@@ -67,6 +67,8 @@ Don't return 4xx for legitimate empty/pending states; use 200 + payload flag (e.
 
 CLAUDE.md project-wide rule: **No `spawn()` from Next.js.** All Python subprocess invocation goes through this layer. Callers from the Next.js side use `radonFetch` against FastAPI routes that wrap `run_script*` internally.
 
+**Slot lanes.** `MAX_CONCURRENT_SUBPROCESSES` (env `RADON_MAX_CONCURRENT_SUBPROCESSES`, default 4) is the hard cap. `RESERVED_ORDER_SLOTS` (1) is claimable only by `_ORDER_LANE_SCRIPTS`. `RESERVED_INTERACTIVE_SLOTS` (env `RADON_RESERVED_INTERACTIVE_SLOTS`, default 1) is unclaimable by any caller whose `timeout` exceeds `LONG_RUNNING_TIMEOUT_S` (60 s): with the defaults, cri/vcg/gex/breadth-class scans share 2 slots, interactive calls (chains, expirations, sync, orders) 3, orders 4. Interactive callers wait up to `SUBPROCESS_ADMISSION_WAIT_S` (env `RADON_SUBPROCESS_ADMISSION_WAIT_S`, default 10 s, never past their own `timeout`) for a slot before "Subprocess capacity exhausted"; long-running callers stay fail-fast because they have caches and the scan-gate backoff. 2026-09-08: the VIX position page 502'd on `/options/expirations` + `/index-options/chain` while three scans plus the 30 s-cadence ib_sync/ib_orders pinned every general slot. Tests: `test_subprocess_interactive_lane.py`, `test_subprocess_order_lane.py`.
+
 ---
 
 ## Autonomous Timers (Hetzner)
@@ -88,7 +90,9 @@ Unit files in `radon-cloud/services/`; enumerated by `setup-vps.sh SERVICE_FILES
 
 ## Options exposure (MenthorQ dashboard)
 
-`GET /options/exposure/{symbol}` uses `MenthorQDashboardClient` and a dedicated Playwright jar at `data/menthorq_dashboard/menthorq_dashboard_storage_state.json` (not the CTA jar). Next.js `OPTIONS_PROXY_TIMEOUT_MS` is 50s; request-path login is 25s / `REQUEST_PATH_AUTH_BUDGET_SECONDS` 40s. Auth failures embargo 300s process-wide; restart `radon-api` after a remint so the embargo dies.
+`GET /options/exposure/{symbol}` uses `MenthorQDashboardClient` and a dedicated Playwright jar at `data/menthorq_dashboard/menthorq_dashboard_storage_state.json` (not the CTA jar). Next.js `OPTIONS_PROXY_TIMEOUT_MS` is 50s; auth queue/exchange/login share `REQUEST_PATH_AUTH_BUDGET_SECONDS` 40s; data calls consume the remaining 45s request allowance. Auth failures embargo unchanged config/jar for 300s; an atomic remint is detected without an API restart. Durable Auth.js cookie expiry governs before ephemeral Cognito expiry; rejected ambient tokens get one recovery attempt. Browser and storage faults are not credential failures.
+
+A provider cube can have `spot_price: null` while all exposure arrays remain valid. Serve it with `spot: null` and `complete: false`; the table and PNG show spot unavailable and no spot marker. Never fabricate a price or discard the cube for an explicitly absent spot.
 
 Bootstrap: WordPress login, then click OIDC `input[name=authorize]` (page stays on `wp-login.php` with `client_id=aws_cognito_client_id`), then wait for `dashboard.menthorq.io`. Skipping Authorize is the 2026-08-20 remint hole. Probe: `menthorq-login-probe`. Cookie metadata: `menthorq-session`.
 

@@ -47,6 +47,11 @@ describe("Clear theme", () => {
       }
       expect(contrast(p["--text-on-accent"], p["--signal-core"])).toBeGreaterThanOrEqual(4.5);
       expect(p["--chart-surface"]).toBe(p["--bg-panel"]);
+      // Focus must remain distinguishable around composite controls as well as
+      // standalone fields, including raised modal/composer surfaces.
+      for (const background of ["--bg-canvas", "--bg-subtle", "--bg-panel", "--bg-panel-raised"]) {
+        expect(contrast(p["--border-focus"], p[background]), `${theme} focus on ${background}`).toBeGreaterThanOrEqual(3);
+      }
     });
   }
 });

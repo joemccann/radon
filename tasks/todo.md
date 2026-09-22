@@ -1,3 +1,1889 @@
+# Task: Dashboard return reliability
+
+A page return must be a memory read. No mount-time regime/gex POST, no posts.json fallback, headlines socket and ticket backoff survive the remount.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: remount within the poll window does not refetch; posts 502 does not call /data/posts.json; ticket abort does not start a second POST; headlines socket stays open when the feed unmounts
+- T2 depends_on: [T1] - Return cache, hasPost false, headlines provider, shared ticket backoff
+- T3 depends_on: [T2] - Failed regime/gex scan with a snapshot returns 200 scan_succeeded false and aborts on disconnect
+- T4 depends_on: [T3] - Focused vitest green. Shell layout persistence is a later PR
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Client implementation
+- [x] T3 Scan response
+- [x] T4 Focused vitest green. Shell layout persistence stays a later PR
+
+# Task: Runner trust (R01-A / R02-A)
+
+Operator 2026-09-22: R01-A (no host browser endpoint on the codex write rung), R02-A (host-owned gitdir the agent cannot write).
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: codex env has no PW_TEST_CONNECT_WS_ENDPOINT; host git uses $WEEKEND_ROOT/.gitdirs/<loop>.git; codex writable_roots omit .git
+- T2 depends_on: [T1] - Wrappers, plists, setup scripts, prune protection, operations.md
+- T3 depends_on: [T2] - Focused pytest green; PR; Mac mini setup_* after merge
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Implementation
+- [ ] T3 Verify and ship
+
+# Task: After-hours option last is last trade or last bid/offer, not previous close
+# Task: flex-pull activity coverage page d3b66eaf
+
+08:30 ET retry exits 1. Applied Equity_Summary claims, NAV dates absent.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red: duplicate repair inserts missing NAV; suppressed persist still records NAV
+- T2 depends_on: [T1] - Insert-only NAV repair plus suppressed nav_points mirror
+- T3 depends_on: [T2] - Focused pytest green; runbook case; commit on the local fix branch; no push
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Implementation
+- [x] T3 Focused tests, runbook, commit
+
+## Review
+
+- Applied activity duplicate with cash covered inserts only missing NAV (`DO NOTHING`) and does not call `_apply_classified`. Missing cash stays `coverage_unverified`. Suppressed payload still has an empty `series` and now mirrors five NAV dates. Focused pytest 84 passed. Not pushed.
+
+# Task: Operator page on the app container
+
+The API image has no systemctl, so /admin marked every app unit Unknown and said the browser was not on the VPS.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests for host-health unit rows and the app-host copy
+- T2 depends_on: [T1] - Read :8330 unit state; show that state when systemctl is absent
+- T3 depends_on: [T2] - Focused pytest + vitest green
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Implementation
+- [x] T3 Focused tests green
+
+# Task: Research Dropbox discovery lookback + empty-cursor footgun
+
+Sep 18-style gaps: daemon today-only + 2-day `date_scopes` + cursor advance on zero eligible work.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: 7-day lookback, env override, no empty cursor advance, backlog gap helper, daemon current_only window
+- T2 depends_on: [T1] - `date_scopes` lookback, discover/ingest persist rules, health/journal gap, docs
+- T3 depends_on: [T2] - Green focused tests; draft PR; no merge
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Implementation
+- [ ] T3 Draft PR; hold merge
+
+# Task: Held-tab feed rail footer layout
+
+Joe via CoS: CAPTURE BASIS mid-label gap + SOURCE/CAPTURE overlap at ~1024 after PR #573 grid.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red: CSS contract + e2e geometry (nowrap keys, even gaps, no overlap)
+- T2 depends_on: [T1] - Flex + gap chips; drop 16ch / 3-col grid; mobile stack without space-between
+- T3 depends_on: [T2] - Green focused suites; draft PR; CI; no merge
+
+## Checklist
+
+- [x] T1 Failing rail-layout contract
+- [x] T2 `.dashboard-news__rail` flex chips
+- [ ] T3 Draft PR; CI; hold merge for Joe
+
+# Task: Add company icons and fallback icon for processed PDF documents in the live news feed
+
+## Dependency graph
+
+- T1 depends_on: [] - Implement publisher logo mapping and canonical aliases in `web/lib/publisherIcons.ts` with fallback icon support.
+- T2 depends_on: [T1] - Create clean, brand-compliant vector SVGs for major financial institutions and default fallback PDF icon in `web/public/icons/publishers/`.
+- T3 depends_on: [T2] - Implement `<PublisherLogo>` component with error fallback, theme compatibility, and accessible labels.
+- T4 depends_on: [T3] - Integrate publisher logo badge into `DashboardNewsFeed.tsx` (top source badge on research post cards and beside footer PDF link) and `NewsfeedLightbox.tsx`.
+- T5 depends_on: [T4] - Write comprehensive unit tests in Vitest for publisher mapping, component rendering, fallback resolution, and newsfeed display.
+
+## Checklist
+
+- [x] T1 Implement publisher logo resolver and alias mapping (`web/lib/publisherIcons.ts`).
+- [x] T2 Add vector SVGs for major institutions and fallback icon in `web/public/icons/publishers/`.
+- [x] T3 Implement `<PublisherLogo>` component (`web/components/PublisherLogo.tsx`).
+- [x] T4 Integrate publisher logo badge into `DashboardNewsFeed.tsx` and `NewsfeedLightbox.tsx`.
+- [x] T5 Vitest tests for publisher resolver, `PublisherLogo`, and `DashboardNewsFeed` integration.
+
+## Review
+
+- Created `web/lib/publisherIcons.ts` with canonical institution alias resolution (Goldman Sachs, BofA, J.P. Morgan, Morgan Stanley, Deutsche Bank, Citi, UBS, Mizuho, Barclays, Nomura, MUFG, BNP Paribas, Standard Chartered, RBC, Canaccord, BTIG, Apollo, Wells Fargo, Jefferies) and default fallback.
+- Added 20 vector SVGs in `web/public/icons/publishers/` including `default-pdf.svg`.
+- Implemented `<PublisherLogo>` (`web/components/PublisherLogo.tsx`, `web/components/PublisherLogo.module.css`) with graceful SVG fallback, image load error handling, and accessible labels.
+- Integrated publisher logo and badge into `DashboardNewsFeed.tsx` (top research card badge and footer PDF link) and `NewsfeedLightbox.tsx`.
+- Verified with 24 focused new Vitest unit and integration tests (100% green) plus 498/498 passing tests across all 42 newsfeed test suites.
+
+# Task: Mobile Profile Prefs/Keys scroll + tab strip
+
+Joe phone: Prefs/Keys clipped under the tab bar; BOOKMARKS ellipsized on ~390px.
+Separate implement PR from main. No merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red: CSS + mobile ProfileContent wrap + Keys scroll e2e
+- T2 depends_on: [T1] - CSS-only `.preferences-shell` scroll + profile `.m-segment` overflow-x
+- T3 depends_on: [T2] - Green focused suites; 390x844 proof; draft PR; CI
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 CSS-only `.preferences-shell` + `.m-segment` overflow; TS wrap reverted
+- [x] T3 PR #586; Vitest + Playwright 390x844; no merge
+
+## Review
+
+- Do not wrap Bookmarks/Watchlist; they already scroll via `.profile-list`.
+
+# Task: Held card hides excerpt, shows full Selector note
+
+Joe mobile screenshot: raw `context.excerpt` markdown dump dominates the Held
+review card; `context.selectorReason` dies under the tab bar. UI-only.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: excerpt not shown; full selector note shown / scrollable
+- T2 depends_on: [T1] - Drop excerpt mount; `.reason` overflow-y auto + max-height
+- T3 depends_on: [T2] - Focused green; draft PR; CI; no merge
+
+## Checklist
+
+- [x] T1 Failing tests on research-held-ui + e2e excerpt visibility
+- [x] T2 ResearchHeldReview.tsx + module CSS
+- [ ] T3 Draft PR; CI green on touched tests; no merge
+
+# Task: Relax research PDF hold and invalidation gates
+
+Implement plan #583 (`tasks/research-hold-gates-relax-plan.md`). Joe DoD:
+remove length/8-page/caption/copy/NUMBER_NOT_ON_PAGE holds; keep shape, VERIFY,
+TEXT_ONLY_WITH_FIGURES, triage. Separate implement PR from main. No merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests for removed gates (publish, intake, pipeline, runtime, outcomes)
+- T2 depends_on: [T1] - publish.py delete validate_rendered_copy; caption type-only; title/body non-empty
+- T3 depends_on: [T2] - intake + pipeline validators, advisory grounding, prompts
+- T4 depends_on: [T3] - docs/policy/ground; green tests; draft PR; CI; no merge
+
+## Checklist
+
+- [x] T1 Failing tests on main
+- [x] T2 publish.py
+- [x] T3 intake.py + pipeline.py
+- [x] T4 Docs, focused green, draft PR #584; CI green on fa62035d; no merge
+- [x] T5 Joe 2026-09-20: TEXT_ONLY_WITH_FIGURES is one re-SELECT, hold only after miss; amend #584; no merge
+- [ ] T6 Joe 2026-09-20: humanize SELECT title/body rails (prompt-only); fold into #584; no merge
+
+## Review
+
+- Plan PR #583 is design only. Do not edit it.
+
+# Task: Held tab triage rules history + approved/rejected flip
+
+Implement plan #579 (`tasks/research-rules-history-plan.md`). Joe DoD: durable
+approved/rejected history on Held; flip via existing Approve / Reject|Revoke;
+no edit UI. Separate implement PR from main. No merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red: GET `{ proposed, approved, rejected }`, Reject/Revoke stay listed, Approve-from-Rejected wire
+- T2 depends_on: [T1] - `route.ts` rejected query LIMIT 50; `ResearchRuleProposals` third list + `decide()` moves
+- T3 depends_on: [T2] - `docs/dropbox-research.md`; e2e + screenshots; draft PR; CI
+
+## Checklist
+
+- [x] T1 Failing tests on main
+- [x] T2 API + UI
+- [x] T3 Docs, e2e 3/3, screenshots, draft PR #580; CI watch in progress, no merge
+
+## Review
+
+- Plan PR #579 is design only. Do not edit it.
+
+# Task: PDF chart evidence not text-only (PR #574 plan)
+
+Published research posts that cite PDF pages with charts must carry those
+chart images. Implement P1-P3 from `docs/design-shots/pdf-chart-evidence/PLAN.md`.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: figures B/C/D/F/rotation/skipped_pages; intake TEXT_ONLY_WITH_FIGURES hold
+- T2 depends_on: [T1] - P1 `figures.py` displayed-frame detect, raster clusters, kind, skipped_pages
+- T3 depends_on: [T1] - P2 intake hold + P3 SELECT sentence + catalogue `kind` + reason-code label + docs
+- T4 depends_on: [T2, T3] - Green focused suites; draft PR; CI
+
+## Checklist
+
+- [x] T1 Failing tests on main
+- [x] T2 figures.py
+- [x] T3 intake / SELECT / web / docs
+- [ ] T4 Draft PR, CI green, no merge
+
+## Review
+
+- Live JPM PDF probes optional if the private research root is absent.
+
+# Task: Newsfeed SLM tagger v1 implement [DRAFT PR; RUNG OFF]
+
+Implement `docs/ml/newsfeed-slm-tagger.md` (HR-1..HR-8). Dataset/eval/train/export/sidecar/ladder hook default off. No prod enable. No merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - SLM package + tests (dataset, eval, monitor, train refusals)
+- T2 depends_on: [T1] - Ladder + CLI hook default off; migration 0077; units; docs
+- T3 depends_on: [T2] - Fixture bakeoff; draft PR; CI; Joe list (hardware, merge, enable)
+
+## Checklist
+
+- [x] T1 Package + unit tests
+- [x] T2 Ladder hook MODE=off; units pinned not-installed; docs
+- [x] T3 Draft PR #535; local SLM/cloud tests green; latest-head Actions not registered (agent token)
+
+## Review
+
+- Live Turso extract and Mini train are operator commands. Fixture bakeoff verdict is `C FAILS`. Mode stays off.
+- Train default is LLaMA-Factory; mlx-lm is `SLM_TRAINER=mlx` only.
+
+# Task: Newsfeed SLM tagger v1 build spec [PLAN ONLY; PR #533 DRAFT, CI GREEN]
+
+Docs-only PR: `docs/ml/newsfeed-slm-tagger.md`, an implementer-grade spec
+for a local LoRA-tuned 1-3B text tagger as a new ladder rung `slm-tagger`
+ahead of paid/subscription rungs, newsfeed text contract only. No trainer,
+server, or ladder code in this PR.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify tagger.js / model_ladder_cli.py / model_ladder.py / backfill / prior research; probe corpus availability on the cloud VM
+- T2 depends_on: [T1] - Write spec sections A-L with one recommended path (base model, train stack, serve stack, host) and explicit eval baselines
+- T3 depends_on: [T2] - README pointer + owners.json rule; docs contract tests green; draft PR; CI green; Pushover
+
+## Checklist
+
+- [x] T1 Verified: text tagger runs on every post (`hydrateTagsDual`), target column `tags_text`; taxonomy untracked since f88b413a (212 tags then); no posts corpus or Turso creds on the VM
+- [x] T2 Spec written
+- [x] T3 PR #533 draft, CI green on d58a0de1 (31 pass, 7 path-skipped); Pushover blocked: no PUSHOVER_USER / PUSHOVER_TOKEN on the cloud VM
+
+## Review
+
+- [x] Reconciled with `docs/research/radon-small-model.md` (thin $ case kept; Phase-1 tagger experiment bounded) and `radon-harness-and-model-roadmap.md` (M1 rung behind the provider layer).
+# Task: Kelly order-path warn-not-block (2026-09-19)
+
+`RADON_KELLY_ENFORCE_ORDERS=1` must WARN, not BLOCK, place_order.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red: oversized ticket + enforce on warns, IB still called
+- T2 depends_on: [T1] - check_kelly_ticket logs WARNING; place_order continues; mode default warn
+- T3 depends_on: [T2] - Docs D11/C.4 warn-only; draft PR; CI green
+
+## Checklist
+
+- [x] T1 Failing warn + wire tests
+- [x] T2 Guard + place_order continue; attach `kelly_warning`
+- [ ] T3 Spec, PR, CI
+
+## Review
+
+- Order path only. Evaluate M6 fail-closed unchanged. Fat-finger `order_limits` still blocks.
+
+# Task: Fortune's Formula Kelly implement (2026-09-19)
+
+Implement locked spec `docs/risk/kelly-fortunes-formula.md`. Draft PR vs main.
+
+## Dependency graph
+
+- T1 depends_on: [] - Library: default 0.5, ban full Kelly, scalar cap, hooks
+- T2 depends_on: [T1] - M6 fail-closed + kelly_guard flag-off
+- T3 depends_on: [T1] - TypeBox/wrapper/pi-tools + half-Kelly prose/site
+- T4 depends_on: [T1, T2, T3] - Focused tests, draft PR vs main, CI
+
+## Checklist
+
+- [x] T1 `scripts/kelly.py` constants, config, ticket, ruin
+- [x] T2 `evaluate.py` M6 + `kelly_guard.py` default off
+- [x] T3 Schema/wrapper + SYSTEM/prompt/site half-Kelly default
+- [ ] T4 Draft PR, CI green, prod enable still waits Joe
+
+## Review
+
+- Default fraction 0.5 (Joe-signed). Full Kelly rejected. Cap 2.5% on scalar.
+- `RADON_KELLY_ENFORCE_ORDERS` unset on every unit.
+
+# Task: Newsfeed share 502 (2026-09-19)
+
+Production POST /api/newsfeed/share 502s with "Voice rewrite unavailable".
+Journal: Missing Anthropic subscription. Next.js has no subscription binds.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red: nextjs must bind grant dirs; relay must not
+- T2 depends_on: [T1] - Bind nextjs; keep relay excluded; low-reasoning share; fence-strip voice JSON
+- T3 depends_on: [T2] - Focused green, PR, CI
+
+## Checklist
+
+- [x] T1 Failing bind + share-call-shape tests
+- [x] T2 Runtime allowlist + share route + parseVoiceCopy
+- [ ] T3 PR, CI green
+
+## Review
+
+- Live: 2026-09-19 16:09:36Z radon-nextjs `[newsfeed/share] voice rewrite failed: Error: Missing Anthropic subscription`.
+- 2aba1229 excluded nextjs from grant mounts. Share and assistant run in Next.js.
+
+# Task: GEX45 GPU deployment tooling (2026-09-19)
+
+## Dependency graph
+
+- T1 depends_on: [] - Define isolated GPU-host bootstrap/runtime contracts and verify Blackwell-compatible upstream pins.
+- T2 depends_on: [T1] - Implement Ubuntu 24.04 bootstrap, SSH/firewall/Tailscale preparation, and private vLLM service tooling.
+- T3 depends_on: [T1] - Write host-free regression coverage and GPU-host runbook.
+- T4 depends_on: [T2, T3] - Static review, publish PR, repair all exact-head CI failures, and send PR-green notification.
+
+## Checklist
+
+- [x] T1 Contracts and upstream verification.
+- [x] T2 Deployment tooling.
+- [x] T3 Regression coverage and runbook.
+- [ ] T4 Exact-head CI green and notification.
+
+## Review
+
+- Isolated worktree /tmp/radon-slm-gpu-deployment, branch feat/slm-gpu-deployment from origin/main. No production activation, purchases, training, or local test suites.
+- Static verification: Ruff, bash syntax, and diff whitespace checks pass. Live GPU acceptance remains gated on server provisioning.
+
+# Task: Main merge conflict resolution 2026-09-19 [IN PROGRESS]
+
+Resolve `origin/main` into `cursor/panic-index-proxy-plan-e8e5`, keep the panic
+index spec intact, and land a true merge commit with any required conflict
+fixes.
+
+## Dependency graph
+
+- T1 depends_on: [] - Fetch `origin/main` into the shallow clone and start the merge.
+- T2 depends_on: [T1] - Resolve conflicted files with the smallest correct merged result.
+- T3 depends_on: [T2] - Run focused validation and publish the merge commit.
+
+## Checklist
+
+- [x] T1 Fetch `origin/main` and start merge
+- [x] T2 Resolve conflicted files
+- [x] T3 Validate and push
+
+## Review
+
+- [x] Merge commit keeps both parents and only the intended conflict resolutions.
+
+# Task: Four-digit chain strikes [IMPLEMENTED; PR CI PENDING]
+
+SNDK calls ladder clips `$1,737.00` to `$1,70...` because chain-first pins
+`.chain-anchor-strike-col` at 72px and strike cells inherit ellipsis.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red CSS + E2E: 4-digit formatted strike fully visible
+- T2 depends_on: [T1] - Widen strike col; do not ellipsis strike identity
+- T3 depends_on: [T2] - Focused green, PR, CI
+
+## Checklist
+
+- [x] T1 Failing strike-column contract + chain-first four-digit overflow assert
+- [x] T2 CSS width 7.5rem + clip on `td.chain-strike`
+- [ ] T3 PR, CI green
+
+## Review
+
+- [x] Vitest `chain-strike-column.test.ts` 3 passed. Playwright CSS
+      measurement 1 passed (`$1,737.00` and `$12,345.00` unclipped).
+# Task: Reliability remediate 2026-09-17 [DONE]
+
+Reduced-capability rung: remediate P0/P1 only. Today's audit carries one P2
+(REL-257), which remains outside this run; REL-251 through REL-256 source
+tasks are DONE. Closing gates remain BLOCKED by the previously documented
+detached-stage termination after seven genuine attempts.
+
+## Dependency graph
+
+- T1 depends_on: [] - Reconcile P0/P1 backlog against RELIABILITY_LOG.md.
+- T2 depends_on: [T1] - Re-run permanent drill availability check and record outcome.
+
+## Checklist
+
+- [x] T1 Reduced-rung P0/P1 reconciliation
+- [x] T2 Permanent drill path resolution
+
+## Review
+
+- [x] No new source-actionable P0/P1 finding; P2 REL-257 intentionally excluded.
+# Task: CI performance audit 2026-09-17 [COMPLETE]
+
+Measure organic `main` release-path runs since `8d1d0f52`, verify protected
+workflow/deploy invariants, and publish every evidence-backed candidate.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner rails, branch, lock, GitHub access, and audit delta.
+- T2 depends_on: [T1] - Classify 20+ Actions runs and reconstruct comparable critical paths.
+- T3 depends_on: [T2] - Sweep workflow/cache/image/deploy safety contracts and rank candidates.
+- T4 depends_on: [T3] - Append ledger, publish audit branch/PR, and post rolling issue report.
+
+## Checklist
+
+- [x] T1 Dedicated clone, stale-lock preservation, dated branch, GitHub auth, and `origin/main` verified.
+- [x] T2 Classified 35 Actions runs; reconstructed 26 completed deployment paths and rolling comparable samples.
+- [x] T3 Verified the complete deploy closure, immutable inputs, exact-SHA transfer, and recovery rails; no material safe candidate.
+- [x] T4 Ledger, publication branch, and rolling issue report prepared.
+
+## Review
+
+- [x] The E2E delta is explicitly non-gating; no change can reduce the protected release path.
+# Task: Mixed-age combo Today P&L 2026-09-17 [IMPLEMENTED; PR CI PENDING]
+
+SPY bull put spread: overnight long 740P + same-day short 760P. Today P&L
+equals total P&L (-$162,085). Same-day identity must not apply to mixed-age
+combos.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: SPY screenshot numbers, OCC journal ticker, partial fill_dates
+- T2 depends_on: [T1] - Per-leg Today P&L + combo entry_date from overnight legs
+- T3 depends_on: [T2] - Focused suites, Playwright, PR, CI green
+
+## Checklist
+
+- [x] T1 Failing web + ib_sync + journal-map tests
+- [x] T2 getTodayPnlDollars per-leg; isSameDay false for mixed; blotter OCC + partial fills
+- [ ] T3 Focused green, e2e, PR, CI, Pushover
+
+---
+
+# Task: Reliability delta audit 2026-09-16 [IN PROGRESS]
+
+Audit `eb5b8cb0..HEAD` for source-actionable reliability regressions only.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner rails, ledger anchor, dated branch, and delta scope.
+- T2 depends_on: [T1] - Review changed source plus codemap callers and standing safety sweeps.
+- T3 depends_on: [T2] - Append frozen-contract findings/ledger, commit, push, and publish audit PR.
+
+## Checklist
+
+- [x] T1 Dedicated markers, verified anchor `eb5b8cb0`, and `reliability/2026-09-16` checked out.
+- [x] T2 Delta, blast-radius, and standing-sweep evidence reviewed.
+- [x] T3 Audit record committed (`bd0efb5b`), pushed, and PR #460 opened.
+
+## Review
+
+- [x] Finding IDs and backlog IDs strictly ascend; markdown cells escape pipes.
+- [x] Static validation passed; focused pytest unavailable (`python3.13`: no `pytest`).
+
+---
+
+# Task: Reliability remediation 2026-09-16 [IN PROGRESS]
+
+Reduced-capability rung (`RADON_WEEKEND_REDUCED=1`): re-verify every eligible
+P0/P1 backlog item, then record closing-gate evidence without claiming an
+unfinished detached stage as a pass.
+
+## Dependency graph
+
+- T1 depends_on: [] - Reconcile P0/P1 backlog eligibility and existing REL-256 source evidence.
+- T2 depends_on: [T1] - Run the permanent drills and serial gate stage with sentinel accounting.
+- T3 depends_on: [T2] - Append the remediation verdict, commit, and push the dated branch.
+
+## Checklist
+
+- [x] T1 REL-256 is the sole eligible P1 and its source-level red/green record is present.
+- [x] T2 Detached drill stage exited before either result slot or `DONE`; no gate count claimed.
+- [x] T3 Append-only blocker record prepared for commit and remote push.
+
+## Review
+
+- [x] No P2/P3 item was substituted into the reduced-rung remediation scope.
+- [x] Closing-gate blocker records the missing sentinel and the exact stage paths.
+
+---
+
+# Task: Vol/Skew MR scanner mode 2026-09-16 [IN PROGRESS]
+
+Scanner mode `vol-skew-mr` (UI: Vol/Skew MR, `/scanner?mode=vol-skew-mr`).
+Lakha / Options Insight short-term top/bottom framing. Mirror strength/theta
+family. Credit in help tooltip. Do not merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing gate tests (RSI/%B, IV path, skew, verdicts)
+- T2 depends_on: [T1] - `vol_skew_mr_scanner.py` + disk/Turso snapshot
+- T3 depends_on: [T2] - FastAPI + Next GET/POST, UI tab, comma ticker search
+- T4 depends_on: [T3] - Route/UI/e2e tests, PR, CI green. No merge.
+
+## Checklist
+
+- [x] T1 Red gate tests
+- [x] T2 Scanner + snapshot
+- [x] T3 Routes + Vol/Skew MR tab
+- [ ] T4 Focused green, PR, watch CI
+
+## Review
+
+- [ ] `/scanner?mode=vol-skew-mr` renders TOP_MR / BOTTOM_MR / continue
+
+---
+
+# Task: Contextual browser tab titles 2026-09-16 [IN PROGRESS]
+
+Tabs currently all read "Radon Terminal". Every App Router page must export
+a page-first title (`Orders · Radon`, `Positions · Radon`) so truncated tabs
+stay distinct.
+
+## Dependency graph
+
+- T1 depends_on: [] - Title helper + failing contract that every page.tsx sets metadata
+- T2 depends_on: [T1] - Root title template and routeMetadata/generateMetadata on every page
+- T3 depends_on: [T2] - Focused Vitest green, PR, exact-head CI, Pushover. Do not merge.
+
+## Checklist
+
+- [x] T1 Red contract for missing per-page titles
+- [x] T2 Template `%s · Radon`; static, ticker, regime, options, scanner titles
+- [ ] T3 Focused tests, PR, CI green, Pushover
+
+# Task: Order ticket shows full option contract 2026-09-16 [IN PROGRESS]
+
+Docked 384px ticket ellipsizes `1x $strike Call` to `1x...`. The strike and
+right must stay fully visible; wrap controls instead of clipping the contract.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red CSS/source contract that the leg label cannot ellipsize
+- T2 depends_on: [T1] - Stop shrinking the contract; wrap the row
+- T3 depends_on: [T2] - Focused tests, PR, CI green. Do not merge.
+
+## Checklist
+
+- [x] T1 Failing layout contract
+- [x] T2 Full `1x $strike Call/Put` in the rail
+- [ ] T3 PR + CI
+
+---
+
+# Task: Newsfeed + distill on shared model ladder 2026-09-15 [IN PROGRESS]
+
+Stop Cerebras-first text tagging and KB distillation. Both walk
+`scripts/clients/model_ladder.py` (subscription -> nvidia -> cerebras last).
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: Cerebras not first; soft-fail; 3-tag + distill JSON
+- T2 depends_on: [T1] - `complete_text_json` + CLI; wire distill.py and tagger.js
+- T3 depends_on: [T2] - Docs/allowlist that claimed Cerebras-first
+- T4 depends_on: [T3] - Focused green, PR, watch CI. Do not merge.
+
+## Checklist
+
+- [x] T1 Failing tests for order, soft-fail, contracts
+- [x] T2 Shared text JSON helper; JS tagger subprocess bridge
+- [x] T3 Owner docs + newsfeed env allowlist
+- [ ] T4 PR open, CI green, no merge
+
+## Review
+
+- [ ] JS tagger reaches the ladder via `scripts/clients/model_ladder_cli.py`
+
+---
+
+# Task: IR flow-refresh analysis timeout 2026-09-15 [IN PROGRESS]
+
+P1 `radon-flow-refresh.service` Result=exit-code at 20:00Z. Journal:
+capacity-shed retry then `flow-analysis FastAPI outcome indeterminate
+(curl=0, http=502)` at +128s. Same ~120s kill on 2026-09-11 20:00Z.
+`/flow-analysis` timeout=120 while wrapper SCAN_TIMEOUT default is 180
+and `/discover` already uses 180.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red regression: POST /flow-analysis timeout == wrapper budget
+- T2 depends_on: [T1] - Raise endpoint timeout to 180; runbook case
+- T3 depends_on: [T2] - Focused green, commit, push fix/*, ensure PR
+
+## Checklist
+
+- [x] T1 Failing test (120 vs 180 red)
+- [x] T2 Fix + runbook (`flow-refresh-analysis-timeout`)
+- [ ] T3 Ship branch/PR
+
+## Review
+
+- [x] Live journal: capacity shed then +128s indeterminate 502; health/lite authenticated; reproduce POST 200 after incident
+
+---
+
+# Task: PR #450 CI green leftover workflow tests + e2e ledger [IN PROGRESS]
+
+Unblock `chore/remove-workflow-composer` CI. Do not merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Delete leftover `scripts/tests/test_workflow_*.py` that still import the removed package.
+- T2 depends_on: [T1] - Stamp `# REVIEWED 2026-09-15 mobile-p2-polish.spec.ts` for the incidental hold-out edit.
+- T3 depends_on: [T2] - Focused pytest, push to the same PR, watch CI.
+
+## Checklist
+
+- [ ] T1 Delete `test_workflow_order_preflight.py` and `test_workflow_scanner_source.py`.
+- [ ] T2 Ledger annotation dated on or after the spec change.
+- [ ] T3 Focused pytest green; push; CI green or only non-gating failures.
+
+## Review
+
+- [ ] Do not merge. Report what was fixed.
+
+---
+
+# Task: Liquid Compute GPU index poller [DONE]
+
+Third-venue public ticker as host-tagged AI-infra series. Never splice onto
+gpurentalprices / Silicon Data / `gpu-rental`.
+
+## Dependency graph
+
+- T1 depends_on: [] - Parse/upsert/backoff contracts and live-shape fixture.
+- T2 depends_on: [T1] - Collector, host-tagged store, C5 snapshot surface.
+- T3 depends_on: [T2] - Daily timer, docs, focused tests, PR.
+
+## Checklist
+
+- [x] T1 Red contracts for parse, idempotent `(source, series_id, asOf)`, non-200 backoff.
+- [x] T2 Persist `liquidcompute` rows and C5 without mixing C1 / `gpu-aggregator`.
+- [x] T3 `radon-liquidcompute.timer` plus owner docs; PR open, not merged.
+
+## Review
+
+- [x] Third venue labeled opaque until licensed; rental book untouched.
+
+---
+
+# Task: Testing delta audit 2026-09-15 [IN PROGRESS]
+
+Audit `9b9a65c7..fe96fdac` for test-suite-health regressions only. Local full
+suites are excluded by the recorded operator direction; inspect CI and run no
+local suites.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner rails, clean tree, audit anchor, branch, and changed surface.
+- T2 depends_on: [T1] - Review delta coverage, fragile/net-negative tests, CI reachability, and gate drift.
+- T3 depends_on: [T2] - Append audit evidence, commit, push, and open/update the nightly PR.
+
+## Checklist
+
+- [x] T1 Dedicated markers, clean tree, anchor `9b9a65c7`, and dated branch verified.
+- [x] T2 Static delta and CI evidence review.
+- [x] T3 Append-only audit record and PR publication.
+
+## Review
+
+- [x] Zero findings: 26 codemap importers and changed-test source evidence
+  reviewed; CI/gate configuration and executable-skip sweep unchanged.
+- [x] Local full gates deliberately not run per recorded operator direction;
+  GitHub has no CI workflow result for `fe96fdac` at audit time.
+
+---
+
+# Task: CI performance remediate 2026-09-14 [IN PROGRESS]
+
+Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
+
+## Dependency graph
+
+- T1 depends_on: [] - Re-verify dated audit branch, runner rails, reduced scope, and CIP-013 eligibility.
+- T2 depends_on: [T1] - Add a red nightly codemap artifact-freshness contract.
+- T3 depends_on: [T2] - Make the nightly refresh verify generated artifacts before publication.
+- T4 depends_on: [T3] - Run serial focused and full gates, append the ledger, commit, and push CIP-013.
+
+## Checklist
+
+- [x] T1 Dated audit branch and P0 CIP-013 eligibility re-verified.
+- [x] T2 Red regression contract.
+- [x] T3 Minimal nightly verification restoration.
+- [x] T4 Serial gates, ledger, commit, and remote push.
+
+## Review
+
+- [x] Preserve nightly-only generated artifact ownership; never require feature branches to commit codemap output.
+
+---
+
+# Task: CI performance audit 2026-09-14 [IN PROGRESS]
+
+Audit `9db44a3f..origin/main` against organic GitHub Actions production runs;
+append evidence only and preserve every gate and deploy rail.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, exclusive lock, branch, ledger anchor, GitHub access, and protection closure.
+- T2 depends_on: [T1] - Measure relevant runs, reconstruct critical paths, and sweep workflow/deploy invariants.
+- T3 depends_on: [T2] - Append audit evidence, verify contracts, commit/push, and publish the dated audit PR and rolling issue report.
+
+## Checklist
+
+- [x] T1 Dedicated markers, stale-lock preservation, dated branch, GitHub auth, and `origin/main` verified.
+- [x] T2 Classified 25 runs, reconstructed representative paths, swept safety closure, and ranked CIP-013.
+- [x] T3 Audit ledger, 118 focused safety contracts, commit/push, PR #429, and rolling issue report published.
+
+## Review
+
+- [x] CIP-013 is a P0 gate-restoration handoff; no material safe latency experiment was found.
+
+# Task: IR ensure-PR hook [IN PROGRESS]
+
+Durable grok incident-response open-PR after `fix/**` push.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red contract for create / noop / fail-closed / never merge.
+- T2 depends_on: [T1] - `scripts/ir_ensure_pr.py` + `scripts/ir_open_pr.sh`.
+- T3 depends_on: [T2] - Grok prompt + poller backstop; skill/docs/PAT checklist.
+
+## Checklist
+
+- [x] T1 Red tests in `scripts/tests/test_ir_ensure_pr.py`.
+- [x] T2 Helper + wrapper.
+- [x] T3 Playbook, grok poller, operator enablement.
+
+## Review
+
+- [x] No merge from this hook. PAT stays Contents + Pull requests. No live VPS install.
+
+---
+
+# Task: Merge conflict resolution 2026-09-14 [IN PROGRESS]
+
+Resolve the branch merge against `main` without changing the REL-255 fix or
+discarding upstream task ledger entries.
+
+## Dependency graph
+
+- T1 depends_on: [] - Fetch `main`, reproduce the merge conflict, and inspect both task-ledger heads.
+- T2 depends_on: [T1] - Reconcile `tasks/todo.md` append-only so branch and upstream sections both survive.
+- T3 depends_on: [T2] - Run focused verification, finish the merge commit, and publish the branch update.
+
+## Checklist
+
+- [x] T1 Fetch, merge attempt, and conflict inspection.
+- [x] T2 Reconciled `tasks/todo.md` without losing branch or upstream sections.
+- [x] T3 Focused verification, merge commit, and publication.
+
+## Review
+
+- Merge conflict was confined to `tasks/todo.md`; `git diff --check` is clean and no REL-255 source file required manual resolution.
+
+---
+
+# Task: Reliability remediation 2026-09-14 [IN PROGRESS]
+
+Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
+
+## Dependency graph
+
+- T1 depends_on: [] - Add REL-255 stale/malformed DeepSec completion-evidence regressions.
+- T2 depends_on: [T1] - Bind completion markers and run records to the requested audited SHA.
+- T3 depends_on: [T2] - Run focused red/green verification, append the reliability record, commit, and push.
+- T4 depends_on: [T3] - Re-run permanent drills and closing gates or record an evidence-backed blocker.
+
+## Checklist
+
+- [x] T1 RED stale/malformed completion-evidence fault injection.
+- [x] T2 SHA-bound completion implementation.
+- [x] T3 Focused verification, reliability log, commit, and push.
+- [x] T4 Closing drills BLOCKED by detached-stage termination; full gates not started.
+
+## Review
+
+- REL-255 source contract is green; the permanent Python drills are green, while the detached stage was terminated before its Vitest rung and DONE sentinel.
+
+---
+
+# Task: Reliability delta audit 2026-09-14 [IN PROGRESS]
+
+Audit `3e394792..HEAD` across the changed control-plane, model-ladder, security-loop,
+research, assistant, and health surfaces. Audit-only: no production source changes.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner, dated branch, ledger anchor, remote collision state, and delta.
+- T2 depends_on: [T1] - Derive codemap blast radius; review changed source and standing candidates serially.
+- T3 depends_on: [T2] - Run standing money-path and watchdog-catalog sweeps.
+- T4 depends_on: [T3] - Append deduplicated findings and ledger; validate frozen IDs; commit, push, and publish the audit PR.
+
+## Checklist
+
+- [x] T1 Dedicated runner markers, anchor, branch, and remote collision state verified.
+- [x] T2 Changed-surface and blast-radius review.
+- [x] T3 Standing sweeps and candidate re-triage.
+- [x] T4 Ledger/report publication and commit.
+
+## Review
+
+- R-676 is lead-executed: a stale marker classified a current timed-out audit as OK; REL-255 is queued with SHA-bound fault injection criteria.
+
+---
+
+# Task: Reliability delta audit 2026-09-15 [IN PROGRESS]
+
+Audit `9b9a65c7..HEAD` across the changed order-reconstruction, security,
+control-plane, and loop surfaces. Audit-only: no production source changes.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner, dated branch, anchor, remote collision state, and delta.
+- T2 depends_on: [T1] - Derive codemap blast radius and serially review changed source plus callers.
+- T3 depends_on: [T2] - Run standing money-path and watchdog-catalog sweeps; re-triage standing candidates.
+- T4 depends_on: [T3] - Append deduplicated findings and ledger; validate frozen IDs; commit, push, and publish the audit PR.
+
+## Checklist
+
+- [x] T1 Dedicated runner markers, anchor, branch, and remote collision state verified.
+- [x] T2 Changed-surface and 27-caller blast-radius review.
+- [x] T3 Standing sweeps and candidate re-triage.
+- [x] T4 Ledger/report publication and commit.
+
+## Review
+
+- [x] R-677 / REL-256 continue frozen numbering; no reliability log rewrite.
+
+---
+
+# Task: Reliability remediation 2026-09-15 [IN PROGRESS]
+
+Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
+
+## Dependency graph
+
+- T1 depends_on: [] - Add REL-256 PR-failure fault injection to the responder cycle.
+- T2 depends_on: [T1] - Preserve the ticket for bounded retry and degrade responder health on PR failure.
+- T3 depends_on: [T2] - Run focused red/green verification, append the reliability record, commit, and push.
+- T4 depends_on: [T3] - Re-run permanent drills and closing gates or record evidence-backed blocker.
+
+## Checklist
+
+- [x] T1 RED PR-ensure failure and bounded-retry regression.
+- [x] T2 Pending/error implementation.
+- [x] T3 Focused verification and reliability record; commit and push pending.
+- [x] T4 Closing gates BLOCKED by detached-stage termination; no full-gate pass claimed.
+
+## Review
+
+- [x] Reduced rung excludes P2/P3 backlog items; closing-stage blocker is recorded append-only.
+
+---
+
+# Task: IR ensure-PR hook [IN PROGRESS]
+
+Durable grok incident-response open-PR after `fix/**` push.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red contract for create / noop / fail-closed / never merge.
+- T2 depends_on: [T1] - `scripts/ir_ensure_pr.py` + `scripts/ir_open_pr.sh`.
+- T3 depends_on: [T2] - Grok prompt + poller backstop; skill/docs/PAT checklist.
+
+## Checklist
+
+- [x] T1 Red tests in `scripts/tests/test_ir_ensure_pr.py`.
+- [x] T2 Helper + wrapper.
+- [x] T3 Playbook, grok poller, operator enablement.
+
+## Review
+
+- [x] No merge from this hook. PAT stays Contents + Pull requests. No live VPS install.
+
+---
+
+# Task: Testing remediation 2026-09-14 [IN PROGRESS]
+
+Reduced-capability rung (`RADON_WEEKEND_REDUCED=1`): remediate every verified
+P0/P1 finding. T-492 is the sole source-actionable P1; T-488 and T-490 remain
+operator-only with their recorded actions.
+
+## Dependency graph
+
+- T1 depends_on: [] - Add red ledger-integrity contract for conflict markers and duplicate finding headings.
+- T2 depends_on: [T1] - Reconcile both committed ledger tails append-only and assign the relay finding a fresh ID.
+- T3 depends_on: [T2] - Run focused verification, append remediation evidence, commit, and push.
+
+## Checklist
+
+- [x] T1 Red: integrity contract 2 failed / 2 passed on the committed corruption.
+- [x] T2 Reconciled both tails, removed markers, and assigned the relay finding T-493.
+- [x] T3 Focused integrity plus append-only contracts green; remediation evidence appended.
+
+## Review
+
+- [x] No IB access or production-system operation.
+- [x] Closing full-gate stage is INCOMPLETE: no rc file or `DONE` sentinel;
+  no counts claimed.
+
+---
+
+# Task: Testing delta audit 2026-09-14 [COMPLETE]
+
+Audit `9db44a3f..HEAD` for test-suite health only; never contact IB.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, anchor, nightly branch, and toolchain.
+- T2 depends_on: [T1] - Review delta and codemap blast radius; run required gates and determinism sweeps.
+- T3 depends_on: [T2] - Append deduplicated findings, ledger, log, commit, push, and publish nightly PR.
+
+## Checklist
+
+- [x] T1 Runner markers, clean tree, anchor, and dated branch verified.
+- [x] T2 Delta review and static standing sweeps; gate stages remain pending sentinels.
+- [x] T3 Append-only audit record, commit, branch publication, and PR #430.
+
+## Review
+
+- [x] Audit-only; no production or IB operation.
+
+---
+
+# Task: Reliability remediation 2026-09-12 [IN PROGRESS]
+
+Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
+
+## Dependency graph
+
+- T1 depends_on: [] - Add REL-254 production-transport byte-bound fault injection.
+- T2 depends_on: [T1] - Stream and close every model-ladder provider response before parsing.
+- T3 depends_on: [T2] - Run focused verification, record REL-254, regenerate codemap, commit and push.
+- T4 depends_on: [T3] - Re-run permanent drills and required gate stages or record a verified blocker.
+
+## Checklist
+
+- [x] T1 RED fault injection for oversized production-shaped response.
+- [x] T2 Production implementation and GREEN focused suites.
+- [x] T3 Reliability log, codemap, commit, and branch push.
+- [x] T4 Closing drills and gates BLOCKED after three sentinel-less detached stages.
+
+## Review
+
+- REL-254 source contract is green; closing gates are BLOCKED by three sentinel-less detached-stage terminations.
+
+---
+
+# Task: Reliability delta audit 2026-09-12 [IN PROGRESS]
+
+Audit `9dce4b3a..HEAD` for changed reliability surfaces and standing safety
+contracts. Audit-only: no production source changes.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner, branch, ledger anchor, and delta.
+- T2 depends_on: [T1] - Review changed safety, persistence, resources, and observability surfaces; run standing sweeps.
+- T3 depends_on: [T2] - Append deduplicated findings and ledger, validate tables, commit/push, and update the audit PR.
+
+## Checklist
+
+- [x] T1 Runner markers, isolated branch, remote collision check, and anchor verified.
+- [x] T2 Serial changed-surface review and standing sweeps.
+- [x] T3 Audit report and frozen-ID validation complete; commit/push and PR update follow.
+
+## Review
+
+- R-675 is source-verified against the pinned production transport; all standing safety and catalog sweeps hold.
+
+---
+
+# Task: iPhone app direction foundation --- 2026-09-13 [IN PROGRESS]
+
+In-repo design/build direction for the eventual iPhone app. Docs +
+optional `apps/ios` stub only. Do not merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red contract pins for the direction doc, index row, source credit, non-goals, iOS stub.
+- T2 depends_on: [T1] - Write `docs/mobile/iphone-app-direction.md`, index row, `apps/ios/README.md` stub.
+- T3 depends_on: [T2] - Green contract tests, draft PR against main with a 5-bullet Joe summary. No merge.
+
+## Checklist
+
+- [x] T1 Failing iPhone-direction contract tests.
+- [x] T2 Direction doc + index + stub.
+- [x] T3 Draft PR #416 against main. No merge.
+
+---
+
+# Task: Assistant September P&L empty-final 2026-09-11
+
+Grok 4.6 burned 49 tool calls on "analyze all my trades for september 2026 and tell me my P&L" then showed the canned max-rounds string.
+
+## Dependency graph
+
+- T1 depends_on: [] - Prove prefetch, tool_choice=none forced final, Grok reasoning_effort=low, P&L synthesis.
+- T2 depends_on: [T1] - Prefetch get_realized_pnl, keep tools on cap-hit, unwrap fenced payloads.
+- T3 depends_on: [T2] - Focused assistant/provider tests, PR, GitHub CI, Pushover.
+
+## Checklist
+
+- [x] T1 Screenshot prompt maps to 2026-09-01..2026-09-30; empty Grok final still renders dollars.
+- [x] T2 Loop prefetch + tool_choice none + reasoning_effort low + 90s timeout + system-prompt routing.
+- [ ] T3 PR, exact-head CI green, Pushover.
+
+---
+
+# Task: Research model ladder rung fixes [IN PROGRESS]
+
+Fix three keyed-rung bugs that exhaust the research Reviewer ladder and
+leave sticky review health red. Independent of the merged ZH intermediary
+policy. Do not requeue held rows or clear health-review.json.
+
+## Dependency graph
+
+- T1 depends_on: [] - Add red tests for httpx stream misuse, Codex max_tokens, archived Cerebras scout id.
+- T2 depends_on: [T1] - Fix Anthropic default httpx stream, Codex max_completion_tokens, Cerebras qwen-3.8-27b.
+- T3 depends_on: [T2] - Run focused pytest, open PR, do not merge or requeue.
+
+## Checklist
+
+- [x] T1 Red regression tests in `scripts/tests/test_model_ladder.py`.
+- [x] T2 Three rung fixes in `scripts/clients/model_ladder.py`.
+- [x] T3 Focused tests green; PR #425 open with per-rung changelog. Rebased onto main after #424.
+
+## Review
+
+- Anthropic: default adapter uses `httpx.Client.send(stream=True)`.
+- Codex: gpt-5.x sends `max_completion_tokens`.
+- Cerebras: `qwen-3.8-27b` (public multimodal; scout archived).
+
+---
+
+# Task: ZH intermediary recap selection [COMPLETE]
+
+Joe locked: Zero Hedge / intermediary market recaps are valuable. Stop holding
+solely for Tyler Durden/ZH wrap provenance, missing original bank PDF, or
+omnibus aggregator shape. No Sep 11 requeue in this PR.
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing regressions for ZH Goldman-desk recap selection and byline dates
+- T2 depends_on: [T1] - Update policy.md, SELECT_SCHEMA, VERIFY_INSTRUCTION, date_evidence roles
+- T3 depends_on: [T2] - Align dropbox-research.md and lessons.md
+
+## Checklist
+
+- [x] T1 Red/green regressions for ZH wrap selection, byline dates, and rendered ZH ban
+- [x] T2 Selection policy and date-role gate accept intermediary market recaps
+- [x] T3 Docs/lessons aligned; no Sep 11 requeue
+
+## Review
+
+Focused research tests 171 passed. ZH Goldman-desk fixture publishes; rendered ZH still banned. No Sep 11 requeue.
+
+---
+
+# Task: CI performance remediate 2026-09-13 [COMPLETE]
+
+Apply every eligible P0/P1 finding from CIP-012 while preserving the complete
+test, provenance, and deployment-safety closure.
+
+## Dependency graph
+
+- T1 depends_on: [] - Re-verify dedicated runner, dated branch, reduced scope, and audit eligibility.
+- T2 depends_on: [T1] - Establish the workflow-safety baseline and verify no P0/P1 source action exists.
+- T3 depends_on: [T2] - Append the reduced-scope remediation decision, commit, push, and update the nightly report.
+
+## Checklist
+
+- [x] T1 Dedicated markers, stale-lock preservation, dated branch, GitHub authentication, and `RADON_WEEKEND_REDUCED=1` verified.
+- [x] T2 89 workflow-safety contracts, YAML parsing, shell syntax, and diff checks passed; CIP-012 has zero eligible P0/P1 findings.
+- [x] T3 Append-only remediation record and publication update prepared; no lower-priority experiment substitution.
+
+## Review
+
+- [x] The work-bound `scripts-rs`/node-image co-wall remains below the materiality floor and outside reduced remediation scope.
+
+---
+
+# Task: CI performance audit 2026-09-13 [COMPLETE]
+
+Audit `f1f59a73..9db44a3f` against organic `main` GitHub Actions runs. Preserve
+all gates and deployment rails; append evidence only during this phase.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, lock, SHA range, GitHub access, and protection closure.
+- T2 depends_on: [T1] - Measure 20 relevant runs, reconstruct representative paths, and sweep workflow/deploy invariants.
+- T3 depends_on: [T2] - Append audit evidence, commit/push the dated branch, and update the nightly PR and rolling issue.
+
+## Checklist
+
+- [x] T1 Dedicated markers, stale-lock preservation, `origin/main@9db44a3f`, GitHub auth, and 24 required contexts verified.
+- [x] T2 Classified 25 CI runs, retrieved representative job evidence, and passed gate/deploy/path-filter contracts (89 passed).
+- [x] T3 Appended the audit record; commit, push, PR, and issue comment follow.
+
+## Review
+
+- [x] No source-actionable critical-path optimization met the 15s/10% materiality floor without rail risk.
+
+---
+
+# Task: DeepSec sibling worker [IN PROGRESS]
+
+Split DeepSec from the security-nightly 2h audit cap. Not a second
+audit-remediate-deliver loop. Do not merge. Do not advance last-audited by hand.
+
+## Dependency graph
+
+- T1 depends_on: [] - Classify/harvest/queue-lock tests and `security_deepsec.py`
+- T2 depends_on: [T1] - Worker, plist, wrapper harvest, setup, SKILL, ops
+- T3 depends_on: [T2] - Focused tests green, draft PR from main (not #421)
+
+## Checklist
+
+- [x] T1 Red tests for still-running != TIMEOUT, harvest-when-ready, queue lock
+- [x] T2 Sibling worker + harvest handoff + two dead-men
+- [ ] T3 Green tests, PR against main, no merge
+
+---
+
+# Task: Reliability delta audit 2026-09-11 [IN PROGRESS]
+
+Audit `9dce4b3a..f1f59a73` serially across the changed control-plane,
+collection, persistence, research-serving, and web surfaces. Do not change
+production behavior or interact with IB.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner markers, remote branch state, and ledger anchor.
+- T2 depends_on: [T1] - Inspect changed source plus direct blast radius and run standing sweeps.
+- T3 depends_on: [T2] - Append the frozen audit ledger and commit the nightly branch.
+
+## Checklist
+
+- [x] T1 Runner markers and anchor `9dce4b3a` verified; remote dated branch absent.
+- [x] T2 Reviewed 75 changed source files; placement/catalog sweeps hold; pytest unavailable in runner.
+- [x] T3 Appended 2026-09-11 audit record; validation and branch delivery follow.
+
+## Review
+
+No new source-actionable finding verified. The unchanged money-path chokepoints
+remain present; the newly touched `cta-sync`, `perf-twr`, `flex-pull`, and
+`ai-cycle` scheduled writers remain in both watchdog catalogs.
+
+---
+
+# Task: Reliability remediate 2026-09-11 [IN PROGRESS]
+
+Reduced rung permits P0/P1 only. The completed audit has no new P0/P1
+finding; REL-251 through REL-253 source work remains DONE. Re-run the
+mandatory drill and gate closure without touching IB or live orders.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner markers, dated branch, reduced-rung eligibility, and backlog state.
+- T2 depends_on: [T1] - Run permanent drills using the reliability venv with detached sentinel evidence.
+- T3 depends_on: [T2] - Append the remediation outcome, commit, and push the dated branch.
+
+## Checklist
+
+- [x] T1 `RADON_WEEKEND_REDUCED=1`; no open P0/P1 item found; REL-251 through REL-253 are DONE.
+- [x] T2 Drill stage started with prewritten fields and exited before either result or `DONE` sentinel.
+- [x] T3 Appended the blocked verification record; branch delivery follows.
+
+## Review
+
+- [x] The detached child reproduced the existing runner-stage blocker; no incomplete suite is represented as passing.
+
+---
+
+# Task: Daily Dark Pool History mobile overflow --- 2026-09-11 [IN PROGRESS]
+
+Flow Analysis HISTORY table clips PRINTS on ~390px. Wrap in shared
+`table-wrap` with sticky DATE. Layout/CSS only. Do not merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests for table-wrap + sticky DATE + mobile overflow.
+- T2 depends_on: [T1] - DailyTable wrap + globals.css sticky/nowrap.
+- T3 depends_on: [T2] - Focused vitest/e2e, draft PR, no merge.
+
+## Checklist
+
+- [x] T1 Failing wrap / sticky / overflow tests.
+- [x] T2 table-wrap + sticky DATE CSS.
+- [ ] T3 Green tests, PR against main, no merge.
+
+---
+
+# Task: Option order-sheet High/Low/Volume --- 2026-09-11 [IN PROGRESS]
+
+Positions → order sheet for a short single-leg option (SNDK $1750C 2026-09-25)
+shows High/Low/Volume as `---` while Bid/Mid/Ask/Mark/Day% populate.
+Fix relay drops of RT_VOLUME / tickSize volume; do not invent High/Low.
+Do not merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests for RT_VOLUME parse and tickSize broadcast.
+- T2 depends_on: [T1] - parse RT_VOLUME; hydrateAndBroadcast on tickSize + tickString.
+- T3 depends_on: [T2] - Focused vitest, draft PR, CI watch. No merge.
+
+## Checklist
+
+- [x] T1 Failing RT_VOLUME / broadcast / option-null-OHLV tests.
+- [x] T2 Handler + relay wiring.
+- [ ] T3 Green tests, PR against main, no merge.
+
+---
+
+# Task: TWR coverage-lag overwrite 2026-09-11 [IN PROGRESS]
+
+Weekday radon-perf-twr must not clip Turso NAV to lagging mirrored-flow
+covered_through and overwrite a newer published tape. Flex-pull unit must
+keep ProtectHome=read-only and ReadWritePaths /home/radon/radon/data.
+Do not merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests for Sep-8 overwrite and persist no-clobber.
+- T2 depends_on: [T1] - Keep newer NAV, skip unverified TWR sessions, persist guard.
+- T3 depends_on: [T2] - Flex-pull ReadWritePaths, unit comments, focused pytest, draft PR.
+
+## Checklist
+
+- [x] T1 Failing overwrite / persist tests.
+- [x] T2 Builder + persist + warning.
+- [ ] T3 Flex-pull unit, hash pin, CI watch. No merge.
+
+---
+
+# Task: CTA vision cascade 2026-09-10 [IN PROGRESS]
+
+Never hard-fail radon-cta-sync.service on Anthropic Vision credit exhaustion.
+Joe's order: subscription (anthropic -> grok -> cursor -> codex -> gemini),
+then NVIDIA, then Cerebras. Do not merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests for credit/billing fallthrough and exact order.
+- T2 depends_on: [T1] - Shared vision_cascade helper + MenthorQClient wiring.
+- T3 depends_on: [T2] - Service comment, ops messaging, focused pytest, draft PR.
+
+## Checklist
+
+- [x] T1 Failing cascade tests.
+- [x] T2 Helper + client + classifier.
+- [ ] T3 Docs, CI watch, no merge.
+
+---
+
+# Task: Financial research workbench 2026-09-10 [IN PROGRESS]
+
+## Scope and acceptance
+Implement the 13 requested capabilities as integrated, source-grounded workflows, reusing existing research, indicators, order-risk and connector infrastructure. No fabricated provider access, no synthetic live financial data, no automatic orders. Imports must retain provenance; unavailable licensed data must be explicit. Valuation assumptions must be editable and auditable. Desktop and mobile must work. No local test suites; GitHub CI runs adversarial/unit/browser suites.
+
+## Dependency graph
+- T1 depends_on: [] - Verify announcement, inspect existing architecture and isolate clean branch.
+- T2 depends_on: [T1] - Cited evidence domain, earnings/blackout, fundamentals normalization, transcript deltas, deals and AI-capex joins.
+- T3 depends_on: [T1] - Research workbench UX, accessible desktop/mobile flows and focused browser regressions; integrate T2 contracts.
+- T4 depends_on: [T1] - MCP evaluation/reliability, agent-readable research and trading-governance audit of existing chokepoints.
+- T5 depends_on: [T2,T3] - Valuation/export artifacts, desk-note handoff, marketing wedge and production integration.
+- T6 depends_on: [T2,T3,T4,T5] - Adversarial review, generated files, desktop/mobile browser evidence, exact-head green PR CI.
+- T7 depends_on: [T6] - Show-me visual, review record and confirmed Pushover notification.
+
+## Checklist
+- [x] T1 Announcement and Astra model verified against official pages; clean worktree at /tmp/radon-financial-research from 9ef5fa8a.
+- [x] T2 Evidence and research domain; canonical periods, financing roles and as-of boundaries pinned by adversarial regressions.
+- [x] T3 Research workbench UI; preserved draft state and 44px disclosures after independent review.
+- [x] T4 Reliability evaluator, readable PDF manifests/retrieval and operator governance export.
+- [x] T5 Formula XLSX, PPTX, valuation/comps, dated portfolio exports, ticket checklist and marketing section.
+- [ ] T6 Browser and exact-head CI green.
+- [ ] T7 Visual walkthrough created at docs/research/show-me-financial-workbench.html; delivery/notification waits for green CI.
+
+## Review
+Implementation complete; exact-head CI pending on PR https://github.com/joemccann/radon/pull/398. Independent visual reviewer confirmed all original findings resolved. Preserve original workspace dirty files. No merge or deployment requested.
+
+- No local test suites executed. TypeScript static checks, staged-source ESLint and secret scan passed for c0eb7728.
+- Browser: illustrative source intake produced 1 source / 6 cited facts; valid XLSX downloaded; 1440px desktop and 393px mobile, zero page errors and app width 393/393.
+- Independent reviews repaired fiscal-period substitution, financing-role smuggling, future-source prompts/exports, missing plaintext provenance, and Labs state loss.
+- Marketing page exposed a pre-existing decorative WebGL crash; bounded fallback preserves content with regression coverage. New section fits mobile; existing plate-caption overflow remains outside the added section.
+- Verification artifacts and show-me draft: /tmp/radon-financial-evidence/.
+- CI repair cycle at 25a269c4: navigation and route registries, isolated decorative fallback regression, and source-tampering fixture corrected from runner logs. Both app images and Vercel previews passed. Full exact-head suites remain required after repair.
+
+---
+
+# Task: OpenDesign Arena collector stub 2026-09-10 [IN PROGRESS]
+
+Thin LLM/model-quality collector for OpenDesign Arena on Demand `D6`.
+No GPU scarcity mix, no preference/radar UI, no merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests for HTML parse, broken markup, Demand snapshot and live transport.
+- T2 depends_on: [T1] - Fixture, parser, registry, collect wiring, contract note.
+- T3 depends_on: [T2] - Focused pytest, PR, CI watch. Do not merge.
+
+## Checklist
+
+- [x] T1 Failing parse/status/snapshot tests.
+- [x] T2 Collector stub + captured fixture + D6 Demand registry.
+- [ ] T3 Focused green and draft PR.
+
+---
+
+# Task: Historical trade fill prices 2026-09-10 [IMPLEMENTED; PR CI PENDING]
+
+## Dependency graph
+
+- T1 depends_on: [] - Trace journal fill prices and desktop/mobile historical rendering.
+- T2 depends_on: [T1] - Red/green price derivation, missing-price and aggregate provenance tests; add sortable Avg Fill and mobile metric.
+- T3 depends_on: [T2] - Focused tests, types/lint, browser verification and review.
+- T4 depends_on: [T3] - Publish scoped PR, supervise exact-head GitHub CI through green, send confirmed Pushover. Do not merge.
+
+## Checklist
+
+- [x] T1 Journal fill_price reaches executions.price but neither historical surface renders it; rehydrated rows can blend both sides.
+- [x] T2 Recorded quantity-weighted prices, signed/zero values, truthful unavailable and aggregate labels; desktop sorting and mobile parity.
+- [x] T3 158 focused Vitest tests, TypeScript and scoped ESLint passed; helper coverage 100%; 31 clean-snapshot codemap tests and 6 curation tests passed.
+- [ ] T4 Publish, repair and verify CI on GitHub, then notify.
+
+## Review
+
+- Preserve existing user changes in tasks/lessons.md, tasks/todo.md and docs/research/. No order execution, historical rewrites or production changes.
+- Browser: 3/3 Playwright cases passed against exact historical component source, real hook and CSS in an isolated harness; 1280px/393px screenshots inspected, no page errors or document overflow. Full Next page verification remains blocked by local sign-in and single-dev-server constraints.
+- Avg Fill displays recorded execution VWAP, not cost-basis-derived prices; collapsed or mixed-side records are visibly marked Aggregate and are not represented as separate entry/exit prices. Missing price remains null, signed/zero premiums and four-decimal precision are retained.
+- Pre-PR local full suites: Vitest 9,303 passed / 1 failed (fixed historical table remained in the known-unwrapped exception list; removed that entry); Python 12,749 passed / 36 failed / 19 skipped, including environment and local-artifact failures. No full-local-green claim.
+- Operator correction: all remaining test runs and CI repairs execute on GitHub, not locally. PR publication authorized; no merge, deployment, or trading action.
+
+---
+
+# Task: Flow analysis truncated dark-pool cache [IN PROGRESS]
+
+SNDK `/flow-analysis` served 20-session history with ~900-print days
+next to ~19k-print days. Discover's 2-page scoring walk was written as
+schema-v2 complete and never re-fetched.
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing regression: 976-print v2 row is a miss for flow consumers.
+- T2 depends_on: [T1] - Persist `complete`; reject scoring-walk rows; discover writes incomplete.
+- T3 depends_on: [T2] - Focused pytest green, commit, PR, CI.
+
+## Checklist
+
+- [x] T1 Red tests on SNDK-shaped 976-print cache + fetch_flow refetch + discover poison.
+- [x] T2 Cache contract + discover/fetch_flow writers.
+- [ ] T3 PR green.
+
+## Review
+
+- [x] Affected pytest 212 passed. Cache/flow/discover 98 passed.
+
+---
+
+# Task: CI performance remediate 2026-09-10 [COMPLETE]
+
+Apply every eligible P0/P1 finding from the latest completed CI-performance
+audit while preserving the full test, provenance, and deployment-safety
+closure.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, exclusive lock, dated branch, and reduced scope.
+- T2 depends_on: [T1] - Recheck post-audit main delta for P0/P1 CI-performance candidates.
+- T3 depends_on: [T2] - Run focused workflow safety baseline and publish the CIP-010 decision record.
+
+## Checklist
+
+- [x] T1 Dedicated markers, GitHub authentication, fresh dated branch, and reclaimed stale lock verified.
+- [x] T2 `964b6b77..9dce4b3a` changes no CI workflow, cache, image, or deploy surface; no P0/P1 candidate exists.
+- [x] T3 88 workflow/path-filter contracts, Ruby YAML parse, shell syntax, and diff checks passed serially.
+
+## Review
+
+- [x] `RADON_WEEKEND_REDUCED=1` excluded P2/P3 work; no lower-priority experiment was substituted.
+
+---
+
+# Task: Reliability remediate 2026-09-10 [IN PROGRESS]
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, dated branch, reduced-rung eligibility, and prior remediation state.
+- T2 depends_on: [T1] - Re-run permanent fault-injection drills and attempt the serial gate contract with detached sentinels.
+- T3 depends_on: [T2] - Append the remediation outcome, commit, and push the dated branch.
+
+## Checklist
+
+- [x] T1 `RADON_WEEKEND_REDUCED=1`; today's audit has no P0/P1 finding and REL-251 through REL-253 source work is DONE.
+- [x] T2 Permanent drill stage attempted with the shared reliability venv; it exited before its first sentinel update, matching the prior verified runner blocker.
+- [x] T3 Append-only remediation record and commit.
+
+## Review
+
+- [x] Reduced rung admitted no new P0/P1 source work; REL-251 through REL-253 remain DONE.
+- [x] Detached drill PID 21837 produced blank step fields and no `DONE`; this is incomplete verification evidence, never a green gate.
+
+---
+
+# Task: LLM regime empty snapshot 2026-09-10 [IMPLEMENTED; PR CI PENDING]
+
+GET /regime/llm is empty because FastAPI rebuilds the snapshot from 130k
+Turso observation rows and dies inside the 30s/35s budget. Collection already
+ran. Persist a compact API snapshot, dual-write raw archives, show every source.
+
+## Dependency graph
+
+- T1 depends_on: [] - Prove GET scans history; red tests for compact snapshot, raw import, coverage board.
+- T2 depends_on: [T1] - Collector writes compact snapshot and Turso raw; GET reads only that row.
+- T3 depends_on: [T2] - Page-level source coverage for every registry publisher.
+- T4 depends_on: [T2,T3] - Persist live snapshot, focused suites, PR/CI.
+
+## Checklist
+
+- [x] T1 130,083 Turso rows; first snapshot page 2s; 261 pages miss the 30s GET budget.
+- [x] T2 Compact `ai_cycle_api_snapshot`, raw import, GET `load_api_snapshot`.
+- [x] T3 Source coverage board on every pane.
+- [x] T4 Compact snapshot 490,476 bytes / 2.27s GET; 113 pytest + 8 Vitest; PR.
+
+---
+
+# Task: MenthorQ exposure availability 2026-09-09 [IMPLEMENTED; PR CI PENDING]
+
+## Dependency graph
+
+- T1 depends_on: [] - Reproduce live SNDK failure and discriminate authentication from payload validation.
+- T2 depends_on: [T1] - Red/green missing-spot contracts through normalization, table and PNG.
+- T3 depends_on: [T1] - Adversarial auth recovery, durable cookie and atomic persistence regressions.
+- T4 depends_on: [T2,T3] - Focused suites, browser verification, live-payload replay and final review.
+
+## Checklist
+
+- [x] T1 Live API 503; session and both provider endpoints 200; SNDK/SPX spot is null.
+- [x] T2 Missing-spot recovery; red/green normalization, table, export and malformed-price tests.
+- [x] T3 Auth hardening; 12 initial failing regressions, then malformed-JWT/API-storage red/green cases.
+- [x] T4 137 focused Python/codemap tests, 54 exposure Vitest tests, TypeScript and scoped ESLint passed; live-data browser table/PNG verification passed for SNDK/SPX at 1280px/393px.
+
+## Review
+
+- Live provider payloads replayed locally: SNDK 5,413 cells and SPX 12,424 cells; null spot remains partial, with no fabricated price.
+- Full local suites were attempted; credential-store environment tests and other unrelated baseline failures prevent a full-local-green claim. Four credential-store failures reproduced independently; full Next E2E setup was blocked by local dependency resolution, while the actual-component Playwright harness passed all four live-data cases.
+- Reviewed bounded auth recovery, caller-owned explicit tokens, durable-cookie precedence, atomic persistence, typed failures and strict malformed-cube rejection. External outages/revoked access remain availability limits.
+- Production remains unchanged. User authorized a PR and exact-head CI supervision; GitHub checks and the accepted Pushover delivery will be recorded at completion.
+- PR #386 first run: 28 passed, two artifact/ledger checks failed. Added the dated browser-evidence annotation and regenerate codemap from a clean committed-tree snapshot to exclude eight ignored local `.claude-design` scripts.
+
+# Task: CI performance remediate 2026-09-09 [COMPLETE]
+
+Apply each eligible P0/P1 finding from the 2026-09-09 performance audit while
+preserving the full test, provenance, and deployment-safety closure.
+
+## Dependency graph
+
+- T1 depends_on: [] - Resume dated branch and verify dedicated runner, audit eligibility, and reduced scope.
+- T2 depends_on: [T1] - Run focused workflow, path-filter, YAML, shell, and diff safety gates serially.
+- T3 depends_on: [T2] - Append the remediation decision, commit, and push the dated branch.
+
+## Checklist
+
+- [x] T1 `RADON_WEEKEND_REDUCED=1`; audit contains no source-actionable P0/P1 candidate.
+- [x] T2 88 workflow/path-filter safety contracts, YAML parsing, shell syntax, and diff checks passed serially.
+- [x] T3 Append-only remediation decision committed and pushed on the dated branch.
+
+## Review
+
+- [x] `RADON_WEEKEND_REDUCED=1` barred P2/P3 work; no lower-priority shard, cache, or deploy experiment was substituted.
+
+---
+
+# Task: CI performance audit 2026-09-09 [COMPLETE]
+
+Measure the latest organic production runs, verify the changed non-gating
+Playwright surface and deployment rails, then publish a ranked audit record.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, lock recovery, branch, auth, and audited range.
+- T2 depends_on: [T1] - Measure twenty successful push deployments and inspect DAG, cache, image, and rollout paths.
+- T3 depends_on: [T2] - Revalidate safety contracts, record candidates, commit, push, and open/update the dated PR.
+
+## Checklist
+
+- [x] T1 Dedicated markers, stale-lock preservation, branch, authentication, and `90071618..964b6b77` delta verified.
+- [x] T2 Twenty Actions run payloads collected; latest mixed run critical path reconstructed.
+- [x] T3 Safety-contract verification and audit publication.
+
+## Review
+
+- [x] 20 organic deployment payloads measured: p50 281s, p95 385s; 88 focused safety contracts passed.
+- [x] The added Playwright coverage is non-gating, while the deploy closure, exact-SHA pair, rollback, and 40-second stability floor remain intact.
+# Task: Reliability audit 2026-09-09 [IN PROGRESS]
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner rails, ledger anchor, dated branch, and delta.
+- T2 depends_on: [T1] - Audit changed source surfaces and standing reliability sweeps.
+- T3 depends_on: [T2] - Append the ledger/findings, validate frozen IDs, commit, push, and update the nightly PR.
+
+## Checklist
+
+- [x] T1 Dedicated markers, anchor `15e74ff1`, and `reliability/2026-09-09` verified.
+- [x] T2 Changed-surface and standing-sweep review.
+- [x] T3 Audit ledger publication, commit, push, PR #383, and rolling-issue report.
+
+## Review
+
+- [x] 12 commits / 28 changed source files reviewed; zero new source-actionable findings.
+- [x] `80e41b2a` pushed; PR #383 opened and issue #81 commented; Pushover accepted the audit notice.
+
+---
+
+# Task: Testing-weekend audit 2026-09-09 [IN PROGRESS]
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner rails, ledger base, branch, and toolchain.
+- T2 depends_on: [T1] - Run serial CI-gated suites and delta-scoped determinism checks.
+- T3 depends_on: [T1,T2] - Inspect delta, blast radius, gates, skips, and ratchet integrity.
+- T4 depends_on: [T3] - Append the audit ledger/findings, commit, push, and open or update the nightly PR.
+
+## Checklist
+
+- [x] T1 Dedicated runner markers, clean tree, branch, and ledger base verified.
+- [x] T2 Serial gates recorded; 98 touched test files make scoped 3× reruns full-gate equivalent.
+- [x] T3 Delta and standing sweeps complete.
+- [x] T4 Audit committed as `7c36bcf1`, pushed, and published as PR #385.
+
+## Review
+
+- [x] T-490 cites the rendering contract and reproduces deterministically in the full gate.
+
+---
+
+# Task: Testing-weekend remediate 2026-09-09 [COMPLETE]
+
+## Dependency graph
+
+- T1 depends_on: [] - Regenerate stale Codex loop artifacts for T-490.
+- T2 depends_on: [T1] - Verify the portable-render contract and append remediation evidence.
+- T3 depends_on: [T2] - Run three serial full gates and publish the remediation record.
+
+## Checklist
+
+- [x] T1 Operator reran the renderer in writable checkout `/Users/joemccann/.radon/work/pr385-operator`; all eight Codex artifacts are tracked and byte-identical to fresh renders.
+- [x] T2 Portable-render contract passed: 73 passed / 0 failed; `render_loop_prompt.py --check` also passed.
+- [x] T3 Full verification is delegated to PR #385 exact-head GitHub CI per operator policy.
+
+## Review
+
+- [x] `RADON_WEEKEND_REDUCED=1`: T-490 was the sole source-actionable P1.
+- [x] T-490 is resolved: the requested write and focused test both succeeded; no generated diff exists because current main already contains the exact renderer output.
+# Task: CI performance audit 2026-09-08 (post-main delta) [COMPLETE]
+
+Measure the production critical path after `cc77928d`, verify delivery rails,
+and record every material source-actionable optimization candidate.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, stale-lock recovery, branch, auth, and audited range.
+- T2 depends_on: [T1] - Measure 20 successful production runs and inspect workflow, cache, image, and deploy paths.
+- T3 depends_on: [T2] - Validate safety contracts, append the ledger, publish the dated branch, and update the nightly PR/report.
+
+## Checklist
+
+- [x] T1 Dedicated markers, stale-lock preservation, auth, remote branch, and `cc77928d..90071618` delta verified.
+- [x] T2 Actions timing, change-class comparison, and safety-rail inspection.
+- [x] T3 Ledger, focused contract tests, commit, push, PR, and rolling issue report.
+
+## Review
+
+- [x] 20 successful Actions runs measured: mixed/full-stack p50 269s, p95 380s; docs/control-plane p50 166s; first-job queue 2-3s.
+- [x] No candidate clears the 15-second / 10% materiality floor without changing gate closure, test-union risk, or protected deployment behavior.
+
+---
+
+# Task: CI performance remediate 2026-09-08 (post-main delta) [COMPLETE]
+
+Record the reduced-rung remediation decision after synchronizing the dated
+branch with `origin/main`, without changing any production safety contract.
+
+## Dependency graph
+
+- T1 depends_on: [] - Synchronize the dated branch and preserve both append-only records.
+- T2 depends_on: [T1] - Revalidate the current audit's P0/P1 eligibility and protected closure.
+- T3 depends_on: [T2] - Run workflow safety contracts, append the remediation result, commit, and push.
+
+## Checklist
+
+- [x] T1 Dated branch synchronized with `origin/main`; CI ledger and task records preserved.
+- [x] T2 `RADON_WEEKEND_REDUCED=1` admits no P0/P1 source-actionable optimization from the post-main audit.
+- [x] T3 Focused safety contracts, YAML/shell parsing, and diff checks passed; ledger publication pending this commit.
+
+## Review
+
+- [x] `RADON_WEEKEND_REDUCED=1` restricted remediation to P0/P1; no lower-priority experiment was made.
+- [x] 94 focused contract tests passed; no test inventory, gate closure, provenance, rollback, recovery, health, cancellation, or stability behavior changed.
+
+---
+
+# Task: ATS priority universe + freshness rail [COMPLETE]
+
+Widen `/regime/ats` beyond the watchlist and add the regime countdown rail.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: priority unique universe, core coverage, weekly rail.
+- T2 depends_on: [T1] - Resolver, scheduled walk, carry-forward, panel rail.
+- T3 depends_on: [T2] - Focused pytest + vitest green.
+
+## Checklist
+
+- [x] T1 Failing tests for universe order, core coverage vs index tail, weekly countdown
+- [x] T2 Portfolio then watchlist then ndx100/r2k/sp500; FreshnessRail on ATS
+- [x] T3 Focused suites green
+
+---
+
+# LLM historical coverage and source provenance (2026-09-08)
+
+Backfill every AI-infrastructure metric to the earliest authoritative, technically
+and legally available observation; keep snapshot-only sources honest; label every
+rendered section with its originating provider and surface actual provider health.
+
+## Dependency graph
+
+- [x] T1 depends_on: [] - Inventory charts, collectors, provider contracts, existing production coverage, authoritative historical endpoints, date floors, access, rate, and redistribution limits.
+- [x] T2 depends_on: [T1] - Add red regressions for earliest-window selection, resumable provider-specific backfill, source status completeness, and explicit UI provenance.
+- [x] T3 depends_on: [T2] - Implement bounded historical collectors/backfill orchestration and preserve append-only vintages, checkpoints, rate limits, and snapshot-only semantics.
+- [x] T4 depends_on: [T3] - Label every LLM section and chart with linked source providers; render availability, restriction, error, and observation coverage without converting missing data to zero.
+- [x] T5 depends_on: [T3,T4] - Run focused Python/Vitest/Playwright and browser visual checks; verify every configured provider fetches or reports an exact actionable status.
+- [ ] T6 depends_on: [T5] - Commit, open PR, supervise exact-head GitHub CI through green, notify, merge, deploy, execute production backfill, and verify live earliest dates/provider rendering.
+
+Graph: T1 -> T2 -> T3 -> T4 -> T5 -> T6; T3 -> T5.
+
+## Review
+
+- Publisher floors and limits are documented from originating sources: SEC 2009, NOAA July 2018, EIA DOM January 2019, OpenRouter January 2025, Vercel October 2025, and GPU Rental Prices July 2026; current-only and unsupported histories remain explicit.
+- Live bounded validation collected 10,446 SEC rows across ten issuers, 812 Vercel rows, 439 GPU history rows and 32 NOAA rows without production writes.
+- Focused validation: 95 Python collector/core tests, 7 Vitest component tests, Ruff checks, codemap pre-commit, and desktop/mobile Playwright source-label visuals passed. Full suites move to GitHub CI per operator direction.
+
+---
+
+# Task: CI performance remediate 2026-09-08 [COMPLETE]
+
+Apply every verified P0/P1 CI-performance finding from the current audit without changing protected delivery guarantees.
+
+## Dependency graph
+
+- T1 depends_on: [] - Resume the dated branch and verify dedicated runner, lock, remote, and reduced-cap scope.
+- T2 depends_on: [T1] - Recheck P0/P1 eligibility against the current audit and protected deployment closure.
+- T3 depends_on: [T2] - Validate workflow safety contracts, record the outcome, commit, and push.
+
+## Checklist
+
+- [x] T1 Resumed `ci-performance/2026-09-08`; runner markers, exclusive lock, GitHub auth, and remote branch verified.
+- [x] T2 No verified P0/P1 source-actionable candidate: the remaining node-image/scripts-rs co-wall and 40-second stability floor are protected or non-material.
+- [x] T3 Workflow integrity, deployment concurrency, and fail-closed path-filter contracts passed.
+
+## Review
+
+- [x] `RADON_WEEKEND_REDUCED=1` restricted remediation to P0/P1; no lower-priority experiment was made.
+- [x] 88 focused safety-contract tests passed; no test inventory, gate closure, provenance, rollback, recovery, health, cancellation, or stability behavior changed.
+
+---
+
+# Task: CI performance audit 2026-09-08 [COMPLETE]
+
+Record current production critical paths, preserve delivery invariants, and rank every safe source-actionable optimization candidate.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, exclusive lock, dated branch, ledger baseline, GitHub access, and protection closure.
+- T2 depends_on: [T1] - Measure recent successful production runs by comparable class and inspect critical paths, cache state, and changed CI surfaces.
+- T3 depends_on: [T2] - Verify safety contracts, rank candidates, append the audit ledger, validate, commit, and push.
+
+## Checklist
+
+- [x] T1 Dedicated-runner rails, stale-lock preservation, branch, auth, and protection baseline.
+- [x] T2 Actions timing and critical-path analysis.
+- [x] T3 Ledger publication and PR update.
+
+## Review
+
+- [x] 20 successful production runs measured: p50 258s, p95 355s; queue 2-4s.
+- [x] No material rail-safe source change; closure, provenance, rollback, and stability contracts retained.
+
+---
+
+# Task: Reliability remediate 2026-09-08 [IN PROGRESS]
+
+Complete the reduced-rung P0/P1 backlog without leaving evidence archives corruptible.
+
+## Dependency graph
+
+- T1 depends_on: [] - Reproduce REL-253 torn-evidence archive behavior.
+- T2 depends_on: [T1] - Add crash-safe digest-verified archival at both write paths.
+- T3 depends_on: [T2] - Run focused tests, record the result, commit, and push.
+
+## Checklist
+
+- [x] T1 Identify REL-253 as the sole reduced-rung un-DONE P0/P1 task.
+- [x] T2 Add red/green fault-injection coverage and atomic archival.
+- [x] T3 Record focused and permanent-drill verification, commit, and push.
+
+## Review
+
+- [x] RED: focused suite could not import missing `archive_raw`; GREEN: 84 passed in the runner venv.
+- [x] Permanent drills: Python 94 passed; Vitest 12 passed.
+- [ ] Detached full-gate stage has no `DONE` sentinel; 2026-09-08 retry also exited before `pytest_rc`; continuation must re-run all three gates.
+- [ ] Detached full-gate stage has no `DONE` sentinel; continuation must re-run all three gates.
+
+---
+
+# Task: Reliability remediate 2026-09-09 [BLOCKED]
+
+## Dependency graph
+
+- T1 depends_on: [] - Resume the dated branch and reconcile reduced-rung P0/P1 backlog.
+- T2 depends_on: [T1] - Re-run the permanent fault-injection drills with resolved paths.
+- T3 depends_on: [T2] - Run three serial detached full gates and append durable results.
+
+## Checklist
+
+- [x] T1 REL-251 through REL-253 are source-DONE; reduced rung admits no new P0/P1 task.
+- [ ] T2 BLOCKED: detached drill stage was terminated before its required sentinel.
+- [ ] T3 BLOCKED: the third detached closing-gate attempt produced no `DONE` sentinel.
+
+## Review
+
+- [ ] Three genuine detached attempts across 2026-09-08/09 terminated before the stage sentinel; no gate count is claimed.
+
+---
+
+# Task: CI performance audit 2026-09-07 [IN PROGRESS]
+
+Record the current production critical path and every safe, source-actionable optimization candidate.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, lock, branch, ledger baseline, and GitHub access.
+- T2 depends_on: [T1] - Measure 20 recent Actions runs and audit gate/deploy safety closure.
+- T3 depends_on: [T2] - Rank candidates, append the ledger, verify, commit, and push the audit branch.
+
+## Checklist
+
+- [x] T1 Runner and baseline verification
+- [x] T2 Actions and safety audit
+- [x] T3 Ledger and branch publication
+
+## Review
+
+- [x] Fetched 30 recent push runs and measured 20 Deploy-job completion clocks.
+- [x] Verified protected gate closure, Production policy, immutable action pins, and deploy safety rails.
+- [x] Rejected non-material or safety-reducing changes; audit ledger is append-only.
+
+---
+
+# Task: CI performance remediate 2026-09-07 [COMPLETE]
+
+Apply every verified P0/P1 CI-performance finding from today's audit without changing protected delivery guarantees.
+
+## Dependency graph
+
+- T1 depends_on: [] - Resume the dated branch, integrate current main, and take the runner lock.
+- T2 depends_on: [T1] - Recheck reduced-cap P0/P1 eligibility against the audit evidence and protected gate closure.
+- T3 depends_on: [T2] - Validate workflow contracts, append the remediation result, and publish the dated branch.
+
+## Checklist
+
+- [x] T1 Branch synchronized with `origin/main`; exclusive runner lock held.
+- [x] T2 No verified P0/P1 source-actionable finding; protected 40s stability, exact-SHA images, and full gate closure retained.
+- [x] T3 Workflow contracts green and remediation ledger recorded.
+
+## Review
+
+- [x] `RADON_WEEKEND_REDUCED=1` constrained this phase to P0/P1; no lower-priority experiment was implemented.
+- [x] `87 passed` workflow safety contracts; no test inventory, gate, provenance, deploy, rollback, or health behavior changed.
+# Task: Document optional Dropbox research credentials [IN PROGRESS]
+
+Keep the optional private research worker configurable without making its
+credentials mandatory for every production deployment.
+
+## Dependency graph
+
+- T1 depends_on: [] - Reproduce the missing environment-template inventory.
+- T2 depends_on: [T1] - Add the optional credentials and a focused parity guard.
+- T3 depends_on: [T2] - Run documentation and cloud configuration validation.
+
+## Checklist
+
+- [x] T1 Reproduce missing template inventory
+- [x] T2 Update template and parity guard
+- [x] T3 Validate and commit
+
+## Review
+
+- [x] The optional worker remains outside `required-env.txt`.
+- [x] Focused validation: 97 passed; detached full-cloud stage could not survive the CLI process boundary.
+
+---
+# Task: Reliability remediate 2026-09-07 [IN PROGRESS]
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify P0/P1 backlog completion on the dated reliability branch.
+- T2 depends_on: [T1] - Run permanent drills and three sequential full-gate baselines.
+- T3 depends_on: [T2] - Append durable gate evidence and commit/push the phase record.
+
+## Checklist
+
+- [x] T1 Verify REL-251 and REL-252 completion.
+- [ ] T2 Permanent drills green; full gates incomplete because the runner terminated the required stage.
+- [x] T3 Record durable gate-stage evidence.
+
+## Review
+
+- [x] Reduced scope contains no un-DONE P0/P1 items.
+- [x] Permanent drills: Python 94 passed; Vitest 12 passed.
+- [ ] Full-gate stage has no DONE sentinel; continuation required.
+
+# Task: Merge main into testing/2026-09-06 [IN PROGRESS]
+
+Resolve the current branch's merge conflicts against `main` and re-verify the conflicted surfaces.
+
+## Dependency graph
+
+- T1 depends_on: [] - Fetch `main`, create a merge base, and perform the merge.
+- T2 depends_on: [T1] - Resolve conflicts surgically in affected files.
+- T3 depends_on: [T2] - Run focused validation, scan changed files, and publish the merge commit.
+
+## Checklist
+
+- [x] T1 Merge main
+- [x] T2 Resolve conflicts
+- [x] T3 Verify and publish
+
+## Review
+
+- [x] Codemap artifacts regenerated from the merged tree.
+- [x] `python3 -m pytest scripts/tests/test_codemap.py scripts/tests/test_path_filter.py -q`
+
+---
+
 # Task: Keep the code-path map fresh on every code commit
 
 Regenerate `tools/codemap/*.json` when source files change, and point agents at the graph so they do not reconstruct imports.
@@ -818,7 +2704,7 @@ delay notice; playful error copy; operator-only CRUD.
 
 ## Dependency graph
 
-- P1 depends_on: [] - Secret store module: AES-256-GCM-encrypted values (existing
+- P1 depends_on: [] - Credential store module: values encrypted with AES-256-GCM (existing
   `cryptography` dep) in local SQLite on host; master key auto-generated on first
   run, systemd-creds `LoadCredential` on VPS / 0600 file fallback for dev.
   CRUD + audit events. Red tests first.
@@ -5061,3 +6947,1206 @@ Goal: ≤640px position cards expose the desktop default-ON field set (position 
 - YAML, shell syntax, diff hygiene, and gitleaks checks passed. Docker was unavailable locally, so the exact linux/amd64 image build remains gated by PR CI.
 
 ---
+
+# Dropbox research production integration (2026-09-07)
+
+Approved reference: ~/.radon/dropbox-research/calibration-policy.md and batch-2026-09-06_07/review.html. User authorized continuation after accepting all six selections and media format. Implementation isolated from unrelated marketing edits.
+
+## Dependency graph
+- T1 depends_on: [] - Implement tested folder-bound Dropbox polling and durable revision queue.
+- T2 depends_on: [] - Add atomic research provenance publication and authenticated content-addressed media.
+- T3 depends_on: [T2] - Add source-aware live-feed charts/thumbnails/lightbox and API projection.
+- T4 depends_on: [T1,T2] - Integrate pinned Firecrawl extraction, source/vision evidence validation, calibrated relevance/novelty selection and publication outbox.
+- T5 depends_on: [T1,T2,T3,T4] - Verify end-to-end with accepted batch and failure/restart tests, full suites and browser evidence.
+- T6 depends_on: [T5] - Install/deploy watcher and private media, verify runtime health and idempotent publication.
+
+## Checklist
+- [x] T1 Dropbox client and durable queue.
+- [x] T2 Publication and private media.
+- [x] T3 Feed integration.
+- [x] T4 Automated evidence pipeline.
+- [x] T5 Verification.
+- [x] T6 Runtime activation.
+
+## Contract
+Research posts reuse canonical posts table, with companion research_post_sources(post_id, provenance_json). API source object: kind="dropbox", publisher, url (same-origin authenticated original PDF), documentDate, folderDate, pages:number[], figures:{url,page,caption}[], fileId, revision, contentHash. Private URLs /api/newsfeed/research/files/<sha256>.<png|pdf>. Python authenticated files endpoint /newsfeed/research/files/{asset}. Persistent worker state under RADON_RESEARCH_DIR (default /var/lib/radon/research), never public media. Every source asset is content-addressed and validated; no Next image optimizer for private media.
+
+## Review in progress
+- Private approved import: six items, eleven PNG charts and five source PDFs; second import queues zero duplicates.
+- Live model trial found a false-positive crop review: ECB figure headings omitted and unrelated prose included. Independent crop-only verification now rejects this case; a bounded correction using verified PDFium glyph coordinates passes crop-only review and direct visual inspection. Final integrated trial and full suites remain pending.
+- TypeScript typecheck passed; full Python/web/cloud suites running. No production publication or watcher activation yet.
+
+- Final crop/numeric gates: 109 focused tests passed; real ECB crop correction visually verified. A wrong 72bps-prior claim is rejected against source text stating 74bps prior and 72bps current, without relying on novelty filtering.
+- Full web run: 8,531 passed, five failures; three research contract failures repaired and focused checks green, two timing failures passed unchanged in isolation (45 tests). Remaining root Vitest scopes: 497 passed across 54 files.
+
+- Live production client discovery: 18 eligible PDFs across September 6/7, zero additions on the second cursor poll. Approved publisher contract: six posts/eleven figures validated without remote writes.
+- Final focused evidence pipeline: 124 passed, 100% pipeline coverage; unsupported 70bps and duplicated ECB controls held. A manually source-corrected agriculture control passes; original automated agriculture remains held.
+- Full Python: 12,096 passed, three contract failures (generated codemap freshness, owner documentation, E2E curation); fixes are being verified after main integration.
+- Full cloud: 1,815 passed, 33 failed, seven skipped. Follow-up checks resolved all failures except an unchanged operator marker timeout reproduced against pristine HEAD. Final research/runtime/setup/confinement/Caddy checks are green.
+- Production web build and trace audit passed (197 manifests); production-server browser preflight 9/9. Research E2E is curated in CI. Final web focused 194/194 and typecheck passed.
+
+- Post-integration checks on main 1f4b9331 plus this change: 311 focused Python/API/contracts passed with 16 subtests; 30 codemap tests passed. All three full-Python contract failures are resolved. Staged secret scan found no leaks. Runtime activation remains pending deployment.
+
+- PR #333 first head: all checks passed except clean-checkout codemap freshness. Regression reproduced from ignored generated next-env.d.ts; collector excludes that generated file. Red/green test, 31 codemap tests and clean archive graph equivalence passed. Rolling/demo absent-research-table regression fixed; 242 web tests and typecheck passed.
+
+---
+
+# Task: Reliability delta audit 2026-09-07 [COMPLETE]
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify the ledger anchor and changed surface.
+- T2 depends_on: [T1] - Recheck standing money-path and health-catalog invariants.
+- T3 depends_on: [T1,T2] - Record deduplicated findings and actionable backlog rows.
+
+## Checklist
+
+- [x] T1 Verify `7a7ca4ae..0b77a6af`.
+- [x] T2 Recheck guards and catalog coverage.
+- [x] T3 Record R-672/R-673 and REL-251/REL-252.
+
+## Review
+
+- [x] Research worker health writer is absent from both freshness catalogs.
+- [x] Research document processing has no whole-document bound.
+
+---
+
+# Task: Reliability remediation 2026-09-07 [IN PROGRESS]
+
+Reduced-capability rung: remediate P1 findings only.
+
+## Dependency graph
+
+- T1 depends_on: [] - Add red catalog tests for `dropbox-research`.
+- T2 depends_on: [T1] - Register matching continuous freshness windows.
+- T3 depends_on: [] - Add red bounded-document and progress-heartbeat tests.
+- T4 depends_on: [T3] - Bound review work and preserve timed-out work for retry.
+- T5 depends_on: [T2,T4] - Run focused and required full gates; append reliability log.
+
+## Checklist
+
+- [x] T1 Catalog red test.
+- [x] T2 Catalog implementation.
+- [x] T3 Pipeline red test.
+- [x] T4 Pipeline implementation.
+- [x] T5 Focused verification and log; full Python gate baseline recorded.
+
+## Review
+
+- [x] REL-251 fault injection: error and stale `dropbox-research` rows are actionable in both catalogs.
+- [x] REL-252 100-page fault injection: document lease stops new reviewer calls and emits completed-stage heartbeats.
+- [x] Focused gates: Python 103 passed; Vitest 139 passed.
+- [x] Full Python run: 12,093 passed, 95 failed, 14 errors; failures are pre-existing remote, fixture, and host-wrapper environment surfaces.
+
+## Production verification (2026-09-07)
+- PR #333 head 63fba7aa: 31 successful checks, seven non-applicable skips; Pushover accepted HTTP 200. Squash release 0b77a6af6e586b5702f4e8dac70f4cc37942a2b4 deployed successfully in run 34152165447.
+- Six approved posts and eleven ordered figures verified in canonical production tables; repeated publication wrote zero additional posts. All sixteen private assets returned matching hashes internally; both public media paths rejected anonymous access with HTTP 401.
+- Optional research service enabled and active at the exact release with zero restarts; September 6/7 cursors and eighteen eligible PDFs persisted. First unattended document completed against 3,862 feed items; three candidates held after crop correction failed inspection. Remaining queue continues in the background.
+- Approved relevance and chart presentation retained in policy and private profile. Production browser visual review awaits operator sign-in; production-build browser preflight passed 9/9.
+
+## Signed-in production verification (2026-09-07)
+- V1 depends_on: [] - Verify signed-in feed images, thumbnail switching and source context.
+- V2 depends_on: [] - Read watcher status and audit the first automatic publication against its retained source.
+- V3 depends_on: [V1,V2] - Record evidence and report any remaining operator action.
+- Live source-aware lightbox visually verified; original chart, caption/page, secondary thumbnails and article context render in production.
+
+# Research publication-date gate (2026-09-07)
+- D1 depends_on: [] - Disable automatic publication and preserve/retract unsupported automatic rows.
+- D2 depends_on: [] - Add source-literal publication-date evidence gate with red/green regressions for folder dates and copyright-only dates.
+- D3 depends_on: [D2,D5] - Run focused/full verification, regenerate source map, and deliver through exact-head green CI/deployment.
+- D4 depends_on: [D1,D3] - Revalidate pending output against corrected gate, resume watcher, and verify runtime.
+
+- D5 depends_on: [] - Correct existing original-bank attribution and enforce the same rule for future generated copy and seeds; regression tests required.
+
+- [x] D1 Automatic publication disabled; worker stopped and disabled. Unsupported automatic row backed up privately, retracted and cancelled in outbox; zero pending publication payloads.
+- [x] D2 Literal source-date gate implemented; retained failing production audit now fails independently of model approval.
+- [x] D5 Original-bank attribution corrected live and guarded for future rendered copy.
+- [ ] D3 Full verification and release.
+- [ ] D4 Corrected runtime reactivation.
+- Focused verification: 233 passed, 100% pipeline/publisher/seed coverage; independent review eight probes passed after closing named-month ranges and Unicode format-character bypasses.
+
+- Full Python follow-up: 12,273 passed, 11 failed, one skipped and 16 subtests passed. Failures are untouched process-timeout regressions; filing-forensics rerun passed unchanged (1/1). Wrapper baseline reruns are recorded in the release PR.
+- Integrated current main d13f982d (marketing-only implementation changes); regenerated source map has 3,222 nodes and 6,502 edges. Research, codemap and updated public-asset checks passed 266/266; staged secret scan found no leaks.
+- All ten wrapper failures passed serially against pristine d13f982d (10/10, 38.70s); five wrappers and their test module match the integrated worktree. Full-run timeout cause remains unknown; no implementation/test changes were needed.
+- D3a depends_on: [D3] - Main advanced to e4eaa255 during green PR checks; integrate its independently tested loop changes, regenerate conflicting source-map artifacts, run integrated research/contract tests, and repeat exact-head CI before merge.
+- D3a integrated validation passed 320/320; upstream e4eaa255 full CI and production deployment completed successfully. Research implementation is unchanged from the full-suite run.
+
+# PR #337 conflict resolution
+- C1 depends_on: [] - Merge current main in an isolated checkout; preserve research date/attribution gates and the PR's budget/freshness protections.
+- C2 depends_on: [C1] - Regenerate source maps, review semantic integration, and run focused/full verification.
+- C3 depends_on: [C2,C2b] - Push the resolution to PR #337 and supervise all exact-head checks to green.
+- [x] C1 Resolve conflicts.
+- [x] C2 Verify integrated behavior.
+- [ ] C3 Push and verify CI.
+- C2a depends_on: [C1] - Broader checks found nine standalone crop-review deadline failures; add a bounded lazy-initialization regression and fix before full verification.
+- C2a red/green: the prior PR's standalone crop failures were deadline-initialization regressions, not unrelated fixture failures. Eleven crop cases failed before the fix, including two new budget controls; independent crop/runtime/date/publication checks passed 204/204 with no skips afterward.
+- Generated source maps are fresh; focused codemap suite passed 31/31.
+- C2b depends_on: [C2] - Main advanced to c8ae8fa8 during verification; integrate feed-sharing changes, regenerate combined artifacts, and verify the final web tree before pushing.
+- Full Python verification passed: 12,299 tests, one skip, 16 subtests (1,262.32s). Full web: 8,529 passed and 16 timed out; unchanged affected-file/freshness rerun passed 411/411. Typecheck and staged secret scan passed.
+
+# News feed social sharing (2026-09-07)
+
+## Dependency graph
+- T1 depends_on: [] - Inspect feed, media, authentication, platform export requirements.
+- T2 depends_on: [T1] - Build client-side image/video export and caption helpers with tests.
+- T3 depends_on: [T1] - Add accessible share controls to feed and lightbox, retaining selected chart.
+- T4 depends_on: [T2, T3] - Verify focused/full tests, typecheck, desktop/mobile E2E and rendered exports.
+
+## Checklist
+- [x] T1 Scope: X composer; 1080x1920 image and MP4 downloads for Stories/Reels/TikTok; editable captions, source attribution; no publishing or public research endpoint.
+- [x] T2 Export engine and tests.
+- [x] T3 Share interface and integration.
+- [x] T4 Verification and review.
+
+## News sharing review
+- Local sharing only: X composer and caption copy; 1080x1920 PNG for Stories and six-second MP4 for Reels/TikTok. No external publishing or new public research endpoints.
+- Selected chart, publisher, document date and page/caption retained; original chart aspect ratio preserved. Unsupported MP4 browsers offer PNG; errors support retry; caption drafts survive feed refresh and chart selection.
+- Focused verification: 81 passed across six suites; 4 Playwright desktop/mobile scenarios passed, including real PNG header/dimensions and MP4 header/dimensions/duration decoding.
+- Visual inspection: portrait export and desktop/mobile sharing controls checked. Independent review approved with no remaining material findings.
+- Platform references: https://docs.x.com/x-for-websites/web-intents/overview ; https://www.postman.com/meta/instagram/folder/f95kq5e/reels-publishing ; https://developers.tiktok.com/docs/en/content-posting-api-reference-upload-video .
+- Final full suite: 865 files, 8,583 passed / 1 failed, using four workers and 30-second test/hook budgets. The unrelated order-dedup-surfaces lookup failure passed an isolated rerun: 8/8. Full-suite log: /tmp/radon-share-verified-full.log; rerun: /tmp/radon-share-order-rerun.log.
+- TypeScript, targeted ESLint and git diff --check passed. Next route types regenerated after browser checks. PR publication is authorized; no merge or deployment requested.
+
+# News sharing pull request (2026-09-07)
+
+## Dependency graph
+- T1 depends_on: [] - Verify branch, original work ownership, completed tests and CI requirements.
+- T2 depends_on: [T1] - Isolate the sharing diff on current main, commit and publish a pull request.
+- T3 depends_on: [T2] - Verify registered checks on the exact PR head, monitor to completion and repair failures.
+- T4 depends_on: [T3] - Send the required Pushover notification, confirm acceptance and document final evidence.
+
+## Checklist
+- [x] T1 Branch and verification inspection.
+- [x] T2 Focused commit and PR.
+- [ ] T3 Latest-head CI green.
+- [ ] T4 Notification and review.
+
+## PR integration review
+- PR https://github.com/joemccann/radon/pull/338 had 31 passing checks on f5c55ab6.
+- Integrated source-date main update ff2b31f8; retained both task records and regenerated the combined code map. Sharing implementation files are unchanged. Latest merge-head checks and notification pending.
+
+## PR #337 integration review
+- Latest main c8ae8fa8 integrated; Python implementation is unchanged from the 12,299-test full run. Final combined checks passed 267 research/codemap tests and 171 sharing/freshness tests. Existing source-date and attribution guards remain intact.
+- Latest main test gates passed but deployment rolled back to ff2b31f8 on research-worker stop timeout (run 34160677389); this PR conflict update does not constitute deployment.
+
+# Repair production deployment stop deadline (2026-09-07)
+
+## Dependency graph
+- T1 depends_on: [] - Reproduce research stop timeout and inspect lifecycle budgets.
+- T2 depends_on: [T1] - Add failing regression and align bounded shutdown wait with research service.
+- T3 depends_on: [T2] - Run full cloud suite, shell checks, and independent review.
+- T4 depends_on: [T3] - Publish repair PR, verify CI green, merge and verify production deployment.
+
+## Checklist
+- [x] T1 Run 34160677389 fails waiting for research inactive; recovery restores ff2b31f8.
+- [x] T2 Regression and fix: red 3 failed / 9 passed; green 12/12.
+- [x] T3 Verification: 12 focused passed, independent approval, full cloud 1821 passed / 44 failed / 7 skipped.
+- [ ] T4 Production repair.
+
+## Review
+- Research-only production inactive wait now 150s, with unchanged 60s startup/other-unit waits and 180s outer mutation deadline. Canonical unit allows 120s shutdown plus cleanup.
+- Independent review approved; 12 focused tests pass, including simulated 125s stop and persistent-stop exit 71. Shell syntax and diff checks pass.
+- Full cloud suite completed: 1821 passed, 44 failed, 7 skipped in 435.39s. Failures are in unchanged Caddy/runtime/supervisor/Gateway test surfaces (missing local Caddy and subprocess/timing fixtures); representative supervisor TimeoutExpired(3s) reproduced on clean parent. Full log: /private/tmp/radon-deploy-final-cloud.log. Linux CI remains the authoritative release gate.
+
+# PR #339–342 CI repair and merge queue
+- T1 depends_on: [] - Inspect exact-head CI and prove cross-PR conflict dependencies.
+- T2 depends_on: [T1] - Integrate current main into PR339, resolve conflicts, verify and bring its CI green.
+- T3 depends_on: [T2] - Repair PR340 and verify its exact-head CI green.
+- T4 depends_on: [T3] - Repair PR341 and verify its exact-head CI green.
+- T5 depends_on: [T4] - Repair PR342 and verify its exact-head CI green.
+- T6 depends_on: [T2,T3,T4,T5] - Merge339,340,341,342 in order; refresh each against preceding merges, regenerate source maps, repeat exact-head checks, notify once per PR, and supervise each main deployment.
+- [x] T1 Four-way merge-tree audit; task-ledger and source-map conflicts form a sequential chain.
+- [x] T2 PR339 preparation green.
+- [x] T3 PR340 green and merged externally as 125b4655; deployment passed.
+- [x] T4 PR341 preparation green: 31 successful checks.
+- [x] T5 PR342 preparation green on f6092bb8.
+- [ ] T6 All four merged and production verified.
+- PR339 integration: both task histories retained; diff against current main remains two documentation files. CI gate/path/concurrency checks passed 87/87.
+
+## Required-check repair replan
+
+- T7 depends_on: [T2] - Ensure docs-only pull requests execute every branch-protected matrix check; add regression coverage without weakening gates.
+- T8 depends_on: [T7] - Run focused and full suites, regenerate maps if necessary, publish and verify all required contexts before resuming T6.
+- [x] T7 Missing matrix-check repair; 88 focused contracts pass, live protection unchanged.
+- [ ] T8 Required-context validation and resumed merges.
+
+Review: PR339 merge was rejected because skipped matrices emit template names rather than required shard names; no bypass attempted. PR340 notification accepted HTTP200; PR339 notification accepted before this missing-context issue was discovered, so do not send a duplicate.
+
+Verification: full root Python 12,282 passed, 19 skipped, 16 subtests. Full cloud 1,860 passed, 7 skipped, 6 failures; five missing-Caddy failures reproduce on unchanged main, and the operator-concurrency timing test passed unchanged on serial rerun (also green on baseline).
+
+
+# Social share publisher exclusions (2026-09-07)
+- [x] T1 depends_on: [] - Inspect sharing paths and preserve existing workspace changes.
+- [x] T2 depends_on: [T1] - Add red/green regressions and exclude The Market Ear/ZeroHedge names and links from outbound captions and card text.
+- [x] T3 depends_on: [T2] - Verify desktop/mobile browser exports and full web suite; review results.
+
+Dependency graph: T1 -> T2 -> T3.
+
+# Large AI-cycle snapshot deadline hierarchy (2026-09-08)
+
+- [x] T1 depends_on: [] - Measure the complete 79,078-observation production read/build and reproduce the API 503 at the old 18-second ceiling.
+- [x] T2 depends_on: [T1] - Pin and implement bounded store, API, and Next deadlines with explicit headroom at each layer.
+- [ ] T3 depends_on: [T2] - Run focused checks, ship through CI/deployment, and verify the full live payload returns HTTP 200.
+
+Dependency graph: T1 -> T2 -> T3.
+- [x] T4 depends_on: [] - Study verified @joemccann authored tweets and document an evidence-backed voice persona; establish whether X API access is required.
+- [x] T5 depends_on: [T2, T4] - Integrate persona-based social copy rewriting with factual preservation and publisher exclusions, then verify.
+Extended dependency graph: T1 -> T2 -> T3; T4 + T2 -> T5.
+
+
+## Social share review
+- Publisher exclusion regressions: red 7 failures, then focused 93 passing after voice integration and handle/link regression.
+- Browser: 8/8 desktop/mobile cases passed; original PNG/MP4 decoding and lightbox checks retained; rewritten caption/X/canvas parity, pending controls, retries and one generation request per panel verified.
+- Voice persona: docs/joe-mccann-social-voice.md, provisional evidence from 20 source items (18 older thread previews, two standalone posts). Public X profile blocked; recent authenticated timeline requested for improved calibration.
+- Live generation: configured Anthropic provider returned a validated factual draft; output at /tmp/radon-voice-live-check.json. No content published.
+- Full web suite coverage and TypeScript verification complete; PR creation requested and in progress.
+
+- Concurrent workspace cleanup stashed original edits and removed registered worktrees during verification. Recovered task files from exact stash 33d9239d1344ae759c9efa9135cf0c46b91872e6 into an independent repository at /Users/joemccann/.radon/work/social-voice-20260907/repo; shared checkout and stash unchanged.
+- Independent browser rerun: 8/8 passed; next typegen and tsc --noEmit passed; temporary dependency-root configuration restored.
+
+## Social sharing PR plan
+- [ ] T6 depends_on: [T3, T5] - Commit scoped changes from current main and open the PR.
+- [ ] T7 depends_on: [T6] - Verify the exact PR head has its expected CI suite; monitor and repair until green.
+- [ ] T8 depends_on: [T7] - Confirm normal-priority Pushover delivery and document the final PR evidence.
+Dependency graph: T3 + T5 -> T6 -> T7 -> T8.
+
+## Final local verification
+- Full web coverage completed across disjoint batches: 867 files / 8,618 passing tests. Node 25 fork run and Node 24 continuation were partitioned because of workstation load; timezone-mutating suites ran separately in forks (31/31), since threads cannot change process timezone. Journal snapshot timing failure passed rerun (2/2). Manifest: /tmp/radon-social-complete-suite.json.
+- Main integration: 128 focused tests passed. Browser: 8 desktop/mobile E2Es passed, real PNG/MP4 exports verified, rewritten card visually inspected. Next typegen, TypeScript, scoped ESLint and whitespace checks passed.
+- Scoped changes restored to current main after unrelated workspace cleanup; independent recovery copy retained outside registered worktrees.
+
+## AI infrastructure implementation (PR126 follow-up)
+- [x] T1 Source contracts and reproducible retrieval verification. depends_on: []
+- [x] T2 Versioned observations, durable storage, collectors and scheduling. depends_on: [T1]
+- [x] T3 Comparable transforms, financial reconciliation, legacy preservation. depends_on: [T2]
+- [x] T4 Four-view UI, source evidence, dashboard/ticker handoff. depends_on: [T3]
+- [x] T5 Publication-time shadow evaluation and limitation report. depends_on: [T2,T3]
+- [x] T6 Focused tests, full suites, browser verification, PR green, show-me handoff. depends_on: [T4,T5]
+Graph: T1 -> T2 -> T3 -> T4 -> T6; T2 -> T5; T3 -> T5 -> T6.
+Specification: docs/ai-infrastructure-plan.md; execution contract: docs/ai-infrastructure-contract.md.
+Worktree: /Users/joemccann/dev/apps/finance/radon-ai-infrastructure, branch feat/ai-infrastructure-evidence.
+Enabled observations must be reproducible; unentitled/experimental sources stay explicit unavailable and never fabricate values. Shadow validation ships as a reproducible evaluator; no invented history or claimed predictive validity.
+
+### Review
+- Implemented in the isolated worktree with collector, core and UI agents; all feature work reviewed and frozen.
+- Verified 1,962 source observations, five issuer cash-flow mappings and 25 rolling TTM coverage points. Three of 15 indicator groups have available evidence; missing entitlements/cohorts remain explicit.
+- Production build and typecheck pass; six Playwright scenarios and an actual-source capture sweep pass, with 15 screenshots and zero page errors or horizontal overflow.
+- Full suites and exact-head PR CI remain release gates. No production collection, order execution, merge or deployment performed.
+- Final full application Python: 12,392 passed, 19 skipped, 16 subtests passed across two disjoint partitions; all initial failures resolved and rerun green.
+- Full cloud rerun: 1,873 passed, six skipped; deployment inventory/bootstrap and optional-env contracts repaired. Final focused AI/code-map/watchdog/order-worker contracts: 140 passed.
+- Full root Vitest: 9,103 passed across 924 files; final TypeScript check passed. Exact-head PR checks remain pending before final handoff.
+- PR346 integration: merged main00b6aa22, regenerated maps; updated application partition 11,759 passed plus one owner-doc failure, repaired with146/146 ownership/code-map/Equibles regressions. Combined application coverage now12,394 tests including the unchanged634-test partition.
+- Release verification: PR346 head5fa75a9b has all applicable CI checks green, including coverage and Playwright; 15-image show-me artifact verified with seven selectors and desktop/mobile checks. Final release-head status is tracked on PR346 before notification.
+
+### Final-head CI repair
+- [x] T7 Fix the existing compose-validation producer/grep pipeline race with deterministic regression coverage. depends_on: [T6]
+- [x] T8 Verify the repair, publish and supervise all latest-head checks before final notification. depends_on: [T7]
+Graph extension: T6 -> T7 -> T8.
+- Evidence: run34172973979 cloud al rejected the poisoned body with a spurious no-services diagnostic after printf received SIGPIPE. Preserve every compose safety gate and its three-copy parity.
+- T7 red evidence: six deterministic large-body/small-pipe failures across all three Compose validators; trusted-body rejection and privileged-body acceptance both reproduced.
+- T7 green evidence: 125 focused tests, nine large-body regressions, three-copy parity and shell syntax all passed. Full cloud rerun and latest-head CI remain T8 gates.
+- T8 local verification: final full cloud suite 1,882 passed, six skipped after the Compose repair; latest-head CI is the remaining release gate.
+- T8 release evidence: repaired head6fa1f028 passed all31 applicable checks, including both cloud shards, coverage and Playwright. All agents completed; worktree code is verified. Latest ledger-head status remains visible on PR346 and is checked before notification.
+# Task: Reliability audit 2026-09-08 [COMPLETE]
+
+# Regime chart x-axis formatting (2026-09-08)
+
+- [x] T1 depends_on: [] - Inventory every `/regime/*` chart and reproduce the overlapping x-axis labels at representative desktop and mobile widths.
+- [x] T2 depends_on: [T1] - Add red regression coverage for shared tick density, label format, and available axis space.
+- [x] T3 depends_on: [T2] - Fix the narrowest shared chart primitives and any independent regime chart implementations that reproduce the defect.
+- [x] T4 depends_on: [T3] - Run focused Vitest, relevant Playwright coverage, and one batched visual inspection across all regime chart routes.
+- [x] T5 depends_on: [T4] - Run the full project suite, review the final diff, and document verification evidence.
+
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
+
+# AI-cycle bounded-resume completion (2026-09-08)
+
+- [x] T1 depends_on: [] - Reproduce the production SIGTERM and identify exhausted-budget status churn plus repeated successful empty windows.
+- [x] T2 depends_on: [T1] - Add red regressions for checkpointing successful empty windows and stopping cleanly at the first exhausted budget.
+- [x] T3 depends_on: [T2] - Implement clean bounded completion without changing provider/schema failure semantics.
+- [ ] T4 depends_on: [T3] - Run focused checks, open the repair PR, and monitor exact-head CI.
+- [ ] T5 depends_on: [T4] - Deploy, resume to terminal success, and verify final API/source coverage.
+
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
+
+## Review
+
+- Red/green: two regressions failed before the repair and pass after it; 101 AI-cycle core/collector tests and Ruff checks pass.
+
+## Review
+
+- Inventory: 19 shared history routes plus eight independent regime chart implementations reviewed; all affected time and index axes use responsive tick spacing and inward endpoint anchors.
+- Regression evidence: pre-fix irregular-session minimum gap was 19.8px; focused Vitest is 194/194 and TRIN Playwright is 4/4 at 1,440px and 390px.
+- Full verification: 8,634/8,634 web tests, TypeScript, scoped ESLint, codemap freshness, diff check, Impeccable detection, and the held-out E2E evidence contract pass.
+
+# Task: Reliability audit 2026-09-08 [IN PROGRESS]
+
+Perform the delta audit from `0b77a6af` through the dedicated runner head.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner markers, audit anchor, dated branch, and changed surface.
+- T2 depends_on: [T1] - Inspect changed money, state, connectivity, resource, error, safety, and observability surfaces plus standing sweeps.
+- T3 depends_on: [T2] - Dedupe findings, append immutable ledgers, verify, commit, and push the audit branch.
+
+## Checklist
+
+- [x] T1 Runner, anchor, branch, and diff verified.
+- [x] T2 Changed-surface and standing-sweep audit.
+- [x] T3 Ledger publication.
+
+## Review
+
+- [x] Audit evidence: R-674 P1 persistence finding; second pass through `90071618` found no additional defect; all required standing sweeps HOLD.
+- [x] Audit evidence: one P1 persistence finding, all required standing sweeps HOLD.
+
+---
+
+# Dropbox filename resilience repair (2026-09-08)
+- [x] T1 depends_on: [] - Add red regressions and repair remote filename acceptance while preserving security boundaries.
+- [x] T2 depends_on: [] - Add red regressions and isolate discovery failures from other scopes and validated queued work; retain actionable error health.
+- [x] T3 depends_on: [T1,T2] - Independent review, focused/full Python verification and generated code map checks.
+- [ ] T4 depends_on: [T3] - Commit, PR exact-head CI, merge and verify deployed queue recovery and canonical accepted output.
+Dependency graph: T1 + T2 -> T3 -> T4.
+User authorized fixing the live service; preserve source files, cursors, date/novelty/attribution/media gates and existing posts. No trading actions.
+
+## Verification in progress
+- Reader red/green: colon listing/download failed before repair; 38 reader/state tests passed afterward. Exact live blocked cursor validated all 69 entries with patched code in a transient read-only interpreter.
+- Worker red/green: three isolation regressions and one CLI exit-code regression failed before repair; 75 runtime/pipeline tests pass. Independent review found no remaining blockers.
+- Full Python suite running; no production changes before reviewed release.
+
+## Local verification complete
+- Full Python coverage: 12,406 unique tests passed, 19 skipped, 90 integration deselected, 23 subtests passed. Full loadfile run completed every other file (11,990 passed/19 skipped before interruption); remaining serial wrapper file was rerun in full using load scheduling: 634/634 passed. No failures in either batch. Logs: /tmp/radon-dropbox-full-pytest.log and /tmp/radon-dropbox-final-shard.log; collection: /tmp/radon-dropbox-all-collected.txt.
+- Focused research: 263 passed, 18 skipped, 23 subtests. Touched coverage: Dropbox reader 100%, worker 97%. Independent review approved; whitespace and generated map checks pass.
+- Integrated main 1090a84a (unrelated chart changes); research source unchanged from full verification. Regenerated combined source maps; 294 integrated research/codemap tests passed, 18 skipped, 23 subtests.
+- Integrated main c9305ba8 (independently green loop no-op change); repair implementation remains unchanged. Combined research/codemap/new-loop regressions: 318 passed, 18 skipped, 23 subtests. Merge TypeScript, ESLint and secret scans passed on the prior chart integration.
+- Integrated subsequent security release 1ab63ddf; no research implementation changed. Focused research reverified and combined maps regenerated; latest-head CI is the final integrated release gate.
+
+# Dropbox release deployment unblock (2026-09-08)
+Original repair PR355 is merged as 670dcae2 with 31 green checks. Preceding security release 1ab63ddf failed monitor startup (root-owned app tree lacks writable logs); rollback then failed stopping absent legacy watchdog timer. User-authorized live fix remains incomplete until deployment recovers.
+- [x] U1 depends_on: [] - Restore narrowly writable monitor log directory in Python image, retaining immutable source ownership; red/green image regressions.
+- [x] U2 depends_on: [] - Make deployment stop/recovery tolerate provably absent inactive units, with failure-closed state checks and regressions.
+- [ ] U3 depends_on: [U1,U2] - Run full cloud suite and independent review; release through exact-head green CI and deployment.
+- [ ] U4 depends_on: [U3] - Verify monitor and research runtime, advanced Dropbox cursor and queued work progress.
+Dependency graph: U1 + U2 -> U3 -> U4.
+
+## Review
+- Independent review approved both changes and recovery plan. Use exact merged-main helper, atomically installed canonical root0755 after archiving old helper, run recovery as radon, then immediately sync canonical control-plane manifest. Preserve inventory/journal and gateway state.
+- Docker regression red before log provisioning; 41 image tests passed. Actual non-root image smoke is mandatory in CI build; local Docker daemon unavailable.
+
+- Full cloud run: 1,866 passed, 32 failed, seven skipped. Failed subset rerun on unchanged baseline: 26 passed, six failed; repaired tree: 27 passed, five failed, all requiring unavailable local Caddy. New regressions pass; Linux CI remains the integrated release gate. Logs: /tmp/radon-dropbox-full-cloud.log, /tmp/radon-dropbox-cloud-baseline.log, /tmp/radon-dropbox-cloud-confirm.log.
+- Integrated unrelated ATS main release 37f18a9f; cloud and Docker implementation unchanged.
+
+# LLM source credentials in Profile (2026-09-08)
+
+- [x] T1 depends_on: [] - Inventory the Profile credentials contract and all LLM pipeline environment fields.
+- [x] T2 depends_on: [T1] - Add red regression coverage for every missing credential and configuration field.
+- [x] T3 depends_on: [T2] - Register fields across backend storage, validation, and Profile UI metadata.
+- [x] T4 depends_on: [T3] - Run focused API/UI tests and desktop/mobile browser verification.
+- [x] T5 depends_on: [T4] - Run full suites, commit, open a PR, and monitor exact-head CI until green.
+
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
+
+## Verification replan
+- [x] T5a depends_on: [T4] - Run Python and cloud suites sequentially after concurrent-run resource contention.
+- [x] T5b depends_on: [T5a] - Stop expensive local full-suite reruns per operator direction; retain focused UI/browser evidence and delegate the full matrix to GitHub CI.
+- [x] T5c depends_on: [T5b] - Commit, open the PR, and monitor exact-head CI until green.
+Dependency graph: T4 -> T5a -> T5b -> T5c -> T5.
+
+## Review
+- Focused credentials/API coverage: 125 passed; Profile Vitest: 8 passed; Profile Playwright: 2 passed with desktop/mobile visual inspection.
+- Full Python: 12,400 passed, 19 skipped, 90 deselected, 16 subtests; full cloud: 1,877 passed, 12 documented local Caddy skips.
+- GitHub CI is the authoritative full web and release gate per operator direction.
+- PR #361 repair head `5d5a6d0e` passed every applicable GitHub check, including all Vitest/Python shards, both coverage ratchets, Playwright, images, security, perimeter smoke, and previews.
+
+# AI-cycle production import repair (2026-09-08)
+
+- [x] T1 depends_on: [] - Reproduce the deployed one-shot failure and confirm the encrypted Artificial Analysis key exists without reading its value.
+- [x] T2 depends_on: [T1] - Add a subprocess regression for the real package invocation and correct secret-store import resolution.
+- [ ] T3 depends_on: [T2] - Run focused checks, open the repair PR, and monitor exact-head GitHub CI until green.
+- [ ] T4 depends_on: [T3] - Verify successful deployment, trigger the production one-shot, and confirm the Artificial Analysis result and timer health.
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+## Review
+- Red: package invocation failed with `ModuleNotFoundError: secret_store`; green: 52 collector tests and the deployed-unit credential contract pass.
+
+# Dropbox minute ingestion and publication repair (2026-09-08)
+- [x] P1 depends_on: [] - Verify deployment host and current scheduling; design independent current-day discovery and prompt parsing.
+- [x] P2 depends_on: [P1] - Implement 60-second current-day polling independent of review, durable parse staging and prompt review wake-up; regressions for slow review, retries and midnight rollover.
+- [x] P3 depends_on: [] - Repair demonstrated numerical/source-format validation false negatives without weakening provenance, signs, units or date gates; regression tests.
+- [ ] P4 depends_on: [P2,P3] - Independent review, full relevant suites, exact-head PR CI, deployment and live cadence/publication verification.
+Dependency graph: P1 -> P2; P2 + P3 -> P4.
+Scope: preserve private source/queue state and novelty gates. Use bounded ingestion resources; a slow model review must not block discovery or text parsing. Host migration, if needed, must preserve single-writer ownership.
+
+## Minute-ingestion review
+- Live host5.78.148.38 reports RADON_HOST_ROLE=app and IB_GATEWAY_HOST=10.0.0.4; Linux/Hetzner hostname remainsib-gateway. No host migration required.
+- P3 red/green:97 numeric/date/pipeline tests pass, including25 new format/range/context cases. No newdependencies; preservegenuine unsupportedclaims/date/cropfailures.
+
+- P2 frozen after87 ingestion/runtime tests passed; ingestion branch-aware coverage96%. Actualspawn integration demonstrates newarrivals parsed atvirtual0/60seconds while modelreviewremainsblocked. Independentreview resolvedcacheintegrity, processgroup cleanup, cancelledoutbox andaggregatehealth concerns.
+
+- User changed verification policy: no test suites on this machine; use PR CI. Stopped local full suite at11,838 passed/19skipped withKeyboardInterrupt after906seconds; not a completed full-suite result. Integrated current maince4a9a56; preserved both task/lesson updates and regenerated maps. Final validation delegated to exact-head GitHub CI.
+
+## 2026-09-08 — Vast.ai credential verification
+
+### Dependency graph
+- T1 depends_on: [] — Trace Profile credential save/verify path and reproduce Vast response safely.
+- T2 depends_on: [T1] — Add a failing validator regression covering current Vast API behavior.
+- T3 depends_on: [T2] — Implement the minimal robust Vast verification fix.
+- T4 depends_on: [T3] — Run focused tests, regenerate codemap, and review the diff.
+- T5 depends_on: [T4] — Commit, push, open PR, watch exact-head CI green, and send Pushover.
+
+### Checklist
+- [x] T1 Trace and reproduce without exposing secrets.
+- [x] T2 Add red regression.
+- [x] T3 Fix validator.
+- [x] T4 Verify and document review.
+- [ ] T5 PR and green CI.
+
+### Review
+- Production-safe probe confirmed Vast is reachable and returns HTTP 404 with `error=auth_error` for the stored key; no credential material was emitted.
+- Validator now classifies only Vast's explicit `auth_error` payload as invalid; unrelated 404s and transport failures remain non-blocking errors.
+- Focused verification: 56 pytest passed; Ruff check/format, codemap pre-commit, and diff check passed.
+# Regime freshness rails everywhere (2026-09-08)
+
+Audit: 30 regime tabs. FreshnessRail: ivrank, iv-spread, ma-ratio. Text "Next refresh": cot, ats, short. Lacking with a systemd writer (20): cri, vcg, gex, breadth, bpi, margin, straddle, cor, vixcor, vixts, dispersion, skew, skew2d, curve, credit, iei-hyg, trin, divyield, hyad, hhlev. Lacking with no scheduled writer (4, not applicable — nothing to derive from): grg (panel-triggered POST scan), streaks (computed per request), backtest, llm (AiInfrastructurePanel since #346, on-demand "Refresh snapshot"; LlmTokenIndexCard is no longer mounted).
+
+- [x] T1 depends_on: [] - Generalise `web/lib/refreshSchedule.ts` to rule-based schedules (weekday sets, multi-slot, intraday windows, America/New_York timers); add one constant per lacking writer; `freshnessRail.ts` derives the interval from previous/next slot. Pin every constant to its OnCalendar lines by parsing the unit file in `tests/refresh-schedule.test.ts`.
+- [x] T2 depends_on: [T1] - Workflow fan-out: wire `<FreshnessRail>` into each of the 20 panels with a render test asserting the rail and its countdown.
+- [x] T3 depends_on: [T2] - Full vitest suite green; tsc + eslint clean. (9220 passed from web/; the 10 cwd-dependent lib/tools + scanner-scrub failures pass from repo root, 23/23.)
+- [x] T4 depends_on: [T3] - Browser verification of every wired tab (chrome-cdp on local Next), screenshots. 19/20 rails rendered live with correct next-fire instants; TRIN shows its empty state locally (no samples in this environment), rail covered by its unit test.
+- [ ] T5 depends_on: [T4] - PR, mergeable, CI green, Pushover `radon PR green`.
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
+
+# Task: Refresh the Artificial Analysis frontier basket daily [IN PROGRESS]
+
+Keep the AI-cycle price cohort current as frontier models ship while preserving a last-known-good basket when the upstream catalog or selection contract is invalid.
+
+## Dependency graph
+
+- T1 depends_on: [] - Define deterministic frontier-provider selection and red regression tests from the current Artificial Analysis schema.
+- T2 depends_on: [T1] - Implement catalog refresh, validation, atomic secret-store update, audit output, and idempotence.
+- T3 depends_on: [T2] - Add a bounded daily systemd oneshot/timer ordered before AI-cycle collection and wire deployment inventory.
+- T4 depends_on: [T2, T3] - Run focused tests, codemap generation, durability checks, and review the final diff.
+- T5 depends_on: [T4] - Commit, open the PR, follow exact-head GitHub CI through green, and verify production deployment.
+
+## Checklist
+
+- [x] T1 Selection contract and failing regressions
+- [x] T2 Refresh implementation and safe persistence
+- [x] T3 Daily service/timer and deployment wiring
+- [x] T4 Focused verification and review
+- [ ] T5 PR, green CI, and production verification
+
+## Review
+
+- [x] Red import regression preceded implementation; 24 worker durability tests cover frontier selection, stable IDs, anti-churn, catalog truncation, state corruption, write failures, idempotence, and encrypted-store persistence.
+- [x] Focused validation: 278 affected Python tests, 546 cloud/service topology tests, 133 service-health Vitest tests, and 31 codemap tests passed.
+- [x] Live 644-row catalog resolved all eight providers deterministically without exposing credential material.
+
+# AI-cycle Turso write retry (2026-09-08)
+
+- [x] T1 depends_on: [] - Reproduce the production backfill crash and identify the timed-out Turso status write.
+- [x] T2 depends_on: [T1] - Add red regressions for bounded transient retries, non-transient fail-fast behavior, and idempotent status writes.
+- [x] T3 depends_on: [T2] - Implement bounded retries, idempotent status writes, and production-measured snapshot paging that remains below Hrana's response cap.
+- [ ] T4 depends_on: [T3] - Run focused verification, open the repair PR, and monitor exact-head GitHub CI.
+- [ ] T5 depends_on: [T4] - Verify deployment, resume the production backfill, and audit provider counts/ranges and the live payload.
+
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
+
+---
+# Task: Dropbox research rich text [IN PROGRESS]
+
+## Dependency graph
+
+- T1 depends_on: [] - Trace research content, shared rendering, and CI coverage.
+- T2 depends_on: [T1] - Render Dropbox Markdown in feed and lightbox, preserving source structure and existing plain-text posts.
+- T3 depends_on: [T1] - Add component and browser regressions for formatting, source links, and safe rendering.
+- T4 depends_on: [T2, T3] - Publish PR; wait for all exact-head CI checks, inspect browser screenshots, and send the required notification.
+
+## Checklist
+
+- [x] T1 Trace source metadata, normalization, feed, lightbox, and existing Markdown renderer.
+- [x] T2 Implement scoped rich-text rendering with preserved Markdown whitespace in feed and lightbox.
+- [x] T3 Add 6 component regressions and desktop/mobile Playwright assertions. Run suites only on GitHub runners.
+- [ ] T4 Review changes and complete exact-head CI and visual verification.
+
+## Review
+
+- Static review found no blocking issues; research typography uses Clear tokens and the existing safe Markdown renderer.
+- PR: https://github.com/joemccann/radon/pull/367. RED: 4 expected Markdown regressions failed on 0c7491ab2b1baf97dc21f7d4547dcbb3579bf287 (CI run 34282990355).
+- GREEN: a6035206 passed 31 applicable checks, including all 6 component regressions, 67 browser checks, and the demo transport check (CI run 34283301911). Reviewed 4 desktop/mobile screenshots; added scoped italic synthesis after visual review. Final-head verification pending.
+- Regenerate codemap from a clean index export so local generated sources do not enter the committed graph.
+
+---
+# Task: Research and social copy in Joe's voice [IN PROGRESS]
+
+## Dependency graph
+
+- T1 depends_on: [] - Inspect authored copy paths and documented @joemccann voice; isolate unrelated work.
+- T2 depends_on: [T1] - Enforce human voice and no em dashes in research generation/publication.
+- T3 depends_on: [T1] - Enforce no em dashes in existing research renderings and every social-share output; strengthen voice instructions.
+- T4 depends_on: [T2, T3] - Add regressions, publish PR, verify exact-head CI and browser artifacts, and notify.
+
+## Checklist
+
+- [x] T1 Read voice profile and source samples; create isolated worktree.
+- [x] T2 Research generation and publication.
+- [x] T3 Web rendering and social exports.
+- [ ] T4 GitHub-runner validation, visual verification, and delivery.
+
+## Review
+
+- No local test suites. Original PDF/chart evidence remains intact; changes apply to authored text. Preserve all financial grounding gates.
+- PR: https://github.com/joemccann/radon/pull/378. RED: GitHub run 34291166890, head 3a07ebdb, reproduced four voice-output failures and additional research/share regressions before production changes.
+- Added 63 unit regressions and browser assertions. Static review added nested URL-parentheses coverage; promoted social browser tests to CI and removed their held-out ledger entry.
+- GitHub run 34291510793 exposed sentence commas being captured as part of numeric claims after punctuation normalization. Restrict grouping commas to those followed by a digit; retain changed-value/sign rejection.
+- GREEN: 0067a67a passed all 31 applicable checks (run 34291738638), including 75 browser checks and the demo check. Reviewed research feed/lightbox and social export screenshots. Final merge-head verification pending after main advanced.
+
+---
+
+# Task: Radon AI conversation experience (2026-09-08)
+
+## Approved anchored options chain (2026-09-15)
+
+Plan and review: `tasks/options-chain-anchor.md`.
+Dependency graph: T1 -> T2; T1 -> T3; T1 -> T4; T2 + T3 + T4 -> T5 -> T6.
+- [x] T1 depends_on: [] - Approved design and isolated implementation checkout.
+- [x] T2 depends_on: [T1] - Stable anchor and desktop implementation.
+- [x] T3 depends_on: [T1] - Mobile implementation and unit regressions.
+- [x] T4 depends_on: [T1] - Browser regression coverage and CI selection.
+- [x] T5 depends_on: [T2,T3,T4] - Integration review and PR #449.
+- [ ] T6 depends_on: [T5] - Exact-head CI, visual evidence and notification.
+
+### Review
+PR https://github.com/joemccann/radon/pull/449; initial runner screenshots reviewed, CI repair loop active. Details in tasks/options-chain-anchor.md. No local suites or production deployment.
+
+
+## Specification
+Replace the anonymous composer-only overlay with a readable Clear conversation workspace: explicit identity and close/new controls; task-specific editable starters; honest current-page context; multiline composer with visible attachment and model controls; cancellable generation, retry/edit recovery, retained session on close; readable transcript and inspectable tool evidence. Preserve order-risk approvals, quote provenance, auth and root socket ownership. Do not persist sensitive conversation data to disk. Desktop is a spacious centered workspace, mobile fills the viewport with accessible controls. No local test suites; GitHub CI owns Vitest and Playwright execution.
+
+## Dependency graph
+- T1 depends_on: [] - Inspect existing lifecycle, constraints and authoritative AI UX guidance.
+- T2 depends_on: [T1] - Implement composer improvements (parallel agent).
+- T3 depends_on: [T1] - Implement conversation layout, lifecycle and scoped styles (primary).
+- T4 depends_on: [T2,T3] - Regression tests and browser coverage; review semantics and order safety.
+- T5 depends_on: [T4] - Generate codemap, publish PR, resolve conflicts, await exact-head CI, inspect browser artifacts and notify.
+
+## Checklist
+- [x] T1 Source and design audit; isolated worktree preserves existing staged changes.
+- [x] T2 Composer implementation.
+- [x] T3 Conversation implementation.
+- [x] T4 Regression coverage and independent lifecycle review; all 8 Vitest shards and 10 browser scenarios pass on 0b54eecc.
+- [ ] T5 Exact-head CI and visual evidence, PR delivery.
+
+## Review
+PR #379: first GitHub run completed all 10 new browser scenarios; eight desktop/mobile light/dark screenshots inspected. Three unit assertions exposed missing whitespace across a heading line break; fixed the accessible text in the component. Remaining exact-head verification tracked in https://github.com/joemccann/radon/pull/379. No local suites executed. Sources: https://developer.apple.com/design/human-interface-guidelines/generative-ai and https://pair.withgoogle.com/guidebook-v2/chapter/explainability-trust/ . No system prompt or model-policy changes planned.
+
+---
+
+# NOAA signed-temperature repair (2026-09-08)
+
+- [x] T1 depends_on: [] - Reproduce winter-window rejection against the authoritative NOAA daily-summary response.
+- [x] T2 depends_on: [T1] - Add a negative-temperature regression and parse signed finite weather measurements.
+- [ ] T3 depends_on: [T2] - Run focused checks, ship through exact-head CI/deployment, resume, and audit NOAA coverage.
+
+Dependency graph: T1 -> T2 -> T3.
+
+
+## Testing-weekend audit 2026-09-10 [COMPLETE]
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+- [x] T1 — Verify dedicated runner, clean branch, ledger base and toolchain. depends_on: []
+- [x] T2 — Run serial full gates and delta determinism checks. depends_on: [T1]
+- [x] T3 — Audit delta, standing candidates, skips, ratchets and CI reachability. depends_on: [T1,T2]
+- [x] T4 — Append audit evidence, commit and push dated branch. depends_on: [T3]
+
+### Review
+- [x] No new finding; existing T-490 and T-488 reproduced in isolation.
+
+## Testing-weekend remediate 2026-09-10 [COMPLETE]
+
+Dependency graph: T1 -> T2 -> T3.
+
+- [x] T1 — Reconcile all append-only audit sections and reduced-scope P0/P1 eligibility. depends_on: []
+- [x] T2 — Reverified T-490 as blocked by `.codex` filesystem policy; T-488 remains operator-only. depends_on: [T1]
+- [x] T3 — Append evidence, commit, and push; closing gates are inapplicable while T-490 remains deterministically red. depends_on: [T2]
+
+### Review
+- [x] Renderer write returned `PermissionError`; portable-render contract remains 52 passed / 21 failed.
+
+## Ornn data diligence (2026-09-09)
+
+Research only; preserve existing work. Deliver a comprehensive cited Markdown report for Radon's AI/LLM indicators and a purchase recommendation. No subscriptions, external messages, code changes, or local test suites.
+
+Dependency graph: T1 -> T2; T1 -> T3; T2 + T3 -> T4 -> T5.
+
+- [x] T1 — Read screenshot, repository instructions and code map; define scope. depends_on: []
+- [x] T2 — Verify Ornn pricing, methodology, APIs, licensing, coverage and history against primary sources. depends_on: [T1]
+- [x] T3 — Map current Radon LLM/AI indicators and compare alternative sources independently. depends_on: [T1]
+- [ ] T4 — Synthesize use cases, limitations, purchase decision and pilot design into a cited research artifact. depends_on: [T2, T3]
+- [ ] T5 — Review material claims, citations, recommendation and artifact completeness. depends_on: [T4]
+
+### Review
+Pending.
+
+# Market Ear image source captions (2026-09-10)
+
+Preserve explicit per-image provider attribution (for example Ramp) from Market Ear article HTML through storage/API and render it in the existing image caption/footer treatment. Do not invent attribution or replace the article publisher. Keep Dropbox provenance intact. Work in isolated `/tmp/radon-market-ear-sources`; no local test suites.
+
+Dependency graph: T1 -> T2; T1 -> T3; T2 + T3 -> T4 -> T5.
+
+- [x] T1 depends_on: [] - Inspect extraction, persistence, API and caption contracts.
+- [x] T2 depends_on: [T1] - Add source extraction and persistence regression coverage and implementation.
+- [x] T3 depends_on: [T1] - Add source rendering/API regression coverage and implementation.
+- [ ] T4 depends_on: [T2, T3] - Review integration, regenerate maps, publish PR and verify exact-head CI and browser artifacts.
+- [ ] T5 depends_on: [T4] - Record review and send confirmed green notification.
+
+## Review
+PR #393; regression head d233c7a9 after merging latest main. GitHub CI run 34493441591. No local suites. Per-image captions use explicit figure credit text, persisted with the exact public image URL. Additive migration 0073 preserves legacy/default empty metadata.
+
+# Social Compose on X availability (2026-09-09)
+
+## Specification
+Compose on X must immediately open X's composer using the current sanitized caption, independent of voice rewriting, chart rendering, PNG preparation, and video export. When the rewrite finishes, subsequent clicks use the updated caption. Media exports retain their readiness checks. Opening a composer must not publish anything automatically.
+
+## Dependency graph
+- T1 depends_on: [] - Inspect loading state and record regression contract.
+- T2 depends_on: [T1] - Add unit regressions for immediate Compose and asynchronous caption updates.
+- T3 depends_on: [T1] - Add browser regression with delayed rewrite/preview and captured composer navigation (parallel agent).
+- T4 depends_on: [T2,T3] - Publish failing regression head to GitHub CI, then apply minimal fix.
+- T5 depends_on: [T4] - Await exact-head green CI, inspect browser screenshots, document evidence and notify.
+
+## Checklist
+- [x] T1 Source and user screenshot inspected; isolated worktree protects unrelated working changes.
+- [x] T2 Unit regression.
+- [x] T3 Browser regression.
+- [x] T4 Red CI and minimal fix.
+- [ ] T5 Green CI and visual verification.
+
+## Review
+No local test suites. Change only Compose availability; retain caption and media generation behavior.
+
+- RED: GitHub CI run 34437337990, head da04fa6432459b320d36718b38b40c437d6be773, Vitest shard 4/8: 2 intended failures (missing Compose link), 1,332 passed. Both new loading-state assertions reproduce the missing href.
+- Fix: remove the voice-loading condition from the X intent href. Existing buildXShareUrl continues to sanitize captions; media readiness and caption editing behavior remain intact. Browser tests capture real mocked popup navigation during voice/PNG waits at 1440px and 393px.
+
+# PR 393 CI integration repair (2026-09-10)
+
+Dependency graph: T1 -> T2 -> T3.
+- [x] T1 depends_on: [] - Inspect current-head CI and check mergeability against main.
+- [x] T2 depends_on: [T1] - Update source contracts for downloader options and retained share attribution.
+- [ ] T3 depends_on: [T2] - Push and verify exact-head GitHub CI and browser artifacts; primary handles merge.
+
+## Review
+No local suites. CI 34494032484 reproduces outdated download signature matching. Main 1998fb77 merges cleanly.
+
+# CI performance audit (2026-09-11)
+
+Dependency graph: T1 -> T2 -> T3.
+- [x] T1 depends_on: [] - Verify dedicated runner state, exclusive lock, GitHub access, and the audited main delta.
+- [x] T2 depends_on: [T1] - Measured 20 organic main runs, reconstructed the gate/deploy critical path, and swept safety contracts.
+- [x] T3 depends_on: [T2] - Appended the append-only audit ledger, published `c12493a3`, opened PR #402, and posted the rolling issue report.
+
+## Review
+Pending measured audit evidence.
+
+# CI performance remediate (2026-09-11) [COMPLETE]
+
+Apply every eligible P0/P1 finding from CIP-011 while preserving the full
+test, provenance, and deployment-safety closure.
+
+## Dependency graph
+
+- T1 depends_on: [] - Re-verify dedicated runner, dated branch, reduced scope, and audit eligibility.
+- T2 depends_on: [T1] - Establish focused workflow-safety baseline and verify no P0/P1 source action exists.
+- T3 depends_on: [T2] - Append the reduced-scope remediation decision, commit, push, and update the nightly report.
+
+## Checklist
+
+- [x] T1 Dedicated markers, dated branch, GitHub authentication, and `RADON_WEEKEND_REDUCED=1` verified.
+- [x] T2 89 focused workflow safety contracts, YAML parsing, shell syntax, and diff checks.
+- [x] T3 Append-only remediation record ready; no lower-priority experiment substitution.
+
+## Review
+
+- [x] CIP-011 audit identified zero P0/P1 source-actionable findings. The existing work-bound `scripts-rs`/node-image co-wall is below the materiality floor and remains outside this reduced scope.
+
+# Form focus highlight audit (2026-09-10)
+
+Specification: one visible, aligned keyboard focus indicator per field, around the complete visual control (including currency prefixes). Audit shared/composite controls across Clear light/dark and desktop/mobile. Preserve native semantics and all order behavior; use mocked browser data. No local suites.
+
+Dependency graph: T1 -> T2; T1 -> T3; T2 + T3 -> T4 -> T5.
+- [x] T1 depends_on: [] - Audit CSS cascade and composite control ownership; record scoped findings.
+- [x] T2 depends_on: [T1] - Add browser regressions and screenshot artifacts on GitHub runners.
+- [x] T3 depends_on: [T1] - Apply minimal shared CSS fix with focused contract coverage.
+- [ ] T4 depends_on: [T2,T3] - Publish PR, capture red/green CI, resolve conflicts, await every exact-head check.
+- [ ] T5 depends_on: [T4] - Inspect browser screenshots, record results, send confirmed green notification.
+
+## Review
+Isolated worktree /tmp/radon-focus-audit-20260910 protects existing user changes.
+- RED: PR #397 head d1802ea6948a49979e4cb0a6d9c63a52464a00c2, GitHub CI 34504342646: all eight new browser cases reproduce inner outline solid instead of none; 88 existing browser cases passed. All eight Vitest shards and coverage checks passed.
+- Repair: shared Clear selectors assign rings to six active composite wrappers; command palette ring stays inset. Instrument search inherits the standard outline. No financial behavior or local suites changed.
+- CI 34505111914 at 43bbc58c passed the original ownership assertions and 88 existing browser cases; exposed palette inset precedence after production CSS grouped selectors into :is(), plus a modal animation changing offsetParent in the geometry test. Use a local offset custom property and compare settled parent-relative bounds.
+- Exact-head green CI and browser screenshot review pending.
+
+## PR #394 final integration and freshness repair (2026-09-10)
+- [x] T1 (depends_on: []): Inspect collector ingestion, provenance, and upstream changes.
+- [x] T2 (depends_on: [T1]): Resolve main integration and add CI regressions for default live collection and dated offline imports.
+- [x] T3 (depends_on: [T2]): Repair freshness ownership and update source operations documentation.
+- [ ] T4 (depends_on: [T3]): Verify every applicable exact-head GitHub check, then hand off merge to the sweep coordinator.
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+### PR #394 integration review
+- Regression-first GitHub run `34507551064`, scripts-ac job `102973431318`: 4 failed / 2215 passed. Default fixture replay and undated imports reproduced; the prior snapshot test also depended on wall-clock time.
+- Default collection now uses live HTML with no fixture fallback; explicit imports retain verified capture time and actual ingestion time separately. Snapshot tests use a fixed ingestion clock.
+- All suite execution is delegated to GitHub runners. Final exact-head CI remains pending before coordinator merge.
+
+---
+
+# PR 395 final integration (2026-09-10)
+
+Dependency graph: T1 -> T2 -> T3.
+- [x] T1 depends_on: [] - Merge current main, preserve task histories, review signed and missing historical prices.
+- [x] T2 depends_on: [T1] - Register route-level historical price regression and screenshot artifacts in CI.
+- [ ] T3 depends_on: [T2] - Verify final integrated-head checks and inspect desktop/mobile screenshots before parent merges.
+
+## Review
+No local suites. Review confirms quantity-weighted prices preserve zero and signed premiums, reject incomplete executions, and label collapsed journal fills aggregate. Generated codemap conflicts are regenerated from the merged source.
+
+- Integration verification: head 4d92842e passed every applicable check; GitHub CI 34507570000 ran 99 browser regressions plus one demo test. Desktop 1280px/mobile 393px full `/orders` screenshots reviewed (artifact 10164611383). Reintegrating main 722b1121 for the final merge gate; no local suites.
+
+- PR #394 intermediate integration `892f24b1`: 31 applicable checks green, source shard 2225 passed, browser 96 passed plus one demo. Final integration includes historical-fill PR #395 at `aae5e1e5`; repeat exact-head checks before merge.
+
+# Task: Testing remediation 2026-09-15 [IN PROGRESS]
+
+Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
+
+## Dependency graph
+
+- T1 depends_on: [] - Reconcile all verified audit backlog entries and operator-only status.
+- T2 depends_on: [T1] - Run focused ledger contracts and three detached serial full gates.
+- T3 depends_on: [T2] - Append dated remediation evidence, commit, and push the nightly branch.
+
+## Checklist
+
+- [x] T1 No source-actionable P0/P1 remains; T-488 is operator-only and T-493 is P2.
+- [x] T2 Focused verification: 117 passed; detached closing stage stopped before `pytest_1` wrote a result or DONE sentinel.
+- [x] T3 Append-only remediation record and durable commit.
+
+## Review
+
+- [x] No full-gate result is claimed; the detached-child runner failure is recorded for resumption.
+
+# Testing audit 2026-09-12
+
+Dependency graph: T1.
+
+- [x] T1 depends_on: [] - Audit the `9dce4b3a..3e394792` delta; record verified test-suite findings and gate evidence.
+- [x] T2 depends_on: [T1] - Make T-491's no-key reviewer contract independent of ambient ladder credentials.
+
+## Review
+
+- T-491 is reproduced three times in isolation; detached full-gate stages cannot retain a child process in this runner, so no full-gate count is claimed.
+- T-491 red: `XAI_API_KEY=ambient-poison` made the former no-key assertion pass; green preserves explicit empty env injection and keeps ambient fallback only when `env is None`.
+
+# Task: Testing delta audit 2026-09-13 [DONE]
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner markers, clean tree, ledger anchor, and changed surface.
+- T2 depends_on: [T1] - Review delta, standing candidates, CI reachability, skips, and coverage drift.
+- T3 depends_on: [T2] - Record verified findings and audit evidence on testing/2026-09-13.
+
+## Checklist
+
+- [x] T1 Dedicated testing runner and anchor 9dce4b3a verified.
+- [x] T2 Filed T-491 from cited relay test/source lines; CI and skip/ratchet review complete.
+- [x] T3 Appended TEST_AUDIT.md and TEST_LOG.md.
+
+## Review
+
+Detached full-gate runner ended without the required DONE sentinel; no gate
+counts or green result are claimed.
+
+# Task: Testing remediation 2026-09-13 [COMPLETE]
+
+## Dependency graph
+
+- T1 depends_on: [] - Reconcile every audit backlog row and standing P0/P1 status under the reduced-capability rung.
+- T2 depends_on: [T1] - Record the remediation verdict and preserve the closing-gate evidence contract.
+
+## Checklist
+
+- [x] T1 T-491 is P2 and excluded by `RADON_WEEKEND_REDUCED=1`; no source-actionable P0/P1 finding is open.
+- [x] T2 T-488 and T-490 remain operator-only; remediation record is append-only.
+
+## Review
+
+- Detached closing stage prewrote nine result slots but stopped in `pytest_1`
+  without a `DONE` sentinel; no gate count is claimed and the phase is incomplete.
+# Task: CI performance remediate 2026-09-15 [IN PROGRESS]
+
+Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate every verified
+P0/P1 audit finding; retain no-source-actionable verdict only after serial
+safety-gate verification.
+
+## Dependency graph
+
+- T1 depends_on: [] - Re-verify the dated audit branch, runner lock, reduced scope, and CIP eligibility.
+- T2 depends_on: [T1] - Re-run the focused safety contracts and serial baseline gates.
+- T3 depends_on: [T2] - Append the remediation verdict, commit, and push the dated branch.
+
+## Checklist
+
+- [x] T1 Audit has zero P0/P1 source-actionable findings; no lower-priority substitute is allowed.
+- [x] T2 Focused safety contracts green; detached serial baseline has no DONE sentinel and is not counted.
+- [x] T3 Append remediation evidence, commit, and push.
+
+## Review
+
+- [x] No workflow, test, deployment, image, or trading-state change without an eligible audit finding.
+
+# Task: Testing audit 2026-09-16 [IN PROGRESS]
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner safety, branch, audit ledger, and delta surface.
+- T2 depends_on: [T1] - Run required serial gates and targeted determinism checks.
+- T3 depends_on: [T1, T2] - Re-triage findings, append audit evidence, commit, push, and publish the nightly PR.
+
+## Checklist
+
+- [x] T1 Dedicated runner markers, clean tree, audit base, and dated branch verified.
+- [x] T2 Static delta sweeps recorded; detached serial-gate stage ended without `DONE` at pytest.
+- [x] T3 Delta report prepared for the dated branch.
+
+## Review
+
+- [x] T-495 filed with source location and red/green acceptance criteria; no gate count is claimed before the detached stage completes.
+
+# Task: CI performance audit 2026-09-15 [IN PROGRESS]
+
+Audit `9b9a65c7..origin/main` against organic GitHub Actions production runs;
+append evidence only and preserve every gate and deploy rail.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, exclusive lock, dated branch, ledger anchor, GitHub access, and protection closure.
+- T2 depends_on: [T1] - Measure relevant runs, reconstruct critical paths, and sweep workflow/deploy invariants.
+- T3 depends_on: [T2] - Append audit evidence, verify contracts, commit/push, and publish the dated audit PR and rolling issue report.
+
+## Checklist
+
+- [x] T1 Dedicated markers, stale-lock preservation, dated branch, GitHub auth, and origin/main verified.
+- [x] T2 Classified recent runs, reconstructed representative paths, and swept safety closure.
+- [x] T3 Audit ledger, safety contracts, commit/push, PR, and rolling issue report published.
+
+## Review
+
+- [x] Audit-only; no production or trading-system operation.
+
+# Task: Testing remediation 2026-09-16 [COMPLETE]
+
+Reduced-capability rung (`RADON_WEEKEND_REDUCED=1`): remediate verified P0/P1
+findings only; T-495 is P2 and remains out of scope.
+
+## Dependency graph
+
+- T1 depends_on: [] - Reconcile this cycle's audit finding and every standing P0/P1 status.
+- T2 depends_on: [T1] - Record the reduced-scope remediation decision and preserve full-gate evidence separately.
+
+## Checklist
+
+- [x] T1 T-495 is P2; no current source-actionable P0/P1 finding exists.
+- [x] T2 T-488 remains operator-only after three genuine attempts; remediation decision is append-only.
+
+## Review
+
+- [x] No P2 substitute was implemented on the reduced rung.
+- [x] Detached closing stage died without its `DONE` sentinel; no gate count is claimed.
+## Chain-first desktop implementation B (2026-09-16)
+
+User selected B and authorized implementation, PR, and CI verification. Work isolated from unrelated edits in /private/tmp/radon-chain-first-20260916.
+
+Dependency graph: T1 -> {T2, T3, T4} -> T5 -> T6.
+
+- [x] T1 depends_on: [] Inspect selected prototype, current source, instructions, and establish isolated branch.
+- [x] T2 depends_on: [T1] Compact desktop shell to 48px and retain search, navigation, theme, freshness and sync.
+- [x] T3 depends_on: [T1] Implement instrument sidebar and viewport-filling chain with readable 40px rows, compact toolbar, preserved builder and mobile.
+- [x] T4 depends_on: [T1] Add focused behavior/layout regression coverage for density, navigation, builder and responsive themes.
+- [x] T5 depends_on: [T2, T3, T4] Visually inspect real rendered application; inspect changes and regenerate codemap. No local test suites.
+- [ ] T6 depends_on: [T5] Commit, create PR, watch all applicable GitHub checks on exact head until green, send required Pushover notification.
+
+Acceptance: at least 12 full strike rows at 1280x720 and 14 at 1440x800 without a staged ticket; no document horizontal overflow; underlying and held spread quotes remain distinct; expiry, side, strike, recenter and instrument navigation work; staged ticket remains usable; mobile and both themes preserved.
+
+### Review
+Implementation B rendered with isolated broker/API fixtures. Browser geometry: 14 complete strikes at1440×800,12 at1280×720,first quotes y156,40px rows; no document horizontal overflow at1440,1280,1024 or393px. Staged ticket and mobile visually inspected; light/dark captures recorded locally. TypeScript and focused ESLint static checks pass. Added 8 browser cases and 8 sidebar unit regressions; execution pending GitHub CI. No local test suites run.
+
+PR: https://github.com/joemccann/radon/pull/463. Initial head b04ff560 passed all 8 Vitest shards and all Python shards; browser checks still running. Additional direct browser review verified separate underlying120.00/held spread0.85, fixed the feed disclosure stacking above the chain, and added pointer hit-testing plus Sync actionability to browser coverage.
+
+Initial browser run:114 passed, including all8 new chain cases. Demo assertion exposed duplicate canonical data-integrity markers on the new hidden disclosure trigger; use a disclosure-specific data-feed-integrity attribute so the existing demo regression remains unchanged. Latest exact-head verification continues in PR463.
+
+## Consistent instrument workspace (2026-09-16)
+
+Extend selected Chain-first B across the same instrument's Position, News, Ratings, Seasonality, Company, 13F, Filings, Commands and Book & trade. Keep the 48px global bar, persistent instrument context, full remaining desktop canvas and clear active navigation. Preserve mobile, calculations, quote provenance, order-risk gates and URL/keyboard navigation.
+
+Dependency graph: T1 -> {T2,T3,T4} -> T5 -> T6.
+- [x] T1 depends_on: [] Inspect merged B, instructions and codemap; isolate branch from unrelated work.
+- [x] T2 depends_on: [T1] Generalize persistent desktop sidebar, active navigation and compact shell across instrument views.
+- [x] T3 depends_on: [T1] Extend full-height main canvas and consistent deck toolbar/content spacing; retain usable Book & trade and mobile.
+- [x] T4 depends_on: [T1] Add cross-view navigation/layout regressions and preserve existing chain, demo and order coverage. Eight isolated Playwright cases cover both themes, two laptop sizes, mobile, signed held spread quotes, actual position risk review, every reference deck, news empty/error/recovery, and persistent canvas geometry. CI selection and screenshot artifacts updated; syntax inspection passes, execution remains on GitHub runners.
+- [x] T5 depends_on: [T2,T3,T4] Visually verify representative real rendered views in both themes, laptop and mobile; static checks and generated codemap.
+- [ ] T6 depends_on: [T5] Commit, create PR, follow every applicable CI check on exact head through green and deliver Pushover notification.
+
+Review: desktop Position, News and Book & trade visually verified at 1440x800 and 1280x720 in both themes; mobile Position/News verified at 393x852 in both themes. Persistent 208px sidebar, 48px header, 56px view toolbar and internal content scrolling; no document horizontal overflow. TypeScript and focused ESLint pass; codemap regenerated. Added 8 cross-view browser cases, active-navigation unit coverage and CI screenshot artifacts. No local test suites; GitHub runners execute suites. Browser verification uses isolated API/socket fixtures and never submits live orders. Exact-head CI and Pushover pending PR creation.
+
+## Resolve and merge PR466 (2026-09-16)
+Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
+- [x] T1 depends_on: [] Inspect PR and isolate head from unrelated local edits.
+- [x] T2 depends_on: [T1] Merge current main and resolve conflicts preserving page-title behavior and current base changes.
+- [x] T3 depends_on: [T1] Review title contract/integration risks and applicable validation.
+- [ ] T4 depends_on: [T2,T3] Push resolution, verify all applicable CI on exact head green, send Pushover.
+- [ ] T5 depends_on: [T4] Merge the verified head and confirm merged state.
+Review: resolved tasks/todo conflicts by retaining both task records; retained main generated code maps under nightly ownership. Page-title route metadata preserved; added own-key registry and matching Options symbol validation with focused regressions. TypeScript passed before final helper hardening; commit hooks recheck final source. Suites execute only on GitHub. Exact-head CI and merge pending.
+
+## Performance TWR regression (2026-09-16)
+
+Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
+- [x] T1 depends_on: [] Isolate current main and record screenshot symptoms; preserve unrelated work.
+- [x] T2 depends_on: [T1] Trace NAV/flow sources and recent builder changes against actual available incident data.
+- [x] T3 depends_on: [T1] Inspect frontend null/degraded contract and regression coverage independently. Added isolated browser incident-to-repaired refresh coverage using actual historical flow amounts, full date window, positive TWR, return count, suppressed/drawn curve and warning removal; promoted payload spec to CI with screenshot artifacts. No frontend logic change or local suite execution.
+- [x] T4 depends_on: [T2,T3] Implement minimal evidence-backed repair and regressions; inspect rendered recovery without relaxing financial integrity.
+- [ ] T5 depends_on: [T4] Publish PR, verify all exact-head GitHub checks green, notify and record results.
+
+Review: GitHub red phase9e517457 reproduced lost flow (expected80000,actual0) in test_nightly_statement_preserves_verified_historical_external_flows. Repair retains historical observed flows only with per-session coverage, statement overrides its interval including zeros, and unknown evidence remains gated. Added18Python cases plus a browser degraded-to-recovered refresh case; no production UI gating changes. Static compilation and diff checks pass. Operational no-fetch preview restored184returns/0suspects; production rebuild inprogress. Final exact-head CI and screenshot review pending. No local test suites; all suite execution on GitHub. Never infer deposits into canonical returns without source evidence.
+
+Incident evidence: production disk payload generated2026-09-16T12:31:06.516Z, flex_from_file, nav_as_of2026-09-15, empty_verified flows,185NAV/184subperiods/182returns/two suspect sessions. Retained ledger has actual Jan13 deposit80007.13 and Feb6 transfer655497.16; residual candidates are not deposits. Latest nightly statement coversSep15only and has both flow sections withzeroentries. Initial regression commit9e517457 published inPR468 forGitHub red/green evidence.
+
+## CI performance remediate 2026-09-17
+
+Dependency graph: T1 -> T2 -> T3.
+
+- [x] T1 depends_on: [] Resume `ci-performance/2026-09-17`, acquire the dedicated runner lock, and confirm the audit has no P0/P1 source-actionable CIP finding under `RADON_WEEKEND_REDUCED=1`.
+- [x] T2 depends_on: [T1] Focused protected CI contracts passed (119); detached serial baseline had no DONE sentinel and is not counted as green.
+- [x] T3 depends_on: [T2] Appended the reduced-rung remediation verdict for commit and push.
+
+Review: no eligible P0/P1 source change; no protected CI or deploy rail changed.
+
+## Testing audit 2026-09-17
+
+- [x] T1 Audit delta `fe96fdac..HEAD`; depends_on: []
+- [x] T2 Run CI-gated suite and determinism sweeps; depends_on: [T1]
+- [x] T3 Append ledger and findings, then commit audit evidence; depends_on: [T1, T2]
+- Review: one P2 filed as T-495; no production source changed.
+
+## Testing remediate 2026-09-17
+
+- [x] T1 Reconcile all verified P0/P1 findings; depends_on: []
+- [x] T2 Reverify standing P1 T-490 and record operator action; depends_on: [T1]
+- [x] T3 Append remediation result and commit it; depends_on: [T1, T2]
+- Review: reduced scope excludes T-495 (P2); T-490 remains blocked by the
+  runner's `.codex` filesystem policy and T-488 remains operator-only.
+
+## AI industry B production implementation (2026-09-17)
+Plan: `tasks/ai-industry-plan.md`. Dependency graph: T1 -> T2,T3,T4; T2+T3+T4 -> T5 -> T6. See plan for depends_on/checklist and review. Isolated worktree; no local suites.
+
+## Substantive nightly publication (2026-09-17)
+
+Only open nightly PRs for a net substantive change against the target base. Empty commits, audit logs, task bookkeeping and timestamp-only generated artifacts do not qualify. Preserve real documentation, tests, fixes and CI experiments, normal no-op reporting, audit checkpoints and resumable substantive PRs. All suites run on GitHub runners.
+
+Dependency graph: T1 -> {T2,T3,T4} -> T5 -> T6.
+- [x] T1 depends_on: [] Isolate current main, inspect shared delivery and inventory scheduled PR publishers.
+- [x] T2 depends_on: [T1] Add deterministic substantive-diff gate and guarded publication with behavioral regression coverage.
+- [x] T3 depends_on: [T1] Align all five canonical skills and generated provider prompts with valid no-op completion and guarded publication.
+- [x] T4 depends_on: [T1] Cover additional scheduled publishers, including codemap semantic changes, and enforce shared policy at runner boundaries.
+- [x] T5 depends_on: [T2,T3,T4] Review integration and failure handling; static validation and publish PR.
+- [ ] T6 depends_on: [T5] Verify every applicable GitHub check on the latest head green, notify and record evidence.
+
+Review: six nightly PR publishers covered by a shared net-diff classifier and guarded publisher; five agent loops also intercept direct gh creation. Known audit ledgers/tasks and timestamp-only codemap changes do not qualify; real docs/tests/config/source and graph changes remain eligible. Five canonical skills and 16 generated manuals accept explicit no-op completion. Rolling-issue checkpoints and open findings survive report pruning; security state remains private. Python/shell syntax, generated prompt synchronization and diff checks pass. Independent review completed. PR #479 initial head fe587084 passed the nightly regression shard (2109 passed, 1 skipped); CI ownership check required the operations runbook update, now included. Publisher error-path coverage expanded before final exact-head CI. Final CI and notification pending. No local test suites.
+
+## Vol/Skew MR unknown skew investigation (2026-09-17)
+Dependency graph: T1 -> T2 -> T3.
+- [x] T1 depends_on: [] Trace live snapshot and upstream response against parser contract.
+- [x] T2 depends_on: [T1] Correct verified root cause, preserve signal gates, add regressions.
+- [ ] T3 depends_on: [T2] PR and exact-head GitHub verification; report cause and resolution.
+
+Review: production snapshot at 2026-09-17T16:37:26Z had 90/90 unknown, no row errors. Unparameterized UW returned HTTP 200 empty history. Corrected expiry/delta request returned six sessions each for NVDA, AMAT, SNPS. Regression suites and UI screenshots delegated to GitHub CI; no local suites.
+
+## Safe page errors (2026-09-17)
+Dependency graph: T1 -> T2,T3,T4 -> T5 -> T6.
+- [x] T1 depends_on: [] Inventory error sources/rendering and established error UI.
+- [x] T2 depends_on: [T1] Central safe error presentation and transport parsing, regressions.
+- [x] T3 depends_on: [T1,T2] Fix scanner actions/rendering; retain last good data; browser regressions.
+- [x] T4 depends_on: [T1,T2] Audit all route families and remediate unsafe error surfaces.
+- [x] T5 depends_on: [T2,T3,T4] Review coverage, visually verify browser error states in CI.
+- [ ] T6 depends_on: [T5] PR, exact-head green checks and notification.
+
+Review: PR #480; GitHub first run reproduced stale copy contracts and over-broad diagnostic filtering. Preserved known service retry guidance, admin healthy measurements, broker margin rejection details and financial numbers; updated intentional user-copy expectations. CI scanner recovery cases pass at 390px and 1440px; both screenshots reviewed with retained results and readable inline retry. No local suites. Final exact-head checks and notification pending.
+
+## 2026-09-17 Vol/Skew header info bubbles
+- [x] T1 Add concise calculation-aligned help to five existing SortTh headers. depends_on: []
+- [x] T2 Add focused interaction and browser coverage, including sort isolation. depends_on: []
+- [ ] T3 Publish PR, await exact-head CI, inspect browser screenshots. depends_on: [T1, T2]
+Dependency graph: T1 + T2 -> T3. Existing Clear design and shared InfoTooltip; no calculation or layout changes.
+
+## 2026-09-17 Toast-only error presentation
+- [x] T1 depends_on: [] Review recent error commits and isolate from unrelated local work.
+- [x] T2 depends_on: [T1] Implement shared toast error presentation, preserving safe copy, retry and stale-data guidance.
+- [x] T3 depends_on: [T1] Audit/migrate scanner, research, dashboard and indicator errors.
+- [x] T4 depends_on: [T1] Audit/migrate trading, admin, profile, setup and assistant errors.
+- [x] T5 depends_on: [T2,T3,T4] Review full application inventory, document explicit exceptions, add regression/browser coverage.
+- [ ] T6 depends_on: [T5] Create PR, verify exact-head GitHub CI, inspect visual artifacts, send green notification and open show-me report.
+Dependency graph: T1 -> {T2,T3,T4} -> T5 -> T6.
+Validation: no local test suites; GitHub runners execute unit and browser suites. Preserve trading gates, safe error formatting, existing retry actions and cached-data provenance. Fatal framework fallback pages and operational diagnostic records must be explicitly inventoried.
+
+### Toast error audit review
+- Three-agent component audit and independent shared-presenter review complete. Fatal framework fallback, financial safety and stored diagnostic exceptions documented in docs/reviews/2026-09-17-toast-errors.md.
+- Regression coverage includes scanner retained-data retry, persistent dismissal/recovery, shared stacking, dialog keyboard access, order field validation, watchlist failures and AST prevention of inline error surfaces.
+- Local suites intentionally not run; GitHub exact-head CI and screenshot review pending.
+
+## AI Industry capitalization (2026-09-17)
+- [x] T1 Audit all application labels; depends_on: []
+- [x] T2 Normalize labels and existing regression expectations; depends_on: [T1]
+- [ ] T3 Verify exact PR head in GitHub CI; depends_on: [T2]
+Dependency graph: T1 -> T2 -> T3.
+Review: Copy-only change; no local suites. CI includes AI Industry browser screenshots and navigation assertions.
+
+## 2026-09-17 AI metric clarity and line history
+Dependency graph: T1 -> {T2,T3,T3b} -> T4 -> T5.
+- [x] T1 depends_on: [] Isolate latest main and inspect metric definitions and chart gap logic.
+- [x] T2 depends_on: [T1] Replace ambiguous series labels and internal selector identifiers with descriptive names.
+- [x] T3 depends_on: [T1] Render token history as a line while preserving meaningful data gaps; add regression coverage.
+- [x] T3b depends_on: [T1] Refine observation card hover/focus and add per-metric info bubbles.
+- [ ] T4 depends_on: [T2,T3,T3b] Integrate, static-check, create PR and run GitHub verification.
+- [ ] T5 depends_on: [T4] Verify exact-head checks and screenshots, notify and record results.
+
+Review: descriptive residual-model labels, display-only percentages, eight metric info bubbles and stable hover/focus surfaces. Sampled token histories connect at normal observation intervals and preserve larger gaps. TypeScript and Impeccable detector pass; suites and screenshots run on GitHub only.
+# AI Industry source and chart audit (2026-09-17)
+
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
+- [x] T1 depends_on: [] Inventory every source, observation, transformation and rendered chart; inspect live coverage.
+- [x] T2 depends_on: [T1] Verify primary sources and research longer historical archives; document source-by-source findings.
+- [x] T3 depends_on: [T2] Add failing regressions, correct ingestion/presentation, backfill verified history and resolve empty market context.
+- [x] T4 depends_on: [T3] Run focused/full verification and inspect desktop/mobile screenshots.
+- [x] T5 depends_on: [T4] Publish PR #512; registered expected GitHub checks.
+- [ ] T6 depends_on: [T5] Verify all applicable exact-head checks are green; final evidence recorded on PR #512.
+
+Review: audited 16 registered sources, 18 indicators and empty legacy index;
+356,644 baseline vintages / 3,342 comparable series. Production append-only
+backfill: 301 vintages; initial 679,532-byte snapshot at 2026-09-18T05:21:05Z,
+followed by four additional reviewed NVIDIA quarters back to January 2024.
+Final production snapshot: 680,537 bytes at 2026-09-18T05:33:19Z.
+134 focused Python tests including 12 final audit regressions, 515 systemd tests,
+12 Playwright tests, TypeScript and scoped ESLint passed; desktop/mobile visuals
+inspected. Full cloud suite interrupted after 177 passed / 22 skipped; full
+Python run interrupted after 11,427 passed / 19 skipped / 15 unrelated failures
+in model-ladder, research-runtime and vision-cascade tests (local subscription
+discovery). Full Vitest: 979 files / 9,734 tests passed. Exact-head CI recorded
+in PR before handoff.
+
+## Testing remediation 2026-09-18 (reduced P0/P1)
+- [x] T1 depends_on: [] Read rolling issue #83, verify runner markers and branch.
+- [x] T2 depends_on: [T1] T-498: reproduce with synthetic subscription files; isolate three suites; verify both outer environments.
+- [ ] T3 depends_on: [T1] T-496: red/green all-leg P&L measurement and mocked browser display.
+- [x] T4 depends_on: [T2] Run serial full gates three times; preserve terminal results, including red gates.
+- [ ] T4b depends_on: [T1] Finish legacy P0/P1 reconciliation and T-247 remediation.
+- [ ] T5 depends_on: [T4] Persist complete carry-forward issue report and publication classification.
+
+### Testing remediation review (2026-09-18)
+- T-498: 15 red before isolation; 117 green with/without outer canary credentials.
+- T-496: 6 mutation reds; 37 focused greens; final full Vitest 9,739 passed x3.
+- Root pytest: 13,425 passed / 21 T-490 failures x3. Cloud: 1,870 passed / 4 T-488 failures x3. Both failure lists stable.
+- All started stages finished. Browser sandbox refusal and unfinished legacy P0/P1 work keep the phase INCOMPLETE. Complete inventory retained on issue #83; audit cursor unchanged.
+
+## Reliability remediate 2026-09-18 (reduced P0/P1 scope)
+- [x] T1 depends_on: [] Verify runner and read complete issue #81 checkpoint before local ledgers.
+- [x] T2 depends_on: [T1] Restore isolated dependencies and establish full baseline.
+- [x] T3 depends_on: [T2] Red/green REL-258, REL-259, REL-260, REL-262 plus REL-151/152/226; reconcile inherited residuals. REL-260 visual verification BLOCKED after three browser launches.
+- [x] T4 depends_on: [T3] Complete permanent drills and three sequential full gates; prepare complete durable issue report and guarded publication inputs.
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+Review (source preservation): seven P1 findings implemented in six root-cause commits; focused checks 388 Python / 162 cloud / 69 Vitest passed, cloud 2 skipped; permanent drills 132 Python / 12 Vitest passed. Four full-cloud failures reproduce unchanged on b33032b4. Final three full-gate runs and durable publication report remain pending.
+
+Reliability closing review 2026-09-18: three full runs each 13505 Python passed / 9742 Vitest passed / 1881 cloud passed, 4 verified baseline failures, 76 cloud skipped; permanent drills 144 passed. REL-260 browser verification remains BLOCKED after three installed-browser launches. Complete inherited acceptance is preserved in the prepared issue #81 report; publication and notification receipts are tracked in durable reliability scratch.
+
+## 2026-09-18 HY A-D S&P 500 history
+- [x] T1 depends_on: [] Trace stored SPX coverage and HYAD snapshot assembly.
+- [x] T2 depends_on: [T1] Repair historical overlay and add regression coverage without inventing observations.
+- [x] T3 depends_on: [T1] Add browser coverage for early-history S&P values.
+- [ ] T4 depends_on: [T2,T3] Publish PR, verify exact-head GitHub checks and browser artifacts, refresh durable data if needed, notify.
+Dependency graph: T1 -> {T2,T3} -> T4.
+Validation: suites run only on GitHub; inspect real stored coverage and screenshot artifacts. Preserve source priority and FINRA history.
+
+Review: credit history has 269 closes from 2025-08-22; existing Cboe history restores 2,173 of 2,174 HYAD dates from 2018-01-22. The equity closure 2025-01-09 stays null. Python joins and browser early-date regressions added; local suites intentionally not run. Exact-head CI and screenshot review pending.
+
+Operational review: repaired the existing Turso snapshot in place, preserving scan_time 2026-09-18T11:01:32+00:00 and all breadth values. Readback confirms SPX 269 -> 2,173 closes, first 2018-01-22, only 2025-01-09 null. Initial GitHub Python/Vitest feature checks pass; corrected docs-owner index and curated-browser ledger contracts. Recurring repair awaits PR deployment.
+
+## Weekend browser host + stale lock reclaim (implement PR, 2026-09-20)
+- [x] T1 depends_on: [] Read the rails: testing wrapper lock/launch/phase flow, setup script, sibling wrappers, weekend_prune locking_pid, skill + remediate prompt, TEST_LOG T-496, playwright.config.ts.
+- [x] T2 depends_on: [T1] Root-cause the Mach denial (Seatbelt mach-register under codex / Claude sandboxes) and prove the run-server + PW_TEST_CONNECT_WS_ENDPOINT wiring with the runner holding no browser.
+- [x] T3 depends_on: [T1] Design host-only stale-lock reclaim for plain-file locks and dead pids without weakening R-411.
+- [x] T4 depends_on: [T2,T3] Write `tasks/weekend-browser-host-and-lock-reclaim-plan.md` (plan PR #576).
+- [x] T5 depends_on: [T4] Implement PR (separate): wrapper browser host, lock helpers x6 (pid+start fingerprint, shared-parent sweep, setup checks; hard DoD L1-L5 per Joe 2026-09-20), skill rails, red/green tests, operations.md owner update.
+Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
+
+Review: plan PR #576 was design only. This implement PR adds the host run-server, L1-L5 lock hygiene, skill rails, and regressions.
+# Reliability remediate 2026-09-20 (reduced P0/P1)
+
+- [x] T1 depends_on: [] - Establish full baseline; reconcile complete issue #81 checkpoint.
+- [x] T2 depends_on: [T1] - REL-268 aggregate close-out quantities, red/green and full gates.
+- [x] T3 depends_on: [T2] - REL-269 convexity decision gate, red/green and full gates.
+- [x] T4 depends_on: [T3] - REL-274 aggregate/individual reconciliation, red/green and full gates.
+- [ ] T5 depends_on: [T4] - Permanent drills, three full gates, durable complete issue report and guarded publication.
+
+- [ ] T6 depends_on: [T2] - Fresh-snapshot SELL-envelope risk follow-up; restart final drills and three full gates.
+
+## Review
+
+- Pending verification. P2 findings and inherited operator-only acceptance stay open.
+
+## Reliability remediate 2026-09-21 (reduced P0/P1)
+- [x] T1 depends_on: [] Establish full-gate baseline and reconcile authoritative issue #81 handoff.
+- [x] T2 depends_on: [T1] Integrate unpublished REL-268/269/274 commits, preserving source and recorded evidence.
+- [x] T3 depends_on: [T2] REL-275 fault-injection red/green and surgical identity-bound cleanup.
+- [ ] T4 depends_on: [T3] Permanent drills and three consecutive full gates; review diff and guarded publication.
+- [ ] T5 depends_on: [T4] Persist complete dispositions, acceptance and operator actions on issue #81.
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
+Review: pending. P2 acceptance remains in the authoritative checkpoint, outside reduced scope.
+
+## Reliability remediate 2026-09-22 (reduced P0/P1)
+- [x] T1 depends_on: [] Reconcile issue checkpoint and establish full baseline.
+- [x] T2 depends_on: [T1] REL-277 snapshot-bound repair red/green with transactional conflict tests.
+- [x] T3 depends_on: [T2] Permanent drills and three full gates; review and commit substantive work.
+- [ ] T4 depends_on: [T3] Persist complete checkpoint and guarded publication.
+Review: 151 focused tests pass; 12 red regressions recorded. Complete snapshot comparison is intentionally conservative. 107 permanent drills passed. Three full gate pairs finished; Vitest 9993 passed each, Python retains 31 baseline process failures (one extra timing failure only in run 1, isolated green). Publication and durable final checkpoint pending. Inherited operator acceptance and all P2 findings remain open.
+## Documentation remediate 2026-09-22 (reduced P0/P1)
+- [x] T1 depends_on: [] Read complete issue #202 checkpoint and reverify DOC-121/122 against origin/main.
+- [x] T2 depends_on: [T1] Reproduce DOC-122, consolidate gross rebuild recovery in existing Flex owner, extend ownership and safety contract.
+- [x] T3 depends_on: [T2] Run focused and full gates, compare failures on clean main, review substantive diff.
+- [x] T4 depends_on: [T3] Prepare complete finding checkpoint and formatter-generated publication handoff; publication receipts belong on issue #202.
+Review: DOC-122 red/green demonstrated; 108 docs/path and 14 isolated rebuild tests pass. Full Python: 14827 passed, 31 failed, 2 skipped. Cloud: 2169 passed, 6 failed, 6 skipped initially; pinned-environment failure rerun 2 passed/4 failed. All remaining 31 Python and 4 cloud failures reproduce on clean 5bb91597, zero failure delta. Full Vitest: 9993 passed. Changed links/anchors (4), owners JSON, offline help, diff whitespace and secret scan pass. DOC-121 remains operator-only; DOC-110/120/123 retain their complete acceptance in issue #202 outside reduced scope. No live mutation or runtime behavior change. CI delivery belongs to the separate deliver phase.
+
+## 2026-09-22 Remove Command Palette
+Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
+- [x] T1 depends_on: [] Isolate latest main, inspect instructions and map palette dependencies.
+- [x] T2 depends_on: [T1] Remove global palette, trigger, hotkey, styles and obsolete tests; preserve instrument search.
+- [x] T3 depends_on: [T1] Remove instrument Commands deck and shortcut; update cockpit regressions.
+- [x] T4 depends_on: [T2,T3] Review integration and browser regressions; publish PR.
+- [ ] T5 depends_on: [T4] Verify exact-head GitHub checks and screenshots, send Pushover receipt.
+Validation: no local test suites. GitHub owns unit, build and browser checks. Preserve unrelated workspace edits in original checkout.
+
+Review: removed global dialog/trigger/recent-history storage and instrument Commands deck/colon handler; retained direct instrument search and Cmd/Ctrl+K focus. Unit and curated browser regressions cover search navigation, remaining decks, Escape and responsive absence. No local test suites. GitHub checks and visual artifacts pending.
+
+Review update: PR #630 published; independent review preserved the shared asset empty-state style while deleting palette-specific styles. TypeScript and ESLint passed. Exact-head GitHub verification pending.
+
+## 2026-09-22 PR628 delivery and saved-trade follow-through
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5; T1 -> T1b -> T4.
+- [x] T1 depends_on: [] Isolate PR branch and reconcile conflicts with current main, preserving central recovery documentation.
+- [ ] T1b depends_on: [T1] Validate supplied saved XML and inspect runner/host acceptance prerequisites.
+- [ ] T2 depends_on: [T1] Push conflict resolution and verify every applicable exact-head GitHub CI check.
+- [ ] T3 depends_on: [T2] Notify green, merge, and verify production deployment.
+- [ ] T4 depends_on: [T1b,T3] Execute saved-Flex rebuild and legacy cleanup dry-runs; perform safe runner/host acceptance steps and record blockers.
+- [ ] T5 depends_on: [T4] Record operational evidence and remaining actions.
+Review: pending. No local suites. PR next steps specify dry-runs; destructive cleanup and any unproven data repair remain gated by evidence. Original workspace edits untouched.

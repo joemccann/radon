@@ -1,5 +1,7 @@
 "use client";
 
+import ErrorToast from "@/components/ErrorToast";
+
 /**
  * Operator preferences surface for /preferences.
  *
@@ -9,6 +11,7 @@
  * the server's value, so a rejected save leaves the displayed value untouched.
  */
 
+import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useState } from "react";
 import ConfirmDialog from "@/components/admin/ConfirmDialog";
 import {
@@ -21,9 +24,6 @@ import {
 } from "@/lib/preferences";
 import type { PreferenceEntry, PreferenceMutationResult, PreferencesPayload } from "@/lib/preferences";
 
-/** The group whose values bound how much money one order can move. */
-const RISK_GROUP = "Order Limits";
-
 function groupSlug(group: string): string {
   return group.toLowerCase().replace(/\s+/g, "-");
 }
@@ -32,23 +32,34 @@ function groupSlug(group: string): string {
  * Loosening a fat-finger stop is the only edit here that can cost money, and an
  * extra typed zero is exactly the mistake these caps exist to catch. Raising
  * one takes the same type-to-confirm gate as the gateway Stop control.
- * Tightening a cap, or changing anything outside Order Limits, saves directly.
+ * Tightening a cap, or changing anything the registry does not mark
+ * `risk_gated`, saves directly. The flag comes from the server so a renamed
+ * or added group can never silently drop the gate.
  */
 function isWidening(entry: PreferenceEntry, next: number | boolean): boolean {
-  if (entry.group !== RISK_GROUP) return false;
+  if (!entry.risk_gated) return false;
   if (typeof next !== "number" || typeof entry.value !== "number") return false;
   return next > entry.value;
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error && error.message ? error.message : "preferences request failed";
+  return userErrorMessage(error, "Your changes could not be saved. Refresh and try again.");
 }
 
 function rangeLabel(entry: PreferenceEntry): string {
   if (entry.value_type === "bool") {
     return "Allowed On or Off";
   }
-  return `Allowed ${entry.hard_min} to ${entry.hard_max}`;
+  const min = formatPreferenceValue({ ...entry, unit: "" }, entry.hard_min);
+  return `Allowed ${min} to ${formatPreferenceValue(entry, entry.hard_max)}`;
+}
+
+function provenanceLabel(entry: PreferenceEntry): string | null {
+  if (entry.source !== "db") return null;
+  const who = entry.updated_by?.trim() || "unknown";
+  const when = entry.updated_at ? new Date(entry.updated_at) : null;
+  if (!when || Number.isNaN(when.getTime())) return `Set by ${who}`;
+  return `Set by ${who} on ${when.toLocaleString()}`;
 }
 
 export default function PreferencesSection() {
@@ -210,9 +221,7 @@ export default function PreferencesSection() {
   if (pageError || !payload) {
     return (
       <div className="preferences-shell" data-testid="preferences-section">
-        <p className="admin-card-note admin-card-error" role="alert" data-testid="preferences-error">
-          {pageError ?? "preferences request failed"}
-        </p>
+        <ErrorToast message={pageError ?? "preferences request failed"} testId="preferences-error" />
       </div>
     );
   }
@@ -223,9 +232,7 @@ export default function PreferencesSection() {
   return (
     <div className="preferences-shell" data-testid="preferences-section">
       {storeUnavailable ? (
-        <p className="admin-card-note preferences-store-banner" role="status" data-testid="preferences-store-banner">
-          Preferences store unavailable. Showing environment and code defaults. Saving is disabled.
-        </p>
+        <ErrorToast message="Preferences store unavailable. Showing environment and code defaults. Saving is disabled." testId="preferences-store-banner" />
       ) : null}
 
       {groups.map(({ group, entries }) => {
@@ -275,6 +282,11 @@ export default function PreferencesSection() {
                     <span className="preferences-row__meta" data-testid={`preference-range-${entry.key}`}>
                       {rangeLabel(entry)}
                     </span>
+                    {provenanceLabel(entry) ? (
+                      <span className="preferences-row__meta" data-testid={`preference-provenance-${entry.key}`}>
+                        {provenanceLabel(entry)}
+                      </span>
+                    ) : null}
                     {entry.applies_immediately ? null : (
                       <span
                         className="preferences-badge preferences-badge--restart"
@@ -358,13 +370,7 @@ export default function PreferencesSection() {
                   </div>
 
                   {message ? (
-                    <p
-                      className="admin-card-note admin-card-error"
-                      role="alert"
-                      data-testid={`preference-error-${entry.key}`}
-                    >
-                      {message}
-                    </p>
+                    <ErrorToast message={message} testId={`preference-error-${entry.key}`} />
                   ) : null}
                 </div>
               );

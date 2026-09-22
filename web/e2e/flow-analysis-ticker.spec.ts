@@ -88,6 +88,13 @@ function bullishReport(ticker: string, fetchedAt: string) {
 
 async function setupBaseMocks(page: Page) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
+  // Isolate shell polling and the secondary informed-flow panel from live APIs.
+  // More specific test routes registered below override this fallback.
+  await page.route("**/api/**", route => route.fulfill({ status: 200, json: {} }));
+  await page.route("**/api/informed-flow/**", route => route.fulfill({
+    status: 200,
+    json: { ticker: new URL(route.request().url()).pathname.split("/").at(-1), congress_trades: [], insider_trades: [], institutional_summary: null },
+  }));
   await page.route("**/api/portfolio", (r) =>
     r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO) }),
   );
@@ -122,6 +129,7 @@ async function setupBaseMocks(page: Page) {
 test.describe("Flow Analysis per-ticker route", () => {
   test("ticker input on /flow-analysis navigates to /flow-analysis/{TICKER}", async ({ page }) => {
     await setupBaseMocks(page);
+    await page.route("**/api/flow-analysis/AAPL**", route => route.fulfill({ status: 200, json: bullishReport("AAPL", new Date().toISOString()) }));
     await page.goto("/flow-analysis");
 
     const input = page.getByTestId("flow-ticker-input-field");
@@ -210,10 +218,34 @@ test.describe("Flow Analysis per-ticker route", () => {
     await expect(report).not.toContainText("C/P Ratio");
   });
 
+  test("history tab keeps the session table inside table-wrap on a phone", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await setupBaseMocks(page);
+    const fresh = bullishReport("AAPL", new Date().toISOString());
+    await page.route("**/api/flow-analysis/AAPL**", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(fresh) }),
+    );
+
+    await page.goto("/flow-analysis/AAPL");
+    await page.getByRole("tab", { name: "History" }).click();
+
+    const wrap = page.getByTestId("daily-dp-history-table-wrap");
+    await expect(wrap).toBeVisible();
+    await expect(wrap).toHaveClass(/table-wrap/);
+    await expect(wrap.locator("table.ticker-flow-daily")).toBeVisible();
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      innerWidth: window.innerWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.innerWidth + 1);
+  });
+
   test("missing cache triggers a scan and shows the analyzing state", async ({ page }) => {
     await setupBaseMocks(page);
 
     let scanCalls = 0;
+    let releaseScan!: () => void;
+    const scanAllowed = new Promise<void>(resolve => { releaseScan = resolve; });
     await page.route("**/api/flow-analysis/NVDA**", async (route) => {
       const req = route.request();
       if (req.method() === "GET") {
@@ -228,8 +260,8 @@ test.describe("Flow Analysis per-ticker route", () => {
         return;
       }
       scanCalls += 1;
-      // Add a slight delay so we can observe the analyzing state
-      await new Promise((res) => setTimeout(res, 300));
+      // Hold the response until the browser has observed the loading state.
+      await scanAllowed;
       const report = bullishReport("NVDA", new Date().toISOString());
       report.verdict = { direction: "BEARISH", confidence: 60 };
       report.analysis = { signal: "STRONG", direction: "DISTRIBUTION", strength: 60 };
@@ -245,7 +277,11 @@ test.describe("Flow Analysis per-ticker route", () => {
     await page.goto("/flow-analysis/NVDA");
 
     const analyzing = page.locator(".ticker-flow-analyzing .spectral-loader__label");
-    await expect(analyzing).toContainText(/Sampling NVDA flow/i, { timeout: 5000 });
+    try {
+      await expect(analyzing).toContainText(/Sampling NVDA flow/i, { timeout: 5000 });
+    } finally {
+      releaseScan();
+    }
 
     // After scan completes, badge should resolve to BEARISH
     const badge = page.getByTestId("ticker-flow-report").locator(".ticker-flow-badge");
@@ -255,7 +291,7 @@ test.describe("Flow Analysis per-ticker route", () => {
     expect(scanCalls).toBeGreaterThanOrEqual(1);
   });
 
-  test("capacity 502 shows scan failed, not ANALYZING", async ({ page }) => {
+  test("capacity 502 shows a recovery toast without leaving the hero analyzing", async ({ page }) => {
     await setupBaseMocks(page);
     await page.route("**/api/informed-flow/**", (r) =>
       r.fulfill({
@@ -289,8 +325,9 @@ test.describe("Flow Analysis per-ticker route", () => {
     await page.goto("/flow-analysis/JOBY");
 
     const report = page.getByTestId("ticker-flow-report");
-    await expect(report.getByRole("alert")).toContainText(/Scan lane is full/i);
-    await expect(report.getByRole("status")).toContainText(/Scan failed/i);
+    await expect(page.locator(".toast-container").getByRole("alert").filter({ hasText: "This service is busy. Please try again shortly." })).toBeVisible();
+    await expect(report.getByRole("alert")).toHaveCount(0);
+    await expect(report.locator('[role="status"][data-status="error"]')).toContainText(/Flow report/i);
     await expect(report).not.toContainText(/Analyzing JOBY/i);
   });
 
@@ -343,5 +380,92 @@ test.describe("Flow Analysis per-ticker route", () => {
     expect(stripBox!.y).toBeLessThan(aggBox!.y);
 
     await expect(page.getByTestId("flow-hero-stale")).toContainText(isoDay);
+  });
+
+  test("a cached report stays on screen with a live scan indicator until the scan lands", async ({ page }) => {
+    await setupBaseMocks(page);
+    const cached = bullishReport("META", new Date(Date.now() - 3 * 86_400_000).toISOString());
+    let releaseScan: (() => void) | null = null;
+    const scanGate = new Promise<void>((resolve) => {
+      releaseScan = resolve;
+    });
+    await page.route("**/api/flow-analysis/META**", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(cached),
+        });
+        return;
+      }
+      await scanGate;
+      const landed = bullishReport("META", new Date().toISOString());
+      landed.verdict = { direction: "BEARISH", confidence: 61 };
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(landed),
+      });
+    });
+
+    await page.goto("/flow-analysis/META");
+
+    const progress = page.getByTestId("flow-scan-progress");
+    await expect(progress).toBeVisible();
+    await expect(progress).toContainText(/scan running/i);
+    await expect(progress).toContainText(/cached report/i);
+    await expect(progress).toContainText(/figures update when the scan lands/i);
+    await expect(page.getByTestId("flow-hero-stale")).toBeVisible();
+    const refresh = page.getByLabel("Refresh flow report");
+    await expect(refresh).toHaveAttribute("aria-busy", "true");
+    await expect(refresh.getByTestId("thinking-wait")).toBeVisible();
+    await expect(page.getByTestId("ticker-flow-report")).toContainText(/Bullish/i);
+
+    const aggregate = page.locator(".section", { hasText: "Dark Pool Aggregate" }).first();
+    const progressBox = await progress.boundingBox();
+    const aggregateBox = await aggregate.boundingBox();
+    expect(progressBox!.y).toBeLessThan(aggregateBox!.y);
+
+    releaseScan!();
+    const badge = page.getByTestId("ticker-flow-report").locator(".ticker-flow-badge");
+    await expect(badge).toHaveAttribute("data-direction", "BEARISH");
+    await expect(badge).toContainText("61");
+    await expect(progress).toHaveCount(0);
+    await expect(refresh).toHaveAttribute("aria-busy", "false");
+  });
+
+  test("mobile cached report shows the live scan indicator", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await setupBaseMocks(page);
+    const cached = bullishReport("META", new Date(Date.now() - 3 * 86_400_000).toISOString());
+    let releaseScan: (() => void) | null = null;
+    const scanGate = new Promise<void>((resolve) => {
+      releaseScan = resolve;
+    });
+    await page.route("**/api/flow-analysis/META**", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(cached),
+        });
+        return;
+      }
+      await scanGate;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(bullishReport("META", new Date().toISOString())),
+      });
+    });
+
+    await page.goto("/flow-analysis/META");
+    const progress = page.getByTestId("flow-scan-progress");
+    await expect(progress).toBeVisible();
+    await expect(progress).toContainText(/cached report/i);
+    await expect(page.getByLabel("Refresh flow report")).toHaveAttribute("aria-busy", "true");
+    await expect(page.getByTestId("ticker-flow-report")).toContainText(/Bullish/i);
+    await expect(page.getByTestId("flow-stale-age")).toHaveCount(0);
+    releaseScan!();
   });
 });

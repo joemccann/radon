@@ -582,9 +582,24 @@ class TestClassifyUserPath:
         assert result["ok"] == 1
         assert result["detail"] == "clerk_protect_404"
 
-    def test_200_sign_in_served_inline_with_clerk_header_is_ok(self):
+    def test_200_with_signed_out_header_is_not_a_wall(self):
+        # A signed-out visitor that still receives the page content means the
+        # perimeter let the request through; the header alone is not a wall.
         raw = _user_path_raw(status=200, location=None)
-        assert probe.classify_user_path(raw)["ok"] == 1
+        assert probe.classify_user_path(raw)["ok"] == 0
+
+    def test_relative_sign_in_redirect_is_ok(self):
+        raw = _user_path_raw(status=307, location="/sign-in?redirect_url=x", clerk_auth_status=None)
+        result = probe.classify_user_path(raw)
+        assert result == {"ok": 1, "detail": "clerk_redirect"}
+
+    def test_redirect_to_off_domain_sign_in_path_fails(self):
+        raw = _user_path_raw(status=307, location="https://evil.example/sign-in", clerk_auth_status=None)
+        assert probe.classify_user_path(raw)["ok"] == 0
+
+    def test_redirect_to_lookalike_clerk_host_fails(self):
+        raw = _user_path_raw(status=307, location="https://clerk.evil.example/x", clerk_auth_status=None)
+        assert probe.classify_user_path(raw)["ok"] == 0
 
     def test_arbitrary_clerk_header_value_does_not_turn_500_green(self):
         raw = _user_path_raw(

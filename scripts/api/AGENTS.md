@@ -39,7 +39,8 @@ Applies under `scripts/api/`. Root and `scripts/AGENTS.md` also apply. Mirrors `
 ## Options exposure
 
 - `/options/exposure/{symbol}` uses the MenthorQ dashboard jar (`data/menthorq_dashboard/`), not the CTA jar.
-- Next.js proxy 50s; login budget 25s; auth embargo 300s. Restart `radon-api` after reminting the jar.
+- Next.js proxy 50s; auth queue/exchange/login share 40s; data calls consume a remaining 45s allowance. Auth embargo is 300s for unchanged config/jar; an atomic remint is detected without restarting `radon-api`.
+- An exposure cube may have null spot: serve it as partial, never fabricate a price or discard otherwise valid GEX/DEX/OI.
 - After WordPress login, click `input[name=authorize]` before waiting for the dashboard URL. Do not stand down on `client_id=aws_cognito_client_id`.
 
 ## Service Health / Timers

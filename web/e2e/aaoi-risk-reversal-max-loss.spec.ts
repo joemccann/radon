@@ -247,7 +247,7 @@ test.describe("AAOI Risk Reversal — corrected Max Loss + Gate 1 warning", () =
 
     const detail = page.locator(".ticker-detail-page");
     await detail.waitFor({ timeout: 10_000 });
-    await detail.locator(".chain-grid").waitFor();
+    await detail.locator(".chain-grid").first().waitFor();
 
     // Build the Risk Reversal:
     //   1. Click the $150 put BID (sells the put)

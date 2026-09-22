@@ -1,3 +1,37 @@
+# REVIEWED 2026-09-20 mobile-toast-placement.spec.ts - CSS-in-page geometry
+#   at 393x852: toast sits above `mobile-tab-bar`, no overlap with Total
+#   account / balance. Vitest `toast-mobile-placement.test.ts` is the CI pin.
+#   Held out of e2e-financial-smoke pending next start preflight.
+# REVIEWED 2026-09-20 profile-credentials-tab.spec.ts - 3/3 Chromium against
+#   isolated next start :3033 with RADON_AUTHLESS_TEST. Pins CSS-only Prefs/Keys
+#   `.preferences-shell` scroll so MenthorQ sits above `mobile-tab-bar`, and
+#   BOOKMARKS unclipped at 390x844. Held out of e2e-financial-smoke.
+# REVIEWED 2026-09-21 dashboard-feed-tabs.spec.ts - 7/7 Chromium against local
+#   next dev :3000 with RADON_AUTHLESS_TEST. Pins flex-chip rail: nowrap
+#   Capture basis, no SOURCE/CAPTURE overlap, even 18px gaps at 1440/1024,
+#   source shrink-only (not grow), mobile stack. Held out of
+#   e2e-financial-smoke pending next start preflight.
+# REVIEWED 2026-09-19 clear-overview.spec.ts - Research workspace CTA removed:
+#   eyebrow count 0; market-intelligence scroll replaces the deleted News
+#   jump. Positions empty-state Explore research stays. Chromium authless
+#   next dev. Held out pending next start preflight.
+# REVIEWED 2026-09-18 portfolio-mixed-combo-today-pnl.spec.ts - Reviewed mocked desktop/mobile incomplete-coverage cases; 69 related Vitest tests passed. Three installed Chromium launches failed under runner process restrictions; browser and screenshot verification remain BLOCKED, with the exact operator command in RELIABILITY_LOG.md. Held out pending production preflight; no browser pass claimed.
+# Toast error audit 2026-09-17: chat-launcher-focus, flow-analysis-ticker, scanner-ticker-scan and ticker-search-chain now execute in the CI curated suite.
+# REVIEWED 2026-09-17 portfolio-mixed-combo-today-pnl.spec.ts - jsdom PositionTable Today P&L +$1,000 vs P&L +$3,500; Vitest SPY 740/760 screenshot numbers. Browser suite remains held out pending next start preflight.
+# clear-shell.spec.ts is curated in ci.yml for AI Industry desktop/mobile navigation verification.
+# research-workbench.spec.ts is curated in ci.yml: source citations, mobile/desktop, exports and safe handoff.
+# REVIEWED 2026-09-15 aaoi-risk-reversal-max-loss.spec.ts - Static locator adaptation to the shared header table; existing order assertions retained. Browser suite remains held out.
+# REVIEWED 2026-09-15 chain-held-leg-prices.spec.ts - Static locator adaptation to the shared header table; existing price assertions retained. Browser suite remains held out.
+# REVIEWED 2026-09-15 chain-sticky-header.spec.ts - Static review of stationary header geometry and hit-testing across both panes; curated chain-anchored-scroll covers header stability. This suite remains held out.
+# REVIEWED 2026-09-15 chain-strikes-selector.spec.ts - Static locator adaptation to the shared header table; strike-count assertions retained. Browser suite remains held out.
+# REVIEWED 2026-09-15 crcl-spread-builder.spec.ts - Static locator adaptation to the shared header table; order-builder assertions retained. Browser suite remains held out.
+# REVIEWED 2026-09-15 pltr-chain-position-focus.spec.ts - Static locator adaptation to the shared header table; position-focus assertions retained. Browser suite remains held out.
+# REVIEWED 2026-09-15 risk-reversal-skew.spec.ts - Static locator adaptation to the shared header table; skew assertions retained. Browser suite remains held out.
+# REVIEWED 2026-09-15 short-strangle-skew.spec.ts - Static locator adaptation to the shared header table; skew assertions retained. Browser suite remains held out.
+# REVIEWED 2026-09-15 ticker-search-chain.spec.ts - Static locator adaptation to the shared header table; search and order assertions retained. Browser suite remains held out.
+# REVIEWED 2026-09-16 mobile-scanner-mode-tabs-overflow.spec.ts - Tab count pin 7 to 8 for Vol/Skew MR. Vitest scanner-mode-tabs covers the new tab. Browser suite remains held out pending next start preflight.
+# REVIEWED 2026-09-17 mobile-info-tooltip-safe-area.spec.ts - Stubbed scanner payload; asserts the tooltip popup clears an injected --safe-top inset and every viewport edge. Browser suite remains held out.
+# REVIEWED 2026-09-16 vol-skew-mr-scanner.spec.ts - Stubbed mode tab + TOP_MR/BOTTOM_MR/continue labels. Vitest + gate pytest cover the family. Held out pending next start preflight.
 # CI e2e curation ledger — every web/e2e/*.spec.ts must appear HERE or in the
 # curated `npx playwright test` arg list of the `e2e-financial-smoke` job in
 # .github/workflows/ci.yml. scripts/tests/test_e2e_ci_curation.py enforces it.
@@ -19,8 +53,6 @@
 #      account-day-move-ib-daily-pnl.spec.ts
 #          Day Move renders differently under `next dev` and `next start`; the
 #          spec pins the dev reading. Runs locally only. (ci.yml:505-508)
-#      performance-twr-payload.spec.ts
-#          Asserts against a live TWR payload; no CI data source.
 #
 #   2. UNTRIAGED BACKLOG — everything else below. These have NOT been
 #      preflighted under `next start`, which is the only reason they are not
@@ -40,7 +72,6 @@ catalyst-card-weekend.spec.ts
 chain-held-leg-prices.spec.ts
 chain-sticky-header.spec.ts
 chain-strikes-selector.spec.ts
-chat-launcher-focus.spec.ts
 clear-accessibility.spec.ts
 clear-admin-component.spec.ts
 clear-all-pages.spec.ts
@@ -49,7 +80,6 @@ clear-metric-accessibility.spec.ts
 clear-overview.spec.ts
 clear-performance.spec.ts
 clear-research.spec.ts
-clear-shell.spec.ts
 clear-workspace-interactions.spec.ts
 cor-tab.spec.ts
 crcl-spread-builder.spec.ts
@@ -67,12 +97,10 @@ dispersion-tab.spec.ts
 divyield-tab.spec.ts
 dollar-delta-leverage.spec.ts
 ma-ratio-tab.spec.ts
+calm-streak-tab.spec.ts
 fill-toast.spec.ts
-flow-analysis-ticker.spec.ts
 header-fullscreen.spec.ts
 hhlev-tab.spec.ts
-historical-trades-filter.spec.ts
-hyad-tab.spec.ts
 ib-mfa-reconnect-alert.spec.ts
 iei-hyg-tab.spec.ts
 internals-market-closed.spec.ts
@@ -90,7 +118,9 @@ mobile-chain-ladder.spec.ts
 mobile-charts.spec.ts
 mobile-cockpit-book-layout.spec.ts
 mobile-combo-instrument-switcher.spec.ts
+mobile-daily-dark-pool-history.spec.ts
 mobile-executed-journal.spec.ts
+mobile-info-tooltip-safe-area.spec.ts
 mobile-newsfeed-layout.spec.ts
 mobile-order-ticket.spec.ts
 mobile-orders.spec.ts
@@ -102,6 +132,7 @@ mobile-shell.spec.ts
 mobile-short-strangle-skew.spec.ts
 mobile-stop-order.spec.ts
 mobile-ticker-search.spec.ts
+mobile-toast-placement.spec.ts
 mobile-vol-cone-table.spec.ts
 modify-combo-order.spec.ts
 modify-order-confirmation.spec.ts
@@ -124,7 +155,6 @@ performance-chart-axes.spec.ts
 performance-chart-theme.spec.ts
 performance-market-closed.spec.ts
 performance-page.spec.ts
-performance-twr-payload.spec.ts
 pltr-chain-position-focus.spec.ts
 portfolio-leg-row-runtime.spec.ts
 portfolio-market-closed.spec.ts
@@ -161,7 +191,6 @@ rv-ratio.spec.ts
 scanner-discover.spec.ts
 scanner-leap-garch-tabs.spec.ts
 scanner-tab-gaps.spec.ts
-scanner-ticker-scan.spec.ts
 short-strangle-skew.spec.ts
 sidebar-performance-hidden.spec.ts
 skew-tab.spec.ts
@@ -174,7 +203,6 @@ sync-fallback.spec.ts
 theta-harvester-prefill.spec.ts
 theta-harvester-scanner.spec.ts
 ticker-page.spec.ts
-ticker-search-chain.spec.ts
 ticker-search-live.spec.ts
 trin-tab.spec.ts
 vixcor-tab.spec.ts
@@ -191,11 +219,10 @@ ws-connection-stability.spec.ts
 # commit in the range, for every held-out spec modified since the merge-base.
 # Re-stamp the date when you change the spec again; a stale date reds.
 #
-# REVIEWED 2026-09-04 chat-launcher-focus.spec.ts — held out (chat launcher is
-#   dev-server-only focus behaviour). T-419/T-427 rewrote it onto a hydration
-#   marker plus a single real key press and off CSS-module locators; run locally
-#   under `next start` (production server, 4 passed) with a screenshot captured.
-#   Curate it if it stabilises in the shared CI runner.
+# REVIEWED 2026-09-07 chat-launcher-focus.spec.ts — held out (chat launcher is
+#   dev-server-only focus behaviour). The pending-turn geometry regression ran
+#   locally with the focus and safe-error checks (3 passed); dark-theme panel
+#   screenshot captured. Curate it if it stabilises in the shared CI runner.
 # REVIEWED 2026-09-04 open-order-combo.spec.ts — held out (combo blotter row
 #   needs a seeded open combo order the CI fixture does not provide). T-427/T-437
 #   moved it onto testids and a window-relative expiry; run locally under
@@ -271,3 +298,73 @@ ws-connection-stability.spec.ts
 #   verification passed in the 65/65 mobile financial group.
 # REVIEWED 2026-09-06 mobile-short-strangle-skew.spec.ts — compiled mobile
 #   Chromium next start verification passed in the 65/65 mobile group.
+# REVIEWED 2026-09-06 book-montage-spacing.spec.ts — T-454 moved the screenshot
+#   off a hardcoded /tmp path onto testInfo.outputPath and attached it to the
+#   report. Compiled Chromium passed locally against next start (7 passed in
+#   the T-454 remediation group).
+# REVIEWED 2026-09-06 mobile-combo-instrument-switcher.spec.ts — T-454 moved
+#   the VIX desktop cockpit test off bare CSS-class locators (.cockpit-host,
+#   .cockpit-head, .book-window, .book-kind, .act-ticket) onto data-testids
+#   with a visibility guard ahead of the negative act-ticket assertion.
+#   Compiled Chromium passed locally against next start (7 passed).
+# REVIEWED 2026-09-06 demo-headlines.spec.ts — T-455 replaced the pinned
+#   2026-09-04 headline timestamp with a window-relative Date.now() fixture.
+#   Demo compile passed; Chromium passed locally against a demo next start.
+
+# REVIEWED 2026-09-08 trin-tab.spec.ts - local Chromium desktop/mobile
+#   verification passed 4/4; x-axis bounding boxes and screenshots were checked
+#   at 1,440px and 390px with irregular market-session timestamps.
+
+# REVIEWED 2026-09-08 profile-credentials-tab.spec.ts - local Chromium
+#   desktop/mobile verification passed 2/2; LLM source cards, responsive input
+#   layout, and horizontal overflow were visually checked at 1,280px and 390px.
+
+# REVIEWED 2026-09-09 options-exposure.spec.ts - missing-spot behavior verified
+#   with Playwright using the actual OptionsExposurePanel/hook/CSS and live
+#   normalized SNDK/SPX data at 1280px/393px (4/4); table controls, spot labels,
+#   absent spot marker, PNG downloads and screenshots checked; no page errors
+#   or document overflow. Full Next route-level specs remain held out: local
+#   Next startup was blocked by dependency resolution, not claimed executed.
+
+# REVIEWED 2026-09-10 historical-trades-filter.spec.ts - 3/3 Chromium cases
+#   passed in an isolated harness using the exact HistoricalTradesSection
+#   source, real data hook, mobile cards and application CSS. Verified
+#   weighted prices, sorting, unavailable values, filtering and no document
+#   overflow at 1280px/393px; screenshots inspected. Full Next route coverage
+#   remains held out: the existing server requires sign-in and the checkout
+#   disallows a second dev server. No auth or production settings changed.
+
+# PROMOTED 2026-09-10 historical-trades-filter.spec.ts: full /orders route
+#   regression runs on GitHub with desktop/mobile screenshot artifacts.
+
+# REVIEWED 2026-09-11 mobile-daily-dark-pool-history.spec.ts - 2/2 Chromium
+#   cases passed against local next dev with RADON_AUTHLESS_TEST. Asserts the
+#   HISTORY table scrolls inside table-wrap (never the page) and that DATE
+#   stays sticky while PRINTS is fully readable after a horizontal scroll at
+#   393x852. Held out of e2e-financial-smoke: not yet preflighted 3x under
+#   production next start.
+
+# REVIEWED 2026-09-11 flow-analysis-ticker.spec.ts - added a 390px History-tab
+#   assertion that the session table stays inside table-wrap and the document
+#   does not scroll sideways. 1/1 new Chromium case passed locally against
+#   next dev with RADON_AUTHLESS_TEST. Held out of e2e-financial-smoke: the
+#   rest of the file remains uncurated pending next start preflight.
+
+# REVIEWED 2026-09-15 calm-streak-tab.spec.ts - 3/3 Chromium cases passed
+#   against local next dev (port 3100, RADON_AUTHLESS_TEST). A separate live
+#   pass with no route mocks loaded /regime/calm-streak off a real Cboe pull:
+#   strip 28 / EXTREME CALM / window max 26 / record 64, 6 stroked chart paths,
+#   0 NaN paths, countdown matching the 14:30 UTC timer slot; screenshot in
+#   docs/indicators/calm-streak-tab.png. Held out of e2e-financial-smoke: not
+#   yet preflighted 3x under production next start.
+# REVIEWED 2026-09-15 mobile-p2-polish.spec.ts - incidental to Workflow
+#   composer removal: deleted the /workflow canvas add-node/drag case only.
+#   Remaining mobile polish cases are unchanged (no new mobile behavior).
+#   Held out of e2e-financial-smoke; not curated because the edit is a
+#   deletion of a removed-page test, not new browser behavior.
+# REVIEWED 2026-09-22 portfolio-request-cadence.spec.ts - statically reviewed
+# palette-only assertions replaced with direct ticker search focus; initial-read
+# and recovery request-count assertions are unchanged. Shortcut/search behavior
+# runs in curated clear-shell.spec.ts and ticker-search-chain.spec.ts, with
+# instrument workspace screenshots uploaded by CI. Timing suite remains held out.
+# CURATED 2026-09-22 portfolio-mixed-combo-today-pnl.spec.ts - GitHub desktop/mobile acceptance and mixed-coverage screenshots replace blocked local browser verification.

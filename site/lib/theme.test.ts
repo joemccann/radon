@@ -18,14 +18,14 @@ describe("site theme helpers", () => {
   });
 
   it("resolves invalid values with a system-aware fallback", () => {
-    expect(DEFAULT_SITE_THEME).toBe("dark");
+    expect(DEFAULT_SITE_THEME).toBe("light");
     expect(SITE_THEME_STORAGE_KEY).toBe("theme");
     expect(resolveSiteTheme("light")).toBe("light");
     expect(resolveSiteTheme("dark")).toBe("dark");
-    expect(resolveSiteTheme("")).toBe("dark");
-    expect(resolveSiteTheme("system")).toBe("dark");
-    expect(resolveSiteTheme(null)).toBe("dark");
-    expect(resolveSiteTheme("", false)).toBe("light");
+    expect(resolveSiteTheme("")).toBe("light");
+    expect(resolveSiteTheme("system")).toBe("light");
+    expect(resolveSiteTheme(null)).toBe("light");
+    expect(resolveSiteTheme("", true)).toBe("dark");
   });
 
   it("respects an explicit saved theme before system preference", () => {
@@ -41,9 +41,7 @@ describe("site theme helpers", () => {
   it("toggles between dark and light and exposes browser theme colors", () => {
     expect(getNextTheme("dark")).toBe("light");
     expect(getNextTheme("light")).toBe("dark");
-    expect(siteThemeMetaColor.dark).toBe("#0a0f14");
-    // Must match the rendered light-theme background — site/app/globals.css
-    // sets --color-canvas / body background to #FFFFFF (brand audit da00dfd).
-    expect(siteThemeMetaColor.light).toBe("#FFFFFF");
+    expect(siteThemeMetaColor.dark).toBe("#101714");
+    expect(siteThemeMetaColor.light).toBe("#ffffff");
   });
 });

@@ -103,10 +103,12 @@ def _protected_part(name: str) -> Optional[str]:
         return "protected: node_modules (a remediate phase needs it to run vitest)"
     if lowered in ("venv", ".venv") or lowered.startswith("venv-"):
         return "protected: venv (a loop's python interpreter)"
-    if lowered in (".deepsec", "deepsec"):
+    if lowered in (".deepsec", "deepsec") or "security-deepsec" in lowered:
         return "protected: deepsec audit state"
     if "scratch" in lowered:
         return "protected: private scratch state"
+    if lowered in (".gitdirs", "gitdirs"):
+        return "protected: host gitdir (runner clone objects live outside the work tree)"
     return None
 
 

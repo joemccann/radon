@@ -128,7 +128,8 @@ describe("Chain header sticky behavior", () => {
     expect(cssSource).toMatch(/\.chain-header[^{]*\{[^}]*position:\s*sticky/s);
   });
 
-  it("chain grid wrapper allows vertical scrolling", () => {
-    expect(cssSource).toMatch(/\.chain-grid-wrapper[^{]*\{[^}]*overflow-y:\s*(auto|scroll)/s);
+  it("chain panes own vertical scrolling and disable scroll anchoring", () => {
+    expect(cssSource).toMatch(/\.chain-anchor-pane\s*\{[^}]*overflow-y:\s*(auto|scroll)/s);
+    expect(cssSource).toMatch(/\.chain-anchor-pane\s*\{[^}]*overflow-anchor:\s*none/s);
   });
 });

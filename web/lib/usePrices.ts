@@ -17,6 +17,7 @@ import {
   parseOptionKey,
 } from "./pricesProtocol";
 import { createReconnectStrategy, type ReconnectState } from "./reconnectStrategy";
+import { ticketBlockedMs } from "./wsTicket";
 import { buildAuthenticatedWebSocketUrl, resolveRealtimeWebSocketUrl } from "./realtimeSocketAuth";
 import { REALTIME_OPEN_TIMEOUT_MS } from "./realtimeDeadline";
 import type { RealtimeTokenGetter } from "./RealtimeAuthContext";
@@ -709,7 +710,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
       return;
     }
 
-    const delay = strategy.nextDelay();
+    const delay = Math.max(strategy.nextDelay(), ticketBlockedMs());
     wsLog("reconnect-scheduled", { attempt: strategy.attempt, delay: Math.round(delay) });
 
     clearReconnectTimer();

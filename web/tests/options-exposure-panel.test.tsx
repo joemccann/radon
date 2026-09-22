@@ -31,6 +31,21 @@ describe("OptionsExposurePanel", () => {
 
   afterEach(() => cleanup());
 
+  it("keeps the ladder usable with missing spot and no fabricated spot row", () => {
+    useOptionsExposureMock.mockReturnValue({
+      data: { ...EXPOSURE_FIXTURE, spot: null, complete: false },
+      loading: false, error: null, refresh: vi.fn(),
+    });
+    render(<OptionsExposurePanel symbol="MU" />);
+    expect(screen.getByText("SPOT UNAVAILABLE")).toBeTruthy();
+    expect(screen.getByText("PARTIAL")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("Showing all strikes");
+    expect((screen.getByLabelText("Strike range") as HTMLSelectElement).value).toBe("all");
+    expect((screen.getByLabelText("Strike range") as HTMLSelectElement).disabled).toBe(true);
+    expect(screen.getByRole("table")).toBeTruthy();
+    expect(document.querySelectorAll('[data-spot="true"]')).toHaveLength(0);
+  });
+
   it("renders the default instrument controls and accessible exposure table", () => {
     render(<OptionsExposurePanel symbol="MU" />);
 

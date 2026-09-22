@@ -286,6 +286,17 @@ class TestBuckets:
         assert "journal-sync" in cont
         assert "journal-gap-sli" in cont
 
+    def test_dropbox_research_is_continuously_staleness_checked(self):
+        """REL-251: an alive worker can stall in-process without systemd noticing."""
+        from watchdog import services as svc_mod
+
+        assert svc_mod.SCHEDULED_SERVICES["dropbox-research"] == {
+            "open": 15 * 60,
+            "closed": 15 * 60,
+            "requires_ib": False,
+        }
+        assert "dropbox-research" in svc_mod.BUCKETS["continuous"]
+
     def test_daily_bucket_lists_daily_services(self):
         from watchdog import services as svc_mod
 

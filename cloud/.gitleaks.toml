@@ -96,4 +96,10 @@ commits = [
   # the word "credentials". Never a secret, nothing to rotate. Rewritten
   # in the follow-up commit so no later SHA re-trips the rule.
   "9db5f7aff4a947c1ee4965b467a79eefe1800ae9",
+  # 2026-09-08 sweep of history (gitleaks default-rule drift): PR #125's
+  # tasks/todo.md planning prose described the secret-store design
+  # ("AES-…" next to "values") and trips generic-api-key. Prose in an
+  # immutable merged commit; never a secret, nothing to rotate. The line no
+  # longer exists at HEAD.
+  "b0322b6f2ac3ef3b7310e628a23b67b859168ac5",
 ]

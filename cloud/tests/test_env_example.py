@@ -1,6 +1,7 @@
 """Tests for .env.example configuration."""
 
 import re
+import sys
 
 
 KNOWN_PLACEHOLDER_PATTERNS = [
@@ -96,6 +97,55 @@ class TestUWToken:
     def test_contains_uw_token(self, root):
         env_vars = parse_env_vars(read_env_example(root))
         assert "UW_TOKEN" in env_vars
+
+
+class TestCTAVisionModelLadder:
+    def test_contains_every_source_owned_optional_provider_key(self, root):
+        """The cloud template is the operator inventory, not required-env.
+
+        `model_ladder.py` owns aliases and provider order.  Importing its key
+        groups keeps this template aligned when a fallback is added or renamed.
+        """
+        scripts_dir = root.parent / "scripts"
+        sys.path.insert(0, str(scripts_dir))
+        try:
+            from clients import model_ladder
+        finally:
+            sys.path.pop(0)
+
+        source_owned = {
+            key
+            for group in (
+                model_ladder._ANTHROPIC_KEYS,
+                model_ladder._GROK_KEYS,
+                model_ladder._CODEX_KEYS,
+                model_ladder._GEMINI_KEYS,
+                model_ladder._NVIDIA_KEYS,
+                model_ladder._CEREBRAS_KEYS,
+                getattr(model_ladder, "_OPTIONAL_LADDER_ENV", ()),
+            )
+            for key in group
+        }
+        # Auth-file paths are not env inventory rows.
+        source_owned -= {"CLAUDE_CODE_OAUTH_TOKEN_FILE", "CLAUDE_CONFIG_DIR", "CODEX_HOME"}
+        env_vars = parse_env_vars(read_env_example(root))
+        assert source_owned <= env_vars.keys()
+
+
+class TestDropboxResearchVariables:
+    REQUIRED = [
+        "DROPBOX_APP_KEY",
+        "DROPBOX_REFRESH_TOKEN",
+        "DROPBOX_ACCOUNT_ID",
+        "DROPBOX_ROOT_NAMESPACE_ID",
+        "DROPBOX_FOLDER_ID",
+        "DROPBOX_FOLDER_PATH",
+    ]
+
+    def test_contains_private_research_variables(self, root):
+        env_vars = parse_env_vars(read_env_example(root))
+        for var in self.REQUIRED:
+            assert var in env_vars, f"Missing Dropbox research variable: {var}"
 
 
 class TestIBSessionVariables:
@@ -283,3 +333,23 @@ class TestDemoMigrationEnvContract:
         for key in self.KEYS:
             assert key in demo_branch, f"{key} is not what migrate.py --demo reads"
             assert key in self._contract_keys(root)
+
+
+class TestServiceTokenDocumented:
+    """RADON_SERVICE_TOKEN (Next -> FastAPI bearer, web/lib/radonApi.ts) must be
+    documented wherever an operator would look for it. It stays commented out:
+    prod must never set it (see test_env_contract_parity.EXEMPT)."""
+
+    KEY = "RADON_SERVICE_TOKEN"
+
+    def test_documented_in_env_examples_and_runbook(self, root):
+        repo = root.parent
+        for rel in (".env.example", "web/.env.example", "cloud/.env.example", "docs/operations.md"):
+            text = (repo / rel).read_text()
+            assert self.KEY in text, f"{self.KEY} is undocumented in {rel}"
+
+    def test_never_set_in_an_example(self, root):
+        repo = root.parent
+        for rel in (".env.example", "web/.env.example", "cloud/.env.example"):
+            env_vars = parse_env_vars((repo / rel).read_text())
+            assert self.KEY not in env_vars, f"{rel} sets {self.KEY}; prod must leave it unset"

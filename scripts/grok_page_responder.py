@@ -56,6 +56,7 @@ load_repo_dotenv()
 from watchdog import notify
 from watchdog import pages as pages_mod
 from watchdog import units as units_mod
+import ir_ensure_pr
 
 
 GROK_TIMEOUT_SECS = 3600
@@ -124,8 +125,8 @@ SystemctlRunner = Callable[[list[str]], object]
 
 # Every autonomy switch defaults CLOSED. A missing or renamed
 # EnvironmentFile is indistinguishable here from a deliberate stand-down, and
-# an agent that runs `grok --always-approve` and can `git push origin main`
-# into the production auto-deploy must read that ambiguity as "stop".
+# an agent that runs `grok --always-approve` and can push a `fix/*` branch
+# must read that ambiguity as "stop". Merge stays Joe / Mac Mini / loops.
 def responder_enabled() -> bool:
     return _flag("GROK_PAGE_RESPONDER", False)
 
@@ -180,6 +181,55 @@ def sync_remote_clone(repo_root: Path) -> str:
     if merged.returncode != 0:
         return "ff-failed"
     return "synced"
+
+
+# The prompt tells grok never to push main or merge, but prompt text is not a
+# control: page excerpts are untrusted and the clone's credential can push any
+# ref. This hook is the git-level chokepoint — reinstalled every cycle so a
+# prior run (or the agent itself, last cycle) cannot leave it weakened.
+PRE_PUSH_GUARD = """#!/bin/sh
+# radon push guard (installed by grok_page_responder; do not edit)
+status=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/fix/*)
+      if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+        echo "radon push guard: refused delete of $remote_ref" >&2
+        status=1
+      fi
+      ;;
+    *)
+      echo "radon push guard: refused push to $remote_ref (only refs/heads/fix/*)" >&2
+      status=1
+      ;;
+  esac
+done
+exit $status
+"""
+
+
+def install_push_guard(repo_root: Path) -> Optional[Path]:
+    """Write the fix/*-only pre-push hook into the clone. None on failure."""
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--git-path", "hooks"],
+            cwd=repo_root, capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    hooks_dir = Path((proc.stdout or "").strip())
+    if not hooks_dir.is_absolute():
+        hooks_dir = repo_root / hooks_dir
+    try:
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        hook = hooks_dir / "pre-push"
+        hook.write_text(PRE_PUSH_GUARD)
+        hook.chmod(0o755)
+    except OSError:
+        return None
+    return hook
 
 
 def cache_dir(repo_root: Path) -> Path:
@@ -371,7 +421,11 @@ def build_prompt(page: dict, *, autoship: bool, autopush: bool) -> str:
     push_line = (
         "AUTOPUSH is on: after a green focused suite, wait until "
         "`gh run list --workflow=ci.yml --limit 1` is not in_progress, "
-        "then `git push origin main` once. If a deploy is in flight, wait."
+        "then checkout a `fix/<short-slug>` branch, "
+        "`git push -u origin HEAD`, and run "
+        "`python3.13 scripts/ir_ensure_pr.py` so an open PR exists "
+        "against main. Never `git push origin main`. Never merge. "
+        "If a deploy is in flight, wait."
         if autopush and autoship
         else "AUTOPUSH is off: do not push."
     )
@@ -502,6 +556,7 @@ def run_cycle(
     now: Optional[datetime] = None,
     grok_runner: Optional[GrokRunner] = None,
     systemctl_runner: Optional[SystemctlRunner] = None,
+    ensure_ir_pr: Optional[Callable] = None,
 ) -> int:
     now = now or datetime.now(timezone.utc)
     if not responder_enabled():
@@ -521,6 +576,14 @@ def run_cycle(
     runner = grok_runner or _default_grok_runner
     completed = True
     try:
+        if autopush_enabled() and install_push_guard(repo_root) is None:
+            # A push-capable cycle without the git-level refspec guard is
+            # prompt-only containment. Stand down; the timer retries.
+            print(
+                "push guard install failed; refusing push-capable cycle",
+                file=sys.stderr,
+            )
+            return 1
         sync_state = sync_remote_clone(repo_root)
         if sync_state not in {"disabled", "synced", "dirty"}:
             print(json.dumps({"at": now.isoformat(), "sync": sync_state}), file=sys.stderr)
@@ -616,6 +679,40 @@ def run_cycle(
             return 0
 
         disposition, summary = parse_grok_result(stdout)
+        if (
+            disposition == "code_fix"
+            and autopush_enabled()
+            and autoship_enabled()
+        ):
+            ensure = ensure_ir_pr or ir_ensure_pr.ensure_after_code_fix
+            try:
+                pr_info = ensure(repo_root, page=page, summary=summary)
+            except ir_ensure_pr.IrEnsurePrError as exc:
+                pr_error = str(exc)
+                finished = datetime.now(timezone.utc)
+                status = pages_mod.record_attempt_failure(
+                    page["page_id"],
+                    now=finished,
+                    error=f"PR_FAILED: {pr_error}",
+                )
+                # A pushed branch without an open PR has no review/deploy path.
+                # Keep the ticket actionable and let the responder's own health
+                # surface the stalled incident rather than reporting a clean poll.
+                _heartbeat("error", finished)
+                completed = False
+                print(json.dumps({
+                    "at": finished.isoformat(),
+                    "page_id": page["page_id"],
+                    "service": page["service"],
+                    "status": status,
+                    "error": f"PR_FAILED: {pr_error}",
+                }))
+                print(pr_error, file=sys.stderr)
+                return 2
+            else:
+                url = (pr_info or {}).get("url")
+                if url:
+                    summary = f"{summary} {url}"
         finished = datetime.now(timezone.utc)
         pages_mod.complete_page(
             page["page_id"],

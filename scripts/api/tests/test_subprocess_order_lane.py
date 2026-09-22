@@ -43,6 +43,9 @@ def stub_scripts(tmp_path, monkeypatch):
     (tmp_path / "ib_place_order.py").write_text(_FAST_STUB)
     monkeypatch.setattr(subprocess_mod, "SCRIPTS_DIR", tmp_path)
     monkeypatch.setattr(subprocess_mod, "_active_subprocesses", 0)
+    # The reservation is what these tests prove; the interactive admission
+    # wait would only stretch each refusal by its budget.
+    monkeypatch.setattr(subprocess_mod, "SUBPROCESS_ADMISSION_WAIT_S", 0.0)
     return tmp_path
 
 

@@ -37,8 +37,8 @@ export const maxDuration = 300;
 
 export const SYSTEM_PROMPT =
   "You are Radon, the trading operations assistant. Never identify yourself as a model provider or model name. " +
-  "You are an API client of the same HTTP APIs the operator UI uses. " +
-  "Use list_apis to find the path, then call_api to invoke it. Do not guess paths. " +
+  "Named tools first. For questions about trade history, fills, or profit and loss, go straight to the journal tools (get_realized_pnl, query_journal); the knowledge base does not carry P&L figures and cannot enumerate fills. " +
+  "Do not use list_apis or call_api for P&L. One get_realized_pnl call with YYYY-MM-DD from/to is enough; then answer. " +
   "Watchlist is GET/POST /api/watchlist and DELETE /api/watchlist/{symbol}. " +
   "You analyze institutional flow, portfolio risk, and trade structure with a direct operator style. " +
   "You can call named tools to pull live flow, scans, gamma exposure, the portfolio, quotes, priced option chains, ranked verticals, the 7-milestone evaluate pipeline, other FastAPI READ surfaces via fetch_backend or call_api, and the trade journal (query_journal for raw fills, get_realized_pnl for realized P&L). " +
@@ -47,10 +47,9 @@ export const SYSTEM_PROMPT =
   "If confidence is low, explicitly state uncertainty and recommend the next command or additional data. " +
   "LIVE MARKET: before naming strikes or a debit, call get_quote and either rank_spreads or get_option_chain. Never invent a spot price. " +
   "For exact verticals use rank_spreads (it uses live mids and flags convexity: gain >= 2x loss). " +
-  "For a full thesis call run_evaluate. For other backend services (earnings, VCG, short availability, ratings, open orders) call list_apis then call_api. " +
+  "For a full thesis call run_evaluate. Use list_apis then call_api only when no named tool covers the request. Do not guess paths. " +
   "Before forming a new thesis, consult search_knowledge and find_prior_evals for prior theses, evals, incidents, and lessons, and cite the doc_keys you relied on in your answer. " +
   "A knowledge miss or timeout is not a reason to skip live market tools. Continue with quote, chain, flow, and evaluate. " +
-  "For questions about trade history, fills, or profit and loss, go straight to the journal tools (get_realized_pnl, query_journal); the knowledge base does not carry P&L figures and cannot enumerate fills. " +
   "If a knowledge tool fails or returns no thesis documents, say so plainly in your answer and never fabricate prior theses, lessons, or sizing history. " +
   "JOURNAL CONVENTIONS: The trade journal contains two row families for the same executions: Flex-rehydrate aggregate rows (family flex_agg, composite exec ids, carrying realized_pnl / cost_basis / proceeds / open_basis) and realtime per-fill rows (family fill). " +
   "The same fill can appear in BOTH families; never sum across families without deduping, and rows marked dup:true duplicate an aggregate. " +
@@ -72,6 +71,43 @@ const IMAGE_MEDIA_TYPES: readonly string[] = ["image/png", "image/jpeg", "image/
 const MAX_IMAGES_PER_MESSAGE = 4;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
+
+// RC-B4: aggregate turn caps. The per-message limits above reset with every
+// message, so without these one request could carry an unbounded payload
+// into the model loop.
+export const MAX_MESSAGES_PER_TURN = 40;
+export const MAX_IMAGE_BLOCKS_PER_TURN = 8;
+export const MAX_TURN_PAYLOAD_BYTES = 10 * 1024 * 1024;
+
+type PayloadViolation = { status: 400 | 413; error: string };
+
+function turnPayloadViolation(rawMessages: unknown): PayloadViolation | null {
+  if (!Array.isArray(rawMessages)) return null;
+  if (rawMessages.length > MAX_MESSAGES_PER_TURN) {
+    return { status: 400, error: `At most ${MAX_MESSAGES_PER_TURN} messages per turn.` };
+  }
+  let bytes = 0;
+  let images = 0;
+  for (const item of rawMessages) {
+    try {
+      bytes += (JSON.stringify(item) ?? "").length;
+    } catch {
+      return { status: 400, error: "Messages must be JSON-serializable." };
+    }
+    if (bytes > MAX_TURN_PAYLOAD_BYTES) {
+      return { status: 413, error: "Turn payload too large." };
+    }
+    const content = (item as { content?: unknown })?.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if ((block as { type?: unknown })?.type === "image") images += 1;
+    }
+    if (images > MAX_IMAGE_BLOCKS_PER_TURN) {
+      return { status: 400, error: `At most ${MAX_IMAGE_BLOCKS_PER_TURN} image blocks per turn.` };
+    }
+  }
+  return null;
+}
 
 function decodedBase64Bytes(data: string): number {
   return Math.floor((data.length * 3) / 4);
@@ -256,6 +292,11 @@ export async function POST(request: NextRequest): Promise<Response> {
   } catch {
     if (mock) return NextResponse.json({ error: "No messages supplied." }, { status: 400 });
     return NextResponse.json({ error: "Invalid JSON payload." }, { status: 400 });
+  }
+
+  const violation = turnPayloadViolation(body?.messages);
+  if (violation) {
+    return NextResponse.json({ error: violation.error }, { status: violation.status });
   }
 
   const messages = safeMessages(body?.messages);

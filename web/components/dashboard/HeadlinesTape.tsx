@@ -1,4 +1,5 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
 import { useEffect, useState } from "react";
 
@@ -90,7 +91,7 @@ export default function HeadlinesTape({
     return <div className="news-feed-empty">Connecting to headlines…</div>;
   }
   if (status === "down" && items.length === 0) {
-    return <div className="news-feed-error">Headlines feed unavailable.</div>;
+    return <ErrorToast message="Headlines feed is unavailable. Reconnecting automatically." />;
   }
   if (items.length === 0) {
     return <div className="news-feed-empty">Waiting for headline prints.</div>;
@@ -101,9 +102,10 @@ export default function HeadlinesTape({
   return (
     <>
       {status === "down" ? (
-        <div className="news-feed-error headlines-tape__down" data-testid="headlines-tape-down" role="status">
-          Headlines feed down. Last print {newestMs == null ? "time unknown" : formatAge(now - newestMs)}.
-        </div>
+        <>
+          <ErrorToast message="Headlines feed is unavailable. Reconnecting automatically." testId="headlines-tape-down" />
+          <div className="headlines-tape__down" role="status">Last print {newestMs == null ? "time unknown" : formatAge(now - newestMs)}. Showing cached headlines.</div>
+        </>
       ) : null}
       <ol className="headlines-tape" data-testid="headlines-tape">
         {newestFirst.map((row) => {

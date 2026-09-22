@@ -24,7 +24,11 @@ This collapses scanner/flow dark-pool load from ~5 calls/ticker/run to ~1
 Schema:
   - v1 / missing: single-page fetch (UW 500 cap) — treat as miss so liquid
     names re-fetch with multi-page pagination.
-  - v2: full-day cursor walk complete.
+  - v2 + complete=true: full-day cursor walk (or the system page cap).
+  - v2 + complete=false: a capped scoring walk. Discover may reuse it;
+    flow reports must miss and re-fetch.
+  - v2 + missing complete: legacy. Treat 500..1000 prints as a discover
+    2-page scoring walk (SNDK 2026-09-04 froze at 976 prints this way).
 """
 
 from __future__ import annotations
@@ -44,6 +48,12 @@ CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "darkpool_c
 
 # Bump when on-disk payload semantics change (forces re-fetch of stale rows).
 CACHE_SCHEMA = 2
+
+# UW /api/darkpool/{ticker} hard-caps each page at 500. Keep in lockstep
+# with fetch_flow.DARKPOOL_PAGE_LIMIT. Discover scores with 2 pages
+# (discover.DISCOVER_DARKPOOL_MAX_PAGES); that band is a sample, not a day.
+PAGE_LIMIT = 500
+SCORING_WALK_MAX_PRINTS = PAGE_LIMIT * 2
 
 # Entries older than this are never read again. Flow reports use a 20-trading-day
 # window (~28 calendar days); keep a buffer for weekends/holidays.
@@ -69,11 +79,29 @@ def _path(ticker: str, date: str) -> Path:
     return CACHE_DIR / f"{ticker.upper()}_{date}.json"
 
 
-def get_cached_darkpool(ticker: str, date: str) -> Optional[List[dict]]:
+def _row_is_complete(payload: dict, trades: list) -> bool:
+    """True when the row is a full-day walk, not a capped scoring sample."""
+    flag = payload.get("complete")
+    if flag is True:
+        return True
+    if flag is False:
+        return False
+    n = len(trades)
+    return n < PAGE_LIMIT or n > SCORING_WALK_MAX_PRINTS
+
+
+def get_cached_darkpool(
+    ticker: str,
+    date: str,
+    *,
+    require_complete: bool = True,
+) -> Optional[List[dict]]:
     """Return cached prints for an immutable (prior) day, else None.
 
     Today (or any non-immutable date) always returns None so the caller fetches
-    it live.
+    it live. Flow reports keep ``require_complete=True`` so a discover
+    scoring walk cannot freeze into Daily Dark Pool History. Discover
+    passes ``require_complete=False`` to reuse its own sample.
     """
     if not is_immutable(date):
         return None
@@ -90,14 +118,25 @@ def get_cached_darkpool(ticker: str, date: str) -> Optional[List[dict]]:
     if payload.get("schema") != CACHE_SCHEMA:
         return None
     trades = payload.get("trades")
-    return trades if isinstance(trades, list) else None
+    if not isinstance(trades, list):
+        return None
+    if require_complete and not _row_is_complete(payload, trades):
+        return None
+    return trades
 
 
-def set_cached_darkpool(ticker: str, date: str, trades) -> None:
+def set_cached_darkpool(
+    ticker: str,
+    date: str,
+    trades,
+    *,
+    complete: bool = True,
+) -> None:
     """Persist an immutable prior day's prints.
 
     No-op for today (mutable), and for empty/non-list payloads (never cache a
     structurally-empty "success"). Atomic via temp-file + os.replace.
+    ``complete=False`` stores a scoring sample that flow consumers miss.
     """
     if not is_immutable(date):
         return
@@ -116,6 +155,7 @@ def set_cached_darkpool(ticker: str, date: str, trades) -> None:
         "date": date,
         "count": len(trades),
         "schema": CACHE_SCHEMA,
+        "complete": bool(complete),
         "cached_at": datetime.now(_ET).isoformat(),
         "trades": trades,
     }

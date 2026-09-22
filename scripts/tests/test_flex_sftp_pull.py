@@ -57,11 +57,13 @@ class FakeSftp:
         returncode: int = 0,
         stderr: str = "",
         ls_stdout: str | None = None,
+        get_fail: dict[str, str] | None = None,
     ):
         self.files = files
         self.returncode = returncode
         self.stderr = stderr
         self.ls_stdout = ls_stdout
+        self.get_fail = get_fail or {}
         self.calls: list[list[str]] = []
         self.inputs: list[str] = []
 
@@ -95,6 +97,10 @@ class FakeSftp:
             if line.startswith("get "):
                 _, remote, local = line.split(maxsplit=2)
                 key = remote.split("/")[-1]
+                if key in self.get_fail:
+                    completed.returncode = 255
+                    completed.stderr = self.get_fail[key]
+                    return completed
                 Path(local).write_bytes(self.files[key])
                 self.cwd = cwd
                 return completed
@@ -113,6 +119,39 @@ def test_rejects_ssh_config_without_ipv4_and_strict_host_key(tmp_path):
 
     bad = tmp_path / "ssh_config"
     bad.write_text("Host ibkr-flex\n  StrictHostKeyChecking accept-new\n")
+    with pytest.raises(pull.FlexSftpError, match="ssh_config"):
+        pull.validate_ssh_config(bad)
+
+
+def test_global_directive_above_host_block_is_validated(tmp_path):
+    # ssh_config is first-match-wins: a global directive placed ABOVE the
+    # Host block is what actually connects, so it must be validated too.
+    import flex_sftp_pull as pull
+
+    bad = tmp_path / "ssh_config"
+    good = _ssh_config(tmp_path / "good_config").read_text()
+    bad.write_text("StrictHostKeyChecking accept-new\n" + good)
+    with pytest.raises(pull.FlexSftpError, match="ssh_config"):
+        pull.validate_ssh_config(bad)
+
+
+def test_include_directive_fails_closed(tmp_path):
+    import flex_sftp_pull as pull
+
+    bad = tmp_path / "ssh_config"
+    bad.write_text("Include ~/.ssh/other_config\n" + _ssh_config(tmp_path / "good_config").read_text())
+    with pytest.raises(pull.FlexSftpError, match="ssh_config"):
+        pull.validate_ssh_config(bad)
+
+
+def test_match_directive_fails_closed(tmp_path):
+    import flex_sftp_pull as pull
+
+    bad = tmp_path / "ssh_config"
+    bad.write_text(
+        _ssh_config(tmp_path / "good_config").read_text()
+        + "Match host *\n  StrictHostKeyChecking no\n"
+    )
     with pytest.raises(pull.FlexSftpError, match="ssh_config"):
         pull.validate_ssh_config(bad)
 
@@ -410,6 +449,7 @@ def test_run_without_ingest_drives_default_ingest(tmp_path, monkeypatch):
     monkeypatch.setattr(flex_delivery_ingest, "claim_flex_delivery", fake_claim)
     # R-436: the applied mark after the writers and the status lookup behind a
     # lost claim are the same seam; the fake above only ever holds applied rows.
+    monkeypatch.setattr(flex_delivery_ingest, "delivery_rows_present", lambda *a: True)
     monkeypatch.setattr(flex_delivery_ingest, "mark_flex_delivery_applied", lambda _d: True)
     monkeypatch.setattr(flex_delivery_ingest, "flex_delivery_status", lambda _d: "applied")
     rehydrated = []
@@ -568,7 +608,7 @@ def _duplicating_ingest():
     def ingest(xml_text, source_path=None, **kwargs):
         outcome = "duplicate" if xml_text in seen else "applied"
         seen.add(xml_text)
-        return {"ok": True, "outcome": outcome}
+        return {"ok": True, "outcome": outcome, "persistence_confirmed": True}
 
     return ingest
 
@@ -615,3 +655,114 @@ def test_stale_remote_still_errors(tmp_path, monkeypatch):
     assert codes[-1] == 1
     assert heartbeats[-1][0] == "error"
     assert "stopped delivering" in str(heartbeats[-1][1])
+
+
+# 2026-09-16 page 5a2eb828: newest Equity_Summary ingested, then IBKR RST'd
+# kex on older outgoing files. Type=oneshot Result=exit-code / NRestarts=0.
+_PAGE_NOW = datetime(2026, 9, 16, 7, 30, tzinfo=ZoneInfo("America/New_York"))
+_RST_STDERR = (
+    "kex_exchange_identification: read: Connection reset by peer\n"
+    "Connection reset by 64.190.196.110 port 22\n"
+    "Connection closed\n"
+)
+
+
+def _two_statement_names():
+    newest = "U4698258.Equity_Summary_in_Base.20260915.20260915.xml.pgp"
+    older = "U4698258.Equity_Summary_in_Base.20260828.20260828.xml.pgp"
+    return newest, older
+
+
+def _run_two_statements(tmp_path, monkeypatch, *, get_fail, newest_outcome):
+    import flex_sftp_pull as pull
+
+    heartbeats = []
+    monkeypatch.setattr(pull, "_heartbeat", lambda state, error=None: heartbeats.append((state, error)))
+    newest, older = _two_statement_names()
+    files = {
+        newest: _statement_xml(date(2026, 9, 15)),
+        older: _statement_xml(date(2026, 8, 28)),
+    }
+    seen: list[str] = []
+
+    def ingest(xml_text, source_path="", **k):
+        seen.append(Path(source_path).name if source_path else "")
+        outcome = newest_outcome if "20260915" in (source_path or "") else "duplicate"
+        return {"ok": True, "outcome": outcome, "persistence_confirmed": True}
+
+    code = pull.run(
+        config=_ssh_config(tmp_path / "ssh_config"),
+        inbox=tmp_path / "inbox",
+        runner=FakeSftp(files, get_fail=get_fail),
+        decrypt=lambda data, **k: data.decode(),
+        ingest=ingest,
+        now=_PAGE_NOW,
+    )
+    return code, heartbeats, seen
+
+
+def test_historical_sftp_rst_after_newest_ingest_does_not_fail_the_oneshot(tmp_path, monkeypatch):
+    newest, older = _two_statement_names()
+    code, heartbeats, seen = _run_two_statements(
+        tmp_path,
+        monkeypatch,
+        get_fail={older: _RST_STDERR},
+        newest_outcome="applied",
+    )
+    assert seen == [newest.replace(".pgp", "")], seen
+    assert code == 0, heartbeats
+    assert heartbeats[-1][0] == "ok"
+
+
+def test_historical_sftp_rst_after_duplicate_newest_does_not_fail_the_oneshot(tmp_path, monkeypatch):
+    """08:30 retry: today's file is already applied; IBKR still RSTs the tail."""
+    newest, older = _two_statement_names()
+    code, heartbeats, seen = _run_two_statements(
+        tmp_path,
+        monkeypatch,
+        get_fail={older: _RST_STDERR},
+        newest_outcome="duplicate",
+    )
+    assert seen == [newest.replace(".pgp", "")], seen
+    assert code == 0, heartbeats
+    assert heartbeats[-1][0] == "ok"
+
+
+def test_sftp_rst_on_the_newest_statement_still_fails_the_oneshot(tmp_path, monkeypatch):
+    newest, older = _two_statement_names()
+    code, heartbeats, seen = _run_two_statements(
+        tmp_path,
+        monkeypatch,
+        get_fail={newest: _RST_STDERR},
+        newest_outcome="applied",
+    )
+    assert newest.replace(".pgp", "") not in seen
+    assert code == 1, heartbeats
+    assert heartbeats[-1][0] == "error"
+
+
+@pytest.mark.parametrize("outcome", ["applied", "duplicate"])
+@pytest.mark.parametrize("missing", [
+    "U4698258.Equity_Summary_in_Base.20260915.20260915.xml.pgp",
+    "U0000001.Trades.20260915.20260915.xml.pgp",
+])
+def test_current_query_cannot_hide_another_query_reset(tmp_path, monkeypatch, outcome, missing):
+    """REL-262: every query/account needs its own successful delivery."""
+    import flex_sftp_pull as pull
+
+    current = "U4698258.Trades.20260915.20260915.xml.pgp"
+    files = {current: _statement_xml(date(2026, 9, 15)), missing: "unavailable"}
+    heartbeats = []
+    monkeypatch.setattr(pull, "_heartbeat", lambda state, error=None: heartbeats.append((state, error)))
+    config = _ssh_config(tmp_path / "ssh_config")
+    for _ in range(2):
+        code = pull.run(
+            config=config, inbox=tmp_path / "inbox",
+            runner=FakeSftp(files, get_fail={missing: _RST_STDERR}),
+            decrypt=lambda data, **k: data.decode(),
+            ingest=lambda *a, **k: {"ok": True, "outcome": outcome, "persistence_confirmed": True},
+            now=_PAGE_NOW,
+        )
+        assert code == 1
+        assert heartbeats[-1][0] == "error"
+        assert pull._delivery_key(missing) in str(heartbeats[-1][1])

@@ -3,10 +3,11 @@
  */
 
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { BlotterData } from "../lib/types";
 import { HistoricalTradesSection } from "../components/WorkspaceSections";
+import MobileBlotterList from "../components/mobile/MobileBlotterList";
 
 vi.mock("../components/TickerLink", () => ({
   default: (props: { ticker: string }) => React.createElement("span", null, props.ticker),
@@ -123,6 +124,39 @@ afterEach(() => {
 });
 
 describe("HistoricalTradesSection", () => {
+  it("shows recorded fill prices and sorts numerically rather than by formatted text", () => {
+    render(React.createElement(HistoricalTradesSection));
+    const heading = screen.getByRole("columnheader", { name: "Avg Fill" });
+    const row = screen.getByText("AAPL").closest("tr")!;
+    expect(within(row).getByTestId("historical-fill-price").textContent).toBe("$13.20");
+    fireEvent.click(heading);
+    expect(screen.getAllByRole("row").slice(1).map((r) => r.children[1].textContent))
+      .toEqual(["MSFT", "AAPL", "TSLA"]);
+    fireEvent.click(heading);
+    expect(screen.getAllByRole("row").slice(1).map((r) => r.children[1].textContent))
+      .toEqual(["TSLA", "AAPL", "MSFT"]);
+  });
+
+  it("shows the same fill price on mobile cards", () => {
+    render(React.createElement(MobileBlotterList, { trades: BASE_BLOTTER.closed_trades }));
+    const card = screen.getByTestId("mobile-blotter-AAPL-0");
+    expect(within(card).getByText("Avg Fill")).toBeTruthy();
+    expect(within(card).getByText("$13.20")).toBeTruthy();
+  });
+
+  it("labels aggregates and keeps missing prices unavailable on desktop and mobile", () => {
+    const data = structuredClone(BASE_BLOTTER);
+    data.closed_trades[0].executions[0].price_is_aggregate = true;
+    data.closed_trades[1].executions[0].price = null;
+    useBlotterMock.mockReturnValue({ data, loading: false, syncing: false, error: null, syncNow: vi.fn() });
+    const desktop = render(React.createElement(HistoricalTradesSection));
+    expect(screen.getByText("Aggregate")).toBeTruthy();
+    expect(within(screen.getByText("MSFT").closest("tr")!).getByTestId("historical-fill-price").textContent).toBe("---");
+    desktop.unmount();
+    render(React.createElement(MobileBlotterList, { trades: data.closed_trades }));
+    expect(screen.getByText("Avg Fill (aggregate)")).toBeTruthy();
+    expect(within(screen.getByTestId("mobile-blotter-MSFT-1")).getByTestId("historical-fill-price").textContent).toContain("---");
+  });
   it("renders a filter input and filters rows by symbol", () => {
     render(React.createElement(HistoricalTradesSection));
 

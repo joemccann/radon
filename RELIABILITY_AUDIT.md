@@ -217,6 +217,17 @@ Delta findings continue the R-### numbering in dated `## Delta audit` sections.
 - Audited through: `2b936ebc` on 2026-09-04 - delta audit, 37 new findings (R-596...R-632; 2 P0, 13 P1, 15 P2, 7 P3), backlog REL-224...REL-231. Anchor `0202e32d` verified (`rev-parse --verify` resolves to `0202e32d54949b7dd640b2ad630b60b4a7160723`, `merge-base --is-ancestor` confirms); eight loop-output squashes split from the 28 feature commits by commit identity, leaving 44 source files; six subsystem walks capped at 4-12 files plus a seventh EXECUTING walk over REL-209...REL-223 all finished, none lost to the stream watchdog. `git ls-remote` was run BEFORE numbering: no `reliability/*` branch existed. **All seven standing sweeps HOLD and NF-8 stays CLOSED** (both parity suites green over 59 timer-backed services; all 6 exemption reasons re-verified against the resolver in the lead). The two P0s are both in the dead-man prune shipped by `d396eacc`: it fails OPEN into a destructive delete (lead-executed: a failing `gh pr list` produced `pruned 1/1 comments`, rc 0) and it runs BEFORE a post whose failure is swallowed, in all five loops. The executing walk found REL-210 and REL-212 PARTIAL as P1s and REL-209/REL-211 PARTIAL, each with literal output; REL-213...REL-223 were not reached in budget. Two walk severities were RAISED with the reasoning in the row (R-608, R-609). Two P1s are defects in R-389's own fix. NF-10 recurs six times, NF-3 twice, NF-9 twice. REL-187 and REL-188 remain un-started and roll into this cycle's remediate. See `## Delta audit 2026-09-04`.
 - Audited through: `391aaaea` on 2026-09-05 -- delta audit, 34 new findings (R-633...R-666; 0 P0, 5 P1, 19 P2, 10 P3), backlog REL-232...REL-247. Anchor `2b936ebc` verified (`rev-parse --verify` resolves to `2b936ebc6cae4a4eba20cabfa0153fd8dfca34fa`, `merge-base --is-ancestor` confirms); the four 2026-09-04 loop squashes split by their merge second parents, leaving 38 feature commits / 137 source files; six subsystem walks plus one EXECUTING walk all finished, none lost. `git ls-remote` run BEFORE numbering: no `reliability/*` branch existed. All seven standing sweeps HOLD; NF-8 stays CLOSED (parity suites `49 passed`). Executing walk: REL-227/REL-230/REL-187/188 HOLD; REL-229 PARTIAL P1 (R-637, fix landed in mcp_hosted only), REL-225 PARTIAL P2 (R-644), REL-224 PARTIAL P3 (R-657), each with literal output. All five P1s lead-verified by reading the cited lines. One severity arbitration recorded in-row (R-650, opposing walk verdicts). Dominant new class: client-side races against the live-updating order prop (R-633/R-640/R-642). NF-3 recurs (R-641), NF-10 twice (R-650, R-655). See `## Delta audit 2026-09-05`.
 - Audited through: `7a7ca4ae` on 2026-09-06 -- delta audit, 5 new findings (R-667...R-671; 0 P0, 0 P1, 2 P2, 3 P3), backlog REL-248...REL-250. Anchor `391aaaea` verified (`rev-parse --verify` resolves to `391aaaeaed239cca79026df354059a862b141f05`, `merge-base --is-ancestor` confirms). The range is 5 first-parent commits, ALL loop output/machinery (own remediation #303, testing #305/#308, ci-performance #302, wrapper fix #307) — no product feature commits, so two walks only: an EXECUTING regression walk over #303's P1 fixes and a loop-machinery walk, both returning literal repro output. All seven standing sweeps HOLD (parity suites `38 passed`). Executing walk: REL-232/REL-233/REL-235 HOLD with adjacent cases run; REL-234 PARTIAL (R-668: compose gate misses `ipc: host`/`userns_mode: host` at all three install paths, walk-executed rc=0). Both P2s carry executed repros; R-667 is the #307 cap detector classifying quoted prose as a session cap (stub-agent repro: crash -> rc 75, ladder suppressed). `git ls-remote` run BEFORE numbering: no `reliability/*` branch existed. All REL-232...REL-247 landed DONE, so no roll-forward beyond this section's REL-248...REL-250. See `## Delta audit 2026-09-06`.
+- Audited through: `0b77a6af` on 2026-09-07 — delta audit, 2 new findings (R-672…R-673; 0 P0, 2 P1), backlog REL-251…REL-252. Anchor `7a7ca4ae` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 88 commits / 68 files, led by the Dropbox research ingestion and its app-runtime deployment. Standing sweeps HOLD: `_NON_IDEMPOTENT_IB_SCRIPTS`, halt chokepoints, exit-order acknowledgement, daemon-state Hrana writer, and the function-level order-limit scan remain present; no changed `placeOrder` / `place_order` path bypasses the guard. Remote branch discovery could not run because this runner could not resolve `github.com`; no remote state was modified.
+- Audited through: `cc77928d` on 2026-09-08 — delta audit, 1 new finding (R-674; 0 P0, 1 P1), backlog REL-253. Anchor `0b77a6af` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 13 commits / 68 files. Standing sweeps HOLD: halt chokepoints, `_NON_IDEMPOTENT_IB_SCRIPTS`, order limits, exit-order acknowledgement, daemon-state Hrana, all new order sites, and both watchdog catalogs for the new `ai-cycle` timer.
+- Audited through: `90071618` on 2026-09-08 (second pass) — 0 new findings. Anchor `cc77928d` verified; range is 12 commits. The order-admission, daily frontier refresh, research-ingestion, credential, indicator-freshness, and loop surfaces were inspected serially. Standing sweeps HOLD: no new unguarded placement site; halt/order-limit/exit-ack/Hrana chokepoints and both catalog entries for the new `aa-frontier-basket` writer remain present.
+- Audited through: `964b6b77` on 2026-09-09 — 0 new findings. Anchor `15e74ff1` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 12 commits / 28 changed source files. Serial review covered AI-cycle collection and archive durability, loop completion reporting, CI artifacts, research publishing, ticker routing, and chat attachment/stream recovery. All standing sweeps HOLD: no delta placement or health writer, existing halt/order-limit/exit-ack/Hrana chokepoints remain wired, and `NEW_FINDINGS` plus the REL-021b remainder have no changed-surface instance.
+- Audited through: `9dce4b3a` on 2026-09-10 — 0 new findings. Anchor `1ed5aa84` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 5 commits / 42 changed files. Serial review covered compact AI-cycle snapshot persistence and serving, Ramp curated ingestion, MenthorQ session recovery, and the related control-plane timeout increase. All standing sweeps HOLD: no delta placement or health writer, halt/order-limit/exit-ack/Hrana chokepoints remain wired, and `NEW_FINDINGS` plus the REL-021b remainder have no changed-surface instance. Focused pytest could not start because this runner's `python3.13` lacks pytest.
+- Audited through: `f1f59a73` on 2026-09-11 — 0 new findings. Anchor `9dce4b3a` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 13 commits / 75 changed source files. Serial review covered the CTA vision cascade, AI-cycle OpenDesign ingestion, TWR coverage persistence, dark-pool cache semantics, hosted MCP bounded reads, authenticated research assets, and newsfeed provenance. All standing sweeps HOLD: no delta placement or health writer, halt/order-limit/exit-ack/Hrana chokepoints remain wired, and `NEW_FINDINGS` plus the REL-021b remainder have no changed-surface instance. Focused pytest could not start because this runner's `python3.13` lacks pytest.
+- Audited through: `3e394792` on 2026-09-12 — 1 new finding (R-675; P1), backlog REL-254. Anchor `9dce4b3a` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 20 commits / 180 changed files. Serial review covered the shared model ladder, AI-cycle archive, research persistence, flow/TWR, quote relay, systemd changes, and web surfaces. Standing money-path and watchdog sweeps hold; `NEW_FINDINGS` and REL-021b have no changed-surface instance.
+- Audited through: `9b9a65c7` on 2026-09-14 — 1 new finding (R-676; P1), backlog REL-255. Anchor `3e394792` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 53 commits / 78 changed paths. Serial review covered control-plane provenance, model-ladder/research, DeepSec security-loop state, codemap scheduling, assistant P&L, and the codemap caller blast radius. Standing money-path and watchdog sweeps hold; `NEW_FINDINGS` and REL-021b have no changed-surface instance.
+- Audited through: `eb5b8cb0` on 2026-09-15 — 1 new finding (R-677; P1), backlog REL-256. Anchor `9b9a65c7` verified (`rev-parse --verify` resolves to `9b9a65c7156f1b9d705db5cf6f659590b15297d9`; ancestor of HEAD); range is 29 commits / 51 changed paths. Serial review covered incident-response PR delivery, Grok responder state, order reconstruction, control-plane isolation, DeepSec evidence, wrapper subscription rails, and codemap callers. Standing money-path and watchdog sweeps hold; `NEW_FINDINGS` and REL-021b have no changed-surface instance.
+- Audited through: `0833758b` on 2026-09-17 — 1 new finding (R-678; P2), backlog REL-257. Anchor `eb5b8cb0` verified (`rev-parse --verify` resolves to `eb5b8cb0e65622c8377022508a06db3c6b545294`; ancestor of HEAD); range is 92 commits / 139 changed source paths. Serial review covered new scanner and indicator persistence, TWR history extension, position reconstruction, app-runtime isolation, and their codemap callers. Standing money-path and watchdog sweeps hold; `NEW_FINDINGS` and REL-021b have no changed-surface instance.
+- Audited through: `8d1d0f52` on 2026-09-16 — 1 new finding (R-678; P2), backlog REL-257. Anchor `eb5b8cb0` verified (`rev-parse --verify` resolves to `eb5b8cb0e65622c8377022508a06db3c6b545294`; ancestor of HEAD); range is 81 commits / 228 changed paths, with 627 codemap importers reviewed by subsystem. Standing halt/order-limit chokepoints, `_NON_IDEMPOTENT_IB_SCRIPTS`, exit-order acknowledgement, daemon-state Hrana writes, whole-repo placement scan, and both watchdog catalogs hold. `NEW_FINDINGS` and REL-021b have no changed-surface instance.
 
 ## 7. Exit criteria check (A5)
 
@@ -2413,3 +2424,265 @@ Anchor `391aaaea` (verified: `rev-parse --verify` resolves to `391aaaeaed239cca7
 | REL-248 | P2 | R-667, R-669, R-670 | **The session-cap detector matches the CLI's verdict, not quoted prose, in all five wrappers.** Anchor `is_session_limited` to the final non-empty transcript lines and the CLI's actual cap-line shape; classify an exit-0 cap print; make the dead-man's resume claim phase-accurate. | Red first: stub round exiting 1 with a Traceback QUOTING "usage limit reached" -> classified FAILED, ladder walks, retries run; stub emitting the real cap line as its final line -> INCOMPLETE(cap) exactly as today; exit-0 cap print -> cause named. Extend `test_loop_session_limit.py` over all five loops; detector stays byte-identical across wrappers. |
 | REL-249 | P2 | R-668 | **The compose gate denies every host-namespace join, at every install path.** Add `ipc:` and `userns_mode:` host forms to the deny-list in `deploy-root-helper.sh`, `bootstrap-control-plane.sh`, `setup-vps.sh`, plus the parity pin. | Red first: renderable body with `ipc: host` -> rc=1 naming the key; same for `userns_mode: host` (map and inline forms); `pid: host` and `cap_add` refusals unchanged; three-copy byte-parity test stays green. |
 | REL-250 | P3 | R-671 | **The host-job population in `test_ci_gate_integrity.py` derives from mechanism, not a secret-name string.** Classify by what the job DOES (deploy.needs membership, ssh/scp/appleboy action use, any `secrets.*HOST*`/environment marker), with a fault-injection case for a renamed secret. | Red first: fixture workflow with a host job using `secrets.PROD_HOST` -> test flags it into the population; current population unchanged. |
+
+## Delta audit 2026-09-07
+
+Anchor `7a7ca4ae` verified (`git rev-parse --verify` resolves to `7a7ca4aea4da74c316c2b81feb270297725c4e7c`, `merge-base --is-ancestor` confirms). Range `7a7ca4ae..0b77a6af` is 88 commits and 68 changed files. The product surface is the new private Dropbox research pipeline and its container runtime; loop and UI changes were inspected for their direct blast radius. All standing money-path sweeps HOLD. The newly added service-health writer is absent from both catalogs, and the worker has no whole-document budget; both claims were lead-verified from code. IDs R-672+/REL-251+ were free across both ledgers and commit subjects. Remote branch discovery failed safely because DNS could not resolve `github.com`.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-672 | P1 | `cloud/services/radon-research.service:17-20`; `scripts/research/worker.py:16-30,136-145`; `scripts/watchdog/services.py:54-642`; `web/lib/serviceHealthWindows.ts:80-360` | **The new continuous Dropbox research writer can fail or stall without any watchdog or operator-facing stale signal.** It writes `dropbox-research` rows before and after each cycle, but that name is absent from both freshness catalogs. `radon-research.service` restarts only on process failure; an in-process Dropbox/model/PDF failure is caught, records an error row, and remains alive. The watchdog iterates catalogued names, so neither the error nor a stale `running` row is evaluated; the web surface also has no expected window. The private-research feed can stop advancing indefinitely while systemd remains active. |
+| R-673 | P1 | `scripts/research/pipeline.py:299-367`; `scripts/research/model.py:36-46`; `scripts/research/worker.py:136-153` | **One accepted 100-page PDF can monopolize the sole research worker for hours with no end-to-end deadline or progress heartbeat.** The pipeline makes up to 13 sequential 120-second selection calls, accepts an unbounded number of valid candidates, then performs per-candidate crop/review calls, each with the same 120-second remote bound. The only heartbeat brackets the entire `cycle`; it cannot show work progress or recover a document that consumes the daemon. Subsequent queue items and publication retries are starved behind that document. |
+
+### Backlog (continuing)
+
+| ID | Sev | Findings | Task | Acceptance |
+|---|---|---|---|---|
+| REL-251 | P1 | R-672 | **Register and exercise `dropbox-research` as a continuous scheduled writer.** Add matching non-IB freshness windows to both watchdog catalogs, include the service in the appropriate staleness bucket, and pin its error/stale behavior. | Red first: a seeded `dropbox-research` error row and an aged `running` row each reach the watchdog and web stale/degraded state; a fresh running row remains healthy; both catalogs reject a one-sided registration. |
+| REL-252 | P1 | R-673 | **Bound research work per document and make in-flight progress observable.** Cap accepted candidates/reviewer calls with a whole-document monotonic deadline, preserve the work item for retry/hold on exhaustion, and heartbeat each completed stage. | Red first: a 100-page fixture plus reviewers that consume their per-call timeout cannot exceed the configured document budget; a later queued item is reached on the next cycle; a mid-document heartbeat advances and an exhausted document records a safe error class. |
+
+---
+
+## Delta audit 2026-09-08
+
+Anchor `0b77a6af` verified (`git rev-parse --verify` resolves to
+`0b77a6af6e586b5702f4e8dac70f4cc37942a2b4`; `git merge-base --is-ancestor`
+confirms it is an ancestor). Range `0b77a6af..cc77928d` is 13 commits and 68
+changed files. The changed source surface covers the AI-cycle collector and
+timer, Dropbox research runtime, external ATS ingestion, deployment scripts,
+and internal web generation. Standing sweeps HOLD: all placement paths are
+unchanged; the existing halt, order-limit, exit acknowledgement, and Hrana
+writer chokepoints remain wired; `ai-cycle` is present in both watchdog
+catalogs. `NEW_FINDINGS` and REL-021b remain standing P2 candidates with no
+new changed-surface instance.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-674 | P1 | `scripts/ai_cycle/collectors.py:188-192`; `scripts/ai_cycle/collect.py:123-126` | **AI-cycle raw evidence can be permanently torn on interruption.** Both paths write a content-addressed raw payload directly to its final digest path. A process or host failure after truncation leaves that path present but partial; later collection sees `path.exists()` and never repairs it. The stored observation retains the digest of the complete response while the audit archive contains unverifiable, corrupt evidence, defeating source reconstruction. |
+
+### Backlog (continuing)
+
+| ID | Sev | Findings | Task | Acceptance |
+|---|---|---|---|---|
+| REL-253 | P1 | R-674 | **Make AI-cycle raw evidence writes crash-safe and self-repairing.** Atomically stage and fsync payloads in the archive directory, replace only after the full digest is verified, and replace an existing file whose bytes do not match its digest. | Red first: seed `<sha>.json` with a truncated payload, collect the matching response, and assert the final file hashes to `<sha>` with full bytes. Inject a write interruption before replacement and assert no partial final path becomes visible; existing valid content-addressed files remain untouched. |
+
+---
+
+## Delta audit 2026-09-08 (second pass)
+
+Anchor `cc77928d` verified (`git rev-parse --verify` resolves and
+`git merge-base --is-ancestor` confirms it is an ancestor). Range
+`cc77928d..90071618` is 12 commits. Serial review covered subprocess admission,
+frontier-basket persistence and telemetry, research ingestion, credentials,
+indicator freshness, deployment, and loop changes. Standing sweeps HOLD: no
+delta `placeOrder` or `place_order` bypasses `trading_halt` / `order_limits`;
+halt chokepoints, `_NON_IDEMPOTENT_IB_SCRIPTS`, exit-order acknowledgement and
+daemon-state Hrana remain wired; `aa-frontier-basket` is present in both watchdog
+catalogs. `NEW_FINDINGS` and REL-021b remain standing P2 candidates with no new
+changed-surface instance. No new finding was verified.
+
+---
+
+## Delta audit 2026-09-09
+
+Anchor `15e74ff1` verified (`git rev-parse --verify` resolves to
+`15e74ff1f5f505539f07bec6b69f69279886aab2`; `git merge-base --is-ancestor`
+confirms it is an ancestor). Range `15e74ff1..964b6b77` is 12 commits and 28
+changed source files. Serial review covered AI-cycle bounded collection and
+evidence archival, the five loop wrappers' phase/deliver handling, CI artifact
+publication, research publishing, VIX term-structure routing, and chat
+attachments/stream interruption handling. Standing sweeps HOLD: halt
+chokepoints (`scripts/ib_place_order.py:240-242`), order limits
+(`scripts/ib_place_order.py:253-255`; `scripts/api/server.py:2882-2898`),
+`_NON_IDEMPOTENT_IB_SCRIPTS` (`scripts/api/server.py:5540,5649,5727`),
+exit-order acknowledgement (`scripts/monitor_daemon/handlers/exit_orders.py`),
+and daemon-state Hrana writes (`scripts/db/writer.py:2360-2373`) remain wired.
+The delta adds no `placeOrder` / `place_order` or `service_health` writer, so
+no new bypass or catalog gap exists. `NEW_FINDINGS` and REL-021b remain
+standing P2 candidates with no changed-surface instance. No new finding was
+verified.
+
+---
+
+## Delta audit 2026-09-10
+
+Anchor `1ed5aa84` verified (`git rev-parse --verify` resolves to
+`1ed5aa84e2d9a97fa261b7982c827edaa1da2c1e`; `git merge-base --is-ancestor`
+confirms it is an ancestor). Range `1ed5aa84..9dce4b3a` is 5 commits and 42
+changed files. Serial review covered compact AI-cycle snapshot persistence and
+serving, Ramp curated ingestion, MenthorQ session recovery, and the
+AI-cycle control-plane timeout increase. Standing sweeps HOLD: halt
+chokepoints (`scripts/ib_place_order.py:240-242`), order limits
+(`scripts/ib_place_order.py:253-255`), `_NON_IDEMPOTENT_IB_SCRIPTS`
+(`scripts/api/server.py:5540,5649,5727`), exit-order acknowledgement
+(`scripts/monitor_daemon/handlers/exit_orders.py:185-220`), and daemon-state
+Hrana writes (`scripts/db/writer.py:2360-2373`) remain wired. The delta adds
+no `placeOrder` / `place_order` or `service_health` writer, so no new bypass
+or catalog gap exists. `NEW_FINDINGS` and REL-021b remain standing P2
+candidates with no changed-surface instance. Focused pytest could not start:
+this runner's `python3.13` lacks pytest. No new finding was verified.
+
+---
+
+## Delta audit 2026-09-11
+
+Anchor `9dce4b3a` verified (`git rev-parse --verify` resolves to
+`9dce4b3a3ec515b442a3e384270da42420539e08`; `git merge-base --is-ancestor`
+confirms it is an ancestor). Range `9dce4b3a..f1f59a73` is 13 commits and 75
+changed source files. Serial review covered the CTA vision cascade and its
+scheduled health path, bounded OpenDesign Arena collection, TWR
+coverage-lag persistence, dark-pool cache completeness, hosted MCP reads,
+authenticated research assets, and newsfeed provenance. Standing sweeps HOLD:
+halt chokepoints (`scripts/ib_place_order.py:240-242`), order limits
+(`scripts/ib_place_order.py:253-255`), `_NON_IDEMPOTENT_IB_SCRIPTS`
+(`scripts/api/server.py:5540,5649,5727`), exit-order acknowledgement
+(`scripts/monitor_daemon/handlers/exit_orders.py:185-220`), and daemon-state
+Hrana writes (`scripts/db/writer.py:2360-2373`) remain wired. The delta adds
+no `placeOrder` / `place_order` or `service_health` writer; changed scheduled
+writers remain in both watchdog catalogs. `NEW_FINDINGS` and REL-021b remain
+standing P2 candidates with no changed-surface instance. Focused pytest could
+not start because this runner's `python3.13` lacks pytest. No new finding was
+verified.
+
+---
+
+## Delta audit 2026-09-12
+
+Anchor `9dce4b3a` verified (`git rev-parse --verify` resolves to
+`9dce4b3a`; `git merge-base --is-ancestor` confirms it is an ancestor). Range
+`9dce4b3a..3e394792` is 20 commits / 180 changed files. Serial review covered
+the new shared model ladder and its MenthorQ/research callers, AI-cycle raw
+evidence persistence, research state and publishing, dark-pool/TWR changes,
+the quote relay, and changed units/UI. Standing sweeps HOLD: halt and
+order-limit chokepoints remain wired (`scripts/ib_place_order.py:240-255`),
+`_NON_IDEMPOTENT_IB_SCRIPTS` remains enforced (`scripts/api/server.py:5546,
+5655,5733`), exit-order acknowledgement remains polled
+(`scripts/monitor_daemon/handlers/exit_orders.py:202,766`), and daemon state
+uses Hrana (`scripts/db/writer.py:2360-2379`). No delta placement site or new
+service-health writer bypasses those controls; `NEW_FINDINGS` and REL-021b
+remain standing P2 candidates with no changed-surface instance.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-675 | P1 | `scripts/clients/model_ladder.py:330-378,624-703,838-861`; `scripts/research/model.py:43-53`; `requirements.txt:49` | **The new research model ladder's advertised 2 MB response bound is not enforced on its real HTTP transport, so a provider response can exhaust the worker.** `Reviewer.ask()` turns on Anthropic streaming and passes `max_response_bytes=2_000_000`, but `_default_post` invokes `httpx.post` without a streaming client. The bound is then attempted only for a response exposing requests-style `iter_content`; otherwise `_request` immediately materializes `.text` and `.json` with no cap. The five non-Anthropic providers never receive a byte limit at all. A malformed or oversized valid-HTTP provider response therefore consumes unbounded memory in the single research worker, denying queued documents and contradicting the bounded-reviewer contract. |
+
+### Backlog (continuing)
+
+| ID | Sev | Findings | Task | Acceptance |
+|---|---|---|---|---|
+| REL-254 | P1 | R-675 | **Make every model-ladder response genuinely byte-bounded on the production HTTP transport.** Use a managed streaming client/response API compatible with pinned `httpx==0.28.1`, enforce the cap before JSON/text materialization for every provider, close responses on all paths, and preserve bounded connect/read timeouts and failover. | Red first: a fake production-shaped streaming response exceeding 2 MB makes `Reviewer.ask()` raise the safe bounded-response error without calling `.text`/`.json`; each provider route is passed the same cap; a sub-cap Anthropic/Grok response still parses and the response is closed. |
+
+---
+
+## Delta audit 2026-09-14
+
+Anchor `3e394792` verified (`git rev-parse --verify` resolves to
+`3e394792601f42a83de9f6eeb8936acff209b4b5`; `git merge-base --is-ancestor`
+confirms it is an ancestor). Range `3e394792..9b9a65c7` is 53 commits / 78
+changed paths. Serial review covered trusted control-plane drift comparison,
+Flex-pull filesystem permissions, bounded model-ladder transport, research
+selection, codemap scheduling, assistant P&L recovery, and the DeepSec
+sibling-worker handoff. Codemap import edges added 35 callers to the changed
+source scope. Standing sweeps HOLD: halt/order-limit chokepoints
+(`scripts/ib_place_order.py:240-255`), `_NON_IDEMPOTENT_IB_SCRIPTS`
+(`scripts/api/server.py:5546,5655,5733`), exit-order acknowledgement
+(`scripts/monitor_daemon/handlers/exit_orders.py:202,766`), and daemon-state
+Hrana writes (`scripts/db/writer.py:2360-2379`) remain wired. No delta
+placement site or service-health writer bypasses those controls; `NEW_FINDINGS`
+and REL-021b have no changed-surface instance.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-676 | P1 | `scripts/security_deepsec.py:164-179,182-198`; `scripts/security_nightly.sh:521-538` | **A stale DeepSec fast-engine marker can convert an uncompleted timed-out security audit into an OK result.** `fast_engines_complete()` accepts either `fast-engines.complete` marker merely by existence, without comparing its contents to `head_sha`; `classify_audit()` then returns `OK (fast engines complete; DeepSec still running)` for a timed-out audit whenever status is `running`. A direct isolated repro wrote `old-head` into the marker, set `head_sha='new-head'`, and produced `fast_engines_complete=True` and the OK classification. The security wrapper treats that classification as successful, so the next audit may advance/report completion although its fast engines never audited the current commit. |
+
+### Backlog (continuing)
+
+| ID | Sev | Findings | Task | Acceptance |
+|---|---|---|---|---|
+| REL-255 | P1 | R-676 | **Bind DeepSec fast-engine completion evidence to the exact audited SHA.** Parse and require a marker/run-record SHA equal to `head_sha`; stale or malformed evidence must retain the timeout result. | Red first: an old marker plus `status=running` and a different requested head returns `TIMEOUT`; an exact-head marker returns the existing sibling-worker OK result; malformed marker and stale run-record cases fail closed. |
+
+---
+
+## Delta audit 2026-09-15
+
+Anchor `9b9a65c7` verified (`git rev-parse --verify` resolves to
+`9b9a65c7156f1b9d705db5cf6f659590b15297d9`; `git merge-base --is-ancestor`
+confirms it is an ancestor). Range `9b9a65c7..eb5b8cb0` is 29 commits / 51
+changed paths; codemap import edges add 27 callers, chiefly IB-sync contract
+tests. Serial review covered incident-response PR delivery, Grok responder
+state, stacked-vertical reconstruction, newsfeed runtime isolation, DeepSec
+handoff, wrapper subscription rails, and direct callers. Standing sweeps HOLD:
+halt/order-limit chokepoints (`scripts/ib_place_order.py:240-255`;
+`scripts/api/server.py:2883-2899`), `_NON_IDEMPOTENT_IB_SCRIPTS`
+(`scripts/api/server.py:5546,5655,5733`), exit-order acknowledgement
+(`scripts/monitor_daemon/handlers/exit_orders.py:196-222,766-780`), and
+daemon-state Hrana writes (`scripts/db/writer.py:35-46,2360-2373`) remain
+wired. The delta adds no placement call or service-health writer; the changed
+Grok responder writer remains in both catalogs (`scripts/watchdog/services.py:394-398,506`;
+`web/lib/serviceHealthWindows.ts:551-558`). `NEW_FINDINGS` and REL-021b remain
+standing P2 candidates with no changed-surface instance.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-677 | P1 | `scripts/grok_page_responder.py:624-647,660-671`; `scripts/watchdog/pages.py:211-249` | **An incident code fix with no PR is irreversibly marked done and its responder heartbeat remains healthy.** When `ensure_after_code_fix` rejects a missing/unauthorized `gh` or PR-create failure, the handler stores `PR_FAILED` but calls `complete_page(... status="done")` before returning 2. The page therefore leaves the retry queue; the `finally` still writes an `ok` heartbeat. The next 30-second timer can only process another page, while the pushed `fix/*` branch has no review/deploy path despite the helper's explicit “Branch-only is not a ship” contract. |
+
+### Backlog (continuing)
+
+| ID | Sev | Findings | Task | Acceptance |
+|---|---|---|---|---|
+| REL-256 | P1 | R-677 | **Keep an incident page actionable until its pushed code fix has a verified open PR.** On `IrEnsurePrError`, record a bounded failed attempt/pending state instead of `done`, report degraded responder health, and retain the PR error without discarding the branch. | Red first: a `code_fix` fixture whose PR ensure raises leaves the page pending with an incremented attempt and emits non-`ok` health; a later ensure returning a PR URL completes it once with that URL; the third PR failure follows the existing bounded-attempt terminal policy and remains operator-visible. |
+
+---
+
+## Delta audit 2026-09-17
+
+Anchor `eb5b8cb0` verified (`git rev-parse --verify` resolves to
+`eb5b8cb0e65622c8377022508a06db3c6b545294`; `git merge-base --is-ancestor`
+confirms it is an ancestor). Range `eb5b8cb0..0833758b` is 92 commits / 139
+changed source paths. Serial review covered the vol/skew and Cboe indicator
+paths, Liquid Compute collection and persistence, TWR history extension,
+position reconstruction, runtime isolation, and direct codemap callers.
+Standing sweeps HOLD: halt/order-limit chokepoints
+(`scripts/ib_place_order.py:239-255`; `scripts/api/server.py:2805-2899`),
+`_NON_IDEMPOTENT_IB_SCRIPTS` (`scripts/api/server.py:5545-5547`), exit-order
+acknowledgement (`scripts/monitor_daemon/handlers/exit_orders.py:196-222,766-780`),
+and daemon-state Hrana writes (`scripts/db/writer.py:35-46,2415-2437`) remain
+wired. No delta placement site bypasses the controls. New scheduled writers
+are in both watchdog catalogs: `liquidcompute` (`scripts/watchdog/services.py:173-175,555`)
+and `calm-streak` (`scripts/watchdog/services.py:192-195,567`); mirror-fed
+`vol-skew-mr` retains its snapshot/heartbeat chokepoint
+(`scripts/db/scan_mirror.py:40-53,84-142`). `NEW_FINDINGS` and REL-021b have
+no changed-surface instance.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-678 | P2 | `scripts/ai_cycle/liquidcompute.py:182-209`; `scripts/ai_cycle/store.py:114-139,141-166` | **The new daily Liquid Compute writer can delete the prior canonical observation before replacing it, then exit without an error health row.** `persist_ticker()` first upserts the index and then calls `upsert_observations_by_identity()`, which commits a `DELETE` at `:134` before its replacement `INSERT` at `:135-138`; neither operation shares a transaction. A transient Hrana failure or process death between those commits loses the prior AI-cycle observation while the index row presents the newer datum. The production handler catches only `SourceError`, schema/local exceptions at `liquidcompute.py:205`; `HranaHttpError` from either write escapes, so the newly-added `liquidcompute` watchdog row receives neither `ok` nor `error` for the failed cycle. This is a scheduled third-venue research source, not an execution path, hence P2; it is a silent provenance hole until the 26-hour stale alert. |
+## Delta audit 2026-09-16
+
+Anchor `eb5b8cb0` verified (`git rev-parse --verify` resolves to
+`eb5b8cb0e65622c8377022508a06db3c6b545294`; `git merge-base --is-ancestor`
+confirms it is an ancestor). Range `eb5b8cb0..8d1d0f52` is 81 commits / 228
+changed paths. Serial review covered Flex ingestion recovery, new CALM STREAK
+and Liquid Compute writers, incident-response PR handoff, model-ladder
+consumers, the removed workflow order bridge, order reconstruction, control
+plane lifecycle, and codemap callers. Standing sweeps HOLD: halt/order-limit
+chokepoints (`scripts/ib_place_order.py:239-255`; `scripts/api/server.py:2798-2819`),
+`_NON_IDEMPOTENT_IB_SCRIPTS` (`scripts/api/server.py:5460,5569`), exit-order
+acknowledgement (`scripts/monitor_daemon/handlers/exit_orders.py:198-222,764-780`),
+and daemon-state Hrana writes (`scripts/db/writer.py:35-46,2561-2587`) remain
+wired. Whole-repo placement scan adds no bypass, and the new `calm-streak` and
+`liquidcompute` writers are present in both watchdog catalogs
+(`scripts/watchdog/services.py:173-195,555-567`; `web/lib/serviceHealthWindows.ts:186-187,249-251`).
+`NEW_FINDINGS` and REL-021b remain standing P2 candidates with no
+changed-surface instance.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-678 | P2 | `scripts/flex_sftp_pull.py:579-590`; `scripts/watchdog/check.py:260-273`; `scripts/db/service_health_sql.py:25-32` | **A recurring Flex ingest budget exhaustion is recorded as healthy and can defer the same historical tail forever.** When at least one newest-first statement applies before `SWEEP_BUDGET_S`, `_run()` writes `state="ok"` with a `class:"budget"` payload and returns 0. The shared upsert replaces `last_error`, but `_check_error()` returns `state ok` without inspecting it, so repeated budget stops reset the error cooldown and never page. The 08:30 retry repeats newest-first work; if its arrival rate remains above the budget, oldest statements have no durable retry/debt signal despite being deferred indefinitely. This is P2 because the newest statement remains current, but historical portfolio reconciliation can remain incomplete without an operator-visible condition. |
+
+### Backlog (continuing)
+
+| ID | Sev | Findings | Task | Acceptance |
+|---|---|---|---|---|
+| REL-257 | P2 | R-678 | **Make Liquid Compute observation replacement atomic and report every persistence failure.** Replace an observation identity without a committed delete-before-insert gap, and translate every production collection/persistence exception into the existing bounded error heartbeat before non-zero exit. | Red first: seed a valid old observation, inject a failure into its replacement write, and assert the old row remains queryable; inject `HranaHttpError` from each persistence step and assert exactly one `liquidcompute` error health write plus non-zero exit; a successful replacement still updates both index and observation records. |
+| REL-257 | P2 | R-678 | **Make repeated Flex budget exhaustion durable and operator-visible without misclassifying one successful newest-first partial run.** Persist a bounded consecutive-budget/deferred-tail signal keyed to the delivery population; after the configured bound write a non-healthy state (or an explicitly watchdog-evaluated degraded state), and clear it only after a full catch-up. Preserve newest-first priority and the successful fresh-statement path. | Fault injection, red first: two consecutive runs with an applied newest statement and a forced expired budget produce an operator-visible degraded/error watchdog outcome; a complete next run clears it. Assert a single partial run remains distinguishable but does not page, and that repeated partial runs do not reset the watchdog failure sequence. |

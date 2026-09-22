@@ -112,6 +112,25 @@ def test_host_relay_unit_is_notify_watchdog() -> None:
     assert "ExecStart=/usr/bin/node scripts/ib_realtime_server.js" in text
 
 
+def test_relay_stop_timeout_is_inside_the_deploy_wait() -> None:
+    """stop-clean waits 60s, then fails the deploy. Default TimeoutStopSec is 90s.
+
+    On 2026-09-21 19:25Z the relay stayed in stop-sigterm until SIGKILL at
+    90s while nextjs and api were already stopped, so the edge 502'd and
+    the helper aborted at 60s. The cap has to land before that wait.
+    """
+    text = "\n".join(
+        line for line in RELAY_UNIT.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    assert "TimeoutStopSec=10" in text
+    dropin = "\n".join(
+        line for line in DROPIN.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    assert "TimeoutStopSec=" not in dropin
+
+
 def _uncommented(path) -> str:
     """Source with comment lines stripped.
 
@@ -156,5 +175,8 @@ def test_container_dropin_forwards_notify_socket() -> None:
     assert "docker.sock" not in runtime
     assert "NOTIFY_SOCKET" in runtime
     assert "WATCHDOG_USEC" in runtime
-    assert "--network host" in runtime
+    # Host network is now per-unit: the default stays host, newsfeed is
+    # isolated on bridge (see test_app_runtime.py network assertions).
+    assert "container_network=host" in runtime
+    assert '--network "$container_network"' in runtime
     assert "--cgroupns" in runtime

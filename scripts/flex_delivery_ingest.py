@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -71,6 +72,95 @@ HEALTH_SERVICE = "flex-pull"
 CASH_FLOW_HEALTH_SERVICE = "cash-flow-sync"
 
 
+def delivery_rows_present(kind: str, xml_text: str) -> bool:
+    """Independently verify duplicate coverage over bounded, read-only Hrana."""
+    from db.hrana_http import hrana_query
+
+    deadline = time.monotonic() + 15.0
+
+    def query(sql, args):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("duplicate coverage verification budget exhausted")
+        return hrana_query(sql, args, timeout=min(4.0, remaining))
+
+    if kind == ACTIVITY:
+        from cash_flow_sync import parse_cash_transactions
+        from perf_twr_builder import DEFAULT_ACCOUNT_ID, parse_nav_entries
+
+        expected = parse_cash_transactions(xml_text)
+        for offset in range(0, len(expected), 100):
+            batch = expected[offset:offset + 100]
+            ids = tuple(row["id"] for row in batch)
+            rows = query(
+                "SELECT id FROM cash_flows WHERE id IN ("
+                + ",".join("?" for _ in ids) + ")", ids,
+            )
+            if not set(ids).issubset({row[0] for row in rows}):
+                return False
+        # The NAV query can legitimately contain no cash movements. Its
+        # persisted dates must still exist. Values may have been corrected by
+        # a later statement, so coverage does not compare historical amounts.
+        dates = list(parse_nav_entries(xml_text))
+        for offset in range(0, len(dates), 100):
+            batch = dates[offset:offset + 100]
+            rows = query(
+                "SELECT report_date FROM nav_snapshots WHERE account_id = ? AND report_date IN ("
+                + ",".join("?" for _ in batch) + ")", (DEFAULT_ACCOUNT_ID, *batch),
+            )
+            if not set(batch).issubset({row[0] for row in rows}):
+                return False
+        return True
+    if kind == TRADES:
+        from trade_blotter.flex_query import FlexQueryFetcher
+        from journal_rehydrate import (
+            _existing_exec_ids,
+            _existing_exec_roots,
+            _reconcile_against_individual_fills,
+            _root_already_journaled,
+        )
+
+        executions, dropped = FlexQueryFetcher(token="x", query_id="x").parse_xml_with_drops(xml_text)
+        if dropped:
+            return False
+        pending = {str(execution.exec_id) for execution in executions}
+        cursor = ""
+        seen: List[Dict[str, Any]] = []
+        exhausted = False
+        # Bound both each page and the complete verification walk. Hitting the
+        # page cap with ids still pending is unknown coverage, never evidence
+        # that the missing rows were written.
+        for _ in range(100):
+            if not pending:
+                return True
+            rows = query(
+                "SELECT trade_id, payload FROM journal WHERE trade_id > ? "
+                "ORDER BY trade_id LIMIT 200", (cursor,),
+            )
+            if not rows:
+                exhausted = True
+                break
+            payloads = [json.loads(row[1]) for row in rows]
+            seen.extend(payloads)
+            ids = _existing_exec_ids(payloads)
+            roots = _existing_exec_roots(ids)
+            pending = {eid for eid in pending if eid not in ids and not _root_already_journaled(eid, roots)}
+            cursor = rows[-1][0]
+        if not pending:
+            return True
+        if not exhausted:
+            return False
+        # NF-4: individual IB fills are canonical. rehydrate marks the delivery
+        # applied and stores no Flex tradeID when those fills already match the
+        # contract-day quantity and gross notional. Requiring the Flex id here
+        # failed the oneshot on every re-pull (2026-09-22 page e1297eea).
+        # A quantity or notional disagreement stays unverified.
+        remaining = [execution for execution in executions if str(execution.exec_id) in pending]
+        uncovered, _groups, disagreements = _reconcile_against_individual_fills(remaining, seen)
+        return not uncovered and not disagreements
+    return False
+
+
 def ingest_xml(
     xml_text: str, *, source_path: str = "", record_as: str | None = None
 ) -> Dict[str, Any]:
@@ -97,7 +187,8 @@ def ingest_xml(
         # to one whose release failed with its writer (R-436); reporting it
         # `ok` lets the 08:30 re-pull heartbeat fine over a half-applied
         # `cash_flows`. It becomes claimable again once stale.
-        if flex_delivery_status(digest) == "in_progress":
+        status = flex_delivery_status(digest)
+        if status == "in_progress":
             return {
                 "ok": False,
                 "outcome": "in_progress",
@@ -106,6 +197,29 @@ def ingest_xml(
                 "error": "claim is in_progress from an earlier run; retried once stale",
                 "source_path": source_path,
             }
+        try:
+            if (
+                status == "applied"
+                and kind == ACTIVITY
+                and not delivery_rows_present(kind, xml_text)
+            ):
+                # Suppressed TWR persist writes no series, so an applied
+                # activity claim can lack its NAV dates. Insert the missing
+                # ones. Cash that is absent stays unverified; do not replay.
+                _repair_unmirrored_activity_nav(xml_text)
+            confirmed = status == "applied" and delivery_rows_present(kind, xml_text)
+        except Exception as exc:
+            # A verification read failure does not authorize replay of the
+            # non-idempotent ingest; report unknown coverage and retain its claim.
+            confirmed = False
+            print(f"[flex-ingest] duplicate coverage unavailable: {exc}", file=sys.stderr)
+        if not confirmed:
+            message = "applied delivery lacks verified persisted-row coverage; operator reconciliation required"
+            if kind == ACTIVITY:
+                _heartbeat_cash_flow_sync("error", {"message": message})
+            return {"ok": False, "outcome": "coverage_unverified", "persistence_confirmed": False,
+                    "classified_as": kind, "content_sha256": digest, "error": message,
+                    "source_path": source_path}
         if kind == ACTIVITY:
             # Its cash flows are already in Turso. The 08:30 re-pull and every
             # manual re-run land here, so without this the row the lozenge
@@ -116,6 +230,7 @@ def ingest_xml(
         return {
             "ok": True,
             "outcome": "duplicate",
+            "persistence_confirmed": True,
             "classified_as": kind,
             "content_sha256": digest,
             "source_path": source_path,
@@ -135,6 +250,68 @@ def ingest_xml(
     # Only now has every writer committed. R-436.
     mark_flex_delivery_applied(digest)
     return result
+
+
+def _repair_unmirrored_activity_nav(xml_text: str) -> None:
+    """Insert statement NAV dates a suppressed TWR persist did not mirror.
+
+    Cash coverage is the non-idempotent write. When those ids are present and
+    the NAV dates are not, the 08:30 retry failed the oneshot
+    (coverage_unverified, classified_as=activity). Insert the missing dates
+    only. ON CONFLICT DO NOTHING so a later correction already stored under
+    the same key is not overwritten.
+    """
+    from cash_flow_sync import parse_cash_transactions
+    from db.hrana_http import hrana_execute, hrana_query
+    from perf_twr_builder import DEFAULT_ACCOUNT_ID, parse_nav_entries
+
+    deadline = time.monotonic() + 15.0
+
+    def query(sql: str, args: tuple) -> list:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("duplicate coverage verification budget exhausted")
+        return hrana_query(sql, args, timeout=min(4.0, remaining))
+
+    expected = parse_cash_transactions(xml_text)
+    for offset in range(0, len(expected), 100):
+        batch = expected[offset:offset + 100]
+        ids = tuple(row["id"] for row in batch)
+        rows = query(
+            "SELECT id FROM cash_flows WHERE id IN ("
+            + ",".join("?" for _ in ids) + ")",
+            ids,
+        )
+        if not set(ids).issubset({row[0] for row in rows}):
+            return
+    nav = parse_nav_entries(xml_text)
+    dates = list(nav)
+    missing: List[str] = []
+    for offset in range(0, len(dates), 100):
+        batch = dates[offset:offset + 100]
+        rows = query(
+            "SELECT report_date FROM nav_snapshots WHERE account_id = ? "
+            "AND report_date IN (" + ",".join("?" for _ in batch) + ")",
+            (DEFAULT_ACCOUNT_ID, *batch),
+        )
+        found = {row[0] for row in rows}
+        missing.extend(day for day in batch if day not in found)
+    for offset in range(0, len(missing), 100):
+        batch = missing[offset:offset + 100]
+        params: List[Any] = []
+        for day in batch:
+            params.extend((DEFAULT_ACCOUNT_ID, day, float(nav[day])))
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("duplicate coverage verification budget exhausted")
+        hrana_execute(
+            "INSERT INTO nav_snapshots (account_id, report_date, total_net_liq, "
+            "cash, stock, options, accrued_fees) VALUES "
+            + ", ".join("(?, ?, ?, NULL, NULL, NULL, NULL)" for _ in batch)
+            + " ON CONFLICT(account_id, report_date) DO NOTHING",
+            params,
+            timeout=min(4.0, remaining),
+        )
 
 
 def _release_claim(digest: str) -> None:
@@ -248,14 +425,16 @@ def _apply_classified(kind: str, xml_text: str, digest: str, source_path: str) -
             }
         # REL-220 (R-588): this ok deliberately precedes the TWR build — it
         # reports the CASH-FLOW write, which is complete and (per R-329's
-        # id-keyed upsert) convergent under the retry a TWR failure triggers:
-        # the caller releases the claim, and re-ingesting the same bytes
-        # re-applies to identical rows. The TWR half reports through its own
-        # perf-twr surface. Pinned by test_rel220_twr_retry_convergence.
+        # id-keyed upsert) convergent under the retry a TWR *exception*
+        # triggers. A returned TWR status of degraded/unavailable is not an
+        # ingest failure: persist already ran, and perf-twr owns that page.
+        # 2026-09-16 page 5a2eb828: cash_exit=0 + twr_status=degraded failed
+        # radon-flex-pull (Result=exit-code) while radon-perf-twr published
+        # ok three minutes later.
         _heartbeat_cash_flow_sync("ok")
         twr = perf_twr_builder.build_and_persist(from_file=source_path, persist=True)
         return {
-            "ok": twr.get("status") in ("ok", "stale"),
+            "ok": True,
             "classified_as": kind,
             "content_sha256": digest,
             "cash_exit": cash_code,

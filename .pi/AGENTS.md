@@ -19,7 +19,7 @@ When a scoped `AGENTS.md` and this root file conflict, prefer the more specific 
 
 ## Code path map
 
-Read `tools/codemap/architecture.json` before searching for a module or reconstructing imports. Full graph: `tools/codemap/codemap.json` (`meta`, `groups`, `nodes`, `edges`; `edges` are `[src, dst]` indexes into `nodes`). Do not walk the tree to reconstruct imports. Code commits regenerate those files via `python3.13 tools/codemap/pre_commit.py`; CI fails if they are stale (`python3.13 tools/codemap/generate_codemap.py`).
+Read `tools/codemap/architecture.json` before searching for a module or reconstructing imports. Full graph: `tools/codemap/codemap.json` (`meta`, `groups`, `nodes`, `edges`; `edges` are `[src, dst]` indexes into `nodes`). Do not walk the tree to reconstruct imports. A nightly job (`scripts/codemap_nightly.sh`, 02:00 local) regenerates them and merges its own PR; never commit `tools/codemap/*.json` or `codemap.data.js` from a feature branch (it conflicts every open PR).
 
 ## Response Format
 
@@ -78,6 +78,7 @@ Read `tools/codemap/architecture.json` before searching for a module or reconstr
 - UI bugs require Playwright E2E coverage and visual browser verification. Use `chrome-cdp` when available; otherwise use Playwright.
 - Target 95% coverage on touched surfaces.
 - Always run the relevant focused tests. Run full project suites before commits when changes are code-bearing; if baselines are already red, report focused green results and unrelated baseline failures separately.
+- Local suites are worker-budgeted: `pytest -n auto` resolves to half the cores and an explicit `-n N` above that is clamped to it (root `conftest.py`); vitest runs `maxWorkers: 50%`. CI keeps every core. Never run pytest and vitest concurrently on the laptop. Overrides: `PYTEST_XDIST_AUTO_NUM_WORKERS` (lifts the pytest budget), `VITEST_MAX_WORKERS`.
 - For scoped Python changes, prefer `python3.13 scripts/run_pytest_affected.py --files ... -- -q` first, then broaden when needed.
 - For JS/UI changes, run focused Vitest, relevant Playwright E2E, and browser screenshot checks.
 
@@ -87,7 +88,7 @@ Read `tools/codemap/architecture.json` before searching for a module or reconstr
 - Four gates are sequential:
   1. Convexity: gain >= 2x loss; defined-risk preferred.
   2. Edge: specific data-backed dark-pool / OTC signal that has not moved price.
-  3. Risk: fractional Kelly with hard cap 2.5% bankroll per position.
+  3. Risk: half Kelly (0.5) default, 0.25 optional stricter, full Kelly banned; hard cap 2.5% bankroll per position.
   4. Naked-short gate is disabled as of 2026-04-30; logic remains in `_*Impl`, re-enable only via `docs/naked-short-reenable.md`.
 - If an active gate fails, stop and name the gate. Never rationalize a bad trade.
 - Evaluations must call `python3.13 scripts/evaluate.py [TICKER]`; do not manually call milestone scripts during evaluation.
@@ -109,13 +110,13 @@ Any UI or asset work must comply with Radon brand identity:
 ## Data Source Priority
 
 1. Interactive Brokers.
-2. Unusual Whales.
-3. Cboe official index feeds — COR1M dashboard history, official VIX/VVIX daily closes. Other specialized official feeds (Treasury, FINRA) rank here when a script documents them as the source for that metric.
-4. Robinhood — official trading MCP only (`https://agent.robinhood.com/mcp/trading`), READ-ONLY. Quote/chain failover + retail-crowding overlay; never above IB, UW, or Cboe; execution stays on IB. No dark pool, OTC, sweeps, GEX, or vol surface; options are NBBO/last + prior-close only.
+2. Robinhood — official trading MCP only (`https://agent.robinhood.com/mcp/trading`), READ-ONLY. Primary after IB for commodity price data (daily closes, quotes, chains) so UW calls go to its unique endpoints; retail-crowding overlay; never above IB; execution stays on IB. No dark pool, OTC, sweeps, GEX, or vol surface; options are NBBO/last + prior-close only.
+3. Unusual Whales.
+4. Cboe official index feeds — COR1M dashboard history, official VIX/VVIX daily closes. Other specialized official feeds (Treasury, FINRA) rank here when a script documents them as the source for that metric.
 5. Yahoo Finance — **ABSOLUTE LAST RESORT**. Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve.
 6. Web scrape / browser after Yahoo; use Exa for research/docs and interactive browser only for JS-rendered pages.
 
-Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set and not `authenticated`; then UW; then Robinhood (skipped cleanly when no credentials (access or refresh token) are configured; access tokens expire ~3 days, refreshed automatically via the 0600 token file `ROBINHOOD_MCP_TOKEN_FILE`); then Yahoo. 2FA, unattended timers, and "historical needs a gateway" do not skip IB or UW. Specialized official feeds (Cboe, Treasury, FINRA) may sit ahead of Robinhood and Yahoo when a script documents them as the source for that metric — the full order is IB > UW > Cboe > Robinhood > Yahoo.
+Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set and not `authenticated`; then Robinhood (skipped cleanly when no credentials (access or refresh token) are configured; access tokens expire ~3 days, refreshed automatically via the 0600 token file `ROBINHOOD_MCP_TOKEN_FILE`); then UW; then Yahoo. 2FA, unattended timers, and "historical needs a gateway" do not skip IB or UW. Specialized official feeds (Cboe, Treasury, FINRA) may sit ahead of Yahoo when a script documents them as the source for that metric — the full order is IB > Robinhood > UW > Cboe > Yahoo.
 
 ## Commands
 

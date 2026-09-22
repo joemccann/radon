@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { TrendingUp } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
+import FreshnessRail from "./FreshnessRail";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
 import SectionEmptyState from "./SectionEmptyState";
@@ -25,11 +26,27 @@ import {
   type MarginRangeSlug,
   type MarginRightView,
 } from "@/lib/marginDebt";
+import { MARGIN_DEBT_REFRESH } from "@/lib/refreshSchedule";
 import { useMarginDebt } from "@/lib/useMarginDebt";
 import { useViewport } from "@/lib/useViewport";
 
 const SPLICE_FOOTNOTE =
   "FINRA debit balances Jan 1997+; NYSE member-firm series 1959-1996 ratio-adjusted ×1.039 at the splice. YoY is null across the 1997 seam.";
+
+const MONTH_KEY = /^(\d{4})-(\d{2})$/;
+
+/**
+ * FINRA publishes debit balances as month-end totals under a `YYYY-MM` key;
+ * the rail wants the session it stands for, so a month label becomes its
+ * last calendar day. A full `YYYY-MM-DD` passes through untouched.
+ */
+function marginAsOfDate(monthKey: string | null | undefined): string | null {
+  if (!monthKey) return null;
+  const match = MONTH_KEY.exec(monthKey);
+  if (!match) return /^\d{4}-\d{2}-\d{2}$/.test(monthKey) ? monthKey : null;
+  const [, year, month] = match;
+  return new Date(Date.UTC(Number(year), Number(month), 0)).toISOString().slice(0, 10);
+}
 
 function yoyTone(v: number | null | undefined): "pos" | "neg" | "warn" | "mut" {
   const color = yoyColor(v);
@@ -170,6 +187,13 @@ export default function MarginDebtPanel() {
             />
           </RegimeStrip>
         )}
+
+        <FreshnessRail
+          schedule={MARGIN_DEBT_REFRESH}
+          asOf={marginAsOfDate(current.date)}
+          testId="margin-debt-freshness-rail"
+          model="release"
+        />
       </div>
 
       {/* ── S&P 500 vs margin debt chart ──────────────────── */}

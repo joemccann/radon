@@ -68,8 +68,8 @@ export function classifyRateTier(
 // of fresh per-resource tier-A budgets (R-652). Drift pin:
 // rel244-demo-rate-budget.test.ts fails when a new segment ships unlisted.
 export const KNOWN_API_SEGMENTS: ReadonlySet<string> = new Set([
-  "admin", "alerts", "assistant", "attribution", "backtest", "blotter",
-  "bookmarks", "bpi", "breadth", "cash-flows", "catalysts", "cor",
+  "admin", "ai-cycle", "alerts", "assistant", "attribution", "backtest", "blotter",
+  "bookmarks", "bpi", "breadth", "calm-streak", "cash-flows", "catalysts", "cor",
   "credentials", "credit-spread", "discover", "dispersion", "divyield",
   "equibles-ats-venue-share", "equibles-cot-positioning",
   "equibles-filing-forensics", "equibles-short-crowding",
@@ -80,10 +80,10 @@ export const KNOWN_API_SEGMENTS: ReadonlySet<string> = new Set([
   "journal", "knowledge", "leap", "llm-token-index", "ma-ratio",
   "margin-debt", "menthorq", "models", "newsfeed", "options", "orders",
   "paper", "performance", "pi", "portfolio", "preferences", "previous-close",
-  "prices", "probe", "profile", "regime", "risk-free-rate", "scanner",
+  "prices", "probe", "profile", "regime", "research", "risk-free-rate", "scanner",
   "service-health", "setup", "share", "short-availability", "skew", "skew2d",
-  "straddle", "streaks", "ticker", "trin", "vcg", "vixcor", "vixts",
-  "vol-cone", "watchlist", "webhooks", "workflow", "yield-curve",
+  "straddle", "streaks", "ticker", "trin", "vcg", "vixcor", "vixts", "panic-index",
+  "vol-cone", "watchlist", "webhooks", "yield-curve",
 ]);
 
 /**

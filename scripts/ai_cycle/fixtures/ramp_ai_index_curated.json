@@ -1,0 +1,663 @@
+{
+  "source_url": "https://ramp.com/data/ai-index",
+  "methodology_version": "ramp-spend-intensity-v2-jun2026",
+  "cohort_version": "ramp-us-business-panel-70k-v2",
+  "published_at": "2026-09-09T00:00:00Z",
+  "curated_from": [
+    "https://ramp.com/data/ai-index",
+    "https://ramp.com/data/how-we-built-the-ramp-ai-index",
+    "https://ramp.com/data/ai-index-june-2026",
+    "https://ramp.com/data/ai-index-august-2026",
+    "https://ramp.com/data/ai-index-sept-2026"
+  ],
+  "methodology_notes": [
+    "Observed paid card and bill-pay transactions on Ramp; free tools and employee personal accounts are excluded.",
+    "Top 1% spend per employee uses a small cohort and is more volatile than median and top 10% estimates.",
+    "Ramp revised July 2026 top-1% spend upward after additional transactions arrived (see Sept 2026 letter)."
+  ],
+  "source_page_hash": "afd8defc886412d74ce9a1ce392f2227f2f4faa7f3bbec61f44d347956a335a1",
+  "spend_per_employee": [
+    {
+      "date_month": "2024-01-01",
+      "median_pepm": 2.86,
+      "p90_pepm": 38.71,
+      "p99_pepm": 491.19,
+      "top_10_percent_median_pepm": 86.92,
+      "top_1_percent_median_pepm": 880.7,
+      "p99_winsorized_weighted_pepm": 4.96,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2024-02-01",
+      "median_pepm": 2.93,
+      "p90_pepm": 40.06,
+      "p99_pepm": 437.32,
+      "top_10_percent_median_pepm": 83.06,
+      "top_1_percent_median_pepm": 945.29,
+      "p99_winsorized_weighted_pepm": 5.01,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2024-03-01",
+      "median_pepm": 3.18,
+      "p90_pepm": 47.77,
+      "p99_pepm": 513.31,
+      "top_10_percent_median_pepm": 103.49,
+      "top_1_percent_median_pepm": 1240.56,
+      "p99_winsorized_weighted_pepm": 5.79,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2024-04-01",
+      "median_pepm": 3.15,
+      "p90_pepm": 44.88,
+      "p99_pepm": 583.17,
+      "top_10_percent_median_pepm": 97.55,
+      "top_1_percent_median_pepm": 1507.03,
+      "p99_winsorized_weighted_pepm": 6.6,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2024-05-01",
+      "median_pepm": 3.21,
+      "p90_pepm": 46.6,
+      "p99_pepm": 587.21,
+      "top_10_percent_median_pepm": 101.99,
+      "top_1_percent_median_pepm": 1360.34,
+      "p99_winsorized_weighted_pepm": 6.68,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2024-06-01",
+      "median_pepm": 3.1,
+      "p90_pepm": 44.66,
+      "p99_pepm": 633.46,
+      "top_10_percent_median_pepm": 99.49,
+      "top_1_percent_median_pepm": 1389.19,
+      "p99_winsorized_weighted_pepm": 6.36,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2024-07-01",
+      "median_pepm": 3.08,
+      "p90_pepm": 45.58,
+      "p99_pepm": 717.05,
+      "top_10_percent_median_pepm": 105.11,
+      "top_1_percent_median_pepm": 1590.49,
+      "p99_winsorized_weighted_pepm": 7.44,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2024-08-01",
+      "median_pepm": 3.05,
+      "p90_pepm": 45.47,
+      "p99_pepm": 719.89,
+      "top_10_percent_median_pepm": 102.42,
+      "top_1_percent_median_pepm": 1530.12,
+      "p99_winsorized_weighted_pepm": 7.36,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2024-09-01",
+      "median_pepm": 3.13,
+      "p90_pepm": 46.26,
+      "p99_pepm": 617.74,
+      "top_10_percent_median_pepm": 104.78,
+      "top_1_percent_median_pepm": 1488.32,
+      "p99_winsorized_weighted_pepm": 6.03,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2024-10-01",
+      "median_pepm": 3.3,
+      "p90_pepm": 47.6,
+      "p99_pepm": 665.93,
+      "top_10_percent_median_pepm": 112.01,
+      "top_1_percent_median_pepm": 1352.38,
+      "p99_winsorized_weighted_pepm": 7.17,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2024-11-01",
+      "median_pepm": 3.33,
+      "p90_pepm": 47.57,
+      "p99_pepm": 776.19,
+      "top_10_percent_median_pepm": 108.67,
+      "top_1_percent_median_pepm": 1456.7,
+      "p99_winsorized_weighted_pepm": 7.67,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2024-12-01",
+      "median_pepm": 3.33,
+      "p90_pepm": 52.4,
+      "p99_pepm": 772.39,
+      "top_10_percent_median_pepm": 119.44,
+      "top_1_percent_median_pepm": 1730.01,
+      "p99_winsorized_weighted_pepm": 7.48,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2025-01-01",
+      "median_pepm": 3.53,
+      "p90_pepm": 60.71,
+      "p99_pepm": 711.93,
+      "top_10_percent_median_pepm": 139.95,
+      "top_1_percent_median_pepm": 1825.74,
+      "p99_winsorized_weighted_pepm": 8.06,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2025-02-01",
+      "median_pepm": 3.88,
+      "p90_pepm": 64.64,
+      "p99_pepm": 785.69,
+      "top_10_percent_median_pepm": 137.88,
+      "top_1_percent_median_pepm": 1952.77,
+      "p99_winsorized_weighted_pepm": 8.2,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2025-03-01",
+      "median_pepm": 4,
+      "p90_pepm": 66.72,
+      "p99_pepm": 790.84,
+      "top_10_percent_median_pepm": 141.9,
+      "top_1_percent_median_pepm": 2136.63,
+      "p99_winsorized_weighted_pepm": 9.09,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2025-04-01",
+      "median_pepm": 4,
+      "p90_pepm": 68.68,
+      "p99_pepm": 859.72,
+      "top_10_percent_median_pepm": 154.98,
+      "top_1_percent_median_pepm": 2122.65,
+      "p99_winsorized_weighted_pepm": 9.19,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2025-05-01",
+      "median_pepm": 4.13,
+      "p90_pepm": 73.48,
+      "p99_pepm": 901.48,
+      "top_10_percent_median_pepm": 163.39,
+      "top_1_percent_median_pepm": 2057.11,
+      "p99_winsorized_weighted_pepm": 10.37,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2025-06-01",
+      "median_pepm": 4.27,
+      "p90_pepm": 76.81,
+      "p99_pepm": 873.71,
+      "top_10_percent_median_pepm": 166.69,
+      "top_1_percent_median_pepm": 2017.41,
+      "p99_winsorized_weighted_pepm": 9.85,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2025-07-01",
+      "median_pepm": 4.55,
+      "p90_pepm": 85.04,
+      "p99_pepm": 989.81,
+      "top_10_percent_median_pepm": 194.3,
+      "top_1_percent_median_pepm": 2176.86,
+      "p99_winsorized_weighted_pepm": 11.78,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2025-08-01",
+      "median_pepm": 4.71,
+      "p90_pepm": 87.31,
+      "p99_pepm": 988.67,
+      "top_10_percent_median_pepm": 195.53,
+      "top_1_percent_median_pepm": 2417.88,
+      "p99_winsorized_weighted_pepm": 7.47,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2025-09-01",
+      "median_pepm": 4.9,
+      "p90_pepm": 93.79,
+      "p99_pepm": 1137.66,
+      "top_10_percent_median_pepm": 196.01,
+      "top_1_percent_median_pepm": 2301.14,
+      "p99_winsorized_weighted_pepm": 12.73,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2025-10-01",
+      "median_pepm": 5.15,
+      "p90_pepm": 103.66,
+      "p99_pepm": 1201.08,
+      "top_10_percent_median_pepm": 223.17,
+      "top_1_percent_median_pepm": 2811.13,
+      "p99_winsorized_weighted_pepm": 13.18,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2025-11-01",
+      "median_pepm": 5.09,
+      "p90_pepm": 100.26,
+      "p99_pepm": 1099.97,
+      "top_10_percent_median_pepm": 220.69,
+      "top_1_percent_median_pepm": 2521.35,
+      "p99_winsorized_weighted_pepm": 11.55,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2025-12-01",
+      "median_pepm": 5.26,
+      "p90_pepm": 110,
+      "p99_pepm": 1486.77,
+      "top_10_percent_median_pepm": 247.56,
+      "top_1_percent_median_pepm": 3333.54,
+      "p99_winsorized_weighted_pepm": 14.86,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2026-01-01",
+      "median_pepm": 5.86,
+      "p90_pepm": 135.96,
+      "p99_pepm": 1458.61,
+      "top_10_percent_median_pepm": 284.53,
+      "top_1_percent_median_pepm": 2926.97,
+      "p99_winsorized_weighted_pepm": 14.11,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2026-02-01",
+      "median_pepm": 6.94,
+      "p90_pepm": 153.54,
+      "p99_pepm": 1702.13,
+      "top_10_percent_median_pepm": 336.65,
+      "top_1_percent_median_pepm": 3112.59,
+      "p99_winsorized_weighted_pepm": 16.04,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2026-03-01",
+      "median_pepm": 8.7,
+      "p90_pepm": 185.51,
+      "p99_pepm": 2116.78,
+      "top_10_percent_median_pepm": 404.12,
+      "top_1_percent_median_pepm": 4241.31,
+      "p99_winsorized_weighted_pepm": 18.2,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2026-04-01",
+      "median_pepm": 10,
+      "p90_pepm": 200,
+      "p99_pepm": 2344.1,
+      "top_10_percent_median_pepm": 432.89,
+      "top_1_percent_median_pepm": 4436.32,
+      "p99_winsorized_weighted_pepm": 20.07,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2026-05-01",
+      "median_pepm": 10.43,
+      "p90_pepm": 211.19,
+      "p99_pepm": 2466.6,
+      "top_10_percent_median_pepm": 465.22,
+      "top_1_percent_median_pepm": 4782.23,
+      "p99_winsorized_weighted_pepm": 19.29,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2026-06-01",
+      "median_pepm": 10.92,
+      "p90_pepm": 223.27,
+      "p99_pepm": 2834.26,
+      "top_10_percent_median_pepm": 517.34,
+      "top_1_percent_median_pepm": 5405.46,
+      "p99_winsorized_weighted_pepm": 20.34,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2026-07-01",
+      "median_pepm": 11.88,
+      "p90_pepm": 263.01,
+      "p99_pepm": 3797.58,
+      "top_10_percent_median_pepm": 644.58,
+      "top_1_percent_median_pepm": 7975.84,
+      "p99_winsorized_weighted_pepm": 26.17,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    },
+    {
+      "date_month": "2026-08-01",
+      "median_pepm": 12.5,
+      "p90_pepm": 279.98,
+      "p99_pepm": 3768.57,
+      "top_10_percent_median_pepm": 675.6,
+      "top_1_percent_median_pepm": 7205.13,
+      "p99_winsorized_weighted_pepm": 13.71,
+      "raw_weighted_pepm": null,
+      "business_count": null,
+      "spend_usd": null,
+      "total_fte_denominator": null,
+      "is_publishable": null
+    }
+  ],
+  "adoption_overall": [
+    {
+      "date_month": "2024-01-01",
+      "adoption_rate_pct": 32.51,
+      "mom_change_pp": 0.83,
+      "yoy_change_pp": 25.06
+    },
+    {
+      "date_month": "2024-02-01",
+      "adoption_rate_pct": 32.73,
+      "mom_change_pp": 0.22,
+      "yoy_change_pp": 20.68
+    },
+    {
+      "date_month": "2024-03-01",
+      "adoption_rate_pct": 33.35,
+      "mom_change_pp": 0.61,
+      "yoy_change_pp": 12.44
+    },
+    {
+      "date_month": "2024-04-01",
+      "adoption_rate_pct": 33.12,
+      "mom_change_pp": -0.23,
+      "yoy_change_pp": 8.72
+    },
+    {
+      "date_month": "2024-05-01",
+      "adoption_rate_pct": 33.22,
+      "mom_change_pp": 0.1,
+      "yoy_change_pp": 7.13
+    },
+    {
+      "date_month": "2024-06-01",
+      "adoption_rate_pct": 33.47,
+      "mom_change_pp": 0.25,
+      "yoy_change_pp": 7.81
+    },
+    {
+      "date_month": "2024-07-01",
+      "adoption_rate_pct": 33.88,
+      "mom_change_pp": 0.42,
+      "yoy_change_pp": 6.75
+    },
+    {
+      "date_month": "2024-08-01",
+      "adoption_rate_pct": 34.21,
+      "mom_change_pp": 0.33,
+      "yoy_change_pp": 6.33
+    },
+    {
+      "date_month": "2024-09-01",
+      "adoption_rate_pct": 35.21,
+      "mom_change_pp": 0.99,
+      "yoy_change_pp": 6.17
+    },
+    {
+      "date_month": "2024-10-01",
+      "adoption_rate_pct": 35.83,
+      "mom_change_pp": 0.62,
+      "yoy_change_pp": 6.18
+    },
+    {
+      "date_month": "2024-11-01",
+      "adoption_rate_pct": 36.36,
+      "mom_change_pp": 0.53,
+      "yoy_change_pp": 5.89
+    },
+    {
+      "date_month": "2024-12-01",
+      "adoption_rate_pct": 36.66,
+      "mom_change_pp": 0.3,
+      "yoy_change_pp": 4.97
+    },
+    {
+      "date_month": "2025-01-01",
+      "adoption_rate_pct": 37.73,
+      "mom_change_pp": 1.08,
+      "yoy_change_pp": 5.22
+    },
+    {
+      "date_month": "2025-02-01",
+      "adoption_rate_pct": 38.67,
+      "mom_change_pp": 0.94,
+      "yoy_change_pp": 5.94
+    },
+    {
+      "date_month": "2025-03-01",
+      "adoption_rate_pct": 39.17,
+      "mom_change_pp": 0.5,
+      "yoy_change_pp": 5.83
+    },
+    {
+      "date_month": "2025-04-01",
+      "adoption_rate_pct": 40.77,
+      "mom_change_pp": 1.6,
+      "yoy_change_pp": 7.65
+    },
+    {
+      "date_month": "2025-05-01",
+      "adoption_rate_pct": 41.9,
+      "mom_change_pp": 1.13,
+      "yoy_change_pp": 8.68
+    },
+    {
+      "date_month": "2025-06-01",
+      "adoption_rate_pct": 42.72,
+      "mom_change_pp": 0.81,
+      "yoy_change_pp": 9.25
+    },
+    {
+      "date_month": "2025-07-01",
+      "adoption_rate_pct": 44.08,
+      "mom_change_pp": 1.36,
+      "yoy_change_pp": 10.2
+    },
+    {
+      "date_month": "2025-08-01",
+      "adoption_rate_pct": 44.98,
+      "mom_change_pp": 0.9,
+      "yoy_change_pp": 10.77
+    },
+    {
+      "date_month": "2025-09-01",
+      "adoption_rate_pct": 45.19,
+      "mom_change_pp": 0.21,
+      "yoy_change_pp": 9.98
+    },
+    {
+      "date_month": "2025-10-01",
+      "adoption_rate_pct": 45.1,
+      "mom_change_pp": -0.09,
+      "yoy_change_pp": 9.27
+    },
+    {
+      "date_month": "2025-11-01",
+      "adoption_rate_pct": 45.94,
+      "mom_change_pp": 0.84,
+      "yoy_change_pp": 9.58
+    },
+    {
+      "date_month": "2025-12-01",
+      "adoption_rate_pct": 45.92,
+      "mom_change_pp": -0.02,
+      "yoy_change_pp": 9.27
+    },
+    {
+      "date_month": "2026-01-01",
+      "adoption_rate_pct": 46.96,
+      "mom_change_pp": 1.04,
+      "yoy_change_pp": 9.23
+    },
+    {
+      "date_month": "2026-02-01",
+      "adoption_rate_pct": 49.1,
+      "mom_change_pp": 2.14,
+      "yoy_change_pp": 10.43
+    },
+    {
+      "date_month": "2026-03-01",
+      "adoption_rate_pct": 51.26,
+      "mom_change_pp": 2.17,
+      "yoy_change_pp": 12.09
+    },
+    {
+      "date_month": "2026-04-01",
+      "adoption_rate_pct": 52.98,
+      "mom_change_pp": 1.71,
+      "yoy_change_pp": 12.2
+    },
+    {
+      "date_month": "2026-05-01",
+      "adoption_rate_pct": 54.17,
+      "mom_change_pp": 1.19,
+      "yoy_change_pp": 12.26
+    },
+    {
+      "date_month": "2026-06-01",
+      "adoption_rate_pct": 54.95,
+      "mom_change_pp": 0.78,
+      "yoy_change_pp": 12.23
+    },
+    {
+      "date_month": "2026-07-01",
+      "adoption_rate_pct": 55.71,
+      "mom_change_pp": 0.76,
+      "yoy_change_pp": 11.63
+    },
+    {
+      "date_month": "2026-08-01",
+      "adoption_rate_pct": 56.13,
+      "mom_change_pp": 0.42,
+      "yoy_change_pp": 11.15
+    }
+  ]
+}

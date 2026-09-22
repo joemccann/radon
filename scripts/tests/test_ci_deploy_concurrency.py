@@ -8,6 +8,7 @@ finish and every deploy must name the exact commit it intends to release.
 
 from __future__ import annotations
 
+import ast
 import fnmatch
 import json
 import re
@@ -42,10 +43,8 @@ TEST_JOBS = (
 def _declared_required_status_checks() -> set[str]:
     """Contexts the operator has declared as required status checks on `main`.
 
-    Empty today: `gh api repos/{owner}/{repo}/branches/main/protection` returns
-    no `required_status_checks` key at all. Adding a context here is a claim
-    about live GitHub state that this test cannot verify — apply it over the API
-    first, then declare it.
+    Verified against GitHub on 2026-09-07. Keep the offline mirror in sync
+    after changing branch protection.
     """
     if not REQUIRED_STATUS_CHECKS.exists():
         return set()
@@ -97,10 +96,44 @@ def test_deploy_time_budgets_cover_supervisor_and_recovery() -> None:
     # 190s once for an orphan root action to release the lifecycle lock.
     root_recovery_seconds = 190 + (2 * 180) + 30 + 30
     worst_case_seconds = (2 * root_recovery_seconds) + 900 + 30
+    # 2026-09-19: the SSH script first waits a bounded time for the previous
+    # release to free the production deploy lock; that wait is part of the
+    # SSH budget too.
+    worst_case_seconds += _deploy_lock_wait_seconds()
     ssh_seconds = int(command_timeout.removesuffix("m")) * 60
     job_seconds = int(deploy["timeout-minutes"]) * 60
     assert ssh_seconds >= worst_case_seconds + 600
     assert job_seconds >= ssh_seconds + 300
+
+
+def _deploy_script() -> str:
+    deploy = _workflow()["jobs"]["deploy"]
+    ssh_step = next(step for step in deploy["steps"] if step.get("name") == "Deploy via SSH")
+    return ssh_step["with"]["script"]
+
+
+def _deploy_lock_wait_seconds() -> int:
+    match = re.search(r"RADON_DEPLOY_LOCK_WAIT_SECS:-(\d+)", _deploy_script())
+    assert match, "the deploy script lost its bounded lock wait"
+    return int(match.group(1))
+
+
+def test_deploy_waits_for_the_finishing_release_before_refusing() -> None:
+    """2026-09-19: three merges in four minutes. deploy-production serializes the
+    GitHub jobs, but the previous release was still inside deploy.sh on the VPS
+    when the next job's SSH began, so deploy.sh refused the held lock (exit
+    75) and a green commit never shipped until a manual re-run. deploy.sh stays
+    non-blocking (cloud/tests pin `flock -n`); the SSH script queues behind the
+    lock for a bounded time first."""
+    script = _deploy_script()
+    assert "wait_for_deploy_lock()" in script
+    assert 'flock -n "$DEPLOY_LOCK_FILE" true' in script
+    assert ".radon-deploy.lock" in script
+    assert 0 < _deploy_lock_wait_seconds() <= 600
+    # The wait runs before EVERY deploy.sh invocation, including the legacy
+    # runner and the recover-only pass.
+    assert script.index("wait_for_deploy_lock\n") < script.index("deploy_with_legacy_runner() {")
+    assert script.index("wait_for_deploy_lock\n") < script.index("RADON_DEPLOY_RECOVER_ONLY")
 
 
 def test_deploy_passes_the_explicit_workflow_sha() -> None:
@@ -260,8 +293,12 @@ def test_python_ci_jobs_cache_pip_and_pin_the_test_toolchain() -> None:
 
 
 def test_vitest_uses_all_ci_workers() -> None:
+    # The worker count is resolved by vitest.workers.ts: every core on CI,
+    # half on a developer machine (web/tests/vitest-config-contract.test.ts).
     config = (WORKFLOW.parents[2] / "vitest.config.ts").read_text(encoding="utf-8")
-    assert re.search(r'maxWorkers:\s*["\']100%["\']', config)
+    budget = (WORKFLOW.parents[2] / "vitest.workers.ts").read_text(encoding="utf-8")
+    assert re.search(r"maxWorkers:\s*resolveMaxWorkers\(process\.env\)", config)
+    assert re.search(r'env\.CI\s*\?\s*["\']100%["\']', budget)
     assert re.search(r"fileParallelism:\s*true", config)
 
 
@@ -513,6 +550,42 @@ def test_coverage_ratchets_gate_the_deploy() -> None:
     assert "stage-release" in needs
     assert "merge_vitest_coverage" in _job_commands(jobs["web-coverage"])
     assert "fail-under=56" in _job_commands(jobs["py-coverage"])
+
+
+def test_required_matrix_checks_run_for_every_pr_and_filter_pushes() -> None:
+    """Job-level false conditions skip matrix expansion and its required names."""
+    jobs = _workflow()["jobs"]
+    required = _declared_required_status_checks()
+    matrices = {
+        name: job for name, job in jobs.items()
+        if "matrix" in job.get("strategy", {})
+        and any(
+            job["name"].replace("${{ matrix.shard }}", str(shard)) in required
+            for shard in job["strategy"]["matrix"]["shard"]
+        )
+    }
+    assert set(matrices) == {"web-tests", "py-tests", "cloud-tests"}
+    assert jobs["perimeter-smoke"]["name"] in required
+    matrices["perimeter-smoke"] = jobs["perimeter-smoke"]
+    for event in ("pull_request", "push"):
+        for web_changed, python_changed in ((False, False), (True, False), (False, True), (True, True)):
+            values = {
+                "github.event_name": event,
+                "needs.changes.outputs.web": str(web_changed).lower(),
+                "needs.changes.outputs.python": str(python_changed).lower(),
+            }
+            for name, job in matrices.items():
+                # These guards use equality clauses joined by OR. Parse values
+                # as literals; do not execute expressions from the workflow.
+                clauses = job["if"].split("||")
+                enabled = False
+                for clause in clauses:
+                    left, right = clause.strip().split(" == ")
+                    enabled |= values[left] == ast.literal_eval(right)
+                changed = web_changed if name in {"web-tests", "perimeter-smoke"} else python_changed
+                assert enabled == (event == "pull_request" or changed), (
+                    name, event, web_changed, python_changed, job["if"]
+                )
 
 
 def test_path_filter_skips_the_other_gate() -> None:
@@ -786,3 +859,38 @@ def test_cloud_shards_parallelise_except_the_wall_clock_edge_shard() -> None:
     assert rows["al"]["xdist"] == "-n auto --dist loadfile"
     assert rows["edge"]["xdist"] == "", "the edge shard is wall-clock; keep it serial"
     assert "matrix.xdist" in _job_commands(cloud)
+
+
+def test_mcp_golden_report_runs_once_in_the_full_python_matrix() -> None:
+    """A full Python PR suppresses cross-tree jobs; its report cannot live there."""
+    jobs = _workflow()["jobs"]
+    evaluation_steps = [
+        (name, step)
+        for name, job in jobs.items()
+        for step in job.get("steps", [])
+        if "-m mcp_hosted.evaluate" in step.get("run", "")
+    ]
+    assert len(evaluation_steps) == 1
+    job_name, evaluate = evaluation_steps[0]
+    assert job_name == "py-tests"
+    assert "github.event_name == 'pull_request'" in jobs[job_name]["if"]
+    assert "matrix.shard == 'scripts-jm'" in evaluate["if"]
+    assert "!cancelled()" in evaluate["if"]
+    assert "--live" not in evaluate["run"], "CI must use offline contracts, never providers"
+    assert "--output /tmp/mcp-evaluation.json" in evaluate["run"]
+    assert evaluate.get("continue-on-error", "false") == "false"
+    uploads = [
+        (name, step)
+        for name, job in jobs.items()
+        for step in job.get("steps", [])
+        if step.get("with", {}).get("name") == "mcp-golden-contract-report"
+    ]
+    assert len(uploads) == 1, "matrix shards cannot race on one artifact name"
+    upload_job, upload = uploads[0]
+    assert upload_job == job_name
+    assert upload["if"] == evaluate["if"]
+    assert upload["with"]["path"] == "/tmp/mcp-evaluation.json"
+    assert upload["with"]["if-no-files-found"] == "error"
+    steps = jobs[job_name]["steps"]
+    assert steps.index(upload) > steps.index(evaluate)
+    assert "-r requirements.txt" in _job_commands(jobs[job_name])

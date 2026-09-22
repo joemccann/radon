@@ -222,7 +222,7 @@ export default function SingleLegOrderTicket({
       }
       setConfirmStep(false);
     },
-    [onLimitPriceChange, orderType],
+    [onLimitPriceChange, orderType, setStopPrice],
   );
 
   const selectOrderType = (next: IbOrderType) => {

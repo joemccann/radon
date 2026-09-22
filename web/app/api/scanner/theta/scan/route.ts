@@ -1,7 +1,7 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { NextResponse } from "next/server";
-import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, scrubSecrets, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import { emptyThetaHarvesterPayload, readThetaHarvesterCache } from "../route";
 import { buildDemoThetaHarvester } from "@/lib/demo/fixtures/thetaHarvester";
@@ -41,7 +41,9 @@ export async function POST(request: Request): Promise<Response> {
   if (ticker) {
     params.set("ticker", ticker);
   } else if (typeof body.preset === "string") {
-    params.set("preset", body.preset);
+    // RC-B10: forward the SANITIZED preset — the FastAPI cooldown cache keys
+    // on it, so forwarding the raw body value defeats the cache match.
+    params.set("preset", preset);
   }
   const limit = !ticker && typeof body.limit === "number" && Number.isFinite(body.limit) && body.limit > 0
     ? Math.trunc(body.limit)
@@ -105,7 +107,8 @@ export async function POST(request: Request): Promise<Response> {
     } catch {
       // Preserve the upstream failure below.
     }
-    const message = err instanceof Error ? err.message : "Theta harvester scan failed";
+    // RC-B9: upstream error text can carry a LibsqlError's URL + token.
+    const message = scrubSecrets(err instanceof Error ? err.message : "Theta harvester scan failed");
     return setNoStoreResponseHeaders(
       NextResponse.json({ ...emptyThetaHarvesterPayload(), scan_succeeded: false, error: message }, { status }),
       requestId,

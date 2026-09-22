@@ -1,24 +1,12 @@
 "use client";
+import RequestError from "@/components/RequestError";
 
-/**
- * LLM Compute Premium card — Regime tab.
- *
- * Renders the Radon LLM Token Expenditure Index as a line chart matching
- * the CRI/VCG visual treatment. The index is normalised to 1.0 on the
- * first persisted day so the chart reads like Silicon Data's compute-cost
- * series (1.0 base → climbs/falls thereafter as the basket of frontier
- * model prices moves).
- *
- * Data source: GET /api/llm-token-index → /llm-token-index FastAPI route
- *              → Turso llm_token_index table → daily systemd timer
- *              → Artificial Analysis API.
- *
- * Brand tokens only — no raw hex, 4px max border-radius (CLAUDE.md).
- */
+/** Preserved v1 inference price history. Membership and price direction do not establish scarcity. */
 
+import { userErrorMessage } from "@/lib/userError";
 import { useMemo } from "react";
-import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
-import { chartSeriesColor } from "@/lib/chartSystem";
+import AiIndustryHistoryChart from "./AiIndustryHistoryChart";
+import { historyGroups, type AiHistoryPoint } from "@/lib/aiInfrastructure";
 import {
   useLlmTokenIndex,
   type LlmTokenIndexRow,
@@ -37,57 +25,41 @@ function formatChange(rows: LlmTokenIndexRow[]): {
   if (rows.length < 2) return { pct: null, label: "---" };
   const first = rows[0].index_value;
   const last = rows[rows.length - 1].index_value;
-  if (!Number.isFinite(first) || first === 0) return { pct: null, label: "---" };
+  if (!Number.isFinite(first) || first === 0 || rows.some(row => row.methodology_version !== rows[0].methodology_version)) return { pct: null, label: "---" };
   const pct = ((last - first) / first) * 100;
   const sign = pct >= 0 ? "+" : "";
   return { pct, label: `${sign}${pct.toFixed(1)}% over ${rows.length}d` };
+}
+
+export function legacyIndexHistory(rows: LlmTokenIndexRow[]): AiHistoryPoint[][] {
+  return historyGroups(rows.map(row => ({
+    date: row.date,
+    value: row.index_value,
+    unit: "index (first observation = 1)",
+    series_id: `legacy-inference-price-v${row.methodology_version}`,
+    label: `Legacy inference price basket · methodology v${row.methodology_version}`,
+    source_id: "radon-llm-token-index",
+  })));
 }
 
 /* ─── Component ───────────────────────────────────────── */
 
 const HISTORY_DAYS = 180;
 
-const SERIES: [ChartSeries<LlmTokenIndexRow>, ChartSeries<LlmTokenIndexRow>] = [
-  {
-    key: "index_value",
-    label: "Index",
-    color: chartSeriesColor("primary"),
-    axis: "left",
-    format: (v: number) => v.toFixed(2),
-  },
-  {
-    key: "raw_avg_usd",
-    label: "USD / Mtok",
-    color: chartSeriesColor("extreme"),
-    axis: "right",
-    format: (v: number) => `$${v.toFixed(2)}`,
-  },
-];
-
 export default function LlmTokenIndexCard() {
   const { data, loading, error } = useLlmTokenIndex(HISTORY_DAYS);
 
   const rows = data?.rows ?? [];
+  const histories = useMemo(() => legacyIndexHistory(rows), [rows]);
   const change = useMemo(() => formatChange(rows), [rows]);
   const latest = rows[rows.length - 1] ?? null;
-  const direction =
-    change.pct == null
-      ? "neutral"
-      : change.pct > 0
-        ? "negative" // rising compute cost reads as risk-on / supply constraint
-        : "positive";
-  const directionColor =
-    direction === "positive"
-      ? "var(--positive)"
-      : direction === "negative"
-        ? "var(--negative)"
-        : "var(--text-secondary)";
+  const directionColor = "var(--text-secondary)";
 
   return (
     <div className="regime-panel" data-testid="llm-token-index-card">
       <div className="section-header">
         <div className="section-title">
-          <span>LLM COMPUTE PREMIUM</span>
+          <span>Legacy inference price basket</span>
         </div>
         {latest && (
           <span
@@ -111,16 +83,15 @@ export default function LlmTokenIndexCard() {
           margin: "4px 0 12px",
         }}
       >
-        Weighted median price per million tokens across a basket of frontier
-        models (Claude, GPT-4o, Gemini 2.5 Pro, DeepSeek V3, Llama 405B,
-        Mistral Large). Normalised to 1.0 at the series base date. Rising
-        index means inference is getting more expensive.
+        Preserved methodology v1: median model price using a 70% input and 30% output
+        token blend, normalized to the first observation. Available membership can change.
+        This series measures quoted inference prices, not compute scarcity or actual spend.
       </p>
 
       {/* Summary row */}
       <div
         className="regime-hero-meta"
-        style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: 16 }}
+        style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}
       >
         <div>
           <span style={{ color: "var(--text-muted)", fontSize: "var(--text-meta)" }}>LATEST</span>
@@ -165,9 +136,7 @@ export default function LlmTokenIndexCard() {
       )}
 
       {error && !data && (
-        <div className="regime-empty" data-testid="llm-token-index-error">
-          Unable to load LLM Token Index: {error}
-        </div>
+        <RequestError error={error} testId="llm-token-index-error" />
       )}
 
       {data && rows.length === 0 && (
@@ -177,13 +146,15 @@ export default function LlmTokenIndexCard() {
         </div>
       )}
 
-      {rows.length >= 2 && (
+      {histories.length > 0 && (
         <div data-testid="llm-token-index-chart">
-          <CriHistoryChart<LlmTokenIndexRow>
-            history={rows}
-            series={SERIES}
-            title="LLM Compute Premium (180d)"
-          />
+          {histories.map(points => <AiIndustryHistoryChart
+            key={points[0].series_id}
+            points={points}
+            cadence="daily"
+            sourceLabel="Radon legacy token index"
+          />)}
+          <p style={{ color: "var(--text-muted)", fontSize: 12 }}>Normalized index only. Methodology versions remain separate; raw USD per million tokens are not plotted on this axis.</p>
         </div>
       )}
     </div>

@@ -16,6 +16,7 @@ from clients.menthorq_dashboard_client import (  # noqa: E402
     MenthorQDashboardAuthEmbargoed,
     MenthorQDashboardAuthError,
     MenthorQDashboardPayloadError,
+    MenthorQDashboardStorageError,
     MenthorQDashboardTimeoutError,
     MenthorQDashboardUpstreamError,
 )
@@ -93,6 +94,11 @@ def test_route_rejects_invalid_symbol_or_frequency_with_400(client, path):
 @pytest.mark.parametrize(
     ("provider_error", "expected_status", "expected_detail"),
     [
+        (
+            MenthorQDashboardStorageError("private storage path"),
+            503,
+            "Options exposure session storage is unavailable",
+        ),
         (
             MenthorQDashboardAuthError("secret token here"),
             503,

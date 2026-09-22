@@ -532,12 +532,19 @@ class FillMonitorHandler(BaseHandler):
         message = f"{completed['action']} {completed['filled']}x {completed['contract']}"
         self._send_notification(title, message)
     
+    # Fixed AppleScript source: the text rides argv, so fill fields are data
+    # to the script, never part of it.
+    _NOTIFY_SCRIPT = (
+        "on run argv\n"
+        "  display notification (item 1 of argv) with title (item 2 of argv)\n"
+        "end run"
+    )
+
     def _send_notification(self, title: str, message: str) -> None:
         """Send macOS notification via osascript."""
         try:
-            script = f'display notification "{message}" with title "{title}"'
             subprocess.run(
-                ["osascript", "-e", script],
+                ["osascript", "-e", self._NOTIFY_SCRIPT, message, title],
                 capture_output=True,
                 timeout=5
             )

@@ -13,4 +13,5 @@ def test_public_site_references_only_the_synthetic_portfolio_hero_plate():
     hero = (ROOT / "site" / "components" / "sections" / "EditorialHeroSection.tsx").read_text()
     assert 'shot="dashboard"' not in hero
     assert 'shot="portfolio"' in hero
-    assert "Synthetic demonstration" in hero
+    assert "These rows are invented" in hero
+    assert "Not a live account" in hero

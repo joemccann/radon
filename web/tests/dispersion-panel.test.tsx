@@ -17,7 +17,7 @@
  * Spec: docs/indicators/dispersion.md §G, §H, §M.
  */
 import React from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -135,6 +135,7 @@ import DispersionPanel from "@/components/DispersionPanel";
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   mockUseDispersion.mockReset();
 });
 
@@ -496,5 +497,26 @@ describe("DispersionPanel — copy discipline", () => {
     const { container } = renderPanel(hookState({ data: buildData() }));
     const text = container.textContent ?? "";
     expect(text).toMatch(/Interactive Brokers/);
+  });
+});
+
+describe("DispersionPanel — freshness rail", () => {
+  it("shows the sweep session date and counts down to the 22:20 UTC slot", () => {
+    // 21:00 UTC on a Wednesday: 1h20m short of radon-dispersion.timer's
+    // 22:20 UTC slot. The other evening EOD writers (ivrank 22:10, iv-spread
+    // 22:15, yield-curve 22:30, ma-ratio 22:45) each land on a different number.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T21:00:00Z"));
+    const data = buildData({ data_date: "2026-08-25" });
+    data.current = { ...data.current!, date: "2026-08-25" };
+    renderPanel(hookState({ data }));
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    const rail = screen.getByTestId("dispersion-freshness-rail");
+    expect(rail).toBeTruthy();
+    expect(rail.textContent).toContain("2026-08-25");
+    expect(screen.getByTestId("dispersion-freshness-rail-countdown").textContent).toBe("1h 20m");
+    expect(rail.textContent).toContain("Next sample");
   });
 });

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as d3 from "d3";
 import ChartPanel from "./charts/ChartPanel";
 import { chartSeriesColor } from "@/lib/chartSystem";
+import { buildChartXAxisTickIndices, chartXAxisTickAnchor } from "@/lib/chartXAxis";
 import type { StreakEntry } from "@/lib/streaks";
 
 /**
@@ -27,16 +28,6 @@ const MARGIN = { top: 16, right: 20, bottom: 32, left: 56 };
 const PANE_GAP = 26;
 /** Price pane share of the plot height (the histogram gets the rest). */
 const PRICE_PANE_RATIO = 0.56;
-
-function buildTickIndices(length: number, count: number): number[] {
-  if (length <= count) return Array.from({ length }, (_, i) => i);
-  const step = (length - 1) / (count - 1);
-  const set = new Set<number>();
-  for (let i = 0; i < count; i += 1) set.add(Math.round(step * i));
-  set.add(0);
-  set.add(length - 1);
-  return Array.from(set).sort((a, b) => a - b);
-}
 
 function formatPriceTick(v: number): string {
   if (!Number.isFinite(v)) return "";
@@ -146,8 +137,7 @@ export default function StreaksChart({
   }, [finite, xAt, yPrice]);
 
   const tickIndices = useMemo(() => {
-    const maxTicks = Math.max(4, Math.min(7, Math.floor(innerWidth / 110)));
-    return buildTickIndices(finite.length, maxTicks);
+    return buildChartXAxisTickIndices(finite.length, innerWidth);
   }, [finite.length, innerWidth]);
 
   const dateFormatter = useMemo(() => {
@@ -290,7 +280,7 @@ export default function StreaksChart({
                   className="regime-relationship-baseline"
                 />
                 {/* X-axis ticks under the streak pane */}
-                {tickIndices.map((i) => (
+                {tickIndices.map((i, tickIndex) => (
                   <g key={`x-${i}`}>
                     <line
                       x1={xAt(i)}
@@ -302,7 +292,7 @@ export default function StreaksChart({
                     <text
                       x={xAt(i)}
                       y={streakHeight + 20}
-                      textAnchor="middle"
+                      textAnchor={chartXAxisTickAnchor(tickIndex, tickIndices.length)}
                       className="regime-relationship-axis-label"
                     >
                       {formatDateLabel(finite[i]?.date ?? "")}

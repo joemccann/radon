@@ -11,6 +11,7 @@ import type {
 } from "./types";
 import { PI_COMMAND_ALIASES, PI_COMMAND_SET } from "./data";
 import { assistantErrorMessage } from "./assistant/errorCopy";
+import { isTickerRouteSegment } from "./tickerRoute";
 import { placeOrderFeedback } from "./orders/placeOrderFeedback";
 import {
   createTimestamp,
@@ -173,7 +174,7 @@ export async function requestAssistantReply(history: ApiMessage[], latestMessage
  * the endpoint has always accepted; pasted images promote it to the Anthropic
  * block array, images first so the model reads them before the question.
  */
-function buildUserMessage(text: string, attachments: ChatImageAttachment[]): ApiMessage {
+export function buildUserMessage(text: string, attachments: ChatImageAttachment[]): ApiMessage {
   if (!attachments.length) {
     return { role: "user", content: text };
   }
@@ -195,6 +196,7 @@ function buildUserMessage(text: string, attachments: ChatImageAttachment[]): Api
 }
 
 export type AssistantTurn = {
+  failed?: boolean;
   content: string;
   proposal: AssistantOrderProposal | null;
   /** Per-tool-call telemetry from the agentic loop; drives <EngineTrace>. */
@@ -306,6 +308,7 @@ async function readAssistantStream(
 
   if (settled) return settled;
   return {
+    failed: true,
     content: failure ?? TRUNCATED_STREAM_MESSAGE,
     proposal: null,
     toolEvents: streamedTools,
@@ -327,8 +330,10 @@ export async function requestAssistantTurn(
   model = "",
   /** Live progress while the turn is still open — flips the panel to alive. */
   onEvent?: (event: AssistantStreamEvent) => void,
+  signal?: AbortSignal,
 ): Promise<AssistantTurn> {
   const response = await fetch("/api/assistant", {
+    ...(signal ? { signal } : {}),
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
     body: JSON.stringify({
@@ -343,7 +348,7 @@ export async function requestAssistantTurn(
   // so a non-2xx is still a JSON body.
   if (!response.ok) {
     const message = assistantErrorMessage(response.status);
-    return { content: message, proposal: null, toolEvents: [], model: null };
+    return { failed: true, content: message, proposal: null, toolEvents: [], model: null };
   }
 
   if (response.headers?.get?.("content-type")?.includes("text/event-stream") && response.body) {
@@ -418,8 +423,9 @@ export async function placeProposedOrder(
   return { ok: true, message: feedback.message };
 }
 
-export async function requestPiReply(command: string): Promise<string> {
+export async function requestPiReply(command: string, signal?: AbortSignal): Promise<string> {
   const response = await fetch("/api/pi", {
+    ...(signal ? { signal } : {}),
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -546,6 +552,8 @@ export function resolveSectionFromPath(pathname: string | null, fallback: Worksp
     return "journal";
   }
 
+  if (pathname === "/ai-industry" || pathname.startsWith("/ai-industry/")) return "ai-industry";
+
   if (pathname.startsWith("/regime")) {
     return "regime";
   }
@@ -554,10 +562,7 @@ export function resolveSectionFromPath(pathname: string | null, fallback: Worksp
     return "alerts";
   }
 
-  if (pathname.startsWith("/workflow")) {
-    return "workflow";
-  }
-
+  if (pathname.startsWith("/research-workbench")) return "research-workbench";
   if (pathname.startsWith("/admin")) {
     return "admin";
   }
@@ -570,8 +575,9 @@ export function resolveSectionFromPath(pathname: string | null, fallback: Worksp
     return "profile";
   }
 
-  // Dynamic ticker route: /AAPL, /GOOG, etc. (1-5 alpha chars)
-  if (/^\/[A-Za-z]{1,5}$/.test(pathname)) {
+  // Dynamic ticker route: /AAPL, /GOOG, /VIX3M, etc.
+  const segments = pathname.split("/");
+  if (segments.length === 2 && isTickerRouteSegment(segments[1])) {
     return "ticker-detail";
   }
 

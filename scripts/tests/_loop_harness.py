@@ -22,13 +22,13 @@ LOOPS = {
     "ci-performance": REPO / "scripts" / "ci_performance_nightly.sh",
     "documentation": REPO / "scripts" / "documentation_nightly.sh",
     "security": REPO / "scripts" / "security_nightly.sh",
+    "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
 }
 
-# Best first. The top rung is the operator's own default; the next is the same
-# family one tier down, which is what 2026-09-01 needed and never got.
+# Documented SAFETY ladder when catalog discovery fails (helper empty /
+# stub `claude models`). Live policy is skip-newest from the Mini catalog;
+# do not treat these ids as a forever pin. Do not put fable back.
 LADDER = [
-    "claude-fable-5[1m]",
-    "claude-opus-5[1m]",
     "claude-opus-5",
     "claude-sonnet-5",
 ]
@@ -49,10 +49,13 @@ CASUAL_RATE_LIMITS = "the 500 mentioned rate limits in a timeout log"
 # The security wrapper refuses to call a phase OK without this; harmless noise
 # for the other four.
 COMPLETION = "SECURITY-NIGHTLY PHASE COMPLETE: audit"
+# The DeepSec wrapper greps its own prefix; each line is inert for the other.
+COMPLETION_DEEPSEC = "SECURITY-DEEPSEC PHASE COMPLETE: audit"
 
 MARKERS = (
     ".radon-weekend-runner",
     ".radon-security-runner",
+    ".radon-security-deepsec-runner",
     ".radon-reliability-runner",
     ".radon-testing-runner",
     ".radon-ci-performance-runner",
@@ -67,6 +70,10 @@ def _clone(tmp_path: Path, wrapper: Path) -> Path:
     (repo / "scripts" / wrapper.name).chmod(0o755)
     for helper in ("weekend_notify.py", "weekend_redact.py"):
         (repo / "scripts" / helper).write_text("# stub\n", encoding="utf-8")
+    for helper in ("security_claude_ladder.py", "security_claude_ladder.sh"):
+        src = REPO / "scripts" / helper
+        if src.exists():
+            shutil.copy2(src, repo / "scripts" / helper)
     for marker in MARKERS:
         (repo / marker).write_text("", encoding="utf-8")
     # The four fallback loops drive codex and grok from a rendered prompt file
@@ -78,6 +85,18 @@ def _clone(tmp_path: Path, wrapper: Path) -> Path:
     return repo
 
 
+# A clone whose HEAD never moves: `git rev-parse HEAD` returns the same value
+# the wrapper recorded at phase start, so phase_committed() is false.
+_GIT_FROZEN = (
+    "#!/bin/sh\n"
+    'case "$*" in\n'
+    '  *"rev-parse HEAD"*) echo frozen; exit 0 ;;\n'
+    '  *"--format=%ct"*) echo 1; exit 0 ;;\n'
+    "esac\n"
+    "exit 0\n"
+)
+
+
 def _stub_bin(
     tmp_path: Path,
     models_log: Path,
@@ -85,6 +104,7 @@ def _stub_bin(
     gh_log: Path,
     exhausted_line: str = QUOTA_LINE,
     exhausted_exit: int = 1,
+    committed: bool = True,
 ) -> Path:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -103,6 +123,8 @@ def _stub_bin(
         # quota for that model is (or is not) gone.
         "claude": (
             "#!/bin/bash\n"
+            # Catalog discovery (`claude models`) must not record a launch.
+            'if [ "$1" = "models" ]; then exit 1; fi\n'
             'model=""\n'
             "while [ $# -gt 0 ]; do\n"
             '  if [ "$1" = "--model" ]; then model="$2"; shift 2; continue; fi\n'
@@ -115,6 +137,7 @@ def _stub_bin(
             f"  exit {exhausted_exit}\n"
             "fi\n"
             f'echo "{COMPLETION}"\n'
+            f'echo "{COMPLETION_DEEPSEC}"\n'
             "exit 0\n"
         ),
         "timeout": (
@@ -127,13 +150,34 @@ def _stub_bin(
             "done\n"
             'exec "$@"\n'
         ),
-        "git": '#!/bin/sh\n# REL-188: the wrapper calls a phase OK only on commit evidence, so the\n# stub reports a fresh HEAD and a current committer date.\ncase "$*" in\n  *"rev-parse HEAD"*) date +%s%N; exit 0 ;;\n  *"--format=%ct"*) date +%s; exit 0 ;;\nesac\nexit 0\n',
+        # `committed=False` is the phase that ran, printed a real report and
+        # legitimately had nothing to commit: HEAD never moves. That is the
+        # shape testing/audit and documentation/remediate had on 2026-09-08.
+        "git": (
+            '#!/bin/sh\n# REL-188: the wrapper calls a phase OK only on commit evidence, so the\n# stub reports a fresh HEAD and a current committer date.\ncase "$*" in\n  *"rev-parse HEAD"*) date +%s%N; exit 0 ;;\n  *"--format=%ct"*) date +%s; exit 0 ;;\nesac\nexit 0\n'
+            if committed
+            else _GIT_FROZEN
+        ),
         "python3": "#!/bin/sh\nexit 0\n",
     }
     for name, body in stubs.items():
         exe = bin_dir / name
         exe.write_text(body, encoding="utf-8")
         exe.chmod(0o755)
+    host_py = shutil.which("python3.13")
+    if not host_py:
+        for candidate in (
+            Path("/home/ubuntu/.local/bin/python3.13"),
+            Path("/usr/bin/python3.13"),
+            REPO / ".venv" / "bin" / "python3.13",
+        ):
+            if candidate.exists():
+                host_py = str(candidate)
+                break
+    if host_py:
+        dest = bin_dir / "python3.13"
+        if not dest.exists():
+            dest.symlink_to(host_py)
     return bin_dir
 
 
@@ -183,11 +227,17 @@ def _run(
 # the model — a ladder that silently stays on one provider is the bug these
 # tests exist to catch.
 
+# 2026-09-07: the codex and grok rungs name NO model. The vendor migrates its
+# own account default forward (~/.codex/config.toml already rewrote gpt-5.4 ->
+# gpt-5.6-terra), and the pinned id is what produced the 400 that killed three
+# loops. nvidia and cerebras still name one because the grok CLI resolves them
+# through a `[model."<key>"]` config block: the rung names that stable KEY and
+# scripts/agent_cli_bootstrap.sh resolves the live id behind it.
 FALLBACK_LADDER = [
-    "codex:gpt-5.4",
-    "grok:grok-4.6",
-    "nvidia:nvidia/nemotron-3-ultra-550b-a55b",
-    "cerebras:qwen-3.8-27b",
+    "codex",
+    "grok",
+    "nvidia:nvidia-latest",
+    "cerebras:cerebras-latest",
 ]
 CLAUDE_LADDER = ["claude:" + m for m in LADDER]
 
@@ -210,7 +260,29 @@ PROVIDER_BINARY = {
 }
 
 
-def _provider_stub(attempts, capped, cap_line, cap_exit):
+# The real 400 that killed reliability, ci-performance and documentation on
+# 2026-09-07. Not a cap and not a network blip: a permanent rejection of THIS
+# rung, which must cost one rung and none of the transient-network attempts.
+REJECTION_400_LINE = (
+    'ERROR: {"type":"error","status":400,"error":{"type":'
+    "\"invalid_request_error\",\"message\":\"The 'gpt-5.4' model is not "
+    'supported when using Codex with a ChatGPT account."}}'
+)
+# The same text QUOTED by a crashing round rather than printed as the CLI's own
+# final verdict. These loops audit their own wrappers and echo this string.
+REJECTION_QUOTED_OUTPUT = (
+    "Traceback (most recent call last):\n"
+    '  File "audit.py", line 12, in <module>\n'
+    "    " + REJECTION_400_LINE + "\n"
+    '  File "audit.py", line 31, in check\n'
+    "    raise SystemExit(1)\n"
+    "SystemExit: 1"
+)
+
+
+def _provider_stub(
+    attempts, capped, cap_line, cap_exit, rejected, reject_out, agent_output=None,
+):
     """One stub body, shared by every provider binary.
 
     It derives its own provider from $0 plus GROK_HOME (the grok binary hosts
@@ -219,6 +291,7 @@ def _provider_stub(attempts, capped, cap_line, cap_exit):
     """
     return (
         "#!/bin/bash\n"
+        'if [ "$1" = "models" ]; then exit 1; fi\n'
         'self="$(basename "$0")"\n'
         'prov="$self"\n'
         'case "${GROK_HOME:-}" in\n'
@@ -234,6 +307,10 @@ def _provider_stub(attempts, capped, cap_line, cap_exit):
         "  shift\n"
         "done\n"
         'printf "%s\\t%s\\t%s\\n" "$prov" "$model" "$args" >> "' + str(attempts) + '"\n'
+        'if grep -qxF -- "$prov" "' + str(rejected) + '"; then\n'
+        '  cat "' + str(reject_out) + '"\n'
+        "  exit 1\n"
+        "fi\n"
         'if grep -qxF -- "$prov" "' + str(capped) + '"; then\n'
         '  case "$prov" in\n'
         '    claude) echo "' + (cap_line or CLAUDE_SESSION_CAP_LINE) + '" ;;\n'
@@ -242,8 +319,10 @@ def _provider_stub(attempts, capped, cap_line, cap_exit):
         "  esac\n"
         "  exit " + str(cap_exit) + "\n"
         "fi\n"
-        'echo "' + COMPLETION + '"\n'
-        "exit 0\n"
+        + "cat <<'RADON_AGENT_EOF'\n"
+        + (COMPLETION + "\n" + COMPLETION_DEEPSEC if agent_output is None else agent_output)
+        + "\nRADON_AGENT_EOF\n"
+        + "exit 0\n"
     )
 
 
@@ -257,6 +336,10 @@ def _run_multi(
     authed=("claude", "codex", "grok", "nvidia", "cerebras"),
     cap_line=None,
     cap_exit=1,
+    reject_providers=(),
+    reject_output=None,
+    committed=True,
+    agent_output=None,
 ):
     """Run one phase against stubbed provider CLIs.
 
@@ -269,8 +352,21 @@ def _run_multi(
     capped = tmp_path / "capped.txt"
     capped.write_text("".join(p + "\n" for p in capped_providers), encoding="utf-8")
 
-    bin_dir = _stub_bin(tmp_path, tmp_path / "models.txt", capped, gh_log)
-    body = _provider_stub(attempts, capped, cap_line, cap_exit)
+    rejected = tmp_path / "rejected.txt"
+    rejected.write_text("".join(p + "\n" for p in reject_providers), encoding="utf-8")
+    reject_out = tmp_path / "reject_out.txt"
+    reject_out.write_text(
+        (REJECTION_400_LINE if reject_output is None else reject_output) + "\n",
+        encoding="utf-8",
+    )
+
+    bin_dir = _stub_bin(
+        tmp_path, tmp_path / "models.txt", capped, gh_log, committed=committed,
+    )
+    body = _provider_stub(
+        attempts, capped, cap_line, cap_exit, rejected, reject_out,
+        agent_output=agent_output,
+    )
     for prov in ("claude", "codex", "grok"):
         exe = bin_dir / PROVIDER_BINARY[prov]
         if prov in installed:

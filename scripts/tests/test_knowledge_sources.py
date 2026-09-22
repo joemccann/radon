@@ -428,7 +428,9 @@ def test_docs_mtime_propagates_and_deterministic(db, docs_tree):
 # ---------------------------------------------------------------- newsfeed
 
 
-def _seed_posts(db):
+def _seed_posts(db) -> str:
+    """Seed two posts; return the MoMo post's timestamp so assertions share one clock read."""
+    momo_at = _days_ago(2)
     db.execute(
         "INSERT INTO posts (id, title, content, timestamp, images, raw_images, tags) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -436,7 +438,7 @@ def _seed_posts(db):
             "cRThqRM_Kk",
             "MoMo touching the trendline",
             "Momentum names are back at the trendline that has held all year.",
-            _days_ago(2),
+            momo_at,
             json.dumps(["https://media.radon.run/img/momo.png"]),
             json.dumps(["https://themarketear.com/img/momo.png"]),
             json.dumps(["TRENDLINE", "MOMENTUM", "SPX"]),
@@ -448,10 +450,11 @@ def _seed_posts(db):
         ("aAAAAAA_Aa", "Vol reset", "VIX crushed into the print.", _days_ago(1), None, None, json.dumps(["VIX"])),
     )
     db.commit()
+    return momo_at
 
 
 def test_newsfeed_doc_per_post_with_tags_and_timestamp(db):
-    _seed_posts(db)
+    momo_at = _seed_posts(db)
     docs = {d.doc_key: d for d in newsfeed_source.fetch(db)}
     assert set(docs) == {"cRThqRM_Kk", "aAAAAAA_Aa"}
     momo = docs["cRThqRM_Kk"]
@@ -459,7 +462,7 @@ def test_newsfeed_doc_per_post_with_tags_and_timestamp(db):
     assert momo.metadata["tags"] == ["TRENDLINE", "MOMENTUM", "SPX"]
     assert momo.metadata["tickers"] == ["SPX"]
     assert momo.metadata["url"] == "https://media.radon.run/img/momo.png"
-    assert momo.last_activity_at == _days_ago(2)
+    assert momo.last_activity_at == momo_at
     assert docs["aAAAAAA_Aa"].metadata["url"] is None
 
 

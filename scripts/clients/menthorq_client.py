@@ -23,12 +23,15 @@ Credentials (project root .env, loaded via a local fallback loader):
     MENTHORQ_USER  -- MenthorQ email/username
     MENTHORQ_PASS  -- MenthorQ password
 
-Vision API key (from web/.env or shell):
-    ANTHROPIC_API_KEY / CLAUDE_CODE_API_KEY / CLAUDE_API_KEY
+Vision cascade (credit/billing/quota/hard-fail fallthrough):
+    anthropic -> grok -> cursor (unwired skip) -> codex -> gemini
+    -> nvidia (free) -> cerebras (last).
+    Keys: ANTHROPIC_API_KEY / CLAUDE_CODE_API_KEY / CLAUDE_API_KEY,
+    XAI_API_KEY / GROK_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY,
+    NVIDIA_API_KEY, CEREBRAS_API_KEY.
 """
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import os
@@ -40,6 +43,12 @@ from typing import Any, Dict, List, Optional
 
 from playwright.sync_api import sync_playwright, Page
 
+from clients.vision_cascade import (
+    VISION_CASCADE_ORDER,
+    VisionCascadeExhausted,
+    extract_via_vision,
+    wired_vision_providers,
+)
 from utils.env_loader import load_env_file
 
 # Load .env from project root
@@ -609,9 +618,12 @@ class MenthorQClient:
         Raises:
             MenthorQExtractionError: If no data could be extracted.
         """
-        if not self._api_key:
+        if not wired_vision_providers():
             raise MenthorQExtractionError(
-                "No Anthropic API key found. Set ANTHROPIC_API_KEY in environment."
+                "No keyed CTA vision provider. Cascade order: "
+                + " -> ".join(VISION_CASCADE_ORDER)
+                + ". Cursor is unwired; set a remaining provider key "
+                "(Anthropic, XAI/Grok, OpenAI/Codex, Gemini, NVIDIA, Cerebras)."
             )
 
         self._navigate({
@@ -650,8 +662,10 @@ class MenthorQClient:
 
         if not tables:
             self._capture_debug_artifacts("cta-extraction", f"Vision extraction returned no data for CTA tables on {date}.")
+            cascade_error = getattr(self, "_last_vision_error", None)
             raise MenthorQExtractionError(
-                f"Vision extraction returned no data for CTA tables on {date}."
+                cascade_error
+                or f"Vision extraction returned no data for CTA tables on {date}."
             )
 
         self.persist_storage_state()
@@ -1483,87 +1497,28 @@ class MenthorQClient:
     def _extract_via_vision(
         self, png_bytes: bytes, prompt: str
     ) -> Optional[List[Dict[str, Any]]]:
-        """Send a screenshot to Claude Haiku Vision for structured extraction.
+        """Send a screenshot through the CTA vision cascade.
 
-        Args:
-            png_bytes: PNG image bytes.
-            prompt: Extraction prompt describing the desired output format.
-
-        Returns:
-            List of dicts parsed from Vision response, or None on failure.
+        Order: anthropic -> grok -> cursor (unwired) -> codex -> gemini
+        -> nvidia -> cerebras. Credit/billing/quota/hard provider fails
+        fall through; the winner is logged.
         """
-        if not self._api_key:
-            logger.warning("No Anthropic API key — skipping Vision extraction.")
-            return None
-
-        import httpx
-
-        b64 = base64.b64encode(png_bytes).decode("utf-8")
-
+        self._last_vision_error = None
         try:
-            resp = httpx.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": self._api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": "claude-haiku-4-5-20251001",
-                    "max_tokens": 4096,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image",
-                                    "source": {
-                                        "type": "base64",
-                                        "media_type": "image/png",
-                                        "data": b64,
-                                    },
-                                },
-                                {"type": "text", "text": prompt},
-                            ],
-                        }
-                    ],
-                },
-                timeout=60.0,
-            )
-
-            if resp.status_code != 200:
-                logger.warning(
-                    f"Vision API error: {resp.status_code} {resp.text[:200]}"
-                )
-                return None
-
-            data = resp.json()
-            text = None
-            for block in data.get("content", []):
-                if block.get("type") == "text":
-                    text = block.get("text", "")
-                    break
-
-            if not text:
-                return None
-
-            # Strip markdown fences if present
-            cleaned = text.strip()
-            if cleaned.startswith("```"):
-                cleaned = (
-                    cleaned.split("\n", 1)[-1] if "\n" in cleaned else cleaned[3:]
-                )
-            if cleaned.endswith("```"):
-                cleaned = cleaned[:-3]
-            cleaned = cleaned.strip()
-
-            parsed = json.loads(cleaned)
-            if not isinstance(parsed, list):
-                return None
-
-            logger.info(f"Vision extracted {len(parsed)} rows")
-            return parsed
-
-        except Exception as exc:
-            logger.warning(f"Vision extraction failed: {exc}")
+            result = extract_via_vision(png_bytes, prompt)
+        except VisionCascadeExhausted as exc:
+            self._last_vision_error = str(exc)
+            logger.warning("%s", exc)
             return None
+        except Exception as exc:
+            self._last_vision_error = f"Vision cascade failed: {exc}"
+            logger.warning("Vision extraction failed: %s", exc)
+            return None
+
+        logger.info(
+            "Vision extracted %d rows via %s/%s",
+            len(result.rows),
+            result.provider,
+            result.model,
+        )
+        return result.rows

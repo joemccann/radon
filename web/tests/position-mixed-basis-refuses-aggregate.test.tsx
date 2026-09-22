@@ -22,7 +22,7 @@
  */
 
 import React from "react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 
 import { cleanup as cleanupHooks, renderHook } from "@testing-library/react";
@@ -102,15 +102,29 @@ function partiallyRolledVertical(
     entry_date: "2026-08-27",
     legs: [
       { direction: "LONG", contracts: 10, type: "Call", strike: 575,
-        entry_cost: 5000, avg_cost: 500, basis_source: "ib",
+        entry_cost: 5000, avg_cost: 500,
+        basis_source: basisSource === "mixed" ? "ib" : basisSource,
         market_price: 7.5, market_value: 7500 },
       { direction: "SHORT", contracts: 10, type: "Call", strike: 580,
-        entry_cost: 4000, avg_cost: 400, basis_source: "session_fills",
+        entry_cost: 4000, avg_cost: 400,
+        basis_source: basisSource === "mixed" ? "session_fills" : basisSource,
         market_price: 3.0, market_value: -3000 },
     ],
     ...overrides,
   } as unknown as PortfolioPosition;
 }
+
+// `withSessionIbDailyPnl` masks `ib_daily_pnl` on weekends and holidays
+// (lib/ibDailyPnlSession.ts), so the IB-override assertion below is only
+// meaningful inside a live session. Pin the clock to a Friday afternoon ET;
+// this file was authored on 2026-09-18 and went red at 00:00 ET Saturday.
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-09-18T19:00:00Z"));
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 function todayET(): string {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -199,6 +213,7 @@ describe("PositionTable renders no basis for a `mixed` position", () => {
   const CELL_TESTIDS: Record<string, string> = {
     "P&L": "position-cell-pnl",
     "Return %": "position-cell-pnl-pct",
+    "Today P&L": "position-cell-today-pnl",
   };
 
   function cellUnder(header: string): string {
@@ -216,6 +231,20 @@ describe("PositionTable renders no basis for a `mixed` position", () => {
     render(<PositionTable positions={[MIXED]} prices={{}} />);
     expect(cellUnder("P&L")).toBe(BLENDED_PNL);
     expect(cellUnder("Return %")).toBe("N/A");
+  });
+
+  it("Today P&L is unavailable when an overnight leg is unmeasured", () => {
+    const position = partiallyRolledVertical("mixed", { entry_date: todayET() });
+    const view = render(<PositionTable positions={[position]} prices={{}} />);
+    // T-496: the old +$1,000 assertion pinned a session-leg-only total.
+    expect(cellUnder("Today P&L")).toBe("—");
+    expect(cellUnder("P&L")).toBe(BLENDED_PNL);
+
+    view.rerender(
+      <PositionTable positions={[{ ...position, ib_daily_pnl: 1250 }]} prices={{}} />,
+    );
+    expect(cellUnder("Today P&L")).toBe("+$1,250");
+    expect(cellUnder("P&L")).toBe(BLENDED_PNL);
   });
 
   it("still prints the P&L when every leg agrees", () => {
@@ -240,9 +269,11 @@ describe("mixed basis separates capital from measurable leg P&L", () => {
     expect(getPnlDollars(CLEAN, 4500)).toBe(3500);
   });
 
-  it("Today P&L for a same-day `mixed` position uses the measured leg sum", () => {
+  it("Today P&L for a same-day `mixed` position does not dump overnight P&L into today", () => {
     const sameDay = partiallyRolledVertical("mixed", { entry_date: todayET() });
-    expect(getTodayPnlDollars(sameDay, {})).toBe(3500);
+    // No closes: overnight long is unmeasured; session short is MV − EC = +$1,000.
+    // The session leg alone is not the position total.
+    expect(getTodayPnlDollars(sameDay, {})).toBeNull();
     const sameDayClean = partiallyRolledVertical("session_fills", { entry_date: todayET() });
     expect(getTodayPnlDollars(sameDayClean, {})).toBe(3500);
   });

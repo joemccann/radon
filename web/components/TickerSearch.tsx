@@ -418,7 +418,6 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
             backgroundColor: "var(--bg-panel)",
             border: "1px solid var(--border-dim)",
             borderRadius: "var(--radius-sm)",
-            outline: "none",
             transition: "border-color 150ms",
           }}
           onFocusCapture={(e) => {

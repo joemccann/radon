@@ -47,6 +47,12 @@
     # Do NOT add fail_duration: marking the single upstream down would take
     # the retry loop out of the picture and 502 immediately again.
     handle_path /api/ib/* {
+        # Auth happens in FastAPI AFTER Caddy forwards: bound the anonymous
+        # body at the edge (same idiom as /mcp*) so an oversized upload dies
+        # here (413) instead of buffering in the trading API.
+        request_body {
+            max_size 1MB
+        }
         reverse_proxy 127.0.0.1:8321 {
             lb_try_duration 15s
             lb_try_interval 250ms
@@ -84,6 +90,31 @@
             max_size 1MB
         }
         reverse_proxy 127.0.0.1:8334 {
+            transport http {
+                dial_timeout 5s
+                response_header_timeout 30s
+                read_timeout 300s
+            }
+        }
+    }
+
+    # TradingView alert webhook (issue #457, docs/tradingview-integration.md).
+    # TradingView never retries a delivery and posts from four fixed sender
+    # IPs, so anything else is refused here with a 403. The allowlist is
+    # defense in depth, NOT auth: the path token and the body secret checked
+    # by the Next.js route are the auth. remote_ip (not client_ip) because
+    # Caddy terminates TLS directly with no trusted_proxies in front of it.
+    # This is the ONLY body cap on the route: Next.js middleware skips public
+    # routes, so an oversized POST must die at the edge (413). POST with no
+    # idempotency key, so no lb_try_* retry loop (Caddy default: zero).
+    handle /api/webhooks/tradingview/* {
+        @tv_webhook_blocked not remote_ip 52.89.214.238 34.212.75.30 54.218.53.128 52.32.178.7
+        respond @tv_webhook_blocked 403
+
+        request_body {
+            max_size 16KB
+        }
+        reverse_proxy 127.0.0.1:3000 {
             transport http {
                 dial_timeout 5s
                 response_header_timeout 30s
@@ -241,14 +272,16 @@ media.radon.run {
     }
 }
 
-# http://mcp.radon.run — dedicated Streamable HTTP MCP host (issue #232).
-# HTTP only: an HTTPS site address makes Caddy obtain a cert during
-# `systemctl reload caddy`. The still-running old process 308s HTTP-01
-# for this new hostname, ACME never completes, and publish-caddy TERMs
-# the reload (45s, 180s, on_demand, ask-on-self, ask-on-health). Once
-# this HTTP site is live, a later HTTPS site can ACME against a process
-# that already answers Host: mcp.radon.run on :80.
+# mcp.radon.run — dedicated Streamable HTTP MCP host (issue #232), HTTPS.
+# Clerk bearer tokens ride this host, so it must terminate TLS like every
+# other site here. The explicit http:// block below keeps a process
+# answering Host: mcp.radon.run on :80, so Caddy's automatic HTTP-01
+# handling completes ACME through it and reload never hangs on issuance.
 http://mcp.radon.run {
+    redir https://mcp.radon.run{uri} 308
+}
+
+mcp.radon.run {
     encode zstd gzip
 
     header {

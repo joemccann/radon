@@ -48,11 +48,13 @@ LOOPS = {
     "ci-performance": ("ci_performance_nightly.sh", "ci-performance", "ci-performance"),
     "documentation": ("documentation_nightly.sh", "documentation-nightly", "documentation-nightly"),
     "security": ("security_nightly.sh", "security-nightly", "security-nightly"),
+    "security-deepsec": ("security_deepsec_nightly.sh", "security-deepsec", "security-deepsec"),
 }
 LOOP_IDS = sorted(LOOPS)
 MARKERS = (
     ".radon-weekend-runner",
     ".radon-security-runner",
+    ".radon-security-deepsec-runner",
     ".radon-reliability-runner",
     ".radon-testing-runner",
     ".radon-ci-performance-runner",
@@ -84,17 +86,27 @@ def _executable(path: Path, content: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def _security_marker() -> str:
-    src = _wrapper("security").read_text(encoding="utf-8")
+def _security_marker(loop: str = "security") -> str:
+    src = _wrapper(loop).read_text(encoding="utf-8")
     return re.search(r'PHASE_COMPLETE_MARKER="([^"]+)"', src).group(1)
 
 
-def _build(tmp_path: Path, loop: str, *, deliver_lines: str = "", extra_env: dict | None = None) -> dict:
+def _build(
+    tmp_path: Path,
+    loop: str,
+    *,
+    deliver_lines: str = "",
+    extra_env: dict | None = None,
+    after_marker: str = "",
+    emit_marker: bool = True,
+) -> dict:
     """Stage a fake runner clone plus the stub binaries the wrapper calls.
 
     `deliver_lines` is what the stub agent prints when invoked for the
     deliver phase (the skill's verdict line, or nothing). Every phase of the
-    security loop also prints that loop's completion marker.
+    security loop also prints that loop's completion marker unless
+    `emit_marker` is false. `after_marker` is trailing agent prose after the
+    stamp (the 2026-09-13 Done/Next shape).
     """
     script, label, _skill_dir = LOOPS[loop]
     clone = tmp_path / "clone"
@@ -126,7 +138,11 @@ def _build(tmp_path: Path, loop: str, *, deliver_lines: str = "", extra_env: dic
     _executable(bin_dir / "git", '#!/bin/bash\n# REL-188: the wrapper reads commit evidence from git before calling a phase\n# OK, so the stub reports a fresh HEAD and a current committer date.\ncase "$*" in\n  *"rev-parse HEAD"*) date +%s%N; exit 0 ;;\n  *"--format=%ct"*) date +%s; exit 0 ;;\nesac\nexit 0\n')
     _executable(bin_dir / "python3", "#!/bin/bash\nexit 0\n")
 
-    complete = f"echo '{_security_marker()} '\"$PHASE\"' run_id=stub'\n" if loop == "security" else ""
+    complete = (
+        f"echo '{_security_marker(loop)} '\"$PHASE\"' run_id=stub'\n"
+        if loop in ("security", "security-deepsec") and emit_marker
+        else ""
+    )
     _executable(
         bin_dir / "claude",
         "#!/bin/bash\n"
@@ -138,6 +154,7 @@ def _build(tmp_path: Path, loop: str, *, deliver_lines: str = "", extra_env: dic
         f"{deliver_lines}"
         "fi\n"
         + complete
+        + after_marker
         + "exit 0\n",
     )
 
@@ -164,6 +181,10 @@ def _build(tmp_path: Path, loop: str, *, deliver_lines: str = "", extra_env: dic
         'case "$1 $2" in\n'
         '  "issue list") echo 42 ;;\n'
         '  "pr list") echo "" ;;\n'
+        '  "pr view")\n'
+        '    case "$*" in\n'
+        '      *"github.com/joemccann/radon/pull/"*) echo ok ;;\n'
+        '    esac ;;\n'
         '  "issue comment")\n'
         "    while [ $# -gt 0 ]; do\n"
         '      if [ "$1" = "--body" ]; then shift\n'
@@ -335,7 +356,7 @@ class TestTheDeliverNotifyLine:
         assert len(comments) == 1, comments
         assert comments[0].startswith("**deliver**"), comments
         assert "**2 PR(s) green, ready to merge: " in comments[0], comments
-        if loop != "security":
+        if loop not in ("security", "security-deepsec"):
             assert f"{URL1} {URL2}**" in comments[0], comments
         # The Pushover carries the URLs for every loop; the security loop
         # redacts URLs only on the public issue.
@@ -350,6 +371,73 @@ class TestTheDeliverNotifyLine:
         result = _run(cfg, "deliver")
         assert result.returncode == 0, _why(result, cfg)
         assert "**0 PR(s), nothing to merge**" in _comments(cfg)[0], _comments(cfg)
+
+    # --- 2026-09-08 15:06 re-run: the record path, which every test above
+    # leaves dead (the git stub serves nothing for `show origin/main:...`) ----
+    #
+    # arm_deliver_record() writes a branch-only `launched` record before the
+    # agent starts (R-611), so a cap kill mid-phase is resumable. When the
+    # agent then finishes with nothing to deliver, that record is still what
+    # deliver_status() reads first, and status_from_record() renders it as
+    # "INCOMPLETE (deliver record has a branch but no PR)". The agent's own
+    # verdict line — `NIGHTLY DELIVER READY: prs=0`, in this round's slice —
+    # never got a look. Every night with nothing to deliver would exit 75.
+
+    @staticmethod
+    def _serve_the_helper_from_git(cfg: dict) -> None:
+        """`git show origin/main:scripts/nightly_deliver.py` returns the real
+        helper, which is what makes the record path live in this test."""
+        helper = REPO / "scripts" / "nightly_deliver.py"
+        _executable(
+            cfg["clone"].parent / "bin" / "git",
+            "#!/bin/bash\n"
+            'case "$*" in\n'
+            '  *"rev-parse HEAD"*) date +%s%N; exit 0 ;;\n'
+            '  *"--format=%ct"*) date +%s; exit 0 ;;\n'
+            f'  *"show origin/main:scripts/nightly_deliver.py"*) cat "{helper}"; exit 0 ;;\n'
+            "esac\n"
+            "exit 0\n",
+        )
+
+    @pytest.mark.parametrize("loop", LOOP_IDS)
+    def test_a_branch_only_record_defers_to_this_rounds_verdict(self, tmp_path, loop):
+        cfg = _build(tmp_path, loop, deliver_lines=_ready(loop, []))
+        self._serve_the_helper_from_git(cfg)
+        result = _run(cfg, "deliver")
+        record = nd.read_record(loop, root=Path(cfg["env"]["HOME"]) / "radon-weekend")
+        assert record and record.get("pr") is None, (
+            "precondition: the wrapper armed a branch-only record", record
+        )
+        assert result.returncode == 0, _why(result, cfg)
+        assert "**0 PR(s), nothing to merge**" in _comments(cfg)[0], _comments(cfg)
+
+    @pytest.mark.parametrize("loop", LOOP_IDS)
+    def test_a_branch_only_record_with_no_verdict_is_still_incomplete(self, tmp_path, loop):
+        """The cap-kill shape R-611 exists for: nothing recorded by the agent,
+        nothing printed. Deferring to the log must not turn that into OK."""
+        cfg = _build(tmp_path, loop, deliver_lines="echo 'still waiting on CI'\n")
+        self._serve_the_helper_from_git(cfg)
+        result = _run(cfg, "deliver")
+        assert result.returncode == 75, _why(result, cfg)
+        assert "INCOMPLETE" in _comments(cfg)[0], _comments(cfg)
+
+    @pytest.mark.parametrize("loop", LOOP_IDS)
+    def test_a_recorded_incomplete_check_still_beats_the_log(self, tmp_path, loop):
+        """R-613 unchanged: a record the agent wrote wins over its prose."""
+        cfg = _build(
+            tmp_path, loop,
+            deliver_lines=(
+                "python3.13 -c 'pass' 2>/dev/null\n"
+                f"git show origin/main:scripts/nightly_deliver.py | /usr/bin/python3 -I - record "
+                f"--loop {loop} --branch x/2026-09-08 --pr 7 --url {URL1} "
+                "--status incomplete --check pytest-scripts-rs >/dev/null\n"
+                + _ready(loop, [URL1])
+            ),
+        )
+        self._serve_the_helper_from_git(cfg)
+        result = _run(cfg, "deliver")
+        assert result.returncode == 75, _why(result, cfg)
+        assert "**INCOMPLETE: pytest-scripts-rs**" in _comments(cfg)[0], _comments(cfg)
 
     @pytest.mark.parametrize("loop", LOOP_IDS)
     def test_a_red_check_at_the_cap_is_incomplete_and_names_the_check(self, tmp_path, loop):
@@ -367,7 +455,56 @@ class TestTheDeliverNotifyLine:
         result = _run(cfg, "deliver")
         assert result.returncode == 75, _why(result, cfg)
         comment = _comments(cfg)[0]
-        assert f"**{nd.NO_VERDICT_STATUS}**" in comment, comment
+        if loop in ("security", "security-deepsec"):
+            # A security stamp with no prior verdict is not a completed
+            # deliver (2026-09-13 ordering). Other loops score the missing
+            # verdict line itself.
+            assert "INCOMPLETE" in comment, comment
+            assert (
+                f"**{nd.NO_VERDICT_STATUS}**" in comment
+                or "phase-completion marker" in comment
+            ), comment
+        else:
+            assert f"**{nd.NO_VERDICT_STATUS}**" in comment, comment
+
+    def test_sep13_trailing_done_next_after_an_honest_stamp_is_ready(self, tmp_path):
+        """Host log 20260913T000007: READY, PHASE COMPLETE, then Done/Next.
+        The wrapper must still page ready-to-merge, not a false INCOMPLETE."""
+        cfg = _build(
+            tmp_path,
+            "security",
+            deliver_lines=_ready("security", [URL1]),
+            after_marker=(
+                "echo '**Done**'\n"
+                "echo '- delivered PR 420'\n"
+                "echo '**Next**'\n"
+                "echo '- merge'\n"
+            ),
+        )
+        result = _run(cfg, "deliver")
+        assert result.returncode == 0, _why(result, cfg)
+        assert "**1 PR(s) green, ready to merge: " in _comments(cfg)[0], _comments(cfg)
+
+    def test_a_mid_prose_recital_is_not_a_security_completion_stamp(self, tmp_path):
+        cfg = _build(
+            tmp_path,
+            "security",
+            deliver_lines=(
+                _ready("security", [URL1])
+                + "echo 'remember to print SECURITY-NIGHTLY PHASE COMPLETE: "
+                "deliver run_id=x'\n"
+            ),
+            emit_marker=False,
+        )
+        result = _run(cfg, "deliver")
+        assert result.returncode == 75, _why(result, cfg)
+        assert "INCOMPLETE" in _comments(cfg)[0], _comments(cfg)
+
+    def test_a_security_stamp_with_no_deliver_verdict_is_incomplete(self, tmp_path):
+        cfg = _build(tmp_path, "security")
+        result = _run(cfg, "deliver")
+        assert result.returncode == 75, _why(result, cfg)
+        assert "INCOMPLETE" in _comments(cfg)[0], _comments(cfg)
 
     @pytest.mark.parametrize("loop", LOOP_IDS)
     def test_the_last_verdict_line_wins(self, tmp_path, loop):
@@ -387,6 +524,35 @@ class TestTheDeliverNotifyLine:
         cfg = _build(tmp_path, loop, deliver_lines=f"echo '{line}'\n")
         _run(cfg, "deliver")
         assert f"**{nd.notify_status(line)}**" in _pushover(cfg) or nd.notify_status(line) in _pushover(cfg)
+
+    @pytest.mark.parametrize("loop", LOOP_IDS)
+    def test_a_foreign_pr_url_is_never_rendered_as_ready_to_merge(self, tmp_path, loop):
+        # The verdict line is agent-asserted text. A URL it names is only a
+        # merge cue after the wrapper independently confirms it is a
+        # same-repo open PR on this loop's branch prefix (the stub gh's
+        # `pr view` confirms joemccann/radon URLs only).
+        foreign = "https://github.com/attacker/radon/pull/9"
+        cfg = _build(tmp_path, loop, deliver_lines=_ready(loop, [foreign]))
+        result = _run(cfg, "deliver")
+        assert result.returncode == 75, _why(result, cfg)
+        comment = _comments(cfg)[0]
+        assert "ready to merge" not in comment, comment
+        assert "INCOMPLETE" in comment, comment
+        assert foreign not in _pushover(cfg), _pushover(cfg)
+
+    @pytest.mark.parametrize("loop", LOOP_IDS)
+    def test_deliver_status_verifies_before_rendering_ready(self, loop):
+        body = _uncommented(_wrapper(loop))
+        start = body.index("deliver_status() {")
+        fn = body[start:body.index("\n}", start)]
+        assert "_deliver_urls_verified" in fn, (
+            f"{loop}: deliver_status renders ready-to-merge without verification"
+        )
+        helper_start = body.index("_deliver_urls_verified() {")
+        helper = body[helper_start:body.index("\n}", helper_start)]
+        for needle in ('"$GH_BIN" pr view', 'state == \\"OPEN\\"',
+                       ".isCrossRepository == false", "$PR_BRANCH_PREFIX"):
+            assert needle in helper, (loop, needle)
 
     @pytest.mark.parametrize("loop", LOOP_IDS)
     def test_audit_and_remediate_are_untouched_by_the_verdict_rule(self, tmp_path, loop):

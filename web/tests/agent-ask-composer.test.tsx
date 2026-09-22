@@ -163,3 +163,49 @@ describe("AskComposer — focusKey autofocus", () => {
     expect(document.activeElement).not.toBe(textarea);
   });
 });
+
+
+describe("AskComposer — drafting and response controls", () => {
+  it("provides a multiline field, image picker, and actual keyboard instructions", () => {
+    const { textarea } = renderComposer();
+    expect(textarea.rows).toBe(2);
+    expect(textarea.placeholder).toBe("Ask about your portfolio, risk, or a trade…");
+    expect(screen.getByRole("button", { name: "Attach images" })).toBeTruthy();
+    expect(screen.getByText("Enter to send · Shift+Enter for a new line")).toBeTruthy();
+    expect(screen.queryByText("/ COMMANDS")).toBeNull();
+    expect(screen.queryByText("ESC DISMISSES")).toBeNull();
+  });
+
+  it("stops a response without losing the next draft", () => {
+    const onStop = vi.fn();
+    const { textarea, onSubmit } = renderComposer({ busy: true, onStop });
+    type(textarea, "Next question");
+    fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("Next question");
+  });
+
+  it("disables Send without inventing a stop action during order placement", () => {
+    const { textarea } = renderComposer({ busy: true });
+    type(textarea, "Next question");
+    expect((screen.getByLabelText("Send") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Stop response" })).toBeNull();
+  });
+
+  it("loads and focuses a new draft but preserves editing when its id is unchanged", () => {
+    const onSubmit = vi.fn();
+    const { rerender } = render(<AskComposer onSubmit={onSubmit} draft={{ id: 1, text: "Review portfolio" }} />);
+    const textarea = screen.getByLabelText("Ask Radon") as HTMLTextAreaElement;
+    expect(textarea.value).toBe("Review portfolio");
+    type(textarea, "Review only options");
+    rerender(<AskComposer onSubmit={onSubmit} draft={{ id: 1, text: "Review portfolio" }} />);
+    expect(textarea.value).toBe("Review only options");
+    textarea.blur();
+    rerender(<AskComposer onSubmit={onSubmit} draft={{ id: 2, text: "Check downside" }} />);
+    expect(textarea.value).toBe("Check downside");
+    expect(document.activeElement).toBe(textarea);
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSubmit).toHaveBeenCalledWith("Check downside", "", []);
+  });
+});

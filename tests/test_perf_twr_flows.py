@@ -784,6 +784,7 @@ V2_TOP_LEVEL_KEYS = {
     "series",
     "subperiods",
     "warnings",
+    "nav_points",
 }
 
 ISO_INSTANT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$")

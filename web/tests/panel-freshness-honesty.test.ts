@@ -47,7 +47,8 @@ describe("R-124: the shared affordance exists and is honest", () => {
   it("uses brand tokens, never raw hex", () => {
     const src = read("web/components/PanelRefreshError.tsx");
     expect(src).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
-    expect(src).toContain("var(--");
+    expect(src).toContain("RequestError");
+    expect(src).toContain("retainedData");
   });
 });
 

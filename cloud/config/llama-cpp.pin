@@ -1,0 +1,4 @@
+# llama.cpp release used for GGUF export and radon-slm-tagger serve (Joe approval L.9).
+# CPU build: GGML_NATIVE=ON, no CUDA, no Metal.
+# https://github.com/ggml-org/llama.cpp
+tag=b6504

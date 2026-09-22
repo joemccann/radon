@@ -34,17 +34,25 @@ import fetch_equibles_ats_venue_share as mod  # noqa: E402
 MIGRATION = Path(__file__).parents[1] / "db" / "migrations" / "0041_equibles_ats_venue_share.sql"
 
 
-# Fixed anchor Monday. Anchoring to the CURRENT in-progress week emitted
-# five consecutive days from this week's Monday, i.e. future-dated rows on any
-# Mon-Thu run, while run() caps the fetch at end_date = now.date().
-ANCHOR_MONDAY = date(2026, 8, 31)
+def anchor_monday() -> date:
+    """Monday of the last fully COMPLETED week, derived from the clock.
+
+    Derived, not pinned (T-461): a fixed date drifts a week further every
+    Monday from the live `datetime.now(timezone.utc)` the run()/scheduling
+    call sites pass. A full week back keeps every generated day in the past
+    on any weekday run — anchoring to the CURRENT in-progress week emitted
+    future-dated rows on Mon-Thu, while run() caps the fetch at
+    end_date = now.date()."""
+    today = datetime.now(timezone.utc).date()
+    return today - timedelta(days=today.weekday(), weeks=1)
 
 
 def mondays(count: int) -> list[str]:
-    """The `count` Mondays ending at the fixed ANCHOR_MONDAY, ascending."""
-    assert ANCHOR_MONDAY.weekday() == 0
+    """The `count` Mondays ending at the clock-derived anchor, ascending."""
+    anchor = anchor_monday()
+    assert anchor.weekday() == 0
     return [
-        (ANCHOR_MONDAY - timedelta(weeks=count - 1 - i)).isoformat()
+        (anchor - timedelta(weeks=count - 1 - i)).isoformat()
         for i in range(count)
     ]
 
@@ -86,6 +94,67 @@ def price_week(week: str, *, daily_volume=25_000_000.0, days=5) -> list[dict]:
         }
         for offset in range(days)
     ]
+
+
+class TestFixtureTracksTheClock:
+    """T-461: the anchor must follow the same clock the live
+    `datetime.now(timezone.utc)` call sites hand to run(). A pinned date
+    drifts a week further from that clock every Monday; this guard turns the
+    rot into a failure at the fixture, not in whichever coverage assertion
+    happens to flip first."""
+
+    def test_the_anchor_is_the_last_completed_monday(self):
+        anchor = date.fromisoformat(mondays(1)[0])
+        today = datetime.now(timezone.utc).date()
+        assert anchor.weekday() == 0
+        assert anchor < today  # a completed week: no generated day is future-dated
+        assert 7 <= (today - anchor).days <= 13  # tracks the clock; cannot rot
+
+
+# ── scheduled universe ────────────────────────────────────────────
+
+
+class TestAtsPriorityUniverse:
+    """Portfolio, then watchlist, then Nasdaq-100, Russell 2000, S&P 500.
+
+    The weekly oneshot cannot walk ~2500 names inside TimeoutStartSec, so
+    coverage is scored against the core (portfolio ∪ watchlist) and the
+    index tail rotates. Duplicates keep the first (highest-priority) seat.
+    """
+
+    def test_priority_order_is_unique_and_stable(self):
+        merged = mod.merge_ats_universe(
+            portfolio=["NVDA", "aapl"],
+            watchlist=["AAPL", "MSFT"],
+            ndx100=["MSFT", "TSLA"],
+            r2k=["IONQ", "TSLA"],
+            sp500=["JPM", "AAPL"],
+        )
+        assert merged["tickers"] == ["NVDA", "AAPL", "MSFT", "TSLA", "IONQ", "JPM"]
+        assert merged["core"] == ["NVDA", "AAPL", "MSFT"]
+        assert merged["counts"]["unique"] == 6
+        assert merged["counts"]["core"] == 3
+
+    def test_blank_and_non_ticker_tokens_are_dropped(self):
+        merged = mod.merge_ats_universe(
+            portfolio=["", None, "2026", "SPY"],
+            watchlist=[" spy ", "QQQ"],
+            ndx100=[],
+            r2k=[],
+            sp500=[],
+        )
+        assert merged["tickers"] == ["SPY", "QQQ"]
+
+    def test_index_tail_rotates_from_the_stored_offset(self):
+        rotated, start = mod.rotate_index_tail(["A", "B", "C", "D"], 2)
+        assert start == 2
+        assert rotated == ["C", "D", "A", "B"]
+
+    def test_empty_index_tail_does_not_divide(self):
+        assert mod.rotate_index_tail([], 9) == ([], 0)
+
+    def test_next_index_offset_advances_by_attempted_index_names(self):
+        assert mod.next_index_offset(["A", "B", "C", "D"], start=2, attempted=3) == 1
 
 
 # ── week bucketing ────────────────────────────────────────────────
@@ -550,6 +619,64 @@ class TestRun:
             ("get_short_volume", "AAPL"),
         ]
 
+    def test_scheduled_run_walks_portfolio_before_indexes(self, monkeypatch):
+        monkeypatch.setattr(
+            self.mod,
+            "scheduled_ats_universe",
+            lambda prior=None: {
+                "tickers": ["NVDA", "AAPL", "TSLA"],
+                "core": ["NVDA", "AAPL"],
+                "walk": ["NVDA", "AAPL", "TSLA"],
+                "counts": {
+                    "portfolio": 1, "watchlist": 1, "ndx100": 1,
+                    "r2k": 0, "sp500": 0, "unique": 3, "core": 2,
+                },
+                "index_offset": 0,
+                "indexes": ["TSLA"],
+            },
+        )
+        client = self._client(["NVDA", "AAPL", "TSLA"])
+        payload = self.mod.run(client=client)
+        assert payload["count"] == 3
+        assert payload["universe"]["counts"]["core"] == 2
+        assert self.health == ["ok"]
+
+    def test_index_tail_past_the_budget_does_not_fail_a_covered_core(
+        self, monkeypatch,
+    ):
+        monkeypatch.setattr(
+            self.mod,
+            "scheduled_ats_universe",
+            lambda prior=None: {
+                "tickers": ["AAPL", "TSLA", "IONQ"],
+                "core": ["AAPL"],
+                "walk": ["AAPL", "TSLA", "IONQ"],
+                "counts": {
+                    "portfolio": 1, "watchlist": 0, "ndx100": 1,
+                    "r2k": 1, "sp500": 0, "unique": 3, "core": 1,
+                },
+                "index_offset": 0,
+                "indexes": ["TSLA", "IONQ"],
+            },
+        )
+        clock = {"t": 0.0}
+        monkeypatch.setattr(self.mod.time, "monotonic", lambda: clock["t"])
+        monkeypatch.setattr(self.mod, "SWEEP_BUDGET_S", 5.0, raising=False)
+        real = self.mod._fetch_ticker_bounded
+
+        def spend_budget_after_core(client, ticker, start, end, timeout_s=0.0):
+            series = real(client, ticker, start, end, timeout_s=timeout_s)
+            clock["t"] = 10.0
+            return series
+
+        monkeypatch.setattr(self.mod, "_fetch_ticker_bounded", spend_budget_after_core)
+        client = self._client(["AAPL", "TSLA", "IONQ"])
+        payload = self.mod.run(client=client)
+        assert payload.get("partial") is not True
+        assert "AAPL" in payload["tickers"]
+        assert {e["ticker"] for e in payload["errors"]} == set()
+        assert self.health[-1] == "ok"
+
 
 class TestSweepBudget:
     """2026-09-01: radon-equibles-ats Result=timeout after TimeoutStartSec=900
@@ -614,6 +741,38 @@ class TestSweepBudget:
         assert self.health[-1]["state"] == "ok"
         assert len(self.db_writes) == 1
 
+    def test_timeout_on_one_ticker_does_not_budget_skip_the_rest(self, monkeypatch):
+        """2026-09-01 11:36Z: Equibles tarpitted the first watchlist name
+        for TICKER_FETCH_BUDGET_S (90s). The handler then marked every
+        remaining ticker `budget` and broke, so a 33-name universe wrote
+        `no ticker produced a series / requested=33 / failed=33` and sat
+        in error until the next Tuesday fire — even after Equibles recovered.
+        One hung Session must not zero the week."""
+        weeks = mondays(MIN_HISTORY_WEEKS + 4)
+        names = ["AAPL", "MSFT", "NVDA"]
+        off = {t: [off_exchange_row(w) for w in weeks] for t in names}
+        short = {t: [r for w in weeks for r in short_volume_week(w)] for t in names}
+        client = _StubClient(off, short)
+        real = self.mod._fetch_ticker_bounded
+
+        def hang_first(client_, ticker, start_s, end_s, timeout_s=0.0):
+            if ticker == "AAPL":
+                raise TimeoutError(f"{ticker}: fetch exceeded {timeout_s:.0f}s wall-clock")
+            return real(client_, ticker, start_s, end_s, timeout_s=timeout_s)
+
+        monkeypatch.setattr(self.mod, "_fetch_ticker_bounded", hang_first)
+        payload = self.mod.run(client=client, tickers=names)
+
+        assert payload["count"] == 2
+        assert set(payload["tickers"]) == {"MSFT", "NVDA"}
+        assert [e["ticker"] for e in payload["errors"]] == ["AAPL"]
+        assert payload["errors"][0]["code"] == "timeout"
+        assert {e["code"] for e in payload["errors"]} == {"timeout"}
+
+    def test_replace_wedged_client_leaves_an_injected_client_alone(self):
+        client = object()
+        assert self.mod._replace_wedged_client(client, owned=False) is client
+
     def test_sweep_budget_fits_inside_unit_start_timeout(self):
         service = (
             Path(__file__).resolve().parents[2]
@@ -629,6 +788,75 @@ class TestSweepBudget:
         from fetch_equibles_ats_venue_share import SWEEP_BUDGET_S, TICKER_FETCH_BUDGET_S
 
         assert SWEEP_BUDGET_S + TICKER_FETCH_BUDGET_S <= unit_timeout
+
+
+class TestPersistBudget:
+    """2026-09-22 09:16:37Z → 09:31:37Z: Result=timeout, NRestarts=0,
+    ExecMainStatus=15. The sweep logged `wall-clock budget spent (849/2487)`
+    at T+780. Sync libsql (no client timeout, holds the GIL) was still in
+    `_write_db_cache` at TimeoutStartSec, so the oneshot never reached
+    `_record_health`. A thread join around `get_db()` cannot abandon that
+    call."""
+
+    def test_tarpitted_turso_persist_returns_inside_the_persist_budget(self, monkeypatch):
+        import time
+
+        import fetch_equibles_ats_venue_share as mod
+
+        monkeypatch.setattr(mod, "PERSIST_BUDGET_S", 0.2, raising=False)
+
+        def hang_sync_libsql(*_args, **_kwargs):
+            time.sleep(2.0)
+            raise AssertionError("sync libsql returned")
+
+        monkeypatch.setattr("db.client.get_db", hang_sync_libsql)
+
+        calls = {"n": 0}
+
+        def slow_hrana(_sql, _args=(), timeout=4.0):
+            calls["n"] += 1
+            time.sleep(0.05)
+
+        monkeypatch.setattr("db.hrana_http.hrana_execute", slow_hrana)
+
+        chunk = mod._UPSERT_CHUNK_ROWS
+        payload = {
+            "series": {
+                f"T{i:04d}": [{
+                    "ticker": f"T{i:04d}",
+                    "week_start_date": "2026-01-05",
+                    "classification": "neutral",
+                }]
+                for i in range(chunk * 8)
+            }
+        }
+        started = time.monotonic()
+        mod._write_db_cache(payload, "2026-09-22T09:16:37Z")
+        elapsed = time.monotonic() - started
+
+        assert elapsed < 1.0
+        assert calls["n"] >= 1
+        assert calls["n"] < 8
+
+    def test_persist_budget_fits_inside_the_unit_slack(self):
+        service = (
+            Path(__file__).resolve().parents[2]
+            / "cloud"
+            / "services"
+            / "radon-equibles-ats.service"
+        )
+        timeout_line = next(
+            line for line in service.read_text().splitlines()
+            if line.startswith("TimeoutStartSec=")
+        )
+        unit_timeout = int(timeout_line.split("=", 1)[1])
+        from fetch_equibles_ats_venue_share import PERSIST_BUDGET_S, SWEEP_BUDGET_S
+
+        # In-flight ticker time is already capped by the sweep deadline
+        # (`min(TICKER_FETCH_BUDGET_S, remaining)`). The slack after
+        # SWEEP_BUDGET_S is the persist window, and it has to end before
+        # systemd SIGTERM.
+        assert SWEEP_BUDGET_S + PERSIST_BUDGET_S <= unit_timeout
 
 
 # ── migration + upsert (sqlite3 stand-in for libsql) ───────────────
@@ -802,11 +1030,11 @@ class TestNextAttemptAt:
         self.mod.run(client=client, tickers=["AAPL", "ZZZZ"], now=now)
 
         error = self._errors()[0]
-        assert error["message"] == "no ticker produced a series"
+        assert error["message"] == "no ticker produced a series (not_found)"
         assert error["next_attempt_at"] is None
         assert "not_found" in error["codes"]
 
-    def test_wedged_client_empty_cycle_reports_timeout_and_budget_codes(self, monkeypatch):
+    def test_timeout_on_every_ticker_reports_timeout_codes(self, monkeypatch):
         now = datetime.now(timezone.utc)
 
         def wedged(_client, ticker, _start, _end, timeout_s=0.0):
@@ -817,10 +1045,13 @@ class TestNextAttemptAt:
         self.mod.run(client=client, tickers=["AAPL", "MSFT", "NVDA"], now=now)
 
         error = self._errors()[0]
-        assert error["message"] == "no ticker produced a series"
+        assert error["message"] == "no ticker produced a series (timeout)"
         # A wedged client is the case R-615 must NOT silence for a week.
         assert error["next_attempt_at"] is None
-        assert error["codes"] == ["budget", "timeout"]
+        assert error["codes"] == ["timeout"]
+        # One hung Session used to mark the tail `budget` and break, so
+        # three timeouts collapsed into timeout+budget and zero series.
+        assert error["failed"] == 3
 
     def test_partial_cycle_error_carries_next_attempt(self):
         from clients.equibles_client import EquiblesNotFoundError
@@ -930,8 +1161,8 @@ class TestNaiveNowDoesNotBreakTheErrorRow:
         def _client(*a, **k):
             raise _Boom("upstream down")
 
-        monkeypatch.setattr(mod, "load_universe", lambda: ["AAPL"], raising=False)
-        monkeypatch.setattr(mod, "EquiblesClient", _client, raising=False)
+        monkeypatch.setattr("clients.equibles_client.EquiblesClient", _client)
         with pytest.raises(Exception) as excinfo:
             mod.run(now=datetime(2026, 9, 1, 9, 0), tickers=["AAPL"])
         assert not isinstance(excinfo.value, TypeError), excinfo.value
+        assert rows and rows[0][0] == "error"

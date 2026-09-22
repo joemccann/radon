@@ -20,6 +20,32 @@ function buildHourly() {
 
 const HOURLY = buildHourly();
 
+function buildIrregularHourly() {
+  const timestamps = [
+    "2026-09-03T14:27:00-04:00",
+    "2026-09-03T15:27:00-04:00",
+    "2026-09-04T09:27:00-04:00",
+    "2026-09-04T10:27:00-04:00",
+    "2026-09-04T11:27:00-04:00",
+    "2026-09-04T12:27:00-04:00",
+    "2026-09-04T13:27:00-04:00",
+    "2026-09-04T14:27:00-04:00",
+    "2026-09-08T09:27:00-04:00",
+    "2026-09-08T10:27:00-04:00",
+    "2026-09-08T11:27:00-04:00",
+    "2026-09-08T12:27:00-04:00",
+    "2026-09-08T13:27:00-04:00",
+    "2026-09-08T14:27:00-04:00",
+    "2026-09-08T15:27:00-04:00",
+  ];
+  return timestamps.map((ts, index) => ({
+    ts,
+    bucket: ts,
+    trin: Number((0.8 + 0.03 * index).toFixed(4)),
+    ma10: index >= 9 ? Number((0.72 + 0.02 * index).toFixed(4)) : null,
+  }));
+}
+
 const TRIN_MOCK = {
   scan_time: new Date().toISOString(),
   source: "ib+stockcharts",
@@ -112,6 +138,66 @@ test.describe("/regime/trin - TRIN 60-minute tab", () => {
 
     await expect(section).toContainText("TRIN 60 MIN");
     await expect(section.locator('[data-testid="trin-brush"]')).toBeVisible();
+  });
+
+  test("keeps irregular intraday x-axis labels legible at desktop and mobile widths", async ({ page }, testInfo) => {
+    const hourly = buildIrregularHourly();
+    const payload = {
+      ...TRIN_MOCK,
+      current: { ...TRIN_MOCK.current, ts: hourly.at(-1)?.ts },
+      hourly,
+    };
+
+    for (const viewport of [
+      { name: "desktop", width: 1_440, height: 1_000 },
+      { name: "mobile", width: 390, height: 852 },
+    ]) {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await setupMocks(page, payload);
+      await page.goto("/regime/trin");
+
+      const chartSvg = page.getByTestId("trin-chart-section").locator("svg").first();
+      await expect(chartSvg.locator('[data-testid="chart-x-axis"]')).toBeVisible();
+      const geometry = await chartSvg.evaluate((svg) => {
+        const node = svg.querySelector<SVGGElement>('[data-testid="chart-x-axis"]');
+        if (!node) throw new Error("x-axis is missing from chart SVG");
+        const svgRect = svg.getBoundingClientRect();
+        const labels = [...node.querySelectorAll<SVGTextElement>(".tick text")]
+          .map((label) => {
+            const rect = label.getBoundingClientRect();
+            return {
+              text: label.textContent ?? "",
+              transform: label.getAttribute("transform"),
+              left: rect.left,
+              right: rect.right,
+              top: rect.top,
+              bottom: rect.bottom,
+            };
+          })
+          .sort((a, b) => a.left - b.left);
+        return {
+          labels,
+          svg: { left: svgRect.left, right: svgRect.right, top: svgRect.top, bottom: svgRect.bottom },
+        };
+      });
+
+      expect(geometry.labels.length).toBeGreaterThanOrEqual(2);
+      expect(geometry.labels.length).toBeLessThanOrEqual(7);
+      expect(new Set(geometry.labels.map((label) => label.text)).size).toBe(geometry.labels.length);
+      for (const [index, label] of geometry.labels.entries()) {
+        expect(label.transform).toBeNull();
+        expect(label.left).toBeGreaterThanOrEqual(geometry.svg.left - 1);
+        expect(label.right).toBeLessThanOrEqual(geometry.svg.right + 1);
+        expect(label.top).toBeGreaterThanOrEqual(geometry.svg.top - 1);
+        expect(label.bottom).toBeLessThanOrEqual(geometry.svg.bottom + 1);
+        if (index > 0) expect(label.left).toBeGreaterThanOrEqual(geometry.labels[index - 1].right + 4);
+      }
+
+      await testInfo.attach(`trin-axis-${viewport.name}`, {
+        body: await page.getByTestId("trin-chart-section").screenshot(),
+        contentType: "image/png",
+      });
+    }
   });
 
   test("shows the empty state on missing:true without a 4xx", async ({ page }) => {

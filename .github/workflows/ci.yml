@@ -220,7 +220,8 @@ jobs:
   web-tests:
     name: Vitest (shard ${{ matrix.shard }}/8)
     needs: [changes]
-    if: needs.changes.outputs.web == 'true'
+    # Required PR checks must run even when the changed paths are docs-only.
+    if: github.event_name == 'pull_request' || needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -319,7 +320,8 @@ jobs:
   py-tests:
     name: pytest (${{ matrix.shard }})
     needs: [changes]
-    if: needs.changes.outputs.python == 'true'
+    # Required PR checks must run even when the changed paths are docs-only.
+    if: github.event_name == 'pull_request' || needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -424,6 +426,19 @@ jobs:
           compression-level: 0
           retention-days: 3
 
+      # The full Python matrix owns this report. Cross-tree contract jobs
+      # are omitted when Python runs, so placing it there orphaned the artifact.
+      # Run once on the shard that owns MCP tests, even if a preceding test fails.
+      - name: Evaluate hosted MCP golden contracts
+        if: ${{ !cancelled() && matrix.shard == 'scripts-jm' }}
+        run: PYTHONPATH=scripts python -m mcp_hosted.evaluate --output /tmp/mcp-evaluation.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() && matrix.shard == 'scripts-jm' }}
+        with:
+          name: mcp-golden-contract-report
+          path: /tmp/mcp-evaluation.json
+          if-no-files-found: error
+
   py-coverage:
     name: pytest coverage ratchet
     needs: [py-tests]
@@ -472,6 +487,10 @@ jobs:
       # Skipped when no demo env is configured on the runner, so this cannot
       # fail a prod-only CI run.
       - name: Demo isolation guard
+        # Security 2026-09-18 (PR #514 follow-up): the demo database secrets
+        # are handed to this step only on a push. A pull_request run never
+        # materialises them, so a PR cannot exercise or leak the demo DB URLs.
+        if: github.event_name == 'push'
         env:
           TURSO_DEMO_DB_URL: ${{ secrets.TURSO_DEMO_DB_URL }}
           TURSO_DB_URL: ${{ secrets.TURSO_DEMO_APP_DB_URL }}
@@ -490,7 +509,8 @@ jobs:
   cloud-tests:
     name: pytest (cloud ${{ matrix.shard }})
     needs: [changes]
-    if: needs.changes.outputs.python == 'true'
+    # Required PR checks must run even when the changed paths are docs-only.
+    if: github.event_name == 'pull_request' || needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -598,7 +618,8 @@ jobs:
   perimeter-smoke:
     name: Perimeter smoke (next start + curl)
     needs: [changes]
-    if: needs.changes.outputs.web == 'true'
+    # Required PR checks must run even when the changed paths are docs-only.
+    if: github.event_name == 'pull_request' || needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: ci-perimeter-smoke-${{ github.ref }}
@@ -766,19 +787,137 @@ jobs:
           e2e/wulf-close-order-naked-short.spec.ts
           e2e/portfolio-defined-combo-pnl.spec.ts
           e2e/portfolio-same-day-combo-pnl.spec.ts
+          e2e/portfolio-mixed-combo-today-pnl.spec.ts
           e2e/portfolio-same-day-equity-pnl.spec.ts
           e2e/stop-order-desktop.spec.ts
           e2e/modify-order-correlation-risk.spec.ts
+          e2e/form-focus-highlights.spec.ts
+          e2e/historical-trades-filter.spec.ts
           e2e/chain-expiry-preserves-builder.spec.ts
           e2e/act-ticket-scroll.spec.ts
           e2e/orders-realized-pnl-portfolio-fallback.spec.ts
           e2e/orders-partial-realized-pnl.spec.ts
           e2e/share-pnl-entry-exit.spec.ts
           e2e/chain-deck-ticket-scroll.spec.ts
+          e2e/chain-anchored-scroll.spec.ts
+          e2e/chain-first-layout.spec.ts
+          e2e/instrument-workspace-layout.spec.ts
+          e2e/performance-twr-payload.spec.ts
           e2e/leap-order-prefill.spec.ts
           e2e/mobile-orders-session.spec.ts
           e2e/orders-session-window.spec.ts
           e2e/vixts-tab.spec.ts
+          e2e/panic-index-tab.spec.ts
+          e2e/hyad-tab.spec.ts
+          e2e/research-workbench.spec.ts
+          e2e/newsfeed-research-media.spec.ts
+          e2e/newsfeed-sharing.spec.ts
+          e2e/research-feedback.spec.ts
+          e2e/research-held-review.spec.ts
+          e2e/vol-skew-mr-scanner.spec.ts
+          e2e/ai-industry.spec.ts
+          e2e/clear-shell.spec.ts
+          e2e/chat-experience.spec.ts
+          e2e/chat-launcher-focus.spec.ts
+          e2e/flow-analysis-ticker.spec.ts
+          e2e/scanner-ticker-scan.spec.ts
+          e2e/ticker-search-chain.spec.ts
+      - name: Upload mixed-position coverage screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mixed-position-coverage-screenshots
+          path: web/test-results/**/mixed-coverage-*.png
+          retention-days: 7
+      - name: Upload toast error screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: toast-error-screenshots
+          path: web/test-results/**/vol-skew-safe-error-*.png
+          retention-days: 7
+      - name: Upload historical fill screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: historical-fill-screenshots
+          path: web/test-results/**/historical-fill-*.png
+          retention-days: 7
+      - name: Upload form focus screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: form-focus-screenshots
+          path: web/test-results/**/focus-*.png
+          retention-days: 7
+      - name: Upload chat experience screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: chat-experience-screenshots
+          path: web/test-results/**/chat-experience-*.png
+          retention-days: 7
+      - name: Upload vol-skew missing history screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: vol-skew-missing-screenshots
+          path: |
+            web/test-results/**/vol-skew-missing-*.png
+            web/test-results/**/vol-skew-safe-error-*.png
+            web/test-results/**/vol-skew-header-*.png
+          retention-days: 7
+      - name: Upload AI industry screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ai-industry-screenshots
+          path: web/test-results/**/ai-industry-*.png
+          retention-days: 7
+      - name: Upload research rendering screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: research-rendering-screenshots
+          path: |
+            web/test-results/**/research-*.png
+            web/test-results/**/*share*.png
+          retention-days: 7
+      - name: Upload chain anchor screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: chain-anchor-screenshots
+          path: web/test-results/**/chain-anchor-*.png
+          retention-days: 7
+      - name: Upload chain-first screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: chain-first-screenshots
+          path: web/test-results/**/chain-first-*.png
+          retention-days: 7
+      - name: Upload instrument workspace screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: instrument-workspace-screenshots
+          path: web/test-results/**/instrument-workspace-*.png
+          retention-days: 7
+      - name: Upload performance flow history screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: performance-flow-history-screenshots
+          path: web/test-results/**/performance-flow-history-*.png
+          retention-days: 7
+      - name: Upload HYAD history screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hyad-history-screenshots
+          path: web/test-results/**/hyad-history-*.png
+          retention-days: 7
       - name: Upload traces on failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -945,10 +1084,10 @@ jobs:
     name: Deploy to VPS
     # TEST_AUDIT T-160: the coverage-combine jobs are back on `needs`. They were
     # dropped so deploy could start the moment the shards went green, deferring
-    # enforcement to a "required workflow job" — but `main` carries no
-    # `required_status_checks` at all, so nothing enforced them and both
-    # ratchets (vitest lines/functions/branches, pytest --cov-fail-under=56)
-    # were advisory. Combine genuinely needs its own barrier VM, so this costs
+    # enforcement to a "required workflow job" before main had required
+    # status checks, so both ratchets were advisory. Branch protection now
+    # requires them for PRs; deploy.needs still enforces them on main pushes.
+    # Combine genuinely needs its own barrier VM, so this costs
     # the deploy critical path ~1min. Gating and that latency cannot both be
     # had; a coverage regression must be able to fail the release.
     needs: [secret-scan, changes, app-images, contract-cloud-tests, contract-script-tests, contract-root-tests, web-tests, web-coverage, py-tests, py-coverage, cloud-tests, perimeter-smoke, stage-release, prepull-images]
@@ -1016,6 +1155,33 @@ jobs:
             RUNNER_INDEX_LOCK="${RUNNER_ROOT}/.index.lock"
             RADON_CONTROL_PLANE_READY="${RADON_CONTROL_PLANE_READY:-/var/lib/radon/control-plane-ready}"
             git -C "$RADON" fetch --prune origin main
+
+            # A green run whose predecessor is still finishing its release must
+            # queue behind it, not fail on the production deploy lock
+            # (2026-09-19: run 35463319654 exited 75 at 19:15:19 while the
+            # previous deploy was in its last minute; a manual re-run shipped
+            # it). deploy.sh itself stays non-blocking; this observer waits a
+            # bounded time for the lock to free, then lets deploy.sh decide.
+            DEPLOY_LOCK_FILE="${RADON_DEPLOY_LOCK_FILE:-${HOME}/.radon-deploy.lock}"
+            DEPLOY_LOCK_WAIT_SECS="${RADON_DEPLOY_LOCK_WAIT_SECS:-480}"
+            wait_for_deploy_lock() {
+              local waited=0
+              while ! flock -n "$DEPLOY_LOCK_FILE" true 2>/dev/null; do
+                if (( waited >= DEPLOY_LOCK_WAIT_SECS )); then
+                  echo "production deploy lock still held after ${waited}s; handing over to deploy.sh" >&2
+                  return 0
+                fi
+                if (( waited == 0 )); then
+                  echo "waiting for the previous release to free the production deploy lock"
+                fi
+                sleep 10
+                waited=$((waited + 10))
+              done
+              if (( waited > 0 )); then
+                echo "production deploy lock freed after ${waited}s"
+              fi
+            }
+            wait_for_deploy_lock
 
             verify_health_status_schema() {
               local attempt body

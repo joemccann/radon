@@ -10,7 +10,7 @@
  * stat strip, the chart title, the default range, and the source footnote.
  */
 import React from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -322,5 +322,35 @@ describe("YieldCurvePanel — chart + controls", () => {
     for (const path of Array.from(paths)) {
       expect(path.getAttribute("d") ?? "").not.toContain("NaN");
     }
+  });
+});
+
+describe("YieldCurvePanel — freshness rail", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("shows the raw session date and counts down to the weekday 20:45 UTC slot", () => {
+    // 19:00 UTC on a Wednesday: 1h45m short of radon-yield-curve.timer's
+    // Mon..Fri 20:45 UTC pass (the 22:30 UTC catch-all is 3h30m out). No other
+    // schedule constant lands on 1h45m from this instant.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T19:00:00Z"));
+    renderPanel(
+      hookState({
+        data: buildData({
+          scan_time: "2026-08-25T22:35:00Z",
+          current: { date: "2026-08-25", y3m: 3.83, y2: 4.28, y10: 4.75, spread: 0.47 },
+        }),
+      }),
+    );
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    const rail = screen.getByTestId("yield-curve-freshness-rail");
+    expect(rail).toBeTruthy();
+    expect(rail.textContent).toContain("2026-08-25");
+    expect(screen.getByTestId("yield-curve-freshness-rail-countdown").textContent).toBe("1h 45m");
+    expect(rail.textContent).toContain("Next sample");
   });
 });

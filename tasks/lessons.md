@@ -1,4 +1,95 @@
 # Lessons
+## 2026-09-19 — Next.js is an LLM consumer
+
+- `/api/newsfeed/share` and `/api/assistant` run inside `radon-nextjs`.
+  Binding subscription grant dirs only into Python ladder units
+  (`2aba1229`) 502'd every share rewrite: `Missing Anthropic subscription`.
+- Treat Next.js as an LLM consumer in `radon-app-runtime` binds. Keep
+  the relay unbound. Pin
+  `test_run_nextjs_binds_subscription_credential_dirs_readonly`.
+
+## 2026-09-18 — Chain strike identity must never ellipsis
+
+- Four-digit strikes (`$1,737.00`) rendered as `$1,70...` on the
+  chain-first calls ladder. `.chain-cell` ellipsis plus a 72px strike
+  col hid the value.
+- Do not ellipsis the strike column. Size `.chain-anchor-strike-col`
+  for grouped five-digit labels (`$12,345.00`), pin it in
+  `web/tests/chain-strike-column.test.ts`.
+
+
+## 2026-09-17 — Two 00NN_ migration files silently skip the later table
+
+- `apply_pending_migrations` keys on the integer prefix, not the filename.
+  A second `0074_*.sql` is skipped once 74 is in `schema_migrations`.
+  radon-calm-streak then died with `no such table: calm_streak_history`
+  while `liquidcompute_index` (the first 74) was already there.
+- Pin unique prefixes in `test_migrate.py`. `_list_migrations` must
+  abort on a collision so ExecStartPre fails closed.
+- Per-indicator tests that apply THEIR file into a fresh sqlite do not
+  catch this. The real migrations directory is the topology.
+- A prior unpushed fix chose 0075; vol-skew-mr later took 75 on main.
+  Recurrence page `b4a46e16` needed 0076. Do not leave migration
+  renumbers on unmerged `fix/**` branches overnight.
+
+## 2026-09-17 — Mixed-age combos are not same-day
+
+- Selling a same-day short against an overnight long (SPY 740P since May, 760P sold today) groups as a bull put spread with `basis_source: mixed` and often `entry_date=today`.
+- The same-day identity Today P&L = MV − EC then prints the overnight leg's entire accumulated loss as today's drawdown.
+- `isSameDay` is false for mixed. Today P&L is per-leg: overnight vs prior close, `session_fills` vs fill. Incomplete blotter + a new-leg fill must not stamp the combo today. OCC journal tickers map to the underlying root.
+
+## 2026-09-11 — Grok 4.6 P&L turns cannot omit tools or starve max_tokens
+
+- grok-4.6 reasoning_effort defaults to high and cannot be disabled. A 1200 max_tokens budget is eaten by reasoning, so a cap-hit forced-final with tools omitted returns empty text and the canned "Reached the maximum tool-calling rounds" string.
+- Keep the tool schemas on the forced-final request and set tool_choice=none. Pass reasoning_effort=low and a 4k/8k token budget on assistant tool rounds.
+- Period P&L prompts ("september 2026", weekly, mtd) prefetch get_realized_pnl. Do not lead the system prompt with list_apis/call_api; that sends Grok on a 49-call catalog walk.
+- executeTool wraps journal results in fencePayload. Any synthesizer must read body.total_realized_pnl, not the envelope.
+
+## 2026-09-10 — Run the PR test loop on GitHub
+
+- The operator requires PR test suites to run on GitHub, not the laptop, because GitHub has more compute. Do not start local suites for PR preparation or CI repairs unless explicitly requested.
+- Push the scoped change, inspect exact-head GitHub failures, repair in-scope defects, and keep watching until all applicable checks are green.
+
+
+## 2026-09-10 — A scoring walk is not a trading day
+
+- Discover caps dark-pool pagination at 2 pages (~1000 prints) for
+  scoring. Writing that sample as schema-v2 complete made
+  `/flow-analysis/SNDK` serve 976-print days next to 19k-print days
+  with `cache_meta.is_stale: false`.
+- Persist `complete=false` on a capped walk. Flow consumers require
+  `complete`. Discover may reuse the sample. A 500..1000-print legacy
+  v2 row without the flag is a miss.
+
+## 2026-09-10 — A 130k-row Turso history cannot be the GET path
+
+- `/regime/llm` was empty with 130,083 durable observations already in Turso.
+  Collection and backfill were not the failure. GET `/ai-cycle` rebuilt the
+  snapshot from every latest vintage, 261 x 500-row pages, and died on the
+  30s/100k-row budget. Service-health `ok` does not mean the page can read.
+- Materialize a compact `ai_cycle_api_snapshot` at collect time. GET reads
+  that singleton only. Registry source status is the fallback; never scan
+  observation history on a user request.
+- Page-success proofs: stored payload bytes, GET latency, and per-source
+  coverage. Row counts in `ai_cycle_observations` are not page evidence.
+
+## 2026-09-08: Joe's research and social copy
+
+- Never emit em dashes in generated Dropbox PDF summaries, rendered research copy, or social-share captions, images, and videos. Enforce this at output boundaries as well as in model instructions.
+- Use Joe McCann's documented @joemccann voice: direct, conversational, concise, numbers first when useful. Preserve evidence, attribution, uncertainty, and numeric meaning. Do not invent personal trades or experience.
+- Preserve original source PDFs and chart evidence. Voice changes apply to authored summaries and captions, not source artifacts.
+
+## 2026-09-07 — A weekly error row is one cycle, not a daily re-fail
+
+- `equibles-ats-venue-share` `no ticker produced a series / requested=33 /
+  failed=33` with no `codes` was the 2026-09-01 11:36Z rerun after the
+  Equibles tarpit, not six days of fresh failures. Duration matched
+  `TICKER_FETCH_BUDGET_S`; remaining names were marked `budget` and skipped.
+- Read `service_health_events` and sibling Equibles rows before treating a
+  frozen weekly writer as a live outage. Siblings `ok` plus a live
+  `/off-exchange-volume` probe means the row is waiting on Tuesday 09:15 UTC.
+- One hung Session must not zero the watchlist. Replace it and keep walking.
+  Put `codes` in `message`; the dashboard only renders that field.
 
 ## 2026-09-05 — API health is not authenticated browser relay health
 
@@ -507,6 +598,7 @@ Session: reliability roadmap (DUR-01..16) + a chain of trade-data bugs (CTA-01, 
 - **The nightly IB Gateway "JVM wedge" was the gateway's OWN auto-restart**, not load: `AUTO_RESTART_TIME` unset → IBC default 11:45 PM session-local = 23:45 UTC (jts.ini TZ Africa/Abidjan), and the watchdog killed it mid-relogin. Pin `AUTO_RESTART_TIME` to a quiet window + give the watchdog a quiet-window so it doesn't classify the scheduled relogin as a hang. NOTE: an invalid IBC time format (`"23:58 ET"`) is silently ignored → falls back to the default. radon-cloud 21d9391.
 - **The gnzsnz IB Gateway image BLANKS `JAVA_TOOL_OPTIONS`** before starting the JVM (verified via `/proc/<pid>/environ`) — GC logging must go in the persistent `Jts/ibgateway/<ver>/ibgateway.vmoptions` file (under `### keep on update`), not the compose env.
 - **Timer-driven oneshots firing faster than every 5 min trip the DUR-02 flap-brake** (`StartLimitBurst=5/IntervalSec=300`) even when every run SUCCEEDS — a 60s oneshot makes exactly 5 starts/300s and parks as `start-limit-hit`. Use `Burst=10` (matches ib-watchdog/portfolio-sync) or `StartLimitIntervalSec=0` (a timer oneshot can't crash-loop). Recover a parked unit with `systemctl reset-failed`. host-metrics hit this because DUR-12 created it after DUR-02's special-casing. The DUR-02 unit-watchdog alert was CORRECT — the unit's brake config was the bug.
+- **A 5-minute timer with Burst=5 / IntervalSec=1800 is the same class.** systemd StartLimit counts successful oneshot starts; 6 fires fit in 1800s so the 6th parks `start-limit-hit` on a healthy drain (tv-alerts 2026-09-19 page 8750de94, five `processed: 0` then two skipped slots). `TestPerMinuteStartLimits` only watches a wildcard MINUTE field, so `*:02/5:23` slipped through. Burst must exceed timer fires in the window; pin it with `TestRepeatingTimerStartLimitHeadroom`.
 - **IPO-day / hard-to-borrow shorts: Reg SHO 203(b) requires a locate that doesn't exist on day one** (unsettled shares, no lendable inventory). "Order Inactive" is IB's received-but-not-working status; the reason arrives as a SEPARATE async errorEvent (201 class). `ib_place_order` broke its confirm-poll before the 201 landed and returned a bare message — grace-wait ~1.5s (driving the event loop via `client.sleep`) for the matching error + fall back to `trade.log` errorCode entries, and log the detail server-side before the 502. c9bc47f.
 - **IB shortability ticks 46 (difficulty) and 89 (shortable_shares) arrive INDEPENDENTLY in a streaming probe and only during market hours** (never snapshot — generic ticks break snapshots). tick 46 is often slower, so derive `shortable=true` from `shortable_shares>0` when difficulty is absent, else a borrowable name (AAPL 190M shares) renders a wrong "NO LOCATE". Off-hours the endpoint correctly returns `missing:true`. a3a9fcf/d74b90e.
 - **CTA share staleness: the generator was pinned to glob-latest `data/menthorq_cache/*.json` with no freshness gate**, so between the 16:00 ET session roll and the 17:30 ET sync the modal rendered yesterday's data. Pick the date-max of {DB row, disk} and flag `data_date < latest_closed_trading_day` with a STALE banner; weekend-aware. ab97253.
@@ -911,3 +1003,108 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 - `radon-trin.service` paged P1 (`3b8b2267`) because `fetch_trin.persist_result` let a Turso `TimeoutError` on `record_service_health(..., "ok")` abort a completed no-new-rows cycle. Sibling fetchers and `service_cycle._record` already swallow heartbeat write failures.
 - When a oneshot's sample/scan work finished and only the health upsert fails, exit 0, log non-fatal, and keep the JSON fallback write. A Python Turso canary that succeeds in the same minute means code_fix, not platform stand-down.
+
+## Dropbox research calibration (2026-09-07)
+
+- Preserve the operator-approved selection method in `scripts/research/policy.md`: incremental measured positioning/flow/volatility/market-structure evidence, specific macro transmission, counterevidence, source dates and explicit conditionality; no quota or repetitive summaries.
+- Research media must reuse the live feed presentation: original chart region, complete titles/axes/legends/source, lead preview and secondary thumbnails, article-context enlargement. Full pages are supplementary evidence; state when evidence is text-only.
+- A model reviewing a full page beside a crop can falsely attribute the original page’s missing labels to the crop. Inspect crops independently, require visible label transcription, retain failed attempts, and verify real rendered examples before enabling unattended publication.
+
+## 2026-09-07: Publication dates need local source evidence
+- A model boolean is insufficient for document-date verification. Require a literal source excerpt that contains the exact report publication date and validate it locally. Folder dates, coverage windows, event dates and copyright years cannot establish publication dates. Audit the first automatic result before reporting full unattended verification complete.
+
+## 2026-09-07: Original-provider attribution only
+- Research feed copy must name the original bank/provider only. Do not name the subscription aggregator in publisher labels, titles, bodies or captions. Preserve original source files privately without rewriting evidence.
+
+## 2026-09-07 - Sequence final frontend verification
+
+- Run the full suite only after implementation agents finish and focused/browser fixes are complete. Starting it while source files are changing can produce mixed-revision results and force an expensive restart.
+- Bound test workers on the shared workstation. Run Next route type generation after the dev server has stopped, then typecheck the completed generated files; do not race typechecking against regeneration.
+
+## Deployment completion (2026-09-07)
+- A merged feature with a reproducible deployment failure still needs a concrete repair when requested; trace supervisor, unit and outer deadlines together, add a failing regression, and verify the corrected release reaches production.
+
+## 2026-09-13 - Detached stage sentinel is authoritative
+
+- The remediation closing stage prewrote all nine result slots but its child stopped at `pytest_1` with a zero-byte log and no `DONE` sentinel. Record the phase as incomplete and never infer a passing or failing count from an empty artifact.
+
+
+## 2026-09-07 - Social share publisher exclusions
+- Never include The Market Ear or ZeroHedge names, attribution, or links in generated social-share captions, posts, Story cards, or Reels/TikTok text. Apply the same exclusion to embedded text and edited outbound captions, not only the source footer.
+- Social exports should rewrite the supplied facts in Joe's documented voice, not simply reproduce the feed's narrator. Keep the evidence-backed persona provisional until a representative recent authored-tweet sample is available; exclude quoted/reposted text from calibration.
+
+## 2026-09-08 - One research filename cannot stop ingestion
+- Treat Dropbox metadata paths as remote identifiers, not local paths or URI selectors; retain absolute-root confinement while accepting valid filename punctuation.
+- Isolate discovery failures by scope and continue already validated queue work. Preserve failed cursors for replay and report the actual failing stage with credential-safe diagnostics.
+
+## 2026-09-08 - New data sources require Profile credential coverage
+- When a pipeline introduces a credential or operator-supplied configuration value, add it to the canonical credential registry and Profile credentials UI in the same change. Verify every collector-loaded field is represented; do not leave production-only environment setup as an undocumented side channel.
+
+## 2026-09-08 - Prefer CI for expensive full-suite verification
+- When the operator says local full suites consume too much workstation time, stop rerunning them. Run focused local checks, publish the PR promptly, and use the faster GitHub runners as the authoritative full-suite loop until the exact head is green.
+
+## 2026-09-08 - Dropbox arrival latency
+- A sleep after a batch of long model reviews is not a polling SLA. Keep current-day discovery and document parsing independent from slow review; explicitly report actual host identity and deployment placement.
+- Replay rejection examples against source evidence before describing zero publication as legitimate filtering. Preserve range context and account for extraction markup without relaxing value/sign/unit provenance.
+
+## 2026-09-08 - Run test suites in GitHub CI
+- User instruction: do not run test suites on this machine going forward. Create the PR, resolve conflicts, and ensure CI is green; GitHub runners own suite execution. This supersedes earlier local-full-suite requirements. Local code edits, static inspection and generated-map maintenance remain appropriate.
+
+## 2026-09-08 — Credential verification must use provider-compatible transport
+
+- Verify new credentials against the provider from the server runtime, and classify only provider auth responses as invalid; TLS, proxy, DNS, and request-library behavior need a regression before claiming a key cannot be checked.
+
+## 2026-09-08 — Full test suites run in CI, not on the laptop
+- Never launch full `pytest`/`vitest` locally. Push, read `gh run view --log-failed`, fix, push, repeat until green. Targeted single-file red/green runs are fine.
+
+## 2026-09-09 - Compose on X must not await generated media
+- Keep the text-only X intent link usable immediately with the current sanitized caption while voice rewriting or preview rendering is pending. Media readiness may disable media downloads only; pin the loading-state composer navigation in unit and browser regressions.
+
+
+## 2026-09-10 - Market Ear chart credits are per-image evidence
+- Preserve explicitly supplied image providers from Market Ear (for example Ramp) through scraping, media URL rewriting, durable storage, and image captions. An article publisher and its chart's original source are different fields.
+- Match attribution by image URL across failed downloads, never by the filtered output index. Uncredited charts must not inherit another chart's provider.
+
+## 2026-09-13: ZH intermediary recaps are eligible
+
+- Do not empty-hold Dropbox research PDFs solely because they are Tyler Durden / Zero Hedge wraps, lack the original bank PDF, or are omnibus multi-theme aggregator recaps. Select measured market findings and publish with the best allowable attribution (named desk or person, or institutional desk commentary). A complete aggregator byline date is valid publication-date evidence. Rendered copy still must not name ZeroHedge.
+
+## 2026-09-09 - Ornn trials require an approved research grant
+
+- The operator clarified that Ornn must approve a research grant before its 72-hour Premium trial is available. Distinguish requesting approval from activating an immediately available trial in recommendations and summaries. Never imply a gated vendor trial is self-serve; preserve approval dependencies even when shortening a researched answer.
+
+## 2026-09-14 — `tailscale ping` does not prove an ACL allows the port
+
+- `tailscale ping` pongs at the WireGuard/disco layer and succeeds even when the ACL drops every TCP port. From the tagged `ib-gateway` node, ping to `joes-mac-mini` returned 19ms while `ssh` to port 22 timed out. Test the real port (`nc -z -w5 <ip> 22`) before concluding the peer is reachable.
+- Tagged devices (`tagged-devices` owner) and user-owned devices sit in different ACL groups. When a tagged node must reach a user device, route through a user-owned peer (`ProxyJump radon-broker`) or add an explicit ACL rule; do not keep retrying the direct route.
+
+## 2026-09-15 — flow-refresh analysis timeout vs capacity shed
+
+- `FastAPI outcome indeterminate (curl=0, http=502)` after ~120s is a
+  script timeout body, not capacity shed. Discriminate on duration and
+  the absence of `subprocess capacity exhausted` on the final attempt.
+- Wrapper SCAN_TIMEOUT and each `/flow-tab` `run_script` timeout must
+  match; discover at 180 with flow-analysis at 120 pages the oneshot.
+
+## 2026-09-16 - Performance regression reports need source reconciliation
+- When TWR disappears with excluded NAV sessions, trace the actual NAV and external-flow provenance before changing presentation or weakening integrity gates. Verify historical flow coverage survives refreshed statements and mirror selection; retain the reported dates as regression cases.
+
+## 2026-09-17 - AI charts share the Regime renderer
+- Reuse ChartPanel, CriHistoryChart, HistoryRangeChips and BrushMinimap for AI evidence, including legacy charts. Preserve source cadence, units and missing observations while matching the approved Regime composition.
+
+## 2026-09-17 - Nightly evidence is not a deliverable
+- A nightly audit may complete successfully without a commit or PR. Report no-op results and checkpoints through the rolling issue and runner state; never create empty commits to satisfy phase completion.
+- Gate PR creation on the net substantive base-to-head diff, excluding audit/task bookkeeping and generated timestamp churn. Commit counts and nonempty diffs alone do not prove a useful change. Apply the policy to every scheduled publisher and provider prompt.
+
+## 2026-09-17 - Error bodies are not UI copy
+- Never render response.text(), JSON envelopes, stack traces, or raw infrastructure exceptions as user-facing errors. Route failures through the established error pattern with safe copy and recovery, retaining prior data and financial rejection semantics. Audit shared consumers whenever a page leaks a raw error.
+
+## 2026-09-17 — Errors belong in toasts
+- User-facing request, refresh, validation and action failures must use toast presentation, never inline banners. Preserve retry actions and safe broker/service guidance. Audit shared presenters and custom render branches together; explicitly report framework fallback and diagnostic-record exceptions.
+
+## 2026-09-17 — AI Industry capitalization
+- Use “AI Industry” consistently for navigation, headings, page titles, links, prose references and accessible names. Keep regression expectations case-sensitive.
+
+## 2026-09-17 — AI metric labels and history
+- Translate residual categories into the measured population and unit; never expose bare “other”, “other share” or publisher/cohort IDs as selector copy.
+- Verify actual observation spacing before applying chart gap limits: a daily collection schedule does not imply daily points in publisher history. Token histories must render connected lines across normal sampling intervals.

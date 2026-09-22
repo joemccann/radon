@@ -214,6 +214,7 @@ web/verify-regime-internals.mjs
 !/.claude/skills/ci-performance/
 !/.claude/skills/documentation-nightly/
 !/.claude/skills/security-nightly/
+!/.claude/skills/security-deepsec/
 !/.claude/skills/incident-response/
 !/.claude/skills/long-horizon-jobs/
 !/.claude/skills/reliability-weekend/
@@ -285,3 +286,9 @@ docs/security-audit-*.html
 
 # One-shot security-scan scratch directories (never commit)
 CLAUDE-SECURITY-*/
+# SLM corpus and weight binaries. Manifests and model cards stay tracked.
+data/slm/
+models/**/*.gguf
+models/**/*.safetensors
+models/**/adapter/
+models/**/fused/

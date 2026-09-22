@@ -1,6 +1,30 @@
 import { afterEach, beforeEach } from "vitest";
 import { cleanup } from "@testing-library/react";
 
+type MediaQueryMatcher = (query: string) => boolean;
+
+// Historical suite-wide default: any query containing "dark" matches
+// (prefers-color-scheme: dark → true). Hundreds of tests implicitly rely
+// on this answer, so it stays the default; use setMatchMedia to override.
+const DEFAULT_MATCH_MEDIA_MATCHER: MediaQueryMatcher = (query) => query.includes("dark");
+
+let currentMatchMediaMatcher: MediaQueryMatcher = DEFAULT_MATCH_MEDIA_MATCHER;
+
+/**
+ * Override what the global matchMedia shim answers for the CURRENT test.
+ * Pass a boolean (every query) or a per-query matcher, BEFORE rendering —
+ * consumers read `.matches` at effect time. Resets to the dark-by-default
+ * answer before each test. No effect on window.matchMedia stubs a test
+ * file installed itself.
+ */
+export function setMatchMedia(matcher: boolean | MediaQueryMatcher): void {
+  currentMatchMediaMatcher = typeof matcher === "function" ? matcher : () => matcher;
+}
+
+function resetMatchMediaMatcher(): void {
+  currentMatchMediaMatcher = DEFAULT_MATCH_MEDIA_MATCHER;
+}
+
 function installMatchMediaShim(): void {
   if (typeof window === "undefined") return;
   if (typeof window.matchMedia === "function") return;
@@ -9,7 +33,7 @@ function installMatchMediaShim(): void {
     configurable: true,
     writable: true,
     value: (query: string) => ({
-      matches: query.includes("dark"),
+      matches: currentMatchMediaMatcher(query),
       media: query,
       onchange: null,
       addListener() {},
@@ -66,6 +90,7 @@ function installLocalStorageShim(): void {
 }
 
 beforeEach(() => {
+  resetMatchMediaMatcher();
   installLocalStorageShim();
   installMatchMediaShim();
 });

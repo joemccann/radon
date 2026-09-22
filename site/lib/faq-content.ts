@@ -10,42 +10,42 @@ export const faqEntries: FaqEntry[] = [
   {
     question: "What is Radon?",
     answer:
-      "Radon is a market-structure research terminal. It reconstructs institutional accumulation and distribution from dark-pool and OTC prints, scores the flow before the lit price moves, and routes only defined-risk options structures that clear four sequential gates. A free demo runs at demo.radon.run.",
+      "Radon constructs a view from scanners, news, dark-pool flow, and regime models, then expresses it as defined-risk options, stock, or futures. Four gates still sit on the order path. Try it at demo.radon.run.",
   },
   {
     question: "How does Radon read dark-pool flow?",
     answer:
-      "Radon ingests off-exchange and OTC prints from Unusual Whales and reconciles them against the Interactive Brokers realtime tape. Volume is venue-weighted and normalized to a rolling z-score, and directional pressure is inferred from print-side and size clustering. The output is a flow score with a measured lead window per ticker.",
+      "Radon takes off-exchange and OTC prints from Unusual Whales and lines them up with the Interactive Brokers tape. Volume is venue-weighted into a rolling z-score. Direction comes from print side and size clustering. You get a flow score and a lead window per ticker.",
   },
   {
     question: "Does Radon work with Interactive Brokers?",
     answer:
-      "Yes. Interactive Brokers is Radon's realtime data and execution backbone. Cleared structures are assembled into IB combo orders after a mandatory pre-trade risk check, and every fill is journaled with lot-matched P&L. Live trading requires a funded Interactive Brokers account; Radon itself is not a broker.",
+      "Yes. Interactive Brokers is the live tape and the place orders go. A structure that clears the pre-trade check becomes an IB combo. Fills land in the journal with lot-matched P&L. Live trading needs a funded IB account. Radon is not a broker.",
   },
   {
     question: "Do I need an Unusual Whales subscription?",
     answer:
-      "For live use, yes. Unusual Whales supplies the dark-pool prints and options flow that Radon's flow scoring is built on, alongside the Interactive Brokers tape. The free demo at demo.radon.run requires no subscription to either service.",
+      "For live use, yes. Unusual Whales supplies the dark-pool prints and options flow the scores use, next to the Interactive Brokers tape. The demo at demo.radon.run needs neither subscription.",
   },
   {
     question: "How is Radon different from SpotGamma or MenthorQ?",
     answer:
-      "SpotGamma and MenthorQ publish dealer-positioning levels as dashboards; Radon consumes MenthorQ levels as one data source. What Radon adds is discipline around the models: CRI, GEX, VCG-R, and GRG regime reads paired with four gates, fractional Kelly sizing hard-capped at 2.5% of bankroll per position, and a journaled audit trail from signal to routed order.",
+      "SpotGamma and MenthorQ publish dealer-positioning levels. Radon takes MenthorQ levels as one input. It also picks the structure, sizes it with fractional Kelly hard-capped at 2.5% of bankroll, runs four gates, and journals the chain from signal to order.",
   },
   {
     question: "What is GEX and how does Radon use it?",
     answer:
-      "GEX is aggregate dealer gamma exposure by strike. Positive gamma pins and dampens price movement; negative gamma amplifies it. Radon maps GEX into walls and magnets, which set realistic targets and mark the strikes where market structure resists or accelerates price.",
+      "GEX is dealer gamma by strike. Positive gamma pins. Negative gamma amplifies. Radon turns that into walls and magnets: levels that hold or pull price, and the strikes you actually trade against.",
   },
   {
     question: "Can I use Radon with Robinhood?",
     answer:
-      "No. Robinhood is not integrated, and Radon does not route orders through it. A Robinhood user can explore the free demo at demo.radon.run, but live use requires an Interactive Brokers account. Radon is a research instrument, not a broker.",
+      "No. Robinhood is not wired in, and Radon does not send orders there. You can still open the demo at demo.radon.run. Live use needs Interactive Brokers. Radon is not a broker.",
   },
   {
     question: "Is there a free demo?",
     answer:
-      "Yes. demo.radon.run is a full demo instance with seeded data and no brokerage connection required. It shows the flow scanner, the four regime models, the gate discipline, and the trade journal at no cost.",
+      "Yes. demo.radon.run is a full instance with seeded data and no brokerage hookup. You get scanners, news, regime models, structures, sizing, gates, and the journal. No cost.",
   },
 ];
 

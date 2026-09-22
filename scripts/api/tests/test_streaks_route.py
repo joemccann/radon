@@ -204,5 +204,5 @@ def test_robinhood_rung_label_is_the_writer_vocabulary():
     from clients.robinhood_client import RH_SOURCE
 
     assert streaks.RH_SOURCE == RH_SOURCE == "rh"
-    assert [label for label, _ in streaks.FALLBACK_LADDER] == ["uw", "rh", "yahoo"]
+    assert [label for label, _ in streaks.FALLBACK_LADDER] == ["rh", "uw", "yahoo"]
     assert all(callable(getattr(streaks, name)) for _, name in streaks.FALLBACK_LADDER)

@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -62,14 +64,41 @@ REQUIRED_CONFIG: dict[str, Optional[str]] = {
     "ServerAliveInterval": None,
 }
 
-# Well under the unit's TimeoutStartSec=120: past that systemd SIGKILLs the
-# process, `_heartbeat` never runs, and there is no error row at all — only a
-# `failed` unit, surfaced a day later by the 26h window. R-417.
+# Well under the unit's TimeoutStartSec: past that systemd SIGTERMs then
+# SIGKILLs the process. Without a process budget + SIGTERM unwind, `_heartbeat`
+# never runs and there is no error row at all — only a `failed` unit, surfaced
+# a day later by the 26h window. R-417; 2026-09-15 multi-statement timeout.
 SFTP_TIMEOUT_SECS = 45
+# 2026-09-15: TimeoutStartSec=120 killed a Tue catch-up (24 remote .pgp files,
+# two NEW Equity_Summary ingests each ~60s via perf_twr) at exactly 120s with
+# NRestarts=0 and no flex-pull row. Self-limit before systemd; headroom covers
+# one in-flight ingest after the budget check between files.
+SWEEP_BUDGET_S = 780
+INGEST_HEADROOM_S = 90
 
 
 class FlexSftpError(RuntimeError):
     """Fail-closed sFTP / PGP / period error. Never a token fetch."""
+
+
+# OpenSSH kex RST / idle drop on a later `get`. IBKR never removes files from
+# `outgoing`, so a morning ls re-gets the full history; a peer reset on an
+# already-processed older file must not fail the oneshot after today's
+# statement landed (2026-09-16 page 5a2eb828).
+_TRANSIENT_SFTP_GET_MARKERS = (
+    "kex_exchange_identification",
+    "connection reset",
+    "connection timed out",
+)
+
+
+def _is_transient_sftp_get(exc: BaseException) -> bool:
+    if not isinstance(exc, FlexSftpError):
+        return False
+    text = str(exc).lower()
+    if not text.startswith("sftp_get_failed:"):
+        return False
+    return any(marker in text for marker in _TRANSIENT_SFTP_GET_MARKERS)
 
 
 _INSECURE_HOST_KEY = {"no", "off", "accept-new"}
@@ -82,14 +111,23 @@ def _host_block_directives(text: str, alias: str) -> list[tuple[str, str]]:
     literal is what connects — while a raw `in text` scan saw the required line
     and passed. A commented-out requirement, or one scoped to an unrelated
     `Host` block, satisfied the same scan. R-418.
+
+    Global directives ABOVE the first `Host` block also apply to the alias
+    (they come first, so they win); they are collected too. `Include` and
+    `Match` pull in configuration this validator cannot see, so their mere
+    presence fails closed.
     """
     directives: list[tuple[str, str]] = []
-    in_block = False
+    in_block = True  # pre-Host globals apply to every host, alias included
     for raw in text.splitlines():
         line = raw.split("#", 1)[0].strip()
         if not line:
             continue
         key, _, value = line.partition(" ")
+        if key.lower() in {"include", "match"}:
+            raise FlexSftpError(
+                f"ssh_config: unsupported directive {key!r} is not validatable"
+            )
         if key.lower() == "host":
             patterns = value.replace(",", " ").split()
             in_block = any(p == alias or p == "*" for p in patterns)
@@ -268,6 +306,18 @@ def _delivery_key(name: str) -> str:
     return base
 
 
+def _covered_historical_delivery(name: str, covered: Dict[str, date]) -> bool:
+    """A failed download is historical only within its own applied stream."""
+    latest = covered.get(_delivery_key(name))
+    if latest is None:
+        return False
+    try:
+        period = date.fromisoformat(_period_end_from_name(name))
+    except ValueError:
+        return False
+    return period < latest
+
+
 def delivery_is_stale(period_end: Optional[date], now: Optional[datetime] = None) -> bool:
     """R-614: the lag is counted in trading SESSIONS, not calendar days.
 
@@ -300,6 +350,44 @@ def retain_newest_gpg(inbox: Path, keep: int = KEEP_GPG) -> None:
     )
     for stale in files[:-keep] if keep > 0 else files:
         stale.unlink(missing_ok=True)
+
+
+def _period_end_from_name(name: str) -> str:
+    """Best-effort `toDate` token from `<acct>.<Query>.<from>.<to>.xml.pgp`."""
+    parts = Path(name).name.split(".")
+    # acct, query..., from, to, xml, pgp/gpg  — toDate is the last 8-digit token
+    # before the xml/pgp suffixes.
+    for token in reversed(parts):
+        if len(token) == 8 and token.isdigit():
+            return token
+    return ""
+
+
+def order_for_ingest(names: List[str]) -> List[str]:
+    """Newest period first so a budget stop still lands today's statement.
+
+    IBKR never removes deliveries from `outgoing`, so a morning ls returns the
+    full history. Alphabetical oldest-first burned TimeoutStartSec=120 on
+    duplicates before the NEW Equity_Summary rows (2026-09-15).
+    """
+    return sorted(names, key=lambda n: (_period_end_from_name(n), n), reverse=True)
+
+
+def install_sigterm_unwind() -> None:
+    """Turn SIGTERM into SystemExit so the outer heartbeat can still run.
+
+    TimeoutStartSec's default SIGTERM kills without unwinding; the 2026-09-15
+    page had Result=timeout, NRestarts=0, and no flex-pull row at all.
+    """
+
+    def _unwind(signum, _frame):
+        print(f"[flex-pull] received signal {signum}; unwinding", file=sys.stderr)
+        raise SystemExit(143)
+
+    try:
+        signal.signal(signal.SIGTERM, _unwind)
+    except (ValueError, OSError):
+        pass
 
 
 def _heartbeat(state: str, error: Optional[Any] = None) -> None:
@@ -397,6 +485,7 @@ def run(
     written, the previous `ok` row stayed newest, and the 26h/4d windows kept
     `flex-pull` green over a job that had not run. R-400.
     """
+    install_sigterm_unwind()
     try:
         return _run(
             config=config,
@@ -408,6 +497,16 @@ def run(
             remote_dir=remote_dir,
             now=now,
         )
+    except SystemExit as exc:
+        # SIGTERM → SystemExit(143) from install_sigterm_unwind. Exception does
+        # not catch BaseException; without this branch the unit still ends with
+        # no flex-pull row (2026-09-15).
+        if exc.code == 143:
+            _heartbeat(
+                "error",
+                {"message": "SIGTERM during flex-pull", "class": "timeout"},
+            )
+        raise
     except Exception as exc:  # noqa: BLE001 — the row is the point
         print(f"[flex-pull] unhandled: {type(exc).__name__}: {exc}", file=sys.stderr)
         _heartbeat("error", f"{type(exc).__name__}: {exc}")
@@ -443,10 +542,24 @@ def _run(
 
     _ensure_inbox(inbox)
     failed = False
+    failed_keys: set[str] = set()
     ingested = 0
+    covered_by_key: Dict[str, date] = {}
     newest_period_end: Optional[date] = None
     newest_by_key: Dict[str, date] = {}
-    for name in names:
+    deadline = time.monotonic() + SWEEP_BUDGET_S
+    ordered = order_for_ingest(names)
+    budget_spent = False
+    deferred = 0
+    for index, name in enumerate(ordered):
+        if time.monotonic() >= deadline:
+            deferred = len(ordered) - index
+            budget_spent = True
+            print(
+                f"[flex-pull] wall-clock budget spent; deferring {deferred} file(s)",
+                file=sys.stderr,
+            )
+            break
         dest = inbox / Path(name).name
         try:
             pull_gpg(name, dest, config=config, runner=runner, remote_dir=remote_dir)
@@ -483,19 +596,52 @@ def _run(
             # run then re-pulls the same statement, each returning
             # `outcome: "duplicate"`, which passed `ok` and counted as progress.
             # Only a NEW statement is progress. R-389.
+            if result.get("outcome") == "duplicate" and result.get("persistence_confirmed") is not True:
+                raise FlexSftpError("duplicate ingest lacks independent persistence confirmation")
             if result.get("outcome") != "duplicate":
                 ingested += 1
+            if period_end is not None:
+                covered_by_key[key] = max(period_end, covered_by_key.get(key, period_end))
         except Exception as exc:  # noqa: BLE001 — one bad file must not abort the batch
             # Was `(FlexSftpError, FlexClassifyError, OSError)`, which covered
             # neither a `TimeoutExpired` from the decrypt nor anything out of
             # `ingest_xml`. R-400.
             print(f"[flex-pull] {name}: {type(exc).__name__}: {exc}", file=sys.stderr)
+            if _is_transient_sftp_get(exc) and _covered_historical_delivery(name, covered_by_key):
+                continue
             failed = True
+            failed_keys.add(_delivery_key(name))
             continue
 
     retain_newest_gpg(inbox)
     if failed:
-        _heartbeat("error", "one or more files rejected")
+        _heartbeat("error", "one or more files rejected: " + ", ".join(sorted(failed_keys)))
+        return 1
+    if budget_spent:
+        # Newest-first means a budget stop after progress still applied today;
+        # the 08:30 timer finishes the deferred tail. No progress + budget is
+        # the silent-timeout shape that paged P1 on 2026-09-15.
+        note = {
+            "message": f"wall-clock budget spent; deferred {deferred} file(s)",
+            "class": "budget",
+        }
+        if ingested:
+            _heartbeat("ok", note)
+            return 0
+        _heartbeat("error", note)
+        return 1
+    if budget_spent:
+        # Newest-first means a budget stop after progress still applied today;
+        # the 08:30 timer finishes the deferred tail. No progress + budget is
+        # the silent-timeout shape that paged P1 on 2026-09-15.
+        note = {
+            "message": f"wall-clock budget spent; deferred {deferred} file(s)",
+            "class": "budget",
+        }
+        if ingested:
+            _heartbeat("ok", note)
+            return 0
+        _heartbeat("error", note)
         return 1
     stale_keys = sorted(
         key for key, seen in newest_by_key.items() if delivery_is_stale(seen, now)

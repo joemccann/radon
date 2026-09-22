@@ -2,21 +2,28 @@
 
 The public marketing site at **radon.run** (apex). Separate from the app (`web/` = app.radon.run). Next.js 16 + React 19 + Tailwind v4 + TypeScript, App Router, atomic-design components. Operator-only to *deploy* (see below), but the source lives here in the radon repo.
 
-## Design: "Editorial Quant Research"
+## Design: Clear (selected with app.radon.run)
 
-The site uses the **Editorial** direction, chosen 2026-06-25 from three mocked directions in `../marketing-mockups/` (`01-brutalism`, `02-editorial` [chosen], `03-luxe`). It reads like a published research instrument: light-first, calm, each edge argued as a thesis (source → mechanism → evidence). Newsreader serif headlines + IBM Plex Mono for every figure/metric/label. Journal-plate framing for product exhibits. The mockup `../marketing-mockups/02-editorial/index.html` is the design source of truth; this codebase is the production port.
+The site uses the same **Clear** system as the workstation (selected 2026-09-05). Paper canvas, evergreen actions, Inter hierarchy, tabular amounts, 12px metadata floor, 6–10px radii. It is a marketing site, not a logged-out clone of the app chrome.
+
+**Product story (two systems):**
+1. **Point of view construction** — scanners, news, dark-pool / OTC flow, CRI / GEX / VCG-R / GRG.
+2. **Expression** — the cheapest convex way to own that view (options, stock, futures).
+
+Four sequential gates still sit on the order path. They are the discipline, not the identity. Do not sell Radon as "gates only."
 
 ## Conventions (match these)
 
 - **Atomic design**: `components/{atoms,molecules,organisms,sections}`. Named exports matching filenames; `interface Props` at top; `@/` import alias; Tailwind utility classes driven by tokens (`bg-canvas`, `text-primary`, `border-grid`, `text-signal-deep`, `bg-figure-bg`); no CSS modules. `"use client"` only where stateful.
-- **Tokens**: in `app/globals.css` via Tailwind v4 `@theme` (no `tailwind.config`). Editorial brand tokens are reconciled ONTO the existing palette (`--color-accent` = signal-core, `--color-grid` = hairline, etc.) — do NOT add a parallel system.
-- **Fonts**: `next/font/google` in `app/layout.tsx` (Inter + IBM Plex Mono pre-existing; Newsreader added as `--font-serif`).
-- **Theme**: the site's existing `lib/theme.ts` + shipped `ThemeToggle` (data-theme on `<html>`, localStorage key `theme`, pre-hydration script in `layout.tsx` so no FOUC). Default is **dark** (`DEFAULT_SITE_THEME`); light is fully built + toggleable. Don't add a second toggle.
-- **SEO/infra**: preserve `app/{layout,robots,sitemap,manifest,global-error}.tsx` + `lib/seo.ts` (SITE_NAME stays "Radon Terminal" — `seo.test.ts`/branding e2e depend on it). `og-image.png` still reflects pre-Editorial copy; regenerate for full parity.
+- **Tokens**: in `app/globals.css` via Tailwind v4 `@theme`. Clear light is the default; `html[data-theme="dark"]` is the quiet dark counterpart. No parallel theme store.
+- **Fonts**: `next/font/google` in `app/layout.tsx` (Inter + IBM Plex Mono). Inter for UI and display. IBM Plex Mono only for secondary numeric detail. No Newsreader. No new display face.
+- **Theme**: `lib/theme.ts` + `ThemeToggle` (`data-theme` on `<html>`, localStorage key `theme`, pre-hydration script in `layout.tsx`). Default is **light** (`DEFAULT_SITE_THEME`). Don't add a second toggle.
+- **SEO/infra**: preserve `app/{layout,robots,sitemap,manifest,global-error}.tsx` + `lib/seo.ts` (`SITE_NAME` stays "Radon Terminal"). Update `SITE_DESCRIPTION` when the two-system story changes; `value-prop.test.ts` pins it.
+- **Copy**: no em dashes. Name view construction and expression on every public surface that describes the product.
 
 ## ⛔ Product Plates — how we show the product (READ before touching plates)
 
-The Editorial site shows the real product as framed **journal plates** (`components/molecules/ProductPlate.tsx` + `PlateFrame.tsx`), in `public/plates/`. They are REAL screenshots of the authenticated app, captured + curated like this:
+The site shows the real product as framed plates (`components/molecules/ProductPlate.tsx` + `PlateFrame.tsx`), in `public/plates/`. They are REAL screenshots of the authenticated app, captured + curated like this:
 
 - **Capture**: via the `chrome-cdp` skill against the debug Chrome on `:9222` (authenticated to app.radon.run). Open a NEW tab, work in it, CLOSE it after — never hijack the user's tabs. Set theme via `localStorage['radon-theme'|'theme']` + `data-theme` on `<html>` then nav (reload applies pre-hydration). Capture **light + dark pairs** at ~1512×862 (high-DPR). `ProductPlate` swaps light/dark via `[data-theme]`.
 - **Anonymize the identity**: swap the sidebar username to **`radon-user`** (+ `RA` avatar) via a DOM **re-applier** (`setInterval(fn, 200)`) so it survives React re-renders, then capture. Verify `/mccann/i` is absent before shooting.

@@ -1,5 +1,7 @@
 "use client";
 
+import ErrorToast from "@/components/ErrorToast";
+
 import { useCallback, useMemo, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import type { PortfolioData, PortfolioPosition } from "@/lib/types";
@@ -363,9 +365,7 @@ export default function PositionTradeTicket({
       )}
 
       {overClosesCombo && (
-        <div className="order-error">
-          Quantity exceeds held combo units ({heldQty}).
-        </div>
+        <ErrorToast message={`Quantity exceeds held combo units (${heldQty}).`} />
       )}
 
       <OrderErrorBanner error={error} />

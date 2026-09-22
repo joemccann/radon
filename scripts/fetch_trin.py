@@ -556,18 +556,23 @@ def _nothing_to_persist(payload: dict[str, Any], new_samples: list[Sample], new_
     return not new_samples and not new_daily and not payload["hourly"] and not payload["daily"]
 
 
-def _heartbeat(finished_at: str, health_error: Optional[dict[str, Any]]) -> None:
-    """Best-effort service_health row. A Turso blip must not fail the oneshot
-    after the sample cycle itself completed (page 3b8b2267 / 2026-09-07)."""
+def _record_health(
+    scan_time: str, health_error: Optional[dict[str, Any]] = None,
+) -> None:
+    """Best-effort heartbeat. A Turso timeout must not fail the oneshot
+    (page 3b8b2267 / 2026-09-07 and 2026-09-15 13:22Z page e7d4d053:
+    HRANA_TIMEOUT_S=4 on this write became Result=exit-code / NRestarts=0).
+    Matches fetch_ivrank / service_cycle: telemetry never masks the cycle.
+    """
     try:
         if health_error is None:
-            writer.record_service_health(SERVICE, "ok", finished_at=finished_at)
+            writer.record_service_health(SERVICE, "ok", finished_at=scan_time)
         else:
             writer.record_service_health(
-                SERVICE, "error", finished_at=finished_at, error=health_error,
+                SERVICE, "error", finished_at=scan_time, error=health_error,
             )
-    except Exception as exc:  # noqa: BLE001 — best-effort mirror
-        print(f"[trin] health row non-fatal: {exc}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 — heartbeat is telemetry
+        print(f"[trin] service_health heartbeat failed: {exc}", file=sys.stderr)
 
 
 def persist_result(
@@ -601,7 +606,7 @@ def persist_result(
         # — but the SNAPSHOT is not rewritten, so `scan_time` keeps naming
         # the last cycle that actually produced data.
         writer.ensure_no_replica_for_writers()
-        _heartbeat(payload["scan_time"], health_error)
+        _record_health(payload["scan_time"], health_error)
         _log("no new samples or daily rows; leaving the stored scan_time untouched")
         _write_json_cache(payload)
         return
@@ -612,7 +617,7 @@ def persist_result(
     if new_daily_rows:
         writer.upsert_trin_daily_rows(new_daily_rows, recorded_at=scan_time)
     writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
-    _heartbeat(scan_time, health_error)
+    _record_health(scan_time, health_error)
     _write_json_cache(payload)
 
 

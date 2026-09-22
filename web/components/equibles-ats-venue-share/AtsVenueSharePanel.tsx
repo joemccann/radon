@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { Layers } from "lucide-react";
 import InfoTooltip from "../InfoTooltip";
 import SectionEmptyState from "../SectionEmptyState";
@@ -9,6 +10,7 @@ import {
   classificationColor,
   classificationLabel,
   countByClassification,
+  coverageScopeLabel,
   formatGap,
   formatPrintSize,
   formatSharePct,
@@ -19,7 +21,8 @@ import {
   type AtsVenueShareThresholds,
 } from "./atsVenueShare";
 import { useAtsVenueShare } from "./useAtsVenueShare";
-import { ATS_VENUE_SHARE_REFRESH, dataAgeDays, nextRefreshLabel } from "@/lib/refreshSchedule";
+import { ATS_VENUE_SHARE_REFRESH, dataAgeDays } from "@/lib/refreshSchedule";
+import FreshnessRail from "../FreshnessRail";
 import SortTh from "../SortTh";
 import { useSort } from "@/lib/useSort";
 
@@ -107,8 +110,7 @@ function methodNote(
     : "FINRA off-exchange file.";
   const lag =
     "FINRA publishes these weeks about a month in arrears and the provider trails FINRA, so the newest week always sits behind the calendar.";
-  const refresh = `Next refresh ${nextRefreshLabel(ATS_VENUE_SHARE_REFRESH)}.`;
-  return `${source} ${lag} ATS share is measured against off-exchange volume, the only denominator the source publishes. Accumulation requires elevated ATS share AND a larger average ATS print in the same week. ${scope} ${refresh}`.trim();
+  return `${source} ${lag} ATS share is measured against off-exchange volume, the only denominator the source publishes. Accumulation requires elevated ATS share AND a larger average ATS print in the same week. ${scope}`.trim();
 }
 
 function SignalChip({ row }: { row: AtsVenueShareRow }) {
@@ -133,7 +135,7 @@ function SignalChip({ row }: { row: AtsVenueShareRow }) {
 }
 
 export default function AtsVenueSharePanel() {
-  const { data, loading, syncing, lastSync } = useAtsVenueShare();
+  const { data, loading, syncing } = useAtsVenueShare();
 
   if ((loading || syncing) && !data) {
     return <SpectralLoader label="Sampling FINRA off-exchange venue share" />;
@@ -145,7 +147,7 @@ export default function AtsVenueSharePanel() {
       <SectionEmptyState
         icon={Layers}
         headline="No off-exchange venue data yet"
-        secondary="The venue-share refresh populates this tab from FINRA's weekly off-exchange volume file for every watchlist ticker. Rows appear after the first successful pull."
+        secondary="The venue-share refresh populates this tab from FINRA's weekly off-exchange volume file, portfolio first, then watchlist, Nasdaq-100, Russell 2000, and S&P 500. Rows appear after the first successful pull."
       />
     );
   }
@@ -162,11 +164,6 @@ export default function AtsVenueSharePanel() {
             ATS Venue Share
             <InfoTooltip text="FINRA off-exchange volume is the denominator dark-pool prints lack. ATS share is the dark-pool slice of that off-exchange tape; rising ATS share WITH a larger average ATS print size is an institutional accumulation footprint, since size is being worked in the dark rather than internalized in odd lots. Either signal alone is noise. Short-volume share sits alongside because divergence, dark-pool share running ahead of short volume, is buying rather than hedging." />
           </div>
-          {lastSync && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
-              {new Date(lastSync).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
-            </span>
-          )}
         </div>
 
         <RegimeStrip>
@@ -180,7 +177,7 @@ export default function AtsVenueSharePanel() {
             testId="ats-venue-share-strip-coverage"
             label="TICKERS COVERED"
             value={String(rows.length)}
-            sub={<>WATCHLIST SCOPE</>}
+            sub={<>{coverageScopeLabel(data.universe)}</>}
           />
           <RegimeStripCell
             testId="ats-venue-share-strip-accumulation"
@@ -203,6 +200,12 @@ export default function AtsVenueSharePanel() {
             sub={<>SHARE AND PRINT SIZE BOTH DOWN</>}
           />
         </RegimeStrip>
+
+        <FreshnessRail
+          schedule={ATS_VENUE_SHARE_REFRESH}
+          asOf={data.scan_time ? data.scan_time.slice(0, 10) : null}
+          testId="ats-venue-share-freshness-rail"
+        />
       </div>
 
       <div className="section">
@@ -217,7 +220,7 @@ export default function AtsVenueSharePanel() {
 
           {errors.length > 0 && (
             <div style={MONO_FOOTNOTE} data-testid="ats-venue-share-errors">
-              NOT COVERED THIS CYCLE: {errors.map((e) => `${e.ticker} (${e.error})`).join(", ")}
+              NOT COVERED THIS CYCLE: {errors.map((e) => `${e.ticker} (${userErrorMessage(e.error, "Data unavailable")})`).join(", ")}
             </div>
           )}
         </div>

@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
+import { resolveMaxWorkers } from "../../vitest.workers";
 
 const REPO_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
 const configSource = readFileSync(join(REPO_ROOT, "vitest.config.ts"), "utf-8");
@@ -80,5 +81,29 @@ describe("vitest global config", () => {
     expect(Intl.NumberFormat().resolvedOptions().locale).toBe("en-US");
     // The exact shape the bare-vs-explicit toLocaleString mismatch takes.
     expect((12_120).toLocaleString()).toBe((12_120).toLocaleString("en-US"));
+  });
+});
+
+// 2026-09-07: `maxWorkers: "100%"` spawned 14 jsdom workers on the operator's
+// laptop; alongside a `pytest -n auto` run (14 x ~470 MB) the box sat 8 GB
+// into swap with a load average over 100. CI keeps every core (4 vCPUs);
+// a developer machine keeps half, so a pytest run can share it.
+describe("vitest worker budget", () => {
+  it("keeps every core on CI", () => {
+    expect(resolveMaxWorkers({ CI: "true" })).toBe("100%");
+  });
+
+  it("keeps half the cores on a developer machine", () => {
+    expect(resolveMaxWorkers({})).toBe("50%");
+  });
+
+  it("lets an explicit VITEST_MAX_WORKERS win everywhere", () => {
+    expect(resolveMaxWorkers({ VITEST_MAX_WORKERS: "3" })).toBe(3);
+    expect(resolveMaxWorkers({ CI: "true", VITEST_MAX_WORKERS: "3" })).toBe(3);
+  });
+
+  it("is what the config actually uses, not a hardcoded percentage", () => {
+    expect(configSource).not.toMatch(/maxWorkers:\s*"100%"/);
+    expect(configSource).toMatch(/maxWorkers:\s*resolveMaxWorkers\(process\.env\)/);
   });
 });

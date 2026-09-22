@@ -30,7 +30,11 @@ LOOP_TITLES = {
     "documentation": "Documentation",
     "ci-performance": "CI Performance",
     "security": "Security",
+    "security-deepsec": "DeepSec",
 }
+
+# Loops whose PR text is redacted like their dead-man comment (rail 7).
+SANITIZED_LOOPS = frozenset({"security", "security-deepsec"})
 
 ISSUE_HEADING = "Issue discovered"
 FIX_HEADING = "What was done to fix it"
@@ -76,8 +80,8 @@ def _calendar_date(value: str) -> str:
 def format_pr_title(*, loop: str, date: str, issue: str) -> str:
     """`Reliability 2026-09-01: the handshake froze Gateway`.
 
-    Security titles stay date-only (`Security 2026-09-01`); the issue lives
-    only in the body.
+    Security and DeepSec titles stay date-only (`Security 2026-09-01`); the
+    issue lives only in the body.
     """
     prefix = LOOP_TITLES.get(loop)
     if prefix is None:
@@ -85,7 +89,7 @@ def format_pr_title(*, loop: str, date: str, issue: str) -> str:
         raise ValueError(f"unknown loop {loop!r}; expected one of: {known}")
     day = _calendar_date(date)
     summary = _title_summary(issue, field="issue")
-    if loop == "security":
+    if loop in SANITIZED_LOOPS:
         title = f"{prefix} {day}"
     else:
         title = f"{prefix} {day}: {summary}"
@@ -116,7 +120,7 @@ def format_pr_body(
 
 def render(*, loop: str, date: str, issue: str, fix: str, next_action: str | None) -> dict[str, str]:
     title = format_pr_title(loop=loop, date=date, issue=issue)
-    if loop == "security":
+    if loop in SANITIZED_LOOPS:
         # Public repo: the body gets the same redaction as the rolling-issue
         # comment (routes, file:line, secrets, accounts).
         issue = sanitize(issue)

@@ -1,3 +1,5 @@
+import { userErrorMessage } from "./userError";
+
 /** Operator-facing copy for a per-ticker flow-report failure. */
 
 export function isSubprocessCapacityError(message: string | null | undefined): boolean {
@@ -31,7 +33,7 @@ export function flowReportErrorCopy(message: string | null | undefined): string 
     return `Rate limited. Retry in ${retryAfter}s.`;
   }
   const trimmed = message?.trim();
-  return trimmed || "Flow scan failed";
+  return userErrorMessage(trimmed, "Flow scan failed. Please try again.");
 }
 
 /** R-358: the route sets Retry-After on a 429 and nothing read it. */

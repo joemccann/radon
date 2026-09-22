@@ -6,8 +6,10 @@ real validator or an explicit note saying why it cannot be checked live.
 """
 
 import re
+from pathlib import Path
 
 import credential_validators
+from ai_cycle.collect import KEYS as AI_CYCLE_KEYS
 from credentials_registry import (
     GROUP_ORDER,
     SERVICES,
@@ -49,8 +51,7 @@ class TestRegistryIsHonest:
         for service in SERVICES:
             if service.validator is not None:
                 assert service.validator in credential_validators.VALIDATORS, (
-                    f"{service.id} declares validator {service.validator!r} "
-                    "which does not exist"
+                    f"{service.id} declares validator {service.validator!r} which does not exist"
                 )
 
     def test_slow_implies_validator(self):
@@ -61,9 +62,7 @@ class TestRegistryIsHonest:
     def test_unvalidatable_services_carry_a_note(self):
         for service in SERVICES:
             if service.validator is None:
-                assert service.note, (
-                    f"{service.id} has no validator and no note explaining why"
-                )
+                assert service.note, f"{service.id} has no validator and no note explaining why"
 
     def test_ib_flex_is_never_live_validated(self):
         """The Flex token already took a 24h-168h throttle embargo once."""
@@ -95,8 +94,40 @@ class TestExpectedSurface:
             "IB_FLEX_TOKEN",
             "TWS_USERID",
             "TWS_PASSWORD",
+            "NVIDIA_API_KEY",
+            "FRED_API_KEY",
         ):
             assert expected in names, expected
+
+    def test_mdw_is_an_inbound_secret_not_a_market_data_probe(self):
+        """MDW presents this key to us on X-API-Key (scripts/api/auth.py);
+        listing it beside vendor keys "verified on first use" described a
+        probe that never happens."""
+        service = service_by_id("mdw")
+        assert service.group == "Infrastructure"
+        assert service.validator is None
+        assert "X-API-Key" in service.note
+
+    def test_setup_wizard_web_env_keys_are_a_subset_of_the_registry(self):
+        """`web/lib/setup/envFiles.ts` keeps a hand-written key catalog for the
+        offline completion path; it must never name a key the registry does
+        not manage, or the wizard writes a credential the tab cannot rotate."""
+        wizard = (Path(__file__).resolve().parents[2] / "web" / "lib" / "setup" / "envFiles.ts").read_text()
+        block = re.search(r"WEB_ENV_KEYS = new Set\(\[(.*?)\]\)", wizard, re.S)
+        assert block, "WEB_ENV_KEYS catalog not found"
+        wizard_keys = set(re.findall(r'"([A-Z0-9_]+)"', block.group(1)))
+        assert wizard_keys
+        assert wizard_keys <= set(fields_by_name()), wizard_keys - set(fields_by_name())
+
+    def test_ai_cycle_operator_fields_are_profile_manageable(self):
+        names = fields_by_name()
+        for expected in (*AI_CYCLE_KEYS, "RADON_AI_CYCLE_AA_BASKET"):
+            assert expected in names, expected
+
+        service_ids = {
+            service_by_id(service_id).id for service_id in ("openrouter", "artificial_analysis", "vast", "eia", "sec")
+        }
+        assert service_ids == {"openrouter", "artificial_analysis", "vast", "eia", "sec"}
 
     def test_lookup_helpers(self):
         service = service_by_id("anthropic")

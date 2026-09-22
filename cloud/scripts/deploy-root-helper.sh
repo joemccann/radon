@@ -51,6 +51,8 @@ readonly -a CONTROL_PLANE_SOURCES=(
   services/radon-relay.service.d/runtime-container.conf
   services/radon-monitor.service.d/runtime-container.conf
   services/radon-newsfeed.service.d/runtime-container.conf
+  services/radon-research.service
+  services/radon-research.service.d/runtime-container.conf
 )
 readonly -a CONTROL_PLANE_TARGETS=(
   /usr/local/sbin/radon-deploy-root
@@ -92,6 +94,8 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/systemd/system/radon-relay.service.d/runtime-container.conf
   /etc/systemd/system/radon-monitor.service.d/runtime-container.conf
   /etc/systemd/system/radon-newsfeed.service.d/runtime-container.conf
+  /etc/systemd/system/radon-research.service
+  /etc/systemd/system/radon-research.service.d/runtime-container.conf
 )
 readonly -a CONTROL_PLANE_MODES=(
   755 755 755 644 644 755 755 644
@@ -99,6 +103,7 @@ readonly -a CONTROL_PLANE_MODES=(
   644
   644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644
   644 644 644 644 644
+  644 644
 )
 
 if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
@@ -166,6 +171,7 @@ else
   readonly TIMEOUT=/usr/bin/timeout
   readonly ROOT_LOCK_FILE=/run/radon-deploy-root.lock
   readonly STATE_WAIT_SECONDS=60
+  readonly RESEARCH_STOP_WAIT_SECONDS=150
   readonly PREHELD_WAIT_SECONDS=120
   readonly SLEEP=/usr/bin/sleep
   readonly CONTROL_PLANE_ROOT=""
@@ -367,7 +373,15 @@ systemctl_bounded() {
 wait_for_unit_state() {
   local unit="$1"
   local desired="$2"
-  local deadline=$((SECONDS + STATE_WAIT_SECONDS))
+  local wait_seconds="$STATE_WAIT_SECONDS"
+  # Research permits 120s for systemd shutdown, followed by ExecStopPost
+  # container cleanup. Keep this stop-only allowance below the 180s root
+  # supervisor budget; starts and test-mode waits retain their usual bounds.
+  if (( HELPER_TEST_MODE == 0 )) && \
+     [[ "$unit" == radon-research.service && "$desired" == inactive ]]; then
+    wait_seconds="$RESEARCH_STOP_WAIT_SECONDS"
+  fi
+  local deadline=$((SECONDS + wait_seconds))
   local state
   while :; do
     state="$(active_state "$unit")" || return 69
@@ -547,6 +561,35 @@ snapshot_active_units() {
   "$RM" -f "$RESTORED_STATE_FILE"
 }
 
+stop_inventory_units() {
+  (( $# > 0 )) || return 0
+  # Keep the normal batched stop unchanged. A retired unit in the durable
+  # inventory can reject the batch even though it has nothing left to stop.
+  systemctl_bounded --no-block stop "$@" && return 0
+  local unit load state fragment
+  local loaded=()
+  for unit in "$@"; do
+    load="$(systemctl_bounded show "$unit" --property=LoadState --value 2>/dev/null)" || return 69
+    case "$load" in
+      loaded) loaded+=("$unit") ;;
+      not-found)
+        state="$(active_state "$unit")" || return 69
+        fragment="$(systemctl_bounded show "$unit" --property=FragmentPath --value 2>/dev/null)" || return 69
+        if [[ "$state" != inactive || -n "$fragment" ]]; then
+          echo "could not prove absent inventory unit ${unit} is inactive" >&2
+          return 69
+        fi
+        ;;
+      *)
+        echo "could not verify load state for ${unit}" >&2
+        return 69
+        ;;
+    esac
+  done
+  # Loaded units still require a successful stop; never mask their failures.
+  (( ${#loaded[@]} == 0 )) || systemctl_bounded --no-block stop "${loaded[@]}"
+}
+
 stop_release_consumers() {
   local unit state
   local timers=()
@@ -556,12 +599,12 @@ stop_release_consumers() {
     [[ -n "$unit" ]] || continue
     if [[ "$unit" == *.timer ]]; then timers+=("$unit"); else services+=("$unit"); fi
   done < "$INVENTORY_FILE"
-  (( ${#timers[@]} == 0 )) || systemctl_bounded --no-block stop "${timers[@]}"
+  (( ${#timers[@]} == 0 )) || stop_inventory_units "${timers[@]}"
   for unit in "${timers[@]}"; do
     wait_for_unit_state "$unit" inactive || return $?
   done
   wait_for_preheld_restart
-  (( ${#services[@]} == 0 )) || systemctl_bounded --no-block stop "${services[@]}"
+  (( ${#services[@]} == 0 )) || stop_inventory_units "${services[@]}"
   for unit in "${services[@]}"; do
     wait_for_unit_state "$unit" inactive || return $?
   done
@@ -575,6 +618,17 @@ is_core_service() {
     [[ "$candidate" == "$core" ]] && return 0
   done
   return 1
+}
+
+start_optional_research() {
+  # Installation is inert; only explicit operator enablement joins deploys.
+  local enabled_state
+  enabled_state="$(systemctl_bounded is-enabled radon-research.service 2>/dev/null)" || return 0
+  if [[ "$enabled_state" == "enabled" || "$enabled_state" == "enabled-runtime" ]]; then
+    systemctl_bounded reset-failed radon-research.service
+    systemctl_bounded --no-block start radon-research.service
+    wait_for_unit_state radon-research.service active
+  fi
 }
 
 reset_core_failures() {
@@ -1453,62 +1507,64 @@ compose_body_is_valid() {
   # Comments must never satisfy or trip a structural gate.
   body="$(grep -Ev '^[[:space:]]*#' "$candidate")" || body=""
 
-  printf '%s\n' "$body" | grep -Eq '^services:' || {
+  # Early-exiting consumers must not SIGPIPE a producer under pipefail:
+  # a failed producer inverts both required matches and forbidden-match guards.
+  grep -Eq '^services:' <<< "$body" || {
     echo "compose validation failed: ${dest} declares no services" >&2
     return 1
   }
-  printf '%s\n' "$body" | grep -Eq '^[[:space:]]+container_name:[[:space:]]*ib-gateway[[:space:]]*$' || {
+  grep -Eq '^[[:space:]]+container_name:[[:space:]]*ib-gateway[[:space:]]*$' <<< "$body" || {
     echo "compose validation failed: ${dest} does not pin container_name ib-gateway" >&2
     return 1
   }
-  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*privileged:[[:space:]]*true'; then
+  if grep -Eq "^[[:space:]]*privileged:[[:space:]]*[\"']?true" <<< "$body"; then
     echo "compose validation failed: ${dest} requests privileged" >&2
     return 1
   fi
   # The Gateway body's only volume is the named ib-config volume, so any
   # short-form entry whose source is an absolute host path (quoted or not)
   # is a host mount root must not perform. There is no allowlist.
-  if printf '%s\n' "$body" | grep -Eq "^[[:space:]]*-[[:space:]]*[\"']?/"; then
+  if grep -Eq "^[[:space:]]*-[[:space:]]*[\"']?/" <<< "$body"; then
     echo "compose validation failed: ${dest} binds an absolute host path" >&2
     return 1
   fi
-  if printf '%s\n' "$body" | grep -Eq "type:[[:space:]]*[\"']?bind"; then
+  if grep -Eq "type:[[:space:]]*[\"']?bind" <<< "$body"; then
     echo "compose validation failed: ${dest} declares a long-form bind mount" >&2
     return 1
   fi
-  if printf '%s\n' "$body" | grep -Eq "source:[[:space:]]*[\"']?/"; then
+  if grep -Eq "source:[[:space:]]*[\"']?/" <<< "$body"; then
     echo "compose validation failed: ${dest} declares an absolute long-form source" >&2
     return 1
   fi
-  if printf '%s\n' "$body" | grep -q 'docker\.sock'; then
+  if grep -q 'docker\.sock' <<< "$body"; then
     echo "compose validation failed: ${dest} mounts the docker socket" >&2
     return 1
   fi
   # R-668 (REL-249): every host-namespace join is denied, not only pid — ipc,
   # userns_mode, uts and cgroup widen the container's runtime the same way.
-  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*(pid|ipc|userns_mode|uts|cgroup):'; then
+  if grep -Eq '^[[:space:]]*(pid|ipc|userns_mode|uts|cgroup):' <<< "$body"; then
     echo "compose validation failed: ${dest} joins a host namespace (pid/ipc/userns_mode/uts/cgroup)" >&2
     return 1
   fi
-  if printf '%s\n' "$body" | grep -Eq "^[[:space:]]*network_mode:[[:space:]]*[\"']?host"; then
+  if grep -Eq "^[[:space:]]*network_mode:[[:space:]]*[\"']?host" <<< "$body"; then
     echo "compose validation failed: ${dest} requests host networking" >&2
     return 1
   fi
-  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*(cap_add|devices):'; then
+  if grep -Eq '^[[:space:]]*(cap_add|devices):' <<< "$body"; then
     echo "compose validation failed: ${dest} adds capabilities or devices" >&2
     return 1
   fi
-  if printf '%s\n' "$body" | grep -Eq "^[[:space:]]*user:[[:space:]]*[\"']?(root|0)[\"']?[[:space:]]*$"; then
+  if grep -Eq "^[[:space:]]*user:[[:space:]]*[\"']?(root|0)[\"']?[[:space:]]*$" <<< "$body"; then
     echo "compose validation failed: ${dest} runs as root in the container" >&2
     return 1
   fi
   # security_opt may only tighten: block form, no-new-privileges:true entries
   # and nothing else. The inline form is refused outright.
-  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*security_opt:[[:space:]]*[^[:space:]]'; then
+  if grep -Eq '^[[:space:]]*security_opt:[[:space:]]*[^[:space:]]' <<< "$body"; then
     echo "compose validation failed: ${dest} uses inline security_opt" >&2
     return 1
   fi
-  if ! printf '%s\n' "$body" | awk '
+  if ! awk '
     /^[[:space:]]*security_opt:[[:space:]]*$/ { inso = 1; next }
     inso == 1 && /^[[:space:]]*-[[:space:]]*/ {
       entry = $0
@@ -1519,7 +1575,7 @@ compose_body_is_valid() {
     }
     inso == 1 { inso = 0 }
     END { exit bad }
-  '; then
+  ' <<< "$body"; then
     echo "compose validation failed: ${dest} sets a security_opt beyond no-new-privileges" >&2
     return 1
   fi
@@ -1987,6 +2043,7 @@ case "$1" in
       wait_for_unit_state "$unit" active
     done
     resume_active_snapshot
+    start_optional_research
     ;;
   recover)
     reset_core_failures
@@ -1995,6 +2052,7 @@ case "$1" in
       wait_for_unit_state "$unit" active
     done
     resume_active_snapshot
+    start_optional_research
     ;;
   verify-restored)
     verify_restored_state

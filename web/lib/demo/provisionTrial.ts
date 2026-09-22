@@ -14,7 +14,7 @@
 //      social buttons auto-creates the user WITHOUT the marker, so the demo
 //      deployment treats every non-operator user.created as a trial.
 
-import { upsertDemoUser, type DemoDbClient } from "./demoUsers";
+import { getDemoUser, upsertDemoUser, type DemoDbClient } from "./demoUsers";
 import type { DemoPublicMetadata } from "./demoRole";
 import type { TrialExpiry } from "./trialExpiry";
 
@@ -67,6 +67,27 @@ export async function provisionDemoTrial(
   }
   if (!deps.assumeDemo && !isDemoSignup(data)) {
     return { provisioned: false, reason: "not a demo signup (no demo marker)" };
+  }
+
+  // RC-B11: user.created can be re-delivered. An existing row means this user
+  // was already provisioned — never restart the trial clock, and never
+  // resurrect a revoked/expired trial from a replay.
+  const existing = await getDemoUser(deps.db, userId);
+  if (existing) {
+    if (existing.status !== "active") {
+      return {
+        provisioned: false,
+        reason: `existing ${existing.status} trial — replayed delivery not re-provisioned`,
+      };
+    }
+    if (existing.started_at && existing.expires_at) {
+      await deps.setClerkMetadata(userId, {
+        demoRole: "trial",
+        demoTrialStartedAt: existing.started_at,
+        demoTrialExpiresAt: existing.expires_at,
+      });
+      return { provisioned: true, expiresAt: existing.expires_at };
+    }
   }
 
   const now = deps.now ?? new Date();

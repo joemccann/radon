@@ -1,5 +1,7 @@
 "use client";
+import RequestError from "@/components/RequestError";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useState } from "react";
 import { FileSearch } from "lucide-react";
 import InfoTooltip from "@/components/InfoTooltip";
@@ -96,8 +98,8 @@ export function formatAsOf(asOf: string | null | undefined): string | null {
 }
 
 const META_STYLE = {
-  fontFamily: "var(--font-mono)",
-  fontSize: "9px",
+  fontFamily: "var(--instrument-ui-font, var(--font-mono))",
+  fontSize: "var(--instrument-meta-size, 9px)",
   letterSpacing: "var(--tracking-meta)",
   color: "var(--text-muted)",
 } as const;
@@ -142,15 +144,15 @@ function CheckRow({ check }: { check: FilingCheck }) {
       }}
     >
       <div style={{ display: "flex", alignItems: "baseline", gap: "8px", flexWrap: "wrap" }}>
-        <span style={{ fontFamily: "var(--font-sans)", fontSize: "12px", color: "var(--text-primary)" }}>
+        <span style={{ fontFamily: "var(--font-sans)", fontSize: "var(--instrument-body-size, 12px)", color: "var(--text-primary)" }}>
           {check.label}
         </span>
         <span style={META_STYLE}>{GATE_LABEL[check.gate] ?? `GATE ${check.gate}`}</span>
         <span
           data-testid={`filing-verdict-${check.code}`}
           style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "9px",
+            fontFamily: "var(--instrument-ui-font, var(--font-mono))",
+            fontSize: "var(--instrument-meta-size, 9px)",
             letterSpacing: "var(--tracking-label)",
             color: verdictColor(check),
             border: `1px solid ${verdictColor(check)}`,
@@ -163,13 +165,13 @@ function CheckRow({ check }: { check: FilingCheck }) {
         {figure && (
           <span
             data-testid={`filing-figure-${check.code}`}
-            style={{ fontFamily: "var(--font-mono)", fontSize: "12px", color: verdictColor(check) }}
+            style={{ fontFamily: "var(--instrument-ui-font, var(--font-mono))", fontSize: "var(--instrument-body-size, 12px)", color: verdictColor(check) }}
           >
             {figure}
           </span>
         )}
       </div>
-      <span style={{ fontFamily: "var(--font-sans)", fontSize: "11px", color: "var(--text-secondary)" }}>
+      <span style={{ fontFamily: "var(--font-sans)", fontSize: "var(--instrument-body-size, 11px)", color: "var(--text-secondary)" }}>
         {check.detail}
       </span>
       {check.filing && <FilingLink filing={check.filing} />}
@@ -215,13 +217,7 @@ export default function FilingForensicsDossier({
 
   if (error) {
     return (
-      <SectionEmptyState
-        icon={FileSearch}
-        headline="Filing forensics unavailable"
-        secondary={`${error}. Treat this as unknown, not as an all clear.`}
-        tone="danger"
-        testId="filing-forensics-error"
-      />
+      <><RequestError error={error} testId="filing-forensics-error" /><SectionEmptyState icon={FileSearch} headline="Filing forensics" secondary="No current dossier to display. Treat this as unknown, not as an all clear." action={{ label: "Refresh", onClick: () => void load() }} /></>
     );
   }
 
@@ -258,8 +254,8 @@ export default function FilingForensicsDossier({
         <div
           data-testid="filing-forensics-partial"
           style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "10px",
+            fontFamily: "var(--instrument-ui-font, var(--font-mono))",
+            fontSize: "var(--instrument-meta-size, 10px)",
             color: "var(--warning)",
             padding: "6px 0",
           }}
