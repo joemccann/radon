@@ -2042,8 +2042,9 @@ on the Tue..Sat 07:30 ET fire.** Peak: 2026-09-15 11:35Z, page `68388b70…`.
   equal to `TimeoutStartSec` and mid-ingest journal (perf_twr / statement
   shape) with no `[flex-pull]` terminal heartbeat. `Result=signal` is deploy
   stop-clean (do not raise the budget). sFTP auth/host-key abort is
-  `Result=exit-code` with a health `error` row. If `/health/lite` is down
-  too → API, stand down.
+  `Result=exit-code` with a health `error` row. kex / connection-reset GET
+  failures on leftover history after a same-morning applied delivery is
+  `flex-pull-sftp-get-reset`. If `/health/lite` is down too → API, stand down.
 - **Remediation (code):** wall-clock `SWEEP_BUDGET_S=780` with newest-first
   ordering so a budget stop still lands today's statement; SIGTERM→SystemExit
   unwind heartbeats `class=timeout`. `TimeoutStartSec=900` covers the budget
@@ -2059,6 +2060,49 @@ on the Tue..Sat 07:30 ET fire.** Peak: 2026-09-15 11:35Z, page `68388b70…`.
 - **Code:** `scripts/flex_sftp_pull.py` (`SWEEP_BUDGET_S`, `order_for_ingest`,
   `install_sigterm_unwind`), `cloud/services/radon-flex-pull.service`,
   `scripts/db/writer.py` (`FLEX_CLAIM_STALE_AFTER_S`).
+
+---
+
+## flex-pull-sftp-get-reset
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+on the 08:30 ET retry after leftover `outgoing` GETs RST.** Peak: 2026-09-17
+12:35Z, page `e8da0c53…`. Next timer ~24h.
+
+- **Mechanism:** IBKR never removes deliveries from `outgoing`. 07:30 ET
+  applied today's Equity_Summary + Trade_History (`flex_deliveries` `applied`
+  11:30Z). 08:30 ET is the empty-dir list-dir retry, so it re-GETs the full
+  history. After the current statements (cash-flow-sync `ok` 12:30:39Z)
+  OpenSSH RST'd the tail (`sftp_get_failed` /
+  `kex_exchange_identification: read: Connection reset by peer` on
+  20260903..20260828). Each GET exception set `failed=True`; the oneshot
+  heartbeated `one or more files rejected` and exited 1. `Type=oneshot` has
+  no `Restart=`. Edge and `:8321/health/lite` stayed up; Python Turso canary
+  52 ms.
+- **Detection:** `systemctl show radon-flex-pull.service -p
+  Result,NRestarts,ExecMainStartTimestamp,InactiveEnterTimestamp` →
+  `exit-code` / `0` / span tens of seconds (not `TimeoutStartSec`); journal
+  `[flex-pull] … sftp_get_failed:…kex_exchange_identification`;
+  `service_health.flex-pull` error `one or more files rejected`. Today's
+  `flex_deliveries` rows stay `applied` from 07:30.
+- **Discriminating check:** `Result=exit-code` with kex / connection-reset
+  GET failures on files older than the last completed session, after a
+  same-morning applied delivery. Host-key / auth abort is still fail-closed.
+  `Result=timeout` with ExecMainStart→Inactive equal to `TimeoutStartSec` is
+  `flex-pull-ingest-timeout`. If `/health/lite` is down too → API, stand down.
+- **Remediation (code):** `is_transient_sftp_error` (kex / connection-reset /
+  connection-timed-out on `sftp_get_failed` only) does not set `failed`.
+  Current (non-stale) duplicates then heartbeat `ok` with
+  `class=sftp_transient`. Host-key and ingest rejects still exit 1. A run
+  that GET-fails every file with no parsed period still errors. Do not
+  restart-flap; next 07:30 ET timer, or `reset-failed` after deploy (unit is
+  not on `RERUNNABLE_ONESHOT_UNITS`).
+- **Regression:**
+  `test_flex_pull_sftp_get_reset.py::test_current_duplicate_then_kex_reset_on_history_exits_zero`,
+  `test_kex_reset_on_every_get_without_a_current_statement_still_errors`,
+  `test_host_key_failure_on_get_still_fails_closed`,
+  `test_kex_reset_classifier_matches_the_unit_journal`.
+- **Code:** `scripts/flex_sftp_pull.py` (`is_transient_sftp_error`, `_run`).
 
 ---
 
