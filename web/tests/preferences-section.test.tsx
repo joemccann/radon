@@ -102,6 +102,7 @@ const QTY: Entry = {
   unit: "contracts",
   description: "Hard ceiling on contracts per options or combo order.",
   applies_immediately: true,
+  risk_gated: true,
   source: "db",
   db_rejected: false,
   updated_at: "2026-08-11T17:02:11Z",
@@ -120,6 +121,7 @@ const NOTIONAL: Entry = {
   unit: "USD",
   description: "Hard ceiling on dollar notional per order.",
   applies_immediately: true,
+  risk_gated: true,
   source: "default",
   db_rejected: false,
   updated_at: null,
@@ -138,6 +140,7 @@ const KB: Entry = {
   unit: "",
   description: "Turn off knowledge base vector embedding.",
   applies_immediately: false,
+  risk_gated: false,
   source: "env",
   db_rejected: false,
   updated_at: null,
@@ -156,6 +159,7 @@ const WORKERS: Entry = {
   unit: "threads",
   description: "Concurrent worker threads for the watchlist scanner.",
   applies_immediately: true,
+  risk_gated: false,
   source: "default",
   db_rejected: false,
   updated_at: null,
@@ -285,8 +289,33 @@ describe("PreferencesSection", () => {
     expect(screen.getByTestId("preference-source-RADON_MAX_ORDER_NOTIONAL").textContent).toBe("DEFAULT");
     expect(screen.getByTestId("preference-source-RADON_KB_EMBED_DISABLED").textContent).toBe("ENV");
     expect(screen.getByTestId("preference-default-RADON_MAX_ORDER_QTY").textContent).toContain("500 contracts");
-    expect(screen.getByTestId("preference-range-RADON_MAX_ORDER_QTY").textContent).toContain("1 to 5000");
+    expect(screen.getByTestId("preference-range-RADON_MAX_ORDER_QTY").textContent).toBe("Allowed 1 to 5,000 contracts");
+    expect(screen.getByTestId("preference-range-RADON_MAX_ORDER_NOTIONAL").textContent).toBe("Allowed 1,000 to 5,000,000 USD");
     expect(screen.getByTestId("preference-range-RADON_KB_EMBED_DISABLED").textContent).toContain("On or Off");
+  });
+
+  it("9b. shows who last set a stored value and when; env and default carry no provenance", async () => {
+    await renderSection();
+    const provenance = screen.getByTestId("preference-provenance-RADON_MAX_ORDER_QTY").textContent ?? "";
+    expect(provenance).toMatch(/^Set by user_2abc on /);
+    expect(provenance).toContain(new Date("2026-08-11T17:02:11Z").toLocaleString());
+    expect(screen.queryByTestId("preference-provenance-RADON_MAX_ORDER_NOTIONAL")).toBeNull();
+    expect(screen.queryByTestId("preference-provenance-RADON_KB_EMBED_DISABLED")).toBeNull();
+  });
+
+  it("9c. the widen gate follows the server risk_gated flag, not the group name", async () => {
+    // Same "Order Limits" label, flag off: the server says this key cannot cost money.
+    await renderSection(payload({ preferences: [{ ...structuredClone(NOTIONAL), risk_gated: false }, structuredClone(QTY)] }));
+    mocks.savePreference.mockResolvedValue({
+      preference: { ...structuredClone(NOTIONAL), value: 900000, source: "db" },
+      store: { ...STORE_OK },
+    });
+    fireEvent.change(screen.getByTestId("preference-input-RADON_MAX_ORDER_NOTIONAL"), {
+      target: { value: "900000" },
+    });
+    fireEvent.click(screen.getByTestId("preference-save-RADON_MAX_ORDER_NOTIONAL"));
+    await waitFor(() => expect(mocks.savePreference).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId("preference-widen-confirm")).toBeNull();
   });
 
   it("10. renders RESTART REQUIRED only for applies_immediately false entries", async () => {
@@ -363,9 +392,11 @@ describe("PreferencesSection", () => {
     expect(mocks.savePreference).not.toHaveBeenCalled();
   });
 
-  it("16. an unavailable store renders the banner and disables every control", async () => {
+  it("16. an unavailable store toasts and disables every control", async () => {
     await renderSection(payload({ store: { available: false, error: "HranaHttpError: down", checked_at: null } }));
-    expect(screen.getByTestId("preferences-store-banner")).toBeTruthy();
+    const notice = await screen.findByTestId("preferences-store-banner");
+    expect(notice.closest("[data-toast-viewport]")).not.toBeNull();
+    expect(screen.getByTestId("preferences-section").contains(notice)).toBe(false);
     for (const key of ["RADON_MAX_ORDER_QTY", "RADON_MAX_ORDER_NOTIONAL", "RADON_KB_EMBED_DISABLED"]) {
       expect((screen.getByTestId(`preference-save-${key}`) as HTMLButtonElement).disabled).toBe(true);
       expect((screen.getByTestId(`preference-reset-${key}`) as HTMLButtonElement).disabled).toBe(true);

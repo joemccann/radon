@@ -82,6 +82,7 @@ class FakeClaims:
 
 @pytest.fixture
 def claims(monkeypatch):
+    monkeypatch.setattr(ingest, "delivery_rows_present", lambda *a: True)
     fake = FakeClaims()
     monkeypatch.setattr(ingest, "claim_flex_delivery", fake.claim)
     monkeypatch.setattr(ingest, "release_flex_delivery", fake.release, raising=False)

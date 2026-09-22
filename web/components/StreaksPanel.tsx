@@ -1,5 +1,8 @@
 "use client";
+import RequestError from "@/components/RequestError";
+import ErrorToast from "@/components/ErrorToast";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Flame } from "lucide-react";
@@ -103,12 +106,7 @@ export default function StreaksPanel() {
     body = <SpectralLoader label="Loading daily close series" />;
   } else if (error && !payload) {
     body = (
-      <SectionEmptyState
-        icon={Flame}
-        tone="danger"
-        headline="Streak feed unreachable"
-        secondary={`The streaks route did not answer for ${symbol}: ${error}`}
-      />
+      <RequestError error={error} />
     );
   } else if (!payload || payload.missing || !payload.current || !payload.stats || total === 0) {
     body = (
@@ -220,6 +218,7 @@ export default function StreaksPanel() {
 
   return (
     <>
+      {error && payload && <RequestError error={error} retainedData />}
       <div className="section">
         <div className="section-header">
           <div className="section-title">
@@ -271,16 +270,7 @@ export default function StreaksPanel() {
             LOAD
           </button>
           {inputError ? (
-            <span
-              role="alert"
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: "var(--text-meta)",
-                color: "var(--negative)",
-              }}
-            >
-              {inputError}
-            </span>
+            <ErrorToast message={inputError} />
           ) : null}
         </form>
 

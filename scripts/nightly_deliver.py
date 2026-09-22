@@ -34,7 +34,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-LOOPS = ("reliability", "testing", "ci-performance", "documentation", "security")
+LOOPS = ("reliability", "testing", "ci-performance", "documentation", "security", "security-deepsec")
 
 READY_PREFIX = "NIGHTLY DELIVER READY:"
 INCOMPLETE_PREFIX = "NIGHTLY DELIVER INCOMPLETE:"

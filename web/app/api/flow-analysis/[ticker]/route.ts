@@ -5,7 +5,7 @@ import { readFile } from "fs/promises";
 import { statSync } from "fs";
 import { join } from "path";
 import { radonFetch } from "@/lib/radonApi";
-import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, setNoStoreResponseHeaders, scrubSecrets } from "@/lib/apiContracts";
 import { buildDemoFlowReport } from "@/lib/demo/fixtures/flowAnalysis";
 
 // Disable Next.js static caching: this handler reads live disk state
@@ -172,7 +172,7 @@ export async function POST(_req: Request, ctx: Params): Promise<Response> {
       res.headers.set("X-Sync-Warning", "Radon API unavailable - serving cached data");
       return setNoStoreResponseHeaders(res, requestId);
     }
-    const message = error instanceof Error ? error.message : "Flow report failed";
+    const message = scrubSecrets(error instanceof Error ? error.message : "Flow report failed");
     return setNoStoreResponseHeaders(
       NextResponse.json({ error: message }, { status: 502 }),
       requestId,

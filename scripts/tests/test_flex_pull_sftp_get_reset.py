@@ -97,7 +97,11 @@ def _drive(tmp_path, monkeypatch, files, reset_names, now=RETRY_NOW):
         inbox=inbox,
         runner=ResetOnNamedSftp(files, reset_names),
         decrypt=lambda data, **k: data.decode(),
-        ingest=lambda xml, **k: {"ok": True, "outcome": "duplicate"},
+        ingest=lambda xml, **k: {
+            "ok": True,
+            "outcome": "duplicate",
+            "persistence_confirmed": True,
+        },
         now=now,
     )
     return code, beats

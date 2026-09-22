@@ -446,5 +446,116 @@ class TestComboEntryDateResolution(unittest.TestCase):
             self.assertEqual(result["positions"][0]["entry_date"], today)
 
 
+def _spy_bull_put_spread(*, long_basis="ib", short_basis="session_fills"):
+    return {
+        "id": 8,
+        "ticker": "SPY",
+        "structure": "Bull Put Spread $740.0/$760.0",
+        "structure_type": "Bull Put Spread",
+        "risk_profile": "defined",
+        "expiry": "2026-09-18",
+        "contracts": 50,
+        "direction": "DEBIT",
+        "entry_cost": None,
+        "max_risk": None,
+        "market_value": -10000.0,
+        "market_price_is_calculated": False,
+        "ib_daily_pnl": None,
+        "basis_source": "mixed",
+        "legs": [
+            {
+                "direction": "LONG",
+                "contracts": 50,
+                "type": "Put",
+                "strike": 740.0,
+                "entry_cost": 162535.04,
+                "avg_cost": 3250.70075,
+                "market_price": 0.12,
+                "market_value": 600.0,
+                "market_price_is_calculated": False,
+                "basis_source": long_basis,
+            },
+            {
+                "direction": "SHORT",
+                "contracts": 50,
+                "type": "Put",
+                "strike": 760.0,
+                "entry_cost": 10450.0,
+                "avg_cost": 209.0,
+                "market_price": 2.12,
+                "market_value": 10600.0,
+                "market_price_is_calculated": False,
+                "basis_source": short_basis,
+            },
+        ],
+        "kelly_optimal": None,
+        "target": None,
+        "stop": None,
+    }
+
+
+class TestMixedAgeComboEntryDate(unittest.TestCase):
+    """Overnight long + same-day short must not stamp the combo as today.
+
+    2026-09-17 SPY: long 740P since 2026-05-01, sold 760P today. Incomplete
+    blotter coverage plus the new leg's fill_dates stamped entry_date=today
+    and Today P&L collapsed to the long put's accumulated −$162k.
+    """
+
+    def test_overnight_blotter_leg_beats_same_session_fill_on_the_new_leg(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        today = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+        collapsed = [_spy_bull_put_spread()]
+        fill_dates = {"SPY|2026-09-18|P|760.0": today}
+
+        with _patch_turso_sources(
+            contract_dates={"SPY|2026-09-18|P|740.0": "2026-05-01"},
+        ):
+            result = ib_sync.convert_to_portfolio_format(
+                {"NetLiquidation": 1_000_000},
+                collapsed,
+                {},
+                fill_dates=fill_dates,
+            )
+
+        self.assertEqual(result["positions"][0]["entry_date"], "2026-05-01")
+        self.assertNotEqual(result["positions"][0]["entry_date"], today)
+
+    def test_prev_snapshot_contract_survives_structure_rename(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        today = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+        prev = {
+            "positions": [
+                {
+                    "ticker": "SPY",
+                    "structure": "Long Put $740.0",
+                    "expiry": "2026-09-18",
+                    "entry_date": "2026-05-01",
+                    "legs": [
+                        {
+                            "direction": "LONG",
+                            "type": "Put",
+                            "strike": 740.0,
+                            "contracts": 50,
+                        }
+                    ],
+                }
+            ]
+        }
+        with _patch_turso_sources(previous_portfolio=prev):
+            result = ib_sync.convert_to_portfolio_format(
+                {"NetLiquidation": 1_000_000},
+                [_spy_bull_put_spread()],
+                {},
+                fill_dates={"SPY|2026-09-18|P|760.0": today},
+            )
+
+        self.assertEqual(result["positions"][0]["entry_date"], "2026-05-01")
+
+
 if __name__ == "__main__":
     unittest.main()

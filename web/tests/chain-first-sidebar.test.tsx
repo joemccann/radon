@@ -52,6 +52,17 @@ afterEach(() => {
 });
 
 describe("chain-first instrument context", () => {
+  it("shows a failed watchlist mutation only in the toast viewport", async () => {
+    watchlist.toggleWatch.mockRejectedValueOnce(new Error("TypeError: internal failure"));
+    const { container } = sidebar();
+    const star = screen.getByTestId("star-toggle") as HTMLButtonElement;
+    await act(async () => { fireEvent.click(star); });
+    expect(watchlist.toggleWatch).toHaveBeenCalledExactlyOnceWith("NVDA");
+    expect(star.disabled).toBe(false);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(document.querySelector('#radon-toast-viewport [role="alert"]')?.textContent).toContain("watchlist could not be updated");
+  });
+
   it("keeps the underlying last/day separate from the signed held spread mark", () => {
     sidebar();
     const underlying = screen.getByTestId("chain-underlying-quote");
@@ -116,7 +127,8 @@ describe("chain-first instrument context", () => {
     // Native disclosure visibility is browser-tested; jsdom does not implement
     // the default summary click action, so expose it explicitly for callbacks.
     disclosure.open = true;
-    for (const [name, key] of [["Book & trade", null], ["Ratings", "r"], ["Seasonality", "s"], ["Company", "i"], ["13F holdings", "h"], ["Filings", "f"], ["Commands", ":"]] as const) {
+    expect(within(disclosure).queryByRole("button", { name: "Commands" })).toBeNull();
+    for (const [name, key] of [["Book & trade", null], ["Ratings", "r"], ["Seasonality", "s"], ["Company", "i"], ["13F holdings", "h"], ["Filings", "f"]] as const) {
       disclosure.open = true;
       fireEvent.click(within(disclosure).getByRole("button", { name, exact: true }));
       expect(onDeckChange).toHaveBeenLastCalledWith(key);
@@ -135,7 +147,7 @@ describe("chain-first instrument context", () => {
 
   it.each([
     ["r", "Ratings"], ["s", "Seasonality"], ["i", "Company"],
-    ["h", "13F holdings"], ["f", "Filings"], [":", "Commands"],
+    ["h", "13F holdings"], ["f", "Filings"],
   ] as const)("reflects the selected secondary view %s in the disclosure", (activeDeck, label) => {
     sidebar({ activeDeck });
     const nav = screen.getByRole("navigation", { name: "Instrument views" });

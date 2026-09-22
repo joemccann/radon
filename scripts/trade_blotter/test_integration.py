@@ -10,6 +10,12 @@ These tests require:
 """
 import sys
 import os
+
+import pytest
+
+# These smoke checks require a real Gateway. The default repository gate
+# excludes integration tests; keep live connectivity an explicit opt-in.
+pytestmark = pytest.mark.integration
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from decimal import Decimal

@@ -105,6 +105,35 @@ class TestActivityShortCircuit:
         assert calls == ["cash", "twr"]
         assert result["ok"] is True
 
+    @pytest.mark.parametrize("twr_status", ["degraded", "unavailable", "insufficient_data"])
+    def test_degraded_twr_after_cash_success_still_applies_the_claim(
+        self, monkeypatch, tmp_path, _claim_always_wins, twr_status
+    ):
+        """2026-09-16 page 5a2eb828: cash_exit=0, twr_status=degraded,
+        ingest_failed, radon-flex-pull Result=exit-code. Cash already
+        landed; TWR reports on the perf-twr surface (REL-220)."""
+        import cash_flow_sync
+        import perf_twr_builder
+
+        applied: list[str] = []
+        monkeypatch.setattr(
+            ingest, "mark_flex_delivery_applied", lambda d: applied.append(d) or True
+        )
+        monkeypatch.setattr(cash_flow_sync, "main", lambda _a: 0)
+        monkeypatch.setattr(
+            perf_twr_builder, "build_and_persist", lambda **_k: {"status": twr_status}
+        )
+
+        path = tmp_path / "activity.xml"
+        path.write_text(ACTIVITY.read_text(), encoding="utf-8")
+        result = ingest.ingest_path(path)
+
+        assert result["ok"] is True, result
+        assert result["cash_exit"] == 0
+        assert result["twr_status"] == twr_status
+        assert applied == [result["content_sha256"]]
+        assert _claim_always_wins == []
+
 
 class TestInboxLoopIsolatesFailures:
     def _inbox(self, tmp_path, names):

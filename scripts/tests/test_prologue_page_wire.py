@@ -54,6 +54,11 @@ def _build(tmp_path: Path, *, marker: bool, lock_held: bool, loop: str) -> dict:
         # This test process is alive, so `kill -0` succeeds and the lock is
         # never reclaimed.
         (lock / "pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+        start = subprocess.check_output(
+            ["/bin/ps", "-p", str(os.getpid()), "-o", "lstart="],
+            text=True,
+        ).strip()
+        (lock / "start").write_text(start + "\n", encoding="utf-8")
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -99,6 +104,17 @@ def _build(tmp_path: Path, *, marker: bool, lock_held: bool, loop: str) -> dict:
     _executable(
         bin_dir / "gh",
         "#!/bin/bash\n"
+        f'printf "%s\\n" "$*" >> "{argv_dir}/gh-args"\n'
+        'i=1\n'
+        'while [ "$i" -le "$#" ]; do\n'
+        '  eval "arg=\\${$i}"\n'
+        '  if [ "$arg" = "--body" ]; then\n'
+        '    i=$((i + 1))\n'
+        '    eval "body=\\${$i}"\n'
+        f'    printf "%s\\n" "$body" >> "{argv_dir}/gh-body"\n'
+        '  fi\n'
+        '  i=$((i + 1))\n'
+        'done\n'
         'case "$1 $2" in\n'
         '  "issue list") echo 42 ;;\n'
         '  "pr list") echo "" ;;\n'
@@ -142,6 +158,8 @@ def _run(cfg: dict, loop: str) -> subprocess.CompletedProcess:
 def _recorded_argv(cfg: dict) -> list[list[str]]:
     records = []
     for path in sorted(cfg["argv_dir"].iterdir()):
+        if path.name.startswith("gh-"):
+            continue
         raw = path.read_bytes().decode("utf-8")
         assert raw.endswith("\0"), raw
         records.append(raw[:-1].split("\0"))
@@ -174,5 +192,9 @@ def test_held_lock_refusal_pages_through_the_real_notifier(tmp_path: Path, loop:
     assert result.returncode == 3, result.stderr
     assert "another weekend run owns" in result.stderr
     records = _recorded_argv(cfg)
-    assert len(records) == 1, records
-    _assert_curl_page(records[0], loop, "REFUSED (lock held)")
+    pages = [r for r in records if any("api.pushover.net" in a for a in r)]
+    assert len(pages) == 1, records
+    _assert_curl_page(pages[0], loop, "REFUSED (lock held)")
+    body = (cfg["argv_dir"] / "gh-body").read_text(encoding="utf-8")
+    assert str(os.getpid()) in body, body
+    assert "started" in body and "owner" in body and "cmd" in body, body

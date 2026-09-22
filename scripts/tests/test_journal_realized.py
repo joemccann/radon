@@ -14,6 +14,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
@@ -762,3 +764,89 @@ class TestCrossWriterSameDayPartials:
             _row("c2", "SELL_OPTION", 10, 4.00, 0.0, _C60, "2026-08-26", "w4"),
         ]
         assert realized_pnl_by_exec_id(rows) == {self.API_ID: 2000.0, "c2": 3000.0}
+
+
+class TestAuthoritativeContractIdentity:
+    """REL-109 BLOCKED half (R-320, R-377): IB contract identity is authoritative.
+
+    A contract field corrupted into a different but LISTABLE contract (strike
+    600 for 60, a real later expiry, the neighbouring C70) mints a well-formed
+    key that journal rows alone cannot tell from a second position. The
+    overlay holds IB's own contracts (the executions it overlays carry conId
+    plus IB's strike/expiry/right), so a journal leg that matches none of them
+    must not contribute, and the phantom open it leaves behind poisons its
+    ticker: the published figure is IB's, never the fabricated $4,000.
+    """
+
+    _CONID_C60 = 760060
+
+    @classmethod
+    def _live_fill(cls):
+        fill = _fill("c1", "SLV", 60.0, "C", "SLD", 10, 1234.5)
+        fill["contract"]["conId"] = cls._CONID_C60
+        return fill
+
+    @staticmethod
+    def _overlay(rows, fills):
+        overlay_journal_realized_pnl(fills, reader=_FakeDb(rows=rows))
+        return fills[0]
+
+    @staticmethod
+    def _with_con_id(rows, con_id):
+        payload = json.loads(rows[1][0])
+        payload["con_id"] = con_id
+        rows[1] = (json.dumps(payload), rows[1][1], rows[1][2])
+        return rows
+
+    def test_healthy_history_still_publishes_the_journal_figure(self):
+        rows = TestContractIdentityCorruption._corrupted("strike", 60.0)
+        fill = self._overlay(rows, [self._live_fill()])
+        assert fill["realizedPNL"] == 3000.0
+        assert fill["realizedPNLSource"] == "journal"
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("strike", 0),
+            ("strike", "0"),
+            ("strike", 600.0),        # plausible: the R-320 residual
+            ("expiry", "20260819"),   # plausible real date: the R-320 residual
+            ("strike", 70.0),         # a REAL listed neighbour (SLV C70)
+            ("expiry", "20261120"),   # a REAL listed later monthly
+        ],
+    )
+    def test_corrupted_leg_never_publishes_a_fabricated_figure(self, field, value):
+        rows = TestContractIdentityCorruption._corrupted(field, value)
+        fill = self._overlay(rows, [self._live_fill()])
+        assert fill["realizedPNL"] == 1234.5, (
+            f"{field}={value!r} names a contract IB does not hold; the journal "
+            f"figure is fabricated and must not be published, got {fill['realizedPNL']}"
+        )
+        assert fill.get("realizedPNLSource") == "ib"
+        assert "ibRealizedPNL" not in fill
+
+    def test_row_conid_beats_a_corrupted_strike(self):
+        """A journal row carrying IB's conId is matched by conId, not by fields."""
+        rows = TestContractIdentityCorruption._corrupted("strike", 600.0)
+        fill = self._overlay(self._with_con_id(rows, self._CONID_C60), [self._live_fill()])
+        assert fill["realizedPNL"] == 3000.0
+
+    def test_row_conid_unknown_to_ib_is_not_matched_by_its_fields(self):
+        """Fields naming the live contract do not override a conflicting conId."""
+        rows = TestContractIdentityCorruption._corrupted("strike", 60.0)
+        fill = self._overlay(self._with_con_id(rows, 999999), [self._live_fill()])
+        assert fill["realizedPNL"] == 1234.5
+
+    def test_flat_historical_round_trip_on_another_strike_does_not_poison(self):
+        rows = TestContractIdentityCorruption._corrupted("strike", 60.0) + [
+            _row("h1", "BUY_OPTION", 5, 1.00, 0.0, _C70, "2026-07-01", "h1"),
+            _row("h2", "SELL_OPTION", 5, 2.00, 0.0, _C70, "2026-07-02", "h2"),
+        ]
+        fill = self._overlay(rows, [self._live_fill()])
+        assert fill["realizedPNL"] == 3000.0
+
+    def test_identity_gate_at_the_pure_function(self):
+        rows = TestContractIdentityCorruption._corrupted("strike", 600.0)
+        assert realized_pnl_by_exec_id(
+            rows, live_keys={"SLV|20261016|C|60.0"}, conid_keys={}
+        ) == {}

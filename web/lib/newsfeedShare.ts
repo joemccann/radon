@@ -33,11 +33,140 @@ function cleanText(text: string): string {
     .replace(/\s+/g, " ").trim();
 }
 
+export const SHARE_CAPTION_SOFT_CAP = 400;
+const HOOK_MAX = 110;
+// Body lines are whole sentences. A sentence longer than this is dropped, never cut.
+const LINE_MAX = 180;
+const BULLET_PREFIX = /^(?:[•●▪◦]|[-*])\s+/;
+const IMPLICATION = /\b(?:headwind|overhang|not a gale|rather than|this (?:is|means|leaves)|implies?)\b/i;
+const FILLER = /^(?:this is not just a tech story|for fuller context|the driver here is straightforward)[.!]?$/i;
+const THROAT_CLEAR = /^(?:the driver here is straightforward:\s*|the (?:desk|report|note|authors?) (?:estimates?|sees|says|notes|finds|concludes|suggests)(?: that)?\s+)/i;
+const NOTE_REF = /\breferences?\b.+\bnote\b/i;
+
+function stripResearchPaths(text: string): string {
+  return text.replace(/(?:https?:\/\/[^\s]*)?\/api\/newsfeed\/research\/[^\s)]+/gi, "");
+}
+
+function captionLines(text: string): string[] {
+  return sanitizeShareText(stripResearchPaths(text))
+    .split("\n")
+    .map(line => line.replace(/[ \t]+/g, " ").trim())
+    .filter(line => line && !/^source\s*:/i.test(line));
+}
+
+function captionProse(text: string): string {
+  return captionLines(text).join(" ");
+}
+
+function compactPhrase(text: string, max: number): string {
+  const cleaned = text.replace(/\s+/g, " ").trim().replace(/[.;,]+$/, "");
+  const cut = cleaned.length <= max ? cleaned : (() => {
+    const slice = cleaned.slice(0, max);
+    const punct = Math.max(slice.lastIndexOf(";"), slice.lastIndexOf(","));
+    const clause = slice.search(/\s+(?:that|fast enough|even if)\b/);
+    const at = punct >= 32 ? punct : clause >= 32 ? clause : slice.lastIndexOf(" ");
+    return (at > Math.min(32, max >> 1) ? slice.slice(0, at) : slice).trim().replace(/[.;,]+$/, "");
+  })();
+  return cut.replace(/\s+(?:of|are|that|the|a|an|and|to|for|with|from|in)$/i, "").trim();
+}
+
+function leadCap(text: string): string {
+  return text ? text[0].toUpperCase() + text.slice(1) : text;
+}
+
+function splitSentences(text: string): string[] {
+  return text.replace(/\n+/g, " ").split(/(?<!\b(?:Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec|No|vs|Mr|Ms|Dr|St)\.)(?<=[.!?])\s+(?=[A-Z("'“]|\d|~|\$)/).map(part => part.trim()).filter(Boolean);
+}
+
+function numbersIn(text: string): string[] {
+  return text.match(/[$€£~]?\d[\d,]*(?:\.\d+)?(?:\s?(?:%|bps|bn|tn|mn|[kmbt]\b))?/gi)
+    ?.map(value => value.toLowerCase().replace(/\s/g, "").replace(/^~/, "")) ?? [];
+}
+
+function overlapRatio(left: string, right: string): number {
+  const words = (text: string) => new Set((text.toLowerCase().match(/[a-z0-9$~]+/g) ?? []).filter(word => word.length > 2));
+  const a = words(left);
+  if (!a.size) return 0;
+  const b = words(right);
+  let shared = 0;
+  for (const word of a) if (b.has(word)) shared += 1;
+  return shared / a.size;
+}
+
+function restatesHook(sentence: string, hook: string): boolean {
+  const left = sentence.toLowerCase().replace(/[.;,]+$/, "");
+  const right = hook.toLowerCase().replace(/[.;,]+$/, "");
+  return !right || left.startsWith(right) || right.startsWith(left) || overlapRatio(hook, sentence) >= 0.8;
+}
+
+function hookHeadline(title: string, content: string): string {
+  const titleText = captionProse(title);
+  const raw = titleText || splitSentences(captionProse(content))[0] || "";
+  if (!raw) return "";
+  const clauses = raw.split(/\s*;\s*/).map(part => part.trim()).filter(Boolean);
+  const numbered = clauses.find(clause => /[$€£~]?\d/.test(clause) && clause.length <= HOOK_MAX);
+  return compactPhrase(numbered || clauses[0] || raw, HOOK_MAX);
+}
+
+/** A body line is a complete sentence, never a truncated fragment. */
+function asLine(sentence: string): string {
+  const text = leadCap(sentence.replace(THROAT_CLEAR, "").replace(BULLET_PREFIX, "").replace(/\s+/g, " ").trim());
+  if (!text) return "";
+  return /[.!?%)"'\u201d]$/.test(text) ? text : `${text}.`;
+}
+
+function bodyLine(sentence: string): string {
+  const line = asLine(sentence);
+  return line.length <= LINE_MAX ? line : "";
+}
+
+function extractSharePoints(content: string, hook: string): { lines: string[]; implication: string } {
+  const raw = captionLines(content);
+  const structured = raw.filter(line => BULLET_PREFIX.test(line)).map(bodyLine).filter(Boolean);
+  if (structured.length) {
+    const rest = raw.filter(line => !BULLET_PREFIX.test(line) && !FILLER.test(line)).join(" ");
+    return { lines: structured.slice(0, 3), implication: rest && IMPLICATION.test(rest) ? bodyLine(rest) : "" };
+  }
+  const used = new Set(numbersIn(hook));
+  const sentences = splitSentences(captionProse(content))
+    .map(sentence => sentence.replace(THROAT_CLEAR, "").trim())
+    .filter(sentence => (sentence.length >= 20 || numbersIn(sentence).length > 0) && !FILLER.test(sentence)
+      && !NOTE_REF.test(sentence) && !restatesHook(sentence, hook) && bodyLine(sentence));
+  const picked = new Set<number>();
+  let implication = "";
+  // A line earns its place with a number the hook has not already used.
+  sentences.forEach((sentence, index) => {
+    if (picked.size >= 2) return;
+    const unused = numbersIn(sentence).some(value => !used.has(value));
+    if (IMPLICATION.test(sentence) && !unused) { if (!implication) implication = bodyLine(sentence); return; }
+    if (!unused) return;
+    picked.add(index);
+    for (const value of numbersIn(sentence)) used.add(value);
+  });
+  // Short posts still read as prose, so backfill with the leading sentences.
+  sentences.forEach((sentence, index) => {
+    if (picked.size >= 2 || picked.has(index) || bodyLine(sentence) === implication) return;
+    picked.add(index);
+  });
+  const facts = [...picked].sort((a, b) => a - b).map(index => sentences[index]);
+  return { lines: facts.slice(0, 3).map(bodyLine).filter(Boolean), implication };
+}
+
+export function assembleShareCaption(title: string, content: string, source = ""): string {
+  const hook = hookHeadline(title, content);
+  const { lines, implication } = extractSharePoints(content, hook);
+  const sourceLine = sanitizeShareText(source).split("\n").map(line => line.replace(/[ \t]+/g, " ").trim()).filter(Boolean).join(" ");
+  const join = (items: string[], extra = implication) => [hook, ...items, extra, sourceLine].filter(Boolean).join("\n\n");
+  const items = [...lines];
+  let caption = join(items);
+  // Over the cap, drop a whole line. Never cut a sentence mid-word.
+  if (caption.length > SHARE_CAPTION_SOFT_CAP && implication) caption = join(items, "");
+  while (caption.length > SHARE_CAPTION_SOFT_CAP && items.length > 1) { items.pop(); caption = join(items, ""); }
+  return sanitizeShareText(caption);
+}
+
 export function buildShareCaption(post: SharePost, imageUrl = post.images?.[0]): string {
-  const content = cleanText(post.content || "");
-  const source = shareSource(post, imageUrl);
-  return [cleanText(post.title), content, source && !content.endsWith(source) ? source : ""]
-    .filter(Boolean).join("\n\n");
+  return assembleShareCaption(post.title, post.content || "", shareSource(post, imageUrl));
 }
 
 export function buildXShareUrl(caption: string): string {
@@ -118,15 +247,16 @@ export async function renderShareCard(post: SharePost, imageUrl: string | undefi
   ctx.fillStyle = MUTED;
   ctx.font = `22px ${mono}`;
   ctx.fillText("MARKET ANALYSIS", 72, 220);
-  const date = new Date(post.source?.documentDate ? `${post.source.documentDate}T12:00:00Z` : post.isoTimestamp);
-  const dateLabel = Number.isFinite(date.getTime())
-    ? date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).toUpperCase() : "";
+  // Story cards carry the export date (ET), not the source document date.
+  const dateLabel = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/New_York" }).toUpperCase();
   ctx.fillText(dateLabel, 1080 - 72 - ctx.measureText(dateLabel).width, 220);
   ctx.fillStyle = LINE;
   ctx.fillRect(72, 269, 936, 2);
+  // Same copy and layout as the X caption: hook, then bullets and implication.
+  const [hook = post.title, ...paragraphs] = assembleShareCaption(post.title, post.content || "").split("\n\n");
   ctx.fillStyle = INK;
   ctx.font = `600 54px ${sans}`;
-  const title = drawText(ctx, post.title, 72, 312, 900, 65, 4);
+  const title = drawText(ctx, hook, 72, 312, 900, 65, 4);
   let bodyY = title.bottom + 30;
   if (image) {
     // A white chart field preserves the original chart, labels, axes and source.
@@ -142,24 +272,15 @@ export async function renderShareCard(post: SharePost, imageUrl: string | undefi
   }
   ctx.fillStyle = INK;
   ctx.font = `32px ${sans}`;
-  const body = drawText(ctx, post.content || "", 72, bodyY, 900, 45, Math.max(1, Math.floor((1480 - bodyY) / 45)));
-  if (title.truncated || body.truncated) {
-    ctx.fillStyle = MUTED;
-    ctx.font = `22px ${mono}`;
-    ctx.fillText("EXCERPT", 72, 1490);
+  const limit = 1840;
+  for (const [index, paragraph] of paragraphs.entries()) {
+    if (index) bodyY += 22;
+    for (const line of paragraph.split("\n")) {
+      const room = Math.floor((limit - bodyY) / 45);
+      if (room < 1) break;
+      bodyY = drawText(ctx, line, 72, bodyY, 900, 45, room).bottom + 8;
+    }
   }
-  ctx.fillStyle = LINE;
-  ctx.fillRect(72, 1535, 936, 2);
-  ctx.fillStyle = MUTED;
-  ctx.font = `24px ${sans}`;
-  drawText(ctx, shareSource(post, imageUrl), 72, 1554, 900, 30, 2);
-  const figure = post.source?.figures.find(item => item.url === imageUrl);
-  if (figure) {
-    ctx.font = `22px ${sans}`;
-    drawText(ctx, `p. ${figure.page} · ${figure.caption}`, 72, 1622, 900, 28, 2);
-  }
-  ctx.font = `22px ${mono}`;
-  ctx.fillText("radon.run", 72, 1720);
   return canvas;
 }
 

@@ -57,6 +57,17 @@ afterEach(() => {
 });
 
 describe("AskComposer — pasting an image", () => {
+  it("hides attachment failure toasts while the retained composer is closed", async () => {
+    const onSubmit = vi.fn();
+    const { rerender } = render(<AskComposer onSubmit={onSubmit} active />);
+    await pasteFiles(screen.getByLabelText("Ask Radon") as HTMLTextAreaElement, [imageFile("payload.svg", "image/svg+xml")]);
+    expect(screen.getByRole("alert").textContent).toContain("use a PNG");
+    rerender(<AskComposer onSubmit={onSubmit} active={false} />);
+    expect(screen.queryByRole("alert")).toBeNull();
+    rerender(<AskComposer onSubmit={onSubmit} active />);
+    expect(screen.getByRole("alert")).toBeTruthy();
+  });
+
   it("adds a thumbnail and enables send with an empty textarea", async () => {
     const { send, textarea } = renderComposer();
     expect(send.disabled).toBe(true);

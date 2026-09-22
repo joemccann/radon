@@ -2,15 +2,31 @@
 import copy
 import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+# T-498: file-backed subscriptions are opt-in synthetic fixtures.
+pytestmark = pytest.mark.usefixtures("isolated_model_credentials")
 import requests
 
 from research import model, pipeline, seed, worker
 from research.publish import stable_post_id
 from research.state import State
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_auth_home(monkeypatch, tmp_path):
+    # Ladder auth discovery falls back to Path.home(); keep host auth files
+    # (~/.claude, ~/.codex, ~/.grok) out of these hermetic-env tests.
+    monkeypatch.setenv("HOME", str(tmp_path / "hermetic-home"))
+    monkeypatch.setattr(
+        Path, "home", classmethod(lambda cls: tmp_path / "hermetic-home")
+    )
+
+
 
 
 def item():
@@ -60,7 +76,22 @@ def test_model_valid_multimodal_request_is_tool_free_and_bounded(tmp_path):
     ({"stop_reason":"end_turn","content":[{"type":"text"}]},None),
 ])
 def test_model_malformed_response_fails_closed(value,raw,monkeypatch):
-    for key in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY", "XAI_API_KEY", "GROK_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "NVIDIA_API_KEY", "CEREBRAS_API_KEY"):
+    for key in (
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_API_KEY",
+        "CLAUDE_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CODE_OAUTH_TOKEN_FILE",
+        "XAI_API_KEY",
+        "GROK_API_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "GEMINI_OAUTH_TOKEN",
+        "GOOGLE_OAUTH_ACCESS_TOKEN",
+        "NVIDIA_API_KEY",
+        "CEREBRAS_API_KEY",
+        "RADON_LADDER_ALLOW_PREPAID",
+    ):
         monkeypatch.delenv(key, raising=False)
     session,closed,_=session_response(value,raw)
     with pytest.raises(model.ModelError): model.Reviewer("test",session=session).ask("evaluate")
@@ -80,10 +111,16 @@ def test_model_network_error_is_classified_without_secrets():
     assert "private-token" not in str(error.value)
 
 
-@pytest.mark.parametrize("value", [None,{}, {**item(),"figures":"not-list"}, {**item(),"figures":[{"page":2}]},
-    {**item(),"figures":[{"page":1,"crop":[0,0,1,1],"caption":""}]}])
-def test_candidate_missing_shapes_cannot_be_accepted(value):
-    with pytest.raises(pipeline.EvidenceError): pipeline.validate_candidate(value,2,"2026-09-07")
+@pytest.mark.parametrize("value,match", [
+    (None, "object"),
+    ({}, "Invalid title"),
+    ({**item(),"figures":"not-list"}, "Invalid figures"),
+    ({**item(),"figures":[{"page":2}]}, "Chart must cite an evidence page"),
+    ({**item(),"figures":[{"page":1}]}, "Invalid chart crop"),
+])
+def test_candidate_missing_shapes_cannot_be_accepted(value, match):
+    with pytest.raises(pipeline.EvidenceError, match=match):
+        pipeline.validate_candidate(value, 2, "2026-09-07")
 
 
 def test_comparison_includes_actual_newest_not_id_order():
@@ -375,7 +412,7 @@ def test_cli_rejects_fast_poll_and_concurrent_worker(cli,monkeypatch):
 
 
 def test_invalid_caption_holds_only_that_candidate_not_valid_siblings(tmp_path):
-    invalid=item();invalid["figures"][0]["caption"]="x"*308
+    invalid=item();invalid["figures"][0]["crop"]=[.5,.5,.5,.6]
     valid=item()
     gates=dict.fromkeys(("supported","material_new_evidence","dates_verified","charts_complete","not_market_ear","no_unresolved_conflicts"),True)|{"reason":"Verified", "date_evidence":{"page":1,"date_text":"4 September 2026","source_quote":"Report date: 4 September 2026","role":"report","role_verified":True}}
     pipe,work=fixture_pipeline(tmp_path,[{"candidates":[invalid,valid]},gates])
@@ -402,15 +439,13 @@ def test_seed_attributes_approved_goldman_report_to_original_bank(queue,approved
     assert state.outbox()[0]['payload']['source']['publisher']=='Goldman Sachs'
 
 
-def test_intermediary_candidate_is_held_without_blocking_valid_sibling(tmp_path):
-    invalid=item();invalid['publisher']='Goldman Sachs via ZERO HEDGE'
+def test_intermediary_name_in_publisher_is_no_longer_a_hold(tmp_path):
+    wrap=item();wrap['publisher']='Goldman Sachs via ZERO HEDGE'
     checks=dict.fromkeys(('supported','material_new_evidence','dates_verified','charts_complete','not_market_ear','no_unresolved_conflicts'),True)
     checks.update(reason='Verified',date_evidence={'page':1,'date_text':'4 September 2026','source_quote':'Report date: 4 September 2026','role':'report','role_verified':True})
-    pipe,work=fixture_pipeline(tmp_path,[{'candidates':[invalid,item()]},checks])
+    pipe,work=fixture_pipeline(tmp_path,[{'candidates':[wrap]},checks])
     posts=pipe.process(work,tmp_path/'source.pdf',[])
-    assert len(posts)==1 and posts[0]['source']['publisher']==item()['publisher']
-    audit=json.loads((tmp_path/'evidence/one/review.json').read_text())['audit']
-    assert any(a.get('held')=='invalid candidate' and 'original provider' in a['validation_error'] for a in audit)
+    assert len(posts)==1 and posts[0]['source']['publisher']=='Goldman Sachs via ZERO HEDGE'
 
 
 def test_discovery_bad_scope_retains_cursor_and_continues(queue, monkeypatch):
@@ -522,3 +557,57 @@ def test_cli_once_partial_discovery_failure_closes_and_exits_nonzero(cli, monkey
     assert caught.value.code == 1
     assert events[-2:] == ['error', 'close']
     assert json.loads(capsys.readouterr().out) == result
+
+
+def test_discover_does_not_advance_empty_cursor_and_heals_sep18_orphan(tmp_path, monkeypatch):
+    tmp_path.chmod(0o700)
+    state = State(tmp_path / 'state.sqlite')
+    scope = '2026/september/sep 18'
+    pdf = entry() | {'id': 'id:sep18', 'path_lower': f'/joe mccann/current/{scope}/desk.pdf',
+                     'path_display': f'/Joe McCann/Current/2026/September/Sep 18/desk.pdf'}
+    with state.db:
+        state.db.execute('INSERT INTO cursors VALUES(?,?,?)', (scope, 'stale-empty', '2026-09-18'))
+    calls = []
+    def listing(path, cursor=None):
+        calls.append((path, cursor))
+        if cursor == 'stale-empty':
+            return {'cursor': 'advanced-empty', 'entries': [], 'has_more': False}
+        if path == scope:
+            return {'cursor': 'fresh', 'entries': [pdf], 'has_more': False}
+        return {'cursor': 'other', 'entries': [], 'has_more': False}
+    added = worker.discover(SimpleNamespace(list_page=listing), state,
+                            now=datetime(2026,9,21,16,tzinfo=timezone.utc), current_only=True)
+    assert added == 1
+    assert state.cursor(scope) == 'fresh'
+    assert 'advanced-empty' not in {cursor for _, cursor in calls if cursor}
+    assert (scope, None) in calls
+    assert state.work_count(folder_date='2026-09-18') == 1
+    state.close()
+
+
+def test_discover_gap_is_loud_when_eligible_pdfs_have_no_work(tmp_path, monkeypatch):
+    from api import db_http
+    tmp_path.chmod(0o700)
+    state = State(tmp_path / 'state.sqlite')
+    scope = '2026/september/sep 18'
+    pdf = entry() | {'id': 'id:gap', 'path_lower': f'/joe mccann/current/{scope}/desk.pdf',
+                     'path_display': f'/Joe McCann/Current/2026/September/Sep 18/desk.pdf'}
+    monkeypatch.setattr(state, 'ingest_page', lambda *a, **k: 0)
+    def listing(path, cursor=None):
+        if path == scope:
+            return {'cursor': 'seen', 'entries': [pdf], 'has_more': False}
+        return {'cursor': 'other', 'entries': [], 'has_more': False}
+    with pytest.raises(worker.DiscoveryError) as caught:
+        worker.discover(SimpleNamespace(list_page=listing), state,
+                        now=datetime(2026,9,21,16,tzinfo=timezone.utc), current_only=True)
+    gap = next(row for row in caught.value.failures if row['type'] == 'dropbox_work_gap')
+    assert gap['eligible'] == 1 and gap['work'] == 0
+    assert gap['folder_date'] == '2026-09-18'
+    assert 'desk.pdf' not in json.dumps(caught.value.failures)
+    saved = []
+    monkeypatch.setattr(db_http, 'hrana_execute', lambda sql, params: saved.append(params))
+    assert worker.heartbeat(tmp_path, 'error', caught.value)
+    local = json.loads((tmp_path/'health.json').read_text())
+    assert local['state'] == 'error'
+    assert local['last_error']['discovery_errors'][0]['type'] == 'dropbox_work_gap'
+    state.close()

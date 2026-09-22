@@ -2,14 +2,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const originalFetch = global.fetch;
 const originalKey = process.env.ANTHROPIC_API_KEY;
+const originalGrant = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+const originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
 
 beforeEach(() => {
-  process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
+  // Subscriptions only: the Claude Max grant, never a prepaid key. Pin the
+  // config dir so a developer laptop's real credentials file stays out.
+  delete process.env.ANTHROPIC_API_KEY;
+  process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-anthropic-grant";
+  process.env.CLAUDE_CONFIG_DIR = "/nonexistent/radon-no-claude-config";
 });
 
 afterEach(() => {
   global.fetch = originalFetch;
-  process.env.ANTHROPIC_API_KEY = originalKey;
+  if (originalKey === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = originalKey;
+  if (originalGrant === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN; else process.env.CLAUDE_CODE_OAUTH_TOKEN = originalGrant;
+  if (originalConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = originalConfigDir;
   vi.restoreAllMocks();
 });
 
@@ -63,16 +71,21 @@ describe("createVisionTagger.tagPost", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://api.anthropic.com/v1/messages");
     expect((init as RequestInit).headers).toMatchObject({
-      "x-api-key": "test-anthropic-key",
+      authorization: "Bearer test-anthropic-grant",
+      "anthropic-beta": "oauth-2025-04-20",
       "anthropic-version": "2023-06-01",
     });
+    expect((init as RequestInit).headers).not.toHaveProperty("x-api-key");
 
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body.model).toBe("claude-haiku-4-5");
-    expect(body.system).toMatch(/EXACTLY 3 tags/);
-    expect(body.system).toMatch(/SHOOTING-STAR/);
-    expect(body.system).toMatch(/RSI/);
-    expect(body.system).toMatch(/BTC, VOL, POSITIONING, EQUITIES/);
+    // The identity block leads; the tagger's own system prompt follows.
+    expect(body.system[0].text).toMatch(/^You are Claude Code, Anthropic's official CLI for Claude\./);
+    const system = body.system[1].text;
+    expect(system).toMatch(/EXACTLY 3 tags/);
+    expect(system).toMatch(/SHOOTING-STAR/);
+    expect(system).toMatch(/RSI/);
+    expect(system).toMatch(/BTC, VOL, POSITIONING, EQUITIES/);
 
     const userContent = body.messages[0].content;
     expect(userContent[0]).toMatchObject({
@@ -235,15 +248,16 @@ describe("createVisionTagger.tagPost", () => {
     expect(tags).toEqual(["RSI", "DIVERGENCE", "SPX"]);
   });
 
-  it("throws when ANTHROPIC_API_KEY is unset", async () => {
-    delete process.env.ANTHROPIC_API_KEY;
+  it("throws when no Claude subscription grant is present, even with a prepaid key", async () => {
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    process.env.ANTHROPIC_API_KEY = "sk-ant-prepaid";
     const { createVisionTagger } = await import("../../scripts/newsfeed/vision_tagger.js");
     expect(() =>
       createVisionTagger({
         mediaDir: MEDIA_DIR,
         getTaxonomySnapshot: async () => TAXONOMY,
       }),
-    ).toThrow(/ANTHROPIC_API_KEY/);
+    ).toThrow(/no Anthropic subscription/);
   });
 
   it("throws when mediaDir is missing", async () => {

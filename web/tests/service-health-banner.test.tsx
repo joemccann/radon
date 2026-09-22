@@ -73,8 +73,10 @@ describe("<ServiceHealthBanner />", () => {
       failing: [{ service: "portfolio-sync", state: "error", last_error: "WAL locked" }],
     });
     const { default: Banner } = await import("../components/ServiceHealthBanner");
-    render(<Banner />);
+    const { container } = render(<Banner />);
     const banner = screen.getByTestId("service-health-banner");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(banner.closest("#radon-toast-viewport")).not.toBeNull();
     expect(banner.textContent).toContain("Background sync degraded");
     expect(banner.textContent).toContain("portfolio-sync");
     // Banner now humanizes "WAL locked" into "Database temporarily busy".

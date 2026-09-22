@@ -125,6 +125,26 @@ def _validate_xai(values: Dict[str, str]) -> ValidationResult:
     )
 
 
+def _validate_nvidia(values: Dict[str, str]) -> ValidationResult:
+    return _get(
+        "https://integrate.api.nvidia.com/v1/models",
+        {"Authorization": f"Bearer {values['NVIDIA_API_KEY']}"},
+        "NVIDIA NIM",
+    )
+
+
+def _validate_fred(values: Dict[str, str]) -> ValidationResult:
+    # FRED answers a bad key with HTTP 400 and a body naming api_key, never 401.
+    response = requests.get(
+        "https://api.stlouisfed.org/fred/series",
+        params={"series_id": "DGS3MO", "api_key": values["FRED_API_KEY"], "file_type": "json"},
+        timeout=HTTP_TIMEOUT_S,
+    )
+    if response.status_code == 400 and "api_key" in response.text:
+        return ValidationResult("invalid", "FRED rejected the API key")
+    return _verdict_from_status_code(response.status_code, "FRED")
+
+
 def _validate_exa(values: Dict[str, str]) -> ValidationResult:
     return _post(
         "https://api.exa.ai/search",
@@ -308,6 +328,8 @@ VALIDATORS: Dict[str, Callable[[Dict[str, str]], ValidationResult]] = {
     "unusual_whales": _validate_unusual_whales,
     "cerebras": _validate_cerebras,
     "xai": _validate_xai,
+    "nvidia": _validate_nvidia,
+    "fred": _validate_fred,
     "exa": _validate_exa,
     "clerk": _validate_clerk,
     "equibles": _validate_equibles,

@@ -32,6 +32,7 @@ export async function POST(request: Request): Promise<Response> {
       system: NEWSFEED_VOICE_SYSTEM,
       messages: [{ role: "user", content: JSON.stringify(input) }],
       maxTokens: 1600,
+      reasoningEffort: "low",
       signal,
     });
     signal.throwIfAborted();
@@ -41,6 +42,11 @@ export async function POST(request: Request): Promise<Response> {
     if (timeout.aborted || (error instanceof Error && error.name === "TimeoutError")) {
       return json({ error: "Rewrite timed out. Try again." }, 504);
     }
+    console.error(
+      `[newsfeed/share] voice rewrite failed: ${
+        error instanceof Error ? `${error.name}: ${error.message.slice(0, 300)}` : String(error)
+      }`,
+    );
     return json({ error: "Could not generate a verified draft. Try again." }, 502);
   }
 }

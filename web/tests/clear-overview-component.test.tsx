@@ -81,12 +81,15 @@ describe("Clear account history interaction", () => {
   });
 
   it("reserves loading geometry and exposes missing history without fake curves", () => {
-    const { rerender } = render(<AccountHistory data={null} loading />);
+    const { container, rerender } = render(<AccountHistory data={null} loading />);
     expect(screen.getByText("Loading account history")).toBeDefined();
     expect(screen.queryByRole("slider")).toBeNull();
-    rerender(<AccountHistory data={null} error="Unavailable" />);
+    rerender(<AccountHistory data={null} error="TypeError: internal history failure" />);
     expect(screen.getByText("Account history unavailable")).toBeDefined();
-    expect(screen.getByText(/could not be reached/)).toBeDefined();
+    expect(screen.getByRole("alert").textContent).toContain("could not be reached");
+    expect(screen.getByRole("alert").textContent).not.toContain("TypeError");
+    expect(screen.getByRole("alert").closest("#radon-toast-viewport")).not.toBeNull();
+    expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(screen.getByRole("link", { name: /View performance details/ }).getAttribute("href")).toBe("/performance");
   });
 });
@@ -113,7 +116,10 @@ describe("Clear portfolio overview", () => {
     expect(positionLink.getAttribute("href")).toBe("/XYZ?posId=17");
     expect(positionLink.textContent).toContain("+$100");
     expect(screen.getAllByText("Margin needs attention")).toHaveLength(2);
-    expect(screen.getByRole("link", { name: /News, signals/ }).getAttribute("href")).toBe("#clear-market-intelligence");
+    expect(screen.queryByText("Research workspace")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Follow the evidence." })).toBeNull();
+    expect(screen.queryByRole("link", { name: /News, signals/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: "AI Industry evidence" })).toBeNull();
   });
 
   it("retains the severity of a broker margin call on the mobile risk entry point", () => {
@@ -121,7 +127,9 @@ describe("Clear portfolio overview", () => {
     expect(container.querySelector('a[href="#clear-risk-details"]')?.getAttribute("data-tone")).toBe("critical");
     expect(screen.getByText(/Margin call: Excess Liquidity/)).toBeDefined();
     expect(screen.getByText("No open positions")).toBeDefined();
-    expect(screen.getAllByRole("link", { name: "Explore research", exact: true })).toHaveLength(2);
+    const explore = screen.getByRole("link", { name: "Explore research", exact: true });
+    expect(explore.getAttribute("href")).toBe("/scanner");
+    expect(screen.queryByText("Research workspace")).toBeNull();
   });
 
   it.each([200, 0, -200])("retains a signed, current-session broker P&L of %s", (dailyPnl) => {

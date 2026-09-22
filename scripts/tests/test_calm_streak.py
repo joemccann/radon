@@ -35,7 +35,7 @@ from fetch_calm_streak import (
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
-MIGRATION = Path(__file__).parents[1] / "db" / "migrations" / "0074_calm_streak.sql"
+MIGRATION = Path(__file__).parents[1] / "db" / "migrations" / "0076_calm_streak.sql"
 RAW = json.loads((FIXTURES / "calm_streak_cboe_spx_sample.json").read_text())
 PARSED = parse_cboe_history(RAW)
 LATE = [r for r in PARSED if r["date"] >= "2026-01-01"]
@@ -274,9 +274,9 @@ class TestStorage:
         yield conn
         conn.close()
 
-    def test_migration_registers_version_74_and_reruns(self, db):
+    def test_migration_registers_version_76_and_reruns(self, db):
         db.executescript(MIGRATION.read_text())
-        assert [r[0] for r in db.execute("SELECT version FROM schema_migrations")] == [74]
+        assert [r[0] for r in db.execute("SELECT version FROM schema_migrations")] == [76]
 
     def test_schema(self, db):
         info = list(db.execute("PRAGMA table_info(calm_streak_history)"))

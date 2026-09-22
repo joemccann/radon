@@ -105,7 +105,6 @@ vi.mock("@/components/ChatLauncher", () => ({ default: () => null }));
 vi.mock("@/components/DemoWelcomeModal", () => ({ default: () => null }));
 vi.mock("@/components/mobile/MobileShell", () => ({ default: () => null }));
 vi.mock("@/components/FooterTelemetryStrip", () => ({ default: () => null }));
-vi.mock("@/components/CommandPalette", () => ({ default: () => null }));
 vi.mock("@/components/OfflineBanner", () => ({ default: () => null }));
 vi.mock("@/components/FuturesStrip", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/components/FuturesStrip")>();

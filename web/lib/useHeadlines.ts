@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { createContext, createElement, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 
 import {
   buildHeadlinesWebSocketUrl,
@@ -11,6 +11,7 @@ import {
   DEMO_HEADLINES_POLL_MS,
 } from "./demo/headlinesPolicy";
 import { useRealtimeAuth } from "./RealtimeAuthContext";
+import { ticketBlockedMs } from "./wsTicket";
 
 function reconnectDelayMs(attempt: number): number {
   const exponent = Math.min(Math.max(attempt, 0), 10);
@@ -36,7 +37,11 @@ type ClientFrame =
   | { type: "headline"; item: Headline; degraded?: boolean }
   | { type: "status"; state: string };
 
-export function useHeadlines() {
+type HeadlinesValue = { items: Headline[]; status: HeadlinesStatus };
+
+const HeadlinesContext = createContext<HeadlinesValue | null>(null);
+
+function useHeadlinesConnection(enabled: boolean): HeadlinesValue {
   const getToken = useRealtimeAuth();
   // REL-246 (R-654): the auth provider hands out a fresh getToken identity on
   // every render. Keying the socket effect on it tore down and reopened the
@@ -48,6 +53,7 @@ export function useHeadlines() {
   const [status, setStatus] = useState<HeadlinesStatus>("connecting");
 
   useEffect(() => {
+    if (!enabled) return;
     if (process.env.NEXT_PUBLIC_RADON_DEMO === "1") {
       let stopped = false;
       let timer: ReturnType<typeof setTimeout> | null = null;
@@ -162,7 +168,7 @@ export function useHeadlines() {
           socket = null;
           if (stopped) return;
           setStatus("down");
-          const delay = reconnectDelayMs(attempt);
+          const delay = Math.max(reconnectDelayMs(attempt), ticketBlockedMs());
           attempt += 1;
           timer = setTimeout(() => {
             void open();
@@ -171,7 +177,7 @@ export function useHeadlines() {
       } catch {
         if (stopped) return;
         setStatus("down");
-        const delay = reconnectDelayMs(attempt);
+        const delay = Math.max(reconnectDelayMs(attempt), ticketBlockedMs());
         attempt += 1;
         timer = setTimeout(() => {
           void open();
@@ -186,8 +192,25 @@ export function useHeadlines() {
       socket?.close();
     };
     // REL-246 (R-654): getToken is read via getTokenRef so auth-provider
-    // identity churn cannot recycle the socket.
-  }, []);
+    // identity churn cannot recycle the socket. `enabled` is the only dep:
+    // the root provider passes true for the life of the tab, so a page
+    // unmount cannot close this socket or zero the backoff.
+  }, [enabled]);
 
   return { items, status };
+}
+
+/** Owns the headlines socket for the life of the tab. Page components subscribe. */
+export function HeadlinesProvider({ children }: { children: ReactNode }) {
+  const value = useHeadlinesConnection(true);
+  return createElement(HeadlinesContext.Provider, { value }, children);
+}
+
+export function useHeadlines(): HeadlinesValue {
+  const fromProvider = useContext(HeadlinesContext);
+  // Tests and any tree without the provider still own a socket, and unmount
+  // still closes it. Under the provider the local connection stays disabled
+  // so a dashboard remount cannot open a second one.
+  const local = useHeadlinesConnection(fromProvider == null);
+  return fromProvider ?? local;
 }

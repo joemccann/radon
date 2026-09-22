@@ -281,3 +281,45 @@ export async function writeSetupEnvFiles(
   writeChain = result.catch(() => {});
   return result;
 }
+
+// Web keys Next reads from process.env per request, so a Credentials-tab save
+// can take effect in this process without a restart. Clerk and Turso are read
+// at boot and stay restart-only.
+export const LIVE_WEB_ENV_KEYS = new Set([
+  "UW_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "CEREBRAS_API_KEY",
+  "XAI_API_KEY",
+  "EXA_API_KEY",
+]);
+
+/**
+ * Apply a stored credential save to this Next process: set process.env now and
+ * persist to web/.env so the next boot agrees with the store. Returns the
+ * names applied. A value the Next dialect cannot encode is skipped.
+ */
+export async function applyLiveWebCredentials(
+  values: Record<string, unknown>,
+  repoRoot: string = path.resolve(process.cwd(), ".."),
+): Promise<string[]> {
+  const live: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(values)) {
+    if (!LIVE_WEB_ENV_KEYS.has(key) || typeof raw !== "string" || !raw.trim()) continue;
+    const value = raw.trim();
+    try {
+      quote(key, value, "next");
+    } catch (error) {
+      if (error instanceof EnvEncodingError) continue;
+      throw error;
+    }
+    live[key] = value;
+  }
+  const names = Object.keys(live);
+  if (names.length === 0) return names;
+  for (const name of names) process.env[name] = live[name];
+  const run = () => upsertEnvFile(path.join(repoRoot, "web", ".env"), live, "next");
+  const result = writeChain.then(run, run);
+  writeChain = result.catch(() => {});
+  await result;
+  return names;
+}

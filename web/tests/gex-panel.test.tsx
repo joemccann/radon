@@ -132,10 +132,11 @@ describe("GexPanel", () => {
   it("renders error message in alert-item bearish card", () => {
     mockUseGex.mockReturnValue({ data: null, loading: false, error: "UW API down", lastSync: null, syncing: false, syncNow: vi.fn() });
     const { container } = render(<GexPanel />);
-    expect(container.textContent).toContain("UW API down");
-    const alertEl = container.querySelector(".alert-item.bearish");
-    expect(alertEl).not.toBeNull();
-    expect(alertEl?.textContent).toContain("UW API down");
+    const alertEl = screen.getByRole("alert");
+    expect(alertEl.textContent).toContain("UW API down");
+    expect(alertEl.closest("[data-toast-viewport]")).toBeTruthy();
+    expect(container.contains(alertEl)).toBe(false);
+    expect(container.textContent).not.toContain("UW API down");
   });
 
   it("renders ticker and date in header", () => {
@@ -298,7 +299,7 @@ describe("GexPanel", () => {
 
   it("renders InfoTooltip on section title", () => {
     const { container } = renderWithData();
-    // The section title tooltip trigger is a span with tabIndex=0 containing '?'
+    // The section title exposes a named information button.
     const triggers = Array.from(container.querySelectorAll("[data-testid='gex-section-tooltip-trigger']"));
     expect(triggers.length).toBeGreaterThan(0);
   });
@@ -310,7 +311,7 @@ describe("GexPanel", () => {
     const netGexLabel = metricLabels.find((el) => el.textContent?.includes("NET GEX"));
     expect(netGexLabel).toBeTruthy();
     // Has a tooltip trigger inside
-    expect(netGexLabel?.querySelector("span[tabindex='0']")).toBeTruthy();
+    expect(within(netGexLabel as HTMLElement).getByRole("button", { name: "More information" })).toBeTruthy();
   });
 
   it("renders InfoTooltip on IV 30D metric label", () => {
@@ -318,7 +319,7 @@ describe("GexPanel", () => {
     const metricLabels = Array.from(container.querySelectorAll(".gex-metric-label"));
     const ivLabel = metricLabels.find((el) => el.textContent?.includes("IV 30D"));
     expect(ivLabel).toBeTruthy();
-    expect(ivLabel?.querySelector("span[tabindex='0']")).toBeTruthy();
+    expect(within(ivLabel as HTMLElement).getByRole("button", { name: "More information" })).toBeTruthy();
   });
 
   it("renders ShareReportModal share button in panel header", () => {

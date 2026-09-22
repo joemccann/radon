@@ -33,6 +33,9 @@ Safety guards
   already present.
 - --execute mode requires explicit flag; dry-run never opens a write
   transaction.
+- Gross Flex coverage is required when legacy net totals hide opposing fills.
+  Ambiguous coverage refuses the scan before insertion; restore that aggregate's
+  gross_fill_breakdown from its authoritative executions before retrying.
 Usage
 ─────
 Dry-run (default — reads prod, writes nothing):
@@ -73,7 +76,10 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from clients.journal_basis import contract_fill_fingerprint  # noqa: E402
+from clients.journal_basis import (  # noqa: E402
+    contract_fill_fingerprint,
+    flex_aggregate_budget,
+)
 from utils.exec_ids import exec_id_root  # noqa: E402
 
 # ── env load ──────────────────────────────────────────────────────────────────
@@ -143,7 +149,8 @@ class JournalCoverage:
 
     def __init__(self, exec_ids: set[str], roots: set[str],
                  fingerprints: Counter, claimed: Optional[Counter] = None,
-                 exec_fingerprints: Optional[Dict[str, str]] = None):
+                 exec_fingerprints: Optional[Dict[str, str]] = None,
+                 aggregate: Optional[Counter] = None):
         self.exec_ids = exec_ids
         self.roots = roots
         self.fingerprints = fingerprints
@@ -153,6 +160,12 @@ class JournalCoverage:
         # skip happens BEFORE the payload is reconstructed, so this map is
         # how that path spends its claim without a rebuild per row.
         self.exec_fingerprints = exec_fingerprints if exec_fingerprints is not None else {}
+        # NF-4: Flex aggregate rows are TOTALS, not fills. (contract, date,
+        # sign) → contracts the aggregate accounts for; individual fills
+        # inside that total are covered, fills beyond it are real gaps.
+        self.aggregate = aggregate if aggregate is not None else Counter()
+        self.aggregate_claimed: Counter = Counter()
+        self.aggregate_exec_ids: set[str] = set()
 
     def covers_exec_id(self, exec_id: str) -> bool:
         if exec_id in self.exec_ids:
@@ -164,7 +177,18 @@ class JournalCoverage:
         fingerprint = contract_fill_fingerprint(journal_payload)
         if fingerprint is None:
             return False
-        return self.fingerprints[fingerprint] > self.claimed[fingerprint]
+        if self.fingerprints[fingerprint] > self.claimed[fingerprint]:
+            return True
+        return self._aggregate_left(fingerprint) >= abs(fingerprint[2])
+
+    @staticmethod
+    def _aggregate_key(fingerprint: tuple) -> tuple:
+        contract, date, signed = fingerprint
+        return (contract, str(date)[:10], 1 if signed > 0 else -1)
+
+    def _aggregate_left(self, fingerprint: tuple) -> float:
+        key = self._aggregate_key(fingerprint)
+        return self.aggregate[key] - self.aggregate_claimed[key]
 
     def claim_exec_id(self, exec_id: str) -> None:
         """Spend the journal row an EXACT-id (or root) match consumed.
@@ -186,12 +210,18 @@ class JournalCoverage:
         """Spend the journal row this fill was matched against, so a second
         identical fill is measured against what is left."""
         fingerprint = contract_fill_fingerprint(journal_payload)
-        if fingerprint is not None:
+        if fingerprint is None:
+            return
+        if self.fingerprints[fingerprint] > self.claimed[fingerprint]:
+            self.claimed[fingerprint] += 1
+        elif self._aggregate_left(fingerprint) >= abs(fingerprint[2]):
+            self.aggregate_claimed[self._aggregate_key(fingerprint)] += abs(fingerprint[2])
+        else:
             self.claimed[fingerprint] += 1
 
     def record(self, exec_id: str, journal_payload: Dict[str, Any]) -> None:
-        """Account for a row inserted during this run so the next EO row in
-        the same batch cannot re-insert it."""
+        """Remember a covered or inserted execution so a later correction in
+        the same batch cannot consume coverage or insert the fill again."""
         self.exec_ids.add(str(exec_id))
         root, correction = exec_id_root(exec_id)
         if root:
@@ -216,6 +246,8 @@ class JournalCoverage:
         self.exec_ids |= other.exec_ids
         self.roots |= other.roots
         self.fingerprints |= other.fingerprints
+        self.aggregate |= other.aggregate
+        self.aggregate_exec_ids |= other.aggregate_exec_ids
         self.exec_fingerprints.update(other.exec_fingerprints)
 
 
@@ -269,7 +301,14 @@ def _accumulate_payload_coverage(coverage: JournalCoverage, raw: Any) -> None:
     if not isinstance(payload, dict):
         return
 
-    fingerprint = contract_fill_fingerprint(payload)
+    budget = flex_aggregate_budget(payload)
+    if budget is not None:
+        # NF-4: an aggregate covers fills by quantity, never 1:1.
+        for key, qty in budget.items():
+            coverage.aggregate[key] += qty
+        fingerprint = None
+    else:
+        fingerprint = contract_fill_fingerprint(payload)
     if fingerprint is not None:
         coverage.fingerprints[fingerprint] += 1
 
@@ -277,6 +316,8 @@ def _accumulate_payload_coverage(coverage: JournalCoverage, raw: Any) -> None:
     if not exec_id:
         return
     coverage.exec_ids.add(str(exec_id))
+    if budget is not None:
+        coverage.aggregate_exec_ids.add(str(exec_id))
     if fingerprint is not None:
         coverage.exec_fingerprints.setdefault(str(exec_id), fingerprint)
     for part in str(exec_id).split("+"):
@@ -284,11 +325,15 @@ def _accumulate_payload_coverage(coverage: JournalCoverage, raw: Any) -> None:
         if not part:
             continue
         coverage.exec_ids.add(part)
+        if budget is not None:
+            coverage.aggregate_exec_ids.add(part)
         if fingerprint is not None:
             coverage.exec_fingerprints.setdefault(part, fingerprint)
         root, _correction = exec_id_root(part)
         if root:
             coverage.roots.add(root)
+            if budget is not None:
+                coverage.aggregate_exec_ids.add(root)
             if fingerprint is not None:
                 coverage.exec_fingerprints.setdefault(root, fingerprint)
 
@@ -519,7 +564,13 @@ def backfill(
     for row in executed:
         exec_id = row["exec_id"]
 
-        if coverage.covers_exec_id(exec_id):
+        root, _correction = exec_id_root(exec_id)
+        aggregate_member = (
+            (exec_id in coverage.aggregate_exec_ids or root in coverage.aggregate_exec_ids)
+            and exec_id not in coverage.exec_fingerprints
+            and root not in coverage.exec_fingerprints
+        )
+        if coverage.covers_exec_id(exec_id) and not aggregate_member:
             # R-088: spend the journal row this exact-id match consumed, or
             # this fill's same-fingerprint sibling is read as a re-import
             # and never inserted.
@@ -542,8 +593,11 @@ def backfill(
 
         # The reconstructed row is what the id-independent check needs: only
         # now do we know this fill's contract, session date and signed size.
-        if coverage.covers_fill(journal_payload):
+        if coverage.covers_exec_id(exec_id) or coverage.covers_fill(journal_payload):
             coverage.claim_fill(journal_payload)
+            # Remember namespace matches too: a correction is the same fill,
+            # and must not spend the aggregate's quantity budget a second time.
+            coverage.record(exec_id, journal_payload)
             log.info(
                 "  SKIP  %s — same fill already journaled under another id "
                 "convention (contract/date/quantity match)",

@@ -1,0 +1,18 @@
+[Unit]
+Description=Radon SLM tagger monitor (drift / invalid / label-shift; newsfeed text tags only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/newsfeed/slm/monitor.py
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

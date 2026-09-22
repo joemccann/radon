@@ -25,7 +25,7 @@ Radon's use of this surface is deliberately narrow:
 
 Token lifecycle — access tokens expire in ~3 days, so REFRESH IS MANDATORY
 in production. Tokens persist in a 0600 JSON file (``ROBINHOOD_MCP_TOKEN_FILE``,
-default ``data/rh_mcp_token.json``, gitignored; ``/etc/radon/rh-mcp.json`` on
+default ``data/rh_mcp_token.json``, gitignored; ``/var/lib/radon/rh-mcp/rh-mcp.json`` on
 the VPS) so the process can write rotated tokens back. Env vars bootstrap the
 file on first use. Refresh runs against the official token endpoint
 (``https://api.robinhood.com/oauth2/token/``, ``grant_type=refresh_token``,
@@ -127,6 +127,8 @@ READ_ONLY_TOOLS = frozenset({
     "get_scans",
     "get_scanner_filter_specs",
     "run_scan",
+    # analyst consensus (ahead of UW; UW keeps rating-change history)
+    "get_equity_analyst_ratings",
     # earnings backup
     "get_earnings_calendar",
     "get_earnings_results",
@@ -1054,6 +1056,32 @@ def fetch_robinhood_closes(symbols: List[str]) -> Dict[str, Dict[str, float]]:
                 out[symbol] = closes
                 print(f"  Robinhood: {symbol} — {len(closes)} bars", file=sys.stderr)
     return out
+
+
+def fetch_robinhood_analyst_ratings(symbol: str) -> Optional[Dict[str, Any]]:
+    """The raw consensus block for one symbol from get_equity_analyst_ratings.
+
+    None when unconfigured, on any error, or when the symbol has no coverage.
+    Counts are buy/hold/sell only; price targets may be absent.
+    """
+    if not robinhood_configured():
+        return None
+    try:
+        with _process_lock:
+            if not robinhood_available():
+                return None
+            payload = _client().call_tool(
+                "get_equity_analyst_ratings", {"symbols": [symbol.upper()]}
+            )
+    except Exception as exc:  # noqa: BLE001 - the ladder falls through to UW
+        print(f"  Robinhood ratings failed for {symbol}: {exc}", file=sys.stderr)
+        return None
+    data = payload.get("data") if isinstance(payload, dict) else None
+    for row in _result_rows(data if data is not None else payload):
+        if str(row.get("symbol", "")).upper() == symbol.upper():
+            ratings = row.get("ratings")
+            return ratings if isinstance(ratings, dict) else None
+    return None
 
 
 def _client() -> "RobinhoodClient":
