@@ -1,3 +1,16 @@
+# Task: After-hours option last is last trade or last bid/offer, not previous close
+
+## Dependency graph
+
+- T1 depends_on: [] - Adversarial tests: META 665P CLOSE 26.70 vs print 8.10
+- T2 depends_on: [T1] - Retain session last in tick handler, relay cache, sync history, UI
+- T3 depends_on: [T2] - Focused green; draft PR; hold merge
+
+## Checklist
+
+- [x] T1 Tests
+- [x] T2 Implementation
+- [ ] T3 Draft PR; hold merge
 # Task: Operator page on the app container
 
 The API image has no systemctl, so /admin marked every app unit Unknown and said the browser was not on the VPS.
