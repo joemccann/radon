@@ -978,7 +978,7 @@ refuse_billing_reroute_files() {
       report "REFUSED" "$nested_key_file holds billing-reroute credentials; the agent would bill metered API usage instead of the claude.ai subscription, remove the key line" || true
       exit 2
     fi
-  done < <(find .deepsec -mindepth 2 -type f -name ".env*" 2>/dev/null)
+  done < <(find .deepsec -mindepth 2 -type f -name ".env*" 2>/dev/null || true)
 
   # web/.env is provisioned into the Radon-credential clones for the Next dev
   # server and pytest's load_dotenv, and the product copy carries
