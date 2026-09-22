@@ -89,14 +89,11 @@ artificial commit or PR, and follows the no-op contract below.
    and never create or read `~/radon-weekend/.weekend-runner.lock`. A
    sandboxed `kill -0` returning `Operation not permitted` must not be read as evidence
    of anything and must not become a `lock-owner-unverified` INCOMPLETE.
-6. **Do not launch Chromium in the sandbox.** The wrapper exports
-   `PW_TEST_CONNECT_WS_ENDPOINT` when `RADON_WEEKEND_BROWSER_HOST=ready`.
-   The workspace-write (codex) rung does not receive the endpoint
-   (`unavailable:codex-rung`); treat UI as operator-only on that rung.
-   When that variable is not `ready`, do not attempt a local Chromium
-   launch: it dies on `bootstrap_check_in … Permission denied (1100)`.
-   Record the UI check as operator-only with
-   `bash scripts/setup_reliability_weekend.sh` and quote `browser-host=`.
+6. **Do not launch Chromium in the sandbox.** Scheduled wrappers do not
+   provide `PW_TEST_CONNECT_WS_ENDPOINT`; `RADON_WEEKEND_BROWSER_HOST` is
+   `unavailable:disabled` for every provider. Use GitHub CI for sandboxed UI
+   checks and screenshots. Unsandboxed providers may run Playwright locally.
+   Rerunning setup does not enable a shared host browser.
 7. **Respect the frozen contracts.** `RELIABILITY_AUDIT.md` finding IDs
    (R-###) and backlog IDs (REL-###) continue their numbering; never
    renumber or rewrite prior entries. `RELIABILITY_LOG.md` is append-only.
@@ -413,11 +410,9 @@ how this loop improves as the codebase grows.
 - 2026-09-20 (remediate, REL-260): Chromium cannot launch under the agent
   CLI Seatbelt (`mach-register` for
   `org.chromium.Chromium.MachPortRendezvousServer.<pid>` dies
-  `Permission denied (1100)` / SIGTRAP). The wrapper owns
-  a fixed-option Playwright `launchServer` on the host and exports
-  `PW_TEST_CONNECT_WS_ENDPOINT`. Never reclaim or `kill -0` a runner lock
-  from the sandbox: EPERM is not death. Operator repair is
-  `bash scripts/setup_reliability_weekend.sh`.
+  `Permission denied (1100)` / SIGTRAP). Scheduled wrappers no longer
+  provide a shared host browser. Run sandboxed UI verification in GitHub CI.
+  Never reclaim or `kill -0` a runner lock from the sandbox: EPERM is not death.
 - 2026-08-09 (bootstrap): control-plane unit edits (`cloud/services/*` in
   the readiness manifest) abort the deploy preflight by design — the PR
   body must tell the operator to run the root

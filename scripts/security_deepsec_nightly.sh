@@ -1448,20 +1448,8 @@ launch_round() {
   export PATH
   local remain="$1" prompt_file="$PORTABLE_PROMPT_DIR/$LOOP_SKILL.$PHASE.md"
   unset PW_TEST_CONNECT_WS_ENDPOINT
-  case "$RUNG_PROVIDER" in
-    codex)
-      if declare -F start_browser_host >/dev/null; then start_browser_host; fi
-      ;;
-    *)
-      if [[ "${BROWSER_HOST_STATUS:-}" == "unavailable:codex-rung" ]]; then
-        if declare -F start_browser_host >/dev/null; then start_browser_host; fi
-      fi
-      if [[ -n "${BROWSER_HOST_ENDPOINT:-}" && "${BROWSER_HOST_STATUS:-}" == "ready" ]]; then
-        export PW_TEST_CONNECT_WS_ENDPOINT="$BROWSER_HOST_ENDPOINT"
-        export RADON_WEEKEND_BROWSER_HOST="ready"
-      fi
-      ;;
-  esac
+  export RADON_WEEKEND_BROWSER_HOST="unavailable:disabled"
+
   # A bare rung names no model on purpose: the CLI/account default is what runs
   # and the vendor migrates it forward. An empty --model is NOT the same thing,
   # so the flag is omitted entirely. `${a[@]+"${a[@]}"}` because bash 3.2 (the
