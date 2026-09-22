@@ -52,12 +52,12 @@ for (const width of [360, 390, 768, 1024, 1440]) {
       await page.getByRole("button", { name: "Toggle theme" }).click();
       await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
       await page.getByRole("button", { name: "Toggle theme" }).click();
-      await page.getByRole("button", { name: "Open command palette" }).click();
-      await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible();
-      await page.getByRole("textbox", { name: "Search", exact: true }).fill("AAPL");
+      await page.keyboard.press("Meta+k");
+      await expect(page.getByRole("combobox", { name: "Search ticker", exact: true })).toBeFocused();
       await page.keyboard.press("Escape");
-      await expect(page.getByRole("dialog", { name: "Command palette" })).toBeHidden();
     }
+    await expect(page.getByRole("button", { name: "Open command palette" })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "Command palette" })).toHaveCount(0);
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 
     await more.click();

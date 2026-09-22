@@ -31,7 +31,6 @@ const MORE_VIEWS: { key: DeckKey | null; label: string }[] = [
   { key: "i", label: "Company" },
   { key: "h", label: "13F holdings" },
   { key: "f", label: "Filings" },
-  { key: ":", label: "Commands" },
 ];
 
 export default function ChainInstrumentSidebar({ ticker, position, underlyingQuote, heldQuote, activeDeck = "c", onDeckChange }: Props) {

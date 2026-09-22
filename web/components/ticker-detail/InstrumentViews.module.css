@@ -251,7 +251,6 @@
   }
 
   :global(.instrument-workspace) .views :global(.asset-deck-empty),
-  :global(.instrument-workspace) .views :global(.asset-deck-ph),
   :global(.instrument-workspace) .views :global(.tab-error),
   :global(.instrument-workspace) .views :global(.tab-loading-text) {
     font: 400 14px/1.5 var(--font-sans);

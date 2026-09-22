@@ -48,8 +48,7 @@
 .header :global(.header-actions) { grid-row: 1; grid-column: 2; display: flex; gap: 8px; align-items: center; min-width: 0; }
 .header :global(.search-input-wrapper) { width: clamp(160px, 16vw, 234px); min-width: 0; }
 .header :global(.search-input-wrapper input) { min-height: 40px; font-family: var(--font-sans); font-size: 12px; border-radius: 8px; background: var(--bg-panel); border-color: transparent; }
-.header :global(.theme-toggle), .header :global(.fullscreen-toggle), .header :global(.command-palette-trigger) { width: 36px; height: 44px; flex: none; border: 0; border-radius: 6px; color: var(--text-secondary); background: transparent; }
-.header :global(.command-palette-trigger) { font-size: 12px; }
+.header :global(.theme-toggle), .header :global(.fullscreen-toggle) { width: 36px; height: 44px; flex: none; border: 0; border-radius: 6px; color: var(--text-secondary); background: transparent; }
 .header :global(.telemetry-rail) { grid-row: 2; grid-column: 1; flex-wrap: wrap; gap: 10px; min-width: 0; padding: 28px 0 25px; border: 0; }
 .header.compact :global(.telemetry-rail) { padding: 16px 0; }
 .header :global(.rail-section) { flex: 0 0 100%; font: 550 29px/1.2 var(--font-sans); letter-spacing: -.9px; text-transform: none; color: var(--text-primary); margin: 0 0 3px; max-width: none; }
@@ -99,7 +98,6 @@
   .primaryLink { font-size: 12px; }
   .moreTrigger { font-size: 12px; }
   .header :global(.search-input-wrapper) { display: none; }
-  .header :global(.command-palette-trigger) { width: 40px; }
   .menu { position: fixed; top: 70px; left: 22px; right: 22px; width: auto; }
   .header :global(.rail-section) { font-size: 26px; }
   .contextTools { max-width: 270px; }

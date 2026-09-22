@@ -5,7 +5,6 @@ import { ChevronDown, Maximize2, Minimize2, Moon, Sun } from "lucide-react";
 import TickerSearch from "./TickerSearch";
 import { useTickerNav } from "@/lib/useTickerNav";
 import { useIBStatusContext, type IBDisplayStatus } from "@/lib/IBStatusContext";
-import { pushRecentTicker } from "./CommandPalette";
 import styles from "./ClearShell.module.css";
 
 type HeaderProps = {
@@ -28,7 +27,6 @@ type HeaderProps = {
    *  telemetry rail. Replaces the previous "Last sync" pill that lived
    *  inside the sync-controls children. */
   lastSync?: string | null;
-  onOpenPalette?: () => void;
   isStale?: boolean;
   staleAgeMinutes?: number | null;
   onSyncNow?: () => void;
@@ -78,7 +76,6 @@ export default function Header({
   futuresStrip,
   onSearchUnavailable,
   lastSync,
-  onOpenPalette,
   isStale,
   staleAgeMinutes,
   onSyncNow,
@@ -97,13 +94,12 @@ export default function Header({
     const handler = (event: globalThis.KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        if (onOpenPalette) onOpenPalette();
-        else searchRef.current?.focus();
+        searchRef.current?.focus();
       }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [onOpenPalette]);
+  }, []);
 
   useEffect(() => {
     if (!telemetryOpen) return;
@@ -137,7 +133,6 @@ export default function Header({
 
   const handleSelect = useCallback(
     (symbol: string) => {
-      pushRecentTicker(symbol);
       navigateToTicker(symbol);
     },
     [navigateToTicker],
@@ -215,16 +210,6 @@ export default function Header({
           <span className={`rail-integrity-dot rail-integrity-dot-${isStale ? "warn" : integrity.cls}`} aria-hidden />
           <span>{isStale ? `Stale${staleAgeMinutes != null ? ` ${staleAgeMinutes}m` : ""}` : integrity.text}</span>
           <ChevronDown size={12} aria-hidden />
-        </button>
-        <button
-          type="button"
-          className="command-palette-trigger"
-          onClick={onOpenPalette}
-          aria-label="Open command palette"
-          data-testid="command-palette-trigger"
-          title="⌘K to open palette"
-        >
-          ⌘K
         </button>
         <TickerSearch
           ref={searchRef}

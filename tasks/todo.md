@@ -8079,3 +8079,14 @@ Review: pending. P2 acceptance remains in the authoritative checkpoint, outside 
 - [x] T3 depends_on: [T2] Run focused and full gates, compare failures on clean main, review substantive diff.
 - [x] T4 depends_on: [T3] Prepare complete finding checkpoint and formatter-generated publication handoff; publication receipts belong on issue #202.
 Review: DOC-122 red/green demonstrated; 108 docs/path and 14 isolated rebuild tests pass. Full Python: 14827 passed, 31 failed, 2 skipped. Cloud: 2169 passed, 6 failed, 6 skipped initially; pinned-environment failure rerun 2 passed/4 failed. All remaining 31 Python and 4 cloud failures reproduce on clean 5bb91597, zero failure delta. Full Vitest: 9993 passed. Changed links/anchors (4), owners JSON, offline help, diff whitespace and secret scan pass. DOC-121 remains operator-only; DOC-110/120/123 retain their complete acceptance in issue #202 outside reduced scope. No live mutation or runtime behavior change. CI delivery belongs to the separate deliver phase.
+
+## 2026-09-22 Remove Command Palette
+Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
+- [x] T1 depends_on: [] Isolate latest main, inspect instructions and map palette dependencies.
+- [x] T2 depends_on: [T1] Remove global palette, trigger, hotkey, styles and obsolete tests; preserve instrument search.
+- [x] T3 depends_on: [T1] Remove instrument Commands deck and shortcut; update cockpit regressions.
+- [ ] T4 depends_on: [T2,T3] Review integration and browser regressions; publish PR.
+- [ ] T5 depends_on: [T4] Verify exact-head GitHub checks and screenshots, send Pushover receipt.
+Validation: no local test suites. GitHub owns unit, build and browser checks. Preserve unrelated workspace edits in original checkout.
+
+Review: removed global dialog/trigger/recent-history storage and instrument Commands deck/colon handler; retained direct instrument search and Cmd/Ctrl+K focus. Unit and curated browser regressions cover search navigation, remaining decks, Escape and responsive absence. No local test suites. GitHub checks and visual artifacts pending.
