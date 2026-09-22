@@ -1,3 +1,19 @@
+# Task: Runner trust (R01-A / R02-A)
+
+Operator 2026-09-22: R01-A (no host browser endpoint on the codex write rung), R02-A (host-owned gitdir the agent cannot write).
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: codex env has no PW_TEST_CONNECT_WS_ENDPOINT; host git uses $WEEKEND_ROOT/.gitdirs/<loop>.git; codex writable_roots omit .git
+- T2 depends_on: [T1] - Wrappers, plists, setup scripts, prune protection, operations.md
+- T3 depends_on: [T2] - Focused pytest green; PR; Mac mini setup_* after merge
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Implementation
+- [ ] T3 Verify and ship
+
 # Task: After-hours option last is last trade or last bid/offer, not previous close
 
 ## Dependency graph

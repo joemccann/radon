@@ -168,7 +168,7 @@ class TestTheTwoMarkerGate:
         )
         # the git clean must preserve it, or the first per-round clean deletes
         # the marker and the next round refuses.
-        clean = next(ln for ln in body.splitlines() if "git clean" in ln)
+        clean = next(ln for ln in body.splitlines() if " clean -fdxq" in ln)
         assert "--exclude=.radon-security-runner" in clean, clean
 
     def _stub_bin(self, tmp_path: Path) -> tuple[Path, Path]:
