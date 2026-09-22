@@ -1183,7 +1183,7 @@ aws s3 ls "s3://radon-archive/db_backups/" --endpoint-url "$RADON_ARCHIVE_S3_END
 Restore is unchanged: pull the object, then follow the "Restore runbook"
 above against the downloaded `radon-<stamp>.sql.gz`.
 
-A duplicate Flex ingest confirms cash-flow row IDs and NAV dates, or journal execution coverage through bounded read-only Hrana queries before reporting persistence. Missing or unreadable coverage retains the applied claim, returns an error, and requires operator reconciliation; the puller rejects duplicate results without this explicit confirmation. It never automatically replays an applied delivery to repair missing rows.
+A duplicate Flex ingest confirms cash-flow row IDs and NAV dates, or journal execution coverage through bounded read-only Hrana queries before reporting persistence. Flex trade IDs that were not stored because individual IB fills already match that contract-day's quantity and gross notional count as covered. A quantity or notional disagreement does not. Missing or unreadable coverage retains the applied claim, returns an error, and requires operator reconciliation; the puller rejects duplicate results without this explicit confirmation. It never automatically replays an applied delivery to repair missing rows.
 
 
 ## Legacy Flex aggregate cleanup
@@ -1223,3 +1223,42 @@ backup or stable input cannot be established.
 
 The cleanup's isolated tests own the exact matching behavior; this sequence
 supplies the backup, stop and recovery decisions that CLI help cannot prove.
+
+### Rebuild missing gross coverage
+
+For a legacy aggregate whose gross coverage cannot be recovered from journal
+rows, the journal reconciliation operator can use
+[`rebuild_flex_gross_breakdown.py`](../scripts/rebuild_flex_gross_breakdown.py)
+with stable saved execution-level Flex trade statements. This helper does not
+call the Flex Web Service or delete rows; it stamps only `gross_fill_breakdown`
+when the statements prove the aggregate's recorded totals. Its source and
+[isolated tests](../scripts/tests/test_rebuild_flex_gross_breakdown.py) own the
+exact matching and refusal rules.
+
+The operator-only target database, maintenance window, retained affected rows
+and scratch-verified backup prerequisites above apply to this repair too.
+Keep the saved statements unchanged and prevent concurrent journal writers
+through review, apply and verification. Stop if the target, input provenance,
+exclusive maintenance window or recoverable pre-change rows cannot be verified.
+
+1. Inspect `python3.13 -m scripts.rebuild_flex_gross_breakdown --help` locally;
+   help is offline. A normal dry-run with `--xml` connects to the configured
+   database, so only the authorized operator may run it against production.
+2. Review every planned stamp, refused row and row reported as out of statement period
+   against the saved authoritative executions and retained rows. An out-of-period
+   row is not evidence of a successful repair. Stop on unexpected coverage,
+   identity or totals. Escalate unresolved refusals to journal reconciliation
+   rather than forcing metadata or replaying an applied delivery.
+3. Only after approving that review, the operator may repeat with `--apply`.
+   Each invocation recomputes the plan; it does not apply a saved plan. If the
+   statements or journal changed, stop and repeat backup and dry-run review.
+   The helper commits updates before re-reading them: post-commit verification
+   is not rollback, and a verification failure can leave committed changes.
+4. Require the reported stamped and verified counts to agree, compare each
+   stamped row's dated gross coverage with authoritative executions, and rerun
+   the dry-run to confirm approved rows are already stamped. A zero exit code
+   alone does not resolve refused or out-of-period rows. On an unexpected result,
+   stop further maintenance and reconcile with the retained pre-change rows
+   using the [restore runbook](#restore-runbook)'s scratch comparison and
+   partial-table recovery. Do not perform a blind full restore over newer
+   journal activity; escalate recovery decisions to the database operator.

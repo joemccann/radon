@@ -267,6 +267,18 @@ Incident: 2026-07-08, P1.
   sight paged P1. Edge and `:8321/health/lite` stayed up. Classifier
   now treats exit-code 143 as graceful-SIGTERM collateral inside a
   deploy window; other exit-codes still stay P1.
+- **2026-09-22 00:05Z:** page `9964f6e0`. Deploy stop-clean SIGTERM'd BPI
+  at 00:00:09Z during SPX chart fallback (NDX already upserted). The
+  handler logged `received signal 15; unwinding` and raised SystemExit,
+  but `ThreadPoolExecutor.shutdown(wait=True)` joined Yahoo workers that
+  did not return. TimeoutStopSec=90s later systemd SIGKILL'd
+  (ExecMainStatus=9, InactiveEnter 00:01:39Z) and recorded
+  `Result=timeout`, which this case does not downgrade. Sibling
+  long-running units restarted in that same minute. Edge stayed up.
+  Next BPI timer was 11:01Z. Handler now `os._exit(143)` so the join
+  cannot outlive the stop timeout. Do not widen the classifier to
+  `Result=timeout`: a real start-budget kill has the same Result and
+  must stay P1.
 - **Discriminating check:** `InactiveEnterTimestamp` before a later
   green-marker mtime (within the 24h oneshot horizon) or within
   60 min after the last green (cancelled stack / not-yet-green);
@@ -275,8 +287,10 @@ Incident: 2026-07-08, P1.
   `Result=exit-code` + `ExecMainStatus=143` is graceful SIGTERM
   unwind (same class as `signal`). A fresh successor journal does
   not override kill-before-green.
-- **Remediation:** classifier only, do not restart. Non-143 exit-code
-  and start-limit-hit stay P1.
+- **Remediation:** classifier downgrades `signal` and exit 143 only.
+  A chart-fallback hang that would have been `Result=timeout` exits
+  143 via `os._exit` before TimeoutStopSec. Do not restart. Non-143
+  exit-code, `Result=timeout`, and start-limit-hit stay P1.
 - **Regression:** `test_units.py::TestDeployCollateralSignalKill`
   (`test_stacked_deploy_signal_kill_34min_before_green_is_p3`,
   `test_signal_kill_after_last_green_during_cancelled_stack_is_p3`,
@@ -284,9 +298,12 @@ Incident: 2026-07-08, P1.
   `test_stacked_successor_green_158min_after_kill_is_p3`,
   `test_latched_kill_before_green_not_repaged_by_successor_inflight_journal`,
   `test_graceful_sigterm_exit_143_before_green_is_p3`,
-  `test_graceful_sigterm_exit_143_without_deploy_evidence_stays_p1`).
+  `test_graceful_sigterm_exit_143_without_deploy_evidence_stays_p1`),
+  `test_bpi_truncated_sweep.py::TestSigtermDuringChartFallbackExits`
+  (`test_sigterm_during_stuck_chart_fetch_exits_143`).
 - **Code:** `scripts/watchdog/units.py` (`DEPLOY_COLLATERAL_WINDOW_SECS=3600`,
-  `KILL_BEFORE_GREEN_FROZEN_CAP_SECS=86400`, `GRACEFUL_SIGTERM_EXIT_STATUS=143`).
+  `KILL_BEFORE_GREEN_FROZEN_CAP_SECS=86400`, `GRACEFUL_SIGTERM_EXIT_STATUS=143`),
+  `scripts/bpi_scan.py` (`install_sigterm_unwind`).
 
 ---
 
@@ -651,15 +668,25 @@ on the daily 22:40 UTC timer.** Peak: 2026-08-23 23:57Z, page `c52496dd…`.
   `/off-exchange-volume` AAPL 0.94s) but the Tuesday timer is the only
   retry once the oneshot exits 0. Health row is that single cycle, not a
   daily re-fail.
+- **Follow-on (2026-09-22 09:31Z, page `a3d843f9…`):** the sweep budget
+  worked (`wall-clock budget spent (849/2487)` at 09:29:37Z, T+780 from
+  09:16:37Z) and then sync libsql persist was still running at
+  InactiveEnter 09:31:37Z. `Result=timeout`, `NRestarts=0`,
+  `ExecMainStatus=15`, CPU ~20s. `/health/lite` stayed up. JSON cache
+  mtime stayed 2026-09-15 (write never reached). Do not wrap `get_db()`
+  in a thread join: it holds the GIL. Persist is hrana, chunked, and
+  stops at `PERSIST_BUDGET_S=100`. `TimeoutStartSec` stays 900.
 - **Regression:**
   `test_equibles_ats_venue_share.py::TestSweepBudget`
   (`test_tarpitted_equibles_stops_inside_the_wall_clock_budget`,
   `test_tickers_finished_before_the_deadline_are_kept`,
   `test_timeout_on_one_ticker_does_not_budget_skip_the_rest`,
   `test_sweep_budget_fits_inside_unit_start_timeout`),
+  `test_equibles_ats_venue_share.py::TestPersistBudget`,
   `test_systemd_services.py::TestEquiblesAtsScanBudget`.
 - **Code:** `scripts/fetch_equibles_ats_venue_share.py` (`SWEEP_BUDGET_S`,
-  `TICKER_FETCH_BUDGET_S`, `_fetch_ticker_bounded`, `_replace_wedged_client`),
+  `TICKER_FETCH_BUDGET_S`, `PERSIST_BUDGET_S`, `_fetch_ticker_bounded`,
+  `_replace_wedged_client`, `_write_db_cache`),
   `cloud/services/radon-equibles-ats.service` (`TimeoutStartSec=900`).
 
 ---
@@ -2057,7 +2084,9 @@ Peak: 2026-09-16 11:35Z, page `5a2eb828…`.
   ExecMainStart→Inactive ~2 min, not `TimeoutStartSec`.
 - **Discriminating check:** `cash_exit=0` with `twr_status=degraded`
   (this case). `Result=timeout` with no terminal heartbeat is
-  `flex-pull-ingest-timeout`. Host-key / auth abort is still
+  `flex-pull-ingest-timeout`. `ingest_failed` with
+  `outcome=coverage_unverified` and `classified_as=trades` is
+  `flex-pull-trade-coverage`. Host-key / auth abort is still
   `Result=exit-code` with no ingest. If `/health/lite` is down too →
   API, stand down.
 - **Remediation (code):** activity ingest is `ok` after cash exit 0;
@@ -2075,6 +2104,47 @@ Peak: 2026-09-16 11:35Z, page `5a2eb828…`.
   `test_flex_sftp_pull.py::test_sftp_rst_on_the_newest_statement_still_fails_the_oneshot`.
 - **Code:** `scripts/flex_delivery_ingest.py` (`_apply_classified`),
   `scripts/flex_sftp_pull.py` (`_is_transient_sftp_get`).
+
+---
+
+## flex-pull-trade-coverage
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+after today's Activity statement is applied, on a historical Trade_History
+duplicate.** Peak: 2026-09-22 11:35Z, page `e1297eea…`.
+
+- **Mechanism:** newest-first applied the 2026-09-21 Equity_Summary
+  (`perf_twr` wrote, cash exit 0). `Trade_History.20260904` was already
+  an applied claim. `delivery_rows_present` required every Flex tradeID
+  in `journal.payload.ib_exec_id`. 106 of 127 matched. The other 21 were
+  absent because rehydrate's individual-fill path books nothing when
+  those fills already match the contract-day quantity and notional, and
+  the claim was still marked applied. `ingest_xml` returned
+  `coverage_unverified`, the puller exited 1, and older files then hit
+  IBKR kex RST. `Type=oneshot` has no `Restart=`, so `NRestarts=0`.
+  Span was about 3 min, not `TimeoutStartSec`. `:8321/health/lite` stayed up.
+- **Detection:** journal `ingest_failed:{… 'outcome': 'coverage_unverified',
+  'classified_as': 'trades' …}` then historical `sftp_get_failed` /
+  `kex_exchange_identification`. `systemctl show` → `exit-code` / `0`.
+- **Discriminating check:** `classified_as=trades` and
+  `outcome=coverage_unverified` on an applied duplicate whose missing
+  Flex tradeIDs are covered by individual IB fills (this case).
+  `twr_status=degraded` is `flex-pull-twr-degraded-exit`.
+  `Result=timeout` is `flex-pull-ingest-timeout`. An uncovered exec, or
+  a quantity or notional disagreement, stays unverified and is operator
+  reconciliation, not this fix. If `/health/lite` is down too → API, stand down.
+- **Remediation (code):** after the bounded journal walk exhausts, pending
+  Flex executions are covered when individual-fill reconciliation returns
+  no uncovered executions and no disagreements. Disagreements and truly
+  missing execs still fail the oneshot. Do not replay the delivery. Do not
+  restart-flap; the 08:30 ET timer retries. After deploy,
+  `systemctl reset-failed radon-flex-pull.service` if that retry has not
+  yet fired.
+- **Regression:**
+  `test_rel226_delivery_coverage.py::test_applied_trade_duplicate_covered_by_individual_fills_is_confirmed`,
+  `test_rel226_delivery_coverage.py::test_trade_duplicate_disagreement_stays_unverified`,
+  `test_rel226_delivery_coverage.py::test_trade_duplicate_uncovered_day_stays_unverified`.
+- **Code:** `scripts/flex_delivery_ingest.py` (`delivery_rows_present`).
 
 ---
 

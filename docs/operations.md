@@ -175,7 +175,10 @@ than the working tree, and refuses to publish `mcp.env` through a
 non-regular destination (writes to a temp file, then atomic rename). The
 nightly-loop wrappers refuse symlinks in their privileged file operations
 (log dirs/files, private state) and provision the 2FA lease directory
-through the fd-based `O_NOFOLLOW` helper. Contracts:
+through the fd-based `O_NOFOLLOW` helper. The security and security-deepsec
+loops' `publish_private_report()` also refuses a symlink at the phase report
+path before reading it and at the pinned-GitHub-known-hosts scratch path
+before writing it (2026-09-22). Contracts:
 `cloud/tests/test_setup_vps_privileged_paths.py`,
 `scripts/tests/test_wrapper_symlink_refusal.py`.
 
@@ -591,12 +594,9 @@ Staleness windows live in `web/lib/serviceHealthWindows.ts`. Cycle-driven writer
 
 ## Legacy Flex aggregate gross coverage
 
-`scripts/rebuild_flex_gross_breakdown.py` stamps `gross_fill_breakdown` on legacy `+`-joined / `CLOSED` journal rows from saved Flex trade statements (execution level). It never calls the Flex Web Service. A row is stamped only when every tradeID part appears exactly once (after superseded corrections are dropped), no other aggregate claims it, the contract matches and the executions reproduce the row's recorded totals. Everything else is refused with a reason; rows with no part in the files are reported as out of statement period. Dry run by default; `--apply` writes only that field in one transaction, guarded on the unchanged payload, then re-reads every stamped row.
-
-```bash
-python -m scripts.rebuild_flex_gross_breakdown --xml path/to/trades.xml           # dry run
-python -m scripts.rebuild_flex_gross_breakdown --xml path/to/trades.xml --apply   # operator only
-```
+For operator-only rebuilding from saved execution-level statements, follow the
+[Flex recovery procedure](cloud-services.md#legacy-flex-aggregate-cleanup),
+including backup, review, stop conditions and post-commit recovery.
 
 ## Deployment
 

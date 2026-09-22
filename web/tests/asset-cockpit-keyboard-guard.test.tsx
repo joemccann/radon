@@ -106,6 +106,16 @@ describe("AssetCockpit — single-key deck shortcut keyboard guard", () => {
     expect(onDeckChange).not.toHaveBeenCalled();
   });
 
+  it("does not intercept the removed colon shortcut", () => {
+    const { onDeckChange } = renderCockpit();
+    const event = new KeyboardEvent("keydown", { key: ":", bubbles: true, cancelable: true });
+
+    document.body.dispatchEvent(event);
+
+    expect(onDeckChange).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
   it("DOES open the matching deck when the same key is pressed with no input focused", () => {
     const { onDeckChange } = renderCockpit();
 

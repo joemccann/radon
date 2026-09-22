@@ -383,6 +383,10 @@ publish_private_report() {
   REPORT_URL=""
   local src="$PRIVATE_SCRATCH/latest-report-${PHASE:-}.md" day rel dst ssh_cmd
   [[ -n "${PHASE:-}" && -f "$src" && -f "$REPORTS_KEY" ]] || return 0
+  # $PRIVATE_SCRATCH is agent-writable, so both the report this reads and the
+  # host-key pin this writes could be a planted symlink. Refuse rather than
+  # follow before either touches the path.
+  refuse_symlink "$src" || return 0
   # Only a report written during THIS phase; a stale one would be re-linked.
   [[ -n "${PHASE_START_MARK:-}" && "$src" -nt "$PHASE_START_MARK" ]] || return 0
   day="${STAMP:0:4}-${STAMP:4:2}-${STAMP:6:2}"
@@ -390,6 +394,7 @@ publish_private_report() {
   # Pin GitHub's published ed25519 host key (docs.github.com "GitHub's SSH
   # key fingerprints") instead of trusting whatever answers first contact.
   local pinned_hosts="$PRIVATE_SCRATCH/.github-known-hosts"
+  refuse_symlink "$pinned_hosts" || return 0
   printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' >"$pinned_hosts"
   ssh_cmd="ssh -i $REPORTS_KEY -o IdentitiesOnly=yes -o UserKnownHostsFile=$pinned_hosts -o StrictHostKeyChecking=yes -o ConnectTimeout=20"
   if [[ ! -d "$REPORTS_DIR/.git" ]]; then
@@ -968,6 +973,18 @@ refuse_billing_reroute_files() {
       exit 2
     fi
   done
+  # `--exclude=.deepsec/` preserves the WHOLE tree recursively, not just its
+  # top level, so a key file at a nested path (.deepsec/<subdir>/.env.local)
+  # survives every git clean unchecked by the flat glob above. Walk the tree.
+  local nested_key_file
+  while IFS= read -r nested_key_file; do
+    [[ -f "$nested_key_file" ]] || continue
+    if grep -qE "$BILLING_REROUTE_KEY_ASSIGN" "$nested_key_file" || grep -qiE "$BILLING_REROUTE_FLAG_ASSIGN" "$nested_key_file"; then
+      echo "REFUSING: $nested_key_file holds billing-reroute credentials; this loop bills the claude.ai subscription only, remove the key line" >&2
+      report "REFUSED" "$nested_key_file holds billing-reroute credentials; the agent would bill metered API usage instead of the claude.ai subscription, remove the key line" || true
+      exit 2
+    fi
+  done < <(find .deepsec -mindepth 2 -type f -name ".env*" 2>/dev/null || true)
 
   # web/.env is provisioned into the Radon-credential clones for the Next dev
   # server and pytest's load_dotenv, and the product copy carries

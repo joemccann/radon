@@ -127,7 +127,8 @@ describe("chain-first instrument context", () => {
     // Native disclosure visibility is browser-tested; jsdom does not implement
     // the default summary click action, so expose it explicitly for callbacks.
     disclosure.open = true;
-    for (const [name, key] of [["Book & trade", null], ["Ratings", "r"], ["Seasonality", "s"], ["Company", "i"], ["13F holdings", "h"], ["Filings", "f"], ["Commands", ":"]] as const) {
+    expect(within(disclosure).queryByRole("button", { name: "Commands" })).toBeNull();
+    for (const [name, key] of [["Book & trade", null], ["Ratings", "r"], ["Seasonality", "s"], ["Company", "i"], ["13F holdings", "h"], ["Filings", "f"]] as const) {
       disclosure.open = true;
       fireEvent.click(within(disclosure).getByRole("button", { name, exact: true }));
       expect(onDeckChange).toHaveBeenLastCalledWith(key);
@@ -146,7 +147,7 @@ describe("chain-first instrument context", () => {
 
   it.each([
     ["r", "Ratings"], ["s", "Seasonality"], ["i", "Company"],
-    ["h", "13F holdings"], ["f", "Filings"], [":", "Commands"],
+    ["h", "13F holdings"], ["f", "Filings"],
   ] as const)("reflects the selected secondary view %s in the disclosure", (activeDeck, label) => {
     sidebar({ activeDeck });
     const nav = screen.getByRole("navigation", { name: "Instrument views" });

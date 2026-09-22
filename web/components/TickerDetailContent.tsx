@@ -302,9 +302,8 @@ export default function TickerDetailContent({
   // forms ("chain"/"position"/...), which TickerWorkspace's isDeckKey rejected,
   // so every glyph click resolved to setDeck(null) and the deck never opened.
   //
-  // `:` (Cmd) and `o` (Order ticket, mobile) are the AssetCockpit decks NOT in
-  // VALID_DECKS — they are not URL-addressable, so they live in local component
-  // state. Every other key (c/p/n/r/s/i) flows through the URL via onTabChange.
+  // `o` (Order ticket, mobile) is not URL-addressable, so it lives in local
+  // component state. Every other key (c/p/n/r/s/i) flows through the URL via onTabChange.
   const [localDeck, setLocalDeck] = useState<DeckKey | null>(null);
   const { isMobile, hasMounted } = useViewport();
   useEffect(() => {
@@ -316,9 +315,9 @@ export default function TickerDetailContent({
   const activeDeck: DeckKey | null = urlDeck ?? localDeck;
 
   const onDeckChange = (deck: DeckKey | null) => {
-    // Local-only decks have no URL form: drive them from local state and clear
+    // The mobile order ticket has no URL form: drive it from local state and clear
     // any URL deck so the two can't both be "open".
-    if (deck === ":" || deck === "o") {
+    if (deck === "o") {
       if (urlDeck) onTabChange("book");
       setLocalDeck(deck);
       return;

@@ -1269,11 +1269,14 @@ class TestMaRatioScanBudget:
 class TestEquiblesAtsScanBudget:
     """Weekly Tue 09:15 UTC Equibles ATS venue-share walk. TimeoutStartSec=900
     killed the 2026-09-01 run (Result=timeout, NRestarts=0, CPU 734ms) while
-    Equibles HTTPS tarpitted the Session. The process now self-limits at
-    SWEEP_BUDGET_S=780; this TimeoutStartSec must cover that budget plus one
-    in-flight TICKER_FETCH_BUDGET_S=90 and still end long before the next
-    calendar fire (7d). Nesting is pinned in
-    test_equibles_ats_venue_share.py::TestSweepBudget."""
+    Equibles HTTPS tarpitted the Session. The process now self-limits the
+    walk at SWEEP_BUDGET_S=780 and the following Turso persist at
+    PERSIST_BUDGET_S (hrana, not sync libsql: 2026-09-22 the sweep budget
+    fired and the GIL-holding upsert was still running at SIGTERM). This
+    TimeoutStartSec must cover that sweep plus one in-flight
+    TICKER_FETCH_BUDGET_S=90 and still end long before the next calendar
+    fire (7d). Nesting is pinned in
+    test_equibles_ats_venue_share.py::TestSweepBudget and TestPersistBudget."""
 
     def test_service_is_oneshot_with_start_timeout(self, unit):
         svc = unit("radon-equibles-ats.service")["Service"]

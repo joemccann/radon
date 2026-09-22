@@ -1,3 +1,16 @@
+# Task: After-hours option last is last trade or last bid/offer, not previous close
+
+## Dependency graph
+
+- T1 depends_on: [] - Adversarial tests: META 665P CLOSE 26.70 vs print 8.10
+- T2 depends_on: [T1] - Retain session last in tick handler, relay cache, sync history, UI
+- T3 depends_on: [T2] - Focused green; draft PR; hold merge
+
+## Checklist
+
+- [x] T1 Tests
+- [x] T2 Implementation
+- [ ] T3 Draft PR; hold merge
 # Task: Operator page on the app container
 
 The API image has no systemctl, so /admin marked every app unit Unknown and said the browser was not on the VPS.
@@ -8059,3 +8072,23 @@ Review: plan PR #576 was design only. This implement PR adds the host run-server
 - [ ] T5 depends_on: [T4] Persist complete dispositions, acceptance and operator actions on issue #81.
 Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
 Review: pending. P2 acceptance remains in the authoritative checkpoint, outside reduced scope.
+
+## Documentation remediate 2026-09-22 (reduced P0/P1)
+- [x] T1 depends_on: [] Read complete issue #202 checkpoint and reverify DOC-121/122 against origin/main.
+- [x] T2 depends_on: [T1] Reproduce DOC-122, consolidate gross rebuild recovery in existing Flex owner, extend ownership and safety contract.
+- [x] T3 depends_on: [T2] Run focused and full gates, compare failures on clean main, review substantive diff.
+- [x] T4 depends_on: [T3] Prepare complete finding checkpoint and formatter-generated publication handoff; publication receipts belong on issue #202.
+Review: DOC-122 red/green demonstrated; 108 docs/path and 14 isolated rebuild tests pass. Full Python: 14827 passed, 31 failed, 2 skipped. Cloud: 2169 passed, 6 failed, 6 skipped initially; pinned-environment failure rerun 2 passed/4 failed. All remaining 31 Python and 4 cloud failures reproduce on clean 5bb91597, zero failure delta. Full Vitest: 9993 passed. Changed links/anchors (4), owners JSON, offline help, diff whitespace and secret scan pass. DOC-121 remains operator-only; DOC-110/120/123 retain their complete acceptance in issue #202 outside reduced scope. No live mutation or runtime behavior change. CI delivery belongs to the separate deliver phase.
+
+## 2026-09-22 Remove Command Palette
+Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
+- [x] T1 depends_on: [] Isolate latest main, inspect instructions and map palette dependencies.
+- [x] T2 depends_on: [T1] Remove global palette, trigger, hotkey, styles and obsolete tests; preserve instrument search.
+- [x] T3 depends_on: [T1] Remove instrument Commands deck and shortcut; update cockpit regressions.
+- [x] T4 depends_on: [T2,T3] Review integration and browser regressions; publish PR.
+- [ ] T5 depends_on: [T4] Verify exact-head GitHub checks and screenshots, send Pushover receipt.
+Validation: no local test suites. GitHub owns unit, build and browser checks. Preserve unrelated workspace edits in original checkout.
+
+Review: removed global dialog/trigger/recent-history storage and instrument Commands deck/colon handler; retained direct instrument search and Cmd/Ctrl+K focus. Unit and curated browser regressions cover search navigation, remaining decks, Escape and responsive absence. No local test suites. GitHub checks and visual artifacts pending.
+
+Review update: PR #630 published; independent review preserved the shared asset empty-state style while deleting palette-specific styles. TypeScript and ESLint passed. Exact-head GitHub verification pending.

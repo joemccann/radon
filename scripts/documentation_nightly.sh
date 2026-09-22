@@ -873,6 +873,18 @@ refuse_billing_reroute_files() {
       exit 2
     fi
   done
+  # `--exclude=.deepsec/` preserves the WHOLE tree recursively, not just its
+  # top level, so a key file at a nested path (.deepsec/<subdir>/.env.local)
+  # survives every git clean unchecked by the flat glob above. Walk the tree.
+  local nested_key_file
+  while IFS= read -r nested_key_file; do
+    [[ -f "$nested_key_file" ]] || continue
+    if grep -qE "$BILLING_REROUTE_KEY_ASSIGN" "$nested_key_file" || grep -qiE "$BILLING_REROUTE_FLAG_ASSIGN" "$nested_key_file"; then
+      echo "REFUSING: $nested_key_file holds billing-reroute credentials; this loop bills the claude.ai subscription only, remove the key line" >&2
+      report "REFUSED" "$nested_key_file holds billing-reroute credentials; the agent would bill metered API usage instead of the claude.ai subscription, remove the key line" || true
+      exit 2
+    fi
+  done < <(find .deepsec -mindepth 2 -type f -name ".env*" 2>/dev/null || true)
 
   # web/.env is provisioned into the Radon-credential clones for the Next dev
   # server and pytest's load_dotenv, and the product copy carries
