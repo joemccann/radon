@@ -7,6 +7,7 @@ const LABELS: Record<string, string> = {
   NO_CANDIDATES: "Nothing selected",
   DUPLICATE_OF_PUBLISHED: "Duplicate of a published document",
   SERIES_DENYLIST: "Series is on the denylist",
+  SINGLE_STOCK_NOT_IN_BOOK: "Single-name equity research outside the watchlist and portfolio",
   DOC_TYPE_FX_PAIR_NOTE: "Document type: FX pair note",
   DOC_TYPE_CALENDAR: "Document type: calendar",
 };
