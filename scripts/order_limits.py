@@ -35,6 +35,7 @@ except ImportError:  # imported as scripts.order_limits from the repo root
 _OPTION_MULTIPLIER = 100
 _MAX_COMBO_LEGS = 8
 _MAX_COMBO_RATIO = 100
+_COMBO_ACTIONS = frozenset({"BUY", "SELL"})
 
 
 def max_order_qty() -> int:
@@ -298,6 +299,11 @@ def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
                 ),
             }
 
+        if not _is_known_action(params.get("action")) or not all(
+            isinstance(leg, dict) and _is_known_action(leg.get("action")) for leg in legs
+        ):
+            return {"code": "ORDER_COMBO_ACTION", "message": "combo actions must be BUY or SELL — refused"}
+
         # R-087: combo_max_loss returns None — i.e. NO loss check at all —
         # when any option leg lacks a positive strike, and that hole was the
         # sole combo risk gate. Refuse instead of transmitting unbounded.
@@ -344,6 +350,16 @@ def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
     return None
 
 
+def _is_known_action(action: Any) -> bool:
+    """False for a supplied action other than BUY/SELL. The loss math reads
+    anything not starting with SELL as long while the placer forwards the raw
+    string, so an unknown action would be priced as the wrong side. Absent
+    stays allowed: the exit-order service passes position legs with none."""
+    if action is None or action == "":
+        return True
+    return isinstance(action, str) and action.strip().upper() in _COMBO_ACTIONS
+
+
 def _legs_are_priceable(legs: Any) -> bool:
     """True when `_combo_risk_per_unit` can price every leg.
 
@@ -355,7 +371,7 @@ def _legs_are_priceable(legs: Any) -> bool:
     if not isinstance(legs, list) or not 2 <= len(legs) <= _MAX_COMBO_LEGS:
         return False
     for leg in legs:
-        if not isinstance(leg, dict):
+        if not isinstance(leg, dict) or not _is_known_action(leg.get("action")):
             return False
         if _is_stk_leg(leg):
             continue
