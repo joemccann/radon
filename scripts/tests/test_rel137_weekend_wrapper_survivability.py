@@ -354,8 +354,10 @@ class TestTheCapIsEnforceable:
 class TestContinuationRegroundIsGuarded:
     def test_the_reground_is_wrapped_and_clears_a_stale_index_lock(self):
         body = _uncommented(RELIABILITY)
-        assert "rm -f .git/index.lock" in body, (
-            "the cap SIGTERMs claude mid-commit, leaving .git/index.lock; the "
+        # Split gitdirs: the host checkout locks the HOST gitdir's index; the
+        # agent gitdir's index.lock is dropped by sanitize_agent_gitdir.
+        assert 'rm -f "$HOST_GITDIR/index.lock"' in body, (
+            "the cap SIGTERMs claude mid-commit, leaving index.lock; the "
             "next round's checkout then fails"
         )
         # Everything after `trap - ERR` runs with errexit and no ERR trap, so a

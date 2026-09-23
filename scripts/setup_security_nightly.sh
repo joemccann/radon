@@ -117,6 +117,11 @@ echo "[2/4] dedicated runner clone at $WEEKEND_REPO"
 mkdir -p "$WEEKEND_ROOT"
 mkdir -p "$(dirname "$HOST_GITDIR")"
 chmod 700 "$(dirname "$HOST_GITDIR")" 2>/dev/null || true
+# Split gitdirs: the rungs' own gitdirs live under here, outside the host
+# gitdir. Each wrapper rebuilds <loop>.git from host state before every round.
+AGENT_GITDIR_ROOT="$WEEKEND_ROOT/.gitdirs-agent"
+mkdir -p "$AGENT_GITDIR_ROOT"
+chmod 700 "$AGENT_GITDIR_ROOT"
 if [[ ! -d "$HOST_GITDIR" && ! -e "$WEEKEND_REPO/.git" ]]; then
   git clone --separate-git-dir="$HOST_GITDIR" "$ORIGIN_URL" "$WEEKEND_REPO"
 elif [[ -d "$WEEKEND_REPO/.git" && ! -d "$HOST_GITDIR" ]]; then

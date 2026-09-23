@@ -182,12 +182,17 @@ def test_wrapper_host_git_uses_gitdirs_not_clone(name, tmp_path):
     lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
     assert lines, "no git invocation recorded"
     host_dir = str(tmp_path / ".gitdirs" / f"{name}.git")
+    agent_dir = str(tmp_path / ".gitdirs-agent" / f"{name}.git")
     clone_git = str(repo / ".git")
     saw_host = False
     for line in lines:
         if "--git-dir=" in line or line.startswith("--git-dir"):
+            # agent_git_ro: a throwaway host-written gitdir, never the agent's.
+            if "/radon-agent-ro." in line.split()[0]:
+                continue
             saw_host = True
             assert host_dir in line, line
+            assert agent_dir not in line.split()[0], line
             assert clone_git not in line.split(), line
     assert saw_host, lines
 

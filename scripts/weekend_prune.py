@@ -109,6 +109,8 @@ def _protected_part(name: str) -> Optional[str]:
         return "protected: private scratch state"
     if lowered in (".gitdirs", "gitdirs"):
         return "protected: host gitdir (runner clone objects live outside the work tree)"
+    if lowered in (".gitdirs-agent", "gitdirs-agent"):
+        return "protected: agent gitdir (a rung's branches and commits)"
     return None
 
 
@@ -463,6 +465,13 @@ def _worktrees(root: Path, locked: Dict[str, int], now: float) -> Tuple[List[Tup
         if not clone.is_dir() or clone.is_symlink() or not _is_loop_clone(clone):
             continue
         if os.path.realpath(clone) in locked:
+            continue
+        # A gitfile clone's gitdir is the agent's own (split gitdirs), and
+        # agent-writable config must never reach host git. Its worktrees are
+        # registered there too, so they are left alone, visibly.
+        if (clone / ".git").is_symlink() or not (clone / ".git").is_dir():
+            refused.append({"path": os.path.realpath(clone),
+                            "reason": "refused: worktrees live in the agent gitdir; host git never opens it"})
             continue
         listing = _git(clone, "worktree", "list", "--porcelain")
         if listing is None:
