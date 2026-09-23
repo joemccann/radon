@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-22T09:00:10Z",
-  "node_count": 3545,
-  "edge_count": 7335,
+  "generated_at": "2026-09-23T09:00:10Z",
+  "node_count": 3559,
+  "edge_count": 7360,
   "areas": {
-    "web": 2065,
+    "web": 2070,
     "site": 155,
-    "scripts": 1204,
+    "scripts": 1213,
     "cloud": 74,
     "lib": 28,
     "tests": 17,
@@ -20,7 +20,7 @@
     {
       "id": "web/components",
       "area": "web",
-      "count": 262
+      "count": 261
     },
     {
       "id": "web/e2e",
@@ -35,7 +35,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 408
+      "count": 409
     },
     {
       "id": "web/public",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 958
+      "count": 963
     },
     {
       "id": "site/app",
@@ -85,12 +85,12 @@
     {
       "id": "scripts",
       "area": "scripts",
-      "count": 168
+      "count": 169
     },
     {
       "id": "scripts/ai_cycle",
       "area": "scripts",
-      "count": 12
+      "count": 13
     },
     {
       "id": "scripts/alerts",
@@ -185,7 +185,7 @@
     {
       "id": "scripts/research",
       "area": "scripts",
-      "count": 21
+      "count": 22
     },
     {
       "id": "scripts/security",
@@ -200,7 +200,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 608
+      "count": 614
     },
     {
       "id": "scripts/trade_blotter",
@@ -264,7 +264,7 @@
     {
       "id": "web/lib/pricesProtocol.ts",
       "area": "web",
-      "in": 197,
+      "in": 198,
       "out": 0,
       "test": false
     },
@@ -300,13 +300,13 @@
       "id": "web/components/WorkspaceShell.tsx",
       "area": "web",
       "in": 54,
-      "out": 43,
+      "out": 42,
       "test": false
     },
     {
       "id": "web/lib/radonApi.ts",
       "area": "web",
-      "in": 94,
+      "in": 95,
       "out": 0,
       "test": false
     },
@@ -346,17 +346,17 @@
       "test": false
     },
     {
+      "id": "web/lib/positionUtils.ts",
+      "area": "web",
+      "in": 59,
+      "out": 2,
+      "test": false
+    },
+    {
       "id": "scripts/api/server.py",
       "area": "scripts",
       "in": 45,
       "out": 16,
-      "test": false
-    },
-    {
-      "id": "web/lib/positionUtils.ts",
-      "area": "web",
-      "in": 58,
-      "out": 2,
       "test": false
     },
     {
@@ -367,17 +367,17 @@
       "test": false
     },
     {
+      "id": "web/lib/useSyncHook.ts",
+      "area": "web",
+      "in": 51,
+      "out": 6,
+      "test": false
+    },
+    {
       "id": "web/components/RegimePanel.tsx",
       "area": "web",
       "in": 3,
       "out": 54,
-      "test": false
-    },
-    {
-      "id": "web/lib/useSyncHook.ts",
-      "area": "web",
-      "in": 50,
-      "out": 5,
       "test": false
     },
     {
@@ -432,7 +432,7 @@
     {
       "id": "scripts/db/hrana_http.py",
       "area": "scripts",
-      "in": 42,
+      "in": 43,
       "out": 2,
       "test": false
     },
