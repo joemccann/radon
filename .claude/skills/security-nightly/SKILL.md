@@ -62,8 +62,9 @@ the security completion marker.
 
 The wrapper (`scripts/security_nightly.sh`) and DeepSec share
 `scripts/security_claude_ladder.sh`. At run time the helper lists the Mini
-Claude Code catalog (`claude models`, subscription CLI only), skips the
-newest generation, and runs the prior / second-newest first, then deeper
+Claude Code catalog (`claude models`, subscription CLI only), ranks by
+capability tier (Fable > Opus > Sonnet > Haiku, never by print order), skips
+the most powerful tier, and runs the second most powerful first, then deeper
 Claude fallbacks. Every Claude launch uses `--effort medium` so Mini
 `~/.claude/settings.json` cannot win with low effort or a fable default.
 `RADON_WEEKEND_MODEL_LADDER` / `RADON_WEEKEND_PROVIDER_LADDER` skip

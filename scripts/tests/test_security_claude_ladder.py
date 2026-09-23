@@ -39,6 +39,16 @@ claude-sonnet-5
 """
 
 
+# Real `claude models` output on the Mini, 2026-09-22. It is not a catalog
+# subcommand: the session model answers in prose and lists ITSELF first. Print
+# order said Opus 5.5 was "newest", so skip-by-order made Fable the primary.
+MINI_20260922_PROSE = """
+**Done**
+- This session runs on Opus 5.5 (1M context), ID `claude-opus-5-5[1m]`
+- Other models: Fable 5.1 `claude-fable-5-1`, Sonnet 5 `claude-sonnet-5`, Haiku 4.5 `claude-haiku-4-5-20251001`
+"""
+
+
 def _load():
     spec = importlib.util.spec_from_file_location("security_claude_ladder", HELPER_PY)
     mod = importlib.util.module_from_spec(spec)
@@ -75,6 +85,18 @@ class TestCatalogParsing:
         assert ladder.same_family("claude-fable-5", "claude-fable-5-1")
         assert ladder.same_family("claude-opus-5[1m]", "claude-opus-5")
         assert not ladder.same_family("claude-opus-5", "claude-opus-4")
+
+    def test_strongest_tier_is_skipped_regardless_of_print_order(self, ladder):
+        got = ladder.ladder_from_text(MINI_20260922_PROSE)
+        assert got == ["claude-opus-5-5", "claude-sonnet-5", "claude-haiku-4-5"]
+
+    def test_newest_version_within_a_tier_wins(self, ladder):
+        got = ladder.ladder_from_text("claude-sonnet-5\nclaude-opus-5\nclaude-opus-5-5\nclaude-fable-5-1\n")
+        assert got == ["claude-opus-5-5", "claude-sonnet-5"]
+
+    def test_unknown_family_ranks_above_fable_and_is_skipped(self, ladder):
+        got = ladder.ladder_from_text("claude-opus-5\nclaude-zenith-6\nclaude-fable-5-1\n")
+        assert got == ["claude-fable-5-1", "claude-opus-5"]
 
     def test_one_generation_is_not_a_ladder(self, ladder):
         assert ladder.ladder_from_text("claude-opus-5\nclaude-opus-5[1m]\n") == []
