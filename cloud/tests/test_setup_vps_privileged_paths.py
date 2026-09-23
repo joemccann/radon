@@ -684,7 +684,7 @@ class TestRemoteAncestryProvenance:
     ) -> None:
         other = tmp_path / "other"
         subprocess.run(
-            ["git", "clone", "-q", str(harness["remote"]), str(other)],
+            ["git", "clone", "-q", "-b", "main", str(harness["remote"]), str(other)],
             check=True, capture_output=True,
         )
         (other / "later").write_text("pushed elsewhere\n")
