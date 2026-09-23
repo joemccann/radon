@@ -77,6 +77,14 @@ describe("AI Industry value-chain presentation", () => {
     fireEvent.change(screen.getByRole("searchbox", { name: "Find a source" }), { target: { value: "no matching publisher" } });
     expect(screen.getByText("No sources match your search.")).toBeTruthy();
   });
+  it("renders Epoch AI attribution on the structural compute measure", () => {
+    const s1 = { ...aiFixture.indicators[0], id: "S1", title: "Structural compute context", pane: "delivery" as const, source_ids: ["epoch"] };
+    const epoch = { ...aiFixture.sources[0], id: "epoch", name: "Epoch AI", license: "CC BY 4.0" };
+    render(<AiInfrastructureView data={{ ...aiFixture, sources: [...aiFixture.sources, epoch], indicators: [...aiFixture.indicators, s1] }} error={null} loading={false} refresh={() => {}} />);
+    const card = screen.getByTestId("ai-indicator-S1");
+    expect(card.textContent).toContain("Source: Epoch AI");
+    expect(card.textContent).toContain("Structural compute context");
+  });
   it("separates capability from adoption and retains registry additions", () => {
     const capability = { ...aiFixture.indicators[0], id: "D6", title: "Model benchmark" };
     const future = { ...aiFixture.indicators[0], id: "D99", title: "New publisher metric" };

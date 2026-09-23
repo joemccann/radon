@@ -38,6 +38,7 @@ SOURCES = (
     "ramp",
     "open-design-arena",
     "liquidcompute",
+    "epoch",
     "issuer-disclosures",
     "lambda",
 )
