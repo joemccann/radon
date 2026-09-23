@@ -93,6 +93,11 @@ echo "[2/4] dedicated runner clone at $WEEKEND_REPO"
 mkdir -p "$WEEKEND_ROOT"
 mkdir -p "$(dirname "$HOST_GITDIR")"
 chmod 700 "$(dirname "$HOST_GITDIR")" 2>/dev/null || true
+# Split gitdirs: the rungs' own gitdirs live under here, outside the host
+# gitdir. Each wrapper rebuilds <loop>.git from host state before every round.
+AGENT_GITDIR_ROOT="$WEEKEND_ROOT/.gitdirs-agent"
+mkdir -p "$AGENT_GITDIR_ROOT"
+chmod 700 "$AGENT_GITDIR_ROOT"
 if [[ ! -d "$HOST_GITDIR" && ! -e "$WEEKEND_REPO/.git" ]]; then
   git clone --separate-git-dir="$HOST_GITDIR" "$ORIGIN_URL" "$WEEKEND_REPO"
 elif [[ -d "$WEEKEND_REPO/.git" && ! -d "$HOST_GITDIR" ]]; then
@@ -207,12 +212,48 @@ provision_env_file() {
   install -m 600 "$src" "$dst"
   echo "  provisioned $rel from $SRC_REPO (0600)"
 }
+
+# Least privilege: the operator's web/.env carries the PRODUCTION read-write
+# TURSO_AUTH_TOKEN and production UW_TOKEN; the testing clone gets neither.
+# Each key in the clone copy is replaced by its value from the operator-owned
+# SCOPED_ENV (outside every clone: a read-only Turso token and a separate UW
+# key), or removed when that file or key is absent/empty. Runs on every setup,
+# including after the "kept (clone copy is newer)" path. The wrapper never
+# re-copies web/.env, so nothing restores the production values between
+# setups. Never echo a value.
+SCOPED_ENV="$WEEKEND_ROOT/.env.testing-scoped"
+SCOPED_KEYS="TURSO_AUTH_TOKEN UW_TOKEN"
+scope_clone_credentials() {
+  local dst="$WEEKEND_REPO/web/.env" key line val tmp
+  [[ -f "$dst" ]] || return 0
+  tmp="$dst.scoped.$$"
+  rm -f -- "$tmp"
+  ( umask 077; grep -vE "^[[:space:]]*(export[[:space:]]+)?(${SCOPED_KEYS// /|})[[:space:]]*=" "$dst" > "$tmp" || true )
+  for key in $SCOPED_KEYS; do
+    line=""
+    if [[ -f "$SCOPED_ENV" ]]; then
+      line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" "$SCOPED_ENV" | tail -n 1 || true)"
+    fi
+    val="${line#*=}"
+    val="${val//[[:space:]\"\']/}"
+    if [[ -n "$line" && -n "$val" ]]; then
+      printf '%s\n' "$line" >> "$tmp"
+      echo "  scoped $key in web/.env from $SCOPED_ENV"
+    else
+      echo "  MISSING  scoped $key in $SCOPED_ENV (removed from the clone's web/.env)"
+    fi
+  done
+  cat "$tmp" > "$dst"
+  rm -f -- "$tmp"
+  chmod 600 "$dst"
+}
 if [[ "$SRC_REPO" == "$WEEKEND_REPO" ]]; then
   echo "  MISSING  env provisioning: run setup from your own checkout, not the runner clone"
 else
   for env_rel in web/.env; do
     provision_env_file "$env_rel"
   done
+  scope_clone_credentials
 fi
 
 if [[ ! -f "$WEEKEND_ENV" ]]; then

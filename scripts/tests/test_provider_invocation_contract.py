@@ -125,17 +125,24 @@ class TestTheAgentCanReachGit:
     2026-09-22 R02-A: a workspace-write grant on `$REPO/.git` let the agent
     plant exec-capable repo config that host fetch/checkout then honoured.
     The host gitdir is `$WEEKEND_ROOT/.gitdirs/<loop>.git`. Codex keeps
-    network and deliver/scratch roots; it does not get the gitdir.
+    network and deliver/scratch roots; it does not get the host gitdir.
+
+    2026-09-23 split gitdirs: without ANY writable gitdir the codex rung
+    could not branch, fetch or merge-tree, so four loops landed nothing.
+    It now writes its own `$WEEKEND_ROOT/.gitdirs-agent/<loop>.git`, which
+    host git never opens (test_weekend_split_gitdirs.py).
     """
 
-    def test_codex_cannot_write_host_or_clone_gitdir(self, loop):
+    def test_codex_writes_its_own_gitdir_never_the_host_or_clone_gitdir(self, loop):
         body = LOOPS[loop].read_text(encoding="utf-8")
         start = body.index("launch_round() {")
         fn = body[start : body.index("\n}", start)]
         assert "sandbox_workspace_write" in fn, fn
         roots = fn[fn.index("writable_roots=") : fn.index("]", fn.index("writable_roots=")) + 1]
         assert "$REPO/.git" not in roots, roots
-        assert ".gitdirs" not in roots, roots
+        assert "HOST_GITDIR" not in roots and ".gitdirs/" not in roots, roots
+        assert '\\"$AGENT_GITDIR\\"' in roots, roots
+        assert 'AGENT_GITDIR="$WEEKEND_ROOT/.gitdirs-agent/${LOOP_SLUG}.git"' in body
 
     def test_codex_can_write_the_deliver_record(self, loop):
         """It lives one level ABOVE the clone, outside the workspace.

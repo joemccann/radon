@@ -966,9 +966,75 @@ def test_run_newsfeed_mounts_host_playwright_browsers(tmp_path: Path) -> None:
     state_dir = tmp_path / "state"
     assert f"{state_dir / 'ms-playwright'}:/ms-playwright" in log, log
     assert "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright" in log
-    assert "--ipc host" in log
-    assert "PLAYWRIGHT_CHROMIUM_SANDBOX=0" in log
     assert f"{tmp_path / 'data' / 'newsfeed-scripts'}:/home/radon/radon/scripts/newsfeed:ro" in log, log
+
+
+def _newsfeed_run_args(tmp_path: Path, extra_env: dict[str, str] | None = None) -> list[str]:
+    result = _run(tmp_path, ["run", "radon-newsfeed.service"], extra_env=extra_env)
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    run_lines = [line for line in log.splitlines() if line.startswith("run ")]
+    assert len(run_lines) == 1, log
+    return run_lines[0].split()
+
+
+def test_run_newsfeed_does_not_join_the_host_ipc_namespace(tmp_path: Path) -> None:
+    """DS-2026-09-20-04: Chromium renders hostile third-party pages. Host IPC
+    put its shared memory and SysV/POSIX IPC in the host namespace."""
+    args = _newsfeed_run_args(tmp_path)
+    assert "--ipc" not in args
+    assert not any(arg.startswith("--ipc=") for arg in args)
+
+
+def test_run_newsfeed_sizes_its_own_dev_shm(tmp_path: Path) -> None:
+    """Without host IPC the container gets its own /dev/shm, which Docker and
+    Podman size at 64 MiB. Chromium crashes renderers on that, so size it."""
+    args = _newsfeed_run_args(tmp_path)
+    assert args[args.index("--shm-size") + 1] == "512m"
+
+
+def test_run_newsfeed_uses_the_vendored_chromium_seccomp_profile(tmp_path: Path) -> None:
+    args = _newsfeed_run_args(tmp_path)
+    profile = CLOUD / "config" / "seccomp" / "chromium.json"
+    opts = [args[i + 1] for i, arg in enumerate(args) if arg == "--security-opt"]
+    assert f"seccomp={profile}" in opts, opts
+    assert "no-new-privileges" in opts
+    assert "seccomp=unconfined" not in opts
+
+
+def test_run_newsfeed_production_profile_path_is_root_owned_control_plane() -> None:
+    text = RUNTIME.read_text(encoding="utf-8")
+    assert "CHROMIUM_SECCOMP_PROFILE=/etc/radon/seccomp/chromium.json" in text
+
+
+def test_run_newsfeed_refuses_to_start_without_the_seccomp_profile(tmp_path: Path) -> None:
+    result = _run(
+        tmp_path,
+        ["run", "radon-newsfeed.service"],
+        extra_env={"RADON_TEST_SECCOMP_PROFILE": str(tmp_path / "absent.json")},
+    )
+    assert result.returncode == 78, result.stderr
+    assert "seccomp profile" in result.stderr
+    log = result.docker_log.read_text(encoding="utf-8") if result.docker_log.exists() else ""  # type: ignore[attr-defined]
+    assert not [line for line in log.splitlines() if line.startswith("run ")]
+
+
+def test_run_newsfeed_no_longer_forces_the_chromium_sandbox_off(tmp_path: Path) -> None:
+    """The profile lets Chromium build its namespace sandbox, so the runtime
+    stops injecting PLAYWRIGHT_CHROMIUM_SANDBOX=0 (which meant --no-sandbox)."""
+    args = _newsfeed_run_args(tmp_path)
+    assert "PLAYWRIGHT_CHROMIUM_SANDBOX=0" not in args
+
+
+@pytest.mark.parametrize(
+    "unit", [u for u in APP_UNITS if u != "radon-newsfeed.service"]
+)
+def test_run_other_units_keep_the_engine_default_seccomp(tmp_path: Path, unit: str) -> None:
+    result = _run(tmp_path, ["run", unit])
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert "seccomp=" not in log
+    assert "--shm-size" not in log
 
 
 def test_run_newsfeed_source_overlay_is_read_only(tmp_path: Path) -> None:

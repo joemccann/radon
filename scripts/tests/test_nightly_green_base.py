@@ -187,6 +187,7 @@ def _run_ground_truth(tmp_path: Path, snippet: str) -> list[str]:
             "set -eo pipefail",
             "fetch_origin_with_retry() { :; }",
             f"resolve_green_main_sha() {{ echo {SENTINEL}; }}",
+            "align_agent_gitdir() { :; }",
             snippet,
             "ground_truth",
         ]

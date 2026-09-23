@@ -33,6 +33,10 @@ readonly CADDY_SYNC="${RADON_CADDY_SYNC:-/usr/bin/sync}"
 readonly SSHD_KEYS_ONLY_DROPIN="${RADON_SSHD_KEYS_ONLY_DROPIN:-/etc/ssh/sshd_config.d/10-radon-keys-only.conf}"
 # Root-only staging area for artifacts copied out of the radon-owned checkout.
 readonly STAGE_DIR="${RADON_SETUP_STAGE_DIR:-/root/.radon-stage}"
+# Provenance trust anchor: the main commit THIS URL reports, read by root.
+# Pinned here, never taken from the checkout's radon-writable remote config
+# or refs. The override exists for tests (root's own environment).
+readonly PROVENANCE_REMOTE_URL="${RADON_PROVENANCE_REMOTE_URL:-https://github.com/joemccann/radon.git}"
 # Docker documents this fingerprint for its apt signing key.
 readonly DOCKER_GPG_FINGERPRINT="9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
 # NodeSource nodesource-repo.gpg.key (NSolid <nsolid-gpg@nodesource.com>).
@@ -345,23 +349,57 @@ compose_body_is_valid() {
 }
 
 # Local HEAD is only as trustworthy as commit access to the checkout, so the
-# committed blob must also be reachable from the deploy remote. Fails closed
-# when the remote ref is missing (never fetched / offline): an unverifiable
-# body is a stop, not an install.
-require_remote_ancestry() {
-  local repo_root="$1" rel="$2" blob_sha="$3" label="$4"
-  local remote_ref="${RADON_PROVENANCE_REMOTE_REF:-origin/main}"
-  if ! git -C "$repo_root" rev-parse --verify --quiet "${remote_ref}^{commit}" >/dev/null 2>&1; then
-    log_error "${label} provenance failed: ${remote_ref} is unavailable (fetch it before provisioning)"
+# committed blob must also be reachable from the main commit the pinned
+# remote reports. The anchor SHA is read by root over the network, never from
+# the radon-writable checkout (origin/main, remote URL, config): radon owns
+# that git dir, so any local ref is radon's to move. Fails closed when the
+# remote is unreachable or its main commit is not in the local object store
+# (fetch before provisioning): an unverifiable body is a stop, not an install.
+PROVENANCE_ANCHOR_SHA=""
+resolve_provenance_anchor() {
+  [[ -n "$PROVENANCE_ANCHOR_SHA" ]] && return 0
+  local out sha
+  local -a bound=()
+  command -v timeout >/dev/null 2>&1 && bound=(timeout 30s)
+  # Protocol v1: an unauthenticated v2 ls-refs POST against the public repo
+  # answers 401 from the VPS (deploy-root-helper.sh, 2026-09-02).
+  if ! out="$(${bound[@]+"${bound[@]}"} git -c protocol.version=1 \
+      ls-remote --refs "$PROVENANCE_REMOTE_URL" refs/heads/main 2>/dev/null)"; then
+    log_error "Provenance failed: could not read main from ${PROVENANCE_REMOTE_URL}"
     return 1
   fi
-  if [[ "$(git -C "$repo_root" rev-parse --verify --quiet "${remote_ref}:${rel}" 2>/dev/null)" == "$blob_sha" ]]; then
+  sha="${out%%[[:space:]]*}"
+  if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+    log_error "Provenance failed: could not read main from ${PROVENANCE_REMOTE_URL}"
+    return 1
+  fi
+  PROVENANCE_ANCHOR_SHA="$sha"
+}
+
+# git over the radon-owned store with every radon-writable object/ancestry
+# rewrite ignored: replace refs, grafts and the commit-graph cache.
+provenance_git() {
+  local repo_root="$1"
+  shift
+  GIT_NO_REPLACE_OBJECTS=1 GIT_GRAFT_FILE=/dev/null \
+    git -C "$repo_root" -c core.commitGraph=false "$@"
+}
+
+require_remote_ancestry() {
+  local repo_root="$1" rel="$2" blob_sha="$3" label="$4"
+  resolve_provenance_anchor || return 1
+  local anchor="$PROVENANCE_ANCHOR_SHA"
+  if ! provenance_git "$repo_root" cat-file -e "${anchor}^{commit}" 2>/dev/null; then
+    log_error "${label} provenance failed: remote main commit ${anchor} is not in the local object store (fetch origin main before provisioning)"
+    return 1
+  fi
+  if [[ "$(provenance_git "$repo_root" rev-parse --verify --quiet "${anchor}:${rel}" 2>/dev/null)" == "$blob_sha" ]]; then
     return 0
   fi
-  if git -C "$repo_root" merge-base --is-ancestor HEAD "$remote_ref" 2>/dev/null; then
+  if provenance_git "$repo_root" merge-base --is-ancestor HEAD "$anchor" 2>/dev/null; then
     return 0
   fi
-  log_error "${label} provenance failed: ${rel} is not an ancestor of ${remote_ref}"
+  log_error "${label} provenance failed: ${rel} is not an ancestor of the remote main commit ${anchor}"
   return 1
 }
 
@@ -1246,7 +1284,8 @@ install_gateway_control() {
         return 1
       fi
     else
-      install -m 0600 -o radon -g radon /dev/null /home/radon/.radon-deploy.lock
+      # -T: a link raced in after the checks is replaced, never entered.
+      install -T -m 0600 -o radon -g radon /dev/null /home/radon/.radon-deploy.lock
     fi
   fi
   mv -f "$staged" "$target"
@@ -1305,6 +1344,20 @@ install_app_runtime() {
     return 1
   fi
   mv -f "$staged" "$target"
+
+  # The runtime refuses to start the newsfeed without its Chromium seccomp
+  # profile. Root's engine loads it, so it is root-owned, never the checkout.
+  local profile_source="${CLOUD_DIR}/config/seccomp/chromium.json"
+  local profile_target="${RADON_SECCOMP_TARGET:-/etc/radon/seccomp/chromium.json}"
+  install -d -m 0755 "$(dirname "$profile_target")"
+  staged="$(mktemp "${profile_target}.tmp.XXXXXX")"
+  if ! stage_from_checkout "$profile_source" "$staged" 0644 ${owner_args[@]+"${owner_args[@]}"} || \
+     ! python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1], encoding="utf-8")).get("defaultAction") != "SCMP_ACT_ERRNO")' "$staged"; then
+    rm -f "$staged"
+    log_error "Chromium seccomp profile failed provenance/validation"
+    return 1
+  fi
+  mv -f "$staged" "$profile_target"
 
   log_success "App runtime wrapper installed"
 }

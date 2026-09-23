@@ -59,7 +59,7 @@ def test_invalid_values(value):
 
 def test_store_vintages_and_unknown_publication():
     store = ObservationStore(":memory:")
-    assert len(build_snapshot(store)["indicators"]) == 18
+    assert len(build_snapshot(store)["indicators"]) == 19
     first = observation()
     store.append_observations([first, first])
     revised = {**first, "value": 120, "fetched_at": "2026-08-05T00:00:00Z", "published_at": "2026-08-02T00:00:00Z"}
@@ -127,16 +127,22 @@ def test_source_status_cloud_write_is_retry_idempotent(monkeypatch):
     assert calls[0][1][:2] == calls[0][1][2:]
 
 
+def _paged_payload(row_id):
+    row = observation()
+    row["series_id"] = f"s{row_id}"
+    row["value"] = row_id
+    return json.dumps(row)
+
+
 def test_snapshot_reads_cloud_history_in_safe_large_pages(monkeypatch):
     store = ObservationStore()
-    payload = json.dumps(observation())
     calls = []
 
     def query(sql, args):
         calls.append((sql, args))
         if len(calls) == 1:
-            return [(row_id, payload) for row_id in range(1, 501)]
-        return [(501, payload)]
+            return [(row_id, _paged_payload(row_id)) for row_id in range(1, 501)]
+        return [(501, _paged_payload(501))]
 
     monkeypatch.setattr(store, "_query", query)
     assert len(store.read_snapshot_observations("2026-09-08T00:00:00Z")) == 501
@@ -146,19 +152,80 @@ def test_snapshot_reads_cloud_history_in_safe_large_pages(monkeypatch):
 
 def test_snapshot_persist_reads_past_one_hundred_thousand_rows(monkeypatch):
     store = ObservationStore()
-    payload = json.dumps(observation())
     calls = []
 
     def query(sql, args):
         calls.append(args[0])
         if len(calls) <= 201:
             start = (len(calls) - 1) * 500 + 1
-            return [(row_id, payload) for row_id in range(start, start + 500)]
+            return [(row_id, _paged_payload(row_id)) for row_id in range(start, start + 500)]
         return []
 
     monkeypatch.setattr(store, "_query", query)
     assert len(store.read_snapshot_observations("2026-09-08T00:00:00Z")) == 100_500
     assert len(calls) == 202
+
+
+def test_snapshot_read_keeps_latest_vintage_past_the_retained_row_budget(monkeypatch):
+    """Append-only revisions must not fail the snapshot once stored rows pass the cap.
+
+    2026-09-23 radon-ai-cycle-backfill: 507455 observation rows, 99524 identities.
+    The reader raised 'AI snapshot history exceeds bounded read budget' on the
+    page after 500000 retained rows, before later winning vintages were read.
+    """
+    from scripts.ai_cycle import store as store_module
+    from scripts.ai_cycle.snapshot import latest_vintages
+
+    monkeypatch.setattr(store_module, "_SNAPSHOT_PAGE_SIZE", 2)
+    monkeypatch.setattr(store_module, "_SNAPSHOT_MAX_ROWS", 2)
+    store = ObservationStore()
+    older = {**observation(), "value": 1, "fetched_at": "2026-08-03T00:00:00Z", "raw_hash": "a" * 64}
+    removed = {
+        **observation(),
+        "series_id": "other_share",
+        "value": 9,
+        "fetched_at": "2026-08-03T00:00:00Z",
+        "raw_hash": "b" * 64,
+    }
+    winner = {**observation(), "value": 7, "fetched_at": "2026-08-05T00:00:00Z", "raw_hash": "c" * 64}
+    raw = [older, removed, winner]
+    calls = []
+
+    def query(sql, args):
+        calls.append(args[0])
+        assert "LIMIT 2" in sql
+        if args[0] == 0:
+            return [(1, json.dumps(older)), (2, json.dumps(removed))]
+        if args[0] == 2:
+            return [(3, json.dumps(winner))]
+        return []
+
+    monkeypatch.setattr(store, "_query", query)
+    got = store.read_snapshot_observations("2026-09-08T00:00:00Z")
+    assert {(row["series_id"], row["value"]) for row in got} == {("total_tokens", 7), ("other_share", 9)}
+    assert {(row["series_id"], row["value"]) for row in latest_vintages(got)} == {("total_tokens", 7)}
+    assert {(row["series_id"], row["value"]) for row in latest_vintages(raw)} == {("total_tokens", 7)}
+    assert calls == [0, 2]
+
+
+def test_snapshot_read_still_bounds_distinct_identities(monkeypatch):
+    from scripts.ai_cycle import store as store_module
+
+    monkeypatch.setattr(store_module, "_SNAPSHOT_PAGE_SIZE", 2)
+    monkeypatch.setattr(store_module, "_SNAPSHOT_MAX_ROWS", 2)
+    store = ObservationStore()
+    rows = []
+    for index in range(3):
+        rows.append({**observation(), "series_id": f"s{index}", "raw_hash": f"{index + 1:064x}"})
+
+    def query(sql, args):
+        if args[0] == 0:
+            return [(1, json.dumps(rows[0])), (2, json.dumps(rows[1]))]
+        return [(3, json.dumps(rows[2]))]
+
+    monkeypatch.setattr(store, "_query", query)
+    with pytest.raises(RuntimeError, match="AI snapshot history exceeds bounded read budget"):
+        store.read_snapshot_observations("2026-09-08T00:00:00Z")
 
 
 @pytest.mark.parametrize(

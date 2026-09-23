@@ -411,7 +411,7 @@ describe("GET /api/vixcor — route contract", () => {
     const { GET } = await import("../app/api/vixcor/route");
     const res = await GET();
     expect(res.headers.get("Cache-Control")).toBe(
-      "public, max-age=300, stale-while-revalidate=3600",
+      "private, max-age=300, stale-while-revalidate=3600",
     );
     expect(res.headers.get("X-Cache-Tags")).toBe("vixcor");
   });

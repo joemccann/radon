@@ -84,9 +84,11 @@ export function setCacheResponseHeaders(
   const staleDirective = staleWhileRevalidateSeconds && staleWhileRevalidateSeconds > 0
     ? `, stale-while-revalidate=${staleWhileRevalidateSeconds}`
     : "";
+  // `private`: every caller sits behind the auth gate, so only the requesting
+  // browser may store the body, never a shared cache in front of the app.
   response.headers.set(
     "Cache-Control",
-    `public, max-age=${Math.max(0, Math.trunc(maxAgeSeconds))}${staleDirective}`,
+    `private, max-age=${Math.max(0, Math.trunc(maxAgeSeconds))}${staleDirective}`,
   );
   response.headers.set("Vary", "Accept, Accept-Encoding");
   response.headers.set("X-Request-Id", requestId);

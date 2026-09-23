@@ -1780,13 +1780,15 @@ restart_services
 
 def _commit_checkout(cloud: Path) -> None:
     """stage_from_checkout only installs bytes committed at HEAD and reachable
-    from origin/main, so a fake checkout must be a git repository with its
-    artifacts committed and published."""
+    from the pinned remote's main, so a fake checkout must be a git repository
+    with its artifacts committed and published to the sibling remote.git."""
+    remote = cloud.parent / "remote.git"
     for args in (
         ["git", "init", "-q"],
         ["git", "add", "."],
         ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "seed"],
-        ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+        ["git", "init", "-q", "--bare", str(remote)],
+        ["git", "push", "-q", str(remote), "HEAD:refs/heads/main"],
     ):
         subprocess.run(args, cwd=cloud, check=True, capture_output=True)
 
@@ -1839,6 +1841,7 @@ configure_caddy
                 "RADON_SETUP_SOURCE_ONLY": "1",
                 "RADON_CLOUD_DIR": str(cloud),
                 "RADON_SETUP_STAGE_DIR": str(tmp_path / "stage"),
+                "RADON_PROVENANCE_REMOTE_URL": str(tmp_path / "remote.git"),
                 "RADON_CADDY_CONFIG_PATH": str(live),
                 "RADON_CADDY_LOG_DIR": str(tmp_path / "log"),
                 "RADON_CADDY_BIN": str(fake_caddy),
@@ -1894,6 +1897,7 @@ configure_caddy
                 "RADON_SETUP_SOURCE_ONLY": "1",
                 "RADON_CLOUD_DIR": str(cloud),
                 "RADON_SETUP_STAGE_DIR": str(tmp_path / "stage"),
+                "RADON_PROVENANCE_REMOTE_URL": str(tmp_path / "remote.git"),
                 "RADON_CADDY_CONFIG_PATH": str(live),
                 "RADON_CADDY_LOG_DIR": str(tmp_path / "log"),
                 "RADON_CADDY_BIN": str(fake_caddy),

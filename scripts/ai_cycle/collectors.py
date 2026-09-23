@@ -28,6 +28,7 @@ URLS = {
     "open-design-arena": "https://open-design.ai/llm-arena-for-design/",
     "liquidcompute": "https://liquidcompute.com/api/market/ticker",
     "ramp": "https://ramp.com/data/ai-index",
+    "epoch": "https://epoch.ai/data/notable_ai_models.csv",
 }
 GPU_HISTORY_INDEX = "https://api.github.com/repos/adriannutiu/gpu-rental-prices/contents/data/snapshots"
 NOAA_DOM_STATIONS = (
@@ -269,7 +270,10 @@ class Transport:
         except UnicodeDecodeError:
             raise SourceError("Publisher response is not HTML text") from None
         digest = archive_raw(self.archive, raw)
-        return text, digest, now_iso(), {"last_modified": response_headers.get("Last-Modified")}
+        return text, digest, now_iso(), {
+            "last_modified": response_headers.get("Last-Modified"),
+            "etag": response_headers.get("ETag"),
+        }
 
 
 def parse_openrouter(payload, digest, fetched, start, end):
@@ -1260,6 +1264,10 @@ def collect_source(source, transport, start, end, *, env=None, basket=()):
 
         _store_rows, observations = parse_ticker(*fetch_ticker(transport))
         return observations
+    if source == "epoch":
+        from .epoch import collect_epoch
+
+        return collect_epoch(transport)
     if source == "noaa":
         return parse_noaa(
             *transport.fetch(

@@ -87,6 +87,13 @@ _SOURCE_ROWS = [
         "Public design-task leaderboard HTML; LLM/model-quality only, never GPU scarcity",
     ),
     (
+        "epoch",
+        "Epoch AI",
+        "https://epoch.ai/data/notable_ai_models.csv",
+        "snapshot",
+        "Public CC BY 4.0. Attribution required: Source: Epoch AI",
+    ),
+    (
         "liquidcompute",
         "Liquid Compute GPU index",
         "https://liquidcompute.com/api/market/ticker",
@@ -273,6 +280,15 @@ _ROWS = [
         ["issuer-disclosures"],
         ["VRT", "ETN"],
         "Requested, contracted, construction and energized MW remain distinct; deduplicate project phases. Retain issuer order horizons.",
+    ),
+    (
+        "S1",
+        "Structural compute context",
+        "delivery",
+        "P2",
+        ["epoch"],
+        [],
+        "Research context from Epoch AI public CSVs: max frontier training compute and max listed current H100e with that site's current power. Not a trade signal. Source: Epoch AI (CC BY 4.0).",
     ),
     (
         "M1",

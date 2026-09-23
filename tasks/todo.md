@@ -1,3 +1,37 @@
+# Task: Split gitdirs (runner trust follow-up to R02-A)
+
+Operator 2026-09-23: keep R02-A. The rung gets its own writable gitdir (`$WEEKEND_ROOT/.gitdirs-agent/<loop>.git`); host git keeps `$WEEKEND_ROOT/.gitdirs/<loop>.git` and never opens the agent gitdir.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: codex roots hold the agent gitdir and not the host gitdir; agent branch/commit/fetch/merge-tree/push with the host gitdir read-only; planted agent config never runs on the host path nor survives sanitize; prune skips gitfile clones; setup provisions the root
+- T2 depends_on: [T1] - Wrapper helpers (sanitize/align/agent_git_ro), GIT_DIR pin for nightly_green_base, prune, setup_*, operations.md
+- T3 depends_on: [T2] - Focused pytest green; draft PR; CI green; Mac mini setup_* reruns after merge
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Implementation
+- [ ] T3 Verify and ship
+
+# Task: Epoch AI public CSV source (S1)
+
+Public CC BY Epoch CSVs on the AI-infra pane. Research/context only. Not a trade signal.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests + fixtures: 3 series, attribution, header drift, non-frontier FLOP ignored, exact two CSV URLs
+- T2 depends_on: [T1] - source_id epoch, S1, collectors, snapshot experimental, no AA/chip-stock
+- T3 depends_on: [T2] - S1 measure copy Source: Epoch AI; 18→19 / 17→18 pins
+- T4 depends_on: [T3] - Focused pytest + vitest; draft PR; CI watch; do not merge
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Implementation
+- [x] T3 Frontend copy
+- [ ] T4 Green suites and draft PR
+
 # Task: Research triage single-stock book gate
 
 Reject single-name equity research at triage unless the ticker is in the operator's watchlist or portfolio (the book).
