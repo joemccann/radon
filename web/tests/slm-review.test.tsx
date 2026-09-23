@@ -36,6 +36,7 @@ describe("private SLM blind review", () => {
     const file = new File([JSON.stringify(packet())], "review-packet.json", { type: "application/json" });
     fireEvent.change(screen.getByLabelText("Load review packet", { selector: 'input[type="file"]' }), { target: { files: [file] } });
     await screen.findByText("Synthetic held-out title");
+    expect(screen.getByRole("status").textContent).toContain("fixture-run");
     expect(screen.queryByText("Candidate 1")).toBeNull();
     expect(screen.getByRole("button", { name: "Load 1 image from images.example.invalid" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Load 1 image from images.example.invalid" }));

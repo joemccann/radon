@@ -119,7 +119,7 @@ export default function SlmReview({ reviewer }: { reviewer: string }) {
         : [];
       setDecisions(Object.fromEntries(prior.map((decision) => [decision.id, decision])));
       setPacket(parsed); setIndex(0); setStage("label"); setTags(["", "", ""]); setApprovedImageHosts([]);
-      setNotice(`Loaded ${parsed.items.length} blinded items. Source text stays in this tab; only your decisions are saved.`);
+      setNotice(`Loaded ${parsed.items.length} blinded items from ${parsed.runId}. Source text stays in this tab; only your decisions are saved.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not read review packet.");
     }
@@ -192,7 +192,7 @@ export default function SlmReview({ reviewer }: { reviewer: string }) {
       {!packet || !item ? (
         <section className={styles.empty}>
           <h2>Choose the 200-item packet</h2>
-          <p>Use the evaluation packet generated from the pinned holdout. It must contain at least 40 image posts and three aligned prediction sets.</p>
+          <p>Load the packet for the frozen evaluation cohort. It contains 200 posts, at least 40 with images, and three aligned prediction sets.</p>
           <button className={styles.primary} onClick={() => fileRef.current?.click()}>Choose JSON file</button>
         </section>
       ) : (
