@@ -74,16 +74,21 @@ are extracted from the incoming body separately. Do not rely on stored bodies
 for byte-for-byte replay or recovery of the original request.
 
 [Migration 0084](../scripts/db/migrations/0084_redact_tv_alert_raw_body.sql)
-redacts the JSON secret member in older rows and replaces an entire non-JSON
-body when it matches the migration's secret-token patterns. Other JSON fields
-and already-parsed columns survive; replaced text cannot be reconstructed
+redacts the top-level JSON secret member in older rows and replaces an entire
+non-JSON body when it matches the migration's secret-token patterns.
+[Migration 0085](../scripts/db/migrations/0085_redact_tv_alert_raw_body_nested_secret.sql)
+and [migration 0086](../scripts/db/migrations/0086_redact_tv_alert_raw_body_residual_secret.sql)
+replace eligible retained JSON bodies in full, including their non-secret
+fields. The latter covers residual secret content left after earlier passes.
+Parsed columns survive; replaced raw-body fields cannot be reconstructed
 from that row. The drain consumes parsed columns, and the existing retention
 window still applies. Migration is not credential rotation and is not proof
 that historical copies outside this table were scrubbed.
 
 Deployment and credential follow-up are operator-only: through the approved
 authenticated database interface, check
-`SELECT version FROM schema_migrations WHERE version = 84`, then verify that
+`SELECT version FROM schema_migrations WHERE version IN (84, 85, 86)` and require all three versions,
+then verify that
 the migration-required `TV_WEBHOOK_SECRET` rotation was completed. If not,
 follow **Rotate a secret** below, verify every alert uses the replacement,
 and only then remove the old value. Stop if migration or alert coverage cannot

@@ -1013,7 +1013,11 @@ class TestOperatorSafetyOwners:
         doc = (_ROOT / "docs/tradingview-integration.md").read_text()
         assert "sanitized" in doc and "not an exact copy" in doc
         assert "0084_redact_tv_alert_raw_body.sql" in doc
-        assert "operator-only" in doc and "version = 84" in doc
+        assert "operator-only" in doc and "version IN (84, 85, 86)" in doc
+        assert "0085_redact_tv_alert_raw_body_nested_secret.sql" in doc
+        assert "0086_redact_tv_alert_raw_body_residual_secret.sql" in doc
+        assert "Parsed columns survive" in doc
+        assert "cannot be reconstructed" in doc
         assert "INSERT raw body" not in doc
         cloud = (_ROOT / "docs/cloud-services.md").read_text()
         assert "then writes the raw body" not in cloud
@@ -1121,3 +1125,4 @@ class TestOperatorSafetyOwners:
         assert main.index("plan = plan_rebuild") < main.index("if not args.apply:")
         apply = source.split("def _apply(", 1)[1].split("def main(", 1)[0]
         assert apply.index("db.commit()") < apply.index("verified = 0")
+
