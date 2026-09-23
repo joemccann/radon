@@ -812,18 +812,27 @@ issue (`gh api -X PATCH` on `.../issues/`). That would overwrite the
 dead-man description. Comment-only. The wrapper also comments; you are not
 the only commenter.
 
-**Issue discovered**
-What went wrong, in plain language. If nothing went wrong, say that
-(`NO_ACTIONABLE_DRIFT` lives here).
+Author it to the contract in `docs/dead-man-comment-format.md`. That
+document is binding, not advisory: read it before writing the comment.
 
-**What was done to fix it**
-What THIS run actually changed: `audited-through: <SHA>`, classification
-counts, `DOC-###` findings (severity, actor/action/harm, owner), files
-changed. If nothing: "Nothing this run."
+The five blocks, in order:
 
-**Next**
-Only work that must happen OUTSIDE of CI pushing a new deployment
-(`OPERATOR_REQUIRED`, `BLOCKED`). If nothing remains: "Fixed with green deployment"
+1. a one-line GitHub alert banner carrying the verdict
+   (`Healthy` / `Fixed` / `Needs you` / `Incomplete`), the loop, the date
+   and the phase. `NO_ACTIONABLE_DRIFT` is a `Healthy` banner;
+2. **What broke** — a plain-language paragraph, then a technical one;
+3. **The fix** — what THIS run changed, plain language then technical. If
+   nothing: "Nothing this run." plus why;
+4. **Needs you** — a task list, only for work CI cannot do
+   (`OPERATOR_REQUIRED`, `BLOCKED`). Omit when empty;
+5. collapsed `<details>` for the `DOC-###` findings table (ID, severity,
+   one plain-language line, one linked file) and the run record
+   (`audited-through: <SHA>`, classification counts, files changed).
+
+Under 40 lines before the first `<details>`. Evidence, actor/action/harm
+detail and carried-forward inventory stay in the ledger and are linked,
+never reproduced. Every technical statement is paired with a plain-language
+one, and the plain one comes first.
 
 The wrapper also sends the per-phase Pushover notification and posts the
 wrapper-level comment. For the deliver phase that status IS the operator's

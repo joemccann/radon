@@ -392,15 +392,24 @@ you are not the only commenter. GitHub issue write-ups
 you author use this shape, never a status dump or a pointer to a log on a
 machine:
 
-**Issue discovered**
-What went wrong, in plain language. If nothing went wrong, say that.
+Author it to the contract in `docs/dead-man-comment-format.md`. That
+document is binding, not advisory: read it before writing the comment.
 
-**What was done to fix it**
-What THIS run actually changed. If nothing: "Nothing this run."
+The five blocks, in order:
 
-**Next**
-Only work that must happen OUTSIDE of CI pushing a new deployment. If
-nothing remains: "Fixed with green deployment"
+1. a one-line GitHub alert banner carrying the verdict
+   (`Healthy` / `Fixed` / `Needs you` / `Incomplete`), the loop, the date
+   and the phase;
+2. **What broke** — a plain-language paragraph, then a technical one;
+3. **The fix** — what THIS run changed, plain language then technical, with
+   the red/green evidence. If nothing: "Nothing this run." plus why;
+4. **Needs you** — a task list, only for work CI cannot do. Omit when empty;
+5. collapsed `<details>` for the findings table and the run record.
+
+Under 40 lines before the first `<details>`. Evidence, acceptance criteria
+and carried-forward inventory stay in the ledger and are linked, never
+reproduced. One linked file per finding, no line ranges. Every technical
+statement is paired with a plain-language one, and the plain one comes first.
 
 An exit without substantive commit evidence or an explicit completed no-op is
 INCOMPLETE (T-379), not proof of success. Preserve the phase's unfinished work

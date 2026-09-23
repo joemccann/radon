@@ -584,32 +584,43 @@ issue (`gh api -X PATCH` on `.../issues/`). That would overwrite the
 dead-man description. Comment-only. The wrapper also comments; you are not
 the only commenter.
 
-**Issue discovered**
-What went wrong, in plain language. If nothing went wrong, say that.
+Author it to the contract in `docs/dead-man-comment-format.md`. That
+document is binding, not advisory: read it before writing the comment.
 
-**What was done to fix it**
-What THIS run actually changed. If nothing: "Nothing this run."
+The five blocks, in order:
 
-**Next**
-Only work that must happen OUTSIDE of CI pushing a new deployment. If
-nothing remains: "Fixed with green deployment"
+1. a one-line GitHub alert banner carrying the verdict
+   (`Healthy` / `Fixed` / `Needs you` / `Incomplete`), the loop, the date
+   and the phase;
+2. **What broke** — a plain-language paragraph, then a technical one;
+3. **The fix** — what THIS run changed, plain language then technical, with
+   the red/green evidence. If nothing: "Nothing this run." plus why;
+4. **Needs you** — a task list, only for work CI cannot do. Omit when empty;
+5. collapsed `<details>` for the findings table and the run record.
 
-Put the following inside those sections. A zero-change
-night still comments.
+Under 40 lines before the first `<details>`. Evidence, acceptance criteria
+and carried-forward inventory stay in the ledger and are linked, never
+reproduced. One linked file per finding, no line ranges. Every technical
+statement is paired with a plain-language one, and the plain one comes first.
 
-- `DONE`, `VALIDATING`, `BLOCKED`, or `NO_SAFE_CHANGE` status;
+A zero-change night still comments.
+
+The status word (`DONE`, `VALIDATING`, `BLOCKED`, `NO_SAFE_CHANGE`) maps onto
+the banner verdict. The selected `CIP-###` experiment — or why none was safe —
+is **The fix**, in both plain language and technical form. Everything below
+lives in the collapsed run record, never above the fold:
+
 - audited SHA range and GitHub run URLs;
 - sample table by comparable class with p50/p95 and cache state;
 - queue time separated from execution time;
 - current critical-path job/step list;
 - top bottleneck and evidence;
-- selected `CIP-###` experiment or why none is safe;
 - changed files, exact tests/counts, and safety-contract results;
 - **CI build time** table for every time-saving fix (or VALIDATING
   delivery). Generate it with
-  `python3.13 scripts/nightly_issue_format.py ci-time-savings --row '{...}'`
-  and put it in **What was done to fix it** (or **Issue discovered** while
-  still VALIDATING). Required columns: `| Job | Before | After | % change |`.
+  `python3.13 scripts/nightly_issue_format.py ci-time-savings --row '{...}'`.
+  A measured saving is also stated in one plain-language sentence in
+  **The fix** ("the full gate now finishes about four minutes sooner"). Required columns: `| Job | Before | After | % change |`.
   `% change = (after - before) / before * 100` (negative = faster). Cite the
   Actions runs that supplied the times; do not invent timings. If after
   samples are still `VALIDATING` or `INSUFFICIENT_SAMPLE`, print the before
