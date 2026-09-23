@@ -165,6 +165,11 @@ EXPECTED_NEW_PAIRS = [
         "git:docker-compose.yml",
         "ib-gateway-compose",
     ),
+    (
+        "/etc/radon/seccomp/chromium.json",
+        "git:config/seccomp/chromium.json",
+        "chromium-seccomp",
+    ),
 ]
 
 

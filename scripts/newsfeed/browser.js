@@ -27,6 +27,27 @@ export function chromiumLaunchOptions({
   return { headless, args: ["--no-sandbox", "--disable-dev-shm-usage"] };
 }
 
+// Chromium's own failure text when its namespace/setuid sandbox cannot start.
+const SANDBOX_START_FAILURE = /no usable sandbox|zygote|namespace sandbox|move to new namespace|setuid sandbox/i;
+
+// DS-2026-09-20-04: production runs the sandbox under a seccomp profile that
+// permits it. If the host still refuses (kernel or LSM userns policy), keep the
+// scraper alive on --no-sandbox and say so on every launch; nothing a page
+// does can reach this path, it happens before any navigation.
+async function launchChromium(launcher, headless) {
+  const options = chromiumLaunchOptions({ headless });
+  try {
+    return await launcher.launch(options);
+  } catch (error) {
+    const sandboxed = !(options.args || []).includes("--no-sandbox");
+    if (!sandboxed || !SANDBOX_START_FAILURE.test(String(error?.message ?? error))) throw error;
+    console.error(
+      `[newsfeed] chromium sandbox unavailable, falling back to --no-sandbox: ${String(error?.message ?? error).split("\n")[0]}`,
+    );
+    return launcher.launch(chromiumLaunchOptions({ headless, sandbox: "0" }));
+  }
+}
+
 async function readStorageStateIfPresent(storageStatePath) {
   if (!storageStatePath) return undefined;
   if (!(await fs.pathExists(storageStatePath))) return undefined;
@@ -42,7 +63,7 @@ export async function createBrowser({
 } = {}) {
   await fs.ensureDir(path.dirname(storageStatePath));
 
-  const browser = await launcher.launch(chromiumLaunchOptions({ headless }));
+  const browser = await launchChromium(launcher, headless);
   let context;
   let storageState;
   try {

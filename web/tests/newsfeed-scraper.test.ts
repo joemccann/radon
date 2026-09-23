@@ -99,6 +99,77 @@ describe("browser lifecycle", () => {
     await handle.close();
   });
 
+  function fakeBrowser() {
+    return {
+      newContext: vi.fn(async () => ({
+        newPage: vi.fn(async () => ({})),
+        close: vi.fn(async () => {}),
+        cookies: vi.fn(async () => []),
+        storageState: vi.fn(async () => ({ cookies: [], origins: [] })),
+      })),
+      close: vi.fn(async () => {}),
+    };
+  }
+
+  async function withSandboxEnv<T>(value: string | undefined, fn: () => Promise<T>): Promise<T> {
+    const previous = process.env.PLAYWRIGHT_CHROMIUM_SANDBOX;
+    if (value === undefined) delete process.env.PLAYWRIGHT_CHROMIUM_SANDBOX;
+    else process.env.PLAYWRIGHT_CHROMIUM_SANDBOX = value;
+    try {
+      return await fn();
+    } finally {
+      if (previous === undefined) delete process.env.PLAYWRIGHT_CHROMIUM_SANDBOX;
+      else process.env.PLAYWRIGHT_CHROMIUM_SANDBOX = previous;
+    }
+  }
+
+  it("launches chromium with its sandbox by default (DS-2026-09-20-04)", async () => {
+    const root = await createTempRoot();
+    const launch = vi.fn(async () => fakeBrowser());
+    await withSandboxEnv(undefined, async () => {
+      const { createBrowser } = await import("../../scripts/newsfeed/browser.js");
+      const handle = await createBrowser({ storageStatePath: path.join(root, "storage.json"), launcher: { launch } });
+      expect(launch).toHaveBeenCalledOnce();
+      const options = (launch.mock.calls[0] as unknown[])[0] as { args?: string[] };
+      expect(options.args ?? []).not.toContain("--no-sandbox");
+      await handle.close();
+    });
+  });
+
+  it("falls back to --no-sandbox, loudly, only when the sandbox itself cannot start", async () => {
+    const root = await createTempRoot();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const launch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("[FATAL:zygote_host_impl_linux.cc] No usable sandbox!"))
+      .mockResolvedValueOnce(fakeBrowser());
+    try {
+      await withSandboxEnv(undefined, async () => {
+        const { createBrowser } = await import("../../scripts/newsfeed/browser.js");
+        const handle = await createBrowser({ storageStatePath: path.join(root, "storage.json"), launcher: { launch } });
+        expect(launch).toHaveBeenCalledTimes(2);
+        expect(((launch.mock.calls[0] as unknown[])[0] as { args?: string[] }).args ?? []).not.toContain("--no-sandbox");
+        expect(((launch.mock.calls[1] as unknown[])[0] as { args?: string[] }).args).toContain("--no-sandbox");
+        expect(error.mock.calls.flat().join(" ")).toContain("chromium sandbox unavailable");
+        await handle.close();
+      });
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("does not retry without the sandbox on an unrelated launch failure", async () => {
+    const root = await createTempRoot();
+    const launch = vi.fn().mockRejectedValue(new Error("Executable doesn't exist at /ms-playwright/chromium"));
+    await withSandboxEnv(undefined, async () => {
+      const { createBrowser } = await import("../../scripts/newsfeed/browser.js");
+      await expect(
+        createBrowser({ storageStatePath: path.join(root, "storage.json"), launcher: { launch } }),
+      ).rejects.toThrow("Executable doesn't exist");
+      expect(launch).toHaveBeenCalledOnce();
+    });
+  });
+
   it("launches chromium without a sandbox when PLAYWRIGHT_CHROMIUM_SANDBOX=0", async () => {
     const root = await createTempRoot();
     const previous = process.env.PLAYWRIGHT_CHROMIUM_SANDBOX;

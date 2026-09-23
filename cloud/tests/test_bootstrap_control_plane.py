@@ -55,6 +55,9 @@ ARTIFACTS = (
         "/etc/polkit-1/rules.d/50-radon-services.rules",
         0o644,
     ),
+    # The newsfeed Chromium seccomp profile root's engine loads; radon must not
+    # be able to widen it, so it cannot stay in the checkout.
+    Artifact("config/seccomp/chromium.json", "/etc/radon/seccomp/chromium.json", 0o644),
     Artifact("services/radon-health.service", "/etc/systemd/system/radon-health.service", 0o644),
     Artifact(
         "services/radon-ib-gateway-preheld-restart.service",

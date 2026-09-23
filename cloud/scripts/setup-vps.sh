@@ -1345,6 +1345,20 @@ install_app_runtime() {
   fi
   mv -f "$staged" "$target"
 
+  # The runtime refuses to start the newsfeed without its Chromium seccomp
+  # profile. Root's engine loads it, so it is root-owned, never the checkout.
+  local profile_source="${CLOUD_DIR}/config/seccomp/chromium.json"
+  local profile_target="${RADON_SECCOMP_TARGET:-/etc/radon/seccomp/chromium.json}"
+  install -d -m 0755 "$(dirname "$profile_target")"
+  staged="$(mktemp "${profile_target}.tmp.XXXXXX")"
+  if ! stage_from_checkout "$profile_source" "$staged" 0644 ${owner_args[@]+"${owner_args[@]}"} || \
+     ! python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1], encoding="utf-8")).get("defaultAction") != "SCMP_ACT_ERRNO")' "$staged"; then
+    rm -f "$staged"
+    log_error "Chromium seccomp profile failed provenance/validation"
+    return 1
+  fi
+  mv -f "$staged" "$profile_target"
+
   log_success "App runtime wrapper installed"
 }
 

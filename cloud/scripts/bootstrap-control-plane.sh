@@ -121,6 +121,7 @@ readonly -a SOURCES=(
   config/sudoers.d/radon-ops
   config/sudoers.d/radon-caddy
   config/polkit/50-radon-services.rules
+  config/seccomp/chromium.json
   services/radon-health.service
   services/radon-ib-gateway-preheld-restart.service
   services/radon-ib-watchdog.service
@@ -164,6 +165,7 @@ readonly -a LOGICAL_TARGETS=(
   /etc/sudoers.d/radon-ops
   /etc/sudoers.d/radon-caddy
   /etc/polkit-1/rules.d/50-radon-services.rules
+  /etc/radon/seccomp/chromium.json
   /etc/systemd/system/radon-health.service
   /etc/systemd/system/radon-ib-gateway-preheld-restart.service
   /etc/systemd/system/radon-ib-watchdog.service
@@ -197,6 +199,7 @@ readonly -a MODES=(
   0755 0755 0755 0644 0644 0755 0755 0644
   0440 0440 0440 0440
   0644
+  0644
   0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644
   0644 0644 0644 0644 0644 0644
   0644 0644 0644 0644 0644
@@ -206,6 +209,7 @@ readonly -a KINDS=(
   shell shell shell python python shell shell compose
   sudoers sudoers sudoers sudoers
   polkit
+  seccomp
   systemd systemd systemd systemd systemd systemd systemd systemd systemd systemd
   systemd systemd systemd systemd systemd systemd systemd systemd systemd systemd
   systemd
@@ -454,6 +458,12 @@ for index in "${!SOURCES[@]}"; do
     compose)
       compose_body_is_valid "$staged_path" "$relative_source" || \
         die "compose validation failed: $relative_source"
+      ;;
+    # The newsfeed Chromium seccomp filter root's engine loads. Same gate as
+    # deploy-root-helper.sh refresh_install_file: parses, and denies by default.
+    seccomp)
+      "$PYTHON_BIN" -c 'import json, sys; sys.exit(json.load(open(sys.argv[1], encoding="utf-8")).get("defaultAction") != "SCMP_ACT_ERRNO")' \
+        "$staged_path" || die "seccomp profile validation failed: $relative_source"
       ;;
     python)
       # Parse only. Importing or compiling to disk would execute or cache
