@@ -18,7 +18,7 @@
     <array>
         <string>/bin/bash</string>
         <string>-c</string>
-        <string>export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=false; C=__WEEKEND_REPO__; G="$(dirname "$C")/.gitdirs/security.git"; if kill -0 "$(cat "$C/.weekend-runner.lock/pid" 2&gt;/dev/null)" 2&gt;/dev/null; then exit 0; fi; { T="$(command -v timeout || true)"; ${T:+"$T" -k 15 180} git --git-dir="$G" --work-tree="$C" -c core.sshCommand="ssh -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4" fetch -q origin &amp;&amp; git --git-dir="$G" --work-tree="$C" checkout -f -q main &amp;&amp; git --git-dir="$G" --work-tree="$C" reset --hard -q origin/main; } || exit 70; exec /bin/bash "$C/scripts/security_nightly.sh" cycle</string>
+        <string>export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=false; C=__WEEKEND_REPO__; G="$(dirname "$C")/.gitdirs/security.git"; if kill -0 "$(cat "$C/.weekend-runner.lock/pid" 2&gt;/dev/null)" 2&gt;/dev/null; then exit 0; fi; { T="$(command -v timeout || command -v gtimeout || true)"; [ -n "$T" ] || exit 78; "$T" -k 15 180 git --git-dir="$G" --work-tree="$C" -c core.sshCommand="ssh -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4" fetch -q origin &amp;&amp; git --git-dir="$G" --work-tree="$C" checkout -f -q main &amp;&amp; git --git-dir="$G" --work-tree="$C" reset --hard -q origin/main; } || exit 70; exec /bin/bash "$C/scripts/security_nightly.sh" cycle</string>
     </array>
 
     <key>WorkingDirectory</key>
