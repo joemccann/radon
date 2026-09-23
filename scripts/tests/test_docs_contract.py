@@ -1013,7 +1013,11 @@ class TestOperatorSafetyOwners:
         doc = (_ROOT / "docs/tradingview-integration.md").read_text()
         assert "sanitized" in doc and "not an exact copy" in doc
         assert "0084_redact_tv_alert_raw_body.sql" in doc
-        assert "operator-only" in doc and "version = 84" in doc
+        assert "operator-only" in doc and "version IN (84, 85, 86)" in doc
+        assert "0085_redact_tv_alert_raw_body_nested_secret.sql" in doc
+        assert "0086_redact_tv_alert_raw_body_residual_secret.sql" in doc
+        assert "Parsed columns survive" in doc
+        assert "cannot be reconstructed" in doc
         assert "INSERT raw body" not in doc
         cloud = (_ROOT / "docs/cloud-services.md").read_text()
         assert "then writes the raw body" not in cloud
@@ -1121,3 +1125,31 @@ class TestOperatorSafetyOwners:
         assert main.index("plan = plan_rebuild") < main.index("if not args.apply:")
         apply = source.split("def _apply(", 1)[1].split("def main(", 1)[0]
         assert apply.index("db.commit()") < apply.index("verified = 0")
+
+
+class TestNightlyRecoveryOwnerDrift:
+    """DOC-125..127: keep incident decisions at their canonical owner."""
+
+    def test_flex_duplicate_owner_includes_nav_repair_boundary(self):
+        doc = (_ROOT / "docs/cloud-services.md").read_text()
+        block = doc.split("A duplicate Flex ingest", 1)[1].split("## Legacy Flex", 1)[0]
+        assert "missing NAV dates" in block
+        assert "cash-flow IDs" in block
+        assert "never overwrites" in block
+        assert "never replays cash" in block
+        assert "incident-runbook.md#flex-pull-activity-nav" in block
+
+    def test_sftp_reset_case_defers_to_delivery_coverage_owner(self):
+        doc = (_ROOT / "docs/incident-runbook.md").read_text()
+        case = doc.split("## flex-pull-sftp-get-reset", 1)[1].split("\n---", 1)[0]
+        assert "cloud-services.md#flex-sftp-pull-radon-flex-pulltimer" in case
+        assert "is_transient_sftp_error" not in case
+        assert "different query" in case
+        assert "unparseable" in case
+
+    def test_runner_permissions_link_launcher_without_copied_roots(self):
+        doc = (_ROOT / "docs/operations.md").read_text()
+        assert 'writable_roots=["$REPO/.git"' not in doc
+        assert "../scripts/documentation_nightly.sh" in doc
+        assert "Codex sandbox writable roots omit that host gitdir" in doc
+        assert ".gitdirs-agent/<loop>.git" in doc

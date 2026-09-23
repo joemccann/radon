@@ -2201,19 +2201,19 @@ on the 08:30 ET retry after leftover `outgoing` GETs RST.** Peak: 2026-09-17
   same-morning applied delivery. Host-key / auth abort is still fail-closed.
   `Result=timeout` with ExecMainStart→Inactive equal to `TimeoutStartSec` is
   `flex-pull-ingest-timeout`. If `/health/lite` is down too → API, stand down.
-- **Remediation (code):** `is_transient_sftp_error` (kex / connection-reset /
-  connection-timed-out on `sftp_get_failed` only) does not set `failed`.
-  Current (non-stale) duplicates then heartbeat `ok` with
-  `class=sftp_transient`. Host-key and ingest rejects still exit 1. A run
-  that GET-fails every file with no parsed period still errors. Do not
-  restart-flap; next 07:30 ET timer, or `reset-failed` after deploy (unit is
-  not on `RERUNNABLE_ONESHOT_UNITS`).
+- **Recovery decision:** use the [canonical Flex delivery coverage rule](cloud-services.md#flex-sftp-pull-radon-flex-pulltimer)
+  before standing down a historical GET failure. A same-morning success alone
+  is insufficient: a different query or missing/unparseable delivery date is
+  not covered. Host-key, auth, decrypt and ingest failures remain errors.
+  Do not restart-flap; the next timer retries. After a verified repair deploy,
+  `reset-failed` clears the latch if the retry has not fired (the unit is not
+  on `RERUNNABLE_ONESHOT_UNITS`).
 - **Regression:**
   `test_flex_pull_sftp_get_reset.py::test_current_duplicate_then_kex_reset_on_history_exits_zero`,
   `test_kex_reset_on_every_get_without_a_current_statement_still_errors`,
   `test_host_key_failure_on_get_still_fails_closed`,
   `test_kex_reset_classifier_matches_the_unit_journal`.
-- **Code:** `scripts/flex_sftp_pull.py` (`is_transient_sftp_error`, `_run`).
+- **Code:** `scripts/flex_sftp_pull.py` (`_covered_historical_delivery`, `_run`).
 
 ---
 
