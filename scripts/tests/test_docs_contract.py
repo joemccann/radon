@@ -1146,3 +1146,10 @@ class TestNightlyRecoveryOwnerDrift:
         assert "is_transient_sftp_error" not in case
         assert "different query" in case
         assert "unparseable" in case
+
+    def test_runner_permissions_link_launcher_without_copied_roots(self):
+        doc = (_ROOT / "docs/operations.md").read_text()
+        assert 'writable_roots=["$REPO/.git"' not in doc
+        assert "../scripts/documentation_nightly.sh" in doc
+        assert "Codex sandbox writable roots omit that host gitdir" in doc
+        assert ".gitdirs-agent/<loop>.git" in doc
