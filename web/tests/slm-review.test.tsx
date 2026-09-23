@@ -33,7 +33,7 @@ describe("private SLM blind review", () => {
   it("keeps candidates hidden until human labels are locked and persists only decisions", async () => {
     render(<SlmReview reviewer="operator-fixture" />);
     const file = new File([JSON.stringify(packet())], "review-packet.json", { type: "application/json" });
-    fireEvent.change(screen.getByLabelText("Load review packet"), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText("Load review packet", { selector: 'input[type="file"]' }), { target: { files: [file] } });
     await screen.findByText("Synthetic held-out title");
     expect(screen.queryByText("Candidate 1")).toBeNull();
     expect(screen.getByRole("button", { name: "Load 1 image from images.example.invalid" })).toBeTruthy();
@@ -65,7 +65,7 @@ describe("private SLM blind review", () => {
     const invalid = packet();
     invalid.items = invalid.items.map((item) => ({ ...item, imageUrls: [] }));
     const file = new File([JSON.stringify(invalid)], "review-packet.json", { type: "application/json" });
-    fireEvent.change(screen.getByLabelText("Load review packet"), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText("Load review packet", { selector: 'input[type="file"]' }), { target: { files: [file] } });
     expect(await screen.findByRole("alert")).toHaveTextContent("at least 40 image posts");
   });
 });
