@@ -123,3 +123,28 @@ def test_series_strips_dates_and_ids(name, series):
 ])
 def test_document_type_rules(name, text, doc_type):
     assert identify.identify({1: text}, meta(name), FOLDER).doc_type == doc_type
+
+
+# --- single-stock ticker candidates -----------------------------------------
+
+def test_exchange_suffixed_ticker_on_page_one_is_a_candidate():
+    text = "**Estimates Revised** **US Equity Research** 15 September 2026 RatingPrice Target **BUY US$11.00** Price **ASPI-NASDAQ US$3.16**"
+    ident = identify.identify({1: text}, meta("aspi - a sum of its parts.pdf"), FOLDER)
+    assert ident.doc_type == "single_stock" and "ASPI" in ident.tickers
+
+
+def test_parenthesized_ticker_in_the_filename_is_a_candidate():
+    ident = identify.identify({1: "Initiation of Coverage Rating: Buy"},
+                              meta("maxim - deep fission inc (fisn) - initiation buy - 31 august 2026.pdf"), FOLDER)
+    assert ident.doc_type == "single_stock" and "FISN" in ident.tickers
+
+
+def test_parenthesized_ticker_on_page_one_is_a_candidate():
+    text = "# Spotify Technology S.A. (SPOT) Rating: BUY Price Target US$700"
+    ident = identify.identify({1: text}, meta("spotify update.pdf"), FOLDER)
+    assert ident.doc_type == "single_stock" and "SPOT" in ident.tickers
+
+
+def test_non_single_stock_documents_carry_no_ticker_candidates():
+    ident = identify.identify({1: "## Economics Research ## 16 September 2026 (US) outlook"}, meta("tic data.pdf"), FOLDER)
+    assert ident.doc_type == "research" and ident.tickers == ()

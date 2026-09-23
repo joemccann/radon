@@ -69,6 +69,7 @@ class Identity:
     date_quote: str | None
     doc_type: str                # calendar | single_stock | conference | fx_pair_note | digest | research
     doc_type_reason: str
+    tickers: tuple = ()          # single-name candidates; gates single_stock against the operator book (research.triage)
 
     def as_dict(self):
         return asdict(self)
@@ -136,10 +137,20 @@ def series(name):
     return re.sub(r'\s{2,}', ' ', base).strip(' -,')
 
 
-_TICKER = re.compile(r'\(([A-Z]{1,5}(?:\.[A-Z]{1,2})?)\)|\b[A-Z]{2,5}-(?:NASDAQ|NYSE|LSE|TSX)\b')
+_TICKER = re.compile(r'\(([A-Z]{1,5}(?:\.[A-Z]{1,2})?)\)|\b([A-Z]{2,5})-(?:NASDAQ|NYSE|LSE|TSX)\b')
+# Filenames are often lowercased by Dropbox ("deep fission inc (fisn)"); a stray
+# parenthesized word is harmless because candidates only PASS the book gate.
+_NAME_TICKER = re.compile(r'\(([A-Za-z]{1,5}(?:\.[A-Za-z]{1,2})?)\)')
 _RATING = re.compile(r'(?:Rating|Price Target|Target Price|\bPT\b).{0,40}\b(?:BUY|SELL|HOLD|NEUTRAL|OUTPERFORM|UNDERPERFORM|OVERWEIGHT|UNDERWEIGHT)\b'
                      r'|\b(?:BUY|SELL|HOLD|NEUTRAL|OUTPERFORM|UNDERPERFORM|OVERWEIGHT|UNDERWEIGHT)\b.{0,40}(?:Rating|Price Target|Target Price|\bPT\b)'
                      r'|Initiation of Coverage|initiat(?:e|ing|ion)\b.{0,30}\b(?:buy|sell|outperform|overweight)', re.I)
+
+
+def tickers(name, page_one):
+    """Uppercase ticker candidates from the filename and the page-one head."""
+    found = [match.group(1).upper() for match in _NAME_TICKER.finditer(name)]
+    found += [(match.group(1) or match.group(2)).upper() for match in _TICKER.finditer(page_one[:1500])]
+    return tuple(dict.fromkeys(found))
 
 
 def doc_type(name, page_one):
@@ -192,4 +203,5 @@ def identify(page_text, metadata, folder_date, pdf_created=None):
         found = (folder_date or None, 'folder' if folder_date else 'none', None, None)
 
     kind, reason = doc_type(name, page_one)
-    return Identity(publisher, source, folder, series(name), found[0], found[1], found[2], found[3], kind, reason)
+    names = tickers(name, page_one) if kind == 'single_stock' else ()
+    return Identity(publisher, source, folder, series(name), found[0], found[1], found[2], found[3], kind, reason, names)
