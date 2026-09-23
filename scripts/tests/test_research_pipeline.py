@@ -204,3 +204,30 @@ def test_model_real_byte_limit_closes_stream():
     response=SimpleNamespace(status_code=200,iter_content=lambda _:iter([b'x'*1_500_000,b'x'*600_000]),close=lambda:closed.append(True))
     with pytest.raises(ModelError,match='limit'):Reviewer('secret',session=SimpleNamespace(post=lambda *a,**k:response)).ask('test')
     assert closed==[True]
+
+
+def test_pdf_subprocesses_receive_scrubbed_environment(tmp_path, monkeypatch):
+    import subprocess
+    from types import SimpleNamespace
+    from research import pipeline as module
+
+    monkeypatch.setenv("FIXTURE_ONLY_API_KEY", "fixture-only-secret")
+    monkeypatch.setenv("PYTHONPATH", "/fixture/scripts")
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(returncode=0, stdout=b"[]", stderr=b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "evidence.json").write_text("{}")
+    module.Pipeline.extract(None, tmp_path / "a.pdf", tmp_path / "out")
+    module.Pipeline.render_isolated(None, tmp_path / "a.pdf", tmp_path / "r", [1])
+    module.Pipeline.anchors_isolated(None, tmp_path / "a.pdf", [1])
+    assert len(calls) == 3
+    for kwargs in calls:
+        env = kwargs.get("env")
+        assert env is not None, "PDF subprocess must not inherit the worker environment"
+        assert "FIXTURE_ONLY_API_KEY" not in env
+        assert env.get("PYTHONPATH") == "/fixture/scripts"

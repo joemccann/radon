@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import math
+import os
 import re
 import subprocess
 import sys
@@ -13,6 +14,16 @@ from decimal import Decimal
 from datetime import date, datetime, timezone
 from pathlib import Path
 from utils.atomic_io import atomic_save
+
+
+# The PDF parser subprocess needs only interpreter/locale plumbing, never the
+# worker's credentials: an untrusted document is parsed there.
+_PDF_ENV_KEYS = ('PATH', 'PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV', 'HOME', 'LANG', 'LC_ALL',
+                 'LC_CTYPE', 'TMPDIR', 'TZ', 'SYSTEMROOT')
+
+
+def pdf_subprocess_env():
+    return {key: os.environ[key] for key in _PDF_ENV_KEYS if key in os.environ}
 
 
 class EvidenceError(ValueError):
@@ -390,14 +401,15 @@ class Pipeline:
                    '--render-only', '--pages', ','.join(map(str, pages)), '--dpi', str(dpi)]
         if crop is not None:
             command += ['--crop', ','.join(map(str, crop))]
-        result = subprocess.run(command, capture_output=True, timeout=180)
+        result = subprocess.run(command, capture_output=True, timeout=180, env=pdf_subprocess_env())
         if result.returncode:
             raise EvidenceError('Original PDF rendering failed')
         return json.loads(result.stdout)
 
     def anchors_isolated(self, pdf, pages):
         result = subprocess.run([sys.executable, '-m', 'research.pdf', str(pdf), '.',
-            '--anchors-only', '--pages', ','.join(map(str, pages))], capture_output=True, timeout=180)
+            '--anchors-only', '--pages', ','.join(map(str, pages))], capture_output=True, timeout=180,
+            env=pdf_subprocess_env())
         if result.returncode:
             raise EvidenceError('Original PDF localization failed')
         return json.loads(result.stdout)
@@ -405,7 +417,7 @@ class Pipeline:
     def extract(self, pdf, output):
         # Isolate native PDF parsing and bound total runtime; a crashed parser cannot lose the queue item.
         process = subprocess.run([sys.executable, '-m', 'research.pdf', str(pdf), str(output)],
-                                 capture_output=True, timeout=180)
+                                 capture_output=True, timeout=180, env=pdf_subprocess_env())
         if process.returncode:
             raise EvidenceError('PDF extraction failed; original retained for review')
         return json.loads((Path(output) / 'evidence.json').read_text())
