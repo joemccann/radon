@@ -1,9 +1,9 @@
 # Shared Claude ladder for security_nightly.sh and security_deepsec_nightly.sh.
 # Source after REPO, LOOP_LOG_TAG, and the billing-reroute unset.
 #
-# Policy: discover Mini `claude models` (subscription CLI only), skip the
-# newest generation, use the prior model as primary, then deeper Claude
-# fallbacks. RADON_WEEKEND_MODEL_LADDER / RADON_WEEKEND_PROVIDER_LADDER
+# Policy: discover Mini `claude models` (subscription CLI only), rank by
+# capability tier, skip the most powerful tier, use the second most powerful
+# as primary, then deeper Claude fallbacks. RADON_WEEKEND_MODEL_LADDER / RADON_WEEKEND_PROVIDER_LADDER
 # short-circuit discovery. Discovery failure uses SAFETY (opus then sonnet)
 # and logs; it never silently puts fable back.
 #
