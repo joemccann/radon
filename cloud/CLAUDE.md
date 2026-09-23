@@ -86,8 +86,9 @@ since whichever mechanism the current host lacks would abort the promote that
 installs it (`deploy.sh:204-231`, bd7d7e4c). Note the
 narrowing: preflight now renders the INSTALLED compose body, not the incoming
 release's. The incoming body is gated at install time instead, by provenance
-(git blob at the deployed commit, which must also be reachable from
-`origin/main` - a local-only commit is refused, as is a missing remote ref)
+(git blob at the deployed commit, which must also be reachable from the
+main commit root reads from the pinned GitHub URL - a local-only commit is
+refused, as is an unreachable remote or a main commit missing locally)
 plus `compose_body_is_valid`.
 
 **`publish-caddy` stages from the trusted tip too.** The edge config decides
@@ -307,8 +308,14 @@ provisions the secret-store credential as 32 raw bytes, and prepares the
 radon-replaceable media directory with create-then-verify + `chown
 --no-dereference` rather than a check-then-install pair.
 Setup stages root-installed artifacts from committed git blobs
-(`git cat-file` at the checkout's HEAD), never from working-tree files, and
-publishes `mcp.env` only through a regular-file destination via temp-write +
+(`git cat-file` at the checkout's HEAD), never from working-tree files. Each
+blob must be carried by, or HEAD must be an ancestor of, the trust anchor:
+the `refs/heads/main` SHA root reads with `git ls-remote` from the pinned
+`PROVENANCE_REMOTE_URL`, never the radon-writable `origin/main`, remote URL
+or config. Replace refs, grafts and the commit-graph are ignored for the
+check. It fails closed when the remote is unreachable or its main commit is
+not in the local store, so `git fetch origin main` before provisioning. It
+also publishes `mcp.env` only through a regular-file destination via temp-write +
 atomic `mv -T` rename, so a destination swapped after the check is replaced,
 not entered (contract: `cloud/tests/test_setup_vps_privileged_paths.py`).
 `install_caddy` skips reinstall only when the installed dpkg version already
