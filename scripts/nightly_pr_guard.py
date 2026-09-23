@@ -32,11 +32,38 @@ def option(args: list[str], long: str, short: str = "", default: str = "") -> st
     return value
 
 
+def _positional_prefix(args: list[str], limit: int = 2) -> list[str]:
+    """First `limit` non-flag tokens, skipping -R/--repo and its value.
+
+    gh (Cobra) resolves the pr/create subcommand chain by walking positional
+    tokens and skipping flags wherever they appear, including between the
+    subcommand and its action (`gh pr -R owner/repo create` is equivalent to
+    `gh pr create -R owner/repo`). A plain adjacent-pair scan for ["pr",
+    "create"] missed that form entirely.
+    """
+    out: list[str] = []
+    skip_value = False
+    for a in args:
+        if skip_value:
+            skip_value = False
+            continue
+        if a in ("-R", "--repo"):
+            skip_value = True
+            continue
+        if a.startswith("--repo=") or (a.startswith("-R") and a != "-R"):
+            continue
+        if a.startswith("-"):
+            continue
+        out.append(a)
+        if len(out) == limit:
+            break
+    return out
+
+
 def creation_kind(args: list[str]) -> str:
     """Handle global gh flags as well as the usual subcommand-first form."""
-    for i in range(len(args) - 1):
-        if args[i:i + 2] == ["pr", "create"]:
-            return "pr"
+    if _positional_prefix(args) == ["pr", "create"]:
+        return "pr"
     if "api" in args:
         tail = args[args.index("api") + 1:]
         endpoint = next((a for a in tail if a.rstrip("/").endswith("/graphql") or a == "graphql" or re.search(r"(?:^|/)repos/[^/]+/[^/]+/pulls/?(?:\?.*)?$", a)), "")

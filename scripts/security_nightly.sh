@@ -1538,18 +1538,33 @@ install_nightly_pr_guard() {
     printf 'export RADON_NIGHTLY_HOST_GITDIR=%q\n' "${HOST_GITDIR:-}"
     printf 'export RADON_NIGHTLY_GUARD_PYTHON=%q\n' "$guard_python"
     cat <<'GUARD'
-case " $* " in
-  *" pr create "*|*" api "*)
-    guard_dir="$(mktemp -d "${TMPDIR:-/tmp}/radon-pr-check.XXXXXX")"
-    trap 'rm -rf -- "$guard_dir"' EXIT
-    for helper in nightly_publish.py nightly_pr_guard.py; do
-      git --git-dir="$RADON_NIGHTLY_HOST_GITDIR" --work-tree="$RADON_NIGHTLY_GUARD_REPO" show "origin/main:scripts/$helper" > "$guard_dir/$helper"
-      [[ -s "$guard_dir/$helper" ]] || exit 1
-    done
-    "$RADON_NIGHTLY_GUARD_PYTHON" -I "$guard_dir/nightly_pr_guard.py" "$@"
-    ;;
-  *) exec "$RADON_NIGHTLY_REAL_GH" "$@" ;;
-esac
+# Token-aware match, not `case " $* "`: a joined-string match treats
+# `pr -R owner/repo create` as unguarded because "pr" and "create" are no
+# longer adjacent once a flag sits between them, and a bare "api" elsewhere
+# in argv previously false-matched other subcommands too. Scan argv
+# positionally instead, mirroring nightly_pr_guard.py's own creation_kind()
+# adjacency check, so a reordered or flagged invocation cannot skip the guard.
+# Trigger on ANY "pr" or "api" token anywhere in argv -- a superset, not an
+# exact match: gh (Cobra) lets a global flag like -R/--repo sit between the
+# subcommand and its action, so the true positional pair can be non-adjacent
+# in argv. Routing every "pr"/"api" invocation to nightly_pr_guard.py, which
+# does the precise positional classification, means a bash-side scan can
+# only be too permissive (harmless perf cost), never miss a bypass.
+_guard_hit=0
+for _guard_arg in "$@"; do
+  if [[ "$_guard_arg" == "pr" || "$_guard_arg" == "api" ]]; then _guard_hit=1; fi
+done
+if [[ "$_guard_hit" == 1 ]]; then
+  guard_dir="$(mktemp -d "${TMPDIR:-/tmp}/radon-pr-check.XXXXXX")"
+  trap 'rm -rf -- "$guard_dir"' EXIT
+  for helper in nightly_publish.py nightly_pr_guard.py; do
+    git --git-dir="$RADON_NIGHTLY_HOST_GITDIR" --work-tree="$RADON_NIGHTLY_GUARD_REPO" show "origin/main:scripts/$helper" > "$guard_dir/$helper"
+    [[ -s "$guard_dir/$helper" ]] || exit 1
+  done
+  "$RADON_NIGHTLY_GUARD_PYTHON" -I "$guard_dir/nightly_pr_guard.py" "$@"
+else
+  exec "$RADON_NIGHTLY_REAL_GH" "$@"
+fi
 GUARD
   } > "$NIGHTLY_PR_GUARD_DIR/gh"
   chmod 700 "$NIGHTLY_PR_GUARD_DIR/gh"
