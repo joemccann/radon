@@ -123,7 +123,7 @@ def build_snapshot(store, as_of=None):
         newest = {}
         for row in observations:
             newest[(row["series_id"], row["source_id"], row["methodology_version"], row["cohort_version"])] = row
-        if id in ("D1", "D2", "D3", "D5", "D6", "C1", "C2", "C3", "C4", "C5") and observations:
+        if id in ("D1", "D2", "D3", "D5", "D6", "C1", "C2", "C3", "C4", "C5", "S1") and observations:
             latest_day = max(row["period_end"][:10] for row in observations)
             newest = {key: row for key, row in newest.items() if row["period_end"][:10] == latest_day}
         metrics = []
@@ -231,6 +231,11 @@ def build_snapshot(store, as_of=None):
                 state, reason = (
                     "experimental",
                     "Liquid Compute public GPU index. Third venue versus the rental book. Methodology opaque until licensed.",
+                )
+            if id == "S1" and state == "available":
+                state, reason = (
+                    "experimental",
+                    "Epoch AI structural compute context. Research only; not a trade signal. Source: Epoch AI.",
                 )
             failed = [
                 statuses.get(source, {}).get("status") for source in {row["source_id"] for row in newest.values()}

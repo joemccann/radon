@@ -1,0 +1,5 @@
+Name,Current H100 equivalents,Current power (MW),Owner
+Small Site,100,10,Acme #likely
+Blank Power,250,,OtherCo #speculative
+Max Cluster,500.5,42.0,SpaceXAI #confident
+Huge Power Small GPUs,50,999,Nope #confident
