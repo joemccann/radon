@@ -1,3 +1,21 @@
+# Task: Epoch AI public CSV source (S1)
+
+Public CC BY Epoch CSVs on the AI-infra pane. Research/context only. Not a trade signal.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests + fixtures: 3 series, attribution, header drift, non-frontier FLOP ignored, exact two CSV URLs
+- T2 depends_on: [T1] - source_id epoch, S1, collectors, snapshot experimental, no AA/chip-stock
+- T3 depends_on: [T2] - S1 measure copy Source: Epoch AI; 18→19 / 17→18 pins
+- T4 depends_on: [T3] - Focused pytest + vitest; draft PR; CI watch; do not merge
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Implementation
+- [x] T3 Frontend copy
+- [ ] T4 Green suites and draft PR
+
 # Task: Research triage single-stock book gate
 
 Reject single-name equity research at triage unless the ticker is in the operator's watchlist or portfolio (the book).

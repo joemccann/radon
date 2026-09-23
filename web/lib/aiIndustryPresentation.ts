@@ -45,7 +45,8 @@ export const AI_INDUSTRY_STAGES = [
       "H1",
       "H2",
       "P1",
-      "P2"
+      "P2",
+      "S1"
     ],
     "main": "H1",
     "limit": "Orders, backlog and energized capacity represent different stages.",
@@ -188,6 +189,12 @@ export const AI_MEASURE_COPY: Record<string, { name: string; definition: string;
     "definition": "Model quality, cost and completion time on defined design tasks, such as dashboards and mobile interfaces.",
     "relevance": "Helps you investigate whether models are becoming more useful for a particular kind of work.",
     "limit": "A design-task score does not measure general intelligence, paid adoption or GPU scarcity. Task and evaluation versions must match."
+  },
+  "S1": {
+    "name": "Structural compute context",
+    "definition": "Largest published frontier-model training compute (FLOP) and the largest listed data-center current H100-equivalent count, with that site's current power in MW. Source: Epoch AI (CC BY 4.0).",
+    "relevance": "Research context for how large published training runs and listed data-center capacity are. This is structural evidence, not a cycle timing input.",
+    "limit": "Epoch figures are published estimates, not meter readings. FLOP, H100e and MW stay in their own units. Chip-stock totals are omitted. Source: Epoch AI."
   }
 };
 

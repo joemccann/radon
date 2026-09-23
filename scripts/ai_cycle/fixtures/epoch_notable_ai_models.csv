@@ -1,0 +1,6 @@
+Model,Organization,Publication date,Training compute (FLOP),Frontier model,Confidence
+Alpha,Lab A,2026-01-15,1.0e+25,True,Likely
+BlankFlop,Lab B,2026-02-01,,True,Confident
+NonFrontierBigger,Lab C,2026-03-01,9.0e+25,,Speculative
+FrontierMax,Lab D,2026-04-01,2.5e+25,True,Confident
+SmallFrontier,Lab E,2026-05-01,5.0e+24,True,Unknown
