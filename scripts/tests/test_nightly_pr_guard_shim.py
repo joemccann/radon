@@ -91,6 +91,8 @@ def test_creation_shaped_invocations_always_reach_the_python_guard(wrapper, tmp_
 @pytest.mark.parametrize("argv", [
     ["pr", "checks", "1"],
     ["pr", "list"],
+    ["pr", "merge", "1"],
+    ["issue", "comment", "1", "--body", "done"],
 ])
 def test_non_creation_pr_invocations_still_route_through_the_python_guard(wrapper, tmp_path, argv):
     """The shell dispatch is a deliberately loose superset (any "pr"/"api"
@@ -105,10 +107,16 @@ def test_non_creation_pr_invocations_still_route_through_the_python_guard(wrappe
 
 @pytest.mark.parametrize("wrapper", WRAPPERS)
 @pytest.mark.parametrize("argv", [
-    ["issue", "comment", "1", "--body", "done"],
     ["release", "create", "v1.0.0"],
+    ["run", "view", "1"],
 ])
 def test_non_pr_non_api_invocations_pass_through_to_real_gh(wrapper, tmp_path, argv):
     real_out, guard_out = _run_shim(tmp_path, wrapper, argv)
     assert real_out is not None, (wrapper, argv, "real gh was never invoked")
     assert guard_out is None, (wrapper, argv, "python guard ran for a non pr/api command")
+
+
+@pytest.mark.parametrize("wrapper", WRAPPERS)
+def test_shim_exports_the_loop_name_for_per_loop_policy(wrapper):
+    text = (SCRIPTS / wrapper).read_text(encoding="utf-8")
+    assert "printf 'export RADON_NIGHTLY_LOOP=%q\\n' \"$LOOP_SLUG\"" in text
