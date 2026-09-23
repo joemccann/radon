@@ -362,6 +362,117 @@ ensure_host_gitdir() {
   git init --separate-git-dir="$HOST_GITDIR" "$REPO" >/dev/null 2>&1 || true
 }
 ensure_host_gitdir
+
+# Split gitdirs (2026-09-23). R02-A holds: host git only ever opens
+# $HOST_GITDIR, named explicitly. The rung gets its OWN gitdir, the one the
+# clone's `.git` gitfile names and the one codex may write, so it can branch,
+# commit, fetch, merge-tree and push. Host git never opens it. Before every
+# round the host rewrites its config, gitfile and object alternates from host
+# state and drops hooks, so nothing one rung plants reaches the next rung's
+# git; commit evidence is read through agent_git_ro, never through it.
+AGENT_GITDIR="$WEEKEND_ROOT/.gitdirs-agent/${LOOP_SLUG}.git"
+
+# stdin -> $1. Remove first (a planted symlink is unlinked, not followed),
+# then create with noclobber (O_EXCL), so a path that reappears fails closed.
+_agent_git_write() {
+  rm -rf -- "$1" || return 1
+  ( set -C; cat > "$1" ) || return 1
+}
+
+sanitize_agent_gitdir() {
+  # No host gitdir: ground_truth already failed closed, nothing to point at.
+  [[ -d "$HOST_GITDIR" && ! -L "$HOST_GITDIR" ]] || return 0
+  local d v url
+  mkdir -p "$(dirname "$AGENT_GITDIR")" || return 1
+  chmod 700 "$(dirname "$AGENT_GITDIR")" 2>/dev/null || true
+  for d in "" /objects /objects/info /refs /refs/heads /refs/remotes /refs/remotes/origin; do
+    if [[ -L "$AGENT_GITDIR$d" || ( -e "$AGENT_GITDIR$d" && ! -d "$AGENT_GITDIR$d" ) ]]; then
+      rm -f -- "$AGENT_GITDIR$d" || return 1
+    fi
+    mkdir -p "$AGENT_GITDIR$d" || return 1
+  done
+  rm -rf -- "$AGENT_GITDIR/hooks" "$AGENT_GITDIR/commondir" "$AGENT_GITDIR/config.worktree" \
+    "$AGENT_GITDIR/index.lock" "$AGENT_GITDIR/HEAD.lock" "$AGENT_GITDIR/config.lock" || return 1
+  {
+    printf '[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n\tlogallrefupdates = true\n'
+    for v in ignorecase precomposeunicode; do
+      if [[ "$(git --git-dir="$HOST_GITDIR" config --get "core.$v" 2>/dev/null || true)" == "true" ]]; then
+        printf '\t%s = true\n' "$v"
+      fi
+    done
+    url="$(git --git-dir="$HOST_GITDIR" config --get remote.origin.url 2>/dev/null || true)"
+    if [[ "$url" =~ ^[A-Za-z0-9@:/._~+-]+$ ]]; then
+      printf '[remote "origin"]\n\turl = %s\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n' "$url"
+    fi
+  } | _agent_git_write "$AGENT_GITDIR/config" || return 1
+  printf '%s\n' "$HOST_GITDIR/objects" | _agent_git_write "$AGENT_GITDIR/objects/info/alternates" || return 1
+  if [[ ! -f "$AGENT_GITDIR/HEAD" || -L "$AGENT_GITDIR/HEAD" ]]; then
+    printf 'ref: refs/heads/main\n' | _agent_git_write "$AGENT_GITDIR/HEAD" || return 1
+  fi
+  printf 'gitdir: %s\n' "$AGENT_GITDIR" | _agent_git_write "$REPO/.git" || return 1
+}
+
+# After a host reset: the agent sees main at the tree the host checked out,
+# with a clean index. Its own dated branches survive; only main moves.
+align_agent_gitdir() {
+  [[ -d "$HOST_GITDIR" && ! -L "$HOST_GITDIR" ]] || return 0
+  sanitize_agent_gitdir || return 1
+  local head origin
+  head="$(git --git-dir="$HOST_GITDIR" rev-parse --verify --quiet HEAD 2>/dev/null || true)"
+  origin="$(git --git-dir="$HOST_GITDIR" rev-parse --verify --quiet refs/remotes/origin/main 2>/dev/null || true)"
+  [[ "$head" =~ ^[0-9a-f]{40}$ ]] || return 1
+  printf '%s\n' "$head" | _agent_git_write "$AGENT_GITDIR/refs/heads/main" || return 1
+  if [[ "$origin" =~ ^[0-9a-f]{40}$ ]]; then
+    printf '%s\n' "$origin" | _agent_git_write "$AGENT_GITDIR/refs/remotes/origin/main" || return 1
+  fi
+  printf 'ref: refs/heads/main\n' | _agent_git_write "$AGENT_GITDIR/HEAD" || return 1
+  if [[ -f "$HOST_GITDIR/index" ]]; then
+    _agent_git_write "$AGENT_GITDIR/index" < "$HOST_GITDIR/index" || return 1
+  else
+    rm -f -- "$AGENT_GITDIR/index"
+  fi
+}
+
+# The agent's HEAD commit, parsed from plain files: no git process opens the
+# agent gitdir, so its config cannot run anything here.
+_agent_head_sha() {
+  local g="$AGENT_GITDIR" line="" ref="" sha name
+  [[ -f "$g/HEAD" && ! -L "$g/HEAD" ]] || return 0
+  IFS= read -r line < "$g/HEAD" || true
+  if [[ "$line" == "ref: refs/heads/"* ]]; then
+    ref="${line#ref: }"
+    line=""
+    [[ "$ref" =~ ^refs/heads/[A-Za-z0-9._/-]+$ && "$ref" != *..* ]] || return 0
+    if [[ -f "$g/$ref" && ! -L "$g/$ref" ]]; then
+      IFS= read -r line < "$g/$ref" || true
+    elif [[ -f "$g/packed-refs" && ! -L "$g/packed-refs" ]]; then
+      while IFS=' ' read -r sha name; do
+        if [[ "$name" == "$ref" ]]; then line="$sha"; break; fi
+      done < "$g/packed-refs"
+    fi
+  fi
+  if [[ "$line" =~ ^[0-9a-f]{40}$ ]]; then printf '%s\n' "$line"; fi
+  return 0
+}
+
+# Read-only git over the agent's HEAD: a throwaway gitdir whose config the
+# host writes, the agent's objects borrowed as data through alternates.
+agent_git_ro() {
+  local snap sha rc=0
+  snap="$(mktemp -d "${TMPDIR:-/tmp}/radon-agent-ro.XXXXXX")" || return 1
+  sha="$(_agent_head_sha)"
+  mkdir -p "$snap/objects/info" "$snap/refs"
+  printf '[core]\n\trepositoryformatversion = 0\n\tbare = true\n' > "$snap/config"
+  printf '%s\n%s\n' "$AGENT_GITDIR/objects" "$HOST_GITDIR/objects" > "$snap/objects/info/alternates"
+  if [[ -n "$sha" ]]; then
+    printf '%s\n' "$sha" > "$snap/HEAD"
+  else
+    printf 'ref: refs/heads/unborn\n' > "$snap/HEAD"
+  fi
+  git --git-dir="$snap" "$@" || rc=$?
+  rm -rf -- "$snap"
+  return "$rc"
+}
 DEADMAN_CREATE_BODY="Rolling dead-man for the nightly ${LOOP_SLUG} loop. Sanitized status only. Never a route, file, attack, secret, or account. A missing daily comment means the runner did not fire."
 # Branch prefix the skill opens/updates its PR from. Matched on the head
 # ref, not the title: the title is now `Security <date>`, which a
@@ -1129,7 +1240,7 @@ fetch_origin_with_retry() {
 resolve_green_main_sha() {
   [[ -n "${TIMEOUT_BIN:-}" && -n "$GH_BIN" ]] || return 0
   git --git-dir="$HOST_GITDIR" --work-tree="$REPO" show origin/main:scripts/nightly_green_base.py 2>/dev/null \
-    | "$TIMEOUT_BIN" "${RADON_WEEKEND_GREEN_BASE_TIMEOUT_SECS:-60}" \
+    | GIT_DIR="$HOST_GITDIR" "$TIMEOUT_BIN" "${RADON_WEEKEND_GREEN_BASE_TIMEOUT_SECS:-60}" \
       /usr/bin/python3 -I - --repo "${RADON_WEEKEND_GH_REPO:-joemccann/radon}" \
       --repo-dir "$REPO" --head origin/main --gh-bin "$GH_BIN" 2>/dev/null || true
   return 0
@@ -1152,6 +1263,7 @@ ground_truth() {
     git --git-dir="$HOST_GITDIR" --work-tree="$REPO" reset --hard --quiet "$green_sha" || return 1
   fi
   git --git-dir="$HOST_GITDIR" --work-tree="$REPO" clean -fdxq --exclude=.radon-weekend-runner --exclude=.radon-security-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env --exclude=node_modules/ --exclude=.next/ --exclude=.deepsec/
+  align_agent_gitdir || return 1
 }
 
 # The agent commits per completed task and the skill resumes from the
@@ -1483,8 +1595,11 @@ launch_round() {
       # codex's workspace-write sandbox is narrower than the phase contract in
       # three ways, each of which silently produced an INCOMPLETE on 2026-09-07:
       #
-      #   .git                 host-owned at $WEEKEND_ROOT/.gitdirs/<loop>.git.
-      #                        Codex does not get a writable gitdir (R02-A).
+      #   .git                 the clone gitfile names $AGENT_GITDIR, this
+      #                        rung's own gitdir, so branch, commit, fetch and
+      #                        push work. Host git keeps
+      #                        $WEEKEND_ROOT/.gitdirs/<loop>.git, which stays
+      #                        out of these roots (R02-A).
       #   deliver record       lives one level ABOVE the clone at
       #                        $WEEKEND_ROOT/.<loop>-deliver, so arming it raised
       #                        "PermissionError: [Errno 1] Operation not
@@ -1508,7 +1623,7 @@ launch_round() {
       "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
         "$RUNG_BIN" exec ${model_flag[@]+"${model_flag[@]}"} \
         -c model_reasoning_effort="medium" \
-        -c "sandbox_workspace_write={network_access=true,writable_roots=[\"$WEEKEND_ROOT/.$LOOP_SLUG-deliver\",\"$PRIVATE_SCRATCH\"]}" \
+        -c "sandbox_workspace_write={network_access=true,writable_roots=[\"$AGENT_GITDIR\",\"$WEEKEND_ROOT/.$LOOP_SLUG-deliver\",\"$PRIVATE_SCRATCH\"]}" \
         -C "$REPO" --color never \
         --sandbox workspace-write --skip-git-repo-check \
         - < "$prompt_file" >> "$RUN_LOG" 2>&1 &
@@ -1654,6 +1769,13 @@ run_phase() {
     if [[ $remain -le 60 ]]; then RC=124; break; fi
     [[ -z "$TEST_ROUND_TIMEOUT_SECS" ]] || remain="$TEST_ROUND_TIMEOUT_SECS"
     ROUND_LOG_MARK=$(( $(wc -c < "$RUN_LOG" 2>/dev/null || echo 0) ))
+    # Split gitdirs: nothing the last rung planted in its gitdir reaches this
+    # one. Fail closed: no rung runs on a gitdir the host could not reset.
+    if ! sanitize_agent_gitdir; then
+      echo "[$LOOP_LOG_TAG] could not reset the agent gitdir $AGENT_GITDIR" | tee -a "$RUN_LOG"
+      RC=70
+      break
+    fi
     # Backgrounded and `wait`ed rather than run in the foreground: bash defers
     # trap handling until a foreground child completes, so a SIGTERM to the
     # wrapper was not acted on until `claude` finished on its own — which is
