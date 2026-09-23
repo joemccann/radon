@@ -31,8 +31,16 @@ export function isReturnCacheFresh(
 
 const ReturnCacheContext = createContext<ReturnCache | null>(null);
 
+// Every live store, so an account change can drop the previous user's snapshots.
+const liveStores = new Set<Map<string, ReturnCacheEntry<unknown>>>();
+
+export function purgeReturnCaches(): void {
+  for (const store of liveStores) store.clear();
+}
+
 export function createReturnCache(): ReturnCache {
   const store = new Map<string, ReturnCacheEntry<unknown>>();
+  liveStores.add(store);
   return {
     read(key) {
       const entry = store.get(key);
