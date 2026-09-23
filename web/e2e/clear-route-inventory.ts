@@ -61,6 +61,7 @@ export const CLEAR_ROUTE_CASES: ClearRouteCase[] = [
   { source: "app/trial-expired/page.tsx", path: "/trial-expired", text: "Your demo has ended" },
   { source: "app/kit/page.tsx", path: "/kit", text: "Radon Contributor Kit / Component Spec" },
   { source: "app/admin/page.tsx", path: "/admin", guarded: true },
+  { source: "app/admin/slm-review/page.tsx", path: "/admin/slm-review", guarded: true },
   { source: "app/sign-in/[[...sign-in]]/page.tsx", path: "/sign-in", guarded: true },
   { source: "app/sign-up/[[...sign-up]]/page.tsx", path: "/sign-up", guarded: true },
 ];
