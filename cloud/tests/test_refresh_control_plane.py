@@ -112,6 +112,9 @@ CONTROL_PLANE_MODES = _bash_string_array(HELPER_TEXT, "CONTROL_PLANE_MODES")
 def _diff_marker(source_rel: str) -> str:
     if source_rel.endswith(".rules"):
         return "\n// radon-refresh-test\n"
+    if source_rel.endswith(".json"):
+        # JSON has no comments; trailing whitespace still moves the digest.
+        return "\n\n"
     return "\n# radon-refresh-test\n"
 
 
@@ -743,6 +746,39 @@ def test_unit_refresh_refuses_a_unit_systemd_analyze_rejects(tmp_path: Path) -> 
     assert len(calls) == 1
     assert calls[0].startswith("verify ")
     assert calls[0].endswith("/radon-health.service")
+
+
+SECCOMP_SOURCE = "config/seccomp/chromium.json"
+
+
+@pytest.mark.parametrize(
+    "body",
+    ['{"defaultAction": "SCMP_ACT_ALLOW", "syscalls": []}\n', "not json\n"],
+    ids=["allow-by-default", "unparseable"],
+)
+def test_privileged_refresh_refuses_a_seccomp_profile_that_does_not_deny_by_default(
+    tmp_path: Path, body: str
+) -> None:
+    """DS-2026-09-20-04: root's engine loads this filter for the newsfeed
+    Chromium; an allow-by-default body would install a no-op filter."""
+    box = Sandbox(tmp_path)
+    (box.cloud / SECCOMP_SOURCE).write_text(body, encoding="utf-8")
+    box.commit_sources()
+
+    _refused_without_install(box, "refresh-control-plane-privileged", "seccomp profile validation failed")
+
+
+def test_privileged_refresh_installs_a_valid_seccomp_profile(tmp_path: Path) -> None:
+    box = Sandbox(tmp_path)
+    box.mutate_source(SECCOMP_SOURCE)
+    expected = (box.cloud / SECCOMP_SOURCE).read_bytes()
+
+    result = box.run("refresh-control-plane-privileged")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    installed = box.installed_path(SECCOMP_SOURCE)
+    assert installed == box.rootfs / "etc" / "radon" / "seccomp" / "chromium.json"
+    assert installed.read_bytes() == expected
 
 
 def test_refresh_install_file_has_a_validator_arm_for_every_control_plane_target() -> None:

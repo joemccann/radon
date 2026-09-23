@@ -25,6 +25,7 @@ readonly -a CONTROL_PLANE_SOURCES=(
   config/sudoers.d/radon-ops
   config/sudoers.d/radon-caddy
   config/polkit/50-radon-services.rules
+  config/seccomp/chromium.json
   services/radon-health.service
   services/radon-ib-gateway-preheld-restart.service
   services/radon-ib-watchdog.service
@@ -68,6 +69,7 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/sudoers.d/radon-ops
   /etc/sudoers.d/radon-caddy
   /etc/polkit-1/rules.d/50-radon-services.rules
+  /etc/radon/seccomp/chromium.json
   /etc/systemd/system/radon-health.service
   /etc/systemd/system/radon-ib-gateway-preheld-restart.service
   /etc/systemd/system/radon-ib-watchdog.service
@@ -100,6 +102,7 @@ readonly -a CONTROL_PLANE_TARGETS=(
 readonly -a CONTROL_PLANE_MODES=(
   755 755 755 644 644 755 755 644
   440 440 440 440
+  644
   644
   644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644
   644 644 644 644 644
@@ -1445,6 +1448,15 @@ refresh_install_file() {
     */polkit-1/rules.d/*.rules)
       if [[ -z "$NODE" || ! -x "$NODE" ]] || ! "$NODE" --check < "$candidate"; then
         echo "polkit syntax validation failed: ${dest}" >&2
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+    # The newsfeed Chromium seccomp filter. Mirrors bootstrap's seccomp kind:
+    # it must parse and deny by default, or root's engine loads a no-op filter.
+    */radon/seccomp/*.json)
+      if ! "$SESSION_PYTHON" -c 'import json, sys; sys.exit(json.load(open(sys.argv[1], encoding="utf-8")).get("defaultAction") != "SCMP_ACT_ERRNO")' "$candidate"; then
+        echo "seccomp profile validation failed: ${dest}" >&2
         "$RM" -f "$candidate"
         return 73
       fi

@@ -196,8 +196,17 @@ fetched `origin/main` — an absent or stale remote ref fails closed with
 origin main` in the checkout first. Override the ref with
 `RADON_PROVENANCE_REMOTE_REF` only for a deliberate non-`main` release line.
 
-**Newsfeed least privilege.** `radon-newsfeed.service` runs a
-sandbox-disabled Chromium against third-party web content, so
+**Newsfeed least privilege.** `radon-newsfeed.service` runs Chromium against
+third-party web content. Chromium keeps its own sandbox: the container runs
+under `--security-opt seccomp=/etc/radon/seccomp/chromium.json` (source
+`cloud/config/seccomp/chromium.json`: the engine default from moby/profiles
+plus `clone`/`unshare`/`setns`/`chroot` for the namespace sandbox, the
+addition jessfraz's `chrome.json` makes), without host IPC, with a 512m
+private `/dev/shm`. The runtime refuses to start the unit (exit 78) if the
+profile is missing. If the host still refuses the sandbox at launch,
+`scripts/newsfeed/browser.js` retries with `--no-sandbox` and logs
+`chromium sandbox unavailable`; `PLAYWRIGHT_CHROMIUM_SANDBOX=0` in
+`/etc/radon/env` forces that mode. Also,
 `radon-app-runtime` hands it a filtered env file — only the keys the
 newsfeed code reads (`NODE_ENV`, model-ladder keys including `ANTHROPIC_API_KEY` and `CEREBRAS_API_KEY` last,
 Turso, media, `PLAYWRIGHT_CHROMIUM_SANDBOX`, replica toggles, and

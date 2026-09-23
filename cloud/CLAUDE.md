@@ -70,6 +70,14 @@ not the Gateway), and
 `--project-name cloud` is pinned so the `cloud_ib-config` volume — the
 Gateway's Jts settings and 2FA state — survives the move.
 
+The newsfeed Chromium seccomp profile is the same kind of artifact:
+`cloud/config/seccomp/chromium.json` installs root-owned at
+`/etc/radon/seccomp/chromium.json` (bootstrap kind `seccomp`, refresh arm
+`*/radon/seccomp/*.json`, `setup-vps.sh:install_app_runtime`, drift pair
+`chromium-seccomp`). Every install path refuses a body that does not parse or
+does not deny by default (`defaultAction` `SCMP_ACT_ERRNO`), and
+`radon-app-runtime` refuses to start `radon-newsfeed.service` without it.
+
 `config-check` is `deploy.sh`'s preflight compose render. It takes no
 env-file argument on purpose — a caller-supplied path is the one thing the
 shim refuses — and pins the same `/etc/radon/env` the deploy's
