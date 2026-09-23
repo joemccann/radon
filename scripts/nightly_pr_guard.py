@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Agent PATH guard for nightly PR creation; other gh commands pass through.
+"""Agent PATH guard for nightly PR creation, merges and security-loop issue writes.
 
 The wrapper snapshots this file and nightly_publish.py from origin/main outside
 its mutable checkout. This prevents an accidental direct gh command from
@@ -79,7 +79,35 @@ def creation_kind(args: list[str]) -> str:
     return ""
 
 
-def guard(args: list[str], *, run=subprocess.run) -> None:
+# Security loops publish only through their wrapper's sanitized dead-man
+# comment; an agent-authored issue write could disclose an unpatched finding.
+SECURITY_LOOPS = {"security", "security-deepsec"}
+ISSUE_WRITES = {"comment", "create", "edit", "close", "reopen", "delete", "transfer", "lock", "unlock", "pin", "unpin", "develop"}
+
+
+def refused_action(args: list[str], loop: str = "") -> str:
+    """Actions no nightly loop may take: merging (main auto-deploys) and, for
+    the security loops, any public issue write."""
+    prefix = _positional_prefix(args)
+    tail = args[args.index("api") + 1:] if "api" in args else []
+    endpoint = next((a for a in tail if not a.startswith("-")), "")
+    if prefix == ["pr", "merge"] or re.search(r"(?:^|/)repos/[^/]+/[^/]+/pulls/\d+/merge/?$", endpoint) \
+            or (tail and re.search(r"mergePullRequest|enablePullRequestAutoMerge", " ".join(tail))):
+        return "nightly loops never merge; the operator merges"
+    if loop in SECURITY_LOOPS:
+        if len(prefix) == 2 and prefix[0] == "issue" and prefix[1] in ISSUE_WRITES:
+            return "security loops never write issues; the wrapper posts the sanitized comment"
+        method = option(tail, "--method", "-X").upper()
+        body = any(a in ("--input", "--field", "--raw-field", "-f", "-F") or a.startswith(("--input=", "--field=", "--raw-field=", "-f", "-F")) for a in tail)
+        if re.search(r"(?:^|/)repos/[^/]+/[^/]+/issues(?:/|$)", endpoint) and (method not in ("", "GET") or body):
+            return "security loops never write issues; the wrapper posts the sanitized comment"
+    return ""
+
+
+def guard(args: list[str], *, run=subprocess.run, loop: str = "") -> None:
+    reason = refused_action(args, loop)
+    if reason:
+        raise Refused(reason)
     kind = creation_kind(args)
     if not kind:
         return
@@ -108,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
         print("nightly PR guard: missing absolute gh executable", file=sys.stderr)
         return 1
     try:
-        guard(args)
+        guard(args, loop=os.environ.get("RADON_NIGHTLY_LOOP", ""))
     except (Refused, OSError, subprocess.SubprocessError) as exc:
         print(f"nightly PR guard: {exc}", file=sys.stderr)
         return 1
