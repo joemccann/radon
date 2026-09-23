@@ -726,3 +726,11 @@ No new API keys, no prepaid spend, no cloud GPU are required by the default prop
 - Hetzner host size: not recorded anywhere current in the repo; the deployment guide's CPX11 figure predates the present unit set.
 - `research_post_sources` (migration 0071) exists, so the research-post exclusion in C.2 is required, not hypothetical.
 - Ports in use per `cloud/services/*.service` and Caddy config: 8321, 8330, 8334, 8340, 8765. 8331 is free on paper.
+
+## M. Evaluation-gap closeout (2026-09-23)
+
+The archived 2,420-example evaluation has aggregate scores only; its exact examples and per-example predictions are unavailable. The old micro-F1 and invalid-rate results therefore cannot be reproduced or treated as the new gate. A fresh post-training time split was pinned for a temporary GPU rerun: 2,414 test examples, cutoff `2026-07-25T02:33:11Z`, test SHA-256 `4408d9a9a4ccb9f0e1afb425bd9004c14992837bab489407d3b2d0d163434660`, and prompt-contract SHA-256 `a174584718d22c7e350fd0e0e905cf0d49896d26355dc55a319ccf8567b94288`. The dataset contains private post text; raw extracts and predictions stay in restricted local/pod storage and are not committed.
+
+The pinned gate is fail-closed: pooled rare-label recall for arm C must reach `max(A - 0.05, 0.50)`; each rare label with support at least 10 must reach recall 0.30; arm C human acceptance must be at least arm A, with a paired 95% bootstrap lower bound no worse than -0.05 on a blinded 200-post sample. Per-example predictions, validity, latency, and per-label TP/FP/FN/recall are required; absent evidence is a failed gate.
+
+The operator-only review application uses random reviewer IDs, per-post randomized candidate aliases, and blind human labels before candidate display. It stores only decisions and corrections in the browser and exports them for a separate private join. Images are not fetched until a reviewer explicitly approves each source host. The saved checkpoint rerun and manual review are still pending; `RADON_SLM_TAGGER_MODE` remains `off` unless every gate passes.

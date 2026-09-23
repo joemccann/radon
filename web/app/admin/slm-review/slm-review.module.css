@@ -1,0 +1,70 @@
+.page { min-height: 100vh; background: var(--bg-canvas); color: var(--text-primary); }
+.shell { width: min(1120px, 100% - 32px); margin-inline: auto; padding: 30px 0 48px; }
+.header { display: flex; align-items: end; justify-content: space-between; gap: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--line-grid); }
+.header h1 { max-width: 660px; margin-top: 6px; font: 600 clamp(21px, 3vw, 29px)/1.2 var(--font-sans); letter-spacing: -.035em; }
+.eyebrow, .postHead, .progressLabel, .tagFields label > span { color: var(--text-muted); font: 500 11px/1.4 var(--font-mono); letter-spacing: .025em; }
+.headerActions { display: flex; flex-wrap: wrap; gap: 8px; }
+.primary, .secondary, .vote button { min-height: 44px; border: 1px solid var(--line-grid); border-radius: var(--radius); padding: 9px 14px; font: 600 13px/1.2 var(--font-sans); cursor: pointer; transition: var(--transition-controls); }
+.primary { background: var(--signal-core); color: var(--text-on-accent); border-color: var(--signal-core); }
+.secondary, .vote button { background: var(--bg-panel); color: var(--text-primary); }
+.primary:hover, .secondary:hover, .vote button:hover { filter: brightness(.96); }
+.primary:focus-visible, .secondary:focus-visible, .vote button:focus-visible, .tagFields input:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.secondary:disabled { opacity: .45; cursor: not-allowed; }
+.fileInput { position: absolute; inline-size: 1px; block-size: 1px; clip-path: inset(50%); overflow: hidden; white-space: nowrap; }
+.privacy, .storageNote { color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.privacy { padding: 11px 13px; margin: 14px 0; border: 1px solid var(--line-grid); border-radius: var(--radius); background: var(--bg-subtle); }
+.notice { margin: 12px 0; padding: 10px 12px; border-radius: var(--radius); font-size: 13px; }
+.notice { color: var(--signal-core-text); background: var(--wash-signal); border: 1px solid var(--line-grid); }
+.empty { margin-top: 28px; padding: 30px; border: 1px dashed var(--line-grid); border-radius: 4px; }
+.empty h2, .post h2, .panelTitle h2 { font-size: 18px; font-weight: 600; letter-spacing: -.02em; }
+.empty p { max-width: 560px; margin: 8px 0 18px; color: var(--text-secondary); font-size: 14px; line-height: 1.5; }
+.progress { display: grid; grid-template-columns: auto minmax(80px, 1fr) auto; align-items: center; gap: 14px; margin: 18px 0 14px; color: var(--text-muted); font: 12px var(--font-mono); }
+.progress strong { color: var(--text-primary); }
+.progress progress { width: 100%; height: 5px; accent-color: var(--signal-core); }
+.review { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(380px, .92fr); gap: 14px; align-items: start; }
+.post, .labelPanel { min-width: 0; padding: 18px; border: 1px solid var(--line-grid); border-radius: 4px; background: var(--bg-panel); }
+.postHead { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 14px; }
+.imageFlag { padding: 3px 8px; border: 1px solid var(--line-grid); border-radius: var(--radius-capsule); color: var(--signal-core-text); }
+.post h2 { margin-bottom: 10px; }
+.body { color: var(--text-secondary); font-size: 14px; line-height: 1.62; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 46vh; overflow: auto; scrollbar-color: var(--line-grid) transparent; }
+.images { display: flex; gap: 8px; margin-top: 14px; overflow-x: auto; }
+.imageReview, .imageSource { display: grid; gap: 8px; margin-top: 10px; }
+.images img { max-width: min(100%, 260px); max-height: 220px; object-fit: contain; border: 1px solid var(--line-grid); border-radius: var(--radius-sm); }
+.panelTitle { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.counter { flex: 0 0 auto; max-width: 44%; padding: 5px 8px; border-radius: var(--radius-sm); background: var(--bg-subtle); color: var(--text-muted); font: 10px/1.35 var(--font-mono); overflow-wrap: anywhere; }
+.help { color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+.labelPanel > .help { margin: 7px 0 14px; }
+.tagFields { display: grid; gap: 9px; margin-bottom: 12px; }
+.tagFields label { display: grid; gap: 5px; }
+.tagFields input { min-height: 43px; width: 100%; padding: 9px 11px; border: 1px solid var(--line-grid); border-radius: var(--radius-sm); background: var(--bg-canvas); color: var(--text-primary); font: 14px var(--font-sans); }
+.candidates { margin-top: 22px; border-top: 1px solid var(--line-grid); padding-top: 17px; }
+.candidate { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line-grid); }
+.candidate > span { color: var(--text-muted); font: 11px var(--font-mono); }
+.candidate > strong { font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.vote { display: flex; gap: 5px; }
+.vote button { min-height: 36px; padding: 7px 9px; font-size: 11px; }
+.vote button[aria-pressed="true"] { border-color: var(--signal-core); background: var(--wash-signal); color: var(--signal-core-text); }
+.reveal { margin-top: 10px; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
+.navigation { display: flex; justify-content: space-between; margin-top: 14px; }
+.storageNote { margin-top: 11px; }
+@media (max-width: 760px) {
+  .shell { width: min(100% - 24px, 600px); padding: 18px 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
+  .header { align-items: start; flex-direction: column; gap: 14px; }
+  .header h1 { font-size: 23px; }
+  .headerActions { width: 100%; }
+  .headerActions button { flex: 1; }
+  .progress { grid-template-columns: 1fr auto; gap: 8px 12px; }
+  .progress progress { grid-column: 1 / -1; grid-row: 2; }
+  .review { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .post, .labelPanel { padding: 14px; }
+  .body { max-height: 36vh; }
+  .panelTitle { flex-direction: column; }
+  .counter { max-width: 100%; }
+  .candidate { grid-template-columns: 1fr auto; gap: 6px; }
+  .candidate > strong { grid-column: 1; grid-row: 2; }
+  .vote { grid-column: 2; grid-row: 1 / span 2; flex-direction: column; }
+  .vote button { min-width: 68px; min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .primary, .secondary, .vote button { transition: none; }
+}

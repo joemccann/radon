@@ -27,6 +27,7 @@ export const STATIC_ROUTE_TITLES: Record<string, string> = {
   "/cta": "CTA",
   "/alerts": "Alerts",
   "/admin": "Operator",
+  "/admin/slm-review": "SLM review",
   "/preferences": "Preferences",
   "/profile": "Profile",
   "/kit": "Kit",
