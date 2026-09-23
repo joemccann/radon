@@ -9,9 +9,11 @@
 export class RateLimiter {
   /**
    * @param {number} maxPerSecond — maximum calls to process per 1-second tick
+   * @param {{ maxQueue?: number }} [options] — submissions beyond maxQueue reject
    */
-  constructor(maxPerSecond) {
+  constructor(maxPerSecond, { maxQueue = Infinity } = {}) {
     this._max = maxPerSecond;
+    this._maxQueue = maxQueue;
     this._queue = [];
     this._timer = null;
   }
@@ -24,6 +26,10 @@ export class RateLimiter {
    */
   submit(fn) {
     return new Promise((resolve, reject) => {
+      if (this._queue.length >= this._maxQueue) {
+        reject(new Error("rate limiter queue full"));
+        return;
+      }
       this._queue.push({ fn, resolve, reject });
       this._drain();
     });
