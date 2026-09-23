@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import SlmReview from "../app/admin/slm-review/slm-review";
 
 function packet() {
@@ -28,6 +28,7 @@ function packet() {
 }
 
 describe("private SLM blind review", () => {
+  afterEach(() => cleanup());
   beforeEach(() => localStorage.clear());
 
   it("keeps candidates hidden until human labels are locked and persists only decisions", async () => {
