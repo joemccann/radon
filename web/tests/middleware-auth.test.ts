@@ -64,8 +64,9 @@ const REVIEWED_PUBLIC_NON_SHARE_API_ROUTES = [
   // INSIDE the handler (lib/demo/svixVerify.ts). Reviewed-public deliberately.
   "/api/webhooks/clerk",
   // TradingView alerts (docs/tradingview-integration.md). No session; the
-  // path token and body secret are checked in constant time INSIDE the
-  // handler, and Caddy bounds it to TradingView's sender IPs + 16KB.
+  // path token is checked in constant time INSIDE the handler. A body
+  // secret, when the message carries one, is checked the same way.
+  // Caddy bounds it to TradingView's sender IPs + 16KB.
   "/api/webhooks/tradingview/[token]",
 ] as const;
 
