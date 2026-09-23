@@ -8259,3 +8259,10 @@ Dependency graph: T1 -> T2 -> T3.
 - Fresh export pinned 2026-09-23 02:33:11 UTC: N=2,414 (train 2,527; valid 1,064), test SHA-256 `4408d9a9a4ccb9f0e1afb425bd9004c14992837bab489407d3b2d0d163434660`; test start `2026-07-25T02:33:11Z`; prompt-contract SHA-256 `a174584718d22c7e350fd0e0e905cf0d49896d26355dc55a319ccf8567b94288`; taxonomy 908, rare labels 40. This new time split is post-training but is not the archived 2,420-row set and cannot reproduce the old .579 result.
 - The same holdout has 2,190 image posts; source metadata export contains IDs/image metadata only and stays on the credentialed Mini until the stratified packet is built.
 - Private operator-only review page and client-side local decisions are implemented; desktop (1440px) and mobile (390px) screenshots confirmed responsive, with no mobile horizontal overflow. Production compile, static-generation build, typecheck, and Python syntax checks pass. PR #656 head `375fa02b1b9d88a7c1ec0a358dd959b94788e9be` has all applicable CI green, including Vitest, pytest, image builds, perimeter smoke, and non-gating Playwright; Pushover accepted the green notification (HTTP 200). The PR is open and unmerged, so the operator page is not yet deployed to production. T2 is blocked on private pod access confirmation. The GPU pod remains active at $2.10/hour; RunPod showed $38.49 credit and the planned reserve is $12 at this checkpoint.
+
+## Reliability remediate 2026-09-23 (reduced P0/P1)
+- [x] T1 depends_on: [] Read authoritative issue #81 checkpoint and validate runner/branch.
+- [x] T2 depends_on: [T1] Establish baseline, reproduce REL-280, fix measurement provenance and verify controls.
+- [ ] T3 depends_on: [T2] Run full gates, permanent drills and three closing gates; commit substantive task.
+- [ ] T4 depends_on: [T3] Guard publication and persist complete issue handoff.
+Review: REL-280 red 10/green 52; first full gate matches 33 baseline Python failures, Vitest 10016 passed. Closing drills and two further gate pairs pending; inherited P2/operator acceptance retained.

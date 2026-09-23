@@ -8,6 +8,8 @@ forward-fill 6.95 at volume 0 and must not beat the print.
 
 from pathlib import Path
 
+import pytest
+
 from option_session_mark import (
     last_midpoint_bar_price,
     last_traded_bar_price,
@@ -226,8 +228,68 @@ class TestPollContractMark:
         )
         assert price == PRINT
         assert calc is False
+        assert updated is None
+
+    @pytest.mark.parametrize("failure", ["throw", "empty", "no_volume"])
+    @pytest.mark.parametrize("cached", [{"last": PRINT}, {"mid": PRINT}])
+    def test_failed_history_keeps_provenance_and_allows_next_poll(self, failure, cached):
+        old = {**cached, "checked_on": "2026-09-20"}
+        calls = []
+
+        def fetch():
+            calls.append(1)
+            if len(calls) == 1:
+                if failure == "throw":
+                    raise TimeoutError("history unavailable")
+                if failure == "no_volume":
+                    return _bars((99, 0)), []
+                return [], []
+            return _bars((15, 1)), []
+
+        kwargs = dict(sec_type="OPT", market_price=None, bid=None, ask=None,
+                      close=CLOSE, trade=None, today=TODAY, fetch_history=fetch)
+        price, _, updated = poll_contract_mark(session_mark=old, **kwargs)
+        assert price == PRINT
+        assert updated is None
+        assert old["checked_on"] == "2026-09-20"
+        price, calculated, updated = poll_contract_mark(session_mark=old, **kwargs)
+        assert len(calls) == 2
+        assert price == 15
+        assert calculated is False
+        assert updated["last"] == 15
         assert updated["checked_on"] == TODAY
-        assert updated["last"] == PRINT
+
+    @pytest.mark.parametrize("live_book", [False, True])
+    def test_new_midpoint_does_not_promote_old_trade(self, live_book):
+        kwargs = dict(sec_type="OPT", market_price=None, bid=None, ask=None,
+                      close=CLOSE, trade=None, today=TODAY)
+        _, _, updated = poll_contract_mark(
+            **{**kwargs, "bid": 14 if live_book else None, "ask": 16 if live_book else None},
+            session_mark={"last": PRINT, "checked_on": "2026-09-20"},
+            fetch_history=lambda: ([], _bars((15, 0))),
+        )
+        price, calculated, _ = poll_contract_mark(session_mark=updated, **kwargs)
+        assert price == 15
+        assert calculated is True
+
+    def test_sync_recovery_updates_position_value(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from ib_sync import _stamp_position_price
+
+        client = Mock()
+        client.get_historical_data.side_effect = [TimeoutError(), TimeoutError(), _bars((15, 1))]
+        ticker = SimpleNamespace(marketPrice=lambda: None, bid=None, ask=None, close=CLOSE, last=None)
+        pos = dict(secType="OPT", symbol="META", expiry="20261016", strike=665,
+                   right="P", position=2, contract=SimpleNamespace(symbol="META"))
+        marks = {META_KEY: {"last": PRINT, "checked_on": "2026-09-20"}}
+        assert _stamp_position_price(pos, ticker, marks, client, TODAY) is False
+        assert pos["marketValue"] == 1620
+        assert _stamp_position_price(pos, ticker, marks, client, TODAY) is True
+        assert pos["marketPrice"] == 15
+        assert pos["marketValue"] == 3000
+        assert client.get_historical_data.call_count == 3
+        assert all(call.kwargs["timeout"] == 5.0 for call in client.get_historical_data.call_args_list)
 
     def test_live_ticker_last_is_what_gets_cached(self):
         price, calc, updated = poll_contract_mark(

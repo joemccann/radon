@@ -230,9 +230,7 @@ def poll_contract_mark(
     is_opt = str(sec_type or "").upper() == "OPT"
     need_history = is_opt and not live and not fresh
     trade_bars = midpoint_bars = None
-    fetched = False
     if need_history and fetch_history is not None:
-        fetched = True
         try:
             result = fetch_history()
         except Exception:
@@ -256,20 +254,21 @@ def poll_contract_mark(
         return price, calculated, None
 
     tick_last = _positive_price(trade)
-    store_trade = tick_last
-    if store_trade is None and price is not None and not calculated:
-        store_trade = price
-    store_mid = None
-    if price is not None and calculated and not live_book and tick_last is None:
-        store_mid = price
+    # Persist only observed evidence. The resolved price may be yesterday's
+    # fallback after failed/empty history and must not suppress the next poll.
+    store_trade = tick_last or live_price or last_traded_bar_price(trade_bars)
+    store_mid = last_midpoint_bar_price(midpoint_bars) if store_trade is None else None
+    if store_trade is None and not live_book and store_mid is None:
+        return price, calculated, None
     updated = merge_session_mark(
-        session_mark,
+        # A new book/midpoint must not re-date an older last trade that would
+        # take precedence on subsequent cache-only reads.
+        session_mark if fresh else None,
         today=today,
         trade=store_trade,
         bid=live_bid,
         ask=live_ask,
         mid=store_mid,
-        stamp_checked=fetched,
     )
     return price, calculated, updated
 
