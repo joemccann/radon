@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import ErrorToast from "@/components/ErrorToast";
 import styles from "./slm-review.module.css";
 
 type CandidateAlias = "Candidate 1" | "Candidate 2" | "Candidate 3";
@@ -186,7 +187,7 @@ export default function SlmReview({ reviewer }: { reviewer: string }) {
         </div>
       </header>
       <div className={styles.privacy}>Operator only. Packet text stays in this tab. Images load from their source only when requested; decisions stay in this browser.</div>
-      {error && <p role="alert" className={styles.error}>{error}</p>}
+      {error && <ErrorToast message={error} />}
       {notice && <p role="status" className={styles.notice}>{notice}</p>}
       {!packet || !item ? (
         <section className={styles.empty}>

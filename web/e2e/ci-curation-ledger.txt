@@ -247,6 +247,9 @@ ws-connection-stability.spec.ts
 # REVIEWED 2026-09-06 clear-auth-pages.spec.ts — held out because it exercises
 #   real Clerk sign-in/sign-up rendering and cannot run under CI authless mode.
 #   Chromium passed locally against the normal-auth production server (6 passed).
+# REVIEWED 2026-09-22 clear-auth-pages.spec.ts — added the operator-only SLM
+#   review route check; unauthenticated production request redirected to setup
+#   in this unconfigured local environment, and the review packet never rendered.
 # REVIEWED 2026-09-06 clear-metric-accessibility.spec.ts — held out: Clear
 #   metric keyboard/pointer inventory. Compiled Chromium passed locally
 #   against next start.

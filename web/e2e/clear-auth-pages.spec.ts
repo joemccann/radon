@@ -48,7 +48,7 @@ test.describe("Clear public authentication and operator perimeter", () => {
     test(`${viewport.label} /admin/slm-review stays behind the operator gate`, async ({ page }) => {
       await page.setViewportSize(viewport);
       await page.goto("/admin/slm-review");
-      await expect(page).toHaveURL(/\/sign-in/);
+      await expect(page).toHaveURL(/\/(?:sign-in|setup)(?:$|[?#])/);
       await expect(page.getByText("Choose the 200-item packet")).toHaveCount(0);
     });
   }

@@ -13,8 +13,7 @@
 .fileInput { position: absolute; inline-size: 1px; block-size: 1px; clip-path: inset(50%); overflow: hidden; white-space: nowrap; }
 .privacy, .storageNote { color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
 .privacy { padding: 11px 13px; margin: 14px 0; border: 1px solid var(--line-grid); border-radius: var(--radius); background: var(--bg-subtle); }
-.error, .notice { margin: 12px 0; padding: 10px 12px; border-radius: var(--radius); font-size: 13px; }
-.error { color: var(--fault); background: var(--wash-warn); border: 1px solid var(--fault); }
+.notice { margin: 12px 0; padding: 10px 12px; border-radius: var(--radius); font-size: 13px; }
 .notice { color: var(--signal-core-text); background: var(--wash-signal); border: 1px solid var(--line-grid); }
 .empty { margin-top: 28px; padding: 30px; border: 1px dashed var(--line-grid); border-radius: 4px; }
 .empty h2, .post h2, .panelTitle h2 { font-size: 18px; font-weight: 600; letter-spacing: -.02em; }
