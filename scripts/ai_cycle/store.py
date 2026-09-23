@@ -287,16 +287,21 @@ class ObservationStore:
         return self._read("ai_cycle_observations", "available_at", as_of)
 
     def read_snapshot_observations(self, as_of=None):
+        from .snapshot import vintage_rank
+
         at = utc(as_of)
         # SEC XBRL includes comparative periods before the 2009 mandate; the
         # oldest continuous operational series (EIA/NOAA) begins in July 2018.
         # Keep these stable instead of silently moving the chart window forward.
+        # Refetches append a new fingerprint. The snapshot keeps one winning
+        # vintage per identity; counting every revision trips the row cap
+        # before later winning rows are read (2026-09-23 backfill).
         cutoff = utc("2006-12-31T00:00:00Z")
         daily_cutoff = utc("2018-07-01T00:00:00Z")
-        rows, cursor = [], 0
+        latest, cursor = {}, 0
         deadline = time.monotonic() + _SNAPSHOT_READ_DEADLINE_SECONDS
         while True:
-            if time.monotonic() > deadline or len(rows) >= _SNAPSHOT_MAX_ROWS:
+            if time.monotonic() > deadline:
                 raise RuntimeError("AI snapshot history exceeds bounded read budget")
             try:
                 page = self._query(
@@ -307,9 +312,26 @@ class ObservationStore:
                 if "no such table: ai_cycle_observations" in str(exc):
                     return []
                 raise
-            rows.extend(json.loads(row[1]) for row in page)
+            for payload in (row[1] for row in page):
+                row = json.loads(payload)
+                identity = (
+                    row["indicator_id"],
+                    row["series_id"],
+                    row["source_id"],
+                    row["period_start"],
+                    row["period_end"],
+                    row["methodology_version"],
+                    row["cohort_version"],
+                )
+                current = latest.get(identity)
+                if current is None:
+                    if len(latest) >= _SNAPSHOT_MAX_ROWS:
+                        raise RuntimeError("AI snapshot history exceeds bounded read budget")
+                    latest[identity] = row
+                elif vintage_rank(row) > vintage_rank(current):
+                    latest[identity] = row
             if len(page) < _SNAPSHOT_PAGE_SIZE:
-                return rows
+                return list(latest.values())
             cursor = int(page[-1][0])
 
     def read_source_statuses(self, as_of=None):

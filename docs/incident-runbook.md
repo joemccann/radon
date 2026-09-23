@@ -1066,6 +1066,46 @@ Peak: 2026-09-17 07:22Z, page `1e842638…`. Timer next ~24h.
 
 ---
 
+## ai-cycle-backfill-snapshot-vintage-budget
+
+**`radon-ai-cycle-backfill.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when `persist_api_snapshot` counts every appended revision
+toward the snapshot row cap.** Peak: 2026-09-23 05:42Z, page `b0417cf0…`.
+Timer next ~24h. The 07:15 UTC `radon-ai-cycle.service` reader is the same
+function and fails the same way until this fix is deployed.
+
+- **Mechanism:** `--backfill` commits windows, then `build_snapshot` calls
+  `read_snapshot_observations`. Refetches append a new fingerprint because
+  `fetched_at` is inside the payload hash. The reader kept every revision in
+  a list and raised `AI snapshot history exceeds bounded read budget` once
+  that list hit `_SNAPSHOT_MAX_ROWS` (500000), before later winning vintages
+  were read. Live Turso at the page: `COUNT(*)=507455`,
+  `COUNT(DISTINCT identity)=99524`. `latest_vintages` already discards the
+  older revisions. `Type=oneshot` has no `Restart=`. ExecMain 05:32:44Z to
+  05:42:07Z, `ExecMainStatus=1`, under `TimeoutStartSec=1200` and under the
+  900s read deadline. Edge and `:8321/health/lite` stayed up. Python Turso
+  canary `SELECT 1` 232 ms.
+- **Detection:** journal `RuntimeError: AI snapshot history exceeds bounded
+  read budget` at `store.read_snapshot_observations` via
+  `snapshot.persist_api_snapshot`. `systemctl show` → `exit-code` / `0`.
+- **Discriminating check:** Turso canary `SELECT 1` succeeds;
+  `COUNT(*) FROM ai_cycle_observations` is above 500000 while
+  `COUNT(DISTINCT identity)` is well below it. Canary fail too → Turso
+  platform, stand down. `Result=signal` is deploy stop-clean. IB
+  `/health/lite` down → API/IB, stand down. Do not `reset-failed` + start
+  before this reader is live: the same cap still raises.
+- **Remediation (code):** keep the winning vintage per identity
+  (`vintage_rank`) and apply the row cap to distinct identities. The time
+  deadline still bounds the scan. After deploy, the next 05:30 UTC backfill
+  or one `radon unit restart radon-ai-cycle-backfill.service` rebuilds the
+  snapshot. The 07:15 UTC daily unit needs the same deploy.
+- **Regression:**
+  `test_ai_cycle_core.py::test_snapshot_read_keeps_latest_vintage_past_the_retained_row_budget`,
+  `test_snapshot_read_still_bounds_distinct_identities`.
+- **Code:** `scripts/ai_cycle/store.py` (`read_snapshot_observations`).
+
+---
+
 ## trin-health-heartbeat-timeout
 
 **`radon-trin.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
