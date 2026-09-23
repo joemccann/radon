@@ -47,6 +47,8 @@ In production both keys must also survive `render_env_file`'s newsfeed allowlist
 4. **Failure capture** — any login-flow failure dumps a screenshot to `data/newsfeed-debug-<ts>.png` (gitignored) for postmortem.
 5. **Cookie rotation** — themarketear can rotate FirebaseUI cookies on its own; just delete `data/newsfeed-storage.json` and the next cycle will re-authenticate from scratch.
 
+**Chromium sandbox (production container).** The newsfeed container runs under the root-owned seccomp profile `/etc/radon/seccomp/chromium.json` (source `cloud/config/seccomp/chromium.json`), without host IPC, with a 512m `/dev/shm`, and Chromium launches with its own sandbox. The config-drift audit compares the installed profile against the GitHub main-tip blob (drift id `file-mismatch:chromium-seccomp`). Check after a deploy: `journalctl -u radon-newsfeed --since -1h | grep 'chromium sandbox unavailable'` should print nothing; a hit means the host refused the sandbox and the scraper is on the `--no-sandbox` fallback. Full contract: `docs/operations.md` "Newsfeed least privilege".
+
 **Hetzner first-time setup:**
 
 1. The reviewed deploy transaction installs the Playwright browser dependency before restarting the newsfeed service (idempotent).

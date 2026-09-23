@@ -37,6 +37,8 @@ Live file -> repo source of truth (install command, for when live is stale):
   /etc/radon/ib-gateway-compose.yml <- GitHub main-tip blob cloud/docker-compose.yml
       (R-636 provenance: the working tree is radon-writable and is NOT the
       comparison basis; installed by install_docker_gw / refresh-control-plane)
+  /etc/radon/seccomp/chromium.json <- GitHub main-tip blob cloud/config/seccomp/chromium.json
+      (same provenance; installed by bootstrap-control-plane.sh / refresh-control-plane)
   /etc/sudoers.d/radon* <- config/sudoers.d/*
       sudo visudo -cf config/sudoers.d/NAME && sudo install -m 0440 config/sudoers.d/NAME /etc/sudoers.d/NAME
   docker-compose actually running the ib-gateway container <- docker-compose.yml
@@ -155,6 +157,12 @@ FILE_PAIRS = [
         "/etc/radon/ib-gateway-compose.yml",
         "git:docker-compose.yml",
         "ib-gateway-compose",
+    ),
+    # The newsfeed Chromium seccomp filter root's engine loads; same basis.
+    (
+        "/etc/radon/seccomp/chromium.json",
+        "git:config/seccomp/chromium.json",
+        "chromium-seccomp",
     ),
 ]
 

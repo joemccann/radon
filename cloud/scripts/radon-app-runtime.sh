@@ -29,6 +29,7 @@ if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
   DEPLOY_LOCK_FILE="${RADON_TEST_DEPLOY_LOCK:-${STATE_DIR}/deploy.lock}"
   GREEN_MARKER_FILE="${RADON_TEST_GREEN_MARKER:-${STATE_DIR}/last-green}"
   TRANSITION_JOURNAL_FILE="${RADON_TEST_TRANSITION_JOURNAL:-${STATE_DIR}/transition.json}"
+  CHROMIUM_SECCOMP_PROFILE="${RADON_TEST_SECCOMP_PROFILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/config/seccomp/chromium.json}"
 else
   if (( EUID != 0 )); then
     echo "radon-app-runtime must run as root" >&2
@@ -68,6 +69,9 @@ else
   DEPLOY_LOCK_FILE=/home/radon/.radon-deploy.lock
   GREEN_MARKER_FILE=/home/radon/.radon-last-green-deploy
   TRANSITION_JOURNAL_FILE=/home/radon/.radon-deploy-transition.json
+  # Root-owned control-plane copy of cloud/config/seccomp/chromium.json. Never
+  # the checkout: radon can write that, and could widen its own filter.
+  CHROMIUM_SECCOMP_PROFILE=/etc/radon/seccomp/chromium.json
 fi
 
 readonly SECRET_STORE_CREDENTIAL_NAME=radon-secret-store-key
@@ -524,8 +528,8 @@ render_env_file() {
       -e "s/^([A-Za-z_][A-Za-z0-9_]*=)'(.*)'[[:space:]]*\$/\1\2/" \
       -e 's/^([A-Za-z_][A-Za-z0-9_]*=)"(.*)"[[:space:]]*$/\1\2/' \
       "$ENV_FILE" > "$out"
-    # The newsfeed's Chromium renders third-party web content with the
-    # sandbox disabled; hand that unit only the keys its own code reads,
+    # The newsfeed's Chromium renders third-party web content (and
+    # may fall back to --no-sandbox); hand that unit only the keys its own code reads,
     # never the full production secret set.
     if [[ "$unit" == "radon-newsfeed.service" ]]; then
       grep -E '^(#|$|(NODE_ENV|ANTHROPIC_API_KEY|CLAUDE_CODE_API_KEY|CLAUDE_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CONFIG_DIR|CODEX_HOME|GROK_AUTH_FILE|GEMINI_OAUTH_TOKEN|ANTIGRAVITY_CLI|RADON_LADDER_[A-Z0-9_]+|XAI_API_KEY|GROK_API_KEY|OPENAI_API_KEY|GEMINI_API_KEY|NVIDIA_API_KEY|CEREBRAS_API_KEY|RADON_PYTHON_BIN|TURSO_DB_URL|TURSO_AUTH_TOKEN|PLAYWRIGHT_CHROMIUM_SANDBOX|RADON_DB_NO_REPLICA|RADON_DB_USE_REPLICA|RADON_MEDIA_LOCAL|RADON_MEDIA_REMOTE|RADON_NEWSFEED_[A-Z0-9_]+|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD)=)' \
@@ -632,6 +636,14 @@ cmd_run() {
     *) exit 64 ;;
   esac
 
+  # Fail closed: the newsfeed never starts under the engine default filter,
+  # which would kill Chromium's namespace sandbox at launch.
+  if [[ "$unit" == "radon-newsfeed.service" ]] && \
+     [[ ! -f "$CHROMIUM_SECCOMP_PROFILE" || -L "$CHROMIUM_SECCOMP_PROFILE" ]]; then
+    echo "radon-app-runtime: chromium seccomp profile missing: ${CHROMIUM_SECCOMP_PROFILE}" >&2
+    exit 78
+  fi
+
   local credential_gid=""
   if [[ "$unit" == "radon-api.service" ]]; then
     validate_api_startup_inputs
@@ -678,7 +690,7 @@ cmd_run() {
     prepare_private_dir "$ids" "$LEASE_DIR" "2FA lease"
   fi
 
-  # Newsfeed renders third-party content in a sandbox-disabled Chromium: it
+  # Newsfeed renders third-party content in Chromium (sandbox fallback possible): it
   # gets an isolated bridge network (egress only), never the host stack.
   local container_network=host
   [[ "$unit" == "radon-newsfeed.service" ]] && container_network=bridge
@@ -782,8 +794,8 @@ cmd_run() {
     # chromium_headless_shell-1217 there. Host deploy already caches that
     # revision at radon's ms-playwright dir. Bind it onto /ms-playwright so
     # this unit can launch without waiting for a new GHCR tag (R-234).
-    # Overlay scripts/newsfeed from the live checkout so --no-sandbox in
-    # browser.js applies before the next image build.
+    # Overlay scripts/newsfeed from the live checkout so browser.js launch
+    # changes apply before the next image build.
     local newsfeed_browsers newsfeed_scripts
     if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
       newsfeed_browsers="${RADON_NEWSFEED_BROWSERS_PATH:-${STATE_DIR}/ms-playwright}"
@@ -799,8 +811,15 @@ cmd_run() {
     # (/home/radon/radon-cloud/media/ does not exist in the container), so the
     # rsync hop collapses to a no-op instead of failing on an image with no
     # rsync. Without this every scraped image 404s on media.radon.run.
-    set -- "$@" --ipc host \
-      --env PLAYWRIGHT_CHROMIUM_SANDBOX=0 \
+    #
+    # DS-2026-09-20-04: Chromium renders hostile pages, so it keeps its own
+    # sandbox. The seccomp profile is the engine default plus the clone /
+    # unshare / setns / chroot its namespace sandbox needs without
+    # CAP_SYS_ADMIN (config/seccomp/chromium.json). No host IPC namespace; the
+    # private /dev/shm is sized because the engine's 64 MiB crashes renderers.
+    set -- "$@" \
+      --security-opt "seccomp=${CHROMIUM_SECCOMP_PROFILE}" \
+      --shm-size 512m \
       --env PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
       -v "${newsfeed_browsers}:/ms-playwright" \
       -v "${newsfeed_scripts}:/home/radon/radon/scripts/newsfeed:ro" \
