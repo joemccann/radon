@@ -949,6 +949,9 @@ acquire_runner_lock "$RUNNER_LOCK" || {
 }
 trap 'release_runner_lock "$RUNNER_LOCK"; if [[ -n "${NIGHTLY_PR_GUARD_DIR:-}" ]]; then rm -rf -- "$NIGHTLY_PR_GUARD_DIR"; fi' EXIT
 
+# logs/ survives every git clean: refuse a symlinked ancestor before mkdir -p
+# follows it and creates the leaf outside the clone. CWE-59.
+refuse_symlink "$REPO/logs" || exit 2
 LOG_DIR="$REPO/logs/documentation-nightly"
 mkdir -p "$LOG_DIR"
 refuse_symlink "$LOG_DIR" || exit 2
