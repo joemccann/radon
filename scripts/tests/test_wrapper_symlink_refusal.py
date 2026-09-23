@@ -89,6 +89,20 @@ def test_log_dir_verified_before_chmod(loop):
 
 
 @pytest.mark.parametrize("loop", sorted(LOOPS))
+def test_logs_parent_verified_before_mkdir(loop):
+    """logs/ survives every git clean; a symlinked logs/ ancestor would make
+    `mkdir -p "$LOG_DIR"` create the leaf outside the clone, where the leaf
+    check then passes."""
+    src = LOOPS[loop].read_text()
+    guard = 'refuse_symlink "$REPO/logs" || exit 2'
+    mkdir = 'mkdir -p "$LOG_DIR"'
+    assert guard in src, f"{loop}: logs/ ancestor is not checked for a symlink"
+    assert src.index(guard) < src.index(mkdir), (
+        f"{loop}: symlink refusal on logs/ must run before mkdir -p LOG_DIR"
+    )
+
+
+@pytest.mark.parametrize("loop", sorted(LOOPS))
 def test_log_rotation_deletes_regular_files_only(loop):
     src = LOOPS[loop].read_text()
     assert '[[ -f "$LOG_DIR/$old" && ! -L "$LOG_DIR/$old" ]] || continue' in src, (

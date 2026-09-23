@@ -1060,6 +1060,35 @@ class TestOperatorSafetyOwners:
             db.executescript(migration_0085)
             assert db.execute("SELECT raw_body, symbol FROM tv_alert_events").fetchall() == rows
 
+    def test_tradingview_migration_0086_redacts_nested_secret_behind_redacted_top_level(self):
+        import sqlite3
+
+        names = ("0084_redact_tv_alert_raw_body.sql",
+                 "0085_redact_tv_alert_raw_body_nested_secret.sql",
+                 "0086_redact_tv_alert_raw_body_residual_secret.sql")
+        with sqlite3.connect(":memory:") as db:
+            db.executescript("CREATE TABLE tv_alert_events (raw_body TEXT, symbol TEXT);"
+                             "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT);")
+            db.executemany("INSERT INTO tv_alert_events VALUES (?, ?)", [
+                # Top-level AND nested secret: 0084 rewrites the top level, so
+                # 0085's top-level-IS-NULL guard skips the row.
+                ('{"secret":"fixture-only","payload":{"secret":"fixture-only"},"symbol":"TEST"}', "TEST"),
+                ('{"secret":"fixture-only","note":"secret=fixture-only","symbol":"TEST"}', "TEST"),
+                # Fully redacted rows (top level and nested) stay intact.
+                ('{"secret":"[REDACTED]","symbol":"TEST"}', "TEST"),
+                ('{"secret":"[REDACTED]","payload":{"secret":"[REDACTED]"},"symbol":"TEST"}', "TEST"),
+            ])
+            for name in names:
+                db.executescript((_ROOT / "scripts/db/migrations" / name).read_text())
+            rows = db.execute("SELECT raw_body, symbol FROM tv_alert_events").fetchall()
+            assert all("fixture-only" not in raw for raw, _symbol in rows)
+            assert rows[0][0].startswith("[REDACTED PRE-0086")
+            assert rows[1][0].startswith("[REDACTED PRE-0086")
+            assert rows[2][0] == '{"secret":"[REDACTED]","symbol":"TEST"}'
+            assert rows[3][0] == '{"secret":"[REDACTED]","payload":{"secret":"[REDACTED]"},"symbol":"TEST"}'
+            db.executescript((_ROOT / "scripts/db/migrations" / names[2]).read_text())
+            assert db.execute("SELECT raw_body, symbol FROM tv_alert_events").fetchall() == rows
+
     def test_destructive_flex_cleanup_has_recovery_owner(self):
         doc = (_ROOT / "docs/cloud-services.md").read_text()
         section = _section(doc, "Legacy Flex aggregate cleanup")

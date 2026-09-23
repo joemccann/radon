@@ -54,6 +54,14 @@ def _git_recorder(bin_dir: Path, log: Path) -> None:
     git.chmod(0o755)
 
 
+def _timeout_passthrough(bin_dir: Path) -> None:
+    # The launcher fails closed without timeout/gtimeout; macOS ships neither
+    # on /usr/bin:/bin, so stand in a pass-through for the bounded fetch.
+    stub = bin_dir / "timeout"
+    stub.write_text('#!/bin/sh\nshift 3\nexec "$@"\n', encoding="utf-8")
+    stub.chmod(0o755)
+
+
 def _assert_pinned(log: Path) -> None:
     lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
     assert lines, "no git invocation recorded"
@@ -76,6 +84,7 @@ def test_launchd_pre_reset_pins_hooks_off(plist, tmp_path):
     bin_dir.mkdir()
     log = tmp_path / "git.log"
     _git_recorder(bin_dir, log)
+    _timeout_passthrough(bin_dir)
     script = re.sub(r"__[A-Z]+_REPO__", str(clone), program[2])
     target = script.rsplit('"$C/', 1)[1].split('"', 1)[0]
     wrapper = clone / target
@@ -198,6 +207,7 @@ def test_launchd_never_executes_clone_after_failed_refresh(plist, failed_step, t
     git = bin_dir / "git"
     git.write_text(f'#!/bin/sh\nfor arg do [ "$arg" = "{failed_step}" ] && exit 1; done\nexit 0\n')
     git.chmod(0o755)
+    _timeout_passthrough(bin_dir)
     proc = subprocess.run([BASH, "-c", script], env={"PATH": f"{bin_dir}:/usr/bin:/bin"}, timeout=30)
     assert proc.returncode == 70
     assert not canary.exists()

@@ -46,3 +46,42 @@ describe("SignOutCachePurge", () => {
     expect(postMessage).toHaveBeenLastCalledWith({ type: "radon-clear-caches", identity: "user_b" });
   });
 });
+
+describe("SignOutCachePurge — in-memory per-user stores", () => {
+  it("drops return-cache snapshots and bookmarks when the identity changes", async () => {
+    const { createReturnCache } = await import("../lib/returnCache");
+    const { useBookmarks } = await import("../lib/useBookmarks");
+    Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: undefined });
+
+    const owner = { id: "b1", post_id: "post-owner", snapshot: null, saved_at: "2026-09-01T00:00:00Z" };
+    let served: unknown[] = [owner];
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ bookmarks: served }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const seen: string[][] = [];
+    function Probe() {
+      const { bookmarks } = useBookmarks();
+      seen.push(bookmarks.map((b) => b.post_id));
+      return null;
+    }
+
+    mocks.auth.isLoaded = true;
+    mocks.auth.isSignedIn = true;
+    mocks.auth.userId = "user_a";
+    mocks.useAuth.mockImplementation(() => ({ ...mocks.auth }));
+
+    const returnCache = createReturnCache();
+    const view = render(<><SignOutCachePurge /><Probe /></>);
+    await waitFor(() => expect(seen.at(-1)).toEqual(["post-owner"]));
+    returnCache.write("/api/portfolio", { data: { owner: true }, fetchedAt: Date.now(), lastSync: null });
+
+    served = [];
+    mocks.auth.isSignedIn = false;
+    mocks.auth.userId = null;
+    view.rerender(<><SignOutCachePurge /><Probe /></>);
+
+    await waitFor(() => expect(seen.at(-1)).toEqual([]));
+    expect(returnCache.read("/api/portfolio")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+});

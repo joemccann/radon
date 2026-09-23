@@ -101,4 +101,14 @@ describe("RateLimiter", () => {
     expect(limiter.pending).toBe(0);
     limiter.clear();
   });
+  it("rejects submissions beyond maxQueue instead of growing without bound", async () => {
+    const limiter = new RateLimiter(1, { maxQueue: 2 });
+    const a = limiter.submit(() => "a");
+    const b = limiter.submit(() => "b");
+    await expect(limiter.submit(() => "c")).rejects.toThrow(/queue full/i);
+    expect(limiter.pending).toBe(2);
+    vi.advanceTimersByTime(2000);
+    await expect(Promise.all([a, b])).resolves.toEqual(["a", "b"]);
+    limiter.clear();
+  });
 });

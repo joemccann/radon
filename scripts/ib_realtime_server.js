@@ -37,6 +37,7 @@ import {
 } from "./ib_tick_handler.js";
 import { LRUCache } from "./lib/lru-cache.js";
 import { RateLimiter } from "./lib/rate-limiter.js";
+import { MAX_SNAPSHOT_QUEUE, MAX_WS_PAYLOAD_BYTES, capItems } from "./lib/relayLimits.js";
 import {
   buildRelayHealthDetail,
   decideHealthWrite,
@@ -158,7 +159,7 @@ function parseArgs(argv) {
 }
 
 function normalizeSymbols(raw) {
-  return raw
+  return capItems(raw)
     .map((symbol) => String(symbol).trim().toUpperCase())
     .filter((symbol) => symbol.length > 0);
 }
@@ -175,7 +176,7 @@ function optionKey(c) {
  */
 function normalizeContracts(raw) {
   if (!Array.isArray(raw)) return [];
-  return raw
+  return capItems(raw)
     .map((c) => {
       if (typeof c !== "object" || c === null) return null;
       const symbol = typeof c.symbol === "string" ? c.symbol.trim().toUpperCase() : null;
@@ -194,7 +195,7 @@ function normalizeContracts(raw) {
  */
 function normalizeIndexes(raw) {
   if (!Array.isArray(raw)) return [];
-  return raw
+  return capItems(raw)
     .map((c) => {
       if (typeof c !== "object" || c === null) return null;
       const symbol = typeof c.symbol === "string" ? c.symbol.trim().toUpperCase() : null;
@@ -323,7 +324,7 @@ const httpServer = http.createServer((_req, res) => {
   res.end("WebSocket upgrade required");
 });
 
-const wss = new WebSocketServer({ noServer: true });
+const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_PAYLOAD_BYTES });
 
 httpServer.on("upgrade", async (req, socket, head) => {
   // Skip ticket validation only for genuine loopback server-to-server calls.
@@ -718,7 +719,7 @@ let pingIntervalTimer = null;
 
 /* ─── Snapshot Rate Limiter ──────────────────────────────────────────────
  * IB allows ~100 snapshot requests/sec. We cap at 50 to leave headroom. */
-const snapshotLimiter = new RateLimiter(50);
+const snapshotLimiter = new RateLimiter(50, { maxQueue: MAX_SNAPSHOT_QUEUE });
 
 let ibConnected = false;
 // R-167 / R-168: consecutive failed reconnects drive the backoff, and the
@@ -1886,6 +1887,19 @@ function unsubscribeClientFromSymbol(client, symbol) {
 
 function disconnectClient(client) {
   removeBatchBuffer(client);
+  // Pending snapshots for a gone client: stop their timers, cancel any already
+  // sent to IB; queued ones become no-ops once their entry is gone.
+  for (const [requestId, req] of [...snapshotRequests]) {
+    if (req.client !== client) continue;
+    clearSnapshot(requestId);
+    if (req.sent) {
+      try {
+        ib.cancelMktData(requestId);
+      } catch {
+        // Ignore cleanup failures.
+      }
+    }
+  }
   clientLastPong.delete(client);
   clientDroppedFrames.delete(client);
   if (DEPTH_ENABLED) {
@@ -1936,6 +1950,7 @@ function sendUnsubscribedConfirmation(client, symbols) {
 
 async function handleSnapshotRequest(client, symbols) {
   for (const symbol of symbols) {
+    if (!clients.has(client)) return;
     if (!ibConnected) {
       sendMessage(client, {
         type: "error",
@@ -1969,6 +1984,8 @@ async function handleSnapshotRequest(client, symbols) {
 
     try {
       await snapshotLimiter.submit(() => {
+        if (!snapshotRequests.has(requestId)) return;
+        requestState.sent = true;
         // IB rejects snapshot=true paired with generic ticks (233=RTVolume,
         // 165=Misc Stats) — both are streaming-only. Snapshot still returns
         // bid/ask/last/close/volume/high/low/open via default tick types,

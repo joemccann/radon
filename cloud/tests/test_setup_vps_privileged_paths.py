@@ -704,6 +704,61 @@ class TestDirectoryOwnership:
             "/dev/null /home/radon/.radon-deploy.lock"
         )
 
+    def test_deploy_lock_creation_never_lands_in_a_raced_directory_link(
+        self, harness: dict[str, Path]
+    ) -> None:
+        # /home/radon is radon-owned, so a link can appear at the lock path
+        # after the -L/-e checks. Creation must replace that link, never
+        # drop a radon-owned file inside whatever directory it points at.
+        real_install = None
+        for cand in ("ginstall", "install"):
+            found = shutil.which(cand)
+            if found and subprocess.run([found, "--version"], capture_output=True).returncode == 0:
+                real_install = found
+                break
+        if real_install is None:
+            pytest.skip("needs GNU install (coreutils)")
+        lock = harness["tmp"] / "home-radon" / ".radon-deploy.lock"
+        lock.parent.mkdir()
+        trusted = harness["tmp"] / "root-trusted"
+        trusted.mkdir()
+        # Unprivileged stand-in for root's install: drops -o/-g, redirects the
+        # hard-coded lock path into the sandbox and plants the raced link there.
+        _write_executable(
+            harness["bin"] / "install",
+            f"""#!/bin/bash
+args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o|-g) shift 2 ;;
+    /home/radon/.radon-deploy.lock) ln -s {trusted!s} {lock!s}; args+=({lock!s}); shift ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+exec {real_install} "${{args[@]}}"
+""",
+        )
+        (harness["cloud"] / "scripts" / "ib-gateway-control.sh").write_text("#!/bin/bash\n")
+        _git(harness["cloud"], "add", "scripts/ib-gateway-control.sh")
+        _git(harness["cloud"], "commit", "-q", "-m", "gateway helper")
+        _git(harness["cloud"], "update-ref", "refs/remotes/origin/main", "HEAD")
+        target = harness["tmp"] / "radon-ib-gateway-control"
+        result = _run_setup_function(
+            "install_gateway_control",
+            harness["bin"],
+            {
+                **_base_env(harness),
+                "RADON_HELPER_SKIP_CHOWN": "0",
+                "RADON_GATEWAY_CONTROL_TARGET": str(target),
+                "RADON_STATE_DIR": str(harness["tmp"] / "state"),
+                "RADON_SYSTEM_PYTHON": shutil.which("python3") or "/usr/bin/python3",
+            },
+        )
+        assert list(trusted.iterdir()) == [], "lock landed in the linked directory"
+        assert result.returncode == 0, result.stderr
+        assert not lock.is_symlink() and lock.is_file()
+        assert _mode(lock) == "0o600"
+
 
 # ── (e) static contract over every privileged line ────────────────────
 

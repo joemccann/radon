@@ -72,6 +72,16 @@ function invalidateReads(): void {
   inFlight = null;
 }
 
+/** Drop the previous account's bookmarks; mounted consumers refetch. */
+export function resetBookmarksCache(): void {
+  invalidateReads();
+  cache = [];
+  loaded = false;
+  loadError = null;
+  if (subscribers.size) void loadBookmarks(true);
+  else notify();
+}
+
 function enqueueMutation(operation: () => Promise<void>): Promise<void> {
   const result = mutationQueue.then(operation, operation);
   mutationQueue = result.catch(() => undefined);

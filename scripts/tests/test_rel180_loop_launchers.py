@@ -68,6 +68,46 @@ class TestPlistFetchIsBounded:
         )
         assert "ConnectTimeout" in program and "ServerAliveInterval" in program, program
 
+    @staticmethod
+    def _run_program(loop: str, tmp_path: Path, *, tools: dict[str, str]) -> tuple[int, str]:
+        """Run the plist's shell program with PATH limited to `tools` stubs."""
+        clone = tmp_path / "clone"
+        (clone / "scripts").mkdir(parents=True)
+        log = tmp_path / "calls.log"
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        for name in ("dirname", "cat"):
+            (bin_dir / name).symlink_to(shutil.which(name))
+        _executable(bin_dir / "git", f'#!/bin/sh\necho "git $*" >> "{log}"\nexit 0\n')
+        for name, body in tools.items():
+            _executable(bin_dir / name, body.replace("__LOG__", str(log)))
+        args = _plist(loop)["ProgramArguments"]
+        script = args[2].replace("__WEEKEND_REPO__", str(clone)).replace("__DEEPSEC_REPO__", str(clone))
+        wrapper = re.search(r'exec /bin/bash "\$C/scripts/([a-z_]+\.sh)"', script).group(1)
+        _executable(clone / "scripts" / wrapper, f'#!/bin/sh\necho "wrapper" >> "{log}"\nexit 0\n')
+        proc = subprocess.run(
+            [BASH, "-c", script], env={"PATH": str(bin_dir), "HOME": str(tmp_path)},
+            capture_output=True, text=True, timeout=30,
+        )
+        return proc.returncode, log.read_text() if log.exists() else ""
+
+    @pytest.mark.parametrize("loop", sorted(PLISTS))
+    def test_the_pre_lock_fetch_falls_back_to_gtimeout(self, loop: str, tmp_path: Path) -> None:
+        # Homebrew coreutils ships only the g-prefixed binary on the plist PATH.
+        rc, calls = self._run_program(loop, tmp_path, tools={
+            "gtimeout": '#!/bin/sh\necho "gtimeout $*" >> "__LOG__"\nshift 3\nexec "$@"\n',
+        })
+        assert rc == 0, calls
+        assert re.search(r"^gtimeout .*git .* fetch", calls, re.M), (
+            f"{loop}: with only gtimeout installed the pre-lock fetch ran unbounded: {calls!r}"
+        )
+
+    @pytest.mark.parametrize("loop", sorted(PLISTS))
+    def test_the_pre_lock_fetch_fails_closed_without_a_timeout(self, loop: str, tmp_path: Path) -> None:
+        rc, calls = self._run_program(loop, tmp_path, tools={})
+        assert rc != 0, f"{loop}: ran with no timeout binary: {calls!r}"
+        assert "fetch" not in calls and "wrapper" not in calls, calls
+
 
 # --- R-503: the five fires are staggered ------------------------------------
 

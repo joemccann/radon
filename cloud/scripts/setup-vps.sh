@@ -1246,7 +1246,8 @@ install_gateway_control() {
         return 1
       fi
     else
-      install -m 0600 -o radon -g radon /dev/null /home/radon/.radon-deploy.lock
+      # -T: a link raced in after the checks is replaced, never entered.
+      install -T -m 0600 -o radon -g radon /dev/null /home/radon/.radon-deploy.lock
     fi
   fi
   mv -f "$staged" "$target"
