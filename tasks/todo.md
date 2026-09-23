@@ -8185,3 +8185,23 @@ Dependency graph: T1 -> T2 -> T3.
 - #638 already isolates host git configuration, but refresh failure propagation and shared browser lifecycle required follow-up.
 - #652 adds failure/idempotency/transition cases and all-provider endpoint-removal coverage.
 - Static diff reviewed independently; local suites intentionally omitted. Exact-head GitHub CI is the completion gate.
+# Task: Close SLM evaluation gaps with a private human-review workflow (2026-09-23)
+
+## Dependency graph
+- T1 depends_on: [] - Pin a fresh post-training time holdout because the original 2,420-row set is unavailable; record hash, extraction cutoff, and explicit non-equivalence. Set rare recall target to max(A - 5 pp, 50% pooled), with every rare label at support >=10 reaching >=30%; require C human acceptance >=A and paired 95% interval lower bound >=-5 pp on the 200-row blinded sample. Any missing gate fails closed.
+- T2 depends_on: [T1] - Re-run saved checkpoint on the pinned holdout; persist ID-aligned predictions, validity, latency, and per-label TP/FP/FN/recall.
+- T3 depends_on: [T1] - Implement a responsive human review web app for a blinded, stratified 200-post sample (at least 40 image posts); save only decisions and corrections.
+- T4 depends_on: [T2, T3] - Collect human review, compare A/B/C on matching rows, calculate paired uncertainty, and evaluate every promotion gate.
+- T5 depends_on: [T4] - Keep production rung off unless all gates pass; preserve budget reserve and stop temporary GPU only after artifacts and review are safely complete.
+
+## Checklist
+- [x] T1 Freeze new post-training time holdout; explicitly mark non-equivalent to missing original set.
+- [ ] T2 Run saved checkpoint and publish per-label diagnostic artifacts.
+- [x] T3 Build and verify private review UI on desktop and mobile; operator route only, responsive screenshots, no horizontal overflow, local decisions exclude source text and blind-arm key.
+- [ ] T4 Finish blinded review and gate report.
+- [ ] T5 Preserve reserve, close temporary access, and record final decision.
+
+## Review
+- Fresh export pinned 2026-09-23 02:33:11 UTC: N=2,414 (train 2,527; valid 1,064), test SHA-256 `4408d9a9a4ccb9f0e1afb425bd9004c14992837bab489407d3b2d0d163434660`; test start `2026-07-25T02:33:11Z`; prompt-contract SHA-256 `a174584718d22c7e350fd0e0e905cf0d49896d26355dc55a319ccf8567b94288`; taxonomy 908, rare labels 40. This new time split is post-training but is not the archived 2,420-row set and cannot reproduce the old .579 result.
+- The same holdout has 2,190 image posts; source metadata export contains IDs/image metadata only and stays on the credentialed Mini until the stratified packet is built.
+- Private operator-only review page and client-side local decisions are implemented; desktop (1440px) and mobile (390px) screenshots confirmed responsive, with no mobile horizontal overflow. Production compile, static-generation build, typecheck, and Python syntax checks pass; GitHub CI is still pending. The GPU pod remains active at $2.10/hour; RunPod showed $38.49 credit and the planned reserve is $12 at this checkpoint.

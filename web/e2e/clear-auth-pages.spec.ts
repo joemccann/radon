@@ -45,5 +45,11 @@ test.describe("Clear public authentication and operator perimeter", () => {
       await expect(page).toHaveURL(/\/sign-in/);
       await expect(page.getByTestId("admin-page")).toHaveCount(0);
     });
+    test(`${viewport.label} /admin/slm-review stays behind the operator gate`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      await page.goto("/admin/slm-review");
+      await expect(page).toHaveURL(/\/sign-in/);
+      await expect(page.getByText("Choose the 200-item packet")).toHaveCount(0);
+    });
   }
 });
