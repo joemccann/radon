@@ -1126,3 +1126,23 @@ class TestOperatorSafetyOwners:
         apply = source.split("def _apply(", 1)[1].split("def main(", 1)[0]
         assert apply.index("db.commit()") < apply.index("verified = 0")
 
+
+class TestNightlyRecoveryOwnerDrift:
+    """DOC-125..127: keep incident decisions at their canonical owner."""
+
+    def test_flex_duplicate_owner_includes_nav_repair_boundary(self):
+        doc = (_ROOT / "docs/cloud-services.md").read_text()
+        block = doc.split("A duplicate Flex ingest", 1)[1].split("## Legacy Flex", 1)[0]
+        assert "missing NAV dates" in block
+        assert "cash-flow IDs" in block
+        assert "never overwrites" in block
+        assert "never replays cash" in block
+        assert "incident-runbook.md#flex-pull-activity-nav" in block
+
+    def test_sftp_reset_case_defers_to_delivery_coverage_owner(self):
+        doc = (_ROOT / "docs/incident-runbook.md").read_text()
+        case = doc.split("## flex-pull-sftp-get-reset", 1)[1].split("\n---", 1)[0]
+        assert "cloud-services.md#flex-sftp-pull-radon-flex-pulltimer" in case
+        assert "is_transient_sftp_error" not in case
+        assert "different query" in case
+        assert "unparseable" in case
