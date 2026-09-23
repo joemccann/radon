@@ -67,6 +67,6 @@ describe("private SLM blind review", () => {
     invalid.items = invalid.items.map((item) => ({ ...item, imageUrls: [] }));
     const file = new File([JSON.stringify(invalid)], "review-packet.json", { type: "application/json" });
     fireEvent.change(screen.getByLabelText("Load review packet", { selector: 'input[type="file"]' }), { target: { files: [file] } });
-    expect(await screen.findByRole("alert")).toHaveTextContent("at least 40 image posts");
+    expect((await screen.findByRole("alert")).textContent).toContain("at least 40 image posts");
   });
 });
