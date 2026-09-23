@@ -137,6 +137,23 @@ def test_single_stock_in_book_reaches_selection(tmp_path, publisher):
     assert review["outcome"] == "reviewed" and review["triage"]["decision"] == "review"
 
 
+def test_book_is_reloaded_per_document_so_membership_tracks_the_live_book(tmp_path, publisher):
+    # Watchlist and portfolio are dynamic: the same series must drop before the
+    # operator holds the name and reach review after, within one pipeline instance.
+    books = [frozenset(), frozenset({"ASPI"})]
+    reviewer = Reviewer([{"candidates": [], "reason": "nothing new"}])
+    pipe = build_stock(tmp_path, reviewer, publisher, lambda: books.pop(0))
+    assert pipe.process(work("aspi - a sum of its parts.pdf"), tmp_path / "r.pdf", []) == []
+    first = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
+    assert first["outcome"] == "dropped" and first["reason_code"] == "SINGLE_STOCK_NOT_IN_BOOK"
+    later = dict(work("aspi - a sum of its parts.pdf"), key="n" * 64)
+    later["metadata"] = dict(later["metadata"], id="id:two", rev="r2")
+    assert pipe.process(later, tmp_path / "r.pdf", []) == []
+    second = json.loads((tmp_path / "evidence" / ("n" * 64) / "review.json").read_text())
+    assert second["outcome"] == "reviewed" and second["triage"]["decision"] == "review"
+    assert books == []
+
+
 def test_book_is_not_consulted_for_non_single_stock_documents(tmp_path, publisher):
     loads = []
     reviewer = Reviewer([{"candidates": [], "reason": "nothing new"}])
