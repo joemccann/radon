@@ -14,6 +14,26 @@ Operator 2026-09-23: keep R02-A. The rung gets its own writable gitdir (`$WEEKEN
 - [x] T2 Implementation
 - [ ] T3 Verify and ship
 
+# Task: TradingView crossing webhook 401
+
+ALAB Crossing 357.02 delivered 401 because the default chart message has no body secret.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red test: valid path token + "ALAB Crossing 357.02" is stored with symbol and price
+- T2 depends_on: [T1] - Accept a missing body secret; still 401 a presented secret that does not match; parse the crossing line
+- T3 depends_on: [T2] - Focused vitest + caddy/docs pytest, draft PR
+
+## Checklist
+
+- [x] T1 Failing tests (401)
+- [x] T2 Implementation
+- [x] T3 Focused tests green
+
+## Review
+
+- Path token stays the authenticator. A secret that is present and wrong still writes nothing. TradingView does not retry 401, so a default crossing message must be stored. The 01:05 fire is already lost; the alert is Stopped and must be restarted after deploy.
+
 # Task: Epoch AI public CSV source (S1)
 
 Public CC BY Epoch CSVs on the AI-infra pane. Research/context only. Not a trade signal.

@@ -1,7 +1,8 @@
 /**
  * TradingView alert webhook — wire-level contract (docs/tradingview-integration.md
  * Phase 1). The handler order is the design:
- *   1. path token / body secret mismatch -> 401, write NOTHING
+ *   1. path token mismatch, or a presented body secret that does not match
+ *      -> 401, write NOTHING. A message with no secret is stored.
  *   2. oversized body                    -> 413, write NOTHING
  *   3. INSERT the raw body BEFORE any parse
  *   4. parse JSON or text/plain; failure leaves parsed columns NULL
@@ -126,10 +127,35 @@ describe("POST /api/webhooks/tradingview/[token]", () => {
     expect(mocks.dbExecute).not.toHaveBeenCalled();
   });
 
-  it("missing body secret -> 401 and nothing written", async () => {
-    const res = await post(TOKEN, "NVDA crossed 180");
-    expect(res.status).toBe(401);
-    expect(mocks.dbExecute).not.toHaveBeenCalled();
+  it("default crossing message has no body secret and is still stored", async () => {
+    const body = "ALAB Crossing 357.02";
+    const res = await post(TOKEN, body, "text/plain");
+    expect(res.status).toBe(200);
+    expect(insertCalls()).toHaveLength(1);
+    expect(insertCalls()[0][0].args[2]).toBe(body);
+    const update = mocks.dbExecute.mock.calls[1][0];
+    expect(update.args).toEqual([
+      "ALAB", null, 357.02, null, "ALAB Crossing 357.02", null, null, null, 42,
+    ]);
+  });
+
+  it("exchange-prefixed crossing message fills symbol, exchange, and price", async () => {
+    const res = await post(TOKEN, "NASDAQ:ALAB Crossing 357.02\n", "text/plain");
+    expect(res.status).toBe(200);
+    const update = mocks.dbExecute.mock.calls[1][0];
+    expect(update.args.slice(0, 5)).toEqual([
+      "ALAB", "NASDAQ", 357.02, null, "NASDAQ:ALAB Crossing 357.02",
+    ]);
+    expect(update.args[7]).toBeNull();
+  });
+
+  it("plain text with no secret and no crossing shape is stored, not rejected", async () => {
+    const res = await post(TOKEN, "NVDA crossed 180", "text/plain");
+    expect(res.status).toBe(200);
+    expect(insertCalls()).toHaveLength(1);
+    const update = mocks.dbExecute.mock.calls[1][0];
+    expect(update.args.slice(0, 7)).toEqual([null, null, null, null, null, null, null]);
+    expect(update.args[7]).toMatch(/json/i);
   });
 
   it("unconfigured env fails closed -> 401 and nothing written", async () => {
