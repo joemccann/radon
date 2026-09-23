@@ -78,13 +78,37 @@ function num(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Never throws. `fields` is null when the body is not a JSON object. The
- * secret is deliberately not among the returned fields. */
+// TradingView's chart alert names a price cross "ALAB Crossing 357.02" and
+// puts that same line in the message. There is no JSON and no secret.
+const CROSSING_RE = /^(?:([A-Za-z][A-Za-z0-9_]*):)?([A-Za-z][A-Za-z0-9.]*)\s+Crossing\s+(-?\d+(?:\.\d+)?)$/i;
+
+function parseCrossing(raw: string): TvAlertFields | null {
+  const line = raw.trim();
+  const match = line.match(CROSSING_RE);
+  if (!match) return null;
+  const price = Number(match[3]);
+  if (!Number.isFinite(price)) return null;
+  return {
+    symbol: match[2].toUpperCase(),
+    exchange: match[1] ? match[1].toUpperCase() : null,
+    price,
+    interval: null,
+    alert_name: line,
+    bar_time: null,
+    sent_at: null,
+  };
+}
+
+/** Never throws. `fields` is null when the body is not a JSON object and not
+ * a TradingView crossing line. The secret is deliberately not among the
+ * returned fields. */
 export function parseTvAlertBody(raw: string): { fields: TvAlertFields | null; error: string | null } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
+    const crossing = parseCrossing(raw);
+    if (crossing) return { fields: crossing, error: null };
     return { fields: null, error: `invalid json: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200) };
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {

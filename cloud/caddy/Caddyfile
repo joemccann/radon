@@ -101,8 +101,9 @@
     # TradingView alert webhook (issue #457, docs/tradingview-integration.md).
     # TradingView never retries a delivery and posts from four fixed sender
     # IPs, so anything else is refused here with a 403. The allowlist is
-    # defense in depth, NOT auth: the path token and the body secret checked
-    # by the Next.js route are the auth. remote_ip (not client_ip) because
+    # defense in depth, NOT auth: the path token checked by the Next.js
+    # route is the auth (a body secret, when present, must match too).
+    # remote_ip (not client_ip) because
     # Caddy terminates TLS directly with no trusted_proxies in front of it.
     # This is the ONLY body cap on the route: Next.js middleware skips public
     # routes, so an oversized POST must die at the edge (413). POST with no

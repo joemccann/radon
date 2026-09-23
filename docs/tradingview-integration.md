@@ -46,7 +46,10 @@ Radon log **plus a digested Pushover**, never one push per fire; MCP stays read-
   `runtime = "nodejs"`, `dynamic = "force-dynamic"`, every response through
   `setNoStoreResponseHeaders`.
 - `[token]` is a 32-byte URL-safe random path secret, `TV_WEBHOOK_PATH_TOKEN`.
-- The body carries `TV_WEBHOOK_SECRET`. Both compared in **constant time**.
+- The body may carry `TV_WEBHOOK_SECRET`. The path token is the authenticator.
+  A presented body secret is compared in **constant time** and a mismatch is
+  401. A message with no secret (TradingView's default crossing text) is
+  accepted: TradingView does not retry a 401, so rejecting it drops the fire.
 - Rotation: both env vars accept a comma-separated pair so old and new are valid during
   an overlap window; alerts are re-pointed in bulk later via MCP `update_alert`.
 
@@ -54,7 +57,9 @@ Radon log **plus a digested Pushover**, never one push per fire; MCP stays read-
 
 ```text
 on(POST)
-  1. path token or body secret mismatch     -> 401, write nothing      (fail closed)
+  1. path token mismatch, or a body secret that is present but wrong
+                                           -> 401, write nothing      (fail closed)
+     no secret in the body                   -> continue (default chart message)
   2. Content-Length or read length > 16 KiB -> 413, write nothing
   3. redact configured secrets; INSERT sanitized body + received_at + source_ip
   4. parse application/json, else text/plain
@@ -228,7 +233,7 @@ value containing `$`.
 
 | Symptom | Cause |
 |---|---|
-| TradingView alert log shows a failed webhook, no row | Caddy 403 (sender IP not in the allowlist: TradingView changed IPs) or 401 (wrong path token or body secret) |
+| TradingView alert log shows a failed webhook, no row | Caddy 403 (sender IP not in the allowlist: TradingView changed IPs) or 401 (wrong path token, or a body secret that is present but wrong) |
 | Row with `parse_error` and NULL symbol | message is not valid JSON, usually an unquoted placeholder |
 | Row with NULL `ticker` | symbol not resolvable (crypto, FX, unknown exchange); counted as unresolved in the digest |
 | Rows with NULL `digest_sent_at` | Pushover credentials missing or the push failed; `tv-alerts-drain` reads `error` |

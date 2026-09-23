@@ -1,7 +1,11 @@
 // TradingView alert webhook (docs/tradingview-integration.md, Phase 1).
 //
 // Handler order is the design:
-//   1. path token or body secret mismatch -> 401, write nothing
+//   1. path token mismatch, or a body secret that is present but wrong
+//      -> 401, write nothing
+//      A chart alert's default message has no secret. The path token is
+//      the authenticator. Rejecting that message is a 401 TradingView
+//      does not retry, so the fire is lost.
 //   2. body over 16 KiB                   -> 413, write nothing
 //   3. INSERT the raw body BEFORE any parse
 //   4. parse; failure leaves parsed columns NULL and records parse_error
@@ -50,7 +54,12 @@ export async function POST(
     return reply({ error: "Payload too large.", requestId }, 413);
   }
 
-  if (!secretMatches(extractBodySecret(raw), process.env.TV_WEBHOOK_SECRET)) return unauthorized();
+  // Empty means the message did not carry a secret (TradingView's default
+  // crossing text). A presented secret must match; a wrong one still 401s.
+  const presentedSecret = extractBodySecret(raw);
+  if (presentedSecret !== "" && !secretMatches(presentedSecret, process.env.TV_WEBHOOK_SECRET)) {
+    return unauthorized();
+  }
 
   let id: number;
   try {
