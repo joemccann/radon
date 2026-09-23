@@ -168,8 +168,11 @@ def provisioned_repo(tmp_path: Path) -> dict[str, Path]:
     _git(repo, "config", "user.name", "t")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "seed")
-    # Provenance requires the blob to be reachable from the deploy remote.
-    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    # Provenance requires the blob to be reachable from the main commit the
+    # pinned remote reports; a bare repo stands in for GitHub.
+    remote = tmp_path / "remote.git"
+    _git(tmp_path, "init", "-q", "--bare", str(remote))
+    _git(repo, "push", "-q", str(remote), "HEAD:refs/heads/main")
     (tmp_path / "sbin").mkdir()  # /usr/local/sbin exists on the host
     return {
         "repo": repo,
@@ -177,6 +180,7 @@ def provisioned_repo(tmp_path: Path) -> dict[str, Path]:
         "gw_target": tmp_path / "sbin" / "radon-docker-gw",
         "compose_target": tmp_path / "etc" / "ib-gateway-compose.yml",
         "stage": tmp_path / "stage",
+        "remote": remote,
     }
 
 
@@ -192,6 +196,7 @@ def _run_install_docker_gw(env_paths: dict[str, Path]) -> subprocess.CompletedPr
             "RADON_HELPER_SKIP_CHOWN": "1",
             "RADON_DOCKER_GW_TARGET": str(env_paths["gw_target"]),
             "RADON_COMPOSE_TARGET": str(env_paths["compose_target"]),
+            "RADON_PROVENANCE_REMOTE_URL": str(env_paths["remote"]),
             "GIT_CONFIG_GLOBAL": "/dev/null",
             "GIT_CONFIG_SYSTEM": "/dev/null",
         },
@@ -223,13 +228,16 @@ def test_install_docker_gw_validates_even_a_committed_body(provisioned_repo) -> 
     _git(provisioned_repo["repo"], "add", "-A")
     _git(provisioned_repo["repo"], "commit", "-qm", "poison")
     # Published, so only the validator can be what refuses it.
-    _git(provisioned_repo["repo"], "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(
+        provisioned_repo["repo"], "push", "-q", "--force",
+        str(provisioned_repo["remote"]), "HEAD:refs/heads/main",
+    )
     result = _run_install_docker_gw(provisioned_repo)
     assert result.returncode != 0
     assert not provisioned_repo["compose_target"].exists()
 
 
-def test_install_docker_gw_refuses_a_body_absent_from_origin_main(
+def test_install_docker_gw_refuses_a_body_absent_from_remote_main(
     provisioned_repo,
 ) -> None:
     """Commit access to the checkout is not publication: a local-only compose
@@ -240,7 +248,7 @@ def test_install_docker_gw_refuses_a_body_absent_from_origin_main(
     _git(provisioned_repo["repo"], "commit", "-qm", "local only")
     result = _run_install_docker_gw(provisioned_repo)
     assert result.returncode != 0
-    assert "not an ancestor of origin/main" in result.stdout + result.stderr
+    assert "not an ancestor of the remote main commit" in result.stdout + result.stderr
     assert not provisioned_repo["compose_target"].exists()
 
 

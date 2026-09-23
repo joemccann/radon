@@ -995,6 +995,23 @@ def test_direct_gateway_privileges_are_removed_and_polkit_excludes_gateway():
     assert '"${CLOUD_DIR}/config/polkit/50-radon-services.rules"' in setup
 
 
+def _remote_reporting_head(tmp_path: Path) -> Path:
+    """A bare repo sharing the checkout's objects whose main is its HEAD."""
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(CLOUD_ROOT), *args],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+
+    head = git("rev-parse", "HEAD")
+    objects = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir")) / "objects"
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True, capture_output=True)
+    (remote / "objects" / "info" / "alternates").write_text(f"{objects}\n")
+    (remote / "refs" / "heads" / "main").write_text(f"{head}\n")
+    return remote
+
+
 def test_setup_upgrade_replaces_legacy_gateway_privileges(tmp_path: Path):
     sudoers_dir = tmp_path / "sudoers.d"
     polkit_dir = tmp_path / "polkit-rules.d"
@@ -1027,8 +1044,8 @@ set -eu
         "RADON_POLKIT_RULES_DIR": str(polkit_dir),
         "RADON_SETUP_STAGE_DIR": str(tmp_path / "stage"),
         # This case is about the legacy-privilege upgrade, and it stages from
-        # the real checkout, where CI has no origin/main ref to anchor to.
-        "RADON_PROVENANCE_REMOTE_REF": "HEAD",
+        # the real checkout: a stand-in remote reports its HEAD as main.
+        "RADON_PROVENANCE_REMOTE_URL": str(_remote_reporting_head(tmp_path)),
         "RADON_VISUDO_BIN": str(visudo),
         "RADON_POLICY_SKIP_CHOWN": "1",
         "RADON_SKIP_POLKIT_RELOAD": "1",

@@ -129,10 +129,12 @@ def harness(tmp_path: Path) -> dict[str, Path]:
         check=True,
         capture_output=True,
     )
-    # Provenance also requires the blob to be reachable from the deploy
-    # remote, so the fake checkout carries an origin/main matching HEAD.
+    # Provenance also requires the blob to be reachable from the main commit
+    # the pinned remote reports, so a bare "GitHub" carries HEAD as main.
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True, capture_output=True)
     subprocess.run(
-        ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+        ["git", "push", "-q", str(remote), "HEAD:refs/heads/main"],
         cwd=cloud,
         check=True,
         capture_output=True,
@@ -148,6 +150,7 @@ def harness(tmp_path: Path) -> dict[str, Path]:
         "victim": victim,
         "stage": tmp_path / "stage",
         "app": tmp_path / "app",
+        "remote": remote,
         "tmp": tmp_path,
     }
 
@@ -160,7 +163,13 @@ def _base_env(h: dict[str, Path]) -> dict[str, str]:
         "RADON_HELPER_SKIP_CHOWN": "1",
         "RADON_POLICY_SKIP_CHOWN": "1",
         "RADON_SKIP_POLKIT_RELOAD": "1",
+        "RADON_PROVENANCE_REMOTE_URL": str(h["remote"]),
     }
+
+
+def _publish(h: dict[str, Path]) -> None:
+    """Push the checkout's HEAD to the pinned remote as main."""
+    _git(h["cloud"], "push", "-q", "--force", str(h["remote"]), "HEAD:refs/heads/main")
 
 
 def _link_to_victim(h: dict[str, Path], relative: str) -> Path:
@@ -608,36 +617,88 @@ class TestCheckoutProvenance:
 class TestRemoteAncestryProvenance:
     """Local HEAD is radon-reachable: an account with commit rights on the
     checkout can make any body "committed at HEAD". Root only installs blobs
-    that are also reachable from the deploy remote."""
+    that are also reachable from the main commit the PINNED remote reports,
+    resolved as root, never from radon-writable refs, config or remote URL."""
 
-    def test_local_commit_not_on_origin_main_is_refused(
+    def _head(self, h: dict[str, Path]) -> str:
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=h["cloud"], check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+
+    def _tamper(self, h: dict[str, Path]) -> Path:
+        source = h["cloud"] / "config" / "sudoers.d" / "radon-ops"
+        source.write_text("# committed locally, never pushed\n")
+        _git(h["cloud"], "add", "config/sudoers.d/radon-ops")
+        _git(h["cloud"], "commit", "-q", "-m", "local tamper")
+        return source
+
+    def _refused(self, h: dict[str, Path], source: Path, needle: str) -> None:
+        target = h["tmp"] / "installed"
+        result = _run_stage(h, source, target)
+        assert result.returncode != 0
+        assert needle in result.stdout + result.stderr
+        assert not target.exists()
+        assert _stage_leftovers(h) == []
+
+    def test_local_commit_not_on_remote_main_is_refused(
         self, harness: dict[str, Path]
     ) -> None:
-        source = harness["cloud"] / "config" / "sudoers.d" / "radon-ops"
-        source.write_text("# committed locally, never pushed\n")
-        _git(harness["cloud"], "add", "config/sudoers.d/radon-ops")
-        _git(harness["cloud"], "commit", "-q", "-m", "local tamper")
-        target = harness["tmp"] / "installed"
-        result = _run_stage(harness, source, target)
-        assert result.returncode != 0
-        assert "not an ancestor of origin/main" in result.stdout + result.stderr
-        assert not target.exists()
-        assert _stage_leftovers(harness) == []
+        source = self._tamper(harness)
+        self._refused(harness, source, "is not an ancestor of the remote main commit")
 
-    def test_missing_remote_ref_fails_closed(self, harness: dict[str, Path]) -> None:
-        _git(harness["cloud"], "update-ref", "-d", "refs/remotes/origin/main")
-        source = harness["cloud"] / "config" / "sudoers.d" / "radon-ops"
-        target = harness["tmp"] / "installed"
-        result = _run_stage(harness, source, target)
-        assert result.returncode != 0
-        assert "origin/main is unavailable" in result.stdout + result.stderr
-        assert not target.exists()
+    def test_radon_writable_origin_main_is_not_the_anchor(
+        self, harness: dict[str, Path], tmp_path: Path
+    ) -> None:
+        # radon owns the git dir: it can move origin/main and repoint the
+        # checkout's origin at a remote of its choosing. Neither is trusted.
+        source = self._tamper(harness)
+        rogue = tmp_path / "rogue.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(rogue)], check=True, capture_output=True)
+        _git(harness["cloud"], "push", "-q", str(rogue), "HEAD:refs/heads/main")
+        _git(harness["cloud"], "remote", "add", "origin", str(rogue))
+        _git(harness["cloud"], "update-ref", "refs/remotes/origin/main", "HEAD")
+        self._refused(harness, source, "is not an ancestor of the remote main commit")
 
-    def test_blob_carried_by_origin_main_installs(
+    def test_replace_ref_cannot_forge_the_anchor(self, harness: dict[str, Path]) -> None:
+        anchor = self._head(harness)
+        source = self._tamper(harness)
+        _git(harness["cloud"], "replace", anchor, "HEAD")
+        self._refused(harness, source, "is not an ancestor of the remote main commit")
+
+    def test_graft_cannot_forge_ancestry(self, harness: dict[str, Path]) -> None:
+        anchor = self._head(harness)
+        source = self._tamper(harness)
+        grafts = harness["cloud"] / ".git" / "info" / "grafts"
+        grafts.parent.mkdir(exist_ok=True)
+        grafts.write_text(f"{anchor} {self._head(harness)}\n")
+        self._refused(harness, source, "is not an ancestor of the remote main commit")
+
+    def test_unreachable_remote_fails_closed(self, harness: dict[str, Path]) -> None:
+        harness["remote"] = harness["tmp"] / "absent.git"
+        source = harness["cloud"] / "config" / "sudoers.d" / "radon-ops"
+        self._refused(harness, source, "could not read main from")
+
+    def test_remote_main_absent_locally_fails_closed(
+        self, harness: dict[str, Path], tmp_path: Path
+    ) -> None:
+        other = tmp_path / "other"
+        subprocess.run(
+            ["git", "clone", "-q", "-b", "main", str(harness["remote"]), str(other)],
+            check=True, capture_output=True,
+        )
+        (other / "later").write_text("pushed elsewhere\n")
+        _git(other, "add", "later")
+        _git(other, "commit", "-q", "-m", "later")
+        _git(other, "push", "-q", "origin", "HEAD:refs/heads/main")
+        source = harness["cloud"] / "config" / "sudoers.d" / "radon-ops"
+        self._refused(harness, source, "is not in the local object store")
+
+    def test_blob_carried_by_remote_main_installs(
         self, harness: dict[str, Path]
     ) -> None:
         # HEAD moved ahead of the remote, but this artifact's blob is the one
-        # origin/main carries, so the install stands.
+        # remote main carries, so the install stands.
         (harness["cloud"] / "unrelated").write_text("later work\n")
         _git(harness["cloud"], "add", "unrelated")
         _git(harness["cloud"], "commit", "-q", "-m", "unrelated local work")
@@ -646,6 +707,17 @@ class TestRemoteAncestryProvenance:
         result = _run_stage(harness, source, target)
         assert result.returncode == 0, result.stderr
         assert target.read_text() == source.read_text()
+
+    def test_anchor_url_is_pinned_not_read_from_the_checkout(self) -> None:
+        text = SETUP.read_text(encoding="utf-8")
+        assert (
+            'readonly PROVENANCE_REMOTE_URL="${RADON_PROVENANCE_REMOTE_URL:-'
+            'https://github.com/joemccann/radon.git}"' in text
+        )
+        assert "RADON_PROVENANCE_REMOTE_REF" not in text
+        body = _function_body(text, "resolve_provenance_anchor")
+        assert "ls-remote" in body and "protocol.version=1" in body
+        assert "remote get-url" not in body and "origin/main" not in body
 
 
 # ── (d) /etc/radon and the radon-replaceable directories ──────────────
@@ -741,7 +813,7 @@ exec {real_install} "${{args[@]}}"
         (harness["cloud"] / "scripts" / "ib-gateway-control.sh").write_text("#!/bin/bash\n")
         _git(harness["cloud"], "add", "scripts/ib-gateway-control.sh")
         _git(harness["cloud"], "commit", "-q", "-m", "gateway helper")
-        _git(harness["cloud"], "update-ref", "refs/remotes/origin/main", "HEAD")
+        _publish(harness)
         target = harness["tmp"] / "radon-ib-gateway-control"
         result = _run_setup_function(
             "install_gateway_control",
