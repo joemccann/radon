@@ -103,6 +103,66 @@ def test_dropped_document_makes_no_model_call(tmp_path, publisher):
     assert review["outcome"] == "dropped" and review["reason_code"] == "DOC_TYPE_FX_PAIR_NOTE"
 
 
+STOCK_PAGE = ("**Estimates Revised** **US Equity Research** 15 September 2026 RatingPrice Target **BUY US$11.00** "
+              "Price **ASPI-NASDAQ US$3.16** We reiterate our Buy rating after the quarter.")
+
+
+def stock_extractor(pdf, out):
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "page-0001.md").write_text(STOCK_PAGE)
+    return {"page_count": 1, "source_sha256": "b" * 64, "source_path": str(pdf),
+            "pages": [{"page_number": 1, "markdown_file": "page-0001.md"}]}
+
+
+def build_stock(tmp_path, reviewer, publisher, book):
+    return intake.Pipeline(tmp_path, reviewer, publisher, extractor=stock_extractor, figure_catalogue=catalogue,
+                           pdf_created=lambda pdf: None, book_tickers=book)
+
+
+def test_single_stock_off_book_is_dropped_without_a_model_call(tmp_path, publisher):
+    reviewer = Reviewer([])
+    pipe = build_stock(tmp_path, reviewer, publisher, lambda: frozenset({"NVDA"}))
+    posts = pipe.process(work("aspi - a sum of its parts.pdf"), tmp_path / "r.pdf", [])
+    assert posts == [] and reviewer.calls == []
+    review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
+    assert review["outcome"] == "dropped" and review["reason_code"] == "SINGLE_STOCK_NOT_IN_BOOK"
+
+
+def test_single_stock_in_book_reaches_selection(tmp_path, publisher):
+    reviewer = Reviewer([{"candidates": [], "reason": "nothing new"}])
+    pipe = build_stock(tmp_path, reviewer, publisher, lambda: frozenset({"ASPI"}))
+    assert pipe.process(work("aspi - a sum of its parts.pdf"), tmp_path / "r.pdf", []) == []
+    assert [c[0] for c in reviewer.calls] == ["text"]
+    review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
+    assert review["outcome"] == "reviewed" and review["triage"]["decision"] == "review"
+
+
+def test_book_is_reloaded_per_document_so_membership_tracks_the_live_book(tmp_path, publisher):
+    # Watchlist and portfolio are dynamic: the same series must drop before the
+    # operator holds the name and reach review after, within one pipeline instance.
+    books = [frozenset(), frozenset({"ASPI"})]
+    reviewer = Reviewer([{"candidates": [], "reason": "nothing new"}])
+    pipe = build_stock(tmp_path, reviewer, publisher, lambda: books.pop(0))
+    assert pipe.process(work("aspi - a sum of its parts.pdf"), tmp_path / "r.pdf", []) == []
+    first = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
+    assert first["outcome"] == "dropped" and first["reason_code"] == "SINGLE_STOCK_NOT_IN_BOOK"
+    later = dict(work("aspi - a sum of its parts.pdf"), key="n" * 64)
+    later["metadata"] = dict(later["metadata"], id="id:two", rev="r2")
+    assert pipe.process(later, tmp_path / "r.pdf", []) == []
+    second = json.loads((tmp_path / "evidence" / ("n" * 64) / "review.json").read_text())
+    assert second["outcome"] == "reviewed" and second["triage"]["decision"] == "review"
+    assert books == []
+
+
+def test_book_is_not_consulted_for_non_single_stock_documents(tmp_path, publisher):
+    loads = []
+    reviewer = Reviewer([{"candidates": [], "reason": "nothing new"}])
+    pipe = intake.Pipeline(tmp_path, reviewer, publisher, extractor=extractor, figure_catalogue=catalogue,
+                           pdf_created=lambda pdf: None, book_tickers=lambda: loads.append(1) or frozenset())
+    pipe.process(work(), tmp_path / "r.pdf", [])
+    assert loads == []
+
+
 def test_ungrounded_number_reaches_verify_with_unmatched_hint(tmp_path, publisher):
     reviewer = Reviewer([selection(title="Foreign investors bought $47bn of US equities in July"), verdict()])
     posts = build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])

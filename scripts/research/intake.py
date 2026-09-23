@@ -17,7 +17,7 @@ from pathlib import Path
 
 from utils.atomic_io import atomic_save
 from research import figures as figure_detect
-from research import ground, identify, learn, novelty, triage
+from research import book, ground, identify, learn, novelty, triage
 from research.pipeline import DocumentDeadlineExceeded, EvidenceError, DOCUMENT_BUDGET_SECS, REVIEWER_CALL_TIMEOUT_SECS, comparison_posts
 
 MAX_CANDIDATES = 8
@@ -89,7 +89,7 @@ def verdict_passed(result):
 
 class Pipeline:
     def __init__(self, root, reviewer, publisher, extractor=None, figure_catalogue=None, pdf_created=None,
-                 clock=None, document_budget_secs=DOCUMENT_BUDGET_SECS):
+                 book_tickers=None, clock=None, document_budget_secs=DOCUMENT_BUDGET_SECS):
         from research.pipeline import Pipeline as V1
         self.root = Path(root)
         self.reviewer = reviewer
@@ -97,6 +97,7 @@ class Pipeline:
         self.extractor = extractor or (lambda pdf, out: V1.extract(None, pdf, out))
         self.figure_catalogue = figure_catalogue or figure_detect.catalogue
         self.pdf_created = pdf_created or pdf_creation_date
+        self.book_tickers = book_tickers or book.tickers
         self.clock = clock or time.monotonic
         self.document_budget_secs = document_budget_secs
         self._deadline = None
@@ -168,7 +169,8 @@ class Pipeline:
         review['identity'] = identity.as_dict()
         note = _operator_note(work)
         review['operator_note'] = note or None
-        decision, code = triage.decide(identity, rules=learn.load_rules(self.root))
+        decision, code = triage.decide(identity, rules=learn.load_rules(self.root),
+                                       book=self.book_tickers() if identity.doc_type == 'single_stock' else None)
         review['triage'] = {'decision': decision, 'reason_code': code, 'overridden': bool(note and decision == 'drop')}
         if decision == 'drop' and not note:
             return self._finish(out, review, 'dropped', reason_code=code)

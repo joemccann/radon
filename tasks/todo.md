@@ -1,3 +1,26 @@
+# Task: Research triage single-stock book gate
+
+Reject single-name equity research at triage unless the ticker is in the operator's watchlist or portfolio (the book).
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: identify extracts ticker candidates; triage drops single_stock off-book with SINGLE_STOCK_NOT_IN_BOOK, keeps in-book and None-book; book loader Turso-first with data/*.json fallback; intake wires the loader only for single_stock docs
+- T2 depends_on: [T1] - identify.py Identity.tickers, triage.py gate, research/book.py loader, intake.py wiring
+- T3 depends_on: [T2] - researchReasonCodes.ts label + docs/dropbox-research.md triage sentence
+- T4 depends_on: [T3] - Focused pytest + vitest green, full suites, PR, CI watch
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Implementation
+- [x] T3 Label + docs
+- [x] T4 Green suites and PR
+
+## Review
+
+- Gate lives in `triage.decide(book=...)`; `identity.tickers` candidates come from the filename and page-one head, and the drop fires only when no candidate is in the book. Book unavailable (both Turso and disk unreadable) fails open to review so an outage cannot drop watched names.
+- Loader is Turso-first (`watchlist` table + latest portfolio snapshot underlyings) with `data/{watchlist,portfolio}.json` fallback, called only for `single_stock` documents.
+
 # Task: Dashboard return reliability
 
 A page return must be a memory read. No mount-time regime/gex POST, no posts.json fallback, headlines socket and ticket backoff survive the remount.
