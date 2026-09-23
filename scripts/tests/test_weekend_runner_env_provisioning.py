@@ -390,3 +390,130 @@ class TestPytestReadsTheProvisionedWebEnv:
 
         assert "TURSO_DB_URL" not in os.environ
         assert "TURSO_AUTH_TOKEN" not in os.environ
+
+
+# Dummy "production" and "scoped" values. Never a real credential.
+PROD_TURSO = "prod-turso-rw-dummy-7f3a"
+PROD_UW = "prod-uw-dummy-91c2"
+SCOPED_TURSO = "scoped-turso-ro-dummy-4b1e"
+SCOPED_UW = "scoped-uw-dummy-d05a"
+PROD_WEB_ENV = (
+    "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_dummy\n"
+    f"TURSO_AUTH_TOKEN={PROD_TURSO}\n"
+    "TURSO_DB_URL=libsql://dummy.invalid\n"
+    f"export UW_TOKEN='{PROD_UW}'\n"
+)
+
+
+def _env_keys(path: Path) -> dict:
+    out = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.removeprefix("export ")
+        if "=" in line and not line.startswith("#"):
+            k, v = line.split("=", 1)
+            out[k.strip()] = v.strip().strip("'\"")
+    return out
+
+
+class TestTestingCloneScopedCredentials:
+    """The testing clone never keeps the operator's production Turso/UW keys.
+
+    setup_testing_weekend.sh copies web/.env into the clone, then replaces
+    TURSO_AUTH_TOKEN and UW_TOKEN with the operator-minted least-privilege
+    values from $WEEKEND_ROOT/.env.testing-scoped, or strips them when that
+    file or a key is absent. No value is ever echoed.
+    """
+
+    def _stage_prod(self, tmp_path: Path):
+        src, clone, env = _stage(tmp_path, "testing")
+        (src / "web" / ".env").write_text(PROD_WEB_ENV, encoding="utf-8")
+        scoped = Path(env["RADON_WEEKEND_ROOT"]) / ".env.testing-scoped"
+        return src, clone, env, scoped
+
+    @staticmethod
+    def _assert_no_value_echoed(proc: subprocess.CompletedProcess) -> None:
+        out = proc.stdout + proc.stderr
+        for value in (PROD_TURSO, PROD_UW, SCOPED_TURSO, SCOPED_UW):
+            assert value not in out, "a credential value was echoed"
+
+    def test_scoped_values_replace_the_production_keys(self, tmp_path):
+        src, clone, env, scoped = self._stage_prod(tmp_path)
+        scoped.write_text(
+            f"TURSO_AUTH_TOKEN={SCOPED_TURSO}\nUW_TOKEN=\"{SCOPED_UW}\"\n",
+            encoding="utf-8",
+        )
+        scoped.chmod(0o600)
+
+        proc = _run("testing", env, tmp_path)
+
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        dst = clone / "web" / ".env"
+        keys = _env_keys(dst)
+        assert keys["TURSO_AUTH_TOKEN"] == SCOPED_TURSO
+        assert keys["UW_TOKEN"] == SCOPED_UW
+        # Everything else in the operator copy is untouched.
+        assert keys["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"] == "pk_test_dummy"
+        assert keys["TURSO_DB_URL"] == "libsql://dummy.invalid"
+        text = dst.read_text(encoding="utf-8")
+        assert PROD_TURSO not in text and PROD_UW not in text
+        assert text.count("TURSO_AUTH_TOKEN=") == 1
+        assert text.count("UW_TOKEN=") == 1
+        assert oct(dst.stat().st_mode & 0o777) == "0o600"
+        # The source checkout is never rewritten.
+        assert (src / "web" / ".env").read_text(encoding="utf-8") == PROD_WEB_ENV
+        self._assert_no_value_echoed(proc)
+
+    def test_absent_scoped_file_strips_both_keys(self, tmp_path):
+        src, clone, env, scoped = self._stage_prod(tmp_path)
+
+        proc = _run("testing", env, tmp_path)
+        out = proc.stdout + proc.stderr
+
+        assert proc.returncode == 0, out
+        dst = clone / "web" / ".env"
+        keys = _env_keys(dst)
+        assert "TURSO_AUTH_TOKEN" not in keys
+        assert "UW_TOKEN" not in keys
+        assert keys["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"] == "pk_test_dummy"
+        assert oct(dst.stat().st_mode & 0o777) == "0o600"
+        missing = [ln for ln in out.splitlines() if "MISSING" in ln and str(scoped) in ln]
+        assert missing, out
+        self._assert_no_value_echoed(proc)
+
+    def test_empty_scoped_key_is_stripped_not_kept(self, tmp_path):
+        src, clone, env, scoped = self._stage_prod(tmp_path)
+        scoped.write_text(f"TURSO_AUTH_TOKEN={SCOPED_TURSO}\nUW_TOKEN=\n", encoding="utf-8")
+
+        proc = _run("testing", env, tmp_path)
+        out = proc.stdout + proc.stderr
+
+        keys = _env_keys(clone / "web" / ".env")
+        assert keys["TURSO_AUTH_TOKEN"] == SCOPED_TURSO
+        assert "UW_TOKEN" not in keys
+        assert any("MISSING" in ln and "UW_TOKEN" in ln for ln in out.splitlines()), out
+        self._assert_no_value_echoed(proc)
+
+    def test_a_kept_newer_clone_copy_is_still_scoped(self, tmp_path):
+        """The 'clone copy is newer' early return must not keep prod keys."""
+        src, clone, env, scoped = self._stage_prod(tmp_path)
+        dst = clone / "web" / ".env"
+        dst.write_text(PROD_WEB_ENV, encoding="utf-8")
+        stamp = time.time() + 120
+        os.utime(dst, (stamp, stamp))
+
+        proc = _run("testing", env, tmp_path)
+
+        text = dst.read_text(encoding="utf-8")
+        assert PROD_TURSO not in text and PROD_UW not in text, proc.stdout
+        self._assert_no_value_echoed(proc)
+
+    def test_wrapper_never_recopies_web_env(self):
+        """Only setup provisions web/.env; no phase may restore the prod copy."""
+        text = (REPO / "scripts" / "testing_weekend.sh").read_text(encoding="utf-8")
+        for line in text.splitlines():
+            code = line.split("#", 1)[0]
+            if "web/.env" in code:
+                assert not any(
+                    tok in code.split() for tok in ("cp", "install", "rsync", "ln", "ditto")
+                ), f"testing_weekend.sh re-copies web/.env: {line.strip()}"
+            assert "SRC_REPO" not in code, line
