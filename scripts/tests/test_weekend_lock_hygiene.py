@@ -28,6 +28,32 @@ SKILL_ROOTS = (
 )
 
 
+def _ps_refused_by_codex_sandbox() -> bool:
+    """True only inside the Codex seatbelt AND when it refuses /bin/ps.
+
+    macOS /bin/ps is setuid root and the Codex workspace-write seatbelt refuses
+    to exec any setuid binary, so the lock tests that observe a live process
+    cannot run on the nightly Codex rung (testing loop, 2026-09-23: 24 failures,
+    all PermissionError on /bin/ps). They still run everywhere else, including
+    every GitHub CI run, and a plain host with a broken ps still FAILS them.
+    """
+    if os.environ.get("CODEX_SANDBOX") != "seatbelt" or os.environ.get("CI"):
+        return False
+    try:
+        subprocess.run(["/bin/ps", "-p", "1", "-o", "pid="], capture_output=True, timeout=10)
+    except PermissionError:
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return False
+
+
+needs_host_ps = pytest.mark.skipif(
+    _ps_refused_by_codex_sandbox(),
+    reason="Codex seatbelt refuses setuid /bin/ps; covered by GitHub CI",
+)
+
+
 def _fn_body(text: str, name: str) -> str:
     start = text.index(f"{name}() {{")
     depth = 0
@@ -108,6 +134,7 @@ class TestLockHygieneL1ToL5:
         out2 = _lib(name, f'acquire_runner_lock "{lock2}"\n', tmp_path)
         assert out2.returncode == 0, out2.stderr
 
+    @needs_host_ps
     @pytest.mark.parametrize("name", sorted(LOOPS))
     def test_case5_directory_live_pid_must_not_steal(self, name, tmp_path):
         lock = tmp_path / "lock.d"
@@ -127,6 +154,7 @@ class TestLockHygieneL1ToL5:
         out2 = _lib(name, f'acquire_runner_lock "{lock2}"\n', tmp_path)
         assert out2.returncode != 0, out2.stderr
 
+    @needs_host_ps
     @pytest.mark.parametrize("name", sorted(LOOPS))
     def test_case6_live_pid_stale_start_is_reclaimed(self, name, tmp_path):
         lock = tmp_path / "lock.d"
@@ -150,6 +178,7 @@ class TestLockHygieneL1ToL5:
         assert "pid not yet published" in out.stderr
         assert lock.is_dir()
 
+    @needs_host_ps
     @pytest.mark.parametrize("name", sorted(LOOPS))
     def test_case8_eperm_is_not_death(self, name, tmp_path):
         live = os.getpid()
@@ -312,6 +341,7 @@ class TestSharedParentSweepAndLiveRefuse:
         assert "foreign-lock=removed:999999" in out.stderr
         assert not shared.exists()
 
+    @needs_host_ps
     @pytest.mark.parametrize("name", sorted(LOOPS))
     def test_case10_live_clone_lock_exits_3_and_pages(self, name, tmp_path):
         repo = _runner_clone(tmp_path, name)
