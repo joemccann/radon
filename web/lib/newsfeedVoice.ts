@@ -21,11 +21,43 @@ export function voiceInput(value: unknown): NewsfeedVoiceInput | null {
   return clean.title && clean.content ? clean : null;
 }
 
+const NUMERIC_CLAIM_SOURCE = String.raw`[$€£]?[+-]?\d(?:\d|,(?=\d))*(?:\.\d+)?(?:\s?(?:%|bps\b|basis points\b|million\b|billion\b|trillion\b|[kmbt]\b))?`;
+
+function normalizeClaim(value: string): string {
+  return value.toLowerCase().replace(/\s/g, "");
+}
+
 function numericClaims(text: string): string[] {
   // Preserve signs and common financial units. This is a conservative guard,
   // not semantic fact verification; the prompt still owns factual fidelity.
-  return text.match(/[$€£]?[+-]?\d(?:\d|,(?=\d))*(?:\.\d+)?(?:\s?(?:%|bps\b|basis points\b|million\b|billion\b|trillion\b|[kmbt]\b))?/gi)
-    ?.map(value => value.toLowerCase().replace(/\s/g, "")) ?? [];
+  return text.match(new RegExp(NUMERIC_CLAIM_SOURCE, "gi"))?.map(normalizeClaim) ?? [];
+}
+
+function claimParts(value: string): { currency: string; signed: string; unit: string } {
+  const currency = /^[$€£]/.test(value) ? value[0] : "";
+  const rest = value.slice(currency.length);
+  const unit = rest.match(/(?:million|billion|trillion|[kmbt])$/)?.[0] ?? "";
+  return { currency, signed: rest.slice(0, rest.length - unit.length), unit };
+}
+
+function rangeUnitCompletions(text: string): Set<string> {
+  // "$30-$50B" may be rewritten "$30B-$50B". The added unit has to be the other
+  // side's unit, and the currency has to stay the same. A lone number cannot
+  // gain a magnitude, and "$" cannot become "€".
+  const matches = [...text.matchAll(new RegExp(NUMERIC_CLAIM_SOURCE, "gi"))];
+  const allowed = new Set<string>();
+  for (let index = 0; index < matches.length - 1; index += 1) {
+    const current = matches[index];
+    const next = matches[index + 1];
+    const between = text.slice((current.index ?? 0) + current[0].length, next.index ?? 0);
+    if (!/^(?:\s*-\s*|\s+to\s+)$/i.test(between)) continue;
+    const left = claimParts(normalizeClaim(current[0]));
+    const right = claimParts(normalizeClaim(next[0]));
+    if (left.currency !== right.currency) continue;
+    if (left.unit === "" && right.unit !== "") allowed.add(`${left.currency}${left.signed}${right.unit}`);
+    if (right.unit === "" && left.unit !== "") allowed.add(`${right.currency}${right.signed}${left.unit}`);
+  }
+  return allowed;
 }
 
 function jsonPayload(raw: string): string {
@@ -41,15 +73,11 @@ export function parseVoiceCopy(raw: string, source: NewsfeedVoiceInput): Newsfee
   if (raw.length > 20_000) throw new Error("Invalid voice output");
   const clean = voiceInput(JSON.parse(jsonPayload(raw)));
   if (!clean) throw new Error("Invalid voice output");
-  // Currency symbols are notation. A unit may attach to a source number that had
-  // none (a range "$30-$50B" rewritten "$30B-$50B"), never replace a source unit.
-  const noCurrency = (value: string) => value.replace(/^[$€£]/, "");
-  const bare = (value: string) => noCurrency(value).replace(/(?:million|billion|trillion|[kmbt])$/, "");
-  const sourceClaims = numericClaims(`${source.title}\n${source.content}`).map(noCurrency);
-  const exact = new Set(sourceClaims);
-  const unitless = new Set(sourceClaims.filter(value => bare(value) === value));
-  if (numericClaims(`${clean.title}\n${clean.content}`).map(noCurrency)
-    .some(value => !exact.has(value) && !unitless.has(bare(value)))) {
+  const sourceText = `${source.title}\n${source.content}`;
+  const exact = new Set(numericClaims(sourceText));
+  const rangeCompletions = rangeUnitCompletions(sourceText);
+  if (numericClaims(`${clean.title}\n${clean.content}`)
+    .some(value => !exact.has(value) && !rangeCompletions.has(value))) {
     throw new Error("Unsupported numerical claim");
   }
   return { ...clean, caption: assembleShareCaption(clean.title, clean.content) };
