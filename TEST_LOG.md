@@ -1003,3 +1003,11 @@ action occurred. All gate sentinels are terminal, post-gate worktree was
 clean, and 21 logs contained zero matches for exported/Pushover credentials.
 Evidence and a verified Git bundle are preserved outside the disposable
 checkout at `.testing-deliver/remediate-2026-09-18/`.
+
+## Remediation 2026-09-23 (reduced P0/P1 scope)
+
+| Finding | Status | Red/green evidence |
+|---|---|---|
+| T-508 | Focused fix complete; full gates pending | Push-guard tests: inherited command-scope hooksPath produced 4 failed / 10 passed; fixture-scoped Git isolation produced 14 passed under explicit hostile hooksPath=/dev/null. Existing hook install/reinstall, main/tag/delete refusal and fix-branch acceptance assertions unchanged. |
+
+Substantive fix preserved before long full-gate verification; no publication or phase completion claimed.

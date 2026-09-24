@@ -8266,3 +8266,10 @@ Dependency graph: T1 -> T2 -> T3.
 - [ ] T3 depends_on: [T2] Run full gates, permanent drills and three closing gates; commit substantive task.
 - [ ] T4 depends_on: [T3] Guard publication and persist complete issue handoff.
 Review: REL-280 red 10/green 52; first full gate matches 33 baseline Python failures, Vitest 10016 passed. Closing drills and two further gate pairs pending; inherited P2/operator acceptance retained.
+
+## Testing remediation 2026-09-23 (reduced)
+- [x] T1 depends_on: [] Read issue #83 handoff and restore dated branch to current main.
+- [ ] T2 depends_on: [T1] Remediate verified P0/P1 findings serially with red/green evidence; retain P2 and operator-only inventory.
+- [ ] T3 depends_on: [T2] Run closing full gates three times and persist complete issue handoff.
+- [ ] T4 depends_on: [T3] Review substantive diff and publication eligibility.
+Review: pending; no live broker calls, browser launches, or runner-lock operations.
