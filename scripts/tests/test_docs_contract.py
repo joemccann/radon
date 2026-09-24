@@ -1153,3 +1153,9 @@ class TestNightlyRecoveryOwnerDrift:
         assert "../scripts/documentation_nightly.sh" in doc
         assert "Codex sandbox writable roots omit that host gitdir" in doc
         assert ".gitdirs-agent/<loop>.git" in doc
+
+    def test_provisioning_defers_to_owner_without_retired_override(self):
+        """DOC-129: setup recovery must not recommend an ignored trust override."""
+        doc = (_ROOT / "docs/operations.md").read_text()
+        assert "RADON_PROVENANCE_REMOTE_REF" not in doc
+        assert "../cloud/CLAUDE.md#privileged-bootstrap" in doc

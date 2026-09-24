@@ -39,10 +39,10 @@ function formatExpiry(date: string): string {
  * Index-option order form — Phase 3 surface. Cascading dropdowns:
  *   expiry → right → strike → submit
  *
- * Two-step chain load: first call fetches ALL expirations (no expiry
- * param — quick), second call fetches contracts FOR the selected
- * expiry (filtered server-side). Without the second-step scope the
- * chain returns 1000+ contracts which is overkill for the form.
+ * Expirations come from the shared equity secdef snapshot. Contract
+ * details are requested only for the selected expiry. An unscoped
+ * index-chain read lists every contract and holds a subprocess slot
+ * until it times out.
  *
  * Submits to /api/orders/place with type=option + conId + exchange so
  * IB doesn't pick up VIXW weeklies or other related roots by accident.
@@ -50,35 +50,65 @@ function formatExpiry(date: string): string {
 export function IndexOptionOrderForm({ ticker, portfolio }: IndexOptionOrderFormProps) {
   const symbol = ticker.toUpperCase();
 
-  // Step 1: expiries (no expiry scope)
-  const initial = useIndexOptionsChain(symbol, null);
-
+  const [rowsFor, setRowsFor] = useState(symbol);
+  const [expiryRows, setExpiryRows] = useState<string[]>([]);
+  const [expiryLoading, setExpiryLoading] = useState(true);
+  const [expiryError, setExpiryError] = useState<string | null>(null);
   const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);
   const [right, setRight] = useState<OptionRight>("C");
   const [selectedConId, setSelectedConId] = useState<number | null>(null);
 
-  useEffect(() => {
+  if (rowsFor !== symbol) {
+    setRowsFor(symbol);
+    setExpiryRows([]);
+    setExpiryLoading(true);
+    setExpiryError(null);
     setSelectedExpiry(null);
     setSelectedConId(null);
     setRight("C");
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    const url = `/api/options/expirations?symbol=${encodeURIComponent(symbol)}`;
+    fetch(url, { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) {
+          const body = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? `Expirations failed (${response.status})`);
+        }
+        return response.json() as Promise<{ expirations?: unknown }>;
+      })
+      .then((data) => {
+        if (cancelled) return;
+        const rows = Array.isArray(data.expirations)
+          ? data.expirations.filter((item): item is string => typeof item === "string")
+          : [];
+        setExpiryRows(rows);
+        setExpiryLoading(false);
+        setExpiryError(null);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setExpiryRows([]);
+        setExpiryLoading(false);
+        setExpiryError(err instanceof Error ? err.message : "Expirations failed");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [symbol]);
 
-  // Default to nearest expiry on load.
   useEffect(() => {
-    if (
-      initial.data?.symbol.toUpperCase() === symbol &&
-      initial.data.expirations.length &&
-      selectedExpiry == null
-    ) {
-      setSelectedExpiry(initial.data.expirations[0]);
+    if (selectedExpiry == null && expiryRows.length > 0) {
+      setSelectedExpiry(expiryRows[0]);
     }
-  }, [initial.data, selectedExpiry, symbol]);
+  }, [expiryRows, selectedExpiry]);
 
-  // Step 2: contracts scoped to the chosen expiry
-  const scoped = useIndexOptionsChain(symbol, selectedExpiry);
+  const scoped = useIndexOptionsChain(selectedExpiry ? symbol : null, selectedExpiry);
 
   const expiryContracts = useMemo(() => {
-    if (!scoped.data || scoped.data.symbol.toUpperCase() !== symbol) return [];
+    if (!scoped.data?.symbol || scoped.data.symbol.toUpperCase() !== symbol) return [];
     return scoped.data.contracts.filter(
       (c) =>
         c.right === right &&
@@ -188,13 +218,16 @@ export function IndexOptionOrderForm({ ticker, portfolio }: IndexOptionOrderForm
     };
   };
 
-  if (initial.loading) {
+  const book =
+    scoped.data?.symbol && scoped.data.symbol.toUpperCase() === symbol ? scoped.data : null;
+
+  if (expiryLoading) {
     return <div className="futures-form-loading">Loading {symbol} options chain…</div>;
   }
-  if (initial.error) {
-    return <div className="tab-empty"><RequestError error={initial.error} fallback="The contract chain could not be loaded. Try again." onRetry={() => window.location.reload()} /><button type="button" className="btn-secondary" onClick={() => window.location.reload()}>Reload data</button></div>;
+  if (expiryError) {
+    return <div className="tab-empty"><RequestError error={expiryError} fallback="The contract chain could not be loaded. Try again." onRetry={() => window.location.reload()} /><button type="button" className="btn-secondary" onClick={() => window.location.reload()}>Reload data</button></div>;
   }
-  if (!initial.data || initial.data.expirations.length === 0) {
+  if (expiryRows.length === 0) {
     return <div className="futures-form-empty">No listed {symbol} options.</div>;
   }
 
@@ -202,7 +235,8 @@ export function IndexOptionOrderForm({ ticker, portfolio }: IndexOptionOrderForm
     <ListedContractOrderForm
       eyebrow={
         <>
-          {symbol} Options · {initial.data.exchange} · {initial.data.tradingClass}
+          {symbol} Options
+          {book?.exchange ? ` · ${book.exchange} · ${book.tradingClass}` : ""}
         </>
       }
       contractSelector={
@@ -214,7 +248,7 @@ export function IndexOptionOrderForm({ ticker, portfolio }: IndexOptionOrderForm
               onChange={(e) => setSelectedExpiry(e.target.value)}
               className="futures-form-select"
             >
-              {initial.data.expirations.map((exp) => (
+              {expiryRows.map((exp) => (
                 <option key={exp} value={exp}>
                   {formatExpiry(exp)}
                 </option>
