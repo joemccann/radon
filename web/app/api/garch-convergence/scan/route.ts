@@ -15,6 +15,7 @@ import { requireRouteAccess } from "@/lib/routeAccess";
  */
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 600;
 
 export const radonCapability = "read.spawn";
 
