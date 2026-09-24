@@ -1,7 +1,7 @@
 "use client";
 import RequestError from "@/components/RequestError";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Share2 } from "lucide-react";
 import { useDismissablePopover } from "@/lib/useDismissablePopover";
 import { formatHoldDuration } from "@/lib/holdTime";
@@ -82,6 +82,7 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
   const [shareError, setShareError] = useState<unknown>(null);
   const [copied, setCopied] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const close = useCallback(() => setOpen(false), []);
@@ -117,6 +118,29 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
       }
     };
   }, [open, mounted]);
+
+  // Fixed viewport coordinates escape the enclosing table's scroll clip.
+  // CSS keeps the existing mobile bottom-sheet placement.
+  useLayoutEffect(() => {
+    if (!mounted) return;
+    const place = () => {
+      const trigger = popoverRef.current;
+      const dialog = dialogRef.current;
+      if (!trigger || !dialog) return;
+      const rect = trigger.getBoundingClientRect();
+      const above = rect.top >= dialog.offsetHeight + 8;
+      dialog.style.setProperty("--share-popover-right", `${Math.max(8, window.innerWidth - rect.right)}px`);
+      dialog.style.setProperty("--share-popover-bottom", above ? `${window.innerHeight - rect.top + 8}px` : "auto");
+      dialog.style.setProperty("--share-popover-top", above ? "auto" : `${rect.bottom + 8}px`);
+    };
+    place();
+    window.addEventListener("resize", place);
+    document.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      document.removeEventListener("scroll", place, true);
+    };
+  }, [mounted]);
 
   const generateImage = useCallback(async () => {
     const params = new URLSearchParams();
@@ -205,6 +229,7 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
       {mounted ? (
         <div
           className={`share-pnl-popover${exiting ? " share-pnl-popover--exiting" : ""}`}
+          ref={dialogRef}
           role="dialog"
           aria-label="Share options"
         >

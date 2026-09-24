@@ -93,6 +93,7 @@ function capitalize(s: string): string {
 function RatingsChangesTable({ changes }: { changes: UpgradeEntry[] }) {
   const { sorted, sort, toggle } = useSort(changes, ratingExtract);
   return (
+    <div className="pos-legs-table-wrap" data-testid="ratings-table-scroll">
     <table className="pos-legs-table">
       <thead>
         <tr>
@@ -124,6 +125,7 @@ function RatingsChangesTable({ changes }: { changes: UpgradeEntry[] }) {
         })}
       </tbody>
     </table>
+    </div>
   );
 }
 
