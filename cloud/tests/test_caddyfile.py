@@ -100,6 +100,13 @@ class TestRouting:
         assert re.search(r"handle\s*\{", content, re.MULTILINE)
         assert "127.0.0.1:3000" in content
 
+    def test_scanner_scan_routes_to_3000(self, caddy_dir):
+        content = read_caddyfile(caddy_dir)
+        assert re.search(r"@scan_routes\s+path\s+/api/scanner/\*/scan\*\s+/api/\*/scan\*", content)
+        assert re.search(r"handle\s+@scan_routes\s*\{", content)
+        block = handle_block(content, "@scan_routes")
+        assert "127.0.0.1:3000" in block
+
     def test_handle_path_used_for_api_ib(self, caddy_dir):
         content = read_caddyfile(caddy_dir)
         match = re.search(r"(handle_path|handle)\s+/api/ib/\*", content)

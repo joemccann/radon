@@ -138,4 +138,39 @@ describe("POST /api/scanner/bounce/scan", () => {
     const route = await import("../app/api/scanner/bounce/scan/route");
     expect(route.radonCapability).toBe("read.spawn");
   });
+
+  it("declares maxDuration = 600", async () => {
+    const route = await import("../app/api/scanner/bounce/scan/route");
+    expect(route.maxDuration).toBe(600);
+  });
+
+  it("falls back to cached bounce payload on >=500 API errors when cache matches request", async () => {
+    const { RadonApiError } = await import("@/lib/radonApi");
+    mocks.radonFetch.mockRejectedValueOnce(new RadonApiError(504, "Gateway Timeout"));
+    mocks.readFile.mockResolvedValueOnce(JSON.stringify(payload));
+    const { POST } = await import("../app/api/scanner/bounce/scan/route");
+    const res = await POST(new Request("http://localhost/api/scanner/bounce/scan", { method: "POST" }));
+    expect(res.status).toBe(504);
+    expect(res.headers.get("X-Sync-Warning")).toBe(
+      "Radon API unavailable - matching cached bounce setup attached",
+    );
+    const body = await res.json();
+    expect(body.is_stale).toBe(true);
+    expect(body.scan_succeeded).toBe(false);
+    expect(body.results[0].ticker).toBe("BAC");
+  });
+
+  it("returns missing payload with error when upstream fails and no matching cache exists", async () => {
+    const { RadonApiError } = await import("@/lib/radonApi");
+    mocks.radonFetch.mockRejectedValueOnce(new RadonApiError(502, "Bad Gateway"));
+    mocks.readFile.mockRejectedValueOnce(ENOENT);
+    const { POST } = await import("../app/api/scanner/bounce/scan/route");
+    const res = await POST(new Request("http://localhost/api/scanner/bounce/scan", { method: "POST" }));
+    expect(res.status).toBe(502);
+    expect(res.headers.get("X-Sync-Warning")).toBeNull();
+    const body = await res.json();
+    expect(body.missing).toBe(true);
+    expect(body.scan_succeeded).toBe(false);
+    expect(body.error).toBe("Bad Gateway");
+  });
 });
