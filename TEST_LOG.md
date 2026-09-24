@@ -1031,3 +1031,4 @@ The closing sequence was stopped at round 2 cloud (`DONE 124`) after reconciling
 | Finding | Status | Evidence |
 |---|---|---|
 | T-247 | Implemented; full gates pending | Parser-to-live-fill regression: 2 red before preserving `ibExecID`/`execId` ahead of numeric `tradeID`; 144 focused tests green afterward. Exact execution deduplication and later scale-out remain guarded. Numeric-only historical rows retain their conservative fallback; no stored journal data was rewritten. |
+| T-242 | Implemented; full gates pending | A fake fetch crosses the market close while the real history filter and payload builder execute: 1 red before anchoring the completed session in `scan_index`; 90 affected tests green. Standalone callers retain their default session lookup. |

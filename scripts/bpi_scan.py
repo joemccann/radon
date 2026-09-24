@@ -169,6 +169,7 @@ def build_index_payload(
     member_count: int,
     taken_at: str,
     sources: dict[str, Any],
+    completed_session: str | None = None,
 ) -> dict[str, Any]:
     """schema_version 1 payload, or the missing variant when the run fails
     the >=MIN_SESSIONS / >=80%-latest-coverage gate (never cache/persist an
@@ -214,7 +215,7 @@ def build_index_payload(
         # Latest aggregated session lags the last completed ET session —
         # some members' Yahoo candles haven't published yet. The catch-up
         # timer pass (Tue-Sat 11:00 UTC) re-fetches laggards and converges.
-        "stale": latest["date"] < last_completed_session_date(),
+        "stale": latest["date"] < (completed_session or last_completed_session_date()),
         "thresholds": {"oversold": int(OVERSOLD), "overbought": int(OVERBOUGHT)},
         "history": [{"date": r["date"], "bpi": r["bpi"]} for r in rows],
         "sources": sources,
@@ -241,6 +242,7 @@ def ensure_member_history(
     backfill: bool,
     no_db: bool,
     sweep_deadline: float | None = None,
+    completed_session: str | None = None,
 ) -> tuple[dict[str, dict[str, float]], dict[str, int]]:
     """Date-indexed closes per member plus fetch counters.
 
@@ -250,7 +252,7 @@ def ensure_member_history(
     an in-progress bar stored as a close poisons the durable store
     (rv_ratio_scan precedent). ``no_db`` skips ALL Turso I/O.
     """
-    last_complete = last_completed_session_date()
+    last_complete = completed_session or last_completed_session_date()
     stored_max = {} if (backfill or no_db) else _read_stored_max_dates(members)
     to_fetch = [m for m in members if backfill or stored_max.get(m, "") < last_complete]
     print(
@@ -624,6 +626,7 @@ def scan_index(
     no_db: bool = False,
     sweep_deadline: float | None = None,
 ) -> dict[str, Any]:
+    completed_session = last_completed_session_date()
     taken_at = _now_iso()
     print(f"BPI SCAN: {index_symbol} ({INDEX_NAMES[index_symbol]})", file=sys.stderr)
     tickers, source = resolve_constituents(
@@ -635,7 +638,8 @@ def scan_index(
         print(f"  smoke cap active: first {cap} members only", file=sys.stderr)
 
     closes, fetch_counts = ensure_member_history(
-        tickers, backfill=backfill, no_db=no_db, sweep_deadline=sweep_deadline
+        tickers, backfill=backfill, no_db=no_db, sweep_deadline=sweep_deadline,
+        completed_session=completed_session
     )
     member_series = {
         member: member_signal_series(series)
@@ -651,6 +655,7 @@ def scan_index(
         member_series=member_series,
         member_count=len(tickers),
         taken_at=taken_at,
+        completed_session=completed_session,
         sources={"constituents": source, "member_close_fetches": fetch_counts},
     )
 
