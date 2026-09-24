@@ -251,6 +251,16 @@ file_mode() {
   fi
 }
 
+# A directory root writes into must be a real root-owned one: /etc/radon is
+# radon-writable, so a subdirectory there can be radon's, or a link.
+directory_is_root_owned() {
+  local owner expected=0
+  (( HELPER_TEST_MODE == 1 )) && expected="$(id -u)"
+  [[ -d "$1" && ! -L "$1" ]] || return 1
+  owner="$(stat -c '%u' "$1" 2>/dev/null)" || owner="$(stat -f '%u' "$1")"
+  [[ "$owner" == "$expected" ]]
+}
+
 root_ownership_matches() {
   local ownership
   (( HELPER_TEST_MODE == 1 )) && return 0
@@ -1394,6 +1404,10 @@ refresh_install_file() {
   local dest_dir candidate
   dest_dir="$(dirname -- "$dest")"
   mkdir -p "$dest_dir" || return 73
+  if ! directory_is_root_owned "$dest_dir"; then
+    echo "live control-plane directory is not a root-owned directory: ${dest_dir}" >&2
+    return 74
+  fi
   if [[ -e "$dest" || -L "$dest" ]] && [[ ! -f "$dest" || -L "$dest" ]]; then
     echo "live control-plane path is not a regular file: ${dest}" >&2
     return 74

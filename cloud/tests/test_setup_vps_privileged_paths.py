@@ -770,6 +770,15 @@ class TestDirectoryOwnership:
         ):
             assert guard < body.index(write), write
 
+
+    def test_seccomp_profile_directory_is_refused_unless_root_owned(self) -> None:
+        # DS-2026-09-24-01: install -d follows a link planted under the
+        # radon-writable /etc/radon; the directory must be a real root one.
+        body = _function_body(SETUP.read_text(encoding="utf-8"), "install_app_runtime")
+        assert "install -d" not in body
+        refuse = body.index("not a root-owned directory")
+        assert body.index('-L "$profile_dir"') < refuse < body.index('mktemp "${profile_target}')
+
     def test_deploy_lock_link_is_refused(self) -> None:
         body = _function_body(SETUP.read_text(encoding="utf-8"), "install_gateway_control")
         assert body.index("-L /home/radon/.radon-deploy.lock") < body.index(
