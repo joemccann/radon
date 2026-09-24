@@ -766,3 +766,21 @@ class TestAnAgentThatCommitsNothingIsNotReportedOk:
         assert INCOMPLETE_STATUS not in calls, calls
         assert "message=OK" in pages, pages
         assert INCOMPLETE_STATUS not in pages, pages
+
+
+@pytest.mark.parametrize("second_commits", [True, False])
+def test_testing_audit_retries_an_empty_success_once(tmp_path, second_commits):
+    counter = tmp_path / "audit-attempts"
+    body = (
+        '#!/bin/sh\n'
+        f'echo attempt >> "{counter}"\n'
+        f'count=$(wc -l < "{counter}")\n'
+        'if [ "$count" -eq 2 ]; then\n'
+        + ("git checkout -q -b testing/2026-08-31\n"
+           "git commit -q --allow-empty -m 'T-380 fixture completion'\n" if second_commits else ":\n")
+        + "fi\nexit 0\n"
+    )
+    proc, calls, pages = TestAnAgentThatCommitsNothingIsNotReportedOk()._run(tmp_path, body)
+    assert counter.read_text().splitlines() == ["attempt", "attempt"]
+    assert proc.returncode == (0 if second_commits else 75), (proc.stdout, proc.stderr)
+    assert ("**OK**" if second_commits else "**INCOMPLETE") in calls
