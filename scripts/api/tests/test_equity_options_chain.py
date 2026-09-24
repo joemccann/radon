@@ -20,7 +20,9 @@ def localhost_bypass(monkeypatch):
 
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
+    server._option_secdef_cache.clear()
     yield
+    server._option_secdef_cache.clear()
 
 
 @pytest.fixture
@@ -39,10 +41,14 @@ def _fake_script_result(*, ok=True, data=None, error=None, exit_code=0):
 def test_options_chain_uses_equity_chain_timeout(client):
     payload = {
         "symbol": "MSFT",
-        "expiry": "20260717",
-        "exchange": "SMART",
-        "strikes": [350.0, 352.5, 355.0],
-        "multiplier": "100",
+        "expirations": ["20260717"],
+        "by_expiry": {
+            "20260717": {
+                "exchange": "SMART",
+                "multiplier": "100",
+                "strikes": [350.0, 352.5, 355.0],
+            }
+        },
     }
 
     async def _stub(*args, **kwargs):
