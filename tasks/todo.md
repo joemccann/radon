@@ -17,7 +17,9 @@ Text-only research post. Chart the printed dollar yields. Ask before wiring it i
 ## Review
 
 - CoreWeave 9.00-9.50 is a placement of "low- to mid-9%", not a printed coupon. Connector is dotted.
-- Not wired into the feed. Chart type is a zero-baseline dot-and-range.
+- SoftBank 8.6-9.75 is one printed range.
+- Second figure: 10-year change in bp, October hike on a 0-100 scale, year-end tightening off that scale.
+- Both figures sit under the article body. Not wired into the live feed.
 
 # Task: Research force-include + 24h Held TTL
 
