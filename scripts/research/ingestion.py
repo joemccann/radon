@@ -173,6 +173,10 @@ def _consumer(root, stop, wake, parsed, backoff, review, publish, client_factory
                         # Operator votes ("should have published", "want more") re-queue their documents with the note.
                         from research.feedback import apply as apply_feedback
                         apply_feedback(state, root=root)
+                        try:
+                            publisher.expire_stale_held()
+                        except Exception:
+                            pass  # Same best-effort as apply_feedback; never requeue or publish.
                         next_feedback = time.monotonic() + FEEDBACK_POLL_SECS
                     worked = review_one(root, state, pipeline, publisher, publish)
                     event = parsed

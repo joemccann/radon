@@ -1,3 +1,12 @@
+# Task: Research force-include + 24h Held TTL
+
+Joe via CoS: always include BofA Flow Show and DB positioning data; expire Held rows after 24h on `updated_at` PT.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: force_include predicates, identify series fixtures, intake empty→reselect, expire_stale_held, Held API 24h `updated_at`
+- T2 depends_on: [T1] - force_include.py, intake hooks, publish.expire_stale_held, worker/ingestion call, Held GET filter, HELD_EXPIRED label
+- T3 depends_on: [T2] - Focused pytest + vitest; draft PR; CI green; do not merge
 # Task: Flex re-sync false coverage alarm
 
 Sync Now re-ingests an already-applied trades file. `delivery_rows_present` requires every Flex exec id in the journal. The writer skips some on purpose (legacy key, superseded correction, empty bucket), so those ids never land and every re-sync returns `coverage_unverified`. No rows are missing.
@@ -32,6 +41,7 @@ A VIX page spawned one `ib_option_chain.py` per expiry plus an unscoped `ib_chai
 
 - [x] T1 Failing tests
 - [x] T2 Implementation
+- [ ] T3 Verify and ship
 - [x] T3 Verify and ship
 
 ## Review

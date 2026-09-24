@@ -105,6 +105,10 @@ def test_pdf_creation_date_parses_pdf_syntax():
     ("wolfe research -a brief history of the end of the world(1).pdf", "wolfe research -a brief history of the end of the world"),
     ("pnc_economics_research_nahb_16_september_2026.pdf", "pnc economics research nahb"),
     ("intradayfxview_20260917_en.pdf", "intradayfxview"),
+    ("the flow show friday, 19 september 2026.pdf", "the flow show"),
+    ("bofa - the flow show - 19 sep 2026.pdf", "bofa - the flow show"),
+    ("db positioning data - 19 september 2026.pdf", "db positioning data"),
+    ("deutsche_bank_positioning_data_20260919.pdf", "deutsche bank positioning data"),
 ])
 def test_series_strips_dates_and_ids(name, series):
     assert identify.series(name) == series
