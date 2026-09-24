@@ -226,6 +226,10 @@ async function applyTheme(page: Page, theme: "dark" | "light") {
   }, theme);
 }
 
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
 test.describe("/regime/vixcor — VIX vs COR3M correlation tab", () => {
   test("activates the VIX-COR tab and renders the summary strip", async ({ page }) => {
     await setupMocks(page);
