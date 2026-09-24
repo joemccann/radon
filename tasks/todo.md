@@ -1,3 +1,19 @@
+# Task: Research force-include + 24h Held TTL
+
+Joe via CoS: always include BofA Flow Show and DB positioning data; expire Held rows after 24h on `updated_at` PT.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: force_include predicates, identify series fixtures, intake empty→reselect, expire_stale_held, Held API 24h `updated_at`
+- T2 depends_on: [T1] - force_include.py, intake hooks, publish.expire_stale_held, worker/ingestion call, Held GET filter, HELD_EXPIRED label
+- T3 depends_on: [T2] - Focused pytest + vitest; draft PR; CI green; do not merge
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Implementation
+- [ ] T3 Verify and ship
+
 # Task: Split gitdirs (runner trust follow-up to R02-A)
 
 Operator 2026-09-23: keep R02-A. The rung gets its own writable gitdir (`$WEEKEND_ROOT/.gitdirs-agent/<loop>.git`); host git keeps `$WEEKEND_ROOT/.gitdirs/<loop>.git` and never opens the agent gitdir.

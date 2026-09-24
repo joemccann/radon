@@ -10,6 +10,7 @@ const LABELS: Record<string, string> = {
   SINGLE_STOCK_NOT_IN_BOOK: "Single-name equity research outside the watchlist and portfolio",
   DOC_TYPE_FX_PAIR_NOTE: "Document type: FX pair note",
   DOC_TYPE_CALENDAR: "Document type: calendar",
+  HELD_EXPIRED: "Hold expired",
 };
 
 export function reasonCodeLabel(code: string): string {

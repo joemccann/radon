@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ResearchHeldReview from "../components/ResearchHeldReview";
+import { reasonCodeLabel } from "@/lib/researchReasonCodes";
 
 // The rules panel has its own wire tests (research-rules-ui.test.tsx); here it would only add a second GET.
 vi.mock("../components/ResearchRuleProposals", () => ({ default: () => null }));
@@ -31,6 +32,10 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("ResearchHeldReview", () => {
+  it("labels HELD_EXPIRED for the 24h hold TTL", () => {
+    expect(reasonCodeLabel("HELD_EXPIRED")).toBe("Hold expired");
+  });
+
   it("loads today's sample from the held endpoint and shows why each document was held", async () => {
     render(<ResearchHeldReview />);
     await screen.findByText("jpm_flows___liquidity.pdf");

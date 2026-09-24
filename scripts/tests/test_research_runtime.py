@@ -220,6 +220,17 @@ def test_document_deadline_bounds_a_100_page_selection_and_emits_progress(tmp_pa
     assert stages[-1] == "selected-pages-9-16"
 
 
+def test_cycle_expires_stale_held_and_does_not_publish_or_requeue(queue,monkeypatch):
+    root,state=queue; monkeypatch.setattr(worker,"discover",lambda *a:0)
+    expired=[]; published=[]
+    publisher=SimpleNamespace(recent_posts=lambda **k:[], expire_stale_held=lambda:expired.append(True) or 1,
+                              publish=lambda post:published.append(post))
+    result=worker.cycle(root,SimpleNamespace(download=lambda *a:root/"source.pdf"),state,
+                        SimpleNamespace(process=lambda *a,**k:[]),publisher,publish=True)
+    assert expired==[True] and published==[] and result["processed"]==1
+    assert state.outbox()==[]
+
+
 def test_cycle_success_then_restart_does_not_reprocess(queue,monkeypatch):
     root,state=queue; monkeypatch.setattr(worker,"discover",lambda *a:0)
     calls=[]; published=[]
