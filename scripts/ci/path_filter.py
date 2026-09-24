@@ -197,6 +197,7 @@ CROSS_TREE_CONTRACTS = (
         tests=(
             "cloud/tests/test_caddy_edge_timeouts.py::TestTheAssistantTurnOutlivesTheGenericGuard::test_the_assistant_bound_stays_inside_the_routes_own_budget",
             "cloud/tests/test_caddy_edge_timeouts.py::TestTheAssistantHandleStatesItStreams::test_the_route_writes_its_header_before_the_loop",
+            "cloud/tests/test_caddyfile.py::TestRouting::test_assistant_bounds_the_request_body_at_the_edge",
         ),
     ),
     CrossTreeContract(
