@@ -486,10 +486,12 @@ pin_apt_keyring() {
   local label="$4"
   install -m 0755 -d "$(dirname "$dest")"
   curl -fsSL "$url" | gpg --batch --yes --dearmor -o "$dest"
-  # apt trusts whatever this keyring holds: refuse a key that is not the
-  # pinned publisher rather than adding its repository under it.
-  if ! gpg --batch --show-keys --with-colons "$dest" 2>/dev/null \
-    | grep -q "^fpr:.*:${fingerprint}:"; then
+  # apt trusts every key this keyring holds: refuse unless its only primary
+  # key is the pinned publisher rather than adding its repository under it.
+  local primaries
+  primaries="$(gpg --batch --show-keys --with-colons "$dest" 2>/dev/null \
+    | awk -F: '$1 == "pub" { want = 1; next } want && $1 == "fpr" { print $10; want = 0 }')"
+  if [[ "$primaries" != "$fingerprint" ]]; then
     rm -f "$dest"
     log_error "${label} apt signing key does not match the pinned fingerprint"
     return 1
@@ -710,10 +712,11 @@ preflight_checks() {
 
   # Pin GitHub's published ed25519 host key (docs.github.com "GitHub's SSH
   # key fingerprints") instead of trusting whatever answers first contact.
+  # radon writes its own known_hosts: the file is radon-replaceable after the
+  # link check above, so root never appends to or chowns it.
   if ! sudo -u radon ssh-keygen -F github.com &>/dev/null; then
     printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
-      >> /home/radon/.ssh/known_hosts
-    chown radon:radon /home/radon/.ssh/known_hosts
+      | sudo -u radon tee -a /home/radon/.ssh/known_hosts >/dev/null
   fi
 
   if ! command -v "$PYTHON_BIN" &>/dev/null; then
@@ -894,7 +897,10 @@ setup_node() {
     local public_env_tmp
     public_env_tmp="$(mktemp)"
     grep -E '^NEXT_PUBLIC_[A-Z0-9_]+=' "$ENV_FILE" > "$public_env_tmp" || true
-    install -m 0600 -o radon -g radon "$public_env_tmp" "${RADON_DIR}/web/.env"
+    # web/ is radon-owned: radon writes its own copy, so root never creates,
+    # chmods or chowns a path there.
+    sudo -u radon sh -c 'umask 077; cat > "$1" && chmod 0600 "$1"' _ \
+      "${RADON_DIR}/web/.env" < "$public_env_tmp"
     rm -f "$public_env_tmp"
   fi
 
@@ -1349,7 +1355,18 @@ install_app_runtime() {
   # profile. Root's engine loads it, so it is root-owned, never the checkout.
   local profile_source="${CLOUD_DIR}/config/seccomp/chromium.json"
   local profile_target="${RADON_SECCOMP_TARGET:-/etc/radon/seccomp/chromium.json}"
-  install -d -m 0755 "$(dirname "$profile_target")"
+  local profile_dir expected_uid=0
+  [[ "${RADON_HELPER_SKIP_CHOWN:-0}" == "1" ]] && expected_uid="$(id -u)"
+  # /etc/radon is radon-writable (1770): radon can plant this directory, or a
+  # link in its place, before root's first install. mkdir never follows a
+  # final-component link; anything but a real root-owned directory is refused.
+  profile_dir="$(dirname "$profile_target")"
+  mkdir -m 0755 "$profile_dir" 2>/dev/null || true
+  if [[ -L "$profile_dir" || ! -d "$profile_dir" ]] || \
+     [[ "$(stat -c '%u' "$profile_dir")" != "$expected_uid" ]]; then
+    log_error "Refusing ${profile_dir}: not a root-owned directory"
+    return 1
+  fi
   staged="$(mktemp "${profile_target}.tmp.XXXXXX")"
   if ! stage_from_checkout "$profile_source" "$staged" 0644 ${owner_args[@]+"${owner_args[@]}"} || \
      ! python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1], encoding="utf-8")).get("defaultAction") != "SCMP_ACT_ERRNO")' "$staged"; then

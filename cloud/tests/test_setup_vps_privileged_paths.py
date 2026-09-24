@@ -766,9 +766,32 @@ class TestDirectoryOwnership:
             "cp /root/.ssh/authorized_keys",
             "chown -R radon:radon /home/radon/.ssh",
             "ssh-keygen -t ed25519",
-            ">> /home/radon/.ssh/known_hosts",
+            "tee -a /home/radon/.ssh/known_hosts",
         ):
             assert guard < body.index(write), write
+
+    def test_known_hosts_is_written_by_radon_never_by_root(self) -> None:
+        # DS-2026-09-24-03: radon can swap known_hosts for a link after the
+        # one-time -L check, so root must neither append to it nor chown it.
+        body = _function_body(SETUP.read_text(encoding="utf-8"), "preflight_checks")
+        assert ">> /home/radon/.ssh/known_hosts" not in body
+        assert "chown radon:radon /home/radon/.ssh/known_hosts" not in body
+        assert "| sudo -u radon tee -a /home/radon/.ssh/known_hosts" in body
+
+    def test_public_web_env_is_written_by_radon_never_by_root(self) -> None:
+        # web/ is radon-owned, so root never creates, chmods or chowns there.
+        body = _function_body(SETUP.read_text(encoding="utf-8"), "setup_node")
+        assert '"${RADON_DIR}/web/.env"' in body
+        assert "install -m 0600 -o radon -g radon" not in body
+        assert "sudo -u radon sh -c 'umask 077;" in body
+
+    def test_seccomp_profile_directory_is_refused_unless_root_owned(self) -> None:
+        # DS-2026-09-24-01: install -d follows a link planted under the
+        # radon-writable /etc/radon; the directory must be a real root one.
+        body = _function_body(SETUP.read_text(encoding="utf-8"), "install_app_runtime")
+        assert "install -d" not in body
+        refuse = body.index("not a root-owned directory")
+        assert body.index('-L "$profile_dir"') < refuse < body.index('mktemp "${profile_target}')
 
     def test_deploy_lock_link_is_refused(self) -> None:
         body = _function_body(SETUP.read_text(encoding="utf-8"), "install_gateway_control")
@@ -843,11 +866,7 @@ RADON_CONTROLLED = re.compile(
 )
 # Privileged lines on radon-controlled paths that are allowed WITHOUT the
 # guard or the staging helper, each with its reason.
-ALLOWED_UNGUARDED = {
-    # Root-owned mktemp source; the target holds only the NEXT_PUBLIC_* lines
-    # radon already owns, and `install` unlinks the destination before writing.
-    'install -m 0600 -o radon -g radon "$public_env_tmp" "${RADON_DIR}/web/.env"',
-}
+ALLOWED_UNGUARDED: set[str] = set()
 
 
 def _functions(script: str) -> list[tuple[str, int, int]]:
@@ -979,6 +998,48 @@ class TestRemoteInstallerPins:
         assert dearmor < check
         assert "rm -f" in body[check:]
         assert "does not match the pinned fingerprint" in body
+
+    @pytest.mark.parametrize(
+        ("primaries", "accepted"),
+        [(["PIN"], True), (["PIN", "EXTRA"], False), (["EXTRA"], False)],
+        ids=["pinned-only", "pinned-plus-extra", "wrong-key"],
+    )
+    def test_helper_accepts_only_a_keyring_holding_exactly_the_pinned_key(
+        self, tmp_path: Path, primaries: list[str], accepted: bool
+    ) -> None:
+        # DS-2026-09-24-04: signed-by trusts every key in the keyring, so an
+        # extra primary key beside the pinned one must be refused.
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        pin = self.DOCKER_FPR
+        fprs = {"PIN": pin, "EXTRA": "A" * 40}
+        listing = "".join(
+            f"pub:-:4096:1:{fprs[p][-16:]}:1:::-:::scSC:::::::::0:\n"
+            f"fpr:::::::::{fprs[p]}:\n"
+            f"sub:-:4096:1:{'B' * 16}:1:::::e:::::::::0:\n"
+            f"fpr:::::::::{'B' * 40}:\n"
+            for p in primaries
+        )
+        (tmp_path / "listing").write_text(listing, encoding="utf-8")
+        _write_executable(fake_bin / "curl", "#!/bin/sh\nprintf key\n")
+        _write_executable(
+            fake_bin / "gpg",
+            "#!/bin/bash\n"
+            'if [[ " $* " == *" --dearmor "* ]]; then\n'
+            '  while [[ "$1" != "-o" ]]; do shift; done; cat > "$2"; exit 0\n'
+            "fi\n"
+            f"cat {tmp_path / 'listing'}\n",
+        )
+        dest = tmp_path / "keyrings" / "docker.gpg"
+
+        result = _run_setup_function(
+            f'pin_apt_keyring https://example.invalid/gpg "{dest}" "{pin}" Docker',
+            fake_bin,
+            {},
+        )
+
+        assert (result.returncode == 0) is accepted, result.stderr
+        assert dest.exists() is accepted
 
     def test_docker_apt_key_is_fingerprint_pinned_before_install(self) -> None:
         script = SETUP.read_text(encoding="utf-8")

@@ -246,6 +246,16 @@ mode_matches() {
   [[ "$(file_mode "$1")" == "$expected" ]]
 }
 
+# A directory root writes into must be a real root-owned one: /etc/radon is
+# radon-writable, so a subdirectory there can be radon's, or a link.
+directory_is_root_owned() {
+  local owner expected=0
+  [[ "$TEST_MODE" == "1" ]] && expected="$(id -u)"
+  [[ -d "$1" && ! -L "$1" ]] || return 1
+  owner="$(stat -c '%u' "$1" 2>/dev/null)" || owner="$(stat -f '%u' "$1")"
+  [[ "$owner" == "$expected" ]]
+}
+
 ownership_matches() {
   local ownership
   [[ "$TEST_MODE" == "1" ]] && return 0
@@ -612,6 +622,12 @@ atomic_install() {
     return 1
   fi
 }
+
+for target_path in "${INSTALLED_TARGETS[@]}"; do
+  mkdir -p "$(dirname "$target_path")"
+  directory_is_root_owned "$(dirname "$target_path")" || \
+    die "target directory is not a root-owned directory: $(dirname "$target_path")"
+done
 
 TRANSACTION_TARGETS=("${INSTALLED_TARGETS[@]}" "$MANIFEST_PATH" "$READY_PATH")
 BACKUP_DIR="$STAGE_DIR/backups"

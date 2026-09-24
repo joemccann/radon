@@ -129,6 +129,20 @@ class TestRouting:
         size_bytes = size * (1024 if unit == "KB" else 1024 * 1024)
         assert size_bytes <= 1024 * 1024, "/api/ib/* max_size must be <= 1MB"
 
+    def test_assistant_bounds_the_request_body_at_the_edge(self, caddy_dir):
+        """The assistant route buffers the whole JSON body before its own
+        turn cap runs, so the edge bounds it just above that cap."""
+        active = strip_comments(read_caddyfile(caddy_dir))
+        match = re.search(r"handle\s+/api/assistant\*\s*\{", active)
+        assert match is not None, "/api/assistant* route must exist"
+        block = _balanced_block(active, match.end() - 1)
+        cap = re.search(r"request_body\s*\{[^}]*max_size\s+(\d+)MB", block)
+        assert cap, "/api/assistant* block must set request_body { max_size ... }"
+        route = (caddy_dir.parents[1] / "web/app/api/assistant/route.ts").read_text()
+        turn_cap = re.search(r"MAX_TURN_PAYLOAD_BYTES = (\d+) \* 1024 \* 1024", route)
+        assert turn_cap
+        assert int(turn_cap.group(1)) < int(cap.group(1)) <= 16
+
     def test_reverse_proxy_does_not_dial_localhost_hostname(self, caddy_dir):
         # `localhost` prefers ::1. Relay binds 127.0.0.1:8765 only, so
         # reverse_proxy localhost:8765 502s with connection refused. Same
