@@ -60,8 +60,7 @@ export const AI_CREDIT_YIELDS: readonly YieldMark[] = [
   },
 ];
 
-export const AI_CREDIT_DEK =
-  "10-year +25 bp in two weeks, +35 bp in one month. S&P near 19x.";
+export const AI_CREDIT_DEK = "S&P near 19x.";
 
 export const AI_CREDIT_SOURCE =
   "Goldman Sachs, Sean Johnstone, 24 Sep 2026, p. 2. CoreWeave places the desk phrase low- to mid-9% at 9.00-9.50. Not a printed coupon.";

@@ -26,7 +26,7 @@ describe("AiCreditYieldChart", () => {
     expect(chart.getAttribute("data-axis-max")).toBe("12");
     expect(screen.getByText("0")).toBeTruthy();
     expect(screen.getByText("AI credit dollar yields")).toBeTruthy();
-    expect(screen.getByText(/\+25 bp in two weeks/)).toBeTruthy();
+    expect(screen.queryByText(/\+25 bp/)).toBeNull();
     expect(screen.getByText(/S&P near 19x/)).toBeTruthy();
 
     for (const mark of AI_CREDIT_YIELDS) {
@@ -48,6 +48,7 @@ describe("AiCreditYieldChart", () => {
     const printed = document.querySelector('[data-mark="softbank"]');
     expect(printed?.getAttribute("data-estimated")).toBe("false");
     expect(printed?.querySelector("line")?.getAttribute("stroke-dasharray")).toBeNull();
+    expect(printed?.querySelectorAll("line").length).toBe(1);
     expect(printed?.querySelectorAll("circle").length).toBe(2);
 
     expect(document.querySelector('[data-mark="ust10"] line')).toBeNull();
