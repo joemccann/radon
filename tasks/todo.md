@@ -1,3 +1,23 @@
+# Task: Flex re-sync false coverage alarm
+
+Sync Now re-ingests an already-applied trades file. `delivery_rows_present` requires every Flex exec id in the journal. The writer skips some on purpose (legacy key, superseded correction, empty bucket), so those ids never land and every re-sync returns `coverage_unverified`. No rows are missing.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red test: a legacy-key-skipped META bucket verifies as duplicate, not coverage_unverified
+- T2 depends_on: [T1] - Coverage uses `rehydrate_from_executions`; covered when it would import 0. Dropped rows and an unfinished journal walk stay unverified
+- T3 depends_on: [T2] - Focused pytest green; PR; CI green
+
+## Checklist
+
+- [x] T1 Failing test (`coverage_unverified` on the META legacy-key bucket)
+- [x] T2 Implementation (`rehydrate_from_executions` import count; disagreements stay unverified)
+- [ ] T3 Verify and ship
+
+## Review
+
+- Exec-id presence stays a sufficient early pass. A finished journal walk whose writer would import nothing is covered, including a same-day META fill matched on (ticker, date, structure). Dropped rows, an unfinished walk, a positive import count, and an aggregate qty/notional disagreement stay unverified.
+
 # Task: Option secdef singleflight
 
 A VIX page spawned one `ib_option_chain.py` per expiry plus an unscoped `ib_chain.py`, filled the 3-slot interactive lane, and 502'd the book.

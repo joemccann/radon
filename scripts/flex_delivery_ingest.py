@@ -112,53 +112,71 @@ def delivery_rows_present(kind: str, xml_text: str) -> bool:
                 return False
         return True
     if kind == TRADES:
-        from trade_blotter.flex_query import FlexQueryFetcher
-        from journal_rehydrate import (
-            _existing_exec_ids,
-            _existing_exec_roots,
-            _reconcile_against_individual_fills,
-            _root_already_journaled,
-        )
-
-        executions, dropped = FlexQueryFetcher(token="x", query_id="x").parse_xml_with_drops(xml_text)
-        if dropped:
-            return False
-        pending = {str(execution.exec_id) for execution in executions}
-        cursor = ""
-        seen: List[Dict[str, Any]] = []
-        exhausted = False
-        # Bound both each page and the complete verification walk. Hitting the
-        # page cap with ids still pending is unknown coverage, never evidence
-        # that the missing rows were written.
-        for _ in range(100):
-            if not pending:
-                return True
-            rows = query(
-                "SELECT trade_id, payload FROM journal WHERE trade_id > ? "
-                "ORDER BY trade_id LIMIT 200", (cursor,),
-            )
-            if not rows:
-                exhausted = True
-                break
-            payloads = [json.loads(row[1]) for row in rows]
-            seen.extend(payloads)
-            ids = _existing_exec_ids(payloads)
-            roots = _existing_exec_roots(ids)
-            pending = {eid for eid in pending if eid not in ids and not _root_already_journaled(eid, roots)}
-            cursor = rows[-1][0]
-        if not pending:
-            return True
-        if not exhausted:
-            return False
-        # NF-4: individual IB fills are canonical. rehydrate marks the delivery
-        # applied and stores no Flex tradeID when those fills already match the
-        # contract-day quantity and gross notional. Requiring the Flex id here
-        # failed the oneshot on every re-pull (2026-09-22 page e1297eea).
-        # A quantity or notional disagreement stays unverified.
-        remaining = [execution for execution in executions if str(execution.exec_id) in pending]
-        uncovered, _groups, disagreements = _reconcile_against_individual_fills(remaining, seen)
-        return not uncovered and not disagreements
+        return _trade_delivery_covered(xml_text, query)
     return False
+
+
+# A later unread page can change rehydrate's prior-quantity label and turn a
+# legacy-key skip into an import. Hitting the page cap with ids still pending
+# is unknown coverage, never evidence that the missing rows were written.
+_JOURNAL_COVERAGE_PAGE = 200
+_JOURNAL_COVERAGE_PAGES = 100
+
+
+def _trade_delivery_covered(xml_text: str, query) -> bool:
+    """True when the journal writer would import nothing from this file.
+
+    Exec-id presence misses fills the writer skips on purpose: superseded
+    corrections, empty buckets, legacy (ticker, date, structure) duplicates,
+    and Flex rows whose contract-day already matches individual IB fills.
+    Those ids never land, so every re-sync of an applied file stayed
+    unverified. `rehydrate_from_executions` is the oracle. A qty or notional
+    disagreement stays unverified: the writer also refuses to book it, but
+    the file does not match the journal.
+    """
+    from trade_blotter.flex_query import FlexQueryFetcher
+    from journal_rehydrate import (
+        _existing_exec_ids,
+        _existing_exec_roots,
+        _root_already_journaled,
+        rehydrate_from_executions,
+    )
+
+    executions, dropped = FlexQueryFetcher(token="x", query_id="x").parse_xml_with_drops(xml_text)
+    if dropped:
+        return False
+    pending = {str(execution.exec_id) for execution in executions}
+    if not pending:
+        return True
+
+    trades: List[Dict[str, Any]] = []
+    cursor = ""
+    for _ in range(_JOURNAL_COVERAGE_PAGES):
+        rows = query(
+            "SELECT trade_id, payload FROM journal WHERE trade_id > ? "
+            f"ORDER BY trade_id LIMIT {_JOURNAL_COVERAGE_PAGE}",
+            (cursor,),
+        )
+        if not rows:
+            break
+        payloads = [json.loads(row[1]) for row in rows]
+        trades.extend(payloads)
+        ids = _existing_exec_ids(trades)
+        roots = _existing_exec_roots(ids)
+        if all(
+            eid in ids or _root_already_journaled(eid, roots) for eid in pending
+        ):
+            return True
+        if len(rows) < _JOURNAL_COVERAGE_PAGE:
+            break
+        cursor = rows[-1][0]
+    else:
+        return False
+
+    updated, imported, _skipped, _latest = rehydrate_from_executions(
+        executions, {"trades": trades}
+    )
+    return imported == 0 and not updated.get("aggregate_disagreements")
 
 
 def ingest_xml(
