@@ -189,6 +189,11 @@
     # is billed for and re-run its tool calls. Caddy's default is zero retries.
     # R-262.
     handle /api/assistant* {
+        # The route buffers the whole JSON body before its 10MB turn cap runs.
+        request_body {
+            max_size 12MB
+        }
+
         reverse_proxy 127.0.0.1:3000 {
             flush_interval -1
 
