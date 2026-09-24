@@ -53,4 +53,21 @@ describe("newsfeed voice", () => {
     expect(() => parseVoiceCopy(JSON.stringify({ ...copy, content: "Volume: 1,300, returns: +2.5%." }), evidence)).toThrow("Unsupported numerical claim");
     expect(() => parseVoiceCopy(JSON.stringify({ ...copy, content: "Volume: 1,301, returns: -2.5%." }), evidence)).toThrow("Unsupported numerical claim");
   });
+  it("rejects currency substitution and magnitude amplification", () => {
+    const evidence = { title: "Flows", content: "Volume: $130." };
+    expect(() => parseVoiceCopy(JSON.stringify({ title: "Flows", content: "Volume: €130." }), evidence)).toThrow("Unsupported numerical claim");
+    expect(() => parseVoiceCopy(JSON.stringify({ title: "Flows", content: "Volume: 130B." }), evidence)).toThrow("Unsupported numerical claim");
+    expect(parseVoiceCopy(JSON.stringify({ title: "Flows", content: "Volume: $130." }), evidence).content).toBe("Volume: $130.");
+  });
+  it("completes only the unitless side of a same-currency range", () => {
+    const evidence = { title: "Wolfe sees $30-$50B for Meta", content: "Revenue opportunity from Muse." };
+    expect(parseVoiceCopy(JSON.stringify({ title: "Meta: $30B-$50B from Muse", content: "Revenue opportunity from Muse." }), evidence).title)
+      .toBe("Meta: $30B-$50B from Muse");
+    const spaced = { title: "Range", content: "Wolfe sees $30 to $50B." };
+    expect(parseVoiceCopy(JSON.stringify({ title: "Range", content: "Wolfe sees $30B to $50B." }), spaced).content)
+      .toBe("Wolfe sees $30B to $50B.");
+    expect(() => parseVoiceCopy(JSON.stringify({ title: "Meta: €30B-€50B from Muse", content: "Revenue opportunity from Muse." }), evidence)).toThrow("Unsupported numerical claim");
+    expect(() => parseVoiceCopy(JSON.stringify({ title: "Meta: $30M-$50B from Muse", content: "Revenue opportunity from Muse." }), evidence)).toThrow("Unsupported numerical claim");
+    expect(() => parseVoiceCopy(JSON.stringify({ title: "Meta: $30B-$60B from Muse", content: "Revenue opportunity from Muse." }), evidence)).toThrow("Unsupported numerical claim");
+  });
 });
