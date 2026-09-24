@@ -710,10 +710,11 @@ preflight_checks() {
 
   # Pin GitHub's published ed25519 host key (docs.github.com "GitHub's SSH
   # key fingerprints") instead of trusting whatever answers first contact.
+  # radon writes its own known_hosts: the file is radon-replaceable after the
+  # link check above, so root never appends to or chowns it.
   if ! sudo -u radon ssh-keygen -F github.com &>/dev/null; then
     printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
-      >> /home/radon/.ssh/known_hosts
-    chown radon:radon /home/radon/.ssh/known_hosts
+      | sudo -u radon tee -a /home/radon/.ssh/known_hosts >/dev/null
   fi
 
   if ! command -v "$PYTHON_BIN" &>/dev/null; then
