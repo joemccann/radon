@@ -13,11 +13,19 @@ PAGE1 = ("## Economics Research ## 16 September 2026 | 5:20PM EDT # TIC Data: Co
 PAGE2 = "Chart 1: Net foreign purchases of US equities, 12-month rolling sum (USD bn). Source: Treasury, Goldman Sachs Global Investment Research."
 
 
-def work(name="tic data.pdf"):
-    return {"key": "k" * 64, "folder_date": "2026-09-17",
+def work(name="tic data.pdf", folder="goldman sachs", folder_date="2026-09-17"):
+    return {"key": "k" * 64, "folder_date": folder_date,
             "metadata": {"name": name, "id": "id:one", "rev": "r1", "content_hash": "a" * 64,
-                         "path_lower": f"/joe mccann/current/2026/september/sep 17/goldman sachs/{name}",
+                         "path_lower": f"/joe mccann/current/2026/september/sep 17/{folder}/{name}",
                          "client_modified": "2026-09-17T08:00:00Z"}}
+
+
+def bofa_flow_show(name="the flow show friday, 19 september 2026.pdf"):
+    return work(name, folder="bank of america", folder_date="2026-09-19")
+
+
+def db_positioning(name="db positioning data - 19 september 2026.pdf"):
+    return work(name, folder="deutsche bank", folder_date="2026-09-19")
 
 
 def extractor(pdf, out):
@@ -369,6 +377,47 @@ def _candidate(**overrides):
             "captions": {}, "tags": ["FLOWS"], "text_only": True}
     item.update(overrides)
     return item
+
+
+def test_force_include_overrides_a_series_denylist_drop(tmp_path, publisher, monkeypatch):
+    monkeypatch.setattr(intake.learn, "load_rules", lambda root: {"series_deny": {"the flow show"},
+                                                                  "doc_type_drop": set(), "publisher_deny": set()})
+    reviewer = Reviewer([selection(), verdict()])
+    posts = build(tmp_path, reviewer, publisher).process(bofa_flow_show(), tmp_path / "r.pdf", [])
+    review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
+    assert review["force_include"] is True and review["triage"]["overridden"] is True
+    assert review["outcome"] == "reviewed" and len(posts) == 1
+    assert "always in scope" in reviewer.calls[0][1]
+
+
+def test_force_include_empty_select_reselects_once_then_publishes(tmp_path, publisher):
+    reviewer = Reviewer([{"candidates": [], "reason": "nothing measured"}, selection(), verdict()])
+    posts = build(tmp_path, reviewer, publisher).process(bofa_flow_show(), tmp_path / "r.pdf", [])
+    assert [c[0] for c in reviewer.calls] == ["text", "text", "multimodal"]
+    assert "empty candidates is incorrect" in reviewer.calls[0][1]
+    assert "RESELECT" in reviewer.calls[1][1] and "always in scope" in reviewer.calls[1][1]
+    review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
+    assert any(a.get("force_include_reselect") for a in review["audit"])
+    assert len(posts) == 1 and posts[0]["source"]["publisher"] == "BofA Global Research"
+
+
+def test_force_include_empty_after_reselect_allows_no_candidates(tmp_path, publisher):
+    reviewer = Reviewer([{"candidates": [], "reason": "first"}, {"candidates": [], "reason": "second"}])
+    posts = build(tmp_path, reviewer, publisher).process(db_positioning(), tmp_path / "r.pdf", [])
+    assert posts == [] and [c[0] for c in reviewer.calls] == ["text", "text"]
+    review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
+    assert review["force_include"] is True and review["outcome"] == "reviewed"
+    assert review["selection"]["candidates"] == []
+
+
+def test_wrong_publisher_matching_title_does_not_force(tmp_path, publisher):
+    reviewer = Reviewer([{"candidates": [], "reason": "nothing new"}])
+    posts = build(tmp_path, reviewer, publisher).process(work("the flow show friday, 19 september 2026.pdf"),
+                                                         tmp_path / "r.pdf", [])
+    assert posts == [] and [c[0] for c in reviewer.calls] == ["text"]
+    review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
+    assert review["force_include"] is False
+    assert not any(a.get("force_include_reselect") for a in review["audit"])
 
 
 def test_validate_candidate_drops_length_and_page_ceiling_keeps_shape():

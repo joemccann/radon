@@ -1,5 +1,8 @@
 """Every reviewed document mirrors its outcome and reason codes to Turso for the operator's Held review."""
 import json
+import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -103,6 +106,50 @@ def test_outcome_row_surfaces_text_only_with_figures_and_figure_count():
     ))
     assert json.loads(row["reason_codes"]) == ["TEXT_ONLY_WITH_FIGURES"]
     assert json.loads(row["context_json"])["figureCount"] > 0
+
+
+def test_held_cutoff_is_updated_at_minus_24h_against_the_pt_clock():
+    now = datetime(2026, 9, 19, 15, 0, tzinfo=timezone.utc)
+    assert publish.held_cutoff(now) == datetime(2026, 9, 18, 15, 0, tzinfo=timezone.utc)
+
+
+def test_expire_stale_held_updates_held_rows_and_never_publishes(monkeypatch):
+    calls = []
+    monkeypatch.setattr(publish, "hrana_execute", lambda sql, args=(), **kw: calls.append((sql, args)) or [("old-key",)])
+    published = []
+    monkeypatch.setattr(publish, "publish", lambda post: published.append(post))
+    count = publish.expire_stale_held(now=datetime(2026, 9, 19, 15, 0, tzinfo=timezone.utc))
+    sql, args = calls[0]
+    assert sql == publish._EXPIRE_SQL
+    assert "folder_date" not in sql
+    assert "HELD_EXPIRED" in sql and "outcome = 'held'" in sql
+    assert any("2026-09-18T15:00:00" in str(a) for a in args)
+    assert count == 1 and published == []
+
+
+def test_expire_sql_merges_held_expired_on_sqlite():
+    connection = sqlite3.connect(":memory:")
+    root = Path(__file__).resolve().parents[1] / "db/migrations"
+    connection.execute("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
+    connection.executescript((root / "0079_research_outcomes.sql").read_text())
+    cols = ("work_key,file_id,file_name,publisher,series,doc_type,folder_date,document_date,"
+            "outcome,reason_codes,drafts_json,posts,pipeline,updated_at")
+    rows = [
+        ("old", "id:old", "old.pdf", "GS", "x", "research", "2026-09-01", "2026-09-01",
+         "held", '["NO_CANDIDATES"]', "[]", 0, "v2", "2026-09-17T10:00:00+00:00"),
+        ("fresh", "id:fresh", "fresh.pdf", "GS", "x", "research", "2026-09-19", "2026-09-19",
+         "held", '["VERIFY_FAILED"]', "[]", 0, "v2", "2026-09-19T10:00:00+00:00"),
+        ("pub", "id:pub", "pub.pdf", "GS", "x", "research", "2026-09-17", "2026-09-17",
+         "published", "[]", "[]", 1, "v2", "2026-09-17T10:00:00+00:00"),
+    ]
+    connection.executemany(f"INSERT INTO research_outcomes ({cols}) VALUES ({','.join('?' * 14)})", rows)
+    stamped = connection.execute(publish._EXPIRE_SQL, ("2026-09-19T15:00:00+00:00", "2026-09-18T15:00:00+00:00")).fetchall()
+    assert [row[0] for row in stamped] == ["old"]
+    old = connection.execute("SELECT outcome, reason_codes FROM research_outcomes WHERE work_key='old'").fetchone()
+    assert old == ("dropped", '["NO_CANDIDATES","HELD_EXPIRED"]')
+    assert connection.execute("SELECT outcome FROM research_outcomes WHERE work_key='fresh'").fetchone()[0] == "held"
+    assert connection.execute("SELECT outcome FROM research_outcomes WHERE work_key='pub'").fetchone()[0] == "published"
+    connection.close()
 
 
 def test_intake_records_the_opening_text_and_a_pdf_link_for_a_document_that_publishes_nothing(tmp_path):

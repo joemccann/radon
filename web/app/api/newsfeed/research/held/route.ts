@@ -10,7 +10,8 @@ export const radonCapability = "internal";
 
 /** The operator reviews a small daily sample, not the whole hold pile. */
 const DAILY_SAMPLE = 10;
-const LOOKBACK_DAYS = 7;
+/** Process time (updated_at) vs America/Los_Angeles. 24h duration; not folder_date. */
+const HELD_TTL_MS = 24 * 60 * 60 * 1000;
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
@@ -70,16 +71,18 @@ export async function GET(request: Request): Promise<Response> {
     if (Number(probe.rows[0]?.n ?? 0) < 2) return json({ items: [], pending: 0 });
 
     const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
-    const cutoff = new Date(Date.now() - LOOKBACK_DAYS * 86_400_000).toISOString().slice(0, 10);
+    const cutoff = new Date(Date.now() - HELD_TTL_MS).toISOString();
     const result = await dbExecute({
       sql: `SELECT o.*
             FROM research_outcomes o
-            WHERE o.outcome IN ('held', 'dropped') AND o.folder_date >= ?
+            WHERE o.outcome IN ('held', 'dropped')
+              AND datetime(replace(o.updated_at, 'Z', '')) >= datetime(replace(?, 'Z', ''))
+              AND instr(o.reason_codes, 'HELD_EXPIRED') = 0
               AND NOT EXISTS (
                 SELECT 1 FROM research_feedback f WHERE f.target = 'held' AND f.work_key = o.work_key AND f.vote != 'clear'
                   AND f.rowid = (SELECT g.rowid FROM research_feedback g WHERE g.target = 'held' AND g.work_key = o.work_key
                                  ORDER BY g.created_at DESC, g.rowid DESC LIMIT 1))
-            ORDER BY o.folder_date DESC LIMIT 1000`,
+            ORDER BY o.updated_at DESC LIMIT 1000`,
       args: [cutoff],
     }, { timeoutMs: 8_000, label: "research-held" });
     const documents = result.rows.map((row): HeldDocument => ({
