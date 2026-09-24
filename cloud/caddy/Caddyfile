@@ -200,6 +200,23 @@
         }
     }
 
+    # Scanner execution runs long-running batch and universe scans via Next.js
+    # (/api/scanner/*/scan, /api/leap/scan, /api/garch-convergence/scan).
+    # Without a dedicated block with sufficient response_header_timeout,
+    # these routes ride the catch-all whose 30s guard aborts them with a 504
+    # while Next.js and FastAPI are still awaiting the scanner subprocess.
+    # No retry loop (scans are POST requests; Caddy default is zero retries).
+    @scan_routes path /api/scanner/*/scan* /api/*/scan*
+    handle @scan_routes {
+        reverse_proxy 127.0.0.1:3000 {
+            transport http {
+                dial_timeout 5s
+                response_header_timeout 600s
+                read_timeout 600s
+            }
+        }
+    }
+
     handle {
         reverse_proxy 127.0.0.1:3000 {
             lb_try_duration 15s

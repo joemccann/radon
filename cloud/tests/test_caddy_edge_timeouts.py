@@ -256,6 +256,76 @@ class TestTheAssistantTurnOutlivesTheGenericGuard:
         )
 
 
+SCAN_MATCHER = "@scan_routes"
+
+SCAN_ROUTES = [
+    REPO / "web" / "app" / "api" / "scanner" / "bounce" / "scan" / "route.ts",
+    REPO / "web" / "app" / "api" / "scanner" / "theta" / "scan" / "route.ts",
+    REPO / "web" / "app" / "api" / "scanner" / "strength" / "scan" / "route.ts",
+    REPO / "web" / "app" / "api" / "scanner" / "vol-skew-mr" / "scan" / "route.ts",
+    REPO / "web" / "app" / "api" / "leap" / "scan" / "route.ts",
+    REPO / "web" / "app" / "api" / "garch-convergence" / "scan" / "route.ts",
+]
+
+
+class TestScannerScanRoutesHaveTheirOwnBound:
+    """Scanner execution runs long-running batch and universe scans via Next.js
+    (/api/scanner/*/scan, /api/*/scan*).
+
+    Without a dedicated block with sufficient response_header_timeout,
+    these routes ride the catch-all whose 30s guard aborts them with a 504
+    while Next.js and FastAPI are still awaiting the scanner subprocess.
+    """
+
+    def _scan_block(self, caddy_dir):
+        content = read_caddyfile(caddy_dir)
+        return reverse_proxy_block(handle_block(content, SCAN_MATCHER), APP_UPSTREAM)
+
+    def test_the_scan_routes_have_their_own_handle(self, caddy_dir):
+        block = self._scan_block(caddy_dir)
+        assert _directive_seconds(block, "response_header_timeout") is not None, (
+            "@scan_routes has no handle with response_header_timeout, so it rides the "
+            "catch-all's 30s header guard and long scans 504 at the edge"
+        )
+
+    def test_the_scan_routes_handle_precedes_the_catch_all(self, caddy_dir):
+        active = strip_comments(read_caddyfile(caddy_dir))
+        scan = active.find("handle " + SCAN_MATCHER)
+        catch_all = re.search(r"handle\s*\{", active)
+        assert scan != -1 and catch_all
+        assert scan < catch_all.start(), (
+            "handle blocks are mutually exclusive in written order; a "
+            "catch-all declared first swallows @scan_routes and the "
+            "dedicated bound never applies"
+        )
+
+    def test_the_scan_routes_bound_is_at_least_600s(self, caddy_dir):
+        seconds = _directive_seconds(self._scan_block(caddy_dir), "response_header_timeout")
+        assert seconds is not None and seconds >= 600, (
+            f"response_header_timeout {seconds}s is under 600s; full-universe scans "
+            "running bounce/theta/strength take several minutes and need 600s"
+        )
+        read_timeout = _directive_seconds(self._scan_block(caddy_dir), "read_timeout")
+        assert read_timeout is not None and read_timeout >= 600, (
+            f"read_timeout {read_timeout}s is under 600s; connection would tear down early"
+        )
+
+    def test_the_scan_routes_state_max_duration(self):
+        for route_path in SCAN_ROUTES:
+            source = route_path.read_text(encoding="utf-8")
+            match = re.search(r"maxDuration\s*=\s*(\d+)", source)
+            assert match, f"{route_path.name} ({route_path}) does not state maxDuration"
+            assert int(match.group(1)) >= 600, f"{route_path.name} maxDuration under 600s"
+
+    def test_the_scan_block_never_replays_the_scan(self, caddy_dir):
+        block = self._scan_block(caddy_dir)
+        assert retry_window_seconds(block) == 0, (
+            "a retry window on the scan handle would replay a severed POST scan, "
+            "re-spawning heavy scanner subprocesses"
+        )
+
+
+
 # ── Mechanism tests ──────────────────────────────────────────────────────
 #
 # The assertions above prove the config STATES the right behaviour. These drive
