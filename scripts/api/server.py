@@ -50,6 +50,13 @@ from api import db_http
 from db.service_health_sql import SERVICE_HEALTH_UPSERT_SQL, service_health_upsert_args
 from api.demo_scan import demo_disabled_payload, demo_scan_response
 from api.subprocess import run_script, run_module, run_script_raw, ScriptResult
+from api.option_secdef import (
+    OPTION_SECDEF_TTL_S,
+    OptionSecdefCache,
+    OptionSecdefError,
+    chain_from_snapshot,
+    expirations_from_snapshot,
+)
 from api.scan_gate import ScanGate
 from api.ib_gateway import (
     check_ib_gateway,
@@ -5020,6 +5027,7 @@ async def performance_background():
 
 
 _EQUITY_OPTIONS_CHAIN_TIMEOUT_S = 45.0
+_option_secdef_cache = OptionSecdefCache(ttl_s=OPTION_SECDEF_TTL_S)
 
 
 def _options_chain_failure_status(error: Optional[str]) -> int:
@@ -5030,49 +5038,51 @@ def _options_chain_failure_status(error: Optional[str]) -> int:
     return 502
 
 
-@app.get("/options/chain")
-async def options_chain(symbol: str, expiry: Optional[str] = None):
-    """Fetch options chain for a symbol."""
-    args = ["--symbol", symbol.upper()]
-    if expiry:
-        args.extend(["--expiry", expiry])
+async def _load_option_secdef(symbol: str) -> dict:
+    """One subprocess for the whole book. Callers slice expirations or one expiry."""
     result = await _run_ib_script_with_recovery(
-        "ib_option_chain.py", args, timeout=_EQUITY_OPTIONS_CHAIN_TIMEOUT_S
+        "ib_option_chain.py",
+        ["--symbol", symbol, "--snapshot"],
+        timeout=_EQUITY_OPTIONS_CHAIN_TIMEOUT_S,
     )
     if not result.ok:
+        raise OptionSecdefError(result.error or "option secdef unavailable")
+    data = result.data or {}
+    if data.get("error"):
+        raise OptionSecdefError(str(data["error"]))
+    return data
+
+
+async def _option_secdef(symbol: str) -> dict:
+    try:
+        return await _option_secdef_cache.get(symbol, _load_option_secdef)
+    except OptionSecdefError as exc:
         raise HTTPException(
-            status_code=_options_chain_failure_status(result.error),
-            detail=result.error,
-        )
-    if result.data and result.data.get("error"):
-        detail = str(result.data["error"])
+            status_code=_options_chain_failure_status(exc.detail),
+            detail=exc.detail,
+        ) from exc
+
+
+@app.get("/options/chain")
+async def options_chain(symbol: str, expiry: Optional[str] = None):
+    """Strikes for one expiry, sliced from the shared secdef snapshot."""
+    snapshot = await _option_secdef(symbol)
+    if not expiry:
+        return expirations_from_snapshot(snapshot)
+    try:
+        return chain_from_snapshot(snapshot, expiry)
+    except OptionSecdefError as exc:
         raise HTTPException(
-            status_code=_options_chain_failure_status(detail),
-            detail=detail,
-        )
-    return result.data
+            status_code=_options_chain_failure_status(exc.detail),
+            detail=exc.detail,
+        ) from exc
 
 
 @app.get("/options/expirations")
 async def options_expirations(symbol: str):
-    """List option expirations for a symbol."""
-    result = await _run_ib_script_with_recovery(
-        "ib_option_chain.py",
-        ["--symbol", symbol.upper()],
-        timeout=_EQUITY_OPTIONS_CHAIN_TIMEOUT_S,
-    )
-    if not result.ok:
-        raise HTTPException(
-            status_code=_options_chain_failure_status(result.error),
-            detail=result.error,
-        )
-    if result.data and result.data.get("error"):
-        detail = str(result.data["error"])
-        raise HTTPException(
-            status_code=_options_chain_failure_status(detail),
-            detail=detail,
-        )
-    return {"symbol": result.data.get("symbol"), "expirations": result.data.get("expirations")}
+    """List option expirations for a symbol from the shared secdef snapshot."""
+    snapshot = await _option_secdef(symbol)
+    return expirations_from_snapshot(snapshot)
 
 
 _OPTIONS_EXPOSURE_SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")

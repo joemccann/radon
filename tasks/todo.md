@@ -7,12 +7,46 @@ Joe via CoS: always include BofA Flow Show and DB positioning data; expire Held 
 - T1 depends_on: [] - Red tests: force_include predicates, identify series fixtures, intake empty→reselect, expire_stale_held, Held API 24h `updated_at`
 - T2 depends_on: [T1] - force_include.py, intake hooks, publish.expire_stale_held, worker/ingestion call, Held GET filter, HELD_EXPIRED label
 - T3 depends_on: [T2] - Focused pytest + vitest; draft PR; CI green; do not merge
+# Task: Flex re-sync false coverage alarm
+
+Sync Now re-ingests an already-applied trades file. `delivery_rows_present` requires every Flex exec id in the journal. The writer skips some on purpose (legacy key, superseded correction, empty bucket), so those ids never land and every re-sync returns `coverage_unverified`. No rows are missing.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red test: a legacy-key-skipped META bucket verifies as duplicate, not coverage_unverified
+- T2 depends_on: [T1] - Coverage uses `rehydrate_from_executions`; covered when it would import 0. Dropped rows and an unfinished journal walk stay unverified
+- T3 depends_on: [T2] - Focused pytest green; PR; CI green
+
+## Checklist
+
+- [x] T1 Failing test (`coverage_unverified` on the META legacy-key bucket)
+- [x] T2 Implementation (`rehydrate_from_executions` import count; disagreements stay unverified)
+- [ ] T3 Verify and ship
+
+## Review
+
+- Exec-id presence stays a sufficient early pass. A finished journal walk whose writer would import nothing is covered, including a same-day META fill matched on (ticker, date, structure). Dropped rows, an unfinished walk, a positive import count, and an aggregate qty/notional disagreement stay unverified.
+
+# Task: Option secdef singleflight
+
+A VIX page spawned one `ib_option_chain.py` per expiry plus an unscoped `ib_chain.py`, filled the 3-slot interactive lane, and 502'd the book.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: one snapshot per symbol is shared by expirations and every expiry; failures are not cached; the index ticket loads expirations from `/api/options/expirations` and never calls the unscoped index chain
+- T2 depends_on: [T1] - Snapshot builder, 60s singleflight cache, route slice, index form uses the equity expirations route
+- T3 depends_on: [T2] - Focused pytest and vitest green, PR, CI
 
 ## Checklist
 
 - [x] T1 Failing tests
 - [x] T2 Implementation
 - [ ] T3 Verify and ship
+- [x] T3 Verify and ship
+
+## Review
+
+- One `--snapshot` read per symbol for 60s. Expirations and every expiry slice it. The index ticket loads expirations from `/api/options/expirations` and calls `ib_chain.py` only for the selected expiry. Focused pytest 38 passed, vitest 10 passed.
 
 # Task: Split gitdirs (runner trust follow-up to R02-A)
 

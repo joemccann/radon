@@ -52,15 +52,24 @@ def test_later_cash_corrections_do_not_invalidate_existing_row_coverage(monkeypa
 def test_trade_duplicate_requires_all_executions(monkeypatch, ids, expected):
     import json
     from datetime import datetime
-    from types import SimpleNamespace
     from trade_blotter.flex_query import FlexQueryFetcher
 
     def _exec(exec_id):
         # Not an individual-fill match: the journal row below has no contract.
-        return SimpleNamespace(
-            exec_id=exec_id, symbol='ZZ', strike=1, right='C', expiry='20260101',
-            time=datetime(2026, 1, 2, 15, 0), quantity=1, price=1,
-            side=SimpleNamespace(value='BOT'),
+        from decimal import Decimal
+        from trade_blotter.models import Execution, SecurityType, Side
+        return Execution(
+            exec_id=exec_id,
+            time=datetime(2026, 1, 2, 15, 0),
+            symbol='ZZ',
+            sec_type=SecurityType.OPTION,
+            side=Side.BUY,
+            quantity=Decimal('1'),
+            price=Decimal('1'),
+            commission=Decimal('0'),
+            strike=Decimal('1'),
+            right='C',
+            expiry='20260101',
         )
 
     monkeypatch.setattr(FlexQueryFetcher, 'parse_xml_with_drops',
@@ -85,6 +94,62 @@ def test_nav_only_duplicate_requires_persisted_nav(monkeypatch):
     xml = '<FlexQueryResponse><FlexStatement><EquitySummaryByReportDateInBase reportDate="20260917" total="1000"/></FlexStatement></FlexQueryResponse>'
     monkeypatch.setattr(hrana_http, 'hrana_query', lambda *a, **k: [])
     assert ingest.delivery_rows_present(ingest.ACTIVITY, xml) is False
+
+
+def test_legacy_key_skipped_meta_bucket_verifies_as_duplicate(monkeypatch):
+    """A same-day META fill the live path already journaled is skipped by the
+    writer on (ticker, date, structure). Its Flex exec id never lands, so an
+    exec-id check stays coverage_unverified on every re-sync."""
+    import json
+    from datetime import datetime
+    from decimal import Decimal
+
+    from trade_blotter.flex_query import FlexQueryFetcher
+    from trade_blotter.models import Execution, SecurityType, Side
+
+    execution = Execution(
+        exec_id='FLEX-META-NEW',
+        time=datetime(2026, 9, 24, 10, 15),
+        symbol='META',
+        sec_type=SecurityType.OPTION,
+        side=Side.BUY,
+        quantity=Decimal('1'),
+        price=Decimal('7.2557'),
+        commission=Decimal('0'),
+        strike=Decimal('575'),
+        right='C',
+        expiry='20260918',
+    )
+    # Label `_bucket_to_entry` emits for this contract. The live row carries
+    # a different exec id, so only the legacy key can cover it.
+    journal_row = {
+        'id': 42,
+        'date': '2026-09-24',
+        'ticker': 'META',
+        'structure': 'Long Call $575 2026-09-18',
+        'action': 'BUY_OPTION',
+        'ib_exec_id': 'LIVE-PATH-OTHER',
+        'contracts': 1,
+        'strike': 575.0,
+        'right': 'C',
+        'expiry': '20260918',
+    }
+    trades_xml = (Path(__file__).parent / 'fixtures/flex_trade_confirm_sample.xml').read_text()
+    monkeypatch.setenv('IB_FLEX_ACCOUNT_ID', 'U0000000')
+    monkeypatch.setattr(FlexQueryFetcher, 'parse_xml_with_drops', lambda *a: ([execution], 0))
+    monkeypatch.setattr(
+        hrana_http, 'hrana_query',
+        lambda *a, **k: [('t-live', json.dumps(journal_row))],
+    )
+    monkeypatch.setattr(ingest, 'claim_flex_delivery', lambda *a, **k: False)
+    monkeypatch.setattr(ingest, 'flex_delivery_status', lambda digest: 'applied')
+    monkeypatch.setattr(ingest, '_apply_classified', lambda *a: pytest.fail('duplicate reapplied'))
+
+    result = ingest.ingest_xml(trades_xml)
+
+    assert result['outcome'] == 'duplicate'
+    assert result['ok'] is True
+    assert result['persistence_confirmed'] is True
 
 
 # 2026-09-22 page d3b66eaf: the 08:30 retry failed applied Equity_Summary
