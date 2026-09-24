@@ -126,6 +126,12 @@ def flush_outbox(state, publisher):
 
 
 def cycle(root, client, state, pipeline, publisher, publish=False, limit=4):
+    expire = getattr(publisher, 'expire_stale_held', None)
+    if callable(expire):
+        try:
+            expire()
+        except Exception:
+            pass  # Held TTL is telemetry on the outcomes mirror; the queue must still run.
     published = flush_outbox(state, publisher) if publish else 0
     discovery_errors = []
     retry_after = 0

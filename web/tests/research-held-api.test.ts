@@ -26,7 +26,7 @@ async function outcome(key: string, outcomeValue: string, codes: string[], folde
     sql: `INSERT INTO research_outcomes (work_key,file_id,file_name,publisher,series,doc_type,folder_date,document_date,outcome,reason_codes,drafts_json,posts,pipeline,updated_at)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     args: [wk(key), "id:" + key, extra.file_name ?? key + ".pdf", extra.publisher ?? "Goldman Sachs", "series " + key, "research", folderDate, folderDate,
-      outcomeValue, JSON.stringify(codes), JSON.stringify([{ title: "Draft " + key, content: "Body", held: codes[0], detail: "$47bn" }]), outcomeValue === "published" ? 1 : 0, "v2", "2026-09-19T10:00:00Z"],
+      outcomeValue, JSON.stringify(codes), JSON.stringify([{ title: "Draft " + key, content: "Body", held: codes[0], detail: "$47bn" }]), outcomeValue === "published" ? 1 : 0, "v2", extra.updated_at ?? "2026-09-19T10:00:00Z"],
   });
 }
 
@@ -104,12 +104,23 @@ describe("GET /api/newsfeed/research/held", () => {
     expect((await held()).body.items.map((i) => i.workKey)).toEqual(first.body.items.map((i) => i.workKey));
   });
 
-  it("drops documents older than seven folder days and ones already voted on", async () => {
-    await outcome("old", "held", ["NO_CANDIDATES"], "2026-09-01");
+  it("drops documents whose updated_at is older than 24 hours and ones already voted on", async () => {
+    await outcome("old", "held", ["NO_CANDIDATES"], "2026-09-17", { updated_at: "2026-09-18T14:00:00Z" });
     await outcome("fresh", "held", ["NO_CANDIDATES"]);
     await outcome("voted", "held", ["NO_CANDIDATES"]);
     expect((await vote({ workKey: wk("voted"), vote: "down" })).status).toBe(200);
     expect((await held()).body.items.map((i) => i.fileName)).toEqual(["fresh.pdf"]);
+  });
+
+  it("keeps a fresh process time even when folder_date is older than seven days", async () => {
+    await outcome("aged-folder", "held", ["NO_CANDIDATES"], "2026-09-01");
+    expect((await held()).body.items.map((i) => i.fileName)).toEqual(["aged-folder.pdf"]);
+  });
+
+  it("hides HELD_EXPIRED even when updated_at was just bumped", async () => {
+    await outcome("expired", "dropped", ["NO_CANDIDATES", "HELD_EXPIRED"], "2026-09-19", { updated_at: "2026-09-19T14:00:00Z" });
+    await outcome("still", "held", ["NO_CANDIDATES"]);
+    expect((await held()).body.items.map((i) => i.fileName)).toEqual(["still.pdf"]);
   });
 
   it("serves an empty list when the outcome mirror is not migrated yet", async () => {

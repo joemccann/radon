@@ -2,12 +2,42 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import hashlib
 import json
 import re
 
 from api.db_http import hrana_execute, hrana_transaction
 from research.assets import ASSET_RE, URL_PREFIX, read_asset, store_asset
+
+PT = ZoneInfo("America/Los_Angeles")
+HELD_TTL_HOURS = 24
+# Product clock is America/Los_Angeles. Compare process time (updated_at), never folder_date.
+_EXPIRE_SQL = """UPDATE research_outcomes
+SET outcome = 'dropped',
+    reason_codes = CASE
+      WHEN instr(COALESCE(reason_codes, ''), 'HELD_EXPIRED') > 0 THEN reason_codes
+      ELSE json_insert(COALESCE(nullif(reason_codes, ''), '[]'), '$[#]', 'HELD_EXPIRED')
+    END,
+    updated_at = ?
+WHERE outcome = 'held'
+  AND datetime(replace(updated_at, 'Z', '')) < datetime(replace(?, 'Z', ''))
+RETURNING work_key"""
+
+
+def held_cutoff(now=None, max_age_hours=HELD_TTL_HOURS):
+    """now in America/Los_Angeles minus max_age_hours, returned as UTC."""
+    instant = now or datetime.now(timezone.utc)
+    if instant.tzinfo is None:
+        instant = instant.replace(tzinfo=timezone.utc)
+    return (instant.astimezone(PT) - timedelta(hours=max_age_hours)).astimezone(timezone.utc)
+
+
+def expire_stale_held(max_age_hours=HELD_TTL_HOURS, now=None) -> int:
+    """Drop held outcomes older than the PT TTL. Never publishes or requeues."""
+    cutoff = held_cutoff(now, max_age_hours).isoformat()
+    stamp = datetime.now(timezone.utc).isoformat()
+    return len(hrana_execute(_EXPIRE_SQL, (stamp, cutoff)))
 
 
 def stable_post_id(file_id: str, finding_key: str) -> str:
