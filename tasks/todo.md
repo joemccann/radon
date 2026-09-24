@@ -1,3 +1,24 @@
+# Task: AI credit yield chart test (GS Johnstone 24 Sep 2026)
+
+Text-only research post. Chart the printed dollar yields. Ask before wiring it into the feed.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red test: zero baseline, printed labels, dashed desk band
+- T2 depends_on: [T1] - visx dot-and-range on Clear dark tokens
+- T3 depends_on: [T2] - Green test, rendered PNG
+
+## Checklist
+
+- [x] T1 Failing test
+- [x] T2 Chart
+- [x] T3 Rendered image
+
+## Review
+
+- CoreWeave 9.00-9.50 is a placement of "low- to mid-9%", not a printed coupon.
+- Not wired into the feed. Chart type is a zero-baseline dot-and-range.
+
 # Task: Research force-include + 24h Held TTL
 
 Joe via CoS: always include BofA Flow Show and DB positioning data; expire Held rows after 24h on `updated_at` PT.
