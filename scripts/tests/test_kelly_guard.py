@@ -142,3 +142,55 @@ class TestD11PlaceOrderWire:
         assert result.get("status") == "error"
         assert result.get("code") == "KELLY_CAP_EXCEEDED"
         ib_cls.assert_not_called()
+
+
+def _option(price=50.0):
+    return {
+        "type": "option", "symbol": "AAPL", "action": "BUY",
+        "quantity": 1, "limitPrice": price, "tif": "DAY",
+        "expiry": "20261218", "strike": 100, "right": "C",
+    }
+
+
+@pytest.mark.parametrize("price,oversized", [(24.99, False), (25.0, False), (25.01, True), (50.0, True)])
+def test_single_option_cap_boundary(monkeypatch, price, oversized):
+    monkeypatch.setenv("RADON_KELLY_ENFORCE_ORDERS", "1")
+    warning = check_kelly_ticket(_option(price), bankroll=100_000)
+    if oversized:
+        assert warning["code"] == "KELLY_CAP_EXCEEDED"
+        assert warning["loss"] == pytest.approx(price * 100)
+        assert warning["pct"] == pytest.approx(price / 10)
+    else:
+        assert warning is None
+
+
+@pytest.mark.parametrize("closing,armed", [(True, True), (False, False)])
+def test_single_option_exempt_controls(monkeypatch, closing, armed, caplog):
+    monkeypatch.setenv("RADON_KELLY_ENFORCE_ORDERS", "1" if armed else "0")
+    ticket = _option()
+    ticket["isClosing"] = closing
+    assert check_kelly_ticket(ticket, bankroll=100_000) is None
+    assert not caplog.records
+
+
+@pytest.mark.parametrize("mode", ["warn", "block"])
+def test_single_option_order_wire(monkeypatch, mode):
+    monkeypatch.setenv("RADON_KELLY_ENFORCE_ORDERS", "1")
+    monkeypatch.setenv("RADON_KELLY_ENFORCE_MODE", mode)
+    client = _armed_combo_client()
+    with patch("ib_place_order.IBClient", return_value=client) as ib_cls, \
+         patch("kelly_guard._portfolio_bankroll", return_value=100_000), \
+         patch("clients.contract_resolver.resolve_option_contract", return_value=MagicMock()), \
+         patch("ib_place_order.LimitOrder", return_value=MagicMock()):
+        import ib_place_order
+        result = ib_place_order.place_order(_option())
+    if mode == "block":
+        assert result["status"] == "error"
+        assert result["code"] == "KELLY_CAP_EXCEEDED"
+        ib_cls.assert_not_called()
+        client.place_order.assert_not_called()
+    else:
+        assert result["status"] == "ok"
+        assert result["kelly_warning"]["code"] == "KELLY_CAP_EXCEEDED"
+        assert result["kelly_warning"]["loss"] == pytest.approx(5000)
+        client.place_order.assert_called_once()

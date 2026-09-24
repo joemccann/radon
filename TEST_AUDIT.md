@@ -10514,3 +10514,106 @@ permitted remediation scope. Reconciliation found no verified
 source-actionable P0/P1 finding. T-488 remains operator-only after three
 genuine attempts: reproduce and repair the GNU-timeout process-tree behavior
 on Linux CI without widening its fixed test timeout.
+
+
+## Remediation handoff 2026-09-23 (adopted from issue #83)
+
+Authoritative partial audit: https://github.com/joemccann/radon/issues/83#issuecomment-5806941329. No audit checkpoint advance. Reduced remediation covers P0/P1 only.
+
+## Delta audit 2026-09-23 (partial; checkpoint NOT advanced)
+
+
+### T-505 — P1 — single-option Kelly enforcement has no regression coverage
+
+Evidence: `scripts/tests/test_kelly_guard.py:45-99` tests combos and stock, not single options. An in-memory mutation of `scripts/kelly_guard.py:112` treats option tickets like the exempt stock path. All nine unchanged tests pass at both original and mutant. A synthetic BUY option with quantity 1, limit 50 and bankroll 100000 produces `KELLY_CAP_EXCEEDED` for loss 5000 at the original, but no warning at the mutant. No broker connection or order occurred.
+
+Acceptance: add single-option cap boundary and warn/block wire tests with fake IB; assert a 5% opening ticket warns or blocks as configured and the legitimate boundary/closing/flag-off controls still work. The option-as-stock mutation must fail. Preserve all feature defaults and the 2.5% cap.
+
+### T-506 — P2 — unknown-tag monitor test is satisfied by a different trigger
+
+Evidence: `scripts/tests/test_slm_monitor.py:40-47` uses ten unknown rows out of thirty, already above the independent 3% share threshold at `scripts/newsfeed/slm/monitor.py:117`. Removing `or unknown_hot` in memory leaves all thirteen tests passing. A separate synthetic 10/1000 fixture (1% unknown, every other metric clean) reports vocabulary drift at the original and no breach at the mutant despite ten occurrences of the same unknown tag.
+
+Acceptance: add the independent ten-occurrence positive case below 3% share and a nine-occurrence negative control, with all other signals clean. Removing the hot-tag trigger must fail; keep every threshold unchanged.
+
+### T-507 — P1 — relay input-limit wiring tests accept a disabled normalizer
+
+Evidence: `web/tests/relay-input-limits.test.ts:42-46` checks only that normalizer source contains `capItems(`. Intercepting its read of `scripts/ib_realtime_server.js:161` and inserting `return raw` before the cap leaves all five tests passing (five also pass at original). Executing only the real extracted normalizer in a VM with the real pure cap helper returns 1000 of 3000 symbols at original and all 3000 at mutant. The read interception was recorded once. The relay was never started and no IB/network call was made.
+
+Acceptance: execute production normalizers in a fake-only harness and observe bounded output/work for symbols, contracts and indexes. An early-return cap bypass must fail. Preserve and exercise frame/queue/disconnect controls rather than replacing their assertions with weaker checks; no live relay or broker.
+
+### T-508 — P1 — push-guard fixtures inherit command-scope Git configuration
+
+Evidence: `scripts/tests/test_grok_push_guard.py:35-55` inherits host Git settings in both its helper and guard installation. The runner injects `core.hooksPath=/dev/null` through `GIT_CONFIG_*`: isolated runs each give four failed / ten passed; a child-process-only clean Git configuration gives fourteen passed; restoring inherited configuration gives the same four failures again. The temporary-repository guard cannot install into `/dev/null`, so its main/tag rejection tests cannot exercise the installed hook. All pushes were to temporary local remotes. The file is unchanged from the retained checkpoint: this is a standing-sweep isolation finding, not a claimed production regression. It is distinct from T-468's other fixture and global/pre-commit configuration case.
+
+Acceptance: isolate global/system and command-scope Git settings in this fixture while leaving its temporary pre-push hook active. Under hostile ambient configuration, verify hook install/reinstall, main/tag/delete rejection and allowed fix-branch push. Do not disable the hook under test or modify runner/workspace Git configuration.
+
+### T-509 — P1 — prologue notification fixture depends on forbidden process inspection
+
+Evidence: the delta adds unmocked `/bin/ps` execution at `scripts/tests/test_prologue_page_wire.py:57-61` while constructing a temporary held-owner fixture. The full gate and two isolated runs fail all five loop variants before the wrapper/notifier assertions; each isolated file is five failed / five passed with `PermissionError`. Exact-head GitHub CI passes. These calls concern only the test process and temporary fake locks, not the runner's real lock. This records the remaining fixture dependency separately from the inherited host limitation and the other suite addressed by #673.
+
+Acceptance: supply controlled process inventory for the offline fixture while retaining held-owner refusal, owner/start/command notification fields, exactly one fake Pushover request and dead/reused-owner controls. The suite must execute under denied host process inspection without skipping tests or loosening assertions; keep live-process evidence on a permitted CI host.
+
+### T-502 [P2] SLM scoring regression test accepts fabricated perfect metrics
+
+Evidence: `scripts/tests/test_slm_eval.py:74-93` calls the real evaluator on a five-row fixture, but checks micro-F1 only for positivity and macro-F1, rare-label recall and Jaccard only for membership in [0,1]. The metric calculations at `scripts/newsfeed/slm/eval.py:203-207` can all be replaced with constant `1.0` without any of this file's ten unchanged test methods failing. An in-memory source mutation verified both directions: original 10 passed; four constant-perfect metrics 10 passed. No source or test was modified, model invoked, or network request made. A scoring regression can therefore report perfect performance for a fixture containing incorrect and invalid predictions.
+
+Acceptance: pin independently hand-calculated micro-F1 (10/21), macro-F1 (14/45), rare-label recall (0), and mean Jaccard (3/10) for the existing fixture; add a positive rare-label case so constant zero is rejected too. The constant-perfect mutation must fail the metric assertions; the original implementation must pass. Keep invalid-output classification and normalization assertions. No relaxed tolerance or model call.
+
+### T-503 [P2] Bakeoff predictor entry points lack a prompt-parity regression
+
+Evidence: no importing test in the codemap and no `predict_ladder` / `predict_slm` reference in the test suites. `scripts/newsfeed/slm/predict_ladder.py:33-45` uses an empty system prompt unless `--system-file` is supplied; `scripts/newsfeed/slm/predict_slm.py:87-89` instead defaults to the corpus row's system prompt. A fake-only execution of both real `main` functions on the same synthetic messages row captured arm A system `""` versus arm C `"CANARY production taxonomy prompt"`, with identical user input. The export contract at `scripts/tests/test_slm_export_dataset.py:81` checks the corpus prompt, but does not exercise either consumer. The default comparison can therefore benchmark different instructions without a test failure.
+
+Acceptance: exercise both entry points with a temporary corpus and stubbed inference functions. Assert each row's system/user prompt is forwarded consistently by default, and an explicit system file overrides both. Prove the current empty-arm-A path fails before a surgical fix; preserve subscription-only refusal and JSONL identity/error handling. Never invoke a real model or live endpoint.
+
+### T-504 [P2] Bakeoff verdict tests cannot detect bypassed promotion gates
+
+Evidence: `scripts/tests/test_slm_bakeoff.py:26-75` has two verdict cases, both missing G0 evidence. They assert only a failing verdict naming G0, never G1-G8 outcomes. An in-memory mutation of `scripts/newsfeed/slm/bakeoff.py:52-55,135-137` forces every G1-G8 result to pass before verdict assembly. Both unchanged test methods still pass (original 2; mutant 2), including the case named `test_missing_c_fails_all_win_gates`. No model or external service was called.
+
+Acceptance: a complete passing fixture must assert all nine gates and `C WINS`; independent boundary/failure cases must assert each gate's result and the resulting refusal, including missing arms/evidence. The G1-G8 forced-pass mutation must fail. Preserve existing thresholds and use synthetic metrics only.
+
+Complete inherited inventory, evidence and acceptance retained:
+
+## Delta audit 2026-09-21 (partial; checkpoint NOT advanced)
+
+Range 0833758b5ef3583a33386124eb01e01224931c08..f3f63775547ff22ad8d309c8305fdcc8c40263c2: 246 commits / 785 paths.
+
+### T-499 [P2] Deploy-lock wait regression test passes with the wait disabled
+
+Evidence: scripts/tests/test_ci_deploy_concurrency.py:121-136 asserts source substrings and their order in the SSH script. The implementation at .github/workflows/ci.yml:1159-1177 is never executed by this test. Read-only mutation: insert `return 0` as the first statement of `wait_for_deploy_lock`; the unchanged test still passes, while no lock is observed and no waiting occurs. No workflow, Gateway or deployment was executed.
+
+Acceptance: execute the extracted helper with fake flock and sleep commands in a temporary PATH. Assert a held lock is retried, release permits continuation, exhaustion stops after the configured budget, and an initially free lock does not sleep. The early-return mutation must fail; the original implementation must pass. Never invoke production deploy or lock files.
+
+### T-500 [P2] New live-network test is collected by the default offline gate
+
+Evidence: scripts/tests/test_panic_index.py:654-667 marks the live Cboe history test `network`, then skips only when CI equals the literal string true. pyproject.toml:51-57 excludes only the integration marker. On local/nightly default invocations, the test calls four live Cboe feeds; on CI it is skipped without a linked issue or finding. This makes the required default suite depend on external CDN availability and revisions. The same file already contains checked-in fixture tests, which must remain active.
+
+Acceptance: put the live check behind the existing explicit integration opt-in, preserve all fixture-backed arithmetic tests, and add a collection contract proving the default suite deselects the live case while an explicit integration invocation selects it. No tolerance change or skipped offline assertion.
+
+### T-501 [P1] Backfill test collection replaces an installed libsql driver
+
+`scripts/tests/test_backfill_journal_from_executed_orders.py:23-26` installs a process-wide module with MagicMock.connect merely because libsql_experimental has not yet been imported. It does not check whether the real driver is installed. The correctly guarded sibling at scripts/tests/test_db_readers.py:20-32 already uses an actual import attempt, but cannot repair a stub installed earlier. The real-driver guard at scripts/tests/test_flex_delivery_claim_writer.py:49-64 detects this contamination.
+
+Verified without changing repository tests or production code: the entire Flex claim file alone passes **14 tests**, collecting the backfill file before the claim file with `-k test_the_driver_under_test_is_the_real_one` gives **1 failed / 47 deselected**, and the claim file alone again passes **14 tests**. The scoped four-worker run also reports 13 claim failures and 20 knowledge-pipeline failures with MagicMock database results; the full recursive run passed those surfaces. This is a collection-order defect exposed by the delta selection, not a claimed new product defect.
+
+Acceptance: replace the import-time unconditional fallback with an actual dependency import or a test-scoped stub that cannot escape its owner. Keep the real-driver guard and all SQL/state assertions. The standalone claim file and paired backfill/claim collection in both orders must pass against the real installed driver; include the knowledge-pipeline owner suite and repeat the affected collection. No real Turso or IB connection.
+
+Prior findings:
+
+### T-496 — RESOLVED
+
+Merged source/tests: 23d5fff6 (#515). Prior mutation evidence in TEST_LOG.md: six failed / 26 passed; corrected focused surface 37 passed. Current full Vitest: 10039 passed. Exact-head CI run 35945458166 passed the curated mixed-position browser cases; its mobile screenshot was inspected and shows unavailable Today P&L. The previously pending browser acceptance is complete.
+
+### T-497 — P2 — preference reader contract accepts disconnected runtime consumers
+
+`scripts/tests/test_app_preferences.py:477-501` promises each displayed preference has an effective registry consumer but only searches source text. Executed the unchanged test function against read-only source copies replacing all 11 app_preferences.get_int/get_float calls in server.py and order_limits.py with constant 1 while retaining the original expressions in comments: PASS. This defect would disable the operator-configured worker and order limits without reddening this contract. Existing registry validation tests do not make this source-only reader claim behavioral.
+
+Acceptance: exercise scanner worker argument selection and order-limit delegates with injected non-default registry values and assert runtime outputs. Show the same disconnected-consumer mutation reds, and green at the unmodified implementation. Retain registry range tests. No production edits during audit.
+
+### T-498 — P1 — model-ladder tests read ambient subscription files
+
+Delta to the resolved T-491 environment-variable isolation issue: this change introduces file-backed subscription discovery, and env-only fixture dictionaries no longer isolate credentials.
+
+`scripts/tests/test_model_ladder.py:411-416` passes env={} as if it means no credentials, but `scripts/clients/model_ladder.py:215-217,283-302` resolves the real home directory and reads .codex/auth.json. The new prepaid-only cases at test lines 684-714 have the same dependency. Full gate reports 15 failures in the blast radius: model-ladder 5, research-runtime 7, vision-cascade 3. The sibling no-key/env-only assumptions appear at scripts/tests/test_research_runtime.py:62-87 and scripts/tests/test_vision_cascade.py:191-201,365,420. The same 15 failures reproduce in all three delta rounds and separately in each file (5/7/3 failures). A scratch-only ambient-auth guard makes the same files 117 passed; no repository test was changed. Read-only existing-test probe with a synthetic home proves both directions: empty synthetic home PASS; adding a fake .codex/auth.json with a canary access_token makes the unchanged no-key test FAIL AssertionError. Its must_not_post fake prevented any network call. This can change provider ordering and feed operator credentials into test doubles on authenticated workstations.
+
+Acceptance: isolate credential-file discovery across all three affected modules, opt in only to per-test synthetic subscription files, and run the file with canary credentials present/absent outside its sandbox. Both outer environments must produce identical results; explicit subscription-precedence tests must still execute. No real credential values should enter captured headers or logs.
+

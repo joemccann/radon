@@ -1011,3 +1011,7 @@ checkout at `.testing-deliver/remediate-2026-09-18/`.
 | T-508 | Focused fix complete; full gates pending | Push-guard tests: inherited command-scope hooksPath produced 4 failed / 10 passed; fixture-scoped Git isolation produced 14 passed under explicit hostile hooksPath=/dev/null. Existing hook install/reinstall, main/tag/delete refusal and fix-branch acceptance assertions unchanged. |
 
 Substantive fix preserved before long full-gate verification; no publication or phase completion claimed.
+
+| T-505 | Focused fix complete; closing gates pending | New single-option boundary and fake-order wire tests: option-as-stock in-memory mutation 4 failed / 13 passed; original and installed tests 17 passed. Covers 2.5% boundary, oversized warn/block, closing and flag-off controls without broker calls. |
+
+Initial full-gate stage at 02ddb622 completed: pytest 15137 passed / 6 failed / 26 skipped / 23 subtests passed; Vitest 10039 passed (1011 files); cloud 2201 passed / 4 failed / 6 skipped. Five pytest failures are T-509; the subscription-login prompt timing case passed 3/3 subsequent isolated runs. Cloud failure identities are the four inherited T-488 process-tree cases. No exported-secret matches and no gate-generated checkout changes. This is preliminary evidence, not the required closing three-run result.
