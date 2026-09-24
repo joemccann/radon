@@ -996,6 +996,48 @@ class TestRemoteInstallerPins:
         assert "rm -f" in body[check:]
         assert "does not match the pinned fingerprint" in body
 
+    @pytest.mark.parametrize(
+        ("primaries", "accepted"),
+        [(["PIN"], True), (["PIN", "EXTRA"], False), (["EXTRA"], False)],
+        ids=["pinned-only", "pinned-plus-extra", "wrong-key"],
+    )
+    def test_helper_accepts_only_a_keyring_holding_exactly_the_pinned_key(
+        self, tmp_path: Path, primaries: list[str], accepted: bool
+    ) -> None:
+        # DS-2026-09-24-04: signed-by trusts every key in the keyring, so an
+        # extra primary key beside the pinned one must be refused.
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        pin = self.DOCKER_FPR
+        fprs = {"PIN": pin, "EXTRA": "A" * 40}
+        listing = "".join(
+            f"pub:-:4096:1:{fprs[p][-16:]}:1:::-:::scSC:::::::::0:\n"
+            f"fpr:::::::::{fprs[p]}:\n"
+            f"sub:-:4096:1:{'B' * 16}:1:::::e:::::::::0:\n"
+            f"fpr:::::::::{'B' * 40}:\n"
+            for p in primaries
+        )
+        (tmp_path / "listing").write_text(listing, encoding="utf-8")
+        _write_executable(fake_bin / "curl", "#!/bin/sh\nprintf key\n")
+        _write_executable(
+            fake_bin / "gpg",
+            "#!/bin/bash\n"
+            'if [[ " $* " == *" --dearmor "* ]]; then\n'
+            '  while [[ "$1" != "-o" ]]; do shift; done; cat > "$2"; exit 0\n'
+            "fi\n"
+            f"cat {tmp_path / 'listing'}\n",
+        )
+        dest = tmp_path / "keyrings" / "docker.gpg"
+
+        result = _run_setup_function(
+            f'pin_apt_keyring https://example.invalid/gpg "{dest}" "{pin}" Docker',
+            fake_bin,
+            {},
+        )
+
+        assert (result.returncode == 0) is accepted, result.stderr
+        assert dest.exists() is accepted
+
     def test_docker_apt_key_is_fingerprint_pinned_before_install(self) -> None:
         script = SETUP.read_text(encoding="utf-8")
         assert f'readonly DOCKER_GPG_FINGERPRINT="{self.DOCKER_FPR}"' in script
