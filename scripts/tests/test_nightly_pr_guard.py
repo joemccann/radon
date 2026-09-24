@@ -134,3 +134,36 @@ def test_main_preserves_arguments_for_normal_reporting(monkeypatch):
     monkeypatch.setattr(mod.os, "execv", lambda *a: calls.append(a))
     mod.main(["issue", "comment", "1", "--body", "nightly complete"])
     assert calls == [("/bin/gh", ["/bin/gh", "issue", "comment", "1", "--body", "nightly complete"])]
+
+
+@pytest.mark.parametrize("args", [
+    ["pr", "merge", "1"], ["pr", "-R", "a/b", "merge", "1", "--squash"], ["-R", "a/b", "pr", "merge", "1"],
+    ["api", "repos/a/b/pulls/1/merge", "-X", "PUT"],
+    ["api", "graphql", "-f", "query=mutation { mergePullRequest(input:{}) { clientMutationId } }"],
+    ["api", "graphql", "-f", "query=mutation { enablePullRequestAutoMerge(input:{}) { clientMutationId } }"],
+])
+def test_nightly_loops_never_merge(args):
+    with pytest.raises(mod.Refused, match="never merge"):
+        mod.guard(args)
+
+
+@pytest.mark.parametrize("loop", ["security", "security-deepsec"])
+@pytest.mark.parametrize("args", [
+    ["issue", "comment", "1", "--body", "x"], ["issue", "-R", "a/b", "create", "-t", "x"], ["issue", "edit", "1"],
+    ["api", "repos/a/b/issues/1/comments", "-f", "body=x"], ["api", "repos/a/b/issues", "-X", "POST"],
+])
+def test_security_loops_cannot_write_public_issues(loop, args):
+    with pytest.raises(mod.Refused, match="wrapper"):
+        mod.guard(args, loop=loop)
+
+
+@pytest.mark.parametrize("loop", ["", "reliability", "testing"])
+def test_other_loops_keep_issue_reporting(loop):
+    mod.guard(["issue", "comment", "1", "--body", "done"], loop=loop)
+    mod.guard(["issue", "view", "1"], loop="security")
+
+
+def test_main_reads_loop_from_wrapper_env(monkeypatch):
+    monkeypatch.setenv("RADON_NIGHTLY_REAL_GH", "/nonexistent/gh")
+    monkeypatch.setenv("RADON_NIGHTLY_LOOP", "security-deepsec")
+    assert mod.main(["issue", "comment", "1", "--body", "x"]) == 1

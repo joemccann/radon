@@ -77,6 +77,9 @@ The newsfeed Chromium seccomp profile is the same kind of artifact:
 `chromium-seccomp`). Every install path refuses a body that does not parse or
 does not deny by default (`defaultAction` `SCMP_ACT_ERRNO`), and
 `radon-app-runtime` refuses to start `radon-newsfeed.service` without it.
+`/etc/radon` is radon-writable, so every install path also refuses a target
+directory that is a symlink or not root-owned; recovery is removing that
+directory as root and rerunning the install.
 
 `config-check` is `deploy.sh`'s preflight compose render. It takes no
 env-file argument on purpose — a caller-supplied path is the one thing the

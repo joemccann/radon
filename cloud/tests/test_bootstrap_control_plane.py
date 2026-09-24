@@ -630,3 +630,19 @@ def test_current_bundle_rerun_is_a_noop(tmp_path: Path) -> None:
         else ""
     )
     assert "systemctl\t" not in commands
+
+
+def test_symlinked_target_directory_is_refused_before_any_write(tmp_path: Path) -> None:
+    # DS-2026-09-24-01: /etc/radon is radon-writable (1770), so a subdirectory
+    # root installs into can be a link radon planted before first install.
+    sandbox = _sandbox(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    seccomp_dir = sandbox.rootfs / "etc/radon/seccomp"
+    seccomp_dir.parent.mkdir(parents=True, exist_ok=True)
+    seccomp_dir.symlink_to(outside, target_is_directory=True)
+
+    result = sandbox.run()
+
+    assert result.returncode != 0
+    assert list(outside.iterdir()) == []

@@ -908,3 +908,21 @@ def test_privileged_refresh_installs_a_valid_compose_body(tmp_path: Path) -> Non
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert box.installed_path(COMPOSE_SOURCE).read_bytes() == expected
+
+
+def test_privileged_refresh_refuses_a_symlinked_target_directory(tmp_path: Path) -> None:
+    """DS-2026-09-24-01: /etc/radon is radon-writable, so the seccomp
+    directory can be a planted link; root must not write through it."""
+    box = Sandbox(tmp_path)
+    outside = tmp_path / "outside"
+    seccomp_dir = box.installed_path(SECCOMP_SOURCE).parent
+    shutil.move(str(seccomp_dir), str(outside))
+    seccomp_dir.symlink_to(outside, target_is_directory=True)
+    box.mutate_source(SECCOMP_SOURCE)
+    before = {path.name: path.read_bytes() for path in outside.iterdir()}
+
+    result = box.run("refresh-control-plane-privileged")
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "not a root-owned directory" in result.stdout + result.stderr
+    assert {path.name: path.read_bytes() for path in outside.iterdir()} == before
