@@ -1023,3 +1023,11 @@ Initial full-gate stage at 02ddb622 completed: pytest 15137 passed / 6 failed / 
 | T-498 | RESOLVED upstream | Fixture isolation already landed in 23d5fff6; current model-ladder/research-runtime/vision-cascade suites: 139 passed, including synthetic subscription cases. No implementation change required this run. |
 
 T-508 additional hostile-environment control: global/system config enabling signing and disabling hooks, plus command-scope hooksPath=/dev/null, still yields 14 passed with the real temporary pre-push hook active.
+
+### Legacy reconciliation 2026-09-23
+
+The closing sequence was stopped at round 2 cloud (`DONE 124`) after reconciling the complete inherited inventory exposed unfinished P0/P1 work. Its earlier rounds are evidence only, not the required final three rounds. T-247, T-121, T-242 and T-380 remain in scope despite the older zero-P0/P1 preamble.
+
+| Finding | Status | Evidence |
+|---|---|---|
+| T-247 | Implemented; full gates pending | Parser-to-live-fill regression: 2 red before preserving `ibExecID`/`execId` ahead of numeric `tradeID`; 144 focused tests green afterward. Exact execution deduplication and later scale-out remain guarded. Numeric-only historical rows retain their conservative fallback; no stored journal data was rewritten. |

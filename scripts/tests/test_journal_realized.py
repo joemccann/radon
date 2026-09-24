@@ -850,3 +850,47 @@ class TestAuthoritativeContractIdentity:
         assert realized_pnl_by_exec_id(
             rows, live_keys={"SLV|20261016|C|60.0"}, conid_keys={}
         ) == {}
+
+
+@pytest.mark.parametrize("api_attribute", ["ibExecID", "execId"])
+def test_flex_execution_identity_reaches_live_fill_correction(api_attribute):
+    """T-247: a real Flex close lacks execution_time but must match the API fill."""
+    from xml.etree.ElementTree import fromstring
+    from trade_blotter.flex_query import FlexQueryFetcher
+
+    api_id = "0000e0d5.68abc123.01.01"
+    execution = FlexQueryFetcher("unused", "unused")._parse_trade_element(fromstring(
+        f'<Trade symbol="SLV" assetCategory="OPT" tradeID="9998092102" '
+        f'{api_attribute}="{api_id}" quantity="10" tradePrice="3" '
+        'dateTime="20260824;153000" buySell="SELL" ibCommission="0" '
+        'strike="60" putCall="C" expiry="20261016" />'
+    ))
+    assert execution is not None
+    rows = [
+        _row("open", "BUY_OPTION", 20, 1, 0, _C60, "2026-08-07", "w1"),
+        _row(api_id, "SELL_OPTION", 10, 3, 0, _C60, "2026-08-24", "w2",
+             "2026-08-24T15:30:00-04:00"),
+        _row(execution.exec_id, "SELL_OPTION", 10, 3, 0, _C60, "2026-08-24", "w3"),
+        _row("later", "SELL_OPTION", 10, 4, 0, _C60, "2026-08-25", "w4"),
+    ]
+    realized = realized_pnl_by_exec_id(rows)
+    assert realized == {api_id: 2000.0, "later": 3000.0}
+    fills = [_fill(api_id, "SLV", 60, "C", "SLD", 10, 1300)]
+    apply_journal_realized_pnl(fills, realized)
+    assert fills[0]["realizedPNL"] == 2000.0
+    assert fills[0]["realizedPNLSource"] == "journal"
+
+
+@pytest.mark.parametrize("attributes,expected", [
+    ('ibExecID="api" execId="alias" tradeID="123"', "api"),
+    ('tradeID="123"', "123"),
+])
+def test_flex_execution_identity_precedence_and_legacy_fallback(attributes, expected):
+    from xml.etree.ElementTree import fromstring
+    from trade_blotter.flex_query import FlexQueryFetcher
+
+    execution = FlexQueryFetcher("unused", "unused")._parse_trade_element(fromstring(
+        f'<Trade symbol="SLV" assetCategory="STK" {attributes} quantity="1" '
+        'tradePrice="3" dateTime="20260824;153000" buySell="BUY" />'
+    ))
+    assert execution.exec_id == expected
