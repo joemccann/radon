@@ -1349,7 +1349,18 @@ install_app_runtime() {
   # profile. Root's engine loads it, so it is root-owned, never the checkout.
   local profile_source="${CLOUD_DIR}/config/seccomp/chromium.json"
   local profile_target="${RADON_SECCOMP_TARGET:-/etc/radon/seccomp/chromium.json}"
-  install -d -m 0755 "$(dirname "$profile_target")"
+  local profile_dir expected_uid=0
+  [[ "${RADON_HELPER_SKIP_CHOWN:-0}" == "1" ]] && expected_uid="$(id -u)"
+  # /etc/radon is radon-writable (1770): radon can plant this directory, or a
+  # link in its place, before root's first install. mkdir never follows a
+  # final-component link; anything but a real root-owned directory is refused.
+  profile_dir="$(dirname "$profile_target")"
+  mkdir -m 0755 "$profile_dir" 2>/dev/null || true
+  if [[ -L "$profile_dir" || ! -d "$profile_dir" ]] || \
+     [[ "$(stat -c '%u' "$profile_dir")" != "$expected_uid" ]]; then
+    log_error "Refusing ${profile_dir}: not a root-owned directory"
+    return 1
+  fi
   staged="$(mktemp "${profile_target}.tmp.XXXXXX")"
   if ! stage_from_checkout "$profile_source" "$staged" 0644 ${owner_args[@]+"${owner_args[@]}"} || \
      ! python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1], encoding="utf-8")).get("defaultAction") != "SCMP_ACT_ERRNO")' "$staged"; then
