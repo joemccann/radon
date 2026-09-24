@@ -897,7 +897,10 @@ setup_node() {
     local public_env_tmp
     public_env_tmp="$(mktemp)"
     grep -E '^NEXT_PUBLIC_[A-Z0-9_]+=' "$ENV_FILE" > "$public_env_tmp" || true
-    install -m 0600 -o radon -g radon "$public_env_tmp" "${RADON_DIR}/web/.env"
+    # web/ is radon-owned: radon writes its own copy, so root never creates,
+    # chmods or chowns a path there.
+    sudo -u radon sh -c 'umask 077; cat > "$1" && chmod 0600 "$1"' _ \
+      "${RADON_DIR}/web/.env" < "$public_env_tmp"
     rm -f "$public_env_tmp"
   fi
 
