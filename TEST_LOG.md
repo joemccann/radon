@@ -1003,3 +1003,39 @@ action occurred. All gate sentinels are terminal, post-gate worktree was
 clean, and 21 logs contained zero matches for exported/Pushover credentials.
 Evidence and a verified Git bundle are preserved outside the disposable
 checkout at `.testing-deliver/remediate-2026-09-18/`.
+
+## Remediation 2026-09-23 (reduced P0/P1 scope)
+
+| Finding | Status | Red/green evidence |
+|---|---|---|
+| T-508 | Focused fix complete; full gates pending | Push-guard tests: inherited command-scope hooksPath produced 4 failed / 10 passed; fixture-scoped Git isolation produced 14 passed under explicit hostile hooksPath=/dev/null. Existing hook install/reinstall, main/tag/delete refusal and fix-branch acceptance assertions unchanged. |
+
+Substantive fix preserved before long full-gate verification; no publication or phase completion claimed.
+
+| T-505 | Focused fix complete; closing gates pending | New single-option boundary and fake-order wire tests: option-as-stock in-memory mutation 4 failed / 13 passed; original and installed tests 17 passed. Covers 2.5% boundary, oversized warn/block, closing and flag-off controls without broker calls. |
+
+Initial full-gate stage at 02ddb622 completed: pytest 15137 passed / 6 failed / 26 skipped / 23 subtests passed; Vitest 10039 passed (1011 files); cloud 2201 passed / 4 failed / 6 skipped. Five pytest failures are T-509; the subscription-login prompt timing case passed 3/3 subsequent isolated runs. Cloud failure identities are the four inherited T-488 process-tree cases. No exported-secret matches and no gate-generated checkout changes. This is preliminary evidence, not the required closing three-run result.
+
+| T-507 | Focused fix complete; closing gates pending | Execute real relay normalizers with the real cap helper and fake-only snapshot cleanup. Early-return bypass in all three normalizers: 3 failed / 5 passed; restored source plus limiter tests: 16 passed. Existing frame, queue, and disconnected-client assertions retained; bounded-work probes reject reading beyond the cap. No relay or broker started. |
+
+| T-501 | Focused fix complete; closing gates pending | Removed the import-time process-wide fake driver. Red paired collection: 1 failed / 60 deselected. Corrected backfill/claim/knowledge suites: 109 passed in both orders; standalone real-driver suite 14 passed. Installed isolation/prologue group: 134 passed. |
+| T-509 | Focused fix complete; closing gates pending | Original prologue suite: 5 failed / 5 passed under denied host process inspection. Controlled inventory: 25 passed, including all five loops, exact owner/start/command fields, one notification, and matching/reused/dead-owner controls. Existing CI live-process suite retained unchanged. |
+| T-498 | RESOLVED upstream | Fixture isolation already landed in 23d5fff6; current model-ladder/research-runtime/vision-cascade suites: 139 passed, including synthetic subscription cases. No implementation change required this run. |
+
+T-508 additional hostile-environment control: global/system config enabling signing and disabling hooks, plus command-scope hooksPath=/dev/null, still yields 14 passed with the real temporary pre-push hook active.
+
+### Legacy reconciliation 2026-09-23
+
+The closing sequence was stopped at round 2 cloud (`DONE 124`) after reconciling the complete inherited inventory exposed unfinished P0/P1 work. Its earlier rounds are evidence only, not the required final three rounds. T-247, T-121, T-242 and T-380 remain in scope despite the older zero-P0/P1 preamble.
+
+| Finding | Status | Evidence |
+|---|---|---|
+| T-247 | Implemented; full gates pending | Parser-to-live-fill regression: 2 red before preserving `ibExecID`/`execId` ahead of numeric `tradeID`; 144 focused tests green afterward. Exact execution deduplication and later scale-out remain guarded. Numeric-only historical rows retain their conservative fallback; no stored journal data was rewritten. |
+| T-242 | Implemented; full gates pending | A fake fetch crosses the market close while the real history filter and payload builder execute: 1 red before anchoring the completed session in `scan_index`; 90 affected tests green. Standalone callers retain their default session lookup. |
+| T-380 | Implemented; full gates pending | Real temporary Git runner harness: 2 red before one bounded retry for an empty successful audit; 95 dead-man/no-op tests green. Retry shares the phase start clock, preserves timeout/truncation precedence, and a second empty exit remains 75. Only the testing wrapper changed. |
+| T-240 | Implemented; browser CI pending | Remaining VIX-COR Clerk proxy lacked global teardown. AST locates each real top-level `afterEach`, executes its callback, and asserts route disposal: 1 red/2 green before, all 3 green after. Older named specs no longer use the proxy; IV rank and IV spread already dispose it. |
+| T-121 | Implemented; browser CI pending | Empty unwrapped-table inventory is 1 red/4 green against the four remaining sites. Added existing overflow classes around ratings, seasonality, COT and desktop executed tables; focused wrapper/COT/teardown set is 42 green. Eight mocked Playwright cases collect successfully at 390px/1024px; CI owns production-server execution and screenshots. Mobile executed orders retain their existing cards. |
+| T-258 | Resolved upstream | The original premise was explicitly corrected in this log (2026-09-02): divergent configured query IDs are not evidence of a second request on the supported default path. The erroneous change was reverted as bb734389; existing single-request behavioral guards remain in the full green Python runs. No incorrect acceptance criterion was implemented. |
+| T-346–T-352 | Resolved upstream | PR #213 squash 4584e84a landed the authenticated middleware wire cases, real loopback mTLS client with fake helper, forwarded-token assertions, provider fallback tests, security credential/log rails and prologue page tests. Current pre-legacy full roots passed 15166 twice and Vitest 10042 twice. T-352's process-visibility fixture was strengthened again here under T-509. |
+
+T-121 CI acceptance on be7a8e9d: all eight new 390px/1024px overflow cases passed, but the existing share-popover checkbox test failed twice because the newly scrolling executed table clipped its absolute popover. Kept the assertion unchanged, anchored the popover to viewport coordinates (mobile sheet CSS retained), and added scroll/flip/dismissal coverage: focused set 86 passed. A screenshot now accompanies the existing interaction test. The first post-legacy closing attempt stopped cleanly (`DONE 124`) before this repair; it is not counted as final acceptance.

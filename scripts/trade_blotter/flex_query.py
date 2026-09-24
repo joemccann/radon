@@ -293,7 +293,10 @@ class FlexQueryFetcher:
             
             expiry = trade.get("expiry") or trade.get("lastTradeDateOrContractMonth", "")
         
-        trade_id = trade.get("tradeID") or trade.get("execId") or f"{symbol}_{datetime_str}"
+        # Keep the broker execution identity shared with live fills. A numeric
+        # Flex tradeID cannot receive the journal realized-P&L correction.
+        trade_id = (trade.get("ibExecID") or trade.get("execId")
+                    or trade.get("tradeID") or f"{symbol}_{datetime_str}")
 
         return Execution(
             exec_id=trade_id,

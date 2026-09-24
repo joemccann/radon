@@ -3891,6 +3891,7 @@ function OrdersSections({
           ) : showMobileOrders ? (
             <MobileExecutedList groups={execGroupSort.sorted} />
           ) : (
+            <div className="table-wrap" data-testid="executed-table-scroll">
             <table>
               <thead>
                 <tr>
@@ -3991,6 +3992,7 @@ function OrdersSections({
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       </div>

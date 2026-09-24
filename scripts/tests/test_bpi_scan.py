@@ -554,3 +554,32 @@ class TestBpiWriters:
         assert len(rows) == 1
         assert rows[0][0] == "t2"
         assert json.loads(rows[0][1])["bpi"] == 41.0
+
+
+def test_scan_anchors_completed_session_before_fetch_crosses_close(monkeypatch):
+    """T-242: fetching and freshness must judge the same market session."""
+    sessions = _sessions(40)
+    before, after = sessions[-2:]
+    fetched = False
+    clock_calls = []
+
+    def completed_session():
+        clock_calls.append(fetched)
+        return after if fetched else before
+
+    def fetch(members, deadline):
+        nonlocal fetched
+        fetched = True
+        return {"AAA": {day: 100.0 for day in sessions}}
+
+    monkeypatch.setattr(bpi, "last_completed_session_date", completed_session)
+    monkeypatch.setattr(bpi, "resolve_constituents", lambda *a, **k: (["AAA"], "fixture"))
+    monkeypatch.setattr(bpi, "_smoke_member_cap", lambda: 0)
+    monkeypatch.setattr(bpi, "_fetch_members_spark", fetch)
+    monkeypatch.setattr(bpi, "_fetch_members", lambda *a, **k: pytest.fail("unexpected chart fallback"))
+    monkeypatch.setattr(bpi, "member_signal_series", lambda bars: (sorted(bars), ["buy"] * len(bars)))
+
+    payload = bpi.scan_index("NDX", no_db=True)
+    assert payload["as_of_session"] == before
+    assert payload["stale"] is False
+    assert clock_calls == [False]

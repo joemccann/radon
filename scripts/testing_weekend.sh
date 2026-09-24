@@ -1715,7 +1715,7 @@ run_phase() {
   trap - ERR
   PHASE_HEAD_BEFORE="$(agent_git_ro rev-parse HEAD 2>/dev/null || true)"
   PHASE_START_EPOCH="$(date +%s)"
-  local attempt=1 start_ts=$SECONDS remain round_start
+  local attempt=1 empty_audit_retries=0 start_ts=$SECONDS remain round_start
   set +e
   # The rung carried in from startup (or from the previous phase) has never
   # been checked against THIS phase: its binary may be gone, its key unset, or
@@ -1781,6 +1781,15 @@ run_phase() {
       echo "[$LOOP_LOG_TAG] $RUNG_PROVIDER:$RUNG_MODEL is exhausted" | tee -a "$RUN_LOG"
       advance_rung "" "quota exhausted" || { ALL_PROVIDERS_EXHAUSTED=1; break; }
       echo "[$LOOP_LOG_TAG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
+      continue
+    fi
+    # T-380: one recovery attempt for a genuinely empty audit success. Keep
+    # the phase clock and baseline SHA: a retry cannot buy a second cap.
+    if [[ "$PHASE" == audit && $RC -eq 0 && $empty_audit_retries -eq 0 ]] \
+       && [[ "$(phase_status "$RC" "$RUN_LOG" "$ROUND_LOG_MARK")" == OK ]] \
+       && ! phase_committed && ! phase_declared_noop; then
+      empty_audit_retries=1
+      echo "[testing-weekend] audit exited without completion evidence; retrying once within the phase cap" | tee -a "$RUN_LOG"
       continue
     fi
     [[ $RC -eq 0 || $RC -eq 124 || $attempt -ge $MAX_ATTEMPTS ]] && break

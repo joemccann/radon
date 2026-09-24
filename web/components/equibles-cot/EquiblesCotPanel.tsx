@@ -51,6 +51,7 @@ function cotBoardExtract(row: CotBoardRow, key: CotBoardSortKey): string | numbe
 function CotBoardTable({ rows }: { rows: CotBoardRow[] }) {
   const { sorted, sort, toggle } = useSort(rows, cotBoardExtract);
   return (
+    <div className="table-wrap" data-testid="cot-table-scroll">
     <table className="data-table">
       <thead>
         <tr>
@@ -75,6 +76,7 @@ function CotBoardTable({ rows }: { rows: CotBoardRow[] }) {
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
 
