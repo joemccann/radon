@@ -9,21 +9,14 @@ import json
 import re
 import sqlite3
 import sys
-import types
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
-
-if "libsql_experimental" not in sys.modules:
-    libsql_stub = types.ModuleType("libsql_experimental")
-    libsql_stub.connect = MagicMock(return_value=MagicMock())  # type: ignore[attr-defined]
-    sys.modules["libsql_experimental"] = libsql_stub
 
 _MIGRATIONS = [
     _SCRIPTS_DIR / "db" / "migrations" / "0001_init.sql",

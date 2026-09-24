@@ -51,17 +51,33 @@ def _build(tmp_path: Path, *, marker: bool, lock_held: bool, loop: str) -> dict:
     if lock_held:
         lock = clone / ".weekend-runner.lock"
         lock.mkdir()
-        # This test process is alive, so `kill -0` succeeds and the lock is
-        # never reclaimed.
+        # The controlled inventory below describes this process as the live
+        # owner even when the sandbox refuses host process observation.
         (lock / "pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
-        start = subprocess.check_output(
-            ["/bin/ps", "-p", str(os.getpid()), "-o", "lstart="],
-            text=True,
-        ).strip()
+        start = "Mon Jan  1 00:00:00 2024"
         (lock / "start").write_text(start + "\n", encoding="utf-8")
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    # T-509: inventory describes only the fake clone's owner; never inspect
+    # the host or the real runner lock. CI retains the live-process suite.
+    ps_stub = bin_dir / "ps"
+    _executable(
+        ps_stub,
+        "#!/bin/bash\n"
+        f'[ "$1" = "-p" ] && [ "$2" = "{os.getpid()}" ] || exit 1\n'
+        'case "$4" in\n'
+        f'  pid=) echo {os.getpid()} ;;\n'
+        '  lstart=) echo "Mon Jan  1 00:00:00 2024" ;;\n'
+        '  user=) echo fixture-owner ;;\n'
+        '  command=) echo "fixture-runner audit" ;;\n'
+        '  *) exit 1 ;;\n'
+        'esac\n',
+    )
+    wrapper.write_text(
+        wrapper.read_text(encoding="utf-8").replace("/bin/ps", str(ps_stub)),
+        encoding="utf-8",
+    )
     argv_dir = tmp_path / "notify-argv"
     argv_dir.mkdir()
     curl_stub = bin_dir / "curl"
@@ -198,3 +214,22 @@ def test_held_lock_refusal_pages_through_the_real_notifier(tmp_path: Path, loop:
     body = (cfg["argv_dir"] / "gh-body").read_text(encoding="utf-8")
     assert str(os.getpid()) in body, body
     assert "started" in body and "owner" in body and "cmd" in body, body
+    assert "Mon Jan  1 00:00:00 2024" in body
+    assert "fixture-owner" in body
+    assert "fixture-runner audit" in body
+
+
+@pytest.mark.parametrize("loop", LOOP_IDS)
+@pytest.mark.parametrize("identity", ["matching", "reused", "dead"])
+def test_controlled_owner_inventory(tmp_path, loop, identity):
+    cfg = _build(tmp_path, marker=True, lock_held=True, loop=loop)
+    source = cfg["wrapper"].read_text()
+    start = source.index("pid_alive() {")
+    end = source.index("\n}", start) + 2
+    pid = os.getpid() if identity != "dead" else 999999999
+    stamp = "Mon Jan  1 00:00:00 2024" if identity != "reused" else "old process"
+    result = subprocess.run(
+        ["/bin/bash", "-c", source[start:end] + f'\npid_alive {pid} "{stamp}"'],
+        env=cfg["env"], capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == (0 if identity == "matching" else 1), result.stderr
