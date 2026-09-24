@@ -16,7 +16,7 @@ Text-only research post. Chart the printed dollar yields. Ask before wiring it i
 
 ## Review
 
-- CoreWeave 9.00-9.50 is a placement of "low- to mid-9%", not a printed coupon.
+- CoreWeave 9.00-9.50 is a placement of "low- to mid-9%", not a printed coupon. Connector is dotted.
 - Not wired into the feed. Chart type is a zero-baseline dot-and-range.
 
 # Task: Research force-include + 24h Held TTL

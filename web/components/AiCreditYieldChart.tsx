@@ -137,8 +137,8 @@ export function AiCreditYieldChart({ marks = AI_CREDIT_YIELDS }: Props) {
                   from={{ x: xScale(mark.low), y: cy }}
                   to={{ x: xScale(mark.high), y: cy }}
                   stroke={color}
-                  strokeWidth={2}
-                  strokeDasharray={estimated ? "4 3" : undefined}
+                  strokeWidth={estimated ? 3 : 2}
+                  strokeDasharray={estimated ? "0 6" : undefined}
                   strokeLinecap="round"
                 />
               )}
