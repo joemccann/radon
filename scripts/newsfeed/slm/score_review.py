@@ -53,8 +53,8 @@ def score_review(
         raise ValueError("Review packet must be a radon.slm-review.v1 packet of exactly 200 items")
     sample = _aligned(sample_items, {str(item.get("id")) for item in sample_items}, "review packet")
     sample_ids = set(sample)
-    if not sample_ids <= test_ids:
-        raise ValueError("Review sample IDs are not a subset of the pinned test set")
+    # Packet ids are blinded review ids, not holdout ids. Membership is checked
+    # on reviewIdToPostId after the packet, decisions, and private key agree.
     if decisions.get("schema") != "radon.slm-review-decisions.v1" or decisions.get("runId") != packet.get("runId"):
         raise ValueError("Decision export schema/run ID does not match the packet")
     if key.get("schema") != "radon.slm-review-key.v1" or key.get("runId") != packet.get("runId"):
