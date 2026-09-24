@@ -220,6 +220,23 @@ def test_text_only_finding_publishes_without_images(tmp_path, publisher):
     reviewer = Reviewer([selection(figure_ids=[], text_only=True, captions={}), verdict()])
     posts = build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
     assert len(posts) == 1 and posts[0]["images"] == [] and reviewer.calls[1][2] == ()
+    assert "charts" not in posts[0]["source"]
+
+
+def test_text_only_comparable_yields_store_a_chart_plan(tmp_path, publisher):
+    content = "Name A yields 3.5-4.0%. Name B sits at 2.1%."
+    reviewer = Reviewer([selection(title="Two printed yields", content=content, figure_ids=[], text_only=True, captions={}), verdict()])
+    posts = build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
+    charts = posts[0]["source"]["charts"]
+    assert charts[0]["kind"] == "levels" and charts[0]["axis"] == [0, 6]
+    assert [mark["label"] for mark in charts[0]["marks"]] == ["Name A", "Name B"]
+
+
+def test_figured_finding_does_not_store_a_generated_chart(tmp_path, publisher):
+    content = "Name A yields 3.5-4.0%. Name B sits at 2.1%."
+    reviewer = Reviewer([selection(title="Two printed yields", content=content), verdict()])
+    posts = build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
+    assert posts[0]["images"] and "charts" not in posts[0]["source"]
 
 
 def catalogue_on(page):

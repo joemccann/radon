@@ -70,7 +70,10 @@ export function formatYield(value: number): string {
 }
 
 export function valueLabel(mark: Pick<YieldMark, "kind" | "low" | "high">): string {
-  if (mark.kind === "desk-band") return "low-mid 9%";
+  if (mark.kind === "desk-band") {
+    const low = Number.isInteger(mark.low) ? String(mark.low) : String(mark.low);
+    return `low-mid ${low}%`;
+  }
   if (mark.kind === "point") return formatYield(mark.low);
   return `${formatYield(mark.low)}-${formatYield(mark.high)}`;
 }

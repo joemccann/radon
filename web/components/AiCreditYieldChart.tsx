@@ -25,13 +25,31 @@ const SERIES_COLOR: Record<YieldMark["kind"], string> = {
 
 type Props = {
   marks?: readonly YieldMark[];
+  title?: string;
+  ariaLabel?: string;
+  dek?: string | null;
+  axis?: readonly [number, number];
+  ticks?: readonly number[];
+  reference?: { value: number; label: string } | null;
+  source?: string | null;
+  eyebrow?: string;
 };
 
-export function AiCreditYieldChart({ marks = AI_CREDIT_YIELDS }: Props) {
+export function AiCreditYieldChart({
+  marks = AI_CREDIT_YIELDS,
+  title = "AI credit dollar yields",
+  ariaLabel = "AI credit dollar yields versus Treasuries",
+  dek = AI_CREDIT_DEK,
+  axis = YIELD_AXIS_DOMAIN,
+  ticks = YIELD_TICKS,
+  reference = { value: NEAR_TEN_BID, label: "near 10%" },
+  source = AI_CREDIT_SOURCE,
+  eyebrow = "Credit · Rates · 24 Sep 2026",
+}: Props) {
   const plotRight = WIDTH - MARGIN.right;
   const plotBottom = HEIGHT - MARGIN.bottom;
   const xScale = scaleLinear<number>({
-    domain: [...YIELD_AXIS_DOMAIN],
+    domain: [...axis],
     range: [MARGIN.left, plotRight],
     zero: true,
   });
@@ -44,21 +62,21 @@ export function AiCreditYieldChart({ marks = AI_CREDIT_YIELDS }: Props) {
 
   return (
     <figure style={frameStyle}>
-      <p style={eyebrowStyle}>Credit · Rates · 24 Sep 2026</p>
-      <figcaption style={titleStyle}>AI credit dollar yields</figcaption>
-      <p style={dekStyle}>{AI_CREDIT_DEK}</p>
+      <p style={eyebrowStyle}>{eyebrow}</p>
+      <figcaption style={titleStyle}>{title}</figcaption>
+      {dek ? <p style={dekStyle}>{dek}</p> : null}
       <svg
         role="img"
-        aria-label="AI credit dollar yields versus Treasuries"
+        aria-label={ariaLabel}
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
         width="100%"
         data-axis-min={axisMin}
         data-axis-max={axisMax}
       >
-        <title>AI credit dollar yields versus Treasuries</title>
-        {YIELD_TICKS.map((tick) => (
+        <title>{ariaLabel}</title>
+        {ticks.map((tick) => (
           <Group key={`tick-${tick}`}>
-            {tick !== NEAR_TEN_BID && (
+            {tick !== reference?.value && (
               <Line
                 from={{ x: xScale(tick), y: MARGIN.top }}
                 to={{ x: xScale(tick), y: plotBottom }}
@@ -78,23 +96,27 @@ export function AiCreditYieldChart({ marks = AI_CREDIT_YIELDS }: Props) {
             </text>
           </Group>
         ))}
-        <Line
-          from={{ x: xScale(NEAR_TEN_BID), y: MARGIN.top }}
-          to={{ x: xScale(NEAR_TEN_BID), y: plotBottom }}
-          stroke="var(--text-muted)"
-          strokeWidth={1}
-          strokeDasharray="3 3"
-        />
-        <text
-          x={xScale(NEAR_TEN_BID)}
-          y={16}
-          fill="var(--text-secondary)"
-          fontSize={12}
-          fontFamily="var(--font-mono)"
-          textAnchor="middle"
-        >
-          near 10%
-        </text>
+        {reference ? (
+          <Group>
+            <Line
+              from={{ x: xScale(reference.value), y: MARGIN.top }}
+              to={{ x: xScale(reference.value), y: plotBottom }}
+              stroke="var(--text-muted)"
+              strokeWidth={1}
+              strokeDasharray="3 3"
+            />
+            <text
+              x={xScale(reference.value)}
+              y={16}
+              fill="var(--text-secondary)"
+              fontSize={12}
+              fontFamily="var(--font-mono)"
+              textAnchor="middle"
+            >
+              {reference.label}
+            </text>
+          </Group>
+        ) : null}
         <text
           x={(MARGIN.left + plotRight) / 2}
           y={HEIGHT - 8}
@@ -175,14 +197,15 @@ export function AiCreditYieldChart({ marks = AI_CREDIT_YIELDS }: Props) {
           );
         })}
       </svg>
-      <p style={sourceStyle}>{AI_CREDIT_SOURCE}</p>
+      {source ? <p style={sourceStyle}>{source}</p> : null}
     </figure>
   );
 }
 
 const frameStyle: React.CSSProperties = {
   boxSizing: "border-box",
-  width: 760,
+  width: "100%",
+  maxWidth: 760,
   margin: 0,
   padding: "16px 20px 14px",
   background: "var(--bg-panel)",

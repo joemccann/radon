@@ -22,6 +22,7 @@ import ResearchFeedback from "./ResearchFeedback";
 import ResearchHeldReview from "./ResearchHeldReview";
 import { getImageSource } from "@/lib/newsfeedSource";
 import NewsfeedPostContent from "./NewsfeedPostContent";
+import { ResearchCharts } from "./PlannedCharts";
 import StarToggle from "./StarToggle";
 import PublisherLogo from "./PublisherLogo";
 import HeadlinesTape, { newestHeadlineTime } from "./dashboard/HeadlinesTape";
@@ -462,6 +463,7 @@ export default function DashboardNewsFeed() {
                     </div>
                   ) : null}
                   <NewsfeedPostContent post={post} className={`news-feed-summary ${styles.summary}`} />
+                  <ResearchCharts post={post} />
                   {firstImage ? (
                     <figure className={`news-feed-figure ${styles.figure}`}>
                       <button

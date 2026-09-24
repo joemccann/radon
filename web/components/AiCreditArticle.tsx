@@ -1,9 +1,10 @@
-import { AiCreditYieldChart } from "@/components/AiCreditYieldChart";
-import { RatesMoveChart } from "@/components/RatesMoveChart";
+import { PlannedCharts } from "@/components/PlannedCharts";
+import { planCharts } from "@/lib/planCharts";
 
 const BODY = [
   "Rates are getting into the AI credit story, GS Johnstone notes. The 10-year is back above 5.10% and the 2-year sits at 4.90% after the hot September PMI, oil and the hawkish Fed tone. The desk says the speed is what matters: the 10-year is up ~25 bp in two weeks and ~35 bp over the past month, which is close to where equities usually start to care, especially with the S&P still trading around ~19x.",
   "The clearest stress test is SoftBank. Its ~$11.1bn HY raise to fund the final $10bn OpenAI tranche and refinance bridge debt cleared with strong demand, but at record dollar yields of 8.6-9.75%. That is the tell for AI-linked credit. Earlier in the week, CoreWeave's Virginia data-centre financing was still marketing in the low- to mid-9% area. The desk's read: markets will still fund AI infrastructure and neocloud project finance, even with pre-revenue construction risk. But they are not doing it cheap. Credit investors only want near-10% coupons.",
+  "The desk prices a 71% chance of an October hike and about 36 bp of tightening by year-end.",
 ];
 
 export function AiCreditArticle() {
@@ -18,10 +19,7 @@ export function AiCreditArticle() {
           </p>
         ))}
       </div>
-      <div data-slot="under-body" style={chartsStyle}>
-        <AiCreditYieldChart />
-        <RatesMoveChart />
-      </div>
+      <PlannedCharts plans={planCharts(BODY.join("\n\n"))} date="2026-09-24" />
     </article>
   );
 }
@@ -61,11 +59,4 @@ const bodyStyle: React.CSSProperties = {
   fontFamily: "var(--font-sans)",
   fontSize: 15,
   lineHeight: 1.5,
-};
-
-const chartsStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 12,
-  marginTop: 20,
 };
