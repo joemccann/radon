@@ -3,7 +3,7 @@
  *
  * GS Johnstone, 24 Sep 2026, p. 2 has yields and no chart. This pins the
  * test graphic: a zero-baseline dot-and-range, printed coupons as solid
- * marks, and the CoreWeave desk phrase as a dashed estimate.
+ * marks, and the CoreWeave desk phrase as a dotted estimate.
  */
 
 import React from "react";
@@ -41,7 +41,9 @@ describe("AiCreditYieldChart", () => {
 
     const band = document.querySelector('[data-mark="coreweave"]');
     expect(band?.getAttribute("data-estimated")).toBe("true");
-    expect(band?.querySelector("line")?.getAttribute("stroke-dasharray")).toBeTruthy();
+    const bandLine = band?.querySelector("line");
+    expect(bandLine?.getAttribute("stroke-dasharray")).toBe("0 6");
+    expect(bandLine?.getAttribute("stroke-linecap")).toBe("round");
 
     const printed = document.querySelector('[data-mark="softbank"]');
     expect(printed?.getAttribute("data-estimated")).toBe("false");
