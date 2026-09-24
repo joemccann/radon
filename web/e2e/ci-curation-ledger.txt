@@ -371,3 +371,7 @@ ws-connection-stability.spec.ts
 # runs in curated clear-shell.spec.ts and ticker-search-chain.spec.ts, with
 # instrument workspace screenshots uploaded by CI. Timing suite remains held out.
 # CURATED 2026-09-22 portfolio-mixed-combo-today-pnl.spec.ts - GitHub desktop/mobile acceptance and mixed-coverage screenshots replace blocked local browser verification.
+# REVIEWED 2026-09-23 vixcor-tab.spec.ts - T-240 adds global route disposal;
+#   the real registered callback executes in clerk-route-teardown.test.ts
+#   (3 passed). Scenario assertions are unchanged. Browser preflight remains
+#   outstanding; no local Chromium launch or browser pass is claimed.

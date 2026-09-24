@@ -89,6 +89,7 @@ function seasonExtract(m: MonthData, key: SeasonSortKey): string | number | null
 function SeasonalityDetailTable({ months, currentMonth }: { months: MonthData[]; currentMonth: number }) {
   const { sorted, sort, toggle } = useSort(months, seasonExtract, "month", "asc");
   return (
+    <div className="pos-legs-table-wrap" data-testid="seasonality-table-scroll">
     <table className="pos-legs-table">
       <thead>
         <tr>
@@ -129,6 +130,7 @@ function SeasonalityDetailTable({ months, currentMonth }: { months: MonthData[];
         })}
       </tbody>
     </table>
+    </div>
   );
 }
 
