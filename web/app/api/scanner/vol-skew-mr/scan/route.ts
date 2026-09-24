@@ -8,6 +8,7 @@ import { emptyVolSkewMrPayload, readVolSkewMrCache } from "../route";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 600;
 
 function cacheMatchesRequest(cached: Record<string, unknown>, tickers: string[], preset: string): boolean {
   const requested = Array.isArray(cached.requested_tickers) ? cached.requested_tickers : [];
