@@ -486,10 +486,12 @@ pin_apt_keyring() {
   local label="$4"
   install -m 0755 -d "$(dirname "$dest")"
   curl -fsSL "$url" | gpg --batch --yes --dearmor -o "$dest"
-  # apt trusts whatever this keyring holds: refuse a key that is not the
-  # pinned publisher rather than adding its repository under it.
-  if ! gpg --batch --show-keys --with-colons "$dest" 2>/dev/null \
-    | grep -q "^fpr:.*:${fingerprint}:"; then
+  # apt trusts every key this keyring holds: refuse unless its only primary
+  # key is the pinned publisher rather than adding its repository under it.
+  local primaries
+  primaries="$(gpg --batch --show-keys --with-colons "$dest" 2>/dev/null \
+    | awk -F: '$1 == "pub" { want = 1; next } want && $1 == "fpr" { print $10; want = 0 }')"
+  if [[ "$primaries" != "$fingerprint" ]]; then
     rm -f "$dest"
     log_error "${label} apt signing key does not match the pinned fingerprint"
     return 1
