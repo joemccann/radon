@@ -778,6 +778,13 @@ class TestDirectoryOwnership:
         assert "chown radon:radon /home/radon/.ssh/known_hosts" not in body
         assert "| sudo -u radon tee -a /home/radon/.ssh/known_hosts" in body
 
+    def test_public_web_env_is_written_by_radon_never_by_root(self) -> None:
+        # web/ is radon-owned, so root never creates, chmods or chowns there.
+        body = _function_body(SETUP.read_text(encoding="utf-8"), "setup_node")
+        assert '"${RADON_DIR}/web/.env"' in body
+        assert "install -m 0600 -o radon -g radon" not in body
+        assert "sudo -u radon sh -c 'umask 077;" in body
+
     def test_seccomp_profile_directory_is_refused_unless_root_owned(self) -> None:
         # DS-2026-09-24-01: install -d follows a link planted under the
         # radon-writable /etc/radon; the directory must be a real root one.
@@ -859,11 +866,7 @@ RADON_CONTROLLED = re.compile(
 )
 # Privileged lines on radon-controlled paths that are allowed WITHOUT the
 # guard or the staging helper, each with its reason.
-ALLOWED_UNGUARDED = {
-    # Root-owned mktemp source; the target holds only the NEXT_PUBLIC_* lines
-    # radon already owns, and `install` unlinks the destination before writing.
-    'install -m 0600 -o radon -g radon "$public_env_tmp" "${RADON_DIR}/web/.env"',
-}
+ALLOWED_UNGUARDED: set[str] = set()
 
 
 def _functions(script: str) -> list[tuple[str, int, int]]:
