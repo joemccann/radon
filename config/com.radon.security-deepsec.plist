@@ -25,7 +25,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:__HOME__/.local/bin:__HOME__/.bun/bin</string>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:__HOME__/.local/share/radon/claude-stable:__HOME__/.local/bin:__HOME__/.bun/bin</string>
         <key>RADON_WEEKEND_REPO</key>
         <string>__DEEPSEC_REPO__</string>
         <key>HOME</key>
