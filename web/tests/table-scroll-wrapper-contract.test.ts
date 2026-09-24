@@ -31,21 +31,9 @@ import { describe, expect, it } from "vitest";
 const WEB_ROOT = join(__dirname, "..");
 const TSX_ROOTS = [join(WEB_ROOT, "components"), join(WEB_ROOT, "app")];
 
-/** Sites the sweep found unwrapped when it was inverted (T-121).
- *
- * Each is a real horizontal-overflow defect of the 2026-08-18 class, not a
- * measurement artefact: none of `.ratings-changes`, `.seasonality-detail`,
- * `.data-table`, `.section-body` carries an `overflow-x` rule anywhere. They
- * are pinned here rather than silently skipped, and the assertion is an
- * EQUALITY — fixing one reds this file until its entry is removed, and a
- * seventh unwrapped table reds it immediately.
- */
-const KNOWN_UNWRAPPED_T121 = [
-  "components/WorkspaceSections.tsx:OrdersSections",
-  "components/equibles-cot/EquiblesCotPanel.tsx:CotBoardTable",
-  "components/ticker-detail/RatingsTab.tsx:RatingsChangesTable",
-  "components/ticker-detail/SeasonalityTab.tsx:SeasonalityDetailTable",
-];
+/** T-121: the inherited unwrapped-table backlog is closed. Keep equality
+ * against an empty inventory so every new unwrapped table fails. */
+const KNOWN_UNWRAPPED_T121: string[] = [];
 
 function walk(dir: string, ext: string): string[] {
   const out: string[] = [];
