@@ -18,16 +18,42 @@ const ODDS_HEIGHT = 88;
 const MOVE_MARGIN = { top: 8, right: 88, bottom: 36, left: 96 };
 const ODDS_MARGIN = { top: 28, right: 72, bottom: 28, left: 96 };
 
-export function RatesMoveChart() {
+type MoveBar = { id: string; label: string; bp: number };
+
+type Props = {
+  bars?: readonly MoveBar[];
+  axisMax?: number;
+  ticks?: readonly number[];
+  probability?: { label: string; pct: number } | null;
+  readout?: { label: string; bp: number } | null;
+  title?: string;
+  barAria?: string;
+  note?: string | null;
+  source?: string | null;
+  eyebrow?: string;
+};
+
+export function RatesMoveChart({
+  bars = TEN_YEAR_MOVE,
+  axisMax = MOVE_AXIS_MAX,
+  ticks = MOVE_TICKS,
+  probability = { label: "October hike", pct: OCTOBER_HIKE_ODDS },
+  readout = { label: "Year-end tightening", bp: YEAR_END_TIGHTENING_BP },
+  title = "10-year move and the October hike",
+  barAria = "10-year change in basis points",
+  note = "2-week window sits inside the month. Not additive.",
+  source = RATES_MOVE_SOURCE,
+  eyebrow = "Rates · 24 Sep 2026",
+}: Props) {
   const moveRight = WIDTH - MOVE_MARGIN.right;
   const moveBottom = MOVE_HEIGHT - MOVE_MARGIN.bottom;
   const moveX = scaleLinear<number>({
-    domain: [0, MOVE_AXIS_MAX],
+    domain: [0, axisMax],
     range: [MOVE_MARGIN.left, moveRight],
     zero: true,
   });
   const moveY = scaleBand<string>({
-    domain: TEN_YEAR_MOVE.map((row) => row.id),
+    domain: bars.map((row) => row.id),
     range: [MOVE_MARGIN.top, moveBottom],
     padding: 0.4,
   });
@@ -44,18 +70,19 @@ export function RatesMoveChart() {
 
   return (
     <figure style={frameStyle}>
-      <p style={eyebrowStyle}>Rates · 24 Sep 2026</p>
-      <figcaption style={titleStyle}>10-year move and the October hike</figcaption>
+      <p style={eyebrowStyle}>{eyebrow}</p>
+      <figcaption style={titleStyle}>{title}</figcaption>
+      {bars.length > 0 ? (
       <svg
         role="img"
-        aria-label="10-year change in basis points"
+        aria-label={barAria}
         viewBox={`0 0 ${WIDTH} ${MOVE_HEIGHT}`}
         width="100%"
         data-axis-min={moveX.domain()[0]}
         data-axis-max={moveX.domain()[1]}
       >
-        <title>10-year change in basis points</title>
-        {MOVE_TICKS.map((tick) => (
+        <title>{barAria}</title>
+        {ticks.map((tick) => (
           <Group key={`tick-${tick}`}>
             <line
               x1={moveX(tick)}
@@ -87,7 +114,7 @@ export function RatesMoveChart() {
         >
           Basis points
         </text>
-        {TEN_YEAR_MOVE.map((row) => {
+        {bars.map((row) => {
           const y = moveY(row.id) ?? 0;
           return (
             <Group key={row.id} data-mark={row.id}>
@@ -123,17 +150,19 @@ export function RatesMoveChart() {
           );
         })}
       </svg>
-      <p style={noteStyle}>2-week window sits inside the month. Not additive.</p>
+      ) : null}
+      {note ? <p style={noteStyle}>{note}</p> : null}
+      {probability ? (
       <svg
         role="img"
-        aria-label="October hike probability"
+        aria-label={`${probability.label} probability`}
         viewBox={`0 0 ${WIDTH} ${ODDS_HEIGHT}`}
         width="100%"
         data-scale="probability"
         data-axis-min={oddsMin}
         data-axis-max={oddsMax}
       >
-        <title>October hike probability</title>
+        <title>{`${probability.label} probability`}</title>
         <text
           x={ODDS_MARGIN.left}
           y={18}
@@ -142,7 +171,7 @@ export function RatesMoveChart() {
           fontFamily="var(--font-sans)"
           fontWeight={600}
         >
-          October hike
+          {probability.label}
         </text>
         <Bar
           x={oddsX(0)}
@@ -154,19 +183,19 @@ export function RatesMoveChart() {
         <Bar
           x={oddsX(0)}
           y={trackY}
-          width={oddsX(OCTOBER_HIKE_ODDS) - oddsX(0)}
+          width={oddsX(probability.pct) - oddsX(0)}
           height={trackH}
           fill="var(--signal-core)"
         />
         <text
-          x={oddsX(OCTOBER_HIKE_ODDS) + 8}
+          x={oddsX(probability.pct) + 8}
           y={trackY + 9}
           fill="var(--signal-core)"
           fontSize={12}
           fontFamily="var(--font-mono)"
           fontWeight={500}
         >
-          {`${OCTOBER_HIKE_ODDS}%`}
+          {`${probability.pct}%`}
         </text>
         <text
           x={oddsX(0)}
@@ -189,18 +218,22 @@ export function RatesMoveChart() {
           100
         </text>
       </svg>
-      <p style={tighteningStyle} data-unit="bp">
-        Year-end tightening
-        <span style={tighteningValueStyle}>{`+${YEAR_END_TIGHTENING_BP} bp`}</span>
-      </p>
-      <p style={sourceStyle}>{RATES_MOVE_SOURCE}</p>
+      ) : null}
+      {readout ? (
+        <p style={tighteningStyle} data-unit="bp">
+          {readout.label}
+          <span style={tighteningValueStyle}>{`+${readout.bp} bp`}</span>
+        </p>
+      ) : null}
+      {source ? <p style={sourceStyle}>{source}</p> : null}
     </figure>
   );
 }
 
 const frameStyle: React.CSSProperties = {
   boxSizing: "border-box",
-  width: 760,
+  width: "100%",
+  maxWidth: 760,
   margin: 0,
   padding: "16px 20px 14px",
   background: "var(--bg-panel)",

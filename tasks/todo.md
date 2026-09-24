@@ -1,25 +1,25 @@
-# Task: AI credit yield chart test (GS Johnstone 24 Sep 2026)
+# Task: Chart every text-only research PDF
 
-Text-only research post. Chart the printed dollar yields. Ask before wiring it into the feed.
+Every dropbox finding with no source figure gets a chart planned from its title and body. Findings that already have a figure, and findings with too little comparable data, stay as they are.
 
 ## Dependency graph
 
-- T1 depends_on: [] - Red test: zero baseline, printed labels, dashed desk band
-- T2 depends_on: [T1] - visx dot-and-range on Clear dark tokens
-- T3 depends_on: [T2] - Green test, rendered PNG
+- T1 depends_on: [] - Red tests: GS text plans both figures; a lone point, a lone bp change, and dollar amounts plan nothing; a source figure suppresses generation
+- T2 depends_on: [T1] - planCharts, visx renderer, feed and lightbox under the body, intake source.charts
+- T3 depends_on: [T2] - Focused vitest and pytest, rendered article, CI
 
 ## Checklist
 
-- [x] T1 Failing test
-- [x] T2 Chart
-- [x] T3 Rendered image
+- [x] T1 Failing tests
+- [x] T2 Pipeline
+- [x] T3 Verify and ship
 
 ## Review
 
 - CoreWeave 9.00-9.50 is a placement of "low- to mid-9%", not a printed coupon. Connector is dotted.
 - SoftBank 8.6-9.75 is one printed range.
 - Second figure: 10-year change in bp, October hike on a 0-100 scale, year-end tightening off that scale.
-- Both figures sit under the article body. Not wired into the live feed.
+- `planCharts` reads the finding title and body. Text-only dropbox posts render that plan under the body. A source figure suppresses generation. Intake stores `source.charts` only when the plan is non-empty and the finding has no figure.
 
 # Task: Research force-include + 24h Held TTL
 

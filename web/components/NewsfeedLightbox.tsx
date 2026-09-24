@@ -12,6 +12,7 @@ import styles from "./NewsfeedResearchMedia.module.css";
 import NewsfeedShare from "./NewsfeedShare";
 import { getImageSource } from "@/lib/newsfeedSource";
 import NewsfeedPostContent from "./NewsfeedPostContent";
+import { ResearchCharts } from "./PlannedCharts";
 import StarToggle from "@/components/StarToggle";
 import PublisherLogo from "./PublisherLogo";
 
@@ -231,6 +232,7 @@ export default function NewsfeedLightbox({
             </header>
 
             <NewsfeedPostContent post={post} className="newsfeed-lightbox__body" />
+            <ResearchCharts post={post} />
 
             {tags.length > 0 ? (
               <div className="newsfeed-lightbox__tags">

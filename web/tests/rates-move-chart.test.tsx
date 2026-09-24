@@ -45,6 +45,6 @@ describe("AiCreditArticle", () => {
     expect(slot!.compareDocumentPosition(body!) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
     expect(slot!.querySelectorAll("figure")).toHaveLength(2);
     expect(document.querySelector("article img")).toBeNull();
-    expect(slot!.querySelectorAll('[data-mark="softbank"] line')).toHaveLength(1);
+    expect(slot!.querySelectorAll('[data-mark="softbank-hy"] line')).toHaveLength(1);
   });
 });
