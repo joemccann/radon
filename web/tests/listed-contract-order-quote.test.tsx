@@ -116,6 +116,7 @@ afterEach(() => {
   cleanup();
   mocks.indexHook.mockReset();
   mocks.prices = {};
+  vi.unstubAllGlobals();
 });
 
 describe("listed-contract order quote telemetry", () => {
@@ -163,6 +164,16 @@ function strikeSelect(): HTMLSelectElement {
 
 describe("IndexOptionOrderForm quote threading", () => {
   beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const requested = new URL(url, "http://localhost").searchParams.get("symbol");
+        return {
+          ok: true,
+          json: async () => ({ symbol: requested, expirations: ["20260916"] }),
+        };
+      }),
+    );
     mocks.indexHook.mockImplementation((symbol: string, expiry: string | null) =>
       expiry == null
         ? {
@@ -210,6 +221,7 @@ describe("IndexOptionOrderForm quote threading", () => {
     };
 
     const { container } = render(<IndexOptionOrderForm ticker="VIX" portfolio={null} />);
+    await waitFor(() => expect(strikeSelect()).toBeTruthy());
     fireEvent.change(strikeSelect(), { target: { value: "7001" } });
 
     await waitFor(() => {
@@ -220,12 +232,14 @@ describe("IndexOptionOrderForm quote threading", () => {
     expect(values).not.toContain("$15.10");
   });
 
-  it("falls back to the empty state while no strike is selected", () => {
+  it("falls back to the empty state while no strike is selected", async () => {
     mocks.prices = { VIX_20260916_20_C: VIX_CALL_QUOTE };
 
     const { container } = render(<IndexOptionOrderForm ticker="VIX" portfolio={null} />);
 
-    expect(container.querySelector(".price-bar-empty")?.textContent).toBe("No real-time data");
+    await waitFor(() => {
+      expect(container.querySelector(".price-bar-empty")?.textContent).toBe("No real-time data");
+    });
   });
 });
 

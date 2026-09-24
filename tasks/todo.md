@@ -1,3 +1,23 @@
+# Task: Option secdef singleflight
+
+A VIX page spawned one `ib_option_chain.py` per expiry plus an unscoped `ib_chain.py`, filled the 3-slot interactive lane, and 502'd the book.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: one snapshot per symbol is shared by expirations and every expiry; failures are not cached; the index ticket loads expirations from `/api/options/expirations` and never calls the unscoped index chain
+- T2 depends_on: [T1] - Snapshot builder, 60s singleflight cache, route slice, index form uses the equity expirations route
+- T3 depends_on: [T2] - Focused pytest and vitest green, PR, CI
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Implementation
+- [x] T3 Verify and ship
+
+## Review
+
+- One `--snapshot` read per symbol for 60s. Expirations and every expiry slice it. The index ticket loads expirations from `/api/options/expirations` and calls `ib_chain.py` only for the selected expiry. Focused pytest 38 passed, vitest 10 passed.
+
 # Task: Split gitdirs (runner trust follow-up to R02-A)
 
 Operator 2026-09-23: keep R02-A. The rung gets its own writable gitdir (`$WEEKEND_ROOT/.gitdirs-agent/<loop>.git`); host git keeps `$WEEKEND_ROOT/.gitdirs/<loop>.git` and never opens the agent gitdir.

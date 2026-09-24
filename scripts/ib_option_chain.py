@@ -114,6 +114,31 @@ def _preferred_multiplier(chains) -> str:
     return str(getattr(chains[0], "multiplier", ""))
 
 
+def build_secdef_snapshot(chains, symbol: str) -> dict:
+    """Every expiry and its strike book from one reqSecDefOptParams result.
+
+    Adjusted classes stay out once a canonical class exists, matching the
+    expiration list the chain page already shows.
+    """
+    canonical = _canonical_trading_class_chains(chains, symbol)
+    by_expiry: dict[str, dict] = {}
+    for chain in canonical:
+        for expiry in _chain_expirations(chain):
+            if expiry in by_expiry:
+                continue
+            selected = _chains_for_expiry(canonical, symbol, expiry)
+            by_expiry[expiry] = {
+                "exchange": _preferred_exchange(selected),
+                "multiplier": _preferred_multiplier(selected),
+                "strikes": _union_strikes(selected),
+            }
+    return {
+        "symbol": symbol.upper(),
+        "expirations": sorted(by_expiry),
+        "by_expiry": by_expiry,
+    }
+
+
 def _is_terminal_connect_error(exc: BaseException) -> bool:
     """Whether retrying this connect failure can only cost time. R-334."""
     text = str(exc).lower()
@@ -178,6 +203,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--expiry", default=None, help="If provided, fetch strikes for this expiry")
+    parser.add_argument(
+        "--snapshot",
+        action="store_true",
+        help="Print every expiry and its strikes from this single secdef read",
+    )
     parser.add_argument("--port", type=int, default=4001)
     # client_id="auto" rotates through SUBPROCESS_ID_RANGE (20-49) so parallel
     # chain fetches (one per expiry) don't collide on a single hardcoded ID.
@@ -217,6 +247,10 @@ def main():
         chains = _request_option_chains(
             client._ib, args.symbol, sec_type, underlying.conId
         )
+
+        if args.snapshot:
+            print(json.dumps(build_secdef_snapshot(chains, args.symbol)))
+            return
 
         if args.expiry:
             # IB can return both adjusted and standard option chains for the
