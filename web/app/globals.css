@@ -12616,9 +12616,10 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 }
 
 .share-pnl-popover {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  right: 0;
+  position: fixed;
+  top: var(--share-popover-top, auto);
+  bottom: var(--share-popover-bottom, 8px);
+  right: var(--share-popover-right, 8px);
   z-index: 100;
   min-width: 200px;
   background: var(--bg-panel);

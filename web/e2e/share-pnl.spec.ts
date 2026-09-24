@@ -95,7 +95,7 @@ test.describe("Share PnL", () => {
     await expect(popover.getByRole("button", { name: /^Copy$/ })).toBeVisible();
   });
 
-  test("unchecking P&L $ disables it but keeps % checked", async ({ page }) => {
+  test("unchecking P&L $ disables it but keeps % checked", async ({ page }, testInfo) => {
     await stubOrdersShareApis(page);
     const popover = await openSharePopover(page);
     const dollarCheckbox = popover.locator("input[type='checkbox']").nth(0);
@@ -106,6 +106,9 @@ test.describe("Share PnL", () => {
     await expect(pctCheckbox).toBeChecked();
     await dollarCheckbox.check();
     await expect(dollarCheckbox).toBeChecked();
+    const screenshot = testInfo.outputPath("table-overflow-share-popover.png");
+    await page.screenshot({ path: screenshot });
+    await testInfo.attach("share-popover-scroll-container", { path: screenshot, contentType: "image/png" });
     await dollarCheckbox.uncheck();
     await expect(dollarCheckbox).not.toBeChecked();
   });
