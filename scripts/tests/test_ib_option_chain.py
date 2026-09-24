@@ -22,6 +22,26 @@ def _chain(exchange: str, trading_class: str, expirations: list[str], strikes: l
     )
 
 
+def test_secdef_snapshot_keeps_one_strike_book_per_expiry():
+    """One reqSecDefOptParams result has to serve every expiry on the page."""
+    chains = [
+        _chain("SMART", "2VIX", ["20261215"], [99.0]),
+        _chain("CBOE", "VIX", ["20261020", "20261117"], [15.0, 20.0]),
+        _chain("SMART", "VIX", ["20261020"], [18.0, 20.0]),
+    ]
+
+    snapshot = ib_option_chain.build_secdef_snapshot(chains, "vix")
+
+    assert snapshot["symbol"] == "VIX"
+    assert snapshot["expirations"] == ["20261020", "20261117"]
+    assert "20261215" not in snapshot["by_expiry"]
+    october = snapshot["by_expiry"]["20261020"]
+    assert october["exchange"] == "SMART"
+    assert october["multiplier"] == "100"
+    assert october["strikes"] == [15.0, 18.0, 20.0]
+    assert snapshot["by_expiry"]["20261117"]["strikes"] == [15.0, 20.0]
+
+
 def test_requested_expiry_prefers_canonical_trading_class_over_adjusted_chain():
     chains = [
         _chain("SMART", "2MSFT", ["20260717"], [380.0, 400.0, 410.0, 430.0]),
