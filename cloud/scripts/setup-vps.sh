@@ -377,7 +377,9 @@ resolve_provenance_anchor() {
 }
 
 # git over the radon-owned store with every radon-writable object/ancestry
-# rewrite ignored: replace refs, grafts and the commit-graph cache.
+# rewrite ignored: replace refs, grafts and the commit-graph cache. Every
+# provenance read goes through it; hash-object also passes --no-filters so a
+# checkout-configured filter command never runs as root.
 provenance_git() {
   local repo_root="$1"
   shift
@@ -417,12 +419,12 @@ stage_from_checkout() {
     return 1
   fi
   source_rel="${source#"${repo_root}"/}"
-  if ! blob_sha="$(git -C "$repo_root" rev-parse "HEAD:${source_rel}" 2>/dev/null)"; then
+  if ! blob_sha="$(provenance_git "$repo_root" rev-parse "HEAD:${source_rel}" 2>/dev/null)"; then
     log_error "Provenance failed: ${source_rel} is not committed at HEAD"
     return 1
   fi
   require_remote_ancestry "$repo_root" "$source_rel" "$blob_sha" "Provenance" || return 1
-  if ! work_sha="$(git -C "$repo_root" hash-object -- "$source")" \
+  if ! work_sha="$(provenance_git "$repo_root" hash-object --no-filters -- "$source")" \
     || [[ "$work_sha" != "$blob_sha" ]]; then
     log_error "Provenance failed: ${source} differs from the committed blob"
     return 1
@@ -443,7 +445,7 @@ stage_from_checkout() {
   # The staged bytes are the committed blob, read from the object store; a
   # source swapped after the hash check fails the byte comparison instead of
   # being published.
-  if ! git -C "$repo_root" cat-file blob "$blob_sha" > "$staged" \
+  if ! provenance_git "$repo_root" cat-file blob "$blob_sha" > "$staged" \
     || ! require_regular_file "$source" \
     || ! cmp -s -- "$source" "$staged"; then
     rm -f "$staged"
@@ -1425,12 +1427,12 @@ install_docker_gw() {
     return 1
   fi
   local compose_rel="${compose_source#"${repo_root}"/}"
-  if ! blob_sha="$(git -C "$repo_root" rev-parse "HEAD:${compose_rel}" 2>/dev/null)"; then
+  if ! blob_sha="$(provenance_git "$repo_root" rev-parse "HEAD:${compose_rel}" 2>/dev/null)"; then
     log_error "Compose provenance failed: ${compose_rel} is not committed at HEAD"
     return 1
   fi
   require_remote_ancestry "$repo_root" "$compose_rel" "$blob_sha" "Compose" || return 1
-  if ! work_sha="$(git -C "$repo_root" hash-object -- "$compose_source")" \
+  if ! work_sha="$(provenance_git "$repo_root" hash-object --no-filters -- "$compose_source")" \
     || [[ "$work_sha" != "$blob_sha" ]]; then
     log_error "Compose provenance failed: ${compose_source} differs from the committed blob"
     return 1
@@ -1446,7 +1448,7 @@ install_docker_gw() {
     return 1
   fi
   chmod 0600 "$staged"
-  if ! git -C "$repo_root" cat-file blob "$blob_sha" > "$staged"; then
+  if ! provenance_git "$repo_root" cat-file blob "$blob_sha" > "$staged"; then
     rm -f "$staged"
     log_error "Compose provenance failed: could not read blob ${blob_sha}"
     return 1
