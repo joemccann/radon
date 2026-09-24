@@ -23,7 +23,21 @@ import { IndexOptionOrderForm } from "../components/ticker-detail/IndexOptionOrd
 afterEach(() => {
   cleanup();
   mocks.indexHook.mockReset();
+  vi.unstubAllGlobals();
 });
+
+function stubExpirations() {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      const requested = new URL(url, "http://localhost").searchParams.get("symbol");
+      return {
+        ok: true,
+        json: async () => ({ symbol: requested, expirations: ["20260916"] }),
+      };
+    }),
+  );
+}
 
 const future = {
   conId: 9001,
@@ -124,6 +138,7 @@ describe("listed-contract order safety", () => {
       error: null,
     }));
 
+    stubExpirations();
     const { rerender } = render(<IndexOptionOrderForm ticker="VIX" portfolio={resolvedPortfolio()} />);
     await waitFor(() => expect(screen.getByText("$20 C")).toBeTruthy());
     fireEvent.change(screen.getAllByRole("combobox")[1], { target: { value: "42" } });
