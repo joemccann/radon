@@ -17,6 +17,7 @@ pin three chokepoints:
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -29,6 +30,16 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 import grok_page_responder as responder  # noqa: E402
 import ir_ensure_pr  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def isolated_git_environment(monkeypatch, tmp_path):
+    """T-508: exercise the temporary hook, independent of runner Git policy."""
+    for key in tuple(os.environ):
+        if key.startswith("GIT_"):
+            monkeypatch.delenv(key)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "empty-gitconfig"))
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
