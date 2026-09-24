@@ -766,10 +766,17 @@ class TestDirectoryOwnership:
             "cp /root/.ssh/authorized_keys",
             "chown -R radon:radon /home/radon/.ssh",
             "ssh-keygen -t ed25519",
-            ">> /home/radon/.ssh/known_hosts",
+            "tee -a /home/radon/.ssh/known_hosts",
         ):
             assert guard < body.index(write), write
 
+    def test_known_hosts_is_written_by_radon_never_by_root(self) -> None:
+        # DS-2026-09-24-03: radon can swap known_hosts for a link after the
+        # one-time -L check, so root must neither append to it nor chown it.
+        body = _function_body(SETUP.read_text(encoding="utf-8"), "preflight_checks")
+        assert ">> /home/radon/.ssh/known_hosts" not in body
+        assert "chown radon:radon /home/radon/.ssh/known_hosts" not in body
+        assert "| sudo -u radon tee -a /home/radon/.ssh/known_hosts" in body
 
     def test_seccomp_profile_directory_is_refused_unless_root_owned(self) -> None:
         # DS-2026-09-24-01: install -d follows a link planted under the
