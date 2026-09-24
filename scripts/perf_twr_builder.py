@@ -1906,8 +1906,16 @@ def _extend_statement_flows(
     if flows.missing_sections:
         return FlowSet.failed("statement_flow_sections_incomplete"), []
     covered = load_flow_coverage_dates()
-    if covered is None or not historical.issubset(covered):
+    if covered is None:
         return FlowSet.failed("historical_flow_coverage_unverified"), []
+    earlier = {day for day in historical if day < start}
+    if not earlier.issubset(covered):
+        return FlowSet.failed("historical_flow_coverage_unverified"), []
+    # flex-pull ingests newest-first, so a later session's NAV can already be
+    # stored. Keep it on the series but unchained until its own flows are
+    # verified; failing here suppressed every build after 2026-09-17.
+    later_unverified = sorted(day for day in historical if day > end and day not in covered)
+    verified_through = end if later_unverified else flows.verified_through
     mirrored = load_flows_from_turso(allow_empty=True)
     if mirrored is None:
         return FlowSet.failed("historical_flow_ledger_unavailable"), []
@@ -1921,10 +1929,23 @@ def _extend_statement_flows(
         warning for warning in flow_divergence_warnings()
         if not start <= warning["context"]["report_date"] <= end
     ]
+    if later_unverified:
+        warnings.append(_warning(
+            "FLOWS_COVERAGE_LAGS_NAV",
+            "info",
+            f"Statement flows are verified through {end}; NAV extends to "
+            f"{later_unverified[-1]}. Later sessions are not chained until "
+            "their own statements verify their flows.",
+            flows_source="statement",
+            covered_through=end,
+            nav_as_of=later_unverified[-1],
+            sessions_unverified=len(later_unverified),
+        ))
     return FlowSet(
         status=FlowsStatus.OK if combined else FlowsStatus.EMPTY_VERIFIED,
         by_date=combined,
         source=f"{flows.source}+turso",
+        verified_through=verified_through,
     ), warnings
 
 

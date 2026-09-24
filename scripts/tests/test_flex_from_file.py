@@ -328,3 +328,36 @@ def test_statement_merge_retains_historical_disagreement_gate(nightly_builder, m
     conflicts = [w for w in payload["warnings"] if w["code"] == "FLOWS_SOURCE_DISAGREEMENT"]
     assert [w["context"]["report_date"] for w in conflicts] == ["2026-01-13"]
     assert payload["status"] == "stale"
+
+
+def test_nightly_statement_keeps_later_unverified_nav_unchained(nightly_builder, monkeypatch):
+    """A statement older than stored NAV must still publish its TWR.
+
+    flex-pull ingests newest-first, so an older statement can arrive after a
+    later session's NAV is stored. Requiring that later session to be covered
+    suppressed every build from 2026-09-18 on and nothing could re-cover it.
+    Sessions after the statement stay on the series but are not chained.
+    """
+    ptb = nightly_builder
+    monkeypatch.setattr(ptb, "get_nav_snapshots", lambda **_kw: ptb.NavResolution(
+        {"2026-01-12": 100000.0, "2026-01-13": 180000.0, "2026-01-14": 181000.0,
+         "2026-01-20": 190000.0},
+        "turso",
+    ))
+    payload = ptb.build_and_persist(from_file="nightly.xml", persist=False)
+
+    assert payload["flows_status"] == "ok", payload["warnings"]
+    assert payload["twr"] is not None
+    assert payload["nav_as_of"] == "2026-01-20"
+    chained = {row["date"] for row in payload["subperiods"] if row["r"] is not None}
+    assert {"2026-01-15", "2026-01-16"} <= chained
+    assert "2026-01-20" not in chained
+    assert payload["status"] == "ok"
+    assert any(w["code"] == "FLOWS_COVERAGE_LAGS_NAV" for w in payload["warnings"])
+
+
+def test_nightly_statement_still_refuses_an_earlier_unverified_gap(nightly_builder, monkeypatch):
+    monkeypatch.setattr(nightly_builder, "load_flow_coverage_dates", lambda: {"2026-01-14"})
+    payload = nightly_builder.build_and_persist(from_file="nightly.xml", persist=False)
+    assert payload["flows_status"] == "failed"
+    assert payload["twr"] is None
