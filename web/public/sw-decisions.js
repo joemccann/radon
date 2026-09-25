@@ -1,8 +1,9 @@
 /* Radon service-worker policy. Authenticated pages and API responses never
- * enter Cache Storage; only immutable/static public assets are intercepted.
+ * enter Cache Storage. Icons, images, and the manifest are intercepted.
+ * /_next/static/ is not: the document preloads those files.
  */
 const RadonSwDecisions = (() => {
-  const SW_VERSION = "2026-08-13.1";
+  const SW_VERSION = "2026-09-25.1";
   const STATIC_CACHE = `radon-static-${SW_VERSION}`;
   const KNOWN_CACHES = [STATIC_CACHE];
   const PRECACHE_URLS = [
@@ -14,8 +15,11 @@ const RadonSwDecisions = (() => {
   const MAX_STATIC_ENTRIES = 300;
 
   function isStaticAssetPath(pathname) {
-    return pathname.startsWith("/_next/static/")
-      || pathname.startsWith("/icons/")
+    // /_next/static/ stays out of this list. Next preloads those scripts and
+    // the Inter font from the document. respondWith drops that preload:
+    // Chrome reports a cross-world service worker mismatch and an unused
+    // preload. The files are content-hashed and already use the HTTP cache.
+    return pathname.startsWith("/icons/")
       || pathname.startsWith("/images/")
       || pathname === "/manifest.webmanifest";
   }

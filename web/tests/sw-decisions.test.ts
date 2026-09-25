@@ -17,6 +17,11 @@ const classify = (path: string, mode = "cors") => D.classifyRequest({
 });
 
 describe("service worker isolation decisions", () => {
+  it("leaves Next preloads to the document", () => {
+    expect(classify("/_next/static/chunks/app.js")).toBe("ignore");
+    expect(classify("/_next/static/media/Inter_Variable.woff2")).toBe("ignore");
+  });
+
   it("bypasses every authenticated page, API, data, and socket request", () => {
     expect(classify("/portfolio", "navigate")).toBe("bypass");
     expect(classify("/api/portfolio")).toBe("bypass");
@@ -25,7 +30,6 @@ describe("service worker isolation decisions", () => {
   });
 
   it("intercepts only same-origin static public assets", () => {
-    expect(classify("/_next/static/chunk.js")).toBe("static");
     expect(classify("/icons/icon-192.png")).toBe("static");
     expect(classify("/images/hero.png")).toBe("static");
     expect(classify("/manifest.webmanifest")).toBe("static");
