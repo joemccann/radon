@@ -810,7 +810,21 @@ reads `slm_tagger_shadow` (7d / 28d), prints one JSON object, writes
 an I.3 breach. The llama-server sidecar (`radon-slm-tagger.service`,
 127.0.0.1:8331) has no `service_health` row; the unit watchdog covers
 `failed` / `start-limit-hit`. Spec: [`ml/newsfeed-slm-tagger.md`](ml/newsfeed-slm-tagger.md).
-Rung stays `off` until Joe enables it.
+Rung stays `off` until Joe enables it. The sidecar unit is installed even
+before its optional binary and model are provisioned. Its executable/model
+conditions skip activation until both exist; `/usr/bin/env` executes the
+absolute llama-server path so `systemd-analyze verify` can validate the unit
+on hosts without llama-server. Installing the unit does not enable or start it.
+
+For `config-drift`, inspect `journalctl -u radon-drift-audit` for the actual
+findings. An `error` heartbeat can report detected configuration differences
+with a successful database write. The obsolete Flex hotfix
+`radon-flex-pull.service.d/write-performance-data.conf` should be archived
+outside systemd's unit directories once the canonical base unit supplies the
+same data-directory write grant and journal/portfolio read-only restrictions.
+Do not recreate that drop-in. After reconciling configuration, run
+`systemctl daemon-reload` and `systemctl start radon-drift-audit.service` to
+publish a fresh audit verdict.
 
 ### Model catalog (`radon-model-catalog.timer`)
 
