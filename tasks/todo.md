@@ -8372,33 +8372,6 @@ Review: pending; no live broker calls, browser launches, or runner-lock operatio
 ## Review
 - REL-284 source fix is narrow and red/green evidence is recorded in RELIABILITY_LOG.md. Full-gate and Playwright acceptance are blocked by missing installed dependencies and host process/browser permissions; no overall green is claimed.
 
-# Task: Durable config-drift writer recovery (2026-09-25)
-
-## Dependency graph
-- T1 depends_on: [] - Inspect production audit logs and deployed configuration.
-- T2 depends_on: [] - Independently review drift auditor and regression coverage.
-- T3 depends_on: [T1, T2] - Implement minimal durable repair and regression cases.
-- T4 depends_on: [T3] - Create PR; verify every applicable exact-head CI check; notify.
-- T5 depends_on: [T4] - Merge through normal protections, verify production deployment, and publish a fresh clean audit.
-
-## Checklist
-- [x] T1 Production evidence
-- [x] T2 Code review
-- [x] T3 Repair and regression coverage
-- [ ] T4 GitHub CI and notification
-- [ ] T5 Production deployment and audit
-
-## Review
-- Local test suites prohibited; validation runs on GitHub runners.
-
-- Production 2026-09-25 audit wrote successfully; findings were an obsolete Flex drop-in and an uninstalled optional SLM unit.
-- Archived the exact redundant Flex drop-in to `/root/radon-config-drift-20260925/write-performance-data.conf`; verified canonical effective write/read-only paths after daemon-reload.
-- Original SLM unit fails production systemd-analyze verification (exit 1, missing llama-server); guarded candidate passes (exit 0). No services activated.
-- Added Linux CI verification and install-without-activation regressions. Exact-head CI pending.
-
-- CI repair: `scripts-df` reported the SLM owner-document contract; updated the unit example and provisioning semantics in `docs/ml/newsfeed-slm-tagger.md`. Re-run all applicable checks on the new head.
-- CI repair: an unchanged SIGTERM regression failed on the second head after passing on the first. Synchronize the isolated wrapper with its actual parent wait boundary and preserve all reporting/status assertions; retain subprocess diagnostics. Prior failure output did not capture the precise exit path. Production wrappers unchanged.
-
 # Task: Durable Flex Trade_History coverage (2026-09-25)
 - [ ] T1 depends_on: [] Diagnose persisted delivery rejection using read-only production evidence.
 - [ ] T2 depends_on: [T1] Add regression and minimal repair preserving missing-row integrity gates.
@@ -8427,3 +8400,53 @@ Dependency graph: T1 -> T2 -> T3 -> T4.
 Review: local suites prohibited; no live trade/journal changes. Preserve atomic corpus/FTS writes, complete-document batches, authoritative pruning, and real failure heartbeat.
 
 Review update: PR #710 red head `9ad53d8c`, GitHub run `36177477069`, scripts-jm: 4 new regressions failed, 1349 passed, 7 skipped. Failures prove immediate busy propagation, four complete enrichment passes after exhaustion, and competing writers acquiring both deferred transactions. Implemented prepared persistence retries with fresh handles, terminal exhaustion, rollback-error preservation, BEGIN IMMEDIATE, committed-batch progress, and 16-document embedding inference. Added prior-commit preservation, prune retry, schema-error no-retry, and 201-vector ordered-coverage cases. Independent review caught rollback cleanup masking the busy cause; strengthened real-store regression accordingly. No local suites.
+
+Review update: GitHub head `6609314e` scripts-jm green: 1357 passed, 7 skipped. Main integration preserves all task sections; exact merged-head checks pending. Liquid Compute fresh health 18:56:11 UTC; parent verified Flex fresh health 18:57:04 UTC. Knowledge timer remains enabled but paused after committed id 10622 checkpoint and 4.3 GiB peak, pending bounded-memory deployment.
+
+# Task: Durable config-drift writer recovery (2026-09-25)
+
+## Dependency graph
+- T1 depends_on: [] - Inspect production audit logs and deployed configuration.
+- T2 depends_on: [] - Independently review drift auditor and regression coverage.
+- T3 depends_on: [T1, T2] - Implement minimal durable repair and regression cases.
+- T4 depends_on: [T3] - Create PR; verify every applicable exact-head CI check; notify.
+- T5 depends_on: [T4] - Merge through normal protections, verify production deployment, and publish a fresh clean audit.
+
+## Checklist
+- [x] T1 Production evidence
+- [x] T2 Code review
+- [x] T3 Repair and regression coverage
+- [ ] T4 GitHub CI and notification
+- [ ] T5 Production deployment and audit
+
+## Review
+- Local test suites prohibited; validation runs on GitHub runners.
+
+- Production 2026-09-25 audit wrote successfully; findings were an obsolete Flex drop-in and an uninstalled optional SLM unit.
+- Archived the exact redundant Flex drop-in to `/root/radon-config-drift-20260925/write-performance-data.conf`; verified canonical effective write/read-only paths after daemon-reload.
+- Original SLM unit fails production systemd-analyze verification (exit 1, missing llama-server); guarded candidate passes (exit 0). No services activated.
+- Added Linux CI verification and install-without-activation regressions. Exact-head CI pending.
+
+- CI repair: `scripts-df` reported the SLM owner-document contract; updated the unit example and provisioning semantics in `docs/ml/newsfeed-slm-tagger.md`. Re-run all applicable checks on the new head.
+- CI repair: an unchanged SIGTERM regression failed on the second head after passing on the first. Synchronize the isolated wrapper with its actual parent wait boundary and preserve all reporting/status assertions; retain subprocess diagnostics. Prior failure output did not capture the precise exit path. Production wrappers unchanged.
+
+# Task: Resume interrupted database backups after deploy (2026-09-25)
+
+## Dependency graph
+- T1 depends_on: [] - Confirm interruption in production and replay-safety of standalone backup.
+- T2 depends_on: [T1] - Regression tests for active-backup replay, dormant exclusion, repeated recovery, and eventual off-box failures.
+- T3 depends_on: [T2] - Restore only the explicitly replay-safe backup oneshot after release activation; preserve all other oneshot exclusions.
+- T4 depends_on: [T3] - Exact-head GitHub CI, deploy, successful real local/off-box backup heartbeat.
+
+## Checklist
+- [x] T1 Sep24/Sep25 backups killed by deploy stop-clean at09:09/09:08; normal recovery skips all oneshots.
+- [x] T2 Regression coverage
+- [x] T3 Surgical restoration
+- [ ] T4 CI and live backup
+
+## Review
+- Backups remain quiesced while code changes; only a backup captured in the interrupted active snapshot is replayed. No trading/order oneshot replay.
+
+- GitHub red evidence: CI36176394767 cloud-al reports four expected interrupted-backup failures; 2,251 passed and two skipped on 86b16936. Implementation adds only explicit backup replay and accepted asynchronous restart submission.
+
+- Independent review: do not couple eventual backup/upload failure to app rollback. Verify start submission, retain normal oneshot verification exclusion, and pin retry after rejected submission without a restore marker.
