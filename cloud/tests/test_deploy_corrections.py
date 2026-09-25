@@ -2325,6 +2325,7 @@ deploy_gate() {{
 build_staged_release() {{ printf 'build\\n' >> {calls!s}; }}
 activate_staged_release() {{ printf 'activate\\n' >> {calls!s}; }}
 prepull_app_images() {{ return 0; }}
+preflight_database() {{ return 0; }}
 restart_services() {{ printf 'restart\\n' >> {calls!s}; }}
 write_transition_phase() {{ return 0; }}
 record_deploy_marker() {{ return 0; }}
@@ -2534,6 +2535,7 @@ esac
 set -euo pipefail
 source {DEPLOY}
 prepull_app_images() {{ printf '%s\n' "$1" > {pull_log}; }}
+preflight_database() {{ return 0; }}
 container_node_image_replaces_next_compile {staged}
 """
         result = subprocess.run(
@@ -3182,6 +3184,7 @@ git() {{
 verify_tracked_drift_matches_target() {{ return 0; }}
 build_staged_release() {{ printf 'build\\n' >> {calls!s}; }}
 prepull_app_images() {{ return 0; }}
+preflight_database() {{ return 0; }}
 restart_services() {{ printf 'restart\\n' >> {calls!s}; }}
 deploy_gate() {{ return 0; }}
 write_transition_phase() {{ return 0; }}

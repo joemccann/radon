@@ -851,7 +851,7 @@ cmd_run() {
   set -- "$@" "$image"
   case "$unit" in
     radon-api.service)
-      set -- "$@" sh -c 'python scripts/db/migrate.py && python scripts/secret_store.py && exec uvicorn scripts.api.server:app --host 0.0.0.0 --port 8321 --proxy-headers --forwarded-allow-ips 127.0.0.1'
+      set -- "$@" sh -c 'python scripts/db/migrate.py --boot && python scripts/secret_store.py && exec uvicorn scripts.api.server:app --host 0.0.0.0 --port 8321 --proxy-headers --forwarded-allow-ips 127.0.0.1'
       ;;
     radon-research.service)
       set -- "$@" python -m research.worker --daemon
