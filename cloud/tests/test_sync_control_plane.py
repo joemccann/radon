@@ -139,28 +139,55 @@ class TestHelperVerb:
         assert result.returncode == 0, result.stdout + result.stderr
         assert sha in result.stdout
         log = bootstrap_log.read_text(encoding="utf-8")
-        state = tmp_path / "state"
+        store = tmp_path / "state" / "provision"
         root_line = log.splitlines()[0]
-        assert root_line.startswith(f"root={state}/control-plane-sync.")
+        assert root_line.startswith(f"root={store}/control-plane-sync.")
         assert root_line.endswith("/cloud/scripts/bootstrap-control-plane.sh")
         # The extraction is cloud/ at the tip commit, nothing else.
         assert "./scripts/deploy-root-helper.sh" in log
         assert "./services/radon-relay.service.d/runtime-container.conf" in log
         assert "README.md" not in log
         # Root-owned staging tree is gone once bootstrap returns.
-        assert not list(state.glob("control-plane-sync.*"))
+        assert not list(store.glob("control-plane-sync.*"))
 
-    def test_refuses_a_tip_the_local_store_has_not_fetched(self, tmp_path):
+    def test_root_fetches_a_tip_the_checkout_store_has_not(self, tmp_path):
+        # Root reads its own clone of the pinned remote, so the radon-owned
+        # checkout store neither gates nor supplies the bundle.
         repo, _ = _init_release_repo(tmp_path)
         remote = tmp_path / "remote"
         subprocess.run(["git", "clone", "-q", str(repo), str(remote)], check=True)
         (remote / "cloud" / "scripts" / "deploy-root-helper.sh").write_text("#!/bin/bash\n# newer\n", encoding="utf-8")
-        _commit_all(remote, "newer tip not fetched locally")
+        tip = _commit_all(remote, "newer tip not fetched locally")
         env, bootstrap_log = _helper_env(tmp_path, repo, remote=remote)
         result = _run_sync(env)
-        assert result.returncode == 66, result.stdout + result.stderr
-        assert "fetch origin main" in result.stderr
-        assert not bootstrap_log.exists()
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert tip in result.stdout
+        assert bootstrap_log.exists()
+
+    def test_tip_read_ignores_the_callers_repository_config(self, tmp_path):
+        # sudo keeps the caller's cwd, and radon owns every repo it can cd
+        # into. The tip read must come from the pinned remote whatever that
+        # repo's config says.
+        repo, sha = _init_release_repo(tmp_path)
+        other = tmp_path / "other"
+        subprocess.run(["git", "clone", "-q", str(repo), str(other)], check=True)
+        (other / "README.md").write_text("other\n", encoding="utf-8")
+        _commit_all(other, "other main")
+        caller = tmp_path / "caller"
+        caller.mkdir()
+        _git(caller, "init", "-q")
+        _git(caller, "config", f"url.{other}.insteadOf", str(repo))
+        env, _ = _helper_env(tmp_path, repo)
+        result = subprocess.run(
+            ["bash", str(ROOT_HELPER), "sync-control-plane"],
+            env=env,
+            cwd=caller,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert sha in result.stdout
 
     def test_refuses_a_tip_without_a_bootstrap(self, tmp_path):
         repo, _ = _init_release_repo(tmp_path, with_bootstrap=False)
@@ -169,7 +196,7 @@ class TestHelperVerb:
         assert result.returncode == 66, result.stdout + result.stderr
         assert "no control-plane bootstrap" in result.stderr
         assert not bootstrap_log.exists()
-        assert not list((tmp_path / "state").glob("control-plane-sync.*"))
+        assert not list((tmp_path / "state" / "provision").glob("control-plane-sync.*"))
 
     def test_propagates_bootstrap_lock_refusal_and_cleans_up(self, tmp_path):
         repo, _ = _init_release_repo(tmp_path)
@@ -177,7 +204,7 @@ class TestHelperVerb:
         result = _run_sync(env)
         assert result.returncode == 75, result.stdout + result.stderr
         assert bootstrap_log.exists()
-        assert not list((tmp_path / "state").glob("control-plane-sync.*"))
+        assert not list((tmp_path / "state" / "provision").glob("control-plane-sync.*"))
 
 
 class TestContracts:
@@ -193,11 +220,12 @@ class TestContracts:
         assert "resolve_fetched_main_tip" in body
         assert 'archive --format=tar "$tip" cloud' in body
         assert "RADON_BOOTSTRAP_CLOUD_ROOT=" in body
-        assert 'mktemp -d "${STATE_DIR}/control-plane-sync.' in body
+        assert 'mktemp -d "${PROVISION_ROOT}/control-plane-sync.' in body
         tip = function_body(helper, "resolve_fetched_main_tip")
-        assert "ls-remote --refs" in tip
+        assert 'remote_sha="$(remote_main_sha)"' in tip
+        assert "ls-remote --refs" in function_body(helper, "remote_main_sha")
         assert "github_origin_is_allowed" in tip
-        assert 'cat-file -e "${remote_sha}^{commit}"' in tip
+        assert 'provision_store_has_tip "$remote_sha"' in tip
 
     def test_the_tip_is_read_over_git_protocol_v1(self):
         """2026-09-02: from the VPS, an unauthenticated protocol-v2 `ls-remote`
@@ -207,8 +235,11 @@ class TestContracts:
         reads the refs from the `info/refs` GET, which answers 200."""
         helper = ROOT_HELPER.read_text(encoding="utf-8")
         for fn in ("resolve_fetched_main_tip", "resolve_trusted_main_tip"):
-            body = function_body(helper, fn)
-            assert '-c protocol.version=1 ls-remote --refs "$UNIT_REMOTE" refs/heads/main' in body, fn
+            assert 'remote_sha="$(remote_main_sha)"' in function_body(helper, fn), fn
+        assert helper.count("ls-remote --refs") == 1
+        body = function_body(helper, "remote_main_sha")
+        assert "-C /" in body and "GIT_CONFIG_GLOBAL=/dev/null" in body
+        assert '-c protocol.version=1 ls-remote --refs "$UNIT_REMOTE" refs/heads/main' in body
 
     def test_verb_has_its_own_deadline_and_never_cancels_radon_jobs(self):
         helper = ROOT_HELPER.read_text(encoding="utf-8")

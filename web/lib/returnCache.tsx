@@ -33,9 +33,16 @@ const ReturnCacheContext = createContext<ReturnCache | null>(null);
 
 // Every live store, so an account change can drop the previous user's snapshots.
 const liveStores = new Set<Map<string, ReturnCacheEntry<unknown>>>();
+let identityGeneration = 0;
 
 export function purgeReturnCaches(): void {
+  identityGeneration += 1;
   for (const store of liveStores) store.clear();
+}
+
+/** Generation captured by async producers so a pre-purge response cannot repopulate a new identity's cache. */
+export function getReturnCacheGeneration(): number {
+  return identityGeneration;
 }
 
 export function createReturnCache(): ReturnCache {

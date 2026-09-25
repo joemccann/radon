@@ -37,6 +37,11 @@ readonly STAGE_DIR="${RADON_SETUP_STAGE_DIR:-/root/.radon-stage}"
 # Pinned here, never taken from the checkout's radon-writable remote config
 # or refs. The override exists for tests (root's own environment).
 readonly PROVENANCE_REMOTE_URL="${RADON_PROVENANCE_REMOTE_URL:-https://github.com/joemccann/radon.git}"
+# Root's own bare clone of PROVENANCE_REMOTE_URL, shared with
+# deploy-root-helper.sh. Every root-installed artifact is read from it; the
+# radon-owned checkout store supplies only its HEAD commit id.
+readonly PROVISION_ROOT="${RADON_PROVISION_ROOT:-/opt/radon-provision}"
+readonly PROVISION_GIT_DIR="${PROVISION_ROOT}/radon.git"
 # Docker documents this fingerprint for its apt signing key.
 readonly DOCKER_GPG_FINGERPRINT="9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
 # NodeSource nodesource-repo.gpg.key (NSolid <nsolid-gpg@nodesource.com>).
@@ -353,8 +358,7 @@ compose_body_is_valid() {
 # remote reports. The anchor SHA is read by root over the network, never from
 # the radon-writable checkout (origin/main, remote URL, config): radon owns
 # that git dir, so any local ref is radon's to move. Fails closed when the
-# remote is unreachable or its main commit is not in the local object store
-# (fetch before provisioning): an unverifiable body is a stop, not an install.
+# remote is unreachable: an unverifiable body is a stop, not an install.
 PROVENANCE_ANCHOR_SHA=""
 resolve_provenance_anchor() {
   [[ -n "$PROVENANCE_ANCHOR_SHA" ]] && return 0
@@ -363,7 +367,11 @@ resolve_provenance_anchor() {
   command -v timeout >/dev/null 2>&1 && bound=(timeout 30s)
   # Protocol v1: an unauthenticated v2 ls-refs POST against the public repo
   # answers 401 from the VPS (deploy-root-helper.sh, 2026-09-02).
-  if ! out="$(${bound[@]+"${bound[@]}"} git -c protocol.version=1 \
+  # Root runs this from inside the radon-owned checkout: read from / with no
+  # system or global config so no repository config can redirect the URL.
+  if ! out="$(GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+      GIT_TERMINAL_PROMPT=0 GIT_CEILING_DIRECTORIES=/ \
+      ${bound[@]+"${bound[@]}"} git -C / -c protocol.version=1 \
       ls-remote --refs "$PROVENANCE_REMOTE_URL" refs/heads/main 2>/dev/null)"; then
     log_error "Provenance failed: could not read main from ${PROVENANCE_REMOTE_URL}"
     return 1
@@ -377,7 +385,8 @@ resolve_provenance_anchor() {
 }
 
 # git over the radon-owned store with every radon-writable object/ancestry
-# rewrite ignored: replace refs, grafts and the commit-graph cache.
+# rewrite ignored: replace refs, grafts and the commit-graph cache. Used only
+# to find the checkout and read its HEAD commit id.
 provenance_git() {
   local repo_root="$1"
   shift
@@ -385,48 +394,129 @@ provenance_git() {
     git -C "$repo_root" -c core.commitGraph=false "$@"
 }
 
-require_remote_ancestry() {
-  local repo_root="$1" rel="$2" blob_sha="$3" label="$4"
+# The checkout store is radon-owned: radon can rewrite its loose or packed
+# object files or add alternates, and a git read does not re-hash an object.
+# Root reads bytes only from PROVISION_GIT_DIR, whose objects arrive only by
+# fetch from the pinned URL (hashed by index-pack, checked by fsck). No
+# system or global git config applies.
+provision_git() {
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+    git --git-dir="$PROVISION_GIT_DIR" "$@"
+}
+
+# Owned by the running user (root in production), not a link, writable by
+# nobody else.
+provision_dir_is_private() {
+  local path="$1" owner mode
+  [[ -d "$path" && ! -L "$path" ]] || return 1
+  owner="$(stat -c '%u' "$path" 2>/dev/null)" || owner="$(stat -f '%u' "$path")"
+  mode="$(stat -c '%a' "$path" 2>/dev/null)" || mode="$(stat -f '%Lp' "$path")"
+  [[ "$owner" == "$(id -u)" ]] && (( (8#$mode & 8#022) == 0 ))
+}
+
+# Creates the root store on first use, refuses one anybody else can write,
+# and makes the remote main commit present in it (fetching only when absent).
+PROVISION_STORE_READY=0
+sync_provision_store() {
+  (( PROVISION_STORE_READY )) && return 0
   resolve_provenance_anchor || return 1
   local anchor="$PROVENANCE_ANCHOR_SHA"
-  if ! provenance_git "$repo_root" cat-file -e "${anchor}^{commit}" 2>/dev/null; then
-    log_error "${label} provenance failed: remote main commit ${anchor} is not in the local object store (fetch origin main before provisioning)"
+  local -a bound=()
+  command -v timeout >/dev/null 2>&1 && bound=(timeout 300s)
+  if [[ ! -e "$PROVISION_ROOT" && ! -L "$PROVISION_ROOT" ]]; then
+    mkdir -m 0755 "$PROVISION_ROOT" || true
+  fi
+  if ! provision_dir_is_private "$PROVISION_ROOT"; then
+    log_error "Provenance failed: ${PROVISION_ROOT} is not a root-only directory"
     return 1
   fi
-  if [[ "$(provenance_git "$repo_root" rev-parse --verify --quiet "${anchor}:${rel}" 2>/dev/null)" == "$blob_sha" ]]; then
-    return 0
+  if [[ ! -e "$PROVISION_GIT_DIR" && ! -L "$PROVISION_GIT_DIR" ]]; then
+    ( umask 022 && provision_git init --quiet --bare ) >/dev/null || true
   fi
-  if provenance_git "$repo_root" merge-base --is-ancestor HEAD "$anchor" 2>/dev/null; then
-    return 0
+  if ! provision_dir_is_private "$PROVISION_GIT_DIR" \
+    || ! provision_dir_is_private "${PROVISION_GIT_DIR}/objects"; then
+    log_error "Provenance failed: ${PROVISION_GIT_DIR} is not a root-only git store"
+    return 1
   fi
-  log_error "${label} provenance failed: ${rel} is not an ancestor of the remote main commit ${anchor}"
-  return 1
+  if ! provision_git cat-file -e "${anchor}^{commit}" 2>/dev/null; then
+    # Protocol v1 for the same reason as resolve_provenance_anchor.
+    if ! GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+      ${bound[@]+"${bound[@]}"} git --git-dir="$PROVISION_GIT_DIR" \
+      -c protocol.version=1 -c fetch.fsckObjects=true -c transfer.fsckObjects=true \
+      -c gc.autoDetach=false -c maintenance.autoDetach=false \
+      fetch --quiet --no-tags --no-recurse-submodules \
+      "$PROVENANCE_REMOTE_URL" "+refs/heads/main:refs/remotes/pinned/main"; then
+      log_error "Provenance failed: could not fetch main from ${PROVENANCE_REMOTE_URL} into ${PROVISION_GIT_DIR}"
+      return 1
+    fi
+    if ! provision_git cat-file -e "${anchor}^{commit}" 2>/dev/null; then
+      log_error "Provenance failed: remote main commit ${anchor} is not in ${PROVISION_GIT_DIR} after fetch"
+      return 1
+    fi
+  fi
+  PROVISION_STORE_READY=1
+}
+
+# Sets PROVISION_COMMIT: the checkout's HEAD when the root store proves it is
+# main history, else the remote main commit itself (PROVISION_HEAD_ON_MAIN=0),
+# so a checkout ahead of main still installs only bodies main carries.
+PROVISION_COMMIT=""
+PROVISION_HEAD_ON_MAIN=0
+resolve_provision_commit() {
+  local repo_root="$1" head
+  sync_provision_store || return 1
+  head="$(provenance_git "$repo_root" rev-parse --verify --quiet HEAD 2>/dev/null)" || head=""
+  if [[ "$head" =~ ^[0-9a-f]{40}$ ]] \
+    && provision_git merge-base --is-ancestor "$head" "$PROVENANCE_ANCHOR_SHA" 2>/dev/null; then
+    PROVISION_COMMIT="$head"
+    PROVISION_HEAD_ON_MAIN=1
+  else
+    PROVISION_COMMIT="$PROVENANCE_ANCHOR_SHA"
+    PROVISION_HEAD_ON_MAIN=0
+  fi
+}
+
+# stage_provisioned_blob <rel> <source> <staged> <label>
+# Writes <rel> at PROVISION_COMMIT from the root store into <staged>, then
+# requires the checkout copy to match it byte for byte: a working-tree edit,
+# or a commit main never carried, is a stop rather than a silent install.
+stage_provisioned_blob() {
+  local rel="$1" source="$2" staged="$3" label="$4"
+  local off_main="${rel} is not an ancestor of the remote main commit ${PROVENANCE_ANCHOR_SHA}"
+  if ! provision_git cat-file blob "${PROVISION_COMMIT}:${rel}" > "$staged" 2>/dev/null; then
+    if (( PROVISION_HEAD_ON_MAIN )); then
+      log_error "${label} failed: ${rel} is not committed at HEAD"
+    else
+      log_error "${label} failed: ${off_main}"
+    fi
+    return 1
+  fi
+  if ! require_regular_file "$source" || ! cmp -s -- "$source" "$staged"; then
+    if (( PROVISION_HEAD_ON_MAIN )); then
+      log_error "${label} failed: ${source} differs from the committed blob"
+    else
+      log_error "${label} failed: ${off_main}"
+    fi
+    return 1
+  fi
 }
 
 stage_from_checkout() {
   local source="$1" target="$2" mode="$3"
   shift 3
-  local staged repo_root source_rel blob_sha work_sha
+  local staged repo_root source_rel
   require_regular_file "$source" || return 1
   # R-636 extension: root-installed artifacts come from the committed git
-  # blob at HEAD, never the radon-writable working tree. A working-tree body
-  # that differs from that blob is a stop, not a silent install. Same
-  # provenance shape as the compose install below.
+  # blob at HEAD, read from root's own clone of the pinned remote, never the
+  # radon-writable working tree or object store. A working-tree body that
+  # differs from that blob is a stop, not a silent install. Same provenance
+  # shape as the compose install below.
   if ! repo_root="$(git -C "$(dirname "$source")" rev-parse --show-toplevel 2>/dev/null)"; then
     log_error "Provenance failed: ${source} is not inside a git checkout"
     return 1
   fi
   source_rel="${source#"${repo_root}"/}"
-  if ! blob_sha="$(git -C "$repo_root" rev-parse "HEAD:${source_rel}" 2>/dev/null)"; then
-    log_error "Provenance failed: ${source_rel} is not committed at HEAD"
-    return 1
-  fi
-  require_remote_ancestry "$repo_root" "$source_rel" "$blob_sha" "Provenance" || return 1
-  if ! work_sha="$(git -C "$repo_root" hash-object -- "$source")" \
-    || [[ "$work_sha" != "$blob_sha" ]]; then
-    log_error "Provenance failed: ${source} differs from the committed blob"
-    return 1
-  fi
+  resolve_provision_commit "$repo_root" || return 1
   if [[ -L "$STAGE_DIR" ]]; then
     log_error "Refusing symlinked staging dir ${STAGE_DIR}"
     return 1
@@ -440,14 +530,11 @@ stage_from_checkout() {
     return 1
   fi
   chmod 0600 "$staged"
-  # The staged bytes are the committed blob, read from the object store; a
-  # source swapped after the hash check fails the byte comparison instead of
+  # The staged bytes are the committed blob, read from the root store; a
+  # source that differs or is swapped fails the byte comparison instead of
   # being published.
-  if ! git -C "$repo_root" cat-file blob "$blob_sha" > "$staged" \
-    || ! require_regular_file "$source" \
-    || ! cmp -s -- "$source" "$staged"; then
+  if ! stage_provisioned_blob "$source_rel" "$source" "$staged" "Provenance"; then
     rm -f "$staged"
-    log_error "Source changed while staging: ${source}"
     return 1
   fi
   mkdir -p "$(dirname "$target")"
@@ -1414,27 +1501,19 @@ install_docker_gw() {
   mv -f "$staged" "$target"
 
   # R-636: the compose body root will execute must not come from the
-  # radon-writable working tree. Install the git blob at HEAD, refuse a
-  # working-tree body that differs from that blob (a tamper is a stop, not a
-  # silent bypass), and run the shared validator before anything is staged.
-  # Same provenance shape as the deploy helper's refresh_control_plane.
+  # radon-writable working tree. Install the git blob at HEAD from root's own
+  # clone, refuse a working-tree body that differs from that blob (a tamper
+  # is a stop, not a silent bypass), and run the shared validator before
+  # anything is installed. Same provenance shape as the deploy helper's
+  # refresh_control_plane.
   log_info "Installing ${compose_target}..."
-  local repo_root blob_sha work_sha
+  local repo_root
   if ! repo_root="$(git -C "$CLOUD_DIR" rev-parse --show-toplevel 2>/dev/null)"; then
     log_error "Compose provenance failed: ${CLOUD_DIR} is not a git checkout"
     return 1
   fi
   local compose_rel="${compose_source#"${repo_root}"/}"
-  if ! blob_sha="$(git -C "$repo_root" rev-parse "HEAD:${compose_rel}" 2>/dev/null)"; then
-    log_error "Compose provenance failed: ${compose_rel} is not committed at HEAD"
-    return 1
-  fi
-  require_remote_ancestry "$repo_root" "$compose_rel" "$blob_sha" "Compose" || return 1
-  if ! work_sha="$(git -C "$repo_root" hash-object -- "$compose_source")" \
-    || [[ "$work_sha" != "$blob_sha" ]]; then
-    log_error "Compose provenance failed: ${compose_source} differs from the committed blob"
-    return 1
-  fi
+  resolve_provision_commit "$repo_root" || return 1
   if [[ -L "$STAGE_DIR" ]]; then
     log_error "Refusing symlinked staging dir ${STAGE_DIR}"
     return 1
@@ -1446,9 +1525,8 @@ install_docker_gw() {
     return 1
   fi
   chmod 0600 "$staged"
-  if ! git -C "$repo_root" cat-file blob "$blob_sha" > "$staged"; then
+  if ! stage_provisioned_blob "$compose_rel" "$compose_source" "$staged" "Compose provenance"; then
     rm -f "$staged"
-    log_error "Compose provenance failed: could not read blob ${blob_sha}"
     return 1
   fi
   if ! compose_body_is_valid "$staged" "$compose_target"; then

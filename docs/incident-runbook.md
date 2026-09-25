@@ -387,6 +387,33 @@ Reported 2026-09-21 19:25Z as production network timeouts on `/portfolio`.
 
 ---
 
+## app-container-sigterm-not-delivered
+
+**A deploy rolls back on `timed out waiting for radon-<unit>.service to
+become inactive` (exit 71) about 64s after "Promoting staged artifacts".**
+Hung stops: 2026-09-23 19:39 (nextjs), 2026-09-24 13:20 (monitor), 16:20 (nextjs),
+2026-09-25 02:58 (monitor), 03:01 and 03:06 (newsfeed).
+
+- **Mechanism:** systemd's stop signalled only the foreground `podman run`
+  client, which proxies SIGTERM into the container. In the hung stops the
+  app never logged its SIGTERM handler and kept working (newsfeed ran a
+  scrape cycle at 03:05:36, 5s after `Stopping`; nextjs ran CRI/VCG scans
+  for 40s), until `State 'stop-sigterm' timed out` and SIGKILL at 90s, past
+  the helper's 60s wait. In the fast stops of the same deploys the app
+  logged SIGTERM in the same second.
+- **Not the discriminator:** `unable to signal init: permission denied` and
+  `forwarding signal 18` appear on every stop, fast or hung (AppArmor denies
+  SIGCONT from the podman peer; the kernel audit line says `signal=cont`).
+- **Detection:** `journalctl -u radon-<unit>` around `Stopping` has no app
+  shutdown line (`SIGTERM received`, `[newsfeed] received SIGTERM`) and
+  later shows `stop-sigterm timed out`.
+- **Fix:** each app drop-in runs `ExecStop=radon-app-runtime halt %n
+  <grace>` (engine `stop --time`), so delivery no longer depends on the
+  client proxy. Grace + 5s fits `TimeoutStopSec` and the helper wait.
+- **Regression:** `cloud/tests/test_container_stop_delivery.py`.
+
+---
+
 ## caddy-health-floor-pages-aggregate-invalid
 
 **Off-box observer pages P1 `aggregate_invalid` while ping and `/sign-in`
@@ -2285,6 +2312,8 @@ duplicate.** Peak: 2026-09-22 11:35Z, page `e1297eea…`.
 - **Discriminating check:** `classified_as=trades` and
   `outcome=coverage_unverified` on an applied duplicate whose missing
   Flex tradeIDs are covered by individual IB fills (this case).
+  A Flex `ibExecID` that is the live five-part `ib_exec_id` minus the
+  trailing `.01` is `flex-pull-live-exec-id`.
   `twr_status=degraded` is `flex-pull-twr-degraded-exit`.
   `classified_as=activity` with `outcome=coverage_unverified` is
   `flex-pull-activity-nav`.
@@ -2303,6 +2332,47 @@ duplicate.** Peak: 2026-09-22 11:35Z, page `e1297eea…`.
   `test_rel226_delivery_coverage.py::test_trade_duplicate_disagreement_stays_unverified`,
   `test_rel226_delivery_coverage.py::test_trade_duplicate_uncovered_day_stays_unverified`.
 - **Code:** `scripts/flex_delivery_ingest.py` (`delivery_rows_present`).
+
+---
+
+## flex-pull-live-exec-id
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+after today's Activity statement is applied, on applied Trade_History
+duplicates whose live fills use a five-part exec id.** Peak: 2026-09-25
+11:35Z, page `722f1b39…`. Span about 80s, not `TimeoutStartSec`. The next
+timer is the 08:30 ET retry.
+
+- **Mechanism:** Flex `ibExecID` is four parts
+  (`0000f126.6ab14023.03.01`). The live journal row is that id plus one
+  trailing segment (`….03.01.01`). `symbol` on the Trade row is the OCC
+  local symbol, while the journal ticker is the underlying, so the
+  individual-fill contract key misses too. `rehydrate_from_executions`
+  then reports the fill as a new import. The claim is already `applied`.
+  The oneshot exits 1. `Type=oneshot` has no `Restart=`. `:8321/health/lite`
+  stays up.
+- **Detection:** journal `ingest_failed:{… 'outcome': 'coverage_unverified',
+  'classified_as': 'trades' …}` on several `Trade_History` files, not one;
+  `systemctl show` → `exit-code` / `0`; ExecMain span well under
+  `TimeoutStartSec`.
+- **Discriminating check:** for a failing sha, the Flex `ibExecID` plus
+  `.01` is an `ib_exec_id` already in `journal`, and the other leg index
+  (`.02` vs `.03`) is a different fill. That is this case. A Flex id with
+  no live row and no matching contract-day fills stays unverified
+  (`flex-pull-trade-coverage`: uncovered exec or a real qty/notional
+  disagreement is operator reconciliation, not this fix). `Result=timeout`
+  is `flex-pull-ingest-timeout`. If `/health/lite` is down too → API,
+  stand down.
+- **Remediation (code):** the journal exec-id set also contains the Flex
+  form of a five-part live id. One segment only. Do not replay the
+  delivery. Do not restart-flap; the 08:30 ET timer retries. After deploy,
+  `systemctl reset-failed radon-flex-pull.service` if that retry has not
+  yet fired.
+- **Regression:**
+  `test_rel226_delivery_coverage.py::test_live_five_part_exec_id_covers_flex_ib_exec_id`,
+  `test_rel226_delivery_coverage.py::test_live_exec_id_alias_does_not_cover_the_other_leg`.
+- **Code:** `scripts/utils/exec_ids.py` (`flex_ib_exec_id`),
+  `scripts/journal_rehydrate.py` (`_existing_exec_ids`).
 
 ---
 

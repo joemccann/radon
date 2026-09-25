@@ -79,16 +79,8 @@ The commit that adds `refresh-control-plane-privileged` cannot auto-apply
 that sudoers line. After merge, before the next CI deploy:
 
 ```bash
-TARGET_SHA=<exact-tested-sha>
-sudo -u radon -H git -C /home/radon/radon fetch --prune origin
-TARGET_COMMIT="$(sudo -u radon -H git -C /home/radon/radon rev-parse "${TARGET_SHA}^{commit}")"
-CURRENT_COMMIT="$(sudo -u radon -H git -C /home/radon/radon rev-parse HEAD)"
-if [ "$CURRENT_COMMIT" != "$TARGET_COMMIT" ]; then
-  sudo -u radon -H git -C /home/radon/radon merge --ff-only "$TARGET_COMMIT"
-fi
-test "$(sudo -u radon -H git -C /home/radon/radon rev-parse HEAD)" = "$TARGET_COMMIT"
-cd /home/radon/radon
-bash cloud/scripts/bootstrap-control-plane.sh
+# as root; converges on the GitHub main tip via root's own clone
+/usr/local/sbin/radon-deploy-root sync-control-plane
 ```
 
 Do not restart Gateway. Re-run CI for the same SHA if the in-flight deploy

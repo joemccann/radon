@@ -68,8 +68,9 @@ radon/                          # sole product repo
    not an immutable runner. Then, from a root session, install the exact target
    control-plane bundle without restarting any service or IB Gateway:
    ```bash
-   cd /home/radon/radon
-   bash cloud/scripts/bootstrap-control-plane.sh
+   # today: bootstrap refuses the radon-owned checkout; converge as root via
+   # root's own clone of the pinned remote (cloud/CLAUDE.md)
+   /usr/local/sbin/radon-deploy-root sync-control-plane
    ```
    Preserve the manifest preflight. The script acquires the deploy lock, refuses pending app/Gateway
    transitions, validates and atomically installs root-owned helpers, policies,
@@ -169,7 +170,7 @@ evidence; the next successful deploy performs bounded cleanup.
 ### Order of operations that worked
 
 1. Deploy a readiness-gated release so `cloud/` and schema-v2 `radon-health` land (broker health advisory).
-2. As root, from `/home/radon/radon`: `bash cloud/scripts/bootstrap-control-plane.sh` (no Gateway restart).
+2. As root: `/usr/local/sbin/radon-deploy-root sync-control-plane` (no Gateway restart; bootstrap now refuses the radon-owned checkout as its source).
 3. Recover IBKR 2FA via `/usr/local/bin/radon-ib-gateway-control` only.
 4. Confirm `/status` `schema_version=3 ok=true overall_state=up` and pool 3/3 connected.
 5. Subsequent deploys use immutable runners under `~/.radon-deploy-runners/` and start automatically after the required CI jobs pass; the non-blocking Production environment retains its main-only deployment policy.
@@ -214,10 +215,11 @@ the CI-tested release. The safe refresh sequence is therefore:
    fi
    test "$(sudo -u radon -H git -C /home/radon/radon rev-parse HEAD)" = "$TARGET_COMMIT"
    ```
-2. As root, run only the non-restarting bootstrap from the verified checkout:
+2. As root, run only the non-restarting bootstrap. It now reads root's own
+   clone of the pinned remote, never the checkout (`cloud/CLAUDE.md`,
+   "Root provision store"):
    ```bash
-   cd /home/radon/radon
-   bash cloud/scripts/bootstrap-control-plane.sh
+   /usr/local/sbin/radon-deploy-root sync-control-plane
    ```
    Preserve the installed-control-plane manifest preflight. Do not restart
    Gateway, which can trigger IB 2FA.
