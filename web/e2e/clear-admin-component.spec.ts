@@ -115,10 +115,12 @@ for (const viewport of [{ label: "desktop", width: 1440, height: 1000 }, { label
     await page.clock.setFixedTime(new Date(CLEAR_FIXTURE_TIME));
     const errors: string[] = [];
     const mutations: string[] = [];
+    const reads: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.route("**/api/**", async (route) => {
       const path = new URL(route.request().url()).pathname;
       if (route.request().method() !== "GET") mutations.push(path);
+      else reads.push(path);
       const payloads: Record<string, unknown> = {
         "/api/admin/health": HEALTH_OK,
         "/api/admin/services": SERVICES,
@@ -180,5 +182,6 @@ for (const viewport of [{ label: "desktop", width: 1440, height: 1000 }, { label
     await expect(page.getByTestId("admin-confirm")).toHaveCount(0);
     expect(errors).toEqual([]);
     expect(mutations).toEqual([]);
+    expect(reads).not.toContain("/api/admin/demo-users");
   });
 }
