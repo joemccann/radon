@@ -88,11 +88,12 @@ class _StoredChunk(NamedTuple):
 
 _EMPTY_UPSERT_COUNTS = {"inserted": 0, "updated": 0, "skipped": 0, "pruned": 0}
 
-# Changed docs are distilled/embedded/written in bounded batches, each batch
-# upserted on a FRESH connection. One long-lived Hrana stream carrying minutes
+# Changed docs are distilled/embedded in bounded preparation batches. Each
+# complete authoritative document is then upserted on a FRESH connection.
+# One long-lived Hrana stream carrying minutes
 # of distillation idle time plus thousands of write statements 502s on Turso
-# (2026-07-19, newsfeed backfill), and batch-level writes make progress
-# durable: a mid-run failure keeps every completed batch.
+# (2026-07-19, newsfeed backfill). Document-level commits make progress
+# durable: a mid-run failure keeps every completed document.
 _INGEST_BATCH_DOCS = 200
 
 
@@ -129,14 +130,16 @@ def ingest_source(
     With ``limit`` set the connector fetch is truncated to the first N
     documents, and vanished-doc pruning is skipped — a partial fetch must
     never delete documents it simply didn't reach. ``db_factory`` supplies a
-    fresh connection per write batch; without it the shared ``db`` is used."""
+    fresh connection per authoritative document; without it the shared
+    ``db`` is used."""
     source = module.SOURCE
     fresh_db = db_factory if db_factory is not None else (lambda: db)
     docs = _fetch_docs(module, db, limit)
     existing = _load_existing(db, source)
     embedder = get_embedder() if embed_enabled else None
     to_process, skipped_docs = _pre_filter(
-        docs, existing, require_embedding=embedder is not None
+        docs, existing, require_embedding=embedder is not None,
+        require_summary=distill_enabled
     )
 
     distilled = distill_failed = embedded = 0
@@ -148,12 +151,17 @@ def ingest_source(
             distill_failed += batch_failed
         if embed_enabled:
             embedded += _embed_docs(batch, embedder)
-        persisted = _persist_prepared(
-            fresh_db, lambda connection: upsert_documents(connection, batch),
-            source=source,
-        )
-        for key, value in persisted.items():
-            counts[key] = counts.get(key, 0) + value
+        # One authoritative document is the smallest safe write transaction:
+        # every chunk and its trailing-chunk prune must commit together. The
+        # preparation batch must not reserve the shared writer for hundreds
+        # of unrelated documents and serial HTTP round trips.
+        for document in _document_batches(batch, max_chunks=1):
+            persisted = _persist_prepared(
+                fresh_db, lambda connection: upsert_documents(connection, document),
+                source=source,
+            )
+            for key, value in persisted.items():
+                counts[key] = counts.get(key, 0) + value
         print(
             f"[{SERVICE_NAME}] {source}: committed {len(batch)} prepared chunks",
             file=sys.stderr, flush=True,
@@ -222,6 +230,7 @@ def _pre_filter(
     existing: dict[str, dict[int, _StoredChunk]],
     *,
     require_embedding: bool,
+    require_summary: bool = True,
 ) -> tuple[list[KnowledgeDoc], int]:
     by_doc: dict[str, list[KnowledgeDoc]] = {}
     for doc in docs:
@@ -229,7 +238,9 @@ def _pre_filter(
     to_process: list[KnowledgeDoc] = []
     skipped = 0
     for doc_key, chunks in by_doc.items():
-        if _is_unchanged_and_summarized(chunks, existing.get(doc_key), require_embedding):
+        if _is_unchanged_and_summarized(
+            chunks, existing.get(doc_key), require_embedding, require_summary
+        ):
             skipped += 1
         else:
             to_process.extend(chunks)
@@ -240,19 +251,22 @@ def _is_unchanged_and_summarized(
     chunks: list[KnowledgeDoc],
     stored: dict[int, _StoredChunk] | None,
     require_embedding: bool,
+    require_summary: bool = True,
 ) -> bool:
     if stored is None or set(stored) != {chunk.chunk_ix for chunk in chunks}:
         return False
     return all(
-        _chunk_is_current(chunk, stored[chunk.chunk_ix], require_embedding)
+        _chunk_is_current(chunk, stored[chunk.chunk_ix], require_embedding, require_summary)
         for chunk in chunks
     )
 
 
 def _chunk_is_current(
-    chunk: KnowledgeDoc, stored: _StoredChunk, require_embedding: bool
+    chunk: KnowledgeDoc, stored: _StoredChunk, require_embedding: bool,
+    require_summary: bool = True,
 ) -> bool:
-    if not stored.has_summary or (require_embedding and not stored.has_embedding):
+    if ((require_summary and not stored.has_summary)
+            or (require_embedding and not stored.has_embedding)):
         return False
     return (
         stored.content == chunk.content

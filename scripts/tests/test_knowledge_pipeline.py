@@ -1226,3 +1226,50 @@ class TestPreparedBatchRetry:
                 db, _module([_chunk("doc-a")]), distill_enabled=False, embed_enabled=False,
             )
         assert len(calls) == 1
+
+
+class TestDocumentWriteOccupancy:
+    def test_each_transaction_contains_one_complete_authoritative_document(self, db, monkeypatch):
+        docs = [_chunk('large', i, f'part{i}') for i in range(205)] + [_chunk('next')]
+        real_upsert = ingest_mod.upsert_documents
+        transactions = []
+        def record(connection, prepared):
+            transactions.append([(doc.doc_key, doc.chunk_ix) for doc in prepared])
+            return real_upsert(connection, prepared)
+        monkeypatch.setattr(ingest_mod, 'upsert_documents', record)
+        # Keep preparation large enough to expose the distinct write boundary.
+        monkeypatch.setattr(ingest_mod, '_INGEST_BATCH_DOCS', 500)
+        result = ingest_mod.ingest_source(db, _module(docs), distill_enabled=False, embed_enabled=False)
+        assert transactions == [[('large', i) for i in range(205)], [('next', 0)]]
+        assert result['inserted'] == 206
+        assert db.execute("SELECT count(*) FROM knowledge WHERE doc_key='large'").fetchone()[0] == 205
+
+    def test_no_distill_repeat_skips_embedding_and_write_lock_for_raw_embedded_doc(
+        self, db, monkeypatch, fake_embedder
+    ):
+        ingest_mod.ingest_source(db, _module([_chunk()]), distill_enabled=False)
+        fake_embedder.clear()
+        monkeypatch.setattr(ingest_mod, 'upsert_documents', lambda *a: pytest.fail('unchanged raw document acquired a write transaction'))
+        result = ingest_mod.ingest_source(db, _module([_chunk()]), distill_enabled=False)
+        assert result['skipped_docs'] == 1
+        assert fake_embedder == []
+
+    def test_normal_run_still_backfills_optional_summary(self, db, fake_embedder, fake_distill):
+        ingest_mod.ingest_source(db, _module([_chunk()]), distill_enabled=False)
+        assert fake_distill == []
+        result = ingest_mod.ingest_source(db, _module([_chunk()]), distill_enabled=True)
+        assert result['distilled'] == 1
+        assert db.execute('SELECT summary FROM knowledge').fetchone()[0] == 'distilled: alpha content'
+
+    def test_later_document_failure_preserves_earlier_document_and_fts(self, db, monkeypatch):
+        real_upsert = ingest_mod.upsert_documents
+        monkeypatch.setattr(ingest_mod.time, 'sleep', lambda _: None)
+        def persist(connection, prepared):
+            if any(doc.doc_key == 'doc-b' for doc in prepared):
+                raise RuntimeError('SQLITE_BUSY')
+            return real_upsert(connection, prepared)
+        monkeypatch.setattr(ingest_mod, 'upsert_documents', persist)
+        with pytest.raises(RuntimeError, match='prepared write failed'):
+            ingest_mod.ingest_source(db, _module([_chunk('doc-a'), _chunk('doc-b')]), distill_enabled=False, embed_enabled=False)
+        assert db.execute('SELECT doc_key FROM knowledge').fetchall() == [('doc-a',)]
+        assert db.execute("SELECT k.doc_key FROM knowledge k JOIN knowledge_fts f ON f.rowid=k.id WHERE knowledge_fts MATCH 'alpha'").fetchall() == [('doc-a',)]

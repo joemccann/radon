@@ -1063,6 +1063,18 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   receipt may already have committed; content-hash idempotency makes replay
   safe. Cleanup is bounded and does not replace the original failure.
   Never wrap native calls in a thread timeout or bypass transaction integrity.
+- **2026-09-25 shared writer occupancy:** after transport was bounded,
+  a 200-chunk write transaction still delayed unrelated heartbeat writers.
+  Reads took 44–67ms while one cleanup-bearing BEGIN/ROLLBACK probe timed out
+  at 4.040s. Preparation remains batched, but persistence now commits one
+  complete authoritative document at a time. All its chunks, FTS entries
+  and trailing-chunk pruning remain atomic; an oversized document stays
+  intact rather than dropping or independently publishing chunks. A later
+  failed document preserves earlier commits and retries only its prepared
+  payload. Read-only prefiltering in `--no-distill` mode skips unchanged raw
+  documents with embeddings even if their optional summaries are absent;
+  normal runs still backfill missing summaries. Never raise timeouts to hide
+  writer starvation or retry the full pipeline while the writer is blocked.
 - **Recovery:** if optional enrichment providers are unavailable, one bounded
   canonical `ingest.py --source all --no-distill` catch-up preserves raw
   content and local embeddings. It does not attest provider recovery. Restore
