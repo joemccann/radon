@@ -12,7 +12,12 @@ Keys come from process env first, then root .env, then web/.env. Never logged.
 """
 from __future__ import annotations
 
+import json
 import os
+import signal
+import subprocess
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 import sys
 from pathlib import Path
@@ -140,3 +145,115 @@ def _normalize_distillation(data: Any) -> dict | None:
         if isinstance(ticker, str) and ticker.strip()
     ]
     return {"summary": summary.strip(), "tickers": tickers}
+
+
+# Optional summaries must not consume the oneshot's 1800s raw-ingest window.
+# A read timeout is not an elapsed deadline (streaming and CLI providers can
+# outlive it), so each small wave runs in its own killable process group.
+ENRICHMENT_SECONDS = 120.0
+ENRICHMENT_WORKERS = 4
+
+
+class EnrichmentBudget:
+    """One cumulative optional-work allowance per ingest run, including retries."""
+
+    def __init__(self, seconds=ENRICHMENT_SECONDS, *, runner=None, clock=None):
+        self.remaining = max(0.0, float(seconds))
+        self.runner = runner or run_distill_batch
+        self.clock = clock or time.monotonic
+        self.exhausted = False
+
+    def run(self, docs):
+        results = []
+        while len(results) < len(docs) and self.remaining > 0 and not self.exhausted:
+            wave = docs[len(results):len(results) + ENRICHMENT_WORKERS]
+            started = self.clock()
+            try:
+                completed = self.runner(wave, self.remaining)
+            finally:
+                self.remaining = max(0.0, self.remaining - (self.clock() - started))
+            results.extend(completed)
+            # An entire exhausted ladder wave is enough evidence to stop
+            # retrying the same unavailable providers for this process run.
+            if not any(result is not None for result in completed):
+                self.exhausted = True
+        return results, len(docs) - len(results)
+
+
+def _kill_worker_group(process):
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def run_distill_batch(docs, timeout, *, clock=None):
+    """Return completed results in input order; unfinished attempts are None.
+
+    Documents travel on stdin; credentials remain inherited environment only.
+    stdout is an incremental result protocol so a timeout keeps prior successes.
+    """
+    clock = clock or time.monotonic
+    started = clock()
+    results = [None] * len(docs)
+    process = None
+    output = ""
+    try:
+        process = subprocess.Popen(
+            [sys.executable, "-m", "knowledge.distill", "--worker"],
+            cwd=str(_PROJECT_ROOT / "scripts"),
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            text=True, start_new_session=True,
+        )
+        try:
+            output, _ = process.communicate(json.dumps(docs), timeout=max(0.001, timeout - (clock() - started)))
+        except subprocess.TimeoutExpired as exc:
+            output = exc.output or ""
+            _kill_worker_group(process)
+            output, _ = process.communicate(timeout=5)
+    except subprocess.TimeoutExpired as exc:
+        output = exc.output or output
+        print("[knowledge-distill] worker cleanup deadline reached", file=sys.stderr)
+    except (OSError, subprocess.SubprocessError):
+        print("[knowledge-distill] bounded worker failed — deferring enrichment", file=sys.stderr)
+    finally:
+        if process is not None:
+            # Also kill CLI descendants after normal exit or parent cancellation.
+            _kill_worker_group(process)
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                print("[knowledge-distill] worker reap deadline reached", file=sys.stderr)
+            finally:
+                for pipe in (process.stdin, process.stdout):
+                    if pipe is not None:
+                        pipe.close()
+    if isinstance(output, bytes):
+        output = output.decode("utf-8", errors="replace")
+    for line in output.splitlines():
+        try:
+            index, payload = json.loads(line)
+            if isinstance(index, int) and 0 <= index < len(results):
+                results[index] = _normalize_distillation(payload) if payload is not None else None
+        except (ValueError, TypeError):
+            # Corrupt output cannot turn optional enrichment into ingest failure.
+            continue
+    return results
+
+
+def _worker():
+    docs = json.load(sys.stdin)
+    with ThreadPoolExecutor(max_workers=ENRICHMENT_WORKERS) as pool:
+        pending = {pool.submit(distill, title, content): index for index, (title, content) in enumerate(docs)}
+        for future in as_completed(pending):
+            try:
+                result = future.result()
+            except Exception:
+                result = None
+            print(json.dumps([pending[future], result]), flush=True)
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] != ["--worker"]:
+        raise SystemExit("internal knowledge distillation worker")
+    _worker()
