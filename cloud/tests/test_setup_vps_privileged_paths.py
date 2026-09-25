@@ -1058,7 +1058,8 @@ class TestStaticContract:
                 continue
             guard = None
             if "ENV_FILE" in line or "$env_file" in line:
-                guard = "require_regular_file"
+                # chmod/chown follow links: the file must already be ours.
+                guard = "require_own_regular_file" if line.startswith(("chmod", "chown")) else "require_regular_file"
             elif "/home/radon/.ssh" in line:
                 guard = SSH_GUARD
             elif "/home/radon/.radon-deploy.lock" in line:
@@ -1073,7 +1074,7 @@ class TestStaticContract:
         script = SETUP.read_text(encoding="utf-8")
         for function in ("validate_env", "setup_node", "write_mcp_env"):
             body = _function_body(script, function)
-            guard = body.index("require_regular_file")
+            guard = re.search(r"require_(own_)?regular_file", body).start()
             for reader in ("chmod", "chown", "grep -E"):
                 if reader in body:
                     assert guard < body.index(reader), (function, reader)
@@ -1251,6 +1252,53 @@ class TestPlaybookInvariant:
         assert "Caddy" in text
         assert "fingerprint-pinned" in text
         assert "canonical env file is 0640 root:radon" in text
+
+
+# ── the env file: only a file the running user owns is re-moded ──────
+
+
+def _run_own_file_check(tmp_path: Path, target: Path, stat_uid: str | None) -> int:
+    script = SETUP.read_text(encoding="utf-8")
+    body = "\n".join(
+        f"{name}() {{\n{_function_body(script, name)}\n}}"
+        for name in ("require_regular_file", "require_own_regular_file")
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    if stat_uid is not None:
+        stub = bin_dir / "stat"
+        stub.write_text(f"#!/bin/sh\necho {stat_uid}\n", encoding="utf-8")
+        stub.chmod(0o755)
+    check = f"log_error() {{ :; }}\n{body}\nrequire_own_regular_file \"$1\"\n"
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin"}
+    return subprocess.run(["bash", "-c", check, "_", str(target)], env=env, check=False).returncode
+
+
+class TestEnvFileOwnership:
+    def test_env_file_is_owner_checked_before_chmod_and_chown(self) -> None:
+        script = SETUP.read_text(encoding="utf-8")
+        for function in ("validate_env", "setup_node"):
+            body = _function_body(script, function)
+            guard = body.index("require_own_regular_file")
+            assert guard < body.index("chmod"), function
+            assert guard < body.index("chown"), function
+
+    def test_own_regular_file_is_accepted(self, tmp_path: Path) -> None:
+        target = tmp_path / "env"
+        target.write_text("A=1\n", encoding="utf-8")
+        assert _run_own_file_check(tmp_path, target, None) == 0
+
+    def test_file_owned_by_another_user_is_refused(self, tmp_path: Path) -> None:
+        target = tmp_path / "env"
+        target.write_text("A=1\n", encoding="utf-8")
+        assert _run_own_file_check(tmp_path, target, str(os.getuid() + 1)) != 0
+
+    def test_link_is_refused(self, tmp_path: Path) -> None:
+        real = tmp_path / "real"
+        real.write_text("A=1\n", encoding="utf-8")
+        link = tmp_path / "env"
+        link.symlink_to(real)
+        assert _run_own_file_check(tmp_path, link, None) != 0
 
 
 # ── radon's ~/.ssh: every write runs as radon ─────────────────────────

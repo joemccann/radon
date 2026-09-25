@@ -245,6 +245,19 @@ require_regular_file() {
   fi
 }
 
+# chmod and chown follow links, and radon can create entries in the sticky
+# /etc/radon, so only a regular file the running user already owns (radon
+# cannot rename or replace it there) is re-moded.
+require_own_regular_file() {
+  local path="$1" owner
+  require_regular_file "$path" || return 1
+  owner="$(stat -c '%u' "$path" 2>/dev/null)" || owner="$(stat -f '%u' "$path")"
+  if [[ "$owner" != "$(id -u)" ]]; then
+    log_error "Refusing ${path}: not owned by $(id -un)"
+    return 1
+  fi
+}
+
 # stage_from_checkout <source> <target> <mode> [install owner args...]
 # Copies a checkout artifact into a root-only 0600 staging file, re-checks the
 # source around the copy (a swap between the test and the copy fails the byte
@@ -973,7 +986,7 @@ setup_node() {
   # Persist only browser-safe build variables. Server-side values are injected
   # into the build process by run_with_env.py and never copied into web/.env.
   if [[ -e "$ENV_FILE" || -L "$ENV_FILE" ]]; then
-    require_regular_file "$ENV_FILE" || return 1
+    require_own_regular_file "$ENV_FILE" || return 1
     chmod 0640 "$ENV_FILE"
     chown root:radon "$ENV_FILE"
     local public_env_tmp
@@ -1574,7 +1587,7 @@ validate_env() {
     return 1
   fi
 
-  require_regular_file "$env_file" || return 1
+  require_own_regular_file "$env_file" || return 1
   chmod 0640 "$env_file"
   chown root:radon "$env_file"
 
