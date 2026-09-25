@@ -10,7 +10,7 @@ import {
   reportOfflineServed,
 } from "./offline/offlineSignals";
 import { useRouteRefreshKey } from "./RouteRefreshContext";
-import { isReturnCacheFresh, useReturnCache } from "./returnCache";
+import { getReturnCacheGeneration, isReturnCacheFresh, useReturnCache } from "./returnCache";
 import { resolveRetryDelayMs } from "./syncRetrySchedule";
 
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
@@ -143,6 +143,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
       pendingRef.current.add(method);
       return;
     }
+    const identityGeneration = getReturnCacheGeneration();
     inFlightRef.current.add(method);
     if (!background && method === "POST") {
       setSyncing(true);
@@ -155,6 +156,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
         signal: AbortSignal.timeout(SYNC_REQUEST_TIMEOUT_MS),
       });
       networkResolved = true;
+      if (identityGeneration !== getReturnCacheGeneration()) return;
       const meta = readOfflineMeta(res.headers);
       if (meta.servedOffline) reportOfflineServed(meta.cachedAt);
       else reportFetchSuccess();
@@ -169,6 +171,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
         throw failure;
       }
       const json = (await res.json()) as T;
+      if (identityGeneration !== getReturnCacheGeneration()) return;
       const scanFailed = (json as { scan_succeeded?: unknown } | null)?.scan_succeeded === false;
       const held = scanFailed ? (rememberedRef.current ?? json) : json;
       if (!scanFailed && !meta.servedOffline) {
@@ -192,6 +195,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
       clearRetry();
       armRetry(json);
     } catch (err) {
+      if (identityGeneration !== getReturnCacheGeneration()) return;
       if (!networkResolved) reportFetchFailure();
       // Only show error if we don't already have valid cached data —
       // unless the caller explicitly wants the stale view marked as degraded.
@@ -208,7 +212,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
       if (!background && method === "POST") {
         setSyncing(false);
       }
-      if (pendingRef.current.delete(method)) {
+      if (pendingRef.current.delete(method) && identityGeneration === getReturnCacheGeneration()) {
         void requestRef.current(method, true);
       }
     }
@@ -256,6 +260,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
     initialLoadKeyRef.current = endpoint;
 
     const init = async () => {
+      const identityGeneration = getReturnCacheGeneration();
       let networkResolved = false;
       try {
         if (!didInitialRead.current) setLoading(true);
@@ -265,11 +270,13 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
           signal: AbortSignal.timeout(SYNC_REQUEST_TIMEOUT_MS),
         });
         networkResolved = true;
+        if (identityGeneration !== getReturnCacheGeneration()) return;
         const meta = readOfflineMeta(res.headers);
         if (meta.servedOffline) reportOfflineServed(meta.cachedAt);
         else reportFetchSuccess();
         if (!res.ok) throw new Error(await readErrorResponse(res, "The data could not be loaded. Please try again."));
         const json = (await res.json()) as T;
+        if (identityGeneration !== getReturnCacheGeneration()) return;
         const scanFailed = (json as { scan_succeeded?: unknown } | null)?.scan_succeeded === false;
         const sync = extractTimestamp ? extractTimestamp(json) : null;
         if (!scanFailed && !meta.servedOffline) {
@@ -287,6 +294,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
         clearRetry();
         armRetry(json);
       } catch (err) {
+        if (identityGeneration !== getReturnCacheGeneration()) return;
         if (!networkResolved) reportFetchFailure();
         setData((prev) => {
           const held = prev ?? rememberedRef.current;

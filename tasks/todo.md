@@ -8362,3 +8362,12 @@ Review: REL-280 red 10/green 52; first full gate matches 33 baseline Python fail
 - [ ] T3 depends_on: [T2] Run closing full gates three times and persist complete issue handoff.
 - [ ] T4 depends_on: [T3] Review substantive diff and publication eligibility.
 Review: pending; no live broker calls, browser launches, or runner-lock operations.
+
+## Reliability remediation 2026-09-25
+
+- [x] T1: Reproduce REL-284 account-switch stale-read and queued-write failures (depends_on: [])
+- [x] T2: Implement identity-generation isolation and focused browser coverage (depends_on: [T1])
+- [x] T3: Focused checks and permanent drills green; full gates/browser acceptance recorded BLOCKED after verified environment failures (depends_on: [T2])
+
+## Review
+- REL-284 source fix is narrow and red/green evidence is recorded in RELIABILITY_LOG.md. Full-gate and Playwright acceptance are blocked by missing installed dependencies and host process/browser permissions; no overall green is claimed.
