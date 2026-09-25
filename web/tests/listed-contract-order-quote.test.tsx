@@ -12,7 +12,7 @@
  */
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PriceData } from "@/lib/pricesProtocol";
 
 const mocks = vi.hoisted(() => ({
@@ -220,7 +220,12 @@ describe("IndexOptionOrderForm quote threading", () => {
       VIX_20260916_20_C: VIX_CALL_QUOTE,
     };
 
-    const { container } = render(<IndexOptionOrderForm ticker="VIX" portfolio={null} />);
+    // Flush expiration initialization and its strike-reset effect before the
+    // simulated selection; a visible option can precede passive effect flush.
+    let container!: HTMLElement;
+    await act(async () => {
+      ({ container } = render(<IndexOptionOrderForm ticker="VIX" portfolio={null} />));
+    });
     await waitFor(() => expect(strikeSelect()).toBeTruthy());
     fireEvent.change(strikeSelect(), { target: { value: "7001" } });
 
