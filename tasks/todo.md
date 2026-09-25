@@ -8425,3 +8425,5 @@ Review: Liquid Compute 180s timeout predates deployed PR #693, which removes the
 - [ ] T4 depends_on: [T3] Notify and coordinate deployment/live catch-up with root agent.
 Dependency graph: T1 -> T2 -> T3 -> T4.
 Review: local suites prohibited; no live trade/journal changes. Preserve atomic corpus/FTS writes, complete-document batches, authoritative pruning, and real failure heartbeat.
+
+Review update: PR #710 red head `9ad53d8c`, GitHub run `36177477069`, scripts-jm: 4 new regressions failed, 1349 passed, 7 skipped. Failures prove immediate busy propagation, four complete enrichment passes after exhaustion, and competing writers acquiring both deferred transactions. Implemented prepared persistence retries with fresh handles, terminal exhaustion, rollback-error preservation, BEGIN IMMEDIATE, committed-batch progress, and 16-document embedding inference. Added prior-commit preservation, prune retry, schema-error no-retry, and 201-vector ordered-coverage cases. Independent review caught rollback cleanup masking the busy cause; strengthened real-store regression accordingly. No local suites.
