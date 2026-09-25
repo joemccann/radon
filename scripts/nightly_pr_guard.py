@@ -94,7 +94,7 @@ def refused_action(args: list[str], loop: str = "") -> str:
     prefix = _positional_prefix(args)
     tail = args[args.index("api") + 1:] if "api" in args else []
     # Any tail token may be the endpoint: a value-taking flag can precede it.
-    if prefix == ["pr", "merge"] or any(re.search(r"(?:^|/)repos/[^/]+/[^/]+/pulls/\d+/merge/?$", a) for a in tail) \
+    if prefix == ["pr", "merge"] or any(re.search(r"(?:^|/)repos/[^/]+/[^/]+/pulls/\d+/merge/?(?:[?#].*)?$", a) for a in tail) \
             or (tail and re.search(r"mergePullRequest|enablePullRequestAutoMerge", " ".join(tail))):
         return "nightly loops never merge; the operator merges"
     # An alias can rename any refused command to one the gh shim never routes.
@@ -105,7 +105,7 @@ def refused_action(args: list[str], loop: str = "") -> str:
             return "security loops never write issues; the wrapper posts the sanitized comment"
         method = option(tail, "--method", "-X").upper()
         body = any(a in ("--input", "--field", "--raw-field", "-f", "-F") or a.startswith(("--input=", "--field=", "--raw-field=", "-f", "-F")) for a in tail)
-        if any(re.search(r"(?:^|/)repos/[^/]+/[^/]+/issues(?:/|$)", a) for a in tail) and (method not in ("", "GET") or body):
+        if any(re.search(r"(?:^|/)repos/[^/]+/[^/]+/issues(?:[/?#]|$)", a) for a in tail) and (method not in ("", "GET") or body):
             return "security loops never write issues; the wrapper posts the sanitized comment"
     return ""
 

@@ -192,6 +192,25 @@ def test_security_issue_writes_are_refused_when_flag_values_precede_the_action(l
         mod.guard(args, loop=loop)
 
 
+# GitHub routes an endpoint the same with a query or fragment suffix.
+@pytest.mark.parametrize("args", [
+    ["api", "repos/o/r/pulls/5/merge?x=1", "-X", "PUT"], ["api", "-X", "PUT", "repos/o/r/pulls/5/merge#x"],
+])
+def test_merge_is_refused_with_a_query_suffix(args):
+    with pytest.raises(mod.Refused, match="never merge"):
+        mod.guard(args)
+
+
+@pytest.mark.parametrize("loop", ["security", "security-deepsec"])
+@pytest.mark.parametrize("args", [
+    ["api", "repos/o/r/issues?x=1", "-X", "POST", "-f", "title=t"],
+    ["api", "-f", "body=x", "repos/o/r/issues/5/comments?x=1"],
+])
+def test_security_issue_writes_are_refused_with_a_query_suffix(loop, args):
+    with pytest.raises(mod.Refused, match="wrapper"):
+        mod.guard(args, loop=loop)
+
+
 @pytest.mark.parametrize("args", [
     ["pr", "--title", "t", "create", "--head", "h", "--base", "main"],
     ["pr", "-t", "t", "create", "--head", "h", "--base", "main", "-R", "evil/r"],
