@@ -42,6 +42,7 @@ import {
   buildRelayHealthDetail,
   decideHealthWrite,
   farmStateAfterIdleDrain,
+  findStaleSubjectsOnLivePlane,
   isFarmStateCode,
   nextFarmStateCode,
   summarizeSubscriptionFreshness,
@@ -839,6 +840,18 @@ function resubscribeAll() {
   if (DEPTH_ENABLED) cleanupDepthForReconnect();
   restoreSubscriptions();
   if (DEPTH_ENABLED) restoreDepthSubscriptions();
+}
+
+// Re-issue reqMktData for symbols that went silent while the rest of the data
+// plane ticks. startLiveSubscription reseeds lastTickAt, so a contract that is
+// simply quiet is retried at most once per stale threshold, never in a loop.
+function resubscribeStaleSubjects(symbols) {
+  if (symbols.length === 0) return;
+  console.log(`[stale-data] resubscribing ${symbols.length} silent symbol(s) on a live data plane: ${symbols.join(", ")}`);
+  for (const symbol of symbols) {
+    const state = symbolStates.get(symbol);
+    if (state?.contract) startLiveSubscription(symbol, state.contract);
+  }
 }
 
 // Bounce the IB socket; the connected handler restores fresh subscriptions.
@@ -2873,16 +2886,15 @@ staleCheckTimer = setInterval(() => {
 
   const now = Date.now();
   const marketHours = isUSMarketHours();
-  const freshness = summarizeSubscriptionFreshness(
-    [...symbolSubscribers.keys()].map((symbol) => {
-      const state = symbolStates.get(symbol);
-      return {
-        active: Boolean(state?.tickerId != null),
-        lastTickAt: state?.lastTickAt,
-      };
-    }),
-    now,
-  );
+  const subjects = [...symbolSubscribers.keys()].map((symbol) => {
+    const state = symbolStates.get(symbol);
+    return {
+      key: symbol,
+      active: Boolean(state?.tickerId != null),
+      lastTickAt: state?.lastTickAt,
+    };
+  });
+  const freshness = summarizeSubscriptionFreshness(subjects, now);
   const { activeSubscriptions, subscribedSymbols } = freshness;
   const elapsed = now - freshness.lastTickAt;
 
@@ -2970,7 +2982,10 @@ staleCheckTimer = setInterval(() => {
     });
   }
 
-  if (action === "none") return;
+  if (action === "none") {
+    if (marketHours && ibConnected) resubscribeStaleSubjects(findStaleSubjectsOnLivePlane(subjects, now));
+    return;
+  }
 
   console.warn(
     `\x1b[33m[stale-data] No ticks for ${Math.round(elapsed / 1000)}s with ${activeSubscriptions} active subscriptions during market hours → ${action}\x1b[0m`,
