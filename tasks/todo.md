@@ -8403,9 +8403,12 @@ Review: pending; no live broker calls, browser launches, or runner-lock operatio
 
 ## Dependency graph and checklist
 - [x] T1 depends_on: [] Diagnose live error, provider format, and canonical tickers.
-- [ ] T2 depends_on: [T1] Add regression cases and narrow source normalization.
+- [x] T2 depends_on: [T1] Add regression cases and narrow source normalization.
 - [ ] T3 depends_on: [T2] Publish PR, verify exact-head GitHub CI, and notify.
 
 ## Review
 - Preserve strict ticker validation, all-source preflight, and atomic writes.
 - No local suites; regression red/green and all applicable verification run on GitHub.
+
+- Tests-first GitHub run `36176075067`, head `8d5e159d`: six expected regression failures in scripts-npsz; 2,569 passed.
+- Read-only live BlackRock fetch: all 1,979 equity rows validate; four reported class shares retained in dash form.
