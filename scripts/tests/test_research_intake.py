@@ -220,7 +220,8 @@ def test_text_only_finding_publishes_without_images(tmp_path, publisher):
     reviewer = Reviewer([selection(figure_ids=[], text_only=True, captions={}), verdict()])
     posts = build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
     assert len(posts) == 1 and posts[0]["images"] == [] and reviewer.calls[1][2] == ()
-    assert "charts" not in posts[0]["source"]
+    bars = posts[0]["source"]["charts"][0]["bars"]
+    assert [(bar["label"], bar["value"]) for bar in bars] == [("Foreign investors", 45), ("Official investors", 12)]
 
 
 def test_text_only_comparable_yields_store_a_chart_plan(tmp_path, publisher):
