@@ -338,7 +338,7 @@ class _PersistenceExhausted(RuntimeError):
 
 def _persist_prepared(db_factory, operation, *, source):
     # Distillation and embeddings stay outside this loop. A fresh connection
-    # retries only the rolled-back atomic write, not minutes of optional LLM
+    # retries the idempotent atomic write (COMMIT may be ambiguous), not optional LLM
     # work. Exhaustion is terminal for this source even when its cause is busy.
     for attempt in range(1, _WRITE_ATTEMPTS + 1):
         try:
@@ -362,21 +362,18 @@ def _is_transient_db_error(exc: BaseException) -> bool:
     """True for retryable reads/writes, excluding an exhausted write budget."""
     if isinstance(exc, _PersistenceExhausted):
         return False
+    from knowledge.http_db import TransportError
+    if isinstance(exc, TransportError):
+        return True
     message = str(exc).lower()
     return any(marker in message for marker in _TRANSIENT_DB_MARKERS)
 
 
 def _fresh_db():
-    """Drop the process singleton and open a new direct-to-cloud connection.
+    """New bounded HTTP handle; transactions never share a native singleton."""
+    from knowledge.http_db import Connection
 
-    get_db() caches one connection; without reset_connection the per-source
-    and per-batch "fresh" factory is a no-op and a dead/busy Hrana stream
-    poisons every later source (2026-07-19 stream-not-found, 2026-08-15
-    SQLITE_BUSY on newsfeed)."""
-    from db.client import get_db, reset_connection  # noqa: PLC0415
-
-    reset_connection()
-    return get_db()
+    return Connection()
 
 
 def main(argv: list[str] | None = None) -> int:

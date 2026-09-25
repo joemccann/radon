@@ -1032,9 +1032,8 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   every source, not `stream not found` cascade after a dead singleton).
   If the canary fails too → Turso platform; stand down.
 - **Remediation (code):** bounded retries per source on transient
-  lock/stream markers, with `reset_connection()` so `get_db()` is a
-  real fresh Hrana stream (the process singleton made the previous
-  per-source `get_db()` a no-op). Do not restart-flap; next timer or
+  lock/stream markers, with a fresh connection per attempt (the historical
+  process singleton made per-source `get_db()` a no-op). Do not restart-flap; next timer or
   one `radon unit restart radon-knowledge.service` after the fix deploys.
 - **2026-08-21 17:22Z recurrence (page `e3268a38…`):** `_SOURCE_ATTEMPTS=2`
   retried newsfeed once; both attempts SQLITE_BUSY; incidents in the
@@ -1053,6 +1052,26 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   an interrupted run is not a successful heartbeat. Do not widen the
   systemd deadline or fabricate health. After deploy, restore the normal
   timer and verify a complete ingest plus its actual health timestamp.
+- **2026-09-25 native transport stall:** the bounded-memory recovery still
+  stopped advancing during newsfeed: CPU and TLS application counters stayed
+  fixed while independent HTTP queries succeeded. The CLI now uses
+  `knowledge.http_db.Connection`, with 4-second socket timeouts, response
+  deadline checks and an 8 MiB response ceiling. It keeps rotating Hrana
+  batons for `BEGIN IMMEDIATE` through `COMMIT`, so document and FTS changes
+  remain atomic. Unexpected stream closure or ambiguous transport failure
+  poisons the handle; prepared batches retry on fresh handles. A lost COMMIT
+  receipt may already have committed; content-hash idempotency makes replay
+  safe. Cleanup is bounded and does not replace the original failure.
+  Never wrap native calls in a thread timeout or bypass transaction integrity.
+- **Recovery:** if optional enrichment providers are unavailable, one bounded
+  canonical `ingest.py --source all --no-distill` catch-up preserves raw
+  content and local embeddings. It does not attest provider recovery. Restore
+  the canonical hourly timer for normal enrichment after actual completion;
+  retain failed/interrupted health until a real successful ingest finishes.
+- **Transport regressions:** `scripts/tests/test_knowledge_http.py` covers
+  native-path exclusion, rotating/error batons, safe routing, SQL error
+  classification, atomic document/FTS rollback, typed row IDs, missing receipts,
+  timeout poisoning and response bounds.
 - **Additional regressions:** `TestPreparedBatchRetry`,
   `test_write_lock_precedes_read_snapshot`, and
   `test_large_corpus_uses_bounded_inference_batches_without_dropping_rows`.

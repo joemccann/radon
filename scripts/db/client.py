@@ -43,6 +43,8 @@ Paths with a REAL socket timeout ride ``scripts/db/hrana_http.py``
     persist. Sync libsql held the GIL past ``TimeoutStartSec`` after the
     sweep budget (2026-09-22, Result=timeout). Chunked hrana with
     ``PERSIST_BUDGET_S``.
+  - Knowledge ingest CLI: ``knowledge.http_db`` maintains transactional streams
+    with bounded HTTP requests; ambiguous streams retry whole prepared batches.
   - FastAPI: all Turso I/O via ``api.db_http`` (lint: test_no_sync_libsql_in_api).
 
   Process-bound (still use this module / sync libsql)
