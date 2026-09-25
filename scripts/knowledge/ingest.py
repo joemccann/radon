@@ -40,6 +40,7 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+from credential_redaction import scrub_credential_text  # noqa: E402
 from knowledge.distill import EnrichmentBudget, distill  # noqa: E402
 from knowledge.embed import EMBEDDING_DIM, embedding_text, get_embedder  # noqa: E402
 from knowledge.schema import KnowledgeDoc  # noqa: E402
@@ -173,7 +174,8 @@ def ingest_source(
                 continue
             persisted = _persist_prepared(
                 fresh_db, lambda connection: upsert_documents(connection, document),
-                source=source,
+                source=source, doc_key=document[0].doc_key,
+                chunk_count=len(document),
             )
             for key, value in persisted.items():
                 counts[key] = counts.get(key, 0) + value
@@ -394,22 +396,30 @@ class _PersistenceExhausted(RuntimeError):
     """The prepared write used its retry budget; never replay enrichment."""
 
 
-def _persist_prepared(db_factory, operation, *, source):
+def _persist_prepared(db_factory, operation, *, source, doc_key=None, chunk_count=None):
     # Distillation and embeddings stay outside this loop. A fresh connection
     # retries the idempotent atomic write (COMMIT may be ambiguous), not optional LLM
     # work. Exhaustion is terminal for this source even when its cause is busy.
     for attempt in range(1, _WRITE_ATTEMPTS + 1):
+        connection = None
         try:
-            return operation(db_factory())
+            connection = db_factory()
+            return operation(connection)
         except Exception as exc:
             if not _is_transient_db_error(exc):
                 raise
+            context = ""
+            if doc_key is not None:
+                safe_key = json.dumps(scrub_credential_text(str(doc_key))[:256])
+                steps = getattr(connection, "last_transaction_step_count", "unknown")
+                context = (f" doc_key={safe_key} chunk_count={chunk_count}"
+                           f" statement_count={steps}")
             if attempt == _WRITE_ATTEMPTS:
                 raise _PersistenceExhausted(
-                    f"{source}: prepared write failed after {attempt} attempts: {exc}"
+                    f"{source}:{context} prepared write failed after {attempt} attempts: {exc}"
                 ) from exc
             print(
-                f"[{SERVICE_NAME}] {source}: transient prepared-write error "
+                f"[{SERVICE_NAME}] {source}:{context} transient prepared-write error "
                 f"(attempt {attempt}/{_WRITE_ATTEMPTS}): {exc}; retrying persistence",
                 file=sys.stderr, flush=True,
             )

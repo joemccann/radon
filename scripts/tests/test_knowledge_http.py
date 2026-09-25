@@ -561,3 +561,44 @@ def test_atomic_operations_require_fresh_handle_and_empty_store_never_locks(atom
     with pytest.raises(http_db.TransportError, match='fresh stream'):
         db.execute_transaction([('SELECT 1', ())])
     assert server.calls == []
+
+
+def test_atomic_receipt_has_separate_finite_budget_from_reads_and_cleanup(atomic_server, monkeypatch):
+    server, _ = atomic_server
+    clock = [0.0]
+    original_open = server.open
+    def delayed_receipt(request, timeout):
+        response = original_open(request, timeout)
+        if json.loads(request.data)['requests'][0]['type'] == 'batch':
+            clock[0] += 5.0  # whole document legitimately exceeds a single-read budget
+        return response
+    monkeypatch.setattr(server, 'open', delayed_receipt)
+    monkeypatch.setattr(http_db.time, 'monotonic', lambda: clock[0])
+    db = http_db.Connection()
+    db.execute_transaction([('SELECT 1', ())])
+    assert db.last_transaction_step_count == 4
+    db.execute('SELECT 1')
+    db.execute('BEGIN IMMEDIATE')
+    db.close()
+    assert [call[2] for call in server.calls] == [30.0, 4.0, 4.0, 4.0]
+    assert [r['type'] for r in server.calls[0][1]['requests']] == ['batch', 'close']
+
+
+def test_atomic_receipt_still_expires_after_finite_allowance(atomic_server, monkeypatch):
+    server, path = atomic_server
+    clock = [0.0]
+    original_open = server.open
+    def expired_receipt(request, timeout):
+        response = original_open(request, timeout)
+        clock[0] += 31.0
+        return response
+    monkeypatch.setattr(server, 'open', expired_receipt)
+    monkeypatch.setattr(http_db.time, 'monotonic', lambda: clock[0])
+    with pytest.raises(http_db.TransportError, match='deadline'):
+        http_db.Connection().execute_transaction([('SELECT 1', ())])
+    assert server.calls[0][2] == 30.0
+    assert not server.db.in_transaction
+    competitor = sqlite3.connect(path, isolation_level=None, timeout=0)
+    competitor.execute('BEGIN IMMEDIATE')
+    competitor.rollback()
+    competitor.close()

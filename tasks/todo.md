@@ -1,3 +1,13 @@
+# Task: Knowledge atomic receipt budget (2026-09-25)
+
+- [x] T1: Diagnose normal-cycle receipt exhaustion; depends_on: [].
+- [x] T2: Regression-first finite atomic receipt budget and safe document diagnostics; depends_on: [T1].
+- [ ] T3: Exact-head GitHub CI, notification, coordinated deployment and real canonical cycle; depends_on: [T2].
+
+Red evidence: GitHub CI36194951875, head caa7e96d: 3 expected failures / 1,436 passed / 7 skipped. Independent read-only review found no blockers.
+
+Evidence: default cycle 21:59:25–22:03:04 failed after four 4-second atomic receipt timeouts. Atomic documents now combine hundreds of statements under the old per-statement allowance. Reads and cleanup retain 4 seconds; atomic receipts receive a distinct finite 30-second socket/elapsed allowance, with existing server-queued cleanup and whole-document retry intact. No local suites.
+
 ## 2026-09-25 Bound optional knowledge enrichment
 - [x] T1 Static audit confirms missing summaries retry every keyed provider without a run budget. depends_on: []
 - [x] T2 Regression-first GitHub CI for cumulative budget, exhaustion breaker, raw/vector preservation, and child cleanup. depends_on: [T1]

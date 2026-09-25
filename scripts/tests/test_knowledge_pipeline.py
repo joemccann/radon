@@ -1119,7 +1119,7 @@ class TestBatchedWrites:
 
 class TestPreparedBatchRetry:
     def test_busy_write_reuses_enriched_batch_on_fresh_connection(
-        self, db, monkeypatch, fake_distill, fake_embedder
+        self, db, monkeypatch, fake_distill, fake_embedder, capsys
     ):
         real_upsert = ingest_mod.upsert_documents
         calls, connections = [], []
@@ -1158,6 +1158,7 @@ class TestPreparedBatchRetry:
         assert len(connections) >= 3
         assert len({id(connection) for connection in connections}) == len(connections)
         assert _rows(db)[0][3] == "distilled: alpha content"
+        assert 'doc_key="doc-a" chunk_count=1 statement_count=unknown' in capsys.readouterr().err
 
     def test_exhausted_batch_does_not_restart_source_or_prune(
         self, db, monkeypatch, fake_distill, fake_embedder
@@ -1349,3 +1350,21 @@ class TestEnrichmentBudgetRecovery:
         assert result["skipped"] == 205
         assert result["embedded"] == 0
         assert fake_embedder == []
+
+
+def test_prepared_retry_diagnostics_identify_document_without_content(monkeypatch, capsys):
+    from types import SimpleNamespace
+    monkeypatch.setattr(ingest_mod.time, 'sleep', lambda _: None)
+    def fail(connection):
+        connection.last_transaction_step_count = 638
+        raise TimeoutError('receipt timed out')
+    with pytest.raises(ingest_mod._PersistenceExhausted) as error:
+        ingest_mod._persist_prepared(
+            lambda: SimpleNamespace(), fail, source='docs',
+            doc_key='tasks/lessons.md\nforged', chunk_count=158,
+        )
+    output = capsys.readouterr().err
+    assert 'chunk_count=158' in output and 'statement_count=638' in output
+    assert 'doc_key="tasks/lessons.md\\nforged"' in output
+    assert '\nforged' not in output
+    assert 'statement_count=638' in str(error.value)
