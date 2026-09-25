@@ -8409,9 +8409,11 @@ Review: pending; no live broker calls, browser launches, or runner-lock operatio
 
 ## Checklist
 - [x] T1 Sep24/Sep25 backups killed by deploy stop-clean at09:09/09:08; normal recovery skips all oneshots.
-- [ ] T2 Regression coverage
-- [ ] T3 Surgical restoration
+- [x] T2 Regression coverage
+- [x] T3 Surgical restoration
 - [ ] T4 CI and live backup
 
 ## Review
 - Backups remain quiesced while code changes; only a backup captured in the interrupted active snapshot is replayed. No trading/order oneshot replay.
+
+- GitHub red evidence: CI36176394767 cloud-al reports four expected interrupted-backup failures; 2,251 passed and two skipped on 86b16936. Implementation adds only explicit backup replay and bounded restore-state verification.

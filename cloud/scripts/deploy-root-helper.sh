@@ -654,13 +654,44 @@ reset_core_failures() {
   systemctl_bounded reset-failed "${CORE_SERVICES[@]}"
 }
 
+# A backup captured mid-dump is safe to replay: incomplete files are private
+# .tmp artifacts and publication is atomic. No other oneshot has this grant.
+# Do not wait for the full dump here; it can take hours behind the DB lock.
+wait_for_backup_resume() {
+  local unit=radon-db-backup.service state result
+  local deadline=$((SECONDS + STATE_WAIT_SECONDS))
+  while :; do
+    state="$(active_state "$unit")" || return 69
+    case "$state" in
+      active|activating) return 0 ;;
+      inactive)
+        result="$(systemctl_bounded show "$unit" --property=Result --value)" || return 69
+        [[ "$result" == success ]] && return 0
+        ;;
+      failed)
+        echo "interrupted backup failed after restore: ${unit}" >&2
+        return 67
+        ;;
+    esac
+    (( SECONDS >= deadline )) && break
+    "$SLEEP" 1
+  done
+  echo "interrupted backup is not restored: ${unit} (${state:-unknown})" >&2
+  return 67
+}
+
 verify_restored_state() {
   local unit type extra state
   [[ -f "$ACTIVE_STATE_FILE" ]] || return 0
   validate_active_snapshot || return 1
   [[ -f "$RESTORED_STATE_FILE" ]] || return 1
   while IFS=$'\t' read -r unit type extra; do
-    [[ "$type" == oneshot ]] && continue
+    if [[ "$type" == oneshot ]]; then
+      if [[ "$unit" == radon-db-backup.service ]]; then
+        wait_for_backup_resume || return $?
+      fi
+      continue
+    fi
     state="$(active_state "$unit")" || return 69
     [[ "$state" == active ]] || {
       echo "snapshotted unit is not restored: ${unit} (${state:-unknown})" >&2
@@ -673,6 +704,7 @@ resume_active_snapshot() {
   local unit type extra state
   local services=()
   local timers=()
+  local backups=()
   local already_resumed=0
   [[ -f "$ACTIVE_STATE_FILE" ]] || return 0
   validate_active_snapshot || return 1
@@ -680,6 +712,12 @@ resume_active_snapshot() {
   while IFS=$'\t' read -r unit type extra; do
     is_core_service "$unit" && continue
     if [[ "$type" == oneshot ]]; then
+      if [[ "$unit" == radon-db-backup.service && "$already_resumed" == 0 ]]; then
+        state="$(active_state "$unit")" || return 69
+        if [[ "$state" != active && "$state" != activating ]]; then
+          backups+=("$unit")
+        fi
+      fi
       continue
     fi
     state="$(active_state "$unit")" || return 69
@@ -694,6 +732,10 @@ resume_active_snapshot() {
   for unit in "${timers[@]}"; do
     wait_for_unit_state "$unit" active || return $?
   done
+  if (( ${#backups[@]} > 0 )); then
+    systemctl_bounded --no-block start "${backups[@]}" || return $?
+    wait_for_backup_resume || return $?
+  fi
   : > "$RESTORED_STATE_FILE"
   chmod 0600 "$RESTORED_STATE_FILE"
   "$SYNC" -f "$RESTORED_STATE_FILE"

@@ -454,10 +454,20 @@ bounded.
 | Piece | Where | What |
 |---|---|---|
 | `radon-db-backup.timer` | VPS | Nightly **09:00 UTC** (after archive 05:40 + retention 08:10), `Persistent=true` |
-| `radon-db-backup.service` | VPS | Oneshot, `User=radon`, `TimeoutStartSec=3600` (libsql has no client timeouts — the unit bound is the real one) |
+| `radon-db-backup.service` | VPS | Oneshot, `User=radon`, `TimeoutStartSec=19500` (7,500s lock wait plus 12,000s work budget) |
 | `radon-cloud/scripts/db_backup.py` / monorepo `cloud/scripts/db_backup.py` | VPS | Iterates `sqlite_master` — the ENTIRE DB, no hand-picked table list, so new migration tables are captured automatically. Paged `SELECT`s (500 rows/page). Emits portable SQL (schema + INSERTs), gzip'd to `/home/radon/radon-cloud/backups/db/radon-<UTC>.sql.gz`. Prunes dumps older than `RETENTION_DAYS` (7) in-script, and only those present in B2 once the off-box leg has run (R-445). |
 | `service_health` heartbeat | row `db-backup` | Written on EVERY run — `ok` with `{size_bytes, duration_secs, tables, rows, pruned}` detail, `error` with the failure summary. 48h freshness window. |
 | `com.radon.db-backup-pull` | laptop launchd | Daily rsync of dump dir over Tailscale into `data/db_backups/` (no `--delete`). |
+
+A deployment quiesces an in-flight backup before changing its code. If the
+backup was present in the deployment's active-unit snapshot, recovery starts
+it asynchronously after restoring the application and timers. Only
+`radon-db-backup.service` has this replay exception; dormant backups and all
+other oneshots remain untouched. Repeated recovery does not start another
+dump once restoration is recorded. The deployment accepts a running backup
+or a successfully completed one, while a failed backup prevents a successful
+restore check. A fresh `db-backup` heartbeat still requires the real dump and
+off-box work to finish; restarting the unit does not mark it healthy.
 
 ### Restore runbook
 
