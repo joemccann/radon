@@ -233,3 +233,62 @@ def test_ambiguous_commit_replays_whole_prepared_batch_idempotently(connection, 
     assert counts == {'inserted': 0, 'updated': 0, 'skipped': 1, 'pruned': 0}
     assert server.db.execute('SELECT id, content FROM knowledge').fetchall() == [(1, 'durable')]
     assert server.db.execute("SELECT rowid FROM knowledge_fts WHERE knowledge_fts MATCH 'durable'").fetchall() == [(1,)]
+
+
+@pytest.mark.parametrize('body', [
+    [], {}, {'baton': 'x'}, {'baton': 'x', 'results': []},
+    {'baton': 'x', 'results': [None]},
+    {'baton': 'x', 'results': [{'type': 'ok', 'response': {'type': 'wrong'}}]},
+    {'baton': 'x', 'results': [{'type': 'ok', 'response': {'type': 'execute', 'result': {}}}]},
+    {'baton': 'x', 'results': [{'type': 'error', 'error': 'invalid error shape'}]},
+])
+def test_malformed_transaction_receipts_fail_closed(connection, body):
+    db, server = connection
+    server.responses = [body]
+    with pytest.raises(http_db.HranaHttpError):
+        db.execute('BEGIN IMMEDIATE')
+    with pytest.raises(http_db.TransportError):
+        db.execute('INSERT INTO docs VALUES (1, 2)')
+
+
+@pytest.mark.parametrize('body', [
+    {'baton': 'still-open', 'results': [{'type': 'ok'}, {'type': 'ok'}]},
+    {'baton': None, 'results': [result()['results'][0], {'type': 'error'}]},
+])
+def test_unconfirmed_close_is_not_success(connection, body):
+    db, server = connection
+    server.responses = [body]
+    with pytest.raises(http_db.HranaHttpError):
+        db.execute('SELECT 1')
+    with pytest.raises(http_db.TransportError):
+        db.execute('SELECT 2')
+
+
+def test_explicit_rollback_and_close_preserve_committed_rows(connection):
+    db, server = connection
+    with pytest.raises(http_db.HranaHttpError, match='no transaction'):
+        db.commit()
+    db.execute('BEGIN IMMEDIATE')
+    with pytest.raises(http_db.HranaHttpError, match='already open'):
+        db.execute('BEGIN IMMEDIATE')
+    db.execute('INSERT INTO docs(content) VALUES (?)', ('rolled back',))
+    db.rollback()
+    assert db.execute('SELECT count(*) FROM docs').fetchone() == (0,)
+    db.close()
+    with pytest.raises(http_db.TransportError):
+        db.execute('SELECT 1')
+
+
+def test_configuration_fails_before_network_without_credentials(monkeypatch):
+    monkeypatch.setattr(http_db, 'read_env', lambda: ('', ''))
+    with pytest.raises(http_db.HranaHttpError, match='not configured'):
+        http_db.Connection()
+
+
+def test_unknown_cell_type_is_rejected():
+    with pytest.raises(http_db.HranaHttpError, match='value type'):
+        http_db._Cursor({'rows': [[{'type': 'unknown'}]]})
+
+
+def test_http_redirect_handler_refuses_credential_forwarding():
+    assert http_db._NoRedirect().redirect_request(None, None, 302, '', {}, 'https://evil.test') is None
