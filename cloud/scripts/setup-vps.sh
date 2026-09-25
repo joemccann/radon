@@ -764,28 +764,27 @@ preflight_checks() {
     fi
   done
 
+  # Everything under /home/radon/.ssh is created, written and chmodded as
+  # radon: the directory stays radon-replaceable after the link check above,
+  # so root only reads its own authorized_keys and pipes the bytes in.
   # Copy root's authorized_keys so radon user is accessible via SSH
   if [[ -f /root/.ssh/authorized_keys ]] && [[ ! -f /home/radon/.ssh/authorized_keys ]]; then
     log_info "Copying SSH authorized_keys to radon user..."
-    mkdir -p /home/radon/.ssh
-    cp /root/.ssh/authorized_keys /home/radon/.ssh/
-    chown -R radon:radon /home/radon/.ssh
-    chmod 700 /home/radon/.ssh
-    chmod 600 /home/radon/.ssh/authorized_keys
+    sudo -u radon install -d -m 700 /home/radon/.ssh
+    sudo -u radon sh -c 'umask 077; cat > "$1" && chmod 600 "$1"' _ \
+      /home/radon/.ssh/authorized_keys < /root/.ssh/authorized_keys
   fi
 
   # Ensure radon has an SSH key for GitHub access
   if [[ ! -f /home/radon/.ssh/id_ed25519 ]]; then
     log_info "Generating SSH deploy key for radon user..."
-    mkdir -p /home/radon/.ssh
-    chmod 700 /home/radon/.ssh
-    ssh-keygen -t ed25519 -C "radon@ib-gateway" -f /home/radon/.ssh/id_ed25519 -N "" -q
-    chown -R radon:radon /home/radon/.ssh
+    sudo -u radon install -d -m 700 /home/radon/.ssh
+    sudo -u radon ssh-keygen -t ed25519 -C "radon@ib-gateway" -f /home/radon/.ssh/id_ed25519 -N "" -q
     log_success "SSH key generated"
     echo ""
     echo -e "  ${YELLOW}ACTION REQUIRED:${NC} Add this deploy key to GitHub before continuing:"
     echo ""
-    cat /home/radon/.ssh/id_ed25519.pub
+    sudo -u radon cat /home/radon/.ssh/id_ed25519.pub
     echo ""
     echo "  Go to: https://github.com/settings/keys → New SSH key"
     echo ""

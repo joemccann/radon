@@ -907,9 +907,8 @@ class TestDirectoryOwnership:
         body = _function_body(SETUP.read_text(encoding="utf-8"), "preflight_checks")
         guard = body.index(SSH_GUARD)
         for write in (
-            "mkdir -p /home/radon/.ssh",
-            "cp /root/.ssh/authorized_keys",
-            "chown -R radon:radon /home/radon/.ssh",
+            "install -d -m 700 /home/radon/.ssh",
+            "< /root/.ssh/authorized_keys",
             "ssh-keygen -t ed25519",
             "tee -a /home/radon/.ssh/known_hosts",
         ):
@@ -1252,3 +1251,115 @@ class TestPlaybookInvariant:
         assert "Caddy" in text
         assert "fingerprint-pinned" in text
         assert "canonical env file is 0640 root:radon" in text
+
+
+# ── radon's ~/.ssh: every write runs as radon ─────────────────────────
+
+SSH_DIR = "/home/radon/.ssh"
+SSH_WRITERS = re.compile(
+    r"(?<!sudo -u radon )\b(mkdir|chmod|chown|cp|install|ssh-keygen|cat|tee)\b[^\n]*/home/radon/\.ssh"
+)
+WRAPPED = ("mkdir", "chmod", "cp", "install", "tee", "cat")
+
+
+def _ssh_harness(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """preflight_checks() with /home/radon and /root/.ssh moved under tmp_path.
+    Shell-function stubs (no per-exec cost): sudo marks its child as radon and
+    every file tool logs the identity it ran as before running the real one."""
+    home = tmp_path / "home-radon"
+    home.mkdir()
+    root_ssh = tmp_path / "root-ssh"
+    root_ssh.mkdir()
+    (root_ssh / "authorized_keys").write_text("ssh-ed25519 AAAAoperator op@host\n")
+    log = tmp_path / "calls.log"
+    log.touch()
+    stubs = [f'_log() {{ printf \'%s as=%s %s\\n\' "$1" "${{RADON_AS:-root}}" "${{*:2}}" >> {log!s}; }}']
+    stubs += [f'{name}() {{ _log {name} "$@"; command {name} "$@"; }}' for name in WRAPPED]
+    stubs += [
+        # No radon account on the test host: chown only records the call.
+        '_chown_stub() { _log chown "$@"; }',
+        'chown() { _chown_stub "$@"; }',
+        'ssh-keygen() {',
+        '  _log ssh-keygen "$@"',
+        '  [ "$1" = -F ] && return 1',
+        '  local f=""',
+        '  while [ $# -gt 0 ]; do [ "$1" = -f ] && f="$2"; shift; done',
+        '  (umask 077; command printf "private\\n" > "$f")',
+        '  command printf "ssh-ed25519 AAAAdeploy radon@ib-gateway\\n" > "$f.pub"',
+        '}',
+        'sudo() { [ "$1" = -u ] && [ "$2" = radon ] || return 97; shift 2; RADON_AS=radon "$@"; }',
+        'id() { [ "$1" = -nG ] && echo radon; return 0; }',
+        'getent() { :; }',
+        'python3.13() { :; }',
+        'git() { :; }',
+        'node() { :; }',
+    ]
+    body = _function_body(SETUP.read_text(encoding="utf-8"), "preflight_checks")
+    body = body.replace("/home/radon", str(home)).replace("/root/.ssh", str(root_ssh))
+    (tmp_path / "preflight.sh").write_text(
+        "\n".join(stubs) + f"\npreflight_checks() {{\n{body}\n}}\n", encoding="utf-8"
+    )
+    return home / ".ssh", root_ssh, log
+
+
+def _run_preflight(tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    shell = f"""
+set -euo pipefail
+source {SETUP!s}
+source {tmp_path / 'preflight.sh'!s}
+preflight_checks
+"""
+    return subprocess.run(
+        ["bash", "-c", shell],
+        env={**os.environ, "RADON_SETUP_SOURCE_ONLY": "1"},
+        capture_output=True,
+        text=True,
+    )
+
+
+def _calls_on(log: Path, ssh_dir: Path) -> list[str]:
+    return [line for line in log.read_text().splitlines() if str(ssh_dir) in line]
+
+
+class TestRadonSshDirectory:
+    def test_no_root_run_command_writes_under_radon_ssh(self) -> None:
+        body = _function_body(SETUP.read_text(encoding="utf-8"), "preflight_checks")
+        offenders = [
+            line.strip()
+            for line in body.splitlines()
+            if not line.strip().startswith("#") and SSH_WRITERS.search(line)
+        ]
+        assert offenders == []
+        assert f"> {SSH_DIR}" not in body
+        assert f"chown -R radon:radon {SSH_DIR}" not in body
+        assert f"sudo -u radon install -d -m 700 {SSH_DIR}" in body
+        assert "sudo -u radon ssh-keygen -t ed25519" in body
+
+    def test_fresh_host_creates_keys_as_radon(self, tmp_path: Path) -> None:
+        ssh_dir, root_ssh, log = _ssh_harness(tmp_path)
+        result = _run_preflight(tmp_path)
+        assert result.returncode == 0, result.stderr
+        assert "ssh-ed25519 AAAAdeploy radon@ib-gateway" in result.stdout
+        assert _mode(ssh_dir) == "0o700"
+        assert _mode(ssh_dir / "authorized_keys") == "0o600"
+        assert (ssh_dir / "authorized_keys").read_text() == (
+            root_ssh / "authorized_keys"
+        ).read_text()
+        assert (ssh_dir / "id_ed25519").is_file()
+        calls = _calls_on(log, ssh_dir)
+        assert any(c.startswith("ssh-keygen as=radon -t ed25519") for c in calls)
+        assert [c for c in calls if " as=root " in c] == []
+
+    def test_rerun_is_idempotent_and_stays_radon(self, tmp_path: Path) -> None:
+        ssh_dir, root_ssh, log = _ssh_harness(tmp_path)
+        assert _run_preflight(tmp_path).returncode == 0
+        private = (ssh_dir / "id_ed25519").read_text()
+        log.write_text("")
+        result = _run_preflight(tmp_path)
+        assert result.returncode == 0, result.stderr
+        assert "Preflight checks passed" in result.stdout
+        assert (ssh_dir / "id_ed25519").read_text() == private
+        assert "github.com ssh-ed25519" in (ssh_dir / "known_hosts").read_text()
+        calls = _calls_on(log, ssh_dir)
+        assert not any(c.startswith("ssh-keygen as=radon -t") for c in calls)
+        assert [c for c in calls if " as=root " in c] == []
