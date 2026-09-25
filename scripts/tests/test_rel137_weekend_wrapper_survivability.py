@@ -240,7 +240,11 @@ class TestTheCapIsEnforceable:
             "orphaned grandchildren keep writing into the clone while the next "
             "round runs git clean -fdq"
         )
-        assert re.search(r'kill -TERM -- "-\$ROUND_PID"', body), body
+        # The group kill lives in _reap_group (TERM, grace, then KILL) since
+        # 2026-09-24; kill_round_group must still hand it the round's pgid.
+        assert re.search(r'_reap_group "\$ROUND_PID"', body), body
+        assert re.search(r'kill -TERM -- "-\$pgid"', body), body
+        assert re.search(r'kill -KILL -- "-\$pgid"', body), body
         # The round must be waited on, not run in the foreground: bash defers
         # trap handling until a foreground child completes, so a SIGTERM to the
         # wrapper was not acted on until claude finished on its own.
@@ -356,10 +360,15 @@ class TestContinuationRegroundIsGuarded:
         body = _uncommented(RELIABILITY)
         # Split gitdirs: the host checkout locks the HOST gitdir's index; the
         # agent gitdir's index.lock is dropped by sanitize_agent_gitdir.
-        assert 'rm -f "$HOST_GITDIR/index.lock"' in body, (
+        # clear_stale_git_locks (shared by all six wrappers since 2026-09-24)
+        # removes the host index.lock outright; the reground must call it.
+        reground = body[body.index("reground_for_continuation() {"):]
+        reground = reground[:reground.index("\n}")]
+        assert 'clear_stale_git_locks "$HOST_GITDIR"' in reground, (
             "the cap SIGTERMs claude mid-commit, leaving index.lock; the "
             "next round's checkout then fails"
         )
+        assert 'rm -f -- "$g/index.lock"' in body
         # Everything after `trap - ERR` runs with errexit and no ERR trap, so a
         # BARE git call there ends the run with nothing reported at all.
         tail = body[body.index("trap - ERR"):]

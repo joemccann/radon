@@ -53,7 +53,7 @@ refuse_symlink() {
 }
 
 pid_alive() {
-  local pid="$1" start="${2:-}" listed lstart
+  local pid="$1" start="${2:-}" listed now legacy
   case "$pid" in
     ''|*[!0-9]*) return 1 ;;
   esac
@@ -68,23 +68,47 @@ pid_alive() {
     fi
   fi
   if [[ -n "$start" ]]; then
-    lstart="$(/bin/ps -p "$pid" -o lstart= 2>/dev/null || true)"
-    lstart="${lstart#"${lstart%%[![:space:]]*}"}"
-    lstart="${lstart%"${lstart##*[![:space:]]}"}"
     start="${start#"${start%%[![:space:]]*}"}"
     start="${start%"${start##*[![:space:]]}"}"
-    if [[ -n "$lstart" && "$lstart" != "$start" ]]; then
+    # Inline, not via _proc_lstart: pid_alive must stand alone (setup_* and
+    # the prologue contract extract it by itself). See _proc_lstart for why
+    # the fingerprint is pinned to C/UTC.
+    now="$(LC_ALL=C TZ=UTC /bin/ps -p "$pid" -o lstart= 2>/dev/null || true)"
+    now="${now#"${now%%[![:space:]]*}"}"
+    now="${now%"${now##*[![:space:]]}"}"
+    legacy="$(/bin/ps -p "$pid" -o lstart= 2>/dev/null || true)"
+    legacy="${legacy#"${legacy%%[![:space:]]*}"}"
+    legacy="${legacy%"${legacy##*[![:space:]]}"}"
+    if [[ -n "$now" && "$start" != "$now" && "$start" != "$legacy" ]]; then
       return 1
     fi
   fi
   return 0
 }
 
+# `ps -o lstart=` follows the caller's TZ and LC_TIME: the same process reads
+# "Thu Sep 24 19:46:48 2026" under launchd and "Fri Sep 25 02:46:48 2026" under
+# TZ=UTC, so a lock written in one environment and checked from another took a
+# LIVE owner for a reused pid and reclaimed its clone. The fingerprint is
+# written and compared pinned to C/UTC; the local form still matches locks a
+# wrapper wrote before the pin.
+_proc_lstart() {
+  local out
+  out="$(LC_ALL=C TZ=UTC /bin/ps -p "$1" -o lstart= 2>/dev/null || true)"
+  out="${out#"${out%%[![:space:]]*}"}"
+  printf '%s' "${out%"${out##*[![:space:]]}"}"
+}
+
+_proc_lstart_local() {
+  local out
+  out="$(/bin/ps -p "$1" -o lstart= 2>/dev/null || true)"
+  out="${out#"${out%%[![:space:]]*}"}"
+  printf '%s' "${out%"${out##*[![:space:]]}"}"
+}
+
 _write_runner_lock_files() {
   local dir="$1" start
-  start="$(/bin/ps -p $$ -o lstart= 2>/dev/null || true)"
-  start="${start#"${start%%[![:space:]]*}"}"
-  start="${start%"${start##*[![:space:]]}"}"
+  start="$(_proc_lstart $$)"
   printf '%s\n' "$start" > "$dir/start.tmp" && mv -f "$dir/start.tmp" "$dir/start"
   printf '%s\n' "$$" > "$dir/pid.tmp" && mv -f "$dir/pid.tmp" "$dir/pid"
 }
@@ -101,6 +125,11 @@ _stale_lock_dest() {
     name="shared.weekend-runner.lock.${tag}.${stamp}"
   else
     name="$(basename "${REPO:-$(dirname "$src")}").weekend-runner.lock.${tag}.${stamp}"
+  fi
+  # `mv -f dir existing-dir` moves INTO the existing one, so a second reclaim
+  # in the same second must never reuse a name.
+  if [[ -e "$dest_dir/$name" ]]; then
+    name="${name}.$$.${RANDOM}"
   fi
   printf '%s' "$dest_dir/$name"
 }
@@ -121,38 +150,132 @@ _read_runner_lock_identity() {
   LOCK_START="${LOCK_START%"${LOCK_START##*[![:space:]]}"}"
 }
 
+# A lock directory is published pid-less for the few milliseconds between
+# mkdir and the pid write. A wrapper SIGKILLed (or out of disk) inside that
+# window used to leave one that refused every later run forever. Past this
+# many minutes an unpublished lock is abandoned, not in flight.
+RUNNER_LOCK_UNPUBLISHED_GRACE_MINS="${RADON_WEEKEND_LOCK_GRACE_MINS:-5}"
+
+# `|| true` inside every $(...): under `set -E` the ERR trap also runs in a
+# command substitution, so a find that lost a race with a concurrent delete
+# fired on_crash (a false CRASHED page) and its output became a "path".
+_path_older_than_mins() {
+  [[ -n "$(find "$1" -maxdepth 0 -mmin +"$2" 2>/dev/null || true)" ]]
+}
+
+# A reclaim guard is abandoned when its recorded owner is dead, or, if it
+# never published one, after two minutes. Age alone is not enough: a slow
+# reclaim (a hung ps, a sleep/wake) must not have its guard broken under it.
+_guard_abandoned() {
+  local guard="$1" held start
+  held="$(cat "$guard/pid" 2>/dev/null || true)"
+  start="$(cat "$guard/start" 2>/dev/null || true)"
+  held="${held//[[:space:]]/}"
+  case "$held" in
+    ''|*[!0-9]*) _path_older_than_mins "$guard" 2; return ;;
+  esac
+  ! pid_alive "$held" "$start"
+}
+
+_inode() {
+  # GNU first: on Linux `stat -f` is filesystem status and exits 0.
+  stat -c %i "$1" 2>/dev/null || stat -f %i "$1" 2>/dev/null || true
+}
 
 acquire_runner_lock() {
-  local dir="$1" held start shape dest
+  local dir="$1" guard="$1.reclaim" rc gino moved
   if mkdir "$dir" 2>/dev/null; then
     _write_runner_lock_files "$dir"
     return 0
   fi
-  if [[ -d "$dir" ]]; then
+  # Reclaiming is judge-then-move, so two runs that both judged the same dead
+  # owner used to move each other's FRESH lock aside and both proceed: 7 of
+  # 80 three-way races ended with two owners of one clone. One reclaimer at a
+  # time, and it re-judges under the guard. The guard carries its owner, so a
+  # guard is broken only when that reclaimer is dead.
+  if ! mkdir "$guard" 2>/dev/null; then
+    if [[ ! -L "$guard" && -d "$guard" ]]; then
+      gino="$(_inode "$guard")"
+      if [[ -n "$gino" ]] && _guard_abandoned "$guard"; then
+        # Moved aside, not rm -rf'd, and proven to be the guard judged: two
+        # runs that both judged it abandoned must not delete each other's
+        # fresh guard.
+        moved="$guard.dead.$$.${RANDOM}"
+        if mv -- "$guard" "$moved" 2>/dev/null; then
+          if [[ "$(_inode "$moved")" == "$gino" ]]; then
+            rm -rf -- "$moved"
+          else
+            mv -- "$moved" "$guard" 2>/dev/null || true
+          fi
+        fi
+      fi
+    fi
+    if ! mkdir "$guard" 2>/dev/null; then
+      echo "weekend runner lock is being reclaimed by another run ($dir)" >&2
+      return 1
+    fi
+  fi
+  _write_runner_lock_files "$guard"
+  _acquire_runner_lock_guarded "$dir" && rc=0 || rc=$?
+  if [[ "$(cat "$guard/pid" 2>/dev/null || true)" == "$$" ]]; then
+    rm -rf -- "$guard"
+  fi
+  return "$rc"
+}
+
+# After moving a judged-stale lock aside, prove it was the one judged, by
+# inode (a fresh unpublished lock has the same empty pid as an abandoned one):
+# if a fresh owner's lock was moved instead, put it back and stand down.
+_moved_lock_was_judged() {
+  local dest="$1" dir="$2" judged_ino="$3"
+  [[ -n "$judged_ino" && "$(_inode "$dest")" == "$judged_ino" ]] && return 0
+  echo "[weekend] the lock changed hands during reclaim; restoring it" >&2
+  [[ -e "$dir" ]] || mv -- "$dest" "$dir" 2>/dev/null || true
+  return 1
+}
+
+_acquire_runner_lock_guarded() {
+  local dir="$1" held start shape dest ino
+  if mkdir "$dir" 2>/dev/null; then
+    _write_runner_lock_files "$dir"
+    return 0
+  fi
+  if [[ -L "$dir" ]]; then
+    echo "cannot take runner lock $dir" >&2
+    return 1
+  elif [[ -d "$dir" ]]; then
     shape=dir
+    ino="$(_inode "$dir")"
     held="$(cat "$dir/pid" 2>/dev/null || true)"
     start="$(cat "$dir/start" 2>/dev/null || true)"
     held="${held#"${held%%[![:space:]]*}"}"
     held="${held%"${held##*[![:space:]]}"}"
     start="${start#"${start%%[![:space:]]*}"}"
     start="${start%"${start##*[![:space:]]}"}"
-    if [[ -z "$held" ]]; then
-      echo "weekend runner lock held (pid not yet published): $dir" >&2
-      return 1
-    fi
     case "$held" in
-      *[!0-9]*)
-        echo "weekend runner lock held (pid not yet published): $dir" >&2
-        return 1
+      ''|*[!0-9]*)
+        if ! _path_older_than_mins "$dir" "$RUNNER_LOCK_UNPUBLISHED_GRACE_MINS"; then
+          echo "weekend runner lock held (pid not yet published): $dir" >&2
+          return 1
+        fi
+        echo "[weekend] reclaiming abandoned runner lock (no pid published for ${RUNNER_LOCK_UNPUBLISHED_GRACE_MINS}m)" >&2
+        _reap_dead_owner "$dir"
+        dest="$(_stale_lock_dest "$dir" "nopid")" || { echo "cannot take runner lock $dir" >&2; return 1; }
+        mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
+        _moved_lock_was_judged "$dest" "$dir" "$ino" || return 1
+        ;;
+      *)
+        if pid_alive "$held" "$start"; then
+          echo "weekend runner lock held by pid $held ($dir)" >&2
+          return 1
+        fi
+        echo "[weekend] reclaiming stale runner lock (pid $held, $shape)" >&2
+        _reap_dead_owner "$dir"
+        dest="$(_stale_lock_dest "$dir" "$held")" || { echo "cannot take runner lock $dir" >&2; return 1; }
+        mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
+        _moved_lock_was_judged "$dest" "$dir" "$ino" || return 1
         ;;
     esac
-    if pid_alive "$held" "$start"; then
-      echo "weekend runner lock held by pid $held ($dir)" >&2
-      return 1
-    fi
-    echo "[weekend] reclaiming stale runner lock (pid $held, $shape)" >&2
-    dest="$(_stale_lock_dest "$dir" "$held")" || { echo "cannot take runner lock $dir" >&2; return 1; }
-    mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
   elif [[ -f "$dir" ]]; then
     shape=file
     held="$(cat "$dir" 2>/dev/null || true)"
@@ -205,6 +328,315 @@ release_runner_lock() {
     return 0
   fi
   rm -rf -- "$dir"
+}
+
+# --- round process reaping ---------------------------------------------------
+# The runner lock names the WRAPPER, but the work is the agent's process tree.
+# Two ways that tree outlived its round:
+#   - an agent detaches a child into its own session (the testing skill runs
+#     its gate script with start_new_session=True). It leaves the round's
+#     process group, so the group kill never reached it, and on 2026-09-22/23
+#     the testing runs had pytest writing into the clone after the audit
+#     ended, straight through the next phase's `git clean`.
+#   - the wrapper itself is SIGKILLed (launchd ExitTimeOut, OOM, an operator
+#     kill -9). The round's `timeout` keeps the agent running for the rest of
+#     its cap, and the next run reclaimed the dead wrapper's lock and worked
+#     the same clone alongside it.
+# Round membership is never GUESSED from what a process looks like. On the
+# runner, `~/radon-weekend/radon` is also the Remote Control workspace:
+# radon-rc.sh agents, Claude Code daemons and interactive sessions (plus
+# anything they background) sit in it with no tty. A process is reaped only
+# when it is POSITIVELY known to be the round's:
+#   - a member of the round's process group;
+#   - a descendant of the round that a sampler saw while the round ran, still
+#     carrying the start time it had then; or
+#   - a pid the agent declared in $RADON_WEEKEND_DETACHED_PIDFILE for a job it
+#     detached, and only while that process still works in the clone, started
+#     during this round and is no Remote Control or daemon process.
+# The descendants of anything reaped go with it. The round's records live
+# OUTSIDE the clone, where the agent cannot rewrite them.
+
+# Grace between TERM and KILL. The signal path shortens it so launchd's
+# ExitTimeOut still leaves room for the KILLED page.
+REAP_GRACE_SECS="${RADON_WEEKEND_REAP_GRACE_SECS:-10}"
+
+# pid<TAB>cwd for every process this user owns.
+_cwd_listing() {
+  local d path lsof_bin
+  if [[ -e /proc/self/cwd ]]; then
+    for d in /proc/[0-9]*; do
+      path="$(readlink "$d/cwd" 2>/dev/null || true)"
+      [[ -n "$path" ]] || continue
+      printf '%s\t%s\n' "${d#/proc/}" "$path"
+    done
+    return 0
+  fi
+  lsof_bin=/usr/sbin/lsof
+  [[ -x "$lsof_bin" ]] || lsof_bin="$(command -v lsof 2>/dev/null || true)"
+  [[ -n "$lsof_bin" ]] || return 0
+  # lsof exits 1 whenever one process was unreadable; under pipefail that must
+  # not abort the wrapper that is only trying to clean up.
+  "$lsof_bin" -nP -w -a -u "$(id -u)" -d cwd -Fpn 2>/dev/null \
+    | awk '/^p/ { pid = substr($0, 2) } /^n/ { print pid "\t" substr($0, 2) }' || true
+  return 0
+}
+
+_pid_cwd_in() {
+  local pid="$1" root="$2" path
+  root="$(cd -P "$root" 2>/dev/null && pwd -P || true)"
+  [[ -n "$root" ]] || return 1
+  path="$(_cwd_listing | awk -F '\t' -v p="$pid" '$1 == p { print $2; exit }' || true)"
+  case "$path" in
+    "$root"|"$root"/*) return 0 ;;
+  esac
+  return 1
+}
+
+# Seconds process $1 has been running (from `ps -o etime=`, [[dd-]hh:]mm:ss).
+_proc_age_secs() {
+  local e d=0 h=0 m=0 s=0 a b c
+  e="$(/bin/ps -o etime= -p "$1" 2>/dev/null || true)"
+  e="${e//[[:space:]]/}"
+  [[ -n "$e" ]] || return 1
+  if [[ "$e" == *-* ]]; then
+    d="${e%%-*}"
+    e="${e#*-}"
+  fi
+  IFS=: read -r a b c <<< "$e"
+  if [[ -n "$c" ]]; then
+    h="$a"; m="$b"; s="$c"
+  else
+    m="$a"; s="$b"
+  fi
+  printf '%s' "$(( 10#$d * 86400 + 10#$h * 3600 + 10#$m * 60 + 10#$s ))"
+}
+
+# One ps snapshot, joined in awk: the round's live membership as
+# "pid<TAB>lstart" lines. A member is any process in the recorded set $2 (a
+# file of pid<TAB>lstart) that is still alive with the same start time, and
+# every live descendant of a member or of the root pids in $1. Remote Control
+# agents and Claude Code daemons are never members, and neither is anything
+# under one. The lstart is C/UTC with runs of spaces collapsed, so it compares
+# equal however it was written. Output is bounded by the live process table,
+# so the set never grows past what is actually running.
+_round_scan() {
+  local roots="${1:-}" recorded="${2:-/dev/null}"
+  [[ -f "$recorded" && ! -L "$recorded" ]] || recorded=/dev/null
+  LC_ALL=C TZ=UTC /bin/ps -axo pid=,ppid=,lstart=,command= 2>/dev/null | awk -v roots="$roots" -v rec="$recorded" '
+    function norm(s) { gsub(/[[:space:]]+/, " ", s); sub(/^ /, "", s); sub(/ $/, "", s); return s }
+    function foreign(c) { return c ~ /ClaudeCode\.app|--bg-pty-host|bg-spare|radon-rc\.sh|--remote-control/ }
+    BEGIN {
+      n = split(roots, r, /[[:space:]]+/)
+      for (i = 1; i <= n; i++) if (r[i] ~ /^[0-9]+$/) root[r[i]] = 1
+      while ((getline line < rec) > 0) {
+        t = index(line, "\t")
+        if (t > 1) seen[substr(line, 1, t - 1)] = norm(substr(line, t + 1)) }
+      close(rec) }
+    NF >= 7 {
+      pid = $1; parent[pid] = $2; start[pid] = $3 " " $4 " " $5 " " $6 " " $7
+      cmd = ""; for (i = 8; i <= NF; i++) cmd = cmd " " $i
+      command[pid] = cmd }
+    END {
+      for (p in seen) if ((p in start) && start[p] == seen[p] && !foreign(command[p])) member[p] = 1
+      for (p in parent) {
+        if (p in member || p in root || foreign(command[p])) continue
+        q = parent[p]; hops = 0; bad = 0
+        while (q != "" && q != "0" && q != "1" && hops < 128) {
+          if (q in member || q in root) break
+          if (foreign(command[q])) { bad = 1; break }
+          q = parent[q]; hops++ }
+        if (!bad && (q in member || q in root)) member[p] = 1 }
+      for (p in member) if (!(p in root)) print p "\t" start[p]
+    }' || true
+}
+
+# Take in the pids the agent declared for jobs it detached. A declaration is
+# accepted only if it is prompt, and it is recorded with its start time, so a
+# later reuse of the pid can never match:
+#   - the process started during this round and at most 30s before it was
+#     first seen declared (a stale or sloppy entry, e.g. `pgrep -f pytest`,
+#     names older processes);
+#   - it works in the clone and has no controlling terminal;
+#   - it is not a Remote Control or Claude Code daemon process.
+# One pid per line; a line with anything else on it is ignored.
+_ingest_declarations() {
+  local clone="$1" observed="$2" since="${3:-}" pidfile="${RADON_WEEKEND_DETACHED_PIDFILE:-}" pid rest now age tty cmd
+  [[ -n "$pidfile" && -f "$pidfile" && ! -L "$pidfile" ]] || return 0
+  case "$since" in ''|*[!0-9]*) return 0 ;; esac
+  now="$(date +%s)"
+  while read -r pid rest; do
+    [[ -z "$rest" ]] || continue
+    case "$pid" in ''|*[!0-9]*|0|1) continue ;; esac
+    [[ "$pid" != "$$" ]] || continue
+    grep -q "^${pid}"$'\t' "$observed" 2>/dev/null && continue
+    age="$(_proc_age_secs "$pid" || true)"
+    [[ -n "$age" ]] || continue
+    (( now - age >= since - 2 && age <= ${RADON_WEEKEND_DECLARE_WINDOW_SECS:-30} )) || continue
+    tty="$(/bin/ps -o tty= -p "$pid" 2>/dev/null || true)"
+    tty="${tty//[[:space:]]/}"
+    [[ "$tty" == '??' || "$tty" == '?' ]] || continue
+    cmd="$(/bin/ps -o command= -p "$pid" 2>/dev/null || true)"
+    case "$cmd" in
+      ''|*ClaudeCode.app*|*--bg-pty-host*|*bg-spare*|*radon-rc.sh*|*--remote-control*) continue ;;
+    esac
+    _pid_cwd_in "$pid" "$clone" || continue
+    printf '%s\t%s\n' "$pid" "$(_proc_lstart "$pid")" >> "$observed"
+  done < "$pidfile"
+  return 0
+}
+
+# Where this clone's round records live: beside the clones, never inside one.
+_round_state_dir() {
+  local clone="${1:-${REPO:-}}" root dir
+  [[ -n "$clone" ]] || return 1
+  root="${WEEKEND_ROOT:-$(dirname "$clone")}"
+  dir="$root/.runner-state/$(basename "$clone")"
+  refuse_symlink "$root/.runner-state" || return 1
+  mkdir -p "$dir" 2>/dev/null || return 1
+  refuse_symlink "$dir" || return 1
+  chmod 0700 "$root/.runner-state" "$dir" 2>/dev/null || true
+  printf '%s' "$dir"
+}
+
+ROUND_STARTED_AT=""
+ROUND_SAMPLER_PID=""
+
+# Before a round launches: stamp its start and hand the agent a place to
+# declare what it detaches.
+_prepare_round() {
+  ROUND_STARTED_AT="$(date +%s)"
+  if [[ -n "${REPO:-}" && -d "$REPO" ]]; then
+    export RADON_WEEKEND_DETACHED_PIDFILE="$REPO/.weekend-detached-pids"
+    refuse_symlink "$RADON_WEEKEND_DETACHED_PIDFILE" && rm -f -- "$RADON_WEEKEND_DETACHED_PIDFILE" || true
+  fi
+  return 0
+}
+
+# After a round launches: record its group outside the clone and sample its
+# descendants every second until it ends. The sampler outlives a SIGKILLed
+# wrapper and keeps recording until the round itself is gone.
+_record_round() {
+  local state tmp
+  [[ -n "${ROUND_PID:-}" ]] || return 0
+  state="$(_round_state_dir "${REPO:-}" 2>/dev/null || true)"
+  [[ -n "$state" ]] || return 0
+  tmp="$(mktemp "$state/round.XXXXXX" 2>/dev/null || true)"
+  [[ -n "$tmp" ]] || return 0
+  printf '%s\n%s\n%s\n' "$ROUND_PID" "$(_proc_lstart "$ROUND_PID")" "${ROUND_STARTED_AT:-$(date +%s)}" > "$tmp" \
+    && mv -f -- "$tmp" "$state/round" || rm -f -- "$tmp"
+  : > "$state/observed"
+  (
+    trap - INT TERM HUP EXIT ERR
+    set +e
+    round_start="$(_proc_lstart "$ROUND_PID")"
+    while kill -0 "$ROUND_PID" 2>/dev/null && [[ "$(_proc_lstart "$ROUND_PID")" == "$round_start" ]]; do
+      _ingest_declarations "${REPO:-}" "$state/observed" "${ROUND_STARTED_AT:-}"
+      # Rewritten, not appended: the recorded set is exactly what is alive.
+      _round_scan "$ROUND_PID" "$state/observed" > "$state/observed.next" \
+        && mv -f -- "$state/observed.next" "$state/observed"
+      sleep 1
+    done
+  ) </dev/null >/dev/null 2>&1 &
+  ROUND_SAMPLER_PID=$!
+  return 0
+}
+
+# TERM, a grace period, then KILL whatever is left.
+_reap_pids() {
+  local pids="${1:-}" alive p i
+  [[ -n "${pids//[[:space:]]/}" ]] || return 0
+  echo "[weekend] reaping leftover round processes: $pids" >&2
+  kill -TERM $pids 2>/dev/null || true
+  for (( i = 0; i < REAP_GRACE_SECS; i++ )); do
+    alive=""
+    for p in $pids; do
+      if kill -0 "$p" 2>/dev/null; then alive="$alive $p"; fi
+    done
+    [[ -n "$alive" ]] || return 0
+    sleep 1
+  done
+  alive=""
+  for p in $pids; do
+    if kill -0 "$p" 2>/dev/null; then alive="$alive $p"; fi
+  done
+  [[ -z "$alive" ]] || kill -KILL $alive 2>/dev/null || true
+  return 0
+}
+
+_reap_group() {
+  local pgid="$1" i
+  kill -TERM -- "-$pgid" 2>/dev/null || kill -TERM "$pgid" 2>/dev/null || return 0
+  for (( i = 0; i < REAP_GRACE_SECS; i++ )); do
+    kill -0 -- "-$pgid" 2>/dev/null || return 0
+    sleep 1
+  done
+  kill -KILL -- "-$pgid" 2>/dev/null || true
+  return 0
+}
+
+# The round's positively identified leftovers in clone $1, from the records
+# in state dir $2 (round start $3), as a pid list.
+_round_leftover_pids() {
+  local clone="$1" state="$2" since="${3:-}"
+  [[ -n "$state" && -d "$state" ]] || return 0
+  [[ -f "$state/observed" && ! -L "$state/observed" ]] || : > "$state/observed"
+  _ingest_declarations "$clone" "$state/observed" "$since"
+  _round_scan "" "$state/observed" | awk -F '\t' '{ printf "%s ", $1 }' || true
+}
+
+_stop_round_sampler() {
+  local pid="${ROUND_SAMPLER_PID:-}"
+  ROUND_SAMPLER_PID=""
+  [[ -n "$pid" ]] || return 0
+  kill -TERM "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  return 0
+}
+
+_clear_round_record() {
+  local state
+  state="$(_round_state_dir "${REPO:-}" 2>/dev/null || true)"
+  [[ -n "$state" ]] || return 0
+  rm -f -- "$state/round" "$state/observed"
+  return 0
+}
+
+# The previous owner of lock $1 is dead: stop the round it left running. The
+# recorded group is trusted only while its leader still has the recorded start
+# time AND still works inside this clone.
+_reap_dead_owner() {
+  local dir="$1" clone state pgid="" lstart="" since=""
+  clone="$(dirname "$dir")"
+  state="$(_round_state_dir "$clone" 2>/dev/null || true)"
+  [[ -n "$state" && -f "$state/round" && ! -L "$state/round" ]] || return 0
+  { read -r pgid; read -r lstart; read -r since; } < "$state/round" 2>/dev/null || true
+  case "$pgid" in
+    ''|*[!0-9]*|0|1) pgid="" ;;
+  esac
+  if [[ -n "$pgid" && -n "$lstart" && "$(_proc_lstart "$pgid")" == "$lstart" ]] && _pid_cwd_in "$pgid" "$clone"; then
+    echo "[weekend] reaping round group $pgid left running by the dead owner" >&2
+    _reap_group "$pgid"
+  fi
+  _reap_pids "$(_round_scan "" "$state/observed" | awk -F '\t' '{ printf "%s ", $1 }' || true)"
+  rm -f -- "$state/round" "$state/observed"
+  return 0
+}
+
+# A git killed mid-write leaves its lock file, and every later git in that
+# gitdir fails. The runner lock is held here, so the host work tree's own
+# index.lock and HEAD.lock can only be this loop's and go outright. Ref,
+# packed-refs, shallow and config locks are shared with interactive worktrees
+# of this gitdir, so only ones abandoned for ten minutes go. R-385.
+clear_stale_git_locks() {
+  local g="${1:-}" f
+  [[ -n "$g" && -d "$g" && ! -L "$g" ]] || return 0
+  rm -f -- "$g/index.lock" "$g/HEAD.lock"
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    echo "[weekend] removing abandoned git lock $f" >&2
+    rm -f -- "$f"
+  done <<< "$(find "$g" \( -path "$g/objects" -o -path "$g/worktrees" -o -path "$g/modules" \) -prune -o -type f -name '*.lock' -mmin +10 -print 2>/dev/null || true)"
+  return 0
 }
 
 sweep_shared_parent_lock() {
@@ -831,14 +1263,26 @@ on_crash() {
 # operator to read quiet as "still running", so they waited. R-384.
 ROUND_PID=""
 kill_round_group() {
-  [[ -n "$ROUND_PID" ]] || return 0
   # `timeout` (deliberately WITHOUT --foreground) makes itself the round's
   # process-group leader, so the negative pid reaches claude and anything it
   # left behind. --foreground would signal only timeout's direct child, which
   # is the opposite of what reaping orphaned subagents needs — they would keep
   # writing into the clone while the next round runs `git --git-dir="$HOST_GITDIR" --work-tree="$REPO" clean -fdxq`. R-386.
-  kill -TERM -- "-$ROUND_PID" 2>/dev/null || kill -TERM "$ROUND_PID" 2>/dev/null || true
+  # TERM alone was never followed up: a member that ignored it outlived the
+  # round. It now gets ten seconds, then KILL.
+  local state
+  if [[ -n "$ROUND_PID" ]]; then
+    _reap_group "$ROUND_PID"
+  fi
   ROUND_PID=""
+  _stop_round_sampler
+  # A child that detached into its own session left the group above. Reap
+  # only what is positively the round's: see `_round_leftover_pids`.
+  state="$(_round_state_dir "${REPO:-}" 2>/dev/null || true)"
+  if [[ -n "$state" ]]; then
+    _reap_pids "$(_round_leftover_pids "${REPO:-}" "$state" "${ROUND_STARTED_AT:-}")"
+  fi
+  _clear_round_record
 }
 
 
@@ -950,6 +1394,8 @@ start_browser_host() {
 on_signal() {
   local sig="$1"
   trap - INT TERM HUP ERR EXIT
+  # launchd SIGKILLs at ExitTimeOut: a short grace leaves room to page.
+  REAP_GRACE_SECS=3
   kill_round_group
   stop_browser_host
   # REL-199 (R-531): launchd's default ExitTimeOut is ~20s and report()'s gh
@@ -1249,11 +1695,12 @@ resolve_green_main_sha() {
   git --git-dir="$HOST_GITDIR" --work-tree="$REPO" show origin/main:scripts/nightly_green_base.py 2>/dev/null \
     | GIT_DIR="$HOST_GITDIR" "$TIMEOUT_BIN" "${RADON_WEEKEND_GREEN_BASE_TIMEOUT_SECS:-60}" \
       /usr/bin/python3 -I - --repo "${RADON_WEEKEND_GH_REPO:-joemccann/radon}" \
-      --repo-dir "$REPO" --head origin/main --gh-bin "$GH_BIN" 2>/dev/null || true
+      --repo-dir "$REPO" --head origin/main --gh-bin "$GH_BIN" 2>>"${RUN_LOG:-/dev/null}" || true
   return 0
 }
 
 ground_truth() {
+  clear_stale_git_locks "$HOST_GITDIR"
   fetch_origin_with_retry || return 1
   # T-490: a hand-set sparse checkout (`/*` + `!/.codex/`, radon-testing,
   # 2026-09-08) hid the tracked `.codex/skills/**` render from every audit
@@ -1758,7 +2205,9 @@ run_phase() {
     # wrapper was not acted on until `claude` finished on its own — which is
     # never, in the case that matters. `-k` escalates to SIGKILL so a claude
     # blocked on a hung child cannot make the cap advisory. R-384, R-386.
+    _prepare_round
     launch_round "$remain"
+    _record_round
     round_start=$SECONDS
     wait "$ROUND_PID"
     RC=$?
