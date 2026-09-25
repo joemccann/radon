@@ -337,11 +337,11 @@ describe("PreferencesSection", () => {
 
   it("shows the group save only when a value is dirty", async () => {
     await renderSection();
-    expect(screen.queryByTestId("preference-group-save-feature-flags")).toBeNull();
+    expect(screen.queryByTestId("preference-group-save-scanning")).toBeNull();
     fireEvent.change(screen.getByTestId("preference-input-RADON_SCANNER_WORKERS"), {
       target: { value: "40" },
     });
-    const saveGroup = screen.getByTestId("preference-group-save-feature-flags");
+    const saveGroup = screen.getByTestId("preference-group-save-scanning");
     expect(saveGroup.textContent).toBe("Save changes");
     mocks.savePreference.mockResolvedValue({
       preference: { ...structuredClone(WORKERS), value: 40, source: "db" },
@@ -352,7 +352,7 @@ describe("PreferencesSection", () => {
       expect(mocks.savePreference).toHaveBeenCalledWith("RADON_SCANNER_WORKERS", 40);
     });
     await waitFor(() => {
-      expect(screen.queryByTestId("preference-group-save-feature-flags")).toBeNull();
+      expect(screen.queryByTestId("preference-group-save-scanning")).toBeNull();
     });
   });
 
