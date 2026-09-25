@@ -337,3 +337,78 @@ def test_trade_duplicate_uncovered_day_stays_unverified(monkeypatch):
     rows = [_individual_fill('0001aaaa.6a000001.01.01', 3, 1.00)]
     _stub_trade_journal(monkeypatch, executions, rows)
     assert ingest.delivery_rows_present(ingest.TRADES, TRADE_XML) is False
+
+
+# 2026-09-25 page 722f1b39: Flex ibExecID is the live journal id minus one
+# trailing segment (0000f126.6ab14023.03.01 vs ….03.01.01). Flex symbol= is
+# the OCC local symbol, so the individual-fill contract key also misses the
+# underlying-ticker row. The fill is already journaled. Coverage must confirm.
+def test_live_five_part_exec_id_covers_flex_ib_exec_id(monkeypatch):
+    from datetime import datetime
+    from decimal import Decimal
+    from trade_blotter.models import Execution, SecurityType, Side
+
+    flex_id = '0000f126.6ab14023.03.01'
+    when = datetime(2026, 9, 21, 10, 15, 0)
+    execution = Execution(
+        exec_id=flex_id,
+        time=when,
+        symbol='SPCX  261016C00155000',
+        sec_type=SecurityType.OPTION,
+        side=Side.SELL,
+        quantity=Decimal('100'),
+        price=Decimal('1.25'),
+        commission=Decimal('0'),
+        strike=Decimal('155'),
+        right='C',
+        expiry='20261016',
+    )
+    row = {
+        'date': '2026-09-21',
+        'ticker': 'SPCX',
+        'action': 'SELL_OPTION',
+        'fill_price': 1.25,
+        'contracts': 100,
+        'strike': 155.0,
+        'right': 'C',
+        'expiry': '20261016',
+        'ib_exec_id': flex_id + '.01',
+        'structure': 'Closed Call $155 2026-10-16',
+    }
+    _stub_trade_journal(monkeypatch, [execution], [row])
+    assert ingest.delivery_rows_present(ingest.TRADES, TRADE_XML) is True
+
+
+def test_live_exec_id_alias_does_not_cover_the_other_leg(monkeypatch):
+    from datetime import datetime
+    from decimal import Decimal
+    from trade_blotter.models import Execution, SecurityType, Side
+
+    when = datetime(2026, 9, 21, 10, 15, 0)
+    execution = Execution(
+        exec_id='0000f126.6ab14023.02.01',
+        time=when,
+        symbol='SPCX  261016C00170000',
+        sec_type=SecurityType.OPTION,
+        side=Side.BUY,
+        quantity=Decimal('100'),
+        price=Decimal('0.40'),
+        commission=Decimal('0'),
+        strike=Decimal('170'),
+        right='C',
+        expiry='20261016',
+    )
+    row = {
+        'date': '2026-09-21',
+        'ticker': 'SPCX',
+        'action': 'SELL_OPTION',
+        'fill_price': 1.25,
+        'contracts': 100,
+        'strike': 155.0,
+        'right': 'C',
+        'expiry': '20261016',
+        'ib_exec_id': '0000f126.6ab14023.03.01.01',
+        'structure': 'Closed Call $155 2026-10-16',
+    }
+    _stub_trade_journal(monkeypatch, [execution], [row])
+    assert ingest.delivery_rows_present(ingest.TRADES, TRADE_XML) is False

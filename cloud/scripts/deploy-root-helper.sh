@@ -138,6 +138,7 @@ if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
   readonly BOOTSTRAP_RUNNER="${RADON_TEST_BOOTSTRAP_RUNNER:-/bin/bash}"
   readonly RADON_GIT_DIR="${RADON_TEST_GIT_DIR:-}"
   readonly UNIT_REMOTE="${RADON_TEST_UNIT_REMOTE:-}"
+  readonly PROVISION_ROOT="${RADON_TEST_PROVISION_ROOT:-${STATE_DIR}/provision}"
   readonly SYSTEMD_DIR="${RADON_TEST_SYSTEMD_DIR:-}"
   readonly FORCE_GITHUB_REMOTE_CHECK="${RADON_TEST_FORCE_GITHUB_REMOTE_CHECK:-0}"
   readonly TEST_SYSTEMCTL_TIMEOUT="${RADON_TEST_SYSTEMCTL_TIMEOUT:-1}"
@@ -200,6 +201,7 @@ else
   readonly BOOTSTRAP_RUNNER=/bin/bash
   readonly RADON_GIT_DIR=/home/radon/radon/.git
   readonly UNIT_REMOTE=https://github.com/joemccann/radon.git
+  readonly PROVISION_ROOT=/opt/radon-provision
   readonly SYSTEMD_DIR=/etc/systemd/system
   readonly FORCE_GITHUB_REMOTE_CHECK=1
   readonly REPLICA_FILES=(
@@ -217,6 +219,10 @@ readonly CONTROL_PLANE_MANIFEST="${CONTROL_PLANE_ROOT}/var/lib/radon/control-pla
 readonly CONTROL_PLANE_READY="${CONTROL_PLANE_ROOT}/var/lib/radon/control-plane-ready"
 readonly GATEWAY_TRANSITION_FILE="${CONTROL_PLANE_ROOT}/var/lib/radon/ib-gateway-transition.json"
 readonly LOGICAL_CONTROL_PLANE_MANIFEST="/var/lib/radon/control-plane-manifest.sha256"
+# Root's own bare clone of UNIT_REMOTE: the only git store privileged bytes are
+# read from. RADON_GIT_DIR (the radon-owned checkout) supplies the HEAD commit
+# id and nothing else.
+readonly PROVISION_GIT_DIR="${PROVISION_ROOT}/radon.git"
 
 # Where control-plane bytes are read from. refresh_control_plane repoints this
 # at a root-owned staging copy of the git blobs for the deployed commit, so the
@@ -751,7 +757,7 @@ stage_caddy_candidate() {
   else
     "$INSTALL" -m 0600 -o root -g root /dev/null "$candidate" || return $?
   fi
-  git_bounded --git-dir="$RADON_GIT_DIR" cat-file blob \
+  provision_git cat-file blob \
     "${tip}:cloud/caddy/Caddyfile" > "$candidate"
 }
 
@@ -985,7 +991,7 @@ install_manifest_units() {
   }
 
   tip="$(resolve_trusted_main_tip)" || return $?
-  manifest="$(git_bounded --git-dir="$RADON_GIT_DIR" cat-file blob \
+  manifest="$(provision_git cat-file blob \
     "${tip}:cloud/config/installed-units.sha256")" || {
     echo "installed-units manifest is missing at main tip" >&2
     return 66
@@ -1020,7 +1026,7 @@ install_manifest_units() {
 
     candidate="$(mktemp "${SYSTEMD_UNIT_DIR}/.${unit}.candidate.XXXXXX")"
     chmod 0600 "$candidate"
-    if ! git_bounded --git-dir="$RADON_GIT_DIR" cat-file blob \
+    if ! provision_git cat-file blob \
          "${tip}:cloud/services/${unit}" > "$candidate"; then
       "$RM" -f "$candidate"
       skipped+=("${unit} (not-at-main-tip)")
@@ -1144,6 +1150,89 @@ git_bounded() {
   fi
 }
 
+# The checkout store is radon-owned: radon can rewrite its loose or packed
+# object files or add alternates, and a git read does not re-hash an object.
+# So every privileged byte comes from PROVISION_GIT_DIR, a root-owned bare
+# clone whose objects arrive only by fetch from UNIT_REMOTE (hashed by
+# index-pack, checked by fsck). No system or global git config applies.
+provision_git() {
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+    git_bounded --git-dir="$PROVISION_GIT_DIR" "$@"
+}
+
+# The tip read names no repository, so it runs from / with no system or
+# global config: sudo keeps the caller's cwd, and radon owns every repo it
+# can cd into. Protocol v1 for the reason given at the install-units read.
+remote_main_sha() {
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+    GIT_CEILING_DIRECTORIES=/ \
+    git_bounded -C / -c protocol.version=1 ls-remote --refs "$UNIT_REMOTE" refs/heads/main | awk '{print $1}'
+}
+
+provision_fetch() {
+  local -a bound=()
+  [[ -n "${TIMEOUT:-}" ]] && bound=("$TIMEOUT" --signal=TERM --kill-after=5s 120s)
+  # Protocol v1 for the same reason as the ls-remote reads below.
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+    ${bound[@]+"${bound[@]}"} "$GIT" --git-dir="$PROVISION_GIT_DIR" \
+    -c protocol.version=1 -c fetch.fsckObjects=true -c transfer.fsckObjects=true \
+    -c gc.autoDetach=false -c maintenance.autoDetach=false \
+    fetch --quiet --no-tags --no-recurse-submodules \
+    "$UNIT_REMOTE" "+refs/heads/main:refs/remotes/pinned/main"
+}
+
+# Owned by root (the invoking user in test mode), not a link, and writable by
+# nobody else.
+provision_dir_is_private() {
+  local mode
+  directory_is_root_owned "$1" || return 1
+  mode="$(file_mode "$1")" || return 1
+  (( (8#$mode & 8#022) == 0 ))
+}
+
+# First run creates the store; every run refuses one radon could write.
+ensure_provision_store() {
+  if [[ ! -e "$PROVISION_ROOT" && ! -L "$PROVISION_ROOT" ]]; then
+    if (( HELPER_TEST_MODE == 1 )); then
+      "$INSTALL" -d -m 0755 "$PROVISION_ROOT" || return 73
+    else
+      "$INSTALL" -d -m 0755 -o root -g root "$PROVISION_ROOT" || return 73
+    fi
+  fi
+  provision_dir_is_private "$PROVISION_ROOT" || {
+    echo "root provision store is not a root-only directory: ${PROVISION_ROOT}" >&2
+    return 74
+  }
+  if [[ ! -e "$PROVISION_GIT_DIR" && ! -L "$PROVISION_GIT_DIR" ]]; then
+    ( umask 022 && provision_git init --quiet --bare ) >/dev/null || {
+      echo "could not create the root provision store: ${PROVISION_GIT_DIR}" >&2
+      return 73
+    }
+  fi
+  provision_dir_is_private "$PROVISION_GIT_DIR" && \
+    provision_dir_is_private "${PROVISION_GIT_DIR}/objects" || {
+    echo "root provision store is not a root-only directory: ${PROVISION_GIT_DIR}" >&2
+    return 74
+  }
+}
+
+# Makes $1, the commit the pinned remote just reported as main, readable from
+# the root store. Already present means no network round trip: only fetches
+# from UNIT_REMOTE ever write that store. Unreachable remote: fail closed.
+provision_store_has_tip() {
+  local tip="$1"
+  ensure_provision_store || return $?
+  provision_git cat-file -e "${tip}^{commit}" 2>/dev/null && return 0
+  provision_fetch || {
+    echo "could not fetch the GitHub main tip into the root provision store" >&2
+    return 69
+  }
+  provision_git cat-file -e "${tip}^{commit}" 2>/dev/null || {
+    echo "the root provision store does not carry the GitHub main tip ${tip}" >&2
+    return 69
+  }
+}
+
 # Allowlisted non-control-plane units only. Content comes from git objects at
 # the GitHub main tip -- never from the radon-writable checkout -- and must
 # match installed-units.sha256. Install is 0644 root:root plus one
@@ -1173,7 +1262,7 @@ resolve_trusted_main_tip() {
   # unauthenticated v2 ls-refs POST against the public repo answers 401
   # ("could not read Username"), which failed every deploy at the first real
   # sync-control-plane run (2026-09-02).
-  remote_sha="$(git_bounded -c protocol.version=1 ls-remote --refs "$UNIT_REMOTE" refs/heads/main | awk '{print $1}')" || {
+  remote_sha="$(remote_main_sha)" || {
     echo "could not read the GitHub main tip" >&2
     return 69
   }
@@ -1189,10 +1278,7 @@ resolve_trusted_main_tip() {
     echo "HEAD is not the GitHub main tip; refusing unit install" >&2
     return 76
   }
-  git_bounded --git-dir="$RADON_GIT_DIR" cat-file -e "${remote_sha}^{commit}" || {
-    echo "local git store is missing the main tip" >&2
-    return 66
-  }
+  provision_store_has_tip "$remote_sha" || return $?
   printf '%s\n' "$remote_sha"
 }
 
@@ -1222,7 +1308,7 @@ resolve_fetched_main_tip() {
   # unauthenticated v2 ls-refs POST against the public repo answers 401
   # ("could not read Username"), which failed every deploy at the first real
   # sync-control-plane run (2026-09-02).
-  remote_sha="$(git_bounded -c protocol.version=1 ls-remote --refs "$UNIT_REMOTE" refs/heads/main | awk '{print $1}')" || {
+  remote_sha="$(remote_main_sha)" || {
     echo "could not read the GitHub main tip" >&2
     return 69
   }
@@ -1230,10 +1316,7 @@ resolve_fetched_main_tip() {
     echo "invalid GitHub main tip" >&2
     return 69
   }
-  git_bounded --git-dir="$RADON_GIT_DIR" cat-file -e "${remote_sha}^{commit}" || {
-    echo "local git store is missing the main tip; fetch origin main first" >&2
-    return 66
-  }
+  provision_store_has_tip "$remote_sha" || return $?
   printf '%s\n' "$remote_sha"
 }
 
@@ -1251,11 +1334,11 @@ sync_control_plane() {
   local tip workdir bootstrap rc
 
   tip="$(resolve_fetched_main_tip)" || return $?
-  workdir="$(mktemp -d "${STATE_DIR}/control-plane-sync.XXXXXX")" || {
+  workdir="$(mktemp -d "${PROVISION_ROOT}/control-plane-sync.XXXXXX")" || {
     echo "could not create a root-owned control-plane staging tree" >&2
     return 73
   }
-  if ! git_bounded --git-dir="$RADON_GIT_DIR" archive --format=tar "$tip" cloud \
+  if ! provision_git -c tar.umask=022 archive --format=tar "$tip" cloud \
       | "$TAR" -x -C "$workdir"; then
     "$RM" -rf "$workdir"
     echo "could not extract cloud/ at the GitHub main tip ${tip}" >&2
@@ -1287,12 +1370,12 @@ sync_scheduled_units() {
   }
   remote_sha="$(resolve_trusted_main_tip)" || return $?
 
-  allowlist="$(git_bounded --git-dir="$RADON_GIT_DIR" cat-file blob \
+  allowlist="$(provision_git cat-file blob \
     "${remote_sha}:cloud/config/auto-sync-units.txt")" || {
     echo "auto-sync unit allowlist is missing at main tip" >&2
     return 66
   }
-  manifest="$(git_bounded --git-dir="$RADON_GIT_DIR" cat-file blob \
+  manifest="$(provision_git cat-file blob \
     "${remote_sha}:cloud/config/installed-units.sha256")" || {
     echo "installed-units manifest is missing at main tip" >&2
     return 66
@@ -1332,8 +1415,8 @@ sync_scheduled_units() {
       return 74
     fi
 
-    tmp="$(mktemp "${STATE_DIR}/scheduled-unit.XXXXXX")"
-    if ! git_bounded --git-dir="$RADON_GIT_DIR" cat-file blob \
+    tmp="$(mktemp "${PROVISION_ROOT}/scheduled-unit.XXXXXX")"
+    if ! provision_git cat-file blob \
          "${remote_sha}:cloud/services/${unit}" > "$tmp"; then
       "$RM" -f "$tmp"
       echo "allowlisted unit blob is missing at main tip: ${unit}" >&2
@@ -1705,7 +1788,7 @@ resolve_deployed_control_plane_commit() {
       return 76
     }
   fi
-  remote_sha="$(git_bounded -c protocol.version=1 ls-remote --refs "$UNIT_REMOTE" refs/heads/main | awk '{print $1}')" || {
+  remote_sha="$(remote_main_sha)" || {
     echo "could not read the GitHub main tip" >&2
     return 69
   }
@@ -1721,15 +1804,10 @@ resolve_deployed_control_plane_commit() {
     echo "invalid local HEAD" >&2
     return 66
   }
-  # Ancestry can only be decided against an object this host actually has.
-  # The deploy job fetches main as radon before asking; a missing tip is a
-  # broken deploy, not a licence to install unreviewed bytes.
-  git_bounded --git-dir="$RADON_GIT_DIR" cat-file -e "${remote_sha}^{commit}" || {
-    echo "local git store is missing the main tip" >&2
-    return 66
-  }
-  git_bounded --git-dir="$RADON_GIT_DIR" merge-base --is-ancestor \
-    "$local_sha" "$remote_sha" || {
+  # Ancestry is decided in the root store, which holds main's history. A HEAD
+  # it does not carry was never on main.
+  provision_store_has_tip "$remote_sha" || return $?
+  provision_git merge-base --is-ancestor "$local_sha" "$remote_sha" 2>/dev/null || {
     echo "HEAD is not reachable from the GitHub main tip; refusing control-plane refresh" >&2
     return 76
   }
@@ -1751,7 +1829,7 @@ stage_control_plane_sources() {
     mkdir -p "$(dirname -- "$staged")" || return 73
     # A source absent at this commit stays absent, so the existing
     # missing-source arms (drop-in rollback, app-role skip) still decide.
-    if ! git_bounded --git-dir="$RADON_GIT_DIR" cat-file blob \
+    if ! provision_git cat-file blob \
       "${commit}:cloud/${source_rel}" > "$staged" 2>/dev/null; then
       /bin/rm -f -- "$staged"
       continue
@@ -1780,8 +1858,7 @@ refresh_control_plane() {
   fi
 
   commit="$(resolve_deployed_control_plane_commit)" || return $?
-  mkdir -p "$STATE_DIR" || return 73
-  staging="$(mktemp -d "${STATE_DIR}/control-plane-src.XXXXXX")" || return 73
+  staging="$(mktemp -d "${PROVISION_ROOT}/control-plane-src.XXXXXX")" || return 73
   chmod 0700 "$staging"
   CONTROL_PLANE_SOURCE_ROOT="$staging"
   stage_control_plane_sources "$commit" "$staging" || rc=$?

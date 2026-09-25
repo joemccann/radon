@@ -17,7 +17,7 @@ from pathlib import Path
 
 from utils.atomic_io import atomic_save
 from research import figures as figure_detect
-from research import book, force_include, ground, identify, learn, novelty, triage
+from research import book, charts as chart_plan, force_include, ground, identify, learn, novelty, triage
 from research.pipeline import DocumentDeadlineExceeded, EvidenceError, DOCUMENT_BUDGET_SECS, REVIEWER_CALL_TIMEOUT_SECS, comparison_posts
 
 MAX_CANDIDATES = 8
@@ -320,6 +320,10 @@ class Pipeline:
             manifest = out / 'manifest.json'
             if manifest.is_file():
                 post['source']['evidenceUrl'] = self.publisher.store_asset(manifest)
+            if not candidate['figure_ids']:
+                planned = chart_plan.plan(candidate['title'] + '\n' + candidate['content'])
+                if planned:
+                    post['source']['charts'] = planned
             posts.append(post)
         review['posts'] = posts
         if posts:

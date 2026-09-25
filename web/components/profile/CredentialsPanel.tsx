@@ -57,6 +57,7 @@ export default function CredentialsPanel() {
   const [pageError, setPageError] = useState<string | null>(null);
   // drafts keyed by field name; only non-empty drafts are submitted.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [revealedSecrets, setRevealedSecrets] = useState<Record<string, boolean>>({});
   const [busyService, setBusyService] = useState<string | null>(null);
   const [notices, setNotices] = useState<Record<string, ServiceNotice>>({});
   const [attempts, setAttempts] = useState<Record<string, number>>({});
@@ -214,8 +215,8 @@ export default function CredentialsPanel() {
       ) : null}
       {groups.map(({ group, services }) => (
         <section className="admin-card preferences-group" key={group}>
-          <header className="admin-card-header">
-            <span className="admin-card-title">{group}</span>
+          <header className="admin-card-header preferences-group__header">
+            <h2 className="admin-card-title">{group}</h2>
           </header>
 
           {services.map((service) => {
@@ -225,7 +226,7 @@ export default function CredentialsPanel() {
             const slug = serviceSlug(service.id);
             return (
               <div
-                className="preferences-row preferences-row--service"
+                className="preferences-row preferences-row--service settings-service"
                 data-testid={`credential-service-${slug}`}
                 key={service.id}
               >
@@ -233,11 +234,11 @@ export default function CredentialsPanel() {
                   <span className="preferences-row__label">{service.label}</span>
                   {service.slow ? (
                     <span className="preferences-badge preferences-badge--restart">
-                      SLOW CHECK
+                      Longer verification
                     </span>
                   ) : null}
                   {!service.validator ? (
-                    <span className="preferences-badge">NO LIVE CHECK</span>
+                    <span className="preferences-badge">Not checked live</span>
                   ) : null}
                 </div>
                 {service.note ? (
@@ -247,26 +248,38 @@ export default function CredentialsPanel() {
                 <div className="credentials-fields">
                   {service.fields.map((field) => (
                     <div className="credentials-field" key={field.name}>
-                      <label className="credentials-field__meta" htmlFor={`cred-${field.name}`}>
+                      <div className="credentials-field__meta">
                         <span className="credentials-field__title">
-                          <span className="preferences-row__label">{field.label}</span>
-                          <code className="preferences-row__key">{field.name}</code>
+                          <label className="preferences-row__label" htmlFor={`cred-${field.name}`}>
+                            {field.label}
+                          </label>
                         </span>
-                        <span className="preferences-row__meta" data-testid={`credential-status-${field.name}`}>
+                        <span
+                          id={`credential-status-${field.name}`}
+                          className="preferences-row__meta"
+                          data-testid={`credential-status-${field.name}`}
+                        >
                           {fieldStatus(field)}
                         </span>
-                      </label>
+                        <details className="credentials-field__details">
+                          <summary>Field name</summary>
+                          <code className="preferences-row__key">{field.name}</code>
+                        </details>
+                      </div>
                       <div className="credentials-field__inputrow">
                         <input
                           id={`cred-${field.name}`}
                           className="order-input preferences-row__input credentials-field__input"
-                          type={field.secret ? "password" : "text"}
+                          type={field.secret && !revealedSecrets[field.name] ? "password" : "text"}
                           autoComplete="off"
                           spellCheck={false}
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          aria-describedby={`credential-status-${field.name}`}
                           placeholder={
                             field.configured
-                              ? `Replace ${field.hint}`
-                              : field.placeholder || "Paste value"
+                              ? "Enter replacement"
+                              : field.placeholder || `Paste ${field.label.toLowerCase()}`
                           }
                           value={drafts[field.name] ?? ""}
                           disabled={busy}
@@ -277,10 +290,25 @@ export default function CredentialsPanel() {
                             }))
                           }
                         />
+                        {field.secret ? (
+                          <button
+                            type="button"
+                            className="admin-btn admin-btn-ghost credentials-field__reveal"
+                            aria-label={`${revealedSecrets[field.name] ? "Hide" : "Show"} ${field.label}`}
+                            aria-pressed={Boolean(revealedSecrets[field.name])}
+                            disabled={busy}
+                            onClick={() => setRevealedSecrets((current) => ({
+                              ...current,
+                              [field.name]: !current[field.name],
+                            }))}
+                          >
+                            {revealedSecrets[field.name] ? "Hide" : "Show"}
+                          </button>
+                        ) : null}
                         {field.configured ? (
                           <button
                             type="button"
-                            className="admin-btn admin-btn-ghost"
+                            className="admin-btn admin-btn-ghost credentials-field__clear"
                             data-testid={`credential-clear-${field.name}`}
                             disabled={busy}
                             onClick={() => {

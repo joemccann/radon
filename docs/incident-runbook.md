@@ -387,6 +387,33 @@ Reported 2026-09-21 19:25Z as production network timeouts on `/portfolio`.
 
 ---
 
+## app-container-sigterm-not-delivered
+
+**A deploy rolls back on `timed out waiting for radon-<unit>.service to
+become inactive` (exit 71) about 64s after "Promoting staged artifacts".**
+Hung stops: 2026-09-23 19:39 (nextjs), 2026-09-24 13:20 (monitor), 16:20 (nextjs),
+2026-09-25 02:58 (monitor), 03:01 and 03:06 (newsfeed).
+
+- **Mechanism:** systemd's stop signalled only the foreground `podman run`
+  client, which proxies SIGTERM into the container. In the hung stops the
+  app never logged its SIGTERM handler and kept working (newsfeed ran a
+  scrape cycle at 03:05:36, 5s after `Stopping`; nextjs ran CRI/VCG scans
+  for 40s), until `State 'stop-sigterm' timed out` and SIGKILL at 90s, past
+  the helper's 60s wait. In the fast stops of the same deploys the app
+  logged SIGTERM in the same second.
+- **Not the discriminator:** `unable to signal init: permission denied` and
+  `forwarding signal 18` appear on every stop, fast or hung (AppArmor denies
+  SIGCONT from the podman peer; the kernel audit line says `signal=cont`).
+- **Detection:** `journalctl -u radon-<unit>` around `Stopping` has no app
+  shutdown line (`SIGTERM received`, `[newsfeed] received SIGTERM`) and
+  later shows `stop-sigterm timed out`.
+- **Fix:** each app drop-in runs `ExecStop=radon-app-runtime halt %n
+  <grace>` (engine `stop --time`), so delivery no longer depends on the
+  client proxy. Grace + 5s fits `TimeoutStopSec` and the helper wait.
+- **Regression:** `cloud/tests/test_container_stop_delivery.py`.
+
+---
+
 ## caddy-health-floor-pages-aggregate-invalid
 
 **Off-box observer pages P1 `aggregate_invalid` while ping and `/sign-in`
@@ -1103,6 +1130,56 @@ function and fails the same way until this fix is deployed.
   `test_ai_cycle_core.py::test_snapshot_read_keeps_latest_vintage_past_the_retained_row_budget`,
   `test_snapshot_read_still_bounds_distinct_identities`.
 - **Code:** `scripts/ai_cycle/store.py` (`read_snapshot_observations`).
+
+---
+
+## liquidcompute-ticker-snapshot-timeout
+
+**`radon-liquidcompute.service` oneshot pages P1 `Result=timeout`
+(`NRestarts=0`) when `--record` rebuilds the full AI-cycle snapshot
+inside `TimeoutStartSec=180`.** Peak: 2026-09-25 07:36:40Z, page
+`63159d4c84441ca6cab89350e01f73ba`. Timer next ~24h.
+
+- **Mechanism:** the dedicated ticker unit calls
+  `python -m scripts.ai_cycle.liquidcompute --record`. After the
+  homepage upsert it hashed every file in `~/.radon/ai-cycle/raw`
+  (`import_raw_archive`, 164MB / 1329 files) and called
+  `persist_api_snapshot`, whose read deadline is 900s. The oneshot
+  budget is 180s. ExecMain 07:33:40Z to 07:36:40Z, exactly
+  `TimeoutStartSec`, `ExecMainStatus=15` (SIGTERM), CPU 15.672s.
+  `Type=oneshot` has no `Restart=`. The five `liquidcompute_index`
+  rows and observation ids 573563-573567 (asOf 2026-09-24,
+  `fetched_at` 07:33:40Z) were already committed. Health was not:
+  `service_health[liquidcompute]` stayed `ok` at 2026-09-24T07:34:21Z
+  because `_write_health` runs after the scan. Yesterday's dedicated
+  run finished (fetch 07:32:02Z, health 07:34:21Z). The 05:30Z backfill
+  grew `ai_cycle_observations` to 572017 rows and pushed the same scan
+  past 180s.
+- **Detection:** `systemctl show radon-liquidcompute.service` →
+  `Result=timeout`, `NRestarts=0`, ExecMainStart to InactiveEnter
+  equal to `TimeoutStartSec`. No journal line is required: the index
+  `fetched_at` matches ExecMainStart and the process is
+  `code=killed, signal=TERM`.
+- **Discriminating check:** Turso canary `SELECT 1` succeeds (41 ms at
+  the page). `ai_cycle_api_snapshot.generated_at` is the earlier
+  `radon-ai-cycle` finish (2026-09-25T07:23:42Z, that unit
+  `Result=success` 07:18:58Z-07:23:43Z), and that payload already
+  contains `liquidcompute` through 2026-09-24. Source status at
+  07:20:38Z is `available`, `5 observations`. `:8321/health/lite` stays
+  `auth_state=authenticated`. Canary fail too → Turso platform, stand
+  down. `Result=signal` during a deploy stop is deploy-stop-clean, not
+  this case. IB `/health/lite` down → API/IB, stand down. Do not
+  `reset-failed` and start the unrepaired unit: the same two calls
+  still exceed 180s.
+- **Remediation (code):** dedicated `--record` persists the host-tagged
+  ticker only, then writes the `liquidcompute` heartbeat. Raw-archive
+  import and `persist_api_snapshot` stay on `radon-ai-cycle`
+  (`TimeoutStartSec=1200`), which already collects this source. After
+  deploy, the next 07:30 UTC timer recovers the unit. A restart before
+  that deploy times out again.
+- **Regression:**
+  `scripts/tests/test_liquidcompute.py::test_dedicated_record_does_not_rescan_history_inside_the_unit_budget`.
+- **Code:** `scripts/ai_cycle/liquidcompute.py` (`main`).
 
 ---
 
@@ -2285,6 +2362,8 @@ duplicate.** Peak: 2026-09-22 11:35Z, page `e1297eea…`.
 - **Discriminating check:** `classified_as=trades` and
   `outcome=coverage_unverified` on an applied duplicate whose missing
   Flex tradeIDs are covered by individual IB fills (this case).
+  A Flex `ibExecID` that is the live five-part `ib_exec_id` minus the
+  trailing `.01` is `flex-pull-live-exec-id`.
   `twr_status=degraded` is `flex-pull-twr-degraded-exit`.
   `classified_as=activity` with `outcome=coverage_unverified` is
   `flex-pull-activity-nav`.
@@ -2303,6 +2382,47 @@ duplicate.** Peak: 2026-09-22 11:35Z, page `e1297eea…`.
   `test_rel226_delivery_coverage.py::test_trade_duplicate_disagreement_stays_unverified`,
   `test_rel226_delivery_coverage.py::test_trade_duplicate_uncovered_day_stays_unverified`.
 - **Code:** `scripts/flex_delivery_ingest.py` (`delivery_rows_present`).
+
+---
+
+## flex-pull-live-exec-id
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+after today's Activity statement is applied, on applied Trade_History
+duplicates whose live fills use a five-part exec id.** Peak: 2026-09-25
+11:35Z, page `722f1b39…`. Span about 80s, not `TimeoutStartSec`. The next
+timer is the 08:30 ET retry.
+
+- **Mechanism:** Flex `ibExecID` is four parts
+  (`0000f126.6ab14023.03.01`). The live journal row is that id plus one
+  trailing segment (`….03.01.01`). `symbol` on the Trade row is the OCC
+  local symbol, while the journal ticker is the underlying, so the
+  individual-fill contract key misses too. `rehydrate_from_executions`
+  then reports the fill as a new import. The claim is already `applied`.
+  The oneshot exits 1. `Type=oneshot` has no `Restart=`. `:8321/health/lite`
+  stays up.
+- **Detection:** journal `ingest_failed:{… 'outcome': 'coverage_unverified',
+  'classified_as': 'trades' …}` on several `Trade_History` files, not one;
+  `systemctl show` → `exit-code` / `0`; ExecMain span well under
+  `TimeoutStartSec`.
+- **Discriminating check:** for a failing sha, the Flex `ibExecID` plus
+  `.01` is an `ib_exec_id` already in `journal`, and the other leg index
+  (`.02` vs `.03`) is a different fill. That is this case. A Flex id with
+  no live row and no matching contract-day fills stays unverified
+  (`flex-pull-trade-coverage`: uncovered exec or a real qty/notional
+  disagreement is operator reconciliation, not this fix). `Result=timeout`
+  is `flex-pull-ingest-timeout`. If `/health/lite` is down too → API,
+  stand down.
+- **Remediation (code):** the journal exec-id set also contains the Flex
+  form of a five-part live id. One segment only. Do not replay the
+  delivery. Do not restart-flap; the 08:30 ET timer retries. After deploy,
+  `systemctl reset-failed radon-flex-pull.service` if that retry has not
+  yet fired.
+- **Regression:**
+  `test_rel226_delivery_coverage.py::test_live_five_part_exec_id_covers_flex_ib_exec_id`,
+  `test_rel226_delivery_coverage.py::test_live_exec_id_alias_does_not_cover_the_other_leg`.
+- **Code:** `scripts/utils/exec_ids.py` (`flex_ib_exec_id`),
+  `scripts/journal_rehydrate.py` (`_existing_exec_ids`).
 
 ---
 
@@ -2348,6 +2468,36 @@ Peak: 2026-09-22 12:35Z, page `d3b66eaf…`.
   `test_flex_from_file.py::test_suppressed_statement_still_records_nav_points`.
 - **Code:** `scripts/flex_delivery_ingest.py` (`_repair_unmirrored_activity_nav`),
   `scripts/perf_twr_builder.py` (`nav_points`, `_nav_snapshot_rows`).
+
+---
+
+## flex-pull-twr-gap
+
+**`/performance` stays `FLOWS_FETCH_FAILED` for days; every nightly build
+returns `historical_flow_coverage_unverified`.** 2026-09-18..24, healed by hand.
+
+- **Mechanism:** a from-file build extends a statement only when every
+  EARLIER stored NAV session has a `twr_subperiods` row. One failed build
+  writes no subperiods, so every later statement fails the same gate. The
+  weekday `radon-perf-twr` timer chains only through `MAX(twr_subperiods)`
+  and cannot heal it; re-ingest is fingerprint-gated as a duplicate.
+- **Self-heal (code):** after the normal ingest, flex-pull lists NAV
+  sessions inside `TWR_GAP_LOOKBACK` (45 days before the newest activity
+  statement) with no subperiod, maps each to a delivered activity statement
+  still in `outgoing`, and replays those oldest-first through
+  `build_and_persist(from_file=..., persist=True)` only. No cash_flow_sync
+  or journal writer runs. It shares the sweep's wall-clock budget.
+- **Detection:** the `flex-pull` ok row carries a note: `twr_gap_healed`
+  (replayed), `twr_gap_unhealed` (replay ran, sessions still uncovered, or
+  deferred by budget), `twr_gap_unhealable` (no delivered statement for a
+  session; later sessions are `blocked` and never zero-filled).
+- **Remediation:** `twr_gap_unhealable` needs the missing statement from
+  IBKR; replay it with `build_and_persist(from_file=..., persist=True)`
+  under the flex-pull unit env, then let the next flex-pull finish the tail.
+- **Regression:** `scripts/tests/test_flex_pull_twr_gap_heal.py`.
+- **Code:** `scripts/flex_sftp_pull.py` (`heal_twr_coverage_gaps`,
+  `plan_gap_replay`), `scripts/perf_twr_builder.py`
+  (`load_uncovered_nav_sessions`).
 
 ---
 

@@ -1,3 +1,42 @@
+# Task: Chart text-only findings by series, type, and check
+
+Identify comparable numbers, pick line / bar / range / scatter, drop a plan that does not trace to the text, render with theme tokens.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: the five latest text-only posts, the GS note, and a plan that mislabels a number
+- T2 depends_on: [T1] - planCharts plus the dark-theme renderer
+- T3 depends_on: [T2] - Focused vitest and pytest, screenshots of the five posts
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Pipeline
+- [x] T3 Verify
+
+# Task: Chart every text-only research PDF
+
+Every dropbox finding with no source figure gets a chart planned from its title and body. Findings that already have a figure, and findings with too little comparable data, stay as they are.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: GS text plans both figures; a lone point, a lone bp change, and dollar amounts plan nothing; a source figure suppresses generation
+- T2 depends_on: [T1] - planCharts, visx renderer, feed and lightbox under the body, intake source.charts
+- T3 depends_on: [T2] - Focused vitest and pytest, rendered article, CI
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Pipeline
+- [x] T3 Verify and ship
+
+## Review
+
+- CoreWeave 9.00-9.50 is a placement of "low- to mid-9%", not a printed coupon. Connector is dotted.
+- SoftBank 8.6-9.75 is one printed range.
+- Second figure: 10-year change in bp, October hike on a 0-100 scale, year-end tightening off that scale.
+- `planCharts` reads the finding title and body. Text-only dropbox posts render that plan under the body. A source figure suppresses generation. Intake stores `source.charts` only when the plan is non-empty and the finding has no figure.
+
 # Task: Research force-include + 24h Held TTL
 
 Joe via CoS: always include BofA Flow Show and DB positioning data; expire Held rows after 24h on `updated_at` PT.
@@ -8323,3 +8362,12 @@ Review: REL-280 red 10/green 52; first full gate matches 33 baseline Python fail
 - [ ] T3 depends_on: [T2] Run closing full gates three times and persist complete issue handoff.
 - [ ] T4 depends_on: [T3] Review substantive diff and publication eligibility.
 Review: pending; no live broker calls, browser launches, or runner-lock operations.
+
+## Reliability remediation 2026-09-25
+
+- [x] T1: Reproduce REL-284 account-switch stale-read and queued-write failures (depends_on: [])
+- [x] T2: Implement identity-generation isolation and focused browser coverage (depends_on: [T1])
+- [x] T3: Focused checks and permanent drills green; full gates/browser acceptance recorded BLOCKED after verified environment failures (depends_on: [T2])
+
+## Review
+- REL-284 source fix is narrow and red/green evidence is recorded in RELIABILITY_LOG.md. Full-gate and Playwright acceptance are blocked by missing installed dependencies and host process/browser permissions; no overall green is claimed.

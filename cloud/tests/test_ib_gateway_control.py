@@ -996,19 +996,26 @@ def test_direct_gateway_privileges_are_removed_and_polkit_excludes_gateway():
 
 
 def _remote_reporting_head(tmp_path: Path) -> Path:
-    """A bare repo sharing the checkout's objects whose main is its HEAD."""
+    """A bare repo sharing the checkout's objects whose main carries HEAD's
+    tree as a parentless commit, so root can fetch it from a shallow CI
+    checkout (HEAD's parents are absent there)."""
     def git(*args: str) -> str:
         return subprocess.run(
             ["git", "-C", str(CLOUD_ROOT), *args],
             check=True, capture_output=True, text=True,
         ).stdout.strip()
 
-    head = git("rev-parse", "HEAD")
+    tree = git("rev-parse", "HEAD^{tree}")
     objects = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir")) / "objects"
     remote = tmp_path / "remote.git"
     subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True, capture_output=True)
     (remote / "objects" / "info" / "alternates").write_text(f"{objects}\n")
-    (remote / "refs" / "heads" / "main").write_text(f"{head}\n")
+    main = subprocess.run(
+        ["git", "--git-dir", str(remote), "-c", "user.name=t", "-c", "user.email=t@t",
+         "commit-tree", tree, "-m", "stand-in main"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    (remote / "refs" / "heads" / "main").write_text(f"{main}\n")
     return remote
 
 
@@ -1046,6 +1053,7 @@ set -eu
         # This case is about the legacy-privilege upgrade, and it stages from
         # the real checkout: a stand-in remote reports its HEAD as main.
         "RADON_PROVENANCE_REMOTE_URL": str(_remote_reporting_head(tmp_path)),
+        "RADON_PROVISION_ROOT": str(tmp_path / "provision"),
         "RADON_VISUDO_BIN": str(visudo),
         "RADON_POLICY_SKIP_CHOWN": "1",
         "RADON_SKIP_POLKIT_RELOAD": "1",

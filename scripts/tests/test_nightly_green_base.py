@@ -112,6 +112,64 @@ class TestCli:
         assert proc.stdout.strip() == ""
         assert "keeping the current tip" in proc.stderr
 
+    def test_the_run_listing_is_filtered_client_side(self, tmp_path, git_repo):
+        """GitHub's branch/event/status filters are search-backed and served a
+        listing frozen at 2026-09-19 to eight phases on 09-21..24."""
+        repo_dir, shas = git_repo
+        argv_log = tmp_path / "argv"
+        gh = self._gh(
+            tmp_path,
+            f"open({str(argv_log)!r}, 'w').write('\\n'.join(sys.argv[1:]))\nprint({shas[2]!r})\n",
+        )
+        assert self._run(gh, repo_dir).stdout.strip() == shas[2]
+        argv = argv_log.read_text().splitlines()
+        query = argv[1]
+        assert "branch=" not in query and "status=" not in query and "event=" not in query
+        jq = argv[argv.index("--jq") + 1]
+        assert '.head_branch == "main"' in jq and '.event == "push"' in jq
+        assert ".conclusion" in jq
+
+    def _dated_repo(self, tmp_path):
+        d = tmp_path / "lagrepo"
+        d.mkdir()
+        env = {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
+
+        def commit(name: str, when: str) -> str:
+            (d / name).write_text(name)
+            stamp = {"GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}
+            for args in (("add", name), ("commit", "-qm", name)):
+                subprocess.run(
+                    ["git", "-C", str(d), "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+                     "-c", "user.email=t@t", "-c", "user.name=t", *args],
+                    check=True, capture_output=True, env={**env, **stamp},
+                )
+            return subprocess.run(["git", "-C", str(d), "rev-parse", "HEAD"], capture_output=True,
+                                  text=True, check=True).stdout.strip()
+
+        subprocess.run(["git", "-C", str(d), "init", "-q"], check=True, env=env)
+        old = commit("old", "2026-09-19T06:07:00Z")
+        tip = commit("tip", "2026-09-24T07:00:00Z")
+        return d, old, tip
+
+    def test_a_listing_without_the_tip_is_stale_and_keeps_the_tip(self, tmp_path):
+        """The 2026-09-21..24 shape: the listing froze at 09-19, so it had no
+        run for a tip committed hours earlier."""
+        d, old, _ = self._dated_repo(tmp_path)
+        gh = self._gh(tmp_path, f"print({old + ' success'!r})\n")
+        proc = self._run(gh, d)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.strip() == "", "a five-day-old green base was pinned"
+        assert "stale" in proc.stderr and old[:12] in proc.stderr
+
+    def test_a_red_tip_after_a_quiet_spell_still_pins_the_last_green(self, tmp_path):
+        """Friday green, Monday red: the tip's failed run is in the listing, so
+        the listing is fresh and days of lag are legitimate."""
+        d, old, tip = self._dated_repo(tmp_path)
+        gh = self._gh(tmp_path, f"print({tip + ' failure'!r})\nprint({old + ' success'!r})\n")
+        proc = self._run(gh, d)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.strip() == old
+
     def test_a_green_sha_from_another_branch_is_not_used(self, tmp_path, git_repo):
         repo_dir, _ = git_repo
         gh = self._gh(tmp_path, "print('0' * 40)\n")
@@ -186,6 +244,7 @@ def _run_ground_truth(tmp_path: Path, snippet: str) -> list[str]:
         [
             "set -eo pipefail",
             "fetch_origin_with_retry() { :; }",
+            "clear_stale_git_locks() { :; }",
             f"resolve_green_main_sha() {{ echo {SENTINEL}; }}",
             "align_agent_gitdir() { :; }",
             snippet,

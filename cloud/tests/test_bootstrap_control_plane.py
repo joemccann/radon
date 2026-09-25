@@ -646,3 +646,25 @@ def test_symlinked_target_directory_is_refused_before_any_write(tmp_path: Path) 
 
     assert result.returncode != 0
     assert list(outside.iterdir()) == []
+
+
+@pytest.mark.parametrize("writable", ["file", "directory"])
+def test_a_cloud_root_another_account_can_write_is_refused_before_any_write(
+    tmp_path: Path, writable: str,
+) -> None:
+    """The bundle becomes root's sudoers, helpers and units, so it is read
+    only from a tree nobody but root can write: never the radon checkout."""
+    sandbox = _sandbox(tmp_path)
+    victim = sandbox.source / ARTIFACTS[0].source
+    (victim if writable == "file" else victim.parent).chmod(
+        0o666 if writable == "file" else 0o777
+    )
+
+    result = sandbox.run()
+
+    assert result.returncode != 0
+    assert "writable by an account other than root" in result.stderr
+    assert not sandbox.lock_path.exists()
+    assert not _manifest_path(sandbox.rootfs).exists()
+    for artifact in ARTIFACTS:
+        assert not _installed_path(sandbox.rootfs, artifact).exists()

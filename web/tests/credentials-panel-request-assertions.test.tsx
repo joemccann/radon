@@ -192,6 +192,20 @@ describe("credentials panel wire contract", () => {
     expect(calls.filter((c) => c.method !== "GET")).toHaveLength(0);
   });
 
+  it("reveals only the secret draft on explicit request", async () => {
+    await renderPanel();
+    const input = document.getElementById("cred-ANTHROPIC_API_KEY") as HTMLInputElement;
+    expect(input.type).toBe("password");
+    expect(input.getAttribute("aria-describedby")).toBe("credential-status-ANTHROPIC_API_KEY");
+    expect(document.getElementById("credential-status-ANTHROPIC_API_KEY")).not.toBeNull();
+    fireEvent.change(input, { target: { value: "sk-ant-draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Show API key" }));
+    expect(input.type).toBe("text");
+    expect(input.value).toBe("sk-ant-draft");
+    fireEvent.click(screen.getByRole("button", { name: "Hide API key" }));
+    expect(input.type).toBe("password");
+  });
+
   it("armed submit fires exactly one PUT with full path and payload", async () => {
     await renderPanel();
     fireEvent.change(screen.getByLabelText(/API key/, { selector: "#cred-ANTHROPIC_API_KEY" }), {
