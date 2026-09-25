@@ -1,4 +1,4 @@
-"""Chart plans copied from a finding. The GS note is the proof fixture."""
+"""Chart plans copied from a finding. The plan has to match the series."""
 from research import charts
 
 GS = "\n\n".join([
@@ -7,29 +7,46 @@ GS = "\n\n".join([
     "The desk prices a 71% chance of an October hike and about 36 bp of tightening by year-end.",
 ])
 
+DLT = "\n".join([
+    "Global DLT fixed-income issuance reached €4.8bn in 2025, up 48% from 2024, finance at €3.45bn",
+    "Global DLT fixed-income issuance reached €4.8bn in 2025, up 48% from 2024. Finance led global digital bond issuance by issuer type in 2025 at €3.45bn. Government issued €1.29bn. Construction was €47mn, supranational €6mn, technology €5mn and energy €2mn.",
+])
 
-def test_gs_finding_plans_yields_and_a_separate_rates_chart():
+
+def test_gs_finding_plans_a_yield_range_and_a_basis_point_bar():
     plans = charts.plan(GS)
-    assert [plan["kind"] for plan in plans] == ["levels", "move"]
-    levels, move = plans
-    assert levels["title"] == "Dollar yields" and levels["axis"] == [0, 12]
-    assert levels["dek"] == "S&P near 19x."
-    assert levels["reference"] == {"value": 10, "label": "near 10%"}
-    assert [(mark["label"], mark["kind"], mark["low"], mark["high"]) for mark in levels["marks"]] == [
-        ("SoftBank HY", "printed-range", 8.6, 9.75),
-        ("CoreWeave VA", "desk-band", 9, 9.5),
-        ("US 10-year", "point", 5.1, 5.1),
-        ("US 2-year", "point", 4.9, 4.9),
+    assert [plan["kind"] for plan in plans] == ["range", "bar"]
+    yields, move = plans
+    assert yields["title"] == "Dollar yields" and yields["axis"] == [0, 12]
+    assert yields["reference"] == {"value": 10, "label": "near 10%"}
+    assert [(mark["label"], mark["estimated"], mark["low"], mark["high"]) for mark in yields["marks"]] == [
+        ("SoftBank HY", False, 8.6, 9.75),
+        ("CoreWeave VA", True, 9, 9.5),
+        ("10-year", False, 5.1, 5.1),
+        ("2-year", False, 4.9, 4.9),
     ]
-    assert levels["marks"][0]["detail"] == "$11.1bn"
-    assert move["axisMax"] == 40
-    assert [(bar["label"], bar["bp"]) for bar in move["bars"]] == [("1 month", 35), ("2 weeks", 25)]
-    assert move["probability"] == {"label": "October hike", "pct": 71}
-    assert move["readout"] == {"label": "Year-end tightening", "bp": 36}
+    assert yields["marks"][0]["detail"] == "$11.1bn"
+    assert [(bar["label"], bar["value"]) for bar in move["bars"]] == [("2 weeks", 25), ("1 month", 35)]
+    assert "71" not in str(plans) and "36" not in str(plans)
 
 
 def test_thin_findings_do_not_invent_a_chart():
     assert charts.plan("The 10-year closed at 4.2%.") == []
     assert charts.plan("The 10-year rose 12bp in two weeks.") == []
-    assert charts.plan("Foreign investors bought $45bn of US equities. Official investors added $12bn.") == []
+    assert charts.plan("Markets price a 71% chance of an October hike.") == []
     assert len(charts.plan("SoftBank cleared at 8.6-9.75%.")) == 1
+
+
+def test_issuance_bar_drops_the_total_and_the_growth_rate():
+    plans = charts.plan(DLT)
+    assert len(plans) == 1 and plans[0]["kind"] == "bar" and plans[0]["unit"] == "€bn"
+    assert [(bar["label"], bar["value"]) for bar in plans[0]["bars"]] == [
+        ("Finance", 3.45), ("Government", 1.29), ("Construction", 0.047),
+        ("Supranational", 0.006), ("Technology", 0.005), ("Energy", 0.002),
+    ]
+
+
+def test_two_dollar_flows_are_a_bar():
+    plans = charts.plan("Foreign investors bought $45bn of US equities. Official investors added $12bn.")
+    assert plans[0]["kind"] == "bar"
+    assert [(bar["label"], bar["value"]) for bar in plans[0]["bars"]] == [("Foreign investors", 45), ("Official investors", 12)]

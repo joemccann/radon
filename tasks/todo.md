@@ -1,3 +1,19 @@
+# Task: Chart text-only findings by series, type, and check
+
+Identify comparable numbers, pick line / bar / range / scatter, drop a plan that does not trace to the text, render with theme tokens.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: the five latest text-only posts, the GS note, and a plan that mislabels a number
+- T2 depends_on: [T1] - planCharts plus the dark-theme renderer
+- T3 depends_on: [T2] - Focused vitest and pytest, screenshots of the five posts
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Pipeline
+- [x] T3 Verify
+
 # Task: Chart every text-only research PDF
 
 Every dropbox finding with no source figure gets a chart planned from its title and body. Findings that already have a figure, and findings with too little comparable data, stay as they are.

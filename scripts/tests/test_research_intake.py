@@ -228,7 +228,7 @@ def test_text_only_comparable_yields_store_a_chart_plan(tmp_path, publisher):
     reviewer = Reviewer([selection(title="Two printed yields", content=content, figure_ids=[], text_only=True, captions={}), verdict()])
     posts = build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
     charts = posts[0]["source"]["charts"]
-    assert charts[0]["kind"] == "levels" and charts[0]["axis"] == [0, 6]
+    assert charts[0]["kind"] == "range" and charts[0]["axis"] == [0, 6]
     assert [mark["label"] for mark in charts[0]["marks"]] == ["Name A", "Name B"]
 
 
