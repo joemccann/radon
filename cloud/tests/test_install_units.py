@@ -152,6 +152,20 @@ def test_new_timer_pair_is_installed_reloaded_and_only_the_timer_enabled(tmp_pat
     assert "installed=2" in result.stdout
 
 
+def test_optional_slm_service_installs_without_activation(tmp_path):
+    box = Sandbox(tmp_path)
+    unit = "radon-slm-tagger.service"
+    body = (ROOT / "services" / unit).read_text(encoding="utf-8")
+    box.source(unit, body)
+
+    result = box.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (box.unit_dir / unit).read_text() == body
+    assert box.systemctl_calls() == ["daemon-reload"]
+    assert "installed=1" in result.stdout
+
+
 def test_changed_unit_is_refreshed_without_re_enabling(tmp_path):
     box = Sandbox(tmp_path)
     new_timer = TIMER_BODY.replace("daily", "*-*-* 21:45:00 UTC")

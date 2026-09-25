@@ -8371,3 +8371,30 @@ Review: pending; no live broker calls, browser launches, or runner-lock operatio
 
 ## Review
 - REL-284 source fix is narrow and red/green evidence is recorded in RELIABILITY_LOG.md. Full-gate and Playwright acceptance are blocked by missing installed dependencies and host process/browser permissions; no overall green is claimed.
+
+# Task: Durable config-drift writer recovery (2026-09-25)
+
+## Dependency graph
+- T1 depends_on: [] - Inspect production audit logs and deployed configuration.
+- T2 depends_on: [] - Independently review drift auditor and regression coverage.
+- T3 depends_on: [T1, T2] - Implement minimal durable repair and regression cases.
+- T4 depends_on: [T3] - Create PR; verify every applicable exact-head CI check; notify.
+- T5 depends_on: [T4] - Merge through normal protections, verify production deployment, and publish a fresh clean audit.
+
+## Checklist
+- [x] T1 Production evidence
+- [x] T2 Code review
+- [x] T3 Repair and regression coverage
+- [ ] T4 GitHub CI and notification
+- [ ] T5 Production deployment and audit
+
+## Review
+- Local test suites prohibited; validation runs on GitHub runners.
+
+- Production 2026-09-25 audit wrote successfully; findings were an obsolete Flex drop-in and an uninstalled optional SLM unit.
+- Archived the exact redundant Flex drop-in to `/root/radon-config-drift-20260925/write-performance-data.conf`; verified canonical effective write/read-only paths after daemon-reload.
+- Original SLM unit fails production systemd-analyze verification (exit 1, missing llama-server); guarded candidate passes (exit 0). No services activated.
+- Added Linux CI verification and install-without-activation regressions. Exact-head CI pending.
+
+- CI repair: `scripts-df` reported the SLM owner-document contract; updated the unit example and provisioning semantics in `docs/ml/newsfeed-slm-tagger.md`. Re-run all applicable checks on the new head.
+- CI repair: an unchanged SIGTERM regression failed on the second head after passing on the first. Synchronize the isolated wrapper with its actual parent wait boundary and preserve all reporting/status assertions; retain subprocess diagnostics. Prior failure output did not capture the precise exit path. Production wrappers unchanged.
