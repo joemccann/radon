@@ -164,6 +164,7 @@ def _base_env(h: dict[str, Path]) -> dict[str, str]:
         "RADON_POLICY_SKIP_CHOWN": "1",
         "RADON_SKIP_POLKIT_RELOAD": "1",
         "RADON_PROVENANCE_REMOTE_URL": str(h["remote"]),
+        "RADON_PROVISION_ROOT": str(h["tmp"] / "provision"),
     }
 
 
@@ -698,7 +699,7 @@ class TestRemoteAncestryProvenance:
         source = harness["cloud"] / "config" / "sudoers.d" / "radon-ops"
         self._refused(harness, source, "could not read main from")
 
-    def test_remote_main_absent_locally_fails_closed(
+    def test_remote_main_the_checkout_never_fetched_is_fetched_by_root(
         self, harness: dict[str, Path], tmp_path: Path
     ) -> None:
         other = tmp_path / "other"
@@ -711,7 +712,10 @@ class TestRemoteAncestryProvenance:
         _git(other, "commit", "-q", "-m", "later")
         _git(other, "push", "-q", "origin", "HEAD:refs/heads/main")
         source = harness["cloud"] / "config" / "sudoers.d" / "radon-ops"
-        self._refused(harness, source, "is not in the local object store")
+        target = harness["tmp"] / "installed"
+        result = _run_stage(harness, source, target)
+        assert result.returncode == 0, result.stderr
+        assert target.read_text() == source.read_text()
 
     def test_blob_carried_by_remote_main_installs(
         self, harness: dict[str, Path]
@@ -737,6 +741,128 @@ class TestRemoteAncestryProvenance:
         body = _function_body(text, "resolve_provenance_anchor")
         assert "ls-remote" in body and "protocol.version=1" in body
         assert "remote get-url" not in body and "origin/main" not in body
+
+
+class TestRootProvisionStore:
+    """Root reads installed bytes from its own clone of the pinned remote.
+    The checkout store is radon-owned: its object files and alternates can be
+    rewritten, and a git read does not re-hash an object."""
+
+    SOURCE_REL = "config/sudoers.d/radon-ops"
+    FORGED = b"radon ALL=(ALL) NOPASSWD: ALL\n"
+
+    def _forged_tree(self, h: dict[str, Path]) -> tuple[str, bytes]:
+        """(sha of HEAD's config/sudoers.d tree, raw loose file of a tree
+        whose radon-ops entry points at a forged blob). Also writes the
+        forged body to the working tree, so worktree and store agree."""
+        repo = h["cloud"]
+        run = lambda *a, **k: subprocess.run(  # noqa: E731
+            ["git", *a], cwd=repo, check=True, capture_output=True, **k
+        )
+        victim = run("rev-parse", "HEAD:config/sudoers.d", text=True).stdout.strip()
+        forged_blob = run("hash-object", "-w", "--stdin", input=self.FORGED).stdout.decode().strip()
+        listing = run("ls-tree", victim, text=True).stdout
+        lines = []
+        for line in listing.splitlines():
+            meta, name = line.split("\t", 1)
+            mode, kind, sha = meta.split()
+            if name == "radon-ops":
+                sha = forged_blob
+            lines.append(f"{mode} {kind} {sha}\t{name}")
+        forged_tree = run("mktree", input="\n".join(lines) + "\n", text=True).stdout.strip()
+        raw = (repo / ".git" / "objects" / forged_tree[:2] / forged_tree[2:]).read_bytes()
+        (repo / self.SOURCE_REL).write_bytes(self.FORGED)
+        return victim, raw
+
+    def _refused(self, h: dict[str, Path]) -> None:
+        target = h["tmp"] / "installed"
+        result = _run_stage(h, h["cloud"] / self.SOURCE_REL, target)
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert not target.exists()
+        assert _stage_leftovers(h) == []
+
+    def test_rewritten_object_file_cannot_change_the_installed_blob(
+        self, harness: dict[str, Path]
+    ) -> None:
+        victim, raw = self._forged_tree(harness)
+        loose = harness["cloud"] / ".git" / "objects" / victim[:2] / victim[2:]
+        assert loose.is_file()
+        loose.chmod(0o644)
+        loose.write_bytes(raw)
+        self._refused(harness)
+
+    def test_alternates_entry_cannot_change_the_installed_blob(
+        self, harness: dict[str, Path]
+    ) -> None:
+        victim, raw = self._forged_tree(harness)
+        loose = harness["cloud"] / ".git" / "objects" / victim[:2] / victim[2:]
+        loose.chmod(0o644)
+        loose.unlink()
+        planted = harness["tmp"] / "planted-objects"
+        (planted / victim[:2]).mkdir(parents=True)
+        (planted / victim[:2] / victim[2:]).write_bytes(raw)
+        info = harness["cloud"] / ".git" / "objects" / "info"
+        info.mkdir(exist_ok=True)
+        (info / "alternates").write_text(f"{planted}\n")
+        self._refused(harness)
+
+    def test_fetch_failure_fails_closed(self, harness: dict[str, Path]) -> None:
+        real = shutil.which("git")
+        assert real
+        _write_executable(
+            harness["bin"] / "git",
+            f"""#!/bin/bash
+for arg in "$@"; do
+  [[ "$arg" == fetch ]] && exit 128
+done
+exec {real} "$@"
+""",
+        )
+        target = harness["tmp"] / "installed"
+        result = _run_stage(harness, harness["cloud"] / self.SOURCE_REL, target)
+        assert result.returncode != 0
+        assert "could not fetch main from" in result.stdout + result.stderr
+        assert not target.exists()
+
+    def test_first_use_creates_a_root_only_bare_store(self, harness: dict[str, Path]) -> None:
+        store = harness["tmp"] / "provision"
+        target = harness["tmp"] / "installed"
+        result = _run_stage(harness, harness["cloud"] / self.SOURCE_REL, target)
+        assert result.returncode == 0, result.stderr
+        for path in (store, store / "radon.git", store / "radon.git" / "objects"):
+            assert path.is_dir() and not path.is_symlink(), path
+            assert path.stat().st_uid == os.getuid(), path
+            assert path.stat().st_mode & 0o022 == 0, path
+
+    def test_a_writable_store_is_refused(self, harness: dict[str, Path]) -> None:
+        store = harness["tmp"] / "provision"
+        store.mkdir()
+        store.chmod(0o777)
+        target = harness["tmp"] / "installed"
+        result = _run_stage(harness, harness["cloud"] / self.SOURCE_REL, target)
+        assert result.returncode != 0
+        assert "is not a root-only directory" in result.stdout + result.stderr
+        assert not target.exists()
+
+    def test_production_store_path_and_isolation(self) -> None:
+        text = SETUP.read_text(encoding="utf-8")
+        assert 'readonly PROVISION_ROOT="${RADON_PROVISION_ROOT:-/opt/radon-provision}"' in text
+        body = _function_body(text, "sync_provision_store")
+        for needle in (
+            "GIT_CONFIG_NOSYSTEM=1",
+            "GIT_CONFIG_GLOBAL=/dev/null",
+            "fetch.fsckObjects=true",
+            "transfer.fsckObjects=true",
+            '"$PROVENANCE_REMOTE_URL"',
+        ):
+            assert needle in body, needle
+        # Only HEAD's commit id (and the checkout root) is read from the
+        # radon-owned store; every blob read goes through provision_git.
+        assert "cat-file" not in _function_body(text, "provenance_git")
+        for name in ("stage_from_checkout", "install_docker_gw"):
+            fn = _function_body(text, name)
+            assert "git -C \"$repo_root\"" not in fn, name
+            assert "hash-object" not in fn, name
 
 
 # ── (d) /etc/radon and the radon-replaceable directories ──────────────
@@ -974,12 +1100,14 @@ class TestStaticContract:
         # a working-tree cp the radon account could have edited.
         assert "cp --" not in body
         assert body.index('require_regular_file "$source"') < body.index(
-            'rev-parse "HEAD:${source_rel}"'
+            'resolve_provision_commit "$repo_root"'
         )
-        assert body.index('rev-parse "HEAD:${source_rel}"') < body.index(
-            'cat-file blob "$blob_sha"'
+        assert body.index('resolve_provision_commit "$repo_root"') < body.index(
+            "stage_provisioned_blob"
         )
-        assert body.index('cat-file blob "$blob_sha"') < body.index("cmp -s")
+        # The blob comes from the root store, then the byte check runs.
+        stage = _function_body(script, "stage_provisioned_blob")
+        assert stage.index('provision_git cat-file blob "${PROVISION_COMMIT}:${rel}"') < stage.index("cmp -s")
         assert 'install -m "$mode" "$@" "$staged" "$target"' in body
         # No mapfile / exec {fd} / ${arr[@]} on empty arrays: bash 3.2 runs this.
         assert "mapfile" not in script

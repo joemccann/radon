@@ -162,11 +162,12 @@ seconds leaves more than ten minutes of SSH headroom for file and gate overhead.
 
 Root-owned helpers, sudoers, polkit rules, and systemd units covered by the
 control-plane manifest are installed or updated only through the root bootstrap
-transaction from the exact target monorepo checkout:
+transaction, run from root's own clone of the pinned remote (never the
+radon-owned checkout):
 
 ```bash
-cd /home/radon/radon
-sudo bash cloud/scripts/bootstrap-control-plane.sh
+# as root; converges on the GitHub main tip via root's own clone
+/usr/local/sbin/radon-deploy-root sync-control-plane
 ```
 
 It serializes with deploy and Gateway transitions, validates and atomically

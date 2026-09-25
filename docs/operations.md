@@ -201,7 +201,9 @@ before writing it (2026-09-22). Contracts:
 
 **Provisioning provenance.** Follow the [privileged bootstrap owner](../cloud/CLAUDE.md#privileged-bootstrap)
 for the trusted-release prerequisite, provenance refusal conditions, and the
-boundary between provisioning and live control-plane refresh.
+boundary between provisioning and live control-plane refresh. Setup and the
+root helper read installed bytes from root's own clone of the pinned remote,
+`/opt/radon-provision/radon.git`, never the radon-owned checkout store.
 
 **Newsfeed least privilege.** `radon-newsfeed.service` runs Chromium against
 third-party web content. Chromium keeps its own sandbox: the container runs
