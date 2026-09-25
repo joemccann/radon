@@ -1046,6 +1046,7 @@ set -eu
         # This case is about the legacy-privilege upgrade, and it stages from
         # the real checkout: a stand-in remote reports its HEAD as main.
         "RADON_PROVENANCE_REMOTE_URL": str(_remote_reporting_head(tmp_path)),
+        "RADON_PROVISION_ROOT": str(tmp_path / "provision"),
         "RADON_VISUDO_BIN": str(visudo),
         "RADON_POLICY_SKIP_CHOWN": "1",
         "RADON_SKIP_POLKIT_RELOAD": "1",

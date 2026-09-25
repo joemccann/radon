@@ -13,6 +13,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import zlib
 from pathlib import Path
 
 import pytest
@@ -942,6 +943,36 @@ def test_privileged_refresh_ignores_object_rewrites_in_the_checkout_store(
     _git(box.tmp, "tag", "rewritten")
     _git(box.tmp, "reset", "-q", "--hard", tip)
     _git(box.tmp, "replace", tip, "rewritten")
+
+    result = box.run("refresh-control-plane-privileged")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert box.installed_path(SUDOERS_SOURCE).read_bytes() == installed_before
+
+
+def test_privileged_refresh_reads_the_root_store_not_checkout_objects(
+    tmp_path: Path,
+) -> None:
+    """The checkout store is radon-owned: an object file rewritten there must
+    not change what root installs. Root reads its own clone of the remote."""
+    box = Sandbox(tmp_path)
+    remote = tmp_path / "github.git"
+    subprocess.run(
+        ["git", "clone", "-q", "--bare", "--no-local", str(box.tmp), str(remote)],
+        check=True,
+        capture_output=True,
+    )
+    box.env["RADON_TEST_UNIT_REMOTE"] = str(remote)
+    blob = subprocess.run(
+        ["git", "rev-parse", f"HEAD:cloud/{SUDOERS_SOURCE}"],
+        cwd=box.tmp, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    loose = box.tmp / ".git" / "objects" / blob[:2] / blob[2:]
+    assert loose.is_file()
+    forged = b"radon ALL=(ALL) NOPASSWD: ALL\n"
+    loose.chmod(0o644)
+    loose.write_bytes(zlib.compress(f"blob {len(forged)}\0".encode() + forged))
+    installed_before = box.installed_path(SUDOERS_SOURCE).read_bytes()
 
     result = box.run("refresh-control-plane-privileged")
 
