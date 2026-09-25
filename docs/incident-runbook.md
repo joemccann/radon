@@ -387,6 +387,33 @@ Reported 2026-09-21 19:25Z as production network timeouts on `/portfolio`.
 
 ---
 
+## app-container-sigterm-not-delivered
+
+**A deploy rolls back on `timed out waiting for radon-<unit>.service to
+become inactive` (exit 71) about 64s after "Promoting staged artifacts".**
+Hung stops: 2026-09-23 19:39 (nextjs), 2026-09-24 13:20 (monitor), 16:20 (nextjs),
+2026-09-25 02:58 (monitor), 03:01 and 03:06 (newsfeed).
+
+- **Mechanism:** systemd's stop signalled only the foreground `podman run`
+  client, which proxies SIGTERM into the container. In the hung stops the
+  app never logged its SIGTERM handler and kept working (newsfeed ran a
+  scrape cycle at 03:05:36, 5s after `Stopping`; nextjs ran CRI/VCG scans
+  for 40s), until `State 'stop-sigterm' timed out` and SIGKILL at 90s, past
+  the helper's 60s wait. In the fast stops of the same deploys the app
+  logged SIGTERM in the same second.
+- **Not the discriminator:** `unable to signal init: permission denied` and
+  `forwarding signal 18` appear on every stop, fast or hung (AppArmor denies
+  SIGCONT from the podman peer; the kernel audit line says `signal=cont`).
+- **Detection:** `journalctl -u radon-<unit>` around `Stopping` has no app
+  shutdown line (`SIGTERM received`, `[newsfeed] received SIGTERM`) and
+  later shows `stop-sigterm timed out`.
+- **Fix:** each app drop-in runs `ExecStop=radon-app-runtime halt %n
+  <grace>` (engine `stop --time`), so delivery no longer depends on the
+  client proxy. Grace + 5s fits `TimeoutStopSec` and the helper wait.
+- **Regression:** `cloud/tests/test_container_stop_delivery.py`.
+
+---
+
 ## caddy-health-floor-pages-aggregate-invalid
 
 **Off-box observer pages P1 `aggregate_invalid` while ping and `/sign-in`
