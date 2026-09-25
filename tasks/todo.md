@@ -8435,6 +8435,14 @@ Review update: PR #710 red head `9ad53d8c`, GitHub run `36177477069`, scripts-jm
 
 Review update: GitHub head `6609314e` scripts-jm green: 1357 passed, 7 skipped. Main integration preserves all task sections; exact merged-head checks pending. Liquid Compute fresh health 18:56:11 UTC; parent verified Flex fresh health 18:57:04 UTC. Knowledge timer remains enabled but paused after committed id 10622 checkpoint and 4.3 GiB peak, pending bounded-memory deployment.
 
+# Task: Bounded transactional knowledge transport (2026-09-25)
+- [x] T1 depends_on: [] Reproduce native stall with stable CPU/socket counters and responsive bounded DB read; stop recovery and release deploy lock.
+- [x] T2 depends_on: [T1] Prove native CLI regression on GitHub; implement knowledge-only bounded transactional Hrana adapter and protocol/atomicity tests.
+- [ ] T3 depends_on: [T2] Independently review, publish exact-head green PR, notify and coordinate deployment.
+- [ ] T4 depends_on: [T3] Complete lock-protected all-source recovery and restore hourly timer with real health evidence.
+Dependency graph: T1 -> T2 -> T3 -> T4.
+Review: red head e3aa9167, CI36182632129: 1 regression failed, 1357 passed, 7 skipped. Independent transport review approved transaction/protocol coverage. No local test suites; native GIL-blocking I/O cannot be bounded by threads. Preserve document/FTS transactions, rotating batons, safe HTTPS routing and retry entire prepared batches after ambiguous failure.
+
 # Task: Durable config-drift writer recovery (2026-09-25)
 
 ## Dependency graph

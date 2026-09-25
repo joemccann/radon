@@ -14,8 +14,8 @@ hash-equal skip: an unchanged doc arriving WITH a vector where the stored row
 has none gets an embedding-only backfill (recovery from FTS-only degraded
 ingests), still without an activity bump or FTS churn.
 
-Callers pass the connection explicitly (sync libsql via get_db() in oneshot
-ingest scripts, a local libsql :memory: DB in tests).
+Callers pass the connection explicitly (bounded transactional Hrana HTTP in
+the ingest CLI, a local libsql :memory: DB in tests).
 """
 from __future__ import annotations
 

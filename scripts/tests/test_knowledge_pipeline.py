@@ -811,7 +811,7 @@ class TestMainConnectionIsolation:
             "b": SimpleNamespace(SOURCE="b", SCOPE="ops", fetch=fake_fetch),
         }
 
-        monkeypatch.setattr(db_client, "get_db", counting_get_db)
+        monkeypatch.setattr(ingest_mod, "_fresh_db", counting_get_db)
         monkeypatch.setattr(
             service_cycle_mod, "service_cycle",
             lambda *a, **k: contextlib.nullcontext(),
@@ -874,7 +874,7 @@ class TestTransientDbRetry:
 
         monkeypatch.setattr(ingest_mod, "ingest_source", flaky_ingest)
         monkeypatch.setattr(ingest_mod, "_SOURCE_RETRY_BACKOFF_SECS", 0.0)
-        monkeypatch.setattr(db_client, "get_db", lambda: object())
+        monkeypatch.setattr(ingest_mod, "_fresh_db", lambda: object())
         monkeypatch.setattr(db_client, "reset_connection", lambda: None)
         monkeypatch.setattr(
             service_cycle_mod, "service_cycle",
@@ -934,7 +934,7 @@ class TestTransientDbRetry:
 
         monkeypatch.setattr(ingest_mod, "ingest_source", flaky_ingest)
         monkeypatch.setattr(ingest_mod, "_SOURCE_RETRY_BACKOFF_SECS", 0.0)
-        monkeypatch.setattr(db_client, "get_db", lambda: object())
+        monkeypatch.setattr(ingest_mod, "_fresh_db", lambda: object())
         monkeypatch.setattr(db_client, "reset_connection", lambda: None)
         monkeypatch.setattr(
             service_cycle_mod, "service_cycle",
@@ -974,7 +974,7 @@ class TestTransientDbRetry:
 
         monkeypatch.setattr(ingest_mod, "ingest_source", always_busy)
         monkeypatch.setattr(ingest_mod, "_SOURCE_RETRY_BACKOFF_SECS", 0.0)
-        monkeypatch.setattr(db_client, "get_db", lambda: object())
+        monkeypatch.setattr(ingest_mod, "_fresh_db", lambda: object())
         monkeypatch.setattr(db_client, "reset_connection", lambda: None)
         monkeypatch.setattr(
             service_cycle_mod, "service_cycle",
@@ -1006,7 +1006,7 @@ class TestTransientDbRetry:
 
         monkeypatch.setattr(ingest_mod, "ingest_source", always_fail)
         monkeypatch.setattr(ingest_mod, "_SOURCE_RETRY_BACKOFF_SECS", 0.0)
-        monkeypatch.setattr(db_client, "get_db", lambda: object())
+        monkeypatch.setattr(ingest_mod, "_fresh_db", lambda: object())
         monkeypatch.setattr(db_client, "reset_connection", lambda: None)
         monkeypatch.setattr(
             service_cycle_mod, "service_cycle",
