@@ -306,6 +306,53 @@ class TestFailClosedExecution:
         assert after == before
 
 
+
+@pytest.mark.parametrize("invalid", [None, "BAD SYMBOL", "MOG  A", "MOG\tA"])
+def test_ishares_class_shares_publish_or_abort_all_presets(tmp_path, monkeypatch, invalid):
+    """Exercise real IWM parsing through preflight and canonical preset writes."""
+    helper = TestFailClosedExecution()
+    sp500 = helper._companies("S", 500)
+    ndx100 = helper._companies("N", 100)
+    r2k = helper._companies("R", 1900)
+    for index, rows in (("sp500", sp500), ("ndx100", ndx100), ("r2k", r2k)):
+        (tmp_path / f"{index}.json").write_text(json.dumps(
+            helper._master(index, [row["ticker"] for row in rows])
+        ))
+    before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    sp500[-1] = dict(sp500[-1], ticker="SNEW")
+    classes = ["MOG A", "GEF B", "CRD A", "BH A"]
+    for row, ticker in zip(r2k, classes):
+        row["ticker"] = ticker
+    if invalid is not None:
+        r2k[4]["ticker"] = invalid
+    response = MagicMock()
+    response.read.return_value = _make_iwm_payload(r2k).encode()
+    monkeypatch.setattr(pr, "PRESETS_DIR", tmp_path)
+    monkeypatch.setattr(pr, "CHANGELOG_PATH", tmp_path / "changelog.json")
+    monkeypatch.setattr(pr, "fetch_sp500", lambda: sp500)
+    monkeypatch.setattr(pr, "fetch_ndx100", lambda: ndx100)
+    monkeypatch.setattr(pr, "urlopen", lambda *args, **kwargs: response)
+
+    result = pr.execute()
+
+    if invalid is not None:
+        assert result["status"] == "error"
+        assert "invalid tickers" in result["error"]
+        assert result["total_files_written"] == 0
+        assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
+    else:
+        assert result["status"] == "ok"
+        assert result["total_files_written"] > 0
+        canonical = {"MOG-A", "GEF-B", "CRD-A", "BH-A"}
+        master = json.loads((tmp_path / "r2k.json").read_text())
+        assert len(master["tickers"]) == 1900
+        assert canonical <= set(master["tickers"])
+        sector = json.loads((tmp_path / "r2k-technology.json").read_text())
+        assert canonical <= set(sector["tickers"])
+        assert canonical <= {ticker for pair in sector["pairs"] for ticker in pair}
+        assert canonical <= set(result["indices"]["r2k"]["added"])
+
+
 def test_atomic_json_write_preserves_target_on_serialization_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -492,6 +539,31 @@ class TestFetchR2kParsing:
         assert "TICK1" in tickers
         assert "TICK2" in tickers
         assert mocked_open.call_args.kwargs["timeout"] == 30
+
+    @pytest.mark.parametrize("raw,canonical", [
+        ("MOG A", "MOG-A"), ("GEF B", "GEF-B"),
+        ("CRD A", "CRD-A"), ("BH A", "BH-A"),
+        ("MOG-A", "MOG-A"), ("REAL", "REAL"),
+    ])
+    def test_normalizes_ishares_share_classes(self, raw, canonical):
+        payload = _make_iwm_payload([{"ticker": raw}])
+        with patch.object(pr, "urlopen", return_value=self._mock_response(payload)):
+            assert pr.fetch_r2k()[0]["ticker"] == canonical
+
+    @pytest.mark.parametrize("invalid", [
+        "MOG  A", "MOG\tA", "MOG\nA", "MOG AA", "MOG A B", "BAD SYMBOL", "../MOG A",
+    ])
+    def test_does_not_repair_malformed_equity_symbols(self, invalid):
+        payload = _make_iwm_payload([{"ticker": invalid}])
+        with patch.object(pr, "urlopen", return_value=self._mock_response(payload)):
+            result = pr.fetch_r2k()
+        assert result[0]["ticker"] == invalid
+        assert not pr._VALID_TICKER.fullmatch(result[0]["ticker"])
+
+    def test_normalizes_before_existing_deduplication(self):
+        payload = _make_iwm_payload([{"ticker": "MOG A"}, {"ticker": "MOG-A"}])
+        with patch.object(pr, "urlopen", return_value=self._mock_response(payload)):
+            assert [row["ticker"] for row in pr.fetch_r2k()] == ["MOG-A"]
 
     def test_skips_non_equity_rows(self):
         payload = _make_iwm_payload([

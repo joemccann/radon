@@ -43,6 +43,10 @@ _REQUIRED_FIELDS = {
     "r2k": ("ticker", "name", "sector"),
 }
 _VALID_TICKER = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
+# BlackRock uses a single literal space before a one-letter equity class
+# (MOG A, GEF B, CRD A, BH A). Match only that provider format; arbitrary
+# embedded whitespace must still fail the existing constituent validator.
+_ISHARES_CLASS_TICKER = re.compile(r"^([A-Z]{1,5}) ([A-Z])$")
 _VALID_PRESET_KEY = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _VALID_GROUP_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,&'()+-]{0,79}$")
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
@@ -402,6 +406,8 @@ def fetch_r2k() -> List[Dict]:
         columns["holdingPercent"],
     ):
         ticker = str(ticker_value or "").strip().upper()
+        # Match Radon's dash-form constituent seeds before deduplication/diffing.
+        ticker = _ISHARES_CLASS_TICKER.sub(r"\1-\2", ticker)
         name = str(name_value or "").strip()
         sector = str(sector_value or "").strip()
         asset_class = str(asset_value or "").strip()

@@ -203,13 +203,13 @@ describe("GET /api/gex does not wait on the background scan", () => {
       history: [],
     }));
     const { GET } = await import("../app/api/gex/route");
-    const res = await Promise.race([
-      GET(),
-      new Promise<Response>((_resolve, reject) => {
-        setTimeout(() => reject(new Error("GET waited on the scan")), 50);
-      }),
-    ]);
+    // The scan promise never settles: the test timeout catches an awaited scan.
+    // A 50ms wall-clock race instead leaks the losing GET into the next test
+    // under CI load, where it can invoke that test's freshly reset fetch mock.
+    const res = await GET();
+    expect(mockRadonFetch).toHaveBeenCalledWith("/gex/scan", expect.any(Object));
     expect(res.status).toBe(200);
+    expect((await res.json()).net_gex).toBe(111);
   });
 });
 
