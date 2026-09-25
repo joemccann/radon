@@ -14,6 +14,7 @@ import {
   decideHealthWrite,
   shouldRequestGatewayRestart,
   summarizeSubscriptionFreshness,
+  findStaleSubjectsOnLivePlane,
   nextFarmStateCode,
   farmStateAfterIdleDrain,
 } from "./staleDataMachine.js";
@@ -60,19 +61,55 @@ describe("staleDataMachine constants", () => {
 });
 
 describe("decideStaleAction", () => {
-  it("per-subscription staleness cannot be masked or escalate unentitled subjects", () => {
-    const summary = summarizeSubscriptionFreshness([
-      { active: true, lastTickAt: NOW },
-      { active: true, lastTickAt: STALE_TICK_AT },
-      { active: false, lastTickAt: 0 },
-    ], NOW);
+  it("one silent subject on a live data plane is a per-symbol fault, not a socket fault", () => {
+    const subjects = [
+      { key: "SPY", active: true, lastTickAt: NOW },
+      { key: "SPCX 260925P00149000", active: true, lastTickAt: STALE_TICK_AT },
+      { key: "NULLED", active: false, lastTickAt: 0 },
+    ];
+    const summary = summarizeSubscriptionFreshness(subjects, NOW);
 
-    expect(summary).toEqual({ activeSubscriptions: 2, subscribedSymbols: 3, lastTickAt: STALE_TICK_AT });
+    expect(summary).toEqual({ activeSubscriptions: 2, subscribedSymbols: 3, lastTickAt: NOW });
+    expect(decideStaleAction(input(summary))).toBe("none");
+    expect(findStaleSubjectsOnLivePlane(subjects, NOW)).toEqual(["SPCX 260925P00149000"]);
+  });
+
+  it("every active subject silent is a dead data plane: the socket ladder owns it", () => {
+    const subjects = [
+      { key: "SPY", active: true, lastTickAt: STALE_TICK_AT },
+      { key: "QQQ", active: true, lastTickAt: STALE_TICK_AT - 10_000 },
+    ];
+    const summary = summarizeSubscriptionFreshness(subjects, NOW);
+
+    expect(summary.lastTickAt).toBe(STALE_TICK_AT);
     expect(decideStaleAction(input(summary))).toBe("reconnect");
+    expect(findStaleSubjectsOnLivePlane(subjects, NOW)).toEqual([]);
+  });
 
+  it("IB-nulled subjects are never resubscribed individually", () => {
+    expect(findStaleSubjectsOnLivePlane([
+      { key: "SPY", active: true, lastTickAt: NOW },
+      { key: "NULLED", active: false, lastTickAt: 0 },
+    ], NOW)).toEqual([]);
     expect(summarizeSubscriptionFreshness([
       { active: false, lastTickAt: STALE_TICK_AT },
     ], NOW)).toEqual({ activeSubscriptions: 0, subscribedSymbols: 1, lastTickAt: STALE_TICK_AT });
+  });
+
+  it("a session with one dead symbol never bounces the socket (incident 20260925T164500Z)", () => {
+    // Production 2026-09-22 and 09-24: dozens of cycle-1 socket bounces per
+    // RTH day and never an escalation. The dead subject made the aggregate
+    // stale, and the next tick from any live subject reset the ladder to 0.
+    const actions = new Set();
+    for (let cycle = 1; cycle <= 40; cycle += 1) {
+      const now = NOW + cycle * STALE_CHECK_INTERVAL_MS;
+      const summary = summarizeSubscriptionFreshness([
+        { active: true, lastTickAt: now - 5_000 },
+        { active: true, lastTickAt: NOW },
+      ], now);
+      actions.add(decideHealthWrite({ ...input(summary), now, inError: false, lastHeartbeatAt: 0 }).action);
+    }
+    expect(actions).toEqual(new Set(["none"]));
   });
 
   it("healthy ticks → none", () => {
