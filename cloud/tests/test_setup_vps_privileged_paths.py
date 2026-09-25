@@ -753,7 +753,7 @@ class TestRemoteAncestryProvenance:
         other = harness["tmp"] / "other.git"
         subprocess.run(["git", "clone", "-q", "--bare", str(harness["remote"]), str(other)], check=True)
         work = harness["tmp"] / "other-work"
-        subprocess.run(["git", "clone", "-q", str(other), str(work)], check=True)
+        subprocess.run(["git", "clone", "-q", "-b", "main", str(other), str(work)], check=True)
         _git(work, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "other")
         _git(work, "push", "-q", "origin", "HEAD:refs/heads/main")
         _git(harness["cloud"], "config", f"url.{other}.insteadOf", str(harness["remote"]))
