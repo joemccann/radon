@@ -451,6 +451,8 @@ Note on why the win is judged on `gold_human`: `test.jsonl` labels were produced
 Description=Radon SLM tagger: internal specialist, not a SotA replacement for open research (llama-server sidecar, newsfeed text tags only)
 After=network-online.target
 Wants=network-online.target
+ConditionFileIsExecutable=/usr/local/bin/llama-server
+ConditionPathExists=/var/lib/radon/models/current.gguf
 StartLimitIntervalSec=300
 StartLimitBurst=5
 
@@ -462,7 +464,7 @@ UMask=0077
 # Environment=); the shared /etc/radon/env would hand a third-party binary
 # the full production credential set.
 Environment=RADON_SLM_TAGGER_THREADS=1
-ExecStart=/usr/local/bin/llama-server \
+ExecStart=/usr/bin/env /usr/local/bin/llama-server \
   --model /var/lib/radon/models/current.gguf \
   --alias radon-slm-tagger \
   --host 127.0.0.1 --port 8331 \
@@ -485,6 +487,7 @@ Notes for the implementer:
 - `MemoryMax` is a hard ceiling so a leak cannot take `radon-nextjs` down; the value is the D.4 threshold plus headroom and is re-derived if the model changes.
 - `Nice=10` and `CPUQuota` keep the sidecar behind the API and Next.js on a shared-vCPU host.
 - `--parallel 1`: the newsfeed tags one post at a time; backfill is throttled to about 24 posts per minute. No batching.
+- Installation precedes optional binary/model provisioning and does not enable or start the sidecar. The unit conditions skip activation while prerequisites are absent. `/usr/bin/env` execs the absolute server path and preserves its exit status; this lets the real `systemd-analyze verify` gate pass on unprovisioned hosts without suppressing runtime failures or configuration drift.
 - The unit is pinned in `cloud/config/installed-units.sha256` (the deploy's `install-units` verb installs anything listed there). The unit watchdog (`scripts/watchdog/units.py`, continuous bucket) already probes every `radon-*` unit via `systemctl show` and pages on `failed` / `start-limit-hit`, so a dead sidecar is covered with no new heartbeat. Call-level health is the `slm_status` column of the shadow table (section I) plus the `attempted` codes in the `newsfeed-tagger` ladder log lines. Do not add a `service_health` writer for this unit and do not put one inside `llama-server`.
 - `RADON_SLM_TAGGER_THREADS` defaults to `nproc - 1`, minimum 1.
 - Health: `GET http://127.0.0.1:8331/health` returns 200 when the model is loaded; the ladder rung treats anything else as `slm-tagger:unavailable` and falls through.
