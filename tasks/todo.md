@@ -8393,3 +8393,5 @@ Review: pending; no live broker calls, browser launches, or runner-lock operatio
 - Archived the exact redundant Flex drop-in to `/root/radon-config-drift-20260925/write-performance-data.conf`; verified canonical effective write/read-only paths after daemon-reload.
 - Original SLM unit fails production systemd-analyze verification (exit 1, missing llama-server); guarded candidate passes (exit 0). No services activated.
 - Added Linux CI verification and install-without-activation regressions. Exact-head CI pending.
+
+- CI repair: `scripts-df` reported the SLM owner-document contract; updated the unit example and provisioning semantics in `docs/ml/newsfeed-slm-tagger.md`. Re-run all applicable checks on the new head.
