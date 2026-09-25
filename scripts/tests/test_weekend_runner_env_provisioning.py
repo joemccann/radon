@@ -507,6 +507,43 @@ class TestTestingCloneScopedCredentials:
         assert PROD_TURSO not in text and PROD_UW not in text, proc.stdout
         self._assert_no_value_echoed(proc)
 
+    def _planted_link(self, tmp_path: Path, clone: Path, rel: str) -> Path:
+        """A clone-planted link to an operator file outside the sandbox."""
+        victim_dir = tmp_path / "operator"
+        victim_dir.mkdir()
+        victim = victim_dir / ".env"
+        victim.write_text(PROD_WEB_ENV, encoding="utf-8")
+        # Newer than the source so the "kept" branch would follow it.
+        stamp = time.time() + 120
+        os.utime(victim, (stamp, stamp))
+        if rel == "web":
+            shutil.rmtree(clone / "web")
+            (clone / "web").symlink_to(victim_dir)
+        else:
+            (clone / "web" / ".env").symlink_to(victim)
+        return victim
+
+    @pytest.mark.parametrize("rel", ["web/.env", "web"])
+    def test_a_symlinked_clone_env_is_refused_not_written_through(self, tmp_path, rel):
+        src, clone, env, scoped = self._stage_prod(tmp_path)
+        victim = self._planted_link(tmp_path, clone, rel)
+        before = victim.stat()
+
+        proc = _run("testing", env, tmp_path)
+
+        assert proc.returncode != 0, proc.stdout + proc.stderr
+        assert "REFUSING" in proc.stdout + proc.stderr
+        assert victim.read_text(encoding="utf-8") == PROD_WEB_ENV
+        after = victim.stat()
+        assert (after.st_mode, after.st_mtime) == (before.st_mode, before.st_mtime)
+        self._assert_no_value_echoed(proc)
+
+    def test_scoping_replaces_the_file_instead_of_writing_into_it(self):
+        text = (REPO / "scripts" / "setup_testing_weekend.sh").read_text(encoding="utf-8")
+        body = text.split("scope_clone_credentials() {", 1)[1].split("\n}\n", 1)[0]
+        assert 'cat "$tmp" > "$dst"' not in body
+        assert 'mv -f -- "$tmp" "$dst"' in body
+
     def test_wrapper_never_recopies_web_env(self):
         """Only setup provisions web/.env; no phase may restore the prod copy."""
         text = (REPO / "scripts" / "testing_weekend.sh").read_text(encoding="utf-8")
