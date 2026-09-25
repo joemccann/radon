@@ -191,3 +191,45 @@ def test_response_deadline_rejects_slow_stream(connection, monkeypatch):
     monkeypatch.setattr(http_db.time, 'monotonic', lambda: next(ticks))
     with pytest.raises(http_db.TransportError, match='deadline'):
         db.execute('SELECT 1')
+
+
+def test_ambiguous_commit_replays_whole_prepared_batch_idempotently(connection, monkeypatch):
+    from knowledge.schema import KnowledgeDoc
+    from knowledge.store import upsert_documents
+
+    _, server = connection
+    server.db.executescript('''
+        CREATE TABLE knowledge(id INTEGER PRIMARY KEY, source TEXT, scope TEXT,
+          doc_key TEXT, chunk_ix INTEGER, title TEXT, summary TEXT, content TEXT,
+          metadata TEXT, embedding BLOB, content_hash TEXT, created_at TEXT,
+          last_activity_at TEXT, UNIQUE(source, doc_key, chunk_ix));
+        CREATE VIRTUAL TABLE knowledge_fts USING fts5(title, summary, content);
+    ''')
+    original_open = server.open
+    lose_receipt = True
+
+    def ambiguous_once(request, timeout):
+        nonlocal lose_receipt
+        body = json.loads(request.data)
+        response = original_open(request, timeout)
+        if lose_receipt and body['requests'][0].get('stmt', {}).get('sql') == 'COMMIT':
+            lose_receipt = False
+            response.close()
+            raise TimeoutError('COMMIT applied but receipt lost')
+        return response
+
+    monkeypatch.setattr(server, 'open', ambiguous_once)
+    monkeypatch.setattr(ingest, '_SOURCE_RETRY_BACKOFF_SECS', 0)
+    handles = []
+
+    def fresh():
+        handle = http_db.Connection()
+        handles.append(handle)
+        return handle
+
+    docs = [KnowledgeDoc(source='docs', scope='ops', doc_key='one', content='durable')]
+    counts = ingest._persist_prepared(fresh, lambda db: upsert_documents(db, docs), source='docs')
+    assert len(handles) == 2 and handles[0] is not handles[1]
+    assert counts == {'inserted': 0, 'updated': 0, 'skipped': 1, 'pruned': 0}
+    assert server.db.execute('SELECT id, content FROM knowledge').fetchall() == [(1, 'durable')]
+    assert server.db.execute("SELECT rowid FROM knowledge_fts WHERE knowledge_fts MATCH 'durable'").fetchall() == [(1,)]
