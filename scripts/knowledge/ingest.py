@@ -30,9 +30,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import struct
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Iterable, NamedTuple
 
@@ -40,13 +40,12 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from knowledge.distill import distill  # noqa: E402
-from knowledge.embed import embedding_text, get_embedder  # noqa: E402
+from knowledge.distill import EnrichmentBudget, distill  # noqa: E402
+from knowledge.embed import EMBEDDING_DIM, embedding_text, get_embedder  # noqa: E402
 from knowledge.schema import KnowledgeDoc  # noqa: E402
 from knowledge.store import delete_source_docs, upsert_documents  # noqa: E402
 
 SERVICE_NAME = "knowledge-ingest"
-DISTILL_WORKERS = 8
 
 # Bounded retries absorb a transient Turso lock/stream blip so the
 # hourly oneshot does not page P1 on SQLITE_BUSY (2026-08-15: newsfeed
@@ -74,7 +73,7 @@ _EXISTING_BATCH_ROWS = 200
 
 _EXISTING_SQL = (
     "SELECT id, doc_key, chunk_ix, content, title, metadata, "
-    "summary IS NOT NULL, embedding IS NOT NULL "
+    "summary, embedding, content_hash "
     "FROM knowledge WHERE source = ? AND id > ? ORDER BY id LIMIT ?"
 )
 
@@ -83,8 +82,17 @@ class _StoredChunk(NamedTuple):
     content: str
     title: str | None
     metadata_json: str | None
-    has_summary: bool
-    has_embedding: bool
+    summary: str | None
+    embedding: bytes | None
+    content_hash: str
+
+    @property
+    def has_summary(self):
+        return self.summary is not None
+
+    @property
+    def has_embedding(self):
+        return self.embedding is not None
 
 _EMPTY_UPSERT_COUNTS = {"inserted": 0, "updated": 0, "skipped": 0, "pruned": 0}
 
@@ -124,6 +132,7 @@ def ingest_source(
     embed_enabled: bool = True,
     limit: int | None = None,
     db_factory=None,
+    enrichment: EnrichmentBudget | None = None,
 ) -> dict:
     """Run one connector module through the full pipeline. Returns counts.
 
@@ -132,6 +141,7 @@ def ingest_source(
     never delete documents it simply didn't reach. ``db_factory`` supplies a
     fresh connection per authoritative document; without it the shared
     ``db`` is used."""
+    enrichment = enrichment if enrichment is not None else EnrichmentBudget()
     source = module.SOURCE
     fresh_db = db_factory if db_factory is not None else (lambda: db)
     docs = _fetch_docs(module, db, limit)
@@ -142,20 +152,25 @@ def ingest_source(
         require_summary=distill_enabled
     )
 
-    distilled = distill_failed = embedded = 0
+    distilled = distill_failed = distill_deferred = embedded = 0
     counts = dict(_EMPTY_UPSERT_COUNTS)
     for batch in _document_batches(to_process, _INGEST_BATCH_DOCS):
         if distill_enabled:
-            batch_distilled, batch_failed = _distill_docs(batch)
+            batch_distilled, batch_failed, batch_deferred = _distill_docs(batch, enrichment)
             distilled += batch_distilled
             distill_failed += batch_failed
+            distill_deferred += batch_deferred
+        _restore_unchanged_enrichment(batch, existing)
         if embed_enabled:
-            embedded += _embed_docs(batch, embedder)
+            embedded += _embed_docs([doc for doc in batch if doc.embedding is None], embedder)
         # One authoritative document is the smallest safe write transaction:
         # every chunk and its trailing-chunk prune must commit together. The
         # preparation batch must not reserve the shared writer for hundreds
         # of unrelated documents and serial HTTP round trips.
         for document in _document_batches(batch, max_chunks=1):
+            if _prepared_document_is_current(document, existing):
+                counts["skipped"] += len(document)
+                continue
             persisted = _persist_prepared(
                 fresh_db, lambda connection: upsert_documents(connection, document),
                 source=source,
@@ -182,6 +197,7 @@ def ingest_source(
         "skipped_docs": skipped_docs,
         "distilled": distilled,
         "distill_failed": distill_failed,
+        "distill_deferred": distill_deferred,
         "embedded": embedded,
         "deleted": deleted,
         **counts,
@@ -216,9 +232,9 @@ def _load_existing(db, source: str) -> dict[str, dict[int, _StoredChunk]]:
         rows = db.execute(_EXISTING_SQL, (source, cursor, _EXISTING_BATCH_ROWS)).fetchall()
         if not rows:
             return existing
-        for row_id, doc_key, chunk_ix, content, title, metadata_json, has_summary, has_embedding in rows:
+        for row_id, doc_key, chunk_ix, content, title, metadata_json, summary, embedding, digest in rows:
             existing.setdefault(doc_key, {})[chunk_ix] = _StoredChunk(
-                content, title, metadata_json, bool(has_summary), bool(has_embedding)
+                content, title, metadata_json, summary, embedding, digest
             )
             cursor = row_id
         if len(rows) < _EXISTING_BATCH_ROWS:
@@ -311,11 +327,8 @@ def _vanished_keys(
     return vanished
 
 
-def _distill_docs(docs: list[KnowledgeDoc]) -> tuple[int, int]:
-    if not docs:
-        return 0, 0
-    with ThreadPoolExecutor(max_workers=DISTILL_WORKERS) as pool:
-        results = list(pool.map(lambda doc: distill(doc.title, doc.content), docs))
+def _distill_docs(docs: list[KnowledgeDoc], enrichment: EnrichmentBudget) -> tuple[int, int, int]:
+    results, deferred = enrichment.run([(doc.title, doc.content) for doc in docs])
     distilled = failed = 0
     for doc, result in zip(docs, results):
         if result is None:
@@ -325,7 +338,38 @@ def _distill_docs(docs: list[KnowledgeDoc]) -> tuple[int, int]:
         if result.get("tickers"):
             doc.metadata = {**(doc.metadata or {}), "tickers": result["tickers"]}
         distilled += 1
-    return distilled, failed
+    return distilled, failed, deferred
+
+
+def _prepared_document_is_current(docs, existing):
+    """Compare final hashes, not raw-only prefilter keys: retain new summaries.
+
+    Compare the complete chunk set so skipping never suppresses a trailing-chunk
+    prune. An embedding-only backfill still requires a write.
+    """
+    stored = existing.get(docs[0].doc_key, {})
+    return set(stored) == {doc.chunk_ix for doc in docs} and all(
+        doc.content_hash() == stored[doc.chunk_ix].content_hash
+        and (stored[doc.chunk_ix].has_embedding or doc.embedding is None)
+        for doc in docs
+    )
+
+
+def _restore_unchanged_enrichment(docs, existing):
+    """A deferred optional retry must not erase a current sibling's enrichment."""
+    for doc in docs:
+        stored = existing.get(doc.doc_key, {}).get(doc.chunk_ix)
+        if stored is None:
+            continue
+        if _chunk_is_current(doc, stored, require_embedding=False, require_summary=False):
+            if doc.summary is None:
+                doc.summary = stored.summary
+                # Preserve model-added tickers when no replacement was produced.
+                doc.metadata = json.loads(stored.metadata_json) if stored.metadata_json else None
+        if (stored.embedding is not None and len(stored.embedding) == EMBEDDING_DIM * 4 and
+                embedding_text(doc.title, doc.summary, doc.content) ==
+                embedding_text(stored.title, stored.summary, stored.content)):
+            doc.embedding = list(struct.unpack(f"<{EMBEDDING_DIM}f", stored.embedding))
 
 
 def _embed_docs(docs: list[KnowledgeDoc], embedder) -> int:
@@ -399,6 +443,7 @@ def main(argv: list[str] | None = None) -> int:
     modules = _select_sources(ALL_SOURCES, args.source)
     results: dict[str, dict] = {}
     errors: dict[str, str] = {}
+    enrichment = EnrichmentBudget()
     with service_cycle(SERVICE_NAME, market_hours_class="daily"):
         for name, module in modules.items():
             last_exc: BaseException | None = None
@@ -415,6 +460,7 @@ def main(argv: list[str] | None = None) -> int:
                         embed_enabled=not args.no_embed,
                         limit=args.limit,
                         db_factory=_fresh_db,
+                        enrichment=enrichment,
                     )
                     last_exc = None
                     break
