@@ -1,3 +1,16 @@
+# Task: Stop the operator page 403 on /api/admin/demo-users
+
+## Dependency graph and checklist
+- [x] T1 depends_on: [] Red tests: operator build does not fetch demo-users; unconfigured demo backend is 404 before the admin gate; configured demo backend still 403s a non-admin.
+- [x] T2 depends_on: [T1] Skip the panel fetch unless NEXT_PUBLIC_RADON_DEMO=1, and 404 before requireDemoAdmin when TURSO_DEMO_DB_URL is unset.
+- [x] T3 depends_on: [T2] Focused vitest green, browser assertion that the operator admin component does not request the route.
+
+## Review
+- Operator bundle: 7 admin reads, 0 `/api/admin/demo-users`, demo panel absent, no page errors.
+- Demo bundle (`NEXT_PUBLIC_RADON_DEMO=1`): requests `/api/admin/demo-users`.
+- Configured backend still 403s a non-admin. Unconfigured backend 404s before that gate.
+- Focused vitest 17 passed across the new route/component tests plus the admin gate and perimeter pins.
+
 # Task: Preserve iShares class shares in preset rebalance (2026-09-25)
 
 ## Dependency graph and checklist
