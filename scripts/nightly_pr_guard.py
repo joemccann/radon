@@ -32,14 +32,19 @@ def option(args: list[str], long: str, short: str = "", default: str = "") -> st
     return value
 
 
-def _positional_prefix(args: list[str], limit: int = 2) -> list[str]:
-    """First `limit` non-flag tokens, skipping -R/--repo and its value.
+# The only gh flags valid before a subcommand's action that take no value.
+BOOL_FLAGS = {"-h", "--help", "--version"}
 
-    gh (Cobra) resolves the pr/create subcommand chain by walking positional
-    tokens and skipping flags wherever they appear, including between the
-    subcommand and its action (`gh pr -R owner/repo create` is equivalent to
-    `gh pr create -R owner/repo`). A plain adjacent-pair scan for ["pr",
-    "create"] missed that form entirely.
+
+def _positional_prefix(args: list[str], limit: int = 2) -> list[str]:
+    """First `limit` non-flag tokens, skipping every flag value the way gh does.
+
+    gh (Cobra) resolves the subcommand chain by walking positional tokens and
+    skipping flags wherever they appear, including between the subcommand and
+    its action (`gh pr -R owner/repo create` is `gh pr create -R owner/repo`).
+    Cobra consumes the next token for any `--flag` or two-character `-f`
+    without `=` unless the flag is a known bool, so model that fail-closed:
+    `gh pr -t subj merge 5` is a merge, not a `pr subj` command.
     """
     out: list[str] = []
     skip_value = False
@@ -47,12 +52,10 @@ def _positional_prefix(args: list[str], limit: int = 2) -> list[str]:
         if skip_value:
             skip_value = False
             continue
-        if a in ("-R", "--repo"):
-            skip_value = True
-            continue
-        if a.startswith("--repo=") or (a.startswith("-R") and a != "-R"):
-            continue
+        if a == "--":
+            break
         if a.startswith("-"):
+            skip_value = "=" not in a and a not in BOOL_FLAGS and (a.startswith("--") or len(a) == 2)
             continue
         out.append(a)
         if len(out) == limit:
@@ -90,16 +93,20 @@ def refused_action(args: list[str], loop: str = "") -> str:
     the security loops, any public issue write."""
     prefix = _positional_prefix(args)
     tail = args[args.index("api") + 1:] if "api" in args else []
-    # Flag values (-X PUT, -H ...) may precede the endpoint, so match any token.
-    if prefix == ["pr", "merge"] or any(re.search(r"(?:^|/)repos/[^/]+/[^/]+/pulls/\d+/merge/?$", a) for a in tail) \
+    # Any tail token may be the endpoint: a value-taking flag (-X PUT, -H ...)
+    # can precede it, and a query or fragment suffix must not hide it.
+    if prefix == ["pr", "merge"] or any(re.search(r"(?:^|/)repos/[^/]+/[^/]+/pulls/\d+/merge/?(?:[?#].*)?$", a) for a in tail) \
             or (tail and re.search(r"mergePullRequest|enablePullRequestAutoMerge", " ".join(tail))):
         return "nightly loops never merge; the operator merges"
+    # An alias can rename any refused command to one the gh shim never routes.
+    if prefix in (["alias", "set"], ["alias", "import"]):
+        return "nightly loops never define gh aliases"
     if loop in SECURITY_LOOPS:
         if len(prefix) == 2 and prefix[0] == "issue" and prefix[1] in ISSUE_WRITES:
             return "security loops never write issues; the wrapper posts the sanitized comment"
         method = option(tail, "--method", "-X").upper()
         body = any(a in ("--input", "--field", "--raw-field", "-f", "-F") or a.startswith(("--input=", "--field=", "--raw-field=", "-f", "-F")) for a in tail)
-        if any(re.search(r"(?:^|/)repos/[^/]+/[^/]+/issues(?:/|$)", a) for a in tail) and (method not in ("", "GET") or body):
+        if any(re.search(r"(?:^|/)repos/[^/]+/[^/]+/issues(?:[/?#]|$)", a) for a in tail) and (method not in ("", "GET") or body):
             return "security loops never write issues; the wrapper posts the sanitized comment"
     return ""
 
