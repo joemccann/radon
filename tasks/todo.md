@@ -8398,3 +8398,14 @@ Review: pending; no live broker calls, browser launches, or runner-lock operatio
 
 - CI repair: `scripts-df` reported the SLM owner-document contract; updated the unit example and provisioning semantics in `docs/ml/newsfeed-slm-tagger.md`. Re-run all applicable checks on the new head.
 - CI repair: an unchanged SIGTERM regression failed on the second head after passing on the first. Synchronize the isolated wrapper with its actual parent wait boundary and preserve all reporting/status assertions; retain subprocess diagnostics. Prior failure output did not capture the precise exit path. Production wrappers unchanged.
+
+# Task: Preserve iShares class shares in preset rebalance (2026-09-25)
+
+## Dependency graph and checklist
+- [x] T1 depends_on: [] Diagnose live error, provider format, and canonical tickers.
+- [ ] T2 depends_on: [T1] Add regression cases and narrow source normalization.
+- [ ] T3 depends_on: [T2] Publish PR, verify exact-head GitHub CI, and notify.
+
+## Review
+- Preserve strict ticker validation, all-source preflight, and atomic writes.
+- No local suites; regression red/green and all applicable verification run on GitHub.
