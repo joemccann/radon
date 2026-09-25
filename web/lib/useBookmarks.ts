@@ -25,6 +25,7 @@ let loadError: string | null = null;
 let loadGeneration = 0;
 let inFlight: { generation: number; controller: AbortController; promise: Promise<void> } | null = null;
 let mutationQueue: Promise<void> = Promise.resolve();
+let mutationGeneration = 0;
 const subscribers = new Set<() => void>();
 
 function notify(): void {
@@ -74,6 +75,7 @@ function invalidateReads(): void {
 
 /** Drop the previous account's bookmarks; mounted consumers refetch. */
 export function resetBookmarksCache(): void {
+  mutationGeneration += 1;
   invalidateReads();
   cache = [];
   loaded = false;
@@ -109,49 +111,55 @@ export function useBookmarks(): UseBookmarksReturn {
     return cache.some((b) => b.post_id === postId);
   }, []);
 
-  const toggleBookmark = useCallback((post: { id: string; snapshot?: unknown }) => enqueueMutation(async () => {
-    invalidateReads();
-    const existing = cache.find((bookmark) => bookmark.post_id === post.id);
+  const toggleBookmark = useCallback((post: { id: string; snapshot?: unknown }) => {
+    const generation = mutationGeneration;
+    return enqueueMutation(async () => {
+      if (generation !== mutationGeneration) return;
+      invalidateReads();
+      const existing = cache.find((bookmark) => bookmark.post_id === post.id);
 
-    if (existing) {
-      setCache(cache.filter((b) => b.post_id !== post.id));
+      if (existing) {
+        setCache(cache.filter((b) => b.post_id !== post.id));
+        try {
+          const res = await fetch(`/api/bookmarks/${encodeURIComponent(post.id)}`, {
+            method: "DELETE",
+            cache: "no-store",
+          });
+          if (!res.ok) throw new Error("Failed to remove bookmark");
+          if (generation !== mutationGeneration) return;
+          await loadBookmarks(true);
+        } catch (err) {
+          if (generation === mutationGeneration && !cache.some((bookmark) => bookmark.post_id === post.id)) {
+            setCache([existing, ...cache]);
+          }
+          throw err;
+        }
+        return;
+      }
+
+      const optimistic: Bookmark = {
+        id: `optimistic-${post.id}`,
+        post_id: post.id,
+        snapshot: post.snapshot ?? null,
+        saved_at: new Date().toISOString(),
+      };
+      setCache([optimistic, ...cache]);
       try {
-        const res = await fetch(`/api/bookmarks/${encodeURIComponent(post.id)}`, {
-          method: "DELETE",
+        const res = await fetch("/api/bookmarks", {
+          method: "POST",
           cache: "no-store",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ post_id: post.id, snapshot: post.snapshot }),
         });
-        if (!res.ok) throw new Error("Failed to remove bookmark");
+        if (!res.ok) throw new Error("Failed to save bookmark");
+        if (generation !== mutationGeneration) return;
         await loadBookmarks(true);
       } catch (err) {
-        if (!cache.some((bookmark) => bookmark.post_id === post.id)) {
-          setCache([existing, ...cache]);
-        }
+        if (generation === mutationGeneration) setCache(cache.filter((bookmark) => bookmark.id !== optimistic.id));
         throw err;
       }
-      return;
-    }
-
-    const optimistic: Bookmark = {
-      id: `optimistic-${post.id}`,
-      post_id: post.id,
-      snapshot: post.snapshot ?? null,
-      saved_at: new Date().toISOString(),
-    };
-    setCache([optimistic, ...cache]);
-    try {
-      const res = await fetch("/api/bookmarks", {
-        method: "POST",
-        cache: "no-store",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ post_id: post.id, snapshot: post.snapshot }),
-      });
-      if (!res.ok) throw new Error("Failed to save bookmark");
-      await loadBookmarks(true);
-    } catch (err) {
-      setCache(cache.filter((bookmark) => bookmark.id !== optimistic.id));
-      throw err;
-    }
-  }), []);
+    });
+  }, []);
 
   const retry = useCallback(() => loadBookmarks(true), []);
 
