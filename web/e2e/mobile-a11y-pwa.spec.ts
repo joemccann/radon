@@ -114,7 +114,8 @@ test.describe("PWA shell assertions", () => {
     }
     expect(classify("/portfolio", "navigate")).toBe("bypass");
     expect(classify("/api/orders/place", "cors", "POST")).toBe("ignore");
-    expect(classify("/_next/static/chunk.js")).toBe("static");
+    expect(classify("/_next/static/chunks/app.js")).toBe("ignore");
+    expect(classify("/_next/static/media/Inter_Variable.woff2")).toBe("ignore");
     expect(classify("/icons/icon-192.png")).toBe("static");
     expect(policy.KNOWN_CACHES).toEqual([policy.STATIC_CACHE]);
     expect(policy.KNOWN_CACHES.join(" ")).not.toMatch(/radon-(pages|api)-/);

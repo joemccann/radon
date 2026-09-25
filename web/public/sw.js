@@ -1,5 +1,6 @@
-/* Radon service worker. Only public static assets are cached. Authenticated
- * navigations, RSC payloads, API responses, and WebSocket traffic bypass it.
+/* Radon service worker. Only icons, images, and the manifest are cached.
+ * Authenticated navigations, RSC payloads, API responses, WebSocket traffic,
+ * and /_next/static/ (document preloads) bypass it.
  */
 importScripts("/sw-decisions.js");
 

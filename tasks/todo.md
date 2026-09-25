@@ -1,3 +1,14 @@
+# Task: Stop service-worker preload warnings
+
+## Dependency graph and checklist
+- [x] T1 depends_on: [] Red tests: /_next/static scripts and the Inter font are ignore, and the worker does not respondWith them.
+- [x] T2 depends_on: [T1] Leave those fetches to the document. Keep icons, images, and the manifest intercepted. Bump the static cache.
+- [x] T3 depends_on: [T2] Focused vitest green.
+
+## Review
+- Chrome drops a document preload when the worker respondWith's the same /_next/static URL. That is the cross-world mismatch and the unused-preload warning on /dashboard and /admin.
+- Vitest 14 passed across sw-decisions, sw-smoke, and signout-cache-purge.
+
 # Task: Stop the operator page 403 on /api/admin/demo-users
 
 ## Dependency graph and checklist
