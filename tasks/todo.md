@@ -1,3 +1,21 @@
+# Task: Preserve iShares class shares in preset rebalance (2026-09-25)
+
+## Dependency graph and checklist
+- [x] T1 depends_on: [] Diagnose live error, provider format, and canonical tickers.
+- [x] T2 depends_on: [T1] Add regression cases and narrow source normalization.
+- [x] T3 depends_on: [T2] Publish PR, verify exact-head GitHub CI, and notify.
+
+## Review
+- Preserve strict ticker validation, all-source preflight, and atomic writes.
+- No local suites; regression red/green and all applicable verification run on GitHub.
+
+- Tests-first GitHub run `36176075067`, head `8d5e159d`: six expected regression failures in scripts-npsz; 2,569 passed.
+- Read-only live BlackRock fetch: all 1,979 equity rows validate; four reported class shares retained in dash form.
+
+- Repair head `c93be7ad` passes all 2,575 scripts-npsz tests. CI exposed an existing GEX fixture's 50ms timer race; await the real response with an unresolved mock scan and retain snapshot/scan assertions, preventing the losing request from mutating the next test's mock.
+
+- Final review: PR #706, head `2bc43a2cd7c17245563c0fabcfe7afdaabdef956`; 31 successful checks, seven intentionally skipped; CI `36176881484` and image run `36176881933` success. Pushover HTTP 200/status 1 accepted once. Merge/deploy held for parent coordination; live count/overlap preflight passed without writes.
+
 # Task: Chart text-only findings by series, type, and check
 
 Identify comparable numbers, pick line / bar / range / scatter, drop a plan that does not trace to the text, render with theme tokens.
@@ -8399,18 +8417,3 @@ Review: pending; no live broker calls, browser launches, or runner-lock operatio
 - CI repair: `scripts-df` reported the SLM owner-document contract; updated the unit example and provisioning semantics in `docs/ml/newsfeed-slm-tagger.md`. Re-run all applicable checks on the new head.
 - CI repair: an unchanged SIGTERM regression failed on the second head after passing on the first. Synchronize the isolated wrapper with its actual parent wait boundary and preserve all reporting/status assertions; retain subprocess diagnostics. Prior failure output did not capture the precise exit path. Production wrappers unchanged.
 
-# Task: Preserve iShares class shares in preset rebalance (2026-09-25)
-
-## Dependency graph and checklist
-- [x] T1 depends_on: [] Diagnose live error, provider format, and canonical tickers.
-- [x] T2 depends_on: [T1] Add regression cases and narrow source normalization.
-- [ ] T3 depends_on: [T2] Publish PR, verify exact-head GitHub CI, and notify.
-
-## Review
-- Preserve strict ticker validation, all-source preflight, and atomic writes.
-- No local suites; regression red/green and all applicable verification run on GitHub.
-
-- Tests-first GitHub run `36176075067`, head `8d5e159d`: six expected regression failures in scripts-npsz; 2,569 passed.
-- Read-only live BlackRock fetch: all 1,979 equity rows validate; four reported class shares retained in dash form.
-
-- Repair head `c93be7ad` passes all 2,575 scripts-npsz tests. CI exposed an existing GEX fixture's 50ms timer race; await the real response with an unresolved mock scan and retain snapshot/scan assertions, preventing the losing request from mutating the next test's mock.
