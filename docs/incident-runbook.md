@@ -2421,6 +2421,36 @@ Peak: 2026-09-22 12:35Z, page `d3b66eaf…`.
 
 ---
 
+## flex-pull-twr-gap
+
+**`/performance` stays `FLOWS_FETCH_FAILED` for days; every nightly build
+returns `historical_flow_coverage_unverified`.** 2026-09-18..24, healed by hand.
+
+- **Mechanism:** a from-file build extends a statement only when every
+  EARLIER stored NAV session has a `twr_subperiods` row. One failed build
+  writes no subperiods, so every later statement fails the same gate. The
+  weekday `radon-perf-twr` timer chains only through `MAX(twr_subperiods)`
+  and cannot heal it; re-ingest is fingerprint-gated as a duplicate.
+- **Self-heal (code):** after the normal ingest, flex-pull lists NAV
+  sessions inside `TWR_GAP_LOOKBACK` (45 days before the newest activity
+  statement) with no subperiod, maps each to a delivered activity statement
+  still in `outgoing`, and replays those oldest-first through
+  `build_and_persist(from_file=..., persist=True)` only. No cash_flow_sync
+  or journal writer runs. It shares the sweep's wall-clock budget.
+- **Detection:** the `flex-pull` ok row carries a note: `twr_gap_healed`
+  (replayed), `twr_gap_unhealed` (replay ran, sessions still uncovered, or
+  deferred by budget), `twr_gap_unhealable` (no delivered statement for a
+  session; later sessions are `blocked` and never zero-filled).
+- **Remediation:** `twr_gap_unhealable` needs the missing statement from
+  IBKR; replay it with `build_and_persist(from_file=..., persist=True)`
+  under the flex-pull unit env, then let the next flex-pull finish the tail.
+- **Regression:** `scripts/tests/test_flex_pull_twr_gap_heal.py`.
+- **Code:** `scripts/flex_sftp_pull.py` (`heal_twr_coverage_gaps`,
+  `plan_gap_replay`), `scripts/perf_twr_builder.py`
+  (`load_uncovered_nav_sessions`).
+
+---
+
 ## flex-1025-lockout
 
 **IBKR Flex code 1025 is a token lockout.** Routine ingest is sFTP
