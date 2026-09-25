@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-09-24T09:00:07Z",
-  "node_count": 3574,
-  "edge_count": 7383,
+  "generated_at": "2026-09-25T09:00:11Z",
+  "node_count": 3596,
+  "edge_count": 7407,
   "areas": {
-    "web": 2075,
+    "web": 2086,
     "site": 155,
-    "scripts": 1222,
-    "cloud": 75,
+    "scripts": 1231,
+    "cloud": 77,
     "lib": 28,
     "tests": 17,
     "tools": 2
@@ -20,12 +20,12 @@
     {
       "id": "web/components",
       "area": "web",
-      "count": 261
+      "count": 264
     },
     {
       "id": "web/e2e",
       "area": "web",
-      "count": 203
+      "count": 204
     },
     {
       "id": "web",
@@ -35,7 +35,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 409
+      "count": 410
     },
     {
       "id": "web/public",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 966
+      "count": 972
     },
     {
       "id": "site/app",
@@ -100,7 +100,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 118
+      "count": 120
     },
     {
       "id": "scripts/backtest",
@@ -185,7 +185,7 @@
     {
       "id": "scripts/research",
       "area": "scripts",
-      "count": 22
+      "count": 24
     },
     {
       "id": "scripts/security",
@@ -200,7 +200,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 619
+      "count": 624
     },
     {
       "id": "scripts/trade_blotter",
@@ -230,7 +230,7 @@
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 65
+      "count": 67
     },
     {
       "id": "lib/tools",
@@ -297,17 +297,17 @@
       "test": false
     },
     {
+      "id": "web/lib/radonApi.ts",
+      "area": "web",
+      "in": 96,
+      "out": 0,
+      "test": false
+    },
+    {
       "id": "web/components/WorkspaceShell.tsx",
       "area": "web",
       "in": 54,
       "out": 42,
-      "test": false
-    },
-    {
-      "id": "web/lib/radonApi.ts",
-      "area": "web",
-      "in": 95,
-      "out": 0,
       "test": false
     },
     {
@@ -320,7 +320,7 @@
     {
       "id": "scripts/api/__init__.py",
       "area": "scripts",
-      "in": 81,
+      "in": 82,
       "out": 0,
       "test": false
     },
@@ -346,17 +346,17 @@
       "test": false
     },
     {
+      "id": "scripts/api/server.py",
+      "area": "scripts",
+      "in": 46,
+      "out": 16,
+      "test": false
+    },
+    {
       "id": "web/lib/positionUtils.ts",
       "area": "web",
       "in": 59,
       "out": 2,
-      "test": false
-    },
-    {
-      "id": "scripts/api/server.py",
-      "area": "scripts",
-      "in": 45,
-      "out": 16,
       "test": false
     },
     {
@@ -500,6 +500,20 @@
       "test": false
     },
     {
+      "id": "scripts/api/auth.py",
+      "area": "scripts",
+      "in": 34,
+      "out": 0,
+      "test": false
+    },
+    {
+      "id": "web/components/DashboardNewsFeed.tsx",
+      "area": "web",
+      "in": 15,
+      "out": 19,
+      "test": false
+    },
+    {
       "id": "web/lib/serviceHealthWindows.ts",
       "area": "web",
       "in": 33,
@@ -514,24 +528,10 @@
       "test": false
     },
     {
-      "id": "scripts/api/auth.py",
-      "area": "scripts",
-      "in": 33,
-      "out": 0,
-      "test": false
-    },
-    {
       "id": "web/lib/OrderActionsContext.tsx",
       "area": "web",
       "in": 31,
       "out": 2,
-      "test": false
-    },
-    {
-      "id": "scripts/perf_twr_builder.py",
-      "area": "scripts",
-      "in": 22,
-      "out": 11,
       "test": false
     }
   ],
