@@ -245,6 +245,19 @@ require_regular_file() {
   fi
 }
 
+# chmod and chown follow links, and radon can create entries in the sticky
+# /etc/radon, so only a regular file the running user already owns (radon
+# cannot rename or replace it there) is re-moded.
+require_own_regular_file() {
+  local path="$1" owner
+  require_regular_file "$path" || return 1
+  owner="$(stat -c '%u' "$path" 2>/dev/null)" || owner="$(stat -f '%u' "$path")"
+  if [[ "$owner" != "$(id -u)" ]]; then
+    log_error "Refusing ${path}: not owned by $(id -un)"
+    return 1
+  fi
+}
+
 # stage_from_checkout <source> <target> <mode> [install owner args...]
 # Copies a checkout artifact into a root-only 0600 staging file, re-checks the
 # source around the copy (a swap between the test and the copy fails the byte
@@ -768,28 +781,27 @@ preflight_checks() {
     fi
   done
 
+  # Everything under /home/radon/.ssh is created, written and chmodded as
+  # radon: the directory stays radon-replaceable after the link check above,
+  # so root only reads its own authorized_keys and pipes the bytes in.
   # Copy root's authorized_keys so radon user is accessible via SSH
   if [[ -f /root/.ssh/authorized_keys ]] && [[ ! -f /home/radon/.ssh/authorized_keys ]]; then
     log_info "Copying SSH authorized_keys to radon user..."
-    mkdir -p /home/radon/.ssh
-    cp /root/.ssh/authorized_keys /home/radon/.ssh/
-    chown -R radon:radon /home/radon/.ssh
-    chmod 700 /home/radon/.ssh
-    chmod 600 /home/radon/.ssh/authorized_keys
+    sudo -u radon install -d -m 700 /home/radon/.ssh
+    sudo -u radon sh -c 'umask 077; cat > "$1" && chmod 600 "$1"' _ \
+      /home/radon/.ssh/authorized_keys < /root/.ssh/authorized_keys
   fi
 
   # Ensure radon has an SSH key for GitHub access
   if [[ ! -f /home/radon/.ssh/id_ed25519 ]]; then
     log_info "Generating SSH deploy key for radon user..."
-    mkdir -p /home/radon/.ssh
-    chmod 700 /home/radon/.ssh
-    ssh-keygen -t ed25519 -C "radon@ib-gateway" -f /home/radon/.ssh/id_ed25519 -N "" -q
-    chown -R radon:radon /home/radon/.ssh
+    sudo -u radon install -d -m 700 /home/radon/.ssh
+    sudo -u radon ssh-keygen -t ed25519 -C "radon@ib-gateway" -f /home/radon/.ssh/id_ed25519 -N "" -q
     log_success "SSH key generated"
     echo ""
     echo -e "  ${YELLOW}ACTION REQUIRED:${NC} Add this deploy key to GitHub before continuing:"
     echo ""
-    cat /home/radon/.ssh/id_ed25519.pub
+    sudo -u radon cat /home/radon/.ssh/id_ed25519.pub
     echo ""
     echo "  Go to: https://github.com/settings/keys → New SSH key"
     echo ""
@@ -978,7 +990,7 @@ setup_node() {
   # Persist only browser-safe build variables. Server-side values are injected
   # into the build process by run_with_env.py and never copied into web/.env.
   if [[ -e "$ENV_FILE" || -L "$ENV_FILE" ]]; then
-    require_regular_file "$ENV_FILE" || return 1
+    require_own_regular_file "$ENV_FILE" || return 1
     chmod 0640 "$ENV_FILE"
     chown root:radon "$ENV_FILE"
     local public_env_tmp
@@ -1579,7 +1591,7 @@ validate_env() {
     return 1
   fi
 
-  require_regular_file "$env_file" || return 1
+  require_own_regular_file "$env_file" || return 1
   chmod 0640 "$env_file"
   chown root:radon "$env_file"
 

@@ -93,6 +93,8 @@ def test_creation_shaped_invocations_always_reach_the_python_guard(wrapper, tmp_
     ["pr", "list"],
     ["pr", "merge", "1"],
     ["issue", "comment", "1", "--body", "done"],
+    ["alias", "set", "m", "pr merge"],
+    ["alias", "import", "-"],
 ])
 def test_non_creation_pr_invocations_still_route_through_the_python_guard(wrapper, tmp_path, argv):
     """The shell dispatch is a deliberately loose superset (any "pr"/"api"
