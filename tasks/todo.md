@@ -6,6 +6,7 @@
 - [x] T3 depends_on: [T2] Publish PR, verify exact-head GitHub CI, and notify.
 
 ## Review
+- Merge-head CI exposed the same asynchronous expiration/strike-reset fixture race as listed-order-security; flush mount effects in async act before quote selection, preserving all quote assertions.
 - Preserve strict ticker validation, all-source preflight, and atomic writes.
 - No local suites; regression red/green and all applicable verification run on GitHub.
 
