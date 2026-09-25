@@ -8419,3 +8419,11 @@ Review: pending; no live broker calls, browser launches, or runner-lock operatio
 - GitHub red evidence: CI36176394767 cloud-al reports four expected interrupted-backup failures; 2,251 passed and two skipped on 86b16936. Implementation adds only explicit backup replay and accepted asynchronous restart submission.
 
 - Independent review: do not couple eventual backup/upload failure to app rollback. Verify start submission, retain normal oneshot verification exclusion, and pin retry after rejected submission without a restore marker.
+
+## 2026-09-25 Scheduled writer freshness investigation
+- [x] T1 Collect current health, timer and writer evidence. depends_on: []
+- [x] T2 Repair admin freshness classification and retired control applicability; add regression coverage. depends_on: [T1]
+- [x] T3 Create scoped PR and verify exact-head GitHub CI. depends_on: [T2]
+Dependency graph: T1 -> T2 -> T3.
+
+Review: Seven on-demand writers were correctly registered but admin freshness ignored categories. Admin now labels them On demand and scores scheduled writers only. Errors and last-run ages remain visible. Retired exit-orders rows are excluded without mutating storage. Unknown services remain scheduled. knowledge-ingest disabled timer and liquidcompute timeout investigations handed to parent for separate operational repair. PR707 head61a4973e:31 applicable checks green,7 expected skips; Playwright200+1 passed. Desktop/mobile screenshots inspected. Pushover200/status1 request8474b0e5-ecba-4d16-8817-4a430c742f03. No local suites run. Completion notes kept local to preserve the verified PR head; parent coordinates merge/deploy.

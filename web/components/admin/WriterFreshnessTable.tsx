@@ -3,7 +3,7 @@
 import ErrorToast from "@/components/ErrorToast";
 
 import { userErrorMessage } from "@/lib/userError";
-import { getMarketStateFromDate, isStale, type MarketState } from "@/lib/serviceHealthWindows";
+import { getMarketStateFromDate, getServiceCategory, isStale, type MarketState } from "@/lib/serviceHealthWindows";
 import { humanizeDetail } from "@/lib/adminFormat";
 import type { ServiceHealthRow } from "@/lib/adminTypes";
 import { useSort } from "@/lib/useSort";
@@ -39,7 +39,7 @@ export default function WriterFreshnessTable({
         <span className="admin-card-title">Writer Freshness</span>
       </header>
       <p className="admin-card-subhead">
-        Background data writers (service_health). Stale windows are market-hours aware.
+        Scheduled writers report freshness. On-demand writers run when requested.
       </p>
 
       {loading ? (
@@ -91,7 +91,7 @@ function writerSortValue(row: ServiceHealthRow, key: WriterSortKey, market: Mark
     case "state":
       return row.state;
     case "freshness":
-      return isStale(row.service, row.updated_at ?? null, market) ? 1 : 0;
+      return getServiceCategory(row.service) === "on-demand" ? 1 : isStale(row.service, row.updated_at ?? null, market) ? 2 : 0;
     case "lastRun": {
       const lastRun = row.last_attempt_finished_at ?? row.updated_at ?? null;
       return lastRun ? Date.parse(lastRun) : null;
@@ -103,10 +103,17 @@ function writerSortValue(row: ServiceHealthRow, key: WriterSortKey, market: Mark
 
 function WriterRow({ row }: { row: ServiceHealthRow }) {
   const market = getMarketStateFromDate();
-  const stale = isStale(row.service, row.updated_at ?? null, market);
+  const onDemand = getServiceCategory(row.service) === "on-demand";
+  const stale = !onDemand && isStale(row.service, row.updated_at ?? null, market);
   const stateTone =
     row.state === "ok" ? "positive" : row.state === "error" ? "negative" : "neutral";
   const lastRun = row.last_attempt_finished_at ?? row.updated_at ?? null;
+  const detail = row.last_error
+    ? userErrorMessage(
+        row.state === "ok" ? humanizeDetail(row.last_error) : row.last_error,
+        row.state === "ok" ? "Last run completed." : "Writer update failed. Review service logs for details.",
+      )
+    : null;
   return (
     <tr data-testid={`writer-row-${row.service}`}>
       <td className="admin-unit-name">{row.service}</td>
@@ -116,15 +123,15 @@ function WriterRow({ row }: { row: ServiceHealthRow }) {
       <td>
         <div className="admin-verdict-cell">
           <span
-            className={`admin-status-dot admin-status-dot-${stale ? "warning" : "positive"}`}
+            className={`admin-status-dot admin-status-dot-${onDemand ? "neutral" : stale ? "warning" : "positive"}`}
             aria-hidden
           />
-          {stale ? "STALE" : "fresh"}
+          {onDemand ? "On demand" : stale ? "STALE" : "fresh"}
         </div>
       </td>
       <td className="admin-unit-activity">{relAge(lastRun)}</td>
-      <td className="admin-unit-desc" title={row.last_error ? userErrorMessage(row.state === "ok" ? humanizeDetail(row.last_error) : row.last_error, "Writer update failed. Review service logs for details.") : undefined}>
-        {row.last_error ? userErrorMessage(row.state === "ok" ? humanizeDetail(row.last_error) : row.last_error, "Writer update failed. Review service logs for details.") : "--"}
+      <td className="admin-unit-desc" title={detail ?? undefined}>
+        {detail ?? "--"}
       </td>
     </tr>
   );

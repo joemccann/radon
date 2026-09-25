@@ -818,6 +818,7 @@ jobs:
           e2e/vol-skew-mr-scanner.spec.ts
           e2e/ai-industry.spec.ts
           e2e/clear-shell.spec.ts
+          e2e/clear-admin-component.spec.ts
           e2e/chat-experience.spec.ts
           e2e/chat-launcher-focus.spec.ts
           e2e/flow-analysis-ticker.spec.ts
@@ -925,6 +926,13 @@ jobs:
         with:
           name: table-overflow-screenshots
           path: web/test-results/**/table-overflow-*.png
+          retention-days: 7
+      - name: Upload admin freshness screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: admin-freshness-screenshots
+          path: web/test-results/**/*-admin-component.png
           retention-days: 7
       - name: Upload traces on failure
         if: failure()
