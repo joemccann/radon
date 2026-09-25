@@ -574,3 +574,51 @@ class TestLegacyRunnerRefusal:
         assert "compgen -G '/etc/systemd/system/radon-*.service.d/runtime-container.conf'" in guard
         assert "exit 78" in guard
         assert "bootstrap-control-plane.sh" in guard
+
+
+class TestDatabaseBrownoutNeverReachesTeardown:
+    """2026-09-25 P1: a deploy stopped the serving release during a Turso
+    brownout. The restarted API could not boot, the deploy gate AND the
+    rollback gate failed, and production stayed down until Turso answered.
+    Teardown must wait on a bounded database probe, like the image prepull."""
+
+    def _preflight(self, tmp_path, *, probe_exits: list[int]):
+        calls = tmp_path / "probe.log"
+        exits = tmp_path / "exits"
+        exits.write_text("\n".join(str(code) for code in probe_exits) + "\n")
+        shell = f"""
+set -euo pipefail
+source {DEPLOY}
+run_with_cloud_env() {{
+  printf '%s\\n' "$*" >> {calls}
+  local code
+  code="$(head -n1 {exits})"
+  sed -i.bak 1d {exits}
+  return "$code"
+}}
+sleep() {{ return 0; }}
+preflight_database
+"""
+        result = subprocess.run(["bash", "-c", shell], env={**os.environ}, capture_output=True, text=True, timeout=30)
+        return result, calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
+
+    def test_main_probes_the_database_after_prepull_and_before_restart(self):
+        main = function_body(DEPLOY.read_text(encoding="utf-8"), "main")
+        assert main.index('prepull_app_images "$requested_sha"') < main.index("preflight_database") < main.index("restart_services")
+
+    def test_an_unanswering_database_refuses_teardown_after_bounded_retries(self, tmp_path):
+        result, calls = self._preflight(tmp_path, probe_exits=[124, 124, 124])
+        combined = result.stdout + result.stderr
+        assert result.returncode != 0, combined
+        assert "refusing teardown" in combined
+        assert len(calls) == 3
+
+    def test_a_recovered_database_lets_the_deploy_proceed(self, tmp_path):
+        result, calls = self._preflight(tmp_path, probe_exits=[124, 0])
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert len(calls) == 2
+
+    def test_the_probe_is_a_bounded_read_from_the_current_release(self, tmp_path):
+        _, calls = self._preflight(tmp_path, probe_exits=[0])
+        assert "timeout" in calls[0]
+        assert "SELECT 1" in calls[0]

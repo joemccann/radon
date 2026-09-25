@@ -58,7 +58,12 @@ uses them (operator decision 2026-09-01, PR #125; no migration planned).
 `radon-app-runtime` creates the `data/secret_store/` directory without
 following symlinks (`0700`, owned by the app user) and exits 78 if the path
 is a symlink or unusable.
-Before Uvicorn starts, `scripts/secret_store.py` opens the configured store and
+Before Uvicorn starts, `scripts/db/migrate.py --boot` applies pending Turso
+migrations in a killable child bounded at 20s. A real migration error blocks
+startup. A Turso stall boots only when `data/schema_version.prod` shows the
+schema is already at the release's newest migration; unverified schema fails
+closed (exit 75) and systemd retries.
+Then `scripts/secret_store.py` opens the configured store and
 authenticates every encrypted row; a missing, replaced, or malformed key fails
 the unit instead of starting credential-degraded. After that preflight, every
 stored registry name is exported into `os.environ` over the deployed `.env`

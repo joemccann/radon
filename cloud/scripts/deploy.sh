@@ -78,6 +78,13 @@ readonly HEALTH_RETRIES=6
 readonly HEALTH_RETRY_WAIT=5
 readonly HEALTH_CURL_TIMEOUT=5
 readonly SURFACE_RETRIES=8
+# Pre-teardown Turso probe. A restarted radon-api cannot bind :8321 while its
+# boot-time schema check waits on the database (2026-09-25 brownout: 156s,
+# deploy AND rollback gates failed). Worst case 3 x 10s + 2 x 10s = 50s.
+readonly DATABASE_PROBE_ATTEMPTS=3
+readonly DATABASE_PROBE_TIMEOUT=10
+readonly DATABASE_PROBE_WAIT=10
+readonly DATABASE_PROBE_SQL="from scripts.db.client import get_db; get_db().execute('SELECT 1').fetchone()"
 readonly SURFACE_RETRY_WAIT=2
 readonly SURFACE_TIMEOUT=3
 # The slowest managed restart policy is newsfeed's RestartSec=30. A 40-second
@@ -439,6 +446,23 @@ prepull_app_images() {
   fi
   log_success "Exact app image pair is local for ${requested_sha:0:7}"
   return 0
+}
+
+# The serving release keeps serving while Turso is unhealthy; stopping it then
+# trades a degraded database for a full outage.
+preflight_database() {
+  local attempt
+  for (( attempt = 1; attempt <= DATABASE_PROBE_ATTEMPTS; attempt++ )); do
+    if (cd "$RADON_DIR" && run_with_cloud_env "$ENV_FILE_DEFAULT" \
+      timeout "$DATABASE_PROBE_TIMEOUT" "${VENV_DIR}/bin/python" -c "$DATABASE_PROBE_SQL"); then
+      log_success "Turso answered the pre-teardown probe"
+      return 0
+    fi
+    log_warn "Turso probe failed (attempt ${attempt}/${DATABASE_PROBE_ATTEMPTS})"
+    (( attempt == DATABASE_PROBE_ATTEMPTS )) || sleep "$DATABASE_PROBE_WAIT"
+  done
+  log_error "Turso is not answering; refusing teardown while the current release serves"
+  return 1
 }
 
 refresh_control_plane() {
@@ -1797,6 +1821,7 @@ main() {
   fi
 
   prepull_app_images "$requested_sha"
+  preflight_database
 
   log_info "Promoting staged artifacts and restarting services..."
   restart_services "$requested_sha" "$prev_commit"

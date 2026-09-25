@@ -239,6 +239,9 @@ Pushes to `main` run the root CI workflow. The deploy job:
    (`radon-app-runtime pull <sha>`, sudoers-granted) while the current
    release still serves; the same verb drops SHA-tagged pairs that are
    neither the target nor in use by a running container (R-431).
+   Then `preflight_database` runs a bounded Turso `SELECT 1` (3 x 10s); if
+   Turso does not answer, the deploy refuses teardown and the current release
+   keeps serving (2026-09-25 brownout outage).
 8. Fsyncs a durable transition journal, snapshots active services and timers,
    promotes artifacts, restores the prior topology, and runs code-controlled
    gates.

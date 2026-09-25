@@ -23,11 +23,11 @@ LoadCredentialEncrypted=radon-secret-store-key:/etc/credstore.encrypted/radon-se
 # Apply pending Turso migrations before serving traffic. Idempotent — a
 # no-op when at latest. See scripts/db/migrate.py.
 # libsql_experimental has no socket/operation timeout and can hold the GIL
-# indefinitely during a Turso transport outage. Preserve fail-closed behavior
-# for real migration errors, but let an already-current API start after the
-# bounded transport deadline. A timeout is unverified schema state and must
-# block startup just like a migration error.
-ExecStartPre=/usr/bin/timeout 30 /home/radon/radon/.venv/bin/python3.13 /home/radon/radon/scripts/db/migrate.py
+# indefinitely during a Turso transport outage. --boot runs it in a killable
+# child: real migration errors still block startup, and a transport stall
+# boots only when data/schema_version.prod proves the schema is already at
+# this release's newest migration. Unverified schema still blocks startup.
+ExecStartPre=/usr/bin/timeout 30 /home/radon/radon/.venv/bin/python3.13 /home/radon/radon/scripts/db/migrate.py --boot
 ExecStartPre=/home/radon/radon/.venv/bin/python3.13 /home/radon/radon/scripts/secret_store.py
 # --host 0.0.0.0 so the laptop cloud-thin Next.js can reach FastAPI over
 # Tailscale at 100.112.32.16:8321. Direct (non-proxied) requests from outside
