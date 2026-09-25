@@ -63,7 +63,7 @@ try:
 except ImportError:
     pass
 
-from utils.exec_ids import exec_id_root  # noqa: E402 — needs the sys.path above
+from utils.exec_ids import exec_id_root, flex_ib_exec_id  # noqa: E402 — needs the sys.path above
 from clients.journal_basis import _bucket_key, _signed_qty  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -522,8 +522,12 @@ def _existing_exec_ids(trades: List[Dict[str, Any]]) -> set[str]:
             continue
         ids.add(str(exec_id))
         for part in str(exec_id).split("+"):
-            if part:
-                ids.add(part)
+            if not part:
+                continue
+            ids.add(part)
+            flex_id = flex_ib_exec_id(part)
+            if flex_id:
+                ids.add(flex_id)
     return ids
 
 
