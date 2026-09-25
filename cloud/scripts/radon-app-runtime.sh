@@ -87,7 +87,7 @@ readonly SECRET_STORE_CREDENTIAL_STAGE_ROOT="${NOTIFY_PROXY_DIR}/credentials"
 STAGED_CREDENTIAL_UNIT=""
 
 usage() {
-  echo "usage: radon-app-runtime {pull [<sha>]|run <unit>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
+  echo "usage: radon-app-runtime {pull [<sha>]|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
   exit 64
 }
 
@@ -435,6 +435,27 @@ cmd_stop() {
   # and stays benign; only a SURVIVING container aborts.
   reap_container "$unit"
   cleanup_runtime_credential "$unit"
+}
+
+# ExecStop. systemd's own stop signals only the foreground `podman run`
+# client, which proxies SIGTERM into the container. On 2026-09-23..25 that
+# proxy intermittently never delivered it: the app logged no SIGTERM, kept
+# working, and ran until the 90s SIGKILL, past the deploy helper's 60s
+# inactive wait, so six deploys rolled back. Ask the engine to stop the
+# container by name instead: SIGTERM to its init, SIGKILL after <grace>.
+# systemd also runs ExecStop after the main process exited on its own, so a
+# missing container is success. Only a container that survives is an error.
+cmd_halt() {
+  local unit="${1:-}" grace="${2:-}"
+  [[ -n "$unit" && "$grace" =~ ^[0-9]+$ ]] || usage
+  refuse_host_plane "$unit"
+  is_app_unit "$unit" || exit 64
+  "$DOCKER" container inspect "$unit" >/dev/null 2>&1 || return 0
+  "$DOCKER" stop --time "$grace" "$unit" >/dev/null && return 0
+  if "$DOCKER" container inspect "$unit" >/dev/null 2>&1; then
+    echo "radon-app-runtime: ${DOCKER##*/} stop ${unit} failed and the container is still present" >&2
+    exit 75
+  fi
 }
 
 
@@ -857,6 +878,10 @@ case "$1" in
   stop)
     [[ $# -eq 2 ]] || usage
     cmd_stop "$2"
+    ;;
+  halt)
+    [[ $# -eq 3 ]] || usage
+    cmd_halt "$2" "$3"
     ;;
   pull)
     [[ $# -eq 1 || $# -eq 2 ]] || usage

@@ -135,6 +135,20 @@ with Podman (`--cgroups=split`, so it lives in the unit's own cgroup) when
 `RADON_CONTAINER_ENGINE=docker`; credential staging is identical on both
 (REL-087).
 
+**Container stop (2026-09-25).** Each app drop-in runs
+`ExecStop=radon-app-runtime halt %n <grace>`, which stops the container by
+name through the engine (`stop --time <grace>`: SIGTERM to the container
+init, SIGKILL after the grace) before systemd signals the foreground
+`podman run` client. Stops previously relied on that client proxying
+SIGTERM; it intermittently never arrived (app logged no SIGTERM, kept
+working until the 90s SIGKILL), and the deploy helper's 60s inactive wait
+rolled six deploys back. Graces: 30s for api, nextjs, monitor and newsfeed,
+5s for relay (`TimeoutStopSec=10`), 110s for research (150s helper wait).
+`cloud/tests/test_container_stop_delivery.py` pins grace + 5s inside both
+the unit's `TimeoutStopSec` and the helper wait. A missing container is
+success (ExecStop also runs after a crash); one that survives a failed stop
+exits 75. `ExecStopPost` still reaps.
+
 **Subscription credential binds (2026-09-18).** `radon-app-runtime` also
 binds the operator's CLI subscription grants, each read-only and only when the
 directory exists on the host: `/home/radon/.grok`, `/home/radon/.codex` and
