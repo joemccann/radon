@@ -1,3 +1,7 @@
+# REVIEWED 2026-09-25 mobile-a11y-pwa.spec.ts - classify() now ignores
+#   /_next/static scripts and the Inter font. Same policy is executed by
+#   web/tests/sw-decisions.test.ts and web/tests/sw-smoke.test.ts (14 passed).
+#   Playwright spec not run. Held out of e2e-financial-smoke.
 # REVIEWED 2026-09-20 mobile-toast-placement.spec.ts - CSS-in-page geometry
 #   at 393x852: toast sits above `mobile-tab-bar`, no overlap with Total
 #   account / balance. Vitest `toast-mobile-placement.test.ts` is the CI pin.

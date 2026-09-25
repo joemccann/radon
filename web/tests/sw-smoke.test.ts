@@ -73,10 +73,20 @@ describe("service worker authenticated-data isolation", () => {
     expect(h.fetchMock).not.toHaveBeenCalled();
   });
 
+  it("does not intercept Next static preloads", () => {
+    for (const url of [
+      `${ORIGIN}/_next/static/chunks/app.js`,
+      `${ORIGIN}/_next/static/media/Inter_Variable.woff2`,
+    ]) {
+      expect(dispatchFetch(h, { url }).event.respondWith).not.toHaveBeenCalled();
+    }
+    expect(h.fetchMock).not.toHaveBeenCalled();
+  });
+
   it("intercepts and caches a clean public static asset", async () => {
-    const network = new Response("chunk", { status: 200 });
+    const network = new Response("icon", { status: 200 });
     h.fetchMock.mockResolvedValue(network);
-    const dispatched = dispatchFetch(h, { url: `${ORIGIN}/_next/static/chunk.js` });
+    const dispatched = dispatchFetch(h, { url: `${ORIGIN}/icons/icon-192.png` });
     expect(dispatched.event.respondWith).toHaveBeenCalledTimes(1);
     expect(await dispatched.event.respondWith.mock.calls[0][0]).toBe(network);
     await Promise.allSettled(dispatched.waits);
