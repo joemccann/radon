@@ -1055,10 +1055,10 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
 - **2026-09-25 native transport stall:** the bounded-memory recovery still
   stopped advancing during newsfeed: CPU and TLS application counters stayed
   fixed while independent HTTP queries succeeded. The CLI now uses
-  `knowledge.http_db.Connection`, with 4-second socket timeouts, response
-  deadline checks and an 8 MiB response ceiling. It keeps rotating Hrana
-  batons for `BEGIN IMMEDIATE` through `COMMIT`, so document and FTS changes
-  remain atomic. Unexpected stream closure or ambiguous transport failure
+  `knowledge.http_db.Connection`, with 4-second read/cleanup socket timeouts,
+  response deadline checks and an 8 MiB response ceiling. Atomic document
+  writes queue BEGIN, dependent statements, COMMIT/rollback and close in one
+  request; their receipt allowance is separately bounded at 30 seconds. Unexpected stream closure or ambiguous transport failure
   poisons the handle; prepared batches retry on fresh handles. A lost COMMIT
   receipt may already have committed; content-hash idempotency makes replay
   safe. Cleanup is bounded and does not replace the original failure.
@@ -1097,6 +1097,17 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   content and local embeddings. It does not attest provider recovery. Restore
   the canonical hourly timer for normal enrichment after actual completion;
   retain failed/interrupted health until a real successful ingest finishes.
+- **2026-09-25 atomic receipt allowance:** a normal enrichment cycle exhausted
+  four receipts after whole-document batching reused the old 4-second
+  per-statement allowance. A 158-chunk embedded document queues 638 steps.
+  Atomic requests now use a separate 30-second socket/elapsed allowance;
+  source reads and cleanup remain at 4 seconds. Socket reads begun before
+  the elapsed limit may finish later, so this is not a hard 30-second wall.
+  Server-queued close, four fresh whole-document attempts, process ceiling,
+  and fail-closed health remain unchanged. Retry diagnostics identify the
+  scrubbed document key, chunk count and statement count, never document
+  content or SQL. A lost receipt still does not prove rollback or failure to
+  commit; validate the complete canonical cycle before clearing the incident.
 - **Transport regressions:** `scripts/tests/test_knowledge_http.py` covers
   native-path exclusion, rotating/error batons, safe routing, SQL error
   classification, atomic document/FTS rollback, typed row IDs, missing receipts,

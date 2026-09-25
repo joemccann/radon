@@ -1119,7 +1119,7 @@ class TestBatchedWrites:
 
 class TestPreparedBatchRetry:
     def test_busy_write_reuses_enriched_batch_on_fresh_connection(
-        self, db, monkeypatch, fake_distill, fake_embedder
+        self, db, monkeypatch, fake_distill, fake_embedder, capsys
     ):
         real_upsert = ingest_mod.upsert_documents
         calls, connections = [], []
@@ -1158,6 +1158,7 @@ class TestPreparedBatchRetry:
         assert len(connections) >= 3
         assert len({id(connection) for connection in connections}) == len(connections)
         assert _rows(db)[0][3] == "distilled: alpha content"
+        assert 'doc_key="doc-a" chunk_count=1 statement_count=unknown' in capsys.readouterr().err
 
     def test_exhausted_batch_does_not_restart_source_or_prune(
         self, db, monkeypatch, fake_distill, fake_embedder
