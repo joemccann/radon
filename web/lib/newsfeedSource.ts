@@ -1,4 +1,5 @@
 import { withoutEmDashes } from "./copyPunctuation";
+import { parseChartPlans, type ChartPlan } from "./planCharts";
 
 /** Research media stays on the authenticated same-origin path. */
 export type ResearchSource = {
@@ -14,6 +15,8 @@ export type ResearchSource = {
   fileId: string;
   revision: string;
   contentHash: string;
+  /** Chart plan for a text-only finding. Absent when the post has source figures. */
+  charts?: ChartPlan[];
 };
 export const PRIVATE_RESEARCH_ASSET = /^\/api\/newsfeed\/research\/files\/[a-f0-9]{64}\.(?:png|pdf)(?:#page=[1-9]\d*)?$/;
 export function parseResearchSource(value: unknown): ResearchSource | undefined {
@@ -35,10 +38,14 @@ export function parseResearchSource(value: unknown): ResearchSource | undefined 
       && Number.isInteger(f.page) && f.page > 0 && s.pages.includes(f.page) && typeof f.caption === "string")) return undefined;
   if (s.evidenceUrl !== undefined && (typeof s.evidenceUrl !== "string"
     || !/^\/api\/newsfeed\/research\/files\/[a-f0-9]{64}\.json$/.test(s.evidenceUrl))) return undefined;
+  const charts = parseChartPlans(s.charts);
+  const rest = { ...s };
+  delete rest.charts;
   return {
-    ...s,
+    ...rest,
     publisher: withoutEmDashes(s.publisher),
     figures: s.figures.map(figure => ({ ...figure, caption: withoutEmDashes(figure.caption) })),
+    ...(charts ? { charts } : {}),
   };
 }
 
