@@ -8445,11 +8445,11 @@ Review: red head e3aa9167, CI36182632129: 1 regression failed, 1357 passed, 7 sk
 
 # Task: Knowledge writer lock occupancy (2026-09-25)
 - [x] T1 depends_on: [] Confirm bounded writer probe timeout4.040s with reads44–67ms, stopped recovery and released deploy lock; inspect200-chunk write transaction.
-- [ ] T2 depends_on: [T1] GitHub red/green regressions; make no-distill prefilter honor optional summaries and persist one complete authoritative document per transaction.
+- [x] T2 depends_on: [T1] GitHub red/green regressions; make no-distill prefilter honor optional summaries and persist one complete authoritative document per transaction.
 - [ ] T3 depends_on: [T2] Independent review, all exact-head CI green, accepted notification and coordinated deployment.
 - [ ] T4 depends_on: [T3] Verify writer availability and complete bounded recovery, restore timer and real health.
 Dependency graph: T1 -> T2 -> T3 -> T4.
-Review: preserve complete multi-chunk document/FTS/prune atomicity; no timeout increase, dropped rows, speculative retries or fabricated health. No local test suites.
+Review: red head bff0eecd, CI36186210160 reproduced the new regressions. Parent and independent reviewer approved the narrow implementation. Preserve complete multi-chunk document/FTS/prune atomicity; no timeout increase, dropped rows, speculative retries or fabricated health. No local test suites.
 
 # Task: Durable config-drift writer recovery (2026-09-25)
 
