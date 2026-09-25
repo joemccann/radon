@@ -8462,6 +8462,14 @@ Review: red head e3aa9167, CI36182632129: 1 regression failed, 1357 passed, 7 sk
 Dependency graph: T1 -> T2 -> T3 -> T4.
 Review: red head bff0eecd, CI36186210160 reproduced the new regressions. Parent and independent reviewer approved the narrow implementation. Preserve complete multi-chunk document/FTS/prune atomicity; no timeout increase, dropped rows, speculative retries or fabricated health. No local test suites.
 
+# Task: Knowledge atomic HTTP transaction cleanup (2026-09-25)
+- [x] T1 depends_on: [] Identify lost-receipt orphan window in rotating-baton writes; preserve failed recovery and read-only provenance.
+- [ ] T2 depends_on: [T1] GitHub regression-first proof; single-request conditional transaction plus close, SQL-only store parity for upsert and source prune.
+- [ ] T3 depends_on: [T2] Independent review, exact-head CI green, accepted notification and coordinated deployment.
+- [ ] T4 depends_on: [T3] Verify passive writer availability; complete bounded recovery, real healthy timestamp and enabled timer.
+Dependency graph: T1 -> T2 -> T3 -> T4.
+Review: no local suites, timeout inflation, speculative live retries or fabricated health. Preserve first SQL error, document/FTS/prune atomicity and idempotent ambiguous-commit replay.
+
 # Task: Durable config-drift writer recovery (2026-09-25)
 
 ## Dependency graph
