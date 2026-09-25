@@ -179,6 +179,12 @@ Violating any rail is a failed run.
    and never create or read `~/radon-weekend/.weekend-runner.lock`. A
    sandboxed `kill -0` returning `Operation not permitted` must not be read as evidence
    of anything and must not become a `lock-owner-unverified` INCOMPLETE.
+   A job you detach from your own process group (`start_new_session=True`,
+   `setsid`, a detached spawn) must have its pid appended, one per line, to
+   `$RADON_WEEKEND_DETACHED_PIDFILE` within seconds of starting it. The
+   wrapper reaps it when the round ends. An undeclared detached job can
+   outlive the round and keep writing into the clone through the next
+   phase's `git clean`.
    Never reset, clean, modify, or kill work owned by another nightly
    process. Use namespaced scratch state outside the repository and clean
    it on exit.
@@ -417,7 +423,7 @@ tested.
 Goal: classify documentation impact for the code delta and find harmful drift
 without generating documentation work by default.
 
-1. Verify the dedicated clone marker, exclusive lock, clean tree, GitHub auth,
+1. Verify the dedicated clone marker, clean tree, GitHub auth,
    `origin/main`, required tools, rolling issue, and any existing
    documentation PR. Recoverably stash orphaned runner state and record the
    stash ref; never discard or mix it into this run.

@@ -18,7 +18,7 @@
     <array>
         <string>/bin/bash</string>
         <string>-c</string>
-        <string>export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=false; C=__WEEKEND_REPO__; G="$(dirname "$C")/.gitdirs/ci-performance.git"; if kill -0 "$(cat "$C/.weekend-runner.lock/pid" 2&gt;/dev/null)" 2&gt;/dev/null; then exit 0; fi; { T="$(command -v timeout || command -v gtimeout || true)"; [ -n "$T" ] || exit 78; "$T" -k 15 180 git --git-dir="$G" --work-tree="$C" -c core.sshCommand="ssh -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4" fetch -q origin &amp;&amp; git --git-dir="$G" --work-tree="$C" checkout -f -q main &amp;&amp; git --git-dir="$G" --work-tree="$C" reset --hard -q origin/main; } || exit 70; exec /bin/bash "$C/scripts/ci_performance_nightly.sh" cycle</string>
+        <string>export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=false; C=__WEEKEND_REPO__; G="$(dirname "$C")/.gitdirs/ci-performance.git"; L="$C/.weekend-runner.lock"; page() { echo "[launchd] $(date -u +%FT%TZ) $1" &gt;&amp;2; E="$(dirname "$C")/.env"; U="$(sed -n 's/^PUSHOVER_USER=//p' "$E" 2&gt;/dev/null | head -n 1 | tr -d "\"'")"; K="$(sed -n 's/^PUSHOVER_TOKEN=//p' "$E" 2&gt;/dev/null | head -n 1 | tr -d "\"'")"; [ -n "$U" ] &amp;&amp; [ -n "$K" ] &amp;&amp; /usr/bin/curl -fsS -m 10 --form-string "token=$K" --form-string "user=$U" --form-string "title=radon ci-performance: nightly did not start" --form-string "message=$1" https://api.pushover.net/1/messages.json &gt;/dev/null 2&gt;&amp;1; return 0; }; P="$(cat "$C/.weekend-runner.lock/pid" 2&gt;/dev/null)"; case "$P" in ""|*[!0-9]*|0|1) P= ;; esac; if [ -n "$P" ] &amp;&amp; kill -0 "$P" 2&gt;/dev/null; then S="$(cat "$L/start" 2&gt;/dev/null | sed 's/^ *//;s/ *$//')"; N="$(LC_ALL=C TZ=UTC /bin/ps -p "$P" -o lstart= 2&gt;/dev/null | sed 's/^ *//;s/ *$//')"; O="$(/bin/ps -p "$P" -o lstart= 2&gt;/dev/null | sed 's/^ *//;s/ *$//')"; if [ -z "$S" ] || [ -z "$N" ] || [ "$S" = "$N" ] || [ "$S" = "$O" ]; then page "skipped: pid $P still holds $L, so this scheduled cycle did not run"; exit 0; fi; fi; { T="$(command -v timeout || command -v gtimeout || true)"; [ -n "$T" ] || { page "no timeout or gtimeout on PATH; install coreutils"; exit 78; }; rm -f "$G/index.lock" "$G/HEAD.lock"; find "$G" \( -path "$G/objects" -o -path "$G/worktrees" \) -prune -o -type f -name "*.lock" -mmin +10 -exec rm -f {} + 2&gt;/dev/null; F=1; for i in 1 2 3; do "$T" -k 15 180 git --git-dir="$G" --work-tree="$C" -c core.sshCommand="ssh -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4" fetch -q origin &amp;&amp; { F=0; break; }; [ "$i" = 3 ] || sleep "${RADON_LAUNCHD_FETCH_PAUSE_SECS:-30}"; done; [ "$F" = 0 ] &amp;&amp; git --git-dir="$G" --work-tree="$C" checkout -f -q main &amp;&amp; git --git-dir="$G" --work-tree="$C" reset --hard -q origin/main; } || { page "refresh of $C failed (fetch, checkout or reset); this cycle did not run"; exit 70; }; exec /bin/bash "$C/scripts/ci_performance_nightly.sh" cycle</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -53,6 +53,11 @@
 
     <key>RunAtLoad</key>
     <false/>
+
+    <!-- The SIGTERM path reaps the round (TERM, 10s, KILL) and then
+         pages; launchd's short default SIGKILLed it before the page. -->
+    <key>ExitTimeOut</key>
+    <integer>60</integer>
 
     <key>StandardOutPath</key>
     <string>__WEEKEND_REPO__/logs/ci-performance/launchd-cycle.log</string>

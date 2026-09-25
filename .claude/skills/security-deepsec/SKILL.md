@@ -213,6 +213,12 @@ Violating any rail is a failed run.
    and never create or read `~/radon-weekend/.weekend-runner.lock`. A
    sandboxed `kill -0` returning `Operation not permitted` must not be read as evidence
    of anything and must not become a `lock-owner-unverified` INCOMPLETE.
+   A job you detach from your own process group (`start_new_session=True`,
+   `setsid`, a detached spawn) must have its pid appended, one per line, to
+   `$RADON_WEEKEND_DETACHED_PIDFILE` within seconds of starting it. The
+   wrapper reaps it when the round ends. An undeclared detached job can
+   outlive the round and keep writing into the clone through the next
+   phase's `git clean`.
    Use namespaced scratch and state outside the repository. Never reset,
    clean, modify, or kill work owned by another process. Serialize CPU-,
    memory-, and model-heavy work with the shared Mac mini heavy-work
@@ -263,7 +269,8 @@ Violating any rail is a failed run.
 
 Before every run:
 
-1. Resolve the repository root, verify the markers and lock, and require a
+1. Resolve the repository root, verify the markers (never the runner lock:
+   the wrapper holds it, see Rails), and require a
    clean worktree except for `.deepsec/`, `data/radon/` and logs.
 2. Fetch `origin` read-only. Resolve and record immutable `HEAD_SHA` and the
    last completely DeepSec-audited SHA from the private `last-audited.json`.

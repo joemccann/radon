@@ -123,6 +123,12 @@ Violating any rail is a failed run.
    and never create or read `~/radon-weekend/.weekend-runner.lock`. A
    sandboxed `kill -0` returning `Operation not permitted` must not be read as evidence
    of anything and must not become a `lock-owner-unverified` INCOMPLETE.
+   A job you detach from your own process group (`start_new_session=True`,
+   `setsid`, a detached spawn) must have its pid appended, one per line, to
+   `$RADON_WEEKEND_DETACHED_PIDFILE` within seconds of starting it. The
+   wrapper reaps it when the round ends. An undeclared detached job can
+   outlive the round and keep writing into the clone through the next
+   phase's `git clean`.
    Namespace scratch files and clean them on exit. Do not kill another
    nightly process to gain benchmark capacity.
 3. **Never push to `main`.** Work on `ci-performance/<YYYY-MM-DD>` and open or
@@ -250,7 +256,7 @@ force-push `main`.
 Goal: identify the current critical-path bottleneck and produce a ranked,
 evidence-backed optimization candidate.
 
-1. Verify the dedicated clone marker, exclusive lock, clean tree, GitHub auth,
+1. Verify the dedicated clone marker, clean tree, GitHub auth,
    `origin/main`, and required toolchain. Recoverably stash orphaned runner
    state and record the stash ref; never discard it or mix it into this run.
 2. Resolve the newest successful `audited-through:` checkpoint on the

@@ -213,7 +213,11 @@ def test_launchd_never_executes_clone_after_failed_refresh(plist, failed_step, t
     git.write_text(f'#!/bin/sh\nfor arg do [ "$arg" = "{failed_step}" ] && exit 1; done\nexit 0\n')
     git.chmod(0o755)
     _timeout_passthrough(bin_dir)
-    proc = subprocess.run([BASH, "-c", script], env={"PATH": f"{bin_dir}:/usr/bin:/bin"}, timeout=30)
+    proc = subprocess.run(
+        [BASH, "-c", script],
+        env={"PATH": f"{bin_dir}:/usr/bin:/bin", "RADON_LAUNCHD_FETCH_PAUSE_SECS": "0"},
+        timeout=30,
+    )
     assert proc.returncode == 70
     assert not canary.exists()
 
@@ -229,6 +233,7 @@ def test_ground_truth_propagates_failure_inside_conditional(name, failed_step, t
 HOST_GITDIR=/unused
 REPO=/unused
 fetch_origin_with_retry() { [[ "$FAIL_STEP" != fetch ]]; }
+clear_stale_git_locks() { :; }
 resolve_green_main_sha() { :; }
 git() { for arg do [[ "$arg" == "$FAIL_STEP" ]] && return 1; done; return 0; }
 ''' + function + '\nif ! ground_truth; then exit 70; fi\nexit 0\n'

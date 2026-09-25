@@ -106,6 +106,12 @@ artificial commit or PR, and follows the no-op contract below.
    and never create or read `~/radon-weekend/.weekend-runner.lock`. A
    sandboxed `kill -0` returning `Operation not permitted` must not be read as evidence
    of anything and must not become a `lock-owner-unverified` INCOMPLETE.
+   A job you detach from your own process group (`start_new_session=True`,
+   `setsid`, a detached spawn) must have its pid appended, one per line, to
+   `$RADON_WEEKEND_DETACHED_PIDFILE` within seconds of starting it. The
+   wrapper reaps it when the round ends. An undeclared detached job can
+   outlive the round and keep writing into the clone through the next
+   phase's `git clean`.
 9. **Do not launch Chromium in the sandbox.** Scheduled wrappers do not
    provide `PW_TEST_CONNECT_WS_ENDPOINT`; `RADON_WEEKEND_BROWSER_HOST` is
    `unavailable:disabled` for every provider. Use GitHub CI for sandboxed UI
@@ -703,6 +709,13 @@ how this loop improves as the codebase grows.
   `-n auto --dist loadfile` (a new shard is only proven with CI's flags).
   `setsid` does not exist on darwin: detach a long job with
   `subprocess.Popen(..., start_new_session=True)`, never `nohup setsid`.
+  Then append its pid (`proc.pid`, one per line) to the file named by
+  `$RADON_WEEKEND_DETACHED_PIDFILE` (`$REPO/.weekend-detached-pids`). A
+  detached job leaves the round's process group, so the wrapper can reap it
+  only if it is declared there, and it will be reaped when the round ends. On
+  2026-09-22/23 undeclared detached pytest runs kept writing into the clone
+  through the next phase's `git clean`. Finish, and read the results of,
+  every detached job inside the round that started it.
 - **2026-08-25 (remediate): the closing 3× gate does not fit the Bash tool's
   600 s cap.** One serial round (pytest ~275 s + vitest ~300 s + cloud
   ~185 s) already exceeds it and a backgrounded tool call is still killed at
