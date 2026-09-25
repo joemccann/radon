@@ -1075,6 +1075,23 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   documents with embeddings even if their optional summaries are absent;
   normal runs still backfill missing summaries. Never raise timeouts to hide
   writer starvation or retry the full pipeline while the writer is blocked.
+- **2026-09-25 ambiguous receipt recurrence:** document-level commits
+  preserved progress, but a timed-out rotating-baton response could still
+  leave the client unable to close the server transaction: it only retained
+  the previous baton. The initiating slow operation remains unknown. A real
+  error heartbeat appeared in storage despite its client reporting timeout,
+  confirming ambiguous write receipts. Knowledge HTTP writes now queue one
+  conditional Hrana batch (`BEGIN IMMEDIATE`, dependent SQL, guarded `COMMIT`,
+  rollback on failure) followed by unconditional stream close. Cleanup is
+  delivered before waiting for any receipt; source disappearance pruning uses
+  the same path. Counts require complete SQL/COMMIT/close receipts. Lost
+  receipts replay the complete idempotent document; no individual write is
+  retried. Existing FTS mirrors do not churn on skips or embedding backfills;
+  a missing mirror is repaired without changing the canonical row. Whole
+  documents are never split: over 4096 transaction steps or 8 MiB request size
+  fails before network I/O. Regression covers 205 embedded chunks in one
+  request, actual writer release after a lost receipt, and rollback on a
+  failed middle statement. See the [Hrana HTTP v2 protocol](https://github.com/tursodatabase/libsql/blob/main/docs/HTTP_V2_SPEC.md).
 - **Recovery:** if optional enrichment providers are unavailable, one bounded
   canonical `ingest.py --source all --no-distill` catch-up preserves raw
   content and local embeddings. It does not attest provider recovery. Restore

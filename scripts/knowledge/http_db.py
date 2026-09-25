@@ -1,8 +1,9 @@
-"""Knowledge-only DB-API subset over bounded, transactional Hrana HTTP v2.
+"""Knowledge-only DB-API subset over bounded Hrana HTTP v2.
 
-A transaction keeps one server stream and consumes each rotating baton exactly
-once. An ambiguous response poisons the handle; the caller retries the whole
-prepared document batch on a fresh connection, never one uncertain statement.
+Production store writes queue an entire conditional transaction and stream
+close in one request. Losing a receipt cannot prevent the server from receiving
+cleanup. The caller retries the whole prepared document after an ambiguous
+COMMIT; standalone source reads close their stream in the same request.
 """
 from __future__ import annotations
 
@@ -16,6 +17,8 @@ from db.hrana_http import HranaHttpError, _encode_arg, _refuse_pytest_pollution
 from health_service.turso_http import http_url_from_libsql, read_env
 
 REQUEST_TIMEOUT = 4.0
+MAX_REQUEST_BYTES = 8 * 1024 * 1024
+MAX_TRANSACTION_STEPS = 4096
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024  # paginated source content, not tiny write receipts
 
 
@@ -93,6 +96,8 @@ class Connection:
     def _request(self, requests, *, closing=False):
         _refuse_pytest_pollution()
         payload = json.dumps({"baton": self._baton, "requests": requests}).encode()
+        if len(payload) > MAX_REQUEST_BYTES:
+            raise HranaHttpError("Hrana request exceeds bounded size")
         request = urllib.request.Request(
             self._url.rstrip("/") + "/v2/pipeline", data=payload, method="POST",
             headers={"Content-Type": "application/json", "Authorization": "Bearer " + self._token},
@@ -188,6 +193,69 @@ class Connection:
         except Exception:
             self._discard()
             raise
+
+    def execute_transaction(self, statements):
+        """Queue all dependent SQL and cleanup before awaiting any receipt.
+
+        Losing the response can obscure COMMIT, but cannot prevent the server
+        from receiving rollback/close. Replay the entire idempotent operation.
+        """
+        if self._poisoned or self._transaction or self._baton is not None:
+            raise TransportError("atomic transaction requires a fresh stream")
+        statements = list(statements)
+        if len(statements) + 3 > MAX_TRANSACTION_STEPS:
+            raise HranaHttpError("atomic transaction exceeds bounded step count")
+        steps = [{"stmt": {"sql": "BEGIN IMMEDIATE", "want_rows": True}}]
+        for sql, args in statements:
+            steps.append({
+                "condition": {"type": "ok", "step": len(steps) - 1},
+                "stmt": {"sql": sql, "args": [_encode_arg(a) for a in args],
+                         "want_rows": True},
+            })
+        commit_index = len(steps)
+        steps.append({"condition": {"type": "ok", "step": commit_index - 1},
+                      "stmt": {"sql": "COMMIT", "want_rows": True}})
+        steps.append({"condition": {"type": "not", "cond": {"type": "ok", "step": commit_index}},
+                      "stmt": {"sql": "ROLLBACK", "want_rows": True}})
+        try:
+            replies = self._request([
+                {"type": "batch", "batch": {"steps": steps}},
+                {"type": "close"},
+            ], closing=True)
+            first = replies[0]
+            if first.get("type") == "error":
+                error = first.get("error") or {}
+                raise HranaHttpError(f"{error.get('code', 'SQL_ERROR')}: {error.get('message', 'batch failed')}")
+            response = first.get("response", {})
+            if first.get("type") != "ok" or response.get("type") != "batch":
+                raise TransportError("unexpected Hrana batch receipt")
+            result = response.get("result", {})
+            outcomes, errors = result.get("step_results"), result.get("step_errors")
+            if (not isinstance(outcomes, list) or not isinstance(errors, list)
+                    or len(outcomes) != len(steps) or len(errors) != len(steps)):
+                raise TransportError("incomplete Hrana transaction receipt")
+            # Preserve the first SQL failure, not a later rollback failure.
+            for error in errors:
+                if error is not None:
+                    if not isinstance(error, dict):
+                        raise TransportError("invalid Hrana step error")
+                    raise HranaHttpError(f"{error.get('code', 'SQL_ERROR')}: {error.get('message', 'statement failed')}")
+            if any(not isinstance(outcome, dict) for outcome in outcomes[:commit_index + 1]):
+                raise TransportError("transaction statements or COMMIT were not confirmed")
+            if outcomes[-1] is not None:
+                raise TransportError("unexpected rollback after successful COMMIT")
+            if (replies[-1].get("type") != "ok"
+                    or replies[-1].get("response", {}).get("type") != "close"):
+                raise TransportError("transaction close was not confirmed")
+            cursors = [_Cursor(outcome) for outcome in outcomes[:commit_index + 1]]
+            return cursors[1:commit_index]
+        except Exception as exc:
+            self._discard()
+            if isinstance(exc, HranaHttpError):
+                raise
+            raise TransportError(f"{type(exc).__name__}: {exc}") from exc
+        finally:
+            self._url = self._origin
 
     def commit(self):
         self.execute("COMMIT")
