@@ -44,6 +44,14 @@ def _split_statements(sql: str) -> list[str]:
     return [s.strip() for s in re.split(r";\s*$", stripped, flags=re.MULTILINE) if s.strip()]
 
 
+@pytest.fixture(autouse=True)
+def injected_enrichment_runner(monkeypatch):
+    monkeypatch.setattr(
+        distill_mod, "run_distill_batch",
+        lambda docs, timeout: [ingest_mod.distill(title, content) for title, content in docs],
+    )
+
+
 @pytest.fixture
 def db():
     conn = libsql.connect(":memory:")
@@ -1273,3 +1281,71 @@ class TestDocumentWriteOccupancy:
             ingest_mod.ingest_source(db, _module([_chunk('doc-a'), _chunk('doc-b')]), distill_enabled=False, embed_enabled=False)
         assert db.execute('SELECT doc_key FROM knowledge').fetchall() == [('doc-a',)]
         assert db.execute("SELECT k.doc_key FROM knowledge k JOIN knowledge_fts f ON f.rowid=k.id WHERE knowledge_fts MATCH 'alpha'").fetchall() == [('doc-a',)]
+
+
+class TestEnrichmentBudgetRecovery:
+    def test_exhausted_budget_still_ingests_every_raw_document(self, db, fake_embedder):
+        budget = distill_mod.EnrichmentBudget(seconds=0)
+        result = ingest_mod.ingest_source(
+            db, _module([_chunk("a"), _chunk("b")]), enrichment=budget,
+        )
+        assert result["inserted"] == 2
+        assert result["embedded"] == 2
+        assert result["distill_failed"] == 0
+        assert result["distill_deferred"] == 2
+        assert len(_rows(db)) == 2
+
+    def test_failed_backfill_preserves_vector_without_reembedding(self, db, fake_embedder, monkeypatch):
+        ingest_mod.ingest_source(db, _module([_chunk("a")]), distill_enabled=False)
+        vector = _rows(db)[0][4]
+        assert len(vector) == EMBEDDING_DIM * 4  # actual native vector32 wire shape
+        def forbid(texts):
+            raise AssertionError("unchanged raw input was re-embedded")
+        monkeypatch.setattr(ingest_mod, "get_embedder", lambda: forbid)
+        budget = distill_mod.EnrichmentBudget(runner=lambda docs, timeout: [None] * len(docs))
+        result = ingest_mod.ingest_source(db, _module([_chunk("a")]), enrichment=budget)
+        assert result["distill_failed"] == 1
+        assert result["embedded"] == 0
+        assert _rows(db)[0][4] == vector
+
+    def test_later_run_backfills_summary_after_deferral(self, db, fake_embedder):
+        ingest_mod.ingest_source(db, _module([_chunk("a")]), enrichment=distill_mod.EnrichmentBudget(seconds=0))
+        budget = distill_mod.EnrichmentBudget(runner=lambda docs, timeout: [{"summary": "restored", "tickers": []}] * len(docs))
+        result = ingest_mod.ingest_source(db, _module([_chunk("a")]), enrichment=budget)
+        assert result["distilled"] == 1
+        assert result["embedded"] == 1
+        assert _rows(db)[0][3] == "restored"
+
+
+    def test_deferred_multichunk_doc_preserves_existing_summary_and_vectors(self, db, fake_embedder):
+        from knowledge.store import upsert_documents
+        first, second = _chunk("a", 0, "first"), _chunk("a", 1, "second")
+        first.summary = "existing summary"
+        first.metadata = {"tickers": ["XYZ"]}
+        first.embedding = [0.25] * EMBEDDING_DIM
+        second.embedding = [0.5] * EMBEDDING_DIM
+        upsert_documents(db, [first, second])
+        before = db.execute("SELECT chunk_ix, summary, metadata, embedding FROM knowledge ORDER BY chunk_ix").fetchall()
+        result = ingest_mod.ingest_source(
+            db, _module([_chunk("a", 0, "first"), _chunk("a", 1, "second")]),
+            enrichment=distill_mod.EnrichmentBudget(seconds=0),
+        )
+        after = db.execute("SELECT chunk_ix, summary, metadata, embedding FROM knowledge ORDER BY chunk_ix").fetchall()
+        assert after == before
+        assert result["embedded"] == 0
+        assert result["distill_deferred"] == 2
+
+
+    def test_deferred_unchanged_corpus_never_reembeds_or_acquires_writer(self, db, fake_embedder, monkeypatch):
+        docs = [_chunk(str(index)) for index in range(205)]
+        ingest_mod.ingest_source(db, _module(docs), distill_enabled=False)
+        fake_embedder.clear()
+        monkeypatch.setattr(ingest_mod, "upsert_documents", lambda *a: pytest.fail("unchanged deferred corpus acquired writer"))
+        result = ingest_mod.ingest_source(
+            db, _module([_chunk(str(index)) for index in range(205)]),
+            enrichment=distill_mod.EnrichmentBudget(seconds=0),
+        )
+        assert result["distill_deferred"] == 205
+        assert result["skipped"] == 205
+        assert result["embedded"] == 0
+        assert fake_embedder == []
