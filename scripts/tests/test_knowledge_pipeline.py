@@ -1273,3 +1273,36 @@ class TestDocumentWriteOccupancy:
             ingest_mod.ingest_source(db, _module([_chunk('doc-a'), _chunk('doc-b')]), distill_enabled=False, embed_enabled=False)
         assert db.execute('SELECT doc_key FROM knowledge').fetchall() == [('doc-a',)]
         assert db.execute("SELECT k.doc_key FROM knowledge k JOIN knowledge_fts f ON f.rowid=k.id WHERE knowledge_fts MATCH 'alpha'").fetchall() == [('doc-a',)]
+
+
+class TestEnrichmentBudgetRecovery:
+    def test_exhausted_budget_still_ingests_every_raw_document(self, db, fake_embedder):
+        budget = distill_mod.EnrichmentBudget(seconds=0)
+        result = ingest_mod.ingest_source(
+            db, _module([_chunk("a"), _chunk("b")]), enrichment=budget,
+        )
+        assert result["inserted"] == 2
+        assert result["embedded"] == 2
+        assert result["distill_failed"] == 0
+        assert result["distill_deferred"] == 2
+        assert len(_rows(db)) == 2
+
+    def test_failed_backfill_preserves_vector_without_reembedding(self, db, fake_embedder, monkeypatch):
+        ingest_mod.ingest_source(db, _module([_chunk("a")]), distill_enabled=False)
+        vector = _rows(db)[0][4]
+        def forbid(texts):
+            raise AssertionError("unchanged raw input was re-embedded")
+        monkeypatch.setattr(ingest_mod, "get_embedder", lambda: forbid)
+        budget = distill_mod.EnrichmentBudget(runner=lambda docs, timeout: [None] * len(docs))
+        result = ingest_mod.ingest_source(db, _module([_chunk("a")]), enrichment=budget)
+        assert result["distill_failed"] == 1
+        assert result["embedded"] == 0
+        assert _rows(db)[0][4] == vector
+
+    def test_later_run_backfills_summary_after_deferral(self, db, fake_embedder):
+        ingest_mod.ingest_source(db, _module([_chunk("a")]), enrichment=distill_mod.EnrichmentBudget(seconds=0))
+        budget = distill_mod.EnrichmentBudget(runner=lambda docs, timeout: [{"summary": "restored", "tickers": []}] * len(docs))
+        result = ingest_mod.ingest_source(db, _module([_chunk("a")]), enrichment=budget)
+        assert result["distilled"] == 1
+        assert result["embedded"] == 1
+        assert _rows(db)[0][3] == "restored"

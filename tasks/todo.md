@@ -1,3 +1,12 @@
+## 2026-09-25 Bound optional knowledge enrichment
+- [x] T1 Static audit confirms missing summaries retry every keyed provider without a run budget. depends_on: []
+- [ ] T2 Regression-first GitHub CI for cumulative budget, exhaustion breaker, raw/vector preservation, and child cleanup. depends_on: [T1]
+- [ ] T3 Implement a knowledge-only 120-second cumulative subprocess enrichment budget shared across sources/retries; incremental four-chunk waves and explicit failed/deferred counts. Preserve normal summary backfill and raw/embedding ingestion. depends_on: [T2]
+- [ ] T4 All applicable exact-head CI green, one notification, parent-coordinated deployment after catch-up lock release. depends_on: [T3]
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+Review: No local suites or provider calls. Subprocess process groups enforce the wall deadline and reap provider CLI descendants; thread cancellation alone cannot. Scope: knowledge ingest/distill and their tests. Stored summaries/vectors survive deferred enrichment of unchanged input.
+
 # Task: Stop service-worker preload warnings
 
 ## Dependency graph and checklist
