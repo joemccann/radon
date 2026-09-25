@@ -100,6 +100,22 @@ describe("SystemStatusBar", () => {
 });
 
 describe("WriterFreshnessTable", () => {
+  it("labels on-demand writers neutrally without hiding errors or scheduled staleness", () => {
+    render(<WriterFreshnessTable reachable rows={[
+      { service: "analyst-ratings", state: "ok", updated_at: "2020-01-01T00:00:00Z" },
+      { service: "informed-flow", state: "error", updated_at: "2020-01-01T00:00:00Z", last_error: "request failed" },
+      { service: "knowledge-ingest", state: "ok", updated_at: "2020-01-01T00:00:00Z" },
+    ]} />);
+    for (const name of ["analyst-ratings", "informed-flow"]) {
+      const row = screen.getByTestId(`writer-row-${name}`);
+      expect(row.textContent).toContain("On demand");
+      expect(row.textContent).not.toContain("STALE");
+      expect(row.querySelector(".admin-status-dot-neutral")).toBeTruthy();
+    }
+    expect(screen.getByTestId("writer-row-informed-flow").querySelector(".admin-pill-negative")?.textContent).toBe("error");
+    expect(screen.getByTestId("writer-row-knowledge-ingest").textContent).toContain("STALE");
+  });
+
   it("humanizes a JSON detail (never renders a raw blob)", () => {
     render(
       <WriterFreshnessTable

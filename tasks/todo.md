@@ -8398,3 +8398,11 @@ Review: pending; no live broker calls, browser launches, or runner-lock operatio
 
 - CI repair: `scripts-df` reported the SLM owner-document contract; updated the unit example and provisioning semantics in `docs/ml/newsfeed-slm-tagger.md`. Re-run all applicable checks on the new head.
 - CI repair: an unchanged SIGTERM regression failed on the second head after passing on the first. Synchronize the isolated wrapper with its actual parent wait boundary and preserve all reporting/status assertions; retain subprocess diagnostics. Prior failure output did not capture the precise exit path. Production wrappers unchanged.
+
+## 2026-09-25 Scheduled writer freshness investigation
+- [x] T1 Collect current health, timer and writer evidence. depends_on: []
+- [x] T2 Repair admin freshness classification and retired control applicability; add regression coverage. depends_on: [T1]
+- [ ] T3 Create scoped PR and verify exact-head GitHub CI. depends_on: [T2]
+Dependency graph: T1 -> T2 -> T3.
+
+Review: Seven on-demand writers were correctly registered but admin freshness ignored categories. Admin now labels them On demand and scores scheduled writers only. Errors and last-run ages remain visible. Retired exit-orders rows are excluded without mutating storage. Unknown services remain scheduled. knowledge-ingest disabled timer and liquidcompute timeout investigations handed to parent for separate operational repair. GitHub CI and screenshot inspection pending; no local suites run.
