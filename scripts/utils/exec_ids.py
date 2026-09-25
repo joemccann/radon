@@ -16,12 +16,18 @@ convention as the web read side: ``web/lib/journal/realizedPnl.ts``
 from __future__ import annotations
 
 import re
-from typing import Any, Tuple
+from typing import Any, Optional, Tuple
 
 # Root must itself be dotted (IB roots are `<hex>.<hex>.<NN>`) and the
 # correction counter is exactly two digits, so ad-hoc ids ("ORDER-7",
 # "backfill.3") stay opaque and keep exact-match dedupe.
 _CORRECTION_SUFFIX = re.compile(r"^(?P<root>.+\..+)\.(?P<correction>\d{2})$")
+# Live fills append one extra two-digit segment to Flex ibExecID.
+# Flex `0000f126.6ab14023.03.01` is journaled as `….03.01.01`.
+# Only that last segment is removed, so `.02` and `.03` stay different legs.
+_LIVE_EXTRA_SEGMENT = re.compile(
+    r"^(?P<flex>[0-9A-Fa-f]+\.[0-9A-Fa-f]+\.\d{2}\.\d{2})\.\d{2}$"
+)
 
 
 def exec_id_root(exec_id: Any) -> Tuple[str, int]:
@@ -39,3 +45,19 @@ def exec_id_root(exec_id: Any) -> Tuple[str, int]:
     if not match:
         return raw, 0
     return match.group("root"), int(match.group("correction"))
+
+
+def flex_ib_exec_id(exec_id: Any) -> Optional[str]:
+    """Flex ibExecID for a live five-part exec id, else None.
+
+    Returns None for Flex's own four-part id, composites, and anything that
+    is not `<hex>.<hex>.<dd>.<dd>.<dd>`. Callers add the result beside the
+    stored id. They must not strip a second segment.
+    """
+    raw = str(exec_id or "").strip()
+    if not raw or "+" in raw:
+        return None
+    match = _LIVE_EXTRA_SEGMENT.match(raw)
+    if not match:
+        return None
+    return match.group("flex")
