@@ -257,7 +257,7 @@ function extract(text: string): Obs[] {
     const end = start + match[0].length;
     if (!take(start, end)) continue;
     const before = text.slice(Math.max(0, start - 80), start).toLowerCase();
-    const words = before.match(/\b(tokenized|assets|equities|credit|debt|issuance)\b/g) ?? [];
+    const words: string[] = before.match(/\b(tokenized|assets|equities|credit|debt|issuance)\b/g) ?? [];
     const label = words.includes("tokenized") && words.includes("assets") ? "Tokenized assets" : "Series";
     if (label === "Series") continue;
     const unit = moneyUnit(match[1]);
