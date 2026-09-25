@@ -1559,7 +1559,7 @@ install_nightly_pr_guard() {
 # only be too permissive (harmless perf cost), never miss a bypass.
 _guard_hit=0
 for _guard_arg in "$@"; do
-  if [[ "$_guard_arg" == "pr" || "$_guard_arg" == "api" || "$_guard_arg" == "issue" ]]; then _guard_hit=1; fi
+  if [[ "$_guard_arg" == "pr" || "$_guard_arg" == "api" || "$_guard_arg" == "issue" || "$_guard_arg" == "alias" ]]; then _guard_hit=1; fi
 done
 if [[ "$_guard_hit" == 1 ]]; then
   guard_dir="$(mktemp -d "${TMPDIR:-/tmp}/radon-pr-check.XXXXXX")"
