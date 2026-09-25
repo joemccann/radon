@@ -742,6 +742,30 @@ class TestRemoteAncestryProvenance:
         assert "ls-remote" in body and "protocol.version=1" in body
         assert "remote get-url" not in body and "origin/main" not in body
 
+    def test_anchor_ignores_the_callers_repository_config(
+        self, harness: dict[str, Path]
+    ) -> None:
+        # Root runs setup from inside the radon-owned checkout; that repo's
+        # config must not choose where the anchor is read from.
+        main = subprocess.check_output(
+            ["git", "-C", str(harness["cloud"]), "rev-parse", "HEAD"], text=True
+        ).strip()
+        other = harness["tmp"] / "other.git"
+        subprocess.run(["git", "clone", "-q", "--bare", str(harness["remote"]), str(other)], check=True)
+        work = harness["tmp"] / "other-work"
+        subprocess.run(["git", "clone", "-q", "-b", "main", str(other), str(work)], check=True)
+        _git(work, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "other")
+        _git(work, "push", "-q", "origin", "HEAD:refs/heads/main")
+        _git(harness["cloud"], "config", f"url.{other}.insteadOf", str(harness["remote"]))
+        result = _run_setup_function(
+            'resolve_provenance_anchor; printf "anchor=%s\\n" "$PROVENANCE_ANCHOR_SHA"',
+            harness["bin"],
+            _base_env(harness),
+            cwd=harness["cloud"],
+        )
+        assert result.returncode == 0, result.stderr
+        assert f"anchor={main}" in result.stdout
+
 
 class TestRootProvisionStore:
     """Root reads installed bytes from its own clone of the pinned remote.
