@@ -1132,11 +1132,15 @@ control_plane_unit_name() {
   return 1
 }
 
+# RADON_GIT_DIR is radon-owned, so every object/ancestry rewrite it can hold
+# is ignored: replace refs, grafts and the commit-graph cache.
 git_bounded() {
   if [[ -n "${TIMEOUT:-}" ]]; then
-    "$TIMEOUT" --signal=TERM --kill-after=2s 20s "$GIT" "$@"
+    GIT_NO_REPLACE_OBJECTS=1 GIT_GRAFT_FILE=/dev/null \
+      "$TIMEOUT" --signal=TERM --kill-after=2s 20s "$GIT" -c core.commitGraph=false "$@"
   else
-    "$GIT" "$@"
+    GIT_NO_REPLACE_OBJECTS=1 GIT_GRAFT_FILE=/dev/null \
+      "$GIT" -c core.commitGraph=false "$@"
   fi
 }
 

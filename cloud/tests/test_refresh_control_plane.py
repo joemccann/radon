@@ -926,3 +926,24 @@ def test_privileged_refresh_refuses_a_symlinked_target_directory(tmp_path: Path)
     assert result.returncode != 0, result.stdout + result.stderr
     assert "not a root-owned directory" in result.stdout + result.stderr
     assert {path.name: path.read_bytes() for path in outside.iterdir()} == before
+
+
+def test_privileged_refresh_ignores_object_rewrites_in_the_checkout_store(
+    tmp_path: Path,
+) -> None:
+    """radon owns the git store root reads blobs from: a replace ref (or a
+    graft) there must not change what the trusted main tip resolves to."""
+    box = Sandbox(tmp_path)
+    tip = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=box.tmp, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    installed_before = box.installed_path(SUDOERS_SOURCE).read_bytes()
+    box.mutate_source(SUDOERS_SOURCE)
+    _git(box.tmp, "tag", "rewritten")
+    _git(box.tmp, "reset", "-q", "--hard", tip)
+    _git(box.tmp, "replace", tip, "rewritten")
+
+    result = box.run("refresh-control-plane-privileged")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert box.installed_path(SUDOERS_SOURCE).read_bytes() == installed_before

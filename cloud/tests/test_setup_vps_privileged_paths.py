@@ -666,6 +666,25 @@ class TestRemoteAncestryProvenance:
         _git(harness["cloud"], "replace", anchor, "HEAD")
         self._refused(harness, source, "is not an ancestor of the remote main commit")
 
+    def test_replace_ref_cannot_forge_the_head_blob(self, harness: dict[str, Path]) -> None:
+        # HEAD stays on remote main; only the object HEAD resolves to moves.
+        anchor = self._head(harness)
+        source = self._tamper(harness)
+        tampered = self._head(harness)
+        _git(harness["cloud"], "reset", "-q", "--soft", anchor)
+        _git(harness["cloud"], "replace", anchor, tampered)
+        self._refused(harness, source, "differs from the committed blob")
+
+    def test_checkout_configured_filters_never_run(self, harness: dict[str, Path]) -> None:
+        marker = harness["tmp"] / "filter-ran"
+        _git(harness["cloud"], "config", "filter.x.clean", f"touch {marker}; cat")
+        (harness["cloud"] / ".git" / "info").mkdir(exist_ok=True)
+        (harness["cloud"] / ".git" / "info" / "attributes").write_text("* filter=x\n")
+        source = harness["cloud"] / "config" / "sudoers.d" / "radon-ops"
+        result = _run_stage(harness, source, harness["tmp"] / "installed")
+        assert result.returncode == 0, result.stderr
+        assert not marker.exists()
+
     def test_graft_cannot_forge_ancestry(self, harness: dict[str, Path]) -> None:
         anchor = self._head(harness)
         source = self._tamper(harness)
