@@ -8412,3 +8412,5 @@ Review: pending; no live broker calls, browser launches, or runner-lock operatio
 
 - Tests-first GitHub run `36176075067`, head `8d5e159d`: six expected regression failures in scripts-npsz; 2,569 passed.
 - Read-only live BlackRock fetch: all 1,979 equity rows validate; four reported class shares retained in dash form.
+
+- Repair head `c93be7ad` passes all 2,575 scripts-npsz tests. CI exposed an existing GEX fixture's 50ms timer race; await the real response with an unresolved mock scan and retain snapshot/scan assertions, preventing the losing request from mutating the next test's mock.
