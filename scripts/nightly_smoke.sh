@@ -10,7 +10,7 @@
 set -u
 W="${RADON_WEEKEND_ROOT:-$HOME/radon-weekend}"
 LAUNCHD_PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$HOME/.bun/bin"
-REF="$W/radon"                      # any clone: used only to read origin/main blobs
+REF="$W/.gitdirs/reliability.git"    # host gitdir: used only to read origin/main blobs
 FAILS=0; WARNS=0
 SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/radon-nightly-smoke.XXXXXX")" || exit 2
 trap 'rm -rf "$SCRATCH"' EXIT
@@ -18,9 +18,12 @@ ok()   { printf '  \033[32mPASS\033[0m %s\n' "$*"; }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$*"; FAILS=$((FAILS+1)); }
 warn() { printf '  \033[33mWARN\033[0m %s\n' "$*"; WARNS=$((WARNS+1)); }
 
-git -C "$REF" fetch -q origin main || { echo "cannot fetch origin/main"; exit 2; }
-MAIN="$(git -C "$REF" rev-parse origin/main)"
-blob() { git -C "$REF" show "origin/main:$1" 2>/dev/null; }
+# Never a clone's .git: that points at its agent gitdir, which the loop agent
+# can write. Hooks and fsmonitor off, as the launchd fetch below.
+rgit() { GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=false git --git-dir="$REF" "$@"; }
+rgit fetch -q origin main || { echo "cannot fetch origin/main"; exit 2; }
+MAIN="$(rgit rev-parse origin/main)"
+blob() { rgit show "origin/main:$1" 2>/dev/null; }
 echo "origin/main = ${MAIN:0:8}"
 
 echo "== host"
@@ -70,7 +73,7 @@ loop() {  # label clone wrapper skill slug venv
     for phase in audit remediate deliver; do
       if env -i HOME="$HOME" PATH="$LAUNCHD_PATH" PHASE="$phase" LOOP_SKILL="$skill" \
            AGENT_CLI_ROOT="$HOME/.radon/agent-cli" PORTABLE_PROMPT_DIR="$SCRATCH/prompts-$slug" \
-           bash -c "$fns"$'\n'"mkdir -p \"\$PORTABLE_PROMPT_DIR\"; git -C '$REF' show 'origin/main:.claude/portable-prompts/$skill.$phase.md' > \"\$PORTABLE_PROMPT_DIR/$skill.$phase.md\" 2>/dev/null || rm -f \"\$PORTABLE_PROMPT_DIR/$skill.$phase.md\"; provider_ready '${r%%:*}'"; then :; else continue 2; fi
+           bash -c "$fns"$'\n'"mkdir -p \"\$PORTABLE_PROMPT_DIR\"; git --git-dir='$REF' show 'origin/main:.claude/portable-prompts/$skill.$phase.md' > \"\$PORTABLE_PROMPT_DIR/$skill.$phase.md\" 2>/dev/null || rm -f \"\$PORTABLE_PROMPT_DIR/$skill.$phase.md\"; provider_ready '${r%%:*}'"; then :; else continue 2; fi
     done
     ready="${ready:+$ready }$r"
   done
