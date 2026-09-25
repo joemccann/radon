@@ -8403,7 +8403,7 @@ Review: pending; no live broker calls, browser launches, or runner-lock operatio
 
 ## Dependency graph
 - T1 depends_on: [] - Confirm interruption in production and replay-safety of standalone backup.
-- T2 depends_on: [T1] - Regression tests for active-backup replay, dormant exclusion, repeated recovery, and failed completion.
+- T2 depends_on: [T1] - Regression tests for active-backup replay, dormant exclusion, repeated recovery, and eventual off-box failures.
 - T3 depends_on: [T2] - Restore only the explicitly replay-safe backup oneshot after release activation; preserve all other oneshot exclusions.
 - T4 depends_on: [T3] - Exact-head GitHub CI, deploy, successful real local/off-box backup heartbeat.
 
@@ -8416,4 +8416,6 @@ Review: pending; no live broker calls, browser launches, or runner-lock operatio
 ## Review
 - Backups remain quiesced while code changes; only a backup captured in the interrupted active snapshot is replayed. No trading/order oneshot replay.
 
-- GitHub red evidence: CI36176394767 cloud-al reports four expected interrupted-backup failures; 2,251 passed and two skipped on 86b16936. Implementation adds only explicit backup replay and bounded restore-state verification.
+- GitHub red evidence: CI36176394767 cloud-al reports four expected interrupted-backup failures; 2,251 passed and two skipped on 86b16936. Implementation adds only explicit backup replay and accepted asynchronous restart submission.
+
+- Independent review: do not couple eventual backup/upload failure to app rollback. Verify start submission, retain normal oneshot verification exclusion, and pin retry after rejected submission without a restore marker.

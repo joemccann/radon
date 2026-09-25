@@ -464,10 +464,12 @@ backup was present in the deployment's active-unit snapshot, recovery starts
 it asynchronously after restoring the application and timers. Only
 `radon-db-backup.service` has this replay exception; dormant backups and all
 other oneshots remain untouched. Repeated recovery does not start another
-dump once restoration is recorded. The deployment accepts a running backup
-or a successfully completed one, while a failed backup prevents a successful
-restore check. A fresh `db-backup` heartbeat still requires the real dump and
-off-box work to finish; restarting the unit does not mark it healthy.
+dump once restoration is recorded. A rejected start submission prevents the
+restore marker from being committed and can be retried. Once systemd accepts
+the job, later dump or off-box failures remain backup-health failures without
+rolling back the application. A fresh `db-backup` heartbeat still requires the
+real dump and off-box work to finish; restarting the unit does not mark it
+healthy.
 
 ### Restore runbook
 

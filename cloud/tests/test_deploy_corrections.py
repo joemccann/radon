@@ -1279,6 +1279,8 @@ if command in {{"stop", "start", "restart"}}:
         handle.write(command + " " + " ".join(args[1:]) + "\\n")
     if command == "stop" and any(data["units"].get(unit, {{}}).get("load", "loaded") != "loaded" or data["units"].get(unit, {{}}).get("stop_fail") for unit in args[1:]):
         raise SystemExit(5)
+    if command in {{"start", "restart"}} and any(data["units"].get(unit, {{}}).get("start_fail") for unit in args[1:]):
+        raise SystemExit(6)
     for unit in args[1:]:
         if unit not in data["units"]:
             continue
@@ -1474,8 +1476,34 @@ for path in paths:
         data["units"][backup].update(state="failed", result="exit-code")
         state_file.write_text(json.dumps(data))
         failed = subprocess.run(["bash", str(ROOT_HELPER), "verify-restored"], env=env, capture_output=True, text=True)
-        assert failed.returncode != 0
-        assert backup in failed.stderr
+        assert failed.returncode == 0, failed.stderr
+        # Eventual off-box failure belongs to backup health, not app rollback.
+        again = subprocess.run(["bash", str(ROOT_HELPER), verb], env=env, capture_output=True, text=True)
+        assert again.returncode == 0, again.stderr
+        starts = [line.split()[1:] for line in systemctl_log.read_text().splitlines() if line.startswith("start ")]
+        assert sum(backup in units for units in starts) == 1
+
+    def test_backup_start_rejection_does_not_commit_restore_and_can_retry(self, tmp_path):
+        import json
+
+        env, state_file, systemctl_log, _, active_state = self._root_helper_fixture(tmp_path)
+        data = json.loads(state_file.read_text())
+        backup = "radon-db-backup.service"
+        data["units"][backup] = {"state": "activating", "type": "oneshot", "start_fail": True}
+        state_file.write_text(json.dumps(data))
+        stopped = subprocess.run(["bash", str(ROOT_HELPER), "stop-clean"], env=env, capture_output=True, text=True)
+        assert stopped.returncode == 0, stopped.stderr
+        rejected = subprocess.run(["bash", str(ROOT_HELPER), "recover"], env=env, capture_output=True, text=True)
+        assert rejected.returncode == 6, rejected.stderr
+        assert not Path(f"{active_state}.restored").exists()
+        data = json.loads(state_file.read_text())
+        data["units"][backup]["start_fail"] = False
+        state_file.write_text(json.dumps(data))
+        retried = subprocess.run(["bash", str(ROOT_HELPER), "recover"], env=env, capture_output=True, text=True)
+        assert retried.returncode == 0, retried.stderr
+        assert Path(f"{active_state}.restored").exists()
+        starts = [line.split()[1:] for line in systemctl_log.read_text().splitlines() if line.startswith("start ")]
+        assert sum(backup in units for units in starts) == 2
 
     def test_dormant_backup_is_not_started_by_deploy(self, tmp_path):
         import json
