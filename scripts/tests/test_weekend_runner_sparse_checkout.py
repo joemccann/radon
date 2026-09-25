@@ -68,6 +68,7 @@ def test_ground_truth_undoes_a_sparse_checkout_that_hides_codex(tmp_path, wrappe
         [
             "set -eo pipefail",
             "fetch_origin_with_retry() { git fetch origin --quiet; }",
+            "clear_stale_git_locks() { :; }",
             "resolve_green_main_sha() { :; }",
             "align_agent_gitdir() { :; }",
             _extract_ground_truth(wrapper),
