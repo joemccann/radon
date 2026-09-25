@@ -89,6 +89,12 @@ artificial commit or PR, and follows the no-op contract below.
    and never create or read `~/radon-weekend/.weekend-runner.lock`. A
    sandboxed `kill -0` returning `Operation not permitted` must not be read as evidence
    of anything and must not become a `lock-owner-unverified` INCOMPLETE.
+   A job you detach from your own process group (`start_new_session=True`,
+   `setsid`, a detached spawn) must have its pid appended, one per line, to
+   `$RADON_WEEKEND_DETACHED_PIDFILE` within seconds of starting it. The
+   wrapper reaps it when the round ends. An undeclared detached job can
+   outlive the round and keep writing into the clone through the next
+   phase's `git clean`.
 6. **Do not launch Chromium in the sandbox.** Scheduled wrappers do not
    provide `PW_TEST_CONNECT_WS_ENDPOINT`; `RADON_WEEKEND_BROWSER_HOST` is
    `unavailable:disabled` for every provider. Use GitHub CI for sandboxed UI

@@ -2312,6 +2312,8 @@ duplicate.** Peak: 2026-09-22 11:35Z, page `e1297eea…`.
 - **Discriminating check:** `classified_as=trades` and
   `outcome=coverage_unverified` on an applied duplicate whose missing
   Flex tradeIDs are covered by individual IB fills (this case).
+  A Flex `ibExecID` that is the live five-part `ib_exec_id` minus the
+  trailing `.01` is `flex-pull-live-exec-id`.
   `twr_status=degraded` is `flex-pull-twr-degraded-exit`.
   `classified_as=activity` with `outcome=coverage_unverified` is
   `flex-pull-activity-nav`.
@@ -2330,6 +2332,47 @@ duplicate.** Peak: 2026-09-22 11:35Z, page `e1297eea…`.
   `test_rel226_delivery_coverage.py::test_trade_duplicate_disagreement_stays_unverified`,
   `test_rel226_delivery_coverage.py::test_trade_duplicate_uncovered_day_stays_unverified`.
 - **Code:** `scripts/flex_delivery_ingest.py` (`delivery_rows_present`).
+
+---
+
+## flex-pull-live-exec-id
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+after today's Activity statement is applied, on applied Trade_History
+duplicates whose live fills use a five-part exec id.** Peak: 2026-09-25
+11:35Z, page `722f1b39…`. Span about 80s, not `TimeoutStartSec`. The next
+timer is the 08:30 ET retry.
+
+- **Mechanism:** Flex `ibExecID` is four parts
+  (`0000f126.6ab14023.03.01`). The live journal row is that id plus one
+  trailing segment (`….03.01.01`). `symbol` on the Trade row is the OCC
+  local symbol, while the journal ticker is the underlying, so the
+  individual-fill contract key misses too. `rehydrate_from_executions`
+  then reports the fill as a new import. The claim is already `applied`.
+  The oneshot exits 1. `Type=oneshot` has no `Restart=`. `:8321/health/lite`
+  stays up.
+- **Detection:** journal `ingest_failed:{… 'outcome': 'coverage_unverified',
+  'classified_as': 'trades' …}` on several `Trade_History` files, not one;
+  `systemctl show` → `exit-code` / `0`; ExecMain span well under
+  `TimeoutStartSec`.
+- **Discriminating check:** for a failing sha, the Flex `ibExecID` plus
+  `.01` is an `ib_exec_id` already in `journal`, and the other leg index
+  (`.02` vs `.03`) is a different fill. That is this case. A Flex id with
+  no live row and no matching contract-day fills stays unverified
+  (`flex-pull-trade-coverage`: uncovered exec or a real qty/notional
+  disagreement is operator reconciliation, not this fix). `Result=timeout`
+  is `flex-pull-ingest-timeout`. If `/health/lite` is down too → API,
+  stand down.
+- **Remediation (code):** the journal exec-id set also contains the Flex
+  form of a five-part live id. One segment only. Do not replay the
+  delivery. Do not restart-flap; the 08:30 ET timer retries. After deploy,
+  `systemctl reset-failed radon-flex-pull.service` if that retry has not
+  yet fired.
+- **Regression:**
+  `test_rel226_delivery_coverage.py::test_live_five_part_exec_id_covers_flex_ib_exec_id`,
+  `test_rel226_delivery_coverage.py::test_live_exec_id_alias_does_not_cover_the_other_leg`.
+- **Code:** `scripts/utils/exec_ids.py` (`flex_ib_exec_id`),
+  `scripts/journal_rehydrate.py` (`_existing_exec_ids`).
 
 ---
 
@@ -2375,6 +2418,36 @@ Peak: 2026-09-22 12:35Z, page `d3b66eaf…`.
   `test_flex_from_file.py::test_suppressed_statement_still_records_nav_points`.
 - **Code:** `scripts/flex_delivery_ingest.py` (`_repair_unmirrored_activity_nav`),
   `scripts/perf_twr_builder.py` (`nav_points`, `_nav_snapshot_rows`).
+
+---
+
+## flex-pull-twr-gap
+
+**`/performance` stays `FLOWS_FETCH_FAILED` for days; every nightly build
+returns `historical_flow_coverage_unverified`.** 2026-09-18..24, healed by hand.
+
+- **Mechanism:** a from-file build extends a statement only when every
+  EARLIER stored NAV session has a `twr_subperiods` row. One failed build
+  writes no subperiods, so every later statement fails the same gate. The
+  weekday `radon-perf-twr` timer chains only through `MAX(twr_subperiods)`
+  and cannot heal it; re-ingest is fingerprint-gated as a duplicate.
+- **Self-heal (code):** after the normal ingest, flex-pull lists NAV
+  sessions inside `TWR_GAP_LOOKBACK` (45 days before the newest activity
+  statement) with no subperiod, maps each to a delivered activity statement
+  still in `outgoing`, and replays those oldest-first through
+  `build_and_persist(from_file=..., persist=True)` only. No cash_flow_sync
+  or journal writer runs. It shares the sweep's wall-clock budget.
+- **Detection:** the `flex-pull` ok row carries a note: `twr_gap_healed`
+  (replayed), `twr_gap_unhealed` (replay ran, sessions still uncovered, or
+  deferred by budget), `twr_gap_unhealable` (no delivered statement for a
+  session; later sessions are `blocked` and never zero-filled).
+- **Remediation:** `twr_gap_unhealable` needs the missing statement from
+  IBKR; replay it with `build_and_persist(from_file=..., persist=True)`
+  under the flex-pull unit env, then let the next flex-pull finish the tail.
+- **Regression:** `scripts/tests/test_flex_pull_twr_gap_heal.py`.
+- **Code:** `scripts/flex_sftp_pull.py` (`heal_twr_coverage_gaps`,
+  `plan_gap_replay`), `scripts/perf_twr_builder.py`
+  (`load_uncovered_nav_sessions`).
 
 ---
 

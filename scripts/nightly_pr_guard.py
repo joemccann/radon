@@ -93,7 +93,8 @@ def refused_action(args: list[str], loop: str = "") -> str:
     the security loops, any public issue write."""
     prefix = _positional_prefix(args)
     tail = args[args.index("api") + 1:] if "api" in args else []
-    # Any tail token may be the endpoint: a value-taking flag can precede it.
+    # Any tail token may be the endpoint: a value-taking flag (-X PUT, -H ...)
+    # can precede it, and a query or fragment suffix must not hide it.
     if prefix == ["pr", "merge"] or any(re.search(r"(?:^|/)repos/[^/]+/[^/]+/pulls/\d+/merge/?(?:[?#].*)?$", a) for a in tail) \
             or (tail and re.search(r"mergePullRequest|enablePullRequestAutoMerge", " ".join(tail))):
         return "nightly loops never merge; the operator merges"

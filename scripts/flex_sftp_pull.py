@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -25,7 +26,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from lib.flex_classify import FlexClassifyError, classify_flex_xml
+from lib.flex_classify import ACTIVITY, FlexClassifyError, classify_flex_xml
 
 SERVICE = "flex-pull"
 DEFAULT_CONFIG = Path("/var/lib/radon/flex-secrets/ssh_config")
@@ -88,6 +89,10 @@ _TRANSIENT_SFTP_MARKERS = (
 # one in-flight ingest after the budget check between files.
 SWEEP_BUDGET_S = 780
 INGEST_HEADROOM_S = 90
+# How far behind the newest statement a twr_subperiods gap is looked for. IBKR
+# keeps every delivery in `outgoing`, so anything inside this window can be
+# replayed; older gaps predate the sFTP feed and need an operator.
+TWR_GAP_LOOKBACK = timedelta(days=45)
 
 
 class FlexSftpError(RuntimeError):
@@ -364,7 +369,7 @@ def nightly_period_ok(xml_text: str) -> bool:
     return (end - start).days <= MAX_NIGHTLY_SPAN_DAYS
 
 
-def statement_period_end(xml_text: str) -> Optional[date]:
+def _statement_day(xml_text: str, attribute: str) -> Optional[date]:
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError:
@@ -372,7 +377,15 @@ def statement_period_end(xml_text: str) -> Optional[date]:
     statement = root.find(".//FlexStatement")
     if statement is None:
         return None
-    return _flex_day(statement.get("toDate"))
+    return _flex_day(statement.get(attribute))
+
+
+def statement_period_end(xml_text: str) -> Optional[date]:
+    return _statement_day(xml_text, "toDate")
+
+
+def statement_period_start(xml_text: str) -> Optional[date]:
+    return _statement_day(xml_text, "fromDate")
 
 
 def _sessions_between(start: date, end: date) -> int:
@@ -543,6 +556,153 @@ def _default_ingest(xml_text: str, *, source_path: str = "") -> Dict[str, Any]:
         tmp.unlink(missing_ok=True)
 
 
+@dataclass(frozen=True)
+class ActivityStatement:
+    """A delivered activity statement still on local disk, by its period."""
+
+    name: str
+    path: Path
+    period_from: date
+    period_to: date
+
+    def covers(self, day: date) -> bool:
+        return self.period_from <= day <= self.period_to
+
+
+@dataclass(frozen=True)
+class GapReplayPlan:
+    statements: List[ActivityStatement]
+    unhealable: List[str]
+    blocked: List[str]
+
+
+def plan_gap_replay(
+    uncovered: Sequence[str], statements: Sequence[ActivityStatement]
+) -> GapReplayPlan:
+    """Statements to replay, oldest first, for sessions lacking a subperiod.
+
+    The builder extends a statement only when every EARLIER session is covered,
+    so the first session with no delivered statement caps the plan: anything
+    after it would fail the same gate. Such a session is never zero-filled.
+    """
+    ordered = sorted(statements, key=lambda s: (s.period_to, s.name))
+    plan: List[ActivityStatement] = []
+    unhealable: List[str] = []
+    blocked: List[str] = []
+    for session in sorted(set(uncovered)):
+        if unhealable:
+            blocked.append(session)
+            continue
+        day = date.fromisoformat(session)
+        statement = next((s for s in ordered if s.covers(day)), None)
+        if statement is None:
+            unhealable.append(session)
+        elif statement not in plan:
+            plan.append(statement)
+    return GapReplayPlan(plan, unhealable, blocked)
+
+
+def _uncovered_nav_sessions(since: str, through: str) -> Optional[List[str]]:
+    import perf_twr_builder
+
+    return perf_twr_builder.load_uncovered_nav_sessions(since, through)
+
+
+def _replay_twr_statement(xml_text: str) -> None:
+    """Rebuild the TWR from one statement. TWR only: the delivery is already
+    claimed, and cash_flow_sync / journal writers are not idempotent (R-329)."""
+    import perf_twr_builder
+
+    fd, raw_path = tempfile.mkstemp(suffix=".xml")  # 0600 from creation
+    path = Path(raw_path)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(xml_text)
+        perf_twr_builder.build_and_persist(from_file=str(path), persist=True)
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def _replay_sessions(statement: ActivityStatement, uncovered: Sequence[str]) -> List[str]:
+    return [s for s in uncovered if statement.covers(date.fromisoformat(s))]
+
+
+def heal_twr_coverage_gaps(
+    statements: Sequence[ActivityStatement],
+    *,
+    decrypt_fn: Callable[..., str],
+    deadline: float,
+) -> Optional[Dict[str, Any]]:
+    """Replay delivered statements for NAV sessions with no twr_subperiods row.
+
+    A build that failed for any reason writes no subperiods, and every later
+    statement then fails `historical_flow_coverage_unverified` forever; the
+    weekday perf-twr timer chains only through MAX(twr_subperiods), so it
+    cannot heal it (2026-09-18..24, healed by hand). Returns a heartbeat note,
+    or None when there is nothing to report.
+    """
+    if not statements:
+        return None
+    through = max(s.period_to for s in statements)
+    since = (through - TWR_GAP_LOOKBACK).isoformat()
+    uncovered = _uncovered_nav_sessions(since, through.isoformat())
+    if not uncovered:
+        if uncovered is None:
+            print("[flex-pull] twr coverage unknown; gap heal skipped", file=sys.stderr)
+        return None
+    plan = plan_gap_replay(uncovered, statements)
+    outcome: Dict[str, List[str]] = {"replayed": [], "failed": [], "deferred": []}
+    for statement in plan.statements:
+        sessions = _replay_sessions(statement, uncovered)
+        if time.monotonic() >= deadline:
+            outcome["deferred"] += sessions
+            continue
+        try:
+            _replay_twr_statement(decrypt_fn(statement.path.read_bytes()))
+            outcome["replayed"] += sessions
+        except Exception as exc:  # noqa: BLE001 — perf-twr owns the TWR page (REL-220)
+            print(f"[flex-pull] twr replay {statement.name}: {type(exc).__name__}: {exc}", file=sys.stderr)
+            outcome["failed"] += sessions
+    remaining = _uncovered_nav_sessions(since, through.isoformat())
+    return _gap_heal_note(plan, outcome, remaining)
+
+
+def _gap_heal_note(
+    plan: GapReplayPlan,
+    outcome: Dict[str, List[str]],
+    remaining: Optional[List[str]],
+) -> Dict[str, Any]:
+    note: Dict[str, Any] = {**outcome, "unhealable": plan.unhealable, "blocked": plan.blocked,
+                            "still_uncovered": remaining}
+    if plan.unhealable:
+        note["class"] = "twr_gap_unhealable"
+        note["message"] = (
+            "TWR coverage gap has no delivered statement for "
+            + ", ".join(plan.unhealable)
+            + "; later sessions stay unchained until an operator supplies it"
+        )
+    elif remaining or remaining is None:
+        note["class"] = "twr_gap_unhealed"
+        note["message"] = (
+            "TWR coverage gap replay left sessions uncovered: "
+            + (", ".join(remaining) if remaining else "coverage unknown")
+        )
+    else:
+        note["class"] = "twr_gap_healed"
+        note["message"] = "replayed TWR for " + ", ".join(outcome["replayed"])
+    return note
+
+
+def _merge_notes(*notes: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    present = [note for note in notes if note]
+    if len(present) <= 1:
+        return present[0] if present else None
+    merged = dict(present[-1])
+    merged["message"] = "; ".join(note["message"] for note in present)
+    merged["class"] = ",".join(note["class"] for note in present)
+    return merged
+
+
 def first_delivery_date() -> date:
     """Cutover date, overridable so a slip needs no code deploy. R-416."""
     raw = (os.environ.get(FIRST_DELIVERY_ENV) or "").strip()
@@ -665,6 +825,7 @@ def _run(
     ordered = order_for_ingest(names)
     budget_spent = False
     deferred = 0
+    activity_statements: List[ActivityStatement] = []
     for index, name in enumerate(ordered):
         if time.monotonic() >= deadline:
             deferred = len(ordered) - index
@@ -682,7 +843,7 @@ def _run(
             xml_text = decrypt_fn(dest.read_bytes())
             if not nightly_period_ok(xml_text):
                 raise FlexSftpError("period_gate: nightly path rejects 365-day/YTD")
-            classify_flex_xml(xml_text)
+            kind = classify_flex_xml(xml_text)
             # Every classified file counts here, duplicates included: an
             # idempotent re-pull of the CURRENT statement is not a stoppage.
             period_end = statement_period_end(xml_text)
@@ -718,6 +879,11 @@ def _run(
                 ingested += 1
             if period_end is not None:
                 covered_by_key[key] = max(period_end, covered_by_key.get(key, period_end))
+            period_start = statement_period_start(xml_text)
+            if kind == ACTIVITY and period_start is not None and period_end is not None:
+                activity_statements.append(
+                    ActivityStatement(name, dest, period_start, period_end)
+                )
         except Exception as exc:  # noqa: BLE001 — one bad file must not abort the batch
             # Was `(FlexSftpError, FlexClassifyError, OSError)`, which covered
             # neither a `TimeoutExpired` from the decrypt nor anything out of
@@ -730,6 +896,12 @@ def _run(
             failed_keys.add(_delivery_key(name))
             continue
 
+    gap_note = None
+    if not budget_spent:
+        # Before retention prunes the inbox: the replay reads these files.
+        gap_note = heal_twr_coverage_gaps(
+            activity_statements, decrypt_fn=decrypt_fn, deadline=deadline
+        )
     retain_newest_gpg(inbox)
     if failed:
         _heartbeat("error", "one or more files rejected: " + ", ".join(sorted(failed_keys)))
@@ -766,7 +938,7 @@ def _run(
             "message": f"transient sftp get failed for {transient_gets} file(s)",
             "class": "sftp_transient",
         }
-    _heartbeat("ok", note)
+    _heartbeat("ok", _merge_notes(note, gap_note))
     return 0
 
 

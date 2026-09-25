@@ -48,6 +48,33 @@ class TestTheWire:
         )
         assert "--skip-git-repo-check" in first, first
 
+    def test_codex_runs_commands_in_a_non_login_shell(self, tmp_path, loop):
+        """The wrapper puts $VENV/bin first on PATH; a login shell undoes it.
+
+        2026-09-25 testing audit: codex ran every command as `/bin/zsh -lc`,
+        which re-sourced the operator profile and put /opt/homebrew/bin ahead
+        of the venv, so `python3.13` was Homebrew's and `import pytest_asyncio`
+        failed although venv-testing has pytest-asyncio 1.3.0. With
+        allow_login_shell=false the same command resolved the venv and passed.
+        """
+        first = _argv(tmp_path, loop)[0]
+        assert "allow_login_shell=false" in first, first
+
+    def test_codex_can_rewrite_rendered_skills_but_not_codex_config(self, tmp_path, loop):
+        """Checkout must be able to update the tracked .codex/skills renders.
+
+        2026-09-25 testing audit: the wrapper pinned HEAD to the last green
+        commit, the agent switched to origin/main, and the workspace-write
+        seatbelt refused `unable to unlink old '.codex/skills/*/SKILL.md'`,
+        leaving a half-applied checkout that blocked every later switch. The
+        grant is the tracked skills directory only: `.codex/config.toml` and
+        the rest of `.codex/` stay read-only to the agent.
+        """
+        first = _argv(tmp_path, loop)[0]
+        roots = first[first.index("writable_roots=") : first.index("]", first.index("writable_roots=")) + 1]
+        assert re.search(r'"[^"]*/\.codex/skills"', roots), roots
+        assert not re.search(r'"[^"]*/\.codex/?"', roots), roots
+
     def test_codex_never_receives_a_slash_command(self, tmp_path, loop):
         argv = _argv(tmp_path, loop)
         assert not re.search(r"/\w+-\w+ (audit|remediate|deliver)", argv[0]), (

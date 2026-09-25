@@ -380,7 +380,11 @@ resolve_provenance_anchor() {
   command -v timeout >/dev/null 2>&1 && bound=(timeout 30s)
   # Protocol v1: an unauthenticated v2 ls-refs POST against the public repo
   # answers 401 from the VPS (deploy-root-helper.sh, 2026-09-02).
-  if ! out="$(${bound[@]+"${bound[@]}"} git -c protocol.version=1 \
+  # Root runs this from inside the radon-owned checkout: read from / with no
+  # system or global config so no repository config can redirect the URL.
+  if ! out="$(GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+      GIT_TERMINAL_PROMPT=0 GIT_CEILING_DIRECTORIES=/ \
+      ${bound[@]+"${bound[@]}"} git -C / -c protocol.version=1 \
       ls-remote --refs "$PROVENANCE_REMOTE_URL" refs/heads/main 2>/dev/null)"; then
     log_error "Provenance failed: could not read main from ${PROVENANCE_REMOTE_URL}"
     return 1
