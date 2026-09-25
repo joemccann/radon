@@ -55,6 +55,7 @@ DISTILL_WORKERS = 8
 # 6s later).
 _SOURCE_ATTEMPTS = 4
 _SOURCE_RETRY_BACKOFF_SECS = 1.0
+_WRITE_ATTEMPTS = 4
 _TRANSIENT_DB_MARKERS = (
     "sqlite_busy",
     "database is locked",
@@ -147,12 +148,24 @@ def ingest_source(
             distill_failed += batch_failed
         if embed_enabled:
             embedded += _embed_docs(batch, embedder)
-        for key, value in upsert_documents(fresh_db(), batch).items():
+        persisted = _persist_prepared(
+            fresh_db, lambda connection: upsert_documents(connection, batch),
+            source=source,
+        )
+        for key, value in persisted.items():
             counts[key] = counts.get(key, 0) + value
+        print(
+            f"[{SERVICE_NAME}] {source}: committed {len(batch)} prepared chunks",
+            file=sys.stderr, flush=True,
+        )
 
     deleted = 0
     if limit is None:
-        deleted = delete_source_docs(fresh_db(), source, _vanished_keys(module, docs, existing))
+        vanished = _vanished_keys(module, docs, existing)
+        deleted = _persist_prepared(
+            fresh_db, lambda connection: delete_source_docs(connection, source, vanished),
+            source=source,
+        )
 
     result = {
         "source": source,
@@ -319,8 +332,36 @@ def _embed_docs(docs: list[KnowledgeDoc], embedder) -> int:
 # ── CLI ──────────────────────────────────────────────────────────────
 
 
+class _PersistenceExhausted(RuntimeError):
+    """The prepared write used its retry budget; never replay enrichment."""
+
+
+def _persist_prepared(db_factory, operation, *, source):
+    # Distillation and embeddings stay outside this loop. A fresh connection
+    # retries only the rolled-back atomic write, not minutes of optional LLM
+    # work. Exhaustion is terminal for this source even when its cause is busy.
+    for attempt in range(1, _WRITE_ATTEMPTS + 1):
+        try:
+            return operation(db_factory())
+        except Exception as exc:
+            if not _is_transient_db_error(exc):
+                raise
+            if attempt == _WRITE_ATTEMPTS:
+                raise _PersistenceExhausted(
+                    f"{source}: prepared write failed after {attempt} attempts: {exc}"
+                ) from exc
+            print(
+                f"[{SERVICE_NAME}] {source}: transient prepared-write error "
+                f"(attempt {attempt}/{_WRITE_ATTEMPTS}): {exc}; retrying persistence",
+                file=sys.stderr, flush=True,
+            )
+            time.sleep(_SOURCE_RETRY_BACKOFF_SECS)
+
+
 def _is_transient_db_error(exc: BaseException) -> bool:
-    """True for Turso lock/stream blips worth retry; SQL/schema stay fatal."""
+    """True for retryable reads/writes, excluding an exhausted write budget."""
+    if isinstance(exc, _PersistenceExhausted):
+        return False
     message = str(exc).lower()
     return any(marker in message for marker in _TRANSIENT_DB_MARKERS)
 

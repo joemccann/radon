@@ -72,7 +72,9 @@ def upsert_documents(db, docs: Iterable[KnowledgeDoc]) -> dict[str, int]:
     counts = {"inserted": 0, "updated": 0, "skipped": 0}
     last_chunk_ix: dict[tuple[str, str], int] = {}
     try:
-        db.execute("BEGIN")
+        # Reserve the writer before reading: a deferred transaction's read
+        # snapshot cannot be upgraded after a concurrent writer commits.
+        db.execute("BEGIN IMMEDIATE")
         for doc in docs:
             doc_id = (doc.source, doc.doc_key)
             last_chunk_ix[doc_id] = max(last_chunk_ix.get(doc_id, -1), doc.chunk_ix)
@@ -95,7 +97,12 @@ def upsert_documents(db, docs: Iterable[KnowledgeDoc]) -> dict[str, int]:
         counts["pruned"] = _prune_trailing_chunks(db, last_chunk_ix)
         db.commit()
     except BaseException:
-        db.rollback()
+        # BEGIN can fail before a transaction exists, or a dead stream can
+        # reject rollback too. Preserve the write failure for retry policy.
+        try:
+            db.rollback()
+        except Exception:
+            pass
         raise
     return counts
 
@@ -109,7 +116,9 @@ def delete_source_docs(db, source: str, missing_doc_keys: Iterable[str]) -> int:
         return 0
     key_marks = ", ".join("?" for _ in doc_keys)
     try:
-        db.execute("BEGIN")
+        # Reserve the writer before reading: a deferred transaction's read
+        # snapshot cannot be upgraded after a concurrent writer commits.
+        db.execute("BEGIN IMMEDIATE")
         id_rows = db.execute(
             f"SELECT id FROM knowledge WHERE source = ? AND doc_key IN ({key_marks})",
             (source, *doc_keys),
@@ -121,7 +130,12 @@ def delete_source_docs(db, source: str, missing_doc_keys: Iterable[str]) -> int:
             db.execute(f"DELETE FROM knowledge WHERE id IN ({id_marks})", tuple(ids))
         db.commit()
     except BaseException:
-        db.rollback()
+        # BEGIN can fail before a transaction exists, or a dead stream can
+        # reject rollback too. Preserve the write failure for retry policy.
+        try:
+            db.rollback()
+        except Exception:
+            pass
         raise
     return len(ids)
 

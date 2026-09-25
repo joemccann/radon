@@ -8372,6 +8372,37 @@ Review: pending; no live broker calls, browser launches, or runner-lock operatio
 ## Review
 - REL-284 source fix is narrow and red/green evidence is recorded in RELIABILITY_LOG.md. Full-gate and Playwright acceptance are blocked by missing installed dependencies and host process/browser permissions; no overall green is claimed.
 
+# Task: Durable Flex Trade_History coverage (2026-09-25)
+- [ ] T1 depends_on: [] Diagnose persisted delivery rejection using read-only production evidence.
+- [ ] T2 depends_on: [T1] Add regression and minimal repair preserving missing-row integrity gates.
+- [ ] T3 depends_on: [T2] Publish PR, verify every exact-head GitHub check, notify green.
+Dependency graph: T1 -> T2 -> T3.
+Review: no local suites; no speculative trade replay or journal writes.
+
+## Flex review update
+- T1 complete: eight rejected saved statements independently satisfy deployed read-only coverage; 2798 persisted journal rows, zero imports/drops/disagreements per statement.
+- T2 complete through existing PR #698 (f3dd7921), merged 15:26 UTC and deployed 15:30 UTC after both morning failures; no duplicate source patch warranted.
+- T3 not applicable: no substantive new diff or PR. Existing exact-head #698 GitHub checks complete green (applicable Python, Vitest, coverage, browser, images, security); parent owns post-deploy normal Flex retry.
+
+# Task: Knowledge and Liquid Compute operational recovery (2026-09-25)
+- [x] T1 depends_on: [] Inspect units, logs, deployed fix provenance, and runtime prerequisites without writes.
+- [ ] T2 depends_on: [T1] Coordinate post-deploy activation/retry with root agent and observe actual completion.
+- [ ] T3 depends_on: [T2] Record health evidence; add minimal source/regression repair only for a reproduced residual defect.
+Dependency graph: T1 -> T2 -> T3.
+Review: Liquid Compute 180s timeout predates deployed PR #693, which removes the expensive shared snapshot rebuild. Knowledge canonical hourly timer was disabled; setup already enables it, content-only deploy sync intentionally preserves activation state. Embedding, database, HTTP, dotenv packages and persistent model cache exist; required credential keys are present. No local suites or live starts.
+
+# Task: Knowledge prepared-batch persistence recovery
+- [x] T1 depends_on: [] Identify live SQLITE_BUSY after expensive enrichment and source-wide replay.
+- [x] T2 depends_on: [T1] Add regressions for prepared-batch retries, bounded exhaustion without source replay/pruning, and competing-writer lock exclusion.
+- [ ] T3 depends_on: [T2] Verify red on GitHub, implement bounded batch retries and early write lock, then exact-head green.
+- [ ] T4 depends_on: [T3] Notify and coordinate deployment/live catch-up with root agent.
+Dependency graph: T1 -> T2 -> T3 -> T4.
+Review: local suites prohibited; no live trade/journal changes. Preserve atomic corpus/FTS writes, complete-document batches, authoritative pruning, and real failure heartbeat.
+
+Review update: PR #710 red head `9ad53d8c`, GitHub run `36177477069`, scripts-jm: 4 new regressions failed, 1349 passed, 7 skipped. Failures prove immediate busy propagation, four complete enrichment passes after exhaustion, and competing writers acquiring both deferred transactions. Implemented prepared persistence retries with fresh handles, terminal exhaustion, rollback-error preservation, BEGIN IMMEDIATE, committed-batch progress, and 16-document embedding inference. Added prior-commit preservation, prune retry, schema-error no-retry, and 201-vector ordered-coverage cases. Independent review caught rollback cleanup masking the busy cause; strengthened real-store regression accordingly. No local suites.
+
+Review update: GitHub head `6609314e` scripts-jm green: 1357 passed, 7 skipped. Main integration preserves all task sections; exact merged-head checks pending. Liquid Compute fresh health 18:56:11 UTC; parent verified Flex fresh health 18:57:04 UTC. Knowledge timer remains enabled but paused after committed id 10622 checkpoint and 4.3 GiB peak, pending bounded-memory deployment.
+
 # Task: Durable config-drift writer recovery (2026-09-25)
 
 ## Dependency graph

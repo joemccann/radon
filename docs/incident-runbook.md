@@ -1040,6 +1040,22 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   retried newsfeed once; both attempts SQLITE_BUSY; incidents in the
   same run succeeded 6s later; Turso canary `SELECT 1` ~961 ms. Budget
   raised to 4. Persistent busy after the budget still fails the unit.
+- **2026-09-25 catch-up:** after restoring the disabled hourly timer,
+  a busy journal write replayed minutes of optional enrichment and a
+  200-chunk embedding call peaked at 4.3 GiB. Persistence now retries the
+  prepared batch on at most four fresh connections, without re-distilling
+  or re-embedding. An exhausted write fails that source without another
+  source-wide retry; committed earlier batches remain durable. Upsert and
+  prune acquire `BEGIN IMMEDIATE` before reading, avoiding deferred read
+  snapshot upgrades under concurrent writers. Embedding inference uses
+  batches of 16 instead of fastembed's default 256, preserving every row.
+  The `committed N prepared chunks` stderr line is a durable checkpoint;
+  an interrupted run is not a successful heartbeat. Do not widen the
+  systemd deadline or fabricate health. After deploy, restore the normal
+  timer and verify a complete ingest plus its actual health timestamp.
+- **Additional regressions:** `TestPreparedBatchRetry`,
+  `test_write_lock_precedes_read_snapshot`, and
+  `test_large_corpus_uses_bounded_inference_batches_without_dropping_rows`.
 - **Regression:** `test_knowledge_pipeline.py::TestTransientDbRetry`
   (`test_source_retries_once_on_sqlite_busy`,
   `test_two_consecutive_sqlite_busy_then_success_exits_zero`,
