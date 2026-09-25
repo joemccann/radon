@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -164,6 +165,23 @@ class TestSignalledRunReportsItsDeath:
     def test_a_sigterm_mid_phase_posts_a_comment_and_pages(self, name, tmp_path):
         repo = _runner_clone(tmp_path, name)
         started = tmp_path / "claude-started"
+        waiting = tmp_path / "wrapper-waiting"
+        # The agent can start before its parent has finished launch_round and
+        # _record_round (including sampler setup). This test targets a signal
+        # DURING the phase, not an arbitrary point in that startup sequence.
+        # Mark the parent's wait boundary in the isolated copy, without sleeps
+        # or changing the production wrapper's signal handling.
+        wrapper = _cloned_wrapper(repo, name)
+        source = wrapper.read_text(encoding="utf-8")
+        wait_line = '    wait "$ROUND_PID"\n'
+        assert source.count(wait_line) == 1
+        wrapper.write_text(
+            source.replace(
+                wait_line,
+                f"    printf 'ready\\n' > {shlex.quote(str(waiting))}\n" + wait_line,
+            ),
+            encoding="utf-8",
+        )
         bin_dir, gh_log, py_log = _stub_bin(
             tmp_path,
             claude_body=f"#!/bin/sh\ntouch {started}\nsleep 60\n",
@@ -181,25 +199,37 @@ class TestSignalledRunReportsItsDeath:
             text=True,
         )
         deadline = time.monotonic() + 60
-        while not started.exists() and time.monotonic() < deadline:
+        while not (started.exists() and waiting.exists()) and time.monotonic() < deadline:
             if proc.poll() is not None:
                 break
             time.sleep(0.2)
-        assert started.exists(), (proc.poll(), proc.communicate(timeout=10))
+        if not (started.exists() and waiting.exists()):
+            proc.kill()
+            stdout, stderr = proc.communicate(timeout=10)
+            pytest.fail(
+                f"wrapper never reached its phase wait: rc={proc.returncode}; "
+                f"started={started.exists()}, waiting={waiting.exists()}\n"
+                f"stdout={stdout}\nstderr={stderr}"
+            )
 
         proc.send_signal(signal.SIGTERM)
         try:
-            proc.communicate(timeout=60)
+            stdout, stderr = proc.communicate(timeout=60)
         except subprocess.TimeoutExpired:
             proc.kill()
-            pytest.fail("the wrapper did not exit within 60s of SIGTERM")
+            stdout, stderr = proc.communicate(timeout=10)
+            pytest.fail(
+                "the wrapper did not exit within 60s of SIGTERM\n"
+                f"stdout={stdout}\nstderr={stderr}"
+            )
 
         calls = gh_log.read_text(encoding="utf-8") if gh_log.exists() else ""
-        assert "issue comment" in calls, f"no dead-man comment on SIGTERM: {calls!r}"
+        diagnostics = f"rc={proc.returncode}\nstdout={stdout}\nstderr={stderr}"
+        assert "issue comment" in calls, f"no dead-man comment on SIGTERM: {calls!r}\n{diagnostics}"
         assert "KILLED" in calls, calls
         pages = py_log.read_text(encoding="utf-8") if py_log.exists() else ""
-        assert "pushover.net" in pages, f"no Pushover on SIGTERM: {pages!r}"
-        assert proc.returncode == 143, proc.returncode
+        assert "pushover.net" in pages, f"no Pushover on SIGTERM: {pages!r}\n{diagnostics}"
+        assert proc.returncode == 143, diagnostics
         assert not (repo / ".weekend-runner.lock").exists(), "the lock was not released"
 
 
