@@ -30,12 +30,29 @@ function demoExtract(u: DemoUserWithUsage, key: DemoSortKey): string | number | 
 type DemoUserWithUsage = DemoUserRow & { aiUsage: Record<string, number> };
 
 /**
+ * demo.radon.run sets NEXT_PUBLIC_RADON_DEMO at build time. Next inlines that
+ * access, so the operator bundle never reads a process global. The isolated
+ * admin bundle has no process global and must stay off this panel instead of
+ * throwing.
+ */
+function isDemoDeployment(): boolean {
+  try {
+    return process.env.NEXT_PUBLIC_RADON_DEMO === "1";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Operator panel for demo.radon.run trials (Phase 6). Self-fetching: hits the
- * operator-gated /api/admin/demo-users. On a non-demo deployment that route
- * 403s (no ALLOWED_USER_IDS match) or the demo DB is absent — the panel then
- * renders nothing rather than cluttering the prod operator view.
+ * demo-admin-gated /api/admin/demo-users. Absent on the operator deployment.
  */
 export default function DemoUsersTable() {
+  if (!isDemoDeployment()) return null;
+  return <DemoUsersPanel />;
+}
+
+function DemoUsersPanel() {
   const [users, setUsers] = useState<DemoUserWithUsage[] | null>(null);
   const [available, setAvailable] = useState(true);
   const [loading, setLoading] = useState(true);

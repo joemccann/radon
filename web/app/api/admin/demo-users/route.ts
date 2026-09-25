@@ -25,11 +25,18 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // This deployment has no demo backend (the prod app, not demo.radon.run) when
-// TURSO_DEMO_DB_URL is unset. Return a clean 404 rather than letting getDemoDb
-// throw a 500 — the operator panel's DemoUsersTable treats any non-200 as
-// "no demo backend" and renders nothing.
+// TURSO_DEMO_DB_URL is unset. Return 404 before the admin gate: that gate
+// default-denies when DEMO_ADMIN_USER_IDS is unset, and a 403 is the wrong
+// answer for a backend that is not installed. getDemoDb throws if called.
 function demoConfigured(): boolean {
   return Boolean(process.env.TURSO_DEMO_DB_URL);
+}
+
+function demoUnavailable(requestId: string): Response {
+  return setNoStoreResponseHeaders(
+    NextResponse.json({ error: "Demo backend not configured.", requestId }, { status: 404 }),
+    requestId,
+  );
 }
 
 async function setClerkMetadata(
@@ -54,16 +61,11 @@ export const radonCapability = { GET: "admin", POST: "admin" };
 
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
+  if (!demoConfigured()) return demoUnavailable(requestId);
   const admin = await requireDemoAdmin();
   if (!admin) {
     return setNoStoreResponseHeaders(
       NextResponse.json({ error: "Forbidden", requestId }, { status: 403 }),
-      requestId,
-    );
-  }
-  if (!demoConfigured()) {
-    return setNoStoreResponseHeaders(
-      NextResponse.json({ error: "Demo backend not configured.", requestId }, { status: 404 }),
       requestId,
     );
   }
@@ -82,9 +84,9 @@ export async function POST(request: Request): Promise<Response> {
       requestId,
     );
 
+  if (!demoConfigured()) return demoUnavailable(requestId);
   const admin = await requireDemoAdmin();
   if (!admin) return reject("Forbidden", 403);
-  if (!demoConfigured()) return reject("Demo backend not configured.", 404);
 
   let body: { action?: string; userId?: string; tradingDays?: number };
   try {
