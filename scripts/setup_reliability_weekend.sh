@@ -212,12 +212,43 @@ provision_env_file() {
   install -m 600 "$src" "$dst"
   echo "  provisioned $rel from $SRC_REPO (0600)"
 }
+# Least privilege: the operator's web/.env carries the production read-write
+# TURSO_AUTH_TOKEN and production UW_TOKEN. This clone gets the values in
+# SCOPED_ENV, or neither key when that file or a key is absent. Never echo a value.
+SCOPED_ENV="$WEEKEND_ROOT/.env.reliability-scoped"
+SCOPED_KEYS="TURSO_AUTH_TOKEN UW_TOKEN"
+scope_clone_credentials() {
+  local dst="$WEEKEND_REPO/web/.env" key line val tmp
+  [[ -f "$dst" ]] || return 0
+  tmp="$(umask 077; mktemp "$WEEKEND_REPO/web/.env.scoped.XXXXXX")" || return 1
+  grep -vE "^[[:space:]]*(export[[:space:]]+)?(${SCOPED_KEYS// /|})[[:space:]]*=" "$dst" > "$tmp" || true
+  for key in $SCOPED_KEYS; do
+    line=""
+    if [[ -f "$SCOPED_ENV" ]]; then
+      line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" "$SCOPED_ENV" | tail -n 1 || true)"
+    fi
+    val="${line#*=}"
+    val="${val//[[:space:]\"\']/}"
+    if [[ -n "$line" && -n "$val" ]]; then
+      printf '%s\n' "$line" >> "$tmp"
+      echo "  scoped $key in web/.env from $SCOPED_ENV"
+    else
+      echo "  MISSING  scoped $key in $SCOPED_ENV (removed from the clone's web/.env)"
+    fi
+  done
+  chmod 600 "$tmp"
+  mv -f -- "$tmp" "$dst"
+}
 if [[ "$SRC_REPO" == "$WEEKEND_REPO" ]]; then
   echo "  MISSING  env provisioning: run setup from your own checkout, not the runner clone"
 else
+  for env_rel in web web/.env; do
+    refuse_symlink "$WEEKEND_REPO/$env_rel" || exit 1
+  done
   for env_rel in web/.env; do
     provision_env_file "$env_rel"
   done
+  scope_clone_credentials
 fi
 
 if [[ ! -f "$WEEKEND_ENV" ]]; then
