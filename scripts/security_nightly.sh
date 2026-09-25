@@ -425,6 +425,23 @@ align_agent_gitdir() {
   if [[ "$origin" =~ ^[0-9a-f]{40}$ ]]; then
     printf '%s\n' "$origin" | _agent_git_write "$AGENT_GITDIR/refs/remotes/origin/main" || return 1
   fi
+  # A dated branch with no commits past main is moved to main; otherwise the
+  # next round resumes it and tests a stale tree (2026-09-24: e69de638 re-ran
+  # nine baseline failures #674 had already fixed). Only a strict ancestor
+  # moves, so no commit is dropped. Host git reads only its own objects: an
+  # agent-only commit is never an ancestor and is left alone.
+  local dir ref sha
+  dir="$AGENT_GITDIR/refs/heads/${PR_BRANCH_PREFIX:-}"
+  if [[ -n "${PR_BRANCH_PREFIX:-}" && -d "${dir%/}" && ! -L "${dir%/}" ]]; then
+    for ref in "$dir"*; do
+      [[ -f "$ref" && ! -L "$ref" ]] || continue
+      sha=""
+      IFS= read -r sha < "$ref" || true
+      [[ "$sha" =~ ^[0-9a-f]{40}$ && "$sha" != "$head" ]] || continue
+      git --git-dir="$HOST_GITDIR" merge-base --is-ancestor "$sha" "$head" 2>/dev/null || continue
+      printf '%s\n' "$head" | _agent_git_write "$ref" || return 1
+    done
+  fi
   printf 'ref: refs/heads/main\n' | _agent_git_write "$AGENT_GITDIR/HEAD" || return 1
   if [[ -f "$HOST_GITDIR/index" ]]; then
     _agent_git_write "$AGENT_GITDIR/index" < "$HOST_GITDIR/index" || return 1
