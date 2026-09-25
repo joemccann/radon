@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -444,3 +445,113 @@ class TestMigrateEntrypointArgv:
             f"entrypoint dropped the flag and connected to {url!r}"
         )
         assert "target=demo" in result.stdout
+
+
+class TestBootSurvivesDatabaseBrownout:
+    """2026-09-25 P1: a Turso brownout hung migrate.py inside the radon-api
+    container for 156s. It ran unbounded ahead of uvicorn, so the deploy's
+    restart could not bind :8321, the post-deploy gate AND the rollback gate
+    both failed, and production was down until Turso answered. Boot must
+    never wait on the database longer than a fixed deadline."""
+
+    def test_hung_database_is_abandoned_at_the_deadline(self, migrate_module):
+        started = time.monotonic()
+        finished = migrate_module.finished_within_deadline(
+            [sys.executable, "-c", "import time; time.sleep(30)"], deadline_seconds=0.5
+        )
+        assert finished is False
+        assert time.monotonic() - started < 5
+
+    def test_transport_failure_counts_as_unreachable(self, migrate_module):
+        command = [sys.executable, "-c", "raise SystemExit(75)"]
+        assert migrate_module.finished_within_deadline(command, deadline_seconds=10) is False
+
+    def test_migration_failure_still_fails_boot(self, migrate_module):
+        command = [sys.executable, "-c", "raise SystemExit(1)"]
+        with pytest.raises(SystemExit) as exited:
+            migrate_module.finished_within_deadline(command, deadline_seconds=10)
+        assert exited.value.code == 1
+
+    def test_completed_work_reports_finished(self, migrate_module):
+        command = [sys.executable, "-c", "pass"]
+        assert migrate_module.finished_within_deadline(command, deadline_seconds=10) is True
+
+    def test_unreachable_database_exits_tempfail(self, migrate_module):
+        def unreachable():
+            raise ValueError("Hrana: stream error: timed out")
+
+        with pytest.raises(SystemExit) as exited:
+            migrate_module._unless_unreachable(unreachable)
+        assert exited.value.code == migrate_module.EXIT_DATABASE_UNREACHABLE
+
+    def test_sql_error_is_not_masked_as_unreachable(self, migrate_module):
+        def broken_migration():
+            raise ValueError('near "CRAETE": syntax error')
+
+        with pytest.raises(ValueError, match="syntax error"):
+            migrate_module._unless_unreachable(broken_migration)
+
+    def test_schema_is_current_once_recorded_at_the_newest_migration(
+        self, migrate_module, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(migrate_module, "SCHEMA_MARKER_DIR", tmp_path)
+        assert migrate_module.is_schema_known_current("prod") is False
+        migrate_module.record_current_schema("prod")
+        assert migrate_module.is_schema_known_current("prod") is True
+        assert migrate_module.is_schema_known_current("demo") is False
+
+    def test_a_newer_release_migration_makes_the_schema_unverified(
+        self, migrate_module, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(migrate_module, "SCHEMA_MARKER_DIR", tmp_path)
+        newest = migrate_module._newest_migration_version()
+        (tmp_path / "schema_version.prod").write_text(f"{newest - 1}\n")
+        assert migrate_module.is_schema_known_current("prod") is False
+
+    def test_boot_deadline_fits_inside_the_deploy_gate(self, migrate_module):
+        # deploy.sh gives /health/lite 6 x (5s curl + 5s wait) after restart.
+        assert migrate_module.BOOT_DEADLINE_SECONDS <= 20
+
+
+def _run_migrate_against_blackhole(marker_dir: Path, *flags: str) -> subprocess.CompletedProcess:
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    env = {
+        **os.environ,
+        # TEST-NET-1 (RFC 5737): never routable, so the connect hangs exactly
+        # like the 2026-09-25 brownout instead of failing fast.
+        "TURSO_DB_URL": "http://192.0.2.1:8080",
+        "TURSO_AUTH_TOKEN": "unused",
+        "RADON_MIGRATE_BOOT_DEADLINE": "1",
+        "RADON_SCHEMA_MARKER_DIR": str(marker_dir),
+    }
+    return subprocess.run(
+        [sys.executable, str(repo_root / "scripts" / "db" / "migrate.py"), *flags],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+
+class TestMigrateEntrypointUnderBrownout:
+    @pytest.fixture(autouse=True)
+    def _needs_libsql(self):
+        pytest.importorskip("libsql_experimental")
+
+    def test_known_current_schema_boots_through_the_brownout(self, tmp_path):
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        newest = max(
+            int(path.name.split("_", 1)[0])
+            for path in (repo_root / "scripts" / "db" / "migrations").glob("[0-9]*_*.sql")
+        )
+        (tmp_path / "schema_version.prod").write_text(f"{newest}\n")
+        started = time.monotonic()
+        result = _run_migrate_against_blackhole(tmp_path, "--boot")
+        assert result.returncode == 0, result.stderr
+        assert "booting without the check" in result.stderr
+        assert time.monotonic() - started < 10
+
+    def test_unverified_schema_still_fails_closed(self, tmp_path):
+        result = _run_migrate_against_blackhole(tmp_path, "--boot")
+        assert result.returncode == 75, result.stderr
+        assert "refusing to boot" in result.stderr

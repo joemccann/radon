@@ -1562,3 +1562,11 @@ def test_run_newsfeed_does_not_mount_robinhood_token_dir(tmp_path: Path) -> None
     assert result.returncode == 0, result.stderr
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
     assert "rh-mcp" not in log
+
+
+def test_api_boot_bounds_the_schema_migration() -> None:
+    # 2026-09-25: an unbounded migrate.py held :8321 closed for 156s during a
+    # Turso brownout, failing the deploy and rollback gates.
+    text = RUNTIME.read_text(encoding="utf-8")
+    api_command = text.split("radon-api.service)", 1)[1].split(";;", 1)[0]
+    assert "python scripts/db/migrate.py --boot &&" in api_command

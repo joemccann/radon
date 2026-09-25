@@ -1187,7 +1187,7 @@ def test_api_migration_transport_stall_is_bounded_without_masking_errors(service
     command = next(line for line in service.splitlines() if line.startswith("ExecStartPre="))
     assert "/usr/bin/timeout 30" in command
     assert '"$rc" -eq 124' not in command
-    assert "migrate.py" in command
+    assert "migrate.py --boot" in command
 
 
 class TestBpiScanBudget:
