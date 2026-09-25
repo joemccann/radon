@@ -15,7 +15,9 @@ has none gets an embedding-only backfill (recovery from FTS-only degraded
 ingests), still without an activity bump or FTS churn.
 
 Callers pass the connection explicitly (bounded transactional Hrana HTTP in
-the ingest CLI, a local libsql :memory: DB in tests).
+the ingest CLI, a local libsql :memory: DB in tests). HTTP connections queue
+SQL predicates and cleanup in a single atomic request. The HTTP path also
+repairs a missing FTS mirror without changing a hash-identical canonical row.
 """
 from __future__ import annotations
 
@@ -69,6 +71,8 @@ def upsert_documents(db, docs: Iterable[KnowledgeDoc]) -> dict[str, int]:
     a document together, so chunks stored beyond the highest emitted chunk_ix
     are superseded and pruned. Returns
     {"inserted": n, "updated": n, "skipped": n, "pruned": n}."""
+    if hasattr(db, "execute_transaction"):
+        return _upsert_documents_http(db, list(docs))
     counts = {"inserted": 0, "updated": 0, "skipped": 0}
     last_chunk_ix: dict[tuple[str, str], int] = {}
     try:
@@ -114,6 +118,8 @@ def delete_source_docs(db, source: str, missing_doc_keys: Iterable[str]) -> int:
     doc_keys = list(missing_doc_keys)
     if not doc_keys:
         return 0
+    if hasattr(db, "execute_transaction"):
+        return _delete_source_docs_http(db, source, doc_keys)
     key_marks = ", ".join("?" for _ in doc_keys)
     try:
         # Reserve the writer before reading: a deferred transaction's read
@@ -196,3 +202,102 @@ def _refresh_fts_row(db, row_id: int, doc: KnowledgeDoc) -> None:
 
 def _metadata_json(doc: KnowledgeDoc) -> str | None:
     return json.dumps(doc.metadata) if doc.metadata is not None else None
+
+
+# HTTP writes are an entire server-side transaction, never a rotating-baton
+# conversation. Initial SELECT receipts drive accounting only; every mutation
+# uses SQL predicates so all work and cleanup can be queued in one request.
+def _upsert_documents_http(db, docs: list[KnowledgeDoc]) -> dict[str, int]:
+    counts = {"inserted": 0, "updated": 0, "skipped": 0, "pruned": 0}
+    groups: dict[tuple[str, str], list[KnowledgeDoc]] = {}
+    for doc in docs:
+        groups.setdefault((doc.source, doc.doc_key), []).append(doc)
+    if not groups:
+        return counts
+    statements, snapshots = [], []
+    for key, chunks in groups.items():
+        snapshots.append((len(statements), chunks))
+        statements.append((
+            "SELECT id, chunk_ix, content_hash, embedding IS NOT NULL FROM knowledge "
+            "WHERE source = ? AND doc_key = ?", key,
+        ))
+        for doc in chunks:
+            identity = (doc.source, doc.doc_key, doc.chunk_ix)
+            digest = doc.content_hash()
+            statements.append((
+                "DELETE FROM knowledge_fts WHERE rowid IN (SELECT id FROM knowledge "
+                "WHERE source = ? AND doc_key = ? AND chunk_ix = ? AND content_hash != ?)",
+                identity + (digest,),
+            ))
+            now = _now_iso()
+            args = (doc.source, doc.scope, doc.doc_key, doc.chunk_ix, doc.title,
+                    doc.summary, doc.content, _metadata_json(doc))
+            tail = (digest, doc.created_at or now, doc.last_activity_at or now)
+            if doc.embedding is None:
+                insert, args = _INSERT_NO_EMBEDDING_SQL, args + tail
+            else:
+                insert = _INSERT_WITH_EMBEDDING_SQL
+                args += (json.dumps(doc.embedding),) + tail
+            # Preserve id and created_at; changed content clears a stale vector
+            # when the incoming document has no embedding.
+            statements.append((insert + " ON CONFLICT(source, doc_key, chunk_ix) DO UPDATE SET "
+                "scope=excluded.scope, title=excluded.title, summary=excluded.summary, "
+                "content=excluded.content, metadata=excluded.metadata, "
+                "embedding=excluded.embedding, content_hash=excluded.content_hash, "
+                "last_activity_at=excluded.last_activity_at "
+                "WHERE knowledge.content_hash != excluded.content_hash", args))
+            if doc.embedding is not None:
+                statements.append((
+                    "UPDATE knowledge SET embedding=vector32(?) WHERE source=? "
+                    "AND doc_key=? AND chunk_ix=? AND content_hash=? AND embedding IS NULL",
+                    (json.dumps(doc.embedding),) + identity + (digest,),
+                ))
+            # Changed mirrors were removed above; unchanged/backfill mirrors
+            # remain untouched. A previously missing mirror is safely repaired.
+            statements.append((
+                "INSERT INTO knowledge_fts(rowid,title,summary,content) "
+                "SELECT id,title,summary,content FROM knowledge WHERE source=? "
+                "AND doc_key=? AND chunk_ix=? AND NOT EXISTS "
+                "(SELECT 1 FROM knowledge_fts WHERE rowid=knowledge.id)", identity,
+            ))
+        max_ix = max(doc.chunk_ix for doc in chunks)
+        predicate = "source=? AND doc_key=? AND chunk_ix>?"
+        args = key + (max_ix,)
+        statements.append((
+            "DELETE FROM knowledge_fts WHERE rowid IN (SELECT id FROM knowledge WHERE "
+            + predicate + ")", args,
+        ))
+        statements.append(("DELETE FROM knowledge WHERE " + predicate, args))
+    receipts = db.execute_transaction(statements)
+    for index, chunks in snapshots:
+        before = {row[1]: (row[2], bool(row[3])) for row in receipts[index].fetchall()}
+        max_ix = max(doc.chunk_ix for doc in chunks)
+        counts["pruned"] += sum(ix > max_ix for ix in before)
+        for doc in chunks:
+            digest = doc.content_hash()
+            old = before.get(doc.chunk_ix)
+            if old is None:
+                counts["inserted"] += 1
+                before[doc.chunk_ix] = (digest, doc.embedding is not None)
+            elif old[0] != digest:
+                counts["updated"] += 1
+                before[doc.chunk_ix] = (digest, doc.embedding is not None)
+            elif not old[1] and doc.embedding is not None:
+                counts["updated"] += 1
+                before[doc.chunk_ix] = (digest, True)
+            else:
+                counts["skipped"] += 1
+    return counts
+
+
+def _delete_source_docs_http(db, source: str, doc_keys: list[str]) -> int:
+    marks = ",".join("?" for _ in doc_keys)
+    predicate = f"source=? AND doc_key IN ({marks})"
+    args = (source, *doc_keys)
+    receipts = db.execute_transaction([
+        ("SELECT id FROM knowledge WHERE " + predicate, args),
+        ("DELETE FROM knowledge_fts WHERE rowid IN (SELECT id FROM knowledge WHERE "
+         + predicate + ")", args),
+        ("DELETE FROM knowledge WHERE " + predicate, args),
+    ])
+    return len(receipts[0].fetchall())
