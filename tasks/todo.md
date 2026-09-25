@@ -8468,7 +8468,7 @@ Review: red head bff0eecd, CI36186210160 reproduced the new regressions. Parent 
 - [ ] T3 depends_on: [T2] Independent review, exact-head CI green, accepted notification and coordinated deployment.
 - [ ] T4 depends_on: [T3] Verify passive writer availability; complete bounded recovery, real healthy timestamp and enabled timer.
 Dependency graph: T1 -> T2 -> T3 -> T4.
-Review: no local suites, timeout inflation, speculative live retries or fabricated health. Preserve first SQL error, document/FTS/prune atomicity and idempotent ambiguous-commit replay.
+Review: tests-first head3c8bb97d, CI36188923632 reproduced the new cleanup regressions; parent and independent reviews approved the implementation and parity coverage. No local suites, timeout inflation, speculative live retries or fabricated health. Preserve first SQL error, document/FTS/prune atomicity and idempotent ambiguous-commit replay.
 
 # Task: Durable config-drift writer recovery (2026-09-25)
 

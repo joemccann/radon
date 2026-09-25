@@ -193,18 +193,11 @@ def test_response_deadline_rejects_slow_stream(connection, monkeypatch):
         db.execute('SELECT 1')
 
 
-def test_ambiguous_commit_replays_whole_prepared_batch_idempotently(connection, monkeypatch):
+def test_ambiguous_commit_replays_whole_prepared_batch_idempotently(atomic_server, monkeypatch):
     from knowledge.schema import KnowledgeDoc
     from knowledge.store import upsert_documents
 
-    _, server = connection
-    server.db.executescript('''
-        CREATE TABLE knowledge(id INTEGER PRIMARY KEY, source TEXT, scope TEXT,
-          doc_key TEXT, chunk_ix INTEGER, title TEXT, summary TEXT, content TEXT,
-          metadata TEXT, embedding BLOB, content_hash TEXT, created_at TEXT,
-          last_activity_at TEXT, UNIQUE(source, doc_key, chunk_ix));
-        CREATE VIRTUAL TABLE knowledge_fts USING fts5(title, summary, content);
-    ''')
+    server, _ = atomic_server
     original_open = server.open
     lose_receipt = True
 
@@ -212,7 +205,7 @@ def test_ambiguous_commit_replays_whole_prepared_batch_idempotently(connection, 
         nonlocal lose_receipt
         body = json.loads(request.data)
         response = original_open(request, timeout)
-        if lose_receipt and body['requests'][0].get('stmt', {}).get('sql') == 'COMMIT':
+        if lose_receipt and body['requests'][0]['type'] == 'batch':
             lose_receipt = False
             response.close()
             raise TimeoutError('COMMIT applied but receipt lost')
@@ -371,7 +364,9 @@ def atomic_server(monkeypatch, tmp_path):
 
 def _raw_doc(key='one', **kwargs):
     from knowledge.schema import KnowledgeDoc
-    return KnowledgeDoc(source='docs', scope='ops', doc_key=key, content='durable', **kwargs)
+    values = dict(source='docs', scope='ops', doc_key=key, content='durable')
+    values.update(kwargs)
+    return KnowledgeDoc(**values)
 
 
 def test_lost_store_receipt_cannot_leave_a_reserved_writer(atomic_server, monkeypatch):
@@ -438,3 +433,131 @@ def test_source_prune_is_one_atomic_server_queue(atomic_server):
     assert [item['type'] for item in server.calls[0][1]['requests']] == ['batch', 'close']
     assert server.db.execute('SELECT count(*) FROM knowledge').fetchone() == (0,)
     assert server.db.execute('SELECT count(*) FROM knowledge_fts').fetchone() == (0,)
+
+
+def test_http_store_preserves_skip_backfill_and_changed_row_semantics(atomic_server):
+    from knowledge.store import upsert_documents
+    server, _ = atomic_server
+    created, activity = '2020-01-01T00:00:00Z', '2020-01-02T00:00:00Z'
+    def persist(**kwargs):
+        return upsert_documents(http_db.Connection(), [_raw_doc(**kwargs)])
+    assert persist(created_at=created, last_activity_at=activity)['inserted'] == 1
+    before = server.db.total_changes
+    assert persist(created_at='new', last_activity_at='new')['skipped'] == 1
+    assert server.db.total_changes == before
+    assert persist(embedding=[0.25] * 384, last_activity_at='new')['updated'] == 1
+    # Only the canonical vector changed: no FTS delete/insert or activity bump.
+    assert server.db.total_changes == before + 1
+    assert server.db.execute('SELECT id,created_at,last_activity_at,embedding IS NOT NULL FROM knowledge').fetchone() == (1, created, activity, 1)
+    before = server.db.total_changes
+    assert persist()['skipped'] == 1
+    assert server.db.total_changes == before
+    assert persist(content='replacement', title='changed title', summary='changed summary', metadata={'new': True}, scope='research', last_activity_at='later')['updated'] == 1
+    assert server.db.execute('SELECT id,created_at,last_activity_at,embedding,scope,metadata FROM knowledge').fetchone() == (1, created, 'later', None, 'research', '{"new": true}')
+    assert server.db.execute('SELECT rowid,title,summary,content FROM knowledge_fts').fetchall() == [(1, 'changed title', 'changed summary', 'replacement')]
+
+
+def test_http_store_atomic_chunk_prune_preserves_siblings_and_other_sources(atomic_server):
+    from knowledge.store import delete_source_docs, upsert_documents
+    server, _ = atomic_server
+    doc = lambda ix: _raw_doc(chunk_ix=ix, content=f'part{ix}')
+    upsert_documents(http_db.Connection(), [doc(0), doc(1), doc(2), _raw_doc('sibling'), _raw_doc(source='other')])
+    result = upsert_documents(http_db.Connection(), [doc(0), doc(1)])
+    assert result == {'inserted': 0, 'updated': 0, 'skipped': 2, 'pruned': 1}
+    assert server.db.execute('SELECT source,doc_key,chunk_ix FROM knowledge ORDER BY id').fetchall() == [('docs','one',0), ('docs','one',1), ('docs','sibling',0), ('other','one',0)]
+    assert delete_source_docs(http_db.Connection(), 'docs', ['one']) == 2
+    assert server.db.execute('SELECT source,doc_key FROM knowledge ORDER BY id').fetchall() == [('docs','sibling'), ('other','one')]
+    assert server.db.execute('SELECT rowid FROM knowledge_fts ORDER BY rowid').fetchall() == server.db.execute('SELECT id FROM knowledge ORDER BY id').fetchall()
+
+
+def test_http_store_repairs_missing_mirror_without_mutating_canonical_row(atomic_server):
+    from knowledge.store import upsert_documents
+    server, _ = atomic_server
+    upsert_documents(http_db.Connection(), [_raw_doc()])
+    canonical = server.db.execute('SELECT * FROM knowledge').fetchall()
+    server.db.execute('DELETE FROM knowledge_fts')
+    assert upsert_documents(http_db.Connection(), [_raw_doc()])['skipped'] == 1
+    assert server.db.execute('SELECT * FROM knowledge').fetchall() == canonical
+    assert server.db.execute('SELECT rowid,content FROM knowledge_fts').fetchall() == [(1, 'durable')]
+
+
+def test_large_embedded_authoritative_document_is_one_bounded_atomic_request(atomic_server):
+    from knowledge.store import upsert_documents
+    server, _ = atomic_server
+    docs = [_raw_doc(chunk_ix=i, content='x' * 2000, embedding=[0.1234567890123456] * 384) for i in range(205)]
+    result = upsert_documents(http_db.Connection(), docs)
+    assert result['inserted'] == 205
+    assert len(server.calls) == 1
+    payload = server.calls[0][1]
+    assert len(json.dumps(payload).encode()) <= http_db.MAX_REQUEST_BYTES
+    assert len(payload['requests'][0]['batch']['steps']) <= http_db.MAX_TRANSACTION_STEPS
+    assert server.db.execute('SELECT count(*) FROM knowledge_fts').fetchone() == (205,)
+
+
+def test_failed_begin_preserves_first_error_and_never_runs_writes(atomic_server):
+    from knowledge.store import upsert_documents
+    server, _ = atomic_server
+    server.fail_sql = 'BEGIN IMMEDIATE'
+    with pytest.raises(http_db.HranaHttpError, match='injected middle SQL failure'):
+        upsert_documents(http_db.Connection(), [_raw_doc()])
+    assert server.executed_sql == ['BEGIN IMMEDIATE', 'ROLLBACK']
+    assert server.close_count == 1
+
+
+@pytest.mark.parametrize('corruption', ['missing_results', 'missing_errors', 'unconfirmed_commit', 'unexpected_rollback', 'bad_close', 'bad_step_error', 'wrong_response'])
+def test_atomic_store_rejects_incomplete_success_receipts(atomic_server, monkeypatch, corruption):
+    from knowledge.store import upsert_documents
+    server, _ = atomic_server
+    original_open = server.open
+    def corrupt(request, timeout):
+        response = original_open(request, timeout)
+        body = json.loads(response.getvalue())
+        response.close()
+        result = body['results'][0]['response']['result']
+        if corruption == 'missing_results': result.pop('step_results')
+        elif corruption == 'missing_errors': result['step_errors'].pop()
+        elif corruption == 'unconfirmed_commit': result['step_results'][-2] = None
+        elif corruption == 'unexpected_rollback': result['step_results'][-1] = {'rows': []}
+        elif corruption == 'bad_close': body['results'][-1] = {'type': 'error'}
+        elif corruption == 'bad_step_error': result['step_errors'][0] = 'invalid'
+        elif corruption == 'wrong_response': body['results'][0]['response']['type'] = 'execute'
+        return Response(json.dumps(body).encode())
+    monkeypatch.setattr(server, 'open', corrupt)
+    with pytest.raises(http_db.TransportError):
+        upsert_documents(http_db.Connection(), [_raw_doc()])
+    assert not server.db.in_transaction
+
+
+@pytest.mark.parametrize('bound', ['MAX_TRANSACTION_STEPS', 'MAX_REQUEST_BYTES'])
+def test_oversized_atomic_document_fails_before_network_without_splitting(atomic_server, monkeypatch, bound):
+    from knowledge.store import upsert_documents
+    server, _ = atomic_server
+    monkeypatch.setattr(http_db, bound, 3)
+    with pytest.raises(http_db.HranaHttpError, match='bounded'):
+        upsert_documents(http_db.Connection(), [_raw_doc()])
+    assert server.calls == []
+
+
+def test_atomic_outer_sql_error_preserves_retry_classification(atomic_server, monkeypatch):
+    server, _ = atomic_server
+    body = {'baton': None, 'results': [
+        {'type': 'error', 'error': {'code': 'SQLITE_BUSY', 'message': 'busy'}},
+        {'type': 'ok', 'response': {'type': 'close'}},
+    ]}
+    monkeypatch.setattr(server, 'open', lambda *a, **k: Response(json.dumps(body).encode()))
+    with pytest.raises(http_db.HranaHttpError, match='SQLITE_BUSY') as caught:
+        http_db.Connection().execute_transaction([('SELECT 1', ())])
+    assert ingest._is_transient_db_error(caught.value)
+
+
+def test_atomic_operations_require_fresh_handle_and_empty_store_never_locks(atomic_server):
+    from knowledge.store import delete_source_docs, upsert_documents
+    server, _ = atomic_server
+    db = http_db.Connection()
+    assert upsert_documents(db, []) == {'inserted': 0, 'updated': 0, 'skipped': 0, 'pruned': 0}
+    assert delete_source_docs(db, 'docs', []) == 0
+    assert server.calls == []
+    db.close()
+    with pytest.raises(http_db.TransportError, match='fresh stream'):
+        db.execute_transaction([('SELECT 1', ())])
+    assert server.calls == []
