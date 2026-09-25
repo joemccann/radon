@@ -15,6 +15,7 @@
 import { authStateLabel, authStateTone, unitVerdict, type AuthStateTone } from "./adminFormat";
 import {
   getMarketStateFromDate,
+  getServiceCategory,
   isStale,
   type MarketState,
 } from "./serviceHealthWindows";
@@ -46,10 +47,11 @@ export function freshnessSummary(
   market: MarketState = getMarketStateFromDate(),
   nowMs: number = Date.now(),
 ): FreshnessSummary {
-  const staleServices = rows
+  const scheduled = rows.filter((row) => getServiceCategory(row.service) === "scheduled");
+  const staleServices = scheduled
     .filter((r) => isStale(r.service, r.updated_at ?? null, market, nowMs))
     .map((r) => r.service);
-  return { stale: staleServices.length, total: rows.length, staleServices };
+  return { stale: staleServices.length, total: scheduled.length, staleServices };
 }
 
 // Tile 3 — IB auth, with the documented stuck-pool detector folded in.

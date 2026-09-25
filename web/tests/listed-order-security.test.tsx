@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PortfolioData } from "@/lib/types";
 
 const mocks = vi.hoisted(() => ({
@@ -139,7 +139,13 @@ describe("listed-contract order safety", () => {
     }));
 
     stubExpirations();
-    const { rerender } = render(<IndexOptionOrderForm ticker="VIX" portfolio={resolvedPortfolio()} />);
+    // The async expiry response triggers a passive strike reset. Settle that
+    // mount before selecting: seeing the option DOM alone does not prove the
+    // reset effect has run under a loaded concurrent CI worker.
+    let rerender!: ReturnType<typeof render>["rerender"];
+    await act(async () => {
+      ({ rerender } = render(<IndexOptionOrderForm ticker="VIX" portfolio={resolvedPortfolio()} />));
+    });
     await waitFor(() => expect(screen.getByText("$20 C")).toBeTruthy());
     fireEvent.change(screen.getAllByRole("combobox")[1], { target: { value: "42" } });
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "1" } });

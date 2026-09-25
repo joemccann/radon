@@ -177,3 +177,25 @@ describe("replica-watchdog reliability history applicability", () => {
     expect(presentBody.events[0].service).toBe("replica-watchdog");
   });
 });
+
+
+describe("retired exit-orders health applicability", () => {
+  it("omits the unscheduled legacy control while preserving unknown writers", async () => {
+    mockReplicaExists(false);
+    const stale = "2020-01-01T00:00:00Z";
+    mockDbResults([healthRow("exit-orders", stale), healthRow("unknown-writer", stale)]);
+    const { GET } = await import("../app/api/service-health/route");
+    const body = await (await GET()).json();
+    expect(body.services.map((row: DbRow) => row.service)).toEqual(["unknown-writer"]);
+    expect(body.degraded_count).toBe(1);
+  });
+
+  it("filters current rows and historical baselines without deleting stored records", async () => {
+    const { filterApplicableServiceHealthRows, filterApplicableServiceHealthBaseline } = await import("../lib/serviceHealthApplicability");
+    const rows = [{ service: "exit-orders", state: "ok" }, { service: "fill-monitor", state: "error" }];
+    expect(filterApplicableServiceHealthRows(rows, true)).toEqual([rows[1]]);
+    expect(rows).toHaveLength(2);
+    expect(filterApplicableServiceHealthBaseline({ "exit-orders": "ok", "fill-monitor": "error" }, true))
+      .toEqual({ "fill-monitor": "error" });
+  });
+});

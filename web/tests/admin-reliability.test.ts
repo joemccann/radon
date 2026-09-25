@@ -106,6 +106,13 @@ describe("freshnessSummary", () => {
     expect(s.stale).toBe(1);
     expect(s.staleServices).toEqual(["vcg-scan"]);
   });
+  it("measures scheduled writers only, retaining unknown-writer failures", () => {
+    const dormant = ["analyst-ratings", "gamma-rotation-scan", "informed-flow", "vol-skew-mr", "orders-read-compare", "flex-web-service", "performance"]
+      .map((service) => ({ ...ancient, service }));
+    expect(freshnessSummary([...dormant, fresh, { ...ancient, service: "unknown-writer" }], "open", now))
+      .toEqual({ stale: 1, total: 2, staleServices: ["unknown-writer"] });
+    expect(freshnessSummary(dormant, "open", now)).toEqual({ stale: 0, total: 0, staleServices: [] });
+  });
   it("missing updated_at is stale", () => {
     expect(freshnessSummary([{ service: "x", state: "ok", updated_at: null }], "open", now).stale).toBe(1);
   });

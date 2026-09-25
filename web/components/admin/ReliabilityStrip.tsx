@@ -97,10 +97,10 @@ export default function ReliabilityStrip({
             !edgeReachable
               ? "edge unreachable"
               : freshness.total === 0
-                ? "no writers reported"
+                ? "no scheduled writers reported"
                 : freshness.stale > 0
                   ? freshness.staleServices.slice(0, 3).join(", ")
-                  : `${freshness.total} writers current`
+                  : `${freshness.total} scheduled writers current`
           }
         />
         <Tile label="IB Auth" tone={auth.tone} value={auth.label} sub="gateway session" />

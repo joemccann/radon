@@ -22,6 +22,11 @@ export function isServiceHealthApplicable(
   service: string,
   replicaPresent: boolean,
 ): boolean {
+  // REL-055 retired this unscheduled handler: no producer creates the order
+  // contract it requires. Historical rows are not evidence of a live control.
+  // Keep the row in storage, but do not revive it through the unknown-writer
+  // scheduled fallback. Re-enable applicability when a real producer ships.
+  if (service === "exit-orders") return false;
   return service !== REPLICA_WATCHDOG_SERVICE || replicaPresent;
 }
 
