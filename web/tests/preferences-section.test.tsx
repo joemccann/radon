@@ -335,6 +335,27 @@ describe("PreferencesSection", () => {
     expect(save.disabled).toBe(true);
   });
 
+  it("shows the group save only when a value is dirty", async () => {
+    await renderSection();
+    expect(screen.queryByTestId("preference-group-save-feature-flags")).toBeNull();
+    fireEvent.change(screen.getByTestId("preference-input-RADON_SCANNER_WORKERS"), {
+      target: { value: "40" },
+    });
+    const saveGroup = screen.getByTestId("preference-group-save-feature-flags");
+    expect(saveGroup.textContent).toBe("Save changes");
+    mocks.savePreference.mockResolvedValue({
+      preference: { ...structuredClone(WORKERS), value: 40, source: "db" },
+      store: { ...STORE_OK },
+    });
+    fireEvent.click(saveGroup);
+    await waitFor(() => {
+      expect(mocks.savePreference).toHaveBeenCalledWith("RADON_SCANNER_WORKERS", 40);
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("preference-group-save-feature-flags")).toBeNull();
+    });
+  });
+
   it("12. Save calls savePreference and re-renders the row from the response", async () => {
     await renderSection();
     mocks.savePreference.mockResolvedValue({
@@ -401,7 +422,7 @@ describe("PreferencesSection", () => {
       expect((screen.getByTestId(`preference-save-${key}`) as HTMLButtonElement).disabled).toBe(true);
       expect((screen.getByTestId(`preference-reset-${key}`) as HTMLButtonElement).disabled).toBe(true);
     }
-    expect((screen.getByTestId("preference-group-save-order-limits") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByTestId("preference-group-save-order-limits")).toBeNull();
   });
 
   it("17. bool rows render a checkbox (not role=switch) and save true", async () => {
