@@ -1627,6 +1627,20 @@ launch_round() {
       #                        read CI, and `git push` cannot reach origin.
       #                        Verified: network_access=true -> 200.
       #
+      #   .codex/skills        the seatbelt keeps every `.codex/` path read-only
+      #                        even inside the workspace, so a checkout that
+      #                        changes the tracked skill renders half-applies
+      #                        ("unable to unlink old '.codex/skills/...'",
+      #                        testing audit 2026-09-25) and blocks every later
+      #                        switch. Only that tracked directory is granted;
+      #                        .codex/config.toml stays read-only.
+      #
+      #   login shell          codex runs commands as `zsh -lc` by default,
+      #                        which re-sources the operator profile and puts
+      #                        /opt/homebrew/bin ahead of $VENV/bin: python3.13
+      #                        lost pytest-asyncio (2026-09-25). A plain
+      #                        `zsh -c` keeps the PATH this wrapper built.
+      #
       #   scratch              the phase contract keeps report-only state in
       #                        durable runner scratch one level ABOVE the clone,
       #                        so every audit write was denied and the phase
@@ -1639,7 +1653,8 @@ launch_round() {
       "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
         "$RUNG_BIN" exec ${model_flag[@]+"${model_flag[@]}"} \
         -c model_reasoning_effort="medium" \
-        -c "sandbox_workspace_write={network_access=true,writable_roots=[\"$AGENT_GITDIR\",\"$WEEKEND_ROOT/.$LOOP_SLUG-deliver\",\"$WEEKEND_ROOT/.$LOOP_SLUG-nightly-scratch\"]}" \
+        -c allow_login_shell=false \
+        -c "sandbox_workspace_write={network_access=true,writable_roots=[\"$AGENT_GITDIR\",\"$WEEKEND_ROOT/.$LOOP_SLUG-deliver\",\"$WEEKEND_ROOT/.$LOOP_SLUG-nightly-scratch\",\"$REPO/.codex/skills\"]}" \
         -C "$REPO" --color never \
         --sandbox workspace-write --skip-git-repo-check \
         - < "$prompt_file" >> "$RUN_LOG" 2>&1 &
