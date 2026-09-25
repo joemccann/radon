@@ -415,19 +415,26 @@ def _env_keys(path: Path) -> dict:
     return out
 
 
-class TestTestingCloneScopedCredentials:
-    """The testing clone never keeps the operator's production Turso/UW keys.
+SCOPED_LOOPS = [
+    ("testing", ".env.testing-scoped"),
+    ("reliability", ".env.reliability-scoped"),
+    ("ci-performance", ".env.ci-performance-scoped"),
+    ("documentation", ".env.documentation-scoped"),
+]
 
-    setup_testing_weekend.sh copies web/.env into the clone, then replaces
-    TURSO_AUTH_TOKEN and UW_TOKEN with the operator-minted least-privilege
-    values from $WEEKEND_ROOT/.env.testing-scoped, or strips them when that
-    file or a key is absent. No value is ever echoed.
+
+class TestCloneScopedCredentials:
+    """No nightly clone keeps the operator's production Turso or UW keys.
+
+    Each setup copies web/.env, then replaces TURSO_AUTH_TOKEN and UW_TOKEN
+    from that loop's scoped env file, or strips them when the file or a key
+    is absent. No value is ever echoed.
     """
 
-    def _stage_prod(self, tmp_path: Path):
-        src, clone, env = _stage(tmp_path, "testing")
+    def _stage_prod(self, tmp_path: Path, loop: str, scoped_name: str):
+        src, clone, env = _stage(tmp_path, loop)
         (src / "web" / ".env").write_text(PROD_WEB_ENV, encoding="utf-8")
-        scoped = Path(env["RADON_WEEKEND_ROOT"]) / ".env.testing-scoped"
+        scoped = Path(env["RADON_WEEKEND_ROOT"]) / scoped_name
         return src, clone, env, scoped
 
     @staticmethod
@@ -436,15 +443,16 @@ class TestTestingCloneScopedCredentials:
         for value in (PROD_TURSO, PROD_UW, SCOPED_TURSO, SCOPED_UW):
             assert value not in out, "a credential value was echoed"
 
-    def test_scoped_values_replace_the_production_keys(self, tmp_path):
-        src, clone, env, scoped = self._stage_prod(tmp_path)
+    @pytest.mark.parametrize("loop,scoped_name", SCOPED_LOOPS)
+    def test_scoped_values_replace_the_production_keys(self, tmp_path, loop, scoped_name):
+        src, clone, env, scoped = self._stage_prod(tmp_path, loop, scoped_name)
         scoped.write_text(
             f"TURSO_AUTH_TOKEN={SCOPED_TURSO}\nUW_TOKEN=\"{SCOPED_UW}\"\n",
             encoding="utf-8",
         )
         scoped.chmod(0o600)
 
-        proc = _run("testing", env, tmp_path)
+        proc = _run(loop, env, tmp_path)
 
         assert proc.returncode == 0, proc.stdout + proc.stderr
         dst = clone / "web" / ".env"
@@ -463,10 +471,11 @@ class TestTestingCloneScopedCredentials:
         assert (src / "web" / ".env").read_text(encoding="utf-8") == PROD_WEB_ENV
         self._assert_no_value_echoed(proc)
 
-    def test_absent_scoped_file_strips_both_keys(self, tmp_path):
-        src, clone, env, scoped = self._stage_prod(tmp_path)
+    @pytest.mark.parametrize("loop,scoped_name", SCOPED_LOOPS)
+    def test_absent_scoped_file_strips_both_keys(self, tmp_path, loop, scoped_name):
+        src, clone, env, scoped = self._stage_prod(tmp_path, loop, scoped_name)
 
-        proc = _run("testing", env, tmp_path)
+        proc = _run(loop, env, tmp_path)
         out = proc.stdout + proc.stderr
 
         assert proc.returncode == 0, out
@@ -480,11 +489,12 @@ class TestTestingCloneScopedCredentials:
         assert missing, out
         self._assert_no_value_echoed(proc)
 
-    def test_empty_scoped_key_is_stripped_not_kept(self, tmp_path):
-        src, clone, env, scoped = self._stage_prod(tmp_path)
+    @pytest.mark.parametrize("loop,scoped_name", SCOPED_LOOPS)
+    def test_empty_scoped_key_is_stripped_not_kept(self, tmp_path, loop, scoped_name):
+        src, clone, env, scoped = self._stage_prod(tmp_path, loop, scoped_name)
         scoped.write_text(f"TURSO_AUTH_TOKEN={SCOPED_TURSO}\nUW_TOKEN=\n", encoding="utf-8")
 
-        proc = _run("testing", env, tmp_path)
+        proc = _run(loop, env, tmp_path)
         out = proc.stdout + proc.stderr
 
         keys = _env_keys(clone / "web" / ".env")
@@ -493,15 +503,16 @@ class TestTestingCloneScopedCredentials:
         assert any("MISSING" in ln and "UW_TOKEN" in ln for ln in out.splitlines()), out
         self._assert_no_value_echoed(proc)
 
-    def test_a_kept_newer_clone_copy_is_still_scoped(self, tmp_path):
+    @pytest.mark.parametrize("loop,scoped_name", SCOPED_LOOPS)
+    def test_a_kept_newer_clone_copy_is_still_scoped(self, tmp_path, loop, scoped_name):
         """The 'clone copy is newer' early return must not keep prod keys."""
-        src, clone, env, scoped = self._stage_prod(tmp_path)
+        src, clone, env, scoped = self._stage_prod(tmp_path, loop, scoped_name)
         dst = clone / "web" / ".env"
         dst.write_text(PROD_WEB_ENV, encoding="utf-8")
         stamp = time.time() + 120
         os.utime(dst, (stamp, stamp))
 
-        proc = _run("testing", env, tmp_path)
+        proc = _run(loop, env, tmp_path)
 
         text = dst.read_text(encoding="utf-8")
         assert PROD_TURSO not in text and PROD_UW not in text, proc.stdout
@@ -523,13 +534,14 @@ class TestTestingCloneScopedCredentials:
             (clone / "web" / ".env").symlink_to(victim)
         return victim
 
+    @pytest.mark.parametrize("loop,scoped_name", SCOPED_LOOPS)
     @pytest.mark.parametrize("rel", ["web/.env", "web"])
-    def test_a_symlinked_clone_env_is_refused_not_written_through(self, tmp_path, rel):
-        src, clone, env, scoped = self._stage_prod(tmp_path)
+    def test_a_symlinked_clone_env_is_refused_not_written_through(self, tmp_path, loop, scoped_name, rel):
+        src, clone, env, scoped = self._stage_prod(tmp_path, loop, scoped_name)
         victim = self._planted_link(tmp_path, clone, rel)
         before = victim.stat()
 
-        proc = _run("testing", env, tmp_path)
+        proc = _run(loop, env, tmp_path)
 
         assert proc.returncode != 0, proc.stdout + proc.stderr
         assert "REFUSING" in proc.stdout + proc.stderr
@@ -538,15 +550,18 @@ class TestTestingCloneScopedCredentials:
         assert (after.st_mode, after.st_mtime) == (before.st_mode, before.st_mtime)
         self._assert_no_value_echoed(proc)
 
-    def test_scoping_replaces_the_file_instead_of_writing_into_it(self):
-        text = (REPO / "scripts" / "setup_testing_weekend.sh").read_text(encoding="utf-8")
+    @pytest.mark.parametrize("loop", [name for name, _scoped in SCOPED_LOOPS])
+    def test_scoping_replaces_the_file_instead_of_writing_into_it(self, loop):
+        script, _clone = SETUPS[loop]
+        text = script.read_text(encoding="utf-8")
         body = text.split("scope_clone_credentials() {", 1)[1].split("\n}\n", 1)[0]
         assert 'cat "$tmp" > "$dst"' not in body
         assert 'mv -f -- "$tmp" "$dst"' in body
 
-    def test_wrapper_never_recopies_web_env(self):
+    @pytest.mark.parametrize("loop", [name for name, _scoped in SCOPED_LOOPS])
+    def test_wrapper_never_recopies_web_env(self, loop):
         """Only setup provisions web/.env; no phase may restore the prod copy."""
-        text = (REPO / "scripts" / "testing_weekend.sh").read_text(encoding="utf-8")
+        text = (REPO / "scripts" / WRAPPERS[loop]).read_text(encoding="utf-8")
         for line in text.splitlines():
             code = line.split("#", 1)[0]
             if "web/.env" in code:
