@@ -235,6 +235,81 @@ def test_commit_evidence_is_read_without_opening_the_agent_gitdir(layout):
     assert int(epoch) > 0
 
 
+# --- 2b. an empty dated branch never pins a round to a stale main ---------
+# 2026-09-24: the 00:00 remediate created reliability/2026-09-24 at e69de638
+# and committed nothing. The fixes for its baseline blockers (#674) merged at
+# 06:15; the 19:40 rerun reset main to 80bbfdb2, then resumed the dated branch
+# and re-ran the baseline on e69de638, failing the same nine tests again.
+def _advance_main(layout: Layout) -> str:
+    seed = layout.tmp / "seed"
+    (seed / "later").write_text("later\n", encoding="utf-8")
+    _git("add", "later", cwd=seed)
+    _git("commit", "-q", "-m", "later", cwd=seed)
+    _git("push", "-q", str(layout.origin), "main", cwd=seed)
+    host = (f"--git-dir={layout.host}", f"--work-tree={layout.repo}")
+    _git(*host, "fetch", "-q", "origin", cwd=layout.tmp)
+    _git(*host, "reset", "-q", "--hard", "origin/main", cwd=layout.tmp)
+    return _git(f"--git-dir={layout.host}", "rev-parse", "HEAD", cwd=layout.tmp).stdout.strip()
+
+
+@pytest.mark.parametrize("loop", sorted(WRAPPERS))
+def test_align_moves_an_empty_dated_branch_to_the_new_main(layout, loop):
+    prefix = f"PR_BRANCH_PREFIX={loop}/"
+    assert layout.run(WRAPPERS[loop], f"{prefix}; align_agent_gitdir").returncode == 0
+    layout.agent_git("branch", "-q", f"{loop}/2026-09-24", "origin/main")
+    new_main = _advance_main(layout)
+
+    proc = layout.run(WRAPPERS[loop], f"{prefix}; align_agent_gitdir")
+
+    assert proc.returncode == 0, proc.stderr
+    assert layout.agent_git("rev-parse", f"{loop}/2026-09-24").stdout.strip() == new_main
+
+
+def test_align_never_moves_a_dated_branch_that_holds_work(layout):
+    wrapper = WRAPPERS["reliability"]
+    assert layout.run(wrapper, "PR_BRANCH_PREFIX=reliability/; align_agent_gitdir").returncode == 0
+    layout.agent_git("switch", "-q", "-c", "reliability/2026-09-24", "origin/main")
+    (layout.repo / "fix.txt").write_text("fix\n", encoding="utf-8")
+    layout.agent_git("add", "fix.txt")
+    layout.agent_git("commit", "-q", "-m", "fix")
+    work = layout.agent_git("rev-parse", "HEAD").stdout.strip()
+    _advance_main(layout)
+
+    proc = layout.run(wrapper, "PR_BRANCH_PREFIX=reliability/; align_agent_gitdir")
+
+    assert proc.returncode == 0, proc.stderr
+    assert layout.agent_git("rev-parse", "reliability/2026-09-24").stdout.strip() == work
+
+
+def test_align_never_writes_through_a_planted_branch_directory_symlink(layout):
+    wrapper = WRAPPERS["reliability"]
+    assert layout.run(wrapper, "PR_BRANCH_PREFIX=reliability/; align_agent_gitdir").returncode == 0
+    outside = layout.tmp / "outside"
+    outside.mkdir()
+    head = layout.agent_git("rev-parse", "HEAD").stdout
+    (outside / "2026-09-24").write_text(head, encoding="utf-8")
+    (layout.agent / "refs" / "heads" / "reliability").symlink_to(outside)
+    _advance_main(layout)
+
+    proc = layout.run(wrapper, "PR_BRANCH_PREFIX=reliability/; align_agent_gitdir")
+
+    assert proc.returncode == 0, proc.stderr
+    assert (outside / "2026-09-24").read_text(encoding="utf-8") == head
+
+
+def test_align_without_a_branch_prefix_leaves_dated_branches_alone(layout):
+    wrapper = WRAPPERS["reliability"]
+    assert layout.run(wrapper, "align_agent_gitdir").returncode == 0
+    layout.agent_git("branch", "-q", "reliability/2026-09-24", "origin/main")
+    old = layout.agent_git("rev-parse", "reliability/2026-09-24").stdout.strip()
+    _advance_main(layout)
+
+    proc = layout.run(wrapper, "align_agent_gitdir")
+
+    assert proc.returncode == 0, proc.stderr
+    assert layout.agent_git("rev-parse", "reliability/2026-09-24").stdout.strip() == old
+
+
 # --- 3. nothing the agent plants runs on the host or survives into a rung ---
 def _plant(layout: Layout) -> Path:
     marker = layout.tmp / "PWNED"
