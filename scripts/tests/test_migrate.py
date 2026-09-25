@@ -18,9 +18,10 @@ import pytest
 
 
 @pytest.fixture
-def migrate_module(monkeypatch: pytest.MonkeyPatch):
+def migrate_module(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """Import the module fresh per test (it has module-level dotenv calls)."""
     monkeypatch.setenv("RADON_DB_NO_REPLICA", "1")
+    monkeypatch.setenv("RADON_SCHEMA_MARKER_DIR", str(tmp_path / "schema-marker"))
     repo_root = Path(__file__).resolve().parent.parent.parent
     scripts_dir = repo_root / "scripts"
     if str(scripts_dir) not in sys.path:

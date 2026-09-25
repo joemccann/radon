@@ -292,3 +292,6 @@ models/**/*.gguf
 models/**/*.safetensors
 models/**/adapter/
 models/**/fused/
+
+# migrate.py --boot: host-local proof the schema is current (scripts/db/migrate.py)
+data/schema_version.*
