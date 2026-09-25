@@ -240,19 +240,21 @@ export default function PreferencesSection() {
         const groupDirty = entries.some(isDirty);
         return (
           <section className="admin-card preferences-group" data-testid={`preferences-group-${slug}`} key={group}>
-            <header className="admin-card-header">
-              <span className="admin-card-title">{group}</span>
-              <div className="admin-actions-row">
-                <button
-                  type="button"
-                  className="admin-btn admin-btn-primary"
-                  data-testid={`preference-group-save-${slug}`}
-                  disabled={!groupDirty || storeUnavailable}
-                  onClick={() => { void saveGroup(entries); }}
-                >
-                  Save group
-                </button>
-              </div>
+            <header className="admin-card-header preferences-group__header">
+              <h2 className="admin-card-title">{group}</h2>
+              {groupDirty ? (
+                <div className="admin-actions-row">
+                  <button
+                    type="button"
+                    className="admin-btn admin-btn-primary"
+                    data-testid={`preference-group-save-${slug}`}
+                    disabled={storeUnavailable}
+                    onClick={() => { void saveGroup(entries); }}
+                  >
+                    Save changes
+                  </button>
+                </div>
+              ) : null}
             </header>
 
             {entries.map((entry) => {
@@ -261,76 +263,81 @@ export default function PreferencesSection() {
               const message = rowError[entry.key] ?? inputError;
               const dirty = isDirty(entry);
               return (
-                <div className="preferences-row" data-testid={`preference-row-${entry.key}`} key={entry.key}>
+                <div className="preferences-row settings-preference" data-testid={`preference-row-${entry.key}`} key={entry.key}>
                   <div className="preferences-row__head">
-                    <span className="preferences-row__label">{entry.label}</span>
-                    <code className="preferences-row__key">{entry.key}</code>
+                    <label className="preferences-row__label" htmlFor={`preference-${entry.key}`}>
+                      {entry.label}
+                    </label>
                   </div>
 
-                  <p className="preferences-row__description">{entry.description}</p>
-
-                  <div className="preferences-row__metaline">
-                    <span
-                      className={`preferences-badge preferences-badge--${entry.source}`}
-                      data-testid={`preference-source-${entry.key}`}
-                    >
-                      {entry.source.toUpperCase()}
-                    </span>
-                    <span className="preferences-row__meta" data-testid={`preference-default-${entry.key}`}>
-                      Default {formatPreferenceValue(entry, entry.default)}
-                    </span>
-                    <span className="preferences-row__meta" data-testid={`preference-range-${entry.key}`}>
-                      {rangeLabel(entry)}
-                    </span>
-                    {provenanceLabel(entry) ? (
-                      <span className="preferences-row__meta" data-testid={`preference-provenance-${entry.key}`}>
-                        {provenanceLabel(entry)}
-                      </span>
-                    ) : null}
+                  <div className="settings-preference__copy">
+                    <p className="preferences-row__description" id={`preference-description-${entry.key}`}>
+                      {entry.description}
+                    </p>
                     {entry.applies_immediately ? null : (
                       <span
                         className="preferences-badge preferences-badge--restart"
                         data-testid={`preference-restart-badge-${entry.key}`}
                         title="Stored now. The consuming process reads this when it next starts."
                       >
-                        RESTART REQUIRED
+                        Restart required
                       </span>
                     )}
                     {entry.db_rejected ? (
-                      <>
-                        <span
-                          className="preferences-badge preferences-badge--rejected"
-                          data-testid={`preference-rejected-${entry.key}`}
-                        >
-                          STORED VALUE IGNORED
+                      <span className="settings-preference__rejected" role="status">
+                        <span className="preferences-badge preferences-badge--rejected" data-testid={`preference-rejected-${entry.key}`}>
+                          Stored value ignored
                         </span>
-                        <span className="preferences-row__meta">
-                          A stored value was outside the allowed range and was ignored.
-                        </span>
-                      </>
+                        <span>A saved value was outside the allowed range.</span>
+                      </span>
                     ) : null}
+                    <details className="settings-preference__details">
+                      <summary>Limits and source</summary>
+                      <div className="preferences-row__metaline">
+                        <span
+                          className={`preferences-badge preferences-badge--${entry.source}`}
+                          data-testid={`preference-source-${entry.key}`}
+                        >
+                          {entry.source.toUpperCase()}
+                        </span>
+                        <span className="preferences-row__meta" data-testid={`preference-default-${entry.key}`}>
+                          Default {formatPreferenceValue(entry, entry.default)}
+                        </span>
+                        <span className="preferences-row__meta" data-testid={`preference-range-${entry.key}`}>
+                          {rangeLabel(entry)}
+                        </span>
+                        <code className="preferences-row__key">{entry.key}</code>
+                        {provenanceLabel(entry) ? (
+                          <span className="preferences-row__meta" data-testid={`preference-provenance-${entry.key}`}>
+                            {provenanceLabel(entry)}
+                          </span>
+                        ) : null}
+                      </div>
+                    </details>
                   </div>
 
                   <div className="preferences-row__control">
                     {entry.value_type === "bool" ? (
                       <label className="preferences-row__toggle">
                         <input
+                          id={`preference-${entry.key}`}
                           type="checkbox"
                           checked={boolDraftFor(entry)}
                           onChange={(e) => setBoolDrafts((current) => ({ ...current, [entry.key]: e.target.checked }))}
                           data-testid={`preference-input-${entry.key}`}
-                          aria-label={entry.label}
+                          aria-describedby={`preference-description-${entry.key}`}
                         />
                         <span>{boolDraftFor(entry) ? "On" : "Off"}</span>
                       </label>
                     ) : (
                       <input
+                        id={`preference-${entry.key}`}
                         type="number"
                         step={entry.value_type === "int" ? "1" : "any"}
                         min={Number(entry.hard_min)}
                         max={Number(entry.hard_max)}
                         inputMode={entry.value_type === "int" ? "numeric" : "decimal"}
-                        className="order-input preferences-row__input"
+                        className="order-input preferences-row__input settings-preference__input"
                         value={draftFor(entry)}
                         onChange={(e) => {
                           const raw = e.target.value;
@@ -342,7 +349,7 @@ export default function PreferencesSection() {
                           });
                         }}
                         data-testid={`preference-input-${entry.key}`}
-                        aria-label={entry.label}
+                        aria-describedby={`preference-description-${entry.key}`}
                       />
                     )}
                   </div>
@@ -362,10 +369,11 @@ export default function PreferencesSection() {
                       className="admin-btn admin-btn-ghost"
                       data-testid={`preference-reset-${entry.key}`}
                       disabled={busy || storeUnavailable || entry.source !== "db"}
+                      aria-label={`Reset ${entry.label} to default`}
                       title={entry.source !== "db" ? "No stored override to reset" : undefined}
                       onClick={() => { void resetRow(entry); }}
                     >
-                      Reset to default
+                      Reset
                     </button>
                   </div>
 

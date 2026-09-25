@@ -111,10 +111,6 @@
   color: var(--text-on-accent);
 }
 
-.radon-clear .btn-quick {
-  padding-inline: 8px;
-}
-
 .radon-clear :is(.btn-secondary, .btn-quick, .btn-sync) {
   background: var(--bg-panel);
   border-color: var(--line-grid);
@@ -143,23 +139,30 @@
   border-radius: var(--radius-sm);
 }
 
-.radon-clear :is(.modify-price-input-row, .table-search, .theta-search, .flow-ticker-input-row):has(> input:focus-visible),
+.radon-clear :is(.modify-price-input-row, .table-search, .theta-search, .flow-ticker-input-row, .command-palette-input-wrap):has(> input:focus-visible),
 .radon-clear .modify-price-input-row:has(> select.modify-price-input:focus-visible),
 .radon-clear .ask-composer:has(.ask-composer__input:focus-visible) {
   outline: 2px solid var(--border-focus);
   outline-offset: var(--field-focus-offset, 2px);
 }
 
-.radon-clear :is(.modify-price-input-row, .table-search, .theta-search, .flow-ticker-input-row) > input,
+.radon-clear :is(.modify-price-input-row, .table-search, .theta-search, .flow-ticker-input-row, .command-palette-input-wrap) > input,
 .radon-clear .modify-price-input-row > select.modify-price-input,
 .radon-clear .ask-composer .ask-composer__input {
   border-radius: 0;
 }
 
-.radon-clear :is(.modify-price-input-row, .table-search, .theta-search, .flow-ticker-input-row) > input:focus-visible,
+.radon-clear :is(.modify-price-input-row, .table-search, .theta-search, .flow-ticker-input-row, .command-palette-input-wrap) > input:focus-visible,
 .radon-clear .modify-price-input-row > select.modify-price-input:focus-visible,
 .radon-clear .ask-composer .ask-composer__input:focus-visible {
   outline: none;
+}
+
+/* This field touches an overflow-clipped dialog edge; keep its ring inside.
+   A local value avoids competing with the grouped selector's specificity
+   after the production CSS optimizer combines it into :is(...). */
+.radon-clear .command-palette-input-wrap {
+  --field-focus-offset: -2px;
 }
 
 .radon-clear :is(.pill, .order-status-pill) {
@@ -170,7 +173,7 @@
   border-radius: var(--radius-capsule);
 }
 
-.radon-clear .modal-content {
+.radon-clear :is(.modal-content, .command-palette) {
   border-radius: var(--radius-lg);
   border-color: var(--line-grid);
   background: var(--bg-panel);
@@ -622,3 +625,165 @@ body.radon-clear[data-mobile="true"] :is(
 }
 
 .chat-approval-area { max-height: 45%; overflow-y: auto; flex-shrink: 1; padding: 0 28px; overscroll-behavior: contain; }
+
+/* Settings: make the editable value the first thing the eye finds. */
+.radon-clear .preferences-shell { gap: 20px; min-width: 0; }
+.radon-clear .preferences-group {
+  gap: 0;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+}
+.radon-clear .preferences-group__header {
+  min-height: 60px;
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--line-grid);
+}
+.radon-clear .preferences-group__header .admin-card-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-transform: none;
+}
+.radon-clear .preferences-group__header .admin-btn { min-height: 40px; }
+.radon-clear .settings-preference {
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  grid-template-areas: "copy control" "copy actions" "error error";
+  align-items: center;
+  gap: 8px 32px;
+  padding: 22px;
+  border-top-color: var(--line-grid);
+}
+.radon-clear .settings-preference__copy { grid-area: copy; min-width: 0; display: grid; gap: 8px; }
+.radon-clear .settings-preference .preferences-row__head { margin: 0; }
+.radon-clear .settings-preference .preferences-row__label {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  cursor: pointer;
+}
+.radon-clear .settings-preference .preferences-row__description {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 68ch;
+}
+.radon-clear .settings-preference__details,
+.radon-clear .credentials-field__details { color: var(--text-muted); font-size: 12px; }
+.radon-clear .settings-preference__details summary,
+.radon-clear .credentials-field__details summary {
+  width: fit-content;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--signal-core-text);
+  list-style-position: inside;
+}
+.radon-clear .settings-preference__details .preferences-row__metaline {
+  padding-top: 4px;
+  gap: 6px 10px;
+}
+.radon-clear .settings-preference__details .preferences-row__key { flex-basis: 100%; }
+.radon-clear .settings-preference__rejected { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; color: var(--negative); font-size: 12px; }
+.radon-clear .settings-preference__rejected .preferences-badge { color: var(--negative); }
+.radon-clear .settings-preference__input {
+  width: 100%;
+  min-height: 48px;
+  padding-inline: 14px;
+  border-color: var(--line-grid);
+  background: var(--bg-subtle);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  text-align: left;
+}
+.radon-clear .settings-preference__input:hover:not(:disabled) { border-color: var(--text-muted); }
+.radon-clear .settings-preference__input:focus-visible { background: var(--bg-panel); }
+.radon-clear .settings-preference__input:invalid { border-color: var(--negative); }
+.radon-clear .settings-preference .preferences-row__toggle {
+  min-height: 48px;
+  width: 100%;
+  justify-content: space-between;
+  padding: 0 14px;
+  border: 1px solid var(--line-grid);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  font-size: 14px;
+}
+.radon-clear .settings-preference .preferences-row__toggle input { width: 20px; height: 20px; }
+.radon-clear .settings-preference .admin-actions-row { grid-area: actions; justify-content: flex-end; gap: 8px; }
+.radon-clear .settings-preference .admin-btn { min-height: 40px; }
+.radon-clear .settings-preference .admin-card-error { grid-area: error; }
+
+.radon-clear .settings-service { display: block; padding: 22px; }
+.radon-clear .settings-service + .settings-service { border-top-color: var(--line-grid); }
+.radon-clear .settings-service > .preferences-row__head { align-items: center; gap: 8px; }
+.radon-clear .settings-service > .preferences-row__head .preferences-row__label { font-size: 16px; font-weight: 600; }
+.radon-clear .settings-service > .preferences-row__description { margin-top: 6px; max-width: 70ch; font-size: 13px; line-height: 1.5; }
+.radon-clear .settings-service .credentials-fields { margin-top: 12px; gap: 0; }
+.radon-clear .settings-service .credentials-field {
+  grid-template-columns: minmax(180px, 0.7fr) minmax(300px, 1.3fr);
+  gap: 8px 24px;
+  align-items: center;
+  padding: 14px 0;
+  border-top: 1px solid var(--line-grid);
+}
+.radon-clear .settings-service .credentials-field__meta { gap: 4px; cursor: default; }
+.radon-clear .settings-service .credentials-field__title .preferences-row__label { font-size: 14px; font-weight: 500; cursor: pointer; }
+.radon-clear .settings-service .credentials-field__inputrow { display: flex; gap: 8px; }
+.radon-clear .settings-service .credentials-field__input {
+  min-height: 48px;
+  padding-inline: 14px;
+  background: var(--bg-subtle);
+  border-color: var(--line-grid);
+  font-family: var(--font-sans);
+  font-size: 16px;
+}
+.radon-clear .settings-service .credentials-field__input::placeholder { color: var(--text-muted); opacity: 1; }
+.radon-clear .settings-service .credentials-field__inputrow .admin-btn { min-height: 44px; flex: none; }
+.radon-clear .settings-service .credentials-field__reveal { min-width: 58px; }
+.radon-clear .settings-service .credentials-field__details summary { min-height: 28px; }
+.radon-clear .settings-service > .admin-actions-row { justify-content: flex-end; padding-top: 8px; }
+.radon-clear .settings-service > .admin-actions-row .admin-btn { min-height: 44px; }
+.radon-clear .settings-service [data-testid^="credential-notice-"] { margin-top: 12px; }
+
+@media (max-width: 640px) {
+  .radon-clear .preferences-shell { gap: 14px; }
+  .radon-clear .preferences-group__header { padding: 12px 16px; }
+  .radon-clear .preferences-group__header .admin-actions-row { margin-left: auto; }
+  .radon-clear .preferences-group__header .admin-btn { min-height: 44px; }
+  .radon-clear .settings-preference {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "copy" "control" "actions" "error";
+    gap: 12px;
+    padding: 18px 16px;
+  }
+  .radon-clear .settings-preference__input,
+  .radon-clear .settings-preference .preferences-row__toggle { min-height: 50px; font-size: 16px; }
+  .radon-clear .settings-preference__details summary { min-height: 44px; }
+  .radon-clear .settings-preference .admin-actions-row { justify-content: flex-start; }
+  .radon-clear .settings-preference .admin-actions-row .admin-btn { min-height: 44px; }
+  .radon-clear .settings-service { padding: 18px 16px; }
+  .radon-clear .settings-service .credentials-field {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 16px 0;
+  }
+  .radon-clear .settings-service .credentials-field__inputrow { width: 100%; flex-wrap: wrap; }
+  .radon-clear .settings-service .credentials-field__input { flex: 1 1 calc(100% - 72px); width: auto; min-width: 0; min-height: 50px; font-size: 16px; }
+  .radon-clear .settings-service .credentials-field__inputrow .admin-btn { min-height: 44px; }
+  .radon-clear .settings-service .credentials-field__reveal { min-width: 58px; }
+  .radon-clear .settings-service .credentials-field__clear { margin-left: auto; }
+  .radon-clear .settings-service > .admin-actions-row { padding-top: 8px; }
+  .radon-clear .settings-service > .admin-actions-row .admin-btn { width: 100%; min-height: 48px; }
+}
+
+@media (pointer: coarse) {
+  .radon-clear .settings-preference__details summary,
+  .radon-clear .credentials-field__details summary,
+  .radon-clear .settings-preference .admin-btn,
+  .radon-clear .settings-service .credentials-field__inputrow .admin-btn { min-height: 44px; }
+}
