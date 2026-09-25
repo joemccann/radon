@@ -1089,3 +1089,63 @@ class TestBatchedWrites:
             [("doc-a", 0), ("doc-a", 1), ("doc-a", 2)],
             [("doc-b", 0)],
         ]
+
+
+class TestPreparedBatchRetry:
+    def test_busy_write_reuses_enriched_batch_on_fresh_connection(
+        self, db, monkeypatch, fake_distill, fake_embedder
+    ):
+        real_upsert = ingest_mod.upsert_documents
+        calls, connections = [], []
+        monkeypatch.setattr(ingest_mod.time, "sleep", lambda _: None)
+
+        def persist(connection, batch):
+            calls.append(batch)
+            if len(calls) < 3:
+                raise RuntimeError("SQLITE_BUSY: database is locked")
+            return real_upsert(connection, batch)
+
+        def fresh():
+            connections.append(object())
+            return db
+
+        monkeypatch.setattr(ingest_mod, "upsert_documents", persist)
+        result = ingest_mod.ingest_source(db, _module([_chunk("doc-a")]), db_factory=fresh)
+        assert result["inserted"] == 1
+        assert len(calls) == 3
+        assert all(batch is calls[0] for batch in calls)
+        assert len(fake_distill) == 1
+        assert len(fake_embedder) == 1
+        assert len(connections) >= 3
+        assert _rows(db)[0][3] == "distilled: alpha content"
+
+    def test_exhausted_batch_does_not_restart_source_or_prune(
+        self, db, monkeypatch, fake_distill, fake_embedder
+    ):
+        import contextlib
+        import db.service_cycle as cycles
+        import knowledge.sources as sources
+
+        fetches, writes = [], []
+        module = _module([_chunk("doc-a")])
+        original_fetch = module.fetch
+        def fetch(connection):
+            fetches.append(1)
+            return original_fetch(connection)
+        module.fetch = fetch
+        def busy(*args):
+            writes.append(1)
+            raise RuntimeError("SQLITE_BUSY: database is locked")
+        monkeypatch.setattr(ingest_mod.time, "sleep", lambda _: None)
+        monkeypatch.setattr(ingest_mod, "_fresh_db", lambda: db)
+        monkeypatch.setattr(ingest_mod, "upsert_documents", busy)
+        monkeypatch.setattr(ingest_mod, "delete_source_docs", lambda *a: pytest.fail("pruned after failed write"))
+        monkeypatch.setattr(sources, "ALL_SOURCES", {module.SOURCE: module})
+        monkeypatch.setattr(cycles, "service_cycle", lambda *a, **k: contextlib.nullcontext())
+        with pytest.raises(RuntimeError, match="knowledge ingest failed"):
+            ingest_mod.main(["--source", module.SOURCE])
+        assert len(writes) == 4
+        assert len(fetches) == 1
+        assert len(fake_distill) == 1
+        assert len(fake_embedder) == 1
+        assert _rows(db) == []
