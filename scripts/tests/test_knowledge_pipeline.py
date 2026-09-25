@@ -1349,3 +1349,21 @@ class TestEnrichmentBudgetRecovery:
         assert result["skipped"] == 205
         assert result["embedded"] == 0
         assert fake_embedder == []
+
+
+def test_prepared_retry_diagnostics_identify_document_without_content(monkeypatch, capsys):
+    from types import SimpleNamespace
+    monkeypatch.setattr(ingest_mod.time, 'sleep', lambda _: None)
+    def fail(connection):
+        connection.last_transaction_step_count = 638
+        raise TimeoutError('receipt timed out')
+    with pytest.raises(ingest_mod._PersistenceExhausted) as error:
+        ingest_mod._persist_prepared(
+            lambda: SimpleNamespace(), fail, source='docs',
+            doc_key='tasks/lessons.md\nforged', chunk_count=158,
+        )
+    output = capsys.readouterr().err
+    assert 'chunk_count=158' in output and 'statement_count=638' in output
+    assert 'doc_key="tasks/lessons.md\\nforged"' in output
+    assert '\nforged' not in output
+    assert 'statement_count=638' in str(error.value)
