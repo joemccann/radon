@@ -108,6 +108,12 @@ function WriterRow({ row }: { row: ServiceHealthRow }) {
   const stateTone =
     row.state === "ok" ? "positive" : row.state === "error" ? "negative" : "neutral";
   const lastRun = row.last_attempt_finished_at ?? row.updated_at ?? null;
+  const detail = row.last_error
+    ? userErrorMessage(
+        row.state === "ok" ? humanizeDetail(row.last_error) : row.last_error,
+        row.state === "ok" ? "Last run completed." : "Writer update failed. Review service logs for details.",
+      )
+    : null;
   return (
     <tr data-testid={`writer-row-${row.service}`}>
       <td className="admin-unit-name">{row.service}</td>
@@ -124,8 +130,8 @@ function WriterRow({ row }: { row: ServiceHealthRow }) {
         </div>
       </td>
       <td className="admin-unit-activity">{relAge(lastRun)}</td>
-      <td className="admin-unit-desc" title={row.last_error ? userErrorMessage(row.state === "ok" ? humanizeDetail(row.last_error) : row.last_error, "Writer update failed. Review service logs for details.") : undefined}>
-        {row.last_error ? userErrorMessage(row.state === "ok" ? humanizeDetail(row.last_error) : row.last_error, "Writer update failed. Review service logs for details.") : "--"}
+      <td className="admin-unit-desc" title={detail ?? undefined}>
+        {detail ?? "--"}
       </td>
     </tr>
   );

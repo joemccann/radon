@@ -237,8 +237,6 @@ ws-connection-stability.spec.ts
 #   inventory, not a P0 financial path. Compiled Chromium passed locally
 #   against next start. Keep out of the 25-min smoke job until preflighted
 #   3x on the shared runner.
-#   admin-component document, not a P0 financial path. Compiled Chromium
-#   passed locally against next start.
 # REVIEWED 2026-09-06 clear-all-pages.spec.ts — held out: 117-case route
 #   inventory would blow the 25-min smoke budget. Compiled Chromium passed
 #   locally (117 passed) against next start.

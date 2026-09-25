@@ -122,7 +122,7 @@ for (const viewport of [{ label: "desktop", width: 1440, height: 1000 }, { label
       const payloads: Record<string, unknown> = {
         "/api/admin/health": HEALTH_OK,
         "/api/admin/services": SERVICES,
-        "/api/admin/edge-health": { ...EDGE_HEALTH, service_health: { state: "ok", rows: [...EDGE_HEALTH.service_health.rows.map((row) => ({ ...row, updated_at: CLEAR_FIXTURE_TIME, last_attempt_finished_at: CLEAR_FIXTURE_TIME })), ...["analyst-ratings", "gamma-rotation-scan", "informed-flow", "vol-skew-mr", "orders-read-compare", "flex-web-service", "performance"].map((service) => ({ service, state: service === "informed-flow" ? "error" : "ok", updated_at: "2020-01-01T00:00:00Z", last_error: null })), { service: "knowledge-ingest", state: "ok", updated_at: "2020-01-01T00:00:00Z", last_error: null }] }, external_probe: { source: "sample", ok: 1, latency_ms: 142, checked_at: CLEAR_FIXTURE_TIME } },
+        "/api/admin/edge-health": { ...EDGE_HEALTH, service_health: { state: "ok", rows: [...EDGE_HEALTH.service_health.rows.map((row) => ({ ...row, updated_at: CLEAR_FIXTURE_TIME, last_attempt_finished_at: CLEAR_FIXTURE_TIME })), ...["analyst-ratings", "gamma-rotation-scan", "informed-flow", "vol-skew-mr", "orders-read-compare", "flex-web-service", "performance"].map((service) => ({ service, state: service === "informed-flow" ? "error" : "ok", updated_at: "2020-01-01T00:00:00Z", last_error: null })), { service: "knowledge-ingest", state: "ok", updated_at: "2020-01-01T00:00:00Z", last_error: null }, { service: "db-backup", state: "ok", updated_at: CLEAR_FIXTURE_TIME, last_error: '{"archive":"/home/radon/backups/db.sql.gz"}' }] }, external_probe: { source: "sample", ok: 1, latency_ms: 142, checked_at: CLEAR_FIXTURE_TIME } },
         "/api/admin/reliability": { window_ms: 604800000, since: "2026-08-28T18:00:00.000Z", baseline: { "portfolio-sync": "ok" }, events: [{ service: "portfolio-sync", state: "ok", created_at: CLEAR_FIXTURE_TIME }] },
         "/api/admin/host-metrics": { window_ms: 3600000, since: "2026-09-04T17:00:00.000Z", rows: Array.from({ length: 6 }, (_, i) => ({ taken_at: new Date(Date.parse(CLEAR_FIXTURE_TIME) - (5 - i) * 60000).toISOString(), cpu_pct: 12 + i, mem_used_mb: 2600, mem_avail_mb: 5200, load1: 0.3, swap_used_mb: 0, loop_lag_ms: 3 })) },
         "/api/admin/slo": { window_ms: 604800000, since: "2026-08-28T18:00:00.000Z", rows: [{ run_at: CLEAR_FIXTURE_TIME, edge_ok: 1, user_path_ok: 1, freshness_ok: 1, tick_fresh: 1, scan_fresh: 1, latency_ms: 142 }] },
@@ -158,6 +158,8 @@ for (const viewport of [{ label: "desktop", width: 1440, height: 1000 }, { label
     }
     await expect(page.getByTestId("writer-row-informed-flow").locator(".admin-pill-negative")).toHaveText("error");
     await expect(page.getByTestId("writer-row-knowledge-ingest")).toContainText("STALE");
+    await expect(page.getByTestId("writer-row-db-backup")).toContainText("Last run completed.");
+    await expect(page.getByTestId("writer-row-db-backup")).not.toContainText("Writer update failed");
     await expect(page.getByTestId("reliability-strip")).toContainText("1 stale");
     await expect(page.getByTestId("trading-halt-state")).toHaveText("Active");
     await page.evaluate(() => document.fonts.ready);
