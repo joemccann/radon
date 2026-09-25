@@ -42,6 +42,9 @@ readonly PROVENANCE_REMOTE_URL="${RADON_PROVENANCE_REMOTE_URL:-https://github.co
 # radon-owned checkout store supplies only its HEAD commit id.
 readonly PROVISION_ROOT="${RADON_PROVISION_ROOT:-/opt/radon-provision}"
 readonly PROVISION_GIT_DIR="${PROVISION_ROOT}/radon.git"
+# Shared with radon-deploy-root: the newest main commit whose control plane
+# root has installed. Root never installs from an older commit.
+readonly PROVISION_FLOOR_FILE="${PROVISION_ROOT}/control-plane-floor"
 # Docker documents this fingerprint for its apt signing key.
 readonly DOCKER_GPG_FINGERPRINT="9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
 # NodeSource nodesource-repo.gpg.key (NSolid <nsolid-gpg@nodesource.com>).
@@ -487,6 +490,35 @@ resolve_provision_commit() {
     PROVISION_COMMIT="$PROVENANCE_ANCHOR_SHA"
     PROVISION_HEAD_ON_MAIN=0
   fi
+  if ! provision_commit_meets_floor "$PROVISION_COMMIT"; then
+    log_error "Provenance failed: ${PROVISION_COMMIT} is older than the installed control plane (${PROVISION_FLOOR_FILE})"
+    return 1
+  fi
+}
+
+# True when $1 is the recorded floor commit or descends from it, decided in
+# the root store. No record yet: any main commit. An unreadable record: none.
+provision_commit_meets_floor() {
+  local commit="$1" floor=""
+  [[ -e "$PROVISION_FLOOR_FILE" || -L "$PROVISION_FLOOR_FILE" ]] || return 0
+  [[ -f "$PROVISION_FLOOR_FILE" && ! -L "$PROVISION_FLOOR_FILE" ]] || return 1
+  IFS= read -r floor < "$PROVISION_FLOOR_FILE" || true
+  [[ "$floor" =~ ^[0-9a-f]{40}$ ]] || return 1
+  provision_git merge-base --is-ancestor "$floor" "$commit" 2>/dev/null
+}
+
+# Moves the floor to PROVISION_COMMIT after an install from it. Never lowers it.
+record_provision_floor() {
+  local tmp
+  provision_commit_meets_floor "$PROVISION_COMMIT" || return 0
+  tmp="$(mktemp "${PROVISION_FLOOR_FILE}.XXXXXX")" || return 1
+  if printf '%s\n' "$PROVISION_COMMIT" > "$tmp" && chmod 0644 "$tmp" \
+    && mv -f -- "$tmp" "$PROVISION_FLOOR_FILE"; then
+    return 0
+  fi
+  rm -f -- "$tmp"
+  log_error "Could not record the installed control-plane commit in ${PROVISION_FLOOR_FILE}"
+  return 1
 }
 
 # stage_provisioned_blob <rel> <source> <staged> <label>
@@ -553,6 +585,7 @@ stage_from_checkout() {
   mkdir -p "$(dirname "$target")"
   install -m "$mode" "$@" "$staged" "$target"
   rm -f "$staged"
+  record_provision_floor
 }
 
 # -- Base packages ----------------------------------------------------------
@@ -1549,6 +1582,7 @@ install_docker_gw() {
   mkdir -p "$(dirname "$compose_target")"
   install -m 0644 ${owner_args[@]+"${owner_args[@]}"} "$staged" "$compose_target"
   rm -f "$staged"
+  record_provision_floor || return 1
 
   log_success "Gateway docker shim installed"
 }
