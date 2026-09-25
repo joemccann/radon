@@ -277,6 +277,22 @@ def restart_backoff_state() -> Dict:
 # settle budget so it clears on the next poll once the transition converges.
 BROKER_TRANSITION_HOLD_SECS = 60
 
+# Synthetic hold while the broker status probe fails: its lease is unknown, and
+# treating unknown as free let the operator fire Force 2FA into a held lease
+# (409). Short so the next successful poll clears it.
+BROKER_UNREACHABLE_HOLD_SECS = 15
+
+
+def _synthetic_push_lock(holder: str, hold_secs: int, reason: str) -> Dict:
+    now = time.time()
+    return {
+        "holder": holder,
+        "acquired_at": now,
+        "expires_at": now + hold_secs,
+        "remaining_secs": hold_secs,
+        "reason": reason,
+    }
+
 
 async def _overlay_broker_push_lock(backoff: Dict) -> None:
     """Replace ``push_lock`` with the broker's lease on the app role."""
@@ -287,6 +303,9 @@ async def _overlay_broker_push_lock(backoff: Dict) -> None:
     status, payload = await services._remote_status()
     if status == -1 or not isinstance(payload, dict):
         backoff["source"] = "broker-unreachable"
+        backoff["push_lock"] = _synthetic_push_lock(
+            "broker:unreachable", BROKER_UNREACHABLE_HOLD_SECS, "broker lease state unknown"
+        )
         return
     backoff["source"] = "broker"
     lease = payload.get("lease")
@@ -307,14 +326,9 @@ async def _overlay_broker_push_lock(backoff: Dict) -> None:
         "pending" if str(payload.get("detail") or payload.get("state") or "").strip() == "transition-pending" else None
     )
     if transition:
-        now = time.time()
-        backoff["push_lock"] = {
-            "holder": "broker:transition-pending",
-            "acquired_at": now,
-            "expires_at": now + BROKER_TRANSITION_HOLD_SECS,
-            "remaining_secs": BROKER_TRANSITION_HOLD_SECS,
-            "reason": "broker Gateway transition pending",
-        }
+        backoff["push_lock"] = _synthetic_push_lock(
+            "broker:transition-pending", BROKER_TRANSITION_HOLD_SECS, "broker Gateway transition pending"
+        )
         return
     backoff["push_lock"] = None
 

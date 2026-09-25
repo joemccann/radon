@@ -532,6 +532,18 @@ class TestSplit2faContract:
         assert lock["remaining_secs"] > 0
         assert gw["restart_backoff"]["source"] == "broker"
 
+    def test_unreachable_broker_fails_closed_as_held_lease(self, monkeypatch):
+        import asyncio
+
+        self._stub_status(monkeypatch, -1, {"ok": False, "detail": "timed out"})
+        gw = asyncio.run(server.ib_gateway.check_ib_gateway())
+        backoff = gw["restart_backoff"]
+        assert backoff["source"] == "broker-unreachable"
+        lock = backoff["push_lock"]
+        assert lock is not None
+        assert lock["remaining_secs"] > 0
+        assert "unreachable" in lock["holder"]
+
     def test_no_broker_lease_means_no_push_lock(self, monkeypatch):
         import asyncio
 
