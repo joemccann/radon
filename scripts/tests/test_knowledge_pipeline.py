@@ -380,6 +380,24 @@ class TestGetEmbedder:
         assert len(build_calls) == 1
 
 
+    def test_large_corpus_uses_bounded_inference_batches_without_dropping_rows(
+        self, monkeypatch, fresh_embedder_cache
+    ):
+        calls = []
+        class Model:
+            def __init__(self, name):
+                pass
+            def embed(self, texts, batch_size=256):
+                calls.append(batch_size)
+                for text in texts:
+                    yield [float(text)] * embed_mod.EMBEDDING_DIM
+        monkeypatch.setattr(embed_mod, "_import_text_embedding", lambda: Model)
+        vectors = embed_mod.get_embedder()([str(i) for i in range(201)])
+        assert calls == [16]
+        assert len(vectors) == 201
+        assert [vector[0] for vector in vectors] == list(range(201))
+
+
 class TestEmbeddingText:
     def test_prefers_summary_over_content(self):
         assert embed_mod.embedding_text("Title", "the summary", "the content") == (
@@ -1089,3 +1107,122 @@ class TestBatchedWrites:
             [("doc-a", 0), ("doc-a", 1), ("doc-a", 2)],
             [("doc-b", 0)],
         ]
+
+
+class TestPreparedBatchRetry:
+    def test_busy_write_reuses_enriched_batch_on_fresh_connection(
+        self, db, monkeypatch, fake_distill, fake_embedder
+    ):
+        real_upsert = ingest_mod.upsert_documents
+        calls, connections = [], []
+        monkeypatch.setattr(ingest_mod.time, "sleep", lambda _: None)
+
+        def persist(connection, batch):
+            calls.append(batch)
+            return real_upsert(connection, batch)
+
+        class Connection:
+            def __init__(self, busy):
+                self.busy = busy
+            def execute(self, sql, args=()):
+                if self.busy and sql.startswith("BEGIN"):
+                    raise RuntimeError("SQLITE_BUSY: database is locked")
+                return db.execute(sql, args)
+            def commit(self):
+                db.commit()
+            def rollback(self):
+                if self.busy:
+                    raise RuntimeError("no transaction is active")
+                db.rollback()
+
+        def fresh():
+            connection = Connection(busy=len(connections) < 2)
+            connections.append(connection)
+            return connection
+
+        monkeypatch.setattr(ingest_mod, "upsert_documents", persist)
+        result = ingest_mod.ingest_source(db, _module([_chunk("doc-a")]), db_factory=fresh)
+        assert result["inserted"] == 1
+        assert len(calls) == 3
+        assert all(batch is calls[0] for batch in calls)
+        assert len(fake_distill) == 1
+        assert len(fake_embedder) == 1
+        assert len(connections) >= 3
+        assert len({id(connection) for connection in connections}) == len(connections)
+        assert _rows(db)[0][3] == "distilled: alpha content"
+
+    def test_exhausted_batch_does_not_restart_source_or_prune(
+        self, db, monkeypatch, fake_distill, fake_embedder
+    ):
+        import contextlib
+        import db.service_cycle as cycles
+        import knowledge.sources as sources
+
+        fetches, writes = [], []
+        module = _module([_chunk("doc-a")])
+        original_fetch = module.fetch
+        def fetch(connection):
+            fetches.append(1)
+            return original_fetch(connection)
+        module.fetch = fetch
+        def busy(*args):
+            writes.append(1)
+            raise RuntimeError("SQLITE_BUSY: database is locked")
+        monkeypatch.setattr(ingest_mod.time, "sleep", lambda _: None)
+        monkeypatch.setattr(ingest_mod, "_fresh_db", lambda: db)
+        monkeypatch.setattr(ingest_mod, "upsert_documents", busy)
+        monkeypatch.setattr(ingest_mod, "delete_source_docs", lambda *a: pytest.fail("pruned after failed write"))
+        monkeypatch.setattr(sources, "ALL_SOURCES", {module.SOURCE: module})
+        monkeypatch.setattr(cycles, "service_cycle", lambda *a, **k: contextlib.nullcontext())
+        with pytest.raises(RuntimeError, match="knowledge ingest failed"):
+            ingest_mod.main(["--source", module.SOURCE])
+        assert len(writes) == 4
+        assert len(fetches) == 1
+        assert len(fake_distill) == 1
+        assert len(fake_embedder) == 1
+        assert _rows(db) == []
+
+    def test_later_failed_batch_retains_prior_commit(self, db, monkeypatch):
+        real_upsert = ingest_mod.upsert_documents
+        monkeypatch.setattr(ingest_mod, "_INGEST_BATCH_DOCS", 1)
+        monkeypatch.setattr(ingest_mod.time, "sleep", lambda _: None)
+        def persist(connection, batch):
+            if batch[0].doc_key == "doc-b":
+                raise RuntimeError("SQLITE_BUSY")
+            return real_upsert(connection, batch)
+        monkeypatch.setattr(ingest_mod, "upsert_documents", persist)
+        with pytest.raises(RuntimeError, match="prepared write failed"):
+            ingest_mod.ingest_source(
+                db, _module([_chunk("doc-a"), _chunk("doc-b")]),
+                distill_enabled=False, embed_enabled=False,
+            )
+        assert [row[0] for row in _rows(db)] == ["doc-a"]
+
+    def test_prune_retry_does_not_repeat_upsert(self, db, monkeypatch):
+        real_delete = ingest_mod.delete_source_docs
+        calls = []
+        monkeypatch.setattr(ingest_mod.time, "sleep", lambda _: None)
+        def prune(connection, source, keys):
+            calls.append(1)
+            if len(calls) == 1:
+                raise RuntimeError("stream not found")
+            return real_delete(connection, source, keys)
+        monkeypatch.setattr(ingest_mod, "delete_source_docs", prune)
+        result = ingest_mod.ingest_source(
+            db, _module([_chunk("doc-a")]), distill_enabled=False, embed_enabled=False,
+        )
+        assert result["inserted"] == 1
+        assert result["skipped"] == 0
+        assert len(calls) == 2
+
+    def test_non_transient_write_fails_without_retry(self, db, monkeypatch):
+        calls = []
+        def invalid(*args):
+            calls.append(1)
+            raise ValueError("no such table: knowledge")
+        monkeypatch.setattr(ingest_mod, "upsert_documents", invalid)
+        with pytest.raises(ValueError, match="no such table"):
+            ingest_mod.ingest_source(
+                db, _module([_chunk("doc-a")]), distill_enabled=False, embed_enabled=False,
+            )
+        assert len(calls) == 1

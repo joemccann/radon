@@ -298,3 +298,47 @@ class TestDeleteSourceDocs:
 
         assert delete_source_docs(db, "docs", []) == 0
         assert len(_knowledge_rows(db)) == 1
+
+
+@pytest.mark.parametrize("operation", ["upsert", "prune"])
+def test_write_lock_precedes_read_snapshot(tmp_path, operation):
+    """A competing writer cannot invalidate our read snapshot before mutation."""
+    import sqlite3
+    path = str(tmp_path / "concurrent.sqlite")
+    connection = sqlite3.connect(path, timeout=0)
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute(_BOOTSTRAP_SQL)
+    for sql in _split_statements(_MIGRATION.read_text()):
+        if "libsql_vector_idx" not in sql:
+            connection.execute(sql)
+    connection.commit()
+    competitor = sqlite3.connect(path, timeout=0)
+    competing_locks = []
+
+    class InterleavedConnection:
+        def execute(self, sql, args=()):
+            if sql.startswith("SELECT"):
+                try:
+                    competitor.execute("BEGIN IMMEDIATE")
+                except sqlite3.OperationalError as exc:
+                    assert "locked" in str(exc)
+                    competing_locks.append(False)
+                else:
+                    competing_locks.append(True)
+                    competitor.rollback()
+            return connection.execute(sql, args)
+        def commit(self):
+            connection.commit()
+        def rollback(self):
+            connection.rollback()
+
+    try:
+        if operation == "upsert":
+            assert upsert_documents(InterleavedConnection(), [_doc()])["inserted"] == 1
+        else:
+            assert delete_source_docs(InterleavedConnection(), "docs", ["absent"]) == 0
+        assert competing_locks
+        assert not any(competing_locks)
+    finally:
+        competitor.close()
+        connection.close()

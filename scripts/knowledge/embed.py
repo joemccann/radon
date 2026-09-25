@@ -22,6 +22,9 @@ EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 EMBEDDING_DIM = 384
 DISABLE_ENV = "RADON_KB_EMBED_DISABLED"
 CONTENT_HEAD_CHARS = 2000
+# fastembed defaults to 256: a 200-chunk catch-up peaked at 4.3 GiB RSS.
+# Keep the model inference working set bounded independently of write batches.
+EMBEDDING_BATCH_SIZE = 16
 
 Embedder = Callable[[Sequence[str]], list[list[float]]]
 
@@ -78,6 +81,9 @@ def _build_embedder() -> Embedder | None:
         return None
 
     def embed_texts(texts: Sequence[str]) -> list[list[float]]:
-        return [[float(value) for value in vector] for vector in model.embed(list(texts))]
+        return [
+            [float(value) for value in vector]
+            for vector in model.embed(list(texts), batch_size=EMBEDDING_BATCH_SIZE)
+        ]
 
     return embed_texts
