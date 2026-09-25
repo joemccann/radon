@@ -65,11 +65,11 @@ describe("PlannedCharts", () => {
     const move = screen.getByRole("img", { name: /10-year change/i });
     expect(move.getAttribute("data-axis-min")).toBe("0");
     expect(move.getAttribute("data-axis-max")).toBe("40");
-    const odds = screen.getByRole("img", { name: /October hike/i });
-    expect(odds.getAttribute("data-axis-min")).toBe("0");
-    expect(odds.getAttribute("data-axis-max")).toBe("100");
-    expect(odds.textContent).not.toMatch(/36/);
-    expect(screen.getByText("+36 bp").closest("[data-unit]")?.getAttribute("data-unit")).toBe("bp");
+    expect(move.getAttribute("data-unit")).toBe("bp");
+    expect(move.textContent).toMatch(/\+25 bp/);
+    expect(move.textContent).toMatch(/\+35 bp/);
+    expect(move.textContent).not.toMatch(/71|36/);
+    expect(screen.queryByRole("img", { name: /October hike/i })).toBeNull();
     expect(screen.getByText(/Not a printed coupon/)).toBeTruthy();
   });
 });

@@ -1,7 +1,6 @@
 import type { CSSProperties } from "react";
 
-import { AiCreditYieldChart } from "@/components/AiCreditYieldChart";
-import { RatesMoveChart } from "@/components/RatesMoveChart";
+import { ResearchChart } from "@/components/ResearchChart";
 import { chartsForPost, type ChartPlan } from "@/lib/planCharts";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -31,33 +30,9 @@ export function PlannedCharts({ plans, date }: { plans: readonly ChartPlan[]; da
   const label = formatResearchDate(date);
   return (
     <div data-slot="under-body" data-generated-charts="" style={stackStyle}>
-      {plans.map((plan, index) => plan.kind === "levels" ? (
-        <AiCreditYieldChart
-          key={`${plan.kind}-${index}`}
-          marks={plan.marks}
-          title={plan.title}
-          ariaLabel={plan.title}
-          dek={plan.dek ?? null}
-          axis={plan.axis}
-          ticks={plan.ticks}
-          reference={plan.reference ?? null}
-          source={plan.sourceNote ?? null}
-          eyebrow={label ? `Yields · ${label}` : "Yields"}
-        />
-      ) : (
-        <RatesMoveChart
-          key={`${plan.kind}-${index}`}
-          bars={plan.bars}
-          axisMax={plan.axisMax || undefined}
-          ticks={plan.ticks}
-          probability={plan.probability ?? null}
-          readout={plan.readout ?? null}
-          title={plan.title}
-          barAria={plan.barAria}
-          note={plan.note ?? null}
-          source={null}
-          eyebrow={label ? `Rates · ${label}` : "Rates"}
-        />
+      {label ? <p style={dateStyle}>{label}</p> : null}
+      {plans.map((plan, index) => (
+        <ResearchChart key={`${plan.kind}-${index}`} plan={plan} />
       ))}
     </div>
   );
@@ -72,4 +47,14 @@ const stackStyle: CSSProperties = {
   flexDirection: "column",
   gap: 12,
   marginTop: 16,
+};
+
+const dateStyle: CSSProperties = {
+  margin: 0,
+  color: "var(--text-muted)",
+  fontFamily: "var(--font-mono)",
+  fontSize: 12,
+  fontWeight: 500,
+  letterSpacing: "0.04em",
+  textTransform: "uppercase",
 };
