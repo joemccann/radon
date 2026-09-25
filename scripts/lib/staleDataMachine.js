@@ -152,9 +152,39 @@ export function summarizeSubscriptionFreshness(subjects, now) {
     const oldest = timestamps.every(Number.isFinite) ? Math.min(...timestamps) : 0;
     return { activeSubscriptions: 0, subscribedSymbols, lastTickAt: oldest };
   }
-  const timestamps = active.map((subject) => Number(subject.lastTickAt));
-  const oldest = timestamps.every(Number.isFinite) ? Math.min(...timestamps) : 0;
-  return { activeSubscriptions: active.length, subscribedSymbols, lastTickAt: oldest };
+  // The socket ladder asks "is the data plane alive?", so any active tick
+  // answers it. Taking the OLDEST let one silent symbol bounce the whole
+  // socket every ~75s while live ticks reset the ladder before it could
+  // escalate. Silent symbols on a live plane: findStaleSubjectsOnLivePlane.
+  return { activeSubscriptions: active.length, subscribedSymbols, lastTickAt: newestTickAt(active) };
+}
+
+function newestTickAt(subjects) {
+  const timestamps = subjects.map((subject) => Number(subject.lastTickAt)).filter(Number.isFinite);
+  return timestamps.length > 0 ? Math.max(...timestamps) : 0;
+}
+
+function isSubjectStale(subject, now) {
+  const lastTickAt = Number(subject.lastTickAt);
+  return !Number.isFinite(lastTickAt) || now - lastTickAt > STALE_DATA_THRESHOLD_MS;
+}
+
+/**
+ * Keys of active subjects that have gone silent while the rest of the data
+ * plane still ticks. The relay resubscribes just these tickers: a socket
+ * bounce cannot fix one quiet or broken contract, and escalating would spend
+ * a 2FA-gated Gateway restart on it. Empty when the whole plane is silent,
+ * because the socket ladder owns that case.
+ *
+ * @param {{key: string, active: boolean, lastTickAt: number}[]} subjects
+ * @param {number} now
+ * @returns {string[]}
+ */
+export function findStaleSubjectsOnLivePlane(subjects, now) {
+  const active = subjects.filter((subject) => subject?.active === true);
+  const stale = active.filter((subject) => isSubjectStale(subject, now));
+  if (stale.length === active.length) return [];
+  return stale.map((subject) => subject.key);
 }
 
 /**
