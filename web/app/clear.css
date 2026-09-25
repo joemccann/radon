@@ -117,6 +117,8 @@
   color: var(--text-primary);
 }
 
+.radon-clear .btn-quick { padding-inline: 8px; }
+
 .radon-clear :is(.btn-secondary, .btn-quick, .btn-sync):hover:not(:disabled) {
   background: var(--bg-subtle);
   border-color: var(--text-muted);
