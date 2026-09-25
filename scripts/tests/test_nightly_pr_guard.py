@@ -139,6 +139,8 @@ def test_main_preserves_arguments_for_normal_reporting(monkeypatch):
 @pytest.mark.parametrize("args", [
     ["pr", "merge", "1"], ["pr", "-R", "a/b", "merge", "1", "--squash"], ["-R", "a/b", "pr", "merge", "1"],
     ["api", "repos/a/b/pulls/1/merge", "-X", "PUT"],
+    ["api", "-X", "PUT", "repos/a/b/pulls/1/merge"], ["api", "--method", "PUT", "repos/a/b/pulls/1/merge"],
+    ["api", "-H", "Accept: application/json", "repos/a/b/pulls/1/merge", "-X", "PUT"],
     ["api", "graphql", "-f", "query=mutation { mergePullRequest(input:{}) { clientMutationId } }"],
     ["api", "graphql", "-f", "query=mutation { enablePullRequestAutoMerge(input:{}) { clientMutationId } }"],
 ])
@@ -151,6 +153,8 @@ def test_nightly_loops_never_merge(args):
 @pytest.mark.parametrize("args", [
     ["issue", "comment", "1", "--body", "x"], ["issue", "-R", "a/b", "create", "-t", "x"], ["issue", "edit", "1"],
     ["api", "repos/a/b/issues/1/comments", "-f", "body=x"], ["api", "repos/a/b/issues", "-X", "POST"],
+    ["api", "-X", "POST", "repos/a/b/issues/1/comments", "-f", "body=x"],
+    ["api", "--method", "PATCH", "repos/a/b/issues/1"], ["api", "-H", "Accept: x", "repos/a/b/issues", "-f", "title=x"],
 ])
 def test_security_loops_cannot_write_public_issues(loop, args):
     with pytest.raises(mod.Refused, match="wrapper"):

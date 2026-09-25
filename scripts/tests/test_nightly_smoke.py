@@ -65,3 +65,12 @@ def test_each_row_names_the_plists_clone():
     for label, (clone, _wrapper, _skill) in _table().items():
         if plists[label][0]:
             assert clone == plists[label][0], label
+
+
+def test_origin_main_is_read_through_the_host_gitdir():
+    # A clone's .git points at its agent gitdir, which the loop agent can
+    # write; the hand-run preflight must read blobs through the host gitdir.
+    text = SMOKE.read_text(encoding="utf-8")
+    assert re.search(r'^REF="\$W/\.gitdirs/[a-z-]+\.git"', text, re.M)
+    assert "git -C" not in text
+    assert "core.hooksPath" in text.split("\nloop() {")[0]

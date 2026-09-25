@@ -90,8 +90,8 @@ def refused_action(args: list[str], loop: str = "") -> str:
     the security loops, any public issue write."""
     prefix = _positional_prefix(args)
     tail = args[args.index("api") + 1:] if "api" in args else []
-    endpoint = next((a for a in tail if not a.startswith("-")), "")
-    if prefix == ["pr", "merge"] or re.search(r"(?:^|/)repos/[^/]+/[^/]+/pulls/\d+/merge/?$", endpoint) \
+    # Flag values (-X PUT, -H ...) may precede the endpoint, so match any token.
+    if prefix == ["pr", "merge"] or any(re.search(r"(?:^|/)repos/[^/]+/[^/]+/pulls/\d+/merge/?$", a) for a in tail) \
             or (tail and re.search(r"mergePullRequest|enablePullRequestAutoMerge", " ".join(tail))):
         return "nightly loops never merge; the operator merges"
     if loop in SECURITY_LOOPS:
@@ -99,7 +99,7 @@ def refused_action(args: list[str], loop: str = "") -> str:
             return "security loops never write issues; the wrapper posts the sanitized comment"
         method = option(tail, "--method", "-X").upper()
         body = any(a in ("--input", "--field", "--raw-field", "-f", "-F") or a.startswith(("--input=", "--field=", "--raw-field=", "-f", "-F")) for a in tail)
-        if re.search(r"(?:^|/)repos/[^/]+/[^/]+/issues(?:/|$)", endpoint) and (method not in ("", "GET") or body):
+        if any(re.search(r"(?:^|/)repos/[^/]+/[^/]+/issues(?:/|$)", a) for a in tail) and (method not in ("", "GET") or body):
             return "security loops never write issues; the wrapper posts the sanitized comment"
     return ""
 
