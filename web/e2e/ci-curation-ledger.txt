@@ -73,7 +73,6 @@ chain-held-leg-prices.spec.ts
 chain-sticky-header.spec.ts
 chain-strikes-selector.spec.ts
 clear-accessibility.spec.ts
-clear-admin-component.spec.ts
 clear-all-pages.spec.ts
 clear-auth-pages.spec.ts
 clear-metric-accessibility.spec.ts
@@ -238,7 +237,6 @@ ws-connection-stability.spec.ts
 #   inventory, not a P0 financial path. Compiled Chromium passed locally
 #   against next start. Keep out of the 25-min smoke job until preflighted
 #   3x on the shared runner.
-# REVIEWED 2026-09-06 clear-admin-component.spec.ts — held out: isolated
 #   admin-component document, not a P0 financial path. Compiled Chromium
 #   passed locally against next start.
 # REVIEWED 2026-09-06 clear-all-pages.spec.ts — held out: 117-case route
