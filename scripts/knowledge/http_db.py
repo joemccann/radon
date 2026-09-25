@@ -17,6 +17,9 @@ from db.hrana_http import HranaHttpError, _encode_arg, _refuse_pytest_pollution
 from health_service.turso_http import http_url_from_libsql, read_env
 
 REQUEST_TIMEOUT = 4.0
+# One authoritative document can contain hundreds of SQL steps. This is a
+# separate finite receipt allowance, not an increase to reads or cleanup.
+TRANSACTION_TIMEOUT = 30.0
 MAX_REQUEST_BYTES = 8 * 1024 * 1024
 MAX_TRANSACTION_STEPS = 4096
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024  # paginated source content, not tiny write receipts
@@ -93,7 +96,7 @@ class Connection:
                 or url.query or url.fragment):
             raise HranaHttpError("unsafe Hrana stream routing URL")
 
-    def _request(self, requests, *, closing=False):
+    def _request(self, requests, *, closing=False, timeout=REQUEST_TIMEOUT):
         _refuse_pytest_pollution()
         payload = json.dumps({"baton": self._baton, "requests": requests}).encode()
         if len(payload) > MAX_REQUEST_BYTES:
@@ -102,8 +105,8 @@ class Connection:
             self._url.rstrip("/") + "/v2/pipeline", data=payload, method="POST",
             headers={"Content-Type": "application/json", "Authorization": "Bearer " + self._token},
         )
-        deadline = time.monotonic() + REQUEST_TIMEOUT
-        with self._opener.open(request, timeout=REQUEST_TIMEOUT) as response:
+        deadline = time.monotonic() + timeout
+        with self._opener.open(request, timeout=timeout) as response:
             chunks, size = [], 0
             while True:
                 if time.monotonic() >= deadline:
@@ -217,11 +220,12 @@ class Connection:
                       "stmt": {"sql": "COMMIT", "want_rows": True}})
         steps.append({"condition": {"type": "not", "cond": {"type": "ok", "step": commit_index}},
                       "stmt": {"sql": "ROLLBACK", "want_rows": True}})
+        self.last_transaction_step_count = len(steps)
         try:
             replies = self._request([
                 {"type": "batch", "batch": {"steps": steps}},
                 {"type": "close"},
-            ], closing=True)
+            ], closing=True, timeout=TRANSACTION_TIMEOUT)
             first = replies[0]
             if first.get("type") == "error":
                 error = first.get("error") or {}
