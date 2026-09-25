@@ -1256,6 +1256,8 @@ if command == "show":
         print(data["units"].get(unit, {{}}).get("load", "loaded"))
     elif "--property=FragmentPath" in args:
         print(data["units"].get(unit, {{}}).get("fragment", ""))
+    elif "--property=Result" in args:
+        print(data["units"].get(unit, {{}}).get("result", "success"))
     elif "--property=Type" in args:
         print(data["units"].get(unit, {{"type": "simple"}})["type"])
     else:
@@ -1277,13 +1279,18 @@ if command in {{"stop", "start", "restart"}}:
         handle.write(command + " " + " ".join(args[1:]) + "\\n")
     if command == "stop" and any(data["units"].get(unit, {{}}).get("load", "loaded") != "loaded" or data["units"].get(unit, {{}}).get("stop_fail") for unit in args[1:]):
         raise SystemExit(5)
+    if command in {{"start", "restart"}} and any(data["units"].get(unit, {{}}).get("start_fail") for unit in args[1:]):
+        raise SystemExit(6)
     for unit in args[1:]:
         if unit not in data["units"]:
             continue
         if command == "stop" and data["units"][unit]["state"] == "failed":
             continue
-        if command == "stop" or data["units"][unit]["type"] == "oneshot":
+        if command == "stop":
             data["units"][unit]["state"] = "inactive"
+        elif data["units"][unit]["type"] == "oneshot":
+            data["units"][unit]["state"] = data["units"][unit].get("start_state", "inactive")
+            data["units"][unit]["result"] = data["units"][unit].get("start_result", "success")
         elif data["units"][unit].get("start_limited"):
             data["units"][unit]["state"] = "failed"
         else:
@@ -1439,6 +1446,79 @@ for path in paths:
         assert committed.returncode == 0, committed.stdout + committed.stderr
         assert not active_state.exists()
         assert not Path(f"{active_state}.inventory").exists()
+
+    @pytest.mark.parametrize("start_state", ["activating", "inactive"])
+    @pytest.mark.parametrize("verb", ["recover", "restart-managed"])
+    def test_interrupted_backup_resumes_once_without_replaying_other_oneshots(
+        self, tmp_path, start_state, verb
+    ):
+        import json
+
+        env, state_file, systemctl_log, _, active_state = self._root_helper_fixture(tmp_path)
+        data = json.loads(state_file.read_text())
+        backup = "radon-db-backup.service"
+        data["units"][backup] = {
+            "state": "activating", "type": "oneshot", "start_state": start_state,
+        }
+        state_file.write_text(json.dumps(data))
+        stopped = subprocess.run(["bash", str(ROOT_HELPER), "stop-clean"], env=env, capture_output=True, text=True)
+        assert stopped.returncode == 0, stopped.stderr
+        assert f"{backup}\toneshot" in active_state.read_text()
+        for _ in range(2):
+            resumed = subprocess.run(["bash", str(ROOT_HELPER), verb], env=env, capture_output=True, text=True)
+            assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+        starts = [line.split()[1:] for line in systemctl_log.read_text().splitlines() if line.startswith("start ")]
+        assert sum(backup in units for units in starts) == 1
+        assert not any("radon-margin-debt-refresh.service" in units for units in starts)
+        verified = subprocess.run(["bash", str(ROOT_HELPER), "verify-restored"], env=env, capture_output=True, text=True)
+        assert verified.returncode == 0, verified.stderr
+        data = json.loads(state_file.read_text())
+        data["units"][backup].update(state="failed", result="exit-code")
+        state_file.write_text(json.dumps(data))
+        failed = subprocess.run(["bash", str(ROOT_HELPER), "verify-restored"], env=env, capture_output=True, text=True)
+        assert failed.returncode == 0, failed.stderr
+        # Eventual off-box failure belongs to backup health, not app rollback.
+        again = subprocess.run(["bash", str(ROOT_HELPER), verb], env=env, capture_output=True, text=True)
+        assert again.returncode == 0, again.stderr
+        starts = [line.split()[1:] for line in systemctl_log.read_text().splitlines() if line.startswith("start ")]
+        assert sum(backup in units for units in starts) == 1
+
+    def test_backup_start_rejection_does_not_commit_restore_and_can_retry(self, tmp_path):
+        import json
+
+        env, state_file, systemctl_log, _, active_state = self._root_helper_fixture(tmp_path)
+        data = json.loads(state_file.read_text())
+        backup = "radon-db-backup.service"
+        data["units"][backup] = {"state": "activating", "type": "oneshot", "start_fail": True}
+        state_file.write_text(json.dumps(data))
+        stopped = subprocess.run(["bash", str(ROOT_HELPER), "stop-clean"], env=env, capture_output=True, text=True)
+        assert stopped.returncode == 0, stopped.stderr
+        rejected = subprocess.run(["bash", str(ROOT_HELPER), "recover"], env=env, capture_output=True, text=True)
+        assert rejected.returncode == 6, rejected.stderr
+        assert not Path(f"{active_state}.restored").exists()
+        data = json.loads(state_file.read_text())
+        data["units"][backup]["start_fail"] = False
+        state_file.write_text(json.dumps(data))
+        retried = subprocess.run(["bash", str(ROOT_HELPER), "recover"], env=env, capture_output=True, text=True)
+        assert retried.returncode == 0, retried.stderr
+        assert Path(f"{active_state}.restored").exists()
+        starts = [line.split()[1:] for line in systemctl_log.read_text().splitlines() if line.startswith("start ")]
+        assert sum(backup in units for units in starts) == 2
+
+    def test_dormant_backup_is_not_started_by_deploy(self, tmp_path):
+        import json
+
+        env, state_file, systemctl_log, _, active_state = self._root_helper_fixture(tmp_path)
+        data = json.loads(state_file.read_text())
+        backup = "radon-db-backup.service"
+        data["units"][backup] = {"state": "inactive", "type": "oneshot"}
+        state_file.write_text(json.dumps(data))
+        for verb in ("stop-clean", "recover"):
+            result = subprocess.run(["bash", str(ROOT_HELPER), verb], env=env, capture_output=True, text=True)
+            assert result.returncode == 0, result.stderr
+        assert backup not in active_state.read_text()
+        starts = [line for line in systemctl_log.read_text().splitlines() if line.startswith("start ")]
+        assert all(backup not in line.split()[1:] for line in starts)
 
     def test_durable_snapshot_survives_simulated_reboot_run_cleanup(
         self, tmp_path: Path

@@ -673,6 +673,7 @@ resume_active_snapshot() {
   local unit type extra state
   local services=()
   local timers=()
+  local backups=()
   local already_resumed=0
   [[ -f "$ACTIVE_STATE_FILE" ]] || return 0
   validate_active_snapshot || return 1
@@ -680,6 +681,12 @@ resume_active_snapshot() {
   while IFS=$'\t' read -r unit type extra; do
     is_core_service "$unit" && continue
     if [[ "$type" == oneshot ]]; then
+      if [[ "$unit" == radon-db-backup.service && "$already_resumed" == 0 ]]; then
+        state="$(active_state "$unit")" || return 69
+        if [[ "$state" != active && "$state" != activating ]]; then
+          backups+=("$unit")
+        fi
+      fi
       continue
     fi
     state="$(active_state "$unit")" || return 69
@@ -694,6 +701,13 @@ resume_active_snapshot() {
   for unit in "${timers[@]}"; do
     wait_for_unit_state "$unit" active || return $?
   done
+  # Only the interrupted backup is replay-safe: publication is atomic and
+  # incomplete dumps remain private .tmp files. A successful job submission
+  # restores its execution; eventual dump/upload health belongs to its writer,
+  # never the app deployment gate. The marker prevents duplicate submissions.
+  if (( ${#backups[@]} > 0 )); then
+    systemctl_bounded --no-block start "${backups[@]}" || return $?
+  fi
   : > "$RESTORED_STATE_FILE"
   chmod 0600 "$RESTORED_STATE_FILE"
   "$SYNC" -f "$RESTORED_STATE_FILE"
