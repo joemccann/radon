@@ -1160,6 +1160,15 @@ provision_git() {
     git_bounded --git-dir="$PROVISION_GIT_DIR" "$@"
 }
 
+# The tip read names no repository, so it runs from / with no system or
+# global config: sudo keeps the caller's cwd, and radon owns every repo it
+# can cd into. Protocol v1 for the reason given at the install-units read.
+remote_main_sha() {
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+    GIT_CEILING_DIRECTORIES=/ \
+    git_bounded -C / -c protocol.version=1 ls-remote --refs "$UNIT_REMOTE" refs/heads/main | awk '{print $1}'
+}
+
 provision_fetch() {
   local -a bound=()
   [[ -n "${TIMEOUT:-}" ]] && bound=("$TIMEOUT" --signal=TERM --kill-after=5s 120s)
@@ -1253,7 +1262,7 @@ resolve_trusted_main_tip() {
   # unauthenticated v2 ls-refs POST against the public repo answers 401
   # ("could not read Username"), which failed every deploy at the first real
   # sync-control-plane run (2026-09-02).
-  remote_sha="$(git_bounded -c protocol.version=1 ls-remote --refs "$UNIT_REMOTE" refs/heads/main | awk '{print $1}')" || {
+  remote_sha="$(remote_main_sha)" || {
     echo "could not read the GitHub main tip" >&2
     return 69
   }
@@ -1299,7 +1308,7 @@ resolve_fetched_main_tip() {
   # unauthenticated v2 ls-refs POST against the public repo answers 401
   # ("could not read Username"), which failed every deploy at the first real
   # sync-control-plane run (2026-09-02).
-  remote_sha="$(git_bounded -c protocol.version=1 ls-remote --refs "$UNIT_REMOTE" refs/heads/main | awk '{print $1}')" || {
+  remote_sha="$(remote_main_sha)" || {
     echo "could not read the GitHub main tip" >&2
     return 69
   }
@@ -1779,7 +1788,7 @@ resolve_deployed_control_plane_commit() {
       return 76
     }
   fi
-  remote_sha="$(git_bounded -c protocol.version=1 ls-remote --refs "$UNIT_REMOTE" refs/heads/main | awk '{print $1}')" || {
+  remote_sha="$(remote_main_sha)" || {
     echo "could not read the GitHub main tip" >&2
     return 69
   }
