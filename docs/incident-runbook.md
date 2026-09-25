@@ -1133,6 +1133,56 @@ function and fails the same way until this fix is deployed.
 
 ---
 
+## liquidcompute-ticker-snapshot-timeout
+
+**`radon-liquidcompute.service` oneshot pages P1 `Result=timeout`
+(`NRestarts=0`) when `--record` rebuilds the full AI-cycle snapshot
+inside `TimeoutStartSec=180`.** Peak: 2026-09-25 07:36:40Z, page
+`63159d4c84441ca6cab89350e01f73ba`. Timer next ~24h.
+
+- **Mechanism:** the dedicated ticker unit calls
+  `python -m scripts.ai_cycle.liquidcompute --record`. After the
+  homepage upsert it hashed every file in `~/.radon/ai-cycle/raw`
+  (`import_raw_archive`, 164MB / 1329 files) and called
+  `persist_api_snapshot`, whose read deadline is 900s. The oneshot
+  budget is 180s. ExecMain 07:33:40Z to 07:36:40Z, exactly
+  `TimeoutStartSec`, `ExecMainStatus=15` (SIGTERM), CPU 15.672s.
+  `Type=oneshot` has no `Restart=`. The five `liquidcompute_index`
+  rows and observation ids 573563-573567 (asOf 2026-09-24,
+  `fetched_at` 07:33:40Z) were already committed. Health was not:
+  `service_health[liquidcompute]` stayed `ok` at 2026-09-24T07:34:21Z
+  because `_write_health` runs after the scan. Yesterday's dedicated
+  run finished (fetch 07:32:02Z, health 07:34:21Z). The 05:30Z backfill
+  grew `ai_cycle_observations` to 572017 rows and pushed the same scan
+  past 180s.
+- **Detection:** `systemctl show radon-liquidcompute.service` →
+  `Result=timeout`, `NRestarts=0`, ExecMainStart to InactiveEnter
+  equal to `TimeoutStartSec`. No journal line is required: the index
+  `fetched_at` matches ExecMainStart and the process is
+  `code=killed, signal=TERM`.
+- **Discriminating check:** Turso canary `SELECT 1` succeeds (41 ms at
+  the page). `ai_cycle_api_snapshot.generated_at` is the earlier
+  `radon-ai-cycle` finish (2026-09-25T07:23:42Z, that unit
+  `Result=success` 07:18:58Z-07:23:43Z), and that payload already
+  contains `liquidcompute` through 2026-09-24. Source status at
+  07:20:38Z is `available`, `5 observations`. `:8321/health/lite` stays
+  `auth_state=authenticated`. Canary fail too → Turso platform, stand
+  down. `Result=signal` during a deploy stop is deploy-stop-clean, not
+  this case. IB `/health/lite` down → API/IB, stand down. Do not
+  `reset-failed` and start the unrepaired unit: the same two calls
+  still exceed 180s.
+- **Remediation (code):** dedicated `--record` persists the host-tagged
+  ticker only, then writes the `liquidcompute` heartbeat. Raw-archive
+  import and `persist_api_snapshot` stay on `radon-ai-cycle`
+  (`TimeoutStartSec=1200`), which already collects this source. After
+  deploy, the next 07:30 UTC timer recovers the unit. A restart before
+  that deploy times out again.
+- **Regression:**
+  `scripts/tests/test_liquidcompute.py::test_dedicated_record_does_not_rescan_history_inside_the_unit_budget`.
+- **Code:** `scripts/ai_cycle/liquidcompute.py` (`main`).
+
+---
+
 ## trin-health-heartbeat-timeout
 
 **`radon-trin.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)

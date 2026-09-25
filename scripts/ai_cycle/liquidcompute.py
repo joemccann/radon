@@ -180,13 +180,12 @@ def main(argv=None):
         payload, digest, fetched = fetch_ticker(transport)
         store_rows, observations = parse_ticker(payload, digest, fetched)
         if args.record:
-            from .snapshot import persist_api_snapshot
             from .store import ObservationStore
 
+            # Archive import and the 900s snapshot scan run in radon-ai-cycle
+            # (TimeoutStartSec=1200). This oneshot is budgeted at 180s.
             store = ObservationStore(args.database)
             persist_ticker(store, observations)
-            store.import_raw_archive(Path(args.archive))
-            persist_api_snapshot(store)
         print(
             json.dumps(
                 {

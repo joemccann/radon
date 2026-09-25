@@ -267,6 +267,73 @@ def test_dedicated_main_records_host_tagged_rows(tmp_path, monkeypatch):
     }
 
 
+def test_dedicated_record_does_not_rescan_history_inside_the_unit_budget(tmp_path, monkeypatch):
+    """2026-09-25 radon-liquidcompute Result=timeout.
+
+    --record hashed the on-disk raw archive and rebuilt the API snapshot
+    (900s read deadline) inside TimeoutStartSec=180. systemd SIGTERM
+    landed at exactly 180s after the ticker upsert. radon-ai-cycle owns
+    that rebuild and already has TimeoutStartSec=1200.
+    """
+    from scripts.ai_cycle.liquidcompute import main
+    from scripts.ai_cycle.store import _SNAPSHOT_READ_DEADLINE_SECONDS
+
+    unit = (
+        Path(__file__).resolve().parents[2] / "cloud/services/radon-liquidcompute.service"
+    ).read_text(encoding="utf-8")
+    timeout = next(
+        int(line.split("=", 1)[1])
+        for line in unit.splitlines()
+        if line.startswith("TimeoutStartSec=")
+    )
+    assert timeout < _SNAPSHOT_READ_DEADLINE_SECONDS
+
+    calls = []
+
+    def _archive(self, archive):
+        calls.append("import_raw_archive")
+        return 0
+
+    def _snapshot(store):
+        calls.append("persist_api_snapshot")
+        return {}
+
+    monkeypatch.setattr(ObservationStore, "import_raw_archive", _archive)
+    monkeypatch.setattr("scripts.ai_cycle.snapshot.persist_api_snapshot", _snapshot)
+    monkeypatch.setattr("scripts.ai_cycle.collectors.now_iso", lambda: "2026-09-15T12:00:00+00:00")
+
+    class Response:
+        status_code = 200
+        headers = {"Content-Type": "application/json"}
+
+        def iter_content(self, _size):
+            yield FIXTURE.read_bytes()
+
+        def close(self):
+            pass
+
+    class Session:
+        def request(self, *args, **kwargs):
+            return Response()
+
+    monkeypatch.setattr("scripts.ai_cycle.collectors.requests.Session", lambda: Session())
+    db = tmp_path / "lc.sqlite"
+    assert (
+        main(
+            [
+                "--record",
+                "--database",
+                str(db),
+                "--archive",
+                str(tmp_path / "raw"),
+            ]
+        )
+        == 0
+    )
+    assert calls == []
+    assert len(ObservationStore(db).read_liquidcompute()) == 5
+
+
 def test_recorded_ticker_lands_on_compute_c5_not_c1(tmp_path, monkeypatch):
     from scripts.ai_cycle.collect import main
 
