@@ -147,6 +147,7 @@ rm -f /usr/local/sbin/radon-docker-gw
 rm -f /usr/local/bin/radon
 rm -f /usr/local/bin/radon-ib-gateway-control
 rm -rf /usr/local/lib/radon
+rm -rf /opt/radon-provision
 rm -rf /run/radon-app-runtime
 rm -f /run/radon-deploy-root.lock
 groupdel radon-secrets 2>/dev/null || true

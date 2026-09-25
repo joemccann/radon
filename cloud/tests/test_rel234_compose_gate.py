@@ -197,6 +197,7 @@ def _run_install_docker_gw(env_paths: dict[str, Path]) -> subprocess.CompletedPr
             "RADON_DOCKER_GW_TARGET": str(env_paths["gw_target"]),
             "RADON_COMPOSE_TARGET": str(env_paths["compose_target"]),
             "RADON_PROVENANCE_REMOTE_URL": str(env_paths["remote"]),
+            "RADON_PROVISION_ROOT": str(env_paths["stage"].parent / "provision"),
             "GIT_CONFIG_GLOBAL": "/dev/null",
             "GIT_CONFIG_SYSTEM": "/dev/null",
         },

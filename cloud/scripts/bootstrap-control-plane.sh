@@ -58,6 +58,17 @@ readonly CLOUD_ROOT_INPUT="${RADON_BOOTSTRAP_CLOUD_ROOT:-/home/radon/radon/cloud
 [[ -d "$CLOUD_ROOT_INPUT" ]] || die "canonical cloud root is missing: $CLOUD_ROOT_INPUT"
 readonly CLOUD_ROOT="$(cd "$CLOUD_ROOT_INPUT" && pwd -P)"
 
+# The bundle becomes root's sudoers, helpers and units, so it is read only from
+# a tree nobody but root can write: never the radon-owned checkout. Group write
+# is tolerated for group root alone (a root `git archive | tar -x` keeps 0664).
+# `radon-deploy-root sync-control-plane` extracts one from root's own clone of
+# the pinned remote. Links are judged by owner only; sources refuse them below.
+tree_writer="$(find "$CLOUD_ROOT" \( ! -user "$EUID" -o \( ! -type l \
+  \( -perm -0002 -o \( -perm -0020 ! -group 0 \) \) \) \) -print -quit 2>/dev/null)" || \
+  die "cannot inspect cloud root: $CLOUD_ROOT"
+[[ -z "$tree_writer" ]] || \
+  die "cloud root is writable by an account other than root: $tree_writer (run radon-deploy-root sync-control-plane)"
+
 readonly FLOCK_BIN="${RADON_BOOTSTRAP_FLOCK_BIN:-flock}"
 readonly VISUDO_BIN="${RADON_BOOTSTRAP_VISUDO_BIN:-visudo}"
 readonly NODE_BIN="${RADON_BOOTSTRAP_NODE_BIN:-node}"

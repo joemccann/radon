@@ -97,10 +97,10 @@ since whichever mechanism the current host lacks would abort the promote that
 installs it (`deploy.sh:204-231`, bd7d7e4c). Note the
 narrowing: preflight now renders the INSTALLED compose body, not the incoming
 release's. The incoming body is gated at install time instead, by provenance
-(git blob at the deployed commit, which must also be reachable from the
-main commit root reads from the pinned GitHub URL - a local-only commit is
-refused, as is an unreachable remote or a main commit missing locally)
-plus `compose_body_is_valid`.
+(git blob at the deployed commit, read from the root provision store and
+reachable from the main commit root reads from the pinned GitHub URL - a
+local-only commit is refused, as is an unreachable remote) plus
+`compose_body_is_valid`.
 
 **`publish-caddy` stages from the trusted tip too.** The edge config decides
 which proxy and fetch-metadata headers survive on the way to the API's
@@ -124,10 +124,11 @@ or bypass a forbidden match. Large-body regressions exercise both outcomes
 in all three copies.
 
 **The broker host gets none of this from CI.** `.github/workflows/ci.yml`
-deploys to a single `secrets.VPS_HOST`, and `sync-control-plane` reads
-`/home/radon/radon/.git`, which the broker does not have. Every control-plane
-change reaches it by hand: rsync the `cloud/` tree at the tested SHA to a
-root-owned path there, then run `bootstrap-control-plane.sh` with
+deploys to a single `secrets.VPS_HOST`. Every control-plane change reaches the
+broker by hand: as root there, run `radon-deploy-root sync-control-plane`
+(it needs no checkout, only the root provision store below), or rsync the
+`cloud/` tree at the tested SHA to a root-owned path (`--chown=0:0`, no group
+or other write) and run `bootstrap-control-plane.sh` with
 `RADON_BOOTSTRAP_CLOUD_ROOT` pointed at it.
 
 `inspect-running` passes docker's stdout, stderr and exit code through
@@ -137,15 +138,43 @@ ladder at `unknown`.
 
 **Refresh installs git blobs, never the working tree.** The sources it copies
 into `/etc/sudoers.d`, `/usr/local/sbin`, `/etc/polkit-1` and the unit
-directory come from `git cat-file blob` at the deployed commit, staged
-root-owned under `/var/lib/radon/deploy/control-plane-src.*`. That commit is
-the local HEAD, and it must be reachable from the GitHub main tip -- an
-ancestor, so a rollback still installs its own release's control plane, but
-never a commit main has not contained. `/home/radon/radon` is writable by
-`radon`, which holds a NOPASSWD verb for `refresh-control-plane-privileged`;
-reading the checkout there made those bytes a root install with only syntax
-validation in front of them. Same rule `install-units` has always followed
-(R-084).
+directory come from `git cat-file blob` at the deployed commit, read from the
+root provision store (below) and staged root-owned under
+`/opt/radon-provision/control-plane-src.*`. That commit is the local HEAD,
+and it must be reachable from the GitHub main tip -- an ancestor, so a
+rollback still installs its own release's control plane, but never a commit
+main has not contained. `/home/radon/radon` is writable by `radon`, which
+holds a NOPASSWD verb for `refresh-control-plane-privileged`; reading the
+checkout there made those bytes a root install with only syntax validation in
+front of them. Same rule `install-units` has always followed (R-084).
+
+**Root provision store.** Every root install of a privileged artifact
+(`sync-control-plane`, `refresh-control-plane[-privileged]`, `install-units`,
+`sync-scheduled-units`, `publish-caddy`, and `setup-vps.sh`) reads git objects
+from `/opt/radon-provision/radon.git`: a bare clone, `root:root` `0755`, that
+only root writes. Root fetches it from the pinned
+`https://github.com/joemccann/radon.git` with `fetch.fsckObjects` and
+`transfer.fsckObjects`, `GIT_CONFIG_NOSYSTEM=1` and
+`GIT_CONFIG_GLOBAL=/dev/null`, bounded at 120s, and only when the commit
+`git ls-remote` just reported is not already there, so a deploy pays at most
+one incremental fetch. It never reads objects from `/home/radon/radon/.git`,
+whose object files and alternates radon can rewrite and whose reads git does
+not re-hash; that store supplies the HEAD commit id alone, which root then
+proves is main history. An unreachable remote, a fetch without the verified
+commit, or a store that is not root-only fails closed (69 / 74). First use
+creates the store; nothing grants radon write to it. Recovery for an exact
+older SHA or with GitHub down, as root, when the store already has it:
+
+```bash
+SHA=<exact-sha>
+export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+STORE=/opt/radon-provision/radon.git
+git --git-dir="$STORE" cat-file -e "${SHA}^{commit}"
+STAGE="$(mktemp -d /opt/radon-provision/manual.XXXXXX)"
+git --git-dir="$STORE" -c tar.umask=022 archive "$SHA" cloud | tar -x -C "$STAGE"
+RADON_BOOTSTRAP_CLOUD_ROOT="$STAGE/cloud" bash "$STAGE/cloud/scripts/bootstrap-control-plane.sh"
+rm -rf "$STAGE"
+```
 
 The five app-plane drop-ins run the container with the systemd notify
 socket proxied: `radon-app-runtime run` spawns `notify-proxy` inside the
@@ -173,6 +202,8 @@ only a prefix of a baked key is rejected.
   container mount; host user radon cannot traverse the anchor.
 - Compatibility media symlink: `/home/radon/radon-cloud/media` -> `/var/lib/radon/media`
 - Durable privileged deploy state: `/var/lib/radon/deploy`
+- Root provision store (root's clone of the pinned remote):
+  `/opt/radon-provision/radon.git`
 - Control-plane manifest/readiness:
   `/var/lib/radon/control-plane-manifest.sha256` and
   `/var/lib/radon/control-plane-ready`
@@ -255,8 +286,8 @@ readiness manifest hashes match the next release.
 The deploy job runs `cloud/scripts/sync-control-plane.sh` (as `radon`, from
 the immutable runner) before `deploy.sh`. It calls the sudoers verb
 `radon-deploy-root sync-control-plane`: root resolves the GitHub main tip,
-extracts `cloud/` at that commit from git objects into a root-only staging
-tree under `/var/lib/radon/deploy/`, and runs that tip's own
+extracts `cloud/` at that commit from the root provision store into a
+root-only staging tree under `/opt/radon-provision/`, and runs that tip's own
 `bootstrap-control-plane.sh` (deploy lock, transition refusal, validation,
 atomic install, manifest rewrite). A bundle that is already current is a
 no-op. Helper, sudoers, polkit, control-plane unit and drop-in edits, and
@@ -280,25 +311,17 @@ the deploy job refuse (exit 78) instead of using the legacy runner.
 
 ### Safe control-plane refresh (2026-07-18)
 
-Bootstrap validates the current `/home/radon/radon/cloud` contents, not the
-Git relationship between that checkout and the CI-tested release. Before any
-root operation, prove the VPS checkout is the intended tested commit and, if
-it is behind, fast-forward it as `radon` without resetting or checking out
-unreviewed code:
+Bootstrap refuses a cloud root any account other than root can write, so it
+never runs from the radon-owned `/home/radon/radon/cloud`. When the tested
+release is the GitHub main tip (the normal case), converge on it as root:
 
 ```bash
-TARGET_SHA=<exact-tested-sha>
-sudo -u radon -H git -C /home/radon/radon fetch --prune origin
-TARGET_COMMIT="$(sudo -u radon -H git -C /home/radon/radon rev-parse "${TARGET_SHA}^{commit}")"
-CURRENT_COMMIT="$(sudo -u radon -H git -C /home/radon/radon rev-parse HEAD)"
-if [ "$CURRENT_COMMIT" != "$TARGET_COMMIT" ]; then
-  sudo -u radon -H git -C /home/radon/radon merge --ff-only "$TARGET_COMMIT"
-fi
-test "$(sudo -u radon -H git -C /home/radon/radon rev-parse HEAD)" = "$TARGET_COMMIT"
-
-cd /home/radon/radon
-bash cloud/scripts/bootstrap-control-plane.sh
+# as root; converges on the GitHub main tip via root's own clone
+/usr/local/sbin/radon-deploy-root sync-control-plane
 ```
+
+For an exact older SHA, or with GitHub unreachable, use the root provision
+store recovery above.
 
 Do not restart Gateway during this sequence, and do not bypass the installed
 control-plane manifest preflight. Re-run the CI deploy for the same tested SHA
@@ -318,14 +341,15 @@ Setup pins GitHub's published ed25519 SSH host key (no first-contact keyscan),
 provisions the secret-store credential as 32 raw bytes, and prepares the
 radon-replaceable media directory with create-then-verify + `chown
 --no-dereference` rather than a check-then-install pair.
-Setup stages root-installed artifacts from committed git blobs
-(`git cat-file` at the checkout's HEAD), never from working-tree files. Each
-blob must be carried by, or HEAD must be an ancestor of, the trust anchor:
-the `refs/heads/main` SHA root reads with `git ls-remote` from the pinned
+Setup stages root-installed artifacts from committed git blobs read from
+the root provision store, never from working-tree files or the checkout's
+object store. The commit is the checkout's HEAD when the store proves it is
+an ancestor of the trust anchor, else the anchor itself: the
+`refs/heads/main` SHA root reads with `git ls-remote` from the pinned
 `PROVENANCE_REMOTE_URL`, never the radon-writable `origin/main`, remote URL
-or config. Replace refs, grafts and the commit-graph are ignored for the
-check. It fails closed when the remote is unreachable or its main commit is
-not in the local store, so `git fetch origin main` before provisioning. It
+or config. The working-tree copy must match that blob byte for byte. It
+fails closed when the remote is unreachable or the fetch does not carry the
+anchor (`RADON_PROVISION_ROOT` overrides the store path for tests). It
 also publishes `mcp.env` only through a regular-file destination via temp-write +
 atomic `mv -T` rename, so a destination swapped after the check is replaced,
 not entered (contract: `cloud/tests/test_setup_vps_privileged_paths.py`).

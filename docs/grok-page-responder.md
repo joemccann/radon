@@ -52,7 +52,7 @@ As root:
 bash cloud/scripts/setup-grok-page-responder.sh
 sudo -u radon -H /home/radon/.local/bin/grok login --device-auth
 # approve the code on your phone
-bash cloud/scripts/bootstrap-control-plane.sh   # installs the unit
+/usr/local/sbin/radon-deploy-root sync-control-plane   # installs the unit
 systemctl enable --now radon-grok-page-responder.timer
 ```
 
