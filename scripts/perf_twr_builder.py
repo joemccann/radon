@@ -567,7 +567,7 @@ def _query_turso(sql: str) -> Optional[List[Any]]:
         return None
 
 
-def _query_turso_strict(sql: str) -> Optional[List[Any]]:
+def _query_turso_strict(sql: str, params: Sequence[Any] = ()) -> Optional[List[Any]]:
     """`_query_turso` without the blanket swallow, for callers that must tell
     an unreachable Turso from an empty result (R-321)."""
     if not _os.environ.get("TURSO_DB_URL") or not _os.environ.get("TURSO_AUTH_TOKEN"):
@@ -577,7 +577,8 @@ def _query_turso_strict(sql: str) -> Optional[List[Any]]:
     except ImportError:
         from scripts.db.client import get_db  # type: ignore
 
-    return get_db().execute(sql).fetchall()
+    db = get_db()
+    return (db.execute(sql, tuple(params)) if params else db.execute(sql)).fetchall()
 
 
 def _row_values(row: Any, *keys: str) -> Tuple[Any, ...]:
@@ -1868,6 +1869,48 @@ def load_flow_coverage_dates() -> Optional[set[str]]:
         day for row in rows
         if (day := _normalize_date(_row_values(row, "report_date")[0])) is not None
     }
+
+
+def _stored_nav_dates(since: str, through: str) -> Optional[set[str]]:
+    rows = _query_turso_strict(
+        "SELECT DISTINCT report_date FROM nav_snapshots "
+        "WHERE report_date >= ? AND report_date <= ?",
+        (since, through),
+    )
+    if rows is None:
+        return None
+    return {
+        day for row in rows
+        if (day := _normalize_date(_row_values(row, "report_date")[0])) is not None
+    }
+
+
+def _opening_nav_date() -> Optional[str]:
+    rows = _query_turso_strict("SELECT MIN(report_date) AS report_date FROM nav_snapshots")
+    if not rows:
+        return None
+    return _normalize_date(_row_values(rows[0], "report_date")[0])
+
+
+def load_uncovered_nav_sessions(since: str, through: str) -> Optional[List[str]]:
+    """Stored NAV sessions in [since, through] with no verified subperiod.
+
+    These are exactly the sessions `_extend_statement_flows` demands before it
+    will extend a later statement. The opening valuation is not a return
+    endpoint, so it is never a gap. None means coverage is unknown: callers
+    must not treat it as "nothing to heal" evidence either way.
+    """
+    try:
+        covered = load_flow_coverage_dates()
+        if covered is None:
+            return None
+        stored = _stored_nav_dates(since, through)
+        if stored is None:
+            return None
+        opening = _opening_nav_date()
+    except Exception:  # noqa: BLE001 — unavailable evidence is unknown coverage
+        return None
+    return sorted(day for day in stored if day != opening and day not in covered)
 
 
 def _extend_statement_flows(
