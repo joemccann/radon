@@ -25,6 +25,46 @@ MAX_TRANSACTION_STEPS = 4096
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024  # paginated source content, not tiny write receipts
 
 
+def write_budget_bytes() -> int:
+    """Stay under the hard cap. The margin covers baton text and framing."""
+    return max(1, MAX_REQUEST_BYTES - MAX_REQUEST_BYTES // 8)
+
+
+def is_request_size_error(exc: BaseException) -> bool:
+    return isinstance(exc, HranaHttpError) and "exceeds bounded size" in str(exc)
+
+
+def transaction_steps(statements):
+    """BEGIN + statements + COMMIT/ROLLBACK, same shape execute_transaction sends."""
+    steps = [{"stmt": {"sql": "BEGIN IMMEDIATE", "want_rows": True}}]
+    for sql, args in statements:
+        steps.append({
+            "condition": {"type": "ok", "step": len(steps) - 1},
+            "stmt": {"sql": sql, "args": [_encode_arg(a) for a in args], "want_rows": True},
+        })
+    commit_index = len(steps)
+    steps.append({
+        "condition": {"type": "ok", "step": commit_index - 1},
+        "stmt": {"sql": "COMMIT", "want_rows": True},
+    })
+    steps.append({
+        "condition": {"type": "not", "cond": {"type": "ok", "step": commit_index}},
+        "stmt": {"sql": "ROLLBACK", "want_rows": True},
+    })
+    return steps
+
+
+def transaction_request_bytes(statements) -> int:
+    payload = {
+        "baton": None,
+        "requests": [
+            {"type": "batch", "batch": {"steps": transaction_steps(statements)}},
+            {"type": "close"},
+        ],
+    }
+    return len(json.dumps(payload).encode())
+
+
 class TransportError(HranaHttpError):
     """The stream is unusable; retry only a fresh, complete transaction."""
 
@@ -175,10 +215,7 @@ class Connection:
         try:
             results = self._request(requests, closing=closing)
         except Exception as exc:
-            self._discard()
-            if isinstance(exc, HranaHttpError):
-                raise
-            raise TransportError(f"{type(exc).__name__}: {exc}") from exc
+            self._fail_request(exc)
         self._transaction = not closing
         if closing:
             self._baton = None
@@ -214,20 +251,10 @@ class Connection:
         if self._poisoned or self._transaction or self._baton is not None:
             raise TransportError("atomic transaction requires a fresh stream")
         statements = list(statements)
-        if len(statements) + 3 > MAX_TRANSACTION_STEPS:
+        steps = transaction_steps(statements)
+        commit_index = len(steps) - 2
+        if len(steps) > MAX_TRANSACTION_STEPS:
             raise HranaHttpError("atomic transaction exceeds bounded step count")
-        steps = [{"stmt": {"sql": "BEGIN IMMEDIATE", "want_rows": True}}]
-        for sql, args in statements:
-            steps.append({
-                "condition": {"type": "ok", "step": len(steps) - 1},
-                "stmt": {"sql": sql, "args": [_encode_arg(a) for a in args],
-                         "want_rows": True},
-            })
-        commit_index = len(steps)
-        steps.append({"condition": {"type": "ok", "step": commit_index - 1},
-                      "stmt": {"sql": "COMMIT", "want_rows": True}})
-        steps.append({"condition": {"type": "not", "cond": {"type": "ok", "step": commit_index}},
-                      "stmt": {"sql": "ROLLBACK", "want_rows": True}})
         self.last_transaction_step_count = len(steps)
         try:
             replies = self._request([
@@ -262,12 +289,20 @@ class Connection:
             cursors = [_Cursor(outcome) for outcome in outcomes[:commit_index + 1]]
             return cursors[1:commit_index]
         except Exception as exc:
-            self._discard()
-            if isinstance(exc, HranaHttpError):
-                raise
-            raise TransportError(f"{type(exc).__name__}: {exc}") from exc
+            self._fail_request(exc)
         finally:
             self._url = self._origin
+
+    def _fail_request(self, exc):
+        # The size check fires before the socket opens. The stream is unused,
+        # so a smaller batch can reuse this handle.
+        if (is_request_size_error(exc) and self._baton is None
+                and not self._poisoned and not self._transaction):
+            raise exc
+        self._discard()
+        if isinstance(exc, HranaHttpError):
+            raise
+        raise TransportError(f"{type(exc).__name__}: {exc}") from exc
 
     def commit(self):
         self.execute("COMMIT")
