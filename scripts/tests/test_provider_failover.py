@@ -303,6 +303,47 @@ class TestARungThatCrashesInsideItselfCostsOneRung:
         assert providers(tried) == ["nvidia"] * 3 + ["grok"], tried
 
 
+# Every wrapper that can host a grok rung. documentation defaults to fx:nvidia
+# but takes an operator ladder; security and security-deepsec carry the same
+# classifier for parity but refuse any non-claude rung.
+GROK_HOSTING_LOOPS = FALLBACK_LOOPS + ["documentation"]
+
+
+@pytest.mark.parametrize("loop", GROK_HOSTING_LOOPS)
+class TestTheRealSerializationCrashCostsOneRung:
+    """The verbatim round slice of audit-20260926T003006.log, replayed through
+    every wrapper: grok hosting `nvidia:nvidia-latest` died on
+    `Internal error: {"message": "serialization error: ..."}` and every phase
+    ended rc=1 with codex untouched below it."""
+
+    def test_the_real_crash_advances_to_codex_and_the_phase_completes(
+        self, tmp_path, loop,
+    ):
+        proc, tried, _calls, _argv = _run_multi(
+            tmp_path, loop, "audit",
+            provider_ladder="nvidia:nvidia-latest codex",
+            reject_providers=("nvidia",),
+            reject_output=_h.NVIDIA_INTERNAL_ERROR_REAL_LOG,
+        )
+        assert ladder_walk(tried) == ["nvidia", "codex"], (
+            tried, proc.stdout, proc.stderr,
+        )
+        assert proc.returncode != 1, (proc.returncode, proc.stdout, proc.stderr)
+        assert "crashed inside its own CLI" in proc.stdout + proc.stderr
+
+    def test_output_quoting_the_crash_does_not_advance(self, tmp_path, loop):
+        """These loops audit their own wrappers and echo the trigger text."""
+        _proc, tried, _calls, _argv = _run_multi(
+            tmp_path, loop, "audit",
+            provider_ladder="nvidia:nvidia-latest codex",
+            reject_providers=("nvidia",),
+            reject_output=BROKEN_RUNG_QUOTED_OUTPUT,
+        )
+        assert ladder_walk(tried) == ["nvidia"], (
+            f"a Traceback quoting the crash walked the ladder: {tried}"
+        )
+
+
 class TestASingleRungLadderReportsACrashHonestly:
     """documentation runs one rung (`fx:nvidia`), so there is nothing to walk to.
     Before the classifier a crash inside the CLI was a bare exit 1 with no cause;
