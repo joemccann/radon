@@ -85,6 +85,22 @@ A failure *inside radon-api*, not the gateway: after the user approves the 2FA p
 
 **The fix — `recover_stuck_pool` (`scripts/api/ib_gateway.py`), level-triggered + pool-independent, run from `_ib_recovery_heartbeat_tick` (15s) via `_recover_stuck_pool_guarded` (`server.py`):** healthy pool → no-op; disconnected slot + an independent `_probe_authenticated()` (throwaway clientId 98) that is NOT authenticated → genuine 2FA wait, do nothing (never touches the gateway/lock, ZERO pushes); disconnected slot + probe authenticated → `reconnect_all()` then RE-READ the pool, success iff a role is now connected WITH accounts. Single-flight + 60s cooldown; only a *verified* failure (probe authenticated yet pool still stuck) counts toward a 3-strike ladder, after which it self-restarts **radon-api only** (`os._exit(1)` under systemd `Restart=always`; never the gateway), then resets so it cannot loop. Pool reconnects in ~15-60s with no operator action and no new push. Tests: `scripts/api/tests/test_ib_gateway_pool_recovery.py` + `test_pool_recovery_escalation.py`. Follow-up not done: a `pool_stuck` /health flag to keep the watchdog from restarting the gateway on this signature — skipped because the probe is 8s and breaks the fast-/health 2.5s budget; the 15s heartbeat beats the watchdog's ~3-min threshold anyway.
 
+### 6. Watchdog login-throttle hold (2026-09-26)
+
+**Symptom:** you force a Gateway restart and no IBKR Mobile push arrives. `/health` shows `auth_state=unreachable`, `port_listening=true`, `upstream_dead=true`. The Gateway log (`sudo -n /usr/local/sbin/radon-docker-gw logs` on the broker) ends with `IBC: Too many failed login attempts. Please wait N seconds before attempting to re-login again.` IBKR refused the login before the 2FA step, so no push was ever sent. IBC never retries from that dialog, and the API port stays open with no handshake, which reads as `wedged`.
+
+**Why restarting makes it worse:** every restart is one more login attempt, and IBKR counts each one. On 2026-09-26, the api-hang ladder (Gate 4) restarted three times and the operator forced three more within an hour, and every login was throttled.
+
+**Behaviour:** when the probe is `wedged`/`dead`, `auth_state` is neither `authenticated` nor `awaiting_2fa`, and the latest `Login attempt:` in the container's last 5 minutes of log is followed by the throttle line, `_handle_login_throttled` (`scripts/ib_watchdog.py`) takes over:
+- It never touches the api-hang counter or cap, and it holds all restarts.
+- It records the error in `service_health` once per episode with the time of its retry: "do not restart the Gateway".
+- After 15 minutes with no new throttled attempt (doubling to a 60-minute cap), it makes **one** fresh login under the push lock, so you get a push to approve.
+- Any new throttled attempt, including your own, restarts the quiet period.
+- Outside market-data hours it never retries: restart once yourself, 15+ minutes after the last attempt.
+- The episode lives in the watchdog state file, so it survives the 5-minute log window. It ends on `authenticated`, on `awaiting_2fa`, or on a login that got past the throttle.
+
+Tests: `scripts/tests/test_ib_watchdog_login_throttle.py`.
+
 ---
 
 ## Status Surface
@@ -119,6 +135,8 @@ Next.js footer reads via `useIBStatusContext().displayStatus` (polls `/api/admin
 ---
 
 ## What NOT to Do
+
+- **Do not keep forcing restarts when no push arrives.** Check the Gateway log for `Too many failed login attempts` first. Each restart is another failed login, and IBKR keeps throttling. Wait 15+ minutes with no attempts, then restart once (Gate 6).
 
 - **Do not re-enable IBC-side relogin on 2FA timeout** (`TWOFA_TIMEOUT_ACTION: exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT: "no"` in `docker/ib-gateway/docker-compose.yml`). VPS counterpart uses IBC default (`no`). IBC's relogin bypasses the push lock and reintroduces the stacked-push bug.
 - **Do not piecemeal `systemctl stop radon-<one>`** — a clean stop does not `Restart=always` back, so the unit stays down until something starts it. Use `radon restart` instead. (Stopping `radon-ib-gateway` no longer cascade-stops api/relay/monitor: since 44e89e1b they are `After=`-ordered only, never `PartOf=`; a 2FA restart leaves the app plane up. See `docs/spof-host-split.md`.) See `feedback_use_radon_restart_not_piecemeal_systemctl.md`.
