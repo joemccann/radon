@@ -1888,6 +1888,22 @@ rejection_regex() {
   esac
 }
 
+# A rung that ANSWERED and then died inside its own machinery. 2026-09-26: the
+# first night nvidia led documentation's ladder (#728), every phase ended on
+#   Error: Internal error: {"message": "serialization error: invalid type:
+#    null, expected u32 at line 1 column 331", "promptUsage": {...}}
+# The rung billed 30k tokens, so it is neither a cap nor a 400 nor a network
+# blip, and nothing classified it: audit, remediate and deliver each exited 1
+# having done nothing while three healthy rungs sat below. Permanent for the
+# rung, so it costs exactly one rung like any other rejection. Anchored at
+# column 0 because the verdict is the CLI's own line and every quoted copy
+# (these loops audit their own wrappers) is indented or embedded.
+broken_rung_regex() {
+  case "$1" in
+    *) printf '%s' '^(Error: )?(Internal error|serialization error):' ;;
+  esac
+}
+
 # One launch per rung. Backgrounded and `wait`ed, never foreground: bash defers
 # trap handling until a foreground child exits, and `-k` escalates to SIGKILL so
 # a CLI blocked on a hung child cannot make the cap advisory. R-384, R-386.
@@ -2121,6 +2137,16 @@ is_rung_rejected() {
     | grep -v '^\[' | grep -v '^[[:space:]]*$' | tail -n 3 | grep -qiE "$(rejection_regex "$RUNG_PROVIDER")"
 }
 
+# Unlike is_rung_rejected, the verdict here is MULTI-LINE -- the message sits
+# above a token-usage block, so a last-3-lines window cannot see it. Scan the
+# last 40 lines of THIS round, like the quota detector, and rely on the
+# column-0 anchor rather than the window to exclude quoted prose.
+is_rung_broken() {
+  tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
+    | grep -v '^\[' | grep -v '^[[:space:]]*$' | tail -n 40 \
+    | grep -qE "$(broken_rung_regex "$RUNG_PROVIDER")"
+}
+
 is_transient_network_failure() {
   tail -c 500 "$RUN_LOG" | grep -qE 'API Error|ENOTFOUND|Connection lost|Execution error'
 }
@@ -2218,6 +2244,14 @@ run_phase() {
     if (( RC != 0 )) && is_rung_rejected; then
       echo "[$LOOP_LOG_TAG] $RUNG_PROVIDER:$RUNG_MODEL was rejected by the provider" | tee -a "$RUN_LOG"
       advance_rung "" "rung rejected by provider" || { ALL_PROVIDERS_EXHAUSTED=1; break; }
+      echo "[$LOOP_LOG_TAG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
+      continue
+    fi
+    # A rung that crashed inside itself after answering is a permanent
+    # rejection too: same one-rung cost, same zero transient-network attempts.
+    if (( RC != 0 )) && is_rung_broken; then
+      echo "[$LOOP_LOG_TAG] $RUNG_PROVIDER:$RUNG_MODEL crashed inside its own CLI" | tee -a "$RUN_LOG"
+      advance_rung "" "rung crashed inside its own CLI" || { ALL_PROVIDERS_EXHAUSTED=1; break; }
       echo "[$LOOP_LOG_TAG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
       continue
     fi

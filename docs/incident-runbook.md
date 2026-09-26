@@ -2777,6 +2777,22 @@ notification plugin can post a body, but desktop actions are not supported
 Either would add a signed always-on tray app to solve a sender-identity
 bug. Revisit only if Radon grows a real operator desktop shell.
 
+## evening-execution-sweep-dual-slot
+
+**Evening execution sweep has two fire slots (20:30 ET and 23:45 ET) with independent retry budgets.**
+
+- **Mechanism:** `scripts/monitor_daemon/handlers/evening_execution_sweep.py` runs twice per ET trading day:
+  - Early slot: 20:30 ET (after cash close)
+  - Late slot: 23:45 ET (captures expiry assignment prints that land after 20:30)
+  Each slot has its own 3-attempt soft-failure budget (5-min embargo per attempt). A burned early-slot budget does not consume the late slot. The handler pulls IB fills, imports missing exec_ids via `JournalSyncHandler.import_fills`, mirrors to `executed_orders` (Turso), and recovers carried-over gaps from `executed_orders` for days whose sweep never succeeded.
+- **Detection:** `service_health` row for `execution-sweep` shows `error` with `next_attempt_at` in the future; `logs/monitor-daemon.log` shows `[evening_execution_sweep] soft failure` with the error message. If both slots exhaust their budgets, the day's after-hours fills stay missing until manual `backfill_journal_from_executed_orders.py` or the next trading day's early slot.
+- **Discriminating check:** `systemctl show radon-monitor` is `active`; `journalctl -u radon-monitor` shows the handler's `started_at` and `error` payload. The 20:30 and 23:45 runs are distinct `slot` values in the handler state (`early` / `late`). A gateway outage at 20:30 that recovers by 23:45 will succeed on the late slot.
+- **Operator action:** If both slots fail for a trading day, run `python3.13 scripts/backfill_journal_from_executed_orders.py --window-days 7 --dry-run false` on a host with Turso credentials. This recovers the same gap the sweep's carried-over recovery would. Do not restart the daemon to "force" a retry — the soft-failure embargo is intentional.
+- **Regression:** `scripts/tests/test_evening_execution_sweep.py` covers dual-slot cadence, per-slot retry budget, and carried-over gap recovery.
+- **Code:** `scripts/monitor_daemon/handlers/evening_execution_sweep.py`, `scripts/backfill_journal_from_executed_orders.py`.
+
+---
+
 ## preferences-operator-403
 
 **Operator Save on the profile Preferences tab (`/profile?tab=preferences`, formerly the `/preferences` page) returns 403 `Operator authorization required`.**

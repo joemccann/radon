@@ -151,6 +151,7 @@ rm -rf /opt/radon-provision
 rm -rf /run/radon-app-runtime
 rm -f /run/radon-deploy-root.lock
 groupdel radon-secrets 2>/dev/null || true
+groupdel radon-media 2>/dev/null || true
 
 # -- Remove sudoers and polkit ------------------------------------------------
 

@@ -313,6 +313,40 @@ REJECTION_QUOTED_OUTPUT = (
 )
 
 
+# The crash that killed every documentation-nightly phase on 2026-09-26, the
+# first night nvidia led that loop's ladder (#728). The grok-hosted NVIDIA rung
+# answers, bills tokens, then dies inside its own result serializer. It is
+# permanent for that rung, and the verdict is MULTI-LINE: the message sits far
+# above the final line, so a last-3-lines classifier cannot see it and the
+# ladder never advanced -- all three phases exited 1 having audited nothing.
+NVIDIA_INTERNAL_ERROR_OUTPUT = (
+    "Error: Internal error: {\n"
+    '  "message": "serialization error: invalid type: null, expected u32 at '
+    'line 1 column 331",\n'
+    '  "promptUsage": {\n'
+    '    "inputTokens": 30206,\n'
+    '    "outputTokens": 201,\n'
+    '    "modelUsage": {\n'
+    '      "nvidia/nemotron-3-ultra-550b-a55b": {\n'
+    '        "totalTokens": 30407\n'
+    "      }\n"
+    "    },\n"
+    '    "numTurns": 1\n'
+    "  }\n"
+    "}"
+)
+# The same text QUOTED mid-run rather than printed as the CLI's own verdict.
+# Every quoted copy is indented or embedded; only a column-0 verdict counts.
+BROKEN_RUNG_QUOTED_OUTPUT = (
+    "Traceback (most recent call last):\n"
+    '  File "audit.py", line 12, in <module>\n'
+    "    Error: Internal error: {\"message\": \"serialization error: invalid "
+    'type: null, expected u32\"}\n'
+    "    raise SystemExit(1)\n"
+    "SystemExit: 1"
+)
+
+
 def _provider_stub(
     attempts, capped, cap_line, cap_exit, rejected, reject_out, agent_output=None,
 ):
@@ -386,6 +420,7 @@ def _run_multi(
     reject_output=None,
     committed=True,
     agent_output=None,
+    env_extra=None,
 ):
     """Run one phase against stubbed provider CLIs.
 
@@ -468,6 +503,9 @@ def _run_multi(
     }
     if provider_ladder is not None:
         env["RADON_WEEKEND_PROVIDER_LADDER"] = provider_ladder
+    # Caller-supplied knobs (round budgets, caps) go last so a test can throttle
+    # the wrapper the same way the operator's environment does.
+    env.update(env_extra or {})
     proc = subprocess.run(
         [BASH, str(repo / "scripts" / wrapper.name), phase],
         cwd=repo, env=env, capture_output=True, text=True, timeout=180,
