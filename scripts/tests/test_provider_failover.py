@@ -27,7 +27,9 @@ _h = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = _h
 _spec.loader.exec_module(_h)
 
-FALLBACK_LOOPS = ["ci-performance", "documentation", "reliability", "testing"]
+# The codex-first ladder. documentation runs the single fx:nvidia rung since
+# 2026-09-26; its wire and failure handling live in test_fx_nvidia_rung.py.
+FALLBACK_LOOPS = ["ci-performance", "reliability", "testing"]
 FALLBACK_LADDER = _h.FALLBACK_LADDER
 EXPECTED_PROVIDER_ORDER = _h.FALLBACK_PROVIDER_ORDER
 CLAUDE_LADDER = _h.CLAUDE_LADDER
