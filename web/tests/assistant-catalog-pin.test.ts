@@ -28,6 +28,7 @@ const PINNED: Record<string, PinnedCapability> = {
   "admin/reliability": "admin",
   "admin/services": "admin",
   "admin/services/[unit]/[action]": "admin",
+  "admin/slm-review": "admin",
   "admin/slo": "admin",
   "admin/stack/restart": "admin",
   "admin/trading/[action]": { GET: "admin", POST: "admin" },

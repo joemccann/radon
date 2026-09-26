@@ -8565,3 +8565,14 @@ Dependency graph: T1 → T2 → T3 → T4 → T5, T1 → T3, T2 → T4. Independ
 Review: Selected A implemented using existing Clear tokens and mutation owners. Independent model, UI, and coverage reviews completed. TypeScript static check passed; desktop/mobile browser fixture inspected, including 320px dark layout, primary action within first viewport, no horizontal overflow, and nested confirmation focus return. Local test suites were not run; regression execution and screenshots are assigned to GitHub CI.
 
 CI review: e3fc14a0 passed all eight Vitest shards and the coverage ratchet. The curation guard requires a dated review for modified held-out admin-panel.spec.ts; recorded its static locator review and separate browser fixture coverage without claiming that held-out suite ran.
+
+## 2026-09-25 Durable SLM review and readable images
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+- [x] T1 Add operator-only decision backup with merge and regression coverage. depends_on: []
+- [x] T2 Restore packet, decisions, draft tags and exact position after restart. depends_on: [T1]
+- [x] T3 Show source images automatically at useful desktop/mobile size. depends_on: [T2]
+- [ ] T4 Verify in browser and exact-head GitHub CI; document result. depends_on: [T3]
+
+Review: pending. Existing localStorage decisions migrate into the backup when the original packet is loaded. The packet stays in browser storage; the server stores only votes, labels and cursor. No local test suites per operator policy.
