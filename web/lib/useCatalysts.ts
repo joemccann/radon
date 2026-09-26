@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isReturnCacheFresh, useReturnCache } from "./returnCache";
+import { getReturnCacheGeneration, isReturnCacheFresh, useReturnCache } from "./returnCache";
 
 const SYNC_INTERVAL_MS = 10 * 60 * 1000; // producer refreshes intraday; refetch while mounted
 
@@ -46,6 +46,7 @@ export function useCatalysts(active: boolean = true): UseCatalystsReturn {
   const returnCache = useReturnCache();
 
   const load = useCallback(async () => {
+    const identityGeneration = getReturnCacheGeneration();
     try {
       const res = await fetch("/api/catalysts", { cache: "no-store" });
       if (!res.ok) throw new Error("Failed to fetch catalysts");
@@ -56,7 +57,7 @@ export function useCatalysts(active: boolean = true): UseCatalystsReturn {
         data: json,
         fetchedAt: Date.now(),
         lastSync: json.scan_time,
-      });
+      }, identityGeneration);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
