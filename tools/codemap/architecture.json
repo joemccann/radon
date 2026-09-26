@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-25T09:00:11Z",
-  "node_count": 3596,
-  "edge_count": 7407,
+  "generated_at": "2026-09-26T09:00:08Z",
+  "node_count": 3623,
+  "edge_count": 7487,
   "areas": {
-    "web": 2086,
+    "web": 2101,
     "site": 155,
-    "scripts": 1231,
+    "scripts": 1243,
     "cloud": 77,
     "lib": 28,
     "tests": 17,
@@ -15,17 +15,17 @@
     {
       "id": "web/app",
       "area": "web",
-      "count": 222
+      "count": 224
     },
     {
       "id": "web/components",
       "area": "web",
-      "count": 264
+      "count": 267
     },
     {
       "id": "web/e2e",
       "area": "web",
-      "count": 204
+      "count": 205
     },
     {
       "id": "web",
@@ -35,7 +35,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 410
+      "count": 411
     },
     {
       "id": "web/public",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 972
+      "count": 980
     },
     {
       "id": "site/app",
@@ -150,7 +150,7 @@
     {
       "id": "scripts/knowledge",
       "area": "scripts",
-      "count": 16
+      "count": 18
     },
     {
       "id": "scripts/lib",
@@ -185,7 +185,7 @@
     {
       "id": "scripts/research",
       "area": "scripts",
-      "count": 24
+      "count": 26
     },
     {
       "id": "scripts/security",
@@ -200,7 +200,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 624
+      "count": 632
     },
     {
       "id": "scripts/trade_blotter",
@@ -276,17 +276,17 @@
       "test": false
     },
     {
+      "id": "web/lib/routeAccess.ts",
+      "area": "web",
+      "in": 97,
+      "out": 4,
+      "test": false
+    },
+    {
       "id": "web/components/WorkspaceSections.tsx",
       "area": "web",
       "in": 20,
       "out": 81,
-      "test": false
-    },
-    {
-      "id": "web/lib/routeAccess.ts",
-      "area": "web",
-      "in": 96,
-      "out": 4,
       "test": false
     },
     {
@@ -334,7 +334,7 @@
     {
       "id": "scripts/db/client.py",
       "area": "scripts",
-      "in": 75,
+      "in": 76,
       "out": 0,
       "test": false
     },
@@ -362,14 +362,14 @@
     {
       "id": "web/lib/db.ts",
       "area": "web",
-      "in": 58,
+      "in": 59,
       "out": 1,
       "test": false
     },
     {
       "id": "web/lib/useSyncHook.ts",
       "area": "web",
-      "in": 51,
+      "in": 52,
       "out": 6,
       "test": false
     },
@@ -390,7 +390,7 @@
     {
       "id": "web/lib/dbExecute.ts",
       "area": "web",
-      "in": 45,
+      "in": 46,
       "out": 5,
       "test": false
     },
@@ -493,6 +493,20 @@
       "test": false
     },
     {
+      "id": "web/lib/serviceHealthWindows.ts",
+      "area": "web",
+      "in": 35,
+      "out": 0,
+      "test": false
+    },
+    {
+      "id": "scripts/perf_twr_builder.py",
+      "area": "scripts",
+      "in": 24,
+      "out": 11,
+      "test": false
+    },
+    {
       "id": "web/lib/refreshSchedule.ts",
       "area": "web",
       "in": 34,
@@ -514,24 +528,10 @@
       "test": false
     },
     {
-      "id": "web/lib/serviceHealthWindows.ts",
-      "area": "web",
-      "in": 33,
-      "out": 0,
-      "test": false
-    },
-    {
       "id": "web/components/mobile/MetricCell.tsx",
       "area": "web",
       "in": 33,
       "out": 0,
-      "test": false
-    },
-    {
-      "id": "web/lib/OrderActionsContext.tsx",
-      "area": "web",
-      "in": 31,
-      "out": 2,
       "test": false
     }
   ],
