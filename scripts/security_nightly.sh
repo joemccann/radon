@@ -742,6 +742,7 @@ MODE="${1:?usage: security_nightly.sh audit|remediate|deliver|cycle}"
 }
 
 REPO="${RADON_WEEKEND_REPO:-$HOME/radon-weekend/radon-security}"
+export RADON_REPO_ROOT="$REPO"
 WEEKEND_ROOT="$(dirname "$REPO")"
 # Per-loop venv. The legacy $WEEKEND_ROOT/venv is not deleted here
 # (operator follow-up after this ships).
