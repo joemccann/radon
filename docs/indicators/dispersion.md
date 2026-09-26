@@ -554,8 +554,10 @@ Description=Radon DISPERSION Indicator - daily 22:20 UTC IB daily-bar sweep (S&P
 # clear of the credit-spread / iei-hyg flock at 21:45-21:55. Runs every
 # calendar day: weekend and holiday runs find no new completed session,
 # make no IB or Yahoo requests, and refresh the snapshot + heartbeat so
-# service_health stays inside the 26h window.
+# service_health stays inside the 26h window. 23:20 retries a run that
+# stop-clean killed; a completed 22:20 run only refreshes the heartbeat.
 OnCalendar=*-*-* 22:20:00 UTC
+OnCalendar=*-*-* 23:20:00 UTC
 Persistent=true
 RandomizedDelaySec=120
 
