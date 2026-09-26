@@ -335,6 +335,43 @@ NVIDIA_INTERNAL_ERROR_OUTPUT = (
     "  }\n"
     "}"
 )
+# The round slice of documentation-nightly audit-20260926T003006.log verbatim:
+# grok printed the block twice, first as a bare `Internal error: {` and then
+# prefixed `Error: `, 52 lines in all, so the verdict line the 40-line window
+# can see is the SECOND copy's opener. No `is_retryable` text reaches the log.
+_REAL_CRASH_BLOCK = (
+    "{\n"
+    '  "message": "serialization error: invalid type: null, expected u32 at '
+    'line 1 column 331",\n'
+    '  "promptUsage": {\n'
+    '    "inputTokens": 30206,\n'
+    '    "outputTokens": 201,\n'
+    '    "totalTokens": 30407,\n'
+    '    "cachedReadTokens": 0,\n'
+    '    "cacheCreationTokens": 0,\n'
+    '    "reasoningTokens": 0,\n'
+    '    "modelCalls": 1,\n'
+    '    "apiDurationMs": 4585,\n'
+    '    "modelUsage": {\n'
+    '      "nvidia/nemotron-3-ultra-550b-a55b": {\n'
+    '        "inputTokens": 30206,\n'
+    '        "outputTokens": 201,\n'
+    '        "totalTokens": 30407,\n'
+    '        "cachedReadTokens": 0,\n'
+    '        "cacheCreationTokens": 0,\n'
+    '        "reasoningTokens": 0,\n'
+    '        "modelCalls": 1,\n'
+    '        "apiDurationMs": 4585\n'
+    "      }\n"
+    "    },\n"
+    '    "numTurns": 1\n'
+    "  }\n"
+    "}"
+)
+NVIDIA_INTERNAL_ERROR_REAL_LOG = (
+    "Internal error: " + _REAL_CRASH_BLOCK + "\n"
+    "Error: Internal error: " + _REAL_CRASH_BLOCK
+)
 # The same text QUOTED mid-run rather than printed as the CLI's own verdict.
 # Every quoted copy is indented or embedded; only a column-0 verdict counts.
 BROKEN_RUNG_QUOTED_OUTPUT = (
