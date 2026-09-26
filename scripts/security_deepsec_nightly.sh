@@ -1843,10 +1843,18 @@ provider_bin() {
     claude) command -v claude 2>/dev/null || true ;;
     codex) printf '%s' "${RADON_WEEKEND_CODEX_BIN:-/opt/homebrew/bin/codex}" ;;
     grok | nvidia | cerebras) printf '%s' "${RADON_WEEKEND_GROK_BIN:-$HOME/.grok/bin/grok}" ;;
-    fx) printf '%s' "${RADON_WEEKEND_FX_BIN:-$HOME/.local/bin/fx}" ;;
+    # fx: the fixed-path copy scripts/fx_stable_sync.sh keeps current, so the
+    # Full Disk Access grant survives `fx upgrade`; else the installer path.
+    fx)
+      if [[ -n "${RADON_WEEKEND_FX_BIN:-}" ]]; then printf '%s' "$RADON_WEEKEND_FX_BIN"
+      elif [[ -x "$HOME/.local/share/radon/fx-stable/fx" ]]; then printf '%s' "$HOME/.local/share/radon/fx-stable/fx"
+      else printf '%s' "$HOME/.local/bin/fx"; fi ;;
     *) return 1 ;;
   esac
 }
+
+# The fx rung's model half names the fx provider, which picks the key it bills.
+fx_key() { case "$1" in cerebras) printf CEREBRAS_API_KEY ;; *) printf NVIDIA_API_KEY ;; esac; }
 
 # Readiness is checked BEFORE a rung is selected, so it cannot depend on the
 # key already being exported — only the chosen rung's key ever is.
@@ -1872,7 +1880,7 @@ provider_ready() {
     grok) [[ -r "$HOME/.grok/auth.json" || -n "${XAI_API_KEY:-}" ]] || return 1 ;;
     nvidia) provider_key_present NVIDIA_API_KEY && [[ -r "$AGENT_CLI_ROOT/grok-home-nvidia/config.toml" ]] || return 1 ;;
     cerebras) provider_key_present CEREBRAS_API_KEY && [[ -r "$AGENT_CLI_ROOT/grok-home-cerebras/config.toml" ]] || return 1 ;;
-    fx) provider_key_present NVIDIA_API_KEY && [[ -r "$HOME/.fx/settings.json" ]] || return 1 ;;
+    fx) provider_key_present "$(fx_key "${2:-}")" && [[ -r "$HOME/.fx/settings.json" ]] || return 1 ;;
     *) return 1 ;;
   esac
   # A fallback rung is driven by a rendered prompt file, not a slash command.
@@ -1891,6 +1899,9 @@ provider_ready() {
 load_provider_key() {
   local want="$1" envf="$AGENT_CLI_ROOT/env" line key val
   unset NVIDIA_API_KEY CEREBRAS_API_KEY XAI_API_KEY
+  if [[ "$want" == fx ]]; then
+    if [[ "${2:-}" == cerebras ]]; then want=cerebras; else want=nvidia; fi
+  fi
   case "$want" in nvidia | cerebras | grok | fx) ;; *) return 0 ;; esac
   [[ -r "$envf" ]] || return 0
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -1899,7 +1910,7 @@ load_provider_key() {
     val="${line#*=}"
     [[ -n "$val" ]] || continue
     case "$want:$key" in
-      nvidia:NVIDIA_API_KEY | fx:NVIDIA_API_KEY | cerebras:CEREBRAS_API_KEY | grok:XAI_API_KEY)
+      nvidia:NVIDIA_API_KEY | cerebras:CEREBRAS_API_KEY | grok:XAI_API_KEY)
         export "$key=$val" ;;
     esac
   done < "$envf"
@@ -1922,7 +1933,7 @@ use_rung() {
   else
     export RADON_WEEKEND_REDUCED=1
   fi
-  load_provider_key "$RUNG_PROVIDER"
+  load_provider_key "$RUNG_PROVIDER" "$RUNG_MODEL"
 }
 
 # `wide` retires every remaining rung of the current provider. Returns 1 when
@@ -1945,7 +1956,7 @@ advance_rung() {
     (( RUNG_INDEX < ${#PROVIDER_RUNGS[@]} )) || return 1
     next="$(rung_provider "${PROVIDER_RUNGS[$RUNG_INDEX]}")"
     [[ "$wide" == "wide" && "$next" == "$dead" ]] && continue
-    if ! provider_ready "$next"; then
+    if ! provider_ready "$next" "$(rung_model "${PROVIDER_RUNGS[$RUNG_INDEX]}")"; then
       echo "[$LOOP_LOG_TAG] rung ${PROVIDER_RUNGS[$RUNG_INDEX]} skipped: provider not installed or not signed in" | tee -a "$RUN_LOG"
       note_exhausted "$next" "not installed or not signed in"
       continue
@@ -2326,7 +2337,7 @@ run_phase() {
   # The rung carried in from startup (or from the previous phase) has never
   # been checked against THIS phase: its binary may be gone, its key unset, or
   # its rendered prompt missing. Walk to the first rung that can actually run.
-  if ! provider_ready "$RUNG_PROVIDER"; then
+  if ! provider_ready "$RUNG_PROVIDER" "$RUNG_MODEL"; then
     echo "[$LOOP_LOG_TAG] rung $RUNG_PROVIDER:$RUNG_MODEL is not usable for $PHASE" | tee -a "$RUN_LOG"
     advance_rung "" "not installed or not signed in" || ALL_PROVIDERS_EXHAUSTED=1
   fi

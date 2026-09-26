@@ -6,8 +6,7 @@ audited nothing. A model ladder cannot help there — the cap is on the account,
 not the model. On 09-06 codex was capped at the same time, which is the whole
 argument for a ladder that crosses providers rather than models.
 
-The four non-security loops now run codex, then grok, then NVIDIA, then
-Cerebras, and never touch the claude.ai subscription: it is reserved for the
+The four non-security loops never touch the claude.ai subscription: it is reserved for the
 security loop, which stays claude-exclusive and is asserted so here.
 """
 
@@ -27,8 +26,9 @@ _h = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = _h
 _spec.loader.exec_module(_h)
 
-# The codex-first ladder. documentation runs the single fx:nvidia rung since
-# 2026-09-26; its wire and failure handling live in test_fx_nvidia_rung.py.
+# The shared ladder: fx:nvidia, grok, codex, fx:cerebras (2026-09-26).
+# documentation runs the single fx:nvidia rung; its wire and failure handling
+# live in test_fx_nvidia_rung.py.
 FALLBACK_LOOPS = ["ci-performance", "reliability", "testing"]
 FALLBACK_LADDER = _h.FALLBACK_LADDER
 EXPECTED_PROVIDER_ORDER = _h.FALLBACK_PROVIDER_ORDER
@@ -61,6 +61,16 @@ def ladder_walk(tried):
     return walk
 
 
+def rungs(tried):
+    """ladder_walk by rung: `fx:nvidia` and `fx:cerebras` stay distinct, and a
+    bare rung is its name."""
+    walk = []
+    for r in (t.rstrip(":") for t in tried):
+        if not walk or walk[-1] != r:
+            walk.append(r)
+    return walk
+
+
 def order(loop):
     return EXPECTED_PROVIDER_ORDER[loop]
 
@@ -77,7 +87,7 @@ def launch_of(tried, argv, provider):
 class TestACapContinuesOnTheNextProvider:
     def test_the_default_ladder_leads_with_its_pinned_first_rung(self, tmp_path, loop):
         proc, tried, _calls, _argv = _run_multi(tmp_path, loop, "audit")
-        assert providers(tried)[:1] == order(loop)[:1], (tried, proc.stdout, proc.stderr)
+        assert rungs(tried)[:1] == FALLBACK_LADDER[:1], (tried, proc.stdout, proc.stderr)
 
     def test_no_claude_rung_is_ever_launched(self, tmp_path, loop):
         """The claude.ai subscription belongs to the security loop."""
@@ -88,24 +98,24 @@ class TestACapContinuesOnTheNextProvider:
 
     def test_a_first_rung_cap_continues_on_the_second(self, tmp_path, loop):
         proc, tried, _calls, _argv = _run_multi(
-            tmp_path, loop, "audit", capped_providers=(order(loop)[0],)
+            tmp_path, loop, "audit", capped_providers=(FALLBACK_LADDER[0],)
         )
-        assert providers(tried)[:2] == order(loop)[:2], (tried, proc.stderr)
+        assert rungs(tried)[:2] == FALLBACK_LADDER[:2], (tried, proc.stderr)
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
 
     def test_it_walks_the_whole_ladder_in_order(self, tmp_path, loop):
         proc, tried, _calls, _argv = _run_multi(
-            tmp_path, loop, "audit", capped_providers=tuple(order(loop)[:3])
+            tmp_path, loop, "audit", capped_providers=tuple(FALLBACK_LADDER[:3])
         )
-        assert providers(tried) == order(loop), tried
+        assert rungs(tried) == FALLBACK_LADDER, tried
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
 
     def test_every_provider_capped_is_one_honest_incomplete(self, tmp_path, loop):
         proc, tried, calls, _argv = _run_multi(
             tmp_path, loop, "audit",
-            capped_providers=("codex", "grok", "nvidia", "cerebras"),
+            capped_providers=tuple(FALLBACK_LADDER),
         )
-        assert providers(tried) == order(loop), tried
+        assert rungs(tried) == FALLBACK_LADDER, tried
         assert proc.returncode == 75, (proc.returncode, proc.stdout, proc.stderr)
         assert "all agent providers exhausted" in calls, calls
         assert "INCOMPLETE" in calls, calls
@@ -123,10 +133,10 @@ class TestACapContinuesOnTheNextProvider:
     def test_an_unauthenticated_provider_is_skipped(self, tmp_path, loop):
         proc, tried, _calls, _argv = _run_multi(
             tmp_path, loop, "audit",
-            capped_providers=tuple(order(loop)[:2]),
-            authed=tuple(p for p in order(loop) if p != order(loop)[2]),
+            capped_providers=tuple(FALLBACK_LADDER[:2]),
+            authed=("claude", "grok", "nvidia", "cerebras", "fx"),
         )
-        assert providers(tried) == order(loop)[:2] + order(loop)[3:], tried
+        assert rungs(tried) == FALLBACK_LADDER[:2] + FALLBACK_LADDER[3:], tried
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
 
     def test_an_operator_ladder_overrides_the_default(self, tmp_path, loop):
@@ -152,7 +162,8 @@ class TestACapContinuesOnTheNextProvider:
         """nvidia and cerebras ride the grok binary; only GROK_HOME tells them
         apart, so a wrong home silently bills the wrong provider."""
         _proc, tried, _calls, _argv = _run_multi(
-            tmp_path, loop, "audit", capped_providers=("codex", "grok", "nvidia")
+            tmp_path, loop, "audit", capped_providers=("nvidia",),
+            provider_ladder="nvidia:nvidia-latest cerebras:cerebras-latest",
         )
         hosted = [p for p in providers(tried) if p in ("nvidia", "cerebras")]
         assert hosted == ["nvidia", "cerebras"], tried
@@ -174,12 +185,11 @@ class TestAPermanentRejectionCostsOneRung:
     def test_a_rejected_codex_rung_advances_and_the_night_completes(
         self, tmp_path, loop
     ):
-        before = rungs_before(loop, "codex")
         proc, tried, _calls, _argv = _run_multi(
             tmp_path, loop, "audit",
-            capped_providers=before, reject_providers=("codex",),
+            capped_providers=tuple(FALLBACK_LADDER[:2]), reject_providers=("codex",),
         )
-        assert providers(tried) == list(before) + ["codex", "grok"], (tried, proc.stderr)
+        assert rungs(tried) == FALLBACK_LADDER, (tried, proc.stderr)
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
 
     def test_a_rejection_is_not_a_provider_wide_cap(self, tmp_path, loop):
@@ -194,14 +204,13 @@ class TestAPermanentRejectionCostsOneRung:
 
     def test_prose_quoting_a_rejection_is_not_a_rejection(self, tmp_path, loop):
         """These loops audit their own wrappers and echo the trigger text."""
-        before = rungs_before(loop, "codex")
         _proc, tried, _calls, _argv = _run_multi(
             tmp_path, loop, "audit",
-            capped_providers=before,
+            capped_providers=tuple(FALLBACK_LADDER[:2]),
             reject_providers=("codex",),
             reject_output=REJECTION_QUOTED_OUTPUT,
         )
-        assert ladder_walk(tried) == list(before) + ["codex"], (
+        assert rungs(tried) == FALLBACK_LADDER[:3], (
             f"a Traceback quoting the 400 walked the ladder: {tried}"
         )
 
@@ -219,8 +228,11 @@ class TestAPermanentRejectionCostsOneRung:
 
 
 # documentation runs a single `fx:nvidia` rung, so it has no nvidia rung to
-# crash and nothing below one to fall back to. Its own case is below.
-NVIDIA_LADDER_LOOPS = [l for l in FALLBACK_LOOPS if "nvidia" in EXPECTED_PROVIDER_ORDER[l]]
+# crash and nothing below one to fall back to. Its own case is below. The shared
+# ladder no longer names the grok-hosted nvidia rung by default (2026-09-26),
+# so these cases pin an operator ladder that does.
+NVIDIA_LADDER_LOOPS = FALLBACK_LOOPS
+NVIDIA_OVERRIDE = "codex nvidia:nvidia-latest grok"
 
 
 @pytest.mark.parametrize("loop", NVIDIA_LADDER_LOOPS)
@@ -233,17 +245,16 @@ class TestARungThatCrashesInsideItselfCostsOneRung:
     deliver each exited 1 with nothing done and the ladder untouched."""
 
     def test_a_crashing_rung_advances_and_the_night_completes(self, tmp_path, loop):
-        before = rungs_before(loop, "nvidia")
         proc, tried, _calls, _argv = _run_multi(
             tmp_path, loop, "audit",
-            capped_providers=before,
+            provider_ladder=NVIDIA_OVERRIDE,
+            capped_providers=("codex",),
             reject_providers=("nvidia",),
             reject_output=NVIDIA_INTERNAL_ERROR_OUTPUT,
         )
-        # Only the capped rungs before nvidia, nvidia itself, and the first
-        # healthy rung after it: that rung answers, so the ladder stops there.
-        nxt = order(loop)[len(before) + 1:][:1]
-        assert providers(tried) == list(before) + ["nvidia"] + list(nxt), (
+        # The capped rung before nvidia, nvidia itself, and the first healthy
+        # rung after it: that rung answers, so the ladder stops there.
+        assert providers(tried) == ["codex", "nvidia", "grok"], (
             tried, proc.stdout, proc.stderr,
         )
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
@@ -271,14 +282,14 @@ class TestARungThatCrashesInsideItselfCostsOneRung:
 
     def test_prose_quoting_the_crash_is_not_a_crash(self, tmp_path, loop):
         """These loops audit their own wrappers and echo the trigger text."""
-        before = rungs_before(loop, "nvidia")
         _proc, tried, _calls, _argv = _run_multi(
             tmp_path, loop, "audit",
-            capped_providers=before,
+            provider_ladder=NVIDIA_OVERRIDE,
+            capped_providers=("codex",),
             reject_providers=("nvidia",),
             reject_output=BROKEN_RUNG_QUOTED_OUTPUT,
         )
-        assert ladder_walk(tried) == list(before) + ["nvidia"], (
+        assert ladder_walk(tried) == ["codex", "nvidia"], (
             f"a Traceback quoting the crash walked the ladder: {tried}"
         )
 
@@ -381,20 +392,18 @@ class TestTheOperatorsDecisionNoPinnedModels:
         )
 
     @pytest.mark.parametrize("loop", FALLBACK_LOOPS)
-    def test_the_hosted_rungs_name_a_config_key_not_a_vendor_model_id(self, loop):
-        """nvidia and cerebras MUST name a model — grok resolves it through a
-        `[model."<key>"]` block — but the id itself belongs in the bootstrap,
-        which reads it from the provider's live /v1/models."""
+    def test_the_fx_rungs_name_a_provider_not_a_vendor_model_id(self, loop):
+        """An fx rung's model half names the fx provider; the model id behind
+        it belongs in the bootstrap, which reads the provider's live
+        /v1/models into ~/.fx/settings.json."""
         body = _h.LOOPS[loop].read_text(encoding="utf-8")
         m = re.search(
             r'^PROVIDER_LADDER="\$\{RADON_WEEKEND_PROVIDER_LADDER:-(.+?)\}"$',
             body, re.M,
         )
-        rungs = dict(r.split(":", 1) for r in m.group(1).split() if ":" in r)
-        assert rungs["nvidia"] == "nvidia-latest", rungs
-        assert rungs["cerebras"] == "cerebras-latest", rungs
-        assert "/" not in rungs["nvidia"], (
-            f"{loop}: a vendor model id is pinned in the wrapper: {rungs}"
+        fx = [r.split(":", 1)[1] for r in m.group(1).split() if r.startswith("fx:")]
+        assert fx == ["nvidia", "cerebras"], (
+            f"{loop}: a vendor model id is pinned in the wrapper: {fx}"
         )
 
     @pytest.mark.parametrize("loop", ["security", "security-deepsec"])
@@ -454,7 +463,8 @@ class TestMediumReasoningOnEveryFallbackRung:
 
     def test_the_hosted_rungs_still_pass_their_config_key(self, tmp_path, loop):
         _proc, tried, _calls, argv = _run_multi(
-            tmp_path, loop, "audit", capped_providers=rungs_before(loop, "nvidia")
+            tmp_path, loop, "audit",
+            provider_ladder="nvidia:nvidia-latest cerebras:cerebras-latest",
         )
         rung, launch = launch_of(tried, argv, "nvidia")
         assert rung == "nvidia:nvidia-latest", tried
