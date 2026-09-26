@@ -1678,7 +1678,12 @@ PORTABLE_PROMPT_DIR="${RADON_PORTABLE_PROMPT_DIR:-$REPO/.claude/portable-prompts
 # because the grok CLI resolves them through a `[model."<key>"]` block: the
 # rung names that STABLE KEY and scripts/agent_cli_bootstrap.sh resolves the
 # live id behind it from the provider's own /v1/models.
-PROVIDER_LADDER="${RADON_WEEKEND_PROVIDER_LADDER:-codex grok nvidia:nvidia-latest cerebras:cerebras-latest}"
+# 2026-09-25: this loop leads with the NVIDIA rung. Its nightly audit and
+# remediate rounds were the largest draw on the codex and grok accounts, and
+# the hosted rung answered through the wrapper's exact grok wire on the runner
+# (GROK_HOME=grok-home-nvidia, --model nvidia-latest, rc=0). codex and grok
+# stay as fallbacks in their prior order.
+PROVIDER_LADDER="${RADON_WEEKEND_PROVIDER_LADDER:-nvidia:nvidia-latest codex grok cerebras:cerebras-latest}"
 
 # --- provider ladder (byte-identical across all five loops) ------------------
 # A rung is `provider:model`. 2026-09-06: a Claude session cap is shared across
