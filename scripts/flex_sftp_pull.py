@@ -930,8 +930,9 @@ def _run(
             continue
 
     gap_note = None
-    if not budget_spent:
-        # Before retention prunes the inbox: the replay reads these files.
+    # REL-289 (R-679): Always attempt TWR gap healing for statements processed
+    # before budget exhaustion. The deadline bounds the heal runtime.
+    if activity_statements:
         gap_note = heal_twr_coverage_gaps(
             activity_statements, decrypt_fn=decrypt_fn, deadline=deadline
         )
