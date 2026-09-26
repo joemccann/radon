@@ -9,9 +9,9 @@ and the orders-sync loop that feeds ``executed_orders`` is market-hours
 gated. journal_reconcile therefore had nothing to diff and the fill
 stayed missing until a manual Flex rehydrate.
 
-This handler runs once per ET trading day at 20:30 ET (after IB's
-post-close processing) while the day's executions — including
-after-hours ones — are still visible on the evening session:
+This handler runs twice per ET trading day, at 20:30 ET and again at
+23:45 ET, while the day's executions — including after-hours ones and
+expiry assignment — are still visible on the evening session:
 
   1. connects to IB (``client_id="auto"``) and pulls ``get_fills()``;
   2. imports any exec_id not yet in the journal via
@@ -69,11 +69,14 @@ CHECK_INTERVAL = 24 * 60 * 60
 
 ET = ZoneInfo("America/New_York")
 
-# Daily fire time: 20:30 ET, after IB's post-close processing, while the
-# evening session still exposes the day's executions. Late fire allowed
-# any time after 20:30 ET if the handler hasn't run this ET day.
+# First pass: 20:30 ET, after the cash close. That pass can still miss
+# expiry assignment. On 2026-09-25 execution-sweep was ok at 20:30:20 ET
+# and the SPCX 149-put assignment was unjournaled when reconcile saw it
+# at 23:43 ET. Second pass at 23:45 ET, still the same IB session day.
 FIRE_HOUR_ET = 20
 FIRE_MINUTE_ET = 30
+LATE_FIRE_HOUR_ET = 23
+LATE_FIRE_MINUTE_ET = 45
 
 # Soft-failure retry budget per ET day (mirrors cash_flow_sync): each
 # failed attempt embargoes 5 min via record_soft_failure; after this
@@ -92,6 +95,16 @@ def _now_utc() -> datetime:
 
 def _et_date(now_utc: datetime) -> str:
     return now_utc.astimezone(ET).strftime("%Y-%m-%d")
+
+
+def _fire_slot(et_now: datetime) -> Optional[str]:
+    """Which same-day pass this clock is in, or None before 20:30 ET."""
+    hm = (et_now.hour, et_now.minute)
+    if hm >= (LATE_FIRE_HOUR_ET, LATE_FIRE_MINUTE_ET):
+        return "late"
+    if hm >= (FIRE_HOUR_ET, FIRE_MINUTE_ET):
+        return "early"
+    return None
 
 
 def _is_trading_day_et(now_utc: datetime) -> bool:
@@ -119,7 +132,7 @@ def _overlay_journal_realized_pnl(rows: List[Dict[str, Any]]) -> None:
 
 
 class EveningExecutionSweepHandler(BaseHandler):
-    """Import the day's after-hours executions once per ET trading day."""
+    """Import the day's after-hours executions at 20:30 ET and again at 23:45."""
 
     name = "evening_execution_sweep"
     interval_seconds = CHECK_INTERVAL
@@ -152,13 +165,14 @@ class EveningExecutionSweepHandler(BaseHandler):
                 "throttle_count": int(raw.get("throttle_count") or 0),
                 "blocked_until": raw.get("blocked_until"),
                 "soft_attempt_date": raw.get("soft_attempt_date"),
+                "soft_attempt_slot": raw.get("soft_attempt_slot"),
                 "soft_attempts": int(raw.get("soft_attempts") or 0),
             }
         else:
             self._backoff_state = _throttle_backoff.initial_state()
 
     # ------------------------------------------------------------------
-    # Cadence — once per ET trading day at/after 20:30 ET.
+    # Cadence — 20:30 ET, then 23:45 ET, once each per trading day.
     # ------------------------------------------------------------------
     def is_due(self) -> bool:
         if not self._enabled:
@@ -169,23 +183,32 @@ class EveningExecutionSweepHandler(BaseHandler):
         if _throttle_backoff.is_blocked(self._backoff_state, now_utc=now_utc):
             return False
 
-        if self._soft_budget_exhausted(now_utc):
-            return False
-
         if not _is_trading_day_et(now_utc):
             return False
 
         et_now = now_utc.astimezone(ET)
-        if (et_now.hour, et_now.minute) < (FIRE_HOUR_ET, FIRE_MINUTE_ET):
+        slot = _fire_slot(et_now)
+        if slot is None:
             return False
 
-        # Never double-fire the same ET trading day; a late fire after a
-        # daemon outage is fine — skipping the day defeats the sweep.
-        if self.last_run is not None:
-            if self.last_run.astimezone(ET).strftime("%Y-%m-%d") == et_now.strftime("%Y-%m-%d"):
-                return False
+        # One success per slot. The 20:30 pass must not suppress 23:45:
+        # assignment prints land between them. A missed day still fires
+        # on the next trading day's first open slot. A burned early-slot
+        # retry budget does not consume the late slot.
+        if self._last_success_slot(et_now) == slot:
+            return False
+        if self._soft_budget_exhausted(now_utc, slot):
+            return False
 
         return True
+
+    def _last_success_slot(self, et_now: datetime) -> Optional[str]:
+        if self.last_run is None:
+            return None
+        last = self.last_run.astimezone(ET)
+        if last.strftime("%Y-%m-%d") != et_now.strftime("%Y-%m-%d"):
+            return None
+        return _fire_slot(last)
 
     # ------------------------------------------------------------------
     # Execution
@@ -302,11 +325,16 @@ class EveningExecutionSweepHandler(BaseHandler):
     def _record_failure(self, started_at: str, message: str) -> None:
         now_utc = _now_utc()
         today = _et_date(now_utc)
+        slot = _fire_slot(now_utc.astimezone(ET))
         prior = self._backoff_state
-        same_day = prior.get("soft_attempt_date") == today
-        attempts = int(prior.get("soft_attempts") or 0) if same_day else 0
+        same_slot = (
+            prior.get("soft_attempt_date") == today
+            and prior.get("soft_attempt_slot") == slot
+        )
+        attempts = int(prior.get("soft_attempts") or 0) if same_slot else 0
         self._backoff_state = _throttle_backoff.record_soft_failure(prior, now_utc=now_utc)
         self._backoff_state["soft_attempt_date"] = today
+        self._backoff_state["soft_attempt_slot"] = slot
         self._backoff_state["soft_attempts"] = attempts + 1
 
         self.record_cycle_health(
@@ -320,9 +348,11 @@ class EveningExecutionSweepHandler(BaseHandler):
             },
         )
 
-    def _soft_budget_exhausted(self, now_utc: datetime) -> bool:
+    def _soft_budget_exhausted(self, now_utc: datetime, slot: str) -> bool:
         state = self._backoff_state
         if state.get("soft_attempt_date") != _et_date(now_utc):
+            return False
+        if state.get("soft_attempt_slot") != slot:
             return False
         return int(state.get("soft_attempts") or 0) >= MAX_SOFT_ATTEMPTS_PER_ET_DAY
 
