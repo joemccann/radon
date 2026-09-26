@@ -17,7 +17,8 @@ radon ALL=(root) NOPASSWD: /usr/sbin/faillock --user radon --reset
 radon ALL=(root) NOPASSWD: /usr/sbin/faillock --user radon
 
 # --- read-only diagnostic helpers ---
-radon ALL=(root) NOPASSWD: /usr/bin/journalctl -u radon-*
+# No journalctl grant: a wildcard unit argument would admit every journalctl
+# option as root. Read unit logs as root over ssh instead.
 radon ALL=(root) NOPASSWD: /usr/bin/docker logs ib-gateway
 
 # --- Gateway container control (replaces radon's group `docker` membership) ---
