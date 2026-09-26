@@ -1,4 +1,9 @@
 # Lessons
+## 2026-09-25 — Review progress must survive a browser restart
+
+- Local votes alone do not resume a file-backed review: the packet and cursor must restore too. Keep packet storage local to the browser, back up decisions to the authenticated operator store, and resume the exact item without discarding existing votes.
+- A loaded packet should display available images immediately at a readable size. Per-host load buttons and thumbnail caps made the human review unnecessarily slow.
+
 ## 2026-09-19 — Next.js is an LLM consumer
 
 - `/api/newsfeed/share` and `/api/assistant` run inside `radon-nextjs`.
