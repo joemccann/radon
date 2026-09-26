@@ -1,6 +1,6 @@
-# REVIEWED 2026-09-25 admin-panel.spec.ts - Static adaptation opens native gateway,
-#   services, and writer disclosures before existing assertions. Manual browser
-#   fixture review confirmed disclosure navigation and mobile inventory reflow.
+# REVIEWED 2026-09-25 admin-panel.spec.ts - Static adaptation opens header gateway
+#   and service dialogs before existing controls/sort assertions; writer and status
+#   assertions retain their native disclosures. No local suite execution.
 #   This route suite remains held out; curated admin-action-queue.spec.ts and
 #   clear-admin-component.spec.ts exercise the real workspace with mocked transport.
 # REVIEWED 2026-09-25 mobile-a11y-pwa.spec.ts - classify() now ignores

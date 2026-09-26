@@ -67,9 +67,9 @@
 .history { display: grid; min-width: 0; gap: var(--space-4); }
 .secondaryGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); min-width: 0; }
 .workspace :is(button, summary):focus-visible, .queue :is(button, summary):focus-visible { outline: 2px solid var(--border-focus); outline-offset: 3px; }
-.workspace :global(.admin-card), .workspace :global(.admin-table-scroll) { min-width: 0; max-width: 100%; }
-.workspace :global(.admin-actions-row) { flex-wrap: wrap; }
-.workspace :global(.admin-btn) { min-height: var(--touch-min); }
+:is(.workspace, .controlPanel) :global(.admin-card), :is(.workspace, .controlPanel) :global(.admin-table-scroll) { min-width: 0; max-width: 100%; }
+:is(.workspace, .controlPanel) :global(.admin-actions-row) { flex-wrap: wrap; }
+:is(.workspace, .controlPanel) :global(.admin-btn) { min-height: var(--touch-min); }
 
 @media (max-width: 900px) {
   .split { grid-template-columns: minmax(0, 1fr) 240px; gap: var(--space-5); }
@@ -91,7 +91,7 @@
   .secondaryGrid { grid-template-columns: minmax(0, 1fr); }
   .summary { gap: var(--space-1); }
   .summaryDescription { width: 100%; }
-  .workspace :global(.admin-card-note) { overflow-wrap: anywhere; }
+  :is(.workspace, .controlPanel) :global(.admin-card-note) { overflow-wrap: anywhere; }
 }
 
 .tradingTrigger { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); min-height: var(--touch-min); padding: var(--space-2) var(--space-4); border: 1px solid var(--line-grid); border-radius: var(--radius-sm); background: transparent; color: var(--text-primary); font: 550 var(--text-label)/1.5 var(--font-sans); cursor: pointer; }
@@ -104,7 +104,7 @@
 .neutral { color: var(--text-muted); }
 
 .workspace { min-height: 0; max-width: 1280px; margin-inline: auto; }
-.workspace :global(.admin-page) { display: grid; gap: var(--space-5); width: 100%; max-width: none; min-width: 0; padding: 0 0 var(--space-6); }
+:is(.workspace, .controlPanel) :global(.admin-page) { display: grid; gap: var(--space-5); width: 100%; max-width: none; min-width: 0; padding: 0 0 var(--space-6); }
 .pageHeader > div:first-child { flex: 1; min-width: 0; }
 .secondaryGrid { grid-template-columns: minmax(0, 1fr); }
 .inspectButton::after { content: none; }
@@ -114,28 +114,55 @@
 .tradingPanel :global(.admin-card) { border: 0; padding-inline: 0; }
 .tradingPanel :global(.admin-card-note) { overflow-wrap: anywhere; }
 @media (max-width: 640px) {
-  .workspace :global(.admin-page) { padding: var(--space-4) var(--space-4) var(--space-6); }
+  :is(.workspace, .controlPanel) :global(.admin-page) { padding: var(--space-4) var(--space-4) var(--space-6); }
   .summaryDescription { display: none; }
   .summary { justify-content: space-between; align-items: center; }
   .summary :global(.admin-btn) { font-size: var(--text-meta); padding-inline: var(--space-2); }
   .pageHeader { flex-wrap: nowrap; }
   .pageMeta { max-width: 170px; line-height: 1.4; }
   .tradingTrigger { flex-direction: column; gap: 0; font-size: var(--text-meta); }
-  .workspace :global(.admin-table-scroll) { overflow: visible; }
-  .workspace :global(.admin-services-table) { display: block; min-width: 0; width: 100%; }
-  .workspace :global(.admin-services-table thead), .workspace :global(.admin-services-table tbody) { display: block; }
-  .workspace :global(.admin-services-table thead tr) { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-  .workspace :global(.admin-services-table th) { padding: var(--space-2) 0; border: 0; }
-  .workspace :global(.admin-services-table th button) { min-height: var(--touch-min); }
-  .workspace :global(.admin-services-table tbody tr) { display: grid; gap: var(--space-3); padding-block: var(--space-4); border-bottom: 1px solid var(--line-grid); }
-  .workspace :global(.admin-services-table td) { display: block; min-width: 0; border: 0; padding: 0; white-space: normal; text-align: left; overflow-wrap: anywhere; }
-  .workspace :global(.admin-services-table td[data-label])::before { content: attr(data-label); display: block; margin-bottom: var(--space-1); font: 500 var(--text-meta)/1.5 var(--font-sans); color: var(--text-muted); }
-  .workspace :global(.admin-unit-name), .workspace :global(.admin-unit-desc), .workspace :global(.admin-unit-activity) { white-space: normal; max-width: 100%; overflow-wrap: anywhere; }
-  .workspace :global(.admin-row-actions) { justify-content: flex-start; flex-wrap: wrap; }
+  :is(.workspace, .controlPanel) :global(.admin-table-scroll) { overflow: visible; }
+  :is(.workspace, .controlPanel) :global(.admin-services-table) { display: block; min-width: 0; width: 100%; }
+  :is(.workspace, .controlPanel) :global(.admin-services-table thead), :is(.workspace, .controlPanel) :global(.admin-services-table tbody) { display: block; }
+  :is(.workspace, .controlPanel) :global(.admin-services-table thead tr) { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+  :is(.workspace, .controlPanel) :global(.admin-services-table th) { padding: var(--space-2) 0; border: 0; }
+  :is(.workspace, .controlPanel) :global(.admin-services-table th button) { min-height: var(--touch-min); }
+  :is(.workspace, .controlPanel) :global(.admin-services-table tbody tr) { display: grid; gap: var(--space-3); padding-block: var(--space-4); border-bottom: 1px solid var(--line-grid); }
+  :is(.workspace, .controlPanel) :global(.admin-services-table td) { display: block; min-width: 0; border: 0; padding: 0; white-space: normal; text-align: left; overflow-wrap: anywhere; }
+  :is(.workspace, .controlPanel) :global(.admin-services-table td[data-label])::before { content: attr(data-label); display: block; margin-bottom: var(--space-1); font: 500 var(--text-meta)/1.5 var(--font-sans); color: var(--text-muted); }
+  :is(.workspace, .controlPanel) :global(.admin-unit-name), :is(.workspace, .controlPanel) :global(.admin-unit-desc), :is(.workspace, .controlPanel) :global(.admin-unit-activity) { white-space: normal; max-width: 100%; overflow-wrap: anywhere; }
+  :is(.workspace, .controlPanel) :global(.admin-row-actions) { justify-content: flex-start; flex-wrap: wrap; }
 }
 
-.workspace :global(.admin-log-row), .workspace :global(.admin-services-help) { font-size: var(--text-meta); }
+:is(.workspace, .controlPanel) :global(.admin-log-row), :is(.workspace, .controlPanel) :global(.admin-services-help) { font-size: var(--text-meta); }
 @media (max-width: 640px) {
-  .workspace :global(.admin-log-row) { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
-  .workspace :global(.admin-log-detail), .workspace :global(.admin-log-target), .workspace :global(.admin-log-action) { white-space: normal; overflow-wrap: anywhere; }
+  :is(.workspace, .controlPanel) :global(.admin-log-row) { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
+  :is(.workspace, .controlPanel) :global(.admin-log-detail), :is(.workspace, .controlPanel) :global(.admin-log-target), :is(.workspace, .controlPanel) :global(.admin-log-action) { white-space: normal; overflow-wrap: anywhere; }
 }
+
+.controlPanel { width: min(100%, 900px); }
+.controlPanelHeader { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-4); }
+.controlPanelHeader h2 { margin: 0; font-size: var(--text-panel-title); font-weight: 550; }
+.controlPanelHeader button { flex-shrink: 0; }
+.controlDescription { margin: 0 0 var(--space-4); color: var(--text-secondary); font-size: var(--text-label); line-height: 1.6; }
+.controlPanel :global(.admin-card) { margin: 0; }
+.controlPanel :global(.admin-card-title), .controlPanel :global(.admin-card-note), .controlPanel :global(.admin-card-note-inline), .controlPanel :global(.admin-services-help) { font-size: var(--text-meta); }
+.controlPanel :global(.admin-actions-row) { gap: var(--space-2); }
+.controlPanel :global(.admin-btn):focus-visible { outline: 2px solid var(--border-focus); outline-offset: 3px; }
+.stackActions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-4); }
+@media (max-width: 640px) {
+  .pageHeader { flex-wrap: wrap; }
+  .pageHeader > div:first-child { flex-basis: 100%; }
+  .pageMeta { max-width: none; }
+  .headerActions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); width: 100%; }
+  .headerActions button { min-width: 0; min-height: 64px; padding-inline: var(--space-2); white-space: normal; font-size: var(--text-meta); }
+  .controlPanel { padding: var(--space-4); }
+}
+
+.controlPanel[data-controls="gateway-controls"] { width: min(100%, 660px); }
+.controlPanel :global(.admin-gateway-power .admin-actions-row) { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.controlPanel :global(.admin-gateway-power-btn) { min-width: 0; padding-inline: var(--space-2); white-space: normal; }
+
+.controlPanel :global(.admin-card-header) { display: none; }
+
+@media (max-width: 640px) { .headerActions { align-items: stretch; } }

@@ -319,9 +319,20 @@ case "$HOST_ROLE" in
     )
     ;;
 esac
+# Exact array membership avoids an early-exit grep closing a printf pipe.
+# Under pipefail, that SIGPIPE falsely classifies a present unit as missing.
+contains_unit() {
+  local expected="$1" candidate
+  shift
+  for candidate in "$@"; do
+    [[ "$candidate" == "$expected" ]] && return 0
+  done
+  return 1
+}
+
 MISSING_UNITS=()
 for required_unit in "${REQUIRED_UNITS[@]}"; do
-  if ! printf '%s\n' "${LOADED_UNITS[@]}" | grep -qx "$required_unit"; then
+  if ! contains_unit "$required_unit" "${LOADED_UNITS[@]}"; then
     MISSING_UNITS+=("$required_unit")
   fi
 done
@@ -448,7 +459,7 @@ case "$requested_action" in
   stop)
     STOP_UNITS=()
     for unit in "${PERSISTENT_UNITS[@]}"; do
-      if printf '%s\n' "${ACTIVE_UNITS[@]}" | grep -qx "$unit"; then
+      if contains_unit "$unit" "${ACTIVE_UNITS[@]}"; then
         STOP_UNITS+=("$unit")
       fi
     done

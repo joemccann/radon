@@ -25,6 +25,8 @@ type ServiceControlPanelProps = {
   error: string | null;
   onAction: (unit: string, action: ServiceAction) => Promise<void>;
   flashTarget?: FlashTarget | null;
+  observationCurrent?: boolean;
+  externalPending?: boolean;
 };
 
 type PendingAction = { unit: string; action: ServiceAction } | null;
@@ -45,11 +47,20 @@ export default function ServiceControlPanel({
   error,
   onAction,
   flashTarget = null,
+  observationCurrent = true,
+  externalPending = false,
 }: ServiceControlPanelProps) {
   const [pending, setPending] = useState<PendingAction>(null);
   const [confirm, setConfirm] = useState<PendingAction>(null);
 
+  const disabledReason = (unit: string, action: ServiceAction): string | null => {
+    if (!observationCurrent) return "Refresh service status before running a command.";
+    const current = services?.units.find(row => row.unit === unit);
+    if (!current) return "Service is no longer available.";
+    return serviceControlDisabledReason({ unit: current, action, supported: services?.supported ?? false, hostRole: services?.host_role, pending: pending !== null || externalPending });
+  };
   const runAction = async (unit: string, action: ServiceAction) => {
+    if (disabledReason(unit, action)) return;
     setPending({ unit, action });
     try {
       await onAction(unit, action);
@@ -60,6 +71,7 @@ export default function ServiceControlPanel({
   };
 
   const requestAction = (unit: string, action: ServiceAction) => {
+    if (disabledReason(unit, action)) return;
     if (action === "start") void runAction(unit, action);
     else setConfirm({ unit, action });
   };
@@ -122,12 +134,13 @@ export default function ServiceControlPanel({
       </header>
       <p className="admin-card-subhead">
         {supported
-          ? "systemd units on the Hetzner VPS (the radon-* stack). Controls call systemctl via polkit."
+          ? "Current service status. Commands may briefly interrupt data and order services."
           : hostRole === "app"
-            ? "Unit state is from the host health daemon. The API container cannot start, stop, or restart these units."
+            ? "This host cannot start, stop, or restart services. Current status remains visible."
             : "Read-only: this browser is not on the Hetzner VPS, so controls are disabled."}
       </p>
 
+      {!observationCurrent && <p className="admin-card-note" role="status">Refresh service status before running a command.</p>}
       <div className="admin-table-scroll">
       <table className="admin-services-table">
         <thead>
@@ -146,6 +159,7 @@ export default function ServiceControlPanel({
               supported={supported}
               hostRole={hostRole}
               pending={pending}
+              controlsDisabledReason={!observationCurrent ? "Refresh service status before running a command." : pending !== null || externalPending ? "Action in flight..." : null}
               onRequest={requestAction}
               flashTarget={flashTarget}
             />
@@ -157,7 +171,7 @@ export default function ServiceControlPanel({
       <p className="admin-services-help">
         Daemon stuck or pool disconnected after 2FA? Use Restart All Services. A
         single scheduled job failed? Restart that row. IB session issues? See IB
-        Gateway above.
+        Gateway controls in the header.
       </p>
 
       <ConfirmDialog
@@ -175,6 +189,8 @@ export default function ServiceControlPanel({
         affectedUnits={stopNeedsTyped ? dependents : undefined}
         requireTyped={stopNeedsTyped ? confirm!.unit : undefined}
         pending={pending !== null}
+        confirmDisabled={confirm !== null && disabledReason(confirm.unit, confirm.action) !== null}
+        disabledReason={confirm ? disabledReason(confirm.unit, confirm.action) ?? undefined : undefined}
         onConfirm={() => confirm && runAction(confirm.unit, confirm.action)}
         onCancel={() => setConfirm(null)}
       />
@@ -204,6 +220,7 @@ function ServiceRow({
   pending,
   onRequest,
   flashTarget,
+  controlsDisabledReason,
 }: {
   unit: UnitStatus;
   supported: boolean;
@@ -211,6 +228,7 @@ function ServiceRow({
   pending: PendingAction;
   onRequest: (unit: string, action: ServiceAction) => void;
   flashTarget: FlashTarget | null;
+  controlsDisabledReason: string | null;
 }) {
   const verdict = unitVerdict(unit);
   const isUnitPending = pending?.unit === unit.unit;
@@ -246,7 +264,7 @@ function ServiceRow({
       <td data-label="Controls" className="admin-col-controls">
         <div className="admin-row-actions">
           {(["start", "restart", "stop"] as ServiceAction[]).map((action) => {
-            const reason = serviceControlDisabledReason({
+            const reason = controlsDisabledReason ?? serviceControlDisabledReason({
               unit,
               action,
               supported,

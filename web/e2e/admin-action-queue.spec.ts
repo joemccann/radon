@@ -42,11 +42,15 @@ async function openOperator(page: Page, request: APIRequestContext, theme: "ligh
   await page.clock.setFixedTime(new Date(NOW));
   const mutations: { path: string; body: unknown }[] = [];
   let healthAvailable = scenario !== "unavailable";
+  let servicesAvailable = true;
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (route.request().method() !== "GET") {
       mutations.push({ path, body: route.request().postDataJSON() });
       return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, detail: "accepted", returncode: 0 }) });
+    }
+    if (path === "/api/admin/services" && !servicesAvailable) {
+      return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Services unavailable" }) });
     }
     if (path === "/api/admin/health" && !healthAvailable) {
       return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Health unavailable" }) });
@@ -77,12 +81,12 @@ async function openOperator(page: Page, request: APIRequestContext, theme: "ligh
   await page.goto("/__operator-action-queue");
   await page.addScriptTag({ content: bundle });
   await expect(page.getByTestId("admin-attention-queue")).toBeVisible();
-  return { mutations, failHealth: () => { healthAvailable = false; } };
+  return { mutations, failHealth: () => { healthAvailable = false; }, failServices: () => { servicesAvailable = false; } };
 }
 
 for (const theme of ["light", "dark"] as const) {
   for (const viewport of [{ label: "desktop", width: 1440, height: 900 }, { label: "mobile", width: 390, height: 752 }, { label: "small-mobile", width: 320, height: 752 }]) {
-    test(`${theme} ${viewport.label}: priority action and trading entry precede diagnostics`, async ({ page, request }, testInfo) => {
+    test(`${theme} ${viewport.label}: priority action and recovery controls precede diagnostics`, async ({ page, request }, testInfo) => {
       await page.setViewportSize(viewport);
       const { mutations } = await openOperator(page, request, theme, "attention");
       const queue = page.getByTestId("admin-attention-queue");
@@ -95,8 +99,12 @@ for (const theme of ["light", "dark"] as const) {
       expect(box).not.toBeNull();
       expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
       expect(box!.height).toBeGreaterThanOrEqual(44);
-      const trading = page.getByTestId("trading-controls-button");
-      await expect(trading).toBeInViewport();
+      for (const control of ["gateway", "service", "trading"]) {
+        const entry = page.getByTestId(`${control}-controls-button`);
+        await expect(entry).toBeInViewport();
+        const entryBox = await entry.boundingBox();
+        expect(entryBox!.height).toBeGreaterThanOrEqual(44);
+      }
       for (const section of ["services", "writers", "reliability", "gateway", "host", "access"]) {
         await expect(page.getByTestId(`admin-disclosure-${section}`)).not.toHaveAttribute("open", "");
       }
@@ -117,10 +125,12 @@ test("queue recovery preserves confirmation and exact gateway mutation; inventor
   await page.getByTestId("admin-confirm-action").click();
   await expect.poll(() => mutations.length).toBe(1);
   expect(mutations[0].path).toBe("/api/admin/services/radon-ib-gateway.service/start");
-  await page.getByTestId("admin-disclosure-services").locator(":scope > summary").click();
+  await page.getByTestId("service-controls-button").click();
   await expect(page.getByTestId("services-card")).toBeVisible();
   await page.getByTestId("services-card").getByRole("columnheader", { name: /unit/i }).click();
   await expect(page.locator("[data-testid^='service-row-']").first()).toContainText("radon-api.service");
+  await page.keyboard.press("Escape");
+  await page.getByTestId("admin-disclosure-services").locator(":scope > summary").click();
   await page.getByTestId("admin-disclosure-writers").locator(":scope > summary").click();
   await expect(page.getByTestId("writer-row-knowledge-ingest")).toBeVisible();
   await expect(page.getByTestId("writer-row-portfolio-sync")).toBeVisible();
@@ -196,3 +206,147 @@ for (const theme of ["light", "dark"] as const) {
     await page.screenshot({ path: testInfo.outputPath(`${theme}-desktop-unavailable-admin-component.png`), fullPage: true });
   });
 }
+
+for (const theme of ["light", "dark"] as const) {
+  for (const width of [1440, 390, 320]) {
+    test(`${theme} ${width}px: healthy gateway and services remain one click from the header`, async ({ page, request }, testInfo) => {
+      await page.setViewportSize({ width, height: 900 });
+      const { mutations } = await openOperator(page, request, theme, "healthy");
+      await expect(page.getByTestId("admin-attention-empty")).toContainText("No action needed");
+      for (const control of ["gateway", "service"] as const) {
+        const entry = page.getByTestId(`${control}-controls-button`);
+        await expect(entry).toBeInViewport();
+        await entry.click();
+        const dialog = page.getByTestId(`${control}-controls-dialog`);
+        await expect(dialog).toBeVisible();
+        if (control === "gateway") {
+          for (const name of ["Start Gateway", "Restart Gateway", "Stop Gateway"]) {
+            await expect(dialog.getByRole("button", { name, exact: true })).toBeVisible();
+          }
+          await expect(page.getByTestId("ib-controls")).toHaveCount(1);
+          await expect(dialog.getByRole("button", { name: "Restart Gateway", exact: true })).toBeEnabled();
+        } else {
+          await expect(page.getByTestId("services-card")).toHaveCount(1);
+          await expect(dialog.getByTestId("restart-stack-button")).toBeVisible();
+          await expect(dialog.getByTestId("service-row-radon-api.service")).toBeVisible();
+          await expect(dialog.getByTestId("service-restart-radon-api.service")).toBeVisible();
+        }
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+        await page.screenshot({ path: testInfo.outputPath(`${theme}-${width}-${control}-controls-admin-component.png`), fullPage: true });
+        await page.keyboard.press("Escape");
+        await expect(dialog).not.toBeVisible();
+        await expect(entry).toBeFocused();
+      }
+      expect(mutations).toEqual([]);
+    });
+  }
+}
+
+test("gateway header restart preserves typed confirmation and nested focus return", async ({ page, request }) => {
+  const { mutations } = await openOperator(page, request, "dark", "healthy");
+  const entry = page.getByTestId("gateway-controls-button");
+  await entry.click();
+  const dialog = page.getByTestId("gateway-controls-dialog");
+  const restart = page.getByTestId("gateway-restart-button");
+  await restart.click();
+  await expect(page.getByTestId("admin-confirm")).toContainText("Restart the IB Gateway?");
+  await expect(page.getByTestId("admin-confirm-action")).toBeDisabled();
+  await expect(page.getByTestId("admin-confirm-typed-input")).toBeFocused();
+  expect(mutations).toEqual([]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("admin-confirm")).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  await expect(restart).toBeFocused();
+  await restart.click();
+  await page.getByTestId("admin-confirm-typed-input").fill("radon-ib-gateway.service");
+  await page.getByTestId("admin-confirm-action").click();
+  await expect.poll(() => mutations.length).toBe(1);
+  expect(mutations[0]).toEqual({ path: "/api/admin/services/radon-ib-gateway.service/restart", body: null });
+  await expect(page.getByTestId("admin-confirm")).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(entry).toBeFocused();
+});
+
+for (const action of ["start", "restart", "stop"] as const) {
+  test(`service header ${action} preserves the exact service mutation`, async ({ page, request }) => {
+    const { mutations } = await openOperator(page, request, "light", action === "start" ? "attention" : "healthy");
+    const entry = page.getByTestId("service-controls-button");
+    await entry.click();
+    const dialog = page.getByTestId("service-controls-dialog");
+    const trigger = page.getByTestId(`service-${action}-radon-api.service`);
+    await trigger.click();
+    if (action !== "start") {
+      await expect(page.getByTestId("admin-confirm")).toBeVisible();
+      expect(mutations).toEqual([]);
+      await page.keyboard.press("Escape");
+      await expect(page.getByTestId("admin-confirm")).toHaveCount(0);
+      await expect(dialog).toBeVisible();
+      await expect(trigger).toBeFocused();
+      await trigger.click();
+      await page.getByTestId("admin-confirm-action").click();
+    }
+    await expect.poll(() => mutations.length).toBe(1);
+    expect(mutations[0]).toEqual({ path: `/api/admin/services/radon-api.service/${action}`, body: null });
+    await expect(page.getByTestId("admin-confirm")).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(entry).toBeFocused();
+  });
+}
+
+for (const action of ["start", "stop"] as const) {
+  test(`gateway header ${action} preserves confirmation and the exact gateway mutation`, async ({ page, request }) => {
+    const { mutations } = await openOperator(page, request, "light", action === "start" ? "attention" : "healthy");
+    await page.getByTestId("gateway-controls-button").click();
+    const dialog = page.getByTestId("gateway-controls-dialog");
+    await dialog.getByRole("button", { name: action === "start" ? "Start Gateway" : "Stop Gateway", exact: true }).click();
+    await expect(page.getByTestId("admin-confirm")).toBeVisible();
+    expect(mutations).toEqual([]);
+    if (action === "stop") {
+      await expect(page.getByTestId("admin-confirm-action")).toBeDisabled();
+      await page.getByTestId("admin-confirm-typed-input").fill("radon-ib-gateway.service");
+    }
+    await page.getByTestId("admin-confirm-action").click();
+    await expect.poll(() => mutations.length).toBe(1);
+    expect(mutations[0]).toEqual({ path: `/api/admin/services/radon-ib-gateway.service/${action}`, body: null });
+    await expect(page.getByTestId("admin-confirm")).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+  });
+}
+
+test("service header exposes the single Restart All Services owner and its confirmation", async ({ page, request }) => {
+  const { mutations } = await openOperator(page, request, "dark", "healthy");
+  await page.getByTestId("service-controls-button").click();
+  const dialog = page.getByTestId("service-controls-dialog");
+  const restart = dialog.getByTestId("restart-stack-button");
+  await expect(page.getByTestId("restart-stack-button")).toHaveCount(1);
+  await restart.click();
+  await expect(page.getByTestId("admin-confirm")).toContainText("Restart all radon services?");
+  expect(mutations).toEqual([]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("admin-confirm")).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  await expect(restart).toBeFocused();
+  await restart.click();
+  await page.getByTestId("admin-confirm-action").click();
+  await expect.poll(() => mutations.length).toBe(1);
+  expect(mutations[0]).toEqual({ path: "/api/admin/stack/restart", body: null });
+});
+
+test("failed service refresh retains the inventory but blocks its header commands", async ({ page, request }) => {
+  const { mutations, failServices } = await openOperator(page, request, "light", "healthy");
+  await expect(page.getByTestId("overview-services")).toContainText("3 / 3 OK");
+  failServices();
+  await page.getByTestId("admin-status-summary").getByRole("button", { name: "Refresh status" }).click();
+  await expect(page.getByTestId("overview-services")).toContainText("Last known");
+  await page.getByTestId("service-controls-button").click();
+  await expect(page.getByTestId("service-row-radon-api.service")).toBeVisible();
+  for (const unit of ["radon-api.service", "radon-relay.service"]) {
+    for (const action of ["start", "restart", "stop"]) {
+      await expect(page.getByTestId(`service-${action}-${unit}`)).toBeDisabled();
+    }
+  }
+  await expect(page.getByTestId("restart-stack-button")).toBeDisabled();
+  expect(mutations).toEqual([]);
+});

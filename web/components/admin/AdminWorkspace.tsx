@@ -34,6 +34,7 @@ import HostMetricsStrip from "./HostMetricsStrip";
 import WriterFreshnessTable from "./WriterFreshnessTable";
 import DemoUsersTable from "./DemoUsersTable";
 import TradingKillSwitch from "./TradingKillSwitch";
+import AdminControlDialog from "./AdminControlDialog";
 
 type EdgePayload = (EdgeHealthStatus & { reachable?: boolean }) | null;
 
@@ -67,6 +68,15 @@ const FLASH_DURATION_MS = 2_000;
  * Keeps the page-level component thin: child components are render-only.
  */
 export default function AdminWorkspace() {
+  const commandLock = useRef(false);
+  const [commandPending, setCommandPending] = useState(false);
+  const runCommand = async <T,>(command: () => Promise<T>): Promise<T | false> => {
+    if (commandLock.current) return false;
+    commandLock.current = true;
+    setCommandPending(true);
+    try { return await command(); } finally { commandLock.current = false; setCommandPending(false); }
+  };
+  const [controlsOpen, setControlsOpen] = useState<"gateway" | "services" | null>(null);
   const [health, setHealth] = useState<AdminHealthPayload | null>(null);
   const [telemetryErrors, setTelemetryErrors] = useState<Record<string, unknown>>({});
   const [healthError, setHealthError] = useState<string | null>(null);
@@ -89,6 +99,7 @@ export default function AdminWorkspace() {
   const [healthObservedAt, setHealthObservedAt] = useState<number | null>(null);
   const [servicesObservedAt, setServicesObservedAt] = useState<number | null>(null);
   const [edgeObservedAt, setEdgeObservedAt] = useState<number | null>(null);
+  const [stackActionContainer, setStackActionContainer] = useState<HTMLDivElement | null>(null);
   const [primaryActionContainer, setPrimaryActionContainer] = useState<HTMLDivElement | null>(null);
   const disclosures = useRef<Partial<Record<string, HTMLDetailsElement>>>({});
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -483,6 +494,7 @@ export default function AdminWorkspace() {
       flashRow(unit, succeeded);
       void fetchServices();
       void fetchHealth();
+      return succeeded;
     },
     [appendLog, fetchHealth, fetchServices, flashRow],
   );
@@ -509,6 +521,7 @@ export default function AdminWorkspace() {
   const refreshStatus = () => { void fetchHealth(); void fetchServices(); void fetchEdge(); };
   const review = (action: AdminAttentionCondition["action"]) => {
     if (action === "refresh") refreshStatus();
+    else if (action === "gateway" || action === "services") setControlsOpen(action);
     else inspect(action);
   };
   const disclosureProps = (id: string) => ({
@@ -529,7 +542,11 @@ export default function AdminWorkspace() {
             <h1 className={styles.pageTitle}>Operator</h1>
             <p className={styles.pageMeta}>Current observations and recovery controls</p>
           </div>
-          <div className={styles.headerActions}><TradingKillSwitch compact /></div>
+          <div className={styles.headerActions} role="group" aria-label="Operator controls">
+            <button type="button" className={`admin-btn admin-btn-ghost ${styles.tradingTrigger}`} data-testid="gateway-controls-button" aria-haspopup="dialog" aria-expanded={controlsOpen === "gateway"} onClick={() => setControlsOpen("gateway")}>Gateway controls</button>
+            <button type="button" className={`admin-btn admin-btn-ghost ${styles.tradingTrigger}`} data-testid="service-controls-button" aria-haspopup="dialog" aria-expanded={controlsOpen === "services"} onClick={() => setControlsOpen("services")}>Service controls</button>
+            <TradingKillSwitch compact />
+          </div>
         </header>
         <div className={styles.summary} data-testid="admin-status-summary">
           <span className={styles.summaryTitle}>{checking ? "Checking sources" : conditions.length ? `${conditions.length} ${conditions.length === 1 ? "needs" : "need"} attention` : "No action needed"}</span>
@@ -557,32 +574,44 @@ export default function AdminWorkspace() {
           </aside>
         </div>
 
+        <AdminControlDialog open={controlsOpen === "gateway"} onClose={() => setControlsOpen(null)} title="Gateway controls" id="gateway-controls">
+              <Ib2faControls
+                health={health}
+                onForcePush={async () => { await runCommand(forcePush); }}
+                onResetBackoff={async () => { await runCommand(resetBackoff); }}
+                onRestartStack={() => runCommand(restartStack)}
+                gatewayUnit={units.find((u) => u.unit === "radon-ib-gateway.service") ?? null}
+                servicesSupported={services?.supported ?? false}
+                hostRole={services?.host_role ?? health?.host_role}
+                onStopGateway={() => runCommand(stopGateway)}
+                onStartGateway={() => runCommand(startGateway)}
+                onRestartGateway={() => runCommand(() => runServiceAction("radon-ib-gateway.service", "restart"))}
+                externalPending={commandPending}
+                apiUnreachable={servicesError != null && healthError != null}
+                stackActionContainer={stackActionContainer}
+                primaryActionContainer={primaryActionContainer}
+                primaryObservationCurrent={isAdminObservationCurrent(sources.health, nowTick) && isAdminObservationCurrent(sources.services, nowTick)}
+                onInspect={() => setControlsOpen("gateway")}
+              />
+        </AdminControlDialog>
+        <AdminControlDialog open={controlsOpen === "services"} onClose={() => setControlsOpen(null)} title="Service controls" id="service-controls">
+          <p className={styles.controlDescription}>Start, restart, or stop an individual service. Gateway lifecycle controls are available separately.</p>
+          <div className={styles.stackActions} ref={setStackActionContainer} />
+          <ServiceControlPanel services={services} loading={servicesLoading} error={servicesError} observationCurrent={isAdminObservationCurrent(sources.services, nowTick)} externalPending={commandPending} onAction={async (unit, action) => { await runCommand(() => runServiceAction(unit, action)); }} flashTarget={flashTarget} />
+        </AdminControlDialog>
+
         <div className={styles.secondaryGrid}>
           <details {...disclosureProps("gateway")}>
             <summary className={styles.disclosureSummary}>Broker connection & recovery</summary>
             <div className={`${styles.disclosureBody} admin-ib-row`}>
               <IbGatewayCard health={health} loading={healthLoading} error={healthError} />
-              <Ib2faControls
-                health={health}
-                onForcePush={forcePush}
-                onResetBackoff={resetBackoff}
-                onRestartStack={restartStack}
-                gatewayUnit={units.find((u) => u.unit === "radon-ib-gateway.service") ?? null}
-                servicesSupported={services?.supported ?? false}
-                hostRole={services?.host_role ?? health?.host_role}
-                onStopGateway={stopGateway}
-                onStartGateway={startGateway}
-                apiUnreachable={servicesError != null && healthError != null}
-                primaryActionContainer={primaryActionContainer}
-                primaryObservationCurrent={isAdminObservationCurrent(sources.health, nowTick) && isAdminObservationCurrent(sources.services, nowTick)}
-                onInspect={() => inspect("gateway")}
-              />
+              <button type="button" className="admin-btn admin-btn-ghost" onClick={() => setControlsOpen("gateway")}>Open gateway controls</button>
             </div>
           </details>
           <details {...disclosureProps("services")}>
             <summary className={styles.disclosureSummary}>Services & writers</summary>
             <div className={styles.disclosureBody}>
-              <ServiceControlPanel services={services} loading={servicesLoading} error={servicesError} onAction={runServiceAction} flashTarget={flashTarget} />
+              <button type="button" className="admin-btn admin-btn-ghost" onClick={() => setControlsOpen("services")}>Open service controls</button>
               <details {...disclosureProps("writers")}>
                 <summary className={styles.disclosureSummary}>Writer freshness</summary>
                 <div className={styles.disclosureBody}><WriterFreshnessTable rows={serviceHealthRows} reachable={edgeReachable} loading={edgeFirstLoading} /></div>
