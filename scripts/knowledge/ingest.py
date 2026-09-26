@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import struct
 import sys
 import time
@@ -55,9 +56,13 @@ SERVICE_NAME = "knowledge-ingest"
 # hourly oneshot does not page P1 on SQLITE_BUSY (2026-08-15: newsfeed
 # failed once with no retry, NRestarts=0; 2026-08-21 17:22Z: newsfeed
 # busy on both attempts of the then-budget of 2, incidents succeeded
-# 6s later).
+# 6s later). Turso reaps an abandoned idle transaction after 10s (up to
+# 300s if running), so a 1s retry queued behind the orphan's writer lock
+# (Turso support, 2026-09-26). Wait past that window, doubling, with jitter.
 _SOURCE_ATTEMPTS = 4
-_SOURCE_RETRY_BACKOFF_SECS = 1.0
+_SOURCE_RETRY_BACKOFF_SECS = 12.0
+_RETRY_BACKOFF_CAP_SECS = 60.0
+_RETRY_JITTER = 0.25
 _WRITE_ATTEMPTS = 4
 _TRANSIENT_DB_MARKERS = (
     "sqlite_busy",
@@ -516,7 +521,13 @@ def _persist_prepared(db_factory, operation, *, source, doc_key=None, chunk_coun
                 f"(attempt {attempt}/{_WRITE_ATTEMPTS}): {exc}; retrying persistence",
                 file=sys.stderr, flush=True,
             )
-            time.sleep(_SOURCE_RETRY_BACKOFF_SECS)
+            time.sleep(_retry_delay(attempt))
+
+
+def _retry_delay(attempt: int) -> float:
+    """Seconds to wait after failed attempt N (1-based)."""
+    base = min(_SOURCE_RETRY_BACKOFF_SECS * 2 ** (attempt - 1), _RETRY_BACKOFF_CAP_SECS)
+    return base * (1 + _RETRY_JITTER * random.random())
 
 
 def _is_transient_db_error(exc: BaseException) -> bool:
@@ -570,13 +581,14 @@ def main(argv: list[str] | None = None) -> int:
                 except Exception as exc:  # noqa: BLE001 — one bad source must not stop the rest
                     last_exc = exc
                     if _is_transient_db_error(exc) and attempt < _SOURCE_ATTEMPTS:
+                        delay = _retry_delay(attempt)
                         print(
                             f"[{SERVICE_NAME}] {name}: transient DB error "
                             f"(attempt {attempt}/{_SOURCE_ATTEMPTS}): {exc}; "
-                            f"retrying in {_SOURCE_RETRY_BACKOFF_SECS}s",
+                            f"retrying in {delay:.1f}s",
                             file=sys.stderr,
                         )
-                        time.sleep(_SOURCE_RETRY_BACKOFF_SECS)
+                        time.sleep(delay)
                         continue
                     break
             if last_exc is not None:
