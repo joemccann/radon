@@ -255,7 +255,7 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # calendar day (Cboe VIX/VIX3M/VVIX/SKEW composite; weekend/holiday runs
     # are 304 heartbeats). Uniform 26h window mirrors its Cboe siblings.
     "panic-index":      {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
-    # dispersion — radon-dispersion.timer, daily 22:20 UTC every calendar day,
+    # dispersion — radon-dispersion.timer, 22:20 UTC plus a 23:20 recovery slot,
     # after the 16:00 ET close year-round (weekend/holiday runs are no-new-
     # session heartbeats). Uniform 26h window matches its daily siblings. IB
     # primary with a Yahoo fallback, so the job heartbeats through an IB

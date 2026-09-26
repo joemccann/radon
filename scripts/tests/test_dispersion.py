@@ -1219,3 +1219,13 @@ class TestNonPositiveCloses:
         assert by_date[VIX_DATES[-2]]["n_stocks"] == 6
         assert by_date[VIX_DATES[-1]]["n_stocks"] == 6
         assert by_date[VIX_DATES[-3]]["n_stocks"] == 7
+
+
+def test_dispersion_timer_retries_an_hour_after_the_primary_slot():
+    """stop-clean SIGTERMs an in-flight 22:20 oneshot and does not resume it.
+    The 26h freshness window only has about two hours of slack, so the retry
+    has to land before that window expires."""
+    timer = Path(__file__).resolve().parents[2] / "cloud/services/radon-dispersion.timer"
+    text = timer.read_text()
+    assert "OnCalendar=*-*-* 22:20:00 UTC" in text
+    assert "OnCalendar=*-*-* 23:20:00 UTC" in text

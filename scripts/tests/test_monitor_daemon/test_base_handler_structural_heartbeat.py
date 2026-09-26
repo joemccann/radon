@@ -169,6 +169,72 @@ class TestSelfRecordedCycles:
         assert result["status"] == "ok"
 
 
+class TestFailedHeartbeatRetriesWithoutRescan:
+    """A daily handler that finishes its scan and then loses the heartbeat
+    write (Turso connection cap, 2026-09-25 journal-reconcile) must not wait
+    out its whole interval. The scan stays latched; only the write retries."""
+
+    def test_failed_write_latches_last_run_and_keeps_the_payload(self, monkeypatch):
+        import db.writer as writer_mod
+
+        monkeypatch.setattr(
+            writer_mod,
+            "record_service_health",
+            lambda *a, **kw: (_ for _ in ()).throw(TimeoutError("read timed out")),
+            raising=False,
+        )
+        handler = _make_handler(lambda self: {"gaps_found": 0})
+        before = handler.last_run
+        result = handler.run()
+
+        assert result["status"] == "ok"
+        assert handler.last_run is not None
+        assert handler.last_run is not before
+        assert handler.is_due() is False
+        pending = handler.pending_health()
+        assert pending["state"] == "ok"
+        assert pending["error"] is None
+        assert pending["started_at"]
+        assert pending["finished_at"]
+
+    def test_flush_retries_the_write_and_clears_pending(self, monkeypatch):
+        import db.writer as writer_mod
+
+        calls: list[tuple] = []
+
+        def flaky(service, state, **kwargs):
+            calls.append((service, state, kwargs))
+            if len(calls) == 1:
+                raise TimeoutError("read timed out")
+
+        monkeypatch.setattr(writer_mod, "record_service_health", flaky, raising=False)
+        handler = _make_handler(lambda self: {"gaps_found": 0})
+        handler.run()
+        assert handler.flush_pending_health() is True
+        assert handler.pending_health() is None
+        assert [state for _, state, _ in calls] == ["ok", "ok"]
+        assert calls[1][2]["finished_at"] == calls[0][2]["finished_at"]
+        assert calls[1][2]["started_at"] == calls[0][2]["started_at"]
+
+    def test_pending_health_survives_state_round_trip(self, monkeypatch):
+        import db.writer as writer_mod
+
+        monkeypatch.setattr(
+            writer_mod,
+            "record_service_health",
+            lambda *a, **kw: (_ for _ in ()).throw(OSError("db gone")),
+            raising=False,
+        )
+        handler = _make_handler(lambda self: {})
+        handler.run()
+        restored = _make_handler(lambda self: {})
+        restored.set_state(handler.get_state())
+
+        assert restored.pending_health() == handler.pending_health()
+        assert restored.last_run == handler.last_run
+        assert restored.is_due() is False
+
+
 class TestExistingHandlersDeclareServiceNames:
     """Every daemon-registered handler that owns a service_health row must
     declare it via the structural attribute (the registration-completeness

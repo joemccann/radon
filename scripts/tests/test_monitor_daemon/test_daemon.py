@@ -235,6 +235,22 @@ class TestMonitorDaemonRun:
         handler.run.assert_called_once()
         assert "off_hours" in results
 
+    def test_run_once_flushes_a_pending_heartbeat_without_rerunning(self):
+        daemon = MonitorDaemon()
+        handler = Mock(spec=BaseHandler)
+        handler.name = "journal_reconcile"
+        handler.interval_seconds = 86400
+        handler.requires_market_hours = False
+        handler.is_due.return_value = False
+        handler.flush_pending_health.return_value = True
+
+        daemon.register(handler)
+        results = daemon.run_once(market_hours=False)
+
+        handler.run.assert_not_called()
+        handler.flush_pending_health.assert_called_once()
+        assert results == {}
+
 
 class TestMonitorDaemonState:
     """Test daemon state persistence."""
