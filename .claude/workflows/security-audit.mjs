@@ -1,3 +1,5 @@
+import { resolveRadonRepoRoot } from './resolveRepoRoot.mjs'
+
 export const meta = {
   name: 'security-audit',
   description: 'Reusable Radon security audit: fan out N dimensions, adversarially verify each finding, run a completeness + regression critic. Returns structured JSON.',
@@ -11,6 +13,7 @@ export const meta = {
 
 // ===========================================================================
 // HOW TO RUN
+//   Repo root: RADON_REPO_ROOT, then RADON_WEEKEND_REPO, then git toplevel, then cwd.
 //   Workflow({ name: 'security-audit' })                      // full audit
 //   Workflow({ name: 'security-audit', args: { focus: ['authn-authz','sqli'] } })  // subset
 //   Workflow({ name: 'security-audit', args: { extraDimensions: [{ key, label, scope }] } })  // extend
@@ -25,7 +28,7 @@ export const meta = {
 //   3. Mirror the change in docs/security-audit-playbook.md.
 // ===========================================================================
 
-const REPO = '/Users/joemccann/dev/apps/finance/radon'
+const REPO = resolveRadonRepoRoot()
 
 const PREAMBLE = `You are a senior application-security engineer auditing RADON, a production options/equities trading app for a single operator. Repo root: ${REPO}.
 
