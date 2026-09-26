@@ -223,6 +223,10 @@ readonly LOGICAL_CONTROL_PLANE_MANIFEST="/var/lib/radon/control-plane-manifest.s
 # read from. RADON_GIT_DIR (the radon-owned checkout) supplies the HEAD commit
 # id and nothing else.
 readonly PROVISION_GIT_DIR="${PROVISION_ROOT}/radon.git"
+# The newest main commit whose privileged control plane root has installed.
+# Root never installs a privileged body from an older commit: the radon
+# account can point the checkout HEAD at any older main commit.
+readonly CONTROL_PLANE_FLOOR_FILE="${PROVISION_ROOT}/control-plane-floor"
 
 # Where control-plane bytes are read from. refresh_control_plane repoints this
 # at a root-owned staging copy of the git blobs for the deployed commit, so the
@@ -1247,6 +1251,33 @@ provision_store_has_tip() {
   }
 }
 
+# True when $1 is the recorded floor commit or descends from it, decided in
+# the root store. No record yet: any main commit. An unreadable record: none.
+control_plane_commit_meets_floor() {
+  local commit="$1" floor=""
+  [[ -e "$CONTROL_PLANE_FLOOR_FILE" || -L "$CONTROL_PLANE_FLOOR_FILE" ]] || return 0
+  [[ -f "$CONTROL_PLANE_FLOOR_FILE" && ! -L "$CONTROL_PLANE_FLOOR_FILE" ]] || return 1
+  IFS= read -r floor < "$CONTROL_PLANE_FLOOR_FILE" || true
+  [[ "$floor" =~ ^[0-9a-f]{40}$ ]] || return 1
+  provision_git merge-base --is-ancestor "$floor" "$commit" 2>/dev/null
+}
+
+# Moves the floor to $1 after root installed that commit's privileged set.
+# Never lowers it.
+record_control_plane_floor() {
+  local commit="$1" tmp
+  control_plane_commit_meets_floor "$commit" || return 0
+  tmp="$(mktemp "${CONTROL_PLANE_FLOOR_FILE}.XXXXXX")" || return 73
+  if printf '%s\n' "$commit" > "$tmp" && chmod 0644 "$tmp" && \
+     mv -f -- "$tmp" "$CONTROL_PLANE_FLOOR_FILE"; then
+    "$SYNC" -f "$CONTROL_PLANE_FLOOR_FILE" || true
+    return 0
+  fi
+  "$RM" -f -- "$tmp"
+  echo "could not record the installed control-plane commit in ${CONTROL_PLANE_FLOOR_FILE}" >&2
+  return 73
+}
+
 # Allowlisted non-control-plane units only. Content comes from git objects at
 # the GitHub main tip -- never from the radon-writable checkout -- and must
 # match installed-units.sha256. Install is 0644 root:root plus one
@@ -1371,6 +1402,9 @@ sync_control_plane() {
     rc=$?
   fi
   "$RM" -rf "$workdir"
+  if (( rc == 0 )); then
+    record_control_plane_floor "$tip" || rc=$?
+  fi
   return "$rc"
 }
 
@@ -1877,7 +1911,10 @@ refresh_control_plane() {
   CONTROL_PLANE_SOURCE_ROOT="$staging"
   stage_control_plane_sources "$commit" "$staging" || rc=$?
   if (( rc == 0 )); then
-    refresh_control_plane_staged "$privileged" || rc=$?
+    refresh_control_plane_staged "$privileged" "$commit" || rc=$?
+  fi
+  if (( rc == 0 && privileged == 1 )); then
+    record_control_plane_floor "$commit" || rc=$?
   fi
   /bin/rm -rf -- "$staging"
   CONTROL_PLANE_SOURCE_ROOT="$CLOUD_SOURCE"
@@ -1885,7 +1922,7 @@ refresh_control_plane() {
 }
 
 refresh_control_plane_staged() {
-  local privileged="$1"
+  local privileged="$1" commit="$2"
   local index source_rel source dest installed_hash source_hash mode
   local -a unit_indexes=()
   local -a privileged_indexes=()
@@ -1935,6 +1972,12 @@ refresh_control_plane_staged() {
   if (( ${#privileged_indexes[@]} > 0 )) && (( privileged == 0 )); then
     echo "refresh-control-plane: privileged control-plane diffs require refresh-control-plane-privileged" >&2
     return 78
+  fi
+
+  if (( ${#privileged_indexes[@]} > 0 )) && \
+     ! control_plane_commit_meets_floor "$commit"; then
+    echo "refresh-control-plane: ${commit} is older than the installed privileged control plane (${CONTROL_PLANE_FLOOR_FILE}); refusing to install its privileged files" >&2
+    return 76
   fi
 
   if (( ${#unit_indexes[@]} == 0 && ${#privileged_indexes[@]} == 0 )); then

@@ -209,6 +209,8 @@ for the trusted-release prerequisite, provenance refusal conditions, and the
 boundary between provisioning and live control-plane refresh. Setup and the
 root helper read installed bytes from root's own clone of the pinned remote,
 `/opt/radon-provision/radon.git`, never the radon-owned checkout store.
+Both refuse a privileged install from a commit older than the one recorded in
+`/opt/radon-provision/control-plane-floor`.
 
 **Newsfeed least privilege.** `radon-newsfeed.service` runs Chromium against
 third-party web content. Chromium keeps its own sandbox: the container runs
