@@ -10,10 +10,7 @@ radon ALL=(root) NOPASSWD: /usr/local/bin/radon start, /usr/local/bin/radon stop
 radon ALL=(root) NOPASSWD: /usr/local/bin/radon unit start radon-*.service, /usr/local/bin/radon unit stop radon-*.service, /usr/local/bin/radon unit restart radon-*.service
 radon ALL=(root) NOPASSWD: /usr/local/bin/radon unit start radon-*.timer, /usr/local/bin/radon unit stop radon-*.timer, /usr/local/bin/radon unit restart radon-*.timer
 
-# Host lifecycle remains explicit operator-only maintenance.
-radon ALL=(root) NOPASSWD: /usr/sbin/reboot
-radon ALL=(root) NOPASSWD: /usr/sbin/shutdown -r now
-radon ALL=(root) NOPASSWD: /usr/sbin/shutdown -h now
+# Host lifecycle remains explicit operator-only maintenance. No reboot or shutdown grant.
 
 # --- faillock self-recovery (cannot lock yourself out forever) ---
 radon ALL=(root) NOPASSWD: /usr/sbin/faillock --user radon --reset
