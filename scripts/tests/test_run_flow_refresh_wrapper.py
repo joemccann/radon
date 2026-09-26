@@ -223,6 +223,35 @@ class _FastApiStub:
         self._server.server_close()
 
 
+def _stage_refusing_curl(bin_dir: Path, *, refuse_first: int = 1) -> Path:
+    """A curl that exits 7 for the first N calls, then the real client.
+
+    Models a deploy restart: the listener is absent for one POST, then back.
+    The real binary is absolute so this stub does not recurse through PATH.
+    """
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    count = bin_dir / "curl.count"
+    curl = bin_dir / "curl"
+    _executable(
+        curl,
+        textwrap.dedent(
+            f"""\
+            #!/bin/bash
+            n=0
+            if [ -f "{count}" ]; then n=$(cat "{count}"); fi
+            n=$((n + 1))
+            echo "$n" > "{count}"
+            if [ "$n" -le {refuse_first} ]; then
+                echo "curl: (7) Failed to connect" >&2
+                exit 7
+            fi
+            exec /usr/bin/curl "$@"
+            """
+        ),
+    )
+    return bin_dir
+
+
 def _run(
     repo_dir: Path,
     python_bin: Path,
@@ -230,6 +259,8 @@ def _run(
     *,
     retries: int | None = None,
     delay: int | None = None,
+    connect_wait: int | None = None,
+    path_prefix: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = {
         **os.environ,
@@ -240,6 +271,10 @@ def _run(
         env["RADON_FLOW_REFRESH_RETRIES"] = str(retries)
     if delay is not None:
         env["RADON_FLOW_REFRESH_RETRY_DELAY_SECS"] = str(delay)
+    if connect_wait is not None:
+        env["RADON_FLOW_REFRESH_CONNECT_WAIT_SECS"] = str(connect_wait)
+    if path_prefix is not None:
+        env["PATH"] = f"{path_prefix}{os.pathsep}{env.get('PATH', '/usr/bin:/bin')}"
     return subprocess.run(
         ["bash", str(repo_dir / "scripts" / "run_flow_refresh.sh")],
         cwd=repo_dir,
@@ -298,7 +333,7 @@ def test_the_direct_fallback_runs_the_cheap_discover_scan(tmp_path: Path) -> Non
     record_dir = tmp_path / "recorded"
     python_bin = _stage_recording_python(tmp_path / "bin", record_dir)
 
-    result = _run(repo_dir, python_bin, _free_port())
+    result = _run(repo_dir, python_bin, _free_port(), connect_wait=0)
 
     assert result.returncode == 0, result.stderr or result.stdout
     assert _recorded(record_dir, "argv.log") == [
@@ -326,6 +361,43 @@ def test_wrapper_posts_all_three_when_fastapi_reachable(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr or result.stdout
     assert sorted(stub.calls) == sorted([SCAN_PATH, FLOW_PATH, DISCOVER_PATH]), stub.calls
     assert "fallback" not in (result.stdout + result.stderr).lower()
+
+
+def test_connection_refused_then_up_retries_without_direct_fallback(tmp_path: Path) -> None:
+    """2026-09-25 20:00Z page c11fbc4a: curl 7 at the hourly fire, listener
+    back inside the scan budget. An immediate direct fallback opened sync
+    libsql while Turso was at its connection cap and the oneshot exited 1.
+    A refused POST must be retried. The direct scan must not launch.
+    """
+    repo_dir = _repo(tmp_path)
+    record_dir = tmp_path / "recorded"
+    python_bin = _stage_recording_python(tmp_path / "bin", record_dir)
+    port = _free_port()
+    stub = _FastApiStub(port)
+    stub.start()
+    try:
+        result = _run(
+            repo_dir,
+            python_bin,
+            port,
+            delay=1,
+            connect_wait=5,
+            path_prefix=_stage_refusing_curl(tmp_path / "curlbin", refuse_first=1),
+        )
+    finally:
+        stub.stop()
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert stub.raw_calls == [
+        "/scan?force=true",
+        "/flow-analysis?force=true",
+        "/discover?force=true",
+    ], stub.raw_calls
+    combined = (result.stdout + result.stderr).lower()
+    assert "connection refused" in combined
+    assert "retry" in combined
+    assert "fallback" not in combined
+    assert _recorded(record_dir, "argv.log") == []
 
 
 def test_http_502_then_ok_retries_without_direct_fallback(tmp_path: Path) -> None:
