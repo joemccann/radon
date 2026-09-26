@@ -180,7 +180,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
           data: json,
           fetchedAt: Date.now(),
           lastSync: extractTimestamp ? extractTimestamp(json) : new Date().toISOString(),
-        });
+        }, identityGeneration);
       }
       setData(previous => scanFailed ? previous ?? held : json);
       setLastSync(previous => scanFailed ? previous : extractTimestamp ? extractTimestamp(json) : new Date().toISOString());
@@ -281,7 +281,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
         const sync = extractTimestamp ? extractTimestamp(json) : null;
         if (!scanFailed && !meta.servedOffline) {
           rememberedRef.current = json;
-          returnCache?.write(endpoint, { data: json, fetchedAt: Date.now(), lastSync: sync });
+          returnCache?.write(endpoint, { data: json, fetchedAt: Date.now(), lastSync: sync }, identityGeneration);
         }
         setData((prev) => scanFailed ? prev ?? rememberedRef.current ?? json : json);
         setLastSync(sync);

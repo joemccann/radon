@@ -1,3 +1,7 @@
+import { resolveRadonRepoRoot } from './resolveRepoRoot.mjs'
+
+// Repo root: RADON_REPO_ROOT, then RADON_WEEKEND_REPO, then git toplevel, then cwd.
+
 export const meta = {
   name: 'security-audit-knowledge',
   description: 'Focused security audit of the Radon knowledge-base subsystem (Phases 0-3): SQLi, prompt injection, MCP trust boundary, data isolation, ingest, secrets. Finder -> adversarial verifier -> critic.',
@@ -9,7 +13,7 @@ export const meta = {
   ],
 }
 
-const REPO = '/Users/joemccann/dev/apps/finance/radon'
+const REPO = resolveRadonRepoRoot()
 
 const PREAMBLE = `You are a senior application-security engineer auditing the NEWLY ADDED knowledge-base (KB) subsystem of RADON, a production single-operator options/equities trading app. Repo root: ${REPO}.
 

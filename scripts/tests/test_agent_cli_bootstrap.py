@@ -107,3 +107,56 @@ def test_no_local_declaration_expands_an_indirection_it_also_assigns():
                     f"assigned in one `local`; split them: {stripped}"
                 )
             names.append(name)
+
+
+# --- fx (2026-09-26) ---------------------------------------------------------
+# The documentation loop runs Vercel fx against NVIDIA NIM. fx reads only
+# $HOME/.fx/settings.json, which the operator also uses interactively, so the
+# bootstrap merges its provider in and leaves every other setting alone.
+
+
+def _fx_settings(tmp_path: Path) -> dict:
+    import json
+
+    return json.loads((tmp_path / "home" / ".fx" / "settings.json").read_text())
+
+
+@pytest.mark.skipif(not Path(BASH).exists(), reason="no /bin/bash")
+def test_fx_gets_an_nvidia_provider_that_names_the_key_not_its_value(tmp_path):
+    _run(tmp_path, {"NVIDIA_API_KEY": "nvapi-TEST"})
+    settings = _fx_settings(tmp_path)
+    assert settings["providers"]["nvidia"] == {
+        "protocol": "openai-chat-completions",
+        "base_url": "https://integrate.api.nvidia.com/v1",
+        "auth": {"type": "bearer", "env": "NVIDIA_API_KEY"},
+    }, settings
+    assert settings["models"]["nvidia"] == "nvidia/nemotron-3-ultra-550b-a55b", settings
+    raw = (tmp_path / "home" / ".fx" / "settings.json").read_text()
+    assert "nvapi-TEST" not in raw, "the key value must never land in fx settings"
+    mode = (tmp_path / "home" / ".fx" / "settings.json").stat().st_mode & 0o777
+    assert mode == 0o600, oct(mode)
+
+
+@pytest.mark.skipif(not Path(BASH).exists(), reason="no /bin/bash")
+def test_fx_settings_the_operator_chose_are_kept(tmp_path):
+    import json
+
+    fx = tmp_path / "home" / ".fx"
+    fx.mkdir(parents=True)
+    (fx / "settings.json").write_text(json.dumps({
+        "provider": "gateway",
+        "theme": "dark",
+        "yolo_acknowledged": True,
+        "models": {"gateway": "anthropic/claude-sonnet-5"},
+        "providers": {"local": {"protocol": "openai-chat-completions",
+                                "base_url": "http://localhost:11434/v1",
+                                "auth": {"type": "none"}}},
+    }))
+    _run(tmp_path, {"NVIDIA_API_KEY": "nvapi-TEST"})
+    settings = _fx_settings(tmp_path)
+    assert settings["provider"] == "gateway", settings
+    assert settings["theme"] == "dark", settings
+    assert settings["yolo_acknowledged"] is True, settings
+    assert settings["models"]["gateway"] == "anthropic/claude-sonnet-5", settings
+    assert "local" in settings["providers"], settings
+    assert "nvidia" in settings["providers"], settings

@@ -1,3 +1,17 @@
+# Task: Bound knowledge vector writes (2026-09-26)
+
+- [x] T1 depends_on: [] Failing tests: oversized doc ingests, size error splits, one vector send, backfill byte bound, source errors.
+- [x] T2 depends_on: [T1] Send each vector once as f32 blob; byte-budget batches; halve on Hrana size errors; byte-bound _load_existing.
+- [ ] T3 depends_on: [T2] Focused pytest green, draft PR, CI green.
+
+Review: vector JSON was bound twice (104,614 B/chunk). f32 blobs once are 13,032 B. 366 chunks of 4,000 chars fit under the 7 MiB write budget. Text+FTS+prune stay one transaction; vectors follow only when that payload does not fit.
+
+# Task: Native security-audit repo root (2026-09-26)
+
+- [x] T1 depends_on: [] Red tests: resolve order (RADON_REPO_ROOT, git toplevel, cwd), reject a non-radon tree, planted `/Users/` guard, wrappers export the env.
+- [x] T2 depends_on: [T1] Resolver + both security-audit workflows + export from security nightly wrappers.
+- [ ] T3 depends_on: [T2] Focused pytest green, non-draft PR, CI green, no merge.
+
 # Task: Nemotron parse + embedding_v2 (2026-09-26)
 
 - [x] T1 depends_on: [] Parser ladder, evidence shape, compare_parsers, embedding_v2 migration/backfill/retrieval fallback.

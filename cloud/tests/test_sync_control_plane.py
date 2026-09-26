@@ -206,6 +206,17 @@ class TestHelperVerb:
         assert bootstrap_log.exists()
         assert not list((tmp_path / "state" / "provision").glob("control-plane-sync.*"))
 
+    def test_records_the_installed_tip_only_after_bootstrap_succeeds(self, tmp_path):
+        repo, sha = _init_release_repo(tmp_path)
+        floor = tmp_path / "state" / "provision" / "control-plane-floor"
+        env, _ = _helper_env(tmp_path, repo, bootstrap_exit=1)
+        assert _run_sync(env).returncode == 1
+        assert not floor.exists()
+        env, _ = _helper_env(tmp_path, repo)
+        result = _run_sync(env)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert floor.read_text(encoding="utf-8") == f"{sha}\n"
+
 
 class TestContracts:
     def test_sudoers_and_helper_pin_the_verb(self):

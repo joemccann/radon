@@ -978,3 +978,108 @@ def test_privileged_refresh_reads_the_root_store_not_checkout_objects(
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert box.installed_path(SUDOERS_SOURCE).read_bytes() == installed_before
+
+
+# --- G. the privileged control plane only moves forward ----------------------
+#
+# The checkout is radon-owned, so radon can point HEAD at any older main
+# commit. Main ancestry alone would let that reinstall an older helper,
+# sudoers or polkit body. Root records the last main commit whose privileged
+# set it installed and never installs a privileged body from an older one.
+
+
+def _head(box: Sandbox) -> str:
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=box.tmp, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _floor(box: Sandbox) -> Path:
+    return box.tmp / "provision" / "control-plane-floor"
+
+
+def _install_privileged_v2(box: Sandbox) -> tuple[str, str]:
+    older = _head(box)
+    box.mutate_source(HELPER_SOURCE)
+    box.mutate_source(SUDOERS_SOURCE)
+    newer = _head(box)
+    result = box.run("refresh-control-plane-privileged")
+    assert result.returncode == 0, result.stdout + result.stderr
+    return older, newer
+
+
+def test_privileged_refresh_refuses_a_head_older_than_the_installed_set(
+    tmp_path: Path,
+) -> None:
+    box = Sandbox(tmp_path)
+    older, newer = _install_privileged_v2(box)
+    helper_hash = _sha256_path(box.installed_path(HELPER_SOURCE))
+    sudoers_hash = _sha256_path(box.installed_path(SUDOERS_SOURCE))
+    box.systemctl_log.unlink(missing_ok=True)
+    _git(box.tmp, "checkout", "-q", "--detach", older)
+
+    combined = _refused_without_install(
+        box, "refresh-control-plane-privileged", "older than the installed privileged control plane"
+    )
+
+    assert _sha256_path(box.installed_path(HELPER_SOURCE)) == helper_hash
+    assert _sha256_path(box.installed_path(SUDOERS_SOURCE)) == sudoers_hash
+    assert _floor(box).read_text(encoding="utf-8").strip() == newer
+    assert older in combined
+
+
+def test_privileged_refresh_moves_forward_and_records_the_commit(tmp_path: Path) -> None:
+    box = Sandbox(tmp_path)
+    assert not _floor(box).exists()
+
+    first = box.run("refresh-control-plane-privileged")
+
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert _floor(box).read_text(encoding="utf-8").strip() == _head(box)
+    _, newer = _install_privileged_v2(box)
+    assert box.installed_path(HELPER_SOURCE).read_bytes() == (box.cloud / HELPER_SOURCE).read_bytes()
+    assert box.installed_path(SUDOERS_SOURCE).read_bytes() == (box.cloud / SUDOERS_SOURCE).read_bytes()
+    assert _floor(box).read_text(encoding="utf-8").strip() == newer
+    assert oct(_floor(box).stat().st_mode & 0o777) == "0o644"
+
+
+def test_privileged_refresh_at_the_recorded_commit_is_idempotent(tmp_path: Path) -> None:
+    box = Sandbox(tmp_path)
+    _, newer = _install_privileged_v2(box)
+    snapshot = box.snapshot_installed()
+
+    result = box.run("refresh-control-plane-privileged")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "current/unchanged" in result.stdout
+    assert {path: path.read_bytes() for path in snapshot} == snapshot
+    assert _floor(box).read_text(encoding="utf-8").strip() == newer
+
+
+def test_an_older_head_still_rolls_back_unit_files(tmp_path: Path) -> None:
+    """A release rollback reinstalls its unit files; only privileged bodies
+    are held at the recorded commit."""
+    box = Sandbox(tmp_path)
+    older_api = (box.cloud / API_UNIT).read_bytes()
+    older = _head(box)
+    box.mutate_source(API_UNIT)
+    newer = _head(box)
+    assert box.run("refresh-control-plane-privileged").returncode == 0
+    _git(box.tmp, "checkout", "-q", "--detach", older)
+
+    result = box.run("refresh-control-plane-privileged")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert box.installed_path(API_UNIT).read_bytes() == older_api
+    assert _floor(box).read_text(encoding="utf-8").strip() == newer
+
+
+def test_an_unreadable_floor_record_refuses_privileged_installs(tmp_path: Path) -> None:
+    box = Sandbox(tmp_path)
+    assert box.run("refresh-control-plane-privileged").returncode == 0
+    _floor(box).write_text("not-a-commit\n", encoding="utf-8")
+    box.mutate_source(SUDOERS_SOURCE)
+
+    _refused_without_install(
+        box, "refresh-control-plane-privileged", "older than the installed privileged control plane"
+    )

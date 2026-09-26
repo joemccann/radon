@@ -9,6 +9,7 @@ body root owns rather than one the caller can rewrite.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -196,6 +197,29 @@ def test_sudoers_lists_each_verb_without_a_wildcard() -> None:
         assert f"/usr/local/sbin/radon-docker-gw {verb}" in text
     assert "/usr/local/sbin/radon-docker-gw *" not in text
     assert "radon ALL=(root) NOPASSWD: /usr/bin/docker compose" not in text
+
+
+def test_sudoers_grants_no_host_lifecycle() -> None:
+    """radon must not hold passwordless reboot, shutdown, poweroff, or halt."""
+    grants = "\n".join(
+        line
+        for line in OPS_SUDOERS.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    )
+    for command in ("reboot", "shutdown", "poweroff", "halt"):
+        assert command not in grants, (
+            f"radon-ops must not grant {command} to radon"
+        )
+    visudo = shutil.which("visudo")
+    if visudo is None:
+        return
+    checked = subprocess.run(
+        [visudo, "-cf", str(OPS_SUDOERS)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert checked.returncode == 0, checked.stderr or checked.stdout
 
 
 # --- deploy preflight executes, not greps (T-443) ---------------------------

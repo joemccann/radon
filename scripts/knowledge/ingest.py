@@ -72,8 +72,12 @@ _TRANSIENT_DB_MARKERS = (
 
 # Bounded id-cursor pagination, same Turso HTTP-pipeline limit as the
 # newsfeed posts read: a source's full stored content in one SELECT
-# 502s once the corpus is large (2026-07-19).
+# 502s once the corpus is large (2026-07-19). 200 rows that also carry an
+# 8 KB embedding_v2 blob can approach the 8 MiB response cap, so the page
+# shrinks to a byte budget before the first fetch.
 _EXISTING_BATCH_ROWS = 200
+_EXISTING_ASSUMED_ROW_BYTES = 16 * 1024
+_EXISTING_ASSUMED_V2_ROW_BYTES = 48 * 1024
 
 _EXISTING_SQL = (
     "SELECT id, doc_key, chunk_ix, content, title, metadata, "
@@ -196,7 +200,10 @@ def ingest_source(
                 chunk_count=len(document),
             )
             for key, value in persisted.items():
-                counts[key] = counts.get(key, 0) + value
+                if key == "row_errors":
+                    counts.setdefault(key, []).extend(value)
+                else:
+                    counts[key] = counts.get(key, 0) + value
         print(
             f"[{SERVICE_NAME}] {source}: committed {len(batch)} prepared chunks",
             file=sys.stderr, flush=True,
@@ -252,14 +259,38 @@ def _knowledge_has_embedding_v2(db) -> bool:
     return any(row[1] == "embedding_v2" for row in rows)
 
 
+def _existing_page_limit(has_v2: bool, observed_bytes: int = 0, observed_rows: int = 0) -> int:
+    from knowledge.http_db import MAX_RESPONSE_BYTES
+
+    budget = max(1, MAX_RESPONSE_BYTES - MAX_RESPONSE_BYTES // 8)
+    if observed_rows > 0:
+        per_row = max(1, (observed_bytes + observed_rows - 1) // observed_rows)
+    else:
+        per_row = _EXISTING_ASSUMED_V2_ROW_BYTES if has_v2 else _EXISTING_ASSUMED_ROW_BYTES
+    return max(1, min(_EXISTING_BATCH_ROWS, budget // per_row))
+
+
+def _row_wire_bytes(row) -> int:
+    total = 64
+    for cell in row:
+        if isinstance(cell, (bytes, bytearray, memoryview)):
+            total += ((len(cell) + 2) // 3) * 4 + 48
+        elif cell is not None:
+            total += len(str(cell)) + 8
+    return total
+
+
 def _load_existing(db, source: str) -> dict[str, dict[int, _StoredChunk]]:
     """{doc_key: {chunk_ix: _StoredChunk}} for the source."""
     existing: dict[str, dict[int, _StoredChunk]] = {}
     has_v2 = _knowledge_has_embedding_v2(db)
     sql = _EXISTING_SQL_V2 if has_v2 else _EXISTING_SQL
     cursor = 0
+    seen_rows = 0
+    seen_bytes = 0
     while True:
-        rows = db.execute(sql, (source, cursor, _EXISTING_BATCH_ROWS)).fetchall()
+        limit = _existing_page_limit(has_v2, seen_bytes, seen_rows)
+        rows = db.execute(sql, (source, cursor, limit)).fetchall()
         if not rows:
             return existing
         for row in rows:
@@ -274,7 +305,9 @@ def _load_existing(db, source: str) -> dict[str, dict[int, _StoredChunk]]:
                 content, title, metadata_json, summary, embedding, digest, embedding_v2
             )
             cursor = row_id
-        if len(rows) < _EXISTING_BATCH_ROWS:
+            seen_rows += 1
+            seen_bytes += _row_wire_bytes(row)
+        if len(rows) < limit:
             return existing
 
 
