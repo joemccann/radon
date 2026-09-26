@@ -105,16 +105,18 @@ def test_canonical_env_is_root_owned_group_readable() -> None:
 def test_setup_vps_grants_caddy_traverse_into_media_parent() -> None:
     """/var/lib/radon is 0750 radon:radon and Caddy serves media/ beneath it.
 
-    Without radon group membership the caddy user cannot traverse the parent
-    and every media.radon.run request 403s (2026-08-23 regression after the
-    media cutover). Supplementary groups apply at process start, so a fresh
-    grant must restart caddy, not reload it.
+    DS-2026-09-25-06: caddy is not in group radon (that group reads
+    /etc/radon/env). Media access is group radon-media plus a parent
+    traverse ACL. Supplementary groups apply at process start, so a
+    fresh grant must restart caddy, not reload it.
     """
     text = (CLOUD / "scripts" / "setup-vps.sh").read_text(encoding="utf-8")
-    assert "usermod -aG radon caddy" in text
-    grant = text.index("usermod -aG radon caddy")
-    restart_snippet = text[grant : grant + 400]
-    assert "restart caddy" in restart_snippet
+    assert "usermod -aG radon caddy" not in text
+    assert "usermod -aG radon-media caddy" in text
+    grant = text.index("usermod -aG radon-media caddy")
+    restart_at = text.index("restart caddy", grant)
+    drop = text.index("gpasswd -d caddy radon")
+    assert drop < restart_at
 
 
 # ── T-416: prove the env-file mode/owner by running the code ──────────

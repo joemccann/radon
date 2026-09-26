@@ -175,6 +175,11 @@ line here whenever you ship a security fix.**
   `radon-docker-gw` shim; `setup-vps.sh` strips any legacy membership and
   refuses to re-add it. Finding `radon` in group `docker` on a host is a
   defect, not an accepted risk.
+  Invariant: `caddy` is NOT in the radon group. Group radon reads
+  `/etc/radon/env` (0640 root:radon). Caddy serves `/var/lib/radon/media`
+  via dedicated group `radon-media` and a parent traverse ACL; setup and
+  `publish-caddy` migrate existing hosts.
+  (`cloud/tests/test_caddy_media_group.py`)
   (`cloud/tests/test_setup_vps_privileged_paths.py`)
 - **Startup never dies on stored data, and nothing unexportable persists** — a
   credential value `os.environ` cannot hold is refused at the validation
