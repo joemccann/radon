@@ -8,7 +8,7 @@ vi.mock("../lib/routeAccess", () => ({ requireRouteAccess: guard }));
 
 const RUN = "slm-review-cohort-2026";
 const URL = `http://localhost/api/admin/slm-review?runId=${RUN}`;
-const migration = readFileSync(path.join(__dirname, "../../scripts/db/migrations/0087_slm_review_decisions.sql"), "utf8");
+const migration = readFileSync(path.join(__dirname, "../../scripts/db/migrations/0088_slm_review_decisions.sql"), "utf8");
 let db: Client;
 
 const decision = (id: string, reviewedAt = "2026-09-25T12:00:00.000Z") => ({

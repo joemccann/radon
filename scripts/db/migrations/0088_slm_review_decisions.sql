@@ -9,4 +9,4 @@ CREATE TABLE IF NOT EXISTS slm_review_decisions (
   PRIMARY KEY (run_id, reviewer),
   CHECK (cursor_index BETWEEN 0 AND 199)
 );
-INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (87, datetime('now'));
+INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (88, datetime('now'));
