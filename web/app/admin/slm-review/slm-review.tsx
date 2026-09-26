@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import ErrorToast from "@/components/ErrorToast";
+import { loadReviewPacket, saveReviewPacket } from "./packetStorage";
 import styles from "./slm-review.module.css";
 
 type CandidateAlias = "Candidate 1" | "Candidate 2" | "Candidate 3";
@@ -21,7 +22,7 @@ type SavedDecision = {
   reviewer: string;
   reviewedAt: string;
 };
-type SavedRun = { schema: "radon.slm-review-decisions.v1"; runId: string; reviewer: string; decisions: SavedDecision[] };
+type SavedRun = { schema: "radon.slm-review-decisions.v1"; runId: string; reviewer: string; decisions: SavedDecision[]; index?: number; draftTags?: string[] };
 
 const ALIASES: CandidateAlias[] = ["Candidate 1", "Candidate 2", "Candidate 3"];
 const scrubText = (value: unknown, limit = 20_000) => typeof value === "string"
@@ -82,28 +83,122 @@ function storageKey(runId: string, reviewer: string) {
   return `radon-slm-review:${runId}:${reviewer}`;
 }
 
+function nextReviewTime(previous?: string): string {
+  return new Date(Math.max(Date.now(), (Date.parse(previous ?? "") || 0) + 1)).toISOString();
+}
+
+function readLocalRun(runId: string, reviewer: string): SavedRun | null {
+  try {
+    const raw = localStorage.getItem(storageKey(runId, reviewer));
+    const saved = raw ? JSON.parse(raw) as SavedRun : null;
+    return saved?.schema === "radon.slm-review-decisions.v1" && saved.runId === runId && saved.reviewer === reviewer && Array.isArray(saved.decisions) ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+function mergeDecisions(items: Item[], ...runs: Array<SavedRun | null>): Record<string, SavedDecision> {
+  const validIds = new Set(items.map((item) => item.id));
+  const merged: Record<string, SavedDecision> = {};
+  for (const run of runs) {
+    for (const decision of run?.decisions ?? []) {
+      if (!decision || !validIds.has(decision.id) || !Array.isArray(decision.humanTags) || !decision.acceptance || typeof decision.acceptance !== "object") continue;
+      const prior = merged[decision.id];
+      if (!prior || (Date.parse(decision.reviewedAt) || 0) >= (Date.parse(prior.reviewedAt) || 0)) merged[decision.id] = decision;
+    }
+  }
+  return merged;
+}
+
 export default function SlmReview({ reviewer }: { reviewer: string }) {
   const [packet, setPacket] = useState<Packet | null>(null);
   const [decisions, setDecisions] = useState<Record<string, SavedDecision>>({});
   const [index, setIndex] = useState(0);
   const [tags, setTags] = useState(["", "", ""]);
   const [stage, setStage] = useState<"label" | "compare">("label");
-  const [approvedImageHosts, setApprovedImageHosts] = useState<string[]>([]);
+  const [restoring, setRestoring] = useState(true);
+  const [serverReady, setServerReady] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "offline">("saved");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const syncQueue = useRef(Promise.resolve());
+
+  useEffect(() => {
+    let active = true;
+    loadReviewPacket(reviewer).then((stored) => {
+      if (active && stored) return restorePacket(parsePacket(stored), false);
+    }).catch(() => {
+      if (active) setNotice("Saved packet unavailable. Load the JSON file to resume your saved decisions.");
+    }).finally(() => { if (active) setRestoring(false); });
+    return () => { active = false; };
+  // The reviewer identity is fixed for this page session.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewer]);
+
+  async function restorePacket(parsed: Packet, persistPacket: boolean) {
+    let packetSaved = true;
+    if (persistPacket) {
+      try { await saveReviewPacket(reviewer, parsed); }
+      catch { packetSaved = false; }
+    }
+    const local = readLocalRun(parsed.runId, reviewer);
+    let remote: SavedRun | null = null;
+    try {
+      const response = await fetch(`/api/admin/slm-review?runId=${encodeURIComponent(parsed.runId)}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Review backup unavailable.");
+      remote = await response.json() as SavedRun;
+      if (remote.schema !== "radon.slm-review-decisions.v1" || remote.runId !== parsed.runId || remote.reviewer !== reviewer || !Array.isArray(remote.decisions)) throw new Error("Invalid saved review response.");
+      setServerReady(true);
+    } catch {
+      setServerReady(false);
+      setSaveStatus("offline");
+    }
+    const restored = mergeDecisions(parsed.items, remote, local);
+    const resumeIndex = Math.max(0, Math.min(parsed.items.length - 1, local?.index ?? remote?.index ?? 0));
+    const selected = restored[parsed.items[resumeIndex].id];
+    setDecisions(restored);
+    setPacket(parsed);
+    setIndex(resumeIndex);
+    const draft = local?.index === resumeIndex && Array.isArray(local.draftTags) ? local.draftTags : [];
+    setTags(selected?.humanTags ?? [0, 1, 2].map((i) => typeof draft[i] === "string" ? draft[i] : ""));
+    setStage(selected?.humanTags.length === 3 ? "compare" : "label");
+    setNotice(packetSaved
+      ? `Resumed ${Object.keys(restored).length} labeled items in ${parsed.runId}.`
+      : "Could not keep the packet in this browser. Keep the JSON file for your next visit; decisions are still saved.");
+  }
 
   useEffect(() => {
     if (!packet) return;
-    const saved: SavedRun = { schema: "radon.slm-review-decisions.v1", runId: packet.runId, reviewer, decisions: Object.values(decisions) };
+    const saved: SavedRun = { schema: "radon.slm-review-decisions.v1", runId: packet.runId, reviewer, decisions: Object.values(decisions), index, draftTags: tags };
     try { localStorage.setItem(storageKey(packet.runId, reviewer), JSON.stringify(saved)); }
     catch { setError("Browser storage is full. Export the review file now to preserve decisions."); }
-  }, [decisions, packet, reviewer]);
+  }, [decisions, packet, reviewer, index, tags]);
+
+  useEffect(() => {
+    if (!packet || !serverReady) return;
+    const snapshot: SavedRun = { schema: "radon.slm-review-decisions.v1", runId: packet.runId, reviewer, decisions: Object.values(decisions), index };
+    setSaveStatus("saving");
+    syncQueue.current = syncQueue.current.catch(() => undefined).then(async () => {
+      const response = await fetch(`/api/admin/slm-review?runId=${encodeURIComponent(packet.runId)}`, {
+        method: "PUT", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify(snapshot),
+      });
+      if (!response.ok) throw new Error("Review backup failed.");
+      setSaveStatus("saved");
+    }).catch(() => { setSaveStatus("offline"); });
+  }, [decisions, packet, reviewer, index, serverReady]);
 
   const item = packet?.items[index];
   const current = item ? decisions[item.id] : undefined;
   const completeCount = packet ? Object.values(decisions).filter((decision) => ALIASES.every((name) => name in decision.acceptance)).length : 0;
   const suggestionListId = useMemo(() => "slm-review-taxonomy", []);
+
+  function saveLocalNow(nextDecisions: Record<string, SavedDecision>, nextIndex = index, draftTags = tags) {
+    if (!packet) return;
+    const saved: SavedRun = { schema: "radon.slm-review-decisions.v1", runId: packet.runId, reviewer, decisions: Object.values(nextDecisions), index: nextIndex, draftTags };
+    try { localStorage.setItem(storageKey(packet.runId, reviewer), JSON.stringify(saved)); }
+    catch { setError("Browser storage is full. Export the review file now to preserve decisions."); }
+  }
 
   async function loadPacket(file?: File) {
     if (!file) return;
@@ -111,15 +206,7 @@ export default function SlmReview({ reviewer }: { reviewer: string }) {
     try {
       if (file.size > 15_000_000) throw new Error("Review packet is larger than the 15 MB safety limit.");
       const parsed = parsePacket(JSON.parse(await file.text()));
-      const raw = localStorage.getItem(storageKey(parsed.runId, reviewer));
-      const saved = raw ? JSON.parse(raw) as SavedRun : null;
-      const validIds = new Set(parsed.items.map((item) => item.id));
-      const prior = saved?.schema === "radon.slm-review-decisions.v1"
-        ? saved.decisions.filter((decision) => validIds.has(decision.id))
-        : [];
-      setDecisions(Object.fromEntries(prior.map((decision) => [decision.id, decision])));
-      setPacket(parsed); setIndex(0); setStage("label"); setTags(["", "", ""]); setApprovedImageHosts([]);
-      setNotice(`Loaded ${parsed.items.length} blinded items from ${parsed.runId}. Source text stays in this tab; only your decisions are saved.`);
+      await restorePacket(parsed, true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not read review packet.");
     }
@@ -137,17 +224,23 @@ export default function SlmReview({ reviewer }: { reviewer: string }) {
       id: item.id,
       humanTags: normalized,
       acceptance: {}, reviewer,
-      reviewedAt: new Date().toISOString(),
+      reviewedAt: nextReviewTime(),
     };
-    setDecisions((previous) => ({ ...previous, [item.id]: { ...existing, humanTags: normalized, acceptance: {} } }));
+    const unchanged = existing.humanTags.length === 3 && existing.humanTags.every((tag, i) => tag === normalized[i]);
+    const updated = { ...existing, humanTags: normalized, acceptance: unchanged ? existing.acceptance : {}, reviewedAt: nextReviewTime(existing.reviewedAt) };
+    const next = { ...decisions, [item.id]: updated };
+    saveLocalNow(next, index, normalized);
+    setDecisions(next);
     setStage("compare"); setError("");
   }
 
   function saveDecision(alias: string, accepted: boolean) {
     if (!item || !current) return;
     const acceptance = { ...current.acceptance, [alias]: accepted };
-    const next = { ...current, acceptance, reviewedAt: new Date().toISOString() };
-    setDecisions((previous) => ({ ...previous, [item.id]: next }));
+    const updated = { ...current, acceptance, reviewedAt: nextReviewTime(current.reviewedAt) };
+    const next = { ...decisions, [item.id]: updated };
+    saveLocalNow(next);
+    setDecisions(next);
     if (ALIASES.every((name) => name in acceptance)) {
       setNotice("All three candidates recorded. Move to the next item when ready.");
     }
@@ -162,13 +255,32 @@ export default function SlmReview({ reviewer }: { reviewer: string }) {
     URL.revokeObjectURL(url);
   }
 
+  async function retryBackup() {
+    if (!packet) return;
+    try {
+      const response = await fetch(`/api/admin/slm-review?runId=${encodeURIComponent(packet.runId)}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Review backup unavailable.");
+      const remote = await response.json() as SavedRun;
+      if (remote.schema !== "radon.slm-review-decisions.v1" || remote.runId !== packet.runId || remote.reviewer !== reviewer || !Array.isArray(remote.decisions)) throw new Error("Invalid saved review response.");
+      const local: SavedRun = { schema: "radon.slm-review-decisions.v1", runId: packet.runId, reviewer, decisions: Object.values(decisions) };
+      setDecisions(mergeDecisions(packet.items, remote, local));
+      setServerReady(true);
+      setSaveStatus("saving");
+      setError("");
+    } catch {
+      setSaveStatus("offline");
+      setError("Review backup is unavailable. Decisions remain in this browser; export a copy or retry.");
+    }
+  }
+
   function step(next: number) {
     if (!packet) return;
     const bounded = Math.max(0, Math.min(packet.items.length - 1, next));
-    setIndex(bounded);
-    setApprovedImageHosts([]);
     const saved = decisions[packet.items[bounded].id];
-    setTags(saved?.humanTags ?? ["", "", ""]);
+    const nextTags = saved?.humanTags ?? ["", "", ""];
+    saveLocalNow(decisions, bounded, nextTags);
+    setIndex(bounded);
+    setTags(nextTags);
     setStage(saved && saved.humanTags.length === 3 ? "compare" : "label");
     setNotice(""); setError("");
   }
@@ -181,15 +293,15 @@ export default function SlmReview({ reviewer }: { reviewer: string }) {
           <h1>Label the post. Then judge the candidates.</h1>
         </div>
         <div className={styles.headerActions}>
-          {packet && <button className={styles.secondary} onClick={exportDecisions} disabled={completeCount !== packet.items.length}>Export completed review</button>}
+          {packet && <button className={styles.secondary} onClick={exportDecisions}>Export decisions</button>}
           <input ref={fileRef} className={styles.fileInput} type="file" accept="application/json,.json" aria-label="Load review packet" onChange={(event) => loadPacket(event.target.files?.[0])} />
           <button className={styles.primary} onClick={() => fileRef.current?.click()}>Load review packet</button>
         </div>
       </header>
-      <div className={styles.privacy}>Operator only. Packet text stays in this tab. Images load from their source only when requested; decisions stay in this browser.</div>
+      <div className={styles.privacy}>Operator only. The packet is kept in this browser for automatic resume. Decisions are backed up to Radon. Images load from their source.</div>
       {error && <ErrorToast message={error} />}
       {notice && <p role="status" className={styles.notice}>{notice}</p>}
-      {!packet || !item ? (
+      {restoring ? <p role="status" className={styles.notice}>Restoring review…</p> : !packet || !item ? (
         <section className={styles.empty}>
           <h2>Choose the 200-item packet</h2>
           <p>Load the packet for the frozen evaluation cohort. It contains 200 posts, at least 40 with images, and three aligned prediction sets.</p>
@@ -200,7 +312,7 @@ export default function SlmReview({ reviewer }: { reviewer: string }) {
           <div className={styles.progress}>
             <span className={styles.progressLabel}>ITEM <strong>{index + 1}</strong> / {packet.items.length}</span>
             <progress value={completeCount} max={packet.items.length} aria-label="Review progress" />
-            <span>{completeCount} / {packet.items.length} reviewed · {item.month || "date unavailable"}</span>
+            <span>{completeCount} / {packet.items.length} reviewed · {item.month || "date unavailable"} · {saveStatus === "saved" ? "Backed up" : saveStatus === "saving" ? "Saving…" : <button className={styles.retry} onClick={retryBackup}>Backup unavailable · Retry</button>}</span>
           </div>
           <section className={styles.review}>
             <article className={styles.post}>
@@ -210,17 +322,8 @@ export default function SlmReview({ reviewer }: { reviewer: string }) {
               </div>
               <h2>{item.title || "Untitled post"}</h2>
               <p className={styles.body}>{item.text}</p>
-              {item.imageUrls.length > 0 && <div className={styles.imageReview}>
-                <p className={styles.help}>Images stay unloaded until you approve each source host.</p>
-                {[...new Set(item.imageUrls.map(imageHost))].map((host) => {
-                  const hostImages = item.imageUrls.filter((url) => imageHost(url) === host);
-                  const approved = approvedImageHosts.includes(host);
-                  return <div className={styles.imageSource} key={host}>
-                    {!approved
-                      ? <button className={styles.secondary} onClick={() => setApprovedImageHosts((currentHosts) => [...currentHosts, host])}>Load {hostImages.length} {hostImages.length === 1 ? "image" : "images"} from {host}</button>
-                      : <div className={styles.images}>{hostImages.map((url, imageIndex) => <img key={`${url}-${imageIndex}`} src={url} alt={`Post image from ${host}, ${imageIndex + 1}`} referrerPolicy="no-referrer" loading="lazy" decoding="async" />)}</div>}
-                  </div>;
-                })}
+              {item.imageUrls.length > 0 && <div className={styles.images}>
+                {item.imageUrls.map((url, imageIndex) => <img key={url} src={url} alt={`Post image ${imageIndex + 1} from ${imageHost(url)}`} referrerPolicy="no-referrer" loading="eager" decoding="async" />)}
               </div>}
             </article>
 
@@ -260,7 +363,7 @@ export default function SlmReview({ reviewer }: { reviewer: string }) {
             <button className={styles.secondary} onClick={() => step(index - 1)} disabled={index === 0}>Previous</button>
             <button className={styles.secondary} onClick={() => step(index + 1)} disabled={index === packet.items.length - 1}>Skip / next</button>
           </nav>
-          <p className={styles.storageNote}>Progress is saved in this browser. Export decisions before clearing site data or changing browsers.</p>
+          <p className={styles.storageNote}>Your work resumes automatically in this browser. Export decisions at any time for an additional copy.</p>
         </>
       )}
     </div>

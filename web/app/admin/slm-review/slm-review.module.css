@@ -1,5 +1,5 @@
 .page { min-height: 100vh; background: var(--bg-canvas); color: var(--text-primary); }
-.shell { width: min(1120px, 100% - 32px); margin-inline: auto; padding: 30px 0 48px; }
+.shell { width: min(1440px, 100% - 32px); margin-inline: auto; padding: 30px 0 48px; }
 .header { display: flex; align-items: end; justify-content: space-between; gap: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--line-grid); }
 .header h1 { max-width: 660px; margin-top: 6px; font: 600 clamp(21px, 3vw, 29px)/1.2 var(--font-sans); letter-spacing: -.035em; }
 .eyebrow, .postHead, .progressLabel, .tagFields label > span { color: var(--text-muted); font: 500 11px/1.4 var(--font-mono); letter-spacing: .025em; }
@@ -21,15 +21,16 @@
 .progress { display: grid; grid-template-columns: auto minmax(80px, 1fr) auto; align-items: center; gap: 14px; margin: 18px 0 14px; color: var(--text-muted); font: 12px var(--font-mono); }
 .progress strong { color: var(--text-primary); }
 .progress progress { width: 100%; height: 5px; accent-color: var(--signal-core); }
-.review { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(380px, .92fr); gap: 14px; align-items: start; }
+.retry { border: 0; padding: 0; background: transparent; color: var(--signal-core-text); font: inherit; text-decoration: underline; cursor: pointer; }
+.retry:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.review { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(380px, .7fr); gap: 14px; align-items: start; }
 .post, .labelPanel { min-width: 0; padding: 18px; border: 1px solid var(--line-grid); border-radius: 4px; background: var(--bg-panel); }
 .postHead { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 14px; }
 .imageFlag { padding: 3px 8px; border: 1px solid var(--line-grid); border-radius: var(--radius-capsule); color: var(--signal-core-text); }
 .post h2 { margin-bottom: 10px; }
 .body { color: var(--text-secondary); font-size: 14px; line-height: 1.62; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 46vh; overflow: auto; scrollbar-color: var(--line-grid) transparent; }
-.images { display: flex; gap: 8px; margin-top: 14px; overflow-x: auto; }
-.imageReview, .imageSource { display: grid; gap: 8px; margin-top: 10px; }
-.images img { max-width: min(100%, 260px); max-height: 220px; object-fit: contain; border: 1px solid var(--line-grid); border-radius: var(--radius-sm); }
+.images { display: grid; gap: 12px; margin-top: 18px; }
+.images img { display: block; width: 100%; max-height: min(75vh, 900px); object-fit: contain; border: 1px solid var(--line-grid); border-radius: var(--radius-sm); background: var(--bg-subtle); }
 .panelTitle { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
 .counter { flex: 0 0 auto; max-width: 44%; padding: 5px 8px; border-radius: var(--radius-sm); background: var(--bg-subtle); color: var(--text-muted); font: 10px/1.35 var(--font-mono); overflow-wrap: anywhere; }
 .help { color: var(--text-muted); font-size: 12px; line-height: 1.45; }

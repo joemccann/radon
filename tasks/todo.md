@@ -8534,3 +8534,13 @@ Review: tests-first head3c8bb97d, CI36188923632 reproduced the new cleanup regre
 Dependency graph: T1 -> T2 -> T3.
 
 Review: Seven on-demand writers were correctly registered but admin freshness ignored categories. Admin now labels them On demand and scores scheduled writers only. Errors and last-run ages remain visible. Retired exit-orders rows are excluded without mutating storage. Unknown services remain scheduled. knowledge-ingest disabled timer and liquidcompute timeout investigations handed to parent for separate operational repair. PR707 head61a4973e:31 applicable checks green,7 expected skips; Playwright200+1 passed. Desktop/mobile screenshots inspected. Pushover200/status1 request8474b0e5-ecba-4d16-8817-4a430c742f03. No local suites run. Completion notes kept local to preserve the verified PR head; parent coordinates merge/deploy.
+## 2026-09-25 Durable SLM review and readable images
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+- [x] T1 Add operator-only decision backup with merge and regression coverage. depends_on: []
+- [x] T2 Restore packet, decisions, draft tags and exact position after restart. depends_on: [T1]
+- [x] T3 Show source images automatically at useful desktop/mobile size. depends_on: [T2]
+- [ ] T4 Verify in browser and exact-head GitHub CI; document result. depends_on: [T3]
+
+Review: pending. Existing localStorage decisions migrate into the backup when the original packet is loaded. The packet stays in browser storage; the server stores only votes, labels and cursor. No local test suites per operator policy.
