@@ -93,7 +93,7 @@ export default function ServiceControlPanel({
                 <td><span className="admin-skeleton admin-skeleton-line" style={{ width: 80 }} /></td>
                 <td><span className="admin-skeleton admin-skeleton-line" style={{ width: 150 }} /></td>
                 <td><span className="admin-skeleton admin-skeleton-line" style={{ width: 90 }} /></td>
-                <td className="admin-col-controls"><span className="admin-skeleton admin-skeleton-line" style={{ width: 130, height: 22 }} /></td>
+                <td data-label="Controls" className="admin-col-controls"><span className="admin-skeleton admin-skeleton-line" style={{ width: 130, height: 22 }} /></td>
               </tr>
             ))}
           </tbody>
@@ -225,7 +225,7 @@ function ServiceRow({
       className={flashClass}
       data-flash={flashClass ? "true" : undefined}
     >
-      <td>
+      <td data-label="Status">
         <div className="admin-verdict-cell" title={rawState}>
           <span
             className={`admin-status-dot admin-status-dot-${verdict.tone}${transitional ? " admin-status-dot-pulse" : ""}`}
@@ -234,16 +234,16 @@ function ServiceRow({
           <span className="admin-verdict-label">{verdict.label}</span>
         </div>
       </td>
-      <td>
+      <td data-label="Unit">
         <div className="admin-unit-name">{unit.unit}</div>
         {unit.description && <div className="admin-unit-desc">{unit.description}</div>}
       </td>
-      <td>
+      <td data-label="Activity">
         <div className="admin-unit-activity" data-testid={`service-activity-${unit.unit}`}>
           {activity}
         </div>
       </td>
-      <td className="admin-col-controls">
+      <td data-label="Controls" className="admin-col-controls">
         <div className="admin-row-actions">
           {(["start", "restart", "stop"] as ServiceAction[]).map((action) => {
             const reason = serviceControlDisabledReason({

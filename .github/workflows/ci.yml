@@ -819,6 +819,7 @@ jobs:
           e2e/ai-industry.spec.ts
           e2e/clear-shell.spec.ts
           e2e/clear-admin-component.spec.ts
+          e2e/admin-action-queue.spec.ts
           e2e/chat-experience.spec.ts
           e2e/chat-launcher-focus.spec.ts
           e2e/flow-analysis-ticker.spec.ts

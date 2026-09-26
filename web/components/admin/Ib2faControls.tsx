@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import type { AdminHealthPayload, HostRole, UnitStatus } from "@/lib/adminTypes";
 import {
   forcePushDisabledReason,
@@ -39,6 +40,10 @@ type Ib2faControlsProps = {
   /** App hosts must not cycle the broker Gateway. Unset means combined. */
   hostRole?: HostRole;
   onAfter?: () => void;
+  /** Hoist the suggested recovery trigger while preserving one control owner. */
+  primaryActionContainer?: HTMLElement | null;
+  primaryObservationCurrent?: boolean;
+  onInspect?: () => void;
 };
 
 /**
@@ -58,6 +63,9 @@ export default function Ib2faControls({
   apiUnreachable = false,
   hostRole,
   onAfter,
+  primaryActionContainer = null,
+  primaryObservationCurrent = true,
+  onInspect,
 }: Ib2faControlsProps) {
   const [showForceConfirm, setShowForceConfirm] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
@@ -217,8 +225,31 @@ export default function Ib2faControls({
           ? "Start Gateway"
           : "Unavailable";
 
+  const anyPending = pendingForce || pendingReset || pendingRestart || pendingPower;
+  const suggestStart = primaryObservationCurrent && ownsGatewayLifecycle && powerState === "stopped" && Boolean(onStartGateway);
+  const suggestPush = primaryObservationCurrent && ownsGatewayLifecycle && !apiUnreachable && powerState === "running" &&
+    (authState === "awaiting_2fa" || authState === "unreachable");
+  const primaryDisabledReason = suggestStart ? powerDisabledReason : suggestPush ? disableReason : null;
+  const primaryDisabled = anyPending || (suggestStart ? powerDisabled : suggestPush ? disableForce : !onInspect);
+
   return (
     <section className="admin-card" data-testid="ib-controls">
+      {primaryActionContainer && createPortal(
+        <>
+          <button
+            type="button"
+            className="admin-btn admin-btn-primary"
+            data-testid="admin-primary-recovery"
+            disabled={primaryDisabled}
+            aria-describedby={primaryDisabledReason ? "admin-primary-recovery-reason" : undefined}
+            onClick={() => suggestStart ? setShowStartConfirm(true) : suggestPush ? setShowForceConfirm(true) : onInspect?.()}
+          >
+            {anyPending ? "Working..." : suggestStart ? "Start Gateway" : suggestPush ? "Force 2FA Push" : "Review gateway"}
+          </button>
+          {primaryDisabledReason && <p className="admin-card-note" id="admin-primary-recovery-reason">{primaryDisabledReason}</p>}
+        </>,
+        primaryActionContainer,
+      )}
       <header className="admin-card-header">
         <span className="admin-card-title">IB Gateway controls</span>
       </header>
