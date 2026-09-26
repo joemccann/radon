@@ -196,8 +196,12 @@ def detect(pdf_path, page_number):
     return found
 
 
-def catalogue(pdf_path, pages, output_dir, dpi=216):
-    """Detect and render every figure on the given pages; ids f1.. in reading order."""
+def catalogue(pdf_path, pages, output_dir, dpi=216, extras=None):
+    """Detect and render every figure on the given pages; ids f1.. in reading order.
+
+    extras are Nemotron picture boxes ({page, bbox}) already in the displayed
+    frame. A box that overlaps a detected figure is not rendered twice.
+    """
     from research.pdf import render
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -207,9 +211,46 @@ def catalogue(pdf_path, pages, output_dir, dpi=216):
         if reason:
             skipped.append({'page': number, 'reason': reason})
         for figure in found:
-            index = len(result) + 1
-            target = output / f'f{index}'
-            record = render(pdf_path, target, [number], dpi=dpi, crop=figure['bbox'])[0]
-            result.append({'id': f'f{index}', **figure, 'image_file': f'f{index}/' + record['image_file'],
-                           'width': record['width'], 'height': record['height']})
+            _append_figure(result, pdf_path, output, dpi, figure)
+    for extra in extras or []:
+        if not isinstance(extra, dict) or extra.get('page') not in pages:
+            continue
+        box = _extra_box(extra.get('bbox'))
+        if box is None:
+            continue
+        if any(row['page'] == extra['page'] and _iou(row['bbox'], box) > 0.5 for row in result):
+            continue
+        figure = {'page': extra['page'], 'bbox': [round(v, 4) for v in box], 'objects': extra.get('objects') or 1,
+                  'kind': extra.get('kind') or 'raster', 'title': extra.get('title'),
+                  'source_line': extra.get('source_line'), 'origin': extra.get('origin') or 'nemotron'}
+        _append_figure(result, pdf_path, output, dpi, figure)
     return Catalogue(result, skipped_pages=skipped)
+
+
+def _append_figure(result, pdf_path, output, dpi, figure):
+    from research.pdf import render
+    index = len(result) + 1
+    target = output / f'f{index}'
+    record = render(pdf_path, target, [figure['page']], dpi=dpi, crop=figure['bbox'])[0]
+    result.append({'id': f'f{index}', **figure, 'image_file': f'f{index}/' + record['image_file'],
+                   'width': record['width'], 'height': record['height']})
+
+
+def _extra_box(box):
+    if not isinstance(box, (list, tuple)) or len(box) != 4:
+        return None
+    if not all(isinstance(n, (int, float)) and math.isfinite(n) for n in box):
+        return None
+    if not (0 <= box[0] < box[2] <= 1 and 0 <= box[1] < box[3] <= 1):
+        return None
+    return [float(n) for n in box]
+
+
+def _iou(a, b) -> float:
+    left, top = max(a[0], b[0]), max(a[1], b[1])
+    right, bottom = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0.0, right - left) * max(0.0, bottom - top)
+    if inter <= 0:
+        return 0.0
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union else 0.0

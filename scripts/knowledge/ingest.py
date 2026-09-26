@@ -42,7 +42,10 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 from credential_redaction import scrub_credential_text  # noqa: E402
 from knowledge.distill import EnrichmentBudget, distill  # noqa: E402
-from knowledge.embed import EMBEDDING_DIM, embedding_text, get_embedder  # noqa: E402
+from knowledge.embed import (  # noqa: E402
+    EMBEDDING_DIM, EMBEDDING_DIM_V2, dual_write_enabled, embed_passages,
+    embedding_text, get_embedder,
+)
 from knowledge.schema import KnowledgeDoc  # noqa: E402
 from knowledge.store import delete_source_docs, upsert_documents  # noqa: E402
 
@@ -77,6 +80,11 @@ _EXISTING_SQL = (
     "summary, embedding, content_hash "
     "FROM knowledge WHERE source = ? AND id > ? ORDER BY id LIMIT ?"
 )
+_EXISTING_SQL_V2 = (
+    "SELECT id, doc_key, chunk_ix, content, title, metadata, "
+    "summary, embedding, content_hash, embedding_v2 "
+    "FROM knowledge WHERE source = ? AND id > ? ORDER BY id LIMIT ?"
+)
 
 
 class _StoredChunk(NamedTuple):
@@ -86,6 +94,7 @@ class _StoredChunk(NamedTuple):
     summary: str | None
     embedding: bytes | None
     content_hash: str
+    embedding_v2: bytes | None = None
 
     @property
     def has_summary(self):
@@ -94,6 +103,10 @@ class _StoredChunk(NamedTuple):
     @property
     def has_embedding(self):
         return self.embedding is not None
+
+    @property
+    def has_embedding_v2(self):
+        return self.embedding_v2 is not None
 
 _EMPTY_UPSERT_COUNTS = {"inserted": 0, "updated": 0, "skipped": 0, "pruned": 0}
 
@@ -163,7 +176,12 @@ def ingest_source(
             distill_deferred += batch_deferred
         _restore_unchanged_enrichment(batch, existing)
         if embed_enabled:
-            embedded += _embed_docs([doc for doc in batch if doc.embedding is None], embedder)
+            want_v2 = dual_write_enabled() and _knowledge_has_embedding_v2(db)
+            pending = [
+                doc for doc in batch
+                if doc.embedding is None or (want_v2 and doc.embedding_v2 is None)
+            ]
+            embedded += _embed_docs(pending, embedder, write_v2=want_v2)
         # One authoritative document is the smallest safe write transaction:
         # every chunk and its trailing-chunk prune must commit together. The
         # preparation batch must not reserve the shared writer for hundreds
@@ -226,17 +244,34 @@ def _fetch_docs(module, db, limit: int | None) -> list[KnowledgeDoc]:
     return docs
 
 
+def _knowledge_has_embedding_v2(db) -> bool:
+    try:
+        rows = db.execute("PRAGMA table_info(knowledge)").fetchall()
+    except Exception:
+        return False
+    return any(row[1] == "embedding_v2" for row in rows)
+
+
 def _load_existing(db, source: str) -> dict[str, dict[int, _StoredChunk]]:
     """{doc_key: {chunk_ix: _StoredChunk}} for the source."""
     existing: dict[str, dict[int, _StoredChunk]] = {}
+    has_v2 = _knowledge_has_embedding_v2(db)
+    sql = _EXISTING_SQL_V2 if has_v2 else _EXISTING_SQL
     cursor = 0
     while True:
-        rows = db.execute(_EXISTING_SQL, (source, cursor, _EXISTING_BATCH_ROWS)).fetchall()
+        rows = db.execute(sql, (source, cursor, _EXISTING_BATCH_ROWS)).fetchall()
         if not rows:
             return existing
-        for row_id, doc_key, chunk_ix, content, title, metadata_json, summary, embedding, digest in rows:
+        for row in rows:
+            embedding_v2 = None
+            if has_v2:
+                (row_id, doc_key, chunk_ix, content, title, metadata_json,
+                 summary, embedding, digest, embedding_v2) = row
+            else:
+                (row_id, doc_key, chunk_ix, content, title, metadata_json,
+                 summary, embedding, digest) = row
             existing.setdefault(doc_key, {})[chunk_ix] = _StoredChunk(
-                content, title, metadata_json, summary, embedding, digest
+                content, title, metadata_json, summary, embedding, digest, embedding_v2
             )
             cursor = row_id
         if len(rows) < _EXISTING_BATCH_ROWS:
@@ -353,6 +388,7 @@ def _prepared_document_is_current(docs, existing):
     return set(stored) == {doc.chunk_ix for doc in docs} and all(
         doc.content_hash() == stored[doc.chunk_ix].content_hash
         and (stored[doc.chunk_ix].has_embedding or doc.embedding is None)
+        and (doc.embedding_v2 is None or stored[doc.chunk_ix].has_embedding_v2)
         for doc in docs
     )
 
@@ -368,25 +404,49 @@ def _restore_unchanged_enrichment(docs, existing):
                 doc.summary = stored.summary
                 # Preserve model-added tickers when no replacement was produced.
                 doc.metadata = json.loads(stored.metadata_json) if stored.metadata_json else None
-        if (stored.embedding is not None and len(stored.embedding) == EMBEDDING_DIM * 4 and
-                embedding_text(doc.title, doc.summary, doc.content) ==
-                embedding_text(stored.title, stored.summary, stored.content)):
+        same_text = (
+            embedding_text(doc.title, doc.summary, doc.content)
+            == embedding_text(stored.title, stored.summary, stored.content)
+        )
+        if stored.embedding is not None and len(stored.embedding) == EMBEDDING_DIM * 4 and same_text:
             doc.embedding = list(struct.unpack(f"<{EMBEDDING_DIM}f", stored.embedding))
+        if (stored.embedding_v2 is not None and len(stored.embedding_v2) == EMBEDDING_DIM_V2 * 4
+                and same_text):
+            doc.embedding_v2 = list(struct.unpack(f"<{EMBEDDING_DIM_V2}f", stored.embedding_v2))
 
 
-def _embed_docs(docs: list[KnowledgeDoc], embedder) -> int:
+def _embed_docs(docs: list[KnowledgeDoc], embedder, *, write_v2: bool | None = None) -> int:
+    if write_v2 is None:
+        write_v2 = dual_write_enabled()
     if not docs:
         return 0
-    if embedder is None:
+    missing_local = [doc for doc in docs if doc.embedding is None]
+    wrote = 0
+    if embedder is not None and missing_local:
+        texts = [embedding_text(doc.title, doc.summary, doc.content) for doc in missing_local]
+        for doc, vector in zip(missing_local, embedder(texts)):
+            doc.embedding = vector
+        wrote = len(missing_local)
+    elif embedder is None and missing_local and not write_v2:
         print(
             f"[{SERVICE_NAME}] embeddings unavailable — ingesting without vectors",
             file=sys.stderr,
         )
         return 0
-    texts = [embedding_text(doc.title, doc.summary, doc.content) for doc in docs]
-    for doc, vector in zip(docs, embedder(texts)):
-        doc.embedding = vector
-    return len(docs)
+    if write_v2:
+        missing_v2 = [doc for doc in docs if doc.embedding_v2 is None]
+        if missing_v2:
+            texts = [embedding_text(doc.title, doc.summary, doc.content) for doc in missing_v2]
+            try:
+                vectors = embed_passages(texts)
+            except Exception as exc:
+                print(f"[{SERVICE_NAME}] embedding_v2 unavailable ({exc})", file=sys.stderr)
+                vectors = []
+            for doc, vector in zip(missing_v2, vectors):
+                if len(vector) == EMBEDDING_DIM_V2:
+                    doc.embedding_v2 = vector
+                    wrote += 1
+    return wrote
 
 
 # ── CLI ──────────────────────────────────────────────────────────────

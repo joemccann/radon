@@ -33,7 +33,8 @@ def make_pdf(path, pages=2, size=(300,200)):
     return path
 
 
-def test_real_parse_original_pages_and_crop(tmp_path):
+def test_real_parse_original_pages_and_crop(tmp_path, monkeypatch):
+    monkeypatch.setenv("RADON_RESEARCH_PARSER", "local")
     from research.pdf import parse,render
     from PIL import Image
     pdf=make_pdf(tmp_path/"source.pdf")
@@ -57,6 +58,7 @@ def test_real_parse_original_pages_and_crop(tmp_path):
 
 
 def test_real_isolated_subprocess_extract_and_render(tmp_path,monkeypatch):
+    monkeypatch.setenv("RADON_RESEARCH_PARSER", "local")
     from research.pipeline import Pipeline
     scripts=str(Path(__file__).resolve().parents[1])
     monkeypatch.setenv("PYTHONPATH",scripts+os.pathsep+os.environ.get("PYTHONPATH",""))
