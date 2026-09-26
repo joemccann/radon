@@ -2,6 +2,10 @@
 
 import ErrorToast from "@/components/ErrorToast";
 
+import { createPortal } from "react-dom";
+import { useDialogChrome } from "@/lib/useDialogChrome";
+import styles from "./adminActionQueue.module.css";
+
 import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ConfirmDialog from "./ConfirmDialog";
@@ -24,8 +28,12 @@ type PendingAction = "halt" | "resume" | "cancel-all" | "kill" | null;
  * requires typing the confirm token — the same guardrail class as the
  * order-risk chokepoint.
  */
-export default function TradingKillSwitch() {
+export default function TradingKillSwitch({ compact = false }: { compact?: boolean }) {
+  const [controlsOpen, setControlsOpen] = useState(false);
+  const { portalTarget, panelRef } = useDialogChrome<HTMLDivElement>({ open: compact && controlsOpen, onClose: () => setControlsOpen(false) });
   const [status, setStatus] = useState<HaltState | null>(null);
+  const [observedAt, setObservedAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [statusError, setStatusError] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingAction>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -40,7 +48,9 @@ export default function TradingKillSwitch() {
       const res = await fetch("/api/admin/trading/status", { cache: "no-store" });
       if (!res.ok) throw new Error(`status ${res.status}`);
       const data = (await res.json()) as HaltState;
+      if (typeof data.halted !== "boolean") throw new Error("Invalid trading status");
       setStatus(data);
+      setObservedAt(Date.now());
       setStatusError(null);
     } catch (err) {
       setStatusError(userErrorMessage(err, "status probe failed"));
@@ -51,7 +61,7 @@ export default function TradingKillSwitch() {
 
   useEffect(() => {
     void fetchStatus();
-    const id = window.setInterval(fetchStatus, STATUS_POLL_MS);
+    const id = window.setInterval(() => { setNow(Date.now()); void fetchStatus(); }, STATUS_POLL_MS);
     return () => window.clearInterval(id);
   }, [fetchStatus]);
 
@@ -92,15 +102,16 @@ export default function TradingKillSwitch() {
 
   const halted = status?.halted === true;
 
-  return (
+  const statusKnown = status !== null && statusError === null && observedAt !== null && now - observedAt <= 30_000;
+  const controls = (
     <section className="admin-card" data-testid="trading-kill-switch">
       <div className="admin-card-header">
         <h2 className="admin-card-title">Trading Controls</h2>
         <span
-          className={`admin-pill ${halted ? "admin-pill-negative" : "admin-pill-positive"}`}
+          className={`admin-pill ${!statusKnown ? "admin-pill-neutral" : halted ? "admin-pill-negative" : "admin-pill-positive"}`}
           data-testid="trading-halt-state"
         >
-          {status === null ? "Unknown" : halted ? "HALTED" : "Active"}
+          {!statusKnown ? "Unknown" : halted ? "HALTED" : "Active"}
         </span>
       </div>
 
@@ -207,6 +218,24 @@ export default function TradingKillSwitch() {
         onCancel={() => setConfirmFor(null)}
       />
     </section>
+  );
+
+  if (!compact) return controls;
+  return (
+    <>
+      <button type="button" className={`admin-btn admin-btn-ghost ${styles.tradingTrigger}`} data-testid="trading-controls-button" aria-haspopup="dialog" onClick={() => setControlsOpen(true)}>
+        Trading controls
+        <span className={!statusKnown ? styles.neutral : halted ? styles.negative : styles.positive}>{!statusKnown ? "Unknown" : halted ? "Halted" : "Active"}</span>
+      </button>
+      {portalTarget && createPortal(
+        <div className={styles.tradingBackdrop} hidden={!controlsOpen} data-testid="trading-controls-dialog" role="dialog" aria-modal="true" aria-label="Trading controls">
+          <div ref={panelRef} className={styles.tradingPanel} tabIndex={-1}>
+            <button type="button" className="admin-btn admin-btn-ghost" onClick={() => setControlsOpen(false)} aria-label="Close trading controls">Close</button>
+            {controls}
+          </div>
+        </div>, portalTarget,
+      )}
+    </>
   );
 }
 

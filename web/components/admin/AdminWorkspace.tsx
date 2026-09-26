@@ -24,7 +24,10 @@ import IbGatewayCard from "./IbGatewayCard";
 import Ib2faControls from "./Ib2faControls";
 import ServiceControlPanel from "./ServiceControlPanel";
 import RestartLog from "./RestartLog";
-import SystemStatusBar from "./SystemStatusBar";
+import AdminAttentionQueue from "./AdminAttentionQueue";
+import AdminSystemOverview from "./AdminSystemOverview";
+import { deriveAdminAttention, isAdminObservationCurrent, type AdminAttentionSources, type AdminAttentionCondition } from "@/lib/adminAttention";
+import styles from "./adminActionQueue.module.css";
 import ReliabilityStrip from "./ReliabilityStrip";
 import SloStrip from "./SloStrip";
 import HostMetricsStrip from "./HostMetricsStrip";
@@ -58,9 +61,8 @@ const FLASH_DURATION_MS = 2_000;
  *   - in-memory action log (last 5 entries)
  *
  * Renders responsively: the same panel serves desktop and mobile (393px). On
- * mobile it sits inside the MobileShell chrome; the wide tables scroll
- * horizontally and controls grow to 44px touch targets via the .admin-*
- * mobile media query in globals.css.
+ * mobile it sits inside the MobileShell chrome; actionable conditions lead
+ * the page and the full inventory is available through disclosures.
  *
  * Keeps the page-level component thin: child components are render-only.
  */
@@ -84,7 +86,11 @@ export default function AdminWorkspace() {
 
   // Epoch ms of the last successful poll, + a 1s tick so "updated Ns ago"
   // counts up live without a fetch.
-  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+  const [healthObservedAt, setHealthObservedAt] = useState<number | null>(null);
+  const [servicesObservedAt, setServicesObservedAt] = useState<number | null>(null);
+  const [edgeObservedAt, setEdgeObservedAt] = useState<number | null>(null);
+  const [primaryActionContainer, setPrimaryActionContainer] = useState<HTMLDivElement | null>(null);
+  const disclosures = useRef<Partial<Record<string, HTMLDetailsElement>>>({});
   const [nowTick, setNowTick] = useState(() => Date.now());
 
   const [log, setLog] = useState<RestartLogEntry[]>([]);
@@ -114,7 +120,9 @@ export default function AdminWorkspace() {
         throw new Error(body.error ?? `health ${res.status}`);
       }
       const data = (await res.json()) as AdminHealthPayload;
+      if (!data?.ib_gateway || !data.ib_pool) throw new Error("Invalid broker observation");
       setHealth(data);
+      setHealthObservedAt(Date.now());
       setHealthError(null);
     } catch (err) {
       setHealthError(err instanceof Error ? err.message : "health probe failed");
@@ -134,7 +142,9 @@ export default function AdminWorkspace() {
         throw new Error(body.error ?? `services ${res.status}`);
       }
       const data = (await res.json()) as ServicesListResponse;
+      if (!Array.isArray(data?.units)) throw new Error("Invalid service observation");
       setServices(data);
+      setServicesObservedAt(Date.now());
       setServicesError(null);
     } catch (err) {
       setServicesError(err instanceof Error ? err.message : "service list failed");
@@ -152,10 +162,13 @@ export default function AdminWorkspace() {
     edgeInflightRef.current = true;
     try {
       const res = await fetch("/api/admin/edge-health", { cache: "no-store" });
+      if (!res.ok) throw new Error("Edge observation unavailable");
       const data = (await res.json().catch(() => null)) as EdgePayload;
-      setEdge(data);
+      if (data?.reachable) {
+        setEdge(data);
+        setEdgeObservedAt(Date.now());
+      }
       setEdgeReachable(Boolean(data?.reachable));
-      if (data?.reachable) setLastUpdatedAt(Date.now());
     } catch {
       setEdgeReachable(false);
     } finally {
@@ -475,91 +488,124 @@ export default function AdminWorkspace() {
   );
 
   const units = services?.units ?? [];
-  // A poll failed but prior data remains: surface a stale badge rather than
-  // letting frozen data read as healthy.
-  const stalled = Boolean((healthError || servicesError) && (health || services));
-  const updatedSecsAgo =
-    lastUpdatedAt != null ? Math.max(0, Math.floor((nowTick - lastUpdatedAt) / 1000)) : null;
   const serviceHealthRows = edge?.service_health?.rows ?? [];
-  // First-paint loading (before any data) drives skeletons rather than empty
-  // "Unknown"/"Loading..." text.
   const edgeFirstLoading = !edgeLoaded;
   const reliabilityLoading = (servicesLoading && !services) || edgeFirstLoading;
+  const sources: AdminAttentionSources = {
+    health: { observedAt: healthObservedAt, loading: healthLoading, error: healthError !== null },
+    services: { observedAt: servicesObservedAt, loading: servicesLoading, error: servicesError !== null },
+    edge: { observedAt: edgeObservedAt, loading: edgeFirstLoading, error: edgeLoaded && !edgeReachable },
+  };
+  const conditions = deriveAdminAttention({ health, services, edge, sources, now: nowTick });
+  const checking = healthLoading || servicesLoading || edgeFirstLoading;
+  const inspect = (section: string) => {
+    const disclosure = disclosures.current[section];
+    if (!disclosure) return;
+    disclosure.open = true;
+    if (section === "writers" && disclosures.current.services) disclosures.current.services.open = true;
+    disclosure.querySelector("summary")?.focus({ preventScroll: true });
+    disclosure.scrollIntoView?.({ block: "start" });
+  };
+  const refreshStatus = () => { void fetchHealth(); void fetchServices(); void fetchEdge(); };
+  const review = (action: AdminAttentionCondition["action"]) => {
+    if (action === "refresh") refreshStatus();
+    else inspect(action);
+  };
+  const disclosureProps = (id: string) => ({
+    className: styles.disclosure,
+    "data-testid": `admin-disclosure-${id}`,
+    ref: (node: HTMLDetailsElement | null) => { if (node) disclosures.current[id] = node; else delete disclosures.current[id]; },
+  });
 
   return (
-    <div className="admin-shell" data-testid="admin-page">
-      <main className="admin-page">
+    <div className={`admin-shell ${styles.workspace}`} data-testid="admin-page">
+      <div className="admin-page">
         {Object.entries(telemetryErrors).map(([source, error]) => (
           <RequestError key={source} error={error} fallback={`${source} telemetry could not be refreshed. Try again.`} />
         ))}
         <RequestError key={actionError?.at} error={actionError?.detail} fallback="The action could not be completed. Review service status and try again." />
-        <header className="admin-page-header">
-          <h1 className="admin-page-title">Operator</h1>
-          <p className="admin-page-subtitle">
-            Live status and controls for IB Gateway and the radon-* stack.
-            Reliability signals are instantaneous and freshness based.
-          </p>
-        </header>
-
-        <SystemStatusBar
-          units={units}
-          health={health}
-          updatedSecsAgo={updatedSecsAgo}
-          stalled={stalled}
-          loading={reliabilityLoading}
-        />
-
-        <ReliabilityStrip
-          units={units}
-          edge={edge}
-          health={health}
-          edgeReachable={edgeReachable}
-          history={reliability}
-          loading={reliabilityLoading}
-        />
-
-        <SloStrip slo={slo} />
-
-        <HostMetricsStrip metrics={hostMetrics} />
-
-        <div className="admin-grid">
-          <div className="admin-ib-row">
-            <IbGatewayCard health={health} loading={healthLoading} error={healthError} />
-            <Ib2faControls
-              health={health}
-              onForcePush={forcePush}
-              onResetBackoff={resetBackoff}
-              onRestartStack={restartStack}
-              gatewayUnit={units.find((u) => u.unit === "radon-ib-gateway.service") ?? null}
-              servicesSupported={services?.supported ?? false}
-              hostRole={services?.host_role ?? health?.host_role}
-              onStopGateway={stopGateway}
-              onStartGateway={startGateway}
-              // Stopping the gateway cascade-stops radon-api — the very service
-              // serving /admin/services + /health — so both polls fail. When the
-              // API is unreachable, the last-known unit row reads stale "active";
-              // treat that as a stopped gateway so the power control flips to
-              // "Start Gateway" instead of latching "running" forever.
-              apiUnreachable={servicesError != null && healthError != null}
-            />
+        <header className={styles.pageHeader}>
+          <div>
+            <h1 className={styles.pageTitle}>Operator</h1>
+            <p className={styles.pageMeta}>Current observations and recovery controls</p>
           </div>
-          <TradingKillSwitch />
-          <ServiceControlPanel
-            services={services}
-            loading={servicesLoading}
-            error={servicesError}
-            onAction={runServiceAction}
-            flashTarget={flashTarget}
-          />
-          <WriterFreshnessTable
-            rows={serviceHealthRows}
-            reachable={edgeReachable}
-            loading={edgeFirstLoading}
-          />
-          <RestartLog entries={log} />
-          <DemoUsersTable />
+          <div className={styles.headerActions}><TradingKillSwitch compact /></div>
+        </header>
+        <div className={styles.summary} data-testid="admin-status-summary">
+          <span className={styles.summaryTitle}>{checking ? "Checking sources" : conditions.length ? `${conditions.length} need attention` : "No action needed"}</span>
+          <span className={styles.summaryDescription}>Broker, service and writer observations are checked independently.</span>
+          <button type="button" className="admin-btn admin-btn-ghost" onClick={refreshStatus}>Refresh status</button>
         </div>
-      </main>
+
+        <div className={styles.split}>
+          <div>
+            <AdminAttentionQueue conditions={conditions} loading={checking} now={nowTick} onReview={review} primaryActionRef={setPrimaryActionContainer} />
+            <button type="button" className={styles.inspectButton} onClick={() => inspect("services")}>View all services and writers <span aria-hidden>→</span></button>
+            <details {...disclosureProps("session")} open className={`${styles.disclosure} ${styles.history}`}>
+              <summary className={styles.disclosureSummary}>Recent actions <span>This session</span></summary>
+              <div className={styles.disclosureBody}><RestartLog entries={log} /></div>
+            </details>
+          </div>
+          <aside className={styles.rail}>
+            <AdminSystemOverview health={health} services={services} edge={edge} sources={sources} now={nowTick} />
+            <nav className={styles.inspect} aria-label="Operator diagnostics">
+              <h2 className={styles.inspectHeading}>Inspect</h2>
+              {[["gateway", "Broker connection"], ["services", "Services & writers"], ["reliability", "Reliability · 7 days"], ["host", "Host resources · 1 hour"], ["access", "Access administration"]].map(([id, label]) => (
+                <button key={id} type="button" className={styles.inspectButton} onClick={() => inspect(id)}>{label}<span aria-hidden>→</span></button>
+              ))}
+            </nav>
+          </aside>
+        </div>
+
+        <div className={styles.secondaryGrid}>
+          <details {...disclosureProps("gateway")}>
+            <summary className={styles.disclosureSummary}>Broker connection & recovery</summary>
+            <div className={`${styles.disclosureBody} admin-ib-row`}>
+              <IbGatewayCard health={health} loading={healthLoading} error={healthError} />
+              <Ib2faControls
+                health={health}
+                onForcePush={forcePush}
+                onResetBackoff={resetBackoff}
+                onRestartStack={restartStack}
+                gatewayUnit={units.find((u) => u.unit === "radon-ib-gateway.service") ?? null}
+                servicesSupported={services?.supported ?? false}
+                hostRole={services?.host_role ?? health?.host_role}
+                onStopGateway={stopGateway}
+                onStartGateway={startGateway}
+                apiUnreachable={servicesError != null && healthError != null}
+                primaryActionContainer={primaryActionContainer}
+                primaryObservationCurrent={isAdminObservationCurrent(sources.health, nowTick) && isAdminObservationCurrent(sources.services, nowTick)}
+                onInspect={() => inspect("gateway")}
+              />
+            </div>
+          </details>
+          <details {...disclosureProps("services")}>
+            <summary className={styles.disclosureSummary}>Services & writers</summary>
+            <div className={styles.disclosureBody}>
+              <ServiceControlPanel services={services} loading={servicesLoading} error={servicesError} onAction={runServiceAction} flashTarget={flashTarget} />
+              <details {...disclosureProps("writers")}>
+                <summary className={styles.disclosureSummary}>Writer freshness</summary>
+                <div className={styles.disclosureBody}><WriterFreshnessTable rows={serviceHealthRows} reachable={edgeReachable} loading={edgeFirstLoading} /></div>
+              </details>
+            </div>
+          </details>
+          <details {...disclosureProps("reliability")}>
+            <summary className={styles.disclosureSummary}>Reliability & objectives <span>7 days</span></summary>
+            <div className={styles.disclosureBody}>
+              <ReliabilityStrip units={units} edge={edge} health={health} edgeReachable={edgeReachable} history={reliability} loading={reliabilityLoading} />
+              <SloStrip slo={slo} />
+            </div>
+          </details>
+          <details {...disclosureProps("host")}>
+            <summary className={styles.disclosureSummary}>Host resources <span>1 hour</span></summary>
+            <div className={styles.disclosureBody}><HostMetricsStrip metrics={hostMetrics} /></div>
+          </details>
+          <details {...disclosureProps("access")}>
+            <summary className={styles.disclosureSummary}>Access administration</summary>
+            <div className={styles.disclosureBody}><DemoUsersTable /></div>
+          </details>
+        </div>
+      </div>
     </div>
   );
 }

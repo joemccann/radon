@@ -139,6 +139,9 @@ test.describe("admin panel", () => {
     );
 
     await page.goto("/admin");
+    await page.getByTestId("admin-disclosure-gateway").locator(":scope > summary").click();
+    await page.getByTestId("admin-disclosure-services").locator(":scope > summary").click();
+    await page.getByTestId("admin-disclosure-writers").locator(":scope > summary").click();
 
     await expect(page.getByTestId("admin-page")).toBeVisible();
     await expect(page.getByTestId("ib-auth-state")).toContainText("Authenticated");
@@ -167,6 +170,9 @@ test.describe("admin panel", () => {
     );
 
     await page.goto("/admin");
+    await page.getByTestId("admin-disclosure-gateway").locator(":scope > summary").click();
+    await page.getByTestId("admin-disclosure-services").locator(":scope > summary").click();
+    await page.getByTestId("admin-disclosure-writers").locator(":scope > summary").click();
 
     const serviceRows = page.locator("[data-testid^='service-row-']");
     await expect(serviceRows).toHaveCount(3);
@@ -206,6 +212,9 @@ test.describe("admin panel", () => {
     });
 
     await page.goto("/admin");
+    await page.getByTestId("admin-disclosure-gateway").locator(":scope > summary").click();
+    await page.getByTestId("admin-disclosure-services").locator(":scope > summary").click();
+    await page.getByTestId("admin-disclosure-writers").locator(":scope > summary").click();
     await expect(page.getByTestId("force-2fa-button")).toBeVisible();
 
     // First click: opens confirmation, does NOT fire the POST.
@@ -231,6 +240,9 @@ test.describe("admin panel", () => {
     );
 
     await page.goto("/admin");
+    await page.getByTestId("admin-disclosure-gateway").locator(":scope > summary").click();
+    await page.getByTestId("admin-disclosure-services").locator(":scope > summary").click();
+    await page.getByTestId("admin-disclosure-writers").locator(":scope > summary").click();
 
     // Open the destructive Stop dialog for the gateway unit (gated by type-to-confirm).
     await page.getByTestId("gateway-power-button").click();
@@ -259,6 +271,9 @@ test.describe("admin panel", () => {
     );
 
     await page.goto("/admin");
+    await page.getByTestId("admin-disclosure-gateway").locator(":scope > summary").click();
+    await page.getByTestId("admin-disclosure-services").locator(":scope > summary").click();
+    await page.getByTestId("admin-disclosure-writers").locator(":scope > summary").click();
 
     const button = page.getByTestId("force-2fa-button");
     await expect(button).toBeDisabled();
