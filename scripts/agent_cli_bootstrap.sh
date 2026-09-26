@@ -126,17 +126,18 @@ EOF
   log "wrote $home/config.toml ($key -> $model)"
 }
 
-# Vercel fx drives the documentation loop's `fx:nvidia` rung. fx reads only
+# Vercel fx drives the `fx:nvidia` and `fx:cerebras` rungs. fx reads only
 # $HOME/.fx/settings.json (no home override), and the operator uses the same
-# file interactively, so this MERGES the nvidia provider and model in and
+# file interactively, so this MERGES one provider and its model in and
 # leaves every other setting alone. The key is referenced by name; its value
 # stays in $ROOT/env and reaches fx only through the wrapper's environment.
 write_fx_settings() {
-  local base_url="$1" model="$2"
+  local provider="$1" base_url="$2" env_key="$3" model="$4"
   local dir="$HOME/.fx"
   mkdir -p "$dir"
   chmod 0700 "$dir"
-  RADON_FX_SETTINGS="$dir/settings.json" RADON_FX_BASE_URL="$base_url" \
+  RADON_FX_SETTINGS="$dir/settings.json" RADON_FX_PROVIDER="$provider" \
+    RADON_FX_BASE_URL="$base_url" RADON_FX_ENV_KEY="$env_key" \
     RADON_FX_MODEL="$model" python3 -c '
 import json, os
 
@@ -148,12 +149,13 @@ try:
         settings = {}
 except (OSError, ValueError):
     settings = {}
-settings.setdefault("providers", {})["nvidia"] = {
+provider = os.environ["RADON_FX_PROVIDER"]
+settings.setdefault("providers", {})[provider] = {
     "protocol": "openai-chat-completions",
     "base_url": os.environ["RADON_FX_BASE_URL"],
-    "auth": {"type": "bearer", "env": "NVIDIA_API_KEY"},
+    "auth": {"type": "bearer", "env": os.environ["RADON_FX_ENV_KEY"]},
 }
-settings.setdefault("models", {})["nvidia"] = os.environ["RADON_FX_MODEL"]
+settings.setdefault("models", {})[provider] = os.environ["RADON_FX_MODEL"]
 tmp = path + ".new"
 with open(tmp, "w", encoding="utf-8") as fh:
     json.dump(settings, fh, indent=2)
@@ -161,7 +163,7 @@ with open(tmp, "w", encoding="utf-8") as fh:
 os.chmod(tmp, 0o600)
 os.replace(tmp, path)
 '
-  log "wrote $dir/settings.json (nvidia -> $model)"
+  log "wrote $dir/settings.json ($provider -> $model)"
 }
 
 # One env file, mode 0600, read by the wrappers before they launch a rung.
@@ -228,7 +230,8 @@ provision() {
 
   write_grok_home nvidia   "$nv_url" NVIDIA_API_KEY   "$NVIDIA_MODEL_KEY"   "$nv"
   write_grok_home cerebras "$cb_url" CEREBRAS_API_KEY "$CEREBRAS_MODEL_KEY" "$cb"
-  write_fx_settings "$nv_url" "$nv"
+  write_fx_settings nvidia   "$nv_url" NVIDIA_API_KEY   "$nv"
+  write_fx_settings cerebras "$cb_url" CEREBRAS_API_KEY "$cb"
 }
 
 report() {
@@ -256,7 +259,7 @@ report() {
       log "$p  MISSING  no API key"; missing=1
     fi
   done
-  # fx: the documentation loop's only rung. Installed by its own installer.
+  # fx: the fx:nvidia and fx:cerebras rungs. Installed by its own installer.
   if [[ -x "${RADON_WEEKEND_FX_BIN:-$HOME/.local/bin/fx}" && -r "$HOME/.fx/settings.json" ]]; then
     log "fx        OK   $HOME/.fx/settings.json"
   else

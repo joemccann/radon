@@ -235,13 +235,15 @@ def _run(
 # scripts/agent_cli_bootstrap.sh resolves the live id behind it.
 # 2026-09-26: the documentation loop runs ONE rung, `fx:nvidia` -- Vercel fx
 # driving NVIDIA NIM directly, no grok host and no codex/grok/cerebras fallback.
-# The other three keep the codex-first order. One table, read by every ladder
-# test.
+# The other three run the operator's order (2026-09-26): fx on NVIDIA, grok,
+# codex, fx on Cerebras. One table, read by every ladder test. A capped or
+# rejected entry may name a provider (every rung it owns) or a `provider:model`
+# rung, which is how the two fx rungs are told apart.
 FALLBACK_PROVIDER_ORDER = {
-    "ci-performance": ["codex", "grok", "nvidia", "cerebras"],
+    "ci-performance": ["fx", "grok", "codex", "fx"],
     "documentation": ["fx"],
-    "reliability": ["codex", "grok", "nvidia", "cerebras"],
-    "testing": ["codex", "grok", "nvidia", "cerebras"],
+    "reliability": ["fx", "grok", "codex", "fx"],
+    "testing": ["fx", "grok", "codex", "fx"],
 }
 
 
@@ -264,10 +266,10 @@ def _launch_of(tmp_path, loop, provider, phase="audit", **kw):
 
 
 FALLBACK_LADDER = [
-    "codex",
+    "fx:nvidia",
     "grok",
-    "nvidia:nvidia-latest",
-    "cerebras:cerebras-latest",
+    "codex",
+    "fx:cerebras",
 ]
 CLAUDE_LADDER = ["claude:" + m for m in LADDER]
 
@@ -385,11 +387,11 @@ def _provider_stub(
         "  shift\n"
         "done\n"
         'printf "%s\\t%s\\t%s\\n" "$prov" "$model" "$args" >> "' + str(attempts) + '"\n'
-        'if grep -qxF -- "$prov" "' + str(rejected) + '"; then\n'
+        'if grep -qxF -e "$prov" -e "$prov:$model" "' + str(rejected) + '"; then\n'
         '  cat "' + str(reject_out) + '"\n'
         "  exit 1\n"
         "fi\n"
-        'if grep -qxF -- "$prov" "' + str(capped) + '"; then\n'
+        'if grep -qxF -e "$prov" -e "$prov:$model" "' + str(capped) + '"; then\n'
         '  case "$prov" in\n'
         '    claude) echo "' + (cap_line or CLAUDE_SESSION_CAP_LINE) + '" ;;\n'
         '    codex) echo "' + (cap_line or CODEX_CAP_LINE) + '" ;;\n'
