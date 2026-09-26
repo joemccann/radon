@@ -91,6 +91,7 @@ class JournalSyncHandler(BaseHandler):
     # current day's executions, so without grace a fill between the last
     # in-hours cycle and the close is never journaled (15:59:52 / 15:58:04
     # incidents). Consumed by the daemon gate via market_state().
+    # Evening assignment prints belong to the execution sweep, not this grace.
     post_close_grace_minutes = 15
     service_name = "journal-sync"  # structural heartbeat via BaseHandler.run()
 
