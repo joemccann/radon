@@ -136,7 +136,7 @@ export default function ServiceControlPanel({
         {supported
           ? "Current service status. Commands may briefly interrupt data and order services."
           : hostRole === "app"
-            ? "Service commands are unavailable on this host. Current status remains visible."
+            ? "This host cannot start, stop, or restart services. Current status remains visible."
             : "Read-only: this browser is not on the Hetzner VPS, so controls are disabled."}
       </p>
 
