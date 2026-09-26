@@ -8552,6 +8552,20 @@ Review: tests-first head3c8bb97d, CI36188923632 reproduced the new cleanup regre
 Dependency graph: T1 -> T2 -> T3.
 
 Review: Seven on-demand writers were correctly registered but admin freshness ignored categories. Admin now labels them On demand and scores scheduled writers only. Errors and last-run ages remain visible. Retired exit-orders rows are excluded without mutating storage. Unknown services remain scheduled. knowledge-ingest disabled timer and liquidcompute timeout investigations handed to parent for separate operational repair. PR707 head61a4973e:31 applicable checks green,7 expected skips; Playwright200+1 passed. Desktop/mobile screenshots inspected. Pushover200/status1 request8474b0e5-ecba-4d16-8817-4a430c742f03. No local suites run. Completion notes kept local to preserve the verified PR head; parent coordinates merge/deploy.
+
+
+## Operator A implementation — 2026-09-25
+- [x] T1 Attention model and regression cases. depends_on: []
+- [x] T2 Action queue, overview, responsive styles and reusable controls. depends_on: [T1]
+- [x] T3 Integrate current polling, timestamps and diagnostic navigation. depends_on: [T1, T2]
+- [x] T4 Component/E2E coverage and independent review. depends_on: [T2, T3]
+- [ ] T5 PR, exact-head all-applicable CI green and accepted Pushover. depends_on: [T4]
+Dependency graph: T1 → T2 → T3 → T4 → T5, T1 → T3, T2 → T4. Independent model, presentation, and test preparation run in parallel; integration waits for their contracts. Isolated worktree protects unrelated local SLM changes. No local suites; GitHub CI only. No merge/deploy authorization.
+
+Review: Selected A implemented using existing Clear tokens and mutation owners. Independent model, UI, and coverage reviews completed. TypeScript static check passed; desktop/mobile browser fixture inspected, including 320px dark layout, primary action within first viewport, no horizontal overflow, and nested confirmation focus return. Local test suites were not run; regression execution and screenshots are assigned to GitHub CI.
+
+CI review: e3fc14a0 passed all eight Vitest shards and the coverage ratchet. The curation guard requires a dated review for modified held-out admin-panel.spec.ts; recorded its static locator review and separate browser fixture coverage without claiming that held-out suite ran.
+
 ## 2026-09-25 Durable SLM review and readable images
 
 Dependency graph: T1 -> T2 -> T3 -> T4.

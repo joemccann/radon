@@ -127,7 +127,8 @@ export default function ConfirmDialog({
     [exiting, pending, onCancel],
   );
 
-  if (!mounted || !portalTarget) return null;
+  // Mount on the opening render so shared focus effects see the panel.
+  if ((!mounted && !open) || !portalTarget) return null;
 
   const typedOk = !requireTyped || typed.trim() === requireTyped;
   const confirmDisabled = pending || !typedOk || exiting;

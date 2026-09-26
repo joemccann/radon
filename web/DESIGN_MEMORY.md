@@ -59,3 +59,17 @@ The production work is specified in [DESIGN_PLAN.md](DESIGN_PLAN.md). The subseq
 User selected B from two density prototypes and authorized implementation. On desktop at 1024px and wider, every instrument view owns the viewport below a 48px global navigation bar. Position, News, Ratings, Seasonality, Company, 13F, Filings and Commands share a 56px toolbar and independently scrolling full-width content. Book & trade retains its quote strip, depth/tape and order ticket beside the same persistent sidebar. A 208px instrument sidebar (192px at narrower desktop widths) holds the underlying quote, instrument views and held position. Feed/freshness, futures and sync remain in a header disclosure. A 56px toolbar, 52px column header and 26px underlying anchor leave room for 40px quote rows. The existing two independently scrolling strike panes and 384px staged ticket remain intact. Widths below 1024px retain the existing cockpit/mobile layout.
 
 Rendered fixture measurements: 14 complete strike rows at 1440×800; 12 at 1280×720; first quotes at y=156px; no document horizontal overflow. Financial quote labels and stale behavior use the shared telemetry model. CI coverage lives in `e2e/chain-first-layout.spec.ts`, `e2e/instrument-workspace-layout.spec.ts` and `tests/chain-first-sidebar.test.tsx`.
+
+
+## Operator workspace: A / Action queue (2026-09-25)
+
+User selected **A** from the three desktop/mobile operator concepts: “A”. The accepted reference is [Operator A](../docs/design/operator-action-queue/index.html), with [research](../docs/design/operator-action-queue/research.md) and [review evidence](../docs/design/operator-action-queue/review.md). Implementation is specified in [OPERATOR_DESIGN_PLAN.md](OPERATOR_DESIGN_PLAN.md).
+
+- Lead with actionable conditions ordered by supported operational impact. Keep the most relevant available recovery action beside its condition.
+- Desktop: main action queue and session activity, with a compact system overview and diagnostic links in the right rail.
+- Mobile: one column; priority condition and recovery action precede secondary diagnostics. Trading controls remain available at the top.
+- Preserve Clear typography, semantic tokens, light/dark themes, and existing navigation. Status words and observation age accompany color.
+- Distinguish placement permission, broker authentication, process liveness, writer freshness, and missing observations. Never infer overall health from process liveness alone.
+- Show historical reliability, host resources, full inventories, and access administration through progressive disclosure. Keep every existing capability reachable.
+- Reuse existing confirmations, typed kill-switch confirmation, push leases, backoff, host capabilities and broker safety checks. A request being accepted does not establish recovery.
+- Prototype values and outcomes are synthetic. This selection establishes the presentation direction, not new operational data, live remediation, or deployment.

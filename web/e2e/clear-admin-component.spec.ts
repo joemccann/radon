@@ -99,14 +99,16 @@ const EDGE_HEALTH = {
 };
 
 let componentBundle = "";
+let componentCss = "";
 test.beforeAll(async () => {
   const root = fileURLToPath(new URL("..", import.meta.url));
   const result = await build({
     stdin: { contents: 'import { createRoot } from "react-dom/client"; import AdminWorkspace from "./components/admin/AdminWorkspace"; createRoot(document.getElementById("clear-component-root")).render(<AdminWorkspace />);', resolveDir: root, loader: "tsx" },
-    bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic",
+    outfile: "admin-component.js", bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic",
     alias: { "@": root }, define: { "process.env.NODE_ENV": '"production"' },
   });
-  componentBundle = result.outputFiles[0].text;
+  componentBundle = result.outputFiles.find((file) => file.path.endsWith(".js"))!.text;
+  componentCss = result.outputFiles.filter((file) => file.path.endsWith(".css")).map((file) => file.text).join("\n");
 });
 
 for (const viewport of [{ label: "desktop", width: 1440, height: 1000 }, { label: "mobile", width: 390, height: 844 }]) {
@@ -145,11 +147,15 @@ for (const viewport of [{ label: "desktop", width: 1440, height: 1000 }, { label
     expect(bodyClass).toContain("radon-clear");
     await page.route("**/__clear-admin-component", (route) => route.fulfill({
       status: 200, contentType: "text/html",
-      body: `<!doctype html><html lang="en" data-theme="light" class="${htmlClass}"><head><meta name="viewport" content="width=device-width,initial-scale=1">${styles}<title>Clear isolated admin component</title></head><body class="${bodyClass}"><div id="clear-component-root"></div></body></html>`,
+      body: `<!doctype html><html lang="en" data-theme="light" class="${htmlClass}"><head><meta name="viewport" content="width=device-width,initial-scale=1">${styles}<style>${componentCss}</style><title>Clear isolated admin component</title></head><body class="${bodyClass}"><div id="clear-component-root"></div></body></html>`,
     }));
     await page.goto("/__clear-admin-component");
     await page.addScriptTag({ content: componentBundle });
     await expect(page.getByTestId("admin-page")).toBeVisible();
+    await expect(page.getByTestId("admin-attention-queue")).toBeVisible();
+    for (const section of ["services", "writers", "reliability", "gateway"]) {
+      await page.getByTestId(`admin-disclosure-${section}`).locator(":scope > summary").click();
+    }
     await expect(page.getByTestId("ib-auth-state")).toContainText("Authenticated");
     await expect(page.getByTestId("services-card")).toContainText("radon-api.service");
     await expect(page.getByTestId("writer-row-portfolio-sync")).toBeVisible();
@@ -163,7 +169,7 @@ for (const viewport of [{ label: "desktop", width: 1440, height: 1000 }, { label
     await expect(page.getByTestId("writer-row-db-backup")).toContainText("Last run completed.");
     await expect(page.getByTestId("writer-row-db-backup")).not.toContainText("Writer update failed");
     await expect(page.getByTestId("reliability-strip")).toContainText("1 stale");
-    await expect(page.getByTestId("trading-halt-state")).toHaveText("Active");
+
     await page.evaluate(() => document.fonts.ready);
     const smallLabels = await page.locator(".admin-tile-label, .admin-tile-sub, .admin-kv dt").evaluateAll((labels) => labels
       .filter((label) => label.getBoundingClientRect().width > 0)

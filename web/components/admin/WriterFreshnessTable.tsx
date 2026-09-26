@@ -116,11 +116,11 @@ function WriterRow({ row }: { row: ServiceHealthRow }) {
     : null;
   return (
     <tr data-testid={`writer-row-${row.service}`}>
-      <td className="admin-unit-name">{row.service}</td>
-      <td>
+      <td data-label="Writer" className="admin-unit-name">{row.service}</td>
+      <td data-label="State">
         <span className={`admin-pill admin-pill-${stateTone}`}>{row.state}</span>
       </td>
-      <td>
+      <td data-label="Freshness">
         <div className="admin-verdict-cell">
           <span
             className={`admin-status-dot admin-status-dot-${onDemand ? "neutral" : stale ? "warning" : "positive"}`}
@@ -129,8 +129,8 @@ function WriterRow({ row }: { row: ServiceHealthRow }) {
           {onDemand ? "On demand" : stale ? "STALE" : "fresh"}
         </div>
       </td>
-      <td className="admin-unit-activity">{relAge(lastRun)}</td>
-      <td className="admin-unit-desc" title={detail ?? undefined}>
+      <td data-label="Last run" className="admin-unit-activity">{relAge(lastRun)}</td>
+      <td data-label="Detail" className="admin-unit-desc" title={detail ?? undefined}>
         {detail ?? "--"}
       </td>
     </tr>

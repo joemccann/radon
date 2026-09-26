@@ -1,0 +1,42 @@
+{
+  "scope": "page",
+  "isRedesign": true,
+  "targetPath": "web/components/admin/AdminWorkspace.tsx",
+  "targetName": "Operator",
+  "painPoints": [
+    "Too much information",
+    "Recovery actions buried",
+    "Weak priority hierarchy"
+  ],
+  "variants": [
+    "A Action queue",
+    "B Service workspace",
+    "C Guided recovery"
+  ],
+  "brand": {
+    "source": "web/DESIGN_MEMORY.md and web/app/globals.css",
+    "direction": "Clear",
+    "themes": [
+      "dark",
+      "light"
+    ]
+  },
+  "constraints": {
+    "prototypeOnly": true,
+    "noLiveRequests": true,
+    "syntheticData": true,
+    "noLocalSuites": true
+  },
+  "sharedScenario": {
+    "broker": "Authentication required",
+    "dispersion": "Scheduled run overdue",
+    "units": "6/6 running",
+    "edge": "452 ms latest probe"
+  },
+  "framework": "standalone HTML for isolated review",
+  "productionFramework": "Next.js App Router",
+  "packageManager": "npm",
+  "selectedVariant": "A",
+  "selection": "User chose A for desktop and mobile",
+  "status": "Selected reference; production implementation pending"
+}

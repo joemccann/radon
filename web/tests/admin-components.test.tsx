@@ -830,3 +830,32 @@ describe("<WriterFreshnessTable />", () => {
     ]);
   });
 });
+
+
+describe("<Ib2faControls /> retained primary observation", () => {
+  it.each(["stopped", "awaiting_2fa"] as const)("offers inspection only for retained %s state", (state) => {
+    const onInspect = vi.fn();
+    const onStartGateway = vi.fn();
+    const onForcePush = vi.fn();
+    const { container: primaryTarget } = render(<div />);
+    render(<Ib2faControls
+      health={buildHealth({ auth_state: state === "stopped" ? "unreachable" : "awaiting_2fa", port_listening: state !== "stopped" })}
+      gatewayUnit={{ unit: "radon-ib-gateway.service", load_state: "loaded", active_state: state === "stopped" ? "inactive" : "active", sub_state: state === "stopped" ? "dead" : "running", description: "Gateway", can_control: true }}
+      servicesSupported
+      primaryActionContainer={primaryTarget}
+      primaryObservationCurrent={false}
+      onInspect={onInspect}
+      onForcePush={onForcePush}
+      onStartGateway={onStartGateway}
+      onResetBackoff={vi.fn()}
+      onRestartStack={vi.fn()}
+    />);
+    const primary = screen.getByTestId("admin-primary-recovery");
+    expect(primary.textContent).toBe("Review gateway");
+    fireEvent.click(primary);
+    expect(onInspect).toHaveBeenCalledTimes(1);
+    expect(onStartGateway).not.toHaveBeenCalled();
+    expect(onForcePush).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("admin-confirm")).toBeNull();
+  });
+});

@@ -6,7 +6,7 @@
  * cascade enumeration).
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import React from "react";
 
 afterEach(cleanup);
@@ -278,5 +278,36 @@ describe("ConfirmDialog — type-to-confirm + cascade", () => {
     fireEvent.change(screen.getByTestId("admin-confirm-typed-input"), { target: { value: "x" } });
     fireEvent.click(screen.getByTestId("admin-confirm-action"));
     expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe("ConfirmDialog opening focus lifecycle", () => {
+  it("focuses and traps a dialog opened after its initial closed render, then restores the trigger", async () => {
+    const onConfirm = vi.fn();
+    function Harness() {
+      const [open, setOpen] = React.useState(false);
+      return <>
+        <button type="button" onClick={() => setOpen(true)}>Open recovery</button>
+        <ConfirmDialog open={open} title="Restart API?" body="Review the service restart." confirmLabel="Restart" destructive onConfirm={onConfirm} onCancel={() => setOpen(false)} />
+      </>;
+    }
+    render(<Harness />);
+    const trigger = screen.getByRole("button", { name: "Open recovery" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const cancel = screen.getByRole("button", { name: "Cancel", exact: true });
+    const confirm = screen.getByTestId("admin-confirm-action");
+    expect(document.activeElement).toBe(cancel);
+    // jsdom has no layout; mark these actual dialog controls as visible for the shared focus trap.
+    for (const control of [cancel, confirm]) Object.defineProperty(control, "offsetParent", { configurable: true, get: () => document.body });
+    fireEvent.keyDown(cancel, { key: "Tab" });
+    expect(document.activeElement).toBe(confirm);
+    fireEvent.keyDown(confirm, { key: "Tab" });
+    expect(document.activeElement).toBe(cancel);
+    fireEvent.keyDown(cancel, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByTestId("admin-confirm")).toBeNull());
+    expect(document.activeElement).toBe(trigger);
+    expect(onConfirm).not.toHaveBeenCalled();
   });
 });

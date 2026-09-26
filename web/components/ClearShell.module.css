@@ -190,3 +190,8 @@
   .workspace:has(:global(.instrument-workspace)) .brand { margin-right: 0; }
   .workspace:has(:global(.instrument-workspace)) .header :global(.search-input-wrapper) { width: 150px; }
 }
+
+/* The operator content owns its title and source freshness. Keep the shared
+   navigation/search row without a duplicate portfolio telemetry heading. */
+.workspace[data-workspace-section="admin"] .header :global(.telemetry-rail),
+.workspace[data-workspace-section="admin"] .header :global(.sync-controls) { display: none; }
