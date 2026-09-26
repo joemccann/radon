@@ -9,6 +9,7 @@ After that date an empty remote is an error heartbeat. Never a token fetch.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import signal
 import subprocess
@@ -503,6 +504,38 @@ def install_sigterm_unwind() -> None:
         pass
 
 
+# Budget state tracking for consecutive budget exhaustion visibility (REL-257/R-678)
+# Threshold: after this many consecutive budget-exhausted runs with progress, write degraded
+BUDGET_DEGRADED_THRESHOLD = 2
+_BUDGET_STATE_FILENAME = ".flex_budget_state.json"
+
+
+def _budget_state_path(inbox: Path) -> Path:
+    """Path to the persistent budget state file."""
+    return inbox / _BUDGET_STATE_FILENAME
+
+
+def read_budget_state(inbox: Path) -> Dict[str, int]:
+    """Read consecutive budget run count from state file."""
+    path = _budget_state_path(inbox)
+    if not path.is_file():
+        return {"consecutive_budget_runs": 0}
+    try:
+        data = json.loads(path.read_text())
+        return {"consecutive_budget_runs": int(data.get("consecutive_budget_runs", 0))}
+    except (json.JSONDecodeError, ValueError, OSError):
+        return {"consecutive_budget_runs": 0}
+
+
+def write_budget_state(inbox: Path, state: Dict[str, int]) -> None:
+    """Atomically write budget state to file."""
+    path = _budget_state_path(inbox)
+    # Atomic write: temp file + rename
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state))
+    tmp.rename(path)
+
+
 def _heartbeat(state: str, error: Optional[Any] = None) -> None:
     try:
         from db import writer
@@ -910,15 +943,38 @@ def _run(
         # Newest-first means a budget stop after progress still applied today;
         # the 08:30 timer finishes the deferred tail. No progress + budget is
         # the silent-timeout shape that paged P1 on 2026-09-15.
+        # REL-257: Track consecutive budget-exhausted runs with progress.
+        # After BUDGET_DEGRADED_THRESHOLD consecutive runs, write degraded.
+        budget_state = read_budget_state(inbox)
+        consecutive = budget_state.get("consecutive_budget_runs", 0)
+        
         note = {
             "message": f"wall-clock budget spent; deferred {deferred} file(s)",
             "class": "budget",
+            "consecutive_budget_runs": consecutive + 1,
         }
+        
         if ingested:
-            _heartbeat("ok", note)
+            consecutive += 1
+            if consecutive >= BUDGET_DEGRADED_THRESHOLD:
+                # Repeated budget exhaustion with progress -> degraded (visible, pages)
+                note["class"] = "budget_degraded"
+                _heartbeat("degraded", note)
+            else:
+                # First budget run with progress -> ok with budget class (distinguishable)
+                _heartbeat("ok", note)
+            write_budget_state(inbox, {"consecutive_budget_runs": consecutive})
             return 0
-        _heartbeat("error", note)
-        return 1
+        else:
+            # No progress + budget -> error (existing behavior)
+            _heartbeat("error", note)
+            write_budget_state(inbox, {"consecutive_budget_runs": 0})
+            return 1
+    else:
+        # Complete run (no budget spent) -> clear consecutive counter
+        budget_state = read_budget_state(inbox)
+        if budget_state.get("consecutive_budget_runs", 0) > 0:
+            write_budget_state(inbox, {"consecutive_budget_runs": 0})
     stale_keys = sorted(
         key for key, seen in newest_by_key.items() if delivery_is_stale(seen, now)
     )
