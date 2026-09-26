@@ -21,7 +21,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from knowledge.embed import EMBEDDING_DIM_V2, embed_passages, embedding_text  # noqa: E402
-from knowledge.store import backfill_embedding_v2  # noqa: E402
+from knowledge.store import backfill_embedding_v2_batch  # noqa: E402
 
 
 def backfill_missing_v2(
@@ -45,9 +45,11 @@ def backfill_missing_v2(
         _progress(progress, result)
         return result
     updated = 0
+    processed = 0
     last_id = 0
-    while updated < target:
-        take = min(batch_size, target - updated)
+    row_errors: list[dict] = []
+    while processed < target:
+        take = min(batch_size, target - processed)
         rows = db.execute(
             "SELECT id, title, summary, content FROM knowledge "
             "WHERE embedding_v2 IS NULL AND id > ? ORDER BY id LIMIT ?",
@@ -58,21 +60,21 @@ def backfill_missing_v2(
         vectors = embed([embedding_text(title, summary, content) for _id, title, summary, content in rows])
         if len(vectors) != len(rows):
             raise RuntimeError("embedding batch length does not match the row batch")
-        try:
-            db.execute("BEGIN IMMEDIATE")
-            for (row_id, _title, _summary, _content), vector in zip(rows, vectors):
-                if len(vector) != EMBEDDING_DIM_V2:
-                    raise RuntimeError(f"expected {EMBEDDING_DIM_V2} dims, got {len(vector)}")
-                backfill_embedding_v2(db, row_id, vector)
-                last_id = row_id
+        pairs = []
+        for (row_id, _title, _summary, _content), vector in zip(rows, vectors):
+            if len(vector) != EMBEDDING_DIM_V2:
+                raise RuntimeError(f"expected {EMBEDDING_DIM_V2} dims, got {len(vector)}")
+            pairs.append((row_id, vector))
+        # Advance past a row that cannot fit so one oversized vector cannot
+        # stall the id cursor. The other rows in the batch still commit.
+        batch_errors = backfill_embedding_v2_batch(db, pairs)
+        failed = {item["id"] for item in batch_errors}
+        row_errors.extend(batch_errors)
+        for row_id, _vector in pairs:
+            last_id = row_id
+            processed += 1
+            if row_id not in failed:
                 updated += 1
-            db.commit()
-        except BaseException:
-            try:
-                db.rollback()
-            except Exception:
-                pass
-            raise
         if updated < target and min_interval > 0:
             if sleep is not None:
                 sleep(min_interval)
@@ -80,6 +82,8 @@ def backfill_missing_v2(
                 time.sleep(min_interval)
     remaining = int(db.execute("SELECT COUNT(*) FROM knowledge WHERE embedding_v2 IS NULL").fetchone()[0])
     result = {"candidates": target, "updated": updated, "remaining": remaining, "dry_run": False}
+    if row_errors:
+        result["row_errors"] = row_errors
     _progress(progress, result)
     return result
 

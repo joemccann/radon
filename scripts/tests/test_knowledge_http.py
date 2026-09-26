@@ -544,14 +544,23 @@ def test_atomic_store_rejects_incomplete_success_receipts(atomic_server, monkeyp
     assert not server.db.in_transaction
 
 
-@pytest.mark.parametrize('bound', ['MAX_TRANSACTION_STEPS', 'MAX_REQUEST_BYTES'])
-def test_oversized_atomic_document_fails_before_network_without_splitting(atomic_server, monkeypatch, bound):
+def test_oversized_step_count_fails_before_network(atomic_server, monkeypatch):
     from knowledge.store import upsert_documents
     server, _ = atomic_server
-    monkeypatch.setattr(http_db, bound, 3)
+    monkeypatch.setattr(http_db, 'MAX_TRANSACTION_STEPS', 3)
     with pytest.raises(http_db.HranaHttpError, match='bounded'):
         upsert_documents(http_db.Connection(), [_raw_doc()])
     assert server.calls == []
+
+
+def test_oversized_request_is_a_row_error_before_network(atomic_server, monkeypatch):
+    from knowledge.store import upsert_documents
+    server, _ = atomic_server
+    monkeypatch.setattr(http_db, 'MAX_REQUEST_BYTES', 3)
+    result = upsert_documents(http_db.Connection(), [_raw_doc()])
+    assert server.calls == []
+    assert result['inserted'] == 0
+    assert result['row_errors'][0]['doc_key'] == 'one'
 
 
 def test_atomic_outer_sql_error_preserves_retry_classification(atomic_server, monkeypatch):
