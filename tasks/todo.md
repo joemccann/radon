@@ -1,3 +1,9 @@
+# Task: DS-2026-09-25-06 Caddy media group (2026-09-26)
+
+- [x] T1 depends_on: [] Failing tests: caddy not in radon, radon-media grant, env 0640.
+- [x] T2 depends_on: [T1] setup-vps + deploy-root-helper migrate group/ACLs; wipe groupdel.
+- [ ] T3 depends_on: [T2] Focused pytest, non-draft PR, CI green. No merge, no deploy.
+
 # Task: Bound knowledge vector writes (2026-09-26)
 
 - [x] T1 depends_on: [] Failing tests: oversized doc ingests, size error splits, one vector send, backfill byte bound, source errors.
