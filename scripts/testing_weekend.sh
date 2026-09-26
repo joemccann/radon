@@ -457,10 +457,11 @@ _round_scan() {
 #     first seen declared (a stale or sloppy entry, e.g. `pgrep -f pytest`,
 #     names older processes);
 #   - it works in the clone and has no controlling terminal;
-#   - it is not a Remote Control or Claude Code daemon process.
+#   - neither it nor any ancestor is a Remote Control or Claude Code daemon
+#     process.
 # One pid per line; a line with anything else on it is ignored.
 _ingest_declarations() {
-  local clone="$1" observed="$2" since="${3:-}" pidfile="${RADON_WEEKEND_DETACHED_PIDFILE:-}" pid rest now age tty cmd
+  local clone="$1" observed="$2" since="${3:-}" pidfile="${RADON_WEEKEND_DETACHED_PIDFILE:-}" pid rest now age tty cmd q hops
   [[ -n "$pidfile" && -f "$pidfile" && ! -L "$pidfile" ]] || return 0
   case "$since" in ''|*[!0-9]*) return 0 ;; esac
   now="$(date +%s)"
@@ -475,10 +476,17 @@ _ingest_declarations() {
     tty="$(/bin/ps -o tty= -p "$pid" 2>/dev/null || true)"
     tty="${tty//[[:space:]]/}"
     [[ "$tty" == '??' || "$tty" == '?' ]] || continue
-    cmd="$(/bin/ps -o command= -p "$pid" 2>/dev/null || true)"
-    case "$cmd" in
-      ''|*ClaudeCode.app*|*--bg-pty-host*|*bg-spare*|*radon-rc.sh*|*--remote-control*) continue ;;
-    esac
+    q="$pid"; hops=0
+    while [[ -n "$q" && "$q" != 0 && "$q" != 1 ]] && (( hops < 128 )); do
+      cmd="$(/bin/ps -o command= -p "$q" 2>/dev/null || true)"
+      case "$cmd" in
+        *ClaudeCode.app*|*--bg-pty-host*|*bg-spare*|*radon-rc.sh*|*--remote-control*) break ;;
+      esac
+      q="$(/bin/ps -o ppid= -p "$q" 2>/dev/null || true)"
+      q="${q//[[:space:]]/}"
+      hops=$(( hops + 1 ))
+    done
+    [[ -z "$q" || "$q" == 0 || "$q" == 1 ]] || continue
     _pid_cwd_in "$pid" "$clone" || continue
     printf '%s\t%s\n' "$pid" "$(_proc_lstart "$pid")" >> "$observed"
   done < "$pidfile"
