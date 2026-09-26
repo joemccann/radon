@@ -577,9 +577,21 @@ class WatchdogState:
     # First epoch at which a functional failure was observed inside a scheduled
     # restart window. Suppression expires after SCHEDULED_RESTART_GRACE_SECS.
     quiet_degraded_since: float = 0.0
+    # IBKR login-throttle episode (see _handle_login_throttled): when the
+    # latest failed login was seen, the throttle line that marked it, how many
+    # fresh logins the watchdog has spent on it, and whether the operator has
+    # been told.
+    login_throttle_since: float = 0.0
+    login_throttle_line: str = ""
+    login_throttle_retries: int = 0
+    login_throttle_alerted: bool = False
 
     def to_dict(self) -> dict:
         return {
+            "login_throttle_since": self.login_throttle_since,
+            "login_throttle_line": self.login_throttle_line,
+            "login_throttle_retries": self.login_throttle_retries,
+            "login_throttle_alerted": self.login_throttle_alerted,
             "degraded_count": self.degraded_count,
             "last_restart_at": self.last_restart_at,
             "last_outcome": self.last_outcome,
@@ -610,6 +622,10 @@ class WatchdogState:
                 data.get("authenticated_recovery_count", 0)
             ),
             quiet_degraded_since=float(data.get("quiet_degraded_since", 0.0)),
+            login_throttle_since=float(data.get("login_throttle_since", 0.0)),
+            login_throttle_line=str(data.get("login_throttle_line", "")),
+            login_throttle_retries=int(data.get("login_throttle_retries", 0)),
+            login_throttle_alerted=bool(data.get("login_throttle_alerted", False)),
         )
 
 
@@ -1138,6 +1154,189 @@ def _handle_primary_sensor_down(
     return state
 
 
+# --- IBKR login throttle ------------------------------------------------------
+
+# 2026-09-26: IBKR answered every Gateway login with "Too many failed login
+# attempts. Please wait N seconds" BEFORE the 2FA step, so no IBKR Mobile push
+# was ever sent. IBC then sits on that dialog forever (it never retries), with
+# the API port open and no handshake, which the independent probe reads as
+# `wedged`. The api-hang ladder restarted it three times, and every restart was
+# one more login attempt keeping IBKR's failed-login counter armed. A throttled
+# login is not a JVM hang: the only cure is a quiet period with no attempts,
+# then ONE fresh login whose push the operator approves.
+LOGIN_THROTTLE_COOLDOWN_BASE_SECS = 900
+LOGIN_THROTTLE_COOLDOWN_CAP_SECS = 3600
+LOGIN_LOG_TIMEOUT_SECS = 6.0
+_LOGIN_ATTEMPT_MARK = "IBC: Login attempt:"
+_LOGIN_THROTTLE_MARK = "IBC: Too many failed login attempts"
+
+
+@dataclass(frozen=True)
+class LoginEvents:
+    throttled: bool
+    throttle_line: str = ""
+
+
+def parse_login_events(log: Optional[str]) -> LoginEvents:
+    """Is the Gateway's latest login attempt one IBKR throttled?
+
+    True only when a throttle line follows the last `Login attempt:` line: a
+    later attempt with no throttle after it got past the throttle."""
+    last_attempt = last_throttle = -1
+    throttle_line = ""
+    for i, line in enumerate((log or "").splitlines()):
+        if _LOGIN_ATTEMPT_MARK in line:
+            last_attempt = i
+        elif _LOGIN_THROTTLE_MARK in line:
+            last_throttle = i
+            throttle_line = line.strip()
+    if last_throttle > last_attempt:
+        return LoginEvents(throttled=True, throttle_line=throttle_line)
+    return LoginEvents(throttled=False)
+
+
+def read_gateway_login_log() -> Optional[str]:
+    """The Gateway container's last 5 minutes of log via the root docker shim
+    (the same verb JVM forensics uses), or None when it cannot be read."""
+    try:
+        import jvm_forensics
+
+        if not os.path.exists(jvm_forensics.DOCKER_GW):
+            return None  # not the broker host (dev, CI): nothing to read
+        out = subprocess.run(
+            jvm_forensics._gw("logs"),
+            capture_output=True,
+            text=True,
+            timeout=LOGIN_LOG_TIMEOUT_SECS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError, ImportError) as exc:
+        LOG.warning("gateway login log unreadable: %s", exc)
+        return None
+    if out.returncode != 0:
+        LOG.warning("gateway login log unreadable: rc=%s", out.returncode)
+        return None
+    return (out.stdout or "") + (out.stderr or "")
+
+
+def _clear_login_throttle(state: "WatchdogState") -> None:
+    state.login_throttle_since = 0.0
+    state.login_throttle_line = ""
+    state.login_throttle_retries = 0
+    state.login_throttle_alerted = False
+
+
+def _login_throttle_cooldown(retries: int) -> float:
+    return min(
+        LOGIN_THROTTLE_COOLDOWN_BASE_SECS * (2 ** retries),
+        LOGIN_THROTTLE_COOLDOWN_CAP_SECS,
+    )
+
+
+def _handle_login_throttled(
+    *,
+    state: "WatchdogState",
+    state_path: Path,
+    restart_unit: str,
+    dry_run: bool,
+    clock: callable,
+    off_hours: bool,
+    events: LoginEvents,
+) -> "WatchdogState":
+    """Hold every restart while IBKR throttles logins, then spend one.
+
+    Never touches the api-hang counter or cap: this is a different failure,
+    and a restart here is a login attempt, not a JVM recycle."""
+    now = clock()
+    if events.throttled and events.throttle_line != state.login_throttle_line:
+        # A new throttled attempt (ours or an operator's) restarts the quiet
+        # period: IBKR counts every one of them.
+        state.login_throttle_line = events.throttle_line
+        state.login_throttle_since = now
+    state.degraded_count = 0
+    state.quiet_degraded_since = 0.0
+
+    cooldown = _login_throttle_cooldown(state.login_throttle_retries)
+    retry_at = state.login_throttle_since + cooldown
+    retry_at_utc = datetime.fromtimestamp(retry_at, timezone.utc).strftime("%H:%M UTC")
+    if not state.login_throttle_alerted:
+        LOG.error(
+            "IBKR is throttling Gateway logins (%s) — no 2FA push can be sent; "
+            "holding restarts until %s",
+            state.login_throttle_line,
+            retry_at_utc,
+        )
+
+    def _hold(outcome: str, detail: str) -> "WatchdogState":
+        state.last_outcome = outcome
+        state.login_throttle_alerted = True
+        save_state(state_path, state)
+        record_service_health(
+            "error",
+            error_message=(
+                "IBKR rejected the Gateway login: too many failed login attempts, "
+                "so no 2FA push was sent. Do not restart the Gateway: every "
+                f"restart is another failed login. {detail}"
+            ),
+        )
+        return state
+
+    if off_hours:
+        return _hold(
+            "login_throttled:off_hours",
+            "Outside market-data hours the watchdog will not retry; restart once "
+            "yourself, 15+ minutes after the last attempt, and approve the push.",
+        )
+    if now < retry_at:
+        return _hold(
+            f"login_throttled:wait:{int(retry_at - now)}s",
+            f"The watchdog will try one fresh login at {retry_at_utc}; approve "
+            "that push.",
+        )
+
+    with _timed("lock"):
+        existing_lock = _check_2fa_push_lock_bounded(now=now)
+    if existing_lock is not None:
+        return _hold(
+            f"login_throttled:push_lock:{existing_lock.holder}",
+            f"A login from {existing_lock.holder} is already in flight; approve "
+            "its push.",
+        )
+    with _timed("lock"):
+        acquired, lock_now = _acquire_2fa_push_lock_bounded(
+            now=now, reason="retry after IBKR login throttle"
+        )
+    if not acquired:
+        return _hold(
+            "login_throttled:push_lock_race",
+            "Another login took the push lock; approve its push.",
+        )
+
+    LOG.warning(
+        "IBKR login throttle quiet for %ds — one fresh login via %s",
+        int(now - state.login_throttle_since),
+        restart_unit,
+    )
+    with _timed("restart"):
+        ok = trigger_restart(restart_unit, dry_run=dry_run)
+    state.login_throttle_retries += 1
+    state.login_throttle_since = now
+    state.last_restart_at = now
+    state.pending_pool_reconnect = True
+    state.last_outcome = f"login_throttled:retry_{state.login_throttle_retries}:{'ok' if ok else 'fail'}"
+    save_state(state_path, state)
+    record_service_health(
+        "error",
+        error_message=(
+            "Gateway login retried after an IBKR login throttle: approve the IBKR "
+            "Mobile push now."
+            if ok
+            else f"FAILED to restart {restart_unit} for the login-throttle retry"
+        ),
+    )
+    return state
+
+
 # --- Api-hang ladder ----------------------------------------------------------
 
 # Bounded remediation for the api-hang restart (2026-07-05 storm): the ladder
@@ -1486,6 +1685,45 @@ def _run_cycle_steps(
     # structured `probe_timed_out` response cannot mask failure for new clients.
     with _timed("direct_probe"):
         functional_verdict = probe_gateway_direct()
+
+    # Any sign the login got through ends a login-throttle episode.
+    if state.login_throttle_since > 0 and (
+        functional_verdict == GATEWAY_ALIVE
+        or health.auth_state in ("authenticated", "awaiting_2fa")
+    ):
+        LOG.info("IBKR login throttle cleared (auth=%s)", health.auth_state)
+        _clear_login_throttle(state)
+
+    # An unauthenticated Gateway whose API never answers may simply be parked
+    # on IBKR's login-throttle dialog. That is not a JVM hang, and restarting
+    # it is another failed login (2026-09-26). An authenticated wedge is the
+    # real api hang and never consults the log.
+    if functional_verdict in (GATEWAY_DEAD, GATEWAY_WEDGED) and health.auth_state not in (
+        "authenticated",
+        "awaiting_2fa",
+    ):
+        with _timed("login_log"):
+            login_log = read_gateway_login_log()
+        events = parse_login_events(login_log)
+        proceeding = (
+            login_log is not None
+            and not events.throttled
+            and _LOGIN_ATTEMPT_MARK in login_log
+        )
+        if proceeding and state.login_throttle_since > 0:
+            LOG.info("a Gateway login got past the IBKR throttle; episode over")
+            _clear_login_throttle(state)
+        if events.throttled or state.login_throttle_since > 0:
+            state.authenticated_recovery_count = 0
+            return _handle_login_throttled(
+                state=state,
+                state_path=state_path,
+                restart_unit=restart_unit,
+                dry_run=dry_run,
+                clock=clock,
+                off_hours=stuck_2fa_quiet,
+                events=events,
+            )
 
     if health.auth_state == "awaiting_2fa" and functional_verdict in (
         GATEWAY_DEAD,
