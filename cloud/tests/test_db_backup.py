@@ -319,3 +319,13 @@ class TestRel185LocalRetentionValve:
     def test_non_dump_files_never_counted_or_pruned(self):
         entries = self._aged_entries(5) + [("stray.txt", 0.0)] * 40
         assert db_backup.select_hard_valve(entries) == []
+
+
+def test_vector_indexes_are_not_portable_dump_objects():
+    """libsql_vector_idx is recreated by migrations, including embedding_v2."""
+    kept = "CREATE INDEX idx_journal_ticker ON journal(ticker)"
+    v1 = "CREATE INDEX idx_knowledge_embedding ON knowledge(libsql_vector_idx(embedding))"
+    v2 = "CREATE INDEX idx_knowledge_embedding_v2 ON knowledge(libsql_vector_idx(embedding_v2))"
+    assert db_backup._is_portable_object(kept) is True
+    assert db_backup._is_portable_object(v1) is False
+    assert db_backup._is_portable_object(v2) is False

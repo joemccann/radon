@@ -47,7 +47,8 @@ class KnowledgeDoc:
     title: str | None = None
     summary: str | None = None  # distilled searchable form (retrieval key only)
     metadata: dict | None = None
-    embedding: list[float] | None = None  # 384d; None until the embed step runs
+    embedding: list[float] | None = None  # 384d bge; None until the embed step runs
+    embedding_v2: list[float] | None = None  # 2048d nemotron; dual-write default, disable with RADON_KB_EMBED_DUAL_WRITE=0
     created_at: str | None = None  # UTC ISO; store fills with now() when None
     last_activity_at: str | None = None  # UTC ISO; store fills with now() when None
 

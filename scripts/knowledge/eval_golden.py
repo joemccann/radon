@@ -103,14 +103,28 @@ def main(argv: Sequence[str] | None = None) -> None:
         default=DEFAULT_GOLDEN_PATH,
         help="path to golden_set.json (default: the shipped set)",
     )
+    parser.add_argument(
+        "--backend",
+        choices=("local", "nvidia"),
+        default=None,
+        help="query embedding backend; nvidia uses embedding_v2 and falls back to local bge",
+    )
     args = parser.parse_args(argv)
+    if args.backend:
+        import os
+        os.environ["RADON_KB_EMBED_BACKEND"] = args.backend
     golden = json.loads(args.golden_path.read_text(encoding="utf-8"))
     if isinstance(golden, dict) and golden.get("draft"):
         print(
             "warning: golden set is marked draft:true — curate before trusting the gate",
             file=sys.stderr,
         )
-    summary = run_golden(_production_db(), golden, query_embedder=_load_query_embedder())
+    db = _production_db()
+    summary = run_golden(db, golden, query_embedder=_load_query_embedder(db))
+    from knowledge.embed import embed_backend
+    summary["backend"] = embed_backend()
+    summary["hit_at_k"] = summary["overall_hit_at_5"]
+    print(f"hit@{DEFAULT_LIMIT}={summary['hit_at_k']:.3f} backend={summary['backend']}", file=sys.stderr)
     _print_table(summary, file=sys.stderr)
     json.dump(summary, sys.stdout, indent=2)
     print()
@@ -132,19 +146,40 @@ def _production_db():
     return get_db()
 
 
-def _load_query_embedder() -> QueryEmbedder | None:
-    try:
-        from knowledge.embed import get_embedder
+def _load_query_embedder(db=None) -> QueryEmbedder | None:
+    from knowledge.embed import embed_backend, get_embedder, resolve_query_vector, v2_coverage_ready
 
-        embedder = get_embedder()
+    local = None
+    try:
+        local = get_embedder()
     except Exception as exc:  # missing module/deps/model — FTS-only is a valid mode
         print(f"embedder unavailable ({exc}); running FTS-only", file=sys.stderr)
+    if local is None and embed_backend() != "nvidia":
         return None
-    embed_call = embedder if callable(embedder) else getattr(embedder, "embed", None)
-    if embed_call is None:
-        print("embedder has no callable interface; running FTS-only", file=sys.stderr)
-        return None
-    return lambda text: _as_vector(embed_call([text]))
+
+    def _v2_ready() -> bool:
+        if db is None:
+            return True
+        try:
+            return v2_coverage_ready(db)
+        except Exception as exc:
+            print(f"embedding_v2 coverage check failed ({exc}); local bge", file=sys.stderr)
+            return False
+
+    def embed_one(text: str):
+        vector = resolve_query_vector(
+            text,
+            local_embedder=local,
+            coverage_ready=_v2_ready if db is not None else None,
+            on_nvidia_error=lambda exc: print(
+                f"nvidia embed failed ({exc}); falling back", file=sys.stderr
+            ),
+        )
+        if not vector:
+            raise RuntimeError("embedding unavailable")
+        return vector
+
+    return embed_one
 
 
 def _as_vector(value) -> list[float]:

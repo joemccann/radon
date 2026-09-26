@@ -183,8 +183,9 @@ def ground(copy_fields, page_text, cited_pages, known=None):
     """copy_fields: strings (title, body, captions). known: facts established by identify
     ({'date': ISO, 'date_page': n}); the copy may restate them without citing their page.
     Returns {'passed': bool, 'tokens': [...]}."""
+    from research.nemotron_parse import grounding_text
     known = known or {}
-    pages = {p: normalize(page_text.get(p, '')) for p in cited_pages}
+    pages = {p: normalize(grounding_text(page_text.get(p, ''))) for p in cited_pages}
     page_numbers = {p: _page_numbers(text) for p, text in pages.items()}
     page_lower = {p: text.lower() for p, text in pages.items()}
     page_dates = {p: {_date_key(m.group(0)) for m in _DATE_PARSE.finditer(text)} for p, text in pages.items()}

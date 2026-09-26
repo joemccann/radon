@@ -173,7 +173,8 @@ def identify(page_text, metadata, folder_date, pdf_created=None):
     """page_text: {page_number: markdown}. Returns an Identity with sourced facts."""
     folder = publisher_folder(metadata.get('path_lower', ''))
     name = metadata.get('name') or metadata.get('path_lower', '').split('/')[-1]
-    page_one = page_text.get(1, '') if page_text else ''
+    from research.nemotron_parse import grounding_text
+    page_one = grounding_text(page_text.get(1, '')) if page_text else ''
     if folder and folder not in TOPIC_FOLDERS:
         publisher, source = PUBLISHER_DISPLAY.get(folder, folder.title()), 'folder'
     else:
@@ -184,7 +185,7 @@ def identify(page_text, metadata, folder_date, pdf_created=None):
     found = None
     numbers = sorted(page_text) if page_text else []
     for number in ([numbers[0]] if numbers else []) + ([numbers[-1]] if len(numbers) > 1 else []):
-        for iso, quote in _dates_in(page_text[number]):
+        for iso, quote in _dates_in(grounding_text(page_text[number])):
             if limit and date.fromisoformat(iso) > limit:
                 continue
             found = (iso, 'text', number, quote)

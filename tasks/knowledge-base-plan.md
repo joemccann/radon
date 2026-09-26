@@ -66,7 +66,7 @@ So the plan is a **thin slice**: the shared-embeddings-table + hybrid-retrieval 
  │             │ HTML→text    │             │              │  watchdog)   │
  └──────┬──────┴──────┬───────┴──────┬──────┴──────┬───────┴──────┬──────┘
         │  distill (Cerebras API, normalized summary + question form)
-        │  embed (local ONNX, bge-small-en-v1.5, 384d — data never leaves)
+        │  embed (nvidia nemotron-3-embed-1b, 2048d; bge-384 fallback)
         ▼
  ┌──────────────────────────────────────────────────────────────────┐
  │ Turso `knowledge` table                                          │
@@ -92,7 +92,7 @@ So the plan is a **thin slice**: the shared-embeddings-table + hybrid-retrieval 
 
 Key decisions:
 - **Storage: Turso, not Postgres/pgvector.** libsql supports `F32_BLOB`, `vector_distance_cos`, `vector_top_k`, and FTS5; SQL evaluates server-side over the HTTP pipeline, so the pinned `libsql_experimental` client version doesn't gate vector functions. Zero new stateful services. At 384d × ~10k rows the table adds ~15–30 MB. (Phase 0 includes a verification spike on the current Turso plan; risk noted below.)
-- **Embeddings: local ONNX (fastembed / bge-small-en-v1.5, 384d).** Privacy is the driver — journal rows carry real positions and P&L; they should not transit a new third-party embeddings API. CPU inference on laptop/VPS is trivial at this corpus size, marginal cost zero. Env-var escape hatch to a hosted model if quality disappoints.
+- **Embeddings: NVIDIA nemotron-3-embed-1b (2048d), with local bge-384 fallback.** On 2026-09-25 Joe McCann reversed the earlier local-only decision. All knowledge-base text, including journal, positions, and P&L, is sent to NVIDIA's hosted embeddings API (`RADON_KB_EMBED_BACKEND` defaults to `nvidia`). Local fastembed / bge-small-en-v1.5 remains the automatic fallback on NVIDIA errors and until `embedding_v2` has no NULL rows. Ingest dual-writes both vectors by default (`RADON_KB_EMBED_DUAL_WRITE=0` turns the 2048 write off). The previous rule was: journal rows carry real positions and P&L and should not transit a third-party embeddings API.
 - **Distillation: Cerebras API.** `CEREBRAS_API_KEY` is already provisioned in `web/.env` and currently unused. OpenAI-compatible chat endpoint via `requests` — no SDK. Fits the "cheaper models for grunt work" rule. Only summaries/question-forms are distilled; raw text is FTS-searchable immediately (their pattern).
 - **Recency decay is per-source:** newsfeed and incidents decay; docs, options-structures taxonomy, and methodology do not ("Slack answers expire" — but a defined-risk structure definition doesn't).
 - **Demo isolation:** knowledge endpoints ride the existing operator allowlist / auth perimeter; the demo instance (TEST_MODE) gets no KB — reports contain real account figures.
@@ -103,7 +103,7 @@ Key decisions:
 2. **Near-zero new infrastructure.** Same Turso DB, same FastAPI, same systemd-timer + service_health patterns, same auth perimeter, existing assistant loop. The only genuinely new runtime piece is a ~50 MB ONNX embedding model.
 3. **Directly feeds the evaluate pipeline.** A `prior_context` step (prior evals of the ticker, similar structures, relevant lessons) grounds Milestone 4 edge decisions in Radon's own history.
 4. **Claude Code sessions get institutional memory.** MCP primitives mean repo sessions can ask "what fixed the relay farm-down?" instead of re-deriving it — compounding value for every future session.
-5. **Cheap.** Distillation of the full backlog is a few dollars of Cerebras tokens once; incremental cost is cents/day. Embeddings are local.
+5. **Cheap.** Distillation of the full backlog is a few dollars of Cerebras tokens once; incremental cost is cents/day. Query embeddings are hosted NVIDIA with a local fallback.
 6. **Incremental by construction.** `content_hash` idempotency gives CocoIndex-style re-embed-only-what-changed without the framework.
 
 ## Cons / risks
@@ -134,7 +134,7 @@ Key decisions:
 **Phase 1 — Connectors + backlog ingest (~1–2 days)** — ✅ SHIPPED `f3dee350` + hardening `359f8120`/`1fcd25af`/`ac883c84`
 - Connector contract: `fetch() -> Iterable[KnowledgeDoc]` per source; plugin modules under `scripts/knowledge/sources/`.
 - Sources in value order: journal (Turso rows + trade_log rationale), eval reports (`reports/*.html` → text via stdlib parser), docs + `tasks/lessons.md`, newsfeed posts, service_health incident digests.
-- Distillation via Cerebras (`scripts/knowledge/distill.py`), local embeddings (`embed.py`).
+- Distillation via Cerebras (`scripts/knowledge/distill.py`). Embeddings (`embed.py`) are NVIDIA 2048d by default as of 2026-09-25, with local bge-384 fallback.
 - One-shot backfill script, then `radon-knowledge.timer` (30–60 min) + service_health heartbeat (`knowledge-ingest`, 24h staleness window).
 - Golden-set eval harness (`scripts/knowledge/eval_golden.py`, 20–30 real questions, hit@5 report).
 - *Outcome:* hourly timer at `:20` UTC, installed on the VPS via one-time

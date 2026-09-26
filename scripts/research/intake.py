@@ -9,6 +9,7 @@ Provider outages propagate as ModelError so the queue parks the item.
 from __future__ import annotations
 import copy
 import hashlib
+import inspect
 import json
 import re
 import time
@@ -83,6 +84,16 @@ def validate_candidate(value, page_count, catalogue):
     if not isinstance(tags, list) or not 1 <= len(tags) <= 10 or any(not isinstance(t, str) or not TAG_RE.fullmatch(t) for t in tags):
         raise EvidenceError('Invalid tags')
     return value
+
+
+def _catalogue_call(fn, pdf, pages, output, extras):
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if "extras" in params:
+        return fn(pdf, pages, output, extras=extras)
+    return fn(pdf, pages, output)
 
 
 def verdict_passed(result):
@@ -186,7 +197,8 @@ class Pipeline:
             return self._finish(out, review, 'dropped', reason_code='DUPLICATE_OF_PUBLISHED')
         self._checkpoint('identified')
 
-        figure_list = self.figure_catalogue(pdf, list(range(1, count + 1)), out / 'figures')
+        extras = [candidate for page in (evidence.get('pages') or []) for candidate in (page.get('chart_candidates') or [])]
+        figure_list = _catalogue_call(self.figure_catalogue, pdf, list(range(1, count + 1)), out / 'figures', extras)
         catalogue = {f['id']: f for f in figure_list}
         review['figures'] = [{k: v for k, v in f.items() if k != 'image_file'} | {'image_file': f['image_file']} for f in catalogue.values()]
         review['figure_gaps'] = list(getattr(figure_list, 'skipped_pages', []) or [])

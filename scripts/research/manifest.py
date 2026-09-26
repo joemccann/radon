@@ -31,7 +31,8 @@ def build_manifest(evidence: dict, directory: Path) -> dict:
             raise ValueError('Extracted pages cannot be symlinks')
         if path.stat().st_size > MAX_TEXT_CHARS * 4:
             raise ValueError('Extracted text exceeds manifest budget')
-        text = path.read_text(encoding='utf-8')
+        from research.nemotron_parse import grounding_text
+        text = grounding_text(path.read_text(encoding='utf-8'))
         total += len(text)
         if total > MAX_TEXT_CHARS:
             raise ValueError('Extracted text exceeds manifest budget')
