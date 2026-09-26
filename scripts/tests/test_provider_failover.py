@@ -38,15 +38,37 @@ CODEX_CAP_LINE = _h.CODEX_CAP_LINE
 CLAUDE_SESSION_CAP_LINE = _h.CLAUDE_SESSION_CAP_LINE
 REJECTION_400_LINE = _h.REJECTION_400_LINE
 REJECTION_QUOTED_OUTPUT = _h.REJECTION_QUOTED_OUTPUT
+NVIDIA_INTERNAL_ERROR_OUTPUT = _h.NVIDIA_INTERNAL_ERROR_OUTPUT
+BROKEN_RUNG_QUOTED_OUTPUT = _h.BROKEN_RUNG_QUOTED_OUTPUT
 
 
 def providers(tried):
     return [t.split(":", 1)[0] for t in tried]
 
 
+def ladder_walk(tried):
+    """The RUNGS the ladder advanced through, not the launch count.
+
+    A phase with continuation rounds (reliability's audit relaunches an
+    INCOMPLETE round inside its cap) re-fires the SAME rung once per round.
+    That is not the ladder walking, so collapse consecutive repeats before
+    asserting on ladder movement.
+    """
+    walk = []
+    for p in providers(tried):
+        if not walk or walk[-1] != p:
+            walk.append(p)
+    return walk
+
+
 def rungs(tried):
-    """`fx:nvidia` and `fx:cerebras` stay distinct; a bare rung is its name."""
-    return [t.rstrip(":") for t in tried]
+    """ladder_walk by rung: `fx:nvidia` and `fx:cerebras` stay distinct, and a
+    bare rung is its name."""
+    walk = []
+    for r in (t.rstrip(":") for t in tried):
+        if not walk or walk[-1] != r:
+            walk.append(r)
+    return walk
 
 
 def order(loop):
@@ -203,6 +225,149 @@ class TestAPermanentRejectionCostsOneRung:
             reject_providers=("codex",),
         )
         assert providers(tried) == ["codex", "codex", "codex", "grok"], tried
+
+
+# documentation runs a single `fx:nvidia` rung, so it has no nvidia rung to
+# crash and nothing below one to fall back to. Its own case is below. The shared
+# ladder no longer names the grok-hosted nvidia rung by default (2026-09-26),
+# so these cases pin an operator ladder that does.
+NVIDIA_LADDER_LOOPS = FALLBACK_LOOPS
+NVIDIA_OVERRIDE = "codex nvidia:nvidia-latest grok"
+
+
+@pytest.mark.parametrize("loop", NVIDIA_LADDER_LOOPS)
+class TestARungThatCrashesInsideItselfCostsOneRung:
+    """2026-09-26: the first night nvidia led documentation's ladder (#728),
+    every phase died on `Error: Internal error: {"message": "serialization
+    error: ..."}` -- the rung answered, billed tokens, then crashed in its own
+    result serializer. Not a cap, not a 400, not a network blip, and its
+    verdict is multi-line, so no classifier saw it: audit, remediate and
+    deliver each exited 1 with nothing done and the ladder untouched."""
+
+    def test_a_crashing_rung_advances_and_the_night_completes(self, tmp_path, loop):
+        proc, tried, _calls, _argv = _run_multi(
+            tmp_path, loop, "audit",
+            provider_ladder=NVIDIA_OVERRIDE,
+            capped_providers=("codex",),
+            reject_providers=("nvidia",),
+            reject_output=NVIDIA_INTERNAL_ERROR_OUTPUT,
+        )
+        # The capped rung before nvidia, nvidia itself, and the first healthy
+        # rung after it: that rung answers, so the ladder stops there.
+        assert providers(tried) == ["codex", "nvidia", "grok"], (
+            tried, proc.stdout, proc.stderr,
+        )
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+
+    def test_a_broken_lead_rung_is_survivable(self, tmp_path, loop):
+        """The lead rung is the one that has no predecessor to fall back on."""
+        _proc, tried, _calls, _argv = _run_multi(
+            tmp_path, loop, "audit",
+            provider_ladder="nvidia:nvidia-latest codex grok",
+            reject_providers=("nvidia",),
+            reject_output=NVIDIA_INTERNAL_ERROR_OUTPUT,
+        )
+        assert providers(tried) == ["nvidia", "codex"], tried
+
+    def test_a_crash_is_not_a_provider_wide_cap(self, tmp_path, loop):
+        """Another model behind the same key may serialize fine, so a crash
+        costs ONE rung where a shared account cap retires them all."""
+        _proc, tried, _calls, _argv = _run_multi(
+            tmp_path, loop, "audit",
+            provider_ladder="nvidia:a nvidia:b grok",
+            reject_providers=("nvidia",),
+            reject_output=NVIDIA_INTERNAL_ERROR_OUTPUT,
+        )
+        assert providers(tried) == ["nvidia", "nvidia", "grok"], tried
+
+    def test_prose_quoting_the_crash_is_not_a_crash(self, tmp_path, loop):
+        """These loops audit their own wrappers and echo the trigger text."""
+        _proc, tried, _calls, _argv = _run_multi(
+            tmp_path, loop, "audit",
+            provider_ladder=NVIDIA_OVERRIDE,
+            capped_providers=("codex",),
+            reject_providers=("nvidia",),
+            reject_output=BROKEN_RUNG_QUOTED_OUTPUT,
+        )
+        assert ladder_walk(tried) == ["codex", "nvidia"], (
+            f"a Traceback quoting the crash walked the ladder: {tried}"
+        )
+
+    def test_a_crash_does_not_consume_a_transient_network_attempt(self, tmp_path, loop):
+        _proc, tried, _calls, _argv = _run_multi(
+            tmp_path, loop, "audit",
+            provider_ladder="nvidia:a nvidia:b nvidia:c grok",
+            reject_providers=("nvidia",),
+            reject_output=NVIDIA_INTERNAL_ERROR_OUTPUT,
+        )
+        assert providers(tried) == ["nvidia"] * 3 + ["grok"], tried
+
+
+class TestASingleRungLadderReportsACrashHonestly:
+    """documentation runs one rung (`fx:nvidia`), so there is nothing to walk to.
+    Before the classifier a crash inside the CLI was a bare exit 1 with no cause;
+    it must now be the same honest exhausted-ladder INCOMPLETE the wrapper posts
+    for a cap, so the operator learns the rung died rather than reading silence."""
+
+    def test_the_only_rung_crashing_is_an_honest_incomplete(self, tmp_path):
+        proc, tried, calls, _argv = _run_multi(
+            tmp_path, "documentation", "audit",
+            reject_providers=("fx",),
+            reject_output=NVIDIA_INTERNAL_ERROR_OUTPUT,
+        )
+        assert providers(tried) == ["fx"], tried
+        assert proc.returncode == 75, (proc.returncode, proc.stdout, proc.stderr)
+        assert "all agent providers exhausted" in calls, calls
+
+
+class TestAnIncompleteAuditGetsContinuationRounds:
+    """2026-09-26: reliability's audit self-declared INCOMPLETE 2 minutes into
+    a 2-hour cap (101k tokens, serial review of a 54-commit delta) and the
+    phase ended there -- audit ran MAX_ROUNDS=1, so 98% of its own cap and the
+    whole 20h cycle budget went unused, and the checkpoint never advanced.
+    Remediation already relaunches a continuation round on a non-zero exit;
+    audit must too, bounded by the same per-round cap and cycle deadline."""
+
+    def test_an_unclassified_audit_failure_is_relaunched(self, tmp_path):
+        proc, tried, _calls, _argv = _run_multi(
+            tmp_path, "reliability", "audit",
+            provider_ladder="codex",
+            capped_providers=("codex",),
+            cap_line="NIGHTLY PHASE INCOMPLETE: loop=reliability phase=audit",
+            cap_exit=75,
+        )
+        assert providers(tried) == ["codex"] * 3, (
+            "an INCOMPLETE audit must get continuation rounds inside its cap, "
+            f"not end the phase on the first one: {tried}\n{proc.stdout}"
+        )
+        assert proc.returncode == 75, (proc.returncode, proc.stdout, proc.stderr)
+
+    def test_a_cap_killed_audit_is_not_relaunched(self, tmp_path):
+        """A continuation round is for a RESUMABLE audit, not a cap kill. The
+        cap is the authority on an audit -- it holds no durable partial state
+        the way remediation's per-task commits do -- so a 124 round must end the
+        phase, exactly as it did before audit gained continuation rounds."""
+        proc, tried, _calls, _argv = _run_multi(
+            tmp_path, "reliability", "audit",
+            provider_ladder="codex",
+            capped_providers=("codex",),
+            cap_line="stalled with no verdict",
+            cap_exit=124,
+        )
+        assert providers(tried) == ["codex"], (tried, proc.stdout)
+
+    def test_audit_rounds_stay_bounded_by_the_operators_override(self, tmp_path):
+        """Three is a default, not a hard-coded number: an operator throttling
+        a bad night back to one round must not have to edit the wrapper."""
+        proc, tried, _calls, _argv = _run_multi(
+            tmp_path, "reliability", "audit",
+            provider_ladder="codex",
+            capped_providers=("codex",),
+            cap_line="NIGHTLY PHASE INCOMPLETE: loop=reliability phase=audit",
+            cap_exit=75,
+            env_extra={"RADON_WEEKEND_AUDIT_MAX_ROUNDS": "1"},
+        )
+        assert providers(tried) == ["codex"], (tried, proc.stdout)
 
 
 class TestTheOperatorsDecisionNoPinnedModels:

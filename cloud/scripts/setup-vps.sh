@@ -591,7 +591,7 @@ stage_from_checkout() {
 # -- Base packages ----------------------------------------------------------
 
 install_base_packages() {
-  local packages=(git curl ca-certificates gnupg software-properties-common ufw)
+  local packages=(git curl ca-certificates gnupg software-properties-common ufw acl)
   local missing=()
 
   for pkg in "${packages[@]}"; do
@@ -798,6 +798,13 @@ preflight_checks() {
     log_info "Creating radon-secrets group..."
     groupadd --system radon-secrets
   fi
+  # DS-2026-09-25-06: media.radon.run is served by caddy, which must not
+  # inherit group radon (that gid reads /etc/radon/env). radon-media is
+  # the only extra gid caddy gets.
+  if ! getent group radon-media &>/dev/null; then
+    log_info "Creating radon-media group..."
+    groupadd --system radon-media
+  fi
   if id -nG radon 2>/dev/null | grep -qw radon-secrets; then
     log_error "radon must not be a member of radon-secrets (R-619)"
     exit 1
@@ -946,8 +953,76 @@ create_etc_radon_dir() {
     return 1
   fi
   if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" != "1" ]]; then
-    chown --no-dereference radon:radon "$media"
+    if ! getent group radon-media &>/dev/null; then
+      groupadd --system radon-media
+    fi
+    chown --no-dereference radon:radon-media "$media"
+    chmod 2750 "$media"
   fi
+}
+
+# DS-2026-09-25-06: give caddy media without group radon (env is 0640 root:radon).
+# Parent /var/lib/radon stays 0750 radon:radon; radon-media gets traverse-only
+# ACL there and r-x on media/. A user ACL on caddy bridges the running
+# process so a group retarget does not 403 media.radon.run before restart.
+# Supplementary groups apply at process start: the caller restarts when
+# GRANT_CADDY_NEEDS_RESTART=1.
+grant_caddy_media_access() {
+  local parent="${RADON_MEDIA_PARENT:-/var/lib/radon}"
+  local media="${RADON_MEDIA_DIR:-${parent}/media}"
+  local env_file="${RADON_CANONICAL_ENV_FILE:-${ENV_FILE:-/etc/radon/env}}"
+  local need_restart=0
+  local groups=""
+  GRANT_CADDY_NEEDS_RESTART=0
+
+  if ! getent group radon-media >/dev/null 2>&1; then
+    groupadd --system radon-media
+  fi
+
+  if [[ -d "$media" && ! -L "$media" ]]; then
+    if command -v setfacl >/dev/null 2>&1; then
+      if id caddy >/dev/null 2>&1; then
+        setfacl -m u:caddy:--x "$parent"
+        setfacl -R -m u:caddy:r-X "$media"
+      fi
+      setfacl -m g:radon-media:--x "$parent"
+      setfacl -m g:radon-media:r-x "$media"
+      setfacl -d -m g:radon-media:r-X "$media"
+      setfacl -R -m g:radon-media:r-X "$media"
+    else
+      chmod 0711 "$parent"
+      chmod 0755 "$media"
+    fi
+    if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" != "1" ]]; then
+      chown --no-dereference radon:radon-media "$media"
+      if command -v setfacl >/dev/null 2>&1; then
+        chmod 2750 "$media"
+      fi
+    fi
+  fi
+
+  if id caddy >/dev/null 2>&1; then
+    # grep -w radon also matches radon-media (hyphen is a word boundary).
+    groups=" $(id -nG caddy 2>/dev/null) "
+    if [[ "$groups" != *" radon-media "* ]]; then
+      usermod -aG radon-media caddy
+      need_restart=1
+    fi
+    if [[ "$groups" == *" radon "* ]]; then
+      gpasswd -d caddy radon
+      need_restart=1
+    fi
+  fi
+
+  if [[ -e "$env_file" ]]; then
+    require_own_regular_file "$env_file" || return 1
+    chmod 0640 "$env_file"
+    if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" != "1" ]]; then
+      chown root:radon "$env_file"
+    fi
+  fi
+
+  GRANT_CADDY_NEEDS_RESTART="$need_restart"
 }
 
 # -- Repo cloning -----------------------------------------------------------
@@ -1078,18 +1153,16 @@ install_caddy() {
     log_success "Caddy installed"
   fi
 
-  # /var/lib/radon stays 0750 radon:radon (2FA leases live beside media/), so
-  # the caddy user needs radon group membership to traverse into media/ —
-  # without it every media.radon.run request 403s (2026-08-23 regression).
+  # Media access is group radon-media plus a parent traverse ACL.
+  # Do not add caddy to group radon: that gid reads /etc/radon/env.
   # Supplementary groups apply at process start: a fresh grant needs a
-  # restart, not a reload. Runs here (setup-only) because deploys reuse
-  # configure_caddy, which must never restart the proxy.
+  # restart, not a reload. configure_caddy must never restart the proxy.
+  grant_caddy_media_access
   if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" != "1" ]] \
-    && ! id -nG caddy 2>/dev/null | grep -qw radon; then
-    usermod -aG radon caddy
+    && [[ "${GRANT_CADDY_NEEDS_RESTART:-0}" == "1" ]]; then
     if ! "$CADDY_TIMEOUT" --signal=TERM --kill-after=2s 15s \
       "$CADDY_SYSTEMCTL" restart caddy; then
-      log_error "Caddy restart after radon group grant failed"
+      log_error "Caddy restart after radon-media group grant failed"
       return 1
     fi
   fi
