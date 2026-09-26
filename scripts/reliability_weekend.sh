@@ -2364,6 +2364,15 @@ run_phase() {
     run_round
     set -e
     [[ $RC -ne 0 && $round -lt $MAX_ROUNDS && $ALL_PROVIDERS_EXHAUSTED -eq 0 ]] || break
+    # An audit continuation round is for a RESUMABLE audit -- one that declared
+    # itself INCOMPLETE with cap left over. A cap kill is the opposite: the cap
+    # is the authority on an audit, which holds no durable partial state the way
+    # remediation's per-task commits do, so relaunching only burns the rest of
+    # the phase. Remediation still relaunches on 124 by design.
+    if [[ "$PHASE" == "audit" && $RC -eq 124 ]]; then
+      echo "[weekend] audit hit its ${CAP_SECS}s cap — not relaunching" | tee -a "$RUN_LOG"
+      break
+    fi
     # A daily job must finish inside its own day. launchd will not start a
     # second instance of a running label, so a cycle that overruns silently
     # eats the next fire and the dead-man goes quiet for a full day.
@@ -2377,8 +2386,16 @@ run_phase() {
       echo "[weekend] cycle budget cannot cover another ${CAP_SECS}s round after round $round — stopping" | tee -a "$RUN_LOG"
       break
     fi
-    report "ROUND $round $([[ $RC -eq 124 ]] && echo TIMEOUT || echo "FAILED (exit $RC)") — continuing" \
-      "backlog not finished; relaunching a continuation round (committed tasks are durable on the weekend branch)" 0
+    # Remediation reports each continuation round because its per-task commits
+    # are durable partial state the operator may want to see mid-night. An
+    # audit round has no such state, and one comment plus one page per phase is
+    # the operator-facing contract, so an audit relaunch is logged only.
+    if [[ "$PHASE" == "audit" ]]; then
+      echo "[weekend] audit round $round ended $([[ $RC -eq 124 ]] && echo TIMEOUT || echo "exit $RC") — relaunching inside the cap" | tee -a "$RUN_LOG"
+    else
+      report "ROUND $round $([[ $RC -eq 124 ]] && echo TIMEOUT || echo "FAILED (exit $RC)") — continuing" \
+        "backlog not finished; relaunching a continuation round (committed tasks are durable on the weekend branch)" 0
+    fi
     round=$((round+1))
     if ! reground_for_continuation; then
       RC=70

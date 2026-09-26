@@ -307,6 +307,20 @@ class TestAnIncompleteAuditGetsContinuationRounds:
         )
         assert proc.returncode == 75, (proc.returncode, proc.stdout, proc.stderr)
 
+    def test_a_cap_killed_audit_is_not_relaunched(self, tmp_path):
+        """A continuation round is for a RESUMABLE audit, not a cap kill. The
+        cap is the authority on an audit -- it holds no durable partial state
+        the way remediation's per-task commits do -- so a 124 round must end the
+        phase, exactly as it did before audit gained continuation rounds."""
+        proc, tried, _calls, _argv = _run_multi(
+            tmp_path, "reliability", "audit",
+            provider_ladder="codex",
+            capped_providers=("codex",),
+            cap_line="stalled with no verdict",
+            cap_exit=124,
+        )
+        assert providers(tried) == ["codex"], (tried, proc.stdout)
+
     def test_audit_rounds_stay_bounded_by_the_operators_override(self, tmp_path):
         """Three is a default, not a hard-coded number: an operator throttling
         a bad night back to one round must not have to edit the wrapper."""
