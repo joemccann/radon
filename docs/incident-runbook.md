@@ -2026,6 +2026,43 @@ Prior: 2026-09-11 20:00Z (same ~120s kill, no shed).
 
 ---
 
+## flow-refresh-connect-refused
+
+**`radon-flow-refresh.service` oneshot pages P1 `Result=exit-code` when
+the hourly fire hits a deploy listener gap and the direct fallback dies
+on Turso's connection cap.** Peak: 2026-09-25 20:00:19Z, page `c11fbc4a…`.
+
+- **Mechanism:** from 19:56:35Z to 20:01:00Z nothing accepted on `:8321`
+  (portfolio-sync `curl=7`, a deploy prestage lock from 19:55Z). The
+  20:00Z wrapper treated curl 7 as immediate direct fallback.
+  `scanner.py` and `flow_analysis.py` exited in the same second with
+  `Database connections limit exceeded, try to reduce concurrency`.
+  `discover.py` fallback still completed. `/health/lite` was back and
+  authenticated by 20:01:25Z. A Python Hrana canary from this host
+  succeeded after the gap (150 ms), so this was not a Turso wedge.
+- **Discriminating check:** unit journal `curl: (7)` then
+  `FastAPI unavailable, fallback` for scanner and flow-analysis in the
+  same second, and `logs/flow_refresh.err.log` shows the Hrana
+  connection-cap `ValueError` on both. Discover may still say
+  `fallback refresh complete`. Portfolio-sync in the same minute logs
+  `curl=7` and a later `complete (OK)`. Not `Subprocess capacity
+  exhausted` (`flow-refresh-capacity-502`). Not a 120s/180s script
+  timeout (`flow-refresh-analysis-timeout`). Deploy stop-clean is
+  `Result=signal`.
+- **Remediation (code):** retry curl 7 inside
+  `RADON_FLOW_REFRESH_CONNECT_WAIT_SECS` (default 75), charged against
+  the per-scan deadline, then fall back with the time that remains.
+  75s covers the observed ~60s gap and leaves the POST room. Three
+  scans still fit in `TimeoutStartSec=600`. A timeout or other HTTP
+  status still refuses the duplicate direct scan (BUG-013). A listener
+  that stays down still falls back.
+- **Regression:**
+  `test_run_flow_refresh_wrapper.py::test_connection_refused_then_up_retries_without_direct_fallback`,
+  `test_the_direct_fallback_runs_the_cheap_discover_scan` (connect wait 0).
+- **Code:** `scripts/run_flow_refresh.sh` (`refresh_scan`).
+
+---
+
 ## orders-sync-capacity-shed-stale
 
 **Autonomous `orders-sync` loop pages P1 `kind=stale` during RTH when
