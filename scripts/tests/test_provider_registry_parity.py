@@ -101,16 +101,17 @@ def test_begin_phase_resets_exhaustion_but_keeps_the_rung(loop):
     assert "RUNG_INDEX" not in fn, "rung carry must be preserved"
 
 
-def test_the_four_fallback_loops_lead_with_codex_and_never_name_claude():
-    for loop in ("reliability", "testing", "documentation", "ci-performance"):
+FALLBACK_PROVIDER_ORDER = _h.FALLBACK_PROVIDER_ORDER
+
+
+def test_the_four_fallback_loops_run_their_pinned_ladders_and_never_name_claude():
+    for loop, expected in FALLBACK_PROVIDER_ORDER.items():
         body = LOOPS[loop].read_text(encoding="utf-8")
         m = re.search(r'^PROVIDER_LADDER="\$\{RADON_WEEKEND_PROVIDER_LADDER:-(.+?)\}"$',
                       body, re.M)
         assert m, f"{loop}: no default provider ladder"
         rungs = m.group(1).split()
-        assert [r.split(":")[0] for r in rungs] == [
-            "codex", "grok", "nvidia", "cerebras"
-        ], (loop, rungs)
+        assert [r.split(":")[0] for r in rungs] == expected, (loop, rungs)
         assert not any(r.startswith("claude:") for r in rungs), (
             f"{loop}: the claude.ai subscription is reserved for the security "
             f"loop: {rungs}"

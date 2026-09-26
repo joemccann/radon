@@ -26,6 +26,11 @@ LOOPS = _h.LOOPS
 FALLBACK_LOOPS = ["ci-performance", "documentation", "reliability", "testing"]
 
 
+def _launch(tmp_path, loop, provider, phase="audit", **kw):
+    _rung, line, _tried = _h._launch_of(tmp_path, loop, provider, phase, **kw)
+    return line
+
+
 def _argv(tmp_path, loop, phase="audit", **kw):
     _proc, _tried, _calls, argv = _h._run_multi(tmp_path, loop, phase, **kw)
     return argv
@@ -34,9 +39,7 @@ def _argv(tmp_path, loop, phase="audit", **kw):
 @pytest.mark.parametrize("loop", FALLBACK_LOOPS)
 class TestTheWire:
     def test_codex_runs_exec_with_the_prompt_on_stdin(self, tmp_path, loop):
-        argv = _argv(tmp_path, loop)
-        assert argv, "codex was never launched"
-        first = argv[0]
+        first = _launch(tmp_path, loop, "codex")
         assert first.startswith("exec "), first
         assert "--model" not in first.split(), (
             f"the codex rung must not pin a model: {first}"
@@ -57,7 +60,7 @@ class TestTheWire:
         failed although venv-testing has pytest-asyncio 1.3.0. With
         allow_login_shell=false the same command resolved the venv and passed.
         """
-        first = _argv(tmp_path, loop)[0]
+        first = _launch(tmp_path, loop, "codex")
         assert "allow_login_shell=false" in first, first
 
     def test_codex_can_rewrite_rendered_skills_but_not_codex_config(self, tmp_path, loop):
@@ -70,21 +73,19 @@ class TestTheWire:
         grant is the tracked skills directory only: `.codex/config.toml` and
         the rest of `.codex/` stay read-only to the agent.
         """
-        first = _argv(tmp_path, loop)[0]
+        first = _launch(tmp_path, loop, "codex")
         roots = first[first.index("writable_roots=") : first.index("]", first.index("writable_roots=")) + 1]
         assert re.search(r'"[^"]*/\.codex/skills"', roots), roots
         assert not re.search(r'"[^"]*/\.codex/?"', roots), roots
 
     def test_codex_never_receives_a_slash_command(self, tmp_path, loop):
-        argv = _argv(tmp_path, loop)
-        assert not re.search(r"/\w+-\w+ (audit|remediate|deliver)", argv[0]), (
-            f"a Claude slash command reached codex, which cannot resolve it: {argv[0]}"
+        first = _launch(tmp_path, loop, "codex")
+        assert not re.search(r"/\w+-\w+ (audit|remediate|deliver)", first), (
+            f"a Claude slash command reached codex, which cannot resolve it: {first}"
         )
 
     def test_grok_gets_a_prompt_file_and_the_repo_cwd(self, tmp_path, loop):
-        argv = _argv(tmp_path, loop, capped_providers=("codex",))
-        assert len(argv) >= 2, argv
-        grok = argv[1]
+        grok = _launch(tmp_path, loop, "grok")
         assert "--prompt-file" in grok, grok
         assert "--model" not in grok.split(), (
             f"the grok rung must not pin a model: {grok}"
@@ -103,8 +104,8 @@ class TestTheWire:
         for phase in ("audit", "remediate", "deliver"):
             sub = tmp_path / phase
             sub.mkdir(parents=True, exist_ok=True)
-            argv = _argv(sub, loop, phase, capped_providers=("codex",))
-            assert f"{skill}.{phase}.md" in argv[1], (phase, argv[1])
+            grok = _launch(sub, loop, "grok", phase)
+            assert f"{skill}.{phase}.md" in grok, (phase, grok)
 
 
 @pytest.mark.parametrize("loop", sorted(LOOPS))
