@@ -112,9 +112,50 @@ class ObservationStore:
         return len(validated)
 
     def upsert_observations_by_identity(self, rows):
-        """Replace one identity. Used by snapshot tickers that republish asOf."""
+        """Replace one identity. Used by snapshot tickers that republish asOf.
+        
+        Atomic on SQLite (transaction). On Hrana, best-effort: insert new row first,
+        then delete old; if insert fails, old rows remain intact.
+        """
         validated = [validate_observation(row) for row in rows]
         self.initialize()
+        if self.connection is not None:
+            # SQLite: use transaction for atomicity
+            cur = self.connection.cursor()
+            try:
+                cur.execute("BEGIN")
+                for row in validated:
+                    payload = canonical(row)
+                    identity = canonical(
+                        [
+                            row[key]
+                            for key in (
+                                "indicator_id",
+                                "series_id",
+                                "source_id",
+                                "period_start",
+                                "period_end",
+                                "methodology_version",
+                                "cohort_version",
+                            )
+                        ]
+                    )
+                    cur.execute("DELETE FROM ai_cycle_observations WHERE identity=?", (identity,))
+                    cur.execute(
+                        "INSERT INTO ai_cycle_observations (fingerprint,available_at,period_end,identity,payload) VALUES (?,?,?,?,?)",
+                        (digest(payload.encode()), available_at(row), row["period_end"], identity, payload),
+                    )
+                self.connection.commit()
+            except Exception:
+                self.connection.rollback()
+                raise
+            return len(validated)
+        
+        # Hrana: best-effort atomicity - insert new rows first, then delete old
+        # If any insert fails, no deletes occur and old data remains
+        from scripts.db.hrana_http import hrana_execute
+        identities = []
+        insert_args_list = []
         for row in validated:
             payload = canonical(row)
             identity = canonical(
@@ -131,11 +172,19 @@ class ObservationStore:
                     )
                 ]
             )
-            self._execute("DELETE FROM ai_cycle_observations WHERE identity=?", (identity,))
-            self._execute(
+            identities.append(identity)
+            insert_args_list.append((
+                digest(payload.encode()), available_at(row), row["period_end"], identity, payload
+            ))
+        # Insert all new rows first
+        for args in insert_args_list:
+            hrana_execute(
                 "INSERT INTO ai_cycle_observations (fingerprint,available_at,period_end,identity,payload) VALUES (?,?,?,?,?)",
-                (digest(payload.encode()), available_at(row), row["period_end"], identity, payload),
+                args,
             )
+        # Then delete old rows for each identity
+        for identity in identities:
+            hrana_execute("DELETE FROM ai_cycle_observations WHERE identity=?", (identity,))
         return len(validated)
 
     def upsert_liquidcompute(self, rows):

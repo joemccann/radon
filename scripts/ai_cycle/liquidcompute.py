@@ -149,8 +149,23 @@ def store_row_from_observation(row):
 
 
 def persist_ticker(store, observations):
-    store.upsert_liquidcompute([store_row_from_observation(row) for row in observations])
-    store.upsert_observations_by_identity(observations)
+    """Persist ticker rows and observations. Writes error health on failure."""
+    try:
+        store.upsert_liquidcompute([store_row_from_observation(row) for row in observations])
+        store.upsert_observations_by_identity(observations)
+    except Exception as exc:
+        # Write error health before re-raising so the watchdog sees the failure
+        from scripts.db.hrana_http import write_service_health_http
+        from .collectors import now_iso
+        write_service_health_http(
+            HEALTH_SERVICE,
+            "error",
+            started_at=now_iso(),
+            finished_at=now_iso(),
+            error={"message": f"Liquid Compute persistence failed: {type(exc).__name__}: {exc}"},
+            timeout=8,
+        )
+        raise
     return len(observations)
 
 
@@ -201,11 +216,11 @@ def main(argv=None):
         if production:
             _write_health("ok", started)
         return 0
-    except (SourceError, KeyError, TypeError, ValueError, OSError) as exc:
-        reason = str(exc) if isinstance(exc, SourceError) else "Source schema or local archive validation failed"
+    except Exception as exc:
+        reason = str(exc) if isinstance(exc, SourceError) else f"Liquid Compute failed: {type(exc).__name__}: {exc}"
         print(json.dumps({"mode": "record" if args.record else "verify", "source": SOURCE_ID, "error": reason}, indent=2))
         if production:
-            _write_health("error", started, {"message": "Liquid Compute ticker collection failed"})
+            _write_health("error", started, {"message": reason})
         return 1
 
 
