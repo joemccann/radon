@@ -532,7 +532,7 @@ export default function AdminWorkspace() {
           <div className={styles.headerActions}><TradingKillSwitch compact /></div>
         </header>
         <div className={styles.summary} data-testid="admin-status-summary">
-          <span className={styles.summaryTitle}>{checking ? "Checking sources" : conditions.length ? `${conditions.length} need attention` : "No action needed"}</span>
+          <span className={styles.summaryTitle}>{checking ? "Checking sources" : conditions.length ? `${conditions.length} ${conditions.length === 1 ? "needs" : "need"} attention` : "No action needed"}</span>
           <span className={styles.summaryDescription}>Broker, service and writer observations are checked independently.</span>
           <button type="button" className="admin-btn admin-btn-ghost" onClick={refreshStatus}>Refresh status</button>
         </div>

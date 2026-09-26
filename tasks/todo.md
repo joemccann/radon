@@ -8563,3 +8563,5 @@ Review: Seven on-demand writers were correctly registered but admin freshness ig
 Dependency graph: T1 → T2 → T3 → T4 → T5, T1 → T3, T2 → T4. Independent model, presentation, and test preparation run in parallel; integration waits for their contracts. Isolated worktree protects unrelated local SLM changes. No local suites; GitHub CI only. No merge/deploy authorization.
 
 Review: Selected A implemented using existing Clear tokens and mutation owners. Independent model, UI, and coverage reviews completed. TypeScript static check passed; desktop/mobile browser fixture inspected, including 320px dark layout, primary action within first viewport, no horizontal overflow, and nested confirmation focus return. Local test suites were not run; regression execution and screenshots are assigned to GitHub CI.
+
+CI review: e3fc14a0 passed all eight Vitest shards and the coverage ratchet. The curation guard requires a dated review for modified held-out admin-panel.spec.ts; recorded its static locator review and separate browser fixture coverage without claiming that held-out suite ran.
