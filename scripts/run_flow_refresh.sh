@@ -6,7 +6,10 @@
 # Turso mirror and service_health row share the SCAN path. Every POST carries
 # force=true: the cooldown equals the timer period, so a jittered early fire
 # would otherwise be cache-served and skip the UW spend this job exists for.
-# Direct fallback only on connection-refused (curl exit 7).
+# Direct fallback only on connection-refused (curl exit 7), and only after
+# a bounded connect wait. A deploy restart drops the listener for about a
+# minute; falling back immediately opens a sync libsql client while Turso
+# is at its connection cap (2026-09-25 20:00Z).
 #
 # Discover scoring: --min-alerts 3 --dp-pages 2. evaluate.py still walks
 # the full darkpool tape.
@@ -18,6 +21,7 @@
 #   RADON_FLOW_REFRESH_FASTAPI_PORT         FastAPI port (default 8321)
 #   RADON_FLOW_REFRESH_RETRIES              502/503 retries (default 2)
 #   RADON_FLOW_REFRESH_RETRY_DELAY_SECS     delay between retries (default 8)
+#   RADON_FLOW_REFRESH_CONNECT_WAIT_SECS    curl-7 retry window (default 75)
 #
 
 set -u
@@ -131,11 +135,14 @@ SCAN_TIMEOUT="${RADON_FLOW_REFRESH_SCAN_TIMEOUT:-180}"
 # Retry transient FastAPI shedding a bounded number of times:
 #   502/503 — API up but subprocess slot-cap full (2026-08-24 19:00Z:
 #             all three flow POSTs 502 while /health 200; capacity exhausted)
-# Connection refused (curl 7) still falls through to direct invocation.
+# Connection refused (curl 7) retries inside CONNECT_WAIT, which is charged
+# against this scan's deadline, then falls back with whatever budget remains.
+# 75s covers the observed ~60s deploy listener gap and leaves the POST room.
 # A timeout or other HTTP response still refuses the direct fallback so an
 # accepted in-flight scan is never duplicated (BUG-013).
 RETRY_LIMIT="${RADON_FLOW_REFRESH_RETRIES:-2}"
 RETRY_DELAY="${RADON_FLOW_REFRESH_RETRY_DELAY_SECS:-8}"
+CONNECT_WAIT="${RADON_FLOW_REFRESH_CONNECT_WAIT_SECS:-75}"
 # Distinct return code for "the general subprocess lane was full" (R-170), so
 # the caller can tell a capacity shed from a real scan failure.
 SHED_EXIT=75
@@ -171,6 +178,7 @@ refresh_scan() {
     local attempt=0
     local HTTP_CODE=000 CURL_EXIT=28 RESPONSE_BODY="" BODY_FILE=""
     local SCAN_DEADLINE=$((SECONDS + SCAN_TIMEOUT))
+    local CONNECT_DEADLINE=$((SECONDS + CONNECT_WAIT))
     local remaining delay
 
     echo "$(date): POST ${url}"
@@ -190,6 +198,19 @@ refresh_scan() {
             return 0
         fi
         if ! _retryable_flow_shed "$attempt" "$CURL_EXIT" "$HTTP_CODE" "$RESPONSE_BODY"; then
+            # curl 7 means nothing accepted the POST, so a retry is not a
+            # second copy of an in-flight scan (BUG-013 is curl 28 / HTTP).
+            if [ "$CURL_EXIT" -eq 7 ] && [ "$SECONDS" -lt "$CONNECT_DEADLINE" ]; then
+                delay=$((CONNECT_DEADLINE - SECONDS))
+                remaining=$((SCAN_DEADLINE - SECONDS))
+                [ "$delay" -gt "$remaining" ] && delay="$remaining"
+                [ "$delay" -gt "$RETRY_DELAY" ] && delay="$RETRY_DELAY"
+                if [ "$delay" -gt 0 ]; then
+                    echo "$(date): ${label} FastAPI connection refused (curl=7) - retry in ${delay}s"
+                    sleep "$delay"
+                    continue
+                fi
+            fi
             break
         fi
         attempt=$((attempt + 1))
