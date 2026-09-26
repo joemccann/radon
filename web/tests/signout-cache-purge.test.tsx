@@ -49,7 +49,7 @@ describe("SignOutCachePurge", () => {
 
 describe("SignOutCachePurge — in-memory per-user stores", () => {
   it("drops return-cache snapshots and bookmarks when the identity changes", async () => {
-    const { createReturnCache } = await import("../lib/returnCache");
+    const { createReturnCache, getReturnCacheGeneration } = await import("../lib/returnCache");
     const { useBookmarks } = await import("../lib/useBookmarks");
     Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: undefined });
 
@@ -73,7 +73,7 @@ describe("SignOutCachePurge — in-memory per-user stores", () => {
     const returnCache = createReturnCache();
     const view = render(<><SignOutCachePurge /><Probe /></>);
     await waitFor(() => expect(seen.at(-1)).toEqual(["post-owner"]));
-    returnCache.write("/api/portfolio", { data: { owner: true }, fetchedAt: Date.now(), lastSync: null });
+    returnCache.write("/api/portfolio", { data: { owner: true }, fetchedAt: Date.now(), lastSync: null }, getReturnCacheGeneration());
 
     served = [];
     mocks.auth.isSignedIn = false;

@@ -27,7 +27,9 @@ _h = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = _h
 _spec.loader.exec_module(_h)
 
-FALLBACK_LOOPS = ["ci-performance", "documentation", "reliability", "testing"]
+# The codex-first ladder. documentation runs the single fx:nvidia rung since
+# 2026-09-26; its wire and failure handling live in test_fx_nvidia_rung.py.
+FALLBACK_LOOPS = ["ci-performance", "reliability", "testing"]
 FALLBACK_LADDER = _h.FALLBACK_LADDER
 EXPECTED_PROVIDER_ORDER = _h.FALLBACK_PROVIDER_ORDER
 CLAUDE_LADDER = _h.CLAUDE_LADDER
@@ -216,7 +218,12 @@ class TestAPermanentRejectionCostsOneRung:
         assert providers(tried) == ["codex", "codex", "codex", "grok"], tried
 
 
-@pytest.mark.parametrize("loop", FALLBACK_LOOPS)
+# documentation runs a single `fx:nvidia` rung, so it has no nvidia rung to
+# crash and nothing below one to fall back to. Its own case is below.
+NVIDIA_LADDER_LOOPS = [l for l in FALLBACK_LOOPS if "nvidia" in EXPECTED_PROVIDER_ORDER[l]]
+
+
+@pytest.mark.parametrize("loop", NVIDIA_LADDER_LOOPS)
 class TestARungThatCrashesInsideItselfCostsOneRung:
     """2026-09-26: the first night nvidia led documentation's ladder (#728),
     every phase died on `Error: Internal error: {"message": "serialization
@@ -283,6 +290,23 @@ class TestARungThatCrashesInsideItselfCostsOneRung:
             reject_output=NVIDIA_INTERNAL_ERROR_OUTPUT,
         )
         assert providers(tried) == ["nvidia"] * 3 + ["grok"], tried
+
+
+class TestASingleRungLadderReportsACrashHonestly:
+    """documentation runs one rung (`fx:nvidia`), so there is nothing to walk to.
+    Before the classifier a crash inside the CLI was a bare exit 1 with no cause;
+    it must now be the same honest exhausted-ladder INCOMPLETE the wrapper posts
+    for a cap, so the operator learns the rung died rather than reading silence."""
+
+    def test_the_only_rung_crashing_is_an_honest_incomplete(self, tmp_path):
+        proc, tried, calls, _argv = _run_multi(
+            tmp_path, "documentation", "audit",
+            reject_providers=("fx",),
+            reject_output=NVIDIA_INTERNAL_ERROR_OUTPUT,
+        )
+        assert providers(tried) == ["fx"], tried
+        assert proc.returncode == 75, (proc.returncode, proc.stdout, proc.stderr)
+        assert "all agent providers exhausted" in calls, calls
 
 
 class TestAnIncompleteAuditGetsContinuationRounds:

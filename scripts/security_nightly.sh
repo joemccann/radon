@@ -473,10 +473,11 @@ _round_scan() {
 #     first seen declared (a stale or sloppy entry, e.g. `pgrep -f pytest`,
 #     names older processes);
 #   - it works in the clone and has no controlling terminal;
-#   - it is not a Remote Control or Claude Code daemon process.
+#   - neither it nor any ancestor is a Remote Control or Claude Code daemon
+#     process.
 # One pid per line; a line with anything else on it is ignored.
 _ingest_declarations() {
-  local clone="$1" observed="$2" since="${3:-}" pidfile="${RADON_WEEKEND_DETACHED_PIDFILE:-}" pid rest now age tty cmd
+  local clone="$1" observed="$2" since="${3:-}" pidfile="${RADON_WEEKEND_DETACHED_PIDFILE:-}" pid rest now age tty cmd q hops
   [[ -n "$pidfile" && -f "$pidfile" && ! -L "$pidfile" ]] || return 0
   case "$since" in ''|*[!0-9]*) return 0 ;; esac
   now="$(date +%s)"
@@ -491,10 +492,17 @@ _ingest_declarations() {
     tty="$(/bin/ps -o tty= -p "$pid" 2>/dev/null || true)"
     tty="${tty//[[:space:]]/}"
     [[ "$tty" == '??' || "$tty" == '?' ]] || continue
-    cmd="$(/bin/ps -o command= -p "$pid" 2>/dev/null || true)"
-    case "$cmd" in
-      ''|*ClaudeCode.app*|*--bg-pty-host*|*bg-spare*|*radon-rc.sh*|*--remote-control*) continue ;;
-    esac
+    q="$pid"; hops=0
+    while [[ -n "$q" && "$q" != 0 && "$q" != 1 ]] && (( hops < 128 )); do
+      cmd="$(/bin/ps -o command= -p "$q" 2>/dev/null || true)"
+      case "$cmd" in
+        *ClaudeCode.app*|*--bg-pty-host*|*bg-spare*|*radon-rc.sh*|*--remote-control*) break ;;
+      esac
+      q="$(/bin/ps -o ppid= -p "$q" 2>/dev/null || true)"
+      q="${q//[[:space:]]/}"
+      hops=$(( hops + 1 ))
+    done
+    [[ -z "$q" || "$q" == 0 || "$q" == 1 ]] || continue
     _pid_cwd_in "$pid" "$clone" || continue
     printf '%s\t%s\n' "$pid" "$(_proc_lstart "$pid")" >> "$observed"
   done < "$pidfile"
@@ -734,6 +742,7 @@ MODE="${1:?usage: security_nightly.sh audit|remediate|deliver|cycle}"
 }
 
 REPO="${RADON_WEEKEND_REPO:-$HOME/radon-weekend/radon-security}"
+export RADON_REPO_ROOT="$REPO"
 WEEKEND_ROOT="$(dirname "$REPO")"
 # Per-loop venv. The legacy $WEEKEND_ROOT/venv is not deleted here
 # (operator follow-up after this ships).
@@ -1831,6 +1840,7 @@ provider_bin() {
     claude) command -v claude 2>/dev/null || true ;;
     codex) printf '%s' "${RADON_WEEKEND_CODEX_BIN:-/opt/homebrew/bin/codex}" ;;
     grok | nvidia | cerebras) printf '%s' "${RADON_WEEKEND_GROK_BIN:-$HOME/.grok/bin/grok}" ;;
+    fx) printf '%s' "${RADON_WEEKEND_FX_BIN:-$HOME/.local/bin/fx}" ;;
     *) return 1 ;;
   esac
 }
@@ -1859,6 +1869,7 @@ provider_ready() {
     grok) [[ -r "$HOME/.grok/auth.json" || -n "${XAI_API_KEY:-}" ]] || return 1 ;;
     nvidia) provider_key_present NVIDIA_API_KEY && [[ -r "$AGENT_CLI_ROOT/grok-home-nvidia/config.toml" ]] || return 1 ;;
     cerebras) provider_key_present CEREBRAS_API_KEY && [[ -r "$AGENT_CLI_ROOT/grok-home-cerebras/config.toml" ]] || return 1 ;;
+    fx) provider_key_present NVIDIA_API_KEY && [[ -r "$HOME/.fx/settings.json" ]] || return 1 ;;
     *) return 1 ;;
   esac
   # A fallback rung is driven by a rendered prompt file, not a slash command.
@@ -1877,7 +1888,7 @@ provider_ready() {
 load_provider_key() {
   local want="$1" envf="$AGENT_CLI_ROOT/env" line key val
   unset NVIDIA_API_KEY CEREBRAS_API_KEY XAI_API_KEY
-  case "$want" in nvidia | cerebras | grok) ;; *) return 0 ;; esac
+  case "$want" in nvidia | cerebras | grok | fx) ;; *) return 0 ;; esac
   [[ -r "$envf" ]] || return 0
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in \#* | "") continue ;; esac
@@ -1885,7 +1896,7 @@ load_provider_key() {
     val="${line#*=}"
     [[ -n "$val" ]] || continue
     case "$want:$key" in
-      nvidia:NVIDIA_API_KEY | cerebras:CEREBRAS_API_KEY | grok:XAI_API_KEY)
+      nvidia:NVIDIA_API_KEY | fx:NVIDIA_API_KEY | cerebras:CEREBRAS_API_KEY | grok:XAI_API_KEY)
         export "$key=$val" ;;
     esac
   done < "$envf"
@@ -1944,11 +1955,14 @@ advance_rung() {
 # Per-provider cap signatures, captured from the real CLIs rather than guessed.
 # Scoping is unchanged and deliberately narrow (R-426, R-530, R-667): this
 # round's slice only, never the wrapper's own `[loop]` marker lines.
+# fx prints its own verdict as `failed: <cause> · retry after: <n>s`; only the
+# rate-limited cause is a cap, matched as that whole token.
 quota_regex() {
   case "$1" in
     claude) printf '%s' 'out of usage credits|You.ve hit your (Opus|Sonnet) limit|You.ve reached your [A-Za-z]+ limit|Request rejected \(429\)|529 Overloaded|experiencing high load' ;;
     codex) printf '%s' 'You.ve hit your usage limit|usage limited|rate limit reached|429' ;;
     grok | nvidia | cerebras) printf '%s' 'usage limit reached|out of credits|spending limit|usage balance exhausted|429' ;;
+    fx) printf '%s' 'failed: rate[_]limited|usage limit reached|out of credits|429' ;;
     *) printf '%s' 'a\{0\}b' ;;
   esac
 }
@@ -2154,6 +2168,35 @@ launch_round() {
         "$RUNG_BIN" --prompt-file "$prompt_file" ${model_flag[@]+"${model_flag[@]}"} \
         --reasoning-effort medium \
         --cwd "$REPO" --always-approve --output-format plain >> "$RUN_LOG" 2>&1 &
+      ;;
+    fx)
+      # Vercel fx drives NVIDIA NIM over Chat Completions directly: no grok
+      # host, whose client exited 1 on `serialization error: invalid type:
+      # null, expected u32` while parsing NIM's reply (every documentation
+      # phase, 2026-09-26). The rung's model half names the fx provider
+      # configured in ~/.fx/settings.json (scripts/agent_cli_bootstrap.sh).
+      #
+      # fx runs every shell command in the account's login shell, `zsh -l -i`
+      # (resolved from getpwuid, not $SHELL), which re-sources the operator
+      # profile and /etc/zprofile and puts /opt/homebrew/bin ahead of
+      # $VENV/bin: python3.13 lost yaml and the audit's own contract tests
+      # failed (2026-09-26). A runner-owned ZDOTDIR replaces the operator's
+      # zsh startup files, and its .zshrc/.zlogin, which run after the profile
+      # stage, restore the PATH this wrapper built. Rewritten every round so a
+      # stray edit cannot survive to the next one.
+      local fx_zdotdir="$AGENT_CLI_ROOT/fx-zdotdir" fx_rc
+      mkdir -p "$fx_zdotdir" || return 1
+      for fx_rc in .zshrc .zlogin; do
+        printf '%s\n' \
+          '# Written by the nightly wrapper every round; edits are overwritten.' \
+          '[[ -n "${RADON_AGENT_PATH:-}" ]] && export PATH="$RADON_AGENT_PATH"' \
+          > "$fx_zdotdir/$fx_rc" || return 1
+      done
+      ( cd "$REPO" || exit 70
+        RADON_AGENT_PATH="$PATH" ZDOTDIR="$fx_zdotdir" FX_PROVIDER="$RUNG_MODEL" \
+          FX_AUTO_UPGRADE=0 FX_SKIP_ONBOARDING=1 FX_DISABLE_KEYCHAIN=1 \
+          exec "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
+          "$RUNG_BIN" ask --full-access --no-save ) < "$prompt_file" >> "$RUN_LOG" 2>&1 &
       ;;
     *)
       echo "[$LOOP_LOG_TAG] unknown provider $RUNG_PROVIDER" | tee -a "$RUN_LOG"

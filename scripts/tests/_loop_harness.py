@@ -233,12 +233,13 @@ def _run(
 # loops. nvidia and cerebras still name one because the grok CLI resolves them
 # through a `[model."<key>"]` config block: the rung names that stable KEY and
 # scripts/agent_cli_bootstrap.sh resolves the live id behind it.
-# 2026-09-25: the documentation loop leads with the NVIDIA rung so its nightly
-# rounds stop drawing on the codex and grok accounts; the other three keep the
-# codex-first order. One table, read by every ladder test.
+# 2026-09-26: the documentation loop runs ONE rung, `fx:nvidia` -- Vercel fx
+# driving NVIDIA NIM directly, no grok host and no codex/grok/cerebras fallback.
+# The other three keep the codex-first order. One table, read by every ladder
+# test.
 FALLBACK_PROVIDER_ORDER = {
     "ci-performance": ["codex", "grok", "nvidia", "cerebras"],
-    "documentation": ["codex", "grok", "nvidia", "cerebras"],
+    "documentation": ["fx"],
     "reliability": ["codex", "grok", "nvidia", "cerebras"],
     "testing": ["codex", "grok", "nvidia", "cerebras"],
 }
@@ -286,6 +287,7 @@ PROVIDER_BINARY = {
     "grok": "grok",
     "nvidia": "grok",
     "cerebras": "grok",
+    "fx": "fx",
 }
 
 
@@ -363,6 +365,19 @@ def _provider_stub(
         "esac\n"
         'model=""\n'
         'args="$*"\n'
+        'if [ "$self" = fx ]; then\n'
+        '  model="${FX_PROVIDER:-}"\n'
+        '  {\n'
+        '    printf "PWD=%s\\n" "$PWD"\n'
+        '    printf "PATH=%s\\n" "$PATH"\n'
+        '    for v in ZDOTDIR RADON_AGENT_PATH FX_PROVIDER FX_AUTO_UPGRADE \\\n'
+        '             FX_SKIP_ONBOARDING FX_DISABLE_KEYCHAIN NVIDIA_API_KEY \\\n'
+        '             XAI_API_KEY CEREBRAS_API_KEY RADON_WEEKEND_REDUCED; do\n'
+        '      eval "printf \\"%s=%s\\\\n\\" $v \\"\\${$v-<unset>}\\""\n'
+        '    done\n'
+        '    printf "STDIN=%s\\n" "$(cat)"\n'
+        '  } > "' + str(attempts) + '.fx-env"\n'
+        'fi\n'
         "while [ $# -gt 0 ]; do\n"
         '  case "$1" in\n'
         '    --model|-m) model="$2"; shift 2; continue ;;\n'
@@ -395,8 +410,8 @@ def _run_multi(
     phase,
     capped_providers=(),
     provider_ladder=None,
-    installed=("claude", "codex", "grok"),
-    authed=("claude", "codex", "grok", "nvidia", "cerebras"),
+    installed=("claude", "codex", "grok", "fx"),
+    authed=("claude", "codex", "grok", "nvidia", "cerebras", "fx"),
     cap_line=None,
     cap_exit=1,
     reject_providers=(),
@@ -431,7 +446,7 @@ def _run_multi(
         attempts, capped, cap_line, cap_exit, rejected, reject_out,
         agent_output=agent_output,
     )
-    for prov in ("claude", "codex", "grok"):
+    for prov in ("claude", "codex", "grok", "fx"):
         exe = bin_dir / PROVIDER_BINARY[prov]
         if prov in installed:
             exe.write_text(body, encoding="utf-8")
@@ -448,6 +463,9 @@ def _run_multi(
         (home / ".codex" / "auth.json").write_text("{}", encoding="utf-8")
     if "grok" in authed:
         (home / ".grok" / "auth.json").write_text("{}", encoding="utf-8")
+    if "fx" in authed:
+        (home / ".fx").mkdir(parents=True, exist_ok=True)
+        (home / ".fx" / "settings.json").write_text("{}", encoding="utf-8")
 
     cli_root = tmp_path / "agent-cli"
     cli_root.mkdir(parents=True, exist_ok=True)
@@ -458,6 +476,8 @@ def _run_multi(
             (cli_root / ("grok-home-" + prov) / "config.toml").write_text(
                 '[model."stub"]\nbase_url = "http://127.0.0.1:1"\n', encoding="utf-8"
             )
+        # fx drives NVIDIA NIM directly, so it reads the same key.
+        if prov in authed or (prov == "nvidia" and "fx" in authed):
             lines.append(key + "=stub-key")
     (cli_root / "env").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -477,6 +497,7 @@ def _run_multi(
         "RADON_PORTABLE_PROMPT_DIR": str(prompts),
         "RADON_WEEKEND_CODEX_BIN": str(bin_dir / "codex"),
         "RADON_WEEKEND_GROK_BIN": str(bin_dir / "grok"),
+        "RADON_WEEKEND_FX_BIN": str(bin_dir / "fx"),
     }
     if provider_ladder is not None:
         env["RADON_WEEKEND_PROVIDER_LADDER"] = provider_ladder

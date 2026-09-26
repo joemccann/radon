@@ -87,6 +87,19 @@ def test_query_and_passage_input_types(monkeypatch):
     assert len(passage[0]) == EMBEDDING_DIM_V2
 
 
+def test_hosted_embedding_input_is_credential_scrubbed(monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
+    post = _vectors(2)
+    secret = "nvapi-" + "A1b2C3d4E5f6G7h8I9j0"
+    db_url = "libsql://example-db.turso.io"
+    embed_passages([f"note {secret}", f"db {db_url}"], post=post)
+    embed_query([f"find {secret}"], post=post)
+    sent = json.dumps(post.bodies)
+    assert secret not in sent
+    assert db_url not in sent
+    assert post.bodies[0]["input"][0].startswith("note ")
+
+
 def test_non_2048_payload_is_rejected(monkeypatch):
     monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
     with pytest.raises(RuntimeError, match="2048"):

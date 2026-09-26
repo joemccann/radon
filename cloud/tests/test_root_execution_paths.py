@@ -378,6 +378,23 @@ def test_nextjs_db_watchdog_restarts_through_the_validating_operator():
     assert "/usr/local/bin/radon unit restart radon-*.service" in ops_rules
 
 
+def test_ops_sudoers_wildcards_only_reach_validating_root_helpers():
+    # A sudoers `*` spans spaces, so a wildcard argument on a stock binary admits
+    # every option that binary has. Only root-owned helpers that re-validate
+    # their own argv may carry one.
+    validating_helpers = ("/usr/local/bin/radon", "/usr/local/sbin/radon-docker-gw")
+    text = (CLOUD_ROOT / "config" / "sudoers.d" / "radon-ops").read_text(encoding="utf-8")
+    for line in text.splitlines():
+        if not line.strip() or line.strip().startswith("#") or "NOPASSWD:" not in line:
+            continue
+        for command in line.split("NOPASSWD:", 1)[1].split(","):
+            command = command.strip()
+            if "*" in command:
+                assert command.split()[0] in validating_helpers, (
+                    f"radon-ops grants a wildcard argument to {command!r}"
+                )
+
+
 def test_caddy_sudoers_grants_no_root_file_write():
     text = CADDY_SUDOERS.read_text(encoding="utf-8")
     rules = "\n".join(

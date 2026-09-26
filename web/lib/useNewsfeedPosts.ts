@@ -13,7 +13,7 @@ import {
 
 import { parseImageSources, parseResearchSource, type ResearchSource } from "./newsfeedSource";
 import type { PostFeedback } from "./researchFeedback";
-import { isReturnCacheFresh, useReturnCache } from "./returnCache";
+import { getReturnCacheGeneration, isReturnCacheFresh, useReturnCache } from "./returnCache";
 
 const POSTS_ENDPOINT = "/api/newsfeed/posts";
 const REFRESH_INTERVAL_MS = 2 * 60 * 1000;
@@ -84,6 +84,7 @@ export function useNewsfeedPosts(): NewsfeedPosts {
       setError(null);
     }
 
+    const identityGeneration = getReturnCacheGeneration();
     let networkResolved = false;
     try {
       const response = await fetch(POSTS_ENDPOINT, {
@@ -143,7 +144,7 @@ export function useNewsfeedPosts(): NewsfeedPosts {
           data: normalised,
           fetchedAt: Date.now(),
           lastSync: stamped,
-        });
+        }, identityGeneration);
       }
       setError(null);
     } catch (err) {

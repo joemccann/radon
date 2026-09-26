@@ -26,3 +26,12 @@ def test_bearer_without_leading_authorization_keyword_is_redacted():
 def test_authorization_bearer_assignment_still_redacted():
     body = scrub_credential_text("Authorization: Bearer opaque-value-123")
     assert "opaque-value-123" not in body
+
+
+def test_bare_nvidia_and_cerebras_keys_are_redacted():
+    nvidia = "nvapi-" + "A1b2C3d4E5f6G7h8I9j0"
+    cerebras = "csk-" + "a1b2c3d4e5f6g7h8i9j0"
+    body = scrub_credential_text(f"keys {nvidia} and {cerebras} pasted")
+    assert nvidia not in body
+    assert cerebras not in body
+    assert "keys " in body and " pasted" in body

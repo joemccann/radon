@@ -21,6 +21,7 @@ vs process-bound paths: ``scripts/db/client.py`` module docstring.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import urllib.request
@@ -53,6 +54,8 @@ def _encode_arg(value: Any) -> dict[str, Any]:
         return {"type": "integer", "value": str(value)}
     if isinstance(value, float):
         return {"type": "float", "value": value}
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return {"type": "blob", "base64": base64.b64encode(bytes(value)).decode("ascii")}
     return {"type": "text", "value": str(value)}
 
 

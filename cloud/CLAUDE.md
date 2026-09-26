@@ -147,6 +147,13 @@ main has not contained. `/home/radon/radon` is writable by `radon`, which
 holds a NOPASSWD verb for `refresh-control-plane-privileged`; reading the
 checkout there made those bytes a root install with only syntax validation in
 front of them. Same rule `install-units` has always followed (R-084).
+Privileged files (helpers, sudoers, polkit, runtime, compose, seccomp) never
+move backwards: `/opt/radon-provision/control-plane-floor` records the last
+main commit whose privileged set root installed (`sync-control-plane`,
+`refresh-control-plane-privileged`, `setup-vps.sh`), and a privileged diff
+from a HEAD that does not descend from it fails with 76. An older HEAD still
+rolls back its unit files. A missing record accepts any main commit; an
+unreadable one refuses every privileged diff.
 
 **Root provision store.** Every root install of a privileged artifact
 (`sync-control-plane`, `refresh-control-plane[-privileged]`, `install-units`,
@@ -174,6 +181,8 @@ STAGE="$(mktemp -d /opt/radon-provision/manual.XXXXXX)"
 git --git-dir="$STORE" -c tar.umask=022 archive "$SHA" cloud | tar -x -C "$STAGE"
 RADON_BOOTSTRAP_CLOUD_ROOT="$STAGE/cloud" bash "$STAGE/cloud/scripts/bootstrap-control-plane.sh"
 rm -rf "$STAGE"
+# only when deliberately pinning an older privileged set:
+printf '%s\n' "$SHA" > /opt/radon-provision/control-plane-floor
 ```
 
 The five app-plane drop-ins run the container with the systemd notify

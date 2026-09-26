@@ -10,17 +10,15 @@ radon ALL=(root) NOPASSWD: /usr/local/bin/radon start, /usr/local/bin/radon stop
 radon ALL=(root) NOPASSWD: /usr/local/bin/radon unit start radon-*.service, /usr/local/bin/radon unit stop radon-*.service, /usr/local/bin/radon unit restart radon-*.service
 radon ALL=(root) NOPASSWD: /usr/local/bin/radon unit start radon-*.timer, /usr/local/bin/radon unit stop radon-*.timer, /usr/local/bin/radon unit restart radon-*.timer
 
-# Host lifecycle remains explicit operator-only maintenance.
-radon ALL=(root) NOPASSWD: /usr/sbin/reboot
-radon ALL=(root) NOPASSWD: /usr/sbin/shutdown -r now
-radon ALL=(root) NOPASSWD: /usr/sbin/shutdown -h now
+# Host lifecycle remains explicit operator-only maintenance. No reboot or shutdown grant.
 
 # --- faillock self-recovery (cannot lock yourself out forever) ---
 radon ALL=(root) NOPASSWD: /usr/sbin/faillock --user radon --reset
 radon ALL=(root) NOPASSWD: /usr/sbin/faillock --user radon
 
 # --- read-only diagnostic helpers ---
-radon ALL=(root) NOPASSWD: /usr/bin/journalctl -u radon-*
+# No journalctl grant: a wildcard unit argument would admit every journalctl
+# option as root. Read unit logs as root over ssh instead.
 radon ALL=(root) NOPASSWD: /usr/bin/docker logs ib-gateway
 
 # --- Gateway container control (replaces radon's group `docker` membership) ---
