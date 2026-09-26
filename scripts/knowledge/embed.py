@@ -222,10 +222,11 @@ def resolve_query_vector(
 
 def _nvidia_embed(texts: Sequence[str], *, input_type: str, post) -> list[list[float]]:
     from clients.model_ladder import _classify_http_failure, _default_post, _request, safe_error_message
+    from credential_redaction import scrub_credential_text
 
     if input_type not in {"query", "passage"}:
         raise ValueError("input_type must be query or passage")
-    pending = list(texts)
+    pending = [scrub_credential_text(text) for text in texts]
     if not pending:
         return []
     key = os.environ.get("NVIDIA_API_KEY", "").strip()

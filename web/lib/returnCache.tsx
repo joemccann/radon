@@ -16,7 +16,8 @@ export type ReturnCacheEntry<T> = {
 export type ReturnCache = {
   /** Last successful snapshot, including one past the poll window. */
   read<T>(key: string): ReturnCacheEntry<T> | null;
-  write<T>(key: string, entry: ReturnCacheEntry<T>): void;
+  /** Dropped when `generation` predates the latest identity purge. */
+  write<T>(key: string, entry: ReturnCacheEntry<T>, generation: number): void;
 };
 
 export function isReturnCacheFresh(
@@ -53,7 +54,8 @@ export function createReturnCache(): ReturnCache {
       const entry = store.get(key);
       return entry ? entry as ReturnCacheEntry<never> : null;
     },
-    write(key, entry) {
+    write(key, entry, generation) {
+      if (generation !== identityGeneration) return;
       store.set(key, entry);
     },
   };
