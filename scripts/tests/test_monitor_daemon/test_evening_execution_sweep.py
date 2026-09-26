@@ -5,7 +5,7 @@ Fills outside RTH + journal_sync's 15-min post-close grace (outsideRth
 GTC fills, manual TWS trades, late busts/corrections) reach neither
 journal_sync (next morning's fresh IB session no longer returns them)
 nor executed_orders (orders-sync is market-hours-gated). The sweep runs
-once per ET trading day ~20:30 ET, pulls the evening session's fills
+twice per ET trading day (20:30 and 23:45 ET), pulls the evening session's fills
 and imports any exec_id not yet in the journal via JournalSyncHandler's
 machinery, mirroring executions into executed_orders.
 """
@@ -151,7 +151,7 @@ class TestIdentity:
 
 
 class TestDailyFireWindow:
-    """Once per ET trading day, at/after 20:30 ET (post IB evening processing)."""
+    """20:30 ET, then 23:45 ET, once each per trading day."""
 
     def _at(self, handler, now_utc):
         return patch(
@@ -178,6 +178,19 @@ class TestDailyFireWindow:
         h = EveningExecutionSweepHandler()
         h.last_run = _et_to_utc(2026, 5, 11, 20, 35)
         with self._at(h, _et_to_utc(2026, 5, 11, 21, 30)):
+            assert h.is_due() is False
+
+    def test_refires_late_when_the_2030_pass_already_succeeded(self):
+        """Expiry assignment can print after the 20:30 pass. 2026-09-25 SPCX."""
+        h = EveningExecutionSweepHandler()
+        h.last_run = _et_to_utc(2026, 5, 11, 20, 35)
+        with self._at(h, _et_to_utc(2026, 5, 11, 23, 50)):
+            assert h.is_due() is True
+
+    def test_late_slot_does_not_refire(self):
+        h = EveningExecutionSweepHandler()
+        h.last_run = _et_to_utc(2026, 5, 11, 23, 50)
+        with self._at(h, _et_to_utc(2026, 5, 11, 23, 55)):
             assert h.is_due() is False
 
     def test_late_fire_when_yesterday_missed(self):

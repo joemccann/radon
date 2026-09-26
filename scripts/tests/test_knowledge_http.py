@@ -164,6 +164,22 @@ def test_cursor_decodes_types_without_truthy_zero():
     assert cursor.fetchall() == []
 
 
+def test_cursor_decodes_unpadded_blob_the_way_turso_returns_vectors():
+    """Turso omits '=' on embedding_v2. 8192-byte vectors arrive with len % 4 == 3."""
+    import base64
+
+    vector = bytes(range(256)) * 32
+    encoded = base64.b64encode(vector).decode("ascii").rstrip("=")
+    one_byte = base64.b64encode(b"\xff").decode("ascii").rstrip("=")
+    assert len(encoded) == 10923 and len(encoded) % 4 == 3
+    assert len(one_byte) % 4 == 2
+    cursor = http_db._Cursor({"rows": [[
+        {"type": "blob", "base64": encoded},
+        {"type": "blob", "base64": one_byte},
+    ]]})
+    assert cursor.fetchone() == (vector, b"\xff")
+
+
 @pytest.mark.parametrize('code, transient', [('SQLITE_ERROR', False), ('SQLITE_BUSY', True)])
 def test_failed_begin_with_closed_stream_preserves_sql_error_classification(connection, code, transient):
     db, server = connection

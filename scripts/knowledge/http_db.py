@@ -45,8 +45,16 @@ def _cell(cell):
     if kind == "text":
         return cell["value"]
     if kind == "blob":
-        return base64.b64decode(cell["base64"], validate=True)
+        return _decode_blob(cell.get("base64"))
     raise HranaHttpError("invalid Hrana value type")
+
+
+def _decode_blob(encoded):
+    """Turso's pipeline JSON strips '='. 8192-byte vectors then have len % 4 == 3."""
+    if not isinstance(encoded, str):
+        raise HranaHttpError("invalid Hrana blob")
+    padded = encoded + "=" * (-len(encoded) % 4)
+    return base64.b64decode(padded, validate=True)
 
 
 class _Cursor:
