@@ -116,6 +116,9 @@ class BaseHandler(ABC):
         self.last_run: Optional[datetime] = None
         self._enabled: bool = True
         self._cycle_health_recorded: bool = False
+        # Set while a finished cycle's service_health write has not landed.
+        # The scan stays latched; the daemon retries only this payload.
+        self._pending_health: Optional[Dict[str, Any]] = None
     
     @property
     def enabled(self) -> bool:
@@ -191,7 +194,7 @@ class BaseHandler(ABC):
         started_at: Optional[str] = None,
         finished_at: Optional[str] = None,
         error: Optional[Dict[str, Any]] = None,
-    ) -> None:
+    ) -> bool:
         """Best-effort service_health write for THIS handler's row.
 
         Marks the cycle recorded so ``run()`` never overwrites a richer
@@ -201,19 +204,50 @@ class BaseHandler(ABC):
         """
         self._cycle_health_recorded = True
         if not self.service_name:
-            return
+            self._pending_health = None
+            return True
+        payload = {
+            "state": state,
+            "started_at": started_at,
+            "finished_at": finished_at or self._utc_now_iso(),
+            "error": error,
+        }
+        # Park the payload before the write. A timeout or a kill mid-call
+        # leaves it for the next daemon loop instead of burning a daily slot.
+        self._pending_health = payload
         try:
             from db.writer import record_service_health  # noqa: PLC0415 — lazy; libsql optional
 
             record_service_health(
                 self.service_name,
                 state,
-                started_at=started_at,
-                finished_at=finished_at or self._utc_now_iso(),
+                started_at=payload["started_at"],
+                finished_at=payload["finished_at"],
                 error=error,
             )
         except Exception as exc:  # noqa: BLE001 — heartbeat must never kill the cycle
             logger.warning("record_service_health(%s) failed: %s", self.service_name, exc)
+            return False
+        self._pending_health = None
+        return True
+
+    def pending_health(self) -> Optional[Dict[str, Any]]:
+        if not self._pending_health:
+            return None
+        return dict(self._pending_health)
+
+    def flush_pending_health(self) -> bool:
+        """Retry a heartbeat the last cycle could not persist. False when
+        there is nothing pending or the write fails again."""
+        pending = self._pending_health
+        if not pending:
+            return False
+        return self.record_cycle_health(
+            pending["state"],
+            started_at=pending.get("started_at"),
+            finished_at=pending.get("finished_at"),
+            error=pending.get("error"),
+        )
 
     def _ensure_cycle_heartbeat(self, result: Any, *, started_at: str) -> None:
         """Structural heartbeat after a successful execute. ``result["error"]``
@@ -270,10 +304,13 @@ class BaseHandler(ABC):
         
         Override in subclasses to include additional state.
         """
-        return {
+        state: Dict[str, Any] = {
             "last_run": self.last_run.isoformat() if self.last_run else None,
-            "enabled": self._enabled
+            "enabled": self._enabled,
         }
+        if self._pending_health is not None:
+            state["pending_health"] = dict(self._pending_health)
+        return state
     
     def set_state(self, state: Dict[str, Any]) -> None:
         """
@@ -288,3 +325,18 @@ class BaseHandler(ABC):
             self.last_run = None
         
         self._enabled = state.get("enabled", True)
+        self._pending_health = self._pending_health_from_state(state.get("pending_health"))
+
+    @staticmethod
+    def _pending_health_from_state(raw: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(raw, dict):
+            return None
+        if raw.get("state") not in {"ok", "syncing", "error", "paused"}:
+            return None
+        error = raw.get("error")
+        return {
+            "state": raw["state"],
+            "started_at": raw.get("started_at"),
+            "finished_at": raw.get("finished_at"),
+            "error": error if isinstance(error, dict) else None,
+        }

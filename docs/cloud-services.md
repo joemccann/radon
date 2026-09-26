@@ -776,7 +776,7 @@ run after merge must use `--no-alert`.
 
 ### DISPERSION (`radon-dispersion.timer`)
 
-Daily `22:20 UTC` (`RandomizedDelaySec=120`), oneshot `scripts/fetch_dispersion.py`,
+Daily `22:20 UTC`, with a `23:20 UTC` recovery if a deploy killed the first run (`RandomizedDelaySec=120`), oneshot `scripts/fetch_dispersion.py`,
 `TimeoutStartSec=900`. VIX close, the 95th-minus-5th percentile spread of daily
 single-stock returns across the S&P 500 seed, and the same spread across the 11
 Select Sector SPDRs, each rolled to a 60-session mean and z-scored over the full
@@ -789,7 +789,7 @@ z-scores are rebuilt from every stored row each run. 22:20 clears the EST close
 and sits between iv-spread 22:15 and yield-curve 22:30. Runs every calendar day;
 weekend and holiday runs find no new completed session, make no IB or Yahoo
 requests, and refresh only the snapshot + heartbeat that keep `dispersion` inside
-its 26h window. An empty VIX or a thin cross-section re-serves the stored series
+its 26h window. The 23:20 slot does the same when 22:20 already wrote the session. An empty VIX or a thin cross-section re-serves the stored series
 as `stale_source` with an `error` heartbeat and exits non-zero; a gap wider than
 the incremental window raises and asks for `--backfill`. Installed by the deploy's
 `install-units` verb from `installed-units.sha256`. Spec:

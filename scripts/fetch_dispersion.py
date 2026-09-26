@@ -79,7 +79,7 @@ YAHOO_COURTESY_SLEEP_S = 0.25
 YAHOO_TIMEOUT_S = 30
 YAHOO_USER_AGENT = "Mozilla/5.0"   # an honest UA gets 429 from Yahoo
 HISTORY_READ_PAGE_ROWS = 500       # Hrana bounding on the dispersion_history read
-# Mirrors radon-dispersion.timer (OnCalendar=*-*-* 22:20:00 UTC)
+# Mirrors radon-dispersion.timer (OnCalendar 22:20 and 23:20 UTC)
 TIMER_HOUR_UTC, TIMER_MINUTE_UTC = 22, 20
 
 STATUS_OK = "ok"

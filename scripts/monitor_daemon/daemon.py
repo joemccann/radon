@@ -265,8 +265,14 @@ class MonitorDaemon:
             Dict mapping handler names to their results
         """
         results = {}
+        flushed = False
         if market_hours is None and self.respect_market_hours:
             market_hours = self.is_market_hours()
+
+        for handler in self.handlers:
+            flush = getattr(handler, "flush_pending_health", None)
+            if callable(flush) and flush() is True:
+                flushed = True
         
         for handler in self.handlers:
             if self._handler_can_run_now(handler, market_hours=market_hours):
@@ -284,8 +290,10 @@ class MonitorDaemon:
                 else:
                     logger.debug(f"Handler {handler.name} not due yet")
         
-        # Save state after each run
-        if self.state_file and results:
+        # Save state after each run. A pending-heartbeat flush is a write
+        # even when no handler was due, and the cleared payload has to
+        # survive the next restart.
+        if self.state_file and (results or flushed):
             self.save_state()
 
         return results

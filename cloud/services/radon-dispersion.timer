@@ -9,7 +9,12 @@ Description=Radon DISPERSION Indicator - daily 22:20 UTC IB daily-bar sweep (S&P
 # calendar day: weekend and holiday runs find no new completed session,
 # make no IB or Yahoo requests, and refresh the snapshot + heartbeat so
 # service_health stays inside the 26h window.
+# 23:20 is the recovery slot. stop-clean SIGTERMs an in-flight 22:20
+# oneshot and does not resume it; the 26h window only has about two
+# hours of slack after that slot. A run that already wrote the session
+# takes the no-fetch heartbeat path.
 OnCalendar=*-*-* 22:20:00 UTC
+OnCalendar=*-*-* 23:20:00 UTC
 Persistent=true
 RandomizedDelaySec=120
 

@@ -120,8 +120,8 @@ export const VIXTS_REFRESH: RefreshSchedule = [daily(2, 45)];
 /** cloud/services/radon-panic-index.timer */
 export const PANIC_INDEX_REFRESH: RefreshSchedule = [daily(2, 50), daily(13, 15)];
 
-/** cloud/services/radon-dispersion.timer */
-export const DISPERSION_REFRESH: RefreshSchedule = [daily(22, 20)];
+/** cloud/services/radon-dispersion.timer — 22:20 sweep, 23:20 if a deploy killed it */
+export const DISPERSION_REFRESH: RefreshSchedule = [daily(22, 20), daily(23, 20)];
 
 /** cloud/services/radon-skew.timer — intraday sweep plus the EOD finalize. */
 export const SKEW_REFRESH: RefreshSchedule = [

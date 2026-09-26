@@ -145,7 +145,7 @@ d25e52ea594eba7cd7421793dec6b0e6e554ea3055628b812e2d5b7508fd29f6  radon-vixts.se
 5ac1c01564869de06fd392a047d9f28772299bf0b1bd63c9ab2541ba6345b574  radon-panic-index.service
 72cb31a00baf0b49d8a95c582b5de3b23d6ed853208dfc98798b631c6508d1be  radon-panic-index.timer
 ea53f16f0a91b478398d599f3db52c16dc4efcd097100ee5a32cffaaf298ef6a  radon-dispersion.service
-2a3bd5d9433d70162ec2c28247e6e5fe0ca826ad955c09ad4cf5a321b72b7366  radon-dispersion.timer
+cb09556b2a06dda7a685727f293494124b1722220cd7a9be45876d7a66eaaaee  radon-dispersion.timer
 
 # Weekend disk cleanup (2026-08-27 root-disk-usage P1). CONTROL-PLANE units:
 # `install-units` skips them by design, so the copy that clears these two
