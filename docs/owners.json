@@ -183,7 +183,7 @@
       "globs": [
         "scripts/knowledge/**",
         "scripts/db/migrations/0087_knowledge_embedding_v2.sql",
-        "scripts/tests/test_knowledge_embedding_contract.py"
+        "scripts/tests/test_knowledge_embed_v2.py"
       ],
       "owners": ["docs/knowledge-embeddings.md"],
       "note": "Dual-dimension vector contract (384d bge + 2048d nemotron), query fallback, dual-write ingest, backfill order, and env vars. Drift test pins schema and coverage logic (DOC-129)."

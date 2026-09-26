@@ -50,7 +50,7 @@ Backfill is idempotent: `backfill_embedding_v2` only writes where `embedding_v2 
 - `v2_coverage_ready` logic: queries use 384-d while any NULL exists; 2048-d only after full backfill.
 - Dual-write env var parsing matches `dual_write_enabled()`.
 
-Run: `python3.13 -m pytest scripts/tests/test_knowledge_embedding_contract.py -q`
+Run: `python3.13 -m pytest scripts/tests/test_knowledge_embed_v2.py -q`
 
 ## Operator actions
 
