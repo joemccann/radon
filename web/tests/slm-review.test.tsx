@@ -104,7 +104,7 @@ describe("private SLM blind review", () => {
     vi.stubGlobal("fetch", vi.fn(async (_url: string, options?: RequestInit) => ({
       ok: true,
       json: async () => options?.method === "PUT" ? JSON.parse(options.body as string) : {
-        schema: "radon.slm-review-decisions.v1", runId: "fixture-run", reviewer: "operator-fixture", index: 8,
+        schema: "radon.slm-review-decisions.v1", runId: "fixture-run", reviewer: "operator-fixture", index: 8, updatedAt: "2026-09-25T12:00:00.000Z",
         decisions: [{ id: "post-8", humanTags: ["OPTIONS", "GAMMA", "VOL"], acceptance: { "Candidate 1": true }, reviewer: "operator-fixture", reviewedAt: "2026-09-25T12:00:00.000Z" }],
       },
     })));
