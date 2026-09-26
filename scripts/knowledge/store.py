@@ -31,6 +31,18 @@ _SELECT_EXISTING_SQL = (
     "SELECT id, content_hash, embedding IS NOT NULL FROM knowledge "
     "WHERE source = ? AND doc_key = ? AND chunk_ix = ?"
 )
+_SELECT_EXISTING_V2_SQL = (
+    "SELECT id, content_hash, embedding IS NOT NULL, embedding_v2 IS NOT NULL FROM knowledge "
+    "WHERE source = ? AND doc_key = ? AND chunk_ix = ?"
+)
+_HTTP_SELECT = (
+    "SELECT id, chunk_ix, content_hash, embedding IS NOT NULL FROM knowledge "
+    "WHERE source = ? AND doc_key = ?"
+)
+_HTTP_SELECT_V2 = (
+    "SELECT id, chunk_ix, content_hash, embedding IS NOT NULL, embedding_v2 IS NOT NULL "
+    "FROM knowledge WHERE source = ? AND doc_key = ?"
+)
 
 _INSERT_COLUMNS = (
     "source, scope, doc_key, chunk_ix, title, summary, content, metadata, "
@@ -57,6 +69,9 @@ _UPDATE_NO_EMBEDDING_SQL = (
 )
 
 _BACKFILL_EMBEDDING_SQL = "UPDATE knowledge SET embedding = vector32(?) WHERE id = ?"
+_BACKFILL_EMBEDDING_V2_SQL = (
+    "UPDATE knowledge SET embedding_v2 = vector32(?) WHERE id = ? AND embedding_v2 IS NULL"
+)
 
 _FTS_DELETE_SQL = "DELETE FROM knowledge_fts WHERE rowid = ?"
 _FTS_INSERT_SQL = "INSERT INTO knowledge_fts (rowid, title, summary, content) VALUES (?, ?, ?, ?)"
@@ -66,15 +81,25 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _need_embedding_v2(docs) -> bool:
+    if any(getattr(doc, "embedding_v2", None) is not None for doc in docs):
+        return True
+    from knowledge.embed import dual_write_enabled
+    return dual_write_enabled()
+
+
 def upsert_documents(db, docs: Iterable[KnowledgeDoc]) -> dict[str, int]:
     """Idempotent upsert keyed on content_hash. Connectors emit every chunk of
     a document together, so chunks stored beyond the highest emitted chunk_ix
     are superseded and pruned. Returns
     {"inserted": n, "updated": n, "skipped": n, "pruned": n}."""
+    docs = list(docs)
     if hasattr(db, "execute_transaction"):
-        return _upsert_documents_http(db, list(docs))
+        return _upsert_documents_http(db, docs)
     counts = {"inserted": 0, "updated": 0, "skipped": 0}
     last_chunk_ix: dict[tuple[str, str], int] = {}
+    need_v2 = _need_embedding_v2(docs)
+    select_sql = _SELECT_EXISTING_V2_SQL if need_v2 else _SELECT_EXISTING_SQL
     try:
         # Reserve the writer before reading: a deferred transaction's read
         # snapshot cannot be upgraded after a concurrent writer commits.
@@ -84,16 +109,22 @@ def upsert_documents(db, docs: Iterable[KnowledgeDoc]) -> dict[str, int]:
             last_chunk_ix[doc_id] = max(last_chunk_ix.get(doc_id, -1), doc.chunk_ix)
             digest = doc.content_hash()
             existing = db.execute(
-                _SELECT_EXISTING_SQL, (doc.source, doc.doc_key, doc.chunk_ix)
+                select_sql, (doc.source, doc.doc_key, doc.chunk_ix)
             ).fetchone()
             if existing is not None and existing[1] == digest:
+                changed = False
                 if doc.embedding is not None and not existing[2]:
                     _backfill_embedding(db, existing[0], doc)
-                    counts["updated"] += 1
-                else:
-                    counts["skipped"] += 1
+                    changed = True
+                if need_v2 and doc.embedding_v2 is not None and not existing[3]:
+                    backfill_embedding_v2(db, existing[0], doc.embedding_v2)
+                    changed = True
+                counts["updated" if changed else "skipped"] += 1
             elif existing is not None:
-                _update_document(db, existing[0], doc, digest)
+                _update_document(
+                    db, existing[0], doc, digest,
+                    clear_v2=need_v2 and doc.embedding_v2 is None,
+                )
                 counts["updated"] += 1
             else:
                 _insert_document(db, doc, digest)
@@ -169,7 +200,19 @@ def _insert_document(db, doc: KnowledgeDoc, digest: str) -> None:
         doc.title, doc.summary, doc.content, _metadata_json(doc),
     )
     tail_args = (digest, doc.created_at or now, doc.last_activity_at or now)
-    if doc.embedding is not None:
+    if doc.embedding_v2 is not None:
+        emb_sql = "NULL" if doc.embedding is None else "vector32(?)"
+        sql = (
+            "INSERT INTO knowledge (source, scope, doc_key, chunk_ix, title, summary, "
+            "content, metadata, embedding, embedding_v2, content_hash, created_at, last_activity_at) "
+            f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, {emb_sql}, vector32(?), ?, ?, ?)"
+        )
+        args = list(shared_args)
+        if doc.embedding is not None:
+            args.append(json.dumps(doc.embedding))
+        args.append(json.dumps(doc.embedding_v2))
+        cursor = db.execute(sql, tuple(args) + tail_args)
+    elif doc.embedding is not None:
         cursor = db.execute(
             _INSERT_WITH_EMBEDDING_SQL,
             shared_args + (json.dumps(doc.embedding),) + tail_args,
@@ -179,20 +222,40 @@ def _insert_document(db, doc: KnowledgeDoc, digest: str) -> None:
     _refresh_fts_row(db, cursor.lastrowid, doc)
 
 
-def _update_document(db, row_id: int, doc: KnowledgeDoc, digest: str) -> None:
+def _update_document(db, row_id: int, doc: KnowledgeDoc, digest: str, *, clear_v2: bool = False) -> None:
     shared_args = (
         doc.scope, doc.title, doc.summary, doc.content, _metadata_json(doc),
         digest, doc.last_activity_at or _now_iso(),
     )
-    if doc.embedding is not None:
-        db.execute(_UPDATE_WITH_EMBEDDING_SQL, shared_args + (json.dumps(doc.embedding), row_id))
+    if doc.embedding_v2 is None and not clear_v2:
+        if doc.embedding is not None:
+            db.execute(_UPDATE_WITH_EMBEDDING_SQL, shared_args + (json.dumps(doc.embedding), row_id))
+        else:
+            db.execute(_UPDATE_NO_EMBEDDING_SQL, shared_args + (row_id,))
     else:
-        db.execute(_UPDATE_NO_EMBEDDING_SQL, shared_args + (row_id,))
+        sets = _UPDATE_SET_COLUMNS
+        args = list(shared_args)
+        if doc.embedding is not None:
+            sets += ", embedding = vector32(?)"
+            args.append(json.dumps(doc.embedding))
+        else:
+            sets += ", embedding = NULL"
+        if doc.embedding_v2 is not None:
+            sets += ", embedding_v2 = vector32(?)"
+            args.append(json.dumps(doc.embedding_v2))
+        else:
+            sets += ", embedding_v2 = NULL"
+        args.append(row_id)
+        db.execute(f"UPDATE knowledge SET {sets} WHERE id = ?", tuple(args))
     _refresh_fts_row(db, row_id, doc)
 
 
 def _backfill_embedding(db, row_id: int, doc: KnowledgeDoc) -> None:
     db.execute(_BACKFILL_EMBEDDING_SQL, (json.dumps(doc.embedding), row_id))
+
+
+def backfill_embedding_v2(db, row_id: int, vector) -> None:
+    db.execute(_BACKFILL_EMBEDDING_V2_SQL, (json.dumps(list(vector)), row_id))
 
 
 def _refresh_fts_row(db, row_id: int, doc: KnowledgeDoc) -> None:
@@ -214,13 +277,11 @@ def _upsert_documents_http(db, docs: list[KnowledgeDoc]) -> dict[str, int]:
         groups.setdefault((doc.source, doc.doc_key), []).append(doc)
     if not groups:
         return counts
+    need_v2 = _need_embedding_v2(docs)
     statements, snapshots = [], []
     for key, chunks in groups.items():
         snapshots.append((len(statements), chunks))
-        statements.append((
-            "SELECT id, chunk_ix, content_hash, embedding IS NOT NULL FROM knowledge "
-            "WHERE source = ? AND doc_key = ?", key,
-        ))
+        statements.append((_HTTP_SELECT_V2 if need_v2 else _HTTP_SELECT, key))
         for doc in chunks:
             identity = (doc.source, doc.doc_key, doc.chunk_ix)
             digest = doc.content_hash()
@@ -233,16 +294,23 @@ def _upsert_documents_http(db, docs: list[KnowledgeDoc]) -> dict[str, int]:
             args = (doc.source, doc.scope, doc.doc_key, doc.chunk_ix, doc.title,
                     doc.summary, doc.content, _metadata_json(doc))
             tail = (digest, doc.created_at or now, doc.last_activity_at or now)
-            if doc.embedding is None:
+            include_v2 = doc.embedding_v2 is not None or (need_v2 and doc.embedding_v2 is None)
+            if include_v2:
+                insert, args = _http_insert_v2(doc, args, tail)
+                v2_assign = "embedding_v2=excluded.embedding_v2, "
+            elif doc.embedding is None:
                 insert, args = _INSERT_NO_EMBEDDING_SQL, args + tail
+                v2_assign = ""
             else:
                 insert = _INSERT_WITH_EMBEDDING_SQL
                 args += (json.dumps(doc.embedding),) + tail
+                v2_assign = ""
             # Preserve id and created_at; changed content clears a stale vector
             # when the incoming document has no embedding.
             statements.append((insert + " ON CONFLICT(source, doc_key, chunk_ix) DO UPDATE SET "
                 "scope=excluded.scope, title=excluded.title, summary=excluded.summary, "
                 "content=excluded.content, metadata=excluded.metadata, "
+                + v2_assign +
                 "embedding=excluded.embedding, content_hash=excluded.content_hash, "
                 "last_activity_at=excluded.last_activity_at "
                 "WHERE knowledge.content_hash != excluded.content_hash", args))
@@ -251,6 +319,12 @@ def _upsert_documents_http(db, docs: list[KnowledgeDoc]) -> dict[str, int]:
                     "UPDATE knowledge SET embedding=vector32(?) WHERE source=? "
                     "AND doc_key=? AND chunk_ix=? AND content_hash=? AND embedding IS NULL",
                     (json.dumps(doc.embedding),) + identity + (digest,),
+                ))
+            if doc.embedding_v2 is not None:
+                statements.append((
+                    "UPDATE knowledge SET embedding_v2=vector32(?) WHERE source=? "
+                    "AND doc_key=? AND chunk_ix=? AND content_hash=? AND embedding_v2 IS NULL",
+                    (json.dumps(doc.embedding_v2),) + identity + (digest,),
                 ))
             # Changed mirrors were removed above; unchanged/backfill mirrors
             # remain untouched. A previously missing mirror is safely repaired.
@@ -270,24 +344,47 @@ def _upsert_documents_http(db, docs: list[KnowledgeDoc]) -> dict[str, int]:
         statements.append(("DELETE FROM knowledge WHERE " + predicate, args))
     receipts = db.execute_transaction(statements)
     for index, chunks in snapshots:
-        before = {row[1]: (row[2], bool(row[3])) for row in receipts[index].fetchall()}
+        rows = receipts[index].fetchall()
+        if need_v2:
+            before = {row[1]: (row[2], bool(row[3]), bool(row[4])) for row in rows}
+        else:
+            before = {row[1]: (row[2], bool(row[3]), True) for row in rows}
         max_ix = max(doc.chunk_ix for doc in chunks)
         counts["pruned"] += sum(ix > max_ix for ix in before)
         for doc in chunks:
             digest = doc.content_hash()
             old = before.get(doc.chunk_ix)
+            has_v2 = doc.embedding_v2 is not None or not need_v2
             if old is None:
                 counts["inserted"] += 1
-                before[doc.chunk_ix] = (digest, doc.embedding is not None)
+                before[doc.chunk_ix] = (digest, doc.embedding is not None, has_v2)
             elif old[0] != digest:
                 counts["updated"] += 1
-                before[doc.chunk_ix] = (digest, doc.embedding is not None)
-            elif not old[1] and doc.embedding is not None:
+                before[doc.chunk_ix] = (digest, doc.embedding is not None, has_v2)
+            elif (not old[1] and doc.embedding is not None) or (
+                need_v2 and not old[2] and doc.embedding_v2 is not None
+            ):
                 counts["updated"] += 1
-                before[doc.chunk_ix] = (digest, True)
+                before[doc.chunk_ix] = (digest, True, True)
             else:
                 counts["skipped"] += 1
     return counts
+
+
+def _http_insert_v2(doc: KnowledgeDoc, args: tuple, tail: tuple) -> tuple[str, tuple]:
+    emb_sql = "NULL" if doc.embedding is None else "vector32(?)"
+    v2_sql = "NULL" if doc.embedding_v2 is None else "vector32(?)"
+    extra: list = []
+    if doc.embedding is not None:
+        extra.append(json.dumps(doc.embedding))
+    if doc.embedding_v2 is not None:
+        extra.append(json.dumps(doc.embedding_v2))
+    sql = (
+        "INSERT INTO knowledge (source, scope, doc_key, chunk_ix, title, summary, content, "
+        "metadata, embedding, embedding_v2, content_hash, created_at, last_activity_at) "
+        f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, {emb_sql}, {v2_sql}, ?, ?, ?)"
+    )
+    return sql, args + tuple(extra) + tail
 
 
 def _delete_source_docs_http(db, source: str, doc_keys: list[str]) -> int:

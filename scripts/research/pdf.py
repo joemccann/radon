@@ -1,4 +1,10 @@
-"""Local Firecrawl extraction and original PDF page rendering; no hosted calls."""
+"""Research PDF extraction and original page rendering.
+
+parse() uses NVIDIA Nemotron when RADON_RESEARCH_PARSER=nemotron, or when
+that variable is unset and NVIDIA_API_KEY is present. Any hosted failure
+falls back to local pdf-inspector for the whole document. The hosted budget
+stays inside the 180s pipeline subprocess timeout.
+"""
 import argparse
 import hashlib
 import importlib.metadata
@@ -18,10 +24,16 @@ def save_json(path, value):
     atomic_save(str(path), value)
 
 
-def parse(pdf_path, output):
+def parse(pdf_path, output, *, post=None, sleep=None, monotonic=None, jitter=None):
+    from research.nemotron_parse import parse_document
+    return parse_document(
+        pdf_path, output, post=post, sleep=sleep, monotonic=monotonic, jitter=jitter,
+    )
+
+
+def parse_local(pdf_path):
+    """pdf-inspector extract. Markdown stays on result['markdowns'] until write_evidence."""
     source = Path(pdf_path).resolve(strict=True)
-    output = Path(output)
-    output.mkdir(parents=True, exist_ok=True, mode=0o700)
     with pypdfium2.PdfDocument(str(source)) as doc:
         if not 0 < len(doc) <= 100:
             raise ValueError('Research PDF must contain 1..100 pages')
@@ -33,20 +45,29 @@ def parse(pdf_path, output):
     for item in positioned:
         items.setdefault(item.page, []).append({f: getattr(item, f) for f in fields})
     records = []
+    markdowns = {}
     for page in extracted.pages:
         number = page.page + 1
         name = f'page-{number:04d}.md'
-        (output / name).write_text(page.markdown)
+        markdowns[number] = page.markdown or ''
         records.append({'page_number': number, 'markdown_file': name,
                         'needs_ocr': page.needs_ocr, 'ocr_reason': page.ocr_reason,
                         'position_frame_rotation': 'unknown: 1.17.0 wheel does not expose frame rotations',
                         'items': items.get(number, [])})
-    result = {'source_path': str(source), 'source_sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
-              'parser': 'firecrawl/pdf-inspector', 'parser_version': importlib.metadata.version('pdf-inspector'),
-              'page_numbering': '1-based original PDF page sequence, not printed folio',
-              'position_coordinates': 'PDF points, visible box lower-left origin, y up; text y is baseline; /Rotate not applied; rebased frames unknown in this wheel; positions are evidence metadata, not auto-crop coordinates',
-              'ocr_enabled': False,
-              'page_count': len(records), 'pages': records}
+    return {'source_path': str(source), 'source_sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
+            'parser': 'firecrawl/pdf-inspector', 'parser_version': importlib.metadata.version('pdf-inspector'),
+            'page_numbering': '1-based original PDF page sequence, not printed folio',
+            'position_coordinates': 'PDF points, visible box lower-left origin, y up; text y is baseline; /Rotate not applied; rebased frames unknown in this wheel; positions are evidence metadata, not auto-crop coordinates',
+            'ocr_enabled': False,
+            'page_count': len(records), 'pages': records, 'markdowns': markdowns}
+
+
+def write_evidence(output, result):
+    output = Path(output)
+    output.mkdir(parents=True, exist_ok=True, mode=0o700)
+    markdowns = result.pop('markdowns')
+    for page in result['pages']:
+        (output / page['markdown_file']).write_text(markdowns[page['page_number']])
     from research.manifest import build_manifest
     save_json(output / 'manifest.json', build_manifest(result, output))
     save_json(output / 'evidence.json', result)

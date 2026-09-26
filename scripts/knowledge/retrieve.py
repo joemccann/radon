@@ -30,6 +30,8 @@ import json
 import re
 from typing import Callable, Iterable, Mapping, Sequence
 
+from knowledge.embed import EMBEDDING_DIM_V2
+
 RRF_K = 60
 LEG_WEIGHTS = {"fts": 1.0, "vector": 1.0}
 RECENCY_HALF_LIFE_DAYS: dict[str, float] = {"newsfeed": 7.0, "incidents": 14.0}
@@ -50,12 +52,7 @@ _FTS_SQL_TEMPLATE = (
     "WHERE {where} ORDER BY bm25(knowledge_fts), knowledge_fts.rowid LIMIT ?"
 )
 
-_VECTOR_TOP_K_SQL = "SELECT t.id FROM vector_top_k('idx_knowledge_embedding', vector32(?), ?) t"
-
-_VECTOR_TOP_K_FILTERED_SQL_TEMPLATE = (
-    "SELECT t.id FROM vector_top_k('idx_knowledge_embedding', vector32(?), ?) t "
-    "JOIN knowledge ON knowledge.id = t.id WHERE {where} LIMIT ?"
-)
+_VECTOR_INDEXES = ("idx_knowledge_embedding", "idx_knowledge_embedding_v2")
 
 _NEIGHBOR_SQL = (
     "SELECT chunk_ix, content FROM knowledge "
@@ -207,13 +204,22 @@ def _vector_top_k_search(
     pool: int,
     scopes: Sequence[str] | None = None,
     sources: Sequence[str] | None = None,
+    index_name: str | None = None,
 ) -> list[int]:
+    name = index_name or (
+        "idx_knowledge_embedding_v2" if len(query_embedding) == EMBEDDING_DIM_V2
+        else "idx_knowledge_embedding"
+    )
+    if name not in _VECTOR_INDEXES:
+        raise ValueError("unknown knowledge vector index")
     embedding_json = json.dumps(list(query_embedding))
     filter_clauses, filter_args = _knowledge_filters(scopes, sources)
+    head = "SELECT t.id FROM vector_top_k('" + name + "', vector32(?), ?) t"
     if not filter_clauses:
-        rows = db.execute(_VECTOR_TOP_K_SQL, (embedding_json, pool)).fetchall()
+        rows = db.execute(head, (embedding_json, pool)).fetchall()
         return [row[0] for row in rows]
-    sql = _VECTOR_TOP_K_FILTERED_SQL_TEMPLATE.format(where=" AND ".join(filter_clauses))
+    sql = head + " JOIN knowledge ON knowledge.id = t.id WHERE {where} LIMIT ?"
+    sql = sql.format(where=" AND ".join(filter_clauses))
     top_k = pool * VECTOR_FILTER_OVERFETCH
     rows = db.execute(sql, (embedding_json, top_k, *filter_args, pool)).fetchall()
     return [row[0] for row in rows]

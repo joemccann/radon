@@ -236,25 +236,23 @@ def _get_query_embedder() -> QueryEmbedder | None:
 
 
 def _build_query_embedder() -> QueryEmbedder | None:
-    try:
-        from knowledge.embed import get_embedder
+    from knowledge.embed import embed_backend, get_embedder, resolve_query_vector
 
-        embedder = get_embedder()
+    local = None
+    try:
+        local = get_embedder()
     except Exception as exc:  # missing deps/model — FTS-only is a valid mode
         print(f"[kb-mcp] embedder unavailable ({exc}); FTS-only", file=sys.stderr)
+    if local is None and embed_backend() != "nvidia":
         return None
-    embed_call = embedder if callable(embedder) else getattr(embedder, "embed", None)
-    if embed_call is None:
-        return None
-    return lambda text: _as_vector(embed_call([text]))
 
+    def embed_one(text: str):
+        vector = resolve_query_vector(text, local_embedder=local)
+        if not vector:
+            raise RuntimeError("embedding unavailable")
+        return vector
 
-def _as_vector(value) -> list[float]:
-    """Accept a plain vector or a batch-of-one (list/generator of vectors)."""
-    values = list(value)
-    if len(values) == 1 and not isinstance(values[0], (int, float)):
-        values = list(values[0])
-    return [float(component) for component in values]
+    return embed_one
 
 
 # ── MCP tool registrations ───────────────────────────────────────────

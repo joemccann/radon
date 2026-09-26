@@ -103,7 +103,16 @@ def main(argv: Sequence[str] | None = None) -> None:
         default=DEFAULT_GOLDEN_PATH,
         help="path to golden_set.json (default: the shipped set)",
     )
+    parser.add_argument(
+        "--backend",
+        choices=("local", "nvidia"),
+        default=None,
+        help="query embedding backend; nvidia uses embedding_v2 and falls back to local bge",
+    )
     args = parser.parse_args(argv)
+    if args.backend:
+        import os
+        os.environ["RADON_KB_EMBED_BACKEND"] = args.backend
     golden = json.loads(args.golden_path.read_text(encoding="utf-8"))
     if isinstance(golden, dict) and golden.get("draft"):
         print(
@@ -111,6 +120,10 @@ def main(argv: Sequence[str] | None = None) -> None:
             file=sys.stderr,
         )
     summary = run_golden(_production_db(), golden, query_embedder=_load_query_embedder())
+    from knowledge.embed import embed_backend
+    summary["backend"] = embed_backend()
+    summary["hit_at_k"] = summary["overall_hit_at_5"]
+    print(f"hit@{DEFAULT_LIMIT}={summary['hit_at_k']:.3f} backend={summary['backend']}", file=sys.stderr)
     _print_table(summary, file=sys.stderr)
     json.dump(summary, sys.stdout, indent=2)
     print()
@@ -133,18 +146,29 @@ def _production_db():
 
 
 def _load_query_embedder() -> QueryEmbedder | None:
-    try:
-        from knowledge.embed import get_embedder
+    from knowledge.embed import embed_backend, get_embedder, resolve_query_vector
 
-        embedder = get_embedder()
+    local = None
+    try:
+        local = get_embedder()
     except Exception as exc:  # missing module/deps/model — FTS-only is a valid mode
         print(f"embedder unavailable ({exc}); running FTS-only", file=sys.stderr)
+    if local is None and embed_backend() != "nvidia":
         return None
-    embed_call = embedder if callable(embedder) else getattr(embedder, "embed", None)
-    if embed_call is None:
-        print("embedder has no callable interface; running FTS-only", file=sys.stderr)
-        return None
-    return lambda text: _as_vector(embed_call([text]))
+
+    def embed_one(text: str):
+        vector = resolve_query_vector(
+            text,
+            local_embedder=local,
+            on_nvidia_error=lambda exc: print(
+                f"nvidia embed failed ({exc}); falling back", file=sys.stderr
+            ),
+        )
+        if not vector:
+            raise RuntimeError("embedding unavailable")
+        return vector
+
+    return embed_one
 
 
 def _as_vector(value) -> list[float]:

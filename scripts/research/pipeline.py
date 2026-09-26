@@ -17,13 +17,20 @@ from utils.atomic_io import atomic_save
 
 
 # The PDF parser subprocess needs only interpreter/locale plumbing, never the
-# worker's credentials: an untrusted document is parsed there.
+# worker's credentials: an untrusted document is parsed there. NVIDIA_API_KEY
+# and RADON_RESEARCH_PARSE* are the exception that lets the hosted extractor
+# run inside the same crash boundary. The hosted budget defaults to 100s so
+# local fallback still finishes inside the 180s subprocess timeout.
 _PDF_ENV_KEYS = ('PATH', 'PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV', 'HOME', 'LANG', 'LC_ALL',
                  'LC_CTYPE', 'TMPDIR', 'TZ', 'SYSTEMROOT')
 
 
 def pdf_subprocess_env():
-    return {key: os.environ[key] for key in _PDF_ENV_KEYS if key in os.environ}
+    env = {key: os.environ[key] for key in _PDF_ENV_KEYS if key in os.environ}
+    for key, value in os.environ.items():
+        if key == 'NVIDIA_API_KEY' or key.startswith('RADON_RESEARCH_PARSE'):
+            env[key] = value
+    return env
 
 
 class EvidenceError(ValueError):
