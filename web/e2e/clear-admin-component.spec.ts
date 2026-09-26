@@ -157,7 +157,10 @@ for (const viewport of [{ label: "desktop", width: 1440, height: 1000 }, { label
       await page.getByTestId(`admin-disclosure-${section}`).locator(":scope > summary").click();
     }
     await expect(page.getByTestId("ib-auth-state")).toContainText("Authenticated");
+    await page.getByTestId("service-controls-button").click();
+    await expect(page.getByTestId("services-card")).toBeVisible();
     await expect(page.getByTestId("services-card")).toContainText("radon-api.service");
+    await page.keyboard.press("Escape");
     await expect(page.getByTestId("writer-row-portfolio-sync")).toBeVisible();
     for (const service of ["analyst-ratings", "gamma-rotation-scan", "informed-flow", "vol-skew-mr", "orders-read-compare", "flex-web-service", "performance"]) {
       const writer = page.getByTestId(`writer-row-${service}`);
@@ -178,6 +181,7 @@ for (const viewport of [{ label: "desktop", width: 1440, height: 1000 }, { label
     expect(smallLabels, "Operator status metadata must meet the 12px minimum").toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
     await page.screenshot({ path: testInfo.outputPath(`${viewport.label}-admin-component.png`), fullPage: true });
+    await page.getByTestId("gateway-controls-button").click();
     await page.getByTestId("gateway-power-button").click();
     await expect(page.getByTestId("admin-confirm")).toBeVisible();
     await expect(page.getByTestId("admin-confirm-action")).toBeDisabled();

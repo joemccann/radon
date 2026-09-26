@@ -140,8 +140,8 @@ test.describe("admin panel", () => {
 
     await page.goto("/admin");
     await page.getByTestId("admin-disclosure-gateway").locator(":scope > summary").click();
-    await page.getByTestId("admin-disclosure-services").locator(":scope > summary").click();
-    await page.getByTestId("admin-disclosure-writers").locator(":scope > summary").click();
+    await expect(page.getByTestId("ib-gateway-card")).toContainText("IB Gateway");
+    await page.getByTestId("service-controls-button").click();
 
     await expect(page.getByTestId("admin-page")).toBeVisible();
     await expect(page.getByTestId("ib-auth-state")).toContainText("Authenticated");
@@ -170,9 +170,7 @@ test.describe("admin panel", () => {
     );
 
     await page.goto("/admin");
-    await page.getByTestId("admin-disclosure-gateway").locator(":scope > summary").click();
-    await page.getByTestId("admin-disclosure-services").locator(":scope > summary").click();
-    await page.getByTestId("admin-disclosure-writers").locator(":scope > summary").click();
+    await page.getByTestId("service-controls-button").click();
 
     const serviceRows = page.locator("[data-testid^='service-row-']");
     await expect(serviceRows).toHaveCount(3);
@@ -183,6 +181,9 @@ test.describe("admin panel", () => {
     await expect(serviceRows.nth(1)).toContainText("radon-monitor.service");
     await expect(serviceRows.nth(2)).toContainText("radon-nextjs.service");
 
+    await page.keyboard.press("Escape");
+    await page.getByTestId("admin-disclosure-services").locator(":scope > summary").click();
+    await page.getByTestId("admin-disclosure-writers").locator(":scope > summary").click();
     const writerRows = page.locator("[data-testid^='writer-row-']");
     await expect(writerRows).toHaveCount(3);
     await expect(writerRows.nth(0)).toContainText("cash-flow-sync");
@@ -212,9 +213,7 @@ test.describe("admin panel", () => {
     });
 
     await page.goto("/admin");
-    await page.getByTestId("admin-disclosure-gateway").locator(":scope > summary").click();
-    await page.getByTestId("admin-disclosure-services").locator(":scope > summary").click();
-    await page.getByTestId("admin-disclosure-writers").locator(":scope > summary").click();
+    await page.getByTestId("gateway-controls-button").click();
     await expect(page.getByTestId("force-2fa-button")).toBeVisible();
 
     // First click: opens confirmation, does NOT fire the POST.
@@ -240,9 +239,7 @@ test.describe("admin panel", () => {
     );
 
     await page.goto("/admin");
-    await page.getByTestId("admin-disclosure-gateway").locator(":scope > summary").click();
-    await page.getByTestId("admin-disclosure-services").locator(":scope > summary").click();
-    await page.getByTestId("admin-disclosure-writers").locator(":scope > summary").click();
+    await page.getByTestId("gateway-controls-button").click();
 
     // Open the destructive Stop dialog for the gateway unit (gated by type-to-confirm).
     await page.getByTestId("gateway-power-button").click();
@@ -271,9 +268,7 @@ test.describe("admin panel", () => {
     );
 
     await page.goto("/admin");
-    await page.getByTestId("admin-disclosure-gateway").locator(":scope > summary").click();
-    await page.getByTestId("admin-disclosure-services").locator(":scope > summary").click();
-    await page.getByTestId("admin-disclosure-writers").locator(":scope > summary").click();
+    await page.getByTestId("gateway-controls-button").click();
 
     const button = page.getByTestId("force-2fa-button");
     await expect(button).toBeDisabled();

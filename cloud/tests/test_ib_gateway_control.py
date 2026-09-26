@@ -724,7 +724,10 @@ fi
     assert not any(line.startswith("systemctl stop ") for line in lines)
 
 
-def test_operator_stop_then_start_restores_exact_timer_topology(tmp_path: Path):
+@pytest.mark.parametrize("extra_active_units", [0, 4096])
+def test_operator_stop_then_start_restores_exact_timer_topology(
+    tmp_path: Path, extra_active_units: int,
+):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     events = tmp_path / "events.log"
@@ -740,6 +743,13 @@ if [ "${1:-}" = list-units ]; then
   printf '%s\n' 'radon-db-backup.timer loaded inactive dead inactive-timer'
   printf '%s\n' 'radon-portfolio-sync.service loaded inactive dead scheduled-job'
   printf '%s\n' 'radon-db-backup.service loaded inactive dead scheduled-job'
+  # Exceed pipe capacity after the required/active units already matched.
+  # A printf | grep -q predicate must not turn a SIGPIPE into a missing unit.
+  extra_unit=0
+  while [ "$extra_unit" -lt "$RADON_TEST_EXTRA_ACTIVE_UNITS" ]; do
+    printf 'radon-test-%s.service loaded active running scheduled-job\n' "$extra_unit"
+    extra_unit=$((extra_unit + 1))
+  done
   exit 0
 fi
 if [ "${1:-}" = list-unit-files ]; then
@@ -762,6 +772,7 @@ printf 'gateway %s\n' "$*" >> "$RADON_OPERATOR_EVENTS"
         "PATH": f"{fake_bin}:{os.environ['PATH']}",
         "RADON_IB_GATEWAY_CONTROL": str(gateway_control),
         "RADON_OPERATOR_EVENTS": str(events),
+        "RADON_TEST_EXTRA_ACTIVE_UNITS": str(extra_active_units),
         "RADON_OPERATOR_TOPOLOGY_PATH": str(topology),
         "RADON_OPERATOR_ALLOW_ROOT": "1",
         "RADON_OPERATOR_PYTHON": sys.executable,
@@ -774,6 +785,11 @@ printf 'gateway %s\n' "$*" >> "$RADON_OPERATOR_EVENTS"
     )
     assert stopped.returncode == 0, stopped.stderr
     assert topology.exists()
+    # Required active daemons must be stopped even when followed by a large
+    # inventory; an early-exit consumer must not silently drop them.
+    stopped_units = topology.read_text().splitlines()
+    for unit in ("radon-api", "radon-nextjs", "radon-relay", "radon-monitor", "radon-newsfeed"):
+        assert f"{unit}.service" in stopped_units
     events.write_text("")
 
     started = subprocess.run(
@@ -789,6 +805,7 @@ printf 'gateway %s\n' "$*" >> "$RADON_OPERATOR_EVENTS"
     assert "radon-db-backup.timer" not in start_call
     assert "radon-portfolio-sync.service" not in start_call
     assert "radon-db-backup.service" not in start_call
+    assert "radon-test-" not in start_call
     assert not topology.exists()
 
 

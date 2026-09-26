@@ -8576,3 +8576,14 @@ Dependency graph: T1 -> T2 -> T3 -> T4.
 - [ ] T4 Verify in browser and exact-head GitHub CI; document result. depends_on: [T3]
 
 Review: pending. Existing localStorage decisions migrate into the backup when the original packet is loaded. The packet stays in browser storage; the server stores only votes, labels and cursor. No local test suites per operator policy.
+
+## Operator header recovery controls — 2026-09-25
+- [x] T1 Inspect gateway/service capabilities and define header layout. depends_on: []
+- [x] T2 Add persistent header access, explicit gateway Start/Restart/Stop, and service controls using current mutation owners. depends_on: [T1]
+- [x] T3 Add regressions and inspect desktop/mobile fixtures. depends_on: [T2]
+- [ ] T4 Publish PR; complete exact-head CI and accepted notification. depends_on: [T3]
+Dependency graph: T1 -> T2 -> T3 -> T4. Gateway implementation, header composition, and coverage preparation may run in parallel after contracts are established. Existing confirmations, source freshness, push leases, host permissions and pending exclusion remain enforced. No live remediation or local test suites. Bulk Start All/Stop All scope awaits optional user clarification; default to each service plus existing Restart All.
+
+Review: independent gateway/coverage reviews completed; shared command lock and source freshness guards implemented. TypeScript static check passed. Manual dark desktop and320px mobile fixture review confirmed direct header access, grouped Gateway commands, service inventory reflow, primary action within752px and no horizontal overflow. Tests authored for GitHub CI; no local suites or live infrastructure actions run.
+
+CI repair review: befea93d preserved21 new gateway/service component regressions; one existing copy assertion required explicit unavailable start/stop/restart wording. Cloud CI exposed an existing pipefail race in required/active unit membership checks (2261 passed,1 failed): pure-shell exact matching replaces early-exit grep pipelines and adds4096-unit topology coverage without relaxing required-unit or oneshot replay guards. No local suites.

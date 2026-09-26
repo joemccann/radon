@@ -69,3 +69,8 @@ All existing service/writer diagnostics and administration features remain reach
 ## Existing regression surfaces
 
 Extend the relevant current suites rather than replacing coverage: `tests/admin-redesign-components.test.tsx`, `tests/admin-polling.test.tsx`, `tests/admin-action-request-assertions.test.tsx`, `tests/admin-trading-controls.test.ts`, and `e2e/admin-panel.spec.ts`, `e2e/admin-visual-snapshot.spec.ts`, `e2e/clear-admin-component.spec.ts`. Preserve `lib/serviceHealthWindows.ts` market-aware `isStale` behavior and current `adminReliability`, `adminHostMetrics`, `adminSlo`, `adminFormat`, and `adminTypes` contracts.
+
+## Header recovery refinement — 2026-09-25
+Gateway controls and Service controls remain permanently available beside Trading controls. Gateway commands expose Start, Restart and Stop together, with Force 2FA and Reset Backoff secondary. Service controls contain the existing Restart All action and the full service inventory with per-service commands. The same component owners remain mounted while dialogs are closed; commands are never duplicated. Existing host capability restrictions remain authoritative. Bulk Start All/Stop All are not introduced.
+
+A shared command lock prevents overlapping infrastructure actions. Stale source observations disable commands and revalidate open confirmations, retaining enabled Cancel and explicit refresh guidance. Mobile header entries reflow into three equal-width touch targets; dialogs use current Clear tokens and native confirmation/focus behavior.

@@ -1113,3 +1113,6 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-09-17 — AI metric labels and history
 - Translate residual categories into the measured population and unit; never expose bare “other”, “other share” or publisher/cohort IDs as selector copy.
 - Verify actual observation spacing before applying chart gap limits: a daily collection schedule does not imply daily points in publisher history. Token histories must render connected lines across normal sampling intervals.
+
+## 2026-09-25 — Recovery controls must stay discoverable
+- Keep gateway lifecycle and service recovery available beside Trading controls even when broker health is nominal. A conditional attention action and buried diagnostics do not satisfy rapid operator access.

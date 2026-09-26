@@ -6,7 +6,6 @@ import type { AdminHealthPayload, HostRole, UnitStatus } from "@/lib/adminTypes"
 import {
   forcePushDisabledReason,
   gatewayPowerState,
-  isForcePushDisabled,
   unitDependents,
   type GatewayPowerState,
 } from "@/lib/adminFormat";
@@ -30,8 +29,9 @@ type Ib2faControlsProps = {
   servicesSupported?: boolean;
   /** Targeted per-unit stop of the gateway (control_unit / systemctl stop). */
   onStopGateway?: () => Promise<boolean>;
-  /** Full-stack recovery (radon restart): brings the gateway + dependents back
-   *  in order. Reuses the Restart All Services path. */
+  /** Targeted per-unit restart of the gateway. */
+  onRestartGateway?: () => Promise<boolean>;
+  /** Start the gateway through its existing recovery handler. */
   onStartGateway?: () => Promise<boolean>;
   /** Both admin polls (/admin/services + /health) are failing — radon-api is
    *  unreachable, which is exactly what a gateway stop causes (cascade). The
@@ -42,14 +42,17 @@ type Ib2faControlsProps = {
   onAfter?: () => void;
   /** Hoist the suggested recovery trigger while preserving one control owner. */
   primaryActionContainer?: HTMLElement | null;
+  /** Hoist the existing stack trigger into service controls. */
+  stackActionContainer?: HTMLElement | null;
   primaryObservationCurrent?: boolean;
+  /** Shared workspace lock for gateway and service commands. */
+  externalPending?: boolean;
   onInspect?: () => void;
 };
 
 /**
- * Two-button control surface: Force 2FA Push (primary) + Reset Backoff
- * (secondary). Each button gates on its own confirmation modal. Force push
- * is also gated on the cross-process lock surfaced by /health.
+ * One owner for gateway lifecycle, 2FA recovery and stack restart commands.
+ * Header/attention triggers share these confirmations and pending guards.
  */
 export default function Ib2faControls({
   health,
@@ -60,11 +63,14 @@ export default function Ib2faControls({
   servicesSupported = true,
   onStopGateway,
   onStartGateway,
+  onRestartGateway,
   apiUnreachable = false,
   hostRole,
   onAfter,
   primaryActionContainer = null,
+  stackActionContainer = null,
   primaryObservationCurrent = true,
+  externalPending = false,
   onInspect,
 }: Ib2faControlsProps) {
   const [showForceConfirm, setShowForceConfirm] = useState(false);
@@ -72,6 +78,7 @@ export default function Ib2faControls({
   const [showRestartConfirm, setShowRestartConfirm] = useState(false);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
   const [showStartConfirm, setShowStartConfirm] = useState(false);
+  const [showGatewayRestartConfirm, setShowGatewayRestartConfirm] = useState(false);
   const [pendingForce, setPendingForce] = useState(false);
   const [pendingReset, setPendingReset] = useState(false);
   const [pendingRestart, setPendingRestart] = useState(false);
@@ -82,20 +89,20 @@ export default function Ib2faControls({
   // window) so it never sticks stale.
   const [optimisticPower, setOptimisticPower] = useState<GatewayPowerState | null>(null);
 
+  const anyPending = externalPending || pendingForce || pendingReset || pendingRestart || pendingPower;
   const pushLock = health?.ib_gateway?.restart_backoff?.push_lock ?? null;
-  const disableForce = isForcePushDisabled({ pushLock, pending: pendingForce });
-  const disableReason = forcePushDisabledReason({ pushLock, pending: pendingForce });
 
   // When radon-api is unreachable (both admin polls failing — the cascade a
   // gateway stop causes), the cached unit row is not affirmative power-state
   // evidence. Fail closed as unknown and disable destructive power actions.
-  const polledPowerState: GatewayPowerState = apiUnreachable
+  const polledPowerState: GatewayPowerState = apiUnreachable || !primaryObservationCurrent ||
+    gatewayUnit?.active_state === "unknown" || (!gatewayUnit && health?.ib_gateway?.port_listening == null)
     ? "unknown"
     : gatewayPowerState({
         unit: gatewayUnit,
         portListening: health?.ib_gateway?.port_listening,
       });
-  const powerState = optimisticPower ?? polledPowerState;
+  const powerState = polledPowerState === "unknown" ? "unknown" : optimisticPower ?? polledPowerState;
 
   // Reconcile the optimistic override with the authoritative poll: clear it
   // once the poll confirms the expected terminal state, or after the safety
@@ -116,26 +123,43 @@ export default function Ib2faControls({
 
   const remoteGateway = hostRole === "app" && gatewayUnit?.can_control === true;
   const ownsGatewayLifecycle = hostRole !== "app" || remoteGateway;
+  const stackCyclesGateway = hostRole !== "app";
   const gatewayDependents = unitDependents(GATEWAY_UNIT);
   // Start triggers a fresh 2FA login, so gate it on the same push lock as
   // Force 2FA to keep two pushes from racing (feedback_2fa_push_stacking).
-  const startBlockedByPush = isForcePushDisabled({ pushLock, pending: false });
-  const powerDisabledReason = !servicesSupported && !remoteGateway
-    ? "Read-only: this browser is not on the Hetzner VPS."
-    : powerState === "unknown"
-      ? "Gateway state is unknown while the control plane is unreachable."
-      : powerState === "running" && !onStopGateway
-        ? "Gateway stop control is unavailable."
-        : powerState === "stopped" && !onStartGateway
-          ? "Gateway start control is unavailable."
+  const lifecycleDisabledReason = !primaryObservationCurrent || apiUnreachable
+    ? "Refresh gateway status before running a command."
+    : !ownsGatewayLifecycle || gatewayUnit?.can_control === false
+      ? "Read-only: this host cannot control the broker Gateway."
+      : !servicesSupported && !remoteGateway
+        ? "Read-only: this browser is not on the Hetzner VPS."
+        : null;
+  const transitionDisabledReason = powerState === "unknown"
+    ? "Gateway state is unknown while the control plane is unreachable."
     : powerState === "transitional"
       ? "Gateway is mid-transition. Wait for it to settle."
-      : powerState === "stopped" && startBlockedByPush
-        ? (forcePushDisabledReason({ pushLock, pending: false }) ?? "A 2FA push is already in flight.")
-        : null;
-  const powerDisabled = pendingPower || powerDisabledReason !== null;
+      : null;
+  const pushDisabledReason = forcePushDisabledReason({ pushLock, pending: false });
+  const startDisabledReason = lifecycleDisabledReason ?? transitionDisabledReason ??
+    (powerState === "running" ? "Gateway is already running." : !onStartGateway ? "Gateway start control is unavailable." : pushDisabledReason);
+  const stopDisabledReason = lifecycleDisabledReason ?? transitionDisabledReason ??
+    (powerState === "stopped" ? "Gateway is already stopped." : !onStopGateway ? "Gateway stop control is unavailable." : null);
+  const restartGatewayDisabledReason = lifecycleDisabledReason ?? transitionDisabledReason ??
+    (!onRestartGateway ? "Gateway restart control is unavailable." : pushDisabledReason);
+  const powerDisabledReason = powerState === "stopped" ? startDisabledReason : stopDisabledReason;
+  const powerDisabled = anyPending || powerDisabledReason !== null;
+  const disableReason = lifecycleDisabledReason ?? transitionDisabledReason ??
+    forcePushDisabledReason({ pushLock, pending: anyPending });
+  const disableForce = disableReason !== null;
+  const stackDisabledReason = !primaryObservationCurrent || apiUnreachable
+    ? "Refresh service status before running a command."
+    : !servicesSupported
+      ? "Read-only: service control is unavailable on this host."
+      : stackCyclesGateway ? lifecycleDisabledReason ?? transitionDisabledReason ?? pushDisabledReason : null;
+  const resetDisabled = anyPending || !primaryObservationCurrent || apiUnreachable;
 
   const runForce = async () => {
+    if (anyPending || disableForce) return;
     setPendingForce(true);
     try {
       await onForcePush();
@@ -147,6 +171,7 @@ export default function Ib2faControls({
   };
 
   const runReset = async () => {
+    if (resetDisabled) return;
     setPendingReset(true);
     try {
       await onResetBackoff();
@@ -158,6 +183,7 @@ export default function Ib2faControls({
   };
 
   const runRestart = async () => {
+    if (anyPending || stackDisabledReason) return;
     setPendingRestart(true);
     try {
       await onRestartStack();
@@ -169,6 +195,7 @@ export default function Ib2faControls({
   };
 
   const runStop = async () => {
+    if (anyPending || stopDisabledReason) return;
     setPendingPower(true);
     try {
       const succeeded = onStopGateway ? await onStopGateway() : false;
@@ -184,6 +211,7 @@ export default function Ib2faControls({
   };
 
   const runStart = async () => {
+    if (anyPending || startDisabledReason) return;
     setPendingPower(true);
     try {
       const succeeded = onStartGateway ? await onStartGateway() : false;
@@ -195,6 +223,18 @@ export default function Ib2faControls({
     } finally {
       setPendingPower(false);
       setShowStartConfirm(false);
+      onAfter?.();
+    }
+  };
+
+  const runGatewayRestart = async () => {
+    if (anyPending || restartGatewayDisabledReason || !onRestartGateway) return;
+    setPendingPower(true);
+    try {
+      if (await onRestartGateway()) setOptimisticPower("transitional");
+    } finally {
+      setPendingPower(false);
+      setShowGatewayRestartConfirm(false);
       onAfter?.();
     }
   };
@@ -225,12 +265,28 @@ export default function Ib2faControls({
           ? "Start Gateway"
           : "Unavailable";
 
-  const anyPending = pendingForce || pendingReset || pendingRestart || pendingPower;
   const suggestStart = primaryObservationCurrent && ownsGatewayLifecycle && powerState === "stopped" && Boolean(onStartGateway);
   const suggestPush = primaryObservationCurrent && ownsGatewayLifecycle && !apiUnreachable && powerState === "running" &&
     (authState === "awaiting_2fa" || authState === "unreachable");
   const primaryDisabledReason = suggestStart ? powerDisabledReason : suggestPush ? disableReason : null;
   const primaryDisabled = anyPending || (suggestStart ? powerDisabled : suggestPush ? disableForce : !onInspect);
+
+  const stackAction = (
+    <button
+      type="button"
+      className="admin-btn admin-btn-danger"
+      onClick={() => setShowRestartConfirm(true)}
+      disabled={anyPending || stackDisabledReason !== null}
+      title={stackDisabledReason ?? (
+        stackCyclesGateway
+          ? "Run radon restart on the VPS: stops then starts every radon-* unit in order"
+          : "Run radon restart on this app host. Gateway stays on the broker."
+      )}
+      data-testid="restart-stack-button"
+    >
+      {pendingRestart ? "Restarting..." : "Restart All Services"}
+    </button>
+  );
 
   return (
     <section className="admin-card" data-testid="ib-controls">
@@ -254,6 +310,56 @@ export default function Ib2faControls({
         <span className="admin-card-title">IB Gateway controls</span>
       </header>
 
+      {ownsGatewayLifecycle ? (
+      <div className="admin-gateway-power" data-testid="gateway-power">
+        <span className="admin-card-note-inline">Gateway power</span>
+        <p
+          className="admin-gateway-power-status"
+          data-testid="gateway-power-status"
+          data-state={powerState}
+        >
+          {powerStatusLine}
+        </p>
+        <div className="admin-actions-row">
+          <button
+            type="button"
+            className="admin-btn admin-btn-primary admin-gateway-power-btn"
+            onClick={() => setShowStartConfirm(true)}
+            disabled={anyPending || startDisabledReason !== null}
+            title={startDisabledReason ?? "Start IB Gateway and request one 2FA approval"}
+            data-testid={powerState === "stopped" ? "gateway-power-button" : "gateway-start-button"}
+          >
+            {powerState === "stopped" ? powerButtonLabel : "Start Gateway"}
+          </button>
+          <button
+            type="button"
+            className="admin-btn admin-btn-ghost admin-gateway-power-btn"
+            onClick={() => setShowGatewayRestartConfirm(true)}
+            disabled={anyPending || restartGatewayDisabledReason !== null}
+            title={restartGatewayDisabledReason ?? "Restart IB Gateway and request a fresh 2FA approval"}
+            data-testid="gateway-restart-button"
+          >
+            Restart Gateway
+          </button>
+          <button
+            type="button"
+            className="admin-btn admin-btn-danger admin-gateway-power-btn"
+            onClick={() => setShowStopConfirm(true)}
+            disabled={anyPending || stopDisabledReason !== null}
+            title={stopDisabledReason ?? "Stop IB Gateway"}
+            data-testid={powerState !== "stopped" ? "gateway-power-button" : "gateway-stop-button"}
+          >
+            {powerState !== "stopped" ? powerButtonLabel : "Stop Gateway"}
+          </button>
+        </div>
+        {powerDisabledReason && (
+          <p className="admin-card-note" data-testid="gateway-power-disabled-reason">
+            {powerDisabledReason}
+          </p>
+        )}
+      </div>
+      ) : null}
+
       <div className="admin-actions-row">
         {ownsGatewayLifecycle ? (
         <button
@@ -272,7 +378,7 @@ export default function Ib2faControls({
           type="button"
           className="admin-btn admin-btn-ghost"
           onClick={() => setShowResetConfirm(true)}
-          disabled={pendingReset}
+          disabled={resetDisabled}
           title={
             hostRole === "app"
               ? "Release the broker's 2FA push lease and clear the restart backoff counter"
@@ -283,20 +389,7 @@ export default function Ib2faControls({
           Reset Backoff
         </button>
 
-        <button
-          type="button"
-          className="admin-btn admin-btn-danger"
-          onClick={() => setShowRestartConfirm(true)}
-          disabled={pendingRestart}
-          title={
-            ownsGatewayLifecycle
-              ? "Run radon restart on the VPS: stops then starts every radon-* unit in order"
-              : "Run radon restart on this app host. Gateway stays on the broker."
-          }
-          data-testid="restart-stack-button"
-        >
-          {pendingRestart ? "Restarting..." : "Restart All Services"}
-        </button>
+        {stackActionContainer ? createPortal(stackAction, stackActionContainer) : stackAction}
       </div>
 
       {ownsGatewayLifecycle && disableReason && (
@@ -311,40 +404,6 @@ export default function Ib2faControls({
         </p>
       ) : null}
 
-      {ownsGatewayLifecycle ? (
-      <div className="admin-gateway-power" data-testid="gateway-power">
-        <span className="admin-card-note-inline">Gateway power</span>
-        <p
-          className="admin-gateway-power-status"
-          data-testid="gateway-power-status"
-          data-state={powerState}
-        >
-          {powerStatusLine}
-        </p>
-        <button
-          type="button"
-          className={`admin-btn admin-gateway-power-btn ${powerState === "running" ? "admin-btn-danger" : "admin-btn-primary"}`}
-          onClick={() =>
-            powerState === "running"
-              ? setShowStopConfirm(true)
-              : powerState === "stopped"
-                ? setShowStartConfirm(true)
-                : undefined
-          }
-          disabled={powerDisabled}
-          title={powerDisabledReason ?? undefined}
-          data-testid="gateway-power-button"
-        >
-          {powerButtonLabel}
-        </button>
-        {powerDisabledReason && (
-          <p className="admin-card-note" data-testid="gateway-power-disabled-reason">
-            {powerDisabledReason}
-          </p>
-        )}
-      </div>
-      ) : null}
-
       <ConfirmDialog
         open={showForceConfirm}
         title="Force 2FA push?"
@@ -352,6 +411,8 @@ export default function Ib2faControls({
         confirmLabel="Send push"
         destructive
         pending={pendingForce}
+        confirmDisabled={anyPending || disableForce}
+        disabledReason={disableReason ?? (anyPending ? "Another command is in progress." : undefined)}
         onConfirm={runForce}
         onCancel={() => setShowForceConfirm(false)}
       />
@@ -365,6 +426,8 @@ export default function Ib2faControls({
         }
         confirmLabel="Reset"
         pending={pendingReset}
+        confirmDisabled={resetDisabled}
+        disabledReason={anyPending ? "Another command is in progress." : "Refresh gateway status before running a command."}
         onConfirm={runReset}
         onCancel={() => setShowResetConfirm(false)}
       />
@@ -372,13 +435,15 @@ export default function Ib2faControls({
         open={showRestartConfirm}
         title="Restart all radon services?"
         body={
-          ownsGatewayLifecycle
+          stackCyclesGateway
             ? "Runs radon restart on the VPS: stops every radon-* systemd unit, then starts them in dependency order (IB Gateway first). Takes about 60 to 90 seconds. The page will briefly lose its connection while FastAPI cycles. IB Gateway will need a fresh 2FA approval on your phone when it comes back up."
             : "Runs radon restart on this app host. App-plane units only. Gateway stays on the broker. The page will briefly lose its connection while FastAPI cycles."
         }
         confirmLabel="Restart all"
         destructive
         pending={pendingRestart}
+        confirmDisabled={anyPending || stackDisabledReason !== null}
+        disabledReason={stackDisabledReason ?? (anyPending ? "Another command is in progress." : undefined)}
         onConfirm={runRestart}
         onCancel={() => setShowRestartConfirm(false)}
       />
@@ -391,8 +456,27 @@ export default function Ib2faControls({
         affectedUnits={gatewayDependents}
         requireTyped={GATEWAY_UNIT}
         pending={pendingPower}
+        confirmDisabled={anyPending || stopDisabledReason !== null}
+        disabledReason={stopDisabledReason ?? (anyPending ? "Another command is in progress." : undefined)}
         onConfirm={runStop}
         onCancel={() => setShowStopConfirm(false)}
+      />
+      <ConfirmDialog
+        open={showGatewayRestartConfirm}
+        title="Restart the IB Gateway?"
+        body={remoteGateway
+          ? "This restarts only the broker Gateway and fires one fresh IBKR Mobile 2FA push. IB data and orders go offline during recovery. Approve only one push. App services stay up."
+          : "This restarts only the IB Gateway and fires one fresh IBKR Mobile 2FA push. IB data and orders go offline during recovery. Approve only one push. Dependent relay and monitor services stop; use Restart All Services to recover them."
+        }
+        confirmLabel="Restart Gateway"
+        destructive
+        affectedUnits={remoteGateway ? [] : gatewayDependents}
+        requireTyped={GATEWAY_UNIT}
+        pending={pendingPower}
+        confirmDisabled={anyPending || restartGatewayDisabledReason !== null}
+        disabledReason={restartGatewayDisabledReason ?? (anyPending ? "Another command is in progress." : undefined)}
+        onConfirm={runGatewayRestart}
+        onCancel={() => setShowGatewayRestartConfirm(false)}
       />
       <ConfirmDialog
         open={showStartConfirm}
@@ -400,6 +484,8 @@ export default function Ib2faControls({
         body="This starts the IB Gateway. It fires one IBKR Mobile 2FA push. Approve only one. App services stay up."
         confirmLabel="Start Gateway"
         pending={pendingPower}
+        confirmDisabled={anyPending || startDisabledReason !== null}
+        disabledReason={startDisabledReason ?? (anyPending ? "Another command is in progress." : undefined)}
         onConfirm={runStart}
         onCancel={() => setShowStartConfirm(false)}
       />
