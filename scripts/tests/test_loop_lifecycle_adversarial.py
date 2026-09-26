@@ -425,7 +425,9 @@ def test_an_untracked_orphan_in_the_clone_is_never_reaped(tmp_path):
 
 
 @needs_host_ps
-@pytest.mark.parametrize("shape", ["remote-control", "outside-clone", "older-than-round", "has-tty-parentless"])
+@pytest.mark.parametrize(
+    "shape", ["remote-control", "under-remote-control", "outside-clone", "older-than-round", "has-tty-parentless"]
+)
 def test_a_declared_pid_is_reaped_only_when_it_is_really_the_rounds(shape, tmp_path):
     """The declaration file lives in the agent-writable clone, so a forged or
     stale entry must not reach anything that is not plausibly the round's."""
@@ -440,6 +442,18 @@ def test_a_declared_pid_is_reaped_only_when_it_is_really_the_rounds(shape, tmp_p
         rc.write_text("#!/bin/sh\n/bin/sleep 60\n")  # like radon-rc.sh: the shell stays
         rc.chmod(0o755)
         pid = _orphan(clone, "/bin/sh", str(rc))
+    elif shape == "under-remote-control":
+        # A tool a Remote Control session started: its own argv is clean, its parent's is not.
+        kids = tmp_path / "kids"
+        rc = tmp_path / "radon-rc.sh"
+        rc.write_text(f'#!/bin/sh\n/bin/sleep 60 &\necho $! > "{kids}"\nwait\n')
+        rc.chmod(0o755)
+        _orphan(clone, "/bin/sh", str(rc))
+        for _ in range(50):
+            if kids.exists() and kids.read_text().strip():
+                break
+            time.sleep(0.1)
+        pid = int(kids.read_text())
     elif shape == "outside-clone":
         pid = _orphan(outside)
     elif shape == "older-than-round":
