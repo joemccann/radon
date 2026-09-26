@@ -114,6 +114,21 @@ describe("private SLM blind review", () => {
     expect(JSON.parse(localStorage.getItem("radon-slm-review:fixture-run:operator-fixture") as string).decisions).toHaveLength(1);
   });
 
+  it("opens the first unfinished item when importing legacy browser votes without a cursor", async () => {
+    browserPacket.value = packet();
+    localStorage.setItem("radon-slm-review:fixture-run:operator-fixture", JSON.stringify({
+      schema: "radon.slm-review-decisions.v1", runId: "fixture-run", reviewer: "operator-fixture",
+      decisions: [{
+        id: "post-0", humanTags: ["OPTIONS", "GAMMA", "VOL"],
+        acceptance: { "Candidate 1": true, "Candidate 2": false, "Candidate 3": true },
+        reviewer: "operator-fixture", reviewedAt: "2026-09-25T12:00:00.000Z",
+      }],
+    }));
+    render(<SlmReview reviewer="operator-fixture" />);
+    await screen.findByText("POST post-1");
+    expect(screen.getByText(/Resumed 1 labeled item/)).toBeTruthy();
+  });
+
   it("rejects packets without the required 40 image posts", async () => {
     render(<SlmReview reviewer="operator-fixture" />);
     const invalid = packet();

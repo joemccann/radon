@@ -22,7 +22,7 @@ type SavedDecision = {
   reviewer: string;
   reviewedAt: string;
 };
-type SavedRun = { schema: "radon.slm-review-decisions.v1"; runId: string; reviewer: string; decisions: SavedDecision[]; index?: number; draftTags?: string[] };
+type SavedRun = { schema: "radon.slm-review-decisions.v1"; runId: string; reviewer: string; decisions: SavedDecision[]; index?: number; draftTags?: string[]; updatedAt?: string };
 
 const ALIASES: CandidateAlias[] = ["Candidate 1", "Candidate 2", "Candidate 3"];
 const scrubText = (value: unknown, limit = 20_000) => typeof value === "string"
@@ -155,7 +155,9 @@ export default function SlmReview({ reviewer }: { reviewer: string }) {
       setSaveStatus("offline");
     }
     const restored = mergeDecisions(parsed.items, remote, local);
-    const resumeIndex = Math.max(0, Math.min(parsed.items.length - 1, local?.index ?? remote?.index ?? 0));
+    const firstIncomplete = parsed.items.findIndex((item) => !ALIASES.every((alias) => alias in (restored[item.id]?.acceptance ?? {})));
+    const legacyPosition = firstIncomplete < 0 ? parsed.items.length - 1 : firstIncomplete;
+    const resumeIndex = Math.max(0, Math.min(parsed.items.length - 1, local?.index ?? (remote?.updatedAt ? remote.index ?? legacyPosition : legacyPosition)));
     const selected = restored[parsed.items[resumeIndex].id];
     setDecisions(restored);
     setPacket(parsed);
