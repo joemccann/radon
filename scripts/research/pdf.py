@@ -1,9 +1,11 @@
 """Research PDF extraction and original page rendering.
 
-parse() uses NVIDIA Nemotron when RADON_RESEARCH_PARSER=nemotron, or when
-that variable is unset and NVIDIA_API_KEY is present. Any hosted failure
-falls back to local pdf-inspector for the whole document. The hosted budget
-stays inside the 180s pipeline subprocess timeout.
+parse() uses NVIDIA Nemotron v1 when RADON_RESEARCH_PARSER=nemotron, or when
+that variable is unset and NVIDIA_API_KEY is present. pdf-inspector always
+runs first and stays the grounding text. Nemotron is added per page where it
+helps (no text layer, raster, or a figure candidate) and a page falls back
+to local-only on a bad response. The hosted budget stays inside the 180s
+pipeline subprocess timeout because unselected pages make no NVIDIA call.
 """
 import argparse
 import hashlib

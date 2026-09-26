@@ -111,7 +111,11 @@ def _parse_as(pdf: Path, output: Path, mode: str, post=None):
     from research.pdf import parse
 
     previous = os.environ.get("RADON_RESEARCH_PARSER")
+    previous_selective = os.environ.get("RADON_RESEARCH_PARSE_SELECTIVE")
     os.environ["RADON_RESEARCH_PARSER"] = mode
+    if mode == "nemotron":
+        # Comparison measures the hosted parser on every page, not only the weak ones.
+        os.environ["RADON_RESEARCH_PARSE_SELECTIVE"] = "0"
     try:
         return parse(pdf, output, post=post)
     finally:
@@ -119,6 +123,10 @@ def _parse_as(pdf: Path, output: Path, mode: str, post=None):
             os.environ.pop("RADON_RESEARCH_PARSER", None)
         else:
             os.environ["RADON_RESEARCH_PARSER"] = previous
+        if previous_selective is None:
+            os.environ.pop("RADON_RESEARCH_PARSE_SELECTIVE", None)
+        else:
+            os.environ["RADON_RESEARCH_PARSE_SELECTIVE"] = previous_selective
 
 
 def _measure(local: dict, local_dir: Path, hosted: dict, hosted_dir: Path) -> dict:

@@ -1,28 +1,31 @@
-"""NVIDIA Nemotron Parse for research PDFs, with a whole-document local fallback.
+"""NVIDIA Nemotron Parse v1 on top of local pdf-inspector.
 
-The hosted ladder is RADON_RESEARCH_PARSE_MODELS (default
-nvidia/nemotron-parse-2.0, then nvidia/nemotron-parse). Each model has its
-own request and response adapter. A single failed page, a bad numeric-token
-recall against the local pdf-inspector text, or an exhausted budget drops
-the whole document onto research.pdf.parse_local. Parsers are never mixed
-inside one document.
+Local pdf-inspector runs on every page and stays the grounding text for
+verbatim number gates. nvidia/nemotron-parse (v1) is called only on pages
+that need it: no or garbled text layer, a large raster image, or a
+figures.py candidate. Its text is fenced as image-derived. Numbers that
+appear only there do not satisfy the verbatim gate.
 
-Numeric recall is |local numbers ∩ nemotron numbers| / |local numbers|.
-A page is gated only when the local text has at least
-RADON_RESEARCH_PARSE_MIN_NUMERIC distinct numbers (default 3) and recall is
-below RADON_RESEARCH_PARSE_MIN_RECALL (default 0.6). Fewer numbers are
-recorded and do not force a fallback, so a date-only page cannot discard a
-good parse. Downstream gates copy numbers verbatim; this is the check that
-protects them.
+nemotron-parse-2.0 is not in the default ladder. Set
+RADON_RESEARCH_PARSE_MODELS to opt in. RADON_RESEARCH_PARSE_SELECTIVE=0
+sends every page.
+
+A page stays local-only on 429, 5xx, DEGRADED, timeout, empty content,
+finish_reason=length, duplicated blocks, or table-number agreement below
+RADON_RESEARCH_PARSE_TABLE_AGREE (default 0.90) when the page has a text
+layer. After RADON_RESEARCH_PARSE_FAIL_LIMIT consecutive failures (default
+3) Nemotron is parked for the provider cooldown and later pages stay local.
+The per-document budget (RADON_RESEARCH_PARSE_BUDGET_S, default 100s) stops
+further calls without blocking the local extract. One call per selected page.
 """
 from __future__ import annotations
 
 import base64
-import copy
 import io
 import os
 import random
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -40,17 +43,34 @@ _NUMERIC = re.compile(
 _TABULAR = re.compile(r"\\begin\{tabular\}(?:\{[^}]*\})?(.*)\\end\{tabular\}", re.S)
 _LATEX_CMD = re.compile(r"\\[a-zA-Z]+")
 _NOISE = re.compile(r"</?s>|<predict_[a-z_]+>|<output_markdown>|<\|[^>]*\|>")
+_IMAGE_FENCE = re.compile(
+    r"<!--\s*image-derived\s*-->.*?<!--\s*/image-derived\s*-->",
+    re.S,
+)
+_FENCE_OPEN = "<!-- image-derived -->"
+_FENCE_CLOSE = "<!-- /image-derived -->"
 
-DEFAULT_MODELS = ("nvidia/nemotron-parse-2.0", "nvidia/nemotron-parse")
+DEFAULT_MODELS = ("nvidia/nemotron-parse",)
 NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-_EMPTY_KINDS = {"chart", "picture", "image"}
+_PICTURE_KINDS = {"chart", "picture", "image"}
 _TITLE_KINDS = {"title", "section-header", "header", "section_header"}
+_BREAKER = {"degraded", "empty", "length", "timeout", "network", "malformed", "duplicated"}
+_LONG_DUP = 40
+
+_CIRCUIT = {"failures": 0, "park_until": 0.0}
+_CIRCUIT_LOCK = threading.Lock()
 
 
 class PageParseError(RuntimeError):
     def __init__(self, reason: str):
         super().__init__(reason)
         self.reason = reason
+
+
+def reset_parse_circuit() -> None:
+    with _CIRCUIT_LOCK:
+        _CIRCUIT["failures"] = 0
+        _CIRCUIT["park_until"] = 0.0
 
 
 def parser_mode(env: dict | None = None) -> str:
@@ -81,9 +101,93 @@ def numeric_tokens(text: str) -> set[str]:
     return found
 
 
-def page_recall(local_text: str, other_text: str) -> dict:
+def grounding_text(text: str) -> str:
+    """Page text with image-derived Nemotron spans removed."""
+    return _IMAGE_FENCE.sub("", text or "")
+
+
+def image_derived_numbers(local_text: str, other_text: str) -> list[str]:
+    return sorted(numeric_tokens(other_text) - numeric_tokens(local_text))
+
+
+def compose_markdown(local_md: str, nemotron_md: str) -> str:
+    extra = (nemotron_md or "").strip()
+    base = local_md or ""
+    if not extra:
+        return base
+    spacer = "\n\n" if base.strip() else ""
+    return base.rstrip() + spacer + _FENCE_OPEN + "\n" + extra + "\n" + _FENCE_CLOSE + "\n"
+
+
+def table_agreement(local_text: str, blocks: list) -> float | None:
+    """Share of Nemotron table numbers that also appear in the local text."""
+    tokens: set[str] = set()
+    for block in blocks or []:
+        kind = str(block.get("type") or "").lower()
+        text = str(block.get("text") or "")
+        if kind != "table" and "\\begin{tabular}" not in text:
+            continue
+        tokens |= numeric_tokens(latex_table_to_markdown(text))
+    if not tokens:
+        return None
     local = numeric_tokens(local_text)
-    other = numeric_tokens(other_text)
+    return len(tokens & local) / len(tokens)
+
+
+def prepare_blocks(blocks: list) -> tuple[list, str | None]:
+    """Reading order, drop zero-area pictures, drop exact dupes. Long dupes fail the page."""
+    ordered = sorted(blocks or [], key=_bbox_key)
+    cleaned = []
+    seen = set()
+    counts: dict[str, int] = {}
+    duplicated = False
+    for block in ordered:
+        kind = str(block.get("type") or "Text")
+        norm = kind.lower().replace("_", "-")
+        bbox = block.get("bbox")
+        if norm in _PICTURE_KINDS and _area(bbox) <= 0:
+            continue
+        text = " ".join(str(block.get("text") or "").split())
+        ident = (norm, text, _bbox_tuple(bbox))
+        if ident in seen:
+            continue
+        seen.add(ident)
+        if len(text) >= _LONG_DUP:
+            counts[text] = counts.get(text, 0) + 1
+            if counts[text] > 1:
+                duplicated = True
+        cleaned.append(block)
+    if duplicated:
+        return cleaned, "duplicated"
+    return cleaned, None
+
+
+def chart_candidates(blocks: list, page_number: int) -> list:
+    """Picture and chart boxes with area, in reading order. figures.py stays the other source."""
+    found = []
+    for block in blocks or []:
+        kind = str(block.get("type") or "").lower().replace("_", "-")
+        if kind not in _PICTURE_KINDS:
+            continue
+        bbox = block.get("bbox")
+        if _area(bbox) <= 0:
+            continue
+        box = [float(bbox[key]) for key in ("xmin", "ymin", "xmax", "ymax")]
+        found.append({
+            "page": page_number,
+            "bbox": [round(max(0.0, min(1.0, value)), 4) for value in box],
+            "objects": 1,
+            "kind": "raster",
+            "title": None,
+            "source_line": None,
+            "origin": "nemotron",
+        })
+    return found
+
+
+def page_recall(local_text: str, other_text: str) -> dict:
+    local = numeric_tokens(grounding_text(local_text))
+    other = numeric_tokens(grounding_text(other_text))
     overlap = local & other
     recall = (len(overlap) / len(local)) if local else 1.0
     return {
@@ -110,9 +214,11 @@ def latex_table_to_markdown(text: str) -> str:
     if len(rows) < 1 or (match is None and "&" not in (text or "")):
         return text
     width = max(len(row) for row in rows)
+
     def fmt(row: list[str]) -> str:
         padded = row + [""] * (width - len(row))
         return "| " + " | ".join(padded) + " |"
+
     lines = [fmt(rows[0]), "| " + " | ".join(["---"] * width) + " |"]
     lines.extend(fmt(row) for row in rows[1:])
     return "\n".join(lines)
@@ -123,117 +229,272 @@ def parse_document(pdf_path, output, *, post=None, sleep=None, monotonic=None, j
 
     local = parse_local(pdf_path)
     if parser_mode() != "nemotron":
+        _stamp_local(local)
         return write_evidence(output, local)
     if post is None and not os.environ.get("NVIDIA_API_KEY", "").strip():
         local["fallback_reason"] = "missing_api_key"
         local["fallback_attempts"] = []
+        _stamp_local(local)
         return write_evidence(output, local)
     try:
-        hosted, attempts, grounding = _try_models(
+        _run_nemotron(
             pdf_path, local, post=post, sleep=sleep, monotonic=monotonic, jitter=jitter,
         )
     except Exception as exc:
         from clients.model_ladder import safe_error_message
         local["fallback_reason"] = safe_error_message(exc)
         local["fallback_attempts"] = []
-        return write_evidence(output, local)
-    if hosted is None:
-        local["fallback_attempts"] = attempts
-        local["fallback_reason"] = attempts[-1]["reason"] if attempts else "no_model"
-        if grounding is not None:
-            local["nemotron_grounding"] = grounding
-        return write_evidence(output, local)
-    return write_evidence(output, hosted)
+        _stamp_local(local)
+    return write_evidence(output, local)
 
 
-def _try_models(pdf_path, local, *, post, sleep, monotonic, jitter):
-    deadline = _clock(monotonic) + _float_env("RADON_RESEARCH_PARSE_BUDGET_S", 100.0)
-    min_recall = _float_env("RADON_RESEARCH_PARSE_MIN_RECALL", 0.6)
-    min_tokens = _int_env("RADON_RESEARCH_PARSE_MIN_NUMERIC", 3, 0, 1000)
-    attempts = []
-    last_grounding = None
-    images = _render_pngs(pdf_path, len(local["pages"]))
+def _run_nemotron(pdf_path, local, *, post, sleep, monotonic, jitter):
+    selected = _selected_pages(pdf_path, local)
+    now = _clock(monotonic)
+    if not selected or _parked(now):
+        reason = "circuit" if selected and _parked(now) else None
+        _stamp_local(local, reason)
+        if reason:
+            local["fallback_reason"] = reason
+            local["fallback_attempts"] = [
+                {"page": number, "model": "", "reason": reason} for number in selected
+            ]
+        _record_grounding(local, {})
+        return
+    deadline = now + _float_env("RADON_RESEARCH_PARSE_BUDGET_S", 100.0)
+    images = _render_selected(pdf_path, selected)
+    outcomes = _parse_selected(
+        local, selected, images, post=post, sleep=sleep, monotonic=monotonic,
+        jitter=jitter, deadline=deadline,
+    )
+    _apply(local, outcomes)
+
+
+def _selected_pages(pdf_path, local) -> list[int]:
+    pages = local["pages"]
+    if not _selective():
+        return [page["page_number"] for page in pages]
+    visual = _visual_pages(pdf_path, len(pages))
+    chosen = []
+    for page in pages:
+        number = page["page_number"]
+        markdown = local["markdowns"].get(number, "")
+        if page.get("needs_ocr") or not (markdown or "").strip() or number in visual:
+            chosen.append(number)
+    return chosen
+
+
+def _selective() -> bool:
+    raw = os.environ.get("RADON_RESEARCH_PARSE_SELECTIVE", "1").strip().lower()
+    return raw not in {"0", "false", "off", "no"}
+
+
+def _visual_pages(pdf_path, page_count: int) -> set[int]:
+    """Pages with a large raster image or a figures.py cluster. Text pages stay out."""
+    try:
+        import pypdfium2 as pdfium
+        import pypdfium2.raw as pdfium_c
+        from research.figures import _figures_on_page, _frame, _norm
+    except Exception:
+        return set()
+    selected = set()
+    try:
+        with pdfium.PdfDocument(str(pdf_path)) as document:
+            for index in range(min(page_count, len(document))):
+                page = document[index]
+                number = index + 1
+                frame, reason = _frame(page)
+                raster = False
+                if frame and not reason:
+                    try:
+                        objects = page.get_objects(filter=(pdfium_c.FPDF_PAGEOBJ_IMAGE,), max_depth=8)
+                    except Exception:
+                        objects = ()
+                    for obj in objects:
+                        try:
+                            box = _norm(obj.get_bounds(), frame)
+                        except Exception:
+                            continue
+                        if (box[2] - box[0]) * (box[3] - box[1]) >= 0.02:
+                            raster = True
+                            break
+                page.close()
+                if raster:
+                    selected.add(number)
+                    continue
+                figures, _skip = _figures_on_page(pdf_path, number)
+                if figures:
+                    selected.add(number)
+    except Exception:
+        return selected
+    return selected
+
+
+def _parse_selected(local, selected, images, *, post, sleep, monotonic, jitter, deadline):
+    workers = _int_env("RADON_RESEARCH_PARSE_CONCURRENCY", 2, 1, 8)
+    outcomes = {}
+    futures = {}
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for number in selected:
+            now = _clock(monotonic)
+            if now >= deadline:
+                outcomes[number] = {"ok": False, "reason": "budget"}
+                continue
+            if _parked(now):
+                outcomes[number] = {"ok": False, "reason": "circuit"}
+                continue
+            png = images.get(number)
+            if not png:
+                outcomes[number] = {"ok": False, "reason": "render"}
+                continue
+            futures[pool.submit(
+                _parse_one, number, png, local, post=post, sleep=sleep,
+                monotonic=monotonic, jitter=jitter, deadline=deadline,
+            )] = number
+        for future in as_completed(futures):
+            number = futures[future]
+            try:
+                outcomes[number] = future.result()
+            except Exception as exc:
+                from clients.model_ladder import safe_error_message
+                outcomes[number] = {"ok": False, "reason": safe_error_message(exc)}
+    return outcomes
+
+
+def _parse_one(number, png, local, *, post, sleep, monotonic, jitter, deadline):
+    page = next(item for item in local["pages"] if item["page_number"] == number)
+    local_md = local["markdowns"].get(number, "")
+    last = "empty"
+    last_model = ""
     for model in parse_models():
-        if _clock(monotonic) >= deadline:
-            attempts.append({"model": model, "reason": "budget"})
-            break
+        now = _clock(monotonic)
+        if now >= deadline:
+            return {"ok": False, "reason": "budget", "model": last_model}
+        if _parked(now):
+            return {"ok": False, "reason": "circuit", "model": last_model}
+        last_model = model
         try:
-            parsed = _parse_model(
-                model, images, post=post, sleep=sleep, monotonic=monotonic,
+            _markdown_ignored, blocks = _parse_page(
+                model, png, post=post, sleep=sleep, monotonic=monotonic,
                 jitter=jitter, deadline=deadline,
             )
         except PageParseError as exc:
-            attempts.append({"model": model, "reason": exc.reason})
+            last = exc.reason
+            if _trips_breaker(last):
+                _note_failure(_clock(monotonic))
             continue
-        stats = []
-        for page, (markdown, _blocks) in zip(local["pages"], parsed):
-            row = page_recall(local["markdowns"][page["page_number"]], markdown)
-            row["page_number"] = page["page_number"]
-            stats.append(row)
-        grounding = {
-            "method": "numeric_token_recall",
-            "min_recall": min_recall,
-            "min_local_tokens": min_tokens,
+        prepared, problem = prepare_blocks(blocks)
+        if problem == "duplicated":
+            _note_failure(_clock(monotonic))
+            return {"ok": False, "reason": "duplicated", "model": model}
+        agree = table_agreement(local_md, prepared)
+        minimum = _float_env("RADON_RESEARCH_PARSE_TABLE_AGREE", 0.90)
+        if _has_text_layer(page, local_md) and agree is not None and agree < minimum:
+            return {
+                "ok": False, "reason": "table_agreement", "model": model, "table_agreement": agree,
+            }
+        _note_success()
+        return {
+            "ok": True,
             "model": model,
-            "pages": stats,
+            "markdown": _markdown(prepared),
+            "blocks": prepared,
+            "table_agreement": agree,
         }
-        failed = any(
-            row["local_count"] >= min_tokens and row["recall"] < min_recall for row in stats
-        )
-        if failed:
-            grounding["failed"] = True
-            last_grounding = grounding
-            attempts.append({"model": model, "reason": "numeric_grounding"})
-            continue
-        grounding["failed"] = False
-        return _hosted_result(local, model, parsed, grounding), attempts, grounding
-    return None, attempts, last_grounding
+    return {"ok": False, "reason": last, "model": last_model}
 
 
-def _hosted_result(local, model, parsed, grounding):
-    hosted = copy.deepcopy(local)
-    hosted["parser"] = model
-    hosted["parser_version"] = model
-    hosted["grounding"] = grounding
-    for page, (markdown, blocks) in zip(hosted["pages"], parsed):
+def _apply(local, outcomes):
+    attempts = []
+    used = None
+    for page in local["pages"]:
         number = page["page_number"]
-        hosted["markdowns"][number] = markdown
-        page["blocks"] = blocks
-        if markdown.strip():
-            page["needs_ocr"] = False
-            page["ocr_reason"] = None
-        else:
-            page["needs_ocr"] = True
-            page["ocr_reason"] = "nemotron returned no text"
-    return hosted
+        page["sources"] = ["local"]
+        outcome = outcomes.get(number)
+        if not outcome:
+            continue
+        if not outcome.get("ok"):
+            reason = outcome.get("reason") or "empty"
+            page["fallback_reason"] = reason
+            attempts.append({"page": number, "model": outcome.get("model") or "", "reason": reason})
+            if outcome.get("table_agreement") is not None:
+                page["table_agreement"] = outcome["table_agreement"]
+            continue
+        local_md = local["markdowns"].get(number, "")
+        nemotron_md = outcome.get("markdown") or ""
+        used = outcome["model"]
+        local["markdowns"][number] = compose_markdown(local_md, nemotron_md)
+        page["sources"] = ["local", "nemotron"]
+        page["model"] = used
+        page["blocks"] = outcome["blocks"]
+        page["chart_candidates"] = chart_candidates(outcome["blocks"], number)
+        page["image_derived_numbers"] = image_derived_numbers(local_md, nemotron_md)
+        if outcome.get("table_agreement") is not None:
+            page["table_agreement"] = outcome["table_agreement"]
+    if used:
+        local["parser"] = f"{used}+firecrawl/pdf-inspector"
+        local["parser_version"] = used
+    if attempts:
+        local["fallback_attempts"] = attempts
+        if not used:
+            local["fallback_reason"] = attempts[-1]["reason"]
+    _record_grounding(local, outcomes)
 
 
-def _parse_model(model, images, *, post, sleep, monotonic, jitter, deadline):
-    workers = _int_env("RADON_RESEARCH_PARSE_CONCURRENCY", 4, 1, 8)
-    results: list = [None] * len(images)
-    error: PageParseError | None = None
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {
-            pool.submit(
-                _parse_page, model, image, post=post, sleep=sleep,
-                monotonic=monotonic, jitter=jitter, deadline=deadline,
-            ): index
-            for index, image in enumerate(images)
-        }
-        for future in as_completed(futures):
-            index = futures[future]
-            try:
-                results[index] = future.result()
-            except PageParseError as exc:
-                error = exc
-                break
-        if error is not None:
-            for future in futures:
-                future.cancel()
-            raise error
-    if any(item is None for item in results):
-        raise PageParseError("empty")
-    return results
+def _record_grounding(local, outcomes):
+    rows = []
+    for page in local["pages"]:
+        number = page["page_number"]
+        outcome = outcomes.get(number) or {}
+        rows.append({
+            "page_number": number,
+            "sources": page.get("sources") or ["local"],
+            "fallback_reason": page.get("fallback_reason"),
+            "table_agreement": outcome.get("table_agreement", page.get("table_agreement")),
+            "model": page.get("model") or outcome.get("model") or "",
+        })
+    local["grounding"] = {
+        "method": "local_text_layer",
+        "table_agreement_min": _float_env("RADON_RESEARCH_PARSE_TABLE_AGREE", 0.90),
+        "pages": rows,
+    }
+
+
+def _stamp_local(local, reason: str | None = None):
+    for page in local["pages"]:
+        page["sources"] = ["local"]
+        if reason:
+            page["fallback_reason"] = reason
+
+
+def _has_text_layer(page, markdown: str) -> bool:
+    if page.get("needs_ocr"):
+        return False
+    return bool((markdown or "").strip())
+
+
+def _parked(now: float) -> bool:
+    with _CIRCUIT_LOCK:
+        return now < _CIRCUIT["park_until"]
+
+
+def _note_failure(now: float) -> None:
+    limit = _int_env("RADON_RESEARCH_PARSE_FAIL_LIMIT", 3, 1, 50)
+    with _CIRCUIT_LOCK:
+        _CIRCUIT["failures"] += 1
+        if _CIRCUIT["failures"] >= limit:
+            from research.model import PROVIDER_PARK_SECS
+            _CIRCUIT["park_until"] = now + PROVIDER_PARK_SECS
+            _CIRCUIT["failures"] = 0
+
+
+def _note_success() -> None:
+    with _CIRCUIT_LOCK:
+        _CIRCUIT["failures"] = 0
+
+
+def _trips_breaker(reason: str) -> bool:
+    return reason in _BREAKER or reason == "http_429" or reason.startswith("http_5")
 
 
 def _parse_page(model, png: bytes, *, post, sleep, monotonic, jitter, deadline):
@@ -303,7 +564,7 @@ def _post_with_retries(model, body, *, post, sleep, monotonic, jitter, deadline)
     if not key:
         raise PageParseError("missing_api_key")
     headers = {"authorization": f"Bearer {key}", "content-type": "application/json"}
-    timeout = _float_env("RADON_RESEARCH_PARSE_PAGE_TIMEOUT_S", 20.0)
+    timeout = _float_env("RADON_RESEARCH_PARSE_PAGE_TIMEOUT_S", 25.0)
     retries = _int_env("RADON_RESEARCH_PARSE_MAX_RETRIES", 2, 0, 5)
     delay = 0.5
     last = "empty"
@@ -343,29 +604,39 @@ def _failure_reason(model, status, text, payload, classify) -> str | None:
         return "degraded"
     if status != 200 or not isinstance(payload, dict):
         return "degraded" if "degraded" in text.lower() else classify(status, text)
+    finish = _finish_reason(payload)
+    if finish == "length":
+        return "length"
     if _adapter(model) == "v2":
         content = _openai_text(payload)
-        finish = ((payload.get("choices") or [{}])[0] or {}).get("finish_reason")
         if _meaningful(content):
             return None
-        return "length" if finish == "length" else "empty"
+        return "empty"
     if _v1_blocks(payload) is None:
-        return "malformed"
+        content = _openai_text(payload)
+        return "malformed" if _meaningful(content) else "empty"
     return None
+
+
+def _finish_reason(payload) -> str | None:
+    choices = payload.get("choices") or []
+    if not choices or not isinstance(choices[0], dict):
+        return None
+    return choices[0].get("finish_reason")
 
 
 def _blocks_from_v2(payload) -> tuple[str, list]:
     content = _openai_text(payload)
     if not _meaningful(content):
-        finish = ((payload.get("choices") or [{}])[0] or {}).get("finish_reason")
+        finish = _finish_reason(payload)
         raise PageParseError("length" if finish == "length" else "empty")
     blocks = _v2_blocks(content)
-    if not blocks and not _meaningful(content):
-        raise PageParseError("malformed")
     return _markdown(blocks), blocks
 
 
 def _blocks_from_v1(payload) -> tuple[str, list]:
+    if _finish_reason(payload) == "length":
+        raise PageParseError("length")
     raw = _v1_blocks(payload)
     if not raw:
         raise PageParseError("malformed")
@@ -382,7 +653,6 @@ def _blocks_from_v1(payload) -> tuple[str, list]:
 
 
 def _v1_blocks(payload):
-    import json
     choices = payload.get("choices") or []
     if not choices:
         return None
@@ -465,8 +735,6 @@ def _markdown(blocks: list) -> str:
         kind = str(block.get("type") or "Text")
         norm = kind.lower().replace("_", "-")
         text = str(block.get("text") or "").strip()
-        if norm in _EMPTY_KINDS:
-            continue
         if not text:
             continue
         if norm == "table" or "\\begin{tabular}" in text:
@@ -500,6 +768,36 @@ def _norm_bbox(raw):
     return {"xmin": xmin, "ymin": ymin, "xmax": xmax, "ymax": ymax}
 
 
+def _bbox_key(block) -> tuple[float, float]:
+    bbox = block.get("bbox") if isinstance(block, dict) else None
+    if not isinstance(bbox, dict):
+        return (1.0, 1.0)
+    try:
+        return (float(bbox.get("ymin", 1.0)), float(bbox.get("xmin", 1.0)))
+    except (TypeError, ValueError):
+        return (1.0, 1.0)
+
+
+def _bbox_tuple(bbox):
+    if not isinstance(bbox, dict):
+        return None
+    try:
+        return tuple(round(float(bbox[key]), 4) for key in ("xmin", "ymin", "xmax", "ymax"))
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _area(bbox) -> float:
+    if not isinstance(bbox, dict):
+        return 0.0
+    try:
+        width = float(bbox["xmax"]) - float(bbox["xmin"])
+        height = float(bbox["ymax"]) - float(bbox["ymin"])
+    except (KeyError, TypeError, ValueError):
+        return 0.0
+    return max(0.0, width) * max(0.0, height)
+
+
 def _latex_cell(cell: str) -> str:
     cell = cell.replace(r"\%", "%").replace(r"\$", "$").replace(r"\&", "&")
     cell = re.sub(r"\\[a-zA-Z]+\{([^}]*)\}", r"\1", cell)
@@ -507,17 +805,17 @@ def _latex_cell(cell: str) -> str:
     return " ".join(cell.replace("{", "").replace("}", "").split())
 
 
-def _render_pngs(pdf_path, page_count: int) -> list[bytes]:
+def _render_selected(pdf_path, numbers: list[int]) -> dict[int, bytes]:
     import pypdfium2
     from pathlib import Path
 
-    pngs = []
+    pngs = {}
     with pypdfium2.PdfDocument(str(Path(pdf_path).resolve(strict=True))) as document:
-        if len(document) != page_count:
-            raise ValueError("page count changed while rendering")
-        for number in range(page_count):
-            page = document[number]
-            pngs.append(_page_png(page))
+        for number in numbers:
+            if number < 1 or number > len(document):
+                continue
+            page = document[number - 1]
+            pngs[number] = _page_png(page)
             page.close()
     return pngs
 

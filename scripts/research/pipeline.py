@@ -178,7 +178,8 @@ def date_evidence_passed(candidate, result, page_text):
     raw, quote = evidence.get('date_text'), evidence.get('source_quote')
     if not isinstance(raw, str) or not raw.strip() or len(raw) > 40 or not isinstance(quote, str) or not quote.strip() or len(quote) > 1000:
         return False
-    raw, quote, original = _source_literal(raw), _source_literal(quote), _source_literal(page_text[page])
+    from research.nemotron_parse import grounding_text
+    raw, quote, original = _source_literal(raw), _source_literal(quote), _source_literal(grounding_text(page_text[page]))
     if raw not in quote or quote not in original:
         return False
     # Parse complete, unambiguous dates only. Numeric slash dates are held.
@@ -241,11 +242,12 @@ def numeric_evidence_passed(candidate, result, page_text):
         if (not isinstance(quote, str) or not quote.strip() or len(quote) > 2000
                 or not isinstance(source, str) or not source.strip() or len(source) > 3000):
             return False
+        from research.nemotron_parse import grounding_text
         quote, source = _literal(quote), _source_literal(source)
-        if quote not in proposal or source not in _source_literal(page_text[check['page']]):
+        original = _source_literal(grounding_text(page_text[check['page']]))
+        if quote not in proposal or source not in original:
             return False
         claims = _numeric_assertions(quote)
-        original = _source_literal(page_text[check['page']])
         original_numbers = _numeric_assertions(original)
         # A literal substring must not strip a decimal point, sign or currency.
         if not any(True for _ in _numeric_quote_positions(source, original, original_numbers)):

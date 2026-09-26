@@ -3,7 +3,8 @@
 - [x] T1 depends_on: [] Parser ladder, evidence shape, compare_parsers, embedding_v2 migration/backfill/retrieval fallback.
 - [x] T2 depends_on: [T1] Focused pytest for parse fallback and 2048-d embed path.
 - [x] T4 depends_on: [T2] Default backend nvidia, dual-write on, 384 until v2 coverage is complete.
-- [ ] T3 depends_on: [T4] Draft PR, CI green, no merge.
+- [ ] T3 depends_on: [T5] Draft PR, CI green, no merge.
+- [x] T5 depends_on: [T4] Per-page v1 parse: local grounding, selective pages, circuit breaker, image-derived numbers.
 
 # Task: Knowledge atomic receipt budget (2026-09-25)
 
