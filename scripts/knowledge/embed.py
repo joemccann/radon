@@ -155,7 +155,7 @@ def _nvidia_embed(texts: Sequence[str], *, input_type: str, post) -> list[list[f
     pending = list(texts)
     if not pending:
         return []
-    key = (os.environ.get("NVIDIA_API_KEY") or "").strip()
+    key = os.environ.get("NVIDIA_API_KEY", "").strip()
     if not key:
         raise RuntimeError("missing NVIDIA_API_KEY")
     headers = {"authorization": f"Bearer {key}", "content-type": "application/json"}

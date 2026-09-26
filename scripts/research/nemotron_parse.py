@@ -124,7 +124,7 @@ def parse_document(pdf_path, output, *, post=None, sleep=None, monotonic=None, j
     local = parse_local(pdf_path)
     if parser_mode() != "nemotron":
         return write_evidence(output, local)
-    if post is None and not (os.environ.get("NVIDIA_API_KEY") or "").strip():
+    if post is None and not os.environ.get("NVIDIA_API_KEY", "").strip():
         local["fallback_reason"] = "missing_api_key"
         local["fallback_attempts"] = []
         return write_evidence(output, local)
@@ -299,7 +299,7 @@ def _post_with_retries(model, body, *, post, sleep, monotonic, jitter, deadline)
     from clients.model_ladder import _classify_http_failure, _default_post, _request
 
     sender = _CapturingPost(post or _default_post)
-    key = (os.environ.get("NVIDIA_API_KEY") or "").strip() or ("test-key" if post else "")
+    key = os.environ.get("NVIDIA_API_KEY", "").strip() or ("test-key" if post else "")
     if not key:
         raise PageParseError("missing_api_key")
     headers = {"authorization": f"Bearer {key}", "content-type": "application/json"}
