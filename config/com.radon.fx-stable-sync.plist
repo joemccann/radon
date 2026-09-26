@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.radon.fx-stable-sync</string>
+
+    <!-- __HOME__ is substituted by scripts/setup_fx_stable_sync.sh. The
+         script runs from an installed copy outside every runner clone, so an
+         in-phase agent edit to a clone cannot change what launchd executes. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__HOME__/.local/share/radon/fx-stable/sync.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>__HOME__</string>
+    </dict>
+
+    <!-- Re-sync as soon as `fx upgrade` replaces ~/.local/bin/fx. -->
+    <key>WatchPaths</key>
+    <array>
+        <string>__HOME__/.local/bin</string>
+    </array>
+
+    <!-- Backstop: daily at 23:45 local, before the 00:00-00:50 nightly loops. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>23</integer>
+        <key>Minute</key>
+        <integer>45</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/radon-weekend/logs/fx-stable-sync.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/radon-weekend/logs/fx-stable-sync.err</string>
+</dict>
+</plist>

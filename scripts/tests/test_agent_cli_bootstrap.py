@@ -138,6 +138,19 @@ def test_fx_gets_an_nvidia_provider_that_names_the_key_not_its_value(tmp_path):
 
 
 @pytest.mark.skipif(not Path(BASH).exists(), reason="no /bin/bash")
+def test_fx_gets_a_cerebras_provider_for_the_fx_cerebras_rung(tmp_path):
+    _run(tmp_path, {"NVIDIA_API_KEY": "nvapi-TEST", "CEREBRAS_API_KEY": "csk-TEST"})
+    settings = _fx_settings(tmp_path)
+    assert settings["providers"]["cerebras"] == {
+        "protocol": "openai-chat-completions",
+        "base_url": "https://api.cerebras.ai/v1",
+        "auth": {"type": "bearer", "env": "CEREBRAS_API_KEY"},
+    }, settings
+    assert settings["models"]["cerebras"], settings
+    assert "csk-TEST" not in (tmp_path / "home" / ".fx" / "settings.json").read_text()
+
+
+@pytest.mark.skipif(not Path(BASH).exists(), reason="no /bin/bash")
 def test_fx_settings_the_operator_chose_are_kept(tmp_path):
     import json
 

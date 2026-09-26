@@ -186,3 +186,38 @@ def test_the_fx_arm_is_wrapped_in_timeout():
     assert '"$TIMEOUT_BIN" -k "$KILL_AFTER_SECS"' in arm, arm
     assert '< "$prompt_file"' in arm, arm
     assert os.sep + "fx-zdotdir" in arm, arm
+
+
+# --- fx on the shared ladder (2026-09-26) ------------------------------------
+# reliability, testing and ci-performance lead with fx:nvidia and close with
+# fx:cerebras. The model half names the fx provider and picks its key.
+
+
+@pytest.mark.parametrize("loop", ["reliability", "testing", "ci-performance"])
+def test_the_shared_ladder_leads_and_ends_on_fx(loop):
+    body = _h.LOOPS[loop].read_text(encoding="utf-8")
+    m = re.search(
+        r'^PROVIDER_LADDER="\$\{RADON_WEEKEND_PROVIDER_LADDER:-(.+?)\}"$', body, re.M
+    )
+    assert m, "no default provider ladder"
+    assert m.group(1).split() == ["fx:nvidia", "grok", "codex", "fx:cerebras"], m.group(1)
+
+
+def test_fx_cerebras_bills_only_cerebras(tmp_path):
+    _proc, tried, _calls, _argv = _h._run_multi(
+        tmp_path, "reliability", "audit", provider_ladder="fx:cerebras",
+    )
+    assert tried == ["fx:cerebras"], tried
+    env = _fx_env(tmp_path)
+    assert env["FX_PROVIDER"] == "cerebras", env
+    assert env["CEREBRAS_API_KEY"] == "stub-key", env
+    assert env["NVIDIA_API_KEY"] == "<unset>", env
+    assert env["XAI_API_KEY"] == "<unset>", env
+
+
+def test_fx_cerebras_is_skipped_without_a_cerebras_key(tmp_path):
+    _proc, tried, _calls, _argv = _h._run_multi(
+        tmp_path, "reliability", "audit", provider_ladder="fx:cerebras grok",
+        authed=("claude", "codex", "grok", "nvidia", "fx"),
+    )
+    assert tried == ["grok:"], tried
