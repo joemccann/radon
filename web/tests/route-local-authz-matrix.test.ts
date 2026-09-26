@@ -27,7 +27,7 @@ const ADMIN_ROUTES = ["edge-health", "health", "host-metrics", "reliability", "s
 const GUARDED_ADMIN_ACTION_ROUTES = [
   "admin/ib/reset-backoff", "admin/ib/restart", "admin/services",
   "admin/services/[unit]/[action]", "admin/stack/restart",
-  "admin/trading/[action]", "alerts", "alerts/[id]",
+  "admin/trading/[action]", "admin/slm-review", "alerts", "alerts/[id]",
   // Operator credentials CRUD (PR #125): requireRouteAccess operatorOnly on
   // every verb, reads included — masked hints are nobody's business on demo.
   "credentials", "credentials/[service]",
