@@ -1,9 +1,9 @@
 -- 0087_knowledge_embedding_v2.sql — optional 2048-d knowledge vectors.
 --
 -- nvidia/nemotron-3-embed-1b returns 2048 floats and rejects every other
--- dimensions value. The 384-d bge column and idx_knowledge_embedding stay
--- the live default (RADON_KB_EMBED_BACKEND=local) so journal and P&L text
--- is not sent to a third-party API until that switch is explicit.
+-- dimensions value. Queries default to this index (RADON_KB_EMBED_BACKEND
+-- defaults to nvidia; 2026-09-25). The 384-d column stays the automatic
+-- fallback, and ingest dual-writes it, until embedding_v2 has no NULLs.
 --
 -- ORDERING IS LOAD-BEARING. Turso does not backfill libsql_vector_idx for
 -- rows written before the index existed (local libsql does, which is why a

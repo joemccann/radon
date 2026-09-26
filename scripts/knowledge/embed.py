@@ -1,11 +1,22 @@
 """Knowledge embeddings.
 
-The live default is local fastembed / bge-small-en-v1.5 (384d, migration
-0028). Journal and P&L text stays off third-party APIs unless
-RADON_KB_EMBED_BACKEND=nvidia. That backend calls nvidia/nemotron-3-embed-1b
-(2048d only; other `dimensions` values are rejected) and writes
-embedding_v2. nvidia/llama-3.2-nv-embedqa-1b-v1 is not used: this account
-gets 404 Function not found, and the model caps input at 512 tokens.
+The live default is nvidia/nemotron-3-embed-1b (2048d, column embedding_v2).
+On 2026-09-25 Joe McCann reversed the local-only decision in
+tasks/knowledge-base-plan.md: every knowledge source, including journal,
+positions, and P&L, is sent to NVIDIA's hosted embeddings API.
+RADON_KB_EMBED_BACKEND=local forces BAAI/bge-small-en-v1.5 (384d).
+
+Local fastembed is the automatic fallback on NVIDIA 429s, 5xx, timeouts,
+and any other embed error. It is also the query path while any
+embedding_v2 value is still NULL, so a partial backfill cannot answer from
+the 2048 index and miss the rest of the corpus. That NULL check is cached
+for 60 seconds.
+
+Ingest dual-writes both vectors by default so the 384 index stays current
+for that fallback. RADON_KB_EMBED_DUAL_WRITE=0 turns the 2048 write off.
+
+nvidia/llama-3.2-nv-embedqa-1b-v1 is not used: this account gets 404
+Function not found, and the model caps input at 512 tokens.
 
 get_embedder() is the local singleton. It returns None when
 RADON_KB_EMBED_DISABLED=1 or fastembed is missing/broken, and ingest then
@@ -100,14 +111,19 @@ def _build_embedder() -> Embedder | None:
 
 
 def embed_backend() -> str:
-    """local unless RADON_KB_EMBED_BACKEND=nvidia. Unknown values stay local."""
-    value = os.environ.get(BACKEND_ENV, "local").strip().lower()
-    return value if value in {"local", "nvidia"} else "local"
+    """nvidia unless RADON_KB_EMBED_BACKEND=local. Unknown values stay local."""
+    value = os.environ.get(BACKEND_ENV, "nvidia").strip().lower()
+    if value == "nvidia":
+        return "nvidia"
+    return "local"
 
 
 def dual_write_enabled() -> bool:
-    """Write embedding_v2 alongside the 384-d vector. nvidia backend implies it."""
-    return os.environ.get(DUAL_WRITE_ENV) == "1" or embed_backend() == "nvidia"
+    """Write both vectors. Default on. RADON_KB_EMBED_DUAL_WRITE=0 disables v2."""
+    raw = os.environ.get(DUAL_WRITE_ENV)
+    if raw is None or not raw.strip():
+        return True
+    return raw.strip().lower() not in {"0", "false", "off", "no"}
 
 
 def embed_passages(texts: Sequence[str], *, post=None) -> list[list[float]]:
@@ -118,6 +134,55 @@ def embed_query(texts: Sequence[str], *, post=None) -> list[list[float]]:
     return _nvidia_embed(texts, input_type="query", post=post)
 
 
+_COVERAGE_TTL_S = 60.0
+_coverage_lock = threading.Lock()
+_coverage_cache: dict = {"at": None, "ready": None}
+
+
+def reset_v2_coverage_cache() -> None:
+    with _coverage_lock:
+        _coverage_cache["at"] = None
+        _coverage_cache["ready"] = None
+
+
+def v2_coverage_ready(db, *, now=None) -> bool:
+    """False while any knowledge.embedding_v2 is NULL.
+
+    SELECT 1 ... LIMIT 1 is the cheap form of that count. The result is
+    cached for 60 seconds. A missing column or a failed read is not ready,
+    so queries stay on the 384 index instead of a partial 2048 index.
+    """
+    current = now() if callable(now) else (time.monotonic() if now is None else float(now))
+    with _coverage_lock:
+        stamped = _coverage_cache["at"]
+        if (
+            stamped is not None
+            and _coverage_cache["ready"] is not None
+            and current - stamped < _COVERAGE_TTL_S
+        ):
+            return bool(_coverage_cache["ready"])
+    ready = _probe_v2_coverage(db)
+    with _coverage_lock:
+        _coverage_cache["at"] = current
+        _coverage_cache["ready"] = ready
+    if not ready:
+        print(
+            "[knowledge-embed] embedding_v2 backfill incomplete; queries use bge-384",
+            file=sys.stderr,
+        )
+    return ready
+
+
+def _probe_v2_coverage(db) -> bool:
+    try:
+        row = db.execute(
+            "SELECT 1 FROM knowledge WHERE embedding_v2 IS NULL LIMIT 1"
+        ).fetchone()
+    except Exception:
+        return False
+    return row is None
+
+
 def resolve_query_vector(
     text: str,
     *,
@@ -125,9 +190,17 @@ def resolve_query_vector(
     post=None,
     on_nvidia_error=None,
     on_local_error=None,
+    coverage_ready: Callable[[], bool] | None = None,
 ) -> list[float] | None:
-    """NVIDIA 2048 when the backend says so, else local 384, else None (FTS)."""
-    if embed_backend() == "nvidia":
+    """NVIDIA 2048 when the backend says so and v2 coverage is complete.
+
+    Incomplete coverage skips NVIDIA and uses local 384. NVIDIA errors
+    (429, 5xx, timeouts) also fall through to local 384, else None (FTS).
+    """
+    use_nvidia = embed_backend() == "nvidia"
+    if use_nvidia and coverage_ready is not None and not coverage_ready():
+        use_nvidia = False
+    if use_nvidia:
         try:
             vector = embed_query([text], post=post)[0]
             if len(vector) != EMBEDDING_DIM_V2:

@@ -17,8 +17,9 @@ if str(_SCRIPTS) not in sys.path:
 
 from knowledge.backfill_v2 import backfill_missing_v2  # noqa: E402
 from knowledge.embed import (  # noqa: E402
-    EMBEDDING_DIM, EMBEDDING_DIM_V2, EMBEDDING_MODEL_V2, embed_passages, embed_query,
-    resolve_query_vector,
+    EMBEDDING_DIM, EMBEDDING_DIM_V2, EMBEDDING_MODEL_V2, dual_write_enabled, embed_backend,
+    embed_passages, embed_query, reset_v2_coverage_cache, resolve_query_vector,
+    v2_coverage_ready,
 )
 from knowledge.ingest import _embed_docs, _restore_unchanged_enrichment  # noqa: E402
 from knowledge.retrieve import _vector_top_k_search  # noqa: E402
@@ -110,6 +111,97 @@ def test_nvidia_failure_falls_back_to_bge_then_fts(monkeypatch):
         raise RuntimeError("onnx")
 
     assert resolve_query_vector("relay", local_embedder=broken, post=_vectors(1, status=503)) is None
+
+
+def test_default_backend_is_nvidia_and_dual_write_is_on(monkeypatch):
+    monkeypatch.delenv("RADON_KB_EMBED_BACKEND", raising=False)
+    monkeypatch.delenv("RADON_KB_EMBED_DUAL_WRITE", raising=False)
+    assert embed_backend() == "nvidia"
+    assert dual_write_enabled() is True
+    monkeypatch.setenv("RADON_KB_EMBED_DUAL_WRITE", "0")
+    assert dual_write_enabled() is False
+
+
+def test_incomplete_v2_coverage_queries_384_and_skips_nvidia(monkeypatch):
+    monkeypatch.delenv("RADON_KB_EMBED_BACKEND", raising=False)
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
+    reset_v2_coverage_cache()
+    db = _db()
+    upsert_documents(db, [KnowledgeDoc(
+        source="journal", scope="trading", doc_key="pnl", content="position pnl",
+    )])
+    calls = []
+
+    def post(url, **kwargs):
+        calls.append(kwargs["json"])
+        raise AssertionError("nvidia called before backfill")
+
+    vector = resolve_query_vector(
+        "pnl",
+        local_embedder=lambda texts: [[0.2] * EMBEDDING_DIM],
+        post=post,
+        coverage_ready=lambda: v2_coverage_ready(db, now=lambda: 10.0),
+    )
+    assert calls == []
+    assert vector == [0.2] * EMBEDDING_DIM
+    assert v2_coverage_ready(db, now=lambda: 10.0) is False
+
+
+def test_v2_coverage_check_is_cached_until_the_ttl(monkeypatch):
+    reset_v2_coverage_cache()
+    clock = {"t": 50.0}
+
+    class _Db:
+        def __init__(self):
+            self.calls = 0
+            self.missing = True
+
+        def execute(self, sql, args=()):
+            assert "embedding_v2 IS NULL" in sql
+            self.calls += 1
+            self.sql = sql
+            return self
+
+        def fetchone(self):
+            return (1,) if self.missing else None
+
+    db = _Db()
+    assert v2_coverage_ready(db, now=lambda: clock["t"]) is False
+    db.missing = False
+    assert v2_coverage_ready(db, now=lambda: clock["t"] + 30) is False
+    assert db.calls == 1
+    assert v2_coverage_ready(db, now=lambda: clock["t"] + 61) is True
+    assert db.calls == 2
+
+
+def test_complete_v2_coverage_uses_nvidia_then_384_on_429(monkeypatch):
+    monkeypatch.delenv("RADON_KB_EMBED_BACKEND", raising=False)
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
+    monkeypatch.setattr("knowledge.embed.time.sleep", lambda _seconds: None)
+    reset_v2_coverage_cache()
+    db = _db()
+    upsert_documents(db, [KnowledgeDoc(
+        source="journal", scope="trading", doc_key="pnl", content="position pnl",
+        embedding_v2=[0.1] * EMBEDDING_DIM_V2,
+    )])
+    assert v2_coverage_ready(db, now=lambda: 1.0) is True
+    post = _vectors(1)
+    vector = resolve_query_vector(
+        "pnl",
+        local_embedder=lambda texts: [[0.3] * EMBEDDING_DIM],
+        post=post,
+        coverage_ready=lambda: v2_coverage_ready(db, now=lambda: 1.0),
+    )
+    assert post.bodies[0]["input_type"] == "query"
+    assert len(vector) == EMBEDDING_DIM_V2
+    limited = _vectors(1, status=429)
+    fallen = resolve_query_vector(
+        "pnl",
+        local_embedder=lambda texts: [[0.3] * EMBEDDING_DIM],
+        post=limited,
+        coverage_ready=lambda: True,
+    )
+    assert fallen == [0.3] * EMBEDDING_DIM
 
 
 def test_local_backend_does_not_call_nvidia(monkeypatch):

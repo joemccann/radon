@@ -81,11 +81,25 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _need_embedding_v2(docs) -> bool:
+def _has_embedding_v2_column(db) -> bool:
+    try:
+        rows = db.execute("PRAGMA table_info(knowledge)").fetchall()
+    except Exception:
+        return False
+    return any(row[1] == "embedding_v2" for row in rows)
+
+
+def _need_embedding_v2(docs, db=None) -> bool:
     if any(getattr(doc, "embedding_v2", None) is not None for doc in docs):
         return True
     from knowledge.embed import dual_write_enabled
-    return dual_write_enabled()
+    if not dual_write_enabled():
+        return False
+    # The HTTP writer must not open a second stream (PRAGMA) before the
+    # atomic batch. v2 SQL is used once a doc actually carries the vector.
+    if db is None or hasattr(db, "execute_transaction"):
+        return False
+    return _has_embedding_v2_column(db)
 
 
 def upsert_documents(db, docs: Iterable[KnowledgeDoc]) -> dict[str, int]:
@@ -98,7 +112,7 @@ def upsert_documents(db, docs: Iterable[KnowledgeDoc]) -> dict[str, int]:
         return _upsert_documents_http(db, docs)
     counts = {"inserted": 0, "updated": 0, "skipped": 0}
     last_chunk_ix: dict[tuple[str, str], int] = {}
-    need_v2 = _need_embedding_v2(docs)
+    need_v2 = _need_embedding_v2(docs, db)
     select_sql = _SELECT_EXISTING_V2_SQL if need_v2 else _SELECT_EXISTING_SQL
     try:
         # Reserve the writer before reading: a deferred transaction's read
@@ -277,7 +291,7 @@ def _upsert_documents_http(db, docs: list[KnowledgeDoc]) -> dict[str, int]:
         groups.setdefault((doc.source, doc.doc_key), []).append(doc)
     if not groups:
         return counts
-    need_v2 = _need_embedding_v2(docs)
+    need_v2 = _need_embedding_v2(docs, db)
     statements, snapshots = [], []
     for key, chunks in groups.items():
         snapshots.append((len(statements), chunks))

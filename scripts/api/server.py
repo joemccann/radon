@@ -99,7 +99,7 @@ from clients.menthorq_dashboard_client import (
 )
 # Lightweight imports: get_embedder is a lazy singleton (fastembed/ONNX load
 # only on first call, and only ever inside asyncio.to_thread — see /knowledge).
-from knowledge.embed import get_embedder, resolve_query_vector
+from knowledge.embed import get_embedder, resolve_query_vector, v2_coverage_ready
 from knowledge.retrieve import hybrid_search
 from knowledge.sources.journal import TRADE_LOG_KEY_PREFIX
 
@@ -6426,14 +6426,23 @@ def _knowledge_search_in_thread(
     A transient DbHttpError gets one in-thread retry (the query is embedded
     once); the last failure propagates to the caller's 503 mapping."""
     embedder = get_embedder()
+
+    def _v2_ready() -> bool:
+        try:
+            return v2_coverage_ready(_KnowledgeHranaConnection())
+        except Exception as exc:
+            logger.warning("knowledge: embedding_v2 coverage check failed (%s); local bge", exc)
+            return False
+
     query_embedding = resolve_query_vector(
         query,
         local_embedder=embedder,
+        coverage_ready=_v2_ready,
         on_nvidia_error=lambda exc: logger.warning(
-            "knowledge: nvidia query embedding failed (%s) — local bge", exc
+            "knowledge: nvidia query embedding failed (%s); local bge", exc
         ),
         on_local_error=lambda exc: logger.warning(
-            "knowledge: query embedding failed (%s) — FTS-only", exc
+            "knowledge: query embedding failed (%s); FTS-only", exc
         ),
     )
     for attempt in range(1, _KNOWLEDGE_RETRIEVAL_ATTEMPTS + 1):

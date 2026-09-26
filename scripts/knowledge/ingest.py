@@ -176,12 +176,12 @@ def ingest_source(
             distill_deferred += batch_deferred
         _restore_unchanged_enrichment(batch, existing)
         if embed_enabled:
-            want_v2 = dual_write_enabled()
+            want_v2 = dual_write_enabled() and _knowledge_has_embedding_v2(db)
             pending = [
                 doc for doc in batch
                 if doc.embedding is None or (want_v2 and doc.embedding_v2 is None)
             ]
-            embedded += _embed_docs(pending, embedder)
+            embedded += _embed_docs(pending, embedder, write_v2=want_v2)
         # One authoritative document is the smallest safe write transaction:
         # every chunk and its trailing-chunk prune must commit together. The
         # preparation batch must not reserve the shared writer for hundreds
@@ -415,21 +415,25 @@ def _restore_unchanged_enrichment(docs, existing):
             doc.embedding_v2 = list(struct.unpack(f"<{EMBEDDING_DIM_V2}f", stored.embedding_v2))
 
 
-def _embed_docs(docs: list[KnowledgeDoc], embedder) -> int:
+def _embed_docs(docs: list[KnowledgeDoc], embedder, *, write_v2: bool | None = None) -> int:
+    if write_v2 is None:
+        write_v2 = dual_write_enabled()
     if not docs:
         return 0
     missing_local = [doc for doc in docs if doc.embedding is None]
+    wrote = 0
     if embedder is not None and missing_local:
         texts = [embedding_text(doc.title, doc.summary, doc.content) for doc in missing_local]
         for doc, vector in zip(missing_local, embedder(texts)):
             doc.embedding = vector
-    elif embedder is None and missing_local and not dual_write_enabled():
+        wrote = len(missing_local)
+    elif embedder is None and missing_local and not write_v2:
         print(
             f"[{SERVICE_NAME}] embeddings unavailable — ingesting without vectors",
             file=sys.stderr,
         )
         return 0
-    if dual_write_enabled():
+    if write_v2:
         missing_v2 = [doc for doc in docs if doc.embedding_v2 is None]
         if missing_v2:
             texts = [embedding_text(doc.title, doc.summary, doc.content) for doc in missing_v2]
@@ -441,7 +445,8 @@ def _embed_docs(docs: list[KnowledgeDoc], embedder) -> int:
             for doc, vector in zip(missing_v2, vectors):
                 if len(vector) == EMBEDDING_DIM_V2:
                     doc.embedding_v2 = vector
-    return len(docs)
+                    wrote += 1
+    return wrote
 
 
 # ── CLI ──────────────────────────────────────────────────────────────

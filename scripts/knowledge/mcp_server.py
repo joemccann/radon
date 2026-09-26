@@ -236,7 +236,7 @@ def _get_query_embedder() -> QueryEmbedder | None:
 
 
 def _build_query_embedder() -> QueryEmbedder | None:
-    from knowledge.embed import embed_backend, get_embedder, resolve_query_vector
+    from knowledge.embed import embed_backend, get_embedder, resolve_query_vector, v2_coverage_ready
 
     local = None
     try:
@@ -246,8 +246,15 @@ def _build_query_embedder() -> QueryEmbedder | None:
     if local is None and embed_backend() != "nvidia":
         return None
 
+    def _v2_ready() -> bool:
+        try:
+            return v2_coverage_ready(_get_db())
+        except Exception as exc:
+            print(f"[kb-mcp] embedding_v2 coverage check failed ({exc}); local bge", file=sys.stderr)
+            return False
+
     def embed_one(text: str):
-        vector = resolve_query_vector(text, local_embedder=local)
+        vector = resolve_query_vector(text, local_embedder=local, coverage_ready=_v2_ready)
         if not vector:
             raise RuntimeError("embedding unavailable")
         return vector

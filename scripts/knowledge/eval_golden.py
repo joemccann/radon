@@ -119,7 +119,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             "warning: golden set is marked draft:true — curate before trusting the gate",
             file=sys.stderr,
         )
-    summary = run_golden(_production_db(), golden, query_embedder=_load_query_embedder())
+    db = _production_db()
+    summary = run_golden(db, golden, query_embedder=_load_query_embedder(db))
     from knowledge.embed import embed_backend
     summary["backend"] = embed_backend()
     summary["hit_at_k"] = summary["overall_hit_at_5"]
@@ -145,8 +146,8 @@ def _production_db():
     return get_db()
 
 
-def _load_query_embedder() -> QueryEmbedder | None:
-    from knowledge.embed import embed_backend, get_embedder, resolve_query_vector
+def _load_query_embedder(db=None) -> QueryEmbedder | None:
+    from knowledge.embed import embed_backend, get_embedder, resolve_query_vector, v2_coverage_ready
 
     local = None
     try:
@@ -156,10 +157,20 @@ def _load_query_embedder() -> QueryEmbedder | None:
     if local is None and embed_backend() != "nvidia":
         return None
 
+    def _v2_ready() -> bool:
+        if db is None:
+            return True
+        try:
+            return v2_coverage_ready(db)
+        except Exception as exc:
+            print(f"embedding_v2 coverage check failed ({exc}); local bge", file=sys.stderr)
+            return False
+
     def embed_one(text: str):
         vector = resolve_query_vector(
             text,
             local_embedder=local,
+            coverage_ready=_v2_ready if db is not None else None,
             on_nvidia_error=lambda exc: print(
                 f"nvidia embed failed ({exc}); falling back", file=sys.stderr
             ),
