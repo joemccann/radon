@@ -204,7 +204,7 @@ only a prefix of a baked key is rejected.
 - Immutable deploy support: `/home/radon/.radon-deploy-runners/<sha>.<run>/cloud`
 - Canonical secrets: `/etc/radon/env` (regular file, mode `0640`, owner `root:radon`)
 - Compatibility secret symlink: `/home/radon/radon-cloud/.env` -> `/etc/radon/env`
-- Canonical media: `/var/lib/radon/media`
+- Canonical media: `/var/lib/radon/media` (owner `radon:radon-media`; caddy is not in group `radon`)
 - Private research: `/var/lib/radon-private` is a root-owned `0700` anchor;
   its `research` child is radon-owned `0700`. The worker mounts that child
   read-write and API read-only at `/var/lib/radon/research`. Seed through the

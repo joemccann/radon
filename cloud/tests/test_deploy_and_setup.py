@@ -360,7 +360,7 @@ class TestSetupEtcRadon:
     def test_creates_etc_radon_dir_mode_0750(self, setup_sh: str) -> None:
         body = _function_body(setup_sh, "create_etc_radon_dir")
         assert "-m 0750" in body
-        assert 'chown --no-dereference radon:radon "$media"' in body
+        assert 'chown --no-dereference radon:radon-media "$media"' in body
         assert "/etc/radon" in body
         assert "/var/lib/radon/media" in body
         assert not re.search(r"^\s*(mv|cp)\s+", body, re.MULTILINE)

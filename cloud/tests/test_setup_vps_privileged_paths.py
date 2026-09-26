@@ -941,7 +941,7 @@ class TestDirectoryOwnership:
         body = _function_body(SETUP.read_text(encoding="utf-8"), "create_etc_radon_dir")
         assert 'mkdir -m 0750 "$media"' in body
         assert body.index('mkdir -m 0750 "$media"') < body.index('-L "$media"')
-        assert 'chown --no-dereference radon:radon "$media"' in body
+        assert 'chown --no-dereference radon:radon-media "$media"' in body
         assert 'install -d' not in body.split('-L "$media"')[1]
 
     def test_secret_store_key_is_32_raw_bytes(self) -> None:

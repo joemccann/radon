@@ -779,6 +779,73 @@ stage_caddy_candidate() {
     "${tip}:cloud/caddy/Caddyfile" > "$candidate"
 }
 
+# DS-2026-09-25-06: give caddy media without group radon (env is 0640 root:radon).
+# Parent /var/lib/radon stays 0750 radon:radon; radon-media gets traverse-only
+# ACL there and r-x on media/. A user ACL on caddy bridges the running
+# process so a group retarget does not 403 media.radon.run before restart.
+# Supplementary groups apply at process start: the caller restarts when
+# GRANT_CADDY_NEEDS_RESTART=1.
+grant_caddy_media_access() {
+  local parent="${RADON_MEDIA_PARENT:-/var/lib/radon}"
+  local media="${RADON_MEDIA_DIR:-${parent}/media}"
+  local env_file="${RADON_CANONICAL_ENV_FILE:-${ENV_FILE:-/etc/radon/env}}"
+  local need_restart=0
+  local groups=""
+  GRANT_CADDY_NEEDS_RESTART=0
+
+  if ! getent group radon-media >/dev/null 2>&1; then
+    groupadd --system radon-media
+  fi
+
+  if [[ -d "$media" && ! -L "$media" ]]; then
+    if command -v setfacl >/dev/null 2>&1; then
+      if id caddy >/dev/null 2>&1; then
+        setfacl -m u:caddy:--x "$parent"
+        setfacl -R -m u:caddy:r-X "$media"
+      fi
+      setfacl -m g:radon-media:--x "$parent"
+      setfacl -m g:radon-media:r-x "$media"
+      setfacl -d -m g:radon-media:r-X "$media"
+      setfacl -R -m g:radon-media:r-X "$media"
+    else
+      chmod 0711 "$parent"
+      chmod 0755 "$media"
+    fi
+    if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" != "1" ]]; then
+      chown --no-dereference radon:radon-media "$media"
+      if command -v setfacl >/dev/null 2>&1; then
+        chmod 2750 "$media"
+      fi
+    fi
+  fi
+
+  if id caddy >/dev/null 2>&1; then
+    # grep -w radon also matches radon-media (hyphen is a word boundary).
+    groups=" $(id -nG caddy 2>/dev/null) "
+    if [[ "$groups" != *" radon-media "* ]]; then
+      usermod -aG radon-media caddy
+      need_restart=1
+    fi
+    if [[ "$groups" == *" radon "* ]]; then
+      gpasswd -d caddy radon
+      need_restart=1
+    fi
+  fi
+
+  if [[ -e "$env_file" ]]; then
+    if [[ -L "$env_file" || ! -f "$env_file" ]]; then
+      echo "Refusing ${env_file}: not a regular file (missing or a symlink)" >&2
+      return 1
+    fi
+    chmod 0640 "$env_file"
+    if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" != "1" ]]; then
+      chown root:radon "$env_file"
+    fi
+  fi
+
+  GRANT_CADDY_NEEDS_RESTART="$need_restart"
+}
+
 # radon publishes Caddy config only through this fixed action. The retired
 # `cp <checkout Caddyfile> /etc/caddy/Caddyfile` sudoers rule followed a
 # symlinked source, so radon could read any root-only file out of the 0644
@@ -828,7 +895,19 @@ publish_caddy() {
   mv -f -- "$candidate" "$CADDY_CONFIG"
   "$SYNC" -f "$CADDY_CONFIG"
 
-  if reload_caddy; then
+  # Existing hosts still have caddy in group radon from the 2026-08-23 media
+  # cutover. Converge membership and media ACLs here so the next deploy
+  # drops that gid without a setup-vps re-run. Skipped in helper test mode
+  # unless a test opts in: groupadd/usermod must not mutate the runner.
+  if (( HELPER_TEST_MODE == 0 )) || [[ "${RADON_TEST_GRANT_CADDY_MEDIA:-0}" == "1" ]]; then
+    grant_caddy_media_access || return $?
+  fi
+  if [[ "${GRANT_CADDY_NEEDS_RESTART:-0}" == "1" ]]; then
+    if restart_caddy; then
+      [[ -z "$rollback" ]] || "$RM" -f "$rollback"
+      return 0
+    fi
+  elif reload_caddy; then
     [[ -z "$rollback" ]] || "$RM" -f "$rollback"
     return 0
   fi
