@@ -731,6 +731,40 @@ class TestRemoteAncestryProvenance:
         assert result.returncode == 0, result.stderr
         assert target.read_text() == source.read_text()
 
+    def _advance_main(self, h: dict[str, Path]) -> tuple[str, str, Path]:
+        older = self._head(h)
+        source = h["cloud"] / "config" / "sudoers.d" / "radon-ops"
+        source.write_text("# reviewed change on main\n")
+        _git(h["cloud"], "add", "config/sudoers.d/radon-ops")
+        _git(h["cloud"], "commit", "-q", "-m", "reviewed change")
+        _publish(h)
+        return older, self._head(h), source
+
+    def test_install_records_the_commit_and_moves_forward(
+        self, harness: dict[str, Path]
+    ) -> None:
+        floor = harness["tmp"] / "provision" / "control-plane-floor"
+        source = harness["cloud"] / "config" / "sudoers.d" / "radon-ops"
+        target = harness["tmp"] / "installed"
+        assert _run_stage(harness, source, target).returncode == 0
+        assert floor.read_text() == f"{self._head(harness)}\n"
+        _, newer, source = self._advance_main(harness)
+        result = _run_stage(harness, source, target)
+        assert result.returncode == 0, result.stderr
+        assert target.read_text() == source.read_text()
+        assert floor.read_text() == f"{newer}\n"
+
+    def test_head_older_than_the_installed_commit_is_refused(
+        self, harness: dict[str, Path]
+    ) -> None:
+        older, newer, source = self._advance_main(harness)
+        installed = harness["tmp"] / "newer-installed"
+        assert _run_stage(harness, source, installed).returncode == 0
+        _git(harness["cloud"], "checkout", "-q", "--detach", older)
+        self._refused(harness, source, "is older than the installed control plane")
+        floor = harness["tmp"] / "provision" / "control-plane-floor"
+        assert floor.read_text() == f"{newer}\n"
+
     def test_anchor_url_is_pinned_not_read_from_the_checkout(self) -> None:
         text = SETUP.read_text(encoding="utf-8")
         assert (
