@@ -12,6 +12,8 @@ type ConfirmDialogProps = {
   cancelLabel?: string;
   destructive?: boolean;
   pending?: boolean;
+  confirmDisabled?: boolean;
+  disabledReason?: string;
   onConfirm: () => void;
   onCancel: () => void;
   /** Units that will ALSO stop (cascade). Rendered as an enumerated warning. */
@@ -38,6 +40,8 @@ export default function ConfirmDialog({
   cancelLabel = "Cancel",
   destructive = false,
   pending = false,
+  confirmDisabled: actionDisabled = false,
+  disabledReason,
   onConfirm,
   onCancel,
   affectedUnits,
@@ -131,7 +135,7 @@ export default function ConfirmDialog({
   if ((!mounted && !open) || !portalTarget) return null;
 
   const typedOk = !requireTyped || typed.trim() === requireTyped;
-  const confirmDisabled = pending || !typedOk || exiting;
+  const confirmDisabled = actionDisabled || pending || !typedOk || exiting;
 
   return createPortal(
     <div
@@ -188,6 +192,7 @@ export default function ConfirmDialog({
           </label>
         )}
 
+        {actionDisabled && !pending && disabledReason && <p className="admin-card-note" role="status">{disabledReason}</p>}
         <div className="admin-confirm-actions">
           <button
             ref={cancelBtnRef}
