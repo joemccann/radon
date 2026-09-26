@@ -233,6 +233,35 @@ def _run(
 # loops. nvidia and cerebras still name one because the grok CLI resolves them
 # through a `[model."<key>"]` config block: the rung names that stable KEY and
 # scripts/agent_cli_bootstrap.sh resolves the live id behind it.
+# 2026-09-25: the documentation loop leads with the NVIDIA rung so its nightly
+# rounds stop drawing on the codex and grok accounts; the other three keep the
+# codex-first order. One table, read by every ladder test.
+FALLBACK_PROVIDER_ORDER = {
+    "ci-performance": ["codex", "grok", "nvidia", "cerebras"],
+    "documentation": ["nvidia", "codex", "grok", "cerebras"],
+    "reliability": ["codex", "grok", "nvidia", "cerebras"],
+    "testing": ["codex", "grok", "nvidia", "cerebras"],
+}
+
+
+def providers_before(loop, provider):
+    """The providers a cap must exhaust before `provider` is launched."""
+    order = FALLBACK_PROVIDER_ORDER[loop]
+    return tuple(order[: order.index(provider)])
+
+
+def _launch_of(tmp_path, loop, provider, phase="audit", **kw):
+    """Cap every rung ahead of `provider` and return (rung, argv line, tried)."""
+    capped = tuple(kw.pop("capped_providers", ())) + providers_before(loop, provider)
+    _proc, tried, _calls, argv = _run_multi(
+        tmp_path, loop, phase, capped_providers=capped, **kw
+    )
+    names = [t.split(":", 1)[0] for t in tried]
+    assert provider in names, (provider, tried)
+    idx = names.index(provider)
+    return tried[idx], argv[idx], tried
+
+
 FALLBACK_LADDER = [
     "codex",
     "grok",

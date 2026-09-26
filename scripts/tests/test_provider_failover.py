@@ -29,6 +29,7 @@ _spec.loader.exec_module(_h)
 
 FALLBACK_LOOPS = ["ci-performance", "documentation", "reliability", "testing"]
 FALLBACK_LADDER = _h.FALLBACK_LADDER
+EXPECTED_PROVIDER_ORDER = _h.FALLBACK_PROVIDER_ORDER
 CLAUDE_LADDER = _h.CLAUDE_LADDER
 _run_multi = _h._run_multi
 CODEX_CAP_LINE = _h.CODEX_CAP_LINE
@@ -41,11 +42,23 @@ def providers(tried):
     return [t.split(":", 1)[0] for t in tried]
 
 
+def order(loop):
+    return EXPECTED_PROVIDER_ORDER[loop]
+
+
+rungs_before = _h.providers_before
+
+
+def launch_of(tried, argv, provider):
+    idx = providers(tried).index(provider)
+    return tried[idx], argv[idx]
+
+
 @pytest.mark.parametrize("loop", FALLBACK_LOOPS)
 class TestACapContinuesOnTheNextProvider:
-    def test_the_default_ladder_leads_with_codex(self, tmp_path, loop):
+    def test_the_default_ladder_leads_with_its_pinned_first_rung(self, tmp_path, loop):
         proc, tried, _calls, _argv = _run_multi(tmp_path, loop, "audit")
-        assert providers(tried)[:1] == ["codex"], (tried, proc.stdout, proc.stderr)
+        assert providers(tried)[:1] == order(loop)[:1], (tried, proc.stdout, proc.stderr)
 
     def test_no_claude_rung_is_ever_launched(self, tmp_path, loop):
         """The claude.ai subscription belongs to the security loop."""
@@ -54,18 +67,18 @@ class TestACapContinuesOnTheNextProvider:
         )
         assert "claude" not in providers(tried), tried
 
-    def test_a_codex_cap_continues_on_grok(self, tmp_path, loop):
+    def test_a_first_rung_cap_continues_on_the_second(self, tmp_path, loop):
         proc, tried, _calls, _argv = _run_multi(
-            tmp_path, loop, "audit", capped_providers=("codex",)
+            tmp_path, loop, "audit", capped_providers=(order(loop)[0],)
         )
-        assert providers(tried)[:2] == ["codex", "grok"], (tried, proc.stderr)
+        assert providers(tried)[:2] == order(loop)[:2], (tried, proc.stderr)
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
 
     def test_it_walks_the_whole_ladder_in_order(self, tmp_path, loop):
         proc, tried, _calls, _argv = _run_multi(
-            tmp_path, loop, "audit", capped_providers=("codex", "grok", "nvidia")
+            tmp_path, loop, "audit", capped_providers=tuple(order(loop)[:3])
         )
-        assert providers(tried) == ["codex", "grok", "nvidia", "cerebras"], tried
+        assert providers(tried) == order(loop), tried
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
 
     def test_every_provider_capped_is_one_honest_incomplete(self, tmp_path, loop):
@@ -73,7 +86,7 @@ class TestACapContinuesOnTheNextProvider:
             tmp_path, loop, "audit",
             capped_providers=("codex", "grok", "nvidia", "cerebras"),
         )
-        assert providers(tried) == ["codex", "grok", "nvidia", "cerebras"], tried
+        assert providers(tried) == order(loop), tried
         assert proc.returncode == 75, (proc.returncode, proc.stdout, proc.stderr)
         assert "all agent providers exhausted" in calls, calls
         assert "INCOMPLETE" in calls, calls
@@ -81,7 +94,9 @@ class TestACapContinuesOnTheNextProvider:
     def test_an_uninstalled_provider_is_skipped_not_crashed(self, tmp_path, loop):
         """A missing binary must cost one rung, never the night."""
         proc, tried, _calls, _argv = _run_multi(
-            tmp_path, loop, "audit", capped_providers=("codex",), installed=("codex",)
+            tmp_path, loop, "audit",
+            capped_providers=rungs_before(loop, "codex") + ("codex",),
+            installed=("codex",),
         )
         assert providers(tried) == ["codex"], tried
         assert proc.returncode == 75, (proc.returncode, proc.stdout, proc.stderr)
@@ -89,10 +104,10 @@ class TestACapContinuesOnTheNextProvider:
     def test_an_unauthenticated_provider_is_skipped(self, tmp_path, loop):
         proc, tried, _calls, _argv = _run_multi(
             tmp_path, loop, "audit",
-            capped_providers=("codex", "grok"),
-            authed=("codex", "grok", "cerebras"),
+            capped_providers=tuple(order(loop)[:2]),
+            authed=tuple(p for p in order(loop) if p != order(loop)[2]),
         )
-        assert providers(tried) == ["codex", "grok", "cerebras"], tried
+        assert providers(tried) == order(loop)[:2] + order(loop)[3:], tried
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
 
     def test_an_operator_ladder_overrides_the_default(self, tmp_path, loop):
@@ -120,7 +135,8 @@ class TestACapContinuesOnTheNextProvider:
         _proc, tried, _calls, _argv = _run_multi(
             tmp_path, loop, "audit", capped_providers=("codex", "grok", "nvidia")
         )
-        assert providers(tried)[2:] == ["nvidia", "cerebras"], tried
+        hosted = [p for p in providers(tried) if p in ("nvidia", "cerebras")]
+        assert hosted == ["nvidia", "cerebras"], tried
 
     def test_a_reduced_rung_is_marked_reduced(self, tmp_path, loop):
         """Fallback rungs run the portable prompt with no subagents, so the
@@ -139,10 +155,12 @@ class TestAPermanentRejectionCostsOneRung:
     def test_a_rejected_codex_rung_advances_and_the_night_completes(
         self, tmp_path, loop
     ):
+        before = rungs_before(loop, "codex")
         proc, tried, _calls, _argv = _run_multi(
-            tmp_path, loop, "audit", reject_providers=("codex",)
+            tmp_path, loop, "audit",
+            capped_providers=before, reject_providers=("codex",),
         )
-        assert providers(tried)[:2] == ["codex", "grok"], (tried, proc.stderr)
+        assert providers(tried) == list(before) + ["codex", "grok"], (tried, proc.stderr)
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
 
     def test_a_rejection_is_not_a_provider_wide_cap(self, tmp_path, loop):
@@ -157,12 +175,14 @@ class TestAPermanentRejectionCostsOneRung:
 
     def test_prose_quoting_a_rejection_is_not_a_rejection(self, tmp_path, loop):
         """These loops audit their own wrappers and echo the trigger text."""
+        before = rungs_before(loop, "codex")
         _proc, tried, _calls, _argv = _run_multi(
             tmp_path, loop, "audit",
+            capped_providers=before,
             reject_providers=("codex",),
             reject_output=REJECTION_QUOTED_OUTPUT,
         )
-        assert providers(tried) == ["codex"], (
+        assert providers(tried) == list(before) + ["codex"], (
             f"a Traceback quoting the 400 walked the ladder: {tried}"
         )
 
@@ -192,14 +212,12 @@ class TestTheOperatorsDecisionNoPinnedModels:
         )
         assert m, f"{loop}: no default provider ladder"
         rungs = m.group(1).split()
-        assert [r.split(":")[0] for r in rungs] == [
-            "codex", "grok", "nvidia", "cerebras"
-        ], rungs
-        assert rungs[0] == "codex", (
-            f"{loop}: the codex rung pins a model again: {rungs[0]}"
+        assert [r.split(":")[0] for r in rungs] == EXPECTED_PROVIDER_ORDER[loop], rungs
+        assert "codex" in rungs, (
+            f"{loop}: the codex rung pins a model again: {rungs}"
         )
-        assert rungs[1] == "grok", (
-            f"{loop}: the grok rung pins a model again: {rungs[1]}"
+        assert "grok" in rungs, (
+            f"{loop}: the grok rung pins a model again: {rungs}"
         )
 
     @pytest.mark.parametrize("loop", FALLBACK_LOOPS)
@@ -255,27 +273,32 @@ def _fn_source(wrapper, name):
 @pytest.mark.parametrize("loop", FALLBACK_LOOPS)
 class TestMediumReasoningOnEveryFallbackRung:
     def test_codex_is_launched_with_no_model_and_medium_effort(self, tmp_path, loop):
-        _proc, _tried, _calls, argv = _run_multi(tmp_path, loop, "audit")
-        assert argv, "codex was never launched"
-        assert "--model" not in argv[0].split(), (
-            f"a bare rung must omit --model entirely, not pass an empty one: {argv[0]}"
+        _proc, tried, _calls, argv = _run_multi(
+            tmp_path, loop, "audit", capped_providers=rungs_before(loop, "codex")
         )
-        assert 'model_reasoning_effort=medium' in argv[0].replace('"', ""), argv[0]
+        assert "codex" in providers(tried), "codex was never launched"
+        _rung, launch = launch_of(tried, argv, "codex")
+        assert "--model" not in launch.split(), (
+            f"a bare rung must omit --model entirely, not pass an empty one: {launch}"
+        )
+        assert 'model_reasoning_effort=medium' in launch.replace('"', ""), launch
 
     def test_grok_is_launched_with_no_model_and_medium_effort(self, tmp_path, loop):
-        _proc, _tried, _calls, argv = _run_multi(
-            tmp_path, loop, "audit", capped_providers=("codex",)
+        _proc, tried, _calls, argv = _run_multi(
+            tmp_path, loop, "audit", capped_providers=rungs_before(loop, "grok")
         )
-        assert len(argv) >= 2, argv
-        assert "--model" not in argv[1].split(), argv[1]
-        assert "--reasoning-effort medium" in argv[1], argv[1]
+        assert "grok" in providers(tried), tried
+        _rung, launch = launch_of(tried, argv, "grok")
+        assert "--model" not in launch.split(), launch
+        assert "--reasoning-effort medium" in launch, launch
 
     def test_the_hosted_rungs_still_pass_their_config_key(self, tmp_path, loop):
         _proc, tried, _calls, argv = _run_multi(
-            tmp_path, loop, "audit", capped_providers=("codex", "grok")
+            tmp_path, loop, "audit", capped_providers=rungs_before(loop, "nvidia")
         )
-        assert tried[2:3] == ["nvidia:nvidia-latest"], tried
-        assert "--reasoning-effort medium" in argv[2], argv[2]
+        rung, launch = launch_of(tried, argv, "nvidia")
+        assert rung == "nvidia:nvidia-latest", tried
+        assert "--reasoning-effort medium" in launch, launch
 
 
 class TestTheSecurityLoopIsClaudeExclusive:
