@@ -267,7 +267,7 @@ but `0.449/0.393 = 1.14`, so only one neighbour qualifies).
 writer.ensure_no_replica_for_writers()
 if rows_changed and rows:
     writer.upsert_iv_spread_rows(rows, recorded_at=scan_time)   # own try/except, folded into the heartbeat
-writer.upsert_scan_snapshot("iv-spread", scan_time, payload)           # EVERY cycle
+_persist_snapshot(scan_time, payload)   # EVERY cycle, hrana, PERSIST_BUDGET_S
 writer.record_service_health("iv-spread", "ok" | "error", finished_at=scan_time, error=...)  # EVERY cycle
 ```
 
