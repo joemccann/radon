@@ -35,3 +35,23 @@ def test_bare_nvidia_and_cerebras_keys_are_redacted():
     assert nvidia not in body
     assert cerebras not in body
     assert "keys " in body and " pasted" in body
+
+
+def test_generic_secret_assignments_are_redacted():
+    # Env-file / config-dump shapes reach the embed + validator egress paths,
+    # not only distill (DS-2026-09-27-02).
+    token = "Zq9" + "xY7wV5uT3sR1"
+    password = "Pw0" + "rdV4lue88"
+    secret = "Cs1" + "ecretV4lue"
+    body = scrub_credential_text(
+        f"UW_TOKEN={token}\nDB_PASSWORD: '{password}'\n\"client_secret\": \"{secret}\""
+    )
+    assert token not in body
+    assert password not in body
+    assert secret not in body
+    assert "UW_TOKEN=" in body and "DB_PASSWORD:" in body
+
+
+def test_generic_assignment_leaves_plain_prose_untouched():
+    text = "the token budget ran out; password reset scheduled"
+    assert scrub_credential_text(text) == text

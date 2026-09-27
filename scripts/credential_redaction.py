@@ -30,6 +30,16 @@ _SECRET_SCRUB_PATTERNS = [
     (re.compile(r"(?<![A-Za-z0-9])csk-[A-Za-z0-9_-]{16,}"), "[redacted-key]"),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[redacted-key]"),
     (re.compile(r"([?&](?:t|token|api[_-]?key)=)[^\s&'\"]+", re.IGNORECASE), r"\1[redacted]"),
+    # Generic key-value assignment (env files, config dumps, JSON), last so a
+    # value the specific shapes above already tagged keeps its tag.
+    (
+        re.compile(
+            r"([\"']?(?:api[_-]?key|access[_-]?token|client[_-]?secret|password|secret|token)"
+            r"[\"']?\s*[:=]\s*[\"']?)(?!\[redacted)[^\"'\s,;&]+",
+            re.IGNORECASE,
+        ),
+        r"\1[redacted-secret]",
+    ),
 ]
 
 
