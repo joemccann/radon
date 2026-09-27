@@ -779,6 +779,18 @@ stage_caddy_candidate() {
     "${tip}:cloud/caddy/Caddyfile" > "$candidate"
 }
 
+# Make $1 the cwd only if it is still the real directory at that path, so
+# root's later operations on "." cannot follow a link swapped in after a
+# check. getcwd reports the directory actually entered, not the path.
+enter_real_dir() {
+  local dir="$1" expected
+  expected="$(cd -P -- "${dir%/*}" && pwd -P)/${dir##*/}" || return 1
+  if ! cd -P -- "$dir" 2>/dev/null || [[ "$(pwd -P)" != "$expected" ]]; then
+    echo "Refusing ${dir}: not a real directory (moved or replaced by a link)" >&2
+    return 1
+  fi
+}
+
 # DS-2026-09-25-06: give caddy media without group radon (env is 0640 root:radon).
 # Parent /var/lib/radon stays 0750 radon:radon; radon-media gets traverse-only
 # ACL there and r-x on media/. A user ACL on caddy bridges the running
@@ -790,7 +802,7 @@ grant_caddy_media_access() {
   local media="${RADON_MEDIA_DIR:-${parent}/media}"
   local env_file="${RADON_CANONICAL_ENV_FILE:-${ENV_FILE:-/etc/radon/env}}"
   local need_restart=0
-  local groups=""
+  local groups="" here=""
   GRANT_CADDY_NEEDS_RESTART=0
 
   if ! getent group radon-media >/dev/null 2>&1; then
@@ -798,25 +810,32 @@ grant_caddy_media_access() {
   fi
 
   if [[ -d "$media" && ! -L "$media" ]]; then
+    # media/ sits in radon-owned /var/lib/radon, so radon can swap in a link
+    # after the check above. Root acts only on "." once cwd is pinned to the
+    # real directory; the recursive walks run as radon, which owns the tree,
+    # so a link swapped in mid-walk grants nothing radon could not already.
+    here="$(pwd)"
+    enter_real_dir "$media" || { cd -- "$here"; return 1; }
     if command -v setfacl >/dev/null 2>&1; then
       if id caddy >/dev/null 2>&1; then
         setfacl -m u:caddy:--x "$parent"
-        setfacl -R -m u:caddy:r-X "$media"
+        runuser -u radon -- setfacl -R -P -m u:caddy:r-X .
       fi
       setfacl -m g:radon-media:--x "$parent"
-      setfacl -m g:radon-media:r-x "$media"
-      setfacl -d -m g:radon-media:r-X "$media"
-      setfacl -R -m g:radon-media:r-X "$media"
+      setfacl -m g:radon-media:r-x .
+      setfacl -d -m g:radon-media:r-X .
+      runuser -u radon -- setfacl -R -P -m g:radon-media:r-X .
     else
       chmod 0711 "$parent"
-      chmod 0755 "$media"
+      chmod 0755 .
     fi
     if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" != "1" ]]; then
-      chown --no-dereference radon:radon-media "$media"
+      chown --no-dereference radon:radon-media .
       if command -v setfacl >/dev/null 2>&1; then
-        chmod 2750 "$media"
+        chmod 2750 .
       fi
     fi
+    cd -- "$here"
   fi
 
   if id caddy >/dev/null 2>&1; then
