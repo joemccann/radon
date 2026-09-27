@@ -47,7 +47,7 @@ class TestHeartbeatDecoupledFromSnapshot:
         def boom(*a, **k):
             raise RuntimeError("turso down")
 
-        monkeypatch.setattr(ivs.writer, "upsert_scan_snapshot", boom)
+        monkeypatch.setattr(ivs, "_persist_snapshot", boom)
         ivs._write_db({"x": 1}, "2026-09-03T22:15:00Z", rows_changed=False, health_error=None)
         assert health_rows, "no heartbeat after the snapshot write failed"
         assert health_rows[-1]["state"] == "error"
