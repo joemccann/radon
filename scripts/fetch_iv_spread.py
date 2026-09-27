@@ -24,6 +24,7 @@ import json
 import math
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -63,6 +64,11 @@ OUTLIER_NEIGHBOR_RATIO = 1.5
 
 IV_SPREAD_JSON = _PROJECT_DIR / "data" / "iv_spread.json"
 SERVICE = "iv-spread"
+# Snapshot upsert ceiling. Two hrana statements, each capped at
+# HRANA_TIMEOUT_S. Must stay under cloud/services TimeoutStartSec=300.
+# Sync libsql has no client timeout and holds the GIL, so a stalled
+# upsert_scan_snapshot used to sit until systemd SIGTERM (2026-09-26).
+PERSIST_BUDGET_S = 30
 
 # Leg symbol -> stored column / series key.
 LEG_KEYS = {"SPX": "spx_iv", "NDX": "ndx_iv"}
@@ -395,6 +401,51 @@ def persist_json(payload: dict[str, Any]) -> None:
     os.replace(tmp, IV_SPREAD_JSON)
 
 
+def _persist_snapshot(scan_time: str, payload: dict[str, Any]) -> None:
+    """Write scan_snapshots over hrana, not sync libsql.
+
+    libsql_experimental has no client timeout and holds the GIL while
+    blocked. On 2026-09-26 the IB-skip path printed the cache reserve at
+    22:15:54Z and was still inside upsert_scan_snapshot when systemd
+    SIGTERM'd at TimeoutStartSec (22:20:53Z, Result=timeout). The
+    heartbeat and the JSON mirror never ran. A socket timeout can be
+    abandoned; a thread join around get_db() cannot.
+    """
+    try:
+        from db.hrana_http import HRANA_TIMEOUT_S, hrana_execute
+        from db.writer import SCAN_SNAPSHOT_KEEP
+    except ImportError:
+        return
+    deadline = time.monotonic() + PERSIST_BUDGET_S
+    blob = json.dumps(payload)
+
+    def _timeout() -> float:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f"iv-spread persist budget spent ({PERSIST_BUDGET_S}s)")
+        return min(HRANA_TIMEOUT_S, remaining)
+
+    hrana_execute(
+        "INSERT OR REPLACE INTO scan_snapshots (service, scan_time, payload) "
+        "VALUES (?, ?, ?)",
+        (SERVICE, scan_time, blob),
+        timeout=_timeout(),
+    )
+    hrana_execute(
+        """
+        DELETE FROM scan_snapshots
+        WHERE service = ? AND scan_time NOT IN (
+          SELECT scan_time FROM scan_snapshots
+          WHERE service = ?
+          ORDER BY scan_time DESC
+          LIMIT ?
+        )
+        """,
+        (SERVICE, SERVICE, SCAN_SNAPSHOT_KEEP),
+        timeout=_timeout(),
+    )
+
+
 def _write_db(
     payload: dict[str, Any],
     scan_time: str,
@@ -424,11 +475,11 @@ def _write_db(
             "class": "db_write_failed",
         }
     # REL-213 (R-575): the snapshot write and the heartbeat are SEPARATE
-    # trys — a Turso failure on the snapshot is exactly the dead-writer
-    # condition the heartbeat exists to surface, so it must not silence it.
+    # trys. A Turso failure on the snapshot is the dead-writer condition
+    # the heartbeat exists to surface, so it must not silence it.
     snapshot_error: Optional[dict[str, Any]] = None
     try:
-        writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
+        _persist_snapshot(scan_time, payload)
     except Exception as exc:  # noqa: BLE001
         print(f"[iv-spread] snapshot write failed: {exc}", file=sys.stderr)
         snapshot_error = {

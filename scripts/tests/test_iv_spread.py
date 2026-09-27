@@ -524,6 +524,11 @@ def job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(mod, "IV_SPREAD_JSON", tmp_path / "iv_spread.json")
     fake = _FakeWriter()
     monkeypatch.setattr(mod, "writer", fake)
+
+    def _record_snapshot(scan_time, payload, _fake=fake, _service=mod.SERVICE):
+        _fake.upsert_scan_snapshot(_service, scan_time, payload)
+
+    monkeypatch.setattr(mod, "_persist_snapshot", _record_snapshot)
     monkeypatch.setattr(mod, "gateway_auth_state", lambda: "authenticated")
     monkeypatch.setattr(mod, "load_history", lambda: [])
     return mod, fake, tmp_path
@@ -662,10 +667,9 @@ class TestIbDown:
 
 
 class TestRowWriteFailureIsVisible:
-    def test_row_upsert_failure_folds_into_an_error_heartbeat(self, job, monkeypatch):
-        mod, _fake, _tmp = job
-        fake = _FakeWriter(row_exc=RuntimeError("hrana 502"))
-        monkeypatch.setattr(mod, "writer", fake)
+    def test_row_upsert_failure_folds_into_an_error_heartbeat(self, job):
+        mod, fake, _tmp = job
+        fake.row_exc = RuntimeError("hrana 502")
         payload = mod.run(ib_fetch=_StubIb(_sample_legs()), now=NOW_RUN)
         assert payload["status"] == "ok"
         assert [snap[0] for snap in fake.snapshots] == ["iv-spread"]    # snapshot still lands
@@ -694,3 +698,74 @@ class TestJsonFallback:
         rows = mod._history_from_json()
         assert [row["date"] for row in rows] == ["2026-08-31", "2026-09-01"]
         assert set(rows[0]) == {"date", "spx_iv", "ndx_iv"}
+
+
+class TestSnapshotPersistBudget:
+    """2026-09-26 22:15:54Z: gateway auth_state=unreachable, cache reserve
+    printed, then sync libsql `upsert_scan_snapshot` held the GIL until
+    TimeoutStartSec=300 (SIGTERM, Result=timeout, NRestarts=0). Heartbeat
+    and data/iv_spread.json never landed (both still 2026-09-25)."""
+
+    def test_unreachable_skip_does_not_block_on_sync_libsql(self, monkeypatch, tmp_path):
+        import time
+
+        mod = _mod()
+        monkeypatch.setattr(mod, "IV_SPREAD_JSON", tmp_path / "iv_spread.json")
+        monkeypatch.setattr(mod, "gateway_auth_state", lambda: "unreachable")
+        (tmp_path / "iv_spread.json").write_text(json.dumps({
+            "scan_time": "2026-09-25T22:15:58Z",
+            "status": "ok",
+            "source": "ib",
+            "as_of": "2026-09-25",
+            "series": [{"date": "2026-09-25", "spx_iv": 0.11, "ndx_iv": 0.17, "spread": 6.0}],
+        }))
+
+        calls = {"get_db": 0, "hrana": []}
+
+        def hang_get_db(*_a, **_k):
+            calls["get_db"] += 1
+            time.sleep(2.0)
+            raise AssertionError("sync libsql returned")
+
+        monkeypatch.setattr("db.writer.get_db", hang_get_db)
+
+        def hrana(sql, args=(), timeout=4.0):
+            calls["hrana"].append((sql, timeout))
+            assert timeout <= mod.PERSIST_BUDGET_S
+
+        monkeypatch.setattr("db.hrana_http.hrana_execute", hrana)
+
+        health: list[tuple] = []
+
+        def record(service, state, **kwargs):
+            health.append((service, state, kwargs.get("error")))
+
+        monkeypatch.setattr(mod.writer, "record_service_health", record)
+
+        started = time.monotonic()
+        payload = mod.run(now=NOW_RUN)
+        elapsed = time.monotonic() - started
+
+        assert elapsed < 1.0
+        assert calls["get_db"] == 0
+        assert calls["hrana"]
+        assert any("scan_snapshots" in sql for sql, _timeout in calls["hrana"])
+        assert payload["status"] == "stale_source"
+        assert health and health[0][0] == "iv-spread" and health[0][1] == "error"
+        on_disk = json.loads((tmp_path / "iv_spread.json").read_text())
+        assert on_disk["scan_time"] == payload["scan_time"]
+
+    def test_persist_budget_fits_inside_unit_start_timeout(self):
+        mod = _mod()
+        service = (
+            Path(__file__).resolve().parents[2]
+            / "cloud"
+            / "services"
+            / "radon-iv-spread.service"
+        )
+        timeout_line = next(
+            line for line in service.read_text().splitlines()
+            if line.startswith("TimeoutStartSec=")
+        )
+        unit_timeout = int(timeout_line.split("=", 1)[1])
+        assert mod.PERSIST_BUDGET_S <= unit_timeout
