@@ -537,6 +537,7 @@ def _run_multi(
         "RADON_WEEKEND_CODEX_BIN": str(bin_dir / "codex"),
         "RADON_WEEKEND_GROK_BIN": str(bin_dir / "grok"),
         "RADON_WEEKEND_FX_BIN": str(bin_dir / "fx"),
+        "RADON_WEEKEND_RETRY_PAUSE_SECS": "0",
     }
     if provider_ladder is not None:
         env["RADON_WEEKEND_PROVIDER_LADDER"] = provider_ladder
