@@ -128,6 +128,7 @@ if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
   readonly ROOT_KILL_AFTER="${RADON_TEST_ROOT_KILL_AFTER:-5}"
   readonly ROOT_LOCK_WAIT="${RADON_TEST_ROOT_LOCK_WAIT:-190}"
   readonly SESSION_PYTHON="${RADON_TEST_SESSION_PYTHON:-$(command -v python3)}"
+  readonly SETPRIV="${RADON_TEST_SETPRIV:-setpriv}"
   readonly INSTALL="${RADON_TEST_INSTALL:-$(command -v install)}"
   readonly CADDY_SOURCE="${RADON_TEST_CADDY_SOURCE:-}"
   readonly CADDY_CONFIG="${RADON_TEST_CADDY_CONFIG:-}"
@@ -192,6 +193,7 @@ else
   readonly ROOT_KILL_AFTER=5
   readonly ROOT_LOCK_WAIT=190
   readonly SESSION_PYTHON=/usr/bin/python3.13
+  readonly SETPRIV=/usr/bin/setpriv
   readonly CADDY_SOURCE=/home/radon/radon/cloud/caddy/Caddyfile
   readonly CADDY_CONFIG=/etc/caddy/Caddyfile
   readonly CADDY_BIN=/usr/bin/caddy
@@ -779,16 +781,17 @@ stage_caddy_candidate() {
     "${tip}:cloud/caddy/Caddyfile" > "$candidate"
 }
 
-# Make $1 the cwd only if it is still the real directory at that path, so
-# root's later operations on "." cannot follow a link swapped in after a
-# check. getcwd reports the directory actually entered, not the path.
-enter_real_dir() {
-  local dir="$1" expected
-  expected="$(cd -P -- "${dir%/*}" && pwd -P)/${dir##*/}" || return 1
-  if ! cd -P -- "$dir" 2>/dev/null || [[ "$(pwd -P)" != "$expected" ]]; then
-    echo "Refusing ${dir}: not a real directory (moved or replaced by a link)" >&2
-    return 1
-  fi
+# fchmod through an O_NOFOLLOW fd: a by-name chmod on an entry in a
+# radon-owned directory follows whatever link radon swapped in.
+chmod_dir_nofollow() {
+  "$SESSION_PYTHON" - "$1" "$2" <<'PY_CHMOD_DIR'
+import os, sys
+fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    os.fchmod(fd, int(sys.argv[2], 8))
+finally:
+    os.close(fd)
+PY_CHMOD_DIR
 }
 
 # DS-2026-09-25-06: give caddy media without group radon (env is 0640 root:radon).
@@ -802,40 +805,41 @@ grant_caddy_media_access() {
   local media="${RADON_MEDIA_DIR:-${parent}/media}"
   local env_file="${RADON_CANONICAL_ENV_FILE:-${ENV_FILE:-/etc/radon/env}}"
   local need_restart=0
-  local groups="" here=""
+  local groups=""
   GRANT_CADDY_NEEDS_RESTART=0
 
   if ! getent group radon-media >/dev/null 2>&1; then
     groupadd --system radon-media
   fi
 
+  # radon owns the parent and media/, so it can swap any name under media
+  # between a check and root's use of it (DS-2026-09-27-01). ACLs inside
+  # media are set as radon, the owner; root only acts on media itself
+  # through an O_NOFOLLOW fd (chown --no-dereference never follows).
+  local -a as_owner=()
+  if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" != "1" ]]; then
+    as_owner=("$SETPRIV" --reuid=radon --regid=radon --clear-groups --)
+  fi
   if [[ -d "$media" && ! -L "$media" ]]; then
-    # media/ sits in radon-owned /var/lib/radon, so radon can swap in a link
-    # after the check above. Root acts only on "." once cwd is pinned to the
-    # real directory; the recursive walks run as radon, which owns the tree,
-    # so a link swapped in mid-walk grants nothing radon could not already.
-    here="$(pwd)"
-    enter_real_dir "$media" || { cd -- "$here"; return 1; }
     if command -v setfacl >/dev/null 2>&1; then
       if id caddy >/dev/null 2>&1; then
         setfacl -m u:caddy:--x "$parent"
-        runuser -u radon -- setfacl -R -P -m u:caddy:r-X .
+        "${as_owner[@]}" setfacl -R -P -m u:caddy:r-X "$media"
       fi
       setfacl -m g:radon-media:--x "$parent"
-      setfacl -m g:radon-media:r-x .
-      setfacl -d -m g:radon-media:r-X .
-      runuser -u radon -- setfacl -R -P -m g:radon-media:r-X .
+      "${as_owner[@]}" setfacl -m g:radon-media:r-x "$media"
+      "${as_owner[@]}" setfacl -d -m g:radon-media:r-X "$media"
+      "${as_owner[@]}" setfacl -R -P -m g:radon-media:r-X "$media"
     else
       chmod 0711 "$parent"
-      chmod 0755 .
+      chmod_dir_nofollow "$media" 0755
     fi
     if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" != "1" ]]; then
-      chown --no-dereference radon:radon-media .
+      chown --no-dereference radon:radon-media "$media"
       if command -v setfacl >/dev/null 2>&1; then
-        chmod 2750 .
+        chmod_dir_nofollow "$media" 2750
       fi
     fi
-    cd -- "$here"
   fi
 
   if id caddy >/dev/null 2>&1; then
@@ -1859,11 +1863,48 @@ compose_body_is_valid() {
   return 0
 }
 
+# The state dir is radon-owned, so a temp or target name in it can be swapped
+# for a link between root's create and a by-name write/chmod/rename
+# (DS-2026-09-27-01). Create, write, own and mode through one O_NOFOLLOW fd,
+# then rename relative to a pinned directory fd.
+install_state_file() {
+  "$SESSION_PYTHON" - "$1" "$2" "$3" "$HELPER_TEST_MODE" <<'PY_STATE_FILE'
+import os, secrets, sys
+source, target, mode, test = sys.argv[1], sys.argv[2], int(sys.argv[3], 8), sys.argv[4] == "1"
+parent, name = os.path.split(target)
+with open(source, "rb") as handle:
+    data = handle.read()
+dfd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    tmp = f".{name}.{secrets.token_hex(8)}"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dfd)
+    try:
+        view = memoryview(data)
+        while view:
+            view = view[os.write(fd, view):]
+        if not test:
+            os.fchown(fd, 0, 0)
+        os.fchmod(fd, mode)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    try:
+        os.rename(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd)
+    except OSError:
+        os.unlink(tmp, dir_fd=dfd)
+        raise
+    os.fsync(dfd)
+finally:
+    os.close(dfd)
+PY_STATE_FILE
+}
+
 write_control_plane_manifest_and_ready() {
   local index source_rel dest digest tmp_manifest tmp_ready state_dir
   state_dir="$(dirname -- "$CONTROL_PLANE_MANIFEST")"
   mkdir -p "$state_dir" || return 73
-  tmp_manifest="$(mktemp "${CONTROL_PLANE_MANIFEST}.XXXXXX")"
+  # Staged in root's private temp dir, never in the radon-owned state dir.
+  tmp_manifest="$(mktemp)"
   for index in "${!CONTROL_PLANE_SOURCES[@]}"; do
     source_rel="${CONTROL_PLANE_SOURCES[$index]}"
     dest="${CONTROL_PLANE_ROOT}${CONTROL_PLANE_TARGETS[$index]}"
@@ -1897,15 +1938,14 @@ write_control_plane_manifest_and_ready() {
     printf '%s  %s -> %s\n' "$digest" "$source_rel" "${CONTROL_PLANE_TARGETS[$index]}" \
       >> "$tmp_manifest"
   done
-  chmod 0644 "$tmp_manifest"
-  mv -f -- "$tmp_manifest" "$CONTROL_PLANE_MANIFEST"
-  "$SYNC" -f "$CONTROL_PLANE_MANIFEST"
-  tmp_ready="$(mktemp "${CONTROL_PLANE_READY}.XXXXXX")"
-  printf '%s  %s\n' "$(file_sha256 "$CONTROL_PLANE_MANIFEST")" \
+  tmp_ready="$(mktemp)"
+  printf '%s  %s\n' "$(file_sha256 "$tmp_manifest")" \
     "$LOGICAL_CONTROL_PLANE_MANIFEST" > "$tmp_ready"
-  chmod 0644 "$tmp_ready"
-  mv -f -- "$tmp_ready" "$CONTROL_PLANE_READY"
-  "$SYNC" -f "$CONTROL_PLANE_READY"
+  local rc=0
+  install_state_file "$tmp_manifest" "$CONTROL_PLANE_MANIFEST" 0644 && \
+    install_state_file "$tmp_ready" "$CONTROL_PLANE_READY" 0644 || rc=$?
+  "$RM" -f "$tmp_manifest" "$tmp_ready"
+  return "$rc"
 }
 
 # The commit whose control-plane bytes this host may install: the local HEAD,

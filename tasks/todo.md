@@ -6,6 +6,12 @@
 - [x] T4 depends_on: [T3] Offline tests, systemd units (not enabled), docs.
 - [ ] T5 depends_on: [T4] Draft PR vs main, CI green, no merge.
 
+# Task: grok-fix-pickup self-refresh (2026-09-27)
+
+- [x] T1 depends_on: [] Failing tests: plist bash -c refresh before python exec, git -C not .gitdirs, fix/* survive, bash -n, plistlib.
+- [x] T2 depends_on: [T1] Plist + docs install snippet + contract pins.
+- [ ] T3 depends_on: [T2] Focused pytest green, non-draft PR, CI green. No merge.
+
 # Task: DS-2026-09-25-06 Caddy media group (2026-09-26)
 
 - [x] T1 depends_on: [] Failing tests: caddy not in radon, radon-media grant, env 0640.

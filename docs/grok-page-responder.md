@@ -104,9 +104,11 @@ with `GROK_PAGE_AUTOPUSH=0`: it edits, tests and commits to `fix/<slug>` in
 its clone, and stops.
 
 `scripts/grok_fix_pickup.py` on the Mac mini (launchd
-`com.radon.grok-fix-pickup`, every 15 min) fetches those branches over the
+`com.radon.grok-fix-pickup`, every 15 min) first refreshes its clone to
+`origin/main`, then fetches those branches over the
 existing ssh access, pushes them to GitHub and calls `ir_ensure_pr`. It never
-merges; Joe merges after CI is green. Branch content is still untrusted, so
+merges; Joe merges after CI is green. Local `fix/*` branches in that clone
+survive the reset. Branch content is still untrusted, so
 pickup refuses:
 
 - refs outside `fix/<slug>` (no refspec, option or path tricks);
@@ -126,7 +128,9 @@ in pickup executes code out of the fetched tree. Regressions:
 `scripts/tests/test_grok_fix_pickup.py`.
 
 ```bash
-# Mac mini, once: dedicated clone + job
+# Mac mini, once: dedicated clone + job.
+# Each fire fetches origin and hard-resets main to origin/main before
+# pickup, so the job cannot drift. Local fix/* branches survive.
 git clone git@github.com:joemccann/radon.git ~/radon-weekend/radon-grok-pickup
 sed -e "s|__PICKUP_REPO__|$HOME/radon-weekend/radon-grok-pickup|g" \
     -e "s|__HOME__|$HOME|g" \
