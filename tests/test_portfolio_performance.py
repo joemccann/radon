@@ -207,7 +207,7 @@ def test_acats_in_is_an_external_flow_at_position_value():
 # A real ACATS is a BASKET, and some of its legs are genuinely negative.
 #
 # Transcribed from the operator's Flex export for 2026-02-06 (query 1442520,
-# accountId U4698258). Two legs carry negative amounts under direction="IN":
+# accountId U1234567). Two legs carry negative amounts under direction="IN":
 # a short ETHA call, which is a liability being taken on, and the cash leg,
 # which left the account as part of the transfer. `abs()`-ing the magnitude
 # before applying the direction sign flipped both, inflating the flow from

@@ -612,8 +612,8 @@ def test_retain_newest_gpg_keep_zero_removes_all(tmp_path):
 # --- IBKR's real delivery names end in .xml.pgp, not .gpg (2026-09-02) ------
 
 IBKR_LS = (
-    "U4698258.Equity_Summary_in_Base.20260901.20260901.xml.pgp\n"
-    "U4698258.Trade_History.20260901.20260901.xml.pgp\n"
+    "U1234567.Equity_Summary_in_Base.20260901.20260901.xml.pgp\n"
+    "U1234567.Trade_History.20260901.20260901.xml.pgp\n"
 )
 
 
@@ -626,8 +626,8 @@ def test_list_remote_gpg_accepts_ibkr_pgp_names(tmp_path):
     config = _ssh_config(tmp_path / "ssh_config")
     fake = FakeSftp({}, ls_stdout=IBKR_LS + "notes.txt\n")
     assert pull.list_remote_gpg(config=config, runner=fake) == [
-        "U4698258.Equity_Summary_in_Base.20260901.20260901.xml.pgp",
-        "U4698258.Trade_History.20260901.20260901.xml.pgp",
+        "U1234567.Equity_Summary_in_Base.20260901.20260901.xml.pgp",
+        "U1234567.Trade_History.20260901.20260901.xml.pgp",
     ]
 
 
@@ -639,7 +639,7 @@ def test_run_ingests_ibkr_pgp_delivery(tmp_path):
 
     config = _ssh_config(tmp_path / "ssh_config")
     inbox = tmp_path / "inbox"
-    name = "U4698258.Trade_History.20260901.20260901.xml.pgp"
+    name = "U1234567.Trade_History.20260901.20260901.xml.pgp"
     fake = FakeSftp({name: TRADES.read_bytes()}, ls_stdout=f"{name}\n")
     seen: list[str] = []
 
@@ -657,7 +657,7 @@ def test_run_ingests_ibkr_pgp_delivery(tmp_path):
     )
     assert rc == 0
     assert (inbox / name).exists()
-    assert seen == [str(inbox / "U4698258.Trade_History.20260901.20260901.xml")]
+    assert seen == [str(inbox / "U1234567.Trade_History.20260901.20260901.xml")]
 
 
 def test_retain_newest_gpg_prunes_pgp_names(tmp_path):
@@ -668,14 +668,14 @@ def test_retain_newest_gpg_prunes_pgp_names(tmp_path):
     inbox = tmp_path / "inbox"
     inbox.mkdir()
     for i in range(5):
-        (inbox / f"U4698258.Trade_History.2026090{i}.2026090{i}.xml.pgp").write_bytes(b"x")
+        (inbox / f"U1234567.Trade_History.2026090{i}.2026090{i}.xml.pgp").write_bytes(b"x")
         time.sleep(0.01)
     pull.retain_newest_gpg(inbox, keep=3)
     remaining = sorted(p.name for p in inbox.iterdir())
     assert remaining == [
-        "U4698258.Trade_History.20260902.20260902.xml.pgp",
-        "U4698258.Trade_History.20260903.20260903.xml.pgp",
-        "U4698258.Trade_History.20260904.20260904.xml.pgp",
+        "U1234567.Trade_History.20260902.20260902.xml.pgp",
+        "U1234567.Trade_History.20260903.20260903.xml.pgp",
+        "U1234567.Trade_History.20260904.20260904.xml.pgp",
     ]
 
 
@@ -771,8 +771,8 @@ _RST_STDERR = (
 
 
 def _two_statement_names():
-    newest = "U4698258.Equity_Summary_in_Base.20260915.20260915.xml.pgp"
-    older = "U4698258.Equity_Summary_in_Base.20260828.20260828.xml.pgp"
+    newest = "U1234567.Equity_Summary_in_Base.20260915.20260915.xml.pgp"
+    older = "U1234567.Equity_Summary_in_Base.20260828.20260828.xml.pgp"
     return newest, older
 
 
@@ -846,14 +846,14 @@ def test_sftp_rst_on_the_newest_statement_still_fails_the_oneshot(tmp_path, monk
 
 @pytest.mark.parametrize("outcome", ["applied", "duplicate"])
 @pytest.mark.parametrize("missing", [
-    "U4698258.Equity_Summary_in_Base.20260915.20260915.xml.pgp",
+    "U1234567.Equity_Summary_in_Base.20260915.20260915.xml.pgp",
     "U0000001.Trades.20260915.20260915.xml.pgp",
 ])
 def test_current_query_cannot_hide_another_query_reset(tmp_path, monkeypatch, outcome, missing):
     """REL-262: every query/account needs its own successful delivery."""
     import flex_sftp_pull as pull
 
-    current = "U4698258.Trades.20260915.20260915.xml.pgp"
+    current = "U1234567.Trades.20260915.20260915.xml.pgp"
     files = {current: _statement_xml(date(2026, 9, 15)), missing: "unavailable"}
     heartbeats = []
     monkeypatch.setattr(pull, "_heartbeat", lambda state, error=None: heartbeats.append((state, error)))

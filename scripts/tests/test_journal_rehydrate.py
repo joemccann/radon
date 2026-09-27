@@ -743,7 +743,7 @@ class TestStructureLabel:
 class TestAssignmentImport:
     """Covered-call assignment/exercise rows must reach the journal.
 
-    Ground truth (MSFT 2026-08-03 assignment notice, account U4698258):
+    Ground truth (MSFT 2026-08-03 assignment notice, account U1234567):
     SELL_TO_OPEN 10x $460C on 07-30 (tradeID 9970976570, already journaled
     by the prior rehydrate), then IB books the assignment as two Flex
     trades dated 08-03: OPT BUY 10 @ $0 (notes "A") and STK SELL 1000 @

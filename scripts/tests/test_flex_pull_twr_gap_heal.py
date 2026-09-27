@@ -29,7 +29,7 @@ import perf_twr_builder as twr  # noqa: E402
 from test_flex_sftp_pull import AFTER_FIRST_DELIVERY, FakeSftp  # noqa: E402
 from test_rel146_flex_sftp_honesty import _config_lines, _write  # noqa: E402
 
-ACCOUNT = "U4698258"
+ACCOUNT = "U1234567"
 
 
 def _statement_xml(day: str) -> str:
