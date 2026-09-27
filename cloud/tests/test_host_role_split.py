@@ -114,6 +114,8 @@ class TestAutoSyncStrays:
     STILL_EXCLUDED = (
         "radon-llm-index.service",
         "radon-llm-index.timer",
+        "radon-knowledge-eval.service",
+        "radon-knowledge-eval.timer",
         "radon-mktnews.service",
         "radon-ib-gateway.service",
         "radon-db-backup.service",

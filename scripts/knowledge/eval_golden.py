@@ -28,7 +28,7 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from knowledge.embed import EMBEDDING_DIM, EMBEDDING_DIM_V2  # noqa: E402
+from knowledge.embed import BACKEND_ENV, EMBEDDING_DIM, EMBEDDING_DIM_V2  # noqa: E402
 from knowledge.retrieve import hybrid_search  # noqa: E402
 
 DEFAULT_GOLDEN_PATH = Path(__file__).with_name("golden_set.json")
@@ -473,7 +473,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     if args.backend:
-        os.environ["RADON_KB_EMBED_BACKEND"] = args.backend
+        os.environ.update({BACKEND_ENV: args.backend})
     golden = json.loads(args.golden_path.read_text(encoding="utf-8"))
     if isinstance(golden, dict) and golden.get("draft"):
         print(
