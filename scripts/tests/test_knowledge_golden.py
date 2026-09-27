@@ -510,14 +510,12 @@ class TestSchemaValidation:
         errors = validate_golden_set({"draft": True, "version": "2.0", "questions": []})
         assert any("100" in err for err in errors)
 
-    def test_shipped_candidates_are_marked_needs_review(self):
+    def test_shipped_candidates_file_is_gone_after_promotion(self):
         path = DEFAULT_GOLDEN_PATH.with_name("golden_set_candidates.json")
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        assert payload["needs_review"] is True
-        assert payload["questions"]
-        for entry in payload["questions"]:
-            assert entry["needs_review"] is True
-            assert "relevant" not in entry
+        assert not path.exists(), (
+            "Turso-validated candidates were promoted or dropped; "
+            "do not ship an empty review file"
+        )
 
 
 class TestBackendRecording:

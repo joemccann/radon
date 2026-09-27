@@ -1,7 +1,7 @@
 {
   "draft": true,
   "version": "2.0",
-  "note": "DRAFT golden set v2 (2026-09-27). Machine-expanded from repo-tracked docs/ and tasks/lessons.md plus the 2026-07-18 corpus recon labels for journal/evals/newsfeed/incidents that the live DB already contains. Keep draft:true until a human reviews it. Newsfeed/journal questions without a known Turso doc_key live in golden_set_candidates.json.",
+  "note": "DRAFT golden set v2 (2026-09-27). Machine-expanded from repo-tracked docs/ and tasks/lessons.md, 2026-07-18 corpus recon labels, plus nine Turso-validated newsfeed/journal promotions (read-only SELECT 2026-09-27). Dropped c-journal-open-risk: knowledge rows have no still-open or cost-basis fields. Keep draft:true until a human reviews it.",
   "questions": [
     {
       "id": "q-docs-001-evaluation",
@@ -1618,6 +1618,236 @@
           "grade": 3
         }
       ]
+    },
+    {
+      "id": "q-journal-latest-alab-exit",
+      "question": "What was the most recent ALAB LEAP exit and realized P&L?",
+      "category": "recent",
+      "relevant": [
+        {
+          "source": "journal",
+          "doc_key_pattern": "^9087683443\\+9359844529\\+9363238199$",
+          "grade": 3
+        },
+        {
+          "source": "journal",
+          "doc_key_pattern": "^ALAB\\|",
+          "grade": 2
+        }
+      ],
+      "note": "Turso 2026-09-27: Jan 2027 $120 LEAP closed 2026-03-02 @ 65.8 (5x) vs entry 36.9. Later ALAB rows are Sep 2026 $350 puts, not LEAP exits."
+    },
+    {
+      "id": "q-journal-wulf-adds",
+      "question": "Did I add to the WULF LEAP after the original entry?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "journal",
+          "doc_key_pattern": "^WULF\\|",
+          "grade": 3
+        },
+        {
+          "source": "journal",
+          "doc_key_pattern": "^9088163250\\+9088172895$",
+          "grade": 3
+        },
+        {
+          "source": "journal",
+          "doc_key_pattern": "^9821048741$",
+          "grade": 2
+        },
+        {
+          "source": "journal",
+          "doc_key_pattern": "^9448987493\\+",
+          "grade": 2
+        }
+      ],
+      "note": "Original 77x Jan 2027 $17 LEAP. Later Jan 2027 $31 short then buy-to-close, not additional $17 contracts."
+    },
+    {
+      "id": "q-news-latest-momo",
+      "question": "What is the latest newsfeed take on momentum exposure and the MoMo trendline?",
+      "category": "recent",
+      "scopes": [
+        "research"
+      ],
+      "relevant": [
+        {
+          "source": "newsfeed",
+          "doc_key_pattern": "^cvv9s2mITw$",
+          "grade": 3
+        },
+        {
+          "source": "newsfeed",
+          "doc_key_pattern": "^research-439e694360313e33a800a46001b62669eb0f78ec42f2001781d7f4f760f59fa2$",
+          "grade": 3
+        },
+        {
+          "source": "newsfeed",
+          "doc_key_pattern": "^c5aRG7lGfU$|^cV8gbuTycM$|^c3ORdA8mYU$|^cm3i5-pWQb$",
+          "grade": 2
+        },
+        {
+          "source": "newsfeed",
+          "doc_key_pattern": "^cRThqRM_Kk$|^czQf8ahQ0R$",
+          "grade": 1
+        }
+      ],
+      "note": "Turso 2026-09-27: latest native MoMo is cvv9s2mITw (2026-09-20); latest research ingest is High Beta Momentum (2026-09-27). July ids remain historical grade 1."
+    },
+    {
+      "id": "q-news-latest-gamma",
+      "question": "What is the most recent newsfeed post about a gamma flip?",
+      "category": "recent",
+      "scopes": [
+        "research"
+      ],
+      "relevant": [
+        {
+          "source": "newsfeed",
+          "doc_key_pattern": "^research-9b6d9bc779d18b8f759ec9c4feb5520eb340665fae84b995fbfa201ec232bfa7$",
+          "grade": 3
+        },
+        {
+          "source": "newsfeed",
+          "doc_key_pattern": "^cUi4cNFyT_$|^co5aRfQ4N_$|^coNGUy9Bpd$",
+          "grade": 2
+        },
+        {
+          "source": "newsfeed",
+          "doc_key_pattern": "^cCVYN9efMl$",
+          "grade": 2
+        }
+      ],
+      "note": "Exact title Gamma Flip remains cCVYN9efMl (2026-06-25). Latest dealer-gamma post is the 2026-09-27 hedger-gamma research ingest."
+    },
+    {
+      "id": "q-news-latest-buybacks",
+      "question": "What has the newsfeed said about buybacks this month?",
+      "category": "recent",
+      "scopes": [
+        "research"
+      ],
+      "relevant": [
+        {
+          "source": "newsfeed",
+          "doc_key_pattern": "^cOhjpfBD77$",
+          "grade": 3
+        },
+        {
+          "source": "newsfeed",
+          "doc_key_pattern": "^c2xxIizZz1$|^c6nsY1cQwp$",
+          "grade": 3
+        },
+        {
+          "source": "newsfeed",
+          "doc_key_pattern": "^research-4f3487e7a7e8138a9d715eae83300a9a560fc4371df09a9711f02fdbaf7caa36$",
+          "grade": 2
+        }
+      ],
+      "note": "Turso 2026-09-27: native Sep posts cOhjpfBD77, c2xxIizZz1, c6nsY1cQwp."
+    },
+    {
+      "id": "q-news-spxxai",
+      "question": "Has the newsfeed covered SPX-ex-AI or SPXXAI crowding?",
+      "category": "paraphrase",
+      "scopes": [
+        "research"
+      ],
+      "relevant": [
+        {
+          "source": "newsfeed",
+          "doc_key_pattern": "^c9kVlhjGwG$",
+          "grade": 3
+        },
+        {
+          "source": "newsfeed",
+          "doc_key_pattern": "^c_B_414j8X$|^cABnubu-KP$|^cIvYhHO8QD$",
+          "grade": 3
+        },
+        {
+          "source": "newsfeed",
+          "doc_key_pattern": "^ceOztH--Dp$",
+          "grade": 2
+        }
+      ]
+    },
+    {
+      "id": "q-news-dram",
+      "question": "What has the newsfeed said about DRAM and memory-cycle vol?",
+      "category": "paraphrase",
+      "scopes": [
+        "research"
+      ],
+      "relevant": [
+        {
+          "source": "newsfeed",
+          "doc_key_pattern": "^cOKPoUwh_g$",
+          "grade": 3
+        },
+        {
+          "source": "newsfeed",
+          "doc_key_pattern": "^cuQrMg-9IE$",
+          "grade": 3
+        },
+        {
+          "source": "newsfeed",
+          "doc_key_pattern": "^research-9cdee742162a058aabdbf6504f53c72b7750cab0177542dc0afcc58700bd71c4$",
+          "grade": 2
+        }
+      ]
+    },
+    {
+      "id": "q-journal-adbe",
+      "question": "Did I evaluate or journal an ADBE bullish call spread?",
+      "category": "cross_source",
+      "relevant": [
+        {
+          "source": "journal",
+          "doc_key_pattern": "^0001505f\\.6a7dc90",
+          "grade": 3
+        },
+        {
+          "source": "journal",
+          "doc_key_pattern": "^10056961267\\+10056961654$",
+          "grade": 3
+        },
+        {
+          "source": "journal",
+          "doc_key_pattern": "^10056963667\\+10056964450$",
+          "grade": 2
+        }
+      ],
+      "note": "Journaled 2026-08-13 as ADBE $300/$350 Sep-18 bull call (long BAG). No dedicated ADBE eval report in Turso."
+    },
+    {
+      "id": "q-journal-3dte-rr",
+      "question": "What went wrong on 3 DTE risk reversals in the journal?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "journal",
+          "doc_key_pattern": "^EWY\\|2026-03-03\\|Risk Reversal\\|6$",
+          "grade": 3
+        },
+        {
+          "source": "journal",
+          "doc_key_pattern": "^AAOI\\|2026-03-03\\|Risk Reversal\\|4$",
+          "grade": 3
+        },
+        {
+          "source": "journal",
+          "doc_key_pattern": "^EWY\\|2026-03-04\\|Risk Reversal\\|11$",
+          "grade": 2
+        },
+        {
+          "source": "journal",
+          "doc_key_pattern": "^AAOI\\|2026-03-04\\|Risk Reversal",
+          "grade": 2
+        }
+      ],
+      "note": "EWY and AAOI Mar 6 2026 RRs logged as 3 DTE; next-day unwind / roll notes are the failure trail."
     }
   ]
 }
