@@ -9,6 +9,7 @@ an injected numpy scorer, the seam production keeps for tests.
 """
 from __future__ import annotations
 
+import inspect
 import re
 import sys
 from datetime import datetime, timedelta, timezone
@@ -25,9 +26,13 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 from knowledge.retrieve import (  # noqa: E402
     CANDIDATE_POOL,
+    LEG_WEIGHTS,
     MAX_PER_SOURCE,
     MIN_RECENCY_FACTOR,
+    NEIGHBOR_SPAN,
+    RECENCY_HALF_LIFE_DAYS,
     RRF_K,
+    VECTOR_FILTER_OVERFETCH,
     cap_per_source,
     dedup_best_chunk,
     hybrid_search,
@@ -434,3 +439,56 @@ class TestRerankHook:
 
         neighbor_queries = [s for s in recording.statements if "chunk_ix BETWEEN" in s]
         assert len(neighbor_queries) == 1
+
+
+class TestDefaultHybridSearchUnchanged:
+    """Opt-in scoring hooks must not change production ranking defaults."""
+
+    def test_signature_defaults_are_identity(self):
+        defaults = {
+            name: param.default
+            for name, param in inspect.signature(hybrid_search).parameters.items()
+            if param.default is not inspect.Parameter.empty
+        }
+        assert defaults["limit"] == 10
+        assert defaults["with_neighbors"] is True
+        assert defaults["rerank"] is None
+        assert defaults["vector_search"] is None
+        assert defaults["query_embedding"] is None
+        assert defaults["scopes"] is None
+        assert defaults["sources"] is None
+        assert defaults["now"] is None
+        assert defaults["legs"] is None
+        assert defaults["apply_recency"] is True
+        assert defaults["apply_source_cap"] is True
+        assert RRF_K == 60
+        assert LEG_WEIGHTS == {"fts": 1.0, "vector": 1.0}
+        assert RECENCY_HALF_LIFE_DAYS == {"newsfeed": 7.0, "incidents": 14.0}
+        assert MIN_RECENCY_FACTOR == 0.05
+        assert CANDIDATE_POOL == 50
+        assert VECTOR_FILTER_OVERFETCH == 4
+        assert MAX_PER_SOURCE == 3
+        assert NEIGHBOR_SPAN == 1
+
+    def test_explicit_defaults_match_omitted_kwargs(self, db):
+        upsert_documents(
+            db,
+            [
+                _doc(source="newsfeed", doc_key="post-old", content="cobalt news",
+                     last_activity_at=_days_ago(40)),
+                _doc(doc_key="methodology", content="cobalt methodology"),
+            ],
+        )
+        now = datetime.now(timezone.utc)
+        implicit = hybrid_search(db, "cobalt", now=now)
+        explicit = hybrid_search(
+            db,
+            "cobalt",
+            now=now,
+            legs=None,
+            apply_recency=True,
+            apply_source_cap=True,
+        )
+        assert [(row["id"], row["doc_key"], row["score"]) for row in implicit] == [
+            (row["id"], row["doc_key"], row["score"]) for row in explicit
+        ]
