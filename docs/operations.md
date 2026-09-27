@@ -582,6 +582,12 @@ The health surface is **decoupled from the trading stack** so it keeps reporting
 
 **Recovery heartbeat:** the `awaiting_2fa → authenticated` pool reconnect (`pool.reconnect_all`) is driven server-side by a FastAPI lifespan task (`_ib_recovery_heartbeat_loop`, 15s) — independent of any browser poll, since the chip is now a read-only consumer. The every-minute `radon-ib-watchdog` `/health` curl is the slower backstop.
 
+**IVRank snapshot heartbeat (2026-09-26).** `scripts/fetch_ivrank.py` writes a heartbeat to the `service_health` table on every cycle. Previously, a Turso read timeout on the snapshot write (`upsert_scan_snapshot`) would skip the heartbeat entirely, leaving the previous day's `ok` row in place while the snapshot JSON advanced — the admin panel read "overdue" with no error to explain it. Now both the row upsert and the snapshot write are bounded independently and their failures are **folded into the heartbeat** instead of silencing it. When either write fails, the cycle records an `error` heartbeat with:
+- `class: "db_write_failed"`
+- `message` containing the underlying exception text (e.g., `"ivrank snapshot write failed: <error>"` or `"ivrank row upsert failed: <error>"`)
+
+An on-call engineer seeing an `ivrank` row with `status: "error"` and `class: "db_write_failed"` now knows the root cause immediately — the write path is blocked, not the data source. The JSON fallback at `data/ivrank.json` still advances on every run, so the API surface remains available even when the DB write is degraded.
+
 ## Service Health & Watchdogs
 
 Every dual-write service writes a row to the `service_health` Turso table on every cycle, including no-op short-circuits. The Next.js `<ServiceHealthBanner />` reads the latest row per service and renders a category-aware banner.
