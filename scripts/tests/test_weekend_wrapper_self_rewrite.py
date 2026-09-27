@@ -645,6 +645,24 @@ class TestTheJobRestoresTheEntryPointBeforeReadingIt:
             "hard-resets the tree under a running agent"
         )
 
+    def test_grok_fix_pickup_plist_resets_main_before_python_exec(self) -> None:
+        import plistlib
+
+        plist = plistlib.loads(
+            (REPO / "config" / "com.radon.grok-fix-pickup.plist").read_bytes()
+        )
+        argv = plist["ProgramArguments"]
+        assert argv[0] == "/bin/bash" and argv[1] == "-c", argv
+        cmd = argv[2]
+        assert "fetch" in cmd and "checkout" in cmd and "reset --hard" in cmd, cmd
+        assert cmd.index("fetch") < cmd.index("checkout") < cmd.index(
+            "reset --hard"
+        ), cmd
+        assert cmd.index("reset --hard") < cmd.index("exec /usr/bin/env python3.13"), cmd
+        assert "grok_fix_pickup.py" in cmd, cmd
+        assert 'git -C' in cmd and ".gitdirs/" not in cmd, cmd
+        assert "--git-dir=" not in cmd, cmd
+
     @pytest.mark.parametrize(
         "setup",
         ["setup_reliability_weekend.sh", "setup_testing_weekend.sh", "setup_documentation_nightly.sh", "setup_security_nightly.sh"],

@@ -342,6 +342,9 @@ class TestGrokPromptAndPlaybook:
         assert "git push origin main" not in text.split("## Path", 1)[1].split(
             "## Install", 1
         )[0]
+        mini = text.split("Mac mini, once", 1)[1].split("## ", 1)[0]
+        assert "origin/main" in mini
+        assert "fix/*" in mini
 
     def test_runbook_grok_section_opens_a_pr(self):
         text = RUNBOOK.read_text(encoding="utf-8")
