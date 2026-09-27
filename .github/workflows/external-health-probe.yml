@@ -28,7 +28,11 @@ on:
     # best-effort. The latest 99 scheduled runs had a 41.8 min median,
     # 78.8 min p95, and 88.1 min max interval, so readers use a two-hour
     # dead-man window rather than treating ordinary scheduler delay as death.
-    - cron: "*/5 * * * *"
+    # By 2026-09-26 the gaps were 2-5 hours, so the Mac mini dispatches this
+    # workflow every five minutes (config/com.radon.external-probe-dispatch.plist)
+    # and this cron is the fallback. GitHub names the start of every hour as
+    # its high-load window for schedules, so the slots stay off :00.
+    - cron: "1-56/5 * * * *"
   workflow_dispatch: {}
 
 # Never let two probes overlap; don't cancel an in-flight one (let it finish
