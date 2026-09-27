@@ -466,6 +466,17 @@ Spec: [`docs/tradingview-integration.md`](../docs/tradingview-integration.md).
 `enable_services` skips all three until Joe enables them after bakeoff `C WINS`.
 `RADON_SLM_TAGGER_MODE` stays `off`. Spec: [`docs/ml/newsfeed-slm-tagger.md`](../docs/ml/newsfeed-slm-tagger.md).
 
+`setup-vps.sh` also inventories `radon-knowledge-eval.{service,timer}` so a
+fresh host has the unit files. `enable_services` skips both until a human
+reviews the draft golden set. The repo ships an initial live baseline in
+`scripts/knowledge/golden_eval_baseline.json`; enabling the timer before
+that review would page on a draft gate. The unit
+writes no `service_health` row (`EXEMPT_UNITS` `gap:`); a failed run pages
+via the unit watchdog. Drift ack: `not-installed:radon-knowledge-eval.*`.
+Auto-sync stays off. `cloud/tests/test_knowledge_eval_setup.py` pins
+the inventory-and-skip. Contract:
+[`docs/knowledge-embeddings.md`](../docs/knowledge-embeddings.md).
+
 
 Canonical unit files are copied root-owned to `/etc/systemd/system`; they are
 not symlinked from the checkout.

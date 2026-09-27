@@ -48,7 +48,32 @@ Then rerun the backfill. Without the index, `--batch-size 64` and no sleep is ab
 python3.13 scripts/knowledge/backfill_v2.py --batch-size 64 --min-interval 0
 ```
 
-Then `python3.13 scripts/knowledge/eval_golden.py`. Backfill does not require the index. It only writes where `embedding_v2 IS NULL`.
+Then `python3.13 scripts/knowledge/eval_golden.py --mode all`. Backfill does not require the index. It only writes where `embedding_v2 IS NULL`.
+
+## Golden eval
+
+`scripts/knowledge/eval_golden.py` scores the draft v2 set (`scripts/knowledge/golden_set.json`) under three retrieval modes:
+
+| Mode | Path | Recency | Per-source cap |
+|---|---|---|---|
+| `hybrid` | production `hybrid_search` (FTS + vector RRF) | on | on |
+| `vector` | vector leg only | off | off |
+| `keyword` | FTS leg only | off | off |
+
+Default `--mode all` runs every mode. Metrics per mode: hit@1, hit@5, recall@10, MRR, nDCG@10 (grades 3/2/1). Also broken down by `category` and by relevant-doc `source`. Each question keeps its top-10 rows. The report records `backend_used` and `fallback` (true when nvidia requested but a 384-d local vector actually ran). `--strict-backend` exits 2 on that fallback.
+
+```bash
+.venv/bin/python scripts/knowledge/eval_golden.py --mode all
+.venv/bin/python scripts/knowledge/eval_golden.py --mode hybrid --backend nvidia --strict-backend
+.venv/bin/python scripts/knowledge/eval_golden.py --mode all \
+  --baseline scripts/knowledge/golden_eval_baseline.json \
+  --max-drop 0.03 \
+  --write-results /var/lib/radon/knowledge-eval
+```
+
+`--baseline PATH` exits 1 when hit@5 or MRR for any scored mode drops more than `--max-drop` (default 0.03). `--write-baseline PATH` writes the compact metrics snapshot. `scripts/knowledge/golden_eval_baseline.json` is the initial live Turso `--mode all` snapshot (`placeholder: false`, NVIDIA 2048-d, no fallback). Promoted newsfeed/journal labels came from read-only production SELECTs; `golden_set_candidates.json` is gone. Keep `draft: true` until a human reviews the set. The nightly timer stays off until that review.
+
+Nightly VPS unit (not enabled): `cloud/services/radon-knowledge-eval.{service,timer}`. `setup-vps.sh` inventories both files and `enable_services` skips them until a live baseline replaces `scripts/knowledge/golden_eval_baseline.json`. Auto-sync stays off. A `not-installed:` drift ack holds the pending window. The oneshot writes no `service_health` row (`EXEMPT_UNITS` `gap:`); a failed run pages via the unit watchdog. After the first live VPS write, `systemctl enable --now radon-knowledge-eval.timer`. CI stays offline: in-memory libsql fixtures cover metric math, mode switching, baseline comparison, and schema validation.
 
 Past about 50k rows, revisit a compact index (`compress_neighbors=float8`, `max_neighbors=32`, `insert_l=40`) built in pieces.
 

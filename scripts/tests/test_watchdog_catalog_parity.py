@@ -391,6 +391,11 @@ EXEMPT_UNITS: dict[str, str] = {
         "catalogs. The wrapper needs no name of its own; registering one would "
         "add a key nothing writes."
     ),
+    "radon-knowledge-eval": (
+        "gap: writes no service_health row. Nightly oneshot is not enabled; "
+        "when a live baseline exists and the timer is enabled, a failed "
+        "oneshot pages via the unit watchdog. eval_golden.py writes JSON only."
+    ),
 }
 
 
