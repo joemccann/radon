@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.radon.external-probe-dispatch</string>
+
+    <!-- __HOME__ is substituted by scripts/setup_external_probe_dispatch.sh.
+         GitHub's five-minute cron is best-effort: by 2026-09-26 the scheduled
+         runs of external-health-probe.yml were 2-5 hours apart, past the
+         two-hour dead-man window in scripts/health_probe/reader.py and
+         web/lib/adminReliability.ts. Asking for the run from the always-on
+         runner restores the cadence while the probe's identity, code path
+         and Turso row stay exactly as before. The workflow's concurrency
+         group queues at most one run and never cancels an in-flight one, so
+         a dispatch cannot cut a cron run short. Needs the operator's gh
+         login on this host; a failed fire logs and the next interval retries. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/env</string>
+        <string>gh</string>
+        <string>workflow</string>
+        <string>run</string>
+        <string>external-health-probe.yml</string>
+        <string>-R</string>
+        <string>joemccann/radon</string>
+        <string>--ref</string>
+        <string>main</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>__HOME__</string>
+    </dict>
+
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/radon-weekend/logs/external-probe-dispatch.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/radon-weekend/logs/external-probe-dispatch.err</string>
+</dict>
+</plist>
