@@ -435,13 +435,25 @@ def _write_db(
             "message": f"ivrank row upsert failed: {exc}",
             "class": "db_write_failed",
         }
+    # 2026-09-26: a Turso read timeout on the snapshot skipped the heartbeat
+    # the same way, so the row sat on the previous day and /admin read
+    # "overdue" with no error to explain it. Fold it in like the row write.
+    snapshot_error: Optional[dict[str, Any]] = None
     try:
         writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[ivrank] snapshot write failed: {exc}", file=sys.stderr)
+        snapshot_error = {
+            "message": f"ivrank snapshot write failed: {exc}",
+            "class": "db_write_failed",
+        }
+    db_error = health_error or row_error or snapshot_error
+    try:
         writer.record_service_health(
             SERVICE,
-            "ok" if (health_error is None and row_error is None) else "error",
+            "ok" if db_error is None else "error",
             finished_at=scan_time,
-            error=health_error or row_error,
+            error=db_error,
         )
     except Exception as exc:  # noqa: BLE001 — best-effort mirror
         print(f"[ivrank] db cache non-fatal: {exc}", file=sys.stderr)
