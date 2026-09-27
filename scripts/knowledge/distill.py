@@ -18,7 +18,6 @@ import signal
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import re
 import sys
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -48,33 +47,9 @@ _SYSTEM_PROMPT = (
 # account id (U\d{6,}), a Turso URL, or a token; none of it helps distillation,
 # and the operator's data-handling rule is to never ship account ids/secrets to
 # third parties. The raw content still lives in the LOCAL operator-only corpus —
-# this only scrubs the copy that leaves the box. The base pattern set is the
-# canonical scripts/credential_redaction.py (reused, not duplicated); the
-# patterns below are distill-only supplements for header/assignment shapes.
-_EGRESS_SCRUB_PATTERNS = (
-    (
-        re.compile(
-            r"(\bauthorization\s*[:=]\s*(?:bearer\s+)?)[^\s,;]+",
-            re.IGNORECASE,
-        ),
-        r"\1[redacted-secret]",
-    ),
-    (
-        re.compile(
-            r"([\"']?(?:api[_-]?key|access[_-]?token|client[_-]?secret|password|secret|token)"
-            r"[\"']?\s*[:=]\s*[\"']?)[^\"'\s,;&]+",
-            re.IGNORECASE,
-        ),
-        r"\1[redacted-secret]",
-    ),
-)
-
-
+# this only scrubs the copy that leaves the box. The pattern set is the
+# canonical scripts/credential_redaction.py (reused, not duplicated).
 def _scrub_for_egress(text: str) -> str:
-    # Distill-only header/assignment shapes first (they consume the full
-    # value), then the canonical credential scrubber.
-    for pattern, repl in _EGRESS_SCRUB_PATTERNS:
-        text = pattern.sub(repl, text)
     return scrub_credential_text(text)
 
 
