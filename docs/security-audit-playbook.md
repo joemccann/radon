@@ -167,7 +167,10 @@ line here whenever you ship a security fix.**
   install from the radon-owned checkout goes through `stage_from_checkout`
   (regular-file check, root-only 0600 staging copy, byte re-check, then install
   at the final mode). `/etc/radon` is root-owned (`root:radon 1770`), links under
-  `/home/radon/.ssh` and at `/var/lib/radon/media` are refused, and the Docker,
+  `/home/radon/.ssh` and at `/var/lib/radon/media` are refused,
+  a one-shot `-L` check never guards a later path-based `chmod`/`setfacl`
+  (root acts on media only as `.` after `enter_real_dir` pins the cwd, and
+  recursive walks of a radon-owned tree run as `radon`), and the Docker,
   NodeSource, and Caddy apt keys are fingerprint-pinned. The canonical env file is 0640 root:radon
   (group radon reads; the service account cannot rewrite it).
   Invariant: `radon` is NOT in the docker group (Docker socket access is
