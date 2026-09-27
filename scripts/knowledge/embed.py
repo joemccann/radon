@@ -9,11 +9,13 @@ RADON_KB_EMBED_BACKEND=local forces BAAI/bge-small-en-v1.5 (384d).
 Local fastembed is the automatic fallback on NVIDIA 429s, 5xx, timeouts,
 and any other embed error. It is also the query path while any
 embedding_v2 value is still NULL, so a partial backfill cannot answer from
-the 2048 index and miss the rest of the corpus. That NULL check is cached
-for 60 seconds.
+a subset of the 2048-d column and miss the rest of the corpus. That NULL
+check is cached for 60 seconds.
 
 Ingest dual-writes both vectors by default so the 384 index stays current
-for that fallback. RADON_KB_EMBED_DUAL_WRITE=0 turns the 2048 write off.
+for that fallback. The 2048-d path has no ANN index (exact cosine scan;
+migration 0089 drops idx_knowledge_embedding_v2). RADON_KB_EMBED_DUAL_WRITE=0
+turns the 2048 write off.
 
 nvidia/llama-3.2-nv-embedqa-1b-v1 is not used: this account gets 404
 Function not found, and the model caps input at 512 tokens.
@@ -36,7 +38,6 @@ EMBEDDING_DIM = 384
 EMBEDDING_MODEL_V2 = "nvidia/nemotron-3-embed-1b"
 EMBEDDING_DIM_V2 = 2048
 VECTOR_INDEX_V1 = "idx_knowledge_embedding"
-VECTOR_INDEX_V2 = "idx_knowledge_embedding_v2"
 DISABLE_ENV = "RADON_KB_EMBED_DISABLED"
 BACKEND_ENV = "RADON_KB_EMBED_BACKEND"
 DUAL_WRITE_ENV = "RADON_KB_EMBED_DUAL_WRITE"
@@ -150,7 +151,7 @@ def v2_coverage_ready(db, *, now=None) -> bool:
 
     SELECT 1 ... LIMIT 1 is the cheap form of that count. The result is
     cached for 60 seconds. A missing column or a failed read is not ready,
-    so queries stay on the 384 index instead of a partial 2048 index.
+    so queries stay on the 384 index instead of a partial 2048-d column.
     """
     current = now() if callable(now) else (time.monotonic() if now is None else float(now))
     with _coverage_lock:

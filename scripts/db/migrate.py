@@ -8,6 +8,15 @@ existing Python venv is the path of least resistance.
 
 Idempotent: running twice with no new migrations is a no-op.
 
+A file whose source contains a line `-- radon-migrate: manual` is skipped
+unless RADON_MIGRATE_MANUAL=1. radon-api applies migrations with
+`migrate.py --boot` under `timeout 30` (boot deadline 20s). The 0089
+DiskANN drop takes about 14 minutes and must not run there, and it must
+not share a transaction with the version row (Turso reaps a transaction
+that is still running). The manual path commits each statement on its
+own. Manual files do not advance the boot schema marker, so a deferred
+drop does not fail closed on a Turso brownout.
+
 Usage:
     python3.13 scripts/db/migrate.py
     python3.13 scripts/db/migrate.py --demo
@@ -59,6 +68,8 @@ _TRANSPORT_ERROR_MARKERS = ("hrana", "dns", "timeout", "timed out", "connection"
 # when invoked as --demo, and require the demo DB name.
 _PROD_URL_MARKER = "radon-joemccann"
 _DEMO_URL_MARKER = "radon-demo"
+
+MANUAL_MIGRATION_DIRECTIVE = "-- radon-migrate: manual"
 
 _BOOTSTRAP_SQL = """
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -136,8 +147,28 @@ def _schema_marker(label: str) -> Path:
     return SCHEMA_MARKER_DIR / f"schema_version.{label}"
 
 
+def _is_manual_migration(sql: str) -> bool:
+    return any(line.strip() == MANUAL_MIGRATION_DIRECTIVE for line in sql.splitlines())
+
+
+def _manual_migrations_enabled() -> bool:
+    return os.environ.get("RADON_MIGRATE_MANUAL", "").strip() == "1"
+
+
 def _newest_migration_version() -> int:
-    return max(version for version, _, _ in _list_migrations())
+    """Newest migration the boot path is expected to have applied.
+
+    Manual files are operator-run. Counting them would make a brownout
+    boot refuse until the 14-minute drop finishes.
+    """
+    versions = [
+        version
+        for version, _name, path in _list_migrations()
+        if not _is_manual_migration(path.read_text(encoding="utf-8"))
+    ]
+    if not versions:
+        raise SystemExit("[migrate] no automatic migrations")
+    return max(versions)
 
 
 def record_current_schema(label: str) -> None:
@@ -223,6 +254,28 @@ def _is_already_applied(exc: BaseException) -> bool:
     return any(marker in message for marker in _ALREADY_APPLIED_MARKERS)
 
 
+def _execute_statement(db, name: str, stmt: str) -> None:
+    try:
+        db.execute(stmt)
+    except Exception as exc:
+        # R-153: 0050 is the only real ALTER TABLE in the set. A kill
+        # between its committed ADD COLUMN and the version row left
+        # version 50 unrecorded, so the next run replayed it, hit
+        # `duplicate column name` and ABORTED — taking 0051-0054 with
+        # it. migrate.py is radon-api's ExecStartPre, so that is a
+        # control-plane outage on every boot until a hand repair.
+        # A statement whose object already exists IS the applied
+        # state; anything else still fails loudly.
+        if _is_already_applied(exc):
+            sys.stderr.write(
+                f"[migrate] {name}: statement already applied, continuing "
+                f"({exc})\n"
+            )
+            return
+        sys.stderr.write(f"[migrate] FAILED on statement:\n{stmt[:200]}\n\n")
+        raise
+
+
 def resolve_target(*, demo: bool) -> tuple[str, str]:
     """Return (url, token) for prod (default) or the isolated demo Turso."""
     if demo:
@@ -275,43 +328,47 @@ def apply_pending_migrations(db) -> int:
         return 0
 
     print(f"[migrate] applying {len(pending)} migration(s)")
+    applied_count = 0
+    deferred = False
     for version, name, path in pending:
-        print(f"[migrate] → {name}")
         sql = path.read_text(encoding="utf-8")
+        manual = _is_manual_migration(sql)
+        if manual and not _manual_migrations_enabled():
+            deferred = True
+            sys.stderr.write(
+                f"[migrate] {name}: skipped (manual DDL, not applied on boot). "
+                "Run: RADON_MIGRATE_MANUAL=1 python3.13 scripts/db/migrate.py\n"
+            )
+            continue
+        print(f"[migrate] → {name}")
+        if manual:
+            sys.stderr.write(
+                f"[migrate] {name}: committing each statement on its own "
+                "(DiskANN drop is about 14 min and must not share a transaction)\n"
+            )
         for stmt in _split_statements(sql):
-            try:
-                db.execute(stmt)
-            except Exception as exc:
-                # R-153: 0050 is the only real ALTER TABLE in the set. A kill
-                # between its committed ADD COLUMN and the version row left
-                # version 50 unrecorded, so the next run replayed it, hit
-                # `duplicate column name` and ABORTED — taking 0051-0054 with
-                # it. migrate.py is radon-api's ExecStartPre, so that is a
-                # control-plane outage on every boot until a hand repair.
-                # A statement whose object already exists IS the applied
-                # state; anything else still fails loudly.
-                if _is_already_applied(exc):
-                    sys.stderr.write(
-                        f"[migrate] {name}: statement already applied, continuing "
-                        f"({exc})\n"
-                    )
-                    continue
-                sys.stderr.write(f"[migrate] FAILED on statement:\n{stmt[:200]}\n\n")
-                raise
+            _execute_statement(db, name, stmt)
+            if manual:
+                db.commit()
         # The migration file's own INSERT INTO schema_migrations may already
         # record the version; if not, record it ourselves. INSERT OR IGNORE
         # keeps both code paths idempotent. Issued BEFORE the commit so the
         # version lands with the statements, not in a second round trip that
-        # a dropped connection can lose.
+        # a dropped connection can lose. Manual DDL commits the DROP first,
+        # then this version row, so a killed drop is retried.
         db.execute(
             "INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
             "VALUES (?, datetime('now'))",
             (version,),
         )
         db.commit()
+        applied_count += 1
 
-    print("[migrate] done")
-    return len(pending)
+    if applied_count:
+        print("[migrate] done")
+    elif deferred:
+        print("[migrate] manual migration(s) still pending")
+    return applied_count
 
 
 def main(argv: list[str] | None = None) -> None:

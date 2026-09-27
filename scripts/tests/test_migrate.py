@@ -556,3 +556,149 @@ class TestMigrateEntrypointUnderBrownout:
         result = _run_migrate_against_blackhole(tmp_path, "--boot")
         assert result.returncode == 75, result.stderr
         assert "refusing to boot" in result.stderr
+
+
+class _LoggingConn:
+    def __init__(self, raw):
+        self.raw = raw
+        self.log: list[tuple[str, str | None]] = []
+
+    def execute(self, sql, params=()):
+        self.log.append(("execute", " ".join(sql.split())))
+        if params == ():
+            return self.raw.execute(sql)
+        return self.raw.execute(sql, params)
+
+    def commit(self):
+        self.log.append(("commit", None))
+        return self.raw.commit()
+
+
+class TestManualMigration:
+    """0089 drops a ~5 GB DiskANN index (~14 min). radon-api runs migrate
+    under timeout 30 / a 20s boot deadline, and migrate.py holds every
+    statement in one transaction until the final commit. The drop has to
+    be operator-run and committed on its own."""
+
+    def _dir(self, tmp_path: Path, migrate_module, monkeypatch):
+        import sqlite3
+
+        d = tmp_path / "migrations"
+        d.mkdir()
+        (d / "0001_init.sql").write_text(
+            "CREATE TABLE IF NOT EXISTS demo (id INTEGER);\n"
+            "CREATE INDEX IF NOT EXISTS idx_demo ON demo(id);\n"
+            "INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
+            "VALUES (1, datetime('now'));\n"
+        )
+        (d / "0002_drop.sql").write_text(
+            "-- radon-migrate: manual\n"
+            "DROP INDEX IF EXISTS idx_demo;\n"
+            "INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
+            "VALUES (2, datetime('now'));\n"
+        )
+        (d / "0003_after.sql").write_text(
+            "CREATE TABLE IF NOT EXISTS after_manual (id INTEGER);\n"
+            "INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
+            "VALUES (3, datetime('now'));\n"
+        )
+        monkeypatch.setattr(migrate_module, "MIGRATIONS_DIR", d)
+        raw = sqlite3.connect(":memory:")
+        raw.execute(
+            "CREATE TABLE schema_migrations "
+            "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+        )
+        raw.commit()
+        return _LoggingConn(raw)
+
+    def test_boot_skips_the_drop_and_still_applies_later_migrations(
+        self, migrate_module, monkeypatch, tmp_path
+    ):
+        monkeypatch.delenv("RADON_MIGRATE_MANUAL", raising=False)
+        db = self._dir(tmp_path, migrate_module, monkeypatch)
+        assert migrate_module._newest_migration_version() == 3
+        assert migrate_module.apply_pending_migrations(db) == 2
+        versions = {
+            row[0]
+            for row in db.raw.execute("SELECT version FROM schema_migrations").fetchall()
+        }
+        assert versions == {1, 3}
+        assert any(
+            op == "execute" and "idx_demo" in (sql or "") and sql.startswith("DROP")
+            for op, sql in db.log
+        ) is False
+        names = {
+            row[0]
+            for row in db.raw.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            )
+        }
+        assert "idx_demo" in names
+
+    def test_manual_flag_commits_the_drop_before_recording_the_version(
+        self, migrate_module, monkeypatch, tmp_path
+    ):
+        monkeypatch.setenv("RADON_MIGRATE_MANUAL", "1")
+        db = self._dir(tmp_path, migrate_module, monkeypatch)
+        assert migrate_module.apply_pending_migrations(db) == 3
+        drop_log = next(
+            i for i, (op, sql) in enumerate(db.log)
+            if op == "execute" and (sql or "").startswith("DROP INDEX")
+        )
+        version_log = next(
+            i for i, (op, sql) in enumerate(db.log)
+            if op == "execute" and sql and "schema_migrations" in sql and "2," in sql
+        )
+        assert any(op == "commit" for op, _sql in db.log[drop_log + 1:version_log])
+        versions = {
+            row[0]
+            for row in db.raw.execute("SELECT version FROM schema_migrations").fetchall()
+        }
+        assert versions == {1, 2, 3}
+        names = {
+            row[0]
+            for row in db.raw.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            )
+        }
+        assert "idx_demo" not in names
+        assert migrate_module.apply_pending_migrations(db) == 0
+
+    def test_ordinary_migration_still_commits_once(
+        self, migrate_module, monkeypatch, tmp_path
+    ):
+        import sqlite3
+
+        d = tmp_path / "migrations"
+        d.mkdir()
+        (d / "0004_plain.sql").write_text(
+            "CREATE TABLE plain (id INTEGER);\n"
+            "INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
+            "VALUES (4, datetime('now'));\n"
+        )
+        monkeypatch.setattr(migrate_module, "MIGRATIONS_DIR", d)
+        raw = sqlite3.connect(":memory:")
+        raw.execute(
+            "CREATE TABLE schema_migrations "
+            "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+        )
+        db = _LoggingConn(raw)
+        assert migrate_module.apply_pending_migrations(db) == 1
+        assert [op for op, _sql in db.log].count("commit") == 1
+        assert db.log[-1][0] == "commit"
+
+    def test_v2_index_drop_file_is_manual_and_does_not_block_the_boot_marker(
+        self, migrate_module
+    ):
+        rows = migrate_module._list_migrations()
+        drop = next(row for row in rows if row[1].startswith("0089_"))
+        sql = drop[2].read_text(encoding="utf-8")
+        assert migrate_module._is_manual_migration(sql)
+        assert "DROP INDEX IF EXISTS idx_knowledge_embedding_v2" in sql
+        automatic = [
+            version
+            for version, _name, path in rows
+            if not migrate_module._is_manual_migration(path.read_text(encoding="utf-8"))
+        ]
+        assert migrate_module._newest_migration_version() == max(automatic)
+        assert drop[0] not in automatic
