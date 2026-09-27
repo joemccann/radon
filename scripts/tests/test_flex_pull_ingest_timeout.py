@@ -65,7 +65,7 @@ def _drive_many(
     monkeypatch.setattr(pull, "SWEEP_BUDGET_S", budget_s, raising=False)
 
     files = {
-        f"U4698258.Equity_Summary_in_Base.202609{day:02d}.202609{day:02d}.xml.pgp": b"<x/>"
+        f"U1234567.Equity_Summary_in_Base.202609{day:02d}.202609{day:02d}.xml.pgp": b"<x/>"
         for day in range(1, n_files + 1)
     }
 

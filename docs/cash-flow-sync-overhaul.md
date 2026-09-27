@@ -565,7 +565,7 @@ chosen, assert on statement shape (see C16).
 `superseded_at` (tombstone so an IBKR revision is a new row, not an overwrite). Stop rewriting
 `synced_at` on unchanged rows: only update when a field actually changed.
 **Why:** today you cannot answer "which statement produced this row", "did IBKR revise this amount",
-"was this row present before the embargo", or even "is this account U4698258". The fixture replay
+"was this row present before the embargo", or even "is this account U1234567". The fixture replay
 this morning stamped all 262 rows with the current time and erased the only trace of the ten-day
 outage.
 **Files:** migration, `scripts/db/writer.py:530-560`, `scripts/cash_flow_sync.py:210-248`.
