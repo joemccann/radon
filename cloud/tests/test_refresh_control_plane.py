@@ -1083,3 +1083,43 @@ def test_an_unreadable_floor_record_refuses_privileged_installs(tmp_path: Path) 
     _refused_without_install(
         box, "refresh-control-plane-privileged", "older than the installed privileged control plane"
     )
+
+
+def test_marker_publish_never_acts_on_a_radon_swappable_name(tmp_path: Path) -> None:
+    """DS-2026-09-27-01: the state dir is radon-owned, so any by-name root
+    chmod/write on a temp in it can be redirected through a swapped-in link."""
+    box = Sandbox(tmp_path)
+    box.mutate_source(API_UNIT)
+    victim = tmp_path / "root-only"
+    victim.write_text("secret\n", encoding="utf-8")
+    victim.chmod(0o600)
+    shim_dir = tmp_path / "shim"
+    shim_dir.mkdir()
+    real_chmod = shutil.which("chmod")
+    _write_executable(
+        shim_dir / "chmod",
+        f"""#!/bin/bash
+for arg in "$@"; do
+  case "$arg" in
+    {shlex.quote(str(box.manifest.parent))}/*)
+      /bin/rm -f -- "$arg"; /bin/ln -s {shlex.quote(str(victim))} "$arg" ;;
+  esac
+done
+exec {shlex.quote(str(real_chmod))} "$@"
+""",
+    )
+    box.env["PATH"] = f"{shim_dir}:{box.env['PATH']}"
+
+    result = box.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert oct(victim.stat().st_mode & 0o777) == "0o600"
+    assert victim.read_text(encoding="utf-8") == "secret\n"
+    assert not box.manifest.is_symlink() and not box.ready.is_symlink()
+    ready_hash = _sha256_path(box.manifest)
+    assert box.ready.read_text(encoding="utf-8") == (
+        f"{ready_hash}  /var/lib/radon/control-plane-manifest.sha256\n"
+    )
+    assert oct(box.manifest.stat().st_mode & 0o777) == "0o644"
+    leftovers = [p.name for p in box.manifest.parent.iterdir() if p.name.startswith(".")]
+    assert leftovers == []
