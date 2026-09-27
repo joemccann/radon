@@ -166,6 +166,43 @@ class TestVisionPath:
         assert result.provider == "grok"
         assert result.rows == ROWS
 
+    @pytest.mark.parametrize(
+        ("env", "needle", "payload"),
+        [
+            ({"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"}, "api.anthropic.com", {"content": [{"type": "text", "text": json.dumps(ROWS)}]}),
+            ({"XAI_API_KEY": "x", "RADON_LADDER_ALLOW_PREPAID": "1"}, "api.x.ai", {"choices": [{"message": {"content": json.dumps(ROWS)}}]}),
+            ({"OPENAI_API_KEY": "o", "RADON_LADDER_ALLOW_PREPAID": "1"}, "api.openai.com", {"choices": [{"message": {"content": json.dumps(ROWS)}}]}),
+            ({"NVIDIA_API_KEY": "n"}, "integrate.api.nvidia.com", {"choices": [{"message": {"content": json.dumps(ROWS)}}]}),
+            ({"CEREBRAS_API_KEY": "c"}, "api.cerebras.ai", {"choices": [{"message": {"content": json.dumps(ROWS)}}]}),
+        ],
+    )
+    def test_every_vision_provider_streams_and_closes_before_parsing(self, env, needle, payload):
+        response = _StreamingResponse(payload)
+        calls = []
+
+        def post(url, **kwargs):
+            calls.append((url, kwargs))
+            assert needle in url
+            return response
+
+        assert extract_via_vision(PNG, PROMPT, env=env, post=post).rows == ROWS
+        assert calls[0][1]["stream"] is True
+        assert response.closed
+
+    def test_oversized_vision_streaming_response_never_materializes_text_or_json(self):
+        response = _StreamingResponse(
+            {}, chunks=[b"x" * 17, b"x" * 17]
+        )
+
+        with pytest.raises(ModelResponseError, match="exceeds limit"):
+            extract_via_vision(
+                PNG, PROMPT,
+                env={"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"},
+                post=lambda *_args, **_kwargs: response,
+                max_response_bytes=32,
+            )
+        assert response.closed
+
 
 class TestTextJsonPath:
     def test_anthropic_credit_falls_to_grok_for_json(self):

@@ -1116,6 +1116,8 @@ def _call_vision_provider(
     b64: str,
     prompt: str,
     post: Callable[..., Any],
+    *,
+    max_response_bytes: int = 2_000_000,
 ) -> tuple[int, str, Any]:
     api_key = auth.token
     if name == "anthropic":
@@ -1125,6 +1127,9 @@ def _call_vision_provider(
             "https://api.anthropic.com/v1/messages",
             _anthropic_headers(api_key, subscription=subscription),
             _anthropic_vision_body(model, b64, prompt, subscription=subscription),
+            timeout=(10.0, 120.0),
+            stream=True,
+            max_bytes=max_response_bytes,
         )
     if name == "grok":
         return _request(
@@ -1135,6 +1140,9 @@ def _call_vision_provider(
                 "content-type": "application/json",
             },
             _openai_vision_body(model, b64, prompt),
+            timeout=120.0,
+            stream=True,
+            max_bytes=max_response_bytes,
         )
     if name == "codex":
         if auth.kind == "subscription":
@@ -1144,7 +1152,7 @@ def _call_vision_provider(
                 _chatgpt_headers(auth),
                 _chatgpt_responses_body(model, "", prompt, [("image", b64)]),
                 timeout=60.0,
-                max_bytes=2_000_000,
+                max_bytes=max_response_bytes,
             )
         return _request(
             post,
@@ -1154,6 +1162,9 @@ def _call_vision_provider(
                 "content-type": "application/json",
             },
             _openai_vision_body(model, b64, prompt),
+            timeout=120.0,
+            stream=True,
+            max_bytes=max_response_bytes,
         )
     if name == "gemini":
         return _antigravity_complete(api_key, {}, model, "", prompt, [("image", b64)])
@@ -1166,6 +1177,9 @@ def _call_vision_provider(
                 "content-type": "application/json",
             },
             _openai_vision_body(model, b64, prompt),
+            timeout=120.0,
+            stream=True,
+            max_bytes=max_response_bytes,
         )
     if name == "cerebras":
         return _request(
@@ -1176,6 +1190,9 @@ def _call_vision_provider(
                 "content-type": "application/json",
             },
             _openai_vision_body(model, b64, prompt, extra=_CEREBRAS_REQUEST_EXTRAS),
+            timeout=120.0,
+            stream=True,
+            max_bytes=max_response_bytes,
         )
     raise RuntimeError(f"{name}:unwired")
 
@@ -1559,13 +1576,14 @@ def extract_via_vision(
     *,
     env: Mapping[str, str] | None = None,
     post: Callable[..., Any] | None = None,
+    max_response_bytes: int = 2_000_000,
 ) -> VisionResult:
     src = env if env is not None else os.environ
     sender = post or _default_post
     b64 = base64.b64encode(png_bytes).decode("utf-8")
 
     def call_provider(name: str, auth: AuthMaterial, model: str) -> tuple[int, str, Any]:
-        return _call_vision_provider(name, auth, model, b64, prompt, sender)
+        return _call_vision_provider(name, auth, model, b64, prompt, sender, max_response_bytes=max_response_bytes)
 
     def parse_success(name: str, payload: dict[str, Any]) -> tuple[Any, str]:
         text = _extract_text(name, payload)
