@@ -15,7 +15,11 @@ _SECRET_SCRUB_PATTERNS = [
     # leave the real token in "authorization: bearer <token>" untouched.
     (re.compile(r"\bbearer\s+\S+", re.IGNORECASE), "bearer [redacted]"),
     (
-        re.compile(r"(auth[_-]?token|authorization|bearer)(\s*[=:]\s*)\S+", re.IGNORECASE),
+        re.compile(
+            r"(auth[_-]?token|authorization|bearer)([\"']?\s*[=:]\s*[\"']?)"
+            r"(?:(?:basic|bearer|digest|token)\s+)?\S+",
+            re.IGNORECASE,
+        ),
         r"\1\2[redacted]",
     ),
     (re.compile(r"eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*"), "[redacted-jwt]"),
@@ -34,7 +38,8 @@ _SECRET_SCRUB_PATTERNS = [
     # value the specific shapes above already tagged keeps its tag.
     (
         re.compile(
-            r"([\"']?(?:api[_-]?key|access[_-]?token|client[_-]?secret|password|secret|token)"
+            r"([\"']?(?:api[_-]?key|access[_-]?key|secret[_-]?key|access[_-]?token"
+            r"|client[_-]?secret|password|secret|token)"
             r"[\"']?\s*[:=]\s*[\"']?)(?!\[redacted)[^\"'\s,;&]+",
             re.IGNORECASE,
         ),

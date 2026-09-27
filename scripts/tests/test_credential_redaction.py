@@ -55,3 +55,17 @@ def test_generic_secret_assignments_are_redacted():
 def test_generic_assignment_leaves_plain_prose_untouched():
     text = "the token budget ran out; password reset scheduled"
     assert scrub_credential_text(text) == text
+
+
+def test_authorization_scheme_and_compound_secret_keys_are_redacted():
+    basic = "dXNlcjpw" + "YXNzd29yZA=="
+    opaque = "tok" + "V4lue7788"
+    aws = "wJalr" + "XUtnFEMI9x"
+    django = "dj4n" + "goS3cret"
+    body = scrub_credential_text(
+        f"Authorization: Basic {basic}\n"
+        f'{{"authorization": "Token {opaque}"}}\n'
+        f"AWS_SECRET_ACCESS_KEY={aws}\nSECRET_KEY={django}"
+    )
+    for value in (basic, opaque, aws, django):
+        assert value not in body
