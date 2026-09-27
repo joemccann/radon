@@ -1,6 +1,31 @@
 {
-  "placeholder": true,
+  "placeholder": false,
   "version": "2.0",
-  "note": "Write after the first live VPS run. Do not enable radon-knowledge-eval.timer until this file is replaced:\n  /home/radon/radon/.venv/bin/python /home/radon/radon/scripts/knowledge/eval_golden.py --mode all --write-baseline /home/radon/radon/scripts/knowledge/golden_eval_baseline.json",
-  "modes": {}
+  "backend_requested": "nvidia",
+  "backend_used": "nvidia",
+  "fallback": false,
+  "modes": {
+    "hybrid": {
+      "hit_at_5": 0.8636363636363636,
+      "mrr": 0.7525252525252525,
+      "hit_at_1": 0.6666666666666666,
+      "recall_at_10": 0.8200757575757576,
+      "ndcg_at_10": 0.7577307528212298
+    },
+    "vector": {
+      "hit_at_5": 0.9015151515151515,
+      "mrr": 0.7972522847522847,
+      "hit_at_1": 0.7121212121212122,
+      "recall_at_10": 0.9166666666666666,
+      "ndcg_at_10": 0.8446217111260444
+    },
+    "keyword": {
+      "hit_at_5": 0.8939393939393939,
+      "mrr": 0.7438852813852813,
+      "hit_at_1": 0.6363636363636364,
+      "recall_at_10": 0.898989898989899,
+      "ndcg_at_10": 0.786707586415669
+    }
+  },
+  "note": "Initial live Turso run 2026-09-27. --mode all --backend nvidia (2048-d nemotron, v2 coverage 12027/12027, fallback false). 132 draft questions. Ranking unchanged."
 }

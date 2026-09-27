@@ -818,15 +818,16 @@ Nightly `06:00 UTC` (`RandomizedDelaySec=300`), oneshot
 `.venv/bin/python scripts/knowledge/eval_golden.py --mode all --baseline scripts/knowledge/golden_eval_baseline.json --write-results /var/lib/radon/knowledge-eval`,
 `TimeoutStartSec=1800`. Scores hybrid / vector / keyword against the draft
 v2 golden set. A hit@5 or MRR drop past 0.03 fails the unit so the existing
-watchdog pages. **Not enabled.** The unit files ship with a
-`not-installed:` drift ack until a live baseline replaces the placeholder
-at `scripts/knowledge/golden_eval_baseline.json`. After that first VPS run:
+watchdog pages. **Not enabled.** The repo now has an initial live baseline
+at `scripts/knowledge/golden_eval_baseline.json` (`placeholder: false`).
+Keep the `not-installed:` drift ack until a human reviews the draft set.
+After that review:
 
 ```
 install -d -o radon -g radon /var/lib/radon/knowledge-eval
 .venv/bin/python scripts/knowledge/eval_golden.py --mode all \
   --write-baseline scripts/knowledge/golden_eval_baseline.json
-# then enable the timer; do not enable before the baseline exists
+# then enable the timer; do not enable before a human reviews the draft set
 systemctl enable --now radon-knowledge-eval.timer
 ```
 

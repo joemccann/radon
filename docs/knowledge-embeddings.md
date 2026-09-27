@@ -71,7 +71,7 @@ Default `--mode all` runs every mode. Metrics per mode: hit@1, hit@5, recall@10,
   --write-results /var/lib/radon/knowledge-eval
 ```
 
-`--baseline PATH` exits 1 when hit@5 or MRR for any scored mode drops more than `--max-drop` (default 0.03). `--write-baseline PATH` writes the compact metrics snapshot. `scripts/knowledge/golden_eval_baseline.json` starts as a placeholder and is replaced by the first live Turso `--mode all` run. Promoted newsfeed/journal labels came from read-only production SELECTs; `golden_set_candidates.json` is gone. Keep `draft: true` until a human reviews the set.
+`--baseline PATH` exits 1 when hit@5 or MRR for any scored mode drops more than `--max-drop` (default 0.03). `--write-baseline PATH` writes the compact metrics snapshot. `scripts/knowledge/golden_eval_baseline.json` is the initial live Turso `--mode all` snapshot (`placeholder: false`, NVIDIA 2048-d, no fallback). Promoted newsfeed/journal labels came from read-only production SELECTs; `golden_set_candidates.json` is gone. Keep `draft: true` until a human reviews the set. The nightly timer stays off until that review.
 
 Nightly VPS unit (not enabled): `cloud/services/radon-knowledge-eval.{service,timer}`. `setup-vps.sh` inventories both files and `enable_services` skips them until a live baseline replaces `scripts/knowledge/golden_eval_baseline.json`. Auto-sync stays off. A `not-installed:` drift ack holds the pending window. The oneshot writes no `service_health` row (`EXEMPT_UNITS` `gap:`); a failed run pages via the unit watchdog. After the first live VPS write, `systemctl enable --now radon-knowledge-eval.timer`. CI stays offline: in-memory libsql fixtures cover metric math, mode switching, baseline comparison, and schema validation.
 
