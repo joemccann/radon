@@ -300,6 +300,85 @@ class TestPersistResult:
         assert SERVICE == "ma-ratio"
 
 
+class TestHeartbeatTimeout:
+    def _stub_sweep(self, monkeypatch, tmp_path):
+        import ma_ratio_scan as mrs
+
+        monkeypatch.setattr(mrs, "MA_RATIO_JSON", tmp_path / "ma_ratio.json")
+        monkeypatch.setattr(
+            mrs, "resolve_spx_constituents", lambda: (list(MEMBERS), "cache")
+        )
+        monkeypatch.setattr(
+            mrs,
+            "ensure_member_history",
+            lambda members, backfill, no_db, sweep_deadline: (
+                {m: CLOSES[m] for m in members if m in CLOSES},
+                {"yahoo": 0, "stored": len(members)},
+            ),
+        )
+        monkeypatch.setattr(
+            mrs,
+            "fetch_spx_overlay_closes",
+            lambda yahoo, **kwargs: (dict(yahoo), "yahoo"),
+        )
+        monkeypatch.setattr(mrs.writer, "ensure_no_replica_for_writers", lambda: None)
+        monkeypatch.setattr(
+            mrs.writer, "upsert_scan_snapshot", lambda service, scan_time, payload: None
+        )
+        return mrs
+
+    def test_main_exits_zero_when_the_ok_heartbeat_times_out(
+        self, monkeypatch, tmp_path,
+    ):
+        """Page 265f8e2e (2026-09-26 22:58Z): rows and the scan snapshot
+        committed, then record_service_health('ok') raised HranaHttpError
+        'TimeoutError: The read operation timed out'. The bare call aborted
+        before the JSON mirror, and main() exited 1 (NRestarts=0, P1).
+        The heartbeat is telemetry. A committed cycle must exit 0 and
+        still write the JSON fallback."""
+        from db.hrana_http import HranaHttpError
+
+        mrs = self._stub_sweep(monkeypatch, tmp_path)
+        written: list[int] = []
+        monkeypatch.setattr(
+            mrs.writer,
+            "upsert_ma_ratio_rows",
+            lambda rows, recorded_at=None: written.append(len(rows)),
+        )
+
+        def boom(*_a, **_k):
+            raise HranaHttpError("TimeoutError: The read operation timed out")
+
+        monkeypatch.setattr(mrs.writer, "record_service_health", boom)
+
+        assert mrs.main([]) == 0
+        assert written == [53]
+        fallback = json.loads((tmp_path / "ma_ratio.json").read_text())
+        assert fallback["data_date"] == _sessions()[-1]
+        assert fallback["missing"] is False
+
+    def test_row_upsert_failure_still_fails_the_oneshot(self, monkeypatch, tmp_path):
+        """A timeout on the history upsert is the cycle failing, not
+        telemetry. main() must still exit 1, skip the JSON mirror, and
+        land an error heartbeat."""
+        mrs = self._stub_sweep(monkeypatch, tmp_path)
+        health: list[tuple] = []
+
+        def boom(*_a, **_k):
+            raise TimeoutError("The read operation timed out")
+
+        monkeypatch.setattr(mrs.writer, "upsert_ma_ratio_rows", boom)
+        monkeypatch.setattr(
+            mrs.writer,
+            "record_service_health",
+            lambda service, state, **kwargs: health.append((service, state)),
+        )
+
+        assert mrs.main([]) == 1
+        assert not (tmp_path / "ma_ratio.json").exists()
+        assert health == [("ma-ratio", "error")]
+
+
 class TestRun:
     def test_run_aggregates_the_sweep_and_persists(self, persist_calls, monkeypatch):
         import ma_ratio_scan as mrs

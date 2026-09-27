@@ -281,6 +281,20 @@ def fetch_spx_overlay_closes(
 
 # ── persistence ───────────────────────────────────────────────────
 
+def _record_ok_heartbeat(finished_at: str) -> None:
+    """Best-effort ok heartbeat.
+
+    A Turso read timeout must not fail the oneshot after rows and the
+    snapshot have committed (page 265f8e2e, 2026-09-26: HranaHttpError on
+    this write became Result=exit-code / NRestarts=0). Row and snapshot
+    failures still raise. Matches fetch_trin._record_health.
+    """
+    try:
+        writer.record_service_health(SERVICE, "ok", finished_at=finished_at)
+    except Exception as exc:  # noqa: BLE001 - heartbeat is telemetry
+        _log(f"service_health heartbeat failed: {exc}")
+
+
 def persist_result(payload: dict[str, Any], rows: list[dict[str, Any]]) -> None:
     """Dual-write: Turso rows + snapshot + heartbeat, then the JSON fallback.
 
@@ -296,7 +310,7 @@ def persist_result(payload: dict[str, Any], rows: list[dict[str, Any]]) -> None:
     writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
     # R-557: finished_at is WRITE time — the sweep can spend up to
     # SWEEP_BUDGET_S between scan_time and this line.
-    writer.record_service_health(SERVICE, "ok", finished_at=_now_iso())
+    _record_ok_heartbeat(_now_iso())
     _write_json_cache(payload)
 
 
