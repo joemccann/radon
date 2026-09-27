@@ -132,6 +132,9 @@ def fts_match_expression(query: str) -> str:
 # ── hybrid search ────────────────────────────────────────────────────
 
 
+_VALID_LEGS = frozenset({"fts", "vector"})
+
+
 def hybrid_search(
     db,
     query: str,
@@ -144,6 +147,9 @@ def hybrid_search(
     vector_search: Callable | None = None,
     with_neighbors: bool = True,
     rerank: Callable[[list[tuple[float, dict]]], Sequence[tuple[float, dict]]] | None = None,
+    legs: Sequence[str] | None = None,
+    apply_recency: bool = True,
+    apply_source_cap: bool = True,
 ) -> list[dict]:
     """Returns result rows best-first, each a dict of `knowledge` columns plus
     `score` and — unless `with_neighbors=False` — `neighbors` (adjacent chunks
@@ -154,36 +160,75 @@ def hybrid_search(
     best-first — before the per-source cap and the limit cut, so a caller can
     promote a doc class the fused ranking buries (prior-evals: thesis docs
     behind dozens of fill rows) without overfetching or extra statements.
-    Neighbor SELECTs still run only for the final winners."""
+    Neighbor SELECTs still run only for the final winners.
+
+    Opt-in scoring hooks (defaults keep production ranking identical):
+    `legs=None` runs both FTS and vector; `legs=("fts",)` / `("vector",)`
+    isolate a single leg. `apply_recency=False` and `apply_source_cap=False`
+    skip post-fusion decay and the per-source cap so a golden eval can score
+    each raw leg the way the per-leg diagnostic does.
+    """
     now = now or datetime.now(timezone.utc)
-    fts_ids = _fts_leg(db, query, CANDIDATE_POOL, scopes, sources)
+    active = _normalize_legs(legs)
+    fts_ids = _fts_leg(db, query, CANDIDATE_POOL, scopes, sources) if "fts" in active else []
     vector_ids: list = []
-    if query_embedding is not None:
+    if "vector" in active and query_embedding is not None:
         search = vector_search or _vector_top_k_search
         vector_ids = list(search(db, query_embedding, CANDIDATE_POOL, scopes, sources))
 
     rows_by_id = _fetch_candidate_rows(db, fts_ids + vector_ids, scopes, sources)
-    fused = rrf_fuse(
-        {
-            "fts": [i for i in fts_ids if i in rows_by_id],
-            "vector": [i for i in vector_ids if i in rows_by_id],
-        }
-    )
-
-    scored = []
-    for row_id, base_score in fused.items():
-        row = rows_by_id[row_id]
-        decayed = base_score * recency_factor(row["source"], row["last_activity_at"], now)
-        scored.append((decayed, row))
-    scored.sort(key=lambda pair: (-pair[0], pair[1]["id"]))
+    if len(active) == 1:
+        # Single-leg scoring: preserve that leg's order (diag.py `ordered`),
+        # then optional decay/cap. Fusion of one list would re-score by RRF.
+        only = next(iter(active))
+        ordered_ids = fts_ids if only == "fts" else vector_ids
+        scored = []
+        for rank, row_id in enumerate(ordered_ids):
+            row = rows_by_id.get(row_id)
+            if row is None:
+                continue
+            score = 1.0 / (RRF_K + rank + 1)
+            if apply_recency:
+                score *= recency_factor(row["source"], row["last_activity_at"], now)
+            scored.append((score, row))
+        if apply_recency:
+            scored.sort(key=lambda pair: (-pair[0], pair[1]["id"]))
+    else:
+        fused = rrf_fuse(
+            {
+                "fts": [i for i in fts_ids if i in rows_by_id],
+                "vector": [i for i in vector_ids if i in rows_by_id],
+            }
+        )
+        scored = []
+        for row_id, base_score in fused.items():
+            row = rows_by_id[row_id]
+            decayed = (
+                base_score * recency_factor(row["source"], row["last_activity_at"], now)
+                if apply_recency
+                else base_score
+            )
+            scored.append((decayed, row))
+        scored.sort(key=lambda pair: (-pair[0], pair[1]["id"]))
 
     pool = dedup_best_chunk(scored)
     if rerank is not None:
         pool = list(rerank(pool))
-    winners = cap_per_source(pool)[:limit]
+    winners = (cap_per_source(pool) if apply_source_cap else list(pool))[:limit]
     if not with_neighbors:
         return [_scored_result(score, row) for score, row in winners]
     return [_result_with_neighbors(db, score, row) for score, row in winners]
+
+
+def _normalize_legs(legs: Sequence[str] | None) -> frozenset[str]:
+    if legs is None:
+        return _VALID_LEGS
+    unknown = set(legs) - _VALID_LEGS
+    if unknown:
+        raise ValueError(f"unknown retrieval legs: {sorted(unknown)}")
+    if not legs:
+        raise ValueError("legs must be non-empty")
+    return frozenset(legs)
 
 
 def _fts_leg(

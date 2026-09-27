@@ -147,6 +147,8 @@ readonly SERVICE_FILES=(
   radon-oi-changes.timer
   radon-knowledge.service
   radon-knowledge.timer
+  radon-knowledge-eval.service
+  radon-knowledge-eval.timer
   radon-bpi.service
   radon-bpi.timer
   radon-yield-curve.service
@@ -1293,6 +1295,10 @@ enable_services() {
     [[ "$svc" == "radon-slm-tagger.service" ]] && continue
     [[ "$svc" == "radon-slm-tagger-monitor.service" ]] && continue
     [[ "$svc" == "radon-slm-tagger-monitor.timer" ]] && continue
+    # Knowledge golden-eval stays copied but disabled until a live baseline
+    # exists. Enabling the timer would fire a placeholder-baseline oneshot.
+    [[ "$svc" == "radon-knowledge-eval.service" ]] && continue
+    [[ "$svc" == "radon-knowledge-eval.timer" ]] && continue
     # Broker-only. Combined/app copy the unit but do not enable it. Certs plus
     # `systemctl enable --now` happen on the broker after the split.
     [[ "$svc" == "radon-ib-gateway-remote.service" ]] && continue

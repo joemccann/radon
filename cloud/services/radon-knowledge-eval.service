@@ -1,0 +1,26 @@
+[Unit]
+Description=Radon knowledge golden-eval (hybrid / vector / keyword vs baseline)
+After=network.target
+
+# Same crash-loop brake as radon-knowledge.service. A failed oneshot pages
+# via the existing unit watchdog; do not enable this timer until a live
+# baseline has been written (see docs/knowledge-embeddings.md).
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=FASTEMBED_CACHE_PATH=/home/radon/.cache/fastembed
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/knowledge/eval_golden.py --mode all --baseline /home/radon/radon/scripts/knowledge/golden_eval_baseline.json --write-results /var/lib/radon/knowledge-eval
+StandardOutput=journal
+StandardError=journal
+# Live eval embeds every question (nvidia, local fallback). 30 min bounds a
+# wedged NVIDIA retry well inside the nightly slot.
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=multi-user.target

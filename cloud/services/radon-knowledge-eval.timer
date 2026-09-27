@@ -1,0 +1,12 @@
+[Unit]
+Description=Radon knowledge golden-eval - nightly
+
+[Timer]
+# Nightly 06:00 UTC, before radon-forecast-nightly at 07:00. Persistent=true
+# replays a boot-missed slot. Do not enable until the live baseline exists.
+OnCalendar=*-*-* 06:00:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
