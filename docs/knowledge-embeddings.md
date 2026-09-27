@@ -4,16 +4,16 @@
 
 The `knowledge` table carries two vector columns:
 
-| Column | Model | Dimensions | Index | Purpose |
+| Column | Model | Dimensions | Access | Purpose |
 |---|---|---|---|---|
-| `embedding` | BAAI/bge-small-en-v1.5 | 384 | `idx_knowledge_embedding` | Automatic fallback; ingest dual-writes by default. |
-| `embedding_v2` | nvidia/nemotron-3-embed-1b | 2048 | `idx_knowledge_embedding_v2` | Live default for queries and ingest (2026-09-25). |
+| `embedding` | BAAI/bge-small-en-v1.5 | 384 | `idx_knowledge_embedding` (DiskANN) | Automatic fallback; ingest dual-writes by default. |
+| `embedding_v2` | nvidia/nemotron-3-embed-1b | 2048 | exact `vector_distance_cos` scan | Live default for queries and ingest (2026-09-25). No ANN index. |
 
 ## Query resolution
 
 `scripts/knowledge/embed.py:resolve_query_vector` selects the query vector:
 
-1. If `RADON_KB_EMBED_BACKEND=nvidia` (default) **and** `v2_coverage_ready(db)` is true → NVIDIA 2048-d query vector against `embedding_v2` index.
+1. If `RADON_KB_EMBED_BACKEND=nvidia` (default) **and** `v2_coverage_ready(db)` is true → NVIDIA 2048-d query vector. Retrieval is `SELECT id FROM knowledge WHERE embedding_v2 IS NOT NULL ORDER BY vector_distance_cos(embedding_v2, vector32(?)) LIMIT ?`. Cosine distance 0 is identical, so ascending order is nearest-first, the same rank the 384-d `vector_top_k` leg feeds into RRF. Similarity is `1 - distance` and ranks the same rows.
 2. Otherwise → local 384-d `bge-small-en-v1.5` vector against `embedding` index, or FTS-only if the local embedder is unavailable.
 
 `v2_coverage_ready` returns false while **any** `knowledge.embedding_v2` is NULL. The check is cached for 60 seconds. A missing column or failed read also returns false.
@@ -26,11 +26,31 @@ The `knowledge` table carries two vector columns:
 - **Disable:** `RADON_KB_EMBED_DISABLED=1` turns off all embeddings; ingest writes FTS-only rows (`embedding` and `embedding_v2` both NULL).
 - **Transient write retries:** source and prepared-write retries wait `_retry_delay(attempt)` in `scripts/knowledge/ingest.py`: 12s doubling to a 60s cap, plus up to 25% jitter. Turso reaps an abandoned idle transaction after 10s (up to 300s if it is still running), so a shorter wait queues the retry behind the orphan's writer lock. Replay is safe because upserts are idempotent on `content_hash`.
 
-## Backfill order (load-bearing)
+## Backfill
 
-Migration 0087 creates `embedding_v2` column and its vector index **while every value is still NULL**, then `scripts/knowledge/backfill_v2.py` backfills. The index must exist before the backfill runs because Turso does not backfill `libsql_vector_idx` for rows written before the index existed (local libsql does, which is why a unit test cannot reproduce the miss).
+Migration 0087 added `embedding_v2` and `idx_knowledge_embedding_v2` while every value was still NULL. That DiskANN index matched exact-scan recall (0.96 hit@5, 0.99 recall vs exact on 11,718 rows / 24 eval_golden questions) and cost about 5.0 GB, 4.5-33s per row insert, and a CREATE that cannot finish inside Turso's one-hour statement limit. Exact scan was about 1s p50 and 1.8s p95, with no index storage and about 17ms per row write. Migration 0089 drops the index. Do not edit 0087.
 
-Backfill is idempotent: `backfill_embedding_v2` only writes where `embedding_v2 IS NULL`.
+0089 is a manual migration. `DROP INDEX` took about 14 minutes on a branch copy. `radon-api` runs `migrate.py --boot` under `timeout 30` and a 20s boot deadline, and the runner commits an ordinary file once at the end. The automatic path skips 0089 (the boot schema marker ignores it, so a Turso brownout still boots). Apply it once, each statement committed on its own:
+
+```bash
+RADON_MIGRATE_MANUAL=1 python3.13 scripts/db/migrate.py
+```
+
+Confirm:
+
+```sql
+SELECT name FROM sqlite_master WHERE name = 'idx_knowledge_embedding_v2';
+```
+
+Then rerun the backfill. Without the index, `--batch-size 64` and no sleep is about 15 minutes for 8,715 NULL rows:
+
+```bash
+python3.13 scripts/knowledge/backfill_v2.py --batch-size 64 --min-interval 0
+```
+
+Then `python3.13 scripts/knowledge/eval_golden.py`. Backfill does not require the index. It only writes where `embedding_v2 IS NULL`.
+
+Past about 50k rows, revisit a compact index (`compress_neighbors=float8`, `max_neighbors=32`, `insert_l=40`) built in pieces.
 
 ## Environment variables
 
@@ -47,27 +67,31 @@ Backfill is idempotent: `backfill_embedding_v2` only writes where `embedding_v2 
 `scripts/tests/test_knowledge_embedding_contract.py` asserts:
 
 - `embedding_v2` column exists post-migration 0087.
-- `idx_knowledge_embedding_v2` index exists.
-- `v2_coverage_ready` logic: queries use 384-d while any NULL exists; 2048-d only after full backfill.
+- `idx_knowledge_embedding_v2` is created by 0087 and dropped by 0089. 0089 is `-- radon-migrate: manual` and is not applied by boot.
+- `v2_coverage_ready` logic: queries use 384-d while any NULL exists; 2048-d exact scan only after full backfill.
 - Dual-write env var parsing matches `dual_write_enabled()`.
 
-Run: `python3.13 -m pytest scripts/tests/test_knowledge_embed_v2.py -q`
+Run: `python3.13 -m pytest scripts/tests/test_knowledge_embed_v2.py scripts/tests/test_migrate.py -q`
 
 ## Operator actions
 
 - **Rotate NVIDIA key:** Update `NVIDIA_API_KEY` in the encrypted credential store (profile Credentials tab) or `/etc/radon/env`. The next query call picks it up automatically.
 - **Force local fallback:** Set `RADON_KB_EMBED_BACKEND=local` in the environment and restart `radon-api` and `radon-monitor`.
 - **Disable dual-write (save NVIDIA quota):** `RADON_KB_EMBED_DUAL_WRITE=0`; restart ingest workers. Existing `embedding_v2` values remain; new rows get only 384-d.
-- **Verify backfill complete:** Run `python3.13 -c "from scripts.knowledge.embed import v2_coverage_ready; from db import get_db; print(v2_coverage_ready(get_db()))"` on a host with Turso credentials. `True` = 2048-d index is fully populated and active.
-- **Manual backfill:** `python3.13 scripts/knowledge/backfill_v2.py` (idempotent; safe to re-run).
+- **Verify backfill complete:** Run `python3.13 -c "from scripts.knowledge.embed import v2_coverage_ready; from db import get_db; print(v2_coverage_ready(get_db()))"` on a host with Turso credentials. `True` = every `embedding_v2` is populated and the exact scan is the active query path.
+- **Manual backfill:** `python3.13 scripts/knowledge/backfill_v2.py --batch-size 64 --min-interval 0` (idempotent; safe to re-run). Run it after 0089 has dropped the index.
+- **Drop the 2048-d index:** `RADON_MIGRATE_MANUAL=1 python3.13 scripts/db/migrate.py` (about 14 minutes when the index exists). Idempotent (`DROP INDEX IF EXISTS`).
 
 ## Schema reference
 
 ```sql
--- Migration 0087
+-- Migration 0087 (unchanged; superseded by 0089)
 ALTER TABLE knowledge ADD COLUMN embedding_v2 F32_BLOB(2048);
 CREATE INDEX IF NOT EXISTS idx_knowledge_embedding_v2
   ON knowledge(libsql_vector_idx(embedding_v2));
+
+-- Migration 0089, manual only
+DROP INDEX IF EXISTS idx_knowledge_embedding_v2;
 ```
 
 Row contract: `scripts/knowledge/schema.py:KnowledgeDoc` (fields `embedding: list[float] | None` for 384d, `embedding_v2: list[float] | None` for 2048d).

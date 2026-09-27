@@ -16,8 +16,9 @@ Scope/source filters are pushed into both candidate legs (not applied after
 the fixed candidate pool) so a flooded unmatching source cannot crowd a
 scoped query out of the pool entirely.
 
-The vector leg defaults to server-side vector_top_k over the ANN index from
-migration 0028; callers may inject any
+The 384-d vector leg uses server-side vector_top_k over the ANN index from
+migration 0028. The 2048-d leg is an exact cosine scan of embedding_v2
+(migration 0089 drops that DiskANN index). Callers may inject any
 `vector_search(db, embedding, pool, scopes, sources)` callable (tests use a
 numpy cosine scorer). Fusion/decay/list helpers are pure Python — importable
 and unit-testable without a DB.
@@ -52,7 +53,12 @@ _FTS_SQL_TEMPLATE = (
     "WHERE {where} ORDER BY bm25(knowledge_fts), knowledge_fts.rowid LIMIT ?"
 )
 
-_VECTOR_INDEXES = ("idx_knowledge_embedding", "idx_knowledge_embedding_v2")
+_VECTOR_INDEXES = ("idx_knowledge_embedding",)
+
+_V2_EXACT_SQL = (
+    "SELECT id FROM knowledge WHERE {where} "
+    "ORDER BY vector_distance_cos(embedding_v2, vector32(?)) LIMIT ?"
+)
 
 _NEIGHBOR_SQL = (
     "SELECT chunk_ix, content FROM knowledge "
@@ -206,13 +212,15 @@ def _vector_top_k_search(
     sources: Sequence[str] | None = None,
     index_name: str | None = None,
 ) -> list[int]:
-    name = index_name or (
-        "idx_knowledge_embedding_v2" if len(query_embedding) == EMBEDDING_DIM_V2
-        else "idx_knowledge_embedding"
-    )
+    embedding_json = json.dumps(list(query_embedding))
+    if len(query_embedding) == EMBEDDING_DIM_V2:
+        # Legacy callers passed the dropped DiskANN name. Exact scan does not read it.
+        if index_name not in (None, "idx_knowledge_embedding_v2"):
+            raise ValueError("unknown knowledge vector index")
+        return _exact_cosine_v2_ids(db, embedding_json, pool, scopes, sources)
+    name = index_name or "idx_knowledge_embedding"
     if name not in _VECTOR_INDEXES:
         raise ValueError("unknown knowledge vector index")
-    embedding_json = json.dumps(list(query_embedding))
     filter_clauses, filter_args = _knowledge_filters(scopes, sources)
     head = "SELECT t.id FROM vector_top_k('" + name + "', vector32(?), ?) t"
     if not filter_clauses:
@@ -222,6 +230,27 @@ def _vector_top_k_search(
     sql = sql.format(where=" AND ".join(filter_clauses))
     top_k = pool * VECTOR_FILTER_OVERFETCH
     rows = db.execute(sql, (embedding_json, top_k, *filter_args, pool)).fetchall()
+    return [row[0] for row in rows]
+
+
+def _exact_cosine_v2_ids(
+    db,
+    embedding_json: str,
+    pool: int,
+    scopes: Sequence[str] | None,
+    sources: Sequence[str] | None,
+) -> list[int]:
+    """Nearest-first ids for embedding_v2.
+
+    vector_distance_cos is cosine distance (0 = identical). Ascending order
+    is the same nearest-first rank vector_top_k fed into RRF. Similarity is
+    1 - distance and ranks the same rows, so the hybrid score stays the RRF
+    weight of that rank.
+    """
+    filter_clauses, filter_args = _knowledge_filters(scopes, sources)
+    where = " AND ".join(["embedding_v2 IS NOT NULL", *filter_clauses])
+    sql = _V2_EXACT_SQL.format(where=where)
+    rows = db.execute(sql, (*filter_args, embedding_json, pool)).fetchall()
     return [row[0] for row in rows]
 
 

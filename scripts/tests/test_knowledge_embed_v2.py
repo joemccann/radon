@@ -22,12 +22,13 @@ from knowledge.embed import (  # noqa: E402
     v2_coverage_ready,
 )
 from knowledge.ingest import _embed_docs, _restore_unchanged_enrichment  # noqa: E402
-from knowledge.retrieve import _vector_top_k_search  # noqa: E402
+from knowledge.retrieve import RRF_K, _vector_top_k_search, hybrid_search  # noqa: E402
 from knowledge.schema import KnowledgeDoc  # noqa: E402
 from knowledge.store import upsert_documents  # noqa: E402
 
 _MIGRATION = _SCRIPTS / "db" / "migrations" / "0028_knowledge.sql"
 _MIGRATION_V2 = _SCRIPTS / "db" / "migrations" / "0087_knowledge_embedding_v2.sql"
+_MIGRATION_DROP = _SCRIPTS / "db" / "migrations" / "0089_drop_knowledge_embedding_v2_index.sql"
 _BOOTSTRAP = (
     "CREATE TABLE IF NOT EXISTS schema_migrations "
     "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
@@ -227,40 +228,99 @@ def test_local_backend_does_not_call_nvidia(monkeypatch):
     assert vector == [1.0] * EMBEDDING_DIM
 
 
-def test_vector_search_picks_the_index_for_the_query_width():
+def test_vector_search_picks_exact_cosine_for_2048_and_ann_for_384():
     class _Db:
         def __init__(self):
             self.sql = []
+            self.args = []
 
         def execute(self, sql, args=()):
             self.sql.append(sql)
+            self.args.append(args)
             return self
 
         def fetchall(self):
             return []
 
     wide = _Db()
-    _vector_top_k_search(wide, [0.0] * EMBEDDING_DIM_V2, 4)
-    assert "vector_top_k('idx_knowledge_embedding_v2'" in wide.sql[0]
+    _vector_top_k_search(wide, [0.0] * EMBEDDING_DIM_V2, 4, scopes=["ops"])
+    assert "vector_top_k" not in wide.sql[0]
+    assert "idx_knowledge_embedding_v2" not in wide.sql[0]
+    assert "embedding_v2 IS NOT NULL" in wide.sql[0]
+    assert "ORDER BY vector_distance_cos(embedding_v2, vector32(?))" in wide.sql[0]
+    assert "knowledge.scope IN (?)" in wide.sql[0]
+    assert wide.sql[0].rstrip().endswith("LIMIT ?")
+    assert wide.args[0][0] == "ops"
+    assert wide.args[0][-1] == 4
+    assert json.loads(wide.args[0][-2]) == [0.0] * EMBEDDING_DIM_V2
     narrow = _Db()
     _vector_top_k_search(narrow, [0.0] * EMBEDDING_DIM, 4)
     assert "vector_top_k('idx_knowledge_embedding'" in narrow.sql[0]
     assert "embedding_v2" not in narrow.sql[0]
 
 
-def test_migration_creates_v2_index_before_data():
+def test_migration_0087_creates_the_index_and_0089_drops_it():
     sql = _MIGRATION_V2.read_text(encoding="utf-8")
     assert sql.index("CREATE INDEX IF NOT EXISTS idx_knowledge_embedding_v2") < sql.index("schema_migrations")
     assert "INSERT INTO knowledge" not in sql
+    drop = _MIGRATION_DROP.read_text(encoding="utf-8")
+    assert "DROP INDEX IF EXISTS idx_knowledge_embedding_v2" in drop
+    assert "-- radon-migrate: manual" in drop
+    assert "VALUES (89," in drop
+    assert "CREATE INDEX" not in drop
     db = _db()
     names = {row[0] for row in db.execute("SELECT name FROM sqlite_master").fetchall()}
     assert "idx_knowledge_embedding_v2" in names
+    for stmt in _split(drop):
+        db.execute(stmt)
+    db.commit()
+    for stmt in _split(drop):
+        db.execute(stmt)
+    db.commit()
+    names = {row[0] for row in db.execute("SELECT name FROM sqlite_master").fetchall()}
+    assert "idx_knowledge_embedding_v2" not in names
+    columns = {row[1] for row in db.execute("PRAGMA table_info(knowledge)").fetchall()}
+    assert "embedding_v2" in columns
     upsert_documents(db, [KnowledgeDoc(
         source="docs", scope="ops", doc_key="note", content="after the index",
         embedding_v2=[0.0] * EMBEDDING_DIM_V2,
     )])
     stored = db.execute("SELECT embedding_v2 IS NOT NULL FROM knowledge").fetchone()
     assert stored[0] in (1, True)
+
+
+def test_v2_exact_scan_excludes_nulls_and_ranks_nearest_first():
+    db = _db()
+    close = [1.0] + [0.0] * (EMBEDDING_DIM_V2 - 1)
+    far = [0.0, 1.0] + [0.0] * (EMBEDDING_DIM_V2 - 2)
+    upsert_documents(db, [
+        KnowledgeDoc(
+            source="docs", scope="ops", doc_key="close", content="alpha row",
+            embedding_v2=close,
+        ),
+        KnowledgeDoc(
+            source="docs", scope="ops", doc_key="far", content="beta row",
+            embedding_v2=far,
+        ),
+        KnowledgeDoc(
+            source="docs", scope="trading", doc_key="other-scope", content="alpha twin",
+            embedding_v2=close,
+        ),
+        KnowledgeDoc(
+            source="docs", scope="ops", doc_key="missing", content="gamma row",
+        ),
+    ])
+    db.execute("DROP INDEX IF EXISTS idx_knowledge_embedding_v2")
+    db.commit()
+    ids = _vector_top_k_search(db, close, 5, scopes=["ops"])
+    keys = []
+    for row_id in ids:
+        keys.append(db.execute("SELECT doc_key FROM knowledge WHERE id = ?", (row_id,)).fetchone()[0])
+    assert keys == ["close", "far"]
+    results = hybrid_search(db, "zzzqqq", query_embedding=close, scopes=["ops"])
+    assert [row["doc_key"] for row in results] == ["close", "far"]
+    assert results[0]["score"] == pytest.approx(1.0 / (RRF_K + 1))
+    assert results[1]["score"] == pytest.approx(1.0 / (RRF_K + 2))
 
 
 def test_backfill_is_dry_run_resumable_and_idempotent():

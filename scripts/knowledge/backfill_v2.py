@@ -1,6 +1,7 @@
-"""Backfill knowledge.embedding_v2 for rows the 2048-d index does not have yet.
+"""Backfill knowledge.embedding_v2 for rows that do not have a 2048-d vector yet.
 
-The migration creates idx_knowledge_embedding_v2 before any of these writes.
+Writes do not require idx_knowledge_embedding_v2. Migration 0089 drops that
+DiskANN index; retrieval scans embedding_v2 with vector_distance_cos.
 Rows are selected with WHERE embedding_v2 IS NULL, so a re-run is a no-op
 and a stopped run resumes at the next null row. Dry-run counts candidates
 and does not call the embeddings API.
