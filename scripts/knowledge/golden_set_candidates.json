@@ -1,0 +1,78 @@
+{
+  "needs_review": true,
+  "version": "2.0-candidates",
+  "note": "Candidate questions for Turso-only sources (newsfeed, journal). Do not invent doc keys. A human should attach relevant[] after a live SELECT on the production knowledge table.",
+  "questions": [
+    {
+      "id": "c-journal-latest-alab-exit",
+      "question": "What was the most recent ALAB LEAP exit and realized P&L?",
+      "category": "recent",
+      "needs_review": true,
+      "source_hint": "journal"
+    },
+    {
+      "id": "c-journal-open-risk",
+      "question": "Which journal theses are still open and what is their cost basis?",
+      "category": "numeric",
+      "needs_review": true,
+      "source_hint": "journal"
+    },
+    {
+      "id": "c-journal-wulf-adds",
+      "question": "Did I add to the WULF LEAP after the original entry?",
+      "category": "paraphrase",
+      "needs_review": true,
+      "source_hint": "journal"
+    },
+    {
+      "id": "c-news-latest-momo",
+      "question": "What is the latest newsfeed take on momentum exposure and the MoMo trendline?",
+      "category": "recent",
+      "needs_review": true,
+      "source_hint": "newsfeed",
+      "note": "The July 2026 post ids in the main set are stale for a latest query."
+    },
+    {
+      "id": "c-news-latest-gamma",
+      "question": "What is the most recent newsfeed post about a gamma flip?",
+      "category": "recent",
+      "needs_review": true,
+      "source_hint": "newsfeed"
+    },
+    {
+      "id": "c-news-latest-buybacks",
+      "question": "What has the newsfeed said about buybacks this month?",
+      "category": "recent",
+      "needs_review": true,
+      "source_hint": "newsfeed"
+    },
+    {
+      "id": "c-news-spxxai",
+      "question": "Has the newsfeed covered SPX-ex-AI or SPXXAI crowding?",
+      "category": "paraphrase",
+      "needs_review": true,
+      "source_hint": "newsfeed"
+    },
+    {
+      "id": "c-news-dram",
+      "question": "What has the newsfeed said about DRAM and memory-cycle vol?",
+      "category": "paraphrase",
+      "needs_review": true,
+      "source_hint": "newsfeed"
+    },
+    {
+      "id": "c-journal-adbe",
+      "question": "Did I evaluate or journal an ADBE bullish call spread?",
+      "category": "cross_source",
+      "needs_review": true,
+      "source_hint": "journal"
+    },
+    {
+      "id": "c-journal-3dte-rr",
+      "question": "What went wrong on 3 DTE risk reversals in the journal?",
+      "category": "paraphrase",
+      "needs_review": true,
+      "source_hint": "journal"
+    }
+  ]
+}

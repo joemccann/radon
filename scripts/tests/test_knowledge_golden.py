@@ -23,7 +23,19 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 from knowledge import embed as embed_mod  # noqa: E402
 from knowledge import eval_golden as eval_golden_mod  # noqa: E402
-from knowledge.eval_golden import DEFAULT_GOLDEN_PATH, run_golden  # noqa: E402
+from knowledge.eval_golden import (  # noqa: E402
+    DEFAULT_GOLDEN_PATH,
+    DEFAULT_MAX_DROP,
+    baseline_payload,
+    compare_baseline,
+    hit_at_k,
+    mean_reciprocal_rank,
+    ndcg_at_k,
+    recall_at_k,
+    relevant_labels,
+    run_golden,
+    validate_golden_set,
+)
 from knowledge.schema import KnowledgeDoc  # noqa: E402
 from knowledge.store import upsert_documents  # noqa: E402
 
@@ -87,11 +99,11 @@ class TestHitMatching:
         assert summary["overall_hit_at_5"] == 1.0
         outcome = summary["per_question"][0]
         assert outcome["hit"] is True
-        assert outcome["matched"] == {
-            "source": "journal",
-            "doc_key": "ALAB|2026-03-02|Long Call - LEAP|1",
-            "pattern": "ALAB",
-        }
+        assert outcome["matched"]["source"] == "journal"
+        assert outcome["matched"]["doc_key"] == "ALAB|2026-03-02|Long Call - LEAP|1"
+        assert outcome["matched"]["pattern"] == "ALAB"
+        assert outcome["matched"]["grade"] == 3
+        assert outcome["matched"]["rank"] == 1
 
     def test_source_mismatch_is_a_miss_even_when_pattern_matches(self, db):
         upsert_documents(
@@ -160,7 +172,9 @@ class TestMissCounting:
     def test_empty_golden_returns_zero_rate(self, db):
         summary = run_golden(db, [])
 
-        assert summary == {"overall_hit_at_5": 0.0, "per_question": []}
+        assert summary["overall_hit_at_5"] == 0.0
+        assert summary["per_question"] == []
+        assert summary["modes"]["hybrid"]["hit_at_5"] == 0.0
 
     def test_miss_when_expected_doc_ranks_below_limit(self, db):
         docs = [
@@ -246,6 +260,7 @@ class TestLoadQueryEmbedder:
             received.append(list(texts))
             return [[0.5] * EMBEDDING_DIM for _ in list(texts)]
 
+        monkeypatch.setenv("RADON_KB_EMBED_BACKEND", "local")
         monkeypatch.setattr(embed_mod, "get_embedder", lambda: batch_embed)
 
         query_embedder = eval_golden_mod._load_query_embedder()
@@ -269,29 +284,58 @@ class TestOutputShape:
         summary = run_golden(db, golden)
         round_tripped = json.loads(json.dumps(summary))
 
-        assert set(round_tripped) == {"overall_hit_at_5", "per_question"}
+        assert {
+            "overall_hit_at_5",
+            "per_question",
+            "modes",
+            "backend_used",
+            "fallback",
+        } <= set(round_tripped)
         outcome = round_tripped["per_question"][0]
-        assert set(outcome) == {"question", "hit", "matched", "results"}
+        assert {"question", "hit", "matched", "results", "modes", "relevant"} <= set(outcome)
         assert outcome["results"] == [
             {"source": "docs", "doc_key": "runbook.md", "score": pytest.approx(outcome["results"][0]["score"])}
         ]
         assert set(outcome["results"][0]) == {"source", "doc_key", "score"}
+        assert len(outcome["results"]) <= 10
 
 
 class TestGoldenSetFile:
     def test_shipped_golden_set_is_well_formed(self):
+        from knowledge.eval_golden import validate_golden_set
+
         golden = json.loads(DEFAULT_GOLDEN_PATH.read_text(encoding="utf-8"))
 
         assert golden["draft"] is True
+        assert golden["version"]
         assert golden["note"]
         questions = golden["questions"]
-        assert len(questions) == 24
+        assert len(questions) >= 100
+        errors = validate_golden_set(golden)
+        assert errors == [], errors
+        ids = [entry["id"] for entry in questions]
+        assert len(ids) == len(set(ids))
+        categories = {entry["category"] for entry in questions}
+        sources = {want["source"] for entry in questions for want in entry["relevant"]}
+        assert categories == {"exact_term", "paraphrase", "numeric", "recent", "cross_source"}
+        assert sources == {"journal", "evals", "docs", "newsfeed", "incidents"}
+        assert any(
+            entry.get("scopes") == ["ops"]
+            and any(want["doc_key_pattern"] == r"^tasks/lessons\.md$" for want in entry["relevant"])
+            for entry in questions
+        )
+        assert any(
+            any(want["source"] == "docs" and "docs/" in want["doc_key_pattern"] for want in entry["relevant"])
+            and entry.get("scopes") != ["ops"]
+            for entry in questions
+        )
         for entry in questions:
             assert entry["question"].strip()
-            assert entry["expected"]
-            for want in entry["expected"]:
+            assert entry["relevant"]
+            for want in entry["relevant"]:
                 assert want["source"] in {"journal", "evals", "docs", "newsfeed", "incidents"}
-                re.compile(want["doc_key_pattern"])  # must be a valid regex
+                assert want["grade"] in {1, 2, 3}
+                re.compile(want["doc_key_pattern"])
             if "scopes" in entry:
                 assert set(entry["scopes"]) <= {"trading", "research", "ops"}
 
@@ -312,4 +356,181 @@ class TestCliInvocation:
         )
 
         assert result.returncode == 0, result.stderr
-        assert "golden" in (result.stdout + result.stderr).lower()
+        help_text = result.stdout + result.stderr
+        assert "golden" in help_text.lower()
+        for flag in (
+            "--mode",
+            "--baseline",
+            "--max-drop",
+            "--write-baseline",
+            "--write-results",
+            "--strict-backend",
+            "--backend",
+        ):
+            assert flag in help_text
+        for mode in ("hybrid", "vector", "keyword", "all"):
+            assert mode in help_text
+
+
+class TestMetricMath:
+    """Hand-computed metric values. No DB."""
+
+    def test_hit_at_k(self):
+        ranks = [1, 3, None, 6]
+        assert hit_at_k(ranks, 1) == pytest.approx(0.25)
+        assert hit_at_k(ranks, 5) == pytest.approx(0.5)
+        assert hit_at_k([], 5) == 0.0
+
+    def test_mrr(self):
+        ranks = [1, 2, None]
+        assert mean_reciprocal_rank(ranks) == pytest.approx((1.0 + 0.5 + 0.0) / 3)
+        assert mean_reciprocal_rank([]) == 0.0
+
+    def test_recall_at_k(self):
+        labels = [
+            [{"source": "docs", "doc_key_pattern": "a", "grade": 3},
+             {"source": "docs", "doc_key_pattern": "b", "grade": 2}],
+            [{"source": "docs", "doc_key_pattern": "a", "grade": 3},
+             {"source": "newsfeed", "doc_key_pattern": "z", "grade": 1}],
+        ]
+        retrieved = [
+            [{"source": "docs", "doc_key": "a.md"}, {"source": "docs", "doc_key": "b.md"}],
+            [{"source": "docs", "doc_key": "a.md"}, {"source": "docs", "doc_key": "other.md"}],
+        ]
+        assert recall_at_k(retrieved, labels, 10) == pytest.approx((1.0 + 0.5) / 2)
+
+    def test_ndcg_at_k(self):
+        import math
+
+        labels = [[{"source": "docs", "doc_key_pattern": "hit", "grade": 3},
+                   {"source": "docs", "doc_key_pattern": "side", "grade": 1}]]
+        retrieved = [[
+            {"source": "docs", "doc_key": "noise.md"},
+            {"source": "docs", "doc_key": "hit.md"},
+            {"source": "docs", "doc_key": "side.md"},
+        ]]
+        dcg = 0.0 / math.log2(2) + 3.0 / math.log2(3) + 1.0 / math.log2(4)
+        idcg = 3.0 / math.log2(2) + 1.0 / math.log2(3)
+        assert ndcg_at_k(retrieved, labels, 10) == pytest.approx(dcg / idcg)
+
+
+class TestRelevantCompat:
+    def test_legacy_expected_is_grade_3(self):
+        entry = {"expected": [{"source": "docs", "doc_key_pattern": "runbook"}]}
+        labels = relevant_labels(entry)
+        assert labels == [{"source": "docs", "doc_key_pattern": "runbook", "grade": 3}]
+
+    def test_relevant_wins_over_expected(self):
+        entry = {
+            "expected": [{"source": "docs", "doc_key_pattern": "old"}],
+            "relevant": [{"source": "evals", "doc_key_pattern": "new", "grade": 2}],
+        }
+        assert relevant_labels(entry)[0]["source"] == "evals"
+        assert relevant_labels(entry)[0]["grade"] == 2
+
+
+class TestModeSwitching:
+    def _seed(self, db):
+        upsert_documents(
+            db,
+            [
+                _doc(doc_key="fts-only.md", content="cobalt runbook reconnect",
+                     embedding=_unit_vector(1)),
+                _doc(doc_key="vector-only.md", content="unrelated body text here",
+                     embedding=_unit_vector(0)),
+            ],
+        )
+
+    def test_keyword_hits_fts_and_misses_paraphrase(self, db):
+        self._seed(db)
+        golden = [_entry("cobalt reconnect", [{"source": "docs", "doc_key_pattern": "fts-only"}])]
+        summary = run_golden(db, golden, modes=("keyword", "vector"), query_embedder=lambda t: _unit_vector(0))
+        assert summary["per_question"][0]["modes"]["keyword"]["hit"] is True
+        assert summary["per_question"][0]["modes"]["keyword"]["results"][0]["doc_key"] == "fts-only.md"
+        assert summary["per_question"][0]["modes"]["vector"]["results"][0]["doc_key"] == "vector-only.md"
+
+    def test_hybrid_is_the_default_mode(self, db):
+        upsert_documents(db, [_doc(doc_key="runbook.md", content="relay reconnect runbook")])
+        summary = run_golden(db, [_entry("relay reconnect", [{"source": "docs", "doc_key_pattern": "runbook"}])])
+        assert "hybrid" in summary["modes"]
+        assert "keyword" not in summary["modes"]
+
+    def test_keeps_top_10_results(self, db):
+        upsert_documents(
+            db,
+            [_doc(doc_key=f"docs/note-{ix}.md", content="cobalt cobalt note") for ix in range(12)],
+        )
+        golden = [_entry("cobalt", [{"source": "docs", "doc_key_pattern": "note-0"}])]
+        summary = run_golden(db, golden, limit=10, modes=("keyword",))
+        assert len(summary["per_question"][0]["results"]) == 10
+        assert len(summary["per_question"][0]["modes"]["keyword"]["results"]) == 10
+
+
+class TestBaselineComparison:
+    def test_drop_within_margin_is_ok(self):
+        current = {"modes": {"hybrid": {"hit_at_5": 0.80, "mrr": 0.70}}}
+        baseline = {"modes": {"hybrid": {"hit_at_5": 0.82, "mrr": 0.72}}}
+        assert compare_baseline(current, baseline, max_drop=0.03) == []
+
+    def test_drop_past_margin_is_a_regression(self):
+        current = {"modes": {"hybrid": {"hit_at_5": 0.70, "mrr": 0.70}}}
+        baseline = {"modes": {"hybrid": {"hit_at_5": 0.80, "mrr": 0.70}}}
+        lines = compare_baseline(current, baseline, max_drop=DEFAULT_MAX_DROP)
+        assert len(lines) == 1
+        assert "hybrid.hit_at_5" in lines[0]
+
+    def test_placeholder_baseline_is_a_regression(self):
+        lines = compare_baseline({"modes": {}}, {"placeholder": True})
+        assert lines and "placeholder" in lines[0]
+
+    def test_write_baseline_is_compact(self):
+        payload = baseline_payload({
+            "version": "2.0",
+            "backend_used": "local",
+            "fallback": False,
+            "modes": {
+                "hybrid": {
+                    "hit_at_5": 0.8,
+                    "mrr": 0.7,
+                    "hit_at_1": 0.5,
+                    "recall_at_10": 0.9,
+                    "ndcg_at_10": 0.6,
+                    "by_category": {},
+                }
+            },
+        })
+        assert payload["placeholder"] is False
+        assert set(payload["modes"]["hybrid"]) == {
+            "hit_at_5", "mrr", "hit_at_1", "recall_at_10", "ndcg_at_10",
+        }
+
+
+class TestSchemaValidation:
+    def test_validate_rejects_small_set(self):
+        errors = validate_golden_set({"draft": True, "version": "2.0", "questions": []})
+        assert any("100" in err for err in errors)
+
+    def test_shipped_candidates_are_marked_needs_review(self):
+        path = DEFAULT_GOLDEN_PATH.with_name("golden_set_candidates.json")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        assert payload["needs_review"] is True
+        assert payload["questions"]
+        for entry in payload["questions"]:
+            assert entry["needs_review"] is True
+            assert "relevant" not in entry
+
+
+class TestBackendRecording:
+    def test_fallback_flag_when_nvidia_request_returns_384(self, db, monkeypatch):
+        upsert_documents(db, [_doc(doc_key="runbook.md", content="relay reconnect runbook")])
+        summary = run_golden(
+            db,
+            [_entry("relay reconnect", [{"source": "docs", "doc_key_pattern": "runbook"}])],
+            query_embedder=lambda text: _unit_vector(0),
+            backend_requested="nvidia",
+            backend_used="local",
+            fallback=True,
+        )
+        assert summary["fallback"] is True
+        assert summary["backend_used"] == "local"
+        assert summary["backend_requested"] == "nvidia"

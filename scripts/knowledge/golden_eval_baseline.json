@@ -1,0 +1,6 @@
+{
+  "placeholder": true,
+  "version": "2.0",
+  "note": "Write after the first live VPS run. Do not enable radon-knowledge-eval.timer until this file is replaced:\n  /home/radon/radon/.venv/bin/python /home/radon/radon/scripts/knowledge/eval_golden.py --mode all --write-baseline /home/radon/radon/scripts/knowledge/golden_eval_baseline.json",
+  "modes": {}
+}

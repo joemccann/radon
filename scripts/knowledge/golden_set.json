@@ -1,163 +1,1622 @@
 {
   "draft": true,
-  "note": "DRAFT golden set, machine-drafted from corpus recon on 2026-07-18 — the operator should curate it. Assumed doc_key conventions (verify once connectors land): journal = trade_id ('TICKER|date|structure|id' for rich rows), evals = report filename stem, docs = repo-relative markdown path, newsfeed = post id slug, incidents = service name. doc_key_pattern is a regex applied with re.search. Replace or add questions from real operator usage; Phase 2 gate is overall hit@5 >= 0.8 against the curated (non-draft) set.",
+  "version": "2.0",
+  "note": "DRAFT golden set v2 (2026-09-27). Machine-expanded from repo-tracked docs/ and tasks/lessons.md plus the 2026-07-18 corpus recon labels for journal/evals/newsfeed/incidents that the live DB already contains. Keep draft:true until a human reviews it. Newsfeed/journal questions without a known Turso doc_key live in golden_set_candidates.json.",
   "questions": [
     {
-      "question": "What was my thesis on the ALAB LEAP calls?",
-      "expected": [
-        {"source": "journal", "doc_key_pattern": "ALAB"}
-      ]
-    },
-    {
-      "question": "Why did I put on the TeraWulf WULF LEAP position?",
-      "expected": [
-        {"source": "journal", "doc_key_pattern": "WULF"},
-        {"source": "evals", "doc_key_pattern": "wulf-leap-trade"}
-      ]
-    },
-    {
-      "question": "What was the rationale for the EWY risk reversal?",
-      "expected": [
-        {"source": "journal", "doc_key_pattern": "EWY"}
-      ]
-    },
-    {
-      "question": "What did the HIMS LEAP IV mispricing evaluation conclude?",
-      "expected": [
-        {"source": "evals", "doc_key_pattern": "hims-evaluation"}
-      ]
-    },
-    {
-      "question": "What dark pool signal backed the GOOG bull call spread?",
-      "expected": [
-        {"source": "journal", "doc_key_pattern": "GOOG"},
-        {"source": "evals", "doc_key_pattern": "goog-evaluation"}
-      ]
-    },
-    {
-      "question": "How was the IWM bullish risk reversal structured and sized?",
-      "expected": [
-        {"source": "evals", "doc_key_pattern": "iwm-risk-reversal"},
-        {"source": "journal", "doc_key_pattern": "IWM"}
-      ]
-    },
-    {
-      "question": "What was the setup on the TSLA dark pool accumulation trade?",
-      "expected": [
-        {"source": "journal", "doc_key_pattern": "TSLA"},
-        {"source": "evals", "doc_key_pattern": "tsla-evaluation"}
-      ]
-    },
-    {
-      "question": "What is the max loss on a risk reversal and which structures count as defined-risk?",
-      "expected": [
-        {"source": "docs", "doc_key_pattern": "options-structures"}
-      ]
-    },
-    {
-      "question": "What fixed the 2026-07-02 destroy-storm database outage?",
-      "expected": [
-        {"source": "docs", "doc_key_pattern": "lessons"}
-      ],
-      "scopes": ["ops"]
-    },
-    {
-      "question": "How does IB Gateway recover from a stacked 2FA push lock?",
-      "expected": [
-        {"source": "docs", "doc_key_pattern": "ib-gateway-recovery"}
-      ]
-    },
-    {
-      "question": "What happens when the WS relay stops receiving ticks?",
-      "expected": [
-        {"source": "docs", "doc_key_pattern": "ib-connection-troubleshooting"},
-        {"source": "docs", "doc_key_pattern": "lessons"}
-      ]
-    },
-    {
-      "question": "Which services and schedulers run on the Hetzner VPS and how are they deployed?",
-      "expected": [
-        {"source": "docs", "doc_key_pattern": "cloud-services"}
-      ]
-    },
-    {
-      "question": "What is the runbook for running IB Gateway in Docker?",
-      "expected": [
-        {"source": "docs", "doc_key_pattern": "ib-gateway-docker"}
-      ]
-    },
-    {
-      "question": "What does the journal gap SLI monitor and what state is it in?",
-      "expected": [
-        {"source": "incidents", "doc_key_pattern": "journal-gap-sli"}
-      ],
-      "scopes": ["ops"]
-    },
-    {
-      "question": "Is the newsfeed scraper healthy and when did it last run?",
-      "expected": [
-        {"source": "incidents", "doc_key_pattern": "newsfeed-scraper"}
-      ],
-      "scopes": ["ops"]
-    },
-    {
-      "question": "What did the Turso read-stall RCA conclude?",
-      "expected": [
-        {"source": "docs", "doc_key_pattern": "lessons"}
-      ]
-    },
-    {
-      "question": "How does the GARCH convergence strategy find IV mispricings?",
-      "expected": [
-        {"source": "docs", "doc_key_pattern": "strategy-garch-convergence"},
-        {"source": "evals", "doc_key_pattern": "garch-convergence"}
-      ]
-    },
-    {
-      "question": "What is the cross-asset volatility credit gap (VCG) methodology?",
-      "expected": [
-        {"source": "docs", "doc_key_pattern": "volatility_credit_gap"},
-        {"source": "evals", "doc_key_pattern": "vcg-scan"}
-      ]
-    },
-    {
-      "question": "How is the CRI crash risk indicator computed and interpreted?",
-      "expected": [
-        {"source": "docs", "doc_key_pattern": "strategies"},
-        {"source": "evals", "doc_key_pattern": "cri-scan"}
-      ]
-    },
-    {
-      "question": "What has the newsfeed said about a gamma flip?",
-      "expected": [
-        {"source": "newsfeed", "doc_key_pattern": "cCVYN9efMl|ck27lPBeKX|c5lXmiZV4A"}
-      ],
-      "scopes": ["research"]
-    },
-    {
-      "question": "What is the latest newsfeed take on momentum exposure and the MoMo trendline?",
-      "expected": [
-        {"source": "newsfeed", "doc_key_pattern": "cRThqRM_Kk|czQf8ahQ0R"}
-      ],
-      "scopes": ["research"]
-    },
-    {
-      "question": "What has the newsfeed covered on buybacks and de-equitization?",
-      "expected": [
-        {"source": "newsfeed", "doc_key_pattern": "cHzM__4N8i|cT0wHmumtl"}
-      ],
-      "scopes": ["research"]
-    },
-    {
+      "id": "q-docs-001-evaluation",
       "question": "What are the seven milestones of the trade evaluation pipeline?",
-      "expected": [
-        {"source": "docs", "doc_key_pattern": "evaluation"}
+      "category": "numeric",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/evaluation\\.md$",
+          "grade": 3
+        },
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/reports\\.md$",
+          "grade": 1
+        }
       ]
     },
     {
+      "id": "q-docs-002-evaluation",
+      "question": "How is intraday dark pool volume interpolated before the close?",
+      "category": "numeric",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/evaluation\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-003-evaluation",
+      "question": "What P/C ratio bands count as bearish in signal interpretation?",
+      "category": "numeric",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/evaluation\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-004-options-structures",
+      "question": "What is the max loss on a risk reversal and which structures count as defined-risk?",
+      "category": "numeric",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/options-structures\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-005-options-structures",
+      "question": "How does the order-entry guard decide to allow or block a short call?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/options-structures\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-006-options-structures",
+      "question": "What are the three documented guard gaps for asymmetric short-put structures?",
+      "category": "numeric",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/options-structures\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-007-strategies",
+      "question": "How is the CRI crash risk indicator computed and interpreted?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/strategies\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-008-strategies",
+      "question": "What is Strategy 1 dark pool flow detection looking for?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/strategies\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-009-strategies",
+      "question": "How does the LEAP IV mispricing scan choose candidates?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/strategies\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-010-strategy-garch-convergence",
+      "question": "How does the GARCH convergence strategy find IV mispricings?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/strategy-garch-convergence\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-011-cross_asset_volatility_credit_ga",
+      "question": "What is the cross-asset volatility credit gap (VCG) methodology?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/cross_asset_volatility_credit_gap_spec_(VCG)\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-012-unusual_whales_api",
       "question": "What dark pool and flow data does the Unusual Whales API provide?",
-      "expected": [
-        {"source": "docs", "doc_key_pattern": "unusual_whales_api"}
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/unusual_whales_api\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-013-unusual_whales_api",
+      "question": "Which UW endpoints map to Radon fetch scripts?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/unusual_whales_api\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-014-cloud-services",
+      "question": "Which services and schedulers run on the Hetzner VPS and how are they deployed?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/cloud-services\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-015-cloud-services",
+      "question": "How does the production deploy promote an immutable cloud runner?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/cloud-services\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-016-cloud-services",
+      "question": "Where is the trades canonical store and how do journal and orders derive from it?",
+      "category": "cross_source",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/cloud-services\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-017-gateway-recovery",
+      "question": "How does IB Gateway recover from a stacked 2FA push lock?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/ib[-]gateway-recovery\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-018-gateway-docker",
+      "question": "What is the runbook for running IB Gateway in Docker?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/ib[-]gateway-docker\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-019-ib-connection-troubleshooting",
+      "question": "What happens when the WS relay stops receiving ticks?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/ib-connection-troubleshooting\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-020-gateway-healthcheck-hardening",
+      "question": "How is the IB Gateway healthcheck hardened against false ready?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/ib[-]gateway-healthcheck-hardening\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-021-ibc-remote-access",
+      "question": "How is IBC remote access configured for the Gateway?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/ibc-remote-access\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-022-ib_tws_api",
+      "question": "What TWS API request patterns does Radon use?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/ib_tws_api\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-023-ib-flex-transfers-runbook",
+      "question": "How are IB Flex cash transfers pulled and verified?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/ib-flex-transfers-runbook\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-024-flex-sftp-setup",
+      "question": "How is Flex sFTP delivery set up?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/flex-sftp-setup\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-025-flex-delivery-architecture",
+      "question": "What is the Flex delivery architecture and claim status machine?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/flex-delivery-architecture\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-026-flex-sftp-cutover",
+      "question": "What is the Flex sFTP cutover procedure?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/flex-sftp-cutover\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-027-operations",
+      "question": "Where do production secrets live and what is the /etc/radon/env contract?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/operations\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-028-operations",
+      "question": "How do isolated health and watchdog buckets differ?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/operations\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-029-incident-runbook",
+      "question": "What is the incident runbook entry for a Turso destroy-storm?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/incident-runbook\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-030-incident-runbook",
+      "question": "How should a knowledge-ingest sqlite busy failure be recovered?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/incident-runbook\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-031-knowledge-embeddings",
+      "question": "What are the two knowledge embedding columns and when does nvidia fall back to local bge?",
+      "category": "numeric",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/knowledge-embeddings\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-032-knowledge-embeddings",
+      "question": "How is v2 coverage readiness cached and what happens while any embedding_v2 is NULL?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/knowledge-embeddings\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-033-brand-identity",
+      "question": "What are the Radon brand canvas, panel, and signal.core tokens?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/brand-identity\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-034-reports",
+      "question": "What is the HTML trade-spec report template and P&L card spec?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/reports\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-035-factory",
+      "question": "How does the Foreman software factory open draft PRs?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/factory\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-036-grok-page-responder",
+      "question": "How does the VPS P1 auto-fix Grok page responder work?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/grok-page-responder\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-037-equibles-api",
+      "question": "What Equibles endpoints feed 13F, ATS, COT, filings, and short crowding?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/equibles-api\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-038-ai-infrastructure-operations",
+      "question": "How is the AI infrastructure daily collection scheduled?",
+      "category": "recent",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/ai-infrastructure-operations\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-039-ai-infrastructure-plan",
+      "question": "What is the AI infrastructure measurement plan?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/ai-infrastructure-plan\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-040-ai-infrastructure-contract",
+      "question": "What is the AI infrastructure source contract?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/ai-infrastructure-contract\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-041-ai-infrastructure-verification",
+      "question": "How is AI infrastructure collection verified?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/ai-infrastructure-verification\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-042-ai-boom-leading-indicators",
+      "question": "Which leading indicators track the AI boom?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/ai-boom-leading-indicators\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-043-spof-host-split",
+      "question": "How is the app/broker host split supposed to remove the Gateway SPOF?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/spof-host-split\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-044-monorepo-cloud-migration",
+      "question": "What is the monorepo cloud cutover contract?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/monorepo-cloud-migration\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-045-monorepo-legibility-plan",
+      "question": "What does the thin-index docs contract enforce?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/monorepo-legibility-plan\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-046-demo-environment",
+      "question": "How is the demo environment isolated from the operator Turso?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/demo-environment\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-047-dropbox-research",
+      "question": "How does private Dropbox research get ingested?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/dropbox-research\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-048-forecasting-deploy",
+      "question": "How is the Chronos-2 nightly forecast pipeline deployed?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/forecasting-deploy\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-049-gpu-host-deployment",
+      "question": "What is required to deploy on the GPU host?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/gpu-host-deployment\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-050-subscription-tokens",
+      "question": "How does radon-subscription-tokens keep agent CLI grants alive?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/subscription-tokens\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-051-oauth-subscription-auth",
+      "question": "How does OAuth subscription auth work for agent CLIs?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/oauth-subscription-auth\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-052-tradingview-integration",
+      "question": "How do TradingView webhook alerts get drained into Pushover?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/tradingview-integration\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-053-chart-system",
+      "question": "How does the Radon chart system render regime panes?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/chart-system\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-054-bounce-setup",
+      "question": "What is the bounce-setup indicator looking for?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/bounce-setup\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-055-short-locate-borrow",
+      "question": "How is short-locate borrow availability recorded?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/short-locate-borrow\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-056-options-flow-verification",
+      "question": "How is options flow verification performed?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/options-flow-verification\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-057-performance-reconstruction",
+      "question": "How is performance TWR reconstructed from Flex activity?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/performance-reconstruction\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-058-cash-flow-sync-overhaul",
+      "question": "What changed in the cash-flow sync overhaul?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/cash-flow-sync-overhaul\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-059-external-services",
+      "question": "Which external services does Radon depend on?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/external-services\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-060-security-audit-playbook",
+      "question": "What is the security audit playbook?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/security-audit-playbook\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-061-security-approved-tools",
+      "question": "Which tools are approved for security weekend loops?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/security-approved-tools\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-062-scripts-reference",
+      "question": "Where is the operator scripts reference?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/scripts-reference\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-063-menthorq-prompts",
+      "question": "What MenthorQ prompts does Radon send?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/menthorq-prompts\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-064-dead-man-comment-format",
+      "question": "What is the dead-man comment format for wrappers?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/dead-man-comment-format\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-065-implement",
+      "question": "What does the implement doc specify?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/implement\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-066-plans",
+      "question": "Where are active implementation plans listed?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/plans\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-067-mobile-newsfeed-layout",
+      "question": "How is the mobile newsfeed layout specified?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/mobile-newsfeed-layout\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-068-design-evals",
+      "question": "What are the design evals for the workstation UI?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/design-evals\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-069-focus-highlight-audit",
+      "question": "What did the focus-highlight audit conclude?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/focus-highlight-audit\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-070-performance-audit-findings",
+      "question": "What did the performance audit find?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/performance-audit-findings\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-071-performance-refactor-spec",
+      "question": "What is the performance refactor spec?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/performance-refactor-spec\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-072-security-report-template",
+      "question": "What is the security report template?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/security-report-template\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-073-joe-mccann-social-voice",
+      "question": "What is the social-voice spec for Joe McCann posts?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/joe-mccann-social-voice\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-074-prompt",
+      "question": "What is the durable operator prompt contract?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/prompt\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-075-status",
+      "question": "What does docs/status.md record for NO_TRADE outcomes?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/status\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-076-README",
+      "question": "What does the docs index list as owner documents?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/README\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-077-flex-sftp-cutover-review",
+      "question": "What did the Flex sFTP cutover review conclude?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/flex-sftp-cutover-review\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-docs-078-ib-flex-transfers-runbook",
+      "question": "Which Flex query id carries Equity Summary in Base?",
+      "category": "numeric",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/ib-flex-transfers-runbook\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-ops-lessons-001",
+      "question": "What fixed the 2026-07-02 destroy-storm database outage?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-002",
+      "question": "What did the Turso read-stall RCA conclude?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-003",
+      "question": "Why must Turso Hrana I/O be paginated and chunked?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-004",
+      "question": "Why can two 00NN_ migration files silently skip the later table?",
+      "category": "numeric",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-005",
+      "question": "Why are mixed-age combos not treated as same-day for Today P&L?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-006",
+      "question": "Why must Next.js be treated as an LLM consumer in app-runtime binds?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-007",
+      "question": "Why must chain strike identity never ellipsis?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-008",
+      "question": "What happens when Grok 4.6 P&L turns omit tools or starve max_tokens?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-009",
+      "question": "Why can a 130k-row Turso history not be the GET path for /regime/llm?",
+      "category": "numeric",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-010",
+      "question": "Why is a scoring walk not a complete trading day in discover flow?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-011",
+      "question": "Why is IB error 202 cancel confirmation rather than a replace abort?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-012",
+      "question": "Why must defined-risk combinations use whole-structure coverage?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-013",
+      "question": "Why is Yahoo last resort and never the scheduled primary source?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-014",
+      "question": "Why is Flex 1025 a token lockout that Monday retry extends?",
+      "category": "numeric",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-015",
+      "question": "Why do container newsfeed units need the host Playwright revision?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-016",
+      "question": "Why must host-local prune authority never treat another host's evals as vanished?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-017",
+      "question": "Why must oneshot health heartbeats stay best-effort?",
+      "category": "recent",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-018",
+      "question": "Why must recovery controls stay discoverable after a browser restart?",
+      "category": "recent",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-019",
+      "question": "Why is a weekly error row one cycle and not a daily re-fail?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-020",
+      "question": "Why is API health not authenticated browser relay health?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-021",
+      "question": "Why must EXT fills keep orders-sync and fill-monitor past 16:00 ET?",
+      "category": "numeric",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-ops-lessons-022",
+      "question": "Why is overnight TIF not EXT outsideRth?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-journal-alab-leap",
+      "question": "What was my thesis on the ALAB LEAP calls?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "journal",
+          "doc_key_pattern": "^ALAB\\|",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-journal-wulf-leap",
+      "question": "Why did I put on the TeraWulf WULF LEAP position?",
+      "category": "cross_source",
+      "relevant": [
+        {
+          "source": "journal",
+          "doc_key_pattern": "^WULF\\|",
+          "grade": 3
+        },
+        {
+          "source": "evals",
+          "doc_key_pattern": "wulf-leap-trade",
+          "grade": 2
+        }
+      ]
+    },
+    {
+      "id": "q-journal-ewy-rr",
+      "question": "What was the rationale for the EWY risk reversal?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "journal",
+          "doc_key_pattern": "^EWY\\|",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-journal-goog-dp",
+      "question": "What dark pool signal backed the GOOG bull call spread?",
+      "category": "cross_source",
+      "relevant": [
+        {
+          "source": "journal",
+          "doc_key_pattern": "^GOOG\\|",
+          "grade": 3
+        },
+        {
+          "source": "evals",
+          "doc_key_pattern": "^goog-evaluation",
+          "grade": 2
+        }
+      ]
+    },
+    {
+      "id": "q-journal-iwm-rr",
+      "question": "How was the IWM bullish risk reversal structured and sized?",
+      "category": "numeric",
+      "relevant": [
+        {
+          "source": "evals",
+          "doc_key_pattern": "iwm-risk-reversal",
+          "grade": 3
+        },
+        {
+          "source": "journal",
+          "doc_key_pattern": "^IWM\\|",
+          "grade": 2
+        }
+      ]
+    },
+    {
+      "id": "q-journal-tsla-dp",
+      "question": "What was the setup on the TSLA dark pool accumulation trade?",
+      "category": "cross_source",
+      "relevant": [
+        {
+          "source": "journal",
+          "doc_key_pattern": "^TSLA\\|",
+          "grade": 3
+        },
+        {
+          "source": "evals",
+          "doc_key_pattern": "^tsla-evaluation",
+          "grade": 2
+        }
+      ]
+    },
+    {
+      "id": "q-evals-hims",
+      "question": "What did the HIMS LEAP IV mispricing evaluation conclude?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "evals",
+          "doc_key_pattern": "^hims-evaluation",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-evals-garch",
+      "question": "Which eval report records a GARCH convergence scan?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "evals",
+          "doc_key_pattern": "garch-convergence",
+          "grade": 3
+        },
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/strategy-garch-convergence\\.md$",
+          "grade": 2
+        }
+      ]
+    },
+    {
+      "id": "q-evals-vcg",
+      "question": "Which eval report records a VCG scan?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "evals",
+          "doc_key_pattern": "vcg-scan",
+          "grade": 3
+        },
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/cross_asset_volatility_credit_gap_spec_\\(VCG\\)\\.md$",
+          "grade": 2
+        }
+      ]
+    },
+    {
+      "id": "q-evals-cri",
+      "question": "Which eval report records a CRI scan?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "evals",
+          "doc_key_pattern": "cri-scan",
+          "grade": 3
+        },
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/strategies\\.md$",
+          "grade": 2
+        }
+      ]
+    },
+    {
+      "id": "q-news-gamma-flip",
+      "question": "What has the newsfeed said about a gamma flip?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "newsfeed",
+          "doc_key_pattern": "cCVYN9efMl|ck27lPBeKX|c5lXmiZV4A",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "research"
+      ]
+    },
+    {
+      "id": "q-news-buybacks",
+      "question": "What has the newsfeed covered on buybacks and de-equitization?",
+      "category": "paraphrase",
+      "relevant": [
+        {
+          "source": "newsfeed",
+          "doc_key_pattern": "cHzM__4N8i|cT0wHmumtl",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "research"
+      ]
+    },
+    {
+      "id": "q-news-momo",
+      "question": "What has the newsfeed covered on momentum exposure and the MoMo trendline?",
+      "category": "recent",
+      "relevant": [
+        {
+          "source": "newsfeed",
+          "doc_key_pattern": "cRThqRM_Kk|czQf8ahQ0R",
+          "grade": 2
+        }
+      ],
+      "scopes": [
+        "research"
+      ],
+      "note": "Do not treat this as latest. The pinned post ids are historical examples from the 2026-07 draft set; recurate after a live review."
+    },
+    {
+      "id": "q-inc-journal-gap",
+      "question": "What does the journal gap SLI monitor and what state is it in?",
+      "category": "exact_term",
+      "relevant": [
+        {
+          "source": "incidents",
+          "doc_key_pattern": "^journal-gap-sli$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-inc-newsfeed-scraper",
+      "question": "Is the newsfeed scraper healthy and when did it last run?",
+      "category": "recent",
+      "relevant": [
+        {
+          "source": "incidents",
+          "doc_key_pattern": "^newsfeed-scraper$",
+          "grade": 3
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-x-eval-lessons-prune",
+      "question": "Which ops lesson covers host-local prune authority for evals and journal trade_log keys?",
+      "category": "cross_source",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^tasks/lessons\\.md$",
+          "grade": 3
+        },
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/incident-runbook\\.md$",
+          "grade": 2
+        }
+      ],
+      "scopes": [
+        "ops"
+      ]
+    },
+    {
+      "id": "q-x-uw-evaluation",
+      "question": "Where are UW dark-pool endpoints documented relative to the evaluation pipeline's flow milestone?",
+      "category": "cross_source",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/unusual_whales_api\\.md$",
+          "grade": 3
+        },
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/evaluation\\.md$",
+          "grade": 2
+        }
+      ]
+    },
+    {
+      "id": "q-x-rr-structures-strategies",
+      "question": "Where is risk-reversal structure and strategy documented together?",
+      "category": "cross_source",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/options-structures\\.md$",
+          "grade": 3
+        },
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/strategies\\.md$",
+          "grade": 2
+        }
+      ]
+    },
+    {
+      "id": "q-num-half-kelly",
+      "question": "What Kelly fraction is the default and what is the hard bankroll cap per position?",
+      "category": "numeric",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/evaluation\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-num-embed-dims",
+      "question": "What embedding dimensions do bge-small and nemotron-3-embed-1b use?",
+      "category": "numeric",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/knowledge-embeddings\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-num-four-gates",
+      "question": "What are the four sequential evaluation gates and which one is disabled?",
+      "category": "numeric",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/evaluation\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-recent-ai-cycle",
+      "question": "When does the daily AI infrastructure collection timer fire?",
+      "category": "recent",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/ai-infrastructure-operations\\.md$",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "id": "q-recent-forecast",
+      "question": "When does the nightly Chronos-2 forecast pipeline run?",
+      "category": "recent",
+      "relevant": [
+        {
+          "source": "docs",
+          "doc_key_pattern": "^docs/forecasting-deploy\\.md$",
+          "grade": 3
+        }
       ]
     }
   ]
