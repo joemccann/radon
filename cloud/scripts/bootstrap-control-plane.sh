@@ -612,26 +612,43 @@ if [[ "$bundle_is_current" == "1" ]] && \
 fi
 
 
+# The manifest and readiness marker live in radon-owned /var/lib/radon, where
+# radon can swap a temp name for a link between a by-name install, chmod and
+# mv (DS-2026-09-27-01). Create, write, own and mode through one O_NOFOLLOW
+# fd, then rename relative to a pinned directory fd.
 atomic_install() {
   local source="$1"
   local target="$2"
   local mode="$3"
-  local target_dir temporary
-  local -a owner_args=()
-  target_dir="$(dirname "$target")"
-  mkdir -p "$target_dir"
-  temporary="$(mktemp "$target_dir/.radon-bootstrap.$(basename "$target").XXXXXX")"
-  if [[ "$TEST_MODE" != "1" ]]; then
-    owner_args=(-o root -g root)
-  fi
-  if ! install -m "$mode" "${owner_args[@]}" "$source" "$temporary"; then
-    rm -f -- "$temporary"
-    return 1
-  fi
-  if ! mv -f -- "$temporary" "$target"; then
-    rm -f -- "$temporary"
-    return 1
-  fi
+  mkdir -p "$(dirname "$target")"
+  "$PYTHON_BIN" - "$source" "$target" "$mode" "$TEST_MODE" <<'PY_ATOMIC_INSTALL'
+import os, secrets, sys
+source, target, mode, test = sys.argv[1], sys.argv[2], int(sys.argv[3], 8), sys.argv[4] == "1"
+parent, name = os.path.split(target)
+with open(source, "rb") as handle:
+    data = handle.read()
+dfd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    tmp = f".radon-bootstrap.{name}.{secrets.token_hex(8)}"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dfd)
+    try:
+        view = memoryview(data)
+        while view:
+            view = view[os.write(fd, view):]
+        if not test:
+            os.fchown(fd, 0, 0)
+        os.fchmod(fd, mode)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    try:
+        os.rename(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd)
+    except OSError:
+        os.unlink(tmp, dir_fd=dfd)
+        raise
+finally:
+    os.close(dfd)
+PY_ATOMIC_INSTALL
 }
 
 for target_path in "${INSTALLED_TARGETS[@]}"; do

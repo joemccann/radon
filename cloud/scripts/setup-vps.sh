@@ -956,26 +956,22 @@ create_etc_radon_dir() {
     if ! getent group radon-media &>/dev/null; then
       groupadd --system radon-media
     fi
-    # chmod follows links: act on "." once cwd is pinned to the real media/.
-    local here
-    here="$(pwd)"
-    enter_real_dir "$media" || { cd -- "$here"; return 1; }
-    chown --no-dereference radon:radon-media .
-    chmod 2750 .
-    cd -- "$here"
+    chown --no-dereference radon:radon-media "$media"
+    chmod_dir_nofollow "$media" 2750
   fi
 }
 
-# Make $1 the cwd only if it is still the real directory at that path, so
-# root's later operations on "." cannot follow a link swapped in after a
-# check. getcwd reports the directory actually entered, not the path.
-enter_real_dir() {
-  local dir="$1" expected
-  expected="$(cd -P -- "${dir%/*}" && pwd -P)/${dir##*/}" || return 1
-  if ! cd -P -- "$dir" 2>/dev/null || [[ "$(pwd -P)" != "$expected" ]]; then
-    log_error "Refusing ${dir}: not a real directory (moved or replaced by a link)"
-    return 1
-  fi
+# fchmod through an O_NOFOLLOW fd: a by-name chmod on an entry in a
+# radon-owned directory follows whatever link radon swapped in.
+chmod_dir_nofollow() {
+  "${RADON_SYSTEM_PYTHON:-/usr/bin/python3.13}" - "$1" "$2" <<'PY_CHMOD_DIR'
+import os, sys
+fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    os.fchmod(fd, int(sys.argv[2], 8))
+finally:
+    os.close(fd)
+PY_CHMOD_DIR
 }
 
 # DS-2026-09-25-06: give caddy media without group radon (env is 0640 root:radon).
@@ -989,40 +985,41 @@ grant_caddy_media_access() {
   local media="${RADON_MEDIA_DIR:-${parent}/media}"
   local env_file="${RADON_CANONICAL_ENV_FILE:-${ENV_FILE:-/etc/radon/env}}"
   local need_restart=0
-  local groups="" here=""
+  local groups=""
   GRANT_CADDY_NEEDS_RESTART=0
 
   if ! getent group radon-media >/dev/null 2>&1; then
     groupadd --system radon-media
   fi
 
+  # radon owns the parent and media/, so it can swap any name under media
+  # between a check and root's use of it (DS-2026-09-27-01). ACLs inside
+  # media are set as radon, the owner; root only acts on media itself
+  # through an O_NOFOLLOW fd (chown --no-dereference never follows).
+  local -a as_owner=()
+  if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" != "1" ]]; then
+    as_owner=(setpriv --reuid=radon --regid=radon --clear-groups --)
+  fi
   if [[ -d "$media" && ! -L "$media" ]]; then
-    # media/ sits in radon-owned /var/lib/radon, so radon can swap in a link
-    # after the check above. Root acts only on "." once cwd is pinned to the
-    # real directory; the recursive walks run as radon, which owns the tree,
-    # so a link swapped in mid-walk grants nothing radon could not already.
-    here="$(pwd)"
-    enter_real_dir "$media" || { cd -- "$here"; return 1; }
     if command -v setfacl >/dev/null 2>&1; then
       if id caddy >/dev/null 2>&1; then
         setfacl -m u:caddy:--x "$parent"
-        runuser -u radon -- setfacl -R -P -m u:caddy:r-X .
+        "${as_owner[@]}" setfacl -R -P -m u:caddy:r-X "$media"
       fi
       setfacl -m g:radon-media:--x "$parent"
-      setfacl -m g:radon-media:r-x .
-      setfacl -d -m g:radon-media:r-X .
-      runuser -u radon -- setfacl -R -P -m g:radon-media:r-X .
+      "${as_owner[@]}" setfacl -m g:radon-media:r-x "$media"
+      "${as_owner[@]}" setfacl -d -m g:radon-media:r-X "$media"
+      "${as_owner[@]}" setfacl -R -P -m g:radon-media:r-X "$media"
     else
       chmod 0711 "$parent"
-      chmod 0755 .
+      chmod_dir_nofollow "$media" 0755
     fi
     if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" != "1" ]]; then
-      chown --no-dereference radon:radon-media .
+      chown --no-dereference radon:radon-media "$media"
       if command -v setfacl >/dev/null 2>&1; then
-        chmod 2750 .
+        chmod_dir_nofollow "$media" 2750
       fi
     fi
-    cd -- "$here"
   fi
 
   if id caddy >/dev/null 2>&1; then

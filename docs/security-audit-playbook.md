@@ -169,10 +169,20 @@ line here whenever you ship a security fix.**
   at the final mode). `/etc/radon` is root-owned (`root:radon 1770`), links under
   `/home/radon/.ssh` and at `/var/lib/radon/media` are refused,
   a one-shot `-L` check never guards a later path-based `chmod`/`setfacl`
-  (root acts on media only as `.` after `enter_real_dir` pins the cwd, and
-  recursive walks of a radon-owned tree run as `radon`), and the Docker,
+  (root changes the media mode only through `chmod_dir_nofollow`, and every
+  ACL change inside media, including the physical `-R -P` walks, runs as
+  `radon`), and the Docker,
   NodeSource, and Caddy apt keys are fingerprint-pinned. The canonical env file is 0640 root:radon
   (group radon reads; the service account cannot rewrite it).
+  Invariant: root never acts BY NAME inside a radon-owned directory
+  (`/var/lib/radon` and everything under it). A check-then-use pair there is a
+  race radon wins by renaming an entry. Root writes, chmods and renames there
+  through an `O_NOFOLLOW` fd with `dir_fd` renames (`install_state_file`,
+  bootstrap `atomic_install`, `chmod_dir_nofollow`); ACL changes inside
+  `media/` run as radon, the owner. Pinned by
+  `cloud/tests/test_refresh_control_plane.py::test_marker_publish_never_acts_on_a_radon_swappable_name`
+  and `cloud/tests/test_caddy_media_group.py::test_grant_never_follows_a_media_dir_swapped_mid_grant`
+  / `::test_grant_does_not_follow_media_swapped_for_a_link_after_the_check`.
   Invariant: `radon` is NOT in the docker group (Docker socket access is
   root-equivalent). Gateway container operations go through the root-owned
   `radon-docker-gw` shim; `setup-vps.sh` strips any legacy membership and

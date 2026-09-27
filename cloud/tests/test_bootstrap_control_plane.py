@@ -668,3 +668,17 @@ def test_a_cloud_root_another_account_can_write_is_refused_before_any_write(
     assert not _manifest_path(sandbox.rootfs).exists()
     for artifact in ARTIFACTS:
         assert not _installed_path(sandbox.rootfs, artifact).exists()
+
+
+def test_atomic_install_writes_through_one_nofollow_fd() -> None:
+    """DS-2026-09-27-01: the manifest and ready marker land in radon-owned
+    /var/lib/radon; a by-name install/chmod/mv of a temp there follows a
+    radon-swapped link."""
+    text = (Path(__file__).resolve().parents[1] / "scripts" / "bootstrap-control-plane.sh").read_text(
+        encoding="utf-8"
+    )
+    start = text.index("atomic_install() {")
+    body = text[start : text.index("\n}\n", start)]
+    assert "O_NOFOLLOW" in body and "dir_fd=dfd" in body
+    for by_name in ("install -m", "mv -f", "chmod "):
+        assert by_name not in body, by_name
