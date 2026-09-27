@@ -70,7 +70,11 @@ def _clone(tmp_path: Path, wrapper: Path) -> Path:
     (repo / "scripts" / wrapper.name).chmod(0o755)
     for helper in ("weekend_notify.py", "weekend_redact.py"):
         (repo / "scripts" / helper).write_text("# stub\n", encoding="utf-8")
-    for helper in ("security_claude_ladder.py", "security_claude_ladder.sh"):
+    for helper in (
+        "security_claude_ladder.py",
+        "security_claude_ladder.sh",
+        "nvidia_budget.py",
+    ):
         src = REPO / "scripts" / helper
         if src.exists():
             shutil.copy2(src, repo / "scripts" / helper)
@@ -233,15 +237,13 @@ def _run(
 # loops. nvidia and cerebras still name one because the grok CLI resolves them
 # through a `[model."<key>"]` config block: the rung names that stable KEY and
 # scripts/agent_cli_bootstrap.sh resolves the live id behind it.
-# 2026-09-26: the documentation loop runs ONE rung, `fx:nvidia` -- Vercel fx
-# driving NVIDIA NIM directly, no grok host and no codex/grok/cerebras fallback.
-# The other three run the operator's order (2026-09-26): fx on NVIDIA, grok,
-# codex, fx on Cerebras. One table, read by every ladder test. A capped or
-# rejected entry may name a provider (every rung it owns) or a `provider:model`
-# rung, which is how the two fx rungs are told apart.
+# 2026-09-27: all four fallback loops share fx:nvidia, grok, codex,
+# fx:cerebras. A capped or rejected entry may name a provider (every rung
+# it owns) or a `provider:model` rung, which is how the two fx rungs are
+# told apart.
 FALLBACK_PROVIDER_ORDER = {
     "ci-performance": ["fx", "grok", "codex", "fx"],
-    "documentation": ["fx"],
+    "documentation": ["fx", "grok", "codex", "fx"],
     "reliability": ["fx", "grok", "codex", "fx"],
     "testing": ["fx", "grok", "codex", "fx"],
 }
@@ -538,6 +540,8 @@ def _run_multi(
         "RADON_WEEKEND_GROK_BIN": str(bin_dir / "grok"),
         "RADON_WEEKEND_FX_BIN": str(bin_dir / "fx"),
         "RADON_WEEKEND_RETRY_PAUSE_SECS": "0",
+        "RADON_NVIDIA_BUDGET_PATH": str(tmp_path / "nvidia-budget.json"),
+        "RADON_NVIDIA_BUDGET_JITTER": "0",
     }
     if provider_ladder is not None:
         env["RADON_WEEKEND_PROVIDER_LADDER"] = provider_ladder

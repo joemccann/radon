@@ -108,6 +108,8 @@ def _run_phase_marker(
     """
     src = WRAPPER.read_text(encoding="utf-8")
     helpers = [_marker_constants(src)]
+    if "deliver_record_fresh_terminal() {" in src:
+        helpers.append(_extract_named_fn(src, "deliver_record_fresh_terminal"))
     if "phase_marker_in_slice() {" in src:
         helpers.append(_extract_named_fn(src, "phase_marker_in_slice"))
     helpers.append(_extract_named_fn(src, "phase_marker_present"))

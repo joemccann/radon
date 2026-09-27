@@ -26,9 +26,7 @@ _h = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = _h
 _spec.loader.exec_module(_h)
 
-# The shared ladder: fx:nvidia, grok, codex, fx:cerebras (2026-09-26).
-# documentation runs the single fx:nvidia rung; its wire and failure handling
-# live in test_fx_nvidia_rung.py.
+# The shared ladder: fx:nvidia, grok, codex, fx:cerebras (2026-09-27).
 FALLBACK_LOOPS = ["ci-performance", "reliability", "testing"]
 FALLBACK_LADDER = _h.FALLBACK_LADDER
 EXPECTED_PROVIDER_ORDER = _h.FALLBACK_PROVIDER_ORDER
@@ -259,10 +257,8 @@ class TestAPermanentRejectionCostsOneRung:
         assert providers(tried) == ["codex", "codex", "codex", "grok"], tried
 
 
-# documentation runs a single `fx:nvidia` rung, so it has no nvidia rung to
-# crash and nothing below one to fall back to. Its own case is below. The shared
-# ladder no longer names the grok-hosted nvidia rung by default (2026-09-26),
-# so these cases pin an operator ladder that does.
+# The shared ladder no longer names the grok-hosted nvidia rung by default
+# (2026-09-26), so these cases pin an operator ladder that does.
 NVIDIA_LADDER_LOOPS = FALLBACK_LOOPS
 NVIDIA_OVERRIDE = "codex nvidia:nvidia-latest grok"
 
@@ -377,7 +373,7 @@ class TestTheRealSerializationCrashCostsOneRung:
 
 
 class TestASingleRungLadderReportsACrashHonestly:
-    """documentation runs one rung (`fx:nvidia`), so there is nothing to walk to.
+    """A one-rung operator override still has nothing to walk to.
     Before the classifier a crash inside the CLI was a bare exit 1 with no cause;
     it must now be the same honest exhausted-ladder INCOMPLETE the wrapper posts
     for a cap, so the operator learns the rung died rather than reading silence."""
@@ -385,6 +381,7 @@ class TestASingleRungLadderReportsACrashHonestly:
     def test_the_only_rung_crashing_is_an_honest_incomplete(self, tmp_path):
         proc, tried, calls, _argv = _run_multi(
             tmp_path, "documentation", "audit",
+            provider_ladder="fx:nvidia",
             reject_providers=("fx",),
             reject_output=NVIDIA_INTERNAL_ERROR_OUTPUT,
         )
