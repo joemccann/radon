@@ -23,6 +23,8 @@
         "scripts/watchdog/pages.py",
         "scripts/deploy_notify.py",
         "config/com.radon.grok-page-responder.plist",
+        "config/com.radon.grok-fix-pickup.plist",
+        "scripts/grok_fix_pickup.py",
         "cloud/scripts/nextjs_db_watchdog.py",
         "cloud/services/radon-incident-watchdog.*",
         "cloud/services/radon-nextjs-db-watchdog.*"

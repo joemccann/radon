@@ -10,14 +10,15 @@
          merging a PR need the same permission, and that host runs an agent
          over untrusted page text. It commits to fix/<slug> locally; this job
          fetches those branches over ssh, pushes them and opens the PR with
-         the operator credential that already lives here. It never merges. -->
+         the operator credential that already lives here. It never merges.
+         The clone is a normal .git dir (not a weekend .gitdirs checkout).
+         Each fire fetches origin and hard-resets only main so pickup runs
+         current code; local fix/* branches survive. -->
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/env</string>
-        <string>python3.13</string>
-        <string>__PICKUP_REPO__/scripts/grok_fix_pickup.py</string>
-        <string>--repo</string>
-        <string>__PICKUP_REPO__</string>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=false; C=__PICKUP_REPO__; G="$C/.git"; page() { echo "[launchd] $(date -u +%FT%TZ) $1" &gt;&amp;2; E="$(dirname "$C")/.env"; U="$(sed -n 's/^PUSHOVER_USER=//p' "$E" 2&gt;/dev/null | head -n 1 | tr -d "\"'")"; K="$(sed -n 's/^PUSHOVER_TOKEN=//p' "$E" 2&gt;/dev/null | head -n 1 | tr -d "\"'")"; [ -n "$U" ] &amp;&amp; [ -n "$K" ] &amp;&amp; /usr/bin/curl -fsS -m 10 --form-string "token=$K" --form-string "user=$U" --form-string "title=radon grok-fix-pickup: pickup did not start" --form-string "message=$1" https://api.pushover.net/1/messages.json &gt;/dev/null 2&gt;&amp;1; return 0; }; { T="$(command -v timeout || command -v gtimeout || true)"; [ -n "$T" ] || { page "no timeout or gtimeout on PATH; install coreutils"; exit 78; }; rm -f "$G/index.lock" "$G/HEAD.lock"; find "$G" \( -path "$G/objects" -o -path "$G/worktrees" \) -prune -o -type f -name "*.lock" -mmin +10 -exec rm -f {} + 2&gt;/dev/null; F=1; for i in 1 2 3; do "$T" -k 15 180 git -C "$C" -c core.sshCommand="ssh -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4" fetch -q origin &amp;&amp; { F=0; break; }; [ "$i" = 3 ] || sleep "${RADON_LAUNCHD_FETCH_PAUSE_SECS:-30}"; done; [ "$F" = 0 ] &amp;&amp; git -C "$C" checkout -f -q main &amp;&amp; git -C "$C" reset --hard -q origin/main; } || { page "refresh of $C failed (fetch, checkout or reset); this cycle did not run"; exit 70; }; exec /usr/bin/env python3.13 __PICKUP_REPO__/scripts/grok_fix_pickup.py --repo __PICKUP_REPO__</string>
     </array>
 
     <key>WorkingDirectory</key>
