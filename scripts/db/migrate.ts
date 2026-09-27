@@ -96,6 +96,20 @@ function isAlreadyApplied(err: unknown): boolean {
   return message.includes("duplicate column name") || message.includes("already exists");
 }
 
+// Same directive as migrate.py. A manual file is the 0089 DiskANN drop
+// (~14 min). @libsql/client execute() autocommits one statement, so the
+// enabled path does not wrap the drop in a batch transaction. Boot and
+// a casual `bun run db:migrate` skip it unless RADON_MIGRATE_MANUAL=1.
+const MANUAL_MIGRATION_DIRECTIVE = "-- radon-migrate: manual";
+
+function isManualMigration(sql: string): boolean {
+  return sql.split("\n").some((line) => line.trim() === MANUAL_MIGRATION_DIRECTIVE);
+}
+
+function manualMigrationsEnabled(): boolean {
+  return (process.env.RADON_MIGRATE_MANUAL || "").trim() === "1";
+}
+
 async function main(): Promise<void> {
   const { url, authToken } = readEnv();
   const db = createClient({ url, authToken });
@@ -111,9 +125,25 @@ async function main(): Promise<void> {
   }
 
   console.log(`[migrate] applying ${pending.length} migration(s) → ${url}`);
+  let appliedCount = 0;
+  let deferred = false;
   for (const m of pending) {
-    console.log(`[migrate] → ${m.name}`);
     const sql = fs.readFileSync(m.absPath, "utf8");
+    if (isManualMigration(sql) && !manualMigrationsEnabled()) {
+      deferred = true;
+      console.error(
+        `[migrate] ${m.name}: skipped (manual DDL, not applied on boot). ` +
+          "Run: RADON_MIGRATE_MANUAL=1 python3.13 scripts/db/migrate.py",
+      );
+      continue;
+    }
+    console.log(`[migrate] → ${m.name}`);
+    if (isManualMigration(sql)) {
+      console.error(
+        `[migrate] ${m.name}: each statement autocommits ` +
+          "(DiskANN drop is about 14 min and must not share a transaction)",
+      );
+    }
     const statements = splitStatements(sql);
     for (const stmt of statements) {
       try {
@@ -139,9 +169,14 @@ async function main(): Promise<void> {
       sql: "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, datetime('now'))",
       args: [m.version],
     });
+    appliedCount += 1;
   }
 
-  console.log(`[migrate] done`);
+  if (appliedCount > 0) {
+    console.log(`[migrate] done`);
+  } else if (deferred) {
+    console.log(`[migrate] manual migration(s) still pending`);
+  }
 }
 
 main().catch((err) => {
