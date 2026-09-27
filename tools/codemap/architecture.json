@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-09-26T09:00:08Z",
-  "node_count": 3623,
-  "edge_count": 7487,
+  "generated_at": "2026-09-27T09:00:11Z",
+  "node_count": 3638,
+  "edge_count": 7505,
   "areas": {
-    "web": 2101,
+    "web": 2102,
     "site": 155,
-    "scripts": 1243,
-    "cloud": 77,
+    "scripts": 1256,
+    "cloud": 78,
     "lib": 28,
     "tests": 17,
     "tools": 2
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 980
+      "count": 981
     },
     {
       "id": "site/app",
@@ -150,7 +150,7 @@
     {
       "id": "scripts/knowledge",
       "area": "scripts",
-      "count": 18
+      "count": 19
     },
     {
       "id": "scripts/lib",
@@ -190,7 +190,7 @@
     {
       "id": "scripts/security",
       "area": "scripts",
-      "count": 1
+      "count": 2
     },
     {
       "id": "scripts/slm",
@@ -200,7 +200,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 632
+      "count": 643
     },
     {
       "id": "scripts/trade_blotter",
@@ -230,7 +230,7 @@
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 67
+      "count": 68
     },
     {
       "id": "lib/tools",
@@ -409,6 +409,13 @@
       "test": false
     },
     {
+      "id": "scripts/db/hrana_http.py",
+      "area": "scripts",
+      "in": 45,
+      "out": 2,
+      "test": false
+    },
+    {
       "id": "web/components/ErrorToast.tsx",
       "area": "web",
       "in": 45,
@@ -427,13 +434,6 @@
       "area": "web",
       "in": 45,
       "out": 0,
-      "test": false
-    },
-    {
-      "id": "scripts/db/hrana_http.py",
-      "area": "scripts",
-      "in": 43,
-      "out": 2,
       "test": false
     },
     {
