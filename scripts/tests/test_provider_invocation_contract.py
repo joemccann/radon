@@ -23,8 +23,8 @@ sys.modules[_spec.name] = _h
 _spec.loader.exec_module(_h)
 
 LOOPS = _h.LOOPS
-# The codex-first ladder. documentation runs the single fx:nvidia rung since
-# 2026-09-26; its wire and failure handling live in test_fx_nvidia_rung.py.
+# The shared fx ladder. documentation matches the other fallback loops as of
+# 2026-09-27; its fx wire lives in test_fx_nvidia_rung.py.
 FALLBACK_LOOPS = ["ci-performance", "reliability", "testing"]
 
 

@@ -35,6 +35,9 @@ SHARED = [
     "quota_regex",
     "session_regex",
     "rejection_regex",
+    "is_quota_exhausted",
+    "is_transient_network_failure",
+    "is_fx_loop_guard",
     "launch_round",
 ]
 # launch_round is identical within each family. Security + DeepSec pin
