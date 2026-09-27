@@ -16,6 +16,10 @@ The branch content is still untrusted, so pickup is gated:
 
 from __future__ import annotations
 
+import os
+import plistlib
+import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -225,3 +229,219 @@ def test_default_pickup_hook_requests_terminal_dispositions(monkeypatch):
     monkeypatch.setattr(pickup.ir_ensure_pr, "ensure_pr", lambda **kwargs: calls.append(kwargs) or {"url": "https://github.com/x/y/pull/1"})
     pickup._ensure_pr_default(head="fix/example")
     assert calls[0]["include_terminal"] is True
+
+
+PLIST = _SCRIPTS_DIR.parent / "config" / "com.radon.grok-fix-pickup.plist"
+
+
+def _pickup_script(clone: Path | str = "/tmp/radon-grok-pickup") -> str:
+    plist = plistlib.loads(PLIST.read_bytes())
+    argv = plist["ProgramArguments"]
+    assert argv[:2] == ["/bin/bash", "-c"], argv
+    return argv[2].replace("__PICKUP_REPO__", str(clone)).replace(
+        "__HOME__", str(Path(clone).parent)
+    )
+
+
+def _executable(path: Path, body: str) -> None:
+    path.write_text(body, encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+class TestPickupPlistSelfRefresh:
+    def test_plist_parses_and_bash_n_accepts_the_substituted_script(self) -> None:
+        plist = plistlib.loads(PLIST.read_bytes())
+        assert plist["Label"] == "com.radon.grok-fix-pickup"
+        script = _pickup_script()
+        checked = subprocess.run(
+            ["/bin/bash", "-n", "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert checked.returncode == 0, checked.stderr
+
+    def test_refresh_precedes_python_and_uses_plain_git_c(self) -> None:
+        script = _pickup_script()
+        assert "GIT_CONFIG_COUNT=2" in script
+        assert "core.hooksPath" in script and "core.fsmonitor" in script
+        assert "index.lock" in script and "HEAD.lock" in script
+        assert "timeout" in script and "gtimeout" in script
+        assert "-k 15 180" in script
+        assert "for i in 1 2 3" in script
+        assert "exit 70" in script
+        assert "api.pushover.net" in script
+        assert script.index("fetch") < script.index("checkout") < script.index(
+            "reset --hard"
+        )
+        assert script.index("reset --hard") < script.index(
+            "exec /usr/bin/env python3.13"
+        )
+        assert "grok_fix_pickup.py" in script
+        assert "--repo" in script
+        assert 'git -C "$C"' in script or 'git -C "$C" ' in script
+        assert ".gitdirs/" not in script
+        assert "--git-dir=" not in script
+        assert "branch -D" not in script and "branch -d" not in script
+
+    @pytest.mark.parametrize("failed_step", ["fetch", "checkout", "reset"])
+    def test_failed_refresh_pages_and_skips_python(
+        self, failed_step: str, tmp_path: Path
+    ) -> None:
+        clone = tmp_path / "clone"
+        (clone / "scripts").mkdir(parents=True)
+        script = _pickup_script(clone)
+        ran = tmp_path / "python-ran"
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        _executable(
+            bin_dir / "git",
+            "#!/bin/sh\n"
+            f'for arg do [ "$arg" = "{failed_step}" ] && exit 1; done\n'
+            "exit 0\n",
+        )
+        _executable(
+            bin_dir / "timeout",
+            "#!/bin/sh\nshift 3\nexec \"$@\"\n",
+        )
+        _executable(
+            bin_dir / "python3.13",
+            "#!/bin/sh\n"
+            f'touch "{ran}"\n'
+            "exit 0\n",
+        )
+        (tmp_path / ".env").write_text(
+            "PUSHOVER_USER=test-user\nPUSHOVER_TOKEN=test-token\n",
+            encoding="utf-8",
+        )
+        curl_log = tmp_path / "curl.log"
+        _executable(
+            tmp_path / "usr-curl",
+            "#!/bin/sh\n"
+            f'printf "%s\\n" "$*" >> "{curl_log}"\n'
+            "exit 0\n",
+        )
+        # The launcher calls /usr/bin/curl; rewrite that path in a copy.
+        script = script.replace("/usr/bin/curl", str(tmp_path / "usr-curl"))
+        proc = subprocess.run(
+            ["/bin/bash", "-c", script],
+            env={
+                "PATH": f"{bin_dir}:/usr/bin:/bin",
+                "HOME": str(tmp_path),
+                "RADON_LAUNCHD_FETCH_PAUSE_SECS": "0",
+            },
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert proc.returncode == 70, proc.stdout + proc.stderr
+        assert not ran.exists()
+        assert curl_log.exists()
+        assert "pushover.net" in curl_log.read_text(encoding="utf-8")
+
+    def test_successful_refresh_execs_python_after_fetch_checkout_reset(
+        self, tmp_path: Path
+    ) -> None:
+        clone = tmp_path / "clone"
+        (clone / "scripts").mkdir(parents=True)
+        script = _pickup_script(clone)
+        log = tmp_path / "calls.log"
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        _executable(
+            bin_dir / "git",
+            "#!/bin/sh\n"
+            f'printf "%s\\n" "git $*" >> "{log}"\n'
+            "exit 0\n",
+        )
+        _executable(
+            bin_dir / "timeout",
+            "#!/bin/sh\n"
+            f'printf "%s\\n" "timeout $*" >> "{log}"\n'
+            "shift 3\n"
+            'exec "$@"\n',
+        )
+        _executable(
+            bin_dir / "python3.13",
+            "#!/bin/sh\n"
+            f'printf "%s\\n" "python $*" >> "{log}"\n'
+            "exit 0\n",
+        )
+        proc = subprocess.run(
+            ["/bin/bash", "-c", script],
+            env={
+                "PATH": f"{bin_dir}:/usr/bin:/bin",
+                "HOME": str(tmp_path),
+                "RADON_LAUNCHD_FETCH_PAUSE_SECS": "0",
+            },
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        calls = log.read_text(encoding="utf-8").splitlines()
+        joined = "\n".join(calls)
+        assert "git -C" in joined and "fetch" in joined
+        assert "checkout" in joined and "reset --hard" in joined
+        assert "python" in joined and "grok_fix_pickup.py" in joined
+        git_idxs = [i for i, line in enumerate(calls) if line.startswith("git ")]
+        py_idxs = [i for i, line in enumerate(calls) if line.startswith("python ")]
+        assert git_idxs and py_idxs and max(git_idxs) < min(py_idxs), calls
+
+    def test_reset_leaves_local_fix_branches(self, tmp_path: Path) -> None:
+        origin = tmp_path / "origin.git"
+        origin.mkdir()
+        assert _git(origin, "init", "--bare", "-b", "main").returncode == 0
+        seed = tmp_path / "seed"
+        seed.mkdir()
+        assert _git(seed, "init", "-b", "main").returncode == 0
+        _git(seed, "config", "user.name", "t")
+        _git(seed, "config", "user.email", "t@example.invalid")
+        _commit(seed, "app.py", "main\n", "init")
+        assert _git(seed, "remote", "add", "origin", str(origin)).returncode == 0
+        assert _git(seed, "push", "-q", "origin", "main").returncode == 0
+
+        clone = tmp_path / "clone"
+        assert _git(tmp_path, "clone", "-q", str(origin), str(clone)).returncode == 0
+        _git(clone, "config", "user.name", "t")
+        _git(clone, "config", "user.email", "t@example.invalid")
+        assert _git(clone, "checkout", "-q", "-b", "fix/keep-me").returncode == 0
+        _commit(clone, "app.py", "wip\n", "local wip")
+        assert _git(clone, "checkout", "-q", "main").returncode == 0
+        (clone / "dirty").write_text("stale checkout\n", encoding="utf-8")
+
+        script = _pickup_script(clone)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        timeout = shutil.which("timeout") or shutil.which("gtimeout")
+        if timeout:
+            _executable(
+                bin_dir / Path(timeout).name,
+                "#!/bin/sh\nshift 3\nexec \"$@\"\n",
+            )
+        else:
+            _executable(bin_dir / "timeout", "#!/bin/sh\nshift 3\nexec \"$@\"\n")
+        _executable(
+            bin_dir / "python3.13",
+            "#!/bin/sh\nexit 0\n",
+        )
+        path = os.environ.get("PATH", "/usr/bin:/bin")
+        proc = subprocess.run(
+            ["/bin/bash", "-c", script],
+            env={
+                "PATH": f"{bin_dir}:{path}",
+                "HOME": str(tmp_path),
+                "RADON_LAUNCHD_FETCH_PAUSE_SECS": "0",
+            },
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        head = _git(clone, "rev-parse", "--abbrev-ref", "HEAD")
+        assert head.stdout.strip() == "main"
+        listed = _git(clone, "for-each-ref", "--format=%(refname:short)")
+        assert "fix/keep-me" in listed.stdout
+        tip = _git(clone, "rev-parse", "fix/keep-me").stdout
+        assert tip.strip()
+        assert (clone / "app.py").read_text(encoding="utf-8") == "main\n"
