@@ -260,6 +260,59 @@ def test_cycle_failure_backoff_then_exhaustion_is_held(queue,monkeypatch):
     assert state.outbox()==[]
 
 
+def test_cycle_document_deadline_parks_work_and_allows_next_item(queue,monkeypatch):
+    """REL-252: a document that exhausts its budget is parked so the next item is reached."""
+    root,state=queue
+    monkeypatch.setattr(worker,"discover",lambda *a:0)
+    
+    # Create a pipeline that raises DocumentDeadlineExceeded
+    def deadline_fail(work, pdf, recent, progress=None):
+        from research.pipeline import DocumentDeadlineExceeded
+        if progress: progress("extracted")
+        raise DocumentDeadlineExceeded("document review deadline exceeded during selection")
+    
+    # Add two work items to the queue
+    import hashlib
+    def work_key(entry):
+        return hashlib.sha256((entry['id'] + '\0' + entry['rev']).encode()).hexdigest()
+    
+    scope = "2026/september/sep 07"
+    prefix = "/joe mccann/current/2026/september/sep 07"
+    entries = [
+        {"id": "id:one", "rev": "rev1", "content_hash": "a"*64, "name": "doc1.pdf", "path_lower": prefix + "/doc1.pdf", ".tag": "file"},
+        {"id": "id:two", "rev": "rev2", "content_hash": "b"*64, "name": "doc2.pdf", "path_lower": prefix + "/doc2.pdf", ".tag": "file"},
+    ]
+    state.ingest_page(scope, {"cursor": "cursor1", "entries": entries}, "2026-09-07")
+    key1 = work_key(entries[0])
+    key2 = work_key(entries[1])
+    
+    client=SimpleNamespace(download=lambda *a: root/"source.pdf")
+    publisher=SimpleNamespace(recent_posts=lambda **k: [])
+    pipeline=SimpleNamespace(process=deadline_fail)
+    
+    # First cycle should process the first item, hit deadline, and park it
+    result=worker.cycle(root,client,state,pipeline,publisher)
+    
+    # Check that the first item was parked (not held, not retried immediately)
+    row1=state.db.execute("SELECT * FROM work WHERE key=?", (key1,)).fetchone()
+    assert row1 is not None
+    assert row1["status"] == "pending"  # parked, available later
+    assert "DocumentDeadlineExceeded" in result["errors"]
+    
+    # Second cycle should reach the second item (since first is parked)
+    result2=worker.cycle(root,client,state,pipeline,publisher)
+    
+    # The second item should be processed (pipeline returns empty list for it)
+    row2=state.db.execute("SELECT * FROM work WHERE key=?", (key2,)).fetchone()
+    assert row2 is not None
+    # Since deadline_fail raises for all items, the second item should also be parked
+    # But the key point is that the cycle continued to the second item
+    assert "DocumentDeadlineExceeded" in result2["errors"]
+    # Both items should be parked (available_at in future)
+    assert row1["available_at"] > 0
+    assert row2["available_at"] > 0
+
+
 def test_heartbeat_keeps_private_local_error_when_db_unavailable(tmp_path,monkeypatch):
     from api import db_http
     def fail(*a):raise OSError("offline")

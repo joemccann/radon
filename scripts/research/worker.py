@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from research.dropbox import DropboxClient, DropboxError
 from research.model import PROVIDER_PARK_SECS, classify_error, is_provider_outage
+from research.pipeline import DocumentDeadlineExceeded
 from research.state import State, date_scopes, eligible, folder_backlog_gap, should_persist_cursor
 from utils.atomic_io import atomic_save
 
@@ -158,6 +159,12 @@ def cycle(root, client, state, pipeline, publisher, publish=False, limit=4):
             state.complete(work['key'], {'status': 'reviewed', 'items': len(posts)}, publications=posts)
             recent.extend(posts)
             processed += 1
+        except DocumentDeadlineExceeded as error:
+            # Document exhausted its budget: park it for the next cycle and stop processing
+            # further items in this cycle so a later queued item is reached on the next cycle.
+            errors.append('DocumentDeadlineExceeded')
+            state.park(work['key'], time.time() + PROVIDER_PARK_SECS)
+            break
         except Exception as error:
             errors.append(classify_error(error))
             if is_provider_outage(error):
