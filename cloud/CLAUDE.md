@@ -472,7 +472,8 @@ baseline replaces `scripts/knowledge/golden_eval_baseline.json`. Enabling
 the timer against the placeholder would fire a failing oneshot. The unit
 writes no `service_health` row (`EXEMPT_UNITS` `gap:`); a failed run pages
 via the unit watchdog. Drift ack: `not-installed:radon-knowledge-eval.*`.
-Auto-sync stays off. Contract:
+Auto-sync stays off. `cloud/tests/test_knowledge_eval_setup.py` pins
+the inventory-and-skip. Contract:
 [`docs/knowledge-embeddings.md`](../docs/knowledge-embeddings.md).
 
 
