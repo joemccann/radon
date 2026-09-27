@@ -24,6 +24,7 @@ The `knowledge` table carries two vector columns:
 - **Single-write:** `RADON_KB_EMBED_DUAL_WRITE=0` disables the 2048-d write; ingest writes only `embedding`.
 - **Backend override:** `RADON_KB_EMBED_BACKEND=local` forces BAAI/bge-small-en-v1.5 (384d) for both query and ingest; the NVIDIA path is never used.
 - **Disable:** `RADON_KB_EMBED_DISABLED=1` turns off all embeddings; ingest writes FTS-only rows (`embedding` and `embedding_v2` both NULL).
+- **Transient write retries:** source and prepared-write retries wait `_retry_delay(attempt)` in `scripts/knowledge/ingest.py`: 12s doubling to a 60s cap, plus up to 25% jitter. Turso reaps an abandoned idle transaction after 10s (up to 300s if it is still running), so a shorter wait queues the retry behind the orphan's writer lock. Replay is safe because upserts are idempotent on `content_hash`.
 
 ## Backfill order (load-bearing)
 

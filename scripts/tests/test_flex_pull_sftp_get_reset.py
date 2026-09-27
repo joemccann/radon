@@ -32,10 +32,10 @@ RETRY_NOW = datetime(2026, 9, 17, 8, 30, tzinfo=ET)
 CURRENT = date(2026, 9, 16)
 STALE = date(2026, 8, 28)
 
-CURRENT_TRADE = "U4698258.Trade_History.20260916.20260916.xml.pgp"
-CURRENT_EQ = "U4698258.Equity_Summary_in_Base.20260916.20260916.xml.pgp"
-OLD_TRADE = "U4698258.Trade_History.20260903.20260903.xml.pgp"
-OLD_EQ = "U4698258.Equity_Summary_in_Base.20260828.20260828.xml.pgp"
+CURRENT_TRADE = "U1234567.Trade_History.20260916.20260916.xml.pgp"
+CURRENT_EQ = "U1234567.Equity_Summary_in_Base.20260916.20260916.xml.pgp"
+OLD_TRADE = "U1234567.Trade_History.20260903.20260903.xml.pgp"
+OLD_EQ = "U1234567.Equity_Summary_in_Base.20260828.20260828.xml.pgp"
 
 # Verbatim OpenSSH stderr from the 12:30Z unit journal.
 KEX_RST = (
@@ -51,7 +51,7 @@ def _xml(period_end: date) -> bytes:
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<FlexQueryResponse queryName="Trade Confirmation" type="TC">'
         '<FlexStatements count="1">'
-        f'<FlexStatement accountId="U4698258" fromDate="{stamp}" toDate="{stamp}"'
+        f'<FlexStatement accountId="U1234567" fromDate="{stamp}" toDate="{stamp}"'
         ' period="LastBusinessDay">'
         "<Trades></Trades>"
         "</FlexStatement></FlexStatements></FlexQueryResponse>"

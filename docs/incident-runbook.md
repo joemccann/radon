@@ -2889,6 +2889,52 @@ Peak: 2026-09-26 22:58:12Z, page `265f8e2e…`.
   `test_row_upsert_failure_still_fails_the_oneshot`.
 - **Code:** `scripts/ma_ratio_scan.py` (`_record_ok_heartbeat`).
 
+## iv-spread-snapshot-libsql-timeout
+
+**`radon-iv-spread.service` oneshot pages P1 `Result=timeout` (`NRestarts=0`)
+after the IB-skip path has already chosen the cached payload.** Peak:
+2026-09-26 22:25Z, page `6cd1a278…`.
+
+- **Mechanism:** Saturday 22:15 UTC, `/health/lite` `auth_state=unreachable`
+  (`upstream_dead=true`, port listening). The job printed
+  `IB skipped: gateway auth_state=unreachable` and
+  `re-serving cached payload through 2026-09-25` at 22:15:54Z, then
+  `writer.upsert_scan_snapshot` blocked in sync libsql. That client has
+  no socket timeout and holds the GIL, so the process cannot abandon the
+  call. systemd SIGTERM'd at `TimeoutStartSec=300` (22:20:53Z,
+  `ExecMainStatus=15`, `Result=timeout`). `Type=oneshot` has no
+  `Restart=`, so `NRestarts=0`. `Result=timeout` is not on the exit-code
+  latch, so the same InactiveEnter re-pages until reset or the next
+  22:15 UTC fire. No `service_health` row and no JSON refresh: both stayed
+  on the 2026-09-25 22:15Z success. Dispersion wrote `ok` at 23:20Z, so
+  this was not a Turso platform outage. Gateway unreachable is why the
+  skip ran; the page is the unbounded snapshot after that decision.
+- **Detection:** `systemctl show radon-iv-spread.service -p
+  Result,NRestarts,ExecMainStartTimestamp,InactiveEnterTimestamp,ExecMainStatus`
+  shows `timeout` / `0` / span exactly `TimeoutStartSec` / `15`. Journal
+  has the two skip lines and then silence. `data/iv_spread.json` mtime
+  stays on the previous success.
+- **Discriminating check:** skip lines present and the next line never
+  arrives, span equal to `TimeoutStartSec`. A real IB hang never prints
+  the skip line. `Result=signal` or exit 143 inside a deploy window is
+  `deploy-stop-clean-oneshot-signal` (do not treat as this case). If
+  `/health/lite` is down too, stand down as API. If a same-minute Python
+  Turso canary fails, stand down as Turso.
+- **Remediation (code):** `_persist_snapshot` writes `scan_snapshots`
+  over hrana with `PERSIST_BUDGET_S=30` (each statement
+  `min(HRANA_TIMEOUT_S, remaining)`). `TimeoutStartSec` stays 300. The
+  heartbeat stays a separate try. Do not wrap `get_db()` in a thread
+  join. Do not restart-flap the hung run while the gateway is
+  unreachable; after the fix deploys, one `reset-failed` + start (the
+  unit is not on `RERUNNABLE_ONESHOT_UNITS`).
+- **Regression:**
+  `scripts/tests/test_iv_spread.py::TestSnapshotPersistBudget`
+  (`test_unreachable_skip_does_not_block_on_sync_libsql`,
+  `test_persist_budget_fits_inside_unit_start_timeout`).
+- **Code:** `scripts/fetch_iv_spread.py` (`PERSIST_BUDGET_S`,
+  `_persist_snapshot`), `cloud/services/radon-iv-spread.service`
+  (`TimeoutStartSec=300`).
+
 ## Grok auto-response on iPhone P1 pages
 
 Canonical: [`grok-page-responder.md`](grok-page-responder.md).
