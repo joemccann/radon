@@ -73,7 +73,7 @@ Default `--mode all` runs every mode. Metrics per mode: hit@1, hit@5, recall@10,
 
 `--baseline PATH` exits 1 when hit@5 or MRR for any scored mode drops more than `--max-drop` (default 0.03). `--write-baseline PATH` writes the compact metrics snapshot. `scripts/knowledge/golden_eval_baseline.json` ships as `placeholder: true`; replace it after the first live VPS run. Newsfeed/journal questions without a known Turso key live in `scripts/knowledge/golden_set_candidates.json` (`needs_review: true`).
 
-Nightly VPS unit (not enabled): `cloud/services/radon-knowledge-eval.{service,timer}`. Install the unit files, write the live baseline, then `systemctl enable --now radon-knowledge-eval.timer`. A regression fails the oneshot so the existing unit watchdog pages. CI stays offline: in-memory libsql fixtures cover metric math, mode switching, baseline comparison, and schema validation.
+Nightly VPS unit (not enabled): `cloud/services/radon-knowledge-eval.{service,timer}`. `setup-vps.sh` inventories both files and `enable_services` skips them until a live baseline replaces `scripts/knowledge/golden_eval_baseline.json`. Auto-sync stays off. A `not-installed:` drift ack holds the pending window. The oneshot writes no `service_health` row (`EXEMPT_UNITS` `gap:`); a failed run pages via the unit watchdog. After the first live VPS write, `systemctl enable --now radon-knowledge-eval.timer`. CI stays offline: in-memory libsql fixtures cover metric math, mode switching, baseline comparison, and schema validation.
 
 Past about 50k rows, revisit a compact index (`compress_neighbors=float8`, `max_neighbors=32`, `insert_l=40`) built in pieces.
 
