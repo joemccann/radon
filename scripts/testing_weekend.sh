@@ -1774,7 +1774,7 @@ if [[ -n "${RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS:-}" ]]; then
 fi
 ROUND_LOG_MARK=0
 MAX_ATTEMPTS=3
-RETRY_PAUSE_SECS=60
+RETRY_PAUSE_SECS="${RADON_WEEKEND_RETRY_PAUSE_SECS:-60}"
 # Credits, per-model rate limit, and provider capacity are per MODEL, so an
 # exhausted one is a reason to drop a rung, not to lose the night. 2026-09-01:
 # `~/.claude/settings.json` carried `model: claude-fable-5[1m]`, these wrappers
@@ -2256,7 +2256,9 @@ is_rung_broken() {
 }
 
 is_transient_network_failure() {
-  tail -c 500 "$RUN_LOG" | grep -qE 'API Error|ENOTFOUND|Connection lost|Execution error'
+  # fx: IncompleteStream is fx's verdict when the provider cuts the response
+  # stream mid-reply (NVIDIA, testing audit 2026-09-26).
+  tail -c 500 "$RUN_LOG" | grep -qE 'API Error|ENOTFOUND|Connection lost|Execution error|IncompleteStream'
 }
 
 run_phase() {
@@ -2379,8 +2381,17 @@ run_phase() {
       echo "[testing-weekend] audit exited without completion evidence; retrying once within the phase cap" | tee -a "$RUN_LOG"
       continue
     fi
-    [[ $RC -eq 0 || $RC -eq 124 || $attempt -ge $MAX_ATTEMPTS ]] && break
+    [[ $RC -eq 0 || $RC -eq 124 ]] && break
     is_transient_network_failure || break
+    # Still failing after every transient attempt: this rung is unwell right
+    # now, so the next rung gets the phase with a fresh attempt count.
+    if (( attempt >= MAX_ATTEMPTS )); then
+      echo "[$LOOP_LOG_TAG] $RUNG_PROVIDER:$RUNG_MODEL failed $MAX_ATTEMPTS transient attempts; moving down the ladder" | tee -a "$RUN_LOG"
+      advance_rung "" "transient failures persisted" || { ALL_PROVIDERS_EXHAUSTED=1; break; }
+      echo "[$LOOP_LOG_TAG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
+      attempt=1
+      continue
+    fi
     echo "[testing-weekend] transient network failure (rc=$RC) — attempt $attempt/$MAX_ATTEMPTS, retrying in ${RETRY_PAUSE_SECS}s" | tee -a "$RUN_LOG"
     attempt=$((attempt + 1))
     sleep "$RETRY_PAUSE_SECS"

@@ -175,6 +175,38 @@ class TestACapContinuesOnTheNextProvider:
         assert "RADON_WEEKEND_REDUCED" in wrapper
 
 
+FX_INCOMPLETE_STREAM = "fx: IncompleteStream"
+
+
+@pytest.mark.parametrize("loop", FALLBACK_LOOPS + ["documentation"])
+class TestATransientFailureRetriesThenMovesDownTheLadder:
+    """2026-09-26: the testing audit died rc=1 on `fx: IncompleteStream` (NVIDIA
+    cut the response stream mid-reply). Nothing classified it, so the phase
+    ended on its first round: no retry, and the ladder never moved to grok."""
+
+    def test_an_incomplete_stream_is_retried_then_the_next_rung_runs(self, tmp_path, loop):
+        proc, tried, _calls, _argv = _run_multi(
+            tmp_path, loop, "audit",
+            provider_ladder="fx:nvidia grok",
+            reject_providers=("fx",),
+            reject_output=FX_INCOMPLETE_STREAM,
+        )
+        assert rungs(tried) == ["fx:nvidia", "grok"], (tried, proc.stdout)
+        assert providers(tried) == ["fx", "fx", "fx", "grok"], tried
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+
+    def test_the_next_rung_gets_its_own_attempts(self, tmp_path, loop):
+        proc, tried, calls, _argv = _run_multi(
+            tmp_path, loop, "audit",
+            provider_ladder="fx:nvidia fx:cerebras",
+            reject_providers=("fx",),
+            reject_output=FX_INCOMPLETE_STREAM,
+        )
+        assert tried == ["fx:nvidia"] * 3 + ["fx:cerebras"] * 3, tried
+        assert proc.returncode == 75, (proc.returncode, proc.stdout, proc.stderr)
+        assert "all agent providers exhausted" in calls, calls
+
+
 @pytest.mark.parametrize("loop", FALLBACK_LOOPS)
 class TestAPermanentRejectionCostsOneRung:
     """2026-09-07: `codex exec --model gpt-5.4` answered HTTP 400
