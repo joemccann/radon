@@ -169,7 +169,21 @@ def test_every_wrapper_clears_git_locks_records_rounds_and_reaps(loop):
     text = LOOPS[loop].read_text()
     ground = _fn(text, "ground_truth")
     assert ground.splitlines()[1].strip() == 'clear_stale_git_locks "$HOST_GITDIR"'
-    assert '    _prepare_round\n    launch_round "$remain"\n    _record_round\n' in text
+    prepare = text.index("    _prepare_round\n")
+    launch = text.index('    launch_round "$remain"\n', prepare)
+    record = text.index("    _record_round\n", launch)
+    between = text[prepare:launch]
+    # launch then record stay adjacent so a launched round is always recorded.
+    assert text[launch : record + len("    _record_round\n")] == (
+        '    launch_round "$remain"\n    _record_round\n'
+    )
+    # Four fx:nvidia hosts acquire the shared NVIDIA budget before launch;
+    # security/deepsec stay on the claude ladder and must not grow a gap.
+    if loop in ("reliability", "testing", "ci-performance", "documentation"):
+        assert "nvidia_budget_acquire_or_skip" in between, between
+        assert 'RUNG_PROVIDER" == "fx"' in between and 'RUNG_MODEL" == "nvidia"' in between
+    else:
+        assert between == "    _prepare_round\n"
     on_signal = _fn(text, "on_signal")
     # The round must be dead before the lock is released, or the next run
     # takes the clone while this one's agent is still in it.

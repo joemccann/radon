@@ -72,6 +72,7 @@
         "scripts/weekend_redact.py",
         "scripts/weekend_prune.py",
         "scripts/nightly_*.py",
+        "scripts/nvidia_budget.py",
         "scripts/github_pr_output.py",
         "config/com.radon.*-daily.plist"
       ],

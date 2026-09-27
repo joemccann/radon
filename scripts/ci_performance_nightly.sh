@@ -2111,8 +2111,20 @@ is_quota_exhausted() {
   # crashing round that QUOTES a pattern mid-run must not read as quota
   # exhaustion. The CLI prints its refusal in its FINAL lines: scan only the
   # last 40 lines of the round slice, and never the wrapper's own markers.
-  tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
-    | grep -v '^\[' | tail -n 40 | grep -qiE "$(quota_regex "$RUNG_PROVIDER")"
+  local slice
+  slice="$(tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null || true)"
+  if printf '%s\n' "$slice" | grep -v '^\[' | tail -n 40 | grep -qiE "$(quota_regex "$RUNG_PROVIDER")"; then
+    return 0
+  fi
+  # fx prints HTTP 429 as a `[notice]` line; grep -v '^[' above throws those
+  # away. Match that form only, and only for fx, so claude/codex/grok stay
+  # on the existing detector. A recovered phase (rc=0 + marker) never
+  # reaches this function: the caller still requires RC != 0.
+  if [[ "${RUNG_PROVIDER:-}" == "fx" ]]; then
+    printf '%s\n' "$slice" | tail -n 40 | grep -qE '\[notice\].*Rate limited · HTTP 429'
+    return $?
+  fi
+  return 1
 }
 
 # 2026-09-05: the subscription's SHARED session (or weekly) cap is not a
@@ -2150,10 +2162,76 @@ is_rung_broken() {
 }
 
 is_transient_network_failure() {
-  # fx: IncompleteStream is fx's verdict when the provider cuts the response
-  # stream mid-reply (NVIDIA, testing audit 2026-09-26).
-  tail -c 500 "$RUN_LOG" | grep -qE 'API Error|ENOTFOUND|Connection lost|Execution error|IncompleteStream'
+  # fx: IncompleteStream / InvalidChunk are fx verdicts when the provider
+  # cuts the response stream mid-reply (NVIDIA, testing audit 2026-09-26
+  # and 2026-09-27).
+  tail -c 500 "$RUN_LOG" | grep -qE 'API Error|ENOTFOUND|Connection lost|Execution error|IncompleteStream|InvalidChunk'
 }
+
+is_fx_loop_guard() {
+  # fx stops itself when the same shell action fails twice. That is a dead
+  # rung, not a finished phase: retry / fall through, never rc=1 or
+  # rc=0-INCOMPLETE on this rung. Real strings 2026-09-27.
+  [[ "${RUNG_PROVIDER:-}" == "fx" ]] || return 1
+  tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
+    | grep -qE 'Repeated (identical shell|shell validation) failures stopped the tool loop'
+}
+
+nvidia_budget() {
+  local py helper
+  py="$(command -v python3.13 || true)"
+  [[ -n "$py" ]] || return 0
+  helper="${RADON_NVIDIA_BUDGET_PY:-$REPO/scripts/nvidia_budget.py}"
+  [[ -r "$helper" ]] || return 0
+  "$py" -I "$helper" "$@"
+}
+
+nvidia_budget_acquire_or_skip() {
+  local verdict wait_secs deadline
+  deadline=$(( $(date +%s) + remain ))
+  verdict="$(nvidia_budget acquire --loop "$LOOP_SLUG" --deadline "$deadline" || true)"
+  case "$verdict" in
+    wait*)
+      wait_secs="${verdict#wait }"
+      wait_secs="${wait_secs%%.*}"
+      [[ "$wait_secs" =~ ^[0-9]+$ ]] || wait_secs=1
+      if (( wait_secs >= remain - 5 )); then
+        echo "[$LOOP_LOG_TAG] NVIDIA budget wait ${wait_secs}s would miss the phase deadline; skipping $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
+        advance_rung "" "nvidia rate budget" || ALL_PROVIDERS_EXHAUSTED=1
+        echo "[$LOOP_LOG_TAG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
+        return 1
+      fi
+      echo "[$LOOP_LOG_TAG] NVIDIA budget wait ${wait_secs}s" | tee -a "$RUN_LOG"
+      sleep "$wait_secs"
+      ;;
+    fallback)
+      echo "[$LOOP_LOG_TAG] NVIDIA budget fallback: skipping $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
+      advance_rung "" "nvidia rate budget" || ALL_PROVIDERS_EXHAUSTED=1
+      echo "[$LOOP_LOG_TAG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
+      return 1
+      ;;
+  esac
+  nvidia_budget record-request --loop "$LOOP_SLUG" || true
+  return 0
+}
+
+nvidia_budget_record_round() {
+  local slice n retry
+  slice="$(tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null || true)"
+  n="$(printf '%s\n' "$slice" | grep -cE '\[notice\].*Rate limited · HTTP 429' || true)"
+  (( n > 0 )) || return 0
+  retry="$(printf '%s\n' "$slice" | sed -n 's/.*retrying request in \([0-9][0-9]*\)s.*/\1/p' | tail -n 1)"
+  if [[ -n "$retry" ]]; then
+    nvidia_budget record-429 --loop "$LOOP_SLUG" --retry-after "$retry" || true
+  else
+    nvidia_budget record-429 --loop "$LOOP_SLUG" || true
+  fi
+  local i
+  for ((i=0; i<n; i++)); do
+    nvidia_budget record-request --loop "$LOOP_SLUG" || true
+  done
+}
+
 
 run_phase() {
   begin_phase "$1"
@@ -2215,6 +2293,9 @@ run_phase() {
     # never, in the case that matters. `-k` escalates to SIGKILL so a claude
     # blocked on a hung child cannot make the cap advisory. R-384, R-386.
     _prepare_round
+    if [[ "$RUNG_PROVIDER" == "fx" && "$RUNG_MODEL" == "nvidia" ]]; then
+      nvidia_budget_acquire_or_skip || continue
+    fi
     launch_round "$remain"
     _record_round
     round_start=$SECONDS
@@ -2224,6 +2305,9 @@ run_phase() {
     # pid — the guard early-returns on an empty ROUND_PID, so the old order
     # made orphan reaping after a normal exit dead code.
     kill_round_group
+    if [[ "$RUNG_PROVIDER" == "fx" && "$RUNG_MODEL" == "nvidia" ]]; then
+      nvidia_budget_record_round
+    fi
     # The exit code for a `-k` escalation is not portable: GNU coreutils 9.4
     # reports 137 when the SIGKILL is what actually ended the child, not 124.
     # The cap is OUR clock, so classify from it rather than from the code, or a
@@ -2262,6 +2346,12 @@ run_phase() {
     if (( RC != 0 )) && is_quota_exhausted; then
       echo "[$LOOP_LOG_TAG] $RUNG_PROVIDER:$RUNG_MODEL is exhausted" | tee -a "$RUN_LOG"
       advance_rung "" "quota exhausted" || { ALL_PROVIDERS_EXHAUSTED=1; break; }
+      echo "[$LOOP_LOG_TAG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
+      continue
+    fi
+    if is_fx_loop_guard; then
+      echo "[$LOOP_LOG_TAG] $RUNG_PROVIDER:$RUNG_MODEL hit a tool-loop guard" | tee -a "$RUN_LOG"
+      advance_rung "" "fx loop guard" || { ALL_PROVIDERS_EXHAUSTED=1; break; }
       echo "[$LOOP_LOG_TAG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
       continue
     fi

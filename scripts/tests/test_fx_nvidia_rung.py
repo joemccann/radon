@@ -44,13 +44,13 @@ def _fx_env(tmp_path):
     return env
 
 
-def test_the_default_ladder_is_the_single_fx_nvidia_rung():
+def test_the_default_ladder_matches_the_other_fx_loops():
     body = WRAPPER.read_text(encoding="utf-8")
     m = re.search(
         r'^PROVIDER_LADDER="\$\{RADON_WEEKEND_PROVIDER_LADDER:-(.+?)\}"$', body, re.M
     )
     assert m, "no default provider ladder"
-    assert m.group(1).split() == ["fx:nvidia"], m.group(1)
+    assert m.group(1).split() == ["fx:nvidia", "grok", "codex", "fx:cerebras"], m.group(1)
 
 
 def test_an_operator_ladder_still_overrides_the_default(tmp_path):
@@ -152,6 +152,7 @@ def test_a_real_login_shell_resolves_the_venv_first(tmp_path):
 def test_an_uninstalled_fx_is_an_honest_incomplete(tmp_path):
     proc, tried, calls, _argv = _h._run_multi(
         tmp_path, "documentation", "audit",
+        provider_ladder="fx:nvidia",
         installed=("claude", "codex", "grok"),
     )
     assert tried == [], tried
@@ -162,6 +163,7 @@ def test_an_uninstalled_fx_is_an_honest_incomplete(tmp_path):
 def test_fx_without_an_nvidia_key_is_skipped(tmp_path):
     proc, tried, _calls, _argv = _h._run_multi(
         tmp_path, "documentation", "audit",
+        provider_ladder="fx:nvidia",
         authed=("claude", "codex", "grok"),
     )
     assert tried == [], tried
@@ -174,9 +176,10 @@ def test_an_fx_rate_limit_is_classified_not_a_bare_failure(tmp_path):
         capped_providers=("fx",),
         cap_line="failed: rate_limited · retry after: 4s",
     )
-    assert tried == ["fx:nvidia"], tried
-    assert proc.returncode == 75, (proc.returncode, proc.stdout, proc.stderr)
-    assert "all agent providers exhausted" in calls, calls
+    assert tried[0] == "fx:nvidia", tried
+    assert [t.split(":", 1)[0] for t in tried][:2] == ["fx", "grok"], tried
+    assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+    assert "all agent providers exhausted" not in calls, calls
 
 
 def test_the_fx_arm_is_wrapped_in_timeout():

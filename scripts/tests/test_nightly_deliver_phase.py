@@ -485,6 +485,30 @@ class TestTheDeliverNotifyLine:
         assert result.returncode == 0, _why(result, cfg)
         assert "**1 PR(s) green, ready to merge: " in _comments(cfg)[0], _comments(cfg)
 
+    @pytest.mark.parametrize("loop", ("security", "security-deepsec"))
+    def test_marker_without_ready_plus_fresh_green_record_is_complete(self, tmp_path, loop):
+        cfg = _build(
+            tmp_path,
+            loop,
+            deliver_lines=(
+                f"git show origin/main:scripts/nightly_deliver.py | /usr/bin/python3 -I - record "
+                f"--loop {loop} --branch '' --status green >/dev/null\n"
+            ),
+        )
+        self._serve_the_helper_from_git(cfg)
+        result = _run(cfg, "deliver")
+        assert result.returncode == 0, _why(result, cfg)
+        assert "**0 PR(s), nothing to merge**" in _comments(cfg)[0], _comments(cfg)
+
+    @pytest.mark.parametrize("loop", ("security", "security-deepsec"))
+    def test_marker_without_ready_and_no_record_omits_audited_sha_wording(self, tmp_path, loop):
+        cfg = _build(tmp_path, loop, deliver_lines="echo 'prs=0 done'\n")
+        result = _run(cfg, "deliver")
+        assert result.returncode == 75, _why(result, cfg)
+        comment = _comments(cfg)[0]
+        assert "INCOMPLETE" in comment, comment
+        assert "audited SHA was NOT advanced" not in comment, comment
+
     def test_a_mid_prose_recital_is_not_a_security_completion_stamp(self, tmp_path):
         cfg = _build(
             tmp_path,

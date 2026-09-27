@@ -1320,14 +1320,66 @@ deliver_status() {
 # Done/Next after a real stamp is still complete. Deliver additionally
 # requires that last stamp to appear AFTER a verdict line in the same
 # round (READY or INCOMPLETE), so a stamp cannot precede the verdict.
+deliver_record_fresh_terminal() {
+  # A deliver stamp without READY/INCOMPLETE is still complete when this
+  # round wrote a terminal record (green / incomplete). Fail closed on a
+  # missing, launched, or stale record.
+  local rec since
+  rec="${RADON_WEEKEND_ROOT:-$HOME/radon-weekend}/.${LOOP_SLUG}-deliver/record.json"
+  since="${PHASE_START_EPOCH:-0}"
+  [[ -f "$rec" ]] || return 1
+  local py="/usr/bin/python3"
+  [[ -x "$py" ]] || return 1
+  "$py" -I -c '
+import json, sys
+from datetime import datetime, timezone
+from pathlib import Path
+path, since = Path(sys.argv[1]), int(float(sys.argv[2]))
+try:
+    rec = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    sys.exit(1)
+if rec.get("status") not in ("green", "incomplete"):
+    sys.exit(1)
+raw = rec.get("updated_at") or ""
+if raw.endswith("Z"):
+    raw = raw[:-1] + "+00:00"
+try:
+    ts = datetime.fromisoformat(raw)
+except Exception:
+    ts = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+if ts.tzinfo is None:
+    ts = ts.replace(tzinfo=timezone.utc)
+sys.exit(0 if int(ts.timestamp()) >= since else 1)
+' "$rec" "$since"
+}
+
+deliver_phase_resume_detail() {
+  if [[ "${PHASE:-}" == "deliver" ]]; then
+    printf '%s' "the next fire resumes the same private run, branch and PR"
+    return 0
+  fi
+  case "${1:-}" in
+    INCOMPLETE*)
+      printf '%s' "the agent exited 0 without declaring the phase complete — this phase is INCOMPLETE; the audited SHA was NOT advanced and the next fire resumes the same private run" ;;
+    TRUNCATED*)
+      printf '%s' "the harness killed unfinished background work and the agent still exited 0 — this phase is INCOMPLETE; the audited SHA was NOT advanced" ;;
+    TIMEOUT*)
+      printf '%s' "the phase hit its wall-clock cap; incomplete, the audited SHA was NOT advanced" ;;
+    *)
+      printf '%s' "the phase ended with a non-zero status; the audited SHA was NOT advanced" ;;
+  esac
+}
+
 phase_marker_in_slice() {
   local slice="$1" phase="${2:-}"
-  local marker="" verdict_seen=0 line
+  local marker="" verdict_seen=0 saw_stamp=0 line
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
       "$DELIVER_READY_MARKER"*|"$DELIVER_INCOMPLETE_MARKER"*)
         verdict_seen=1 ;;
       "$PHASE_COMPLETE_MARKER"*)
+        saw_stamp=1
         if [[ "$phase" == "deliver" && "$verdict_seen" -eq 0 ]]; then
           marker=""
         else
@@ -1336,7 +1388,13 @@ phase_marker_in_slice() {
         ;;
     esac
   done < <(printf '%s\n' "$slice")
-  [[ -n "$marker" ]]
+  if [[ -n "$marker" ]]; then
+    return 0
+  fi
+  if [[ "$phase" == "deliver" && "$saw_stamp" -eq 1 ]] && deliver_record_fresh_terminal; then
+    return 0
+  fi
+  return 1
 }
 
 phase_marker_present() {
@@ -2256,8 +2314,20 @@ is_quota_exhausted() {
   # crashing round that QUOTES a pattern mid-run must not read as quota
   # exhaustion. The CLI prints its refusal in its FINAL lines: scan only the
   # last 40 lines of the round slice, and never the wrapper's own markers.
-  tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
-    | grep -v '^\[' | tail -n 40 | grep -qiE "$(quota_regex "$RUNG_PROVIDER")"
+  local slice
+  slice="$(tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null || true)"
+  if printf '%s\n' "$slice" | grep -v '^\[' | tail -n 40 | grep -qiE "$(quota_regex "$RUNG_PROVIDER")"; then
+    return 0
+  fi
+  # fx prints HTTP 429 as a `[notice]` line; grep -v '^[' above throws those
+  # away. Match that form only, and only for fx, so claude/codex/grok stay
+  # on the existing detector. A recovered phase (rc=0 + marker) never
+  # reaches this function: the caller still requires RC != 0.
+  if [[ "${RUNG_PROVIDER:-}" == "fx" ]]; then
+    printf '%s\n' "$slice" | tail -n 40 | grep -qE '\[notice\].*Rate limited · HTTP 429'
+    return $?
+  fi
+  return 1
 }
 
 # 2026-09-05: the subscription's SHARED session (or weekly) cap is not a
@@ -2295,9 +2365,19 @@ is_rung_broken() {
 }
 
 is_transient_network_failure() {
-  # fx: IncompleteStream is fx's verdict when the provider cuts the response
-  # stream mid-reply (NVIDIA, testing audit 2026-09-26).
-  tail -c 500 "$RUN_LOG" | grep -qE 'API Error|ENOTFOUND|Connection lost|Execution error|IncompleteStream'
+  # fx: IncompleteStream / InvalidChunk are fx verdicts when the provider
+  # cuts the response stream mid-reply (NVIDIA, testing audit 2026-09-26
+  # and 2026-09-27).
+  tail -c 500 "$RUN_LOG" | grep -qE 'API Error|ENOTFOUND|Connection lost|Execution error|IncompleteStream|InvalidChunk'
+}
+
+is_fx_loop_guard() {
+  # fx stops itself when the same shell action fails twice. That is a dead
+  # rung, not a finished phase: retry / fall through, never rc=1 or
+  # rc=0-INCOMPLETE on this rung. Real strings 2026-09-27.
+  [[ "${RUNG_PROVIDER:-}" == "fx" ]] || return 1
+  tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
+    | grep -qE 'Repeated (identical shell|shell validation) failures stopped the tool loop'
 }
 
 run_phase() {
@@ -2409,6 +2489,12 @@ run_phase() {
       echo "[$LOOP_LOG_TAG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
       continue
     fi
+    if is_fx_loop_guard; then
+      echo "[$LOOP_LOG_TAG] $RUNG_PROVIDER:$RUNG_MODEL hit a tool-loop guard" | tee -a "$RUN_LOG"
+      advance_rung "" "fx loop guard" || { ALL_PROVIDERS_EXHAUSTED=1; break; }
+      echo "[$LOOP_LOG_TAG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
+      continue
+    fi
     [[ $RC -eq 0 || $RC -eq 124 ]] && break
     is_transient_network_failure || break
     # Still failing after every transient attempt: this rung is unwell right
@@ -2486,13 +2572,13 @@ run_phase() {
     OK)
       report "$status" "0 public findings to disclose. The phase completed. Verified findings stay private." ;;
     INCOMPLETE*)
-      report "$status" "the agent exited 0 without declaring the phase complete — this phase is INCOMPLETE; the audited SHA was NOT advanced and the next fire resumes the same private run" ;;
+      report "$status" "$(deliver_phase_resume_detail "$status")" ;;
     TRUNCATED*)
-      report "$status" "the harness killed unfinished background work and the agent still exited 0 — this phase is INCOMPLETE; the audited SHA was NOT advanced" ;;
+      report "$status" "$(deliver_phase_resume_detail "$status")" ;;
     TIMEOUT*)
-      report "$status" "the phase hit its wall-clock cap; incomplete, the audited SHA was NOT advanced" ;;
+      report "$status" "$(deliver_phase_resume_detail "$status")" ;;
     *)
-      report "$status" "the phase ended with a non-zero status; the audited SHA was NOT advanced" ;;
+      report "$status" "$(deliver_phase_resume_detail "$status")" ;;
   esac
   echo "[security-nightly] $PHASE done rc=$RC" | tee -a "$RUN_LOG"
 }
