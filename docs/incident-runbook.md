@@ -2838,6 +2838,57 @@ Peak incident: 2026-08-15, operator signed in as joemccann on app.radon.run,
 - **Recovery:** after deploy, the next weekday `radon-perf-twr` run or the next sFTP ingest republishes the full window; no data was lost (Turso `nav_history` / disk cache untouched).
 - **Regression:** `scripts/tests/test_flex_from_file.py::test_twr_from_file_keeps_stored_nav_history`.
 
+## ma-ratio-heartbeat-timeout
+
+**`radon-ma-ratio.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+after rows and the snapshot have committed, when the ok heartbeat times out.**
+Peak: 2026-09-26 22:58:12Z, page `265f8e2e…`.
+
+- **Mechanism:** Saturday 22:47 UTC fire. `/health/lite` `auth_state=unreachable`
+  (`upstream_dead=true`, port listening). The job logged
+  `IB skipped — gateway auth_state=unreachable` and continued on stored
+  member history (503 constituents). `upsert_ma_ratio_rows` and
+  `upsert_scan_snapshot` committed (`recorded_at` / `scan_time`
+  `2026-09-26T22:47:38`). `record_service_health("ok")` goes through
+  hrana (`HRANA_TIMEOUT_S=4`) and raised
+  `HranaHttpError: TimeoutError: The read operation timed out`.
+  `persist_result` did not catch it, so `data/ma_ratio.json` stayed on
+  the 2026-09-25 success. `main` called `record_failed_cycle`, whose
+  error heartbeat also timed out on the client; the applied statement
+  left `service_health` `state=error` with `finished_at` coalesced to
+  the ok attempt (`2026-09-26T22:58:04+00:00`). `Type=oneshot` has no
+  `Restart=`, so `NRestarts=0`. `requires_ib` is false. Same-window
+  sibling heartbeats also logged the read timeout; the Python canary
+  later succeeded, so this page is the uncaught heartbeat, not a
+  standing Turso outage.
+- **Detection:** journal `[ma-ratio] service_health heartbeat failed:
+  TimeoutError: The read operation timed out` then
+  `MA RATIO — failed: TimeoutError: The read operation timed out`.
+  `systemctl show radon-ma-ratio.service -p Result,NRestarts,ExecMainStatus`
+  → `exit-code` / `0` / `1`. Exec span is minutes, not
+  `TimeoutStartSec=2100`. Snapshot row for this `scan_time` exists.
+  JSON mtime stays on the previous success.
+- **Discriminating check:** Turso canary `SELECT 1` succeeds and the
+  snapshot / `ma_ratio_history.recorded_at` match this fire. Canary
+  fail → Turso platform, stand down. No snapshot row → the raise was
+  the row or snapshot write; do not treat that as this case.
+  `Result=signal` or exit 143 inside a deploy window is
+  `deploy-stop-clean-oneshot-signal`. `/health/lite` down → API, stand
+  down. The IB skip line plus a later `members:` line means the gateway
+  was unreachable and the sweep still finished; that is not the exit
+  cause (`requires_ib` is false, not `ib-gateway-grouped`).
+- **Remediation (code):** `_record_ok_heartbeat` catches the ok
+  heartbeat, logs, and still writes the JSON fallback. The oneshot
+  exits 0. Row and snapshot failures still raise and still land an
+  error heartbeat via `record_failed_cycle`. Do not restart-flap while
+  the canary is failing. The unit is not on
+  `RERUNNABLE_ONESHOT_UNITS`. After the fix deploys, the next 22:45 UTC
+  timer recovers it.
+- **Regression:**
+  `scripts/tests/test_ma_ratio.py::TestHeartbeatTimeout::test_main_exits_zero_when_the_ok_heartbeat_times_out`,
+  `test_row_upsert_failure_still_fails_the_oneshot`.
+- **Code:** `scripts/ma_ratio_scan.py` (`_record_ok_heartbeat`).
+
 ## Grok auto-response on iPhone P1 pages
 
 Canonical: [`grok-page-responder.md`](grok-page-responder.md).
