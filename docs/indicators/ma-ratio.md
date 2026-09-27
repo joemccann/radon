@@ -97,6 +97,8 @@ member's own session axis), `aggregate_ma_ratio(member_flags, sessions)`
   `record_service_health("ma-ratio", "ok", finished_at=scan_time)` → atomic JSON
   fallback `data/ma_ratio.json`. Turso is the source of truth. Weekend/holiday runs
   recompute the same rows (idempotent upsert) and act as unchanged-data heartbeats.
+  A timeout on that ok heartbeat is logged and does not fail the oneshot; the JSON
+  fallback is still written. A row or snapshot upsert failure still exits 1.
 - CLI: `--json` (payload to stdout; ALL progress to stderr), `--no-db` (skip all
   Turso I/O), `--backfill` (2y Yahoo range for every member — run once to seed).
 
