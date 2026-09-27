@@ -486,6 +486,7 @@ class TestBaselineComparison:
     def test_write_baseline_is_compact(self):
         payload = baseline_payload({
             "version": "2.0",
+            "backend_requested": "nvidia",
             "backend_used": "local",
             "fallback": False,
             "modes": {
@@ -500,9 +501,18 @@ class TestBaselineComparison:
             },
         })
         assert payload["placeholder"] is False
+        assert payload["backend_requested"] == "nvidia"
+        assert payload["backend_used"] == "local"
         assert set(payload["modes"]["hybrid"]) == {
             "hit_at_5", "mrr", "hit_at_1", "recall_at_10", "ndcg_at_10",
         }
+
+    def test_tracking_embedder_backend_is_read_after_call(self):
+        tracker = eval_golden_mod._TrackingEmbedder(lambda text: _unit_vector(0), "nvidia")
+        assert tracker.backend_used == "fts"
+        tracker("relay reconnect")
+        assert tracker.backend_used == "local"
+        assert tracker.fallback is True
 
 
 class TestSchemaValidation:

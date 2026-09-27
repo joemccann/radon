@@ -198,6 +198,7 @@ def baseline_payload(summary: dict) -> dict:
     return {
         "placeholder": False,
         "version": summary.get("version"),
+        "backend_requested": summary.get("backend_requested") or summary.get("backend"),
         "backend_used": summary.get("backend_used"),
         "fallback": summary.get("fallback"),
         "modes": {
@@ -491,9 +492,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         query_embedder=tracker,
         modes=requested_modes,
         backend_requested=requested_backend,
-        backend_used=tracker.backend_used if tracker is not None else "fts",
-        fallback=bool(tracker.fallback) if tracker is not None else False,
+        backend_used="fts",
+        fallback=False,
     )
+    # Keyword args are evaluated before run_golden, so read the tracker after
+    # it has actually embedded. Ranking is unchanged.
+    if tracker is not None:
+        summary["backend_used"] = tracker.backend_used
+        summary["fallback"] = bool(tracker.fallback)
     summary["backend"] = requested_backend
     summary["hit_at_k"] = summary["overall_hit_at_5"]
     if args.strict_backend and summary["fallback"]:
