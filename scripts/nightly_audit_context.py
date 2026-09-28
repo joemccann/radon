@@ -40,6 +40,9 @@ DIFF_EXCLUDES = (
     ":(exclude).claude/portable-prompts/**",
 )
 ISSUE_BODY_CAP = 12000
+#: Only comments from repository insiders may set the base or reach the agent's
+#: context; the rolling issues are public and anyone can comment on them.
+TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 
 
 def git(repo_dir: str, *args: str) -> str | None:
@@ -72,14 +75,16 @@ def rolling_issue(gh_bin: str, repo: str, label: str, timeout: int):
         return None
     number, title = rows[0]["number"], rows[0].get("title", "")
     out = gh(gh_bin, ["api", f"repos/{repo}/issues/{number}/comments?per_page=100", "--paginate",
-                      "--jq", ".[] | {html_url, created_at, body} | @json"], timeout)
+                      "--jq", ".[] | {html_url, created_at, body, author_association} | @json"], timeout)
     marked = []
     for line in (out or "").splitlines():
         try:
             row = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if isinstance(row, dict) and MARKER.search(row.get("body") or ""):
+        if not isinstance(row, dict) or row.get("author_association") not in TRUSTED_ASSOCIATIONS:
+            continue
+        if MARKER.search(row.get("body") or ""):
             marked.append(row)
     return number, title, marked
 

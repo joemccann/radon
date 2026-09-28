@@ -58,7 +58,8 @@ class TestCli:
     subprocess wiring (argv shape, --jq parsing, DELETE calls) is covered,
     not just the pure decision function."""
 
-    def _fake_gh(self, tmp_path: Path, *, open_refs: list[str], comment_ids: list[str], bodies: dict[str, str] | None = None) -> Path:
+    def _fake_gh(self, tmp_path: Path, *, open_refs: list[str], comment_ids: list[str], bodies: dict[str, str] | None = None,
+                 assoc: dict[str, str] | None = None) -> Path:
         log = tmp_path / "delete-log.txt"
         script = tmp_path / "fake-gh"
         script.write_text(
@@ -67,6 +68,7 @@ class TestCli:
             f"OPEN_REFS = {open_refs!r}\n"
             f"COMMENT_IDS = {comment_ids!r}\n"
             f"BODIES = {bodies or {}!r}\n"
+            f"ASSOC = {assoc or {}!r}\n"
             f"LOG = {str(log)!r}\n"
             "args = sys.argv[1:]\n"
             "if args[:2] == ['pr', 'list']:\n"
@@ -77,7 +79,8 @@ class TestCli:
             "        f.write(comment_id + '\\n')\n"
             "elif args[:1] == ['api']:\n"
             "    for cid in COMMENT_IDS:\n"
-            "        print(json.dumps({'id': cid, 'body': BODIES.get(cid, '')}))\n"
+            "        print(json.dumps({'id': cid, 'body': BODIES.get(cid, ''),\n"
+            "                          'author_association': ASSOC.get(cid, 'OWNER')}))\n"
             "else:\n"
             "    sys.exit(1)\n",
             encoding="utf-8",
@@ -141,6 +144,20 @@ class TestCli:
         proc = self._run(gh)
         assert proc.returncode == 0, proc.stderr
         assert sorted((tmp_path / "delete-log.txt").read_text().split()) == ["101", "103", "105"]
+
+    def test_an_outsider_checkpoint_neither_survives_nor_evicts_the_real_one(self, tmp_path):
+        gh = self._fake_gh(
+            tmp_path, open_refs=[], comment_ids=["101", "102", "103"],
+            bodies={
+                "101": "audited-through: aaaaaaa",
+                "102": "audited-through: bbbbbbb\nNO_SAFE_CHANGE",
+                "103": "audited-through: ccccccc\nNO_SAFE_CHANGE",
+            },
+            assoc={"102": "NONE", "103": "CONTRIBUTOR"},
+        )
+        proc = self._run(gh)
+        assert proc.returncode == 0, proc.stderr
+        assert sorted((tmp_path / "delete-log.txt").read_text().split()) == ["102", "103"]
 
     def test_no_comments_to_delete_is_a_clean_no_op(self, tmp_path):
         gh = self._fake_gh(tmp_path, open_refs=[], comment_ids=[])
@@ -364,26 +381,34 @@ class TestWrapperPostBeforePrune:
 class TestDurableState:
     def test_checkpoint_and_latest_report_can_share_one_comment(self):
         comments = [
-            {"id": "1", "body": "audited-through: aaaaaaa"},
-            {"id": "2", "body": "audited-through: bbbbbbb\nNO_ACTIONABLE_DRIFT"},
-            {"id": "3", "body": "**deliver** 0 PR(s), nothing to merge"},
+            {"id": "1", "author_association": "OWNER", "body": "audited-through: aaaaaaa"},
+            {"id": "2", "author_association": "OWNER", "body": "audited-through: bbbbbbb\nNO_ACTIONABLE_DRIFT"},
+            {"id": "3", "author_association": "OWNER", "body": "**deliver** 0 PR(s), nothing to merge"},
         ]
         assert prune.state_comment_ids(comments) == {"2"}
 
     def test_creation_order_not_listing_order_controls_authoritative_checkpoint(self):
         comments = [
-            {"id": "20", "body": "audited-through: bbbbbbb"},
-            {"id": "9", "body": "audited-through: aaaaaaa"},
+            {"id": "20", "author_association": "OWNER", "body": "audited-through: bbbbbbb"},
+            {"id": "9", "author_association": "OWNER", "body": "audited-through: aaaaaaa"},
         ]
         assert prune.state_comment_ids(comments) == {"20"}
 
     def test_quoted_placeholder_is_not_a_verified_checkpoint(self):
         assert prune.state_comment_ids([
-            {"id": "1", "body": "audited-through: <verified-origin-main-sha>"},
+            {"id": "1", "author_association": "OWNER", "body": "audited-through: <verified-origin-main-sha>"},
         ]) == set()
+
+    def test_only_repository_insiders_hold_state(self):
+        assert prune.state_comment_ids([
+            {"id": "1", "author_association": "MEMBER", "body": "audited-through: aaaaaaa"},
+            {"id": "2", "author_association": "COLLABORATOR", "body": "NO_SAFE_CHANGE"},
+            {"id": "3", "author_association": "NONE", "body": "audited-through: bbbbbbb\nNO_SAFE_CHANGE"},
+            {"id": "4", "body": "audited-through: ccccccc"},
+        ]) == {"1", "2"}
 
     def test_standalone_noop_report_survives_without_a_repository_log(self):
         assert prune.state_comment_ids([
-            {"id": "1", "body": "NO_SAFE_CHANGE"},
-            {"id": "2", "body": "NIGHTLY PHASE NO-OP: loop=testing phase=audit no findings"},
+            {"id": "1", "author_association": "OWNER", "body": "NO_SAFE_CHANGE"},
+            {"id": "2", "author_association": "OWNER", "body": "NIGHTLY PHASE NO-OP: loop=testing phase=audit no findings"},
         ]) == {"2"}

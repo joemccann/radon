@@ -95,7 +95,7 @@ def issue_comments(gh_bin: str, issue: str, *, timeout: int) -> list[dict[str, s
             f"repos/{{owner}}/{{repo}}/issues/{issue}/comments",
             "--paginate",
             "--jq",
-            ".[] | {id, body} | @json",
+            ".[] | {id, body, author_association} | @json",
         ],
         timeout=timeout,
     )
@@ -109,13 +109,16 @@ def issue_comments(gh_bin: str, issue: str, *, timeout: int) -> list[dict[str, s
             row = json.loads(line)
             if not isinstance(row, dict) or not str(row.get("id", "")).isdigit() or not isinstance(row.get("body"), str):
                 return None
-            comments.append({"id": str(row["id"]), "body": row["body"]})
+            comments.append({"id": str(row["id"]), "body": row["body"],
+                             "author_association": str(row.get("author_association") or "")})
     except json.JSONDecodeError:
         return None
     return comments
 
 
 CHECKPOINT = re.compile(r"\baudited-through:\s*`?[0-9a-f]{7,40}\b", re.IGNORECASE)
+#: The dead-man issues are public; only insiders' comments can hold loop state.
+TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 NOOP_REPORT = re.compile(r"\b(?:NO_ACTIONABLE_DRIFT\b|NO_SAFE_CHANGE\b|NIGHTLY PHASE NO-OP:)")
 
 
@@ -128,6 +131,8 @@ def state_comment_ids(comments: list[dict[str, str]]) -> set[str]:
     """
     checkpoint = report = None
     for comment in sorted(comments, key=lambda row: int(row["id"])):
+        if comment.get("author_association") not in TRUSTED_ASSOCIATIONS:
+            continue
         body = comment["body"]
         if CHECKPOINT.search(body):
             checkpoint = comment["id"]
