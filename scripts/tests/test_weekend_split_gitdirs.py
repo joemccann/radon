@@ -34,8 +34,6 @@ sys.path.insert(0, str(REPO / "scripts"))
 import weekend_prune  # noqa: E402
 
 WRAPPERS = {
-    "reliability": REPO / "scripts" / "reliability_weekend.sh",
-    "testing": REPO / "scripts" / "testing_weekend.sh",
     "security": REPO / "scripts" / "security_nightly.sh",
     "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
 }
@@ -200,7 +198,7 @@ def test_align_points_the_clone_at_a_clean_agent_gitdir(layout, loop):
 
 
 def test_the_agent_branches_commits_fetches_merge_trees_and_pushes_without_the_host_gitdir(layout):
-    assert layout.run(WRAPPERS["reliability"], "align_agent_gitdir").returncode == 0
+    assert layout.run(WRAPPERS["security"], "align_agent_gitdir").returncode == 0
     before = layout.host_state()
     _freeze(layout.host)  # the codex sandbox: host gitdir readable, not writable
     try:
@@ -221,15 +219,15 @@ def test_the_agent_branches_commits_fetches_merge_trees_and_pushes_without_the_h
 
 
 def test_commit_evidence_is_read_without_opening_the_agent_gitdir(layout):
-    assert layout.run(WRAPPERS["reliability"], "align_agent_gitdir").returncode == 0
-    before = layout.run(WRAPPERS["reliability"], "agent_git_ro rev-parse HEAD").stdout
+    assert layout.run(WRAPPERS["security"], "align_agent_gitdir").returncode == 0
+    before = layout.run(WRAPPERS["security"], "agent_git_ro rev-parse HEAD").stdout
     layout.agent_git("switch", "-q", "-c", "reliability/x")
     (layout.repo / "f").write_text("f\n", encoding="utf-8")
     layout.agent_git("add", "f")
     layout.agent_git("commit", "-q", "-m", "f")
-    after = layout.run(WRAPPERS["reliability"], "agent_git_ro rev-parse HEAD").stdout
+    after = layout.run(WRAPPERS["security"], "agent_git_ro rev-parse HEAD").stdout
     assert after.strip() == layout.agent_git("rev-parse", "HEAD").stdout.strip() != before.strip()
-    epoch = layout.run(WRAPPERS["reliability"], "agent_git_ro log -1 --format=%ct HEAD").stdout
+    epoch = layout.run(WRAPPERS["security"], "agent_git_ro log -1 --format=%ct HEAD").stdout
     assert int(epoch) > 0
 
 
@@ -264,7 +262,7 @@ def test_align_moves_an_empty_dated_branch_to_the_new_main(layout, loop):
 
 
 def test_align_never_moves_a_dated_branch_that_holds_work(layout):
-    wrapper = WRAPPERS["reliability"]
+    wrapper = WRAPPERS["security"]
     assert layout.run(wrapper, "PR_BRANCH_PREFIX=reliability/; align_agent_gitdir").returncode == 0
     layout.agent_git("switch", "-q", "-c", "reliability/2026-09-24", "origin/main")
     (layout.repo / "fix.txt").write_text("fix\n", encoding="utf-8")
@@ -280,7 +278,7 @@ def test_align_never_moves_a_dated_branch_that_holds_work(layout):
 
 
 def test_align_never_writes_through_a_planted_branch_directory_symlink(layout):
-    wrapper = WRAPPERS["reliability"]
+    wrapper = WRAPPERS["security"]
     assert layout.run(wrapper, "PR_BRANCH_PREFIX=reliability/; align_agent_gitdir").returncode == 0
     outside = layout.tmp / "outside"
     outside.mkdir()
@@ -296,7 +294,7 @@ def test_align_never_writes_through_a_planted_branch_directory_symlink(layout):
 
 
 def test_align_without_a_branch_prefix_leaves_dated_branches_alone(layout):
-    wrapper = WRAPPERS["reliability"]
+    wrapper = WRAPPERS["security"]
     assert layout.run(wrapper, "align_agent_gitdir").returncode == 0
     layout.agent_git("branch", "-q", "reliability/2026-09-24", "origin/main")
     old = layout.agent_git("rev-parse", "reliability/2026-09-24").stdout.strip()
@@ -325,14 +323,14 @@ def _plant(layout: Layout) -> Path:
 
 def test_planted_agent_config_is_live_for_the_agent_before_sanitize(layout):
     """Control: the vector works, so the next test's silence means something."""
-    assert layout.run(WRAPPERS["reliability"], "align_agent_gitdir").returncode == 0
+    assert layout.run(WRAPPERS["security"], "align_agent_gitdir").returncode == 0
     marker = _plant(layout)
     layout.agent_git("checkout", "-q", "-b", "probe")
     assert marker.exists()
 
 
 def test_host_git_never_reads_planted_agent_config(layout):
-    wrapper = WRAPPERS["reliability"]
+    wrapper = WRAPPERS["security"]
     assert layout.run(wrapper, "align_agent_gitdir").returncode == 0
     marker = _plant(layout)
     planted = layout.repo / "planted.git"
@@ -351,7 +349,7 @@ def test_host_git_never_reads_planted_agent_config(layout):
 
 
 def test_sanitize_drops_planted_config_hooks_and_gitfile_before_the_next_rung(layout):
-    wrapper = WRAPPERS["reliability"]
+    wrapper = WRAPPERS["security"]
     assert layout.run(wrapper, "align_agent_gitdir").returncode == 0
     marker = _plant(layout)
     (layout.agent / "commondir").write_text(str(layout.tmp), encoding="utf-8")
@@ -369,7 +367,7 @@ def test_sanitize_drops_planted_config_hooks_and_gitfile_before_the_next_rung(la
 
 
 def test_sanitize_never_writes_through_a_planted_symlink(layout):
-    wrapper = WRAPPERS["reliability"]
+    wrapper = WRAPPERS["security"]
     assert layout.run(wrapper, "align_agent_gitdir").returncode == 0
     victim = layout.host / "config"
     original = victim.read_bytes()
@@ -384,7 +382,7 @@ def test_sanitize_never_writes_through_a_planted_symlink(layout):
 
 
 def test_a_symlinked_agent_gitdir_is_replaced_not_followed(layout):
-    wrapper = WRAPPERS["reliability"]
+    wrapper = WRAPPERS["security"]
     layout.agent.parent.mkdir(parents=True)
     layout.agent.symlink_to(layout.host)
     original = (layout.host / "config").read_bytes()

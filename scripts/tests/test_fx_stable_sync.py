@@ -19,8 +19,6 @@ REPO = Path(__file__).resolve().parents[2]
 SYNC = REPO / "scripts" / "fx_stable_sync.sh"
 STABLE = "__HOME__/.local/share/radon/fx-stable"
 WRAPPERS = [
-    "reliability_weekend.sh",
-    "testing_weekend.sh",
     "security_nightly.sh",
     "security_deepsec_nightly.sh",
 ]

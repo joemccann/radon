@@ -42,8 +42,6 @@ BASH = shutil.which("bash") or "/bin/bash"
 # Every nightly loop wrapper. A loop missing here keeps the 2026-09-01
 # failure mode.
 LOOPS = {
-    "reliability": REPO / "scripts" / "reliability_weekend.sh",
-    "testing": REPO / "scripts" / "testing_weekend.sh",
     "security": REPO / "scripts" / "security_nightly.sh",
     "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
 }
@@ -78,7 +76,7 @@ TOOL_SKIP_OVERLOADED = "Claude Code skipped a tool (overloaded)"
 TOOL_SKIP_RATE_LIMITED = "Claude Code skipped a tool (rate-limited)"
 CASUAL_RATE_LIMITS = "the 500 mentioned rate limits in a timeout log"
 # The security wrapper refuses to call a phase OK without this; harmless noise
-# for the other four.
+# for DeepSec.
 COMPLETION = "SECURITY-NIGHTLY PHASE COMPLETE: audit"
 # The DeepSec wrapper greps its own prefix; each line is inert for the other.
 COMPLETION_DEEPSEC = "SECURITY-DEEPSEC PHASE COMPLETE: audit"
@@ -87,16 +85,11 @@ MARKERS = (
     ".radon-weekend-runner",
     ".radon-security-runner",
     ".radon-security-deepsec-runner",
-    ".radon-reliability-runner",
-    ".radon-testing-runner",
 )
 
 
-# 2026-09-06: the claude model ladder now exists in ONE loop. The other four
-# left the claude.ai subscription entirely — it is reserved for the security
-# loop — and run codex, then grok, then NVIDIA, then Cerebras. Their ladder
-# behaviour is asserted in test_provider_failover.py; what stays here is the
-# claude-rung behaviour, against the loop that still has claude rungs.
+# 2026-09-06: the claude model ladder exists only in the security loops; every
+# other nightly loop runs through scripts/runner/run_loop.sh.
 CLAUDE_LOOPS = ["security", "security-deepsec"]
 
 
@@ -105,7 +98,7 @@ def _clone(tmp_path: Path, wrapper: Path) -> Path:
     (repo / "scripts").mkdir(parents=True)
     shutil.copy2(wrapper, repo / "scripts" / wrapper.name)
     (repo / "scripts" / wrapper.name).chmod(0o755)
-    for helper in ("weekend_notify.py", "weekend_redact.py"):
+    for helper in ("weekend_notify.py",):
         (repo / "scripts" / helper).write_text("# stub\n", encoding="utf-8")
     for helper in ("security_claude_ladder.py", "security_claude_ladder.sh"):
         src = REPO / "scripts" / helper

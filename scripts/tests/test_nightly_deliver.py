@@ -29,13 +29,13 @@ URL2 = "https://github.com/joemccann/radon/pull/302"
 
 class TestVerdictLine:
     def test_ready_line_carries_loop_count_and_urls(self):
-        line = nd.ready_line("testing", [URL1, URL2])
-        assert line == f"NIGHTLY DELIVER READY: loop=testing prs=2 {URL1} {URL2}"
+        line = nd.ready_line("security", [URL1, URL2])
+        assert line == f"NIGHTLY DELIVER READY: loop=security prs=2 {URL1} {URL2}"
         assert line.startswith(nd.READY_PREFIX)
 
     def test_ready_line_with_nothing_to_merge(self):
-        assert nd.ready_line("reliability", []) == (
-            "NIGHTLY DELIVER READY: loop=reliability prs=0"
+        assert nd.ready_line("security-deepsec", []) == (
+            "NIGHTLY DELIVER READY: loop=security-deepsec prs=0"
         )
 
     def test_incomplete_line_names_the_failing_check(self):
@@ -48,7 +48,7 @@ class TestVerdictLine:
     def test_check_names_with_spaces_are_collapsed_to_one_token(self):
         # The wrapper splits the line on whitespace; a multi-word check name
         # must survive as one token.
-        line = nd.incomplete_line("testing", "Python tests (scripts)", URL1)
+        line = nd.incomplete_line("security", "Python tests (scripts)", URL1)
         assert "check=Python-tests-(scripts)" in line
 
     @pytest.mark.parametrize("loop", ["bogus", "", "reliability-weekend"])
@@ -61,14 +61,14 @@ class TestNotifyStatus:
     """The one string every dead-man channel carries for the deliver phase."""
 
     def test_ready_is_n_prs_green_ready_to_merge(self):
-        status = nd.notify_status(nd.ready_line("testing", [URL1, URL2]))
+        status = nd.notify_status(nd.ready_line("security", [URL1, URL2]))
         assert status == f"2 PR(s) green, ready to merge: {URL1} {URL2}"
 
     def test_zero_prs_is_nothing_to_merge(self):
         assert nd.notify_status(nd.ready_line("security", [])) == "0 PR(s), nothing to merge"
 
     def test_incomplete_names_the_check(self):
-        status = nd.notify_status(nd.incomplete_line("testing", "vitest", URL1))
+        status = nd.notify_status(nd.incomplete_line("security", "vitest", URL1))
         assert status == "INCOMPLETE: vitest"
 
     def test_no_verdict_is_incomplete(self):
@@ -78,9 +78,9 @@ class TestNotifyStatus:
     def test_last_verdict_line_wins(self):
         log = "\n".join([
             "chatter",
-            nd.incomplete_line("testing", "vitest", URL1),
+            nd.incomplete_line("security", "vitest", URL1),
             "fixed and pushed",
-            nd.ready_line("testing", [URL1]),
+            nd.ready_line("security", [URL1]),
             "trailing",
         ])
         assert nd.notify_status(nd.last_verdict(log)) == f"1 PR(s) green, ready to merge: {URL1}"
@@ -183,13 +183,13 @@ class TestRecord:
 
     def test_round_trip_and_private_location(self, tmp_path):
         path = nd.write_record(
-            "reliability", root=tmp_path, branch="reliability/2026-09-02",
+            "security-deepsec", root=tmp_path, branch="security-deepsec/2026-09-02",
             pr=301, url=URL1, status="incomplete", check="vitest", run_id="20260902T000007",
         )
-        assert path == tmp_path / ".reliability-deliver" / "record.json"
+        assert path == tmp_path / ".security-deepsec-deliver" / "record.json"
         assert (path.parent.stat().st_mode & 0o777) == 0o700
-        record = nd.read_record("reliability", root=tmp_path)
-        assert record["branch"] == "reliability/2026-09-02"
+        record = nd.read_record("security-deepsec", root=tmp_path)
+        assert record["branch"] == "security-deepsec/2026-09-02"
         assert record["pr"] == 301
         assert record["url"] == URL1
         assert record["status"] == "incomplete"
@@ -198,21 +198,21 @@ class TestRecord:
         assert record["updated_at"]
 
     def test_missing_record_is_none(self, tmp_path):
-        assert nd.read_record("testing", root=tmp_path) is None
+        assert nd.read_record("security", root=tmp_path) is None
 
     def test_green_record_clears_the_check(self, tmp_path):
-        nd.write_record("testing", root=tmp_path, branch="testing/2026-09-02", pr=5,
+        nd.write_record("security", root=tmp_path, branch="security/2026-09-02", pr=5,
                         url=URL1, status="incomplete", check="vitest")
-        nd.write_record("testing", root=tmp_path, branch="testing/2026-09-02", pr=5,
+        nd.write_record("security", root=tmp_path, branch="security/2026-09-02", pr=5,
                         url=URL1, status="green")
-        assert nd.read_record("testing", root=tmp_path)["check"] is None
+        assert nd.read_record("security", root=tmp_path)["check"] is None
 
     def test_a_record_is_resumable_only_while_incomplete(self, tmp_path):
-        nd.write_record("testing", root=tmp_path, branch="b", pr=5, url=URL1, status="green")
-        assert nd.resumable("testing", root=tmp_path) is None
-        nd.write_record("testing", root=tmp_path, branch="b", pr=5, url=URL1,
+        nd.write_record("security", root=tmp_path, branch="b", pr=5, url=URL1, status="green")
+        assert nd.resumable("security", root=tmp_path) is None
+        nd.write_record("security", root=tmp_path, branch="b", pr=5, url=URL1,
                         status="incomplete", check="vitest")
-        assert nd.resumable("testing", root=tmp_path)["pr"] == 5
+        assert nd.resumable("security", root=tmp_path)["pr"] == 5
 
 
 class TestEveryLoopIsAccepted:
@@ -222,8 +222,6 @@ class TestEveryLoopIsAccepted:
     @pytest.mark.parametrize("loop", sorted(nd.LOOPS))
     def test_the_wrapper_slug_is_a_loop_both_helpers_accept(self, loop):
         wrappers = {
-            "reliability": "reliability_weekend.sh",
-            "testing": "testing_weekend.sh",
             "security": "security_nightly.sh",
             "security-deepsec": "security_deepsec_nightly.sh",
         }
@@ -241,9 +239,9 @@ class TestCli:
         )
 
     def test_verdict_ready(self):
-        proc = self._run("verdict", "--loop", "testing", "--ready", URL1, URL2)
+        proc = self._run("verdict", "--loop", "security", "--ready", URL1, URL2)
         assert proc.returncode == 0, proc.stderr
-        assert proc.stdout.strip() == nd.ready_line("testing", [URL1, URL2])
+        assert proc.stdout.strip() == nd.ready_line("security", [URL1, URL2])
 
     def test_verdict_ready_with_no_urls(self):
         proc = self._run("verdict", "--loop", "security", "--ready")
@@ -251,34 +249,34 @@ class TestCli:
         assert proc.stdout.strip() == nd.ready_line("security", [])
 
     def test_verdict_incomplete(self):
-        proc = self._run("verdict", "--loop", "testing", "--incomplete", "vitest", "--pr-url", URL1)
+        proc = self._run("verdict", "--loop", "security", "--incomplete", "vitest", "--pr-url", URL1)
         assert proc.returncode == 0, proc.stderr
-        assert proc.stdout.strip() == nd.incomplete_line("testing", "vitest", URL1)
+        assert proc.stdout.strip() == nd.incomplete_line("security", "vitest", URL1)
 
     def test_verdict_refuses_an_unknown_loop(self):
         proc = self._run("verdict", "--loop", "bogus", "--ready")
         assert proc.returncode == 2
 
     def test_status_renders_the_operator_line(self):
-        proc = self._run("status", "--line", nd.ready_line("testing", [URL1]))
+        proc = self._run("status", "--line", nd.ready_line("security", [URL1]))
         assert proc.stdout.strip() == f"1 PR(s) green, ready to merge: {URL1}"
 
     def test_record_and_show(self, tmp_path):
         env = {"PATH": "/usr/bin:/bin", "RADON_WEEKEND_ROOT": str(tmp_path)}
         proc = self._run(
-            "record", "--loop", "testing", "--branch", "testing/2026-09-02",
+            "record", "--loop", "security", "--branch", "security/2026-09-02",
             "--pr", "5", "--url", URL1, "--status", "incomplete", "--check", "vitest",
             env=env,
         )
         assert proc.returncode == 0, proc.stderr
-        shown = self._run("show", "--loop", "testing", env=env)
+        shown = self._run("show", "--loop", "security", env=env)
         assert shown.returncode == 0, shown.stderr
         assert json.loads(shown.stdout)["pr"] == 5
         assert json.loads(shown.stdout)["resumable"] is True
 
     def test_show_without_a_record_is_empty_json(self, tmp_path):
         env = {"PATH": "/usr/bin:/bin", "RADON_WEEKEND_ROOT": str(tmp_path)}
-        shown = self._run("show", "--loop", "testing", env=env)
+        shown = self._run("show", "--loop", "security", env=env)
         assert shown.returncode == 0
         assert json.loads(shown.stdout) == {"resumable": False}
 
@@ -387,40 +385,39 @@ class TestDeliverStatusFromTheRecord:
 
     def test_status_from_record_renders_the_operator_string(self, tmp_path):
         nd.write_record(
-            "reliability", branch="reliability/2026-09-04", pr=301, url=URL1,
+            "security-deepsec", branch="security-deepsec/2026-09-04", pr=301, url=URL1,
             status="green", root=tmp_path,
         )
-        assert nd.status_from_record("reliability", root=tmp_path) == (
+        assert nd.status_from_record("security-deepsec", root=tmp_path) == (
             f"1 PR(s) green, ready to merge: {URL1}"
         )
 
     def test_an_incomplete_record_names_the_failing_check(self, tmp_path):
         nd.write_record(
-            "reliability", branch="reliability/2026-09-04", pr=301, url=URL1,
+            "security-deepsec", branch="security-deepsec/2026-09-04", pr=301, url=URL1,
             status="incomplete", check="ci / gate", root=tmp_path,
         )
-        assert nd.status_from_record("reliability", root=tmp_path) == "INCOMPLETE: ci / gate"
+        assert nd.status_from_record("security-deepsec", root=tmp_path) == "INCOMPLETE: ci / gate"
 
     def test_a_branch_only_record_is_reported_as_incomplete_but_resumable(self, tmp_path):
         """The wrapper writes this BEFORE launching the agent, so a cap kill
         mid-phase is genuinely resumable instead of leaving no trace."""
         nd.write_record(
-            "reliability", branch="reliability/2026-09-04", pr=None, url=None,
+            "security-deepsec", branch="security-deepsec/2026-09-04", pr=None, url=None,
             status="launched", root=tmp_path,
         )
-        status = nd.status_from_record("reliability", root=tmp_path)
+        status = nd.status_from_record("security-deepsec", root=tmp_path)
         assert status.startswith("INCOMPLETE"), status
-        assert nd.resumable("reliability", root=tmp_path) is not None
+        assert nd.resumable("security-deepsec", root=tmp_path) is not None
 
     def test_no_record_at_all_says_so(self, tmp_path):
-        assert nd.status_from_record("reliability", root=tmp_path) == (
+        assert nd.status_from_record("security-deepsec", root=tmp_path) == (
             "INCOMPLETE (no deliver record — not resumable)"
         )
 
 
 WRAPPERS = tuple(
     REPO / "scripts" / n for n in (
-        "reliability_weekend.sh", "testing_weekend.sh",
         "security_nightly.sh", "security_deepsec_nightly.sh",
     )
 )
@@ -431,7 +428,7 @@ def _uncommented(text: str) -> str:
 
 
 class TestWrapperDeliverRecordContract:
-    """R-611/R-613 (P1), all five loops."""
+    """R-611/R-613 (P1), every wrapper loop."""
 
     @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
     def test_a_branch_only_record_is_written_before_the_agent_starts(self, wrapper):

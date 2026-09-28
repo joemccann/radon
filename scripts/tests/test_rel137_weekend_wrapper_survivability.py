@@ -30,13 +30,9 @@ import pytest
 CLAUDE_RUNG_LADDER = "claude:claude-fable-5[1m]"
 
 REPO = Path(__file__).resolve().parents[2]
-RELIABILITY = REPO / "scripts" / "reliability_weekend.sh"
-TESTING = REPO / "scripts" / "testing_weekend.sh"
 SECURITY = REPO / "scripts" / "security_nightly.sh"
 SECURITY_DEEPSEC = REPO / "scripts" / "security_deepsec_nightly.sh"
 LOOPS = {
-    "reliability": RELIABILITY,
-    "testing": TESTING,
     "security": SECURITY,
     "security-deepsec": SECURITY_DEEPSEC,
 }
@@ -55,7 +51,7 @@ def _runner_clone(tmp_path: Path, name: str) -> Path:
     (repo / "scripts").mkdir(parents=True)
     (repo / ".radon-weekend-runner").write_text("", encoding="utf-8")
     # REL-180 (R-504): every wrapper requires its OWN loop marker as well.
-    for marker in (".radon-security-runner", ".radon-security-deepsec-runner", ".radon-reliability-runner", ".radon-testing-runner"):
+    for marker in (".radon-security-runner", ".radon-security-deepsec-runner"):
         (repo / marker).write_text("", encoding="utf-8")
     wrapper_src = LOOPS[name]
     wrapper = repo / "scripts" / wrapper_src.name
@@ -375,40 +371,6 @@ class TestTheCapIsEnforceable:
         assert "REFUSED" in calls, f"the fail-closed refusal was not reported: {calls!r}"
         pages = py_log.read_text(encoding="utf-8") if py_log.exists() else ""
         assert "pushover.net" in pages, f"the fail-closed refusal did not page: {pages!r}"
-
-
-# --- (c) R-385: the continuation re-ground cannot end the run silently -------
-
-
-class TestContinuationRegroundIsGuarded:
-    def test_the_reground_is_wrapped_and_clears_a_stale_index_lock(self):
-        body = _uncommented(RELIABILITY)
-        # Split gitdirs: the host checkout locks the HOST gitdir's index; the
-        # agent gitdir's index.lock is dropped by sanitize_agent_gitdir.
-        # clear_stale_git_locks (shared by all six wrappers since 2026-09-24)
-        # removes the host index.lock outright; the reground must call it.
-        reground = body[body.index("reground_for_continuation() {"):]
-        reground = reground[:reground.index("\n}")]
-        assert 'clear_stale_git_locks "$HOST_GITDIR"' in reground, (
-            "the cap SIGTERMs claude mid-commit, leaving index.lock; the "
-            "next round's checkout then fails"
-        )
-        assert 'rm -f -- "$g/index.lock"' in body
-        # Everything after `trap - ERR` runs with errexit and no ERR trap, so a
-        # BARE git call there ends the run with nothing reported at all.
-        tail = body[body.index("trap - ERR"):]
-        bare = [
-            ln.strip() for ln in tail.splitlines()
-            if re.match(r"^\s*git\s+(checkout|reset|clean)\b", ln)
-        ]
-        assert not bare, bare
-        assert "reground_for_continuation" in tail, tail
-        # ...and its failure is reported rather than swallowed.
-        idx = tail.index("reground_for_continuation")
-        line_start = tail.rindex("\n", 0, idx) + 1
-        call = tail[line_start:]
-        assert call.lstrip().startswith("if ! reground_for_continuation"), call[:120]
-        assert "report" in call[: call.index("fi")], call[: call.index("fi")]
 
 
 # --- (d) R-409: every network call is bounded -------------------------------

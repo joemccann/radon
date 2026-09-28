@@ -215,8 +215,6 @@ web/verify-regime-internals.mjs
 !/.claude/skills/security-deepsec/
 !/.claude/skills/incident-response/
 !/.claude/skills/long-horizon-jobs/
-!/.claude/skills/reliability-weekend/
-!/.claude/skills/testing-weekend/
 /.pi/skills/
 /skills-lock.json
 /radon-dark-full.png
@@ -273,7 +271,7 @@ docs/security-audit-*.html
 /.radon-systemd-credential
 /data/secret_store/
 
-# Weekend reliability runner marker (dedicated clone only, never committed)
+# Weekend runner marker (dedicated clone only, never committed)
 /.radon/
 .radon-weekend-runner
 # REL-180 (R-507): per-loop markers and the runner lock live untracked in every

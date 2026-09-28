@@ -21,8 +21,6 @@ REPO = Path(__file__).resolve().parents[2]
 BASH = shutil.which("bash") or "/bin/bash"
 
 LOOPS = {
-    "reliability": REPO / "scripts" / "reliability_weekend.sh",
-    "testing": REPO / "scripts" / "testing_weekend.sh",
     "security": REPO / "scripts" / "security_nightly.sh",
     "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
 }

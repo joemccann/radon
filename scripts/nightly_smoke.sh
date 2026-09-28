@@ -10,7 +10,7 @@
 set -u
 W="${RADON_WEEKEND_ROOT:-$HOME/radon-weekend}"
 LAUNCHD_PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$HOME/.bun/bin"
-REF="$W/.gitdirs/reliability.git"    # host gitdir: used only to read origin/main blobs
+REF="$W/.gitdirs/security.git"       # host gitdir: used only to read origin/main blobs
 FAILS=0; WARNS=0
 SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/radon-nightly-smoke.XXXXXX")" || exit 2
 trap 'rm -rf "$SCRATCH"' EXIT
@@ -90,8 +90,6 @@ loop() {  # label clone wrapper skill slug venv
   [[ -x "$v/bin/python" ]] && "$v/bin/python" -c 'import pytest' 2>/dev/null && ok "venv $v has pytest" || bad "venv $v missing or no pytest"
 }
 
-loop reliability-daily      "$W/radon"                  reliability_weekend.sh       reliability-weekend   reliability      reliability
-loop testing-daily          "$W/radon-testing"          testing_weekend.sh           testing-weekend       testing          testing
 loop security-daily         "$W/radon-security"         security_nightly.sh          security-nightly      security         security
 loop security-deepsec       "$W/radon-security-deepsec" security_deepsec_nightly.sh  security-deepsec      security-deepsec security-deepsec
 

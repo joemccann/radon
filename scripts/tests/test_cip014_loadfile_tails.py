@@ -51,8 +51,8 @@ LIFECYCLE_READ_ONLY = {
 }
 
 # Inventory on the same junit. A dropped or duplicated case moves the count.
-SUBSCRIPTION_TESTS = 600
-LIFECYCLE_TESTS = 134
+SUBSCRIPTION_TESTS = 300
+LIFECYCLE_TESTS = 96
 
 
 def _workflow() -> dict:

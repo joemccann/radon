@@ -16,9 +16,9 @@ BASH = shutil.which("bash") or "/bin/bash"
 
 # Every nightly loop wrapper. A loop missing here keeps the 2026-09-01
 # failure mode.
+# reliability, testing, ci-performance and documentation moved to
+# scripts/runner/run_loop.sh (docs/runner.md).
 LOOPS = {
-    "reliability": REPO / "scripts" / "reliability_weekend.sh",
-    "testing": REPO / "scripts" / "testing_weekend.sh",
     "security": REPO / "scripts" / "security_nightly.sh",
     "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
 }
@@ -45,7 +45,7 @@ TOOL_SKIP_OVERLOADED = "Claude Code skipped a tool (overloaded)"
 TOOL_SKIP_RATE_LIMITED = "Claude Code skipped a tool (rate-limited)"
 CASUAL_RATE_LIMITS = "the 500 mentioned rate limits in a timeout log"
 # The security wrapper refuses to call a phase OK without this; harmless noise
-# for the other four.
+# for DeepSec.
 COMPLETION = "SECURITY-NIGHTLY PHASE COMPLETE: audit"
 # The DeepSec wrapper greps its own prefix; each line is inert for the other.
 COMPLETION_DEEPSEC = "SECURITY-DEEPSEC PHASE COMPLETE: audit"
@@ -54,8 +54,6 @@ MARKERS = (
     ".radon-weekend-runner",
     ".radon-security-runner",
     ".radon-security-deepsec-runner",
-    ".radon-reliability-runner",
-    ".radon-testing-runner",
 )
 
 
@@ -64,24 +62,17 @@ def _clone(tmp_path: Path, wrapper: Path) -> Path:
     (repo / "scripts").mkdir(parents=True)
     shutil.copy2(wrapper, repo / "scripts" / wrapper.name)
     (repo / "scripts" / wrapper.name).chmod(0o755)
-    for helper in ("weekend_notify.py", "weekend_redact.py"):
+    for helper in ("weekend_notify.py",):
         (repo / "scripts" / helper).write_text("# stub\n", encoding="utf-8")
     for helper in (
         "security_claude_ladder.py",
         "security_claude_ladder.sh",
-        "nvidia_budget.py",
     ):
         src = REPO / "scripts" / helper
         if src.exists():
             shutil.copy2(src, repo / "scripts" / helper)
     for marker in MARKERS:
         (repo / marker).write_text("", encoding="utf-8")
-    # The four fallback loops drive codex and grok from a rendered prompt file
-    # under .claude/portable-prompts; a clone without them has no usable rung.
-    prompts = repo / ".claude" / "portable-prompts"
-    prompts.mkdir(parents=True, exist_ok=True)
-    for src in (REPO / ".claude" / "portable-prompts").glob("*.md"):
-        shutil.copy2(src, prompts / src.name)
     return repo
 
 
@@ -220,55 +211,10 @@ def _run(
 
 
 # --- provider ladder (2026-09-06) -------------------------------------------
-# The four non-security loops left the claude.ai subscription: they run on
-# codex, then grok, then NVIDIA and Cerebras (both hosted by the grok CLI, the
-# only agent CLI here that speaks /chat/completions). The harness below stubs
-# every provider binary and records the PROVIDER sequence attempted, not just
-# the model — a ladder that silently stays on one provider is the bug these
-# tests exist to catch.
-
-# 2026-09-07: the codex and grok rungs name NO model. The vendor migrates its
-# own account default forward (~/.codex/config.toml already rewrote gpt-5.4 ->
-# gpt-5.6-terra), and the pinned id is what produced the 400 that killed three
-# loops. nvidia and cerebras still name one because the grok CLI resolves them
-# through a `[model."<key>"]` config block: the rung names that stable KEY and
-# scripts/agent_cli_bootstrap.sh resolves the live id behind it.
-# 2026-09-27: the fallback loops share grok, codex, antigravity,
-# fx:nvidia, fx:cerebras. NVIDIA moved down after a documentation audit
-# logged 232 HTTP 429s in 17 minutes as the lead rung. A capped or rejected
-# entry may name a provider (every rung it owns) or a `provider:model` rung,
-# which is how the two fx rungs are told apart.
-FALLBACK_PROVIDER_ORDER = {
-    "reliability": ["grok", "codex", "antigravity", "fx", "fx"],
-    "testing": ["grok", "codex", "antigravity", "fx", "fx"],
-}
-
-
-def providers_before(loop, provider):
-    """The providers a cap must exhaust before `provider` is launched."""
-    order = FALLBACK_PROVIDER_ORDER[loop]
-    return tuple(order[: order.index(provider)])
-
-
-def _launch_of(tmp_path, loop, provider, phase="audit", **kw):
-    """Cap every rung ahead of `provider` and return (rung, argv line, tried)."""
-    capped = tuple(kw.pop("capped_providers", ())) + providers_before(loop, provider)
-    _proc, tried, _calls, argv = _run_multi(
-        tmp_path, loop, phase, capped_providers=capped, **kw
-    )
-    names = [t.split(":", 1)[0] for t in tried]
-    assert provider in names, (provider, tried)
-    idx = names.index(provider)
-    return tried[idx], argv[idx], tried
-
-
-FALLBACK_LADDER = [
-    "grok",
-    "codex",
-    "antigravity",
-    "fx:nvidia",
-    "fx:cerebras",
-]
+# The wrappers still carry the cross-provider rung code (codex, grok, agy, fx)
+# although security and DeepSec refuse any non-claude rung. The harness below
+# stubs every provider binary and records the PROVIDER sequence attempted, not
+# just the model, so a security run that launched anything but claude fails.
 CLAUDE_LADDER = ["claude:" + m for m in LADDER]
 
 # Real cap lines, captured from the CLIs rather than invented.
@@ -526,8 +472,7 @@ def _run_multi(
 
     prompts = tmp_path / "prompts"
     prompts.mkdir(exist_ok=True)
-    for skill in ("reliability-weekend", "testing-weekend",
-                  "security-nightly"):
+    for skill in ("security-nightly", "security-deepsec"):
         for ph in ("audit", "remediate", "deliver"):
             (prompts / (skill + "." + ph + ".md")).write_text("stub\n", encoding="utf-8")
 
@@ -543,8 +488,6 @@ def _run_multi(
         "RADON_WEEKEND_FX_BIN": str(bin_dir / "fx"),
         "RADON_WEEKEND_AGY_BIN": str(bin_dir / "agy"),
         "RADON_WEEKEND_RETRY_PAUSE_SECS": "0",
-        "RADON_NVIDIA_BUDGET_PATH": str(tmp_path / "nvidia-budget.json"),
-        "RADON_NVIDIA_BUDGET_JITTER": "0",
     }
     if provider_ladder is not None:
         env["RADON_WEEKEND_PROVIDER_LADDER"] = provider_ladder

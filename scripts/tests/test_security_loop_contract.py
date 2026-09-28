@@ -1,17 +1,15 @@
 """The nightly security loop's own identity and isolation contract.
 
-The five nightly loops share one wrapper shape, one runner-lock primitive and
-per-loop venvs, and all five fire at 00:00. The security loop is the
-one that must NEVER: run in a sibling clone or the operator checkout, receive a
+The wrapper loops (security and DeepSec) share one wrapper shape, one
+runner-lock primitive and per-loop venvs. The security loop is the one that
+must NEVER: run in a sibling clone or the operator checkout, receive a
 Radon credential, or leak a scanner artifact into the public repository. Those
 three properties are enforced by concrete, testable facts asserted here — the
 two-marker gate, the absence of any credential provisioning in its setup, and
 the sanitized dead-man. The shared survivability/dead-man contracts live in
 `test_weekend_loop_deadman.py`, `test_rel137_weekend_wrapper_survivability.py`
 and `test_weekend_wrapper_self_rewrite.py`; this loop is registered in all
-three. The security loop is deliberately NOT registered in
-`test_weekend_runner_env_provisioning.py`: that contract asserts a setup DOES
-provision `web/.env`, which is the exact opposite of rail 5 here.
+three.
 """
 
 from __future__ import annotations
@@ -22,16 +20,9 @@ import re
 import shutil
 import stat
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
-
-# The setup-execution stubs live beside this file; pytest's rootdir is the
-# repo, so the directory is not on sys.path by default.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from test_weekend_runner_env_provisioning import DUMMY, _stub_bin as _setup_stub_bin  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 WRAPPER = REPO / "scripts" / "security_nightly.sh"
@@ -45,6 +36,65 @@ LOG_DIR = "logs/security-nightly"
 SIBLING_CLONES = ("radon", "radon-testing", "radon-ci-performance", "radon-documentation")
 BASH = shutil.which("bash") or "/bin/bash"
 COMMENT_MARK = "<<<COMMENT>>>"
+
+# Operator credential files a setup run must never copy into this clone.
+DUMMY = {
+    ".env": "TURSO_DB_URL=libsql://dummy.invalid\nTURSO_AUTH_TOKEN=dummy\n",
+    ".env.ib-mode": "IB_GATEWAY_MODE=local\n",
+    "web/.env": "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_dummy\n",
+}
+
+
+def _setup_stub_bin(tmp_path: Path) -> Path:
+    """Every external the setup script shells out to, neutered."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    scripts = {
+        # `git config --get remote.origin.url` must answer; everything else
+        # (ls-remote / fetch / checkout / reset) just succeeds.
+        "git": (
+            "#!/bin/sh\n"
+            'case "$*" in *"config --get remote.origin.url"*)'
+            ' echo git@example.invalid:stub/radon.git;; esac\n'
+            "exit 0\n"
+        ),
+        "gh": "#!/bin/sh\nexit 0\n",
+        "claude": "#!/bin/sh\nexit 0\n",
+        "node": "#!/bin/sh\nexit 0\n",
+        "bun": "#!/bin/sh\nexit 0\n",
+        "caddy": "#!/bin/sh\nexit 0\n",
+        # Only the `bash 4+` toolchain check shells out to `bash`; this
+        # keeps [1/4] green on a macOS runner so the run reaches [2/4].
+        "bash": "#!/bin/sh\nexit 0\n",
+        "ssh": "#!/bin/sh\nexit 0\n",
+        "python3.13": "#!/bin/sh\nexit 0\n",
+        "launchctl": "#!/bin/sh\nexit 0\n",
+        # -lint succeeds; -extract feeds the closing printf a number.
+        "plutil": (
+            "#!/bin/sh\n"
+            'if [ "$1" = "-lint" ]; then exit 0; fi\n'
+            "echo 0\n"
+        ),
+        "timeout": (
+            "#!/bin/sh\n"
+            'while [ $# -gt 0 ]; do\n'
+            '  case "$1" in\n'
+            '    -k|--kill-after) shift 2 ;;\n'
+            '    --foreground|--preserve-status) shift ;;\n'
+            '    [0-9]*) shift; break ;;\n'
+            '    *) shift; break ;;\n'
+            '  esac\n'
+            'done\n'
+            'exec "$@"\n'
+        ),
+        "npm": "#!/bin/sh\nexit 0\n",
+        "npx": "#!/bin/sh\nexit 0\n",
+    }
+    for name, body in scripts.items():
+        path = bin_dir / name
+        path.write_text(body, encoding="utf-8")
+        path.chmod(0o755)
+    return bin_dir
 
 
 def _uncommented(path: Path) -> str:
@@ -467,20 +517,6 @@ class TestTheSetupIsCredentialFree:
         install = body[: body.index("python3.13 -m venv")]
         assert f'"$WEEKEND_ROOT/{sibling}"' in install, (
             f"setup re-creates the shared venv without checking {sibling}"
-        )
-
-    @pytest.mark.parametrize(
-        "setup_name",
-        [
-            "setup_reliability_weekend.sh",
-            "setup_testing_weekend.sh",
-        ],
-    )
-    def test_every_sibling_setup_stands_down_on_this_loops_lock(self, setup_name):
-        body = _uncommented(REPO / "scripts" / setup_name)
-        install = body[: body.index("python3.13 -m venv")]
-        assert f'"$WEEKEND_ROOT/{CLONE}"' in install, (
-            f"{setup_name} re-creates the shared venv without checking {CLONE}"
         )
 
 

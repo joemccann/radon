@@ -20,10 +20,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
 WRAPPERS = [
-    "reliability_weekend.sh",
     "security_nightly.sh",
     "security_deepsec_nightly.sh",
-    "testing_weekend.sh",
 ]
 
 GUARD_RE = re.compile(r"cat <<'GUARD'\n(.*?)\nGUARD\n", re.DOTALL)

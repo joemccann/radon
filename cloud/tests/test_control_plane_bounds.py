@@ -20,8 +20,8 @@ DEPLOY = REPO / "cloud" / "scripts" / "deploy.sh"
 HELPER = REPO / "cloud" / "scripts" / "deploy-root-helper.sh"
 ALLOWLIST = REPO / "cloud" / "config" / "auto-sync-units.txt"
 WRAPPERS = (
-    REPO / "scripts" / "testing_weekend.sh",
-    REPO / "scripts" / "reliability_weekend.sh",
+    REPO / "scripts" / "security_nightly.sh",
+    REPO / "scripts" / "security_deepsec_nightly.sh",
 )
 
 
@@ -84,11 +84,10 @@ class TestEnableLoopIsNotTruncated:
 # --------------------------------------------------------------------------
 # R-185 — an ordinary non-zero agent exit is not a wrapper crash
 # --------------------------------------------------------------------------
-# Where each wrapper's agent loop actually RUNS (reliability_weekend.sh keeps
-# the `timeout claude` call inside run_round(), defined above the loop).
+# Where each wrapper's agent loop actually RUNS.
 LOOP_MARKERS = {
-    "testing_weekend.sh": "local attempt=1",
-    "reliability_weekend.sh": "local round=1",
+    "security_nightly.sh": "local attempt=1",
+    "security_deepsec_nightly.sh": "local attempt=1",
 }
 
 

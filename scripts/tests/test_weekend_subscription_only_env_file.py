@@ -2,14 +2,12 @@
 
 from scripts.tests.weekend_subscription_only_lib import (
     TestABillingRerouteInAnIgnoredEnvFileRefusesTheRun,
-    TestTheProvisionedWebEnvIsScrubbedOfRerouteLines,
     TestASettingsLevelRerouteRefusesTheRun,
     test_the_security_clone_still_refuses_any_web_env,
 )
 
 __all__ = [
     TestABillingRerouteInAnIgnoredEnvFileRefusesTheRun,
-    TestTheProvisionedWebEnvIsScrubbedOfRerouteLines,
     TestASettingsLevelRerouteRefusesTheRun,
     test_the_security_clone_still_refuses_any_web_env,
 ]

@@ -23,8 +23,6 @@ SCRIPTS = REPO / "scripts"
 SCRIPT = SCRIPTS / "nightly_audit_context.py"
 # wrapper -> (skill, heading that opens its audit instructions)
 WRAPPERS = {
-    "reliability_weekend.sh": ("reliability-weekend", "## Mode: audit"),
-    "testing_weekend.sh": ("testing-weekend", "## Mode: audit"),
     "security_nightly.sh": ("security-nightly", "## Ground truth and change selection"),
     "security_deepsec_nightly.sh": ("security-deepsec", "## Audit pipeline"),
 }

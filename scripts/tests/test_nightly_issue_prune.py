@@ -23,8 +23,6 @@ import nightly_issue_prune as prune
 REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO / "scripts"
 WRAPPERS = (
-    SCRIPTS / "reliability_weekend.sh",
-    SCRIPTS / "testing_weekend.sh",
     SCRIPTS / "security_nightly.sh",
     SCRIPTS / "security_deepsec_nightly.sh",
 )

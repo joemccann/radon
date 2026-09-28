@@ -1,6 +1,6 @@
 """Nightly (and related) GitHub PR titles and bodies.
 
-The five unattended loops used to dump audit tables, SHA ranges, finding
+The unattended loops used to dump audit tables, SHA ranges, finding
 inventories and gate counts into the PR. Operators read the PR for what
 broke, what changed, and whether anything remains outside CI. Everything
 else stays on the rolling issue and in the loop ledgers.
@@ -23,16 +23,8 @@ import github_pr_output as pr
 REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO / "scripts"
 SKILLS = REPO / ".claude" / "skills"
-LOOPS = (
-    "reliability-weekend",
-    "testing-weekend",
-    "security-nightly",
-)
-WRAPPERS = (
-    SCRIPTS / "reliability_weekend.sh",
-    SCRIPTS / "testing_weekend.sh",
-    SCRIPTS / "security_nightly.sh",
-)
+LOOPS = ("security-nightly",)
+WRAPPERS = (SCRIPTS / "security_nightly.sh",)
 ISSUE_HEADING = "## Issue discovered"
 FIX_HEADING = "## What was done to fix it"
 NEXT_HEADING = "## Next"
@@ -154,23 +146,6 @@ class TestBulletedSections:
 
 
 class TestFormatPrTitle:
-    @pytest.mark.parametrize(
-        "loop, prefix",
-        [
-            ("reliability", "Reliability"),
-            ("testing", "Testing"),
-        ],
-    )
-    def test_loop_date_and_plain_language_issue(self, loop, prefix):
-        title = pr.format_pr_title(
-            loop=loop,
-            date="2026-09-01",
-            issue="The TLS handshake ran on the accept thread.",
-        )
-        assert title == (
-            f"{prefix} 2026-09-01: The TLS handshake ran on the accept thread."
-        )
-
     def test_security_title_is_date_only(self):
         issue = "A sanitized one-line description of the patched class."
         title = pr.format_pr_title(
@@ -181,32 +156,21 @@ class TestFormatPrTitle:
         body = _body(issue=issue, fix="The chokepoint now refuses the input.")
         assert issue in body
 
-    def test_bulleted_issue_collapses_to_a_single_line_title(self):
-        issue = (
-            "- **Validator**: contacted any host a caller named.\n"
-            "- **Wizard**: wrote unknown env keys on backend errors."
-        )
-        title = pr.format_pr_title(loop="reliability", date="2026-09-01", issue=issue)
-        assert "\n" not in title
-        assert title == (
-            "Reliability 2026-09-01: Validator: contacted any host a caller named."
-        )
-
     def test_unknown_loop_is_refused(self):
         with pytest.raises(ValueError, match="loop"):
             pr.format_pr_title(loop="factory", date="2026-09-01", issue="A.")
 
     def test_empty_issue_is_refused(self):
         with pytest.raises(ValueError, match="issue"):
-            pr.format_pr_title(loop="testing", date="2026-09-01", issue="  ")
+            pr.format_pr_title(loop="security", date="2026-09-01", issue="  ")
 
     @pytest.mark.parametrize(
         "loop, bad_date",
         [
             ("security", "2026-09-01 A sanitized one-line description of the patched class."),
-            ("reliability", "2026-09-01 The TLS handshake ran on the accept thread."),
+            ("security-deepsec", "2026-09-01 The TLS handshake ran on the accept thread."),
             ("security", "2026-9-1"),
-            ("testing", "09/01/2026"),
+            ("security-deepsec", "09/01/2026"),
             ("security-deepsec", "2026-13-01"),
         ],
     )
@@ -220,21 +184,6 @@ class TestFormatPrTitle:
         title = pr.format_pr_title(loop=loop, date="2026-09-01", issue=issue)
         assert len(title) <= pr.GITHUB_PR_TITLE_MAX
         assert title.startswith(pr.LOOP_TITLES[loop] + " 2026-09-01")
-
-    def test_title_fits_github_256_char_limit(self):
-        issue = (
-            "The TLS handshake ran on the accept thread, so one half-open "
-            "TCP connect froze Gateway control, healthz, and every mTLS "
-            "restart from the app host while the broker still looked up."
-        ) * 4
-        title = pr.format_pr_title(
-            loop="reliability", date="2026-09-01", issue=issue
-        )
-        assert len(title) <= pr.GITHUB_PR_TITLE_MAX
-        assert title.startswith("Reliability 2026-09-01:")
-        body = _body(issue=issue, fix="Handshake now runs per connection.")
-        assert issue[:80] in body
-
 
 class TestZeroFindingDeadman:
     def test_no_deploy_needed_variant(self):
@@ -260,7 +209,7 @@ class TestCli:
 
     def test_json_emits_title_and_body(self):
         proc = self._run(
-            "--loop", "reliability",
+            "--loop", "security-deepsec",
             "--date", "2026-09-01",
             "--issue", "The TLS handshake ran on the accept thread.",
             "--fix", "Handshake now runs per connection under a socket timeout.",
@@ -268,7 +217,7 @@ class TestCli:
         )
         assert proc.returncode == 0, proc.stderr
         payload = json.loads(proc.stdout)
-        assert payload["title"].startswith("Reliability 2026-09-01:")
+        assert payload["title"] == "DeepSec 2026-09-01"
         assert ISSUE_HEADING in payload["body"]
         assert payload["body"].rstrip().endswith(GREEN)
 
@@ -288,7 +237,7 @@ class TestCli:
 
     def test_text_emits_title_then_body(self):
         proc = self._run(
-            "--loop", "testing",
+            "--loop", "security-deepsec",
             "--date", "2026-08-31",
             "--issue", "A skipped test never ran.",
             "--fix", "The test now executes against HEAD.",
@@ -296,14 +245,14 @@ class TestCli:
         )
         assert proc.returncode == 0, proc.stderr
         title, body = proc.stdout.split("\n\n", 1)
-        assert title.startswith("Testing 2026-08-31:")
+        assert title == "DeepSec 2026-08-31"
         assert ISSUE_HEADING in body
         assert "No deploy needed." in body
 
     def test_json_still_exits_zero_when_the_issue_would_overflow_the_title(self):
         issue = ("One half-open TCP connect froze Gateway control. " * 20).strip()
         proc = self._run(
-            "--loop", "reliability",
+            "--loop", "security-deepsec",
             "--date", "2026-09-01",
             "--issue", issue,
             "--fix", "Handshake now runs per connection under a socket timeout.",
@@ -354,14 +303,6 @@ class TestSkillsInstructTheFormatter:
         assert "What was done to fix it" in text, loop
         assert GREEN in text, loop
 
-    def test_skills_still_keep_audit_detail_off_the_pr(self):
-        reliability = (SKILLS / "reliability-weekend" / "SKILL.md").read_text(
-            encoding="utf-8"
-        )
-        testing = (SKILLS / "testing-weekend" / "SKILL.md").read_text(encoding="utf-8")
-        assert "with the delta summary in the body" not in reliability
-        assert "update the PR body with: tasks DONE/BLOCKED" not in testing
-
     @pytest.mark.parametrize("loop", LOOPS)
     def test_pull_request_output_uses_guarded_creation_and_can_update(self, loop):
         raw = (SKILLS / loop / "SKILL.md").read_text(encoding="utf-8")
@@ -396,7 +337,7 @@ class TestIssueGenerationIsUntouched:
             assert "github_pr_output" not in text, path.name
 
     def test_pushover_and_issue_comment_helpers_do_not_import_it(self):
-        for name in ("weekend_notify.py", "weekend_redact.py"):
+        for name in ("weekend_notify.py",):
             text = (SCRIPTS / name).read_text(encoding="utf-8")
             assert "github_pr_output" not in text, name
 
@@ -439,16 +380,6 @@ class TestSecurityBodyIsRedacted:
         assert ISSUE_HEADING in payload["body"]
         assert FIX_HEADING in payload["body"]
         assert NEXT_HEADING in payload["body"]
-
-    def test_non_security_loops_keep_the_body_verbatim(self):
-        payload = pr.render(
-            loop="reliability",
-            date="2026-09-02",
-            issue=f"{self.ROUTE} hung the accept thread.",
-            fix="Handshake now runs per connection.",
-            next_action=None,
-        )
-        assert self.ROUTE in payload["body"]
 
     def test_cli_security_json_body_is_redacted(self):
         proc = subprocess.run(

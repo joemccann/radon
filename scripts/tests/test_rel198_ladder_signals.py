@@ -15,14 +15,10 @@ SCRIPTS = REPO / "scripts"
 BASH = shutil.which("bash") or "/bin/bash"
 
 LOOPS = {
-    "reliability": SCRIPTS / "reliability_weekend.sh",
-    "testing": SCRIPTS / "testing_weekend.sh",
     "security": SCRIPTS / "security_nightly.sh",
     "security-deepsec": SCRIPTS / "security_deepsec_nightly.sh",
 }
 PLISTS = {
-    "reliability": REPO / "config" / "com.radon.reliability-daily.plist",
-    "testing": REPO / "config" / "com.radon.testing-daily.plist",
     "security": REPO / "config" / "com.radon.security-daily.plist",
     "security-deepsec": REPO / "config" / "com.radon.security-deepsec.plist",
 }
@@ -50,7 +46,6 @@ class TestControlSignalHygiene:
         """R-532: `ROUND_PID=\"\"` before `kill_round_group` made orphan
         reaping after a normal exit dead code (the guard early-returns)."""
         body = _uncommented(LOOPS[loop])
-        # reliability names it run_round; the siblings inline it in run_phase.
         wait_at = body.index('wait "$ROUND_PID"')
         tail = body[wait_at : wait_at + 1500]
         kill_at = tail.index("kill_round_group")

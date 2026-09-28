@@ -19,7 +19,7 @@ class TestWeekendPayload:
         payload = build_weekend_payload(
             user="u",
             token="t",
-            loop="testing",
+            loop="security",
             phase="audit",
             status="OK",
             pr_url="",
@@ -28,7 +28,7 @@ class TestWeekendPayload:
         assert payload["priority"] == 0
         assert "retry" not in payload
         assert "expire" not in payload
-        assert payload["title"] == "radon testing audit"
+        assert payload["title"] == "radon security audit"
         assert payload["message"] == "OK"
         assert payload["user"] == "u"
         assert payload["token"] == "t"
@@ -37,13 +37,13 @@ class TestWeekendPayload:
         payload = build_weekend_payload(
             user="u",
             token="t",
-            loop="reliability",
+            loop="security-deepsec",
             phase="remediate",
             status="TIMEOUT after 21600s",
             pr_url="",
             detail="log: remediate-20260823T000000.log",
         )
-        assert payload["title"] == "radon reliability remediate"
+        assert payload["title"] == "radon security-deepsec remediate"
         assert payload["message"] == (
             "TIMEOUT after 21600s\nlog: remediate-20260823T000000.log"
         )
@@ -52,7 +52,7 @@ class TestWeekendPayload:
         payload = build_weekend_payload(
             user="u",
             token="t",
-            loop="testing",
+            loop="security",
             phase="remediate",
             status="FAILED (exit 3)",
             pr_url="https://github.com/joemccann/radon/pull/91",
@@ -68,7 +68,7 @@ class TestWeekendPayload:
         payload = build_weekend_payload(
             user="u",
             token="t",
-            loop="testing",
+            loop="security",
             phase="audit",
             status="OK",
             pr_url="https://github.com/joemccann/radon/pull/91",
@@ -85,7 +85,7 @@ class TestSend:
         monkeypatch.delenv("PUSHOVER_TOKEN", raising=False)
         with patch("weekend_notify._http_post") as post:
             err = notify_weekend_phase(
-                loop="testing", phase="audit", status="OK", pr_url="", detail=""
+                loop="security", phase="audit", status="OK", pr_url="", detail=""
             )
         assert err is None
         post.assert_not_called()
@@ -95,7 +95,7 @@ class TestSend:
         monkeypatch.setenv("PUSHOVER_TOKEN", "t")
         with patch("weekend_notify._http_post", return_value=(200, b"")) as post:
             err = notify_weekend_phase(
-                loop="reliability",
+                loop="security-deepsec",
                 phase="audit",
                 status="OK",
                 pr_url="",
@@ -106,14 +106,14 @@ class TestSend:
         url, payload = post.call_args[0][:2]
         assert "pushover.net" in url
         assert payload["priority"] == 0
-        assert payload["title"] == "radon reliability audit"
+        assert payload["title"] == "radon security-deepsec audit"
 
     def test_transport_error_does_not_raise(self, monkeypatch):
         monkeypatch.setenv("PUSHOVER_USER", "u")
         monkeypatch.setenv("PUSHOVER_TOKEN", "t")
         with patch("weekend_notify._http_post", side_effect=OSError("down")):
             err = notify_weekend_phase(
-                loop="testing", phase="audit", status="OK", pr_url="", detail=""
+                loop="security", phase="audit", status="OK", pr_url="", detail=""
             )
         assert err is not None
         assert "down" in err
@@ -122,7 +122,7 @@ class TestSend:
 class TestMainAlwaysExitsZero:
     ARGV = [
         "--loop",
-        "testing",
+        "security",
         "--phase",
         "audit",
         "--status",
@@ -214,7 +214,7 @@ class TestProloguePhaseStillPages:
     test, which reproduced the held-lock refusal end to end.
     """
 
-    LOOPS = ("reliability", "testing", "security")
+    LOOPS = ("security", "security-deepsec")
 
     @pytest.mark.parametrize("loop", LOOPS)
     def test_the_prologue_page_is_sent(self, loop, monkeypatch):

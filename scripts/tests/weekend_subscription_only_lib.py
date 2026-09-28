@@ -9,9 +9,8 @@ Operator rule (2026-09-01): a reroute variable the launch shell happens to
 carry is IGNORED, not fatal. The wrapper names it on stderr (never the value),
 unsets it, and runs on the subscription. It still refuses what `unset` cannot
 reach: a key file a scanner reloads itself, or a Claude Code settings file
-carrying an apiKeyHelper / env reroute. The product's web/.env, provisioned
-into the four Radon-credential clones, is scrubbed of reroute lines in place
-so neither the dev server nor pytest's load_dotenv can hand the key onward.
+carrying an apiKeyHelper / env reroute. The security clones get no web/.env
+at all: one present refuses the run.
 
 CIP-014: pytest does not collect this module. The cases are imported by
 test_weekend_subscription_only_*.py so ``--dist loadfile`` can put the
@@ -32,12 +31,9 @@ REPO = Path(__file__).resolve().parents[2]
 BASH = shutil.which("bash") or "/bin/bash"
 
 LOOPS = {
-    "reliability": REPO / "scripts" / "reliability_weekend.sh",
-    "testing": REPO / "scripts" / "testing_weekend.sh",
     "security": REPO / "scripts" / "security_nightly.sh",
     "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
 }
-CREDENTIAL_LOOPS = sorted(loop for loop in LOOPS if loop not in ("security", "security-deepsec"))
 
 # Every var the installed CLI (2.1.272, re-derived 2026-09-15) honors as an
 # off-subscription route: `strings` on the binary, filtered to key / token /
@@ -99,8 +95,6 @@ MARKERS = (
     ".radon-weekend-runner",
     ".radon-security-runner",
     ".radon-security-deepsec-runner",
-    ".radon-reliability-runner",
-    ".radon-testing-runner",
 )
 
 
@@ -109,16 +103,10 @@ def _clone(tmp_path: Path, wrapper: Path) -> Path:
     (repo / "scripts").mkdir(parents=True)
     shutil.copy2(wrapper, repo / "scripts" / wrapper.name)
     (repo / "scripts" / wrapper.name).chmod(0o755)
-    for helper in ("weekend_notify.py", "weekend_redact.py"):
+    for helper in ("weekend_notify.py",):
         (repo / "scripts" / helper).write_text("# stub\n", encoding="utf-8")
     for marker in MARKERS:
         (repo / marker).write_text("", encoding="utf-8")
-    # The four fallback loops drive codex and grok from a rendered prompt file
-    # under .claude/portable-prompts; a clone without them has no usable rung.
-    prompts = repo / ".claude" / "portable-prompts"
-    prompts.mkdir(parents=True, exist_ok=True)
-    for src in (REPO / ".claude" / "portable-prompts").glob("*.md"):
-        shutil.copy2(src, prompts / src.name)
     return repo
 
 
@@ -200,9 +188,8 @@ def _audit(
         # 2026-09-06: the billing rails in this file are about the ANTHROPIC
         # key path — an apiKeyHelper or ANTHROPIC_API_KEY must never move a
         # claude rung off the subscription. That rail only has meaning on a
-        # claude rung, so pin one here. The four loops' real default ladder
-        # (codex, grok, NVIDIA, Cerebras) is asserted in
-        # test_provider_registry_parity.py, and its own rails in
+        # claude rung, so pin one here. The security loops' claude-only
+        # ladder is asserted in test_provider_registry_parity.py and
         # test_provider_failover.py.
         "RADON_WEEKEND_PROVIDER_LADDER": "claude:claude-fable-5[1m]",
     }
@@ -443,42 +430,6 @@ WEB_ENV = (
     "CLAUDE_CODE_USE_VERTEX=0\n"
     "TURSO_DB_URL=libsql://dummy\n"
 )
-
-
-@pytest.mark.parametrize("loop", CREDENTIAL_LOOPS)
-class TestTheProvisionedWebEnvIsScrubbedOfRerouteLines:
-    def test_reroute_lines_are_removed_in_place_and_the_run_proceeds(
-        self, tmp_path, loop
-    ):
-        proc, env_dump, repo = _audit(tmp_path, loop, env_file=("web/.env", WEB_ENV))
-        out = proc.stdout + proc.stderr
-        assert proc.returncode == 0, (proc.returncode, out)
-        assert env_dump.exists(), f"{loop}: the agent never ran"
-        web_env = repo / "web" / ".env"
-        body = web_env.read_text(encoding="utf-8")
-        assert KEY not in body, (
-            f"{loop}: web/.env still carries ANTHROPIC_API_KEY; the dev server "
-            "and pytest's load_dotenv would hand it to every child"
-        )
-        assert "CLAUDE_CODE_USE_BEDROCK=1" not in body, body
-        assert "UW_TOKEN=uw-dummy\n" in body and "TURSO_DB_URL=libsql://dummy\n" in body, (
-            f"{loop}: the scrub dropped a non-reroute line: {body!r}"
-        )
-        assert "CLAUDE_CODE_USE_VERTEX=0\n" in body, (
-            f"{loop}: a falsy flag locks the reroute OFF and stays: {body!r}"
-        )
-        assert web_env.stat().st_mode & 0o777 == 0o600, oct(web_env.stat().st_mode)
-        assert "IGNORING" in out and "web/.env" in out, out
-        assert KEY not in out, out
-        assert "ANTHROPIC_API_KEY" not in _agent_env(env_dump)
-
-    def test_a_clean_web_env_is_left_untouched(self, tmp_path, loop):
-        clean = "UW_TOKEN=uw-dummy\nTURSO_DB_URL=libsql://dummy\n"
-        proc, env_dump, repo = _audit(tmp_path, loop, env_file=("web/.env", clean))
-        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
-        assert env_dump.exists()
-        assert (repo / "web" / ".env").read_text(encoding="utf-8") == clean
-        assert "IGNORING" not in proc.stdout + proc.stderr
 
 
 def test_the_security_clone_still_refuses_any_web_env(tmp_path):

@@ -1,9 +1,10 @@
-"""The provider block is copied into five wrappers; only a test stops drift.
+"""The provider block is copied into both wrappers; only a test stops drift.
 
 Each loop is a standalone script by design — a shared library would put one
-file in the blast radius of all five nightly runs. The cost of that choice is
-five copies of the same eleven functions, and the only thing keeping them
-identical is this file.
+file in the blast radius of both nightly wrapper runs (security and DeepSec;
+the other loops moved to scripts/runner/run_loop.sh). The cost of that choice
+is two copies of the same functions, and the only thing keeping them identical
+is this file.
 """
 
 from __future__ import annotations
@@ -40,12 +41,10 @@ SHARED = [
     "is_fx_loop_guard",
     "launch_round",
 ]
-# launch_round is identical within each family. Security + DeepSec pin
-# `--effort medium` on the claude arm (2026-09-21 Fable-limit night);
-# the fallback loops do not take that arm and stay on their copy.
+# Security + DeepSec pin `--effort medium` on the claude arm (2026-09-21
+# Fable-limit night); launch_round is checked on its own below.
 IDENTICAL_ACROSS_ALL = [n for n in SHARED if n != "launch_round"]
 SECURITY_LOOPS = ("security", "security-deepsec")
-FALLBACK_LOOPS = ("reliability", "testing")
 
 
 def _fn(text: str, name: str) -> str:
@@ -59,7 +58,7 @@ def _fn(text: str, name: str) -> str:
 
 
 @pytest.mark.parametrize("fn", IDENTICAL_ACROSS_ALL)
-def test_the_helper_is_byte_identical_across_the_five_wrappers(fn):
+def test_the_helper_is_byte_identical_across_the_wrappers(fn):
     bodies = {n: _fn(p.read_text(encoding="utf-8"), fn) for n, p in LOOPS.items()}
     assert len(set(bodies.values())) == 1, (
         f"{fn}() has drifted between loops: "
@@ -67,12 +66,10 @@ def test_the_helper_is_byte_identical_across_the_five_wrappers(fn):
     )
 
 
-def test_launch_round_is_identical_within_each_ladder_family():
+def test_launch_round_is_identical_across_the_security_wrappers():
     bodies = {n: _fn(p.read_text(encoding="utf-8"), "launch_round") for n, p in LOOPS.items()}
     security = {bodies[n] for n in SECURITY_LOOPS}
-    fallback = {bodies[n] for n in FALLBACK_LOOPS}
     assert len(security) == 1, "security launch_round drifted between wrappers"
-    assert len(fallback) == 1, "fallback launch_round drifted between wrappers"
 
 
 @pytest.mark.parametrize("loop", SECURITY_LOOPS)
@@ -102,23 +99,6 @@ def test_begin_phase_resets_exhaustion_but_keeps_the_rung(loop):
     assert "ALL_PROVIDERS_EXHAUSTED=0" in fn
     assert "EXHAUSTED_PROVIDERS=" in fn
     assert "RUNG_INDEX" not in fn, "rung carry must be preserved"
-
-
-FALLBACK_PROVIDER_ORDER = _h.FALLBACK_PROVIDER_ORDER
-
-
-def test_the_four_fallback_loops_run_their_pinned_ladders_and_never_name_claude():
-    for loop, expected in FALLBACK_PROVIDER_ORDER.items():
-        body = LOOPS[loop].read_text(encoding="utf-8")
-        m = re.search(r'^PROVIDER_LADDER="\$\{RADON_WEEKEND_PROVIDER_LADDER:-(.+?)\}"$',
-                      body, re.M)
-        assert m, f"{loop}: no default provider ladder"
-        rungs = m.group(1).split()
-        assert [r.split(":")[0] for r in rungs] == expected, (loop, rungs)
-        assert not any(r.startswith("claude:") for r in rungs), (
-            f"{loop}: the claude.ai subscription is reserved for the security "
-            f"loop: {rungs}"
-        )
 
 
 @pytest.mark.parametrize("loop", SECURITY_LOOPS)

@@ -26,8 +26,6 @@ REPO = Path(__file__).resolve().parents[2]
 
 # loop id -> (wrapper, branch prefix)
 LOOPS = {
-    "reliability": ("reliability_weekend.sh", "reliability/"),
-    "testing": ("testing_weekend.sh", "testing/"),
     "security": ("security_nightly.sh", "security/"),
 }
 LOOP_IDS = sorted(LOOPS)

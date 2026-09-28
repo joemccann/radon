@@ -43,19 +43,19 @@ Where things live when you are done:
 
 ```bash
 # Homebrew first if the Mac has none: https://brew.sh
-brew install git gh coreutils python@3.13 uv bun
+brew install git gh coreutils python@3.13 uv bun node
 brew install --cask codex
 sudo pmset -a sleep 0 displaysleep 10     # the Mac must stay awake at night
 ```
 
-`coreutils` provides `timeout`; the runner exits 69 without it. `codex` is shared from Homebrew; the other agent CLIs are installed per user in step 4.
+`coreutils` provides `timeout`; the runner exits 69 without it. `node` runs Vitest for the testing loop (bun installs the packages, `npx vitest run` runs them); without it that loop leaves Vitest to PR CI. `codex` is shared from Homebrew; the other agent CLIs are installed per user in step 4.
 
 ### 2. Install the runner (operator)
 
 ```bash
 /usr/bin/git clone https://github.com/joemccann/radon.git /tmp/radon-runner-install
 /bin/bash /tmp/radon-runner-install/scripts/runner/install.sh --print-plist documentation   # review
-sudo /bin/bash /tmp/radon-runner-install/scripts/runner/install.sh documentation ci-performance
+sudo /bin/bash /tmp/radon-runner-install/scripts/runner/install.sh documentation ci-performance testing reliability
 ```
 
 It asks for your sudo password, then `User password:` for the new `_radonbot` account. Choose a password and save it (your password manager, or `security add-generic-password -s radon-runnerbot-login -a _radonbot -w`); step 5 reuses it. The `No clear text password ... FDE` warning and `Home directory is assigned (not created!)` are expected: the script creates the home right after. It ends with one `installed com.radon.runner.<loop>` line per loop.
@@ -78,7 +78,7 @@ The prompt shows `_radonbot@...`. Before running a check, confirm its output pat
 
 ### 4. Agent CLIs (bot shell)
 
-Install and sign in to every agent the loop's `AGENTS` names (`grok codex agy fx:nvidia fx:cerebras` for documentation and ci-performance). The sign-ins print a URL or a device code: open it in your own browser, signed in to the account that owns the subscription.
+Install and sign in to every agent the loop's `AGENTS` names (`grok codex agy fx:nvidia fx:cerebras` for every loop installed today). The sign-ins print a URL or a device code: open it in your own browser, signed in to the account that owns the subscription.
 
 | Agent | Install (bot shell) | Sign in (bot shell) | Binary the runner uses |
 |---|---|---|---|
@@ -228,6 +228,8 @@ It passes when the log starts with `starting grok`, a draft PR on `documentation
 |---|---|
 | documentation | Cut over: runs at 03:00 on branch `documentation/<date>` as `_radonbot`; the old wrapper, setup script, LaunchAgent and skill are deleted |
 | ci-performance | Cut over: runs at 00:20 on branch `ci-performance/<date>`; `scripts/ci_performance_nightly.sh` and its LaunchAgent are deleted |
-| testing, reliability, security, DeepSec | Not started; still on `scripts/<loop>_*.sh` (see `docs/operations.md`) |
+| testing | Cut over: runs at 00:10 on branch `testing/<date>` (4h budget, for the closing three rounds of the full gates); `scripts/testing_weekend.sh`, its setup script, LaunchAgent, skill and portable prompts are deleted. It gets no scoped Turso or Unusual Whales key: the suites need none |
+| reliability | Cut over: runs at 00:00 on branch `reliability/<date>`; `scripts/reliability_weekend.sh`, its setup script, LaunchAgent, skill and portable prompts are deleted. Full pytest, `cloud/tests` and Vitest run in PR CI; the night runs focused suites and the drills |
+| security, DeepSec | Not started; still on `scripts/security_nightly.sh` and `scripts/security_deepsec_nightly.sh` (see `docs/operations.md`) |
 
 Cutover per loop: compare three nights of shadow PRs, set `BRANCH_PREFIX` to the old prefix, unload the old LaunchAgent, then delete the old wrapper, setup script, helpers and their tests.

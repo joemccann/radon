@@ -1,7 +1,8 @@
 """Nightly GitHub ISSUE comments: wrapper dead-man vs agent three-section.
 
-The five loops post to rolling issues (security #204, testing #83, reliability
-#81, CI performance #196, documentation #202). Wrapper runner-health comments
+The loops post to rolling issues (security #204, testing #83, reliability
+#81, CI performance #196, documentation #202); only security and DeepSec
+still run through a wrapper. Wrapper runner-health comments
 are a PHASE STAMP status dead-man line. Non-security agents still write the
 three-section update. Wrappers create the issue once with a timeless
 rolling-dead-man description; run history stays in comments.
@@ -28,14 +29,10 @@ import nightly_issue_format as nif  # noqa: E402
 CLAUDE_RUNG_LADDER = "claude:claude-fable-5[1m]"
 
 WRAPPERS = [
-    REPO / "scripts" / "reliability_weekend.sh",
-    REPO / "scripts" / "testing_weekend.sh",
     REPO / "scripts" / "security_nightly.sh",
     REPO / "scripts" / "security_deepsec_nightly.sh",
 ]
 SKILLS = [
-    REPO / ".claude" / "skills" / "reliability-weekend" / "SKILL.md",
-    REPO / ".claude" / "skills" / "testing-weekend" / "SKILL.md",
     REPO / ".claude" / "skills" / "security-nightly" / "SKILL.md",
 ]
 HEADINGS = (
@@ -496,20 +493,11 @@ class TestWrappersAndSkillsUseTheTemplate:
     def test_pr_title_body_generation_is_untouched_in_skills(self):
         # #229 owns PR title/body via github_pr_output.py. Issue comments are
         # this branch; do not retarget PR generation at nightly_issue_format.
-        testing = (
-            REPO / ".claude" / "skills" / "testing-weekend" / "SKILL.md"
-        ).read_text(encoding="utf-8")
-        reliability = (
-            REPO / ".claude" / "skills" / "reliability-weekend" / "SKILL.md"
-        ).read_text(encoding="utf-8")
         security = (
             REPO / ".claude" / "skills" / "security-nightly" / "SKILL.md"
         ).read_text(encoding="utf-8")
-        for text in (testing, reliability, security):
-            assert "scripts/github_pr_output.py" in text
-            assert "nightly_issue_format.py" not in text
-        assert "Title shape: `Testing <date>" in testing
-        assert "Title shape: `Reliability <date>" in reliability
+        assert "scripts/github_pr_output.py" in security
+        assert "nightly_issue_format.py" not in security
         assert "Title shape: `Security <YYYY-MM-DD>`" in security
 
 

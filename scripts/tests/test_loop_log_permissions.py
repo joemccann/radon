@@ -24,8 +24,6 @@ REPO = Path(__file__).resolve().parents[2]
 BASH = "/bin/bash"
 
 WRAPPERS = {
-    "reliability": "reliability_weekend.sh",
-    "testing": "testing_weekend.sh",
     "security": "security_nightly.sh",
 }
 LOOP_IDS = sorted(WRAPPERS)

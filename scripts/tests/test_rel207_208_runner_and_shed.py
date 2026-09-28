@@ -50,8 +50,6 @@ class TestSetupInstallsDevRequirements:
     @pytest.mark.parametrize(
         "setup",
         [
-            "setup_reliability_weekend.sh",
-            "setup_testing_weekend.sh",
             "setup_security_nightly.sh",
         ],
     )
@@ -65,17 +63,6 @@ class TestSetupInstallsDevRequirements:
         assert "requirements-dev.txt" in body, setup
         assert "pytest_asyncio" in body or "pytest-asyncio" in body, (
             f"{setup} does not assert the dev deps actually imported"
-        )
-
-    def test_the_runner_clone_gets_a_venv_link_for_the_kb_mcp(self):
-        body = "\n".join(
-            line
-            for line in (SCRIPTS / "setup_reliability_weekend.sh").read_text().splitlines()
-            if not line.lstrip().startswith("#")
-        )
-        assert re.search(r"ln -sfn? .*\.venv", body), (
-            ".mcp.json's radon-kb uses a relative .venv/bin/python; the "
-            "runner clone needs the link or the MCP fails ENOENT every boot"
         )
 
 

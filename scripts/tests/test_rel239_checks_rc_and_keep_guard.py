@@ -27,8 +27,6 @@ import nightly_deliver as nd
 REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO / "scripts"
 WRAPPERS = (
-    SCRIPTS / "reliability_weekend.sh",
-    SCRIPTS / "testing_weekend.sh",
     SCRIPTS / "security_nightly.sh",
 )
 

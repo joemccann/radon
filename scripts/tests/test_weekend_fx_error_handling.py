@@ -1,16 +1,17 @@
-"""fx InvalidChunk / notice-429 / loop-guard / docs ladder / security deliver.
+"""fx InvalidChunk / notice-429 / loop-guard classifiers / security deliver.
 
 2026-09-27: the Mac mini runner's six nightly wrappers shared copy-pasted fx
 handling that dropped InvalidChunk, threw away ``[notice] ⚠ Rate limited ·
 HTTP 429`` lines, and treated fx's tool-loop guard as a bare FAILED or
-rc=0-INCOMPLETE. These fixtures are the real log lines.
+rc=0-INCOMPLETE. These fixtures are the real log lines. The loops that ran fx
+rungs moved to scripts/runner/run_loop.sh; the classifiers stay in the two
+security wrappers and are pinned here.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
-import plistlib
 import re
 import subprocess
 import sys
@@ -29,7 +30,6 @@ REPO = _h.REPO
 BASH = _h.BASH
 LOOPS = _h.LOOPS
 LOOP_IDS = sorted(LOOPS)
-_run_multi = _h._run_multi
 
 FX_INVALID_CHUNK = "fx: InvalidChunk"
 FX_NOTICE_429 = (
@@ -51,15 +51,6 @@ FX_LOOP_IDENTICAL = (
     "action before continuing."
 )
 FX_LOOP_VALIDATION = "Repeated shell validation failures stopped the tool loop."
-SHARED_LADDER = "grok codex antigravity fx:nvidia fx:cerebras"
-PLISTS = {
-    "reliability": REPO / "config" / "com.radon.reliability-daily.plist",
-    "testing": REPO / "config" / "com.radon.testing-daily.plist",
-}
-PLIST_MINUTES = {
-    "reliability": 0,
-    "testing": 10,
-}
 
 
 def _extract_fn(src: str, name: str) -> str:
@@ -125,19 +116,6 @@ class TestFxInvalidChunkIsTransient:
         )
         assert proc.returncode == 0, (proc.stdout, proc.stderr)
 
-    def test_an_invalid_chunk_is_retried_then_the_next_rung_runs(self, tmp_path, loop):
-        if loop in ("security", "security-deepsec"):
-            pytest.skip("claude-only ladder; classifier is still shared")
-        proc, tried, _calls, _argv = _run_multi(
-            tmp_path, loop, "audit",
-            provider_ladder="fx:nvidia grok",
-            reject_providers=("fx",),
-            reject_output=FX_INVALID_CHUNK,
-        )
-        assert [t.split(":", 1)[0] for t in tried][:4] == ["fx", "fx", "fx", "grok"], (
-            tried, proc.stdout, proc.stderr
-        )
-        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
 
 
 @pytest.mark.parametrize("loop", LOOP_IDS)
@@ -175,18 +153,6 @@ class TestFxNotice429IsAQuotaWall:
         assert "NOT_A_WALL" in proc.stdout
         assert "IS_A_WALL" not in proc.stdout
 
-    def test_a_failed_notice_429_drops_a_rung(self, tmp_path, loop):
-        if loop in ("security", "security-deepsec"):
-            pytest.skip("claude-only ladder; detector is still shared")
-        proc, tried, _calls, _argv = _run_multi(
-            tmp_path, loop, "audit",
-            provider_ladder="fx:nvidia grok",
-            reject_providers=("fx",),
-            reject_output="\n".join([FX_NOTICE_429, FX_NOTICE_429_WAIT]),
-        )
-        names = [t.split(":", 1)[0] for t in tried]
-        assert names[:2] == ["fx", "grok"], (tried, proc.stdout, proc.stderr)
-        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
 
 
 @pytest.mark.parametrize("loop", LOOP_IDS)
@@ -201,21 +167,6 @@ class TestFxLoopGuardDropsARung:
         )
         assert proc.returncode == 0, (line, proc.stdout, proc.stderr)
 
-    @pytest.mark.parametrize("line", (FX_LOOP_IDENTICAL, FX_LOOP_VALIDATION))
-    def test_a_loop_guard_advances_the_ladder(self, tmp_path, loop, line):
-        if loop in ("security", "security-deepsec"):
-            pytest.skip("claude-only ladder; detector is still shared")
-        proc, tried, _calls, _argv = _run_multi(
-            tmp_path, loop, "audit",
-            provider_ladder="fx:nvidia grok",
-            reject_providers=("fx",),
-            reject_output=line,
-        )
-        names = [t.split(":", 1)[0] for t in tried]
-        assert names[:2] == ["fx", "grok"], (tried, proc.stdout, proc.stderr)
-        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
-        assert proc.returncode not in (1,)
-
 
 def _finished_audit(loop: str, citation: str | None = None) -> str:
     """Column-0 phase marker, optionally after an indented fixture citation."""
@@ -227,9 +178,7 @@ def _finished_audit(loop: str, citation: str | None = None) -> str:
     elif loop == "security-deepsec":
         lines.append("SECURITY-DEEPSEC PHASE COMPLETE: audit run_id=ok")
     else:
-        lines.append(
-            f"NIGHTLY PHASE NO-OP: loop={loop} phase=audit reason=finished"
-        )
+        raise AssertionError(f"no phase marker for {loop}")
     return "\n".join(lines) + "\n"
 
 
@@ -237,9 +186,8 @@ def _finished_audit(loop: str, citation: str | None = None) -> str:
 class TestFxLoopGuardIgnoresAQuotedFixture:
     """R-709 / REL-290: a citation of the fixture is not the CLI's verdict.
 
-    Security and DeepSec refuse a non-Claude ladder, so the advance is
-    executed on the four fx loops. The classifier itself is run on all six;
-    provider parity keeps that function byte-identical.
+    Security and DeepSec refuse a non-Claude ladder, so only the classifier
+    is run here; provider parity keeps that function byte-identical.
     """
 
     @pytest.mark.parametrize("line", (FX_LOOP_IDENTICAL, FX_LOOP_VALIDATION))
@@ -273,66 +221,6 @@ class TestFxLoopGuardIgnoresAQuotedFixture:
             "is_fx_loop_guard\n",
         )
         assert proc.returncode != 0, (loop, proc.stdout, proc.stderr)
-
-
-_FX_LOOPS = ("reliability", "testing")
-
-
-@pytest.mark.parametrize("loop", _FX_LOOPS)
-class TestFxLoopGuardDoesNotDiscardAFinishedPhase:
-    def test_indented_citation_with_exit_0_and_marker_does_not_advance(
-        self, tmp_path, loop
-    ):
-        proc, tried, _calls, _argv = _run_multi(
-            tmp_path, loop, "audit",
-            provider_ladder="fx:nvidia grok",
-            agent_output=_finished_audit(loop, FX_LOOP_IDENTICAL),
-        )
-        names = [t.split(":", 1)[0] for t in tried]
-        assert names == ["fx"], (tried, proc.returncode, proc.stdout, proc.stderr)
-        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
-        assert "hit a tool-loop guard" not in proc.stdout
-
-    def test_a_final_line_sentence_advances_once(self, tmp_path, loop):
-        proc, tried, _calls, _argv = _run_multi(
-            tmp_path, loop, "audit",
-            provider_ladder="fx:nvidia grok",
-            agent_output=FX_LOOP_IDENTICAL,
-        )
-        names = [t.split(":", 1)[0] for t in tried]
-        assert names[:2] == ["fx", "grok"], (tried, proc.stdout, proc.stderr)
-        assert names.count("fx") == 1, tried
-        assert "hit a tool-loop guard" in proc.stdout
-
-    def test_a_clean_log_accepts_exit_0(self, tmp_path, loop):
-        proc, tried, _calls, _argv = _run_multi(
-            tmp_path, loop, "audit",
-            provider_ladder="fx:nvidia grok",
-            agent_output=_finished_audit(loop),
-        )
-        names = [t.split(":", 1)[0] for t in tried]
-        assert names == ["fx"], (tried, proc.returncode, proc.stdout, proc.stderr)
-        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
-
-
-@pytest.mark.parametrize("loop", _FX_LOOPS)
-def test_each_fx_loop_default_ladder_is_the_shared_ladder(loop):
-    body = LOOPS[loop].read_text(encoding="utf-8")
-    match = re.search(
-        r'^PROVIDER_LADDER="\$\{RADON_WEEKEND_PROVIDER_LADDER:-(.+?)\}"$',
-        body,
-        re.M,
-    )
-    assert match, "no default provider ladder"
-    assert match.group(1) == SHARED_LADDER, match.group(1)
-
-
-def test_launchd_start_times_are_the_light_baseline_offset():
-    for loop, path in PLISTS.items():
-        with path.open("rb") as handle:
-            when = plistlib.load(handle)["StartCalendarInterval"]
-        assert when["Hour"] == 0, (loop, when)
-        assert when["Minute"] == PLIST_MINUTES[loop], (loop, when)
 
 
 def _security_deliver_driver(tmp_path: Path, loop: str, log_text: str, record: dict | None):
