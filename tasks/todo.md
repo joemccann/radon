@@ -8625,9 +8625,10 @@ CI repair review: befea93d preserved21 new gateway/service component regressions
 
 ## Dependency graph and checklist
 - [x] T1 depends_on: [] Confirm PR state, CI wiring, demo database identity, and the Linux cleanup tests.
-- [ ] T2 depends_on: [T1] Provision both repository CI demo URL secrets and verify a push executes the isolation guard.
-- [ ] T3 depends_on: [T1] Reproduce and repair deploy child cleanup on Linux CI, preserving the fixed test timeout.
+- [x] T2 depends_on: [T1] Provision both repository CI demo URL secrets and verify their registration.
+- [x] T3 depends_on: [T1] Reproduce and repair deploy child cleanup on Linux CI, preserving the fixed test timeout.
 - [ ] T4 depends_on: [T2, T3] Open follow-up PR, verify every applicable exact-head CI check, and send the required notification.
 
 ## Review
-- Pending.
+- Both secrets point to Turso `radon-demo` and appear in `gh secret list`; the push-only guard will run on the next main push.
+- Linux cloud CI on `5f7c36ab` red-failed at the preheld gateway gate (status 66). The fixture now reports it inactive, reaches the hanging stop child, and Linux cloud CI passed on `6156ac79`; the harness remains `timeout=5`.
