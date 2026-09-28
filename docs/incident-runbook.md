@@ -2935,6 +2935,50 @@ after the IB-skip path has already chosen the cached payload.** Peak:
   `_persist_snapshot`), `cloud/services/radon-iv-spread.service`
   (`TimeoutStartSec=300`).
 
+## grok-page-responder-ledger-timeout
+
+**`radon-grok-page-responder.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when a watchdog_pages ledger read times out.** Peak:
+2026-09-27 00:15:04Z, page `a1c550c1…`.
+
+- **Mechanism:** `Type=oneshot` poller, no `Restart=`. Between 00:13:22Z
+  and 00:17:17Z, hrana (`HRANA_TIMEOUT_S=4`) raised
+  `HranaHttpError: TimeoutError: The read operation timed out` inside
+  `complete_page` (00:13:22Z) and `claim_page` (00:17:17Z). `run_cycle`
+  only caught that on the heartbeat path (`grok page heartbeat
+  non-fatal`). The ledger raise skipped the ok heartbeat and escaped,
+  so the interpreter exited 1 and systemd recorded `Result=exit-code`,
+  `NRestarts=0`. The watchdog then paged this unit about itself.
+  `requires_ib` is false. Later cycles in the same hour logged
+  `pending: 0` and exited 0, including cycles whose heartbeat timed out
+  and was already non-fatal. `{"sync": "ff-failed"}` in the same journal
+  is a dirty or diverged clone; that path logs and continues.
+- **Detection:** journal traceback ends at
+  `db.hrana_http.HranaHttpError: TimeoutError: The read operation timed out`
+  with `grok_page_responder.py` `run_cycle` calling `claim_page` or
+  `complete_page`. `systemctl show radon-grok-page-responder.service -p
+  Result,NRestarts` → `exit-code` / `0` on that invocation. Exec span is
+  seconds, not `TimeoutStartSec=3900`.
+- **Discriminating check:** Python Turso canary `SELECT 1` succeeds
+  (45 ms at diagnosis). Canary fail → Turso platform, stand down. Do not
+  restart-flap. `/health/lite` `auth_state=unreachable` is not this exit
+  (`requires_ib` is false, not `ib-gateway-grouped`).
+  `/api/service-health` 401 without the probe token is anonymous, not
+  this case. No `/home/radon/.radon-deploy-transition.json`.
+  `Result=signal` or exit 143 inside a deploy window is
+  `deploy-stop-clean-oneshot-signal`. A ledger statement error (not a
+  read timeout) still fails the oneshot on purpose.
+- **Remediation (code):** a ledger `TimeoutError` logs
+  `grok page ledger non-fatal`, skips the ok heartbeat, releases the
+  lock, and exits 0. The timer starts the next cycle in 30s. A claim
+  the server already applied stays until `STALE_CLAIM_SECS` (2h); a
+  claim that never landed is eligible on that next cycle. Other
+  `HranaHttpError` values still propagate. The unit is not on
+  `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `scripts/tests/test_grok_page_ledger_timeout.py::TestLedgerReadTimeout`.
+- **Code:** `scripts/grok_page_responder.py` (`_ledger_read_timeout`).
+
 ## Grok auto-response on iPhone P1 pages
 
 Canonical: [`grok-page-responder.md`](grok-page-responder.md).
