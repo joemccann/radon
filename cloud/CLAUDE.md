@@ -467,8 +467,9 @@ Spec: [`docs/tradingview-integration.md`](../docs/tradingview-integration.md).
 `RADON_SLM_TAGGER_MODE` stays `off`. Spec: [`docs/ml/newsfeed-slm-tagger.md`](../docs/ml/newsfeed-slm-tagger.md).
 
 `setup-vps.sh` also inventories `radon-knowledge-eval.{service,timer}` so a
-fresh host has the unit files. `enable_services` skips both until a human
-reviews the draft golden set. The repo ships an initial live baseline in
+fresh host has the unit files. `enable_services` skips both on every setup.
+It does not inspect the baseline file. Leave that skip until a human reviews
+the draft golden set. The repo ships an initial live baseline in
 `scripts/knowledge/golden_eval_baseline.json`; enabling the timer before
 that review would page on a draft gate. The unit
 writes no `service_health` row (`EXEMPT_UNITS` `gap:`); a failed run pages

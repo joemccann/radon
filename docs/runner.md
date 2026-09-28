@@ -18,7 +18,7 @@ Safety is where the runner runs, not what the script checks:
 |---|---|
 | Agent cannot read operator files, ssh keys, `~/.radon`, Keychain | Dedicated macOS user `_radonbot`, standard (non-admin), hidden |
 | Agent cannot edit the runner | `run_loop.sh` and `loops/*.env` installed root-owned in `/usr/local/radon-runner` |
-| No production credential in reach | The clone gets no `.env`; `~/.radon-runner.env` holds only `GH_TOKEN` and Pushover keys (hidden from the agent) |
+| No production credential in the clone | The clone gets no `.env`. `~/.radon-runner.env` may hold only `GH_TOKEN`, `PUSHOVER_USER` and `PUSHOVER_TOKEN`. The agent runs as `_radonbot`, so it can read that file. The runner unsets the Pushover keys in the agent process; `GH_TOKEN` stays so the agent can push. Do not put a production credential or an admin token in that file or anywhere in the bot's home |
 | Agent cannot merge or push `main` | A separate GitHub machine account with the Write role on this repo only, used through its classic `repo` token, plus a `main` ruleset requiring 1 approval with the Repository admin role as bypass actor. A token of the operator's own account would not do: it acts as the admin and bypasses the ruleset |
 
 The ruleset is applied at cutover. Before then every nightly loop still runs as the operator, whose admin token bypasses it anyway, and `scripts/codemap_nightly.sh` merges its own PR with that token.
@@ -33,7 +33,7 @@ Where things live when you are done:
 |---|---|---|
 | `/usr/local/radon-runner/run_loop.sh`, `loops/<loop>.env` | root | The runner and each loop's config. The agent cannot edit them |
 | `/Library/LaunchDaemons/com.radon.runner.<loop>.plist` | root | The nightly schedule, run as `_radonbot` |
-| `/Users/_radonbot/.radon-runner.env` | bot, 600 | `GH_TOKEN`, `PUSHOVER_USER`, `PUSHOVER_TOKEN`. Hidden from the agent |
+| `/Users/_radonbot/.radon-runner.env` | bot, 600 | `GH_TOKEN`, `PUSHOVER_USER`, `PUSHOVER_TOKEN`. The agent can read it (it runs as the bot); the runner unsets the Pushover keys in the agent process. Never a production or admin credential |
 | `/Users/_radonbot/.radon/agent-cli/env` | bot, 600 | `NVIDIA_API_KEY`, `CEREBRAS_API_KEY` for the fx agents |
 | `/Users/_radonbot/radon-runner/work/<loop>` | bot | Tonight's clone, deleted and re-cloned every run |
 | `/Users/_radonbot/radon-runner/logs/<loop>/<date>.log` | bot, 700 | The run log, kept 14 days |
