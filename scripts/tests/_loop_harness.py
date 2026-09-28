@@ -20,7 +20,6 @@ LOOPS = {
     "reliability": REPO / "scripts" / "reliability_weekend.sh",
     "testing": REPO / "scripts" / "testing_weekend.sh",
     "ci-performance": REPO / "scripts" / "ci_performance_nightly.sh",
-    "documentation": REPO / "scripts" / "documentation_nightly.sh",
     "security": REPO / "scripts" / "security_nightly.sh",
     "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
 }
@@ -59,7 +58,6 @@ MARKERS = (
     ".radon-reliability-runner",
     ".radon-testing-runner",
     ".radon-ci-performance-runner",
-    ".radon-documentation-runner",
 )
 
 
@@ -244,7 +242,6 @@ def _run(
 # which is how the two fx rungs are told apart.
 FALLBACK_PROVIDER_ORDER = {
     "ci-performance": ["grok", "codex", "antigravity", "fx", "fx"],
-    "documentation": ["grok", "codex", "antigravity", "fx", "fx"],
     "reliability": ["grok", "codex", "antigravity", "fx", "fx"],
     "testing": ["grok", "codex", "antigravity", "fx", "fx"],
 }
@@ -532,7 +529,7 @@ def _run_multi(
 
     prompts = tmp_path / "prompts"
     prompts.mkdir(exist_ok=True)
-    for skill in ("reliability-weekend", "testing-weekend", "documentation-nightly",
+    for skill in ("reliability-weekend", "testing-weekend",
                   "ci-performance", "security-nightly"):
         for ph in ("audit", "remediate", "deliver"):
             (prompts / (skill + "." + ph + ".md")).write_text("stub\n", encoding="utf-8")

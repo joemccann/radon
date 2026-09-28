@@ -22,7 +22,6 @@ LOOP_PLISTS = [
     "com.radon.reliability-daily.plist",
     "com.radon.testing-daily.plist",
     "com.radon.ci-performance-daily.plist",
-    "com.radon.documentation-daily.plist",
     "com.radon.security-daily.plist",
     "com.radon.security-deepsec.plist",
 ]

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Format GitHub ISSUE write-ups for the four non-security nightly agents.
+"""Format GitHub ISSUE write-ups for the non-security nightly agents.
 
 Operators read the rolling issues (security, testing, reliability, CI
-performance, documentation). Status dumps and pointers to a log file on a
+performance). Status dumps and pointers to a log file on a
 machine are not a write-up.
 
 This module is the agent three-section spec and CLI. Wrapper runner-health

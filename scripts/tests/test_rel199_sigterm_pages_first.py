@@ -12,7 +12,6 @@ LOOPS = [
     "reliability_weekend.sh",
     "testing_weekend.sh",
     "security_nightly.sh",
-    "documentation_nightly.sh",
     "ci_performance_nightly.sh",
 ]
 

@@ -681,7 +681,6 @@ _LOOPS = {
     "reliability": ("com.radon.reliability-daily.plist", "reliability_weekend.sh"),
     "testing": ("com.radon.testing-daily.plist", "testing_weekend.sh"),
     "ci-performance": ("com.radon.ci-performance-daily.plist", "ci_performance_nightly.sh"),
-    "documentation": ("com.radon.documentation-daily.plist", "documentation_nightly.sh"),
     "security": ("com.radon.security-daily.plist", "security_nightly.sh"),
 }
 
@@ -690,7 +689,6 @@ _LOOP_SKILLS = {
     "reliability": "reliability-weekend",
     "testing": "testing-weekend",
     "ci-performance": "ci-performance",
-    "documentation": "documentation-nightly",
     "security": "security-nightly",
 }
 
@@ -1150,7 +1148,7 @@ class TestNightlyRecoveryOwnerDrift:
     def test_runner_permissions_link_launcher_without_copied_roots(self):
         doc = (_ROOT / "docs/operations.md").read_text()
         assert 'writable_roots=["$REPO/.git"' not in doc
-        assert "../scripts/documentation_nightly.sh" in doc
+        assert "../scripts/ci_performance_nightly.sh" in doc
         assert "Codex sandbox writable roots omit that host gitdir" in doc
         assert ".gitdirs-agent/<loop>.git" in doc
 

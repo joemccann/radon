@@ -99,7 +99,6 @@ class TestTheWire:
     def test_the_prompt_file_names_this_loop_and_phase(self, tmp_path, loop):
         skill = {
             "ci-performance": "ci-performance",
-            "documentation": "documentation-nightly",
             "reliability": "reliability-weekend",
             "testing": "testing-weekend",
         }[loop]
