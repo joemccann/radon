@@ -8621,3 +8621,13 @@ Dependency graph: T1 -> T2 -> T3 -> T4. Gateway implementation, header compositi
 Review: independent gateway/coverage reviews completed; shared command lock and source freshness guards implemented. TypeScript static check passed. Manual dark desktop and320px mobile fixture review confirmed direct header access, grouped Gateway commands, service inventory reflow, primary action within752px and no horizontal overflow. Tests authored for GitHub CI; no local suites or live infrastructure actions run.
 
 CI repair review: befea93d preserved21 new gateway/service component regressions; one existing copy assertion required explicit unavailable start/stop/restart wording. Cloud CI exposed an existing pipefail race in required/active unit membership checks (2261 passed,1 failed): pure-shell exact matching replaces early-exit grep pipelines and adds4096-unit topology coverage without relaxing required-unit or oneshot replay guards. No local suites.
+# Task: PR #766 follow-up, demo CI guard and Linux deploy cleanup (2026-09-28)
+
+## Dependency graph and checklist
+- [x] T1 depends_on: [] Confirm PR state, CI wiring, demo database identity, and the Linux cleanup tests.
+- [ ] T2 depends_on: [T1] Provision both repository CI demo URL secrets and verify a push executes the isolation guard.
+- [ ] T3 depends_on: [T1] Reproduce and repair deploy child cleanup on Linux CI, preserving the fixed test timeout.
+- [ ] T4 depends_on: [T2, T3] Open follow-up PR, verify every applicable exact-head CI check, and send the required notification.
+
+## Review
+- Pending.
