@@ -50,11 +50,6 @@ LOOPS = {
         "testing-weekend",
         "com.radon.testing-daily.plist",
     ),
-    "ci-performance": (
-        "ci_performance_nightly.sh",
-        "ci-performance",
-        "com.radon.ci-performance-daily.plist",
-    ),
     "documentation": (
         "documentation_nightly.sh",
         "documentation-nightly",
@@ -125,7 +120,7 @@ def _build(
         (clone / ".radon-weekend-runner").touch()
         # REL-180 (R-504): every wrapper requires its OWN loop marker as well.
         for loop_marker in (".radon-security-runner", ".radon-security-deepsec-runner", ".radon-reliability-runner", ".radon-testing-runner",
-                            ".radon-ci-performance-runner", ".radon-documentation-runner"):
+                            ".radon-documentation-runner"):
             (clone / loop_marker).touch()
 
     bin_dir = tmp_path / "bin"

@@ -1,7 +1,7 @@
 """GAP A: the nightly runner clones are never given `web/.env`.
 
 Since DeepSec #771 only the testing clone is provisioned (with scoped Turso/UW
-keys); the reliability, ci-performance and documentation clones get no
+keys); the reliability and documentation clones get no
 `web/.env` at all (`TestCredentialFreeClones`). The history below describes
 the testing clone.
 
@@ -51,10 +51,6 @@ BASH = shutil.which("bash") or "/bin/bash"
 SETUPS = {
     "reliability": (REPO / "scripts" / "setup_reliability_weekend.sh", "radon"),
     "testing": (REPO / "scripts" / "setup_testing_weekend.sh", "radon-testing"),
-    "ci-performance": (
-        REPO / "scripts" / "setup_ci_performance.sh",
-        "radon-ci-performance",
-    ),
     "documentation": (
         REPO / "scripts" / "setup_documentation_nightly.sh",
         "radon-documentation",
@@ -63,7 +59,6 @@ SETUPS = {
 PLISTS = {
     "reliability": "com.radon.reliability-daily.plist",
     "testing": "com.radon.testing-daily.plist",
-    "ci-performance": "com.radon.ci-performance-daily.plist",
     "documentation": "com.radon.documentation-daily.plist",
 }
 
@@ -71,7 +66,6 @@ PLISTS = {
 WRAPPERS = {
     "reliability": "reliability_weekend.sh",
     "testing": "testing_weekend.sh",
-    "ci-performance": "ci_performance_nightly.sh",
     "documentation": "documentation_nightly.sh",
 }
 DUMMY = {
@@ -183,7 +177,6 @@ def _stage(tmp_path: Path, name: str) -> tuple[Path, Path, dict]:
     venv_name = {
         "reliability": "venv-reliability",
         "testing": "venv-testing",
-        "ci-performance": "venv-ci-performance",
         "documentation": "venv-documentation",
     }[name]
     venv_bin = root / venv_name / "bin"
@@ -218,7 +211,7 @@ def _run(name: str, env: dict, cwd: Path) -> subprocess.CompletedProcess:
 
 
 PROVISIONED = ("testing",)
-CREDENTIAL_FREE = ("ci-performance", "documentation", "reliability")
+CREDENTIAL_FREE = ("documentation", "reliability")
 
 
 @pytest.mark.parametrize("name", PROVISIONED)

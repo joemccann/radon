@@ -59,7 +59,6 @@ LOOPS = {
     "reliability-weekend": "reliability",
     "testing-weekend": "testing",
     "documentation-nightly": "documentation",
-    "ci-performance": "ci-performance",
 }
 
 PREAMBLE = """\
@@ -179,7 +178,6 @@ BRANCH_PREFIX = {
     "reliability-weekend": "reliability/",
     "testing-weekend": "testing/",
     "documentation-nightly": "documentation/",
-    "ci-performance": "ci-performance/",
 }
 
 
@@ -227,8 +225,6 @@ CODEX_DISPLAY = {
                         "Nightly test-suite audit and remediation"),
     "documentation-nightly": ("Radon Documentation Nightly",
                               "Nightly documentation audit and remediation"),
-    "ci-performance": ("Radon CI Performance",
-                       "Nightly CI and deploy critical-path optimizer"),
 }
 
 

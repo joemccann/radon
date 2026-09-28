@@ -224,7 +224,6 @@ class TestEveryLoopIsAccepted:
         wrappers = {
             "reliability": "reliability_weekend.sh",
             "testing": "testing_weekend.sh",
-            "ci-performance": "ci_performance_nightly.sh",
             "documentation": "documentation_nightly.sh",
             "security": "security_nightly.sh",
             "security-deepsec": "security_deepsec_nightly.sh",
@@ -422,7 +421,7 @@ class TestDeliverStatusFromTheRecord:
 
 WRAPPERS = tuple(
     REPO / "scripts" / n for n in (
-        "reliability_weekend.sh", "testing_weekend.sh", "ci_performance_nightly.sh",
+        "reliability_weekend.sh", "testing_weekend.sh",
         "documentation_nightly.sh", "security_nightly.sh", "security_deepsec_nightly.sh",
     )
 )

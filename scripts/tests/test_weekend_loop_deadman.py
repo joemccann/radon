@@ -49,14 +49,12 @@ CLAUDE_RUNG_LADDER = "claude:claude-fable-5[1m]"
 REPO = Path(__file__).resolve().parents[2]
 RELIABILITY = REPO / "scripts" / "reliability_weekend.sh"
 TESTING = REPO / "scripts" / "testing_weekend.sh"
-CI_PERFORMANCE = REPO / "scripts" / "ci_performance_nightly.sh"
 DOCUMENTATION = REPO / "scripts" / "documentation_nightly.sh"
 SECURITY = REPO / "scripts" / "security_nightly.sh"
 SECURITY_DEEPSEC = REPO / "scripts" / "security_deepsec_nightly.sh"
 PLISTS = {
     "reliability": REPO / "config" / "com.radon.reliability-daily.plist",
     "testing": REPO / "config" / "com.radon.testing-daily.plist",
-    "ci-performance": REPO / "config" / "com.radon.ci-performance-daily.plist",
     "documentation": REPO / "config" / "com.radon.documentation-daily.plist",
     "security": REPO / "config" / "com.radon.security-daily.plist",
     "security-deepsec": REPO / "config" / "com.radon.security-deepsec.plist",
@@ -67,7 +65,6 @@ PLISTS = {
 LOOPS = {
     "reliability": RELIABILITY,
     "testing": TESTING,
-    "ci-performance": CI_PERFORMANCE,
     "documentation": DOCUMENTATION,
     "security": SECURITY,
     "security-deepsec": SECURITY_DEEPSEC,
@@ -100,7 +97,7 @@ def _fake_runner_clone(tmp_path: Path, name: str) -> Path:
     # REL-180 (R-504): every wrapper requires its OWN loop marker as well; a
     # generic clone carries all five so each wrapper finds its own.
     for marker in (".radon-security-runner", ".radon-security-deepsec-runner", ".radon-reliability-runner", ".radon-testing-runner",
-                   ".radon-ci-performance-runner", ".radon-documentation-runner"):
+                   ".radon-documentation-runner"):
         (repo / marker).write_text("", encoding="utf-8")
     lock = repo / ".weekend-runner.lock"
     lock.mkdir()
@@ -319,14 +316,12 @@ class TestSetupGuardsPerLoopVenvs:
     SETUPS = {
         "reliability": REPO / "scripts" / "setup_reliability_weekend.sh",
         "testing": REPO / "scripts" / "setup_testing_weekend.sh",
-        "ci-performance": REPO / "scripts" / "setup_ci_performance.sh",
         "documentation": REPO / "scripts" / "setup_documentation_nightly.sh",
         "security": REPO / "scripts" / "setup_security_nightly.sh",
     }
     WRAPPERS = {
         "reliability": REPO / "scripts" / "reliability_weekend.sh",
         "testing": REPO / "scripts" / "testing_weekend.sh",
-        "ci-performance": REPO / "scripts" / "ci_performance_nightly.sh",
         "documentation": REPO / "scripts" / "documentation_nightly.sh",
         "security": REPO / "scripts" / "security_nightly.sh",
         "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
@@ -334,7 +329,6 @@ class TestSetupGuardsPerLoopVenvs:
     VENV_DIR = {
         "reliability": "$WEEKEND_ROOT/venv-reliability",
         "testing": "$WEEKEND_ROOT/venv-testing",
-        "ci-performance": "$WEEKEND_ROOT/venv-ci-performance",
         "documentation": "$WEEKEND_ROOT/venv-documentation",
         "security": "$WEEKEND_ROOT/venv-security",
         # Provisioned by setup_security_nightly.sh alongside venv-security.
@@ -369,7 +363,7 @@ class TestSetupGuardsPerLoopVenvs:
                 "is a follow-up after this ships"
             )
 
-    @pytest.mark.parametrize("name", ["reliability", "testing", "ci-performance", "documentation", "security"])
+    @pytest.mark.parametrize("name", ["reliability", "testing", "documentation", "security"])
     def test_each_setup_checks_the_sibling_clone_lock(self, name):
         # Comments stripped first: the guard's own comment quotes the
         # `python3.13 -m venv` line it protects, and a naive slice ends there.
@@ -383,7 +377,7 @@ class TestSetupGuardsPerLoopVenvs:
             "the other loop's cycle is executing against it"
         )
 
-    @pytest.mark.parametrize("name", ["reliability", "testing", "ci-performance", "documentation", "security"])
+    @pytest.mark.parametrize("name", ["reliability", "testing", "documentation", "security"])
     def test_each_setup_checks_the_bash_version(self, name):
         """GAP C: `/bin/bash` on this runner is 3.2, and `cloud/tests` needs 4+.
 

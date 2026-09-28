@@ -19,7 +19,6 @@ BASH = shutil.which("bash") or "/bin/bash"
 LOOPS = {
     "reliability": REPO / "scripts" / "reliability_weekend.sh",
     "testing": REPO / "scripts" / "testing_weekend.sh",
-    "ci-performance": REPO / "scripts" / "ci_performance_nightly.sh",
     "documentation": REPO / "scripts" / "documentation_nightly.sh",
     "security": REPO / "scripts" / "security_nightly.sh",
     "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
@@ -58,7 +57,6 @@ MARKERS = (
     ".radon-security-deepsec-runner",
     ".radon-reliability-runner",
     ".radon-testing-runner",
-    ".radon-ci-performance-runner",
     ".radon-documentation-runner",
 )
 
@@ -237,13 +235,12 @@ def _run(
 # loops. nvidia and cerebras still name one because the grok CLI resolves them
 # through a `[model."<key>"]` config block: the rung names that stable KEY and
 # scripts/agent_cli_bootstrap.sh resolves the live id behind it.
-# 2026-09-27: all four fallback loops share grok, codex, antigravity,
+# 2026-09-27: the fallback loops share grok, codex, antigravity,
 # fx:nvidia, fx:cerebras. NVIDIA moved down after a documentation audit
 # logged 232 HTTP 429s in 17 minutes as the lead rung. A capped or rejected
 # entry may name a provider (every rung it owns) or a `provider:model` rung,
 # which is how the two fx rungs are told apart.
 FALLBACK_PROVIDER_ORDER = {
-    "ci-performance": ["grok", "codex", "antigravity", "fx", "fx"],
     "documentation": ["grok", "codex", "antigravity", "fx", "fx"],
     "reliability": ["grok", "codex", "antigravity", "fx", "fx"],
     "testing": ["grok", "codex", "antigravity", "fx", "fx"],
@@ -533,7 +530,7 @@ def _run_multi(
     prompts = tmp_path / "prompts"
     prompts.mkdir(exist_ok=True)
     for skill in ("reliability-weekend", "testing-weekend", "documentation-nightly",
-                  "ci-performance", "security-nightly"):
+                  "security-nightly"):
         for ph in ("audit", "remediate", "deliver"):
             (prompts / (skill + "." + ph + ".md")).write_text("stub\n", encoding="utf-8")
 

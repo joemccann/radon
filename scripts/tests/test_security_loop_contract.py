@@ -474,7 +474,6 @@ class TestTheSetupIsCredentialFree:
         [
             "setup_reliability_weekend.sh",
             "setup_testing_weekend.sh",
-            "setup_ci_performance.sh",
             "setup_documentation_nightly.sh",
         ],
     )

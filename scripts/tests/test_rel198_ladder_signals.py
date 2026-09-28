@@ -20,7 +20,6 @@ LOOPS = {
     "security": SCRIPTS / "security_nightly.sh",
     "security-deepsec": SCRIPTS / "security_deepsec_nightly.sh",
     "documentation": SCRIPTS / "documentation_nightly.sh",
-    "ci-performance": SCRIPTS / "ci_performance_nightly.sh",
 }
 PLISTS = {
     "reliability": REPO / "config" / "com.radon.reliability-daily.plist",
@@ -28,7 +27,6 @@ PLISTS = {
     "security": REPO / "config" / "com.radon.security-daily.plist",
     "security-deepsec": REPO / "config" / "com.radon.security-deepsec.plist",
     "documentation": REPO / "config" / "com.radon.documentation-daily.plist",
-    "ci-performance": REPO / "config" / "com.radon.ci-performance-daily.plist",
 }
 
 

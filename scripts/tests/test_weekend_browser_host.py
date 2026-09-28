@@ -190,7 +190,7 @@ def test_browser_lifetime_follows_provider_transition(name, first, tmp_path):
 
 
 @pytest.mark.parametrize("provider", ["claude", "codex", "grok", "nvidia", "cerebras"])
-@pytest.mark.parametrize("name", ["testing_weekend", "reliability_weekend", "documentation_nightly", "ci_performance_nightly", "security_nightly", "security_deepsec_nightly"])
+@pytest.mark.parametrize("name", ["testing_weekend", "reliability_weekend", "documentation_nightly", "security_nightly", "security_deepsec_nightly"])
 def test_every_provider_discards_inherited_host_endpoint(name, provider, tmp_path):
     source = (REPO / "scripts" / f"{name}.sh").read_text()
     start = source.index("launch_round() {")

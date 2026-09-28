@@ -680,7 +680,6 @@ class TestTestingLedgersHaveNoConflictMarkers:
 _LOOPS = {
     "reliability": ("com.radon.reliability-daily.plist", "reliability_weekend.sh"),
     "testing": ("com.radon.testing-daily.plist", "testing_weekend.sh"),
-    "ci-performance": ("com.radon.ci-performance-daily.plist", "ci_performance_nightly.sh"),
     "documentation": ("com.radon.documentation-daily.plist", "documentation_nightly.sh"),
     "security": ("com.radon.security-daily.plist", "security_nightly.sh"),
 }
@@ -689,7 +688,6 @@ _LOOPS = {
 _LOOP_SKILLS = {
     "reliability": "reliability-weekend",
     "testing": "testing-weekend",
-    "ci-performance": "ci-performance",
     "documentation": "documentation-nightly",
     "security": "security-nightly",
 }

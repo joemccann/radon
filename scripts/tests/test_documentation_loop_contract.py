@@ -209,7 +209,6 @@ class TestSetupProvisionsTheDeadmanLabel:
         [
             "setup_reliability_weekend.sh",
             "setup_testing_weekend.sh",
-            "setup_ci_performance.sh",
             "setup_security_nightly.sh",
         ],
     )

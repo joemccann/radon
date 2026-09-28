@@ -26,14 +26,12 @@ SKILLS = REPO / ".claude" / "skills"
 LOOPS = (
     "reliability-weekend",
     "testing-weekend",
-    "ci-performance",
     "documentation-nightly",
     "security-nightly",
 )
 WRAPPERS = (
     SCRIPTS / "reliability_weekend.sh",
     SCRIPTS / "testing_weekend.sh",
-    SCRIPTS / "ci_performance_nightly.sh",
     SCRIPTS / "documentation_nightly.sh",
     SCRIPTS / "security_nightly.sh",
 )
@@ -164,7 +162,6 @@ class TestFormatPrTitle:
             ("reliability", "Reliability"),
             ("testing", "Testing"),
             ("documentation", "Documentation"),
-            ("ci-performance", "CI Performance"),
         ],
     )
     def test_loop_date_and_plain_language_issue(self, loop, prefix):
