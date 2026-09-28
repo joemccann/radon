@@ -20,6 +20,11 @@ origin/main before this change, then fixed:
 - A git killed mid-write left `*.lock` files in the host gitdir that the
   plist's checkout then failed on, before any wrapper could clear them.
 - launchd SIGKILLed the wrapper 5s after SIGTERM, before its KILLED page.
+
+CIP-014: pytest does not collect this module. The cases are imported by
+test_loop_lifecycle_adversarial_*.py so ``--dist loadfile`` can put the
+detach floor and the reclaim floor on separate workers. Cases that start
+processes take tmp_path and do not share a clone.
 """
 
 from __future__ import annotations
