@@ -86,6 +86,15 @@
       "note": "operations.md is the one place indexing all five nightly loops: fire times, clone + marker rails, the model pin and the status vocabulary an operator reads off a page. #219 changed operator-facing behaviour in all five wrappers with no owner update (DOC-032/033/034/040). Loop SEMANTICS stay in .claude/skills/<loop>/SKILL.md; only the operator contract belongs here."
     },
     {
+      "id": "nightly-runner",
+      "globs": [
+        "scripts/runner/**",
+        ".claude/runner-prompts/**"
+      ],
+      "owners": ["docs/runner.md"],
+      "note": "The one-file runner that replaces the per-loop wrappers: install, the bot-user boundary, loop config and migration state."
+    },
+    {
       "id": "streaks-source-ladder",
       "globs": ["scripts/api/routes/streaks.py"],
       "owners": ["docs/indicators/streaks.md"],
