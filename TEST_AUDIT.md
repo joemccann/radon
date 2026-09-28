@@ -10628,13 +10628,9 @@ Reduced scope: P0 and P1 only. No P0 was open. The 2026-09-26 checkpoint (`audit
 
 Red: with the degraded branch forced off, `test_consecutive_budget_runs_write_degraded` saw `ok` instead of `degraded` (1 failed). With the heal call forced off, `test_heal_twr_coverage_gaps_called_even_when_budget_spent` saw an empty call list (1 failed). Green, source restored: 16 passed across those three modules.
 
-### T-130 — operator-only
+T-130 stays operator-only. Provision `TURSO_DEMO_DB_URL` and `TURSO_DEMO_APP_DB_URL` for repository CI. The wiring half is already recorded done. An unconditional isolation run stays red until those secrets exist.
 
-Provision `TURSO_DEMO_DB_URL` and `TURSO_DEMO_APP_DB_URL` for repository CI. The wiring half is already recorded done. An unconditional isolation run stays red until those secrets exist.
-
-### T-488 — operator-only
-
-Reproduce the deploy helper timeout and TERM child cleanup on Linux CI without widening the fixed timeout. Three fixture attempts are already recorded. This host's bash 3.2 `services[@]` errors and the absent `caddy` binary are not that item.
+T-488 stays operator-only. Reproduce the deploy helper timeout and TERM child cleanup on Linux CI without widening the fixed timeout. Three fixture attempts are already recorded. This host's bash 3.2 `services[@]` errors and the absent `caddy` binary are not that item.
 
 
 ### T-513 — DONE
