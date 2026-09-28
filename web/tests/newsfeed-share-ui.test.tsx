@@ -5,6 +5,7 @@ import React from "react";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import NewsfeedShare, { resetNewsfeedShareVoiceCache } from "@/components/NewsfeedShare";
+import { encodeVoiceEvent } from "@/lib/newsfeedVoiceProgress";
 
 const engine = vi.hoisted(() => ({ buildShareCaption: vi.fn(), renderShareCard: vi.fn(), canvasToPng: vi.fn(), canvasToMp4: vi.fn(), supportsMp4Export: vi.fn() }));
 vi.mock("@/lib/newsfeedShare", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/newsfeedShare")>(), ...engine }));
@@ -106,6 +107,41 @@ describe("news feed sharing", () => {
     const signal = vi.mocked(fetch).mock.calls[0][1]?.signal;
     fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
     expect(signal?.aborted).toBe(true);
+  });
+
+  it("shows streamed rewrite progress with stage and elapsed time, then clears it", async () => {
+    const encoder = new TextEncoder();
+    let push!: (event: string, data: unknown) => void;
+    let finish!: () => void;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        push = (event, data) => controller.enqueue(encoder.encode(encodeVoiceEvent(event, data)));
+        finish = () => controller.close();
+      },
+    });
+    vi.mocked(fetch).mockResolvedValue(new Response(body, { headers: { "content-type": "text/event-stream; charset=utf-8" } }));
+    render(<NewsfeedShare post={post} />);
+    fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    expect(vi.mocked(fetch).mock.calls[0][1]?.headers).toMatchObject({ Accept: "text/event-stream" });
+    const bar = screen.getByRole("progressbar", { name: "Voice rewrite progress" });
+    expect(Number(bar.getAttribute("aria-valuenow"))).toBeGreaterThan(0);
+    await act(async () => { push("stage", { stage: "queued" }); push("stage", { stage: "drafting" }); });
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Drafting in your voice…"));
+    await act(async () => { push("stage", { stage: "hedging" }); });
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Still drafting. Trying a second model…"));
+    expect(bar.getAttribute("aria-valuetext")).toMatch(/^Still drafting\. Trying a second model, \d+s elapsed$/);
+    await act(async () => { push("stage", { stage: "checking" }); push("result", { title: "Hedge demand is back.", content: "Positioning remains neutral." }); finish(); });
+    await waitFor(() => expect(screen.queryByRole("progressbar")).toBeNull());
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Hedge demand is back\n\nPositioning remains neutral.");
+  });
+
+  it("surfaces a streamed server error as the rewrite toast", async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(encodeVoiceEvent("error", { error: "Rewrite timed out. Try again.", status: 504 }), { headers: { "content-type": "text/event-stream; charset=utf-8" } }));
+    render(<NewsfeedShare post={post} />);
+    fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
+    await screen.findByText("Voice rewrite unavailable. Showing the original copy.");
+    expect(screen.queryByRole("progressbar")).toBeNull();
   });
 
   it("updates the X intent after rewriting without waiting for the preview", async () => {

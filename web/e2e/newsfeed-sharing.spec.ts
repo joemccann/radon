@@ -101,7 +101,8 @@ for (const width of [1440, 393]) {
           expect(new URL(popup.url()).searchParams.get("text")).toBe(expectedText);
         } finally { await popup.close(); }
       }
-      await expect(panel.getByRole("status")).toHaveText("Writing in your voice…");
+      await expect(panel.getByRole("status")).toHaveText("Starting rewrite…");
+      await expect(panel.getByRole("progressbar", { name: "Voice rewrite progress" })).toBeVisible();
       await expect(caption).toBeDisabled();
       await expect(panel.getByText("Preparing preview…", { exact: true })).toBeVisible();
       await expect(panel.getByRole("button", { name: "Download Story image" })).toBeDisabled();
@@ -173,6 +174,36 @@ test("news sharing retains sanitized fallback and retries a failed voice rewrite
   await failure.getByRole("button", { name: "Try again" }).click();
   await expect(panel.getByRole("textbox", { name: "Post caption" })).toHaveValue("Retry succeeds\n\nPositioning remains the tell.");
   expect(requests).toBe(2);
+});
+
+test("voice rewrite shows progress while pending and applies the streamed draft", async ({ page }, testInfo) => {
+  test.setTimeout(90_000);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const frame = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  await page.route("**/api/newsfeed/share", async route => {
+    expect(route.request().headers().accept).toBe("text/event-stream");
+    await held;
+    await route.fulfill({
+      headers: { "content-type": "text/event-stream; charset=utf-8" },
+      body: frame("stage", { stage: "queued" }) + frame("stage", { stage: "drafting" }) + frame("stage", { stage: "checking" })
+        + frame("result", { title: "Streamed draft lands", content: "Positioning stays near neutral." }),
+    });
+  });
+  await page.route("**/api/newsfeed/posts**", route => route.fulfill({ json: [{ ...post, source: undefined }] }));
+  await page.route("**/api/newsfeed/research/files/*.png", route => route.fulfill({ contentType: "image/svg+xml", body: svg }));
+  await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+  const item = page.getByTestId("news-feed-item").filter({ hasText: post.title });
+  await item.getByRole("button", { name: "Share", exact: true }).click();
+  const panel = item.getByRole("region", { name: "Share news item" });
+  const bar = panel.getByRole("progressbar", { name: "Voice rewrite progress" });
+  await expect(bar).toBeVisible();
+  await expect(panel.getByRole("status")).toHaveText("Starting rewrite…");
+  await expect(bar).toHaveAttribute("aria-valuetext", /^Starting rewrite, [1-9]\d*s elapsed$/, { timeout: 5_000 });
+  await panel.screenshot({ path: testInfo.outputPath("voice-rewrite-progress.png") });
+  release();
+  await expect(panel.getByRole("textbox", { name: "Post caption" })).toHaveValue("Streamed draft lands\n\nPositioning stays near neutral.");
+  await expect(bar).toHaveCount(0);
 });
 
 test("equity-issuance fallback is hook plus short paragraphs and Compose on X stays usable", async ({ page, context }) => {
