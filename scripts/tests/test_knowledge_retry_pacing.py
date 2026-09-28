@@ -81,3 +81,19 @@ def test_retry_delay_is_jittered_so_parallel_writers_do_not_realign(monkeypatch)
     monkeypatch.setattr(ingest_mod.random, "random", lambda: 1.0)
     high = ingest_mod._retry_delay(1)
     assert TURSO_IDLE_STREAM_EXPIRY_SECS < low < high
+
+
+def test_existing_page_picks_ids_before_fetching_rows():
+    """ORDER BY id over full rows made Turso sort every newsfeed row with its
+    embeddings: 25s for 50 rows on a radon fork (2026-09-28), past the 4s
+    client timeout. Paging ids first through the source index took 0.08s."""
+    inner = "id IN (SELECT id FROM knowledge WHERE source = ? AND id > ? ORDER BY id LIMIT ?)"
+    for sql in (ingest_mod._EXISTING_SQL, ingest_mod._EXISTING_SQL_V2):
+        assert inner in sql
+        assert sql.rstrip().endswith("ORDER BY id")
+
+
+def test_existing_page_stays_small_enough_for_the_read_timeout():
+    """~150-row newsfeed pages took 2.5-4s on the fork against a 4s timeout."""
+    assert ingest_mod._existing_page_limit(True) <= 50
+    assert ingest_mod._existing_page_limit(False) <= 50

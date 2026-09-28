@@ -6,15 +6,15 @@ The `knowledge` table carries two vector columns:
 
 | Column | Model | Dimensions | Access | Purpose |
 |---|---|---|---|---|
-| `embedding` | BAAI/bge-small-en-v1.5 | 384 | `idx_knowledge_embedding` (DiskANN) | Automatic fallback; ingest dual-writes by default. |
+| `embedding` | BAAI/bge-small-en-v1.5 | 384 | exact `vector_distance_cos` scan | Automatic fallback; ingest dual-writes by default. No ANN index after 0090. |
 | `embedding_v2` | nvidia/nemotron-3-embed-1b | 2048 | exact `vector_distance_cos` scan | Live default for queries and ingest (2026-09-25). No ANN index. |
 
 ## Query resolution
 
 `scripts/knowledge/embed.py:resolve_query_vector` selects the query vector:
 
-1. If `RADON_KB_EMBED_BACKEND=nvidia` (default) **and** `v2_coverage_ready(db)` is true → NVIDIA 2048-d query vector. Retrieval is `SELECT id FROM knowledge WHERE embedding_v2 IS NOT NULL ORDER BY vector_distance_cos(embedding_v2, vector32(?)) LIMIT ?`. Cosine distance 0 is identical, so ascending order is nearest-first, the same rank the 384-d `vector_top_k` leg feeds into RRF. Similarity is `1 - distance` and ranks the same rows.
-2. Otherwise → local 384-d `bge-small-en-v1.5` vector against `embedding` index, or FTS-only if the local embedder is unavailable.
+1. If `RADON_KB_EMBED_BACKEND=nvidia` (default) **and** `v2_coverage_ready(db)` is true → NVIDIA 2048-d query vector. Retrieval is `SELECT id FROM knowledge WHERE embedding_v2 IS NOT NULL ORDER BY vector_distance_cos(embedding_v2, vector32(?)) LIMIT ?`. Cosine distance 0 is identical, so ascending order is nearest-first, the rank RRF expects. Similarity is `1 - distance` and ranks the same rows.
+2. Otherwise → local 384-d `bge-small-en-v1.5` vector, the same exact scan over `embedding`, or FTS-only if the local embedder is unavailable.
 
 `v2_coverage_ready` returns false while **any** `knowledge.embedding_v2` is NULL. The check is cached for 60 seconds. A missing column or failed read also returns false.
 
@@ -41,6 +41,8 @@ Confirm:
 ```sql
 SELECT name FROM sqlite_master WHERE name = 'idx_knowledge_embedding_v2';
 ```
+
+Migration 0090 drops the 384-d `idx_knowledge_embedding` the same way (manual, same command). On a fork of `radon` (2026-09-28) one row's `embedding` UPDATE took 10-26s with the index and every other statement about 0.03s. Ingest held Turso's single writer that long per chunk and every other writer timed out. Keep `radon-knowledge.timer` disabled until `SELECT name FROM sqlite_master WHERE name = 'idx_knowledge_embedding'` returns no row.
 
 Then rerun the backfill. Without the index, `--batch-size 64` and no sleep is about 15 minutes for 8,715 NULL rows:
 
@@ -92,7 +94,7 @@ Past about 50k rows, revisit a compact index (`compress_neighbors=float8`, `max_
 `scripts/tests/test_knowledge_embedding_contract.py` asserts:
 
 - `embedding_v2` column exists post-migration 0087.
-- `idx_knowledge_embedding_v2` is created by 0087 and dropped by 0089. 0089 is `-- radon-migrate: manual` and is not applied by boot.
+- `idx_knowledge_embedding_v2` is created by 0087 and dropped by 0089; `idx_knowledge_embedding` is dropped by 0090. Both are `-- radon-migrate: manual` and are not applied by boot.
 - `v2_coverage_ready` logic: queries use 384-d while any NULL exists; 2048-d exact scan only after full backfill.
 - Dual-write env var parsing matches `dual_write_enabled()`.
 
