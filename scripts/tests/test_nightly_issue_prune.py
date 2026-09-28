@@ -25,7 +25,6 @@ SCRIPTS = REPO / "scripts"
 WRAPPERS = (
     SCRIPTS / "reliability_weekend.sh",
     SCRIPTS / "testing_weekend.sh",
-    SCRIPTS / "ci_performance_nightly.sh",
     SCRIPTS / "security_nightly.sh",
     SCRIPTS / "security_deepsec_nightly.sh",
 )

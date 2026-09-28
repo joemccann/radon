@@ -92,7 +92,6 @@ loop() {  # label clone wrapper skill slug venv
 
 loop reliability-daily      "$W/radon"                  reliability_weekend.sh       reliability-weekend   reliability      reliability
 loop testing-daily          "$W/radon-testing"          testing_weekend.sh           testing-weekend       testing          testing
-loop ci-performance-daily   "$W/radon-ci-performance"   ci_performance_nightly.sh    ci-performance        ci-performance   ci-performance
 loop security-daily         "$W/radon-security"         security_nightly.sh          security-nightly      security         security
 loop security-deepsec       "$W/radon-security-deepsec" security_deepsec_nightly.sh  security-deepsec      security-deepsec security-deepsec
 

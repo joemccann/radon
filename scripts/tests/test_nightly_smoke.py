@@ -80,7 +80,7 @@ def test_origin_main_is_read_through_the_host_gitdir():
 
 @pytest.mark.parametrize(
     "wrapper",
-    ["reliability_weekend.sh", "testing_weekend.sh", "ci_performance_nightly.sh"],
+    ["reliability_weekend.sh", "testing_weekend.sh"],
 )
 def test_the_extracted_readiness_check_passes_a_ready_fx_rung(tmp_path, wrapper):
     """2026-09-27: the smoke copied provider_ready without fx_key, so every

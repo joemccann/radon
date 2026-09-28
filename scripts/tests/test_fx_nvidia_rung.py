@@ -199,11 +199,11 @@ def test_the_fx_arm_is_wrapped_in_timeout():
 
 
 # --- fx on the shared ladder (2026-09-26) ------------------------------------
-# reliability, testing and ci-performance carry fx:nvidia behind grok, codex
+# reliability and testing carry fx:nvidia behind grok, codex
 # and antigravity, and close with fx:cerebras (2026-09-27 evening). The model half names the fx provider and picks its key.
 
 
-@pytest.mark.parametrize("loop", ["reliability", "testing", "ci-performance"])
+@pytest.mark.parametrize("loop", ["reliability", "testing"])
 def test_the_shared_ladder_ends_on_fx(loop):
     body = _h.LOOPS[loop].read_text(encoding="utf-8")
     m = re.search(

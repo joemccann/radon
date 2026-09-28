@@ -58,7 +58,6 @@ PHASES = ("audit", "remediate", "deliver")
 LOOPS = {
     "reliability-weekend": "reliability",
     "testing-weekend": "testing",
-    "ci-performance": "ci-performance",
 }
 
 PREAMBLE = """\
@@ -177,7 +176,6 @@ CONTRACT_DELIVER = """
 BRANCH_PREFIX = {
     "reliability-weekend": "reliability/",
     "testing-weekend": "testing/",
-    "ci-performance": "ci-performance/",
 }
 
 
@@ -223,8 +221,6 @@ CODEX_DISPLAY = {
                             "Nightly reliability delta-audit and remediation"),
     "testing-weekend": ("Radon Testing Weekend",
                         "Nightly test-suite audit and remediation"),
-    "ci-performance": ("Radon CI Performance",
-                       "Nightly CI and deploy critical-path optimizer"),
 }
 
 

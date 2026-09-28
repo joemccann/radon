@@ -21,7 +21,6 @@ STABLE = "__HOME__/.local/share/radon/fx-stable"
 WRAPPERS = [
     "reliability_weekend.sh",
     "testing_weekend.sh",
-    "ci_performance_nightly.sh",
     "security_nightly.sh",
     "security_deepsec_nightly.sh",
 ]

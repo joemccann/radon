@@ -55,12 +55,10 @@ SHARED_LADDER = "grok codex antigravity fx:nvidia fx:cerebras"
 PLISTS = {
     "reliability": REPO / "config" / "com.radon.reliability-daily.plist",
     "testing": REPO / "config" / "com.radon.testing-daily.plist",
-    "ci-performance": REPO / "config" / "com.radon.ci-performance-daily.plist",
 }
 PLIST_MINUTES = {
     "reliability": 0,
     "testing": 10,
-    "ci-performance": 20,
 }
 
 
@@ -277,7 +275,7 @@ class TestFxLoopGuardIgnoresAQuotedFixture:
         assert proc.returncode != 0, (loop, proc.stdout, proc.stderr)
 
 
-_FX_LOOPS = ("reliability", "testing", "ci-performance")
+_FX_LOOPS = ("reliability", "testing")
 
 
 @pytest.mark.parametrize("loop", _FX_LOOPS)

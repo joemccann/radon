@@ -25,7 +25,6 @@ SCRIPT = SCRIPTS / "nightly_audit_context.py"
 WRAPPERS = {
     "reliability_weekend.sh": ("reliability-weekend", "## Mode: audit"),
     "testing_weekend.sh": ("testing-weekend", "## Mode: audit"),
-    "ci_performance_nightly.sh": ("ci-performance", "## Mode: audit"),
     "security_nightly.sh": ("security-nightly", "## Ground truth and change selection"),
     "security_deepsec_nightly.sh": ("security-deepsec", "## Audit pipeline"),
 }

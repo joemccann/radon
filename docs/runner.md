@@ -55,10 +55,10 @@ sudo pmset -a sleep 0 displaysleep 10     # the Mac must stay awake at night
 ```bash
 /usr/bin/git clone https://github.com/joemccann/radon.git /tmp/radon-runner-install
 /bin/bash /tmp/radon-runner-install/scripts/runner/install.sh --print-plist documentation   # review
-sudo /bin/bash /tmp/radon-runner-install/scripts/runner/install.sh documentation
+sudo /bin/bash /tmp/radon-runner-install/scripts/runner/install.sh documentation ci-performance
 ```
 
-It asks for your sudo password, then `User password:` for the new `_radonbot` account. Choose a password and save it (your password manager, or `security add-generic-password -s radon-runnerbot-login -a _radonbot -w`); step 5 reuses it. The `No clear text password ... FDE` warning and `Home directory is assigned (not created!)` are expected: the script creates the home right after. It ends with `installed com.radon.runner.documentation`.
+It asks for your sudo password, then `User password:` for the new `_radonbot` account. Choose a password and save it (your password manager, or `security add-generic-password -s radon-runnerbot-login -a _radonbot -w`); step 5 reuses it. The `No clear text password ... FDE` warning and `Home directory is assigned (not created!)` are expected: the script creates the home right after. It ends with one `installed com.radon.runner.<loop>` line per loop.
 
 The account is hidden, so it does not appear on the login screen. Check it:
 
@@ -78,7 +78,7 @@ The prompt shows `_radonbot@...`. Before running a check, confirm its output pat
 
 ### 4. Agent CLIs (bot shell)
 
-Install and sign in to every agent the loop's `AGENTS` names (`grok codex agy fx:nvidia fx:cerebras` for documentation). The sign-ins print a URL or a device code: open it in your own browser, signed in to the account that owns the subscription.
+Install and sign in to every agent the loop's `AGENTS` names (`grok codex agy fx:nvidia fx:cerebras` for documentation and ci-performance). The sign-ins print a URL or a device code: open it in your own browser, signed in to the account that owns the subscription.
 
 | Agent | Install (bot shell) | Sign in (bot shell) | Binary the runner uses |
 |---|---|---|---|
@@ -227,6 +227,7 @@ It passes when the log starts with `starting grok`, a draft PR on `documentation
 | Loop | State |
 |---|---|
 | documentation | Cut over: runs at 03:00 on branch `documentation/<date>` as `_radonbot`; the old wrapper, setup script, LaunchAgent and skill are deleted |
-| ci-performance, testing, reliability, security, DeepSec | Not started; still on `scripts/<loop>_*.sh` (see `docs/operations.md`) |
+| ci-performance | Cut over: runs at 00:20 on branch `ci-performance/<date>`; `scripts/ci_performance_nightly.sh` and its LaunchAgent are deleted |
+| testing, reliability, security, DeepSec | Not started; still on `scripts/<loop>_*.sh` (see `docs/operations.md`) |
 
 Cutover per loop: compare three nights of shadow PRs, set `BRANCH_PREFIX` to the old prefix, unload the old LaunchAgent, then delete the old wrapper, setup script, helpers and their tests.

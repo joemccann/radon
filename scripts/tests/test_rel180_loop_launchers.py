@@ -29,13 +29,11 @@ BASH = "/bin/bash"
 WRAPPERS = {
     "reliability": "reliability_weekend.sh",
     "testing": "testing_weekend.sh",
-    "ci-performance": "ci_performance_nightly.sh",
     "security": "security_nightly.sh",
 }
 CANONICAL = {
     "reliability": "radon",
     "testing": "radon-testing",
-    "ci-performance": "radon-ci-performance",
     "security": "radon-security",
 }
 LOOP_MARKERS = {loop: f".radon-{loop}-runner" for loop in WRAPPERS}
@@ -44,7 +42,7 @@ PLISTS = {loop: REPO / "config" / f"com.radon.{loop}-daily.plist" for loop in WR
 # in WRAPPERS/SETUPS; its launcher still has to obey the fetch-timeout and
 # stagger contracts.
 PLISTS["security-deepsec"] = REPO / "config" / "com.radon.security-deepsec.plist"
-TAIL_POSTERS = ["reliability", "testing", "ci-performance"]
+TAIL_POSTERS = ["reliability", "testing"]
 
 
 def _plist(loop: str) -> dict:
@@ -255,7 +253,7 @@ class TestRunDoesNotFireHostPushover:
 
 
 class TestLoopMarkerGuard:
-    @pytest.mark.parametrize("loop", ["reliability", "testing", "ci-performance"])
+    @pytest.mark.parametrize("loop", ["reliability", "testing"])
     def test_the_shared_marker_alone_is_refused(self, loop: str, tmp_path: Path) -> None:
         home = tmp_path / "home"
         home.mkdir()
@@ -268,7 +266,7 @@ class TestLoopMarkerGuard:
         assert not started.exists(), "the agent ran inside a sibling loop's clone"
         assert "REFUSED" in (gh_log.read_text() if gh_log.exists() else ""), "the refusal never reached the dead-man"
 
-    @pytest.mark.parametrize("loop", ["reliability", "testing", "ci-performance"])
+    @pytest.mark.parametrize("loop", ["reliability", "testing"])
     def test_the_loop_marker_admits(self, loop: str, tmp_path: Path) -> None:
         home = tmp_path / "home"
         home.mkdir()
@@ -278,7 +276,7 @@ class TestLoopMarkerGuard:
         result = _run(loop, repo, bin_dir, home)
         assert started.exists(), (result.returncode, result.stderr[-600:])
 
-    @pytest.mark.parametrize("loop", ["reliability", "testing", "ci-performance"])
+    @pytest.mark.parametrize("loop", ["reliability", "testing"])
     def test_the_canonical_clone_self_stamps_its_marker(self, loop: str, tmp_path: Path) -> None:
         """Installed clones predate the loop marker: the canonical path is
         admitted once and stamps itself, so a merge cannot silence a loop
@@ -297,7 +295,6 @@ class TestLoopMarkerGuard:
         setup = {
             "reliability": "setup_reliability_weekend.sh",
             "testing": "setup_testing_weekend.sh",
-            "ci-performance": "setup_ci_performance.sh",
             "security": "setup_security_nightly.sh",
         }[loop]
         text = "\n".join(
@@ -364,7 +361,6 @@ class TestRedactor:
 SETUPS = {
     "reliability": "setup_reliability_weekend.sh",
     "testing": "setup_testing_weekend.sh",
-    "ci-performance": "setup_ci_performance.sh",
     "security": "setup_security_nightly.sh",
 }
 SCRIPT_ORIGIN = "git@example.invalid:radon/script-checkout.git"

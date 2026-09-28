@@ -42,10 +42,10 @@ SHARED = [
 ]
 # launch_round is identical within each family. Security + DeepSec pin
 # `--effort medium` on the claude arm (2026-09-21 Fable-limit night);
-# the four fallback loops do not take that arm and stay on their copy.
+# the fallback loops do not take that arm and stay on their copy.
 IDENTICAL_ACROSS_ALL = [n for n in SHARED if n != "launch_round"]
 SECURITY_LOOPS = ("security", "security-deepsec")
-FALLBACK_LOOPS = ("reliability", "testing", "ci-performance")
+FALLBACK_LOOPS = ("reliability", "testing")
 
 
 def _fn(text: str, name: str) -> str:

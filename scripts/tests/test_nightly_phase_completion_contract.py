@@ -30,7 +30,6 @@ BASH = shutil.which("bash") or "/bin/bash"
 COMMIT_EVIDENCE_LOOPS = (
     SCRIPTS / "reliability_weekend.sh",
     SCRIPTS / "testing_weekend.sh",
-    SCRIPTS / "ci_performance_nightly.sh",
 )
 ALL_LOOPS = COMMIT_EVIDENCE_LOOPS + (WRAPPER, SCRIPTS / "security_deepsec_nightly.sh")
 

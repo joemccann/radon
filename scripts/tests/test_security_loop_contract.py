@@ -474,7 +474,6 @@ class TestTheSetupIsCredentialFree:
         [
             "setup_reliability_weekend.sh",
             "setup_testing_weekend.sh",
-            "setup_ci_performance.sh",
         ],
     )
     def test_every_sibling_setup_stands_down_on_this_loops_lock(self, setup_name):

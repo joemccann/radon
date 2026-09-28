@@ -245,3 +245,26 @@ def test_installed_daemon_runs_the_root_owned_runner_as_the_bot_user():
     for entry in ("/Users/_radonbot/.local/bin", "/Users/_radonbot/.grok/bin", "/opt/homebrew/bin"):
         assert entry in path
     assert plist["StartCalendarInterval"] == {"Hour": 3, "Minute": 0}
+
+
+def test_ci_performance_runs_on_the_runner_in_the_old_loops_slot():
+    """ci-performance moved off scripts/ci_performance_nightly.sh: same branch
+    prefix and 00:20 start, and a prompt from main that ends on a RESULT line."""
+    import plistlib
+
+    out = subprocess.run([BASH, str(REPO / "scripts" / "runner" / "install.sh"), "--print-plist", "ci-performance"],
+                         capture_output=True, check=True)
+    plist = plistlib.loads(out.stdout)
+    assert plist["Label"] == "com.radon.runner.ci-performance"
+    assert plist["UserName"] == "_radonbot"
+    assert plist["ProgramArguments"] == ["/bin/bash", "/usr/local/radon-runner/run_loop.sh", "ci-performance"]
+    assert plist["StartCalendarInterval"] == {"Hour": 0, "Minute": 20}
+
+    env = (REPO / "scripts" / "runner" / "loops" / "ci-performance.env").read_text()
+    assert "\nBRANCH_PREFIX=ci-performance\n" in env
+    prompt = REPO / ".claude" / "runner-prompts" / "ci-performance.md"
+    assert f"\nPROMPT={prompt.relative_to(REPO)}\n" in env
+    body = prompt.read_text()
+    assert "RESULT: <PR URL>" in body and "RESULT: no PR" in body
+    assert not (REPO / "scripts" / "ci_performance_nightly.sh").exists()
+    assert not (REPO / "config" / "com.radon.ci-performance-daily.plist").exists()
