@@ -1,5 +1,10 @@
 """GAP A: the nightly runner clones are never given `web/.env`.
 
+Since DeepSec #771 only the testing clone is provisioned (with scoped Turso/UW
+keys); the reliability, ci-performance and documentation clones get no
+`web/.env` at all (`TestCredentialFreeClones`). The history below describes
+the testing clone.
+
 `web/.env` is gitignored, so the dedicated clones at
 `~/radon-weekend/radon{,-testing}` (created by `git clone` and hard-reset to
 `origin/main` every night) structurally cannot contain it. Both wrappers
@@ -212,7 +217,11 @@ def _run(name: str, env: dict, cwd: Path) -> subprocess.CompletedProcess:
     )
 
 
-@pytest.mark.parametrize("name", sorted(SETUPS))
+PROVISIONED = ("testing",)
+CREDENTIAL_FREE = ("ci-performance", "documentation", "reliability")
+
+
+@pytest.mark.parametrize("name", PROVISIONED)
 class TestRunnerEnvProvisioning:
     def test_setup_copies_the_env_files_into_the_clone(self, name, tmp_path):
         src, clone, env = _stage(tmp_path, name)
@@ -417,10 +426,55 @@ def _env_keys(path: Path) -> dict:
 
 SCOPED_LOOPS = [
     ("testing", ".env.testing-scoped"),
-    ("reliability", ".env.reliability-scoped"),
-    ("ci-performance", ".env.ci-performance-scoped"),
-    ("documentation", ".env.documentation-scoped"),
 ]
+
+
+@pytest.mark.parametrize("name", CREDENTIAL_FREE)
+class TestCredentialFreeClones:
+    """DeepSec #771: these clones get no web/.env at all, not a scoped copy.
+
+    The operator copy carries production credentials beyond the Turso/UW pair
+    the scoping swapped (Clerk secret, IB Flex, Upstash, webhook secrets), and
+    the loop agents run without permission prompts inside the clone.
+    """
+
+    def test_setup_never_provisions_web_env(self, name, tmp_path):
+        src, clone, env = _stage(tmp_path, name)
+        (src / "web" / ".env").write_text(PROD_WEB_ENV, encoding="utf-8")
+
+        proc = _run(name, env, tmp_path)
+        out = proc.stdout + proc.stderr
+
+        assert proc.returncode == 0, out
+        assert not (clone / "web" / ".env").exists(), out
+        assert not list((clone / "web").glob(".env*")), out
+        assert "NOT provisioned" in out
+        for value in (PROD_TURSO, PROD_UW):
+            assert value not in out
+
+    def test_setup_deletes_a_previously_provisioned_copy(self, name, tmp_path):
+        src, clone, env = _stage(tmp_path, name)
+        (clone / "web" / ".env").write_text(PROD_WEB_ENV, encoding="utf-8")
+        stamp = time.time() + 120
+        os.utime(clone / "web" / ".env", (stamp, stamp))
+
+        proc = _run(name, env, tmp_path)
+        out = proc.stdout + proc.stderr
+
+        assert proc.returncode == 0, out
+        assert not (clone / "web" / ".env").exists(), out
+        assert "removed web/.env" in out
+        assert (src / "web" / ".env").exists(), "the operator copy is never touched"
+
+    def test_setup_no_longer_advises_a_source_web_env(self, name, tmp_path):
+        src, clone, env = _stage(tmp_path, name)
+        (src / "web" / ".env").unlink()
+
+        proc = _run(name, env, tmp_path)
+        out = proc.stdout + proc.stderr
+
+        assert proc.returncode == 0, out
+        assert not any("MISSING" in ln and "web/.env" in ln for ln in out.splitlines()), out
 
 
 class TestCloneScopedCredentials:
@@ -534,10 +588,10 @@ class TestCloneScopedCredentials:
             (clone / "web" / ".env").symlink_to(victim)
         return victim
 
-    @pytest.mark.parametrize("loop,scoped_name", SCOPED_LOOPS)
+    @pytest.mark.parametrize("loop", sorted(SETUPS))
     @pytest.mark.parametrize("rel", ["web/.env", "web"])
-    def test_a_symlinked_clone_env_is_refused_not_written_through(self, tmp_path, loop, scoped_name, rel):
-        src, clone, env, scoped = self._stage_prod(tmp_path, loop, scoped_name)
+    def test_a_symlinked_clone_env_is_refused_not_written_through(self, tmp_path, loop, rel):
+        src, clone, env, scoped = self._stage_prod(tmp_path, loop, f".env.{loop}-scoped")
         victim = self._planted_link(tmp_path, clone, rel)
         before = victim.stat()
 
@@ -558,7 +612,7 @@ class TestCloneScopedCredentials:
         assert 'cat "$tmp" > "$dst"' not in body
         assert 'mv -f -- "$tmp" "$dst"' in body
 
-    @pytest.mark.parametrize("loop", [name for name, _scoped in SCOPED_LOOPS])
+    @pytest.mark.parametrize("loop", sorted(SETUPS))
     def test_wrapper_never_recopies_web_env(self, loop):
         """Only setup provisions web/.env; no phase may restore the prod copy."""
         text = (REPO / "scripts" / WRAPPERS[loop]).read_text(encoding="utf-8")
