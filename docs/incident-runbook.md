@@ -1828,6 +1828,56 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
 
 ---
 
+## db-backup-hrana-stream-not-found
+
+**`radon-db-backup.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when Turso 404s the Hrana stream mid-dump.** Peak:
+2026-09-28 09:21:56Z, page `4076d7d9…`.
+
+- **Mechanism:** daily 09:00 UTC oneshot reads every user table through
+  one `get_db()` singleton (`BEGIN` held for the whole dump). After
+  about 10 minutes Turso answers `stream not found: b4866f02:2ef17`
+  on the next page. This run died on the page after
+  `research_post_sources` (`ai_cycle_observations`, 648071 rows).
+  Fetched rows stayed in the `.tmp` and were not promoted.
+  `Type=oneshot` has no `Restart=`, so `NRestarts=0`. Yesterday's run
+  finished that table (625406 rows in 129.9s) and uploaded. Not the
+  B2 case (that journal says `b2 FAILED: ConnectionClosedError` after
+  `dumped N tables`). Not a platform outage: `SELECT 1` from this host
+  succeeded, `/health/lite` stayed authenticated, and the only fresh
+  `service_health` error was `db-backup`.
+- **Detection:** journal `backup failed: ValueError: Hrana: ... status=404
+  ... stream not found` after per-table `name: N rows` lines and no
+  `db-backup: dumped` summary. `systemctl show` is `exit-code` / `0`.
+  Edge and `:8321/health/lite` stay up.
+- **Discriminating check:** canary `SELECT 1` succeeds and the journal
+  shows a partial table list then the 404. `b2 FAILED` is
+  `db-backup-b2-connection-closed`. Missing `RADON_ARCHIVE_S3_*` is
+  ops (secret). Canary fails too: Turso platform, stand down.
+  `Result=signal` is deploy stop-clean. A deploy may replay this
+  oneshot; the replay's `exit-code` is this case, not the signal.
+  If `/health/lite` is down too: API, stand down.
+- **Remediation (code):** on `stream not found` or `upstream forward
+  failed`, `reset_connection()` and resume the same `rowid` cursor on
+  a fresh connection. Three tries per page, budget resets after a
+  successful page, so a 20-25 min dump can outlive one stream.
+  Emitted rows are not replayed. A persistent 404 still exits 1.
+  Do not restart-flap; next timer (09:00 UTC) or one
+  `radon unit restart radon-db-backup.service` after the fix deploys.
+  Unit is not on `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `cloud/tests/test_db_backup.py::TestTransientHranaStreamRetry`
+  (`test_stream_not_found_mid_table_resumes_on_a_fresh_connection`,
+  `test_later_pages_get_a_fresh_attempt_budget`,
+  `test_persistent_stream_not_found_still_fails_without_replaying_rows`,
+  `test_non_transient_page_error_is_not_retried`,
+  `test_run_backup_resumes_through_reopen_cloud_db`);
+  `test_reopen_cloud_db_resets_the_singleton_before_connecting`.
+- **Code:** `cloud/scripts/db_backup.py`
+  (`is_transient_db_error`, `iter_table_rows`, `_reopen_cloud_db`).
+
+---
+
 ## demo-mirror-schema-lag
 
 **`radon-demo-mirror.service` oneshot pages P1 `Result=exit-code` with

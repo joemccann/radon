@@ -102,6 +102,17 @@ MIN_DUMP_ROWS = 1
 # portfolio_snapshots rows are ~12 KB, so 500 rows ≈ 6 MB / ~7 s per page —
 # bounded memory instead of a ~700 MB fetchall on the fattest table.
 BATCH_SIZE = 500
+# Page 4076d7d9 (2026-09-28): one Hrana stream for the whole dump 404'd
+# "stream not found" about 10 min in, on the page after research_post_sources.
+# get_db() is a singleton, so that same handle 404s forever. Retry the page
+# on a fresh connection. The budget is per page and resets after a success
+# (a healthy dump runs 20-25 min, longer than one stream).
+DB_STREAM_ATTEMPTS = 3
+DB_STREAM_RETRY_DELAY_SECS = 1.0
+_TRANSIENT_DB_MARKERS = (
+    "stream not found",
+    "upstream forward failed",
+)
 
 def _path_env(key: str, default: str) -> Path:
     """`os.environ.get(key, default)` returns "" for a SET-BUT-EMPTY variable,
@@ -335,23 +346,45 @@ def fetch_rows(result) -> list:
     return result.fetchall()
 
 
-def iter_table_rows(db, table: str, batch_size: int):
+def is_transient_db_error(exc: BaseException) -> bool:
+    """True when the Hrana stream is dead and a new connection can continue."""
+    text = str(exc).lower()
+    return any(marker in text for marker in _TRANSIENT_DB_MARKERS)
+
+
+def iter_table_rows(db, table: str, batch_size: int, reconnect=None, sleep=None):
     """Yield a stable rowid keyset, never replaying an already-emitted page.
 
     A WITHOUT ROWID table may fall back to one unpaged read only when the
-    first rowid query fails. Once any page has been emitted, failure is fatal:
-    replaying the whole table would silently duplicate the prefix.
+    first rowid query fails. Once any page has been emitted, a non-transient
+    failure is fatal: replaying the whole table would silently duplicate the
+    prefix. A dead Hrana stream retries the same page on ``reconnect()``.
     """
     last_rowid = None
     emitted = False
+    attempts = 0
+    sleeper = time.sleep if sleep is None else sleep
     while True:
         where = "" if last_rowid is None else f" WHERE rowid > {int(last_rowid)}"
         try:
             page = fetch_rows(db.execute(
                 f'SELECT rowid, * FROM "{table}"{where} ORDER BY rowid LIMIT {batch_size}'
             ))
-        except Exception:
-            if emitted:
+            attempts = 0
+        except Exception as exc:
+            retryable = reconnect is not None and is_transient_db_error(exc)
+            if retryable and attempts + 1 < DB_STREAM_ATTEMPTS:
+                attempts += 1
+                print(
+                    f"db-backup: transient turso stream error on {table}, "
+                    f"retry {attempts}/{DB_STREAM_ATTEMPTS - 1}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                sleeper(DB_STREAM_RETRY_DELAY_SECS)
+                db = reconnect()
+                continue
+            if emitted or retryable:
                 raise
             yield from fetch_rows(db.execute(f'SELECT * FROM "{table}"'))
             return
@@ -379,16 +412,31 @@ def _is_portable_object(sql: str) -> bool:
     return "libsql_vector_idx(" not in lowered
 
 
-def dump_database(db, out, batch_size: int = BATCH_SIZE) -> dict:
+def dump_database(db, out, batch_size: int = BATCH_SIZE, reconnect=None, sleep=None) -> dict:
     """Write a full SQL dump of ``db`` (anything with ``.execute(sql)``
     returning rows per :func:`fetch_rows`) to text stream ``out``.
 
     Emits tables (CREATE + paged per-row INSERTs) first, then indexes /
-    views / triggers, inside one transaction. Returns {"tables": n, "rows": n}.
+    views / triggers, inside one transaction. A dead Hrana stream resumes
+    from the last emitted rowid on ``reconnect()`` (a new read transaction).
+    Returns {"tables": n, "rows": n}.
     """
-    db.execute("BEGIN TRANSACTION")
+    current = db
+
+    def reopen():
+        nonlocal current
+        try:
+            current.execute("ROLLBACK")
+        except Exception as exc:
+            if not is_transient_db_error(exc):
+                raise
+        current = reconnect()
+        current.execute("BEGIN TRANSACTION")
+        return current
+
+    current.execute("BEGIN TRANSACTION")
     try:
-        master = fetch_rows(db.execute(
+        master = fetch_rows(current.execute(
             "SELECT name, type, sql FROM sqlite_master WHERE sql IS NOT NULL"
         ))
         virtual_names = {
@@ -428,7 +476,13 @@ def dump_database(db, out, batch_size: int = BATCH_SIZE) -> dict:
                     'SELECT rowid,title,summary,content FROM "knowledge";\n'
                 )
             else:
-                for row in iter_table_rows(db, name, batch_size):
+                for row in iter_table_rows(
+                    current,
+                    name,
+                    batch_size,
+                    reconnect=reopen if reconnect is not None else None,
+                    sleep=sleep,
+                ):
                     out.write(build_insert(name, row) + "\n")
                     table_rows += 1
             total_rows += table_rows
@@ -444,7 +498,11 @@ def dump_database(db, out, batch_size: int = BATCH_SIZE) -> dict:
         out.write("COMMIT;\n")
         return {"tables": len(tables), "rows": total_rows}
     finally:
-        db.execute("ROLLBACK")
+        try:
+            current.execute("ROLLBACK")
+        except Exception as exc:
+            if not is_transient_db_error(exc):
+                raise
 
 
 # ---------------------------------------------------------------------------
@@ -739,6 +797,19 @@ def _open_cloud_db():
     return get_db()
 
 
+def _reopen_cloud_db():
+    """New libsql connection after Turso has forgotten the Hrana stream.
+
+    ``get_db()`` without ``reset_connection()`` returns the dead singleton,
+    and every later statement 404s ``stream not found``.
+    """
+    sys.path.insert(0, str(REPO_ROOT))
+    from scripts.db.client import get_db, reset_connection
+
+    reset_connection()
+    return get_db()
+
+
 def assert_plausible_dump(stats: dict) -> None:
     """Raise before an implausible dump is promoted, pruned against or shipped.
 
@@ -766,7 +837,7 @@ def run_backup() -> dict:
     db = _open_cloud_db()
     try:
         with gzip.open(tmp_path, "wt", encoding="utf-8") as out:
-            stats = dump_database(db, out)
+            stats = dump_database(db, out, reconnect=_reopen_cloud_db)
         assert_plausible_dump(stats)
         os.replace(tmp_path, final_path)
     finally:
