@@ -67,6 +67,11 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 from utils import ib_2fa_lock  # noqa: E402
+from utils.ib_login_throttle import (  # noqa: E402
+    LOGIN_THROTTLE_COOLDOWN_BASE_SECS,
+    format_utc,
+    login_throttle_cooldown,
+)
 
 LOG = logging.getLogger("ib_watchdog")
 
@@ -1163,9 +1168,9 @@ def _handle_primary_sensor_down(
 # `wedged`. The api-hang ladder restarted it three times, and every restart was
 # one more login attempt keeping IBKR's failed-login counter armed. A throttled
 # login is not a JVM hang: the only cure is a quiet period with no attempts,
-# then ONE fresh login whose push the operator approves.
-LOGIN_THROTTLE_COOLDOWN_BASE_SECS = 900
-LOGIN_THROTTLE_COOLDOWN_CAP_SECS = 3600
+# then ONE fresh login whose push the operator approves. The quiet period is
+# shared with the broker daemon (utils/ib_login_throttle.py), which refuses
+# operator restarts inside it.
 LOGIN_LOG_TIMEOUT_SECS = 6.0
 _LOGIN_ATTEMPT_MARK = "IBC: Login attempt:"
 _LOGIN_THROTTLE_MARK = "IBC: Too many failed login attempts"
@@ -1226,13 +1231,6 @@ def _clear_login_throttle(state: "WatchdogState") -> None:
     state.login_throttle_alerted = False
 
 
-def _login_throttle_cooldown(retries: int) -> float:
-    return min(
-        LOGIN_THROTTLE_COOLDOWN_BASE_SECS * (2 ** retries),
-        LOGIN_THROTTLE_COOLDOWN_CAP_SECS,
-    )
-
-
 def _handle_login_throttled(
     *,
     state: "WatchdogState",
@@ -1256,9 +1254,8 @@ def _handle_login_throttled(
     state.degraded_count = 0
     state.quiet_degraded_since = 0.0
 
-    cooldown = _login_throttle_cooldown(state.login_throttle_retries)
-    retry_at = state.login_throttle_since + cooldown
-    retry_at_utc = datetime.fromtimestamp(retry_at, timezone.utc).strftime("%H:%M UTC")
+    retry_at = state.login_throttle_since + login_throttle_cooldown(state.login_throttle_retries)
+    retry_at_utc = format_utc(retry_at)
     if not state.login_throttle_alerted:
         LOG.error(
             "IBKR is throttling Gateway logins (%s) — no 2FA push can be sent; "
