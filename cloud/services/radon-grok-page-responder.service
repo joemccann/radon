@@ -32,7 +32,7 @@ ReadOnlyPaths=/home/radon
 # system"), each page burned its 3 attempts and was skipped — the responder
 # polled healthily while fixing nothing (Aug 15–20 outage). Secrets stance is
 # unchanged: radon-cloud/.env stays inaccessible above.
-ReadWritePaths=/home/radon/radon-page-responder /home/radon/.grok
+ReadWritePaths=/home/radon/radon-page-responder /home/radon/.grok /home/radon/.local /var/lib/radon
 
 [Install]
 WantedBy=multi-user.target

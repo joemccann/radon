@@ -248,3 +248,62 @@ def record_attempt_failure(page_id: str, *, now: datetime, error: str) -> str:
         (attempts, status, _iso(now), (error or "")[:1000], page_id),
     )
     return status
+
+
+_PAGE_ROW_SQL = """
+SELECT page_id, service, severity, kind, message_excerpt, paged_at,
+       status, claimed_at, attempts, result, finished_at
+FROM watchdog_pages
+"""
+
+
+def _row_to_page(row) -> dict:
+    return {
+        "page_id": row[0],
+        "service": row[1],
+        "severity": row[2],
+        "kind": row[3],
+        "message_excerpt": row[4],
+        "paged_at": row[5],
+        "status": row[6],
+        "claimed_at": row[7],
+        "attempts": int(row[8] or 0),
+        "result": row[9],
+        "finished_at": row[10],
+    }
+
+
+def get_page(page_id: str) -> Optional[dict]:
+    """Best-effort single-row read. None on miss or Turso failure."""
+    if not page_id:
+        return None
+    try:
+        from db.hrana_http import hrana_query
+    except ImportError:
+        from scripts.db.hrana_http import hrana_query
+    try:
+        rows = hrana_query(_PAGE_ROW_SQL + " WHERE page_id = ? LIMIT 1", (page_id,))
+    except Exception as exc:  # noqa: BLE001 — pickup must still open a PR
+        log.warning("watchdog_pages get_page failed for %s: %s", page_id, exc)
+        return None
+    return _row_to_page(rows[0]) if rows else None
+
+
+def find_page_by_result(needle: str) -> Optional[dict]:
+    """Best-effort match on ``result`` (commit SHA / grok summary)."""
+    text = (needle or "").strip()
+    if len(text) < 7:
+        return None
+    try:
+        from db.hrana_http import hrana_query
+    except ImportError:
+        from scripts.db.hrana_http import hrana_query
+    try:
+        rows = hrana_query(
+            _PAGE_ROW_SQL + " WHERE result LIKE ? ORDER BY paged_at DESC LIMIT 1",
+            (f"%{text}%",),
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("watchdog_pages find_page_by_result failed: %s", exc)
+        return None
+    return _row_to_page(rows[0]) if rows else None

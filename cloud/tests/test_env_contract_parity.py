@@ -69,6 +69,10 @@ EXEMPT: dict[str, str] = {
     "CBOE_DAILY_PRICES_BASE_URL": "override for _DEFAULT_BASE_URL in clients/cboe_client.py",
     "FINRA_MARGIN_XLSX_URL": "override for _DEFAULT_XLSX_URL in clients/finra_client.py",
     "GROK_BIN": "override for the `grok` binary name on PATH",
+    "GROK_MODEL": "optional override; unset resolves the live default from `grok models` or last-known-good",
+    "GROK_CLI_VERSION": "optional stamp override for tests; unset is probed from `grok --version`",
+    "RADON_GROK_LKG_PATH": "optional override; unset is /var/lib/radon/grok_lkg.json",
+    "RADON_GROK_RUNTIME_LOCK": "optional override; unset is /var/lib/radon/grok-runtime.lock",
     "IB_FLEX_FLOWS_QUERY_ID": "deliberately unset; _flows_query_id() falls back to the NAV id",
 }
 

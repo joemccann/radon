@@ -155,6 +155,69 @@ three flags all defaulted on, so a broken env file yielded maximum autonomy.
 
 `GROK_BIN` overrides the `grok` executable.
 
+## IR PR description
+
+Pickup no longer opens a PR whose issue and fix lines are
+`grok incident fix on fix/<slug>`. Grok's commit body is the source. It
+must contain these sections, each with real content:
+
+- What broke (symptom, failing job or alert, page id, first-seen time,
+  run or log links, error excerpt)
+- Root cause
+- What changed (each file)
+- How it was verified
+- Risk and rollback
+- Still open
+
+A missing, empty, TODO, branch-name, or `grok incident fix on` section is
+refused: pickup logs, sends a normal-priority Pushover, exits non-zero for
+that branch, and leaves it for the next cycle. The responder's AUTOPUSH
+path uses the same validator. Pickup also folds in the `watchdog_pages`
+row (page id, severity, first-seen, result) when Turso is reachable, and
+adds CI run URLs on a later cycle once `gh run list` has them.
+
+## Grok model and CLI (track latest)
+
+Default is the newest stable CLI and the live default model. The responder
+resolves the model id at run time from `grok models` (or the promoted
+last-known-good) and always passes it with `-m`. Every log line,
+`watchdog_pages.result`, commit body, and PR `How it was verified` records
+`Ran <model> on CLI <version>`. `--no-auto-update` stays on at incident
+time so the CLI never upgrades itself mid-run.
+
+Last-known-good is a machine-written state file owned by the daily
+upgrader: `/var/lib/radon/grok_lkg.json` (`cli_version`, `binary_path`,
+`model`, `promoted_at`, `smoke_result`). There is no checked-in pin.
+
+If the current model or CLI errors at incident time (non-zero exit,
+model-unavailable, unparseable output with no `RESULT:` line), the
+responder retries once on last-known-good and alerts. A valid
+`RESULT: failed` line is not a retry.
+
+A shared flock (`/var/lib/radon/grok-runtime.lock`) serializes the
+responder against a live promotion.
+
+### Daily upgrade timer (enabled)
+
+`radon-grok-upgrade.{service,timer}` is installed and enabled. Daily
+07:40 UTC it runs `scripts/grok_upgrade.py`: `grok update` into a
+candidate under `~/.grok/downloads` (scratch `GROK_HOME`), resolves the
+newest default model, and smokes a canned dry-run that must return
+`RESULT:` plus a Part 1 validator-passing body.
+
+- Pass: promote immediately (switch the live symlink), write LKG. No PR.
+- Fail: stay on last-known-good and alert via Pushover / watchdog.
+- Incident lock held: skip the promote and retry next fire.
+
+```bash
+systemctl status radon-grok-upgrade.timer
+journalctl -u radon-grok-upgrade.service -n 50
+cat /var/lib/radon/grok_lkg.json
+```
+
+`cloud/scripts/setup-grok-page-responder.sh` installs the latest stable
+CLI and seeds LKG from the live default.
+
 ## Push guard
 
 The prompt tells grok never to push `main` or merge, but prompt text is not
@@ -267,8 +330,13 @@ running` every 30 seconds.
 | `scripts/watchdog/notify.py` | After P1 2xx |
 | `scripts/watchdog/grouping.py` | After grouped IB P1 2xx (creds required) |
 | `scripts/grok_page_responder.py` | Poller |
+| `scripts/ir_pr_description.py` | IR PR section validator |
+| `scripts/grok_runtime.py` | Model resolve, LKG IO, lock, fallback |
+| `scripts/grok_upgrade.py` | Daily smoke + auto-promote |
+| `/var/lib/radon/grok_lkg.json` | Machine-written last-known-good |
 | `cloud/services/radon-grok-page-responder.*` | VPS timer |
-| `cloud/scripts/setup-grok-page-responder.sh` | Clone + stripped env + grok CLI |
+| `cloud/services/radon-grok-upgrade.*` | Daily track-latest, installed enabled |
+| `cloud/scripts/setup-grok-page-responder.sh` | Clone + stripped env + latest grok CLI |
 | `scripts/deploy_notify.py` | Live-gate Pushover |
 | `cloud/scripts/deploy.sh` | `notify_release_live` after green marker |
 

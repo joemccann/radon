@@ -1,3 +1,10 @@
+# Task: IR PR descriptions + Grok pin (2026-09-28)
+
+- [x] T1 depends_on: [] Validator + pickup/autopush refuse placeholders; tests on title/body.
+- [x] T2 depends_on: [T1] Track-latest resolver, LKG state, responder `-m`/fallback/lock.
+- [x] T3 depends_on: [T2] Daily enabled upgrade timer, smoke/promote/stay-fail, runbook.
+- [ ] T4 depends_on: [T3] Draft PR vs main, CI green, no merge.
+
 # Task: Knowledge golden eval v2 (2026-09-27)
 
 - [x] T1 depends_on: [] Opt-in retrieve.py legs/recency/cap hooks; defaults identical.

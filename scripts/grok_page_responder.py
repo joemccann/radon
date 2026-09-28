@@ -56,6 +56,7 @@ load_repo_dotenv()
 from watchdog import notify
 from watchdog import pages as pages_mod
 from watchdog import units as units_mod
+import grok_runtime
 import ir_ensure_pr
 
 try:
@@ -276,14 +277,26 @@ def acquire_lock(lock_path: Path, now: datetime) -> bool:
     return True
 
 
-def build_grok_command(prompt_path: Path, repo_root: Path) -> list[str]:
+def build_grok_command(
+    prompt_path: Path,
+    repo_root: Path,
+    *,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+    grok: str | None = None,
+) -> list[str]:
+    effort = reasoning_effort or grok_runtime.reasoning_effort()
+    if not model:
+        raise grok_runtime.GrokRuntimeError("refusing implicit grok model default")
     return [
-        grok_bin(),
+        grok or grok_bin(),
         "--prompt-file", str(prompt_path),
         "--cwd", str(repo_root),
         "--always-approve",
         "--no-auto-update",
         "--no-plan",
+        "-m", model,
+        "--reasoning-effort", effort,
         "--output-format", "json",
     ]
 
@@ -459,6 +472,22 @@ def build_prompt(page: dict, *, autoship: bool, autopush: bool) -> str:
         "not a local testable defect\n\n"
         f"{ship_line}\n{push_line}\n"
         "Ignore unrelated dirty files. No em dashes in user-facing copy.\n"
+        "When AUTOSHIP commits, the commit message body MUST include these "
+        "markdown sections, each with real content (not TODO, not the branch "
+        "name, not 'grok incident fix on'):\n"
+        "## What broke\n"
+        "symptom, failing job or alert, page id, first-seen time, run or log "
+        "links, error excerpt.\n"
+        "## Root cause\n"
+        "## What changed\n"
+        "each file with a plain summary.\n"
+        "## How it was verified\n"
+        "tests, commands, CI links if known. Record the model id and CLI "
+        "version that ran (Ran <model> on CLI <version>).\n"
+        "## Risk and rollback\n"
+        "## Still open\n"
+        "Pickup opens the PR from this body. A missing or placeholder section "
+        "refuses the PR and pages.\n"
         "End with exactly one line:\n"
         "RESULT: <code_fix|stand_down|ops_only|failed> | <one-line summary>\n"
     )
@@ -523,6 +552,82 @@ def _send_followup(*, service: str, disposition: str, summary: str) -> None:
     notify._post_pushover(payload)
 
 
+def _send_pin_warning(message: str) -> None:
+    print(message, file=sys.stderr)
+    creds = notify._pushover_creds()
+    if not creds:
+        return
+    user, token = creds
+    notify._post_pushover(
+        notify.build_pushover_payload(
+            user=user,
+            token=token,
+            title="radon grok: last-known-good fallback",
+            message=message[:900],
+            severity=None,
+        )
+    )
+
+
+def _runtime_lock_path(repo_root: Path) -> Path:
+    env = os.environ.get("RADON_GROK_RUNTIME_LOCK")
+    if env:
+        return Path(env)
+    machine = grok_runtime.DEFAULT_LOCK_PATH
+    if machine.parent.is_dir() and os.access(machine.parent, os.W_OK):
+        return machine
+    return cache_dir(repo_root) / "grok-runtime.lock"
+
+
+def _lkg_path() -> Path:
+    env = os.environ.get("RADON_GROK_LKG_PATH")
+    if env:
+        return Path(env)
+    return grok_runtime.DEFAULT_LKG_PATH
+
+
+def _runtime_from_track(
+    *,
+    probe: bool,
+    pin_runtime: grok_runtime.ResolvedRuntime | None = None,
+    grok_runner: GrokRunner | None = None,
+) -> grok_runtime.ResolvedRuntime:
+    if pin_runtime is not None:
+        return pin_runtime
+    lkg = None
+    try:
+        lkg = grok_runtime.load_lkg(_lkg_path())
+    except grok_runtime.GrokRuntimeError:
+        lkg = None
+    if not probe:
+        if lkg is not None:
+            return grok_runtime.ResolvedRuntime(
+                model=lkg.model,
+                reasoning_effort=lkg.reasoning_effort,
+                cli_version=lkg.cli_version,
+                binary_path=lkg.binary_path,
+                used_fallback=False,
+                warning=None,
+                refused=False,
+                source="lkg",
+            )
+        return grok_runtime.ResolvedRuntime(
+            model=os.environ.get("GROK_MODEL") or "grok-4.7",
+            reasoning_effort=grok_runtime.reasoning_effort(),
+            cli_version=os.environ.get("GROK_CLI_VERSION") or "",
+            binary_path=grok_bin(),
+            used_fallback=False,
+            warning=None,
+            refused=False,
+            source="models",
+        )
+    return grok_runtime.resolve_latest(
+        grok_bin=grok_bin(),
+        runner=grok_runner or _default_grok_runner,
+        lkg=lkg,
+    )
+
+
 def record_cycle_health(state: str, *, now: Optional[datetime] = None) -> None:
     """Heartbeat THIS poller, never the ticket outcome.
 
@@ -572,6 +677,7 @@ def run_cycle(
     grok_runner: Optional[GrokRunner] = None,
     systemctl_runner: Optional[SystemctlRunner] = None,
     ensure_ir_pr: Optional[Callable] = None,
+    pin_runtime: grok_runtime.ResolvedRuntime | None = None,
 ) -> int:
     now = now or datetime.now(timezone.utc)
     if not responder_enabled():
@@ -619,6 +725,22 @@ def run_cycle(
             _heartbeat("paused", now)
             return 0
 
+        runtime = _runtime_from_track(
+            probe=grok_runner is None,
+            pin_runtime=pin_runtime,
+            grok_runner=grok_runner,
+        )
+        if runtime.warning:
+            _send_pin_warning(runtime.warning)
+        if runtime.refused:
+            print(json.dumps({
+                "at": now.isoformat(),
+                "skipped": "grok_runtime",
+                "warning": runtime.warning,
+            }))
+            _heartbeat("paused", now)
+            return 0
+
         page = actionable[0]
         token = uuid.uuid4().hex
         if not pages_mod.claim_page(page["page_id"], now=now, claim_token=token):
@@ -659,10 +781,58 @@ def run_cycle(
                 autopush=autopush_enabled(),
             )
         )
-        cmd = build_grok_command(prompt_path, repo_root)
+        cmd = build_grok_command(
+            prompt_path,
+            repo_root,
+            model=runtime.model,
+            reasoning_effort=runtime.reasoning_effort,
+            grok=runtime.binary_path or grok_bin(),
+        )
+
+        def _run_once(command: list[str]):
+            try:
+                return runner(command, timeout=GROK_TIMEOUT_SECS, cwd=str(repo_root)), None
+            except subprocess.TimeoutExpired:
+                return None, "timeout"
+
         try:
-            proc = runner(cmd, timeout=GROK_TIMEOUT_SECS, cwd=str(repo_root))
-        except subprocess.TimeoutExpired:
+            with grok_runtime.exclusive_lock(_runtime_lock_path(repo_root), blocking=True):
+                proc, timeout_err = _run_once(cmd)
+                stdout = getattr(proc, "stdout", "") or "" if proc else ""
+                stderr = getattr(proc, "stderr", "") or "" if proc else ""
+                returncode = getattr(proc, "returncode", 1) if proc else 124
+                if timeout_err or grok_runtime.should_retry_lkg(returncode, stdout, stderr):
+                    lkg = None
+                    try:
+                        lkg = grok_runtime.load_lkg(_lkg_path())
+                    except grok_runtime.GrokRuntimeError:
+                        lkg = None
+                    if lkg is not None and (
+                        lkg.model != runtime.model or lkg.binary_path != runtime.binary_path
+                    ):
+                        _send_pin_warning(
+                            f"grok {runtime.model} / CLI {runtime.cli_version} "
+                            f"failed at incident time; retrying last-known-good "
+                            f"{lkg.model} / CLI {lkg.cli_version}"
+                        )
+                        runtime = grok_runtime.runtime_from_lkg(lkg)
+                        cmd = build_grok_command(
+                            prompt_path,
+                            repo_root,
+                            model=runtime.model,
+                            reasoning_effort=runtime.reasoning_effort,
+                            grok=runtime.binary_path or grok_bin(),
+                        )
+                        proc, timeout_err = _run_once(cmd)
+        except grok_runtime.GrokRuntimeError as exc:
+            print(json.dumps({
+                "at": now.isoformat(),
+                "page_id": page["page_id"],
+                "error": f"grok runtime lock: {exc}",
+            }), file=sys.stderr)
+            return 0
+
+        if timeout_err:
             status = pages_mod.record_attempt_failure(
                 page["page_id"],
                 now=datetime.now(timezone.utc),
@@ -676,9 +846,9 @@ def run_cycle(
             }))
             return 0
 
-        returncode = getattr(proc, "returncode", 1)
-        stdout = getattr(proc, "stdout", "") or ""
-        stderr = getattr(proc, "stderr", "") or ""
+        returncode = getattr(proc, "returncode", 1) if proc else 1
+        stdout = getattr(proc, "stdout", "") or "" if proc else ""
+        stderr = getattr(proc, "stderr", "") or "" if proc else ""
         if returncode != 0:
             status = pages_mod.record_attempt_failure(
                 page["page_id"],
@@ -729,6 +899,9 @@ def run_cycle(
                 if url:
                     summary = f"{summary} {url}"
         finished = datetime.now(timezone.utc)
+        stamp = grok_runtime.runtime_stamp(runtime.model, runtime.cli_version)
+        if stamp not in summary:
+            summary = f"{summary} {stamp}".strip()
         pages_mod.complete_page(
             page["page_id"],
             status="done",
@@ -746,6 +919,8 @@ def run_cycle(
             "service": page["service"],
             "disposition": disposition,
             "summary": summary,
+            "model": runtime.model,
+            "cli_version": runtime.cli_version,
         }))
         return 0
     except HranaHttpError as exc:
