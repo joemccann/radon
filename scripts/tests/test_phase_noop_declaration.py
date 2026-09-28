@@ -36,7 +36,7 @@ _spec.loader.exec_module(_h)
 
 # security scores on its own completion marker, not on a commit, so it has no
 # phase_committed() to soften.
-FALLBACK = ["reliability", "testing", "ci-performance", "documentation"]
+FALLBACK = ["reliability", "testing", "ci-performance"]
 NOOP_MARKER = "NIGHTLY PHASE NO-OP:"
 INCOMPLETE = "without committing to the nightly branch"
 
@@ -168,7 +168,6 @@ def test_an_echoed_skill_manual_is_not_a_declaration(tmp_path, loop):
         "reliability": "reliability-weekend",
         "testing": "testing-weekend",
         "ci-performance": "ci-performance",
-        "documentation": "documentation-nightly",
     }[loop]
     manual = (_h.REPO / ".claude" / "skills" / skill_dir / "SKILL.md").read_text(
         encoding="utf-8"

@@ -27,14 +27,12 @@ LOOPS = (
     "reliability-weekend",
     "testing-weekend",
     "ci-performance",
-    "documentation-nightly",
     "security-nightly",
 )
 WRAPPERS = (
     SCRIPTS / "reliability_weekend.sh",
     SCRIPTS / "testing_weekend.sh",
     SCRIPTS / "ci_performance_nightly.sh",
-    SCRIPTS / "documentation_nightly.sh",
     SCRIPTS / "security_nightly.sh",
 )
 ISSUE_HEADING = "## Issue discovered"
@@ -163,7 +161,6 @@ class TestFormatPrTitle:
         [
             ("reliability", "Reliability"),
             ("testing", "Testing"),
-            ("documentation", "Documentation"),
             ("ci-performance", "CI Performance"),
         ],
     )
@@ -213,7 +210,7 @@ class TestFormatPrTitle:
             ("reliability", "2026-09-01 The TLS handshake ran on the accept thread."),
             ("security", "2026-9-1"),
             ("testing", "09/01/2026"),
-            ("documentation", "2026-13-01"),
+            ("ci-performance", "2026-13-01"),
         ],
     )
     def test_date_must_be_yyyy_mm_dd(self, loop, bad_date):

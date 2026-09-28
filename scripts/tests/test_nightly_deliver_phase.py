@@ -46,7 +46,6 @@ LOOPS = {
     "reliability": ("reliability_weekend.sh", "reliability-weekend", "reliability-weekend"),
     "testing": ("testing_weekend.sh", "testing-weekend", "testing-weekend"),
     "ci-performance": ("ci_performance_nightly.sh", "ci-performance", "ci-performance"),
-    "documentation": ("documentation_nightly.sh", "documentation-nightly", "documentation-nightly"),
     "security": ("security_nightly.sh", "security-nightly", "security-nightly"),
     "security-deepsec": ("security_deepsec_nightly.sh", "security-deepsec", "security-deepsec"),
 }
@@ -58,7 +57,6 @@ MARKERS = (
     ".radon-reliability-runner",
     ".radon-testing-runner",
     ".radon-ci-performance-runner",
-    ".radon-documentation-runner",
 )
 URL1 = "https://github.com/joemccann/radon/pull/301"
 URL2 = "https://github.com/joemccann/radon/pull/302"

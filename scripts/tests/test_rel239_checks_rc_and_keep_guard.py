@@ -30,7 +30,6 @@ WRAPPERS = (
     SCRIPTS / "reliability_weekend.sh",
     SCRIPTS / "testing_weekend.sh",
     SCRIPTS / "ci_performance_nightly.sh",
-    SCRIPTS / "documentation_nightly.sh",
     SCRIPTS / "security_nightly.sh",
 )
 

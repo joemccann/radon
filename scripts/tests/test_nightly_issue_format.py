@@ -31,7 +31,6 @@ WRAPPERS = [
     REPO / "scripts" / "reliability_weekend.sh",
     REPO / "scripts" / "testing_weekend.sh",
     REPO / "scripts" / "ci_performance_nightly.sh",
-    REPO / "scripts" / "documentation_nightly.sh",
     REPO / "scripts" / "security_nightly.sh",
     REPO / "scripts" / "security_deepsec_nightly.sh",
 ]
@@ -39,7 +38,6 @@ SKILLS = [
     REPO / ".claude" / "skills" / "reliability-weekend" / "SKILL.md",
     REPO / ".claude" / "skills" / "testing-weekend" / "SKILL.md",
     REPO / ".claude" / "skills" / "ci-performance" / "SKILL.md",
-    REPO / ".claude" / "skills" / "documentation-nightly" / "SKILL.md",
     REPO / ".claude" / "skills" / "security-nightly" / "SKILL.md",
 ]
 HEADINGS = (

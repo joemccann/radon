@@ -71,7 +71,7 @@ def _assert_pinned(log: Path) -> None:
 
 
 def test_every_clone_plist_is_covered():
-    assert len(PLISTS) >= 6, PLISTS
+    assert len(PLISTS) >= 5, PLISTS
 
 
 @pytest.mark.parametrize("plist", PLISTS, ids=lambda p: p.stem)
@@ -131,7 +131,7 @@ CLONE_SETUPS = [p for p in SETUPS if "WEEKEND_REPO" in p.read_text(encoding="utf
 
 
 def test_every_runner_setup_is_covered():
-    assert len(CLONE_SETUPS) >= 5, CLONE_SETUPS
+    assert len(CLONE_SETUPS) >= 4, CLONE_SETUPS
 
 
 @pytest.mark.parametrize("setup", CLONE_SETUPS, ids=lambda p: p.stem)

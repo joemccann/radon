@@ -55,11 +55,6 @@ LOOPS = {
         "ci-performance",
         "com.radon.ci-performance-daily.plist",
     ),
-    "documentation": (
-        "documentation_nightly.sh",
-        "documentation-nightly",
-        "com.radon.documentation-daily.plist",
-    ),
     "security": (
         "security_nightly.sh",
         "security-nightly",
@@ -125,7 +120,7 @@ def _build(
         (clone / ".radon-weekend-runner").touch()
         # REL-180 (R-504): every wrapper requires its OWN loop marker as well.
         for loop_marker in (".radon-security-runner", ".radon-security-deepsec-runner", ".radon-reliability-runner", ".radon-testing-runner",
-                            ".radon-ci-performance-runner", ".radon-documentation-runner"):
+                            ".radon-ci-performance-runner"):
             (clone / loop_marker).touch()
 
     bin_dir = tmp_path / "bin"
@@ -665,7 +660,7 @@ class TestTheJobRestoresTheEntryPointBeforeReadingIt:
 
     @pytest.mark.parametrize(
         "setup",
-        ["setup_reliability_weekend.sh", "setup_testing_weekend.sh", "setup_documentation_nightly.sh", "setup_security_nightly.sh"],
+        ["setup_reliability_weekend.sh", "setup_testing_weekend.sh", "setup_security_nightly.sh"],
     )
     def test_the_setup_script_states_the_deploy_rule(self, setup: str) -> None:
         src = (REPO / "scripts" / setup).read_text(encoding="utf-8")
@@ -676,7 +671,7 @@ class TestTheJobRestoresTheEntryPointBeforeReadingIt:
 
     @pytest.mark.parametrize(
         "setup",
-        ["setup_reliability_weekend.sh", "setup_testing_weekend.sh", "setup_documentation_nightly.sh", "setup_security_nightly.sh"],
+        ["setup_reliability_weekend.sh", "setup_testing_weekend.sh", "setup_security_nightly.sh"],
     )
     def test_the_setup_script_refuses_while_a_run_is_in_flight(self, setup: str) -> None:
         src = (REPO / "scripts" / setup).read_text(encoding="utf-8")

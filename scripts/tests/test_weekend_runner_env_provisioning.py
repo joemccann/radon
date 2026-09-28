@@ -55,16 +55,11 @@ SETUPS = {
         REPO / "scripts" / "setup_ci_performance.sh",
         "radon-ci-performance",
     ),
-    "documentation": (
-        REPO / "scripts" / "setup_documentation_nightly.sh",
-        "radon-documentation",
-    ),
 }
 PLISTS = {
     "reliability": "com.radon.reliability-daily.plist",
     "testing": "com.radon.testing-daily.plist",
     "ci-performance": "com.radon.ci-performance-daily.plist",
-    "documentation": "com.radon.documentation-daily.plist",
 }
 
 # Dummy values only. Never stage a real credential into a fixture.
@@ -72,7 +67,6 @@ WRAPPERS = {
     "reliability": "reliability_weekend.sh",
     "testing": "testing_weekend.sh",
     "ci-performance": "ci_performance_nightly.sh",
-    "documentation": "documentation_nightly.sh",
 }
 DUMMY = {
     ".env": "TURSO_DB_URL=libsql://dummy.invalid\nTURSO_AUTH_TOKEN=dummy\n",
@@ -184,7 +178,6 @@ def _stage(tmp_path: Path, name: str) -> tuple[Path, Path, dict]:
         "reliability": "venv-reliability",
         "testing": "venv-testing",
         "ci-performance": "venv-ci-performance",
-        "documentation": "venv-documentation",
     }[name]
     venv_bin = root / venv_name / "bin"
     venv_bin.mkdir(parents=True)
@@ -218,7 +211,7 @@ def _run(name: str, env: dict, cwd: Path) -> subprocess.CompletedProcess:
 
 
 PROVISIONED = ("testing",)
-CREDENTIAL_FREE = ("ci-performance", "documentation", "reliability")
+CREDENTIAL_FREE = ("ci-performance", "reliability")
 
 
 @pytest.mark.parametrize("name", PROVISIONED)
