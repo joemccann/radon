@@ -1246,6 +1246,11 @@ if command in {{"list-unit-files", "list-units"}}:
     for name in names:
         print(name, "enabled")
     raise SystemExit(0)
+if command == "show" and "--property=Id,Transient" in args:
+    for unit in args[args.index("--") + 1:]:
+        transient = "yes" if data["units"].get(unit, {{}}).get("transient") else "no"
+        print(f"Id={{unit}}\\nTransient={{transient}}\\n")
+    raise SystemExit(0)
 if command == "show":
     unit = args[1]
     if data["list_mode"] == "show-fail" and unit == "radon-demo-mirror.service":
@@ -1258,8 +1263,6 @@ if command == "show":
         print(data["units"].get(unit, {{}}).get("fragment", ""))
     elif "--property=Result" in args:
         print(data["units"].get(unit, {{}}).get("result", "success"))
-    elif "--property=Transient" in args:
-        print("yes" if data["units"].get(unit, {{}}).get("transient") else "no")
     elif "--property=Type" in args:
         print(data["units"].get(unit, {{"type": "simple"}})["type"])
     else:

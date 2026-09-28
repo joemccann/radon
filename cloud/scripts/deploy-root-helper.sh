@@ -437,28 +437,42 @@ unit_is_release_managed() {
 }
 
 list_transition_units() {
-  local unit file_units loaded_units
+  local unit file_units loaded_units candidates transient
   file_units="$(systemctl_bounded list-unit-files 'radon-*.service' 'radon-*.timer' --no-legend --no-pager)" \
     || return 1
   loaded_units="$(systemctl_bounded list-units --all 'radon-*.service' 'radon-*.timer' --no-legend --no-pager --plain)" \
     || return 1
-  printf '%s\n%s\n' "$file_units" "$loaded_units" \
+  candidates="$(printf '%s\n%s\n' "$file_units" "$loaded_units" \
     | awk '{print $1}' \
     | while IFS= read -r unit; do
         [[ "$unit" =~ ^radon-[a-zA-Z0-9_.@-]+\.(service|timer)$ ]] || continue
         unit_is_excluded "$unit" && continue
-        unit_is_transient "$unit" && continue
         printf '%s\n' "$unit"
       done \
-    | sort -u
+    | sort -u)"
+  [[ -n "$candidates" ]] || return 0
+  transient="$(transient_units $candidates)"
+  while IFS= read -r unit; do
+    grep -qxF -- "$unit" <<< "$transient" && continue
+    printf '%s\n' "$unit"
+  done <<< "$candidates"
 }
 
 # A `systemd-run` unit is discarded by systemd once stopped, so a release
 # transition that stops it can never start it again (2026-09-28: an operator's
 # radon-forktest.timer failed a deploy and its rollback). Leave such units
-# alone. An unreadable property keeps the unit in the transition as before.
-unit_is_transient() {
-  [[ "$(systemctl_bounded show "$1" --property=Transient --value 2>/dev/null)" == yes ]]
+# alone. One batched query; if it fails, every unit stays in the transition.
+transient_units() {
+  systemctl_bounded show --property=Id,Transient -- "$@" 2>/dev/null \
+    | awk 'BEGIN { RS = ""; FS = "\n" }
+      { id = ""; t = ""
+        for (i = 1; i <= NF; i++) {
+          split($i, kv, "=")
+          if (kv[1] == "Id") id = kv[2]
+          if (kv[1] == "Transient") t = kv[2]
+        }
+        if (t == "yes" && id != "") print id }' \
+    || true
 }
 
 active_state() {
