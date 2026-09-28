@@ -13,6 +13,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[2]
 SMOKE = REPO / "scripts" / "nightly_smoke.sh"
 BASH = shutil.which("bash") or "/bin/bash"
@@ -74,3 +76,34 @@ def test_origin_main_is_read_through_the_host_gitdir():
     assert re.search(r'^REF="\$W/\.gitdirs/[a-z-]+\.git"', text, re.M)
     assert "git -C" not in text
     assert "core.hooksPath" in text.split("\nloop() {")[0]
+
+
+@pytest.mark.parametrize(
+    "wrapper",
+    ["reliability_weekend.sh", "testing_weekend.sh", "ci_performance_nightly.sh", "documentation_nightly.sh"],
+)
+def test_the_extracted_readiness_check_passes_a_ready_fx_rung(tmp_path, wrapper):
+    """2026-09-27: the smoke copied provider_ready without fx_key, so every
+    fx rung printed `fx_key: command not found` and read as NOT ready."""
+    text = SMOKE.read_text(encoding="utf-8")
+    awk = re.search(r"fns=\"\$\(awk '([^']+)' \"\$wf\"\)\"", text).group(1)
+    fns = subprocess.run(
+        ["awk", awk, str(REPO / "scripts" / wrapper)], capture_output=True, text=True, check=True
+    ).stdout
+    home, cli = tmp_path / "home", tmp_path / "cli"
+    (home / ".fx").mkdir(parents=True)
+    (home / ".fx" / "settings.json").write_text("{}")
+    cli.mkdir()
+    (cli / "env").write_text("NVIDIA_API_KEY=k\n")
+    fx = tmp_path / "fx"
+    fx.write_text("#!/bin/sh\n")
+    fx.chmod(0o755)
+    call = re.search(r"provider_ready '\$\{r%%:\*\}'[^\"]*", text).group(0)
+    script = fns + "\nr=fx:nvidia\n" + call.replace("'${r%%:*}'", "fx").replace("\\$", "$").replace('\\"', '"')
+    proc = subprocess.run(
+        [BASH, "-c", script], capture_output=True, text=True,
+        env={"HOME": str(home), "PATH": "/usr/bin:/bin", "AGENT_CLI_ROOT": str(cli),
+             "RADON_WEEKEND_FX_BIN": str(fx)},
+    )
+    assert "command not found" not in proc.stderr, proc.stderr
+    assert proc.returncode == 0, proc.stderr
