@@ -61,7 +61,7 @@ loop() {  # label clone wrapper skill slug venv
   blob "scripts/$wrapper" > "$wf"
   bash -n "$wf" 2>/dev/null && ok "wrapper parses (bash -n scripts/$wrapper)" || bad "wrapper syntax error: scripts/$wrapper"
   # provider ladder readiness, evaluated with the wrapper's own functions
-  local fns; fns="$(awk '/^(rung_model|provider_bin|provider_key_present|provider_ready)\(\) \{/,/^\}/' "$wf")"
+  local fns; fns="$(awk '/^(rung_model|provider_bin|fx_key|provider_key_present|provider_ready)\(\) \{/,/^\}/' "$wf")"
   local ladder; ladder="$(grep -oE 'PROVIDER_LADDER="\$\{RADON_WEEKEND_PROVIDER_LADDER:-[^}]+' "$wf" | sed 's/.*:-//')"
   if [[ -z "$ladder" ]]; then
     local lf="$SCRATCH/$slug-ladder.sh"; blob scripts/security_claude_ladder.sh > "$lf"
@@ -73,7 +73,7 @@ loop() {  # label clone wrapper skill slug venv
     for phase in audit remediate deliver; do
       if env -i HOME="$HOME" PATH="$LAUNCHD_PATH" PHASE="$phase" LOOP_SKILL="$skill" \
            AGENT_CLI_ROOT="$HOME/.radon/agent-cli" PORTABLE_PROMPT_DIR="$SCRATCH/prompts-$slug" \
-           bash -c "$fns"$'\n'"mkdir -p \"\$PORTABLE_PROMPT_DIR\"; git --git-dir='$REF' show 'origin/main:.claude/portable-prompts/$skill.$phase.md' > \"\$PORTABLE_PROMPT_DIR/$skill.$phase.md\" 2>/dev/null || rm -f \"\$PORTABLE_PROMPT_DIR/$skill.$phase.md\"; provider_ready '${r%%:*}'"; then :; else continue 2; fi
+           bash -c "$fns"$'\n'"mkdir -p \"\$PORTABLE_PROMPT_DIR\"; git --git-dir='$REF' show 'origin/main:.claude/portable-prompts/$skill.$phase.md' > \"\$PORTABLE_PROMPT_DIR/$skill.$phase.md\" 2>/dev/null || rm -f \"\$PORTABLE_PROMPT_DIR/$skill.$phase.md\"; provider_ready '${r%%:*}' \"\$(rung_model '$r')\""; then :; else continue 2; fi
     done
     ready="${ready:+$ready }$r"
   done

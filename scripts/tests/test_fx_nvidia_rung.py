@@ -33,6 +33,9 @@ sys.modules[_spec.name] = _h
 _spec.loader.exec_module(_h)
 
 WRAPPER = _h.LOOPS["documentation"]
+# fx sits behind grok, codex and antigravity on the default ladder since
+# 2026-09-27 evening; the arm tests below pin it as the only rung.
+FX = "fx:nvidia"
 
 
 def _fx_env(tmp_path):
@@ -50,7 +53,7 @@ def test_the_default_ladder_matches_the_other_fx_loops():
         r'^PROVIDER_LADDER="\$\{RADON_WEEKEND_PROVIDER_LADDER:-(.+?)\}"$', body, re.M
     )
     assert m, "no default provider ladder"
-    assert m.group(1).split() == ["fx:nvidia", "grok", "codex", "fx:cerebras"], m.group(1)
+    assert m.group(1).split() == ["grok", "codex", "antigravity", "fx:nvidia", "fx:cerebras"], m.group(1)
 
 
 def test_an_operator_ladder_still_overrides_the_default(tmp_path):
@@ -65,13 +68,13 @@ def test_every_phase_launches_fx_and_nothing_else(tmp_path):
     for phase in ("audit", "remediate", "deliver"):
         sub = tmp_path / phase
         sub.mkdir()
-        proc, tried, _calls, argv = _h._run_multi(sub, "documentation", phase)
+        proc, tried, _calls, argv = _h._run_multi(sub, "documentation", phase, provider_ladder=FX)
         assert tried == ["fx:nvidia"], (phase, tried, proc.stdout, proc.stderr)
         assert argv[0].split() == ["ask", "--full-access", "--no-save"], argv
 
 
 def test_fx_gets_the_prompt_on_stdin_in_the_repo(tmp_path):
-    _proc, tried, _calls, _argv = _h._run_multi(tmp_path, "documentation", "audit")
+    _proc, tried, _calls, _argv = _h._run_multi(tmp_path, "documentation", "audit", provider_ladder=FX)
     assert tried == ["fx:nvidia"], tried
     env = _fx_env(tmp_path)
     assert env["STDIN"] == "stub", env
@@ -79,7 +82,7 @@ def test_fx_gets_the_prompt_on_stdin_in_the_repo(tmp_path):
 
 
 def test_fx_runs_non_interactive_and_bills_only_nvidia(tmp_path):
-    _h._run_multi(tmp_path, "documentation", "audit")
+    _h._run_multi(tmp_path, "documentation", "audit", provider_ladder=FX)
     env = _fx_env(tmp_path)
     assert env["FX_PROVIDER"] == "nvidia", env
     assert env["FX_AUTO_UPGRADE"] == "0", env
@@ -92,7 +95,7 @@ def test_fx_runs_non_interactive_and_bills_only_nvidia(tmp_path):
 
 
 def test_fx_carries_the_wrapper_path_into_its_login_shell(tmp_path):
-    _h._run_multi(tmp_path, "documentation", "audit")
+    _h._run_multi(tmp_path, "documentation", "audit", provider_ladder=FX)
     env = _fx_env(tmp_path)
     assert env["RADON_AGENT_PATH"] == env["PATH"], env
     zdot = Path(env["ZDOTDIR"])
@@ -107,7 +110,7 @@ def test_the_zdotdir_is_rewritten_every_round(tmp_path):
     zdot = tmp_path / "agent-cli" / "fx-zdotdir"
     zdot.mkdir(parents=True)
     (zdot / ".zshrc").write_text("export PATH=/opt/homebrew/bin\n", encoding="utf-8")
-    _h._run_multi(tmp_path, "documentation", "audit")
+    _h._run_multi(tmp_path, "documentation", "audit", provider_ladder=FX)
     assert 'export PATH="$RADON_AGENT_PATH"' in (zdot / ".zshrc").read_text()
     assert (zdot / ".zlogin").exists()
 
@@ -117,7 +120,7 @@ def test_a_real_login_shell_resolves_the_venv_first(tmp_path):
     """The shape fx uses: `zsh -l -i -c`. Whatever the profile stage does to
     PATH (/etc/zprofile's path_helper, an operator .zprofile), the restore in
     the wrapper-written .zshrc/.zlogin runs after it and the venv wins."""
-    _h._run_multi(tmp_path, "documentation", "audit")
+    _h._run_multi(tmp_path, "documentation", "audit", provider_ladder=FX)
     written = tmp_path / "agent-cli" / "fx-zdotdir"
     zdot = tmp_path / "zdot"
     zdot.mkdir()
@@ -173,6 +176,7 @@ def test_fx_without_an_nvidia_key_is_skipped(tmp_path):
 def test_an_fx_rate_limit_is_classified_not_a_bare_failure(tmp_path):
     proc, tried, calls, _argv = _h._run_multi(
         tmp_path, "documentation", "audit",
+        provider_ladder=FX + " grok",
         capped_providers=("fx",),
         cap_line="failed: rate_limited · retry after: 4s",
     )
@@ -192,18 +196,18 @@ def test_the_fx_arm_is_wrapped_in_timeout():
 
 
 # --- fx on the shared ladder (2026-09-26) ------------------------------------
-# reliability, testing and ci-performance lead with fx:nvidia and close with
-# fx:cerebras. The model half names the fx provider and picks its key.
+# reliability, testing and ci-performance carry fx:nvidia behind grok, codex
+# and antigravity, and close with fx:cerebras (2026-09-27 evening). The model half names the fx provider and picks its key.
 
 
 @pytest.mark.parametrize("loop", ["reliability", "testing", "ci-performance"])
-def test_the_shared_ladder_leads_and_ends_on_fx(loop):
+def test_the_shared_ladder_ends_on_fx(loop):
     body = _h.LOOPS[loop].read_text(encoding="utf-8")
     m = re.search(
         r'^PROVIDER_LADDER="\$\{RADON_WEEKEND_PROVIDER_LADDER:-(.+?)\}"$', body, re.M
     )
     assert m, "no default provider ladder"
-    assert m.group(1).split() == ["fx:nvidia", "grok", "codex", "fx:cerebras"], m.group(1)
+    assert m.group(1).split() == ["grok", "codex", "antigravity", "fx:nvidia", "fx:cerebras"], m.group(1)
 
 
 def test_fx_cerebras_bills_only_cerebras(tmp_path):

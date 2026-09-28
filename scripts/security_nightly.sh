@@ -1919,6 +1919,7 @@ provider_bin() {
     claude) command -v claude 2>/dev/null || true ;;
     codex) printf '%s' "${RADON_WEEKEND_CODEX_BIN:-/opt/homebrew/bin/codex}" ;;
     grok | nvidia | cerebras) printf '%s' "${RADON_WEEKEND_GROK_BIN:-$HOME/.grok/bin/grok}" ;;
+    antigravity) printf '%s' "${RADON_WEEKEND_AGY_BIN:-$HOME/.local/bin/agy}" ;;
     # fx: the fixed-path copy scripts/fx_stable_sync.sh keeps current, so the
     # Full Disk Access grant survives `fx upgrade`; else the installer path.
     fx)
@@ -1957,6 +1958,10 @@ provider_ready() {
     nvidia) provider_key_present NVIDIA_API_KEY && [[ -r "$AGENT_CLI_ROOT/grok-home-nvidia/config.toml" ]] || return 1 ;;
     cerebras) provider_key_present CEREBRAS_API_KEY && [[ -r "$AGENT_CLI_ROOT/grok-home-cerebras/config.toml" ]] || return 1 ;;
     fx) provider_key_present "$(fx_key "${2:-}")" && [[ -r "$HOME/.fx/settings.json" ]] || return 1 ;;
+    # agy keeps its Google grant where the host's credential store puts it
+    # (no token file on the Mac mini), so like claude the binary is the
+    # check; a signed-out agy is a rejection and costs one rung.
+    antigravity) : ;;
     *) return 1 ;;
   esac
   # A fallback rung is driven by a rendered prompt file, not a slash command.
@@ -2053,6 +2058,8 @@ quota_regex() {
     codex) printf '%s' 'You.ve hit your usage limit|usage limited|rate limit reached|429' ;;
     grok | nvidia | cerebras) printf '%s' 'usage limit reached|out of credits|spending limit|usage balance exhausted|429' ;;
     fx) printf '%s' 'failed: rate[_]limited|usage limit reached|out of credits|429' ;;
+    # agy retries per-minute 429s in-process; what reaches us is unrecovered.
+    antigravity) printf '%s' 'RESOURCE_EXHAUSTED|Quota exhausted|429' ;;
     *) printf '%s' 'a\{0\}b' ;;
   esac
 }
@@ -2080,6 +2087,8 @@ session_regex() {
 # merely QUOTES the text (these loops audit their own wrappers) is not one.
 rejection_regex() {
   case "$1" in
+    # agy's own sign-in failures (scripts/subscription_tokens.py markers).
+    antigravity) printf '%s' 'invalid_request_error|model is not supported|model .* not found|unknown model|"status":[[:space:]]*400|please sign in|authentication (required|failed)' ;;
     *) printf '%s' 'invalid_request_error|model is not supported|model metadata for .* not found|unknown model|"status":[[:space:]]*400' ;;
   esac
 }

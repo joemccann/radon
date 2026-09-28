@@ -51,7 +51,7 @@ FX_LOOP_IDENTICAL = (
     "action before continuing."
 )
 FX_LOOP_VALIDATION = "Repeated shell validation failures stopped the tool loop."
-SHARED_LADDER = "fx:nvidia grok codex fx:cerebras"
+SHARED_LADDER = "grok codex antigravity fx:nvidia fx:cerebras"
 PLISTS = {
     "reliability": REPO / "config" / "com.radon.reliability-daily.plist",
     "testing": REPO / "config" / "com.radon.testing-daily.plist",
