@@ -27,7 +27,7 @@ sys.modules[_spec.name] = _h
 _spec.loader.exec_module(_h)
 
 # The shared ladder: grok, codex, antigravity, fx:nvidia, fx:cerebras (2026-09-27).
-FALLBACK_LOOPS = ["ci-performance", "reliability", "testing"]
+FALLBACK_LOOPS = ["reliability", "testing"]
 FALLBACK_LADDER = _h.FALLBACK_LADDER
 EXPECTED_PROVIDER_ORDER = _h.FALLBACK_PROVIDER_ORDER
 CLAUDE_LADDER = _h.CLAUDE_LADDER

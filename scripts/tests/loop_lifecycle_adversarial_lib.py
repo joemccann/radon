@@ -51,7 +51,6 @@ LOOPS = harness.LOOPS
 LOOP_PLISTS = {
     "reliability": "com.radon.reliability-daily.plist",
     "testing": "com.radon.testing-daily.plist",
-    "ci-performance": "com.radon.ci-performance-daily.plist",
     "security": "com.radon.security-daily.plist",
     "security-deepsec": "com.radon.security-deepsec.plist",
 }
@@ -183,7 +182,7 @@ def test_every_wrapper_clears_git_locks_records_rounds_and_reaps(loop):
     )
     # Three fx:nvidia hosts acquire the shared NVIDIA budget before launch;
     # security/deepsec stay on the claude ladder and must not grow a gap.
-    if loop in ("reliability", "testing", "ci-performance"):
+    if loop in ("reliability", "testing"):
         assert "nvidia_budget_acquire_or_skip" in between, between
         assert 'RUNG_PROVIDER" == "fx"' in between and 'RUNG_MODEL" == "nvidia"' in between
     else:

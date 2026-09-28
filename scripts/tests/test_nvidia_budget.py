@@ -209,7 +209,7 @@ def test_wrapper_429_notice_slice_calls_record_429(tmp_path):
 def test_budget_helpers_are_identical_on_the_fx_loops():
     names = ("nvidia_budget", "nvidia_budget_acquire_or_skip", "nvidia_budget_record_round")
     bodies = {n: {} for n in names}
-    for loop in ("reliability", "testing", "ci-performance"):
+    for loop in ("reliability", "testing"):
         src = _h.LOOPS[loop].read_text(encoding="utf-8")
         for name in names:
             start = src.index(f"{name}() {{")
@@ -245,7 +245,7 @@ def _fn_body(src: str, name: str) -> str:
     raise AssertionError(name)
 
 
-@pytest.mark.parametrize("loop", ("reliability", "testing", "ci-performance"))
+@pytest.mark.parametrize("loop", ("reliability", "testing"))
 def test_nvidia_budget_runs_origin_mains_helper_not_the_worktree_copy(tmp_path, loop):
     """DS-2026-09-28-01: the helper must be executed from origin/main's blob.
 

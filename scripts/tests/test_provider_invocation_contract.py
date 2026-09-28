@@ -25,7 +25,7 @@ _spec.loader.exec_module(_h)
 LOOPS = _h.LOOPS
 # The shared fx ladder. documentation matches the other fallback loops as of
 # 2026-09-27; its fx wire lives in test_fx_nvidia_rung.py.
-FALLBACK_LOOPS = ["ci-performance", "reliability", "testing"]
+FALLBACK_LOOPS = ["reliability", "testing"]
 
 
 def _launch(tmp_path, loop, provider, phase="audit", **kw):
@@ -98,7 +98,6 @@ class TestTheWire:
 
     def test_the_prompt_file_names_this_loop_and_phase(self, tmp_path, loop):
         skill = {
-            "ci-performance": "ci-performance",
             "reliability": "reliability-weekend",
             "testing": "testing-weekend",
         }[loop]
