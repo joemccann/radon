@@ -447,9 +447,18 @@ list_transition_units() {
     | while IFS= read -r unit; do
         [[ "$unit" =~ ^radon-[a-zA-Z0-9_.@-]+\.(service|timer)$ ]] || continue
         unit_is_excluded "$unit" && continue
+        unit_is_transient "$unit" && continue
         printf '%s\n' "$unit"
       done \
     | sort -u
+}
+
+# A `systemd-run` unit is discarded by systemd once stopped, so a release
+# transition that stops it can never start it again (2026-09-28: an operator's
+# radon-forktest.timer failed a deploy and its rollback). Leave such units
+# alone. An unreadable property keeps the unit in the transition as before.
+unit_is_transient() {
+  [[ "$(systemctl_bounded show "$1" --property=Transient --value 2>/dev/null)" == yes ]]
 }
 
 active_state() {

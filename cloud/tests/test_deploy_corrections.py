@@ -1258,6 +1258,8 @@ if command == "show":
         print(data["units"].get(unit, {{}}).get("fragment", ""))
     elif "--property=Result" in args:
         print(data["units"].get(unit, {{}}).get("result", "success"))
+    elif "--property=Transient" in args:
+        print("yes" if data["units"].get(unit, {{}}).get("transient") else "no")
     elif "--property=Type" in args:
         print(data["units"].get(unit, {{"type": "simple"}})["type"])
     else:
@@ -1365,6 +1367,27 @@ for path in paths:
             recovered = subprocess.run(["bash", str(ROOT_HELPER), "recover"], env=env, capture_output=True, text=True)
             assert recovered.returncode == 0, recovered.stderr
             assert missing not in [unit for line in systemctl_log.read_text().splitlines() if line.startswith("start ") for unit in line.split()[1:]]
+
+    def test_transient_units_are_left_out_of_the_release_transition(self, tmp_path):
+        # 2026-09-28: an operator's `systemd-run` timer named radon-forktest was
+        # snapshotted, stopped (so systemd discarded it), then could not be
+        # started again; the deploy and its own rollback both failed.
+        import json
+        env, state_file, systemctl_log, _, active_state = self._root_helper_fixture(tmp_path)
+        data = json.loads(state_file.read_text())
+        data["units"]["radon-forktest.timer"] = dict(state="active", type="timer", transient=True)
+        data["units"]["radon-forktest.service"] = dict(state="inactive", type="oneshot", transient=True)
+        state_file.write_text(json.dumps(data))
+        stopped = subprocess.run(["bash", str(ROOT_HELPER), "stop-clean"], env=env, capture_output=True, text=True)
+        assert stopped.returncode == 0, stopped.stdout + stopped.stderr
+        inventory = active_state.with_name(active_state.name + ".inventory")
+        assert "radon-forktest" not in inventory.read_text()
+        assert "radon-forktest" not in active_state.read_text()
+        assert "radon-margin-debt-refresh.timer" in active_state.read_text()
+        assert json.loads(state_file.read_text())["units"]["radon-forktest.timer"]["state"] == "active"
+        recovered = subprocess.run(["bash", str(ROOT_HELPER), "recover"], env=env, capture_output=True, text=True)
+        assert recovered.returncode == 0, recovered.stdout + recovered.stderr
+        assert "radon-forktest" not in systemctl_log.read_text()
 
     def test_loaded_stop_failure_remains_fatal(self, tmp_path):
         import json
