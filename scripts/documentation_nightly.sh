@@ -1521,11 +1521,16 @@ acquire_runner_lock "$RUNNER_LOCK" || {
   held="$LOCK_HELD"
   start="$LOCK_START"
   owner="$(/bin/ps -p "$held" -o user= 2>/dev/null || true)"
-  cmd="$(/bin/ps -p "$held" -o command= 2>/dev/null || true)"
+  # The pid is read from a lock inside the agent-writable clone and this body
+  # is posted to the PUBLIC dead-man issue, so report the PROGRAM only. A full
+  # command line would let an agent that points the lock at any live process
+  # publish that process's arguments on a public repository.
+  cmd="$(/bin/ps -p "$held" -o comm= 2>/dev/null || true)"
   owner="${owner#"${owner%%[![:space:]]*}"}"
   owner="${owner%"${owner##*[![:space:]]}"}"
   cmd="${cmd#"${cmd%%[![:space:]]*}"}"
   cmd="${cmd%"${cmd##*[![:space:]]}"}"
+  cmd="${cmd##*/}"
   report "REFUSED (lock held)" "another weekend run owns $REPO (pid ${held:-unknown}, started ${start:-unknown}, owner ${owner:-unknown}, cmd ${cmd:-unknown}); if no cycle is running, the recorded pid was reused — remove $RUNNER_LOCK" || true
   exit 3
 }
