@@ -1039,3 +1039,14 @@ The closing sequence was stopped at round 2 cloud (`DONE 124`) after reconciling
 | T-346–T-352 | Resolved upstream | PR #213 squash 4584e84a landed the authenticated middleware wire cases, real loopback mTLS client with fake helper, forwarded-token assertions, provider fallback tests, security credential/log rails and prologue page tests. Current pre-legacy full roots passed 15166 twice and Vitest 10042 twice. T-352's process-visibility fixture was strengthened again here under T-509. |
 
 T-121 CI acceptance on be7a8e9d: all eight new 390px/1024px overflow cases passed, but the existing share-popover checkbox test failed twice because the newly scrolling executed table clipped its absolute popover. Kept the assertion unchanged, anchored the popover to viewport coordinates (mobile sheet CSS retained), and added scroll/flip/dismissal coverage: focused set 86 passed. A screenshot now accompanies the existing interaction test. The first post-legacy closing attempt stopped cleanly (`DONE 124`) before this repair; it is not counted as final acceptance.
+
+
+## Remediation 2026-09-27
+
+Reduced scope was P0/P1. T-130 and T-488 remain operator-only. P2 findings T-493, T-495, T-510, and T-512 were out of scope.
+
+| Finding | Status | Red/green evidence |
+|---|---|---|
+| T-511 | DONE | Degraded branch forced off: 1 failed (`ok` instead of `degraded`). Heal call forced off: 1 failed (empty statement list). Restored source: 16 passed across the budget, gap-heal, and liquidcompute visibility tests. |
+| T-130 | operator-only | Provision `TURSO_DEMO_DB_URL` and `TURSO_DEMO_APP_DB_URL` for repository CI. The wiring half is already done; do not make the guard unconditional without those secrets. |
+| T-488 | operator-only | Reproduce the deploy helper timeout and TERM child cleanup on Linux CI without widening the fixed timeout. |
