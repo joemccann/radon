@@ -305,6 +305,16 @@ Never invent a spend cap.
 
 ## Audit pipeline
 
+**Pre-computed context.** Read `~/radon-weekend/.security-deepsec-scratch/audit-context.md`
+first. The wrapper writes it before the audit phase and deletes it before
+every other phase: HEAD, the verified base (`last_audited_sha` in `last-audited.json`), the rolling
+issue and its newest checkpoint comment, the commit list, per-commit
+`--stat`, and the diff with generated paths excluded. When its `head:`
+equals `git rev-parse HEAD` and `base:` is a SHA, take the Stage 1 range step from it
+instead of re-running `gh issue`, `git log`, `git diff` or per-commit
+`git show`. Run git only for a path it lists as omitted or for code
+outside the diff. `base: UNRESOLVED` or no file: compute the range as below.
+
 ### Stage 1: preflight
 
 - Record `./.deepsec/node_modules/.bin/deepsec --version` in the run-record;

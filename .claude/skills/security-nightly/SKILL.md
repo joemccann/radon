@@ -379,6 +379,16 @@ API-key auth therefore means the wrapper was bypassed.
 
 ## Ground truth and change selection
 
+**Pre-computed context.** Read `~/radon-weekend/.security-nightly-scratch/audit-context.md`
+first. The wrapper writes it before the audit phase and deletes it before
+every other phase: HEAD, the verified base (`head_sha` in `last-audited.json`; per-engine SHAs stay yours to check), the rolling
+issue and its newest checkpoint comment, the commit list, per-commit
+`--stat`, and the diff with generated paths excluded. When its `head:`
+equals `git rev-parse HEAD` and `base:` is a SHA, take the committed-range step from it
+instead of re-running `gh issue`, `git log`, `git diff` or per-commit
+`git show`. Run git only for a path it lists as omitted or for code
+outside the diff. `base: UNRESOLVED` or no file: compute the range as below.
+
 Use `docs/security-audit-playbook.md` as the canonical Radon threat and
 regression catalog. Use `tasks/security-remediation-status.md` and
 `tasks/security-remediation-status-security.md` only as historical

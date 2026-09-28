@@ -1724,6 +1724,26 @@ resolve_green_main_sha() {
   return 0
 }
 
+# The audit's mechanical ground truth (range, commits, diff, rolling issue),
+# written once so the agent does not spend a provider request per `git show`:
+# 2026-09-27 a documentation audit on fx:nvidia made sixteen such round trips
+# and hit the per-minute cap 27 times before classifying anything. Removed
+# every phase so remediate/deliver never read a stale one. Same isolated
+# origin/main pipe as resolve_green_main_sha; any failure leaves no file and
+# the agent falls back to computing the range itself.
+AUDIT_CONTEXT="$WEEKEND_ROOT/.testing-nightly-scratch/audit-context.md"
+write_audit_context() {
+  refuse_symlink "$AUDIT_CONTEXT" || return 0
+  rm -f -- "$AUDIT_CONTEXT"
+  [[ "$PHASE" == audit && -n "${TIMEOUT_BIN:-}" && -n "$GH_BIN" ]] || return 0
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" show origin/main:scripts/nightly_audit_context.py 2>/dev/null \
+    | GIT_DIR="$HOST_GITDIR" "$TIMEOUT_BIN" "${RADON_WEEKEND_AUDIT_CONTEXT_TIMEOUT_SECS:-180}" \
+      /usr/bin/python3 -I - --repo "${RADON_WEEKEND_GH_REPO:-joemccann/radon}" \
+      --repo-dir "$REPO" --head HEAD --gh-bin "$GH_BIN" --label "$DEADMAN_LABEL" \
+      --out "$AUDIT_CONTEXT" 2>>"${RUN_LOG:-/dev/null}" || true
+  return 0
+}
+
 ground_truth() {
   clear_stale_git_locks "$HOST_GITDIR"
   fetch_origin_with_retry || return 1
@@ -2360,6 +2380,7 @@ run_phase() {
   # or a settings reroute the reset does not remove; refuse before this
   # phase's `claude` launches.
   refuse_billing_reroute_files
+  write_audit_context
   start_browser_host
   echo "[testing-weekend] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s${BILLING_IGNORED:+ ignored=${BILLING_IGNORED// /,}}${FOREIGN_LOCK:+ foreign-lock=$FOREIGN_LOCK}${BROWSER_HOST_STATUS:+ browser-host=$BROWSER_HOST_STATUS}" | tee -a "$RUN_LOG"
 
