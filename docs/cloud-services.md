@@ -823,7 +823,10 @@ Nightly `06:00 UTC` (`RandomizedDelaySec=300`), oneshot
 v2 golden set. A hit@5 or MRR drop past 0.03 fails the unit so the existing
 watchdog pages. **Not enabled.** The repo now has an initial live baseline
 at `scripts/knowledge/golden_eval_baseline.json` (`placeholder: false`).
-Keep the `not-installed:` drift ack until a human reviews the draft set.
+`enable_services` skips both units on every setup and does not read that file.
+Keep the `not-installed:` drift ack until a human reviews the draft set
+(`scripts/knowledge/golden_set.json` `draft: true`). The ack reason is that
+review.
 After that review:
 
 ```
