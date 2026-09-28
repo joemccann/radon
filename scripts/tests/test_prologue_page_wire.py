@@ -70,7 +70,8 @@ def _build(tmp_path: Path, *, marker: bool, lock_held: bool, loop: str) -> dict:
         f'  pid=) echo {os.getpid()} ;;\n'
         '  lstart=) echo "Mon Jan  1 00:00:00 2024" ;;\n'
         '  user=) echo fixture-owner ;;\n'
-        '  command=) echo "fixture-runner audit" ;;\n'
+        '  command=) echo "/opt/fixture/fixture-runner --token=fixture-argv-secret" ;;\n'
+        '  comm=) echo "/opt/fixture/fixture-runner" ;;\n'
         '  *) exit 1 ;;\n'
         'esac\n',
     )
@@ -216,7 +217,11 @@ def test_held_lock_refusal_pages_through_the_real_notifier(tmp_path: Path, loop:
     assert "started" in body and "owner" in body and "cmd" in body, body
     assert "Mon Jan  1 00:00:00 2024" in body
     assert "fixture-owner" in body
-    assert "fixture-runner audit" in body
+    # The program, never its arguments: the pid comes from a lock in the
+    # agent-writable clone and this body is posted to a PUBLIC issue.
+    assert "fixture-runner" in body
+    assert "fixture-argv-secret" not in body
+    assert "/opt/fixture/" not in body
 
 
 @pytest.mark.parametrize("loop", LOOP_IDS)

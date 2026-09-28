@@ -65,7 +65,11 @@ loop() {  # label clone wrapper skill slug venv
   local ladder; ladder="$(grep -oE 'PROVIDER_LADDER="\$\{RADON_WEEKEND_PROVIDER_LADDER:-[^}]+' "$wf" | sed 's/.*:-//')"
   if [[ -z "$ladder" ]]; then
     local lf="$SCRATCH/$slug-ladder.sh"; blob scripts/security_claude_ladder.sh > "$lf"
-    ladder="$(cd "$C" && env -i HOME="$HOME" PATH="$LAUNCHD_PATH" REPO="$C" LOOP_LOG_TAG=smoke "$T" 60 bash -c ". '$lf' >/dev/null 2>&1; printf '%s' \"\$PROVIDER_LADDER\"")"
+    # The ladder shell resolves its python helper from $REPO, and $REPO here is
+    # the agent-writable clone: blob that helper too, or the preflight runs
+    # clone bytes it never reviewed.
+    local lp="$SCRATCH/$slug-ladder.py"; blob scripts/security_claude_ladder.py > "$lp"
+    ladder="$(cd "$C" && env -i HOME="$HOME" PATH="$LAUNCHD_PATH" REPO="$C" LOOP_LOG_TAG=smoke RADON_SECURITY_CLAUDE_LADDER_PY="$lp" "$T" 60 bash -c ". '$lf' >/dev/null 2>&1; printf '%s' \"\$PROVIDER_LADDER\"")"
   fi
   [[ -n "$ladder" ]] || { bad "could not resolve provider ladder"; rm -f "$wf"; return; }
   local ready=""; local r
