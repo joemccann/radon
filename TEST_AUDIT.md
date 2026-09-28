@@ -10638,3 +10638,13 @@ T-488 stays operator-only. Reproduce the deploy helper timeout and TERM child cl
 `scripts/tests/test_fx_stable_sync.py` copied whatever was at `~/.local/bin/fx`. On this host that binary is ad-hoc signed (`Identifier=fx-…`, `Signature=adhoc`), and `scripts/fx_stable_sync.sh` correctly refused it, so the test failed. The separate-file assertion now uses a fixture that a codesign double accepts only when `--verify --strict` and the Vercel requirement (`com.vercel.fx`, team `JW6Y669B67`) are both present. The host binary is used only when `/usr/bin/codesign` accepts that requirement. `RADON_FX_CODESIGN` is unset in the launchd job, whose environment is PATH and HOME.
 
 Red: the host-binary test failed with `REFUSED` (1 failed). The controlled sample against the old hardcoded `/usr/bin/codesign` also failed with `REFUSED` (1 failed). Green: 11 passed, 1 skipped (no Vercel-signed host binary). The unsigned-binary refusal test still fails closed.
+
+
+## Remediation 2026-09-28
+
+`RADON_WEEKEND_REDUCED=1`. The 2026-09-28 audit phase timed out after the standing gates and did not post a new `audited-through` checkpoint, so this section does not advance that cursor. Authoritative open set is issue #83 comment 5864289632.
+
+- **T-488 — DONE.** The five darwin cloud failures in `cloud/tests/test_deploy_corrections.py` were `services[@]: unbound variable` at `resume_active_snapshot`, not a widened timeout. The helper re-execs through `#!/bin/bash` (3.2.57 on this host). Empty snapshot walks now use the bash 3.2 form already used by `revert_installed_units`. `TestRootHelper` 35 passed, 1 skipped. Acceptance that those tests reach their assertions is met on this host; the fixed contract timeout was not changed.
+- **T-130 — operator-only.** Provision `TURSO_DEMO_DB_URL` and `TURSO_DEMO_APP_DB_URL` for repository CI. The guard still exits 0 with a warning when they are absent.
+- **T-511, T-513 — not redone.** Already on open PR #766.
+- **T-493, T-495, T-510, T-512 — unchanged P2**, outside reduced scope.

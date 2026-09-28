@@ -1062,3 +1062,14 @@ Cloud, three consecutive runs, identical failure list: 2318 passed, 10 failed, 8
 Pytest on Homebrew Python aborted at collection three times (missing Pillow, pypdfium2, then pdf-inspector). Those libraries were installed in a throwaway virtual environment, not in the repo. Two full runs then passed: 16044 passed, 13 skipped, 94 deselected, 1 xpassed. An intervening run is not a gate result: its PATH omitted `/sbin`, so `sha256sum` was missing, and the run crossed midnight Eastern, so an import-time session date disagreed with a fill created after the roll. Those four failures are outside this branch's diff. After the roll, the session-date tests and the node resolver passed in isolation.
 
 Reduced scope was P0 and P1. No P0 was open. T-493, T-495, T-510, and T-512 stay open because they are P2.
+
+
+## Remediation 2026-09-28 (testing/2026-09-28, reduced P0/P1)
+
+Tonight's audit timed out before a new checkpoint. Open P0/P1 carried forward from issue #83 (2026-09-27 remediate): T-130 operator-only, T-488. P2 T-493, T-495, T-510, T-512 stay open under `RADON_WEEKEND_REDUCED=1`. T-511 and T-513 stay on open PR #766 and were not redone.
+
+| Finding | Status | Red/green evidence |
+|---|---|---|
+| T-488 | DONE | `test_backup_start_rejection_does_not_commit_restore_and_can_retry` failed before the edit: return code 1, `deploy-root-helper.sh: line 678: services[@]: unbound variable`. The supervised child is `#!/bin/bash` (bash 3.2.57); an empty `services` array under `set -u` aborts `recover` before the restore marker. The same four loops now use the helper's existing `${arr[@]+"${arr[@]}"}` form. `TestRootHelper`: 35 passed, 1 skipped (flock absent). Timeouts and assertions were not loosened. |
+| T-130 | operator-only | `ci.yml` still warns and exits 0 when `TURSO_DEMO_DB_URL` and `TURSO_DEMO_APP_DB_URL` are unset. `test_demo_isolation_is_wired.py`: 8 passed. Operator must provision those two repository secrets. |
+

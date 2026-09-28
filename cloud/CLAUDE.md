@@ -265,7 +265,10 @@ topology state is durable across reboot under `/var/lib/radon/deploy`.
 resume that exact replay-safe oneshot during `restart-managed` / `recover`.
 Do not replay other oneshots or start a backup that was dormant. Once restore
 is recorded, repeated recovery does not restart the dump, including after an
-off-box failure. A rejected start submission fails recovery before the restore
+off-box failure. A second `recover` with nothing left to start is a finished
+restore: the helper's child is `/bin/bash`, and on bash 3.2 an empty
+`services` or `timers` list is an unbound variable under `set -u`, so those
+walks use `${arr[@]+"${arr[@]}"}`. A rejected start submission fails recovery before the restore
 marker is written and can be retried. Once accepted, the eventual dump/upload
 result belongs to backup health, not application rollback. Deploy does not
 manufacture a healthy heartbeat.
