@@ -176,8 +176,11 @@ Operator commands after the cut:
   not in `RADON_IB_REMOTE_ALLOW` (`source not allowlisted`) or the client
   certificate's CN/DNS SAN is not in `RADON_IB_REMOTE_CLIENT_NAMES`
   (`client certificate not allowlisted`); `409` the request was refused, not
-  failed — a held 2FA lease or the 60s per-verb cooldown, with the reason in
-  `detail`. Expiry also shows the Gateway row as `load_state=remote`,
+  failed — a held 2FA lease, the 60s per-verb cooldown, or (for `start` and
+  `restart`) an IBKR login throttle the watchdog recorded in
+  `/var/lib/radon/ib-watchdog-state.json` (quiet period in
+  `scripts/utils/ib_login_throttle.py`; the detail names the UTC time a login
+  is allowed again), with the reason in `detail`. Expiry also shows the Gateway row as `load_state=remote`,
   `active_state=unknown`. For 502/403, re-run the mint script and steps 1-3;
   Gateway itself is untouched. A 409 needs no action but time.
   Reversal: `systemctl disable --now radon-ib-gateway-remote.service` on

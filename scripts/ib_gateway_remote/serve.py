@@ -28,14 +28,21 @@ from typing import Iterable
 # host, which cannot see this VM's lock file (REL-172, R-475).
 try:
     from utils import ib_2fa_lock
+    from utils.ib_login_throttle import format_utc, login_throttle_retry_at
 except ImportError:  # pragma: no cover - `python -m scripts.ib_gateway_remote.serve`
     from scripts.utils import ib_2fa_lock
+    from scripts.utils.ib_login_throttle import format_utc, login_throttle_retry_at
 
 DEFAULT_BIND = "10.0.0.4"
 DEFAULT_PORT = 8340
 DEFAULT_ALLOW = "10.0.0.2"
 DEFAULT_CLIENT_NAMES = "radon-app"
 DEFAULT_HELPER = "/usr/local/bin/radon-ib-gateway-control"
+DEFAULT_WATCHDOG_STATE = "/var/lib/radon/ib-watchdog-state.json"
+# Verbs that start a Gateway login. Inside an IBKR login throttle each one is
+# another failed attempt (2026-09-26), so they wait out the watchdog's quiet
+# period; stop and reset-lease never log in.
+LOGIN_VERBS = frozenset({"start", "restart"})
 HELPER_TIMEOUT_S = 120.0
 # Per-connection socket timeout: covers the TLS handshake, the request line,
 # headers and body. A peer that connects and goes quiet is released here
@@ -234,6 +241,7 @@ def load_config(env: dict[str, str] | None = None) -> dict:
         "allow": allow,
         "client_names": client_names,
         "helper": helper,
+        "watchdog_state": source.get("RADON_IB_WATCHDOG_STATE_PATH") or DEFAULT_WATCHDOG_STATE,
         "cert": str(cert),
         "key": str(key),
         "ca": str(ca),
@@ -288,6 +296,21 @@ def cooldown_refusal(verb: str, now: float | None = None) -> str | None:
                     f"{VERB_COOLDOWN_S - elapsed:.0f}s (a fresh login now would stack a 2FA push)"
                 )
     return None
+
+
+def login_throttle_refusal(verb: str, watchdog_state: str, now: float | None = None) -> str | None:
+    """Reason a login verb is refused while IBKR throttles logins, else None."""
+    if verb not in LOGIN_VERBS:
+        return None
+    retry_at = login_throttle_retry_at(Path(watchdog_state))
+    now = time.time() if now is None else now
+    if retry_at is None or now >= retry_at:
+        return None
+    return (
+        "IBKR is refusing Gateway logins (too many failed login attempts); "
+        f"every {verb} is another failed login. Wait until {format_utc(retry_at)}, "
+        "then restart once and approve the push."
+    )
 
 
 def record_verb(verb: str, now: float | None = None) -> None:
@@ -415,7 +438,7 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
     def _helper(self, verb: str) -> None:
         cfg = self.server.gateway_config
         if verb in MUTATIONS:
-            refusal = cooldown_refusal(verb)
+            refusal = cooldown_refusal(verb) or login_throttle_refusal(verb, cfg["watchdog_state"])
             if refusal is not None:
                 self._ok({"ok": False, "verb": verb, "returncode": CONTROL_BUSY_RC, "detail": refusal}, 409)
                 return
