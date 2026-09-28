@@ -1,6 +1,6 @@
 """Knowledge golden-eval units copy on setup but stay disabled.
 
-Do not enable until a live baseline is written. A failed oneshot pages via
+Do not enable until a human reviews the draft golden set. A failed oneshot pages via
 the unit watchdog; install-units must not `enable --now` this timer.
 """
 from pathlib import Path
@@ -49,3 +49,27 @@ def test_owner_doc_records_knowledge_eval_stay_off():
     assert "radon-knowledge-eval.{service,timer}" in text
     assert "enable_services` skips both" in text
     assert "test_knowledge_eval_setup.py" in text
+
+
+def test_enable_gate_is_the_draft_review_not_a_missing_baseline():
+    """The checked-in baseline is already a live snapshot. The skip stays."""
+    setup = SETUP.read_text(encoding="utf-8")
+    comment = setup.split("radon-knowledge-eval.service", 1)[1].split(
+        "radon-ib-gateway-remote.service", 1
+    )[0]
+    assert "draft golden set" in comment
+    assert "placeholder-baseline" not in comment
+    assert "until a live baseline" not in comment
+
+    allow = (CLOUD / "config" / "drift-allowlist.conf").read_text(encoding="utf-8")
+    for unit in UNITS:
+        line = next(row for row in allow.splitlines() if row.startswith(f"not-installed:{unit} "))
+        assert "golden_set.json draft" in line
+        assert "baseline write" not in line
+
+    repo = CLOUD.parent
+    embeddings = (repo / "docs" / "knowledge-embeddings.md").read_text(encoding="utf-8")
+    assert "until a live baseline replaces" not in embeddings
+    assert "After the first live VPS write" not in embeddings
+    operations = (repo / "docs" / "operations.md").read_text(encoding="utf-8")
+    assert "write-baseline` run before" not in operations
