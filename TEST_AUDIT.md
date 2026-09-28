@@ -10616,3 +10616,13 @@ Delta to the resolved T-491 environment-variable isolation issue: this change in
 `scripts/tests/test_model_ladder.py:411-416` passes env={} as if it means no credentials, but `scripts/clients/model_ladder.py:215-217,283-302` resolves the real home directory and reads .codex/auth.json. The new prepaid-only cases at test lines 684-714 have the same dependency. Full gate reports 15 failures in the blast radius: model-ladder 5, research-runtime 7, vision-cascade 3. The sibling no-key/env-only assumptions appear at scripts/tests/test_research_runtime.py:62-87 and scripts/tests/test_vision_cascade.py:191-201,365,420. The same 15 failures reproduce in all three delta rounds and separately in each file (5/7/3 failures). A scratch-only ambient-auth guard makes the same files 117 passed; no repository test was changed. Read-only existing-test probe with a synthetic home proves both directions: empty synthetic home PASS; adding a fake .codex/auth.json with a canary access_token makes the unchanged no-key test FAIL AssertionError. Its must_not_post fake prevented any network call. This can change provider ordering and feed operator credentials into test doubles on authenticated workstations.
 
 Acceptance: isolate credential-file discovery across all three affected modules, opt in only to per-test synthetic subscription files, and run the file with canary credentials present/absent outside its sandbox. Both outer environments must produce identical results; explicit subscription-precedence tests must still execute. No real credential values should enter captured headers or logs.
+
+
+## Remediation 2026-09-28
+
+`RADON_WEEKEND_REDUCED=1`. The 2026-09-28 audit phase timed out after the standing gates and did not post a new `audited-through` checkpoint, so this section does not advance that cursor. Authoritative open set is issue #83 comment 5864289632.
+
+- **T-488 — DONE.** The five darwin cloud failures in `cloud/tests/test_deploy_corrections.py` were `services[@]: unbound variable` at `resume_active_snapshot`, not a widened timeout. The helper re-execs through `#!/bin/bash` (3.2.57 on this host). Empty snapshot walks now use the bash 3.2 form already used by `revert_installed_units`. `TestRootHelper` 35 passed, 1 skipped. Acceptance that those tests reach their assertions is met on this host; the fixed contract timeout was not changed.
+- **T-130 — operator-only.** Provision `TURSO_DEMO_DB_URL` and `TURSO_DEMO_APP_DB_URL` for repository CI. The guard still exits 0 with a warning when they are absent.
+- **T-511, T-513 — not redone.** Already on open PR #766.
+- **T-493, T-495, T-510, T-512 — unchanged P2**, outside reduced scope.

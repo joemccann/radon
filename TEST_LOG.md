@@ -1039,3 +1039,14 @@ The closing sequence was stopped at round 2 cloud (`DONE 124`) after reconciling
 | T-346–T-352 | Resolved upstream | PR #213 squash 4584e84a landed the authenticated middleware wire cases, real loopback mTLS client with fake helper, forwarded-token assertions, provider fallback tests, security credential/log rails and prologue page tests. Current pre-legacy full roots passed 15166 twice and Vitest 10042 twice. T-352's process-visibility fixture was strengthened again here under T-509. |
 
 T-121 CI acceptance on be7a8e9d: all eight new 390px/1024px overflow cases passed, but the existing share-popover checkbox test failed twice because the newly scrolling executed table clipped its absolute popover. Kept the assertion unchanged, anchored the popover to viewport coordinates (mobile sheet CSS retained), and added scroll/flip/dismissal coverage: focused set 86 passed. A screenshot now accompanies the existing interaction test. The first post-legacy closing attempt stopped cleanly (`DONE 124`) before this repair; it is not counted as final acceptance.
+
+
+## Remediation 2026-09-28 (testing/2026-09-28, reduced P0/P1)
+
+Tonight's audit timed out before a new checkpoint. Open P0/P1 carried forward from issue #83 (2026-09-27 remediate): T-130 operator-only, T-488. P2 T-493, T-495, T-510, T-512 stay open under `RADON_WEEKEND_REDUCED=1`. T-511 and T-513 stay on open PR #766 and were not redone.
+
+| Finding | Status | Red/green evidence |
+|---|---|---|
+| T-488 | DONE | `test_backup_start_rejection_does_not_commit_restore_and_can_retry` failed before the edit: return code 1, `deploy-root-helper.sh: line 678: services[@]: unbound variable`. The supervised child is `#!/bin/bash` (bash 3.2.57); an empty `services` array under `set -u` aborts `recover` before the restore marker. The same four loops now use the helper's existing `${arr[@]+"${arr[@]}"}` form. `TestRootHelper`: 35 passed, 1 skipped (flock absent). Timeouts and assertions were not loosened. |
+| T-130 | operator-only | `ci.yml` still warns and exits 0 when `TURSO_DEMO_DB_URL` and `TURSO_DEMO_APP_DB_URL` are unset. `test_demo_isolation_is_wired.py`: 8 passed. Operator must provision those two repository secrets. |
+
