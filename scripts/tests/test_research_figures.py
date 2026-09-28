@@ -1,11 +1,13 @@
 """Deterministic chart detection from PDF page objects: no model, no guessed coordinates."""
 import zlib
+from pathlib import Path
 
 import pytest
 
 from research import figures
 from research import pdf as research_pdf
 
+SCRIPTS = Path(__file__).resolve().parents[1]
 W, H = 612, 792
 GRAY = bytes([0x20] * 64)
 
@@ -134,8 +136,9 @@ def test_catalogue_numbers_figures_across_pages_and_renders_crops(chart_pdf, tmp
     assert png.is_file() and png.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
 
 
-def test_isolated_catalogue_matches_in_process_and_renders_in_the_child(chart_pdf, tmp_path):
+def test_isolated_catalogue_matches_in_process_and_renders_in_the_child(chart_pdf, tmp_path, monkeypatch):
     from research.pipeline import figures_isolated
+    monkeypatch.setenv("PYTHONPATH", str(SCRIPTS))
     extras = [{"page": 1, "bbox": [0.05, 0.9, 0.3, 0.98]}]
     expected = figures.catalogue(chart_pdf, [1], tmp_path / "direct", extras=extras)
     isolated = figures_isolated(chart_pdf, [1], tmp_path / "child", extras=extras)
@@ -145,8 +148,9 @@ def test_isolated_catalogue_matches_in_process_and_renders_in_the_child(chart_pd
     assert png.is_file() and png.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
 
 
-def test_isolated_creation_date_reads_the_info_dictionary(tmp_path):
+def test_isolated_creation_date_reads_the_info_dictionary(tmp_path, monkeypatch):
     from research.pipeline import creation_date_isolated
+    monkeypatch.setenv("PYTHONPATH", str(SCRIPTS))
     path = tmp_path / "dated.pdf"
     body = _pdf(chart(72, 400, 540, 680))
     info = b"7 0 obj\n<< /CreationDate (D:20260908124300Z) >>\nendobj\n"
