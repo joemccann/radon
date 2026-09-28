@@ -155,6 +155,67 @@ three flags all defaulted on, so a broken env file yielded maximum autonomy.
 
 `GROK_BIN` overrides the `grok` executable.
 
+## IR PR description
+
+Pickup no longer opens a PR whose issue and fix lines are
+`grok incident fix on fix/<slug>`. Grok's commit body is the source. It
+must contain these sections, each with real content:
+
+- What broke (symptom, failing job or alert, page id, first-seen time,
+  run or log links, error excerpt)
+- Root cause
+- What changed (each file)
+- How it was verified
+- Risk and rollback
+- Still open
+
+A missing, empty, TODO, branch-name, or `grok incident fix on` section is
+refused: pickup logs, sends a normal-priority Pushover, exits non-zero for
+that branch, and leaves it for the next cycle. The responder's AUTOPUSH
+path uses the same validator. Pickup also folds in the `watchdog_pages`
+row (page id, severity, first-seen, result) when Turso is reachable, and
+adds CI run URLs on a later cycle once `gh run list` has them.
+
+## Grok model and CLI pin
+
+`config/grok_pin.json` is the only allowed model/CLI pair. The responder
+passes `-m` and `--reasoning-effort` from that file and checks
+`grok --version` plus `grok models` before each run. A CLI mismatch or a
+missing pinned model falls back to `last_known_good` and sends a warning
+Pushover. It never runs on the CLI's unpinned default. `--no-auto-update`
+stays on.
+
+`cloud/scripts/setup-grok-page-responder.sh` installs
+`grok update --version <pin.cli_version> --no-auto-update`.
+
+### Hand bump
+
+1. Edit `config/grok_pin.json`: set `model` / `cli_version` / `reasoning_effort`.
+   Move today's values into `last_known_good`.
+2. On the VPS: `sudo -u radon -H grok update --version <new> --no-auto-update`.
+3. Confirm `grok --version` and `grok models` match the pin.
+4. Open a PR with the six IR sections. Joe merges.
+
+### Rollback to last-known-good
+
+1. Copy `last_known_good` over the live `model` / `cli_version` / `reasoning_effort`
+   fields in `config/grok_pin.json`.
+2. On the VPS: `sudo -u radon -H grok update --version <lkg> --no-auto-update`.
+3. Do not enable auto-update.
+
+### Weekly bump timer (disabled)
+
+`radon-grok-pin-bump.{service,timer}` is inventoried and stays disabled.
+When enabled it runs `scripts/grok_pin_bump.py`: `grok update --check --json`
+and `grok models`, side-installs a candidate under a scratch `GROK_HOME`,
+smokes a canned dry-run that must return `RESULT:` plus a validator-passing
+body, then commits `fix/grok-pin-*` in the responder clone for pickup.
+A failed smoke alerts and leaves the pin alone. Enable only after review:
+
+```bash
+systemctl enable --now radon-grok-pin-bump.timer
+```
+
 ## Push guard
 
 The prompt tells grok never to push `main` or merge, but prompt text is not
@@ -267,8 +328,13 @@ running` every 30 seconds.
 | `scripts/watchdog/notify.py` | After P1 2xx |
 | `scripts/watchdog/grouping.py` | After grouped IB P1 2xx (creds required) |
 | `scripts/grok_page_responder.py` | Poller |
+| `scripts/ir_pr_description.py` | IR PR section validator |
+| `scripts/grok_pin.py` | Pin parse + fallback |
+| `scripts/grok_pin_bump.py` | Weekly candidate smoke (disabled) |
+| `config/grok_pin.json` | Model / CLI pin |
 | `cloud/services/radon-grok-page-responder.*` | VPS timer |
-| `cloud/scripts/setup-grok-page-responder.sh` | Clone + stripped env + grok CLI |
+| `cloud/services/radon-grok-pin-bump.*` | Weekly pin check, installed disabled |
+| `cloud/scripts/setup-grok-page-responder.sh` | Clone + stripped env + pinned grok CLI |
 | `scripts/deploy_notify.py` | Live-gate Pushover |
 | `cloud/scripts/deploy.sh` | `notify_release_live` after green marker |
 

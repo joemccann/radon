@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Callable
 
 import github_pr_output as pr_fmt
+import ir_pr_description
 
 IR_BRANCH_PREFIX = "fix/"
 DEFAULT_BASE = "main"
@@ -257,6 +258,18 @@ def _create_pr(
     }
 
 
+def _update_pr_body(
+    runner: Runner,
+    binary: str,
+    *,
+    url: str,
+    body: str,
+) -> None:
+    proc = runner([binary, "pr", "edit", url, "--body", body])
+    if getattr(proc, "returncode", 1) != 0:
+        _raise_from_gh(proc)
+
+
 def ensure_pr(
     *,
     head: str,
@@ -271,6 +284,9 @@ def ensure_pr(
     gh_bin: str | None = None,
     which: Callable[[str], str | None] | None = None,
     include_terminal: bool = False,
+    title: str | None = None,
+    body: str | None = None,
+    update_existing: bool = False,
 ) -> dict:
     """Create the IR PR if missing. Never merge. Fail closed on gh/PAT."""
     if not is_ir_branch(head):
@@ -281,10 +297,20 @@ def ensure_pr(
     run = runner or _default_runner
     binary = _resolve_gh(gh_bin, which)
     _require_auth(run, binary)
+    resolved_title = title or format_ir_pr_title(issue=issue, incident_id=incident_id)
+    resolved_body = body or format_ir_pr_body(
+        issue=issue,
+        fix=fix,
+        next_action=next_action,
+        incident_id=incident_id,
+        case_id=case_id,
+    )
     existing = _list_open_pr(
         run, binary, head=head, base=base, repo=repo, include_terminal=include_terminal
     )
     if existing:
+        if update_existing and body:
+            _update_pr_body(run, binary, url=existing["url"], body=resolved_body)
         return {
             "action": existing["state"].lower() if include_terminal and existing.get("state") in {"CLOSED", "MERGED"} else "exists",
             "url": existing["url"],
@@ -297,14 +323,8 @@ def ensure_pr(
         head=head,
         base=base,
         repo=repo,
-        title=format_ir_pr_title(issue=issue, incident_id=incident_id),
-        body=format_ir_pr_body(
-            issue=issue,
-            fix=fix,
-            next_action=next_action,
-            incident_id=incident_id,
-            case_id=case_id,
-        ),
+        title=resolved_title,
+        body=resolved_body,
     )
 
 
@@ -360,18 +380,30 @@ def ensure_after_code_fix(
             "no fix/** branch found after code_fix; grok must push "
             f"{IR_BRANCH_PREFIX}<slug>. Branch-only is not a ship."
         )
-    summary = sanitize_summary(summary)
-    issue = summary or f"{page.get('service') or 'service'} P1"
-    fix_text = summary or issue
+    run = runner or _default_runner
+    commit = _git_stdout(run, ["git", "log", "-1", "--format=%B"], repo_root)
+    try:
+        title_summary, body = ir_pr_description.description_from_commit(
+            commit, branch=resolved, page=page
+        )
+    except ir_pr_description.IrDescriptionError as exc:
+        raise IrEnsurePrError(f"IR PR description invalid: {exc}") from exc
+    issue = sanitize_summary(title_summary) or sanitize_summary(summary)
     return ensure_pr(
         head=resolved,
         issue=issue,
-        fix=fix_text,
+        fix=issue,
+        title=format_ir_pr_title(
+            issue=issue,
+            incident_id=page.get("incident_id") or page.get("page_id"),
+        ),
+        body=body,
         incident_id=page.get("incident_id") or page.get("page_id"),
         case_id=page.get("case_id"),
         runner=runner,
         gh_bin=gh_bin,
         which=which,
+        update_existing=True,
     )
 
 

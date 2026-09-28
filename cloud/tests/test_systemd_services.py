@@ -86,6 +86,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-incident-watchdog.timer",
     "radon-grok-page-responder.service",
     "radon-grok-page-responder.timer",
+    "radon-grok-pin-bump.service",
+    "radon-grok-pin-bump.timer",
     "radon-leap.service",
     "radon-leap.timer",
     "radon-liquidcompute.service",
@@ -183,6 +185,7 @@ IB_GATEWAY_DEPENDENTS = [
 ENV_FILE_PATH = "/etc/radon/env"
 STRIPPED_ENV_SERVICES = {
     "radon-grok-page-responder.service": "/home/radon/radon-page-responder.env",
+    "radon-grok-pin-bump.service": "/home/radon/radon-page-responder.env",
     "radon-flex-pull.service": "/var/lib/radon/flex-secrets/env",
     "radon-mcp.service": "/etc/radon/mcp.env",
 }

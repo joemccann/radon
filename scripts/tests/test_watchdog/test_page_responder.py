@@ -28,6 +28,7 @@ from grok_page_responder import (
     run_cycle,
     sync_remote_clone,
 )
+import grok_pin
 from watchdog import units as units_mod
 from watchdog.check import CheckOutcome
 from watchdog.pages import (
@@ -234,7 +235,38 @@ class TestResponder:
         assert "--always-approve" in cmd
         assert "--output-format" in cmd
         assert "json" in cmd
+        assert cmd[cmd.index("-m") + 1] == "grok-4.7"
+        assert cmd[cmd.index("--reasoning-effort") + 1] == "high"
         assert "-p" not in cmd
+
+    def test_refused_pin_does_not_launch_grok(self, db_conn, tmp_path, monkeypatch):
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        enqueue_delivered_page(
+            service="vcg-scan",
+            severity="P1",
+            kind="stale",
+            message="silent",
+            now=NOW,
+        )
+        called = []
+
+        def runner(cmd, **_kwargs):
+            called.append(cmd)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        runtime = grok_pin.ResolvedRuntime(
+            model="grok-4.7",
+            reasoning_effort="high",
+            cli_version="1.0.3",
+            used_fallback=True,
+            warning="pinned model unavailable; refusing unpinned default",
+            refused=True,
+        )
+        rc = run_cycle(tmp_path, now=NOW, grok_runner=runner, pin_runtime=runtime)
+        assert rc == 0
+        assert called == []
+        status = db_conn.execute("SELECT status FROM watchdog_pages").fetchone()[0]
+        assert status == "pending"
 
     def test_followup_push_is_not_emergency(self):
         payload = build_followup_payload(
@@ -261,6 +293,10 @@ class TestResponder:
         assert "silent for 23m" in prompt
         assert "stand_down" in prompt
         assert "incident-response" in prompt
+        assert "## What broke" in prompt
+        assert "## Root cause" in prompt
+        assert "## Still open" in prompt
+        assert "grok incident fix on" in prompt
 
     def test_parse_result_line_from_json(self):
         raw = json.dumps({

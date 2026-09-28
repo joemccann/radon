@@ -563,6 +563,7 @@ Do not hand-edit a wrapper while a cycle is running: the shell reads the script 
 | `radon-garch.timer` | Mon-Fri 14:00 / 17:00 / 20:00 UTC | GARCH convergence scan via FastAPI, 3x per RTH session. Capacity-shed case: [`incident-runbook.md`](incident-runbook.md) |
 | `radon-incident-watchdog.timer` | every 5 min | Writes `data/incidents/`. Cases: [`incident-runbook.md`](incident-runbook.md) |
 | `radon-grok-page-responder.timer` | 30s after last cycle | Headless Grok auto-fix from dedicated clone. Spec: [`grok-page-responder.md`](grok-page-responder.md) |
+| `radon-grok-pin-bump.timer` | weekly Sunday 07:40 UTC, installed disabled | Side-install a newer Grok CLI or default model, smoke it, commit a pin bump. Do not enable until reviewed. Spec: [`grok-page-responder.md`](grok-page-responder.md) |
 
 The autonomous timers retired Radon's previous "data only refreshes when a browser tab is open" failure mode. Some surfaces remain on-demand by design (`scanner`, `discover`, `flow-analysis`, `analyst-ratings`, `gex-scan`, `orders-read-compare`).
 

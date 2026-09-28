@@ -351,6 +351,8 @@ journald on the VPS is on-box only (capped at 1G). A laptop launchd job (`~/Libr
 off. A `code_fix` + AUTOPUSH ships a `fix/**` branch and
 `scripts/ir_ensure_pr.py` opens a PR against `main` (never merges).
 Spec: [`grok-page-responder.md`](grok-page-responder.md).
+`radon-grok-pin-bump.timer` is inventoried and stays disabled. It does not
+run until Joe enables it. Spec in the same doc (Grok pin).
 Do not install this on any clone under `~/radon-weekend/` (the six nightly loops hard-reset them every phase; table in [`operations.md`](operations.md#background-services)).
 
 ### Error tracking — Sentry (not wired; recommended next step)

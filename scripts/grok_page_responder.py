@@ -56,6 +56,7 @@ load_repo_dotenv()
 from watchdog import notify
 from watchdog import pages as pages_mod
 from watchdog import units as units_mod
+import grok_pin
 import ir_ensure_pr
 
 try:
@@ -276,7 +277,19 @@ def acquire_lock(lock_path: Path, now: datetime) -> bool:
     return True
 
 
-def build_grok_command(prompt_path: Path, repo_root: Path) -> list[str]:
+def build_grok_command(
+    prompt_path: Path,
+    repo_root: Path,
+    *,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+) -> list[str]:
+    if not model or not reasoning_effort:
+        pin = grok_pin.load_pin()
+        model = model or pin.model
+        reasoning_effort = reasoning_effort or pin.reasoning_effort
+    if not model or not reasoning_effort:
+        raise grok_pin.GrokPinError("refusing unpinned grok invocation")
     return [
         grok_bin(),
         "--prompt-file", str(prompt_path),
@@ -284,6 +297,8 @@ def build_grok_command(prompt_path: Path, repo_root: Path) -> list[str]:
         "--always-approve",
         "--no-auto-update",
         "--no-plan",
+        "-m", model,
+        "--reasoning-effort", reasoning_effort,
         "--output-format", "json",
     ]
 
@@ -459,6 +474,21 @@ def build_prompt(page: dict, *, autoship: bool, autopush: bool) -> str:
         "not a local testable defect\n\n"
         f"{ship_line}\n{push_line}\n"
         "Ignore unrelated dirty files. No em dashes in user-facing copy.\n"
+        "When AUTOSHIP commits, the commit message body MUST include these "
+        "markdown sections, each with real content (not TODO, not the branch "
+        "name, not 'grok incident fix on'):\n"
+        "## What broke\n"
+        "symptom, failing job or alert, page id, first-seen time, run or log "
+        "links, error excerpt.\n"
+        "## Root cause\n"
+        "## What changed\n"
+        "each file with a plain summary.\n"
+        "## How it was verified\n"
+        "tests, commands, CI links if known.\n"
+        "## Risk and rollback\n"
+        "## Still open\n"
+        "Pickup opens the PR from this body. A missing or placeholder section "
+        "refuses the PR and pages.\n"
         "End with exactly one line:\n"
         "RESULT: <code_fix|stand_down|ops_only|failed> | <one-line summary>\n"
     )
@@ -523,6 +553,46 @@ def _send_followup(*, service: str, disposition: str, summary: str) -> None:
     notify._post_pushover(payload)
 
 
+def _send_pin_warning(message: str) -> None:
+    print(message, file=sys.stderr)
+    creds = notify._pushover_creds()
+    if not creds:
+        return
+    user, token = creds
+    notify._post_pushover(
+        notify.build_pushover_payload(
+            user=user,
+            token=token,
+            title="radon grok: pin fallback",
+            message=message[:900],
+            severity=None,
+        )
+    )
+
+
+def _runtime_from_pin(
+    *,
+    probe: bool,
+    pin_runtime: grok_pin.ResolvedRuntime | None = None,
+    grok_runner: GrokRunner | None = None,
+) -> grok_pin.ResolvedRuntime:
+    if pin_runtime is not None:
+        return pin_runtime
+    pin = grok_pin.load_pin()
+    if not probe:
+        return grok_pin.ResolvedRuntime(
+            model=pin.model,
+            reasoning_effort=pin.reasoning_effort,
+            cli_version=pin.cli_version,
+            used_fallback=False,
+            warning=None,
+            refused=False,
+        )
+    return grok_pin.resolve_runtime(
+        pin, grok_bin=grok_bin(), runner=grok_runner or _default_grok_runner
+    )
+
+
 def record_cycle_health(state: str, *, now: Optional[datetime] = None) -> None:
     """Heartbeat THIS poller, never the ticket outcome.
 
@@ -572,6 +642,7 @@ def run_cycle(
     grok_runner: Optional[GrokRunner] = None,
     systemctl_runner: Optional[SystemctlRunner] = None,
     ensure_ir_pr: Optional[Callable] = None,
+    pin_runtime: grok_pin.ResolvedRuntime | None = None,
 ) -> int:
     now = now or datetime.now(timezone.utc)
     if not responder_enabled():
@@ -619,6 +690,22 @@ def run_cycle(
             _heartbeat("paused", now)
             return 0
 
+        runtime = _runtime_from_pin(
+            probe=grok_runner is None,
+            pin_runtime=pin_runtime,
+            grok_runner=grok_runner,
+        )
+        if runtime.warning:
+            _send_pin_warning(runtime.warning)
+        if runtime.refused:
+            print(json.dumps({
+                "at": now.isoformat(),
+                "skipped": "grok_pin",
+                "warning": runtime.warning,
+            }))
+            _heartbeat("paused", now)
+            return 0
+
         page = actionable[0]
         token = uuid.uuid4().hex
         if not pages_mod.claim_page(page["page_id"], now=now, claim_token=token):
@@ -659,7 +746,12 @@ def run_cycle(
                 autopush=autopush_enabled(),
             )
         )
-        cmd = build_grok_command(prompt_path, repo_root)
+        cmd = build_grok_command(
+            prompt_path,
+            repo_root,
+            model=runtime.model,
+            reasoning_effort=runtime.reasoning_effort,
+        )
         try:
             proc = runner(cmd, timeout=GROK_TIMEOUT_SECS, cwd=str(repo_root))
         except subprocess.TimeoutExpired:

@@ -116,6 +116,8 @@ class TestAutoSyncStrays:
         "radon-llm-index.timer",
         "radon-knowledge-eval.service",
         "radon-knowledge-eval.timer",
+        "radon-grok-pin-bump.service",
+        "radon-grok-pin-bump.timer",
         "radon-mktnews.service",
         "radon-ib-gateway.service",
         "radon-db-backup.service",

@@ -21,6 +21,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -164,12 +165,33 @@ class TestSummaryIsFlattened:
         assert all(ord(c) >= 32 for c in clean)
         assert len(clean) <= ir_ensure_pr.SUMMARY_MAX_CHARS
 
-    def test_ensure_after_code_fix_uses_the_flattened_summary(self, tmp_path):
+    def test_ensure_after_code_fix_uses_the_structured_commit(self, tmp_path):
         captured = {}
+        commit = (
+            "fix: ledger timeout\n\n"
+            "## What broke\n"
+            "The oneshot exited Result=exit-code and paged P1 about itself.\n"
+            "Page p1 first seen 2026-09-26T17:15:00Z. Error: TimeoutError.\n\n"
+            "## Root cause\n"
+            "A Turso read timeout escaped run_cycle and failed the unit.\n\n"
+            "## What changed\n"
+            "- scripts/grok_page_responder.py: exit 0 on ledger timeout.\n\n"
+            "## How it was verified\n"
+            "Focused pytest for the timeout path passed locally.\n\n"
+            "## Risk and rollback\n"
+            "The matcher is broad. Rollback by reverting this commit.\n\n"
+            "## Still open\n"
+            "Whether a duplicate grok run can follow a complete_page timeout.\n"
+        )
 
         def _fake_ensure_pr(**kwargs):
             captured.update(kwargs)
             return {"action": "created", "url": "https://x/pull/1"}
+
+        def runner(argv, **_kwargs):
+            if list(argv)[:2] == ["git", "log"]:
+                return SimpleNamespace(returncode=0, stdout=commit, stderr="")
+            return SimpleNamespace(returncode=1, stdout="", stderr="no")
 
         orig = ir_ensure_pr.ensure_pr
         ir_ensure_pr.ensure_pr = _fake_ensure_pr
@@ -179,8 +201,30 @@ class TestSummaryIsFlattened:
                 page={"page_id": "p1", "service": "svc"},
                 summary="line1\nline2\x07",
                 head="fix/slug",
+                runner=runner,
             )
         finally:
             ir_ensure_pr.ensure_pr = orig
         assert "\n" not in captured["issue"]
         assert "\x07" not in captured["issue"]
+        assert "## What broke" in captured["body"]
+        assert captured["update_existing"] is True
+
+    def test_ensure_after_code_fix_refuses_a_placeholder_commit(self, tmp_path):
+        def runner(argv, **_kwargs):
+            if list(argv)[:2] == ["git", "log"]:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout="grok incident fix on fix/slug\n",
+                    stderr="",
+                )
+            return SimpleNamespace(returncode=1, stdout="", stderr="no")
+
+        with pytest.raises(ir_ensure_pr.IrEnsurePrError, match="IR PR description"):
+            ir_ensure_pr.ensure_after_code_fix(
+                tmp_path,
+                page={"page_id": "p1", "service": "svc"},
+                summary="grok incident fix on fix/slug",
+                head="fix/slug",
+                runner=runner,
+            )

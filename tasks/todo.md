@@ -1,3 +1,10 @@
+# Task: IR PR descriptions + Grok pin (2026-09-28)
+
+- [x] T1 depends_on: [] Validator + pickup/autopush refuse placeholders; tests on title/body.
+- [x] T2 depends_on: [T1] `config/grok_pin.json`, responder `-m`/fallback, setup pin install.
+- [x] T3 depends_on: [T2] Disabled weekly bump timer, smoke/commit decision tests, runbook.
+- [ ] T4 depends_on: [T3] Draft PR vs main, CI green, no merge, nothing enabled on the VPS.
+
 # Task: Knowledge golden eval v2 (2026-09-27)
 
 - [x] T1 depends_on: [] Opt-in retrieve.py legs/recency/cap hooks; defaults identical.

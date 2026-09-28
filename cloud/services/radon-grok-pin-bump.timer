@@ -1,0 +1,12 @@
+[Unit]
+Description=Radon Grok pin bump timer — weekly, installed disabled
+
+[Timer]
+# Sunday 07:40 UTC, after the subscription-token keepalive window.
+# Persistent=false so a missed slot does not catch up on enable.
+OnCalendar=Sun *-*-* 07:40:00 UTC
+Persistent=false
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

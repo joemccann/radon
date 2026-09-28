@@ -477,6 +477,14 @@ Auto-sync stays off. `cloud/tests/test_knowledge_eval_setup.py` pins
 the inventory-and-skip. Contract:
 [`docs/knowledge-embeddings.md`](../docs/knowledge-embeddings.md).
 
+`setup-vps.sh` also inventories `radon-grok-pin-bump.{service,timer}` so a
+fresh host has the unit files. `enable_services` skips both until Joe
+reviews the pin smoke path. The weekly timer stays disabled; enabling it
+would side-install a candidate Grok CLI and open a pin-bump PR. Drift ack:
+`not-installed:radon-grok-pin-bump.*`. Auto-sync stays off.
+`cloud/tests/test_grok_pin_bump_setup.py` pins the inventory-and-skip.
+Contract: [`docs/grok-page-responder.md`](../docs/grok-page-responder.md).
+
 
 Canonical unit files are copied root-owned to `/etc/systemd/system`; they are
 not symlinked from the checkout.

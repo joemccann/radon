@@ -81,6 +81,12 @@ sudo -u radon mkdir -p /home/radon/.local/bin
 if [[ -x /home/radon/.grok/bin/grok && ! -e /home/radon/.local/bin/grok ]]; then
   sudo -u radon ln -sf /home/radon/.grok/bin/grok /home/radon/.local/bin/grok
 fi
+PIN_FILE="$CLONE/config/grok_pin.json"
+if [[ -x /home/radon/.local/bin/grok && -f "$PIN_FILE" ]]; then
+  PIN_VER="$(python3.13 -c 'import json,sys; print(json.load(open(sys.argv[1]))["cli_version"])' "$PIN_FILE")"
+  sudo -u radon -H /home/radon/.local/bin/grok update --version "$PIN_VER" --no-auto-update \
+    || echo "warn: grok update --version $PIN_VER failed; responder will fall back" >&2
+fi
 
 echo "[5/5] device-code login required next"
 echo "  sudo -u radon -H /home/radon/.local/bin/grok login --device-auth"

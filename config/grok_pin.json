@@ -1,0 +1,10 @@
+{
+  "model": "grok-4.7",
+  "reasoning_effort": "high",
+  "cli_version": "1.0.41",
+  "last_known_good": {
+    "model": "grok-4.7",
+    "reasoning_effort": "high",
+    "cli_version": "1.0.3"
+  }
+}
