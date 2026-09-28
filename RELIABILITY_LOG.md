@@ -808,3 +808,13 @@ Review: focused changed-surface tests and permanent fault drills pass; source di
 - **N146 (from DeepSec 2026-09-26):** `scripts/setup_testing_weekend.sh:78` same single-credential Pushover preflight as N144.
 - **N148 (from DeepSec 2026-09-26):** `scripts/setup_security_nightly.sh:88` same single-credential Pushover preflight as N144; siblings at `scripts/setup_documentation_nightly.sh:78` and `scripts/setup_ci_performance.sh:78`.
 - **N130 (from DeepSec 2026-09-26, resolved):** `.claude/workflows/security-audit.mjs` hardcoded `/Users/joemccann/dev/apps/finance/radon` at the old `:28`; #735 merged 2026-09-26, current main uses `resolveRadonRepoRoot()` at `:35`. Closed, not a reliability task.
+
+## Remediation 2026-09-28 — REL-290 (reduced P0/P1)
+
+| Task | Status | Red / green | Evidence and remaining acceptance |
+|---|---|---|---|
+| REL-290 / R-709 | DONE | RED 22 failed, 20 passed, 62 deselected; GREEN 102 passed, 8 skipped, 26 deselected | `is_fx_loop_guard` now matches only when the last non-empty, non-wrapper line of this round is a column-0 tool-loop sentence. An indented fixture citation plus the phase marker, exit 0, stays on the fx rung in all four fx loops. The same sentence as the CLI's own final line still advances once, including on exit 0. A clean log accepts exit 0. The function is byte-identical in all six wrappers; security and DeepSec stay claude-exclusive, so their ladder is not given an fx rung. `docs/operations.md` states the same rule. |
+
+`RADON_WEEKEND_REDUCED=1`: P2 findings R-679, R-678, NF-1, NF-2, NF-3 and NF-4 stay open with the acceptance already on issue #81. No Gateway, live order, production halt, or browser launch.
+
+Closing gates on `b39e5377` (then rebased onto `09a485ae` as `33f3f38e`, same diff). Drills: pytest `107 passed`; `order-idempotency-durability` vitest `12 passed`. Three serial vitest runs from the repo root: each `10144 passed, 21 skipped`. Pytest run 1: `16137 passed, 22 skipped, 94 deselected`. Pytest run 2: `1 failed, 16136 passed` — `test_timeout_retains_completed_summaries_and_kills_worker_group` raised `PermissionError` at `scripts/knowledge/distill.py:160` (`os.killpg`); that test passed inside run 1. Pytest run 3: `1 failed, 16136 passed` — `TEST_LOG.md` row count versus `origin/main`, which gained rows from other merges while the suite ran; this branch does not edit `TEST_LOG.md`. After the rebase, `TestTestLogLedgerIsAppendOnly`, the killpg test, and the R-709 fx-guard classes: `45 passed`. No assertion was weakened.

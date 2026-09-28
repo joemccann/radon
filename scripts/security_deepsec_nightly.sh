@@ -2413,9 +2413,13 @@ is_fx_loop_guard() {
   # fx stops itself when the same shell action fails twice. That is a dead
   # rung, not a finished phase: retry / fall through, never rc=1 or
   # rc=0-INCOMPLETE on this rung. Real strings 2026-09-27.
+  # R-709: the CLI prints that sentence as its own final line, at column 0.
+  # These loops quote the fixture indented, and a finished phase ends on its
+  # marker. Either of those is a citation, not the verdict.
   [[ "${RUNG_PROVIDER:-}" == "fx" ]] || return 1
   tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
-    | grep -qE 'Repeated (identical shell|shell validation) failures stopped the tool loop'
+    | grep -v '^\[' | grep -v '^[[:space:]]*$' | tail -n 1 \
+    | grep -qE '^Repeated (identical shell|shell validation) failures stopped the tool loop'
 }
 
 run_phase() {
