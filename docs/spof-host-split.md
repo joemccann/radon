@@ -182,7 +182,13 @@ Operator commands after the cut:
   `scripts/utils/ib_login_throttle.py`; the detail names the UTC time a login
   is allowed again), with the reason in `detail`. Expiry also shows the Gateway row as `load_state=remote`,
   `active_state=unknown`. For 502/403, re-run the mint script and steps 1-3;
-  Gateway itself is untouched. A 409 needs no action but time.
+  Gateway itself is untouched. A 409 from a held 2FA lease or the 60s cooldown
+  needs no action but time. A 409 from an IBKR login throttle means do not log
+  in until the UTC time in `detail`. During market-data hours the watchdog
+  retries then. Outside those hours, one app-path restart after that time is
+  the recovery. Broker-local `radon restart` and a broker-host
+  `POST /ib/restart` call the helper directly and are another login. See
+  [Gate 6](ib-gateway-recovery.md#6-watchdog-login-throttle-hold-2026-09-26).
   Reversal: `systemctl disable --now radon-ib-gateway-remote.service` on
   the broker and unset `RADON_IB_REMOTE_URL` on the app (controls go
   read-only, no error).
