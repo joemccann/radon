@@ -1626,37 +1626,61 @@ for path in paths:
         late_mutation = tmp_path / "late-mutation"
         child_started = tmp_path / "child-started"
         fake_systemctl = tmp_path / "systemctl"
+        # A Python process per inventory read outlasted the 1s supervisor
+        # deadline on a loaded runner, so stop never started. Bash answers
+        # those reads. The supervisor budget only has to let stop start;
+        # systemctl's own timeout is what kills the hang. LoadState has to
+        # say loaded, or the failed stop is reported as an unverifiable
+        # unit instead of the timeout's 124.
+        units = " ".join(MANAGED_SERVICES)
+        hang = tmp_path / "hang-stop.py"
+        hang.write_text(
+            "\n".join(
+                [
+                    "import signal",
+                    "import subprocess",
+                    "import sys",
+                    "from pathlib import Path",
+                    "signal.signal(signal.SIGTERM, signal.SIG_IGN)",
+                    "child = subprocess.Popen([",
+                    "    sys.executable, '-c',",
+                    f"    \"import time; time.sleep(3); open({str(late_mutation)!r}, 'w').write('late')\",",
+                    "])",
+                    f"Path({str(child_started)!r}).touch()",
+                    "child.wait()",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
         _write_executable(
             fake_systemctl,
-            f"""#!{sys.executable}
-import signal
-import subprocess
-import sys
-from pathlib import Path
-args = [arg for arg in sys.argv[1:] if arg != "--no-block"]
-if args[0] == "list-jobs":
-    raise SystemExit(0)
-if args[0] in ("list-unit-files", "list-units"):
-    for unit in {MANAGED_SERVICES!r}:
-        print(unit, "enabled")
-    raise SystemExit(0)
-if args[0] == "show":
-    if "--property=Type" in args:
-        print("simple")
-    elif args[1] == "radon-ib-gateway-preheld-restart.service":
-        print("inactive")
-    else:
-        print("active")
-    raise SystemExit(0)
-if args[0] != "stop":
-    raise SystemExit(2)
-signal.signal(signal.SIGTERM, signal.SIG_IGN)
-child = subprocess.Popen([
-    sys.executable, "-c",
-    "import time; time.sleep(3); open({str(late_mutation)!r}, 'w').write('late')",
-])
-Path({str(child_started)!r}).touch()
-child.wait()
+            f"""#!/bin/bash
+args=()
+for arg in "$@"; do
+  [[ "$arg" == "--no-block" ]] || args+=("$arg")
+done
+case "${{args[0]}}" in
+  list-jobs) exit 0 ;;
+  list-unit-files|list-units)
+    for unit in {units}; do printf '%s enabled\\n' "$unit"; done
+    exit 0
+    ;;
+  show)
+    for arg in "${{args[@]}}"; do
+      if [[ "$arg" == "--property=Type" ]]; then printf 'simple\\n'; exit 0; fi
+      if [[ "$arg" == "--property=LoadState" ]]; then printf 'loaded\\n'; exit 0; fi
+    done
+    if [[ "${{args[1]}}" == "radon-ib-gateway-preheld-restart.service" ]]; then
+      printf 'inactive\\n'
+    else
+      printf 'active\\n'
+    fi
+    exit 0
+    ;;
+  stop) exec {sys.executable} {hang} ;;
+  *) exit 2 ;;
+esac
 """,
         )
         fake_rm = tmp_path / "rm"
@@ -1674,12 +1698,12 @@ child.wait()
                 "RADON_TEST_ACTIVE_STATE_FILE": str(tmp_path / "active-units"),
                 "RADON_TEST_REPLICA_PREFIX": str(tmp_path / "replica.db"),
                 "RADON_TEST_TIMEOUT": shutil.which("timeout") or "",
-                "RADON_TEST_ROOT_ACTION_TIMEOUT": "1",
+                "RADON_TEST_ROOT_ACTION_TIMEOUT": "15",
                 "RADON_TEST_ROOT_KILL_AFTER": "1",
             },
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=20,
         )
         assert result.returncode in {124, 137}
         assert child_started.exists(), result.stdout + result.stderr
