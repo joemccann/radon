@@ -287,6 +287,10 @@ A failed batched stop retries loaded units, tolerating a retired inventory entry
 only when successful probes report `LoadState=not-found`, `ActiveState=inactive`
 and an empty `FragmentPath`. Unknown states, probe errors and loaded-unit stop
 failures remain fatal. Recovery preserves the inventory and active snapshot.
+Transient `radon-*` units (`systemd-run`, `Transient=yes`) never enter the
+inventory: systemd discards one once stopped, so a transition that stopped it
+could not restore it (2026-09-28, `radon-forktest.timer` failed a deploy and its
+rollback). One batched `systemctl show` decides; a failed query keeps every unit.
 The Python image keeps application source root-owned and provisions only
 `/home/radon/radon/logs` for the runtime user; its non-root build smoke verifies
 log creation, writing and rotation while source directories remain unwritable.

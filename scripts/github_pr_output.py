@@ -27,7 +27,6 @@ from nightly_issue_format import sanitize
 LOOP_TITLES = {
     "reliability": "Reliability",
     "testing": "Testing",
-    "documentation": "Documentation",
     "security": "Security",
     "security-deepsec": "DeepSec",
 }

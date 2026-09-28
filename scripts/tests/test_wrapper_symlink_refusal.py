@@ -23,7 +23,6 @@ BASH = shutil.which("bash") or "/bin/bash"
 LOOPS = {
     "reliability": REPO / "scripts" / "reliability_weekend.sh",
     "testing": REPO / "scripts" / "testing_weekend.sh",
-    "documentation": REPO / "scripts" / "documentation_nightly.sh",
     "security": REPO / "scripts" / "security_nightly.sh",
     "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
 }

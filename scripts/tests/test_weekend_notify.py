@@ -214,7 +214,7 @@ class TestProloguePhaseStillPages:
     test, which reproduced the held-lock refusal end to end.
     """
 
-    LOOPS = ("reliability", "testing", "documentation", "security")
+    LOOPS = ("reliability", "testing", "security")
 
     @pytest.mark.parametrize("loop", LOOPS)
     def test_the_prologue_page_is_sent(self, loop, monkeypatch):

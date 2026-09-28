@@ -53,7 +53,6 @@ class TestSetupInstallsDevRequirements:
             "setup_reliability_weekend.sh",
             "setup_testing_weekend.sh",
             "setup_security_nightly.sh",
-            "setup_documentation_nightly.sh",
         ],
     )
     def test_the_loop_venv_gets_requirements_dev(self, setup):

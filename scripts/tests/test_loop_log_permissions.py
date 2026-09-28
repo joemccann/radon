@@ -26,7 +26,6 @@ BASH = "/bin/bash"
 WRAPPERS = {
     "reliability": "reliability_weekend.sh",
     "testing": "testing_weekend.sh",
-    "documentation": "documentation_nightly.sh",
     "security": "security_nightly.sh",
 }
 LOOP_IDS = sorted(WRAPPERS)

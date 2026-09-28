@@ -176,7 +176,7 @@ class TestACapContinuesOnTheNextProvider:
 FX_INCOMPLETE_STREAM = "fx: IncompleteStream"
 
 
-@pytest.mark.parametrize("loop", FALLBACK_LOOPS + ["documentation"])
+@pytest.mark.parametrize("loop", FALLBACK_LOOPS)
 class TestATransientFailureRetriesThenMovesDownTheLadder:
     """2026-09-26: the testing audit died rc=1 on `fx: IncompleteStream` (NVIDIA
     cut the response stream mid-reply). Nothing classified it, so the phase
@@ -331,10 +331,9 @@ class TestARungThatCrashesInsideItselfCostsOneRung:
         assert providers(tried) == ["nvidia"] * 3 + ["grok"], tried
 
 
-# Every wrapper that can host a grok rung. documentation defaults to fx:nvidia
-# but takes an operator ladder; security and security-deepsec carry the same
-# classifier for parity but refuse any non-claude rung.
-GROK_HOSTING_LOOPS = FALLBACK_LOOPS + ["documentation"]
+# Every wrapper that can host a grok rung. security and security-deepsec carry
+# the same classifier for parity but refuse any non-claude rung.
+GROK_HOSTING_LOOPS = FALLBACK_LOOPS
 
 
 @pytest.mark.parametrize("loop", GROK_HOSTING_LOOPS)
@@ -380,7 +379,7 @@ class TestASingleRungLadderReportsACrashHonestly:
 
     def test_the_only_rung_crashing_is_an_honest_incomplete(self, tmp_path):
         proc, tried, calls, _argv = _run_multi(
-            tmp_path, "documentation", "audit",
+            tmp_path, "reliability", "audit",
             provider_ladder="fx:nvidia",
             reject_providers=("fx",),
             reject_output=NVIDIA_INTERNAL_ERROR_OUTPUT,

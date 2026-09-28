@@ -28,7 +28,6 @@ REPO = Path(__file__).resolve().parents[2]
 LOOPS = {
     "reliability": ("reliability_weekend.sh", "reliability/"),
     "testing": ("testing_weekend.sh", "testing/"),
-    "documentation": ("documentation_nightly.sh", "documentation/"),
     "security": ("security_nightly.sh", "security/"),
 }
 LOOP_IDS = sorted(LOOPS)

@@ -1,4 +1,7 @@
-"""The documentation loop runs on Vercel fx driving NVIDIA NIM, and nothing else.
+"""The fx:nvidia rung: Vercel fx driving NVIDIA NIM directly.
+
+First shipped for the retired per-loop documentation wrapper; pinned here on
+reliability, which carries the same fx rung and ladder.
 
 2026-09-26: every documentation phase died on its first model call. The NVIDIA
 rung was hosted by the grok CLI, which exited 1 on `serialization error:
@@ -32,7 +35,7 @@ _h = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = _h
 _spec.loader.exec_module(_h)
 
-WRAPPER = _h.LOOPS["documentation"]
+WRAPPER = _h.LOOPS["reliability"]
 # fx sits behind grok, codex and antigravity on the default ladder since
 # 2026-09-27 evening; the arm tests below pin it as the only rung.
 FX = "fx:nvidia"
@@ -58,7 +61,7 @@ def test_the_default_ladder_matches_the_other_fx_loops():
 
 def test_an_operator_ladder_still_overrides_the_default(tmp_path):
     _proc, tried, _calls, _argv = _h._run_multi(
-        tmp_path, "documentation", "audit",
+        tmp_path, "reliability", "audit",
         provider_ladder="grok:grok-4.6 fx:nvidia", capped_providers=("grok",),
     )
     assert [t.split(":", 1)[0] for t in tried] == ["grok", "fx"], tried
@@ -68,13 +71,13 @@ def test_every_phase_launches_fx_and_nothing_else(tmp_path):
     for phase in ("audit", "remediate", "deliver"):
         sub = tmp_path / phase
         sub.mkdir()
-        proc, tried, _calls, argv = _h._run_multi(sub, "documentation", phase, provider_ladder=FX)
+        proc, tried, _calls, argv = _h._run_multi(sub, "reliability", phase, provider_ladder=FX)
         assert tried == ["fx:nvidia"], (phase, tried, proc.stdout, proc.stderr)
         assert argv[0].split() == ["ask", "--full-access", "--no-save"], argv
 
 
 def test_fx_gets_the_prompt_on_stdin_in_the_repo(tmp_path):
-    _proc, tried, _calls, _argv = _h._run_multi(tmp_path, "documentation", "audit", provider_ladder=FX)
+    _proc, tried, _calls, _argv = _h._run_multi(tmp_path, "reliability", "audit", provider_ladder=FX)
     assert tried == ["fx:nvidia"], tried
     env = _fx_env(tmp_path)
     assert env["STDIN"] == "stub", env
@@ -82,7 +85,7 @@ def test_fx_gets_the_prompt_on_stdin_in_the_repo(tmp_path):
 
 
 def test_fx_runs_non_interactive_and_bills_only_nvidia(tmp_path):
-    _h._run_multi(tmp_path, "documentation", "audit", provider_ladder=FX)
+    _h._run_multi(tmp_path, "reliability", "audit", provider_ladder=FX)
     env = _fx_env(tmp_path)
     assert env["FX_PROVIDER"] == "nvidia", env
     assert env["FX_AUTO_UPGRADE"] == "0", env
@@ -95,7 +98,7 @@ def test_fx_runs_non_interactive_and_bills_only_nvidia(tmp_path):
 
 
 def test_fx_carries_the_wrapper_path_into_its_login_shell(tmp_path):
-    _h._run_multi(tmp_path, "documentation", "audit", provider_ladder=FX)
+    _h._run_multi(tmp_path, "reliability", "audit", provider_ladder=FX)
     env = _fx_env(tmp_path)
     assert env["RADON_AGENT_PATH"] == env["PATH"], env
     zdot = Path(env["ZDOTDIR"])
@@ -110,7 +113,7 @@ def test_the_zdotdir_is_rewritten_every_round(tmp_path):
     zdot = tmp_path / "agent-cli" / "fx-zdotdir"
     zdot.mkdir(parents=True)
     (zdot / ".zshrc").write_text("export PATH=/opt/homebrew/bin\n", encoding="utf-8")
-    _h._run_multi(tmp_path, "documentation", "audit", provider_ladder=FX)
+    _h._run_multi(tmp_path, "reliability", "audit", provider_ladder=FX)
     assert 'export PATH="$RADON_AGENT_PATH"' in (zdot / ".zshrc").read_text()
     assert (zdot / ".zlogin").exists()
 
@@ -120,7 +123,7 @@ def test_a_real_login_shell_resolves_the_venv_first(tmp_path):
     """The shape fx uses: `zsh -l -i -c`. Whatever the profile stage does to
     PATH (/etc/zprofile's path_helper, an operator .zprofile), the restore in
     the wrapper-written .zshrc/.zlogin runs after it and the venv wins."""
-    _h._run_multi(tmp_path, "documentation", "audit", provider_ladder=FX)
+    _h._run_multi(tmp_path, "reliability", "audit", provider_ladder=FX)
     written = tmp_path / "agent-cli" / "fx-zdotdir"
     zdot = tmp_path / "zdot"
     zdot.mkdir()
@@ -154,7 +157,7 @@ def test_a_real_login_shell_resolves_the_venv_first(tmp_path):
 
 def test_an_uninstalled_fx_is_an_honest_incomplete(tmp_path):
     proc, tried, calls, _argv = _h._run_multi(
-        tmp_path, "documentation", "audit",
+        tmp_path, "reliability", "audit",
         provider_ladder="fx:nvidia",
         installed=("claude", "codex", "grok"),
     )
@@ -165,7 +168,7 @@ def test_an_uninstalled_fx_is_an_honest_incomplete(tmp_path):
 
 def test_fx_without_an_nvidia_key_is_skipped(tmp_path):
     proc, tried, _calls, _argv = _h._run_multi(
-        tmp_path, "documentation", "audit",
+        tmp_path, "reliability", "audit",
         provider_ladder="fx:nvidia",
         authed=("claude", "codex", "grok"),
     )
@@ -175,7 +178,7 @@ def test_fx_without_an_nvidia_key_is_skipped(tmp_path):
 
 def test_an_fx_rate_limit_is_classified_not_a_bare_failure(tmp_path):
     proc, tried, calls, _argv = _h._run_multi(
-        tmp_path, "documentation", "audit",
+        tmp_path, "reliability", "audit",
         provider_ladder=FX + " grok",
         capped_providers=("fx",),
         cap_line="failed: rate_limited · retry after: 4s",

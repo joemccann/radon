@@ -186,7 +186,7 @@ It runs in the foreground for up to `TIMEOUT_SECS` (3 hours for documentation); 
 sudo -u _radonbot tail -f /Users/_radonbot/radon-runner/logs/documentation/$(date +%F).log
 ```
 
-It passes when the log starts with `starting grok`, a draft PR on `documentation-runner/<date>` appears with author `radon-runner-bot` (`gh pr list --author radon-runner-bot --state all`), and a `radon documentation: done via <agent>` Pushover arrives.
+It passes when the log starts with `starting grok`, a draft PR on `documentation/<date>` appears with author `radon-runner-bot` (`gh pr list --author radon-runner-bot --state all`), and a `radon documentation: done via <agent>` Pushover arrives.
 
 ### 10. Clean up
 
@@ -200,7 +200,7 @@ It passes when the log starts with `starting grok`, a draft PR on `documentation
 | launchd's own output (start failures) | `sudo -u _radonbot tail /Users/_radonbot/radon-runner/launchd-documentation.log` |
 | Is the job loaded, when did it last run | `sudo launchctl print system/com.radon.runner.documentation \| grep -E 'state\|last exit'` |
 | Run a loop now | `sudo launchctl kickstart system/com.radon.runner.documentation` |
-| Change `run_loop.sh` or a loop `.env` | merge to `main`, then repeat step 2 (clone and `sudo install.sh <loop>`). The prompt is read from `main` every night and needs no reinstall |
+| Change `run_loop.sh` or a loop `.env` | merge to `main`, then repeat step 2 on the mini (clone and `sudo install.sh <loop>`, e.g. `sudo install.sh documentation`); the installed copy does not change until you do. The prompt is read from `main` every night and needs no reinstall |
 | Rotate the GitHub token (before its expiry) | step 7.5 to 7.6, then step 8 |
 | After a reboot | `security unlock-keychain ~/Library/Keychains/login.keychain-db` in the bot shell (agy only) |
 | Re-sign a CLI | the bot shell, then the sign-in command from step 4 |
@@ -226,7 +226,7 @@ It passes when the log starts with `starting grok`, a draft PR on `documentation
 
 | Loop | State |
 |---|---|
-| documentation | Shadow: runs at 03:00 on branch `documentation-runner/<date>` next to `scripts/documentation_nightly.sh` |
+| documentation | Cut over: runs at 03:00 on branch `documentation/<date>` as `_radonbot`; the old wrapper, setup script, LaunchAgent and skill are deleted |
 | ci-performance | Cut over: runs at 00:20 on branch `ci-performance/<date>`; `scripts/ci_performance_nightly.sh` and its LaunchAgent are deleted |
 | testing, reliability, security, DeepSec | Not started; still on `scripts/<loop>_*.sh` (see `docs/operations.md`) |
 

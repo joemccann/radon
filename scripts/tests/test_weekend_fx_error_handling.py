@@ -55,12 +55,10 @@ SHARED_LADDER = "grok codex antigravity fx:nvidia fx:cerebras"
 PLISTS = {
     "reliability": REPO / "config" / "com.radon.reliability-daily.plist",
     "testing": REPO / "config" / "com.radon.testing-daily.plist",
-    "documentation": REPO / "config" / "com.radon.documentation-daily.plist",
 }
 PLIST_MINUTES = {
     "reliability": 0,
     "testing": 10,
-    "documentation": 30,
 }
 
 
@@ -277,7 +275,7 @@ class TestFxLoopGuardIgnoresAQuotedFixture:
         assert proc.returncode != 0, (loop, proc.stdout, proc.stderr)
 
 
-_FX_LOOPS = ("reliability", "testing", "documentation")
+_FX_LOOPS = ("reliability", "testing")
 
 
 @pytest.mark.parametrize("loop", _FX_LOOPS)
@@ -317,8 +315,9 @@ class TestFxLoopGuardDoesNotDiscardAFinishedPhase:
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
 
 
-def test_documentation_default_ladder_matches_the_other_fx_loops():
-    body = LOOPS["documentation"].read_text(encoding="utf-8")
+@pytest.mark.parametrize("loop", _FX_LOOPS)
+def test_each_fx_loop_default_ladder_is_the_shared_ladder(loop):
+    body = LOOPS[loop].read_text(encoding="utf-8")
     match = re.search(
         r'^PROVIDER_LADDER="\$\{RADON_WEEKEND_PROVIDER_LADDER:-(.+?)\}"$',
         body,

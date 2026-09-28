@@ -21,7 +21,6 @@ STABLE = "__HOME__/.local/share/radon/claude-stable"
 LOOP_PLISTS = [
     "com.radon.reliability-daily.plist",
     "com.radon.testing-daily.plist",
-    "com.radon.documentation-daily.plist",
     "com.radon.security-daily.plist",
     "com.radon.security-deepsec.plist",
 ]

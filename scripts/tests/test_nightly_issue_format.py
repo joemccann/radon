@@ -30,14 +30,12 @@ CLAUDE_RUNG_LADDER = "claude:claude-fable-5[1m]"
 WRAPPERS = [
     REPO / "scripts" / "reliability_weekend.sh",
     REPO / "scripts" / "testing_weekend.sh",
-    REPO / "scripts" / "documentation_nightly.sh",
     REPO / "scripts" / "security_nightly.sh",
     REPO / "scripts" / "security_deepsec_nightly.sh",
 ]
 SKILLS = [
     REPO / ".claude" / "skills" / "reliability-weekend" / "SKILL.md",
     REPO / ".claude" / "skills" / "testing-weekend" / "SKILL.md",
-    REPO / ".claude" / "skills" / "documentation-nightly" / "SKILL.md",
     REPO / ".claude" / "skills" / "security-nightly" / "SKILL.md",
 ]
 HEADINGS = (

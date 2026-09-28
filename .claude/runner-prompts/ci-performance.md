@@ -15,9 +15,9 @@ Reduce the measured time from a push to `main` until a healthy production deploy
 
 Do these in order and work serially (no subagents or parallel worktrees).
 
-### 1. Finish what earlier nights left open
+### 1. Read what earlier nights left open
 
-Run `gh pr list --state open --json number,url,headRefName,author,statusCheckRollup` and keep the PRs whose head branch starts with `ci-performance/`. For each one with a red or pending check, check out its branch, make CI green (see Delivery step 5), and push. Never open a second PR for a branch that already has one, never force-push, never rebase over a commit you did not author. Note every `CIP-###` those PRs already carry so tonight does not repeat them.
+Run `gh pr list --state open --json number,url,headRefName,author,statusCheckRollup` and keep the PRs whose head branch starts with `ci-performance/`. Only read them: note every `CIP-###` they already carry so tonight neither repeats nor reallocates them, and skip any candidate an open PR already addresses. List each one with a red or pending check under "Needs you" in the rolling issue comment. Never check out, commit to or push any branch except tonight's (the header's branch is the only one you may push).
 
 ### 2. Read the checkpoint
 

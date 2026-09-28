@@ -45,7 +45,7 @@ SHARED = [
 # the fallback loops do not take that arm and stay on their copy.
 IDENTICAL_ACROSS_ALL = [n for n in SHARED if n != "launch_round"]
 SECURITY_LOOPS = ("security", "security-deepsec")
-FALLBACK_LOOPS = ("reliability", "testing", "documentation")
+FALLBACK_LOOPS = ("reliability", "testing")
 
 
 def _fn(text: str, name: str) -> str:

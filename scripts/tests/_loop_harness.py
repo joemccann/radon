@@ -19,7 +19,6 @@ BASH = shutil.which("bash") or "/bin/bash"
 LOOPS = {
     "reliability": REPO / "scripts" / "reliability_weekend.sh",
     "testing": REPO / "scripts" / "testing_weekend.sh",
-    "documentation": REPO / "scripts" / "documentation_nightly.sh",
     "security": REPO / "scripts" / "security_nightly.sh",
     "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
 }
@@ -57,7 +56,6 @@ MARKERS = (
     ".radon-security-deepsec-runner",
     ".radon-reliability-runner",
     ".radon-testing-runner",
-    ".radon-documentation-runner",
 )
 
 
@@ -241,7 +239,6 @@ def _run(
 # entry may name a provider (every rung it owns) or a `provider:model` rung,
 # which is how the two fx rungs are told apart.
 FALLBACK_PROVIDER_ORDER = {
-    "documentation": ["grok", "codex", "antigravity", "fx", "fx"],
     "reliability": ["grok", "codex", "antigravity", "fx", "fx"],
     "testing": ["grok", "codex", "antigravity", "fx", "fx"],
 }
@@ -529,7 +526,7 @@ def _run_multi(
 
     prompts = tmp_path / "prompts"
     prompts.mkdir(exist_ok=True)
-    for skill in ("reliability-weekend", "testing-weekend", "documentation-nightly",
+    for skill in ("reliability-weekend", "testing-weekend",
                   "security-nightly"):
         for ph in ("audit", "remediate", "deliver"):
             (prompts / (skill + "." + ph + ".md")).write_text("stub\n", encoding="utf-8")
