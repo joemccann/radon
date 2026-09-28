@@ -220,13 +220,9 @@ class TestEveryLoopIsAccepted:
         assert set(nd.LOOPS) == set(pr.LOOP_TITLES)
 
     @pytest.mark.parametrize("loop", sorted(nd.LOOPS))
-    def test_the_wrapper_slug_is_a_loop_both_helpers_accept(self, loop):
-        wrappers = {
-            "security": "security_nightly.sh",
-            "security-deepsec": "security_deepsec_nightly.sh",
-        }
-        text = (REPO / "scripts" / wrappers[loop]).read_text(encoding="utf-8")
-        assert f'LOOP_SLUG="{loop}"' in text
+    def test_the_runner_loop_name_is_a_loop_both_helpers_accept(self, loop):
+        # The post-run hook passes $LOOP (the runner loop name) as --loop.
+        assert (REPO / "scripts" / "runner" / "loops" / f"{loop}.env").is_file()
         pr.format_pr_title(loop=loop, date="2026-09-02", issue="x")
         nd.ready_line(loop, [])
 
@@ -416,64 +412,30 @@ class TestDeliverStatusFromTheRecord:
         )
 
 
-WRAPPERS = tuple(
-    REPO / "scripts" / n for n in (
-        "security_nightly.sh", "security_deepsec_nightly.sh",
-    )
-)
-
-
-def _uncommented(text: str) -> str:
-    return "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
+PRE = REPO / "scripts" / "runner" / "hooks" / "security_pre.sh"
+POST = REPO / "scripts" / "runner" / "hooks" / "security_post.sh"
 
 
 class TestWrapperDeliverRecordContract:
-    """R-611/R-613 (P1), every wrapper loop."""
+    """R-611/R-613 (P1): the security loops' runner hooks."""
 
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_a_branch_only_record_is_written_before_the_agent_starts(self, wrapper):
-        body = _uncommented(wrapper.read_text(encoding="utf-8"))
-        assert "arm_deliver_record" in body, wrapper.name
-        assert "--status launched" in body, wrapper.name
-        # Armed before the agent is launched, not after it. The launch is the
-        # `claude -p "/<loop> $PHASE"` invocation; the loops differ over
-        # whether the round loop is a function or inline in run_phase, so
-        # anchor on the invocation itself.
-        lines = body.splitlines()
-        armed_at = next(
-            i for i, l in enumerate(lines) if l.strip() == "arm_deliver_record"
-        )
-        # The launch is whichever comes first AFTER the arm point: the inline
-        # `claude -p` invocation, or the `run_round` call for the loops that
-        # factored the round loop into a function. Both must follow it.
-        # 2026-09-06: the launch moved into launch_round(); the claude arm
-        # spells the binary "$RUNG_BIN", so `claude -p "/` is no longer
-        # literal anywhere in the round loop.
-        launch_at = next(
-            i for i, l in enumerate(lines)
-            if i > armed_at
-            and (l.strip().startswith("launch_round ") or l.strip() == "run_round")
-        )
-        assert armed_at < launch_at, wrapper.name
-        # ...and nothing launches the agent before run_phase reaches the arm.
-        before = "\n".join(lines[:armed_at])
-        assert "\nrun_round\n" not in before, wrapper.name
+    def test_a_branch_only_record_is_written_before_the_agent_starts(self):
+        # run_loop.sh runs PRE_RUN before the agent of every phase.
+        body = PRE.read_text(encoding="utf-8")
+        arm = body[body.index('if [[ "$PHASE" == deliver ]]'):]
+        assert 'RADON_WEEKEND_ROOT="$LOOP_STATE"' in arm
+        assert "record" in arm and "--status launched" in arm
 
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_the_verdict_comes_from_the_record_not_the_transcript(self, wrapper):
-        body = _uncommented(wrapper.read_text(encoding="utf-8"))
-        start = body.index("deliver_status() {")
-        end = body.index("\n}", start)
-        fn = body[start:end]
-        assert "deliver-status" in fn, wrapper.name
-        assert "no deliver record" in fn, wrapper.name
+    def test_the_verdict_comes_from_the_record_not_the_transcript(self):
+        body = POST.read_text(encoding="utf-8")
+        fn = body[body.index("deliver_status() {"):]
+        fn = fn[:fn.index("\n}")]
+        assert "deliver-status" in fn
+        assert "no deliver record" in fn
+        assert fn.index("deliver-status") < fn.index("grep -E")
 
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_the_record_read_uses_the_isolated_origin_main_pipe(self, wrapper):
-        body = _uncommented(wrapper.read_text(encoding="utf-8"))
-        for fn_name in ("deliver_status", "arm_deliver_record"):
-            start = body.index(f"{fn_name}() {{")
-            end = body.index("\n}", start)
-            fn = body[start:end]
-            assert "origin/main:scripts/nightly_deliver.py" in fn, (wrapper.name, fn_name)
-            assert "/usr/bin/python3 -I -" in fn, (wrapper.name, fn_name)
+    def test_the_record_read_uses_the_root_installed_helper_isolated(self):
+        for hook in (PRE, POST):
+            body = hook.read_text(encoding="utf-8")
+            assert '"$PY" -I "$RUNNER_DIR/lib/nightly_deliver.py"' in body, hook.name
+            assert "scripts/nightly_deliver.py" not in body, hook.name

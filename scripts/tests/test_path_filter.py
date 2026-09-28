@@ -176,11 +176,6 @@ _NON_REPOSITORY_WEB_FIXTURES = {
     "cloud/tests/test_deploy_corrections.py",
     "cloud/tests/test_deploy_resilience.py",
     "cloud/tests/test_setup_vps_privileged_paths.py",
-    "scripts/tests/weekend_subscription_only_lib.py",
-    # Same family: it builds a miniature ~/radon-weekend under tmp_path with a
-    # web/node_modules and a web/.env inside it, to prove the prune's allowlist
-    # refuses both. Nothing it asserts reads the checkout's own web tree.
-    "scripts/tests/test_weekend_prune.py",
 }
 _DYNAMIC_WEB_READER_MODULES = {
     # Their tracked web paths live in parameter tables and are joined to ROOT
@@ -707,7 +702,7 @@ def _unread_docs() -> list[str]:
 
 
 @pytest.mark.parametrize(
-    "path", ["CLAUDE.md", ".claude/skills/security-nightly/SKILL.md", "AGENTS.md", "scripts/AGENTS.md"]
+    "path", ["CLAUDE.md", ".claude/skills/incident-response/SKILL.md", "AGENTS.md", "scripts/AGENTS.md"]
 )
 def test_agent_rails_fail_closed_to_both_gates(path: str) -> None:
     selection = select_gates([path])

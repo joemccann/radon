@@ -5,6 +5,7 @@ import importlib.util
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 
@@ -14,7 +15,6 @@ ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("nightly_pr_guard", ROOT / "scripts/nightly_pr_guard.py")
 mod = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(mod)
-WRAPPERS = ("security_nightly", "security_deepsec_nightly")
 
 
 @pytest.mark.parametrize("args", [
@@ -75,40 +75,33 @@ def test_fetch_failure_never_reaches_publication_check():
     assert len(calls) == 2
 
 
-@pytest.mark.parametrize("wrapper", WRAPPERS)
 @pytest.mark.parametrize("verdict", [0, 3, 1])
-def test_each_runner_installs_an_effective_guard(tmp_path, wrapper, verdict):
-    """Execute actual bash installer + gh shim, with a deterministic git oracle."""
-    source = (ROOT / f"scripts/{wrapper}.sh").read_text()
-    installer = source.split("install_nightly_pr_guard() {", 1)[1].split("\nlaunch_round() {", 1)[0]
-    installer = "install_nightly_pr_guard() {" + installer
-    assert "  install_nightly_pr_guard\n" in source
-    assert 'local PATH="$NIGHTLY_PR_GUARD_DIR:$PATH"' in source
+def test_the_installed_shim_routes_pr_creation_through_an_effective_guard(tmp_path, verdict):
+    """Execute the gh shim install.sh writes for a GH_GUARD=1 loop, over the
+    real guard, with a deterministic publication oracle."""
+    prefix = tmp_path / "prefix"
+    (prefix / "lib").mkdir(parents=True)
+    shutil.copy2(ROOT / "scripts" / "nightly_pr_guard.py", prefix / "lib" / "nightly_pr_guard.py")
+    (prefix / "lib" / "nightly_publish.py").write_text(f"raise SystemExit({verdict})\n")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     called = tmp_path / "called"
     gh = bin_dir / "real-gh"
     gh.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> {shlex.quote(str(called))}\n")
     gh.chmod(0o700)
-    # Trusted source is served by git-show, not by files in the checkout.
-    oracle = tmp_path / "nightly_publish.py"
-    oracle.write_text(f"raise SystemExit({verdict})\n")
     git = bin_dir / "git"
-    git.write_text(
-        "#!/bin/sh\ncase \"$*\" in\n"
-        f" *show*nightly_pr_guard.py*) cat {shlex.quote(str(ROOT / 'scripts/nightly_pr_guard.py'))} ;;\n"
-        f" *show*nightly_publish.py*) cat {shlex.quote(str(oracle))} ;;\n"
-        " *) exit 0 ;;\nesac\n"
-    )
+    git.write_text("#!/bin/sh\nexit 0\n")
     git.chmod(0o700)
-    (bin_dir / "python3.13").symlink_to(sys.executable)
-    driver = tmp_path / "driver.sh"
-    driver.write_text("set -euo pipefail\n" + installer + "\n" +
-        f"GH_BIN={shlex.quote(str(gh))}\nREPO={shlex.quote(str(tmp_path))}\nLOOP_SLUG=testing\n" +
-        "install_nightly_pr_guard\ntrap 'rm -rf -- \"$NIGHTLY_PR_GUARD_DIR\"' EXIT\n" +
-        'export PATH="$NIGHTLY_PR_GUARD_DIR:$PATH"\ngh pr checks 12\ngh pr create --base main --head testing/today\n')
-    env = {**os.environ, "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"]}
-    result = subprocess.run(["bash", str(driver)], env=env, capture_output=True, text=True, timeout=15)
+    env = {**os.environ, "RADON_RUNNER_PREFIX": str(prefix), "RADON_RUNNER_GH": str(gh),
+           "RADON_RUNNER_PYTHON": sys.executable}
+    shim = subprocess.run(["bash", str(ROOT / "scripts" / "runner" / "install.sh"), "--print-guard", "testing"],
+                          env=env, capture_output=True, text=True, check=True).stdout
+    (bin_dir / "gh").write_text(shim)
+    (bin_dir / "gh").chmod(0o700)
+    run_env = {**os.environ, "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"]}
+    subprocess.run([str(bin_dir / "gh"), "pr", "checks", "12"], env=run_env, check=True, timeout=15)
+    result = subprocess.run([str(bin_dir / "gh"), "pr", "create", "--base", "main", "--head", "testing/today"],
+                            env=run_env, capture_output=True, text=True, timeout=15)
     lines = called.read_text().splitlines()
     assert lines[0] == "pr checks 12"
     assert (result.returncode == 0) == (verdict == 0), result.stderr
@@ -157,7 +150,7 @@ def test_nightly_loops_never_merge(args):
     ["api", "--method", "PATCH", "repos/a/b/issues/1"], ["api", "-H", "Accept: x", "repos/a/b/issues", "-f", "title=x"],
 ])
 def test_security_loops_cannot_write_public_issues(loop, args):
-    with pytest.raises(mod.Refused, match="wrapper"):
+    with pytest.raises(mod.Refused, match="the runner posts the sanitized comment"):
         mod.guard(args, loop=loop)
 
 
@@ -192,7 +185,7 @@ def test_merge_is_refused_when_flag_values_precede_the_action(args):
     ["api", "-f", "body=x", "repos/o/r/issues/5/comments"],
 ])
 def test_security_issue_writes_are_refused_when_flag_values_precede_the_action(loop, args):
-    with pytest.raises(mod.Refused, match="wrapper"):
+    with pytest.raises(mod.Refused, match="the runner posts the sanitized comment"):
         mod.guard(args, loop=loop)
 
 
@@ -211,7 +204,7 @@ def test_merge_is_refused_with_a_query_suffix(args):
     ["api", "-f", "body=x", "repos/o/r/issues/5/comments?x=1"],
 ])
 def test_security_issue_writes_are_refused_with_a_query_suffix(loop, args):
-    with pytest.raises(mod.Refused, match="wrapper"):
+    with pytest.raises(mod.Refused, match="the runner posts the sanitized comment"):
         mod.guard(args, loop=loop)
 
 
