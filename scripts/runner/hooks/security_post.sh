@@ -53,6 +53,10 @@ DEADMAN_CREATE_BODY="Rolling dead-man for the nightly ${LOOP} loop. Sanitized st
 
 net_bounded() { "$TIMEOUT_BIN" "$NET_TIMEOUT_SECS" "$@"; }
 refuse_symlink() { [[ ! -L "$1" ]]; }
+protocol_value() {
+  local value="${1//$'\r'/}"
+  printf '%s' "${value%%$'\n'*}"
+}
 
 # --- status ------------------------------------------------------------------
 
@@ -348,22 +352,25 @@ prune_scratch() {
 }
 
 main() {
-  local pr
+  local pr status_line pr_line report_line
   decide
+  status_line="$(protocol_value "$STATUS")"
   # Printed first so the runner has a verdict even if a network step below
   # hangs past the hook's cap; the final status line supersedes it.
-  echo "status=$STATUS"
+  echo "status=$status_line"
   if [[ -z "${PHASE_STATUS:-}" ]]; then publish_private_report; else REPORT_URL=""; fi
   pr="$(resolve_pr_url)"
   report
   prune_scratch
+  pr_line="$(protocol_value "$pr")"
+  report_line="$(protocol_value "$REPORT_URL")"
   if [[ -n "$REPORT_URL" ]]; then
-    echo "status=$STATUS"
+    echo "status=$status_line"
   else
-    echo "status=$STATUS (no private report this phase)"
+    echo "status=${status_line} (no private report this phase)"
   fi
-  echo "pr_url=$pr"
-  echo "report_url=$REPORT_URL"
+  echo "pr_url=$pr_line"
+  echo "report_url=$report_line"
 }
 
 main

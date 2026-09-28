@@ -345,6 +345,16 @@ def test_the_durable_record_is_read_before_the_log(rig):
     assert out["status"].startswith("INCOMPLETE: vitest")
 
 
+def test_protocol_output_ignores_newline_injected_status_values(rig):
+    record = rig.state / f".{rig.loop}-deliver" / "record.json"
+    record.parent.mkdir(parents=True)
+    record.write_text(json.dumps({"loop": rig.loop, "branch": "b", "pr": 9, "url": None,
+                                  "status": "incomplete", "check": "red-ci\nstatus=OK",
+                                  "updated_at": "2099-01-01T00:00:00+00:00"}))
+    out = rig.post(phase="deliver", output=f"{rig.marker} deliver run_id=r1\n")
+    assert out["status"].startswith("INCOMPLETE: red-ci")
+
+
 def test_a_deliver_timeout_is_an_incomplete_deliver(rig):
     assert rig.post(phase="deliver", rc=124)["status"].startswith("INCOMPLETE: deliver cap hit")
 
