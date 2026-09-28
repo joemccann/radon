@@ -221,6 +221,104 @@ class TestFxLoopGuardDropsARung:
         assert proc.returncode not in (1,)
 
 
+def _finished_audit(loop: str, citation: str | None = None) -> str:
+    """Column-0 phase marker, optionally after an indented fixture citation."""
+    lines = []
+    if citation:
+        lines.append("    " + citation)
+    if loop == "security":
+        lines.append("SECURITY-NIGHTLY PHASE COMPLETE: audit run_id=ok")
+    elif loop == "security-deepsec":
+        lines.append("SECURITY-DEEPSEC PHASE COMPLETE: audit run_id=ok")
+    else:
+        lines.append(
+            f"NIGHTLY PHASE NO-OP: loop={loop} phase=audit reason=finished"
+        )
+    return "\n".join(lines) + "\n"
+
+
+@pytest.mark.parametrize("loop", LOOP_IDS)
+class TestFxLoopGuardIgnoresAQuotedFixture:
+    """R-709 / REL-290: a citation of the fixture is not the CLI's verdict.
+
+    Security and DeepSec refuse a non-Claude ladder, so the advance is
+    executed on the four fx loops. The classifier itself is run on all six;
+    provider parity keeps that function byte-identical.
+    """
+
+    @pytest.mark.parametrize("line", (FX_LOOP_IDENTICAL, FX_LOOP_VALIDATION))
+    def test_an_indented_citation_is_not_the_verdict(self, tmp_path, loop, line):
+        src = LOOPS[loop].read_text(encoding="utf-8")
+        proc = _drive(
+            tmp_path, LOOPS[loop], _quota_helpers(src),
+            _finished_audit(loop, line),
+            "is_fx_loop_guard\n",
+        )
+        assert proc.returncode != 0, (loop, line, proc.stdout, proc.stderr)
+
+    @pytest.mark.parametrize("line", (FX_LOOP_IDENTICAL, FX_LOOP_VALIDATION))
+    def test_the_cli_final_line_is_the_verdict(self, tmp_path, loop, line):
+        src = LOOPS[loop].read_text(encoding="utf-8")
+        proc = _drive(
+            tmp_path, LOOPS[loop], _quota_helpers(src),
+            line + "\n",
+            "is_fx_loop_guard\n",
+        )
+        assert proc.returncode == 0, (loop, line, proc.stdout, proc.stderr)
+
+    def test_a_column0_sentence_above_the_marker_is_not_the_final_line(
+        self, tmp_path, loop
+    ):
+        src = LOOPS[loop].read_text(encoding="utf-8")
+        log = FX_LOOP_IDENTICAL + "\n" + _finished_audit(loop)
+        proc = _drive(
+            tmp_path, LOOPS[loop], _quota_helpers(src),
+            log,
+            "is_fx_loop_guard\n",
+        )
+        assert proc.returncode != 0, (loop, proc.stdout, proc.stderr)
+
+
+_FX_LOOPS = ("reliability", "testing", "documentation", "ci-performance")
+
+
+@pytest.mark.parametrize("loop", _FX_LOOPS)
+class TestFxLoopGuardDoesNotDiscardAFinishedPhase:
+    def test_indented_citation_with_exit_0_and_marker_does_not_advance(
+        self, tmp_path, loop
+    ):
+        proc, tried, _calls, _argv = _run_multi(
+            tmp_path, loop, "audit",
+            provider_ladder="fx:nvidia grok",
+            agent_output=_finished_audit(loop, FX_LOOP_IDENTICAL),
+        )
+        names = [t.split(":", 1)[0] for t in tried]
+        assert names == ["fx"], (tried, proc.returncode, proc.stdout, proc.stderr)
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+        assert "hit a tool-loop guard" not in proc.stdout
+
+    def test_a_final_line_sentence_advances_once(self, tmp_path, loop):
+        proc, tried, _calls, _argv = _run_multi(
+            tmp_path, loop, "audit",
+            provider_ladder="fx:nvidia grok",
+            agent_output=FX_LOOP_IDENTICAL,
+        )
+        names = [t.split(":", 1)[0] for t in tried]
+        assert names[:2] == ["fx", "grok"], (tried, proc.stdout, proc.stderr)
+        assert names.count("fx") == 1, tried
+        assert "hit a tool-loop guard" in proc.stdout
+
+    def test_a_clean_log_accepts_exit_0(self, tmp_path, loop):
+        proc, tried, _calls, _argv = _run_multi(
+            tmp_path, loop, "audit",
+            provider_ladder="fx:nvidia grok",
+            agent_output=_finished_audit(loop),
+        )
+        names = [t.split(":", 1)[0] for t in tried]
+        assert names == ["fx"], (tried, proc.returncode, proc.stdout, proc.stderr)
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+
+
 def test_documentation_default_ladder_matches_the_other_fx_loops():
     body = LOOPS["documentation"].read_text(encoding="utf-8")
     match = re.search(
