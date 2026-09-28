@@ -1200,3 +1200,26 @@ class TestExternalProbeDispatchProcedure:
         assert "external-probe-dispatch.log" in plist
         assert "external-probe-dispatch.err" in plist
         assert "gh" in plist and "external-health-probe.yml" in plist
+
+
+class TestModelLadderByteCapOwner:
+    """DOC-144: vision HTTP responses share the text ladder's byte cap."""
+
+    def test_extract_via_vision_cap_is_owned(self):
+        rules = {r["id"]: r for r in _load_owners()["rules"]}
+        rule = rules["model-ladder"]
+        assert rule["globs"] == ["scripts/clients/model_ladder.py"]
+        assert rule["owners"] == ["docs/dropbox-research.md"]
+        doc = (_ROOT / "docs/dropbox-research.md").read_text(encoding="utf-8")
+        ladder = doc.split("### Model ladder (shared HTTP)", 1)[1].split(
+            "### Verified host placement", 1
+        )[0]
+        assert "extract_via_vision" in ladder
+        assert "2,000,000" in ladder
+        assert "Antigravity" in ladder
+        source = (_ROOT / "scripts/clients/model_ladder.py").read_text(encoding="utf-8")
+        vision = source.split("def extract_via_vision(", 1)[1].split("\ndef ", 1)[0]
+        assert "max_response_bytes: int = 2_000_000" in vision
+        call = source.split("def _call_vision_provider(", 1)[1].split("\ndef ", 1)[0]
+        assert call.count("max_bytes=max_response_bytes") == 6
+        assert "_antigravity_complete" in call
