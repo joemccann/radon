@@ -28,6 +28,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Topic | Doc |
 |-------|-----|
 | Background services, watchdogs, env | [`docs/operations.md`](operations.md) |
+| Nightly agent runner (one clone, one prompt, one session) | [`docs/runner.md`](runner.md) |
 | Cloud architecture, Turso, two-mode deploy | [`docs/cloud-services.md`](cloud-services.md) |
 | Production network topology (app / broker split) | [`docs/spof-host-split.md`](spof-host-split.md) · [`docs/radon-network-topology.png`](radon-network-topology.png) |
 | Retired beta.radon.run (do not recreate) | [`docs/cloud-services.md`](cloud-services.md#retired-betaradonrun-2026-08-20) |
