@@ -14,6 +14,10 @@
 # $RUNNER_DIR/lib, run with an isolated interpreter.
 set -uo pipefail
 
+# Restrict command lookup to trusted system directories.
+# Prevent PATH hijacking from agent-writable locations.
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
+
 : "${LOOP:?}" "${PHASE:?}" "${WORK:?}" "${LOOP_STATE:?}" "${RUNNER_DIR:?}"
 PHASE_RC="${PHASE_RC:-0}"
 PHASE_LOG="${PHASE_LOG:-/dev/null}"
