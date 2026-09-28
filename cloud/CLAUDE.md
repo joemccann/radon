@@ -477,6 +477,15 @@ Auto-sync stays off. `cloud/tests/test_knowledge_eval_setup.py` pins
 the inventory-and-skip. Contract:
 [`docs/knowledge-embeddings.md`](../docs/knowledge-embeddings.md).
 
+`setup-vps.sh` inventories `radon-grok-upgrade.{service,timer}` and
+`enable_services` enables both. Daily 07:40 UTC. The oneshot side-installs
+the latest stable Grok CLI, smokes it, and auto-promotes on pass (writes
+`/var/lib/radon/grok_lkg.json`). A failed smoke stays on last-known-good
+and pages via Pushover plus the unit watchdog. The job heartbeats
+`service_health` as `grok-upgrade` (26h daily window). Contract:
+[`docs/grok-page-responder.md`](../docs/grok-page-responder.md).
+`cloud/tests/test_grok_upgrade_setup.py` pins the inventory-and-enable.
+
 
 Canonical unit files are copied root-owned to `/etc/systemd/system`; they are
 not symlinked from the checkout.

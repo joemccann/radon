@@ -315,6 +315,8 @@ class TestGrokPromptAndPlaybook:
         assert "Never merge" in prompt or "never merge" in prompt
         assert "Never `git push origin main`" in prompt
         assert "then `git push origin main`" not in prompt
+        assert "## What broke" in prompt
+        assert "Pickup opens the PR from this body" in prompt
 
     def test_skill_ships_via_fix_branch_and_ensure_pr(self):
         text = SKILL.read_text(encoding="utf-8")
