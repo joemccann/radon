@@ -10635,3 +10635,10 @@ Provision `TURSO_DEMO_DB_URL` and `TURSO_DEMO_APP_DB_URL` for repository CI. The
 ### T-488 — operator-only
 
 Reproduce the deploy helper timeout and TERM child cleanup on Linux CI without widening the fixed timeout. Three fixture attempts are already recorded. This host's bash 3.2 `services[@]` errors and the absent `caddy` binary are not that item.
+
+
+### T-513 — DONE
+
+`scripts/tests/test_fx_stable_sync.py` copied whatever was at `~/.local/bin/fx`. On this host that binary is ad-hoc signed (`Identifier=fx-…`, `Signature=adhoc`), and `scripts/fx_stable_sync.sh` correctly refused it, so the test failed. The separate-file assertion now uses a fixture that a codesign double accepts only when `--verify --strict` and the Vercel requirement (`com.vercel.fx`, team `JW6Y669B67`) are both present. The host binary is used only when `/usr/bin/codesign` accepts that requirement. `RADON_FX_CODESIGN` is unset in the launchd job, whose environment is PATH and HOME.
+
+Red: the host-binary test failed with `REFUSED` (1 failed). The controlled sample against the old hardcoded `/usr/bin/codesign` also failed with `REFUSED` (1 failed). Green: 11 passed, 1 skipped (no Vercel-signed host binary). The unsigned-binary refusal test still fails closed.

@@ -1050,3 +1050,4 @@ Reduced scope was P0/P1. T-130 and T-488 remain operator-only. P2 findings T-493
 | T-511 | DONE | Degraded branch forced off: 1 failed (`ok` instead of `degraded`). Heal call forced off: 1 failed (empty statement list). Restored source: 16 passed across the budget, gap-heal, and liquidcompute visibility tests. |
 | T-130 | operator-only | Provision `TURSO_DEMO_DB_URL` and `TURSO_DEMO_APP_DB_URL` for repository CI. The wiring half is already done; do not make the guard unconditional without those secrets. |
 | T-488 | operator-only | Reproduce the deploy helper timeout and TERM child cleanup on Linux CI without widening the fixed timeout. |
+| T-513 | DONE | Host `~/.local/bin/fx` is ad-hoc signed: 1 failed with `REFUSED`. Controlled fixture before the codesign seam: 1 failed with `REFUSED`. After the seam: 11 passed, 1 skipped. Unsigned refusal still fails closed. |
