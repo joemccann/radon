@@ -1624,6 +1624,7 @@ for path in paths:
         self, tmp_path: Path
     ) -> None:
         late_mutation = tmp_path / "late-mutation"
+        child_started = tmp_path / "child-started"
         fake_systemctl = tmp_path / "systemctl"
         _write_executable(
             fake_systemctl,
@@ -1631,13 +1632,30 @@ for path in paths:
 import signal
 import subprocess
 import sys
-if len(sys.argv) > 1 and sys.argv[1] == "list-jobs":
+from pathlib import Path
+args = [arg for arg in sys.argv[1:] if arg != "--no-block"]
+if args[0] == "list-jobs":
     raise SystemExit(0)
+if args[0] in ("list-unit-files", "list-units"):
+    for unit in {MANAGED_SERVICES!r}:
+        print(unit, "enabled")
+    raise SystemExit(0)
+if args[0] == "show":
+    if "--property=Type" in args:
+        print("simple")
+    elif args[1] == "radon-ib-gateway-preheld-restart.service":
+        print("inactive")
+    else:
+        print("active")
+    raise SystemExit(0)
+if args[0] != "stop":
+    raise SystemExit(2)
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
 child = subprocess.Popen([
     sys.executable, "-c",
     "import time; time.sleep(3); open({str(late_mutation)!r}, 'w').write('late')",
 ])
+Path({str(child_started)!r}).touch()
 child.wait()
 """,
         )
@@ -1664,6 +1682,7 @@ child.wait()
             timeout=5,
         )
         assert result.returncode in {124, 137}
+        assert child_started.exists(), result.stdout + result.stderr
         time.sleep(2)
         assert not late_mutation.exists(), "timed-out root descendant mutated state later"
 
