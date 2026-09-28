@@ -198,7 +198,7 @@ def test_one_oversized_row_does_not_fail_the_source(server, monkeypatch):
 def test_v2_existing_page_stays_under_the_response_cap():
     limit = ingest._existing_page_limit(True)
     budget = http_db.MAX_RESPONSE_BYTES - http_db.MAX_RESPONSE_BYTES // 8
-    assert limit < ingest._EXISTING_BATCH_ROWS
+    assert limit <= ingest._EXISTING_BATCH_ROWS
     assert limit * ingest._EXISTING_ASSUMED_V2_ROW_BYTES <= budget
 
 

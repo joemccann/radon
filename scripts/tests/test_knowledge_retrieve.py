@@ -32,7 +32,6 @@ from knowledge.retrieve import (  # noqa: E402
     NEIGHBOR_SPAN,
     RECENCY_HALF_LIFE_DAYS,
     RRF_K,
-    VECTOR_FILTER_OVERFETCH,
     cap_per_source,
     dedup_best_chunk,
     hybrid_search,
@@ -466,7 +465,6 @@ class TestDefaultHybridSearchUnchanged:
         assert RECENCY_HALF_LIFE_DAYS == {"newsfeed": 7.0, "incidents": 14.0}
         assert MIN_RECENCY_FACTOR == 0.05
         assert CANDIDATE_POOL == 50
-        assert VECTOR_FILTER_OVERFETCH == 4
         assert MAX_PER_SOURCE == 3
         assert NEIGHBOR_SPAN == 1
 

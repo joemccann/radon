@@ -29,6 +29,7 @@ from knowledge.store import upsert_documents  # noqa: E402
 _MIGRATION = _SCRIPTS / "db" / "migrations" / "0028_knowledge.sql"
 _MIGRATION_V2 = _SCRIPTS / "db" / "migrations" / "0087_knowledge_embedding_v2.sql"
 _MIGRATION_DROP = _SCRIPTS / "db" / "migrations" / "0089_drop_knowledge_embedding_v2_index.sql"
+_MIGRATION_DROP_V1 = _SCRIPTS / "db" / "migrations" / "0090_drop_knowledge_embedding_index.sql"
 _BOOTSTRAP = (
     "CREATE TABLE IF NOT EXISTS schema_migrations "
     "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
@@ -228,7 +229,7 @@ def test_local_backend_does_not_call_nvidia(monkeypatch):
     assert vector == [1.0] * EMBEDDING_DIM
 
 
-def test_vector_search_picks_exact_cosine_for_2048_and_ann_for_384():
+def test_vector_search_uses_exact_cosine_for_both_dimensions():
     class _Db:
         def __init__(self):
             self.sql = []
@@ -254,9 +255,43 @@ def test_vector_search_picks_exact_cosine_for_2048_and_ann_for_384():
     assert wide.args[0][-1] == 4
     assert json.loads(wide.args[0][-2]) == [0.0] * EMBEDDING_DIM_V2
     narrow = _Db()
-    _vector_top_k_search(narrow, [0.0] * EMBEDDING_DIM, 4)
-    assert "vector_top_k('idx_knowledge_embedding'" in narrow.sql[0]
+    _vector_top_k_search(narrow, [0.0] * EMBEDDING_DIM, 4, scopes=["ops"])
+    assert "vector_top_k" not in narrow.sql[0]
     assert "embedding_v2" not in narrow.sql[0]
+    assert "embedding IS NOT NULL" in narrow.sql[0]
+    assert "ORDER BY vector_distance_cos(embedding, vector32(?))" in narrow.sql[0]
+    assert "knowledge.scope IN (?)" in narrow.sql[0]
+    assert narrow.args[0][0] == "ops"
+    assert narrow.args[0][-1] == 4
+    with pytest.raises(ValueError):
+        _vector_top_k_search(narrow, [0.0] * EMBEDDING_DIM, 4, index_name="bogus")
+
+
+def test_migration_0090_drops_the_384_index_and_384_search_still_ranks():
+    """Each DiskANN row update took 10-26s on a radon fork (2026-09-28) and
+    held the single writer, so every other Turso writer timed out."""
+    drop = _MIGRATION_DROP_V1.read_text(encoding="utf-8")
+    assert "DROP INDEX IF EXISTS idx_knowledge_embedding;" in drop
+    assert "-- radon-migrate: manual" in drop
+    assert "VALUES (90," in drop
+    assert "CREATE INDEX" not in drop
+    db = _db()
+    close = [1.0] + [0.0] * (EMBEDDING_DIM - 1)
+    far = [0.0, 1.0] + [0.0] * (EMBEDDING_DIM - 2)
+    upsert_documents(db, [
+        KnowledgeDoc(source="docs", scope="ops", doc_key="far", content="beta", embedding=far),
+        KnowledgeDoc(source="docs", scope="ops", doc_key="close", content="alpha", embedding=close),
+        KnowledgeDoc(source="docs", scope="ops", doc_key="none", content="gamma"),
+    ])
+    for _ in range(2):
+        for stmt in _split(drop):
+            db.execute(stmt)
+        db.commit()
+    names = {row[0] for row in db.execute("SELECT name FROM sqlite_master").fetchall()}
+    assert "idx_knowledge_embedding" not in names
+    ids = _vector_top_k_search(db, close, 5, scopes=["ops"])
+    keys = [db.execute("SELECT doc_key FROM knowledge WHERE id = ?", (i,)).fetchone()[0] for i in ids]
+    assert keys == ["close", "far"]
 
 
 def test_migration_0087_creates_the_index_and_0089_drops_it():

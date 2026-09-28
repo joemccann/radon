@@ -6462,9 +6462,9 @@ def _knowledge_search_in_thread(
                 raise
             if query_embedding is not None:
                 # The vector statement is what blows the Hrana bound under load.
-                # 384-d vector_top_k is 0.3-1.6s normally and >4s on a cold
-                # host (2026-08-30 03:05Z post-deploy 503s). 2048-d exact
-                # cosine scan is about 1s p50 / 1.8s p95. Retry without the
+                # Both legs are exact cosine scans since 0089/0090; 2048-d is
+                # about 1s p50 / 1.8s p95 and a cold host has exceeded 4s
+                # (2026-08-30 03:05Z post-deploy 503s). Retry without the
                 # leg that just timed out rather than re-running it.
                 logger.warning("knowledge: hybrid retrieval timed out; retrying FTS-only")
                 query_embedding = None

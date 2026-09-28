@@ -30,7 +30,10 @@ root cause: unbounded I/O over the direct-to-cloud HTTP pipeline. Rules:
 
 1. **Paginate large reads on an id cursor** (`WHERE id > ? ORDER BY id LIMIT 200`).
    One SELECT of thousands of rows with text payloads 502s ("upstream forward
-   failed") and, once degraded, keeps 502ing for hours.
+   failed") and, once degraded, keeps 502ing for hours. If no index covers
+   `(filter, id)`, page ids first (`WHERE id IN (SELECT id ... ORDER BY id
+   LIMIT ?)`): otherwise SQLite sorts every matching full row per page
+   (knowledge newsfeed: 25s vs 0.08s, 2026-09-28).
 2. **`executemany` is one round-trip PER ROW over Hrana.** Bulk writes must be
    chunked multi-row `INSERT ... VALUES (...), (...)` statements (~400 rows,
    params well under the variable limit). Exemplar:
