@@ -253,6 +253,16 @@ force-push `main`.
 
 ## Mode: audit
 
+**Pre-computed context.** Read `~/radon-weekend/.ci-performance-nightly-scratch/audit-context.md`
+first. The wrapper writes it before the audit phase and deletes it before
+every other phase: HEAD, the verified base (the newest `audited-through:` marker on the rolling issue), the rolling
+issue and its newest checkpoint comment, the commit list, per-commit
+`--stat`, and the diff with generated paths excluded. When its `head:`
+equals `git rev-parse HEAD` and `base:` is a SHA, take step 2 from it
+instead of re-running `gh issue`, `git log`, `git diff` or per-commit
+`git show`. Run git only for a path it lists as omitted or for code
+outside the diff. `base: UNRESOLVED` or no file: compute the range as below.
+
 Goal: identify the current critical-path bottleneck and produce a ranked,
 evidence-backed optimization candidate.
 
