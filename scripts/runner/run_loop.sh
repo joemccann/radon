@@ -361,9 +361,14 @@ notify() {
   local title="$1" message="$2" url="${3:-}" url_title="${4:-}"
   log "$title: $message ${url}"
   [[ -n "${PUSHOVER_USER:-}" && -n "${PUSHOVER_TOKEN:-}" ]] || return 0
-  curl -fsS -m 20 --form-string "token=$PUSHOVER_TOKEN" --form-string "user=$PUSHOVER_USER" \
-    --form-string "title=$title" --form-string "message=$message" \
-    ${url:+--form-string "url=$url"} ${url_title:+--form-string "url_title=$url_title"} \
+  {
+    printf '%s\n' "--form-string" "token=$PUSHOVER_TOKEN"
+    printf '%s\n' "--form-string" "user=$PUSHOVER_USER"
+    printf '%s\n' "--form-string" "title=$title"
+    printf '%s\n' "--form-string" "message=$message"
+    [[ -n "$url" ]] && printf '%s\n' "--form-string" "url=$url"
+    [[ -n "$url_title" ]] && printf '%s\n' "--form-string" "url_title=$url_title"
+  } | /usr/bin/curl -q -fsS -m 20 --config - \
     https://api.pushover.net/1/messages.json >/dev/null 2>&1 || true
 }
 
