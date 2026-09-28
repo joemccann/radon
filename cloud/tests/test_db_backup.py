@@ -5,8 +5,9 @@ import io
 import pathlib
 import re
 import sqlite3
-import time
 import sys
+import time
+import types
 
 import pytest
 
@@ -319,6 +320,183 @@ class TestRel185LocalRetentionValve:
     def test_non_dump_files_never_counted_or_pruned(self):
         entries = self._aged_entries(5) + [("stray.txt", 0.0)] * 40
         assert db_backup.select_hard_valve(entries) == []
+
+
+_STREAM_NOT_FOUND = (
+    'Hrana: `api error: `status=404 Not Found, '
+    'body={"error":"stream not found: b4866f02:2ef17"}`'
+)
+
+
+class _StreamNotFound(ValueError):
+    def __init__(self):
+        super().__init__(_STREAM_NOT_FOUND)
+
+
+class _DeadStreamDb(_FakeDb):
+    """The production libsql handle: once the server drops the Hrana stream,
+    every later page on THIS object 404s. Recovery has to be a new object."""
+
+    def __init__(self, conn):
+        super().__init__(conn)
+        self.pages = 0
+
+    def execute(self, sql, params=()):
+        if "rowid >" in sql:
+            self.pages += 1
+            raise _StreamNotFound()
+        return super().execute(sql, params)
+
+
+class _OnePageThenDeadDb(_FakeDb):
+    """Serves a single keyset page, then the stream 404s. A fresh instance
+    starts that budget over, which is what a new libsql connection does."""
+
+    def __init__(self, conn):
+        super().__init__(conn)
+        self.pages = 0
+
+    def execute(self, sql, params=()):
+        if "rowid >" in sql:
+            self.pages += 1
+            if self.pages > 1:
+                raise _StreamNotFound()
+        return super().execute(sql, params)
+
+
+def _reopen_factory(conn, cls, opened: list):
+    def reopen():
+        fresh = cls(conn)
+        opened.append(fresh)
+        return fresh
+
+    return reopen
+
+
+class TestTransientHranaStreamRetry:
+    """Page 4076d7d9: radon-db-backup.service held one Hrana stream for the
+    whole dump. ~10 min in, the next page of ai_cycle_observations raised
+    ValueError `stream not found` and the oneshot exited 1. The rows already
+    written must not be replayed, and the dead singleton must not be reused."""
+
+    def test_stream_not_found_mid_table_resumes_on_a_fresh_connection(self):
+        src = _make_source_db()
+        opened: list = []
+        out = io.StringIO()
+        stats = db_backup.dump_database(
+            _DeadStreamDb(src),
+            out,
+            batch_size=1,
+            reconnect=_reopen_factory(src, _FakeDb, opened),
+            sleep=lambda _delay: None,
+        )
+
+        assert opened, "retry reused the dead stream instead of opening a fresh one"
+        assert stats == {"tables": 2, "rows": 3}
+        assert out.getvalue().count('INSERT INTO "journal"') == 2
+
+    def test_later_pages_get_a_fresh_attempt_budget(self):
+        src = _make_source_db()
+        src.execute("INSERT INTO journal (ticker, note, qty) VALUES ('NVDA', 'x', 1)")
+        src.execute("INSERT INTO journal (ticker, note, qty) VALUES ('AMD', 'y', 1)")
+        src.commit()
+        opened: list = []
+        out = io.StringIO()
+        stats = db_backup.dump_database(
+            _OnePageThenDeadDb(src),
+            out,
+            batch_size=1,
+            reconnect=_reopen_factory(src, _OnePageThenDeadDb, opened),
+            sleep=lambda _delay: None,
+        )
+
+        assert stats["rows"] == 5
+        assert out.getvalue().count('INSERT INTO "journal"') == 4
+        assert len(opened) >= 2
+
+    def test_persistent_stream_not_found_still_fails_without_replaying_rows(self):
+        src = _make_source_db()
+        opened: list = []
+        out = io.StringIO()
+        with pytest.raises(ValueError, match="stream not found"):
+            db_backup.dump_database(
+                _DeadStreamDb(src),
+                out,
+                batch_size=1,
+                reconnect=_reopen_factory(src, _DeadStreamDb, opened),
+                sleep=lambda _delay: None,
+            )
+        assert len(opened) == db_backup.DB_STREAM_ATTEMPTS - 1
+        assert out.getvalue().count('INSERT INTO "journal"') == 1
+
+    def test_non_transient_page_error_is_not_retried(self):
+        src = _make_source_db()
+        opened: list = []
+        out = io.StringIO()
+        with pytest.raises(RuntimeError, match="late page failure"):
+            db_backup.dump_database(
+                _LatePageFailureDb(src),
+                out,
+                batch_size=1,
+                reconnect=_reopen_factory(src, _FakeDb, opened),
+                sleep=lambda _delay: None,
+            )
+        assert opened == []
+        assert out.getvalue().count('INSERT INTO "journal"') == 1
+
+    def test_run_backup_resumes_through_reopen_cloud_db(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(db_backup, "BACKUP_DIR", tmp_path)
+        for key in (
+            "RADON_ARCHIVE_S3_ENDPOINT",
+            "RADON_ARCHIVE_S3_BUCKET",
+            "RADON_ARCHIVE_S3_ACCESS_KEY_ID",
+            "RADON_ARCHIVE_S3_SECRET_ACCESS_KEY",
+            "RADON_DB_BACKUP_S3_ENDPOINT",
+            "RADON_DB_BACKUP_S3_BUCKET",
+            "RADON_DB_BACKUP_S3_ACCESS_KEY_ID",
+            "RADON_DB_BACKUP_S3_SECRET_ACCESS_KEY",
+        ):
+            monkeypatch.delenv(key, raising=False)
+        src = _make_source_db()
+        opened: list = []
+
+        class _DieOnServiceHealth(_FakeDb):
+            def execute(self, sql, params=()):
+                if 'FROM "service_health"' in sql:
+                    raise _StreamNotFound()
+                return super().execute(sql, params)
+
+        monkeypatch.setattr(db_backup, "_open_cloud_db", lambda: _DieOnServiceHealth(src))
+        monkeypatch.setattr(
+            db_backup, "_reopen_cloud_db", _reopen_factory(src, _FakeDb, opened)
+        )
+
+        detail = db_backup.run_backup()
+
+        assert opened, "run_backup retried on the dead singleton"
+        assert detail["rows"] == 3
+        dumps = list(tmp_path.glob("*.sql.gz"))
+        assert len(dumps) == 1
+
+
+def test_reopen_cloud_db_resets_the_singleton_before_connecting(monkeypatch):
+    order: list[str] = []
+    sentinel = object()
+    fake = types.ModuleType("scripts.db.client")
+
+    def reset_connection():
+        order.append("reset")
+
+    def get_db():
+        order.append("get")
+        return sentinel
+
+    fake.reset_connection = reset_connection
+    fake.get_db = get_db
+    monkeypatch.setitem(sys.modules, "scripts.db.client", fake)
+
+    assert db_backup._reopen_cloud_db() is sentinel
+    assert order == ["reset", "get"]
 
 
 def test_vector_indexes_are_not_portable_dump_objects():
