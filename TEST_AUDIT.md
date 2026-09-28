@@ -10616,3 +10616,25 @@ Delta to the resolved T-491 environment-variable isolation issue: this change in
 `scripts/tests/test_model_ladder.py:411-416` passes env={} as if it means no credentials, but `scripts/clients/model_ladder.py:215-217,283-302` resolves the real home directory and reads .codex/auth.json. The new prepaid-only cases at test lines 684-714 have the same dependency. Full gate reports 15 failures in the blast radius: model-ladder 5, research-runtime 7, vision-cascade 3. The sibling no-key/env-only assumptions appear at scripts/tests/test_research_runtime.py:62-87 and scripts/tests/test_vision_cascade.py:191-201,365,420. The same 15 failures reproduce in all three delta rounds and separately in each file (5/7/3 failures). A scratch-only ambient-auth guard makes the same files 117 passed; no repository test was changed. Read-only existing-test probe with a synthetic home proves both directions: empty synthetic home PASS; adding a fake .codex/auth.json with a canary access_token makes the unchanged no-key test FAIL AssertionError. Its must_not_post fake prevented any network call. This can change provider ordering and feed operator credentials into test doubles on authenticated workstations.
 
 Acceptance: isolate credential-file discovery across all three affected modules, opt in only to per-test synthetic subscription files, and run the file with canary credentials present/absent outside its sandbox. Both outer environments must produce identical results; explicit subscription-precedence tests must still execute. No real credential values should enter captured headers or logs.
+
+
+## Remediation 2026-09-27
+
+Reduced scope: P0 and P1 only. No P0 was open. The 2026-09-26 checkpoint (`audited-through: 3cc3d84a`) left four P1s. T-511 and T-513 are source-actionable. T-130 and T-488 stay operator-only. P2 findings T-493, T-495, T-510, and T-512 were outside this rung.
+
+### T-511 — DONE
+
+`scripts/tests/test_rel257_flex_budget.py`, `scripts/tests/test_rel257_liquidcompute_atomic.py`, and `scripts/tests/test_rel289_twr_gap_heal.py` skipped before a degraded heartbeat or a heal call. Those cases now run `flex_sftp_pull.run`, apply one statement, then exhaust the sweep budget.
+
+Red: with the degraded branch forced off, `test_consecutive_budget_runs_write_degraded` saw `ok` instead of `degraded` (1 failed). With the heal call forced off, `test_heal_twr_coverage_gaps_called_even_when_budget_spent` saw an empty call list (1 failed). Green, source restored: 16 passed across those three modules.
+
+T-130 stays operator-only. Provision `TURSO_DEMO_DB_URL` and `TURSO_DEMO_APP_DB_URL` for repository CI. The wiring half is already recorded done. An unconditional isolation run stays red until those secrets exist.
+
+T-488 stays operator-only. Reproduce the deploy helper timeout and TERM child cleanup on Linux CI without widening the fixed timeout. Three fixture attempts are already recorded. This host's bash 3.2 `services[@]` errors and the absent `caddy` binary are not that item.
+
+
+### T-513 — DONE
+
+`scripts/tests/test_fx_stable_sync.py` copied whatever was at `~/.local/bin/fx`. On this host that binary is ad-hoc signed (`Identifier=fx-…`, `Signature=adhoc`), and `scripts/fx_stable_sync.sh` correctly refused it, so the test failed. The separate-file assertion now uses a fixture that a codesign double accepts only when `--verify --strict` and the Vercel requirement (`com.vercel.fx`, team `JW6Y669B67`) are both present. The host binary is used only when `/usr/bin/codesign` accepts that requirement. `RADON_FX_CODESIGN` is unset in the launchd job, whose environment is PATH and HOME.
+
+Red: the host-binary test failed with `REFUSED` (1 failed). The controlled sample against the old hardcoded `/usr/bin/codesign` also failed with `REFUSED` (1 failed). Green: 11 passed, 1 skipped (no Vercel-signed host binary). The unsigned-binary refusal test still fails closed.
