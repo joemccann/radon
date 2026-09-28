@@ -625,12 +625,13 @@ stop_release_consumers() {
     if [[ "$unit" == *.timer ]]; then timers+=("$unit"); else services+=("$unit"); fi
   done < "$INVENTORY_FILE"
   (( ${#timers[@]} == 0 )) || stop_inventory_units "${timers[@]}"
-  for unit in "${timers[@]}"; do
+  # bash 3.2 + set -u: an empty array is unbound. The child uses #!/bin/bash.
+  for unit in ${timers[@]+"${timers[@]}"}; do
     wait_for_unit_state "$unit" inactive || return $?
   done
   wait_for_preheld_restart
   (( ${#services[@]} == 0 )) || stop_inventory_units "${services[@]}"
-  for unit in "${services[@]}"; do
+  for unit in ${services[@]+"${services[@]}"}; do
     wait_for_unit_state "$unit" inactive || return $?
   done
   wait_for_preheld_restart
@@ -700,11 +701,12 @@ resume_active_snapshot() {
     if [[ "$type" == timer ]]; then timers+=("$unit"); else services+=("$unit"); fi
   done < "$ACTIVE_STATE_FILE"
   (( ${#services[@]} == 0 )) || systemctl_bounded --no-block start "${services[@]}"
-  for unit in "${services[@]}"; do
+  # bash 3.2 + set -u: an empty array is unbound. The child uses #!/bin/bash.
+  for unit in ${services[@]+"${services[@]}"}; do
     wait_for_unit_state "$unit" active || return $?
   done
   (( ${#timers[@]} == 0 )) || systemctl_bounded --no-block start "${timers[@]}"
-  for unit in "${timers[@]}"; do
+  for unit in ${timers[@]+"${timers[@]}"}; do
     wait_for_unit_state "$unit" active || return $?
   done
   # Only the interrupted backup is replay-safe: publication is atomic and
