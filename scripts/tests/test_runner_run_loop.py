@@ -6,6 +6,7 @@ CLI, gh and curl stubbed on PATH. Stubs record argv, cwd, env and stdin.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -35,9 +36,23 @@ printf '%s\\n' "$*" >> "$CALLS/gh.argv"
 case "$*" in "pr list"*) echo "{PR_URL}" ;; esac
 """
 CURL_STUB = """#!/bin/bash
-printf '%s\\n' "$@" >> "$CALLS/curl"
+printf '%s\\n' "$@" >> "$CALLS/curl.argv"
+echo --- >> "$CALLS/curl.argv"
+cat >> "$CALLS/curl"
 echo --- >> "$CALLS/curl"
 """
+
+
+def _curl_config_value(raw):
+    out, i = [], 0
+    while i < len(raw):
+        if raw[i] == "\\" and i + 1 < len(raw):
+            out.append({"n": "\n", "r": "\r", "t": "\t"}.get(raw[i + 1], raw[i + 1]))
+            i += 2
+        else:
+            out.append(raw[i])
+            i += 1
+    return "".join(out)
 
 
 def _git(*args, cwd):
@@ -84,6 +99,7 @@ def rig(tmp_path):
 
         def env(self, **stub_env):
             return {"PATH": f"{bin_dir}:{os.environ['PATH']}", "HOME": str(home), "CALLS": str(calls),
+                    "RADON_RUNNER_CURL": str(bin_dir / "curl"),
                     "RADON_RUNNER_RETRY_PAUSE": "0", "RADON_RUNNER_PYTHON": sys.executable, **stub_env}
 
         def run(self, **stub_env):
@@ -101,8 +117,21 @@ def rig(tmp_path):
         def notifications(self):
             path = calls / "curl"
             pages = path.read_text().split("---\n") if path.exists() else []
-            return [{a.split("=", 1)[0]: a.split("=", 1)[1] for a in page.splitlines()
-                     if "=" in a and not a.startswith("http")} for page in pages if page.strip()]
+            parsed = []
+            for page in pages:
+                fields = {}
+                for line in page.splitlines():
+                    m = re.fullmatch(r'form-string = "(.*)"', line)
+                    if m:
+                        key, _, value = _curl_config_value(m.group(1)).partition("=")
+                        fields[key] = value
+                if fields:
+                    parsed.append(fields)
+            return parsed
+
+        def curl_argv(self):
+            path = calls / "curl.argv"
+            return path.read_text() if path.exists() else ""
 
         def notification(self):
             return self.notifications()[-1]
@@ -164,6 +193,22 @@ def test_agent_never_sees_the_notification_credentials(rig):
     env = (rig.calls / "grok.env").read_text()
     assert "t-dummy" not in env and "u-dummy" not in env
     assert "GH_TOKEN=gh-dummy" in env
+
+
+def test_pushover_credentials_stay_off_the_curl_command_line(rig):
+    rig.configure()
+    rig.run()
+    page = rig.notification()
+    assert page["token"] == "t-dummy" and page["user"] == "u-dummy"
+    argv = rig.curl_argv()
+    assert "t-dummy" not in argv and "u-dummy" not in argv
+    assert "--config" in argv and "-q" in argv.splitlines()[0]
+
+
+def test_a_quote_or_newline_in_a_page_cannot_break_the_curl_config(rig):
+    rig.configure()
+    rig.run(STUB_GROK='echo "RESULT: said \\"hi\\" \\\\ ok"; exit 0')
+    assert rig.notification()["message"] == 'RESULT: said "hi" \\ ok'
 
 
 def test_a_failing_agent_falls_through_to_the_next(rig):

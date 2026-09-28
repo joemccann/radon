@@ -24,6 +24,7 @@ PHASE=""
 # The runner, its hooks and helpers resolve binaries only from root- or
 # admin-owned directories; the bot's own CLI dirs go on the agent's PATH alone.
 RUNNER_PATH="${RADON_RUNNER_PATH:-/opt/homebrew/bin:/usr/bin:/bin}"
+CURL_BIN="${RADON_RUNNER_CURL:-/usr/bin/curl}"
 AGENT_PATH_PREFIX="$HOME/.local/bin:$HOME/.grok/bin:$HOME/.bun/bin"
 # Every git the runner, its hooks and the agent run reads the root-owned
 # config install.sh writes, never the bot-writable ~/.gitconfig.
@@ -357,18 +358,28 @@ find_pr() {
     --jq '[.[]|select(.isCrossRepository==false)][0].url // empty' 2>/dev/null)
 }
 
+# One curl config line, form-string = "key=value", with backslash, double quote,
+# CR and LF escaped so a value can neither end the string nor add an option.
+curl_field() {
+  local v="$2"
+  v="${v//\\/\\\\}"; v="${v//\"/\\\"}"; v="${v//$'\n'/\\n}"; v="${v//$'\r'/\\r}"
+  printf 'form-string = "%s=%s"\n' "$1" "$v"
+}
+
+# Credentials reach curl as a config on stdin, never on its argv (ps shows argv
+# to every local user); -q first so no curlrc is read.
 notify() {
   local title="$1" message="$2" url="${3:-}" url_title="${4:-}"
   log "$title: $message ${url}"
   [[ -n "${PUSHOVER_USER:-}" && -n "${PUSHOVER_TOKEN:-}" ]] || return 0
   {
-    printf '%s\n' "--form-string" "token=$PUSHOVER_TOKEN"
-    printf '%s\n' "--form-string" "user=$PUSHOVER_USER"
-    printf '%s\n' "--form-string" "title=$title"
-    printf '%s\n' "--form-string" "message=$message"
-    [[ -n "$url" ]] && printf '%s\n' "--form-string" "url=$url"
-    [[ -n "$url_title" ]] && printf '%s\n' "--form-string" "url_title=$url_title"
-  } | /usr/bin/curl -q -fsS -m 20 --config - \
+    curl_field token "$PUSHOVER_TOKEN"
+    curl_field user "$PUSHOVER_USER"
+    curl_field title "$title"
+    curl_field message "$message"
+    [[ -z "$url" ]] || curl_field url "$url"
+    [[ -z "$url_title" ]] || curl_field url_title "$url_title"
+  } | "$CURL_BIN" -q -fsS -m 20 --config - \
     https://api.pushover.net/1/messages.json >/dev/null 2>&1 || true
 }
 
@@ -409,7 +420,6 @@ run_hook() {
   umask 077
   out_file="$(mktemp "$STATE_DIR/.hook.out.XXXXXX")" || { umask "$old_umask"; return 1; }
   umask "$old_umask"
-  rm -f "$out_file"
   ( cd "$WORK" 2>/dev/null || cd /
     export PATH="$RUNNER_PATH"
     export LOOP PHASE WORK LOOP_STATE BRANCH RUNNER_DIR REPO_URL KEEP_PATHS AGENT_UNSET \
