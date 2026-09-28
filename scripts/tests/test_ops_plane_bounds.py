@@ -216,7 +216,7 @@ class TestRerunsSinceFailsClosed:
 # --------------------------------------------------------------------------
 # R-116 — the weekend runner clone is single-writer
 # --------------------------------------------------------------------------
-WRAPPER = REPO / "scripts" / "reliability_weekend.sh"
+WRAPPER = REPO / "scripts" / "security_nightly.sh"
 
 
 class TestWeekendRunnerMutualExclusion:

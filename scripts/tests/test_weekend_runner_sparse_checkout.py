@@ -17,10 +17,8 @@ REPO = Path(__file__).resolve().parents[2]
 WRAPPERS = [
     REPO / "scripts" / n
     for n in (
-        "reliability_weekend.sh",
         "security_deepsec_nightly.sh",
         "security_nightly.sh",
-        "testing_weekend.sh",
     )
 ]
 

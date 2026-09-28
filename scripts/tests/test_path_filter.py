@@ -176,7 +176,6 @@ _NON_REPOSITORY_WEB_FIXTURES = {
     "cloud/tests/test_deploy_corrections.py",
     "cloud/tests/test_deploy_resilience.py",
     "cloud/tests/test_setup_vps_privileged_paths.py",
-    "scripts/tests/test_weekend_runner_env_provisioning.py",
     "scripts/tests/weekend_subscription_only_lib.py",
     # Same family: it builds a miniature ~/radon-weekend under tmp_path with a
     # web/node_modules and a web/.env inside it, to prove the prune's allowlist

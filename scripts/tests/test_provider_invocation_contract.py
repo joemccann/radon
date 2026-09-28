@@ -1,7 +1,7 @@
 """Each provider is launched with the argv it actually needs.
 
 A rung that launches is not a rung that works. The likeliest silent failure
-here is handing a non-Claude CLI the string `/testing-weekend audit`: codex
+here is handing a non-Claude CLI a slash command like `/security-nightly audit`: codex
 and grok cannot resolve a Claude slash command, so they would burn the cap
 doing nothing and exit 0 — a night that looks green and audited nothing.
 These assert the wire, not the intent.
@@ -23,89 +23,11 @@ sys.modules[_spec.name] = _h
 _spec.loader.exec_module(_h)
 
 LOOPS = _h.LOOPS
-# The shared fx ladder. documentation matches the other fallback loops as of
-# 2026-09-27; its fx wire lives in test_fx_nvidia_rung.py.
-FALLBACK_LOOPS = ["reliability", "testing"]
-
-
-def _launch(tmp_path, loop, provider, phase="audit", **kw):
-    _rung, line, _tried = _h._launch_of(tmp_path, loop, provider, phase, **kw)
-    return line
 
 
 def _argv(tmp_path, loop, phase="audit", **kw):
     _proc, _tried, _calls, argv = _h._run_multi(tmp_path, loop, phase, **kw)
     return argv
-
-
-@pytest.mark.parametrize("loop", FALLBACK_LOOPS)
-class TestTheWire:
-    def test_codex_runs_exec_with_the_prompt_on_stdin(self, tmp_path, loop):
-        first = _launch(tmp_path, loop, "codex")
-        assert first.startswith("exec "), first
-        assert "--model" not in first.split(), (
-            f"the codex rung must not pin a model: {first}"
-        )
-        assert "model_reasoning_effort" in first, first
-        assert "--sandbox workspace-write" in first, (
-            "codex must get the same bounded grant the claude rung has, not "
-            f"--dangerously-bypass-approvals-and-sandbox: {first}"
-        )
-        assert "--skip-git-repo-check" in first, first
-
-    def test_codex_runs_commands_in_a_non_login_shell(self, tmp_path, loop):
-        """The wrapper puts $VENV/bin first on PATH; a login shell undoes it.
-
-        2026-09-25 testing audit: codex ran every command as `/bin/zsh -lc`,
-        which re-sourced the operator profile and put /opt/homebrew/bin ahead
-        of the venv, so `python3.13` was Homebrew's and `import pytest_asyncio`
-        failed although venv-testing has pytest-asyncio 1.3.0. With
-        allow_login_shell=false the same command resolved the venv and passed.
-        """
-        first = _launch(tmp_path, loop, "codex")
-        assert "allow_login_shell=false" in first, first
-
-    def test_codex_can_rewrite_rendered_skills_but_not_codex_config(self, tmp_path, loop):
-        """Checkout must be able to update the tracked .codex/skills renders.
-
-        2026-09-25 testing audit: the wrapper pinned HEAD to the last green
-        commit, the agent switched to origin/main, and the workspace-write
-        seatbelt refused `unable to unlink old '.codex/skills/*/SKILL.md'`,
-        leaving a half-applied checkout that blocked every later switch. The
-        grant is the tracked skills directory only: `.codex/config.toml` and
-        the rest of `.codex/` stay read-only to the agent.
-        """
-        first = _launch(tmp_path, loop, "codex")
-        roots = first[first.index("writable_roots=") : first.index("]", first.index("writable_roots=")) + 1]
-        assert re.search(r'"[^"]*/\.codex/skills"', roots), roots
-        assert not re.search(r'"[^"]*/\.codex/?"', roots), roots
-
-    def test_codex_never_receives_a_slash_command(self, tmp_path, loop):
-        first = _launch(tmp_path, loop, "codex")
-        assert not re.search(r"/\w+-\w+ (audit|remediate|deliver)", first), (
-            f"a Claude slash command reached codex, which cannot resolve it: {first}"
-        )
-
-    def test_grok_gets_a_prompt_file_and_the_repo_cwd(self, tmp_path, loop):
-        grok = _launch(tmp_path, loop, "grok")
-        assert "--prompt-file" in grok, grok
-        assert "--model" not in grok.split(), (
-            f"the grok rung must not pin a model: {grok}"
-        )
-        assert "--reasoning-effort medium" in grok, grok
-        assert "--cwd" in grok, grok
-        assert "--output-format plain" in grok, grok
-
-    def test_the_prompt_file_names_this_loop_and_phase(self, tmp_path, loop):
-        skill = {
-            "reliability": "reliability-weekend",
-            "testing": "testing-weekend",
-        }[loop]
-        for phase in ("audit", "remediate", "deliver"):
-            sub = tmp_path / phase
-            sub.mkdir(parents=True, exist_ok=True)
-            grok = _launch(sub, loop, "grok", phase)
-            assert f"{skill}.{phase}.md" in grok, (phase, grok)
 
 
 @pytest.mark.parametrize("loop", sorted(LOOPS))
@@ -260,9 +182,8 @@ class TestTheClaudeWire:
         assert "--model" in first.split(), first
 
     def test_the_denial_is_in_the_claude_arm_of_every_wrapper(self):
-        """The four fallback loops never take the claude rung. launch_round
-        is identical within each family; the wakeup-tool denial stays on
-        every copy of the claude arm."""
+        """launch_round is identical across the security wrappers; the
+        wakeup-tool denial stays on every copy of the claude arm."""
         for name, path in LOOPS.items():
             text = path.read_text(encoding="utf-8")
             arm_start = text.index("    claude)\n", text.index("launch_round() {"))

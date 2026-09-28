@@ -594,7 +594,7 @@ class TestPrivateNetTrustScope:
 # ── DOC-021: TEST_LOG.md is an append-only ledger ─────────────────
 #
 # 4584e84a (#213) replaced the 543-line ledger with its one new row: header
-# and 176 prior T-rows vanished from HEAD while testing-weekend/SKILL.md kept
+# and 176 prior T-rows vanished from HEAD while the testing loop's manual kept
 # declaring the file append-only and reading it at pre-flight. Rows may only
 # be added relative to the base the change is reviewed against.
 
@@ -632,7 +632,7 @@ class TestTestLogLedgerIsAppendOnly:
         was, is_now = len(_LEDGER_ROW.findall(before)), len(_LEDGER_ROW.findall(now))
         assert is_now >= was, (
             f"TEST_LOG.md has {is_now} T-rows but {base} has {was}: the ledger "
-            "is append-only (testing-weekend/SKILL.md rail 4); restore the rows"
+            "is append-only (.claude/runner-prompts/testing.md); restore the rows"
         )
 
 
@@ -678,15 +678,11 @@ class TestTestingLedgersHaveNoConflictMarkers:
 # are mechanically derivable, so pin them instead of re-reading the prose.
 
 _LOOPS = {
-    "reliability": ("com.radon.reliability-daily.plist", "reliability_weekend.sh"),
-    "testing": ("com.radon.testing-daily.plist", "testing_weekend.sh"),
     "security": ("com.radon.security-daily.plist", "security_nightly.sh"),
 }
 
 
 _LOOP_SKILLS = {
-    "reliability": "reliability-weekend",
-    "testing": "testing-weekend",
     "security": "security-nightly",
 }
 
@@ -1146,7 +1142,7 @@ class TestNightlyRecoveryOwnerDrift:
     def test_runner_permissions_link_launcher_without_copied_roots(self):
         doc = (_ROOT / "docs/operations.md").read_text()
         assert 'writable_roots=["$REPO/.git"' not in doc
-        assert "../scripts/reliability_weekend.sh" in doc
+        assert "../scripts/security_nightly.sh" in doc
         assert "Codex sandbox writable roots omit that host gitdir" in doc
         assert ".gitdirs-agent/<loop>.git" in doc
 

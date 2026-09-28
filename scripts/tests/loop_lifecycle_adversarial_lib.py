@@ -49,8 +49,6 @@ REPO = Path(__file__).resolve().parents[2]
 BASH = shutil.which("bash") or "/bin/bash"
 LOOPS = harness.LOOPS
 LOOP_PLISTS = {
-    "reliability": "com.radon.reliability-daily.plist",
-    "testing": "com.radon.testing-daily.plist",
     "security": "com.radon.security-daily.plist",
     "security-deepsec": "com.radon.security-deepsec.plist",
 }
@@ -180,13 +178,8 @@ def test_every_wrapper_clears_git_locks_records_rounds_and_reaps(loop):
     assert text[launch : record + len("    _record_round\n")] == (
         '    launch_round "$remain"\n    _record_round\n'
     )
-    # Three fx:nvidia hosts acquire the shared NVIDIA budget before launch;
     # security/deepsec stay on the claude ladder and must not grow a gap.
-    if loop in ("reliability", "testing"):
-        assert "nvidia_budget_acquire_or_skip" in between, between
-        assert 'RUNG_PROVIDER" == "fx"' in between and 'RUNG_MODEL" == "nvidia"' in between
-    else:
-        assert between == "    _prepare_round\n"
+    assert between == "    _prepare_round\n"
     on_signal = _fn(text, "on_signal")
     # The round must be dead before the lock is released, or the next run
     # takes the clone while this one's agent is still in it.
@@ -201,7 +194,7 @@ def test_every_wrapper_clears_git_locks_records_rounds_and_reaps(loop):
 def test_concurrent_reclaim_of_a_stale_lock_never_yields_two_owners(tmp_path):
     acquire = tmp_path / "acquire.sh"
     acquire.write_text(
-        f'source {LOOPS["reliability"]} --lock-lib-only\n'
+        f'source {LOOPS["security"]} --lock-lib-only\n'
         'WEEKEND_ROOT="$1"; REPO="$1"\n'
         'if acquire_runner_lock "$1/lock.d" 2>/dev/null; then echo "WIN $$" >> "$1/wins"; sleep 1; fi\n',
         encoding="utf-8",
@@ -275,7 +268,7 @@ def test_a_slow_live_reclaimers_guard_is_never_broken(tmp_path):
         (guard / "start").write_text(_fingerprint(owner.pid) + "\n")
         old = time.time() - 600
         os.utime(guard, (old, old))
-        out = _lib("reliability", f'WEEKEND_ROOT="{tmp_path}"; acquire_runner_lock "{lock}"\n', tmp_path)
+        out = _lib("security", f'WEEKEND_ROOT="{tmp_path}"; acquire_runner_lock "{lock}"\n', tmp_path)
         assert out.returncode != 0
         assert "being reclaimed by another run" in out.stderr
         assert guard.exists()
@@ -338,7 +331,7 @@ def test_a_legacy_local_format_fingerprint_still_matches(tmp_path):
         lock.mkdir()
         (lock / "pid").write_text(f"{owner.pid}\n")
         (lock / "start").write_text(_lstart(owner.pid) + "\n")
-        out = _lib("reliability", f'acquire_runner_lock "{lock}"\n', tmp_path)
+        out = _lib("security", f'acquire_runner_lock "{lock}"\n', tmp_path)
         assert out.returncode != 0
         assert "held by pid" in out.stderr
     finally:
@@ -427,7 +420,7 @@ def test_an_untracked_orphan_in_the_clone_is_never_reaped(tmp_path):
     elsewhere = _rc_style_background(outside, tmp_path / "m2")
     try:
         out = _lib(
-            "reliability",
+            "security",
             f'WEEKEND_ROOT="{weekend}"; REPO="{clone}"; since=$(( $(date +%s) - 60 ))\n'
             # kill_round_group's leftover step, as the lock library exposes it.
             '_reap_pids "$(_round_leftover_pids "$REPO" "$(_round_state_dir "$REPO")" "$since")"\n',
@@ -515,7 +508,7 @@ def test_a_prompt_declaration_is_reaped_with_its_children(tmp_path):
     state = _state(weekend, clone)
     try:
         out = _lib(
-            "testing",
+            "security",
             f'RADON_WEEKEND_DETACHED_PIDFILE="{pidfile}"\n'
             f'_reap_pids "$(_round_leftover_pids "{clone}" "{state}" "{since}")"\n',
             tmp_path,
@@ -565,7 +558,7 @@ def test_a_pidfile_line_never_joins_two_numbers(tmp_path):
     pidfile.write_text(f"{text[:-1]} {text[-1]}\n")  # "9247 6" must not become 92476
     try:
         out = _lib(
-            "reliability",
+            "security",
             f'RADON_WEEKEND_DETACHED_PIDFILE="{pidfile}"\n'
             f'_round_leftover_pids "{clone}" "{_state(weekend, clone)}" "{since}"\n',
             tmp_path,
@@ -614,7 +607,7 @@ def test_the_recorded_set_stays_bounded_by_what_is_alive(tmp_path):
     rec.write_text("\n".join(lines) + "\n")
     try:
         started = time.monotonic()
-        out = _lib("reliability", f'_round_scan "" "{rec}"\n', tmp_path)
+        out = _lib("security", f'_round_scan "" "{rec}"\n', tmp_path)
         elapsed = time.monotonic() - started
         assert out.returncode == 0, out.stderr
         assert [line.split("\t")[0] for line in out.stdout.splitlines()] == [str(live)]
@@ -639,7 +632,7 @@ def test_a_reaped_processs_children_go_with_it(tmp_path):
     (state / "observed").write_text(f"{leader}\t{_fingerprint(leader)}\n")  # the worker came later
     try:
         out = _lib(
-            "testing",
+            "security",
             f'WEEKEND_ROOT="{weekend}"; REPO="{clone}"; since=$(( $(date +%s) - 60 ))\n'
             # kill_round_group's leftover step, as the lock library exposes it.
             '_reap_pids "$(_round_leftover_pids "$REPO" "$(_round_state_dir "$REPO")" "$since")"\n',
@@ -663,7 +656,7 @@ def test_a_recycled_pid_in_the_sampled_set_is_not_reaped(tmp_path):
     # Sampled under this pid, but with another process's start time.
     (state / "observed").write_text(f"{stranger}\t{DEAD_START}\n")
     try:
-        out = _lib("reliability", f'_round_leftover_pids "{clone}" "{state}" 0\n', tmp_path)
+        out = _lib("security", f'_round_leftover_pids "{clone}" "{state}" 0\n', tmp_path)
         assert str(stranger) not in out.stdout.split()
     finally:
         _kill(stranger)
@@ -687,7 +680,7 @@ def test_reclaim_kills_the_recorded_round_group_even_outside_the_clone_tree(tmp_
         member = int((tmp_path / "member").read_text())
         lock = _dead_lock(clone)
         (_state(weekend, clone) / "round").write_text(f"{leader.pid}\n{_fingerprint(leader.pid)}\n{int(time.time())}\n")
-        out = _lib("testing", f'WEEKEND_ROOT="{weekend}"; acquire_runner_lock "{lock}"\n', tmp_path)
+        out = _lib("security", f'WEEKEND_ROOT="{weekend}"; acquire_runner_lock "{lock}"\n', tmp_path)
         assert out.returncode == 0, out.stderr
         assert "reaping round group" in out.stderr
         assert _gone(leader)
@@ -1018,7 +1011,7 @@ def test_launchd_names_a_missing_timeout_binary(loop, tmp_path):
 def test_no_loop_skill_tells_the_agent_to_verify_the_runner_lock():
     pattern = re.compile(r"verify[^.\n]{0,60}\b(exclusive lock|marker and lock|markers and lock)", re.I)
     offenders = []
-    for base in (REPO / ".claude" / "skills", REPO / ".claude" / "portable-prompts", REPO / ".codex" / "skills"):
+    for base in (REPO / ".claude" / "skills", REPO / ".claude" / "runner-prompts"):
         for path in base.rglob("*.md"):
             if pattern.search(path.read_text(encoding="utf-8")):
                 offenders.append(str(path.relative_to(REPO)))
