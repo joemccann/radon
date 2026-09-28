@@ -2220,12 +2220,23 @@ is_fx_loop_guard() {
 }
 
 nvidia_budget() {
-  local py helper
+  local py
   py="$(command -v python3.13 || true)"
   [[ -n "$py" ]] || return 0
-  helper="${RADON_NVIDIA_BUDGET_PY:-$REPO/scripts/nvidia_budget.py}"
-  [[ -r "$helper" ]] || return 0
-  "$py" -I "$helper" "$@"
+  if [[ -n "${RADON_NVIDIA_BUDGET_PY:-}" ]]; then
+    [[ -r "$RADON_NVIDIA_BUDGET_PY" ]] || return 0
+    "$py" -I "$RADON_NVIDIA_BUDGET_PY" "$@"
+    return
+  fi
+  # DS-2026-09-28-01: origin/main's blob piped into the interpreter, never a
+  # python FILE from the agent-writable clone. Executing the file defeats the
+  # `reset --hard origin/main` that makes each fire's code equal to reviewed
+  # main: a helper edited during one phase would run in the next. Same
+  # isolation as write_audit_context / arm_deliver_record. No blob (no ref,
+  # no git) reads as an empty program: rc 0, no verdict, budget not enforced,
+  # exactly as an unreadable helper did before.
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" show origin/main:scripts/nvidia_budget.py 2>/dev/null \
+    | "$py" -I - "$@"
 }
 
 nvidia_budget_acquire_or_skip() {

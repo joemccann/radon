@@ -107,3 +107,17 @@ def test_the_extracted_readiness_check_passes_a_ready_fx_rung(tmp_path, wrapper)
     )
     assert "command not found" not in proc.stderr, proc.stderr
     assert proc.returncode == 0, proc.stderr
+
+
+def test_the_ladder_helper_is_blobbed_not_read_from_the_clone():
+    """DS-2026-09-28-01: the preflight must not execute a clone-resident helper.
+
+    `security_claude_ladder.sh` resolves its python helper from `$REPO`, and
+    the smoke sets `REPO="$C"` (the agent-writable clone), so a tampered
+    `security_claude_ladder.py` would run in the hand-run preflight even
+    though the ladder shell itself is read from `origin/main`.
+    """
+    text = SMOKE.read_text(encoding="utf-8")
+    block = text.split("blob scripts/security_claude_ladder.sh", 1)[1].split("\n\n", 1)[0]
+    assert "blob scripts/security_claude_ladder.py" in block
+    assert "RADON_SECURITY_CLAUDE_LADDER_PY=" in block

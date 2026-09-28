@@ -230,3 +230,57 @@ def test_security_wrappers_do_not_call_the_nvidia_budget():
     for loop in ("security", "security-deepsec"):
         src = _h.LOOPS[loop].read_text(encoding="utf-8")
         assert "nvidia_budget" not in src
+
+
+def _fn_body(src: str, name: str) -> str:
+    start = src.index(f"{name}() {{")
+    depth = 0
+    for i, ch in enumerate(src[start:], start):
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return src[start : i + 1]
+    raise AssertionError(name)
+
+
+@pytest.mark.parametrize("loop", ("reliability", "testing", "ci-performance", "documentation"))
+def test_nvidia_budget_runs_origin_mains_helper_not_the_worktree_copy(tmp_path, loop):
+    """DS-2026-09-28-01: the helper must be executed from origin/main's blob.
+
+    Running it as a FILE in the agent-writable clone defeats the
+    `reset --hard origin/main` that makes each fire's executed code equal to
+    reviewed main: a helper edited during one phase would be run by the next.
+    """
+    repo = tmp_path / "clone"
+    (repo / "scripts").mkdir(parents=True)
+    helper = repo / "scripts" / "nvidia_budget.py"
+    helper.write_text("print('GOOD')\n", encoding="utf-8")
+    git = ["git", "-c", "user.email=t@t", "-c", "user.name=t", "-C", str(repo)]
+    subprocess.run([*git, "init", "-q"], check=True, capture_output=True)
+    subprocess.run([*git, "add", "scripts/nvidia_budget.py"], check=True, capture_output=True)
+    subprocess.run([*git, "commit", "-qm", "helper"], check=True, capture_output=True)
+    subprocess.run([*git, "update-ref", "refs/remotes/origin/main", "HEAD"], check=True, capture_output=True)
+    helper.write_text("print('TAMPERED')\n", encoding="utf-8")
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    shim = bin_dir / "python3.13"
+    shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+    shim.chmod(0o755)
+
+    body = _fn_body(_h.LOOPS[loop].read_text(encoding="utf-8"), "nvidia_budget")
+    proc = subprocess.run(
+        [BASH, "-c", "set -Eeuo pipefail\n" + body + "\nnvidia_budget acquire --loop x\n"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={
+            "PATH": f"{bin_dir}:/usr/bin:/bin",
+            "HOME": str(tmp_path),
+            "REPO": str(repo),
+            "HOST_GITDIR": str(repo / ".git"),
+        },
+    )
+    assert proc.stdout.strip() == "GOOD", (proc.stdout, proc.stderr)
