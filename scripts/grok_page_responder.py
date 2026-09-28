@@ -58,6 +58,11 @@ from watchdog import pages as pages_mod
 from watchdog import units as units_mod
 import ir_ensure_pr
 
+try:
+    from db.hrana_http import HranaHttpError
+except ImportError:  # pragma: no cover - imported as scripts.grok_page_responder
+    from scripts.db.hrana_http import HranaHttpError
+
 
 GROK_TIMEOUT_SECS = 3600
 # No cycle may legally outlive the grok timeout, so a lock older than that plus
@@ -540,6 +545,16 @@ def _heartbeat(state: str, now: datetime) -> None:
         print(f"grok page heartbeat non-fatal: {exc}", file=sys.stderr)
 
 
+def _ledger_read_timeout(exc: BaseException) -> bool:
+    """True for the hrana read stall that must not fail the oneshot.
+
+    Production string: ``TimeoutError: The read operation timed out``.
+    A statement error or missing credential still fails the unit.
+    """
+    text = str(exc)
+    return "TimeoutError" in text or "The read operation timed out" in text
+
+
 def _default_grok_runner(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(
         cmd,
@@ -733,6 +748,16 @@ def run_cycle(
             "summary": summary,
         }))
         return 0
+    except HranaHttpError as exc:
+        # A 4s ledger read stall is the heartbeat timeout's sibling: the
+        # next timer is 30s away. Exit 0 so systemd does not page this
+        # poller about itself. Skip the ok heartbeat so a standing Turso
+        # outage still goes stale.
+        completed = False
+        if _ledger_read_timeout(exc):
+            print(f"grok page ledger non-fatal: {exc}", file=sys.stderr)
+            return 0
+        raise
     except BaseException:
         # A cycle that died on Turso or git is not a healthy poll. Let the
         # row go stale rather than paint over the writer's own failure.
