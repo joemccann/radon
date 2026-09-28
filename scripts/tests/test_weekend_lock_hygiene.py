@@ -482,3 +482,57 @@ class TestSkillsNeverTouchTheLock:
                     ):
                         hits.append(f"{path}:{i}:{line.strip()}")
         assert hits == []
+
+
+class TestTheRefusalCommentCarriesNoArgv:
+    """The lock pid is attacker-choosable; its argv must not be published.
+
+    `$REPO/.weekend-runner.lock` sits in the agent-writable clone, and the
+    refusal body goes to the PUBLIC dead-man issue. A loop agent that writes a
+    live pid into that lock would otherwise have the next fire publish that
+    process's full command line, arguments included, on a public repository.
+    """
+
+    @needs_host_ps
+    @pytest.mark.parametrize("name", sorted(LOOPS))
+    def test_the_lock_holders_arguments_are_not_posted(self, name, tmp_path):
+        marker = "ds-argv-marker-do-not-publish"
+        holder_script = tmp_path / "lock-holder.sh"
+        holder_script.write_text("#!/bin/sh\nsleep 120\n", encoding="utf-8")
+        holder = subprocess.Popen(
+            [BASH, str(holder_script), f"--token={marker}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            repo = _runner_clone(tmp_path, name)
+            lock = repo / ".weekend-runner.lock"
+            lock.mkdir()
+            (lock / "pid").write_text(f"{holder.pid}\n", encoding="utf-8")
+            start = subprocess.check_output(
+                ["/bin/ps", "-p", str(holder.pid), "-o", "lstart="], text=True
+            ).strip()
+            (lock / "start").write_text(start + "\n", encoding="utf-8")
+            bin_dir, gh_log, _py_log = _stub_bin(tmp_path, claude_body="#!/bin/sh\nexit 0\n")
+            proc = subprocess.run(
+                [BASH, str(_cloned_wrapper(repo, name)), "audit"],
+                env={
+                    **os.environ,
+                    "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                    "RADON_WEEKEND_REPO": str(repo),
+                    "RADON_WEEKEND_PROVIDER_LADDER": CLAUDE_RUNG_LADDER,
+                    "HOME": str(tmp_path / "home"),
+                },
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        finally:
+            holder.kill()
+            holder.wait(timeout=30)
+        assert proc.returncode == 3, (proc.stdout, proc.stderr)
+        calls = gh_log.read_text(encoding="utf-8") if gh_log.exists() else ""
+        assert "REFUSED (lock held)" in calls, calls
+        assert str(holder.pid) in calls, calls
+        assert marker not in calls, calls
+        assert str(holder_script) not in calls, calls
