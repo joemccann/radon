@@ -368,12 +368,12 @@ Deeper troubleshooting and full Docker setup live in [`docs/ib-gateway-docker.md
 ## Background Services
 
 Knowledge golden eval (`radon-knowledge-eval.timer`) is a nightly VPS oneshot
-that is **not enabled**. Unit files live in `cloud/services/`. Write
-`scripts/knowledge/golden_eval_baseline.json` from a live
-`eval_golden.py --mode all --write-baseline` run before
-`systemctl enable --now radon-knowledge-eval.timer`. Dated JSON lands in
-`/var/lib/radon/knowledge-eval`. A hit@5 or MRR regression fails the unit.
-See `docs/knowledge-embeddings.md` and `docs/cloud-services.md`.
+that is **not enabled**. `setup-vps.sh` skips it on every run. The checked-in
+baseline is already a live snapshot (`placeholder: false`). Leave the timer
+off while `scripts/knowledge/golden_set.json` is `draft: true`. Dated JSON
+lands in `/var/lib/radon/knowledge-eval`. A hit@5 or MRR regression fails the
+unit. Enable steps: [`cloud-services.md`](cloud-services.md#knowledge-golden-eval-radon-knowledge-evaltimer).
+Contract: [`knowledge-embeddings.md`](knowledge-embeddings.md).
 
 Hetzner host systemd is the production surface. Laptop dev uses launchd plists in `config/`. Laptop `com.radon.data-refresh` must stay unloaded. VPS `radon-flow-refresh.timer` owns hourly scanner/discover/flow during ET RTH.
 

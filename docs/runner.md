@@ -18,7 +18,7 @@ Safety is where the runner runs, not what the script checks:
 |---|---|
 | Agent cannot read operator files, ssh keys, `~/.radon`, Keychain | Dedicated macOS user `_radonbot`, standard (non-admin), hidden |
 | Agent cannot edit the runner | `run_loop.sh` and `loops/*.env` installed root-owned in `/usr/local/radon-runner` |
-| No production credential in reach | The clone gets no `.env`; `~/.radon-runner.env` holds only `GH_TOKEN` and Pushover keys (hidden from the agent) |
+| No production credential in the clone | The clone gets no `.env`. `~/.radon-runner.env` may hold only `GH_TOKEN`, `PUSHOVER_USER` and `PUSHOVER_TOKEN`. The agent runs as `_radonbot`, so it can read that file. The runner unsets the Pushover keys in the agent process; `GH_TOKEN` stays so the agent can push. Do not put a production credential or an admin token in that file or anywhere in the bot's home |
 | Agent cannot merge or push `main` | A separate GitHub machine account with the Write role on this repo only, used through its classic `repo` token, plus a `main` ruleset requiring 1 approval with the Repository admin role as bypass actor. A token of the operator's own account would not do: it acts as the admin and bypasses the ruleset |
 
 The ruleset is applied at cutover. Before then every nightly loop still runs as the operator, whose admin token bypasses it anyway, and `scripts/codemap_nightly.sh` merges its own PR with that token.
@@ -27,7 +27,7 @@ The ruleset is applied at cutover. Before then every nightly loop still runs as 
 
 Run these in Terminal on the mini, logged in as the operator. The installer runs from a throwaway clone, never from a loop clone an agent can write.
 
-1. Get the runner (before #778 merges, add `--branch feat/simple-loop-runner`):
+1. Get the runner:
 
    ```bash
    /usr/bin/git clone https://github.com/joemccann/radon.git /tmp/radon-runner-install
