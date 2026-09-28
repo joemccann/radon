@@ -237,15 +237,16 @@ def _run(
 # loops. nvidia and cerebras still name one because the grok CLI resolves them
 # through a `[model."<key>"]` config block: the rung names that stable KEY and
 # scripts/agent_cli_bootstrap.sh resolves the live id behind it.
-# 2026-09-27: all four fallback loops share fx:nvidia, grok, codex,
-# fx:cerebras. A capped or rejected entry may name a provider (every rung
-# it owns) or a `provider:model` rung, which is how the two fx rungs are
-# told apart.
+# 2026-09-27: all four fallback loops share grok, codex, antigravity,
+# fx:nvidia, fx:cerebras. NVIDIA moved down after a documentation audit
+# logged 232 HTTP 429s in 17 minutes as the lead rung. A capped or rejected
+# entry may name a provider (every rung it owns) or a `provider:model` rung,
+# which is how the two fx rungs are told apart.
 FALLBACK_PROVIDER_ORDER = {
-    "ci-performance": ["fx", "grok", "codex", "fx"],
-    "documentation": ["fx", "grok", "codex", "fx"],
-    "reliability": ["fx", "grok", "codex", "fx"],
-    "testing": ["fx", "grok", "codex", "fx"],
+    "ci-performance": ["grok", "codex", "antigravity", "fx", "fx"],
+    "documentation": ["grok", "codex", "antigravity", "fx", "fx"],
+    "reliability": ["grok", "codex", "antigravity", "fx", "fx"],
+    "testing": ["grok", "codex", "antigravity", "fx", "fx"],
 }
 
 
@@ -268,9 +269,10 @@ def _launch_of(tmp_path, loop, provider, phase="audit", **kw):
 
 
 FALLBACK_LADDER = [
-    "fx:nvidia",
     "grok",
     "codex",
+    "antigravity",
+    "fx:nvidia",
     "fx:cerebras",
 ]
 CLAUDE_LADDER = ["claude:" + m for m in LADDER]
@@ -284,6 +286,9 @@ CLAUDE_SESSION_CAP_LINE = (
     "You've hit your session limit \u00b7 resets 5am (America/Los_Angeles)"
 )
 GROK_CAP_LINE = "usage limit reached, resets in 2 hours"
+# agy retries per-minute 429s in-process and surfaces the unrecovered one as
+# the gRPC status name (strings in agy 1.2.12).
+ANTIGRAVITY_CAP_LINE = "Error: RESOURCE_EXHAUSTED: Quota exhausted for this model"
 
 PROVIDER_BINARY = {
     "claude": "claude",
@@ -292,6 +297,7 @@ PROVIDER_BINARY = {
     "nvidia": "grok",
     "cerebras": "grok",
     "fx": "fx",
+    "antigravity": "agy",
 }
 
 
@@ -406,6 +412,7 @@ def _provider_stub(
         "esac\n"
         'model=""\n'
         'args="$*"\n'
+        'if [ "$self" = agy ]; then prov=antigravity; printf "PWD=%s\\n" "$PWD" > "' + str(attempts) + '.agy-pwd"; fi\n'
         'if [ "$self" = fx ]; then\n'
         '  model="${FX_PROVIDER:-}"\n'
         '  {\n'
@@ -434,6 +441,7 @@ def _provider_stub(
         '  case "$prov" in\n'
         '    claude) echo "' + (cap_line or CLAUDE_SESSION_CAP_LINE) + '" ;;\n'
         '    codex) echo "' + (cap_line or CODEX_CAP_LINE) + '" ;;\n'
+        '    antigravity) echo "' + (cap_line or ANTIGRAVITY_CAP_LINE) + '" ;;\n'
         '    *) echo "' + (cap_line or GROK_CAP_LINE) + '" ;;\n'
         "  esac\n"
         "  exit " + str(cap_exit) + "\n"
@@ -451,8 +459,8 @@ def _run_multi(
     phase,
     capped_providers=(),
     provider_ladder=None,
-    installed=("claude", "codex", "grok", "fx"),
-    authed=("claude", "codex", "grok", "nvidia", "cerebras", "fx"),
+    installed=("claude", "codex", "grok", "fx", "antigravity"),
+    authed=("claude", "codex", "grok", "nvidia", "cerebras", "fx", "antigravity"),
     cap_line=None,
     cap_exit=1,
     reject_providers=(),
@@ -487,7 +495,7 @@ def _run_multi(
         attempts, capped, cap_line, cap_exit, rejected, reject_out,
         agent_output=agent_output,
     )
-    for prov in ("claude", "codex", "grok", "fx"):
+    for prov in ("claude", "codex", "grok", "fx", "antigravity"):
         exe = bin_dir / PROVIDER_BINARY[prov]
         if prov in installed:
             exe.write_text(body, encoding="utf-8")
@@ -539,6 +547,7 @@ def _run_multi(
         "RADON_WEEKEND_CODEX_BIN": str(bin_dir / "codex"),
         "RADON_WEEKEND_GROK_BIN": str(bin_dir / "grok"),
         "RADON_WEEKEND_FX_BIN": str(bin_dir / "fx"),
+        "RADON_WEEKEND_AGY_BIN": str(bin_dir / "agy"),
         "RADON_WEEKEND_RETRY_PAUSE_SECS": "0",
         "RADON_NVIDIA_BUDGET_PATH": str(tmp_path / "nvidia-budget.json"),
         "RADON_NVIDIA_BUDGET_JITTER": "0",
