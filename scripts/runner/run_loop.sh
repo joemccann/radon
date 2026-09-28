@@ -399,7 +399,11 @@ report() {
 # at once instead of after the hook. Sets HOOK_OUT (whatever the hook printed,
 # even if it was killed) and returns the hook's rc.
 run_hook() {
-  local out_file="$LOOP_STATE/.hook.out" rc
+  local out_file rc old_umask
+  old_umask="$(umask)"
+  umask 077
+  out_file="$(mktemp "$STATE_DIR/.hook.out.XXXXXX")" || { umask "$old_umask"; return 1; }
+  umask "$old_umask"
   rm -f "$out_file"
   ( cd "$WORK" 2>/dev/null || cd /
     export PATH="$RUNNER_PATH"
