@@ -585,11 +585,34 @@ The health surface is **decoupled from the trading stack** so it keeps reporting
   - `GET /healthz` — zero-I/O static `200` (liveness pin).
   - `GET /status` — **always `200`**; concurrent live probes (`radon-api` via `/health/lite`, relay/Next.js/IB-gateway TCP) + cached `systemctl` unit states (`active(exited)` reads `up`) + the Turso `service_health` table (read over stdlib libSQL HTTP — no libsql import; degrades to `unknown` on any failure). Degraded sources are body fields, never error codes.
 - **Caddy edge** (`app.radon.run`): `GET /edge-health/ping` — static `respond "ok" 200`, the **never-502 floor** (depends only on Caddy). `GET /edge-health/status` → `reverse_proxy 127.0.0.1:8330`. **Caveat:** every failure mode of `/edge-health/status` is ALSO `200`: an upstream 5xx (`handle_response @down`) and a dial-refused daemon (`handle_errors`, the Caddy-synthesized 502) are both rewritten to `{"reachable":false,"observer":"caddy"}`, i.e. `200` with `reachable:false` and no `ok` field. A status-code-only uptime monitor therefore reads UP in every state except Caddy dead: pin the external monitor on the body (`ok` is a boolean and `overall_state` is `up`), never on the status code. The repo prober already does (`scripts/health_probe/probe.py` `_classify_status_payload` treats the synthetic body as `invalid`). `/edge-health/ping` is the guaranteed floor.
-- **Off-box prober (Tier-3):** `.github/workflows/external-health-probe.yml` (GitHub Actions, `*/5`) hits the public edge from off the VPS and UPSERTs to the Turso `external_probe` table (`scripts/health_probe/`), so a whole-box outage is still recorded externally. `reader.py` is the dead-man's-switch (flags stale `external_probe` rows). Needs repo secrets `TURSO_DB_URL`/`TURSO_AUTH_TOKEN`. GitHub's scheduler had stretched the cron to 2-5 hour gaps by 2026-09-26 (past the two-hour dead-man), so the Mac mini dispatches the same workflow every five minutes (`config/com.radon.external-probe-dispatch.plist`, installed by `scripts/setup_external_probe_dispatch.sh`; needs `gh auth login` on the mini) and the cron is the fallback while the mini is down.
+- **Off-box prober (Tier-3):** `.github/workflows/external-health-probe.yml` hits the public edge from off the VPS and UPSERTs to the Turso `external_probe` table (`scripts/health_probe/`), so a whole-box outage is still recorded externally. `scripts/health_probe/reader.py` flags a stale `external_probe` row after two hours (`STALE_AFTER_SECONDS`). The workflow cron is `1-56/5 * * * *` (every five minutes, off the top of the hour). GitHub's scheduler had stretched those runs to 2-5 hour gaps by 2026-09-26, past that window, so the Mac mini dispatches the same workflow every 300 seconds and the cron is the fallback while the mini is down. Install and verify are in [External probe dispatch](#external-probe-dispatch). Repo secrets the workflow reads: `TURSO_DB_URL`, `TURSO_AUTH_TOKEN`, and `RADON_PROBE_FRESHNESS_TOKEN` (no freshness token fails the job while the market is open).
 
 **Consumers:** the always-on IB status chip (`web/lib/IBStatusContext.tsx`) reads `/edge-health/status` in prod (falls back to `/api/admin/health` in dev / as a prod safety net). The admin panel stays on `/api/admin/health` (needs `managed_accounts`). The `/health` payload itself is **trust-scoped**: public/proxied callers get `{"status":"ok"}` only; account/state detail goes to trusted peers only (loopback, tailnet `100.64.0.0/10`, Hetzner private net `10.0.0.0/16`; never a request carrying reverse-proxy forwarding headers). Any watchdog or off-box probe that needs the full payload must originate from one of those peers, not via Caddy. See `scripts/api/CLAUDE.md` and `scripts/health_service/CLAUDE.md`.
 
 **Recovery heartbeat:** the `awaiting_2fa → authenticated` pool reconnect (`pool.reconnect_all`) is driven server-side by a FastAPI lifespan task (`_ib_recovery_heartbeat_loop`, 15s) — independent of any browser poll, since the chip is now a read-only consumer. The every-minute `radon-ib-watchdog` `/health` curl is the slower backstop.
+
+### External probe dispatch
+
+The Mac mini launchd agent asks GitHub to run the Tier-3 probe when the hosted cron slips. It does not probe the edge itself and it does not restart any trading service.
+
+**Install** on the mini, from any checkout of this repo:
+
+```bash
+bash scripts/setup_external_probe_dispatch.sh
+```
+
+`scripts/setup_external_probe_dispatch.sh` copies `config/com.radon.external-probe-dispatch.plist` to `~/Library/LaunchAgents/com.radon.external-probe-dispatch.plist`, substitutes `__HOME__` with `$HOME`, lints the plist, then `launchctl bootout`, `bootstrap`, and `enable` for `gui/$(id -u)/com.radon.external-probe-dispatch`. `StartInterval` is 300 seconds and the job runs at load. Each fire is `gh workflow run external-health-probe.yml -R joemccann/radon --ref main`. The workflow concurrency group `external-health-probe` queues at most one run and does not cancel an in-flight probe, so a mini dispatch cannot cut a cron run short.
+
+**Prerequisite.** `gh auth status` must succeed on the mini. The script still loads the agent when it does not, prints a warning, and the next interval retries. A dispatch with no `gh` login writes the stderr log and does not change Turso.
+
+**Logs.**
+
+- `$HOME/radon-weekend/logs/external-probe-dispatch.log`
+- `$HOME/radon-weekend/logs/external-probe-dispatch.err`
+
+**Verify** (read-only). `launchctl print "gui/$(id -u)/com.radon.external-probe-dispatch"` shows the label and the 300-second interval. The stdout log should show a `gh` dispatch rather than a traceback. A green workflow run is not proof a row landed: `scripts/health_probe/reader.py` still flags a stale `external_probe` row after two hours whichever trigger wrote it.
+
+**Stop.** `launchctl bootout "gui/$(id -u)/com.radon.external-probe-dispatch"` removes the mini dispatch. Leave `.github/workflows/external-health-probe.yml` in place: its cron is the fallback while the mini is down.
 
 **IVRank snapshot heartbeat (2026-09-26).** `scripts/fetch_ivrank.py` writes a heartbeat to the `service_health` table on every cycle. Previously, a Turso read timeout on the snapshot write (`upsert_scan_snapshot`) would skip the heartbeat entirely, leaving the previous day's `ok` row in place while the snapshot JSON advanced — the admin panel read "overdue" with no error to explain it. Now both the row upsert and the snapshot write are bounded independently and their failures are **folded into the heartbeat** instead of silencing it. When either write fails, the cycle records an `error` heartbeat with:
 - `class: "db_write_failed"`

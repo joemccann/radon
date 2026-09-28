@@ -1159,3 +1159,44 @@ class TestNightlyRecoveryOwnerDrift:
         doc = (_ROOT / "docs/operations.md").read_text()
         assert "RADON_PROVENANCE_REMOTE_REF" not in doc
         assert "../cloud/CLAUDE.md#privileged-bootstrap" in doc
+
+
+class TestExternalProbeDispatchProcedure:
+    """DOC-142: the mini dispatcher is an operator install, not a one-line aside."""
+
+    def test_install_and_verify_match_the_plist_and_workflow(self):
+        ops = (_ROOT / "docs/operations.md").read_text(encoding="utf-8")
+        health = ops.split("## Health monitoring", 1)[1].split("## Service Health", 1)[0]
+        assert "### External probe dispatch" in health
+        section = health.split("### External probe dispatch", 1)[1]
+        workflow = (
+            _ROOT / ".github/workflows/external-health-probe.yml"
+        ).read_text(encoding="utf-8")
+        cron = 'cron: "1-56/5 * * * *"'
+        assert cron in workflow
+        assert "1-56/5 * * * *" in health
+        assert "*/5" not in health
+        assert "bash scripts/setup_external_probe_dispatch.sh" in section
+        assert "com.radon.external-probe-dispatch.plist" in section
+        assert "__HOME__" in section
+        assert "external-probe-dispatch.log" in section
+        assert "external-probe-dispatch.err" in section
+        assert "gh auth status" in section
+        assert "StartInterval" in section and "300" in section
+        assert "does not cancel an in-flight" in section
+        assert 'cancel-in-progress: false' in workflow
+        assert "launchctl bootout" in section
+        assert "RADON_PROBE_FRESHNESS_TOKEN" in health
+        assert "TURSO_DB_URL" in health and "TURSO_AUTH_TOKEN" in health
+        script = (_ROOT / "scripts/setup_external_probe_dispatch.sh").read_text(
+            encoding="utf-8"
+        )
+        assert 'sed "s|__HOME__|$HOME|g"' in script
+        assert "external-probe-dispatch.{log,err}" in script
+        plist = (
+            _ROOT / "config/com.radon.external-probe-dispatch.plist"
+        ).read_text(encoding="utf-8")
+        assert "<integer>300</integer>" in plist
+        assert "external-probe-dispatch.log" in plist
+        assert "external-probe-dispatch.err" in plist
+        assert "gh" in plist and "external-health-probe.yml" in plist
