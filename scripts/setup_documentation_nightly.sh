@@ -78,8 +78,6 @@ check "git ssh to origin" git ls-remote --exit-code "$ORIGIN_URL" HEAD
 check "pushover creds"    grep -qE '^PUSHOVER_(USER|TOKEN)=.+' "$WEEKEND_ENV"
 check "bash 4+ (cloud/tests)" bash -c '((BASH_VERSINFO[0] >= 4))'
 check "caddy (cloud/tests edge)" command -v caddy
-advise "$SRC_REPO/web/.env (else no dev server, so no browser verification)" \
-  test -s "$SRC_REPO/web/.env"
 if [[ $fail -ne 0 ]]; then
   echo "Fix the MISSING items above, then re-run."
   echo "  bash 3.2 leaves 34 cloud/tests permanently red on this runner (13 in"
@@ -181,75 +179,21 @@ touch "$WEEKEND_REPO/.radon-weekend-runner"
 touch "$WEEKEND_REPO/.radon-documentation-runner"  # REL-180 (R-504): this loop's own marker
 mkdir -p "$WEEKEND_REPO/logs/documentation-nightly"
 
-# web/.env is gitignored, so a fresh `git clone` can never carry it and the
-# nightly hard-reset would drop it anyway; both wrappers already exclude it
-# from their per-round `git clean`. Without it the Next dev server cannot
-# boot, so the loop cannot do the browser verification CLAUDE.md requires
-# (T-248 filed the resulting permanent local false-red on 2026-08-29).
-#
-# ONLY web/.env. The root .env is deliberately NOT provisioned: it would put
-# IB_FLEX_TOKEN in a second place. web/.env IS read by pytest, not only by
-# Next: 50 scripts/**/*.py producers (grep -rl 'load_dotenv(.*web.*\.env'
-# scripts --include='*.py') call load_dotenv(web/.env) at import, so the
-# clone's TURSO creds land in os.environ under every collected module.
-# scripts/tests/conftest.py::_strip_turso_credentials removes them per test;
-# that fixture, not this file, keeps the pytest gate host-independent (T-317:
-# without it 22 tests red with FlexTokenLocked on a provisioned clone).
-# Re-copied every setup run so a rotated key propagates. Never inline a value.
-provision_env_file() {
-  local rel="$1"
-  local src="$SRC_REPO/$rel"
-  local dst="$WEEKEND_REPO/$rel"
-  if [[ ! -s "$src" ]]; then
-    echo "  skipped $rel (none at $src; the loops run without it)"
-    return 0
-  fi
-  if [[ -s "$dst" && "$dst" -nt "$src" ]]; then
-    echo "  kept $rel (clone copy is newer than $src)"
-    return 0
-  fi
-  mkdir -p "$(dirname "$dst")"
-  install -m 600 "$src" "$dst"
-  echo "  provisioned $rel from $SRC_REPO (0600)"
-}
-# Least privilege: the operator's web/.env carries the production read-write
-# TURSO_AUTH_TOKEN and production UW_TOKEN. This clone gets the values in
-# SCOPED_ENV, or neither key when that file or a key is absent. Never echo a value.
-SCOPED_ENV="$WEEKEND_ROOT/.env.documentation-scoped"
-SCOPED_KEYS="TURSO_AUTH_TOKEN UW_TOKEN"
-scope_clone_credentials() {
-  local dst="$WEEKEND_REPO/web/.env" key line val tmp
-  [[ -f "$dst" ]] || return 0
-  tmp="$(umask 077; mktemp "$WEEKEND_REPO/web/.env.scoped.XXXXXX")" || return 1
-  grep -vE "^[[:space:]]*(export[[:space:]]+)?(${SCOPED_KEYS// /|})[[:space:]]*=" "$dst" > "$tmp" || true
-  for key in $SCOPED_KEYS; do
-    line=""
-    if [[ -f "$SCOPED_ENV" ]]; then
-      line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" "$SCOPED_ENV" | tail -n 1 || true)"
-    fi
-    val="${line#*=}"
-    val="${val//[[:space:]\"\']/}"
-    if [[ -n "$line" && -n "$val" ]]; then
-      printf '%s\n' "$line" >> "$tmp"
-      echo "  scoped $key in web/.env from $SCOPED_ENV"
-    else
-      echo "  MISSING  scoped $key in $SCOPED_ENV (removed from the clone's web/.env)"
-    fi
-  done
-  chmod 600 "$tmp"
-  mv -f -- "$tmp" "$dst"
-}
-if [[ "$SRC_REPO" == "$WEEKEND_REPO" ]]; then
-  echo "  MISSING  env provisioning: run setup from your own checkout, not the runner clone"
-else
-  for env_rel in web web/.env; do
-    refuse_symlink "$WEEKEND_REPO/$env_rel" || exit 1
-  done
-  for env_rel in web/.env; do
-    provision_env_file "$env_rel"
-  done
-  scope_clone_credentials
+# DeepSec #771: this clone receives NO web/.env. The operator copy carries
+# production credentials (Clerk secret, IB Flex, Upstash, webhook secrets, ...)
+# that no step of this loop needs, and an agent running without permission
+# prompts can read anything in the clone. pytest runs without it (conftest
+# strips Turso per test); a Next dev server started here has no Clerk key.
+# A copy left by an earlier setup is deleted. Symlinks are refused first so
+# the delete can never reach outside the clone.
+for env_rel in web web/.env; do
+  refuse_symlink "$WEEKEND_REPO/$env_rel" || exit 1
+done
+if [[ -e "$WEEKEND_REPO/web/.env" ]]; then
+  rm -f -- "$WEEKEND_REPO/web/.env"
+  echo "  removed web/.env from the clone (no credential is provisioned here)"
 fi
+echo "  web/.env and Radon credentials are NOT provisioned into this clone"
 
 if [[ ! -f "$WEEKEND_ENV" ]]; then
   cat > "$WEEKEND_ENV" <<'EOF'
