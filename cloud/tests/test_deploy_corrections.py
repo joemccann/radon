@@ -1641,7 +1641,12 @@ if args[0] in ("list-unit-files", "list-units"):
         print(unit, "enabled")
     raise SystemExit(0)
 if args[0] == "show":
-    print("simple" if "--property=Type" in args else "active")
+    if "--property=Type" in args:
+        print("simple")
+    elif args[1] == "radon-ib-gateway-preheld-restart.service":
+        print("inactive")
+    else:
+        print("active")
     raise SystemExit(0)
 if args[0] != "stop":
     raise SystemExit(2)
