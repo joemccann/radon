@@ -23,7 +23,9 @@ set -euo pipefail
 SRC_LINK="${RADON_FX_SOURCE:-$HOME/.local/bin/fx}"
 DEST_DIR="${RADON_FX_STABLE_DIR:-$HOME/.local/share/radon/fx-stable}"
 DEST="$DEST_DIR/fx"
-CODESIGN=/usr/bin/codesign
+# The launchd job's environment is only PATH and HOME, so this stays
+# /usr/bin/codesign in production. Tests pass an absolute double.
+CODESIGN="${RADON_FX_CODESIGN:-/usr/bin/codesign}"
 REQUIREMENT='identifier "com.vercel.fx" and anchor apple generic and certificate leaf[subject.OU] = "JW6Y669B67"'
 
 log() { echo "[fx-stable] $(date -u +%FT%TZ) $*"; }

@@ -224,23 +224,20 @@ class TestFlexBudgetExhaustionVisibility:
     (or an explicitly watchdog-evaluated degraded state), and clear it only after a full catch-up.
     """
     
-    def test_consecutive_budget_exhaustion_writes_degraded_state(self):
-        """RED: Two consecutive budget-exhausted runs should produce degraded watchdog outcome.
-        
-        Current code: budget_spent=True + ingested>0 -> writes 'ok' with class='budget'
-        This resets error cooldown and never pages.
-        
-        After fix: track consecutive budget events, write degraded/error after threshold.
-        """
-        pytest.skip("Implementation pending - need to understand flex-pull health writing")
-    
-    def test_single_partial_run_does_not_page(self):
-        """A single partial run (budget spent but progress made) remains distinguishable but does not page."""
-        pytest.skip("Implementation pending")
-    
-    def test_complete_catchup_clears_degraded_state(self):
-        """A complete next run (no budget spend) clears the degraded state."""
-        pytest.skip("Implementation pending")
+    def test_consecutive_budget_exhaustion_writes_degraded_state(self, tmp_path, monkeypatch):
+        from scripts.tests.test_rel257_flex_budget import BudgetSweep, second_progress_stop
+
+        second_progress_stop(BudgetSweep(monkeypatch, tmp_path))
+
+    def test_single_partial_run_does_not_page(self, tmp_path, monkeypatch):
+        from scripts.tests.test_rel257_flex_budget import BudgetSweep, one_progress_stop
+
+        one_progress_stop(BudgetSweep(monkeypatch, tmp_path))
+
+    def test_complete_catchup_clears_degraded_state(self, tmp_path, monkeypatch):
+        from scripts.tests.test_rel257_flex_budget import BudgetSweep, full_run_clears_the_streak
+
+        full_run_clears_the_streak(BudgetSweep(monkeypatch, tmp_path))
 
 
 if __name__ == "__main__":
