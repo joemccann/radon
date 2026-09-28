@@ -17,9 +17,17 @@ SECRET_KEYS="GH_TOKEN PUSHOVER_USER PUSHOVER_TOKEN"
 # Resolvers and hooks run under an isolated interpreter (no cwd, no user site).
 RUNNER_PYTHON="${RADON_RUNNER_PYTHON:-/opt/homebrew/bin/python3.13}"
 TIMED_OUT=124
-HOOK_SECS=900
+HOOK_SECS="${RADON_RUNNER_HOOK_SECS:-900}"
 AGENT_PID=""
+HOOK_PID=""
 PHASE=""
+# The runner, its hooks and helpers resolve binaries only from root- or
+# admin-owned directories; the bot's own CLI dirs go on the agent's PATH alone.
+RUNNER_PATH="${RADON_RUNNER_PATH:-/opt/homebrew/bin:/usr/bin:/bin}"
+AGENT_PATH_PREFIX="$HOME/.local/bin:$HOME/.grok/bin:$HOME/.bun/bin"
+# Every git the runner, its hooks and the agent run reads the root-owned
+# config install.sh writes, never the bot-writable ~/.gitconfig.
+export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="${RADON_RUNNER_GITCONFIG:-$RUNNER_DIR/gitconfig}"
 
 log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG"; }
 
@@ -53,10 +61,10 @@ load_config() {
   PROMPT_FILE="$RUN_DIR/$DATE.prompt.md"
   # Survives every re-clone; the runner never deletes it.
   LOOP_STATE="$STATE_DIR/state/$LOOP"
-  TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+  TIMEOUT_BIN="$(PATH="$RUNNER_PATH" command -v gtimeout || PATH="$RUNNER_PATH" command -v timeout || true)"
   mkdir -p "$RUN_DIR" "$LOOP_STATE"
   chmod 700 "$STATE_DIR/state" "$LOOP_STATE"
-  [[ -n "$TIMEOUT_BIN" ]] || { log "no timeout or gtimeout on PATH"; exit 69; }
+  [[ -n "$TIMEOUT_BIN" ]] || { log "no timeout or gtimeout in $RUNNER_PATH"; exit 69; }
   export RADON_RUNNER_LOOP_STATE="$LOOP_STATE" RADON_RUNNER_PIDFILE="$LOOP_STATE/pids"
   apply_agent_env
 }
@@ -83,19 +91,27 @@ load_secrets() {
   done
 }
 
+proc_start() { ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //;s/ $//'; }
+
+# A lock is live only while its pid still runs with the start time it
+# recorded; a pid reused after a reboot or a SIGKILL does not hold it.
 acquire_lock() {
   LOCK="$STATE_DIR/$LOOP.lock"
-  local holder
+  local holder started
   if ! mkdir "$LOCK" 2>/dev/null; then
     holder="$(cat "$LOCK/pid" 2>/dev/null)"
-    if [[ -n "$holder" ]] && kill -0 "$holder" 2>/dev/null; then
+    started="$(cat "$LOCK/start" 2>/dev/null)"
+    if [[ -n "$holder" && -n "$started" ]] && kill -0 "$holder" 2>/dev/null \
+       && [[ "$(proc_start "$holder")" == "$started" ]]; then
       log "skipped: pid $holder is still running this loop"
+      notify "radon $LOOP: skipped" "the previous run (pid $holder) is still running; this fire did not start"
       exit 0
     fi
     rm -rf "$LOCK"
     mkdir "$LOCK" || exit 75
   fi
   echo $$ > "$LOCK/pid"
+  proc_start $$ > "$LOCK/start"
   trap 'rm -rf "$LOCK"' EXIT
 }
 
@@ -108,7 +124,10 @@ prune_logs() {
 resolve_agents() {
   local out
   [[ -n "$AGENTS_RESOLVER" ]] || return 0
-  out="$("$TIMEOUT_BIN" 120 "$RUNNER_PYTHON" -I "$RUNNER_DIR/$AGENTS_RESOLVER" --rungs 2>>"$LOG")" || out=""
+  # It runs the agent CLI itself (`claude models`), so it gets the agent's
+  # PATH and never the Pushover keys.
+  out="$(env -u PUSHOVER_USER -u PUSHOVER_TOKEN PATH="$AGENT_PATH_PREFIX:$RUNNER_PATH" \
+    "$TIMEOUT_BIN" 120 "$RUNNER_PYTHON" -I "$RUNNER_DIR/$AGENTS_RESOLVER" --rungs 2>>"$LOG")" || out=""
   out="$(printf '%s' "$out" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')"
   if [[ -n "$out" ]]; then
     AGENTS="$out"
@@ -191,7 +210,11 @@ build_prompt() {
   {
     echo "Date: $DATE"
     if [[ -n "$PHASE" ]]; then echo "Phase: $PHASE"; fi
-    echo "Branch: $BRANCH (create it from origin/main; it is the only branch you may push)"
+    if [[ -n "$PRE_RUN" ]]; then
+      echo "Branch: $BRANCH (create it from HEAD, the pinned CI-green base, or resume it; it is the only branch you may push)"
+    else
+      echo "Branch: $BRANCH (create it from origin/main; it is the only branch you may push)"
+    fi
     if [[ -n "$PHASE" ]]; then echo "State: $LOOP_STATE"; fi
     echo "Time budget: $((TIMEOUT_SECS / 60)) minutes, then this session is stopped."
     echo
@@ -250,9 +273,31 @@ proc_age_secs() {
 # After the group kill: anything that left the group (a new session, a
 # daemonized job) and still works in this loop's clone or state, plus pids
 # the agent declared in $RADON_RUNNER_PIDFILE that started during this phase.
-# Every other loop has its own WORK and state, so it is never touched.
+# Every other loop has its own WORK and state, and a declared pid that is (or
+# descends from) another loop's live runner is skipped, so no other loop is
+# ever touched.
+# Live lock holders of the other loops.
+other_runners() {
+  local lock
+  for lock in "$STATE_DIR"/*.lock; do
+    [[ "$lock" != "${LOCK:-}" && -f "$lock/pid" ]] || continue
+    cat "$lock/pid" 2>/dev/null
+  done
+}
+
+# True when $1 is one of the pids in $2 or a descendant of one.
+descends_from() {
+  local pid="$1" others="$2" depth
+  for depth in $(seq 1 64); do
+    case " $others " in *" $pid "*) return 0 ;; esac
+    pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
+    [[ -n "$pid" && "$pid" != 0 && "$pid" != 1 ]] || return 1
+  done
+  return 1
+}
+
 reap_leftovers() {
-  local work state pid path rest age now victims=""
+  local work state pid path rest age now others victims=""
   work="$(cd -P "$WORK" 2>/dev/null && pwd -P)"
   state="$(cd -P "$LOOP_STATE" 2>/dev/null && pwd -P)"
   while IFS=$'\t' read -r pid path; do
@@ -266,12 +311,17 @@ reap_leftovers() {
   done <<< "$(cwd_listing)"
   if [[ -f "$RADON_RUNNER_PIDFILE" && ! -L "$RADON_RUNNER_PIDFILE" ]]; then
     now="$(date +%s)"
+    others="$(other_runners | tr '\n' ' ')"
     while read -r pid rest; do
       [[ -z "$rest" ]] || continue
       case "$pid" in ''|*[!0-9]*|0|1) continue ;; esac
       [[ "$pid" != "$$" ]] || continue
       age="$(proc_age_secs "$pid")" || continue
       (( now - age >= ${PHASE_STARTED_AT:-0} - 2 )) || continue
+      if [[ -n "${others// /}" ]] && descends_from "$pid" "$others"; then
+        log "not reaping declared pid $pid: it belongs to another loop's run"
+        continue
+      fi
       victims="$victims $pid"
     done < "$RADON_RUNNER_PIDFILE"
   fi
@@ -289,6 +339,7 @@ run_agent() {
   ( cd "$WORK" || exit 70
     # The security prompts' native audit workflows resolve the clone from it.
     export PROMPT_FILE RADON_REPO_ROOT="$WORK"
+    export PATH="$AGENT_PATH_PREFIX:$PATH"
     [[ "$GH_GUARD" != 1 ]] || export PATH="$RUNNER_DIR/guard/$LOOP:$PATH"
     exec "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$TIMEOUT_SECS" \
       /bin/bash "$SELF" --launch "$agent" "$provider" ) >> "$LOG" 2>&1 &
@@ -343,12 +394,26 @@ report() {
 }
 
 # PRE_RUN / POST_RUN: root-owned scripts under $RUNNER_DIR, bounded, run in
-# the clone with the phase's facts in their environment.
+# the clone with the phase's facts in their environment and the runner's
+# PATH. Run in the background and waited on, so a SIGTERM reaches on_signal
+# at once instead of after the hook. Sets HOOK_OUT (whatever the hook printed,
+# even if it was killed) and returns the hook's rc.
 run_hook() {
+  local out_file="$LOOP_STATE/.hook.out" rc
+  rm -f "$out_file"
   ( cd "$WORK" 2>/dev/null || cd /
+    export PATH="$RUNNER_PATH"
     export LOOP PHASE WORK LOOP_STATE BRANCH RUNNER_DIR REPO_URL KEEP_PATHS AGENT_UNSET \
       PHASE_RC PHASE_LOG PHASE_START_MARK PHASE_REFUSED PHASE_STATUS RUNNER_PYTHON
-    exec "$TIMEOUT_BIN" -k 10 "$HOOK_SECS" /bin/bash "$RUNNER_DIR/$1" ) 2>> "$LOG"
+    exec "$TIMEOUT_BIN" -k 10 "$HOOK_SECS" /bin/bash "$RUNNER_DIR/$1" ) > "$out_file" 2>> "$LOG" &
+  HOOK_PID=$!
+  wait "$HOOK_PID"
+  rc=$?
+  kill -KILL -- "-$HOOK_PID" 2>/dev/null || true
+  HOOK_PID=""
+  HOOK_OUT="$(cat "$out_file" 2>/dev/null)"
+  rm -f "$out_file"
+  return "$rc"
 }
 
 hook_value() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | tail -n 1; }
@@ -356,11 +421,15 @@ hook_value() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | tail -n 1; }
 finish_phase() {
   local out="" status="" pr="" report_url=""
   if [[ -n "$POST_RUN" ]]; then
-    out="$(run_hook "$POST_RUN")"
+    run_hook "$POST_RUN"
+    out="$HOOK_OUT"
     [[ -z "$out" ]] || printf '%s\n' "$out" >> "$LOG"
     status="$(hook_value "$out" status)"
     pr="$(hook_value "$out" pr_url)"
     report_url="$(hook_value "$out" report_url)"
+    # Fail closed: a hook that timed out, crashed or is missing decided nothing
+    # (a refused phase still pages REFUSED below).
+    [[ -n "$status" || -n "$PHASE_REFUSED" ]] || status="FAILED (post-run hook gave no status)"
   else
     pr="$(find_pr)"
   fi
@@ -395,8 +464,9 @@ run_phases() {
     PHASE_RC=0
     log "phase $PHASE: budget ${TIMEOUT_SECS}s"
     if [[ -n "$PRE_RUN" ]]; then
-      out="$(run_hook "$PRE_RUN")"
+      run_hook "$PRE_RUN"
       rc=$?
+      out="$HOOK_OUT"
       [[ -z "$out" ]] || printf '%s\n' "$out" >> "$LOG"
       if (( rc != 0 )); then
         PHASE_REFUSED="$(hook_value "$out" refused)"
@@ -424,13 +494,16 @@ run_phases() {
 on_signal() {
   trap - TERM INT
   [[ -z "$AGENT_PID" ]] || kill -KILL -- "-$AGENT_PID" 2>/dev/null || true
+  [[ -z "$HOOK_PID" ]] || kill -KILL -- "-$HOOK_PID" 2>/dev/null || true
+  HOOK_PID=""
   reap_leftovers
   notify "radon $LOOP${PHASE:+ $PHASE}" "KILLED (SIG$1)"
   if [[ -n "$POST_RUN" && -n "$PHASE" ]]; then
     PHASE_STATUS="KILLED (SIG$1)"
     PHASE_RC=143
     HOOK_SECS=10
-    run_hook "$POST_RUN" >> "$LOG"
+    run_hook "$POST_RUN"
+    [[ -z "$HOOK_OUT" ]] || printf '%s\n' "$HOOK_OUT" >> "$LOG"
   fi
   exit 143
 }

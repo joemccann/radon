@@ -17,10 +17,12 @@ set -uo pipefail
 : "${LOOP:?}" "${PHASE:?}" "${WORK:?}" "${LOOP_STATE:?}" "${RUNNER_DIR:?}"
 PHASE_RC="${PHASE_RC:-0}"
 PHASE_LOG="${PHASE_LOG:-/dev/null}"
+# Never a bot-writable directory: the agent's CLI dirs are not on this PATH.
+export PATH="${RADON_RUNNER_PATH:-/opt/homebrew/bin:/usr/bin:/bin}"
 PY="${RUNNER_PYTHON:-/opt/homebrew/bin/python3.13}"
-GH="${RADON_RUNNER_GH:-$(command -v gh || true)}"
+GH="${RADON_RUNNER_GH:-/opt/homebrew/bin/gh}"
 GH_REPO="${RADON_WEEKEND_GH_REPO:-joemccann/radon}"
-TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+TIMEOUT_BIN="$(command -v gtimeout || command -v timeout || true)"
 NET_TIMEOUT_SECS="${RADON_WEEKEND_NET_TIMEOUT_SECS:-120}"
 SCRATCH="$LOOP_STATE/scratch"
 STAMP="$(date +%Y%m%dT%H%M%S)"
@@ -245,7 +247,7 @@ publish_private_report() {
   hosts="$dir/known_hosts"
   # GitHub's published ed25519 host key (docs.github.com "GitHub's SSH key fingerprints").
   printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > "$hosts"
-  ssh_cmd="ssh -i $REPORTS_KEY -o IdentitiesOnly=yes -o UserKnownHostsFile=$hosts -o StrictHostKeyChecking=yes -o ConnectTimeout=20"
+  ssh_cmd="/usr/bin/ssh -i $REPORTS_KEY -o IdentitiesOnly=yes -o UserKnownHostsFile=$hosts -o StrictHostKeyChecking=yes -o ConnectTimeout=20"
   if GIT_SSH_COMMAND="$ssh_cmd" net_bounded git clone --quiet --depth 1 "$REPORTS_REMOTE" "$dir/repo" >/dev/null 2>&1 \
      && mkdir -p "$(dirname "$dir/repo/$rel")" \
      && _redact_secret_classes < "$src" > "$dir/repo/$rel" \
@@ -344,6 +346,9 @@ prune_scratch() {
 main() {
   local pr
   decide
+  # Printed first so the runner has a verdict even if a network step below
+  # hangs past the hook's cap; the final status line supersedes it.
+  echo "status=$STATUS"
   if [[ -z "${PHASE_STATUS:-}" ]]; then publish_private_report; else REPORT_URL=""; fi
   pr="$(resolve_pr_url)"
   report

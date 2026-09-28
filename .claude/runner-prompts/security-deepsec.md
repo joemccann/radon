@@ -9,6 +9,8 @@ directory (`$RADON_RUNNER_LOOP_STATE`). You are in a fresh clone of
 newest CI-green `main` before every phase; your local branches survive
 between the phases of one night, nothing in the clone survives to the next.
 The private state directory survives every night.
+Create or resume the dated branch from the detached HEAD (the pinned
+CI-green base), never from `origin/main`.
 
 Toolchain: before the night's first test run,
 `uv venv .venv --python python3.13 && uv pip install --python .venv/bin/python -r requirements.txt -r requirements-dev.txt pytest pytest-asyncio pytest-xdist`,
@@ -447,10 +449,10 @@ PR's Next section); verified findings with no implementation is a failed
 remediate phase.
 
 Unreleased P0/P1 fixes are committed on a local private branch
-`security-deepsec/<YYYY-MM-DD>-p1-private` (never pushed to origin).
+`security-deepsec-private/<YYYY-MM-DD>` (never pushed to origin).
 Because the clone is re-cloned every night, that branch is kept in the
 private bare repository `$RADON_RUNNER_LOOP_STATE/held.git`: push it there
-(`git push "$RADON_RUNNER_LOOP_STATE/held.git" security-deepsec/<date>-p1-private`)
+(`git push "$RADON_RUNNER_LOOP_STATE/held.git" security-deepsec-private/<date>`)
 and fetch earlier held branches from there, never from or to `origin`.
 P2/P3 fixes and operator-released P0/P1 fixes go on the dated branch the
 deliver phase pushes.

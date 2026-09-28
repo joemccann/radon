@@ -4,6 +4,7 @@
 #   sudo scripts/runner/install.sh documentation [more loops...]
 #   scripts/runner/install.sh --print-plist documentation     (no root; for review/tests)
 #   scripts/runner/install.sh --print-guard security          (no root; the gh shim a GH_GUARD=1 loop gets)
+#   scripts/runner/install.sh --print-gitconfig               (no root; the git config every runner git reads)
 #
 # Idempotent. Creates the unprivileged runner user on first use, installs the
 # runner root-owned (the agent cannot edit what launches it), and writes one
@@ -49,7 +50,7 @@ print_plist() {
         <key>HOME</key>
         <string>$BOT_HOME</string>
         <key>PATH</key>
-        <string>$BOT_HOME/.local/bin:$BOT_HOME/.grok/bin:$BOT_HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>/opt/homebrew/bin:/usr/bin:/bin</string>
         <key>DISABLE_AUTOUPDATER</key>
         <string>1</string>
     </dict>
@@ -99,24 +100,39 @@ ensure_user() {
   createhomedir -c -u "$BOT" >/dev/null
 }
 
+# Everything under the bot's home is created by the bot itself: root never
+# writes, chmods or chowns a path the bot could have swapped for a symlink.
+as_bot() { sudo -u "$BOT" "$@"; }
+
 configure_user() {
-  local file="$BOT_HOME/.radon-runner.env"
-  install -d -o "$BOT" -m 700 "$BOT_HOME/radon-runner"
-  install -d -o "$BOT" -m 700 "$BOT_HOME/radon-runner/state"
-  if [[ ! -f "$file" ]]; then
-    printf '%s\n' '# Runner secrets. Never a production credential.' 'GH_TOKEN=' 'PUSHOVER_USER=' 'PUSHOVER_TOKEN=' > "$file"
-    chown "$BOT" "$file"
-    chmod 600 "$file"
-  fi
-  sudo -u "$BOT" -H git config --global credential.https://github.com.helper '!gh auth git-credential'
-  sudo -u "$BOT" -H git config --global user.name "radon-runner"
-  sudo -u "$BOT" -H git config --global user.email "radon-runner@users.noreply.github.com"
+  local dir
+  for dir in "$BOT_HOME/radon-runner" "$BOT_HOME/radon-runner/state"; do
+    as_bot /bin/mkdir -p -m 700 "$dir"
+    as_bot /bin/chmod 700 "$dir"
+  done
+  as_bot /bin/sh -c 'umask 077; f="$1"; [ -e "$f" ] || [ -L "$f" ] || printf "%s\n" "# Runner secrets. Never a production credential." "GH_TOKEN=" "PUSHOVER_USER=" "PUSHOVER_TOKEN=" > "$f"' \
+    sh "$BOT_HOME/.radon-runner.env"
+}
+
+# The runner exports GIT_CONFIG_GLOBAL at this root-owned file, so no git it
+# runs reads the bot-writable ~/.gitconfig.
+print_gitconfig() {
+  cat <<EOF
+[credential "https://github.com"]
+	helper = !$REAL_GH auth git-credential
+[user]
+	name = radon-runner
+	email = radon-runner@users.noreply.github.com
+EOF
 }
 
 install_runner() {
   local file
   install -d -o root -g wheel -m 755 "$PREFIX" "$PREFIX/loops" "$PREFIX/hooks" "$PREFIX/lib" "$PREFIX/guard"
   install -o root -g wheel -m 755 "$SRC/run_loop.sh" "$PREFIX/run_loop.sh"
+  print_gitconfig > "$PREFIX/gitconfig"
+  chown root:wheel "$PREFIX/gitconfig"
+  chmod 644 "$PREFIX/gitconfig"
   for file in "$SRC/hooks/"*; do
     [[ -f "$file" ]] && install -o root -g wheel -m 755 "$file" "$PREFIX/hooks/$(basename "$file")"
   done
@@ -152,6 +168,10 @@ main() {
   fi
   if [[ "$1" == "--print-guard" ]]; then
     print_guard "${2:?loop}"
+    return 0
+  fi
+  if [[ "$1" == "--print-gitconfig" ]]; then
+    print_gitconfig
     return 0
   fi
   [[ $EUID -eq 0 ]] || { echo "run with sudo" >&2; exit 1; }

@@ -228,16 +228,37 @@ def test_fx_rungs_pass_the_provider_and_the_prompt_on_stdin(rig):
     assert "fx ask --full-access --no-save" in (rig.calls / "argv").read_text()
 
 
-def test_a_live_lock_skips_the_night(rig):
+def _lstart(pid):
+    out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True).stdout
+    return " ".join(out.split())
+
+
+def test_a_live_lock_skips_the_night_and_pages_it(rig):
     lock = rig.state / "doc.lock"
     lock.mkdir(parents=True)
     (lock / "pid").write_text(str(os.getpid()))
+    (lock / "start").write_text(_lstart(os.getpid()) + "\n")
 
     proc = rig.run()
 
     assert proc.returncode == 0
     assert rig.called() == []
     assert lock.exists(), "another run's lock is never removed"
+    assert rig.notification()["title"] == "radon doc: skipped"
+
+
+@pytest.mark.parametrize("start", [None, "Mon Jan  1 00:00:00 2001"])
+def test_a_lock_whose_pid_was_reused_is_reclaimed(rig, start):
+    lock = rig.state / "doc.lock"
+    lock.mkdir(parents=True)
+    (lock / "pid").write_text(str(os.getpid()))
+    if start:
+        (lock / "start").write_text(start + "\n")
+
+    proc = rig.run()
+
+    assert proc.returncode == 0
+    assert rig.called() == ["grok"]
 
 
 def test_a_dead_lock_is_reclaimed(rig):
@@ -273,10 +294,10 @@ def test_installed_daemon_runs_the_root_owned_runner_as_the_bot_user():
     assert plist["UserName"] == "_radonbot"
     assert plist["ProgramArguments"] == ["/bin/bash", "/usr/local/radon-runner/run_loop.sh", "documentation"]
     assert plist["EnvironmentVariables"]["HOME"] == "/Users/_radonbot"
-    path = plist["EnvironmentVariables"]["PATH"].split(":")
-    # Per-user CLI installs: agy and fx in ~/.local/bin, grok in ~/.grok/bin; codex from Homebrew.
-    for entry in ("/Users/_radonbot/.local/bin", "/Users/_radonbot/.grok/bin", "/opt/homebrew/bin"):
-        assert entry in path
+    # Per-user CLI installs (agy and fx in ~/.local/bin, grok in ~/.grok/bin) go on the agent's PATH
+    # only; run_loop.sh prepends them there. codex comes from Homebrew.
+    assert plist["EnvironmentVariables"]["PATH"] == "/opt/homebrew/bin:/usr/bin:/bin"
+    assert 'AGENT_PATH_PREFIX="$HOME/.local/bin:$HOME/.grok/bin:$HOME/.bun/bin"' in RUNNER.read_text()
     assert plist["StartCalendarInterval"] == {"Hour": 3, "Minute": 0}
 
 
@@ -513,6 +534,72 @@ def test_post_run_reads_only_its_phase_slice_and_drives_the_page(rig):
     assert note["url_title"] == "Open private report"
 
 
+@pytest.mark.parametrize("post", ["sleep 30\n", "exit 3\n", None])
+def test_a_post_run_that_gives_no_status_fails_the_phase(rig, post):
+    rig.configure(PHASES="audit:60", POST_RUN="hooks/post.sh")
+    if post is not None:
+        rig.hook("post.sh", post)
+    proc = rig.run(RADON_RUNNER_HOOK_SECS="2")
+
+    assert proc.returncode == 75, rig.log()
+    assert rig.notification()["message"].startswith("FAILED (post-run hook gave no status)")
+
+
+def test_the_first_status_line_stands_when_post_run_is_killed_later(rig):
+    rig.configure(PHASES="audit:60", POST_RUN="hooks/post.sh")
+    rig.hook("post.sh", 'echo "status=INCOMPLETE (no marker)"\nsleep 30\n')
+    proc = rig.run(RADON_RUNNER_HOOK_SECS="2")
+
+    assert proc.returncode == 75
+    assert rig.notification()["message"] == "INCOMPLETE (no marker)"
+
+
+def test_a_pinned_base_tells_the_agent_to_branch_from_head(rig):
+    rig.configure(PHASES="audit:60", PRE_RUN="hooks/pre.sh")
+    rig.hook("pre.sh", "exit 0\n")
+    rig.run()
+
+    header = next((rig.state / "logs" / "doc").glob("*.audit.prompt.md")).read_text().split("\n\n", 1)[0]
+    assert "create it from HEAD" in header and "origin/main" not in header
+
+
+def test_hooks_get_the_runner_path_and_the_agent_gets_its_cli_dirs(rig):
+    rig.configure(PHASES="audit:60", PRE_RUN="hooks/pre.sh")
+    rig.hook("pre.sh", 'echo "$PATH" > "$CALLS/pre.path"\n')
+    runner_path = f"{Path(shutil.which('gtimeout') or shutil.which('timeout')).parent}:/usr/bin:/bin"
+    rig.run(RADON_RUNNER_PATH=runner_path)
+
+    assert (rig.calls / "pre.path").read_text().strip() == runner_path
+    env = (rig.calls / "grok.env").read_text().splitlines()
+    path = next(line for line in env if line.startswith("PATH=")).split("=", 1)[1].split(":")
+    home = rig.state.parent
+    assert path[:3] == [f"{home}/.local/bin", f"{home}/.grok/bin", f"{home}/.bun/bin"]
+    assert "GIT_CONFIG_NOSYSTEM=1" in env
+    assert f"GIT_CONFIG_GLOBAL={rig.install}/gitconfig" in env
+
+
+def test_sigterm_during_a_slow_pre_run_pages_killed_at_once(rig, tmp_path):
+    rig.configure(PHASES="audit:60", PRE_RUN="hooks/pre.sh", POST_RUN="hooks/post.sh")
+    marker = tmp_path / "hook.pid"
+    rig.hook("pre.sh", f"echo $$ > {marker}; sleep 300\n")
+    rig.hook("post.sh", 'echo "status=[$PHASE_STATUS]" >> "$CALLS/post"\n')
+    proc = rig.start()
+    for _ in range(100):
+        if marker.exists() and marker.read_text().strip():
+            break
+        time.sleep(0.1)
+    started = time.monotonic()
+    proc.send_signal(signal.SIGTERM)
+    proc.wait(timeout=30)
+
+    assert time.monotonic() - started < 10
+    assert proc.returncode == 143
+    assert _gone(int(marker.read_text()))
+    assert "KILLED" in rig.notifications()[0]["message"]
+    assert "status=[KILLED" in (rig.calls / "post").read_text()
+    assert rig.called() == []
+
+
 def test_a_failing_pre_run_skips_the_agent_and_the_night_exits_2(rig):
     rig.configure(PHASES="audit:60 remediate:60", PRE_RUN="hooks/pre.sh", POST_RUN="hooks/post.sh")
     rig.hook("pre.sh", 'if [ "$PHASE" = audit ]; then echo "refused=credential file present"; exit 2; fi\n')
@@ -590,6 +677,21 @@ def test_a_declared_detached_pid_outside_the_clone_is_reaped_and_an_undeclared_o
         os.kill(survivor, signal.SIGKILL)
 
 
+def test_a_declared_pid_of_another_loops_run_is_not_reaped(rig, tmp_path):
+    other_pid = tmp_path / "other.pid"
+    lock = rig.state / "other.lock"
+    lock.mkdir(parents=True)
+    rig.run(STUB_GROK=DETACH.format(cwd=tmp_path, out=other_pid) + f" && cp {other_pid} {lock}/pid"
+            + f' && cat {other_pid} >> "$RADON_RUNNER_PIDFILE" && echo >> "$RADON_RUNNER_PIDFILE"')
+
+    pid = int(other_pid.read_text())
+    try:
+        os.kill(pid, 0)
+        assert f"not reaping declared pid {pid}" in rig.log()
+    finally:
+        os.kill(pid, signal.SIGKILL)
+
+
 def test_sigterm_kills_the_agent_pages_killed_and_runs_post_run(rig, tmp_path):
     rig.configure(PHASES="audit:60", POST_RUN="hooks/post.sh")
     rig.hook("post.sh", 'echo "status=[$PHASE_STATUS]" >> "$CALLS/post"\n')
@@ -626,6 +728,19 @@ def test_every_daemon_disables_auto_update_and_has_a_minute_to_page_on_stop():
     assert plist["ExitTimeOut"] == 60
 
 
+def test_the_daemon_path_holds_no_bot_writable_directory():
+    assert _plist("security")["EnvironmentVariables"]["PATH"] == "/opt/homebrew/bin:/usr/bin:/bin"
+
+
+def test_every_runner_git_reads_the_root_owned_gitconfig():
+    out = subprocess.run([BASH, str(REPO / "scripts" / "runner" / "install.sh"), "--print-gitconfig"],
+                         capture_output=True, text=True, check=True).stdout
+    assert "helper = !/opt/homebrew/bin/gh auth git-credential" in out
+    src = (REPO / "scripts" / "runner" / "install.sh").read_text()
+    assert 'print_gitconfig > "$PREFIX/gitconfig"' in src
+    assert "git config --global" not in src
+
+
 def test_install_copies_hooks_helpers_and_the_bot_state_dir():
     src = (REPO / "scripts" / "runner" / "install.sh").read_text()
     for helper in ("nightly_pr_guard.py", "nightly_publish.py", "nightly_issue_prune.py", "nightly_green_base.py",
@@ -634,7 +749,14 @@ def test_install_copies_hooks_helpers_and_the_bot_state_dir():
         assert helper in src, helper
         assert (REPO / "scripts" / helper).is_file(), helper
     assert '"$SRC/hooks/"*' in src
-    assert 'install -d -o "$BOT" -m 700 "$BOT_HOME/radon-runner/state"' in src
+    assert 'for dir in "$BOT_HOME/radon-runner" "$BOT_HOME/radon-runner/state"; do' in src
+    assert 'as_bot /bin/mkdir -p -m 700 "$dir"' in src
+    # Root never writes, chmods or chowns a path inside the bot's home.
+    configure = src.split("configure_user() {", 1)[1].split("\n}\n", 1)[0]
+    for line in configure.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith(("local", "for ", "done", "sh ")):
+            assert stripped.startswith("as_bot "), stripped
 
 
 def test_the_gh_guard_shim_routes_pr_api_issue_and_alias_to_the_guard(tmp_path):

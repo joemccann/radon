@@ -2,7 +2,7 @@
 
 One loop run is what the operator would do by hand: open an agent CLI in a fresh clone of `main`, paste the loop's prompt, walk away. `scripts/runner/run_loop.sh <loop>` does exactly that:
 
-1. Take the loop's lock (a live run makes the new fire exit 0; a dead run's lock is reclaimed).
+1. Take the loop's lock (a live run makes the new fire page `skipped` and exit 0; a lock whose pid is gone or now belongs to a different process is reclaimed).
 2. Delete the previous clone and `git clone` `main` again, so nothing an agent left behind (files, `.git` hooks, config) survives to the next night.
 3. Prepend a header (date, branch `<BRANCH_PREFIX>/<date>`, time budget) to `.claude/runner-prompts/<loop>.md` from that clone.
 4. Run the first agent in `AGENTS` under `timeout`. The next agent runs only if one exits non-zero; a timeout ends the night. Anything the agent left running is killed with its process group.
@@ -19,7 +19,8 @@ Safety is where the runner runs, not what the script checks:
 | Control | Enforced by |
 |---|---|
 | Agent cannot read operator files, ssh keys, `~/.radon`, Keychain | Dedicated macOS user `_radonbot`, standard (non-admin), hidden |
-| Agent cannot edit the runner | `run_loop.sh`, `loops/*.env`, the hooks, their `lib/` helpers and the `gh` guard installed root-owned in `/usr/local/radon-runner` |
+| Agent cannot edit the runner | `run_loop.sh`, `loops/*.env`, the hooks, their `lib/` helpers, the `gh` guard and `gitconfig` installed root-owned in `/usr/local/radon-runner` |
+| Agent cannot plant a binary or git config the runner runs | The LaunchDaemon's `PATH` is `/opt/homebrew/bin:/usr/bin:/bin`; the bot's CLI directories (`~/.local/bin`, `~/.grok/bin`, `~/.bun/bin`) are prepended only for the agent. Every git the runner, the hooks and the agent run reads `/usr/local/radon-runner/gitconfig` (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM=1`), never `~/.gitconfig`, and the pre-run hook rebuilds the clone's `.git/config` before every phase |
 | No production credential in the clone | The clone gets no `.env`. `~/.radon-runner.env` may hold only `GH_TOKEN`, `PUSHOVER_USER` and `PUSHOVER_TOKEN`. The agent runs as `_radonbot`, so it can read that file. The runner unsets the Pushover keys in the agent process; `GH_TOKEN` stays so the agent can push. Do not put a production credential or an admin token in that file or anywhere in the bot's home |
 | Agent cannot merge or push `main` | A separate GitHub machine account with the Write role on this repo only, used through its classic `repo` token, plus the `main-review` repository ruleset on the default branch: 1 approving review, approval of the most recent push required, stale approvals dismissed on push. Its only bypass actor is the Repository admin role in pull-request mode, so an admin merges through a PR and never pushes `main` directly; the bot account is not exempt. The 27 required status checks stay in the classic branch protection on `main`, not in the ruleset. A token of the operator's own account would not do: it acts as the admin and bypasses the ruleset |
 
@@ -41,7 +42,7 @@ Where things live when you are done:
 | `/Users/_radonbot/radon-runner/work/<loop>` | bot | Tonight's clone, deleted and re-cloned every run |
 | `/Users/_radonbot/radon-runner/logs/<loop>/<date>.log` | bot, 700 | The run log, kept 14 days |
 | `/Users/_radonbot/radon-runner/state/<loop>` | bot, 700 | Per-loop state the runner never deletes: the security loops' private `scratch/`, deliver record, `held.git` (unreleased P0/P1 branches) and `keep/` |
-| `/Users/_radonbot/.radon-runner-reports-key` | bot, 600 | Write-only deploy key for the private `joemccann/radon-security-reports`; only the post-run hook uses it |
+| `/Users/_radonbot/.radon-runner-reports-key` | bot, 600 | Write deploy key for the private `joemccann/radon-security-reports`, used by the post-run hook. The agent runs as the same user and can read it, as it could read the old wrapper's key; a deploy key reaches only that one repository |
 | Operator login keychain: `github-radon-runner-bot`, `github-radon-runner-bot-token` | operator | The bot's GitHub password and token, for rotation |
 
 ### 1. Prerequisites (operator)
@@ -50,6 +51,12 @@ Where things live when you are done:
 # Homebrew first if the Mac has none: https://brew.sh
 brew install git gh coreutils python@3.13 uv bun node
 brew install --cask codex
+# gitleaks 8.30.1 for the security loops (docs/security-approved-tools.md), checksum-pinned, root-owned
+curl -fsSLo /tmp/gitleaks.tgz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_darwin_arm64.tar.gz \
+  && echo "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5  /tmp/gitleaks.tgz" | shasum -a 256 -c \
+  && tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks && sudo install -o root -g wheel -m 755 /tmp/gitleaks /usr/local/bin/gitleaks \
+  && sudo ln -sf /usr/local/bin/gitleaks /opt/homebrew/bin/gitleaks && rm /tmp/gitleaks.tgz /tmp/gitleaks
+/opt/homebrew/bin/gitleaks version   # 8.30.1
 sudo pmset -a sleep 0 displaysleep 10     # the Mac must stay awake at night
 ```
 
@@ -111,7 +118,7 @@ agy prints a Google URL and waits 60 seconds for the pasted code. Then check it:
 ~/.local/bin/agy -p="reply ok" --output-format text
 ```
 
-A reboot locks this keychain. After one, run `security unlock-keychain ~/Library/Keychains/login.keychain-db` in the bot shell; until then the agy rung fails and the loop moves to the next agent.
+A reboot locks this keychain, which also holds the bot's claude.ai session (step 8b.4). After one, run `security unlock-keychain ~/Library/Keychains/login.keychain-db` in the bot shell, then check `~/.local/bin/claude auth status`. Until then the agy rung fails and those loops move to the next agent, and both security loops (claude only) fail every phase.
 
 ### 6. Provider keys for fx (operator, then bot shell)
 
@@ -223,26 +230,32 @@ The `security` and `security-deepsec` loops need the bot's own Claude Code on th
    sudo cat /Users/_radonbot/.radon-runner-reports-key.pub | gh repo deploy-key add - -R joemccann/radon-security-reports --allow-write -t radon-runner-bot
    ```
 
+Steps 6 to 8 write into the bot's home only as the bot: your account reads your files and pipes them to a `tar` that runs as `_radonbot`, so nothing runs as root on a path the bot can write. `B` is the bot's state directory.
+
 6. Operator tab, the state directories, then migrate the private scratch and deliver records:
 
    ```bash
-   sudo install -d -o _radonbot -g staff -m 700 /Users/_radonbot/radon-runner/state /Users/_radonbot/radon-runner/state/security /Users/_radonbot/radon-runner/state/security-deepsec
-   sudo rsync -a --exclude .github-known-hosts ~/radon-weekend/.security-nightly-scratch/ /Users/_radonbot/radon-runner/state/security/scratch/ && sudo rsync -a ~/radon-weekend/.security-deliver/ /Users/_radonbot/radon-runner/state/security/.security-deliver/
-   sudo rsync -a --exclude .github-known-hosts ~/radon-weekend/.security-deepsec-scratch/ /Users/_radonbot/radon-runner/state/security-deepsec/scratch/ && sudo rsync -a ~/radon-weekend/.security-deepsec-deliver/ /Users/_radonbot/radon-runner/state/security-deepsec/.security-deepsec-deliver/
+   B=/Users/_radonbot/radon-runner/state; bot() { sudo -u _radonbot "$@"; }
+   bot /bin/mkdir -p -m 700 $B/security/scratch $B/security/.security-deliver $B/security-deepsec/scratch $B/security-deepsec/.security-deepsec-deliver
+   tar -C ~/radon-weekend/.security-nightly-scratch -cf - --exclude .github-known-hosts . | bot tar -C $B/security/scratch -xf -
+   tar -C ~/radon-weekend/.security-deliver -cf - . | bot tar -C $B/security/.security-deliver -xf -
+   tar -C ~/radon-weekend/.security-deepsec-scratch -cf - --exclude .github-known-hosts . | bot tar -C $B/security-deepsec/scratch -xf -
+   tar -C ~/radon-weekend/.security-deepsec-deliver -cf - . | bot tar -C $B/security-deepsec/.security-deepsec-deliver -xf -
    ```
 
 7. Operator tab, the held P0/P1 branches (never via `/tmp`):
 
    ```bash
-   for l in security security-deepsec; do git --git-dir=$HOME/radon-weekend/.gitdirs-agent/$l.git bundle create $HOME/radon-weekend/$l-held.bundle --branches && sudo install -o _radonbot -g staff -m 600 $HOME/radon-weekend/$l-held.bundle /Users/_radonbot/radon-runner/state/$l/held.bundle && rm $HOME/radon-weekend/$l-held.bundle; done
+   for l in security security-deepsec; do git --git-dir=$HOME/radon-weekend/.gitdirs-agent/$l.git bundle create - --branches | bot /bin/sh -c 'umask 077; cat > "$1"' sh $B/$l/held.bundle; done
    ```
 
 8. Operator tab, DeepSec's workspace sources and incremental state, with its recorded `rootPath` re-pointed at the runner clone:
 
    ```bash
-   sudo install -d -o _radonbot -g staff -m 700 /Users/_radonbot/radon-runner/state/security-deepsec/keep /Users/_radonbot/radon-runner/state/security-deepsec/keep/.deepsec && (cd ~/radon-weekend/radon-security-deepsec/.deepsec && sudo cp package.json package-lock.json pnpm-workspace.yaml deepsec.config.ts generated-matchers.ts AGENTS.md README.md /Users/_radonbot/radon-runner/state/security-deepsec/keep/.deepsec/)
-   sudo rsync -a ~/radon-weekend/radon-security-deepsec/data/radon/ /Users/_radonbot/radon-runner/state/security-deepsec/keep/data/radon/ && sudo find /Users/_radonbot/radon-runner/state/security-deepsec/keep/data/radon -name '*.json' -exec sed -i '' 's#/Users/asymmetricholdingsltd./radon-weekend/radon-security-deepsec#/Users/_radonbot/radon-runner/work/security-deepsec#g' {} +
-   sudo chown -R _radonbot:staff /Users/_radonbot/radon-runner/state
+   bot /bin/mkdir -p -m 700 $B/security-deepsec/keep/.deepsec $B/security-deepsec/keep/data/radon
+   tar -C ~/radon-weekend/radon-security-deepsec/.deepsec -cf - package.json package-lock.json pnpm-workspace.yaml deepsec.config.ts generated-matchers.ts AGENTS.md README.md | bot tar -C $B/security-deepsec/keep/.deepsec -xf -
+   tar -C ~/radon-weekend/radon-security-deepsec/data/radon -cf - . | bot tar -C $B/security-deepsec/keep/data/radon -xf -
+   bot find $B/security-deepsec/keep/data/radon -name '*.json' -exec sed -i '' 's#/Users/asymmetricholdingsltd./radon-weekend/radon-security-deepsec#/Users/_radonbot/radon-runner/work/security-deepsec#g' {} +
    ```
 
 9. Bot shell, unbundle the held branches into each loop's private bare repository, then bootstrap DeepSec (rail 8: the operator does this, never a nightly run):
@@ -295,7 +308,7 @@ It passes when the log starts with `starting grok`, a draft PR on `documentation
 | Rotate the GitHub token (before its expiry) | step 7.5 to 7.6, then step 8 |
 | Release a held security P0/P1 | `sudo -u _radonbot sh -c 'echo "released: <finding-id>" >> ~/radon-runner/state/<loop>/scratch/<run-id>/run-record.md'` |
 | Read a security loop's private report | the Pushover page's "Open private report" link (`joemccann/radon-security-reports`) |
-| After a reboot | `security unlock-keychain ~/Library/Keychains/login.keychain-db` in the bot shell (agy only) |
+| After a reboot | `security unlock-keychain ~/Library/Keychains/login.keychain-db` in the bot shell, then `~/.local/bin/claude auth status`. Until then agy fails and both security loops fail every phase |
 | Re-sign a CLI | the bot shell, then the sign-in command from step 4 |
 
 ## Troubleshooting
@@ -309,7 +322,8 @@ It passes when the log starts with `starting grok`, a draft PR on `documentation
 | Signup form shows `joemccann` | Browser autofill | Clear the username and password fields, paste the bot's |
 | PR author is `joemccann`, not the bot | `GH_TOKEN` holds your token | Replace it with the bot's (step 8) |
 | Log stops at `starting agy`, then the next agent | Keychain locked after a reboot | Unlock it (Operate) |
-| `no timeout or gtimeout on PATH` | coreutils missing | `brew install coreutils` |
+| A security loop's log shows claude `not logged in` on every rung, every phase `FAILED` | Keychain locked after a reboot, so the claude.ai session is unreadable | Unlock it, then `~/.local/bin/claude auth status` (Operate); re-sign with step 8b.4 if still logged out |
+| `no timeout or gtimeout in /opt/homebrew/bin:/usr/bin:/bin` | coreutils missing | `brew install coreutils` |
 
 ## Loop config
 
@@ -325,10 +339,10 @@ Optional knobs (empty means off; the security loops use them):
 | `AGENTS_RESOLVER` | A root-owned script under `/usr/local/radon-runner`, run as `/opt/homebrew/bin/python3.13 -I <script> --rungs`; its stdout replaces `AGENTS`. Empty or failed output keeps `AGENTS` and is logged |
 | `KEEP_PATHS` | Relative paths moved into `state/<loop>/keep/` before the re-clone and back after it. Whatever is in `keep/` is always restored, so a crash leaves nothing behind and an operator can seed it |
 | `PHASES` | `name:secs ...`: one agent session per phase with its own timeout and a header carrying `Phase:` and `State:`. Every phase runs whatever the earlier rc; each pages `radon <loop> <phase>`. The runner exits 75 if any phase is not OK and 2 if one was refused |
-| `PRE_RUN` / `POST_RUN` | Root-owned hooks under `/usr/local/radon-runner`, run around each phase with `LOOP`, `PHASE`, `WORK`, `LOOP_STATE`, `BRANCH` (and, after it, `PHASE_RC`, `PHASE_LOG`, `PHASE_START_MARK`). A non-zero `PRE_RUN` skips the agent (`REFUSED`); `POST_RUN` prints `status=` (`OK...` means success), `pr_url=` and `report_url=` for the page |
+| `PRE_RUN` / `POST_RUN` | Root-owned hooks under `/usr/local/radon-runner`, run around each phase with `LOOP`, `PHASE`, `WORK`, `LOOP_STATE`, `BRANCH` (and, after it, `PHASE_RC`, `PHASE_LOG`, `PHASE_START_MARK`), the runner's `PATH`, and a 900s cap. A non-zero `PRE_RUN` skips the agent (`REFUSED`); `POST_RUN` prints `status=` (`OK...` means success; the last one printed wins), `pr_url=` and `report_url=` for the page. A `POST_RUN` that prints no `status=` (timed out, crashed, missing) fails the phase. With `PRE_RUN` set, the header tells the agent to branch from `HEAD` (the base the hook pinned), not `origin/main` |
 | `GH_GUARD=1` | Puts `/usr/local/radon-runner/guard/<loop>/gh` first on the agent's `PATH`: every `pr` / `api` / `issue` / `alias` call goes through `nightly_pr_guard.py` |
 
-Every agent gets `RADON_RUNNER_LOOP_STATE` (the loop's state directory), `RADON_RUNNER_PIDFILE` (list a detached job's pid there and the runner reaps it), `RADON_RUNNER_AGENT` and `RADON_RUNNER_MODEL`. After each agent the runner kills its process group, then every bot process whose cwd is in the loop's clone or state and every declared pid that started during the phase. On SIGTERM it does the same, pages `KILLED`, gives `POST_RUN` ten seconds and exits 143. The LaunchDaemon sets `DISABLE_AUTOUPDATER=1` and `ExitTimeOut` 60. PR lookup ignores fork PRs.
+Every agent gets `RADON_RUNNER_LOOP_STATE` (the loop's state directory), `RADON_RUNNER_PIDFILE` (list a detached job's pid there and the runner reaps it), `RADON_RUNNER_AGENT` and `RADON_RUNNER_MODEL`. After each agent the runner kills its process group, then every bot process whose cwd is in the loop's clone or state and every declared pid that started during the phase, except one that is, or descends from, another loop's live runner. On SIGTERM, including one that arrives while a hook runs, it does the same, pages `KILLED`, gives `POST_RUN` ten seconds and exits 143. The LaunchDaemon sets `DISABLE_AUTOUPDATER=1` and `ExitTimeOut` 60. PR lookup ignores fork PRs.
 
 ## Migration from the per-loop wrappers
 

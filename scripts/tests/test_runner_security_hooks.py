@@ -110,6 +110,7 @@ def rig(request, tmp_path):
                 "REPO_URL": str(origin), "BRANCH": f"{loop}/2026-09-28", "AGENT_UNSET": UNSET,
                 "KEEP_PATHS": ".deepsec data/radon" if loop == "security-deepsec" else "",
                 "RUNNER_PYTHON": sys.executable, "PHASE_LOG": str(r.slice), "PHASE_START_MARK": str(r.mark),
+                "RADON_RUNNER_GH": str(bin_dir / "gh"),
                 "RADON_SECURITY_REPORTS_REMOTE": str(reports), "STUB_ISSUE": "204",
                 "STUB_COMMENT_URL": "https://github.com/joemccann/radon/issues/204#issuecomment-555", **extra}
 
@@ -165,6 +166,39 @@ def test_pre_detaches_at_the_base_cleans_the_clone_and_keeps_local_branches(rig)
     branches = subprocess.run(["git", "branch"], cwd=rig.work, capture_output=True, text=True).stdout
     assert f"{rig.loop}/2026-09-28" in branches
     assert (rig.state / "held.git" / "HEAD").is_file()
+
+
+def test_pre_rebuilds_the_clones_git_config_before_any_git_runs(rig, tmp_path):
+    ran = tmp_path / "smudge.ran"
+    _git("checkout", "-qb", f"{rig.loop}/2026-09-28", cwd=rig.work)
+    _git("config", f"branch.{rig.loop}/2026-09-28.remote", "origin", cwd=rig.work)
+    _git("config", f"branch.{rig.loop}/2026-09-28.merge", f"refs/heads/{rig.loop}/2026-09-28", cwd=rig.work)
+    _git("config", "filter.x.smudge", f"touch {ran}; cat", cwd=rig.work)
+    _git("config", "core.sshCommand", f"touch {ran}", cwd=rig.work)
+    (rig.work / ".git" / "info").mkdir(exist_ok=True)
+    (rig.work / ".git" / "info" / "attributes").write_text("* filter=x\n")
+
+    proc = rig.pre(phase="remediate")
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert not ran.exists()
+    assert not (rig.work / ".git" / "info" / "attributes").exists()
+    config = (rig.work / ".git" / "config").read_text()
+    assert "filter" not in config and "sshCommand" not in config
+    assert f"url = {rig.origin}" in config
+    merge = subprocess.run(["git", "config", f"branch.{rig.loop}/2026-09-28.merge"], cwd=rig.work,
+                           capture_output=True, text=True).stdout.strip()
+    assert merge == f"refs/heads/{rig.loop}/2026-09-28"
+
+
+def test_hooks_never_resolve_a_binary_from_the_bots_path():
+    for hook in ("security_pre.sh", "security_post.sh"):
+        body = (HOOKS / hook).read_text()
+        assert 'export PATH="${RADON_RUNNER_PATH:-/opt/homebrew/bin:/usr/bin:/bin}"' in body, hook
+        assert 'GH="${RADON_RUNNER_GH:-/opt/homebrew/bin/gh}"' in body, hook
+        assert "command -v gh" not in body, hook
+    pre = (HOOKS / "security_pre.sh").read_text()
+    assert "--binary" in pre and "claude --version" not in pre
 
 
 def test_pre_refuses_outside_the_runner_clone(rig, tmp_path):
@@ -388,6 +422,13 @@ def test_the_key_is_only_in_the_hooks_ssh_command():
 
 
 # --- security_post.sh: dead-man ----------------------------------------------------
+
+
+def test_post_prints_its_verdict_before_any_network_step(rig):
+    out = rig.post(output=f"{rig.marker} audit run_id=r1\n")
+    lines = out["_proc"].stdout.splitlines()
+    assert lines[0] == "status=OK"
+    assert lines[-3].startswith("status=OK")
 
 
 def test_the_deadman_is_a_sanitized_phase_stamp_status_line(rig):

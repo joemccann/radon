@@ -9,6 +9,8 @@ directory (`$RADON_RUNNER_LOOP_STATE`). You are in a fresh clone of
 newest CI-green `main` before every phase; your local branches survive
 between the phases of one night, nothing in the clone survives to the next.
 The private state directory survives every night.
+Create or resume the dated branch from the detached HEAD (the pinned
+CI-green base), never from `origin/main`.
 
 Toolchain: before the night's first test run,
 `uv venv .venv --python python3.13 && uv pip install --python .venv/bin/python -r requirements.txt -r requirements-dev.txt pytest pytest-asyncio pytest-xdist`,

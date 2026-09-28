@@ -14,11 +14,13 @@
 set -uo pipefail
 
 : "${LOOP:?}" "${PHASE:?}" "${WORK:?}" "${LOOP_STATE:?}" "${RUNNER_DIR:?}" "${REPO_URL:?}"
+# Never a bot-writable directory: the agent's CLI dirs are not on this PATH.
+export PATH="${RADON_RUNNER_PATH:-/opt/homebrew/bin:/usr/bin:/bin}"
 PY="${RUNNER_PYTHON:-/opt/homebrew/bin/python3.13}"
-GH="${RADON_RUNNER_GH:-$(command -v gh || true)}"
+GH="${RADON_RUNNER_GH:-/opt/homebrew/bin/gh}"
 GH_REPO="${RADON_WEEKEND_GH_REPO:-joemccann/radon}"
 SCRATCH="$LOOP_STATE/scratch"
-TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+TIMEOUT_BIN="$(command -v gtimeout || command -v timeout || true)"
 
 case "$LOOP" in
   security) LABEL=security-nightly; CHECKPOINT_KEY=head_sha ;;
@@ -43,6 +45,34 @@ bounded() { "$TIMEOUT_BIN" "$1" "${@:2}"; }
   || refuse "the phase is not running in the runner clone of this loop"
 [[ "$(hostgit config --get remote.origin.url 2>/dev/null)" == "$REPO_URL" ]] \
   || refuse "the clone's origin is not the loop's repository"
+
+# The clone survives between phases, so an earlier phase could have left
+# filters, drivers or transport settings in .git/config or attributes in
+# .git/info. Rebuild the config from a known template before any git runs
+# (only the core case settings and each branch's origin tracking carry over).
+reset_clone_config() {
+  local git_dir="$WORK/.git" cfg new key value branch
+  cfg="$git_dir/config"
+  new="$git_dir/config.radon-runner"
+  [[ -d "$git_dir" && ! -L "$git_dir" && -f "$cfg" ]] || refuse "the clone's .git is not a plain directory"
+  rm -f -- "$new" "$git_dir/info/attributes" "$git_dir/config.worktree"
+  {
+    printf '[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n\tlogallrefupdates = true\n'
+    for key in ignorecase precomposeunicode; do
+      [[ "$(git config --file "$cfg" --bool --get "core.$key" 2>/dev/null)" == true ]] && printf '\t%s = true\n' "$key"
+    done
+    printf '[remote "origin"]\n\turl = %s\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n' "$REPO_URL"
+  } > "$new" || refuse "could not rebuild the clone's git config"
+  while read -r key value; do
+    branch="${key#branch.}"
+    branch="${branch%.merge}"
+    [[ "$value" == refs/heads/* && "$branch" =~ ^[A-Za-z0-9._/-]+$ ]] || continue
+    git config --file "$new" "branch.$branch.remote" origin
+    git config --file "$new" "branch.$branch.merge" "$value"
+  done < <(git config --file "$cfg" --get-regexp '^branch\..*\.merge$' 2>/dev/null || true)
+  mv -f -- "$new" "$cfg" || refuse "could not rebuild the clone's git config"
+}
+reset_clone_config
 
 # REL-180 (R-506): CREDENTIAL-FREE is a check, not a comment.
 refuse_credential_files() {
@@ -101,8 +131,14 @@ install -d -m 700 "$SCRATCH"
 
 # The Claude Code CLI is not version-pinned: page once per version that
 # references an env name nobody reviewed. Non-fatal, as the old 23:50 job was.
-bounded 60 "$PY" -I "$RUNNER_DIR/lib/claude_cli_env_drift.py" --notify --state-dir "$LOOP_STATE" \
-  --reviewed "$RUNNER_DIR/lib/claude_cli_env_reviewed.txt" >&2 || true
+# Reads the installed binary's bytes; never executes the bot-writable CLI.
+claude_bin="$("$PY" -I -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$HOME/.local/bin/claude" 2>/dev/null || true)"
+if [[ -f "$claude_bin" ]]; then
+  bounded 60 "$PY" -I "$RUNNER_DIR/lib/claude_cli_env_drift.py" --notify --state-dir "$LOOP_STATE" \
+    --binary "$claude_bin" --reviewed "$RUNNER_DIR/lib/claude_cli_env_reviewed.txt" >&2 || true
+else
+  echo "claude CLI not installed at ~/.local/bin/claude; env-drift check skipped" >&2
+fi
 
 # REL-187: ground truth is the newest CI-green main, stale-but-green over
 # fresh-but-red; GitHub unreachable keeps origin/main. The agent's local
