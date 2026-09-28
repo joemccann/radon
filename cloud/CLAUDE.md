@@ -480,7 +480,9 @@ the inventory-and-skip. Contract:
 `setup-vps.sh` also inventories `radon-grok-pin-bump.{service,timer}` so a
 fresh host has the unit files. `enable_services` skips both until Joe
 reviews the pin smoke path. The weekly timer stays disabled; enabling it
-would side-install a candidate Grok CLI and open a pin-bump PR. Drift ack:
+would side-install a candidate Grok CLI and open a pin-bump PR. The unit
+writes no `service_health` row (`EXEMPT_UNITS` `gap:`); a failed run pages
+via the unit watchdog. Drift ack:
 `not-installed:radon-grok-pin-bump.*`. Auto-sync stays off.
 `cloud/tests/test_grok_pin_bump_setup.py` pins the inventory-and-skip.
 Contract: [`docs/grok-page-responder.md`](../docs/grok-page-responder.md).
