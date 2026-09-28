@@ -176,45 +176,47 @@ path uses the same validator. Pickup also folds in the `watchdog_pages`
 row (page id, severity, first-seen, result) when Turso is reachable, and
 adds CI run URLs on a later cycle once `gh run list` has them.
 
-## Grok model and CLI pin
+## Grok model and CLI (track latest)
 
-`config/grok_pin.json` is the only allowed model/CLI pair. The responder
-passes `-m` and `--reasoning-effort` from that file and checks
-`grok --version` plus `grok models` before each run. A CLI mismatch or a
-missing pinned model falls back to `last_known_good` and sends a warning
-Pushover. It never runs on the CLI's unpinned default. `--no-auto-update`
-stays on.
+Default is the newest stable CLI and the live default model. The responder
+resolves the model id at run time from `grok models` (or the promoted
+last-known-good) and always passes it with `-m`. Every log line,
+`watchdog_pages.result`, commit body, and PR `How it was verified` records
+`Ran <model> on CLI <version>`. `--no-auto-update` stays on at incident
+time so the CLI never upgrades itself mid-run.
 
-`cloud/scripts/setup-grok-page-responder.sh` installs
-`grok update --version <pin.cli_version> --no-auto-update`.
+Last-known-good is a machine-written state file owned by the daily
+upgrader: `/var/lib/radon/grok_lkg.json` (`cli_version`, `binary_path`,
+`model`, `promoted_at`, `smoke_result`). There is no checked-in pin.
 
-### Hand bump
+If the current model or CLI errors at incident time (non-zero exit,
+model-unavailable, unparseable output with no `RESULT:` line), the
+responder retries once on last-known-good and alerts. A valid
+`RESULT: failed` line is not a retry.
 
-1. Edit `config/grok_pin.json`: set `model` / `cli_version` / `reasoning_effort`.
-   Move today's values into `last_known_good`.
-2. On the VPS: `sudo -u radon -H grok update --version <new> --no-auto-update`.
-3. Confirm `grok --version` and `grok models` match the pin.
-4. Open a PR with the six IR sections. Joe merges.
+A shared flock (`/var/lib/radon/grok-runtime.lock`) serializes the
+responder against a live promotion.
 
-### Rollback to last-known-good
+### Daily upgrade timer (enabled)
 
-1. Copy `last_known_good` over the live `model` / `cli_version` / `reasoning_effort`
-   fields in `config/grok_pin.json`.
-2. On the VPS: `sudo -u radon -H grok update --version <lkg> --no-auto-update`.
-3. Do not enable auto-update.
+`radon-grok-upgrade.{service,timer}` is installed and enabled. Daily
+07:40 UTC it runs `scripts/grok_upgrade.py`: `grok update` into a
+candidate under `~/.grok/downloads` (scratch `GROK_HOME`), resolves the
+newest default model, and smokes a canned dry-run that must return
+`RESULT:` plus a Part 1 validator-passing body.
 
-### Weekly bump timer (disabled)
-
-`radon-grok-pin-bump.{service,timer}` is inventoried and stays disabled.
-When enabled it runs `scripts/grok_pin_bump.py`: `grok update --check --json`
-and `grok models`, side-installs a candidate under a scratch `GROK_HOME`,
-smokes a canned dry-run that must return `RESULT:` plus a validator-passing
-body, then commits `fix/grok-pin-*` in the responder clone for pickup.
-A failed smoke alerts and leaves the pin alone. Enable only after review:
+- Pass: promote immediately (switch the live symlink), write LKG. No PR.
+- Fail: stay on last-known-good and alert via Pushover / watchdog.
+- Incident lock held: skip the promote and retry next fire.
 
 ```bash
-systemctl enable --now radon-grok-pin-bump.timer
+systemctl status radon-grok-upgrade.timer
+journalctl -u radon-grok-upgrade.service -n 50
+cat /var/lib/radon/grok_lkg.json
 ```
+
+`cloud/scripts/setup-grok-page-responder.sh` installs the latest stable
+CLI and seeds LKG from the live default.
 
 ## Push guard
 
@@ -329,12 +331,12 @@ running` every 30 seconds.
 | `scripts/watchdog/grouping.py` | After grouped IB P1 2xx (creds required) |
 | `scripts/grok_page_responder.py` | Poller |
 | `scripts/ir_pr_description.py` | IR PR section validator |
-| `scripts/grok_pin.py` | Pin parse + fallback |
-| `scripts/grok_pin_bump.py` | Weekly candidate smoke (disabled) |
-| `config/grok_pin.json` | Model / CLI pin |
+| `scripts/grok_runtime.py` | Model resolve, LKG IO, lock, fallback |
+| `scripts/grok_upgrade.py` | Daily smoke + auto-promote |
+| `/var/lib/radon/grok_lkg.json` | Machine-written last-known-good |
 | `cloud/services/radon-grok-page-responder.*` | VPS timer |
-| `cloud/services/radon-grok-pin-bump.*` | Weekly pin check, installed disabled |
-| `cloud/scripts/setup-grok-page-responder.sh` | Clone + stripped env + pinned grok CLI |
+| `cloud/services/radon-grok-upgrade.*` | Daily track-latest, installed enabled |
+| `cloud/scripts/setup-grok-page-responder.sh` | Clone + stripped env + latest grok CLI |
 | `scripts/deploy_notify.py` | Live-gate Pushover |
 | `cloud/scripts/deploy.sh` | `notify_release_live` after green marker |
 

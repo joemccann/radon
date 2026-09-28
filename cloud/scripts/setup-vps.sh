@@ -104,8 +104,8 @@ readonly SERVICE_FILES=(
   radon-incident-watchdog.timer
   radon-grok-page-responder.service
   radon-grok-page-responder.timer
-  radon-grok-pin-bump.service
-  radon-grok-pin-bump.timer
+  radon-grok-upgrade.service
+  radon-grok-upgrade.timer
   radon-flex-pull.service
   radon-flex-pull.timer
   radon-llm-index.service
@@ -1301,9 +1301,6 @@ enable_services() {
     # exists. Enabling the timer would fire a placeholder-baseline oneshot.
     [[ "$svc" == "radon-knowledge-eval.service" ]] && continue
     [[ "$svc" == "radon-knowledge-eval.timer" ]] && continue
-    # Grok pin-bump stays copied but disabled until Joe reviews the smoke path.
-    [[ "$svc" == "radon-grok-pin-bump.service" ]] && continue
-    [[ "$svc" == "radon-grok-pin-bump.timer" ]] && continue
     # Broker-only. Combined/app copy the unit but do not enable it. Certs plus
     # `systemctl enable --now` happen on the broker after the split.
     [[ "$svc" == "radon-ib-gateway-remote.service" ]] && continue

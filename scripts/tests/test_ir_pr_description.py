@@ -100,6 +100,14 @@ class TestCompose:
         assert "36361801938" in body
         assert "Ledger result" in body
 
+    def test_runtime_stamp_lands_in_how_it_was_verified(self):
+        _title, body = desc.description_from_commit(
+            VALID_BODY + "\nRan grok-4.7 on CLI 1.0.41.\n",
+            branch="fix/grok-page-ledger-timeout",
+        )
+        verified = desc.parse_ir_sections(body)["How it was verified"]
+        assert "Ran grok-4.7 on CLI 1.0.41." in verified
+
     def test_extracts_page_id(self):
         assert (
             desc.extract_page_id(VALID_BODY)

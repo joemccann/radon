@@ -132,6 +132,8 @@ def compose_ir_pr_body(
     *,
     page: dict | None = None,
     ci_urls: Iterable[str] | None = None,
+    model: str | None = None,
+    cli_version: str | None = None,
 ) -> str:
     """Render the six IR sections plus optional page facts and CI links."""
     merged = dict(sections)
@@ -158,6 +160,11 @@ def compose_ir_pr_body(
         verified = merged.get("How it was verified") or ""
         link_lines = "\n".join(f"- {url}" for url in urls)
         merged["How it was verified"] = f"{verified}\n\nCI:\n{link_lines}".strip()
+    if model and cli_version:
+        verified = merged.get("How it was verified") or ""
+        stamp = f"Ran {model} on CLI {cli_version}."
+        if stamp not in verified:
+            merged["How it was verified"] = f"{verified}\n\n{stamp}".strip()
     parts = []
     for name in REQUIRED_SECTIONS:
         parts.append(f"## {name}\n\n{merged[name].strip()}\n")
@@ -170,9 +177,27 @@ def description_from_commit(
     branch: str | None = None,
     page: dict | None = None,
     ci_urls: Iterable[str] | None = None,
+    model: str | None = None,
+    cli_version: str | None = None,
 ) -> tuple[str, str]:
     """Return ``(title_summary, body)`` from a grok commit message."""
     sections = validate_ir_description(commit_message, branch=branch)
-    body = compose_ir_pr_body(sections, page=page, ci_urls=ci_urls)
+    if not model or not cli_version:
+        try:
+            import grok_runtime
+        except ImportError:
+            grok_runtime = None
+        if grok_runtime is not None:
+            stamp = grok_runtime.extract_runtime_stamp(commit_message)
+            if stamp:
+                model = model or stamp[0]
+                cli_version = cli_version or stamp[1]
+    body = compose_ir_pr_body(
+        sections,
+        page=page,
+        ci_urls=ci_urls,
+        model=model,
+        cli_version=cli_version,
+    )
     validate_ir_description(body, branch=branch)
     return title_from_sections(sections), body

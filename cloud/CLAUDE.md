@@ -477,15 +477,14 @@ Auto-sync stays off. `cloud/tests/test_knowledge_eval_setup.py` pins
 the inventory-and-skip. Contract:
 [`docs/knowledge-embeddings.md`](../docs/knowledge-embeddings.md).
 
-`setup-vps.sh` also inventories `radon-grok-pin-bump.{service,timer}` so a
-fresh host has the unit files. `enable_services` skips both until Joe
-reviews the pin smoke path. The weekly timer stays disabled; enabling it
-would side-install a candidate Grok CLI and open a pin-bump PR. The unit
-writes no `service_health` row (`EXEMPT_UNITS` `gap:`); a failed run pages
-via the unit watchdog. Drift ack:
-`not-installed:radon-grok-pin-bump.*`. Auto-sync stays off.
-`cloud/tests/test_grok_pin_bump_setup.py` pins the inventory-and-skip.
-Contract: [`docs/grok-page-responder.md`](../docs/grok-page-responder.md).
+`setup-vps.sh` inventories `radon-grok-upgrade.{service,timer}` and
+`enable_services` enables both. Daily 07:40 UTC. The oneshot side-installs
+the latest stable Grok CLI, smokes it, and auto-promotes on pass (writes
+`/var/lib/radon/grok_lkg.json`). A failed smoke stays on last-known-good
+and pages via Pushover plus the unit watchdog. The job heartbeats
+`service_health` as `grok-upgrade` (26h daily window). Contract:
+[`docs/grok-page-responder.md`](../docs/grok-page-responder.md).
+`cloud/tests/test_grok_upgrade_setup.py` pins the inventory-and-enable.
 
 
 Canonical unit files are copied root-owned to `/etc/systemd/system`; they are

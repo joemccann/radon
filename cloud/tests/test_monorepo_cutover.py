@@ -521,7 +521,7 @@ def test_runtime_code_paths_are_canonical_while_secret_path_remains_stable() -> 
     }
     stripped = {
         "radon-grok-page-responder.service",
-        "radon-grok-pin-bump.service",
+        "radon-grok-upgrade.service",
     }
     for name, text in unit_texts.items():
         for line in text.splitlines():

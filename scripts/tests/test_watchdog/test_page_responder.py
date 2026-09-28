@@ -28,7 +28,7 @@ from grok_page_responder import (
     run_cycle,
     sync_remote_clone,
 )
-import grok_pin
+import grok_runtime
 from watchdog import units as units_mod
 from watchdog.check import CheckOutcome
 from watchdog.pages import (
@@ -229,7 +229,7 @@ class TestResponder:
     def test_builds_grok_command_from_prompt_file(self, tmp_path):
         prompt = tmp_path / "page.prompt.txt"
         prompt.write_text("diagnose")
-        cmd = build_grok_command(prompt, tmp_path)
+        cmd = build_grok_command(prompt, tmp_path, model="grok-4.7")
         assert "--prompt-file" in cmd
         assert str(prompt) in cmd
         assert "--always-approve" in cmd
@@ -237,7 +237,14 @@ class TestResponder:
         assert "json" in cmd
         assert cmd[cmd.index("-m") + 1] == "grok-4.7"
         assert cmd[cmd.index("--reasoning-effort") + 1] == "high"
+        assert "--no-auto-update" in cmd
         assert "-p" not in cmd
+
+    def test_build_grok_command_refuses_implicit_model(self, tmp_path):
+        prompt = tmp_path / "page.prompt.txt"
+        prompt.write_text("diagnose")
+        with pytest.raises(grok_runtime.GrokRuntimeError, match="implicit"):
+            build_grok_command(prompt, tmp_path)
 
     def test_refused_pin_does_not_launch_grok(self, db_conn, tmp_path, monkeypatch):
         monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
@@ -254,19 +261,83 @@ class TestResponder:
             called.append(cmd)
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        runtime = grok_pin.ResolvedRuntime(
+        runtime = grok_runtime.ResolvedRuntime(
             model="grok-4.7",
             reasoning_effort="high",
             cli_version="1.0.3",
+            binary_path="grok",
             used_fallback=True,
-            warning="pinned model unavailable; refusing unpinned default",
+            warning="no default model; refusing implicit CLI default",
             refused=True,
+            source="none",
         )
         rc = run_cycle(tmp_path, now=NOW, grok_runner=runner, pin_runtime=runtime)
         assert rc == 0
         assert called == []
         status = db_conn.execute("SELECT status FROM watchdog_pages").fetchone()[0]
         assert status == "pending"
+
+    def test_incident_error_retries_last_known_good(self, db_conn, tmp_path, monkeypatch):
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        lkg_path = tmp_path / "grok_lkg.json"
+        lkg_path.write_text(json.dumps({
+            "cli_version": "1.0.3",
+            "binary_path": str(tmp_path / "lkg-grok"),
+            "model": "grok-4.6",
+            "reasoning_effort": "high",
+            "promoted_at": "2026-09-01T00:00:00Z",
+            "smoke_result": "stand_down: previous",
+        }), encoding="utf-8")
+        monkeypatch.setenv("RADON_GROK_LKG_PATH", str(lkg_path))
+        monkeypatch.setenv("RADON_GROK_RUNTIME_LOCK", str(tmp_path / "runtime.lock"))
+        enqueue_delivered_page(
+            service="vcg-scan",
+            severity="P1",
+            kind="stale",
+            message="silent",
+            now=NOW,
+        )
+        calls: list[list[str]] = []
+
+        def runner(cmd, **_kwargs):
+            calls.append(list(cmd))
+            if "-m" in cmd and cmd[cmd.index("-m") + 1] == "grok-4.7":
+                return SimpleNamespace(
+                    returncode=1, stdout="", stderr="model grok-4.7 is unavailable"
+                )
+            return SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps({
+                    "text": "RESULT: stand_down | recovered on last-known-good"
+                }),
+                stderr="",
+            )
+
+        runtime = grok_runtime.ResolvedRuntime(
+            model="grok-4.7",
+            reasoning_effort="high",
+            cli_version="1.0.41",
+            binary_path="grok",
+            used_fallback=False,
+            warning=None,
+            refused=False,
+            source="models",
+        )
+        with patch("grok_page_responder._send_followup"), patch(
+            "grok_page_responder._send_pin_warning"
+        ) as warn:
+            rc = run_cycle(
+                tmp_path, now=NOW, grok_runner=runner, pin_runtime=runtime
+            )
+        assert rc == 0
+        assert len(calls) == 2
+        assert calls[0][calls[0].index("-m") + 1] == "grok-4.7"
+        assert calls[1][calls[1].index("-m") + 1] == "grok-4.6"
+        assert "--no-auto-update" in calls[0] and "--no-auto-update" in calls[1]
+        warn.assert_called_once()
+        result = db_conn.execute("SELECT result FROM watchdog_pages").fetchone()[0]
+        assert "stand_down" in result
+        assert "Ran grok-4.6 on CLI 1.0.3." in result
 
     def test_followup_push_is_not_emergency(self):
         payload = build_followup_payload(
@@ -327,14 +398,27 @@ class TestResponder:
                 stderr="",
             )
 
+        runtime = grok_runtime.ResolvedRuntime(
+            model="grok-4.7",
+            reasoning_effort="high",
+            cli_version="1.0.41",
+            binary_path="grok",
+            used_fallback=False,
+            warning=None,
+            refused=False,
+            source="models",
+        )
         with patch("grok_page_responder._send_followup") as followup:
-            rc = run_cycle(tmp_path, now=NOW, grok_runner=runner)
+            rc = run_cycle(
+                tmp_path, now=NOW, grok_runner=runner, pin_runtime=runtime
+            )
         assert rc == 0
         row = db_conn.execute(
             "SELECT status, result FROM watchdog_pages"
         ).fetchone()
         assert row[0] == "done"
         assert "stand_down" in row[1]
+        assert "Ran grok-4.7 on CLI 1.0.41." in row[1]
         followup.assert_called_once()
 
     def test_failed_run_releases_then_skips(self, db_conn, tmp_path, monkeypatch):
@@ -352,6 +436,7 @@ class TestResponder:
         def boom(*_a, **_k):
             return SimpleNamespace(returncode=1, stdout="", stderr="auth failed")
 
+        monkeypatch.setenv("RADON_GROK_LKG_PATH", str(tmp_path / "absent.json"))
         run_cycle(tmp_path, now=NOW, grok_runner=boom)
         assert db_conn.execute(
             "SELECT status, attempts FROM watchdog_pages WHERE page_id=?", (pid,)

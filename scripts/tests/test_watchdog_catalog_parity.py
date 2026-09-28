@@ -396,11 +396,6 @@ EXEMPT_UNITS: dict[str, str] = {
         "when a live baseline exists and the timer is enabled, a failed "
         "oneshot pages via the unit watchdog. eval_golden.py writes JSON only."
     ),
-    "radon-grok-pin-bump": (
-        "gap: writes no service_health row. Weekly oneshot is not enabled; "
-        "when the timer is enabled, a failed oneshot pages via the unit "
-        "watchdog. grok_pin_bump.py writes a local pin branch only."
-    ),
 }
 
 

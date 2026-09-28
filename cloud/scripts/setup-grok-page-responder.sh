@@ -73,7 +73,7 @@ sudo -u radon bash -lc "
   cd web && bun install --frozen-lockfile
 "
 
-echo "[4/5] grok CLI as radon"
+echo "[4/5] grok CLI as radon (latest stable; LKG is machine-written)"
 if [[ ! -x /home/radon/.local/bin/grok && ! -x /home/radon/.grok/bin/grok ]]; then
   sudo -u radon bash -lc 'curl -fsSL https://x.ai/cli/install.sh | bash'
 fi
@@ -81,14 +81,16 @@ sudo -u radon mkdir -p /home/radon/.local/bin
 if [[ -x /home/radon/.grok/bin/grok && ! -e /home/radon/.local/bin/grok ]]; then
   sudo -u radon ln -sf /home/radon/.grok/bin/grok /home/radon/.local/bin/grok
 fi
-PIN_FILE="$CLONE/config/grok_pin.json"
-if [[ -x /home/radon/.local/bin/grok && -f "$PIN_FILE" ]]; then
-  PIN_VER="$(python3.13 -c 'import json,sys; print(json.load(open(sys.argv[1]))["cli_version"])' "$PIN_FILE")"
-  sudo -u radon -H /home/radon/.local/bin/grok update --version "$PIN_VER" --no-auto-update \
-    || echo "warn: grok update --version $PIN_VER failed; responder will fall back" >&2
+install -d -o radon -g radon -m 0750 /var/lib/radon
+if [[ -x /home/radon/.local/bin/grok && -x "$CLONE/.venv/bin/python" ]]; then
+  sudo -u radon -H "$CLONE/.venv/bin/python" "$CLONE/scripts/grok_upgrade.py" \
+    --seed-if-missing \
+    --grok-bin /home/radon/.local/bin/grok \
+    --lkg /var/lib/radon/grok_lkg.json \
+    || echo "warn: LKG seed failed; first upgrade cycle will try again" >&2
 fi
 
 echo "[5/5] device-code login required next"
 echo "  sudo -u radon -H /home/radon/.local/bin/grok login --device-auth"
-echo "  then: systemctl enable --now radon-grok-page-responder.timer"
+echo "  then: systemctl enable --now radon-grok-page-responder.timer radon-grok-upgrade.timer"
 echo "  after control-plane bootstrap has installed the unit files"

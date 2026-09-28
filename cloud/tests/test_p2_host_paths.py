@@ -26,7 +26,7 @@ def test_fleet_units_load_etc_radon_env() -> None:
         value = match.group(1).strip()
         if path.name in {
             "radon-grok-page-responder.service",
-            "radon-grok-pin-bump.service",
+            "radon-grok-upgrade.service",
         }:
             assert value == STRIPPED_ENV, path.name
             continue

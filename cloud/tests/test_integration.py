@@ -140,7 +140,7 @@ class TestPathConsistency:
         services = read_all_services(services_dir)
         env_paths = set()
         for name, content in services.items():
-            if name.startswith(("radon-grok-page-responder", "radon-grok-pin-bump", "radon-flex-pull", "radon-mcp")):
+            if name.startswith(("radon-grok-page-responder", "radon-grok-upgrade", "radon-flex-pull", "radon-mcp")):
                 continue
             match = re.search(r"EnvironmentFile=(.+)", content)
             if match:
