@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  alternateProvider,
   chat,
   resolveProvider,
   toOpenAiMessages,
@@ -409,6 +410,46 @@ describe("llm provider", () => {
     captureFetch(() => jsonResponse({ error: "boom" }, 500));
 
     await expect(chat(SAMPLE_REQUEST)).rejects.toThrow();
+  });
+
+  it("skips the internal fallback when the caller races providers itself (fallback: false)", async () => {
+    process.env.XAI_OAUTH_TOKEN = "xai-test-key";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
+    const { calls } = captureFetch(() => jsonResponse({ error: "boom" }, 500));
+
+    await expect(chat({ ...SAMPLE_REQUEST, fallback: false })).rejects.toThrow(/xAI Grok request failed/);
+    expect(calls).toHaveLength(1);
+  });
+
+  describe("alternateProvider", () => {
+    it("pairs auto-preferred xAI with Anthropic when both grants exist", () => {
+      process.env.XAI_OAUTH_TOKEN = "xai-test-key";
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
+      expect(alternateProvider("xai")).toBe("anthropic");
+    });
+
+    it("pairs Anthropic with xAI when a Grok grant exists", () => {
+      process.env.XAI_OAUTH_TOKEN = "xai-test-key";
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
+      expect(alternateProvider("anthropic")).toBe("xai");
+    });
+
+    it("honours a configured fallback provider", () => {
+      process.env.LLM_FALLBACK_PROVIDER = "openai";
+      expect(alternateProvider("anthropic")).toBe("openai");
+    });
+
+    it("has no alternate without a second grant", () => {
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
+      expect(alternateProvider("anthropic")).toBeUndefined();
+    });
+
+    it("does not hedge a provider the operator pinned", () => {
+      process.env.LLM_PROVIDER = "xai";
+      process.env.XAI_OAUTH_TOKEN = "xai-test-key";
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
+      expect(alternateProvider("xai")).toBeUndefined();
+    });
   });
 
   it("prefers the Grok subscription token in ~/.grok/auth.json over the prepaid xAI key", async () => {

@@ -68,6 +68,8 @@ export type LlmChatRequest = {
   timeoutMs?: number;
   /** Per-turn abort (client hung up, wall clock); merged with the request timeout. */
   signal?: AbortSignal;
+  /** false: a caller racing providers itself owns the retry, so skip the serial fallback. */
+  fallback?: boolean;
 };
 
 export type LlmToolCall = {
@@ -253,6 +255,21 @@ function resolveFallbackProvider(
   const normalized = normalizeProvider(configured);
   if (normalized === primary) return undefined;
   return normalized;
+}
+
+/**
+ * The second subscription a latency-sensitive caller may race against
+ * `primary`: the configured or default fallback, else the other of
+ * xAI/Anthropic when it holds a grant. A pinned LLM_PROVIDER with no
+ * configured fallback gets none, as with the serial fallback.
+ */
+export function alternateProvider(
+  primary: Exclude<LlmProviderName, "grok">,
+): Exclude<LlmProviderName, "grok"> | undefined {
+  const fallback = resolveFallbackProvider(primary);
+  if (fallback || envValue("LLM_PROVIDER")) return fallback;
+  if (primary === "anthropic") return resolveXaiAuth() ? "xai" : undefined;
+  return primary !== "xai" && hasAnthropicAuth() ? "anthropic" : undefined;
 }
 
 function maxTokensFor(request: LlmChatRequest): number {
@@ -754,7 +771,7 @@ export async function chat(request: LlmChatRequest): Promise<LlmChatResponse> {
   try {
     return await dispatch(provider, request);
   } catch (primaryError) {
-    const fallback = resolveFallbackProvider(provider);
+    const fallback = request.fallback === false ? undefined : resolveFallbackProvider(provider);
     if (!fallback) throw primaryError;
     console.warn(
       `[llm] ${provider} failed, falling back to ${fallback}: ${

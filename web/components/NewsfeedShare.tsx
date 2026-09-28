@@ -5,6 +5,7 @@ import { userErrorMessage } from "@/lib/userError";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Share2 } from "lucide-react";
 import { buildShareCaption, buildXShareUrl, sanitizeShareText, renderShareCard, canvasToPng, canvasToMp4, supportsMp4Export, type SharePost } from "@/lib/newsfeedShare";
+import { readVoiceRewrite, voiceProgress, VOICE_REWRITE_CLIENT_TIMEOUT_MS, VOICE_STAGE_LABELS, type VoiceStage } from "@/lib/newsfeedVoiceProgress";
 import styles from "./NewsfeedShare.module.css";
 
 const voiceDrafts = new Map<string, { title: string; content: string }>();
@@ -34,6 +35,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
   const [rewriting, setRewriting] = useState(!cached);
   const [voiceError, setVoiceError] = useState("");
   const [voiceAttempt, setVoiceAttempt] = useState(0);
+  const [voiceStage, setVoiceStage] = useState<VoiceStage>("queued");
   const sharePost = useMemo(() => rewrite ? { ...post, ...rewrite } : post, [post, rewrite]);
   const [preview, setPreview] = useState<string>();
   const [error, setError] = useState("");
@@ -61,18 +63,19 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
       return;
     }
     setRewriting(true);
+    setVoiceStage("queued");
     setVoiceError("");
     // Defer past StrictMode's setup/cleanup probe to avoid duplicate paid requests.
     const start = setTimeout(() => { void fetch("/api/newsfeed/share", {
-      method: "POST", cache: "no-store", signal: AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]),
-      headers: { "Content-Type": "application/json" },
+      method: "POST", cache: "no-store", signal: AbortSignal.any([abort.signal, AbortSignal.timeout(VOICE_REWRITE_CLIENT_TIMEOUT_MS)]),
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       body: JSON.stringify({
         title: sanitizeShareText(original.current.title),
         content: sanitizeShareText(original.current.content || ""),
       }),
     }).then(async response => {
       if (!response.ok) throw new Error("Voice rewrite unavailable. Showing the original copy.");
-      const draft: unknown = await response.json();
+      const draft: unknown = await readVoiceRewrite(response, stage => { if (!cancelled) setVoiceStage(stage); });
       if (!draft || typeof draft !== "object" || !("title" in draft) || !("content" in draft)
         || typeof draft.title !== "string" || typeof draft.content !== "string"
         || !sanitizeShareText(draft.title) || !sanitizeShareText(draft.content)) {
@@ -134,6 +137,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
 
   return <section id={panelId} className={styles.panel} aria-label="Share news item" aria-busy={busy || rewriting}>
     <div className={styles.heading}><strong>Share this analysis</strong><span>1080 × 1920</span></div>
+    {rewriting ? <RewriteProgress stage={voiceStage} /> : null}
     <div className={styles.layout}>
       <div className={styles.preview}>
         {/* Local blob generated on demand; next/image cannot optimize it. */}
@@ -154,6 +158,32 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
     <p className={styles.note}>The image and video use the preview copy. Caption edits apply only to your post.</p>
     {voiceError ? <ErrorToast message={voiceError} onRetry={busy || rewriting ? undefined : () => setVoiceAttempt(value => value + 1)} /> : null}
     {error ? <ErrorToast message={error} onRetry={busy ? undefined : () => { setError(""); setAttempt(value => value + 1); }} /> : null}
-    <p role="status" className={styles.status}>{rewriting ? "Writing in your voice…" : message || (busy ? "Creating your video. Keep this panel open." : "")}</p>
+    <p role="status" className={rewriting ? `${styles.status} ${styles.visuallyHidden}` : styles.status}>{rewriting ? `${VOICE_STAGE_LABELS[voiceStage]}…` : message || (busy ? "Creating your video. Keep this panel open." : "")}</p>
   </section>;
+}
+
+const ELAPSED_TICK_MS = 250;
+
+function useElapsedMs(): number {
+  const [elapsedMs, setElapsedMs] = useState(0);
+  useEffect(() => {
+    const startedAt = Date.now();
+    const tick = setInterval(() => setElapsedMs(Date.now() - startedAt), ELAPSED_TICK_MS);
+    return () => clearInterval(tick);
+  }, []);
+  return elapsedMs;
+}
+
+function RewriteProgress({ stage }: { stage: VoiceStage }) {
+  const elapsedMs = useElapsedMs();
+  const percent = Math.round(voiceProgress(stage, elapsedMs) * 100);
+  const seconds = Math.floor(elapsedMs / 1000);
+  return <div className={styles.progress}>
+    <span className={styles.progressLabel} aria-hidden>{VOICE_STAGE_LABELS[stage]}…</span>
+    <div role="progressbar" aria-label="Voice rewrite progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}
+      aria-valuetext={`${VOICE_STAGE_LABELS[stage]}, ${seconds}s elapsed`} className={styles.progressTrack}>
+      <span className={styles.progressFill} style={{ width: `${percent}%` }} />
+    </div>
+    <span className={styles.progressElapsed} aria-hidden>{seconds}s</span>
+  </div>;
 }
