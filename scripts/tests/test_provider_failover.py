@@ -26,7 +26,7 @@ _h = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = _h
 _spec.loader.exec_module(_h)
 
-# The shared ladder: fx:nvidia, grok, codex, fx:cerebras (2026-09-27).
+# The shared ladder: grok, codex, antigravity, fx:nvidia, fx:cerebras (2026-09-27).
 FALLBACK_LOOPS = ["ci-performance", "reliability", "testing"]
 FALLBACK_LADDER = _h.FALLBACK_LADDER
 EXPECTED_PROVIDER_ORDER = _h.FALLBACK_PROVIDER_ORDER
@@ -103,7 +103,7 @@ class TestACapContinuesOnTheNextProvider:
 
     def test_it_walks_the_whole_ladder_in_order(self, tmp_path, loop):
         proc, tried, _calls, _argv = _run_multi(
-            tmp_path, loop, "audit", capped_providers=tuple(FALLBACK_LADDER[:3])
+            tmp_path, loop, "audit", capped_providers=tuple(FALLBACK_LADDER[:-1])
         )
         assert rungs(tried) == FALLBACK_LADDER, tried
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
@@ -131,10 +131,10 @@ class TestACapContinuesOnTheNextProvider:
     def test_an_unauthenticated_provider_is_skipped(self, tmp_path, loop):
         proc, tried, _calls, _argv = _run_multi(
             tmp_path, loop, "audit",
-            capped_providers=tuple(FALLBACK_LADDER[:2]),
-            authed=("claude", "grok", "nvidia", "cerebras", "fx"),
+            capped_providers=("grok",),
+            authed=("claude", "grok", "nvidia", "cerebras", "fx", "antigravity"),
         )
-        assert rungs(tried) == FALLBACK_LADDER[:2] + FALLBACK_LADDER[3:], tried
+        assert rungs(tried) == ["grok", "antigravity"], tried
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
 
     def test_an_operator_ladder_overrides_the_default(self, tmp_path, loop):
@@ -217,7 +217,7 @@ class TestAPermanentRejectionCostsOneRung:
     ):
         proc, tried, _calls, _argv = _run_multi(
             tmp_path, loop, "audit",
-            capped_providers=tuple(FALLBACK_LADDER[:2]), reject_providers=("codex",),
+            capped_providers=("grok", "antigravity", "fx:nvidia"), reject_providers=("codex",),
         )
         assert rungs(tried) == FALLBACK_LADDER, (tried, proc.stderr)
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
@@ -236,11 +236,11 @@ class TestAPermanentRejectionCostsOneRung:
         """These loops audit their own wrappers and echo the trigger text."""
         _proc, tried, _calls, _argv = _run_multi(
             tmp_path, loop, "audit",
-            capped_providers=tuple(FALLBACK_LADDER[:2]),
+            capped_providers=("grok",),
             reject_providers=("codex",),
             reject_output=REJECTION_QUOTED_OUTPUT,
         )
-        assert rungs(tried) == FALLBACK_LADDER[:3], (
+        assert rungs(tried) == ["grok", "codex"], (
             f"a Traceback quoting the 400 walked the ladder: {tried}"
         )
 

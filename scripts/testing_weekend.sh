@@ -1819,7 +1819,11 @@ PORTABLE_PROMPT_DIR="${RADON_PORTABLE_PROMPT_DIR:-$REPO/.claude/portable-prompts
 # 2026-09-26, operator's order: Vercel fx on NVIDIA NIM leads, grok and codex
 # follow, and fx on Cerebras closes. The fx model half names the fx provider
 # in ~/.fx/settings.json (scripts/agent_cli_bootstrap.sh) and picks its key.
-PROVIDER_LADDER="${RADON_WEEKEND_PROVIDER_LADDER:-fx:nvidia grok codex fx:cerebras}"
+# 2026-09-27 (evening): NVIDIA moved down. As the lead rung it logged 232
+# HTTP 429s in one 17-minute documentation audit and 124 more before
+# remediate's tool-loop guard handed off to grok, which then ran clean. Lead
+# on grok and codex; Antigravity (`agy`) ahead of NVIDIA.
+PROVIDER_LADDER="${RADON_WEEKEND_PROVIDER_LADDER:-grok codex antigravity fx:nvidia fx:cerebras}"
 
 # --- provider ladder (byte-identical across all five loops) ------------------
 # A rung is `provider:model`. 2026-09-06: a Claude session cap is shared across
@@ -1851,6 +1855,7 @@ provider_bin() {
     claude) command -v claude 2>/dev/null || true ;;
     codex) printf '%s' "${RADON_WEEKEND_CODEX_BIN:-/opt/homebrew/bin/codex}" ;;
     grok | nvidia | cerebras) printf '%s' "${RADON_WEEKEND_GROK_BIN:-$HOME/.grok/bin/grok}" ;;
+    antigravity) printf '%s' "${RADON_WEEKEND_AGY_BIN:-$HOME/.local/bin/agy}" ;;
     # fx: the fixed-path copy scripts/fx_stable_sync.sh keeps current, so the
     # Full Disk Access grant survives `fx upgrade`; else the installer path.
     fx)
@@ -1889,6 +1894,10 @@ provider_ready() {
     nvidia) provider_key_present NVIDIA_API_KEY && [[ -r "$AGENT_CLI_ROOT/grok-home-nvidia/config.toml" ]] || return 1 ;;
     cerebras) provider_key_present CEREBRAS_API_KEY && [[ -r "$AGENT_CLI_ROOT/grok-home-cerebras/config.toml" ]] || return 1 ;;
     fx) provider_key_present "$(fx_key "${2:-}")" && [[ -r "$HOME/.fx/settings.json" ]] || return 1 ;;
+    # agy keeps its Google grant where the host's credential store puts it
+    # (no token file on the Mac mini), so like claude the binary is the
+    # check; a signed-out agy is a rejection and costs one rung.
+    antigravity) : ;;
     *) return 1 ;;
   esac
   # A fallback rung is driven by a rendered prompt file, not a slash command.
@@ -1985,6 +1994,8 @@ quota_regex() {
     codex) printf '%s' 'You.ve hit your usage limit|usage limited|rate limit reached|429' ;;
     grok | nvidia | cerebras) printf '%s' 'usage limit reached|out of credits|spending limit|usage balance exhausted|429' ;;
     fx) printf '%s' 'failed: rate[_]limited|usage limit reached|out of credits|429' ;;
+    # agy retries per-minute 429s in-process; what reaches us is unrecovered.
+    antigravity) printf '%s' 'RESOURCE_EXHAUSTED|Quota exhausted|429' ;;
     *) printf '%s' 'a\{0\}b' ;;
   esac
 }
@@ -2012,6 +2023,8 @@ session_regex() {
 # merely QUOTES the text (these loops audit their own wrappers) is not one.
 rejection_regex() {
   case "$1" in
+    # agy's own sign-in failures (scripts/subscription_tokens.py markers).
+    antigravity) printf '%s' 'invalid_request_error|model is not supported|model .* not found|unknown model|"status":[[:space:]]*400|please sign in|authentication (required|failed)' ;;
     *) printf '%s' 'invalid_request_error|model is not supported|model metadata for .* not found|unknown model|"status":[[:space:]]*400' ;;
   esac
 }
@@ -2179,6 +2192,15 @@ launch_round() {
         "$RUNG_BIN" --prompt-file "$prompt_file" ${model_flag[@]+"${model_flag[@]}"} \
         --reasoning-effort medium \
         --cwd "$REPO" --always-approve --output-format plain >> "$RUN_LOG" 2>&1 &
+      ;;
+    antigravity)
+      # agy print mode takes the prompt only ATTACHED to the flag: a detached
+      # `-p` swallows the next flag as the prompt and exits (agy 1.2.12). It
+      # keeps the PATH this wrapper built, so no ZDOTDIR shim like fx's.
+      ( cd "$REPO" || exit 70
+        exec "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
+          "$RUNG_BIN" -p="$(cat "$prompt_file")" ${model_flag[@]+"${model_flag[@]}"} \
+          --effort medium --dangerously-skip-permissions --output-format text ) < /dev/null >> "$RUN_LOG" 2>&1 &
       ;;
     nvidia | cerebras)
       # grok's CLI hosts every OpenAI-compatible provider: it is the only agent
