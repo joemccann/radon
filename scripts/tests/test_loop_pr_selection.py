@@ -29,7 +29,6 @@ LOOPS = {
     "reliability": ("reliability_weekend.sh", "reliability/"),
     "testing": ("testing_weekend.sh", "testing/"),
     "ci-performance": ("ci_performance_nightly.sh", "ci-performance/"),
-    "documentation": ("documentation_nightly.sh", "documentation/"),
     "security": ("security_nightly.sh", "security/"),
 }
 LOOP_IDS = sorted(LOOPS)

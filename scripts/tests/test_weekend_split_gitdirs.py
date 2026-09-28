@@ -37,7 +37,6 @@ WRAPPERS = {
     "reliability": REPO / "scripts" / "reliability_weekend.sh",
     "testing": REPO / "scripts" / "testing_weekend.sh",
     "ci-performance": REPO / "scripts" / "ci_performance_nightly.sh",
-    "documentation": REPO / "scripts" / "documentation_nightly.sh",
     "security": REPO / "scripts" / "security_nightly.sh",
     "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
 }

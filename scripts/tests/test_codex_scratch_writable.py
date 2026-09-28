@@ -11,7 +11,7 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 
 CASES = {
-    "documentation_nightly.sh": r"\$WEEKEND_ROOT/\.\$LOOP_SLUG-nightly-scratch",
+    "ci_performance_nightly.sh": r"\$WEEKEND_ROOT/\.\$LOOP_SLUG-nightly-scratch",
     "security_nightly.sh": r"\$PRIVATE_SCRATCH",
     "security_deepsec_nightly.sh": r"\$PRIVATE_SCRATCH",
 }
@@ -25,7 +25,7 @@ def test_codex_writable_roots_include_scratch(script, scratch):
     assert re.search(scratch, roots.group(1)), f"{script}: scratch dir not writable"
 
 
-def test_documentation_scratch_matches_skill():
-    skill = (SCRIPTS.parent / ".claude/skills/documentation-nightly/SKILL.md").read_text()
-    assert "~/radon-weekend/.documentation-nightly-scratch/" in skill
-    assert 'LOOP_SLUG="documentation"' in (SCRIPTS / "documentation_nightly.sh").read_text()
+def test_ci_performance_scratch_matches_skill():
+    skill = (SCRIPTS.parent / ".claude/skills/ci-performance/SKILL.md").read_text()
+    assert "~/radon-weekend/.ci-performance-nightly-scratch/" in skill
+    assert 'LOOP_SLUG="ci-performance"' in (SCRIPTS / "ci_performance_nightly.sh").read_text()

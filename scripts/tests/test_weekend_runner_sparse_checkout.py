@@ -18,7 +18,6 @@ WRAPPERS = [
     REPO / "scripts" / n
     for n in (
         "ci_performance_nightly.sh",
-        "documentation_nightly.sh",
         "reliability_weekend.sh",
         "security_deepsec_nightly.sh",
         "security_nightly.sh",

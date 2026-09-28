@@ -21,7 +21,6 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
 WRAPPERS = [
     "ci_performance_nightly.sh",
-    "documentation_nightly.sh",
     "reliability_weekend.sh",
     "security_nightly.sh",
     "security_deepsec_nightly.sh",

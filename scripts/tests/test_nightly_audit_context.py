@@ -26,7 +26,6 @@ WRAPPERS = {
     "reliability_weekend.sh": ("reliability-weekend", "## Mode: audit"),
     "testing_weekend.sh": ("testing-weekend", "## Mode: audit"),
     "ci_performance_nightly.sh": ("ci-performance", "## Mode: audit"),
-    "documentation_nightly.sh": ("documentation-nightly", "## Mode: audit"),
     "security_nightly.sh": ("security-nightly", "## Ground truth and change selection"),
     "security_deepsec_nightly.sh": ("security-deepsec", "## Audit pipeline"),
 }
@@ -102,7 +101,7 @@ def fake_gh(tmp_path: Path, comments: list | None, *, issue: int = 202) -> Path:
 def run_ctx(repo_dir: Path, gh: Path, out: Path, *extra: str):
     return subprocess.run(
         [sys.executable, str(SCRIPT), "--repo", "joemccann/radon", "--repo-dir", str(repo_dir),
-         "--head", "HEAD", "--gh-bin", str(gh), "--label", "documentation-nightly",
+         "--head", "HEAD", "--gh-bin", str(gh), "--label", "ci-performance-nightly",
          "--out", str(out), "--timeout", "10", *extra],
         capture_output=True, text=True, timeout=60, env=GIT_ENV,
     )

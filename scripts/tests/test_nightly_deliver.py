@@ -34,8 +34,8 @@ class TestVerdictLine:
         assert line.startswith(nd.READY_PREFIX)
 
     def test_ready_line_with_nothing_to_merge(self):
-        assert nd.ready_line("documentation", []) == (
-            "NIGHTLY DELIVER READY: loop=documentation prs=0"
+        assert nd.ready_line("ci-performance", []) == (
+            "NIGHTLY DELIVER READY: loop=ci-performance prs=0"
         )
 
     def test_incomplete_line_names_the_failing_check(self):
@@ -225,7 +225,6 @@ class TestEveryLoopIsAccepted:
             "reliability": "reliability_weekend.sh",
             "testing": "testing_weekend.sh",
             "ci-performance": "ci_performance_nightly.sh",
-            "documentation": "documentation_nightly.sh",
             "security": "security_nightly.sh",
             "security-deepsec": "security_deepsec_nightly.sh",
         }
@@ -423,7 +422,7 @@ class TestDeliverStatusFromTheRecord:
 WRAPPERS = tuple(
     REPO / "scripts" / n for n in (
         "reliability_weekend.sh", "testing_weekend.sh", "ci_performance_nightly.sh",
-        "documentation_nightly.sh", "security_nightly.sh", "security_deepsec_nightly.sh",
+        "security_nightly.sh", "security_deepsec_nightly.sh",
     )
 )
 
