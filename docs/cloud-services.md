@@ -351,6 +351,9 @@ journald on the VPS is on-box only (capped at 1G). A laptop launchd job (`~/Libr
 off. A `code_fix` + AUTOPUSH ships a `fix/**` branch and
 `scripts/ir_ensure_pr.py` opens a PR against `main` (never merges).
 Spec: [`grok-page-responder.md`](grok-page-responder.md).
+`radon-grok-upgrade.timer` is installed enabled (daily 07:40 UTC). It
+smokes the latest stable CLI/model and auto-promotes, or stays on
+`/var/lib/radon/grok_lkg.json`. Spec in the same doc (Grok track-latest).
 Do not install this on any clone under `~/radon-weekend/` (the six nightly loops hard-reset them every phase; table in [`operations.md`](operations.md#background-services)).
 
 ### Error tracking — Sentry (not wired; recommended next step)
@@ -820,7 +823,10 @@ Nightly `06:00 UTC` (`RandomizedDelaySec=300`), oneshot
 v2 golden set. A hit@5 or MRR drop past 0.03 fails the unit so the existing
 watchdog pages. **Not enabled.** The repo now has an initial live baseline
 at `scripts/knowledge/golden_eval_baseline.json` (`placeholder: false`).
-Keep the `not-installed:` drift ack until a human reviews the draft set.
+`enable_services` skips both units on every setup and does not read that file.
+Keep the `not-installed:` drift ack until a human reviews the draft set
+(`scripts/knowledge/golden_set.json` `draft: true`). The ack reason is that
+review.
 After that review:
 
 ```

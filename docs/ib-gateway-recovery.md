@@ -96,10 +96,20 @@ A failure *inside radon-api*, not the gateway: after the user approves the 2FA p
 - It records the error in `service_health` once per episode with the time of its retry: "do not restart the Gateway".
 - After 15 minutes with no new throttled attempt (doubling to a 60-minute cap), it makes **one** fresh login under the push lock, so you get a push to approve.
 - Any new throttled attempt, including your own, restarts the quiet period.
-- Outside market-data hours it never retries: restart once yourself, 15+ minutes after the last attempt.
+- Outside market-data hours it never retries. The app path still refuses `start` and `restart` until the quiet period below. After the UTC time that refusal names, restart once from the app admin control and approve the push.
 - The episode lives in the watchdog state file, so it survives the 5-minute log window. It ends on `authenticated`, on `awaiting_2fa`, or on a login that got past the throttle.
 
-Tests: `scripts/tests/test_ib_watchdog_login_throttle.py`.
+**Operator action while that state file has `login_throttle_since` set.** Prerequisite: split topology, watchdog state at `/var/lib/radon/ib-watchdog-state.json`. Blast radius: one login attempt is another IBKR failed login and restarts the quiet period. It does not send an order. Safe diagnosis: read the `ib-watchdog` `service_health` error and, from the app, the admin Start or Restart error. Do not run `docker compose`, `docker restart`, or broker-local `radon restart` to probe it.
+
+The app admin Start/Restart path is the broker daemon (`scripts/ib_gateway_remote/serve.py`). `start` and `restart` return HTTP 409 until `login_throttle_since` plus the quiet period. That period is 900 seconds, doubled for each `login_throttle_retries` already spent, capped at 3600 seconds (`scripts/utils/ib_login_throttle.py`). The `detail` names the UTC time a login is allowed. A 409 did not log in. `stop` and `reset-lease` are not gated.
+
+During market-data hours the watchdog makes the one retry. Do not restart it yourself. Outside those hours the watchdog does not retry, so after the UTC time in the 409, restart once from the app admin control and approve the push. The off-hours `service_health` sentence still says a flat "15+ minutes" (`scripts/ib_watchdog.py`). Follow the 409 time when they differ.
+
+Stop when another 409 comes back, or the Gateway log still ends in `Too many failed login attempts`. Verification: after the allowed login, `/health` moves to `awaiting_2fa` or `authenticated` and the watchdog clears `login_throttle_since`. Rollback: nothing to undo. An early login restarts the quiet period; wait for the new time. Escalation: one login after the 409 time, then stop.
+
+Broker-local `radon restart` and a broker-host `POST /ib/restart` call `/usr/local/bin/radon-ib-gateway-control` directly (`cloud/scripts/operator-radon.sh` `gateway_control`; `scripts/api/services.py` `_control_gateway` when the host role is not `app`). They do not read the throttle file.
+
+Tests: `scripts/tests/test_ib_watchdog_login_throttle.py`, `scripts/tests/test_ib_gateway_remote_login_throttle.py`.
 
 ---
 
@@ -136,7 +146,7 @@ Next.js footer reads via `useIBStatusContext().displayStatus` (polls `/api/admin
 
 ## What NOT to Do
 
-- **Do not keep forcing restarts when no push arrives.** Check the Gateway log for `Too many failed login attempts` first. Each restart is another failed login, and IBKR keeps throttling. Wait 15+ minutes with no attempts, then restart once (Gate 6).
+- **Do not keep forcing restarts when no push arrives.** Check the Gateway log for `Too many failed login attempts` first. Each login is another failed attempt. Wait for the UTC time the app-path 409 names (Gate 6), then restart once from that path. Do not use broker-local `radon restart` during the quiet period.
 
 - **Do not re-enable IBC-side relogin on 2FA timeout** (`TWOFA_TIMEOUT_ACTION: exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT: "no"` in `docker/ib-gateway/docker-compose.yml`). VPS counterpart uses IBC default (`no`). IBC's relogin bypasses the push lock and reintroduces the stacked-push bug.
 - **Do not piecemeal `systemctl stop radon-<one>`** — a clean stop does not `Restart=always` back, so the unit stays down until something starts it. Use `radon restart` instead. (Stopping `radon-ib-gateway` no longer cascade-stops api/relay/monitor: since 44e89e1b they are `After=`-ordered only, never `PartOf=`; a 2FA restart leaves the app plane up. See `docs/spof-host-split.md`.) See `feedback_use_radon_restart_not_piecemeal_systemctl.md`.

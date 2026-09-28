@@ -20,11 +20,15 @@
         "scripts/incident_watchdog/**",
         "scripts/incident_responder.py",
         "scripts/grok_page_responder.py",
+        "scripts/grok_runtime.py",
+        "scripts/grok_upgrade.py",
+        "scripts/ir_pr_description.py",
         "scripts/watchdog/pages.py",
         "scripts/deploy_notify.py",
         "config/com.radon.grok-page-responder.plist",
         "config/com.radon.grok-fix-pickup.plist",
         "scripts/grok_fix_pickup.py",
+        "cloud/services/radon-grok-upgrade.*",
         "cloud/scripts/nextjs_db_watchdog.py",
         "cloud/services/radon-incident-watchdog.*",
         "cloud/services/radon-nextjs-db-watchdog.*"
@@ -82,6 +86,15 @@
       "note": "operations.md is the one place indexing all five nightly loops: fire times, clone + marker rails, the model pin and the status vocabulary an operator reads off a page. #219 changed operator-facing behaviour in all five wrappers with no owner update (DOC-032/033/034/040). Loop SEMANTICS stay in .claude/skills/<loop>/SKILL.md; only the operator contract belongs here."
     },
     {
+      "id": "nightly-runner",
+      "globs": [
+        "scripts/runner/**",
+        ".claude/runner-prompts/**"
+      ],
+      "owners": ["docs/runner.md"],
+      "note": "The one-file runner that replaces the per-loop wrappers: install, the bot-user boundary, loop config and migration state."
+    },
+    {
       "id": "streaks-source-ladder",
       "globs": ["scripts/api/routes/streaks.py"],
       "owners": ["docs/indicators/streaks.md"],
@@ -92,6 +105,12 @@
       "globs": ["scripts/credential_validators.py"],
       "owners": ["docs/operations.md"],
       "note": "The Credentials tab refuses values on egress pins an operator cannot see from the UI (DOC-067)."
+    },
+    {
+      "id": "model-ladder",
+      "globs": ["scripts/clients/model_ladder.py"],
+      "owners": ["docs/dropbox-research.md"],
+      "note": "Shared HTTP ladder byte cap and subscription auth matrix. Vision HTTP rungs gained the 2,000,000-byte stream cap without an owner update (DOC-144). Weekend CLI ladders are a separate contract."
     },
     {
       "id": "health-probes",

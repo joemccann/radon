@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-09-27T09:00:11Z",
-  "node_count": 3638,
+  "generated_at": "2026-09-28T09:00:10Z",
+  "node_count": 3645,
   "edge_count": 7505,
   "areas": {
     "web": 2102,
     "site": 155,
-    "scripts": 1256,
-    "cloud": 78,
+    "scripts": 1262,
+    "cloud": 79,
     "lib": 28,
     "tests": 17,
     "tools": 2
@@ -85,7 +85,7 @@
     {
       "id": "scripts",
       "area": "scripts",
-      "count": 169
+      "count": 171
     },
     {
       "id": "scripts/ai_cycle",
@@ -200,7 +200,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 643
+      "count": 647
     },
     {
       "id": "scripts/trade_blotter",
@@ -230,7 +230,7 @@
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 68
+      "count": 69
     },
     {
       "id": "lib/tools",

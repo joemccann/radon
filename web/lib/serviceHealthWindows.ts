@@ -585,6 +585,12 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Without this row a wedged poller was invisible for 2h40m (2026-08-14).
   "grok-page-responder": { open: 90 * MIN, extended: 90 * MIN, closed: 90 * MIN, category: "scheduled", requires_ib: false },
 
+  // ``grok-upgrade`` is the daily Grok CLI/model track-latest oneshot
+  // (scripts/grok_upgrade.py via radon-grok-upgrade.timer, 07:40 UTC).
+  // Smoke then auto-promote, or stay on last-known-good. Pure xAI CLI +
+  // Turso heartbeat — no IB. 26h window = daily cadence + timer jitter.
+  "grok-upgrade": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``portfolio-archive`` is the portfolio_snapshots cold-archive oneshot
   // (scripts/archive_portfolio_snapshots.py via radon-portfolio-archive.timer
   // on the VPS, 06:52 UTC daily, before db-backup). Heartbeats ok/error on

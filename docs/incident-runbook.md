@@ -1828,6 +1828,56 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
 
 ---
 
+## db-backup-hrana-stream-not-found
+
+**`radon-db-backup.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when Turso 404s the Hrana stream mid-dump.** Peak:
+2026-09-28 09:21:56Z, page `4076d7d9…`.
+
+- **Mechanism:** daily 09:00 UTC oneshot reads every user table through
+  one `get_db()` singleton (`BEGIN` held for the whole dump). After
+  about 10 minutes Turso answers `stream not found: b4866f02:2ef17`
+  on the next page. This run died on the page after
+  `research_post_sources` (`ai_cycle_observations`, 648071 rows).
+  Fetched rows stayed in the `.tmp` and were not promoted.
+  `Type=oneshot` has no `Restart=`, so `NRestarts=0`. Yesterday's run
+  finished that table (625406 rows in 129.9s) and uploaded. Not the
+  B2 case (that journal says `b2 FAILED: ConnectionClosedError` after
+  `dumped N tables`). Not a platform outage: `SELECT 1` from this host
+  succeeded, `/health/lite` stayed authenticated, and the only fresh
+  `service_health` error was `db-backup`.
+- **Detection:** journal `backup failed: ValueError: Hrana: ... status=404
+  ... stream not found` after per-table `name: N rows` lines and no
+  `db-backup: dumped` summary. `systemctl show` is `exit-code` / `0`.
+  Edge and `:8321/health/lite` stay up.
+- **Discriminating check:** canary `SELECT 1` succeeds and the journal
+  shows a partial table list then the 404. `b2 FAILED` is
+  `db-backup-b2-connection-closed`. Missing `RADON_ARCHIVE_S3_*` is
+  ops (secret). Canary fails too: Turso platform, stand down.
+  `Result=signal` is deploy stop-clean. A deploy may replay this
+  oneshot; the replay's `exit-code` is this case, not the signal.
+  If `/health/lite` is down too: API, stand down.
+- **Remediation (code):** on `stream not found` or `upstream forward
+  failed`, `reset_connection()` and resume the same `rowid` cursor on
+  a fresh connection. Three tries per page, budget resets after a
+  successful page, so a 20-25 min dump can outlive one stream.
+  Emitted rows are not replayed. A persistent 404 still exits 1.
+  Do not restart-flap; next timer (09:00 UTC) or one
+  `radon unit restart radon-db-backup.service` after the fix deploys.
+  Unit is not on `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `cloud/tests/test_db_backup.py::TestTransientHranaStreamRetry`
+  (`test_stream_not_found_mid_table_resumes_on_a_fresh_connection`,
+  `test_later_pages_get_a_fresh_attempt_budget`,
+  `test_persistent_stream_not_found_still_fails_without_replaying_rows`,
+  `test_non_transient_page_error_is_not_retried`,
+  `test_run_backup_resumes_through_reopen_cloud_db`);
+  `test_reopen_cloud_db_resets_the_singleton_before_connecting`.
+- **Code:** `cloud/scripts/db_backup.py`
+  (`is_transient_db_error`, `iter_table_rows`, `_reopen_cloud_db`).
+
+---
+
 ## demo-mirror-schema-lag
 
 **`radon-demo-mirror.service` oneshot pages P1 `Result=exit-code` with
@@ -2934,6 +2984,50 @@ after the IB-skip path has already chosen the cached payload.** Peak:
 - **Code:** `scripts/fetch_iv_spread.py` (`PERSIST_BUDGET_S`,
   `_persist_snapshot`), `cloud/services/radon-iv-spread.service`
   (`TimeoutStartSec=300`).
+
+## grok-page-responder-ledger-timeout
+
+**`radon-grok-page-responder.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when a watchdog_pages ledger read times out.** Peak:
+2026-09-27 00:15:04Z, page `a1c550c1…`.
+
+- **Mechanism:** `Type=oneshot` poller, no `Restart=`. Between 00:13:22Z
+  and 00:17:17Z, hrana (`HRANA_TIMEOUT_S=4`) raised
+  `HranaHttpError: TimeoutError: The read operation timed out` inside
+  `complete_page` (00:13:22Z) and `claim_page` (00:17:17Z). `run_cycle`
+  only caught that on the heartbeat path (`grok page heartbeat
+  non-fatal`). The ledger raise skipped the ok heartbeat and escaped,
+  so the interpreter exited 1 and systemd recorded `Result=exit-code`,
+  `NRestarts=0`. The watchdog then paged this unit about itself.
+  `requires_ib` is false. Later cycles in the same hour logged
+  `pending: 0` and exited 0, including cycles whose heartbeat timed out
+  and was already non-fatal. `{"sync": "ff-failed"}` in the same journal
+  is a dirty or diverged clone; that path logs and continues.
+- **Detection:** journal traceback ends at
+  `db.hrana_http.HranaHttpError: TimeoutError: The read operation timed out`
+  with `grok_page_responder.py` `run_cycle` calling `claim_page` or
+  `complete_page`. `systemctl show radon-grok-page-responder.service -p
+  Result,NRestarts` → `exit-code` / `0` on that invocation. Exec span is
+  seconds, not `TimeoutStartSec=3900`.
+- **Discriminating check:** Python Turso canary `SELECT 1` succeeds
+  (45 ms at diagnosis). Canary fail → Turso platform, stand down. Do not
+  restart-flap. `/health/lite` `auth_state=unreachable` is not this exit
+  (`requires_ib` is false, not `ib-gateway-grouped`).
+  `/api/service-health` 401 without the probe token is anonymous, not
+  this case. No `/home/radon/.radon-deploy-transition.json`.
+  `Result=signal` or exit 143 inside a deploy window is
+  `deploy-stop-clean-oneshot-signal`. A ledger statement error (not a
+  read timeout) still fails the oneshot on purpose.
+- **Remediation (code):** a ledger `TimeoutError` logs
+  `grok page ledger non-fatal`, skips the ok heartbeat, releases the
+  lock, and exits 0. The timer starts the next cycle in 30s. A claim
+  the server already applied stays until `STALE_CLAIM_SECS` (2h); a
+  claim that never landed is eligible on that next cycle. Other
+  `HranaHttpError` values still propagate. The unit is not on
+  `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `scripts/tests/test_grok_page_ledger_timeout.py::TestLedgerReadTimeout`.
+- **Code:** `scripts/grok_page_responder.py` (`_ledger_read_timeout`).
 
 ## Grok auto-response on iPhone P1 pages
 

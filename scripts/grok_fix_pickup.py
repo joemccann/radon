@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import ir_ensure_pr
+import ir_pr_description
 
 DEFAULT_SOURCE = os.environ.get(
     "RADON_GROK_FIX_SOURCE",
@@ -160,6 +161,116 @@ def _ensure_pr_default(**kwargs) -> dict:
     return ir_ensure_pr.ensure_pr(include_terminal=True, **kwargs)
 
 
+def default_lookup_page(
+    *, page_id: str | None = None, result_needle: str | None = None
+) -> dict | None:
+    """Best-effort Turso read. Pickup still works when Turso is unreachable."""
+    try:
+        from watchdog import pages as pages_mod
+    except ImportError:
+        try:
+            from scripts.watchdog import pages as pages_mod
+        except ImportError:
+            return None
+    try:
+        if page_id:
+            return pages_mod.get_page(page_id)
+        if result_needle:
+            return pages_mod.find_page_by_result(result_needle)
+    except Exception:  # noqa: BLE001 — enrichment only
+        return None
+    return None
+
+
+def default_ci_urls(head: str, *, runner: Runner) -> list[str]:
+    proc = runner([
+        "gh", "run", "list",
+        "--repo", ir_ensure_pr.DEFAULT_REPO,
+        "--branch", head,
+        "--limit", "8",
+        "--json", "url,databaseId,name,conclusion",
+    ])
+    if getattr(proc, "returncode", 1) != 0:
+        return []
+    try:
+        rows = json.loads(getattr(proc, "stdout", "") or "[]")
+    except ValueError:
+        return []
+    urls: list[str] = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        url = row.get("url")
+        if isinstance(url, str) and url.startswith("http") and url not in urls:
+            urls.append(url)
+    return urls
+
+
+def alert_invalid_description(
+    branch: str,
+    reason: str,
+    *,
+    alerter: Optional[Callable[[str, str], None]] = None,
+) -> None:
+    message = f"grok fix pickup: refusing {branch}: {reason}"
+    print(message, file=sys.stderr)
+    if alerter:
+        alerter(branch, reason)
+        return
+    try:
+        from watchdog import notify
+    except ImportError:
+        return
+    creds = notify._pushover_creds()
+    if not creds:
+        return
+    user, token = creds
+    notify._post_pushover(
+        notify.build_pushover_payload(
+            user=user,
+            token=token,
+            title="radon grok pickup: IR body refused",
+            message=message[:900],
+            severity=None,
+        )
+    )
+
+
+def build_pickup_pr_kwargs(
+    repo: Path,
+    ref: str,
+    branch: str,
+    *,
+    runner: Runner,
+    lookup_page: Optional[Callable[..., dict | None]] = None,
+    list_ci_urls: Optional[Callable[[str], list[str]]] = None,
+) -> dict:
+    """Title/body from the grok commit, page row, and CI links."""
+    message = _stdout(_git(repo, ["log", "-1", "--format=%B", ref], runner=runner))
+    sha = _stdout(_git(repo, ["rev-parse", ref], runner=runner))
+    finder = lookup_page or default_lookup_page
+    page = None
+    page_id = ir_pr_description.extract_page_id(message)
+    if page_id:
+        page = finder(page_id=page_id)
+    if page is None and sha:
+        page = finder(result_needle=sha[:12])
+    ci_urls = list_ci_urls(branch) if list_ci_urls else default_ci_urls(branch, runner=runner)
+    title, body = ir_pr_description.description_from_commit(
+        message, branch=branch, page=page, ci_urls=ci_urls
+    )
+    incident_id = (page or {}).get("page_id")
+    return {
+        "head": branch,
+        "issue": title,
+        "fix": title,
+        "title": ir_ensure_pr.format_ir_pr_title(issue=title, incident_id=incident_id),
+        "body": body,
+        "incident_id": incident_id,
+        "update_existing": True,
+    }
+
+
 def pickup_once(
     repo_root: Path,
     *,
@@ -169,6 +280,9 @@ def pickup_once(
     base: str = DEFAULT_BASE,
     origin: str = DEFAULT_ORIGIN,
     max_commits: int = DEFAULT_MAX_COMMITS,
+    lookup_page: Optional[Callable[..., dict | None]] = None,
+    list_ci_urls: Optional[Callable[[str], list[str]]] = None,
+    alerter: Optional[Callable[[str, str], None]] = None,
 ) -> list[dict]:
     """Fetch, gate, push and open a PR for each new grok fix branch."""
     run = runner or _default_runner
@@ -211,6 +325,24 @@ def pickup_once(
             results.append({"branch": name, "action": "refused", "reason": reason})
             continue
 
+        try:
+            pr_kwargs = build_pickup_pr_kwargs(
+                repo_root,
+                local_ref,
+                name,
+                runner=run,
+                lookup_page=lookup_page,
+                list_ci_urls=list_ci_urls,
+            )
+        except ir_pr_description.IrDescriptionError as exc:
+            alert_invalid_description(name, str(exc), alerter=alerter)
+            results.append({
+                "branch": name,
+                "action": "refused",
+                "reason": f"IR description: {exc}",
+            })
+            continue
+
         if not origin_head:
             pushed = _git(
                 repo_root,
@@ -225,8 +357,7 @@ def pickup_once(
                 })
                 continue
 
-        summary = f"grok incident fix on {name}"
-        pr = open_pr(head=name, issue=summary, fix=summary)
+        pr = open_pr(**pr_kwargs)
         if not isinstance(pr, dict) or not pr.get("url"):
             raise PickupError(f"no confirmed PR URL for {name}")
         results.append({
@@ -260,6 +391,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
     for row in results:
         print(json.dumps(row, sort_keys=True))
+    if any(
+        str(row.get("reason") or "").startswith("IR description:")
+        for row in results
+    ):
+        return 1
     return 0
 
 

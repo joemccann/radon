@@ -1041,6 +1041,29 @@ The closing sequence was stopped at round 2 cloud (`DONE 124`) after reconciling
 T-121 CI acceptance on be7a8e9d: all eight new 390px/1024px overflow cases passed, but the existing share-popover checkbox test failed twice because the newly scrolling executed table clipped its absolute popover. Kept the assertion unchanged, anchored the popover to viewport coordinates (mobile sheet CSS retained), and added scroll/flip/dismissal coverage: focused set 86 passed. A screenshot now accompanies the existing interaction test. The first post-legacy closing attempt stopped cleanly (`DONE 124`) before this repair; it is not counted as final acceptance.
 
 
+## Remediation 2026-09-27
+
+Reduced scope was P0/P1. T-130 and T-488 remain operator-only. P2 findings T-493, T-495, T-510, and T-512 were out of scope.
+
+| Finding | Status | Red/green evidence |
+|---|---|---|
+| T-511 | DONE | Degraded branch forced off: 1 failed (`ok` instead of `degraded`). Heal call forced off: 1 failed (empty statement list). Restored source: 16 passed across the budget, gap-heal, and liquidcompute visibility tests. |
+| T-130 | operator-only | Provision `TURSO_DEMO_DB_URL` and `TURSO_DEMO_APP_DB_URL` for repository CI. The wiring half is already done; do not make the guard unconditional without those secrets. |
+| T-488 | operator-only | Reproduce the deploy helper timeout and TERM child cleanup on Linux CI without widening the fixed timeout. |
+| T-513 | DONE | Host `~/.local/bin/fx` is ad-hoc signed: 1 failed with `REFUSED`. Controlled fixture before the codesign seam: 1 failed with `REFUSED`. After the seam: 11 passed, 1 skipped. Unsigned refusal still fails closed. |
+
+
+### Closing gates 2026-09-27
+
+Vitest, three consecutive runs from the repo root: 1026 files, 10165 passed, 0 failed.
+
+Cloud, three consecutive runs, identical failure list: 2318 passed, 10 failed, 8 skipped. Five failures are `test_caddy_edge_timeouts.py` with `caddy` absent. Five are `test_deploy_corrections.py` reporting `services[@]` unbound, the standing T-488 operator item. Resolved `bash` is Homebrew 5.3.20 and `caddy` is absent.
+
+Pytest on Homebrew Python aborted at collection three times (missing Pillow, pypdfium2, then pdf-inspector). Those libraries were installed in a throwaway virtual environment, not in the repo. Two full runs then passed: 16044 passed, 13 skipped, 94 deselected, 1 xpassed. An intervening run is not a gate result: its PATH omitted `/sbin`, so `sha256sum` was missing, and the run crossed midnight Eastern, so an import-time session date disagreed with a fill created after the roll. Those four failures are outside this branch's diff. After the roll, the session-date tests and the node resolver passed in isolation.
+
+Reduced scope was P0 and P1. No P0 was open. T-493, T-495, T-510, and T-512 stay open because they are P2.
+
+
 ## Remediation 2026-09-28 (testing/2026-09-28, reduced P0/P1)
 
 Tonight's audit timed out before a new checkpoint. Open P0/P1 carried forward from issue #83 (2026-09-27 remediate): T-130 operator-only, T-488. P2 T-493, T-495, T-510, T-512 stay open under `RADON_WEEKEND_REDUCED=1`. T-511 and T-513 stay on open PR #766 and were not redone.

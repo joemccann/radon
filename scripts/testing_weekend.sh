@@ -1631,11 +1631,16 @@ acquire_runner_lock "$RUNNER_LOCK" || {
   held="$LOCK_HELD"
   start="$LOCK_START"
   owner="$(/bin/ps -p "$held" -o user= 2>/dev/null || true)"
-  cmd="$(/bin/ps -p "$held" -o command= 2>/dev/null || true)"
+  # The pid is read from a lock inside the agent-writable clone and this body
+  # is posted to the PUBLIC dead-man issue, so report the PROGRAM only. A full
+  # command line would let an agent that points the lock at any live process
+  # publish that process's arguments on a public repository.
+  cmd="$(/bin/ps -p "$held" -o comm= 2>/dev/null || true)"
   owner="${owner#"${owner%%[![:space:]]*}"}"
   owner="${owner%"${owner##*[![:space:]]}"}"
   cmd="${cmd#"${cmd%%[![:space:]]*}"}"
   cmd="${cmd%"${cmd##*[![:space:]]}"}"
+  cmd="${cmd##*/}"
   report "REFUSED (lock held)" "another weekend run owns $REPO (pid ${held:-unknown}, started ${start:-unknown}, owner ${owner:-unknown}, cmd ${cmd:-unknown}); if no cycle is running, the recorded pid was reused — remove $RUNNER_LOCK" || true
   exit 3
 }
@@ -2326,12 +2331,23 @@ is_fx_loop_guard() {
 }
 
 nvidia_budget() {
-  local py helper
+  local py
   py="$(command -v python3.13 || true)"
   [[ -n "$py" ]] || return 0
-  helper="${RADON_NVIDIA_BUDGET_PY:-$REPO/scripts/nvidia_budget.py}"
-  [[ -r "$helper" ]] || return 0
-  "$py" -I "$helper" "$@"
+  if [[ -n "${RADON_NVIDIA_BUDGET_PY:-}" ]]; then
+    [[ -r "$RADON_NVIDIA_BUDGET_PY" ]] || return 0
+    "$py" -I "$RADON_NVIDIA_BUDGET_PY" "$@"
+    return
+  fi
+  # DS-2026-09-28-01: origin/main's blob piped into the interpreter, never a
+  # python FILE from the agent-writable clone. Executing the file defeats the
+  # `reset --hard origin/main` that makes each fire's code equal to reviewed
+  # main: a helper edited during one phase would run in the next. Same
+  # isolation as write_audit_context / arm_deliver_record. No blob (no ref,
+  # no git) reads as an empty program: rc 0, no verdict, budget not enforced,
+  # exactly as an unreadable helper did before.
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" show origin/main:scripts/nvidia_budget.py 2>/dev/null \
+    | "$py" -I - "$@"
 }
 
 nvidia_budget_acquire_or_skip() {

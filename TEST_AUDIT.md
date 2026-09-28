@@ -10618,6 +10618,28 @@ Delta to the resolved T-491 environment-variable isolation issue: this change in
 Acceptance: isolate credential-file discovery across all three affected modules, opt in only to per-test synthetic subscription files, and run the file with canary credentials present/absent outside its sandbox. Both outer environments must produce identical results; explicit subscription-precedence tests must still execute. No real credential values should enter captured headers or logs.
 
 
+## Remediation 2026-09-27
+
+Reduced scope: P0 and P1 only. No P0 was open. The 2026-09-26 checkpoint (`audited-through: 3cc3d84a`) left four P1s. T-511 and T-513 are source-actionable. T-130 and T-488 stay operator-only. P2 findings T-493, T-495, T-510, and T-512 were outside this rung.
+
+### T-511 — DONE
+
+`scripts/tests/test_rel257_flex_budget.py`, `scripts/tests/test_rel257_liquidcompute_atomic.py`, and `scripts/tests/test_rel289_twr_gap_heal.py` skipped before a degraded heartbeat or a heal call. Those cases now run `flex_sftp_pull.run`, apply one statement, then exhaust the sweep budget.
+
+Red: with the degraded branch forced off, `test_consecutive_budget_runs_write_degraded` saw `ok` instead of `degraded` (1 failed). With the heal call forced off, `test_heal_twr_coverage_gaps_called_even_when_budget_spent` saw an empty call list (1 failed). Green, source restored: 16 passed across those three modules.
+
+T-130 stays operator-only. Provision `TURSO_DEMO_DB_URL` and `TURSO_DEMO_APP_DB_URL` for repository CI. The wiring half is already recorded done. An unconditional isolation run stays red until those secrets exist.
+
+T-488 stays operator-only. Reproduce the deploy helper timeout and TERM child cleanup on Linux CI without widening the fixed timeout. Three fixture attempts are already recorded. This host's bash 3.2 `services[@]` errors and the absent `caddy` binary are not that item.
+
+
+### T-513 — DONE
+
+`scripts/tests/test_fx_stable_sync.py` copied whatever was at `~/.local/bin/fx`. On this host that binary is ad-hoc signed (`Identifier=fx-…`, `Signature=adhoc`), and `scripts/fx_stable_sync.sh` correctly refused it, so the test failed. The separate-file assertion now uses a fixture that a codesign double accepts only when `--verify --strict` and the Vercel requirement (`com.vercel.fx`, team `JW6Y669B67`) are both present. The host binary is used only when `/usr/bin/codesign` accepts that requirement. `RADON_FX_CODESIGN` is unset in the launchd job, whose environment is PATH and HOME.
+
+Red: the host-binary test failed with `REFUSED` (1 failed). The controlled sample against the old hardcoded `/usr/bin/codesign` also failed with `REFUSED` (1 failed). Green: 11 passed, 1 skipped (no Vercel-signed host binary). The unsigned-binary refusal test still fails closed.
+
+
 ## Remediation 2026-09-28
 
 `RADON_WEEKEND_REDUCED=1`. The 2026-09-28 audit phase timed out after the standing gates and did not post a new `audited-through` checkpoint, so this section does not advance that cursor. Authoritative open set is issue #83 comment 5864289632.

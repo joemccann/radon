@@ -12,6 +12,10 @@ reach: a key file a scanner reloads itself, or a Claude Code settings file
 carrying an apiKeyHelper / env reroute. The product's web/.env, provisioned
 into the four Radon-credential clones, is scrubbed of reroute lines in place
 so neither the dev server nor pytest's load_dotenv can hand the key onward.
+
+CIP-014: pytest does not collect this module. The cases are imported by
+test_weekend_subscription_only_*.py so ``--dist loadfile`` can put the
+heavy classes on separate workers of the scripts-gh shard.
 """
 
 from __future__ import annotations

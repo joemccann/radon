@@ -470,8 +470,9 @@ Spec: [`docs/tradingview-integration.md`](../docs/tradingview-integration.md).
 `RADON_SLM_TAGGER_MODE` stays `off`. Spec: [`docs/ml/newsfeed-slm-tagger.md`](../docs/ml/newsfeed-slm-tagger.md).
 
 `setup-vps.sh` also inventories `radon-knowledge-eval.{service,timer}` so a
-fresh host has the unit files. `enable_services` skips both until a human
-reviews the draft golden set. The repo ships an initial live baseline in
+fresh host has the unit files. `enable_services` skips both on every setup.
+It does not inspect the baseline file. Leave that skip until a human reviews
+the draft golden set. The repo ships an initial live baseline in
 `scripts/knowledge/golden_eval_baseline.json`; enabling the timer before
 that review would page on a draft gate. The unit
 writes no `service_health` row (`EXEMPT_UNITS` `gap:`); a failed run pages
@@ -479,6 +480,15 @@ via the unit watchdog. Drift ack: `not-installed:radon-knowledge-eval.*`.
 Auto-sync stays off. `cloud/tests/test_knowledge_eval_setup.py` pins
 the inventory-and-skip. Contract:
 [`docs/knowledge-embeddings.md`](../docs/knowledge-embeddings.md).
+
+`setup-vps.sh` inventories `radon-grok-upgrade.{service,timer}` and
+`enable_services` enables both. Daily 07:40 UTC. The oneshot side-installs
+the latest stable Grok CLI, smokes it, and auto-promotes on pass (writes
+`/var/lib/radon/grok_lkg.json`). A failed smoke stays on last-known-good
+and pages via Pushover plus the unit watchdog. The job heartbeats
+`service_health` as `grok-upgrade` (26h daily window). Contract:
+[`docs/grok-page-responder.md`](../docs/grok-page-responder.md).
+`cloud/tests/test_grok_upgrade_setup.py` pins the inventory-and-enable.
 
 
 Canonical unit files are copied root-owned to `/etc/systemd/system`; they are

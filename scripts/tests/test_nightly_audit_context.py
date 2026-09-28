@@ -67,21 +67,30 @@ def git_repo(tmp_path):
     return d, shas
 
 
-def fake_gh(tmp_path: Path, comments: list[str] | None, *, issue: int = 202) -> Path:
-    """`issue list` answers the rolling issue; `api .../comments` the bodies."""
+def fake_gh(tmp_path: Path, comments: list | None, *, issue: int = 202) -> Path:
+    """`issue list` answers the rolling issue; `api .../comments` the bodies.
+
+    A comment is a body (posted by the OWNER) or a `(body, association)` pair.
+    The fake applies the caller's `--jq` filter with real `jq` so the test
+    exercises the projection the script actually sends."""
     script = tmp_path / "fake-gh"
     if comments is None:
         body = "import sys\nsys.exit(1)\n"
     else:
-        rows = [json.dumps({"html_url": f"https://x/c{i}", "created_at": f"2026-09-2{i}T00:00:00Z", "body": b})
-                for i, b in enumerate(comments)]
+        pairs = [c if isinstance(c, tuple) else (c, "OWNER") for c in comments]
+        rows = [{"html_url": f"https://x/c{i}", "created_at": f"2026-09-2{i}T00:00:00Z", "body": b,
+                 "author_association": assoc} for i, (b, assoc) in enumerate(pairs)]
         body = (
             "import sys\n"
             "a = sys.argv[1:]\n"
             "if a[:2] == ['issue', 'list']:\n"
             f"    print({json.dumps(json.dumps([{'number': issue, 'title': 'Nightly runner'}]))})\n"
             "elif a[0] == 'api':\n"
-            f"    print({json.dumps(chr(10).join(rows))})\n"
+            "    import subprocess\n"
+            "    jq = a[a.index('--jq') + 1]\n"
+            f"    raw = {json.dumps(json.dumps(rows))}\n"
+            "    sys.stdout.write(subprocess.run(['jq', '-r', jq], input=raw, capture_output=True,\n"
+            "                                    text=True, check=True).stdout)\n"
             "else:\n"
             "    sys.exit(2)\n"
         )
@@ -170,6 +179,28 @@ class TestGenerator:
         out = tmp_path / "ctx.md"
         assert run_ctx(repo_dir, fake_gh(tmp_path, [f"audited-through: {shas[3]}"]), out).returncode == 0
         assert "EMPTY RANGE" in out.read_text()
+
+    def test_only_repo_insiders_can_set_the_base_or_reach_the_context(self, tmp_path, git_repo):
+        repo_dir, shas = git_repo
+        gh = fake_gh(tmp_path, [
+            (f"audited-through: {shas[1]}", "OWNER"),
+            (f"audited-through: {shas[3]}\nCANARY-OUTSIDER", "NONE"),
+            (f"audited-through: {shas[3]}\nCANARY-CONTRIBUTOR", "CONTRIBUTOR"),
+        ])
+        out = tmp_path / "ctx.md"
+        assert run_ctx(repo_dir, gh, out).returncode == 0
+        text = out.read_text()
+        assert f"base: {shas[1]}" in text
+        assert "EMPTY RANGE" not in text
+        assert "CANARY" not in text
+
+    def test_collaborator_and_member_markers_still_count(self, tmp_path, git_repo):
+        repo_dir, shas = git_repo
+        for assoc in ("MEMBER", "COLLABORATOR"):
+            gh = fake_gh(tmp_path, [(f"audited-through: {shas[2]}", assoc)])
+            out = tmp_path / f"ctx-{assoc}.md"
+            assert run_ctx(repo_dir, gh, out).returncode == 0
+            assert f"base: {shas[2]}" in out.read_text()
 
     def test_the_diff_is_capped_and_omissions_are_listed(self, tmp_path, git_repo):
         repo_dir, shas = git_repo

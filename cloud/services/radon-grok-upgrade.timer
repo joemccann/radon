@@ -1,0 +1,11 @@
+[Unit]
+Description=Radon Grok track-latest upgrade timer — daily, enabled
+
+[Timer]
+# Daily 07:40 UTC, after the subscription-token keepalive window.
+OnCalendar=*-*-* 07:40:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
