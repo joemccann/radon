@@ -41,7 +41,7 @@ print_plist() {
         <key>HOME</key>
         <string>$BOT_HOME</string>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$BOT_HOME/.local/bin:$BOT_HOME/.bun/bin</string>
+        <string>$BOT_HOME/.local/bin:$BOT_HOME/.grok/bin:$BOT_HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     </dict>
     <key>StartCalendarInterval</key>
     <dict>

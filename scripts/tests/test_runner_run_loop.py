@@ -240,4 +240,8 @@ def test_installed_daemon_runs_the_root_owned_runner_as_the_bot_user():
     assert plist["UserName"] == "_radonbot"
     assert plist["ProgramArguments"] == ["/bin/bash", "/usr/local/radon-runner/run_loop.sh", "documentation"]
     assert plist["EnvironmentVariables"]["HOME"] == "/Users/_radonbot"
+    path = plist["EnvironmentVariables"]["PATH"].split(":")
+    # Per-user CLI installs: agy and fx in ~/.local/bin, grok in ~/.grok/bin; codex from Homebrew.
+    for entry in ("/Users/_radonbot/.local/bin", "/Users/_radonbot/.grok/bin", "/opt/homebrew/bin"):
+        assert entry in path
     assert plist["StartCalendarInterval"] == {"Hour": 3, "Minute": 0}
