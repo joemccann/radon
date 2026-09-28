@@ -94,6 +94,12 @@
       "note": "The Credentials tab refuses values on egress pins an operator cannot see from the UI (DOC-067)."
     },
     {
+      "id": "model-ladder",
+      "globs": ["scripts/clients/model_ladder.py"],
+      "owners": ["docs/dropbox-research.md"],
+      "note": "Shared HTTP ladder byte cap and subscription auth matrix. Vision HTTP rungs gained the 2,000,000-byte stream cap without an owner update (DOC-144). Weekend CLI ladders are a separate contract."
+    },
+    {
       "id": "health-probes",
       "globs": ["scripts/health_service/probes.py"],
       "owners": ["scripts/health_service/CLAUDE.md"],
