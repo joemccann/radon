@@ -28,8 +28,6 @@ WRAPPER = SCRIPTS / "security_nightly.sh"
 SKILL = REPO / ".claude" / "skills" / "security-nightly" / "SKILL.md"
 BASH = shutil.which("bash") or "/bin/bash"
 COMMIT_EVIDENCE_LOOPS = (
-    SCRIPTS / "reliability_weekend.sh",
-    SCRIPTS / "testing_weekend.sh",
 )
 ALL_LOOPS = COMMIT_EVIDENCE_LOOPS + (WRAPPER, SCRIPTS / "security_deepsec_nightly.sh")
 

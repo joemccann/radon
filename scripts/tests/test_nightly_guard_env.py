@@ -13,10 +13,8 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parent.parent
 
 WRAPPERS = [
-    "reliability_weekend.sh",
     "security_nightly.sh",
     "security_deepsec_nightly.sh",
-    "testing_weekend.sh",
 ]
 
 

@@ -23,8 +23,7 @@ from test_rel137_weekend_wrapper_survivability import (
 REPO = Path(__file__).resolve().parents[2]
 SKILL_ROOTS = (
     REPO / ".claude" / "skills",
-    REPO / ".claude" / "portable-prompts",
-    REPO / ".codex" / "skills",
+    REPO / ".claude" / "runner-prompts",
 )
 
 

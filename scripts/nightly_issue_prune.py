@@ -169,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gh-bin", required=True)
     parser.add_argument("--issue", required=True, help="issue number")
     parser.add_argument(
-        "--branch-prefix", required=True, help="this loop's dated-branch prefix, e.g. reliability/"
+        "--branch-prefix", required=True, help="this loop's dated-branch prefix, e.g. security/"
     )
     parser.add_argument("--timeout", type=int, default=10)
     parser.add_argument(

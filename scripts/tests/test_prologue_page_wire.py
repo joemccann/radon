@@ -20,8 +20,6 @@ REPO = Path(__file__).resolve().parents[2]
 
 # loop -> wrapper filename. All five carry the same prologue.
 LOOPS = {
-    "reliability": "reliability_weekend.sh",
-    "testing": "testing_weekend.sh",
     "security": "security_nightly.sh",
 }
 LOOP_IDS = sorted(LOOPS)

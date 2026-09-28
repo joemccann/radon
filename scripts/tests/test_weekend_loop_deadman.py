@@ -8,24 +8,12 @@ remediate` is never reached — contradicting the comment directly above it
 `audit ... CRASHED` comment and then complete silence, which is
 indistinguishable from the remediate phase hanging.
 
-R-238: the cycle budget is tested at exactly one place — AFTER `run_round`
-returns, inside the continuation loop. A check that passes at
-`SECONDS = CYCLE_BUDGET_SECS - 1` still launches a round that runs a further
-`CAP_SECS`, so the effective cap is `CYCLE_BUDGET_SECS + CAP_SECS` = 26 h
-against a 24 h `StartCalendarInterval`. launchd will not start a second
-instance of a running label, so the next 00:00 fire is dropped with no record.
-
 R-239: everything between `main()` entry and `run_phase` runs with NO ERR trap
 — `cd`, the marker check, `acquire_runner_lock`, `mkdir`, the rotation
 pipeline — so a full disk, a moved clone or a held lock exits with nothing but
 a line on stderr. The lock branch is the expensive one: a recorded pid reused
 by any live unrelated process makes every subsequent daily fire exit 3 in
 under a second, silently.
-
-R-240: the testing plist has no `~/.bun/bin` on PATH, and the testing loop is
-the one whose entire remit is JS/vitest health. `setup_testing_weekend.sh`
-checks `bun` in the operator's INTERACTIVE shell, which does have it, so setup
-prints ok and installs a plist under which bun is not resolvable.
 
 R-267: log rotation has no exclusion list and the plists point
 StandardOutPath/StandardErrorPath into that same directory, so the launchd
@@ -47,13 +35,9 @@ import pytest
 CLAUDE_RUNG_LADDER = "claude:claude-fable-5[1m]"
 
 REPO = Path(__file__).resolve().parents[2]
-RELIABILITY = REPO / "scripts" / "reliability_weekend.sh"
-TESTING = REPO / "scripts" / "testing_weekend.sh"
 SECURITY = REPO / "scripts" / "security_nightly.sh"
 SECURITY_DEEPSEC = REPO / "scripts" / "security_deepsec_nightly.sh"
 PLISTS = {
-    "reliability": REPO / "config" / "com.radon.reliability-daily.plist",
-    "testing": REPO / "config" / "com.radon.testing-daily.plist",
     "security": REPO / "config" / "com.radon.security-daily.plist",
     "security-deepsec": REPO / "config" / "com.radon.security-deepsec.plist",
 }
@@ -61,8 +45,6 @@ PLISTS = {
 # none of the dead-man contract below, which is the whole reason the two
 # original loops have it.
 LOOPS = {
-    "reliability": RELIABILITY,
-    "testing": TESTING,
     "security": SECURITY,
     "security-deepsec": SECURITY_DEEPSEC,
 }
@@ -93,7 +75,7 @@ def _fake_runner_clone(tmp_path: Path, name: str) -> Path:
     (repo / ".radon-weekend-runner").write_text("", encoding="utf-8")
     # REL-180 (R-504): every wrapper requires its OWN loop marker as well; a
     # generic clone carries all five so each wrapper finds its own.
-    for marker in (".radon-security-runner", ".radon-security-deepsec-runner", ".radon-reliability-runner", ".radon-testing-runner"):
+    for marker in (".radon-security-runner", ".radon-security-deepsec-runner"):
         (repo / marker).write_text("", encoding="utf-8")
     lock = repo / ".weekend-runner.lock"
     lock.mkdir()
@@ -147,43 +129,6 @@ class TestGroundTruthFailureStillReportsRemediate:
         )
 
 
-class TestCycleBudgetBoundsTheWholeRun:
-    def test_the_budget_plus_one_cap_fits_inside_a_day(self):
-        body = _uncommented(RELIABILITY)
-        budget = int(re.search(r"RADON_WEEKEND_CYCLE_BUDGET_SECS:-(\d+)", body).group(1))
-        # Every round — including round 1 of each phase — is launched only
-        # with room for its own CAP_SECS, so the WHOLE cycle is bounded by the
-        # budget rather than by budget + one more cap.
-        assert budget < 86400, (
-            f"a {budget}s cycle budget cannot leave a 24h launchd period "
-            "clear; launchd will not start a second instance of a running "
-            "label, so the next 00:00 fire is dropped with no record"
-        )
-        # Counting occurrences is satisfied by a duplicated dead line, so
-        # check WHERE they sit relative to the round they must guard. T-209.
-        phase = body[body.index("run_phase() {"):]
-        phase = phase[: phase.index("\n}\n") + 3]
-        rounds = [m.start() for m in re.finditer(r"^\s*run_round\s*$", phase, re.M)]
-        assert rounds, "run_phase no longer calls run_round"
-        guards = [m.start() for m in re.finditer(r"CYCLE_DEADLINE - CAP_SECS", phase)]
-        assert any(g < rounds[0] for g in guards), (
-            "round 1 of a phase is launched without checking the deadline, so "
-            "a cycle already past its budget in the audit phase still runs a "
-            f"full remediate round: guards at {guards}, first round at {rounds[0]}"
-        )
-        assert any(g > rounds[0] for g in guards), (
-            "the continuation loop relaunches rounds without rechecking the "
-            f"deadline: guards at {guards}, first round at {rounds[0]}"
-        )
-
-    def test_a_round_is_not_started_without_room_for_its_cap(self):
-        body = _uncommented(RELIABILITY)
-        assert "CYCLE_DEADLINE - CAP_SECS" in body or "room_for_another_round" in body, (
-            "the deadline is checked without accounting for the cap of the "
-            "round it is about to launch"
-        )
-
-
 class TestPrologueDeathsAreReported:
     @pytest.mark.parametrize("name", sorted(LOOPS))
     def test_the_err_trap_is_armed_before_the_prologue(self, name):
@@ -234,16 +179,7 @@ class TestPrologueDeathsAreReported:
         )
 
 
-class TestTestingPlistCanResolveBun:
-    def test_bun_is_on_the_testing_plist_path(self):
-        text = PLISTS["testing"].read_text(encoding="utf-8")
-        path = re.search(r"<key>PATH</key>\s*<string>([^<]*)</string>", text).group(1)
-        assert ".bun/bin" in path, (
-            "the loop whose entire remit is JS/vitest health cannot resolve "
-            "bun; setup checks it in the operator's interactive shell, which "
-            "can"
-        )
-
+class TestThePlistsAgreeOnPath:
     def test_both_plists_agree_on_path(self):
         paths = {}
         for name, plist in PLISTS.items():
@@ -310,19 +246,13 @@ class TestSetupGuardsPerLoopVenvs:
     """
 
     SETUPS = {
-        "reliability": REPO / "scripts" / "setup_reliability_weekend.sh",
-        "testing": REPO / "scripts" / "setup_testing_weekend.sh",
         "security": REPO / "scripts" / "setup_security_nightly.sh",
     }
     WRAPPERS = {
-        "reliability": REPO / "scripts" / "reliability_weekend.sh",
-        "testing": REPO / "scripts" / "testing_weekend.sh",
         "security": REPO / "scripts" / "security_nightly.sh",
         "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
     }
     VENV_DIR = {
-        "reliability": "$WEEKEND_ROOT/venv-reliability",
-        "testing": "$WEEKEND_ROOT/venv-testing",
         "security": "$WEEKEND_ROOT/venv-security",
         # Provisioned by setup_security_nightly.sh alongside venv-security.
         "security-deepsec": "$WEEKEND_ROOT/venv-security-deepsec",
@@ -356,7 +286,7 @@ class TestSetupGuardsPerLoopVenvs:
                 "is a follow-up after this ships"
             )
 
-    @pytest.mark.parametrize("name", ["reliability", "testing", "security"])
+    @pytest.mark.parametrize("name", ["security"])
     def test_each_setup_checks_the_sibling_clone_lock(self, name):
         # Comments stripped first: the guard's own comment quotes the
         # `python3.13 -m venv` line it protects, and a naive slice ends there.
@@ -370,7 +300,7 @@ class TestSetupGuardsPerLoopVenvs:
             "the other loop's cycle is executing against it"
         )
 
-    @pytest.mark.parametrize("name", ["reliability", "testing", "security"])
+    @pytest.mark.parametrize("name", ["security"])
     def test_each_setup_checks_the_bash_version(self, name):
         """GAP C: `/bin/bash` on this runner is 3.2, and `cloud/tests` needs 4+.
 
@@ -553,221 +483,3 @@ class TestBackgroundWorkIsNotSilentlyKilled:
         # A truncated run that ALSO timed out is a timeout, not a truncation:
         # the cap is the more specific fact and it already implies partial work.
         assert status(124, truncated) == "TIMEOUT after 7200s", status(124, truncated)
-
-
-INCOMPLETE_STATUS = "INCOMPLETE (agent exited 0 without committing to the nightly branch)"
-
-
-def _committing_clone(tmp_path: Path, git: str) -> Path:
-    """A marker-bearing runner clone with a REAL git history.
-
-    `main` has one commit and `origin/main` points at it, so the wrapper's
-    `checkout -f main` / `reset --hard origin/main` / `clean` all run for
-    real; only `fetch` is stubbed out (see `_committing_stub_bin`).
-    """
-    repo = tmp_path / "radon-testing"
-    (repo / "scripts").mkdir(parents=True)
-    (repo / ".radon-weekend-runner").write_text("", encoding="utf-8")
-    # REL-180 (R-504): the testing wrapper requires its own loop marker too.
-    (repo / ".radon-testing-runner").write_text("", encoding="utf-8")
-    wrapper = repo / "scripts" / "testing_weekend.sh"
-    shutil.copy2(TESTING, wrapper)
-    wrapper.chmod(wrapper.stat().st_mode | 0o100)
-    (tmp_path / ".env").write_text(
-        "PUSHOVER_USER=test-user\nPUSHOVER_TOKEN=test-token\n", encoding="utf-8"
-    )
-    curl_stub = tmp_path / "bin" / "curl"
-    (tmp_path / "bin").mkdir(exist_ok=True)
-    wrapper.write_text(
-        wrapper.read_text(encoding="utf-8").replace("/usr/bin/curl", str(curl_stub)),
-        encoding="utf-8",
-    )
-    (repo / "scripts" / "weekend_notify.py").write_text("# unused\n", encoding="utf-8")
-    subprocess.run([git, "init", "-q", str(repo)], check=True, env=_GIT_ENV)
-    at = [git, "-C", str(repo)]
-    subprocess.run([*at, "symbolic-ref", "HEAD", "refs/heads/main"], check=True, env=_GIT_ENV)
-    subprocess.run(
-        [*at, "add", "-f",
-         "scripts/testing_weekend.sh",
-         "scripts/weekend_notify.py",
-         ".radon-weekend-runner",
-         ".radon-testing-runner"],
-        check=True,
-        env=_GIT_ENV,
-    )
-    subprocess.run([*at, "commit", "-q", "-m", "main tip"], check=True, env=_GIT_ENV)
-    subprocess.run([*at, "update-ref", "refs/remotes/origin/main", "HEAD"], check=True, env=_GIT_ENV)
-    return repo
-
-
-_GIT_ENV = {
-    **os.environ,
-    "GIT_CONFIG_GLOBAL": "/dev/null",
-    "GIT_CONFIG_NOSYSTEM": "1",
-    "GIT_AUTHOR_NAME": "t",
-    "GIT_AUTHOR_EMAIL": "t@example.invalid",
-    "GIT_COMMITTER_NAME": "t",
-    "GIT_COMMITTER_EMAIL": "t@example.invalid",
-}
-
-
-def _curl_log_stub(log: Path) -> str:
-    return (
-        "#!/bin/bash\n"
-        f'printf "%s\\n" "$*" >> "{log}"\n'
-        "i=1\n"
-        'while [ "$i" -le "$#" ]; do\n'
-        '  eval "arg=\\${$i}"\n'
-        '  if [ "$arg" = "--config" ] || [ "$arg" = "-K" ]; then\n'
-        "    i=$((i + 1))\n"
-        '    eval "cfg=\\${$i}"\n'
-        f'    if [ "$cfg" = "-" ]; then cat >> "{log}"\n'
-        f'    elif [ -f "$cfg" ]; then cat "$cfg" >> "{log}"; fi\n'
-        "  fi\n"
-        "  i=$((i + 1))\n"
-        "done\n"
-        "exit 0\n"
-    )
-
-
-def _committing_stub_bin(tmp_path: Path, *, claude_body: str) -> tuple[Path, Path, Path]:
-    """`gh` / curl record their calls; `git` is REAL except `fetch`."""
-    real_git = shutil.which("git")
-    assert real_git, "a real git is required to exercise the commit check"
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir(exist_ok=True)
-    gh_log = tmp_path / "gh.log"
-    py_log = tmp_path / "py.log"
-    gh = bin_dir / "gh"
-    gh.write_text(
-        "#!/bin/sh\n"
-        f'printf "%s\\n" "$*" >> "{gh_log}"\n'
-        'if [ "$1 $2" = "issue list" ]; then echo 4242; fi\n'
-        "exit 0\n",
-        encoding="utf-8",
-    )
-    gh.chmod(0o755)
-    py = bin_dir / "python3"
-    py.write_text(
-        "#!/bin/sh\n"
-        f'printf "%s\\n" "$*" >> "{py_log}"\n'
-        "exit 0\n",
-        encoding="utf-8",
-    )
-    py.chmod(0o755)
-    curl = bin_dir / "curl"
-    curl.write_text(_curl_log_stub(py_log), encoding="utf-8")
-    curl.chmod(0o755)
-    git = bin_dir / "git"
-    git.write_text(
-        "#!/bin/sh\n"
-        'for a in "$@"; do [ "$a" = fetch ] && exit 0; done\n'
-        f'exec "{real_git}" "$@"\n',
-        encoding="utf-8",
-    )
-    git.chmod(0o755)
-    claude = bin_dir / "claude"
-    claude.write_text(claude_body, encoding="utf-8")
-    claude.chmod(0o755)
-    return bin_dir, gh_log, py_log
-
-
-class TestAnAgentThatCommitsNothingIsNotReportedOk:
-    """T-379 (T-239 recurring): the 2026-08-31 audit exited 0 and did nothing.
-
-    `claude -p` answered a mid-run nudge with text and no tool call, print
-    mode treated that as the end of the turn, and the phase ended after 18
-    minutes with zero commits, no ledger advance and no PR. rc was 0 and the
-    ceiling marker was absent, so `phase_status` said OK and every dead-man
-    channel repeated it. SKILL.md's contract is that every phase commits at
-    least once on the nightly branch (audit: ledger line + PR, even for an
-    empty range; remediate: the gate-count rows), so "exit 0 and no commit
-    landed during the phase" is INCOMPLETE, not OK.
-
-    Executed, not grepped: the whole wrapper runs against a real-git clone
-    with a stub `claude`, and the status is read back off the `gh issue
-    comment` body and the Pushover call. Only the testing wrapper is under
-    test here; the other four carry the same gap and are reported, not fixed.
-    """
-
-    def _run(self, tmp_path: Path, claude_body: str) -> tuple[subprocess.CompletedProcess, str, str]:
-        repo = _committing_clone(tmp_path, shutil.which("git"))
-        bin_dir, gh_log, py_log = _committing_stub_bin(tmp_path, claude_body=claude_body)
-        proc = subprocess.run(
-            [BASH, str(repo / "scripts" / "testing_weekend.sh"), "audit"],
-            env={
-                **_GIT_ENV,
-                "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-                "RADON_WEEKEND_REPO": str(repo),
-                "RADON_WEEKEND_PROVIDER_LADDER": CLAUDE_RUNG_LADDER,
-            },
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        calls = gh_log.read_text(encoding="utf-8") if gh_log.exists() else ""
-        pages = py_log.read_text(encoding="utf-8") if py_log.exists() else ""
-        return proc, calls, pages
-
-    def test_exit_0_with_no_commit_is_reported_incomplete_on_both_channels(self, tmp_path):
-        proc, calls, pages = self._run(
-            tmp_path,
-            "#!/bin/sh\n"
-            "echo 'Draft findings numbered T-346..T-378 are ready; wait on its completion.'\n"
-            "exit 0\n",
-        )
-        # An unfinished phase must not tell launchd it succeeded either: the
-        # wrapper reports INCOMPLETE on both channels AND exits 75.
-        assert proc.returncode == 75, (proc.returncode, proc.stdout, proc.stderr)
-        comment = next((ln for ln in calls.splitlines() if ln.startswith("issue comment")), "")
-        assert comment, f"no dead-man comment at all: {calls!r} {proc.stderr!r}"
-        assert "**audit**" in calls and "**INCOMPLETE" in calls, (
-            f"no PHASE status dead-man comment: {calls!r} {proc.stderr!r}"
-        )
-        assert "**Issue discovered**" not in calls, calls
-        assert INCOMPLETE_STATUS in calls, (
-            "the agent exited 0 having committed nothing — no ledger line, no "
-            f"PR — and the issue comment did not say so: {calls!r}"
-        )
-        assert "Nothing went wrong" not in calls, calls
-        assert INCOMPLETE_STATUS in pages, (
-            f"the Pushover page must carry the same status: {pages!r}"
-        )
-        assert "message=OK" not in pages, pages
-
-    def test_a_commit_on_the_nightly_branch_during_the_phase_is_ok(self, tmp_path):
-        proc, calls, pages = self._run(
-            tmp_path,
-            "#!/bin/sh\n"
-            "git checkout -q -b testing/2026-08-31\n"
-            "git commit -q --allow-empty -m 'T-379 stub: ledger line'\n"
-            "echo 'ledger appended, PR opened'\n"
-            "exit 0\n",
-        )
-        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
-        assert "**audit**" in calls and "**OK**" in calls, (
-            f"a phase that committed must still report: {calls!r} {proc.stderr!r}"
-        )
-        assert "**Issue discovered**" not in calls, calls
-        assert "Nothing went wrong this audit phase." not in calls, calls
-        assert INCOMPLETE_STATUS not in calls, calls
-        assert "message=OK" in pages, pages
-        assert INCOMPLETE_STATUS not in pages, pages
-
-
-@pytest.mark.parametrize("second_commits", [True, False])
-def test_testing_audit_retries_an_empty_success_once(tmp_path, second_commits):
-    counter = tmp_path / "audit-attempts"
-    body = (
-        '#!/bin/sh\n'
-        f'echo attempt >> "{counter}"\n'
-        f'count=$(wc -l < "{counter}")\n'
-        'if [ "$count" -eq 2 ]; then\n'
-        + ("git checkout -q -b testing/2026-08-31\n"
-           "git commit -q --allow-empty -m 'T-380 fixture completion'\n" if second_commits else ":\n")
-        + "fi\nexit 0\n"
-    )
-    proc, calls, pages = TestAnAgentThatCommitsNothingIsNotReportedOk()._run(tmp_path, body)
-    assert counter.read_text().splitlines() == ["attempt", "attempt"]
-    assert proc.returncode == (0 if second_commits else 75), (proc.stdout, proc.stderr)
-    assert ("**OK**" if second_commits else "**INCOMPLETE") in calls

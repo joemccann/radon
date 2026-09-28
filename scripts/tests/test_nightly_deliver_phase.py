@@ -43,8 +43,6 @@ COMMENT_MARK = "<<<COMMENT>>>"
 
 # loop slug -> (wrapper, log dir, skill dir)
 LOOPS = {
-    "reliability": ("reliability_weekend.sh", "reliability-weekend", "reliability-weekend"),
-    "testing": ("testing_weekend.sh", "testing-weekend", "testing-weekend"),
     "security": ("security_nightly.sh", "security-nightly", "security-nightly"),
     "security-deepsec": ("security_deepsec_nightly.sh", "security-deepsec", "security-deepsec"),
 }
@@ -53,8 +51,6 @@ MARKERS = (
     ".radon-weekend-runner",
     ".radon-security-runner",
     ".radon-security-deepsec-runner",
-    ".radon-reliability-runner",
-    ".radon-testing-runner",
 )
 URL1 = "https://github.com/joemccann/radon/pull/301"
 URL2 = "https://github.com/joemccann/radon/pull/302"
@@ -317,8 +313,8 @@ class TestTheCycleRunsThreePhasesInOrder:
         )
         result = _run(cfg, "cycle")
         assert result.returncode == 7, _why(result, cfg)
-        # The reliability loop relaunches a failed remediate as continuation
-        # rounds, each with its own comment; the phase ORDER is what matters.
+        # A failed remediate may be relaunched as continuation rounds, each
+        # with its own comment; the phase ORDER is what matters.
         order = list(dict.fromkeys(
             re.match(r"\*\*(\w+)\*\*", body.strip()).group(1) for body in _comments(cfg)
         ))

@@ -25,8 +25,6 @@ from datetime import date
 from nightly_issue_format import sanitize
 
 LOOP_TITLES = {
-    "reliability": "Reliability",
-    "testing": "Testing",
     "security": "Security",
     "security-deepsec": "DeepSec",
 }

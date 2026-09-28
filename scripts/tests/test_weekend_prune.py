@@ -317,8 +317,6 @@ def test_the_cli_refuses_a_root_that_is_not_a_weekend_root(tmp_path: Path) -> No
 # Wrapper wiring. Same staging shape as the survivability suites.
 # --------------------------------------------------------------------------
 LOOPS = {
-    "reliability": "reliability_weekend.sh",
-    "testing": "testing_weekend.sh",
     "security": "security_nightly.sh",
     "security-deepsec": "security_deepsec_nightly.sh",
 }
@@ -339,8 +337,7 @@ def _stage(tmp_path: Path, loop: str, *, agent_rc: int = 0,
     shutil.copy2(REPO / "scripts" / script, wrapper)
     wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
     (clone / ".radon-weekend-runner").touch()
-    for marker in (".radon-security-runner", ".radon-security-deepsec-runner", ".radon-reliability-runner",
-                   ".radon-testing-runner"):
+    for marker in (".radon-security-runner", ".radon-security-deepsec-runner"):
         (clone / marker).touch()
     (clone / "scripts" / "weekend_notify.py").write_text("# unused\n", encoding="utf-8")
     (clone / "scripts" / "weekend_prune.py").write_text("# unused\n", encoding="utf-8")

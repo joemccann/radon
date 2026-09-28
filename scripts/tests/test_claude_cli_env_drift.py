@@ -63,6 +63,6 @@ def test_failed_page_is_retried_next_run(tmp_path):
 
 def test_committed_baseline_covers_the_wrapper_reroute_lists():
     reviewed = drift.reviewed_names(REPO / "scripts" / "claude_cli_env_reviewed.txt")
-    text = (REPO / "scripts" / "reliability_weekend.sh").read_text()
+    text = (REPO / "scripts" / "security_nightly.sh").read_text()
     live = [n for n in ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK") if n in text]
     assert live and set(live) <= reviewed

@@ -268,3 +268,38 @@ def test_ci_performance_runs_on_the_runner_in_the_old_loops_slot():
     assert "RESULT: <PR URL>" in body and "RESULT: no PR" in body
     assert not (REPO / "scripts" / "ci_performance_nightly.sh").exists()
     assert not (REPO / "config" / "com.radon.ci-performance-daily.plist").exists()
+
+
+@pytest.mark.parametrize(
+    "loop,hour,minute,retired",
+    [
+        ("testing", 0, 10, ("scripts/testing_weekend.sh", "scripts/setup_testing_weekend.sh",
+                            "config/com.radon.testing-daily.plist", ".claude/skills/testing-weekend")),
+        ("reliability", 0, 0, ("scripts/reliability_weekend.sh", "scripts/setup_reliability_weekend.sh",
+                               "config/com.radon.reliability-daily.plist", ".claude/skills/reliability-weekend")),
+    ],
+)
+def test_testing_and_reliability_run_on_the_runner_in_their_old_slots(loop, hour, minute, retired):
+    """Cut over from the per-loop wrappers: same branch prefix (so PR history
+    and the rolling issue stay continuous) and start time, a prompt read from
+    main that ends on a RESULT line, and the old launcher gone."""
+    import plistlib
+
+    out = subprocess.run([BASH, str(REPO / "scripts" / "runner" / "install.sh"), "--print-plist", loop],
+                         capture_output=True, check=True)
+    plist = plistlib.loads(out.stdout)
+    assert plist["Label"] == f"com.radon.runner.{loop}"
+    assert plist["UserName"] == "_radonbot"
+    assert plist["ProgramArguments"] == ["/bin/bash", "/usr/local/radon-runner/run_loop.sh", loop]
+    assert plist["StartCalendarInterval"] == {"Hour": hour, "Minute": minute}
+
+    env = (REPO / "scripts" / "runner" / "loops" / f"{loop}.env").read_text()
+    assert f"\nBRANCH_PREFIX={loop}\n" in env
+    prompt = REPO / ".claude" / "runner-prompts" / f"{loop}.md"
+    assert f"\nPROMPT={prompt.relative_to(REPO)}\n" in env
+    body = prompt.read_text()
+    assert "RESULT: <PR URL>" in body and "RESULT: no PR" in body
+    assert f"--label {loop}-nightly" in body
+    assert "audited-through:" in body
+    for path in retired:
+        assert not (REPO / path).exists(), path
