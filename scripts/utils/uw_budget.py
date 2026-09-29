@@ -16,6 +16,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Optional
@@ -34,6 +35,8 @@ CALLER_ENV = "RADON_UW_CALLER"
 MAX_TRACKED_KEYS = 200
 TOP_N = 15
 HISTORY_DAYS = 90
+# REL-052 / NF-5: below the web mirror's 3-second request deadline.
+LOCK_TIMEOUT_S = 1.0
 _TICKER_SEGMENT = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 
 
@@ -110,11 +113,17 @@ def _archive_unlocked(path: Path, state: dict) -> None:
         previous = [
             line for line in history.read_text().splitlines() if line.strip()
         ]
-    except OSError:
+    except FileNotFoundError:
         previous = []
+    except OSError:
+        return  # An unreadable archive is not permission to replace it.
     previous.append(json.dumps(_payload(state)))
     try:
-        history.write_text("\n".join(previous[-HISTORY_DAYS:]) + "\n")
+        # The caller holds the budget lock, so this bounded staging name has
+        # one writer. A partial write cannot truncate the complete history.
+        temporary = history.with_suffix(history.suffix + ".tmp")
+        temporary.write_text("\n".join(previous[-HISTORY_DAYS:]) + "\n")
+        temporary.replace(history)
     except OSError:
         pass
 
@@ -194,7 +203,17 @@ def record_hits(
     who = caller_label(caller)
     what = endpoint_class(endpoint)
     with _with_lock(target) as lock:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        # A dead/stalled holder must not pin a default-executor worker.
+        deadline = time.monotonic() + LOCK_TIMEOUT_S
+        while True:
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("UW budget lock busy") from None
+                time.sleep(min(0.02, remaining))
         try:
             state = _read_unlocked(target)
             if state.get("date") != day:

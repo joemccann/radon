@@ -2336,9 +2336,13 @@ async def uw_usage_record(
 
     if not (1 <= count <= 500):
         raise HTTPException(status_code=400, detail="count must be between 1 and 500")
-    await asyncio.to_thread(
-        record_hits, count, caller=caller or "web", endpoint=endpoint
-    )
+    try:
+        await asyncio.to_thread(
+            record_hits, count, caller=caller or "web", endpoint=endpoint
+        )
+    except TimeoutError as exc:
+        # REL-052 / NF-5: bounded contention is explicit, never a false count.
+        raise HTTPException(status_code=503, detail=str(exc), headers={"Retry-After": "1"}) from exc
     return usage_snapshot()
 
 
