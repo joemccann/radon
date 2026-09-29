@@ -194,14 +194,14 @@ model-unavailable, unparseable output with no `RESULT:` line), the
 responder retries once on last-known-good and alerts. A valid
 `RESULT: failed` line is not a retry.
 
-A shared flock (`/var/lib/radon/grok-runtime.lock`) serializes the
+A shared flock (`/var/lib/radon/grok-runtime/grok-runtime.lock`) serializes the
 responder against a live promotion.
 
 ### Daily upgrade timer (enabled)
 
 `radon-grok-upgrade.{service,timer}` is installed and enabled. Daily
 07:40 UTC it runs `scripts/grok_upgrade.py`: `grok update` into a
-candidate under `~/.grok/downloads` (scratch `GROK_HOME`), resolves the
+candidate under `/var/lib/radon/grok-upgrade` (scratch `GROK_HOME`), resolves the
 newest default model, and smokes a canned dry-run that must return
 `RESULT:` plus a Part 1 validator-passing body.
 
@@ -298,9 +298,17 @@ grok path. The claim still counts against the daily action cap.
 The unit's stripped `EnvironmentFile` is pointless if the agent can read the
 real secrets off disk, so `/home/radon/radon-cloud` (which holds the 0600
 `.env` with IB Flex, Clerk, UW and archive credentials) is in
-`InaccessiblePaths`, `/home/radon` is `ReadOnlyPaths`, and only the dedicated
-clone is writable. `ProtectHome=tmpfs` is deliberately NOT used: it would also
-hide the clone and the venv the unit executes from.
+`InaccessiblePaths`, as are `/var/lib/radon/flex-secrets` and
+`/var/lib/radon/rh-mcp`. `/home/radon` and `/var/lib/radon` are
+`ReadOnlyPaths`. The unit writes only the dedicated clone, `~/.grok` (session
+state) and `/var/lib/radon/grok-runtime` (the shared flock). `~/.grok/bin`,
+`~/.grok/hooks` and `~/.grok/downloads` stay read-only inside `~/.grok`,
+because `radon-subscription-tokens` runs `grok` and `agy` from `~/.grok/bin`
+and `~/.local/bin` with the production env. The upgrader installs candidates
+under `/var/lib/radon/grok-upgrade`, which the responder cannot write, so the
+promoted live symlink never points into a responder-writable path.
+`ProtectHome=tmpfs` is deliberately NOT used: it would also hide the clone and
+the venv the unit executes from.
 
 The stripped env file itself is also in `InaccessiblePaths` (systemd reads it
 before building the namespace), and every grok child process runs with an

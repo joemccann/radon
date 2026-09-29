@@ -24,7 +24,9 @@ DEFAULT_LKG_PATH = Path(
     os.environ.get("RADON_GROK_LKG_PATH", "/var/lib/radon/grok_lkg.json")
 )
 DEFAULT_LOCK_PATH = Path(
-    os.environ.get("RADON_GROK_RUNTIME_LOCK", "/var/lib/radon/grok-runtime.lock")
+    os.environ.get(
+        "RADON_GROK_RUNTIME_LOCK", "/var/lib/radon/grok-runtime/grok-runtime.lock"
+    )
 )
 DEFAULT_LIVE_BIN = Path(
     os.environ.get("GROK_BIN") or str(Path.home() / ".local" / "bin" / "grok")
