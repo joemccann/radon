@@ -214,6 +214,54 @@ Incident: 2026-07-08, P1.
 
 ---
 
+## tv-alerts-hrana-read-timeout
+
+**`radon-tv-alerts.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) on a single hrana read timeout.** Peak: 2026-09-28
+21:30Z, page `01374b995572a545deb4ce62905c643c`. Next timer (21:32)
+exited 0 (`processed: 0`).
+
+- **Mechanism:** `Type=oneshot`, no `Restart=`. At 21:27:27Z `run()`
+  raised `HranaHttpError: TimeoutError: The read operation timed out`
+  (`HRANA_TIMEOUT_S=4`). The error heartbeat at 21:27:31Z timed out the
+  same way, so `main` returned 1. Sibling writers in that minute
+  (trin, host-metrics, nextjs-db-watchdog, grok heartbeat,
+  knowledge-ingest) logged the same timeout and stayed up, because
+  they already treat it as non-fatal or retry. `requires_ib` is false.
+  Edge and `:8321/health/lite` stayed authenticated. The 21:28 host
+  snapshot shows this unit `active_state=failed` and nothing else in
+  the radon set failed. Current unit is `Result=success`.
+- **Detection:** journal `[tv-alerts-drain] cycle failed: TimeoutError:
+  The read operation timed out` then `health write failed: TimeoutError:
+  The read operation timed out`. `systemctl show` on that invocation
+  is `exit-code` / `NRestarts=0` / `ExecMainStatus=1`. Exec span is
+  about 8s (two hrana budgets), not `TimeoutStartSec=120`. Prior and
+  next cycles log `{"processed": 0, ...}`.
+- **Discriminating check:** Python Turso canary `SELECT 1` succeeds
+  (64 ms at diagnosis). Canary fail → Turso platform, stand down. Do
+  not restart-flap. Same-minute sibling timeout lines that say
+  `non-fatal` / `heartbeat failed` / `retrying` confirm the stall is
+  the shared read, not this script's SQL. `Result=start-limit-hit` is
+  `tv-alerts-start-limit-healthy-drain`. `Result=signal` or exit 143
+  inside a deploy window is `deploy-stop-clean-oneshot-signal`.
+  `/health/lite` down → API, stand down. A statement error (not a
+  read timeout) still fails the oneshot on purpose.
+- **Remediation (code):** a read timeout logs
+  `cycle read timeout non-fatal` and exits 0. No ok heartbeat and no
+  error heartbeat, so a standing outage still goes stale inside the
+  20-minute `tv-alerts-drain` window. Unprocessed rows stay
+  unprocessed for the next 5-minute fire. Other exceptions still
+  record error health and exit 1. Do not `reset-failed`. The unit is
+  not on `RERUNNABLE_ONESHOT_UNITS`. After deploy, the next timer is
+  enough. The 21:32 fire already recovered this page.
+- **Regression:**
+  `scripts/tests/test_tv_alerts_drain.py::test_empty_poll_read_timeout_does_not_fail_the_oneshot`,
+  `test_ok_heartbeat_read_timeout_does_not_fail_the_oneshot`,
+  `test_hrana_statement_error_still_fails_the_oneshot`.
+- **Code:** `scripts/tv_alerts_drain.py` (`_read_timeout`, `main`).
+
+---
+
 ## deploy-stop-clean-oneshot-signal
 
 **`Type=oneshot` scan units page P1 `Result=signal` when deploy
