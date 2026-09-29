@@ -18,6 +18,7 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
 import sys
 from pathlib import Path
 from typing import Callable
@@ -262,10 +263,19 @@ def _update_pr_body(
     runner: Runner,
     binary: str,
     *,
-    url: str,
+    repo: str,
+    number: int,
     body: str,
 ) -> None:
-    proc = runner([binary, "pr", "edit", url, "--body", body])
+    # REL-294 / R-713: gh pr edit queries retired Projects-classic fields.
+    # REST accepts the exact body without that unrelated GraphQL dependency.
+    with tempfile.NamedTemporaryFile(mode="w+", suffix=".json", encoding="utf-8") as payload:
+        json.dump({"body": body}, payload)
+        payload.flush()
+        proc = runner([
+            binary, "api", "--method", "PATCH", f"repos/{repo}/pulls/{number}",
+            "--input", payload.name,
+        ])
     if getattr(proc, "returncode", 1) != 0:
         _raise_from_gh(proc)
 
@@ -310,7 +320,10 @@ def ensure_pr(
     )
     if existing:
         if update_existing and body:
-            _update_pr_body(run, binary, url=existing["url"], body=resolved_body)
+            number = _number_from_url(existing["url"])
+            if number is None:
+                raise IrEnsurePrError("existing PR has no valid number")
+            _update_pr_body(run, binary, repo=repo, number=number, body=resolved_body)
         return {
             "action": existing["state"].lower() if include_terminal and existing.get("state") in {"CLOSED", "MERGED"} else "exists",
             "url": existing["url"],
