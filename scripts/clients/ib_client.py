@@ -884,7 +884,7 @@ class IBClient:
                 "type": "stock" if sec_type == "STK" else "option",
                 "quantity": getattr(order, "totalQuantity", 0),
                 "symbol": getattr(contract, "symbol", ""),
-                "limitPrice": getattr(order, "lmtPrice", None),
+                "limitPrice": reference_price,
             })
         if violation:
             raise IBOrderError(violation["message"])
