@@ -8644,10 +8644,12 @@ CI repair review: befea93d preserved21 new gateway/service component regressions
 
 - [x] T1 depends_on: [] Install isolated Python toolchain, read trusted checkpoint and open PRs, select tonight's branch.
 - [x] T2 depends_on: [T1] Audit 5c27667c..c274a773 and codemap importers; verify standing sweeps and inherited acceptance.
-- [ ] T3 depends_on: [T2] Fix verified findings serially with fault-injection red/green and focused gates.
+- [x] T3 depends_on: [T2] Fix verified findings serially with fault-injection red/green and focused gates.
 - [ ] T4 depends_on: [T3] Run permanent drills, validate diff, publish substantive draft PR and await exact-head CI.
 - [ ] T5 depends_on: [T4] Record one durable issue comment and final review.
 
 Review: pending; only mocks/local fixtures and GitHub operations are authorized. Full suites and Vitest are assigned to CI.
 
 Nightly review update: REL-291 red 4, green runner/hooks 152; standing catalogs 57 passed. Remaining repairs and closing verification pending.
+
+Nightly closing review (2026-09-29): 12 repaired findings, including five new IDs R-710 through R-714. All reproductions confirmed serially before fixes. Python drills 95 passed; standing catalogs 57 passed; inherited acceptance 125 passed; expanded monitor 530 passed. Two production-browser regressions passed and screenshots inspected; TypeScript, build and six curation checks passed. Changed YAML parsed, runner bash syntax and diff checks passed, gitleaks found no secrets. Full pytest/cloud/Vitest and its idempotency drill remain assigned to exact-head PR CI. Remaining historical acceptance is explicit in the audit appendix; no invented BLOCKED status. Runner credentials are stripped from agent execution; no Pushover credentials are available here, and no secret file was sought. Publication, CI and one issue comment remain the final steps.
