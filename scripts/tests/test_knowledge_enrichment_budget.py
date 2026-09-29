@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from knowledge import distill as subject
@@ -63,7 +64,17 @@ child.wait()
     assert processes[0].poll() is not None
     descendant = int(pid_file.read_text())
     stat = Path(f"/proc/{descendant}/stat")
-    assert not stat.exists() or stat.read_text().split()[2] == "Z"
+    # SIGKILL delivery is asynchronous: poll briefly for exit or zombie.
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            state = stat.read_text().split()[2]
+        except (FileNotFoundError, ProcessLookupError):
+            state = None
+        if state in (None, "Z", "X") or time.monotonic() > deadline:
+            break
+        time.sleep(0.05)
+    assert state in (None, "Z", "X")
 
 
 def test_main_shares_budget_across_source_retries(monkeypatch):

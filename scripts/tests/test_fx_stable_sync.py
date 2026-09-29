@@ -18,10 +18,6 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 SYNC = REPO / "scripts" / "fx_stable_sync.sh"
 STABLE = "__HOME__/.local/share/radon/fx-stable"
-WRAPPERS = [
-    "security_nightly.sh",
-    "security_deepsec_nightly.sh",
-]
 
 
 def test_sync_agent_runs_an_installed_copy_outside_every_runner_clone() -> None:
@@ -31,32 +27,6 @@ def test_sync_agent_runs_an_installed_copy_outside_every_runner_clone() -> None:
     assert "radon-weekend" not in script
     assert plist["RunAtLoad"] is True
     assert "__HOME__/.local/bin" in plist["WatchPaths"]
-
-
-def _provider_bin(wrapper: str, home: Path, env_bin: str = "") -> str:
-    """Run the wrapper's own provider_bin, extracted verbatim."""
-    body = (REPO / "scripts" / wrapper).read_text(encoding="utf-8")
-    start = body.index("provider_bin() {")
-    fn = body[start : body.index("\n}\n", start) + 3]
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(home)}
-    if env_bin:
-        env["RADON_WEEKEND_FX_BIN"] = env_bin
-    return subprocess.run(
-        ["/bin/bash", "-c", fn + "provider_bin fx"],
-        env=env, capture_output=True, text=True, check=True,
-    ).stdout
-
-
-@pytest.mark.parametrize("wrapper", WRAPPERS)
-def test_wrappers_run_the_stable_fx_copy_when_it_exists(wrapper: str, tmp_path: Path) -> None:
-    # ~/.local/bin/fx stays the fallback for a host that has not run setup yet.
-    assert _provider_bin(wrapper, tmp_path) == f"{tmp_path}/.local/bin/fx"
-    stable = tmp_path / ".local" / "share" / "radon" / "fx-stable" / "fx"
-    stable.parent.mkdir(parents=True)
-    stable.write_text("#!/bin/sh\n")
-    stable.chmod(0o755)
-    assert _provider_bin(wrapper, tmp_path) == str(stable)
-    assert _provider_bin(wrapper, tmp_path, "/x/fx") == "/x/fx"
 
 
 def _run(tmp_path: Path, source: Path, extra: dict[str, str] | None = None) -> subprocess.CompletedProcess:

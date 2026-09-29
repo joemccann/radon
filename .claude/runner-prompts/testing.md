@@ -76,7 +76,7 @@ Violating any rail is a failed run.
 - Never run pytest and Vitest at the same time, and write every gate's full output to a file (`> /tmp/<gate>-<n>.log 2>&1`) before reading its tail, so a failing round can be named.
 - Focused, before every commit: `.venv/bin/python -m pytest -n auto <files> -q` for what you touched, `npx vitest run <files>` for web tests. `scripts/tests` and `cloud/tests` need separate pytest invocations (their conftests clash).
 - Full gate, run serially from the repo root: `.venv/bin/python -m pytest -n auto -q`, then `npx vitest run`, then `.venv/bin/python -m pytest cloud/tests -q`.
-- Other scheduled loops share this machine, so a load flake is likely. Re-run a failing file alone and serially before calling it red; the wrapper-driving suites (`test_provider_failover.py`, the `test_weekend_*` and `test_loop_lifecycle_*` files) are the known cases.
+- Other scheduled loops share this machine, so a load flake is likely. Re-run a failing file alone and serially before calling it red; the process-driving runner suites (`test_runner_run_loop.py`, `test_runner_security_hooks.py`) are the known cases.
 - `cloud/tests` is red on this Mac on `origin/main` too (bash 3.2 and no `caddy`: about 37 failures in `test_bootstrap_control_plane.py`, `test_ib_gateway_control.py` and `test_caddy_edge_timeouts.py`). Compare the sorted `FAILED` list, not the count, against the same run in a `git worktree add` of the base SHA. Linux CI is the authority for that suite.
 - Parse every changed YAML, JSON and TOML file, `bash -n` every changed shell script, `git diff --check`, and scan the diff for secrets.
 

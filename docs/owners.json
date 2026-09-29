@@ -72,16 +72,14 @@
     {
       "id": "nightly-loops",
       "globs": [
-        "scripts/*_weekend.sh",
         "scripts/*_nightly.sh",
-        "scripts/weekend_notify.py",
-        "scripts/weekend_prune.py",
         "scripts/nightly_*.py",
         "scripts/github_pr_output.py",
-        "config/com.radon.*-daily.plist"
+        "scripts/security_claude_ladder.py",
+        "scripts/claude_cli_env_drift.py"
       ],
       "owners": ["docs/operations.md"],
-      "note": "operations.md is the one place indexing all five nightly loops: fire times, clone + marker rails, the model pin and the status vocabulary an operator reads off a page. #219 changed operator-facing behaviour in all five wrappers with no owner update (DOC-032/033/034/040). Loop SEMANTICS stay in .claude/skills/<loop>/SKILL.md; only the operator contract belongs here."
+      "note": "operations.md is the one place indexing every nightly loop: fire times, the runner clone rail, the model ladder and the status vocabulary an operator reads off a page. #219 changed operator-facing behaviour in all five wrappers with no owner update (DOC-032/033/034/040). Every loop now runs on scripts/runner/run_loop.sh; loop SEMANTICS stay in .claude/runner-prompts/<loop>.md; only the operator contract belongs here."
     },
     {
       "id": "nightly-runner",
