@@ -275,7 +275,8 @@ def _record_health(state: str, detail: str | None = None) -> None:
         from db.hrana_http import write_service_health_http
     except ImportError:
         return
-    kwargs = {"last_error": detail} if detail else {}
+    # REL-293 / R-712: the transport accepts a structured error, not last_error.
+    kwargs = {"error": {"message": detail}} if detail else {}
     try:
         write_service_health_http(SERVICE_NAME, state, **kwargs)
     except Exception as exc:  # noqa: BLE001 — telemetry must not fail the job

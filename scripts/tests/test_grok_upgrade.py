@@ -262,3 +262,19 @@ class TestSeed:
         )
         assert again == state
         assert sum(1 for c in runner.calls if "--version" in c) == 1
+
+
+@pytest.mark.parametrize("state,detail", [
+    ("error", "candidate smoke failed"),
+    ("ok", "promotion deferred; incident lock held"),
+])
+def test_rel293_diagnostic_heartbeat_uses_the_real_writer_contract(monkeypatch, state, detail):
+    """REL-293 / R-712: diagnostics must reach the canonical health writer."""
+    from unittest.mock import create_autospec
+    from db import hrana_http
+    writer = create_autospec(hrana_http.write_service_health_http)
+    monkeypatch.setattr(hrana_http, "write_service_health_http", writer)
+
+    upgrade._record_health(state, detail)
+
+    writer.assert_called_once_with("grok-upgrade", state, error={"message": detail})
