@@ -120,9 +120,9 @@ phase_marker_present() {
 }
 
 # An agent-asserted URL is not a merge cue: each must be a same-repo OPEN PR
-# on this loop's branch prefix.
+# on this loop's branch prefix, and there must be one per claimed PR ($2).
 deliver_urls_verified() {
-  local tok verified
+  local tok verified count=0
   for tok in $1; do
     case "$tok" in
       http://*|https://*)
@@ -130,10 +130,11 @@ deliver_urls_verified() {
           --json state,headRefName,isCrossRepository \
           -q "select(.state == \"OPEN\" and .isCrossRepository == false and (.headRefName | startswith(\"$PR_BRANCH_PREFIX\"))) | \"ok\"" \
           2>/dev/null || true)"
-        [[ "$verified" == "ok" ]] || return 1 ;;
+        [[ "$verified" == "ok" ]] || return 1
+        count=$((count + 1)) ;;
     esac
   done
-  return 0
+  [[ "$count" -gt 0 && "$count" == "$2" ]]
 }
 
 # R-613: the durable record first, then the verdict line of this slice.
@@ -145,7 +146,7 @@ deliver_status() {
     ""|*"no deliver record"*) ;;
     *"deliver record has a branch but no PR"*) ;;
     *"ready to merge:"*)
-      if deliver_urls_verified "${from_record#*ready to merge:}"; then printf '%s' "$from_record"
+      if deliver_urls_verified "${from_record#*ready to merge:}" "${from_record%% PR(s)*}"; then printf '%s' "$from_record"
       else printf 'INCOMPLETE: unverified-pr-url'; fi
       return 0 ;;
     *) printf '%s' "$from_record"; return 0 ;;
@@ -161,7 +162,7 @@ deliver_status() {
         esac
       done
       if [[ "${n:-0}" == "0" ]]; then printf '0 PR(s), nothing to merge'
-      elif deliver_urls_verified "$urls"; then printf '%s PR(s) green, ready to merge: %s' "$n" "$urls"
+      elif deliver_urls_verified "$urls" "$n"; then printf '%s PR(s) green, ready to merge: %s' "$n" "$urls"
       else printf 'INCOMPLETE: unverified-pr-url'; fi ;;
     "$DELIVER_INCOMPLETE_MARKER"*)
       rest="${line#"$DELIVER_INCOMPLETE_MARKER"}"
