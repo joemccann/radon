@@ -37,8 +37,16 @@ export function usePreviousClose(
     fetchedRef.current = { session, symbols: new Set(), attempts: new Map() };
   }
 
+  const retryTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const generation = useRef(0);
   useEffect(() => {
     setClosePrices({});
+    const timers = retryTimers.current;
+    return () => {
+      generation.current += 1;
+      for (const timer of timers) clearTimeout(timer);
+      timers.clear();
+    };
   }, [session]);
 
   // Stock symbols (no underscores) with valid last but missing close
@@ -46,7 +54,7 @@ export function usePreviousClose(
     return Object.keys(prices).filter((key) =>
       shouldBackfillPreviousClose(key, prices[key]) && !fetchedRef.current.symbols.has(key),
     );
-  }, [prices, retryVersion]);
+  }, [prices, retryVersion, session]);
 
   // Stable key so the effect only fires when the missing list actually changes
   const missingKey = missingClose.join(",");
@@ -58,23 +66,34 @@ export function usePreviousClose(
     // Mark in-flight to prevent duplicate requests
     for (const sym of symbols) fetchedRef.current.symbols.add(sym);
 
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    const scheduleRetry = (delayMs: number) => {
-      if (retryTimer) return;
-      retryTimer = setTimeout(() => setRetryVersion((value) => value + 1), delayMs);
+    const state = fetchedRef.current;
+    const requestGeneration = generation.current;
+    const isCurrent = () => state === fetchedRef.current && requestGeneration === generation.current;
+    // REL-295 / R-714: ticks may rerender/clean up this request effect while
+    // fetch is pending. Own timers for the session, and release symbols only
+    // when their wait expires, never when the error response first arrives.
+    const scheduleRetry = (failed: string[], delayMs: number) => {
+      const timer = setTimeout(() => {
+        retryTimers.current.delete(timer);
+        if (!isCurrent()) return;
+        for (const sym of failed) state.symbols.delete(sym);
+        setRetryVersion((value) => value + 1);
+      }, delayMs);
+      retryTimers.current.add(timer);
     };
     // Exponential backoff per symbol; once MAX_ATTEMPTS misses land the symbol
     // stays marked fetched, so it is not asked for again this session.
     const releaseForRetry = (failed: string[]) => {
       let delayMs = 0;
+      const retryable: string[] = [];
       for (const sym of failed) {
         const attempts = (fetchedRef.current.attempts.get(sym) ?? 0) + 1;
         fetchedRef.current.attempts.set(sym, attempts);
         if (attempts >= MAX_ATTEMPTS) continue;
-        fetchedRef.current.symbols.delete(sym);
+        retryable.push(sym);
         delayMs = Math.max(delayMs, Math.min(RETRY_BASE_MS * 2 ** (attempts - 1), RETRY_MAX_MS));
       }
-      if (delayMs > 0) scheduleRetry(delayMs);
+      if (delayMs > 0) scheduleRetry(retryable, delayMs);
     };
 
     fetch("/api/previous-close", {
@@ -91,6 +110,7 @@ export function usePreviousClose(
         return r.json();
       })
       .then((data: { closes: Record<string, number> }) => {
+        if (!isCurrent()) return;
         const valid: Record<string, number> = {};
         const failed: string[] = [];
         for (const sym of symbols) {
@@ -102,17 +122,14 @@ export function usePreviousClose(
         if (Object.keys(valid).length > 0) setClosePrices((prev) => ({ ...prev, ...valid }));
       })
       .catch((error: unknown) => {
+        if (!isCurrent()) return;
         if (error instanceof RateLimited) {
           // A 429 says nothing about the symbols, so it does not count as a miss.
-          for (const sym of symbols) fetchedRef.current.symbols.delete(sym);
-          scheduleRetry(error.retryAfterMs);
+          scheduleRetry(symbols, error.retryAfterMs);
           return;
         }
         releaseForRetry(symbols);
       });
-    return () => {
-      if (retryTimer) clearTimeout(retryTimer);
-    };
   }, [missingKey, retryVersion, session]);
 
   // Merge backfilled close values into prices

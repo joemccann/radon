@@ -240,12 +240,12 @@ class _FakeDb:
 
     Rows are supplied in the legacy ``(payload, filled_at, written_at)`` shape
     and stamped with a synthetic ascending ``trade_id`` here, matching the
-    four columns ``_fetch_journal_rows_for_tickers`` selects.
+    five columns ``_fetch_journal_rows_for_tickers`` selects (including rowid).
     """
 
     def __init__(self, rows=None, error=None):
         self._rows = [
-            (f"t{index:04d}", *row) for index, row in enumerate(rows or [])
+            (f"t{index:04d}", *row, index + 1) for index, row in enumerate(rows or [])
         ]
         self._error = error
 
@@ -254,7 +254,7 @@ class _FakeDb:
             raise self._error
         cursor = args[0]
         limit = int(args[-1])
-        return _FakeCursor([row for row in self._rows if row[0] > cursor][:limit])
+        return _FakeCursor([row for row in self._rows if row[-1] > cursor][:limit])
 
 
 class TestOverlayWithDb:
@@ -543,7 +543,7 @@ class TestBoundedJournalRead:
 
     def _paged_row(self, trade_id, *args, **kwargs):
         payload, filled_at, written_at = _row(*args, **kwargs)
-        return (trade_id, payload, filled_at, written_at)
+        return (trade_id, payload, filled_at, written_at, int(trade_id[1:]) + 1)
 
     def test_read_is_paged_at_two_hundred_rows_per_statement(self):
         statements = []
@@ -560,7 +560,7 @@ class TestBoundedJournalRead:
                 statements.append((sql, tuple(args)))
                 cursor = args[0]
                 limit = args[-1]
-                page = [row for row in rows if row[0] > cursor][: int(limit)]
+                page = [row for row in rows if row[-1] > cursor][: int(limit)]
                 return _FakeCursor(page)
 
         fills = [_fill("o0", "SLV", 60.0, "C", "BOT", 1, None)]

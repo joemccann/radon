@@ -256,14 +256,14 @@ def _stub_journal_transport(monkeypatch, *, rows=None, error=None):
     R-203 moved this read off ``db.client.get_db()`` — the sync
     ``libsql_experimental`` connection with no execute timeout — and onto the
     ``journal_basis`` 200-row keyset pager over Hrana HTTP, so the stub
-    stamps an ascending ``trade_id`` and honours cursor + LIMIT.
+    stamps an ascending ``journal_rowid`` and honours cursor + LIMIT.
     """
     import json
 
     import db.hrana_http as hrana_http
 
     paged = [
-        (f"t{index:04d}", json.dumps(row), row["date"], f"w{index}")
+        (f"t{index:04d}", json.dumps(row), row["date"], f"w{index}", index + 1)
         for index, row in enumerate(rows or [])
     ]
 
@@ -272,7 +272,7 @@ def _stub_journal_transport(monkeypatch, *, rows=None, error=None):
             raise error
         cursor = args[0]
         limit = int(args[-1])
-        return [row for row in paged if row[0] > cursor][:limit]
+        return [row for row in paged if row[-1] > cursor][:limit]
 
     monkeypatch.setattr(hrana_http, "hrana_query", query)
 

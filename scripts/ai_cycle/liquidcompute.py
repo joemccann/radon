@@ -148,23 +148,24 @@ def store_row_from_observation(row):
     }
 
 
-def persist_ticker(store, observations):
-    """Persist ticker rows and observations. Writes error health on failure."""
+def persist_ticker(store, observations, *, report_error=True):
+    """REL-257: standalone callers report errors; main owns its cycle heartbeat."""
     try:
         store.upsert_liquidcompute([store_row_from_observation(row) for row in observations])
         store.upsert_observations_by_identity(observations)
     except Exception as exc:
-        # Write error health before re-raising so the watchdog sees the failure
-        from scripts.db.hrana_http import write_service_health_http
-        from .collectors import now_iso
-        write_service_health_http(
-            HEALTH_SERVICE,
-            "error",
-            started_at=now_iso(),
-            finished_at=now_iso(),
-            error={"message": f"Liquid Compute persistence failed: {type(exc).__name__}: {exc}"},
-            timeout=8,
-        )
+        if report_error:
+            # Write error health before re-raising so the watchdog sees the failure
+            from scripts.db.hrana_http import write_service_health_http
+            from .collectors import now_iso
+            write_service_health_http(
+                HEALTH_SERVICE,
+                "error",
+                started_at=now_iso(),
+                finished_at=now_iso(),
+                error={"message": f"Liquid Compute persistence failed: {type(exc).__name__}: {exc}"},
+                timeout=8,
+            )
         raise
     return len(observations)
 
@@ -200,7 +201,7 @@ def main(argv=None):
             # Archive import and the 900s snapshot scan run in radon-ai-cycle
             # (TimeoutStartSec=1200). This oneshot is budgeted at 180s.
             store = ObservationStore(args.database)
-            persist_ticker(store, observations)
+            persist_ticker(store, observations, report_error=False)
         print(
             json.dumps(
                 {

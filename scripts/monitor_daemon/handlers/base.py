@@ -37,10 +37,11 @@ for every handler — not just cash_flow_sync. See
 """
 
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, Any, Optional
 from zoneinfo import ZoneInfo
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,8 @@ class BaseHandler(ABC):
 
     def __init__(self):
         self.last_run: Optional[datetime] = None
+        self._last_run_monotonic: Optional[float] = None
+        self._scheduled_last_run: Optional[datetime] = None
         self._enabled: bool = True
         self._cycle_health_recorded: bool = False
         # Set while a finished cycle's service_health write has not landed.
@@ -136,8 +139,14 @@ class BaseHandler(ABC):
         if self.last_run is None:
             return True
         
-        elapsed = datetime.now() - self.last_run
-        return elapsed >= timedelta(seconds=self.interval_seconds)
+        # REL-021b / R-030: wall time is for durable reporting, never the
+        # running process's interval clock. Rebase restored/explicitly changed
+        # timestamps once; a future timestamp waits at most one interval.
+        if self._last_run_monotonic is None or self._scheduled_last_run != self.last_run:
+            elapsed = max(0.0, (datetime.now() - self.last_run).total_seconds())
+            self._last_run_monotonic = time.monotonic() - elapsed
+            self._scheduled_last_run = self.last_run
+        return time.monotonic() - self._last_run_monotonic >= self.interval_seconds
     
     def run(self) -> Dict[str, Any]:
         """
@@ -156,7 +165,7 @@ class BaseHandler(ABC):
         Returns:
             Dict with status, timestamp, and data from execute().
         """
-        start_time = datetime.now()
+        start_time = time.monotonic()
         started_at = self._utc_now_iso()
         self._cycle_health_recorded = False
 
@@ -164,9 +173,11 @@ class BaseHandler(ABC):
             result = self.execute()
             self._enforce_return_contract(result)
             self.last_run = datetime.now()
+            self._last_run_monotonic = time.monotonic()
+            self._scheduled_last_run = self.last_run
             self._ensure_cycle_heartbeat(result, started_at=started_at)
 
-            elapsed_ms = (self.last_run - start_time).total_seconds() * 1000
+            elapsed_ms = (self._last_run_monotonic - start_time) * 1000
 
             return {
                 "status": "ok",
@@ -318,6 +329,8 @@ class BaseHandler(ABC):
         
         Override in subclasses to restore additional state.
         """
+        self._last_run_monotonic = None
+        self._scheduled_last_run = None
         last_run = state.get("last_run")
         if last_run:
             self.last_run = datetime.fromisoformat(last_run)

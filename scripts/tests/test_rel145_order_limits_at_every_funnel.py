@@ -390,3 +390,41 @@ class TestNoPlacementSiteEscapesTheLimits:
             "scripts/monitor_daemon/handlers/exit_orders.py",
         ):
             assert expected in found, (expected, sorted(found))
+
+class TestRel166PricelessOrders(TestTheTransportIsTheLastFunnel):
+    """R-467: absent pricing cannot silently skip the dollar cap."""
+
+    @pytest.mark.parametrize("operation", ["place_order", "modify_order"])
+    @pytest.mark.parametrize("price", [None, 0, -1, float("nan"), float("inf"), "bad"])
+    def test_unpriced_non_combo_never_reaches_the_socket(self, price, operation):
+        from clients.ib_client import IBOrderError
+        placed = []
+        contract, order = self._order(50)
+        order.orderType = "MKT" if price is None else "LMT"
+        order.lmtPrice = price
+        with pytest.raises(IBOrderError, match="positive finite.*price"):
+            getattr(self._client(placed), operation)(contract, order)
+        assert placed == []
+
+    @pytest.mark.parametrize("operation", ["place_order", "modify_order"])
+    def test_stop_order_uses_its_trigger_for_the_notional_cap(self, operation):
+        import order_limits
+        from clients.ib_client import IBOrderError
+        placed = []
+        contract, order = self._order(1, sec_type="STK")
+        order.orderType = "STP"
+        order.lmtPrice = 0
+        order.auxPrice = order_limits.max_order_notional() + 1
+        with pytest.raises(IBOrderError, match="notional"):
+            getattr(self._client(placed), operation)(contract, order)
+        assert placed == []
+
+    @pytest.mark.parametrize("operation", ["place_order", "modify_order"])
+    def test_priced_stop_remains_usable_for_bracket_protection(self, operation):
+        placed = []
+        contract, order = self._order(1, sec_type="STK")
+        order.orderType = "STP"
+        order.lmtPrice = 0
+        order.auxPrice = 100
+        getattr(self._client(placed), operation)(contract, order)
+        assert placed == [(contract, order)]

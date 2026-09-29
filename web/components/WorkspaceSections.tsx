@@ -3091,7 +3091,9 @@ function OrdersSections({
   const { pendingCancels, pendingModifies, cancelledOrders, requestCancel, requestModify } = useOrderActions();
   // T-462: the feed-disconnect arm of quoteSubmitGate is dead unless the
   // owner surface supplies real connectivity.
-  const { connected: feedConnected } = useRealtimePrices();
+  const { connected, ibConnected } = useRealtimePrices();
+  // REL-236 / NF-3: relay pings continue when the broker feed is down.
+  const feedConnected = connected && ibConnected;
   const { isMobile, hasMounted } = useViewport();
   const showMobileOrders = isMobile && hasMounted;
   const riskFreeRate = useRiskFreeRate();

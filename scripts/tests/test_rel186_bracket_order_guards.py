@@ -37,10 +37,11 @@ def _client(placed):
     client._require_connection = lambda: None
 
     def _bracket(action, qty, lmt, tp, sl):
-        mk = lambda otype, px: SimpleNamespace(
-            action=action, totalQuantity=qty, lmtPrice=px, orderType=otype
-        )
-        return [mk("LMT", lmt), mk("LMT", tp), mk("STP", sl)]
+        # REL-166: a real stop stores its trigger in auxPrice, not lmtPrice.
+        from ib_insync import LimitOrder, StopOrder
+        close_action = "SELL" if action == "BUY" else "BUY"
+        return [LimitOrder(action, qty, lmt), LimitOrder(close_action, qty, tp),
+                StopOrder(close_action, qty, sl)]
 
     client._ib = SimpleNamespace(
         bracketOrder=_bracket,

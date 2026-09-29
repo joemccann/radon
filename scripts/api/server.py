@@ -964,7 +964,10 @@ async def auth_middleware(request: Request, call_next):
     # only way to disable auth is the explicit, loud, dev-only opt-in below —
     # never set RADON_AUTH_DISABLED on a public deployment.
     if not os.environ.get("CLERK_JWKS_URL"):
-        if os.environ.get("RADON_AUTH_DISABLED") == "1":
+        # REL-021b / R-037: a development bypass must not open a public
+        # Hetzner deployment when its JWKS configuration is missing.
+        mode = os.environ.get("RADON_MODE", "local").strip().lower()
+        if os.environ.get("RADON_AUTH_DISABLED") == "1" and mode == "local":
             return await call_next(request)
         return JSONResponse(
             status_code=503,
@@ -2333,9 +2336,13 @@ async def uw_usage_record(
 
     if not (1 <= count <= 500):
         raise HTTPException(status_code=400, detail="count must be between 1 and 500")
-    await asyncio.to_thread(
-        record_hits, count, caller=caller or "web", endpoint=endpoint
-    )
+    try:
+        await asyncio.to_thread(
+            record_hits, count, caller=caller or "web", endpoint=endpoint
+        )
+    except TimeoutError as exc:
+        # REL-052 / NF-5: bounded contention is explicit, never a false count.
+        raise HTTPException(status_code=503, detail=str(exc), headers={"Retry-After": "1"}) from exc
     return usage_snapshot()
 
 

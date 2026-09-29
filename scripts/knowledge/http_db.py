@@ -1,4 +1,4 @@
-"""Knowledge-only DB-API subset over bounded Hrana HTTP v2.
+"""Bounded Hrana HTTP v2 DB-API subset for knowledge and AI-cycle batches.
 
 Production store writes queue an entire conditional transaction and stream
 close in one request. Losing a receipt cannot prevent the server from receiving
@@ -13,8 +13,12 @@ import time
 import urllib.request
 from urllib.parse import urlsplit
 
-from db.hrana_http import HranaHttpError, _encode_arg, _refuse_pytest_pollution
-from health_service.turso_http import http_url_from_libsql, read_env
+try:  # scripts/ on sys.path
+    from db.hrana_http import HranaHttpError, _encode_arg, _refuse_pytest_pollution
+    from health_service.turso_http import http_url_from_libsql, read_env
+except ImportError:  # python -m scripts.ai_cycle.liquidcompute (REL-257)
+    from scripts.db.hrana_http import HranaHttpError, _encode_arg, _refuse_pytest_pollution
+    from scripts.health_service.turso_http import http_url_from_libsql, read_env
 
 REQUEST_TIMEOUT = 4.0
 # One authoritative document can contain hundreds of SQL steps. This is a
