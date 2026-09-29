@@ -296,7 +296,7 @@ _sanitize_issue_text() {
   text="${text//http:\/\/claude.ai\/settings\/usage/$'\x01USAGE\x01'}"
   text="${text//claude.ai\/settings\/usage/$'\x01USAGE\x01'}"
   text="$(printf '%s' "$text" | /usr/bin/sed -E \
-    -e 's,https?://[^[:space:]]+,[REDACTED],g' \
+    -e 's,[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]]+,[REDACTED],g' \
     -e 's,(^|[^[:alnum:].])/(api|admin)/[A-Za-z0-9._/-]+,\1[REDACTED],g' \
     -e 's,[A-Za-z0-9./_-]+\.(py|ts|tsx|js|mjs|cjs|sh|go|rb|java|json|yml|yaml|toml|md):[0-9]+,[REDACTED],g' \
     -e 's,[Bb]earer [^[:space:]]+,Bearer [REDACTED],g' \

@@ -85,7 +85,9 @@ _ROUTE_RE = re.compile(
     r"(?<![\w.])(/(?!Users\b|home\b|tmp\b|private\b|var\b|opt\b)"
     r"[a-z][\w.-]*(?:/[\w.-]+)+)"
 )
-_URL_RE = re.compile(r"https?://\S+", re.I)
+# Any scheme, not just http(s): database, cache and socket URIs carry
+# credentials in their userinfo or query.
+_URL_RE = re.compile(r"\b[a-z][a-z0-9+.-]*://\S+", re.I)
 # The quota ladder's one operator URL, kept only when nothing follows it.
 _USAGE_KEEP_RE = re.compile(
     r"(?:https?://)?claude\.ai/settings/usage(?=[\s).,;:!'\"\]>]|$)", re.I

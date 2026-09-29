@@ -680,3 +680,25 @@ class TestSanitizeClaudeUrls:
     ])
     def test_usage_page_is_kept(self, text: str):
         assert "claude.ai/settings/usage" in nif.sanitize(text)
+
+
+class TestSanitizeNonHttpUris:
+    @pytest.mark.parametrize("uri", [
+        "postgres://svc:pw0notreal@db/app", "redis://:pw1notreal@cache:6379/0",
+        "libsql://db.example/x?authToken=pw2notreal", "wss://relay.example/feed?key=pw3notreal",
+    ])
+    def test_credential_bearing_uri_is_redacted(self, uri: str):
+        out = nif.sanitize(f"the url {uri} was set")
+        assert "notreal" not in out, out
+        assert out == "the url [REDACTED] was set"
+
+    def test_bash_issue_sanitizer_redacts_non_http_uris(self, tmp_path: Path):
+        src = HOOK.read_text(encoding="utf-8")
+        start = src.index("_sanitize_issue_text() {")
+        body = _secret_ere_block(src) + src[start:src.index("\n}\n", start) + 3]
+        script = tmp_path / "run.sh"
+        script.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + body
+                          + "\n_sanitize_issue_text 'a redis://:pw1notreal@cache:6379/0 b'\n", encoding="utf-8")
+        proc = subprocess.run(["/bin/bash", str(script)], capture_output=True, text=True, timeout=30)
+        assert proc.returncode == 0, proc.stderr
+        assert "notreal" not in proc.stdout, proc.stdout
