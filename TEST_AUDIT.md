@@ -10700,3 +10700,6 @@ Audited through: c274a773228ed29226721694370d3a1c2739494e on 2026-09-29 — 3 ne
 
 
 **T-495 — DONE locally; browser evidence assigned to PR CI.** `web/e2e/fixtures/chainPaneState.ts:3` measures domain-keyed rows independently of presentation classes. The chain spec uses accessible controls, explicit header/mid IDs, observed scroll displacement and a 390px mobile viewport. Red: both old-reader cases failed after class renames. Green: 23 focused reader/component cases passed; Playwright discovered all 5 scenarios. Geometry and order assertions remain. No local browser or screenshots were available.
+
+
+**T-512 — DONE.** `scripts/tests/test_rel257_liquidcompute_atomic.py:51` injects an actual SQLite trigger failure midway through replacement, checks the entire original batch from writer and fresh observer, verifies transaction release and retains a successful retry. Red: premature-commit mutation produced XPASS in the old test and failed the new rollback assertion. Green: 8 tests passed with no xfail; production persistence is unchanged.
