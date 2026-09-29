@@ -11867,6 +11867,9 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   margin-bottom: 8px;
   flex-wrap: wrap;
 }
+/* Chips seated in a .section-header-actions slot (BPI index switcher): the
+   header row owns the spacing, so no trailing margin. */
+.history-range-chips--inline { margin-bottom: 0; }
 
 .history-range-chip {
   font-family: var(--font-mono);

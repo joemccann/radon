@@ -102,4 +102,38 @@ test.describe("/regime/bpi — Bullish Percent Index tab", () => {
     await expect(page.getByTestId("bpi-strip-session")).toContainText("2026-08-13");
     await expect(page.getByTestId("bpi-session-stale")).toHaveCount(0);
   });
+
+  test("the NDX/SPX/RUT switcher sits on the title row inside the card padding (2026-09-29)", async ({ page }, testInfo) => {
+    // The chips rendered flush against the card's left border and header
+    // hairline. They now share the header row with the title, inset like it.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.clock.install({ time: AFTER_CLOSE });
+    await setupMocks(page, bpiResponse("2026-08-13"));
+    await page.goto("/regime/bpi");
+
+    const nav = page.getByTestId("bpi-index-chips");
+    await expect(nav).toBeVisible();
+    const g = await nav.evaluate((el) => {
+      const header = el.closest(".section-header")!.getBoundingClientRect();
+      const card = el.closest(".section")!.getBoundingClientRect();
+      const title = el.closest(".section-header")!.querySelector(".section-title")!.getBoundingClientRect();
+      const chips = el.getBoundingClientRect();
+      return {
+        insideHeader: chips.top >= header.top && chips.bottom <= header.bottom,
+        centerDelta: Math.abs((chips.top + chips.bottom) / 2 - (title.top + title.bottom) / 2),
+        leftInset: chips.left - card.left,
+        rightInset: card.right - chips.right,
+        rightOfTitle: chips.left > title.right,
+      };
+    });
+    expect(g.insideHeader).toBe(true);
+    expect(g.rightOfTitle).toBe(true);
+    expect(g.centerDelta).toBeLessThanOrEqual(2);
+    expect(g.rightInset).toBeGreaterThanOrEqual(12);
+    expect(g.leftInset).toBeGreaterThanOrEqual(12);
+
+    const shot = testInfo.outputPath("bpi-header.png");
+    await page.locator(".section").filter({ has: nav }).screenshot({ path: shot });
+    await testInfo.attach("bpi-header", { path: shot, contentType: "image/png" });
+  });
 });
