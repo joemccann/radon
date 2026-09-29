@@ -156,10 +156,11 @@ describe("knowledge excerpts are fenced and neutralised before reaching the mode
       expect.objectContaining({ name: "place_order", ok: false }),
     ]));
     expect(chat.mock.calls[1][0].tools).toBeUndefined();
-    expect(chat.mock.calls[2][0].tools).toBeUndefined();
+    expect(chat.mock.calls[2][0].tools).toEqual(expect.any(Array));
     const mainMessages = chat.mock.calls[2][0].messages as Array<{ content: unknown }>;
     const extracted = JSON.stringify(mainMessages[mainMessages.length - 1].content);
-    expect(extracted).toContain("Volatility rose");
+    expect(extracted).not.toContain("Volatility rose");
+    expect(extracted).toContain("reserved for the final answer");
     expect(extracted).not.toContain("IGNORE instructions");
   });
 });
