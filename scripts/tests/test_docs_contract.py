@@ -6,7 +6,13 @@ contains ``docs-skip: <reason>``).
 """
 from __future__ import annotations
 
+import gzip
 import json
+import shlex
+import shutil
+import sqlite3
+import sys
+import types
 import os
 import re
 import subprocess
@@ -429,6 +435,74 @@ class TestDbBackupRunbook:
         text = (_ROOT / "docs" / "cloud-services.md").read_text(encoding="utf-8")
         assert "Off-boxing a 30-day window would buy nothing" not in text
         assert "present in B2" in text
+
+
+class TestRecoveryInstructions:
+    def test_scratch_restore_is_repeatable_and_rejects_bad_input(self, tmp_path):
+        if not shutil.which("sqlite3"):
+            pytest.skip("sqlite3 CLI is required for the documented scratch drill")
+        text = (_ROOT / "docs/cloud-services.md").read_text()
+        section = text.split("### Restore runbook", 1)[1]
+        command = re.search(r"```bash\n(.*?)```", section, re.S).group(1)
+        backup = tmp_path / "data/db_backups/radon-fixture.sql.gz"
+        backup.parent.mkdir(parents=True)
+        with gzip.open(backup, "wt") as out:
+            out.write("CREATE TABLE journal(id); INSERT INTO journal VALUES(1); "
+                      "CREATE TABLE service_health(id); INSERT INTO service_health VALUES(1);")
+        command = command.replace("<stamp>", "fixture")
+        # Reject the old shared /tmp target before executing any doc shell.
+        assert "mktemp -d" in command, "scratch restore must allocate a private fresh directory"
+        env = {"PATH": os.defpath, "TMPDIR": str(tmp_path), "HOME": str(tmp_path)}
+        for _ in range(2):
+            result = subprocess.run(["bash", "-c", command], cwd=tmp_path,
+                                    env=env, capture_output=True, text=True)
+            assert result.returncode == 0, result.stderr
+        databases = sorted(tmp_path.glob("radon-restore.*/restore.db"))
+        assert len(databases) == 2
+        for database in databases:
+            with sqlite3.connect(database) as db:
+                assert db.execute("SELECT COUNT(*) FROM journal").fetchone() == (1,)
+        backup.write_bytes(b"not a gzip dump")
+        result = subprocess.run(["bash", "-c", command], cwd=tmp_path,
+                                env=env, capture_output=True, text=True)
+        assert result.returncode != 0, "invalid backup must stop the restore drill"
+        assert "Scratch restore:" not in result.stdout
+        with gzip.open(backup, "wt") as out:
+            out.write("THIS IS NOT SQL;")
+        result = subprocess.run(["bash", "-c", command], cwd=tmp_path,
+                                env=env, capture_output=True, text=True)
+        assert result.returncode != 0, "SQL errors must stop the restore drill"
+        assert "Scratch restore:" not in result.stdout
+
+    def test_contributing_uses_reviewed_branches(self):
+        text = (_ROOT / "CONTRIBUTING.md").read_text()
+        assert "All work commits to `main`" not in text
+        assert "pull request" in text.lower()
+        assert "Never push directly to `main`" in text
+
+    def test_knowledge_documented_test_paths_exist(self):
+        text = (_ROOT / "docs/knowledge-embeddings.md").read_text()
+        paths = set(re.findall(r"scripts/tests/test_[a-z0-9_]+\.py", text))
+        assert paths
+        assert all((_ROOT / path).is_file() for path in paths), paths
+
+    def test_knowledge_coverage_command_uses_real_imports(self, monkeypatch, capsys):
+        text = (_ROOT / "docs/knowledge-embeddings.md").read_text()
+        line = next(line for line in text.splitlines() if "**Verify backfill complete:**" in line)
+        command = re.search(r"`([^`]+)`", line).group(1)
+        args = shlex.split(command)
+        program = args[args.index("-c") + 1]
+        # The only substituted module is the external DB client. Execute the
+        # documented imports and real coverage query against an offline DB.
+        with sqlite3.connect(":memory:") as db:
+            db.execute("CREATE TABLE knowledge(embedding_v2 BLOB)")
+            client = types.ModuleType("scripts.db.client")
+            client.get_db = lambda: db
+            monkeypatch.setitem(sys.modules, "scripts.db.client", client)
+            from scripts.knowledge import embed
+            monkeypatch.setattr(embed, "_coverage_cache", {"at": None, "ready": None})
+            exec(program, {})
+            assert capsys.readouterr().out.strip() == "True"
 
 
 class TestOwnership:
