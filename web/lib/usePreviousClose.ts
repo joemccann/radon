@@ -27,6 +27,8 @@ export function usePreviousClose(
 ): Record<string, PriceData> {
   const [closePrices, setClosePrices] = useState<Record<string, number>>({});
   const [retryVersion, setRetryVersion] = useState(0);
+  const retryTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const generation = useRef(0);
   const session = mostRecentSessionDate();
   const fetchedRef = useRef<{ session: string; symbols: Set<string>; attempts: Map<string, number> }>({
     session,
@@ -37,8 +39,6 @@ export function usePreviousClose(
     fetchedRef.current = { session, symbols: new Set(), attempts: new Map() };
   }
 
-  const retryTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
-  const generation = useRef(0);
   useEffect(() => {
     setClosePrices({});
     const timers = retryTimers.current;
@@ -62,21 +62,20 @@ export function usePreviousClose(
   useEffect(() => {
     if (!missingKey) return;
     const symbols = missingKey.split(",");
+    const requestState = fetchedRef.current;
+    const requestGeneration = generation.current;
+    const isCurrentRequest = () => requestState === fetchedRef.current && requestGeneration === generation.current;
 
     // Mark in-flight to prevent duplicate requests
-    for (const sym of symbols) fetchedRef.current.symbols.add(sym);
+    for (const sym of symbols) requestState.symbols.add(sym);
 
-    const state = fetchedRef.current;
-    const requestGeneration = generation.current;
-    const isCurrent = () => state === fetchedRef.current && requestGeneration === generation.current;
-    // REL-295 / R-714: ticks may rerender/clean up this request effect while
-    // fetch is pending. Own timers for the session, and release symbols only
-    // when their wait expires, never when the error response first arrives.
     const scheduleRetry = (failed: string[], delayMs: number) => {
+      // Hold the in-flight marks throughout the cooldown. Streaming price
+      // renders must not make these symbols eligible before the timer fires.
       const timer = setTimeout(() => {
         retryTimers.current.delete(timer);
-        if (!isCurrent()) return;
-        for (const sym of failed) state.symbols.delete(sym);
+        if (!isCurrentRequest()) return;
+        for (const sym of failed) requestState.symbols.delete(sym);
         setRetryVersion((value) => value + 1);
       }, delayMs);
       retryTimers.current.add(timer);
@@ -85,15 +84,15 @@ export function usePreviousClose(
     // stays marked fetched, so it is not asked for again this session.
     const releaseForRetry = (failed: string[]) => {
       let delayMs = 0;
-      const retryable: string[] = [];
+      const retrySymbols: string[] = [];
       for (const sym of failed) {
-        const attempts = (fetchedRef.current.attempts.get(sym) ?? 0) + 1;
-        fetchedRef.current.attempts.set(sym, attempts);
+        const attempts = (requestState.attempts.get(sym) ?? 0) + 1;
+        requestState.attempts.set(sym, attempts);
         if (attempts >= MAX_ATTEMPTS) continue;
-        retryable.push(sym);
+        retrySymbols.push(sym);
         delayMs = Math.max(delayMs, Math.min(RETRY_BASE_MS * 2 ** (attempts - 1), RETRY_MAX_MS));
       }
-      if (delayMs > 0) scheduleRetry(retryable, delayMs);
+      if (delayMs > 0) scheduleRetry(retrySymbols, delayMs);
     };
 
     fetch("/api/previous-close", {
@@ -110,7 +109,7 @@ export function usePreviousClose(
         return r.json();
       })
       .then((data: { closes: Record<string, number> }) => {
-        if (!isCurrent()) return;
+        if (!isCurrentRequest()) return;
         const valid: Record<string, number> = {};
         const failed: string[] = [];
         for (const sym of symbols) {
@@ -122,7 +121,7 @@ export function usePreviousClose(
         if (Object.keys(valid).length > 0) setClosePrices((prev) => ({ ...prev, ...valid }));
       })
       .catch((error: unknown) => {
-        if (!isCurrent()) return;
+        if (!isCurrentRequest()) return;
         if (error instanceof RateLimited) {
           // A 429 says nothing about the symbols, so it does not count as a miss.
           scheduleRetry(symbols, error.retryAfterMs);

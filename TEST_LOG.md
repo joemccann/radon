@@ -1073,3 +1073,22 @@ Tonight's audit timed out before a new checkpoint. Open P0/P1 carried forward fr
 | T-488 | DONE | `test_backup_start_rejection_does_not_commit_restore_and_can_retry` failed before the edit: return code 1, `deploy-root-helper.sh: line 678: services[@]: unbound variable`. The supervised child is `#!/bin/bash` (bash 3.2.57); an empty `services` array under `set -u` aborts `recover` before the restore marker. The same four loops now use the helper's existing `${arr[@]+"${arr[@]}"}` form. `TestRootHelper`: 35 passed, 1 skipped (flock absent). Timeouts and assertions were not loosened. |
 | T-130 | operator-only | `ci.yml` still warns and exits 0 when `TURSO_DEMO_DB_URL` and `TURSO_DEMO_APP_DB_URL` are unset. `test_demo_isolation_is_wired.py`: 8 passed. Operator must provision those two repository secrets. |
 
+
+
+## Remediation 2026-09-29
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-515 | DONE | Original hook: 9 failed / 6 passed; live-tick reproduction 3/3 red. Deadline-owned eligibility and lifecycle cleanup: 25 related tests passed; hook coverage 100% lines / 98% branches / 100% functions. Fake-only Playwright pacing case added; browser evidence belongs to PR CI. |
+| T-514 | DONE | Seven files reproduced 27 shared-scratch failures in isolated serial runs. Fixture-owned scratch paths preserve actual shell control flow and assertions: 33 passed. Production wrappers and other users' files unchanged. |
+| T-516 | DONE | Manual-guard mutation: 4 failed / 3 passed. Actual TypeScript CLI with fake boundaries: 7 passed; production migration unchanged. |
+| T-493 | DONE | Old suite accepted a missing live volume update. Behavioral replacements reject four update/delivery mutations; 5 passed with fake IB emitter and real handlers. |
+| T-495 | DONE locally; CI browser pending | Old reader failed both class-rename cases; 23 reader/component cases passed and Playwright discovered 5 scenarios. Semantic locators and observed scroll replace presentation selectors and fixed sleep; actual browser/screenshots assigned to PR CI. |
+| T-512 | DONE | Premature-commit mutation escaped the old test as XPASS and failed the new SQLite-trigger rollback assertion. Full file: 8 passed, no xfail; fresh-connection visibility and retry remain covered. |
+| T-130 | DONE upstream | Main CI run 36502433090/job 109196861726 executed the actual demo-isolation guard successfully; local wiring 8 passed. Required secret names exist; no secret values inspected. |
+| T-510 | DONE upstream retirement | Obsolete controlling-TTY suite and entry point removed together; replacement runner cleanup tests passed all three delta repetitions. |
+| T-435 | operator-only | Retained prior three-attempt diagnosis. Acceptance: isolated keyless compile-mode CI build/server and real /portfolio-to-/setup redirect without x-radon-authless-test. |
+
+Closing verification details and exact counts are appended to TEST_AUDIT.md; external CI/browser/delivery receipts belong to rolling issue #83.
+
+2026-09-29 CI follow-up: T-495 browser acceptance is DONE at e028b4e4 (four scenarios, eight reviewed desktop/390px light/dark screenshots). T-515's new browser fixture red-failed on startup request counting; the controlled missing-close condition now begins after page readiness with all cooldown assertions retained. Final exact-head evidence belongs to issue #83.
