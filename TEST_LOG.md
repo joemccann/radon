@@ -1073,3 +1073,10 @@ Tonight's audit timed out before a new checkpoint. Open P0/P1 carried forward fr
 | T-488 | DONE | `test_backup_start_rejection_does_not_commit_restore_and_can_retry` failed before the edit: return code 1, `deploy-root-helper.sh: line 678: services[@]: unbound variable`. The supervised child is `#!/bin/bash` (bash 3.2.57); an empty `services` array under `set -u` aborts `recover` before the restore marker. The same four loops now use the helper's existing `${arr[@]+"${arr[@]}"}` form. `TestRootHelper`: 35 passed, 1 skipped (flock absent). Timeouts and assertions were not loosened. |
 | T-130 | operator-only | `ci.yml` still warns and exits 0 when `TURSO_DEMO_DB_URL` and `TURSO_DEMO_APP_DB_URL` are unset. `test_demo_isolation_is_wired.py`: 8 passed. Operator must provision those two repository secrets. |
 
+
+
+## Remediation 2026-09-29
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-515 | DONE | Original hook: 9 failed / 6 passed; live-tick reproduction 3/3 red. Deadline-owned eligibility and lifecycle cleanup: 25 related tests passed; hook coverage 100% lines / 98% branches / 100% functions. Fake-only Playwright pacing case added; browser evidence belongs to PR CI. |

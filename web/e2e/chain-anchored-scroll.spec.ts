@@ -4,12 +4,12 @@ const TICKER = "MU";
 const EXPIRIES = ["20261218", "20270115"];
 const STRIKES = Array.from({ length: 61 }, (_, index) => 90 + index);
 
-async function installFixtures(page: Page) {
+async function installFixtures(page: Page, previousClose: number | null = 119, timestamp?: string) {
   let last = 120;
   const sockets = new Set<WebSocketRoute>();
   const quote = (symbol: string, price: number) => ({
     symbol, last: price, bid: price - 0.05, ask: price + 0.05,
-    close: symbol === TICKER ? 119 : price, timestamp: new Date().toISOString(),
+    close: symbol === TICKER ? previousClose : price, timestamp: timestamp ?? new Date().toISOString(),
     lastIsCalculated: false, delta: 0.4, impliedVol: 0.45,
   });
   await page.route("**/api/**", (route) => {
@@ -141,3 +141,43 @@ for (const mobile of [false, true]) {
     });
   }
 }
+
+test("previous-close cooldown survives live price updates", async ({ page }) => {
+  const clockStart = new Date("2026-09-28T15:00:00Z");
+  await page.clock.install({ time: clockStart });
+  const moveSpot = await installFixtures(page, null, clockStart.toISOString());
+  let requests = 0;
+  let releaseFirst!: () => void;
+  const firstResponse = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  await page.route("**/api/previous-close", async (route) => {
+    requests += 1;
+    if (requests === 1) {
+      await firstResponse;
+      await route.fulfill({ status: 429, headers: { "Retry-After": "30" }, contentType: "application/json", body: JSON.stringify({ error: "rate limited" }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ closes: { [TICKER]: 119 } }) });
+  });
+  await page.goto(`/${TICKER}?deck=c`);
+  const spot = page.getByTestId("chain-spot-bar");
+  await expect(spot).toContainText("120.00");
+  await expect.poll(() => requests).toBe(1);
+  await page.clock.pauseAt(new Date(await page.evaluate(() => Date.now() + 1_000)));
+  // A price render while the first request is in flight changes the effect's
+  // dependency key. Its eventual response must still own a full cooldown.
+  moveSpot(121);
+  await page.clock.runFor(250);
+  await expect(spot).toContainText("121.00");
+  const limited = page.waitForResponse((response) => response.url().endsWith("/api/previous-close") && response.status() === 429);
+  releaseFirst();
+  await limited;
+  await page.clock.runFor(100);
+  for (const last of [122, 123, 124]) {
+    moveSpot(last);
+    await page.clock.runFor(1_000);
+    await expect(spot).toContainText(`${last}.00`);
+    expect(requests).toBe(1);
+  }
+  await page.clock.runFor(30_000);
+  await expect.poll(() => requests).toBe(2);
+});
