@@ -675,25 +675,25 @@ class TestSellCloseLabeling:
         # Real libsql cursors expose fetchall(), NOT .rows (CTA-01): keep the
         # fake driver-faithful so a .rows regression fails here.
         paginated = [
-            (f"test-{index:08d}", *row)
+            (f"test-{index:08d}", *row, index)
             for index, row in enumerate(rows, start=1)
         ]
 
         def execute(sql, params=()):
             result = MagicMock(spec=["fetchall"])
-            if "WHERE trade_id > ?" not in str(sql):
+            if "WHERE rowid > ?" not in str(sql):
                 result.fetchall.return_value = []
                 return result
 
-            cursor = str(params[0])
+            cursor = int(params[0])
             tickers = {str(value) for value in params[1:-1]}
             limit = int(params[-1])
             matching = []
             for row in paginated:
-                trade_id, payload_json, _filled_at, _written_at = row
+                trade_id, payload_json, _filled_at, _written_at, rowid = row
                 payload = json.loads(payload_json)
                 ticker = str(payload.get("ticker") or payload.get("symbol") or "").upper()
-                if trade_id > cursor and ticker in tickers:
+                if rowid > cursor and ticker in tickers:
                     matching.append(row)
             result.fetchall.return_value = matching[:limit]
             return result
