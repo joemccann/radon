@@ -10697,3 +10697,6 @@ Audited through: c274a773228ed29226721694370d3a1c2739494e on 2026-09-29 — 3 ne
 
 
 **T-493 — DONE.** `web/tests/ib-rt-volume-relay.test.ts:33` executes actual relay declarations with a fake IB emitter and observes buffered delivery. Red: the old source-grep suite accepted deletion of the live tickSize update; replacements reject all four removed update/delivery variants. Green: 5 behavioral cases passed without a socket or production source change.
+
+
+**T-495 — DONE locally; browser evidence assigned to PR CI.** `web/e2e/fixtures/chainPaneState.ts:3` measures domain-keyed rows independently of presentation classes. The chain spec uses accessible controls, explicit header/mid IDs, observed scroll displacement and a 390px mobile viewport. Red: both old-reader cases failed after class renames. Green: 23 focused reader/component cases passed; Playwright discovered all 5 scenarios. Geometry and order assertions remain. No local browser or screenshots were available.

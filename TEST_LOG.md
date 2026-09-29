@@ -1083,3 +1083,4 @@ Tonight's audit timed out before a new checkpoint. Open P0/P1 carried forward fr
 | T-514 | DONE | Seven files reproduced 27 shared-scratch failures in isolated serial runs. Fixture-owned scratch paths preserve actual shell control flow and assertions: 33 passed. Production wrappers and other users' files unchanged. |
 | T-516 | DONE | Manual-guard mutation: 4 failed / 3 passed. Actual TypeScript CLI with fake boundaries: 7 passed; production migration unchanged. |
 | T-493 | DONE | Old suite accepted a missing live volume update. Behavioral replacements reject four update/delivery mutations; 5 passed with fake IB emitter and real handlers. |
+| T-495 | DONE locally; CI browser pending | Old reader failed both class-rename cases; 23 reader/component cases passed and Playwright discovered 5 scenarios. Semantic locators and observed scroll replace presentation selectors and fixed sleep; actual browser/screenshots assigned to PR CI. |
