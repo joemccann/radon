@@ -8690,3 +8690,22 @@ Delivery review: draft https://github.com/joemccann/radon/pull/795 is published.
 - [ ] T4 depends_on: [T3] Verify, publish substantive changes if any, and record one rolling issue comment.
 
 Review: CIP-015 is the sole qualifying critical-path experiment; 136 focused tests and 49 cloud contracts passed. Collection retains all 38 original cases and adds 3. No production source, gate, shard, timeout or deployment behavior changed. Release gain remains VALIDATING; PR CI and one rolling issue comment are pending.
+# Task: AI chat chart prompt and repetitive completion (2026-09-29)
+
+## Dependency graph
+
+- T1 depends_on: [] - Trace production turn, replay exact prompt and image, record failing regressions.
+- T2 depends_on: [T1] - Preserve live reads after knowledge lookup without exposing retrieval to tool-capable rounds; reject repetitive output with bounded recovery.
+- T3 depends_on: [T2] - Focused/full verification, browser screenshot, live prompt replay, review.
+- T4 depends_on: [T3] - Publish a reviewable PR, verify exact-head CI, send the required green notification.
+
+## Checklist
+
+- [x] T1 Trace and reproduce
+- [x] T2 Patch and regression coverage
+- [x] T3 Verify and review
+- [ ] T4 PR and exact-head verification
+
+## Review
+
+- Original Turso turn matched (18:06:31.410Z, grok-4.7, image_count 1). Five red regressions captured. Patched live chart replay reaches rank_spreads and get_option_chain in six rounds; thirteen successful tool events; no order. Final verification: 401 unique focused tests passed across 47 files; 12 Playwright tests passed; repetition detector coverage 100%; TypeScript and focused ESLint passed. Desktop/mobile screenshots reviewed. Initial full web run: 9693 passed, 9 failed, 10 skipped; it overlapped final source edits and browser verification. Every failed file passes in the fresh focused runs. Exact-head CI pending. Trace: tasks/ai-chat-repetition-2026-09-29.md.
