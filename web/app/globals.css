@@ -2718,7 +2718,20 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
 .catalyst-group__rows--scroll {
   max-height: 320px;
   overflow-y: auto;
+  /* Overlay-style scrollbar (2026-09-29): invisible at rest, shown while the
+     list scrolls (`is-scrolling`, set by CatalystsQuadrant) or when hovered so
+     it can be grabbed. scrollbar-color covers Chrome/Firefox, the webkit
+     pseudo-elements cover Safari. */
+  scrollbar-color: transparent transparent;
 }
+.catalyst-group__rows--scroll::-webkit-scrollbar-track,
+.catalyst-group__rows--scroll::-webkit-scrollbar-thumb { background: transparent; }
+.catalyst-group__rows--scroll:hover,
+.catalyst-group__rows--scroll.is-scrolling {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+.catalyst-group__rows--scroll:hover::-webkit-scrollbar-thumb,
+.catalyst-group__rows--scroll.is-scrolling::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); }
 
 .catalyst-group__row {
   display: flex;
