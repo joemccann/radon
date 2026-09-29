@@ -708,3 +708,10 @@ class TestSanitizeNonHttpUris:
         proc = subprocess.run(["/bin/bash", str(script)], capture_output=True, text=True, timeout=30)
         assert proc.returncode == 0, proc.stderr
         assert "notreal" not in proc.stdout, proc.stdout
+
+
+@pytest.mark.parametrize("route", ["/api/callback?code=qz1NOTREAL", "/orders/place#frag=qz2NOTREAL"])
+def test_route_query_and_fragment_are_redacted_with_the_route(route: str):
+    out = nif.sanitize(f"the call {route} returned")
+    assert "NOTREAL" not in out, out
+    assert out == "the call [REDACTED] returned"

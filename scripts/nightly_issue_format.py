@@ -82,11 +82,12 @@ _CREDENTIAL_LITERAL_RE = re.compile(
     r"|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})"
 )
 _EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w.-]+\.\w+\b")
-# App routes (/api/..., /v1/...). Not filesystem roots: lock-held comments
-# name $REPO and $RUNNER_LOCK (/Users/..., /tmp/..., /home/...).
+# App routes (/api/..., /v1/...) with any query or fragment. Not filesystem
+# roots: lock-held comments name $REPO and $RUNNER_LOCK (/Users/..., /tmp/...,
+# /home/...).
 _ROUTE_RE = re.compile(
     r"(?<![\w.])(/(?!Users\b|home\b|tmp\b|private\b|var\b|opt\b)"
-    r"[a-z][\w.-]*(?:/[\w.-]+)+)"
+    r"[a-z][\w.-]*(?:/[\w.-]+)+(?:[?#]\S*)?)"
 )
 # Any scheme, not just http(s): database, cache and socket URIs carry
 # credentials in their userinfo or query.
