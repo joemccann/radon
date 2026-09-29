@@ -10691,3 +10691,6 @@ Audited through: c274a773228ed29226721694370d3a1c2739494e on 2026-09-29 — 3 ne
 **T-515 — DONE.** `web/lib/usePreviousClose.ts:72` releases retry eligibility only at the deadline; `:42` and `:111` own cleanup and reject stale responses. Red: the original hook failed 9/15 expanded cases, including the live-tick reproduction 3/3. Green: 25 related hook tests; targeted coverage 100% lines, 98% branches, 100% functions. The fake-only Playwright scenario is at `web/e2e/chain-anchored-scroll.spec.ts:133`; browser execution is assigned to PR CI.
 
 **T-514 — DONE.** `scripts/tests/shell_sandbox.py:8` stages the actual scripts and redirects only scratch paths; the Docker digest harness uses its own temporary hash file. Red: 27 serial failures across seven files. Green: the same seven files passed 33 tests with unchanged response/retry assertions. No shared scratch file or production wrapper was changed.
+
+
+**T-516 — DONE.** `web/tests/migrate-manual.test.ts:1` executes the actual TypeScript CLI with fake filesystem, client and environment boundaries. Red: bypassing the manual guard failed 4 cases. Green: 7 cases passed, covering deferral, opt-in ordering, failure and replay without any live database. Production migration code is unchanged.
