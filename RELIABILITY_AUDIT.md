@@ -2703,6 +2703,8 @@ reserved work or IDs; trusted issue #81 comments reserve IDs through R-709.
 | R-712 | P2 | `scripts/grok_upgrade.py:273-285`; `scripts/db/hrana_http.py:189-198` | Every upgrade heartbeat carrying a diagnostic passed unsupported `last_error=`, raised TypeError before writing, and swallowed it as a telemetry outage. Both failed smoke and lock deferral lost their health details. REL-293 acceptance: autospec the real writer and prove exactly one structured `error.message` write for each diagnostic outcome. |
 | R-713 | P2 | `scripts/ir_ensure_pr.py:261-280,320-325` | Resuming an existing incident PR used `gh pr edit`, whose retired Projects-classic GraphQL query aborts on this repository. Pickup/responder then report failure despite the PR already existing. REL-294 acceptance: reproduce the GraphQL rejection, update the exact PR through REST with literal multiline body preserved, and propagate PATCH failure. |
 
+| R-714 | P2 | `web/lib/usePreviousClose.ts:61-122` | Live ticks release a failed previous-close request before Retry-After expires, while effect cleanup can cancel its only wakeup. REL-295 acceptance: hold a request across live ticks, return 429 with a 30-second wait, assert no early POST and exactly one recovery POST with the correct payload; inspect the recovered day change in the browser. |
+
 ### Inherited acceptance recheck
 
 | ID | Sev | Where | Finding |
