@@ -1080,3 +1080,4 @@ Tonight's audit timed out before a new checkpoint. Open P0/P1 carried forward fr
 | Finding | Status | Red / green evidence |
 |---|---|---|
 | T-515 | DONE | Original hook: 9 failed / 6 passed; live-tick reproduction 3/3 red. Deadline-owned eligibility and lifecycle cleanup: 25 related tests passed; hook coverage 100% lines / 98% branches / 100% functions. Fake-only Playwright pacing case added; browser evidence belongs to PR CI. |
+| T-514 | DONE | Seven files reproduced 27 shared-scratch failures in isolated serial runs. Fixture-owned scratch paths preserve actual shell control flow and assertions: 33 passed. Production wrappers and other users' files unchanged. |
