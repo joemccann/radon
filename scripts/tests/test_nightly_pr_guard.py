@@ -234,3 +234,13 @@ def test_aliases_cannot_be_defined(args):
 ])
 def test_reads_and_updates_with_leading_flags_still_pass(args):
     mod.guard(args, run=lambda *a, **k: pytest.fail("non-creation command queried git"), loop="security")
+
+
+@pytest.mark.parametrize("args", [
+    ["api", "repos/o/r/pulls#x", "-X", "POST"], ["api", "-f", "head=h", "repos/o/r/pulls?x=1"],
+    ["api", "https://api.github.com/repos/o/r/pulls/#x", "--input=body.json"],
+    ["api", "graphql?x=1", "--input", "body.json"], ["api", "https://api.github.com/graphql#x", "--input", "-"],
+])
+def test_creation_is_refused_with_a_query_or_fragment_suffix(args):
+    with pytest.raises(mod.Refused, match="API creation"):
+        mod.guard(args)
