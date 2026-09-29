@@ -11,7 +11,6 @@ Fault injection for three ops-plane bounds the 2026-08-22 delta left open:
   so a late audit and remediate can `git clean -fdq` each other mid-write.
 """
 import importlib.util
-import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -214,54 +213,20 @@ class TestRerunsSinceFailsClosed:
 
 
 # --------------------------------------------------------------------------
-# R-116 — the weekend runner clone is single-writer
+# R-116 — a loop's clone is single-writer
 # --------------------------------------------------------------------------
-WRAPPER = REPO / "scripts" / "security_nightly.sh"
+# Every nightly loop runs scripts/runner/run_loop.sh; its lock is exercised
+# live (held, dead, reclaimed) in test_runner_run_loop.py.
+RUNNER = REPO / "scripts" / "runner" / "run_loop.sh"
 
 
 class TestWeekendRunnerMutualExclusion:
-    def test_the_wrapper_takes_a_lock_before_it_resets_the_tree(self):
-        text = WRAPPER.read_text()
-        lock_at = text.index("acquire_runner_lock")
-        reset_at = text.index("reset --hard --quiet origin/main")
-        assert lock_at < reset_at, "the tree is reset before the lock is taken"
+    def test_the_runner_takes_its_lock_before_it_replaces_the_clone(self):
+        text = RUNNER.read_text()
+        main = text[text.index("main() {"):]
+        assert main.index("acquire_lock") < main.index("fresh_clone"), "the clone is replaced before the lock is taken"
 
     def test_the_lock_is_a_portable_mkdir_not_flock(self):
-        text = WRAPPER.read_text()
+        text = RUNNER.read_text()
         assert "flock -" not in text, "flock(1) does not exist on the macOS runner"
-        assert "mkdir" in text
-
-    def test_a_held_lock_refuses_the_second_runner(self, tmp_path):
-        lock = tmp_path / "weekend.lock"
-        lock.mkdir()
-        import os
-
-        (lock / "pid").write_text(f"{os.getpid()}\n")  # this test process is alive
-        rc = subprocess.run(
-            ["bash", "-c", f'source "{WRAPPER}" --lock-lib-only; acquire_runner_lock "{lock}"'],
-            capture_output=True,
-            text=True,
-        )
-        assert rc.returncode != 0
-
-    def test_a_stale_lock_from_a_dead_pid_is_reclaimed(self, tmp_path):
-        lock = tmp_path / "weekend.lock"
-        lock.mkdir()
-        (lock / "pid").write_text("999999\n")  # not a live pid
-        rc = subprocess.run(
-            ["bash", "-c", f'source "{WRAPPER}" --lock-lib-only; acquire_runner_lock "{lock}"'],
-            capture_output=True,
-            text=True,
-        )
-        assert rc.returncode == 0, rc.stderr
-
-    def test_an_unheld_lock_is_acquired(self, tmp_path):
-        lock = tmp_path / "weekend.lock"
-        rc = subprocess.run(
-            ["bash", "-c", f'source "{WRAPPER}" --lock-lib-only; acquire_runner_lock "{lock}"'],
-            capture_output=True,
-            text=True,
-        )
-        assert rc.returncode == 0, rc.stderr
-        assert (lock / "pid").exists()
-        assert (lock / "start").exists()
+        assert 'mkdir "$LOCK"' in text

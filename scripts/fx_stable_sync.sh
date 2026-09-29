@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Keep one fixed-path copy of the installed Vercel fx binary for the nightly
 # loops, so macOS privacy grants (Full Disk Access, Documents, Desktop, ...)
-# survive fx upgrades. Same shape as scripts/claude_stable_sync.sh.
+# survive fx upgrades.
 #
 # Why: fx is a bare Mach-O at ~/.local/bin/fx and `fx upgrade` replaces that
 # file, so the operator re-added fx to Full Disk Access after upgrades. The

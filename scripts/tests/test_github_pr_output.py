@@ -22,9 +22,10 @@ import github_pr_output as pr
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO / "scripts"
-SKILLS = REPO / ".claude" / "skills"
-LOOPS = ("security-nightly",)
-WRAPPERS = (SCRIPTS / "security_nightly.sh",)
+PROMPTS = REPO / ".claude" / "runner-prompts"
+LOOPS = ("security",)
+# The security loops' dead-man is posted by the runner's root-owned post-run hook.
+WRAPPERS = (SCRIPTS / "runner" / "hooks" / "security_post.sh",)
 ISSUE_HEADING = "## Issue discovered"
 FIX_HEADING = "## What was done to fix it"
 NEXT_HEADING = "## Next"
@@ -295,7 +296,7 @@ class TestNightlyTemplateMatchesFormatter:
 class TestSkillsInstructTheFormatter:
     @pytest.mark.parametrize("loop", LOOPS)
     def test_skill_names_the_formatter_and_the_three_headings(self, loop):
-        raw = (SKILLS / loop / "SKILL.md").read_text(encoding="utf-8")
+        raw = (PROMPTS / f"{loop}.md").read_text(encoding="utf-8")
         text = " ".join(raw.split())
         assert "## Pull request output" in raw, loop
         assert "scripts/github_pr_output.py" in text, loop
@@ -305,7 +306,7 @@ class TestSkillsInstructTheFormatter:
 
     @pytest.mark.parametrize("loop", LOOPS)
     def test_pull_request_output_uses_guarded_creation_and_can_update(self, loop):
-        raw = (SKILLS / loop / "SKILL.md").read_text(encoding="utf-8")
+        raw = (PROMPTS / f"{loop}.md").read_text(encoding="utf-8")
         start = raw.index("## Pull request output")
         nxt = raw.find("\n## ", start + 1)
         section = raw[start:nxt if nxt != -1 else None]
@@ -318,7 +319,7 @@ class TestSkillsInstructTheFormatter:
         assert "POST /repos/{owner}/{repo}/pulls" not in raw, loop
 
     def test_security_skill_documents_date_only_title(self):
-        raw = (SKILLS / "security-nightly" / "SKILL.md").read_text(encoding="utf-8")
+        raw = (PROMPTS / "security.md").read_text(encoding="utf-8")
         start = raw.index("## Pull request output")
         nxt = raw.find("\n## ", start + 1)
         section = raw[start:nxt if nxt != -1 else None]
@@ -336,17 +337,12 @@ class TestIssueGenerationIsUntouched:
             text = path.read_text(encoding="utf-8")
             assert "github_pr_output" not in text, path.name
 
-    def test_pushover_and_issue_comment_helpers_do_not_import_it(self):
-        for name in ("weekend_notify.py",):
-            text = (SCRIPTS / name).read_text(encoding="utf-8")
-            assert "github_pr_output" not in text, name
-
     def test_wrappers_still_post_the_rolling_issue_comment(self):
-        # Captain d1: wrapper comments are **PHASE** STAMP **status**,
-        # not the three-section write-up. report() uses the GH_BIN snapshot.
+        # Captain d1: dead-man comments are **PHASE** STAMP **status**,
+        # not the three-section write-up.
         for path in WRAPPERS:
             text = path.read_text(encoding="utf-8")
-            assert '"$GH_BIN" issue comment' in text, path.name
+            assert '"$GH" issue comment' in text, path.name
             assert "gh issue comment" not in text, path.name
             fmt_start = text.index("_format_issue_body() {")
             fmt_end = text.index("\nreport() {", fmt_start)

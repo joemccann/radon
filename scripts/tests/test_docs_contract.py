@@ -672,18 +672,16 @@ class TestTestingLedgersHaveNoConflictMarkers:
 
 
 # DOC-032 / DOC-033 (2026-09-01): docs/operations.md is the one place that
-# indexes all five nightly loops. Its "all fire 00:00 local" sentence had been
-# wrong since the loops were staggered, and its rails named only the shared
-# runner marker while every wrapper also requires a per-loop one. Both facts
-# are mechanically derivable, so pin them instead of re-reading the prose.
+# indexes every nightly loop. Its fire times had drifted from the schedules, and
+# its rails once named only a shared runner marker. Both facts are mechanically
+# derivable, so pin them instead of re-reading the prose. Since the runner
+# cutover (2026-09-28) the schedule is each loop env's SCHEDULE_HOUR:MINUTE and
+# the clone rail is the runner clone ~/radon-runner/work/<loop>.
 
-_LOOPS = {
-    "security": ("com.radon.security-daily.plist", "security_nightly.sh"),
-}
-
-
-_LOOP_SKILLS = {
-    "security": "security-nightly",
+_LOOP_ENVS = _ROOT / "scripts" / "runner" / "loops"
+_SECURITY_PROMPTS = {
+    "security": _ROOT / ".claude" / "runner-prompts" / "security.md",
+    "security-deepsec": _ROOT / ".claude" / "runner-prompts" / "security-deepsec.md",
 }
 
 
@@ -691,17 +689,22 @@ def _operations_text() -> str:
     return (_ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
 
 
-class TestNightlyLoopIndex:
-    def test_each_loop_row_states_the_plist_fire_time(self):
-        import plistlib
+def _schedule(loop: str) -> str:
+    values = {}
+    for line in (_LOOP_ENVS / f"{loop}.env").read_text(encoding="utf-8").splitlines():
+        if line.startswith(("SCHEDULE_HOUR=", "SCHEDULE_MINUTE=")):
+            key, value = line.split("=", 1)
+            values[key] = int(value)
+    return f"{values['SCHEDULE_HOUR']:02d}:{values['SCHEDULE_MINUTE']:02d}"
 
+
+class TestNightlyLoopIndex:
+    def test_each_loop_row_states_the_scheduled_fire_time(self):
         text = _operations_text()
-        for loop, (plist_name, _) in _LOOPS.items():
-            plist = _ROOT / "config" / plist_name
-            assert plist.is_file(), f"{plist} is missing"
-            with plist.open("rb") as fh:
-                when = plistlib.load(fh)["StartCalendarInterval"]
-            fires = f"{when['Hour']:02d}:{when['Minute']:02d}"
+        loops = sorted(p.stem for p in _LOOP_ENVS.glob("*.env"))
+        assert {"security", "security-deepsec"} <= set(loops)
+        for loop in loops:
+            fires = _schedule(loop)
             row = next(
                 (ln for ln in text.splitlines() if ln.startswith(f"| {loop} |")),
                 None,
@@ -711,46 +714,36 @@ class TestNightlyLoopIndex:
             )
             assert f"| {fires} |" in row, (
                 f"docs/operations.md says {row.strip()} but "
-                f"{plist_name} fires at {fires}"
+                f"scripts/runner/loops/{loop}.env fires at {fires}"
             )
 
-    def test_the_per_loop_runner_marker_rail_is_stated(self):
-        assert ".radon-<loop>-runner" in _operations_text(), (
-            "docs/operations.md must state that a wrapper needs BOTH "
-            ".radon-weekend-runner and its own .radon-<loop>-runner marker; "
-            "every wrapper refuses the clone without the second one"
+    def test_the_runner_clone_rail_is_stated(self):
+        assert "`~/radon-runner/work/<loop>`" in _operations_text(), (
+            "docs/operations.md must state that the security loops refuse a "
+            "phase outside their own runner clone"
         )
 
-    def test_each_wrapper_actually_requires_its_own_marker(self):
-        for loop, (_, wrapper) in _LOOPS.items():
-            text = (_ROOT / "scripts" / wrapper).read_text(encoding="utf-8")
-            assert f".radon-{loop}-runner" in text, (
-                f"scripts/{wrapper} no longer names .radon-{loop}-runner; "
-                "docs/operations.md documents that marker as the rail"
-            )
+    def test_the_pre_run_hook_actually_enforces_the_clone_rail(self):
+        text = (_ROOT / "scripts" / "runner" / "hooks" / "security_pre.sh").read_text(encoding="utf-8")
+        assert '$HOME/radon-runner/work/$LOOP' in text
+        assert "remote.origin.url" in text
 
     def test_deepsec_failure_has_a_safe_operator_path(self):
-        """DOC-109: a failed DeepSec loop is never an in-run repair (it is the
-        sixth loop since 2026-09-18, still operator-bootstrapped)."""
+        """DOC-109: a failed DeepSec loop is never an in-run repair (it is
+        operator-bootstrapped)."""
         text = _operations_text()
         assert "A `failed` DeepSec status is operator-only" in text
         assert "DeepSec itself stays operator-bootstrapped (rail 8)" in text
-        assert "`launchctl list | grep radon`" in text
+        assert "`sudo launchctl print system/com.radon.runner.security-deepsec`" in text
         assert "Do not bootstrap or restart DeepSec from a nightly run." in text
 
-    # DOC-084 (2026-09-04): three SKILL.md rails named only
-    # `.radon-weekend-runner`, so an agent reading its own rail believed the
-    # shared marker was the whole gate while its wrapper also required the
-    # per-loop one.
-    @pytest.mark.parametrize("loop,skill", sorted(_LOOP_SKILLS.items()))
-    def test_each_skill_rail_names_its_own_marker(self, loop, skill):
-        text = (_ROOT / ".claude" / "skills" / skill / "SKILL.md").read_text(
-            encoding="utf-8"
-        )
-        assert f".radon-{loop}-runner" in text, (
-            f".claude/skills/{skill}/SKILL.md states the runner-clone rail "
-            f"without .radon-{loop}-runner, but scripts/"
-            f"{_LOOPS[loop][1]} refuses the clone without it"
+    # DOC-084 (2026-09-04): the prompts' clone rail must name the loop's own
+    # runner clone, not a generic one.
+    @pytest.mark.parametrize("loop", sorted(_SECURITY_PROMPTS))
+    def test_each_prompt_rail_names_its_own_clone(self, loop):
+        text = _SECURITY_PROMPTS[loop].read_text(encoding="utf-8")
+        assert f"`~/radon-runner/work/{loop}`" in text, (
+            f"the {loop} prompt states the clone rail without its runner clone"
         )
 
 
@@ -1139,12 +1132,12 @@ class TestNightlyRecoveryOwnerDrift:
         assert "different query" in case
         assert "unparseable" in case
 
-    def test_runner_permissions_link_launcher_without_copied_roots(self):
+    def test_nightly_loops_link_the_runner_not_a_retired_wrapper(self):
         doc = (_ROOT / "docs/operations.md").read_text()
         assert 'writable_roots=["$REPO/.git"' not in doc
-        assert "../scripts/security_nightly.sh" in doc
-        assert "Codex sandbox writable roots omit that host gitdir" in doc
-        assert ".gitdirs-agent/<loop>.git" in doc
+        assert "../scripts/security_nightly.sh" not in doc
+        assert "[docs/runner.md](runner.md)" in doc
+        assert "`scripts/runner/hooks/security_pre.sh`" in doc
 
     def test_provisioning_defers_to_owner_without_retired_override(self):
         """DOC-129: setup recovery must not recommend an ignored trust override."""

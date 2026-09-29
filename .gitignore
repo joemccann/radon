@@ -158,6 +158,9 @@ data/newsfeed-debug-*.png
 # DeepSec's own workspace (separate tool, ~850MB with its own node_modules
 # and .env.local). Nothing under it is Radon source.
 .deepsec/
+# DeepSec's incremental state; the security-deepsec runner loop keeps it
+# across nightly re-clones (KEEP_PATHS). Never committed.
+/data/radon/
 
 # Grok workflow scripts. One-shot prompts named after the task that spawned
 # them (implement-stop-orders, cut-uw-daily-quota, ...), each written once and
@@ -211,8 +214,6 @@ web/verify-regime-internals.mjs
 # The starred form (not a bare dir) lets repo-owned skills below re-include.
 /.agents/
 /.claude/skills/*
-!/.claude/skills/security-nightly/
-!/.claude/skills/security-deepsec/
 !/.claude/skills/incident-response/
 !/.claude/skills/long-horizon-jobs/
 /.pi/skills/

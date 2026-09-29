@@ -1,10 +1,10 @@
 # Private security report template
 
 Every phase of the `security-nightly` and `security-deepsec` loops writes one
-report for the operator, published by the wrapper to the private repository
+report for the operator, published by the runner's post-run hook to the private repository
 `joemccann/radon-security-reports` and rendered by GitHub. This file is the
 template and the formatting contract. It contains no findings; the reports
-do. The skills point here; `scripts/tests/test_security_report_template.py`
+do. The runner prompts (`.claude/runner-prompts/security*.md`) point here; `scripts/tests/test_security_report_template.py`
 pins the headings and rules.
 
 ## Formatting rules
@@ -29,7 +29,7 @@ pins the headings and rules.
 8. Blank line before and after every heading, table, list and code block.
 9. Dates are ISO (`2026-09-19`), times UTC with a `Z`. Durations in minutes.
 10. Secret literals never appear (rail 6): name the variable or secret class
-    and its location. The wrapper's redaction is a backstop, not permission.
+    and its location. The post-run hook's redaction is a backstop, not permission.
 11. Nothing is omitted for brevity. Every candidate the engines produced this
     phase appears in Findings or Rejected with its reason. Complete beats
     short.
@@ -44,7 +44,7 @@ pins the headings and rules.
 | Field | Value |
 |---|---|
 | Run id | `<run-id>` |
-| Cycle | `<wrapper STAMP>` |
+| Cycle | `<runner STAMP>` |
 | Status | COMPLETE / INCOMPLETE / OPERATOR_REQUIRED |
 | Head | `<8-char sha>` |
 | Last audited | `<8-char sha>` |

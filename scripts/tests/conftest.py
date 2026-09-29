@@ -43,7 +43,7 @@ SCRIPTS_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 sys.path.insert(0, str(SCRIPTS_DIR / "trade_blotter"))
 # scripts/tests itself, so test modules can import shared non-test helpers
-# (e.g. _loop_harness) instead of exec_module-ing sibling test files (T-481).
+# instead of exec_module-ing sibling test files (T-481).
 sys.path.insert(0, str(SCRIPTS_DIR / "tests"))
 
 # Captured before any test can patch it, so `real_orphan_confirm_interval`

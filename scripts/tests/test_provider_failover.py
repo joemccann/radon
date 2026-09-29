@@ -1,89 +1,47 @@
-"""A provider's cap must not end the night — some other provider finishes it.
+"""The security loops stay claude-exclusive on the runner.
 
-2026-09-05 and again on 09-06: every loop fired at midnight, Claude answered
-with a shared session cap, and each phase stopped at INCOMPLETE 75 having
-audited nothing. A model ladder cannot help there — the cap is on the account,
-not the model. On 09-06 codex was capped at the same time, which is the whole
-argument for a ladder that crosses providers rather than models.
-
-The loops that walked a cross-provider ladder (reliability, testing) moved to
-scripts/runner/run_loop.sh; the wrappers left are security and DeepSec, which
-stay claude-exclusive and are asserted so here.
+They are the loops whose output is sanitized before it reaches a public
+issue, and a fallback CLI cannot be held to that contract. On the per-loop
+wrappers this was refuse_non_claude_rung; on scripts/runner/run_loop.sh it
+is ALLOWED_AGENTS=claude in the root-owned loop env: any rung naming another
+agent (from AGENTS or from the resolver) is refused before cloning.
+The runner behaviour itself is driven in test_runner_run_loop.py.
 """
-
 from __future__ import annotations
 
-import importlib.util
-import re
-import sys
 from pathlib import Path
 
 import pytest
 
-_H = Path(__file__).with_name("_loop_harness.py")
-_spec = importlib.util.spec_from_file_location("_loop_harness_pf", _H)
-_h = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = _h
-_spec.loader.exec_module(_h)
-
-CLAUDE_LADDER = _h.CLAUDE_LADDER
-_run_multi = _h._run_multi
-CLAUDE_SESSION_CAP_LINE = _h.CLAUDE_SESSION_CAP_LINE
+REPO = Path(__file__).resolve().parents[2]
+SECURITY_LOOPS = ("security", "security-deepsec")
 
 
-def providers(tried):
-    return [t.split(":", 1)[0] for t in tried]
+def _env(loop: str) -> dict[str, str]:
+    out = {}
+    for line in (REPO / "scripts" / "runner" / "loops" / f"{loop}.env").read_text().splitlines():
+        if line and not line.startswith("#"):
+            key, value = line.split("=", 1)
+            out[key] = value.strip('"')
+    return out
 
 
-class TestTheOperatorsDecisionNoPinnedModels:
-    """"Do not pin a particular model. New models are released all the time.
-    Select the most recent model dynamically and use medium reasoning." """
-
-    @pytest.mark.parametrize("loop", ["security", "security-deepsec"])
-    def test_the_security_ladder_uses_the_shared_skip_newest_helper(self, loop):
-        body = _h.LOOPS[loop].read_text(encoding="utf-8")
-        assert ". \"$REPO/scripts/security_claude_ladder.sh\"" in body, (
-            f"{loop}: DeepSec and security must share security_claude_ladder.sh"
-        )
-        assert not re.search(
-            r'^MODEL_LADDER="\$\{RADON_WEEKEND_MODEL_LADDER:-claude-',
-            body,
-            re.M,
-        ), f"{loop}: a static opus pin is the policy Joe rejected"
+@pytest.mark.parametrize("loop", SECURITY_LOOPS)
+def test_only_claude_rungs_are_allowed(loop):
+    env = _env(loop)
+    assert env["ALLOWED_AGENTS"] == "claude"
+    assert all(rung.startswith("claude:") for rung in env["AGENTS"].split())
 
 
-class TestTheSecurityLoopIsClaudeExclusive:
-    def test_its_default_ladder_is_claude_only(self, tmp_path):
-        proc, tried, _calls, _argv = _run_multi(tmp_path, "security", "audit")
-        assert tried[:1] == [CLAUDE_LADDER[0]], (tried, proc.stdout, proc.stderr)
+@pytest.mark.parametrize("loop", SECURITY_LOOPS)
+def test_the_ladder_comes_from_the_skip_newest_resolver_and_never_leads_with_fable(loop):
+    env = _env(loop)
+    assert env["AGENTS_RESOLVER"] == "lib/security_claude_ladder.py"
+    assert "fable" not in env["AGENTS"]
 
-    def test_a_claude_session_cap_walks_no_further(self, tmp_path):
-        """No fallback for the one loop whose output is sanitized."""
-        proc, tried, calls, _argv = _run_multi(
-            tmp_path, "security", "audit",
-            capped_providers=("claude",),
-            cap_line=CLAUDE_SESSION_CAP_LINE,
-        )
-        assert providers(tried) == ["claude"], tried
-        assert proc.returncode == 75, (proc.returncode, proc.stdout, proc.stderr)
-        assert "all agent providers exhausted" in calls, calls
 
-    def test_a_per_model_quota_still_walks_the_claude_ladder(self, tmp_path):
-        proc, tried, _calls, _argv = _run_multi(
-            tmp_path, "security", "audit",
-            provider_ladder=" ".join(CLAUDE_LADDER),
-            capped_providers=(),
-        )
-        assert providers(tried) == ["claude"], tried
-        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
-
-    def test_it_refuses_an_operator_ladder_naming_another_provider(self, tmp_path):
-        proc, tried, _calls, _argv = _run_multi(
-            tmp_path, "security", "audit",
-            provider_ladder="codex:gpt-5.4 claude:claude-opus-5",
-        )
-        assert tried == [], (
-            f"the security loop launched a non-claude provider: {tried}"
-        )
-        assert proc.returncode == 2, (proc.returncode, proc.stdout, proc.stderr)
-        assert "claude-exclusive" in proc.stderr, proc.stderr
+def test_the_runner_refuses_a_disallowed_rung_before_anything_runs():
+    body = (REPO / "scripts" / "runner" / "run_loop.sh").read_text()
+    main = body[body.index("main() {"):]
+    assert main.index("refuse_disallowed_agents") < main.index("fresh_clone")
+    assert main.index("resolve_agents") < main.index("refuse_disallowed_agents")

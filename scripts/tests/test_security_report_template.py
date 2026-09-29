@@ -1,8 +1,8 @@
 """The private operator report has one template and one set of formatting
 rules (2026-09-19: the first hand-published DeepSec audit was a run-record
-dump the operator could not read). Both security skills point at
+dump the operator could not read). Both security runner prompts point at
 docs/security-report-template.md; this test pins the template's shape so a
-skill edit cannot silently drift the reports back into log dumps."""
+prompt edit cannot silently drift the reports back into log dumps."""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 TEMPLATE = REPO / "docs" / "security-report-template.md"
 SKILLS = (
-    REPO / ".claude" / "skills" / "security-nightly" / "SKILL.md",
-    REPO / ".claude" / "skills" / "security-deepsec" / "SKILL.md",
+    REPO / ".claude" / "runner-prompts" / "security.md",
+    REPO / ".claude" / "runner-prompts" / "security-deepsec.md",
 )
 REQUIRED_SECTIONS = (
     "## Summary", "## Operator actions", "## Stages", "## Findings",
@@ -57,7 +57,7 @@ class TestTheTemplate:
             assert rule in rules, rule
         assert "—" not in text, "no em dashes in the template"
 
-    @pytest.mark.parametrize("skill", SKILLS, ids=lambda p: p.parent.name)
+    @pytest.mark.parametrize("skill", SKILLS, ids=lambda p: p.stem)
     def test_each_skill_points_at_the_template_and_its_rules(self, skill):
         text = " ".join(skill.read_text(encoding="utf-8").split())
         assert "docs/security-report-template.md" in text, skill

@@ -808,16 +808,14 @@ PYTEST_SHARD_LEAD_MODULES = {
     "scripts-npsz": [
         "scripts/tests/test_vixcor.py",
     ],
-    "scripts-gh": [
-        "scripts/tests/test_weekend_wrapper_self_rewrite.py",
-    ],
-    "scripts-rs": [
-        "scripts/tests/test_rel137_weekend_wrapper_survivability.py",
-    ],
     "rest": [
         "scripts/tests/test_run_flow_refresh_wrapper.py",
         "scripts/tests/test_run_portfolio_refresh_retry.py",
         "scripts/tests/test_run_signals_refresh_wrapper.py",
+        # Real runner processes, timeouts and SIGTERM drills (2026-09-28: the
+        # security wrappers' suites these replace led scripts-gh and scripts-rs).
+        "scripts/tests/test_runner_run_loop.py",
+        "scripts/tests/test_runner_security_hooks.py",
     ],
 }
 

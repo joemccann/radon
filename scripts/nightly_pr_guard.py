@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Agent PATH guard for nightly PR creation, merges and security-loop issue writes.
 
-The wrapper snapshots this file and nightly_publish.py from origin/main outside
-its mutable checkout. This prevents an accidental direct gh command from
-bypassing publication policy. It is not a sandbox against a malicious agent.
+scripts/runner/install.sh copies this file and nightly_publish.py root-owned
+into /usr/local/radon-runner/lib, and a GH_GUARD=1 loop's agent finds a
+root-owned gh shim first on PATH that routes every pr/api/issue/alias call
+here, with RADON_NIGHTLY_LOOP baked in (the security loops list their
+subscription-only env names in scripts/runner/loops/security*.env
+AGENT_UNSET). This prevents an accidental direct gh command from bypassing
+publication policy. It is not a sandbox against a malicious agent.
 """
 from __future__ import annotations
 
@@ -82,8 +86,8 @@ def creation_kind(args: list[str]) -> str:
     return ""
 
 
-# Security loops publish only through their wrapper's sanitized dead-man
-# comment; an agent-authored issue write could disclose an unpatched finding.
+# Security loops publish only through the runner post-run hook's sanitized
+# dead-man comment; an agent-authored issue write could disclose an unpatched finding.
 SECURITY_LOOPS = {"security", "security-deepsec"}
 ISSUE_WRITES = {"comment", "create", "edit", "close", "reopen", "delete", "transfer", "lock", "unlock", "pin", "unpin", "develop"}
 
@@ -103,11 +107,11 @@ def refused_action(args: list[str], loop: str = "") -> str:
         return "nightly loops never define gh aliases"
     if loop in SECURITY_LOOPS:
         if len(prefix) == 2 and prefix[0] == "issue" and prefix[1] in ISSUE_WRITES:
-            return "security loops never write issues; the wrapper posts the sanitized comment"
+            return "security loops never write issues; the runner posts the sanitized comment"
         method = option(tail, "--method", "-X").upper()
         body = any(a in ("--input", "--field", "--raw-field", "-f", "-F") or a.startswith(("--input=", "--field=", "--raw-field=", "-f", "-F")) for a in tail)
         if any(re.search(r"(?:^|/)repos/[^/]+/[^/]+/issues(?:[/?#]|$)", a) for a in tail) and (method not in ("", "GET") or body):
-            return "security loops never write issues; the wrapper posts the sanitized comment"
+            return "security loops never write issues; the runner posts the sanitized comment"
     return ""
 
 
