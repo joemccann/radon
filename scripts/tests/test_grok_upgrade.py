@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -50,10 +51,28 @@ class ScriptedRunner:
 
     def __call__(self, argv, **kwargs):
         self.calls.append(list(argv))
+        argv = _named(argv)
         for prefix, proc in self.mapping.items():
             if tuple(argv[: len(prefix)]) == prefix:
                 return proc
         return SimpleNamespace(returncode=1, stdout="", stderr="unexpected: " + " ".join(argv))
+
+
+def _named(argv) -> list[str]:
+    """argv with the executable reduced to its name: the candidate runs as <dest>/bin/grok."""
+    return [Path(argv[0]).name, *argv[1:]] if argv else []
+
+
+@pytest.fixture
+def grok_on_path(tmp_path, monkeypatch):
+    """A live `grok` for install_candidate_cli to copy into the candidate."""
+    bindir = tmp_path / "path-bin"
+    bindir.mkdir()
+    grok = bindir / "grok"
+    grok.write_text("#!/bin/sh\n", encoding="utf-8")
+    grok.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}:{os.environ.get('PATH', '')}")
+    return grok
 
 
 def _lkg(tmp_path: Path) -> Path:
@@ -139,7 +158,8 @@ class TestRunUpgrade:
         assert result["action"] == "current"
         assert not any("update" in c and "--version" in c for c in runner.calls)
 
-    def test_failed_smoke_alerts_and_leaves_lkg(self, tmp_path):
+    def test_failed_smoke_alerts_and_leaves_lkg(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(upgrade, "install_candidate_cli", lambda *a, **kw: Path("grok"))
         lkg_path = _lkg(tmp_path)
         alerts: list[str] = []
         runner = ScriptedRunner({
@@ -167,7 +187,7 @@ class TestRunUpgrade:
         assert alerts
         assert json.loads(lkg_path.read_text())["cli_version"] == "1.0.3"
 
-    def test_green_smoke_promotes_and_writes_lkg(self, tmp_path):
+    def test_green_smoke_promotes_and_writes_lkg(self, tmp_path, monkeypatch):
         lkg_path = _lkg(tmp_path)
         live = tmp_path / "live" / "grok"
         live.parent.mkdir()
@@ -175,6 +195,7 @@ class TestRunUpgrade:
         candidate = tmp_path / "scratch" / "candidate" / "bin"
         candidate.mkdir(parents=True)
         (candidate / "grok").write_text("new\n", encoding="utf-8")
+        monkeypatch.setattr(upgrade, "install_candidate_cli", lambda *a, **kw: candidate / "grok")
         runner = ScriptedRunner({
             ("grok", "update", "--check"): SimpleNamespace(
                 returncode=0,
@@ -218,6 +239,7 @@ class TestRunUpgrade:
         candidate = tmp_path / "scratch" / "candidate" / "bin"
         candidate.mkdir(parents=True)
         (candidate / "grok").write_text("new\n", encoding="utf-8")
+        monkeypatch.setattr(upgrade, "install_candidate_cli", lambda *a, **kw: candidate / "grok")
         runner = ScriptedRunner({
             ("grok", "update", "--check"): SimpleNamespace(
                 returncode=0,
@@ -262,29 +284,27 @@ UPDATE_REJECT = (
 
 
 class TestInstallCandidate:
-    def test_update_argv_omits_flag_grok_update_rejects(self, tmp_path):
+    def test_update_argv_omits_flag_grok_update_rejects(self, tmp_path, grok_on_path):
         calls: list[list[str]] = []
 
         def runner(argv, **kwargs):
             calls.append(list(argv))
             if "--no-auto-update" in argv:
                 return SimpleNamespace(returncode=1, stdout="", stderr=UPDATE_REJECT)
-            home = Path(kwargs["env"]["GROK_HOME"])
-            binary = home / "bin" / "grok"
-            binary.parent.mkdir(parents=True, exist_ok=True)
-            binary.write_text("new\n", encoding="utf-8")
+            if argv[1:] == ["--version"]:
+                return SimpleNamespace(returncode=0, stdout="grok 1.0.44", stderr="")
             return SimpleNamespace(returncode=0, stdout="ok", stderr="")
 
         dest = tmp_path / "candidate"
         found = upgrade.install_candidate_cli(
             dest, grok_bin="grok", runner=runner, version="1.0.44"
         )
-        assert calls == [["grok", "update", "--version", "1.0.44"]]
+        assert calls[0] == [str(dest / "bin" / "grok"), "update", "--version", "1.0.44"]
         assert found == dest / "bin" / "grok"
 
 
 class TestMissingLkgRealCheck:
-    def test_pins_latest_version_and_promotes(self, tmp_path):
+    def test_pins_latest_version_and_promotes(self, tmp_path, grok_on_path):
         """Page a57b867d: missing LKG, grok 1.0.3 check JSON, update rejects the flag."""
         calls: list[list[str]] = []
         check = json.dumps({
@@ -298,7 +318,10 @@ class TestMissingLkgRealCheck:
         })
 
         def runner(argv, **kwargs):
+            argv = _named(argv)
             calls.append(list(argv))
+            if argv[1:] == ["--version"]:
+                return SimpleNamespace(returncode=0, stdout="grok 1.0.44", stderr="")
             if tuple(argv[:3]) == ("grok", "update", "--check"):
                 return SimpleNamespace(returncode=0, stdout=check, stderr="")
             if tuple(argv[:2]) == ("grok", "models"):
@@ -308,10 +331,6 @@ class TestMissingLkgRealCheck:
                     return SimpleNamespace(
                         returncode=1, stdout="", stderr=UPDATE_REJECT
                     )
-                home = Path(kwargs["env"]["GROK_HOME"])
-                binary = home / "bin" / "grok"
-                binary.parent.mkdir(parents=True, exist_ok=True)
-                binary.write_text("new\n", encoding="utf-8")
                 return SimpleNamespace(returncode=0, stdout="ok", stderr="")
             if "--prompt-file" in argv:
                 assert "--no-auto-update" in argv
@@ -347,7 +366,7 @@ class TestMissingLkgRealCheck:
 
 
 class TestHeartbeat:
-    def test_failure_passes_error_dict_not_last_error(self, tmp_path, monkeypatch, capsys):
+    def test_failure_passes_error_dict_not_last_error(self, tmp_path, monkeypatch, capsys, grok_on_path):
         captured: list[tuple] = []
 
         def write(service, state, **kwargs):
@@ -409,3 +428,19 @@ class TestSeed:
         )
         assert again == state
         assert sum(1 for c in runner.calls if "--version" in c) == 1
+
+
+@pytest.mark.parametrize("state,detail", [
+    ("error", "candidate smoke failed"),
+    ("ok", "promotion deferred; incident lock held"),
+])
+def test_rel293_diagnostic_heartbeat_uses_the_real_writer_contract(monkeypatch, state, detail):
+    """REL-293 / R-712: diagnostics must reach the canonical health writer."""
+    from unittest.mock import create_autospec
+    from db import hrana_http
+    writer = create_autospec(hrana_http.write_service_health_http)
+    monkeypatch.setattr(hrana_http, "write_service_health_http", writer)
+
+    upgrade._record_health(state, detail)
+
+    writer.assert_called_once_with("grok-upgrade", state, error={"message": detail})

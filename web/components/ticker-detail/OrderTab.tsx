@@ -1115,7 +1115,9 @@ export default function OrderTab({ ticker, position, portfolio, prices, openOrde
   const { requestModify } = useOrderActions();
   // T-462: the feed-disconnect arm of quoteSubmitGate is dead unless the
   // owner surface supplies real connectivity.
-  const { connected: feedConnected } = useRealtimePrices();
+  const { connected, ibConnected } = useRealtimePrices();
+  // REL-236 / NF-3: relay pings continue when the broker feed is down.
+  const feedConnected = connected && ibConnected;
   const [modifyTarget, setModifyTarget] = useState<OpenOrder | null>(null);
   const [modifyLoading, setModifyLoading] = useState(false);
 

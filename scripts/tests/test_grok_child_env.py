@@ -98,9 +98,12 @@ def test_candidate_install_env_strips_secrets(secret_env, tmp_path):
 
     def runner(argv, **kwargs):
         seen.append(kwargs)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+        return SimpleNamespace(returncode=0, stdout="grok 1.0.3", stderr="")
 
-    upgrade.install_candidate_cli(tmp_path / "cand", grok_bin="grok", runner=runner)
+    grok = tmp_path / "grok"
+    grok.write_text("#!/bin/sh\n")
+    grok.chmod(0o755)
+    upgrade.install_candidate_cli(tmp_path / "cand", grok_bin=str(grok), runner=runner)
     env = seen[0]["env"]
     assert env["GROK_HOME"] == str(tmp_path / "cand")
     assert env["HOME"] == str(tmp_path / "cand")

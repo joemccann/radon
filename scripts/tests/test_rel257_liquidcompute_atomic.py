@@ -48,85 +48,47 @@ def _make_valid_obs(series_id="h100-us", value=2.6766, fetched_at=FETCHED, raw_h
 class TestLiquidComputeAtomicReplacement:
     """Tests for atomic observation replacement in Liquid Compute writer."""
 
-    @pytest.mark.xfail(reason="sqlite3.Cursor.execute cannot be monkeypatched; atomicity verified by code inspection and Hrana tests")
     def test_upsert_observations_by_identity_is_atomic_on_sqlite(self, tmp_path):
-        """RED: upsert_observations_by_identity does DELETE then INSERT without transaction.
-        
-        If failure occurs between DELETE and INSERT, old observation is lost.
-        This test should FAIL against current code (no transaction), then PASS after fix.
-        
-        Note: Fault injection via monkeypatch doesn't work for sqlite3.Cursor.execute
-        (immutable type). The fix uses explicit BEGIN/COMMIT/ROLLBACK transactions
-        verified by code inspection. Hrana path is fault-injected in test_upsert_observations_by_identity_atomic_on_hrana.
-        """
+        """A database trigger faults INSERT after DELETE; the old batch survives."""
         import sqlite3
         store = ObservationStore(tmp_path / "lc.sqlite")
-        store.initialize()
-        
-        # Seed an initial observation
-        payload = _payload()
-        store_rows, observations = parse_ticker(payload, HASH, FETCHED)
+        _, observations = parse_ticker(_payload(), HASH, FETCHED)
         persist_ticker(store, observations)
-        
-        # Verify initial state
-        initial_obs = store.read_observations(as_of="2026-09-15T16:00:00Z")
-        assert len(initial_obs) == 5
-        initial_h100 = next(o for o in initial_obs if o["series_id"] == "h100-us")
-        initial_value = initial_h100["value"]
-        
-        # Now try to replace with a revised value (should succeed with fix)
-        revised_payload = _payload()
-        revised_payload["indices"][1]["value"] = 999.0  # Changed value
-        _revised_store, revised_obs = parse_ticker(revised_payload, "d" * 64, "2026-09-15T13:00:00+00:00")
-        
-        # Successful replacement should work
-        store.upsert_observations_by_identity(revised_obs)
-        
-        # Verify new value
-        remaining_obs = store.read_observations(as_of="2026-09-15T16:00:00Z")
-        remaining_h100 = next(o for o in remaining_obs if o["series_id"] == "h100-us")
-        assert remaining_h100["value"] == 999.0, "Replacement should succeed"
+        initial = store.read_observations(as_of="2026-09-15T16:00:00Z")
+        assert len(initial) == 5
+        revised = _payload()
+        revised["indices"][1]["value"] = 999.0
+        _, replacement = parse_ticker(revised, "d" * 64, "2026-09-15T13:00:00+00:00")
+        store.connection.execute("""CREATE TRIGGER reject_revision BEFORE INSERT ON ai_cycle_observations
+            WHEN json_extract(NEW.payload, '$.value') = 999
+            BEGIN SELECT RAISE(ABORT, 'injected replacement failure'); END""")
+        with pytest.raises(sqlite3.IntegrityError, match="injected replacement failure"):
+            store.upsert_observations_by_identity(replacement)
+        assert store.read_observations(as_of="2026-09-15T16:00:00Z") == initial
+        store.connection.execute("DROP TRIGGER reject_revision")
+        store.upsert_observations_by_identity(replacement)
+        remaining = store.read_observations(as_of="2026-09-15T16:00:00Z")
+        assert len(remaining) == 5
+        assert next(row for row in remaining if row["series_id"] == "h100-us")["value"] == 999.0
 
     def test_upsert_observations_by_identity_atomic_on_hrana(self, tmp_path, monkeypatch):
-        """RED: HranaHttpError during replacement must not lose old observation.
-        
-        On Hrana: insert new rows first, then delete old. If insert fails, old data remains.
-        """
-        store = ObservationStore()  # No path = uses Hrana
+        """No independently committed DELETE may precede a failed batch."""
+        from knowledge import http_db
+        store = ObservationStore()
         store.initialize = MagicMock()
-        
-        # Create valid observations
-        initial_obs = [_make_valid_obs("h100-us", 2.6766, FETCHED, HASH)]
-        revised_obs = [_make_valid_obs("h100-us", 999.0, "2026-09-15T13:00:00+00:00", "d" * 64)]
-        
-        # Mock _query to return initial observation
-        def mock_query(sql, args=()):
-            if "SELECT" in sql and "ai_cycle_observations" in sql:
-                return [(1, json.dumps(initial_obs[0]))]
-            return []
-        
-        store._query = mock_query
-        
-        # Track calls to hrana_execute (imported locally in _execute)
-        calls = []
-        def mock_hrana_execute(sql, args=()):
-            calls.append({"sql": sql, "args": args})
-            # Fail on first INSERT (insert new row first)
-            if "INSERT" in sql and len([c for c in calls if "INSERT" in c["sql"]]) == 1:
-                raise HranaHttpError("Injected Hrana INSERT failure")
-            return MagicMock()
-        
-        monkeypatch.setattr("scripts.db.hrana_http.hrana_execute", mock_hrana_execute)
-        
-        # Attempt replacement - should fail on first INSERT
+        connection = MagicMock()
+        connection.execute_transaction.side_effect = HranaHttpError("Injected Hrana INSERT failure")
+        monkeypatch.setattr(http_db, "Connection", lambda: connection)
+        single_statement = MagicMock(side_effect=AssertionError("untransactional write"))
+        monkeypatch.setattr("scripts.db.hrana_http.hrana_execute", single_statement)
+
         with pytest.raises(HranaHttpError, match="Injected Hrana INSERT failure"):
-            store.upsert_observations_by_identity(revised_obs)
-        
-        # Verify INSERT was attempted before any DELETE
-        insert_calls = [c for c in calls if "INSERT" in c["sql"]]
-        delete_calls = [c for c in calls if "DELETE" in c["sql"]]
-        assert len(insert_calls) >= 1, "Should attempt INSERT first"
-        assert len(delete_calls) == 0, "Should not DELETE if INSERT fails (old data preserved)"
+            store.upsert_observations_by_identity([_make_valid_obs(value=999)])
+        connection.execute_transaction.assert_called_once()
+        statements = connection.execute_transaction.call_args.args[0]
+        assert [sql.split()[0] for sql, _ in statements] == ["DELETE", "INSERT"]
+        single_statement.assert_not_called()
+        connection.close.assert_called_once()
 
     def test_persist_ticker_reports_hrana_error_on_observation_failure(self, tmp_path, monkeypatch):
         """RED: HranaHttpError from upsert_observations_by_identity must surface as error health.

@@ -292,7 +292,7 @@ def test_a_live_lock_skips_the_night_and_pages_it(rig):
     assert rig.notification()["title"] == "radon doc: skipped"
 
 
-@pytest.mark.parametrize("start", [None, "Mon Jan  1 00:00:00 2001"])
+@pytest.mark.parametrize("start", ["Mon Jan  1 00:00:00 2001"])
 def test_a_lock_whose_pid_was_reused_is_reclaimed(rig, start):
     lock = rig.state / "doc.lock"
     lock.mkdir(parents=True)
@@ -877,6 +877,48 @@ def test_security_loops_run_on_the_runner_in_their_old_slots(loop, hour, minute,
                                     ".claude/skills/security-deepsec")}[loop]
     for path in retired:
         assert not (REPO / path).exists(), path
+
+
+@pytest.mark.parametrize("metadata", ["empty", "live-without-start", "unreadable-start"])
+def test_rel291_uncertain_lock_never_replaces_an_active_clone(rig, metadata):
+    """REL-291 / R-710: incomplete ownership is not evidence of a dead run."""
+    lock = rig.state / "doc.lock"
+    lock.mkdir(parents=True)
+    if metadata != "empty":
+        (lock / "pid").write_text(str(os.getpid()))
+    if metadata == "unreadable-start":
+        (lock / "start").write_text(_lstart(os.getpid()) + "\n")
+        script = rig.install / "run_loop.sh"
+        text = script.read_text()
+        text = text.replace('proc_start() { ps ', 'proc_start() { return 1; ps ')
+        script.write_text(text)
+    rig.work.mkdir(parents=True)
+    sentinel = rig.work / "uncommitted-work"
+    sentinel.write_text("active agent's work")
+
+    proc = rig.run()
+
+    assert rig.called() == [], "uncertain ownership must refuse before fresh_clone"
+    assert sentinel.read_text() == "active agent's work"
+    assert lock.exists()
+    assert proc.returncode != 0
+
+
+def test_rel291_only_one_contender_can_reclaim_a_stale_lock(rig):
+    """Another claimant may be between ownership recheck and replacement."""
+    lock = rig.state / "doc.lock"
+    (lock / "reaping").mkdir(parents=True)
+    (lock / "pid").write_text("999999")
+    rig.work.mkdir(parents=True)
+    sentinel = rig.work / "uncommitted-work"
+    sentinel.write_text("preserve")
+
+    proc = rig.run()
+
+    assert proc.returncode != 0
+    assert rig.called() == []
+    assert sentinel.read_text() == "preserve"
+    assert (lock / "reaping").is_dir()
 
 
 # --- install.sh: source-tree trust -----------------------------------------------
