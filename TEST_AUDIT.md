@@ -10694,3 +10694,6 @@ Audited through: c274a773228ed29226721694370d3a1c2739494e on 2026-09-29 — 3 ne
 
 
 **T-516 — DONE.** `web/tests/migrate-manual.test.ts:1` executes the actual TypeScript CLI with fake filesystem, client and environment boundaries. Red: bypassing the manual guard failed 4 cases. Green: 7 cases passed, covering deferral, opt-in ordering, failure and replay without any live database. Production migration code is unchanged.
+
+
+**T-493 — DONE.** `web/tests/ib-rt-volume-relay.test.ts:33` executes actual relay declarations with a fake IB emitter and observes buffered delivery. Red: the old source-grep suite accepted deletion of the live tickSize update; replacements reject all four removed update/delivery variants. Green: 5 behavioral cases passed without a socket or production source change.
