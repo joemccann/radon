@@ -124,7 +124,8 @@ class TestRunUpgrade:
         assert result["action"] == "current"
         assert not any("update" in c and "--version" in c for c in runner.calls)
 
-    def test_failed_smoke_alerts_and_leaves_lkg(self, tmp_path):
+    def test_failed_smoke_alerts_and_leaves_lkg(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(upgrade, "install_candidate_cli", lambda *a, **kw: Path("grok"))
         lkg_path = _lkg(tmp_path)
         alerts: list[str] = []
         runner = ScriptedRunner({
@@ -152,7 +153,7 @@ class TestRunUpgrade:
         assert alerts
         assert json.loads(lkg_path.read_text())["cli_version"] == "1.0.3"
 
-    def test_green_smoke_promotes_and_writes_lkg(self, tmp_path):
+    def test_green_smoke_promotes_and_writes_lkg(self, tmp_path, monkeypatch):
         lkg_path = _lkg(tmp_path)
         live = tmp_path / "live" / "grok"
         live.parent.mkdir()
@@ -160,6 +161,7 @@ class TestRunUpgrade:
         candidate = tmp_path / "scratch" / "candidate" / "bin"
         candidate.mkdir(parents=True)
         (candidate / "grok").write_text("new\n", encoding="utf-8")
+        monkeypatch.setattr(upgrade, "install_candidate_cli", lambda *a, **kw: candidate / "grok")
         runner = ScriptedRunner({
             ("grok", "update", "--check"): SimpleNamespace(
                 returncode=0,
@@ -203,6 +205,7 @@ class TestRunUpgrade:
         candidate = tmp_path / "scratch" / "candidate" / "bin"
         candidate.mkdir(parents=True)
         (candidate / "grok").write_text("new\n", encoding="utf-8")
+        monkeypatch.setattr(upgrade, "install_candidate_cli", lambda *a, **kw: candidate / "grok")
         runner = ScriptedRunner({
             ("grok", "update", "--check"): SimpleNamespace(
                 returncode=0,
