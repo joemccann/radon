@@ -24,7 +24,7 @@ Safety is where the runner runs, not what the script checks:
 | No production credential in the clone | The clone gets no `.env`. `~/.radon-runner.env` may hold only `GH_TOKEN`, `PUSHOVER_USER` and `PUSHOVER_TOKEN`. The agent runs as `_radonbot`, so it can read that file. The runner unsets the Pushover keys in the agent process; `GH_TOKEN` stays so the agent can push. Do not put a production credential or an admin token in that file or anywhere in the bot's home |
 | Agent cannot merge or push `main` | A separate GitHub machine account with the Write role on this repo only, used through its classic `repo` token, plus the `main-review` repository ruleset on the default branch: 1 approving review, approval of the most recent push required, stale approvals dismissed on push. Its only bypass actor is the Repository admin role in pull-request mode, so an admin merges through a PR and never pushes `main` directly; the bot account is not exempt. The 27 required status checks stay in the classic branch protection on `main`, not in the ruleset. A token of the operator's own account would not do: it acts as the admin and bypasses the ruleset |
 
-The ruleset is applied at cutover. Before then every nightly loop still runs as the operator, whose admin token bypasses it anyway, and `scripts/codemap_nightly.sh` merges its own PR with that token.
+The six loops in [Migration](#migration-from-the-per-loop-wrappers) use the bot runner. `scripts/codemap_nightly.sh` is separate and merges its own PR with the operator's token. Verify the live ruleset in step 8b.3 before enabling a new installation.
 
 ## Set up a new Mac
 
@@ -284,13 +284,21 @@ Steps 6 to 8 write into the bot's home only as the bot: your account reads your 
 /bin/bash /usr/local/radon-runner/run_loop.sh documentation
 ```
 
-It runs in the foreground for up to `TIMEOUT_SECS` (3 hours for documentation); the 2026-09-28 run took 15 minutes. Do not stop it to read the log. Follow it from your own tab instead (the log directory is mode 700, so your account needs `sudo -u`):
+It runs in the foreground for up to the loop configuration's `TIMEOUT_SECS`. Do not stop it to read the log. Follow it from your own tab instead (the log directory is mode 700, so your account needs `sudo -u`):
 
 ```bash
 sudo -u _radonbot tail -f /Users/_radonbot/radon-runner/logs/documentation/$(date +%F).log
 ```
 
-It passes when the log starts with `starting grok`, a draft PR on `documentation/<date>` appears with author `radon-runner-bot` (`gh pr list --author radon-runner-bot --state all`), and a `radon documentation: done via <agent>` Pushover arrives.
+Verify a completed `RESULT:` line in the log and a `radon documentation: done via <agent>` Pushover. `RESULT: no PR - <reason>` is healthy when the audit found no substantive correction. When a change is published, verify its draft PR on `documentation/<date>` has author `radon-runner-bot` (`gh pr list --author radon-runner-bot --state all`) and that every applicable check on its exact head is green. A runner `done` page alone reports the agent's exit status; it does not prove CI passed.
+
+If completion evidence is missing or the run fails, preserve the log and
+inspect the troubleshooting checks below before another fire. Do not
+reinstall the runner or upgrade its CLIs while a run is active. For a bad
+installation, keep the affected job stopped and have the operator reinstall
+a reviewed known-good runner/config from a retained checkout after the run
+exits; prompts still come from `main` on each fire. Escalate unresolved
+failures with the loop name and sanitized log, never credentials.
 
 ### 10. Clean up
 

@@ -474,6 +474,12 @@ class TestRecoveryInstructions:
         assert result.returncode != 0, "SQL errors must stop the restore drill"
         assert "Scratch restore:" not in result.stdout
 
+    def test_contributing_uses_reviewed_branches(self):
+        text = (_ROOT / "CONTRIBUTING.md").read_text()
+        assert "All work commits to `main`" not in text
+        assert "pull request" in text.lower()
+        assert "Never push directly to `main`" in text
+
     def test_knowledge_documented_test_paths_exist(self):
         text = (_ROOT / "docs/knowledge-embeddings.md").read_text()
         paths = set(re.findall(r"scripts/tests/test_[a-z0-9_]+\.py", text))
