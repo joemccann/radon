@@ -818,3 +818,9 @@ Review: focused changed-surface tests and permanent fault drills pass; source di
 `RADON_WEEKEND_REDUCED=1`: P2 findings R-679, R-678, NF-1, NF-2, NF-3 and NF-4 stay open with the acceptance already on issue #81. No Gateway, live order, production halt, or browser launch.
 
 Closing gates on `b39e5377` (then rebased onto `09a485ae` as `33f3f38e`, same diff). Drills: pytest `107 passed`; `order-idempotency-durability` vitest `12 passed`. Three serial vitest runs from the repo root: each `10144 passed, 21 skipped`. Pytest run 1: `16137 passed, 22 skipped, 94 deselected`. Pytest run 2: `1 failed, 16136 passed` — `test_timeout_retains_completed_summaries_and_kills_worker_group` raised `PermissionError` at `scripts/knowledge/distill.py:160` (`os.killpg`); that test passed inside run 1. Pytest run 3: `1 failed, 16136 passed` — `TEST_LOG.md` row count versus `origin/main`, which gained rows from other merges while the suite ran; this branch does not edit `TEST_LOG.md`. After the rebase, `TestTestLogLedgerIsAppendOnly`, the killpg test, and the R-709 fx-guard classes: `45 passed`. No assertion was weakened.
+
+## Remediation 2026-09-29
+
+| Task | Status | Red / green | Evidence and remaining acceptance |
+|---|---|---|---|
+| REL-291 / R-710 | DONE | RED 4 failed, 55 deselected; GREEN 152 passed | Unknown ownership refuses before clone replacement; stale reclamation takes an exclusive directory claim and rechecks ownership; EXIT releases only its own PID. Tests retain live-owner skip, genuine PID-reuse recovery and dead-owner recovery. The old missing-start case now requires refusal, because missing evidence cannot establish PID reuse. Runner and security-hook suites passed with fake CLIs and local bare origins only. An orphaned incomplete/reaping lock requires an operator to verify no loop process is alive before removing that lock directory. |

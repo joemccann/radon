@@ -8639,3 +8639,15 @@ CI repair review: befea93d preserved21 new gateway/service component regressions
 ## Review
 - Both secrets point to Turso `radon-demo` and appear in `gh secret list`; the push-only guard will run on the next main push.
 - Linux cloud CI on `5f7c36ab` red-failed at the preheld gateway gate (status 66). The fixture now reports it inactive, reaches the hanging stop child, and Linux cloud CI passed on `6156ac79`; the harness remains `timeout=5`.
+
+## Nightly reliability 2026-09-29
+
+- [x] T1 depends_on: [] Install isolated Python toolchain, read trusted checkpoint and open PRs, select tonight's branch.
+- [x] T2 depends_on: [T1] Audit 5c27667c..c274a773 and codemap importers; verify standing sweeps and inherited acceptance.
+- [ ] T3 depends_on: [T2] Fix verified findings serially with fault-injection red/green and focused gates.
+- [ ] T4 depends_on: [T3] Run permanent drills, validate diff, publish substantive draft PR and await exact-head CI.
+- [ ] T5 depends_on: [T4] Record one durable issue comment and final review.
+
+Review: pending; only mocks/local fixtures and GitHub operations are authorized. Full suites and Vitest are assigned to CI.
+
+Nightly review update: REL-291 red 4, green runner/hooks 152; standing catalogs 57 passed. Remaining repairs and closing verification pending.

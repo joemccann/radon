@@ -2686,3 +2686,16 @@ changed-surface instance.
 |---|---|---|---|---|
 | REL-257 | P2 | R-678 | **Make Liquid Compute observation replacement atomic and report every persistence failure.** Replace an observation identity without a committed delete-before-insert gap, and translate every production collection/persistence exception into the existing bounded error heartbeat before non-zero exit. | Red first: seed a valid old observation, inject a failure into its replacement write, and assert the old row remains queryable; inject `HranaHttpError` from each persistence step and assert exactly one `liquidcompute` error health write plus non-zero exit; a successful replacement still updates both index and observation records. |
 | REL-257 | P2 | R-678 | **Make repeated Flex budget exhaustion durable and operator-visible without misclassifying one successful newest-first partial run.** Persist a bounded consecutive-budget/deferred-tail signal keyed to the delivery population; after the configured bound write a non-healthy state (or an explicitly watchdog-evaluated degraded state), and clear it only after a full catch-up. Preserve newest-first priority and the successful fresh-statement path. | Fault injection, red first: two consecutive runs with an applied newest statement and a forced expired budget produce an operator-visible degraded/error watchdog outcome; a complete next run clears it. Assert a single partial run remains distinguishable but does not page, and that repeated partial runs do not reset the watchdog failure sequence. |
+
+## Delta audit 2026-09-29
+
+Range: `5c27667c87f314feaf7fbbcaad03613fd9e00546..c274a773228ed29226721694370d3a1c2739494e`.
+28 commits, 253 changed paths, 382 paths with direct codemap importers. New
+runner/configuration paths absent from the prior codemap were followed with
+`rg`. Serial review covered connectivity, persistence, resource lifetime,
+failure propagation, trading safety and observability. No open reliability PR
+reserved work or IDs; trusted issue #81 comments reserve IDs through R-709.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-710 | P1 | `scripts/runner/run_loop.sh:97-146` | Runner lock acquisition treated missing ownership metadata or an unavailable process fingerprint as a dead owner and deleted the active clone. Concurrent stale-lock reclaimers were uncoordinated. REL-291: four fault injections must preserve the clone and refuse agent launch; verified dead/reused owners still recover and live owners still skip. |

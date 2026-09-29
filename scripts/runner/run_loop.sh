@@ -94,26 +94,56 @@ load_secrets() {
 
 proc_start() { ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //;s/ $//'; }
 
-# A lock is live only while its pid still runs with the start time it
-# recorded; a pid reused after a reboot or a SIGKILL does not hold it.
+# REL-291 / R-710: missing metadata or an unreadable process fingerprint is
+# uncertain ownership, never permission to delete the active agent's clone.
+lock_state() {
+  local holder started observed
+  holder="$(cat "$LOCK/pid" 2>/dev/null)"
+  started="$(cat "$LOCK/start" 2>/dev/null)"
+  case "$holder" in ''|*[!0-9]*|0|1) return 2 ;; esac
+  kill -0 "$holder" 2>/dev/null || return 1
+  [[ -n "$started" ]] || return 2
+  observed="$(proc_start "$holder")"
+  [[ -n "$observed" ]] || return 2
+  [[ "$observed" == "$started" ]] && return 0
+  return 1
+}
+
+release_lock() {
+  # An EXIT from a displaced process must never remove a successor's lock.
+  [[ "$(cat "$LOCK/pid" 2>/dev/null)" == "$$" ]] || return 0
+  rm -rf "$LOCK"
+}
+
 acquire_lock() {
   LOCK="$STATE_DIR/$LOOP.lock"
-  local holder started
+  local state
   if ! mkdir "$LOCK" 2>/dev/null; then
-    holder="$(cat "$LOCK/pid" 2>/dev/null)"
-    started="$(cat "$LOCK/start" 2>/dev/null)"
-    if [[ -n "$holder" && -n "$started" ]] && kill -0 "$holder" 2>/dev/null \
-       && [[ "$(proc_start "$holder")" == "$started" ]]; then
-      log "skipped: pid $holder is still running this loop"
-      notify "radon $LOOP: skipped" "the previous run (pid $holder) is still running; this fire did not start"
+    lock_state; state=$?
+    if [[ "$state" == 0 ]]; then
+      log "skipped: the recorded process is still running this loop"
+      notify "radon $LOOP: skipped" "the previous run is still running; this fire did not start"
       exit 0
+    fi
+    if [[ "$state" != 1 ]]; then
+      notify "radon $LOOP: REFUSED" "lock ownership is uncertain; preserve the clone and inspect $LOCK before removing an orphaned lock"
+      exit 75
+    fi
+    # Serialize reclaimers INSIDE the existing directory. Recheck after the
+    # claim: a contender that observed the old directory may now see a new
+    # owner's directory. Incomplete new metadata remains fail-closed.
+    mkdir "$LOCK/reaping" 2>/dev/null || exit 75
+    lock_state; state=$?
+    if [[ "$state" != 1 ]]; then
+      rmdir "$LOCK/reaping" 2>/dev/null || true
+      exit 75
     fi
     rm -rf "$LOCK"
     mkdir "$LOCK" || exit 75
   fi
   echo $$ > "$LOCK/pid"
   proc_start $$ > "$LOCK/start"
-  trap 'rm -rf "$LOCK"' EXIT
+  trap 'release_lock' EXIT
 }
 
 prune_logs() {
