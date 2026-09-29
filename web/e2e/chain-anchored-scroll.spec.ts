@@ -134,13 +134,20 @@ for (const mobile of [false, true]) {
 
 test("previous-close cooldown survives live price updates", async ({ page }) => {
   const clockStart = new Date("2026-09-28T15:00:00Z");
-  // Finish navigation with a valid close before introducing the missing-data
-  // condition; startup mounts are outside this cooldown scenario.
-  const moveSpot = await installFixtures(page);
+  const warmupTime = new Date("2026-09-25T15:00:00Z");
+  await page.clock.install({ time: warmupTime });
+  // Server-provided marks can request a close before the socket seed arrives.
+  // Finish that warmup in a different session from the measured cooldown.
+  const moveSpot = await installFixtures(page, 119, warmupTime.toISOString());
+  let observingCooldown = false;
   let requests = 0;
   let releaseFirst!: () => void;
   const firstResponse = new Promise<void>((resolve) => { releaseFirst = resolve; });
   await page.route("**/api/previous-close", async (route) => {
+    if (!observingCooldown) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ closes: { [TICKER]: 119 } }) });
+      return;
+    }
     requests += 1;
     if (requests === 1) {
       await firstResponse;
@@ -153,8 +160,9 @@ test("previous-close cooldown survives live price updates", async ({ page }) => 
   const spot = page.getByTestId("chain-spot-bar");
   await expect(spot).toContainText("120.00");
   expect(requests).toBe(0);
-  await page.clock.install({ time: clockStart });
+  await page.clock.setSystemTime(clockStart);
   await page.clock.pauseAt(new Date(await page.evaluate(() => Date.now() + 1_000)));
+  observingCooldown = true;
   moveSpot(120, null, clockStart.toISOString());
   await page.clock.runFor(250);
   await expect.poll(() => requests).toBe(1);
