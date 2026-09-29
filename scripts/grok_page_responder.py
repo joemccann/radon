@@ -667,6 +667,7 @@ def _default_grok_runner(cmd: list[str], **kwargs) -> subprocess.CompletedProces
         text=True,
         timeout=kwargs.get("timeout", GROK_TIMEOUT_SECS),
         cwd=kwargs.get("cwd"),
+        env=grok_runtime.grok_child_env(),
     )
 
 

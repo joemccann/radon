@@ -82,6 +82,11 @@ if [[ -x /home/radon/.grok/bin/grok && ! -e /home/radon/.local/bin/grok ]]; then
   sudo -u radon ln -sf /home/radon/.grok/bin/grok /home/radon/.local/bin/grok
 fi
 install -d -o radon -g radon -m 0750 /var/lib/radon
+# Runtime lock dir (responder-writable) and upgrade scratch (not). The
+# responder unit mounts ~/.grok/{bin,hooks,downloads} read-only; create them
+# so the read-only mount covers them rather than being skipped.
+install -d -o radon -g radon -m 0750 /var/lib/radon/grok-runtime /var/lib/radon/grok-upgrade
+sudo -u radon mkdir -p /home/radon/.grok/bin /home/radon/.grok/hooks /home/radon/.grok/downloads
 if [[ -x /home/radon/.local/bin/grok && -x "$CLONE/.venv/bin/python" ]]; then
   sudo -u radon -H "$CLONE/.venv/bin/python" "$CLONE/scripts/grok_upgrade.py" \
     --seed-if-missing \
