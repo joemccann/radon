@@ -56,4 +56,4 @@ def test_upgrade_timer_is_daily_0740_utc():
     service = (CLOUD / "services" / "radon-grok-upgrade.service").read_text()
     assert "grok_upgrade.py" in service
     assert "/var/lib/radon/grok_lkg.json" in service
-    assert "/var/lib/radon/grok-runtime.lock" in service
+    assert "/var/lib/radon/grok-runtime/grok-runtime.lock" in service

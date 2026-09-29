@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -493,7 +494,7 @@ class TestSanitizeUsesPinnedSed:
         src = HOOK.read_text(encoding="utf-8")
         start = src.index("_sanitize_issue_text() {")
         end = src.index("\nreport() {", start)
-        fns = src[start:end]
+        fns = _secret_ere_block(src) + src[start:end]
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         planted = bin_dir / "sed"
@@ -528,7 +529,7 @@ class TestSecurityBashFallbackSanitizes:
         src = HOOK.read_text(encoding="utf-8")
         start = src.index("_sanitize_issue_text() {")
         end = src.index("\nreport() {", start)
-        fns = src[start:end]
+        fns = _secret_ere_block(src) + src[start:end]
         script = tmp_path / "run.sh"
         script.write_text(
             "#!/usr/bin/env bash\nset -euo pipefail\nISSUE_SANITIZE=1\n"
@@ -568,6 +569,10 @@ def test_this_file_does_not_contain_a_literal_tws_assignment():
 def _credential_literals() -> dict[str, str]:
     return {
         "anthropic": "sk-" + "ant-" + "api03-" + "NOTAREALKEY" * 4,
+        "stripe_live": "sk_" + "live_" + "NOTAREALKEY" + "0" * 12,
+        "xai": "xai" + "-" + "NOTAREALKEY" + "0" * 12,
+        "nvidia": "nvapi" + "-" + "NOTAREALKEY" + "0" * 12,
+        "cerebras": "csk" + "-" + "NOTAREALKEY" + "0" * 12,
         "github_pat_classic": "ghp" + "_" + "NOTAREALTOKEN" + "0" * 23,
         "github_pat_fine": "github" + "_pat_" + "NOTAREALTOKEN" + "0" * 30,
         "slack_bot": "xox" + "b-" + "0000000000-" + "NOTAREALTOKEN",
@@ -600,7 +605,7 @@ class TestSecurityBashSanitizesCredentialLiterals:
         src = HOOK.read_text(encoding="utf-8")
         start = src.index("_sanitize_issue_text() {")
         end = src.index("\nreport() {", start)
-        fns = src[start:end]
+        fns = _secret_ere_block(src) + src[start:end]
         literals = _credential_literals()
         detail = "scanner tail: " + " ".join(literals.values()) + " sha 1f04011f"
         script = tmp_path / "run.sh"
@@ -622,3 +627,93 @@ class TestSecurityBashSanitizesCredentialLiterals:
         assert "[REDACTED]" in proc.stdout
         assert "1f04011f" in proc.stdout
         assert "scanner tail:" in proc.stdout
+
+
+_QUOTED_SECRETS = {
+    "json_key": ('{"PUSHOVER_TOKEN": "qz7NOTREAL000"}', "qz7NOTREAL000"),
+    "json_key_spaced": ('"db_password" : "two words NOTREAL"', "words NOTREAL"),
+    "single_quoted_value": ("SERVICE_SECRET='kept apart NOTREAL'", "apart NOTREAL"),
+    "basic_scheme": ("Authorization: Basic Zm9vOk5PVFJFQUw=", "Zm9vOk5PVFJFQUw="),
+    "token_scheme": ("AUTH_HEADER=Token qz8NOTREAL111", "qz8NOTREAL111"),
+    "hyphenated_header": ("X-API-Key: qz9NOTREAL222", "qz9NOTREAL222"),
+    "hyphenated_lower": ("api-key=qz0NOTREAL333", "qz0NOTREAL333"),
+}
+
+
+def _secret_ere_block(src: str) -> str:
+    start = src.index("# Credential assignments")
+    return src[start:src.index("_redact_secret_classes() {", start)]
+
+
+class TestSanitizeQuotedSecrets:
+    @pytest.mark.parametrize("kind", sorted(_QUOTED_SECRETS))
+    def test_quoted_key_or_value_is_redacted(self, kind: str):
+        text, secret = _QUOTED_SECRETS[kind]
+        out = nif.sanitize(f"the fixture held {text} before the fix")
+        assert secret not in out, (kind, out)
+        assert "[REDACTED]" in out
+        assert out.endswith("before the fix")
+
+    @pytest.mark.parametrize("fn", ["_sanitize_issue_text", "_redact_secret_classes"])
+    def test_bash_sanitizers_redact_quoted_secrets(self, tmp_path: Path, fn: str):
+        src = HOOK.read_text(encoding="utf-8")
+        start = src.index(f"{fn}() {{")
+        body = _secret_ere_block(src) + src[start:src.index("\n}\n", start) + 3]
+        text = " ; ".join(t for t, _ in _QUOTED_SECRETS.values())
+        call = (f"_sanitize_issue_text {shlex.quote(text)}" if fn == "_sanitize_issue_text"
+                else f"printf '%s' {shlex.quote(text)} | _redact_secret_classes")
+        script = tmp_path / "run.sh"
+        script.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + body + "\n" + call + "\n",
+                          encoding="utf-8")
+        proc = subprocess.run(["/bin/bash", str(script)], capture_output=True, text=True, timeout=30)
+        assert proc.returncode == 0, proc.stderr
+        for kind, (_, secret) in _QUOTED_SECRETS.items():
+            assert secret not in proc.stdout, (kind, proc.stdout)
+
+
+class TestSanitizeClaudeUrls:
+    @pytest.mark.parametrize("url", [
+        "https://claude.ai/chat/0000notreal", "https://www.claude.ai/share/0000notreal",
+        "https://claude.ai/settings/usage?code=0000notreal", "https://claude.ai/x?code=0000notreal",
+    ])
+    def test_only_the_usage_page_survives(self, url: str):
+        out = nif.sanitize(f"see {url} for details")
+        assert "0000notreal" not in out, out
+        assert "[REDACTED]" in out
+
+    @pytest.mark.parametrize("text", [
+        "top up at https://claude.ai/settings/usage.", "top up at claude.ai/settings/usage",
+    ])
+    def test_usage_page_is_kept(self, text: str):
+        assert "claude.ai/settings/usage" in nif.sanitize(text)
+
+
+class TestSanitizeNonHttpUris:
+    @pytest.mark.parametrize("uri", [
+        "postgres://svc:pw0notreal@db/app", "redis://:pw1notreal@cache:6379/0",
+        "libsql://db.example/x?authToken=pw2notreal", "wss://relay.example/feed?key=pw3notreal",
+    ])
+    def test_credential_bearing_uri_is_redacted(self, uri: str):
+        out = nif.sanitize(f"the url {uri} was set")
+        assert "notreal" not in out, out
+        assert out == "the url [REDACTED] was set"
+
+    def test_bash_issue_sanitizer_redacts_non_http_uris(self, tmp_path: Path):
+        src = HOOK.read_text(encoding="utf-8")
+        start = src.index("_sanitize_issue_text() {")
+        body = _secret_ere_block(src) + src[start:src.index("\n}\n", start) + 3]
+        script = tmp_path / "run.sh"
+        script.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + body
+                          + "\n_sanitize_issue_text 'a redis://:pw1notreal@cache:6379/0 b'\n", encoding="utf-8")
+        proc = subprocess.run(["/bin/bash", str(script)], capture_output=True, text=True, timeout=30)
+        assert proc.returncode == 0, proc.stderr
+        assert "notreal" not in proc.stdout, proc.stdout
+
+
+@pytest.mark.parametrize("route", [
+    "/api/callback?code=qz1NOTREAL", "/orders/place#frag=qz2NOTREAL", "/api?code=qz3NOTREAL",
+])
+def test_route_query_and_fragment_are_redacted_with_the_route(route: str):
+    out = nif.sanitize(f"the call {route} returned")
+    assert "NOTREAL" not in out, out
+    assert out == "the call [REDACTED] returned"

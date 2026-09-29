@@ -318,6 +318,22 @@ def test_a_foreign_or_closed_pr_url_is_never_ready(rig):
     assert out["status"].startswith("INCOMPLETE: unverified-pr-url")
 
 
+@pytest.mark.parametrize("n,urls", [(1, ""), (2, PR)])
+def test_a_ready_verdict_without_one_verified_url_per_pr_is_never_ready(rig, n, urls):
+    out = rig.post(phase="deliver", output=_ready(rig, n=n, url=urls))
+    assert out["status"].startswith("INCOMPLETE: unverified-pr-url")
+
+
+def test_a_green_record_claiming_a_pr_without_a_url_is_never_ready(rig):
+    record = rig.state / f".{rig.loop}-deliver" / "record.json"
+    record.parent.mkdir(parents=True)
+    record.write_text(json.dumps({"loop": rig.loop, "branch": "b", "pr": 9, "url": " ",
+                                  "status": "green", "check": None,
+                                  "updated_at": "2099-01-01T00:00:00+00:00"}))
+    out = rig.post(phase="deliver", output=f"{rig.marker} deliver run_id=r1\n")
+    assert out["status"].startswith("INCOMPLETE: unverified-pr-url")
+
+
 def test_nothing_to_merge_is_a_finished_deliver(rig):
     out = rig.post(phase="deliver", output=_ready(rig, n=0, url=""))
     assert out["status"].startswith("OK: 0 PR(s), nothing to merge")

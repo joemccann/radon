@@ -73,7 +73,9 @@ def creation_kind(args: list[str]) -> str:
         return "pr"
     if "api" in args:
         tail = args[args.index("api") + 1:]
-        endpoint = next((a for a in tail if a.rstrip("/").endswith("/graphql") or a == "graphql" or re.search(r"(?:^|/)repos/[^/]+/[^/]+/pulls/?(?:\?.*)?$", a)), "")
+        # GitHub routes an endpoint the same with a query or fragment suffix.
+        paths = [re.sub(r"[?#].*", "", a, flags=re.S).rstrip("/") for a in tail]
+        endpoint = next((p for p in paths if p.endswith("/graphql") or p == "graphql" or re.search(r"(?:^|/)repos/[^/]+/[^/]+/pulls$", p)), "")
         method = option(tail, "--method", "-X").upper()
         body = any(a in ("--input", "--field", "--raw-field", "-f", "-F") or a.startswith(("--input=", "--field=", "--raw-field=", "-f", "-F")) for a in tail)
         if endpoint == "graphql" or endpoint.rstrip("/").endswith("/graphql"):

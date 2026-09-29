@@ -24,6 +24,38 @@ LIB_FILES="nightly_pr_guard.py nightly_publish.py nightly_issue_prune.py nightly
   nightly_audit_context.py nightly_deliver.py security_claude_ladder.py claude_cli_env_drift.py
   claude_cli_env_reviewed.txt"
 
+# Root installs from $SRC, so every path it reads must be one only root or the
+# operator can change: each directory from / down to the clone owned by one of
+# them and not group/world-writable (a sticky shared parent like /tmp is fine),
+# and the clone, scripts/ and everything copied held to the same bar with no
+# sticky exemption and no symlinks. RADON_RUNNER_INSTALL_TRUSTED_UID narrows
+# the trusted uid for tests and is ignored as root.
+check_source() {
+  local uid bad dir tree
+  refuse() {
+    echo "refusing to install: untrusted source path $1 (owner must be root or uid $uid, not group/world-writable)" >&2
+    exit 77
+  }
+  if [[ $EUID -eq 0 ]]; then
+    uid="${SUDO_UID:-0}"
+  else
+    uid="${RADON_RUNNER_INSTALL_TRUSTED_UID:-$EUID}"
+  fi
+  tree="$(cd "$SRC/../.." && pwd -P)"
+  dir="$(dirname "$tree")"
+  while :; do
+    bad="$(find "$dir" -maxdepth 0 \( \( ! -user 0 ! -user "$uid" \) -o \( \( -perm -0020 -o -perm -0002 \) ! -perm -1000 \) \) -print)"
+    [[ -z "$bad" ]] || refuse "$bad"
+    [[ "$dir" == / ]] && break
+    dir="$(dirname "$dir")"
+  done
+  local paths=("$tree/scripts/runner") file
+  for file in $LIB_FILES; do paths+=("$tree/scripts/$file"); done
+  bad="$({ find "$tree" "$tree/scripts" -maxdepth 0 \( \( ! -user 0 ! -user "$uid" \) -o -perm -0020 -o -perm -0002 \) -print
+    find "${paths[@]}" \( \( ! -user 0 ! -user "$uid" \) -o -perm -0020 -o -perm -0002 -o -type l \) -print; } 2>&1 | head -n 1)"
+  [[ -z "$bad" ]] || refuse "$bad"
+}
+
 loop_setting() {
   sed -n "s/^$2=//p" "$SRC/loops/$1.env" | tail -n 1 | tr -d "\"'"
 }
@@ -174,6 +206,7 @@ main() {
     print_gitconfig
     return 0
   fi
+  check_source
   [[ $EUID -eq 0 ]] || { echo "run with sudo" >&2; exit 1; }
   local loop
   for loop in "$@"; do

@@ -65,10 +65,13 @@ sudo pmset -a sleep 0 displaysleep 10     # the Mac must stay awake at night
 ### 2. Install the runner (operator)
 
 ```bash
-/usr/bin/git clone https://github.com/joemccann/radon.git /tmp/radon-runner-install
-/bin/bash /tmp/radon-runner-install/scripts/runner/install.sh --print-plist documentation   # review
-sudo /bin/bash /tmp/radon-runner-install/scripts/runner/install.sh documentation ci-performance testing reliability security security-deepsec
+RI="$(mktemp -d)" && /usr/bin/git clone https://github.com/joemccann/radon.git "$RI"
+/bin/bash "$RI/scripts/runner/install.sh" --print-plist documentation   # review
+sudo /bin/bash "$RI/scripts/runner/install.sh" documentation ci-performance testing reliability security security-deepsec
+/bin/rm -rf "$RI"
 ```
+
+Always clone into a fresh `mktemp -d` directory, never a fixed `/tmp` path another account could create first. `install.sh` refuses (exit 77) when the clone, or any directory above it, is owned by someone other than root or you, or is group- or world-writable.
 
 It asks for your sudo password, then `User password:` for the new `_radonbot` account. Choose a password and save it (your password manager, or `security add-generic-password -s radon-runnerbot-login -a _radonbot -w`); step 5 reuses it. The `No clear text password ... FDE` warning and `Home directory is assigned (not created!)` are expected: the script creates the home right after. It ends with one `installed com.radon.runner.<loop>` line per loop.
 
@@ -131,8 +134,10 @@ grep -E "^(export )?(NVIDIA_API_KEY|CEREBRAS_API_KEY)=" ~/.radon/agent-cli/env |
 On a Mac where you have no such file, create `/Users/_radonbot/.radon/agent-cli/env` in the bot shell with `NVIDIA_API_KEY=` and `CEREBRAS_API_KEY=` lines instead. Then, in the bot shell:
 
 ```bash
-/bin/bash /tmp/radon-runner-install/scripts/agent_cli_bootstrap.sh
-/bin/bash /tmp/radon-runner-install/scripts/agent_cli_bootstrap.sh --check
+RB="$(mktemp -d)" && /usr/bin/git clone --depth 1 https://github.com/joemccann/radon.git "$RB"
+/bin/bash "$RB/scripts/agent_cli_bootstrap.sh"
+/bin/bash "$RB/scripts/agent_cli_bootstrap.sh" --check
+/bin/rm -rf "$RB"
 ```
 
 Every line must read `OK` with a `/Users/_radonbot/...` path: codex, grok, nvidia, cerebras, fx. A `MISSING` line names its fix. agy is not in this check; step 5 covers it.
@@ -294,7 +299,7 @@ It passes when the log starts with `starting grok`, a draft PR on `documentation
 
 ### 10. Clean up
 
-`exit` the bot shell, then `/bin/rm -rf /tmp/radon-runner-install`.
+`exit` the bot shell. Step 2 and step 6 already removed their clones.
 
 ## Operate
 
@@ -304,7 +309,7 @@ It passes when the log starts with `starting grok`, a draft PR on `documentation
 | launchd's own output (start failures) | `sudo -u _radonbot tail /Users/_radonbot/radon-runner/launchd-documentation.log` |
 | Is the job loaded, when did it last run | `sudo launchctl print system/com.radon.runner.documentation \| grep -E 'state\|last exit'` |
 | Run a loop now | `sudo launchctl kickstart system/com.radon.runner.documentation` |
-| Change `run_loop.sh` or a loop `.env` | merge to `main`, then repeat step 2 on the mini (clone and `sudo install.sh <loop>`, e.g. `sudo install.sh documentation`); the installed copy does not change until you do. The prompt is read from `main` every night and needs no reinstall |
+| Change `run_loop.sh` or a loop `.env` | merge to `main`, then repeat step 2 on the mini (clone into a fresh `mktemp -d` directory, `sudo install.sh <loop>`, e.g. `sudo install.sh documentation`, then remove the clone); the installed copy does not change until you do. The prompt is read from `main` every night and needs no reinstall |
 | Rotate the GitHub token (before its expiry) | step 7.5 to 7.6, then step 8 |
 | Release a held security P0/P1 | `sudo -u _radonbot sh -c 'echo "released: <finding-id>" >> ~/radon-runner/state/<loop>/scratch/<run-id>/run-record.md'` |
 | Read a security loop's private report | the Pushover page's "Open private report" link (`joemccann/radon-security-reports`) |

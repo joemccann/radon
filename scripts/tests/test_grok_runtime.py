@@ -172,3 +172,15 @@ class TestStamp:
         assert grok_runtime.parse_cli_version(
             "grok 1.0.41 (4220f3b224a6) [stable]"
         ) == "1.0.41"
+
+
+
+def test_default_runtime_lock_lives_in_its_own_dir():
+    """The responder may write only this dir under /var/lib/radon."""
+    import os
+
+    if os.environ.get("RADON_GROK_RUNTIME_LOCK"):
+        pytest.skip("lock path overridden in this environment")
+    assert str(grok_runtime.DEFAULT_LOCK_PATH) == (
+        "/var/lib/radon/grok-runtime/grok-runtime.lock"
+    )

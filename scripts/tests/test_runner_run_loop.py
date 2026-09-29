@@ -877,3 +877,105 @@ def test_security_loops_run_on_the_runner_in_their_old_slots(loop, hour, minute,
                                     ".claude/skills/security-deepsec")}[loop]
     for path in retired:
         assert not (REPO / path).exists(), path
+
+
+# --- install.sh: source-tree trust -----------------------------------------------
+
+_LIB = ("nightly_pr_guard.py", "nightly_publish.py", "nightly_issue_prune.py", "nightly_green_base.py",
+        "nightly_audit_context.py", "nightly_deliver.py", "security_claude_ladder.py",
+        "claude_cli_env_drift.py", "claude_cli_env_reviewed.txt")
+
+
+def _source_tree(tmp_path):
+    """A private copy of the tree install.sh copies from: scripts/runner plus the lib helpers."""
+    root = tmp_path / "clone"
+    shutil.copytree(REPO / "scripts" / "runner", root / "scripts" / "runner")
+    for name in _LIB:
+        shutil.copy2(REPO / "scripts" / name, root / "scripts" / name)
+    for path in [root, *root.rglob("*")]:
+        path.chmod(0o755 if path.is_dir() or path.suffix == ".sh" else 0o644)
+    return root
+
+
+def _install(root, *args, **env):
+    env = {**{k: v for k, v in os.environ.items() if k != "RADON_RUNNER_INSTALL_TRUSTED_UID"}, **env}
+    return subprocess.run([BASH, str(root / "scripts" / "runner" / "install.sh"), *args],
+                          env=env, capture_output=True, text=True)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="the refusal path is exercised as an unprivileged user")
+def test_install_proceeds_past_the_trust_check_on_a_private_operator_owned_tree(tmp_path):
+    out = _install(_source_tree(tmp_path), "documentation")
+    assert out.returncode == 1
+    assert "untrusted" not in out.stderr
+    assert "run with sudo" in out.stderr
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="the refusal path is exercised as an unprivileged user")
+@pytest.mark.parametrize("rel", ["", "scripts", "scripts/runner", "scripts/runner/hooks",
+                                 "scripts/runner/loops/documentation.env", "scripts/runner/run_loop.sh",
+                                 "scripts/nightly_pr_guard.py"])
+@pytest.mark.parametrize("mode", [0o777, 0o775, 0o1777])
+def test_install_refuses_a_group_or_world_writable_source_tree(tmp_path, rel, mode):
+    root = _source_tree(tmp_path)
+    target = root / rel
+    target.chmod(mode if target.is_dir() else mode & 0o777)
+    out = _install(root, "documentation")
+    assert out.returncode != 0
+    assert "untrusted" in out.stderr, out.stderr
+    assert "run with sudo" not in out.stderr
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="the refusal path is exercised as an unprivileged user")
+def test_install_refuses_a_group_writable_ancestor_of_the_source_tree(tmp_path):
+    root = _source_tree(tmp_path / "parent")
+    (tmp_path / "parent").chmod(0o777)
+    out = _install(root, "documentation")
+    assert out.returncode != 0
+    assert "untrusted" in out.stderr and str((tmp_path / "parent").resolve()) in out.stderr, out.stderr
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="the refusal path is exercised as an unprivileged user")
+def test_install_accepts_a_sticky_world_writable_ancestor(tmp_path):
+    root = _source_tree(tmp_path / "shared")
+    (tmp_path / "shared").chmod(0o1777)
+    out = _install(root, "documentation")
+    assert "untrusted" not in out.stderr, out.stderr
+    assert "run with sudo" in out.stderr
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="the refusal path is exercised as an unprivileged user")
+def test_install_refuses_a_source_tree_owned_by_another_user(tmp_path):
+    # Files cannot be chowned without root, so narrow the trusted uid instead.
+    out = _install(_source_tree(tmp_path), "documentation", RADON_RUNNER_INSTALL_TRUSTED_UID="424242")
+    assert out.returncode != 0
+    assert "untrusted" in out.stderr, out.stderr
+    assert "run with sudo" not in out.stderr
+
+
+def test_install_checks_the_source_before_any_install_action():
+    src = (REPO / "scripts" / "runner" / "install.sh").read_text()
+    main = src.split("main() {", 1)[1]
+    assert main.index("check_source") < main.index("ensure_user")
+    assert main.index("check_source") < main.index("install_runner")
+    # The narrowing seam is ignored when running as root.
+    check = src.split("check_source() {", 1)[1].split("\n}\n", 1)[0]
+    assert "EUID" in check and "SUDO_UID" in check
+
+
+def test_runner_docs_never_install_from_a_fixed_tmp_path():
+    doc = (REPO / "docs" / "runner.md").read_text()
+    assert "/tmp/radon-runner-install" not in doc
+    assert "mktemp -d" in doc
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="the refusal path is exercised as an unprivileged user")
+def test_install_refuses_a_symlink_among_the_copied_files(tmp_path):
+    root = _source_tree(tmp_path)
+    elsewhere = tmp_path / "elsewhere.sh"
+    elsewhere.write_text("#!/bin/bash\n")
+    (root / "scripts" / "runner" / "hooks" / "security_pre.sh").unlink()
+    (root / "scripts" / "runner" / "hooks" / "security_pre.sh").symlink_to(elsewhere)
+    out = _install(root, "documentation")
+    assert out.returncode != 0
+    assert "untrusted" in out.stderr, out.stderr

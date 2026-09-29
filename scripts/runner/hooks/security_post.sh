@@ -120,9 +120,9 @@ phase_marker_present() {
 }
 
 # An agent-asserted URL is not a merge cue: each must be a same-repo OPEN PR
-# on this loop's branch prefix.
+# on this loop's branch prefix, and there must be one per claimed PR ($2).
 deliver_urls_verified() {
-  local tok verified
+  local tok verified count=0
   for tok in $1; do
     case "$tok" in
       http://*|https://*)
@@ -130,10 +130,11 @@ deliver_urls_verified() {
           --json state,headRefName,isCrossRepository \
           -q "select(.state == \"OPEN\" and .isCrossRepository == false and (.headRefName | startswith(\"$PR_BRANCH_PREFIX\"))) | \"ok\"" \
           2>/dev/null || true)"
-        [[ "$verified" == "ok" ]] || return 1 ;;
+        [[ "$verified" == "ok" ]] || return 1
+        count=$((count + 1)) ;;
     esac
   done
-  return 0
+  [[ "$count" -gt 0 && "$count" == "$2" ]]
 }
 
 # R-613: the durable record first, then the verdict line of this slice.
@@ -145,7 +146,7 @@ deliver_status() {
     ""|*"no deliver record"*) ;;
     *"deliver record has a branch but no PR"*) ;;
     *"ready to merge:"*)
-      if deliver_urls_verified "${from_record#*ready to merge:}"; then printf '%s' "$from_record"
+      if deliver_urls_verified "${from_record#*ready to merge:}" "${from_record%% PR(s)*}"; then printf '%s' "$from_record"
       else printf 'INCOMPLETE: unverified-pr-url'; fi
       return 0 ;;
     *) printf '%s' "$from_record"; return 0 ;;
@@ -161,7 +162,7 @@ deliver_status() {
         esac
       done
       if [[ "${n:-0}" == "0" ]]; then printf '0 PR(s), nothing to merge'
-      elif deliver_urls_verified "$urls"; then printf '%s PR(s) green, ready to merge: %s' "$n" "$urls"
+      elif deliver_urls_verified "$urls" "$n"; then printf '%s PR(s) green, ready to merge: %s' "$n" "$urls"
       else printf 'INCOMPLETE: unverified-pr-url'; fi ;;
     "$DELIVER_INCOMPLETE_MARKER"*)
       rest="${line#"$DELIVER_INCOMPLETE_MARKER"}"
@@ -229,13 +230,20 @@ decide() {
 
 # --- private report ------------------------------------------------------------
 
+# Credential assignments, case-insensitive (BSD sed has no I flag): the key
+# may be quoted (JSON) or a hyphenated header name, the value quoted (spaces
+# inside) or led by an auth scheme word. POSIX ERE takes the longest alternative.
+_SECRET_KEY_ERE='[A-Za-z0-9_-]*([Tt][Oo][Kk][Ee][Nn]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss]|[Aa][Uu][Tt][Hh]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll]|[Aa][Pp][Ii][-_]?[Kk][Ee][Yy]|[-_][Kk][Ee][Yy])[A-Za-z0-9_-]*'
+_SECRET_SEP_ERE="[\"']?[[:space:]]*[=:][[:space:]]*"
+_SECRET_VALUE_ERE="(\"[^\"]*\"|'[^']*'|([Bb]asic|[Bb]earer|[Dd]igest|[Tt]oken)[[:space:]]+[^[:space:]]+|[^[:space:]]+)"
+
 _redact_secret_classes() {
   # Secret literals only. Routes, file:line and findings stay: this text
   # goes to the PRIVATE repository, not the public issue.
   /usr/bin/sed -E \
     -e 's,[Bb]earer [^[:space:]]+,Bearer [REDACTED],g' \
-    -e 's#(^|[^[:alnum:]_])(sk-(ant-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|xox[abpors]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})#\1[REDACTED]#g' \
-    -e 's,([A-Za-z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|_KEY)[A-Za-z0-9_]*[[:space:]]*[=:][[:space:]]*)[^[:space:]]+,\1[REDACTED],g'
+    -e 's#(^|[^[:alnum:]_])(sk-(ant-)?[A-Za-z0-9_-]{20,}|sk_(live|test)_[A-Za-z0-9]{6,}|(xai|nvapi|csk)-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|xox[abpors]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})#\1[REDACTED]#g' \
+    -e "s,(${_SECRET_KEY_ERE}${_SECRET_SEP_ERE})${_SECRET_VALUE_ERE},\\1[REDACTED],g"
 }
 
 # Best-effort: a failure leaves REPORT_URL empty and the page says so. The
@@ -288,12 +296,12 @@ _sanitize_issue_text() {
   text="${text//http:\/\/claude.ai\/settings\/usage/$'\x01USAGE\x01'}"
   text="${text//claude.ai\/settings\/usage/$'\x01USAGE\x01'}"
   text="$(printf '%s' "$text" | /usr/bin/sed -E \
-    -e 's,https?://[^[:space:]]+,[REDACTED],g' \
+    -e 's,[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]]+,[REDACTED],g' \
     -e 's,(^|[^[:alnum:].])/(api|admin)/[A-Za-z0-9._/-]+,\1[REDACTED],g' \
     -e 's,[A-Za-z0-9./_-]+\.(py|ts|tsx|js|mjs|cjs|sh|go|rb|java|json|yml|yaml|toml|md):[0-9]+,[REDACTED],g' \
     -e 's,[Bb]earer [^[:space:]]+,Bearer [REDACTED],g' \
-    -e 's#(^|[^[:alnum:]_])(sk-(ant-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|xox[abpors]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})#\1[REDACTED]#g' \
-    -e 's,[A-Za-z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|PASS|AUTH|CREDENTIAL|API_KEY|APIKEY|_KEY)[A-Za-z0-9_]*[[:space:]]*[=:][[:space:]]*[^[:space:]]+,[REDACTED],g' \
+    -e 's#(^|[^[:alnum:]_])(sk-(ant-)?[A-Za-z0-9_-]{20,}|sk_(live|test)_[A-Za-z0-9]{6,}|(xai|nvapi|csk)-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|xox[abpors]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})#\1[REDACTED]#g' \
+    -e "s,${_SECRET_KEY_ERE}${_SECRET_SEP_ERE}${_SECRET_VALUE_ERE},[REDACTED],g" \
     -e 's,[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z][A-Za-z]+,[REDACTED],g' \
     -e 's,(^|[^A-Za-z0-9])(radon)?(trader|operator)[0-9]+,\1[REDACTED],g' \
     -e 's,[Cc]heck the runner,,g' \
