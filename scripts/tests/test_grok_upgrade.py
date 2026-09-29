@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -50,10 +51,28 @@ class ScriptedRunner:
 
     def __call__(self, argv, **kwargs):
         self.calls.append(list(argv))
+        argv = _named(argv)
         for prefix, proc in self.mapping.items():
             if tuple(argv[: len(prefix)]) == prefix:
                 return proc
         return SimpleNamespace(returncode=1, stdout="", stderr="unexpected: " + " ".join(argv))
+
+
+def _named(argv) -> list[str]:
+    """argv with the executable reduced to its name: the candidate runs as <dest>/bin/grok."""
+    return [Path(argv[0]).name, *argv[1:]] if argv else []
+
+
+@pytest.fixture
+def grok_on_path(tmp_path, monkeypatch):
+    """A live `grok` for install_candidate_cli to copy into the candidate."""
+    bindir = tmp_path / "path-bin"
+    bindir.mkdir()
+    grok = bindir / "grok"
+    grok.write_text("#!/bin/sh\n", encoding="utf-8")
+    grok.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}:{os.environ.get('PATH', '')}")
+    return grok
 
 
 def _lkg(tmp_path: Path) -> Path:
@@ -102,6 +121,21 @@ class TestDecide:
             json.dumps({"current": "1.0.3", "latest": "1.0.41"})
         )
         assert parsed["latest"] == "1.0.41"
+
+    def test_parse_update_check_grok_103_version_keys(self):
+        # grok 1.0.3 `update --check --json` (live 2026-09-29).
+        parsed = upgrade.parse_update_check(
+            json.dumps({
+                "currentVersion": "1.0.3",
+                "latestVersion": "1.0.44",
+                "updateAvailable": True,
+                "installer": "internal",
+                "channel": "stable",
+                "autoUpdate": None,
+                "error": None,
+            })
+        )
+        assert parsed == {"current": "1.0.3", "latest": "1.0.44"}
 
 
 class TestRunUpgrade:
@@ -240,6 +274,138 @@ class TestRunUpgrade:
         assert result["action"] == "locked"
         assert json.loads(lkg_path.read_text())["cli_version"] == "1.0.3"
         assert not live.is_symlink()
+
+
+UPDATE_REJECT = (
+    "error: unexpected argument '--no-auto-update' found\n\n"
+    "Usage: grok update [OPTIONS]\n\n"
+    "For more information, try '--help'.\n"
+)
+
+
+class TestInstallCandidate:
+    def test_update_argv_omits_flag_grok_update_rejects(self, tmp_path, grok_on_path):
+        calls: list[list[str]] = []
+
+        def runner(argv, **kwargs):
+            calls.append(list(argv))
+            if "--no-auto-update" in argv:
+                return SimpleNamespace(returncode=1, stdout="", stderr=UPDATE_REJECT)
+            if argv[1:] == ["--version"]:
+                return SimpleNamespace(returncode=0, stdout="grok 1.0.44", stderr="")
+            return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+        dest = tmp_path / "candidate"
+        found = upgrade.install_candidate_cli(
+            dest, grok_bin="grok", runner=runner, version="1.0.44"
+        )
+        assert calls[0] == [str(dest / "bin" / "grok"), "update", "--version", "1.0.44"]
+        assert found == dest / "bin" / "grok"
+
+
+class TestMissingLkgRealCheck:
+    def test_pins_latest_version_and_promotes(self, tmp_path, grok_on_path):
+        """Page a57b867d: missing LKG, grok 1.0.3 check JSON, update rejects the flag."""
+        calls: list[list[str]] = []
+        check = json.dumps({
+            "currentVersion": "1.0.3",
+            "latestVersion": "1.0.44",
+            "updateAvailable": True,
+            "installer": "internal",
+            "channel": "stable",
+            "autoUpdate": None,
+            "error": None,
+        })
+
+        def runner(argv, **kwargs):
+            argv = _named(argv)
+            calls.append(list(argv))
+            if argv[1:] == ["--version"]:
+                return SimpleNamespace(returncode=0, stdout="grok 1.0.44", stderr="")
+            if tuple(argv[:3]) == ("grok", "update", "--check"):
+                return SimpleNamespace(returncode=0, stdout=check, stderr="")
+            if tuple(argv[:2]) == ("grok", "models"):
+                return SimpleNamespace(returncode=0, stdout=MODELS, stderr="")
+            if tuple(argv[:2]) == ("grok", "update"):
+                if "--no-auto-update" in argv:
+                    return SimpleNamespace(
+                        returncode=1, stdout="", stderr=UPDATE_REJECT
+                    )
+                return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+            if "--prompt-file" in argv:
+                assert "--no-auto-update" in argv
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=VALID_BODY + "\nRESULT: stand_down | grok upgrade smoke structured\n",
+                    stderr="",
+                )
+            return SimpleNamespace(
+                returncode=1, stdout="", stderr="unexpected " + " ".join(argv)
+            )
+
+        live = tmp_path / "live" / "grok"
+        live.parent.mkdir()
+        live.write_text("old\n", encoding="utf-8")
+        lkg_path = tmp_path / "missing_lkg.json"
+        result = upgrade.run_upgrade(
+            grok_bin="grok",
+            live_bin=live,
+            lkg_path=lkg_path,
+            lock_path=tmp_path / "runtime.lock",
+            scratch=tmp_path / "scratch",
+            runner=runner,
+            alerter=lambda _message: None,
+        )
+        updates = [
+            call for call in calls
+            if call[:2] == ["grok", "update"] and "--check" not in call
+        ]
+        assert updates == [["grok", "update", "--version", "1.0.44"]]
+        assert result["action"] == "promoted"
+        assert json.loads(lkg_path.read_text())["cli_version"] == "1.0.44"
+
+
+class TestHeartbeat:
+    def test_failure_passes_error_dict_not_last_error(self, tmp_path, monkeypatch, capsys, grok_on_path):
+        captured: list[tuple] = []
+
+        def write(service, state, **kwargs):
+            captured.append((service, state, dict(kwargs)))
+            unexpected = set(kwargs) - {"started_at", "finished_at", "error", "timeout"}
+            if unexpected:
+                name = sorted(unexpected)[0]
+                raise TypeError(
+                    f"write_service_health_http() got an unexpected keyword argument '{name}'"
+                )
+
+        import db.hrana_http as hrana
+        monkeypatch.setattr(hrana, "write_service_health_http", write)
+        runner = ScriptedRunner({
+            ("grok", "update", "--check"): SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps({"current": "1.0.3", "latest": "1.0.50"}),
+                stderr="",
+            ),
+            ("grok", "models"): SimpleNamespace(returncode=0, stdout=MODELS, stderr=""),
+            ("grok", "update", "--version"): SimpleNamespace(
+                returncode=1, stdout="", stderr=UPDATE_REJECT
+            ),
+        })
+        result = upgrade.run_upgrade(
+            grok_bin="grok",
+            lkg_path=_lkg(tmp_path),
+            scratch=tmp_path / "scratch",
+            runner=runner,
+            alerter=lambda _message: None,
+        )
+        assert result["action"] == "failed"
+        assert captured
+        service, state, kwargs = captured[0]
+        assert service == "grok-upgrade"
+        assert state == "error"
+        assert "last_error" not in kwargs
+        assert kwargs["error"]["message"]
+        assert "unexpected keyword argument" not in capsys.readouterr().err
 
 
 class TestSeed:

@@ -3077,6 +3077,57 @@ after the IB-skip path has already chosen the cached payload.** Peak:
   `scripts/tests/test_grok_page_ledger_timeout.py::TestLedgerReadTimeout`.
 - **Code:** `scripts/grok_page_responder.py` (`_ledger_read_timeout`).
 
+## grok-upgrade-update-rejects-no-auto-update
+
+**`radon-grok-upgrade.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when the daily track-latest install calls `grok update`
+with a flag that subcommand does not accept.** Peak: 2026-09-29
+07:43:31Z, page `a57b867dba07bd932da040bf13804a1e`, paged 07:45:01Z.
+
+- **Mechanism:** `Type=oneshot`, no `Restart=`. Exec span was 1s, not
+  `TimeoutStartSec=1200`. `/var/lib/radon/grok_lkg.json` was absent, so
+  `decide_upgrade` treated the live default (`grok-4.7`) as a model
+  change. `grok update --check --json` on CLI 1.0.3 returned
+  `currentVersion` / `latestVersion` (`1.0.3` -> `1.0.44`,
+  `updateAvailable: true`). `parse_update_check` only read `current` /
+  `latest`, so `cli_version` stayed empty and the install argv was
+  `grok update --no-auto-update`. That flag is valid on the incident
+  and smoke `grok` invocation, not on `grok update`. The CLI exited 1
+  with `error: unexpected argument '--no-auto-update' found`. The
+  failure heartbeat then called `write_service_health_http(...,
+  last_error=...)`, which does not take that keyword
+  (`error=` is a dict). The oneshot still exited 1. `requires_ib` is
+  false. Edge and `:8321/health/lite` stayed up
+  (`auth_state=authenticated`).
+- **Detection:** journal line `candidate grok update failed: error:
+  unexpected argument '--no-auto-update' found` plus
+  `grok upgrade heartbeat non-fatal: write_service_health_http() got
+  an unexpected keyword argument 'last_error'`. `systemctl show
+  radon-grok-upgrade.service -p Result,NRestarts,ExecMainStatus` →
+  `exit-code` / `0` / `1`.
+- **Discriminating check:** `grok update --help` has `--check`,
+  `--json`, `--version`, and no `--no-auto-update`. `grok update
+  --check --json` uses `currentVersion` and `latestVersion`. Python
+  Turso canary is not this exit (the process died before a ledger
+  read). `/api/service-health` 401 without the probe token is
+  anonymous. No `/home/radon/.radon-deploy-transition.json`.
+  `Result=signal` or exit 143 inside a deploy window is
+  `deploy-stop-clean-oneshot-signal`. Not `ib-gateway-grouped`.
+- **Remediation (code):** parse `currentVersion` / `latestVersion`
+  (old keys still work). Call `grok update` or `grok update --version
+  <latest>` with no `--no-auto-update`. Pass the failure string as
+  `error={"message": ...}`. Do not restart-flap; the unit is not on
+  `RERUNNABLE_ONESHOT_UNITS`. The next 07:40 UTC timer installs
+  `1.0.44` after this deploys. LKG is still absent until that promote
+  writes it.
+- **Regression:** `scripts/tests/test_grok_upgrade.py`
+  (`test_parse_update_check_grok_103_version_keys`,
+  `test_update_argv_omits_flag_grok_update_rejects`,
+  `test_pins_latest_version_and_promotes`,
+  `test_failure_passes_error_dict_not_last_error`).
+- **Code:** `scripts/grok_upgrade.py` (`parse_update_check`,
+  `install_candidate_cli`, `_record_health`).
+
 ## Grok auto-response on iPhone P1 pages
 
 Canonical: [`grok-page-responder.md`](grok-page-responder.md).
