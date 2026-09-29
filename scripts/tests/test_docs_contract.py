@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import gzip
 import json
+import shlex
 import shutil
 import sqlite3
+import sys
+import types
 import os
 import re
 import subprocess
@@ -471,6 +474,29 @@ class TestRecoveryInstructions:
         assert result.returncode != 0, "SQL errors must stop the restore drill"
         assert "Scratch restore:" not in result.stdout
 
+    def test_knowledge_documented_test_paths_exist(self):
+        text = (_ROOT / "docs/knowledge-embeddings.md").read_text()
+        paths = set(re.findall(r"scripts/tests/test_[a-z0-9_]+\.py", text))
+        assert paths
+        assert all((_ROOT / path).is_file() for path in paths), paths
+
+    def test_knowledge_coverage_command_uses_real_imports(self, monkeypatch, capsys):
+        text = (_ROOT / "docs/knowledge-embeddings.md").read_text()
+        line = next(line for line in text.splitlines() if "**Verify backfill complete:**" in line)
+        command = re.search(r"`([^`]+)`", line).group(1)
+        args = shlex.split(command)
+        program = args[args.index("-c") + 1]
+        # The only substituted module is the external DB client. Execute the
+        # documented imports and real coverage query against an offline DB.
+        with sqlite3.connect(":memory:") as db:
+            db.execute("CREATE TABLE knowledge(embedding_v2 BLOB)")
+            client = types.ModuleType("scripts.db.client")
+            client.get_db = lambda: db
+            monkeypatch.setitem(sys.modules, "scripts.db.client", client)
+            from scripts.knowledge import embed
+            monkeypatch.setattr(embed, "_coverage_cache", {"at": None, "ready": None})
+            exec(program, {})
+            assert capsys.readouterr().out.strip() == "True"
 
 
 class TestOwnership:
