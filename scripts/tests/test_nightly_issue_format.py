@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -493,7 +494,7 @@ class TestSanitizeUsesPinnedSed:
         src = HOOK.read_text(encoding="utf-8")
         start = src.index("_sanitize_issue_text() {")
         end = src.index("\nreport() {", start)
-        fns = src[start:end]
+        fns = _secret_ere_block(src) + src[start:end]
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         planted = bin_dir / "sed"
@@ -528,7 +529,7 @@ class TestSecurityBashFallbackSanitizes:
         src = HOOK.read_text(encoding="utf-8")
         start = src.index("_sanitize_issue_text() {")
         end = src.index("\nreport() {", start)
-        fns = src[start:end]
+        fns = _secret_ere_block(src) + src[start:end]
         script = tmp_path / "run.sh"
         script.write_text(
             "#!/usr/bin/env bash\nset -euo pipefail\nISSUE_SANITIZE=1\n"
@@ -600,7 +601,7 @@ class TestSecurityBashSanitizesCredentialLiterals:
         src = HOOK.read_text(encoding="utf-8")
         start = src.index("_sanitize_issue_text() {")
         end = src.index("\nreport() {", start)
-        fns = src[start:end]
+        fns = _secret_ere_block(src) + src[start:end]
         literals = _credential_literals()
         detail = "scanner tail: " + " ".join(literals.values()) + " sha 1f04011f"
         script = tmp_path / "run.sh"
@@ -622,3 +623,43 @@ class TestSecurityBashSanitizesCredentialLiterals:
         assert "[REDACTED]" in proc.stdout
         assert "1f04011f" in proc.stdout
         assert "scanner tail:" in proc.stdout
+
+
+_QUOTED_SECRETS = {
+    "json_key": ('{"PUSHOVER_TOKEN": "qz7NOTREAL000"}', "qz7NOTREAL000"),
+    "json_key_spaced": ('"db_password" : "two words NOTREAL"', "words NOTREAL"),
+    "single_quoted_value": ("SERVICE_SECRET='kept apart NOTREAL'", "apart NOTREAL"),
+    "basic_scheme": ("Authorization: Basic Zm9vOk5PVFJFQUw=", "Zm9vOk5PVFJFQUw="),
+    "token_scheme": ("AUTH_HEADER=Token qz8NOTREAL111", "qz8NOTREAL111"),
+}
+
+
+def _secret_ere_block(src: str) -> str:
+    start = src.index("# Credential assignments")
+    return src[start:src.index("_redact_secret_classes() {", start)]
+
+
+class TestSanitizeQuotedSecrets:
+    @pytest.mark.parametrize("kind", sorted(_QUOTED_SECRETS))
+    def test_quoted_key_or_value_is_redacted(self, kind: str):
+        text, secret = _QUOTED_SECRETS[kind]
+        out = nif.sanitize(f"the fixture held {text} before the fix")
+        assert secret not in out, (kind, out)
+        assert "[REDACTED]" in out
+        assert out.endswith("before the fix")
+
+    @pytest.mark.parametrize("fn", ["_sanitize_issue_text", "_redact_secret_classes"])
+    def test_bash_sanitizers_redact_quoted_secrets(self, tmp_path: Path, fn: str):
+        src = HOOK.read_text(encoding="utf-8")
+        start = src.index(f"{fn}() {{")
+        body = _secret_ere_block(src) + src[start:src.index("\n}\n", start) + 3]
+        text = " ; ".join(t for t, _ in _QUOTED_SECRETS.values())
+        call = (f"_sanitize_issue_text {shlex.quote(text)}" if fn == "_sanitize_issue_text"
+                else f"printf '%s' {shlex.quote(text)} | _redact_secret_classes")
+        script = tmp_path / "run.sh"
+        script.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + body + "\n" + call + "\n",
+                          encoding="utf-8")
+        proc = subprocess.run(["/bin/bash", str(script)], capture_output=True, text=True, timeout=30)
+        assert proc.returncode == 0, proc.stderr
+        for kind, (_, secret) in _QUOTED_SECRETS.items():
+            assert secret not in proc.stdout, (kind, proc.stdout)

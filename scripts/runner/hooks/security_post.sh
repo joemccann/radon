@@ -230,13 +230,20 @@ decide() {
 
 # --- private report ------------------------------------------------------------
 
+# Credential assignments, case-insensitive (BSD sed has no I flag): the key
+# may be quoted (JSON), the value quoted (spaces inside) or led by an auth
+# scheme word. POSIX ERE takes the longest alternative.
+_SECRET_KEY_ERE='[A-Za-z0-9_]*([Tt][Oo][Kk][Ee][Nn]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss]|[Aa][Uu][Tt][Hh]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll]|[Aa][Pp][Ii]_?[Kk][Ee][Yy]|_[Kk][Ee][Yy])[A-Za-z0-9_]*'
+_SECRET_SEP_ERE="[\"']?[[:space:]]*[=:][[:space:]]*"
+_SECRET_VALUE_ERE="(\"[^\"]*\"|'[^']*'|([Bb]asic|[Bb]earer|[Dd]igest|[Tt]oken)[[:space:]]+[^[:space:]]+|[^[:space:]]+)"
+
 _redact_secret_classes() {
   # Secret literals only. Routes, file:line and findings stay: this text
   # goes to the PRIVATE repository, not the public issue.
   /usr/bin/sed -E \
     -e 's,[Bb]earer [^[:space:]]+,Bearer [REDACTED],g' \
     -e 's#(^|[^[:alnum:]_])(sk-(ant-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|xox[abpors]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})#\1[REDACTED]#g' \
-    -e 's,([A-Za-z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|_KEY)[A-Za-z0-9_]*[[:space:]]*[=:][[:space:]]*)[^[:space:]]+,\1[REDACTED],g'
+    -e "s,(${_SECRET_KEY_ERE}${_SECRET_SEP_ERE})${_SECRET_VALUE_ERE},\\1[REDACTED],g"
 }
 
 # Best-effort: a failure leaves REPORT_URL empty and the page says so. The
@@ -294,7 +301,7 @@ _sanitize_issue_text() {
     -e 's,[A-Za-z0-9./_-]+\.(py|ts|tsx|js|mjs|cjs|sh|go|rb|java|json|yml|yaml|toml|md):[0-9]+,[REDACTED],g' \
     -e 's,[Bb]earer [^[:space:]]+,Bearer [REDACTED],g' \
     -e 's#(^|[^[:alnum:]_])(sk-(ant-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|xox[abpors]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})#\1[REDACTED]#g' \
-    -e 's,[A-Za-z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|PASS|AUTH|CREDENTIAL|API_KEY|APIKEY|_KEY)[A-Za-z0-9_]*[[:space:]]*[=:][[:space:]]*[^[:space:]]+,[REDACTED],g' \
+    -e "s,${_SECRET_KEY_ERE}${_SECRET_SEP_ERE}${_SECRET_VALUE_ERE},[REDACTED],g" \
     -e 's,[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z][A-Za-z]+,[REDACTED],g' \
     -e 's,(^|[^A-Za-z0-9])(radon)?(trader|operator)[0-9]+,\1[REDACTED],g' \
     -e 's,[Cc]heck the runner,,g' \
