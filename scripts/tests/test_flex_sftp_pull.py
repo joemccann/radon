@@ -25,6 +25,25 @@ TRADES = FIXTURES / "flex_trade_confirm_sample.xml"
 AFTER_FIRST_DELIVERY = datetime(2026, 9, 1, 8, 0, tzinfo=ZoneInfo("America/New_York"))
 
 
+@pytest.fixture
+def sftp_retry_clock(monkeypatch):
+    """Keep retry requests and elapsed budget, without sleeping on fake SSH.
+
+    Replace only the puller's clock object: other modules (and file-mtime
+    tests) keep real time. Advancing monotonic preserves the sweep budget.
+    """
+    import time
+
+    import flex_sftp_pull as pull
+
+    sleeps = []
+    monkeypatch.setattr(pull, "time", SimpleNamespace(
+        sleep=sleeps.append,
+        monotonic=lambda: time.monotonic() + sum(sleeps),
+    ))
+    return sleeps
+
+
 def _ssh_config(path: Path) -> Path:
     path.write_text(
         "\n".join(
@@ -444,14 +463,11 @@ def test_multi_file_delivery_uses_one_sftp_get_session(tmp_path, monkeypatch):
     assert len(list(inbox.glob("*.gpg"))) == 3
 
 
-def test_transient_kex_reset_retries_batch_get(tmp_path, monkeypatch):
+def test_transient_kex_reset_retries_batch_get(tmp_path, monkeypatch, sftp_retry_clock):
     """A single Connection-reset on the batch get must retry, not page. P1 2026-09-11."""
     import flex_sftp_pull as pull
 
-    import time
-
     monkeypatch.setattr(pull, "_heartbeat", lambda *a, **k: None)
-    monkeypatch.setattr(time, "sleep", lambda _s: None)
     config = _ssh_config(tmp_path / "ssh_config")
     inbox = tmp_path / "inbox"
     inbox.mkdir()
@@ -494,6 +510,7 @@ def test_transient_kex_reset_retries_batch_get(tmp_path, monkeypatch):
     )
     assert code == 0
     assert fake.gets == 2
+    assert sftp_retry_clock == [2.0]
     assert (inbox / "trades.gpg").exists()
 
 
@@ -804,7 +821,7 @@ def _run_two_statements(tmp_path, monkeypatch, *, get_fail, newest_outcome):
     return code, heartbeats, seen
 
 
-def test_historical_sftp_rst_after_newest_ingest_does_not_fail_the_oneshot(tmp_path, monkeypatch):
+def test_historical_sftp_rst_after_newest_ingest_does_not_fail_the_oneshot(tmp_path, monkeypatch, sftp_retry_clock):
     newest, older = _two_statement_names()
     code, heartbeats, seen = _run_two_statements(
         tmp_path,
@@ -812,12 +829,13 @@ def test_historical_sftp_rst_after_newest_ingest_does_not_fail_the_oneshot(tmp_p
         get_fail={older: _RST_STDERR},
         newest_outcome="applied",
     )
+    assert sftp_retry_clock == [2.0, 5.0]
     assert seen == [newest.replace(".pgp", "")], seen
     assert code == 0, heartbeats
     assert heartbeats[-1][0] == "ok"
 
 
-def test_historical_sftp_rst_after_duplicate_newest_does_not_fail_the_oneshot(tmp_path, monkeypatch):
+def test_historical_sftp_rst_after_duplicate_newest_does_not_fail_the_oneshot(tmp_path, monkeypatch, sftp_retry_clock):
     """08:30 retry: today's file is already applied; IBKR still RSTs the tail."""
     newest, older = _two_statement_names()
     code, heartbeats, seen = _run_two_statements(
@@ -826,12 +844,13 @@ def test_historical_sftp_rst_after_duplicate_newest_does_not_fail_the_oneshot(tm
         get_fail={older: _RST_STDERR},
         newest_outcome="duplicate",
     )
+    assert sftp_retry_clock == [2.0, 5.0]
     assert seen == [newest.replace(".pgp", "")], seen
     assert code == 0, heartbeats
     assert heartbeats[-1][0] == "ok"
 
 
-def test_sftp_rst_on_the_newest_statement_still_fails_the_oneshot(tmp_path, monkeypatch):
+def test_sftp_rst_on_the_newest_statement_still_fails_the_oneshot(tmp_path, monkeypatch, sftp_retry_clock):
     newest, older = _two_statement_names()
     code, heartbeats, seen = _run_two_statements(
         tmp_path,
@@ -839,6 +858,7 @@ def test_sftp_rst_on_the_newest_statement_still_fails_the_oneshot(tmp_path, monk
         get_fail={newest: _RST_STDERR},
         newest_outcome="applied",
     )
+    assert sftp_retry_clock == [2.0, 5.0]
     assert newest.replace(".pgp", "") not in seen
     assert code == 1, heartbeats
     assert heartbeats[-1][0] == "error"
@@ -849,7 +869,7 @@ def test_sftp_rst_on_the_newest_statement_still_fails_the_oneshot(tmp_path, monk
     "U1234567.Equity_Summary_in_Base.20260915.20260915.xml.pgp",
     "U0000001.Trades.20260915.20260915.xml.pgp",
 ])
-def test_current_query_cannot_hide_another_query_reset(tmp_path, monkeypatch, outcome, missing):
+def test_current_query_cannot_hide_another_query_reset(tmp_path, monkeypatch, outcome, missing, sftp_retry_clock):
     """REL-262: every query/account needs its own successful delivery."""
     import flex_sftp_pull as pull
 
@@ -869,3 +889,40 @@ def test_current_query_cannot_hide_another_query_reset(tmp_path, monkeypatch, ou
         assert code == 1
         assert heartbeats[-1][0] == "error"
         assert pull._delivery_key(missing) in str(heartbeats[-1][1])
+    assert sftp_retry_clock == [2.0, 5.0] * 2
+
+
+@pytest.mark.parametrize("failure", ["reset", "timeout", "host-key"])
+def test_batch_retry_policy_and_elapsed_budget(tmp_path, sftp_retry_clock, failure):
+    """Fake SSH must still exercise every production retry and its budget."""
+    import time
+
+    import flex_sftp_pull as pull
+
+    assert pull.SFTP_GET_ATTEMPTS == 3
+    assert pull.SFTP_RETRY_SLEEP_SECS == (2.0, 5.0, 10.0)
+    assert pull.SFTP_TIMEOUT_SECS == 90
+    assert pull.time is not time
+    calls = []
+
+    def fail(args, **kwargs):
+        calls.append((args, kwargs))
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+        return SimpleNamespace(
+            returncode=255, stdout="",
+            stderr="Host key verification failed." if failure == "host-key" else _RST_STDERR,
+        )
+
+    started = pull.time.monotonic()
+    config = _ssh_config(tmp_path / "ssh_config")
+    error = subprocess.TimeoutExpired if failure == "timeout" else pull.FlexSftpError
+    with pytest.raises(error):
+        pull.pull_gpg_batch(
+            ["trades.gpg"], tmp_path / "inbox", config=config, runner=fail,
+        )
+    expected = [] if failure == "host-key" else [2.0, 5.0]
+    assert sftp_retry_clock == expected
+    assert len(calls) == (1 if failure == "host-key" else 3)
+    assert all(kwargs["timeout"] == 90 for _, kwargs in calls)
+    assert pull.time.monotonic() - started >= sum(expected)
