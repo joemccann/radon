@@ -721,11 +721,21 @@ class IBClient:
         if sec_type == "BAG":
             violation = check_quantity_limit(getattr(order, "totalQuantity", 0))
         else:
+            # REL-166 / R-467: absent/zero prices must not turn the dollar
+            # guard into a quantity-only check. STP orders have a trigger,
+            # not a limit; preserve protective bracket stops and bound them.
+            price_field = "auxPrice" if getattr(order, "orderType", "LMT") == "STP" else "lmtPrice"
+            try:
+                reference_price = float(getattr(order, price_field, None))
+            except (TypeError, ValueError, OverflowError):
+                raise IBOrderError("Order requires a positive finite reference price") from None
+            if not math.isfinite(reference_price) or reference_price <= 0:
+                raise IBOrderError("Order requires a positive finite reference price")
             violation = check_order_limits({
                 "type": "stock" if sec_type == "STK" else "option",
                 "quantity": getattr(order, "totalQuantity", 0),
                 "symbol": getattr(contract, "symbol", ""),
-                "limitPrice": getattr(order, "lmtPrice", None),
+                "limitPrice": reference_price,
             })
         if violation:
             raise IBOrderError(violation["message"])
@@ -860,6 +870,16 @@ class IBClient:
         if sec_type == "BAG":
             violation = check_quantity_limit(getattr(order, "totalQuantity", 0))
         else:
+            # REL-166 / R-467: absent/zero prices must not turn the dollar
+            # guard into a quantity-only check. STP orders have a trigger,
+            # not a limit; preserve protective bracket stops and bound them.
+            price_field = "auxPrice" if getattr(order, "orderType", "LMT") == "STP" else "lmtPrice"
+            try:
+                reference_price = float(getattr(order, price_field, None))
+            except (TypeError, ValueError, OverflowError):
+                raise IBOrderError("Order requires a positive finite reference price") from None
+            if not math.isfinite(reference_price) or reference_price <= 0:
+                raise IBOrderError("Order requires a positive finite reference price")
             violation = check_order_limits({
                 "type": "stock" if sec_type == "STK" else "option",
                 "quantity": getattr(order, "totalQuantity", 0),
