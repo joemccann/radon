@@ -1,0 +1,114 @@
+name: Diag PDF feed counts
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/diag-pdf-feed.yml'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  counts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Query Turso research_outcomes
+        env:
+          TURSO_DB_URL: ${{ secrets.TURSO_DB_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${TURSO_DB_URL:-}" && test -n "${TURSO_AUTH_TOKEN:-}"
+          python3 <<'PY'
+          import json, os, urllib.request
+          from datetime import datetime, timedelta
+          from zoneinfo import ZoneInfo
+
+          url = os.environ["TURSO_DB_URL"].replace("libsql://", "https://").replace("wss://", "https://")
+          token = os.environ["TURSO_AUTH_TOKEN"]
+
+          def q(sql):
+              body = json.dumps({"requests":[{"type":"execute","stmt":{"sql":sql}},{"type":"close"}]}).encode()
+              req = urllib.request.Request(
+                  url.rstrip("/") + "/v2/pipeline",
+                  data=body,
+                  method="POST",
+                  headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+              )
+              with urllib.request.urlopen(req, timeout=90) as resp:
+                  data = json.load(resp)
+              res = data["results"][0]
+              if res.get("type") != "ok":
+                  raise SystemExit(json.dumps(res)[:1200])
+              cols = [c["name"] for c in res["response"]["result"]["cols"]]
+              rows = []
+              for r in res["response"]["result"]["rows"]:
+                  row = []
+                  for c in r:
+                      row.append(c.get("value") if isinstance(c, dict) else c)
+                  rows.append(row)
+              return cols, rows
+
+          PT = ZoneInfo("America/Los_Angeles")
+          D = "2026-09-28"
+          start = datetime.fromisoformat(D + "T00:00:00").replace(tzinfo=PT)
+          end = start + timedelta(days=1)
+          start_utc = start.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+          end_utc = end.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+          out = {"D": D, "start_utc": start_utc, "end_utc": end_utc}
+
+          _cols, rows = q(
+              "SELECT outcome, COUNT(*) AS docs, COALESCE(SUM(posts),0) AS posts "
+              "FROM research_outcomes "
+              "WHERE updated_at >= '%s' AND updated_at < '%s' "
+              "GROUP BY outcome ORDER BY outcome" % (start_utc, end_utc)
+          )
+          out["tot"] = [
+              {"outcome": r[0], "docs": int(r[1] or 0), "posts": int(float(r[2] or 0))} for r in rows
+          ]
+
+          _cols, rows = q(
+              "SELECT outcome, COUNT(*) AS docs, COALESCE(SUM(posts),0) AS posts, folder_date "
+              "FROM research_outcomes "
+              "WHERE updated_at >= '%s' AND updated_at < '%s' "
+              "GROUP BY outcome, folder_date ORDER BY folder_date, outcome" % (start_utc, end_utc)
+          )
+          out["agg"] = [
+              {
+                  "outcome": r[0],
+                  "docs": int(r[1] or 0),
+                  "posts": int(float(r[2] or 0)),
+                  "folder_date": r[3],
+              }
+              for r in rows
+          ]
+
+          _cols, rows = q(
+              "SELECT outcome, folder_date, file_name, publisher, series, COALESCE(posts,0) AS posts, "
+              "reason_codes, work_key, updated_at, document_date "
+              "FROM research_outcomes "
+              "WHERE updated_at >= '%s' AND updated_at < '%s' "
+              "ORDER BY outcome, updated_at DESC" % (start_utc, end_utc)
+          )
+          out["det"] = [
+              {
+                  "outcome": r[0],
+                  "folder_date": r[1],
+                  "file_name": r[2],
+                  "publisher": r[3],
+                  "series": r[4],
+                  "posts": int(float(r[5] or 0)),
+                  "reason_codes": r[6],
+                  "work_key": r[7],
+                  "updated_at": r[8],
+                  "document_date": r[9],
+              }
+              for r in rows
+          ]
+
+          open("diag-pdf-feed.json", "w").write(json.dumps(out, indent=2))
+          print(json.dumps({"D": out["D"], "start_utc": start_utc, "end_utc": end_utc, "tot": out["tot"], "agg": out["agg"], "det_n": len(out["det"])}, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diag-pdf-feed
+          path: diag-pdf-feed.json
