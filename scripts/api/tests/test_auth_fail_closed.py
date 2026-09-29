@@ -55,6 +55,7 @@ class TestAuthFailsClosed:
         """The ONLY way to disable auth is the loud, explicit dev flag."""
         monkeypatch.delenv("CLERK_JWKS_URL", raising=False)
         monkeypatch.setenv("RADON_AUTH_DISABLED", "1")
+        monkeypatch.setenv("RADON_MODE", "local")
         resp = untrusted_client.get(_PROTECTED_PATH)
         # Reaches the handler (not 503). Handler may 200/4xx/5xx on its own merits;
         # the point is it was NOT stopped by the perimeter.
@@ -79,3 +80,29 @@ class TestAuthFailsClosed:
         monkeypatch.delenv("CLERK_JWKS_URL", raising=False)
         resp = untrusted_client.get("/health")
         assert resp.status_code == 200
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["hetzner", " HETZNER "])
+async def test_rel021b_dev_auth_switch_cannot_open_remote_order_route(monkeypatch, mode):
+    """R-037: exercise middleware without ever executing an order handler."""
+    from starlette.requests import Request
+    from starlette.responses import JSONResponse
+    from scripts.api import server
+
+    monkeypatch.delenv("CLERK_JWKS_URL", raising=False)
+    monkeypatch.setenv("RADON_AUTH_DISABLED", "1")
+    monkeypatch.setenv("RADON_MODE", mode)
+    monkeypatch.setattr(server, "is_trusted_local_request", lambda request: False)
+    monkeypatch.setattr(server, "verify_api_key", lambda request: None)
+    called = []
+
+    async def order_tripwire(request):
+        called.append(request.url.path)
+        return JSONResponse({"tripwire": True}, status_code=202)
+
+    request = Request({"type": "http", "method": "POST", "path": "/orders/place",
+                       "headers": [], "scheme": "https", "server": ("example.test", 443),
+                       "client": ("203.0.113.1", 1234), "query_string": b""})
+    response = await server.auth_middleware(request, order_tripwire)
+    assert response.status_code == 503
+    assert called == []

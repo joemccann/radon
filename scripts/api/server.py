@@ -964,7 +964,10 @@ async def auth_middleware(request: Request, call_next):
     # only way to disable auth is the explicit, loud, dev-only opt-in below —
     # never set RADON_AUTH_DISABLED on a public deployment.
     if not os.environ.get("CLERK_JWKS_URL"):
-        if os.environ.get("RADON_AUTH_DISABLED") == "1":
+        # REL-021b / R-037: a development bypass must not open a public
+        # Hetzner deployment when its JWKS configuration is missing.
+        mode = os.environ.get("RADON_MODE", "local").strip().lower()
+        if os.environ.get("RADON_AUTH_DISABLED") == "1" and mode == "local":
             return await call_next(request)
         return JSONResponse(
             status_code=503,
