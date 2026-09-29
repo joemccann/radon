@@ -85,7 +85,11 @@ _ROUTE_RE = re.compile(
     r"(?<![\w.])(/(?!Users\b|home\b|tmp\b|private\b|var\b|opt\b)"
     r"[a-z][\w.-]*(?:/[\w.-]+)+)"
 )
-_URL_RE = re.compile(r"https?://(?!(?:www\.)?claude\.ai(?:/|\s|$))\S+", re.I)
+_URL_RE = re.compile(r"https?://\S+", re.I)
+# The quota ladder's one operator URL, kept only when nothing follows it.
+_USAGE_KEEP_RE = re.compile(
+    r"(?:https?://)?claude\.ai/settings/usage(?=[\s).,;:!'\"\]>]|$)", re.I
+)
 _FILE_LINE_RE = re.compile(
     r"\b[\w./-]+\.(?:py|ts|tsx|js|mjs|cjs|sh|go|rb|java|json|yml|yaml|toml|md):\d+\b"
 )
@@ -169,7 +173,7 @@ def sanitize(text: str) -> str:
     if not text:
         return text
     # Preserve the one operator URL the quota ladder names, then restore.
-    text = text.replace(_USAGE_KEEP, "\x00USAGE\x00")
+    text = _USAGE_KEEP_RE.sub("\x00USAGE\x00", text)
     text = _URL_RE.sub(REDACTED, text)
     text = _ROUTE_RE.sub(REDACTED, text)
     text = _FILE_LINE_RE.sub(REDACTED, text)

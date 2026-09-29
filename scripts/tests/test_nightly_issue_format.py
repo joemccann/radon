@@ -663,3 +663,20 @@ class TestSanitizeQuotedSecrets:
         assert proc.returncode == 0, proc.stderr
         for kind, (_, secret) in _QUOTED_SECRETS.items():
             assert secret not in proc.stdout, (kind, proc.stdout)
+
+
+class TestSanitizeClaudeUrls:
+    @pytest.mark.parametrize("url", [
+        "https://claude.ai/chat/0000notreal", "https://www.claude.ai/share/0000notreal",
+        "https://claude.ai/settings/usage?code=0000notreal", "https://claude.ai/x?code=0000notreal",
+    ])
+    def test_only_the_usage_page_survives(self, url: str):
+        out = nif.sanitize(f"see {url} for details")
+        assert "0000notreal" not in out, out
+        assert "[REDACTED]" in out
+
+    @pytest.mark.parametrize("text", [
+        "top up at https://claude.ai/settings/usage.", "top up at claude.ai/settings/usage",
+    ])
+    def test_usage_page_is_kept(self, text: str):
+        assert "claude.ai/settings/usage" in nif.sanitize(text)
