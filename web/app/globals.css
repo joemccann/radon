@@ -8344,6 +8344,12 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
   min-height: 0;
   overflow: auto;
 }
+/* The deeper book scrolls inside the montage; keep the column heads in view. */
+.book-region .book-window .book-montage .book-colhead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
 
 /* ── act column: ticket (top) + position-or-FLAT (bottom), both live ──
    The region owns the single internal divider between ticket and position; the
@@ -10172,7 +10178,7 @@ tr {
 
 /* motion */
 @keyframes book-row-reveal { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-.book-reveal { animation: book-row-reveal 360ms cubic-bezier(0.22, 0.61, 0.36, 1) both; animation-delay: calc(var(--i, 0) * 20ms); }
+.book-reveal { animation: book-row-reveal 360ms cubic-bezier(0.22, 0.61, 0.36, 1) both; animation-delay: calc(min(var(--i, 0), 12) * 20ms); }
 .book-row:hover, .book-lrow:hover, .book-trow:hover { background-color: var(--bg-panel-raised); box-shadow: inset 0 0 0 1px var(--book-hairline); }
 @media (prefers-reduced-motion: reduce) {
   .book-body-grid, .book-tape, .book-montage, .book-toggle-thumb, .book-reveal {

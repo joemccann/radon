@@ -164,17 +164,20 @@ function buildDepth(subject: string, quote: PriceData, now: Date): DepthBook {
   const ask = quote.ask ?? quote.last ?? 0;
   const tick = kind === "option" ? 0.01 : instrumentTick(subject, quote.last ?? 0);
   const exchanges = ["CBOE", "PHLX", "ISE", "ARCA", "EDGX"];
-  const bidLevels = Array.from({ length: 5 }, (_, index) => ({
+  // Stocks mirror the live 40-row SMART depth request so the sample montage
+  // fills the panel like the real one; options and futures keep 5 levels.
+  const levels = kind === "stock" ? 40 : 5;
+  const bidLevels = Array.from({ length: levels }, (_, index) => ({
     price: roundDemoPrice(Math.max(tick, bid - index * tick)),
     size: 20 + (demoSymbolHash(`${subject}:bid:${index}`) % 180),
     marketMaker: kind === "stock" ? `D${index + 1}` : null,
-    exchange: kind === "future" ? null : exchanges[index],
+    exchange: kind === "future" ? null : exchanges[index % exchanges.length],
     ...(kind === "option" ? { nbbo: index === 0 } : {}),
   }));
-  const askLevels = Array.from({ length: 5 }, (_, index) => ({
+  const askLevels = Array.from({ length: levels }, (_, index) => ({
     price: roundDemoPrice(ask + index * tick),
     size: 20 + (demoSymbolHash(`${subject}:ask:${index}`) % 180),
-    marketMaker: kind === "stock" ? `D${index + 6}` : null,
+    marketMaker: kind === "stock" ? `D${index + levels + 1}` : null,
     exchange: kind === "future" ? null : exchanges[(index + 2) % exchanges.length],
     ...(kind === "option" ? { nbbo: index === 0 } : {}),
   }));
