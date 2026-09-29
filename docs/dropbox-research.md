@@ -48,7 +48,7 @@ Provider references: [Dropbox change detection](https://developers.dropbox.com/d
 
 ### Model ladder (shared HTTP)
 
-New multimodal or text-JSON model callers must use `scripts/clients/model_ladder.py` (import `complete_text_json`, `complete_multimodal_json`, or `extract_via_vision`). Text-JSON and CTA vision HTTP responses stream through a 2,000,000-byte cap and close before parsing on Anthropic, Grok, Codex, NVIDIA, and Cerebras. Gemini's Antigravity CLI refuses images, so vision skips that rung, and its text stdout is not under this HTTP cap. Do not add a third cascade. `scripts/clients/vision_cascade.py` is a thin re-export for CTA/MenthorQ. The newsfeed text tagger reaches the same helper through `scripts/clients/model_ladder_cli.py`. Weekend bash CLI ladders (`RADON_WEEKEND_MODEL_LADDER` in `scripts/*_weekend.sh`) remain separate subprocess rungs; see `scripts/tests/test_weekend_model_ladder.py`.
+New multimodal or text-JSON model callers must use `scripts/clients/model_ladder.py` (import `complete_text_json`, `complete_multimodal_json`, or `extract_via_vision`). Text-JSON and CTA vision HTTP responses stream through a 2,000,000-byte cap and close before parsing on Anthropic, Grok, Codex, NVIDIA, and Cerebras. Gemini's Antigravity CLI refuses images, so vision skips that rung, and its text stdout is not under this HTTP cap. Do not add a third cascade. `scripts/clients/vision_cascade.py` is a thin re-export for CTA/MenthorQ. The newsfeed text tagger reaches the same helper through `scripts/clients/model_ladder_cli.py`. Nightly CLI sessions are owned separately by the [agent runner](runner.md).
 
 #### Auth matrix (research / CTA / knowledge / newsfeed)
 

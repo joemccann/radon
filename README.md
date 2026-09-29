@@ -152,18 +152,13 @@ Index: [`docs/README.md`](docs/README.md). External services: [`docs/external-se
 
 ## Data source priority
 
-Strict order for any price / flow / chain lookup. Full inventory: [`docs/external-services.md`](docs/external-services.md).
-
-1. **Interactive Brokers** for real-time quotes, options chains, and portfolio state
-2. **Unusual Whales** for dark pool flow, sweeps, options flow, and analyst data
-3. **Cboe official feeds** for COR1M historical fallback
-4. **Yahoo Finance** as a strict last resort
-
-Never skip to Yahoo or web scrape without trying IB then Unusual Whales first. Research surfaces (Exa) and news (themarketear, MenthorQ) are orthogonal. They do not substitute for missing price data.
+Follow the source priority and subsystem requirements in
+[`docs/external-services.md`](docs/external-services.md). Research and news
+sources do not substitute for missing market data.
 
 ## Deployment
 
-`git push origin main` is the deploy. After the CI gates pass, GitHub Actions extracts `cloud/` from the exact tested SHA into an immutable VPS runner and runs its deploy contract.
+Merging a reviewed pull request into `main` triggers the deploy. After the CI gates pass, GitHub Actions extracts `cloud/` from the exact tested SHA into an immutable VPS runner and runs its deploy contract.
 
 Canonical infra: [`cloud/`](cloud/). Recovery: [`cloud/CLAUDE.md`](cloud/CLAUDE.md) and [`docs/monorepo-cloud-migration.md`](docs/monorepo-cloud-migration.md). Confirm: `gh run list --workflow=ci.yml --limit 1`.
 

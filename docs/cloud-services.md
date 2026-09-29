@@ -474,22 +474,51 @@ rolling back the application. A fresh `db-backup` heartbeat still requires the
 real dump and off-box work to finish; restarting the unit does not mark it
 healthy.
 
+A dump that reconnects after a lost Hrana stream resumes after the last
+emitted rowid in a **new read transaction** (`dump_database` in
+[`db_backup.py`](../cloud/scripts/db_backup.py)). It avoids replaying an
+emitted page, but it is not a single point-in-time snapshot across that
+reconnection. A successful dump or scratch integrity check does not prove
+cross-table consistency. Review the backup journal for `transient turso
+stream error` and reconcile trade identities and dependent rows before
+choosing it for recovery. Use the platform recovery path below when a
+specific transaction boundary is required, after checking its availability.
+
 ### Restore runbook
+
+**Symptom and prerequisites:** use this procedure for lost/corrupt database
+state or to inspect a candidate backup. Retain the original dump and incident
+logs, identify the last known-good data boundary, and use a host with gzip,
+sqlite3, sufficient private scratch space, and authorized recovery access.
+Scratch diagnosis is local only. A URL swap affects every reader and writer
+using that database, including schedulers and the API's subprocesses.
+Before activation, coordinate a maintenance window, quiesce those writers,
+and preserve the old configuration and any recoverable post-backup rows.
+Do not restart IB Gateway as part of database recovery.
 
 **1. Scratch restore (verify a dump / inspect old data)** — plain sqlite3,
 no Turso involved:
 
 ```bash
-gunzip -c data/db_backups/radon-<stamp>.sql.gz | sqlite3 /tmp/radon_restore.db
-sqlite3 /tmp/radon_restore.db "SELECT COUNT(*) FROM journal; SELECT COUNT(*) FROM service_health;"
+(
+  set -eu
+  umask 077
+  dump="data/db_backups/radon-<stamp>.sql.gz"
+  restore_dir="$(mktemp -d "${TMPDIR:-/tmp}/radon-restore.XXXXXX")"
+  gzip -t "$dump"
+  gzip -dc "$dump" > "$restore_dir/dump.sql"
+  sqlite3 -bail "$restore_dir/restore.db" < "$restore_dir/dump.sql"
+  sqlite3 -bail "$restore_dir/restore.db" "PRAGMA integrity_check; SELECT COUNT(*) FROM journal; SELECT COUNT(*) FROM service_health;"
+  printf 'Scratch restore: %s/restore.db\n' "$restore_dir"
+)
 ```
 
-Run this drill after any change to `db_backup.py` and compare counts
-against prod (`PYTHONPATH` + `get_db()` per Health & observability above).
-Last drill 2026-06-12: 37 tables / 80,171 rows round-tripped exactly
-(`PRAGMA integrity_check` ok); `journal`/`executed_orders` matched prod,
-remaining deltas were post-dump live drift only (`service_health` +1 =
-host-metrics first heartbeat, `posts` +1, `portfolio_snapshots` +58).
+Run the scratch drill after changes to the backup format.
+Every invocation allocates a fresh private directory. Stop on a gzip or SQL
+error, an integrity result other than `ok`, missing expected tables, or
+unexplained differences in journal identities, amounts, or related records.
+Row counts alone are insufficient. Keep the printed scratch path for the
+comparison; do not import a second dump over an existing scratch database.
 
 **2. Full restore to a NEW Turso DB + URL swap** (DB lost/corrupted):
 
@@ -501,10 +530,33 @@ turso db tokens create radon-restore-<date>
 turso db show radon-restore-<date> --url
 ```
 
-Then swap `TURSO_DB_URL` + `TURSO_AUTH_TOKEN` in ALL THREE env files —
-laptop root `.env`, laptop `web/.env`, VPS `/home/radon/radon-cloud/.env` —
-and restart the stack (`ssh root@ib-gateway radon restart`; mind the 2FA
-push-lock rules). Do NOT repoint by editing the old DB in place.
+Validate the new database before repointing any process. The production
+runtime reads `/etc/radon/env`; follow the [environment
+contract](monorepo-cloud-migration.md#production-env-contract-after-cutover)
+for its permissions and compatibility path. Update the paired
+`TURSO_DB_URL` and `TURSO_AUTH_TOKEN` in the actual configuration of every
+participating host and process, including laptop root `.env` and `web/.env`
+when used. Resolve any stored Turso values under the [encrypted credential
+store contract](operations.md#encrypted-credential-store-profile-credentials-tab)
+before restarting: stored values override the API environment, and the
+Credentials tab refuses a different database host. Never print tokens or
+assume that editing the compatibility file switches all consumers.
+
+Resume the app through the [deployment and recovery
+contract](../cloud/CLAUDE.md#deployment-contract), retaining its exact-SHA
+and health gates. Verify the restored schema, journal reconciliation,
+effective database identity of each consumer, application health, and a
+fresh successful writer heartbeat before ending maintenance. Do not
+repoint by editing the old database in place.
+
+**Stop, rollback, escalation:** stop if the target identity, schema, writer
+quiescence, or reconciliation cannot be proved. Before writes resume,
+rollback means restoring the saved URL/token configuration and credential
+store selection, then repeating the app health checks. After writes resume,
+preserve both databases and reconcile new activity before any reversal;
+blindly swapping back can lose trades. Escalate unresolved data differences
+to the operator through the [incident runbook](incident-runbook.md), keeping
+writers quiesced and secrets out of logs and reports.
 
 **3. Partial-table surgery** (bad rows written to one table — the
 2026-05-14 MagicMock incident wrote garbage contracts to the prod
@@ -512,13 +564,13 @@ push-lock rules). Do NOT repoint by editing the old DB in place.
 
 ```bash
 # Restore the last-good dump into a scratch DB (step 1), then diff:
-sqlite3 /tmp/radon_restore.db "SELECT ib_exec_id FROM journal" | sort > /tmp/good_ids
+sqlite3 -readonly "<scratch-path>/restore.db" "SELECT ib_exec_id FROM journal"
 # Delete only the poisoned rows from prod via get_db(), keyed on ib_exec_id
 # (or INSERT the good rows back). NEVER DROP/replace the prod table wholesale —
-# writers are live against it.
+# retain unrelated rows and quiesce affected writers before applying repairs.
 ```
 
-**4. Platform PITR (Turso Point-in-Time Recovery)** — **verified 2026-07-13**
+**4. Platform PITR (Turso Point-in-Time Recovery)**
 
 ```bash
 turso auth login          # browser OAuth once
@@ -527,24 +579,9 @@ turso db list             # radon / radon-demo
 turso db show radon
 ```
 
-**Recorded org (personal / slug `joemccann`):**
-
-| Field | Value |
-|---|---|
-| Plan | **Pro** (overages enabled) |
-| PITR window | **90 days** ([pricing](https://turso.tech/pricing)) |
-| Prod DB | `radon` → `libsql://radon-joemccann.aws-us-west-2.turso.io` |
-| Size (2026-07-13) | ~670 MB; group `default` Healthy; delete protection **on** |
-| Storage quota | 1.7 GB / 50 GB |
-
-Plan matrix (for reference if the org ever changes plan):
-
-| Plan | PITR window |
-|---|---|
-| Free | 1 day |
-| Developer | 10 days |
-| Scaler | 30 days |
-| Pro | 90 days |
+Verify the current account's recovery entitlement and retained timestamps
+before selecting this path. Historical plan names, quotas and storage sizes
+are not recovery evidence. Stop if the requested timestamp is unavailable.
 
 Restore creates a **new** database (does not rewrite live in place):
 
@@ -558,16 +595,10 @@ turso db show radon-pitr-$(date +%Y%m%d) --url
 
 Then inspect read-only or swap `TURSO_DB_URL` / `TURSO_AUTH_TOKEN` like full-restore step 2. Docs: [PITR](https://docs.turso.tech/features/point-in-time-recovery).
 
-**Radon RPO (defense in depth):**
-
-| Layer | RPO (worst case) | Covers |
-|---|---|---|
-| Turso platform PITR | **90 days** (Pro) | Cloud DB to a commit timestamp |
-| Nightly SQL dump + laptop pull | ~24h (+ pull lag) | Full logical DB if Turso account is gone |
-| B2 portfolio cold-archive | Continuous for pruned months | `portfolio_snapshots` history |
-| B2 media backup | Nightly | `media.radon.run` tree |
-
-Re-check with `turso plan show` after any plan change. Nightly dumps remain mandatory.
+The recoverable boundary is the timestamp and content actually verified in
+the selected restore, not the length of the platform's retention window.
+Retain logical dumps and off-box copies even when platform recovery is
+available; portfolio and media archives cover only their respective data.
 
 ## Portfolio archive + snapshot retention (R1 / R2)
 

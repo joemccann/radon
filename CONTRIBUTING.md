@@ -8,7 +8,7 @@ The canonical developer runbook is `CLAUDE.md`. Read it before making changes. F
 
 ## Workflow
 
-- All work commits to `main`.
+- Commit on a task branch and open a pull request against `main`. Never push directly to `main`. Follow the repository review requirements and verify all applicable checks on the latest PR head before the operator merges.
 - Red/green TDD is required: write a failing test first, make it pass, then commit.
   - Web: Vitest.
   - Python: pytest.
