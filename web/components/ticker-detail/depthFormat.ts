@@ -9,6 +9,16 @@ export function fmtDepthPrice(price: number): string {
   return Number.isInteger(price * 100) ? price.toFixed(2) : price.toFixed(4);
 }
 
+/**
+ * Characters to reserve for a live `fmtDepthPrice` value: the widest string its
+ * magnitude can print (4 decimals at >= 10), so a 2- and a 4-decimal tick of
+ * the same price occupy the same width and the head does not reflow.
+ */
+export function depthPriceCh(price: number): number {
+  const intDigits = String(Math.trunc(Math.abs(price))).length;
+  return (price < 0 ? 1 : 0) + intDigits + 1 + (price < 10 ? 2 : 4);
+}
+
 /** Bid/ask spread to two decimals. Returns "---" when either side is missing. */
 export function fmtSpread(bid: number | null, ask: number | null): string {
   if (bid == null || ask == null) return "---";
