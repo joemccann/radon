@@ -26,6 +26,18 @@ The `knowledge` table carries two vector columns:
 - **Disable:** `RADON_KB_EMBED_DISABLED=1` turns off all embeddings; ingest writes FTS-only rows (`embedding` and `embedding_v2` both NULL).
 - **Transient write retries:** source and prepared-write retries wait `_retry_delay(attempt)` in `scripts/knowledge/ingest.py`: 12s doubling to a 60s cap, plus up to 25% jitter. Turso reaps an abandoned idle transaction after 10s (up to 300s if it is still running), so a shorter wait queues the retry behind the orphan's writer lock. Replay is safe because upserts are idempotent on `content_hash`.
 
+## Bounded HTTP persistence
+
+`scripts/knowledge/http_db.py` provides a schema-independent Hrana connection.
+It supports both the `scripts/` import path and package-mode imports. Knowledge
+ingestion and Liquid Compute observation replacement share its conditional
+transaction transport (REL-257): BEGIN, dependent writes, COMMIT or ROLLBACK,
+and stream close travel in one bounded request. A lost receipt raises; callers
+must prove replay idempotency rather than infer that no commit happened. Liquid
+Compute deletes and reinserts each observation identity within that transaction,
+so a failed insert preserves the prior batch. The connection itself creates no
+knowledge-specific schema.
+
 ## Backfill
 
 Migration 0087 added `embedding_v2` and `idx_knowledge_embedding_v2` while every value was still NULL. That DiskANN index matched exact-scan recall (0.96 hit@5, 0.99 recall vs exact on 11,718 rows / 24 eval_golden questions) and cost about 5.0 GB, 4.5-33s per row insert, and a CREATE that cannot finish inside Turso's one-hour statement limit. Exact scan was about 1s p50 and 1.8s p95, with no index storage and about 17ms per row write. Migration 0089 drops the index. Do not edit 0087.

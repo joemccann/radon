@@ -2,7 +2,7 @@
 
 One loop run is what the operator would do by hand: open an agent CLI in a fresh clone of `main`, paste the loop's prompt, walk away. `scripts/runner/run_loop.sh <loop>` does exactly that:
 
-1. Take the loop's lock (a live run makes the new fire page `skipped` and exit 0; a lock whose pid is gone or now belongs to a different process is reclaimed).
+1. Take the loop's lock (a live run makes the new fire page `skipped` and exit 0; a proven dead or reused pid is reclaimed by one contender). Missing identity metadata or an unreadable process fingerprint refuses with exit 75 and preserves the clone (REL-291 / R-710).
 2. Delete the previous clone and `git clone` `main` again, so nothing an agent left behind (files, `.git` hooks, config) survives to the next night.
 3. Prepend a header (date, branch `<BRANCH_PREFIX>/<date>`, time budget) to `.claude/runner-prompts/<loop>.md` from that clone.
 4. Run the first agent in `AGENTS` under `timeout`. The next agent runs only if one exits non-zero; a timeout ends the night. Anything the agent left running is killed with its process group.
@@ -312,6 +312,8 @@ It passes when the log starts with `starting grok`, a draft PR on `documentation
 | Re-sign a CLI | the bot shell, then the sign-in command from step 4 |
 
 ## Troubleshooting
+
+An uncertain lock requires operator inspection of its recorded PID and process start time before removing it. Do not remove a live owner's lock or clone. A crashed stale-lock reclaimer can leave a `reaping` directory; verify that no run owns the workspace before clearing the orphan. The exit trap removes only the current runner's own lock. Install this behavior from the reviewed, merged checkout with `sudo scripts/runner/install.sh reliability` after the active run exits; changing source alone does not update the root-owned installed runner.
 
 | Symptom | Cause | Fix |
 |---|---|---|

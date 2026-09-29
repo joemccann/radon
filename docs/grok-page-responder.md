@@ -200,13 +200,16 @@ responder against a live promotion.
 ### Daily upgrade timer (enabled)
 
 `radon-grok-upgrade.{service,timer}` is installed and enabled. Daily
-07:40 UTC it runs `scripts/grok_upgrade.py`: `grok update` into a
-candidate under `~/.grok/downloads` (scratch `GROK_HOME`), resolves the
-newest default model, and smokes a canned dry-run that must return
-`RESULT:` plus a Part 1 validator-passing body.
+07:40 UTC it runs `scripts/grok_upgrade.py`: copy the resolved CLI into a
+unique candidate directory under the configured `--scratch` path
+(`data/cache/grok_upgrade` in the responder checkout), then run that private
+copy's updater with isolated `HOME` and `GROK_HOME`. Probe its version before
+smoking a canned dry-run that must return `RESULT:` plus a Part 1
+validator-passing body. The live executable is never the updater target
+(REL-292 / R-711).
 
-- Pass: promote immediately (switch the live symlink), write LKG. No PR.
-- Fail: stay on last-known-good and alert via Pushover / watchdog.
+- Pass: prepare replacement links, atomically switch the canonical live symlink, and write LKG with the immutable candidate path. Keep the promoted directory; a later attempt gets a new directory. No PR.
+- Fail: preserve the live/LKG executable and alert via Pushover / watchdog; remove an unpromoted candidate. Health diagnostics use the writer's structured `error.message` field (REL-293 / R-712).
 - Incident lock held: skip the promote and retry next fire.
 
 ```bash
