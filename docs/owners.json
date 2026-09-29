@@ -169,6 +169,12 @@
       "note": "Store-wins-over-.env precedence, master-key loss recovery, and setup-mode entry/exit are operator contracts (DOC-051)."
     },
     {
+      "id": "db-backup-recovery",
+      "globs": ["cloud/scripts/db_backup.py"],
+      "owners": ["docs/cloud-services.md"],
+      "note": "Backup retention and resumed-read consistency have both drifted from the recovery owner; changes must preserve the documented recovery boundary."
+    },
+    {
       "id": "deploy-provisioning",
       "globs": [
         "cloud/scripts/deploy.sh",
