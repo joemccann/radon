@@ -710,7 +710,9 @@ class TestSanitizeNonHttpUris:
         assert "notreal" not in proc.stdout, proc.stdout
 
 
-@pytest.mark.parametrize("route", ["/api/callback?code=qz1NOTREAL", "/orders/place#frag=qz2NOTREAL"])
+@pytest.mark.parametrize("route", [
+    "/api/callback?code=qz1NOTREAL", "/orders/place#frag=qz2NOTREAL", "/api?code=qz3NOTREAL",
+])
 def test_route_query_and_fragment_are_redacted_with_the_route(route: str):
     out = nif.sanitize(f"the call {route} returned")
     assert "NOTREAL" not in out, out

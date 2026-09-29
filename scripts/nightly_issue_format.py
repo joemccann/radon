@@ -87,7 +87,7 @@ _EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w.-]+\.\w+\b")
 # /home/...).
 _ROUTE_RE = re.compile(
     r"(?<![\w.])(/(?!Users\b|home\b|tmp\b|private\b|var\b|opt\b)"
-    r"[a-z][\w.-]*(?:/[\w.-]+)+(?:[?#]\S*)?)"
+    r"[a-z][\w.-]*(?:(?:/[\w.-]+)+(?:[?#]\S*)?|[?#]\S*))"
 )
 # Any scheme, not just http(s): database, cache and socket URIs carry
 # credentials in their userinfo or query.
