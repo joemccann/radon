@@ -67,7 +67,8 @@ def parse_update_check(stdout: str) -> dict:
             payload = None
         if isinstance(payload, dict):
             current = (
-                payload.get("current")
+                payload.get("currentVersion")
+                or payload.get("current")
                 or payload.get("installed")
                 or payload.get("version")
             )
@@ -75,7 +76,8 @@ def parse_update_check(stdout: str) -> dict:
             if isinstance(stable, dict):
                 stable = stable.get("version")
             latest = (
-                payload.get("latest")
+                payload.get("latestVersion")
+                or payload.get("latest")
                 or payload.get("latest_stable")
                 or stable
             )
@@ -148,9 +150,11 @@ def install_candidate_cli(
 ) -> Path:
     dest.mkdir(parents=True, exist_ok=True)
     env = grok_runtime.grok_child_env({"GROK_HOME": str(dest), "HOME": str(dest)})
-    argv = [grok_bin, "update", "--no-auto-update"]
+    # `grok update` has no --no-auto-update (grok 1.0.3 rejects it).
+    # That flag stays on the smoke invocation only.
+    argv = [grok_bin, "update"]
     if version:
-        argv[2:2] = ["--version", version]
+        argv.extend(["--version", version])
     proc = runner(argv, env=env, cwd=str(dest), timeout=180)
     if getattr(proc, "returncode", 1) != 0:
         raise GrokUpgradeError(
@@ -249,9 +253,9 @@ def _record_health(state: str, detail: str | None = None) -> None:
         from db.hrana_http import write_service_health_http
     except ImportError:
         return
-    kwargs = {"last_error": detail} if detail else {}
+    error = {"message": detail} if detail else None
     try:
-        write_service_health_http(SERVICE_NAME, state, **kwargs)
+        write_service_health_http(SERVICE_NAME, state, error=error)
     except Exception as exc:  # noqa: BLE001 — telemetry must not fail the job
         print(f"grok upgrade heartbeat non-fatal: {exc}", file=sys.stderr)
 
