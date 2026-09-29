@@ -10703,3 +10703,20 @@ Audited through: c274a773228ed29226721694370d3a1c2739494e on 2026-09-29 — 3 ne
 
 
 **T-512 — DONE.** `scripts/tests/test_rel257_liquidcompute_atomic.py:51` injects an actual SQLite trigger failure midway through replacement, checks the entire original batch from writer and fresh observer, verifies transaction release and retains a successful retry. Red: premature-commit mutation produced XPASS in the old test and failed the new rollback assertion. Green: 8 tests passed with no xfail; production persistence is unchanged.
+
+
+### Closing verification 2026-09-29
+
+| Closing round | Python | Vitest | Cloud |
+|---|---|---|---|
+| 1 (log run 2) | 1 failed, 13016 passed, 2 skipped, 41 warnings, 23 subtests passed in 474.03s (0:07:54) | 10213 passed (10213) | 2341 passed, 7 skipped in 766.54s (0:12:46) |
+| 2 (log run 3) | 13017 passed, 2 skipped, 41 warnings, 23 subtests passed in 281.23s (0:04:41) | 10213 passed (10213) | 2341 passed, 7 skipped in 785.44s (0:13:05) |
+| 3 (log run 4) | 13017 passed, 2 skipped, 41 warnings, 23 subtests passed in 321.60s (0:05:21) | 10213 passed (10213) | 2341 passed, 7 skipped in 766.92s (0:12:46) |
+
+An earlier complete attempt had Python 13017 passed / 2 skipped, Vitest 10213 passed, and cloud 2340 passed / 1 failed / 7 skipped. The gateway-readiness file then passed 51/51 alone. Closing round 1 had a fake-login one-second deadline failure; its full file immediately passed 103/103 alone. No assertion or timeout changed. These are recorded load-sensitive observations, not silently counted as full-suite green.
+
+Detached base c274a773 cloud: 2341 passed / 7 skipped; sorted FAILED list empty. All three closing cloud lists match exactly: zero additions and zero removals. The earlier attempt added only test_concurrent_operator_mutation_cannot_interleave_stack_transaction, which passed in isolation and subsequent full rounds.
+
+Full precommit gate: Python 13017 passed / 2 skipped / 23 subtests, Vitest 10213 passed, cloud 2341 passed / 7 skipped. Structured-file parsing, shell syntax, whitespace and secret scans are recorded with delivery. Browser execution, screenshots, exact-head CI and external delivery receipts are recorded on rolling issue #83. No local browser/server was available.
+
+Final hygiene: 71 focused documentation contracts passed; 5 audited JSON and 2 YAML files parsed; 10 audited shell scripts passed bash -n. Final branch diff passed whitespace checks and gitleaks reported zero leaks. No forbidden ledger or generated codemap file changed.

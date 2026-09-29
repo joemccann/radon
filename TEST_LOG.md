@@ -1085,3 +1085,8 @@ Tonight's audit timed out before a new checkpoint. Open P0/P1 carried forward fr
 | T-493 | DONE | Old suite accepted a missing live volume update. Behavioral replacements reject four update/delivery mutations; 5 passed with fake IB emitter and real handlers. |
 | T-495 | DONE locally; CI browser pending | Old reader failed both class-rename cases; 23 reader/component cases passed and Playwright discovered 5 scenarios. Semantic locators and observed scroll replace presentation selectors and fixed sleep; actual browser/screenshots assigned to PR CI. |
 | T-512 | DONE | Premature-commit mutation escaped the old test as XPASS and failed the new SQLite-trigger rollback assertion. Full file: 8 passed, no xfail; fresh-connection visibility and retry remain covered. |
+| T-130 | DONE upstream | Main CI run 36502433090/job 109196861726 executed the actual demo-isolation guard successfully; local wiring 8 passed. Required secret names exist; no secret values inspected. |
+| T-510 | DONE upstream retirement | Obsolete controlling-TTY suite and entry point removed together; replacement runner cleanup tests passed all three delta repetitions. |
+| T-435 | operator-only | Retained prior three-attempt diagnosis. Acceptance: isolated keyless compile-mode CI build/server and real /portfolio-to-/setup redirect without x-radon-authless-test. |
+
+Closing verification details and exact counts are appended to TEST_AUDIT.md; external CI/browser/delivery receipts belong to rolling issue #83.
