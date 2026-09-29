@@ -302,6 +302,12 @@ real secrets off disk, so `/home/radon/radon-cloud` (which holds the 0600
 clone is writable. `ProtectHome=tmpfs` is deliberately NOT used: it would also
 hide the clone and the venv the unit executes from.
 
+The stripped env file itself is also in `InaccessiblePaths` (systemd reads it
+before building the namespace), and every grok child process runs with an
+allowlisted environment (`grok_runtime.grok_child_env`: PATH, HOME, locale,
+proxy and CA vars). Turso and Pushover credentials stay with the Python
+parent, which needs them for the ledger, heartbeats and alerts.
+
 Page text is untrusted third-party/exception content. It reaches the model
 only inside `<untrusted-excerpt>` delimiters, and `build_prompt` re-sanitizes
 a row that does not already carry them rather than trusting the writer.
