@@ -240,6 +240,10 @@ CROSS_TREE_CONTRACTS = (
         ),
     ),
     CrossTreeContract(
+        patterns=("web/lib/researchReasonCodes.ts",),
+        tests=("scripts/tests/test_research_cut_report.py",),
+    ),
+    CrossTreeContract(
         patterns=("web/components/WorkspaceSections.tsx",),
         tests=(
             "scripts/tests/test_uw_budget.py::test_scheduled_scan_defaults_resolve_under_the_universe_brake",

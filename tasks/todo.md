@@ -1,3 +1,9 @@
+# Task: HELD_EXPIRED honest PDF cut + hold timestamps (2026-09-29)
+
+- [ ] T1 depends_on: [] Failing tests: cut-report buckets/labels (no "retries exhausted"), Sep 28 fixture counts, held_at on hold, expire sets expired_at and leaves updated_at, TTL uses held_at, migration 0091 backfill.
+- [ ] T2 depends_on: [T1] cut_report.py + workflow_dispatch, publish.py sweep/record_outcome, migration 0091, docs/dropbox-research.md.
+- [ ] T3 depends_on: [T2] Focused pytest green. Ready PR vs main. No merge.
+
 # Task: tv-alerts hrana read timeout (2026-09-29)
 
 - [x] T1 depends_on: [] Failing test: empty-poll and ok-heartbeat TimeoutError must exit 0 and must not paint health; statement error still exits 1.

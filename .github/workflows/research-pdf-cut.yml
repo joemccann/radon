@@ -1,0 +1,42 @@
+name: Dropbox PDF cut
+
+# Replaces the throwaway diag-pdf-feed.yml from closed PR #800.
+# Read-only Turso SELECT. Manual run; default date is yesterday PT.
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: PT calendar date YYYY-MM-DD. Empty means yesterday America/Los_Angeles.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  cut:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Build daily cut report
+        env:
+          TURSO_DB_URL: ${{ secrets.TURSO_DB_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${TURSO_DB_URL:-}" && test -n "${TURSO_AUTH_TOKEN:-}"
+          PYTHONPATH=scripts python3 -m research.cut_report \
+            --date "${{ inputs.date }}" \
+            --json-out research-pdf-cut.json \
+            --md-out research-pdf-cut.md
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: research-pdf-cut
+          path: |
+            research-pdf-cut.json
+            research-pdf-cut.md

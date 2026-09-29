@@ -63,6 +63,23 @@ def test_record_outcome_upserts_by_work_key(monkeypatch):
     sql, args = calls[0]
     assert "INSERT INTO research_outcomes" in sql and "ON CONFLICT(work_key) DO UPDATE" in sql
     assert args[0] == "k" * 64 and "held" in args
+    assert "held_at" in sql and "COALESCE(research_outcomes.held_at, excluded.held_at)" in sql
+    assert args[-1] == args[-2] and args[-1]  # held row: held_at = updated_at = now
+
+
+def test_record_outcome_keeps_held_at_on_reupsert_of_the_same_held_row(monkeypatch):
+    calls = []
+    monkeypatch.setattr(publish, "hrana_execute", lambda sql, args=(), **kw: calls.append((sql, args)) or [])
+    publish.record_outcome(work(), review())
+    publish.record_outcome(work(), review())
+    first, second = calls[0][1][-1], calls[1][1][-1]
+    assert first and second
+    sql = calls[0][0]
+    assert "COALESCE(research_outcomes.held_at, excluded.held_at)" in sql
+    publish.record_outcome(work(), review(posts=[{"id": "research-1"}], audit=[]))
+    published_sql, published_args = calls[2]
+    assert published_args[-1] is None
+    assert "ELSE research_outcomes.held_at END" in published_sql
 
 
 def test_intake_records_every_outcome_and_survives_a_mirror_failure(tmp_path):
@@ -123,15 +140,25 @@ def test_expire_stale_held_updates_held_rows_and_never_publishes(monkeypatch):
     assert sql == publish._EXPIRE_SQL
     assert "folder_date" not in sql
     assert "HELD_EXPIRED" in sql and "outcome = 'held'" in sql
+    assert "expired_at = ?" in sql
+    assert "updated_at = ?" not in sql
+    assert "COALESCE(held_at, updated_at)" in sql
     assert any("2026-09-18T15:00:00" in str(a) for a in args)
     assert count == 1 and published == []
+    assert publish.HELD_TTL_HOURS == 24
 
 
-def test_expire_sql_merges_held_expired_on_sqlite():
+def _outcome_db():
     connection = sqlite3.connect(":memory:")
     root = Path(__file__).resolve().parents[1] / "db/migrations"
     connection.execute("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
     connection.executescript((root / "0079_research_outcomes.sql").read_text())
+    connection.executescript((root / "0091_research_outcomes_hold_times.sql").read_text())
+    return connection
+
+
+def test_expire_sql_merges_held_expired_on_sqlite():
+    connection = _outcome_db()
     cols = ("work_key,file_id,file_name,publisher,series,doc_type,folder_date,document_date,"
             "outcome,reason_codes,drafts_json,posts,pipeline,updated_at")
     rows = [
@@ -145,10 +172,40 @@ def test_expire_sql_merges_held_expired_on_sqlite():
     connection.executemany(f"INSERT INTO research_outcomes ({cols}) VALUES ({','.join('?' * 14)})", rows)
     stamped = connection.execute(publish._EXPIRE_SQL, ("2026-09-19T15:00:00+00:00", "2026-09-18T15:00:00+00:00")).fetchall()
     assert [row[0] for row in stamped] == ["old"]
-    old = connection.execute("SELECT outcome, reason_codes FROM research_outcomes WHERE work_key='old'").fetchone()
-    assert old == ("dropped", '["NO_CANDIDATES","HELD_EXPIRED"]')
+    old = connection.execute(
+        "SELECT outcome, reason_codes, updated_at, expired_at FROM research_outcomes WHERE work_key='old'"
+    ).fetchone()
+    assert old[0] == "dropped" and old[1] == '["NO_CANDIDATES","HELD_EXPIRED"]'
+    assert old[2] == "2026-09-17T10:00:00+00:00"
+    assert old[3] == "2026-09-19T15:00:00+00:00"
     assert connection.execute("SELECT outcome FROM research_outcomes WHERE work_key='fresh'").fetchone()[0] == "held"
     assert connection.execute("SELECT outcome FROM research_outcomes WHERE work_key='pub'").fetchone()[0] == "published"
+    connection.close()
+
+
+def test_expire_sql_uses_held_at_when_present_and_leaves_updated_at():
+    connection = _outcome_db()
+    cols = ("work_key,file_id,file_name,publisher,series,doc_type,folder_date,document_date,"
+            "outcome,reason_codes,drafts_json,posts,pipeline,updated_at,held_at")
+    rows = [
+        ("aged-hold", "id:a", "a.pdf", "GS", "x", "research", "2026-09-01", "2026-09-01",
+         "held", '["NO_CANDIDATES"]', "[]", 0, "v2",
+         "2026-09-19T14:00:00+00:00", "2026-09-17T10:00:00+00:00"),
+        ("fresh-hold", "id:b", "b.pdf", "GS", "x", "research", "2026-09-18", "2026-09-18",
+         "held", '["VERIFY_FAILED"]', "[]", 0, "v2",
+         "2026-09-17T10:00:00+00:00", "2026-09-19T14:00:00+00:00"),
+    ]
+    connection.executemany(f"INSERT INTO research_outcomes ({cols}) VALUES ({','.join('?' * 15)})", rows)
+    stamped = connection.execute(publish._EXPIRE_SQL, ("2026-09-19T15:00:00+00:00", "2026-09-18T15:00:00+00:00")).fetchall()
+    assert [row[0] for row in stamped] == ["aged-hold"]
+    aged = connection.execute(
+        "SELECT outcome, updated_at, expired_at, held_at FROM research_outcomes WHERE work_key='aged-hold'"
+    ).fetchone()
+    assert aged == ("dropped", "2026-09-19T14:00:00+00:00", "2026-09-19T15:00:00+00:00", "2026-09-17T10:00:00+00:00")
+    fresh = connection.execute(
+        "SELECT outcome, updated_at, expired_at FROM research_outcomes WHERE work_key='fresh-hold'"
+    ).fetchone()
+    assert fresh == ("held", "2026-09-17T10:00:00+00:00", None)
     connection.close()
 
 

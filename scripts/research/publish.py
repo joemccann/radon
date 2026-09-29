@@ -12,16 +12,17 @@ from research.assets import ASSET_RE, URL_PREFIX, read_asset, store_asset
 
 PT = ZoneInfo("America/Los_Angeles")
 HELD_TTL_HOURS = 24
-# Product clock is America/Los_Angeles. Compare process time (updated_at), never folder_date.
+# Product clock is America/Los_Angeles. Age from held_at (fallback updated_at for
+# legacy rows). Do not overwrite updated_at; that stays the review/decision time.
 _EXPIRE_SQL = """UPDATE research_outcomes
 SET outcome = 'dropped',
     reason_codes = CASE
       WHEN instr(COALESCE(reason_codes, ''), 'HELD_EXPIRED') > 0 THEN reason_codes
       ELSE json_insert(COALESCE(nullif(reason_codes, ''), '[]'), '$[#]', 'HELD_EXPIRED')
     END,
-    updated_at = ?
+    expired_at = ?
 WHERE outcome = 'held'
-  AND datetime(replace(updated_at, 'Z', '')) < datetime(replace(?, 'Z', ''))
+  AND datetime(replace(COALESCE(held_at, updated_at), 'Z', '')) < datetime(replace(?, 'Z', ''))
 RETURNING work_key"""
 
 
@@ -161,10 +162,15 @@ _OUTCOME_COLUMNS = ("work_key", "file_id", "file_name", "publisher", "series", "
 def record_outcome(work: dict, review: dict) -> None:
     row = outcome_row(work, review)
     updates = ",".join(f"{c}=excluded.{c}" for c in _OUTCOME_COLUMNS[1:])
+    now = datetime.now(timezone.utc).isoformat()
+    held_at = now if row["outcome"] == "held" else None
     hrana_execute(
-        f"INSERT INTO research_outcomes ({','.join(_OUTCOME_COLUMNS)},updated_at) VALUES ({','.join('?' * len(_OUTCOME_COLUMNS))},?) "
-        f"ON CONFLICT(work_key) DO UPDATE SET {updates},updated_at=excluded.updated_at",
-        (*[row[c] for c in _OUTCOME_COLUMNS], datetime.now(timezone.utc).isoformat()))
+        f"INSERT INTO research_outcomes ({','.join(_OUTCOME_COLUMNS)},updated_at,held_at) "
+        f"VALUES ({','.join('?' * len(_OUTCOME_COLUMNS))},?,?) "
+        f"ON CONFLICT(work_key) DO UPDATE SET {updates},updated_at=excluded.updated_at,"
+        f"held_at=CASE WHEN excluded.outcome='held' THEN COALESCE(research_outcomes.held_at, excluded.held_at) "
+        f"ELSE research_outcomes.held_at END",
+        (*[row[c] for c in _OUTCOME_COLUMNS], now, held_at))
 
 
 def recent_posts(days: int = 90) -> list[dict]:
