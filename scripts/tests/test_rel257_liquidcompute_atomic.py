@@ -48,25 +48,47 @@ def _make_valid_obs(series_id="h100-us", value=2.6766, fetched_at=FETCHED, raw_h
 class TestLiquidComputeAtomicReplacement:
     """Tests for atomic observation replacement in Liquid Compute writer."""
 
-    def test_upsert_observations_by_identity_is_atomic_on_sqlite(self, tmp_path):
-        """A database trigger faults INSERT after DELETE; the old batch survives."""
+    def test_upsert_observations_by_identity_is_atomic_on_sqlite(self, tmp_path, request):
+        """A failed replacement rolls back the entire batch and releases its transaction."""
         import sqlite3
-        store = ObservationStore(tmp_path / "lc.sqlite")
-        _, observations = parse_ticker(_payload(), HASH, FETCHED)
+        from contextlib import closing
+
+        database = tmp_path / "lc.sqlite"
+        store = ObservationStore(database)
+        request.addfinalizer(store.close)
+        store.initialize()
+        _store_rows, observations = parse_ticker(_payload(), HASH, FETCHED)
         persist_ticker(store, observations)
-        initial = store.read_observations(as_of="2026-09-15T16:00:00Z")
-        assert len(initial) == 5
-        revised = _payload()
-        revised["indices"][1]["value"] = 999.0
-        _, replacement = parse_ticker(revised, "d" * 64, "2026-09-15T13:00:00+00:00")
-        store.connection.execute("""CREATE TRIGGER reject_revision BEFORE INSERT ON ai_cycle_observations
-            WHEN json_extract(NEW.payload, '$.value') = 999
-            BEGIN SELECT RAISE(ABORT, 'injected replacement failure'); END""")
+        query = "SELECT * FROM ai_cycle_observations ORDER BY identity"
+        before = store.connection.execute(query).fetchall()
+        assert len(before) == 5
+
+        # Fail inside SQLite, after DELETE and after an earlier row's replacement.
+        # This avoids monkeypatching the immutable sqlite3.Cursor implementation.
+        store.connection.execute("""
+            CREATE TRIGGER reject_h100_replacement
+            BEFORE INSERT ON ai_cycle_observations
+            WHEN json_extract(NEW.payload, '$.series_id') = 'h100-us'
+            BEGIN
+                SELECT RAISE(ABORT, 'injected replacement failure');
+            END
+        """)
+        store.connection.commit()
+        revised_payload = _payload()
+        revised_payload["indices"][1]["value"] = 999.0
+        _revised_store, revised_obs = parse_ticker(revised_payload, "d" * 64, "2026-09-15T13:00:00+00:00")
         with pytest.raises(sqlite3.IntegrityError, match="injected replacement failure"):
-            store.upsert_observations_by_identity(replacement)
-        assert store.read_observations(as_of="2026-09-15T16:00:00Z") == initial
-        store.connection.execute("DROP TRIGGER reject_revision")
-        store.upsert_observations_by_identity(replacement)
+            store.upsert_observations_by_identity(revised_obs)
+
+        assert not store.connection.in_transaction
+        assert store.connection.execute(query).fetchall() == before
+        with closing(sqlite3.connect(database)) as observer:
+            assert observer.execute(query).fetchall() == before
+
+        # The same connection remains usable, and a retry really replaces rows.
+        store.connection.execute("DROP TRIGGER reject_h100_replacement")
+        store.connection.commit()
+        assert store.upsert_observations_by_identity(revised_obs) == 5
         remaining = store.read_observations(as_of="2026-09-15T16:00:00Z")
         assert len(remaining) == 5
         assert next(row for row in remaining if row["series_id"] == "h100-us")["value"] == 999.0

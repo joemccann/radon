@@ -1,15 +1,16 @@
+import { readChainPaneState } from "./fixtures/chainPaneState";
 import { test, expect, type Locator, type Page, type WebSocketRoute } from "@playwright/test";
 
 const TICKER = "MU";
 const EXPIRIES = ["20261218", "20270115"];
 const STRIKES = Array.from({ length: 61 }, (_, index) => 90 + index);
 
-async function installFixtures(page: Page) {
+async function installFixtures(page: Page, previousClose: number | null = 119, timestamp?: string) {
   let last = 120;
   const sockets = new Set<WebSocketRoute>();
   const quote = (symbol: string, price: number) => ({
     symbol, last: price, bid: price - 0.05, ask: price + 0.05,
-    close: symbol === TICKER ? 119 : price, timestamp: new Date().toISOString(),
+    close: symbol === TICKER ? previousClose : price, timestamp: timestamp ?? new Date().toISOString(),
     lastIsCalculated: false, delta: 0.4, impliedVol: 0.45,
   });
   await page.route("**/api/**", (route) => {
@@ -44,36 +45,23 @@ async function installFixtures(page: Page) {
       socket.send(JSON.stringify({ type: "batch", updates }));
     });
   });
-  return (price: number) => {
+  return (price: number, close = previousClose, quoteTimestamp = timestamp) => {
     last = price;
+    previousClose = close;
+    timestamp = quoteTimestamp;
     expect(sockets.size).toBeGreaterThan(0);
     for (const socket of sockets) socket.send(JSON.stringify({ type: "batch", updates: { [TICKER]: quote(TICKER, price) } }));
   };
 }
 
 async function paneState(pane: Locator) {
-  return pane.evaluate((element) => {
-    const viewport = element.getBoundingClientRect();
-    const rows = Array.from(element.querySelectorAll(".chain-row, .mobile-chain__row"));
-    const visible = rows.filter((row) => {
-      const bounds = row.getBoundingClientRect();
-      return bounds.top >= viewport.top && bounds.bottom <= viewport.bottom;
-    });
-    return {
-      scrollTop: element.scrollTop,
-      partition: rows.map((row) => row.querySelector(".chain-strike, .mobile-chain__strike")?.textContent ?? row.getAttribute("data-testid")),
-      visible: visible.map((row) => ({
-        strike: row.querySelector(".chain-strike, .mobile-chain__strike")?.textContent ?? row.getAttribute("data-testid"),
-        offset: Math.round(row.getBoundingClientRect().top - viewport.top),
-      })),
-    };
-  });
+  return pane.evaluate(readChainPaneState);
 }
 
 for (const mobile of [false, true]) {
   for (const theme of ["light", "dark"]) {
     test(`${mobile ? "mobile" : "desktop"} ${theme}: live crossing preserves both browsing panes`, async ({ page }, testInfo) => {
-      await page.setViewportSize(mobile ? { width: 393, height: 852 } : { width: 1440, height: 900 });
+      await page.setViewportSize(mobile ? { width: 390, height: 852 } : { width: 1440, height: 900 });
       await page.addInitScript((value) => localStorage.setItem("theme", value), theme);
       const moveSpot = await installFixtures(page);
       await page.goto(`/${TICKER}?deck=c`);
@@ -82,22 +70,25 @@ for (const mobile of [false, true]) {
       const lower = page.getByTestId("chain-lower-pane");
       const spot = page.getByTestId("chain-spot-bar");
       await expect(spot).toContainText("120.00");
-      const range = mobile ? page.getByTestId("mobile-chain-strikes-select") : page.locator(".chain-expiry-select").nth(1);
+      const range = mobile ? page.getByTestId("mobile-chain-strikes-select") : page.getByRole("combobox", { name: "Strikes per side", exact: true });
       await range.selectOption("25");
       await expect.poll(() => upper.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeGreaterThan(100);
       await expect.poll(() => lower.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeGreaterThan(100);
       const spotBefore = await spot.boundingBox();
-      const header = page.locator(mobile ? ".mobile-chain__ladder-head" : ".chain-grid thead").first();
+      const header = page.getByTestId("chain-columns-header");
       const headerBefore = await header.boundingBox();
+      await expect.poll(() => upper.evaluate((element) => Math.abs(element.scrollTop - (element.scrollHeight - element.clientHeight)))).toBeLessThan(2);
+      await expect.poll(async () => (await paneState(lower)).scrollTop).toBe(0);
+      const upperStart = (await paneState(upper)).scrollTop;
       const lowerBefore = await paneState(lower);
       await upper.hover();
       await page.mouse.wheel(0, -120);
-      await expect.poll(async () => (await paneState(upper)).scrollTop).toBeLessThan(await upper.evaluate((element) => element.scrollHeight - element.clientHeight));
+      await expect.poll(async () => (await paneState(upper)).scrollTop).toBe(Math.max(0, upperStart - 120));
       expect((await paneState(lower)).scrollTop).toBe(lowerBefore.scrollTop);
       await lower.hover();
       await page.mouse.wheel(0, 120);
-      await expect.poll(async () => (await paneState(lower)).scrollTop).toBeGreaterThan(0);
-      await page.waitForTimeout(250);
+      const lowerEnd = await lower.evaluate((element) => element.scrollHeight - element.clientHeight);
+      await expect.poll(async () => (await paneState(lower)).scrollTop).toBe(Math.min(lowerEnd, lowerBefore.scrollTop + 120));
       const before = { upper: await paneState(upper), lower: await paneState(lower), page: await page.evaluate(() => window.scrollY) };
       expect(before.upper.visible.length).toBeGreaterThan(0);
       expect(before.lower.visible.length).toBeGreaterThan(0);
@@ -132,12 +123,64 @@ for (const mobile of [false, true]) {
         await expect(page.getByTestId(`mobile-chain-expiry-${EXPIRIES[1]}`)).toHaveAttribute("aria-pressed", "true");
         await expect(page.getByTestId("mobile-chain-pending-strip")).toContainText("1 LEG");
       } else {
-        const row = page.locator(".chain-row").filter({ has: page.locator(".chain-strike", { hasText: "$127.00" }) });
-        await row.locator(".chain-mid.chain-clickable").first().click();
+        await page.getByTestId("chain-call-mid-127").click();
         await expect(page.getByTestId("order-builder-leg")).toHaveCount(1);
-        await page.locator(".chain-expiry-select").first().selectOption(EXPIRIES[1]);
+        await page.getByRole("combobox", { name: "Options expiry", exact: true }).selectOption(EXPIRIES[1]);
         await expect(page.getByTestId("order-builder-leg")).toHaveCount(1);
       }
     });
   }
 }
+
+test("previous-close cooldown survives live price updates", async ({ page }) => {
+  const clockStart = new Date("2026-09-28T15:00:00Z");
+  const warmupTime = new Date("2026-09-25T15:00:00Z");
+  await page.clock.install({ time: warmupTime });
+  // Server-provided marks can request a close before the socket seed arrives.
+  // Finish that warmup in a different session from the measured cooldown.
+  const moveSpot = await installFixtures(page, 119, warmupTime.toISOString());
+  let observingCooldown = false;
+  let requests = 0;
+  let releaseFirst!: () => void;
+  const firstResponse = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  await page.route("**/api/previous-close", async (route) => {
+    if (!observingCooldown) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ closes: { [TICKER]: 119 } }) });
+      return;
+    }
+    requests += 1;
+    if (requests === 1) {
+      await firstResponse;
+      await route.fulfill({ status: 429, headers: { "Retry-After": "30" }, contentType: "application/json", body: JSON.stringify({ error: "rate limited" }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ closes: { [TICKER]: 119 } }) });
+  });
+  await page.goto(`/${TICKER}?deck=c`);
+  const spot = page.getByTestId("chain-spot-bar");
+  await expect(spot).toContainText("120.00");
+  expect(requests).toBe(0);
+  await page.clock.setSystemTime(clockStart);
+  await page.clock.pauseAt(new Date(await page.evaluate(() => Date.now() + 1_000)));
+  observingCooldown = true;
+  moveSpot(120, null, clockStart.toISOString());
+  await page.clock.runFor(250);
+  await expect.poll(() => requests).toBe(1);
+  // A price render while the first request is in flight changes the effect's
+  // dependency key. Its eventual response must still own a full cooldown.
+  moveSpot(121);
+  await page.clock.runFor(250);
+  await expect(spot).toContainText("121.00");
+  const limited = page.waitForResponse((response) => response.url().endsWith("/api/previous-close") && response.status() === 429);
+  releaseFirst();
+  await limited;
+  await page.clock.runFor(100);
+  for (const last of [122, 123, 124]) {
+    moveSpot(last);
+    await page.clock.runFor(1_000);
+    await expect(spot).toContainText(`${last}.00`);
+    expect(requests).toBe(1);
+  }
+  await page.clock.runFor(30_000);
+  await expect.poll(() => requests).toBe(2);
+});
