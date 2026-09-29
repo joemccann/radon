@@ -231,9 +231,9 @@ decide() {
 # --- private report ------------------------------------------------------------
 
 # Credential assignments, case-insensitive (BSD sed has no I flag): the key
-# may be quoted (JSON), the value quoted (spaces inside) or led by an auth
-# scheme word. POSIX ERE takes the longest alternative.
-_SECRET_KEY_ERE='[A-Za-z0-9_]*([Tt][Oo][Kk][Ee][Nn]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss]|[Aa][Uu][Tt][Hh]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll]|[Aa][Pp][Ii]_?[Kk][Ee][Yy]|_[Kk][Ee][Yy])[A-Za-z0-9_]*'
+# may be quoted (JSON) or a hyphenated header name, the value quoted (spaces
+# inside) or led by an auth scheme word. POSIX ERE takes the longest alternative.
+_SECRET_KEY_ERE='[A-Za-z0-9_-]*([Tt][Oo][Kk][Ee][Nn]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss]|[Aa][Uu][Tt][Hh]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll]|[Aa][Pp][Ii][-_]?[Kk][Ee][Yy]|[-_][Kk][Ee][Yy])[A-Za-z0-9_-]*'
 _SECRET_SEP_ERE="[\"']?[[:space:]]*[=:][[:space:]]*"
 _SECRET_VALUE_ERE="(\"[^\"]*\"|'[^']*'|([Bb]asic|[Bb]earer|[Dd]igest|[Tt]oken)[[:space:]]+[^[:space:]]+|[^[:space:]]+)"
 

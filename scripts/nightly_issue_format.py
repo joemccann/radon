@@ -58,11 +58,11 @@ RETRY_NEXT = "The next fire retries this phase."
 REDACTED = "[REDACTED]"
 
 _FENCE_RE = re.compile(r"```.*?```", re.S)
-# The key may be quoted (JSON), the value quoted (spaces inside) or led by
-# an auth scheme word ("Authorization: Basic <value>").
+# The key may be quoted (JSON) or a hyphenated header name, the value quoted
+# (spaces inside) or led by an auth scheme word ("Authorization: Basic <value>").
 _SECRET_ASSIGN_RE = re.compile(
-    r"\b([A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|PASS|AUTH|CREDENTIAL|"
-    r"API_KEY|APIKEY|_KEY)[A-Za-z0-9_]*)([\"']?\s*[=:]\s*)"
+    r"\b([A-Za-z0-9_-]*(?:TOKEN|SECRET|PASSWORD|PASSWD|PASS|AUTH|CREDENTIAL|"
+    r"API[-_]?KEY|[-_]KEY)[A-Za-z0-9_-]*)([\"']?\s*[=:]\s*)"
     r"(?:(?:basic|bearer|digest|token)\s+)?(?:\"[^\"\n]*\"|'[^'\n]*'|\S+)",
     re.I,
 )

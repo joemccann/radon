@@ -631,6 +631,8 @@ _QUOTED_SECRETS = {
     "single_quoted_value": ("SERVICE_SECRET='kept apart NOTREAL'", "apart NOTREAL"),
     "basic_scheme": ("Authorization: Basic Zm9vOk5PVFJFQUw=", "Zm9vOk5PVFJFQUw="),
     "token_scheme": ("AUTH_HEADER=Token qz8NOTREAL111", "qz8NOTREAL111"),
+    "hyphenated_header": ("X-API-Key: qz9NOTREAL222", "qz9NOTREAL222"),
+    "hyphenated_lower": ("api-key=qz0NOTREAL333", "qz0NOTREAL333"),
 }
 
 
