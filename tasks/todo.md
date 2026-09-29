@@ -8639,3 +8639,12 @@ CI repair review: befea93d preserved21 new gateway/service component regressions
 ## Review
 - Both secrets point to Turso `radon-demo` and appear in `gh secret list`; the push-only guard will run on the next main push.
 - Linux cloud CI on `5f7c36ab` red-failed at the preheld gateway gate (status 66). The fixture now reports it inactive, reaches the hanging stop child, and Linux cloud CI passed on `6156ac79`; the harness remains `timeout=5`.
+
+# Nightly CI performance audit — 2026-09-29
+
+- [x] T1 depends_on: [] Read open performance PRs, rolling checkpoint, ledger, and rules.
+- [x] T2 depends_on: [T1] Classify 30 organic main runs and reconstruct release critical paths.
+- [x] T3 depends_on: [T2] Rank safe candidates; implement qualifying experiments with red/green contracts.
+- [ ] T4 depends_on: [T3] Verify, publish substantive changes if any, and record one rolling issue comment.
+
+Review: CIP-015 is the sole qualifying critical-path experiment; 136 focused tests and 49 cloud contracts passed. Collection retains all 38 original cases and adds 3. No production source, gate, shard, timeout or deployment behavior changed. Release gain remains VALIDATING; PR CI and one rolling issue comment are pending.
