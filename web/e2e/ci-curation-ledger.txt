@@ -79,6 +79,7 @@ bpi-tab.spec.ts
 cash-flows-section.spec.ts
 cash-flows-withdrawal-may8.spec.ts
 catalyst-card-weekend.spec.ts
+catalysts-scrollbar-autohide.spec.ts
 chain-held-leg-prices.spec.ts
 chain-sticky-header.spec.ts
 chain-strikes-selector.spec.ts
@@ -312,6 +313,11 @@ ws-connection-stability.spec.ts
 #   of the title, and is inset >= 12px from the card. 3/3 Chromium under next
 #   dev. Vitest bpi-panel pins the header-actions placement in CI. Held out
 #   pending next start preflight.
+# REVIEWED 2026-09-29 catalysts-scrollbar-autohide.spec.ts - computed
+#   scrollbar-color of an injected expanded Catalysts list: transparent thumb
+#   at rest, visible with is-scrolling and on hover. 1/1 Chromium under next
+#   dev. Vitest catalysts-quadrant pins the is-scrolling toggle in CI.
+#   Held out pending next start preflight.
 # REVIEWED 2026-09-29 book-head-stability.spec.ts - desktop book head geometry
 #   (pill + tape toggle hold still across a 2- to 4-decimal tick, never clipped)
 #   at 1024/1280/1366/1920. 4/4 Chromium under next dev; fails on the pre-fix
