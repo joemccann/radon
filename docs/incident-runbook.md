@@ -214,6 +214,54 @@ Incident: 2026-07-08, P1.
 
 ---
 
+## tv-alerts-hrana-read-timeout
+
+**`radon-tv-alerts.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) on a single hrana read timeout.** Peak: 2026-09-28
+21:30Z, page `01374b995572a545deb4ce62905c643c`. Next timer (21:32)
+exited 0 (`processed: 0`).
+
+- **Mechanism:** `Type=oneshot`, no `Restart=`. At 21:27:27Z `run()`
+  raised `HranaHttpError: TimeoutError: The read operation timed out`
+  (`HRANA_TIMEOUT_S=4`). The error heartbeat at 21:27:31Z timed out the
+  same way, so `main` returned 1. Sibling writers in that minute
+  (trin, host-metrics, nextjs-db-watchdog, grok heartbeat,
+  knowledge-ingest) logged the same timeout and stayed up, because
+  they already treat it as non-fatal or retry. `requires_ib` is false.
+  Edge and `:8321/health/lite` stayed authenticated. The 21:28 host
+  snapshot shows this unit `active_state=failed` and nothing else in
+  the radon set failed. Current unit is `Result=success`.
+- **Detection:** journal `[tv-alerts-drain] cycle failed: TimeoutError:
+  The read operation timed out` then `health write failed: TimeoutError:
+  The read operation timed out`. `systemctl show` on that invocation
+  is `exit-code` / `NRestarts=0` / `ExecMainStatus=1`. Exec span is
+  about 8s (two hrana budgets), not `TimeoutStartSec=120`. Prior and
+  next cycles log `{"processed": 0, ...}`.
+- **Discriminating check:** Python Turso canary `SELECT 1` succeeds
+  (64 ms at diagnosis). Canary fail → Turso platform, stand down. Do
+  not restart-flap. Same-minute sibling timeout lines that say
+  `non-fatal` / `heartbeat failed` / `retrying` confirm the stall is
+  the shared read, not this script's SQL. `Result=start-limit-hit` is
+  `tv-alerts-start-limit-healthy-drain`. `Result=signal` or exit 143
+  inside a deploy window is `deploy-stop-clean-oneshot-signal`.
+  `/health/lite` down → API, stand down. A statement error (not a
+  read timeout) still fails the oneshot on purpose.
+- **Remediation (code):** a read timeout logs
+  `cycle read timeout non-fatal` and exits 0. No ok heartbeat and no
+  error heartbeat, so a standing outage still goes stale inside the
+  20-minute `tv-alerts-drain` window. Unprocessed rows stay
+  unprocessed for the next 5-minute fire. Other exceptions still
+  record error health and exit 1. Do not `reset-failed`. The unit is
+  not on `RERUNNABLE_ONESHOT_UNITS`. After deploy, the next timer is
+  enough. The 21:32 fire already recovered this page.
+- **Regression:**
+  `scripts/tests/test_tv_alerts_drain.py::test_empty_poll_read_timeout_does_not_fail_the_oneshot`,
+  `test_ok_heartbeat_read_timeout_does_not_fail_the_oneshot`,
+  `test_hrana_statement_error_still_fails_the_oneshot`.
+- **Code:** `scripts/tv_alerts_drain.py` (`_read_timeout`, `main`).
+
+---
+
 ## deploy-stop-clean-oneshot-signal
 
 **`Type=oneshot` scan units page P1 `Result=signal` when deploy
@@ -3028,6 +3076,57 @@ after the IB-skip path has already chosen the cached payload.** Peak:
 - **Regression:**
   `scripts/tests/test_grok_page_ledger_timeout.py::TestLedgerReadTimeout`.
 - **Code:** `scripts/grok_page_responder.py` (`_ledger_read_timeout`).
+
+## grok-upgrade-update-rejects-no-auto-update
+
+**`radon-grok-upgrade.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when the daily track-latest install calls `grok update`
+with a flag that subcommand does not accept.** Peak: 2026-09-29
+07:43:31Z, page `a57b867dba07bd932da040bf13804a1e`, paged 07:45:01Z.
+
+- **Mechanism:** `Type=oneshot`, no `Restart=`. Exec span was 1s, not
+  `TimeoutStartSec=1200`. `/var/lib/radon/grok_lkg.json` was absent, so
+  `decide_upgrade` treated the live default (`grok-4.7`) as a model
+  change. `grok update --check --json` on CLI 1.0.3 returned
+  `currentVersion` / `latestVersion` (`1.0.3` -> `1.0.44`,
+  `updateAvailable: true`). `parse_update_check` only read `current` /
+  `latest`, so `cli_version` stayed empty and the install argv was
+  `grok update --no-auto-update`. That flag is valid on the incident
+  and smoke `grok` invocation, not on `grok update`. The CLI exited 1
+  with `error: unexpected argument '--no-auto-update' found`. The
+  failure heartbeat then called `write_service_health_http(...,
+  last_error=...)`, which does not take that keyword
+  (`error=` is a dict). The oneshot still exited 1. `requires_ib` is
+  false. Edge and `:8321/health/lite` stayed up
+  (`auth_state=authenticated`).
+- **Detection:** journal line `candidate grok update failed: error:
+  unexpected argument '--no-auto-update' found` plus
+  `grok upgrade heartbeat non-fatal: write_service_health_http() got
+  an unexpected keyword argument 'last_error'`. `systemctl show
+  radon-grok-upgrade.service -p Result,NRestarts,ExecMainStatus` →
+  `exit-code` / `0` / `1`.
+- **Discriminating check:** `grok update --help` has `--check`,
+  `--json`, `--version`, and no `--no-auto-update`. `grok update
+  --check --json` uses `currentVersion` and `latestVersion`. Python
+  Turso canary is not this exit (the process died before a ledger
+  read). `/api/service-health` 401 without the probe token is
+  anonymous. No `/home/radon/.radon-deploy-transition.json`.
+  `Result=signal` or exit 143 inside a deploy window is
+  `deploy-stop-clean-oneshot-signal`. Not `ib-gateway-grouped`.
+- **Remediation (code):** parse `currentVersion` / `latestVersion`
+  (old keys still work). Call `grok update` or `grok update --version
+  <latest>` with no `--no-auto-update`. Pass the failure string as
+  `error={"message": ...}`. Do not restart-flap; the unit is not on
+  `RERUNNABLE_ONESHOT_UNITS`. The next 07:40 UTC timer installs
+  `1.0.44` after this deploys. LKG is still absent until that promote
+  writes it.
+- **Regression:** `scripts/tests/test_grok_upgrade.py`
+  (`test_parse_update_check_grok_103_version_keys`,
+  `test_update_argv_omits_flag_grok_update_rejects`,
+  `test_pins_latest_version_and_promotes`,
+  `test_failure_passes_error_dict_not_last_error`).
+- **Code:** `scripts/grok_upgrade.py` (`parse_update_check`,
+  `install_candidate_cli`, `_record_health`).
 
 ## Grok auto-response on iPhone P1 pages
 

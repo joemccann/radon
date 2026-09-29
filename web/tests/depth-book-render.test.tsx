@@ -179,6 +179,26 @@ describe("OrderBook render — all three kinds", () => {
   });
 });
 
+describe("Window head — live values hold their width across ticks (jitter, 2026-09-29)", () => {
+  // SPCX: MID 148.1150 -> 148.1350 and BID 148.10 -> 148.1100 alternate between
+  // 2 and 4 decimals, so the stats changed length every tick and shoved the
+  // feed pill + tape toggle left and right.
+  function widths(container: HTMLElement) {
+    return Array.from(container.querySelectorAll<HTMLElement>(".book-head-stat b")).map((b) => b.style.minWidth);
+  }
+
+  it("reserves the same width for a 2-decimal and a 4-decimal tick", () => {
+    const unentitled: DepthBook = { ...STOCK_BOOK, entitled: false, bid: [], ask: [] };
+    const first = renderBook(unentitled, "stock", { bid: 148.1, ask: 148.13, last: 148.115, lastLabel: "MID" });
+    const before = widths(first.container);
+    cleanup();
+    const second = renderBook(unentitled, "stock", { bid: 148.11, ask: 148.16, last: 148.135, lastLabel: "MID" });
+    const after = widths(second.container);
+    expect(before.slice(0, 3).every((w) => w.endsWith("ch"))).toBe(true);
+    expect(after).toEqual(before);
+  });
+});
+
 describe("Window head — derives from the depth book, not the L1 feed (BUG 1)", () => {
   it("shows the depth bid/ask/MID even when the passed-in L1 scalars are corrupt", () => {
     // MU corruption signature: negative MARK / BID on the L1 feed.

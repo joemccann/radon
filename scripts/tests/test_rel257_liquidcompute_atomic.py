@@ -94,45 +94,23 @@ class TestLiquidComputeAtomicReplacement:
         assert next(row for row in remaining if row["series_id"] == "h100-us")["value"] == 999.0
 
     def test_upsert_observations_by_identity_atomic_on_hrana(self, tmp_path, monkeypatch):
-        """RED: HranaHttpError during replacement must not lose old observation.
-        
-        On Hrana: insert new rows first, then delete old. If insert fails, old data remains.
-        """
-        store = ObservationStore()  # No path = uses Hrana
+        """No independently committed DELETE may precede a failed batch."""
+        from knowledge import http_db
+        store = ObservationStore()
         store.initialize = MagicMock()
-        
-        # Create valid observations
-        initial_obs = [_make_valid_obs("h100-us", 2.6766, FETCHED, HASH)]
-        revised_obs = [_make_valid_obs("h100-us", 999.0, "2026-09-15T13:00:00+00:00", "d" * 64)]
-        
-        # Mock _query to return initial observation
-        def mock_query(sql, args=()):
-            if "SELECT" in sql and "ai_cycle_observations" in sql:
-                return [(1, json.dumps(initial_obs[0]))]
-            return []
-        
-        store._query = mock_query
-        
-        # Track calls to hrana_execute (imported locally in _execute)
-        calls = []
-        def mock_hrana_execute(sql, args=()):
-            calls.append({"sql": sql, "args": args})
-            # Fail on first INSERT (insert new row first)
-            if "INSERT" in sql and len([c for c in calls if "INSERT" in c["sql"]]) == 1:
-                raise HranaHttpError("Injected Hrana INSERT failure")
-            return MagicMock()
-        
-        monkeypatch.setattr("scripts.db.hrana_http.hrana_execute", mock_hrana_execute)
-        
-        # Attempt replacement - should fail on first INSERT
+        connection = MagicMock()
+        connection.execute_transaction.side_effect = HranaHttpError("Injected Hrana INSERT failure")
+        monkeypatch.setattr(http_db, "Connection", lambda: connection)
+        single_statement = MagicMock(side_effect=AssertionError("untransactional write"))
+        monkeypatch.setattr("scripts.db.hrana_http.hrana_execute", single_statement)
+
         with pytest.raises(HranaHttpError, match="Injected Hrana INSERT failure"):
-            store.upsert_observations_by_identity(revised_obs)
-        
-        # Verify INSERT was attempted before any DELETE
-        insert_calls = [c for c in calls if "INSERT" in c["sql"]]
-        delete_calls = [c for c in calls if "DELETE" in c["sql"]]
-        assert len(insert_calls) >= 1, "Should attempt INSERT first"
-        assert len(delete_calls) == 0, "Should not DELETE if INSERT fails (old data preserved)"
+            store.upsert_observations_by_identity([_make_valid_obs(value=999)])
+        connection.execute_transaction.assert_called_once()
+        statements = connection.execute_transaction.call_args.args[0]
+        assert [sql.split()[0] for sql, _ in statements] == ["DELETE", "INSERT"]
+        single_statement.assert_not_called()
+        connection.close.assert_called_once()
 
     def test_persist_ticker_reports_hrana_error_on_observation_failure(self, tmp_path, monkeypatch):
         """RED: HranaHttpError from upsert_observations_by_identity must surface as error health.

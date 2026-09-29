@@ -24,7 +24,9 @@ DEFAULT_LKG_PATH = Path(
     os.environ.get("RADON_GROK_LKG_PATH", "/var/lib/radon/grok_lkg.json")
 )
 DEFAULT_LOCK_PATH = Path(
-    os.environ.get("RADON_GROK_RUNTIME_LOCK", "/var/lib/radon/grok-runtime.lock")
+    os.environ.get(
+        "RADON_GROK_RUNTIME_LOCK", "/var/lib/radon/grok-runtime/grok-runtime.lock"
+    )
 )
 DEFAULT_LIVE_BIN = Path(
     os.environ.get("GROK_BIN") or str(Path.home() / ".local" / "bin" / "grok")
@@ -34,6 +36,17 @@ DEFAULT_REASONING = os.environ.get("GROK_REASONING_EFFORT", "high")
 _VERSION_RE = re.compile(r"\b(\d+\.\d+\.\d+)\b")
 _DEFAULT_MODEL_RE = re.compile(r"(?im)^default model:\s*(\S+)")
 _MODEL_LINE_RE = re.compile(r"(?im)^[ \t]*([a-z0-9][a-z0-9._-]{2,})")
+# The grok agent runs --always-approve over untrusted page text. Its parent
+# holds Turso and Pushover credentials; the child gets an allowlist, never
+# a scrub, so a new secret in the env file cannot leak by default.
+GROK_CHILD_ENV_ALLOWLIST = (
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "LC_CTYPE",
+    "TERM", "TMPDIR", "TZ",
+    "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR",
+    "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+    "GROK_HOME",
+)
 RUNTIME_STAMP_RE = re.compile(
     r"Ran\s+(\S+)\s+on\s+CLI\s+(\S+)", re.IGNORECASE
 )
@@ -291,11 +304,18 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def grok_child_env(overrides: Optional[dict] = None) -> dict:
+    """Allowlisted environment for every grok child process."""
+    env = {k: os.environ[k] for k in GROK_CHILD_ENV_ALLOWLIST if os.environ.get(k)}
+    env.update(overrides or {})
+    return env
+
+
 def _default_runner(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(
         argv,
         cwd=kwargs.get("cwd"),
-        env=kwargs.get("env"),
+        env=kwargs.get("env") or grok_child_env(),
         capture_output=True,
         text=True,
         timeout=kwargs.get("timeout", 120),

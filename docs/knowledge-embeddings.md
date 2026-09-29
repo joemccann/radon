@@ -26,7 +26,32 @@ The `knowledge` table carries two vector columns:
 - **Disable:** `RADON_KB_EMBED_DISABLED=1` turns off all embeddings; ingest writes FTS-only rows (`embedding` and `embedding_v2` both NULL).
 - **Transient write retries:** source and prepared-write retries wait `_retry_delay(attempt)` in `scripts/knowledge/ingest.py`: 12s doubling to a 60s cap, plus up to 25% jitter. Turso reaps an abandoned idle transaction after 10s (up to 300s if it is still running), so a shorter wait queues the retry behind the orphan's writer lock. Replay is safe because upserts are idempotent on `content_hash`.
 
+## Bounded HTTP persistence
+
+`scripts/knowledge/http_db.py` provides a schema-independent Hrana connection.
+It supports both the `scripts/` import path and package-mode imports. Knowledge
+ingestion and Liquid Compute observation replacement share its conditional
+transaction transport (REL-257): BEGIN, dependent writes, COMMIT or ROLLBACK,
+and stream close travel in one bounded request. A lost receipt raises; callers
+must prove replay idempotency rather than infer that no commit happened. Liquid
+Compute deletes and reinserts each observation identity within that transaction,
+so a failed insert preserves the prior batch. The connection itself creates no
+knowledge-specific schema.
+
 ## Backfill
+
+**Use when:** v2 coverage is incomplete or knowledge ingestion causes writer
+contention. Before manual migrations, verify the deployed retrieval code
+uses exact scans and preserve a [verified recovery
+copy](cloud-services.md#restore-runbook). Diagnose with the read-only index
+checks below and the backfill's `--dry-run`; manual migration can apply all
+pending manual files, so review those files before using its opt-in.
+The write blast radius is the shared database. Stop on an unexpected target,
+schema error, or renewed writer contention. Keep ingestion disabled until
+the index checks pass. Verify coverage and the golden eval after backfill.
+Do not roll back to retrieval code requiring a dropped index; retain exact
+scan/local fallback and escalate unresolved failures via the [incident
+runbook](incident-runbook.md). Data recovery follows the restore owner above.
 
 Migration 0087 added `embedding_v2` and `idx_knowledge_embedding_v2` while every value was still NULL. That DiskANN index matched exact-scan recall (0.96 hit@5, 0.99 recall vs exact on 11,718 rows / 24 eval_golden questions) and cost about 5.0 GB, 4.5-33s per row insert, and a CREATE that cannot finish inside Turso's one-hour statement limit. Exact scan was about 1s p50 and 1.8s p95, with no index storage and about 17ms per row write. Migration 0089 drops the index. Do not edit 0087.
 
@@ -91,7 +116,7 @@ Past about 50k rows, revisit a compact index (`compress_neighbors=float8`, `max_
 
 ## Drift test
 
-`scripts/tests/test_knowledge_embedding_contract.py` asserts:
+`scripts/tests/test_knowledge_embed_v2.py` asserts:
 
 - `embedding_v2` column exists post-migration 0087.
 - `idx_knowledge_embedding_v2` is created by 0087 and dropped by 0089; `idx_knowledge_embedding` is dropped by 0090. Both are `-- radon-migrate: manual` and are not applied by boot.
@@ -105,7 +130,7 @@ Run: `python3.13 -m pytest scripts/tests/test_knowledge_embed_v2.py scripts/test
 - **Rotate NVIDIA key:** Update `NVIDIA_API_KEY` in the encrypted credential store (profile Credentials tab) or `/etc/radon/env`. The next query call picks it up automatically.
 - **Force local fallback:** Set `RADON_KB_EMBED_BACKEND=local` in the environment and restart `radon-api` and `radon-monitor`.
 - **Disable dual-write (save NVIDIA quota):** `RADON_KB_EMBED_DUAL_WRITE=0`; restart ingest workers. Existing `embedding_v2` values remain; new rows get only 384-d.
-- **Verify backfill complete:** Run `python3.13 -c "from scripts.knowledge.embed import v2_coverage_ready; from db import get_db; print(v2_coverage_ready(get_db()))"` on a host with Turso credentials. `True` = every `embedding_v2` is populated and the exact scan is the active query path.
+- **Verify backfill complete:** Run `python3.13 -c "from scripts.knowledge.embed import v2_coverage_ready; from scripts.db.client import get_db; print(v2_coverage_ready(get_db()))"` on a host with Turso credentials. Run from the repository root with dependencies installed and the intended database environment already loaded. `True` means no NULL `embedding_v2` was found; backend configuration or a provider failure can still select the local fallback.
 - **Manual backfill:** `python3.13 scripts/knowledge/backfill_v2.py --batch-size 64 --min-interval 0` (idempotent; safe to re-run). Run it after 0089 has dropped the index.
 - **Drop the 2048-d index:** `RADON_MIGRATE_MANUAL=1 python3.13 scripts/db/migrate.py` (about 14 minutes when the index exists). Idempotent (`DROP INDEX IF EXISTS`).
 
@@ -125,4 +150,4 @@ Row contract: `scripts/knowledge/schema.py:KnowledgeDoc` (fields `embedding: lis
 Writer: `scripts/knowledge/store.py` (dual-write logic, HTTP and local paths).
 Query resolution: `scripts/knowledge/embed.py:resolve_query_vector`.
 Backfill script: `scripts/knowledge/backfill_v2.py`.
-Contract test: `scripts/tests/test_knowledge_embedding_contract.py`.
+Contract test: `scripts/tests/test_knowledge_embed_v2.py`.

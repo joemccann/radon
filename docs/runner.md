@@ -2,7 +2,7 @@
 
 One loop run is what the operator would do by hand: open an agent CLI in a fresh clone of `main`, paste the loop's prompt, walk away. `scripts/runner/run_loop.sh <loop>` does exactly that:
 
-1. Take the loop's lock (a live run makes the new fire page `skipped` and exit 0; a lock whose pid is gone or now belongs to a different process is reclaimed).
+1. Take the loop's lock (a live run makes the new fire page `skipped` and exit 0; a proven dead or reused pid is reclaimed by one contender). Missing identity metadata or an unreadable process fingerprint refuses with exit 75 and preserves the clone (REL-291 / R-710).
 2. Delete the previous clone and `git clone` `main` again, so nothing an agent left behind (files, `.git` hooks, config) survives to the next night.
 3. Prepend a header (date, branch `<BRANCH_PREFIX>/<date>`, time budget) to `.claude/runner-prompts/<loop>.md` from that clone.
 4. Run the first agent in `AGENTS` under `timeout`. The next agent runs only if one exits non-zero; a timeout ends the night. Anything the agent left running is killed with its process group.
@@ -24,7 +24,7 @@ Safety is where the runner runs, not what the script checks:
 | No production credential in the clone | The clone gets no `.env`. `~/.radon-runner.env` may hold only `GH_TOKEN`, `PUSHOVER_USER` and `PUSHOVER_TOKEN`. The agent runs as `_radonbot`, so it can read that file. The runner unsets the Pushover keys in the agent process; `GH_TOKEN` stays so the agent can push. Do not put a production credential or an admin token in that file or anywhere in the bot's home |
 | Agent cannot merge or push `main` | A separate GitHub machine account with the Write role on this repo only, used through its classic `repo` token, plus the `main-review` repository ruleset on the default branch: 1 approving review, approval of the most recent push required, stale approvals dismissed on push. Its only bypass actor is the Repository admin role in pull-request mode, so an admin merges through a PR and never pushes `main` directly; the bot account is not exempt. The 27 required status checks stay in the classic branch protection on `main`, not in the ruleset. A token of the operator's own account would not do: it acts as the admin and bypasses the ruleset |
 
-The ruleset is applied at cutover. Before then every nightly loop still runs as the operator, whose admin token bypasses it anyway, and `scripts/codemap_nightly.sh` merges its own PR with that token.
+The six loops in [Migration](#migration-from-the-per-loop-wrappers) use the bot runner. `scripts/codemap_nightly.sh` is separate and merges its own PR with the operator's token. Verify the live ruleset in step 8b.3 before enabling a new installation.
 
 ## Set up a new Mac
 
@@ -65,10 +65,13 @@ sudo pmset -a sleep 0 displaysleep 10     # the Mac must stay awake at night
 ### 2. Install the runner (operator)
 
 ```bash
-/usr/bin/git clone https://github.com/joemccann/radon.git /tmp/radon-runner-install
-/bin/bash /tmp/radon-runner-install/scripts/runner/install.sh --print-plist documentation   # review
-sudo /bin/bash /tmp/radon-runner-install/scripts/runner/install.sh documentation ci-performance testing reliability security security-deepsec
+RI="$(mktemp -d)" && /usr/bin/git clone https://github.com/joemccann/radon.git "$RI"
+/bin/bash "$RI/scripts/runner/install.sh" --print-plist documentation   # review
+sudo /bin/bash "$RI/scripts/runner/install.sh" documentation ci-performance testing reliability security security-deepsec
+/bin/rm -rf "$RI"
 ```
+
+Always clone into a fresh `mktemp -d` directory, never a fixed `/tmp` path another account could create first. `install.sh` refuses (exit 77) when the clone, or any directory above it, is owned by someone other than root or you, or is group- or world-writable.
 
 It asks for your sudo password, then `User password:` for the new `_radonbot` account. Choose a password and save it (your password manager, or `security add-generic-password -s radon-runnerbot-login -a _radonbot -w`); step 5 reuses it. The `No clear text password ... FDE` warning and `Home directory is assigned (not created!)` are expected: the script creates the home right after. It ends with one `installed com.radon.runner.<loop>` line per loop.
 
@@ -131,8 +134,10 @@ grep -E "^(export )?(NVIDIA_API_KEY|CEREBRAS_API_KEY)=" ~/.radon/agent-cli/env |
 On a Mac where you have no such file, create `/Users/_radonbot/.radon/agent-cli/env` in the bot shell with `NVIDIA_API_KEY=` and `CEREBRAS_API_KEY=` lines instead. Then, in the bot shell:
 
 ```bash
-/bin/bash /tmp/radon-runner-install/scripts/agent_cli_bootstrap.sh
-/bin/bash /tmp/radon-runner-install/scripts/agent_cli_bootstrap.sh --check
+RB="$(mktemp -d)" && /usr/bin/git clone --depth 1 https://github.com/joemccann/radon.git "$RB"
+/bin/bash "$RB/scripts/agent_cli_bootstrap.sh"
+/bin/bash "$RB/scripts/agent_cli_bootstrap.sh" --check
+/bin/rm -rf "$RB"
 ```
 
 Every line must read `OK` with a `/Users/_radonbot/...` path: codex, grok, nvidia, cerebras, fx. A `MISSING` line names its fix. agy is not in this check; step 5 covers it.
@@ -284,17 +289,25 @@ Steps 6 to 8 write into the bot's home only as the bot: your account reads your 
 /bin/bash /usr/local/radon-runner/run_loop.sh documentation
 ```
 
-It runs in the foreground for up to `TIMEOUT_SECS` (3 hours for documentation); the 2026-09-28 run took 15 minutes. Do not stop it to read the log. Follow it from your own tab instead (the log directory is mode 700, so your account needs `sudo -u`):
+It runs in the foreground for up to the loop configuration's `TIMEOUT_SECS`. Do not stop it to read the log. Follow it from your own tab instead (the log directory is mode 700, so your account needs `sudo -u`):
 
 ```bash
 sudo -u _radonbot tail -f /Users/_radonbot/radon-runner/logs/documentation/$(date +%F).log
 ```
 
-It passes when the log starts with `starting grok`, a draft PR on `documentation/<date>` appears with author `radon-runner-bot` (`gh pr list --author radon-runner-bot --state all`), and a `radon documentation: done via <agent>` Pushover arrives.
+Verify a completed `RESULT:` line in the log and a `radon documentation: done via <agent>` Pushover. `RESULT: no PR - <reason>` is healthy when the audit found no substantive correction. When a change is published, verify its draft PR on `documentation/<date>` has author `radon-runner-bot` (`gh pr list --author radon-runner-bot --state all`) and that every applicable check on its exact head is green. A runner `done` page alone reports the agent's exit status; it does not prove CI passed.
+
+If completion evidence is missing or the run fails, preserve the log and
+inspect the troubleshooting checks below before another fire. Do not
+reinstall the runner or upgrade its CLIs while a run is active. For a bad
+installation, keep the affected job stopped and have the operator reinstall
+a reviewed known-good runner/config from a retained checkout after the run
+exits; prompts still come from `main` on each fire. Escalate unresolved
+failures with the loop name and sanitized log, never credentials.
 
 ### 10. Clean up
 
-`exit` the bot shell, then `/bin/rm -rf /tmp/radon-runner-install`.
+`exit` the bot shell. Step 2 and step 6 already removed their clones.
 
 ## Operate
 
@@ -304,7 +317,7 @@ It passes when the log starts with `starting grok`, a draft PR on `documentation
 | launchd's own output (start failures) | `sudo -u _radonbot tail /Users/_radonbot/radon-runner/launchd-documentation.log` |
 | Is the job loaded, when did it last run | `sudo launchctl print system/com.radon.runner.documentation \| grep -E 'state\|last exit'` |
 | Run a loop now | `sudo launchctl kickstart system/com.radon.runner.documentation` |
-| Change `run_loop.sh` or a loop `.env` | merge to `main`, then repeat step 2 on the mini (clone and `sudo install.sh <loop>`, e.g. `sudo install.sh documentation`); the installed copy does not change until you do. The prompt is read from `main` every night and needs no reinstall |
+| Change `run_loop.sh` or a loop `.env` | merge to `main`, then repeat step 2 on the mini (clone into a fresh `mktemp -d` directory, `sudo install.sh <loop>`, e.g. `sudo install.sh documentation`, then remove the clone); the installed copy does not change until you do. The prompt is read from `main` every night and needs no reinstall |
 | Rotate the GitHub token (before its expiry) | step 7.5 to 7.6, then step 8 |
 | Release a held security P0/P1 | `sudo -u _radonbot sh -c 'echo "released: <finding-id>" >> ~/radon-runner/state/<loop>/scratch/<run-id>/run-record.md'` |
 | Read a security loop's private report | the Pushover page's "Open private report" link (`joemccann/radon-security-reports`) |
@@ -312,6 +325,8 @@ It passes when the log starts with `starting grok`, a draft PR on `documentation
 | Re-sign a CLI | the bot shell, then the sign-in command from step 4 |
 
 ## Troubleshooting
+
+An uncertain lock requires operator inspection of its recorded PID and process start time before removing it. Do not remove a live owner's lock or clone. A crashed stale-lock reclaimer can leave a `reaping` directory; verify that no run owns the workspace before clearing the orphan. The exit trap removes only the current runner's own lock. Install this behavior from the reviewed, merged checkout with `sudo scripts/runner/install.sh reliability` after the active run exits; changing source alone does not update the root-owned installed runner.
 
 | Symptom | Cause | Fix |
 |---|---|---|

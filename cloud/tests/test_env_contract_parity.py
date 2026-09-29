@@ -72,7 +72,7 @@ EXEMPT: dict[str, str] = {
     "GROK_MODEL": "optional override; unset resolves the live default from `grok models` or last-known-good",
     "GROK_CLI_VERSION": "optional stamp override for tests; unset is probed from `grok --version`",
     "RADON_GROK_LKG_PATH": "optional override; unset is /var/lib/radon/grok_lkg.json",
-    "RADON_GROK_RUNTIME_LOCK": "optional override; unset is /var/lib/radon/grok-runtime.lock",
+    "RADON_GROK_RUNTIME_LOCK": "optional override; unset is /var/lib/radon/grok-runtime/grok-runtime.lock",
     "IB_FLEX_FLOWS_QUERY_ID": "deliberately unset; _flows_query_id() falls back to the NAV id",
 }
 

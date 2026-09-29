@@ -213,3 +213,49 @@ describe("usePreviousClose retry pacing", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+it("REL-295 keeps Retry-After across price renders while a response is pending", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-09-29T15:00:00Z"));
+  let release!: (value: Response) => void;
+  const fetchMock = vi.fn()
+    .mockImplementationOnce(() => new Promise<Response>(resolve => { release = resolve; }))
+    .mockResolvedValue(response({ closes: { AAPL: 99 } }));
+  vi.stubGlobal("fetch", fetchMock);
+  const { result, rerender } = renderHook(({ last }) => usePreviousClose({
+    AAPL: { ...price("AAPL"), last },
+  }), { initialProps: { last: 100 } });
+  rerender({ last: 101 });
+  await act(async () => { release(response({}, 429, { "Retry-After": "30" })); });
+  rerender({ last: 102 });
+  await act(async () => { await vi.advanceTimersByTimeAsync(29_000); });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(result.current.AAPL.close).toBe(99);
+});
+
+it("REL-295 drops a late response after unmount without arming a retry", async () => {
+  vi.useFakeTimers();
+  let release!: (value: Response) => void;
+  const fetchMock = vi.fn(() => new Promise<Response>(resolve => { release = resolve; }));
+  vi.stubGlobal("fetch", fetchMock);
+  const { unmount } = renderHook(() => usePreviousClose({ AAPL: price("AAPL") }));
+  unmount();
+  await act(async () => { release(response({}, 429, { "Retry-After": "30" })); });
+  expect(vi.getTimerCount()).toBe(0);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it("REL-295 rejects a previous session's late successful close", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-09-29T15:00:00Z"));
+  const releases: ((value: Response) => void)[] = [];
+  vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(resolve => { releases.push(resolve); })));
+  const { result, rerender } = renderHook(() => usePreviousClose({ AAPL: price("AAPL") }));
+  vi.setSystemTime(new Date("2026-09-30T15:00:00Z"));
+  rerender();
+  await act(async () => { releases[1](response({ closes: { AAPL: 98 } })); });
+  await act(async () => { releases[0](response({ closes: { AAPL: 99 } })); });
+  expect(result.current.AAPL.close).toBe(98);
+});

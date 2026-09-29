@@ -582,3 +582,38 @@ def test_pickup_preserves_terminal_pr_disposition(state):
     assert not any(call[:3] == ["gh", "pr", "create"] for call in run.calls)
     listing = next(call for call in run.calls if call[:3] == ["gh", "pr", "list"])
     assert listing[listing.index("--state") + 1] == "all"
+
+
+@pytest.mark.parametrize("patch_rc", [0, 1])
+def test_rel294_existing_pr_body_uses_rest_when_classic_projects_break_graphql(patch_rc):
+    """REL-294 / R-713: resume must not depend on gh pr edit's retired query."""
+    body = "## What changed\n\nLiteral `code` and $(text) stay intact.\n"
+    patches = []
+    def run(argv, **kwargs):
+        if argv[1:3] == ["auth", "status"]:
+            return FakeProc()
+        if argv[1:3] == ["pr", "list"]:
+            return FakeProc(stdout=json.dumps([{
+                "number": 123, "url": "https://github.com/joemccann/radon/pull/123",
+                "title": "existing", "state": "OPEN",
+            }]))
+        if argv[1:3] == ["pr", "edit"]:
+            return FakeProc(1, stderr="GraphQL: Projects (classic) is being deprecated (repository.pullRequest.projectCards)")
+        if argv[1] == "api":
+            assert "repos/joemccann/radon/pulls/123" in argv
+            assert argv[argv.index("--method") + 1] == "PATCH"
+            payload = json.loads(Path(argv[argv.index("--input") + 1]).read_text())
+            patches.append(payload)
+            return FakeProc(patch_rc, stdout="{}", stderr="injected PATCH failure" if patch_rc else "")
+        raise AssertionError(argv)
+
+    kwargs = dict(head="fix/resume", issue="resume", fix="fixed", body=body,
+                  update_existing=True, runner=run, gh_bin="gh")
+    if patch_rc:
+        with pytest.raises(ir.IrEnsurePrError, match="injected PATCH failure"):
+            ir.ensure_pr(**kwargs)
+    else:
+        outcome = ir.ensure_pr(**kwargs)
+        assert outcome["action"] == "exists"
+        assert outcome["url"] == "https://github.com/joemccann/radon/pull/123"
+    assert patches == [{"body": body}]

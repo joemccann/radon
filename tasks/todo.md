@@ -1,3 +1,11 @@
+# Task: tv-alerts hrana read timeout (2026-09-29)
+
+- [x] T1 depends_on: [] Failing test: empty-poll and ok-heartbeat TimeoutError must exit 0 and must not paint health; statement error still exits 1.
+- [x] T2 depends_on: [T1] main() treats that read timeout as non-fatal; runbook case.
+- [x] T3 depends_on: [T2] Focused pytest green. Commit on fix/tv-alerts-read-timeout. No push.
+
+Review: page 01374b99 was a fleet hrana read stall. Canary 64 ms, health lite authenticated, next fire 21:32Z processed 0. tv-alerts was the oneshot that still exited 1. Timeout now exits 0 with no health paint. Statement errors still exit 1. 22 passed. No push.
+
 # Task: IR PR descriptions + Grok pin (2026-09-28)
 
 - [x] T1 depends_on: [] Validator + pickup/autopush refuse placeholders; tests on title/body.
@@ -8649,3 +8657,30 @@ CI repair review: befea93d preserved21 new gateway/service component regressions
 - [x] T5 depends_on: [T4] Prepare substantive draft-PR and durable issue inputs; publication, exact-head CI, browser and notification receipts are tracked on issue #83.
 
 Review: six separate red/green finding commits; three serial closing rounds recorded in TEST_AUDIT.md, with two earlier load-sensitive failures explicitly retained beside green isolated reruns. Cloud FAILED lists match the detached base. Targeted hook coverage: 100% lines, 98% branches, 100% functions. Browser and external delivery receipts belong to issue #83. Fake-only tests; no live services, credential inspection, main pushes or merges.
+
+## Nightly reliability 2026-09-29
+
+- [x] T1 depends_on: [] Install isolated Python toolchain, read trusted checkpoint and open PRs, select tonight's branch.
+- [x] T2 depends_on: [T1] Audit 5c27667c..c274a773 and codemap importers; verify standing sweeps and inherited acceptance.
+- [x] T3 depends_on: [T2] Fix verified findings serially with fault-injection red/green and focused gates.
+- [ ] T4 depends_on: [T3] Run permanent drills, validate diff, publish substantive draft PR and await exact-head CI.
+- [ ] T5 depends_on: [T4] Record one durable issue comment and final review.
+
+Review: pending; only mocks/local fixtures and GitHub operations are authorized. Full suites and Vitest are assigned to CI.
+
+Nightly review update: REL-291 red 4, green runner/hooks 152; standing catalogs 57 passed. Remaining repairs and closing verification pending.
+
+Nightly closing review (2026-09-29): 12 repaired findings, including five new IDs R-710 through R-714. All reproductions confirmed serially before fixes. Python drills 95 passed; standing catalogs 57 passed; inherited acceptance 125 passed; expanded monitor 530 passed. Two production-browser regressions passed and screenshots inspected; TypeScript, build and six curation checks passed. Changed YAML parsed, runner bash syntax and diff checks passed, gitleaks found no secrets. Full pytest/cloud/Vitest and its idempotency drill remain assigned to exact-head PR CI. Remaining historical acceptance is explicit in the audit appendix; no invented BLOCKED status. Runner credentials are stripped from agent execution; no Pushover credentials are available here, and no secret file was sought. Publication, CI and one issue comment remain the final steps.
+
+Publication review: the runner PAT rejected workflow updates. Removed the unpublished workflow edits from local history and consolidated both new browser cases into the existing CI-selected order-safety spec. No CI gate changed; production browser 3 passed and curation 6 passed after consolidation.
+
+Delivery review: draft https://github.com/joemccann/radon/pull/795 is published. CI ticket fixtures were corrected without changing assertions; all eight Vitest shards then passed. Stop modification received the same trigger-price fault injection (red twice, focused green 175). Documentation owner gate red twice, then 71 passed after maintained docs were updated. Exact final-head CI and the single durable issue comment remain pending; GitHub's managed AI scanner separately reports an unsupported model and requires provider/operator repair.
+
+# Nightly CI performance audit — 2026-09-29
+
+- [x] T1 depends_on: [] Read open performance PRs, rolling checkpoint, ledger, and rules.
+- [x] T2 depends_on: [T1] Classify 30 organic main runs and reconstruct release critical paths.
+- [x] T3 depends_on: [T2] Rank safe candidates; implement qualifying experiments with red/green contracts.
+- [ ] T4 depends_on: [T3] Verify, publish substantive changes if any, and record one rolling issue comment.
+
+Review: CIP-015 is the sole qualifying critical-path experiment; 136 focused tests and 49 cloud contracts passed. Collection retains all 38 original cases and adds 3. No production source, gate, shard, timeout or deployment behavior changed. Release gain remains VALIDATING; PR CI and one rolling issue comment are pending.

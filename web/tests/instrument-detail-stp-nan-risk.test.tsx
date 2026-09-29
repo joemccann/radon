@@ -30,7 +30,7 @@ vi.mock("@/lib/RealtimePricesContext", async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    useRealtimePrices: () => ({ ...actual.useRealtimePrices(), connected: true }),
+    useRealtimePrices: () => ({ ...actual.useRealtimePrices(), connected: true, ibConnected: true }),
   };
 });
 
