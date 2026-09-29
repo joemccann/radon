@@ -24,7 +24,7 @@ if str(SCRIPTS) not in sys.path:
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import flex_sftp_pull as pull  # noqa: E402
-from test_flex_sftp_pull import FakeSftp, _ssh_config  # noqa: E402
+from test_flex_sftp_pull import FakeSftp, _ssh_config, sftp_retry_clock  # noqa: E402
 
 ET = ZoneInfo("America/New_York")
 # Thursday 08:30 ET: last completed session is Wednesday 2026-09-16.
@@ -114,7 +114,7 @@ def _drive(tmp_path, monkeypatch, files, reset_names, now=RETRY_NOW):
     return code, beats
 
 
-def test_current_duplicate_then_kex_reset_on_history_exits_zero(tmp_path, monkeypatch):
+def test_current_duplicate_then_kex_reset_on_history_exits_zero(tmp_path, monkeypatch, sftp_retry_clock):
     """Reproduce 2026-09-17 12:30Z: leftover outgoing RST must not fail the retry."""
     files = {
         CURRENT_TRADE: _xml(CURRENT),
@@ -128,6 +128,7 @@ def test_current_duplicate_then_kex_reset_on_history_exits_zero(tmp_path, monkey
         files,
         reset_names={OLD_TRADE, OLD_EQ},
     )
+    assert sftp_retry_clock == [2.0, 5.0]
     assert code == 0, f"08:30 retry paged P1 after current duplicates; beats={beats}"
     assert beats, "must heartbeat"
     assert beats[-1][0] == "ok"
@@ -135,10 +136,11 @@ def test_current_duplicate_then_kex_reset_on_history_exits_zero(tmp_path, monkey
 
 
 def test_kex_reset_on_every_get_without_a_current_statement_still_errors(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, sftp_retry_clock
 ):
     files = {OLD_EQ: _xml(STALE), OLD_TRADE: _xml(date(2026, 9, 3))}
     code, beats = _drive(tmp_path, monkeypatch, files, reset_names={OLD_EQ, OLD_TRADE})
+    assert sftp_retry_clock == [2.0, 5.0]
     assert code == 1
     assert beats[-1][0] == "error"
 

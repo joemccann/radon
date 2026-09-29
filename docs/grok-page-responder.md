@@ -194,7 +194,7 @@ model-unavailable, unparseable output with no `RESULT:` line), the
 responder retries once on last-known-good and alerts. A valid
 `RESULT: failed` line is not a retry.
 
-A shared flock (`/var/lib/radon/grok-runtime.lock`) serializes the
+A shared flock (`/var/lib/radon/grok-runtime/grok-runtime.lock`) serializes the
 responder against a live promotion.
 
 ### Daily upgrade timer (enabled)
@@ -203,8 +203,8 @@ responder against a live promotion.
 07:40 UTC it runs `scripts/grok_upgrade.py`: copy the resolved CLI into a
 unique candidate directory under the configured `--scratch` path
 (`data/cache/grok_upgrade` in the responder checkout), then run that private
-copy's updater with isolated `HOME` and `GROK_HOME`. Probe its version before
-smoking a canned dry-run that must return `RESULT:` plus a Part 1
+copy's updater with isolated `HOME` and `GROK_HOME`. Probe its version,
+resolve the newest default model, then smoke a canned dry-run that must return `RESULT:` plus a Part 1
 validator-passing body. The live executable is never the updater target
 (REL-292 / R-711).
 
@@ -301,9 +301,23 @@ grok path. The claim still counts against the daily action cap.
 The unit's stripped `EnvironmentFile` is pointless if the agent can read the
 real secrets off disk, so `/home/radon/radon-cloud` (which holds the 0600
 `.env` with IB Flex, Clerk, UW and archive credentials) is in
-`InaccessiblePaths`, `/home/radon` is `ReadOnlyPaths`, and only the dedicated
-clone is writable. `ProtectHome=tmpfs` is deliberately NOT used: it would also
-hide the clone and the venv the unit executes from.
+`InaccessiblePaths`, as are `/var/lib/radon/flex-secrets` and
+`/var/lib/radon/rh-mcp`. `/home/radon` and `/var/lib/radon` are
+`ReadOnlyPaths`. The unit writes only the dedicated clone, `~/.grok` (session
+state) and `/var/lib/radon/grok-runtime` (the shared flock). `~/.grok/bin`,
+`~/.grok/hooks` and `~/.grok/downloads` stay read-only inside `~/.grok`,
+because `radon-subscription-tokens` runs `grok` and `agy` from `~/.grok/bin`
+and `~/.local/bin` with the production env. The upgrader installs candidates
+under `/var/lib/radon/grok-upgrade`, which the responder cannot write, so the
+promoted live symlink never points into a responder-writable path.
+`ProtectHome=tmpfs` is deliberately NOT used: it would also hide the clone and
+the venv the unit executes from.
+
+The stripped env file itself is also in `InaccessiblePaths` (systemd reads it
+before building the namespace), and every grok child process runs with an
+allowlisted environment (`grok_runtime.grok_child_env`: PATH, HOME, locale,
+proxy and CA vars). Turso and Pushover credentials stay with the Python
+parent, which needs them for the ledger, heartbeats and alerts.
 
 Page text is untrusted third-party/exception content. It reaches the model
 only inside `<untrusted-excerpt>` delimiters, and `build_prompt` re-sanitizes

@@ -1,3 +1,11 @@
+# Task: tv-alerts hrana read timeout (2026-09-29)
+
+- [x] T1 depends_on: [] Failing test: empty-poll and ok-heartbeat TimeoutError must exit 0 and must not paint health; statement error still exits 1.
+- [x] T2 depends_on: [T1] main() treats that read timeout as non-fatal; runbook case.
+- [x] T3 depends_on: [T2] Focused pytest green. Commit on fix/tv-alerts-read-timeout. No push.
+
+Review: page 01374b99 was a fleet hrana read stall. Canary 64 ms, health lite authenticated, next fire 21:32Z processed 0. tv-alerts was the oneshot that still exited 1. Timeout now exits 0 with no health paint. Statement errors still exit 1. 22 passed. No push.
+
 # Task: IR PR descriptions + Grok pin (2026-09-28)
 
 - [x] T1 depends_on: [] Validator + pickup/autopush refuse placeholders; tests on title/body.
@@ -8657,3 +8665,12 @@ Nightly closing review (2026-09-29): 12 repaired findings, including five new ID
 Publication review: the runner PAT rejected workflow updates. Removed the unpublished workflow edits from local history and consolidated both new browser cases into the existing CI-selected order-safety spec. No CI gate changed; production browser 3 passed and curation 6 passed after consolidation.
 
 Delivery review: draft https://github.com/joemccann/radon/pull/795 is published. CI ticket fixtures were corrected without changing assertions; all eight Vitest shards then passed. Stop modification received the same trigger-price fault injection (red twice, focused green 175). Documentation owner gate red twice, then 71 passed after maintained docs were updated. Exact final-head CI and the single durable issue comment remain pending; GitHub's managed AI scanner separately reports an unsupported model and requires provider/operator repair.
+
+# Nightly CI performance audit — 2026-09-29
+
+- [x] T1 depends_on: [] Read open performance PRs, rolling checkpoint, ledger, and rules.
+- [x] T2 depends_on: [T1] Classify 30 organic main runs and reconstruct release critical paths.
+- [x] T3 depends_on: [T2] Rank safe candidates; implement qualifying experiments with red/green contracts.
+- [ ] T4 depends_on: [T3] Verify, publish substantive changes if any, and record one rolling issue comment.
+
+Review: CIP-015 is the sole qualifying critical-path experiment; 136 focused tests and 49 cloud contracts passed. Collection retains all 38 original cases and adds 3. No production source, gate, shard, timeout or deployment behavior changed. Release gain remains VALIDATING; PR CI and one rolling issue comment are pending.

@@ -58,17 +58,23 @@ RETRY_NEXT = "The next fire retries this phase."
 REDACTED = "[REDACTED]"
 
 _FENCE_RE = re.compile(r"```.*?```", re.S)
+# The key may be quoted (JSON) or a hyphenated header name, the value quoted
+# (spaces inside) or led by an auth scheme word ("Authorization: Basic <value>").
 _SECRET_ASSIGN_RE = re.compile(
-    r"\b([A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|PASS|AUTH|CREDENTIAL|"
-    r"API_KEY|APIKEY|_KEY)[A-Za-z0-9_]*)(\s*[=:]\s*)(\S+)",
+    r"\b([A-Za-z0-9_-]*(?:TOKEN|SECRET|PASSWORD|PASSWD|PASS|AUTH|CREDENTIAL|"
+    r"API[-_]?KEY|[-_]KEY)[A-Za-z0-9_-]*)([\"']?\s*[=:]\s*)"
+    r"(?:(?:basic|bearer|digest|token)\s+)?(?:\"[^\"\n]*\"|'[^'\n]*'|\S+)",
     re.I,
 )
 _BEARER_RE = re.compile(r"(Bearer\s+)\S+", re.I)
 # Bare credential literals by well-known prefix or shape (the classes the
 # gitleaks default ruleset flags): Anthropic / OpenAI keys, GitHub tokens,
-# Slack tokens, AWS access key ids, three-part JWTs. Kept tight on purpose.
+# Slack tokens, AWS access key ids, three-part JWTs, and the provider key
+# prefixes the canonical redactor knows (Stripe, xAI, NVIDIA, Cerebras).
 _CREDENTIAL_LITERAL_RE = re.compile(
     r"\b(?:sk-(?:ant-)?[A-Za-z0-9_-]{20,}"
+    r"|sk_(?:live|test)_[A-Za-z0-9]{6,}"
+    r"|(?:xai|nvapi|csk)-[A-Za-z0-9_-]{16,}"
     r"|gh[pousr]_[A-Za-z0-9]{36,}"
     r"|github_pat_[A-Za-z0-9_]{22,}"
     r"|xox[abpors]-[A-Za-z0-9-]{10,}"
@@ -76,13 +82,20 @@ _CREDENTIAL_LITERAL_RE = re.compile(
     r"|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})"
 )
 _EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w.-]+\.\w+\b")
-# App routes (/api/..., /v1/...). Not filesystem roots: lock-held comments
-# name $REPO and $RUNNER_LOCK (/Users/..., /tmp/..., /home/...).
+# App routes (/api/..., /v1/...) with any query or fragment. Not filesystem
+# roots: lock-held comments name $REPO and $RUNNER_LOCK (/Users/..., /tmp/...,
+# /home/...).
 _ROUTE_RE = re.compile(
     r"(?<![\w.])(/(?!Users\b|home\b|tmp\b|private\b|var\b|opt\b)"
-    r"[a-z][\w.-]*(?:/[\w.-]+)+)"
+    r"[a-z][\w.-]*(?:(?:/[\w.-]+)+(?:[?#]\S*)?|[?#]\S*))"
 )
-_URL_RE = re.compile(r"https?://(?!(?:www\.)?claude\.ai(?:/|\s|$))\S+", re.I)
+# Any scheme, not just http(s): database, cache and socket URIs carry
+# credentials in their userinfo or query.
+_URL_RE = re.compile(r"\b[a-z][a-z0-9+.-]*://\S+", re.I)
+# The quota ladder's one operator URL, kept only when nothing follows it.
+_USAGE_KEEP_RE = re.compile(
+    r"(?:https?://)?claude\.ai/settings/usage(?=[\s).,;:!'\"\]>]|$)", re.I
+)
 _FILE_LINE_RE = re.compile(
     r"\b[\w./-]+\.(?:py|ts|tsx|js|mjs|cjs|sh|go|rb|java|json|yml|yaml|toml|md):\d+\b"
 )
@@ -166,7 +179,7 @@ def sanitize(text: str) -> str:
     if not text:
         return text
     # Preserve the one operator URL the quota ladder names, then restore.
-    text = text.replace(_USAGE_KEEP, "\x00USAGE\x00")
+    text = _USAGE_KEEP_RE.sub("\x00USAGE\x00", text)
     text = _URL_RE.sub(REDACTED, text)
     text = _ROUTE_RE.sub(REDACTED, text)
     text = _FILE_LINE_RE.sub(REDACTED, text)

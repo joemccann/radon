@@ -51,7 +51,7 @@ def _default_runner(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(
         argv,
         cwd=kwargs.get("cwd"),
-        env=kwargs.get("env"),
+        env=kwargs.get("env") or grok_runtime.grok_child_env(),
         capture_output=True,
         text=True,
         timeout=kwargs.get("timeout", 120),
@@ -155,9 +155,7 @@ def install_candidate_cli(
     installed.parent.mkdir(parents=True, exist_ok=True)
     source = Path(shutil.which(grok_bin) or grok_bin).resolve(strict=True)
     shutil.copy2(source, installed)
-    env = os.environ.copy()
-    env["GROK_HOME"] = str(dest)
-    env["HOME"] = str(dest)
+    env = grok_runtime.grok_child_env({"GROK_HOME": str(dest), "HOME": str(dest)})
     argv = [str(installed), "update", "--no-auto-update"]
     if version:
         argv[2:2] = ["--version", version]
