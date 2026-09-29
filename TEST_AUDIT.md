@@ -10720,3 +10720,12 @@ Detached base c274a773 cloud: 2341 passed / 7 skipped; sorted FAILED list empty.
 Full precommit gate: Python 13017 passed / 2 skipped / 23 subtests, Vitest 10213 passed, cloud 2341 passed / 7 skipped. Structured-file parsing, shell syntax, whitespace and secret scans are recorded with delivery. Browser execution, screenshots, exact-head CI and external delivery receipts are recorded on rolling issue #83. No local browser/server was available.
 
 Final hygiene: 71 focused documentation contracts passed; 5 audited JSON and 2 YAML files parsed; 10 audited shell scripts passed bash -n. Final branch diff passed whitespace checks and gitleaks reported zero leaks. No forbidden ledger or generated codemap file changed.
+
+
+### CI browser acceptance and fixture repair 2026-09-29
+
+T-495 browser acceptance completed on CI run 36554446379/job 109360196812 at e028b4e4: all four chain geometry/order scenarios passed. Eight before/after screenshots were visually reviewed at 1440px desktop and 390px mobile in light/dark themes; rows, pane/header positions and viewport bounds remained stable.
+
+The same run exposed a T-515 browser-fixture startup assumption (227 curated cases passed, one failed): the trace contained two MU requests 15ms apart before the cooldown phase. The fixture now navigates with a valid close, installs its controlled clock after readiness, then introduces the missing close. It adds an exact zero-request precondition and preserves the one-request cooldown and two-request retry assertions. Production hook code is unchanged. Final browser/CI receipts are retained on issue #83.
+
+CI-repair local verification: full Python 13015 passed / 2 failed / 2 skipped / 23 subtests; full Vitest 10213 passed; full cloud 2340 passed / 1 failed / 7 skipped. The failing knowledge-worker, subscription-token and Caddy files passed 5/5, 103/103 and 35/35 when rerun alone. The extra cloud FAILED-list entry versus the empty base was test_a_hung_upstream_becomes_a_5xx_within_a_bound at its listener-readiness check. The three closing cloud lists above remain identical to the base. No timeout or assertion changed.

@@ -45,8 +45,10 @@ async function installFixtures(page: Page, previousClose: number | null = 119, t
       socket.send(JSON.stringify({ type: "batch", updates }));
     });
   });
-  return (price: number) => {
+  return (price: number, close = previousClose, quoteTimestamp = timestamp) => {
     last = price;
+    previousClose = close;
+    timestamp = quoteTimestamp;
     expect(sockets.size).toBeGreaterThan(0);
     for (const socket of sockets) socket.send(JSON.stringify({ type: "batch", updates: { [TICKER]: quote(TICKER, price) } }));
   };
@@ -132,8 +134,9 @@ for (const mobile of [false, true]) {
 
 test("previous-close cooldown survives live price updates", async ({ page }) => {
   const clockStart = new Date("2026-09-28T15:00:00Z");
-  await page.clock.install({ time: clockStart });
-  const moveSpot = await installFixtures(page, null, clockStart.toISOString());
+  // Finish navigation with a valid close before introducing the missing-data
+  // condition; startup mounts are outside this cooldown scenario.
+  const moveSpot = await installFixtures(page);
   let requests = 0;
   let releaseFirst!: () => void;
   const firstResponse = new Promise<void>((resolve) => { releaseFirst = resolve; });
@@ -149,8 +152,12 @@ test("previous-close cooldown survives live price updates", async ({ page }) => 
   await page.goto(`/${TICKER}?deck=c`);
   const spot = page.getByTestId("chain-spot-bar");
   await expect(spot).toContainText("120.00");
-  await expect.poll(() => requests).toBe(1);
+  expect(requests).toBe(0);
+  await page.clock.install({ time: clockStart });
   await page.clock.pauseAt(new Date(await page.evaluate(() => Date.now() + 1_000)));
+  moveSpot(120, null, clockStart.toISOString());
+  await page.clock.runFor(250);
+  await expect.poll(() => requests).toBe(1);
   // A price render while the first request is in flight changes the effect's
   // dependency key. Its eventual response must still own a full cooldown.
   moveSpot(121);

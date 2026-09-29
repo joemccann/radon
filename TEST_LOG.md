@@ -1090,3 +1090,5 @@ Tonight's audit timed out before a new checkpoint. Open P0/P1 carried forward fr
 | T-435 | operator-only | Retained prior three-attempt diagnosis. Acceptance: isolated keyless compile-mode CI build/server and real /portfolio-to-/setup redirect without x-radon-authless-test. |
 
 Closing verification details and exact counts are appended to TEST_AUDIT.md; external CI/browser/delivery receipts belong to rolling issue #83.
+
+2026-09-29 CI follow-up: T-495 browser acceptance is DONE at e028b4e4 (four scenarios, eight reviewed desktop/390px light/dark screenshots). T-515's new browser fixture red-failed on startup request counting; the controlled missing-close condition now begins after page readiness with all cooldown assertions retained. Final exact-head evidence belongs to issue #83.
