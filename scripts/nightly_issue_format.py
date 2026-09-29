@@ -69,9 +69,12 @@ _SECRET_ASSIGN_RE = re.compile(
 _BEARER_RE = re.compile(r"(Bearer\s+)\S+", re.I)
 # Bare credential literals by well-known prefix or shape (the classes the
 # gitleaks default ruleset flags): Anthropic / OpenAI keys, GitHub tokens,
-# Slack tokens, AWS access key ids, three-part JWTs. Kept tight on purpose.
+# Slack tokens, AWS access key ids, three-part JWTs, and the provider key
+# prefixes the canonical redactor knows (Stripe, xAI, NVIDIA, Cerebras).
 _CREDENTIAL_LITERAL_RE = re.compile(
     r"\b(?:sk-(?:ant-)?[A-Za-z0-9_-]{20,}"
+    r"|sk_(?:live|test)_[A-Za-z0-9]{6,}"
+    r"|(?:xai|nvapi|csk)-[A-Za-z0-9_-]{16,}"
     r"|gh[pousr]_[A-Za-z0-9]{36,}"
     r"|github_pat_[A-Za-z0-9_]{22,}"
     r"|xox[abpors]-[A-Za-z0-9-]{10,}"

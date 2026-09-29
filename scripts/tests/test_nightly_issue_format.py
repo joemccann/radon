@@ -569,6 +569,10 @@ def test_this_file_does_not_contain_a_literal_tws_assignment():
 def _credential_literals() -> dict[str, str]:
     return {
         "anthropic": "sk-" + "ant-" + "api03-" + "NOTAREALKEY" * 4,
+        "stripe_live": "sk_" + "live_" + "NOTAREALKEY" + "0" * 12,
+        "xai": "xai" + "-" + "NOTAREALKEY" + "0" * 12,
+        "nvidia": "nvapi" + "-" + "NOTAREALKEY" + "0" * 12,
+        "cerebras": "csk" + "-" + "NOTAREALKEY" + "0" * 12,
         "github_pat_classic": "ghp" + "_" + "NOTAREALTOKEN" + "0" * 23,
         "github_pat_fine": "github" + "_pat_" + "NOTAREALTOKEN" + "0" * 30,
         "slack_bot": "xox" + "b-" + "0000000000-" + "NOTAREALTOKEN",
