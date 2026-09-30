@@ -3163,15 +3163,24 @@ after the IB-skip path has already chosen the cached payload.** Peak:
   Not `ib-gateway-grouped`. A `PermissionError` on a present binary
   still fails the oneshot.
 - **Remediation (code):** `_run` turns `FileNotFoundError` into
-  `GrokRuntimeError`. No LKG refuses the cycle (exit 0, heartbeat
-  `paused`, page left pending, no fallback pushover). An LKG record
-  is used. Do not restart-flap. Installing the CLI is the upgrader.
+  `GrokRuntimeError`. No trusted LKG refuses the cycle: exit 0, page left
+  pending, no fallback pushover, and heartbeat `error` with the reason so
+  the watchdog error bucket still pages once (`paused` never alerts and
+  would hide the outage). An LKG is used only when
+  `grok_runtime.lkg_binary_problem` passes: absolute, present, regular,
+  executable, not world-writable, owned by root or the unit user, and not
+  under `/tmp`, `/var/tmp`, `/dev/shm`, the system temp dir, a
+  `pytest-of-*` basetemp, or the responder clone. A rejected LKG logs
+  `grok last-known-good binary rejected (<reason>)` and counts as no LKG.
+  Do not restart-flap. Installing the CLI is the upgrader.
   This page's binary was already on disk at 17:32Z. The unit is not
   on `RERUNNABLE_ONESHOT_UNITS`.
 - **Regression:**
-  `scripts/tests/test_grok_page_missing_binary.py::TestMissingGrokBinary`.
-- **Code:** `scripts/grok_runtime.py` (`_run`),
-  `scripts/grok_page_responder.py` (pin warning only when not refused).
+  `scripts/tests/test_grok_page_missing_binary.py::TestMissingGrokBinary`,
+  `::TestLkgBinaryIsTrusted`.
+- **Code:** `scripts/grok_runtime.py` (`_run`, `lkg_binary_problem`),
+  `scripts/grok_page_responder.py` (`_load_trusted_lkg`; `error` row and
+  no pin warning on a refuse).
 
 ## grok-upgrade-update-rejects-no-auto-update
 
