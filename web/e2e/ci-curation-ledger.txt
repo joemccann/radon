@@ -112,6 +112,11 @@ dispersion-tab.spec.ts
 divyield-tab.spec.ts
 dollar-delta-leverage.spec.ts
 ma-ratio-tab.spec.ts
+# REVIEWED 2026-09-30 rsi-oversold-tab.spec.ts - Mirrors ma-ratio-tab: page.route
+#   mocked /api/rsi-oversold, no live IB/network/DB. Vitest rsi-oversold-panel
+#   and rsi-oversold-api cover the strip and missing contract. Held out of
+#   e2e-financial-smoke pending next start preflight.
+rsi-oversold-tab.spec.ts
 calm-streak-tab.spec.ts
 fill-toast.spec.ts
 header-fullscreen.spec.ts

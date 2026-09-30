@@ -77,7 +77,7 @@ export const KNOWN_API_SEGMENTS: ReadonlySet<string> = new Set([
   "futures", "futures-quote", "gamma-rotation", "garch-convergence", "gex",
   "headlines", "hhlev", "hyad", "ib", "iei-hyg", "index-options",
   "index-quote", "informed-flow", "internals", "iv-spread", "ivrank",
-  "journal", "knowledge", "leap", "llm-token-index", "ma-ratio",
+  "journal", "knowledge", "leap", "llm-token-index", "ma-ratio", "rsi-oversold",
   "margin-debt", "menthorq", "models", "newsfeed", "options", "orders",
   "paper", "performance", "pi", "portfolio", "preferences", "previous-close",
   "prices", "probe", "profile", "regime", "research", "risk-free-rate", "scanner",

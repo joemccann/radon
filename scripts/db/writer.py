@@ -1229,6 +1229,47 @@ def upsert_ma_ratio_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] 
     db.commit()
 
 
+def upsert_rsi_oversold_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """RSI OVERSOLD indicator — one row per session date, idempotent on date.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): the daily run upserts the
+    full computed window (~500 rows). ``spx_close`` is nullable (optional
+    overlay).
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            spx_close = row.get("spx_close")
+            params.extend(
+                (
+                    row["date"],
+                    float(row["pct_below_30"]),
+                    int(row["count_below_30"]),
+                    int(row["eligible"]),
+                    float(spx_close) if spx_close is not None else None,
+                    stamp,
+                )
+            )
+        db.execute(
+            "INSERT INTO rsi_oversold_history "
+            "(date, pct_below_30, count_below_30, eligible, spx_close, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date) DO UPDATE SET "
+            "pct_below_30 = excluded.pct_below_30, "
+            "count_below_30 = excluded.count_below_30, "
+            "eligible = excluded.eligible, spx_close = excluded.spx_close, "
+            "recorded_at = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
+
 def upsert_calm_streak_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
     """CALM STREAK indicator: one row per SPX session, idempotent on date.
 

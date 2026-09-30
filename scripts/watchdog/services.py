@@ -193,6 +193,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # window: no weekend/holiday gap to widen for. Shared price_history_daily
     # member closes (Yahoo sweep) + Turso — no IB dependency.
     "ma-ratio":         {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # rsi-oversold — radon-rsi-oversold.timer, daily 23:05 UTC every calendar
+    # day (weekend/holiday runs are unchanged-data heartbeats). Uniform 26h
+    # window. Shared price_history_daily member closes (Yahoo sweep) + Turso
+    # — no IB dependency.
+    "rsi-oversold":     {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # calm-streak — radon-calm-streak.timer, daily 02:40 + 14:30 UTC every
     # calendar day (304 runs heartbeat). Uniform 26h window. Cboe official
     # SPX daily OHLC — no IB dependency.
@@ -604,6 +609,9 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 22:45 UTC SPX 50d/200d MA breadth-ratio sweep — hourly check
         # surfaces a missed run within 1h of the 26h window expiring.
         "ma-ratio",
+        # Daily 23:05 UTC SPX RSI(14)<30 breadth sweep — hourly check
+        # surfaces a missed run within 1h of the 26h window expiring.
+        "rsi-oversold",
         # Daily 02:40 + 14:30 UTC Cboe SPX intraday-band streak pull — hourly
         # check surfaces a missed run within 1h of the 26h window expiring.
         "calm-streak",

@@ -140,6 +140,18 @@ with Podman (`--cgroups=split`, so it lives in the unit's own cgroup) when
 `RADON_CONTAINER_ENGINE=docker`; credential staging is identical on both
 (REL-087).
 
+**Container environment rendering (REL-158 / R-438).** Before an app
+container starts, the wrapper renders a private temporary environment copy,
+checks rendering and newsfeed allowlist-filter errors, and atomically publishes
+the complete 0600 file. Failure exits 71 without starting the container or
+overwriting its previous rendered copy. An empty successful newsfeed allowlist
+is permitted; a failed filter is not.
+
+The container notify proxy accepts only `READY=1`, `WATCHDOG=1` and `STATUS=`
+notices (REL-158 / R-439). It drops lifecycle, PID and timeout-control fields,
+including those mixed into an otherwise valid datagram. The proxy socket stays
+0600 and is owned by the container user.
+
 **Container stop (2026-09-25).** Each app drop-in runs
 `ExecStop=radon-app-runtime halt %n <grace>`, which stops the container by
 name through the engine (`stop --time <grace>`: SIGTERM to the container
@@ -434,6 +446,7 @@ Stable fx path (2026-09-26). `com.radon.fx-stable-sync` (installed by `bash scri
 | `radon-cta-sync.timer` | Mon-Fri 18:15 / 19:00 / 21:30 UTC | MenthorQ CTA refresh. Vision cascade: anthropic -> grok -> cursor -> codex -> gemini -> nvidia -> cerebras |
 | `radon-bpi.timer` | Mon-Fri 21:30 / 23:30 UTC; Tue-Sat 11:00 UTC | BPI after the close, same-evening Yahoo catch-up, morning catch-up |
 | `radon-ma-ratio.timer` | daily 22:45 UTC | SPX pct above 50d MA over pct above 200d MA (after the close; 5 min behind divyield). Spec: [`indicators/ma-ratio.md`](indicators/ma-ratio.md) |
+| `radon-rsi-oversold.timer` | daily 23:05 UTC | SPX pct of members with Wilder RSI(14) strictly below 30 (after the close; 20 min behind ma-ratio so the shared member-close store is already fresh). Spec: [`indicators/rsi-oversold.md`](indicators/rsi-oversold.md) |
 | `radon-calm-streak.timer` | daily 02:40 + 14:30 UTC | Consecutive SPX sessions without a >1% intraday band, from Cboe `_SPX.json` (conditional GET; unchanged runs are heartbeats). Spec: [`indicators/calm-streak.md`](indicators/calm-streak.md) |
 | `radon-bounce-setup.timer` | Mon..Fri 21:10 UTC | BOUNCE SETUP scanner: stretch rank from Turso closes (largecaps), then UW fixed-strike put vol and 25-delta skew on the top 30. Writes `data/bounce_setup.json` + `scan_snapshots` service `bounce-setup`. Spec: [`bounce-setup.md`](bounce-setup.md). |
 | `radon-iv-spread.timer` | daily 22:15 UTC | NDX minus SPX 1M ATM implied vol spread from IB (after the close; between ivrank and dispersion). Spec: [`indicators/iv-spread.md`](indicators/iv-spread.md) |
