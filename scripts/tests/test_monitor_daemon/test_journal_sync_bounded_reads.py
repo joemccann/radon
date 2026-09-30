@@ -93,3 +93,25 @@ def test_nonadvancing_cursor_refuses_instead_of_looping(cursor):
     db.execute.return_value.fetchall.return_value = [('exec', cursor)] * 200
     assert mod.JournalSyncHandler._journal_exec_ids_from_db(db) == set()
     assert db.execute.call_count == 1
+
+
+def test_documented_per_cycle_broker_session_lifecycle(monkeypatch):
+    """REL-021b / R-041: daemon lifetime is not execution-cache lifetime."""
+    clients = [Mock(), Mock()]
+    for client in clients:
+        client.get_fills.return_value = []
+    factory = Mock(side_effect=clients)
+    monkeypatch.setattr(mod, 'IBClient', factory)
+    # Refuse before persistence, after each completely mocked broker session.
+    monkeypatch.setattr(mod.JournalSyncHandler, '_open_db', staticmethod(lambda: None))
+    handler = mod.JournalSyncHandler()
+    for _ in range(2):
+        assert 'error' in handler.execute()
+    assert factory.call_count == 2
+    for client in clients:
+        client.connect.assert_called_once_with(host=mod.DEFAULT_HOST, port=4001, client_id='auto')
+        client.get_fills.assert_called_once_with()
+        client.disconnect.assert_called_once_with()
+    assert 'per-cycle' in mod.__doc__
+    assert 'same socket' not in mod.__doc__
+    assert 'no 24h' not in mod.__doc__

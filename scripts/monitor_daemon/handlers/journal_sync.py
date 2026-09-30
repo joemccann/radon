@@ -5,11 +5,12 @@ Journal Sync Handler — Live trade-log replenishment from in-session fills.
 Fits between the two endpoints of the trade-log refresh story:
 
     cold start / multi-day gap → journal_rehydrate.py (Flex Query, ≤365d)
-    intraday, same socket      → this handler (ib_insync session cache, fast)
+    intraday, per-cycle socket → this handler (current-day broker executions)
 
-Because the monitor daemon is a long-lived process, ``client.get_fills()``
-returns every execution observed since the daemon connected — no 24h
-server-side window to fall off, no missing-day risk.
+REL-021b / R-041: each execute() creates an IBClient, connects, fetches fills
+and disconnects before journal processing. The daemon's lifetime does not
+extend that execution cache. Multi-day gaps still require the rehydrate
+path; do not widen the polling interval based on a persistent-session claim.
 
 Each row appended carries an ``ib_exec_id`` so we dedupe against the
 journal_rehydrate path on the next pass.

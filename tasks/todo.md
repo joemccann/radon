@@ -8718,4 +8718,4 @@ Review: CIP-015 is the sole qualifying critical-path experiment; 136 focused tes
 - [ ] T4 depends_on: [T3] Run permanent drills and validation; publish substantive draft PR and await exact-head CI.
 - [ ] T5 depends_on: [T4] Post exactly one durable issue comment and complete review.
 
-Review: six inherited findings repaired in separate commits with repeated serial red evidence and focused green gates. Permanent Python drills: 95 passed; catalog/admission sweep: 108 passed. No new delta findings. Full suites, cloud gates and Vitest belong to PR CI. Historical candidates retain their original acceptance on issue #81; no inspection-only closure. No production access. Publication and exact-head CI pending.
+Review: seven inherited findings repaired in separate commits with repeated serial red evidence and focused green gates. Permanent Python drills: 95 passed; catalog/admission sweep: 108 passed. No new delta findings. Full suites, cloud gates and Vitest belong to PR CI. Historical candidates retain their original acceptance on issue #81; no inspection-only closure. No production access. Publication and exact-head CI pending.
