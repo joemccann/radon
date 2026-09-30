@@ -8719,3 +8719,9 @@ Review: CIP-015 is the sole qualifying critical-path experiment; 136 focused tes
 - [ ] T5 depends_on: [T4] Post exactly one durable issue comment and complete review.
 
 Review: seven inherited findings repaired in separate commits with repeated serial red evidence and focused green gates. Permanent Python drills: 95 passed; catalog/admission sweep: 108 passed. No new delta findings. Full suites, cloud gates and Vitest belong to PR CI. Historical candidates retain their original acceptance on issue #81; no inspection-only closure. No production access. Publication and exact-head CI pending.
+
+# Task: T-435 keyless setup-gate browser test (2026-09-30)
+
+- [x] T1 depends_on: [] Isolated keyless compile-mode build (`.next-setup-gate`, skip production trace audit) + Playwright config/spec outside `web/e2e/` + vitest contract.
+- [x] T2 depends_on: [T1] New non-gating `e2e-setup-gate` CI job + `test_ci_setup_gate_job.py` pin.
+- [ ] T3 depends_on: [T2] Ready PR vs main. Exact-head CI green. No merge.
