@@ -1092,3 +1092,13 @@ Tonight's audit timed out before a new checkpoint. Open P0/P1 carried forward fr
 Closing verification details and exact counts are appended to TEST_AUDIT.md; external CI/browser/delivery receipts belong to rolling issue #83.
 
 2026-09-29 CI follow-up: T-495 browser acceptance is DONE at e028b4e4 (four scenarios, eight reviewed desktop/390px light/dark screenshots). T-515's new browser fixture red-failed on startup request counting; the controlled missing-close condition now begins after page readiness with all cooldown assertions retained. Final exact-head evidence belongs to issue #83.
+
+
+## Remediation 2026-09-30
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-517 | DONE | Held-date SQL mutation: 3 failed / 17 passed; empty-fetch mutation: 9 failed / 11 passed. All 11 original report tests accept both mutations and remain intact. Added fake HTTP boundary backed by read-only SQLite execution: 20 report tests pass. Date/query, request, decoding, fallback and refusal paths execute; `_pt_bounds`, `_hrana`, `fetch_rows` each measure 100% statement/branch coverage (whole module 84%). Product code unchanged. |
+| T-518 | DONE | Wrong runtime-lock default under a synthetic inherited override: original regression skips; isolated import-time configuration test fails (1 failed / 16 passed). Correct source: 17 passed, including explicit override precedence, with no environment-dependent skip or mutation of the shared module. |
+
+All three delta repetitions passed: Python 946, Vitest 134, cloud 24 per repetition. Three serial closing rounds and the exact detached-base cloud failure-list comparison are appended to TEST_AUDIT.md. The first closing Python run had one subscription-login failure; its unchanged file passed 103/103 alone and both later full rounds passed. T-435 remains operator-only with its existing keyless-build/browser acceptance criteria. External delivery and CI receipts belong to rolling issue #83.

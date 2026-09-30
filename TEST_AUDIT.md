@@ -10731,3 +10731,66 @@ The same run exposed a T-515 browser-fixture startup assumption (227 curated cas
 CI-repair local verification: full Python 13015 passed / 2 failed / 2 skipped / 23 subtests; full Vitest 10213 passed; full cloud 2340 passed / 1 failed / 7 skipped. The failing knowledge-worker, subscription-token and Caddy files passed 5/5, 103/103 and 35/35 when rerun alone. The extra cloud FAILED-list entry versus the empty base was test_a_hung_upstream_becomes_a_5xx_within_a_bound at its listener-readiness check. The three closing cloud lists above remain identical to the base. No timeout or assertion changed.
 
 T-515 CI refinement: run 36557703614 again passed 227 curated cases but exposed an earlier server-mark backfill before the socket seed, even with a valid socket close. The fixture now fulfills warmup backfills in a fixed prior trading session, switches to the measured session, then introduces the missing close. Exact zero/one/two cooldown counts remain. Production code and all local-suite surfaces are unchanged from the full repair verification above; this final browser-only refinement is verified by focused checks, Playwright discovery and exact-head CI.
+
+
+## Delta audit 2026-09-30
+
+Audited `c274a773228ed29226721694370d3a1c2739494e..e3063f0c16ddcdead832df49553c6035e6501597`: 13 commits, 127 changed paths. The newest trusted collaborator comment on rolling issue #83 supplied the checkpoint. No open `testing/` PR existed at intake. IDs continue after T-516.
+
+Read the architecture index and incoming codemap edges, then confirmed dynamic/import-time and subprocess consumers with text searches. The graph predates the newest modules: `scripts/tests/test_research_cut_report.py:11` and `web/tests/assistant-response-quality.test.ts:165` confirm imports missing from the graph. The inverse review covered journal row ordering after rowid pagination, trigger-price guards at both IB funnels, daemon monotonic scheduling, transactional replacement and replay, assistant knowledge isolation, and broker-disconnected quote gates. Existing behavioral coverage executes these boundaries with fakes; no source defect was verified in those changes.
+
+### T-517 — P2 — report retrieval can break while every report test stays green
+
+`scripts/tests/test_research_cut_report.py:147` only invokes the CLI with `--from-json`; `:156` searches source text for SELECT-only statements. Neither executes `scripts/research/cut_report.py:276` (wire request/decoding) or `:305` (Pacific-day query and fallback). Changing the held-date SQL predicate to select null timestamps leaves all 11 old tests green. A fetch that simply returns an empty list also leaves all 11 green, falsely accepting empty daily reports.
+
+Acceptance: execute the real fetch and CLI across a fake HTTP boundary backed by in-memory SQLite; assert exact endpoint/method/request shape and bounded timeout, all three date predicates including both DST transitions and the exclusive end boundary, typed-cell decoding, schema-only fallback, failure propagation and missing-configuration refusal. Wrong held-row selection and empty fetch must be rejected.
+
+### T-518 — P2 — an environment override skips the default runtime-lock regression
+
+The newly merged test at the audited base `scripts/tests/test_grok_runtime.py:178` skips whenever RADON_GROK_RUNTIME_LOCK is set. The default at `scripts/grok_runtime.py:27` must stay inside the sandbox's writable runtime directory even on hosts using custom paths. With a synthetic override, the old test reports 1 skipped against a deliberate regression to `/var/lib/radon/grok-runtime.lock`.
+
+Acceptance: evaluate the real module's import-time defaults under a controlled absent override, separately assert explicit override precedence, retain the exact sandbox-compatible pathname, and reject the wrong default even when pytest inherits an override. Never change the process-wide imported runtime object.
+
+### Standing inventory and gate review
+
+- CI's recursive Python shard union is retained at `.github/workflows/ci.yml:342`; Vitest includes and coverage thresholds, Python measurement exclusions and the 56 coverage ratchet are unchanged. Changed daemon tests remain under the recursive daemon shard (`:359`). The new report workflow is dispatch-only, while its Python tests run in the regular rs shard.
+- The three held-out browser specs have explicit reviewed entries at `web/e2e/ci-curation-ledger.txt:311`: BPI, Catalyst scrollbars and order-book geometry. Existing CI-curated chain, chat and modify-order specs remain selected. No local browser/server is available; no browser execution or screenshot is claimed locally.
+- The new optional SQLite CLI prerequisite skip in `scripts/tests/test_docs_contract.py:443` is an explicit tool-availability boundary; the tool is available here and the behavior runs. T-518 addresses the avoidable environment-dependent skip. No skip/xfail or coverage exclusion is added by this branch.
+- Re-triaged TEST_LOG and NEW_FINDINGS: T-493/T-495/T-512/T-514/T-515/T-516 are merged in #798 and retain their accepted evidence; T-130 and T-510 were closed upstream in the trusted checkpoint. Historical Day Move/calendar notes map to T-210/T-386, spread timestamp notes to T-217, and the old payload-contract failure to T-079. The six constructor sites at `scripts/tests/test_service_registration_completeness.py:488` remain an explicitly bounded static-analysis inventory, not a newly reproduced testing defect.
+- T-435 remains P2 operator-only with the prior diagnosis at `TEST_AUDIT.md:9555`: provision an isolated keyless compile-mode build/server and assert the real `/portfolio` to `/setup` redirect without `x-radon-authless-test`. `web/lib/setup/setupMode.ts:29` still defaults the publishable key from the compile-time environment; the shared browser job remains keyed (`.github/workflows/ci.yml:747`).
+
+Audited through: e3063f0c16ddcdead832df49553c6035e6501597 on 2026-09-30 — 2 new findings
+
+## Remediation 2026-09-30
+
+**T-517 — DONE.** Added `scripts/tests/test_research_cut_transport.py:15` fake wire fixture that executes production SQL in SQLite with query_only enabled. Red: held-date predicate mutation, 3 failed / 17 passed across old and new files; empty-fetch mutation, 9 failed / 11 passed. The original 11 tests remain intact. Green: 20 report tests; no production changes or external requests.
+
+**T-518 — DONE.** `scripts/tests/test_grok_runtime.py:178` now re-evaluates module configuration in an isolated runpy namespace after removing only the lock override; `:190` checks explicit override precedence. Red: wrong-default mutation under a synthetic inherited override, 1 failed / 16 passed; old test skipped. Green: 17 runtime cases under the same inherited override. Combined focused gate: 37 passed.
+
+
+### Verification 2026-09-30
+
+Standing gates: Python 13179 passed / 1 failed / 2 skipped / 23 subtests. The failing `scripts/tests/test_knowledge_enrichment_budget.py:62` raised PermissionError in process-group cleanup under suite load; the entire file immediately passed 5/5 alone. Vitest: 1032 files / 10240 passed. Cloud: 2357 passed / 7 skipped, empty FAILED list. These are separate results; the initial Python run is not described as green.
+
+Delta repetitions: all 39 changed Python test files passed 946 cases in each of three runs; all 13 changed Vitest files passed 134 cases in each run; all three changed cloud files passed 24 cases in each run. Browser execution remains with CI because this runner has no browser/server.
+
+Host-only setup uses the Python 3.13 venv with pytest-asyncio/xdist and frozen root/web Bun installs. Gate PATH uses Homebrew Bash 5.3.20, OpenSSL 3.6.4, and Caddy 2.11.4. No repository compatibility workaround was needed. Four audited JSON files and one YAML parsed; four audited shell scripts passed bash -n.
+
+Detached base e3063f0c cloud gate: 2356 passed / 1 failed / 7 skipped. The sole FAILED entry was `cloud/tests/test_caddy_edge_timeouts.py::TestEdgeMechanism::test_a_hung_upstream_becomes_a_5xx_within_a_bound`, which missed its listener-readiness assertion at `:636`. The unchanged file immediately passed 35/35 alone. This is retained as the actual sorted baseline failure list, not rewritten to an empty list from the isolated pass. Linux CI remains authoritative.
+
+
+### Three closing rounds 2026-09-30
+
+| Round | Python | Vitest | Cloud |
+|---|---|---|---|
+| 1 | 1 failed, 13190 passed, 2 skipped, 39 warnings, 23 subtests passed in 347.72s (0:05:47) | Tests  10240 passed (10240) | 2357 passed, 7 skipped in 746.51s (0:12:26) |
+| 2 | 13191 passed, 2 skipped, 39 warnings, 23 subtests passed in 207.85s (0:03:27) | Tests  10240 passed (10240) | 2357 passed, 7 skipped in 729.01s (0:12:09) |
+| 3 | 13191 passed, 2 skipped, 41 warnings, 23 subtests passed in 235.49s (0:03:55) | Tests  10240 passed (10240) | 2357 passed, 7 skipped in 725.16s (0:12:05) |
+
+Round 1's sole Python failure was `scripts/tests/test_subscription_tokens.py::test_the_real_login_runner_kills_a_login_nobody_approved` (`:1666`, zero prompts before its one-second deadline). The complete unchanged file passed 103/103 alone after the closing sequence; both later full rounds also passed this case. Neither its assertion nor its timeout was changed. Round 1 remains a recorded failure, not a green full gate.
+
+Each closing cloud FAILED list is empty. Against the actual detached-base list: zero additions, one removal (the Caddy listener-readiness case named above), in each of the three rounds.
+
+Targeted coverage: the 20 report tests pass; `_pt_bounds`, `_hrana`, and `fetch_rows` each have 100% measured statement and branch coverage. Whole-module combined statement/branch coverage is 84%; no threshold or measurement exclusion changed.
+
+Review: only two test files change executable behavior. Existing report tests are preserved, the runtime default assertion is retained, and an environment-dependent skip is removed. No product code, generated codemap, reliability ledger, live connection, order, credential file, or service is changed. Audit/transport mutation logs and every full gate were captured before reading tails. Final focused/hygiene and exact-head CI receipts are retained on rolling issue #83. Browser execution stays with CI; no local browser screenshot or 390px check is claimed.
