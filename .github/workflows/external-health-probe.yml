@@ -47,6 +47,11 @@ permissions:
 jobs:
   probe:
     name: probe public edge -> Turso
+    # Holds production secrets and is dispatchable, so it runs only from main
+    # (schedule runs on main; the Mac mini dispatches with --ref main). A
+    # dispatch on any other ref would hand the secrets to that branch's code
+    # (F20260930-A01).
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
