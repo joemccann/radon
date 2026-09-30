@@ -1,3 +1,7 @@
+# REVIEWED 2026-09-30 credit-vix-tab.spec.ts - New CREDIT/VIX tab. Verified via
+#   Vitest credit-vix-api (missing 200, Turso vs disk) and credit-vix-panel
+#   (strip values, state tone, freshness rail 22:25 UTC, no front-run copy).
+#   Playwright spec is local-only. Held out of e2e-financial-smoke.
 # REVIEWED 2026-09-25 admin-panel.spec.ts - Static adaptation opens header gateway
 #   and service dialogs before existing controls/sort assertions; writer and status
 #   assertions retain their native disclosures. No local suite execution.
