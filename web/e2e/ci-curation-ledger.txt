@@ -407,3 +407,7 @@ ws-connection-stability.spec.ts
 #   the real registered callback executes in clerk-route-teardown.test.ts
 #   (3 passed). Scenario assertions are unchanged. Browser preflight remains
 #   outstanding; no local Chromium launch or browser pass is claimed.
+# REVIEWED 2026-09-30 clear-research.spec.ts - held out: the mobile deck is
+#   now closed with Escape (the esc x header button was removed) and the spec
+#   asserts the deck header carries no esc/x hint. Chain and book at 390px and
+#   1440px passed locally in Chromium against next dev (4 passed).

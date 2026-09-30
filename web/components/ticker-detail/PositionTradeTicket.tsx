@@ -3,7 +3,7 @@
 import ErrorToast from "@/components/ErrorToast";
 
 import { useCallback, useMemo, useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, X } from "lucide-react";
 import type { PortfolioData, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { legPriceKey, fmtPrice } from "@/lib/positionUtils";
@@ -248,7 +248,7 @@ export default function PositionTradeTicket({
           <div className="position-trade-subject">{subjectLabel}</div>
         </div>
         <button type="button" className="position-trade-close" onClick={onClose} aria-label="Cancel trade">
-          esc ✕
+          <X size={14} aria-hidden="true" />
         </button>
       </div>
 
