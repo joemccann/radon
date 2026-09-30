@@ -6,6 +6,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
+# `_pass` / `_pwd` need the underscore so prose ("tests pass: 3") survives.
+_SECRET_KEY = (
+    r"(?:api[_-]?key|access[_-]?key|secret[_-]?key|access[_-]?token"
+    r"|client[_-]?secret|password|passwd|secret|token|_pass|_pwd)"
+)
+
 _SECRET_SCRUB_PATTERNS = [
     (re.compile(r"libsql://[^\s'\"]+", re.IGNORECASE), "[redacted-db-url]"),
     (re.compile(r"https://[a-z0-9.-]+\.turso\.io[^\s'\"]*", re.IGNORECASE), "[redacted-db-url]"),
@@ -36,12 +42,18 @@ _SECRET_SCRUB_PATTERNS = [
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[redacted-key]"),
     (re.compile(r"([?&](?:t|token|api[_-]?key)=)[^\s&'\"]+", re.IGNORECASE), r"\1[redacted]"),
     # Generic key-value assignment (env files, config dumps, JSON), last so a
-    # value the specific shapes above already tagged keeps its tag.
+    # value the specific shapes above already tagged keeps its tag. A quoted
+    # value is redacted through its closing quote (multi-word passwords).
     (
         re.compile(
-            r"([\"']?(?:api[_-]?key|access[_-]?key|secret[_-]?key|access[_-]?token"
-            r"|client[_-]?secret|password|secret|token)"
-            r"[\"']?\s*[:=]\s*[\"']?)(?!\[redacted)[^\"'\s,;&]+",
+            rf"([\"']?{_SECRET_KEY}[\"']?\s*[:=]\s*)([\"'])(?!\[redacted)[^\"'\n]*\2",
+            re.IGNORECASE,
+        ),
+        r"\1\2[redacted-secret]\2",
+    ),
+    (
+        re.compile(
+            rf"([\"']?{_SECRET_KEY}[\"']?\s*[:=]\s*[\"']?)(?!\[redacted)[^\"'\s,;&]+",
             re.IGNORECASE,
         ),
         r"\1[redacted-secret]",
