@@ -1,4 +1,14 @@
 # Lessons
+## 2026-09-30 — A Flex stock qty gap can be combo envelopes, not a bad fill
+
+- `flex-pull-trade-coverage` says a quantity disagreement is operator
+  reconciliation. Pages `a7d2483d` and `c5177c68` looked like that (SPCX 10000 vs 10100)
+  and was not: the extra 100 was four BAG envelopes (`right='?'`, no
+  strike) that `_fill_contract` stored as `SPCX|STK`. The notional was
+  $28 light, which is the envelopes' net debit, not 100 shares at $149.
+- Before calling a stock disagreement operational, compare the gap to
+  same-day Spread/BAG rows. The stock fill alone matched Flex.
+
 ## 2026-09-25 — Review progress must survive a browser restart
 
 - Local votes alone do not resume a file-backed review: the packet and cursor must restore too. Keep packet storage local to the browser, back up decisions to the authenticated operator store, and resume the exact item without discarding existing votes.
