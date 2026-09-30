@@ -618,6 +618,19 @@ def _is_individual_fill_row(trade: Dict[str, Any]) -> bool:
     return bool(exec_id) and "+" not in exec_id and "." in exec_id and not exec_id.startswith("ep-")
 
 
+def _is_combo_envelope(trade: Dict[str, Any]) -> bool:
+    """IB combo order envelope. Not a fill of the underlying.
+
+    Live BAG rows carry ``right='?'`` or a Spread/BAG structure and no
+    strike. ``_fill_contract`` maps that incomplete key to ``{ticker}|STK``.
+    """
+    right = str(trade.get("right") or "").strip()
+    if right == "?":
+        return True
+    structure = str(trade.get("structure") or "").upper()
+    return "BAG" in structure or "SPREAD" in structure
+
+
 def _is_bag_parent_row(trade: Dict[str, Any]) -> bool:
     """A combo (BAG) parent execution: its legs are journaled separately.
 
@@ -646,6 +659,12 @@ def _individual_fill_totals(trades: List[Dict[str, Any]]) -> Dict[Tuple[str, str
     for trade in trades:
         if not _is_individual_fill_row(trade) or _is_bag_parent_row(trade):
             continue
+        # A combo envelope has no strike, so the STK fallback would add its
+        # contract count to a same-day stock assignment.
+        if _is_combo_envelope(trade):
+            keyed = _bucket_key(trade)
+            if keyed is None:
+                continue
         contract = _fill_contract(trade.get("ticker"), trade.get("strike"),
                                   trade.get("right"), trade.get("expiry"))
         day = str(trade.get("date") or "")[:10]
