@@ -649,6 +649,36 @@ def safe_error_message(error: Exception, *, max_len: int = 240) -> str:
     return type(error).__name__
 
 
+def _nvidia_limiter(env: Mapping[str, str], post: Callable[..., Any]) -> Any:
+    """Host-wide NVIDIA pacer for real network calls; None for an injected post.
+
+    The NVIDIA key is rate limited per key (about 40 requests a minute) and
+    shared with the nightly fx loops; see scripts/nvidia_rate_limit.py.
+    """
+    if post is not _default_post:
+        return None
+    try:
+        import nvidia_rate_limit
+    except ImportError:  # imported without scripts/ on sys.path
+        import sys
+
+        sys.path.append(str(Path(__file__).resolve().parents[1]))
+        import nvidia_rate_limit
+
+    return nvidia_rate_limit.shared_limiter(env)
+
+
+def _nvidia_max_wait(env: Mapping[str, str]) -> float:
+    try:
+        return max(0.0, float((env.get("RADON_NVIDIA_LADDER_MAX_WAIT_S") or "15").strip()))
+    except ValueError:
+        return 15.0
+
+
+def _body_snippet(text: str) -> str:
+    return safe_error_message(RuntimeError(text), max_len=200) if text.strip() else ""
+
+
 def parse_json_rows(text: str) -> Optional[list[dict[str, Any]]]:
     cleaned = _strip_fences(text)
     if not cleaned:
@@ -1496,7 +1526,17 @@ def _run_ladder(
         won_model = ""
         won_parsed: Any = None
         won_text = ""
+        limiter = _nvidia_limiter(env, post) if name == "nvidia" else None
         for model in models:
+            if limiter is not None and not limiter.acquire(_nvidia_max_wait(env)):
+                attempted.append(f"{name}:rate_limited_local")
+                logger.warning(
+                    "%s provider=%s skipped: NVIDIA rate budget spent or paused; "
+                    "no request sent",
+                    log_prefix,
+                    name,
+                )
+                break
             try:
                 status, raw, payload = call_provider(name, auth, model)
             except ModelResponseError:
@@ -1510,19 +1550,39 @@ def _run_ladder(
                 continue
 
             body_text = raw if isinstance(raw, str) else ""
+            if limiter is not None:
+                if status == 429:
+                    limiter.note_429(None)
+                elif status in (401, 403):
+                    limiter.note_auth_failure(status)
+                elif status == 200:
+                    limiter.note_success()
+            if name == "nvidia" and status in (401, 403):
+                logger.error(
+                    "%s NVIDIA AUTHORIZATION FAILED status=%s model=%s: key refused or "
+                    "temporarily blocked; not retried body=%r",
+                    log_prefix,
+                    status,
+                    model,
+                    _body_snippet(body_text),
+                )
             if payload is None or _is_hard_fail(status, payload):
                 code = _classify_http_failure(
                     status, _error_envelope(payload) if status == 200 else body_text
                 )
                 attempted.append(f"{name}:{code}")
                 logger.warning(
-                    "%s provider=%s model=%s auth=%s failed %s",
+                    "%s provider=%s model=%s auth=%s failed %s status=%s body=%r",
                     log_prefix,
                     name,
                     model,
                     auth.kind,
                     code,
+                    status,
+                    _body_snippet(body_text) if status != 200 else "",
                 )
+                if status == 429 and name == "nvidia":
+                    break
                 continue
 
             if not isinstance(payload, dict):

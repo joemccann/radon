@@ -27,11 +27,14 @@ once into FASTEMBED_CACHE_PATH, defaulted here to ~/.cache/fastembed.
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import threading
 import time
 from typing import Callable, Sequence
+
+logger = logging.getLogger(__name__)
 
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 EMBEDDING_DIM = 384
@@ -222,7 +225,10 @@ def resolve_query_vector(
 
 
 def _nvidia_embed(texts: Sequence[str], *, input_type: str, post) -> list[list[float]]:
-    from clients.model_ladder import _classify_http_failure, _default_post, _request, safe_error_message
+    from clients.model_ladder import (
+        _classify_http_failure, _default_post, _nvidia_limiter, _nvidia_max_wait, _request,
+        safe_error_message,
+    )
     from credential_redaction import scrub_credential_text
 
     if input_type not in {"query", "passage"}:
@@ -245,16 +251,23 @@ def _nvidia_embed(texts: Sequence[str], *, input_type: str, post) -> list[list[f
             "dimensions": EMBEDDING_DIM_V2,
             "encoding_format": "float",
         }
-        payload = _embed_with_retries(sender, headers, body, _request, _classify_http_failure, safe_error_message)
+        payload = _embed_with_retries(
+            sender, headers, body, _request, _classify_http_failure, safe_error_message,
+            limiter=_nvidia_limiter(os.environ, sender), max_wait=_nvidia_max_wait(os.environ),
+        )
         vectors.extend(_vectors_from_payload(payload, len(chunk)))
     return vectors
 
 
-def _embed_with_retries(post, headers, body, request, classify, safe_message):
+def _embed_with_retries(post, headers, body, request, classify, safe_message, *, limiter=None, max_wait=15.0):
+    # The NVIDIA key is rate limited per key and shared with the ladder and the
+    # nightly fx loops: every attempt takes a host-wide slot (scripts/nvidia_rate_limit.py).
     retries = 2
     delay = 0.5
     last = "empty"
     for attempt in range(retries + 1):
+        if limiter is not None and not limiter.acquire(max_wait):
+            raise RuntimeError("rate_limited_local")
         try:
             status, text, payload = request(post, NVIDIA_EMBED_URL, headers, body, timeout=30.0)
         except RuntimeError as exc:
@@ -264,12 +277,22 @@ def _embed_with_retries(post, headers, body, request, classify, safe_message):
             time.sleep(min(delay, 8.0))
             delay = min(delay * 2, 8.0)
             continue
+        if limiter is not None:
+            if status == 429:
+                limiter.note_429(None)
+            elif status in (401, 403):
+                limiter.note_auth_failure(status)
+            elif status == 200:
+                limiter.note_success()
         if status == 429:
             last = "http_429"
         elif status == 200 and isinstance(payload, dict):
             return payload
         else:
             last = classify(status, text or "")
+            if status in (401, 403):
+                logger.error("NVIDIA AUTHORIZATION FAILED status=%s (embeddings); not retried body=%r",
+                             status, safe_message(RuntimeError(text or ""), max_len=200))
         retryable = last == "http_429" or last.startswith("http_5")
         if attempt >= retries or not retryable:
             raise RuntimeError(last)
