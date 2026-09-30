@@ -1282,3 +1282,46 @@ class TestModelLadderByteCapOwner:
         call = source.split("def _call_vision_provider(", 1)[1].split("\ndef ", 1)[0]
         assert call.count("max_bytes=max_response_bytes") == 6
         assert "_antigravity_complete" in call
+
+
+class TestShareRecoveryDoc:
+    def test_share_recovery_requires_a_verified_stream_result(self):
+        doc = (_ROOT / "docs/incident-runbook.md").read_text()
+        case = doc.split("## newsfeed-share-missing-subscription-502", 1)[1].split("\n## ", 1)[0]
+        assert "HTTP 200 alone" in case
+        assert "`result`" in case and "`error`" in case
+        assert "operations.md#encrypted-credential-store-profile-credentials-tab" in case
+        for label in ("Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verify", "Rollback", "Escalate"):
+            assert f"**{label}:**" in case
+
+
+class TestNightlyReportingDoc:
+    def test_nightly_reporting_scopes_match_the_runner_prompts(self):
+        ops = (_ROOT / "docs/operations.md").read_text()
+        cycle = next(line for line in ops.splitlines() if "**Cycle shape" in line)
+        assert cycle.startswith("**Cycle shape (security and DeepSec).**")
+        checkpoint = next(line for line in ops.splitlines() if "**No-op checkpoints" in line)
+        listed = re.search(r"runner loops \(([^)]+)\)", checkpoint).group(1)
+        loops = {name.strip() for name in listed.split(",")}
+        prompts = _ROOT / ".claude/runner-prompts"
+        expected = {
+            name for name in ("reliability", "testing", "ci-performance", "documentation")
+            if "audited-through:" in (prompts / f"{name}.md").read_text()
+        }
+        assert loops == expected
+        assert "runner.md#9-smoke-test-bot-shell" in ops
+
+
+class TestResearchCutCommandDoc:
+    def test_documented_pdf_cut_command_resolves_from_repository_root(self):
+        doc = (_ROOT / "docs/dropbox-research.md").read_text()
+        command = re.search(r"daily Dropbox PDF cut is `([^`]+)`", doc).group(1)
+        argv = shlex.split(command)
+        env = {"PATH": os.environ["PATH"]}
+        while "=" in argv[0]:
+            key, value = argv.pop(0).split("=", 1)
+            env[key] = value
+        argv[0] = sys.executable
+        result = subprocess.run([*argv, "--help"], cwd=_ROOT, env=env, text=True, capture_output=True, timeout=10)
+        assert result.returncode == 0, result.stderr
+        assert "--from-json" in result.stdout
