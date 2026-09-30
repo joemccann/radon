@@ -493,6 +493,9 @@ and pages via Pushover plus the unit watchdog. The job heartbeats
 `service_health` as `grok-upgrade` (26h daily window). Contract:
 [`docs/grok-page-responder.md`](../docs/grok-page-responder.md).
 `cloud/tests/test_grok_upgrade_setup.py` pins the inventory-and-enable.
+The unit names every link the upgrader may move (`--live-bin`,
+`--alias-bin ~/.grok/bin/grok`); `grok_upgrade.py` never derives a path
+from HOME, so a test run in the responder clone cannot relink the live CLI.
 
 `setup-vps.sh` inventories `radon-rsi-oversold.{service,timer}` and
 `enable_services` enables the timer. Daily 23:05 UTC, twenty minutes
