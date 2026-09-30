@@ -1457,6 +1457,15 @@ def _models_for_attempt(
     return (_model_for(name, env, kind=kind),)
 
 
+LAST_RESORT_PROVIDER = "cerebras"
+
+
+def _last_resort_last(order: Sequence[str]) -> tuple[str, ...]:
+    """Cerebras is the last resort: nothing runs after it, whatever the caller passed."""
+    rest = tuple(name for name in order if name != LAST_RESORT_PROVIDER)
+    return rest + ((LAST_RESORT_PROVIDER,) if LAST_RESORT_PROVIDER in order else ())
+
+
 def _run_ladder(
     *,
     env: Mapping[str, str],
@@ -1471,7 +1480,7 @@ def _run_ladder(
 ) -> tuple[Any, str, str, str, tuple[str, ...]]:
     attempted: list[str] = []
     skipped: list[str] = []
-    order = providers or MODEL_LADDER_ORDER
+    order = _last_resort_last(providers or MODEL_LADDER_ORDER)
 
     for name in order:
         if name == "cursor":
