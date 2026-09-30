@@ -720,6 +720,20 @@ unchanged-data heartbeats. Heartbeat `ma-ratio`. Installed by the deploy's
 `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/ma-ratio.md`](indicators/ma-ratio.md).
 
+### RSI OVERSOLD (`radon-rsi-oversold.timer`)
+
+Daily `23:05 UTC` (`RandomizedDelaySec=300`, twenty minutes behind
+`radon-ma-ratio`'s 22:45 pass so the shared SPX member-close store is
+already fresh), oneshot `scripts/rsi_oversold_scan.py`,
+`TimeoutStartSec=2100`. Percent of current S&P 500 members whose own
+14-day Wilder RSI closed strictly below 30. Member closes ride the
+shared Turso `price_history_daily` store via
+`bpi_scan.ensure_member_history`. The 10% line is an oversold-cluster
+threshold (level condition only). Weekend and holiday runs are
+unchanged-data heartbeats. Heartbeat `rsi-oversold`. Installed by the
+deploy's `install-units` verb from `installed-units.sha256`. Spec:
+[`indicators/rsi-oversold.md`](indicators/rsi-oversold.md).
+
 ### CALM STREAK (`radon-calm-streak.timer`)
 
 Daily `02:40 UTC` and `14:30 UTC` (`RandomizedDelaySec=120`), oneshot

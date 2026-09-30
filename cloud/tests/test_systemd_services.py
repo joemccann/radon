@@ -147,6 +147,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-divyield.timer",
     "radon-ma-ratio.service",
     "radon-ma-ratio.timer",
+    "radon-rsi-oversold.service",
+    "radon-rsi-oversold.timer",
     "radon-calm-streak.service",
     "radon-calm-streak.timer",
     "radon-bounce-setup.service",
@@ -1268,6 +1270,21 @@ class TestMaRatioScanBudget:
 
     def test_start_budget_ends_before_the_next_calendar_fire(self, unit):
         svc = unit("radon-ma-ratio.service")["Service"]
+        assert int(svc["timeoutstartsec"]) <= 3600
+
+
+class TestRsiOversoldScanBudget:
+    """Daily 23:05 UTC SPX member-close sweep for the RSI OVERSOLD tab.
+    Same SPX-only budget as ma-ratio. Nesting is pinned in
+    scripts/tests/test_rsi_oversold.py::TestSweepBudget."""
+
+    def test_service_start_budget_covers_the_spx_sweep(self, unit):
+        svc = unit("radon-rsi-oversold.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert int(svc["timeoutstartsec"]) >= 2100
+
+    def test_start_budget_ends_before_the_next_calendar_fire(self, unit):
+        svc = unit("radon-rsi-oversold.service")["Service"]
         assert int(svc["timeoutstartsec"]) <= 3600
 
 
