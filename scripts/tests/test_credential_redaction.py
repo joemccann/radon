@@ -69,3 +69,15 @@ def test_authorization_scheme_and_compound_secret_keys_are_redacted():
     )
     for value in (basic, opaque, aws, django):
         assert value not in body
+
+
+def test_paper_account_ids_and_url_userinfo_are_redacted():
+    paper = "D" + "U7654321"
+    secret = "pa" + "ss4Word9"
+    body = scrub_credential_text(
+        f"account {paper} rejected; connect https://svc:{secret}@db.example.test/x"
+    )
+    assert paper not in body
+    assert secret not in body
+    assert "https://svc:[redacted]@db.example.test/x" in body
+    assert scrub_credential_text("see https://example.test/a@b") == "see https://example.test/a@b"
