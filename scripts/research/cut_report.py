@@ -333,10 +333,16 @@ def main(argv=None) -> int:
     parser.add_argument("--from-json", help="read rows from a JSON export instead of Turso")
     parser.add_argument("--json-out", help="write the report JSON")
     parser.add_argument("--md-out", help="write the report markdown")
+    parser.add_argument("--counts-only", action="store_true",
+                        help="omit document identifiers (for public CI artifacts)")
     args = parser.parse_args(argv)
     date = args.date.strip() or default_cut_date()
     rows = load_rows(args.from_json) if args.from_json else fetch_rows(date)
     report = build_report(rows, date)
+    if args.counts_only:
+        for row in report["hold_expired_reviewed_this_day"]:
+            row.pop("file_name", None)
+            row.pop("work_key", None)
     markdown = render_markdown(report)
     if args.json_out:
         Path(args.json_out).write_text(json.dumps(report, indent=2) + "\n")
