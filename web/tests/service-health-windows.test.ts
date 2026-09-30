@@ -479,6 +479,22 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("ma-ratio")).toBe(false);
   });
 
+  // ``rsi-oversold`` — radon-rsi-oversold.timer fires daily 23:05 UTC every
+  // calendar day (weekend/holiday runs are unchanged-data heartbeats), so a
+  // uniform 26h window matches its ma-ratio sibling. Shared
+  // price_history_daily member closes (Yahoo sweep) + Turso only, no IB.
+  it("rsi-oversold is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["rsi-oversold"]).toBeDefined();
+    expect(getServiceCategory("rsi-oversold")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("rsi-oversold", state)).toBe(26 * HOUR);
+      expect(getFreshnessWindowMs("rsi-oversold", state)).toBe(
+        getFreshnessWindowMs("ma-ratio", state),
+      );
+    }
+    expect(requiresIb("rsi-oversold")).toBe(false);
+  });
+
   // ``calm-streak``: radon-calm-streak.timer fires 02:40 and 14:30 UTC every
   // calendar day; uniform 26h window. Cboe SPX HTTP + Turso only.
   it("calm-streak is registered as scheduled with a uniform 26h window", () => {

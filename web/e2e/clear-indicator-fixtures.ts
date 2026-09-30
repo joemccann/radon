@@ -741,6 +741,54 @@ export function MaRatioFixture() {
   return MA_RATIO_MOCK;
 }
 
+// Source: e2e/rsi-oversold-tab.spec.ts
+export function RsiOversoldFixture() {
+  const DAY_MS = 86_400_000;
+  const SERIES_LENGTH = 240;
+
+  function isoDaysAgo(days: number): string {
+    return new Date(Date.now() - days * DAY_MS).toISOString().slice(0, 10);
+  }
+
+  const DATA_DATE = isoDaysAgo(1);
+
+  function buildSeries() {
+    const points = [];
+    for (let i = 0; i < SERIES_LENGTH; i++) {
+      const pct = Number((2 + 10 * Math.abs(Math.sin(i / 30))).toFixed(4));
+      points.push({
+        date: i === SERIES_LENGTH - 1 ? DATA_DATE : isoDaysAgo(SERIES_LENGTH - i),
+        pct_below_30: pct,
+        count_below_30: Math.round(pct * 5),
+        eligible: 500,
+        spx_close: Number((5000 + i * 11.5).toFixed(2)),
+      });
+    }
+    return points;
+  }
+
+  const SERIES = buildSeries();
+  return {
+    schema_version: 1,
+    scan_time: new Date().toISOString(),
+    data_date: DATA_DATE,
+    source: { constituents: "cache", constituents_count: 503, member_close_fetches: { yahoo: 490, stored: 13 } },
+    threshold: 10.0,
+    current: {
+      ...SERIES[SERIES.length - 1],
+      pct_below_30: 12.4,
+      count_below_30: 62,
+      eligible: 500,
+      spx_close: 6630.0,
+      state: "OVERSOLD CLUSTER",
+      cross_up: false,
+      highest_since: "2026-03-13",
+    },
+    series: SERIES,
+    missing: false,
+  };
+}
+
 // Source: e2e/calm-streak-tab.spec.ts
 export function CalmStreakFixture() {
   const DAY_MS = 86_400_000;

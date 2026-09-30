@@ -1,3 +1,9 @@
+# Task: RSI OVERSOLD breadth (2026-09-30)
+
+- [ ] T1 depends_on: [] Failing tests: Wilder RSI, strict 30/10 boundaries, gates, migration 0092, writer, panel/API/lockstep.
+- [ ] T2 depends_on: [T1] Mirror MA RATIO: scan, history table, API, `/regime/rsi-oversold`, 23:05 UTC timer.
+- [ ] T3 depends_on: [T2] Focused suites green. Draft PR vs main, CI green, ready when green. No merge. Turso read-only.
+
 # Task: HELD_EXPIRED honest PDF cut + hold timestamps (2026-09-29)
 
 - [ ] T1 depends_on: [] Failing tests: cut-report buckets/labels (no "retries exhausted"), Sep 28 fixture counts, held_at on hold, expire sets expired_at and leaves updated_at, TTL uses held_at, migration 0091 backfill.
