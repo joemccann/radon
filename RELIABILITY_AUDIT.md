@@ -2805,3 +2805,4 @@ Audited through: e3063f0c16ddcdead832df49553c6035e6501597 on 2026-09-30 — 0 ne
 | ID | Sev | Where | Finding |
 |---|---|---|---|
 | R-024 / REL-021b | P2 | `scripts/api/subprocess.py:348-365`; `scripts/api/server.py:3230-3236,3327-3333` | DONE: nonzero subprocess exits discarded rejection dictionaries, and cancel/modify routes flattened successful-exit error payloads. Four wire-level fault cases failed twice; structured broker and order fields now reach coded 502 details while nonzero remains failure. Legacy uncoded rejection payloads receive an operation code so the web coercer retains them. |
+| R-301 / REL-108 | P2 | `scripts/db/migrate.py:371-394` | DONE: an omitted library argument silently selected production. Fault injection now proves main() refuses before target resolution; explicit main([]), main(['--demo']) and CLI argument forwarding retain their contracts. Red 1 failed twice; focused migration/replay union 58 passed. |
