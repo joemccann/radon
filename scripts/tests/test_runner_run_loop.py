@@ -1009,6 +1009,9 @@ def test_runner_docs_never_install_from_a_fixed_tmp_path():
     doc = (REPO / "docs" / "runner.md").read_text()
     assert "/tmp/radon-runner-install" not in doc
     assert "mktemp -d" in doc
+    # Nothing root installs may pass through a shared fixed /tmp path either.
+    for line in doc.splitlines():
+        assert not ("sudo" in line and "/tmp/" in line), line
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="the refusal path is exercised as an unprivileged user")

@@ -52,10 +52,10 @@ Where things live when you are done:
 brew install git gh coreutils python@3.13 uv bun node
 brew install --cask codex
 # gitleaks 8.30.1 for the security loops (docs/security-approved-tools.md), checksum-pinned, root-owned
-curl -fsSLo /tmp/gitleaks.tgz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_darwin_arm64.tar.gz \
-  && echo "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5  /tmp/gitleaks.tgz" | shasum -a 256 -c \
-  && tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks && sudo install -o root -g wheel -m 755 /tmp/gitleaks /usr/local/bin/gitleaks \
-  && sudo ln -sf /usr/local/bin/gitleaks /opt/homebrew/bin/gitleaks && rm /tmp/gitleaks.tgz /tmp/gitleaks
+GL="$(mktemp -d)" && curl -fsSLo "$GL/gitleaks.tgz" https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_darwin_arm64.tar.gz \
+  && echo "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5  $GL/gitleaks.tgz" | shasum -a 256 -c \
+  && tar -xzf "$GL/gitleaks.tgz" -C "$GL" gitleaks && sudo install -o root -g wheel -m 755 "$GL/gitleaks" /usr/local/bin/gitleaks \
+  && sudo ln -sf /usr/local/bin/gitleaks /opt/homebrew/bin/gitleaks && rm -rf "$GL"
 /opt/homebrew/bin/gitleaks version   # 8.30.1
 sudo pmset -a sleep 0 displaysleep 10     # the Mac must stay awake at night
 ```
