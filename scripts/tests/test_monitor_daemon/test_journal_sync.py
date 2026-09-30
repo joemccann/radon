@@ -289,9 +289,9 @@ class TestTradeLogRecovery:
         def execute(sql, *args, **kwargs):
             result = MagicMock(spec=["fetchall"])
             statement = " ".join(str(sql).split())
-            if "SELECT trade_id, payload, filled_at, written_at FROM journal" in statement:
+            if "SELECT trade_id, payload, filled_at, written_at, rowid AS journal_rowid FROM journal" in statement:
                 result.fetchall.return_value = recovery_rows
-            elif "SELECT trade_id FROM journal" in statement:
+            elif "SELECT trade_id, rowid AS journal_rowid FROM journal" in statement:
                 result.fetchall.return_value = coverage_rows
             else:
                 result.fetchall.return_value = []
@@ -1301,7 +1301,7 @@ class TestCorrectionSuffixSupersede:
             statement = " ".join(str(sql).split())
             if "trade_id, payload, filled_at, written_at" in statement:
                 result.fetchall.return_value = recovery
-            elif "SELECT trade_id FROM journal" in statement:
+            elif "SELECT trade_id, rowid AS journal_rowid FROM journal" in statement:
                 result.fetchall.return_value = coverage
             else:
                 result.fetchall.return_value = prior

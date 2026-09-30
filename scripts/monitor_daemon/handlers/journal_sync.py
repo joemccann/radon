@@ -26,6 +26,7 @@ import logging
 import math
 import re
 import shutil
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -54,10 +55,9 @@ except ImportError:  # pragma: no cover — DB layer optional in unit tests
     delete_journal_entry = None  # type: ignore[assignment]
 
 try:
-    # Used to look up prior signed net qty per contract so closing sells
-    # label as SELL_OPTION instead of SELL_TO_OPEN. Optional — hosts
-    # without libsql fall back to prior_qty=0 (= old behaviour).
-    from db.client import get_db  # type: ignore
+    # REL-108 / NF-2: urllib bounds reads without a native GIL-blocking worker.
+    # The shared Hrana connection closes each non-transaction request stream.
+    from knowledge.http_db import Connection as get_db
 except ImportError:  # pragma: no cover — DB layer optional in unit tests
     get_db = None  # type: ignore[assignment]
 
@@ -301,6 +301,37 @@ class JournalSyncHandler(BaseHandler):
             logger.warning("journal_sync: reconcile heal check failed: %s", exc)
 
     @staticmethod
+    def _journal_rows(db: Any, columns: str, *, mirrors_only: bool = False) -> list:
+        """REL-108 / NF-2: complete rowid pages, or fail without partial state.
+
+        Insertion cursors include concurrent inserts regardless of trade-ID
+        namespace. This does not claim update/delete snapshot isolation.
+        Per-request HTTP bounds and a 30-second scan deadline bound waiting.
+        """
+        rows = []
+        cursor = 0
+        deadline = time.monotonic() + 30
+        predicate = "AND trade_id LIKE 'fill-monitor:%'" if mirrors_only else ""
+        while True:
+            if time.monotonic() >= deadline:
+                raise TimeoutError("journal history scan deadline exceeded")
+            page = db.execute(
+                f"SELECT {columns}, rowid AS journal_rowid FROM journal "
+                f"WHERE rowid > ? {predicate} ORDER BY rowid LIMIT ?",
+                (cursor, 200),
+            ).fetchall()
+            if time.monotonic() >= deadline:
+                raise TimeoutError("journal history scan deadline exceeded")
+            rows.extend(page)
+            if len(page) < 200:
+                return rows
+            next_cursor = JournalSyncHandler._row_value(
+                page[-1], len(columns.split(",")), "journal_rowid")
+            if not isinstance(next_cursor, int) or next_cursor <= cursor:
+                raise RuntimeError("journal history cursor did not advance")
+            cursor = next_cursor
+
+    @staticmethod
     def _journal_exec_ids_from_db(db: Any) -> set[str]:
         """Return the set of exec_id parts confirmed in the journal table.
 
@@ -312,7 +343,7 @@ class JournalSyncHandler(BaseHandler):
 
         covered: set[str] = set()
         try:
-            rows = db.execute("SELECT trade_id FROM journal").fetchall()
+            rows = JournalSyncHandler._journal_rows(db, "trade_id")
         except Exception as exc:  # noqa: BLE001
             logger.warning("journal_sync: journal coverage query failed: %s", exc)
             return covered
@@ -408,9 +439,7 @@ class JournalSyncHandler(BaseHandler):
         """Parse fill_monitor mirror trade_ids → (trade_id, (con, order, date), N)."""
         mirrors: List[tuple] = []
         try:
-            rows = db.execute(
-                "SELECT trade_id FROM journal WHERE trade_id LIKE 'fill-monitor:%'"
-            ).fetchall()
+            rows = JournalSyncHandler._journal_rows(db, "trade_id", mirrors_only=True)
             for row in rows:
                 raw = row[0] if isinstance(row, (tuple, list)) else getattr(row, "trade_id", None)
                 match = _FILL_MONITOR_TRADE_ID.match(str(raw or ""))
@@ -537,13 +566,13 @@ class JournalSyncHandler(BaseHandler):
         if db is None:
             raise RuntimeError("journal DB unavailable for trade_log recovery")
         try:
-            rows = db.execute(
-                """
-                SELECT trade_id, payload, filled_at, written_at
-                FROM journal
-                ORDER BY COALESCE(filled_at, written_at), written_at
-                """
-            ).fetchall()
+            rows = self._journal_rows(db, "trade_id, payload, filled_at, written_at")
+            # Restore effective-time ordering after insertion-order paging.
+            rows.sort(key=lambda row: (
+                str(self._row_value(row, 2, "filled_at") or self._row_value(row, 3, "written_at") or ""),
+                str(self._row_value(row, 3, "written_at") or ""),
+                str(self._row_value(row, 0, "trade_id") or ""),
+            ))
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"journal DB recovery query failed: {exc}") from exc
 
@@ -820,11 +849,8 @@ class JournalSyncHandler(BaseHandler):
 
     @staticmethod
     def _open_db() -> Any:
-        """Open the Turso/libsql client used for prior-qty lookups.
-
-        Returns ``None`` when the DB layer is unavailable (unit tests,
-        hosts without libsql) — callers must treat that as "no prior
-        history, default prior_qty=0".
+        """Open bounded HTTP history reads; unavailable production history
+        aborts import rather than being mistaken for an empty journal.
         """
         if get_db is None:
             return None
