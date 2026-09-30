@@ -732,7 +732,9 @@ def run_cycle(
             pin_runtime=pin_runtime,
             grok_runner=grok_runner,
         )
-        if runtime.warning:
+        if runtime.warning and not runtime.refused:
+            # The pin is the last-known-good fallback. A refuse (no binary
+            # and no LKG) repeats every 30s; pushover would page that loop.
             _send_pin_warning(runtime.warning)
         if runtime.refused:
             print(json.dumps({
@@ -740,6 +742,9 @@ def run_cycle(
                 "skipped": "grok_runtime",
                 "warning": runtime.warning,
             }))
+            # Leave the row paused. The finally block's ok heartbeat is for
+            # a cycle that finished work; this one cannot run grok.
+            completed = False
             _heartbeat("paused", now)
             return 0
 

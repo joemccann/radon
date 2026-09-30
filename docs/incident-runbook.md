@@ -3077,6 +3077,52 @@ after the IB-skip path has already chosen the cached payload.** Peak:
   `scripts/tests/test_grok_page_ledger_timeout.py::TestLedgerReadTimeout`.
 - **Code:** `scripts/grok_page_responder.py` (`_ledger_read_timeout`).
 
+## grok-page-responder-missing-binary
+
+**`radon-grok-page-responder.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when `GROK_BIN` is not on disk.** Peak: 2026-09-30
+00:05:00Z, page `3b990bb8496e24785a14a4df32e79a4e`.
+
+- **Mechanism:** `Type=oneshot`, no `Restart=`. The UTC-day action cap
+  skipped every cycle from 23:40Z through midnight (`actioned_today: 6`),
+  so the poller never exec'd grok while the cap held. At 00:00Z the cap
+  reset and an actionable page was waiting. `run_cycle` probed with
+  `subprocess.run([GROK_BIN, "--version"])`. `/home/radon/.local/bin/grok`
+  was absent. `FileNotFoundError` is not `GrokRuntimeError`, so
+  `resolve_latest` never refused and never read LKG. The exception
+  escaped `run_cycle` (`except BaseException: raise`) and the interpreter
+  exited 1. systemd recorded `Result=exit-code`, `NRestarts=0`. The same
+  traceback repeated every ~30s (about 114 lines an hour) from 00:00:12Z
+  until 17:31:53Z. The symlink and `/var/lib/radon/grok_lkg.json` both
+  have mtime 17:32Z (`grok 1.0.44`). The watchdog paged this unit about
+  itself. `requires_ib` is false. Exec span is milliseconds, not
+  `TimeoutStartSec`.
+- **Detection:** journal traceback ends at
+  `FileNotFoundError: [Errno 2] No such file or directory: '/home/radon/.local/bin/grok'`
+  in `_default_grok_runner` ← `grok_runtime._run` ← `probe_cli` ←
+  `resolve_latest` ← `_runtime_from_track`. Cycles before midnight the
+  same evening log `skipped: daily_action_cap` and exit 0.
+- **Discriminating check:** `ls` of `GROK_BIN` fails at the crash and
+  the next line is not `skipped: grok_runtime`. A hrana
+  `TimeoutError` at `claim_page` / `complete_page` is
+  `grok-page-responder-ledger-timeout`. `grok --version` exiting
+  nonzero is already `GrokRuntimeError` and already refuses. `Result=signal`
+  or exit 143 inside a deploy window is
+  `deploy-stop-clean-oneshot-signal`. `/health/lite` down is the API,
+  stand down. Anonymous `/api/service-health` 401 is not this exit.
+  Not `ib-gateway-grouped`. A `PermissionError` on a present binary
+  still fails the oneshot.
+- **Remediation (code):** `_run` turns `FileNotFoundError` into
+  `GrokRuntimeError`. No LKG refuses the cycle (exit 0, heartbeat
+  `paused`, page left pending, no fallback pushover). An LKG record
+  is used. Do not restart-flap. Installing the CLI is the upgrader.
+  This page's binary was already on disk at 17:32Z. The unit is not
+  on `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `scripts/tests/test_grok_page_missing_binary.py::TestMissingGrokBinary`.
+- **Code:** `scripts/grok_runtime.py` (`_run`),
+  `scripts/grok_page_responder.py` (pin warning only when not refused).
+
 ## grok-upgrade-update-rejects-no-auto-update
 
 **`radon-grok-upgrade.service` oneshot pages P1 `Result=exit-code`

@@ -76,6 +76,7 @@ nature and its silence used to look exactly like health.
 |---|---|
 | Completed (including `pending: 0`) | `ok` |
 | Kill switch off | `paused` |
+| `GROK_BIN` missing and no last-known-good | `paused` (exit 0, `skipped: grok_runtime`, no fallback pushover) |
 | Skipped on a live lock | nothing written |
 | Raised on Turso / git | nothing written |
 

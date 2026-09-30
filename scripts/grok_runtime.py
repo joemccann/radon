@@ -167,7 +167,13 @@ def write_lkg(path: Path, state: LkgState) -> None:
 
 
 def _run(runner: Runner, argv: list[str]) -> str:
-    proc = runner(argv)
+    try:
+        proc = runner(argv)
+    except FileNotFoundError as exc:
+        # No return code when GROK_BIN is absent. Same class as a nonzero
+        # --version: the caller refuses or falls back to last-known-good.
+        target = argv[0] if argv else "grok"
+        raise GrokRuntimeError(f"{target} failed: {exc}") from exc
     if getattr(proc, "returncode", 1) != 0:
         raise GrokRuntimeError(
             f"{argv[0]} failed: {(getattr(proc, 'stderr', '') or '')[:200]}"
