@@ -118,7 +118,18 @@ test.describe("/regime/rsi-oversold - SPX RSI oversold breadth tab", () => {
     expect(await section.locator("svg path[stroke]").count()).toBeGreaterThanOrEqual(2);
 
     await expect(section).toContainText("SPX PCT OF MEMBERS WITH RSI(14) BELOW 30");
-    await expect(section.locator('[data-testid="chart-reference-band"]')).toBeVisible();
+    await expect(section.getByText("10% oversold cluster threshold", { exact: true })).toBeVisible();
+    const thresholdLine = await section.locator(".reference-band-edge").first().evaluate((line) => ({
+      x1: Number(line.getAttribute("x1")),
+      x2: Number(line.getAttribute("x2")),
+      y1: Number(line.getAttribute("y1")),
+      y2: Number(line.getAttribute("y2")),
+      stroke: line.getAttribute("stroke"),
+    }));
+    expect(thresholdLine.x2).toBeGreaterThan(thresholdLine.x1);
+    expect(thresholdLine.y1).toBeGreaterThan(0);
+    expect(thresholdLine.y2).toBe(thresholdLine.y1);
+    expect(thresholdLine.stroke).toBe("var(--warning)");
     await expect(section.locator('[data-testid="rsi-oversold-brush"]')).toBeVisible();
   });
 

@@ -39,6 +39,7 @@ class TestNewHistoryTablesHaveRetention:
                 "credit_spread_history",
                 "ivrank_history",
                 "iei_hyg_history",
+                "credit_vix_history",
                 "trin_samples",
                 "trin_daily",
             }
@@ -55,6 +56,7 @@ class TestNewHistoryTablesHaveRetention:
         # the daily series backs the chart.
         assert by_table["ivrank_history"].keep >= 252
         assert by_table["iei_hyg_history"].keep >= 252
+        assert by_table["credit_vix_history"].keep >= 252
         assert by_table["trin_daily"].keep >= 252
 
     def test_trin_samples_is_bounded_tighter_than_the_daily_series(self):
@@ -94,6 +96,10 @@ class TestTursoFirstRehydration:
         source = (REPO / "scripts" / "fetch_iei_hyg.py").read_text()
         assert "iei_hyg_history" in source
 
+    def test_credit_vix_reads_its_history_table(self):
+        source = (REPO / "scripts" / "fetch_credit_vix.py").read_text()
+        assert "credit_vix_history" in source
+
     def test_credit_spread_prefers_turso_and_falls_back_to_json(self, monkeypatch):
         import fetch_credit_spread as cs
 
@@ -122,3 +128,16 @@ class TestTursoFirstRehydration:
         monkeypatch.setattr(iei, "_turso_series", _boom)
         monkeypatch.setattr(iei, "_json_series", lambda: [{"date": "2026-08-01"}])
         assert iei.load_cached_series()[0]["date"] == "2026-08-01"
+
+    def test_credit_vix_prefers_turso_and_falls_back_to_json(self, monkeypatch):
+        import fetch_credit_vix as cv
+
+        monkeypatch.setattr(cv, "_turso_series", lambda: [{"date": "2008-04-11"}])
+        assert cv.load_cached_series()[0]["date"] == "2008-04-11"
+
+        def _boom():
+            raise RuntimeError("hrana 502")
+
+        monkeypatch.setattr(cv, "_turso_series", _boom)
+        monkeypatch.setattr(cv, "_json_series", lambda: [{"date": "2026-09-01"}])
+        assert cv.load_cached_series()[0]["date"] == "2026-09-01"

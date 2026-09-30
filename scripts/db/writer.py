@@ -1691,6 +1691,43 @@ def upsert_iei_hyg_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] =
     db.commit()
 
 
+def _credit_vix_params(row: dict[str, Any], stamp: str) -> tuple:
+    return (
+        row["date"],
+        float(row["shy_close"]),
+        float(row["hyg_close"]),
+        float(row["vix_close"]),
+        stamp,
+    )
+
+
+def upsert_credit_vix_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """CREDIT/VIX indicator — one row per SHY/HYG/VIX session, idempotent on date.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding). Spread / ranks / gap are
+    derived, not stored.
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(_credit_vix_params(row, stamp))
+        db.execute(
+            "INSERT INTO credit_vix_history (date, shy_close, hyg_close, vix_close, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date) DO UPDATE SET "
+            "shy_close = excluded.shy_close, hyg_close = excluded.hyg_close, "
+            "vix_close = excluded.vix_close, recorded_at = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
+
 _TRIN_SAMPLE_COLUMNS = "(ts, session_date, trin, adv, dec, up_vol, down_vol, source, recorded_at)"
 _TRIN_SAMPLE_ON_CONFLICT = (
     "ON CONFLICT(ts) DO UPDATE SET "

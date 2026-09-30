@@ -41,11 +41,11 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     ]);
   });
 
-  it("flattens to all 32 regime tabs with no duplicates", () => {
-    expect(REGIME_TABS).toHaveLength(32);
-    expect(new Set(REGIME_TABS).size).toBe(32);
+  it("flattens to all 33 regime tabs with no duplicates", () => {
+    expect(REGIME_TABS).toHaveLength(33);
+    expect(new Set(REGIME_TABS).size).toBe(33);
     expect([...REGIME_TABS].sort()).toEqual(
-      ["cri", "vcg", "gex", "grg", "breadth", "ma-ratio", "rsi-oversold", "trin", "divyield", "hyad", "hhlev", "bpi", "margin", "credit", "iei-hyg", "straddle", "cor", "streaks", "vixcor", "vixts", "panic-index", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "calm-streak", "cot", "ats", "short", "backtest"].sort(),
+      ["cri", "vcg", "gex", "grg", "breadth", "ma-ratio", "rsi-oversold", "trin", "divyield", "hyad", "hhlev", "bpi", "margin", "credit", "iei-hyg", "credit-vix", "straddle", "cor", "streaks", "vixcor", "vixts", "panic-index", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "calm-streak", "cot", "ats", "short", "backtest"].sort(),
     );
   });
 
@@ -70,6 +70,8 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(groupOf.margin).toBe("Positioning");
     expect(groupOf.hhlev).toBe("Positioning");
     expect(groupOf.credit).toBe("Positioning");
+    expect(groupOf["iei-hyg"]).toBe("Positioning");
+    expect(groupOf["credit-vix"]).toBe("Positioning");
     expect(groupOf.cot).toBe("Positioning");
     expect(groupOf.short).toBe("Positioning");
     expect(groupOf.ats).toBe("Positioning");
@@ -97,6 +99,8 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(REGIME_TAB_LABEL.ivrank).toBe("IV RANK");
     expect(REGIME_TAB_LABEL["iv-spread"]).toBe("IV SPREAD");
     expect(REGIME_TAB_LABEL.credit).toBe("CREDIT");
+    expect(REGIME_TAB_LABEL["iei-hyg"]).toBe("TSY/HY");
+    expect(REGIME_TAB_LABEL["credit-vix"]).toBe("CREDIT/VIX");
     expect(REGIME_TAB_LABEL.hyad).toBe("HY AD");
     expect(REGIME_TAB_LABEL.hhlev).toBe("HH LEV");
   });
@@ -170,12 +174,12 @@ describe("RegimeRail — grouped rail rendering + navigation", () => {
     return { onSelect, ...utils };
   };
 
-  it("renders all five group headers and 32 items", () => {
+  it("renders all five group headers and 33 items", () => {
     const { container } = renderRail();
     for (const g of REGIME_RAIL_GROUPS) {
       expect(within(container).getByText(g.label)).toBeTruthy();
     }
-    expect(container.querySelectorAll("[data-tab]")).toHaveLength(32);
+    expect(container.querySelectorAll("[data-tab]")).toHaveLength(33);
   });
 
   it("marks the active tab with the active class and aria-current", () => {

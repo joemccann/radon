@@ -16,6 +16,7 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | curve | `/regime/curve` | `yield-curve` | [curve.md](curve.md) |
 | credit | `/regime/credit` | `credit-spread` | [credit.md](credit.md) |
 | iei-hyg | `/regime/iei-hyg` | `iei-hyg` | [iei-hyg.md](iei-hyg.md) (tab renamed TSY/HY 2026-08-23) |
+| credit-vix | `/regime/credit-vix` | `credit-vix` | [credit-vix.md](credit-vix.md) (SHY minus HYG vs VIX) |
 | trin | `/regime/trin` | `trin` | [trin.md](trin.md) (spec; build in flight) |
 | divyield | `/regime/divyield` | `div-yield` | [divyield.md](divyield.md) |
 | ma-ratio | `/regime/ma-ratio` | `ma-ratio` | [ma-ratio.md](ma-ratio.md) (an ok-heartbeat timeout no longer fails the oneshot) |

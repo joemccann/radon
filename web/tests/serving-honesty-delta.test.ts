@@ -18,6 +18,7 @@ const read = (rel: string) => readFileSync(join(REPO, rel), "utf-8");
 // ---------------------------------------------------------------------------
 const DEGRADE_GUARD_ROUTES = [
   "web/app/api/credit-spread/route.ts",
+  "web/app/api/credit-vix/route.ts",
   "web/app/api/iei-hyg/route.ts",
   "web/app/api/trin/route.ts",
   "web/app/api/vol-cone/route.ts",

@@ -184,8 +184,17 @@ class TestSharedIbClientIdsAreSerialized:
     def test_the_two_jobs_still_share_the_same_ids(self):
         from fetch_credit_spread import CREDIT_IB_HISTORY_CLIENT_IDS
         from fetch_iei_hyg import IEI_HYG_IB_HISTORY_CLIENT_IDS
+        from fetch_credit_vix import CREDIT_VIX_IB_HISTORY_CLIENT_IDS
 
         assert CREDIT_IB_HISTORY_CLIENT_IDS == IEI_HYG_IB_HISTORY_CLIENT_IDS
+        assert CREDIT_IB_HISTORY_CLIENT_IDS == CREDIT_VIX_IB_HISTORY_CLIENT_IDS
+
+    def test_credit_vix_takes_the_shared_lock(self):
+        exec_start = _unit_value("radon-credit-vix.service", "ExecStart")
+        assert "/usr/bin/flock" in exec_start
+        assert "/run/lock/radon-ib-history-5669.lock" in exec_start
+        assert _unit_value("radon-credit-vix.service", "SuccessExitStatus") == "75"
+        assert "-E 75" in exec_start
 
     @pytest.mark.parametrize("unit", SHARED_ID_UNITS)
     def test_each_takes_the_shared_lock(self, unit):

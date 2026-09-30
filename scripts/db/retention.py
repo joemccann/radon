@@ -52,6 +52,7 @@ SLM_TAGGER_SHADOW_KEEP_DAYS = 90      # newsfeed SLM shadow provenance (I.1)
 CREDIT_SPREAD_KEEP_SESSIONS = 6000    # 18y+ daily series backs the full chart
 IVRANK_KEEP_SESSIONS = 3000           # 252-session rank window + chart history
 IEI_HYG_KEEP_SESSIONS = 3000          # 252-session extremes window + chart
+CREDIT_VIX_KEEP_SESSIONS = 3000       # 252-session range-gap window + chart
 TRIN_DAILY_KEEP_SESSIONS = 1500       # daily $TRIN chart (~6y)
 # ~78 intraday samples a weekday; only the CURRENT session's MA(10) and the
 # hourly chart read them, so this is deliberately the tightest of the five.
@@ -185,6 +186,7 @@ SNAPSHOT_RETENTION_POLICIES: Sequence[Policy] = (
     KeepLatestPolicy("credit_spread_history", "date", CREDIT_SPREAD_KEEP_SESSIONS),
     KeepLatestPolicy("ivrank_history", "date", IVRANK_KEEP_SESSIONS),
     KeepLatestPolicy("iei_hyg_history", "date", IEI_HYG_KEEP_SESSIONS),
+    KeepLatestPolicy("credit_vix_history", "date", CREDIT_VIX_KEEP_SESSIONS),
     KeepLatestPolicy("trin_daily", "date", TRIN_DAILY_KEEP_SESSIONS),
     KeepLatestPolicy("trin_samples", "ts", TRIN_SAMPLES_KEEP_ROWS),
 )

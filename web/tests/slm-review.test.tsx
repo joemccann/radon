@@ -111,7 +111,7 @@ describe("private SLM blind review", () => {
     render(<SlmReview reviewer="operator-fixture" />);
     await screen.findByText("POST post-8");
     expect(within(screen.getByText("Candidate 1").parentElement as HTMLElement).getByRole("button", { name: "Accept" }).getAttribute("aria-pressed")).toBe("true");
-    expect(JSON.parse(localStorage.getItem("radon-slm-review:fixture-run:operator-fixture") as string).decisions).toHaveLength(1);
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("radon-slm-review:fixture-run:operator-fixture") as string).decisions).toHaveLength(1));
   });
 
   it("opens the first unfinished item when importing legacy browser votes without a cursor", async () => {

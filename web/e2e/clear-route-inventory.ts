@@ -11,7 +11,7 @@ export type ClearRouteCase = {
 
 const regimePages = [
   "ats", "backtest", "bpi", "breadth", "calm-streak", "cor", "cot", "credit", "cri",
-  "curve", "dispersion", "divyield", "gex", "grg", "hhlev", "hyad", "iei-hyg",
+  "credit-vix", "curve", "dispersion", "divyield", "gex", "grg", "hhlev", "hyad", "iei-hyg",
   "iv-spread", "ivrank", "ma-ratio", "margin", "rsi-oversold", "short", "skew", "skew2d",
   "straddle", "streaks", "trin", "vcg", "vixcor", "vixts", "panic-index",
 ] as const;
@@ -21,6 +21,7 @@ const regimeLoaded: Record<string, string> = {
   "calm-streak": '[data-testid="calm-streak-chart-section"]', cor: '[data-testid="cor-chart-section"]', cot: '[data-testid="cot-chart-section"]', credit: '[data-testid="credit-spread-chart-section"]', cri: ".regime-hero, .m-regime-headline",
   curve: '[data-testid="yield-curve-chart-section"]', dispersion: '[data-testid="dispersion-chart-section"]', divyield: '[data-testid="divyield-chart-section"]',
   gex: '[data-testid="gex-laplace-chart"]', grg: '[data-testid="grg-chart"]', hhlev: '[data-testid="hhlev-chart-section"]', hyad: '[data-testid="hyad-chart-section"]',
+  "credit-vix": '[data-testid="credit-vix-chart-section"]',
   "iei-hyg": '[data-testid="iei-hyg-chart-section"]', "iv-spread": '[data-testid="iv-spread-chart-section"]', ivrank: '[data-testid="ivrank-chart-section"]',
   llm: '[data-testid="ai-infrastructure-panel"]', "ma-ratio": '[data-testid="ma-ratio-chart-section"]', margin: '[data-testid="margin-debt-chart-section"]',
   "rsi-oversold": '[data-testid="rsi-oversold-chart-section"]',
