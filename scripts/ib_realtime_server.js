@@ -434,7 +434,9 @@ const fundamentalsStore = new LRUCache(500); // symbol → FundamentalsData (LRU
  */
 const DEPTH_ENABLED = Boolean(process.env.RADON_DEPTH_ENABLED && process.env.RADON_DEPTH_ENABLED !== "0" && process.env.RADON_DEPTH_ENABLED !== "false");
 const MAX_CONCURRENT_DEPTH = 3;
-const DEPTH_NUM_ROWS_EQUITY = 10;
+// 40 SMART rows (~25px each) fill the cockpit montage level with the Time &
+// Sales tape up to ~1000px tall; the montage scrolls internally past that.
+const DEPTH_NUM_ROWS_EQUITY = 40;
 const DEPTH_NUM_ROWS_FUTURES = 10;
 // Symbols treated as futures for depth purposes (single-venue native depth).
 // NOTE: VIX futures use IB contract symbol "VIX" (exchange CFE), NOT the CBOE
