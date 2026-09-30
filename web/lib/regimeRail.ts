@@ -14,7 +14,7 @@ export type RegimeTab =
   | "cri" | "vcg" | "gex" | "grg"
   | "breadth" | "bpi" | "margin" | "straddle"
   | "cor" | "vixcor" | "vixts" | "panic-index" | "dispersion" | "ivrank" | "iv-spread" | "skew" | "skew2d" | "curve"
-  | "cot" | "ats" | "short" | "llm" | "backtest" | "credit" | "iei-hyg" | "trin" | "divyield" | "hyad" | "hhlev"
+  | "cot" | "ats" | "short" | "llm" | "backtest" | "credit" | "iei-hyg" | "credit-vix" | "trin" | "divyield" | "hyad" | "hhlev"
   | "ma-ratio"
   | "calm-streak"
   | "streaks";
@@ -24,7 +24,7 @@ export type RegimeRailGroup = { label: string; tabs: readonly RegimeTab[] };
 export const REGIME_RAIL_GROUPS: readonly RegimeRailGroup[] = [
   { label: "Composite", tabs: ["cri", "grg", "vcg"] },
   { label: "Volatility", tabs: ["vixcor", "vixts", "panic-index", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "straddle", "calm-streak"] },
-  { label: "Positioning", tabs: ["gex", "margin", "hhlev", "credit", "iei-hyg", "cot", "short", "ats"] },
+  { label: "Positioning", tabs: ["gex", "margin", "hhlev", "credit", "iei-hyg", "credit-vix", "cot", "short", "ats"] },
   { label: "Breadth & sentiment", tabs: ["breadth", "ma-ratio", "trin", "divyield", "hyad", "bpi", "cor", "streaks"] },
   { label: "Models", tabs: ["backtest"] },
 ];
@@ -51,6 +51,7 @@ export const REGIME_TAB_LABEL: Record<RegimeTab, string> = {
   hhlev: "HH LEV",
   credit: "CREDIT",
   "iei-hyg": "TSY/HY",
+  "credit-vix": "CREDIT/VIX",
   cot: "COT",
   short: "SHORT",
   ats: "ATS",

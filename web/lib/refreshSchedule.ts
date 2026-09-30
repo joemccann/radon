@@ -144,6 +144,9 @@ export const CREDIT_SPREAD_REFRESH: RefreshSchedule = [daily(21, 45)];
 /** cloud/services/radon-iei-hyg.timer */
 export const IEI_HYG_REFRESH: RefreshSchedule = [daily(21, 55)];
 
+/** cloud/services/radon-credit-vix.timer */
+export const CREDIT_VIX_REFRESH: RefreshSchedule = [daily(22, 25)];
+
 /** cloud/services/radon-trin.timer */
 export const TRIN_REFRESH: RefreshSchedule = [
   { weekdays: MON_FRI, hours: range(13, 21), minutes: every(5, 2) },

@@ -141,6 +141,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-iv-spread.timer",
     "radon-iei-hyg.service",
     "radon-iei-hyg.timer",
+    "radon-credit-vix.service",
+    "radon-credit-vix.timer",
     "radon-trin.service",
     "radon-trin.timer",
     "radon-divyield.service",

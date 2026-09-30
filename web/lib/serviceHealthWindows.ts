@@ -225,6 +225,10 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // ``iei-hyg`` — radon-iei-hyg.timer fires daily 21:55 UTC; IB → UW → Yahoo cascade, so requires_ib stays false.
   "iei-hyg": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``credit-vix`` — radon-credit-vix.timer fires daily 22:25 UTC; SHY/HYG
+  // equity cascade plus IB Index → Cboe → Yahoo VIX, so requires_ib stays false.
+  "credit-vix": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``hy-ad``: radon-hyad.timer fires Tue..Sat 11:00 UTC, the morning after
   // FINRA TRACE end-of-day finalization (T+1). A uniform 120h window covers
   // the T+1 lag plus 3-day weekends and bond-market-only holidays; older

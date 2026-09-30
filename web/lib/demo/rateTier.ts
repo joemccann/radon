@@ -70,7 +70,7 @@ export function classifyRateTier(
 export const KNOWN_API_SEGMENTS: ReadonlySet<string> = new Set([
   "admin", "ai-cycle", "alerts", "assistant", "attribution", "backtest", "blotter",
   "bookmarks", "bpi", "breadth", "calm-streak", "cash-flows", "catalysts", "cor",
-  "credentials", "credit-spread", "discover", "dispersion", "divyield",
+  "credentials", "credit-spread", "credit-vix", "discover", "dispersion", "divyield",
   "equibles-ats-venue-share", "equibles-cot-positioning",
   "equibles-filing-forensics", "equibles-short-crowding",
   "equibles-smart-money-13f", "flex-token", "flow-analysis", "flow-surprise",

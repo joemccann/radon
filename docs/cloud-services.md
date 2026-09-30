@@ -678,6 +678,17 @@ shared IB client IDs (see above). Heartbeat `iei-hyg`. Installed by the deploy's
 `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/iei-hyg.md`](indicators/iei-hyg.md).
 
+### CREDIT/VIX (`radon-credit-vix.timer`)
+
+Daily `22:25 UTC` (`RandomizedDelaySec=300`), oneshot
+`scripts/fetch_credit_vix.py`. SHY + HYG via the iei-hyg equity cascade
+(IB Stock → Robinhood → UW → Yahoo). VIX via IB `Index('VIX','CBOE')` →
+Cboe CDN → Yahoo `^VIX` (never the equity cascade). Serialized against
+`radon-credit-spread` and `radon-iei-hyg` on the shared IB client IDs 56/69
+(see above). Heartbeat `credit-vix`. Installed by the deploy's
+`install-units` verb from `installed-units.sha256`. Spec:
+[`indicators/credit-vix.md`](indicators/credit-vix.md).
+
 ### TRIN (`radon-trin.timer`)
 
 Every 5 minutes `Mon..Fri 13:02-21:57 UTC` (2 min offset from

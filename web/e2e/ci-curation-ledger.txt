@@ -94,6 +94,7 @@ clear-workspace-interactions.spec.ts
 cor-tab.spec.ts
 crcl-spread-builder.spec.ts
 credit-spread-tab.spec.ts
+credit-vix-tab.spec.ts
 crox-bull-call-stale-price.spec.ts
 cta-page.spec.ts
 cta-stale-banner.spec.ts

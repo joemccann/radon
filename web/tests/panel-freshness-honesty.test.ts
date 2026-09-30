@@ -19,6 +19,7 @@ const read = (rel: string) => readFileSync(join(REPO, rel), "utf-8");
 const DELTA_PANELS = [
   "web/components/TrinPanel.tsx",
   "web/components/CreditSpreadPanel.tsx",
+  "web/components/CreditVixPanel.tsx",
   "web/components/IeiHygPanel.tsx",
   "web/components/IvRankPanel.tsx",
 ];
@@ -58,6 +59,7 @@ describe("R-124: the shared affordance exists and is honest", () => {
 const FRESHNESS_ROUTES = [
   "web/app/api/trin/route.ts",
   "web/app/api/credit-spread/route.ts",
+  "web/app/api/credit-vix/route.ts",
   "web/app/api/iei-hyg/route.ts",
   "web/app/api/vol-cone/route.ts",
 ];

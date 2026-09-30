@@ -708,6 +708,22 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("iei-hyg")).toBe(false);
   });
 
+  // ``credit-vix`` — radon-credit-vix.timer fires daily 22:25 UTC every calendar day
+  // (weekend runs are unchanged-data heartbeats), so a uniform 26h window
+  // matches its daily siblings. IB → Cboe → Yahoo cascade, so the job
+  // heartbeats through an IB outage: requires_ib stays false.
+  it("credit-vix is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["credit-vix"]).toBeDefined();
+    expect(getServiceCategory("credit-vix")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("credit-vix", state)).toBe(26 * HOUR);
+      expect(getFreshnessWindowMs("credit-vix", state)).toBe(
+        getFreshnessWindowMs("iei-hyg", state),
+      );
+    }
+    expect(requiresIb("credit-vix")).toBe(false);
+  });
+
   // ``trin`` — radon-trin.timer samples IB every 5 minutes during RTH, so a
   // 15-minute open window tolerates 3 missed cycles (like vcg-scan); the
   // closing snapshot holds 24h off-hours. IB-only internals: requires_ib true.

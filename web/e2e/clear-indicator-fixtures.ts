@@ -859,6 +859,55 @@ export function IeiHygFixture() {
   return IEI_HYG_MOCK;
 }
 
+// Source: e2e/credit-vix-tab.spec.ts
+export function CreditVixFixture() {
+  function buildSeries() {
+    const rows = [];
+    for (let i = 0; i < 88; i++) {
+      const day = new Date(Date.UTC(2026, 4, 26 + i));
+      const shy = Number((80 + i * 0.01).toFixed(4));
+      const hyg = Number((77.5 - i * 0.005).toFixed(4));
+      rows.push({
+        date: day.toISOString().slice(0, 10),
+        shy_close: shy,
+        hyg_close: hyg,
+        vix_close: Number((16 + (i % 5) * 0.2).toFixed(4)),
+        spread: shy - hyg,
+      });
+    }
+    const last = rows[rows.length - 1];
+    last.date = "2026-09-29";
+    last.shy_close = 81.16;
+    last.hyg_close = 77.36;
+    last.vix_close = 16.04;
+    last.spread = 3.8;
+    return rows;
+  }
+
+  const SERIES = buildSeries();
+
+  const CREDIT_VIX_MOCK = {
+    scan_time: new Date().toISOString(),
+    source: "ib",
+    count: SERIES.length,
+    current: {
+      date: "2026-09-29",
+      shy_close: 81.16,
+      hyg_close: 77.36,
+      vix_close: 16.04,
+      spread: 3.8,
+      rank_spread: 1,
+      rank_vix: 0.146,
+      gap: 0.854,
+      state: "CREDIT WIDE",
+      widest_since: "2015-08-17",
+      window_sessions: 88,
+    },
+    series: SERIES,
+  };
+  return CREDIT_VIX_MOCK;
+}
+
 // Source: e2e/divyield-tab.spec.ts
 export function DivyieldFixture() {
   const DAY_MS = 86_400_000;

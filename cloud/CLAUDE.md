@@ -447,7 +447,7 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
 
 ## Systemd And Drift
 
-`setup-vps.sh` includes the `radon-aa-frontier-refresh`, `radon-ai-cycle-backfill`,
+`setup-vps.sh` includes the `radon-credit-vix`, `radon-aa-frontier-refresh`, `radon-ai-cycle-backfill`,
 `radon-ai-cycle`, `radon-liquidcompute`, `radon-subscription-tokens` and
 `radon-panic-index` service/timer pairs in the full-host installation inventory.
 Setup installs those pairs and enables only their timers; existing hosts receive
