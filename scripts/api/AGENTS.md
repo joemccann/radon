@@ -20,8 +20,8 @@ Applies under `scripts/api/`. Root and `scripts/AGENTS.md` also apply. Mirrors `
 
 ## IB Gateway Modes
 
-- `docker`: local and Hetzner Docker Gateway.
-- `cloud`: laptop dev via Tailscale `ib-gateway:4001`; TCP probe only, no restart.
+- `docker`: local development Docker Gateway; lock-aware recovery owns starts.
+- `cloud`: production lifecycle delegates to the installed Gateway control helper; app-role hosts proxy control over mTLS. Laptop remote aliases remain probe-only.
 - `launchd`: legacy local IBC wrappers.
 - Switching mode via `scripts/ib mode {local|cloud}` requires dev stack restart.
 - Auto-recovery must verify port down or CLOSE_WAIT before restart. Client ID collision, VOL error, or transient timeout is not restart evidence.
@@ -55,3 +55,4 @@ Applies under `scripts/api/`. Root and `scripts/AGENTS.md` also apply. Mirrors `
 - Script stdout should contain only result JSON.
 - Progress/debug output goes to stderr.
 - JSON extractors are defensive, but script discipline is the primary guarantee.
+- Failed subprocesses retain structured `status=error` data while `ok` stays false. Cancel/modify return coded 502 details with the broker fields and order identity intact (REL-021b / R-024).
