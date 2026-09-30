@@ -199,7 +199,10 @@ def _get_jwks_client():
         jwks_url = os.environ.get("CLERK_JWKS_URL", "")
         if not jwks_url:
             raise RuntimeError("CLERK_JWKS_URL not set")
-        _jwks_client = pyjwt.PyJWKClient(jwks_url, cache_keys=True)
+        # Per-kid negative caching bounds refreshes without delaying a new rotation.
+        _jwks_client = pyjwt.PyJWKClient(
+            jwks_url, cache_keys=True, cooldown_duration=0
+        )
     return _jwks_client
 
 

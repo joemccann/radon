@@ -100,6 +100,11 @@ untrusted. `check-env.py` accepts any private v4 for
 `IB_GATEWAY_HOST`, so a non-`10.0/16` network deploys green and then every
 private-net probe is silently unauthenticated.
 
+Clerk key rotation must remain immediately discoverable on both hosts.
+The FastAPI and hosted MCP JWKS clients set PyJWT 2.15's
+`cooldown_duration=0`, preserving Radon's existing per-kid negative caches
+and bounded lookups instead of imposing a global refresh delay across kids.
+
 Broker VM:
 
 - `RADON_HOST_ROLE=broker`

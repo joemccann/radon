@@ -410,6 +410,11 @@ JSON-RPC), documented for consumers at radon.run `/developers/mcp`.
   398c8636). A kid already present in the cached key set is served without
   taking the refresh gate, so a slow or contended JWKS refresh cannot stall
   verification of tokens signed by an already-known key.
+  With PyJWT 2.15, both hosted MCP and FastAPI clients explicitly set
+  `cooldown_duration=0`: Radon's per-kid bounds own refresh throttling.
+  The library's global cooldown must not deny a newly rotated Clerk key
+  after another kid's fetch; negative caches, concurrency caps and timeout
+  controls remain in place.
 - **Env**: `CLERK_JWKS_URL` / `CLERK_ISSUER` / `ALLOWED_USER_IDS` from
   `/etc/radon/mcp.env`, a stripped file `deploy.sh:write_mcp_env` (and
   `setup-vps.sh`) derives from `/etc/radon/env` on every deploy; the unit

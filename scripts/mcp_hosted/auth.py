@@ -100,8 +100,10 @@ def _get_jwks_client():
         jwks_url = os.environ.get("CLERK_JWKS_URL", "")
         if not jwks_url:
             raise AuthError(401, "authentication is not configured on this server")
+        # Our per-kid bounds own refresh throttling; a global cooldown blocks rotation.
         _jwks_client = pyjwt.PyJWKClient(
-            jwks_url, cache_keys=True, timeout=JWKS_LOOKUP_TIMEOUT_SECONDS
+            jwks_url, cache_keys=True, timeout=JWKS_LOOKUP_TIMEOUT_SECONDS,
+            cooldown_duration=0,
         )
     return _jwks_client
 
