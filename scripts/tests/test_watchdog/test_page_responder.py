@@ -468,6 +468,19 @@ class TestResponder:
             assert sync_remote_clone(tmp_path) == "synced"
             assert run.call_count == 3
 
+    def test_sync_fetches_over_public_https(self, tmp_path, monkeypatch):
+        # The unit hides ~/.ssh from the agent; main is public, so the sync
+        # needs no credential and must not depend on the clone's origin URL.
+        monkeypatch.setenv("GROK_PAGE_SYNC_REMOTE", "1")
+        with patch("grok_page_responder.subprocess.run") as run:
+            run.return_value = SimpleNamespace(returncode=0, stdout="")
+            assert sync_remote_clone(tmp_path) == "synced"
+        fetch = run.call_args_list[1].args[0]
+        assert fetch == [
+            "git", "fetch", "https://github.com/joemccann/radon.git",
+            "+refs/heads/main:refs/remotes/origin/main",
+        ]
+
     def test_lock_skips_overlapping_cycle(self, db_conn, tmp_path, monkeypatch):
         # REL-030: the responder now fails CLOSED, so an enabled cycle is an
         # explicit opt-in rather than the absence of a switch.

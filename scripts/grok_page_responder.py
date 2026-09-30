@@ -73,6 +73,7 @@ LOCK_STALE_SECS = GROK_TIMEOUT_SECS + 300
 CACHE_REL = Path("data") / "cache" / "grok_pages"
 LOCK_NAME = ".responder.lock"
 HEALTH_SERVICE = "grok-page-responder"
+PUBLIC_REPO_URL = "https://github.com/joemccann/radon.git"
 
 # "Recovers on next timer" is the wrong call when that slot is most of a day
 # away (radon-vol-cone 2026-08-20: SIGTERM'd at 20:4x UTC, next slot ~22h out).
@@ -174,8 +175,9 @@ def sync_remote_clone(repo_root: Path) -> str:
         return "status-failed"
     if (porcelain.stdout or "").strip():
         return "dirty"
+    # Public HTTPS, not the clone's origin: the unit hides ~/.ssh.
     fetch = subprocess.run(
-        ["git", "fetch", "origin", "main"],
+        ["git", "fetch", PUBLIC_REPO_URL, "+refs/heads/main:refs/remotes/origin/main"],
         cwd=repo_root, capture_output=True, text=True, timeout=60,
     )
     if fetch.returncode != 0:
