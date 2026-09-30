@@ -8709,3 +8709,13 @@ Review: CIP-015 is the sole qualifying critical-path experiment; 136 focused tes
 ## Review
 
 - Original Turso turn matched (18:06:31.410Z, grok-4.7, image_count 1). Five red regressions captured. Patched live chart replay reaches rank_spreads and get_option_chain in six rounds; thirteen successful tool events; no order. Final verification: 401 unique focused tests passed across 47 files; 12 Playwright tests passed; repetition detector coverage 100%; TypeScript and focused ESLint passed. Desktop/mobile screenshots reviewed. Initial full web run: 9693 passed, 9 failed, 10 skipped; it overlapped final source edits and browser verification. Every failed file passes in the fresh focused runs. Exact-head CI pending. Trace: tasks/ai-chat-repetition-2026-09-29.md.
+
+## Nightly reliability 2026-09-30
+
+- [x] T1 depends_on: [] Install isolated toolchain, recover trusted checkpoint, inspect open reliability PRs and create authorized branch.
+- [x] T2 depends_on: [T1] Audit c274a773..e3063f0c and codemap importers; execute standing sweeps and re-triage inherited acceptance.
+- [x] T3 depends_on: [T2] Repair verified findings serially with fault-injection red/green and focused gates.
+- [ ] T4 depends_on: [T3] Run permanent drills and validation; publish substantive draft PR and await exact-head CI.
+- [ ] T5 depends_on: [T4] Post exactly one durable issue comment and complete review.
+
+Review: seven inherited findings repaired in separate commits with repeated serial red evidence and focused green gates. Permanent Python drills: 95 passed; catalog/admission sweep: 108 passed. No new delta findings. Full suites, cloud gates and Vitest belong to PR CI. Historical candidates retain their original acceptance on issue #81; no inspection-only closure. No production access. Publication and exact-head CI pending.

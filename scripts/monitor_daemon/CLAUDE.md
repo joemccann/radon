@@ -48,3 +48,7 @@ Full rule in `web/CLAUDE.md` §Combo / BAG Order Guardrails point 7. Python side
 - `flex_token_check` runs daily, alerts on expiry.
 - `menthorq_session_check` is metadata-only (durable `__Secure-authjs.session-token` expiry). `menthorq_login_probe` GETs local FastAPI `/options/exposure/SPX` (90s). Session ok + probe error = unspendable dashboard jar, not a healthy session. Bootstrap must click OIDC `input[name=authorize]` after WordPress login; the page stays on `wp-login.php`. Do not stand down as `client_id=aws_cognito_client_id`. CTA jar ≠ dashboard jar.
 - `replica_watchdog` is disabled before subprocess or health writes when `data/replica.db` is absent. While the file exists it is event-driven — only writes `service_health` when it actually heals. Use the 24h staleness window only for that applicable state (event-driven writer windows rule in `feedback_event_driven_writer_windows.md`).
+
+## Journal History Read Bounds
+
+REL-108 / NF-2: journal-sync uses the shared urllib Hrana connection, not native libsql, for history and prior-quantity reads. Recovery, execution coverage and mirror scans use 200-row insertion cursors with a 30-second scan deadline; each HTTP request has the shared transport timeout. A failed page exposes no partial state. Recovery restores effective-time ordering after pagination. Concurrent inserts are included; concurrent update/delete snapshot isolation is not claimed.

@@ -3227,10 +3227,11 @@ async def orders_cancel(request: Request):
         args.extend(["--perm-id", str(perm_id)])
 
     result = await _run_ib_script_with_recovery("ib_order_manage.py", args, timeout=15)
+    if isinstance(result.data, dict) and result.data.get("status") == "error":
+        # REL-021b / R-024: coded details survive the web error coercer.
+        raise HTTPException(status_code=502, detail={"code": "ORDER_CANCEL_FAILED", **result.data})
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
-    if result.data and result.data.get("status") == "error":
-        raise HTTPException(status_code=502, detail=result.data.get("message", "Cancel failed"))
     # REL-019: audit-trail the successful cancel (best-effort).
     data = result.data or {}
     await record_order_event(
@@ -3317,10 +3318,11 @@ async def orders_modify(request: Request):
         args.append("--no-outside-rth")
 
     result = await _run_ib_script_with_recovery("ib_order_manage.py", args, timeout=15)
+    if isinstance(result.data, dict) and result.data.get("status") == "error":
+        # REL-021b / R-024: retain order identity and broker diagnostics.
+        raise HTTPException(status_code=502, detail={"code": "ORDER_MODIFY_FAILED", **result.data})
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
-    if result.data and result.data.get("status") == "error":
-        raise HTTPException(status_code=502, detail=result.data.get("message", "Modify failed"))
     # REL-019: audit-trail the successful modify (best-effort).
     data = result.data or {}
     await record_order_event(
