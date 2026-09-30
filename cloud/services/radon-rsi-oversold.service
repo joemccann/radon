@@ -1,0 +1,23 @@
+[Unit]
+Description=Radon RSI OVERSOLD Indicator (SPX pct of members with RSI(14) below 30, daily)
+After=network.target
+
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/rsi_oversold_scan.py
+StandardOutput=journal
+StandardError=journal
+# SPX-only member-close sweep: the script self-limits at SWEEP_BUDGET_S=1500,
+# so 2100 covers that budget plus one in-flight FETCH_TIMEOUT_S and persist
+# slack (same as ma-ratio). Nesting pinned in scripts/tests/test_rsi_oversold.py.
+TimeoutStartSec=2100
+
+[Install]
+WantedBy=multi-user.target

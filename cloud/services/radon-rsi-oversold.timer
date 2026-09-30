@@ -1,0 +1,17 @@
+[Unit]
+Description=Radon RSI OVERSOLD Indicator - daily 23:05 UTC SPX RSI breadth
+
+[Timer]
+# 23:05 UTC is after the 16:00 ET close year-round and 20 minutes behind
+# radon-ma-ratio's 22:45 pass so the shared member-close sweep is already
+# fresh. 23:05 was unused (neighbors: ma-ratio 22:45, dispersion 23:20,
+# bpi 23:30). Runs every calendar day: weekend and holiday runs recompute
+# identical rows (idempotent upsert) and act as unchanged-data heartbeats
+# that keep service_health fresh inside the 26h staleness window (the
+# ivrank convention).
+OnCalendar=*-*-* 23:05:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

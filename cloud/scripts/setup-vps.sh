@@ -199,6 +199,8 @@ readonly SERVICE_FILES=(
   radon-divyield.timer
   radon-ma-ratio.service
   radon-ma-ratio.timer
+  radon-rsi-oversold.service
+  radon-rsi-oversold.timer
   radon-calm-streak.service
   radon-calm-streak.timer
   radon-bounce-setup.service

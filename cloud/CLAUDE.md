@@ -494,6 +494,12 @@ and pages via Pushover plus the unit watchdog. The job heartbeats
 [`docs/grok-page-responder.md`](../docs/grok-page-responder.md).
 `cloud/tests/test_grok_upgrade_setup.py` pins the inventory-and-enable.
 
+`setup-vps.sh` inventories `radon-rsi-oversold.{service,timer}` and
+`enable_services` enables the timer. Daily 23:05 UTC, twenty minutes
+after `radon-ma-ratio`. Oneshot `scripts/rsi_oversold_scan.py`,
+`TimeoutStartSec=2100`. Heartbeat `rsi-oversold` (26h). Spec:
+[`docs/indicators/rsi-oversold.md`](../docs/indicators/rsi-oversold.md).
+
 
 Canonical unit files are copied root-owned to `/etc/systemd/system`; they are
 not symlinked from the checkout.
