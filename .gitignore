@@ -58,6 +58,7 @@ htmlcov/
 # =============================================================================
 node_modules/
 .next/
+.next-setup-gate/
 out/
 *.tsbuildinfo
 next-env.d.ts
@@ -75,6 +76,7 @@ build/
 # Test output
 coverage/
 test-results/
+test-results-setup-gate/
 .vitest/
 
 # =============================================================================
