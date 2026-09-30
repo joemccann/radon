@@ -175,12 +175,22 @@ class TestStamp:
 
 
 
-def test_default_runtime_lock_lives_in_its_own_dir():
-    """The responder may write only this dir under /var/lib/radon."""
-    import os
+def test_default_runtime_lock_lives_in_its_own_dir(monkeypatch):
+    """T-518: always check the sandbox-compatible default, even on custom hosts."""
+    import runpy
 
-    if os.environ.get("RADON_GROK_RUNTIME_LOCK"):
-        pytest.skip("lock path overridden in this environment")
-    assert str(grok_runtime.DEFAULT_LOCK_PATH) == (
+    monkeypatch.delenv("RADON_GROK_RUNTIME_LOCK", raising=False)
+    # Re-evaluate import-time configuration without mutating the shared module.
+    runtime = runpy.run_path(grok_runtime.__file__)
+    assert str(runtime["DEFAULT_LOCK_PATH"]) == (
         "/var/lib/radon/grok-runtime/grok-runtime.lock"
     )
+
+
+def test_runtime_lock_honors_explicit_override(monkeypatch, tmp_path):
+    import runpy
+
+    lock = tmp_path / "custom-runtime.lock"
+    monkeypatch.setenv("RADON_GROK_RUNTIME_LOCK", str(lock))
+    runtime = runpy.run_path(grok_runtime.__file__)
+    assert runtime["DEFAULT_LOCK_PATH"] == lock
