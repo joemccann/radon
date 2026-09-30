@@ -33,15 +33,6 @@
     letter-spacing: 0;
     text-transform: none;
   }
-  .workspace :global(.asset-deck-x) {
-    min-width: 44px;
-    min-height: 36px;
-    border-radius: 6px;
-    font: 400 12px var(--font-sans);
-    letter-spacing: 0;
-  }
-  .workspace :global(.asset-deck-x):hover { background: var(--bg-hover); }
-  .workspace :global(.asset-deck-x):focus-visible { outline: 2px solid var(--signal-core); outline-offset: -2px; }
   .workspace :global(.asset-deck-body) {
     min-width: 0;
     padding: 20px;
