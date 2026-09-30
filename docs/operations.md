@@ -147,6 +147,11 @@ the complete 0600 file. Failure exits 71 without starting the container or
 overwriting its previous rendered copy. An empty successful newsfeed allowlist
 is permitted; a failed filter is not.
 
+The container notify proxy accepts only `READY=1`, `WATCHDOG=1` and `STATUS=`
+notices (REL-158 / R-439). It drops lifecycle, PID and timeout-control fields,
+including those mixed into an otherwise valid datagram. The proxy socket stays
+0600 and is owned by the container user.
+
 **Container stop (2026-09-25).** Each app drop-in runs
 `ExecStop=radon-app-runtime halt %n <grace>`, which stops the container by
 name through the engine (`stop --time <grace>`: SIGTERM to the container

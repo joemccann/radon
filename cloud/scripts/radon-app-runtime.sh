@@ -467,7 +467,7 @@ cmd_halt() {
 # out" twice on 2026-08-29 and the drop-in was hot-patched to Type=simple,
 # which then failed every deploy's control-plane preflight. This forwarder
 # is a child of the ExecStart process, so it IS in the cgroup. It owns the
-# socket the container sees and relays every datagram to systemd. R-429.
+# socket the container sees and relays permitted notices to systemd. R-429.
 cmd_notify_proxy() {
   local listen="${1:-}" upstream="${2:-}"
   [[ -n "$listen" && -n "$upstream" ]] || usage
@@ -495,6 +495,11 @@ while True:
         if os.getppid() != parent:
             raise SystemExit(0)
         continue
+    # REL-158 / R-439: the proxy PID is trusted by systemd, the container
+    # is not. Never forward MAINPID, lifecycle or timeout-control fields.
+    data = b"\n".join(line for line in data.splitlines()
+                      if line in (b"READY=1", b"WATCHDOG=1")
+                      or line.startswith(b"STATUS="))
     if not data:
         continue
     try:

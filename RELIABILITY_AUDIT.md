@@ -2792,3 +2792,10 @@ were evaluated against those changes. No new delta defect was verified.
   No new service-health producer is missing either watchdog catalog.
 
 Audited through: e3063f0c16ddcdead832df49553c6035e6501597 on 2026-09-30 — 0 new findings
+
+### Remediation evidence
+
+- R-438 / REL-158 DONE: five render/filter faults failed twice, then the
+  complete runtime suite passed 103 tests; previous rendered bytes are retained.
+- R-439 / REL-158 DONE: control-datagram fault failed twice, then 104 runtime
+  tests passed. Owner-only socket and allowed health notices remain intact.

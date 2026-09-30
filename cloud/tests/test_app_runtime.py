@@ -1603,3 +1603,41 @@ def test_rel158_failed_env_render_never_starts_container(tmp_path: Path, unit: s
     assert not any(line.startswith("run ") for line in result.docker_log.read_text().splitlines())
     assert prior.read_text() == "NODE_ENV=production\n"
     assert list(rendered_dir.iterdir()) == [prior]
+
+
+def test_rel158_notify_proxy_filters_container_control_messages() -> None:
+    """R-439: container notices cannot change the host unit's lifecycle/PID."""
+    with tempfile.TemporaryDirectory(prefix="rdn", dir="/tmp") as directory:
+        root = Path(directory)
+        upstream_path, listen_path = root / "up", root / "in"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as upstream:
+            upstream.bind(str(upstream_path))
+            upstream.settimeout(5)
+            proc = subprocess.Popen(
+                ["bash", str(RUNTIME), "notify-proxy", str(listen_path), str(upstream_path)],
+                env={**_runtime_env(root), "RADON_TEST_PYTHON": sys.executable},
+                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            )
+            try:
+                deadline = time.monotonic() + 5
+                while not listen_path.exists() and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                assert listen_path.exists(), "notify proxy did not bind"
+                with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as client:
+                    client.sendto(b"MAINPID=1\nSTOPPING=1\n", str(listen_path))
+                    client.sendto(
+                        b"READY=1\nMAINPID=2\nWATCHDOG=trigger\nWATCHDOG=1\n"
+                        b"RELOADING=1\nSTATUS=collecting fills\nEXTEND_TIMEOUT_USEC=999999\n",
+                        str(listen_path),
+                    )
+                    # The first packet must disappear entirely; the mixed
+                    # packet retains exactly the three permitted notices.
+                    assert upstream.recv(65536).splitlines() == [
+                        b"READY=1", b"WATCHDOG=1", b"STATUS=collecting fills",
+                    ]
+                    client.sendto(b"READY=1\n", str(listen_path))
+                    assert upstream.recv(65536).splitlines() == [b"READY=1"]
+            finally:
+                proc.terminate()
+                proc.wait(timeout=5)
+                proc.stderr.close()
