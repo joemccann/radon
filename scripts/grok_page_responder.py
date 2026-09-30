@@ -111,9 +111,8 @@ RERUNNABLE_ONESHOT_UNITS = frozenset({
     "radon-equibles-13f.service",
     "radon-equibles-ats.service",
     "radon-equibles-cot.service",
-    # Weekday 21:45 UTC; next slot is ~24h. Schema-lag / exit-code pages need
-    # a same-day re-run after migrate --demo deploys (2026-08-26 P1).
-    "radon-demo-mirror.service",
+    # REL-108 / R-302: demo-mirror's ExecStartPre applies migrations,
+    # so it is not an autonomous data-refresh action.
 })
 # Per-unit ceiling on automatic re-runs in one UTC day. The global action cap
 # bounds how often the responder acts at all, but not how often it spends that

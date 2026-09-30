@@ -2753,3 +2753,61 @@ Historical candidates below remain OPEN for the next nightly pass, with their or
 | REL-087 | P2 | R-232 | Operator/design-only container lifecycle membership. | Explicit reaping is implemented; require a supported Docker/systemd ownership design before changing cgroup membership. Never restore the rejected unit-as-cgroup-parent proposal. |
 | REL-228 | P1 | R-619 | Existing source uses root:radon-secrets 0040 and denies host-user group membership; closing evidence assigned to cloud CI. | Host radon cannot read staged key; container can; failed container removal retains the credential. No host permission experiment is permitted in this run. |
 | REL-261 | P2 | R-682 historical reservation | Retain the ledger's unresolved identifier without reallocating it. | Its original acceptance is not in the current audit ledger or latest trusted checkpoint. Recover the original accepted task before reproduction; do not invent a replacement defect for this ID. |
+
+## Delta audit 2026-09-30
+
+Range `c274a773228ed29226721694370d3a1c2739494e..e3063f0c16ddcdead832df49553c6035e6501597`:
+13 commits, 127 changed paths, 303 paths including direct codemap importers.
+Trusted checkpoint: collaborator comment on issue #81 dated 2026-09-29.
+No open `reliability/` PR reserved findings or identifiers. New identifiers
+remain available after R-714 / REL-295; inherited IDs are not reallocated.
+
+The delta review covered order admission and journal cursor callers, atomic
+AI-cycle transactions and knowledge transport, monotonic handler scheduling,
+runner ownership and redaction, Grok installation/isolation, research expiry
+and migration replay, assistant knowledge isolation and bounded rounds,
+previous-close retry state, and display-only layout changes. Connectivity,
+persistence, resource lifetime, error propagation, safety and observability
+were evaluated against those changes. No new delta defect was verified.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-438 (inherited REL-158) | P2 | `cloud/scripts/radon-app-runtime.sh:543-571,726-737` | Failed environment rendering or allowlist filtering can start the container with an incomplete file. Acceptance: failing sed, missing input and filter I/O failure all exit 71 with zero engine run calls; preserve the prior complete copy and remove temporary files. Existing successful rendering and credential-boundary tests remain mandatory. |
+| R-439 (inherited REL-158) | P2 | `cloud/scripts/radon-app-runtime.sh:471-504` | The owner-only notify socket still forwards container-supplied control messages. Acceptance: MAINPID, STOPPING, RELOADING and watchdog-control fields never cross the proxy; READY=1, WATCHDOG=1 and STATUS survive mixed datagrams, with socket ownership and mode unchanged. |
+
+### Standing sweep
+
+- Actual placement sites remain behind the existing application halt gates and
+  transport limits: `scripts/ib_place_order.py:240-255,559`,
+  `scripts/ib_execute.py:443-455,491`, `scripts/ib_order_manage.py:199-308`,
+  `scripts/exit_order_service.py:343-352,443`,
+  `scripts/monitor_daemon/handlers/exit_orders.py:490-502,735-766` and
+  `scripts/clients/ib_client.py:698-743,802-816,844-893`.
+- The placement-only `_NON_IDEMPOTENT_IB_SCRIPTS` set and refusal/retry checks
+  remain at `scripts/api/server.py:5657,5766,5844`.
+- The acknowledgement poll remains at
+  `scripts/monitor_daemon/handlers/exit_orders.py:202-220`; daemon-state writes
+  still use `_hrana_execute` at `scripts/db/writer.py:2486-2500`.
+- Whole-population writer/catalog and placement/bracket gates: 108 passed.
+  No new service-health producer is missing either watchdog catalog.
+
+Audited through: e3063f0c16ddcdead832df49553c6035e6501597 on 2026-09-30 — 0 new findings
+
+### Remediation evidence
+
+- R-438 / REL-158 DONE: five render/filter faults failed twice, then the
+  complete runtime suite passed 103 tests; previous rendered bytes are retained.
+- R-439 / REL-158 DONE: control-datagram fault failed twice, then 104 runtime
+  tests passed. Owner-only socket and allowed health notices remain intact.
+
+### Further inherited acceptance
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-024 / REL-021b | P2 | `scripts/api/subprocess.py:348-365`; `scripts/api/server.py:3230-3236,3327-3333` | DONE: nonzero subprocess exits discarded rejection dictionaries, and cancel/modify routes flattened successful-exit error payloads. Four wire-level fault cases failed twice; structured broker and order fields now reach coded 502 details while nonzero remains failure. Legacy uncoded rejection payloads receive an operation code so the web coercer retains them. |
+| R-301 / REL-108 | P2 | `scripts/db/migrate.py:371-394` | DONE: an omitted library argument silently selected production. Fault injection now proves main() refuses before target resolution; explicit main([]), main(['--demo']) and CLI argument forwarding retain their contracts. Red 1 failed twice; focused migration/replay union 58 passed. |
+| R-302 / REL-108 | P2 | `scripts/grok_page_responder.py:89-116,393-421`; `cloud/config/polkit/50-radon-services.rules:41-66` | DONE: a qualifying failed demo-mirror page automatically started its migration-bearing unit. Red-first fake-systemctl reproduction failed twice; remove the unit from responder and polkit grants, retaining the normal scheduled timer and benign scan reruns. Acceptance: no start/reset-failed for that unit and no matching grant; focused responder/runtime/docs union 175 passed. |
+
+| REL-108 / NF-2 (inherited) | P2 | `scripts/monitor_daemon/handlers/journal_sync.py:55-60,303-339,344-351,447-450,571-583` | DONE: history scans used unbounded native reads. Seven fault cases failed twice; bounded HTTP, insertion-keyset pagination and a scan deadline now preserve complete-or-unavailable results. SQLite fixtures prove concurrent insertion and later-page failure across all three scans. Recovery ordering is restored after pagination; no concurrent update/delete snapshot guarantee is claimed. |
+
+| R-041 / REL-021b | P2 | `scripts/monitor_daemon/handlers/journal_sync.py:3-14,119-140` | DONE: the module documentation incorrectly promised a persistent execution cache. Two mocked execute cycles prove separate connect/fetch/disconnect lifecycles; the documentation assertion failed twice before correction. Polling and broker behavior are unchanged. |
