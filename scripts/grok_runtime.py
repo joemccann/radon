@@ -11,12 +11,14 @@ import fcntl
 import json
 import os
 import re
+import stat
 import subprocess
+import tempfile
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterator, Optional
+from typing import Callable, Iterable, Iterator, Optional
 
 Runner = Callable[..., object]
 
@@ -158,6 +160,65 @@ def load_lkg(path: Path | None = None) -> LkgState | None:
     )
 
 
+# An LKG binary runs `--always-approve` over untrusted page text. It must be
+# a real executable the upgrader installed, never a path a test or the agent
+# itself could have created. 2026-09-29: a pytest basetemp candidate was
+# promoted over the live CLI (runbook grok-live-binary-relinked-by-pytest).
+UNTRUSTED_BIN_DIRS = ("/tmp", "/var/tmp", "/dev/shm")
+UNTRUSTED_PATH_MARKERS = ("pytest-of-",)
+
+
+def _untrusted_roots() -> list[Path]:
+    roots = {Path(p) for p in UNTRUSTED_BIN_DIRS}
+    roots.add(Path(tempfile.gettempdir()))
+    # Both spellings: /tmp is a symlink on macOS.
+    return sorted(roots | {r.resolve() for r in roots})
+
+
+def lkg_binary_problem(
+    binary_path: str,
+    *,
+    extra_untrusted: Iterable[Path] = (),
+) -> str | None:
+    """Why ``binary_path`` must not be executed as last-known-good, or None.
+
+    Refuses relative, missing, non-regular, non-executable, world-writable,
+    foreign-owned, temp-dir and pytest-basetemp paths (checked on the path
+    as written, its parent, and the resolved target).
+    """
+    raw = str(binary_path or "").strip()
+    if not raw or not os.path.isabs(raw):
+        return "not an absolute path"
+    written = Path(raw)
+    try:
+        target = written.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return "missing"
+    candidates = (written, written.parent.resolve(), target)
+    for path in candidates:
+        if any(m in part for part in path.parts for m in UNTRUSTED_PATH_MARKERS):
+            return "inside a pytest basetemp"
+    roots = _untrusted_roots() + [Path(p).resolve() for p in extra_untrusted]
+    for path in candidates:
+        for root in roots:
+            if path == root or path.is_relative_to(root):
+                return f"under untrusted directory {root}"
+    try:
+        st = target.stat()
+        parent_mode = target.parent.stat().st_mode
+    except OSError:
+        return "missing"
+    if not stat.S_ISREG(st.st_mode):
+        return "not a regular file"
+    if not os.access(target, os.X_OK):
+        return "not executable"
+    if st.st_mode & stat.S_IWOTH or parent_mode & stat.S_IWOTH:
+        return "world-writable"
+    if st.st_uid not in {0, os.getuid()}:
+        return "owned by another user"
+    return None
+
+
 def write_lkg(path: Path, state: LkgState) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(state.as_json(), indent=2) + "\n"
@@ -167,7 +228,13 @@ def write_lkg(path: Path, state: LkgState) -> None:
 
 
 def _run(runner: Runner, argv: list[str]) -> str:
-    proc = runner(argv)
+    try:
+        proc = runner(argv)
+    except FileNotFoundError as exc:
+        # No return code when GROK_BIN is absent. Same class as a nonzero
+        # --version: the caller refuses or falls back to last-known-good.
+        target = argv[0] if argv else "grok"
+        raise GrokRuntimeError(f"{target} failed: {exc}") from exc
     if getattr(proc, "returncode", 1) != 0:
         raise GrokRuntimeError(
             f"{argv[0]} failed: {(getattr(proc, 'stderr', '') or '')[:200]}"
