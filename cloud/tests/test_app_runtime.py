@@ -554,16 +554,22 @@ def _proxy_dir_from(result: subprocess.CompletedProcess[str]) -> str:
 
 
 def test_run_refuses_to_start_when_the_notify_proxy_cannot_bind(tmp_path: Path) -> None:
-    missing = "/nonexistent-radon-proxy-dir"
+    # R-438 now refuses failed environment rendering before proxy startup.
+    # Keep that prerequisite writable so this test reaches its bind fault.
+    missing = str(tmp_path / "notify")
     # Directory provisioning also uses Python; fail only the notify proxy.
     failing_python = tmp_path / "failing-python"
     lease_dir = shlex.quote(str(tmp_path / 'state' / 'ib-lease'))
     _write_executable(failing_python,
         f'#!/bin/bash\nif [[ "${{2:-}}" == {lease_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
+    # The injected proxy never binds. Exercise all admission polls without
+    # paying their sleep delay on the shared runner; keep the timeout intact.
+    _write_executable(tmp_path / "sleep", "#!/bin/bash\nexit 0\n")
     result = _run(
         tmp_path,
         ["run", "radon-relay.service"],
-        extra_env={"RADON_TEST_NOTIFY_PROXY_DIR": missing, "RADON_TEST_PYTHON": str(failing_python)},
+        extra_env={"RADON_TEST_NOTIFY_PROXY_DIR": missing, "RADON_TEST_PYTHON": str(failing_python),
+                   "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"]},
     )
     assert result.returncode == 71, result.stderr
     assert "notify proxy" in result.stderr
@@ -1570,3 +1576,30 @@ def test_api_boot_bounds_the_schema_migration() -> None:
     text = RUNTIME.read_text(encoding="utf-8")
     api_command = text.split("radon-api.service)", 1)[1].split(";;", 1)[0]
     assert "python scripts/db/migrate.py --boot &&" in api_command
+
+
+@pytest.mark.parametrize("fault,unit", [
+    (fault, unit)
+    for fault in ("sed", "grep", "missing_input")
+    for unit in ("radon-relay.service", "radon-newsfeed.service")
+    if fault != "grep" or unit == "radon-newsfeed.service"
+])
+def test_rel158_failed_env_render_never_starts_container(tmp_path: Path, unit: str, fault: str) -> None:
+    """R-438: failed render/filter must refuse before the fake engine run."""
+    rendered_dir = tmp_path / "rendered"
+    rendered_dir.mkdir()
+    prior = rendered_dir / (unit + ".env")
+    prior.write_text("NODE_ENV=production\n")
+    extra = {"NOTIFY_SOCKET": "", "RADON_TEST_NOTIFY_PROXY_DIR": str(rendered_dir)}
+    if fault == "missing_input":
+        extra["RADON_TEST_ENV_FILE"] = str(tmp_path / "missing-input")
+    else:
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        _write_executable(bin_dir / fault, "#!/bin/bash\nexit 2\n")
+        extra["PATH"] = str(bin_dir) + os.pathsep + os.environ["PATH"]
+    result = _run(tmp_path, ["run", unit], extra_env=extra)
+    assert result.returncode == 71, result.stderr
+    assert not any(line.startswith("run ") for line in result.docker_log.read_text().splitlines())
+    assert prior.read_text() == "NODE_ENV=production\n"
+    assert list(rendered_dir.iterdir()) == [prior]

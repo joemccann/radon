@@ -140,6 +140,13 @@ with Podman (`--cgroups=split`, so it lives in the unit's own cgroup) when
 `RADON_CONTAINER_ENGINE=docker`; credential staging is identical on both
 (REL-087).
 
+**Container environment rendering (REL-158 / R-438).** Before an app
+container starts, the wrapper renders a private temporary environment copy,
+checks rendering and newsfeed allowlist-filter errors, and atomically publishes
+the complete 0600 file. Failure exits 71 without starting the container or
+overwriting its previous rendered copy. An empty successful newsfeed allowlist
+is permitted; a failed filter is not.
+
 **Container stop (2026-09-25).** Each app drop-in runs
 `ExecStop=radon-app-runtime halt %n <grace>`, which stops the container by
 name through the engine (`stop --time <grace>`: SIGTERM to the container

@@ -848,3 +848,9 @@ REL-166 closing review: extending the same injected stop-price fault to `modify_
 REL-236 CI review: two existing healthy-ticket fixture modules advertised only relay connectivity. CI reported five failed stock-close/stop-risk assertions after the broker gate became required. Their healthy mocks now explicitly advertise both relay and broker connectivity; all price, risk, confirmation and wire-payload assertions remain unchanged. Upstream-disconnect fault coverage remains in the owner tests and production browser; Vitest re-verification stays in CI as instructed.
 
 Closing documentation gate: CI and two serial local runs found the incident, runner and knowledge transport owner docs missing from this change (1 failed / 70 passed locally). Updated the maintained owner docs with isolation/promotion, uncertain-lock recovery/install, and shared conditional-transaction contracts; 71 focused checks pass without a docs-skip exemption.
+
+## Nightly remediation 2026-09-30
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-158 / R-438 | DONE | RED 5 failed twice; GREEN 103 passed | Environment rendering checks every stage explicitly, publishes a private complete temporary file atomically, and refuses container startup on exit 71. Faults cover sed, missing input and allowlist-filter I/O; prior bytes survive and temporary files are removed. The proxy bind fixture now reaches its intended failure after successful rendering, with polling sleeps stubbed and its timeout/assertions preserved. Baseline proxy liveness failed under system Python 3.9; local child PATH was corrected to the isolated 3.13 venv, without changing production interpreter selection. |
