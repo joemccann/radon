@@ -631,6 +631,19 @@ def _is_combo_envelope(trade: Dict[str, Any]) -> bool:
     return "BAG" in structure or "SPREAD" in structure
 
 
+def _is_bag_parent_row(trade: Dict[str, Any]) -> bool:
+    """A combo (BAG) parent execution: its legs are journaled separately.
+
+    It names no strike or expiry, so `_fill_contract` would otherwise file it
+    under the underlying's stock bucket and inflate that day's share count.
+    """
+    if str(trade.get("right") or "").strip() == "?":
+        return True
+    if str(trade.get("sec_type") or "").upper() == "BAG":
+        return True
+    return "(BAG)" in str(trade.get("structure") or "").upper()
+
+
 def _fill_contract(ticker: Any, strike: Any, right: Any, expiry: Any) -> Optional[str]:
     symbol = str(ticker or "").strip().upper()
     if not symbol:
@@ -644,7 +657,7 @@ def _individual_fill_totals(trades: List[Dict[str, Any]]) -> Dict[Tuple[str, str
     """(contract, date) → signed qty and gross notional of individual fills."""
     totals: Dict[Tuple[str, str], Dict[str, float]] = {}
     for trade in trades:
-        if not _is_individual_fill_row(trade):
+        if not _is_individual_fill_row(trade) or _is_bag_parent_row(trade):
             continue
         # A combo envelope has no strike, so the STK fallback would add its
         # contract count to a same-day stock assignment.

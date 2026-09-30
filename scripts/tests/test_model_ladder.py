@@ -218,6 +218,49 @@ class TestTextJsonPath:
         assert result.provider == "grok"
         assert result.data == OBJ
 
+    def test_success_whose_content_mentions_billing_words_is_accepted(self):
+        # Research and distill content routinely says "capacity", "quota",
+        # "billing", "rate limit" or "overloaded". A 200 answer is judged by its
+        # envelope, never by the words the model wrote.
+        obj = {
+            "summary": (
+                "Refinery capacity is overloaded; the export quota and a billing "
+                "dispute hit after the Fed rate limit talk. Credit balance too low."
+            )
+        }
+        router = _Router(
+            {"api.anthropic.com": _anthropic_obj_ok(obj), "api.x.ai": _openai_obj_ok()}
+        )
+        result = complete_multimodal_json(
+            "evaluate", env=ALL_KEYS, post=router, stream_anthropic=False
+        )
+        assert result.provider == "anthropic"
+        assert result.data == obj
+        assert router.calls == [c for c in router.calls if "api.anthropic.com" in c]
+
+    def test_openai_shaped_success_mentioning_quota_is_accepted(self):
+        obj = {"summary": "OPEC quota cuts and pipeline capacity limits."}
+        router = _Router({"api.x.ai": _openai_obj_ok(obj)})
+        result = complete_multimodal_json(
+            "evaluate",
+            env={"XAI_API_KEY": "x", "RADON_LADDER_ALLOW_PREPAID": "1"},
+            post=router,
+            stream_anthropic=False,
+        )
+        assert result.provider == "grok"
+        assert result.data == obj
+
+    def test_200_error_envelope_still_falls_through_as_quota(self):
+        quota_200 = _Resp(
+            200, {"error": {"message": "You exceeded your current quota", "type": "insufficient_quota"}}
+        )
+        router = _Router({"api.anthropic.com": quota_200, "api.x.ai": _openai_obj_ok()})
+        result = complete_multimodal_json(
+            "evaluate", env=ALL_KEYS, post=router, stream_anthropic=False
+        )
+        assert result.provider == "grok"
+        assert "anthropic:quota_or_billing" in result.attempted
+
     def test_incomplete_anthropic_raises_response_error(self):
         router = _Router(
             {
