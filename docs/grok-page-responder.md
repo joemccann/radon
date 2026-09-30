@@ -101,7 +101,11 @@ request need the same GitHub permission, so any token on the host that runs
 deploy — the prompt rule and `ir_ensure_pr`'s merge refusal are guards the
 agent's own shell can walk around with `curl`. The responder therefore runs
 with `GROK_PAGE_AUTOPUSH=0`: it edits, tests and commits to `fix/<slug>` in
-its clone, and stops.
+its clone, and stops. The host's own GitHub SSH key (`~/.ssh`) and every
+other home credential store (`~/.claude`, `~/.codex`, `~/.gnupg`,
+`~/.config/gh`, `~/.git-credentials`) are `InaccessiblePaths` in the
+responder and upgrade units, and the clone syncs `main` over public HTTPS,
+so the agent's sandbox holds no GitHub credential.
 
 `scripts/grok_fix_pickup.py` on the Mac mini (launchd
 `com.radon.grok-fix-pickup`, every 15 min) first refreshes its clone to

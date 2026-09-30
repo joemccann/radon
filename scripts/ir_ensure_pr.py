@@ -25,6 +25,7 @@ from typing import Callable
 
 import github_pr_output as pr_fmt
 import ir_pr_description
+from credential_redaction import scrub_credential_text
 
 IR_BRANCH_PREFIX = "fix/"
 DEFAULT_BASE = "main"
@@ -307,14 +308,17 @@ def ensure_pr(
     run = runner or _default_runner
     binary = _resolve_gh(gh_bin, which)
     _require_auth(run, binary)
-    resolved_title = title or format_ir_pr_title(issue=issue, incident_id=incident_id)
-    resolved_body = body or format_ir_pr_body(
+    # Title and body carry page-derived text onto a public repository.
+    resolved_title = scrub_credential_text(
+        title or format_ir_pr_title(issue=issue, incident_id=incident_id)
+    )
+    resolved_body = scrub_credential_text(body or format_ir_pr_body(
         issue=issue,
         fix=fix,
         next_action=next_action,
         incident_id=incident_id,
         case_id=case_id,
-    )
+    ))
     existing = _list_open_pr(
         run, binary, head=head, base=base, repo=repo, include_terminal=include_terminal
     )

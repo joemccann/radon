@@ -105,3 +105,30 @@ def test_upgrade_candidate_lives_outside_the_responder_write_set():
     assert _writable(UPGRADE, UPGRADE_SCRATCH + "/candidate")
     assert _writable(UPGRADE, "/home/radon/.local/bin/grok")
     assert not _writable(RESPONDER, UPGRADE_SCRATCH)
+
+
+# Home credential stores: an SSH key registered on GitHub, agent CLI OAuth
+# sessions, GPG keys and gh/git credential files. The grok child runs with
+# HOME=/home/radon, so anything readable here is readable to it.
+HOME_CREDENTIAL_STORES = (
+    "/home/radon/.ssh",
+    "/home/radon/.claude",
+    "/home/radon/.claude.json",
+    "/home/radon/.codex",
+    "/home/radon/.gnupg",
+    "/home/radon/.config/gh",
+    "/home/radon/.git-credentials",
+)
+
+
+@pytest.mark.parametrize("unit", [RESPONDER, UPGRADE])
+@pytest.mark.parametrize("path", HOME_CREDENTIAL_STORES)
+def test_home_credential_stores_are_inaccessible(unit, path):
+    assert path in _paths(unit, "InaccessiblePaths"), (unit, path)
+
+
+def test_responder_clone_origin_needs_no_credential():
+    setup = SERVICES.parent / "scripts" / "setup-grok-page-responder.sh"
+    text = setup.read_text(encoding="utf-8")
+    assert 'ORIGIN_URL="${RADON_PAGE_RESPONDER_ORIGIN:-https://github.com/' in text
+    assert 'git -C "$CLONE" remote set-url origin "$ORIGIN_URL"' in text

@@ -8,7 +8,7 @@ set -euo pipefail
 CLONE="${RADON_PAGE_RESPONDER_DIR:-/home/radon/radon-page-responder}"
 ENV_FILE="${RADON_PAGE_RESPONDER_ENV:-/home/radon/radon-page-responder.env}"
 PROD_ENV="${RADON_DEPLOY_ENV_FILE:-/home/radon/radon-cloud/.env}"
-ORIGIN_URL="${RADON_PAGE_RESPONDER_ORIGIN:-git@github.com:joemccann/radon.git}"
+ORIGIN_URL="${RADON_PAGE_RESPONDER_ORIGIN:-https://github.com/joemccann/radon.git}"
 MARKER="$CLONE/.radon-page-responder"
 
 if [[ "$(id -u)" -ne 0 ]]; then
@@ -20,6 +20,8 @@ echo "[1/5] dedicated clone $CLONE"
 if [[ ! -d "$CLONE/.git" ]]; then
   sudo -u radon git clone "$ORIGIN_URL" "$CLONE"
 fi
+# Public HTTPS origin: the responder unit hides ~/.ssh from the agent.
+sudo -u radon git -C "$CLONE" remote set-url origin "$ORIGIN_URL"
 sudo -u radon bash -c "touch '$MARKER'"
 sudo -u radon git -C "$CLONE" config user.name "radon-grok-responder"
 sudo -u radon git -C "$CLONE" config user.email "ops@radon.run"

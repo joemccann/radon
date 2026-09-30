@@ -176,3 +176,25 @@ def test_workflow_is_dispatch_only_and_sha_pinned():
     assert "research.cut_report" in text
     assert "research-pdf-cut.json" in text and "research-pdf-cut.md" in text
     assert "INSERT " not in text and "UPDATE " not in text
+
+
+def test_counts_only_omits_document_identifiers(tmp_path):
+    rows = [
+        {"outcome": "dropped", "folder_date": "2026-09-27", "posts": 0,
+         "file_name": "Desk Note 0927.pdf", "work_key": "wk-0927",
+         "reason_codes": ["NO_CANDIDATES", "HELD_EXPIRED"],
+         "updated_at": "2026-09-27T18:00:00+00:00",
+         "expired_at": "2026-09-28T18:00:00+00:00", "held_at": "2026-09-27T18:00:00+00:00"},
+    ]
+    src = tmp_path / "rows.json"
+    src.write_text(json.dumps(rows))
+    json_out, md_out = tmp_path / "cut.json", tmp_path / "cut.md"
+    cut_report.main(["--date", "2026-09-27", "--from-json", str(src), "--counts-only",
+                     "--json-out", str(json_out), "--md-out", str(md_out)])
+    for text in (json_out.read_text(), md_out.read_text()):
+        assert "Desk Note" not in text and "wk-0927" not in text
+    payload = json.loads(json_out.read_text())
+    assert len(payload["hold_expired_reviewed_this_day"]) == 1
+    full = cut_report.build_report(rows, "2026-09-27")
+    assert full["hold_expired_reviewed_this_day"][0]["file_name"] == "Desk Note 0927.pdf"
+

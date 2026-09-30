@@ -157,6 +157,30 @@ class TestEnsurePr:
         assert "--title" in create[0]
         assert "--body" in create[0]
 
+    def test_created_title_and_body_are_credential_redacted(self):
+        runner = FakeRunner({
+            ("gh", "auth", "status"): FakeProc(0, stdout="Logged in"),
+            ("gh", "pr", "list"): FakeProc(0, stdout="[]\n"),
+            ("gh", "pr", "create"): FakeProc(
+                0, stdout="https://github.com/joemccann/radon/pull/436\n"
+            ),
+        })
+        token = "gh" + "p_" + "Q" * 36
+        ir.ensure_pr(
+            head="fix/leap-auth",
+            issue=f"Leap died: token={token}",
+            fix="Rotated nothing.",
+            title=f"IR: Leap died {token}",
+            body=f"## Issue discovered\nauthorization: Bearer {token}\n",
+            runner=runner,
+            gh_bin="gh",
+        )
+        create = [c for c in runner.calls if c[:3] == ["gh", "pr", "create"]]
+        assert len(create) == 1
+        assert not any(token in arg for arg in create[0])
+        title = create[0][create[0].index("--title") + 1]
+        assert title.startswith("IR: Leap died")
+
     def test_noop_when_pr_already_open(self):
         runner = FakeRunner({
             ("gh", "auth", "status"): FakeProc(0),
