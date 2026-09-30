@@ -28,7 +28,9 @@ PrivateTmp=yes
 # unit's own env file is read by systemd before the namespace exists, so it
 # is hidden too; grok children also get an allowlisted env (grok_runtime).
 # flex-secrets and rh-mcp hold other units' credentials under /var/lib/radon.
-InaccessiblePaths=/var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root /home/radon/radon-cloud -/etc/radon/env /home/radon/radon-page-responder.env -/var/lib/radon/flex-secrets -/var/lib/radon/rh-mcp
+# HOME is /home/radon, so the home credential stores (SSH key, agent CLI
+# sessions, GPG, gh/git credentials) are denied too; main syncs over HTTPS.
+InaccessiblePaths=/var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root /home/radon/radon-cloud -/etc/radon/env /home/radon/radon-page-responder.env -/var/lib/radon/flex-secrets -/var/lib/radon/rh-mcp -/home/radon/.ssh -/home/radon/.claude -/home/radon/.claude.json -/home/radon/.codex -/home/radon/.gnupg -/home/radon/.config/gh -/home/radon/.git-credentials
 # ~/.grok/bin, ~/.local/bin (read-only via /home/radon) and the promoted
 # candidate under /var/lib/radon/grok-upgrade are executed by the
 # secret-bearing subscription-tokens unit; ~/.grok/hooks is run by grok

@@ -22,7 +22,7 @@ StandardOutput=journal
 StandardError=journal
 NoNewPrivileges=yes
 PrivateTmp=yes
-InaccessiblePaths=/var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root /home/radon/radon-cloud -/etc/radon/env /home/radon/radon-page-responder.env -/var/lib/radon/flex-secrets -/var/lib/radon/rh-mcp
+InaccessiblePaths=/var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root /home/radon/radon-cloud -/etc/radon/env /home/radon/radon-page-responder.env -/var/lib/radon/flex-secrets -/var/lib/radon/rh-mcp -/home/radon/.ssh -/home/radon/.claude -/home/radon/.claude.json -/home/radon/.codex -/home/radon/.gnupg -/home/radon/.config/gh -/home/radon/.git-credentials
 ReadOnlyPaths=/home/radon
 # The candidate install and smoke scratch live under /var/lib/radon/grok-upgrade,
 # outside the page responder's write set, because the promoted live symlink

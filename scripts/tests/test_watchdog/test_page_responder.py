@@ -126,6 +126,15 @@ class TestEnqueueFromDispatch:
         assert len(excerpt) < 500
         assert "IGNORE PREVIOUS" not in excerpt or "..." in excerpt
 
+    def test_excerpt_redacts_credential_shapes(self):
+        # Page text reaches a commit body and a public PR; a service error
+        # that echoes a credential must not carry it there.
+        token = "gh" + "p_" + "Q" * 36
+        excerpt = sanitize_excerpt(f"push failed: token={token} for origin")
+        assert token not in excerpt
+        assert "push failed" in excerpt
+        assert excerpt.startswith("<untrusted-excerpt>")
+
     def test_enqueue_failure_does_not_break_dispatch(self, db_conn, monkeypatch):
         from watchdog import notify
 
@@ -467,6 +476,19 @@ class TestResponder:
             run.return_value = SimpleNamespace(returncode=0, stdout="")
             assert sync_remote_clone(tmp_path) == "synced"
             assert run.call_count == 3
+
+    def test_sync_fetches_over_public_https(self, tmp_path, monkeypatch):
+        # The unit hides ~/.ssh from the agent; main is public, so the sync
+        # needs no credential and must not depend on the clone's origin URL.
+        monkeypatch.setenv("GROK_PAGE_SYNC_REMOTE", "1")
+        with patch("grok_page_responder.subprocess.run") as run:
+            run.return_value = SimpleNamespace(returncode=0, stdout="")
+            assert sync_remote_clone(tmp_path) == "synced"
+        fetch = run.call_args_list[1].args[0]
+        assert fetch == [
+            "git", "fetch", "https://github.com/joemccann/radon.git",
+            "+refs/heads/main:refs/remotes/origin/main",
+        ]
 
     def test_lock_skips_overlapping_cycle(self, db_conn, tmp_path, monkeypatch):
         # REL-030: the responder now fails CLOSED, so an enabled cycle is an

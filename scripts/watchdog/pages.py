@@ -14,6 +14,11 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+try:
+    from credential_redaction import scrub_credential_text
+except ImportError:  # pragma: no cover
+    from scripts.credential_redaction import scrub_credential_text
+
 log = logging.getLogger("watchdog.pages")
 
 SERVICE_RE = re.compile(r"^[A-Za-z0-9_.:/-]{1,64}$")
@@ -70,7 +75,8 @@ def _safe_kind(kind: str) -> str:
 
 
 def sanitize_excerpt(message: str) -> str:
-    cleaned = _NON_PRINTABLE_RE.sub(" ", message or "")
+    # The excerpt reaches a grok commit body and a public PR.
+    cleaned = _NON_PRINTABLE_RE.sub(" ", scrub_credential_text(message or ""))
     cleaned = cleaned.replace(EXCERPT_OPEN, " ").replace(EXCERPT_CLOSE, " ")
     cleaned = " ".join(cleaned.split())
     if len(cleaned) > MAX_EXCERPT_CHARS:
