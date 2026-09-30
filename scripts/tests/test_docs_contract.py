@@ -1310,3 +1310,18 @@ class TestNightlyReportingDoc:
         }
         assert loops == expected
         assert "runner.md#9-smoke-test-bot-shell" in ops
+
+
+class TestResearchCutCommandDoc:
+    def test_documented_pdf_cut_command_resolves_from_repository_root(self):
+        doc = (_ROOT / "docs/dropbox-research.md").read_text()
+        command = re.search(r"daily Dropbox PDF cut is `([^`]+)`", doc).group(1)
+        argv = shlex.split(command)
+        env = {"PATH": os.environ["PATH"]}
+        while "=" in argv[0]:
+            key, value = argv.pop(0).split("=", 1)
+            env[key] = value
+        argv[0] = sys.executable
+        result = subprocess.run([*argv, "--help"], cwd=_ROOT, env=env, text=True, capture_output=True, timeout=10)
+        assert result.returncode == 0, result.stderr
+        assert "--from-json" in result.stdout
