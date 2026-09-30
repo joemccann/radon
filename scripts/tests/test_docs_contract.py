@@ -1293,3 +1293,20 @@ class TestShareRecoveryDoc:
         assert "operations.md#encrypted-credential-store-profile-credentials-tab" in case
         for label in ("Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verify", "Rollback", "Escalate"):
             assert f"**{label}:**" in case
+
+
+class TestNightlyReportingDoc:
+    def test_nightly_reporting_scopes_match_the_runner_prompts(self):
+        ops = (_ROOT / "docs/operations.md").read_text()
+        cycle = next(line for line in ops.splitlines() if "**Cycle shape" in line)
+        assert cycle.startswith("**Cycle shape (security and DeepSec).**")
+        checkpoint = next(line for line in ops.splitlines() if "**No-op checkpoints" in line)
+        listed = re.search(r"runner loops \(([^)]+)\)", checkpoint).group(1)
+        loops = {name.strip() for name in listed.split(",")}
+        prompts = _ROOT / ".claude/runner-prompts"
+        expected = {
+            name for name in ("reliability", "testing", "ci-performance", "documentation")
+            if "audited-through:" in (prompts / f"{name}.md").read_text()
+        }
+        assert loops == expected
+        assert "runner.md#9-smoke-test-bot-shell" in ops
