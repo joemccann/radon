@@ -17,7 +17,7 @@ Environment=GROK_PAGE_NO_DOTENV=1
 Environment=HOME=/home/radon
 Environment=PATH=/home/radon/.local/bin:/home/radon/.grok/bin:/usr/local/bin:/usr/bin:/bin
 TimeoutStartSec=1200
-ExecStart=/home/radon/radon-page-responder/.venv/bin/python /home/radon/radon-page-responder/scripts/grok_upgrade.py --grok-bin /home/radon/.local/bin/grok --live-bin /home/radon/.local/bin/grok --lkg /var/lib/radon/grok_lkg.json --lock /var/lib/radon/grok-runtime/grok-runtime.lock --scratch /var/lib/radon/grok-upgrade
+ExecStart=/home/radon/radon-page-responder/.venv/bin/python /home/radon/radon-page-responder/scripts/grok_upgrade.py --grok-bin /home/radon/.local/bin/grok --live-bin /home/radon/.local/bin/grok --alias-bin /home/radon/.grok/bin/grok --lkg /var/lib/radon/grok_lkg.json --lock /var/lib/radon/grok-runtime/grok-runtime.lock --scratch /var/lib/radon/grok-upgrade
 StandardOutput=journal
 StandardError=journal
 NoNewPrivileges=yes

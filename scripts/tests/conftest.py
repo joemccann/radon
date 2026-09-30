@@ -1,5 +1,6 @@
 """Shared pytest configuration and fixtures for scripts tests."""
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -37,6 +38,38 @@ def _isolate_model_ladder_auth_files(tmp_path, monkeypatch):
             return _read(path)
 
         monkeypatch.setattr(model_ladder, name, isolated)
+
+# Captured at import, before any test can monkeypatch HOME or Path.home.
+_REAL_HOME = Path(os.path.expanduser("~"))
+_REAL_AGENT_BINS = tuple(
+    _REAL_HOME / rel for rel in (".grok/bin/grok", ".local/bin/grok")
+)
+
+
+def _link_state(path: Path):
+    try:
+        st = path.lstat()
+    except FileNotFoundError:
+        return None
+    target = os.readlink(path) if path.is_symlink() else None
+    return (st.st_mode, st.st_ino, st.st_mtime_ns, target)
+
+
+@pytest.fixture(autouse=True)
+def _real_agent_cli_is_untouched():
+    """No test may relink or rewrite the host's real agent CLI entries.
+
+    2026-09-29: a scripts test run inside the VPS responder clone repointed
+    the operator's ~/.grok/bin/grok at a pytest tmp candidate, and the
+    responder and upgrade units then failed on a dangling binary. Tests must
+    fake HOME and pass explicit paths; this guard fails the test that did it.
+    """
+    before = [_link_state(p) for p in _REAL_AGENT_BINS]
+    yield
+    after = [_link_state(p) for p in _REAL_AGENT_BINS]
+    for path, old, new in zip(_REAL_AGENT_BINS, before, after):
+        assert old == new, f"test modified the real {path}: {old} -> {new}"
+
 
 # Add scripts/ and scripts/trade_blotter/ to sys.path so tests can import modules
 SCRIPTS_DIR = Path(__file__).parent.parent

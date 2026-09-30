@@ -27,13 +27,14 @@ def machine(tmp_path, monkeypatch):
     alias = home / ".grok/bin/grok"
     alias.parent.mkdir(parents=True)
     alias.symlink_to(live)
+    monkeypatch.setenv("HOME", str(home))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     monkeypatch.setattr(upgrade, "_record_health", lambda *a, **kw: None)
     lkg = tmp_path / "lkg.json"
     grok_runtime.write_lkg(lkg, grok_runtime.LkgState(
         "1.0.3", str(live), "grok-test", "high", "2026-09-29T00:00:00Z", "pass",
     ))
-    return dict(grok_bin=str(live), live_bin=live, lkg_path=lkg,
+    return dict(grok_bin=str(live), live_bin=live, alias_bin=alias, lkg_path=lkg,
                 lock_path=tmp_path / "lock", scratch=tmp_path / "scratch", alerter=lambda _: None)
 
 
@@ -63,13 +64,14 @@ def test_failed_self_update_smoke_keeps_live_bytes_and_alias(machine):
     outcome = upgrade.run_upgrade(**machine, runner=updater(smoke_ok=False))
     assert outcome["action"] == "failed"
     assert machine["live_bin"].read_text() == "1.0.3"
-    assert (Path.home() / ".grok/bin/grok").read_text() == "1.0.3"
+    assert machine["alias_bin"].read_text() == "1.0.3"
     assert machine["lkg_path"].read_bytes() == old_state
 
 
 def test_success_then_failed_upgrade_preserves_previous_immutable_binary(machine):
     first = upgrade.run_upgrade(**machine, runner=updater())
     assert first["action"] == "promoted"
+    assert machine["alias_bin"].resolve() == machine["live_bin"].resolve()
     prior_binary = machine["live_bin"].resolve(strict=True)
     assert prior_binary.read_text() == "1.0.4"
     prior_state = machine["lkg_path"].read_bytes()

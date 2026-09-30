@@ -1,0 +1,148 @@
+"""setup-grok-page-responder.sh [2/5]: rerunning setup keeps operator flags.
+
+Every rerun used to rebuild the stripped env from the production env alone,
+dropping GROK_PAGE_RESPONDER / AUTOSHIP / AUTOPUSH. The responder treats an
+unset flag as off (REL-030), so it silently reported "skipped": "disabled".
+These tests run the real step [2/5] block with chown stubbed. Example data
+only.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import stat
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+CLOUD = Path(__file__).resolve().parents[1]
+SETUP = CLOUD / "scripts" / "setup-grok-page-responder.sh"
+RESPONDER = CLOUD.parent / "scripts" / "grok_page_responder.py"
+
+PROD = """\
+# example production env
+TURSO_DB_URL=libsql://example.invalid
+TURSO_AUTH_TOKEN=new-turso-token
+PUSHOVER_USER=example-user
+PUSHOVER_TOKEN=new-pushover-token
+GH_TOKEN=new-gh-token
+UW_TOKEN=not-for-the-responder
+GROK_PAGE_RESPONDER=0
+"""
+
+EXISTING = """\
+TURSO_DB_URL=libsql://old.invalid
+TURSO_AUTH_TOKEN=old-turso-token
+PUSHOVER_USER=example-user
+PUSHOVER_TOKEN=old-pushover-token
+GH_TOKEN=old-gh-token
+GROK_PAGE_RESPONDER=1
+GROK_PAGE_AUTOSHIP=1
+GROK_PAGE_AUTOPUSH=0
+GROK_PAGE_MAX_ACTIONS_PER_DAY=3
+GROK_PAGE_NO_DOTENV=0
+GROK_PAGE_SYNC_REMOTE=0
+GROK_BIN=/tmp/elsewhere/grok
+UW_TOKEN=stale-extra-secret
+"""
+
+
+def _step2() -> str:
+    text = SETUP.read_text(encoding="utf-8")
+    match = re.search(r'^echo "\[2/5\].*?(?=^echo "\[3/5\])', text, re.M | re.S)
+    assert match, "step [2/5] moved; update this test"
+    return match.group(0)
+
+
+def _run(tmp_path: Path, prod: str, existing: str | None) -> dict[str, str]:
+    prod_env = tmp_path / "prod.env"
+    prod_env.write_text(prod, encoding="utf-8")
+    env_file = tmp_path / "radon-page-responder.env"
+    if existing is not None:
+        env_file.write_text(existing, encoding="utf-8")
+    shim = tmp_path / "bin"
+    shim.mkdir(exist_ok=True)
+    python = shim / "python3.13"
+    python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+    python.chmod(0o755)
+    script = (
+        "set -euo pipefail\n"
+        "chown() { :; }\n"
+        f'SCRIPT_DIR="{CLOUD / "scripts"}"\n'
+        f'ENV_FILE="{env_file}"\nPROD_ENV="{prod_env}"\n'
+        + _step2()
+    )
+    result = subprocess.run(
+        ["bash", "-c", script],
+        env={**os.environ, "PATH": f"{shim}:{os.environ.get('PATH', '')}"},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
+    lines = env_file.read_text(encoding="utf-8").splitlines()
+    keys = [line.partition("=")[0] for line in lines]
+    assert len(keys) == len(set(keys)), f"duplicate keys: {keys}"
+    return dict(line.partition("=")[::2] for line in lines)
+
+
+def test_rerun_preserves_operator_flags(tmp_path):
+    env = _run(tmp_path, PROD, EXISTING)
+    assert env["GROK_PAGE_RESPONDER"] == "1"
+    assert env["GROK_PAGE_AUTOSHIP"] == "1"
+    assert env["GROK_PAGE_AUTOPUSH"] == "0"
+    assert env["GROK_PAGE_MAX_ACTIONS_PER_DAY"] == "3"
+
+
+def test_secrets_come_only_from_the_production_env(tmp_path):
+    env = _run(tmp_path, PROD, EXISTING)
+    assert env["TURSO_AUTH_TOKEN"] == "new-turso-token"
+    assert env["PUSHOVER_TOKEN"] == "new-pushover-token"
+    assert env["GH_TOKEN"] == "new-gh-token"
+    assert env["TURSO_DB_URL"] == "libsql://example.invalid"
+    assert "UW_TOKEN" not in env
+    # A GH_TOKEN removed from production does not survive from the old file.
+    env = _run(tmp_path, PROD.replace("GH_TOKEN=new-gh-token\n", ""), EXISTING)
+    assert "GH_TOKEN" not in env
+
+
+def test_managed_keys_are_reset_not_preserved(tmp_path):
+    env = _run(tmp_path, PROD, EXISTING)
+    assert env["GROK_PAGE_NO_DOTENV"] == "1"
+    assert env["GROK_PAGE_SYNC_REMOTE"] == "1"
+    assert env["GROK_BIN"] == "/home/radon/.local/bin/grok"
+
+
+def test_first_install_leaves_flags_unset_so_they_default_off(tmp_path):
+    env = _run(tmp_path, PROD, None)
+    assert "GROK_PAGE_RESPONDER" not in env
+    assert "GROK_PAGE_AUTOSHIP" not in env
+    assert "GROK_PAGE_AUTOPUSH" not in env
+
+
+def test_rerun_is_byte_identical(tmp_path):
+    _run(tmp_path, PROD, EXISTING)
+    env_file = tmp_path / "radon-page-responder.env"
+    first = env_file.read_bytes()
+    _run(tmp_path, PROD, first.decode())
+    assert env_file.read_bytes() == first
+
+
+@pytest.mark.parametrize("value", ["1; rm -rf /", "$(id)", "a" * 64])
+def test_malformed_flag_values_are_dropped(tmp_path, value):
+    env = _run(tmp_path, PROD, f"GROK_PAGE_RESPONDER={value}\n")
+    assert "GROK_PAGE_RESPONDER" not in env
+
+
+def test_allowlist_covers_every_operator_knob_the_responder_reads():
+    sys.path.insert(0, str(CLOUD / "scripts"))
+    try:
+        import grok_responder_env as builder
+    finally:
+        sys.path.pop(0)
+    read = set(re.findall(r"\b(GROK_PAGE_[A-Z_]+)\b", RESPONDER.read_text(encoding="utf-8")))
+    managed = {key for key, _ in builder.MANAGED}
+    assert read - managed == set(builder.OPERATOR_FLAGS)
