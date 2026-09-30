@@ -1,0 +1,15 @@
+[Unit]
+Description=Radon CREDIT/VIX Indicator - daily 22:25 UTC SHY/HYG/VIX pull
+
+[Timer]
+# After the 16:00 ET cash close so IB / Cboe / Yahoo have the session bar.
+# 22:25 is the free slot after dispersion (22:20) and before yield-curve (22:30).
+# It shares IB client IDs 56/69 with credit-spread and iei-hyg, so those
+# units serialize on the 5669 flock. Weekend/holiday runs are no-op
+# heartbeats so the 26h staleness window never widens.
+OnCalendar=*-*-* 22:25:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

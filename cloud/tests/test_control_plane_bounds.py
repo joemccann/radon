@@ -144,6 +144,8 @@ EXPECTED_AUTO_SYNC_UNITS = (
     "radon-cor.timer",
     "radon-credit-spread.service",
     "radon-credit-spread.timer",
+    "radon-credit-vix.service",
+    "radon-credit-vix.timer",
     "radon-cta-sync.service",
     "radon-cta-sync.timer",
     "radon-db-retention.service",
