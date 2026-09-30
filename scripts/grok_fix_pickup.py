@@ -15,7 +15,10 @@ it cannot describe:
   * a diff touching `.github/` -- a PR-triggered workflow runs from the PR
     head, so that would execute attacker-authored CI in this repository;
   * a branch that does not descend from origin/main, or exceeds the commit
-    cap.
+    cap;
+  * any push or PR at all unless GROK_PAGE_AUTOPUSH is truthy in this job's
+    environment, and any branch whose commits, diff or PR text carry a
+    private identifier (``ir_push_gate``). A refused branch stays local.
 
 Fetching from a hostile repository is a supported git operation; nothing
 here executes code out of the fetched tree.
@@ -34,6 +37,7 @@ from typing import Callable, Optional
 
 import ir_ensure_pr
 import ir_pr_description
+import ir_push_gate
 
 DEFAULT_SOURCE = os.environ.get(
     "RADON_GROK_FIX_SOURCE",
@@ -211,6 +215,7 @@ def alert_invalid_description(
     reason: str,
     *,
     alerter: Optional[Callable[[str, str], None]] = None,
+    title: str = "radon grok pickup: IR body refused",
 ) -> None:
     message = f"grok fix pickup: refusing {branch}: {reason}"
     print(message, file=sys.stderr)
@@ -229,11 +234,42 @@ def alert_invalid_description(
         notify.build_pushover_payload(
             user=user,
             token=token,
-            title="radon grok pickup: IR body refused",
+            title=title,
             message=message[:900],
             severity=None,
         )
     )
+
+
+def alert_refused_publish(
+    branch: str,
+    reason: str,
+    *,
+    alerter: Optional[Callable[[str, str], None]] = None,
+) -> None:
+    """Same channel as a refused description; ``reason`` never holds a value."""
+    alert_invalid_description(
+        branch, reason, alerter=alerter, title="radon grok pickup: push refused"
+    )
+
+
+def _running_code_is_stale(repo_root: Path, *, origin: str, runner: Runner) -> bool:
+    """True when this script runs from ``repo_root`` and lags origin/main.
+
+    A pickup clone that stopped refreshing kept running pre-#773 code that
+    opened placeholder PRs and had none of the gates below.
+    """
+    here = Path(__file__).resolve()
+    try:
+        here.relative_to(Path(repo_root).resolve())
+    except ValueError:
+        return False
+    proc = _git(
+        repo_root,
+        ["merge-base", "--is-ancestor", f"{origin}/main", "HEAD"],
+        runner=runner,
+    )
+    return getattr(proc, "returncode", 1) != 0
 
 
 def build_pickup_pr_kwargs(
@@ -289,7 +325,21 @@ def pickup_once(
     repo_root = Path(repo_root)
     open_pr = ensure_pr or _ensure_pr_default
 
+    # Fail closed before touching either remote. 2026-09-30: with AUTOPUSH=0
+    # in the responder env this job still pushed fix/* branches and opened
+    # public PRs, one carrying private account and execution ids.
+    if not ir_push_gate.autopush_enabled():
+        return [{
+            "action": "disabled",
+            "reason": f"{ir_push_gate.AUTOPUSH_ENV} is not enabled; nothing pushed",
+        }]
+
     _git(repo_root, ["fetch", "--quiet", origin], runner=run)
+    if _running_code_is_stale(repo_root, origin=origin, runner=run):
+        raise PickupError(
+            "pickup code is older than origin/main; refresh the clone "
+            "(reinstall config/com.radon.grok-fix-pickup.plist) before pushing"
+        )
 
     results: list[dict] = []
     for name in list_source_branches(repo_root, source, runner=run):
@@ -343,6 +393,20 @@ def pickup_once(
             })
             continue
 
+        try:
+            ir_push_gate.check_publish(
+                repo=repo_root,
+                base=base,
+                ref=local_ref,
+                title=pr_kwargs.get("title"),
+                body=pr_kwargs.get("body"),
+                runner=run,
+            )
+        except ir_push_gate.IrPushRefused as exc:
+            alert_refused_publish(name, str(exc), alerter=alerter)
+            results.append({"branch": name, "action": "refused", "reason": str(exc)})
+            continue
+
         if not origin_head:
             pushed = _git(
                 repo_root,
@@ -392,7 +456,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     for row in results:
         print(json.dumps(row, sort_keys=True))
     if any(
-        str(row.get("reason") or "").startswith("IR description:")
+        str(row.get("reason") or "").startswith(
+            ("IR description:", "private identifiers found")
+        )
         for row in results
     ):
         return 1

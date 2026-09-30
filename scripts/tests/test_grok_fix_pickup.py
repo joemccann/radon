@@ -33,6 +33,12 @@ if str(_SCRIPTS_DIR) not in sys.path:
 import grok_fix_pickup as pickup  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _autopush_on(monkeypatch):
+    """Pickup fails closed without it; the off case is tested explicitly."""
+    monkeypatch.setenv("GROK_PAGE_AUTOPUSH", "1")
+
+
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
     proc = subprocess.run(
         ["git", *args], cwd=cwd, capture_output=True, text=True, timeout=60
@@ -564,3 +570,88 @@ class TestPickupPlistSelfRefresh:
         tip = _git(clone, "rev-parse", "fix/keep-me").stdout
         assert tip.strip()
         assert (clone / "app.py").read_text(encoding="utf-8") == "main\n"
+
+
+class TestPushGate:
+    """2026-09-30: pickup pushed fix/* and opened public PRs while the
+    responder env said GROK_PAGE_AUTOPUSH=0; one diff and its commit
+    messages carried private account and exec ids. Ids are invented."""
+
+    @pytest.mark.parametrize("raw", [None, "0", ""])
+    def test_autopush_off_pushes_nothing_and_opens_no_pr(
+        self, world, monkeypatch, raw
+    ):
+        if raw is None:
+            monkeypatch.delenv("GROK_PAGE_AUTOPUSH", raising=False)
+        else:
+            monkeypatch.setenv("GROK_PAGE_AUTOPUSH", raw)
+        _vps_branch(world, "fix/relay-restart")
+        ensure = _FakeEnsurePr()
+
+        results = _run(world, ensure=ensure)
+
+        assert [r["action"] for r in results] == ["disabled"]
+        assert "GROK_PAGE_AUTOPUSH" in results[0]["reason"]
+        listed = _git(world["origin"], "for-each-ref", "--format=%(refname)")
+        assert "fix/relay-restart" not in listed.stdout
+        assert ensure.calls == []
+
+    def test_cli_exits_zero_when_disabled(self, world, monkeypatch, capsys):
+        monkeypatch.delenv("GROK_PAGE_AUTOPUSH", raising=False)
+        rc = pickup.main(["--repo", str(world["mini"]), "--source", str(world["vps"])])
+        assert rc == 0
+        assert '"action": "disabled"' in capsys.readouterr().out
+
+    @pytest.mark.parametrize(
+        "where, leak",
+        [
+            ("diff", "U" + "1234567"),
+            ("diff", "0000abcd" + ".1234ef56" + ".01.01"),
+            ("message", "98765" + "43210987"),
+            ("message", "DU" + "7654321"),
+            ("diff", "gh" + "p_" + "Z" * 36),
+        ],
+        ids=["account", "ib_exec", "flex_exec", "paper_account", "gh_token"],
+    )
+    def test_private_ids_keep_the_branch_local(self, world, where, leak):
+        vps = world["vps"]
+        assert _git(vps, "checkout", "-q", "-b", "fix/journal-leak").returncode == 0
+        message = _valid_ir_message("fix/journal-leak")
+        content = "x = 2\n"
+        if where == "diff":
+            content += f"ROW = '{leak}'\n"
+        else:
+            message += f"\nJournal row: {leak} filled.\n"
+        _commit(vps, "app.py", content, message)
+        ensure = _FakeEnsurePr()
+        alerts: list[tuple[str, str]] = []
+
+        results = _run(world, ensure=ensure, alerter=lambda b, r: alerts.append((b, r)))
+
+        assert [r["action"] for r in results] == ["refused"]
+        reason = results[0]["reason"]
+        assert reason.startswith("private identifiers found")
+        assert leak not in reason
+        assert alerts and leak not in alerts[0][1]
+        listed = _git(world["origin"], "for-each-ref", "--format=%(refname)")
+        assert "fix/journal-leak" not in listed.stdout
+        assert ensure.calls == []
+
+    def test_plist_ships_with_autopush_off(self):
+        plist = plistlib.loads(PLIST.read_bytes())
+        env = plist["EnvironmentVariables"]
+        assert env.get("GROK_PAGE_AUTOPUSH") == "0"
+
+    def test_stale_pickup_code_refuses_to_run(self, world, monkeypatch):
+        """A clone that stopped refreshing ran pre-#773 code with none of
+        these gates. Running from a clone behind origin/main is refused."""
+        monkeypatch.setattr(
+            pickup, "__file__", str(world["mini"] / "scripts" / "grok_fix_pickup.py")
+        )
+        seed = world["origin"].parent / "seed"
+        _commit(seed, "app.py", "x = 3\n", "main moves on")
+        assert _git(seed, "push", "-q", "origin", "main").returncode == 0
+        _vps_branch(world, "fix/relay-restart")
+
+        with pytest.raises(pickup.PickupError, match="older than origin/main"):
+            _run(world)

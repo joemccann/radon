@@ -12,7 +12,7 @@ _SECRET_KEY = (
     r"|client[_-]?secret|password|passwd|secret|token|_pass|_pwd)"
 )
 
-_SECRET_SCRUB_PATTERNS = [
+_SPECIFIC_SCRUB_PATTERNS = [
     (re.compile(r"libsql://[^\s'\"]+", re.IGNORECASE), "[redacted-db-url]"),
     (re.compile(r"https://[a-z0-9.-]+\.turso\.io[^\s'\"]*", re.IGNORECASE), "[redacted-db-url]"),
     # "Bearer <token>" is the literal HTTP header value shape (space, not an
@@ -41,6 +41,12 @@ _SECRET_SCRUB_PATTERNS = [
     (re.compile(r"(?<![A-Za-z0-9])csk-[A-Za-z0-9_-]{16,}"), "[redacted-key]"),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[redacted-key]"),
     (re.compile(r"([?&](?:t|token|api[_-]?key)=)[^\s&'\"]+", re.IGNORECASE), r"\1[redacted]"),
+]
+
+# Generic `password = ...` / `token: ...` shapes. They scrub well but match
+# ordinary code (`token = uuid4().hex`), so detection uses only the
+# specific shapes above.
+_GENERIC_ASSIGNMENT_PATTERNS = [
     # Generic key-value assignment (env files, config dumps, JSON), last so a
     # value the specific shapes above already tagged keeps its tag. A quoted
     # value is redacted through its closing quote (multi-word passwords).
@@ -59,6 +65,23 @@ _SECRET_SCRUB_PATTERNS = [
         r"\1[redacted-secret]",
     ),
 ]
+
+_SECRET_SCRUB_PATTERNS = _SPECIFIC_SCRUB_PATTERNS + _GENERIC_ASSIGNMENT_PATTERNS
+
+
+def find_credential_shapes(text: str) -> list[str]:
+    """Labels of specific credential shapes present in ``text``.
+
+    Returns the redaction tag (for example ``[redacted-key]``), never the
+    matched value, so the result is safe to log.
+    """
+    found: list[str] = []
+    for pattern, repl in _SPECIFIC_SCRUB_PATTERNS:
+        if pattern.search(text or ""):
+            label = re.sub(r"\\\d", "", repl).strip()
+            if label not in found:
+                found.append(label)
+    return found
 
 
 def scrub_credential_text(value: Any) -> Any:
