@@ -21,6 +21,22 @@ RUNBOOK = REPO / "docs" / "incident-runbook.md"
 WRAPPER = REPO / "scripts" / "ir_open_pr.sh"
 
 
+VALID_BODY = (
+    "## What broke\n\nLeap reports died on a PermissionError 502 at 12:00Z.\n\n"
+    "## Root cause\n\nThe unit wrote reports outside its writable paths.\n\n"
+    "## What changed\n\n- leap.py: write reports under the unit cache dir.\n\n"
+    "## How it was verified\n\nFocused leap pytest passed locally, 12 cases.\n\n"
+    "## Risk and rollback\n\nLow; revert the commit to restore the old path.\n\n"
+    "## Still open\n\nNothing beyond the next scheduled leap run check.\n"
+)
+
+
+@pytest.fixture(autouse=True)
+def _autopush_on(monkeypatch):
+    """ensure_pr fails closed without it; the off case is tested explicitly."""
+    monkeypatch.setenv("GROK_PAGE_AUTOPUSH", "1")
+
+
 class FakeProc(SimpleNamespace):
     def __init__(self, returncode=0, stdout="", stderr=""):
         super().__init__(returncode=returncode, stdout=stdout, stderr=stderr)
@@ -143,6 +159,7 @@ class TestEnsurePr:
             fix="Wrote reports under the cache dir the unit can write.",
             incident_id="20260914T120000Z-leap",
             case_id="leap-reports-permission",
+            body=VALID_BODY,
             runner=runner,
             gh_bin="gh",
         )
@@ -157,7 +174,8 @@ class TestEnsurePr:
         assert "--title" in create[0]
         assert "--body" in create[0]
 
-    def test_created_title_and_body_are_credential_redacted(self):
+    def test_credential_in_title_or_body_refuses_instead_of_redacting(self):
+        """A credential shape in PR text is a leak to report, not to hide."""
         runner = FakeRunner({
             ("gh", "auth", "status"): FakeProc(0, stdout="Logged in"),
             ("gh", "pr", "list"): FakeProc(0, stdout="[]\n"),
@@ -166,20 +184,19 @@ class TestEnsurePr:
             ),
         })
         token = "gh" + "p_" + "Q" * 36
-        ir.ensure_pr(
-            head="fix/leap-auth",
-            issue=f"Leap died: token={token}",
-            fix="Rotated nothing.",
-            title=f"IR: Leap died {token}",
-            body=f"## Issue discovered\nauthorization: Bearer {token}\n",
-            runner=runner,
-            gh_bin="gh",
-        )
-        create = [c for c in runner.calls if c[:3] == ["gh", "pr", "create"]]
-        assert len(create) == 1
-        assert not any(token in arg for arg in create[0])
-        title = create[0][create[0].index("--title") + 1]
-        assert title.startswith("IR: Leap died")
+        header = ": ".join(["authorization", "Bearer"])
+        with pytest.raises(ir.IrEnsurePrError, match="private identifiers") as exc:
+            ir.ensure_pr(
+                head="fix/leap-auth",
+                issue="Leap died on auth.",
+                fix="Rotated nothing.",
+                title=f"IR: Leap died {token}",
+                body=VALID_BODY + "\n" + " ".join([header, token]) + "\n",
+                runner=runner,
+                gh_bin="gh",
+            )
+        assert token not in str(exc.value)
+        assert runner.calls == []
 
     def test_noop_when_pr_already_open(self):
         runner = FakeRunner({
@@ -221,6 +238,7 @@ class TestEnsurePr:
             head="fix/leap-reports-permission-502",
             issue="Leap reports died on a PermissionError 502.",
             fix="Wrote reports under the cache dir the unit can write.",
+            body=VALID_BODY,
             runner=runner,
             gh_bin="gh",
         )
@@ -239,6 +257,7 @@ class TestEnsurePr:
             head="fix/example",
             issue="A.",
             fix="B.",
+            body=VALID_BODY,
             runner=runner,
             gh_bin="gh",
         )
@@ -563,6 +582,7 @@ class TestGrokCycleEnsuresPr:
 
 class TestCliAndWrapper:
     def test_cli_emits_json(self, monkeypatch, capsys):
+        monkeypatch.setattr(ir, "_git_stdout", lambda *_a, **_k: VALID_BODY)
         monkeypatch.setattr(
             ir,
             "ensure_pr",
@@ -611,7 +631,7 @@ def test_pickup_preserves_terminal_pr_disposition(state):
 @pytest.mark.parametrize("patch_rc", [0, 1])
 def test_rel294_existing_pr_body_uses_rest_when_classic_projects_break_graphql(patch_rc):
     """REL-294 / R-713: resume must not depend on gh pr edit's retired query."""
-    body = "## What changed\n\nLiteral `code` and $(text) stay intact.\n"
+    body = VALID_BODY + "\nLiteral `code` and $(text) stay intact.\n"
     patches = []
     def run(argv, **kwargs):
         if argv[1:3] == ["auth", "status"]:

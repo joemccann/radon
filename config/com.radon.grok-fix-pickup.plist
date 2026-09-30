@@ -30,6 +30,10 @@
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:__HOME__/.local/bin</string>
         <key>HOME</key>
         <string>__HOME__</string>
+        <!-- Unset or 0: pickup pushes nothing and opens no PR. Set 1 only
+             when grok fix branches should go to the public repo. -->
+        <key>GROK_PAGE_AUTOPUSH</key>
+        <string>0</string>
     </dict>
 
     <!-- Pages are rare and never urgent by the time a fix exists; a quarter
