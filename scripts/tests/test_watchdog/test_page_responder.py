@@ -126,6 +126,15 @@ class TestEnqueueFromDispatch:
         assert len(excerpt) < 500
         assert "IGNORE PREVIOUS" not in excerpt or "..." in excerpt
 
+    def test_excerpt_redacts_credential_shapes(self):
+        # Page text reaches a commit body and a public PR; a service error
+        # that echoes a credential must not carry it there.
+        token = "gh" + "p_" + "Q" * 36
+        excerpt = sanitize_excerpt(f"push failed: token={token} for origin")
+        assert token not in excerpt
+        assert "push failed" in excerpt
+        assert excerpt.startswith("<untrusted-excerpt>")
+
     def test_enqueue_failure_does_not_break_dispatch(self, db_conn, monkeypatch):
         from watchdog import notify
 
