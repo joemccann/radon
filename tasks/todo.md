@@ -8709,3 +8709,13 @@ Review: CIP-015 is the sole qualifying critical-path experiment; 136 focused tes
 ## Review
 
 - Original Turso turn matched (18:06:31.410Z, grok-4.7, image_count 1). Five red regressions captured. Patched live chart replay reaches rank_spreads and get_option_chain in six rounds; thirteen successful tool events; no order. Final verification: 401 unique focused tests passed across 47 files; 12 Playwright tests passed; repetition detector coverage 100%; TypeScript and focused ESLint passed. Desktop/mobile screenshots reviewed. Initial full web run: 9693 passed, 9 failed, 10 skipped; it overlapped final source edits and browser verification. Every failed file passes in the fresh focused runs. Exact-head CI pending. Trace: tasks/ai-chat-repetition-2026-09-29.md.
+
+## Nightly testing 2026-09-30
+- [x] T1 Build isolated toolchain and read trusted checkpoint/open PRs. depends_on: []
+- [x] T2 Audit delta/import graph, standing gates and legacy inventory. depends_on: [T1]
+- [x] T3 Repair verified findings with red/green evidence. depends_on: [T2]
+- [x] T4 Run three serial closing gate rounds and hygiene review. depends_on: [T3]
+- [ ] T5 Publish substantive draft, watch exact-head CI, post one rolling comment. depends_on: [T4]
+
+### Review
+T-517 and T-518 are verified with rejected mutations and 37 focused passes; no product code changes. Delta repetitions and three full serial closing rounds are complete. The first closing Python failure passed 103/103 alone; later full rounds passed. Cloud lists add zero failures against the detached base. Publication/CI/notification receipts and final delivery status are tracked on rolling issue #83 after this prepublication checkpoint. Only testing/2026-09-30 may be pushed; T-435 retains its operator action.
