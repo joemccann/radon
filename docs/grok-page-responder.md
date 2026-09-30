@@ -85,6 +85,7 @@ nature and its silence used to look exactly like health.
 |---|---|
 | Completed (including `pending: 0`) | `ok` |
 | Kill switch off | `paused` |
+| Runtime refused (`GROK_BIN` missing or failing, no trusted last-known-good) | `error` with the reason (exit 0, `skipped: grok_runtime`, no fallback pushover; the watchdog error bucket pages once) |
 | Skipped on a live lock | nothing written |
 | Raised on Turso / git | nothing written |
 

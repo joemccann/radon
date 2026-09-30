@@ -299,6 +299,11 @@ class TestResponder:
         }), encoding="utf-8")
         monkeypatch.setenv("RADON_GROK_LKG_PATH", str(lkg_path))
         monkeypatch.setenv("RADON_GROK_RUNTIME_LOCK", str(tmp_path / "runtime.lock"))
+        # The fake binary is never exec'd (runner is stubbed); the trust
+        # check on a real path is test_grok_page_missing_binary.py.
+        monkeypatch.setattr(
+            grok_runtime, "lkg_binary_problem", lambda *_a, **_k: None
+        )
         enqueue_delivered_page(
             service="vcg-scan",
             severity="P1",

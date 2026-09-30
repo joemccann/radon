@@ -587,19 +587,42 @@ def _lkg_path() -> Path:
     return grok_runtime.DEFAULT_LKG_PATH
 
 
+def _load_trusted_lkg(repo_root: Path | None = None) -> grok_runtime.LkgState | None:
+    """LKG state whose binary is safe to exec, else None (no fallback).
+
+    The fallback binary runs --always-approve over untrusted page text, so
+    a temp-dir, pytest-basetemp, in-clone, missing or world-writable path
+    is treated exactly like no last-known-good.
+    """
+    try:
+        lkg = grok_runtime.load_lkg(_lkg_path())
+    except grok_runtime.GrokRuntimeError:
+        return None
+    if lkg is None:
+        return None
+    problem = grok_runtime.lkg_binary_problem(
+        lkg.binary_path,
+        extra_untrusted=(repo_root,) if repo_root else (),
+    )
+    if problem:
+        print(
+            f"grok last-known-good binary rejected ({problem}): {lkg.binary_path}",
+            file=sys.stderr,
+        )
+        return None
+    return lkg
+
+
 def _runtime_from_track(
     *,
     probe: bool,
     pin_runtime: grok_runtime.ResolvedRuntime | None = None,
     grok_runner: GrokRunner | None = None,
+    repo_root: Path | None = None,
 ) -> grok_runtime.ResolvedRuntime:
     if pin_runtime is not None:
         return pin_runtime
-    lkg = None
-    try:
-        lkg = grok_runtime.load_lkg(_lkg_path())
-    except grok_runtime.GrokRuntimeError:
-        lkg = None
+    lkg = _load_trusted_lkg(repo_root)
     if not probe:
         if lkg is not None:
             return grok_runtime.ResolvedRuntime(
@@ -629,7 +652,12 @@ def _runtime_from_track(
     )
 
 
-def record_cycle_health(state: str, *, now: Optional[datetime] = None) -> None:
+def record_cycle_health(
+    state: str,
+    *,
+    now: Optional[datetime] = None,
+    error: Optional[dict] = None,
+) -> None:
     """Heartbeat THIS poller, never the ticket outcome.
 
     A cycle that reaches the end is healthy even when grok stood down or
@@ -641,12 +669,17 @@ def record_cycle_health(state: str, *, now: Optional[datetime] = None) -> None:
         from db.hrana_http import write_service_health_http
     except ImportError:  # pragma: no cover — stripped clone without db/
         return
-    write_service_health_http(HEALTH_SERVICE, state, finished_at=finished)
+    write_service_health_http(
+        HEALTH_SERVICE, state, finished_at=finished, error=error
+    )
 
 
-def _heartbeat(state: str, now: datetime) -> None:
+def _heartbeat(state: str, now: datetime, *, error: Optional[dict] = None) -> None:
     try:
-        record_cycle_health(state, now=now)
+        if error is None:
+            record_cycle_health(state, now=now)
+        else:
+            record_cycle_health(state, now=now, error=error)
     except Exception as exc:  # noqa: BLE001 — telemetry must not fail a cycle
         print(f"grok page heartbeat non-fatal: {exc}", file=sys.stderr)
 
@@ -731,8 +764,12 @@ def run_cycle(
             probe=grok_runner is None,
             pin_runtime=pin_runtime,
             grok_runner=grok_runner,
+            repo_root=repo_root,
         )
-        if runtime.warning:
+        if runtime.warning and not runtime.refused:
+            # The pin is the last-known-good fallback. A refuse (no usable
+            # binary, no trusted LKG) repeats every 30s; the error row below
+            # alerts once through the watchdog's hysteresis instead.
             _send_pin_warning(runtime.warning)
         if runtime.refused:
             print(json.dumps({
@@ -740,7 +777,16 @@ def run_cycle(
                 "skipped": "grok_runtime",
                 "warning": runtime.warning,
             }))
-            _heartbeat("paused", now)
+            # Exit 0 so systemd does not page every 30s, but this is an
+            # outage: pages go unanswered. `error` (not `paused`, which never
+            # alerts and stays fresh forever) lets the watchdog's error bucket
+            # page once. completed=False keeps the finally block's ok off it.
+            completed = False
+            _heartbeat(
+                "error",
+                now,
+                error={"message": f"grok runtime unavailable: {runtime.warning}"},
+            )
             return 0
 
         page = actionable[0]
@@ -804,11 +850,7 @@ def run_cycle(
                 stderr = getattr(proc, "stderr", "") or "" if proc else ""
                 returncode = getattr(proc, "returncode", 1) if proc else 124
                 if timeout_err or grok_runtime.should_retry_lkg(returncode, stdout, stderr):
-                    lkg = None
-                    try:
-                        lkg = grok_runtime.load_lkg(_lkg_path())
-                    except grok_runtime.GrokRuntimeError:
-                        lkg = None
+                    lkg = _load_trusted_lkg(repo_root)
                     if lkg is not None and (
                         lkg.model != runtime.model or lkg.binary_path != runtime.binary_path
                     ):
