@@ -1,3 +1,12 @@
+# Task: Grok setup hardening (2026-09-30)
+
+- [x] T1 depends_on: [] Failing tests: promote touches only explicit paths (never Path.home()/.grok), candidate must live under scratch, real ~/.grok and ~/.local/bin untouched by any scripts test.
+- [x] T2 depends_on: [T1] grok_upgrade explicit `--alias-bin`; unit passes it; hermetic HOME in upgrade tests.
+- [x] T3 depends_on: [] Failing test: responder env rebuild keeps GROK_PAGE_* operator flags, drops old secrets; extract env builder.
+- [ ] T4 depends_on: [T2, T3] Focused pytest + cloud grok tests green, docs, draft PR vs main, CI green. No merge, no VPS.
+
+Review: promote_live_symlink relinked Path.home()/.grok/bin/grok whenever it existed, so the upgrade test run in the responder clone repointed the real entry at a pytest candidate. Upgrader now moves only --live-bin and an explicit --alias-bin under a --scratch containment check; tests fake HOME; conftest fails any test that touches the real grok entries. Setup step [2/5] keeps GROK_PAGE_* operator flags, secrets only from production.
+
 # Task: RSI OVERSOLD breadth (2026-09-30)
 
 - [ ] T1 depends_on: [] Failing tests: Wilder RSI, strict 30/10 boundaries, gates, migration 0092, writer, panel/API/lockstep.

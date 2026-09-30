@@ -75,6 +75,32 @@ def grok_on_path(tmp_path, monkeypatch):
     return grok
 
 
+INSTALLER_BYTES = "installer-owned grok\n"
+
+
+@pytest.fixture(autouse=True)
+def fake_home(tmp_path, monkeypatch):
+    """Every test runs against a throwaway HOME that already has ~/.grok/bin.
+
+    2026-09-29: this file ran inside the responder clone on the VPS and the
+    promote path repointed the operator's real ~/.grok/bin/grok at a pytest
+    tmp candidate, which then vanished. The fake installer entry here must be
+    byte-identical after every test: nothing in the upgrader may write to a
+    home path it was not explicitly given.
+    """
+    home = tmp_path / "home"
+    alias = home / ".grok" / "bin" / "grok"
+    alias.parent.mkdir(parents=True)
+    alias.write_text(INSTALLER_BYTES, encoding="utf-8")
+    alias.chmod(0o755)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    yield home
+    assert not alias.is_symlink(), f"~/.grok/bin/grok was relinked to {os.readlink(alias)}"
+    assert alias.read_text(encoding="utf-8") == INSTALLER_BYTES
+    assert sorted(p.name for p in alias.parent.iterdir()) == ["grok"]
+
+
 def _lkg(tmp_path: Path) -> Path:
     path = tmp_path / "grok_lkg.json"
     payload = dict(LKG)
@@ -444,3 +470,59 @@ def test_rel293_diagnostic_heartbeat_uses_the_real_writer_contract(monkeypatch, 
     upgrade._record_health(state, detail)
 
     writer.assert_called_once_with("grok-upgrade", state, error={"message": detail})
+
+
+class TestPromoteTouchesOnlyGivenPaths:
+    """2026-09-29 VPS incident: a pytest run replaced the live Grok binary."""
+
+    @staticmethod
+    def _candidate(tmp_path: Path) -> Path:
+        candidate = tmp_path / "scratch" / "candidate-x" / "bin" / "grok"
+        candidate.parent.mkdir(parents=True)
+        candidate.write_text("new\n", encoding="utf-8")
+        return candidate
+
+    def test_promote_without_alias_leaves_home_grok_alone(self, tmp_path, fake_home):
+        live = tmp_path / "live" / "grok"
+        candidate = self._candidate(tmp_path)
+        upgrade.promote_live_symlink(live, candidate)
+        assert live.resolve() == candidate.resolve()
+        # fake_home teardown asserts ~/.grok/bin/grok is untouched.
+
+    def test_explicit_alias_follows_the_live_path(self, tmp_path):
+        live = tmp_path / "live" / "grok"
+        alias = tmp_path / "alias-bin" / "grok"
+        alias.parent.mkdir()
+        alias.write_text("old\n", encoding="utf-8")
+        candidate = self._candidate(tmp_path)
+        upgrade.promote_live_symlink(live, candidate, alias_bin=alias)
+        assert os.readlink(alias) == str(live.absolute())
+        assert alias.resolve() == candidate.resolve()
+
+    def test_candidate_outside_its_root_is_refused(self, tmp_path):
+        live = tmp_path / "live" / "grok"
+        live.parent.mkdir()
+        live.write_text("old\n", encoding="utf-8")
+        stray = tmp_path / "elsewhere" / "grok"
+        stray.parent.mkdir()
+        stray.write_text("new\n", encoding="utf-8")
+        with pytest.raises(upgrade.GrokUpgradeError, match="outside"):
+            upgrade.promote_live_symlink(
+                live, stray, candidate_root=tmp_path / "scratch"
+            )
+        assert not live.is_symlink()
+        assert live.read_text(encoding="utf-8") == "old\n"
+
+    def test_run_upgrade_threads_alias_from_the_cli(self, tmp_path, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(
+            upgrade, "run_upgrade", lambda **kw: seen.update(kw) or {"action": "current"}
+        )
+        alias = tmp_path / "alias" / "grok"
+        assert upgrade.main([
+            "--grok-bin", "grok", "--live-bin", str(tmp_path / "live"),
+            "--alias-bin", str(alias),
+        ]) == 0
+        assert seen["alias_bin"] == alias
+        assert upgrade.main(["--grok-bin", "grok"]) == 0
+        assert seen["alias_bin"] is None

@@ -219,18 +219,39 @@ def run_smoke(
     return disposition, summary
 
 
-def promote_live_symlink(live_bin: Path, candidate_bin: Path) -> Path:
-    """REL-292: prepare links before atomically replacing any live pathname."""
+def promote_live_symlink(
+    live_bin: Path,
+    candidate_bin: Path,
+    *,
+    alias_bin: Path | None = None,
+    candidate_root: Path | None = None,
+) -> Path:
+    """REL-292: prepare links before atomically replacing any live pathname.
+
+    Touches only ``live_bin`` and, when given, ``alias_bin``. It never derives
+    a path from HOME: on 2026-09-29 a pytest run inside the responder clone
+    repointed the operator's real ``~/.grok/bin/grok`` at a pytest tmp
+    candidate because this function linked ``Path.home()/.grok/bin/grok``
+    unconditionally. With ``candidate_root`` the resolved candidate must lie
+    under it, so a link can only ever point into the upgrader's own scratch.
+    """
     target = candidate_bin.resolve(strict=True)
     if target == live_bin.absolute():
         raise GrokUpgradeError("candidate must be separate from the live executable")
+    if candidate_root is not None and not target.is_relative_to(
+        Path(candidate_root).resolve()
+    ):
+        raise GrokUpgradeError(
+            f"candidate {target} is outside the upgrade scratch {candidate_root}"
+        )
     live_bin.parent.mkdir(parents=True, exist_ok=True)
-    grok_home = Path.home() / ".grok" / "bin" / "grok"
     # The secondary entry always follows the canonical live path. Preparing
     # both links first leaves the old CLI reachable if symlink creation fails.
     links = [(live_bin, target)]
-    if grok_home.parent.is_dir() and grok_home != live_bin:
-        links.insert(0, (grok_home, live_bin.absolute()))
+    if alias_bin is not None and alias_bin.absolute() != live_bin.absolute():
+        if not alias_bin.parent.is_dir():
+            raise GrokUpgradeError(f"alias directory missing: {alias_bin.parent}")
+        links.insert(0, (alias_bin, live_bin.absolute()))
     prepared = []
     try:
         for destination, value in links:
@@ -313,6 +334,7 @@ def run_upgrade(
     *,
     grok_bin: str,
     live_bin: Path | None = None,
+    alias_bin: Path | None = None,
     lkg_path: Path | None = None,
     lock_path: Path | None = None,
     scratch: Path | None = None,
@@ -363,7 +385,12 @@ def run_upgrade(
         )
         try:
             with grok_runtime.exclusive_lock(lock_file, blocking=False):
-                promote_live_symlink(live, candidate_bin)
+                promote_live_symlink(
+                    live,
+                    candidate_bin,
+                    alias_bin=Path(alias_bin) if alias_bin else None,
+                    candidate_root=work,
+                )
                 state = grok_runtime.LkgState(
                     cli_version=candidate["cli_version"],
                     binary_path=str(candidate_bin.resolve()),
@@ -407,6 +434,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--grok-bin", default=os.environ.get("GROK_BIN") or "grok")
     parser.add_argument("--live-bin", default="")
+    parser.add_argument(
+        "--alias-bin",
+        default="",
+        help="Secondary entry (e.g. ~/.grok/bin/grok) relinked to --live-bin on "
+        "promote. Never derived from HOME; omitted means only --live-bin moves.",
+    )
     parser.add_argument("--lkg", default="")
     parser.add_argument("--lock", default="")
     parser.add_argument("--scratch", default="")
@@ -429,6 +462,7 @@ def main(argv: list[str] | None = None) -> int:
         result = run_upgrade(
             grok_bin=args.grok_bin,
             live_bin=Path(args.live_bin) if args.live_bin else None,
+            alias_bin=Path(args.alias_bin) if args.alias_bin else None,
             lkg_path=lkg_path,
             lock_path=Path(args.lock) if args.lock else None,
             scratch=Path(args.scratch) if args.scratch else None,

@@ -59,6 +59,15 @@ systemctl enable --now radon-grok-page-responder.timer
 Stripped env: `/home/radon/radon-page-responder.env` (Turso + Pushover
 only). Auth: `/home/radon/.grok/auth.json` via device-code.
 
+Rerunning setup rebuilds that file (`cloud/scripts/grok_responder_env.py`,
+mode 600, owner radon). Secrets come only from the production env; an old
+value in the file is never kept. The operator flags
+`GROK_PAGE_RESPONDER`, `GROK_PAGE_AUTOSHIP`, `GROK_PAGE_AUTOPUSH` and
+`GROK_PAGE_MAX_ACTIONS_PER_DAY` are carried over from the current file, so a
+rerun no longer turns the responder off (`"skipped": "disabled"`).
+`GROK_PAGE_NO_DOTENV`, `GROK_PAGE_SYNC_REMOTE` and `GROK_BIN` are always
+reset. Contract: `cloud/tests/test_grok_responder_env.py`.
+
 Setup drops a `.radon-page-responder` marker in the clone. It is gitignored on
 purpose: `sync_remote_clone` fast-forwards only a clean tree, so an untracked
 marker reads as dirty work and pins the clone to whatever grok last committed.
@@ -207,13 +216,13 @@ responder against a live promotion.
 `radon-grok-upgrade.{service,timer}` is installed and enabled. Daily
 07:40 UTC it runs `scripts/grok_upgrade.py`: copy the resolved CLI into a
 unique candidate directory under the configured `--scratch` path
-(`data/cache/grok_upgrade` in the responder checkout), then run that private
+(`/var/lib/radon/grok-upgrade` in the unit; `data/cache/grok_upgrade` when omitted), then run that private
 copy's updater with isolated `HOME` and `GROK_HOME`. Probe its version,
 resolve the newest default model, then smoke a canned dry-run that must return `RESULT:` plus a Part 1
 validator-passing body. The live executable is never the updater target
 (REL-292 / R-711).
 
-- Pass: prepare replacement links, atomically switch the canonical live symlink, and write LKG with the immutable candidate path. Keep the promoted directory; a later attempt gets a new directory. No PR.
+- Pass: prepare replacement links, atomically switch the canonical live symlink (`--live-bin`) and the explicit `--alias-bin` (`~/.grok/bin/grok` in the unit), and write LKG with the immutable candidate path. The upgrader never derives a path from HOME and refuses a candidate outside `--scratch`. Keep the promoted directory; a later attempt gets a new directory. No PR.
 - Fail: preserve the live/LKG executable and alert via Pushover / watchdog; remove an unpromoted candidate. Health diagnostics use the writer's structured `error.message` field (REL-293 / R-712).
 - Incident lock held: skip the promote and retry next fire.
 
