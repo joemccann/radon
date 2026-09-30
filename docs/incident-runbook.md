@@ -3170,11 +3170,12 @@ silent.
 
 ## newsfeed-share-missing-subscription-502
 
-**POST `/api/newsfeed/share` 502s with toast "Voice rewrite unavailable. Showing the original copy."** Peak: 2026-09-19 16:09:36Z.
+**Symptom:** opening the Share panel leaves the original copy and reports that a verified draft could not be generated. The subscription-mount incident on 2026-09-19 returned HTTP 502; the route now streams after access and input validation, so a model failure arrives as an `error` event inside HTTP 200.
 
-- **Mechanism:** Next.js `chat()` meters SuperGrok / Claude Max grants from `~/.grok` and `~/.claude`. `2aba1229` stopped binding those dirs into `radon-nextjs` (internet-facing, refresh tokens). Prepaid `ANTHROPIC_API_KEY` / `XAI_API_KEY` in the container env are ignored unless `RADON_LADDER_ALLOW_PREPAID=1`. Auto-prefer then falls through to Anthropic and throws `Missing Anthropic subscription`. The share route maps that to 502. `radon-api` and `radon-newsfeed` still had the mounts.
-- **Discriminating check:** `journalctl -u radon-nextjs` contains `[newsfeed/share] voice rewrite failed: Error: Missing Anthropic subscription`. `docker inspect radon-nextjs.service` has no `/home/radon/.claude` or `.grok` bind. Caddy 502 from `response_header_timeout` is an empty body and takes ~30s; this 502 is immediate JSON.
-- **Remediation (code):** bind `.grok` / `.codex` / `.claude` into `radon-nextjs.service` the same way as api/newsfeed/research. Relay stays unbound. Share calls pass `reasoningEffort: "low"` so grok-4.6 does not spend the 1600-token budget on hidden reasoning. `parseVoiceCopy` accepts fenced JSON.
-- **Regression:** `cloud/tests/test_app_runtime.py::test_run_nextjs_binds_subscription_credential_dirs_readonly`, `test_run_relay_gets_no_subscription_credential_binds`, `web/tests/newsfeed-share-api.test.ts`, `web/tests/newsfeed-voice.test.ts`.
-- **Code:** `cloud/scripts/radon-app-runtime.sh`, `web/app/api/newsfeed/share/route.ts`, `web/lib/newsfeedVoice.ts`.
-- **Host:** next deploy of `radon-app-runtime` then restart `radon-nextjs`. Confirm `docker inspect` shows the three binds and a share rewrite returns 200.
+- **Prerequisites:** operator access to the Share panel and read-only access to Next.js service logs and container mount metadata. Credential binding and billing policy belong to [the credential runtime owner](operations.md#encrypted-credential-store-profile-credentials-tab).
+- **Blast radius:** voice rewrite and share export only. Keep the original article available; credential or deployment changes can also affect the assistant in the same Next.js container.
+- **Diagnosis:** inspect the failed request's event stream and the matching `[newsfeed/share] voice rewrite failed` log. Missing-subscription errors require checking the expected read-only mounts and subscription availability against the owner above. Inspect mount metadata only, never dump container environment values or token files. A proxy response without a stream is a separate edge failure.
+- **Stop:** do not infer success from response headers, enable prepaid billing to mask missing subscription access, or restart services solely because a draft failed.
+- **Verify:** an authorized Share attempt must receive a `result` event containing the verified draft and update the preview. HTTP 200 alone is not recovery; an `error` event or a stream ending without a draft is failure. The wire contract and rejection cases are pinned by [`newsfeed-share-api.test.ts`](../web/tests/newsfeed-share-api.test.ts).
+- **Rollback:** keep using the sanitized original copy while the operator follows the [deployment and rollback owner](../cloud/CLAUDE.md#deployment-contract) for any required runtime repair. Do not apply ad hoc mount or billing changes.
+- **Escalate:** provide the request time, terminal event type and sanitized Next.js error to the operator. Never attach grants, cookies or the container environment.

@@ -1282,3 +1282,14 @@ class TestModelLadderByteCapOwner:
         call = source.split("def _call_vision_provider(", 1)[1].split("\ndef ", 1)[0]
         assert call.count("max_bytes=max_response_bytes") == 6
         assert "_antigravity_complete" in call
+
+
+class TestShareRecoveryDoc:
+    def test_share_recovery_requires_a_verified_stream_result(self):
+        doc = (_ROOT / "docs/incident-runbook.md").read_text()
+        case = doc.split("## newsfeed-share-missing-subscription-502", 1)[1].split("\n## ", 1)[0]
+        assert "HTTP 200 alone" in case
+        assert "`result`" in case and "`error`" in case
+        assert "operations.md#encrypted-credential-store-profile-credentials-tab" in case
+        for label in ("Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verify", "Rollback", "Escalate"):
+            assert f"**{label}:**" in case
