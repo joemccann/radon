@@ -467,7 +467,7 @@ cmd_halt() {
 # out" twice on 2026-08-29 and the drop-in was hot-patched to Type=simple,
 # which then failed every deploy's control-plane preflight. This forwarder
 # is a child of the ExecStart process, so it IS in the cgroup. It owns the
-# socket the container sees and relays every datagram to systemd. R-429.
+# socket the container sees and relays permitted notices to systemd. R-429.
 cmd_notify_proxy() {
   local listen="${1:-}" upstream="${2:-}"
   [[ -n "$listen" && -n "$upstream" ]] || usage
@@ -495,6 +495,11 @@ while True:
         if os.getppid() != parent:
             raise SystemExit(0)
         continue
+    # REL-158 / R-439: the proxy PID is trusted by systemd, the container
+    # is not. Never forward MAINPID, lifecycle or timeout-control fields.
+    data = b"\n".join(line for line in data.splitlines()
+                      if line in (b"READY=1", b"WATCHDOG=1")
+                      or line.startswith(b"STATUS="))
     if not data:
         continue
     try:
@@ -541,23 +546,30 @@ start_notify_proxy() {
 # line into a root-only copy under the runtime dir and hand docker that; the
 # host file stays the secret of record and is never rewritten.
 render_env_file() {
-  local unit="$1" out="${NOTIFY_PROXY_DIR}/${unit}.env"
-  mkdir -p "$NOTIFY_PROXY_DIR"
+  local unit="$1" out="${NOTIFY_PROXY_DIR}/${1}.env" temporary status
+  # REL-158 / R-438: substitutions do not inherit errexit. Check each
+  # renderer explicitly, and publish only a complete root-only copy.
+  mkdir -p "$NOTIFY_PROXY_DIR" || return 71
+  temporary="$(mktemp "${out}.XXXXXX")" || return 71
   (
     umask 077
     sed -E \
       -e "s/^([A-Za-z_][A-Za-z0-9_]*=)'(.*)'[[:space:]]*\$/\1\2/" \
       -e 's/^([A-Za-z_][A-Za-z0-9_]*=)"(.*)"[[:space:]]*$/\1\2/' \
-      "$ENV_FILE" > "$out"
+      "$ENV_FILE" > "$temporary" || exit 71
     # The newsfeed's Chromium renders third-party web content (and
     # may fall back to --no-sandbox); hand that unit only the keys its own code reads,
     # never the full production secret set.
     if [[ "$unit" == "radon-newsfeed.service" ]]; then
       grep -E '^(#|$|(NODE_ENV|ANTHROPIC_API_KEY|CLAUDE_CODE_API_KEY|CLAUDE_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CONFIG_DIR|CODEX_HOME|GROK_AUTH_FILE|GEMINI_OAUTH_TOKEN|ANTIGRAVITY_CLI|RADON_LADDER_[A-Z0-9_]+|XAI_API_KEY|GROK_API_KEY|OPENAI_API_KEY|GEMINI_API_KEY|NVIDIA_API_KEY|CEREBRAS_API_KEY|RADON_PYTHON_BIN|TURSO_DB_URL|TURSO_AUTH_TOKEN|PLAYWRIGHT_CHROMIUM_SANDBOX|RADON_DB_NO_REPLICA|RADON_DB_USE_REPLICA|RADON_MEDIA_LOCAL|RADON_MEDIA_REMOTE|RADON_NEWSFEED_[A-Z0-9_]+|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD)=)' \
-        "$out" > "${out}.filtered" || true
-      mv "${out}.filtered" "$out"
+        "$temporary" > "${temporary}.filtered"
+      status=$?
+      # grep's 1 means a valid empty allowlist; 2 means a failed filter.
+      [[ "$status" -le 1 ]] || exit 71
+      mv "${temporary}.filtered" "$temporary" || exit 71
     fi
-  )
+  ) || { rm -f "$temporary" "${temporary}.filtered"; return 71; }
+  mv "$temporary" "$out" || { rm -f "$temporary"; return 71; }
   printf '%s\n' "$out"
 }
 
@@ -637,7 +649,7 @@ PY_PRIVATE_DIR
 
 cmd_run() {
   local unit="${1:-}"
-  local ids image workdir
+  local ids image workdir rendered_env
   [[ -n "$unit" ]] || usage
   refuse_host_plane "$unit"
   is_app_unit "$unit" || {
@@ -716,6 +728,7 @@ cmd_run() {
   local container_network=host
   [[ "$unit" == "radon-newsfeed.service" ]] && container_network=bridge
 
+  rendered_env="$(render_env_file "$unit")" || exit 71
   set -- \
     run \
     --network "$container_network" \
@@ -726,7 +739,7 @@ cmd_run() {
     --cap-drop ALL \
     --security-opt no-new-privileges \
     --cgroupns host \
-    --env-file "$(render_env_file "$unit")" \
+    --env-file "$rendered_env" \
     --env RADON_DB_NO_REPLICA=1 \
     --env PYTHONPATH=/home/radon/radon/scripts \
     -w "$workdir"

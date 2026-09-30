@@ -667,6 +667,24 @@ class TestSignalKilledOneshotRerun:
             )
         return rc, followup
 
+    def test_rel108_migration_bearing_unit_never_auto_reruns(self, tmp_path, monkeypatch):
+        """R-302: data-refresh permission must not grant schema migration."""
+        import grok_page_responder as responder
+
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        monkeypatch.setattr(responder, "DEPLOY_TRANSITION_JOURNAL", tmp_path / "no-transition")
+        page = {"page_id": "synthetic", "service": "radon-demo-mirror.service", "kind": "unit"}
+        log = []
+        result = attempt_oneshot_rerun(
+            page, now=NOW, systemctl_runner=_fake_systemctl(next_elapse=self.FARAWAY, log=log),
+        )
+        assert result is None
+        assert not any(args[0] in {"start", "reset-failed", "restart"} for args in log)
+        root = Path(__file__).resolve().parents[3]
+        assert "migrate.py --demo" in (root / "cloud/services/radon-demo-mirror.service").read_text()
+        rules = (root / "cloud/config/polkit/50-radon-services.rules").read_text()
+        assert '"radon-demo-mirror.service": true' not in rules
+
     def test_faraway_timer_reruns_instead_of_standing_down(
         self, db_conn, tmp_path, monkeypatch
     ):

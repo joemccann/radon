@@ -147,7 +147,7 @@ class TestVersionIsRecordedWithTheStatements:
         monkeypatch.setenv("TURSO_AUTH_TOKEN", "t")
         monkeypatch.setitem(sys.modules, "libsql", type("L", (), {})())
 
-        migrate.main()
+        migrate.main([])  # Explicit production target; connection is mocked.
 
         assert applied_versions == [50, 51], (
             "the runner aborted on the replayed ALTER, so every later "

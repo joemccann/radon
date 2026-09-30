@@ -263,6 +263,10 @@ until a human ran reset-failed + start. Before launching grok on a
   to each other by `test_allowlist_matches_the_polkit_grant`, and every
   member must be a `Type=oneshot` with a `.timer` partner per
   `test_allowlist_covers_the_daily_scans_and_only_timer_owned_oneshots`).
+  `radon-demo-mirror.service` is excluded from both the responder and polkit
+  grants because its `ExecStartPre` applies database migrations (REL-108 /
+  R-302). Its normal timer is unchanged; manual recovery uses the operator's
+  reviewed service-control path.
 - `GROK_PAGE_AUTOSHIP=1` — the restart is an auto-fix action, so it takes the
   same explicit opt-in as shipping a code fix. Unset stands down.
 - no deploy transition journal (`/home/radon/.radon-deploy-transition.json`):
