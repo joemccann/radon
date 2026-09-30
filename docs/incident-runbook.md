@@ -3128,6 +3128,40 @@ with a flag that subcommand does not accept.** Peak: 2026-09-29
 - **Code:** `scripts/grok_upgrade.py` (`parse_update_check`,
   `install_candidate_cli`, `_record_health`).
 
+## grok-live-binary-relinked-by-pytest
+
+**`radon-grok-upgrade.service` and `radon-grok-page-responder.service`
+fail with `FileNotFoundError: /home/radon/.local/bin/grok`.** First seen
+2026-09-29 07:51Z.
+
+- **Mechanism:** `/home/radon/.local/bin/grok` links to
+  `/home/radon/.grok/bin/grok`, and that link pointed into
+  `/tmp/pytest-of-radon/.../scratch/candidate/bin/grok`. A pytest run in
+  the responder clone (a Grok fix session) ran
+  `test_pins_latest_version_and_promotes`. `promote_live_symlink` then
+  relinked `Path.home()/.grok/bin/grok` whenever that directory existed,
+  so the real installer entry was repointed at the test candidate. Pytest
+  pruned its old basetemp and the link dangled.
+- **Discriminating check:** `readlink -f /home/radon/.local/bin/grok` and
+  `readlink /home/radon/.grok/bin/grok` show a `pytest-of-` path. A
+  promote by the timer points only into `/var/lib/radon/grok-upgrade`.
+- **Remediation (ops):** repoint `/home/radon/.grok/bin/grok` at a real
+  binary (`binary_path` in `/var/lib/radon/grok_lkg.json` when it exists,
+  otherwise rerun the xAI installer as radon), then
+  `systemctl start radon-grok-upgrade.service`. Do not delete
+  `/var/lib/radon/grok-upgrade/candidate-*` that LKG names.
+- **Remediation (code):** the upgrader moves only `--live-bin` and an
+  explicit `--alias-bin` (the unit passes `/home/radon/.grok/bin/grok`),
+  and refuses a candidate outside `--scratch`. Upgrade tests fake HOME,
+  and `scripts/tests/conftest.py` fails any test that changes the host's
+  real `~/.grok/bin/grok` or `~/.local/bin/grok`.
+- **Regression:** `scripts/tests/test_grok_upgrade.py`
+  (`fake_home`, `TestPromoteTouchesOnlyGivenPaths`),
+  `cloud/tests/test_grok_upgrade_setup.py`
+  (`test_upgrade_unit_names_every_link_it_may_move`).
+- **Code:** `scripts/grok_upgrade.py` (`promote_live_symlink`, `main`),
+  `cloud/services/radon-grok-upgrade.service`.
+
 ## Grok auto-response on iPhone P1 pages
 
 Canonical: [`grok-page-responder.md`](grok-page-responder.md).
