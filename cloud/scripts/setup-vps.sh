@@ -1618,6 +1618,31 @@ install_app_runtime() {
   log_success "App runtime wrapper installed"
 }
 
+# `radon ib release|resume|status`: the IBKR operator hold (broker). Root-owned
+# because release must reach the root docker shim's compose-down and kill when
+# the radon-side helper is blocked.
+install_ib_hold() {
+  local source="${CLOUD_DIR}/scripts/ib-operator-hold.sh"
+  local target="${RADON_IB_HOLD_TARGET:-/usr/local/sbin/radon-ib-hold}"
+  local -a owner_args=(-o root -g root)
+  [[ "${RADON_HELPER_SKIP_CHOWN:-0}" == "1" ]] && owner_args=()
+  local staged
+
+  if [[ ! -f "$source" ]]; then
+    log_error "ib-operator-hold.sh missing from ${CLOUD_DIR}/scripts/"
+    return 1
+  fi
+  log_info "Installing ${target}..."
+  staged="$(mktemp "${target}.tmp.XXXXXX")"
+  if ! stage_from_checkout "$source" "$staged" 0755 ${owner_args[@]+"${owner_args[@]}"} \
+    || ! bash -n "$staged"; then
+    rm -f "$staged"
+    log_error "IBKR operator hold command failed staging or syntax validation"
+    return 1
+  fi
+  mv -f "$staged" "$target"
+}
+
 # The root-owned Gateway docker operator that replaces radon's group `docker`
 # membership, plus the compose body it runs. Both must land root-owned: a
 # radon-writable compose file hands root straight back through the shim.
@@ -1809,6 +1834,7 @@ main() {
   install_operator_cli
   install_app_runtime
   install_docker_gw
+  install_ib_hold
   configure_sudoers
   install_admin_polkit_rule
   start_services

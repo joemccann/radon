@@ -27,10 +27,10 @@ from typing import Iterable
 # interpreter); it lets /status report the broker's 2FA push lease to the app
 # host, which cannot see this VM's lock file (REL-172, R-475).
 try:
-    from utils import ib_2fa_lock
+    from utils import ib_2fa_lock, ib_operator_hold
     from utils.ib_login_throttle import format_utc, login_throttle_retry_at
 except ImportError:  # pragma: no cover - `python -m scripts.ib_gateway_remote.serve`
-    from scripts.utils import ib_2fa_lock
+    from scripts.utils import ib_2fa_lock, ib_operator_hold
     from scripts.utils.ib_login_throttle import format_utc, login_throttle_retry_at
 
 DEFAULT_BIND = "10.0.0.4"
@@ -437,6 +437,16 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
 
     def _helper(self, verb: str) -> None:
         cfg = self.server.gateway_config
+        # `radon ib release` holds the Gateway out of the IBKR username the
+        # operator shares with it; a login here would kick the operator.
+        if verb in LOGIN_VERBS and ib_operator_hold.is_held():
+            self._ok({
+                "ok": False,
+                "verb": verb,
+                "code": "OPERATOR_HOLD",
+                "detail": "IBKR operator hold active; `radon ib resume` on the broker clears it",
+            }, 423)
+            return
         if verb in MUTATIONS:
             refusal = cooldown_refusal(verb) or login_throttle_refusal(verb, cfg["watchdog_state"])
             if refusal is not None:
@@ -456,6 +466,7 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
                 "returncode": rc,
                 "lease": broker_lease(),
                 "transition": "pending" if state == "transition-pending" else None,
+                "operator_hold": ib_operator_hold.hold_state(),
             }
             self._ok(payload, 409 if rc in {LEASE_HELD_RC, CONTROL_BUSY_RC} else 200)
             return

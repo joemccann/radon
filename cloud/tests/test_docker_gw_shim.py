@@ -64,6 +64,7 @@ def box(tmp_path: Path):
         "RADON_TEST_DOCKER": str(docker),
         "RADON_TEST_COMPOSE_FILE": str(compose_file),
         "RADON_TEST_COMPOSE_ENV_FILE": str(env_file),
+        "RADON_TEST_OPERATOR_HOLD_PATH": str(tmp_path / "ib-operator-hold.json"),
     }
 
     class Box:
@@ -72,6 +73,7 @@ def box(tmp_path: Path):
             self.log = log
             self.compose_file = compose_file
             self.tmp = tmp_path
+            self.hold = tmp_path / "ib-operator-hold.json"
 
         def run(self, *args: str, **extra: str) -> subprocess.CompletedProcess[str]:
             return subprocess.run(
@@ -169,6 +171,52 @@ def test_a_missing_compose_body_is_refused(box) -> None:
     result = box.run("compose-down")
     assert result.returncode == 78
     assert not box.log.exists() or box.log.read_text(encoding="utf-8") == ""
+
+
+# --- operator hold (2026-09-25: the Gateway kept reclaiming the operator's
+# IBKR session). The shim is the lowest layer every start funnels through, so
+# it refuses compose-up while the hold is set, whatever the caller. ---------
+
+
+@pytest.mark.parametrize(
+    "flag",
+    [
+        '{"held": true, "reason": "operator web login"}\n',
+        "garbage",
+        "",
+        '{ "held": false }',
+    ],
+)
+def test_compose_up_is_refused_while_the_operator_hold_is_set(box, flag) -> None:
+    box.hold.write_text(flag, encoding="utf-8")
+    result = box.run("compose-up")
+    assert result.returncode == 73, result.stderr
+    assert "operator hold" in result.stderr
+    assert not box.log.exists() or box.log.read_text(encoding="utf-8") == ""
+
+
+def test_a_symlinked_hold_flag_counts_as_held(box) -> None:
+    planted = box.tmp / "planted-hold.json"
+    planted.write_text('{"held": false}\n', encoding="utf-8")
+    box.hold.symlink_to(planted)
+    assert box.run("compose-up").returncode == 73
+
+
+def test_a_cleared_hold_lets_compose_up_through(box) -> None:
+    box.hold.write_text('{"held": false, "actor": "ssh:test"}\n', encoding="utf-8")
+    assert box.run("compose-up").returncode == 0
+    assert box.log.read_text(encoding="utf-8").strip().endswith("up -d")
+
+
+def test_release_verbs_stay_open_while_held(box) -> None:
+    box.hold.write_text('{"held": true}\n', encoding="utf-8")
+    assert box.run("compose-down").returncode == 0
+    assert box.run("kill").returncode == 0
+    assert box.log.read_text(encoding="utf-8").splitlines()[-1] == "kill ib-gateway"
+
+
+def test_kill_is_root_only_and_not_granted_to_radon() -> None:
+    assert "radon-docker-gw kill" not in OPS_SUDOERS.read_text(encoding="utf-8")
 
 
 # --- wiring ---------------------------------------------------------------
