@@ -197,12 +197,19 @@ Operator commands after the cut:
   Reversal: `systemctl disable --now radon-ib-gateway-remote.service` on
   the broker and unset `RADON_IB_REMOTE_URL` on the app (controls go
   read-only, no error).
-- The API image has no `systemctl`. App-plane rows on `/admin` therefore
-  come from the host health daemon (`127.0.0.1:8330/status`) with
-  `load_state=host-health` and `can_control=false`. Gateway status stays
-  on the remote ladder above. Start, stop, and restart of app units stay
-  unavailable from that container.
+- The API image has no `systemctl` or `sudo`. App-plane rows and actions on
+  `/admin` go through `radon-control.service`, a host daemon on a unix
+  socket that only the radon-api container mounts (contract:
+  [operations.md, Host control socket](operations.md#host-control-socket-radon-controlservice)).
+  `/admin/services` then reports `supported=true` and
+  `status_source=host-control`, with real unit descriptions, uptimes and
+  per-unit `allowed_actions`. When the socket is absent or the daemon is
+  down, rows fall back to the host health daemon (`127.0.0.1:8330/status`,
+  `status_source=host-health`, `can_control=false`) and the panel is
+  read-only. Gateway status stays on the remote ladder above.
 - App `Restart All Services` stays app-plane. It does not cycle Gateway.
+  Through the control socket it is answered first and runs detached, since
+  it restarts radon-api itself.
 
 Do not put the broker in Falkenstein. Do not run two Gateways. Do not
 restore a broker snapshot beside a live broker. Do not start a standby

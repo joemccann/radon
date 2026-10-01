@@ -79,6 +79,7 @@ readonly SERVICE_FILES=(
   radon-relay.service
   radon-monitor.service
   radon-health.service
+  radon-control.service
   radon-mcp.service
   radon-newsfeed.service
   radon-research.service

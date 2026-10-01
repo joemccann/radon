@@ -480,7 +480,20 @@ radon restart
 radon status
 ```
 
-From the laptop: `ssh root@ib-gateway radon stop`. The operator CLI is installed from the monorepo [`cloud/scripts/operator-radon.sh`](../cloud/scripts/operator-radon.sh) control-plane source.
+From the laptop: `ssh root@ib-gateway radon stop`. The operator CLI is installed from the monorepo [`cloud/scripts/operator-radon.sh`](../cloud/scripts/operator-radon.sh) control-plane source. `radon stop|start|restart` also never touches `radon-control.service` (below).
+
+### Host control socket (`radon-control.service`)
+
+The `/admin` Service controls modal runs on the app host, where `radon-api` is a container with every capability dropped, `no-new-privileges`, and no `systemctl` or `sudo`. `radon-control.service` ([`scripts/control_service/serve.py`](../scripts/control_service/serve.py), stdlib only) is its one path to unit control:
+
+- **Transport.** A unix socket at `/run/radon-control/control.sock` (systemd `RuntimeDirectory`, dir `0700`, socket `0600`, owner `radon`, kept across restarts). No TCP port. `radon-app-runtime run radon-api.service` pre-creates that directory symlink-safe and bind-mounts it into the radon-api container only, with `RADON_CONTROL_SOCKET`. No other container mounts it, and it is a path socket, not an abstract one, so the host-network containers cannot reach it through the shared netns.
+- **Peer and no token.** `SO_PEERCRED` must be the daemon's own uid (`radon`) or root. No shared secret: every principal that can open the socket is already uid `radon`, which holds the same `sudoers.d/radon-ops` grant, so a token would gate nothing new. No new group and no new sudoers line.
+- **Allowlist.** One JSON line per request. Ops are `ping`, `status`, `unit` and `stack-restart`; unknown fields are refused. A unit must be in the live `systemctl list-units 'radon-*'` registry, match `radon-NAME.{service,timer}` and the API's `is_valid_unit`, and not be the Gateway, its adapters, a beta unit, or `radon-control` itself. Verbs are `start|stop|restart`.
+- **Execution.** Exactly `sudo -n /usr/local/bin/radon unit <verb> <unit>` or `sudo -n /usr/local/bin/radon restart`, argv list, no shell. The operator CLI holds the deploy lock; a held lock comes back as exit 74 and the API answers 409.
+- **Self-protection.** `radon-api` and `radon-nextjs` serve the panel: Stop is refused (`allowed_actions` is `["restart"]`, so the button is disarmed), and Restart, like Restart All, is answered first and runs about 1s later, detached, after a deploy-lock check. One detached action at a time. The operator CLI excludes `radon-control` from `radon stop|start|restart`, because the stack restart runs inside its cgroup.
+- **Audit.** Each request writes a `radon-control audit {json}` journald line (actor from the API, peer uid, op, unit, verb, result, rc). FastAPI also logs `admin service action actor=... unit=... action=... ok=... rc=...`. Read with `journalctl -u radon-control -u radon-api | grep -E 'radon-control audit|admin service action'`.
+
+`/admin/services` reports `status_source` once (`systemd`, `host-control`, `host-health`, `unavailable`) instead of repeating it per row. With the socket missing or the daemon down, rows fall back to `radon-health` and controls stay disarmed. Install path: `installed-units.sha256` pin, so `install-units` copies the unit on deploy; as a `.service` it is not enabled automatically (one-time `systemctl enable --now radon-control.service` on the app host; `setup-vps.sh` enables it on a fresh host).
 
 ## Health monitoring (isolated daemon + edge surface)
 
