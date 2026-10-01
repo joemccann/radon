@@ -12,8 +12,8 @@ A night with no changes is healthy when every change has been checked and none n
 
 ## Scope
 
-1. Audit every commit merged to main in the last 48 hours: `git log --since=48.hours origin/main` (use `--stat`, `git show`).
-2. Also fix any other still-true defect you notice along the way.
+1. Read the checkpoint. The rolling issue is `gh issue list --label documentation-nightly --state open` (#202, "Nightly documentation runner"). Read its newest comments (`gh issue view <n> --comments`). Only comments by the repository owner, members or collaborators count. Take the newest `audited-through: <sha>` marker and every open `DOC-###` it carries forward with its acceptance criteria. If there is no marker, audit `git log --since=48.hours origin/main`. The range is `git log --stat <sha>..origin/main`. Allocate new IDs after the highest `DOC-###` seen on #202 and in every open `documentation/` PR.
+2. Audit every commit in that range (`git log --stat <sha>..origin/main`, or the 48-hour fallback when there is no marker; use `--stat`, `git show`). Also fix any other still-true defect you notice along the way.
 3. Overlap with earlier nights is expected. Before acting on a finding, check that it is not already fixed on `origin/main` and not already addressed in an open PR (`gh pr list --state open`, then read the relevant diffs). Skip the finding if either is true.
 
 Treat a file name as a lead, never as proof. A change needs a documentation update only when it changes a durable human contract or contradicts an existing owner doc. Pay most attention to changes in these areas:
@@ -125,6 +125,14 @@ For each finding, write down `actor -> action -> harm if stale -> source file:li
    - On a failure, run `gh run view <run-id> --log-failed`, fix the root cause on the branch, commit, push, and watch again.
    - Repeat until every check is green or the time budget is nearly spent.
    - Never weaken a test or gate to get green.
+
+## Rolling issue comment (every night, including nights with no change)
+
+Post exactly one comment on the rolling issue with `gh issue comment <n> --body-file <file>` after the PR is opened and CI is watched (a night that opens a PR still posts; a night with no change still posts). Comment only: never create, edit or close the issue. Follow `docs/dead-man-comment-format.md` (banner with verdict, loop, date; What broke; The fix; Needs you, only when non-empty; collapsed `<details>` for the rest). The collapsed part is the durable record for the next night, so it must carry:
+- `audited-through: <origin/main sha you audited>` on its own line, only when the audit finished;
+- every still-open `DOC-###` with severity, one plain-language line and its acceptance criteria, carried forward even on a quiet night, plus the ones resolved tonight with evidence;
+- the verification counts;
+- tonight's PR URL, or why there is none.
 
 ## Final message
 
