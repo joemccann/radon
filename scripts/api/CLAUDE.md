@@ -53,6 +53,7 @@ All FastAPI routes JWT-protected by default.
 - **`/health/lite`** — side-effect-free, account-free coarse IB state (`auth_state`/`service_state`/`upstream_dead`/`port_listening`) for high-frequency pollers (the standalone health daemon). Calls `check_ib_gateway(pool=None)` so it NEVER triggers `reconnect_all`/heal — the 2FA-recovery heartbeat stays on `/health`. **NOT auth-exempt** (loopback daemon covered by bypass; public → 401); never add it to `AUTH_EXEMPT_PATHS`.
 - WebSocket auth via `scripts/api/ws_ticket.py` — 30s TTL.
 - **JWKS outage is not an auth verdict (REL-235):** in `scripts/api/auth.py` only PyJWT signature/claim errors populate the negative-kid cache; a timeout/OSError/5xx (including `PyJWKClientConnectionError`, which subclasses `PyJWTError`) during a JWKS fetch yields 503 and leaves the kid re-probeable, same rule as `scripts/mcp_hosted/auth.py` (REL-229). The task done-callback distinguishes the same way.
+- **Cached kid skips the in-flight bound:** a kid already in the unexpired cached JWKS set resolves in `_cached_signing_key` (`scripts/api/auth.py`) without a `MAX_JWKS_INFLIGHT` slot; only unknown kids take the bounded single-flight refetch, same rule as RC-A3 in `scripts/mcp_hosted/auth.py`.
 
 Don't return 4xx for legitimate empty/pending states; use 200 + payload flag (e.g., `missing: true`). 4xx noise in the browser console + Next.js logs masks real errors. See `feedback_http_status_for_real_errors.md`.
 
