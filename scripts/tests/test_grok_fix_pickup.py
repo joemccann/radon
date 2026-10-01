@@ -637,6 +637,24 @@ class TestPushGate:
         assert "fix/journal-leak" not in listed.stdout
         assert ensure.calls == []
 
+    def test_clean_tip_cannot_publish_a_private_identifier_in_earlier_history(self, world):
+        vps = world["vps"]
+        _vps_branch(world, "fix/history-leak")
+        leak = "0000abcd" + ".1234ef56" + ".01.01"
+        _commit(vps, "app.py", f"ROW = '{leak}'\n", _valid_ir_message("fix/history-leak"))
+        _commit(vps, "app.py", "x = 3\n", _valid_ir_message("fix/history-leak"))
+        ensure = _FakeEnsurePr()
+        alerts = []
+        results = _run(world, ensure=ensure, alerter=lambda b, r: alerts.append((b, r)))
+        assert [r["action"] for r in results] == ["refused"]
+        assert "ib_exec_id" in results[0]["reason"]
+        assert leak not in str(results) + str(alerts)
+        assert alerts and alerts[0][0] == "fix/history-leak"
+        assert ensure.calls == []
+        assert "fix/history-leak" not in _git(
+            world["origin"], "for-each-ref", "--format=%(refname)"
+        ).stdout
+
     def test_plist_ships_with_autopush_off(self):
         plist = plistlib.loads(PLIST.read_bytes())
         env = plist["EnvironmentVariables"]

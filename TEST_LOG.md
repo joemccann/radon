@@ -1102,3 +1102,20 @@ Closing verification details and exact counts are appended to TEST_AUDIT.md; ext
 | T-518 | DONE | Wrong runtime-lock default under a synthetic inherited override: original regression skips; isolated import-time configuration test fails (1 failed / 16 passed). Correct source: 17 passed, including explicit override precedence, with no environment-dependent skip or mutation of the shared module. |
 
 All three delta repetitions passed: Python 946, Vitest 134, cloud 24 per repetition. Three serial closing rounds and the exact detached-base cloud failure-list comparison are appended to TEST_AUDIT.md. The first closing Python run had one subscription-login failure; its unchanged file passed 103/103 alone and both later full rounds passed. T-435 remains operator-only with its existing keyless-build/browser acceptance criteria. External delivery and CI receipts belong to rolling issue #83.
+
+
+## Remediation 2026-10-01
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-519 | DONE | Three history-scanner cases plus fake-origin pickup fail in each of three delta repetitions. Every outgoing commit patch, including merge resolutions, is now scanned. Scanner/pickup focused gate passes; no live push occurs in tests. |
+| T-520 | DONE | Six non-restrictive guard expressions and four skipped-dependency status overrides bypass the original checker. All ten fail three times; positive guard implication and success-aware inheritance produce 47 passing security tests. Workflows unchanged. |
+| T-521 | DONE | Request/reducer/L2-delivery mutations each yield 1 failed / 7 passed; all three old source-text tests accept each defect. Executable relay boundary suite plus old tests: 8 passed. Product relay unchanged. |
+| T-522 | DONE | Wrong contract: 1 failed / 55 passed; missing disconnect: 11 failed / 45 passed; unlimited wait: 1 failed / 55 passed. All 41 old tests accept all mutations. Fake IB boundary: 56 combined passed; real broker leg and coroutine each 100% statement/branch coverage. Product fetcher unchanged. |
+| T-523 | DONE | Synthetic private filename is echoed by refusal: 1 failed / 41 passed. Suppressing only private diagnostic paths retains refusal and clean-path context: 42 scanner cases pass. |
+| T-524 | DONE | Binary-addition and pure-rename paths bypass the old scanner: 2 failed / 42 passed. Independent commit path enumeration rejects both; 44 scanner cases and 185 combined focused Python tests pass. |
+| T-435 | DONE upstream | PR #816, merge 2640fd61; actual keyless setup browser run 36737302600/job 109962391922, 1 passed with observed 307 Location at head 8fc11512. No authless header; isolated compile-mode bundle and server. |
+
+Standing/delta gates, closing full rounds and the exact detached-base cloud FAILED-list comparison are recorded in TEST_AUDIT.md. Exact-head CI/browser and external delivery receipts belong to rolling issue #83.
+
+Closing verification 2026-10-01: all three rounds pass Python 13448 / Vitest 10300 / cloud 2400, with Python 2 skips and 23 subtests, cloud 7 skips. Every cloud FAILED-list comparison against the clean detached base has zero additions and zero removals. No load-flake exception or test weakening was needed.
