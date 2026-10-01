@@ -21,7 +21,7 @@ import type { PortfolioData } from "@/lib/types";
 
 afterEach(cleanup);
 
-function portfolioWithLongCall(entryCost: number): PortfolioData {
+function portfolioWithLongCall(entryCost: number, strike = 20): PortfolioData {
   return {
     positions: [
       {
@@ -41,7 +41,7 @@ function portfolioWithLongCall(entryCost: number): PortfolioData {
             direction: "LONG",
             contracts: 1000,
             type: "Call",
-            strike: 20,
+            strike,
             entry_cost: entryCost,
             avg_cost: entryCost / 1000,
             market_price: null,
@@ -113,10 +113,34 @@ describe("useOrderRisk — whole-spread figures", () => {
     expect(s.maxLoss).toBeCloseTo(128_000, 0);
     expect(s.maxGain).toBeCloseTo(172_000, 0);
     // Whole spread: credit $172,000 - basis $50,000 = $122,000 net credit.
-    expect(s.withHeldLegs).toMatchObject({ maxGainUnbounded: false, maxLossUnbounded: false });
-    expect(s.withHeldLegs!.maxGain).toBeCloseTo(122_000, 0);
-    expect(s.withHeldLegs!.maxLoss).toBeCloseTo(178_000, 0);
-    expect(s.withHeldLegs!.heldBasisDollars).toBeCloseTo(50_000, 0);
+    // Signed P&L, not magnitudes. Whole spread: credit $172,000 - basis $50,000.
+    const w = s.withHeldLegs!;
+    expect(w.bestUnbounded).toBe(false);
+    expect(w.orderBest).toBeCloseTo(172_000, 0);
+    expect(w.orderWorst).toBeCloseTo(-128_000, 0);
+    expect(w.spreadBest).toBeCloseTo(122_000, 0);
+    expect(w.spreadWorst).toBeCloseTo(-178_000, 0);
+    expect(w.heldBasisDollars).toBeCloseTo(50_000, 0);
+  });
+
+  it("reports a spread that loses everywhere as a NEGATIVE best case, not $0", () => {
+    // Operator repro 2026-10-01: SELL 1000x $19C @ $1.22 against held LONG
+    // 1000x $20C bought for $188,990. Credit exceeds the $1 width, so the
+    // order alone locks in at least +$22,000; the whole spread is a net
+    // $0.67 debit and loses at every settlement.
+    const sell19 = {
+      ...SHORT_17C,
+      chainLegs: [{ ...SHORT_17C.chainLegs[0], strike: 19 }],
+      netPremium: -1.22,
+      description: "Short Call @ $1.22",
+      totalCost: -122_000,
+    };
+    const { result } = renderHook(() => useOrderRisk(sell19, portfolioWithLongCall(188_990)));
+    const w = result.current!.summary.withHeldLegs!;
+    expect(w.orderBest).toBeCloseTo(122_000, 0);
+    expect(w.orderWorst).toBeCloseTo(22_000, 0);
+    expect(w.spreadBest).toBeCloseTo(-66_990, 0);
+    expect(w.spreadWorst).toBeCloseTo(-166_990, 0);
   });
 
   it("is null when no held option covers the order", () => {
@@ -134,14 +158,20 @@ describe("useOrderRisk — whole-spread figures", () => {
 
   it("shows unknown basis as unknown figures", () => {
     const { result } = renderHook(() => useOrderRisk(SHORT_17C, portfolioWithLongCall(Number.NaN)));
-    expect(result.current!.summary.withHeldLegs).toMatchObject({ maxGain: null, maxLoss: null, heldBasisDollars: null });
+    expect(result.current!.summary.withHeldLegs).toMatchObject({
+      orderBest: 172_000,
+      spreadBest: null,
+      spreadWorst: null,
+      heldBasisDollars: null,
+    });
   });
 
   it("renders both figure sets in the confirm summary", () => {
     const { result } = renderHook(() => useOrderRisk(SHORT_17C, portfolioWithLongCall(50_000)));
     const { getByTestId } = render(<OrderConfirmSummary summary={result.current!.summary} />);
-    expect(getByTestId("order-confirm-spread-max-gain").textContent).toContain("$122,000");
-    expect(getByTestId("order-confirm-spread-max-loss").textContent).toContain("$178,000");
+    expect(getByTestId("order-confirm-order-worst").textContent).toContain("-$128,000");
+    expect(getByTestId("order-confirm-spread-best").textContent).toContain("+$122,000");
+    expect(getByTestId("order-confirm-spread-worst").textContent).toContain("-$178,000");
   });
 });
 
@@ -171,17 +201,27 @@ describe("TicketRiskBlock — spread section", () => {
     const { container, getByTestId } = render(
       <TicketRiskBlock
         {...base}
-        withHeldLegs={{ maxGain: 122_000, maxLoss: 178_000, maxGainUnbounded: false, maxLossUnbounded: false, heldBasisDollars: 50_000 }}
+        withHeldLegs={{
+          orderBest: 122_000,
+          orderWorst: 22_000,
+          spreadBest: -66_990,
+          spreadWorst: -166_990,
+          bestUnbounded: false,
+          heldBasisDollars: 188_990,
+        }}
       />,
     );
-    expect(cell(container, "MAX LOSS")).toBe("$128,000.00");
-    expect(cell(container, "SPREAD MAX GAIN")).toBe("$122,000.00");
-    expect(cell(container, "SPREAD MAX LOSS")).toBe("$178,000.00");
-    expect(getByTestId("ticket-risk-spread").textContent).toContain("$50,000 BASIS");
+    // Signed: a locked-in gain reads +, a spread that loses everywhere reads -.
+    expect(cell(container, "BEST CASE")).toBe("+$122,000.00");
+    expect(cell(container, "WORST CASE")).toBe("+$22,000.00");
+    expect(cell(container, "SPREAD BEST CASE")).toBe("-$66,990.00");
+    expect(cell(container, "SPREAD WORST CASE")).toBe("-$166,990.00");
+    expect(getByTestId("ticket-risk-spread").textContent).toContain("$188,990 BASIS");
   });
 
   it("renders no spread section without held coverage", () => {
-    const { queryByTestId } = render(<TicketRiskBlock {...base} />);
+    const { container, queryByTestId } = render(<TicketRiskBlock {...base} />);
     expect(queryByTestId("ticket-risk-spread")).toBeNull();
+    expect(cell(container, "MAX LOSS")).toBe("$128,000.00");
   });
 });

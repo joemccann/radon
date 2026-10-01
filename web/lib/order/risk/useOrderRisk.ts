@@ -41,6 +41,7 @@ import {
 import {
   augmentOrderLegsWithPortfolioCoverage,
   computeOrderRisk,
+  signedPayoffRange,
   type ChainOrderLeg,
   type CoveringPortfolioLeg,
   type OrderRisk,
@@ -314,8 +315,10 @@ function summaryFiguresAreFinite(summary: OrderPresentationSummary): boolean {
     summary.marginImpact?.requirement,
     summary.marginImpact?.availableBefore,
     summary.marginImpact?.availableAfter,
-    summary.withHeldLegs?.maxGain,
-    summary.withHeldLegs?.maxLoss,
+    summary.withHeldLegs?.orderBest,
+    summary.withHeldLegs?.orderWorst,
+    summary.withHeldLegs?.spreadBest,
+    summary.withHeldLegs?.spreadWorst,
   ];
   return figures.every(
     (value) => typeof value !== "number" || Number.isFinite(value),
@@ -649,9 +652,11 @@ function buildCoverageNote(
 }
 
 /**
- * Whole-spread figures when held options cover the order. The order-only
- * figures price the held long at $0 (already paid for); the operator also
- * needs the spread's economics with that leg at its cost basis.
+ * Signed best / worst expiry P&L when held options cover the order, for the
+ * order alone (held long already paid for) and for the whole spread (held
+ * long at its cost basis). Signed on purpose: `maxGain` / `maxLoss` clamp
+ * at 0, which shows a spread that loses at every settlement as "max gain
+ * $0" and a locked-in profit as "max loss $0".
  */
 function buildWithHeldLegs(
   augmented: ReturnType<typeof augmentOrderLegsWithPortfolioCoverage>,
@@ -662,27 +667,20 @@ function buildWithHeldLegs(
   // Partial cover leaves a naked residue: the spread is exactly as unbounded
   // as the order, and the Gate 1 warning already owns that case.
   if (orderRisk.maxLossUnbounded || orderRisk.undefinedRiskReason != null) return null;
+  if (orderRisk.maxLoss == null) return null;
+  const bestUnbounded = orderRisk.maxGainUnbounded;
+  const range = (netPremium: number) =>
+    signedPayoffRange(augmented.riskLegs, netPremium, augmented.comboQuantity);
+  const order = range(adjustedNetPremium);
   const adjustment = augmented.heldOptionBasisAdjustment;
-  if (adjustment == null) {
-    return {
-      maxGain: null,
-      maxLoss: null,
-      maxGainUnbounded: false,
-      maxLossUnbounded: false,
-      heldBasisDollars: null,
-    };
-  }
-  const risk = computeOrderRisk(
-    augmented.riskLegs,
-    adjustedNetPremium + adjustment,
-    augmented.comboQuantity,
-  );
+  const spread = adjustment == null ? null : range(adjustedNetPremium + adjustment);
   return {
-    maxGain: risk.maxGain,
-    maxLoss: risk.maxLoss,
-    maxGainUnbounded: risk.maxGainUnbounded,
-    maxLossUnbounded: risk.maxLossUnbounded,
-    heldBasisDollars: adjustment * augmented.comboQuantity * 100,
+    orderBest: bestUnbounded ? null : order.best,
+    orderWorst: order.worst,
+    spreadBest: spread == null || bestUnbounded ? null : spread.best,
+    spreadWorst: spread == null ? null : spread.worst,
+    bestUnbounded,
+    heldBasisDollars: adjustment == null ? null : adjustment * augmented.comboQuantity * 100,
   };
 }
 

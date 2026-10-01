@@ -493,6 +493,25 @@ function legsAreBounded(sameRightLegs: OrderRiskLeg[]): {
 }
 
 /** Exact same-expiry intrinsic extrema at every payoff kink. */
+/**
+ * Signed expiry P&L range in dollars: best and worst outcome across every
+ * settlement, NOT clamped at zero. A combo whose credit exceeds its width
+ * has a positive worst case; one bought above its payoff has a negative
+ * best case. Only meaningful for a bounded, single-expiry combo (callers
+ * check `computeOrderRisk` first); the net-long-call tail is not modelled.
+ */
+export function signedPayoffRange(
+  legs: OrderRiskLeg[],
+  netPremium: number,
+  comboQuantity: number,
+): { best: number; worst: number } {
+  const extrema = intrinsicPayoffExtrema(legs);
+  return {
+    best: (extrema.max - netPremium) * comboQuantity * MULTIPLIER,
+    worst: (extrema.min - netPremium) * comboQuantity * MULTIPLIER,
+  };
+}
+
 function intrinsicPayoffExtrema(legs: OrderRiskLeg[]): { min: number; max: number } {
   const points = [0, ...legs.map((leg) => leg.strike)].filter(
     (value, index, all) => Number.isFinite(value) && value >= 0 && all.indexOf(value) === index,

@@ -53,6 +53,19 @@ function usd(value: number | null, fractionDigits = 2, magnitude = false): strin
   })}`;
 }
 
+/** Signed P&L: "+" for a gain, "-" for a loss, toned to match. */
+function SignedCell({ label, value, unbounded = false }: { label: string; value: number | null; unbounded?: boolean }) {
+  if (unbounded) return <Cell label={label} value="UNBOUNDED" tone="gain" />;
+  const shown = usd(value);
+  return (
+    <Cell
+      label={label}
+      value={value != null && value > 0 ? `+${shown}` : shown}
+      tone={value == null || value === 0 ? undefined : value > 0 ? "gain" : "loss"}
+    />
+  );
+}
+
 function Cell({ label, value, tone }: { label: string; value: string; tone?: "gain" | "loss" | "warn" }) {
   return (
     <div className="ticket-risk-cell">
@@ -116,12 +129,23 @@ export default function TicketRiskBlock({
       </div>
 
       <div className="ticket-risk-grid">
-        <Cell label="MAX GAIN" value={usd(maxGain, 2, true)} tone={maxGain != null ? "gain" : undefined} />
-        <Cell
-          label="MAX LOSS"
-          value={maxLossUnbounded ? "UNBOUNDED" : usd(maxLoss, 2, true)}
-          tone={maxLossUnbounded || maxLoss != null ? "loss" : undefined}
-        />
+        {withHeldLegs != null ? (
+          // Against a held leg the clamped magnitudes mislead: a credit wider
+          // than the spread reads "MAX LOSS $0" when it locks in a gain.
+          <>
+            <SignedCell label="BEST CASE" value={withHeldLegs.orderBest} unbounded={withHeldLegs.bestUnbounded} />
+            <SignedCell label="WORST CASE" value={withHeldLegs.orderWorst} />
+          </>
+        ) : (
+          <>
+            <Cell label="MAX GAIN" value={usd(maxGain, 2, true)} tone={maxGain != null ? "gain" : undefined} />
+            <Cell
+              label="MAX LOSS"
+              value={maxLossUnbounded ? "UNBOUNDED" : usd(maxLoss, 2, true)}
+              tone={maxLossUnbounded || maxLoss != null ? "loss" : undefined}
+            />
+          </>
+        )}
         <Cell label="BREAKEVENS" value={breakevenLabel} />
         <Cell label="P(PROFIT)" value={DASH} />
         <Cell
@@ -138,9 +162,10 @@ export default function TicketRiskBlock({
 
       {withHeldLegs != null && (
         <>
-          {/* MAX GAIN / MAX LOSS above price the held leg at $0 (already paid
+          {/* BEST / WORST CASE above price the held leg at $0 (already paid
               for). These price the resulting spread with that leg at its
-              cost basis. */}
+              cost basis. Signed: a spread that loses everywhere has a
+              negative best case. */}
           <div className="ticket-risk-head ticket-risk-head--spread" data-testid="ticket-risk-spread">
             <span>
               SPREAD · INCL. HELD LEG
@@ -150,16 +175,12 @@ export default function TicketRiskBlock({
             </span>
           </div>
           <div className="ticket-risk-grid">
-            <Cell
-              label="SPREAD MAX GAIN"
-              value={withHeldLegs.maxGainUnbounded ? "UNBOUNDED" : usd(withHeldLegs.maxGain, 2, true)}
-              tone={withHeldLegs.maxGainUnbounded || withHeldLegs.maxGain != null ? "gain" : undefined}
+            <SignedCell
+              label="SPREAD BEST CASE"
+              value={withHeldLegs.spreadBest}
+              unbounded={withHeldLegs.bestUnbounded}
             />
-            <Cell
-              label="SPREAD MAX LOSS"
-              value={withHeldLegs.maxLossUnbounded ? "UNBOUNDED" : usd(withHeldLegs.maxLoss, 2, true)}
-              tone={withHeldLegs.maxLossUnbounded || withHeldLegs.maxLoss != null ? "loss" : undefined}
-            />
+            <SignedCell label="SPREAD WORST CASE" value={withHeldLegs.spreadWorst} />
           </div>
         </>
       )}
