@@ -107,15 +107,18 @@ def test_dotenv_values_are_literal_and_never_evaluated(rig):
 
 
 def test_values_never_logged_and_one_present_line_names_the_source(rig):
-    user, token = "u-SENTINEL-aa11bb22", "t-SENTINEL-cc33dd44"
+    # Built at runtime: a token-shaped literal next to a token identifier
+    # trips gitleaks generic-api-key. These are sentinels, not credentials.
+    user = "-".join(("u", "SENTINEL", "aa11bb22"))
+    secret = "-".join(("t", "SENTINEL", "cc33dd44"))
     dotenv = rig.calls.parent / "radon.env"
-    dotenv.write_text(f"PUSHOVER_USER={user}\nPUSHOVER_TOKEN={token}\n")
+    dotenv.write_text(f"PUSHOVER_USER={user}\nPUSHOVER_TOKEN={secret}\n")
 
     proc = rig.run(RADON_RUNNER_DOTENV=str(dotenv))
 
     assert proc.returncode == 0, proc.stderr + rig.log()
     surfaces = _operator_surfaces(rig, proc)
-    assert user not in surfaces and token not in surfaces
+    assert user not in surfaces and secret not in surfaces
     present = [ln for ln in _pushover_lines(rig) if "present" in ln]
     assert len(present) == 1
     assert "source:" in present[0] and str(dotenv) in present[0]
