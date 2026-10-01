@@ -463,7 +463,9 @@ def _serve_cached(cached: list[dict[str, Any]], *, no_db: bool = False) -> dict[
         raise RuntimeError(
             f"{SERVICE}: IB, Cboe, UW, Robinhood and Yahoo all failed with no cached series"
         )
-    payload = {**build_output(cached, source=NO_SOURCE), "status": STATUS_STALE_SOURCE}
+    # REL-297 / R-716: existing readers gate on missing, not status alone.
+    payload = {**build_output(cached, source=NO_SOURCE),
+               "status": STATUS_STALE_SOURCE, "missing": True}
     through = payload["current"]["date"]
     _log(f"all sources down; re-serving cached series through {through}")
     health_error = {
@@ -519,6 +521,10 @@ def run(
             equity.get(HYG_SYMBOL, {}),
             vix,
         )
+        # REL-297 / R-716: nonempty transports are not an aligned sample.
+        # A disjoint date set must not refresh the old cache as healthy.
+        if not fresh:
+            return _serve_cached(cached, no_db=no_db)
         series = merge_series(cached, fresh)
         new_rows = diff_new_rows(cached, series)
         if not new_rows:

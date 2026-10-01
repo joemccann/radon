@@ -136,3 +136,12 @@ Fetcher rehydrates from its own table (R-123).
 `SuccessExitStatus=75`, `TimeoutStartSec=960`) + `.timer` (22:25 UTC).
 Register in `setup-vps.sh`, `test_systemd_services.py`, and
 `installed-units.sha256`.
+
+### Unavailable aligned data
+
+REL-297 / R-716: every cycle requires at least one date shared by SHY, HYG
+and VIX. Disjoint source dates use the same unavailable path as a source
+outage: preserve cached history, record error health, and publish
+`missing: true` with `status: stale_source`. Existing readers suppress a
+current regime for that reserve. Without a cached series the cycle fails.
+An unchanged but aligned session still produces the normal weekend heartbeat.
