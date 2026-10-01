@@ -66,6 +66,8 @@ Knowledge distill (`scripts/knowledge/distill.py` → `complete_text_json`) and 
 | nvidia | `NVIDIA_API_KEY` (always OK) | — | First-class before Cerebras when keyed. **Text** default `nvidia/nemotron-3-super-120b-a12b` (override `NVIDIA_TEXT_MODEL` / `NVIDIA_MODEL`). **Vision** default `meta/llama-3.2-90b-vision-instruct`; on timeout/error falls back to `meta/llama-3.2-11b-vision-instruct` (`NVIDIA_VISION_MODEL`). |
 | cerebras | `CEREBRAS_API_KEY` | — | Last rung. Leave paused; prepaid auto-reload stays OFF. |
 
+Cerebras is the last resort in every order, including a caller's `providers=` override: `_run_ladder` moves it to the end, so nothing is tried after it and its failure exhausts the ladder. `scripts/tests/test_cerebras_last_rung.py` pins this for the shared, CTA vision and SLM tagger orders and for the nightly loops' `fx:cerebras` rung.
+
 Hetzner hosts that only mount prepaid Anthropic/XAI/OpenAI keys will skip those rungs and use NVIDIA when keyed — they will not burn prepaid wallets then fall through to Cerebras. Mount subscription tokens for fuller band coverage.
 
 Auth-file API keys obey the same prepaid opt-in as environment keys. Codex
