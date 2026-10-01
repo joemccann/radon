@@ -27,7 +27,7 @@ if [[ "${RADON_DOCKER_GW_TEST_MODE:-0}" == "1" ]]; then
   DOCKER="${RADON_TEST_DOCKER:?test docker is required}"
   COMPOSE_FILE="${RADON_TEST_COMPOSE_FILE:?test compose file is required}"
   COMPOSE_ENV_FILE="${RADON_TEST_COMPOSE_ENV_FILE:?test compose env file is required}"
-  HOLD_FILE="${RADON_TEST_OPERATOR_HOLD_PATH:?test operator hold path is required}"
+  HOLD_FILE="${RADON_TEST_OPERATOR_HOLD_PATH:-/nonexistent/ib-operator-hold.json}"
 else
   if (( EUID != 0 )); then
     echo "radon-docker-gw must run as root" >&2

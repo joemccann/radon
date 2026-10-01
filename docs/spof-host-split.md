@@ -215,6 +215,14 @@ Do not put the broker in Falkenstein. Do not run two Gateways. Do not
 restore a broker snapshot beside a live broker. Do not start a standby
 FastAPI pool against a live Gateway.
 
+## IBKR operator hold
+
+The broker daemon (`scripts/ib_gateway_remote/serve.py`) answers `start` and
+`restart` with `423 OPERATOR_HOLD`, without running the helper, while
+`radon ib release` holds the Gateway out of the operator's shared IBKR
+login. Its `/status` payload carries `operator_hold`. `stop` and
+`reset-lease` stay open. Runbook: `docs/ib-gateway-recovery.md`.
+
 ## Never
 
 - Kubernetes / Compose-as-OS / hot second IBKR username as HA.

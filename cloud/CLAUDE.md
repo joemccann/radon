@@ -59,6 +59,12 @@ verb listed in full in `sudoers.d/radon-ops` with no wildcard. Callers:
 `ib-gateway-control.sh` (still `User=radon`, so the 2FA lease and guard files
 under `/var/lib/radon` keep their ownership) and `scripts/jvm_forensics.py`.
 
+`compose-up` refuses with exit 73 while the IBKR operator hold
+(`/var/lib/radon/ib-operator-hold.json`) is set, and a root-only `kill` verb
+(not in sudoers) backs `radon ib release`. `setup-vps.sh install_ib_hold`
+installs that command root-owned as `/usr/local/sbin/radon-ib-hold`; runbook
+in `docs/ib-gateway-recovery.md`.
+
 The compose body it runs lives at `/etc/radon/ib-gateway-compose.yml`, a
 control-plane artifact, NOT `cloud/docker-compose.yml` in the checkout: root
 acting on a file its caller can rewrite is the same escalation with extra
