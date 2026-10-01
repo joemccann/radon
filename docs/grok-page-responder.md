@@ -133,13 +133,14 @@ pickup refuses:
 - anything at all unless `GROK_PAGE_AUTOPUSH` is truthy in the pickup job's
   own environment (the plist ships `0`). Off, a fire returns
   `{"action": "disabled"}` before touching either remote;
-- a branch whose commit messages, added diff lines or paths, or PR
-  title/body carry a private identifier (`scripts/ir_push_gate.py`): IB
-  account ids (`U`/`DU`/`F` + 6-8 digits), numeric Flex exec ids (10+
+- a branch whose commit messages, added lines or paths in any commit
+  (including merge resolutions), or PR title/body carry a private identifier
+  (`scripts/ir_push_gate.py`): IB account ids (`U`/`DU`/`F` + 6-8 digits), numeric Flex exec ids (10+
   digits), dotted-hex IB exec ids, or a specific credential shape from
   `credential_redaction`. The branch stays local, the reason (kind and
   location, never the value) is logged and sent to Pushover, and nothing is
-  redacted in place;
+  redacted in place. Removing an identifier in a later commit does not
+  make the earlier history safe to publish;
 - running at all from a clone that is behind `origin/main` (stale pickup
   code).
 

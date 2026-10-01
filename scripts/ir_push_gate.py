@@ -117,9 +117,11 @@ def scan_commit_range(
 ) -> list[str]:
     """Findings for everything ``ref`` would publish on top of ``base``.
 
-    REL-296 / R-715: scan every unpublished commit, not just the net diff.
-    An identifier added then removed is still reachable in published history.
-    Removed lines alone are already public on a parent and need no new finding.
+    Scans each commit message (subject, body and trailers) and the added
+    lines and paths of every commit, including merge resolutions. Cleaning
+    the tip does not remove private data from the history being published.
+    REL-296 / R-715: an identifier added then removed is still reachable in
+    published history. Removed lines alone are already public on a parent.
     """
     run = runner or _default_runner
     repo = Path(repo)
@@ -148,11 +150,22 @@ def scan_commit_range(
          "--text", "--unified=0", f"{fork}..{ref}"],
         run,
     )
-    for path, lines in _added_lines_by_file(patch).items():
+    files = _added_lines_by_file(patch)
+    # Binary additions and pure renames have no +++ text-patch header.
+    paths = _git(
+        repo,
+        ["log", "--format=", "--name-only", "--diff-merges=separate",
+         "--no-renames", "--diff-filter=AM", f"{fork}..{ref}"],
+        run,
+    )
+    for path in paths.splitlines():
+        if path:
+            files.setdefault(path, [path])
+    for path, lines in files.items():
+        # A filename can itself be the private value. Never echo it.
+        safe_path = "[private path]" if find_private_identifiers(path.replace("/", "\n")) else path
         for kind in find_private_identifiers("\n".join(lines)):
-            # A filename can itself be the private value. Never echo it.
-            location = "(redacted path)" if find_private_identifiers(path.replace("/", "\n")) else path
-            findings.append(f"{kind} in diff of {location}")
+            findings.append(f"{kind} in diff of {safe_path}")
     return findings
 
 

@@ -10794,3 +10794,94 @@ Each closing cloud FAILED list is empty. Against the actual detached-base list: 
 Targeted coverage: the 20 report tests pass; `_pt_bounds`, `_hrana`, and `fetch_rows` each have 100% measured statement and branch coverage. Whole-module combined statement/branch coverage is 84%; no threshold or measurement exclusion changed.
 
 Review: only two test files change executable behavior. Existing report tests are preserved, the runtime default assertion is retained, and an environment-dependent skip is removed. No product code, generated codemap, reliability ledger, live connection, order, credential file, or service is changed. Audit/transport mutation logs and every full gate were captured before reading tails. Final focused/hygiene and exact-head CI receipts are retained on rolling issue #83. Browser execution stays with CI; no local browser screenshot or 390px check is claimed.
+
+
+## Delta audit 2026-10-01
+
+Audited `e3063f0c16ddcdead832df49553c6035e6501597..731716e54b1e85e98b591cbd79e9d18adf7a1ec7`: 20 commits, 160 changed paths. The newest trusted collaborator comment on rolling issue #83 supplied the checkpoint. No open `testing/` PR existed at intake. IDs continue after T-518.
+
+Read the architecture index and incoming codemap edges, then confirmed direct, dynamic and subprocess consumers with `rg`. The graph predates the newest RSI, CREDIT/VIX and incident-response modules. Inverse review covered actual BAG legs versus aggregate journal rows, structured order errors, CLI migration arguments, rotated authentication keys, responder missing-binary recovery, runtime environment failures, model aliases, relay row budgets, and regime route/cache/cadence contracts. The verified gaps below execute the changed boundaries; no live service was contacted.
+
+### T-519 — P1 — a clean branch tip hides private data in published history
+
+At the audited base, `scripts/ir_push_gate.py:138` scans only the net merge-base-to-tip diff. `scripts/tests/test_ir_push_gate.py:114` now publishes a synthetic identifier in an intermediate commit and removes it before the tip; the old gate accepts it. Deleted diagnostic files and merge-only resolutions also escape. The pickup integration at `scripts/tests/test_grok_fix_pickup.py:640` proves the old scanner permits a push to a local fake origin.
+
+Acceptance: inspect added lines and paths from every outgoing commit, including merge resolutions; refuse before the fake push and PR creation even when the tip is clean. Existing clean branches and removal of already-public base data must still pass. Diagnostics must not expose the synthetic value.
+
+### T-520 — P1 — workflow security tests accept guards that do not restrict execution
+
+At the audited base, `scripts/tests/test_pr_workflows_hold_no_secrets.py:55` and `:153` accept a guard substring even under negation or an unrestricted OR arm. The dependency inference at `:58` also treats a guarded prerequisite as protection when `always()` or another status override lets the secret-bearing dependent run after that prerequisite is skipped. Ten new cases fail against the old checker; repository workflows themselves are not changed.
+
+Acceptance: a positive main/push guard must be required by every possible OR arm; unknown or negated atoms confer no protection. Dependency inheritance must require implicit or explicit success. Quoted guard text must not count as code, and valid nested conjunctions/disjunctions must remain accepted.
+
+### T-521 — P2 — depth tests inspect a constant without executing the broker request
+
+`web/tests/book-montage-fill-height.test.ts:14` reads the 40-row constant and a reducer declaration. Hardcoding 10 at the actual request (`scripts/ib_realtime_server.js:1696`), truncating the reducer (`:1711`), or dropping L2 delivery (`:2791`) leaves all three old tests green. Each mutation fails the new behavior test.
+
+Acceptance: execute the actual relay declarations and registered IB callbacks against fake boundaries, assert 40 SMART equity rows and 10 native futures rows at both request and subscriber delivery, and retain the cap, immutable snapshots, disabled/disconnected gates and unknown-request handling. Do not copy production relay logic into the fixture.
+
+### T-522 — P2 — CREDIT/VIX tests replace the broker leg they intend to protect
+
+`scripts/tests/test_credit_vix.py:359` and `:370` inject `fetch_ib` functions instead of executing `scripts/fetch_credit_vix.py:129`. The 41 existing tests accept a stock contract instead of an index, a missing disconnect, and an unlimited historical request. The new fake-broker tests reject all three mutations.
+
+Acceptance: execute the real leg without a socket; assert index qualification, history arguments and bounded waits, authenticated/unknown/unavailable gateway behavior, connection refusal, missing driver, qualification/history failures, empty data and cleanup. The production source remains unchanged when restored.
+
+### T-523 — P1 — refusal diagnostics repeat a private identifier from a filename
+
+At the audited base, `scripts/ir_push_gate.py:143` includes the raw path in the refusal. `scripts/grok_fix_pickup.py:406` forwards that text to the alert and result. A local fixture with a synthetic account identifier only in its filename is correctly refused but echoes that identifier; `scripts/tests/test_ir_push_gate.py:149` fails against this behavior.
+
+Acceptance: keep the refusal and identifier kind, suppress a private path in diagnostics, and preserve useful clean paths. No history or file is rewritten and no private value is sent to an alert.
+
+### T-524 — P1 — binary additions and pure renames bypass private-path checks
+
+At the audited base, `scripts/ir_push_gate.py:101` discovers paths only through `+++` text-patch headers. Git emits neither header for a binary addition or a pure rename. `scripts/tests/test_ir_push_gate.py:164` reproduces both with a synthetic private filename; both are accepted even after the history and safe-diagnostic fixes.
+
+Acceptance: independently enumerate added/modified paths from every outgoing commit, including binary additions and renames, and refuse their private identifiers without echoing the path. Existing removal-only behavior must remain accepted.
+
+### Standing inventory and gate review
+
+- CI's recursive Python shards (`.github/workflows/ci.yml:342`) and Vitest includes retain reachability for the changed tests. The Python 56 and web 75/71/65 coverage ratchets and their measurement exclusions are unchanged; the delta adds no skip/xfail or blanket exclusion.
+- Browser holdouts are explicit: CREDIT/VIX (`web/e2e/ci-curation-ledger.txt:1`), RSI (`:115`) and clear-research (`:410`). Demo workstation remains explicitly invoked by CI (`.github/workflows/ci.yml:964`), and keyless setup has an isolated job (`:967`). No local browser/server is available; no screenshot or 390px verification is claimed locally.
+- T-435 is DONE upstream in PR #816, merge `2640fd61cd7d016e42deeb08ebea7a44d8a2901c`. `web/e2e-setup-gate/setup-gate.spec.ts:5` verifies the real 307 `/portfolio` to `/setup` redirect without the authless header, plus browser navigation and API setup refusal. Successful CI run 36737302600/job 109962391922 at head `8fc11512715e2e26a08956c89a2b5bb1099af223` records the actual Location and 1 passed (3.1s), not a skipped case.
+- Re-triaged TEST_LOG and NEW_FINDINGS: T-493/T-495/T-512/T-514/T-515/T-516/T-517/T-518 are merged. T-130 and T-510 were closed in trusted earlier checkpoints. Historical Day Move/calendar notes map to T-210/T-386, timestamp notes to T-217, and the old payload-contract failure to T-079. The six constructor sites at `scripts/tests/test_service_registration_completeness.py:488` remain a bounded static-analysis inventory, not a newly reproduced defect. No carried finding remains unassigned.
+
+Audited through: 731716e54b1e85e98b591cbd79e9d18adf7a1ec7 on 2026-10-01 — 6 new findings
+
+## Remediation 2026-10-01
+
+**T-519 — DONE.** Scan every outgoing commit patch, including merge resolutions, rather than only the final tree diff. Red: three scanner regressions and one local-pickup integration fail in all three delta repetitions. Green: the scanner/pickup files pass with the refusal still occurring before push and PR creation; clean-base removals remain accepted. Maintained responder documentation now describes the history boundary.
+
+**T-520 — DONE.** The security checker now conservatively proves positive guard implication across AND/OR expressions and requires success before inheriting a prerequisite's guard. Red: six direct-guard bypasses and four status-override bypasses, repeated three times. Green: all 47 workflow-security tests, including quoted-text controls and valid nested guards. No actual workflow or secret is modified.
+
+**T-521 — DONE.** Added `web/tests/relay-depth-request-behavior.test.ts:10`, evaluating actual AST-selected relay declarations and actual depth reducers without starting sockets. Request, reducer and delivery mutations each produce 1 failed / 7 passed; the original three tests accept each defect. Restored source: 8 passed across both files. Production relay code is unchanged.
+
+**T-522 — DONE.** Added `scripts/tests/test_credit_vix_ib_boundary.py:17` fake broker fixture. Stock-contract mutation: 1 failed / 55 passed; missing disconnect: 11 failed / 45 passed; unlimited history timeout: 1 failed / 55 passed. The original 41 tests accept all three defects. Restored source: 56 passed; `fetch_ib_vix` and its `_fetch` coroutine each measure 100% statement and branch coverage (whole module 82%).
+
+**T-523 — DONE.** Replace a private diagnostic path with `[private path]` while preserving the identifier kind and refusal. Red: 1 failed / 41 passed. Green: 42 scanner cases and the pickup integration pass. This changes diagnostic text only; branch content remains untouched.
+
+**T-524 — DONE.** Enumerate commit path metadata independently of text patches with rename detection disabled and an added/modified filter. Red: 2 failed / 42 passed (binary addition and pure rename). Green: 44 scanner cases; combined publication, security and broker gate 185 passed. This inspects filenames, not binary file contents.
+
+### Verification 2026-10-01
+
+Standing gates before fixes: Python 13407 passed / 2 skipped / 23 subtests; Vitest 1038 files / 10295 passed; cloud 2400 passed / 7 skipped. All full outputs were captured before inspection.
+
+Delta repetitions execute all 28 changed Python test files, 17 changed Vitest files and six changed cloud files. Each of three repetitions reports Python 14 failed / 887 passed, Vitest 463 passed, cloud 739 passed. All 14 Python failures are the deliberately added T-519/T-520 red regressions; no pre-existing test fails. The three closing full rounds also repeat these files after repair. Browser repetition is assigned to CI; held-out specs are not represented as executed.
+
+Focused final tree: 185 Python tests passed, 8 depth tests passed, TypeScript `tsc --noEmit` passed. Final targeted coverage: publication gate 95%; CREDIT/VIX broker leg and coroutine each 100% statement/branch (138 tests passed in the coverage run). No threshold, exclusion, timeout or existing assertion was weakened.
+
+Host-only toolchain: Python 3.13 venv with pytest-asyncio/xdist, frozen Bun installs in root/web, Node 26.10.0, and Homebrew Bash/OpenSSL/Caddy on gate PATH. Nine audited JSON and three YAML files parsed; three audited shell scripts passed `bash -n`. The detached-base cloud comparison and three closing-round receipts follow below.
+
+Detached base `731716e5` cloud gate: 2400 passed / 7 skipped in 803.64s. The sorted FAILED list is empty under the same Homebrew toolchain PATH.
+
+
+### Three closing rounds 2026-10-01
+
+| Round | Python | Vitest | Cloud |
+|---|---|---|---|
+| 1 | 13448 passed, 2 skipped, 43 warnings, 23 subtests passed in 279.44s (0:04:39) | Tests  10300 passed (10300) | 2400 passed, 7 skipped in 711.91s (0:11:51) |
+| 2 | 13448 passed, 2 skipped, 43 warnings, 23 subtests passed in 279.13s (0:04:39) | Tests  10300 passed (10300) | 2400 passed, 7 skipped in 703.06s (0:11:43) |
+| 3 | 13448 passed, 2 skipped, 43 warnings, 23 subtests passed in 276.22s (0:04:36) | Tests  10300 passed (10300) | 2400 passed, 7 skipped in 704.37s (0:11:44) |
+
+All three closing cloud FAILED lists are empty. Each comparison against the actual detached-base list has zero additions and zero removals. No isolated rerun or baseline exception was needed.
+
+Review: six verified findings have red/green evidence. Only the incident-response publication gate changes production behavior; broker and relay sources are restored unchanged. Existing assertions are retained and no skip, xfail, tolerance, timeout, coverage threshold or exclusion is weakened. Generated codemap and reliability ledgers are untouched. Focused checks run again before each finding commit. Exact-head CI/browser and notification receipts are recorded externally on rolling issue #83 so recording them does not change the tested head.
