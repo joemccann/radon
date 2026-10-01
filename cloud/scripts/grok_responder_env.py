@@ -30,6 +30,9 @@ from pathlib import Path
 REQUIRED = ("TURSO_DB_URL", "PUSHOVER_USER", "PUSHOVER_TOKEN")
 OPTIONAL = ("GH_TOKEN",)
 TOKEN_SOURCE = "TURSO_RESPONDER_AUTH_TOKEN"
+# #844 name. Accepted only when TOKEN_SOURCE is empty. Never fall back to
+# production TURSO_AUTH_TOKEN.
+TOKEN_SOURCE_ALIAS = "GROK_RESPONDER_TURSO_AUTH_TOKEN"
 TOKEN_CONSUMER = "TURSO_AUTH_TOKEN"
 MISSING_TOKEN_WARNING = (
     "WARNING: TURSO_RESPONDER_AUTH_TOKEN missing from production env; "
@@ -71,14 +74,22 @@ def _unquote(value: str) -> str:
     return value
 
 
+def _scoped_token(prod: dict[str, str]) -> str:
+    for key in (TOKEN_SOURCE, TOKEN_SOURCE_ALIAS):
+        raw = prod.get(key, "")
+        if _unquote(raw).strip():
+            return raw
+    return ""
+
+
 def build(prod_text: str, existing_text: str | None) -> str:
     prod = parse_env(prod_text)
     missing = [key for key in REQUIRED if not prod.get(key)]
     if missing:
         raise SystemExit("missing in production env: " + ", ".join(missing))
     lines = [f"{key}={prod[key]}" for key in REQUIRED]
-    raw_token = prod.get(TOKEN_SOURCE, "")
-    if _unquote(raw_token).strip():
+    raw_token = _scoped_token(prod)
+    if raw_token:
         lines.append(f"{TOKEN_CONSUMER}={raw_token}")
     else:
         print(MISSING_TOKEN_WARNING, file=sys.stderr)

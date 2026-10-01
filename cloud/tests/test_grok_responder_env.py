@@ -195,6 +195,28 @@ def test_token_values_never_printed(tmp_path, capsys):
         assert secret not in printed
 
 
+def test_scoped_responder_turso_token_replaces_the_full_access_one(tmp_path):
+    # #844 name still works when TURSO_RESPONDER_AUTH_TOKEN is unset.
+    prod = PROD + "GROK_RESPONDER_TURSO_AUTH_TOKEN=scoped-turso-token\n"
+    env = _run(tmp_path, prod, EXISTING)
+    assert env["TURSO_AUTH_TOKEN"] == "scoped-turso-token"
+    assert "GROK_RESPONDER_TURSO_AUTH_TOKEN" not in env
+    assert "new-turso-token" not in (tmp_path / "radon-page-responder.env").read_text()
+
+
+def test_new_source_key_wins_over_the_844_alias(tmp_path):
+    prod = (
+        PROD
+        + "TURSO_RESPONDER_AUTH_TOKEN=scoped-responder-token\n"
+        + "GROK_RESPONDER_TURSO_AUTH_TOKEN=scoped-turso-token\n"
+    )
+    env = _run(tmp_path, prod, EXISTING)
+    assert env["TURSO_AUTH_TOKEN"] == "scoped-responder-token"
+    dest = (tmp_path / "radon-page-responder.env").read_text(encoding="utf-8")
+    assert "scoped-turso-token" not in dest
+    assert "new-turso-token" not in dest
+
+
 def test_managed_keys_are_reset_not_preserved(tmp_path):
     env = _run(tmp_path, PROD, EXISTING)
     assert env["GROK_PAGE_NO_DOTENV"] == "1"

@@ -72,9 +72,11 @@ mode 600, owner radon). Secrets come only from the production env; an old
 value in the file is never kept. The Turso token is
 `TURSO_RESPONDER_AUTH_TOKEN` from `/etc/radon/env`, copied into the
 stripped file as consumer-side `TURSO_AUTH_TOKEN`. Production
-`TURSO_AUTH_TOKEN` is never copied. If the scoped key is missing or empty,
-the dest file has no Turso token, setup prints one WARNING naming that key
-(never a value), and the responder skips Turso-dependent steps
+`TURSO_AUTH_TOKEN` is never copied (the #844 fallback is gone).
+`GROK_RESPONDER_TURSO_AUTH_TOKEN` is still accepted when the new key is
+empty. If both scoped keys are missing or empty, the dest file has no Turso
+token, setup prints one WARNING naming `TURSO_RESPONDER_AUTH_TOKEN` (never
+a value), and the responder skips Turso-dependent steps
 (`"skipped": "turso_token_missing"`) rather than crashing. The operator flags
 `GROK_PAGE_RESPONDER`, `GROK_PAGE_AUTOSHIP`, `GROK_PAGE_AUTOPUSH` and
 `GROK_PAGE_MAX_ACTIONS_PER_DAY` are carried over from the current file, so a
@@ -95,7 +97,9 @@ Production database marker in repo config: `radon-joemccann`
 `{dbname}-{org}.{region}.turso.io`, so the database name is `radon` in
 org `joemccann`. Confirm with `turso db list` before minting.
 
-Verified 2026-10-01 against Turso docs:
+Verified 2026-10-01 against Turso docs. Current flags are
+`--read-only` / `-r` and `--expiration` / `-e` only. There is no
+documented `-p` table ACL on `turso db tokens create`.
 
 ```bash
 # CLI: https://docs.turso.tech/cli/db/tokens/create
