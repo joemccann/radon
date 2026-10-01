@@ -523,6 +523,12 @@ class TestIBGateway:
         svc = unit(self.FILENAME)["Service"]
         assert svc["workingdirectory"] == "/home/radon/radon/cloud"
 
+    def test_boot_under_operator_hold_is_not_a_failure(self, unit):
+        # The helper exits 73 while `radon ib release` holds the Gateway out.
+        # A failed unit would page and burn the DUR-02 start-limit brake.
+        svc = unit(self.FILENAME)["Service"]
+        assert svc["successexitstatus"] == "73"
+
     def test_exec_start_uses_gateway_control_helper(self, unit):
         svc = unit(self.FILENAME)["Service"]
         assert svc["execstart"] == "/usr/local/bin/radon-ib-gateway-control start"
