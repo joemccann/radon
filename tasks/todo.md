@@ -8756,3 +8756,13 @@ Review: seven inherited findings repaired in separate commits with repeated seri
 - [x] T1 depends_on: [] Isolated keyless compile-mode build (`.next-setup-gate`, skip production trace audit) + Playwright config/spec outside `web/e2e/` + vitest contract.
 - [x] T2 depends_on: [T1] New non-gating `e2e-setup-gate` CI job + `test_ci_setup_gate_job.py` pin.
 - [ ] T3 depends_on: [T2] Ready PR vs main. Exact-head CI green. No merge.
+
+## Nightly reliability 2026-10-01
+
+- [x] T1 depends_on: [] Install toolchain, recover trusted checkpoint, inspect open PRs, create tonight’s branch.
+- [x] T2 depends_on: [T1] Audit main delta and codemap callers; re-triage standing candidates and safety sweeps.
+- [ ] T3 depends_on: [T2] Repair verified findings serially with red/green fault injection and focused gates.
+- [ ] T4 depends_on: [T3] Run drills, validate changes, publish substantive draft, watch exact-head CI.
+- [ ] T5 depends_on: [T4] Post one durable issue comment and record final review.
+
+Review: pending; fake-only verification, full suites and Vitest assigned to CI.

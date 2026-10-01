@@ -57,3 +57,7 @@ Every UW-backed indicator shares one daily-cap breaker,
 `UwEmbargo(service, path_source)`; do not re-implement the reset arithmetic.
 
 The Vol/Skew MR scanner measures 25-delta put-minus-call IV history for one listed expiry nearest 30 DTE. Missing history is shown explicitly and cannot satisfy the skew gate; see [source and comparability rules](vol-skew-mr.md#data-sources-per-ticker). The per-ticker flow report (`/flow-analysis/<TICKER>`) embeds the same snapshot as its `skew` block; see [shared skew snapshot](vol-skew-mr.md#shared-skew-snapshot).
+
+CREDIT/VIX unavailable-source behavior is documented in
+[credit-vix.md](credit-vix.md#unavailable-aligned-data): a missing three-leg
+date intersection preserves history but cannot publish a current regime.

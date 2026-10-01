@@ -71,7 +71,6 @@ from api.ib_gateway import (
 from api import ib_gateway
 from api import services as admin_services
 from clients.ib_client import DEFAULT_GATEWAY_PORT
-from api.pool_order_manage import pool_cancel_order, pool_modify_order
 from api.order_audit import record_order_event
 from api.auth import verify_clerk_jwt, verify_clerk_bearer, verify_api_key, is_trusted_local_request, is_private_net_probe
 from api.ws_ticket import create_ticket, validate_ticket

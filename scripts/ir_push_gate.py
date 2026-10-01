@@ -103,7 +103,7 @@ def _added_lines_by_file(patch: str) -> dict[str, list[str]]:
             current = name[2:] if name.startswith("b/") else name
             files.setdefault(current, [current])  # the path itself is published
             continue
-        if line.startswith("+") and not line.startswith("+++"):
+        if line.startswith("+"):
             files.setdefault(current, []).append(line[1:])
     return files
 
@@ -117,8 +117,9 @@ def scan_commit_range(
 ) -> list[str]:
     """Findings for everything ``ref`` would publish on top of ``base``.
 
-    Scans each commit message (subject, body and trailers) and every added
-    diff line and path. Removed lines are already public on the base.
+    REL-296 / R-715: scan every unpublished commit, not just the net diff.
+    An identifier added then removed is still reachable in published history.
+    Removed lines alone are already public on a parent and need no new finding.
     """
     run = runner or _default_runner
     repo = Path(repo)
@@ -133,14 +134,25 @@ def scan_commit_range(
         sha, _, message = record.strip("\n").partition("\x00")
         for kind in find_private_identifiers(message):
             findings.append(f"{kind} in commit message {sha.strip()[:12]}")
+    # Empty files have no +++ header; inspect NUL-delimited names separately.
+    names = _git(repo, ["log", "--format=", "--name-only", "-z",
+                        "--diff-merges=separate", "--no-renames", "--diff-filter=ACM",
+                        f"{fork}..{ref}"], run)
+    for path in names.split("\0"):
+        for kind in find_private_identifiers(path.replace("/", "\n")):
+            findings.append(f"{kind} in filename (redacted path)")
     patch = _git(
         repo,
-        ["diff", "--no-color", "--no-ext-diff", "--unified=0", f"{fork}..{ref}"],
+        ["log", "--format=", "--patch", "--diff-merges=separate",
+         "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames",
+         "--text", "--unified=0", f"{fork}..{ref}"],
         run,
     )
     for path, lines in _added_lines_by_file(patch).items():
         for kind in find_private_identifiers("\n".join(lines)):
-            findings.append(f"{kind} in diff of {path}")
+            # A filename can itself be the private value. Never echo it.
+            location = "(redacted path)" if find_private_identifiers(path.replace("/", "\n")) else path
+            findings.append(f"{kind} in diff of {location}")
     return findings
 
 
@@ -171,7 +183,9 @@ def check_publish(
 ) -> None:
     """Raise :class:`IrPushRefused` unless this push/PR may go public."""
     require_autopush(env)
-    findings: list[str] = []
+    findings: list[str] = [
+        f"{kind} in branch name" for kind in find_private_identifiers((ref or "").replace("/", "\n"))
+    ]
     if repo is not None and base and ref:
         findings += scan_commit_range(repo, base, ref, runner=runner)
     findings += scan_pr_text(title=title, body=body)
