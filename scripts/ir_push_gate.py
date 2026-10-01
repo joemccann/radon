@@ -39,9 +39,15 @@ PRIVATE_ID_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
             re.IGNORECASE,
         ),
     ),
-    # Not after "/": GitHub Actions run ids in CI URLs are 11 digits.
-    ("flex_exec_id", re.compile(r"(?<![0-9A-Za-z./])\d{10,}(?![0-9A-Za-z])")),
+    # GitHub Actions run/job ids (11 digits) are exempt only inside a full
+    # CI URL, which is removed before this pattern runs (_CI_URL).
+    ("flex_exec_id", re.compile(r"(?<![0-9A-Za-z.])\d{10,}(?![0-9A-Za-z])")),
 )
+_CI_URL = re.compile(
+    r"https://github\.com/[\w.-]+/[\w.-]+/actions/runs/\d+"
+    r"(?:/(?:job|attempts)/\d+)?(?![\w/])"
+)
+_SHA = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 Runner = Callable[..., object]
 
@@ -68,13 +74,21 @@ def find_private_identifiers(text: str) -> list[str]:
     """Kinds of private identifier present in ``text`` (never the values)."""
     found: list[str] = []
     for label, pattern in PRIVATE_ID_PATTERNS:
-        if pattern.search(text or ""):
+        subject = _CI_URL.sub("", text or "") if label == "flex_exec_id" else text or ""
+        if pattern.search(subject):
             found.append(label)
     for label in find_credential_shapes(text or ""):
         kind = f"credential {label}"
         if kind not in found:
             found.append(kind)
     return found
+
+
+def _safe_path(path: str) -> str:
+    """``path`` with any private identifier in it masked, for findings."""
+    if not find_private_identifiers(path):
+        return path
+    return "[private path]"
 
 
 def _default_runner(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -88,7 +102,12 @@ def _default_runner(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
 
 
 def _git(repo: Path, argv: list[str], runner: Runner) -> str:
-    proc = runner(["git", *argv], cwd=str(repo))
+    try:
+        proc = runner(["git", *argv], cwd=str(repo))
+    except UnicodeDecodeError:
+        raise IrPushRefused(
+            f"cannot scan the branch: git {argv[0]} output is not text"
+        ) from None
     if getattr(proc, "returncode", 1) != 0:
         raise IrPushRefused(f"cannot scan the branch: git {argv[0]} failed")
     return getattr(proc, "stdout", "") or ""
@@ -97,7 +116,9 @@ def _git(repo: Path, argv: list[str], runner: Runner) -> str:
 def _added_lines_by_file(patch: str) -> dict[str, list[str]]:
     files: dict[str, list[str]] = {}
     current = "(unknown file)"
-    for line in patch.splitlines():
+    # split("\n"), not splitlines(): a \x1c or \u2028 inside an added line
+    # must not start a new line that lacks the "+" marker.
+    for line in patch.split("\n"):
         if line.startswith("+++ "):
             name = line[4:].strip()
             current = name[2:] if name.startswith("b/") else name
@@ -117,11 +138,10 @@ def scan_commit_range(
 ) -> list[str]:
     """Findings for everything ``ref`` would publish on top of ``base``.
 
-    Scans each commit message (subject, body and trailers) and the added
-    lines and paths of every commit, including merge resolutions. Cleaning
-    the tip does not remove private data from the history being published.
-    REL-296 / R-715: an identifier added then removed is still reachable in
-    published history. Removed lines alone are already public on a parent.
+    Scans each commit message (subject, body and trailers) and every line
+    and path any commit in the range adds, including merge resolutions.
+    Cleaning the tip does not remove private data from the history being
+    published (REL-296 / R-715). Removed lines are already public on a parent.
     """
     run = runner or _default_runner
     repo = Path(repo)
@@ -129,43 +149,56 @@ def scan_commit_range(
     if not fork:
         raise IrPushRefused(f"cannot scan the branch: no merge base with {base}")
     findings: list[str] = []
+    # The pushed branch name is public too.
+    for kind in find_private_identifiers(ref):
+        findings.append(f"{kind} in branch name")
     log = _git(repo, ["log", "--format=%H%x00%B%x1e", f"{fork}..{ref}"], run)
     for record in log.split("\x1e"):
         if not record.strip():
             continue
         sha, _, message = record.strip("\n").partition("\x00")
+        if not _SHA.fullmatch(sha.strip()):
+            # A message carrying the record separator would otherwise
+            # smuggle text past the scan as a fake sha field.
+            raise IrPushRefused("cannot scan the branch: unparseable commit log")
         for kind in find_private_identifiers(message):
             findings.append(f"{kind} in commit message {sha.strip()[:12]}")
-    # Empty files have no +++ header; inspect NUL-delimited names separately.
-    names = _git(repo, ["log", "--format=", "--name-only", "-z",
-                        "--diff-merges=separate", "--no-renames", "--diff-filter=ACM",
-                        f"{fork}..{ref}"], run)
-    for path in names.split("\0"):
-        for kind in find_private_identifiers(path.replace("/", "\n")):
-            findings.append(f"{kind} in filename (redacted path)")
+    # Every commit's own patch, not one aggregate diff: pushing publishes
+    # each intermediate blob, so content added then removed still counts.
+    # --text and --no-textconv: a branch-authored .gitattributes (-diff,
+    # binary, a textconv driver) must not hide what the blob publishes.
     patch = _git(
         repo,
-        ["log", "--format=", "--patch", "--diff-merges=separate",
-         "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames",
-         "--text", "--unified=0", f"{fork}..{ref}"],
+        [
+            "log", "-p", "-m", "--format=", "--no-color", "--no-ext-diff",
+            "--no-textconv", "--text", "--no-renames", "--unified=0",
+            f"{fork}..{ref}",
+        ],
         run,
     )
-    files = _added_lines_by_file(patch)
-    # Binary additions and pure renames have no +++ text-patch header.
-    paths = _git(
-        repo,
-        ["log", "--format=", "--name-only", "--diff-merges=separate",
-         "--no-renames", "--diff-filter=AM", f"{fork}..{ref}"],
-        run,
-    )
-    for path in paths.splitlines():
-        if path:
-            files.setdefault(path, [path])
-    for path, lines in files.items():
-        # A filename can itself be the private value. Never echo it.
-        safe_path = "[private path]" if find_private_identifiers(path.replace("/", "\n")) else path
+    added = _added_lines_by_file(patch)
+    for path, lines in added.items():
+        if any("\x00" in line for line in lines):
+            kinds = ", ".join(find_private_identifiers(path))
+            raise IrPushRefused(
+                f"cannot scan the branch: binary content in {_safe_path(path)}"
+                + (f" ({kinds})" if kinds else "")
+            )
         for kind in find_private_identifiers("\n".join(lines)):
-            findings.append(f"{kind} in diff of {safe_path}")
+            findings.append(f"{kind} in diff of {_safe_path(path)}")
+    # Paths with no content hunk (new empty files) are published too.
+    names = _git(
+        repo,
+        [
+            "log", "-m", "--format=", "--name-only", "-z", "--no-renames",
+            "--diff-filter=d", f"{fork}..{ref}",
+        ],
+        run,
+    )
+    for path in (name.strip("\n") for name in names.split("\x00")):
+        if path and path not in added:
+            for kind in find_private_identifiers(path):
+                findings.append(f"{kind} in diff of {_safe_path(path)}")
     return findings
 
 

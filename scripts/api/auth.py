@@ -246,6 +246,25 @@ def _finish_jwks_lookup(kid: str, task: asyncio.Task) -> None:
             _remember_negative_kid(kid)
 
 
+def _cached_signing_key(kid: str):
+    """The signing key for ``kid`` from the unexpired cached JWKS, or None.
+
+    Never fetches. Mirrors RC-A3 in scripts/mcp_hosted/auth.py: a cached kid
+    must not wait behind the in-flight bound meant for unknown-kid refetches.
+    """
+    try:
+        cache = getattr(_get_jwks_client(), "jwk_set_cache", None)
+        jwk_set = cache.get() if cache is not None else None
+    except Exception:  # noqa: BLE001 — the bounded lookup owns error mapping
+        return None
+    if jwk_set is None:
+        return None
+    for key in jwk_set.keys:
+        if key.key_id == kid and key.public_key_use in ("sig", None):
+            return key
+    return None
+
+
 async def _bounded_signing_key_lookup(token: str, kid: str):
     now = time.monotonic()
     expiry = _jwks_negative.get(kid)
@@ -253,6 +272,10 @@ async def _bounded_signing_key_lookup(token: str, kid: str):
         if expiry > now:
             raise HTTPException(status_code=401, detail="Invalid token")
         _jwks_negative.pop(kid, None)
+
+    cached = _cached_signing_key(kid)
+    if cached is not None:
+        return cached
 
     task = _jwks_inflight.get(kid)
     if task is None:
