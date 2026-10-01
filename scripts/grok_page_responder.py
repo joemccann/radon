@@ -181,6 +181,14 @@ def sync_remote_clone(repo_root: Path) -> str:
     )
     if fetch.returncode != 0:
         return "fetch-failed"
+    # A run leaves the clone on its fix/* branch (kept for the pickup); sync
+    # main, or every later cycle runs stale code behind "ff-failed".
+    checkout = subprocess.run(
+        ["git", "checkout", "-q", "main"],
+        cwd=repo_root, capture_output=True, text=True, timeout=30,
+    )
+    if checkout.returncode != 0:
+        return "checkout-failed"
     merged = subprocess.run(
         ["git", "merge", "--ff-only", "origin/main"],
         cwd=repo_root, capture_output=True, text=True, timeout=30,

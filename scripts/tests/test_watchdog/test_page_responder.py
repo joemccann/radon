@@ -480,7 +480,42 @@ class TestResponder:
         with patch("grok_page_responder.subprocess.run") as run:
             run.return_value = SimpleNamespace(returncode=0, stdout="")
             assert sync_remote_clone(tmp_path) == "synced"
-            assert run.call_count == 3
+            assert run.call_count == 4
+
+    def test_sync_returns_a_parked_fix_branch_to_main(self, tmp_path, monkeypatch):
+        # A run that leaves the clone on its fix/* branch must not pin every
+        # later cycle to stale code behind a silent "ff-failed".
+        def git(cwd, *args):
+            out = subprocess.run(["git", *args], cwd=cwd, capture_output=True,
+                                 text=True, check=True)
+            return out.stdout.strip()
+
+        public, seed, clone = (tmp_path / n for n in ("public.git", "seed", "clone"))
+        git(tmp_path, "init", "-q", "--bare", "-b", "main", str(public))
+        git(tmp_path, "clone", "-q", str(public), str(seed))
+        git(seed, "config", "user.email", "t@example.com")
+        git(seed, "config", "user.name", "t")
+        (seed / "a.txt").write_text("1\n")
+        git(seed, "add", "a.txt")
+        git(seed, "commit", "-qm", "base")
+        git(seed, "push", "-q", "--no-verify", "origin", "HEAD:main")
+        git(tmp_path, "clone", "-q", str(public), str(clone))
+        git(clone, "config", "user.email", "t@example.com")
+        git(clone, "config", "user.name", "t")
+        git(clone, "checkout", "-qb", "fix/parked")
+        (clone / "b.txt").write_text("fix\n")
+        git(clone, "add", "b.txt")
+        git(clone, "commit", "-qm", "fix: local")
+        (seed / "a.txt").write_text("2\n")
+        git(seed, "commit", "-qam", "main moves on")
+        git(seed, "push", "-q", "--no-verify", "origin", "HEAD:main")
+
+        monkeypatch.setenv("GROK_PAGE_SYNC_REMOTE", "1")
+        monkeypatch.setattr("grok_page_responder.PUBLIC_REPO_URL", str(public))
+        assert sync_remote_clone(clone) == "synced"
+        assert git(clone, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+        assert git(clone, "rev-parse", "HEAD") == git(seed, "rev-parse", "HEAD")
+        assert git(clone, "log", "-1", "--format=%s", "fix/parked") == "fix: local"
 
     def test_sync_fetches_over_public_https(self, tmp_path, monkeypatch):
         # The unit hides ~/.ssh from the agent; main is public, so the sync
