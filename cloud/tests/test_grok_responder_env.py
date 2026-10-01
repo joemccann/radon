@@ -110,6 +110,16 @@ def test_secrets_come_only_from_the_production_env(tmp_path):
     assert "GH_TOKEN" not in env
 
 
+def test_scoped_responder_turso_token_replaces_the_full_access_one(tmp_path):
+    # The responder only needs watchdog_pages + service_health; a dedicated
+    # token in the production env must win on every rerun.
+    prod = PROD + "GROK_RESPONDER_TURSO_AUTH_TOKEN=scoped-turso-token\n"
+    env = _run(tmp_path, prod, EXISTING)
+    assert env["TURSO_AUTH_TOKEN"] == "scoped-turso-token"
+    assert "GROK_RESPONDER_TURSO_AUTH_TOKEN" not in env
+    assert "new-turso-token" not in (tmp_path / "radon-page-responder.env").read_text()
+
+
 def test_managed_keys_are_reset_not_preserved(tmp_path):
     env = _run(tmp_path, PROD, EXISTING)
     assert env["GROK_PAGE_NO_DOTENV"] == "1"
