@@ -31,6 +31,7 @@ const TOOL_LABELS: Record<string, string> = {
   place_order: "Stage order proposal",
   list_apis: "Search API catalog",
   call_api: "Call Radon API",
+  web_search: "Search the web",
 };
 
 /**
