@@ -20,6 +20,9 @@ jobs:
     # only from main: a dispatch on any other ref would hand the token to that
     # branch's code (F20260930-A01).
     if: github.ref == 'refs/heads/main'
+    # Secrets come from a GitHub Environment whose deployment branch policy is
+    # main only, so a branch cut from an older, unguarded commit gets none.
+    environment: research-cut
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
