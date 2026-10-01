@@ -10,6 +10,9 @@ set -euo pipefail
 # durable operator hold (scripts/utils/ib_operator_hold.py) that every Gateway
 # start path refuses under, then takes the Gateway down without waiting on the
 # deploy lock or the lifecycle mutex. `resume` clears it and logs in once.
+# The watchdog timer keeps running while held: the watchdog stands down on the
+# hold, pages HELD once, and resumes normal recovery the moment any path (this
+# command or the admin panel) clears it.
 # Design: docs/ibkr-session-release.md.
 
 readonly HOLD_PYTHON="${RADON_IB_HOLD_PYTHON:-/usr/bin/python3.13}"
@@ -25,7 +28,7 @@ readonly RELEASE_POLL_SECS="${RADON_IB_RELEASE_POLL_SECS:-2}"
 readonly LEASE_HELD_RC=75
 
 usage() {
-  echo "usage: radon ib {release [--reason TEXT]|resume|status}" >&2
+  echo "usage: radon ib {release [--reason TEXT] [--expires-at ISO]|resume|status}" >&2
   exit 64
 }
 
@@ -79,20 +82,23 @@ stop_gateway() {
 
 release() {
   local reason="operator release"
+  local -a expiry=()
   while (( $# )); do
     case "$1" in
       --reason) (( $# >= 2 )) || usage; reason="$2"; shift 2 ;;
+      # A reminder only: the hold never lifts itself (an expiring hold logs
+      # the Gateway back in and kicks the operator).
+      --expires-at) (( $# >= 2 )) || usage; expiry=(--expires-at "$2"); shift 2 ;;
       *) usage ;;
     esac
   done
   require_root
 
   local hold_written=1
-  if ! hold_cli hold --reason "$reason" --actor "$(actor)" >/dev/null; then
+  if ! hold_cli hold --reason "$reason" --actor "$(actor)" ${expiry[@]+"${expiry[@]}"} >/dev/null; then
     hold_written=0
     echo "radon ib: HOLD NOT WRITTEN; stopping the Gateway anyway" >&2
   fi
-  "$SYSTEMCTL" stop "$WATCHDOG_TIMER" || true
 
   if ! stop_gateway; then
     echo "radon ib: FAILED - Gateway container STILL RUNNING; it may still hold the IBKR session" >&2
@@ -104,7 +110,7 @@ release() {
     exit 1
   fi
   audit_line "released by $(actor): ${reason}"
-  echo "RELEASED gateway=stopped watchdog=paused. Wait ~30s, then log in to IBKR."
+  echo "RELEASED gateway=stopped watchdog=standing-down. Wait ~30s, then log in to IBKR."
   echo "When done, log out of IBKR and run: radon ib resume"
 }
 
@@ -112,6 +118,7 @@ resume() {
   (( $# == 0 )) || usage
   require_root
   hold_cli clear --actor "$(actor)" >/dev/null
+  # Older releases paused the timer; make sure recovery is back on.
   "$SYSTEMCTL" start "$WATCHDOG_TIMER" || true
   local rc=0
   timeout "$START_TIMEOUT_SECS" "$GATEWAY_CONTROL" start || rc=$?

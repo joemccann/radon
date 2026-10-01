@@ -47,6 +47,17 @@ export type IbGatewayHealth = {
   restart_backoff?: RestartBackoffState;
   container_state?: string;
   container_health?: string;
+  /** IBKR operator hold (broker-authoritative). null/absent = unknown. */
+  operator_hold?: OperatorHold | null;
+};
+
+export type OperatorHold = {
+  held: boolean;
+  reason?: string;
+  actor?: string;
+  held_at?: string;
+  expires_at?: string;
+  expired?: boolean;
 };
 
 export type HostRole = "app" | "broker" | "combined";

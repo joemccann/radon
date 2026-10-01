@@ -89,9 +89,16 @@ def test_release_holds_first_then_stops_the_gateway(box):
     assert box.held()
     assert box.container() == "stopped"
     assert "RELEASED" in result.stdout
-    calls = box.calls()
-    assert "systemctl stop radon-ib-watchdog.timer" in calls
-    assert calls.index("systemctl stop radon-ib-watchdog.timer") < calls.index("gateway-control stop")
+    # The watchdog keeps running: it stands down on the hold and resumes
+    # recovery when the admin panel (which cannot start a timer) clears it.
+    assert "systemctl stop radon-ib-watchdog.timer" not in box.calls()
+
+
+def test_release_records_an_optional_expiry_that_never_lifts_the_hold(box, tmp_path):
+    result = box.run("release", "--expires-at", "2000-01-01T00:00:00+00:00")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert box.held()
+    assert '"expires_at": "2000-01-01T00:00:00+00:00"' in (tmp_path / "hold.json").read_text()
 
 
 def test_release_falls_back_to_compose_down_when_the_helper_is_blocked(box):

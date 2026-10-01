@@ -33,5 +33,6 @@ Watchdog monitors scheduled services from `web/lib/serviceHealthWindows.ts` and 
 
 - Each service window declares `requires_ib`.
 - When IB is down, group IB-required failures whose last_error / check reason is IB-shaped (connection, 2FA, gateway, timeout). A latched writer-integrity error (execution fact conflict) falls through per-service. `awaiting_2fa` copy is approve-on-phone / reset-backoff; `unreachable` copy is `radon restart`, not a 2FA prompt.
+- IBKR operator hold (`/health` `ib_gateway.operator_hold.held`): absorb every IB-caused failure with no page. The Gateway is down on purpose; the broker `ib-watchdog` pages HELD once per hold.
 - UW-only, Flex-only, and Playwright-only writers are not IB-required just because they share the dashboard.
 - On IB transition from `awaiting_2fa` to `authenticated`, clear stale service-health rows for IB-required services.

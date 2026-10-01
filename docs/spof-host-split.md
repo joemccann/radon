@@ -221,7 +221,11 @@ The broker daemon (`scripts/ib_gateway_remote/serve.py`) answers `start` and
 `restart` with `423 OPERATOR_HOLD`, without running the helper, while
 `radon ib release` holds the Gateway out of the operator's shared IBKR
 login. Its `/status` payload carries `operator_hold`. `stop` and
-`reset-lease` stay open. Runbook: `docs/ib-gateway-recovery.md`.
+`reset-lease` stay open. `POST /hold` (JSON `reason`, `actor`) writes the
+hold and runs the helper `stop`, with no cooldown. `POST /unhold` removes it and
+runs one `start` through the usual cooldown and login-throttle gates. The app
+reaches both through FastAPI `POST /ib/operator-hold` (operator JWT). Runbook:
+`docs/ib-gateway-recovery.md`.
 
 ## Never
 

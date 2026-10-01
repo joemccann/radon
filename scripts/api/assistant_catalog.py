@@ -68,6 +68,8 @@ CATALOG: dict[CatalogKey, Capability] = {
     ("GET", "/health/lite"): "internal",
     ("POST", "/historical/bars"): "read.spawn",
     ("POST", "/historical/head-timestamp"): "read.spawn",
+    ("GET", "/ib/operator-hold"): "admin",
+    ("POST", "/ib/operator-hold"): "admin",
     ("POST", "/ib/reset-backoff"): "admin",
     ("POST", "/ib/restart"): "admin",
     ("GET", "/index-options/chain"): "read",

@@ -17,6 +17,9 @@ import {
   findStaleSubjectsOnLivePlane,
   nextFarmStateCode,
   farmStateAfterIdleDrain,
+  applyOperatorHold,
+  operatorHoldFromHealth,
+  isOperatorHoldRefusal,
 } from "./staleDataMachine.js";
 
 const NOW = 1_700_000_000_000;
@@ -597,5 +600,44 @@ describe("buildRelayHealthDetail — never-ticked sentinel (R-214)", () => {
     const detail = buildRelayHealthDetail(NOW, undefined, freshness);
     expect(detail.last_tick_at).toBeNull();
     expect(detail.ticks_seen).toBe(false);
+  });
+});
+
+describe("IBKR operator hold (Gateway down on purpose while the operator uses IBKR)", () => {
+  const disconnectedDuringRth = {
+    action: "escalate",
+    heartbeat: false,
+    clearError: false,
+    degraded: true,
+    disconnected: true,
+  };
+
+  it("collapses every page and restart path to a held verdict", () => {
+    expect(applyOperatorHold(disconnectedDuringRth, true)).toEqual({
+      action: "none",
+      heartbeat: false,
+      clearError: false,
+      degraded: false,
+      disconnected: false,
+      held: true,
+    });
+  });
+
+  it("passes the decision through untouched when not held", () => {
+    expect(applyOperatorHold(disconnectedDuringRth, false)).toEqual({ ...disconnectedDuringRth, held: false });
+  });
+
+  it("reads the hold from /health/lite only when it is exactly true", () => {
+    expect(operatorHoldFromHealth({ operator_hold: true })).toBe(true);
+    expect(operatorHoldFromHealth({ operator_hold: false })).toBe(false);
+    expect(operatorHoldFromHealth({ operator_hold: "true" })).toBe(false);
+    expect(operatorHoldFromHealth({})).toBe(false);
+    expect(operatorHoldFromHealth(null)).toBe(false);
+  });
+
+  it("recognises the /ib/restart refusal", () => {
+    expect(isOperatorHoldRefusal(423, {})).toBe(true);
+    expect(isOperatorHoldRefusal(503, { detail: { code: "OPERATOR_HOLD" } })).toBe(true);
+    expect(isOperatorHoldRefusal(503, { detail: { reason: "2fa_push_in_flight" } })).toBe(false);
   });
 });

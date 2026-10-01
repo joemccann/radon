@@ -333,7 +333,7 @@ ssh -L 5900:127.0.0.1:5900 radon@ib-gateway
 # Connect VNC client to localhost:5900
 ```
 
-`EXISTING_SESSION_DETECTED_ACTION=primary` in `.env` ensures the VPS gateway takes over if another IB session is active.
+`cloud/docker-compose.yml` pins `EXISTING_SESSION_DETECTED_ACTION=primaryoverride`: a fresh Gateway login takes the session, but a logged-in Gateway yields to the operator's own IBKR login, and the watchdog then sets the operator hold (`docs/ib-gateway-recovery.md`).
 
 ### Clerk Production Setup
 

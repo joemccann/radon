@@ -63,7 +63,11 @@ under `/var/lib/radon` keep their ownership) and `scripts/jvm_forensics.py`.
 (`/var/lib/radon/ib-operator-hold.json`) is set, and a root-only `kill` verb
 (not in sudoers) backs `radon ib release`. `setup-vps.sh install_ib_hold`
 installs that command root-owned as `/usr/local/sbin/radon-ib-hold`; runbook
-in `docs/ib-gateway-recovery.md`.
+in `docs/ib-gateway-recovery.md`. The compose body pins
+`EXISTING_SESSION_DETECTED_ACTION=primaryoverride`, outside the env file, so a
+logged-in Gateway yields to the operator's own IBKR login. A changed compose
+body reaches the broker only through a manual reinstall of
+`/etc/radon/ib-gateway-compose.yml` and a container recreate, which is one login.
 
 The compose body it runs lives at `/etc/radon/ib-gateway-compose.yml`, a
 control-plane artifact, NOT `cloud/docker-compose.yml` in the checkout: root

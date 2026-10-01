@@ -1,6 +1,6 @@
 # IBKR Session Release (Operator Hold) - Design
 
-Status: Phase 1 implemented (2026-10-01): hold module, shim/helper/unit/watchdog/broker-daemon enforcement and `radon ib release|resume|status`. Phases 2-4 (phone trigger, app mirror and admin buttons, trading-halt coupling, local guards) are not built. Option B (second IBKR username) was declined by the operator on 2026-10-01.
+Status: Phase 1 implemented (2026-10-01): hold module, shim/helper/unit/watchdog/broker-daemon enforcement and `radon ib release|resume|status`. Phase 3 in part (2026-10-01, later the same day): broker daemon `hold`/`unhold`, FastAPI `/ib/operator-hold` plus 423 refusals, the `/health` mirror, the admin Hold / Resume card, relay and grouping stand-down, the recovery-heartbeat skip, and HELD / cleared pages once per hold. Also in that change: IBC `primaryoverride` and a watchdog auto-hold on IBC's yield line (option C plus auto-hold, section 5). `release` no longer pauses the watchdog timer, so a clear from any path brings recovery back. Not built: the phone forced-command trigger, trading-halt coupling and local-mode guards. Option B (second IBKR username) was declined by the operator on 2026-10-01. The current runbook is `docs/ib-gateway-recovery.md`.
 
 Goal: one action that releases every IBKR login Radon holds and keeps it released
 (no auto-heal re-login) until the operator explicitly resumes, so the operator can

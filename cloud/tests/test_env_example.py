@@ -156,7 +156,7 @@ class TestIBSessionVariables:
     def test_contains_existing_session_detected_action(self, root):
         env_vars = parse_env_vars(read_env_example(root))
         assert "EXISTING_SESSION_DETECTED_ACTION" in env_vars
-        assert env_vars["EXISTING_SESSION_DETECTED_ACTION"] == "primary"
+        assert env_vars["EXISTING_SESSION_DETECTED_ACTION"] == "primaryoverride"
 
 
 class TestNodeEnvironment:

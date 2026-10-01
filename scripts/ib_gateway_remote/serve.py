@@ -8,6 +8,7 @@ Routes:
   GET  /healthz      liveness, no helper
   GET  /status       helper status
   POST /start|stop|restart|reset-lease
+  POST /hold|unhold   IBKR operator hold (JSON body: reason, actor)
 """
 from __future__ import annotations
 
@@ -54,6 +55,13 @@ MAX_BODY_BYTES = 4096
 PRIVATE_NET = ipaddress.ip_network("10.0.0.0/16")
 MUTATIONS = frozenset({"start", "stop", "restart", "reset-lease"})
 VERBS = MUTATIONS | {"status"}
+# The IBKR operator hold, set and cleared from the admin panel. Not helper
+# verbs: the daemon writes the hold itself (utils/ib_operator_hold.py), then
+# runs the helper's own `stop` / `start`. `hold` never logs in, so no cooldown
+# or throttle gates it; `unhold` logs in once and both gate that login.
+HOLD_VERBS = frozenset({"hold", "unhold"})
+HOLD_REASON_MAX = 200
+HOLD_ACTOR_MAX = 80
 # REL-172 (R-475): a per-verb cooldown a caller cannot clear. `stop` releases
 # the lease unconditionally and `reset-lease` exists to release it, so either
 # followed by a fresh login within seconds stacks a second IBKR push behind
@@ -419,7 +427,7 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
             return
         path = self.path.split("?", 1)[0]
         verb = path[1:] if path.startswith("/") else path
-        if verb not in MUTATIONS:
+        if verb not in MUTATIONS and verb not in HOLD_VERBS:
             self._refuse(404, "not found")
             return
         try:
@@ -431,9 +439,88 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
             self.close_connection = True
             self._refuse(413, f"body exceeds {MAX_BODY_BYTES} bytes")
             return
-        if length:
-            self.rfile.read(length)
+        body = self.rfile.read(length) if length else b""
+        if verb in HOLD_VERBS:
+            self._operator_hold(verb, body)
+            return
         self._helper(verb)
+
+    def _operator_hold(self, verb: str, body: bytes) -> None:
+        cfg = self.server.gateway_config
+        try:
+            request = json.loads(body.decode("utf-8")) if body else {}
+        except (UnicodeDecodeError, ValueError):
+            self._refuse(400, "body is not JSON")
+            return
+        if not isinstance(request, dict):
+            self._refuse(400, "body is not an object")
+            return
+        actor = "app:" + str(request.get("actor") or "unknown")[:HOLD_ACTOR_MAX]
+        if verb == "hold":
+            self._set_hold(cfg, request, actor)
+        else:
+            self._clear_hold(cfg, actor)
+
+    def _set_hold(self, cfg: dict, request: dict, actor: str) -> None:
+        reason = str(request.get("reason") or "operator hold from the admin panel")[:HOLD_REASON_MAX]
+        expires_at = request.get("expires_at") or None
+        hold_error = None
+        try:
+            ib_operator_hold.set_hold(reason, actor, expires_at)
+        except (OSError, ValueError, TypeError) as exc:
+            hold_error = str(exc)
+        # Stop even when the flag failed: the operator is about to log in.
+        rc, detail = run_helper(cfg["helper"], "stop", cfg["timeout"])
+        if rc == 0:
+            record_verb("stop")
+        payload = {
+            "ok": hold_error is None and rc == 0,
+            "verb": "hold",
+            "operator_hold": ib_operator_hold.hold_state(),
+            "gateway_stop": {"returncode": rc, "detail": detail},
+        }
+        if hold_error is not None:
+            payload["detail"] = f"HOLD NOT WRITTEN ({hold_error}); run `radon ib release` on the broker"
+        elif rc != 0:
+            payload["detail"] = (
+                f"hold set, but the Gateway stop failed (rc={rc}): {detail}. "
+                "Run `radon ib release` on the broker"
+            )
+        else:
+            payload["detail"] = "hold set; Gateway stopped. Wait ~30s, then log in to IBKR."
+        self._ok(payload, 200 if payload["ok"] else 502)
+
+    def _clear_hold(self, cfg: dict, actor: str) -> None:
+        try:
+            ib_operator_hold.clear_hold(actor)
+        except OSError as exc:
+            self._ok({"ok": False, "verb": "unhold", "detail": f"hold not cleared: {exc}",
+                      "operator_hold": ib_operator_hold.hold_state()}, 502)
+            return
+        state = ib_operator_hold.hold_state()
+        if state["held"]:
+            self._ok({"ok": False, "verb": "unhold", "operator_hold": state,
+                      "detail": "hold still reads held; run `radon ib resume` on the broker"}, 502)
+            return
+        # Recovery back on, never silently: one login now (one push), unless
+        # the cooldown or an IBKR login throttle says a login would hurt. The
+        # watchdog owns recovery from there.
+        refusal = cooldown_refusal("start") or login_throttle_refusal("start", cfg["watchdog_state"])
+        if refusal is not None:
+            start = {"ok": False, "returncode": CONTROL_BUSY_RC, "detail": refusal}
+        else:
+            rc, detail = run_helper(cfg["helper"], "start", cfg["timeout"])
+            if rc == 0:
+                record_verb("start")
+            start = {"ok": rc == 0, "returncode": rc, "detail": detail}
+        self._ok({
+            "ok": True,
+            "verb": "unhold",
+            "operator_hold": state,
+            "gateway_start": start,
+            "detail": "hold cleared; approve the IBKR Mobile push" if start["ok"]
+            else f"hold cleared; Gateway start deferred: {start['detail']}",
+        })
 
     def _helper(self, verb: str) -> None:
         cfg = self.server.gateway_config
@@ -444,7 +531,11 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
                 "ok": False,
                 "verb": verb,
                 "code": "OPERATOR_HOLD",
-                "detail": "IBKR operator hold active; `radon ib resume` on the broker clears it",
+                "detail": (
+                    "IBKR operator hold active; `radon ib resume` on the broker "
+                    "or Resume Gateway in /admin clears it"
+                ),
+                "operator_hold": ib_operator_hold.hold_state(),
             }, 423)
             return
         if verb in MUTATIONS:
