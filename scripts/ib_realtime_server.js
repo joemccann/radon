@@ -1681,7 +1681,7 @@ function cleanupTapeForReconnect() {
 }
 
 function startDepthSubscription(key, contract, { kind, isFutures, requestingClient = null }) {
-  if (!DEPTH_ENABLED || !ibConnected) return;
+  if (!DEPTH_ENABLED) return;
 
   let state = symbolDepthStates.get(key);
   if (!state) {
@@ -1694,6 +1694,10 @@ function startDepthSubscription(key, contract, { kind, isFutures, requestingClie
     state.focusedAt = Date.now();
   }
 
+  // Record the subject even while IB is down: restoreDepthSubscriptions
+  // re-requests from this state on (re)connect. Returning before it existed
+  // left a subscribe made during an outage without depth or tape for good.
+  if (!ibConnected) return;
   if (state.depthTickerId != null) return; // already streaming
 
   // Cap-check via the per-client planner: only the requesting client's own
@@ -1706,9 +1710,11 @@ function startDepthSubscription(key, contract, { kind, isFutures, requestingClie
     maxConcurrent: MAX_CONCURRENT_DEPTH,
   });
   if (!admission.admit) {
+    state.awaitingBudget = true;
     emitDepthUnavailable(key, "depth-budget");
     return;
   }
+  state.awaitingBudget = false;
   for (const evictKey of admission.evictKeys) {
     stopDepthSubscription(evictKey);
     emitDepthUnavailable(evictKey, "recycled");
@@ -1843,6 +1849,19 @@ function unsubscribeClientFromDepth(client, key) {
     depthSubscribers.delete(key);
     stopDepthSubscription(key);
     stopTapeSubscription(key); // tape rides the focused depth symbol
+    admitDepthAwaitingBudget();
+  }
+}
+
+// A freed ticket goes to the longest-waiting subject refused for budget, so a
+// session refused while others held the cap gets its book once they let go.
+function admitDepthAwaitingBudget() {
+  const waiting = [...symbolDepthStates]
+    .filter(([key, state]) => state.awaitingBudget && state.depthTickerId == null && depthSubscribers.get(key)?.size)
+    .sort(([, a], [, b]) => a.focusedAt - b.focusedAt);
+  for (const [key, state] of waiting) {
+    if (collectActiveDepthTickets().length >= MAX_CONCURRENT_DEPTH) return;
+    startDepthSubscription(key, state.contract, { kind: state.kind, isFutures: state.isFutures });
   }
 }
 

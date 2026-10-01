@@ -383,7 +383,11 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
   const syncDepth = useCallback((ws: WebSocket) => {
     if (ws.readyState !== WebSocket.OPEN) return;
 
-    const desired = desiredDepthRef.current;
+    // A background tab holds no depth: the relay's few tickets are shared by
+    // every session, so hidden tabs must not starve the one being looked at.
+    const desired = typeof document !== "undefined" && document.visibilityState === "hidden"
+      ? []
+      : desiredDepthRef.current;
     const desiredExpiry = desiredDepthExpiryRef.current;
     const desiredKeys = desired.map((symbol) =>
       `${symbol}|${desired.length === 1 ? desiredExpiry ?? "" : ""}`,
@@ -746,10 +750,14 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
   }, [enabled, reconnect]);
   const recoverIfClosedRef = useRef(recoverIfClosed);
   recoverIfClosedRef.current = recoverIfClosed;
+  const syncDepthRef = useRef(syncDepth);
+  syncDepthRef.current = syncDepth;
 
   useEffect(() => {
     if (typeof document === "undefined" || typeof window === "undefined") return;
     const onVisible = () => {
+      const ws = wsRef.current;
+      if (ws && connStateRef.current === "open") syncDepthRef.current(ws);
       if (document.visibilityState === "visible") recoverIfClosedRef.current();
     };
     const onOnline = () => recoverIfClosedRef.current();
