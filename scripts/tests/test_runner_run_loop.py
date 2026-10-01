@@ -495,10 +495,52 @@ def test_testing_and_reliability_run_on_the_runner_in_their_old_slots(loop, hour
     assert f"\nPROMPT={prompt.relative_to(REPO)}\n" in env
     body = prompt.read_text()
     assert "RESULT: <PR URL>" in body and "RESULT: no PR" in body
-    assert f"--label {loop}-nightly" in body
-    assert "audited-through:" in body
     for path in retired:
         assert not (REPO / path).exists(), path
+
+
+def _loop_env_assignments(name: str) -> dict[str, str]:
+    out = {}
+    for line in (REPO / "scripts" / "runner" / "loops" / f"{name}.env").read_text().splitlines():
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            out[key] = value.strip('"')
+    return out
+
+
+def _loops_without_post_run() -> list[str]:
+    names = []
+    for path in sorted((REPO / "scripts" / "runner" / "loops").glob("*.env")):
+        if "POST_RUN" not in _loop_env_assignments(path.stem):
+            names.append(path.stem)
+    return names
+
+
+def _operations_issue_label(loop: str) -> str:
+    for line in (REPO / "docs" / "operations.md").read_text().splitlines():
+        if line.startswith(f"| {loop} |"):
+            cells = [c.strip() for c in line.strip("|").split("|")]
+            if cells and cells[-1]:
+                return cells[-1].strip("`")
+    return f"{loop}-nightly"
+
+
+@pytest.mark.parametrize("loop", _loops_without_post_run())
+def test_loops_without_a_post_run_hook_post_the_dead_man_from_the_prompt(loop):
+    """The runner never posts to GitHub for non-security loops (report() is
+    Pushover only). The agent prompt is the only place the dead-man comment
+    can come from, so every loop without POST_RUN must instruct the agent
+    to post it. A newly added loop without a hook is covered automatically."""
+    env = _loop_env_assignments(loop)
+    assert "POST_RUN" not in env
+    prompt = REPO / ".claude" / "runner-prompts" / f"{loop}.md"
+    assert env.get("PROMPT") == str(prompt.relative_to(REPO))
+    body = prompt.read_text()
+    label = _operations_issue_label(loop)
+    assert f"--label {label}" in body
+    assert "gh issue comment" in body
+    assert "audited-through:" in body
+    assert "## Rolling issue comment" in body
 
 
 # --- claude rungs -----------------------------------------------------------
