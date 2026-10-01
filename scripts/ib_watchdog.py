@@ -591,9 +591,14 @@ class WatchdogState:
     login_throttle_line: str = ""
     login_throttle_retries: int = 0
     login_throttle_alerted: bool = False
+    # The operator hold this watchdog last announced (its id, or held_at for a
+    # flag without one). Set once the HELD page is out; cleared, with one
+    # "hold cleared" page, when the hold lifts.
+    operator_hold_announced: str = ""
 
     def to_dict(self) -> dict:
         return {
+            "operator_hold_announced": self.operator_hold_announced,
             "login_throttle_since": self.login_throttle_since,
             "login_throttle_line": self.login_throttle_line,
             "login_throttle_retries": self.login_throttle_retries,
@@ -632,6 +637,7 @@ class WatchdogState:
             login_throttle_line=str(data.get("login_throttle_line", "")),
             login_throttle_retries=int(data.get("login_throttle_retries", 0)),
             login_throttle_alerted=bool(data.get("login_throttle_alerted", False)),
+            operator_hold_announced=str(data.get("operator_hold_announced", "")),
         )
 
 
@@ -1132,6 +1138,12 @@ def _handle_primary_sensor_down(
         return state
 
     if verdict in (GATEWAY_DEAD, GATEWAY_WEDGED):
+        # The app host is down: exactly when the operator flattens from IBKR
+        # Mobile. Their login makes the Gateway yield; do not log it back in.
+        with _timed("login_log"):
+            yield_line = parse_session_yield(read_gateway_login_log())
+        if yield_line:
+            return _auto_hold_for_taken_session(state, state_path, yield_line)
         # The independent functional sensor owns both a refused port and a
         # protocol-level wedge. Docker automatic restart is intentionally
         # disabled because it cannot participate in the 2FA push lease.
@@ -1637,24 +1649,154 @@ def run_cycle(
         LOG.info("cycle steps: %s outcome=%s", timings.summary(), outcome)
 
 
+OPERATOR_PAGE_TIMEOUT_SECS = 12.0
+
+
+def _page_operator(title: str, message: str) -> bool:
+    """One normal-priority Pushover, bounded. True when delivered or when no
+    Pushover is configured (the service_health row is then the only channel);
+    False on a failed delivery so the next cycle retries it."""
+    try:
+        from watchdog import notify
+    except ImportError as exc:  # pragma: no cover - always present in the repo
+        LOG.warning("operator page skipped: %s", exc)
+        return True
+    creds = notify._pushover_creds()
+    if not creds:
+        LOG.warning("operator page not sent (Pushover unconfigured): %s", title)
+        return True
+    user, token = creds
+    payload = notify.build_pushover_payload(
+        user=user, token=token, title=title, message=message, severity=None
+    )
+    try:
+        error = _run_bounded(
+            "operator-page", OPERATOR_PAGE_TIMEOUT_SECS, lambda: notify._post_pushover(payload)
+        )
+    except _SubStepTimeout as exc:
+        error = str(exc)
+    if error:
+        LOG.warning("operator page failed (%s); retrying next cycle", error)
+        return False
+    return True
+
+
+def _hold_key(hold: dict) -> str:
+    return str(hold.get("id") or hold.get("held_at") or hold.get("reason") or "held")
+
+
+def _hold_summary(hold: dict) -> str:
+    actor = hold.get("actor") or "unknown actor"
+    since = hold.get("held_at") or "unknown time"
+    summary = f"by {actor} since {since}: {hold.get('reason') or 'operator hold'}"
+    if hold.get("expired"):
+        summary += (
+            f". Expiry {hold.get('expires_at')} has passed; still held until "
+            "someone clears it"
+        )
+    return summary
+
+
 def _stand_down_for_operator_hold(
     state: WatchdogState, state_path: Path, hold: dict
 ) -> WatchdogState:
     """`radon ib release` holds the Gateway out of the IBKR username the
     operator shares with it. A dead Gateway is the intended state, so every
     repair would log in and kick the operator (2026-09-25). Counters reset so
-    a resume starts from a clean ladder instead of an instant restart."""
+    a resume starts from a clean ladder instead of an instant restart.
+
+    The operator hears about it ONCE per hold, as HELD, not as an outage."""
     state.degraded_count = 0
     state.stuck_2fa_count = 0
     state.authenticated_recovery_count = 0
     state.last_outcome = "operator_hold"
+    key = _hold_key(hold)
+    if state.operator_hold_announced != key and _page_operator(
+        "radon: IB Gateway HELD",
+        f"IB Gateway HELD, not down, {_hold_summary(hold)}. Radon will not log "
+        "in to IBKR while held. Clear it with `radon ib resume` on the broker "
+        "or Resume Gateway in /admin.",
+    ):
+        state.operator_hold_announced = key
     save_state(state_path, state)
     record_service_health(
         "ok",
-        f"IBKR operator hold since {hold.get('held_at', 'unknown')}: "
-        f"{hold.get('reason', 'operator release')}",
+        f"IBKR operator hold {_hold_summary(hold)}",
     )
     return state
+
+
+def _announce_hold_cleared(state: WatchdogState) -> None:
+    """Clearing the hold is never silent: one page that recovery is back."""
+    if state.operator_hold_announced and _page_operator(
+        "radon: IB Gateway hold cleared",
+        "The IBKR operator hold was cleared. Normal Gateway recovery is back on: "
+        "approve the one IBKR Mobile push when it arrives.",
+    ):
+        state.operator_hold_announced = ""
+
+
+# --- IBKR session taken by another login --------------------------------------
+
+# With ExistingSessionDetectedAction=primaryoverride, IBC gives the IBKR login
+# up to a competing session (the operator on IBKR Mobile or the web portal)
+# and the Gateway exits. The exact IBC lines
+# (ibcalpha.ibc.ExistingSessionDetectedDialogHandler):
+#   scenario 6: a logged-in Gateway yields to the new session;
+#   scenario 4: a fresh Gateway login finds a session that will not yield.
+# Either means a human holds the username. Restarting would log in and kick
+# them mid-flatten, so the watchdog sets the operator hold instead.
+_SESSION_YIELD_MARKS = (
+    "IBC: Other session may be primary, so end this session and let the other one proceed",
+    "IBC: Other session must be primary or primary override, so end this session",
+)
+AUTO_HOLD_ACTOR = "auto:ib-watchdog"
+
+
+def parse_session_yield(log: Optional[str]) -> str:
+    """The IBC yield line when it is the latest login event, else ''.
+
+    A `Login attempt:` after the yield means something already logged back in
+    on purpose, so the yield is history, not the current state."""
+    last_attempt = last_yield = -1
+    yield_line = ""
+    for i, line in enumerate((log or "").splitlines()):
+        if _LOGIN_ATTEMPT_MARK in line:
+            last_attempt = i
+        elif any(mark in line for mark in _SESSION_YIELD_MARKS):
+            last_yield = i
+            yield_line = line.strip()
+    return yield_line if last_yield > last_attempt else ""
+
+
+def _auto_hold_for_taken_session(
+    state: WatchdogState, state_path: Path, yield_line: str
+) -> WatchdogState:
+    LOG.error(
+        "IBKR session taken by another login (%s); setting the operator hold "
+        "instead of restarting the Gateway",
+        yield_line,
+    )
+    try:
+        ib_operator_hold.set_hold(
+            f"IBKR session taken by another login (IBC: {yield_line[-120:]})",
+            AUTO_HOLD_ACTOR,
+        )
+    except OSError as exc:
+        # Still no restart this cycle: the log says a human holds the login.
+        LOG.error("auto-hold not written: %s", exc)
+        state.degraded_count = 0
+        state.last_outcome = "session_taken:hold_unwritten"
+        save_state(state_path, state)
+        record_service_health(
+            "error",
+            error_message=(
+                "IBKR session taken by another login, and the operator hold could "
+                f"not be written ({exc}). Run `radon ib release` on the broker."
+            ),
+        )
+        return state
+    return _stand_down_for_operator_hold(state, state_path, ib_operator_hold.hold_state())
 
 
 def _run_cycle_steps(
@@ -1673,6 +1815,7 @@ def _run_cycle_steps(
     hold = ib_operator_hold.hold_state()
     if hold["held"]:
         return _stand_down_for_operator_hold(state, state_path, hold)
+    _announce_hold_cleared(state)
     _now_dt = (utcnow or (lambda: datetime.now(timezone.utc)))()
     quiet = quiet_window_active(_now_dt)
     # The stuck-2FA self-heal (NOT api-hang) additionally freezes when the data
@@ -1725,6 +1868,9 @@ def _run_cycle_steps(
     ):
         with _timed("login_log"):
             login_log = read_gateway_login_log()
+        yield_line = parse_session_yield(login_log)
+        if yield_line:
+            return _auto_hold_for_taken_session(state, state_path, yield_line)
         events = parse_login_events(login_log)
         proceeding = (
             login_log is not None

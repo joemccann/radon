@@ -431,6 +431,17 @@ async def _ib_recovery_heartbeat_tick() -> None:
     if ib_pool is None:
         return
     try:
+        # IBKR operator hold: the Gateway is down on purpose while the operator
+        # uses the shared IBKR login. Pool reconnects and the radon-api
+        # self-restart ladder have nothing to recover; stand down.
+        hold = await admin_services.operator_hold_state()
+        if hold and hold.get("held"):
+            if not _pool_recovery_state.get("held_logged"):
+                logger.warning("IB recovery heartbeat standing down: IBKR operator hold %s", hold)
+                _pool_recovery_state["held_logged"] = True
+            _pool_recovery_state["consecutive_failures"] = 0
+            return
+        _pool_recovery_state["held_logged"] = False
         await check_ib_gateway(pool_status=ib_pool.status(), pool=ib_pool)
         await _recover_stuck_pool_guarded()
     except Exception:
@@ -2072,6 +2083,9 @@ async def health_lite():
         "service_state": gw.get("service_state", "unknown"),
         "upstream_dead": gw.get("upstream_dead", False),
         "port_listening": gw.get("port_listening", False),
+        # Coarse: held or not. Lets the relay and health daemon read a down
+        # Gateway as the operator's hold, not an outage.
+        "operator_hold": bool((gw.get("operator_hold") or {}).get("held")),
         "loop_lag_ms": round(loop_lag_ms, 3),
     }
 
@@ -2157,7 +2171,7 @@ def _is_app_role_gateway_mutation(request: Request) -> bool:
     if request.method != "POST":
         return False
     path = request.url.path.rstrip("/")
-    if path in {"/ib/restart", "/ib/reset-backoff"}:
+    if path in {"/ib/restart", "/ib/reset-backoff", "/ib/operator-hold"}:
         return True
     prefix = "/admin/services/"
     if not path.startswith(prefix):
@@ -2200,7 +2214,23 @@ async def ib_restart():
     helper owns the 2FA push lease and the latched-transition state machine;
     pool reconnect after auth is the recovery heartbeat's job
     (feedback_ib_pool_stuck_after_2fa).
+
+    Refused with 423 during an IBKR operator hold: a login now would kick
+    the operator off the shared IBKR username. The relay's stale-data
+    escalation lands here too and treats 423 as "stand down".
     """
+    hold = await admin_services.operator_hold_state()
+    if hold and hold.get("held"):
+        raise HTTPException(
+            status_code=423,
+            detail={
+                "restarted": False,
+                "reason": "operator_hold",
+                "code": "OPERATOR_HOLD",
+                "operator_hold": hold,
+                "error": admin_services.OPERATOR_HOLD_DETAIL,
+            },
+        )
     if ib_gateway.is_cloud_mode() and _gateway_unit_controllable():
         action = await admin_services.control_unit(admin_services.GATEWAY_UNIT, "restart")
         if action.ok:
@@ -2211,6 +2241,12 @@ async def ib_restart():
                 "detail": action.detail,
                 "note": "Gateway cycling — approve the IBKR Mobile 2FA push to complete login.",
             }
+        if action.returncode == admin_services.OPERATOR_HOLD_RC:
+            raise HTTPException(
+                status_code=423,
+                detail={"restarted": False, "reason": "operator_hold", "code": "OPERATOR_HOLD",
+                        "error": action.detail},
+            )
         raise HTTPException(
             status_code=503,
             detail={
@@ -2251,6 +2287,49 @@ async def ib_reset_backoff():
         result["remote"] = remote.to_dict()
         result["broker_lease_released"] = bool(remote.ok)
     return result
+
+
+@app.get("/ib/operator-hold")
+async def ib_operator_hold_status():
+    """The IBKR operator hold (broker-authoritative; mirrored on the app)."""
+    return {"operator_hold": await admin_services.operator_hold_state()}
+
+
+@app.post("/ib/operator-hold")
+async def ib_operator_hold_set(request: Request):
+    """Set (``{"held": true, "reason": ...}``) or clear (``{"held": false}``)
+    the IBKR operator hold on the broker.
+
+    Hold: the broker writes the hold, then stops the Gateway, so the operator
+    can log in to IBKR Mobile / the web portal without the Gateway fighting
+    for the shared username. Clear: the broker removes it and logs the
+    Gateway in once (one 2FA push). Operator JWT only on the app host.
+    """
+    _require_bounded_body(request)
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="body must be JSON")
+    held = body.get("held") if isinstance(body, dict) else None
+    if not isinstance(held, bool):
+        raise HTTPException(status_code=400, detail="held must be true or false")
+    reason = str(body.get("reason") or "").strip()[:200]
+    if held and not reason:
+        raise HTTPException(status_code=400, detail="reason is required to set the hold")
+    expires_at = body.get("expires_at") or None
+    if expires_at is not None and not isinstance(expires_at, str):
+        raise HTTPException(status_code=400, detail="expires_at must be an ISO time string")
+    actor = _admin_actor(request)
+    status, payload = await admin_services.set_operator_hold(
+        held, reason=reason, actor=actor, expires_at=expires_at,
+    )
+    logger.warning(
+        "IBKR operator hold %s by %s: status=%s detail=%s",
+        "SET" if held else "CLEARED", actor, status, str(payload.get("detail") or "")[:200],
+    )
+    if status != 200:
+        raise HTTPException(status_code=status if 400 <= status < 600 else 502, detail=payload)
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -2300,6 +2379,8 @@ async def admin_service_action(unit: str, action: str, request: Request):
     if not result.ok:
         if result.returncode == admin_services.PUSH_LOCK_HELD_RC:
             raise HTTPException(status_code=409, detail=result.to_dict())
+        if result.returncode == admin_services.OPERATOR_HOLD_RC:
+            raise HTTPException(status_code=423, detail=result.to_dict())
         if result.returncode == admin_services.REMOTE_UNREACHABLE_RC:
             # REL-171 (R-500): a dead mTLS link to the broker is a gateway
             # timeout, not a caller error.

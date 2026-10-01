@@ -23,6 +23,7 @@ const PINNED: Record<string, PinnedCapability> = {
   "admin/edge-health": "admin",
   "admin/health": "admin",
   "admin/host-metrics": "admin",
+  "admin/ib/operator-hold": "admin",
   "admin/ib/reset-backoff": "admin",
   "admin/ib/restart": "admin",
   "admin/reliability": "admin",

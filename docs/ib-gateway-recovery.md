@@ -142,13 +142,42 @@ Next.js footer reads via `useIBStatusContext().displayStatus` (polls `/api/admin
 
 `radon restart` (whole-stack) restarts all `radon-*` units. Use after a sustained outage.
 
-**IBKR operator hold (log in to IBKR yourself).** The Gateway shares the operator's IBKR username, and IBKR allows one session per username, so with `ExistingSessionDetectedAction=primary` the Gateway kicks any web / TWS / mobile login (2026-09-25). On the broker as root:
+**IBKR operator hold (log in to IBKR yourself).** The Gateway shares the operator's IBKR username, and IBKR allows one session per username (2026-09-25: with `ExistingSessionDetectedAction=primary` the Gateway kicked every web login). The hold keeps the Gateway logged out, and every automatic login path stands down until someone clears it. It lives on the broker (`/var/lib/radon/ib-operator-hold.json`), so it works with the app host down.
 
-- `radon ib release [--reason TEXT]` writes the hold (`/var/lib/radon/ib-operator-hold.json`), pauses `radon-ib-watchdog.timer`, then stops the Gateway: helper `stop`, falling back to the root shim's `compose-down`, then `kill`, never waiting on the deploy lock. It prints `RELEASED` only once the container is gone. Wait ~30s, then log in to IBKR.
-- `radon ib resume` (after logging out of IBKR) clears the hold, restarts the watchdog timer, and starts the Gateway once; approve the single 2FA push.
-- `radon ib status` prints the hold, the Gateway state and the timer.
+Set and clear it from any of these:
 
-While held, every start path refuses: the root shim `compose-up` and the helper `start|restart|restart-preheld` exit 73 (`radon-ib-gateway.service` treats 73 as success), the watchdog stands down with outcome `operator_hold` and an `ok` health row, and the broker daemon answers `start|restart` with `423 OPERATOR_HOLD`. Unreadable, malformed, symlinked or non-root flags count as held. The hold never expires. From the laptop when broker Tailscale SSH is down: `ssh -J radon@5.78.148.38 root@10.0.0.4 radon ib release`. Design and later phases (phone trigger, app mirror, trading halt): [`ibkr-session-release.md`](ibkr-session-release.md).
+- Broker, as root: `radon ib release [--reason TEXT] [--expires-at ISO]` writes the hold, then stops the Gateway: helper `stop`, falling back to the root shim's `compose-down`, then `kill`, never waiting on the deploy lock. It prints `RELEASED` only once the container is gone. `radon ib resume` clears it, makes sure `radon-ib-watchdog.timer` runs, and starts the Gateway once. `radon ib status` prints the hold, the Gateway and the timer.
+- Admin panel (app up): Gateway controls, IBKR operator hold card. Hold needs a reason and a typed `HOLD`. Resume confirms once. This is `POST /api/admin/ib/operator-hold` to FastAPI `POST /ib/operator-hold` (operator JWT), then the broker daemon's mTLS `POST /hold` or `/unhold`. `/hold` writes the hold, then runs the helper `stop`. `/unhold` removes the hold, then runs one `start`, unless the 60s verb cooldown or an IBKR login throttle refuses it. In that case the hold is still cleared and the watchdog takes over.
+- Automatic: with `ExistingSessionDetectedAction=primaryoverride` (pinned in `cloud/docker-compose.yml`), IBC hands the session to your login and exits. The Gateway log shows `Other session may be primary, so end this session ... (scenario 6)`, or `scenario 4` when a fresh Gateway login loses to your session. When that is the latest login event and the Gateway is down, the watchdog sets the hold with actor `auto:ib-watchdog` instead of restarting it.
+
+While held:
+
+| Path | Behaviour |
+|---|---|
+| Root shim `compose-up`, helper `start\|restart\|restart-preheld` | exit 73 (`radon-ib-gateway.service` treats 73 as success) |
+| `radon-ib-watchdog` (timer keeps running) | outcome `operator_hold`, no probe, no restart, no lease. `service_health[ib-watchdog]` is `ok` and names who, why and when. Pushover sends ONE normal-priority `IB Gateway HELD` page per hold. Clearing sends one `hold cleared` page |
+| Broker daemon `start\|restart` | `423 OPERATOR_HOLD` with the hold in the body |
+| FastAPI `/ib/restart`, admin Gateway `start\|restart` | `423`, and no request leaves the app host. `stop` still works |
+| FastAPI 15s recovery heartbeat (pool reconnect, radon-api self-restart ladder) | skipped |
+| Relay stale-tick ladder | no `disconnected` error row, no reconnect ladder, no `/ib/restart` escalation. It writes an `ok` row with `reason: operator_hold` |
+| Watchdog IB-outage grouping | IB-dependent failures are absorbed without a page. No `radon restart` advice |
+| IBC 2FA relogin | already off (`TWOFA_TIMEOUT_ACTION=exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT=no`, no `AUTO_RESTART_TIME`), so no push spam |
+
+Any flag that is unreadable, malformed, symlinked or not root-owned counts as held, and its reason and actor still show. Holds set by the admin panel and the watchdog are written by `radon`. A non-root clear removes the flag, because absent means not held. An `--expires-at` that has passed reads `expired` but stays held. An expiring hold would log back in and kick you. From the laptop when broker Tailscale SSH is down: `ssh -J radon@5.78.148.38 root@10.0.0.4 radon ib release`. Design: [`ibkr-session-release.md`](ibkr-session-release.md).
+
+### Runbook: flatten from IBKR Mobile while the app is down
+
+Prerequisite: the broker (`radon-broker`) and the Gateway are up, and the app host is not. Blast radius: Radon has no IB data and cannot place or manage orders until you resume. Resting orders at IBKR stay live, and you manage them yourself.
+
+1. If you can reach the broker, run `radon ib release --reason "flatten from mobile"` as root first (`ssh root@radon-broker`, or the jump host line above). Wait about 30 seconds.
+2. If you cannot reach it, log in to IBKR Mobile or the web portal anyway. Once the broker runs the `primaryoverride` compose, the Gateway yields, and within about a minute the watchdog sets the hold (`auto:ib-watchdog`) and pages `IB Gateway HELD` once. Before that rollout, IBC takes the session back and kicks you; use step 1.
+3. Flatten. Nothing on the broker logs the Gateway back in while held. An `IB Gateway HELD` page is expected. Do not run `radon restart`, Start Gateway or `docker compose` to "fix" it.
+4. When done, log out of IBKR Mobile and the web portal. With `primaryoverride` a fresh Gateway login still takes the session and would end yours.
+5. Clear the hold: `radon ib resume` on the broker, or Resume Gateway in /admin once the app is back. Approve the one IBKR Mobile push. The watchdog pages `hold cleared`.
+6. Verify: `radon ib status` shows `"held": false` and `gateway: running`, `/health` reaches `auth_state=authenticated`, and the pool self-heal reconnects within 15 to 60 seconds.
+
+Rollback: `radon ib resume`. Escalation: if `radon ib release` prints `FAILED ... STILL RUNNING`, power the broker off from the Hetzner console. That ends the Gateway session, and a reboot under the hold stays logged out.
+
 
 ---
 
