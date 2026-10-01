@@ -2866,3 +2866,5 @@ Audited through: 731716e54b1e85e98b591cbd79e9d18adf7a1ec7 on 2026-10-01 — 2 ne
 Inherited R-039 / REL-021b resolved with ten repeated red faults and 134 scripts / 138 API passes: the unused server import is removed; legacy helpers enforce original-client ownership and halted-modification refusal. Owned cancellation and broker-error propagation remain covered.
 
 Inherited R-046 / REL-021b resolved: missing-tzdata faults fail closed with visible errors, while valid RTH fallback survives calendar-only failures. Two repeated red faults; 125 focused passes.
+
+Inherited R-034 / REL-021b resolved: expired option closes leave memory and disk at startup/daily cache use, while current and future expiries survive. Two repeated red faults; 81 focused passes, including three isolated actual-JavaScript cache cases.
