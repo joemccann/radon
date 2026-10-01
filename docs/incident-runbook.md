@@ -3233,6 +3233,62 @@ with a flag that subcommand does not accept.** Peak: 2026-09-29
 - **Code:** `scripts/grok_upgrade.py` (`parse_update_check`,
   `install_candidate_cli`, `_record_health`).
 
+## grok-upgrade-update-rollback-needs-symlink
+
+**`radon-grok-upgrade.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when `grok update` cannot `readlink` the candidate
+binary.** Peak: 2026-10-01 07:41:52Z, page
+`2e9419cb9d0d15abc107af4f2bb97ee4`, paged 07:45:01Z. Exec span was about
+3s, not `TimeoutStartSec=1200`. Exit status 1.
+
+- **Mechanism:** `Type=oneshot`, no `Restart=`. LKG was CLI 1.0.44 /
+  `grok-4.7`. `decide_upgrade` asked for 1.0.46. `install_candidate_cli`
+  `copy2`'d the resolved live ELF onto
+  `$GROK_HOME/bin/grok` (a regular file) and ran
+  `grok update --version 1.0.46` with `HOME` and `GROK_HOME` set to the
+  candidate. CLI 1.0.44 captures rollback with `readlink` of that path.
+  A regular file returns `EINVAL`. The CLI exited 1 with
+  `Error: Auto-update failed: capturing rollback state for
+  <candidate>/bin/grok: reading prior symlink target
+  <candidate>/bin/grok: Invalid argument (os error 22)`. The upgrader
+  slices stderr to 300 characters before the heartbeat, so the journal
+  line ends at `Invalid arg`. Live symlinks and
+  `/var/lib/radon/grok_lkg.json` stayed on 1.0.44 (mtime 2026-09-30
+  17:32Z). `requires_ib` is false. `/health/lite` stayed
+  `auth_state=authenticated`. The unpromoted candidate directory was
+  removed.
+- **Detection:** journal line `candidate grok update failed: Installing
+  Grok 1.0.46 (current: 1.0.44)...` and `reading prior symlink target`.
+  `systemctl show radon-grok-upgrade.service -p
+  Result,NRestarts,ExecMainStatus` → `exit-code` / `0` / `1`.
+- **Discriminating check:** stage a private copy two ways and run
+  `grok update --version 1.0.46` with `HOME` and `GROK_HOME` on that
+  tree only. A regular file at `bin/grok` reproduces os error 22. A
+  relative symlink `bin/grok -> ../downloads/grok-linux-x86_64` (payload
+  is a distinct copy of the ELF) installs 1.0.46 and retargets the
+  symlink at `../downloads/grok-1.0.46-linux-x86_64`. Confirm the live
+  inode and mtime of `/home/radon/.grok/downloads/grok-linux-x86_64`,
+  `/home/radon/.grok/bin/grok`, and `/home/radon/.local/bin/grok` do
+  not change. Python Turso canary is not this exit (no ledger read).
+  `/api/service-health` 401 without the probe token is anonymous. No
+  `/home/radon/.radon-deploy-transition.json`. `Result=signal` or exit
+  143 inside a deploy window is `deploy-stop-clean-oneshot-signal`.
+  A `pytest-of-` target on the live symlink is
+  `grok-live-binary-relinked-by-pytest`. `unexpected argument
+  '--no-auto-update'` is `grok-upgrade-update-rejects-no-auto-update`.
+  Not `ib-gateway-grouped`.
+- **Remediation (code):** copy the resolved CLI to
+  `<candidate>/downloads/grok-linux-x86_64` and symlink
+  `<candidate>/bin/grok` to `../downloads/grok-linux-x86_64` before
+  `grok update`. Do not point that symlink at the live ELF. Do not
+  restart-flap. The unit is not on `RERUNNABLE_ONESHOT_UNITS`. The
+  next 07:40 UTC timer installs 1.0.46 after this deploys. Live stays
+  on 1.0.44 until that promote.
+- **Regression:** `scripts/tests/test_grok_upgrade.py`
+  (`test_update_readlink_needs_installer_symlink`).
+- **Code:** `scripts/grok_upgrade.py` (`_stage_candidate_binary`,
+  `install_candidate_cli`).
+
 ## grok-live-binary-relinked-by-pytest
 
 **`radon-grok-upgrade.service` and `radon-grok-page-responder.service`
