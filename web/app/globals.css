@@ -13332,6 +13332,10 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   color: var(--text-muted);
 }
 
+.ticket-risk-head--spread {
+  border-top: 1px solid var(--line-grid);
+}
+
 .ticket-risk-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

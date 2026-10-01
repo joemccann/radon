@@ -116,6 +116,7 @@ export function OrderConfirmSummary({
   const variantClass = variant === "info" ? "order-confirm-summary-info" : "";
   const showMaxGain = summary.maxGainUnbounded === true || summary.maxGain != null;
   const showMaxLoss = summary.maxLossUnbounded === true || summary.maxLoss != null;
+  const withHeld = summary.withHeldLegs ?? null;
   const marginImpact = summary.coverageStatus === "resolved" ? summary.marginImpact ?? null : null;
   const marginRequirementUnavailable = marginImpact != null && marginImpact.requirement == null;
   const hasUndefinedRisk =
@@ -236,6 +237,22 @@ export function OrderConfirmSummary({
               {summary.maxLossUnbounded === true ? "UNBOUNDED" : formatCurrency(summary.maxLoss)}
             </span>
           </span>
+        )}
+        {withHeld != null && (
+          <>
+            <span className="order-confirm-metric" data-testid="order-confirm-spread-max-gain">
+              <span className="order-confirm-metric-label">Spread Max Gain:</span>
+              <span className="order-confirm-metric-value order-confirm-positive">
+                {withHeld.maxGainUnbounded ? "UNBOUNDED" : formatCurrency(withHeld.maxGain)}
+              </span>
+            </span>
+            <span className="order-confirm-metric" data-testid="order-confirm-spread-max-loss">
+              <span className="order-confirm-metric-label">Spread Max Loss:</span>
+              <span className="order-confirm-metric-value order-confirm-negative">
+                {withHeld.maxLossUnbounded ? "UNBOUNDED" : formatCurrency(withHeld.maxLoss)}
+              </span>
+            </span>
+          </>
         )}
         {showPayoff && payoff != null && (
           <span className="order-confirm-metric">

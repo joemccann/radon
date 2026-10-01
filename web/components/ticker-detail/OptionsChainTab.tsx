@@ -950,6 +950,7 @@ function OrderBuilder({
             total={riskState.summary.totalCost ?? null}
             totalLabel={riskState.summary.totalLabel ?? "TOTAL"}
             isCredit={netPremiumForPayoff(payoffLegs, isCombo, signedLimitPrice) < 0}
+            withHeldLegs={riskState.summary.withHeldLegs ?? null}
           />
         )}
 
