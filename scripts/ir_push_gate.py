@@ -141,8 +141,9 @@ def scan_commit_range(
         run,
     )
     for path, lines in _added_lines_by_file(patch).items():
+        safe_path = "[private path]" if find_private_identifiers(path) else path
         for kind in find_private_identifiers("\n".join(lines)):
-            findings.append(f"{kind} in diff of {path}")
+            findings.append(f"{kind} in diff of {safe_path}")
     return findings
 
 

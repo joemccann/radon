@@ -146,6 +146,20 @@ class TestScanCommitRange:
         _commit(repo, "x = 4\n", "fix: remove diagnostic")
         assert "ib_exec_id in diff of app.py" in gate.scan_commit_range(repo, "main", "fix/relay")
 
+    def test_private_filename_is_not_echoed_in_refusal(self, repo):
+        report = repo / f"diagnostic-{PAPER_ACCOUNT}.txt"
+        report.write_text("no private content here\n")
+        assert _git(repo, "add", report.name).returncode == 0
+        assert _git(repo, "commit", "-qm", "fix: diagnostic file").returncode == 0
+
+        with pytest.raises(gate.IrPushRefused, match="ib_account_id") as exc:
+            gate.check_publish(
+                repo=repo, base="main", ref="fix/relay",
+                env={"GROK_PAGE_AUTOPUSH": "1"},
+            )
+        assert PAPER_ACCOUNT not in str(exc.value)
+        assert "[private path]" in str(exc.value)
+
     def test_clean_branch_has_no_findings(self, repo):
         _commit(repo, "x = 2\n", "fix: relay\n\n" + VALID_BODY)
         assert gate.scan_commit_range(repo, "main", "fix/relay") == []
