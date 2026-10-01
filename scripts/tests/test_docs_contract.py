@@ -1325,3 +1325,15 @@ class TestResearchCutCommandDoc:
         result = subprocess.run([*argv, "--help"], cwd=_ROOT, env=env, text=True, capture_output=True, timeout=10)
         assert result.returncode == 0, result.stderr
         assert "--from-json" in result.stdout
+
+class TestGrokBinaryRecoveryDocumentation:
+    def test_incident_recovery_defers_to_trusted_locked_owner(self):
+        cases = (_ROOT / "docs/incident-runbook.md").read_text()
+        case = _section(cases, "grok-live-binary-relinked-by-pytest")
+        assert "grok-page-responder.md#binary-recovery" in case
+        owner = _section((_ROOT / "docs/grok-page-responder.md").read_text(), "Binary recovery")
+        for required in ("lkg_binary_problem", "exclusive_lock", "stop", "verify", "rollback", "escalate"):
+            assert required in owner.casefold(), required
+        upgrade = _section(cases, "grok-upgrade-update-rejects-no-auto-update")
+        assert "LKG is still absent" not in upgrade
+        assert "timer installs\n  `1.0.44`" not in upgrade

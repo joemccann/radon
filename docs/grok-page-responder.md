@@ -256,6 +256,37 @@ cat /var/lib/radon/grok_lkg.json
 `cloud/scripts/setup-grok-page-responder.sh` installs the latest stable
 CLI and seeds LKG from the live default.
 
+## Binary recovery
+
+**Symptom and prerequisites:** use this path when the configured Grok entry
+is missing or resolves to a discarded test candidate. Recovery belongs to the
+operator on the affected host, with the reviewed runtime/upgrader code and
+access to the existing LKG record. Repair affects both CLI entry links and
+incident response; it does not require restarting the trading stack.
+
+- **Safe diagnosis:** inspect the entry links and the LKG `binary_path` without
+  executing an unknown target. Validate the candidate as the unit user with
+  `grok_runtime.lkg_binary_problem`, including the responder checkout in
+  `extra_untrusted`. A JSON record alone is not proof of a usable executable.
+- **Stop conditions and repair:** stop if the target fails that check or its
+  promotion provenance cannot be established. Do not relink while an incident
+  or upgrade owns the shared runtime lock. Any operator relink must hold
+  `grok_runtime.exclusive_lock` on the configured lock and use the explicit
+  live/alias paths from the installed upgrade unit. Preserve the prior links
+  and candidate directories. The upgrader needs a working source binary
+  before it can check or install a candidate; restarting a dangling entry
+  cannot repair it.
+- **Verify:** inspect the resulting link targets, then verify the trusted
+  executable's version and the responder journal/health result. For an
+  upgrade, require its smoke and promotion result; a scheduled fire or exit
+  zero alone can mean `current` or `locked`. Read the LKG record after a
+  successful promotion, rather than assuming a particular version or file state.
+- **Rollback and escalation:** restore only a previously verified executable
+  under the same lock, retaining its candidate directory. If none is available,
+  leave automatic response disabled and escalate CLI installation/authentication
+  to the operator using [Install (VPS)](#install-vps). Do not substitute a temp
+  binary or delete a candidate still referenced by either entry link or LKG.
+
 ## Push guard
 
 The prompt tells grok never to push `main` or merge, but prompt text is not
