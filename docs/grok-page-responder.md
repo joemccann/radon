@@ -85,6 +85,7 @@ nature and its silence used to look exactly like health.
 |---|---|
 | Completed (including `pending: 0`) | `ok` |
 | Kill switch off | `paused` |
+| Runtime refused (`GROK_BIN` missing or failing, no trusted last-known-good) | `error` with the reason (exit 0, `skipped: grok_runtime`, no fallback pushover; the watchdog error bucket pages once) |
 | Skipped on a live lock | nothing written |
 | Raised on Turso / git | nothing written |
 
@@ -128,7 +129,26 @@ pickup refuses:
 - a diff touching `.github/` — a PR-triggered workflow runs from the PR head,
   which would execute attacker-authored CI in this repository;
 - a branch that does not descend from `origin/main`, or exceeds the commit cap
-  (default 20).
+  (default 20);
+- anything at all unless `GROK_PAGE_AUTOPUSH` is truthy in the pickup job's
+  own environment (the plist ships `0`). Off, a fire returns
+  `{"action": "disabled"}` before touching either remote;
+- a branch whose commit messages, added diff lines or paths, or PR
+  title/body carry a private identifier (`scripts/ir_push_gate.py`): IB
+  account ids (`U`/`DU`/`F` + 6-8 digits), numeric Flex exec ids (10+
+  digits), dotted-hex IB exec ids, or a specific credential shape from
+  `credential_redaction`. The branch stays local, the reason (kind and
+  location, never the value) is logged and sent to Pushover, and nothing is
+  redacted in place;
+- running at all from a clone that is behind `origin/main` (stale pickup
+  code).
+
+2026-09-30: a pickup install from before the refresh step (#759) ran a clone
+frozen before #773. It ignored `GROK_PAGE_AUTOPUSH`, opened
+`IR: grok incident fix on <branch>` placeholder PRs, and published one
+branch whose diff and messages carried private account and exec ids.
+After changing the plist, reinstall it (the `sed` below) and
+`launchctl unload`/`load` it.
 
 A pushed branch remains pending until pickup confirms its PR URL. Later
 runs reconcile the PR without pushing the branch again, reuse an open PR,
@@ -164,7 +184,7 @@ three flags all defaulted on, so a broken env file yielded maximum autonomy.
 |---|---|---|
 | `GROK_PAGE_RESPONDER` | Claim and launch | Do not claim or launch |
 | `GROK_PAGE_AUTOSHIP` | Edit, test, commit | Diagnose only. No edits or commits |
-| `GROK_PAGE_AUTOPUSH` | Push `fix/*` and ensure an open PR | Commit locally. Do not push |
+| `GROK_PAGE_AUTOPUSH` | Push `fix/*` and ensure an open PR | Commit locally. Nothing pushes: the responder, `ir_ensure_pr` (module and CLI) and the Mac mini pickup all refuse |
 
 `GROK_BIN` overrides the `grok` executable.
 
@@ -182,8 +202,10 @@ must contain these sections, each with real content:
 - Risk and rollback
 - Still open
 
-A missing, empty, TODO, branch-name, or `grok incident fix on` section is
-refused: pickup logs, sends a normal-priority Pushover, exits non-zero for
+`ir_ensure_pr.ensure_pr` refuses to create or edit a PR whose body lacks
+these sections, and its CLI builds the body from the head commit (there is
+no placeholder default). A missing, empty, TODO, branch-name, or
+`grok incident fix on` section is refused: pickup logs, sends a normal-priority Pushover, exits non-zero for
 that branch, and leaves it for the next cycle. The responder's AUTOPUSH
 path uses the same validator. Pickup also folds in the `watchdog_pages`
 row (page id, severity, first-seen, result) when Turso is reachable, and
