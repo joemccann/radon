@@ -1313,15 +1313,52 @@ class TestNightlyReportingDoc:
 
 
 class TestResearchCutCommandDoc:
-    def test_documented_pdf_cut_command_resolves_from_repository_root(self):
+    @pytest.mark.parametrize("module", ["worker", "harness", "cut_report"])
+    def test_documented_research_commands_resolve_from_repository_root(self, module):
         doc = (_ROOT / "docs/dropbox-research.md").read_text()
-        command = re.search(r"daily Dropbox PDF cut is `([^`]+)`", doc).group(1)
-        argv = shlex.split(command)
-        env = {"PATH": os.environ["PATH"]}
-        while "=" in argv[0]:
-            key, value = argv.pop(0).split("=", 1)
-            env[key] = value
-        argv[0] = sys.executable
-        result = subprocess.run([*argv, "--help"], cwd=_ROOT, env=env, text=True, capture_output=True, timeout=10)
-        assert result.returncode == 0, result.stderr
-        assert "--from-json" in result.stdout
+        commands = re.findall(r"`([^`]*\bpython[\d.]* -m research\." + module + r"\b[^`]*)`", doc)
+        assert commands, f"No documented research.{module} invocation"
+        for command in commands:
+            argv = shlex.split(command)
+            env = {"PATH": os.environ["PATH"]}
+            while "=" in argv[0]:
+                key, value = argv.pop(0).split("=", 1)
+                env[key] = value
+            argv[0] = sys.executable
+            # --help exits at argparse, before private files, auth or network.
+            result = subprocess.run([*argv, "--help"], cwd=_ROOT, env=env, text=True, capture_output=True, timeout=10)
+            assert result.returncode == 0, f"{command}: {result.stderr}"
+            if module == "cut_report":
+                assert "--from-json" in result.stdout
+            for flag in (arg for arg in argv if arg.startswith("--")):
+                assert flag in result.stdout, f"Undocumented parser flag: {flag}"
+
+
+class TestCloudModeDocumentation:
+    def test_cloud_thin_mode_has_one_owner(self):
+        launcher = (_ROOT / "scripts/cloud.sh").read_text()
+        dev = (_ROOT / "scripts/dev").read_text()
+        assert 'export RADON_DEV_PROFILE="cloud-thin"' in launcher
+        thin = dev.split('if [[ "$PROFILE" == "cloud-thin" ]]; then', 1)[1].split("\nfi", 1)[0]
+        assert "exec next dev" in thin
+        owner = (_ROOT / "docs/cloud-services.md").read_text()
+        assert "cloud-thin" in _section(owner, "Mode switch")
+        assert "laptop runs only Next.js" in owner
+        for path in ("README.md", "CLAUDE.md"):
+            text = (_ROOT / path).read_text()
+            assert "docs/cloud-services.md#mode-switch" in text
+            assert "Next.js + newsfeed" not in text
+        assert "not in `setup-vps.sh` yet" not in owner
+
+
+class TestGrokBinaryRecoveryDocumentation:
+    def test_incident_recovery_defers_to_trusted_locked_owner(self):
+        cases = (_ROOT / "docs/incident-runbook.md").read_text()
+        case = _section(cases, "grok-live-binary-relinked-by-pytest")
+        assert "grok-page-responder.md#binary-recovery" in case
+        owner = _section((_ROOT / "docs/grok-page-responder.md").read_text(), "Binary recovery")
+        for required in ("lkg_binary_problem", "exclusive_lock", "stop", "verify", "rollback", "escalate"):
+            assert required in owner.casefold(), required
+        upgrade = _section(cases, "grok-upgrade-update-rejects-no-auto-update")
+        assert "LKG is still absent" not in upgrade
+        assert "timer installs\n  `1.0.44`" not in upgrade

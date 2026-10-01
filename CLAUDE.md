@@ -123,14 +123,11 @@ Never make Yahoo the scheduled, primary, or only source for a series IB or UW ca
 
 ## Architecture
 
-`npm run dev` runs four services. Filter logs: `npm run dev -- --only <next|ib|api|scraper>`.
-
-| Service | Port / cadence |
-|---|---|
-| Next.js | 3000 |
-| FastAPI (`scripts/api/server.py`) | 8321 |
-| IB WS relay (`ib_realtime_server.js`) | 8765 |
-| Newsfeed scraper (`scripts/newsfeed/index.js`) | 120s |
+Development process commands and log-filter names are defined in
+[`scripts/dev`](scripts/dev), launched with `bun run dev` from `web/`.
+`--only` filters logs; it does not stop the other services. Choose the
+[local or cloud-thin mode](docs/cloud-services.md#mode-switch) before starting
+collectors.
 
 Next.js routes call FastAPI via `radonFetch()` (`web/lib/radonApi.ts`). **No `spawn()` from Next.js.** Detailed FastAPI rules in `scripts/api/CLAUDE.md`.
 
@@ -138,8 +135,9 @@ Next.js routes call FastAPI via `radonFetch()` (`web/lib/radonApi.ts`). **No `sp
 
 Both modes read/write the **same Turso DB** (`libsql://radon-joemccann.aws-us-west-2.turso.io`) **direct-to-cloud — no embedded replica anywhere as of 2026-05-20**. JSON files in `data/` are written alongside as fallback. The libsql embedded replica was retired after WAL conflicts between multi-writer-per-host and direct-cloud writers. Direct-to-cloud is the code default (DUR-07): a replica needs an explicit `RADON_DB_USE_REPLICA=1` opt-in, the legacy `RADON_DB_NO_REPLICA=1` kill switch always wins, and the fleet drop-in `radon-.service.d/common.conf` sets it on every `radon-*` unit as belt-and-suspenders. Reads +30–60 ms (absorbed by SWR); WAL contention structurally impossible. See `feedback_libsql_replica_one_writer.md`.
 
-- `scripts/cloud.sh` → `RADON_MODE=hetzner`. Schedulers run as systemd on Hetzner (`radon-{api,monitor,relay,refresh,nextjs}`); laptop runs only Next.js + newsfeed. `app.radon.run` serves when laptop closed.
-- `scripts/local.sh` → `RADON_MODE=local`. Laptop launchd plists own all schedulers.
+The [mode-switch owner](docs/cloud-services.md#mode-switch) describes which
+processes belong on each host. Production scheduling and deployment remain
+owned by the cloud runbook.
 
 **Auto-deploy on push to main.** `.github/workflows/ci.yml` runs the Vitest + pytest gate then deploys on green via the immutable `cloud/` runner's `deploy.sh`; no manual approval. Confirm: `gh run list --workflow=ci.yml --limit 1`. Runner materialization, control-plane sync, health-gated relay restart, rollback: `cloud/CLAUDE.md` § Deployment Contract.
 

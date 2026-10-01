@@ -83,6 +83,10 @@ Composed-method style, stdlib-only computation. Pure functions:
   `record_service_health("rsi-oversold", "ok", finished_at=scan_time)` →
   atomic JSON fallback `data/rsi_oversold.json`.
 - CLI: `--json`, `--no-db`, `--backfill` (2y Yahoo range).
+  `--no-db` suppresses normal persistence, but upstream requests still run.
+  A raised scan error reaches `main`'s `record_failed_cycle` even with that
+  flag, so use mocked-source tests for offline validation rather than a
+  credentialed diagnostic run.
 
 ## Storage — `scripts/db/migrations/0092_rsi_oversold.sql`
 
