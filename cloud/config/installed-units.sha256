@@ -75,6 +75,10 @@ ec62dee8c690542eafbdb5ca2eac930c2cdbd1a19c271bdecdada7f1faf8a9f3  radon-api.serv
 7533b72de84a013e6e63cc3097012fb8ec7ba4eff81a6c17a11e2b21762ed667  radon-perf-twr.service
 29da2f4ddb4ad94b3a66b796cb6db245c66fb973eafaf2062371ea7d558cd56f  radon-health.service
 00e6875e5be790a4d3100475f6750267ebe83b92cade0584df97de9ec83f20e3  radon-mcp.service
+# radon-control: host control socket for the admin service panel. A .service,
+# so install-units installs the body but never enables it; the operator runs
+# `systemctl enable --now radon-control.service` once per app host.
+63ffd7105c34e8c6346757b6ca6bfebfba44bd80ce2a0078316bc6daef642215  radon-control.service
 983e19233b56c8cf8a02cba5d7e9e7a45db671d02a734644561735f717f3e218  radon-equibles-short-crowding.timer
 9a0cf1dd58d8ee2d83e98376b72325d5e7623cc0efd5e8e64334a1b980e2b6d8  radon-demo-mirror.timer
 0386224d1ddb9a13b757469f4228c65ace8035b4f41a369027eaf88fe4773470  radon-oi-changes.service

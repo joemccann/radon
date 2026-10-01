@@ -2258,27 +2258,46 @@ async def ib_reset_backoff():
 # Operator admin — service control (systemd-backed)
 # ---------------------------------------------------------------------------
 
+def _admin_actor(request: Request) -> str:
+    """Who asked, for the service-control audit line (JWT ``sub`` or ``local``)."""
+    user = getattr(request.state, "user", None)
+    if isinstance(user, dict) and user.get("sub"):
+        return str(user["sub"])
+    return "local"
+
+
+def _audit_admin_action(actor: str, result) -> None:
+    logger.info(
+        "admin service action actor=%s unit=%s action=%s ok=%s rc=%s detail=%s",
+        actor, result.unit, result.action, result.ok, result.returncode,
+        (result.detail or "")[:200],
+    )
+
+
 @app.get("/admin/services")
 async def admin_services_list():
-    """List radon-* systemd units with current load/active/sub state.
+    """List radon-* units with current load/active/sub state.
 
-    On non-systemd hosts (laptop dev), returns the placeholder catalogue with
-    ``supported=False`` so the UI can render a graceful "not controllable
-    from here" state. Status payload is identical to the systemd path.
+    ``supported`` is True only when this process can run actions (local
+    systemctl, or the radon-control socket in the app container).
+    ``status_source`` says once where the rows came from. On a laptop the
+    placeholder catalogue renders with ``supported=False``.
     """
-    supported = admin_services.is_systemd_available()
-    units = await admin_services.list_units_with_status()
+    snapshot = await admin_services.services_snapshot()
     return {
-        "supported": supported,
+        "supported": snapshot["supported"],
+        "status_source": snapshot["status_source"],
         "host_role": admin_services.host_role(),
-        "units": [u.to_dict() for u in units],
+        "units": snapshot["units"],
     }
 
 
 @app.post("/admin/services/{unit}/{action}")
-async def admin_service_action(unit: str, action: str):
-    """Run ``systemctl <action> <unit>``. Allowlist-gated to radon-* units."""
-    result = await admin_services.control_unit(unit, action)
+async def admin_service_action(unit: str, action: str, request: Request):
+    """Run ``<action>`` on an allowlisted radon-* unit, audited with the actor."""
+    actor = _admin_actor(request)
+    result = await admin_services.control_unit(unit, action, actor=actor)
+    _audit_admin_action(actor, result)
     if not result.ok:
         if result.returncode == admin_services.PUSH_LOCK_HELD_RC:
             raise HTTPException(status_code=409, detail=result.to_dict())
@@ -2291,7 +2310,7 @@ async def admin_service_action(unit: str, action: str):
 
 
 @app.post("/admin/stack/restart")
-async def admin_stack_restart():
+async def admin_stack_restart(request: Request):
     """Run the operator CLI's ``radon restart`` to cycle every radon-* unit.
 
     The TCP response may not survive the restart (FastAPI itself is one of
@@ -2299,7 +2318,9 @@ async def admin_stack_restart():
     as acceptance; a dropped request is indeterminate and status polling is
     required before a safe retry.
     """
-    result = await admin_services.restart_full_stack()
+    actor = _admin_actor(request)
+    result = await admin_services.restart_full_stack(actor=actor)
+    _audit_admin_action(actor, result)
     if not result.ok:
         if result.returncode == admin_services.PUSH_LOCK_HELD_RC:
             raise HTTPException(status_code=409, detail=result.to_dict())

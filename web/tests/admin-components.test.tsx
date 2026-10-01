@@ -704,10 +704,11 @@ describe("<ServiceControlPanel />", () => {
               load_state: "host-health",
               active_state: "active",
               sub_state: "running",
-              description: "host health daemon",
+              description: "",
               can_control: false,
             },
           ],
+          status_source: "host-health",
         })}
         loading={false}
         error={null}
@@ -717,8 +718,57 @@ describe("<ServiceControlPanel />", () => {
     expect(screen.getByText(/cannot start, stop, or restart/)).toBeTruthy();
     expect(screen.queryByText(/not on the Hetzner VPS/)).toBeNull();
     expect(screen.getByText("Running")).toBeTruthy();
+    // The source is stated once for the table, never per row.
+    expect(screen.getByTestId("services-status-source").textContent).toMatch(/host health daemon/);
+    expect(screen.queryAllByText(/host health daemon/)).toHaveLength(1);
     const restartBtn = screen.getByTestId("service-restart-radon-api.service") as HTMLButtonElement;
     expect(restartBtn.disabled).toBe(true);
+  });
+
+  it("app host with the control socket renders real descriptions, uptime and armed controls", () => {
+    render(
+      <ServiceControlPanel
+        services={services({
+          supported: true,
+          host_role: "app",
+          status_source: "host-control",
+          units: [
+            {
+              unit: "radon-relay.service",
+              load_state: "loaded",
+              active_state: "active",
+              sub_state: "running",
+              description: "Radon IB realtime relay",
+              can_control: true,
+              uptime_secs: 3 * 3600,
+              allowed_actions: ["start", "stop", "restart"],
+            },
+            {
+              unit: "radon-api.service",
+              load_state: "loaded",
+              active_state: "active",
+              sub_state: "running",
+              description: "Radon FastAPI server",
+              can_control: true,
+              uptime_secs: 600,
+              allowed_actions: ["restart"],
+            },
+          ],
+        })}
+        loading={false}
+        error={null}
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Radon IB realtime relay")).toBeTruthy();
+    expect(screen.getByTestId("service-activity-radon-relay.service").textContent).toBe("running 3h");
+    expect(screen.getByTestId("services-status-source").textContent).toMatch(/control socket/);
+    expect((screen.getByTestId("service-restart-radon-relay.service") as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId("service-stop-radon-relay.service") as HTMLButtonElement).disabled).toBe(false);
+    const apiStop = screen.getByTestId("service-stop-radon-api.service") as HTMLButtonElement;
+    expect(apiStop.disabled).toBe(true);
+    expect(apiStop.title).toMatch(/admin panel/);
+    expect((screen.getByTestId("service-restart-radon-api.service") as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("sorts visible service rows from sortable column headers", () => {

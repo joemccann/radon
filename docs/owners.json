@@ -48,6 +48,16 @@
       "note": "App/broker split contract: mTLS Gateway control, cert lifecycle, role env checks. Recurring runbook drift class (DOC-002/006/009/010/017/018/019)."
     },
     {
+      "id": "host-control",
+      "globs": [
+        "scripts/control_service/**",
+        "scripts/api/host_control.py",
+        "cloud/services/radon-control.service"
+      ],
+      "owners": ["docs/operations.md"],
+      "note": "Host control socket for the /admin Service controls: transport, allowlist, self-protection, audit, rollout."
+    },
+    {
       "id": "api-trust-boundary",
       "globs": ["scripts/api/auth.py"],
       "owners": ["scripts/api/CLAUDE.md", "docs/spof-host-split.md"],

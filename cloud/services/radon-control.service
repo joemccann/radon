@@ -1,0 +1,39 @@
+[Unit]
+Description=Radon host control socket for the admin service panel
+# The containerised radon-api has no systemctl and no sudo. This daemon is its
+# only path to unit control: a unix socket (no TCP port) in /run/radon-control
+# that radon-app-runtime bind-mounts into the radon-api container only.
+# Contract: scripts/control_service/serve.py, docs/operations.md.
+#
+# Deliberately no Requires=/BindsTo=/PartOf= on any radon-* unit: restarting
+# radon-api (or the whole stack) from the panel must not take this down
+# mid-action. operator-radon.sh excludes it from `radon stop|start|restart`.
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=radon
+Group=radon
+WorkingDirectory=/home/radon/radon
+# Kept across restarts so the bind mount in the radon-api container keeps
+# pointing at the live directory; radon-app-runtime also pre-creates it.
+RuntimeDirectory=radon-control
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+Environment=RADON_CONTROL_SOCKET=/run/radon-control/control.sock
+# Each action runs `sudo -n /usr/local/bin/radon ...` (sudoers.d/radon-ops), so
+# setuid must keep working: no NoNewPrivileges / RestrictSUIDSGID here. The
+# operator CLI writes the deploy lock under /home/radon and its topology file
+# under /var/lib/radon, so neither is made read-only.
+PrivateTmp=yes
+ProtectSystem=full
+TasksMax=32
+MemoryMax=128M
+ExecStart=/home/radon/radon/.venv/bin/python -m scripts.control_service.serve
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

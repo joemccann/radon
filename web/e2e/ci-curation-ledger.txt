@@ -1,3 +1,11 @@
+# REVIEWED 2026-10-01 admin-service-controls.spec.ts - App-host Service controls
+#   through the radon-control socket. 1/1 Chromium against local next dev :3047
+#   (isolated AdminWorkspace bundle, clear-admin-component harness, fixture
+#   transport): real descriptions, "running 3h 12m", one status-source line,
+#   Stop disarmed on radon-api, one POST on the full restart path. Wire-level
+#   pins live in Vitest admin-action-request-assertions. Held out of
+#   e2e-financial-smoke pending next start preflight.
+admin-service-controls.spec.ts
 # REVIEWED 2026-09-30 credit-vix-tab.spec.ts - New CREDIT/VIX tab. Verified via
 #   Vitest credit-vix-api (missing 200, Turso vs disk) and credit-vix-panel
 #   (strip values, state tone, freshness rail 22:25 UTC, no front-run copy).

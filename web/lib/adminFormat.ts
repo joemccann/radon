@@ -285,9 +285,15 @@ export function gatewayPowerState(opts: {
   return opts.portListening ? "running" : "stopped";
 }
 
+function capitalizeAction(action: ServiceAction): string {
+  return action.charAt(0).toUpperCase() + action.slice(1);
+}
+
 /**
  * Why a service control button is disabled, for a self-explaining tooltip
  * (mirrors forcePushDisabledReason). Returns null when the button is enabled.
+ * `allowed_actions` (from the host control daemon) narrows the verbs per unit:
+ * radon-api / radon-nextjs serve this panel, so only Restart is offered.
  */
 export function serviceControlDisabledReason(opts: {
   unit: UnitStatus;
@@ -298,11 +304,17 @@ export function serviceControlDisabledReason(opts: {
 }): string | null {
   if (!opts.supported) {
     if (opts.hostRole === "app") {
-      return "The API container cannot call systemctl. State is from the host health daemon.";
+      return "The host control service is unreachable. State is from the host health daemon.";
     }
     return "Read-only: this browser is not on the Hetzner VPS.";
   }
   if (!opts.unit.can_control) return "This unit is not in the controllable allowlist.";
+  const allowed = opts.unit.allowed_actions;
+  if (Array.isArray(allowed) && !allowed.includes(opts.action)) {
+    return opts.action === "stop" && allowed.includes("restart")
+      ? "Stopping this unit takes down the admin panel. Use Restart, or the operator CLI over ssh."
+      : `${capitalizeAction(opts.action)} is not available for this unit from the panel.`;
+  }
   if (opts.pending) return "Action in flight...";
   if (opts.action === "start" && unitVerdict(opts.unit).label === "Running") return "Already running.";
   return null;

@@ -72,6 +72,7 @@ EXPECTED_SERVICE_FILES = [
     "radon-garch.service",
     "radon-garch.timer",
     "radon-health.service",
+    "radon-control.service",
     "radon-slm-tagger.service",
     "radon-slm-tagger-monitor.service",
     "radon-slm-tagger-monitor.timer",
