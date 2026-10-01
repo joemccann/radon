@@ -66,8 +66,11 @@ ranks, gap, and state in the job and put them in the payload.
   `^VIX`. **Never** pass VIX through `fetch_iei_hyg.fetch_closes` (that would
   qualify `Stock('VIX')`).
 
-`--no-db` skips all Turso I/O (ma-ratio / bpi precedent). Validation runs
-`--no-db --json`.
+`--no-db` skips normal history reads and snapshot persistence, but is not an
+offline or write-isolation boundary: upstream fetches still run, and
+`fetch_cboe_vix` can emit an error heartbeat if its client constructor fails.
+Use mocked-source tests for offline validation; do not use `--no-db --json`
+on a credentialed host as proof that no Turso writes can occur.
 
 Licensing: ETF prices + Cboe VIX, same class as vixts / iei-hyg. Not ICE OAS.
 
