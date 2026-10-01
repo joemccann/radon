@@ -79,7 +79,8 @@ export function toHttp(url) {
 
 export function isTransientTursoError(error) {
   if (!error) return false;
-  if (error instanceof TypeError) return true;
+  // REL-052 / NF-6: TypeError alone is a programming failure. Fetch
+  // transport errors still qualify through their explicit message/code below.
   const status = Number(error?.status ?? error?.statusCode ?? 0);
   const code = String(error?.code ?? "").toUpperCase();
   const message = String(error?.message ?? error);
