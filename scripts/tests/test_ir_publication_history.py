@@ -83,6 +83,9 @@ def test_added_line_starting_with_pluses_is_still_scanned(repo):
     assert any('ib_account_id' in f for f in gate.scan_commit_range(repo, 'main', 'fix/example'))
 
 
-def test_binary_patch_is_scanned_without_text_conversion(repo):
+def test_binary_patch_is_refused_without_text_conversion(repo):
+    # Binary blobs cannot be fully scanned, so the gate fails closed.
     commit(repo, 'blob.bin', '\x00account ' + ACCOUNT + '\n', 'binary evidence')
-    assert any('ib_account_id' in f for f in gate.scan_commit_range(repo, 'main', 'fix/example'))
+    with pytest.raises(gate.IrPushRefused, match='blob.bin') as exc:
+        gate.scan_commit_range(repo, 'main', 'fix/example')
+    assert ACCOUNT not in str(exc.value)
