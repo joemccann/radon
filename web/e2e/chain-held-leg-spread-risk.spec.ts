@@ -182,10 +182,10 @@ test.describe("Chain ticket: spread risk including the held leg", () => {
           has: page.locator(".ticket-risk-cell-label", { hasText: new RegExp(`^${label}$`) }),
         })
         .locator(".ticket-risk-cell-value");
-    await expect(cellValue("MAX GAIN")).toHaveText("$310.00");
-    await expect(cellValue("MAX LOSS")).toHaveText("$190.00");
-    await expect(cellValue("SPREAD MAX GAIN")).toHaveText("$110.00");
-    await expect(cellValue("SPREAD MAX LOSS")).toHaveText("$390.00");
+    await expect(cellValue("BEST CASE")).toHaveText("+$310.00");
+    await expect(cellValue("WORST CASE")).toHaveText("-$190.00");
+    await expect(cellValue("SPREAD BEST CASE")).toHaveText("+$110.00");
+    await expect(cellValue("SPREAD WORST CASE")).toHaveText("-$390.00");
 
     await risk.scrollIntoViewIfNeeded();
     await risk.screenshot({ path: "test-results/held-leg-spread-risk.png" });
