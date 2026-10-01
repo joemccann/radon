@@ -218,6 +218,16 @@ class TestScanCommitRangeOpaqueContent:
         found = gate.scan_commit_range(repo, "main", "fix/relay")
         assert found and ACCOUNT not in json.dumps(found)
 
+    def test_id_added_then_removed_inside_the_branch_is_found(self, repo):
+        _commit(repo, f"x = 2\nEXEC = '{IB_EXEC}'\n", "fix: relay")
+        _commit(repo, "x = 2\n", "fix: relay\n\n" + VALID_BODY)
+        self._add(repo, f"{ACCOUNT}.txt", b"")
+        _git(repo, "rm", "-q", f"{ACCOUNT}.txt")
+        _git(repo, "commit", "-q", "-m", "fix: drop")
+        found = gate.scan_commit_range(repo, "main", "fix/relay")
+        assert "ib_exec_id in diff of app.py" in found
+        assert any(f.startswith("ib_account_id in diff of") for f in found)
+
     def test_clean_binary_free_branch_still_passes(self, repo):
         self._add(repo, ".gitattributes", b"*.txt -diff\n")
         self._add(repo, "notes.txt", b"nothing private here\n")

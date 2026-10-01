@@ -138,8 +138,9 @@ def scan_commit_range(
 ) -> list[str]:
     """Findings for everything ``ref`` would publish on top of ``base``.
 
-    Scans each commit message (subject, body and trailers) and every added
-    diff line and path. Removed lines are already public on the base.
+    Scans each commit message (subject, body and trailers) and every line
+    and path any commit in the range adds. Removed lines are already public
+    on the base.
     """
     run = runner or _default_runner
     repo = Path(repo)
@@ -161,13 +162,16 @@ def scan_commit_range(
             raise IrPushRefused("cannot scan the branch: unparseable commit log")
         for kind in find_private_identifiers(message):
             findings.append(f"{kind} in commit message {sha.strip()[:12]}")
+    # Every commit's own patch, not one aggregate diff: pushing publishes
+    # each intermediate blob, so content added then removed still counts.
     # --text and --no-textconv: a branch-authored .gitattributes (-diff,
     # binary, a textconv driver) must not hide what the blob publishes.
     patch = _git(
         repo,
         [
-            "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--text",
-            "--no-renames", "--unified=0", f"{fork}..{ref}",
+            "log", "-p", "-m", "--format=", "--no-color", "--no-ext-diff",
+            "--no-textconv", "--text", "--no-renames", "--unified=0",
+            f"{fork}..{ref}",
         ],
         run,
     )
@@ -183,12 +187,12 @@ def scan_commit_range(
     names = _git(
         repo,
         [
-            "diff", "--name-only", "-z", "--no-renames", "--diff-filter=d",
-            f"{fork}..{ref}",
+            "log", "-m", "--format=", "--name-only", "-z", "--no-renames",
+            "--diff-filter=d", f"{fork}..{ref}",
         ],
         run,
     )
-    for path in names.split("\x00"):
+    for path in (name.strip("\n") for name in names.split("\x00")):
         if path and path not in added:
             for kind in find_private_identifiers(path):
                 findings.append(f"{kind} in diff of {_safe_path(path)}")
