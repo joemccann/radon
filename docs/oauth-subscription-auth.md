@@ -511,6 +511,6 @@ Native Mac OAuth above is the product pattern. On Radon hosts, the shared HTTP l
 - **Grok:** `~/.grok/auth.json` (entries keyed `<issuer>::<client_id>`, token under `key`, RFC 3339 `expires_at`), accepted by `api.x.ai` as a Bearer.
 - **Gemini:** the Antigravity CLI. Google retired the Gemini CLI OAuth client for individuals on 2026-09-18 and the Antigravity grant lacks the `generativelanguage` scope (403), so the rung shells out to `agy -p ... --output-format json` (`~/.local/bin/agy`, override `ANTIGRAVITY_CLI`) when `~/.gemini/antigravity-cli/antigravity-oauth-token` exists. Text only; image inputs skip the rung. There is no Gemini API key or OAuth-token path at all, under any flag (operator, 2026-09-18: Antigravity only).
 - **NVIDIA:** `NVIDIA_API_KEY` is always OK; text default `nvidia/nemotron-3-super-120b-a12b`.
-- **Cerebras:** last rung; leave paused on Hetzner until Joe yes.
+- **Cerebras:** last rung; uses available credit on Hetzner, nothing is tried after it.
 
 Weekend bash wrappers remain the Claude Code CLI sibling (they *unset* prepaid keys so the agent bills claude.ai). See the auth matrix in [Dropbox research](dropbox-research.md#auth-matrix-research--cta--knowledge--newsfeed).
