@@ -1,8 +1,8 @@
-"""Pool-based order cancel/modify — no subprocess, no extra connections.
+"""Legacy same-connection order helpers; production routes use subprocesses.
 
-Routes cancel/modify through the IBPool's sync connection (clientId=0, master).
-The master client can manage ALL orders regardless of which clientId placed them,
-eliminating the need to spawn subprocess scripts with their own IB connections.
+REL-021b / R-039: seeing an order through a master connection does not grant
+ownership. These helpers refuse unless the session is the original placing
+client. They never reconnect a shared pool session to acquire that authority.
 """
 
 from __future__ import annotations
@@ -33,6 +33,19 @@ def _find_trade(client, order_id: int, perm_id: int):
     return None
 
 
+def _ownership_error(client, trade) -> Optional[dict]:
+    """Refuse unknown or different session identities before any mutation."""
+    current = getattr(getattr(client.ib, "client", None), "clientId", None)
+    owner = getattr(trade.order, "clientId", None)
+    if type(current) is int and type(owner) is int and current >= 0 and current == owner:
+        return None
+    return {
+        "status": "error", "code": "ORDER_CLIENT_MISMATCH",
+        "message": "Order management requires the original placing client; use the subprocess route",
+        "orderId": trade.order.orderId,
+    }
+
+
 async def pool_cancel_order(
     client,
     order_id: int = 0,
@@ -40,17 +53,17 @@ async def pool_cancel_order(
     max_wait: float = 5.0,
     poll_interval: float = 0.5,
 ) -> dict:
-    """Cancel an open order using a pool connection (master clientId=0).
-
-    Master client can cancel ANY order regardless of which clientId placed it.
-    No reconnection needed — no subprocess spawned.
-    """
+    """Cancel only an order owned by this session; cancellation remains halt-safe."""
     trade = await asyncio.to_thread(_find_trade, client, order_id, perm_id)
     if trade is None:
         return {
             "status": "error",
             "message": f"{working_order_missing_message()} (orderId={order_id}, permId={perm_id})",
         }
+
+    ownership_error = _ownership_error(client, trade)
+    if ownership_error:
+        return ownership_error
 
     status = trade.orderStatus.status
     if status in ("Filled", "Cancelled", "ApiCancelled"):
@@ -99,17 +112,22 @@ async def pool_modify_order(
     max_wait: float = 5.0,
     poll_interval: float = 0.5,
 ) -> dict:
-    """Modify an open order using a pool connection (master clientId=0).
+    """Modify only an owned order while trading is enabled (REL-021b / R-039)."""
+    from trading_halt import is_trading_halted
 
-    Master client can modify ANY order regardless of which clientId placed it.
-    No reconnection needed — no subprocess spawned.
-    """
+    if is_trading_halted():
+        return {"status": "error", "code": "TRADING_HALTED",
+                "message": "Trading halted; order not modified", "orderId": order_id}
     trade = await asyncio.to_thread(_find_trade, client, order_id, perm_id)
     if trade is None:
         return {
             "status": "error",
             "message": f"{working_order_missing_message()} (orderId={order_id}, permId={perm_id})",
         }
+
+    ownership_error = _ownership_error(client, trade)
+    if ownership_error:
+        return ownership_error
 
     status = trade.orderStatus.status
     if status in ("Filled", "Cancelled", "ApiCancelled"):
