@@ -317,6 +317,53 @@ def test_inputs_pasted_into_run_is_caught() -> None:
     assert untrusted_run_interpolations(mutated) == ["cut/Build daily cut report"]
 
 
+# Production database secrets live only in GitHub Environments whose
+# deployment branch policy is `main`. The `if:` guard protects refs that carry
+# it; the environment also refuses a branch cut from an older, unguarded
+# commit, which still reads repository-level secrets. The cut job only reads,
+# so its environment holds a read-only Turso token.
+ENVIRONMENT_SECRETS = {
+    "external-health-probe.yml": (
+        "probe",
+        "health-probe",
+        {"TURSO_DB_URL", "TURSO_AUTH_TOKEN", "RADON_PROBE_FRESHNESS_TOKEN"},
+    ),
+    "research-pdf-cut.yml": ("cut", "research-cut", {"TURSO_DB_URL", "TURSO_AUTH_TOKEN"}),
+}
+PROD_DATA_SECRETS = {"TURSO_DB_URL", "TURSO_AUTH_TOKEN", "RADON_PROBE_FRESHNESS_TOKEN"}
+
+
+def _environment_name(job: dict) -> str:
+    env = job.get("environment")
+    return str(env.get("name", "")) if isinstance(env, dict) else str(env or "")
+
+
+@pytest.mark.parametrize("name", sorted(ENVIRONMENT_SECRETS))
+def test_production_data_secrets_come_from_a_main_only_environment(name: str) -> None:
+    job_name, environment, secrets = ENVIRONMENT_SECRETS[name]
+    job = _load((WORKFLOWS / name).read_text(encoding="utf-8"))["jobs"][job_name]
+    assert _environment_name(job) == environment
+    assert _secrets_in(job) == secrets
+    assert MAIN_GUARD in str(job.get("if", ""))
+
+
+@pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
+def test_no_other_job_reads_production_data_secrets(path: Path) -> None:
+    allowed = ENVIRONMENT_SECRETS.get(path.name)
+    for name, job in (_load(path.read_text(encoding="utf-8")).get("jobs") or {}).items():
+        if allowed and name == allowed[0]:
+            continue
+        assert not _secrets_in(job) & PROD_DATA_SECRETS, f"{path.name}:{name}"
+
+
+def test_dropping_the_environment_from_a_secret_job_is_caught() -> None:
+    for name, (job_name, environment, _) in ENVIRONMENT_SECRETS.items():
+        text = (WORKFLOWS / name).read_text(encoding="utf-8")
+        mutated = text.replace(f"    environment: {environment}\n", "", 1)
+        assert mutated != text, f"{name} has no `environment: {environment}` line"
+        assert _environment_name(_load(mutated)["jobs"][job_name]) != environment
+
+
 @pytest.mark.parametrize('guard', [MAIN_GUARD, PUSH_GUARD])
 @pytest.mark.parametrize('condition', [
     "{guard} || always()",
