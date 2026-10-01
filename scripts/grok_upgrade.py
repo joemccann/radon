@@ -22,7 +22,7 @@ from typing import Callable, Optional
 
 import grok_runtime
 import ir_pr_description
-from grok_page_responder import parse_grok_result
+from grok_page_responder import grok_output_text, parse_grok_result
 
 Runner = Callable[..., object]
 SERVICE_NAME = "grok-upgrade"
@@ -33,8 +33,11 @@ _INSTALLER_LINK = Path("..") / "downloads" / _INSTALLER_PAYLOAD
 SMOKE_PROMPT = """Dry-run smoke for a Grok track-latest candidate. Do not edit files.
 Do not push. Do not merge.
 
-Write a markdown body with these sections, each with two real sentences
-about this smoke check itself (not TODO, not a branch name):
+Do not run tools or commands; answer from this prompt alone.
+
+Reply with only a markdown body. The first line must be `## What broke`:
+no preamble, no plan, nothing before it. Use these sections, each with two
+real sentences about this smoke check itself (not TODO, not a branch name):
 ## What broke
 ## Root cause
 ## What changed
@@ -45,6 +48,31 @@ about this smoke check itself (not TODO, not a branch name):
 End with exactly one line:
 RESULT: stand_down | grok upgrade smoke returned a structured IR summary
 """
+
+
+# `## What broke` anywhere, also glued to the end of a preamble line.
+_FIRST_IR_HEADING = re.compile(
+    r"#{1,3}[ \t]*" + re.escape(ir_pr_description.REQUIRED_SECTIONS[0]) + r"\b",
+    re.I,
+)
+
+
+def smoke_ir_body(text: str) -> str:
+    """The smoke's IR body: the reply from its first required heading on.
+
+    ``grok --output-format json`` joins the assistant messages of each turn
+    with no separator. When the model writes a sentence, calls a tool, then
+    writes the body, ``text`` reads ``...then write the summary.## What
+    broke``: the first heading is glued to the preamble line and is not a
+    markdown heading, so the validator reports it missing. Cut everything
+    before the first ``## What broke`` so it starts its own line. The strict
+    validator still runs on the result: every section must be a real
+    ``## <name>`` line with real content.
+    """
+    match = _FIRST_IR_HEADING.search(text or "")
+    if not match:
+        return text or ""
+    return text[match.start():]
 
 
 class GrokUpgradeError(RuntimeError):
@@ -236,7 +264,10 @@ def run_smoke(
     disposition, summary = parse_grok_result(stdout)
     if disposition not in {"stand_down", "ops_only", "code_fix"}:
         raise GrokUpgradeError(f"smoke RESULT was {disposition}: {summary}")
-    ir_pr_description.validate_ir_description(stdout, branch="fix/grok-upgrade-smoke")
+    # Validate the reply, not the JSON envelope: in raw stdout the headings
+    # sit inside an escaped string and every section reads as missing.
+    body = smoke_ir_body(grok_output_text(stdout))
+    ir_pr_description.validate_ir_description(body, branch="fix/grok-upgrade-smoke")
     return disposition, summary
 
 
