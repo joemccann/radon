@@ -16,11 +16,11 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | curve | `/regime/curve` | `yield-curve` | [curve.md](curve.md) |
 | credit | `/regime/credit` | `credit-spread` | [credit.md](credit.md) |
 | iei-hyg | `/regime/iei-hyg` | `iei-hyg` | [iei-hyg.md](iei-hyg.md) (tab renamed TSY/HY 2026-08-23) |
-| credit-vix | `/regime/credit-vix` | `credit-vix` | [credit-vix.md](credit-vix.md) (SHY minus HYG vs VIX) |
+| credit-vix | `/regime/credit-vix` | `credit-vix` | [credit-vix.md](credit-vix.md) (SHY minus HYG vs VIX; diagnostic I/O limits) |
 | trin | `/regime/trin` | `trin` | [trin.md](trin.md) (spec; build in flight) |
 | divyield | `/regime/divyield` | `div-yield` | [divyield.md](divyield.md) |
 | ma-ratio | `/regime/ma-ratio` | `ma-ratio` | [ma-ratio.md](ma-ratio.md) (an ok-heartbeat timeout no longer fails the oneshot) |
-| rsi-oversold | `/regime/rsi-oversold` | `rsi-oversold` | [rsi-oversold.md](rsi-oversold.md) |
+| rsi-oversold | `/regime/rsi-oversold` | `rsi-oversold` | [rsi-oversold.md](rsi-oversold.md) (diagnostic I/O limits) |
 | calm-streak | `/regime/calm-streak` | `calm-streak` | [calm-streak.md](calm-streak.md) (migration renumbered 0074 to 0076 2026-09-17; `migrate.py` now refuses duplicate version numbers) |
 | hyad | `/regime/hyad` | `hy-ad` | [hyad.md](hyad.md) (SPX history uses stored Cboe closes for dates absent from credit history) |
 | hhlev | `/regime/hhlev` | `hhlev` | [hhlev.md](hhlev.md) |

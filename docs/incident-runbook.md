@@ -3222,9 +3222,10 @@ with a flag that subcommand does not accept.** Peak: 2026-09-29
   (old keys still work). Call `grok update` or `grok update --version
   <latest>` with no `--no-auto-update`. Pass the failure string as
   `error={"message": ...}`. Do not restart-flap; the unit is not on
-  `RERUNNABLE_ONESHOT_UNITS`. The next 07:40 UTC timer installs
-  `1.0.44` after this deploys. LKG is still absent until that promote
-  writes it.
+  `RERUNNABLE_ONESHOT_UNITS`. The timer resolves its candidate at run time;
+  verify the smoke/promotion result and LKG record using
+  [binary recovery](grok-page-responder.md#binary-recovery). Do not infer
+  the installed version or LKG availability from this historical incident.
 - **Regression:** `scripts/tests/test_grok_upgrade.py`
   (`test_parse_update_check_grok_103_version_keys`,
   `test_update_argv_omits_flag_grok_update_rejects`,
@@ -3306,11 +3307,11 @@ fail with `FileNotFoundError: /home/radon/.local/bin/grok`.** First seen
 - **Discriminating check:** `readlink -f /home/radon/.local/bin/grok` and
   `readlink /home/radon/.grok/bin/grok` show a `pytest-of-` path. A
   promote by the timer points only into `/var/lib/radon/grok-upgrade`.
-- **Remediation (ops):** repoint `/home/radon/.grok/bin/grok` at a real
-  binary (`binary_path` in `/var/lib/radon/grok_lkg.json` when it exists,
-  otherwise rerun the xAI installer as radon), then
-  `systemctl start radon-grok-upgrade.service`. Do not delete
-  `/var/lib/radon/grok-upgrade/candidate-*` that LKG names.
+- **Remediation (ops):** follow the canonical
+  [binary recovery procedure](grok-page-responder.md#binary-recovery),
+  including target validation, runtime-lock exclusion, verification and
+  rollback. An existing LKG record alone does not authorize relinking or
+  executing its target.
 - **Remediation (code):** the upgrader moves only `--live-bin` and an
   explicit `--alias-bin` (the unit passes `/home/radon/.grok/bin/grok`),
   and refuses a candidate outside `--scratch`. Upgrade tests fake HOME,
