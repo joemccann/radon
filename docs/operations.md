@@ -559,6 +559,26 @@ Rollout, one host at a time, off RTH, with a second SSH session open:
 
 Rollback: `ufw disable` (broker: its prior state), or restore the backup `ufw --force reset` wrote under `/etc/ufw/*.rules.<timestamp>`.
 
+### Hetzner Cloud Firewalls (`cloud/hetzner/firewalls/`)
+
+`fw-radon-app.json`, `fw-radon-broker.json`, `fw-radon-ops.json` are `hcloud firewall replace-rules` rule files, inbound only (anything not listed is dropped; outbound is open). `hcloud_firewalls.py` renders `__OPERATOR_RECOVERY_IP__/32` from `--recovery-ip` (one public IPv4) and prints the commands; `--apply` runs them with your own `hcloud` context. Deploy never calls it (`cloud/tests/test_hetzner_firewalls.py` pins the shapes and that fact).
+
+- **fw-radon-app:** 22, 80, 443 any; 41641/udp any. SSH stays open to any because CI deploys over SSH from GitHub-hosted runners; restricting it needs the deploy path moved first.
+- **fw-radon-broker:** 22 from the recovery `/32`; 41641/udp any. No web ports.
+- **fw-radon-ops:** 22 from the recovery `/32`; 80, 443 any; 41641/udp any.
+- No 4001/8340 rules: Hetzner Cloud Firewalls filter the public interface only, so the app-to-broker private-net path (`10.0.0.2` -> `10.0.0.4:4001/8340`) never passes them. That path is held by the bind addresses and the broker ufw set above.
+
+Rollout (operator laptop, `hcloud context use <project>`):
+
+1. Dry run: `python3 cloud/hetzner/firewalls/hcloud_firewalls.py --firewall fw-radon-broker --server radon-broker --recovery-ip <your public ip>`.
+2. Same with `--apply`. Verify from the laptop over the tailnet: `ssh radon-broker true`; from the app: the 8340 `/healthz` probe (spof-host-split.md) and `/health` `auth_state=authenticated`.
+3. `--firewall fw-radon-app --server ib-gateway --apply`. Verify `curl -fsS https://app.radon.run/health` and that the next CI deploy is green.
+4. `fw-radon-ops` only once an ops server exists.
+
+Rollback: `hcloud firewall remove-from-resource <fw> --type server --server <name>`.
+
+Protection (once, both servers): `hcloud server enable-protection ib-gateway delete rebuild` and `hcloud server enable-protection radon-broker delete rebuild`. Verify `hcloud server describe <name> -o json | jq .protection` shows `delete` and `rebuild` true. Disable with `disable-protection` before a deliberate rebuild (spof-host-split.md "Never").
+
 ## Health monitoring (isolated daemon + edge surface)
 
 The health surface is **decoupled from the trading stack** so it keeps reporting precisely when the stack is down. Two layers plus an off-box witness:

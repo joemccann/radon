@@ -168,8 +168,11 @@ Operator commands after the cut:
      allowlist, default `radon-app`, matching the `DNS:radon-app` SAN the
      mint script writes. An empty value is a `ConfigError` at startup, not a
      silent open door; set it only if you mint a client cert under a
-     different name. Bind is `10.0.0.4`, never `0.0.0.0`. Hetzner firewall:
-     8340 and 4001 from `10.0.0.2` only.
+     different name. Bind is `10.0.0.4`, never `0.0.0.0`. 8340 and 4001
+     from `10.0.0.2` only is the broker ufw set (`cloud/scripts/host-firewall.sh
+     --role broker`); a Hetzner Cloud Firewall cannot express it because it
+     filters the public interface only (`cloud/hetzner/firewalls/`, runbook in
+     operations.md).
   Verify from the app host, no Gateway side effect:
   `curl --cacert /etc/radon/ib-remote/ca.pem --cert /etc/radon/ib-remote/client.pem --key /etc/radon/ib-remote/client-key.pem https://10.0.0.4:8340/healthz`
   → `{"ok":true,"service":"ib-gateway-remote"}`.

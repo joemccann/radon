@@ -1,0 +1,4 @@
+[
+  {"direction": "in", "protocol": "tcp", "port": "22", "source_ips": ["__OPERATOR_RECOVERY_IP__/32"], "description": "ssh: operator recovery only"},
+  {"direction": "in", "protocol": "udp", "port": "41641", "source_ips": ["0.0.0.0/0", "::/0"], "description": "tailscale direct"}
+]

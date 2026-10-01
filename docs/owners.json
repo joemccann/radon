@@ -59,7 +59,7 @@
     },
     {
       "id": "network-trust",
-      "globs": ["cloud/tailscale/**", "cloud/ibc-overrides/**", "cloud/scripts/host-firewall.sh"],
+      "globs": ["cloud/tailscale/**", "cloud/ibc-overrides/**", "cloud/scripts/host-firewall.sh", "cloud/hetzner/**"],
       "owners": ["docs/operations.md"],
       "note": "Ops Plane step 2 network trust: tailnet policy, host firewalls, Hetzner Cloud Firewalls. All operator-applied; the runbook is the only place the apply order lives."
     },
