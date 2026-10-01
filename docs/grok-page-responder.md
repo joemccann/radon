@@ -72,6 +72,9 @@ Setup drops a `.radon-page-responder` marker in the clone. It is gitignored on
 purpose: `sync_remote_clone` fast-forwards only a clean tree, so an untracked
 marker reads as dirty work and pins the clone to whatever grok last committed.
 A responder running code older than `main` is the failure this prevents.
+For the same reason the sync checks out `main` before fast-forwarding: a run
+leaves the clone on its `fix/*` branch (kept for the pickup), and a
+fast-forward of that branch fails every cycle (`"sync": "ff-failed"`).
 
 Claude analyze-only remains laptop-only: `com.radon.incident-responder`.
 It never pushes.
