@@ -8750,3 +8750,13 @@ Review: seven inherited findings repaired in separate commits with repeated seri
 - [x] T1 depends_on: [] Isolated keyless compile-mode build (`.next-setup-gate`, skip production trace audit) + Playwright config/spec outside `web/e2e/` + vitest contract.
 - [x] T2 depends_on: [T1] New non-gating `e2e-setup-gate` CI job + `test_ci_setup_gate_job.py` pin.
 - [ ] T3 depends_on: [T2] Ready PR vs main. Exact-head CI green. No merge.
+
+## Nightly testing 2026-10-01
+- [x] T1 Build toolchain, recover checkpoint and select authorized branch. depends_on: []
+- [x] T2 Audit delta/importers, reconcile ledgers, run standing gates and three delta repetitions. depends_on: [T1]
+- [x] T3 Repair verified findings with red/green evidence. depends_on: [T2]
+- [x] T4 Complete three serial closing rounds and hygiene review. depends_on: [T3]
+- [x] T5 Prepare draft PR and rolling-comment artifacts; track publication and exact-head CI receipts on issue #83. depends_on: [T4]
+
+### Review
+Six findings have red/green evidence; three full serial rounds pass Python 13448, Vitest 10300 and cloud 2400 each. Cloud FAILED lists match the empty detached-base list. TypeScript and targeted coverage pass. Fake-only execution; no production access, credential-file lookup, main push or merge. Publication, exact-head CI/browser results and the single final checkpoint are recorded on issue #83 after committing, avoiding a change to the head whose checks are being reported.
