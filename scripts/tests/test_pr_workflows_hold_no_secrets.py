@@ -47,15 +47,64 @@ def _secrets_in(node) -> set[str]:
     return set(SECRET_RE.findall(yaml.safe_dump(node, default_flow_style=False)))
 
 
+def _requires_guard(condition: str, guards: set[str]) -> bool:
+    """Conservative implication check for positive guards in AND/OR expressions.
+
+    Every OR arm must require a guard; one AND term is sufficient. Unknown
+    atoms and negated expressions prove nothing. Quoted text is never code.
+    This intentionally does not try to evaluate the full Actions language.
+    """
+    condition = condition.strip()
+    if condition.startswith('${{') and condition.endswith('}}'):
+        condition = condition[3:-2].strip()
+    tokens = re.findall(r"'(?:[^']|'')*'|&&|\|\||[()]|[^'&|()]+", condition)
+    depth = 0
+    conjunctions, alternatives = [], []
+    outer_close = None
+    for index, token in enumerate(tokens):
+        if token == '(':
+            depth += 1
+        elif token == ')':
+            depth -= 1
+            if depth == 0 and outer_close is None:
+                outer_close = index
+        elif depth == 0:
+            if token == '&&':
+                conjunctions.append(index)
+            elif token == '||':
+                alternatives.append(index)
+        if depth < 0:
+            return False
+    if depth != 0:
+        return False
+    if tokens and tokens[0] == '(' and outer_close == len(tokens) - 1:
+        return _requires_guard(''.join(tokens[1:-1]), guards)
+    cuts = alternatives or conjunctions
+    if cuts:
+        edges = [-1, *cuts, len(tokens)]
+        results = [_requires_guard(''.join(tokens[a + 1:b]), guards) for a, b in zip(edges, edges[1:])]
+        return all(results) if alternatives else any(results)
+    return condition in guards
+
+
+def _requires_success(condition: str) -> bool:
+    # GitHub inserts success() only in the absence of a status function.
+    # always()/!cancelled()/failure() can run despite a skipped guarded need.
+    status_override = re.search(r'\b(?:always|cancelled|failure|success)\s*\(', condition)
+    return not status_override or _requires_guard(condition, {'success()'})
+
+
 def _push_only(name: str, jobs: dict, seen: frozenset[str] = frozenset()) -> bool:
     """True when this job can only run on a push (directly or via `needs`)."""
     if name in seen or name not in jobs:
         return False
     job = jobs[name]
-    if PUSH_GUARD in str(job.get("if", "")):
+    if _requires_guard(str(job.get("if", "")), {PUSH_GUARD}):
         return True
     needs = _needs(job)
-    return bool(needs) and any(_push_only(n, jobs, seen | {name}) for n in needs)
+    return _requires_success(str(job.get("if", ""))) and bool(needs) and any(
+        _push_only(n, jobs, seen | {name}) for n in needs
+    )
 
 
 def unguarded_secrets(text: str) -> list[str]:
@@ -71,7 +120,7 @@ def unguarded_secrets(text: str) -> list[str]:
         for secret in sorted(_secrets_in(job)):
             bad.append(f"{name}: {secret}")
         for i, step in enumerate(steps):
-            if PUSH_GUARD in str(step.get("if", "")):
+            if _requires_guard(str(step.get("if", "")), {PUSH_GUARD}):
                 continue
             label = step.get("name") or step.get("uses") or f"step {i}"
             for secret in sorted(_secrets_in(step)):
@@ -150,7 +199,8 @@ def _non_main_triggers(wf: dict) -> set[str]:
 
 def _main_guarded(cond: str, wf: dict) -> bool:
     # A push guard means main when push itself is restricted to main.
-    return MAIN_GUARD in cond or (PUSH_GUARD in cond and _push_main_only(wf))
+    guards = {MAIN_GUARD} | ({PUSH_GUARD} if _push_main_only(wf) else set())
+    return _requires_guard(cond, guards)
 
 
 def _main_only(name: str, wf: dict, seen: frozenset[str] = frozenset()) -> bool:
@@ -161,7 +211,9 @@ def _main_only(name: str, wf: dict, seen: frozenset[str] = frozenset()) -> bool:
     if _main_guarded(str(job.get("if", "")), wf):
         return True
     needs = _needs(job)
-    return bool(needs) and any(_main_only(n, wf, seen | {name}) for n in needs)
+    return _requires_success(str(job.get("if", ""))) and bool(needs) and any(
+        _main_only(n, wf, seen | {name}) for n in needs
+    )
 
 
 def non_main_reachable_secrets(text: str) -> list[str]:
@@ -310,3 +362,65 @@ def test_dropping_the_environment_from_a_secret_job_is_caught() -> None:
         mutated = text.replace(f"    environment: {environment}\n", "", 1)
         assert mutated != text, f"{name} has no `environment: {environment}` line"
         assert _environment_name(_load(mutated)["jobs"][job_name]) != environment
+
+
+@pytest.mark.parametrize('guard', [MAIN_GUARD, PUSH_GUARD])
+@pytest.mark.parametrize('condition', [
+    "{guard} || always()",
+    "always() || ({guard} && success())",
+    "!({guard})",
+    "contains('{guard}', 'github')",
+])
+def test_guard_text_without_guard_semantics_is_rejected(guard, condition):
+    condition = condition.format(guard=guard.replace("'", "''") if condition.startswith("contains") else guard)
+    workflow = {
+        'on': {'push': {'branches': ['main']}, 'pull_request': {}, 'workflow_dispatch': {}},
+        'jobs': {'publish': {'if': condition, 'env': {'TOKEN': '${{ secrets.TEST_TOKEN }}'}, 'steps': []}},
+    }
+    text = yaml.safe_dump(workflow)
+    assert non_main_reachable_secrets(text) == ['publish: TEST_TOKEN']
+    if guard == PUSH_GUARD:
+        assert unguarded_secrets(text) == ['publish: TEST_TOKEN']
+
+
+@pytest.mark.parametrize('condition', ['always()', '!cancelled()', 'failure()', 'success() || always()'])
+def test_status_override_cannot_inherit_a_skipped_dependency_guard(condition):
+    text = yaml.safe_dump({
+        'on': {'push': {'branches': ['main']}, 'pull_request': {}, 'workflow_dispatch': {}},
+        'jobs': {
+            'guard': {'if': f'{MAIN_GUARD} && {PUSH_GUARD}', 'steps': []},
+            # A failed unguarded need makes failure() genuinely reachable too.
+            'check': {'steps': [{'run': 'exit 1'}]},
+            'publish': {'needs': ['guard', 'check'], 'if': condition,
+                        'env': {'TOKEN': '${{ secrets.TEST_TOKEN }}'}, 'steps': []},
+        },
+    })
+    assert non_main_reachable_secrets(text) == ['publish: TEST_TOKEN']
+    assert unguarded_secrets(text) == ['publish: TEST_TOKEN']
+
+
+@pytest.mark.parametrize('condition', [
+    "${{ (github.ref == 'refs/heads/main') && !cancelled() }}",
+    "(github.ref == 'refs/heads/main' && inputs.a) || (inputs.b && github.ref == 'refs/heads/main')",
+    "github.ref == 'refs/heads/main' && (needs.test.result == 'success' || needs.test.result == 'skipped')",
+])
+def test_every_branch_requiring_main_is_accepted(condition):
+    text = yaml.safe_dump({
+        'on': {'workflow_dispatch': {}},
+        'jobs': {'publish': {'if': condition, 'env': {'TOKEN': '${{ secrets.TEST_TOKEN }}'}, 'steps': []}},
+    })
+    assert non_main_reachable_secrets(text) == []
+
+
+@pytest.mark.parametrize('condition', ['', 'inputs.enabled', 'success() && !cancelled()'])
+def test_dependency_guard_is_valid_when_success_is_required(condition):
+    text = yaml.safe_dump({
+        'on': {'push': {'branches': ['main']}, 'pull_request': {}},
+        'jobs': {
+            'guard': {'if': f'{MAIN_GUARD} && {PUSH_GUARD}', 'steps': []},
+            'publish': {'needs': ['guard'], 'if': condition,
+                        'env': {'TOKEN': '${{ secrets.TEST_TOKEN }}'}, 'steps': []},
+        },
+    })
+    assert non_main_reachable_secrets(text) == []
+    assert unguarded_secrets(text) == []
