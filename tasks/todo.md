@@ -1,3 +1,9 @@
+# Task: DeepSec operator-only re-verify (2026-10-01)
+
+- [x] T1 depends_on: [] Failing tests: prompt requires re-verify + open/closed/unverifiable; closed items stay out of Next; DS-2026-09-20-03 closed with #689 / e5c4e627 / setup-vps.sh L39-47.
+- [x] T2 depends_on: [T1] Helper + committed closed ledger + prompt/docs. last-audited.json keeps closed_queue. No VPS.
+- [ ] T3 depends_on: [T2] Focused pytest green. READY PR vs main, CI green. No merge.
+
 # Task: Runner Pushover dotenv allowlist (2026-10-01)
 
 - [x] T1 depends_on: [] Failing tests in scripts/tests/test_runner_pushover_env.py: dotenv pair, allowlist, no eval, values never logged, missing, half-pair, agents never see keys, dotenv-path file, plist/installer.
