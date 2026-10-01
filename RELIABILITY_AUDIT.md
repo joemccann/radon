@@ -2864,3 +2864,5 @@ Audited through: 731716e54b1e85e98b591cbd79e9d18adf7a1ec7 on 2026-10-01 — 2 ne
 | REL-052 / NF-6 | P2 | `scripts/db/mirror_market_snapshots_to_demo.js:80-98,109-128` | DONE: every TypeError was retried as transport failure. Red-first injected programming errors in purge/read/write each ran three times; now each runs once. Realistic fetch failures retain bounded retry, successful recovery and surfaced exhaustion. Focused gates: 104 passed. |
 
 Inherited R-039 / REL-021b resolved with ten repeated red faults and 134 scripts / 138 API passes: the unused server import is removed; legacy helpers enforce original-client ownership and halted-modification refusal. Owned cancellation and broker-error propagation remain covered.
+
+Inherited R-046 / REL-021b resolved: missing-tzdata faults fail closed with visible errors, while valid RTH fallback survives calendar-only failures. Two repeated red faults; 125 focused passes.

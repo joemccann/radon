@@ -161,15 +161,16 @@ class MonitorDaemon:
         journal_sync, exit_orders) would skip the first hour of EDT trading
         and run for an extra hour after the real close.
         """
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
         try:
-            from zoneinfo import ZoneInfo
             et_now = datetime.now(ZoneInfo("America/New_York"))
-        except Exception:
-            # Fail-open: if zoneinfo / tzdata is unavailable on the host,
-            # fall back to UTC-5 so handlers still run rather than going
-            # silent. Better to run an hour late than not at all.
-            from datetime import timezone, timedelta
-            et_now = datetime.now(timezone.utc) + timedelta(hours=-5)
+        except ZoneInfoNotFoundError:
+            # REL-021b / R-046: an invented UTC offset cannot authorize a
+            # market-hours action. Calendar-only errors still fall to the
+            # valid RTH clock below (REL-209 / R-625).
+            logger.error("Eastern timezone unavailable; market-hours handlers paused")
+            return False
 
         return self._is_market_hours_time(
             et_now.hour,
