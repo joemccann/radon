@@ -21,6 +21,12 @@ set -euo pipefail
 # running systemctl, so neither the admin API nor a daemon receives a generic
 # systemctl capability.
 requested_action="${1:-status}"
+# `radon ib release|resume|status` (broker, root): the IBKR operator hold. It
+# must never wait on the deploy lock below, so it leaves before any of it.
+if [[ "$requested_action" == "ib" ]]; then
+  shift
+  exec "${RADON_IB_HOLD_BIN:-/usr/local/sbin/radon-ib-hold}" "$@"
+fi
 case "$requested_action" in
   stop|start|restart|status) ;;
   repair-nextjs-replica)
@@ -37,7 +43,7 @@ case "$requested_action" in
     unit_action="$2"
     unit_name="$3"
     ;;
-  *) echo "usage: radon {stop|start|restart|status|unit|repair-nextjs-replica}" >&2; exit 2 ;;
+  *) echo "usage: radon {stop|start|restart|status|unit|repair-nextjs-replica|ib}" >&2; exit 2 ;;
 esac
 
 if [[ "$requested_action" != "status" && $EUID -ne 0 \

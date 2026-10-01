@@ -67,6 +67,7 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 from utils import ib_2fa_lock  # noqa: E402
+from utils import ib_operator_hold  # noqa: E402
 from utils.ib_login_throttle import (  # noqa: E402
     LOGIN_THROTTLE_COOLDOWN_BASE_SECS,
     format_utc,
@@ -1636,6 +1637,26 @@ def run_cycle(
         LOG.info("cycle steps: %s outcome=%s", timings.summary(), outcome)
 
 
+def _stand_down_for_operator_hold(
+    state: WatchdogState, state_path: Path, hold: dict
+) -> WatchdogState:
+    """`radon ib release` holds the Gateway out of the IBKR username the
+    operator shares with it. A dead Gateway is the intended state, so every
+    repair would log in and kick the operator (2026-09-25). Counters reset so
+    a resume starts from a clean ladder instead of an instant restart."""
+    state.degraded_count = 0
+    state.stuck_2fa_count = 0
+    state.authenticated_recovery_count = 0
+    state.last_outcome = "operator_hold"
+    save_state(state_path, state)
+    record_service_health(
+        "ok",
+        f"IBKR operator hold since {hold.get('held_at', 'unknown')}: "
+        f"{hold.get('reason', 'operator release')}",
+    )
+    return state
+
+
 def _run_cycle_steps(
     *,
     health_url: str,
@@ -1649,6 +1670,9 @@ def _run_cycle_steps(
     utcnow: Optional[Callable[[], datetime]],
 ) -> WatchdogState:
     state = load_state(state_path)
+    hold = ib_operator_hold.hold_state()
+    if hold["held"]:
+        return _stand_down_for_operator_hold(state, state_path, hold)
     _now_dt = (utcnow or (lambda: datetime.now(timezone.utc)))()
     quiet = quiet_window_active(_now_dt)
     # The stuck-2FA self-heal (NOT api-hang) additionally freezes when the data
