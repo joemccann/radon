@@ -119,6 +119,20 @@ export interface OrderPresentationSummary {
    * not only in the builder header. Null/absent when no coverage applies.
    */
   coverageNote?: string | null;
+  /**
+   * Whole-spread risk when held OPTION legs cover this order: the held leg
+   * priced at its cost basis plus this order. The top-level maxGain/maxLoss
+   * stay order-only (held leg treated as already paid for). Null/absent when
+   * no held option covers the order. Gain/loss are null when the held basis
+   * is unknown.
+   */
+  withHeldLegs?: {
+    maxGain: number | null;
+    maxLoss: number | null;
+    maxGainUnbounded: boolean;
+    maxLossUnbounded: boolean;
+    heldBasisDollars: number | null;
+  } | null;
 }
 
 /**

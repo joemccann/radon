@@ -341,7 +341,7 @@ describe("buildPositionTradeOrder — over-closing a leg (T-019)", () => {
     const v = riskVerdictFor(o.riskInput, portfolioWith(riskReversal()));
     expect(v.undefinedRiskReason).toBe("Uncovered short put");
     expect(v.coveringLegs).toEqual([
-      { type: "Option", right: "P", strike: 800, expiry: "20260717", contracts: 5 },
+      { type: "Option", right: "P", strike: 800, expiry: "20260717", contracts: 5, entryCostDollars: 29500 },
     ]);
     // 5 naked puts assigned at zero (5 × 800 × 100) less the whole order's
     // premium (10 × 41 × 100). Pre-fix this read maxLoss/maxGain = 0.

@@ -53,7 +53,15 @@ export interface ChainOrderLeg {
  * the chip-rendering code from formatting stock as "0× $0 Call" or similar.
  */
 export type CoveringPortfolioLeg =
-  | { type: "Option"; right: LegRight; strike: number; expiry: string; contracts: number }
+  | {
+      type: "Option";
+      right: LegRight;
+      strike: number;
+      expiry: string;
+      contracts: number;
+      /** Cost basis in dollars of the `contracts` consumed; null when unknown. */
+      entryCostDollars?: number | null;
+    }
   | { type: "Stock"; shares: number; avgCost: number };
 
 export interface AugmentedOrderLegs {
@@ -76,6 +84,14 @@ export interface AugmentedOrderLegs {
    * the adjusted premium.
    */
   netPremiumAdjustment: number;
+  /**
+   * Per-share, per-combo cost basis of the held OPTION legs injected as
+   * coverage. Not folded into `netPremiumAdjustment`: the order-only figures
+   * treat a held long as already paid for. Adding this to the net premium
+   * prices the whole spread (held leg at its basis + this order). 0 when no
+   * option covers the order; null when any consumed lot has no known basis.
+   */
+  heldOptionBasisAdjustment: number | null;
 }
 
 export interface OrderRiskLeg {
@@ -879,7 +895,7 @@ export function augmentOrderLegsWithPortfolioCoverage(
   portfolio: PortfolioData | null,
 ): AugmentedOrderLegs {
   if (chainLegs.length === 0) {
-    return { riskLegs: [], comboQuantity: 1, coveringLegs: [], netPremiumAdjustment: 0 };
+    return { riskLegs: [], comboQuantity: 1, coveringLegs: [], netPremiumAdjustment: 0, heldOptionBasisAdjustment: 0 };
   }
 
   const quantities = chainLegs.map((l) => Math.max(1, Math.trunc(l.quantity)));
@@ -895,12 +911,15 @@ export function augmentOrderLegsWithPortfolioCoverage(
 
   const coveringLegs: CoveringPortfolioLeg[] = [];
   if (!portfolio) {
-    return { riskLegs, comboQuantity, coveringLegs, netPremiumAdjustment: 0 };
+    return { riskLegs, comboQuantity, coveringLegs, netPremiumAdjustment: 0, heldOptionBasisAdjustment: 0 };
   }
 
   // Per-target index of held LONG OPTION contracts: key = expiry|right|strike.
   type HeldKey = string;
-  const heldLongIndex = new Map<HeldKey, { contracts: number; strike: number; right: LegRight; expiry: string }>();
+  const heldLongIndex = new Map<
+    HeldKey,
+    { contracts: number; strike: number; right: LegRight; expiry: string; basisDollars: number | null }
+  >();
   // Aggregate LONG stock contracts on this ticker, weighted by avg_cost.
   // Multiple lots / positions are pooled because stock is fungible.
   let longStockShares = 0;
@@ -941,11 +960,18 @@ export function augmentOrderLegsWithPortfolioCoverage(
       const right: LegRight = leg.type === "Call" ? "C" : "P";
       const key: HeldKey = `${expiry}|${right}|${leg.strike}`;
       const prior = heldLongIndex.get(key);
+      const legBasis = Number.isFinite(leg.entry_cost) && leg.entry_cost >= 0 ? leg.entry_cost : null;
       heldLongIndex.set(key, {
         contracts: (prior?.contracts ?? 0) + leg.contracts,
         strike: leg.strike,
         right,
         expiry,
+        basisDollars:
+          prior !== undefined && prior.basisDollars == null
+            ? null
+            : legBasis == null
+              ? null
+              : (prior?.basisDollars ?? 0) + legBasis,
       });
     }
   }
@@ -1000,6 +1026,7 @@ export function augmentOrderLegsWithPortfolioCoverage(
   // Track per-leg remaining naked short contracts after option coverage. Used
   // by pass 2 to apply stock coverage to the residue.
   const remainingShortByLeg: number[] = quantities.slice();
+  let heldOptionBasisDollars: number | null = 0;
 
   for (let i = 0; i < chainLegs.length; i++) {
     const chain = chainLegs[i];
@@ -1024,12 +1051,20 @@ export function augmentOrderLegsWithPortfolioCoverage(
       const consumed = Math.min(available, remainingShort);
       remainingByKey.set(key, available - consumed);
       remainingShort -= consumed;
+      // Basis scales linearly with the share of the held lot consumed.
+      const consumedBasis =
+        leg.basisDollars == null ? null : (leg.basisDollars * consumed) / leg.contracts;
+      heldOptionBasisDollars =
+        heldOptionBasisDollars == null || consumedBasis == null
+          ? null
+          : heldOptionBasisDollars + consumedBasis;
       coveringLegs.push({
         type: "Option",
         right: leg.right,
         strike: leg.strike,
         expiry: leg.expiry,
         contracts: consumed,
+        entryCostDollars: consumedBasis,
       });
       riskLegs.push({
         action: "BUY",
@@ -1099,5 +1134,8 @@ export function augmentOrderLegsWithPortfolioCoverage(
     });
   }
 
-  return { riskLegs, comboQuantity, coveringLegs, netPremiumAdjustment };
+  const heldOptionBasisAdjustment =
+    heldOptionBasisDollars == null ? null : heldOptionBasisDollars / (comboQuantity * MULTIPLIER);
+
+  return { riskLegs, comboQuantity, coveringLegs, netPremiumAdjustment, heldOptionBasisAdjustment };
 }
