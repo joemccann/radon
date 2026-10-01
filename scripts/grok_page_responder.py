@@ -502,16 +502,27 @@ def build_prompt(page: dict, *, autoship: bool, autopush: bool) -> str:
     )
 
 
-def parse_grok_result(stdout: str) -> tuple[str, str]:
+def grok_output_text(stdout: str) -> str:
+    """The assistant text from ``grok --output-format json``; plain text as-is.
+
+    The JSON form is one object whose ``text`` holds the reply. Anything that
+    is not such an object (plain output, a truncated or error payload) is
+    returned unchanged.
+    """
     text = stdout or ""
     stripped = text.strip()
     if stripped.startswith("{"):
         try:
             payload = json.loads(stripped)
-            if isinstance(payload, dict) and payload.get("text"):
-                text = str(payload["text"])
         except ValueError:
-            pass
+            return text
+        if isinstance(payload, dict) and payload.get("text"):
+            return str(payload["text"])
+    return text
+
+
+def parse_grok_result(stdout: str) -> tuple[str, str]:
+    text = grok_output_text(stdout)
     disposition = "failed"
     summary = (text.strip() or "empty grok output")[:400]
     for line in reversed(text.splitlines()):

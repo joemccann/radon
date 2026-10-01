@@ -277,7 +277,11 @@ newer readlinks that path to capture rollback; a regular file there exits
 22 before smoke. Run that private symlink's updater with isolated `HOME`
 and `GROK_HOME`. Probe its version,
 resolve the newest default model, then smoke a canned dry-run that must return `RESULT:` plus a Part 1
-validator-passing body. The live executable is never the updater target
+validator-passing body. The smoke runs with `--output-format json`, so it
+validates the reply in the JSON `text` field (the same extraction
+`parse_grok_result` uses), from its first `## What broke` on: grok joins the
+messages of each turn with no separator, which can glue a pre-tool preamble
+to the first heading. The live executable is never the updater target
 (REL-292 / R-711).
 
 - Pass: prepare replacement links, atomically switch the canonical live symlink (`--live-bin`) and the explicit `--alias-bin` (`~/.grok/bin/grok` in the unit), and write LKG with the immutable candidate path. The upgrader never derives a path from HOME and refuses a candidate outside `--scratch`. Keep the promoted directory; a later attempt gets a new directory. No PR.
