@@ -68,14 +68,19 @@ Stripped env: `/home/radon/radon-page-responder.env` (Turso + Pushover
 only). Auth: `/home/radon/.grok/auth.json` via device-code.
 
 Least-privilege Turso: the responder touches only `watchdog_pages` and its
-`service_health` heartbeat. Mint a scoped token and put it in the production
-env as `GROK_RESPONDER_TURSO_AUTH_TOKEN`; setup then writes it as the
-responder's `TURSO_AUTH_TOKEN` (unset falls back to the full-access token):
+`service_health` heartbeat (whose triggers append to `service_health_events`;
+without that grant the heartbeat logs `not authorized`). Mint a scoped token
+and put it in the production env as `GROK_RESPONDER_TURSO_AUTH_TOKEN`; setup
+writes it as the responder's `TURSO_AUTH_TOKEN`. It is required: when unset,
+setup exits and leaves the current file alone. The full-access production
+token is never used. Turso's insert action is `data_add`; the CLI accepts
+`data_insert` but the server rejects that token.
 
 ```bash
 turso db tokens create radon \
   -p watchdog_pages:data_read,data_update \
-  -p service_health:data_read,data_insert,data_update
+  -p service_health:data_read,data_add,data_update \
+  -p service_health_events:data_add
 ```
 
 Rerunning setup rebuilds that file (`cloud/scripts/grok_responder_env.py`,

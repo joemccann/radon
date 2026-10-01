@@ -26,8 +26,8 @@ from pathlib import Path
 REQUIRED = ("TURSO_DB_URL", "TURSO_AUTH_TOKEN", "PUSHOVER_USER", "PUSHOVER_TOKEN")
 OPTIONAL = ("GH_TOKEN",)
 # Production-env name of the responder's least-privilege Turso token
-# (watchdog_pages + service_health only). When set it is the responder's
-# TURSO_AUTH_TOKEN; the full-access production token is the fallback.
+# (watchdog_pages + service_health only), written as the responder's
+# TURSO_AUTH_TOKEN. Required: the full-access production token is never used.
 SCOPED_TURSO_TOKEN = "GROK_RESPONDER_TURSO_AUTH_TOKEN"
 # GROK_PAGE_* knobs grok_page_responder.py reads that only the operator sets.
 # GROK_PAGE_NO_DOTENV / GROK_PAGE_SYNC_REMOTE are managed below, not preserved.
@@ -67,8 +67,12 @@ def _unquote(value: str) -> str:
 
 def build(prod_text: str, existing_text: str | None) -> str:
     prod = parse_env(prod_text)
-    if prod.get(SCOPED_TURSO_TOKEN):
-        prod["TURSO_AUTH_TOKEN"] = prod[SCOPED_TURSO_TOKEN]
+    if not prod.get(SCOPED_TURSO_TOKEN):
+        raise SystemExit(
+            f"missing in production env: {SCOPED_TURSO_TOKEN} "
+            "(docs/grok-page-responder.md; never the full-access token)"
+        )
+    prod["TURSO_AUTH_TOKEN"] = prod[SCOPED_TURSO_TOKEN]
     missing = [key for key in REQUIRED if not prod.get(key)]
     if missing:
         raise SystemExit("missing in production env: " + ", ".join(missing))

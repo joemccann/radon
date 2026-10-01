@@ -26,6 +26,7 @@ PROD = """\
 # example production env
 TURSO_DB_URL=libsql://example.invalid
 TURSO_AUTH_TOKEN=new-turso-token
+GROK_RESPONDER_TURSO_AUTH_TOKEN=scoped-turso-token
 PUSHOVER_USER=example-user
 PUSHOVER_TOKEN=new-pushover-token
 GH_TOKEN=new-gh-token
@@ -57,7 +58,7 @@ def _step2() -> str:
     return match.group(0)
 
 
-def _run(tmp_path: Path, prod: str, existing: str | None) -> dict[str, str]:
+def _invoke(tmp_path: Path, prod: str, existing: str | None) -> subprocess.CompletedProcess:
     prod_env = tmp_path / "prod.env"
     prod_env.write_text(prod, encoding="utf-8")
     env_file = tmp_path / "radon-page-responder.env"
@@ -82,7 +83,13 @@ def _run(tmp_path: Path, prod: str, existing: str | None) -> dict[str, str]:
         capture_output=True,
         text=True,
     )
+    return result
+
+
+def _run(tmp_path: Path, prod: str, existing: str | None) -> dict[str, str]:
+    result = _invoke(tmp_path, prod, existing)
     assert result.returncode == 0, result.stderr
+    env_file = tmp_path / "radon-page-responder.env"
     assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
     lines = env_file.read_text(encoding="utf-8").splitlines()
     keys = [line.partition("=")[0] for line in lines]
@@ -100,7 +107,7 @@ def test_rerun_preserves_operator_flags(tmp_path):
 
 def test_secrets_come_only_from_the_production_env(tmp_path):
     env = _run(tmp_path, PROD, EXISTING)
-    assert env["TURSO_AUTH_TOKEN"] == "new-turso-token"
+    assert env["TURSO_AUTH_TOKEN"] == "scoped-turso-token"
     assert env["PUSHOVER_TOKEN"] == "new-pushover-token"
     assert env["GH_TOKEN"] == "new-gh-token"
     assert env["TURSO_DB_URL"] == "libsql://example.invalid"
@@ -113,11 +120,22 @@ def test_secrets_come_only_from_the_production_env(tmp_path):
 def test_scoped_responder_turso_token_replaces_the_full_access_one(tmp_path):
     # The responder only needs watchdog_pages + service_health; a dedicated
     # token in the production env must win on every rerun.
-    prod = PROD + "GROK_RESPONDER_TURSO_AUTH_TOKEN=scoped-turso-token\n"
-    env = _run(tmp_path, prod, EXISTING)
+    env = _run(tmp_path, PROD, EXISTING)
     assert env["TURSO_AUTH_TOKEN"] == "scoped-turso-token"
     assert "GROK_RESPONDER_TURSO_AUTH_TOKEN" not in env
     assert "new-turso-token" not in (tmp_path / "radon-page-responder.env").read_text()
+
+
+def test_missing_scoped_token_never_falls_back_to_production(tmp_path):
+    # Fail closed: without the scoped key, setup refuses and the current
+    # responder env is left as it was, never rebuilt with the full-access one.
+    prod = PROD.replace("GROK_RESPONDER_TURSO_AUTH_TOKEN=scoped-turso-token\n", "")
+    result = _invoke(tmp_path, prod, EXISTING)
+    assert result.returncode != 0
+    assert "GROK_RESPONDER_TURSO_AUTH_TOKEN" in result.stderr
+    assert "new-turso-token" not in result.stdout + result.stderr
+    env_file = tmp_path / "radon-page-responder.env"
+    assert env_file.read_text(encoding="utf-8") == EXISTING
 
 
 def test_managed_keys_are_reset_not_preserved(tmp_path):
