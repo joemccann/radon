@@ -14,6 +14,8 @@ function relayFixture({ enabled = true, connected = true } = {}) {
     "wireIBEvents", "startDepthSubscription", "stopDepthSubscription", "collectActiveDepthTickets",
     "applyDepthDelta", "hydrateAndBroadcastDepth", "serializeLadder", "nbboPriceForOptionLadder",
     "summarizeOptionNbbo", "depthFeedLabel", "emitDepthUnavailable",
+    "unsubscribeClientFromDepth", "admitDepthAwaitingBudget", "restoreDepthSubscriptions",
+    "startTapeSubscription", "stopTapeSubscription",
   ]);
   const constants = new Set(["DEPTH_ENABLED", "MAX_CONCURRENT_DEPTH", "DEPTH_NUM_ROWS_EQUITY", "DEPTH_NUM_ROWS_FUTURES"]);
   const declarations = ast.statements.filter(node =>
@@ -24,26 +26,27 @@ function relayFixture({ enabled = true, connected = true } = {}) {
   expect(declarations).toHaveLength(functions.size + constants.size);
   const callbacks = new Map<string, (...args: unknown[]) => void>();
   const reqMktDepth = vi.fn();
+  const reqTickByTickData = vi.fn();
   const bufferDepthForClient = vi.fn();
   const symbolDepthStates = new Map();
   const depthSubscribers = new Map();
   const context = {
     process: { env: { RADON_DEPTH_ENABLED: enabled ? "1" : "0" } },
-    ib: { on: (name: string, callback: (...args: unknown[]) => void) => callbacks.set(name, callback), reqMktDepth, cancelMktDepth: vi.fn() },
+    ib: { on: (name: string, callback: (...args: unknown[]) => void) => callbacks.set(name, callback), reqMktDepth, cancelMktDepth: vi.fn(), reqTickByTickData, cancelTickByTickData: vi.fn() },
     EventName: new Proxy({}, { get: (_target, key) => key }),
     ibConnected: connected, ibClientGeneration: 1, nextRequestId: 0,
     symbolDepthStates, depthSubscribers, depthRequestIdToSymbol: new Map(),
+    symbolTapeStates: new Map(), tapeRequestIdToSymbol: new Map(), TickByTickDataType: { AllLast: "AllLast" },
     applyDepthOp, planDepthAdmission, bufferDepthForClient,
     markTick: vi.fn(), verbose: vi.fn(), sendMessage: vi.fn(),
     nowIso: () => "2026-10-01T15:00:00Z", console,
   };
   const start = runInNewContext(`${declarations.map(node => node.getText(ast)).join("\n")}\nwireIBEvents();\nstartDepthSubscription`, context);
   const client = {};
-  function subscribe(isFutures = false) {
-    const symbol = isFutures ? "ES" : "AAPL";
+  function subscribe(isFutures = false, symbol = isFutures ? "ES" : "AAPL", owner: object = client) {
     const contract = { symbol, secType: isFutures ? "FUT" : "STK", exchange: isFutures ? "CME" : "SMART" };
-    depthSubscribers.set(symbol, new Set([client]));
-    start(symbol, contract, { kind: isFutures ? "future" : "stock", isFutures, requestingClient: client });
+    depthSubscribers.set(symbol, new Set([owner]));
+    start(symbol, contract, { kind: isFutures ? "future" : "stock", isFutures, requestingClient: owner });
     return { symbol, contract };
   }
   function insert(id: number, position: number, isFutures: boolean, side = 1) {
@@ -53,7 +56,11 @@ function relayFixture({ enabled = true, connected = true } = {}) {
       : [id, position, "ARCA", 0, side, 100 - position, position + 1, true];
     callbacks.get(event)!(...args);
   }
-  return { subscribe, insert, callbacks, client, reqMktDepth, bufferDepthForClient, symbolDepthStates };
+  return {
+    subscribe, insert, callbacks, client, reqMktDepth, reqTickByTickData, bufferDepthForClient, symbolDepthStates, context,
+    unsubscribe: (owner: object, symbol: string) => runInNewContext("unsubscribeClientFromDepth", context)(owner, symbol),
+    restore: () => runInNewContext("restoreDepthSubscriptions", context)(),
+  };
 }
 
 describe("relay depth budget at the broker and subscriber boundaries", () => {
@@ -82,12 +89,45 @@ describe("relay depth budget at the broker and subscriber boundaries", () => {
     },
   );
 
-  it.each([{ enabled: false }, { connected: false }])("opens no ticket behind a closed gate: %j", settings => {
-    const relay = relayFixture(settings);
+  it("opens no ticket and records nothing with depth disabled", () => {
+    const relay = relayFixture({ enabled: false });
     relay.subscribe();
     expect(relay.reqMktDepth).not.toHaveBeenCalled();
     expect(relay.symbolDepthStates.size).toBe(0);
-    if (settings.enabled === false) expect(relay.callbacks.has("updateMktDepthL2")).toBe(false);
+    expect(relay.callbacks.has("updateMktDepthL2")).toBe(false);
+  });
+
+  it("a subscribe made while IB is down gets its depth and tape on reconnect", () => {
+    const relay = relayFixture({ connected: false });
+    const { contract } = relay.subscribe();
+    expect(relay.reqMktDepth).not.toHaveBeenCalled();
+    relay.context.ibConnected = true;
+    relay.restore();
+    expect(relay.reqMktDepth).toHaveBeenCalledExactlyOnceWith(1, contract, 40, true);
+    expect(relay.reqTickByTickData).toHaveBeenCalledExactlyOnceWith(2, contract, "AllLast", 0, false);
+  });
+
+  it("a subject refused for budget gets the ticket another session frees", () => {
+    const relay = relayFixture();
+    const others = [{}, {}, {}];
+    others.forEach((owner, i) => relay.subscribe(false, `HELD${i}`, owner));
+    expect(relay.reqMktDepth).toHaveBeenCalledTimes(3);
+    const { contract } = relay.subscribe(false, "URTY");
+    expect(relay.reqMktDepth).toHaveBeenCalledTimes(3);
+    expect(relay.context.sendMessage).toHaveBeenCalledWith(relay.client, { type: "depth-unavailable", symbol: "URTY", reason: "depth-budget" });
+    relay.unsubscribe(others[0], "HELD0");
+    expect(relay.reqMktDepth).toHaveBeenCalledTimes(4);
+    expect(relay.reqMktDepth.mock.calls.at(-1)!.slice(1)).toEqual([contract, 40, true]);
+  });
+
+  it("a freed ticket never retries a subject refused for entitlement", () => {
+    const relay = relayFixture();
+    const owner = {};
+    relay.subscribe(false, "HELD", owner);
+    relay.symbolDepthStates.set("NOENT", { depthTickerId: null, contract: {}, kind: "stock", isFutures: false, ladders: { bid: [], ask: [] }, focusedAt: 0 });
+    relay.context.depthSubscribers.set("NOENT", new Set([relay.client]));
+    relay.unsubscribe(owner, "HELD");
+    expect(relay.reqMktDepth).toHaveBeenCalledTimes(1);
   });
 
   it("ignores another request's events and does not duplicate a subscription", () => {
