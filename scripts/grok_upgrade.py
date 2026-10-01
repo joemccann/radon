@@ -26,6 +26,10 @@ from grok_page_responder import parse_grok_result
 
 Runner = Callable[..., object]
 SERVICE_NAME = "grok-upgrade"
+# xAI installer layout. `grok update` on CLI 1.0.44+ captures rollback with
+# readlink($GROK_HOME/bin/grok). A regular file there is EINVAL (os error 22).
+_INSTALLER_PAYLOAD = "grok-linux-x86_64"
+_INSTALLER_LINK = Path("..") / "downloads" / _INSTALLER_PAYLOAD
 SMOKE_PROMPT = """Dry-run smoke for a Grok track-latest candidate. Do not edit files.
 Do not push. Do not merge.
 
@@ -143,6 +147,28 @@ def decide_upgrade(
     }
 
 
+def _stage_candidate_binary(dest: Path, source: Path) -> Path:
+    """Private installer layout under ``dest``.
+
+    REL-292 / R-711: HOME does not isolate a self-updater, so the bytes live
+    under the candidate scratch, never on the live path. CLI 1.0.44+ then
+    readlinks ``$GROK_HOME/bin/grok`` to snapshot that payload before swapping
+    it. ``copy2`` onto ``bin/grok`` makes a regular file, ``readlink`` returns
+    EINVAL, and the oneshot exits 1 before smoke.
+    """
+    dest.mkdir(parents=True, exist_ok=True)
+    downloads = dest / "downloads"
+    downloads.mkdir(parents=True, exist_ok=True)
+    payload = downloads / _INSTALLER_PAYLOAD
+    shutil.copy2(source, payload)
+    installed = dest / "bin" / "grok"
+    installed.parent.mkdir(parents=True, exist_ok=True)
+    if installed.is_symlink() or installed.exists():
+        installed.unlink()
+    installed.symlink_to(_INSTALLER_LINK)
+    return installed
+
+
 def install_candidate_cli(
     dest: Path,
     *,
@@ -150,13 +176,8 @@ def install_candidate_cli(
     runner: Runner,
     version: str | None = None,
 ) -> Path:
-    # REL-292 / R-711: HOME does not isolate a self-updater's executable.
-    # Execute a private copy so even a failed update cannot mutate the live CLI.
-    dest.mkdir(parents=True, exist_ok=True)
-    installed = dest / "bin" / "grok"
-    installed.parent.mkdir(parents=True, exist_ok=True)
     source = Path(shutil.which(grok_bin) or grok_bin).resolve(strict=True)
-    shutil.copy2(source, installed)
+    installed = _stage_candidate_binary(dest, source)
     env = grok_runtime.grok_child_env({"GROK_HOME": str(dest), "HOME": str(dest)})
     # `grok update` has no --no-auto-update (grok 1.0.3 rejects it).
     # That flag stays on the smoke invocation only.

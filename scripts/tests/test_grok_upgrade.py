@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import sys
@@ -327,6 +328,54 @@ class TestInstallCandidate:
         )
         assert calls[0] == [str(dest / "bin" / "grok"), "update", "--version", "1.0.44"]
         assert found == dest / "bin" / "grok"
+
+    def test_update_readlink_needs_installer_symlink(self, tmp_path, grok_on_path):
+        """Page 2e9419cb: grok 1.0.44 update readlinks the candidate and exits 22 on a regular file.
+
+        Reproduced with a private copy: a regular file at ``$GROK_HOME/bin/grok``
+        fails with ``reading prior symlink target ... Invalid argument (os error 22)``.
+        The installer layout (relative symlink ``../downloads/grok-linux-x86_64``)
+        lets ``grok update --version 1.0.46`` finish and leaves the live binary alone.
+        """
+        dest = tmp_path / "candidate"
+        source = grok_on_path.resolve()
+        source_bytes = source.read_bytes()
+
+        def runner(argv, **kwargs):
+            if argv[1:3] == ["update", "--version"]:
+                exe = Path(argv[0])
+                try:
+                    prior = os.readlink(exe)
+                except OSError as exc:
+                    assert exc.errno == errno.EINVAL
+                    return SimpleNamespace(
+                        returncode=1,
+                        stdout="",
+                        stderr=(
+                            "Installing Grok 1.0.46 (current: 1.0.44)...\n\n"
+                            "  Downloading grok v1.0.46 (linux-x86_64)...\n"
+                            "Error: Auto-update failed: capturing rollback state for "
+                            f"{exe}: reading prior symlink target {exe}: "
+                            "Invalid argument (os error 22)\n"
+                        ),
+                    )
+                payload = (exe.parent / prior).resolve()
+                assert prior == "../downloads/grok-linux-x86_64"
+                assert payload.is_file() and not payload.is_symlink()
+                assert payload.is_relative_to(dest.resolve())
+                assert not payload.samefile(source)
+                assert payload.read_bytes() == source_bytes
+                return SimpleNamespace(returncode=0, stdout="installed", stderr="")
+            if argv[1:] == ["--version"]:
+                return SimpleNamespace(returncode=0, stdout="grok 1.0.46\n", stderr="")
+            return SimpleNamespace(returncode=1, stdout="", stderr="unexpected " + " ".join(argv))
+
+        found = upgrade.install_candidate_cli(
+            dest, grok_bin="grok", runner=runner, version="1.0.46"
+        )
+        assert found == dest / "bin" / "grok"
+        assert os.readlink(found) == "../downloads/grok-linux-x86_64"
+        assert source.read_bytes() == source_bytes
 
 
 class TestMissingLkgRealCheck:
