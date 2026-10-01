@@ -39,15 +39,15 @@ PRIVATE_ID_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
             re.IGNORECASE,
         ),
     ),
-    # Not as a GitHub Actions run/job id in a CI URL (11 digits). Any other
-    # "/"-prefixed run, as in a file path, is still an id.
-    (
-        "flex_exec_id",
-        re.compile(
-            r"(?<![0-9A-Za-z.])(?<!/runs/)(?<!/job/)(?<!/jobs/)\d{10,}(?![0-9A-Za-z])"
-        ),
-    ),
+    # GitHub Actions run/job ids (11 digits) are exempt only inside a full
+    # CI URL, which is removed before this pattern runs (_CI_URL).
+    ("flex_exec_id", re.compile(r"(?<![0-9A-Za-z.])\d{10,}(?![0-9A-Za-z])")),
 )
+_CI_URL = re.compile(
+    r"https://github\.com/[\w.-]+/[\w.-]+/actions/runs/\d+"
+    r"(?:/(?:job|attempts)/\d+)?(?![\w/])"
+)
+_SHA = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 Runner = Callable[..., object]
 
@@ -74,13 +74,21 @@ def find_private_identifiers(text: str) -> list[str]:
     """Kinds of private identifier present in ``text`` (never the values)."""
     found: list[str] = []
     for label, pattern in PRIVATE_ID_PATTERNS:
-        if pattern.search(text or ""):
+        subject = _CI_URL.sub("", text or "") if label == "flex_exec_id" else text or ""
+        if pattern.search(subject):
             found.append(label)
     for label in find_credential_shapes(text or ""):
         kind = f"credential {label}"
         if kind not in found:
             found.append(kind)
     return found
+
+
+def _safe_path(path: str) -> str:
+    """``path`` with any private identifier in it masked, for findings."""
+    if not find_private_identifiers(path):
+        return path
+    return f"a file path ({len(path)} chars, masked)"
 
 
 def _default_runner(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -147,6 +155,10 @@ def scan_commit_range(
         if not record.strip():
             continue
         sha, _, message = record.strip("\n").partition("\x00")
+        if not _SHA.fullmatch(sha.strip()):
+            # A message carrying the record separator would otherwise
+            # smuggle text past the scan as a fake sha field.
+            raise IrPushRefused("cannot scan the branch: unparseable commit log")
         for kind in find_private_identifiers(message):
             findings.append(f"{kind} in commit message {sha.strip()[:12]}")
     # --text and --no-textconv: a branch-authored .gitattributes (-diff,
@@ -163,10 +175,10 @@ def scan_commit_range(
     for path, lines in added.items():
         if any("\x00" in line for line in lines):
             raise IrPushRefused(
-                f"cannot scan the branch: binary content in {path}"
+                f"cannot scan the branch: binary content in {_safe_path(path)}"
             )
         for kind in find_private_identifiers("\n".join(lines)):
-            findings.append(f"{kind} in diff of {path}")
+            findings.append(f"{kind} in diff of {_safe_path(path)}")
     # Paths with no content hunk (new empty files) are published too.
     names = _git(
         repo,
@@ -179,7 +191,7 @@ def scan_commit_range(
     for path in names.split("\x00"):
         if path and path not in added:
             for kind in find_private_identifiers(path):
-                findings.append(f"{kind} in diff of {path}")
+                findings.append(f"{kind} in diff of {_safe_path(path)}")
     return findings
 
 

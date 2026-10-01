@@ -195,6 +195,29 @@ class TestScanCommitRangeOpaqueContent:
         assert "ib_account_id in branch name" in found
         assert ACCOUNT not in json.dumps(found)
 
+    def test_runs_segment_outside_a_ci_url_is_still_an_id(self, repo):
+        (repo / "runs").mkdir()
+        self._add(repo, f"runs/{FLEX_EXEC}.json", b"{}\n")
+        _commit(repo, f"x = 'reports/job/{FLEX_EXEC}'\n", "fix: relay")
+        found = gate.scan_commit_range(repo, "main", "fix/relay")
+        assert sum(f.startswith("flex_exec_id in diff of") for f in found) == 2
+
+    def test_record_separator_in_a_message_cannot_hide_an_id(self, repo):
+        _commit(repo, "x = 2\n", f"fix: relay\n\nnote\x1e{ACCOUNT}")
+        _commit(repo, "x = 3\n", "fix: relay\n\n" + VALID_BODY)
+        with pytest.raises(gate.IrPushRefused, match="commit log"):
+            gate.scan_commit_range(repo, "main", "fix/relay")
+
+    def test_path_findings_never_carry_the_value(self, repo):
+        self._add(repo, f"{ACCOUNT}.txt", b"")
+        self._add(repo, f"{PAPER_ACCOUNT}.bin", b"\x00\x01")
+        with pytest.raises(gate.IrPushRefused) as exc:
+            gate.scan_commit_range(repo, "main", "fix/relay")
+        assert PAPER_ACCOUNT not in str(exc.value)
+        _git(repo, "reset", "-q", "--hard", "HEAD~1")
+        found = gate.scan_commit_range(repo, "main", "fix/relay")
+        assert found and ACCOUNT not in json.dumps(found)
+
     def test_clean_binary_free_branch_still_passes(self, repo):
         self._add(repo, ".gitattributes", b"*.txt -diff\n")
         self._add(repo, "notes.txt", b"nothing private here\n")
