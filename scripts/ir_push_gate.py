@@ -117,8 +117,9 @@ def scan_commit_range(
 ) -> list[str]:
     """Findings for everything ``ref`` would publish on top of ``base``.
 
-    Scans each commit message (subject, body and trailers) and every added
-    diff line and path. Removed lines are already public on the base.
+    Scans each commit message (subject, body and trailers) and the added
+    lines and paths of every commit, including merge resolutions. Cleaning
+    the tip does not remove private data from the history being published.
     """
     run = runner or _default_runner
     repo = Path(repo)
@@ -135,7 +136,8 @@ def scan_commit_range(
             findings.append(f"{kind} in commit message {sha.strip()[:12]}")
     patch = _git(
         repo,
-        ["diff", "--no-color", "--no-ext-diff", "--unified=0", f"{fork}..{ref}"],
+        ["log", "--format=", "--patch", "--diff-merges=separate",
+         "--no-color", "--no-ext-diff", "--no-textconv", "--unified=0", f"{fork}..{ref}"],
         run,
     )
     for path, lines in _added_lines_by_file(patch).items():

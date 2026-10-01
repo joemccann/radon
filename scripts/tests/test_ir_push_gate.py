@@ -111,6 +111,41 @@ def _commit(repo: Path, content: str, message: str) -> None:
 
 
 class TestScanCommitRange:
+    def test_identifier_removed_before_the_tip_still_refuses_publication(self, repo):
+        # Both commits are pushed, even though the final tree is clean.
+        _commit(repo, f"x = 2\nEXEC = '{IB_EXEC}'\n", "fix: inspect execution")
+        _commit(repo, "x = 3\n", "fix: remove diagnostic")
+
+        with pytest.raises(gate.IrPushRefused, match="ib_exec_id") as exc:
+            gate.check_publish(
+                repo=repo, base="main", ref="fix/relay",
+                env={"GROK_PAGE_AUTOPUSH": "1"},
+            )
+        assert IB_EXEC not in str(exc.value)
+
+    def test_deleted_file_in_an_earlier_commit_is_still_scanned(self, repo):
+        report = repo / "diagnostic.txt"
+        report.write_text(f"account={PAPER_ACCOUNT}\n")
+        assert _git(repo, "add", "diagnostic.txt").returncode == 0
+        assert _git(repo, "commit", "-qm", "fix: save diagnostic").returncode == 0
+        assert _git(repo, "rm", "diagnostic.txt").returncode == 0
+        assert _git(repo, "commit", "-qm", "fix: remove diagnostic").returncode == 0
+
+        found = gate.scan_commit_range(repo, "main", "fix/relay")
+        assert "ib_account_id in diff of diagnostic.txt" in found
+        assert PAPER_ACCOUNT not in json.dumps(found)
+
+    def test_merge_resolution_removed_before_tip_is_still_scanned(self, repo):
+        assert _git(repo, "checkout", "-qb", "side", "main").returncode == 0
+        _commit(repo, "x = 2\n", "fix: side work")
+        assert _git(repo, "checkout", "-q", "fix/relay").returncode == 0
+        _commit(repo, "x = 3\n", "fix: branch work")
+        # The identifier exists only in the merge result, not either parent.
+        assert _git(repo, "merge", "--no-ff", "--no-commit", "-s", "ours", "side").returncode == 0
+        _commit(repo, f"x = 3\nEXEC = '{IB_EXEC}'\n", "fix: resolve merge")
+        _commit(repo, "x = 4\n", "fix: remove diagnostic")
+        assert "ib_exec_id in diff of app.py" in gate.scan_commit_range(repo, "main", "fix/relay")
+
     def test_clean_branch_has_no_findings(self, repo):
         _commit(repo, "x = 2\n", "fix: relay\n\n" + VALID_BODY)
         assert gate.scan_commit_range(repo, "main", "fix/relay") == []
