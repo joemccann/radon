@@ -363,7 +363,7 @@ Every agent gets `RADON_RUNNER_LOOP_STATE` (the loop's state directory), `RADON_
 
 | Loop | State |
 |---|---|
-| documentation | Cut over: runs at 03:00 on branch `documentation/<date>` as `_radonbot`; the old wrapper, setup script, LaunchAgent and skill are deleted |
+| documentation | Cut over: runs at 03:00 on branch `documentation/<date>` as `_radonbot`, dead-man label `documentation-nightly` (#202); the prompt posts the rolling-issue comment every night (no `POST_RUN` hook); the old wrapper, setup script, LaunchAgent and skill are deleted |
 | ci-performance | Cut over: runs at 00:20 on branch `ci-performance/<date>`; `scripts/ci_performance_nightly.sh` and its LaunchAgent are deleted |
 | testing | Cut over: runs at 00:10 on branch `testing/<date>` (4h budget, for the closing three rounds of the full gates); `scripts/testing_weekend.sh`, its setup script, LaunchAgent, skill and portable prompts are deleted. It gets no scoped Turso or Unusual Whales key: the suites need none |
 | reliability | Cut over: runs at 00:00 on branch `reliability/<date>`; `scripts/reliability_weekend.sh`, its setup script, LaunchAgent, skill and portable prompts are deleted. Full pytest, `cloud/tests` and Vitest run in PR CI; the night runs focused suites and the drills |
