@@ -1328,6 +1328,8 @@ class TestResearchCutCommandDoc:
             # --help exits at argparse, before private files, auth or network.
             result = subprocess.run([*argv, "--help"], cwd=_ROOT, env=env, text=True, capture_output=True, timeout=10)
             assert result.returncode == 0, f"{command}: {result.stderr}"
+            if module == "cut_report":
+                assert "--from-json" in result.stdout
             for flag in (arg for arg in argv if arg.startswith("--")):
                 assert flag in result.stdout, f"Undocumented parser flag: {flag}"
 
