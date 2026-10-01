@@ -21,7 +21,7 @@ Safety is where the runner runs, not what the script checks:
 | Agent cannot read operator files, ssh keys, `~/.radon`, Keychain | Dedicated macOS user `_radonbot`, standard (non-admin), hidden |
 | Agent cannot edit the runner | `run_loop.sh`, `loops/*.env`, the hooks, their `lib/` helpers, the `gh` guard and `gitconfig` installed root-owned in `/usr/local/radon-runner` |
 | Agent cannot plant a binary or git config the runner runs | The LaunchDaemon's `PATH` is `/opt/homebrew/bin:/usr/bin:/bin`; the bot's CLI directories (`~/.local/bin`, `~/.grok/bin`, `~/.bun/bin`) are prepended only for the agent. Every git the runner, the hooks and the agent run reads `/usr/local/radon-runner/gitconfig` (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM=1`), never `~/.gitconfig`, and the pre-run hook rebuilds the clone's `.git/config` before every phase |
-| No production credential in the clone | The clone gets no `.env`. `~/.radon-runner.env` may hold only `GH_TOKEN`, `PUSHOVER_USER` and `PUSHOVER_TOKEN`. The agent runs as `_radonbot`, so it can read that file. The runner unsets the Pushover keys in the agent process; `GH_TOKEN` stays so the agent can push. Do not put a production credential or an admin token in that file or anywhere in the bot's home |
+| No production credential in the clone | The clone gets no `.env`. The runner loads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from `RADON_RUNNER_DOTENV` or `/usr/local/radon-runner/dotenv-path` (never from the plist), then falls back to `~/.radon-runner.env`. `GH_TOKEN` loads only from `~/.radon-runner.env`. `_radonbot` and every agent share a uid, so any file the runner can read, the agent can read. The runner unsets the Pushover keys in the agent process; `GH_TOKEN` stays so the agent can push. Point the dotenv at a Pushover-only file (step 8), not the operator's full Radon `.env`. Never put a production credential or an admin token in `~/.radon-runner.env` or anywhere in the bot's home |
 | Agent cannot merge or push `main` | A separate GitHub machine account with the Write role on this repo only, used through its classic `repo` token, plus the `main-review` repository ruleset on the default branch: 1 approving review, approval of the most recent push required, stale approvals dismissed on push. Its only bypass actor is the Repository admin role in pull-request mode, so an admin merges through a PR and never pushes `main` directly; the bot account is not exempt. The 27 required status checks stay in the classic branch protection on `main`, not in the ruleset. A token of the operator's own account would not do: it acts as the admin and bypasses the ruleset |
 
 The six loops in [Migration](#migration-from-the-per-loop-wrappers) use the bot runner. `scripts/codemap_nightly.sh` is separate and merges its own PR with the operator's token. Verify the live ruleset in step 8b.3 before enabling a new installation.
@@ -37,7 +37,8 @@ Where things live when you are done:
 | `/usr/local/radon-runner/run_loop.sh`, `loops/<loop>.env` | root | The runner and each loop's config. The agent cannot edit them |
 | `/usr/local/radon-runner/hooks/`, `lib/`, `guard/<loop>/gh` | root | The security loops' pre/post-run hooks, the helpers they and the `gh` guard run (copied from `scripts/`), and the guard shim |
 | `/Library/LaunchDaemons/com.radon.runner.<loop>.plist` | root | The nightly schedule, run as `_radonbot` |
-| `/Users/_radonbot/.radon-runner.env` | bot, 600 | `GH_TOKEN`, `PUSHOVER_USER`, `PUSHOVER_TOKEN`. The agent can read it (it runs as the bot); the runner unsets the Pushover keys in the agent process. Never a production or admin credential |
+| `/usr/local/radon-runner/dotenv-path` | root, 644 | Absolute path to the Pushover dotenv. Written only when install is run with `RADON_RUNNER_DOTENV`. A later install without that var leaves the file in place. Never a secret value |
+| `/Users/_radonbot/.radon-runner.env` | bot, 600 | `GH_TOKEN` and, as legacy fallback, `PUSHOVER_USER` / `PUSHOVER_TOKEN`. The agent can read it (it runs as the bot); the runner unsets the Pushover keys in the agent process. Never a production or admin credential |
 | `/Users/_radonbot/.radon/agent-cli/env` | bot, 600 | `NVIDIA_API_KEY`, `CEREBRAS_API_KEY` for the fx agents |
 | `/Users/_radonbot/radon-runner/work/<loop>` | bot | Tonight's clone, deleted and re-cloned every run |
 | `/Users/_radonbot/radon-runner/logs/<loop>/<date>.log` | bot, 700 | The run log, kept 14 days |
@@ -188,11 +189,42 @@ Write the token into the bot's secrets file straight from your keychain:
 security find-generic-password -s github-radon-runner-bot-token -w | sudo /bin/sh -c 'umask 077; read -r t; f=/Users/_radonbot/.radon-runner.env; { grep -v "^GH_TOKEN=" "$f"; printf "GH_TOKEN=%s\n" "$t"; } > "$f.new" && chown _radonbot:staff "$f.new" && mv "$f.new" "$f"'
 ```
 
-Then add Pushover in the bot shell with `nano ~/.radon-runner.env`, setting `PUSHOVER_USER=` and `PUSHOVER_TOKEN=`. Check all three are set without printing them:
+Pushover is a pair. The runner takes both keys from the first source that has both, and never mixes a half pair:
+
+1. both `PUSHOVER_USER` and `PUSHOVER_TOKEN` already set in the inherited environment (launchd never sets them; this is for manual runs and tests)
+2. the Radon dotenv: `RADON_RUNNER_DOTENV` if set, else the first line of `/usr/local/radon-runner/dotenv-path`
+3. `~/.radon-runner.env` (legacy fallback)
+
+Only those two keys are read from the dotenv. `GH_TOKEN` stays in `~/.radon-runner.env`. The path is not in the plist, so regenerating the plists cannot drop it.
+
+`_radonbot` and every agent run as the same uid, so whatever file the runner can read, the agent can read. Pointing `RADON_RUNNER_DOTENV` at the full Radon root `.env` and granting the bot read access exposes every production key in it to the agents, which contradicts the safety table. Use a Pushover-only file, or an allowlisted copy using the step-6 pattern:
 
 ```bash
-grep -oE '^(GH_TOKEN=ghp_|PUSHOVER_USER=.|PUSHOVER_TOKEN=.)' ~/.radon-runner.env    # 3 lines
+grep -E '^(export )?(PUSHOVER_USER|PUSHOVER_TOKEN)=' /path/to/radon/.env | sudo /bin/sh -c 'umask 077; d=/Users/_radonbot/.radon; install -d -m 700 -o _radonbot -g staff $d && cat > $d/pushover.env && chown _radonbot:staff $d/pushover.env'
 ```
+
+Set the path at install time (a refresh without the var leaves `dotenv-path` in place). Refuse a relative path. `install.sh` never chmod, chown or copies the target `.env`. If the bot cannot read it, install prints one WARNING and continues:
+
+```bash
+sudo RADON_RUNNER_DOTENV=/Users/_radonbot/.radon/pushover.env /bin/bash /path/to/clone/scripts/runner/install.sh reliability testing documentation ci-performance security security-deepsec
+sudo -u _radonbot test -r /Users/_radonbot/.radon/pushover.env && echo readable
+```
+
+Check presence without printing values. `2` means both keys are set:
+
+```bash
+grep -cE '^(export )?PUSHOVER_(USER|TOKEN)=.' /Users/_radonbot/.radon/pushover.env
+grep -oE '^(GH_TOKEN=ghp_|PUSHOVER_USER=.|PUSHOVER_TOKEN=.)' ~/.radon-runner.env    # 3 lines if the legacy file still holds the pair
+```
+
+Each run logs exactly one presence line, paths only, never values. A half pair logs `incomplete` for that source and moves on. A curl failure logs `pushover: send failed status=<code>` and the run continues:
+
+```
+pushover: PUSHOVER_USER present, PUSHOVER_TOKEN present (source: dotenv /Users/_radonbot/.radon/pushover.env)
+pushover: credentials missing (checked: env, /Users/_radonbot/.radon/pushover.env, /Users/_radonbot/.radon-runner.env); notifications skipped
+```
+
+To rotate a token, replace `PUSHOVER_TOKEN` in the chosen dotenv and blank or fix the stale one in `/Users/_radonbot/.radon-runner.env`. Then kick a loop and confirm one `pushover:` present line in its log.
 
 ### 8b. Security loops (operator and bot shell)
 

@@ -5,6 +5,7 @@
 #   scripts/runner/install.sh --print-plist documentation     (no root; for review/tests)
 #   scripts/runner/install.sh --print-guard security          (no root; the gh shim a GH_GUARD=1 loop gets)
 #   scripts/runner/install.sh --print-gitconfig               (no root; the git config every runner git reads)
+#   scripts/runner/install.sh --write-dotenv-path             (no root; writes $PREFIX/dotenv-path from RADON_RUNNER_DOTENV)
 #
 # Idempotent. Creates the unprivileged runner user on first use, installs the
 # runner root-owned (the agent cannot edit what launches it), and writes one
@@ -158,6 +159,33 @@ print_gitconfig() {
 EOF
 }
 
+# Path only, never a secret. Written only when RADON_RUNNER_DOTENV is set so a
+# refresh cannot drop it. Never chmod, chown or copy the target .env.
+write_dotenv_path() {
+  local dest="$PREFIX/dotenv-path" path="${RADON_RUNNER_DOTENV:-}"
+  if [[ -z "$path" ]]; then
+    return 0
+  fi
+  case "$path" in
+    /*) ;;
+    *)
+      echo "RADON_RUNNER_DOTENV must be an absolute path" >&2
+      return 64
+      ;;
+  esac
+  mkdir -p "$PREFIX"
+  printf '%s\n' "$path" > "$dest"
+  if [[ $EUID -eq 0 ]]; then
+    chown root:wheel "$dest"
+    chmod 644 "$dest"
+    if ! sudo -u "$BOT" test -r "$path"; then
+      echo "WARNING: $BOT cannot read $path" >&2
+    fi
+  else
+    chmod 644 "$dest" 2>/dev/null || true
+  fi
+}
+
 install_runner() {
   local file
   install -d -o root -g wheel -m 755 "$PREFIX" "$PREFIX/loops" "$PREFIX/hooks" "$PREFIX/lib" "$PREFIX/guard"
@@ -171,6 +199,7 @@ install_runner() {
   for file in $LIB_FILES; do
     install -o root -g wheel -m 755 "$SRC/../$file" "$PREFIX/lib/$file"
   done
+  write_dotenv_path
 }
 
 install_loop() {
@@ -193,7 +222,7 @@ install_loop() {
 }
 
 main() {
-  [[ $# -gt 0 ]] || { echo "usage: $0 <loop>... | --print-plist <loop> | --print-guard <loop>" >&2; exit 64; }
+  [[ $# -gt 0 ]] || { echo "usage: $0 <loop>... | --print-plist <loop> | --print-guard <loop> | --print-gitconfig | --write-dotenv-path" >&2; exit 64; }
   if [[ "$1" == "--print-plist" ]]; then
     print_plist "${2:?loop}"
     return 0
@@ -205,6 +234,10 @@ main() {
   if [[ "$1" == "--print-gitconfig" ]]; then
     print_gitconfig
     return 0
+  fi
+  if [[ "$1" == "--write-dotenv-path" ]]; then
+    write_dotenv_path
+    return
   fi
   check_source
   [[ $EUID -eq 0 ]] || { echo "run with sudo" >&2; exit 1; }
