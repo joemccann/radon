@@ -59,6 +59,15 @@ systemctl enable --now radon-grok-page-responder.timer
 Stripped env: `/home/radon/radon-page-responder.env` (Turso + Pushover
 only). Auth: `/home/radon/.grok/auth.json` via device-code.
 
+Rerunning setup rebuilds that file (`cloud/scripts/grok_responder_env.py`,
+mode 600, owner radon). Secrets come only from the production env; an old
+value in the file is never kept. The operator flags
+`GROK_PAGE_RESPONDER`, `GROK_PAGE_AUTOSHIP`, `GROK_PAGE_AUTOPUSH` and
+`GROK_PAGE_MAX_ACTIONS_PER_DAY` are carried over from the current file, so a
+rerun no longer turns the responder off (`"skipped": "disabled"`).
+`GROK_PAGE_NO_DOTENV`, `GROK_PAGE_SYNC_REMOTE` and `GROK_BIN` are always
+reset. Contract: `cloud/tests/test_grok_responder_env.py`.
+
 Setup drops a `.radon-page-responder` marker in the clone. It is gitignored on
 purpose: `sync_remote_clone` fast-forwards only a clean tree, so an untracked
 marker reads as dirty work and pins the clone to whatever grok last committed.
@@ -76,6 +85,7 @@ nature and its silence used to look exactly like health.
 |---|---|
 | Completed (including `pending: 0`) | `ok` |
 | Kill switch off | `paused` |
+| Runtime refused (`GROK_BIN` missing or failing, no trusted last-known-good) | `error` with the reason (exit 0, `skipped: grok_runtime`, no fallback pushover; the watchdog error bucket pages once) |
 | Skipped on a live lock | nothing written |
 | Raised on Turso / git | nothing written |
 
@@ -119,7 +129,26 @@ pickup refuses:
 - a diff touching `.github/` — a PR-triggered workflow runs from the PR head,
   which would execute attacker-authored CI in this repository;
 - a branch that does not descend from `origin/main`, or exceeds the commit cap
-  (default 20).
+  (default 20);
+- anything at all unless `GROK_PAGE_AUTOPUSH` is truthy in the pickup job's
+  own environment (the plist ships `0`). Off, a fire returns
+  `{"action": "disabled"}` before touching either remote;
+- a branch whose commit messages, added diff lines or paths, or PR
+  title/body carry a private identifier (`scripts/ir_push_gate.py`): IB
+  account ids (`U`/`DU`/`F` + 6-8 digits), numeric Flex exec ids (10+
+  digits), dotted-hex IB exec ids, or a specific credential shape from
+  `credential_redaction`. The branch stays local, the reason (kind and
+  location, never the value) is logged and sent to Pushover, and nothing is
+  redacted in place;
+- running at all from a clone that is behind `origin/main` (stale pickup
+  code).
+
+2026-09-30: a pickup install from before the refresh step (#759) ran a clone
+frozen before #773. It ignored `GROK_PAGE_AUTOPUSH`, opened
+`IR: grok incident fix on <branch>` placeholder PRs, and published one
+branch whose diff and messages carried private account and exec ids.
+After changing the plist, reinstall it (the `sed` below) and
+`launchctl unload`/`load` it.
 
 A pushed branch remains pending until pickup confirms its PR URL. Later
 runs reconcile the PR without pushing the branch again, reuse an open PR,
@@ -155,7 +184,7 @@ three flags all defaulted on, so a broken env file yielded maximum autonomy.
 |---|---|---|
 | `GROK_PAGE_RESPONDER` | Claim and launch | Do not claim or launch |
 | `GROK_PAGE_AUTOSHIP` | Edit, test, commit | Diagnose only. No edits or commits |
-| `GROK_PAGE_AUTOPUSH` | Push `fix/*` and ensure an open PR | Commit locally. Do not push |
+| `GROK_PAGE_AUTOPUSH` | Push `fix/*` and ensure an open PR | Commit locally. Nothing pushes: the responder, `ir_ensure_pr` (module and CLI) and the Mac mini pickup all refuse |
 
 `GROK_BIN` overrides the `grok` executable.
 
@@ -173,8 +202,10 @@ must contain these sections, each with real content:
 - Risk and rollback
 - Still open
 
-A missing, empty, TODO, branch-name, or `grok incident fix on` section is
-refused: pickup logs, sends a normal-priority Pushover, exits non-zero for
+`ir_ensure_pr.ensure_pr` refuses to create or edit a PR whose body lacks
+these sections, and its CLI builds the body from the head commit (there is
+no placeholder default). A missing, empty, TODO, branch-name, or
+`grok incident fix on` section is refused: pickup logs, sends a normal-priority Pushover, exits non-zero for
 that branch, and leaves it for the next cycle. The responder's AUTOPUSH
 path uses the same validator. Pickup also folds in the `watchdog_pages`
 row (page id, severity, first-seen, result) when Turso is reachable, and
@@ -206,13 +237,13 @@ responder against a live promotion.
 `radon-grok-upgrade.{service,timer}` is installed and enabled. Daily
 07:40 UTC it runs `scripts/grok_upgrade.py`: copy the resolved CLI into a
 unique candidate directory under the configured `--scratch` path
-(`data/cache/grok_upgrade` in the responder checkout), then run that private
+(`/var/lib/radon/grok-upgrade` in the unit; `data/cache/grok_upgrade` when omitted), then run that private
 copy's updater with isolated `HOME` and `GROK_HOME`. Probe its version,
 resolve the newest default model, then smoke a canned dry-run that must return `RESULT:` plus a Part 1
 validator-passing body. The live executable is never the updater target
 (REL-292 / R-711).
 
-- Pass: prepare replacement links, atomically switch the canonical live symlink, and write LKG with the immutable candidate path. Keep the promoted directory; a later attempt gets a new directory. No PR.
+- Pass: prepare replacement links, atomically switch the canonical live symlink (`--live-bin`) and the explicit `--alias-bin` (`~/.grok/bin/grok` in the unit), and write LKG with the immutable candidate path. The upgrader never derives a path from HOME and refuses a candidate outside `--scratch`. Keep the promoted directory; a later attempt gets a new directory. No PR.
 - Fail: preserve the live/LKG executable and alert via Pushover / watchdog; remove an unpromoted candidate. Health diagnostics use the writer's structured `error.message` field (REL-293 / R-712).
 - Incident lock held: skip the promote and retry next fire.
 

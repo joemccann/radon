@@ -616,11 +616,24 @@ def _classify_http_failure(status: int, body: str) -> str:
     return "provider_error"
 
 
-def _is_hard_fail(status: int, body: str) -> bool:
+def _error_envelope(payload: Any) -> str:
+    """Text of a provider error envelope inside a 2xx body, else ""."""
+    if not isinstance(payload, dict):
+        return ""
+    if payload.get("error"):
+        err = payload["error"]
+        return err if isinstance(err, str) else json.dumps(err)
+    if payload.get("type") == "error":
+        return json.dumps(payload)
+    return ""
+
+
+def _is_hard_fail(status: int, payload: Any) -> bool:
+    # A 200 is judged by its envelope only: the body is the model's answer, and
+    # research text routinely says "capacity", "quota" or "billing".
     if status != 200:
         return True
-    lowered = body.lower()
-    return any(marker in lowered for marker in _CREDIT_MARKERS)
+    return bool(_error_envelope(payload))
 
 
 def safe_error_message(error: Exception, *, max_len: int = 240) -> str:
@@ -1444,6 +1457,15 @@ def _models_for_attempt(
     return (_model_for(name, env, kind=kind),)
 
 
+LAST_RESORT_PROVIDER = "cerebras"
+
+
+def _last_resort_last(order: Sequence[str]) -> tuple[str, ...]:
+    """Cerebras is the last resort: nothing runs after it, whatever the caller passed."""
+    rest = tuple(name for name in order if name != LAST_RESORT_PROVIDER)
+    return rest + ((LAST_RESORT_PROVIDER,) if LAST_RESORT_PROVIDER in order else ())
+
+
 def _run_ladder(
     *,
     env: Mapping[str, str],
@@ -1458,7 +1480,7 @@ def _run_ladder(
 ) -> tuple[Any, str, str, str, tuple[str, ...]]:
     attempted: list[str] = []
     skipped: list[str] = []
-    order = providers or MODEL_LADDER_ORDER
+    order = _last_resort_last(providers or MODEL_LADDER_ORDER)
 
     for name in order:
         if name == "cursor":
@@ -1497,8 +1519,10 @@ def _run_ladder(
                 continue
 
             body_text = raw if isinstance(raw, str) else ""
-            if payload is None or _is_hard_fail(status, body_text):
-                code = _classify_http_failure(status, body_text)
+            if payload is None or _is_hard_fail(status, payload):
+                code = _classify_http_failure(
+                    status, _error_envelope(payload) if status == 200 else body_text
+                )
                 attempted.append(f"{name}:{code}")
                 logger.warning(
                     "%s provider=%s model=%s auth=%s failed %s",

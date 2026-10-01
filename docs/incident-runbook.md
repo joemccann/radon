@@ -2577,9 +2577,12 @@ duplicate.** Peak: 2026-09-22 11:35Z, page `e1297eea…`.
   `twr_status=degraded` is `flex-pull-twr-degraded-exit`.
   `classified_as=activity` with `outcome=coverage_unverified` is
   `flex-pull-activity-nav`.
-  `Result=timeout` is `flex-pull-ingest-timeout`. An uncovered exec, or
-  a quantity or notional disagreement, stays unverified and is operator
-  reconciliation, not this fix. If `/health/lite` is down too → API, stand down.
+  `Result=timeout` is `flex-pull-ingest-timeout`. A quantity gap equal
+  to same-day BAG envelopes (`right='?'` or a Spread/BAG structure, no
+  strike) is `flex-pull-bag-envelope-as-stock`. An uncovered exec, or a
+  quantity or notional disagreement that remains after those envelopes
+  are excluded, stays unverified and is operator reconciliation, not
+  this fix. If `/health/lite` is down too → API, stand down.
 - **Remediation (code):** after the bounded journal walk exhausts, pending
   Flex executions are covered when individual-fill reconciliation returns
   no uncovered executions and no disagreements. Disagreements and truly
@@ -2594,6 +2597,53 @@ duplicate.** Peak: 2026-09-22 11:35Z, page `e1297eea…`.
 - **Code:** `scripts/flex_delivery_ingest.py` (`delivery_rows_present`).
 
 ---
+
+## flex-pull-bag-envelope-as-stock
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+after a stock assignment whose Flex quantity matches the stock fill, because
+same-day BAG envelopes were summed as stock.** Peak: 2026-09-29 12:35Z,
+page `a7d2483d17687fb7f327d2e22fe1b0bc`. Same file failed again 2026-09-30
+11:31Z and 12:30Z. Span about 50s, not `TimeoutStartSec`. `:8321/health/lite`
+stayed authenticated.
+
+- **Mechanism:** `Trade_History.20260925` is an applied duplicate. Flex
+  trade `1000000001` is SPCX stock, 1000 shares at $149
+  (notional 149,000), the 149-put assignment. The journal stock row
+  matches that fill (`0000abcd.00000001.02.01`). Four combo envelopes
+  the same day (`right='?'`, structure `Long Spread (BAG)`, 50+20+19+11
+  contracts, net prices -0.15/-0.41) have no strike, so `_fill_contract`
+  maps them to `SPCX|STK`. Signed qty becomes 1100 and notional
+  148,972 ($28 light, the envelopes' net debit). `rehydrate_from_executions`
+  flags a disagreement, `delivery_rows_present` returns false, and the
+  oneshot exits 1 on `coverage_unverified` / `classified_as=trades`.
+  The option legs (puts and calls with strike and right) stay on their
+  own contract keys and are not the gap. `Type=oneshot` has no `Restart=`.
+- **Detection:** journal `Flex aggregate disagrees with individual fills`
+  for `SPCX|STK` with `flex_qty=1000`, `fills_qty=1100`,
+  `flex_notional=149000`, `fills_notional=148972`,
+  `flex_exec_ids=['1000000001']`, then
+  `ingest_failed` `outcome=coverage_unverified` `classified_as=trades`
+  on `U0000000.Trade_History.20260925.20260925.xml.pgp`.
+  `systemctl show` → `exit-code` / `NRestarts=0`. The 07:30 ET run and
+  the 08:30 ET retry both log it.
+- **Discriminating check:** the qty gap equals the same-day BAG contract
+  count (here 100) and the notional gap equals those envelopes' signed
+  debit (here $28), while the stock fill alone matches Flex. A remaining
+  gap after envelopes are excluded is still operator reconciliation
+  (`flex-pull-trade-coverage`). A Flex id that is the live five-part
+  exec id minus `.01` is `flex-pull-live-exec-id`. `Result=timeout` is
+  `flex-pull-ingest-timeout`. If `/health/lite` is down too → API, stand down.
+- **Remediation (code):** skip a combo envelope in the individual-fill
+  totals when it has no option bucket. Real stock shares still disagree.
+  Do not replay the delivery. Do not restart-flap; the next timer
+  retries. After deploy, `systemctl reset-failed radon-flex-pull.service`
+  if that retry has not yet fired.
+- **Regression:**
+  `test_journal_rehydrate.py::TestFlexAggregateNeverOverridesIndividualFills::test_bag_combo_envelope_is_not_extra_stock_on_an_assignment`,
+  `test_real_extra_stock_shares_still_disagree_with_flex`.
+- **Code:** `scripts/journal_rehydrate.py` (`_is_combo_envelope`,
+  `_individual_fill_totals`).
 
 ## flex-pull-live-exec-id
 
@@ -3077,6 +3127,61 @@ after the IB-skip path has already chosen the cached payload.** Peak:
   `scripts/tests/test_grok_page_ledger_timeout.py::TestLedgerReadTimeout`.
 - **Code:** `scripts/grok_page_responder.py` (`_ledger_read_timeout`).
 
+## grok-page-responder-missing-binary
+
+**`radon-grok-page-responder.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when `GROK_BIN` is not on disk.** Peak: 2026-09-30
+00:05:00Z, page `3b990bb8496e24785a14a4df32e79a4e`.
+
+- **Mechanism:** `Type=oneshot`, no `Restart=`. The UTC-day action cap
+  skipped every cycle from 23:40Z through midnight (`actioned_today: 6`),
+  so the poller never exec'd grok while the cap held. At 00:00Z the cap
+  reset and an actionable page was waiting. `run_cycle` probed with
+  `subprocess.run([GROK_BIN, "--version"])`. `/home/radon/.local/bin/grok`
+  was absent. `FileNotFoundError` is not `GrokRuntimeError`, so
+  `resolve_latest` never refused and never read LKG. The exception
+  escaped `run_cycle` (`except BaseException: raise`) and the interpreter
+  exited 1. systemd recorded `Result=exit-code`, `NRestarts=0`. The same
+  traceback repeated every ~30s (about 114 lines an hour) from 00:00:12Z
+  until 17:31:53Z. The symlink and `/var/lib/radon/grok_lkg.json` both
+  have mtime 17:32Z (`grok 1.0.44`). The watchdog paged this unit about
+  itself. `requires_ib` is false. Exec span is milliseconds, not
+  `TimeoutStartSec`.
+- **Detection:** journal traceback ends at
+  `FileNotFoundError: [Errno 2] No such file or directory: '/home/radon/.local/bin/grok'`
+  in `_default_grok_runner` ← `grok_runtime._run` ← `probe_cli` ←
+  `resolve_latest` ← `_runtime_from_track`. Cycles before midnight the
+  same evening log `skipped: daily_action_cap` and exit 0.
+- **Discriminating check:** `ls` of `GROK_BIN` fails at the crash and
+  the next line is not `skipped: grok_runtime`. A hrana
+  `TimeoutError` at `claim_page` / `complete_page` is
+  `grok-page-responder-ledger-timeout`. `grok --version` exiting
+  nonzero is already `GrokRuntimeError` and already refuses. `Result=signal`
+  or exit 143 inside a deploy window is
+  `deploy-stop-clean-oneshot-signal`. `/health/lite` down is the API,
+  stand down. Anonymous `/api/service-health` 401 is not this exit.
+  Not `ib-gateway-grouped`. A `PermissionError` on a present binary
+  still fails the oneshot.
+- **Remediation (code):** `_run` turns `FileNotFoundError` into
+  `GrokRuntimeError`. No trusted LKG refuses the cycle: exit 0, page left
+  pending, no fallback pushover, and heartbeat `error` with the reason so
+  the watchdog error bucket still pages once (`paused` never alerts and
+  would hide the outage). An LKG is used only when
+  `grok_runtime.lkg_binary_problem` passes: absolute, present, regular,
+  executable, not world-writable, owned by root or the unit user, and not
+  under `/tmp`, `/var/tmp`, `/dev/shm`, the system temp dir, a
+  `pytest-of-*` basetemp, or the responder clone. A rejected LKG logs
+  `grok last-known-good binary rejected (<reason>)` and counts as no LKG.
+  Do not restart-flap. Installing the CLI is the upgrader.
+  This page's binary was already on disk at 17:32Z. The unit is not
+  on `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `scripts/tests/test_grok_page_missing_binary.py::TestMissingGrokBinary`,
+  `::TestLkgBinaryIsTrusted`.
+- **Code:** `scripts/grok_runtime.py` (`_run`, `lkg_binary_problem`),
+  `scripts/grok_page_responder.py` (`_load_trusted_lkg`; `error` row and
+  no pin warning on a refuse).
+
 ## grok-upgrade-update-rejects-no-auto-update
 
 **`radon-grok-upgrade.service` oneshot pages P1 `Result=exit-code`
@@ -3127,6 +3232,40 @@ with a flag that subcommand does not accept.** Peak: 2026-09-29
   `test_failure_passes_error_dict_not_last_error`).
 - **Code:** `scripts/grok_upgrade.py` (`parse_update_check`,
   `install_candidate_cli`, `_record_health`).
+
+## grok-live-binary-relinked-by-pytest
+
+**`radon-grok-upgrade.service` and `radon-grok-page-responder.service`
+fail with `FileNotFoundError: /home/radon/.local/bin/grok`.** First seen
+2026-09-29 07:51Z.
+
+- **Mechanism:** `/home/radon/.local/bin/grok` links to
+  `/home/radon/.grok/bin/grok`, and that link pointed into
+  `/tmp/pytest-of-radon/.../scratch/candidate/bin/grok`. A pytest run in
+  the responder clone (a Grok fix session) ran
+  `test_pins_latest_version_and_promotes`. `promote_live_symlink` then
+  relinked `Path.home()/.grok/bin/grok` whenever that directory existed,
+  so the real installer entry was repointed at the test candidate. Pytest
+  pruned its old basetemp and the link dangled.
+- **Discriminating check:** `readlink -f /home/radon/.local/bin/grok` and
+  `readlink /home/radon/.grok/bin/grok` show a `pytest-of-` path. A
+  promote by the timer points only into `/var/lib/radon/grok-upgrade`.
+- **Remediation (ops):** repoint `/home/radon/.grok/bin/grok` at a real
+  binary (`binary_path` in `/var/lib/radon/grok_lkg.json` when it exists,
+  otherwise rerun the xAI installer as radon), then
+  `systemctl start radon-grok-upgrade.service`. Do not delete
+  `/var/lib/radon/grok-upgrade/candidate-*` that LKG names.
+- **Remediation (code):** the upgrader moves only `--live-bin` and an
+  explicit `--alias-bin` (the unit passes `/home/radon/.grok/bin/grok`),
+  and refuses a candidate outside `--scratch`. Upgrade tests fake HOME,
+  and `scripts/tests/conftest.py` fails any test that changes the host's
+  real `~/.grok/bin/grok` or `~/.local/bin/grok`.
+- **Regression:** `scripts/tests/test_grok_upgrade.py`
+  (`fake_home`, `TestPromoteTouchesOnlyGivenPaths`),
+  `cloud/tests/test_grok_upgrade_setup.py`
+  (`test_upgrade_unit_names_every_link_it_may_move`).
+- **Code:** `scripts/grok_upgrade.py` (`promote_live_symlink`, `main`),
+  `cloud/services/radon-grok-upgrade.service`.
 
 ## Grok auto-response on iPhone P1 pages
 

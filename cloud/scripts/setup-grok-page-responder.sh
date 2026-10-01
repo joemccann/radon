@@ -5,6 +5,7 @@
 #   bash cloud/scripts/setup-grok-page-responder.sh
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLONE="${RADON_PAGE_RESPONDER_DIR:-/home/radon/radon-page-responder}"
 ENV_FILE="${RADON_PAGE_RESPONDER_ENV:-/home/radon/radon-page-responder.env}"
 PROD_ENV="${RADON_DEPLOY_ENV_FILE:-/home/radon/radon-cloud/.env}"
@@ -29,34 +30,10 @@ sudo -u radon git -C "$CLONE" config user.email "ops@radon.run"
 echo "[2/5] stripped env $ENV_FILE"
 umask 077
 tmp="$(mktemp)"
-python3.13 - "$PROD_ENV" "$tmp" <<'PY'
-import sys
-from pathlib import Path
-src, dest = Path(sys.argv[1]), Path(sys.argv[2])
-keep = ("TURSO_DB_URL", "TURSO_AUTH_TOKEN", "PUSHOVER_USER", "PUSHOVER_TOKEN")
-optional = ("GH_TOKEN",)
-wanted = {k: None for k in keep}
-extras = {k: None for k in optional}
-for raw in src.read_text().splitlines():
-    line = raw.strip()
-    if not line or line.startswith("#") or "=" not in line:
-        continue
-    key, _, value = line.partition("=")
-    if key in wanted:
-        wanted[key] = value
-    if key in extras:
-        extras[key] = value
-missing = [k for k, v in wanted.items() if not v]
-if missing:
-    raise SystemExit("missing in production env: " + ", ".join(missing))
-optional_lines = [f"{k}={extras[k]}" for k in optional if extras[k]]
-dest.write_text(
-    "\n".join(f"{k}={wanted[k]}" for k in keep)
-    + (("\n" + "\n".join(optional_lines)) if optional_lines else "")
-    + "\nGROK_PAGE_NO_DOTENV=1\nGROK_PAGE_SYNC_REMOTE=1\n"
-    + "GROK_BIN=/home/radon/.local/bin/grok\n"
-)
-PY
+# Secrets from the production env only; operator GROK_PAGE_* flags
+# (RESPONDER/AUTOSHIP/AUTOPUSH/MAX_ACTIONS_PER_DAY) carried over from the
+# current file so a rerun never silently disables the responder.
+python3.13 "$SCRIPT_DIR/grok_responder_env.py" "$PROD_ENV" "$ENV_FILE" "$tmp"
 chown radon:radon "$tmp"
 chmod 600 "$tmp"
 mv "$tmp" "$ENV_FILE"
