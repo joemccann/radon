@@ -68,7 +68,7 @@ Confirm:
 SELECT name FROM sqlite_master WHERE name = 'idx_knowledge_embedding_v2';
 ```
 
-Migration 0090 drops the 384-d `idx_knowledge_embedding` the same way (manual, same command). On a fork of `radon` (2026-09-28) one row's `embedding` UPDATE took 10-26s with the index and every other statement about 0.03s. Ingest held Turso's single writer that long per chunk and every other writer timed out. Keep `radon-knowledge.timer` disabled until `SELECT name FROM sqlite_master WHERE name = 'idx_knowledge_embedding'` returns no row.
+Migration 0090 drops the 384-d `idx_knowledge_embedding` the same way (manual, same command). On a fork of `radon` (2026-09-28) one row's `embedding` UPDATE took 10-26s with the index and every other statement about 0.03s. Ingest held Turso's single writer that long per chunk and every other writer timed out. `radon-knowledge.timer` stays disabled while `SELECT name FROM sqlite_master WHERE name = 'idx_knowledge_embedding'` returns a row. Production applied 0090 on 2026-09-28, the index is gone, and the timer runs hourly.
 
 Then rerun the backfill. Without the index, `--batch-size 64` and no sleep is about 15 minutes for 8,715 NULL rows:
 
