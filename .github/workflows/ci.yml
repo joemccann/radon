@@ -805,6 +805,7 @@ jobs:
           e2e/table-overflow-remediation.spec.ts
           e2e/performance-twr-payload.spec.ts
           e2e/leap-order-prefill.spec.ts
+          e2e/chain-held-leg-spread-risk.spec.ts
           e2e/mobile-orders-session.spec.ts
           e2e/orders-session-window.spec.ts
           e2e/vixts-tab.spec.ts

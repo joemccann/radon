@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { payoffCurve, type PayoffLeg } from "@/lib/order/payoff";
+import type { OrderPresentationSummary } from "@/lib/order/types";
 
 /**
  * Risk panel for the docked ticket rail.
@@ -29,6 +30,8 @@ type TicketRiskBlockProps = {
   total: number | null;
   totalLabel?: string;
   isCredit: boolean;
+  /** Whole-spread figures when held options cover this order (held leg at its basis). */
+  withHeldLegs?: OrderPresentationSummary["withHeldLegs"];
 };
 
 const DASH = "---";
@@ -74,6 +77,7 @@ export default function TicketRiskBlock({
   total,
   totalLabel = "TOTAL",
   isCredit,
+  withHeldLegs = null,
 }: TicketRiskBlockProps) {
   const curve = useMemo(() => payoffCurve(legs, netPremium, { spot }), [legs, netPremium, spot]);
 
@@ -131,6 +135,34 @@ export default function TicketRiskBlock({
           tone={fundsAfter != null && fundsAfter < 0 ? "loss" : undefined}
         />
       </div>
+
+      {withHeldLegs != null && (
+        <>
+          {/* MAX GAIN / MAX LOSS above price the held leg at $0 (already paid
+              for). These price the resulting spread with that leg at its
+              cost basis. */}
+          <div className="ticket-risk-head ticket-risk-head--spread" data-testid="ticket-risk-spread">
+            <span>
+              SPREAD · INCL. HELD LEG
+              {withHeldLegs.heldBasisDollars != null
+                ? ` @ ${usd(withHeldLegs.heldBasisDollars, 0)} BASIS`
+                : " · BASIS UNKNOWN"}
+            </span>
+          </div>
+          <div className="ticket-risk-grid">
+            <Cell
+              label="SPREAD MAX GAIN"
+              value={withHeldLegs.maxGainUnbounded ? "UNBOUNDED" : usd(withHeldLegs.maxGain, 2, true)}
+              tone={withHeldLegs.maxGainUnbounded || withHeldLegs.maxGain != null ? "gain" : undefined}
+            />
+            <Cell
+              label="SPREAD MAX LOSS"
+              value={withHeldLegs.maxLossUnbounded ? "UNBOUNDED" : usd(withHeldLegs.maxLoss, 2, true)}
+              tone={withHeldLegs.maxLossUnbounded || withHeldLegs.maxLoss != null ? "loss" : undefined}
+            />
+          </div>
+        </>
+      )}
 
       <div className="ticket-risk-total">
         <span>
