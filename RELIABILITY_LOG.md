@@ -864,3 +864,9 @@ Closing local gates (2026-09-30): permanent Python drills 95 passed; standing wr
 | REL-108 / NF-2 | DONE for journal-sync readers | RED 7 failed twice; GREEN 291 passed | Replace native history access with the shared bounded urllib Hrana connection. All three history scans page by insertion rowid, restore recovery ordering and discard incomplete results on page/cursor/deadline failure. Real SQLite fixtures include a concurrent lexically earlier insert; fake HTTP proves one bounded request and no native connection. Existing recovery, reconciliation, action-label, post-close, basis and transport gates remain green. No update/delete snapshot isolation is claimed. |
 
 | REL-021b / R-041 | DONE | RED 1 failed twice; GREEN 292 passed | Correct the obsolete same-socket/no-window claim to per-cycle broker sessions and retain the multi-day rehydrate requirement. Two mocked cycles pin connect/fetch/disconnect independently; no scheduling or live broker behavior changed. |
+
+## Nightly remediation 2026-10-01
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-296 / R-715 | DONE | RED 5 failed twice; expanded RED 2 failed / 6 passed twice; GREEN 213 passed | Scan each unpublished commit including merge-parent diffs, NUL-delimited added/modified filenames, text-form binary additions and public branch names. Removed-at-head evidence remains denied, empty filenames cannot escape absent patch headers, and private filenames never appear in refusal messages. All identifiers are synthetic and Git repositories have no remote. Focused publication, pickup, credential-redaction and documentation suites pass. |

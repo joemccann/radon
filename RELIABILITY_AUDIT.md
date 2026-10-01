@@ -2811,3 +2811,48 @@ Audited through: e3063f0c16ddcdead832df49553c6035e6501597 on 2026-09-30 — 0 ne
 | REL-108 / NF-2 (inherited) | P2 | `scripts/monitor_daemon/handlers/journal_sync.py:55-60,303-339,344-351,447-450,571-583` | DONE: history scans used unbounded native reads. Seven fault cases failed twice; bounded HTTP, insertion-keyset pagination and a scan deadline now preserve complete-or-unavailable results. SQLite fixtures prove concurrent insertion and later-page failure across all three scans. Recovery ordering is restored after pagination; no concurrent update/delete snapshot guarantee is claimed. |
 
 | R-041 / REL-021b | P2 | `scripts/monitor_daemon/handlers/journal_sync.py:3-14,119-140` | DONE: the module documentation incorrectly promised a persistent execution cache. Two mocked execute cycles prove separate connect/fetch/disconnect lifecycles; the documentation assertion failed twice before correction. Polling and broker behavior are unchanged. |
+
+## Delta audit 2026-10-01
+
+Trusted issue #81 checkpoint: e3063f0c16ddcdead832df49553c6035e6501597.
+Audited main tip: 731716e54b1e85e98b591cbd79e9d18adf7a1ec7.
+Range: 20 commits, 160 changed paths; codemap direct-importer expansion gives
+450 paths. No open reliability PR reserved an identifier or covered a finding.
+The previous high-water marks were R-714 and REL-295.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-715 | P1 | `scripts/ir_push_gate.py:111-155,174-193` | The publication gate scanned only the final diff, missed branch names and empty-file names, and echoed private filenames in refusals. An identifier committed then deleted remained publishable through Git history. Acceptance: disposable Git histories with edited/deleted/renamed sensitive evidence, empty private filenames, binary additions and plus-prefixed lines all refuse; branch-only checks refuse private names; findings never echo the synthetic identifier. REL-296. |
+| R-716 | P2 | `scripts/fetch_credit_vix.py:465-550`; `web/lib/dbFirstRead.ts:134-138`; `web/components/CreditVixPanel.tsx:92-102` | Disjoint nonempty source dates produced no aligned sample but refreshed an old cache with an ok heartbeat. Source-down reserves also omitted the missing marker consumed by existing readers. Acceptance: disjoint legs with cache produce error and missing/stale_source without history writes; no-cache failure raises; no-db makes no writes; valid unchanged aligned sessions retain healthy weekend behavior. REL-297. |
+
+Standing sweeps: 89 passed across timer writer discovery, real-exemption
+population, both catalogs, final order-limit funnels and bracket guards.
+The placement scan retains caller halt checks in `ib_place_order.py:240-255`,
+`ib_order_manage.py:202-204`, `ib_execute.py:442-455`,
+`exit_order_service.py:343-347` and `exit_orders.py:490-502`;
+`IBClient` retains transport limits at `ib_client.py:711-743,867-893`.
+`server.py:5659,5768,5846` retains the non-idempotent placement refusal;
+`exit_orders.py:203-219,766-780` retains acknowledgement polling;
+`db/writer.py:2564-2590` retains the Hrana daemon-state writer.
+New credit-vix and rsi-oversold writers are registered in both catalogs.
+
+Delta review covered publication/recovery authority and bounded subprocesses,
+JWKS rotation and outage classification, indicator persistence and freshness,
+BAG execution coverage, model-response classification, deployment environment
+rendering and notification filtering, workflow secret isolation, route readers,
+and changed interfaces at their codemap callers. The new RSI CLI already
+records failed cycles (`rsi_oversold_scan.py:368-374`); no missing-heartbeat
+finding is asserted from its run() name alone. No new order placement exists
+in this delta. Historical unused pooled-order management remains R-039.
+
+NEW_FINDINGS and REL-021b were re-triaged against the trusted checkpoint.
+NF-1/NF-4 retain operator-only acceptance. NF-2 journal readers and R-024,
+R-301, R-302, R-438, R-439, R-041 are covered by the merged previous-night
+repairs. The remaining 28 inherited candidates retain their original
+acceptance on issue #81; inspection does not close them. R-303's stale deploy
+budget explanation and R-039's unused pooled-management import remain
+reproducible candidates for this night's inherited work. Existing health
+unit dwell is memory-only (`health_service/serve.py:170,200-207`); relay cache,
+queue and depth candidates remain separate historical work, not new IDs.
+
+Audited through: 731716e54b1e85e98b591cbd79e9d18adf7a1ec7 on 2026-10-01 — 2 new findings
