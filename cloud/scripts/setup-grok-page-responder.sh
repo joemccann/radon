@@ -29,16 +29,22 @@ sudo -u radon git -C "$CLONE" config user.email "ops@radon.run"
 
 echo "[2/5] stripped env $ENV_FILE"
 umask 077
-tmp="$(mktemp)"
+# Both env files sit in radon's home, so radon reads and publishes them;
+# root only builds from private copies and never touches either by name.
+work="$(mktemp -d)"
+trap 'rm -rf -- "$work"' EXIT
+sudo -u radon cat -- "$PROD_ENV" >"$work/prod.env"
+if sudo -u radon test -f "$ENV_FILE"; then
+  sudo -u radon cat -- "$ENV_FILE" >"$work/existing.env"
+fi
 # Secrets from the production env only; operator GROK_PAGE_* flags
 # (RESPONDER/AUTOSHIP/AUTOPUSH/MAX_ACTIONS_PER_DAY) carried over from the
 # current file so a rerun never silently disables the responder.
-python3.13 "$SCRIPT_DIR/grok_responder_env.py" "$PROD_ENV" "$ENV_FILE" "$tmp"
-chown radon:radon "$tmp"
-chmod 600 "$tmp"
-mv "$tmp" "$ENV_FILE"
-chown radon:radon "$ENV_FILE"
-chmod 600 "$ENV_FILE"
+python3.13 "$SCRIPT_DIR/grok_responder_env.py" \
+  "$work/prod.env" "$work/existing.env" "$work/out.env"
+sudo -u radon bash -c \
+  'set -euo pipefail; umask 077; tmp="$(mktemp "$1.XXXXXX")"; cat >"$tmp"; mv -f "$tmp" "$1"' \
+  _ "$ENV_FILE" <"$work/out.env"
 
 echo "[3/5] python venv + bun in the clone"
 sudo -u radon bash -lc "
@@ -64,7 +70,7 @@ install -d -o radon -g radon -m 0750 /var/lib/radon
 # Runtime lock dir (responder-writable) and upgrade scratch (not). The
 # responder unit mounts ~/.grok/{bin,hooks,downloads} read-only; create them
 # so the read-only mount covers them rather than being skipped.
-install -d -o radon -g radon -m 0750 /var/lib/radon/grok-runtime /var/lib/radon/grok-upgrade
+sudo -u radon install -d -m 0750 /var/lib/radon/grok-runtime /var/lib/radon/grok-upgrade
 sudo -u radon mkdir -p /home/radon/.grok/bin /home/radon/.grok/hooks /home/radon/.grok/downloads
 if [[ -x /home/radon/.local/bin/grok && -x "$CLONE/.venv/bin/python" ]]; then
   sudo -u radon -H "$CLONE/.venv/bin/python" "$CLONE/scripts/grok_upgrade.py" \

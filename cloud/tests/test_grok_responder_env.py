@@ -70,7 +70,8 @@ def _run(tmp_path: Path, prod: str, existing: str | None) -> dict[str, str]:
     python.chmod(0o755)
     script = (
         "set -euo pipefail\n"
-        "chown() { :; }\n"
+        # Runs as the test user; the contract test below pins "-u radon".
+        'sudo() { [[ "$1 $2" == "-u radon" ]] || exit 97; shift 2; "$@"; }\n'
         f'SCRIPT_DIR="{CLOUD / "scripts"}"\n'
         f'ENV_FILE="{env_file}"\nPROD_ENV="{prod_env}"\n'
         + _step2()
@@ -146,3 +147,39 @@ def test_allowlist_covers_every_operator_knob_the_responder_reads():
     read = set(re.findall(r"\b(GROK_PAGE_[A-Z_]+)\b", RESPONDER.read_text(encoding="utf-8")))
     managed = {key for key, _ in builder.MANAGED}
     assert read - managed == set(builder.OPERATOR_FLAGS)
+
+
+# Paths radon owns or whose parent radon owns. Root must not open, move,
+# chown, chmod or create anything there by name: a radon-planted symlink
+# (to a file or a directory) would redirect the root operation (CWE-59).
+_RADON_PATH = re.compile(
+    r'"?\$(?:ENV_FILE|PROD_ENV|CLONE|MARKER)\b|/home/radon\b|/var/lib/radon/'
+)
+_ROOT_OPS = {
+    "mv", "cp", "chown", "chmod", "install", "mkdir", "ln", "rm", "touch",
+    "tee", "cat", "python3.13", "git",
+}
+
+
+def test_root_never_operates_by_name_inside_radon_owned_trees():
+    offenders = []
+    text = SETUP.read_text(encoding="utf-8").replace("\\\n", " ")
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith(("#", "echo ")):
+            continue
+        words = line.split()
+        if words[0] in _ROOT_OPS and _RADON_PATH.search(line):
+            offenders.append(line)
+        # Redirects are opened by the root shell even on a sudo line;
+        # single-quoted text runs inside the radon shell.
+        unquoted = re.sub(r"'[^']*'", "''", line)
+        if ">" in unquoted and _RADON_PATH.search(unquoted.split(">", 1)[1]):
+            offenders.append(line)
+    assert offenders == []
+
+
+def test_env_file_is_published_by_radon(tmp_path):
+    text = _step2()
+    assert re.search(r'^sudo -u radon .*mv -f .*"\$1"', text, re.M | re.S)
+    _run(tmp_path, PROD, EXISTING)
