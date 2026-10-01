@@ -178,3 +178,10 @@ Full convention (per-contract vs per-share `avg_cost`) lives in `web/CLAUDE.md` 
 ## Entry-Date Resolution Contract
 
 Strict ordered fallback in `ib_sync.py:fetch_positions`, MOST → LEAST specific. Test: `scripts/tests/test_combo_entry_date.py`. Full rule in `web/CLAUDE.md` §Entry-Date Resolution — Python-side implementation must match the order documented there.
+
+## Option close cache expiry (REL-021b / R-034)
+
+The relay prunes expired contract closes at startup and on the first cache
+access/write of each Eastern day, then persists the reduced cache. Today's
+expiry remains available through the session. Late ticks cannot resurrect
+expired keys; expiry comparison uses Eastern dates, not the host timezone.

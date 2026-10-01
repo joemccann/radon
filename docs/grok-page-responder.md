@@ -143,6 +143,11 @@ pickup refuses:
 - running at all from a clone that is behind `origin/main` (stale pickup
   code).
 
+REL-296 / R-715: the gate scans each unpublished commit, including merge
+parents, so adding and then deleting an identifier still refuses publication.
+Empty and binary files, filenames and branch names are included; refusal
+messages replace private filenames with a redacted location.
+
 2026-09-30: a pickup install from before the refresh step (#759) ran a clone
 frozen before #773. It ignored `GROK_PAGE_AUTOPUSH`, opened
 `IR: grok incident fix on <branch>` placeholder PRs, and published one

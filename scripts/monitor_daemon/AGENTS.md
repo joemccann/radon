@@ -5,7 +5,7 @@ Applies under `scripts/monitor_daemon/`. Root and `scripts/AGENTS.md` also apply
 ## Market-Hours Gate
 
 - `scripts/monitor_daemon/daemon.py:is_market_hours()` uses `datetime.now(ZoneInfo("America/New_York"))`.
-- Never reintroduce hardcoded EST/EDT offsets.
+- Never reintroduce hardcoded EST/EDT offsets. Missing tzdata logs an error and refuses market-hours admission; ungated handlers continue. Calendar-only failures retain the valid RTH clock fallback (REL-021b / R-046).
 - Real-time fill monitor, exit orders, and portfolio sync are market-hours gated.
 - Flex-token check and rehydrate-style journal sync run 24/7 where configured; cash-flow sync is not registered.
 
