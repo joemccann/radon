@@ -1,3 +1,9 @@
+# Task: Runner Pushover dotenv allowlist (2026-10-01)
+
+- [x] T1 depends_on: [] Failing tests in scripts/tests/test_runner_pushover_env.py: dotenv pair, allowlist, no eval, values never logged, missing, half-pair, agents never see keys, dotenv-path file, plist/installer.
+- [x] T2 depends_on: [T1] run_loop.sh allowlist parser + precedence; install.sh writes dotenv-path; notify logs curl status; docs/runner.md.
+- [ ] T3 depends_on: [T2] Focused pytest green, READY PR vs main, CI green. No merge.
+
 # Task: Grok setup hardening (2026-09-30)
 
 - [x] T1 depends_on: [] Failing tests: promote touches only explicit paths (never Path.home()/.grok), candidate must live under scratch, real ~/.grok and ~/.local/bin untouched by any scripts test.

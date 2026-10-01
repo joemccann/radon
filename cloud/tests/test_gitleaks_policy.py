@@ -65,6 +65,9 @@ GENERIC_API_KEY_BASELINE_COMMITS = {
     # described the secret-store design and trips generic-api-key; the line
     # no longer exists at HEAD.
     "b0322b6f2ac3ef3b7310e628a23b67b859168ac5",
+    # 2026-10-01 (PR #837): runner Pushover SENTINEL fixtures next to a
+    # token identifier; rewritten to runtime construction afterwards.
+    "5643de1d495a887c0d71d7cdc29a27b4ab291c1a",
 }
 
 
