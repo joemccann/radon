@@ -269,6 +269,10 @@ CROSS_TREE_CONTRACTS = (
             "scripts/tests/test_docs_contract.py::TestThinIndex::test_web_readme_does_not_teach_npm",
         ),
     ),
+    CrossTreeContract(
+        patterns=("web/bun.lock",),
+        tests=("scripts/tests/test_bun_lock_platforms.py",),
+    ),
 )
 
 
