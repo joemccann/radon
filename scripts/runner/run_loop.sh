@@ -269,10 +269,59 @@ launch_agent() {
               --always-approve --output-format plain < /dev/null ;;
     agy)    exec agy -p="$(cat "$PROMPT_FILE")" --effort medium --dangerously-skip-permissions \
               --output-format text < /dev/null ;;
-    fx)     FX_PROVIDER="$provider" FX_AUTO_UPGRADE=0 FX_SKIP_ONBOARDING=1 FX_DISABLE_KEYCHAIN=1 \
+    fx)     [[ "$provider" != nvidia ]] || launch_fx_nvidia
+            FX_PROVIDER="$provider" FX_AUTO_UPGRADE=0 FX_SKIP_ONBOARDING=1 FX_DISABLE_KEYCHAIN=1 \
               exec fx ask --full-access --no-save < "$PROMPT_FILE" ;;
     *)      echo "unknown agent $agent" >&2; exit 64 ;;
   esac
+}
+
+# fx:nvidia. The NVIDIA key is rate limited per key (about 40 requests a
+# minute) and shared with production; fx is a closed binary that cannot pace
+# itself, so it runs against the loopback proxy in lib/nvidia_rate_limit.py
+# (the `nvidia-paced` provider agent_cli_bootstrap.sh writes). The proxy paces
+# every loop on this host through one state file, honours Retry-After, and
+# trips NVIDIA after persistent 429s or any 401/403. A trip makes this rung
+# exit 75 so the ladder moves on instead of hammering the key.
+NVIDIA_PROXY_PORT="${RADON_NVIDIA_PROXY_PORT:-18431}"
+
+nvidia_tripped() {
+  local until
+  until="$(cat "$RADON_NVIDIA_RATE_STATE.tripped" 2>/dev/null)"
+  until="${until//[[:space:]]/}"
+  [[ "$until" =~ ^[0-9]+$ ]] && (( until > $(date +%s) ))
+}
+
+launch_fx_nvidia() {
+  local pid
+  export RADON_NVIDIA_RATE_STATE="$STATE_DIR/nvidia-rate.json"
+  if nvidia_tripped; then
+    echo "[runner] NVIDIA is paused (rate limited or refused) until $(cat "$RADON_NVIDIA_RATE_STATE.tripped"); skipping fx:nvidia"
+    exit 75
+  fi
+  mkdir -p "$STATE_DIR/logs"
+  # A clean environment: the proxy outlives this session and never needs
+  # the agent's GitHub token.
+  if ! env -i HOME="$HOME" PATH="$RUNNER_PATH" "$RUNNER_PYTHON" -I "$RUNNER_DIR/lib/nvidia_rate_limit.py" \
+      ensure-proxy --port "$NVIDIA_PROXY_PORT" --state "$RADON_NVIDIA_RATE_STATE" \
+      --rpm "${RADON_NVIDIA_RPM:-20}" --log "$STATE_DIR/logs/nvidia-proxy.log"; then
+    echo "[runner] the NVIDIA pacing proxy did not start; not calling NVIDIA unpaced"
+    exit 75
+  fi
+  FX_PROVIDER=nvidia-paced FX_AUTO_UPGRADE=0 FX_SKIP_ONBOARDING=1 FX_DISABLE_KEYCHAIN=1 \
+    fx ask --full-access --no-save < "$PROMPT_FILE" &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    if nvidia_tripped; then
+      echo "[runner] NVIDIA stays rate limited or refused; stopping fx:nvidia so the next rung runs (see $STATE_DIR/logs/nvidia-proxy.log)"
+      kill -TERM "$pid" 2>/dev/null
+      wait "$pid"
+      exit 75
+    fi
+    sleep "${RADON_NVIDIA_WATCH_SECS:-10}"
+  done
+  wait "$pid"
+  exit $?
 }
 
 # pid<TAB>cwd for every process this user owns.

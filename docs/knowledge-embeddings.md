@@ -22,6 +22,7 @@ The `knowledge` table carries two vector columns:
 
 - **Dual-write (default):** Every ingested `KnowledgeDoc` writes both vectors when `RADON_KB_EMBED_DUAL_WRITE` is not `0`/`false`/`off`/`no` (default: on). The 384-d column stays current for the fallback.
 - **Single-write:** `RADON_KB_EMBED_DUAL_WRITE=0` disables the 2048-d write; ingest writes only `embedding`.
+- **NVIDIA rate limit:** every embedding request takes a slot from the host-wide NVIDIA pacer shared with the model ladder (`scripts/nvidia_rate_limit.py`, `RADON_NVIDIA_RPM`, default 20 a minute; see [dropbox-research.md](dropbox-research.md)). With no slot inside 15 s the call raises `rate_limited_local` and the query falls back to the 384-d local vector. A 429 feeds the shared cooldown; a 401/403 is logged as `NVIDIA AUTHORIZATION FAILED` and not retried.
 - **Backend override:** `RADON_KB_EMBED_BACKEND=local` forces BAAI/bge-small-en-v1.5 (384d) for both query and ingest; the NVIDIA path is never used.
 - **Disable:** `RADON_KB_EMBED_DISABLED=1` turns off all embeddings; ingest writes FTS-only rows (`embedding` and `embedding_v2` both NULL).
 - **Transient write retries:** source and prepared-write retries wait `_retry_delay(attempt)` in `scripts/knowledge/ingest.py`: 12s doubling to a 60s cap, plus up to 25% jitter. Turso reaps an abandoned idle transaction after 10s (up to 300s if it is still running), so a shorter wait queues the retry behind the orphan's writer lock. Replay is safe because upserts are idempotent on `content_hash`.

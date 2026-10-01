@@ -85,6 +85,7 @@
       "id": "nightly-runner",
       "globs": [
         "scripts/runner/**",
+        "scripts/nvidia_rate_limit.py",
         ".claude/runner-prompts/**"
       ],
       "owners": ["docs/runner.md"],

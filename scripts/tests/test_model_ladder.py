@@ -1309,3 +1309,93 @@ class TestAntigravityCliEnvIsolation:
         )
         assert seen.get("HOME") == "/tmp/fake-home"
         assert seen.get("RADON_LADDER_NO_AUTH_FILES") == "1"
+
+
+# --- NVIDIA rate limits (2026-09-30) -------------------------------------------
+# The NVIDIA key is shared with the nightly fx loops and limited per key. The
+# ladder paces its NVIDIA calls through scripts/nvidia_rate_limit.py, skips the
+# rung (never waits long, never hammers) when the budget is spent, and reports
+# a 401/403 loudly with a redacted body snippet.
+
+
+class _FakeLimiter:
+    def __init__(self, allow=True):
+        self.allow = allow
+        self.events: list = []
+
+    def acquire(self, max_wait):
+        self.events.append(("acquire", max_wait))
+        return self.allow
+
+    def note_429(self, retry_after):
+        self.events.append(("429", retry_after))
+
+    def note_auth_failure(self, status):
+        self.events.append(("auth", status))
+
+    def note_success(self):
+        self.events.append(("ok",))
+
+
+class TestNvidiaRateLimits:
+    ENV = {"NVIDIA_API_KEY": "nvapi-test", "CEREBRAS_API_KEY": "csk-test"}
+
+    def _run(self, monkeypatch, router, limiter):
+        monkeypatch.setattr(model_ladder, "_nvidia_limiter", lambda env, post: limiter)
+        return complete_text_json("evaluate", env=self.ENV, post=router,
+                                  providers=("nvidia", "cerebras"))
+
+    def test_a_spent_budget_skips_nvidia_without_a_request(self, monkeypatch):
+        router = _Router({"api.cerebras.ai": _openai_obj_ok()})
+        limiter = _FakeLimiter(allow=False)
+        result = self._run(monkeypatch, router, limiter)
+        assert result.provider == "cerebras"
+        assert not any("nvidia" in url for url in router.calls)
+        assert "nvidia:rate_limited_local" in result.attempted
+
+    def test_a_429_records_a_cooldown_and_falls_through(self, monkeypatch):
+        router = _Router({"integrate.api.nvidia.com": _Resp(429, {"error": "Too Many Requests"}),
+                          "api.cerebras.ai": _openai_obj_ok()})
+        limiter = _FakeLimiter()
+        result = self._run(monkeypatch, router, limiter)
+        assert result.provider == "cerebras"
+        assert ("429", None) in limiter.events
+        assert sum("nvidia" in url for url in router.calls) == 1, "a 429 is never retried in place"
+
+    def test_a_403_is_logged_loudly_with_a_redacted_snippet(self, monkeypatch, caplog):
+        body = {"detail": "Authorization failed for Bearer nvapi-SECRETSECRETSECRET"}
+        router = _Router({"integrate.api.nvidia.com": _Resp(403, body),
+                          "api.cerebras.ai": _openai_obj_ok()})
+        limiter = _FakeLimiter()
+        with caplog.at_level("WARNING", logger=model_ladder.logger.name):
+            result = self._run(monkeypatch, router, limiter)
+        assert result.provider == "cerebras"
+        assert ("auth", 403) in limiter.events
+        errors = [r for r in caplog.records if r.levelname == "ERROR"]
+        assert errors and "NVIDIA AUTHORIZATION FAILED" in errors[0].getMessage()
+        text = caplog.text
+        assert "Authorization failed" in text
+        assert "SECRETSECRET" not in text
+
+    def test_success_resets_the_429_streak(self, monkeypatch):
+        router = _Router({"integrate.api.nvidia.com": _openai_obj_ok()})
+        limiter = _FakeLimiter()
+        result = self._run(monkeypatch, router, limiter)
+        assert result.provider == "nvidia"
+        assert limiter.events[0][0] == "acquire" and ("ok",) in limiter.events
+
+    def test_non_200_bodies_are_logged_as_a_short_snippet(self, caplog):
+        router = _Router({"api.cerebras.ai": _Resp(500, "upstream exploded " + "z" * 600)})
+        with caplog.at_level("WARNING", logger=model_ladder.logger.name), pytest.raises(ModelLadderExhausted):
+            complete_text_json("evaluate", env={"CEREBRAS_API_KEY": "csk-test"}, post=router,
+                               providers=("cerebras",))
+        assert "upstream exploded" in caplog.text
+        assert "z" * 300 not in caplog.text
+
+    def test_injected_posts_are_never_paced(self):
+        assert model_ladder._nvidia_limiter({}, _Router({})) is None
+
+    def test_the_network_post_uses_the_shared_host_limiter(self, tmp_path):
+        env = {"RADON_NVIDIA_RATE_STATE": str(tmp_path / "rate.json")}
+        limiter = model_ladder._nvidia_limiter(env, model_ladder._default_post)
+        assert limiter is not None and limiter.path == tmp_path / "rate.json"

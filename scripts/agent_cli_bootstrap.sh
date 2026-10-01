@@ -231,6 +231,11 @@ provision() {
   write_grok_home nvidia   "$nv_url" NVIDIA_API_KEY   "$NVIDIA_MODEL_KEY"   "$nv"
   write_grok_home cerebras "$cb_url" CEREBRAS_API_KEY "$CEREBRAS_MODEL_KEY" "$cb"
   write_fx_settings nvidia   "$nv_url" NVIDIA_API_KEY   "$nv"
+  # The runner's fx:nvidia rung uses this one: the same model through the
+  # loopback pacing proxy (scripts/nvidia_rate_limit.py, docs/runner.md), so
+  # every loop on the host shares one NVIDIA rate budget. `nvidia` above
+  # stays direct for interactive use.
+  write_fx_settings nvidia-paced "http://127.0.0.1:${RADON_NVIDIA_PROXY_PORT:-18431}/v1" NVIDIA_API_KEY "$nv"
   write_fx_settings cerebras "$cb_url" CEREBRAS_API_KEY "$cb"
 }
 

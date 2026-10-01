@@ -142,6 +142,8 @@ RB="$(mktemp -d)" && /usr/bin/git clone --depth 1 https://github.com/joemccann/r
 
 Every line must read `OK` with a `/Users/_radonbot/...` path: codex, grok, nvidia, cerebras, fx. A `MISSING` line names its fix. agy is not in this check; step 5 covers it.
 
+The bootstrap also writes fx's `nvidia-paced` provider (`http://127.0.0.1:18431/v1`, or `RADON_NVIDIA_PROXY_PORT`), which the `fx:nvidia` rung uses; see [NVIDIA rate limits](#nvidia-rate-limits). Rerun it after pulling a change to that provider.
+
 ### 7. GitHub machine account (operator, browser)
 
 The bot pushes and opens PRs as its own account, so the `main` ruleset binds it. Your own token would act as the repo admin and bypass the ruleset. GitHub allows one free machine account per person.
@@ -339,6 +341,18 @@ An uncertain lock requires operator inspection of its recorded PID and process s
 | Log stops at `starting agy`, then the next agent | Keychain locked after a reboot | Unlock it (Operate) |
 | A security loop's log shows claude `not logged in` on every rung, every phase `FAILED` | Keychain locked after a reboot, so the claude.ai session is unreadable | Unlock it, then `~/.local/bin/claude auth status` (Operate); re-sign with step 8b.4 if still logged out |
 | `no timeout or gtimeout in /opt/homebrew/bin:/usr/bin:/bin` | coreutils missing | `brew install coreutils` |
+| Log shows `NVIDIA is paused ... skipping fx:nvidia` or `stopping fx:nvidia` | NVIDIA answered persistent 429s or a 401/403, so the key is tripped | Nothing for 429s: it clears itself. For `NVIDIA AUTHORIZATION FAILED` in the proxy log, check the key (Credentials tab or `/v1/models`) |
+| Every `fx:nvidia` rung exits 75 at once, log `not calling NVIDIA unpaced` | The proxy could not start (lib missing: reinstall, step 2) | Reinstall; check `nvidia-proxy.log` |
+| fx:nvidia fails with an unknown provider | The bot's `~/.fx/settings.json` predates `nvidia-paced` | Rerun the bootstrap in the bot shell (step 6) |
+
+## NVIDIA rate limits
+
+The build.nvidia.com key is free but rate limited per key, about 40 requests a minute (NVIDIA returns no rate-limit headers; this is the documented free-tier default). Production (the model ladder, knowledge embeddings, research page parsing) and the `fx:nvidia` rung share it, so each host paces itself with `scripts/nvidia_rate_limit.py`, installed as `/usr/local/radon-runner/lib/nvidia_rate_limit.py`.
+
+- fx is a closed binary, so the `fx:nvidia` rung runs it as provider `nvidia-paced` against a loopback proxy on `127.0.0.1:18431`. The runner starts the proxy on first use (detached, cwd `/`, a clean environment; it never holds the key, it forwards fx's bearer to `https://integrate.api.nvidia.com` only) and it exits after 15 idle minutes. Every loop on the Mac shares it and one state file, `/Users/_radonbot/radon-runner/nvidia-rate.json`.
+- It spaces requests to `RADON_NVIDIA_RPM` (default 20, half the key's limit, because production uses the same key), at most 2 at a time. On a 429 it honours `Retry-After` / `x-ratelimit-reset*` (default 30 s, capped at 300 s) for every loop and retries at most twice; when the budget is still spent it answers a local 429 and sends nothing upstream.
+- Five consecutive 429s (`RADON_NVIDIA_TRIP_AFTER_429S`) or any 401/403 trip NVIDIA for 15 minutes (`RADON_NVIDIA_TRIP_SECS`, `RADON_NVIDIA_AUTH_BLOCK_SECS`) and write `nvidia-rate.json.tripped`. The runner checks that file before `fx:nvidia` and every 10 s while it runs: a trip stops fx and exits 75, so the ladder moves to the next rung instead of hammering the key. A 401/403 is never retried and is logged as `NVIDIA AUTHORIZATION FAILED` with a redacted body snippet.
+- Log: `sudo -u _radonbot tail -40 /Users/_radonbot/radon-runner/logs/nvidia-proxy.log` (429s, trips, 403s, a short secret-free excerpt of every non-200 body).
 
 ## Loop config
 
