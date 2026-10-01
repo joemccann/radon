@@ -67,7 +67,7 @@ responder's `TURSO_AUTH_TOKEN` (unset falls back to the full-access token):
 ```bash
 turso db tokens create radon \
   -p watchdog_pages:data_read,data_update \
-  -p service_health:data_read,data_insert,data_update
+  -p service_health:data_read,data_add,data_update
 ```
 
 Rerunning setup rebuilds that file (`cloud/scripts/grok_responder_env.py`,
