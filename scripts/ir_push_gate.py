@@ -140,7 +140,18 @@ def scan_commit_range(
          "--no-color", "--no-ext-diff", "--no-textconv", "--unified=0", f"{fork}..{ref}"],
         run,
     )
-    for path, lines in _added_lines_by_file(patch).items():
+    files = _added_lines_by_file(patch)
+    # Binary additions and pure renames have no +++ text-patch header.
+    paths = _git(
+        repo,
+        ["log", "--format=", "--name-only", "--diff-merges=separate",
+         "--no-renames", "--diff-filter=AM", f"{fork}..{ref}"],
+        run,
+    )
+    for path in paths.splitlines():
+        if path:
+            files.setdefault(path, [path])
+    for path, lines in files.items():
         safe_path = "[private path]" if find_private_identifiers(path) else path
         for kind in find_private_identifiers("\n".join(lines)):
             findings.append(f"{kind} in diff of {safe_path}")

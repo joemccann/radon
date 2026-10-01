@@ -160,6 +160,24 @@ class TestScanCommitRange:
         assert PAPER_ACCOUNT not in str(exc.value)
         assert "[private path]" in str(exc.value)
 
+    @pytest.mark.parametrize("kind", ["binary", "rename"])
+    def test_private_path_is_scanned_without_added_text_lines(self, repo, kind):
+        report = repo / f"diagnostic-{PAPER_ACCOUNT}.txt"
+        if kind == "binary":
+            report.write_bytes(b"\x00harmless binary fixture\x00")
+        else:
+            assert _git(repo, "config", "diff.renames", "true").returncode == 0
+            assert _git(repo, "mv", "app.py", report.name).returncode == 0
+        assert _git(repo, "add", report.name).returncode == 0
+        assert _git(repo, "commit", "-qm", "fix: diagnostic artifact").returncode == 0
+
+        with pytest.raises(gate.IrPushRefused, match="ib_account_id") as exc:
+            gate.check_publish(
+                repo=repo, base="main", ref="fix/relay",
+                env={"GROK_PAGE_AUTOPUSH": "1"},
+            )
+        assert PAPER_ACCOUNT not in str(exc.value)
+
     def test_clean_branch_has_no_findings(self, repo):
         _commit(repo, "x = 2\n", "fix: relay\n\n" + VALID_BODY)
         assert gate.scan_commit_range(repo, "main", "fix/relay") == []
