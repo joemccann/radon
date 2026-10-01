@@ -11,6 +11,9 @@ readonly APP_UNITS="radon-api.service radon-nextjs.service radon-relay.service r
 # Where the media volume lands INSIDE the container. Fixed regardless of the
 # host path, because Caddy's root and the newsfeed's download dir must agree.
 readonly MEDIA_DIR_IN_CONTAINER=/var/lib/radon/media
+# Host control socket directory (radon-control.service RuntimeDirectory), at
+# the same path inside the radon-api container. Never mounted anywhere else.
+readonly CONTROL_DIR_IN_CONTAINER=/run/radon-control
 
 if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
   DOCKER="${RADON_TEST_DOCKER:?test docker is required}"
@@ -26,6 +29,7 @@ if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
   PYTHON="${RADON_TEST_PYTHON:-$(command -v python3)}"
   GETENT="${RADON_TEST_GETENT:?test getent is required}"
   NOTIFY_PROXY_DIR="${RADON_TEST_NOTIFY_PROXY_DIR:-${STATE_DIR}/notify}"
+  CONTROL_DIR="${RADON_TEST_CONTROL_DIR:-${STATE_DIR}/control}"
   DEPLOY_LOCK_FILE="${RADON_TEST_DEPLOY_LOCK:-${STATE_DIR}/deploy.lock}"
   GREEN_MARKER_FILE="${RADON_TEST_GREEN_MARKER:-${STATE_DIR}/last-green}"
   TRANSITION_JOURNAL_FILE="${RADON_TEST_TRANSITION_JOURNAL:-${STATE_DIR}/transition.json}"
@@ -66,6 +70,7 @@ else
   PYTHON=/usr/bin/python3
   GETENT=/usr/bin/getent
   NOTIFY_PROXY_DIR=/run/radon-app-runtime
+  CONTROL_DIR=/run/radon-control
   DEPLOY_LOCK_FILE=/home/radon/.radon-deploy.lock
   GREEN_MARKER_FILE=/home/radon/.radon-last-green-deploy
   TRANSITION_JOURNAL_FILE=/home/radon/.radon-deploy-transition.json
@@ -809,6 +814,15 @@ cmd_run() {
       set -- "$@" -v "${rh_token_dir}:${rh_token_dir}" \
         --env "ROBINHOOD_MCP_TOKEN_FILE=${rh_token_dir}/rh-mcp.json"
     fi
+    # Host control socket: the API's only path to unit control (it has no
+    # systemctl or sudo). Bind the DIRECTORY, not the socket, so a restart of
+    # radon-control re-creating control.sock stays visible. Root pre-creates
+    # it radon-owned 0700 (symlink-safe) so start order does not matter; the
+    # unit keeps it with RuntimeDirectoryPreserve=yes. A path socket, never an
+    # abstract one: the other host-network containers share the netns.
+    prepare_private_dir "$ids" "$CONTROL_DIR" "host control socket"
+    set -- "$@" -v "${CONTROL_DIR}:${CONTROL_DIR_IN_CONTAINER}" \
+      --env "RADON_CONTROL_SOCKET=${CONTROL_DIR_IN_CONTAINER}/control.sock"
     local credential_host_dir="${SECRET_STORE_CREDENTIAL_STAGE_ROOT}/${unit}"
     set -- "$@" \
       --group-add "$credential_gid" \

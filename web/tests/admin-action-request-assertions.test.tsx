@@ -199,6 +199,131 @@ describe("admin destructive actions reach the wire", () => {
     expect(sent[0].cache).toBe("no-store");
   });
 
+  describe("app host through the radon-control socket", () => {
+    const CONTROLLED: ServicesListResponse = {
+      supported: true,
+      host_role: "app",
+      status_source: "host-control",
+      units: [
+        {
+          unit: "radon-relay.service",
+          load_state: "loaded",
+          active_state: "active",
+          sub_state: "running",
+          description: "Radon IB realtime relay",
+          can_control: true,
+          uptime_secs: 3_600,
+          allowed_actions: ["start", "stop", "restart"],
+        },
+        {
+          unit: "radon-api.service",
+          load_state: "loaded",
+          active_state: "active",
+          sub_state: "running",
+          description: "Radon FastAPI server",
+          can_control: true,
+          uptime_secs: 3_600,
+          allowed_actions: ["restart"],
+        },
+      ],
+    };
+
+    function recordControlled(services: ServicesListResponse): RecordedCall[] {
+      const calls: RecordedCall[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = typeof input === "string" ? input : input.toString();
+          calls.push({ url, method: init?.method ?? "GET", cache: init?.cache });
+          if (url.endsWith("/api/admin/services") && (init?.method ?? "GET") === "GET") {
+            return jsonResponse(services);
+          }
+          if (init?.method === "POST") {
+            return jsonResponse({ ok: true, detail: "done", returncode: 0 });
+          }
+          return jsonResponse({ ...HEALTHY, host_role: "app" });
+        }),
+      );
+      return calls;
+    }
+
+    it("an armed Restart sends exactly one POST on the full unit path", async () => {
+      const calls = recordControlled(CONTROLLED);
+      render(<AdminWorkspace />);
+      await settle();
+
+      const restart = screen.getByTestId("service-restart-radon-relay.service") as HTMLButtonElement;
+      expect(restart.disabled).toBe(false);
+      await click("service-restart-radon-relay.service");
+      // The confirm dialog is the gate: nothing on the wire yet.
+      expect(posts(calls)).toHaveLength(0);
+
+      await click("admin-confirm-action");
+      const sent = posts(calls);
+      expect(sent).toHaveLength(1);
+      expect(sent[0].url).toBe("/api/admin/services/radon-relay.service/restart");
+      expect(sent[0].method).toBe("POST");
+      expect(sent[0].cache).toBe("no-store");
+    });
+
+    it("an armed Stop on a normal unit reaches the stop path", async () => {
+      const calls = recordControlled(CONTROLLED);
+      render(<AdminWorkspace />);
+      await settle();
+
+      await click("service-stop-radon-relay.service");
+      expect(posts(calls)).toHaveLength(0);
+      await click("admin-confirm-action");
+      const sent = posts(calls);
+      expect(sent).toHaveLength(1);
+      expect(sent[0].url).toBe("/api/admin/services/radon-relay.service/stop");
+      expect(sent[0].method).toBe("POST");
+    });
+
+    it("Stop on the API that serves the panel stays disarmed and sends nothing", async () => {
+      const calls = recordControlled(CONTROLLED);
+      render(<AdminWorkspace />);
+      await settle();
+
+      const stop = screen.getByTestId("service-stop-radon-api.service") as HTMLButtonElement;
+      expect(stop.disabled).toBe(true);
+      await click("service-stop-radon-api.service");
+      expect(screen.queryByTestId("admin-confirm-action")).toBeNull();
+      expect(posts(calls)).toHaveLength(0);
+    });
+
+    it("with the socket unreachable every unit control is disarmed and nothing fires", async () => {
+      const calls = recordControlled({
+        ...CONTROLLED,
+        supported: false,
+        status_source: "host-health",
+        units: CONTROLLED.units.map((u) => ({ ...u, can_control: false, allowed_actions: null })),
+      });
+      render(<AdminWorkspace />);
+      await settle();
+
+      const restart = screen.getByTestId("service-restart-radon-relay.service") as HTMLButtonElement;
+      expect(restart.disabled).toBe(true);
+      await click("service-restart-radon-relay.service");
+      await click("restart-stack-button");
+      expect(posts(calls)).toHaveLength(0);
+    });
+
+    it("Restart All on the app host posts the stack restart path once armed", async () => {
+      const calls = recordControlled(CONTROLLED);
+      render(<AdminWorkspace />);
+      await settle();
+
+      await click("restart-stack-button");
+      expect(posts(calls)).toHaveLength(0);
+      await click("admin-confirm-action");
+      const sent = posts(calls);
+      expect(sent).toHaveLength(1);
+      expect(sent[0].url).toBe("/api/admin/stack/restart");
+      expect(sent[0].method).toBe("POST");
+    });
+  });
+
   it("sends no Gateway mutation when the app host has no remote control", async () => {
     const calls: RecordedCall[] = [];
     vi.stubGlobal(

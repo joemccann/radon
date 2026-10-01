@@ -7,6 +7,9 @@ control arbitrary system units.
 
 Host modes:
   - Hetzner / Linux with systemd  -> uses ``systemctl`` for unit control.
+  - API container (no systemctl) with the radon-control socket mounted ->
+    status and actions go through the host daemon (``host_control``,
+    ``scripts/control_service``), which runs the sudoers-granted operator CLI.
   - Anything else (laptop docker, launchd, dev)  -> returns ``supported=False``
     so the UI can render a "service control is host-only" notice without an
     error spike.
@@ -38,6 +41,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
+
+from . import host_control
 
 logger = logging.getLogger("radon.services")
 
@@ -114,6 +119,9 @@ class UnitStatus:
     # Seconds since the unit became active, populated only for currently-running
     # daemons (``ActiveState=active`` AND ``SubState=running``).
     uptime_secs: Optional[int] = None
+    # Verbs the host control daemon will run for this unit. ``None`` means "no
+    # per-unit restriction beyond can_control" (systemd hosts).
+    allowed_actions: Optional[List[str]] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -305,7 +313,12 @@ def _derive_last_active(parsed: Dict[str, str]) -> Optional[str]:
     Oneshot units transition back to ``inactive`` after each run; the most
     useful timestamp there is ``ExecMainExitTimestamp`` (last finish) which
     falls through to ``InactiveEnterTimestamp`` if the exec slot is empty.
+    A timer's last run is ``LastTriggerUSec``; its ActiveEnterTimestamp is only
+    when it was armed (usually boot), which read as "last ran 9d ago".
     """
+    last_trigger = parse_systemctl_timestamp(parsed.get("LastTriggerUSec", ""))
+    if last_trigger:
+        return last_trigger
     candidates = (
         parsed.get("ExecMainExitTimestamp", ""),
         parsed.get("InactiveEnterTimestamp", ""),
@@ -424,12 +437,14 @@ async def show_unit(unit: str) -> UnitStatus:
         observed = read_host_unit_states().get(unit) or {}
         active = str(observed.get("active_state") or "")
         if active and active != "unknown":
+            # The status source is reported once per response
+            # (services_snapshot), not repeated as every row's description.
             return UnitStatus(
                 unit,
                 load_state="host-health",
                 active_state=active,
                 sub_state=str(observed.get("sub_state") or "unknown"),
-                description="host health daemon",
+                description="",
                 can_control=False,
             )
         return UnitStatus(
@@ -437,7 +452,7 @@ async def show_unit(unit: str) -> UnitStatus:
             load_state="unsupported",
             active_state="unknown",
             sub_state="unknown",
-            description="systemctl unavailable on this host",
+            description="",
             can_control=False,
         )
 
@@ -453,23 +468,13 @@ async def show_unit(unit: str) -> UnitStatus:
         "-p", "ExecMainStartTimestamp",
         "-p", "ExecMainExitTimestamp",
         "-p", "ExecMainStatus",
+        "-p", "LastTriggerUSec",
     )
     if rc != 0:
         return UnitStatus(unit, "unknown", "unknown", "unknown", "", can_control=False)
 
     parsed = _parse_show_output(stdout)
-    load_state = parsed.get("LoadState", "unknown")
-    status = UnitStatus(
-        unit=unit,
-        load_state=load_state,
-        active_state=parsed.get("ActiveState", "unknown"),
-        sub_state=parsed.get("SubState", "unknown"),
-        description=parsed.get("Description", ""),
-        can_control=load_state == "loaded",
-        last_active_at=_derive_last_active(parsed),
-        last_exit_code=_derive_last_exit_code(parsed),
-        uptime_secs=_derive_uptime_secs(parsed),
-    )
+    status = _status_from_show(unit, parsed)
     if unit != GATEWAY_UNIT:
         return status
 
@@ -497,8 +502,88 @@ async def show_unit(unit: str) -> UnitStatus:
     return status
 
 
+def _status_from_show(unit: str, parsed: Dict[str, str]) -> UnitStatus:
+    """Build a :class:`UnitStatus` from ``systemctl show`` key/values."""
+    load_state = parsed.get("LoadState", "unknown")
+    return UnitStatus(
+        unit=unit,
+        load_state=load_state,
+        active_state=parsed.get("ActiveState", "unknown"),
+        sub_state=parsed.get("SubState", "unknown"),
+        description=parsed.get("Description", ""),
+        can_control=load_state == "loaded",
+        last_active_at=_derive_last_active(parsed),
+        last_exit_code=_derive_last_exit_code(parsed),
+        uptime_secs=_derive_uptime_secs(parsed),
+    )
+
+
+HOST_CONTROL_STATUS_TIMEOUT_S = 12.0
+HOST_CONTROL_UNIT_TIMEOUT_S = 75.0
+# Detached on the host side: the daemon answers before it acts.
+HOST_CONTROL_STACK_TIMEOUT_S = 10.0
+# operator-radon.sh exits 74 when the deploy/control lock is held.
+OPERATOR_LOCK_HELD_RC = 74
+
+
+async def _host_control_statuses() -> Optional[List[UnitStatus]]:
+    """Unit rows from the host control daemon, or ``None`` when unavailable."""
+    if not host_control.socket_present():
+        return None
+    try:
+        reply = await host_control.acall({"op": "status"}, HOST_CONTROL_STATUS_TIMEOUT_S)
+    except host_control.HostControlError as exc:
+        logger.warning("host control status unavailable: %s", exc)
+        return None
+    rows = reply.get("units")
+    if not reply.get("ok") or not isinstance(rows, list):
+        logger.warning("host control status refused: %s", reply.get("error"))
+        return None
+    statuses: List[UnitStatus] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        unit = canonicalize_unit_name(str(row.get("Id") or ""))
+        if not is_valid_unit(unit):
+            continue
+        parsed = {str(k): str(v) for k, v in row.items() if isinstance(v, str)}
+        status = _status_from_show(unit, parsed)
+        raw_actions = row.get("allowed_actions")
+        actions = (
+            [a for a in raw_actions if a in ALLOWED_ACTIONS]
+            if isinstance(raw_actions, list) else []
+        )
+        status.allowed_actions = actions
+        status.can_control = status.load_state == "loaded" and bool(actions)
+        statuses.append(status)
+    if host_role() == "app" and not any(s.unit == GATEWAY_UNIT for s in statuses):
+        # The Gateway lives on the broker; its row comes from the mTLS daemon.
+        statuses.append(await show_unit(GATEWAY_UNIT))
+    return statuses
+
+
+async def services_snapshot() -> dict:
+    """Everything ``GET /admin/services`` reports except the host role.
+
+    ``status_source`` names where the rows came from, once per response:
+    ``systemd`` (local systemctl), ``host-control`` (radon-control socket),
+    ``host-health`` (radon-health's read-only probe) or ``unavailable``.
+    ``supported`` is True only when this process can actually run actions.
+    """
+    if is_systemd_available():
+        units = await list_units()
+        statuses = list(await asyncio.gather(*(show_unit(u) for u in units)))
+        return {"supported": True, "status_source": "systemd", "units": [s.to_dict() for s in statuses]}
+    controlled = await _host_control_statuses()
+    if controlled is not None:
+        return {"supported": True, "status_source": "host-control", "units": [s.to_dict() for s in controlled]}
+    statuses = await list_units_with_status()
+    source = "host-health" if any(s.load_state == "host-health" for s in statuses) else "unavailable"
+    return {"supported": False, "status_source": source, "units": [s.to_dict() for s in statuses]}
+
+
 async def list_units_with_status() -> List[UnitStatus]:
-    """Snapshot every known radon-* unit. Used by ``GET /admin/services``."""
+    """Snapshot every known radon-* unit from local systemd or the health probe."""
     units = await list_units()
     statuses = await asyncio.gather(*(show_unit(u) for u in units))
     return list(statuses)
@@ -758,7 +843,7 @@ class ActionResult:
         return asdict(self)
 
 
-async def control_unit(unit: str, action: str) -> ActionResult:
+async def control_unit(unit: str, action: str, actor: str = "unknown") -> ActionResult:
     """Control an allowed unit through its authoritative lifecycle path.
 
     Returns an :class:`ActionResult` whether or not the call succeeded so
@@ -777,6 +862,12 @@ async def control_unit(unit: str, action: str) -> ActionResult:
     if unit == GATEWAY_UNIT:
         return await _control_gateway(action)
 
+    if not is_systemd_available() and host_control.socket_present():
+        return await _control_via_host(
+            {"op": "unit", "verb": action, "unit": unit, "actor": actor},
+            unit, action, HOST_CONTROL_UNIT_TIMEOUT_S,
+        )
+
     if not is_systemd_available():
         return ActionResult(
             unit, action, False,
@@ -786,6 +877,30 @@ async def control_unit(unit: str, action: str) -> ActionResult:
         )
 
     return await _control_unit_under_deploy_lock(unit, action)
+
+
+async def _control_via_host(request: dict, unit: str, action: str, timeout: float) -> ActionResult:
+    """Run one allowlisted action through the radon-control daemon.
+
+    The operator CLI the daemon runs owns the deploy lock, so a held lock
+    comes back as the operator's exit 74 and maps to 409 here.
+    """
+    try:
+        reply = await host_control.acall(request, timeout)
+    except host_control.HostControlError as exc:
+        return ActionResult(unit, action, False, str(exc), REMOTE_UNREACHABLE_RC)
+    detail = str(reply.get("detail") or reply.get("error") or "")
+    raw_rc = reply.get("returncode")
+    rc = raw_rc if isinstance(raw_rc, int) and not isinstance(raw_rc, bool) else REMOTE_BAD_REPLY_RC
+    if reply.get("ok") is True:
+        return ActionResult(unit, action, True, detail or f"{action} accepted", 0)
+    if rc == OPERATOR_LOCK_HELD_RC:
+        return ActionResult(unit, action, False, detail or "deploy/control lock held", PUSH_LOCK_HELD_RC)
+    if reply.get("refused"):
+        return ActionResult(unit, action, False, detail or "refused by host control", -1)
+    if rc in {0, -1}:
+        rc = REMOTE_BAD_REPLY_RC
+    return ActionResult(unit, action, False, detail or f"{action} failed rc={rc}", rc)
 
 
 async def _control_unit_under_deploy_lock(unit: str, action: str) -> ActionResult:
@@ -998,7 +1113,7 @@ async def _run_operator_command(
     )
 
 
-async def restart_full_stack() -> ActionResult:
+async def restart_full_stack(actor: str = "unknown") -> ActionResult:
     """Run ``radon restart`` to stop+start every ``radon-*`` systemd unit.
 
     Uses the operator CLI installed at :data:`OPERATOR_CLI_PATH` because the
@@ -1018,6 +1133,16 @@ async def restart_full_stack() -> ActionResult:
           success indicator and verify by polling ``/health`` once the
           backend comes back.
     """
+    if (
+        not is_operator_cli_available()
+        and not is_systemd_available()
+        and host_control.socket_present()
+    ):
+        # The daemon answers before it acts: the restart cycles radon-api.
+        return await _control_via_host(
+            {"op": "stack-restart", "actor": actor},
+            "radon-stack", "restart", HOST_CONTROL_STACK_TIMEOUT_S,
+        )
     if not is_operator_cli_available():
         return ActionResult(
             "radon-stack", "restart", False,

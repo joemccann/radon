@@ -869,8 +869,9 @@ def test_run_api_cleans_staged_credential_on_pre_exec_failure(
     private_anchor = shlex.quote(str(tmp_path / 'state' / 'private'))
     secret_store = shlex.quote(str(tmp_path / 'data' / 'secret_store'))
     lease_dir = shlex.quote(str(tmp_path / 'state' / 'ib-lease'))
+    control_dir = shlex.quote(str(tmp_path / 'state' / 'control'))
     _write_executable(failing_python,
-        f'#!/bin/bash\nif [[ "${{2:-}}" == {private_anchor} || "${{2:-}}" == {secret_store} || "${{2:-}}" == {lease_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
+        f'#!/bin/bash\nif [[ "${{2:-}}" == {private_anchor} || "${{2:-}}" == {secret_store} || "${{2:-}}" == {lease_dir} || "${{2:-}}" == {control_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
     result = _run(
         tmp_path,
         ["run", "radon-api.service"],
@@ -956,6 +957,57 @@ def test_run_newsfeed_does_not_mount_ib_remote_certs(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
     assert "ib-remote" not in log
+
+
+def test_run_api_binds_the_host_control_socket_directory(tmp_path: Path) -> None:
+    """radon-control: the API container's only path to unit control."""
+    control = tmp_path / "control"
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"RADON_TEST_CONTROL_DIR": str(control)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert f"-v {control}:/run/radon-control " in log
+    assert "--env RADON_CONTROL_SOCKET=/run/radon-control/control.sock" in log
+    # Pre-created owner-only so start order against radon-control is moot.
+    assert control.is_dir()
+    assert oct(control.stat().st_mode & 0o777) == "0o700"
+
+
+def test_run_api_refuses_a_symlinked_control_socket_directory(tmp_path: Path) -> None:
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    control = tmp_path / "control"
+    control.symlink_to(target)
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"RADON_TEST_CONTROL_DIR": str(control)},
+    )
+    assert result.returncode == 78
+    log_path = result.docker_log  # type: ignore[attr-defined]
+    assert not log_path.exists() or " run " not in f" {log_path.read_text(encoding='utf-8')}"
+
+
+@pytest.mark.parametrize("unit", [
+    "radon-nextjs.service",
+    "radon-relay.service",
+    "radon-monitor.service",
+    "radon-newsfeed.service",
+])
+def test_no_other_container_gets_the_control_socket(tmp_path: Path, unit: str) -> None:
+    control = tmp_path / "control"
+    result = _run(
+        tmp_path,
+        ["run", unit],
+        extra_env={"RADON_TEST_CONTROL_DIR": str(control)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert "radon-control" not in log
+    assert "RADON_CONTROL_SOCKET" not in log
 
 
 def test_run_newsfeed_mounts_host_playwright_browsers(tmp_path: Path) -> None:

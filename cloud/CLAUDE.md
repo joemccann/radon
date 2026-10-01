@@ -547,6 +547,16 @@ Compose, systemd, polkit, sudoers, and installed helpers with this source; on
 role-skipped because Gateway runtime surfaces are absent by design there. It
 must never read or report `.env*` contents.
 
+`setup-vps.sh` inventories `radon-control.service` and `enable_services`
+enables it: the host control socket the containerised radon-api uses for the
+`/admin` Service controls (`/run/radon-control`, bind-mounted by
+`radon-app-runtime` into radon-api only; runs `sudo -n /usr/local/bin/radon`
+under the existing `radon-ops` grant). Existing hosts get the body through the
+`installed-units.sha256` pin; being a `.service` it is never enabled by
+`install-units`, so the app host needs one `systemctl enable --now
+radon-control.service`. `operator-radon.sh` excludes it from `radon
+stop|start|restart`. Contract: `docs/operations.md` "Host control socket".
+
 `radon-health.service` remains runtime-isolated from the trading cascade: no
 Gateway `Requires=` or `After=` dependency. Coordinated release restart and
 schema validation do not change that zero-shared-fate runtime design.

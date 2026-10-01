@@ -74,7 +74,18 @@ describe("serviceControlDisabledReason", () => {
   it("app container names the real limit instead of blaming the browser", () =>
     expect(serviceControlDisabledReason({
       unit: daemonRunning, action: "restart", supported: false, pending: false, hostRole: "app",
-    })).toMatch(/API container/));
+    })).toMatch(/host control service/));
+  it("a verb the host control daemon withholds is disabled with its reason", () => {
+    const panelHost = { ...daemonRunning, unit: "radon-api.service", allowed_actions: ["restart"] as ("start" | "stop" | "restart")[] };
+    expect(serviceControlDisabledReason({ unit: panelHost, action: "stop", supported: true, pending: false }))
+      .toMatch(/admin panel/);
+    expect(serviceControlDisabledReason({ unit: panelHost, action: "restart", supported: true, pending: false }))
+      .toBeNull();
+  });
+  it("no per-unit verbs from systemd hosts keeps every verb available", () =>
+    expect(serviceControlDisabledReason({
+      unit: { ...daemonStopped, allowed_actions: null }, action: "stop", supported: true, pending: false,
+    })).toBeNull());
   it("allowlist when not controllable", () =>
     expect(serviceControlDisabledReason({ unit: uncontrollable, action: "restart", supported: true, pending: false }))
       .toMatch(/allowlist/));

@@ -73,11 +73,19 @@ export type UnitStatus = {
   last_exit_code?: number | null;
   // Seconds since the unit became active (currently-running daemons only).
   uptime_secs?: number | null;
+  // Verbs the host control daemon will run for this unit. null/absent means
+  // no per-unit restriction beyond can_control (systemd hosts).
+  allowed_actions?: ServiceAction[] | null;
 };
+
+// Where /admin/services read the rows: local systemctl, the radon-control
+// socket, radon-health's read-only probe, or nothing.
+export type ServiceStatusSource = "systemd" | "host-control" | "host-health" | "unavailable";
 
 export type ServicesListResponse = {
   supported: boolean;
   host_role?: HostRole;
+  status_source?: ServiceStatusSource;
   units: UnitStatus[];
 };
 
