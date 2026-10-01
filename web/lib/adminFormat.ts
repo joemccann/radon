@@ -74,9 +74,18 @@ export function forcePushDisabledReason(opts: {
 }): string | null {
   if (opts.pending) return "Restart in flight";
   if (opts.pushLock && opts.pushLock.remaining_secs > 0) {
-    return `Another restart is in flight (held by ${opts.pushLock.holder} for ${opts.pushLock.remaining_secs}s)`;
+    return `Another restart is running (${opts.pushLock.holder}). Available in ${formatLockRemaining(opts.pushLock.remaining_secs)}.`;
   }
   return null;
+}
+
+/** Push-lock countdown: "30s" under a minute, "8m 25s" above it. */
+export function formatLockRemaining(secs: number): string {
+  const total = Number.isFinite(secs) && secs > 0 ? Math.ceil(secs) : 0;
+  if (total < 60) return `${total}s`;
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
 /** Brief backoff summary, e.g. "3 attempts, next in 120s". */

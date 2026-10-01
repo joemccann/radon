@@ -1,12 +1,16 @@
-"""Tests for pool-based order cancel/modify (no subprocess).
+"""Legacy helpers operate only on the original placing session (R-039).
 
-Verifies that cancel/modify operations route through the IBPool's sync
-connection (clientId=0, master) instead of spawning subprocess scripts.
-Master client can manage ALL orders regardless of which clientId placed them.
+Production HTTP routes continue to use the original-client subprocess path.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _not_halted(monkeypatch):
+    import trading_halt
+    monkeypatch.setattr(trading_halt, "is_trading_halted", lambda: False)
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +50,7 @@ class TestPoolCancelOrder:
         client = MagicMock()
         # First call: finds order. Second call (after cancel): order gone
         client.get_open_orders.side_effect = [[trade], []]
-        client.ib.client.clientId = 0  # master
+        client.ib.client.clientId = 26  # original placing session
 
         result = await pool_cancel_order(client, order_id=10, perm_id=12345,
                                         poll_interval=0.001)
@@ -62,7 +66,7 @@ class TestPoolCancelOrder:
         cancelled_trade = _make_trade(status="Cancelled")
         client = MagicMock()
         client.get_open_orders.side_effect = [[trade], [cancelled_trade]]
-        client.ib.client.clientId = 0
+        client.ib.client.clientId = 26
 
         result = await pool_cancel_order(client, order_id=10, perm_id=12345,
                                         poll_interval=0.001)
@@ -75,7 +79,7 @@ class TestPoolCancelOrder:
 
         client = MagicMock()
         client.get_open_orders.return_value = []
-        client.ib.client.clientId = 0
+        client.ib.client.clientId = 26
 
         result = await pool_cancel_order(client, order_id=10, perm_id=0,
                                         poll_interval=0.001)
@@ -90,7 +94,7 @@ class TestPoolCancelOrder:
         trade = _make_trade(status="Filled")
         client = MagicMock()
         client.get_open_orders.return_value = [trade]
-        client.ib.client.clientId = 0
+        client.ib.client.clientId = 26
 
         result = await pool_cancel_order(client, order_id=10, perm_id=12345,
                                         poll_interval=0.001)
@@ -106,7 +110,7 @@ class TestPoolCancelOrder:
         trade_b = _make_trade(order_id=20, perm_id=222)
         client = MagicMock()
         client.get_open_orders.side_effect = [[trade_a, trade_b], [trade_a]]
-        client.ib.client.clientId = 0
+        client.ib.client.clientId = 26
 
         result = await pool_cancel_order(client, order_id=0, perm_id=222,
                                         poll_interval=0.001)
@@ -114,20 +118,22 @@ class TestPoolCancelOrder:
         client.cancel_order.assert_called_once_with(trade_b.order)
 
     @pytest.mark.asyncio
-    async def test_cancel_works_for_any_client_id(self):
-        """Master client (0) can cancel orders placed by any clientId."""
+    async def test_cancel_refuses_a_different_client_id(self):
+        """A master sees another session’s order but cannot cancel it."""
         from api.pool_order_manage import pool_cancel_order
 
         # Order placed by clientId=26 (subprocess), but pool is clientId=0 (master)
         trade = _make_trade(client_id=26)
         client = MagicMock()
         client.get_open_orders.side_effect = [[trade], []]
-        client.ib.client.clientId = 0  # master — no reconnect needed
+        client.ib.client.clientId = 0  # different from the original placing client
 
         result = await pool_cancel_order(client, order_id=10, perm_id=12345,
                                         poll_interval=0.001)
-        assert result["status"] == "ok"
-        # Should NOT disconnect/reconnect — master can cancel anything
+        assert result["status"] == "error"
+        assert result["code"] == "ORDER_CLIENT_MISMATCH"
+        client.cancel_order.assert_not_called()
+        # Never reconnect the shared session to acquire authority
         client.disconnect.assert_not_called()
 
 
@@ -148,7 +154,7 @@ class TestPoolModifyOrder:
         modified = _make_trade(lmt_price=6.0)
         client = MagicMock()
         client.get_open_orders.side_effect = [[trade], [modified]]
-        client.ib.client.clientId = 0
+        client.ib.client.clientId = 26
 
         result = await pool_modify_order(
             client, order_id=10, perm_id=12345, new_price=6.0,
@@ -164,7 +170,7 @@ class TestPoolModifyOrder:
 
         client = MagicMock()
         client.get_open_orders.return_value = []
-        client.ib.client.clientId = 0
+        client.ib.client.clientId = 26
 
         result = await pool_modify_order(
             client, order_id=10, perm_id=0, new_price=6.0,
@@ -173,8 +179,8 @@ class TestPoolModifyOrder:
         assert result["status"] == "error"
 
     @pytest.mark.asyncio
-    async def test_modify_works_for_any_client_id(self):
-        """Master client can modify orders placed by any clientId."""
+    async def test_modify_refuses_a_different_client_id(self):
+        """A master sees another session’s order but cannot modify it."""
         from api.pool_order_manage import pool_modify_order
 
         trade = _make_trade(client_id=26, lmt_price=5.0)
@@ -187,7 +193,10 @@ class TestPoolModifyOrder:
             client, order_id=10, perm_id=12345, new_price=6.0,
             poll_interval=0.001,
         )
-        assert result["status"] == "ok"
+        assert result["status"] == "error"
+        assert result["code"] == "ORDER_CLIENT_MISMATCH"
+        client.place_order.assert_not_called()
+        assert trade.order.lmtPrice == 5.0
         client.disconnect.assert_not_called()
 
     @pytest.mark.asyncio
@@ -204,7 +213,7 @@ class TestPoolModifyOrder:
         modified.order.totalQuantity = 50
         client = MagicMock()
         client.get_open_orders.side_effect = [[trade], [modified]]
-        client.ib.client.clientId = 0
+        client.ib.client.clientId = 26
 
         result = await pool_modify_order(
             client, order_id=10, perm_id=12345, new_quantity=50,
@@ -222,7 +231,7 @@ class TestPoolModifyOrder:
         trade = _make_trade(order_type="MKT")
         client = MagicMock()
         client.get_open_orders.return_value = [trade]
-        client.ib.client.clientId = 0
+        client.ib.client.clientId = 26
 
         result = await pool_modify_order(
             client, order_id=10, perm_id=12345, new_price=6.0,

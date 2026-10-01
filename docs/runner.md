@@ -21,7 +21,7 @@ Safety is where the runner runs, not what the script checks:
 | Agent cannot read operator files, ssh keys, `~/.radon`, Keychain | Dedicated macOS user `_radonbot`, standard (non-admin), hidden |
 | Agent cannot edit the runner | `run_loop.sh`, `loops/*.env`, the hooks, their `lib/` helpers, the `gh` guard and `gitconfig` installed root-owned in `/usr/local/radon-runner` |
 | Agent cannot plant a binary or git config the runner runs | The LaunchDaemon's `PATH` is `/opt/homebrew/bin:/usr/bin:/bin`; the bot's CLI directories (`~/.local/bin`, `~/.grok/bin`, `~/.bun/bin`) are prepended only for the agent. Every git the runner, the hooks and the agent run reads `/usr/local/radon-runner/gitconfig` (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM=1`), never `~/.gitconfig`, and the pre-run hook rebuilds the clone's `.git/config` before every phase |
-| No production credential in the clone | The clone gets no `.env`. `~/.radon-runner.env` may hold only `GH_TOKEN`, `PUSHOVER_USER` and `PUSHOVER_TOKEN`. The agent runs as `_radonbot`, so it can read that file. The runner unsets the Pushover keys in the agent process; `GH_TOKEN` stays so the agent can push. Do not put a production credential or an admin token in that file or anywhere in the bot's home |
+| No production credential in the clone | The clone gets no `.env`. The runner loads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from `RADON_RUNNER_DOTENV` or `/usr/local/radon-runner/dotenv-path` (never from the plist), then falls back to `~/.radon-runner.env`. `GH_TOKEN` loads only from `~/.radon-runner.env`. `_radonbot` and every agent share a uid, so any file the runner can read, the agent can read. The runner unsets the Pushover keys in the agent process; `GH_TOKEN` stays so the agent can push. Point the dotenv at a Pushover-only file (step 8), not the operator's full Radon `.env`. Never put a production credential or an admin token in `~/.radon-runner.env` or anywhere in the bot's home |
 | Agent cannot merge or push `main` | A separate GitHub machine account with the Write role on this repo only, used through its classic `repo` token, plus the `main-review` repository ruleset on the default branch: 1 approving review, approval of the most recent push required, stale approvals dismissed on push. Its only bypass actor is the Repository admin role in pull-request mode, so an admin merges through a PR and never pushes `main` directly; the bot account is not exempt. The 27 required status checks stay in the classic branch protection on `main`, not in the ruleset. A token of the operator's own account would not do: it acts as the admin and bypasses the ruleset |
 
 The six loops in [Migration](#migration-from-the-per-loop-wrappers) use the bot runner. `scripts/codemap_nightly.sh` is separate and merges its own PR with the operator's token. Verify the live ruleset in step 8b.3 before enabling a new installation.
@@ -37,7 +37,8 @@ Where things live when you are done:
 | `/usr/local/radon-runner/run_loop.sh`, `loops/<loop>.env` | root | The runner and each loop's config. The agent cannot edit them |
 | `/usr/local/radon-runner/hooks/`, `lib/`, `guard/<loop>/gh` | root | The security loops' pre/post-run hooks, the helpers they and the `gh` guard run (copied from `scripts/`), and the guard shim |
 | `/Library/LaunchDaemons/com.radon.runner.<loop>.plist` | root | The nightly schedule, run as `_radonbot` |
-| `/Users/_radonbot/.radon-runner.env` | bot, 600 | `GH_TOKEN`, `PUSHOVER_USER`, `PUSHOVER_TOKEN`. The agent can read it (it runs as the bot); the runner unsets the Pushover keys in the agent process. Never a production or admin credential |
+| `/usr/local/radon-runner/dotenv-path` | root, 644 | Absolute path to the Pushover dotenv. Written only when install is run with `RADON_RUNNER_DOTENV`. A later install without that var leaves the file in place. Never a secret value |
+| `/Users/_radonbot/.radon-runner.env` | bot, 600 | `GH_TOKEN` and, as legacy fallback, `PUSHOVER_USER` / `PUSHOVER_TOKEN`. The agent can read it (it runs as the bot); the runner unsets the Pushover keys in the agent process. Never a production or admin credential |
 | `/Users/_radonbot/.radon/agent-cli/env` | bot, 600 | `NVIDIA_API_KEY`, `CEREBRAS_API_KEY` for the fx agents |
 | `/Users/_radonbot/radon-runner/work/<loop>` | bot | Tonight's clone, deleted and re-cloned every run |
 | `/Users/_radonbot/radon-runner/logs/<loop>/<date>.log` | bot, 700 | The run log, kept 14 days |
@@ -142,6 +143,8 @@ RB="$(mktemp -d)" && /usr/bin/git clone --depth 1 https://github.com/joemccann/r
 
 Every line must read `OK` with a `/Users/_radonbot/...` path: codex, grok, nvidia, cerebras, fx. A `MISSING` line names its fix. agy is not in this check; step 5 covers it.
 
+The bootstrap also writes fx's `nvidia-paced` provider (`http://127.0.0.1:18431/v1`, or `RADON_NVIDIA_PROXY_PORT`), which the `fx:nvidia` rung uses; see [NVIDIA rate limits](#nvidia-rate-limits). Rerun it after pulling a change to that provider.
+
 ### 7. GitHub machine account (operator, browser)
 
 The bot pushes and opens PRs as its own account, so the `main` ruleset binds it. Your own token would act as the repo admin and bypass the ruleset. GitHub allows one free machine account per person.
@@ -186,11 +189,42 @@ Write the token into the bot's secrets file straight from your keychain:
 security find-generic-password -s github-radon-runner-bot-token -w | sudo /bin/sh -c 'umask 077; read -r t; f=/Users/_radonbot/.radon-runner.env; { grep -v "^GH_TOKEN=" "$f"; printf "GH_TOKEN=%s\n" "$t"; } > "$f.new" && chown _radonbot:staff "$f.new" && mv "$f.new" "$f"'
 ```
 
-Then add Pushover in the bot shell with `nano ~/.radon-runner.env`, setting `PUSHOVER_USER=` and `PUSHOVER_TOKEN=`. Check all three are set without printing them:
+Pushover is a pair. The runner takes both keys from the first source that has both, and never mixes a half pair:
+
+1. both `PUSHOVER_USER` and `PUSHOVER_TOKEN` already set in the inherited environment (launchd never sets them; this is for manual runs and tests)
+2. the Radon dotenv: `RADON_RUNNER_DOTENV` if set, else the first line of `/usr/local/radon-runner/dotenv-path`
+3. `~/.radon-runner.env` (legacy fallback)
+
+Only those two keys are read from the dotenv. `GH_TOKEN` stays in `~/.radon-runner.env`. The path is not in the plist, so regenerating the plists cannot drop it.
+
+`_radonbot` and every agent run as the same uid, so whatever file the runner can read, the agent can read. Pointing `RADON_RUNNER_DOTENV` at the full Radon root `.env` and granting the bot read access exposes every production key in it to the agents, which contradicts the safety table. Use a Pushover-only file, or an allowlisted copy using the step-6 pattern:
 
 ```bash
-grep -oE '^(GH_TOKEN=ghp_|PUSHOVER_USER=.|PUSHOVER_TOKEN=.)' ~/.radon-runner.env    # 3 lines
+grep -E '^(export )?(PUSHOVER_USER|PUSHOVER_TOKEN)=' /path/to/radon/.env | sudo /bin/sh -c 'umask 077; d=/Users/_radonbot/.radon; install -d -m 700 -o _radonbot -g staff $d && cat > $d/pushover.env && chown _radonbot:staff $d/pushover.env'
 ```
+
+Set the path at install time (a refresh without the var leaves `dotenv-path` in place). Refuse a relative path. `install.sh` never chmod, chown or copies the target `.env`. If the bot cannot read it, install prints one WARNING and continues:
+
+```bash
+sudo RADON_RUNNER_DOTENV=/Users/_radonbot/.radon/pushover.env /bin/bash /path/to/clone/scripts/runner/install.sh reliability testing documentation ci-performance security security-deepsec
+sudo -u _radonbot test -r /Users/_radonbot/.radon/pushover.env && echo readable
+```
+
+Check presence without printing values. `2` means both keys are set:
+
+```bash
+grep -cE '^(export )?PUSHOVER_(USER|TOKEN)=.' /Users/_radonbot/.radon/pushover.env
+grep -oE '^(GH_TOKEN=ghp_|PUSHOVER_USER=.|PUSHOVER_TOKEN=.)' ~/.radon-runner.env    # 3 lines if the legacy file still holds the pair
+```
+
+Each run logs exactly one presence line, paths only, never values. A half pair logs `incomplete` for that source and moves on. A curl failure logs `pushover: send failed status=<code>` and the run continues:
+
+```
+pushover: PUSHOVER_USER present, PUSHOVER_TOKEN present (source: dotenv /Users/_radonbot/.radon/pushover.env)
+pushover: credentials missing (checked: env, /Users/_radonbot/.radon/pushover.env, /Users/_radonbot/.radon-runner.env); notifications skipped
+```
+
+To rotate a token, replace `PUSHOVER_TOKEN` in the chosen dotenv and blank or fix the stale one in `/Users/_radonbot/.radon-runner.env`. Then kick a loop and confirm one `pushover:` present line in its log.
 
 ### 8b. Security loops (operator and bot shell)
 
@@ -339,10 +373,22 @@ An uncertain lock requires operator inspection of its recorded PID and process s
 | Log stops at `starting agy`, then the next agent | Keychain locked after a reboot | Unlock it (Operate) |
 | A security loop's log shows claude `not logged in` on every rung, every phase `FAILED` | Keychain locked after a reboot, so the claude.ai session is unreadable | Unlock it, then `~/.local/bin/claude auth status` (Operate); re-sign with step 8b.4 if still logged out |
 | `no timeout or gtimeout in /opt/homebrew/bin:/usr/bin:/bin` | coreutils missing | `brew install coreutils` |
+| Log shows `NVIDIA is paused ... skipping fx:nvidia` or `stopping fx:nvidia` | NVIDIA answered persistent 429s or a 401/403, so the key is tripped | Nothing for 429s: it clears itself. For `NVIDIA AUTHORIZATION FAILED` in the proxy log, check the key (Credentials tab or `/v1/models`) |
+| Every `fx:nvidia` rung exits 75 at once, log `not calling NVIDIA unpaced` | The proxy could not start (lib missing: reinstall, step 2) | Reinstall; check `nvidia-proxy.log` |
+| fx:nvidia fails with an unknown provider | The bot's `~/.fx/settings.json` predates `nvidia-paced` | Rerun the bootstrap in the bot shell (step 6) |
+
+## NVIDIA rate limits
+
+The build.nvidia.com key is free but rate limited per key, about 40 requests a minute (NVIDIA returns no rate-limit headers; this is the documented free-tier default). Production (the model ladder, knowledge embeddings, research page parsing) and the `fx:nvidia` rung share it, so each host paces itself with `scripts/nvidia_rate_limit.py`, installed as `/usr/local/radon-runner/lib/nvidia_rate_limit.py`.
+
+- fx is a closed binary, so the `fx:nvidia` rung runs it as provider `nvidia-paced` against a loopback proxy on `127.0.0.1:18431`. The runner starts the proxy on first use (detached, cwd `/`, a clean environment; it never holds the key, it forwards fx's bearer to `https://integrate.api.nvidia.com` only) and it exits after 15 idle minutes. Every loop on the Mac shares it and one state file, `/Users/_radonbot/radon-runner/nvidia-rate.json`.
+- It spaces requests to `RADON_NVIDIA_RPM` (default 20, half the key's limit, because production uses the same key), at most 2 at a time. On a 429 it honours `Retry-After` / `x-ratelimit-reset*` (default 30 s, capped at 300 s) for every loop and retries at most twice; when the budget is still spent it answers a local 429 and sends nothing upstream.
+- Five consecutive 429s (`RADON_NVIDIA_TRIP_AFTER_429S`) or any 401/403 trip NVIDIA for 15 minutes (`RADON_NVIDIA_TRIP_SECS`, `RADON_NVIDIA_AUTH_BLOCK_SECS`) and write `nvidia-rate.json.tripped`. The runner checks that file before `fx:nvidia` and every 10 s while it runs: a trip stops fx and exits 75, so the ladder moves to the next rung instead of hammering the key. A 401/403 is never retried and is logged as `NVIDIA AUTHORIZATION FAILED` with a redacted body snippet.
+- Log: `sudo -u _radonbot tail -40 /Users/_radonbot/radon-runner/logs/nvidia-proxy.log` (429s, trips, 403s, a short secret-free excerpt of every non-200 body).
 
 ## Loop config
 
-`scripts/runner/loops/<loop>.env` sets `BRANCH_PREFIX`, `PROMPT`, `AGENTS` (agent names in order; `fx:<provider>` for fx, `claude:<model>` for claude, which always runs with `--effort medium`), `TIMEOUT_SECS`, `SCHEDULE_HOUR` and `SCHEDULE_MINUTE`. Adding a loop is one `.env`, one prompt and one `install.sh <loop>`.
+`scripts/runner/loops/<loop>.env` sets `BRANCH_PREFIX`, `PROMPT`, `AGENTS` (agent names in order; `fx:<provider>` for fx, `claude:<model>` for claude, which always runs with `--effort medium`), `TIMEOUT_SECS`, `SCHEDULE_HOUR` and `SCHEDULE_MINUTE`. Adding a loop is one `.env`, one prompt and one `install.sh <loop>`. `fx:cerebras`, where present, is always the last rung (`scripts/tests/test_cerebras_last_rung.py`).
 
 Optional knobs (empty means off; the security loops use them):
 

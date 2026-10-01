@@ -548,6 +548,28 @@ const searchRequestClients = new Map(); // reqId → { client, pattern }
  */
 const CLOSE_CACHE_PATH = path.resolve(process.cwd(), "data", "option_close_cache.json");
 const optionCloseCache = new Map(); // symbol → close price
+let closeCachePrunedOn = null;
+
+function closeCacheExpiry(symbol) {
+  return /_(\d{8})_[^_]+_[CP]$/.exec(symbol)?.[1] ?? null;
+}
+
+// REL-021b / R-034: prune once per Eastern day, retaining today's expiry
+// through its session. Never revive expired entries from late frozen ticks.
+function pruneCloseCache() {
+  const today = etDateString().replaceAll("-", "");
+  if (closeCachePrunedOn === today) return false;
+  closeCachePrunedOn = today;
+  let changed = false;
+  for (const key of optionCloseCache.keys()) {
+    const expiry = closeCacheExpiry(key);
+    if (expiry && expiry < today) {
+      optionCloseCache.delete(key);
+      changed = true;
+    }
+  }
+  return changed;
+}
 
 function loadCloseCache() {
   try {
@@ -556,6 +578,7 @@ function loadCloseCache() {
       for (const [key, val] of Object.entries(raw)) {
         if (typeof val === "number" && val > 0) optionCloseCache.set(key, val);
       }
+      if (pruneCloseCache()) scheduleCloseCachePersist();
       console.log(`Loaded ${optionCloseCache.size} cached option close prices`);
     }
   } catch (err) {
@@ -567,6 +590,7 @@ let closeCacheDirty = false;
 let closeCacheTimer = null;
 
 function persistCloseCache() {
+  if (pruneCloseCache()) closeCacheDirty = true;
   if (!closeCacheDirty) return;
   closeCacheDirty = false;
   try {
@@ -590,6 +614,9 @@ function scheduleCloseCachePersist() {
 }
 
 function updateOptionCloseCache(symbol, closePrice) {
+  if (pruneCloseCache()) scheduleCloseCachePersist();
+  const expiry = closeCacheExpiry(symbol);
+  if (expiry && expiry < closeCachePrunedOn) return;
   if (!symbol.includes("_") || closePrice == null || closePrice <= 0) return;
   const existing = optionCloseCache.get(symbol);
   if (existing === closePrice) return;
@@ -598,6 +625,7 @@ function updateOptionCloseCache(symbol, closePrice) {
 }
 
 function applyCachedClose(data) {
+  if (pruneCloseCache()) scheduleCloseCachePersist();
   if (data.close != null && data.close > 0) return; // already has close
   if (!data.symbol.includes("_")) return; // only for options
   const cached = optionCloseCache.get(data.symbol);

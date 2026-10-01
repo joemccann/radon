@@ -1,3 +1,9 @@
+# Task: Runner Pushover dotenv allowlist (2026-10-01)
+
+- [x] T1 depends_on: [] Failing tests in scripts/tests/test_runner_pushover_env.py: dotenv pair, allowlist, no eval, values never logged, missing, half-pair, agents never see keys, dotenv-path file, plist/installer.
+- [x] T2 depends_on: [T1] run_loop.sh allowlist parser + precedence; install.sh writes dotenv-path; notify logs curl status; docs/runner.md.
+- [ ] T3 depends_on: [T2] Focused pytest green, READY PR vs main, CI green. No merge.
+
 # Task: Grok setup hardening (2026-09-30)
 
 - [x] T1 depends_on: [] Failing tests: promote touches only explicit paths (never Path.home()/.grok), candidate must live under scratch, real ~/.grok and ~/.local/bin untouched by any scripts test.
@@ -8760,3 +8766,13 @@ Review: seven inherited findings repaired in separate commits with repeated seri
 
 ### Review
 Six findings have red/green evidence; three full serial rounds pass Python 13448, Vitest 10300 and cloud 2400 each. Cloud FAILED lists match the empty detached-base list. TypeScript and targeted coverage pass. Fake-only execution; no production access, credential-file lookup, main push or merge. Publication, exact-head CI/browser results and the single final checkpoint are recorded on issue #83 after committing, avoiding a change to the head whose checks are being reported.
+
+## Nightly reliability 2026-10-01
+
+- [x] T1 depends_on: [] Install toolchain, recover trusted checkpoint, inspect open PRs, create tonight’s branch.
+- [x] T2 depends_on: [T1] Audit main delta and codemap callers; re-triage standing candidates and safety sweeps.
+- [ ] T3 depends_on: [T2] Repair verified findings serially with red/green fault injection and focused gates.
+- [ ] T4 depends_on: [T3] Run drills, validate changes, publish substantive draft, watch exact-head CI.
+- [ ] T5 depends_on: [T4] Post one durable issue comment and record final review.
+
+Review: pending; fake-only verification, full suites and Vitest assigned to CI.

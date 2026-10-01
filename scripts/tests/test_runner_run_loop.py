@@ -265,12 +265,109 @@ def test_nothing_from_a_previous_night_survives(rig):
 
 
 def test_fx_rungs_pass_the_provider_and_the_prompt_on_stdin(rig):
+    rig.configure(AGENTS="fx:cerebras")
+    rig.run()
+
+    assert "FX_PROVIDER=cerebras" in (rig.calls / "fx.env").read_text()
+    assert (rig.calls / "fx.stdin").read_text().endswith(PROMPT_BODY)
+    assert "fx ask --full-access --no-save" in (rig.calls / "argv").read_text()
+
+
+# --- fx:nvidia goes through the host's NVIDIA pacing proxy (2026-09-30) ------
+# 2026-09-27 one 17-minute run logged 232 HTTP 429s: fx is a closed binary
+# and nothing paced it. The rung now runs fx against the loopback proxy in
+# lib/nvidia_rate_limit.py and falls through when NVIDIA stays rate limited.
+
+PROXY_STUB = """#!/usr/bin/env python3
+import os, sys
+here = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(here, "proxy.argv"), "a") as fh:
+    fh.write(" ".join(sys.argv[1:]) + "\\n")
+with open(os.path.join(here, "proxy.env"), "w") as fh:
+    fh.write("\\n".join(sorted(os.environ)))
+rc = os.path.join(here, "proxy.rc")
+sys.exit(int(open(rc).read()) if os.path.exists(rc) else 0)
+"""
+
+
+def _proxy_stub(rig, rc=0):
+    lib = rig.install / "lib"
+    lib.mkdir(exist_ok=True)
+    (lib / "nvidia_rate_limit.py").write_text(PROXY_STUB)
+    (lib / "proxy.rc").write_text(str(rc))
+    return lib
+
+
+def _trip(rig, secs_from_now):
+    rig.state.mkdir(parents=True, exist_ok=True)
+    (rig.state / "nvidia-rate.json.tripped").write_text(f"{int(time.time()) + secs_from_now}\n")
+
+
+def test_fx_nvidia_runs_through_the_pacing_proxy(rig):
+    lib = _proxy_stub(rig)
+    rig.configure(AGENTS="fx:nvidia")
+    proc = rig.run(STUB_FX="echo 'RESULT: ok'")
+
+    assert proc.returncode == 0, rig.log()
+    argv = (lib / "proxy.argv").read_text()
+    assert argv.startswith("ensure-proxy --port 18431 ")
+    assert f"--state {rig.state / 'nvidia-rate.json'}" in argv
+    env = (rig.calls / "fx.env").read_text()
+    assert "FX_PROVIDER=nvidia-paced" in env
+    assert (rig.calls / "fx.stdin").read_text().endswith(PROMPT_BODY)
+    assert rig.notification()["title"] == "radon doc: done via fx:nvidia"
+
+
+def test_the_proxy_never_inherits_the_agent_credentials(rig):
+    lib = _proxy_stub(rig)
     rig.configure(AGENTS="fx:nvidia")
     rig.run()
 
-    assert "FX_PROVIDER=nvidia" in (rig.calls / "fx.env").read_text()
-    assert (rig.calls / "fx.stdin").read_text().endswith(PROMPT_BODY)
-    assert "fx ask --full-access --no-save" in (rig.calls / "argv").read_text()
+    names = (lib / "proxy.env").read_text().split()
+    assert "GH_TOKEN" not in names and "PUSHOVER_TOKEN" not in names
+
+
+def test_fx_nvidia_falls_through_when_the_proxy_cannot_start(rig):
+    _proxy_stub(rig, rc=1)
+    rig.configure(AGENTS="fx:nvidia fx:cerebras")
+    rig.run()
+
+    assert rig.called() == ["fx"], "fx ran once, for cerebras only"
+    assert "FX_PROVIDER=cerebras" in (rig.calls / "fx.env").read_text()
+    assert "not calling NVIDIA unpaced" in rig.log()
+
+
+def test_fx_nvidia_is_skipped_while_nvidia_is_tripped(rig):
+    lib = _proxy_stub(rig)
+    _trip(rig, 600)
+    rig.configure(AGENTS="fx:nvidia grok")
+    rig.run()
+
+    assert rig.called() == ["grok"]
+    assert not (lib / "proxy.argv").exists()
+    assert "fx:nvidia exited 75" in rig.log()
+
+
+def test_an_expired_trip_does_not_skip_the_rung(rig):
+    _proxy_stub(rig)
+    _trip(rig, -5)
+    rig.configure(AGENTS="fx:nvidia grok")
+    rig.run()
+
+    assert rig.called() == ["fx"]
+
+
+def test_a_trip_during_the_session_stops_fx_and_hands_off(rig):
+    _proxy_stub(rig)
+    trip = rig.state / "nvidia-rate.json.tripped"
+    rig.configure(AGENTS="fx:nvidia grok")
+    started = time.monotonic()
+    rig.run(RADON_NVIDIA_WATCH_SECS="1",
+            STUB_FX=f"sleep 1; echo $(( $(date +%s) + 600 )) > '{trip}'; sleep 60")
+
+    assert time.monotonic() - started < 30, "fx was stopped, not waited out"
+    assert rig.called() == ["fx", "grok"]
+    assert "stopping fx:nvidia" in rig.log()
 
 
 def _lstart(pid):
@@ -790,7 +887,7 @@ def test_install_copies_hooks_helpers_and_the_bot_state_dir():
     src = (REPO / "scripts" / "runner" / "install.sh").read_text()
     for helper in ("nightly_pr_guard.py", "nightly_publish.py", "nightly_issue_prune.py", "nightly_green_base.py",
                    "nightly_audit_context.py", "nightly_deliver.py", "security_claude_ladder.py",
-                   "claude_cli_env_drift.py", "claude_cli_env_reviewed.txt"):
+                   "claude_cli_env_drift.py", "claude_cli_env_reviewed.txt", "nvidia_rate_limit.py"):
         assert helper in src, helper
         assert (REPO / "scripts" / helper).is_file(), helper
     assert '"$SRC/hooks/"*' in src
@@ -925,7 +1022,7 @@ def test_rel291_only_one_contender_can_reclaim_a_stale_lock(rig):
 
 _LIB = ("nightly_pr_guard.py", "nightly_publish.py", "nightly_issue_prune.py", "nightly_green_base.py",
         "nightly_audit_context.py", "nightly_deliver.py", "security_claude_ladder.py",
-        "claude_cli_env_drift.py", "claude_cli_env_reviewed.txt")
+        "claude_cli_env_drift.py", "claude_cli_env_reviewed.txt", "nvidia_rate_limit.py")
 
 
 def _source_tree(tmp_path):
