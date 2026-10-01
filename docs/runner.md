@@ -62,7 +62,7 @@ GL="$(mktemp -d)" && curl -fsSLo "$GL/gitleaks.tgz" https://github.com/gitleaks/
 sudo pmset -a sleep 0 displaysleep 10     # the Mac must stay awake at night
 ```
 
-`coreutils` provides `timeout`; the runner exits 69 without it. `node` runs Vitest for the testing loop (bun installs the packages, `npx vitest run` runs them); without it that loop leaves Vitest to PR CI. `codex` is shared from Homebrew; the other agent CLIs are installed per user in step 4.
+`coreutils` provides `timeout`; the runner exits 69 without it. `node` runs Vitest for the testing loop (bun installs the packages, `npx vitest run` runs them); without it that loop leaves Vitest to PR CI. For the security loop, `security_pre.sh` installs both bun projects (`bun install --frozen-lockfile --ignore-scripts`, root and `web/`) and `KEEP_PATHS` carries `node_modules` and `web/node_modules` across the nightly re-clone, so they reinstall only when a lockfile or `package.json` changes. A failed install skips the Vitest stage; it never refuses the phase. `codex` is shared from Homebrew; the other agent CLIs are installed per user in step 4.
 
 ### 2. Install the runner (operator)
 
