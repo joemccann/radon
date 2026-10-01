@@ -86,6 +86,8 @@ print_plist() {
         <string>/opt/homebrew/bin:/usr/bin:/bin</string>
         <key>DISABLE_AUTOUPDATER</key>
         <string>1</string>
+        <key>TMPDIR</key>
+        <string>$BOT_HOME/radon-runner/tmp/</string>
     </dict>
     <key>ExitTimeOut</key>
     <integer>60</integer>
@@ -139,7 +141,7 @@ as_bot() { sudo -u "$BOT" "$@"; }
 
 configure_user() {
   local dir
-  for dir in "$BOT_HOME/radon-runner" "$BOT_HOME/radon-runner/state"; do
+  for dir in "$BOT_HOME/radon-runner" "$BOT_HOME/radon-runner/state" "$BOT_HOME/radon-runner/tmp"; do
     as_bot /bin/mkdir -p -m 700 "$dir"
     as_bot /bin/chmod 700 "$dir"
   done

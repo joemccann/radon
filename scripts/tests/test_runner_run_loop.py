@@ -933,7 +933,7 @@ def test_install_copies_hooks_helpers_and_the_bot_state_dir():
         assert helper in src, helper
         assert (REPO / "scripts" / helper).is_file(), helper
     assert '"$SRC/hooks/"*' in src
-    assert 'for dir in "$BOT_HOME/radon-runner" "$BOT_HOME/radon-runner/state"; do' in src
+    assert 'for dir in "$BOT_HOME/radon-runner" "$BOT_HOME/radon-runner/state" "$BOT_HOME/radon-runner/tmp"; do' in src
     assert 'as_bot /bin/mkdir -p -m 700 "$dir"' in src
     # Root never writes, chmods or chowns a path inside the bot's home.
     configure = src.split("configure_user() {", 1)[1].split("\n}\n", 1)[0]
@@ -1163,3 +1163,14 @@ def test_install_refuses_a_symlink_among_the_copied_files(tmp_path):
     out = _install(root, "documentation")
     assert out.returncode != 0
     assert "untrusted" in out.stderr, out.stderr
+
+
+def test_every_daemon_gives_the_bot_a_private_tmpdir():
+    # Without TMPDIR the bot's mktemp and tools fall back to the shared,
+    # world-writable /tmp (F20260928-B01). The directory lives under the bot's
+    # mode-700 runner home and is created by the bot, never by root.
+    for loop in ("security", "security-deepsec", "testing", "documentation"):
+        assert _plist(loop)["EnvironmentVariables"]["TMPDIR"] == "/Users/_radonbot/radon-runner/tmp/"
+    src = (REPO / "scripts" / "runner" / "install.sh").read_text()
+    configure = src.split("configure_user() {", 1)[1].split("\n}\n", 1)[0]
+    assert '"$BOT_HOME/radon-runner/tmp"' in configure

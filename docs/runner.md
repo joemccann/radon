@@ -43,6 +43,7 @@ Where things live when you are done:
 | `/Users/_radonbot/radon-runner/work/<loop>` | bot | Tonight's clone, deleted and re-cloned every run |
 | `/Users/_radonbot/radon-runner/logs/<loop>/<date>.log` | bot, 700 | The run log, kept 14 days |
 | `/Users/_radonbot/radon-runner/state/<loop>` | bot, 700 | Per-loop state the runner never deletes: the security loops' private `scratch/`, deliver record, `held.git` (unreleased P0/P1 branches) and `keep/` |
+| `/Users/_radonbot/radon-runner/tmp` | bot, 700 | The daemons' `TMPDIR`, so the bot's temporary files never land in the shared, world-writable `/tmp` |
 | `/Users/_radonbot/.radon-runner-reports-key` | bot, 600 | Write deploy key for the private `joemccann/radon-security-reports`, used by the post-run hook. The agent runs as the same user and can read it, as it could read the old wrapper's key; a deploy key reaches only that one repository |
 | Operator login keychain: `github-radon-runner-bot`, `github-radon-runner-bot-token` | operator | The bot's GitHub password and token, for rotation |
 
@@ -403,7 +404,7 @@ Optional knobs (empty means off; the security loops use them):
 | `PRE_RUN` / `POST_RUN` | Root-owned hooks under `/usr/local/radon-runner`, run around each phase with `LOOP`, `PHASE`, `WORK`, `LOOP_STATE`, `BRANCH` (and, after it, `PHASE_RC`, `PHASE_LOG`, `PHASE_START_MARK`), the runner's `PATH`, and a 900s cap. A non-zero `PRE_RUN` skips the agent (`REFUSED`); `POST_RUN` prints `status=` (`OK...` means success; the last one printed wins), `pr_url=` and `report_url=` for the page. A `POST_RUN` that prints no `status=` (timed out, crashed, missing) fails the phase. With `PRE_RUN` set, the header tells the agent to branch from `HEAD` (the base the hook pinned), not `origin/main` |
 | `GH_GUARD=1` | Puts `/usr/local/radon-runner/guard/<loop>/gh` first on the agent's `PATH`: every `pr` / `api` / `issue` / `alias` call goes through `nightly_pr_guard.py` |
 
-Every agent gets `RADON_RUNNER_LOOP_STATE` (the loop's state directory), `RADON_RUNNER_PIDFILE` (list a detached job's pid there and the runner reaps it), `RADON_RUNNER_AGENT` and `RADON_RUNNER_MODEL`. After each agent the runner kills its process group, then every bot process whose cwd is in the loop's clone or state and every declared pid that started during the phase, except one that is, or descends from, another loop's live runner. On SIGTERM, including one that arrives while a hook runs, it does the same, pages `KILLED`, gives `POST_RUN` ten seconds and exits 143. The LaunchDaemon sets `DISABLE_AUTOUPDATER=1` and `ExitTimeOut` 60. PR lookup ignores fork PRs.
+Every agent gets `RADON_RUNNER_LOOP_STATE` (the loop's state directory), `RADON_RUNNER_PIDFILE` (list a detached job's pid there and the runner reaps it), `RADON_RUNNER_AGENT` and `RADON_RUNNER_MODEL`. After each agent the runner kills its process group, then every bot process whose cwd is in the loop's clone or state and every declared pid that started during the phase, except one that is, or descends from, another loop's live runner. On SIGTERM, including one that arrives while a hook runs, it does the same, pages `KILLED`, gives `POST_RUN` ten seconds and exits 143. The LaunchDaemon sets `DISABLE_AUTOUPDATER=1`, `TMPDIR` (the bot's `radon-runner/tmp/`) and `ExitTimeOut` 60. PR lookup ignores fork PRs.
 
 ## Migration from the per-loop wrappers
 
