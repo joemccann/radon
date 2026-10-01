@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Dedicated VPS clone + stripped env for the Grok P1 responder.
 # Run as root on the production host. Does not touch /home/radon/radon.
-#
-#   bash cloud/scripts/setup-grok-page-responder.sh
+# Run it from a root-only stage of /opt/radon-provision/radon.git, never
+# from the deploy checkout: docs/grok-page-responder.md "Install (VPS)".
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,6 +15,23 @@ MARKER="$CLONE/.radon-page-responder"
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "run as root" >&2
   exit 2
+fi
+
+# Root runs this script and its helpers, so a tree radon can write (the
+# deploy checkout) would let radon choose what root executes.
+is_root_owned_tree() {
+  local dir="$1" perms uid
+  while :; do
+    read -r perms _ uid _ < <(ls -ldn -- "$dir")
+    [[ "$uid" == 0 && "${perms:5:1}" != w && "${perms:8:1}" != w ]] || return 1
+    [[ "$dir" == / ]] && return 0
+    dir="$(dirname -- "$dir")"
+  done
+}
+if ! is_root_owned_tree "$(cd "$SCRIPT_DIR" && pwd -P)"; then
+  echo "refusing: $SCRIPT_DIR is not a root-owned tree; stage it from" \
+    "/opt/radon-provision/radon.git (docs/grok-page-responder.md)" >&2
+  exit 77
 fi
 
 echo "[1/5] dedicated clone $CLONE"

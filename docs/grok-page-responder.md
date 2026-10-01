@@ -46,10 +46,18 @@ anonymous 401/403, unknown probes, ops-only (secret/host/restart).
 
 ## Install (VPS)
 
-As root:
+As root, from a root-only stage of the provision store (the script refuses,
+exit 77, to run from any tree radon can write, such as the deploy checkout):
 
 ```bash
-bash cloud/scripts/setup-grok-page-responder.sh
+export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+STORE=/opt/radon-provision/radon.git   # root-only; deploys keep it current
+SHA="$(git ls-remote https://github.com/joemccann/radon.git refs/heads/main | cut -f1)"
+git --git-dir="$STORE" cat-file -e "${SHA}^{commit}"   # fails until that deploy ran
+STAGE="$(mktemp -d /opt/radon-provision/grok-setup.XXXXXX)"
+git --git-dir="$STORE" -c tar.umask=022 archive "$SHA" cloud | tar -x -C "$STAGE"
+bash "$STAGE/cloud/scripts/setup-grok-page-responder.sh"
+rm -rf "$STAGE"
 sudo -u radon -H /home/radon/.local/bin/grok login --device-auth
 # approve the code on your phone
 /usr/local/sbin/radon-deploy-root sync-control-plane   # installs the unit
