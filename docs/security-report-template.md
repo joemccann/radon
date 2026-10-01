@@ -59,6 +59,16 @@ pins the headings and rules.
 
 1. **<Verb first>**: exact command or decision, with the path or URL.
 
+## Closed tonight
+
+Deliver only, and only when re-verify closed an operator-only item this
+phase. Omit the section when none closed. Closed IDs do not appear in
+Next again.
+
+| Id | Closed at | Evidence |
+|---|---|---|
+| `DS-...` | `2026-09-24` | PR #689, `e5c4e627`, `path` L39-47 |
+
 ## Stages
 
 | Stage | Outcome | Detail |

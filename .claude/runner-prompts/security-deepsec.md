@@ -121,7 +121,7 @@ phase was stopped early. The completion contract is explicit:
    `run-record.md` records the `run_id`, the phase, the immutable SHAs and
    range, each stage's completion as it finishes, and a terminal `status:`
    line. `last-audited.json` in the scratch root holds the DeepSec audited
-   SHA and the private open queue.
+   SHA, the private open queue, and the durable `closed_queue`.
 2. **At phase start, look for an incomplete run of the SAME phase**: the
    newest run directory whose `run-record.md` has no terminal completed
    status. If one exists, RESUME it — same `run_id`, same recorded
@@ -430,10 +430,46 @@ advance the SHA.
 Tool failure, incomplete scope, and missing prerequisites are `BLOCKED`,
 `INCOMPLETE`, or `OPERATOR_REQUIRED`, never security severities.
 
+## Operator-only re-verify (every phase)
+
+Carried operator-only findings are not automatically still open. Before
+listing any of them in a report, a PR Next section, or the private open
+queue, re-verify each one against concrete evidence available this
+session: `origin/main` (code, merged PRs, `file:line`) plus any
+read-only host evidence the loop already has. Do not invent host checks
+and do not touch a VPS.
+
+Each item gets exactly one state:
+
+| State | When | Where it goes |
+|---|---|---|
+| `open` | Evidence shows the operator action is still needed. Cite it. | Next, open queue |
+| `closed` | Evidence shows it is done. Cite PR/commit/`file:line`. Record `closed_at` and evidence. | Durable `closed_queue` in `last-audited.json`. NOT listed in Next. Once in tonight's deliver report as closed tonight. |
+| `unverifiable` | The needed evidence is missing. Say what is missing. | Next, labeled `(unverifiable)`, stay in the open queue |
+
+A `closed` item stays in `last-audited.json` as a durable record. It is
+not listed in Next again. Reopen it only with new evidence that the
+prior closure no longer holds (`new_evidence` on the verdict).
+
+The committed ledger `docs/security-deepsec-closed.json` is the
+reviewable seed (sanitized IDs and public evidence only). Apply it
+through the helper before building Next or rewriting the queue:
+
+`python3.13 scripts/nightly_deepsec_queue.py reverify --last-audited "$RADON_RUNNER_LOOP_STATE/scratch/last-audited.json" --verdicts <private-verdicts.json> --write --json`
+
+Pass the helper's `next` text to `github_pr_output.py --next`. Pass
+`closed_tonight` into the deliver report. Never freehand a closed ID
+into Next.
+
+Seeded closure (do not re-list): `DS-2026-09-20-03` is `closed`
+(PR #689, `e5c4e627`, `cloud/scripts/setup-vps.sh` L39-47: root-owned
+`/opt/radon-provision` pinned to the public HTTPS URL).
+
 ## Remediation mode
 
 **Remediate mandate.** Implement every verified source-actionable finding
-from this cycle's audit and the private open queue, highest severity first,
+from this cycle's audit and the private open queue (never a `closed`
+operator-only item), highest severity first,
 not the first one and not one per night. Group fixes by root cause into
 separate commits on one dated branch `security-deepsec/<YYYY-MM-DD>` (one
 branch per loop per day; the deliver phase publishes its substantive diff as
@@ -444,9 +480,10 @@ security-deepsec/<date>`), each committing to its own branch; merge them
 back onto the dated branch, rerun the gates on the merged result, and remove
 the worktrees. Preserve substantive work with a local commit before any long
 suite. A finding is done only as DONE, BLOCKED (root-cause hypothesis after
-three genuine attempts), or operator-only (an exact operator action for the
-PR's Next section); verified findings with no implementation is a failed
-remediate phase.
+three genuine attempts), or operator-only (an exact operator action).
+Re-verify every operator-only item before it may appear in the PR's Next
+section; `closed` items are not listed there. Verified findings with no
+implementation is a failed remediate phase.
 
 Unreleased P0/P1 fixes are committed on a local private branch
 `security-deepsec-private/<YYYY-MM-DD>` (never pushed to origin).
@@ -526,9 +563,10 @@ to merge. The loop never merges. The runner caps this phase at 3h
    create a PR. Exit 1 is INCOMPLETE, never no-op. Exit 0 continues.
 3. Publish ONE substantive PR through the guarded publisher in §Pull request
    output (`--loop security-deepsec`); update the existing PR when one is
-   already open for the branch (`gh api -X PATCH`). Every operator-only
-   finding from this cycle goes into the body's Next section as an exact
-   operator action. Record the PR:
+already open for the branch (`gh api -X PATCH`). After the re-verify
+step, every still-`open` or labeled-`unverifiable` operator-only finding
+goes into the body's Next section as an exact operator action; `closed`
+items are NOT listed in Next. Record the PR:
    `python3.13 scripts/nightly_deliver.py record --loop security-deepsec --branch <branch> --pr <n> --url <url> --status pending`.
 4. Wait for CI, bounded:
    `python3.13 scripts/nightly_deliver.py watch --pr <n> --cap-secs <seconds left in the phase>`
@@ -555,8 +593,10 @@ to merge. The loop never merges. The runner caps this phase at 3h
 PR titles and bodies are generated by `python3.13 scripts/github_pr_output.py`,
 never freehanded. Pass `--loop security-deepsec`, `--date`, `--issue` (one
 sanitized bullet per finding: `- **Component**: what happened.`), `--fix`
-(one bullet per fix, same shape, sanitized), and `--next` only when
-something still must happen outside of CI pushing a new deployment. The
+(one bullet per fix, same shape, sanitized), and `--next` only from
+`nightly_deepsec_queue.py reverify` (still-`open` or labeled-`unverifiable`
+operator-only items; never a `closed` id) when something still must happen
+outside of CI pushing a new deployment. The
 body has exactly three sections: **Issue discovered**, **What was done to
 fix it**, **Next**. Title shape: `DeepSec <YYYY-MM-DD>`; the plain-language
 issue goes only in the body. Publish only through
@@ -585,8 +625,10 @@ root cause, and no sensitive content in the local commit or any public PR.
 
 A completed deliver requires: only P2/P3 and released P0/P1 commits on the
 pushed branch; one sanitized PR open for it (or none, recorded as `prs=0`);
-every operator-only finding named as an exact action in the PR's Next
-section; the deliver record and run-record carrying the branch, PR number
+every still-`open` or labeled-`unverifiable` operator-only finding named
+as an exact action in the PR's Next section after re-verify (`closed`
+items stay in `closed_queue` and appear once in the deliver report as
+closed tonight); the deliver record and run-record carrying the branch, PR number
 and CI outcome; and the verdict line printed before the completion marker.
 CI still red or pending at the cap is INCOMPLETE, never OK.
 
@@ -607,7 +649,8 @@ from a public surface.
 The report is for a reader who was not there and reads it on GitHub. Its
 structure and formatting are the contract in `docs/security-report-template.md`:
 copy that template verbatim (Summary table first, then Operator actions,
-Stages, Findings, Rejected, Fixes, Gate results, Resume state) and obey its
+Closed tonight when any operator-only item closed this phase, Stages,
+Findings, Rejected, Fixes, Gate results, Resume state) and obey its
 formatting rules. In particular: tabular facts in GFM tables with header and
 separator rows, never `key: value` line dumps or `stage:` lines; raw tool
 output only in trimmed fenced code blocks; identifiers (`DS-…`, short SHAs,
