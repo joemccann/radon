@@ -103,3 +103,52 @@ def test_cli_hold_and_clear(tmp_path):
     assert hold.is_held() is True
     assert hold.main(["clear", "--actor", "ssh:test"]) == 0
     assert hold.is_held() is False
+
+
+# --- Non-root writers and the optional expiry (2026-10-01) -------------------
+# The broker daemon (admin panel) and the watchdog (auto-hold) run as radon.
+
+
+def test_a_hold_set_by_a_non_owner_reads_held_and_keeps_who_and_why(tmp_path, monkeypatch):
+    hold.set_hold("phone flatten", "app:user_1")
+    monkeypatch.setenv("RADON_IB_OPERATOR_HOLD_OWNER_UID", str(os.getuid() + 1))
+    state = hold.hold_state()
+    assert state["held"] is True
+    assert state["trusted"] is False
+    assert (state["reason"], state["actor"]) == ("phone flatten", "app:user_1")
+
+
+def test_a_non_owner_clears_by_removing_the_flag(tmp_path, monkeypatch):
+    hold.set_hold("phone flatten", "app:user_1")
+    monkeypatch.setenv("RADON_IB_OPERATOR_HOLD_OWNER_UID", str(os.getuid() + 1))
+    hold.clear_hold("app:user_1")
+    assert not _hold_file(tmp_path).exists()
+    assert hold.is_held() is False
+    events = [json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()]
+    assert events[-1]["event"] == "clear"
+
+
+def test_a_non_owner_not_held_flag_is_still_held(tmp_path, monkeypatch):
+    _hold_file(tmp_path).write_text(hold.NOT_HELD_PREFIX + ', "actor": "forged"}')
+    monkeypatch.setenv("RADON_IB_OPERATOR_HOLD_OWNER_UID", str(os.getuid() + 1))
+    assert hold.is_held() is True
+
+
+def test_expiry_is_recorded_and_a_past_expiry_never_lifts_the_hold():
+    hold.set_hold("flatten", "ssh:test", expires_at="2000-01-01T00:00:00+00:00")
+    state = hold.hold_state()
+    assert state["held"] is True
+    assert state["expired"] is True
+    assert state["expires_at"] == "2000-01-01T00:00:00+00:00"
+
+
+def test_future_expiry_is_not_expired():
+    hold.set_hold("flatten", "ssh:test", expires_at="2999-01-01T00:00:00")
+    state = hold.hold_state()
+    assert (state["held"], state["expired"]) == (True, False)
+    assert state["expires_at"].endswith("+00:00")
+
+
+def test_cli_rejects_a_bad_expiry_without_writing(tmp_path):
+    assert hold.main(["hold", "--actor", "ssh:t", "--expires-at", "tomorrow"]) == 64
+    assert not _hold_file(tmp_path).exists()

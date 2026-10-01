@@ -245,6 +245,7 @@ class TestHealthLite:
             "service_state": "healthy",
             "upstream_dead": False,
             "port_listening": True,
+            "operator_hold": False,
         }
         for leaked in ("managed_accounts", "host", "port", "restart_backoff", "container_state", "ib_pool"):
             assert leaked not in result, leaked
@@ -266,6 +267,7 @@ class TestHealthLite:
             "service_state": "unknown",
             "upstream_dead": False,
             "port_listening": False,
+            "operator_hold": False,
         }
 
     @pytest.mark.asyncio
@@ -286,7 +288,24 @@ class TestHealthLite:
             "service_state": "unknown",
             "upstream_dead": False,
             "port_listening": False,
+            "operator_hold": False,
         }
+
+    @pytest.mark.asyncio
+    async def test_lite_reports_the_ibkr_operator_hold_as_a_bare_flag(self, monkeypatch):
+        """The relay reads this to stand down while the operator holds the
+        shared IBKR login; who and why stay on the operator-only /health."""
+        async def _gw(pool_status=None, pool=None):
+            return {"auth_state": "unreachable",
+                    "operator_hold": {"held": True, "actor": "ssh:joe", "reason": "flatten"}}
+
+        monkeypatch.setattr(server, "check_ib_gateway", _gw)
+        monkeypatch.setattr(server, "ib_pool", None)
+
+        result = await server.health_lite()
+
+        assert result["operator_hold"] is True
+        assert "ssh:joe" not in repr(result)
 
     def test_auth_exempt_paths_exact_pin(self):
         # FULL set-equality pin, not membership checks: the perimeter is the

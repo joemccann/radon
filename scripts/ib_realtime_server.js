@@ -39,8 +39,11 @@ import { LRUCache } from "./lib/lru-cache.js";
 import { RateLimiter } from "./lib/rate-limiter.js";
 import { MAX_SNAPSHOT_QUEUE, MAX_WS_PAYLOAD_BYTES, capItems } from "./lib/relayLimits.js";
 import {
+  applyOperatorHold,
   buildRelayHealthDetail,
   decideHealthWrite,
+  isOperatorHoldRefusal,
+  operatorHoldFromHealth,
   farmStateAfterIdleDrain,
   findStaleSubjectsOnLivePlane,
   isFarmStateCode,
@@ -811,6 +814,28 @@ const IB_RESTART_URL = process.env.IB_RESTART_URL || "http://127.0.0.1:8321/ib/r
 // generous but bounded so a wedged API can't leak a hung request.
 const IB_RESTART_TIMEOUT_MS = 90_000;
 
+// IBKR operator hold: the operator is using the shared IBKR username (e.g.
+// flattening from IBKR Mobile), so the Gateway is down on purpose. Read from
+// FastAPI /health/lite (loopback, side-effect free); while true the stale
+// ladder neither pages nor asks for a restart. Unknown keeps the last value.
+const IB_HEALTH_LITE_URL = process.env.IB_HEALTH_LITE_URL || "http://127.0.0.1:8321/health/lite";
+const OPERATOR_HOLD_POLL_MS = 15_000;
+let operatorHoldActive = false;
+
+async function refreshOperatorHold() {
+  try {
+    const res = await fetch(IB_HEALTH_LITE_URL, { signal: AbortSignal.timeout(5_000) });
+    if (!res.ok) return;
+    const held = operatorHoldFromHealth(await res.json());
+    if (held !== operatorHoldActive) {
+      console.log(`[stale-data] IBKR operator hold ${held ? "ON: standing down" : "OFF: normal recovery"}`);
+    }
+    operatorHoldActive = held;
+  } catch {
+    /* keep the last known value */
+  }
+}
+
 function isUSMarketHours() {
   // Holiday + early-close aware via lib/marketCalendar.js (IBKR cache → static
   // holiday table → weekday/time). A mid-week holiday like Juneteenth is no
@@ -847,6 +872,11 @@ async function requestGatewayRestart() {
       signal: AbortSignal.timeout(IB_RESTART_TIMEOUT_MS),
     });
     const body = await res.json().catch(() => ({}));
+    if (isOperatorHoldRefusal(res.status, body)) {
+      operatorHoldActive = true;
+      console.log("[stale-data] Gateway restart refused: IBKR operator hold active; standing down");
+      return;
+    }
     console.log(
       `[stale-data] requested lock-held Gateway restart (HTTP ${res.status}): ` +
         `restarted=${body?.restarted ?? "?"} auth_state=${body?.auth_state ?? "?"}`,
@@ -2930,6 +2960,9 @@ statusBroadcastTick = setInterval(() => {
  * subscriptions / service_health row. The bounded ladder (K reconnects →
  * escalate-and-alert) and the escalation cooldown live in the machine.
  */
+void refreshOperatorHold();
+setInterval(() => { void refreshOperatorHold(); }, OPERATOR_HOLD_POLL_MS).unref?.();
+
 staleCheckTimer = setInterval(() => {
   if (shuttingDown || ibGatewayRestarting) return;
 
@@ -2953,7 +2986,7 @@ staleCheckTimer = setInterval(() => {
   // ladder is acting it owns the service_health row, so an "ok" heartbeat can
   // no longer land last and clobber the escalation's "error" row — the
   // 2026-06-18 invisibility bug where a dead relay still read state=ok.
-  const { action, heartbeat, clearError, degraded, disconnected } = decideHealthWrite({
+  const { action, heartbeat, clearError, degraded, disconnected, held } = applyOperatorHold(decideHealthWrite({
     now,
     lastTickAt: freshness.lastTickAt,
     ibConnected,
@@ -2966,7 +2999,22 @@ staleCheckTimer = setInterval(() => {
     inError: relayHealthInError,
     lastHeartbeatAt: lastTickHeartbeatAt,
     disconnectedSinceAt: ibDisconnectedSinceAt,
-  });
+  }), operatorHoldActive);
+
+  // IBKR operator hold: report HELD (writer healthy, Gateway down on purpose),
+  // never "disconnected", and never escalate to a Gateway restart.
+  if (held) {
+    staleReconnectCycles = 0;
+    relayHealthInError = false;
+    if (marketHours && subscribedSymbols > 0) {
+      void writeRelayHealth("ok", {
+        message: "IBKR operator hold: Gateway logged out on purpose; market data paused",
+        reason: "operator_hold",
+        ...buildRelayHealthDetail(now, lastTickTimestamp, freshness),
+      });
+    }
+    return;
+  }
 
   // R-168: the socket is gone during RTH with demand outstanding. The ladder
   // has nothing to say (it guards on ibConnected), so without this the relay
