@@ -1313,18 +1313,24 @@ class TestNightlyReportingDoc:
 
 
 class TestResearchCutCommandDoc:
-    def test_documented_pdf_cut_command_resolves_from_repository_root(self):
+    @pytest.mark.parametrize("module", ["worker", "harness", "cut_report"])
+    def test_documented_research_commands_resolve_from_repository_root(self, module):
         doc = (_ROOT / "docs/dropbox-research.md").read_text()
-        command = re.search(r"daily Dropbox PDF cut is `([^`]+)`", doc).group(1)
-        argv = shlex.split(command)
-        env = {"PATH": os.environ["PATH"]}
-        while "=" in argv[0]:
-            key, value = argv.pop(0).split("=", 1)
-            env[key] = value
-        argv[0] = sys.executable
-        result = subprocess.run([*argv, "--help"], cwd=_ROOT, env=env, text=True, capture_output=True, timeout=10)
-        assert result.returncode == 0, result.stderr
-        assert "--from-json" in result.stdout
+        commands = re.findall(r"`([^`]*\bpython[\d.]* -m research\." + module + r"\b[^`]*)`", doc)
+        assert commands, f"No documented research.{module} invocation"
+        for command in commands:
+            argv = shlex.split(command)
+            env = {"PATH": os.environ["PATH"]}
+            while "=" in argv[0]:
+                key, value = argv.pop(0).split("=", 1)
+                env[key] = value
+            argv[0] = sys.executable
+            # --help exits at argparse, before private files, auth or network.
+            result = subprocess.run([*argv, "--help"], cwd=_ROOT, env=env, text=True, capture_output=True, timeout=10)
+            assert result.returncode == 0, f"{command}: {result.stderr}"
+            for flag in (arg for arg in argv if arg.startswith("--")):
+                assert flag in result.stdout, f"Undocumented parser flag: {flag}"
+
 
 class TestCloudModeDocumentation:
     def test_cloud_thin_mode_has_one_owner(self):
