@@ -183,3 +183,42 @@ def test_env_file_is_published_by_radon(tmp_path):
     text = _step2()
     assert re.search(r'^sudo -u radon .*mv -f .*"\$1"', text, re.M | re.S)
     _run(tmp_path, PROD, EXISTING)
+
+
+def _run_whole_script_as_fake_root(tmp_path: Path, source: Path):
+    """The real script from ``source``, with ``id -u`` reporting root."""
+    shim = tmp_path / "rootshim"
+    shim.mkdir()
+    calls = tmp_path / "calls.log"
+    (shim / "id").write_text("#!/bin/sh\necho 0\n", encoding="utf-8")
+    for tool in ("sudo", "git", "python3.13", "install", "curl"):
+        (shim / tool).write_text(
+            f'#!/bin/sh\necho "{tool} $*" >> "{calls}"\nexit 0\n', encoding="utf-8"
+        )
+    for exe in shim.iterdir():
+        exe.chmod(0o755)
+    result = subprocess.run(
+        ["bash", str(source)],
+        env={**os.environ, "PATH": f"{shim}:{os.environ.get('PATH', '')}"},
+        capture_output=True,
+        text=True,
+    )
+    return result, calls
+
+
+def test_refuses_to_run_from_a_tree_root_does_not_own(tmp_path):
+    # Root executing a radon-writable checkout runs whatever radon put there.
+    staged = tmp_path / "cloud" / "scripts"
+    staged.mkdir(parents=True)
+    copy = staged / SETUP.name
+    copy.write_text(SETUP.read_text(encoding="utf-8"), encoding="utf-8")
+    result, calls = _run_whole_script_as_fake_root(tmp_path, copy)
+    assert result.returncode == 77, result.stderr
+    assert "root-owned" in result.stderr
+    assert not calls.exists(), calls.read_text()
+
+
+def test_documented_recipe_stages_from_the_root_provision_store():
+    doc = (CLOUD.parent / "docs" / "grok-page-responder.md").read_text(encoding="utf-8")
+    assert "/opt/radon-provision/radon.git" in doc
+    assert "bash cloud/scripts/setup-grok-page-responder.sh" not in doc
