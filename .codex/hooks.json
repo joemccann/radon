@@ -1,0 +1,39 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash(git commit*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git diff --cached | grep -iE '(api[_-]?key|password|secret|token)\\s*=' && exit 1 || exit 0"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "printf '%s' 'RESPONSE FORMAT (CLAUDE.md): closing message is **Done** bullets + **Next** bullets, 100 words max, bullets only, no prose paragraphs. Causes belong in the commit/PR, not chat. Cut: preamble, Worth-noting, corrections narration, diagnosis tables, restating a diff.'"
+          },
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/audit-dead-code.sh\""
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/pending_diagnoses.py\""
+          }
+        ]
+      }
+    ]
+  }
+}
