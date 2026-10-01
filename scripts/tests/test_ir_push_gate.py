@@ -72,6 +72,8 @@ class TestFindPrivateIdentifiers:
             "commit 3b990bb8496e24785a14a4df32e79a4e and sha "
             "cb94c6cef485666e0e9e737ea4cd4cc52f28bdba",
             "https://github.com/joemccann/radon/actions/runs/36361801938",
+            "https://github.com/joemccann/radon/actions/runs/36361801938/job/99361801938",
+            "https://github.com/joemccann/radon/actions/runs/36361801938/attempts/2",
             "U12345 is five digits; 123456789 is nine",
             "token = uuid.uuid4().hex",
             "pi is 3.14159265358979",
@@ -179,6 +181,19 @@ class TestScanCommitRangeOpaqueContent:
         _git(repo, "commit", "-q", "-m", "fix: rename")
         found = gate.scan_commit_range(repo, "main", "fix/relay")
         assert any(f.startswith("ib_account_id in diff of") for f in found)
+
+    def test_slash_prefixed_long_id_in_a_path_is_found(self, repo):
+        (repo / "reports").mkdir()
+        self._add(repo, f"reports/{FLEX_EXEC}.json", b"{}\n")
+        found = gate.scan_commit_range(repo, "main", "fix/relay")
+        assert any(f.startswith("flex_exec_id in diff of") for f in found)
+
+    def test_private_id_in_the_branch_name_is_found(self, repo):
+        _git(repo, "checkout", "-q", "-b", f"fix/{ACCOUNT}")
+        _commit(repo, "x = 2\n", "fix: relay")
+        found = gate.scan_commit_range(repo, "main", f"fix/{ACCOUNT}")
+        assert "ib_account_id in branch name" in found
+        assert ACCOUNT not in json.dumps(found)
 
     def test_clean_binary_free_branch_still_passes(self, repo):
         self._add(repo, ".gitattributes", b"*.txt -diff\n")

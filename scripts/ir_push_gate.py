@@ -39,8 +39,14 @@ PRIVATE_ID_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
             re.IGNORECASE,
         ),
     ),
-    # Not after "/": GitHub Actions run ids in CI URLs are 11 digits.
-    ("flex_exec_id", re.compile(r"(?<![0-9A-Za-z./])\d{10,}(?![0-9A-Za-z])")),
+    # Not as a GitHub Actions run/job id in a CI URL (11 digits). Any other
+    # "/"-prefixed run, as in a file path, is still an id.
+    (
+        "flex_exec_id",
+        re.compile(
+            r"(?<![0-9A-Za-z.])(?<!/runs/)(?<!/job/)(?<!/jobs/)\d{10,}(?![0-9A-Za-z])"
+        ),
+    ),
 )
 
 Runner = Callable[..., object]
@@ -133,6 +139,9 @@ def scan_commit_range(
     if not fork:
         raise IrPushRefused(f"cannot scan the branch: no merge base with {base}")
     findings: list[str] = []
+    # The pushed branch name is public too.
+    for kind in find_private_identifiers(ref):
+        findings.append(f"{kind} in branch name")
     log = _git(repo, ["log", "--format=%H%x00%B%x1e", f"{fork}..{ref}"], run)
     for record in log.split("\x1e"):
         if not record.strip():
