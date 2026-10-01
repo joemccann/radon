@@ -423,3 +423,62 @@ def test_ingest_reuses_only_matching_widths(monkeypatch):
     _embed_docs([fresh], lambda texts: [[0.2] * EMBEDDING_DIM])
     assert fresh.embedding == [0.2] * EMBEDDING_DIM
     assert len(fresh.embedding_v2) == EMBEDDING_DIM_V2
+
+
+# --- NVIDIA rate limits (2026-09-30): one key, one host-wide pace ----------------
+
+class _Limiter:
+    def __init__(self, allow=True):
+        self.allow = allow
+        self.events = []
+
+    def acquire(self, max_wait):
+        self.events.append("acquire")
+        return self.allow
+
+    def note_429(self, retry_after):
+        self.events.append("429")
+
+    def note_auth_failure(self, status):
+        self.events.append(f"auth{status}")
+
+    def note_success(self):
+        self.events.append("ok")
+
+
+def _pace_with(monkeypatch, limiter):
+    import clients.model_ladder as ladder
+    monkeypatch.setattr(ladder, "_nvidia_limiter", lambda env, post: limiter)
+
+
+def test_embed_is_paced_and_records_success(monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
+    limiter = _Limiter()
+    _pace_with(monkeypatch, limiter)
+    embed_query(["what failed"], post=_vectors(1))
+    assert limiter.events == ["acquire", "ok"]
+
+
+def test_embed_sends_nothing_when_the_budget_is_spent(monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
+    _pace_with(monkeypatch, _Limiter(allow=False))
+    post = _vectors(1)
+    with pytest.raises(RuntimeError, match="rate_limited_local"):
+        embed_query(["what failed"], post=post)
+    assert post.bodies == []
+
+
+def test_embed_429_and_403_feed_the_shared_limiter(monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
+    monkeypatch.setattr("knowledge.embed.time.sleep", lambda _s: None)
+    limiter = _Limiter()
+    _pace_with(monkeypatch, limiter)
+    with pytest.raises(RuntimeError):
+        embed_query(["q"], post=_vectors(1, status=429))
+    assert "429" in limiter.events
+    limiter.events.clear()
+    post = _vectors(1, status=403)
+    with pytest.raises(RuntimeError):
+        embed_query(["q"], post=post)
+    assert limiter.events == ["acquire", "auth403"]
+    assert len(post.bodies) == 1, "a 403 is never retried"

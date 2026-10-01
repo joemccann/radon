@@ -557,9 +557,14 @@ class _CapturingPost:
 
 
 def _post_with_retries(model, body, *, post, sleep, monotonic, jitter, deadline):
-    from clients.model_ladder import _classify_http_failure, _default_post, _request
+    from clients.model_ladder import (
+        _classify_http_failure, _default_post, _nvidia_limiter, _nvidia_max_wait, _request,
+    )
 
     sender = _CapturingPost(post or _default_post)
+    # One NVIDIA key, one host-wide pace shared with the ladder, embeddings and
+    # the nightly fx loops (scripts/nvidia_rate_limit.py).
+    limiter = _nvidia_limiter(os.environ, post or _default_post)
     key = os.environ.get("NVIDIA_API_KEY", "").strip() or ("test-key" if post else "")
     if not key:
         raise PageParseError("missing_api_key")
@@ -571,6 +576,8 @@ def _post_with_retries(model, body, *, post, sleep, monotonic, jitter, deadline)
     for attempt in range(retries + 1):
         if _clock(monotonic) >= deadline:
             raise PageParseError("budget")
+        if limiter is not None and not limiter.acquire(_nvidia_max_wait(os.environ)):
+            raise PageParseError("http_429")
         try:
             status, text, payload = _request(sender, NVIDIA_CHAT_URL, headers, body, timeout=timeout)
         except RuntimeError as exc:
@@ -580,6 +587,13 @@ def _post_with_retries(model, body, *, post, sleep, monotonic, jitter, deadline)
             _sleep(min(delay, 8.0) + _jitter(jitter), sleep)
             delay = min(delay * 2, 8.0)
             continue
+        if limiter is not None:
+            if status == 429:
+                limiter.note_429(_retry_after(sender.headers))
+            elif status in (401, 403):
+                limiter.note_auth_failure(status)
+            elif status == 200:
+                limiter.note_success()
         failure = _failure_reason(model, status, text or "", payload, _classify_http_failure)
         if failure is None:
             return payload

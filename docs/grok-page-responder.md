@@ -133,15 +133,21 @@ pickup refuses:
 - anything at all unless `GROK_PAGE_AUTOPUSH` is truthy in the pickup job's
   own environment (the plist ships `0`). Off, a fire returns
   `{"action": "disabled"}` before touching either remote;
-- a branch whose commit messages, added diff lines or paths, or PR
-  title/body carry a private identifier (`scripts/ir_push_gate.py`): IB
-  account ids (`U`/`DU`/`F` + 6-8 digits), numeric Flex exec ids (10+
+- a branch whose commit messages, added lines or paths in any commit
+  (including merge resolutions), or PR title/body carry a private identifier
+  (`scripts/ir_push_gate.py`): IB account ids (`U`/`DU`/`F` + 6-8 digits), numeric Flex exec ids (10+
   digits), dotted-hex IB exec ids, or a specific credential shape from
   `credential_redaction`. The branch stays local, the reason (kind and
   location, never the value) is logged and sent to Pushover, and nothing is
-  redacted in place;
+  redacted in place. Removing an identifier in a later commit does not
+  make the earlier history safe to publish;
 - running at all from a clone that is behind `origin/main` (stale pickup
   code).
+
+REL-296 / R-715: the gate scans each unpublished commit, including merge
+parents, so adding and then deleting an identifier still refuses publication.
+Empty and binary files, filenames and branch names are included; refusal
+messages replace private filenames with a redacted location.
 
 2026-09-30: a pickup install from before the refresh step (#759) ran a clone
 frozen before #773. It ignored `GROK_PAGE_AUTOPUSH`, opened
@@ -235,10 +241,14 @@ responder against a live promotion.
 ### Daily upgrade timer (enabled)
 
 `radon-grok-upgrade.{service,timer}` is installed and enabled. Daily
-07:40 UTC it runs `scripts/grok_upgrade.py`: copy the resolved CLI into a
-unique candidate directory under the configured `--scratch` path
-(`/var/lib/radon/grok-upgrade` in the unit; `data/cache/grok_upgrade` when omitted), then run that private
-copy's updater with isolated `HOME` and `GROK_HOME`. Probe its version,
+07:40 UTC it runs `scripts/grok_upgrade.py`: copy the resolved CLI into
+`<candidate>/downloads/grok-linux-x86_64` under the configured `--scratch`
+path (`/var/lib/radon/grok-upgrade` in the unit; `data/cache/grok_upgrade`
+when omitted) and point `<candidate>/bin/grok` at it with the installer
+symlink `../downloads/grok-linux-x86_64`. `grok update` on CLI 1.0.44 and
+newer readlinks that path to capture rollback; a regular file there exits
+22 before smoke. Run that private symlink's updater with isolated `HOME`
+and `GROK_HOME`. Probe its version,
 resolve the newest default model, then smoke a canned dry-run that must return `RESULT:` plus a Part 1
 validator-passing body. The live executable is never the updater target
 (REL-292 / R-711).

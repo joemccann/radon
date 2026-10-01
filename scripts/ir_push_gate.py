@@ -88,7 +88,7 @@ def _safe_path(path: str) -> str:
     """``path`` with any private identifier in it masked, for findings."""
     if not find_private_identifiers(path):
         return path
-    return f"a file path ({len(path)} chars, masked)"
+    return "[private path]"
 
 
 def _default_runner(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -124,7 +124,7 @@ def _added_lines_by_file(patch: str) -> dict[str, list[str]]:
             current = name[2:] if name.startswith("b/") else name
             files.setdefault(current, [current])  # the path itself is published
             continue
-        if line.startswith("+") and not line.startswith("+++"):
+        if line.startswith("+"):
             files.setdefault(current, []).append(line[1:])
     return files
 
@@ -139,8 +139,9 @@ def scan_commit_range(
     """Findings for everything ``ref`` would publish on top of ``base``.
 
     Scans each commit message (subject, body and trailers) and every line
-    and path any commit in the range adds. Removed lines are already public
-    on the base.
+    and path any commit in the range adds, including merge resolutions.
+    Cleaning the tip does not remove private data from the history being
+    published (REL-296 / R-715). Removed lines are already public on a parent.
     """
     run = runner or _default_runner
     repo = Path(repo)
@@ -178,8 +179,10 @@ def scan_commit_range(
     added = _added_lines_by_file(patch)
     for path, lines in added.items():
         if any("\x00" in line for line in lines):
+            kinds = ", ".join(find_private_identifiers(path))
             raise IrPushRefused(
                 f"cannot scan the branch: binary content in {_safe_path(path)}"
+                + (f" ({kinds})" if kinds else "")
             )
         for kind in find_private_identifiers("\n".join(lines)):
             findings.append(f"{kind} in diff of {_safe_path(path)}")
@@ -226,7 +229,9 @@ def check_publish(
 ) -> None:
     """Raise :class:`IrPushRefused` unless this push/PR may go public."""
     require_autopush(env)
-    findings: list[str] = []
+    findings: list[str] = [
+        f"{kind} in branch name" for kind in find_private_identifiers((ref or "").replace("/", "\n"))
+    ]
     if repo is not None and base and ref:
         findings += scan_commit_range(repo, base, ref, runner=runner)
     findings += scan_pr_text(title=title, body=body)

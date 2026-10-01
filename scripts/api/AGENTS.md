@@ -56,3 +56,10 @@ Applies under `scripts/api/`. Root and `scripts/AGENTS.md` also apply. Mirrors `
 - Progress/debug output goes to stderr.
 - JSON extractors are defensive, but script discipline is the primary guarantee.
 - Failed subprocesses retain structured `status=error` data while `ok` stays false. Cancel/modify return coded 502 details with the broker fields and order identity intact (REL-021b / R-024).
+
+## Legacy order helpers (REL-021b / R-039)
+
+Production cancel/modify routes retain the original-client subprocess path.
+Do not import the unused pooled shortcut into the server. Legacy helpers
+must refuse unknown or mismatched client ownership before mutation; modify
+also respects trading halt, while owned cancellation remains available.
