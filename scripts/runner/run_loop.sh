@@ -13,7 +13,6 @@ SELF="${BASH_SOURCE[0]}"
 RUNNER_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 STATE_DIR="${RADON_RUNNER_STATE:-$HOME/radon-runner}"
 SECRETS_FILE="${RADON_RUNNER_ENV:-$HOME/.radon-runner.env}"
-SECRET_KEYS="GH_TOKEN PUSHOVER_USER PUSHOVER_TOKEN"
 # Resolvers and hooks run under an isolated interpreter (no cwd, no user site).
 RUNNER_PYTHON="${RADON_RUNNER_PYTHON:-/opt/homebrew/bin/python3.13}"
 TIMED_OUT=124
@@ -83,13 +82,138 @@ apply_agent_env() {
   done
 }
 
-load_secrets() {
-  local key value
-  [[ -f "$SECRETS_FILE" ]] || return 0
-  for key in $SECRET_KEYS; do
-    value="$(sed -n "s/^$key=//p" "$SECRETS_FILE" | tail -n 1 | tr -d "\"'")"
-    [[ -n "$value" ]] && export "$key=$value"
+# Literal dotenv assign. No source, no eval, no command substitution on the
+# file. Last occurrence wins; an empty value counts as missing.
+_dotenv_set() {
+  case "$1" in
+    PUSHOVER_USER) _DOTENV_PUSHOVER_USER="$2" ;;
+    PUSHOVER_TOKEN) _DOTENV_PUSHOVER_TOKEN="$2" ;;
+    GH_TOKEN) _DOTENV_GH_TOKEN="$2" ;;
+  esac
+}
+
+_dotenv_parse_value() {
+  local val="$1" first rest
+  val="${val#"${val%%[![:space:]]*}"}"
+  first="${val:0:1}"
+  if [[ "$first" == '"' || "$first" == "'" ]]; then
+    rest="${val:1}"
+    case "$rest" in
+      *"$first"*)
+        _DOTENV_VAL="${rest%%"$first"*}"
+        return 0
+        ;;
+    esac
+  fi
+  local s="$val" i=0 n=${#val} c j
+  while [[ $i -lt $n ]]; do
+    c="${s:$i:1}"
+    if [[ "$c" == [[:space:]] ]]; then
+      j=$((i + 1))
+      while [[ $j -lt $n && "${s:$j:1}" == [[:space:]] ]]; do
+        j=$((j + 1))
+      done
+      if [[ $j -lt $n && "${s:$j:1}" == "#" ]]; then
+        s="${s:0:$i}"
+        break
+      fi
+    fi
+    i=$((i + 1))
   done
+  _DOTENV_VAL="${s%"${s##*[![:space:]]}"}"
+}
+
+_dotenv_read_file() {
+  local file="$1" allow="$2" line trimmed key
+  _DOTENV_PUSHOVER_USER=""
+  _DOTENV_PUSHOVER_TOKEN=""
+  _DOTENV_GH_TOKEN=""
+  _DOTENV_VAL=""
+  [[ -f "$file" && -r "$file" ]] || return 0
+  while IFS= read -r line || [[ -n "${line:-}" ]]; do
+    line="${line%$'\r'}"
+    trimmed="${line#"${line%%[![:space:]]*}"}"
+    [[ -z "$trimmed" || "${trimmed:0:1}" == "#" ]] && continue
+    case "$trimmed" in
+      export[\ $'\t']*)
+        trimmed="${trimmed#export}"
+        trimmed="${trimmed#"${trimmed%%[![:space:]]*}"}"
+        ;;
+    esac
+    [[ "$trimmed" == *=* ]] || continue
+    key="${trimmed%%=*}"
+    key="${key%"${key##*[![:space:]]}"}"
+    case " $allow " in
+      *" $key "*) ;;
+      *) continue ;;
+    esac
+    _dotenv_parse_value "${trimmed#*=}"
+    _dotenv_set "$key" "${_DOTENV_VAL}"
+  done < "$file"
+}
+
+_radon_dotenv_path() {
+  local path="" line
+  if [[ -n "${RADON_RUNNER_DOTENV:-}" ]]; then
+    path="$RADON_RUNNER_DOTENV"
+  elif [[ -f "$RUNNER_DIR/dotenv-path" && -r "$RUNNER_DIR/dotenv-path" ]]; then
+    IFS= read -r line < "$RUNNER_DIR/dotenv-path" || true
+    line="${line%$'\r'}"
+    path="$line"
+  fi
+  case "$path" in
+    /*) printf '%s' "$path" ;;
+  esac
+}
+
+# Pair from the first source that has BOTH keys (env, Radon dotenv, bot file).
+# GH_TOKEN loads only from the bot file. Values are never logged.
+load_secrets() {
+  local dotenv_path from="" checked
+  dotenv_path="$(_radon_dotenv_path)"
+
+  _dotenv_read_file "$SECRETS_FILE" "GH_TOKEN"
+  if [[ -n "${_DOTENV_GH_TOKEN}" ]]; then
+    export GH_TOKEN="$_DOTENV_GH_TOKEN"
+  fi
+
+  if [[ -n "${PUSHOVER_USER:-}" && -n "${PUSHOVER_TOKEN:-}" ]]; then
+    from="env"
+  else
+    if [[ -n "${PUSHOVER_USER:-}" || -n "${PUSHOVER_TOKEN:-}" ]]; then
+      log "pushover: incomplete env"
+      unset PUSHOVER_USER PUSHOVER_TOKEN
+    fi
+    if [[ -n "$dotenv_path" ]]; then
+      _dotenv_read_file "$dotenv_path" "PUSHOVER_USER PUSHOVER_TOKEN"
+      if [[ -n "${_DOTENV_PUSHOVER_USER}" && -n "${_DOTENV_PUSHOVER_TOKEN}" ]]; then
+        export PUSHOVER_USER="$_DOTENV_PUSHOVER_USER"
+        export PUSHOVER_TOKEN="$_DOTENV_PUSHOVER_TOKEN"
+        from="dotenv $dotenv_path"
+      elif [[ -n "${_DOTENV_PUSHOVER_USER}" || -n "${_DOTENV_PUSHOVER_TOKEN}" ]]; then
+        log "pushover: incomplete dotenv $dotenv_path"
+      fi
+    fi
+    if [[ -z "$from" ]]; then
+      _dotenv_read_file "$SECRETS_FILE" "PUSHOVER_USER PUSHOVER_TOKEN"
+      if [[ -n "${_DOTENV_PUSHOVER_USER}" && -n "${_DOTENV_PUSHOVER_TOKEN}" ]]; then
+        export PUSHOVER_USER="$_DOTENV_PUSHOVER_USER"
+        export PUSHOVER_TOKEN="$_DOTENV_PUSHOVER_TOKEN"
+        from="$SECRETS_FILE"
+      elif [[ -n "${_DOTENV_PUSHOVER_USER}" || -n "${_DOTENV_PUSHOVER_TOKEN}" ]]; then
+        log "pushover: incomplete $SECRETS_FILE"
+      fi
+    fi
+  fi
+
+  if [[ -n "$from" ]]; then
+    log "pushover: PUSHOVER_USER present, PUSHOVER_TOKEN present (source: $from)"
+  else
+    checked="env"
+    [[ -n "$dotenv_path" ]] && checked="$checked, $dotenv_path"
+    checked="$checked, $SECRETS_FILE"
+    log "pushover: credentials missing (checked: $checked); notifications skipped"
+  fi
 }
 
 proc_start() { ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //;s/ $//'; }
@@ -448,18 +572,24 @@ curl_field() {
 # Credentials reach curl as a config on stdin, never on its argv (ps shows argv
 # to every local user); -q first so no curlrc is read.
 notify() {
-  local title="$1" message="$2" url="${3:-}" url_title="${4:-}"
+  local title="$1" message="$2" url="${3:-}" url_title="${4:-}" rc=0 status
   log "$title: $message ${url}"
   [[ -n "${PUSHOVER_USER:-}" && -n "${PUSHOVER_TOKEN:-}" ]] || return 0
-  {
-    curl_field token "$PUSHOVER_TOKEN"
-    curl_field user "$PUSHOVER_USER"
-    curl_field title "$title"
-    curl_field message "$message"
-    [[ -z "$url" ]] || curl_field url "$url"
-    [[ -z "$url_title" ]] || curl_field url_title "$url_title"
-  } | "$CURL_BIN" -q -fsS -m 20 --config - \
-    https://api.pushover.net/1/messages.json >/dev/null 2>&1 || true
+  status="$(
+    {
+      curl_field token "$PUSHOVER_TOKEN"
+      curl_field user "$PUSHOVER_USER"
+      curl_field title "$title"
+      curl_field message "$message"
+      [[ -z "$url" ]] || curl_field url "$url"
+      [[ -z "$url_title" ]] || curl_field url_title "$url_title"
+    } | "$CURL_BIN" -q -sS -m 20 -o /dev/null -w '%{http_code}' --config - \
+      https://api.pushover.net/1/messages.json 2>/dev/null
+  )" || rc=$?
+  if [[ "$rc" -ne 0 || ( -n "${status:-}" && "$status" != "200" ) ]]; then
+    log "pushover: send failed status=${status:-$rc}"
+  fi
+  return 0
 }
 
 run_agents_in_order() {
