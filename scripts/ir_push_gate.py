@@ -88,7 +88,12 @@ def _default_runner(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
 
 
 def _git(repo: Path, argv: list[str], runner: Runner) -> str:
-    proc = runner(["git", *argv], cwd=str(repo))
+    try:
+        proc = runner(["git", *argv], cwd=str(repo))
+    except UnicodeDecodeError:
+        raise IrPushRefused(
+            f"cannot scan the branch: git {argv[0]} output is not text"
+        ) from None
     if getattr(proc, "returncode", 1) != 0:
         raise IrPushRefused(f"cannot scan the branch: git {argv[0]} failed")
     return getattr(proc, "stdout", "") or ""
@@ -97,7 +102,9 @@ def _git(repo: Path, argv: list[str], runner: Runner) -> str:
 def _added_lines_by_file(patch: str) -> dict[str, list[str]]:
     files: dict[str, list[str]] = {}
     current = "(unknown file)"
-    for line in patch.splitlines():
+    # split("\n"), not splitlines(): a \x1c or \u2028 inside an added line
+    # must not start a new line that lacks the "+" marker.
+    for line in patch.split("\n"):
         if line.startswith("+++ "):
             name = line[4:].strip()
             current = name[2:] if name.startswith("b/") else name
@@ -133,14 +140,37 @@ def scan_commit_range(
         sha, _, message = record.strip("\n").partition("\x00")
         for kind in find_private_identifiers(message):
             findings.append(f"{kind} in commit message {sha.strip()[:12]}")
+    # --text and --no-textconv: a branch-authored .gitattributes (-diff,
+    # binary, a textconv driver) must not hide what the blob publishes.
     patch = _git(
         repo,
-        ["diff", "--no-color", "--no-ext-diff", "--unified=0", f"{fork}..{ref}"],
+        [
+            "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--text",
+            "--no-renames", "--unified=0", f"{fork}..{ref}",
+        ],
         run,
     )
-    for path, lines in _added_lines_by_file(patch).items():
+    added = _added_lines_by_file(patch)
+    for path, lines in added.items():
+        if any("\x00" in line for line in lines):
+            raise IrPushRefused(
+                f"cannot scan the branch: binary content in {path}"
+            )
         for kind in find_private_identifiers("\n".join(lines)):
             findings.append(f"{kind} in diff of {path}")
+    # Paths with no content hunk (new empty files) are published too.
+    names = _git(
+        repo,
+        [
+            "diff", "--name-only", "-z", "--no-renames", "--diff-filter=d",
+            f"{fork}..{ref}",
+        ],
+        run,
+    )
+    for path in names.split("\x00"):
+        if path and path not in added:
+            for kind in find_private_identifiers(path):
+                findings.append(f"{kind} in diff of {path}")
     return findings
 
 
