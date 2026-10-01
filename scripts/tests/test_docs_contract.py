@@ -1326,6 +1326,23 @@ class TestResearchCutCommandDoc:
         assert result.returncode == 0, result.stderr
         assert "--from-json" in result.stdout
 
+class TestCloudModeDocumentation:
+    def test_cloud_thin_mode_has_one_owner(self):
+        launcher = (_ROOT / "scripts/cloud.sh").read_text()
+        dev = (_ROOT / "scripts/dev").read_text()
+        assert 'export RADON_DEV_PROFILE="cloud-thin"' in launcher
+        thin = dev.split('if [[ "$PROFILE" == "cloud-thin" ]]; then', 1)[1].split("\nfi", 1)[0]
+        assert "exec next dev" in thin
+        owner = (_ROOT / "docs/cloud-services.md").read_text()
+        assert "cloud-thin" in _section(owner, "Mode switch")
+        assert "laptop runs only Next.js" in owner
+        for path in ("README.md", "CLAUDE.md"):
+            text = (_ROOT / path).read_text()
+            assert "docs/cloud-services.md#mode-switch" in text
+            assert "Next.js + newsfeed" not in text
+        assert "not in `setup-vps.sh` yet" not in owner
+
+
 class TestGrokBinaryRecoveryDocumentation:
     def test_incident_recovery_defers_to_trusted_locked_owner(self):
         cases = (_ROOT / "docs/incident-runbook.md").read_text()

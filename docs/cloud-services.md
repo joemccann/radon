@@ -4,24 +4,11 @@ This document covers Radon's two-mode architecture introduced in Phase 0–6 of 
 
 ## Architecture (TL;DR)
 
-```
-                         Turso Cloud DB (libSQL)
-                       radon-joemccann.aws-us-west-2
-                                  ▲
-                ┌─────────────────┴─────────────────┐
-                │   direct-to-cloud, no replica     │
-                ▼                                   ▼
-         LAPTOP dev process                 HETZNER production (<prod-host>)
-         localhost:3000 (Next.js)           app.radon.run (Caddy → radon-nextjs)
-         FastAPI 8321                       FastAPI 8321 (radon-api, private)
-         IB realtime relay 8765             radon-relay, radon-monitor (host systemd)
-         newsfeed scraper (Playwright)      newsfeed scraper (Playwright, optional)
-                                            ib-gateway docker (4001)
-                                            media.radon.run (Caddy static)
-```
+Production host boundaries are owned by [the host-split runbook](spof-host-split.md).
+Laptop process ownership depends on the [selected mode](#mode-switch).
 
 - **Database**: Turso (libSQL) — every Radon process talks **directly** to the cloud DB for both reads and writes. Direct-to-cloud is the code default (DUR-07; replica is opt-in only via `RADON_DB_USE_REPLICA=1`), and the prefix drop-in `/etc/systemd/system/radon-.service.d/common.conf` sets the `RADON_DB_NO_REPLICA=1` kill switch on every `radon-*` unit as belt-and-suspenders. The embedded-replica architecture (`data/replica.db`) was retired 2026-05-20 after two same-day incidents: multi-writer WAL checkpoint contention (radon-cloud `741cfc6`) followed by single-writer frame conflicts between the replica owner and direct-cloud writers (radon-cloud `2c46232`). The libsql embedded-replica model only works when ONE host has exactly ONE writer; Radon's split between Node and Python writers can't satisfy that constraint. Reads cost +30–60 ms cloud round-trip, absorbed by SWR caching. See `feedback_libsql_replica_one_writer.md` for the full failure-mode catalog.
-- **Media**: Hetzner-hosted Caddy serves `https://media.radon.run`; the laptop's newsfeed scraper rsyncs new images over Tailscale.
+- **Media**: Hetzner-hosted Caddy serves `https://media.radon.run`. The production scraper writes to the local media mount; laptop-only media transfer is described under [Tailscale-free media push](#tailscale-free-media-push).
 - **Schedulers**: laptop launchd plists (local mode) OR Hetzner host systemd (cloud mode). Production scheduling remains host systemd. Installed per-unit drop-ins run Next.js, FastAPI, relay, monitor, and newsfeed in exact-SHA app containers; timer-owned oneshots remain on the host. Unit sources live in `/home/radon/radon/cloud/services/` and are installed through the reviewed control-plane path. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a scheduler alternative.
 - **Self-contained**: themarketear.com newsfeed scraper is now a headless Playwright flow that runs on either the laptop or Hetzner. No magic-link or Chrome Debug.app dependency.
 
@@ -41,7 +28,7 @@ In production both keys must also survive `render_env_file`'s newsfeed allowlist
 
 **Operating procedure:**
 
-1. **Laptop dev stack** — `npm run dev` keeps including the scraper as the 4th child and polls every 120s. No more "must keep Chrome Debug.app open" requirement.
+1. **Laptop dev stack**: the full profile includes the scraper; cloud-thin does not. Follow [Mode switch](#mode-switch) before launching a collector. Process commands live in [`scripts/dev`](../scripts/dev); polling is owned by the scraper scheduler.
 2. **Standalone (laptop or Hetzner)** — `node scripts/newsfeed/index.js` runs forever; `node scripts/newsfeed/index.js --once` runs a single cycle (use for smoke tests).
 3. **Storage state** — first launch authenticates with email + password (full FirebaseUI flow), then saves cookies + localStorage to `data/newsfeed-storage.json`. Subsequent runs reuse the session; the scraper still re-authenticates every ~6h to refresh cookies before they expire.
 4. **Failure capture** — any login-flow failure dumps a screenshot to `data/newsfeed-debug-<ts>.png` (gitignored) for postmortem.
@@ -51,15 +38,16 @@ In production both keys must also survive `render_env_file`'s newsfeed allowlist
 
 **Hetzner first-time setup:**
 
-1. The reviewed deploy transaction installs the Playwright browser dependency before restarting the newsfeed service (idempotent).
-2. System libs (libnspr4, libnss3, libcups2, libxkbcommon0, libgbm1, …) require **one-time** sudo install:
-   ```bash
-   sudo apt-get update
-   sudo npx playwright install-deps chromium    # installs all required apt packages
-   ```
-   Without these, the headless Chromium binary fails with `error while loading shared libraries: libnspr4.so`.
-3. `THEMARKETEAR_EMAIL` + `THEMARKETEAR_PASSWORD` are appended to `/home/radon/radon-cloud/.env`.
-4. **Hetzner runs it as `radon-newsfeed.service`** (enabled 2026-05-03 cutover). `Restart=on-failure`, `RestartSec=30`, `EnvironmentFile=/home/radon/radon-cloud/.env`. Steady-state cycle ~4s; first cold cycle does the FirebaseUI auth (~16s) then caches storage state. Tail logs:
+1. Use the reviewed deploy transaction to prepare the browser cache before
+   the newsfeed service starts. The [Node app image](../docker/app/Dockerfile.node)
+   owns the container's Chromium libraries and build-time browser installation.
+2. For `error while loading shared libraries`, inspect the deployed app image
+   and effective browser mount in
+   [`radon-app-runtime.sh`](../cloud/scripts/radon-app-runtime.sh).
+   Follow the [deployment recovery contract](../cloud/CLAUDE.md) for image repair
+   or rollback; the container's dependencies belong in its image.
+3. Configure newsfeed credentials through the [production environment owner](external-services.md).
+4. **Hetzner runs the scraper as `radon-newsfeed.service`**. The [unit](../cloud/services/radon-newsfeed.service) owns its restart and environment settings; the installed app-container drop-in and environment rendering are described in [operations](operations.md). Tail logs:
    ```bash
    ssh root@ib-gateway "journalctl -u radon-newsfeed -f"
    ```
@@ -83,6 +71,29 @@ The same SSH public key is authorized on both routes — `~/.ssh/authorized_keys
 
 ## Mode switch
 
+`cloud.sh` selects `RADON_DEV_PROFILE=cloud-thin`: the laptop runs only Next.js.
+FastAPI, relay and newsfeed collection stay on Hetzner. The full local profile
+and log-filter names are defined by [`scripts/dev`](../scripts/dev), reached
+through `web/package.json`. `--only` hides other logs; it does not disable
+collectors.
+
+**Use and prerequisites:** choose this mode when developing against the cloud
+stack; use local mode only when intentionally moving collection to the laptop.
+Read [`cloud.sh`](../scripts/cloud.sh) or [`local.sh`](../scripts/local.sh)
+before switching. These are lifecycle commands: they persist mode, change
+scheduler ownership and may stop/start a Gateway, requiring IBKR approval.
+Tailscale/SSH access and operator control of the current stack are prerequisites.
+
+**Safe diagnosis and stop conditions:** inspect `scripts/ib mode` and existing
+local listeners before launching. A VPN preflight refusal, busy dev ports, or
+pending Gateway authentication is a stop condition; do not start a second
+collector stack to work around it. **Verify** the selected profile in launcher
+output and the intended remote API/relay targets. A persisted mode does not
+reconfigure processes already running. **Rollback** a mode change by stopping
+the dev session and using the previous mode's launcher after reviewing its
+Gateway effects. **Escalate** failed authentication through the
+[Gateway recovery owner](ib-gateway-recovery.md), without repeated starts.
+
 | Action | Command |
 |--------|---------|
 | Switch to **Hetzner mode** | `scripts/cloud.sh` |
@@ -97,31 +108,12 @@ The same SSH public key is authorized on both routes — `~/.ssh/authorized_keys
 
 ### Production layout on Hetzner
 
-```
-/home/radon/
-├─ radon/                    (git checkout — main branch, fast-forwarded by CI)
-│  ├─ web/.next              (Next.js compile-mode build, regenerated each deploy)
-│  ├─ scripts/               (Python schedulers, direct-to-cloud writes via libsql client)
-│  └─ cloud/                 (canonical deploy tooling, Caddy, Compose, and unit sources)
-└─ radon-cloud/
-   ├─ .env                   (external secrets only: TURSO_DB_URL, TURSO_AUTH_TOKEN, RADON_MODE=hetzner, …)
-   └─ media/                 (rsync target for newsfeed images)
-```
-
-`data/replica.db` is intentionally absent — the embedded-replica architecture was retired 2026-05-20. If the file appears on disk (stray from a pre-migration host), it is safe to `rm` — nothing reads from it.
-
-Every `radon-*.service` (except `radon-grok-page-responder`, `radon-flex-pull` and `radon-mcp`, which load stripped files) uses `EnvironmentFile=/etc/radon/env`. `/home/radon/radon-cloud/.env` is a compatibility symlink to that file. Media is `/var/lib/radon/media` (Caddy `media.radon.run`); `/home/radon/radon-cloud/media` is a compatibility symlink. The legacy directory is not a deploy source.
-
-**Whole-stack kill switch:** `/usr/local/bin/radon` wraps all units (IB Gateway included). Run on the VPS or remotely:
-
-```bash
-radon stop      # stop IB + radon-{api,relay,monitor,newsfeed,nextjs} + refresh.timer
-radon start     # start them all (IB Gateway first)
-radon restart   # stop + start
-radon status    # systemctl list-units "radon-*"
-```
-
-From the laptop: `ssh root@ib-gateway radon stop`. Useful for off-hours shutdowns from iPhone/Termius without remembering the unit list. Installed manually 2026-05-04 — not in `setup-vps.sh` yet, so a `wipe-vps.sh` rebuild drops it.
+The [host-split runbook](spof-host-split.md) owns production topology.
+[Operations](operations.md) owns app-container mounts, credential staging and
+the installed operator CLI; [the cloud deployment contract](../cloud/CLAUDE.md)
+owns provisioning and exact-SHA release/rollback gates. The legacy
+`radon-cloud` directory is not a deploy source. Do not use a whole-stack
+restart to repair an app-only failure; it can affect Gateway authentication.
 
 ### Day-to-day deploys
 
