@@ -696,10 +696,15 @@ def _ledger_read_timeout(exc: BaseException) -> bool:
     """True for the hrana read stall that must not fail the oneshot.
 
     Production string: ``TimeoutError: The read operation timed out``.
-    A statement error or missing credential still fails the unit.
+    A statement error still fails the unit. A missing Turso token is
+    handled separately and stands the cycle down.
     """
     text = str(exc)
     return "TimeoutError" in text or "The read operation timed out" in text
+
+
+def _missing_turso_credential(exc: BaseException) -> bool:
+    return "TURSO_AUTH_TOKEN not configured" in str(exc)
 
 
 def _default_grok_runner(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -983,6 +988,14 @@ def run_cycle(
         completed = False
         if _ledger_read_timeout(exc):
             print(f"grok page ledger non-fatal: {exc}", file=sys.stderr)
+            return 0
+        if _missing_turso_credential(exc):
+            print(
+                "grok page skipped: TURSO_AUTH_TOKEN missing; "
+                "skip Turso-dependent steps",
+                file=sys.stderr,
+            )
+            print(json.dumps({"at": now.isoformat(), "skipped": "turso_token_missing"}))
             return 0
         raise
     except BaseException:

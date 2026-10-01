@@ -69,12 +69,72 @@ only). Auth: `/home/radon/.grok/auth.json` via device-code.
 
 Rerunning setup rebuilds that file (`cloud/scripts/grok_responder_env.py`,
 mode 600, owner radon). Secrets come only from the production env; an old
-value in the file is never kept. The operator flags
+value in the file is never kept. The Turso token is
+`TURSO_RESPONDER_AUTH_TOKEN` from `/etc/radon/env`, copied into the
+stripped file as consumer-side `TURSO_AUTH_TOKEN`. Production
+`TURSO_AUTH_TOKEN` is never copied. If the scoped key is missing or empty,
+the dest file has no Turso token, setup prints one WARNING naming that key
+(never a value), and the responder skips Turso-dependent steps
+(`"skipped": "turso_token_missing"`) rather than crashing. The operator flags
 `GROK_PAGE_RESPONDER`, `GROK_PAGE_AUTOSHIP`, `GROK_PAGE_AUTOPUSH` and
 `GROK_PAGE_MAX_ACTIONS_PER_DAY` are carried over from the current file, so a
 rerun no longer turns the responder off (`"skipped": "disabled"`).
 `GROK_PAGE_NO_DOTENV`, `GROK_PAGE_SYNC_REMOTE` and `GROK_BIN` are always
 reset. Contract: `cloud/tests/test_grok_responder_env.py`.
+
+### Dedicated Turso token (required for a live ledger)
+
+The poller writes Turso: `watchdog_pages` claim / complete / attempt
+failure, and `service_health` heartbeats. The grok child never sees those
+credentials (`grok_runtime.grok_child_env`). A Turso `--read-only` token
+fails those writes. Mint a dedicated full-access token for this service,
+not the production `TURSO_AUTH_TOKEN`.
+
+Production database marker in repo config: `radon-joemccann`
+(`scripts/db/migrate.py`). Turso host form is
+`{dbname}-{org}.{region}.turso.io`, so the database name is `radon` in
+org `joemccann`. Confirm with `turso db list` before minting.
+
+Verified 2026-10-01 against Turso docs:
+
+```bash
+# CLI: https://docs.turso.tech/cli/db/tokens/create
+# --read-only / -r exists. Do not use it here (writes above).
+# --expiration / -e is optional (never, or e.g. 90d).
+turso db tokens create radon
+# optional: turso db tokens create radon --expiration 90d
+```
+
+Platform API (`authorization=full-access` or `read-only`; default full-access):
+
+```bash
+# https://docs.turso.tech/api-reference/databases/create-token
+curl -sS -X POST \
+  "https://api.turso.tech/v1/organizations/joemccann/databases/radon/auth/tokens?authorization=full-access" \
+  -H "Authorization: Bearer $TURSO_API_TOKEN"
+```
+
+Add the value to `/etc/radon/env` (keep the file's existing owner and mode;
+do not chmod). No-echo append as root:
+
+```bash
+read -rs TURSO_RESPONDER_AUTH_TOKEN
+printf 'TURSO_RESPONDER_AUTH_TOKEN=%s\n' "$TURSO_RESPONDER_AUTH_TOKEN" >> /etc/radon/env
+unset TURSO_RESPONDER_AUTH_TOKEN
+```
+
+After this change is on `main` and the provision store has that SHA, rerun
+the Install (VPS) stage recipe (root-only tree from
+`/opt/radon-provision/radon.git`). Then name-check the dest file and the
+next cycle:
+
+```bash
+cut -d= -f1 /home/radon/radon-page-responder.env
+# expect TURSO_AUTH_TOKEN (consumer name), TURSO_DB_URL, PUSHOVER_*
+# never TURSO_RESPONDER_AUTH_TOKEN, never production-only keys
+journalctl -u radon-grok-page-responder -n 20 --no-pager
+# a clean cycle is {"pending": 0} or a claimed page; not turso_token_missing
+```
 
 Setup drops a `.radon-page-responder` marker in the clone. It is gitignored on
 purpose: `sync_remote_clone` fast-forwards only a clean tree, so an untracked

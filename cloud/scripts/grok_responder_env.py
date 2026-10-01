@@ -7,11 +7,15 @@ Called by ``setup-grok-page-responder.sh`` step [2/5]:
 
 Secrets come only from PROD_ENV (the production env): an old value in
 EXISTING_ENV is never carried forward, so a rotated or revoked token cannot
-survive a rerun. Operator kill switches and knobs are the reverse: they live
-only in EXISTING_ENV (the operator sets them by hand) and every one listed in
-``OPERATOR_FLAGS`` is preserved. Before this, each rerun dropped them and the
-responder silently reported ``"skipped": "disabled"`` because
-``GROK_PAGE_RESPONDER`` is off when unset (REL-030).
+survive a rerun. The Turso token is the exception to a straight copy:
+``TURSO_RESPONDER_AUTH_TOKEN`` from PROD_ENV is written as the consumer
+name ``TURSO_AUTH_TOKEN``. Production ``TURSO_AUTH_TOKEN`` is never
+copied. A missing or empty scoped key omits the consumer token and prints
+one WARNING that names the key, never a value. Operator kill switches and
+knobs live only in EXISTING_ENV (the operator sets them by hand) and every
+one listed in ``OPERATOR_FLAGS`` is preserved. Before this, each rerun
+dropped them and the responder silently reported ``"skipped": "disabled"``
+because ``GROK_PAGE_RESPONDER`` is off when unset (REL-030).
 
 Output is deterministic, so a rerun with unchanged inputs is byte-identical.
 Values are never printed.
@@ -23,8 +27,14 @@ import re
 import sys
 from pathlib import Path
 
-REQUIRED = ("TURSO_DB_URL", "TURSO_AUTH_TOKEN", "PUSHOVER_USER", "PUSHOVER_TOKEN")
+REQUIRED = ("TURSO_DB_URL", "PUSHOVER_USER", "PUSHOVER_TOKEN")
 OPTIONAL = ("GH_TOKEN",)
+TOKEN_SOURCE = "TURSO_RESPONDER_AUTH_TOKEN"
+TOKEN_CONSUMER = "TURSO_AUTH_TOKEN"
+MISSING_TOKEN_WARNING = (
+    "WARNING: TURSO_RESPONDER_AUTH_TOKEN missing from production env; "
+    "writing responder env without a Turso token"
+)
 # GROK_PAGE_* knobs grok_page_responder.py reads that only the operator sets.
 # GROK_PAGE_NO_DOTENV / GROK_PAGE_SYNC_REMOTE are managed below, not preserved.
 OPERATOR_FLAGS = (
@@ -67,6 +77,11 @@ def build(prod_text: str, existing_text: str | None) -> str:
     if missing:
         raise SystemExit("missing in production env: " + ", ".join(missing))
     lines = [f"{key}={prod[key]}" for key in REQUIRED]
+    raw_token = prod.get(TOKEN_SOURCE, "")
+    if _unquote(raw_token).strip():
+        lines.append(f"{TOKEN_CONSUMER}={raw_token}")
+    else:
+        print(MISSING_TOKEN_WARNING, file=sys.stderr)
     lines += [f"{key}={prod[key]}" for key in OPTIONAL if prod.get(key)]
     existing = parse_env(existing_text or "")
     for key in OPERATOR_FLAGS:

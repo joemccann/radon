@@ -57,7 +57,18 @@ def _step2() -> str:
     return match.group(0)
 
 
-def _run(tmp_path: Path, prod: str, existing: str | None) -> dict[str, str]:
+def _builder():
+    sys.path.insert(0, str(CLOUD / "scripts"))
+    try:
+        import grok_responder_env as builder
+    finally:
+        sys.path.pop(0)
+    return builder
+
+
+def _run_result(
+    tmp_path: Path, prod: str, existing: str | None
+) -> tuple[subprocess.CompletedProcess[str], dict[str, str]]:
     prod_env = tmp_path / "prod.env"
     prod_env.write_text(prod, encoding="utf-8")
     env_file = tmp_path / "radon-page-responder.env"
@@ -82,12 +93,21 @@ def _run(tmp_path: Path, prod: str, existing: str | None) -> dict[str, str]:
         capture_output=True,
         text=True,
     )
+    parsed: dict[str, str] = {}
+    if env_file.is_file():
+        lines = env_file.read_text(encoding="utf-8").splitlines()
+        keys = [line.partition("=")[0] for line in lines]
+        assert len(keys) == len(set(keys)), f"duplicate keys: {keys}"
+        parsed = dict(line.partition("=")[::2] for line in lines)
+    return result, parsed
+
+
+def _run(tmp_path: Path, prod: str, existing: str | None) -> dict[str, str]:
+    result, parsed = _run_result(tmp_path, prod, existing)
     assert result.returncode == 0, result.stderr
+    env_file = tmp_path / "radon-page-responder.env"
     assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
-    lines = env_file.read_text(encoding="utf-8").splitlines()
-    keys = [line.partition("=")[0] for line in lines]
-    assert len(keys) == len(set(keys)), f"duplicate keys: {keys}"
-    return dict(line.partition("=")[::2] for line in lines)
+    return parsed
 
 
 def test_rerun_preserves_operator_flags(tmp_path):
@@ -100,7 +120,6 @@ def test_rerun_preserves_operator_flags(tmp_path):
 
 def test_secrets_come_only_from_the_production_env(tmp_path):
     env = _run(tmp_path, PROD, EXISTING)
-    assert env["TURSO_AUTH_TOKEN"] == "new-turso-token"
     assert env["PUSHOVER_TOKEN"] == "new-pushover-token"
     assert env["GH_TOKEN"] == "new-gh-token"
     assert env["TURSO_DB_URL"] == "libsql://example.invalid"
@@ -108,6 +127,72 @@ def test_secrets_come_only_from_the_production_env(tmp_path):
     # A GH_TOKEN removed from production does not survive from the old file.
     env = _run(tmp_path, PROD.replace("GH_TOKEN=new-gh-token\n", ""), EXISTING)
     assert "GH_TOKEN" not in env
+
+
+def test_prod_turso_auth_token_is_never_copied(tmp_path):
+    env = _run(tmp_path, PROD, EXISTING)
+    assert env.get("TURSO_AUTH_TOKEN") != "new-turso-token"
+    assert env.get("TURSO_AUTH_TOKEN") != "old-turso-token"
+    assert "TURSO_AUTH_TOKEN" not in env
+    dest = (tmp_path / "radon-page-responder.env").read_text(encoding="utf-8")
+    assert "new-turso-token" not in dest
+    assert "old-turso-token" not in dest
+
+
+def test_scoped_responder_token_is_copied_as_consumer_name(tmp_path):
+    prod = PROD + "TURSO_RESPONDER_AUTH_TOKEN=scoped-responder-token\n"
+    env = _run(tmp_path, prod, EXISTING)
+    assert env["TURSO_AUTH_TOKEN"] == "scoped-responder-token"
+    assert "TURSO_RESPONDER_AUTH_TOKEN" not in env
+    dest = (tmp_path / "radon-page-responder.env").read_text(encoding="utf-8")
+    assert "new-turso-token" not in dest
+    assert "old-turso-token" not in dest
+
+
+def test_missing_scoped_token_omits_turso_token_and_warns(tmp_path):
+    result, env = _run_result(tmp_path, PROD, EXISTING)
+    assert result.returncode == 0, result.stderr
+    assert "TURSO_AUTH_TOKEN" not in env
+    combined = result.stdout + result.stderr
+    assert "WARNING:" in combined
+    assert "TURSO_RESPONDER_AUTH_TOKEN" in combined
+    assert "new-turso-token" not in combined
+    assert "old-turso-token" not in combined
+    assert "new-pushover-token" not in combined
+
+
+def test_empty_scoped_token_is_treated_as_missing(tmp_path):
+    prod = PROD + "TURSO_RESPONDER_AUTH_TOKEN=\n"
+    result, env = _run_result(tmp_path, prod, None)
+    assert result.returncode == 0, result.stderr
+    assert "TURSO_AUTH_TOKEN" not in env
+    assert "TURSO_RESPONDER_AUTH_TOKEN" in result.stderr
+
+
+def test_token_values_never_printed(tmp_path, capsys):
+    builder = _builder()
+    prod = PROD + "TURSO_RESPONDER_AUTH_TOKEN=scoped-secret-value\n"
+    text = builder.build(prod, EXISTING)
+    captured = capsys.readouterr()
+    for secret in (
+        "new-turso-token",
+        "old-turso-token",
+        "scoped-secret-value",
+        "new-pushover-token",
+    ):
+        assert secret not in captured.out
+        assert secret not in captured.err
+    assert "new-turso-token" not in text
+    assert "scoped-secret-value" in text
+    result, _env = _run_result(tmp_path, prod, EXISTING)
+    printed = result.stdout + result.stderr
+    for secret in (
+        "new-turso-token",
+        "old-turso-token",
+        "scoped-secret-value",
+        "new-pushover-token",
+    ):
+        assert secret not in printed
 
 
 def test_managed_keys_are_reset_not_preserved(tmp_path):

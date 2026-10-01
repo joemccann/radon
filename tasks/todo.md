@@ -1,3 +1,9 @@
+# Task: Grok responder dedicated Turso token (2026-10-01)
+
+- [x] T1 depends_on: [] Failing tests: prod TURSO_AUTH_TOKEN never copied; TURSO_RESPONDER_AUTH_TOKEN copied as consumer TURSO_AUTH_TOKEN; missing scoped key omits token + WARNING (names only); values never printed; missing token cycle skips Turso steps.
+- [x] T2 depends_on: [T1] Env builder + setup fail-closed on credential, soft on service; responder degrades; docs with mint steps. Keep responder writes (claim/complete/heartbeat).
+- [ ] T3 depends_on: [T2] Focused pytest green, READY PR vs main, CI green, Pushover. No merge.
+
 # Task: Runner Pushover dotenv allowlist (2026-10-01)
 
 - [x] T1 depends_on: [] Failing tests in scripts/tests/test_runner_pushover_env.py: dotenv pair, allowlist, no eval, values never logged, missing, half-pair, agents never see keys, dotenv-path file, plist/installer.

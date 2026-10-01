@@ -54,7 +54,8 @@ sudo -u radon cat -- "$PROD_ENV" >"$work/prod.env"
 if sudo -u radon test -f "$ENV_FILE"; then
   sudo -u radon cat -- "$ENV_FILE" >"$work/existing.env"
 fi
-# Secrets from the production env only; operator GROK_PAGE_* flags
+# Secrets from the production env only. Turso uses TURSO_RESPONDER_AUTH_TOKEN
+# (never production TURSO_AUTH_TOKEN). Operator GROK_PAGE_* flags
 # (RESPONDER/AUTOSHIP/AUTOPUSH/MAX_ACTIONS_PER_DAY) carried over from the
 # current file so a rerun never silently disables the responder.
 python3.13 "$SCRIPT_DIR/grok_responder_env.py" \
