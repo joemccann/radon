@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import type { OperatorHold } from "@/lib/adminTypes";
+import ErrorToast from "@/components/ErrorToast";
 import { userErrorMessage } from "@/lib/userError";
 import ConfirmDialog from "./ConfirmDialog";
 
@@ -132,7 +133,7 @@ export default function IbOperatorHold({ hold, disabledReason = null, onAfter }:
         )}
       </div>
 
-      {error && <p className="admin-card-note" role="alert" data-testid="ib-operator-hold-error">{error}</p>}
+      {error && <ErrorToast message={error} testId="ib-operator-hold-error" />}
       {result && !error && <p className="admin-card-note" data-testid="ib-operator-hold-result">{result}</p>}
 
       <ConfirmDialog
