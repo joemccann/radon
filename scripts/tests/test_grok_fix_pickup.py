@@ -673,3 +673,77 @@ class TestPushGate:
 
         with pytest.raises(pickup.PickupError, match="older than origin/main"):
             _run(world)
+
+
+# --- credentials from the weekend .env --------------------------------------
+# launchd gives pickup only HOME, PATH and GROK_PAGE_AUTOPUSH, so refusal
+# alerts (Pushover) and watchdog_pages enrichment (Turso) silently did
+# nothing. Pickup now reads exactly those four keys from the operator's
+# ~/radon-weekend/.env, the same file the plist's launch-failure page reads.
+
+ENV_KEYS = ("PUSHOVER_USER", "PUSHOVER_TOKEN", "TURSO_DB_URL", "TURSO_AUTH_TOKEN")
+
+
+@pytest.fixture
+def clean_env(monkeypatch):
+    for key in (*ENV_KEYS, "IB_FLEX_TOKEN"):
+        monkeypatch.delenv(key, raising=False)
+
+
+def _env_file(path: Path, body: str, mode: int = 0o600) -> Path:
+    path.write_text(body)
+    path.chmod(mode)
+    return path
+
+
+def test_loads_only_the_allowlisted_keys(tmp_path, clean_env):
+    f = _env_file(tmp_path / ".env", (
+        "# comment\n"
+        "PUSHOVER_USER=u-example\n"
+        "PUSHOVER_TOKEN='t-example'\n"
+        'TURSO_DB_URL="libsql://example.invalid"\n'
+        "export TURSO_AUTH_TOKEN=a-example\n"
+        "IB_FLEX_TOKEN=must-not-load\n"
+    ))
+    assert pickup.load_operator_env(f) == sorted(ENV_KEYS)
+    assert os.environ["PUSHOVER_USER"] == "u-example"
+    assert os.environ["PUSHOVER_TOKEN"] == "t-example"
+    assert os.environ["TURSO_DB_URL"] == "libsql://example.invalid"
+    assert os.environ["TURSO_AUTH_TOKEN"] == "a-example"
+    assert "IB_FLEX_TOKEN" not in os.environ
+
+
+def test_the_process_environment_wins(tmp_path, clean_env, monkeypatch):
+    monkeypatch.setenv("PUSHOVER_USER", "from-env")
+    f = _env_file(tmp_path / ".env", "PUSHOVER_USER=from-file\nPUSHOVER_TOKEN=t\n")
+    assert pickup.load_operator_env(f) == ["PUSHOVER_TOKEN"]
+    assert os.environ["PUSHOVER_USER"] == "from-env"
+
+
+@pytest.mark.parametrize("mode", [0o644, 0o620, 0o602])
+def test_a_group_or_world_accessible_file_is_ignored(tmp_path, clean_env, mode):
+    f = _env_file(tmp_path / ".env", "PUSHOVER_USER=u\n", mode)
+    assert pickup.load_operator_env(f) == []
+    assert "PUSHOVER_USER" not in os.environ
+
+
+def test_a_symlinked_or_missing_file_is_ignored(tmp_path, clean_env):
+    real = _env_file(tmp_path / "real.env", "PUSHOVER_USER=u\n")
+    link = tmp_path / ".env"
+    link.symlink_to(real)
+    assert pickup.load_operator_env(link) == []
+    assert pickup.load_operator_env(tmp_path / "absent.env") == []
+    assert "PUSHOVER_USER" not in os.environ
+
+
+def test_main_reads_the_env_file_beside_the_pickup_clone(world, clean_env, monkeypatch):
+    _env_file(world["mini"].parent / ".env", "PUSHOVER_USER=u-beside\nPUSHOVER_TOKEN=t\n")
+    seen = {}
+
+    def fake_pickup_once(*_a, **_k):
+        seen["user"] = os.environ.get("PUSHOVER_USER")
+        return []
+
+    monkeypatch.setattr(pickup, "pickup_once", fake_pickup_once)
+    assert pickup.main(["--repo", str(world["mini"]), "--source", str(world["vps"])]) == 0
+    assert seen["user"] == "u-beside"
