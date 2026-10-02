@@ -989,6 +989,15 @@ export function isKnowledgeTool(name: string): boolean {
   return name === "search_knowledge" || name === "find_prior_evals";
 }
 
+/**
+ * Tools whose results are untrusted retrieved text: the loop sends them
+ * through its tool-less extraction pass and holds the facts for the final
+ * answer, so they never re-enter a tool-capable round.
+ */
+export function isIsolatedResultTool(name: string): boolean {
+  return isKnowledgeTool(name) || name === "web_search";
+}
+
 /** The tool schema the model sees: name + description + input_schema only. */
 export function toolSchemas(): LlmTool[] {
   return ASSISTANT_TOOLS.map(({ name, description, input_schema }) => ({ name, description, input_schema }));
