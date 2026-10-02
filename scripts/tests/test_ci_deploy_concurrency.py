@@ -106,6 +106,17 @@ def test_deploy_time_budgets_cover_supervisor_and_recovery() -> None:
     assert job_seconds >= ssh_seconds + 300
 
 
+def test_deploy_budget_comment_matches_parsed_workflow() -> None:
+    deploy = _workflow()["jobs"]["deploy"]
+    ssh_step = next(step for step in deploy["steps"] if step.get("name") == "Deploy via SSH")
+    raw = WORKFLOW.read_text()
+    comment = raw[raw.index("    # Outer budget: deploy.sh gets") : raw.index("    timeout-minutes: 60")]
+    stated = re.search(r"SSH gets (\d+)m\s+#\s+and the job gets (\d+)m", comment)
+    assert stated, "the deploy budget comment no longer states the SSH and job budgets"
+    assert f"{stated.group(1)}m" == ssh_step["with"]["command_timeout"]
+    assert int(stated.group(2)) == int(deploy["timeout-minutes"])
+
+
 def _deploy_script() -> str:
     deploy = _workflow()["jobs"]["deploy"]
     ssh_step = next(step for step in deploy["steps"] if step.get("name") == "Deploy via SSH")

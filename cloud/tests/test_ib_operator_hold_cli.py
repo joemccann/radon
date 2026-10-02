@@ -10,6 +10,7 @@ container is really gone.
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -53,7 +54,7 @@ esac
     env = {
         **os.environ,
         "RADON_IB_HOLD_TEST_MODE": "1",
-        "RADON_APP_DIR": str(APP_ROOT),
+        "RADON_IB_HOLD_CLI": str(APP_ROOT / "scripts" / "utils" / "ib_operator_hold.py"),
         "RADON_IB_HOLD_PYTHON": sys.executable,
         "RADON_IB_GATEWAY_CONTROL": str(control),
         "RADON_DOCKER_GW": str(docker_gw),
@@ -65,9 +66,12 @@ esac
     }
 
     class Box:
-        def run(self, *args: str, **extra: str) -> subprocess.CompletedProcess[str]:
+        def run(self, *args: str, unset: tuple[str, ...] = (), **extra: str) -> subprocess.CompletedProcess[str]:
+            child_env = {**env, **extra}
+            for key in unset:
+                child_env.pop(key, None)
             return subprocess.run(
-                ["bash", str(SCRIPT), *args], env={**env, **extra},
+                ["bash", str(SCRIPT), *args], env=child_env,
                 text=True, capture_output=True, check=False, timeout=60,
             )
 
@@ -168,3 +172,154 @@ def test_setup_installs_the_hold_command_root_owned():
     text = SETUP.read_text(encoding="utf-8")
     assert "install_ib_hold() {" in text
     assert "/usr/local/sbin/radon-ib-hold" in text
+
+
+# -- The root command must never run code the radon account can write --------
+
+
+def test_root_hold_never_executes_from_the_app_checkout():
+    """Root ran the hold CLI out of the radon-owned checkout, and CPython put
+    that directory first on sys.path: radon code execution became root at the
+    operator's next `radon ib`. Root runs the root-owned installed copy,
+    isolated."""
+    text = SCRIPT.read_text(encoding="utf-8")
+    code = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
+    assert "RADON_APP_DIR" not in code
+    assert "/home/radon" not in code
+    assert "/usr/local/lib/radon/ib_operator_hold.py" in code
+    assert '"$HOLD_PYTHON" -I "$HOLD_CLI"' in code
+
+
+def _cli_copy(tmp_path: Path, mode: int = 0o644) -> Path:
+    cli = tmp_path / "cli" / "ib_operator_hold.py"
+    cli.parent.mkdir()
+    cli.write_bytes((APP_ROOT / "scripts" / "utils" / "ib_operator_hold.py").read_bytes())
+    cli.chmod(mode)
+    return cli
+
+
+def test_release_runs_an_installed_cli_copy(box, tmp_path):
+    result = box.run("release", RADON_IB_HOLD_CLI=str(_cli_copy(tmp_path)))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert box.held()
+
+
+@pytest.mark.parametrize("variant", ["symlink", "group-writable", "other-writable", "missing", "directory"])
+def test_an_untrusted_hold_cli_is_refused_before_it_runs(box, tmp_path, variant):
+    cli = _cli_copy(tmp_path)
+    if variant == "symlink":
+        link = tmp_path / "cli" / "link.py"
+        link.symlink_to(cli)
+        cli = link
+    elif variant == "group-writable":
+        cli.chmod(0o624)
+    elif variant == "other-writable":
+        cli.chmod(0o646)
+    elif variant == "missing":
+        cli = tmp_path / "cli" / "absent.py"
+    elif variant == "directory":
+        cli = tmp_path / "cli"
+    result = box.run("status", RADON_IB_HOLD_CLI=str(cli))
+    assert "refusing hold CLI" in result.stderr
+    assert not (tmp_path / "hold.json").exists()
+    release = box.run("resume", RADON_IB_HOLD_CLI=str(cli))
+    assert release.returncode != 0
+    assert "gateway-control start" not in box.calls()
+
+
+def test_setup_stages_the_hold_cli_root_owned_beside_the_command():
+    text = SETUP.read_text(encoding="utf-8")
+    body = text[text.index("install_ib_hold() {"):]
+    body = body[: body.index("\n}\n")]
+    assert '"${RADON_DIR}/scripts/utils/ib_operator_hold.py"' in body
+    assert "/usr/local/lib/radon/ib_operator_hold.py" in body
+    assert body.count("stage_from_checkout") == 2
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True,
+        env={**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"},
+    )
+
+
+@pytest.fixture
+def provisioned(tmp_path: Path) -> dict[str, Path]:
+    repo = tmp_path / "repo"
+    (repo / "cloud" / "scripts").mkdir(parents=True)
+    (repo / "scripts" / "utils").mkdir(parents=True)
+    (repo / "cloud" / "scripts" / "ib-operator-hold.sh").write_bytes(SCRIPT.read_bytes())
+    cli = repo / "scripts" / "utils" / "ib_operator_hold.py"
+    cli.write_bytes((APP_ROOT / "scripts" / "utils" / "ib_operator_hold.py").read_bytes())
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "t@t")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "seed")
+    remote = tmp_path / "remote.git"
+    _git(tmp_path, "init", "-q", "--bare", str(remote))
+    _git(repo, "push", "-q", str(remote), "HEAD:refs/heads/main")
+    return {"repo": repo, "cli": cli, "remote": remote, "root": tmp_path}
+
+
+def _install_ib_hold(p: dict[str, Path]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["bash", "-c", f"set -euo pipefail\nsource {SETUP}\ninstall_ib_hold\n"],
+        env={
+            **os.environ,
+            "RADON_SETUP_SOURCE_ONLY": "1",
+            "RADON_APP_DIR": str(p["repo"]),
+            "RADON_SETUP_STAGE_DIR": str(p["root"] / "stage"),
+            "RADON_HELPER_SKIP_CHOWN": "1",
+            "RADON_IB_HOLD_TARGET": str(p["root"] / "radon-ib-hold"),
+            "RADON_IB_HOLD_CLI_TARGET": str(p["root"] / "lib" / "ib_operator_hold.py"),
+            "RADON_PROVENANCE_REMOTE_URL": str(p["remote"]),
+            "RADON_PROVISION_ROOT": str(p["root"] / "provision"),
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_SYSTEM": "/dev/null",
+        },
+        capture_output=True, text=True, check=False, timeout=120,
+    )
+
+
+def test_install_ib_hold_stages_the_committed_cli(provisioned):
+    result = _install_ib_hold(provisioned)
+    assert result.returncode == 0, result.stdout + result.stderr
+    installed = provisioned["root"] / "lib" / "ib_operator_hold.py"
+    assert installed.read_bytes() == provisioned["cli"].read_bytes()
+    assert installed.stat().st_mode & 0o777 == 0o644
+
+
+def test_install_ib_hold_refuses_a_tampered_checkout_cli(provisioned):
+    provisioned["cli"].write_text("import os\n", encoding="utf-8")
+    result = _install_ib_hold(provisioned)
+    assert result.returncode != 0
+    assert not (provisioned["root"] / "lib" / "ib_operator_hold.py").exists()
+
+
+@pytest.mark.parametrize("probe", ["exit 1", "echo false; exit 1", "echo garbage; exit 0", "exit 124"])
+def test_release_never_confirms_an_unknown_container_state(box, tmp_path, probe):
+    """REL-298 / R-717: failed Docker observation is not a stopped Gateway."""
+    _stub(tmp_path / "docker-gw", f'case "$1" in inspect-running) echo probe >> "$PROBE_LOG"; {probe} ;; esac\nexit 0\n')
+    result = box.run("release", STUB_CONTROL_STOP_RC="74", SSH_CLIENT="", PROBE_LOG=str(tmp_path / "probes"))
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "RELEASED" not in result.stdout
+    assert box.held()
+    assert len((tmp_path / "probes").read_text().splitlines()) == 3, "one unknown probe per stop stage"
+
+
+def test_release_accepts_only_the_named_container_missing(box, tmp_path):
+    _stub(tmp_path / "docker-gw", 'case "$1" in inspect-running) echo "Error: No such object: ib-gateway" >&2; exit 1 ;; esac\nexit 0\n')
+    result = box.run("release", SSH_CLIENT="")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "RELEASED" in result.stdout
+
+
+def test_console_hold_changes_keep_the_operator_identity(box, tmp_path):
+    """REL-301 / R-720: local root consoles have no SSH_CLIENT to expand."""
+    for verb in ("release", "resume"):
+        result = box.run(verb, unset=("SSH_CLIENT",), SUDO_USER="console-operator")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "unbound variable" not in result.stderr
+    events = [json.loads(line) for line in (tmp_path / "hold.jsonl").read_text().splitlines()]
+    assert [event["actor"] for event in events] == ["ssh:console-operator@local"] * 2

@@ -16,7 +16,9 @@ set -euo pipefail
 # Design: docs/ibkr-session-release.md.
 
 readonly HOLD_PYTHON="${RADON_IB_HOLD_PYTHON:-/usr/bin/python3.13}"
-readonly HOLD_CLI="${RADON_APP_DIR:-/home/radon/radon}/scripts/utils/ib_operator_hold.py"
+# The root-owned copy setup-vps.sh install_ib_hold stages from the committed
+# blob. Never the radon-owned checkout: root would run whatever radon wrote.
+readonly HOLD_CLI="${RADON_IB_HOLD_CLI:-/usr/local/lib/radon/ib_operator_hold.py}"
 readonly GATEWAY_CONTROL="${RADON_IB_GATEWAY_CONTROL:-/usr/local/bin/radon-ib-gateway-control}"
 readonly DOCKER_GW="${RADON_DOCKER_GW:-/usr/local/sbin/radon-docker-gw}"
 readonly SYSTEMCTL="${RADON_SYSTEMCTL:-systemctl}"
@@ -41,7 +43,9 @@ require_root() {
 
 actor() {
   local who="${SUDO_USER:-${USER:-root}}"
-  local from="${SSH_CLIENT%% *}"
+  # REL-301 / R-720: console/sudo sessions need no SSH environment.
+  local from="${SSH_CLIENT:-}"
+  from="${from%% *}"
   printf 'ssh:%s@%s\n' "$who" "${from:-local}"
 }
 
@@ -49,21 +53,45 @@ audit_line() {
   logger -t radon-ib-hold -- "$*" 2>/dev/null || true
 }
 
+# A regular, non-symlinked file owned by root (the caller in test mode) that
+# no one else can write; -I keeps its directory and PYTHON* off sys.path.
 hold_cli() {
-  "$HOLD_PYTHON" "$HOLD_CLI" "$@"
+  local owner=0
+  [[ "${RADON_IB_HOLD_TEST_MODE:-0}" == "1" ]] && owner="$EUID"
+  if [[ -L "$HOLD_CLI" || ! -f "$HOLD_CLI" ]] \
+    || [[ "$(stat -c '%u %a' "$HOLD_CLI" 2>/dev/null || stat -f '%u %Lp' "$HOLD_CLI")" \
+      != "${owner} "[0-7][0145][0145] ]]; then
+    echo "radon ib: refusing hold CLI ${HOLD_CLI}: not a root-owned, root-only-writable file" >&2
+    return 1
+  fi
+  "$HOLD_PYTHON" -I "$HOLD_CLI" "$@"
 }
 
-gateway_running() {
-  [[ "$(timeout "$STEP_TIMEOUT_SECS" "$DOCKER_GW" inspect-running 2>/dev/null)" == "true" ]]
+gateway_stopped() {
+  # REL-298 / R-717: an unavailable Docker daemon cannot confirm logout.
+  # Accept an explicit stopped state or Docker's exact missing-container
+  # response; timeouts, permission failures and malformed output stay unknown.
+  local output rc=0
+  output=$(timeout "$STEP_TIMEOUT_SECS" "$DOCKER_GW" inspect-running 2>&1) || rc=$?
+  if (( rc == 0 )); then
+    [[ "$output" == "false" ]] && return 0
+    [[ "$output" == "true" ]] && return 1
+  elif [[ "$rc" == 1 && "$output" == "Error: No such object: ib-gateway" ]]; then
+    return 0
+  fi
+  return 2 # unknown, distinct from confirmed running
 }
 
 wait_until_stopped() {
-  local poll
+  local poll rc
   for (( poll = 0; poll < RELEASE_POLLS; poll++ )); do
-    gateway_running || return 0
+    if gateway_stopped; then return 0; else rc=$?; fi
+    # Unknown observations cannot converge by polling a broken observer.
+    # Advance to the next shutdown stage without multiplying 30s timeouts.
+    (( rc == 1 )) || return "$rc"
     sleep "$RELEASE_POLL_SECS"
   done
-  ! gateway_running
+  gateway_stopped
 }
 
 # Graceful first (releases the 2FA lease), then a root compose-down that
@@ -101,7 +129,7 @@ release() {
   fi
 
   if ! stop_gateway; then
-    echo "radon ib: FAILED - Gateway container STILL RUNNING; it may still hold the IBKR session" >&2
+    echo "radon ib: FAILED - Gateway container STILL RUNNING or state unknown; it may still hold the IBKR session" >&2
     audit_line "release failed: container still running"
     exit 1
   fi

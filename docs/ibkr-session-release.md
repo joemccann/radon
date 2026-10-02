@@ -107,7 +107,7 @@ Reminder Pushover at 1h, 4h, then every 12h, plus a status chip. Writes are atom
 3. `radon-ib-gateway.service`: `SuccessExitStatus=73` so boot under hold is `active (exited)`, not `failed` (avoids a `units.py` P1 and the DUR-02 start-limit brake).
 4. `scripts/ib_watchdog.py:_run_cycle_steps`: first step; if held, outcome `operator_hold`, no probe-driven restart, no lease acquire, `service_health[ib-watchdog]=ok` with detail `operator hold since ...`.
 5. `ib_gateway_remote/serve.py`: `start|restart` -> HTTP 423 `{"code":"OPERATOR_HOLD"}`; new verbs `hold` / `unhold` (see section 4).
-6. FastAPI `/ib/restart` and `/admin/services/radon-ib-gateway*/start|restart` -> 423 when mirrored hold is set (fast refusal; broker still authoritative). Relay treats 423 as terminal for the escalation window.
+6. FastAPI `/ib/restart` and `/admin/services/radon-ib-gateway*/start|restart` -> 423 when mirrored hold is set (fast refusal; broker still authoritative). Relay treats 423 as terminal for the escalation window. Its `/health/lite` poll accepts only an explicit boolean `operator_hold`: malformed successful replies, failed requests and invalid JSON retain the last confirmed value; only an explicit `false` clears a known hold.
 7. Watchdog IB-outage grouping (`scripts/watchdog/`): while held, IB-shaped failures collapse to one P0 "IBKR operator hold active" line, no P1s.
 8. Local paths (S8, S10, H2, H3): refuse unless `ssh radon-broker radon ib status --json` returns `held:false`; unreachable -> refuse (override `RADON_ALLOW_LOCAL_IB_LOGIN=1`). Preferred: decommission H2 (`local.ibc-gateway` + `config.secure.ini` on mini) since prod is cloud.
 
