@@ -33,7 +33,7 @@ import {
   createAssistantTurnBudget,
   executeTool,
   isDestructiveTool,
-  isKnowledgeTool,
+  isIsolatedResultTool,
   summarizeProposal,
   toolSchemas,
   type AssistantPrincipal,
@@ -562,7 +562,7 @@ export async function runAssistantLoop(
         lastPnlData = result.data;
         forceText = true;
       }
-      if (result.ok && isKnowledgeTool(call.name)) {
+      if (result.ok && isIsolatedResultTool(call.name)) {
         try {
           const isolated = await isolateKnowledgeResult(content, signal);
           content = isolated.content;

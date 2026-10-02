@@ -25,6 +25,8 @@ FA_ACCOUNT = "F" + "1000001"
 FLEX_EXEC = "98765" + "43210987"
 IB_EXEC = "0000abcd" + ".1234ef56" + ".01.01"
 GH_TOKEN = "gh" + "p_" + "Z" * 36
+# An opaque provider key no specific shape knows (Pushover-like).
+OPAQUE = "q8Zr" + "3mWx" + "7Tn2" + "Lp5v" + "9Hd4" + "Ke6s" + "Y1"
 
 VALID_BODY = (
     "## What broke\n\nThe relay unit failed with Result=exit-code at 12:00Z.\n\n"
@@ -83,10 +85,61 @@ class TestFindPrivateIdentifiers:
     def test_ordinary_text_is_clean(self, text):
         assert gate.find_private_identifiers(text) == []
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            f"PUSHOVER_TOKEN={OPAQUE}",
+            f"export UW_TOKEN='{OPAQUE}'",
+            f'"api_key": "{OPAQUE}"',
+            f"client_secret: {OPAQUE}",
+            f'+    password = "{OPAQUE}"',
+        ],
+        ids=["env", "export", "json", "yaml", "code"],
+    )
+    def test_literal_secret_assignment_is_found(self, text):
+        assert "credential assignment" in gate.find_private_identifiers(text)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "PUSHOVER_TOKEN=${PUSHOVER_TOKEN}",
+            'api_key = os.environ["UW_TOKEN"]',
+            "access_token = config.ACCESS_TOKEN_V2",
+            'token = "test-token-abc123def456"',
+            "TOKEN_TTL_SECONDS=3600",
+            "password: [redacted-secret]",
+            'secret = "<your-secret-here-123>"',
+            "token_count = len(tokens_by_window_2026)",
+        ],
+    )
+    def test_benign_secret_named_assignment_is_clean(self, text):
+        assert gate.find_private_identifiers(text) == []
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "PUSHOVER_USER = 'pass phrase, with: punctuation!'",
+            "notify(user='pass phrase, with: punctuation!')",
+        ],
+    )
+    def test_a_secret_value_from_the_gate_env_is_found_in_any_shape(self, monkeypatch, text):
+        monkeypatch.setenv("PUSHOVER_USER", "pass phrase, with: punctuation!")
+        assert "credential env value" in gate.find_private_identifiers(text)
+
+    def test_short_or_non_secret_env_values_are_not_findings(self, monkeypatch):
+        monkeypatch.setenv("UW_TOKEN", "short")
+        monkeypatch.setenv("RADON_REGION", "us-west-2-region-name")
+        monkeypatch.setenv("PWD", "/home/radon/radon-clone")
+        monkeypatch.setenv("GIT_AUTHOR_NAME", "radon-runner-bot")
+        text = "short us-west-2-region-name /home/radon/radon-clone radon-runner-bot"
+        assert gate.find_private_identifiers(text) == []
+
     def test_findings_never_carry_the_value(self):
-        found = gate.find_private_identifiers(f"{ACCOUNT} {FLEX_EXEC} {GH_TOKEN}")
+        found = gate.find_private_identifiers(
+            f"{ACCOUNT} {FLEX_EXEC} {GH_TOKEN} PUSHOVER_TOKEN={OPAQUE}"
+        )
         blob = json.dumps(found)
-        for value in (ACCOUNT, FLEX_EXEC, GH_TOKEN):
+        for value in (ACCOUNT, FLEX_EXEC, GH_TOKEN, OPAQUE):
             assert value not in blob
 
 

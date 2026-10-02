@@ -1624,6 +1624,8 @@ install_app_runtime() {
 install_ib_hold() {
   local source="${CLOUD_DIR}/scripts/ib-operator-hold.sh"
   local target="${RADON_IB_HOLD_TARGET:-/usr/local/sbin/radon-ib-hold}"
+  local cli_source="${RADON_DIR}/scripts/utils/ib_operator_hold.py"
+  local cli_target="${RADON_IB_HOLD_CLI_TARGET:-/usr/local/lib/radon/ib_operator_hold.py}"
   local -a owner_args=(-o root -g root)
   [[ "${RADON_HELPER_SKIP_CHOWN:-0}" == "1" ]] && owner_args=()
   local staged
@@ -1641,6 +1643,13 @@ install_ib_hold() {
     return 1
   fi
   mv -f "$staged" "$target"
+  # The command runs this stdlib CLI as root; stage the committed blob
+  # root-owned, never the radon-owned checkout copy.
+  if [[ ! -f "$cli_source" ]] \
+    || ! stage_from_checkout "$cli_source" "$cli_target" 0644 ${owner_args[@]+"${owner_args[@]}"}; then
+    log_error "IBKR operator hold CLI failed staging"
+    return 1
+  fi
 }
 
 # The root-owned Gateway docker operator that replaces radon's group `docker`
