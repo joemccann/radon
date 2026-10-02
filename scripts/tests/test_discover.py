@@ -254,6 +254,129 @@ def test_required_uw_failure_cannot_publish_or_alert(capsys):
     alert.assert_not_called()
 
 
+def _flow_alert(ticker: str) -> dict:
+    return {
+        "ticker": ticker,
+        "total_premium": 600_000,
+        "type": "CALL",
+        "volume_oi_ratio": 2.5,
+        "has_sweep": True,
+        "sector": "Technology",
+        "marketcap": 1_000_000_000,
+        "underlying_price": 100,
+        "issue_type": "Common Stock",
+    }
+
+
+def _dp_ok() -> dict:
+    return {
+        "aggregate": {
+            "buy_ratio": 0.8,
+            "direction": "ACCUMULATION",
+            "strength": 70.0,
+            "prints": 12,
+        },
+        "daily": [],
+        "sustained_days": 2,
+        "total_prints": 12,
+    }
+
+
+def _discover_market_wide(darkpool):
+    """Market-wide scan with the hourly min-alerts gate. `darkpool` is ticker -> result or exception."""
+    from discover import discover
+
+    alerts = []
+    for ticker in darkpool:
+        alerts.extend(_flow_alert(ticker) for _ in range(3))
+
+    def _fetch(ticker, *args, **kwargs):
+        outcome = darkpool[ticker]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    mock_client = MagicMock()
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+    with patch("discover.UWClient", return_value=mock_client), \
+         patch("discover.fetch_options_flow", return_value=alerts), \
+         patch("discover.get_existing_tickers", return_value=set()), \
+         patch("discover.fetch_darkpool_multi", side_effect=_fetch):
+        return discover(min_alerts=3, dp_pages=2)
+
+
+def test_partial_darkpool_skip_keeps_scored_candidates_without_a_hard_error():
+    """One darkpool UWAPIError must not mark a scored scan as a hard error.
+
+    2026-10-02 14:02Z, page b224647c0c4bb160c0be3aae3f182dff: the hourly
+    discover POST ran 33s, wrote the darkpool caches, then returned HTTP 400
+    because this error key was set. The flow-refresh oneshot exited 1.
+    """
+    result = _discover_market_wide({
+        "AAPL": _dp_ok(),
+        "MSFT": UWAPIError("budget"),
+    })
+
+    assert [row["ticker"] for row in result["candidates"]] == ["AAPL"]
+    assert result["candidates_found"] == 1
+    assert result["degraded"] is True
+    assert "error" not in result
+    assert result["provider_failures"] == [
+        {
+            "provider": "unusual_whales",
+            "operation": "darkpool",
+            "error_type": "UWAPIError",
+            "ticker": "MSFT",
+        }
+    ]
+    assert "budget" not in json.dumps(result)
+
+
+def test_partial_darkpool_skip_does_not_mirror_or_alert(capsys):
+    """Skipped tickers stay out of Turso and out of alerts. The JSON is still a scan."""
+    from discover import main
+
+    alerts = [_flow_alert("AAPL") for _ in range(3)] + [_flow_alert("MSFT") for _ in range(3)]
+
+    def _fetch(ticker, *args, **kwargs):
+        if ticker == "MSFT":
+            raise UWAPIError("budget")
+        return _dp_ok()
+
+    mock_client = MagicMock()
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+    with patch("discover.UWClient", return_value=mock_client), \
+         patch("discover.fetch_options_flow", return_value=alerts), \
+         patch("discover.get_existing_tickers", return_value=set()), \
+         patch("discover.fetch_darkpool_multi", side_effect=_fetch), \
+         patch("discover.mirror_scan_snapshot") as mirror, \
+         patch("discover.run_alerts_for_results") as alert, \
+         patch.object(sys, "argv", ["discover.py", "--min-alerts", "3", "--dp-pages", "2"]):
+        main()
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["candidates"][0]["ticker"] == "AAPL"
+    assert "error" not in result
+    mirror.assert_not_called()
+    alert.assert_not_called()
+
+
+def test_every_darkpool_miss_still_sets_the_hard_error():
+    """No scored candidate is still a required-provider outage."""
+    result = _discover_market_wide({
+        "AAPL": UWAPIError("budget"),
+        "MSFT": UWAPIError("budget"),
+    })
+
+    assert result["candidates"] == []
+    assert result["candidates_found"] == 0
+    assert result["degraded"] is True
+    assert result["error"] == "required provider data unavailable"
+    assert "budget" not in json.dumps(result)
+
+
 def test_fetch_darkpool_multi_caps_scoring_pages():
     from discover import DISCOVER_DARKPOOL_MAX_PAGES, fetch_darkpool_multi
 
