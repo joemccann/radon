@@ -9,7 +9,8 @@ Two checks, both fail closed:
    PR title/body must carry no private identifier: IB account ids, long
    numeric Flex exec ids, dotted-hex IB exec ids, or any specific credential
    shape from the canonical scrubber (``credential_redaction``), or an
-   opaque literal assigned to a credential-named key. A hit
+   opaque literal assigned to a credential-named key, or the value of a
+   credential in the pushing process's own environment. A hit
    refuses the push; the work stays local. Nothing is redacted in place,
    because silently rewriting code or history hides what leaked.
 
@@ -50,6 +51,11 @@ _CI_URL = re.compile(
 )
 _SHA = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
+# Values of the pushing process's own credentials are refused in any shape,
+# quoted, split across punctuation or not. Short values would match prose.
+_SECRET_ENV_NAME = re.compile(r"key|token|secret|passw|_pass|_pwd|auth(?!or)|user", re.IGNORECASE)
+_MIN_SECRET_ENV_VALUE = 12
+
 Runner = Callable[..., object]
 
 
@@ -84,7 +90,17 @@ def find_private_identifiers(text: str) -> list[str]:
             found.append(kind)
     if find_secret_assignments(text or ""):
         found.append("credential assignment")
+    if any(value in (text or "") for value in _secret_env_values()):
+        found.append("credential env value")
     return found
+
+
+def _secret_env_values() -> list[str]:
+    return [
+        value.strip()
+        for name, value in os.environ.items()
+        if _SECRET_ENV_NAME.search(name) and len(value.strip()) >= _MIN_SECRET_ENV_VALUE
+    ]
 
 
 def _safe_path(path: str) -> str:

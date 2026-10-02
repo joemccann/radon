@@ -115,6 +115,25 @@ class TestFindPrivateIdentifiers:
     def test_benign_secret_named_assignment_is_clean(self, text):
         assert gate.find_private_identifiers(text) == []
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "PUSHOVER_USER = 'pass phrase, with: punctuation!'",
+            "notify(user='pass phrase, with: punctuation!')",
+        ],
+    )
+    def test_a_secret_value_from_the_gate_env_is_found_in_any_shape(self, monkeypatch, text):
+        monkeypatch.setenv("PUSHOVER_USER", "pass phrase, with: punctuation!")
+        assert "credential env value" in gate.find_private_identifiers(text)
+
+    def test_short_or_non_secret_env_values_are_not_findings(self, monkeypatch):
+        monkeypatch.setenv("UW_TOKEN", "short")
+        monkeypatch.setenv("RADON_REGION", "us-west-2-region-name")
+        monkeypatch.setenv("PWD", "/home/radon/radon-clone")
+        monkeypatch.setenv("GIT_AUTHOR_NAME", "radon-runner-bot")
+        text = "short us-west-2-region-name /home/radon/radon-clone radon-runner-bot"
+        assert gate.find_private_identifiers(text) == []
+
     def test_findings_never_carry_the_value(self):
         found = gate.find_private_identifiers(
             f"{ACCOUNT} {FLEX_EXEC} {GH_TOKEN} PUSHOVER_TOKEN={OPAQUE}"
