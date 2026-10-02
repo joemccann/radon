@@ -8782,3 +8782,26 @@ Six findings have red/green evidence; three full serial rounds pass Python 13448
 - [ ] T5 depends_on: [T4] Post one durable issue comment and record final review.
 
 Review: pending; fake-only verification, full suites and Vitest assigned to CI.
+
+## Nightly testing 2026-10-02
+
+- [x] T1 Build toolchain, recover trusted checkpoint, select authorized branch. depends_on: []
+- [x] T2 Audit delta and importers, reconcile ledgers, run standing gates and delta repetitions. depends_on: [T1]
+- [x] T3 Repair every verified finding with red/green evidence. depends_on: [T2]
+- [x] T4 Run three serial closing gate rounds and hygiene review. depends_on: [T3]
+- [ ] T5 Publish substantive draft, verify exact-head CI and post one rolling comment. depends_on: [T4]
+
+### Review 2026-10-02
+
+Three verified findings have red/green evidence. All nine closing gates pass, and every cloud failure-list comparison matches the clean detached base. Product change is limited to the relay poller; prior ledger entries, reliability ledgers and codemap files are unchanged. Publication, exact-head CI and the single rolling-issue receipt are the remaining external steps. The held-out admin browser preflight and missing Pushover environment remain operator-only delivery items.
+## Nightly reliability 2026-10-02
+
+- [x] T1 depends_on: [] Install toolchain, recover trusted checkpoint and create authorized branch.
+- [x] T2 depends_on: [T1] Audit delta and codemap importers; run standing sweeps and re-triage inherited candidates.
+- [x] T3 depends_on: [T2] Repair verified findings serially with repeated red and focused green evidence.
+- [x] T4 depends_on: [T3] Run permanent drills, validate, publish substantive draft and await exact-head CI.
+- [x] T5 depends_on: [T4] Post one durable rolling comment and complete review.
+
+Review: delta and direct importers audited; four new and five inherited repairs have red/green evidence. R-303 is operator-only after GitHub rejected workflow publication. Permanent drills 95 passed. No live systems, credentials, main push, merge, codemap changes or test-ledger edits. Publication/CI and the one durable issue comment remain tracked by T4/T5; final receipts belong on issue #81.
+
+Delivery review: draft https://github.com/joemccann/radon/pull/866; source head `22e88dfc454d7f2246493948af46d43fe310887b` completed all 24 required contexts, 32 passing checks total and seven non-applicable skips. Exactly one durable comment posted: https://github.com/joemccann/radon/issues/81#issuecomment-5947930686. Nine repairs resolved; 20 historical candidates retain acceptance. R-303 workflow publication and Pushover delivery remain operator-only; notification credentials were absent on both environment-only checks. No merge or live operation occurred. This receipt changes only the checklist; its own exact-head CI is watched before ending the session.

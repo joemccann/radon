@@ -10,6 +10,7 @@ container is really gone.
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -65,9 +66,12 @@ esac
     }
 
     class Box:
-        def run(self, *args: str, **extra: str) -> subprocess.CompletedProcess[str]:
+        def run(self, *args: str, unset: tuple[str, ...] = (), **extra: str) -> subprocess.CompletedProcess[str]:
+            child_env = {**env, **extra}
+            for key in unset:
+                child_env.pop(key, None)
             return subprocess.run(
-                ["bash", str(SCRIPT), *args], env={**env, **extra},
+                ["bash", str(SCRIPT), *args], env=child_env,
                 text=True, capture_output=True, check=False, timeout=60,
             )
 
@@ -291,3 +295,31 @@ def test_install_ib_hold_refuses_a_tampered_checkout_cli(provisioned):
     result = _install_ib_hold(provisioned)
     assert result.returncode != 0
     assert not (provisioned["root"] / "lib" / "ib_operator_hold.py").exists()
+
+
+@pytest.mark.parametrize("probe", ["exit 1", "echo false; exit 1", "echo garbage; exit 0", "exit 124"])
+def test_release_never_confirms_an_unknown_container_state(box, tmp_path, probe):
+    """REL-298 / R-717: failed Docker observation is not a stopped Gateway."""
+    _stub(tmp_path / "docker-gw", f'case "$1" in inspect-running) echo probe >> "$PROBE_LOG"; {probe} ;; esac\nexit 0\n')
+    result = box.run("release", STUB_CONTROL_STOP_RC="74", SSH_CLIENT="", PROBE_LOG=str(tmp_path / "probes"))
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "RELEASED" not in result.stdout
+    assert box.held()
+    assert len((tmp_path / "probes").read_text().splitlines()) == 3, "one unknown probe per stop stage"
+
+
+def test_release_accepts_only_the_named_container_missing(box, tmp_path):
+    _stub(tmp_path / "docker-gw", 'case "$1" in inspect-running) echo "Error: No such object: ib-gateway" >&2; exit 1 ;; esac\nexit 0\n')
+    result = box.run("release", SSH_CLIENT="")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "RELEASED" in result.stdout
+
+
+def test_console_hold_changes_keep_the_operator_identity(box, tmp_path):
+    """REL-301 / R-720: local root consoles have no SSH_CLIENT to expand."""
+    for verb in ("release", "resume"):
+        result = box.run(verb, unset=("SSH_CLIENT",), SUDO_USER="console-operator")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "unbound variable" not in result.stderr
+    events = [json.loads(line) for line in (tmp_path / "hold.jsonl").read_text().splitlines()]
+    assert [event["actor"] for event in events] == ["ssh:console-operator@local"] * 2
