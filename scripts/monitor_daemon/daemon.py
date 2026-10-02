@@ -152,7 +152,7 @@ class MonitorDaemon:
         
         return open_mins <= current_mins < close_mins
     
-    def is_market_hours(self) -> bool:
+    def is_market_hours(self, *, calendar: bool = True) -> bool:
         """Check if current time is within US market hours.
 
         Uses zoneinfo for proper DST handling. The previous implementation
@@ -172,11 +172,26 @@ class MonitorDaemon:
             logger.error("Eastern timezone unavailable; market-hours handlers paused")
             return False
 
-        return self._is_market_hours_time(
+        clock_open = self._is_market_hours_time(
             et_now.hour,
             et_now.minute,
             et_now.weekday()
         )
+        if not clock_open or not calendar:
+            return clock_open
+        # REL-021b / R-030: RTH actions observe holidays and early closes.
+        # Calendar I/O/format failure retains the established clock fallback;
+        # missing Eastern tzdata above remains a refusal (R-046).
+        try:
+            from utils.market_calendar import market_state
+            state = market_state(et_now)
+            is_open = state['is_open']
+            if type(is_open) is not bool:
+                raise ValueError('calendar is_open must be boolean')
+            return is_open
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            logger.warning('RTH calendar check failed (%s); using valid RTH clock', exc)
+            return clock_open
 
     def _handler_can_run_now(self, handler: BaseHandler, market_hours: Optional[bool] = None) -> bool:
         """Return True when the handler is eligible to run in the current window."""
@@ -202,8 +217,7 @@ class MonitorDaemon:
                 # open is a data regression, not a weekend: run on the clock
                 # and say so, or fill monitoring goes dark for the whole
                 # trading day behind an ordinary out-of-hours log line.
-                if market_hours is None:
-                    market_hours = self.is_market_hours()
+                market_hours = self.is_market_hours(calendar=False)
                 if market_hours:
                     logger.warning(
                         "equity_ext calendar and the RTH clock gate disagree "
@@ -222,8 +236,7 @@ class MonitorDaemon:
                     "equity_ext session check failed (%s); falling back to RTH gate",
                     exc,
                 )
-                if market_hours is None:
-                    market_hours = self.is_market_hours()
+                market_hours = self.is_market_hours(calendar=False)
                 return market_hours or self._market_was_open_within_grace(handler)
 
         if market_hours is None:
