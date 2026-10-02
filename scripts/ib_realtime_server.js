@@ -1763,6 +1763,7 @@ function startDepthSubscription(key, contract, { kind, isFutures, requestingClie
     state.depthTickerId = depthTickerId;
     state.ladders.bid.length = 0;
     state.ladders.ask.length = 0;
+    state.desynchronized = false;
     depthRequestIdToSymbol.set(depthTickerId, key);
     verbose(`depth subscribe ${key} kind=${kind} rows=${numRows} ticket=${depthTickerId}`);
   } catch (error) {
@@ -1772,13 +1773,14 @@ function startDepthSubscription(key, contract, { kind, isFutures, requestingClie
 
 function applyDepthDelta(key, position, marketMaker, operation, side, price, size) {
   const state = symbolDepthStates.get(key);
-  if (!state) return;
+  if (!state) return false;
   const ladder = side === 1 ? state.ladders.bid : state.ladders.ask;
   const maxRows = state.isFutures ? DEPTH_NUM_ROWS_FUTURES : DEPTH_NUM_ROWS_EQUITY;
   // Pure position-SHIFT reducer (scripts/lib/depthLadder.js, T-041): OOB
   // ops mean the ladder desynced from IB — reject rather than corrupt
   // every later position-addressed update, and never exceed the row budget.
-  const result = applyDepthOp(
+  const result = state.desynchronized || (side !== 0 && side !== 1)
+    ? { applied: false, reason: "desynchronized" } : applyDepthOp(
     ladder,
     { operation, position, price, size, marketMaker: marketMaker || null },
     maxRows,
@@ -1788,12 +1790,41 @@ function applyDepthDelta(key, position, marketMaker, operation, side, price, siz
     if (state.desyncCount === 1 || state.desyncCount % 50 === 0) {
       console.warn(
         `[depth] rejected ${result.reason} for ${key} (pos=${position}, op=${operation}, ` +
-        `desyncs=${state.desyncCount}) — ladder kept intact`,
+        `desyncs=${state.desyncCount}) — book invalidated`,
       );
     }
-    return;
+    // REL-021b / R-040: one missed positional delta invalidates the book.
+    // Only a fresh ticket can establish its positions again. Keep recovery
+    // to one attempt per subject per 30s, even across successive bad books;
+    // rejected frames must never clear the relay's stale-feed alarm.
+    if (!state.desynchronized) {
+      for (const client of depthSubscribers.get(key) || []) {
+        clientDepthBuffers.get(client)?.delete(key);
+      }
+      emitDepthUnavailable(key, "desynchronized");
+    }
+    state.desynchronized = true;
+    state.ladders.bid.length = 0;
+    state.ladders.ask.length = 0;
+    const now = performance.now();
+    if (now < (state.nextDepthRecoveryAt ?? -Infinity)) return false;
+    state.nextDepthRecoveryAt = now + 30_000;
+    if (!ibConnected || !depthSubscribers.get(key)?.size) return false;
+    if (state.depthTickerId != null) {
+      try {
+        ib.cancelMktDepth(state.depthTickerId, !state.isFutures);
+      } catch (error) {
+        console.warn(`[depth] cannot cancel desynchronized ${key}:`, error);
+        return false; // Unknown cancellation cannot authorize another ticket.
+      }
+      depthRequestIdToSymbol.delete(state.depthTickerId);
+      state.depthTickerId = null;
+    }
+    startDepthSubscription(key, state.contract, { kind: state.kind, isFutures: state.isFutures });
+    return false;
   }
   hydrateAndBroadcastDepth(key);
+  return true;
 }
 
 function serializeLadder(ladder, isFutures, kind, side) {
@@ -2856,8 +2887,7 @@ function wireIBEvents() {
     ib.on(EventName.updateMktDepth, (id, position, operation, side, price, size) => {
       const key = depthRequestIdToSymbol.get(id);
       if (!key) return;
-      markTick();
-      applyDepthDelta(key, position, null, operation, side, price, size);
+      if (applyDepthDelta(key, position, null, operation, side, price, size)) markTick();
     });
 
     // Equity / SMART L2 — marketMaker = exchange/MPID code. @stoqey/ib appends
@@ -2866,8 +2896,7 @@ function wireIBEvents() {
     ib.on(EventName.updateMktDepthL2, (id, position, marketMaker, operation, side, price, size, _isSmartDepth) => {
       const key = depthRequestIdToSymbol.get(id);
       if (!key) return;
-      markTick();
-      applyDepthDelta(key, position, marketMaker, operation, side, price, size);
+      if (applyDepthDelta(key, position, marketMaker, operation, side, price, size)) markTick();
     });
 
     // Time & Sales tape — reqTickByTickData(AllLast). @stoqey/ib arity:

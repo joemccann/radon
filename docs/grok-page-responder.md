@@ -189,6 +189,14 @@ and retain a closed or merged PR's terminal disposition. If the source and
 origin heads differ, pickup refuses the branch instead of overwriting it.
 These checks retain the `.github/` refusal on repeated pickup runs.
 
+Pickup reads `PUSHOVER_USER`, `PUSHOVER_TOKEN`, `TURSO_DB_URL` and
+`TURSO_AUTH_TOKEN`, and nothing else, from `~/radon-weekend/.env` (the file
+beside the pickup clone, also used by the plist's launch-failure page;
+override with `--env-file`). The process environment wins. The file must be
+a regular file owned by the operator with no group or other access, or it
+is ignored. Without it, refusal alerts and the `watchdog_pages` lookup are
+skipped silently.
+
 Fetching from a hostile repository is a supported git operation, and nothing
 in pickup executes code out of the fetched tree. Regressions:
 `scripts/tests/test_grok_fix_pickup.py`.
