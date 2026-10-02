@@ -8786,9 +8786,9 @@ Review: pending; fake-only verification, full suites and Vitest assigned to CI.
 ## Nightly reliability 2026-10-02
 
 - [x] T1 depends_on: [] Install toolchain, recover trusted checkpoint and create authorized branch.
-- [ ] T2 depends_on: [T1] Audit delta and codemap importers; run standing sweeps and re-triage inherited candidates.
-- [ ] T3 depends_on: [T2] Repair verified findings serially with repeated red and focused green evidence.
+- [x] T2 depends_on: [T1] Audit delta and codemap importers; run standing sweeps and re-triage inherited candidates.
+- [x] T3 depends_on: [T2] Repair verified findings serially with repeated red and focused green evidence.
 - [ ] T4 depends_on: [T3] Run permanent drills, validate, publish substantive draft and await exact-head CI.
 - [ ] T5 depends_on: [T4] Post one durable rolling comment and complete review.
 
-Review: pending; mock-only execution. Full suites and Vitest assigned to CI.
+Review: delta and direct importers audited; four new and five inherited repairs have red/green evidence. R-303 is operator-only after GitHub rejected workflow publication. Permanent drills 95 passed. No live systems, credentials, main push, merge, codemap changes or test-ledger edits. Publication/CI and the one durable issue comment remain tracked by T4/T5; final receipts belong on issue #81.
