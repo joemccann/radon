@@ -1407,3 +1407,22 @@ class TestCredentialSetupOwners:
         assert "no Gemini API key or OAuth-token path at all, under any flag" in owner
         assert "Weekend bash wrappers" not in owner
         assert "[nightly runner](runner.md)" in owner
+
+
+class TestRecurringOwnerCoverage:
+    """DOC-143/145/146/148: actual paths must trigger their existing owner."""
+
+    @pytest.mark.parametrize("source,owner", [
+        ("config/com.radon.external-probe-dispatch.plist", "docs/operations.md"),
+        ("scripts/credential_redaction.py", "docs/security-audit-playbook.md"),
+        ("scripts/research/worker.py", "docs/dropbox-research.md"),
+        ("cloud/services/radon-knowledge-eval.service", "docs/knowledge-embeddings.md"),
+    ])
+    def test_recurring_contract_cannot_change_without_owner(self, source, owner):
+        assert (_ROOT / source).is_file()
+        rules = _load_owners()["rules"]
+        matching = [rule for rule in rules if any(_matches(source, glob) for glob in rule["globs"])]
+        assert matching, f"No documentation owner for {source}"
+        assert any(owner in rule["owners"] for rule in matching)
+        assert _violations([source], matching), "Mapped source alone must fail ownership"
+        assert _violations([source, owner], matching) == []

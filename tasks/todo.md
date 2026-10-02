@@ -8782,3 +8782,12 @@ Six findings have red/green evidence; three full serial rounds pass Python 13448
 - [ ] T5 depends_on: [T4] Post one durable issue comment and record final review.
 
 Review: pending; fake-only verification, full suites and Vitest assigned to CI.
+
+## Nightly documentation 2026-10-02
+
+- [x] T1 depends_on: [] Recover trusted checkpoint, inspect open PRs, create authorized branch.
+- [x] T2 depends_on: [T1] Audit every delta commit and reconcile inherited findings against source and open PRs.
+- [x] T3 depends_on: [T2] Repair verified documentation defects with minimal owner changes and red/green contracts.
+- [ ] T4 depends_on: [T3] Verify, publish one draft PR, watch exact-head CI, post one rolling issue comment.
+
+Review: 22 commits / 146 paths audited through cb47c52a. Four inherited ownership gaps and four source-backed documentation defects corrected; DOC-149 disproved by four resolving CommonMark links. New contracts failed before owner corrections. Runtime behavior, CI gates and generated codemap remain unchanged. Publication, exact-head CI and the one rolling-issue comment remain pending.
