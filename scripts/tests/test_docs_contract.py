@@ -1395,16 +1395,15 @@ class TestCredentialSetupOwners:
             assert f"`{name}`" in procedure
         assert "not in repository secrets" in procedure
 
-    def test_gemini_setup_uses_the_cli_owner_without_prepaid_exception(self):
+    def test_antigravity_setup_uses_the_cli_owner_without_prepaid_exception(self):
         research = (_ROOT / "docs/dropbox-research.md").read_text()
-        row = next(line for line in research.splitlines() if line.startswith("| gemini |"))
+        row = next(line for line in research.splitlines() if line.startswith("| antigravity |"))
         assert "oauth-subscription-auth.md#radon-http-model-ladder-server" in row
         assert "Antigravity CLI" in row
         assert "GEMINI_OAUTH_TOKEN" not in row and "GEMINI_API_KEY" not in row
         owner = _section((_ROOT / "docs/oauth-subscription-auth.md").read_text(), "Radon HTTP model ladder (server)")
-        general = next(line for line in owner.splitlines() if line.startswith("- **Anthropic / Grok / Codex"))
-        assert "Gemini" not in general and "GEMINI_API_KEY" not in general
-        assert "no Gemini API key or OAuth-token path at all, under any flag" in owner
+        assert "Gemini" not in owner and "GEMINI_API_KEY" not in owner
+        assert "no Google API key or OAuth-token path at all, under any flag" in owner
         assert "Weekend bash wrappers" not in owner
         assert "[nightly runner](runner.md)" in owner
 

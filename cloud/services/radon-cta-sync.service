@@ -5,7 +5,7 @@ Wants=radon-api.service
 
 # CTA card OCR vision cascade. Credit / billing / quota / hard provider
 # fail falls through; ops_only only if the whole cascade misses.
-# Exact order: anthropic -> grok -> cursor -> codex -> gemini -> nvidia -> cerebras
+# Exact order: anthropic -> grok -> cursor -> codex -> antigravity -> nvidia -> cerebras
 # Bands: subscription (first five) then NVIDIA free then Cerebras last.
 # Cursor has no vision HTTP path in Radon and is skipped as unavailable.
 

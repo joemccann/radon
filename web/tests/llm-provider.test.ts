@@ -71,9 +71,6 @@ const ENV_KEYS = [
   "GROQ_API_KEY",
   "GROQ_BASE_URL",
   "GROQ_MODEL",
-  "GEMINI_API_KEY",
-  "GEMINI_BASE_URL",
-  "GEMINI_MODEL",
 ];
 
 describe("llm provider", () => {
@@ -277,27 +274,39 @@ describe("llm provider", () => {
     expect(calls[0].url).toBe("http://localhost:11434/v1/chat/completions");
   });
 
-  it("never serves Gemini here: Google is Antigravity-only on the ladder", async () => {
-    process.env.LLM_PROVIDER = "gemini";
-    process.env.GEMINI_API_KEY = "g-test";
+  it("never forwards a gemini-* model: Google is Antigravity-only on the server ladder", async () => {
+    process.env.LLM_PROVIDER = "openai";
+    process.env.OPENAI_API_KEY = "sk-test";
     process.env.RADON_LADDER_ALLOW_PREPAID = "1";
     const { calls } = captureFetch(() => jsonResponse({}));
-    await expect(chat(SAMPLE_REQUEST)).rejects.toThrow(/Antigravity/);
+    expect(resolveProvider({ model: "gemini-2.5-pro" })).toBe("openai");
+    await expect(chat({ ...SAMPLE_REQUEST, model: "gemini-2.5-pro" })).rejects.toThrow(/Antigravity/);
     expect(calls).toHaveLength(0);
   });
 
-  it("gemini tool request explicitly falls back", async () => {
+  it("gemini is not a provider: LLM_PROVIDER=gemini resolves like an unset provider", () => {
     process.env.LLM_PROVIDER = "gemini";
+    expect(resolveProvider({})).toBe("anthropic");
+    expect(resolveProvider({ provider: "gemini" as never })).toBe("anthropic");
+  });
+
+  it("a gemini-* tool request falls back to the configured provider with its own model", async () => {
     process.env.LLM_FALLBACK_PROVIDER = "openai";
     process.env.OPENAI_API_KEY = "sk-test";
     process.env.RADON_LADDER_ALLOW_PREPAID = "1";
     const { calls } = captureFetch(() =>
       jsonResponse({ choices: [{ message: { content: "fallback" } }] }),
     );
-    const result = await chat({ ...SAMPLE_REQUEST, tools: [{ name: "get_flow", input_schema: {} }] });
+    const result = await chat({
+      ...SAMPLE_REQUEST,
+      model: "gemini-2.5-pro",
+      tools: [{ name: "get_flow", input_schema: {} }],
+    });
     expect(result.provider).toBe("openai");
     expect(result.usedFallback).toBe(true);
     expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe("https://api.openai.com/v1/chat/completions");
+    expect(bodyOf(calls[0]).model).not.toMatch(/^gemini-/);
   });
 
   it("falls back to the configured provider when the primary errors", async () => {
@@ -544,11 +553,11 @@ describe("llm provider", () => {
       expect(calls).toHaveLength(0);
     });
 
-    it("never authenticates Gemini with a prepaid key alone", async () => {
-      process.env.GEMINI_API_KEY = "g-prepaid";
-      process.env.LLM_PROVIDER = "gemini";
+    it("never serves a gemini-* model, even under the prepaid escape hatch", async () => {
+      process.env.RADON_LADDER_ALLOW_PREPAID = "1";
+      process.env.ANTHROPIC_API_KEY = "sk-ant-prepaid";
       const { calls } = captureFetch(() => jsonResponse({}));
-      await expect(chat(SAMPLE_REQUEST)).rejects.toThrow(/Antigravity/);
+      await expect(chat({ ...SAMPLE_REQUEST, model: "gemini-2.5-pro" })).rejects.toThrow(/Antigravity/);
       expect(calls).toHaveLength(0);
     });
 

@@ -195,7 +195,7 @@ function fallbackReply(input: string): string {
 // rewrite that placeholder into the assistant's deterministic fallback so the
 // dashboard mock stays useful and stable.
 function isProviderMockContent(content: string): boolean {
-  return /^Mock (anthropic|openai|gemini|xai|grok) response:/i.test(content);
+  return /^Mock (anthropic|openai|xai|grok) response:/i.test(content);
 }
 
 function toTurns(messages: ChatMessage[]): AssistantTurn[] {

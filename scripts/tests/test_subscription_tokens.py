@@ -120,9 +120,8 @@ def codex_doc(expires: datetime) -> dict:
     }
 
 
-def gemini_doc(expires: datetime) -> dict:
+def antigravity_doc(expires: datetime) -> dict:
     # Antigravity CLI (`agy`) 1.2.x: ~/.gemini/antigravity-cli/antigravity-oauth-token.
-    # Google retired the Gemini CLI OAuth client for individuals on 2026-09-18.
     return {
         "token": {
             "access_token": FAKE_ACCESS,
@@ -139,7 +138,7 @@ DOCS = {
     "grok": grok_doc,
     "anthropic": anthropic_doc,
     "codex": codex_doc,
-    "gemini": gemini_doc,
+    "antigravity": antigravity_doc,
 }
 
 
@@ -203,46 +202,46 @@ def test_provider_paths_honour_env_overrides(tmp_path):
     assert st.PROVIDERS["codex"].path(env) == tmp_path / "cx" / "auth.json"
     assert st.PROVIDERS["grok"].path(env) == tmp_path / ".grok" / "auth.json"
     assert (
-        st.PROVIDERS["gemini"].path(env)
+        st.PROVIDERS["antigravity"].path(env)
         == tmp_path / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"
     )
 
 
-def test_gemini_reads_the_antigravity_token_shape():
+def test_antigravity_reads_the_antigravity_token_shape():
     expires = NOW + timedelta(hours=1)
-    doc = gemini_doc(expires)
-    assert st.PROVIDERS["gemini"].read_expiry(doc) == expires
-    assert st.PROVIDERS["gemini"].read_refresh(doc) == FAKE_REFRESH
+    doc = antigravity_doc(expires)
+    assert st.PROVIDERS["antigravity"].read_expiry(doc) == expires
+    assert st.PROVIDERS["antigravity"].read_refresh(doc) == FAKE_REFRESH
     # agy writes nanosecond precision; the parser must not choke on it.
     doc["token"]["expiry"] = "2026-09-18T23:05:47.355949945Z"
-    assert st.PROVIDERS["gemini"].read_expiry(doc) == datetime(
+    assert st.PROVIDERS["antigravity"].read_expiry(doc) == datetime(
         2026, 9, 18, 23, 5, 47, 355949, tzinfo=timezone.utc
     )
 
 
-def test_gemini_refresh_is_agy_native_when_installed(tmp_path):
+def test_antigravity_refresh_is_agy_native_when_installed(tmp_path):
     http = FakeHttp()  # any HTTP call raises
     rt = make_runtime(tmp_path, http=http, which=lambda binary: "/home/radon/.local/bin/" + binary)
-    path = write_doc(rt, "gemini", gemini_doc(NOW + timedelta(seconds=60)))
+    path = write_doc(rt, "antigravity", antigravity_doc(NOW + timedelta(seconds=60)))
     seen: list[tuple] = []
 
     def fake_cli(provider, binary, _env):
         seen.append((binary, provider.probe_args))
-        path.write_text(json.dumps(gemini_doc(NOW + timedelta(hours=1))), encoding="utf-8")
+        path.write_text(json.dumps(antigravity_doc(NOW + timedelta(hours=1))), encoding="utf-8")
         return st.PROBE_OK
 
     rt.probe = fake_cli
-    report = st.run("once", ["gemini"], rt)
+    report = st.run("once", ["antigravity"], rt)
     assert report["providers"][0]["state"] == st.REFRESHED
     assert seen == [("/home/radon/.local/bin/agy", ("models",))]
     assert http.calls == []
 
 
-def test_gemini_token_endpoint_refresh_names_the_antigravity_client(tmp_path):
+def test_antigravity_token_endpoint_refresh_names_the_antigravity_client(tmp_path):
     http = FakeHttp({"https://oauth2.googleapis.com/token": [ok_token_response()]})
     rt = make_runtime(tmp_path, http=http)
-    path = write_doc(rt, "gemini", gemini_doc(NOW + timedelta(seconds=60)))
-    report = st.run("once", ["gemini"], rt)
+    path = write_doc(rt, "antigravity", antigravity_doc(NOW + timedelta(seconds=60)))
+    report = st.run("once", ["antigravity"], rt)
     assert report["providers"][0]["state"] == st.REFRESHED
     method, url, form = http.calls[-1]
     assert url == "https://oauth2.googleapis.com/token"
@@ -251,7 +250,7 @@ def test_gemini_token_endpoint_refresh_names_the_antigravity_client(tmp_path):
     after = json.loads(path.read_text())
     assert after["token"]["access_token"] == FAKE_NEW_ACCESS
     assert after["auth_method"] == "consumer"
-    assert st.PROVIDERS["gemini"].read_expiry(after) > NOW + timedelta(minutes=30)
+    assert st.PROVIDERS["antigravity"].read_expiry(after) > NOW + timedelta(minutes=30)
 
 
 def test_grok_token_endpoint_comes_from_oidc_discovery(tmp_path):
@@ -626,6 +625,57 @@ def test_sidecar_records_per_provider_detail(tmp_path):
     assert entry["last_refresh_at"] == NOW.isoformat()
     assert entry["expires_at"].startswith("2026-09-17T13:00")
     assert entry["last_error"] is None
+
+
+def test_a_sidecar_row_under_the_former_gemini_name_carries_to_antigravity(tmp_path):
+    from scripts.utils.atomic_io import atomic_save, verified_load
+
+    rt = make_runtime(tmp_path)
+    paged_at = (NOW - timedelta(hours=1)).isoformat()
+    atomic_save(
+        str(rt.sidecar_path),
+        {
+            "providers": {"gemini": {"consecutive_error_count": 2, "state": st.ERROR}},
+            "pages": {"gemini": paged_at},
+        },
+    )
+    write_doc(rt, "grok", grok_doc(NOW + timedelta(hours=5)))
+
+    run = st._Run(rt, "once")
+    assert run.error_streak("antigravity") == 2
+    assert run.sidecar["pages"] == {"antigravity": paged_at}
+
+    run.save_sidecar([])
+    state = verified_load(str(rt.sidecar_path))
+    assert "gemini" not in state["providers"] and "gemini" not in state["pages"]
+    assert state["providers"]["antigravity"]["consecutive_error_count"] == 2
+
+
+def test_the_vault_reads_a_slot_sealed_under_the_former_gemini_name():
+    class Store:
+        def __init__(self, rows):
+            self.rows = dict(rows)
+
+        def get_secret(self, name):
+            return self.rows.get(name)
+
+        def set_secret(self, name, value, _service):
+            self.rows[name] = value
+
+    store = Store({"SUBSCRIPTION_TOKEN_GEMINI": "sealed-before-rename"})
+    vault = st.Vault(store)
+    assert vault.get("antigravity") == "sealed-before-rename"
+
+    vault.seal("antigravity", "sealed-after-rename")
+    assert store.rows["SUBSCRIPTION_TOKEN_ANTIGRAVITY"] == "sealed-after-rename"
+    assert vault.get("antigravity") == "sealed-after-rename"
+
+
+def test_gemini_is_no_longer_a_provider_name(capsys):
+    assert "gemini" not in st.PROVIDERS
+    with pytest.raises(SystemExit):
+        st.main(["--seal", "gemini"])
+    capsys.readouterr()
 
 
 def test_heartbeat_reports_worst_state_and_never_fails_the_run(tmp_path):
@@ -1062,13 +1112,13 @@ def test_codex_refresh_never_adds_a_key_codex_did_not_write(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# the scheduled set: claude, codex, grok, antigravity (the `gemini` row)
+# the scheduled set: claude, codex, grok, antigravity
 # --------------------------------------------------------------------------
 
 
 def test_the_scheduled_set_covers_the_four_required_subscriptions(tmp_path):
-    assert set(st.PROVIDERS) == {"anthropic", "codex", "grok", "gemini"}
-    antigravity = st.PROVIDERS["gemini"]
+    assert set(st.PROVIDERS) == {"anthropic", "codex", "grok", "antigravity"}
+    antigravity = st.PROVIDERS["antigravity"]
     assert antigravity.cli_binary == "agy"
     assert antigravity.path({"HOME": str(tmp_path)}) == (
         tmp_path / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"
@@ -1076,10 +1126,10 @@ def test_the_scheduled_set_covers_the_four_required_subscriptions(tmp_path):
 
 
 def test_agy_is_proven_with_an_authenticated_call_that_is_not_a_model_call():
-    assert st.PROVIDERS["gemini"].probe_args == ("models",)
+    assert st.PROVIDERS["antigravity"].probe_args == ("models",)
     # agy wants its code pasted back, so no push login can finish it.
-    assert st.PROVIDERS["gemini"].login_args is None
-    assert "agy" in st.PROVIDERS["gemini"].reauth_command
+    assert st.PROVIDERS["antigravity"].login_args is None
+    assert "agy" in st.PROVIDERS["antigravity"].reauth_command
 
 
 def test_the_claude_reauth_command_is_one_that_writes_the_credential_file():
@@ -1130,9 +1180,9 @@ def test_a_live_credential_is_probed_once_per_keepalive_interval(tmp_path):
 
 def test_a_credential_the_provider_rejects_is_not_live_whatever_its_expiry_says(tmp_path):
     rt = make_runtime(tmp_path, which=installed, probe=FakeProbe(st.PROBE_AUTH_FAILED))
-    write_doc(rt, "gemini", gemini_doc(NOW + timedelta(hours=1)))
+    write_doc(rt, "antigravity", antigravity_doc(NOW + timedelta(hours=1)))
 
-    report = st.run("once", ["gemini"], rt)
+    report = st.run("once", ["antigravity"], rt)
 
     assert report["providers"][0]["state"] == st.NEEDS_REAUTH
     assert report["exit_code"] == 1
@@ -1229,7 +1279,7 @@ def fake_cli(tmp_path: Path, name: str, script: str) -> str:
         ("anthropic", "echo 'Not logged in · Please run /login'\nexit 1\n", "PROBE_AUTH_FAILED"),
         ("grok", "echo 'Error: Not signed in. To authenticate without a browser' >&2\nexit 1\n", "PROBE_AUTH_FAILED"),
         ("codex", "echo 'ERROR: unexpected status 401 Unauthorized: Missing bearer' >&2\nexit 1\n", "PROBE_AUTH_FAILED"),
-        ("gemini", "echo 'Error: Please sign in to view available models. Launch the CLI without arguments to sign in.'\nexit 1\n", "PROBE_AUTH_FAILED"),
+        ("antigravity", "echo 'Error: Please sign in to view available models. Launch the CLI without arguments to sign in.'\nexit 1\n", "PROBE_AUTH_FAILED"),
         ("anthropic", "echo 'usage limit reached'\nexit 1\n", "PROBE_FAILED"),
         ("anthropic", "sleep 30\n", "PROBE_FAILED"),
     ],

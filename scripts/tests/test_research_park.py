@@ -23,7 +23,7 @@ def state(tmp_path):
 
 
 @pytest.mark.parametrize("message,outage", [
-    ("Model ladder exhausted after trying every keyed provider (anthropic: quota; gemini: http_429)", True),
+    ("Model ladder exhausted after trying every keyed provider (anthropic: quota; antigravity: http_429)", True),
     ("http_429 rate limit", True),
     ("provider http_503", True),
     ("Research reviewer unavailable or malformed response", True),
