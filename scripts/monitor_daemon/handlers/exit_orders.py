@@ -11,6 +11,7 @@ IB rejects limit orders >40% from current market price. This handler:
 
 import json
 import logging
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -28,7 +29,8 @@ DEFAULT_IB_PORT = 4001
 DEFAULT_CLIENT_ID: int | str = "auto"
 
 try:
-    from db.client import get_db  # type: ignore
+    # REL-108 / NF-2: native libSQL can pin the GIL past a handler deadline.
+    from knowledge.http_db import Connection as get_db
 except ImportError:  # pragma: no cover - DB layer optional in unit tests
     get_db = None  # type: ignore[assignment]
 
@@ -95,6 +97,32 @@ class ExitOrdersHandler(BaseHandler):
         except (TypeError, ValueError):
             return None
         return parsed if isinstance(parsed, dict) else None
+
+    def _journal_rows(self, db: Any) -> list:
+        """REL-108 / NF-2: insertion pages, complete-or-failed within 30s."""
+        rows = []
+        cursor = 0
+        deadline = time.monotonic() + 30
+        while True:
+            if time.monotonic() >= deadline:
+                raise TimeoutError('exit-order journal scan deadline exceeded')
+            page = db.execute(
+                'SELECT trade_id, payload, rowid AS journal_rowid, '
+                'COALESCE(filled_at, written_at) AS sort_at FROM journal '
+                'WHERE rowid > ? ORDER BY rowid LIMIT ?', (cursor, 200),
+            ).fetchall()
+            if time.monotonic() >= deadline:
+                raise TimeoutError('exit-order journal scan deadline exceeded')
+            rows.extend(page)
+            if len(page) < 200:
+                # Preserve the prior newest-first placement priority after
+                # scanning by insertion identity, including lexical backfills.
+                rows.sort(key=lambda row: self._row_value(row, 3, 'sort_at') or '', reverse=True)
+                return rows
+            next_cursor = self._row_value(page[-1], 2, 'journal_rowid')
+            if type(next_cursor) is not int or next_cursor <= cursor:
+                raise RuntimeError('exit-order journal cursor did not advance')
+            cursor = next_cursor
     
     def _load_pending_orders(self) -> List[Dict]:
         """Load pending exit orders from the Turso journal.
@@ -106,13 +134,7 @@ class ExitOrdersHandler(BaseHandler):
         pending = []
 
         try:
-            rows = self._open_db().execute(
-                """
-                SELECT trade_id, payload
-                FROM journal
-                ORDER BY COALESCE(filled_at, written_at) DESC
-                """
-            ).fetchall()
+            rows = self._journal_rows(self._open_db())
 
             for row in rows:
                 journal_trade_id = self._row_value(row, 0, "trade_id")
@@ -249,7 +271,7 @@ class ExitOrdersHandler(BaseHandler):
                     (journal_trade_id,),
                 ).fetchall()
             if not rows:
-                rows = db.execute("SELECT trade_id, payload FROM journal").fetchall()
+                rows = self._journal_rows(db)
 
             target_trade_id = None
             target_trade = None
@@ -285,7 +307,9 @@ class ExitOrdersHandler(BaseHandler):
                     target_trade_id,
                 ),
             )
-            if hasattr(db, "commit"):
+            # The production HTTP statement autocommits and closes its
+            # stream. Only an injected transaction-bearing store needs this.
+            if self.db is not None and hasattr(db, "commit"):
                 db.commit()
 
             # Read-back verification (REL-003 / R-012): a concurrent

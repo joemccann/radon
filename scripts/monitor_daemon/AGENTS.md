@@ -34,3 +34,5 @@ Applies under `scripts/monitor_daemon/`. Root and `scripts/AGENTS.md` also apply
 ## Journal History Read Bounds
 
 REL-108 / NF-2: journal-sync uses the shared urllib Hrana connection, not native libsql, for history and prior-quantity reads. Recovery, execution coverage and mirror scans use 200-row insertion cursors with a 30-second scan deadline; each HTTP request has the shared transport timeout. A failed page exposes no partial state. Recovery restores effective-time ordering after pagination. Concurrent inserts are included; concurrent update/delete snapshot isolation is not claimed.
+
+REL-108 / NF-2: exit-orders also uses the bounded HTTP connection. Pending-order and legacy-ID fallback scans use 200-row insertion pages and a 30-second scan deadline, exposing no partial orders on failure. Placement priority remains newest-first after the scan. Default HTTP updates autocommit; injected stores retain their explicit commit contract. Read-back verification and durable unrecorded-placement guards remain required.
