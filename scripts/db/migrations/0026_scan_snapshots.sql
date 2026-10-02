@@ -14,3 +14,6 @@ CREATE TABLE IF NOT EXISTS scan_snapshots (
   payload   TEXT NOT NULL,
   PRIMARY KEY (service, scan_time)
 );
+
+-- REL-021b / R-047: direct SQL application records completion too.
+INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (26, datetime('now'));

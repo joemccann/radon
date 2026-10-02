@@ -79,6 +79,7 @@ readonly SERVICE_FILES=(
   radon-relay.service
   radon-monitor.service
   radon-health.service
+  radon-control.service
   radon-mcp.service
   radon-newsfeed.service
   radon-research.service
@@ -193,12 +194,16 @@ readonly SERVICE_FILES=(
   radon-iv-spread.timer
   radon-iei-hyg.service
   radon-iei-hyg.timer
+  radon-credit-vix.service
+  radon-credit-vix.timer
   radon-trin.service
   radon-trin.timer
   radon-divyield.service
   radon-divyield.timer
   radon-ma-ratio.service
   radon-ma-ratio.timer
+  radon-rsi-oversold.service
+  radon-rsi-oversold.timer
   radon-calm-streak.service
   radon-calm-streak.timer
   radon-bounce-setup.service
@@ -1297,8 +1302,8 @@ enable_services() {
     [[ "$svc" == "radon-slm-tagger.service" ]] && continue
     [[ "$svc" == "radon-slm-tagger-monitor.service" ]] && continue
     [[ "$svc" == "radon-slm-tagger-monitor.timer" ]] && continue
-    # Knowledge golden-eval stays copied but disabled until a live baseline
-    # exists. Enabling the timer would fire a placeholder-baseline oneshot.
+    # Knowledge golden-eval stays copied but disabled until a human reviews
+    # the draft golden set. The checked-in baseline is already a live snapshot.
     [[ "$svc" == "radon-knowledge-eval.service" ]] && continue
     [[ "$svc" == "radon-knowledge-eval.timer" ]] && continue
     # Broker-only. Combined/app copy the unit but do not enable it. Certs plus
@@ -1613,6 +1618,40 @@ install_app_runtime() {
   log_success "App runtime wrapper installed"
 }
 
+# `radon ib release|resume|status`: the IBKR operator hold (broker). Root-owned
+# because release must reach the root docker shim's compose-down and kill when
+# the radon-side helper is blocked.
+install_ib_hold() {
+  local source="${CLOUD_DIR}/scripts/ib-operator-hold.sh"
+  local target="${RADON_IB_HOLD_TARGET:-/usr/local/sbin/radon-ib-hold}"
+  local cli_source="${RADON_DIR}/scripts/utils/ib_operator_hold.py"
+  local cli_target="${RADON_IB_HOLD_CLI_TARGET:-/usr/local/lib/radon/ib_operator_hold.py}"
+  local -a owner_args=(-o root -g root)
+  [[ "${RADON_HELPER_SKIP_CHOWN:-0}" == "1" ]] && owner_args=()
+  local staged
+
+  if [[ ! -f "$source" ]]; then
+    log_error "ib-operator-hold.sh missing from ${CLOUD_DIR}/scripts/"
+    return 1
+  fi
+  log_info "Installing ${target}..."
+  staged="$(mktemp "${target}.tmp.XXXXXX")"
+  if ! stage_from_checkout "$source" "$staged" 0755 ${owner_args[@]+"${owner_args[@]}"} \
+    || ! bash -n "$staged"; then
+    rm -f "$staged"
+    log_error "IBKR operator hold command failed staging or syntax validation"
+    return 1
+  fi
+  mv -f "$staged" "$target"
+  # The command runs this stdlib CLI as root; stage the committed blob
+  # root-owned, never the radon-owned checkout copy.
+  if [[ ! -f "$cli_source" ]] \
+    || ! stage_from_checkout "$cli_source" "$cli_target" 0644 ${owner_args[@]+"${owner_args[@]}"}; then
+    log_error "IBKR operator hold CLI failed staging"
+    return 1
+  fi
+}
+
 # The root-owned Gateway docker operator that replaces radon's group `docker`
 # membership, plus the compose body it runs. Both must land root-owned: a
 # radon-writable compose file hands root straight back through the shim.
@@ -1804,6 +1843,7 @@ main() {
   install_operator_cli
   install_app_runtime
   install_docker_gw
+  install_ib_hold
   configure_sudoers
   install_admin_polkit_rule
   start_services

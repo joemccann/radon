@@ -60,6 +60,33 @@ function formatSignedPercent(value: number): string {
   return `${normalized >= 0 ? "+" : ""}${formatted}%`;
 }
 
+/** Signed expiry P&L: "+$22,000" is a locked-in gain, "-$66,990" a loss. */
+function SignedPnlMetric({
+  testId,
+  label,
+  value,
+  unbounded = false,
+}: {
+  testId: string;
+  label: string;
+  value: number | null;
+  unbounded?: boolean;
+}) {
+  const tone = unbounded || (value != null && value > 0)
+    ? "order-confirm-positive"
+    : value != null && value < 0
+      ? "order-confirm-negative"
+      : "";
+  return (
+    <span className="order-confirm-metric" data-testid={testId}>
+      <span className="order-confirm-metric-label">{label}</span>
+      <span className={`order-confirm-metric-value ${tone}`.trim()}>
+        {unbounded ? "UNBOUNDED" : `${value != null && value > 0 ? "+" : ""}${formatCurrency(value)}`}
+      </span>
+    </span>
+  );
+}
+
 function formatPrice(value: number | null | undefined): string {
   if (value == null) return "---";
   return `$${value.toFixed(2)}`;
@@ -116,6 +143,7 @@ export function OrderConfirmSummary({
   const variantClass = variant === "info" ? "order-confirm-summary-info" : "";
   const showMaxGain = summary.maxGainUnbounded === true || summary.maxGain != null;
   const showMaxLoss = summary.maxLossUnbounded === true || summary.maxLoss != null;
+  const withHeld = summary.withHeldLegs ?? null;
   const marginImpact = summary.coverageStatus === "resolved" ? summary.marginImpact ?? null : null;
   const marginRequirementUnavailable = marginImpact != null && marginImpact.requirement == null;
   const hasUndefinedRisk =
@@ -236,6 +264,18 @@ export function OrderConfirmSummary({
               {summary.maxLossUnbounded === true ? "UNBOUNDED" : formatCurrency(summary.maxLoss)}
             </span>
           </span>
+        )}
+        {withHeld != null && (
+          <>
+            <SignedPnlMetric testId="order-confirm-order-worst" label="Worst Case:" value={withHeld.orderWorst} />
+            <SignedPnlMetric
+              testId="order-confirm-spread-best"
+              label="Spread Best Case:"
+              value={withHeld.spreadBest}
+              unbounded={withHeld.bestUnbounded}
+            />
+            <SignedPnlMetric testId="order-confirm-spread-worst" label="Spread Worst Case:" value={withHeld.spreadWorst} />
+          </>
         )}
         {showPayoff && payoff != null && (
           <span className="order-confirm-metric">

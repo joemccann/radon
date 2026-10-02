@@ -119,6 +119,22 @@ export interface OrderPresentationSummary {
    * not only in the builder header. Null/absent when no coverage applies.
    */
   coverageNote?: string | null;
+  /**
+   * Signed expiry P&L (dollars, + gain / - loss, never clamped at 0) when
+   * held OPTION legs cover this order. `order*` treats the held leg as
+   * already paid for; `spread*` prices it at its cost basis, i.e. the whole
+   * resulting spread. Null/absent when no held option covers the order or
+   * the order is unbounded. `spread*` are null when the held basis is
+   * unknown; best values are null when `bestUnbounded`.
+   */
+  withHeldLegs?: {
+    orderBest: number | null;
+    orderWorst: number;
+    spreadBest: number | null;
+    spreadWorst: number | null;
+    bestUnbounded: boolean;
+    heldBasisDollars: number | null;
+  } | null;
 }
 
 /**

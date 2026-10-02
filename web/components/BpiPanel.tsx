@@ -80,7 +80,7 @@ function IndexSwitcher({
   }
 
   return (
-    <nav className="history-range-chips" aria-label="Bullish percent index" data-testid="bpi-index-chips">
+    <nav className="history-range-chips history-range-chips--inline" aria-label="Bullish percent index" data-testid="bpi-index-chips">
       {BPI_INDEX_SYMBOLS.map((symbol) => (
         <button
           key={symbol}
@@ -250,9 +250,14 @@ export default function BpiPanel() {
             Bullish Percent Index
             <InfoTooltip text={TOOLTIP_COPY} />
           </div>
+          {!compact && (
+            <div className="section-header-actions">
+              <IndexSwitcher active={index} compact={false} onChange={switchIndex} />
+            </div>
+          )}
         </div>
 
-        <IndexSwitcher active={index} compact={compact} onChange={switchIndex} />
+        {compact && <IndexSwitcher active={index} compact onChange={switchIndex} />}
 
         {payload ? (
           <>

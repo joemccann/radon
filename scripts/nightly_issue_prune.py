@@ -14,10 +14,10 @@ and latest detailed/no-op report alongside the wrapper's just-posted status.
 Prune only superseded comments: the issue now owns the audit cursor and findings
 handoff even when no branch or PR is needed.
 
-Stdlib only, 3.9-clean (invoked via ``python3 -I -``, same as
-``weekend_prune.py``). ``gh`` does all network I/O; this module only decides
+Stdlib only, 3.9-clean (the security loops' root-owned post-run hook runs the
+installed copy with ``python3.13 -I``). ``gh`` does all network I/O; this module only decides
 whether to prune and drives the two ``gh`` calls that do it. Best-effort by
-design: the wrapper treats any failure here as non-fatal.
+design: the hook treats any failure here as non-fatal.
 """
 
 from __future__ import annotations
@@ -169,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gh-bin", required=True)
     parser.add_argument("--issue", required=True, help="issue number")
     parser.add_argument(
-        "--branch-prefix", required=True, help="this loop's dated-branch prefix, e.g. reliability/"
+        "--branch-prefix", required=True, help="this loop's dated-branch prefix, e.g. security/"
     )
     parser.add_argument("--timeout", type=int, default=10)
     parser.add_argument(

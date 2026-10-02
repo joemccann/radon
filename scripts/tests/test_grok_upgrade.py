@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import errno
 import json
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -50,10 +52,54 @@ class ScriptedRunner:
 
     def __call__(self, argv, **kwargs):
         self.calls.append(list(argv))
+        argv = _named(argv)
         for prefix, proc in self.mapping.items():
             if tuple(argv[: len(prefix)]) == prefix:
                 return proc
         return SimpleNamespace(returncode=1, stdout="", stderr="unexpected: " + " ".join(argv))
+
+
+def _named(argv) -> list[str]:
+    """argv with the executable reduced to its name: the candidate runs as <dest>/bin/grok."""
+    return [Path(argv[0]).name, *argv[1:]] if argv else []
+
+
+@pytest.fixture
+def grok_on_path(tmp_path, monkeypatch):
+    """A live `grok` for install_candidate_cli to copy into the candidate."""
+    bindir = tmp_path / "path-bin"
+    bindir.mkdir()
+    grok = bindir / "grok"
+    grok.write_text("#!/bin/sh\n", encoding="utf-8")
+    grok.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}:{os.environ.get('PATH', '')}")
+    return grok
+
+
+INSTALLER_BYTES = "installer-owned grok\n"
+
+
+@pytest.fixture(autouse=True)
+def fake_home(tmp_path, monkeypatch):
+    """Every test runs against a throwaway HOME that already has ~/.grok/bin.
+
+    2026-09-29: this file ran inside the responder clone on the VPS and the
+    promote path repointed the operator's real ~/.grok/bin/grok at a pytest
+    tmp candidate, which then vanished. The fake installer entry here must be
+    byte-identical after every test: nothing in the upgrader may write to a
+    home path it was not explicitly given.
+    """
+    home = tmp_path / "home"
+    alias = home / ".grok" / "bin" / "grok"
+    alias.parent.mkdir(parents=True)
+    alias.write_text(INSTALLER_BYTES, encoding="utf-8")
+    alias.chmod(0o755)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    yield home
+    assert not alias.is_symlink(), f"~/.grok/bin/grok was relinked to {os.readlink(alias)}"
+    assert alias.read_text(encoding="utf-8") == INSTALLER_BYTES
+    assert sorted(p.name for p in alias.parent.iterdir()) == ["grok"]
 
 
 def _lkg(tmp_path: Path) -> Path:
@@ -103,6 +149,21 @@ class TestDecide:
         )
         assert parsed["latest"] == "1.0.41"
 
+    def test_parse_update_check_grok_103_version_keys(self):
+        # grok 1.0.3 `update --check --json` (live 2026-09-29).
+        parsed = upgrade.parse_update_check(
+            json.dumps({
+                "currentVersion": "1.0.3",
+                "latestVersion": "1.0.44",
+                "updateAvailable": True,
+                "installer": "internal",
+                "channel": "stable",
+                "autoUpdate": None,
+                "error": None,
+            })
+        )
+        assert parsed == {"current": "1.0.3", "latest": "1.0.44"}
+
 
 class TestRunUpgrade:
     def test_current_is_a_noop(self, tmp_path):
@@ -124,7 +185,8 @@ class TestRunUpgrade:
         assert result["action"] == "current"
         assert not any("update" in c and "--version" in c for c in runner.calls)
 
-    def test_failed_smoke_alerts_and_leaves_lkg(self, tmp_path):
+    def test_failed_smoke_alerts_and_leaves_lkg(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(upgrade, "install_candidate_cli", lambda *a, **kw: Path("grok"))
         lkg_path = _lkg(tmp_path)
         alerts: list[str] = []
         runner = ScriptedRunner({
@@ -152,7 +214,7 @@ class TestRunUpgrade:
         assert alerts
         assert json.loads(lkg_path.read_text())["cli_version"] == "1.0.3"
 
-    def test_green_smoke_promotes_and_writes_lkg(self, tmp_path):
+    def test_green_smoke_promotes_and_writes_lkg(self, tmp_path, monkeypatch):
         lkg_path = _lkg(tmp_path)
         live = tmp_path / "live" / "grok"
         live.parent.mkdir()
@@ -160,6 +222,7 @@ class TestRunUpgrade:
         candidate = tmp_path / "scratch" / "candidate" / "bin"
         candidate.mkdir(parents=True)
         (candidate / "grok").write_text("new\n", encoding="utf-8")
+        monkeypatch.setattr(upgrade, "install_candidate_cli", lambda *a, **kw: candidate / "grok")
         runner = ScriptedRunner({
             ("grok", "update", "--check"): SimpleNamespace(
                 returncode=0,
@@ -203,6 +266,7 @@ class TestRunUpgrade:
         candidate = tmp_path / "scratch" / "candidate" / "bin"
         candidate.mkdir(parents=True)
         (candidate / "grok").write_text("new\n", encoding="utf-8")
+        monkeypatch.setattr(upgrade, "install_candidate_cli", lambda *a, **kw: candidate / "grok")
         runner = ScriptedRunner({
             ("grok", "update", "--check"): SimpleNamespace(
                 returncode=0,
@@ -239,6 +303,186 @@ class TestRunUpgrade:
         assert not live.is_symlink()
 
 
+UPDATE_REJECT = (
+    "error: unexpected argument '--no-auto-update' found\n\n"
+    "Usage: grok update [OPTIONS]\n\n"
+    "For more information, try '--help'.\n"
+)
+
+
+class TestInstallCandidate:
+    def test_update_argv_omits_flag_grok_update_rejects(self, tmp_path, grok_on_path):
+        calls: list[list[str]] = []
+
+        def runner(argv, **kwargs):
+            calls.append(list(argv))
+            if "--no-auto-update" in argv:
+                return SimpleNamespace(returncode=1, stdout="", stderr=UPDATE_REJECT)
+            if argv[1:] == ["--version"]:
+                return SimpleNamespace(returncode=0, stdout="grok 1.0.44", stderr="")
+            return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+        dest = tmp_path / "candidate"
+        found = upgrade.install_candidate_cli(
+            dest, grok_bin="grok", runner=runner, version="1.0.44"
+        )
+        assert calls[0] == [str(dest / "bin" / "grok"), "update", "--version", "1.0.44"]
+        assert found == dest / "bin" / "grok"
+
+    def test_update_readlink_needs_installer_symlink(self, tmp_path, grok_on_path):
+        """Page 2e9419cb: grok 1.0.44 update readlinks the candidate and exits 22 on a regular file.
+
+        Reproduced with a private copy: a regular file at ``$GROK_HOME/bin/grok``
+        fails with ``reading prior symlink target ... Invalid argument (os error 22)``.
+        The installer layout (relative symlink ``../downloads/grok-linux-x86_64``)
+        lets ``grok update --version 1.0.46`` finish and leaves the live binary alone.
+        """
+        dest = tmp_path / "candidate"
+        source = grok_on_path.resolve()
+        source_bytes = source.read_bytes()
+
+        def runner(argv, **kwargs):
+            if argv[1:3] == ["update", "--version"]:
+                exe = Path(argv[0])
+                try:
+                    prior = os.readlink(exe)
+                except OSError as exc:
+                    assert exc.errno == errno.EINVAL
+                    return SimpleNamespace(
+                        returncode=1,
+                        stdout="",
+                        stderr=(
+                            "Installing Grok 1.0.46 (current: 1.0.44)...\n\n"
+                            "  Downloading grok v1.0.46 (linux-x86_64)...\n"
+                            "Error: Auto-update failed: capturing rollback state for "
+                            f"{exe}: reading prior symlink target {exe}: "
+                            "Invalid argument (os error 22)\n"
+                        ),
+                    )
+                payload = (exe.parent / prior).resolve()
+                assert prior == "../downloads/grok-linux-x86_64"
+                assert payload.is_file() and not payload.is_symlink()
+                assert payload.is_relative_to(dest.resolve())
+                assert not payload.samefile(source)
+                assert payload.read_bytes() == source_bytes
+                return SimpleNamespace(returncode=0, stdout="installed", stderr="")
+            if argv[1:] == ["--version"]:
+                return SimpleNamespace(returncode=0, stdout="grok 1.0.46\n", stderr="")
+            return SimpleNamespace(returncode=1, stdout="", stderr="unexpected " + " ".join(argv))
+
+        found = upgrade.install_candidate_cli(
+            dest, grok_bin="grok", runner=runner, version="1.0.46"
+        )
+        assert found == dest / "bin" / "grok"
+        assert os.readlink(found) == "../downloads/grok-linux-x86_64"
+        assert source.read_bytes() == source_bytes
+
+
+class TestMissingLkgRealCheck:
+    def test_pins_latest_version_and_promotes(self, tmp_path, grok_on_path):
+        """Page a57b867d: missing LKG, grok 1.0.3 check JSON, update rejects the flag."""
+        calls: list[list[str]] = []
+        check = json.dumps({
+            "currentVersion": "1.0.3",
+            "latestVersion": "1.0.44",
+            "updateAvailable": True,
+            "installer": "internal",
+            "channel": "stable",
+            "autoUpdate": None,
+            "error": None,
+        })
+
+        def runner(argv, **kwargs):
+            argv = _named(argv)
+            calls.append(list(argv))
+            if argv[1:] == ["--version"]:
+                return SimpleNamespace(returncode=0, stdout="grok 1.0.44", stderr="")
+            if tuple(argv[:3]) == ("grok", "update", "--check"):
+                return SimpleNamespace(returncode=0, stdout=check, stderr="")
+            if tuple(argv[:2]) == ("grok", "models"):
+                return SimpleNamespace(returncode=0, stdout=MODELS, stderr="")
+            if tuple(argv[:2]) == ("grok", "update"):
+                if "--no-auto-update" in argv:
+                    return SimpleNamespace(
+                        returncode=1, stdout="", stderr=UPDATE_REJECT
+                    )
+                return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+            if "--prompt-file" in argv:
+                assert "--no-auto-update" in argv
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=VALID_BODY + "\nRESULT: stand_down | grok upgrade smoke structured\n",
+                    stderr="",
+                )
+            return SimpleNamespace(
+                returncode=1, stdout="", stderr="unexpected " + " ".join(argv)
+            )
+
+        live = tmp_path / "live" / "grok"
+        live.parent.mkdir()
+        live.write_text("old\n", encoding="utf-8")
+        lkg_path = tmp_path / "missing_lkg.json"
+        result = upgrade.run_upgrade(
+            grok_bin="grok",
+            live_bin=live,
+            lkg_path=lkg_path,
+            lock_path=tmp_path / "runtime.lock",
+            scratch=tmp_path / "scratch",
+            runner=runner,
+            alerter=lambda _message: None,
+        )
+        updates = [
+            call for call in calls
+            if call[:2] == ["grok", "update"] and "--check" not in call
+        ]
+        assert updates == [["grok", "update", "--version", "1.0.44"]]
+        assert result["action"] == "promoted"
+        assert json.loads(lkg_path.read_text())["cli_version"] == "1.0.44"
+
+
+class TestHeartbeat:
+    def test_failure_passes_error_dict_not_last_error(self, tmp_path, monkeypatch, capsys, grok_on_path):
+        captured: list[tuple] = []
+
+        def write(service, state, **kwargs):
+            captured.append((service, state, dict(kwargs)))
+            unexpected = set(kwargs) - {"started_at", "finished_at", "error", "timeout"}
+            if unexpected:
+                name = sorted(unexpected)[0]
+                raise TypeError(
+                    f"write_service_health_http() got an unexpected keyword argument '{name}'"
+                )
+
+        import db.hrana_http as hrana
+        monkeypatch.setattr(hrana, "write_service_health_http", write)
+        runner = ScriptedRunner({
+            ("grok", "update", "--check"): SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps({"current": "1.0.3", "latest": "1.0.50"}),
+                stderr="",
+            ),
+            ("grok", "models"): SimpleNamespace(returncode=0, stdout=MODELS, stderr=""),
+            ("grok", "update", "--version"): SimpleNamespace(
+                returncode=1, stdout="", stderr=UPDATE_REJECT
+            ),
+        })
+        result = upgrade.run_upgrade(
+            grok_bin="grok",
+            lkg_path=_lkg(tmp_path),
+            scratch=tmp_path / "scratch",
+            runner=runner,
+            alerter=lambda _message: None,
+        )
+        assert result["action"] == "failed"
+        assert captured
+        service, state, kwargs = captured[0]
+        assert service == "grok-upgrade"
+        assert state == "error"
+        assert "last_error" not in kwargs
+        assert kwargs["error"]["message"]
+        assert "unexpected keyword argument" not in capsys.readouterr().err
+
+
 class TestSeed:
     def test_seed_writes_lkg_from_live_cli(self, tmp_path):
         lkg_path = tmp_path / "grok_lkg.json"
@@ -259,3 +503,75 @@ class TestSeed:
         )
         assert again == state
         assert sum(1 for c in runner.calls if "--version" in c) == 1
+
+
+@pytest.mark.parametrize("state,detail", [
+    ("error", "candidate smoke failed"),
+    ("ok", "promotion deferred; incident lock held"),
+])
+def test_rel293_diagnostic_heartbeat_uses_the_real_writer_contract(monkeypatch, state, detail):
+    """REL-293 / R-712: diagnostics must reach the canonical health writer."""
+    from unittest.mock import create_autospec
+    from db import hrana_http
+    writer = create_autospec(hrana_http.write_service_health_http)
+    monkeypatch.setattr(hrana_http, "write_service_health_http", writer)
+
+    upgrade._record_health(state, detail)
+
+    writer.assert_called_once_with("grok-upgrade", state, error={"message": detail})
+
+
+class TestPromoteTouchesOnlyGivenPaths:
+    """2026-09-29 VPS incident: a pytest run replaced the live Grok binary."""
+
+    @staticmethod
+    def _candidate(tmp_path: Path) -> Path:
+        candidate = tmp_path / "scratch" / "candidate-x" / "bin" / "grok"
+        candidate.parent.mkdir(parents=True)
+        candidate.write_text("new\n", encoding="utf-8")
+        return candidate
+
+    def test_promote_without_alias_leaves_home_grok_alone(self, tmp_path, fake_home):
+        live = tmp_path / "live" / "grok"
+        candidate = self._candidate(tmp_path)
+        upgrade.promote_live_symlink(live, candidate)
+        assert live.resolve() == candidate.resolve()
+        # fake_home teardown asserts ~/.grok/bin/grok is untouched.
+
+    def test_explicit_alias_follows_the_live_path(self, tmp_path):
+        live = tmp_path / "live" / "grok"
+        alias = tmp_path / "alias-bin" / "grok"
+        alias.parent.mkdir()
+        alias.write_text("old\n", encoding="utf-8")
+        candidate = self._candidate(tmp_path)
+        upgrade.promote_live_symlink(live, candidate, alias_bin=alias)
+        assert os.readlink(alias) == str(live.absolute())
+        assert alias.resolve() == candidate.resolve()
+
+    def test_candidate_outside_its_root_is_refused(self, tmp_path):
+        live = tmp_path / "live" / "grok"
+        live.parent.mkdir()
+        live.write_text("old\n", encoding="utf-8")
+        stray = tmp_path / "elsewhere" / "grok"
+        stray.parent.mkdir()
+        stray.write_text("new\n", encoding="utf-8")
+        with pytest.raises(upgrade.GrokUpgradeError, match="outside"):
+            upgrade.promote_live_symlink(
+                live, stray, candidate_root=tmp_path / "scratch"
+            )
+        assert not live.is_symlink()
+        assert live.read_text(encoding="utf-8") == "old\n"
+
+    def test_run_upgrade_threads_alias_from_the_cli(self, tmp_path, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(
+            upgrade, "run_upgrade", lambda **kw: seen.update(kw) or {"action": "current"}
+        )
+        alias = tmp_path / "alias" / "grok"
+        assert upgrade.main([
+            "--grok-bin", "grok", "--live-bin", str(tmp_path / "live"),
+            "--alias-bin", str(alias),
+        ]) == 0
+        assert seen["alias_bin"] == alias
+        assert upgrade.main(["--grok-bin", "grok"]) == 0
+        assert seen["alias_bin"] is None

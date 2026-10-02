@@ -1,9 +1,8 @@
 # Dead-man comment format
 
 The contract for every comment an agent posts on a rolling dead-man issue
-(`testing-nightly`, `reliability-nightly`, `ci-performance-nightly`,
-`documentation-nightly`). The wrapper's one-line phase comment is not covered
-here; this governs the write-up the agent authors.
+(`testing-nightly`, `reliability-nightly`, `ci-performance-nightly`, `documentation-nightly`). The
+wrapper's one-line phase comment is not covered here; this governs the write-up the agent authors.
 
 ## The problem this fixes
 

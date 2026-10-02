@@ -1,12 +1,12 @@
 "use client";
 
-import { type ReactNode, useEffect, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useState } from "react";
 import type { DepthBook, Trade } from "@/lib/pricesProtocol";
 import type { OrderPrefill } from "@/lib/TickerDetailContext";
 import { DepthMontage } from "./DepthMontage";
 import { LadderDOM } from "./LadderDOM";
 import { TimeAndSales } from "./TimeAndSales";
-import { fmtDepthPrice, fmtSpread } from "./depthFormat";
+import { depthPriceCh, fmtDepthPrice, fmtSpread } from "./depthFormat";
 import { deriveBookHeader } from "@/lib/book/depthDerivations";
 
 const TAPE_STORAGE_KEY = "radon:book:tape";
@@ -41,6 +41,11 @@ function readTapePreference(): boolean {
   } catch {
     return true;
   }
+}
+
+/** Hold a live head value at its widest print so ticks do not reflow the row. */
+function reservedWidth(price: number | null): CSSProperties | undefined {
+  return price != null ? { minWidth: `${depthPriceCh(price)}ch` } : undefined;
 }
 
 /**
@@ -111,13 +116,13 @@ export function OrderBook({
           <span className="book-kind" data-testid="book-kind">{kindLabel}</span>
         </span>
         <span className="book-head-stat">
-          {head.lastLabel} <b>{head.last != null ? fmtDepthPrice(head.last) : "---"}</b>
+          {head.lastLabel} <b style={reservedWidth(head.last)}>{head.last != null ? fmtDepthPrice(head.last) : "---"}</b>
         </span>
         <span className="book-head-stat bid">
-          BID <b>{head.bid != null ? fmtDepthPrice(head.bid) : "---"}</b>
+          BID <b style={reservedWidth(head.bid)}>{head.bid != null ? fmtDepthPrice(head.bid) : "---"}</b>
         </span>
         <span className="book-head-stat ask">
-          ASK <b>{head.ask != null ? fmtDepthPrice(head.ask) : "---"}</b>
+          ASK <b style={reservedWidth(head.ask)}>{head.ask != null ? fmtDepthPrice(head.ask) : "---"}</b>
         </span>
         <span className="book-head-stat">
           SPRD <b>{fmtSpread(head.bid, head.ask)}</b>

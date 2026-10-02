@@ -15,7 +15,10 @@ it cannot describe:
   * a diff touching `.github/` -- a PR-triggered workflow runs from the PR
     head, so that would execute attacker-authored CI in this repository;
   * a branch that does not descend from origin/main, or exceeds the commit
-    cap.
+    cap;
+  * any push or PR at all unless GROK_PAGE_AUTOPUSH is truthy in this job's
+    environment, and any branch whose commits, diff or PR text carry a
+    private identifier (``ir_push_gate``). A refused branch stays local.
 
 Fetching from a hostile repository is a supported git operation; nothing
 here executes code out of the fetched tree.
@@ -27,6 +30,7 @@ import argparse
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -34,6 +38,7 @@ from typing import Callable, Optional
 
 import ir_ensure_pr
 import ir_pr_description
+import ir_push_gate
 
 DEFAULT_SOURCE = os.environ.get(
     "RADON_GROK_FIX_SOURCE",
@@ -211,6 +216,7 @@ def alert_invalid_description(
     reason: str,
     *,
     alerter: Optional[Callable[[str, str], None]] = None,
+    title: str = "radon grok pickup: IR body refused",
 ) -> None:
     message = f"grok fix pickup: refusing {branch}: {reason}"
     print(message, file=sys.stderr)
@@ -229,11 +235,42 @@ def alert_invalid_description(
         notify.build_pushover_payload(
             user=user,
             token=token,
-            title="radon grok pickup: IR body refused",
+            title=title,
             message=message[:900],
             severity=None,
         )
     )
+
+
+def alert_refused_publish(
+    branch: str,
+    reason: str,
+    *,
+    alerter: Optional[Callable[[str, str], None]] = None,
+) -> None:
+    """Same channel as a refused description; ``reason`` never holds a value."""
+    alert_invalid_description(
+        branch, reason, alerter=alerter, title="radon grok pickup: push refused"
+    )
+
+
+def _running_code_is_stale(repo_root: Path, *, origin: str, runner: Runner) -> bool:
+    """True when this script runs from ``repo_root`` and lags origin/main.
+
+    A pickup clone that stopped refreshing kept running pre-#773 code that
+    opened placeholder PRs and had none of the gates below.
+    """
+    here = Path(__file__).resolve()
+    try:
+        here.relative_to(Path(repo_root).resolve())
+    except ValueError:
+        return False
+    proc = _git(
+        repo_root,
+        ["merge-base", "--is-ancestor", f"{origin}/main", "HEAD"],
+        runner=runner,
+    )
+    return getattr(proc, "returncode", 1) != 0
 
 
 def build_pickup_pr_kwargs(
@@ -289,7 +326,21 @@ def pickup_once(
     repo_root = Path(repo_root)
     open_pr = ensure_pr or _ensure_pr_default
 
+    # Fail closed before touching either remote. 2026-09-30: with AUTOPUSH=0
+    # in the responder env this job still pushed fix/* branches and opened
+    # public PRs, one carrying private account and execution ids.
+    if not ir_push_gate.autopush_enabled():
+        return [{
+            "action": "disabled",
+            "reason": f"{ir_push_gate.AUTOPUSH_ENV} is not enabled; nothing pushed",
+        }]
+
     _git(repo_root, ["fetch", "--quiet", origin], runner=run)
+    if _running_code_is_stale(repo_root, origin=origin, runner=run):
+        raise PickupError(
+            "pickup code is older than origin/main; refresh the clone "
+            "(reinstall config/com.radon.grok-fix-pickup.plist) before pushing"
+        )
 
     results: list[dict] = []
     for name in list_source_branches(repo_root, source, runner=run):
@@ -343,6 +394,20 @@ def pickup_once(
             })
             continue
 
+        try:
+            ir_push_gate.check_publish(
+                repo=repo_root,
+                base=base,
+                ref=local_ref,
+                title=pr_kwargs.get("title"),
+                body=pr_kwargs.get("body"),
+                runner=run,
+            )
+        except ir_push_gate.IrPushRefused as exc:
+            alert_refused_publish(name, str(exc), alerter=alerter)
+            results.append({"branch": name, "action": "refused", "reason": str(exc)})
+            continue
+
         if not origin_head:
             pushed = _git(
                 repo_root,
@@ -368,6 +433,51 @@ def pickup_once(
     return results
 
 
+# launchd gives pickup only HOME, PATH and GROK_PAGE_AUTOPUSH. These are the
+# credentials pickup itself uses: Pushover for refusal alerts and Turso for the
+# watchdog_pages lookup. Nothing else is read from the operator's .env.
+OPERATOR_ENV_KEYS = ("PUSHOVER_USER", "PUSHOVER_TOKEN", "TURSO_DB_URL", "TURSO_AUTH_TOKEN")
+
+
+def load_operator_env(path: Path) -> list[str]:
+    """Set the allowlisted keys from ``path``; return the names it set.
+
+    The process environment wins. The file must be a regular file (not a
+    symlink) owned by this user with no group or other access, or nothing is
+    read. Values are never printed.
+    """
+    try:
+        st = path.lstat()
+    except OSError:
+        return []
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return []
+    found: dict[str, str] = {}
+    for raw in lines:
+        line = raw.strip()
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        key, sep, value = line.partition("=")
+        key = key.strip()
+        if not sep or key not in OPERATOR_ENV_KEYS:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if value:
+            found[key] = value
+    loaded = []
+    for key, value in found.items():
+        if not os.environ.get(key):
+            os.environ[key] = value
+            loaded.append(key)
+    return sorted(loaded)
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -378,11 +488,18 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--repo", default=".", help="local clone to work in")
     parser.add_argument("--source", default=DEFAULT_SOURCE)
     parser.add_argument("--max-commits", type=int, default=DEFAULT_MAX_COMMITS)
+    parser.add_argument(
+        "--env-file",
+        default=None,
+        help="operator .env for Pushover and Turso (default: beside the clone)",
+    )
     args = parser.parse_args(argv)
+    repo = Path(args.repo).resolve()
+    load_operator_env(Path(args.env_file) if args.env_file else repo.parent / ".env")
 
     try:
         results = pickup_once(
-            Path(args.repo).resolve(),
+            repo,
             source=args.source,
             max_commits=args.max_commits,
         )
@@ -392,7 +509,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     for row in results:
         print(json.dumps(row, sort_keys=True))
     if any(
-        str(row.get("reason") or "").startswith("IR description:")
+        str(row.get("reason") or "").startswith(
+            ("IR description:", "private identifiers found")
+        )
         for row in results
     ):
         return 1

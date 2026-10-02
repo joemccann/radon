@@ -126,6 +126,15 @@ class TestEnqueueFromDispatch:
         assert len(excerpt) < 500
         assert "IGNORE PREVIOUS" not in excerpt or "..." in excerpt
 
+    def test_excerpt_redacts_credential_shapes(self):
+        # Page text reaches a commit body and a public PR; a service error
+        # that echoes a credential must not carry it there.
+        token = "gh" + "p_" + "Q" * 36
+        excerpt = sanitize_excerpt(f"push failed: token={token} for origin")
+        assert token not in excerpt
+        assert "push failed" in excerpt
+        assert excerpt.startswith("<untrusted-excerpt>")
+
     def test_enqueue_failure_does_not_break_dispatch(self, db_conn, monkeypatch):
         from watchdog import notify
 
@@ -290,6 +299,11 @@ class TestResponder:
         }), encoding="utf-8")
         monkeypatch.setenv("RADON_GROK_LKG_PATH", str(lkg_path))
         monkeypatch.setenv("RADON_GROK_RUNTIME_LOCK", str(tmp_path / "runtime.lock"))
+        # The fake binary is never exec'd (runner is stubbed); the trust
+        # check on a real path is test_grok_page_missing_binary.py.
+        monkeypatch.setattr(
+            grok_runtime, "lkg_binary_problem", lambda *_a, **_k: None
+        )
         enqueue_delivered_page(
             service="vcg-scan",
             severity="P1",
@@ -466,7 +480,55 @@ class TestResponder:
         with patch("grok_page_responder.subprocess.run") as run:
             run.return_value = SimpleNamespace(returncode=0, stdout="")
             assert sync_remote_clone(tmp_path) == "synced"
-            assert run.call_count == 3
+            assert run.call_count == 4
+
+    def test_sync_returns_a_parked_fix_branch_to_main(self, tmp_path, monkeypatch):
+        # A run that leaves the clone on its fix/* branch must not pin every
+        # later cycle to stale code behind a silent "ff-failed".
+        def git(cwd, *args):
+            out = subprocess.run(["git", *args], cwd=cwd, capture_output=True,
+                                 text=True, check=True)
+            return out.stdout.strip()
+
+        public, seed, clone = (tmp_path / n for n in ("public.git", "seed", "clone"))
+        git(tmp_path, "init", "-q", "--bare", "-b", "main", str(public))
+        git(tmp_path, "clone", "-q", str(public), str(seed))
+        git(seed, "config", "user.email", "t@example.com")
+        git(seed, "config", "user.name", "t")
+        (seed / "a.txt").write_text("1\n")
+        git(seed, "add", "a.txt")
+        git(seed, "commit", "-qm", "base")
+        git(seed, "push", "-q", "--no-verify", "origin", "HEAD:main")
+        git(tmp_path, "clone", "-q", str(public), str(clone))
+        git(clone, "config", "user.email", "t@example.com")
+        git(clone, "config", "user.name", "t")
+        git(clone, "checkout", "-qb", "fix/parked")
+        (clone / "b.txt").write_text("fix\n")
+        git(clone, "add", "b.txt")
+        git(clone, "commit", "-qm", "fix: local")
+        (seed / "a.txt").write_text("2\n")
+        git(seed, "commit", "-qam", "main moves on")
+        git(seed, "push", "-q", "--no-verify", "origin", "HEAD:main")
+
+        monkeypatch.setenv("GROK_PAGE_SYNC_REMOTE", "1")
+        monkeypatch.setattr("grok_page_responder.PUBLIC_REPO_URL", str(public))
+        assert sync_remote_clone(clone) == "synced"
+        assert git(clone, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+        assert git(clone, "rev-parse", "HEAD") == git(seed, "rev-parse", "HEAD")
+        assert git(clone, "log", "-1", "--format=%s", "fix/parked") == "fix: local"
+
+    def test_sync_fetches_over_public_https(self, tmp_path, monkeypatch):
+        # The unit hides ~/.ssh from the agent; main is public, so the sync
+        # needs no credential and must not depend on the clone's origin URL.
+        monkeypatch.setenv("GROK_PAGE_SYNC_REMOTE", "1")
+        with patch("grok_page_responder.subprocess.run") as run:
+            run.return_value = SimpleNamespace(returncode=0, stdout="")
+            assert sync_remote_clone(tmp_path) == "synced"
+        fetch = run.call_args_list[1].args[0]
+        assert fetch == [
+            "git", "fetch", "https://github.com/joemccann/radon.git",
+            "+refs/heads/main:refs/remotes/origin/main",
+        ]
 
     def test_lock_skips_overlapping_cycle(self, db_conn, tmp_path, monkeypatch):
         # REL-030: the responder now fails CLOSED, so an enabled cycle is an
@@ -666,6 +728,24 @@ class TestSignalKilledOneshotRerun:
                 tmp_path, now=NOW, grok_runner=grok, systemctl_runner=systemctl
             )
         return rc, followup
+
+    def test_rel108_migration_bearing_unit_never_auto_reruns(self, tmp_path, monkeypatch):
+        """R-302: data-refresh permission must not grant schema migration."""
+        import grok_page_responder as responder
+
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        monkeypatch.setattr(responder, "DEPLOY_TRANSITION_JOURNAL", tmp_path / "no-transition")
+        page = {"page_id": "synthetic", "service": "radon-demo-mirror.service", "kind": "unit"}
+        log = []
+        result = attempt_oneshot_rerun(
+            page, now=NOW, systemctl_runner=_fake_systemctl(next_elapse=self.FARAWAY, log=log),
+        )
+        assert result is None
+        assert not any(args[0] in {"start", "reset-failed", "restart"} for args in log)
+        root = Path(__file__).resolve().parents[3]
+        assert "migrate.py --demo" in (root / "cloud/services/radon-demo-mirror.service").read_text()
+        rules = (root / "cloud/config/polkit/50-radon-services.rules").read_text()
+        assert '"radon-demo-mirror.service": true' not in rules
 
     def test_faraway_timer_reruns_instead_of_standing_down(
         self, db_conn, tmp_path, monkeypatch

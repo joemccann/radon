@@ -702,3 +702,13 @@ class TestManualMigration:
         ]
         assert migrate_module._newest_migration_version() == max(automatic)
         assert drop[0] not in automatic
+
+
+def test_rel108_library_main_requires_explicit_target_arguments(migrate_module, monkeypatch):
+    """R-301: an omitted library argument must not select production."""
+    selected = []
+    monkeypatch.setattr(migrate_module, "resolve_target", lambda **kw: selected.append(kw) or ("https://synthetic.invalid", "unused"))
+    monkeypatch.setattr(migrate_module, "_migrate", lambda *_args: None)
+    with pytest.raises(SystemExit, match="explicit"):
+        migrate_module.main()
+    assert selected == [], "target selection must not occur for an ambiguous library call"

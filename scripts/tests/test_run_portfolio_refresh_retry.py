@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts.tests.shell_sandbox import stage_shell_script
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SCRIPT = REPO_ROOT / "scripts" / "run_portfolio_refresh.sh"
 
@@ -27,6 +29,12 @@ FAKE_PYTHON = """#!/bin/bash
 if [ "$1" = "-c" ]; then exit 0; fi
 echo yes
 """
+
+
+@pytest.fixture(autouse=True)
+def isolated_wrapper(tmp_path: Path, monkeypatch):
+    script = stage_shell_script(SCRIPT, tmp_path / "repo" / "scripts" / SCRIPT.name, tmp_path / "scratch")
+    monkeypatch.setattr(__name__ + ".SCRIPT", script)
 
 
 @pytest.fixture

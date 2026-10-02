@@ -513,7 +513,7 @@ export default function MobileChainLadder({
         </div>
       </div>
 
-      <div className={`mobile-chain__ladder-head ${gridClass}`}>
+      <div className={`mobile-chain__ladder-head ${gridClass}`} data-testid="chain-columns-header">
         {showCalls && <div className="mobile-chain__side-label">CALLS</div>}
         <div className="mobile-chain__strike-label">STRIKE</div>
         {showPuts && <div className="mobile-chain__side-label">PUTS</div>}

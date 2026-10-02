@@ -741,6 +741,54 @@ export function MaRatioFixture() {
   return MA_RATIO_MOCK;
 }
 
+// Source: e2e/rsi-oversold-tab.spec.ts
+export function RsiOversoldFixture() {
+  const DAY_MS = 86_400_000;
+  const SERIES_LENGTH = 240;
+
+  function isoDaysAgo(days: number): string {
+    return new Date(Date.now() - days * DAY_MS).toISOString().slice(0, 10);
+  }
+
+  const DATA_DATE = isoDaysAgo(1);
+
+  function buildSeries() {
+    const points = [];
+    for (let i = 0; i < SERIES_LENGTH; i++) {
+      const pct = Number((2 + 10 * Math.abs(Math.sin(i / 30))).toFixed(4));
+      points.push({
+        date: i === SERIES_LENGTH - 1 ? DATA_DATE : isoDaysAgo(SERIES_LENGTH - i),
+        pct_below_30: pct,
+        count_below_30: Math.round(pct * 5),
+        eligible: 500,
+        spx_close: Number((5000 + i * 11.5).toFixed(2)),
+      });
+    }
+    return points;
+  }
+
+  const SERIES = buildSeries();
+  return {
+    schema_version: 1,
+    scan_time: new Date().toISOString(),
+    data_date: DATA_DATE,
+    source: { constituents: "cache", constituents_count: 503, member_close_fetches: { yahoo: 490, stored: 13 } },
+    threshold: 10.0,
+    current: {
+      ...SERIES[SERIES.length - 1],
+      pct_below_30: 12.4,
+      count_below_30: 62,
+      eligible: 500,
+      spx_close: 6630.0,
+      state: "OVERSOLD CLUSTER",
+      cross_up: false,
+      highest_since: "2026-03-13",
+    },
+    series: SERIES,
+    missing: false,
+  };
+}
+
 // Source: e2e/calm-streak-tab.spec.ts
 export function CalmStreakFixture() {
   const DAY_MS = 86_400_000;
@@ -857,6 +905,55 @@ export function IeiHygFixture() {
     series: SERIES,
   };
   return IEI_HYG_MOCK;
+}
+
+// Source: e2e/credit-vix-tab.spec.ts
+export function CreditVixFixture() {
+  function buildSeries() {
+    const rows = [];
+    for (let i = 0; i < 88; i++) {
+      const day = new Date(Date.UTC(2026, 4, 26 + i));
+      const shy = Number((80 + i * 0.01).toFixed(4));
+      const hyg = Number((77.5 - i * 0.005).toFixed(4));
+      rows.push({
+        date: day.toISOString().slice(0, 10),
+        shy_close: shy,
+        hyg_close: hyg,
+        vix_close: Number((16 + (i % 5) * 0.2).toFixed(4)),
+        spread: shy - hyg,
+      });
+    }
+    const last = rows[rows.length - 1];
+    last.date = "2026-09-29";
+    last.shy_close = 81.16;
+    last.hyg_close = 77.36;
+    last.vix_close = 16.04;
+    last.spread = 3.8;
+    return rows;
+  }
+
+  const SERIES = buildSeries();
+
+  const CREDIT_VIX_MOCK = {
+    scan_time: new Date().toISOString(),
+    source: "ib",
+    count: SERIES.length,
+    current: {
+      date: "2026-09-29",
+      shy_close: 81.16,
+      hyg_close: 77.36,
+      vix_close: 16.04,
+      spread: 3.8,
+      rank_spread: 1,
+      rank_vix: 0.146,
+      gap: 0.854,
+      state: "CREDIT WIDE",
+      widest_since: "2015-08-17",
+      window_sessions: 88,
+    },
+    series: SERIES,
+  };
+  return CREDIT_VIX_MOCK;
 }
 
 // Source: e2e/divyield-tab.spec.ts

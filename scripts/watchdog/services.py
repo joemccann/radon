@@ -193,6 +193,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # window: no weekend/holiday gap to widen for. Shared price_history_daily
     # member closes (Yahoo sweep) + Turso — no IB dependency.
     "ma-ratio":         {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # rsi-oversold — radon-rsi-oversold.timer, daily 23:05 UTC every calendar
+    # day (weekend/holiday runs are unchanged-data heartbeats). Uniform 26h
+    # window. Shared price_history_daily member closes (Yahoo sweep) + Turso
+    # — no IB dependency.
+    "rsi-oversold":     {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # calm-streak — radon-calm-streak.timer, daily 02:40 + 14:30 UTC every
     # calendar day (304 runs heartbeat). Uniform 26h window. Cboe official
     # SPX daily OHLC — no IB dependency.
@@ -213,6 +218,12 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # then UW, then Yahoo. Yahoo is a complete fallback so this is not
     # grouped with IB outages.
     "iei-hyg":          {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # credit-vix — radon-credit-vix.timer, daily 22:25 UTC every calendar day
+    # (weekend/holiday runs heartbeat with no new rows). Uniform 26h
+    # window. SHY/HYG via the equity cascade; VIX via IB Index → Cboe →
+    # Yahoo. Yahoo/Cboe are complete fallbacks so this is not grouped
+    # with IB outages.
+    "credit-vix":       {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # hy-ad — radon-hyad.timer, Tue..Sat 11:00 UTC (T+1 morning after FINRA
     # TRACE end-of-day finalization; FINRA publishes only for days the bond
     # market is open, so weekend/holiday runs are unchanged-day heartbeats).
@@ -598,6 +609,9 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 22:45 UTC SPX 50d/200d MA breadth-ratio sweep — hourly check
         # surfaces a missed run within 1h of the 26h window expiring.
         "ma-ratio",
+        # Daily 23:05 UTC SPX RSI(14)<30 breadth sweep — hourly check
+        # surfaces a missed run within 1h of the 26h window expiring.
+        "rsi-oversold",
         # Daily 02:40 + 14:30 UTC Cboe SPX intraday-band streak pull — hourly
         # check surfaces a missed run within 1h of the 26h window expiring.
         "calm-streak",
@@ -613,6 +627,9 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 21:55 UTC IB IEI/HYG/DXY ratio pull — hourly check surfaces
         # a missed run within 1h of the 26h window expiring.
         "iei-hyg",
+        # Daily 22:25 UTC SHY/HYG/VIX pull — hourly check surfaces a
+        # missed run within 1h of the 26h window expiring.
+        "credit-vix",
         # Daily 02:15 UTC Cboe SPX/VIX1D straddle pull — hourly check
         # surfaces a missed run within 1h of the 26h window expiring.
         "straddle",

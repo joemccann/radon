@@ -476,6 +476,71 @@ def test_shared_backoff_guards_subsequent_pagination(state):
     assert error.value.status==429 and error.value.retry_after>0
 
 
+def _october(day_folder, name='a'):
+    return {'.tag':'file', 'id':name, 'rev':'1', 'content_hash':'a'*64,
+            'path_lower':f'/joe mccann/current/2026/october/{day_folder}/{name}.pdf'}
+
+
+def test_discover_finds_unpadded_single_digit_day_folder(state, monkeypatch):
+    """2026-10-02: the provider wrote 'Oct 2', the worker only looked for 'Oct 02' and reported ok."""
+    from research.dropbox import DropboxError
+    monkeypatch.setenv('RADON_RESEARCH_LOOKBACK_DAYS', '1')
+    calls = []
+    def listing(scope, cursor):
+        calls.append(scope)
+        if scope != '2026/october/oct 2':
+            raise DropboxError('Dropbox HTTP 409', status=409)
+        return {'cursor':'c', 'entries':[_october('oct 2')], 'has_more':False}
+    now = datetime(2026,10,2,16,tzinfo=timezone.utc)
+    assert discover(SimpleNamespace(list_page=listing), state, now, current_only=True) == 1
+    assert calls == ['2026/october/oct 02', '2026/october/oct 2']
+    assert state.work_count(folder_date='2026-10-02') == 1
+    assert state.cursor('2026/october/oct 2') == 'c'
+
+
+def test_discover_skips_unpadded_spelling_when_padded_folder_exists(state, monkeypatch):
+    monkeypatch.setenv('RADON_RESEARCH_LOOKBACK_DAYS', '1')
+    calls = []
+    client = SimpleNamespace(list_page=lambda scope, cursor: calls.append(scope) or {'cursor':'c', 'entries':[], 'has_more':False})
+    discover(client, state, datetime(2026,10,2,16,tzinfo=timezone.utc), current_only=True)
+    assert calls == ['2026/october/oct 02']
+
+
+def test_discover_reports_month_folders_it_cannot_map_to_a_day(state, monkeypatch):
+    """A renamed day folder must turn discovery red, never a silent 'discovered: 0'."""
+    from research.worker import DiscoveryError
+    monkeypatch.setenv('RADON_RESEARCH_LOOKBACK_DAYS', '1')
+    months = []
+    client = SimpleNamespace(
+        list_page=lambda scope, cursor: {'cursor':'c', 'entries':[], 'has_more':False},
+        folder_names=lambda month: months.append(month) or ['oct 1', 'oct 02', 'october 3rd'])
+    with pytest.raises(DiscoveryError) as caught:
+        discover(client, state, datetime(2026,10,2,16,tzinfo=timezone.utc), current_only=True)
+    assert months == ['2026/october']
+    assert [(f['type'], f['count']) for f in caught.value.failures] == [('dropbox_unrecognized_folder', 1)]
+
+
+def test_discover_treats_missing_month_folder_as_empty(state, monkeypatch):
+    from research.dropbox import DropboxError
+    monkeypatch.setenv('RADON_RESEARCH_LOOKBACK_DAYS', '1')
+    def absent(*_args, **_kwargs):
+        raise DropboxError('Dropbox HTTP 409', status=409)
+    client = SimpleNamespace(list_page=absent, folder_names=absent)
+    assert discover(client, state, datetime(2026,10,2,16,tzinfo=timezone.utc), current_only=True) == 0
+
+
+def test_guarded_client_guards_month_listing_only_when_supported(state):
+    from research.ingestion import GuardedClient
+    from research.dropbox import DropboxError
+    backoff=Backoff(multiprocessing.get_context('spawn'))
+    assert not hasattr(GuardedClient(SimpleNamespace(list_page=None),backoff),'folder_names')
+    guarded=GuardedClient(SimpleNamespace(folder_names=lambda month:[month]),backoff)
+    assert guarded.folder_names('2026/october')==['2026/october']
+    backoff.record(SimpleNamespace(status=429,retry_after=60))
+    with pytest.raises(DropboxError) as error:guarded.folder_names('2026/october')
+    assert error.value.status==429
+
+
 def test_shutdown_before_child_setsid_falls_back_to_process_signal(monkeypatch):
     from research import ingestion
     calls=[]

@@ -13,7 +13,14 @@ services:
 
     environment:
       - VNC_SERVER_PASSWORD=${VNC_SERVER_PASSWORD:-}
-      - EXISTING_SESSION_DETECTED_ACTION=${EXISTING_SESSION_DETECTED_ACTION:-primary}
+      # primaryoverride: when the operator logs in to IBKR Mobile / the web
+      # portal with the username this Gateway shares, IBC yields the session
+      # (scenario 6) instead of reclaiming it (primary, 2026-09-25), and the
+      # watchdog sets the operator hold so nothing logs back in. A fresh
+      # Gateway login still takes the session, so 2FA recovery is unchanged.
+      # Pinned, not env-overridable: an old `primary` in /etc/radon/env must
+      # not quietly bring the fight back.
+      - EXISTING_SESSION_DETECTED_ACTION=primaryoverride
       # Exit after an unattended 2FA timeout and leave relaunch ownership to the
       # watchdog. Relogin retries inside IBC would bypass the same push lock.
       - TWOFA_TIMEOUT_ACTION=exit

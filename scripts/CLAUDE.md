@@ -15,7 +15,7 @@ Yahoo Finance is **ABSOLUTE LAST RESORT**. Never make Yahoo the scheduled, prima
 | 0–9 | FastAPI IBPool (sync=3, orders=4, data=5) |
 | 10–19 | WS relay |
 | 20–49 | Subprocess scripts AND monitor_daemon handlers — **always `client_id="auto"`** |
-| 50–69 | Scanners — fixed IDs: CRI 50–61, breadth 62–66, RV-ratio 67–68 (`rv_ratio_scan.py:RV_RATIO_IB_CLIENT_IDS`), credit-spread 56+69 (`fetch_credit_spread.py:CREDIT_IB_HISTORY_CLIENT_IDS`; shared with iei-hyg — the 21:45/21:55 gap is NOT the mutex, `RandomizedDelaySec=300` on both timers can close it, so both units serialize on `flock /run/lock/radon-ib-history-5669.lock`, R-127) |
+| 50–69 | Scanners — fixed IDs: CRI 50–61, breadth 62–66, RV-ratio 67–68 (`rv_ratio_scan.py:RV_RATIO_IB_CLIENT_IDS`), credit-spread 56+69 (`fetch_credit_spread.py:CREDIT_IB_HISTORY_CLIENT_IDS`; shared with iei-hyg and credit-vix — the 21:45/21:55/22:25 gaps are NOT the mutex, `RandomizedDelaySec=300` on the timers can close them, so those units serialize on `flock /run/lock/radon-ib-history-5669.lock`, R-127) |
 | 90–99 | CLI |
 
 **Never hardcode in 20–49.** As of 2026-05-20 daemon handlers (`fill_monitor`, `exit_orders`, `journal_sync`) also use `client_id="auto"` — prior hardcoded 70/71/72 left them one CLOSE_WAIT away from stuck "client id already in use". Auto-allocator: `scripts/clients/ib_client.py:_connect_auto_allocate`.
@@ -30,7 +30,10 @@ root cause: unbounded I/O over the direct-to-cloud HTTP pipeline. Rules:
 
 1. **Paginate large reads on an id cursor** (`WHERE id > ? ORDER BY id LIMIT 200`).
    One SELECT of thousands of rows with text payloads 502s ("upstream forward
-   failed") and, once degraded, keeps 502ing for hours.
+   failed") and, once degraded, keeps 502ing for hours. If no index covers
+   `(filter, id)`, page ids first (`WHERE id IN (SELECT id ... ORDER BY id
+   LIMIT ?)`): otherwise SQLite sorts every matching full row per page
+   (knowledge newsfeed: 25s vs 0.08s, 2026-09-28).
 2. **`executemany` is one round-trip PER ROW over Hrana.** Bulk writes must be
    chunked multi-row `INSERT ... VALUES (...), (...)` statements (~400 rows,
    params well under the variable limit). Exemplar:
@@ -175,3 +178,10 @@ Full convention (per-contract vs per-share `avg_cost`) lives in `web/CLAUDE.md` 
 ## Entry-Date Resolution Contract
 
 Strict ordered fallback in `ib_sync.py:fetch_positions`, MOST → LEAST specific. Test: `scripts/tests/test_combo_entry_date.py`. Full rule in `web/CLAUDE.md` §Entry-Date Resolution — Python-side implementation must match the order documented there.
+
+## Option close cache expiry (REL-021b / R-034)
+
+The relay prunes expired contract closes at startup and on the first cache
+access/write of each Eastern day, then persists the reduced cache. Today's
+expiry remains available through the session. Late ticks cannot resurrect
+expired keys; expiry comparison uses Eastern dates, not the host timezone.

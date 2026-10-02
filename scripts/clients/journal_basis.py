@@ -16,10 +16,10 @@ logger = logging.getLogger(__name__)
 # Real libsql_experimental cursors return plain tuples, so name-based access
 # must fall back to position or every row silently reads as empty (CTA-01,
 # layer 2 — the .rows AttributeError was masking this). The paginated DB reader
-# selects trade_id as a fourth cursor column and normalizes it back to this
+# selects trade_id and rowid as pagination columns and normalizes it back to this
 # stable row shape before derivation.
 _JOURNAL_COLUMNS = ("payload", "filled_at", "written_at")
-_PAGED_JOURNAL_COLUMNS = ("trade_id", *_JOURNAL_COLUMNS)
+_PAGED_JOURNAL_COLUMNS = ("trade_id", *_JOURNAL_COLUMNS, "journal_rowid")
 _JOURNAL_PAGE_SIZE = 200
 
 
@@ -301,7 +301,12 @@ def _row_is_before_cutoff(row: Any, before: str) -> bool:
 
 
 def _fetch_journal_rows_for_tickers(db, tickers: Iterable[str]) -> list[Any]:
-    """Fetch ticker history in bounded Hrana pages, then restore legacy order."""
+    """REL-108 / R-319: page by insertion order, then restore effective order.
+
+    New executions may have digit-prefixed IDs after an ep-prefixed page was
+    read. SQLite rowid advances independently of those namespaces. This scan
+    is not a snapshot: updates/deletions during enumeration need a later sync.
+    """
     normalized_tickers = tuple(
         sorted({_normalize_ticker(ticker) for ticker in tickers if _normalize_ticker(ticker)})
     )
@@ -309,21 +314,21 @@ def _fetch_journal_rows_for_tickers(db, tickers: Iterable[str]) -> list[Any]:
         return []
 
     placeholders = ", ".join("?" for _ in normalized_tickers)
-    cursor = ""
+    cursor = 0
     accumulated: list[tuple[str, tuple[Any, Any, Any]]] = []
 
     while True:
         result = db.execute(
             f"""
-            SELECT trade_id, payload, filled_at, written_at
+            SELECT trade_id, payload, filled_at, written_at, rowid AS journal_rowid
             FROM journal
-            WHERE trade_id > ?
+            WHERE rowid > ?
               AND UPPER(COALESCE(
                   json_extract(payload, '$.ticker'),
                   json_extract(payload, '$.symbol'),
                   ''
               )) IN ({placeholders})
-            ORDER BY trade_id ASC
+            ORDER BY rowid ASC
             LIMIT ?
             """,
             (cursor, *normalized_tickers, _JOURNAL_PAGE_SIZE),
@@ -334,8 +339,9 @@ def _fetch_journal_rows_for_tickers(db, tickers: Iterable[str]) -> list[Any]:
 
         for row in page:
             trade_id = str(_paged_row_value(row, "trade_id") or "")
-            if not trade_id or trade_id <= cursor:
-                raise RuntimeError("journal basis pagination returned a non-advancing trade_id")
+            rowid = _paged_row_value(row, "journal_rowid")
+            if not trade_id or not isinstance(rowid, int) or rowid <= cursor:
+                raise RuntimeError("journal basis pagination returned a non-advancing rowid")
             accumulated.append(
                 (
                     trade_id,
@@ -347,7 +353,7 @@ def _fetch_journal_rows_for_tickers(db, tickers: Iterable[str]) -> list[Any]:
                 )
             )
 
-        next_cursor = accumulated[-1][0]
+        next_cursor = _paged_row_value(page[-1], "journal_rowid")
         if next_cursor <= cursor:
             raise RuntimeError("journal basis pagination cursor did not advance")
         cursor = next_cursor

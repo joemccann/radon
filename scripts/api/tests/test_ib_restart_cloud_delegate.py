@@ -392,7 +392,7 @@ class TestAppRoleGateAtTheWire:
         monkeypatch.setattr(admin_services, "control_unit", control)
         resp = client.post("/admin/services/radon-api.service/restart")
         assert resp.status_code == 200, resp.text
-        control.assert_awaited_once_with("radon-api.service", "restart")
+        control.assert_awaited_once_with("radon-api.service", "restart", actor="local")
         remote.assert_not_awaited()
 
 

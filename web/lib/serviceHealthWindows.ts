@@ -183,6 +183,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
 
   // ``ma-ratio`` — radon-ma-ratio.timer fires daily 22:45 UTC every calendar day (weekend runs are unchanged-data heartbeats), so a uniform 26h window matches its div-yield sibling; shared price_history_daily member closes (Yahoo sweep) + Turso only, no IB.
   "ma-ratio": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
+  // ``rsi-oversold`` — radon-rsi-oversold.timer fires daily 23:05 UTC every calendar day (weekend runs are unchanged-data heartbeats), so a uniform 26h window matches its ma-ratio sibling; shared price_history_daily member closes (Yahoo sweep) + Turso only, no IB.
+  "rsi-oversold": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
   // ``calm-streak``: radon-calm-streak.timer fires 02:40 and 14:30 UTC every calendar day (304 runs are heartbeats), so a uniform 26h window; Cboe SPX HTTP + Turso only.
   "calm-streak": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
@@ -224,6 +227,10 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
 
   // ``iei-hyg`` — radon-iei-hyg.timer fires daily 21:55 UTC; IB → UW → Yahoo cascade, so requires_ib stays false.
   "iei-hyg": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
+  // ``credit-vix`` — radon-credit-vix.timer fires daily 22:25 UTC; SHY/HYG
+  // equity cascade plus IB Index → Cboe → Yahoo VIX, so requires_ib stays false.
+  "credit-vix": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``hy-ad``: radon-hyad.timer fires Tue..Sat 11:00 UTC, the morning after
   // FINRA TRACE end-of-day finalization (T+1). A uniform 120h window covers

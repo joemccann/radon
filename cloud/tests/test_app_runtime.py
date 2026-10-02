@@ -554,16 +554,22 @@ def _proxy_dir_from(result: subprocess.CompletedProcess[str]) -> str:
 
 
 def test_run_refuses_to_start_when_the_notify_proxy_cannot_bind(tmp_path: Path) -> None:
-    missing = "/nonexistent-radon-proxy-dir"
+    # R-438 now refuses failed environment rendering before proxy startup.
+    # Keep that prerequisite writable so this test reaches its bind fault.
+    missing = str(tmp_path / "notify")
     # Directory provisioning also uses Python; fail only the notify proxy.
     failing_python = tmp_path / "failing-python"
     lease_dir = shlex.quote(str(tmp_path / 'state' / 'ib-lease'))
     _write_executable(failing_python,
         f'#!/bin/bash\nif [[ "${{2:-}}" == {lease_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
+    # The injected proxy never binds. Exercise all admission polls without
+    # paying their sleep delay on the shared runner; keep the timeout intact.
+    _write_executable(tmp_path / "sleep", "#!/bin/bash\nexit 0\n")
     result = _run(
         tmp_path,
         ["run", "radon-relay.service"],
-        extra_env={"RADON_TEST_NOTIFY_PROXY_DIR": missing, "RADON_TEST_PYTHON": str(failing_python)},
+        extra_env={"RADON_TEST_NOTIFY_PROXY_DIR": missing, "RADON_TEST_PYTHON": str(failing_python),
+                   "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"]},
     )
     assert result.returncode == 71, result.stderr
     assert "notify proxy" in result.stderr
@@ -863,8 +869,9 @@ def test_run_api_cleans_staged_credential_on_pre_exec_failure(
     private_anchor = shlex.quote(str(tmp_path / 'state' / 'private'))
     secret_store = shlex.quote(str(tmp_path / 'data' / 'secret_store'))
     lease_dir = shlex.quote(str(tmp_path / 'state' / 'ib-lease'))
+    control_dir = shlex.quote(str(tmp_path / 'state' / 'control'))
     _write_executable(failing_python,
-        f'#!/bin/bash\nif [[ "${{2:-}}" == {private_anchor} || "${{2:-}}" == {secret_store} || "${{2:-}}" == {lease_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
+        f'#!/bin/bash\nif [[ "${{2:-}}" == {private_anchor} || "${{2:-}}" == {secret_store} || "${{2:-}}" == {lease_dir} || "${{2:-}}" == {control_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
     result = _run(
         tmp_path,
         ["run", "radon-api.service"],
@@ -950,6 +957,57 @@ def test_run_newsfeed_does_not_mount_ib_remote_certs(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
     assert "ib-remote" not in log
+
+
+def test_run_api_binds_the_host_control_socket_directory(tmp_path: Path) -> None:
+    """radon-control: the API container's only path to unit control."""
+    control = tmp_path / "control"
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"RADON_TEST_CONTROL_DIR": str(control)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert f"-v {control}:/run/radon-control " in log
+    assert "--env RADON_CONTROL_SOCKET=/run/radon-control/control.sock" in log
+    # Pre-created owner-only so start order against radon-control is moot.
+    assert control.is_dir()
+    assert oct(control.stat().st_mode & 0o777) == "0o700"
+
+
+def test_run_api_refuses_a_symlinked_control_socket_directory(tmp_path: Path) -> None:
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    control = tmp_path / "control"
+    control.symlink_to(target)
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"RADON_TEST_CONTROL_DIR": str(control)},
+    )
+    assert result.returncode == 78
+    log_path = result.docker_log  # type: ignore[attr-defined]
+    assert not log_path.exists() or " run " not in f" {log_path.read_text(encoding='utf-8')}"
+
+
+@pytest.mark.parametrize("unit", [
+    "radon-nextjs.service",
+    "radon-relay.service",
+    "radon-monitor.service",
+    "radon-newsfeed.service",
+])
+def test_no_other_container_gets_the_control_socket(tmp_path: Path, unit: str) -> None:
+    control = tmp_path / "control"
+    result = _run(
+        tmp_path,
+        ["run", unit],
+        extra_env={"RADON_TEST_CONTROL_DIR": str(control)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert "radon-control" not in log
+    assert "RADON_CONTROL_SOCKET" not in log
 
 
 def test_run_newsfeed_mounts_host_playwright_browsers(tmp_path: Path) -> None:
@@ -1590,3 +1648,68 @@ def test_api_boot_bounds_the_schema_migration() -> None:
     text = RUNTIME.read_text(encoding="utf-8")
     api_command = text.split("radon-api.service)", 1)[1].split(";;", 1)[0]
     assert "python scripts/db/migrate.py --boot &&" in api_command
+
+
+@pytest.mark.parametrize("fault,unit", [
+    (fault, unit)
+    for fault in ("sed", "grep", "missing_input")
+    for unit in ("radon-relay.service", "radon-newsfeed.service")
+    if fault != "grep" or unit == "radon-newsfeed.service"
+])
+def test_rel158_failed_env_render_never_starts_container(tmp_path: Path, unit: str, fault: str) -> None:
+    """R-438: failed render/filter must refuse before the fake engine run."""
+    rendered_dir = tmp_path / "rendered"
+    rendered_dir.mkdir()
+    prior = rendered_dir / (unit + ".env")
+    prior.write_text("NODE_ENV=production\n")
+    extra = {"NOTIFY_SOCKET": "", "RADON_TEST_NOTIFY_PROXY_DIR": str(rendered_dir)}
+    if fault == "missing_input":
+        extra["RADON_TEST_ENV_FILE"] = str(tmp_path / "missing-input")
+    else:
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        _write_executable(bin_dir / fault, "#!/bin/bash\nexit 2\n")
+        extra["PATH"] = str(bin_dir) + os.pathsep + os.environ["PATH"]
+    result = _run(tmp_path, ["run", unit], extra_env=extra)
+    assert result.returncode == 71, result.stderr
+    assert not any(line.startswith("run ") for line in result.docker_log.read_text().splitlines())
+    assert prior.read_text() == "NODE_ENV=production\n"
+    assert list(rendered_dir.iterdir()) == [prior]
+
+
+def test_rel158_notify_proxy_filters_container_control_messages() -> None:
+    """R-439: container notices cannot change the host unit's lifecycle/PID."""
+    with tempfile.TemporaryDirectory(prefix="rdn", dir="/tmp") as directory:
+        root = Path(directory)
+        upstream_path, listen_path = root / "up", root / "in"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as upstream:
+            upstream.bind(str(upstream_path))
+            upstream.settimeout(5)
+            proc = subprocess.Popen(
+                ["bash", str(RUNTIME), "notify-proxy", str(listen_path), str(upstream_path)],
+                env={**_runtime_env(root), "RADON_TEST_PYTHON": sys.executable},
+                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            )
+            try:
+                deadline = time.monotonic() + 5
+                while not listen_path.exists() and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                assert listen_path.exists(), "notify proxy did not bind"
+                with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as client:
+                    client.sendto(b"MAINPID=1\nSTOPPING=1\n", str(listen_path))
+                    client.sendto(
+                        b"READY=1\nMAINPID=2\nWATCHDOG=trigger\nWATCHDOG=1\n"
+                        b"RELOADING=1\nSTATUS=collecting fills\nEXTEND_TIMEOUT_USEC=999999\n",
+                        str(listen_path),
+                    )
+                    # The first packet must disappear entirely; the mixed
+                    # packet retains exactly the three permitted notices.
+                    assert upstream.recv(65536).splitlines() == [
+                        b"READY=1", b"WATCHDOG=1", b"STATUS=collecting fills",
+                    ]
+                    client.sendto(b"READY=1\n", str(listen_path))
+                    assert upstream.recv(65536).splitlines() == [b"READY=1"]
+            finally:
+                proc.terminate()
+                proc.wait(timeout=5)
+                proc.stderr.close()

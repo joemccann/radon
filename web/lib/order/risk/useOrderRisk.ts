@@ -41,6 +41,7 @@ import {
 import {
   augmentOrderLegsWithPortfolioCoverage,
   computeOrderRisk,
+  signedPayoffRange,
   type ChainOrderLeg,
   type CoveringPortfolioLeg,
   type OrderRisk,
@@ -314,6 +315,10 @@ function summaryFiguresAreFinite(summary: OrderPresentationSummary): boolean {
     summary.marginImpact?.requirement,
     summary.marginImpact?.availableBefore,
     summary.marginImpact?.availableAfter,
+    summary.withHeldLegs?.orderBest,
+    summary.withHeldLegs?.orderWorst,
+    summary.withHeldLegs?.spreadBest,
+    summary.withHeldLegs?.spreadWorst,
   ];
   return figures.every(
     (value) => typeof value !== "number" || Number.isFinite(value),
@@ -646,6 +651,39 @@ function buildCoverageNote(
   return `COVERED BY HELD ${held}`;
 }
 
+/**
+ * Signed best / worst expiry P&L when held options cover the order, for the
+ * order alone (held long already paid for) and for the whole spread (held
+ * long at its cost basis). Signed on purpose: `maxGain` / `maxLoss` clamp
+ * at 0, which shows a spread that loses at every settlement as "max gain
+ * $0" and a locked-in profit as "max loss $0".
+ */
+function buildWithHeldLegs(
+  augmented: ReturnType<typeof augmentOrderLegsWithPortfolioCoverage>,
+  adjustedNetPremium: number,
+  orderRisk: ReturnType<typeof computeOrderRisk>,
+): OrderPresentationSummary["withHeldLegs"] {
+  if (!augmented.coveringLegs.some((l) => l.type === "Option")) return null;
+  // Partial cover leaves a naked residue: the spread is exactly as unbounded
+  // as the order, and the Gate 1 warning already owns that case.
+  if (orderRisk.maxLossUnbounded || orderRisk.undefinedRiskReason != null) return null;
+  if (orderRisk.maxLoss == null) return null;
+  const bestUnbounded = orderRisk.maxGainUnbounded;
+  const range = (netPremium: number) =>
+    signedPayoffRange(augmented.riskLegs, netPremium, augmented.comboQuantity);
+  const order = range(adjustedNetPremium);
+  const adjustment = augmented.heldOptionBasisAdjustment;
+  const spread = adjustment == null ? null : range(adjustedNetPremium + adjustment);
+  return {
+    orderBest: bestUnbounded ? null : order.best,
+    orderWorst: order.worst,
+    spreadBest: spread == null || bestUnbounded ? null : spread.best,
+    spreadWorst: spread == null ? null : spread.worst,
+    bestUnbounded,
+    heldBasisDollars: adjustment == null ? null : adjustment * augmented.comboQuantity * 100,
+  };
+}
+
 function estimateOptionMargin(opt: OptionOrderRiskInput, risk: OrderRisk): MarginEstimate {
   const isUndefined = risk.maxLossUnbounded || risk.undefinedRiskReason != null;
   const single = opt.chainLegs.length === 1 ? opt.chainLegs[0] : null;
@@ -887,6 +925,8 @@ export function useOrderRisk(
       augmented.comboQuantity,
     );
 
+    const withHeldLegs = buildWithHeldLegs(augmented, adjustedNetPremium, risk);
+
     const coveredCall = isFullyStockCoveredCall(opt, augmented.coveringLegs);
     const optionMargin = coveredCall
       ? estimateInitialMargin({ kind: "stock-covered-call" })
@@ -901,6 +941,7 @@ export function useOrderRisk(
       undefinedRiskReason: risk.undefinedRiskReason,
       marginImpact: buildMarginImpact(optionMargin, portfolio, coverageStatus),
       coverageNote: buildCoverageNote(opt, augmented.coveringLegs, coveredCall),
+      withHeldLegs,
     };
 
     // Unbounded / undefined risk is advisory (Gate 1 warning), not a

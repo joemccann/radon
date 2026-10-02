@@ -47,15 +47,64 @@ def _secrets_in(node) -> set[str]:
     return set(SECRET_RE.findall(yaml.safe_dump(node, default_flow_style=False)))
 
 
+def _requires_guard(condition: str, guards: set[str]) -> bool:
+    """Conservative implication check for positive guards in AND/OR expressions.
+
+    Every OR arm must require a guard; one AND term is sufficient. Unknown
+    atoms and negated expressions prove nothing. Quoted text is never code.
+    This intentionally does not try to evaluate the full Actions language.
+    """
+    condition = condition.strip()
+    if condition.startswith('${{') and condition.endswith('}}'):
+        condition = condition[3:-2].strip()
+    tokens = re.findall(r"'(?:[^']|'')*'|&&|\|\||[()]|[^'&|()]+", condition)
+    depth = 0
+    conjunctions, alternatives = [], []
+    outer_close = None
+    for index, token in enumerate(tokens):
+        if token == '(':
+            depth += 1
+        elif token == ')':
+            depth -= 1
+            if depth == 0 and outer_close is None:
+                outer_close = index
+        elif depth == 0:
+            if token == '&&':
+                conjunctions.append(index)
+            elif token == '||':
+                alternatives.append(index)
+        if depth < 0:
+            return False
+    if depth != 0:
+        return False
+    if tokens and tokens[0] == '(' and outer_close == len(tokens) - 1:
+        return _requires_guard(''.join(tokens[1:-1]), guards)
+    cuts = alternatives or conjunctions
+    if cuts:
+        edges = [-1, *cuts, len(tokens)]
+        results = [_requires_guard(''.join(tokens[a + 1:b]), guards) for a, b in zip(edges, edges[1:])]
+        return all(results) if alternatives else any(results)
+    return condition in guards
+
+
+def _requires_success(condition: str) -> bool:
+    # GitHub inserts success() only in the absence of a status function.
+    # always()/!cancelled()/failure() can run despite a skipped guarded need.
+    status_override = re.search(r'\b(?:always|cancelled|failure|success)\s*\(', condition)
+    return not status_override or _requires_guard(condition, {'success()'})
+
+
 def _push_only(name: str, jobs: dict, seen: frozenset[str] = frozenset()) -> bool:
     """True when this job can only run on a push (directly or via `needs`)."""
     if name in seen or name not in jobs:
         return False
     job = jobs[name]
-    if PUSH_GUARD in str(job.get("if", "")):
+    if _requires_guard(str(job.get("if", "")), {PUSH_GUARD}):
         return True
     needs = _needs(job)
-    return bool(needs) and any(_push_only(n, jobs, seen | {name}) for n in needs)
+    return _requires_success(str(job.get("if", ""))) and bool(needs) and any(
+        _push_only(n, jobs, seen | {name}) for n in needs
+    )
 
 
 def unguarded_secrets(text: str) -> list[str]:
@@ -71,7 +120,7 @@ def unguarded_secrets(text: str) -> list[str]:
         for secret in sorted(_secrets_in(job)):
             bad.append(f"{name}: {secret}")
         for i, step in enumerate(steps):
-            if PUSH_GUARD in str(step.get("if", "")):
+            if _requires_guard(str(step.get("if", "")), {PUSH_GUARD}):
                 continue
             label = step.get("name") or step.get("uses") or f"step {i}"
             for secret in sorted(_secrets_in(step)):
@@ -113,3 +162,265 @@ def test_a_secret_added_to_a_pull_request_test_job_is_caught() -> None:
     )
     assert mutated != text, "ci.yml no longer has the test job env this mutation targets"
     assert unguarded_secrets(mutated) == ["web-tests: VPS_SSH_KEY"]
+
+
+# --- Every non-main trigger, not only pull_request (F20260930-A01) ----------
+#
+# `workflow_dispatch` (and `workflow_call`, `repository_dispatch`, a push to any
+# branch) runs the workflow and the repository code from a ref the caller
+# picks. Anyone with Write can push a branch and dispatch on it, so a
+# secret-bearing job reachable that way hands its secrets to that branch's
+# code. Only `schedule` (default branch) and a push restricted to `main` are
+# safe on their own; every other trigger needs the job to check the ref.
+
+MAIN_GUARD = "github.ref == 'refs/heads/main'"
+# Contexts a dispatcher or PR author controls. Expanded inside `run:`, they are
+# pasted into the shell before it parses the line (expression injection).
+UNTRUSTED_EXPR_RE = re.compile(r"\$\{\{[^}]*\b(inputs\.|github\.event\.|github\.head_ref)")
+# Secret-bearing dispatch workflows: no `${{ }}` in `run:` at all.
+SECRET_DISPATCH_WORKFLOWS = ("research-pdf-cut.yml", "external-health-probe.yml")
+
+
+def _push_main_only(wf: dict) -> bool:
+    on = wf.get("on", wf.get(True, {}))
+    push = on.get("push") if isinstance(on, dict) else None
+    if not isinstance(push, dict):
+        return False
+    return (
+        list(push.get("branches") or []) == ["main"]
+        and not {"tags", "branches-ignore", "tags-ignore"} & set(push)
+    )
+
+
+def _non_main_triggers(wf: dict) -> set[str]:
+    safe = {"schedule"} | ({"push"} if _push_main_only(wf) else set())
+    return _triggers(wf) - safe
+
+
+def _main_guarded(cond: str, wf: dict) -> bool:
+    # A push guard means main when push itself is restricted to main.
+    guards = {MAIN_GUARD} | ({PUSH_GUARD} if _push_main_only(wf) else set())
+    return _requires_guard(cond, guards)
+
+
+def _main_only(name: str, wf: dict, seen: frozenset[str] = frozenset()) -> bool:
+    jobs = wf.get("jobs") or {}
+    if name in seen or name not in jobs:
+        return False
+    job = jobs[name]
+    if _main_guarded(str(job.get("if", "")), wf):
+        return True
+    needs = _needs(job)
+    return _requires_success(str(job.get("if", ""))) and bool(needs) and any(
+        _main_only(n, wf, seen | {name}) for n in needs
+    )
+
+
+def non_main_reachable_secrets(text: str) -> list[str]:
+    """Secrets a non-main ref could reach, as `job[/step]: SECRET`."""
+    wf = _load(text)
+    if not _non_main_triggers(wf):
+        return []
+    bad: list[str] = []
+    for name, job in (wf.get("jobs") or {}).items():
+        if not isinstance(job, dict) or _main_only(name, wf):
+            continue
+        job = dict(job)
+        steps = job.pop("steps", [])
+        for secret in sorted(_secrets_in(job)):
+            bad.append(f"{name}: {secret}")
+        for i, step in enumerate(steps):
+            if _main_guarded(str(step.get("if", "")), wf):
+                continue
+            label = step.get("name") or step.get("uses") or f"step {i}"
+            for secret in sorted(_secrets_in(step)):
+                bad.append(f"{name}/{label}: {secret}")
+    return bad
+
+
+def untrusted_run_interpolations(text: str, *, any_expression: bool = False) -> list[str]:
+    """`run:` blocks that paste an expression into the shell."""
+    wf = _load(text)
+    bad: list[str] = []
+    for name, job in (wf.get("jobs") or {}).items():
+        for i, step in enumerate((job or {}).get("steps") or []):
+            run = str(step.get("run", ""))
+            hit = "${{" in run if any_expression else UNTRUSTED_EXPR_RE.search(run)
+            if hit:
+                bad.append(f"{name}/{step.get('name') or f'step {i}'}")
+    return bad
+
+
+@pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
+def test_no_non_main_reachable_job_receives_a_secret(path: Path) -> None:
+    assert non_main_reachable_secrets(path.read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
+def test_no_run_block_interpolates_caller_controlled_input(path: Path) -> None:
+    assert untrusted_run_interpolations(path.read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.parametrize("name", SECRET_DISPATCH_WORKFLOWS)
+def test_secret_bearing_dispatch_workflows_pass_values_only_through_env(name: str) -> None:
+    text = (WORKFLOWS / name).read_text(encoding="utf-8")
+    assert "workflow_dispatch" in _triggers(_load(text))
+    assert untrusted_run_interpolations(text, any_expression=True) == []
+
+
+def test_research_pdf_cut_validates_the_date_and_publishes_counts_only() -> None:
+    text = (WORKFLOWS / "research-pdf-cut.yml").read_text(encoding="utf-8")
+    wf = _load(text)
+    step = next(s for s in wf["jobs"]["cut"]["steps"] if "research.cut_report" in s.get("run", ""))
+    assert step["env"]["CUT_DATE"] == "${{ inputs.date }}"
+    run = step["run"]
+    assert "^[0-9]{4}-[0-9]{2}-[0-9]{2}$|^$" in run
+    assert run.index("[0-9]{4}") < run.index("research.cut_report"), "validate before use"
+    assert '--date "$CUT_DATE"' in run
+    # The artifact of this public repository must not carry document identifiers.
+    assert "--counts-only" in run
+
+
+def test_dropping_the_main_guard_from_a_dispatch_job_is_caught() -> None:
+    for name in SECRET_DISPATCH_WORKFLOWS:
+        text = (WORKFLOWS / name).read_text(encoding="utf-8")
+        assert f"if: {MAIN_GUARD}" in text, f"{name} no longer carries the main-ref guard"
+        mutated = text.replace(f"if: {MAIN_GUARD}", "if: always()", 1)
+        assert non_main_reachable_secrets(mutated), f"{name}: removed guard not noticed"
+
+
+def test_a_dispatch_trigger_on_a_push_guarded_workflow_is_caught() -> None:
+    wf = (
+        "on:\n  workflow_dispatch: {}\n"
+        "jobs:\n  j:\n    if: github.event_name == 'push'\n    runs-on: x\n"
+        "    steps:\n      - run: echo\n        env:\n          T: ${{ secrets.T }}\n"
+    )
+    # event_name == 'push' excludes dispatch here, but there is no main-only
+    # push trigger, so it is not accepted as a main guard.
+    assert non_main_reachable_secrets(wf) == ["j/step 0: T"]
+
+
+def test_a_push_to_any_branch_counts_as_a_non_main_trigger() -> None:
+    wf = (
+        "on:\n  push: {}\n"
+        "jobs:\n  j:\n    runs-on: x\n    env:\n      T: ${{ secrets.T }}\n    steps: []\n"
+    )
+    assert non_main_reachable_secrets(wf) == ["j: T"]
+    safe = wf.replace("push: {}", "push:\n    branches: [main]")
+    assert non_main_reachable_secrets(safe) == []
+
+
+def test_inputs_pasted_into_run_is_caught() -> None:
+    text = (WORKFLOWS / "research-pdf-cut.yml").read_text(encoding="utf-8")
+    mutated = text.replace('"$CUT_DATE" --counts-only', '"${{ inputs.date }}" --counts-only', 1)
+    assert mutated != text
+    assert untrusted_run_interpolations(mutated) == ["cut/Build daily cut report"]
+
+
+# Production database secrets live only in GitHub Environments whose
+# deployment branch policy is `main`. The `if:` guard protects refs that carry
+# it; the environment also refuses a branch cut from an older, unguarded
+# commit, which still reads repository-level secrets. The cut job only reads,
+# so its environment holds a read-only Turso token.
+ENVIRONMENT_SECRETS = {
+    "external-health-probe.yml": (
+        "probe",
+        "health-probe",
+        {"TURSO_DB_URL", "TURSO_AUTH_TOKEN", "RADON_PROBE_FRESHNESS_TOKEN"},
+    ),
+    "research-pdf-cut.yml": ("cut", "research-cut", {"TURSO_DB_URL", "TURSO_AUTH_TOKEN"}),
+}
+PROD_DATA_SECRETS = {"TURSO_DB_URL", "TURSO_AUTH_TOKEN", "RADON_PROBE_FRESHNESS_TOKEN"}
+
+
+def _environment_name(job: dict) -> str:
+    env = job.get("environment")
+    return str(env.get("name", "")) if isinstance(env, dict) else str(env or "")
+
+
+@pytest.mark.parametrize("name", sorted(ENVIRONMENT_SECRETS))
+def test_production_data_secrets_come_from_a_main_only_environment(name: str) -> None:
+    job_name, environment, secrets = ENVIRONMENT_SECRETS[name]
+    job = _load((WORKFLOWS / name).read_text(encoding="utf-8"))["jobs"][job_name]
+    assert _environment_name(job) == environment
+    assert _secrets_in(job) == secrets
+    assert MAIN_GUARD in str(job.get("if", ""))
+
+
+@pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
+def test_no_other_job_reads_production_data_secrets(path: Path) -> None:
+    allowed = ENVIRONMENT_SECRETS.get(path.name)
+    for name, job in (_load(path.read_text(encoding="utf-8")).get("jobs") or {}).items():
+        if allowed and name == allowed[0]:
+            continue
+        assert not _secrets_in(job) & PROD_DATA_SECRETS, f"{path.name}:{name}"
+
+
+def test_dropping_the_environment_from_a_secret_job_is_caught() -> None:
+    for name, (job_name, environment, _) in ENVIRONMENT_SECRETS.items():
+        text = (WORKFLOWS / name).read_text(encoding="utf-8")
+        mutated = text.replace(f"    environment: {environment}\n", "", 1)
+        assert mutated != text, f"{name} has no `environment: {environment}` line"
+        assert _environment_name(_load(mutated)["jobs"][job_name]) != environment
+
+
+@pytest.mark.parametrize('guard', [MAIN_GUARD, PUSH_GUARD])
+@pytest.mark.parametrize('condition', [
+    "{guard} || always()",
+    "always() || ({guard} && success())",
+    "!({guard})",
+    "contains('{guard}', 'github')",
+])
+def test_guard_text_without_guard_semantics_is_rejected(guard, condition):
+    condition = condition.format(guard=guard.replace("'", "''") if condition.startswith("contains") else guard)
+    workflow = {
+        'on': {'push': {'branches': ['main']}, 'pull_request': {}, 'workflow_dispatch': {}},
+        'jobs': {'publish': {'if': condition, 'env': {'TOKEN': '${{ secrets.TEST_TOKEN }}'}, 'steps': []}},
+    }
+    text = yaml.safe_dump(workflow)
+    assert non_main_reachable_secrets(text) == ['publish: TEST_TOKEN']
+    if guard == PUSH_GUARD:
+        assert unguarded_secrets(text) == ['publish: TEST_TOKEN']
+
+
+@pytest.mark.parametrize('condition', ['always()', '!cancelled()', 'failure()', 'success() || always()'])
+def test_status_override_cannot_inherit_a_skipped_dependency_guard(condition):
+    text = yaml.safe_dump({
+        'on': {'push': {'branches': ['main']}, 'pull_request': {}, 'workflow_dispatch': {}},
+        'jobs': {
+            'guard': {'if': f'{MAIN_GUARD} && {PUSH_GUARD}', 'steps': []},
+            # A failed unguarded need makes failure() genuinely reachable too.
+            'check': {'steps': [{'run': 'exit 1'}]},
+            'publish': {'needs': ['guard', 'check'], 'if': condition,
+                        'env': {'TOKEN': '${{ secrets.TEST_TOKEN }}'}, 'steps': []},
+        },
+    })
+    assert non_main_reachable_secrets(text) == ['publish: TEST_TOKEN']
+    assert unguarded_secrets(text) == ['publish: TEST_TOKEN']
+
+
+@pytest.mark.parametrize('condition', [
+    "${{ (github.ref == 'refs/heads/main') && !cancelled() }}",
+    "(github.ref == 'refs/heads/main' && inputs.a) || (inputs.b && github.ref == 'refs/heads/main')",
+    "github.ref == 'refs/heads/main' && (needs.test.result == 'success' || needs.test.result == 'skipped')",
+])
+def test_every_branch_requiring_main_is_accepted(condition):
+    text = yaml.safe_dump({
+        'on': {'workflow_dispatch': {}},
+        'jobs': {'publish': {'if': condition, 'env': {'TOKEN': '${{ secrets.TEST_TOKEN }}'}, 'steps': []}},
+    })
+    assert non_main_reachable_secrets(text) == []
+
+
+@pytest.mark.parametrize('condition', ['', 'inputs.enabled', 'success() && !cancelled()'])
+def test_dependency_guard_is_valid_when_success_is_required(condition):
+    text = yaml.safe_dump({
+        'on': {'push': {'branches': ['main']}, 'pull_request': {}},
+        'jobs': {
+            'guard': {'if': f'{MAIN_GUARD} && {PUSH_GUARD}', 'steps': []},
+            'publish': {'needs': ['guard'], 'if': condition,
+                        'env': {'TOKEN': '${{ secrets.TEST_TOKEN }}'}, 'steps': []},
+        },
+    })
+    assert non_main_reachable_secrets(text) == []
+    assert unguarded_secrets(text) == []

@@ -13,6 +13,8 @@ import argparse
 import json
 import os
 import re
+import shutil
+import tempfile
 import subprocess
 import sys
 from pathlib import Path
@@ -20,15 +22,22 @@ from typing import Callable, Optional
 
 import grok_runtime
 import ir_pr_description
-from grok_page_responder import parse_grok_result
+from grok_page_responder import grok_output_text, parse_grok_result
 
 Runner = Callable[..., object]
 SERVICE_NAME = "grok-upgrade"
+# xAI installer layout. `grok update` on CLI 1.0.44+ captures rollback with
+# readlink($GROK_HOME/bin/grok). A regular file there is EINVAL (os error 22).
+_INSTALLER_PAYLOAD = "grok-linux-x86_64"
+_INSTALLER_LINK = Path("..") / "downloads" / _INSTALLER_PAYLOAD
 SMOKE_PROMPT = """Dry-run smoke for a Grok track-latest candidate. Do not edit files.
 Do not push. Do not merge.
 
-Write a markdown body with these sections, each with two real sentences
-about this smoke check itself (not TODO, not a branch name):
+Do not run tools or commands; answer from this prompt alone.
+
+Reply with only a markdown body. The first line must be `## What broke`:
+no preamble, no plan, nothing before it. Use these sections, each with two
+real sentences about this smoke check itself (not TODO, not a branch name):
 ## What broke
 ## Root cause
 ## What changed
@@ -41,6 +50,31 @@ RESULT: stand_down | grok upgrade smoke returned a structured IR summary
 """
 
 
+# `## What broke` anywhere, also glued to the end of a preamble line.
+_FIRST_IR_HEADING = re.compile(
+    r"#{1,3}[ \t]*" + re.escape(ir_pr_description.REQUIRED_SECTIONS[0]) + r"\b",
+    re.I,
+)
+
+
+def smoke_ir_body(text: str) -> str:
+    """The smoke's IR body: the reply from its first required heading on.
+
+    ``grok --output-format json`` joins the assistant messages of each turn
+    with no separator. When the model writes a sentence, calls a tool, then
+    writes the body, ``text`` reads ``...then write the summary.## What
+    broke``: the first heading is glued to the preamble line and is not a
+    markdown heading, so the validator reports it missing. Cut everything
+    before the first ``## What broke`` so it starts its own line. The strict
+    validator still runs on the result: every section must be a real
+    ``## <name>`` line with real content.
+    """
+    match = _FIRST_IR_HEADING.search(text or "")
+    if not match:
+        return text or ""
+    return text[match.start():]
+
+
 class GrokUpgradeError(RuntimeError):
     """Upgrade job cannot decide, smoke, or promote."""
 
@@ -49,7 +83,7 @@ def _default_runner(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(
         argv,
         cwd=kwargs.get("cwd"),
-        env=kwargs.get("env"),
+        env=kwargs.get("env") or grok_runtime.grok_child_env(),
         capture_output=True,
         text=True,
         timeout=kwargs.get("timeout", 120),
@@ -67,7 +101,8 @@ def parse_update_check(stdout: str) -> dict:
             payload = None
         if isinstance(payload, dict):
             current = (
-                payload.get("current")
+                payload.get("currentVersion")
+                or payload.get("current")
                 or payload.get("installed")
                 or payload.get("version")
             )
@@ -75,7 +110,8 @@ def parse_update_check(stdout: str) -> dict:
             if isinstance(stable, dict):
                 stable = stable.get("version")
             latest = (
-                payload.get("latest")
+                payload.get("latestVersion")
+                or payload.get("latest")
                 or payload.get("latest_stable")
                 or stable
             )
@@ -139,6 +175,28 @@ def decide_upgrade(
     }
 
 
+def _stage_candidate_binary(dest: Path, source: Path) -> Path:
+    """Private installer layout under ``dest``.
+
+    REL-292 / R-711: HOME does not isolate a self-updater, so the bytes live
+    under the candidate scratch, never on the live path. CLI 1.0.44+ then
+    readlinks ``$GROK_HOME/bin/grok`` to snapshot that payload before swapping
+    it. ``copy2`` onto ``bin/grok`` makes a regular file, ``readlink`` returns
+    EINVAL, and the oneshot exits 1 before smoke.
+    """
+    dest.mkdir(parents=True, exist_ok=True)
+    downloads = dest / "downloads"
+    downloads.mkdir(parents=True, exist_ok=True)
+    payload = downloads / _INSTALLER_PAYLOAD
+    shutil.copy2(source, payload)
+    installed = dest / "bin" / "grok"
+    installed.parent.mkdir(parents=True, exist_ok=True)
+    if installed.is_symlink() or installed.exists():
+        installed.unlink()
+    installed.symlink_to(_INSTALLER_LINK)
+    return installed
+
+
 def install_candidate_cli(
     dest: Path,
     *,
@@ -146,28 +204,27 @@ def install_candidate_cli(
     runner: Runner,
     version: str | None = None,
 ) -> Path:
-    dest.mkdir(parents=True, exist_ok=True)
-    env = os.environ.copy()
-    env["GROK_HOME"] = str(dest)
-    env["HOME"] = str(dest)
-    argv = [grok_bin, "update", "--no-auto-update"]
+    source = Path(shutil.which(grok_bin) or grok_bin).resolve(strict=True)
+    installed = _stage_candidate_binary(dest, source)
+    env = grok_runtime.grok_child_env({"GROK_HOME": str(dest), "HOME": str(dest)})
+    # `grok update` has no --no-auto-update (grok 1.0.3 rejects it).
+    # That flag stays on the smoke invocation only.
+    argv = [str(installed), "update"]
     if version:
-        argv[2:2] = ["--version", version]
+        argv.extend(["--version", version])
     proc = runner(argv, env=env, cwd=str(dest), timeout=180)
     if getattr(proc, "returncode", 1) != 0:
         raise GrokUpgradeError(
             f"candidate grok update failed: "
             f"{(getattr(proc, 'stderr', '') or '')[:300]}"
         )
-    for candidate in (
-        dest / "bin" / "grok",
-        dest / ".grok" / "bin" / "grok",
-        dest / ".local" / "bin" / "grok",
-        dest / "grok",
-    ):
-        if candidate.exists():
-            return candidate
-    return Path(grok_bin)
+    probe = runner([str(installed), "--version"], env=env, cwd=str(dest), timeout=30)
+    if getattr(probe, "returncode", 1) != 0:
+        raise GrokUpgradeError("candidate version probe failed")
+    actual = grok_runtime.parse_cli_version(getattr(probe, "stdout", "") or "")
+    if version and actual != version:
+        raise GrokUpgradeError(f"candidate version {actual} does not match requested {version}")
+    return installed
 
 
 def run_smoke(
@@ -207,18 +264,60 @@ def run_smoke(
     disposition, summary = parse_grok_result(stdout)
     if disposition not in {"stand_down", "ops_only", "code_fix"}:
         raise GrokUpgradeError(f"smoke RESULT was {disposition}: {summary}")
-    ir_pr_description.validate_ir_description(stdout, branch="fix/grok-upgrade-smoke")
+    # Validate the reply, not the JSON envelope: in raw stdout the headings
+    # sit inside an escaped string and every section reads as missing.
+    body = smoke_ir_body(grok_output_text(stdout))
+    ir_pr_description.validate_ir_description(body, branch="fix/grok-upgrade-smoke")
     return disposition, summary
 
 
-def promote_live_symlink(live_bin: Path, candidate_bin: Path) -> Path:
+def promote_live_symlink(
+    live_bin: Path,
+    candidate_bin: Path,
+    *,
+    alias_bin: Path | None = None,
+    candidate_root: Path | None = None,
+) -> Path:
+    """REL-292: prepare links before atomically replacing any live pathname.
+
+    Touches only ``live_bin`` and, when given, ``alias_bin``. It never derives
+    a path from HOME: on 2026-09-29 a pytest run inside the responder clone
+    repointed the operator's real ``~/.grok/bin/grok`` at a pytest tmp
+    candidate because this function linked ``Path.home()/.grok/bin/grok``
+    unconditionally. With ``candidate_root`` the resolved candidate must lie
+    under it, so a link can only ever point into the upgrader's own scratch.
+    """
+    target = candidate_bin.resolve(strict=True)
+    if target == live_bin.absolute():
+        raise GrokUpgradeError("candidate must be separate from the live executable")
+    if candidate_root is not None and not target.is_relative_to(
+        Path(candidate_root).resolve()
+    ):
+        raise GrokUpgradeError(
+            f"candidate {target} is outside the upgrade scratch {candidate_root}"
+        )
     live_bin.parent.mkdir(parents=True, exist_ok=True)
-    live_bin.unlink(missing_ok=True)
-    live_bin.symlink_to(candidate_bin.resolve())
-    grok_home = Path.home() / ".grok" / "bin" / "grok"
-    if grok_home.parent.is_dir() and grok_home != live_bin:
-        grok_home.unlink(missing_ok=True)
-        grok_home.symlink_to(candidate_bin.resolve())
+    # The secondary entry always follows the canonical live path. Preparing
+    # both links first leaves the old CLI reachable if symlink creation fails.
+    links = [(live_bin, target)]
+    if alias_bin is not None and alias_bin.absolute() != live_bin.absolute():
+        if not alias_bin.parent.is_dir():
+            raise GrokUpgradeError(f"alias directory missing: {alias_bin.parent}")
+        links.insert(0, (alias_bin, live_bin.absolute()))
+    prepared = []
+    try:
+        for destination, value in links:
+            fd, name = tempfile.mkstemp(prefix=".grok-link-", dir=destination.parent)
+            os.close(fd)
+            temporary = Path(name)
+            temporary.unlink()
+            prepared.append((temporary, destination))
+            temporary.symlink_to(value)
+        for temporary, destination in prepared:
+            temporary.replace(destination)
+    finally:
+        for temporary, _ in prepared:
+            temporary.unlink(missing_ok=True)
     return live_bin
 
 
@@ -251,9 +350,10 @@ def _record_health(state: str, detail: str | None = None) -> None:
         from db.hrana_http import write_service_health_http
     except ImportError:
         return
-    kwargs = {"last_error": detail} if detail else {}
+    # REL-293 / R-712: the transport accepts a structured error, not last_error.
+    error = {"message": detail} if detail else None
     try:
-        write_service_health_http(SERVICE_NAME, state, **kwargs)
+        write_service_health_http(SERVICE_NAME, state, error=error)
     except Exception as exc:  # noqa: BLE001 — telemetry must not fail the job
         print(f"grok upgrade heartbeat non-fatal: {exc}", file=sys.stderr)
 
@@ -286,6 +386,7 @@ def run_upgrade(
     *,
     grok_bin: str,
     live_bin: Path | None = None,
+    alias_bin: Path | None = None,
     lkg_path: Path | None = None,
     lock_path: Path | None = None,
     scratch: Path | None = None,
@@ -317,7 +418,9 @@ def run_upgrade(
         }
 
     work = Path(scratch) if scratch else Path("data/cache/grok_upgrade")
-    side = work / "candidate"
+    work.mkdir(parents=True, exist_ok=True)
+    # Never reuse the directory an earlier promotion may still execute from.
+    side = Path(tempfile.mkdtemp(prefix="candidate-", dir=work))
     try:
         candidate_bin = install_candidate_cli(
             side,
@@ -334,10 +437,15 @@ def run_upgrade(
         )
         try:
             with grok_runtime.exclusive_lock(lock_file, blocking=False):
-                promote_live_symlink(live, candidate_bin)
+                promote_live_symlink(
+                    live,
+                    candidate_bin,
+                    alias_bin=Path(alias_bin) if alias_bin else None,
+                    candidate_root=work,
+                )
                 state = grok_runtime.LkgState(
                     cli_version=candidate["cli_version"],
-                    binary_path=str(live),
+                    binary_path=str(candidate_bin.resolve()),
                     model=candidate["model"],
                     reasoning_effort=candidate["reasoning_effort"],
                     promoted_at=grok_runtime.now_iso(),
@@ -358,6 +466,9 @@ def run_upgrade(
         _alert(message, alerter)
         _record_health("error", str(exc)[:300])
         return {"action": "failed", "error": str(exc), "candidate": candidate}
+    finally:
+        if not live.resolve().is_relative_to(side):
+            shutil.rmtree(side)
 
     _record_health("ok")
     return {
@@ -375,6 +486,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--grok-bin", default=os.environ.get("GROK_BIN") or "grok")
     parser.add_argument("--live-bin", default="")
+    parser.add_argument(
+        "--alias-bin",
+        default="",
+        help="Secondary entry (e.g. ~/.grok/bin/grok) relinked to --live-bin on "
+        "promote. Never derived from HOME; omitted means only --live-bin moves.",
+    )
     parser.add_argument("--lkg", default="")
     parser.add_argument("--lock", default="")
     parser.add_argument("--scratch", default="")
@@ -397,6 +514,7 @@ def main(argv: list[str] | None = None) -> int:
         result = run_upgrade(
             grok_bin=args.grok_bin,
             live_bin=Path(args.live_bin) if args.live_bin else None,
+            alias_bin=Path(args.alias_bin) if args.alias_bin else None,
             lkg_path=lkg_path,
             lock_path=Path(args.lock) if args.lock else None,
             scratch=Path(args.scratch) if args.scratch else None,

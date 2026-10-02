@@ -22,14 +22,15 @@ import nightly_issue_prune as prune
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO / "scripts"
-WRAPPERS = (
-    SCRIPTS / "reliability_weekend.sh",
-    SCRIPTS / "testing_weekend.sh",
-    SCRIPTS / "ci_performance_nightly.sh",
-    SCRIPTS / "documentation_nightly.sh",
-    SCRIPTS / "security_nightly.sh",
-    SCRIPTS / "security_deepsec_nightly.sh",
-)
+# The security loops' dead-man is posted and pruned by the runner's post-run hook.
+HOOK = SCRIPTS / "runner" / "hooks" / "security_post.sh"
+
+
+def _report_body() -> str:
+    text = HOOK.read_text(encoding="utf-8")
+    start = text.index("\nreport() {")
+    return "\n".join(line for line in text[start:text.index("\n}", start)].splitlines()
+                     if not line.lstrip().startswith("#"))
 
 
 class TestHasOpenPr:
@@ -174,57 +175,24 @@ class TestCli:
 
 
 class TestWrapperWiring:
-    """report() is the single chokepoint every phase status flows through
-    (see nightly_issue_format.py). The prune check belongs there, not
-    scattered at call sites, so no code path can skip it by accident."""
+    """report() is the single chokepoint every phase status flows through."""
 
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_report_is_the_only_place_the_prune_is_wired(self, wrapper: Path):
-        # The ordering half of this case moved to TestWrapperPostBeforePrune
-        # when R-612 inverted it (post first, prune the confirmed remainder).
-        # What still matters here is unchanged: the prune hangs off report(),
-        # the single chokepoint every phase status flows through, so no code
-        # path can skip it and none can call it twice.
-        text = wrapper.read_text(encoding="utf-8")
-        assert "prune_deadman_comments" in text, wrapper.name
-        report_start = text.index("\nreport() {")
-        report_end = text.index("\n}", report_start)
-        body = text[report_start:report_end]
-        assert body.count("prune_deadman_comments") == 1, wrapper.name
-        calls = [
-            line for line in text.splitlines()
-            if "prune_deadman_comments" in line
-            and not line.lstrip().startswith("#")
-            and "prune_deadman_comments() {" not in line
-        ]
-        assert len(calls) == 1, wrapper.name
+    def test_report_is_the_only_place_the_prune_is_wired(self):
+        text = HOOK.read_text(encoding="utf-8")
+        calls = [line for line in text.splitlines()
+                 if "nightly_issue_prune.py" in line and not line.lstrip().startswith("#")]
+        assert len(calls) == 1
+        assert "nightly_issue_prune.py" in _report_body()
 
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_prune_uses_the_isolated_origin_main_pipe(self, wrapper: Path):
-        text = wrapper.read_text(encoding="utf-8")
-        start = text.index("prune_deadman_comments() {")
-        end = text.index("\n}", start)
-        body = text[start:end]
-        assert "origin/main:scripts/nightly_issue_prune.py" in body, wrapper.name
-        assert "/usr/bin/python3 -I -" in body, wrapper.name
-        assert "--branch-prefix" in body and "PR_BRANCH_PREFIX" in body, wrapper.name
+    def test_prune_is_the_root_installed_helper_isolated_bounded_and_never_fatal(self):
+        body = _report_body()
+        call = body[body.index('"$TIMEOUT_BIN" 30'):]
+        assert '"$PY" -I "$RUNNER_DIR/lib/nightly_issue_prune.py"' in call
+        assert '--branch-prefix "$PR_BRANCH_PREFIX"' in call
+        assert "|| true" in call
 
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_prune_is_bounded_and_never_fatal(self, wrapper: Path):
-        text = wrapper.read_text(encoding="utf-8")
-        start = text.index("prune_deadman_comments() {")
-        end = text.index("\n}", start)
-        body = text[start:end]
-        assert "$TIMEOUT_BIN" in body, wrapper.name
-        assert "|| true" in body, wrapper.name
-
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_prune_is_skippable(self, wrapper: Path):
-        text = wrapper.read_text(encoding="utf-8")
-        start = text.index("prune_deadman_comments() {")
-        end = text.index("\n}", start)
-        body = text[start:end]
-        assert "RADON_WEEKEND_SKIP_ISSUE_PRUNE" in body, wrapper.name
+    def test_prune_is_skippable(self):
+        assert "RADON_WEEKEND_SKIP_ISSUE_PRUNE" in _report_body()
 
 
 class TestFailClosed:
@@ -345,37 +313,18 @@ class TestFailClosed:
 class TestWrapperPostBeforePrune:
     """R-612 (P0): the prune ran BEFORE a post whose failure was swallowed by
     `|| true`, so a gh outage during the post deleted the history and added
-    nothing. The post must be confirmed first, and the new comment kept."""
+    nothing. The post must be confirmed first, and the new comment kept.
+    Driven end to end in test_runner_security_hooks.py."""
 
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_prune_runs_only_after_a_confirmed_post(self, wrapper: Path):
-        text = wrapper.read_text(encoding="utf-8")
-        report_start = text.index("\nreport() {")
-        report_end = text.index("\n}", report_start)
-        body = "\n".join(
-            line for line in text[report_start:report_end].splitlines()
-            if not line.lstrip().startswith("#")
-        )
-        assert body.index('issue comment "$issue"') < body.index("prune_deadman_comments"), wrapper.name
+    def test_prune_runs_only_after_a_confirmed_post(self):
+        body = _report_body()
+        assert body.index('issue comment "$issue"') < body.index("nightly_issue_prune.py")
+        assert body.index('if [[ -z "$posted" ]]; then') < body.index("nightly_issue_prune.py")
 
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_a_failed_post_prunes_nothing(self, wrapper: Path):
-        text = wrapper.read_text(encoding="utf-8")
-        report_start = text.index("\nreport() {")
-        report_end = text.index("\n}", report_start)
-        body = text[report_start:report_end]
-        # The prune is reached only through the branch guarded on the post's
-        # captured output, never unconditionally after a `|| true` post.
-        assert 'if [[ -n "$posted" ]]; then' in body, wrapper.name
-        assert "prune_deadman_comments \"$issue\" \"$posted\"" in body, wrapper.name
-
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_prune_forwards_the_new_comment_id_to_keep(self, wrapper: Path):
-        text = wrapper.read_text(encoding="utf-8")
-        start = text.index("prune_deadman_comments() {")
-        end = text.index("\n}", start)
-        body = text[start:end]
-        assert "--keep" in body, wrapper.name
+    def test_prune_forwards_the_new_comment_id_to_keep(self):
+        body = _report_body()
+        assert '--keep "$keep"' in body
+        assert '[[ "$keep" =~ ^[0-9]+$ ]] || return 0' in body
 
 
 class TestDurableState:

@@ -2718,7 +2718,20 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
 .catalyst-group__rows--scroll {
   max-height: 320px;
   overflow-y: auto;
+  /* Overlay-style scrollbar (2026-09-29): invisible at rest, shown while the
+     list scrolls (`is-scrolling`, set by CatalystsQuadrant) or when hovered so
+     it can be grabbed. scrollbar-color covers Chrome/Firefox, the webkit
+     pseudo-elements cover Safari. */
+  scrollbar-color: transparent transparent;
 }
+.catalyst-group__rows--scroll::-webkit-scrollbar-track,
+.catalyst-group__rows--scroll::-webkit-scrollbar-thumb { background: transparent; }
+.catalyst-group__rows--scroll:hover,
+.catalyst-group__rows--scroll.is-scrolling {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+.catalyst-group__rows--scroll:hover::-webkit-scrollbar-thumb,
+.catalyst-group__rows--scroll.is-scrolling::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); }
 
 .catalyst-group__row {
   display: flex;
@@ -8331,6 +8344,12 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
   min-height: 0;
   overflow: auto;
 }
+/* The deeper book scrolls inside the montage; keep the column heads in view. */
+.book-region .book-window .book-montage .book-colhead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
 
 /* ── act column: ticket (top) + position-or-FLAT (bottom), both live ──
    The region owns the single internal divider between ticket and position; the
@@ -8616,16 +8635,6 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
   text-transform: uppercase;
   color: var(--text-secondary);
 }
-.asset-deck-x {
-  margin-left: auto;
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: 13px;
-  border: none;
-  background: transparent;
-  font-family: var(--font-mono);
-}
-.asset-deck-x:hover { color: var(--text-primary); }
 .asset-deck-body {
   flex: 1;
   overflow-y: auto;
@@ -9739,6 +9748,9 @@ tr {
   border-radius: 4px;
   background: var(--bg-panel);
   overflow: hidden;
+  /* The head sizes to the book's width, not the viewport's: the same book is
+     ~460px beside the ticket rail at 1024 and ~1300px at 1920. */
+  container: book-window / inline-size;
 }
 
 .book-window-head {
@@ -9780,7 +9792,10 @@ tr {
   white-space: nowrap;
   flex: 0 0 auto;
 }
-.book-head-stat b { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+/* inline-block so OrderBook's per-value min-width (widest print for that
+   price, in ch) applies: 148.10 and 148.1150 then take the same room and the
+   feed pill + tape toggle stay put across ticks (2026-09-29). */
+.book-head-stat b { display: inline-block; color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
 .book-head-stat.bid b { color: var(--signal-core-text); }
 .book-head-stat.ask b { color: var(--fault); }
 .book-head-spacer { flex: 1; }
@@ -9835,6 +9850,16 @@ tr {
   background: var(--signal-strong);
 }
 .book-toggle-text { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
+/* Narrow book (e.g. 1024-1366 desktop beside the ticket rail): one nowrap row
+   needs ~800px, so the overflow clip used to cut the feed pill and tape toggle
+   off (to "Ta" on SPCX, 2026-09-29). The head values now hold a fixed width
+   (OrderBook min-width), so wrapping is stable across ticks: drop the toggle's
+   text label (it keeps its switch track and aria-label, as on mobile) and let
+   the controls wrap to a second row instead of being clipped. */
+@container book-window (max-width: 820px) {
+  .book-window-head { flex-wrap: wrap; row-gap: 6px; }
+  .book-toggle-text { display: none; }
+}
 
 /* reflow grid (the only animated surface) */
 .book-body-grid {
@@ -10143,7 +10168,7 @@ tr {
 
 /* motion */
 @keyframes book-row-reveal { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-.book-reveal { animation: book-row-reveal 360ms cubic-bezier(0.22, 0.61, 0.36, 1) both; animation-delay: calc(var(--i, 0) * 20ms); }
+.book-reveal { animation: book-row-reveal 360ms cubic-bezier(0.22, 0.61, 0.36, 1) both; animation-delay: calc(min(var(--i, 0), 12) * 20ms); }
 .book-row:hover, .book-lrow:hover, .book-trow:hover { background-color: var(--bg-panel-raised); box-shadow: inset 0 0 0 1px var(--book-hairline); }
 @media (prefers-reduced-motion: reduce) {
   .book-body-grid, .book-tape, .book-montage, .book-toggle-thumb, .book-reveal {
@@ -11851,6 +11876,9 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   margin-bottom: 8px;
   flex-wrap: wrap;
 }
+/* Chips seated in a .section-header-actions slot (BPI index switcher): the
+   header row owns the spacing, so no trailing margin. */
+.history-range-chips--inline { margin-bottom: 0; }
 
 .history-range-chip {
   font-family: var(--font-mono);
@@ -13302,6 +13330,10 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   font-size: 9px;
   letter-spacing: 0.08em;
   color: var(--text-muted);
+}
+
+.ticket-risk-head--spread {
+  border-top: 1px solid var(--line-grid);
 }
 
 .ticket-risk-grid {

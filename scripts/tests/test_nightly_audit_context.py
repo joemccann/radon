@@ -21,19 +21,16 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO / "scripts"
 SCRIPT = SCRIPTS / "nightly_audit_context.py"
-# wrapper -> (skill, heading that opens its audit instructions)
-WRAPPERS = {
-    "reliability_weekend.sh": ("reliability-weekend", "## Mode: audit"),
-    "testing_weekend.sh": ("testing-weekend", "## Mode: audit"),
-    "ci_performance_nightly.sh": ("ci-performance", "## Mode: audit"),
-    "documentation_nightly.sh": ("documentation-nightly", "## Mode: audit"),
-    "security_nightly.sh": ("security-nightly", "## Ground truth and change selection"),
-    "security_deepsec_nightly.sh": ("security-deepsec", "## Audit pipeline"),
+HOOK = SCRIPTS / "runner" / "hooks" / "security_pre.sh"
+# runner prompt -> heading that opens its audit instructions
+PROMPTS = {
+    "security": "## Ground truth and change selection",
+    "security-deepsec": "## Audit pipeline",
 }
 
 
-def _skill(wrapper: str) -> str:
-    return (REPO / ".claude" / "skills" / WRAPPERS[wrapper][0] / "SKILL.md").read_text(encoding="utf-8")
+def _prompt(loop: str) -> str:
+    return (REPO / ".claude" / "runner-prompts" / f"{loop}.md").read_text(encoding="utf-8")
 
 GIT_ENV = {
     **os.environ,
@@ -102,7 +99,7 @@ def fake_gh(tmp_path: Path, comments: list | None, *, issue: int = 202) -> Path:
 def run_ctx(repo_dir: Path, gh: Path, out: Path, *extra: str):
     return subprocess.run(
         [sys.executable, str(SCRIPT), "--repo", "joemccann/radon", "--repo-dir", str(repo_dir),
-         "--head", "HEAD", "--gh-bin", str(gh), "--label", "documentation-nightly",
+         "--head", "HEAD", "--gh-bin", str(gh), "--label", "ci-performance-nightly",
          "--out", str(out), "--timeout", "10", *extra],
         capture_output=True, text=True, timeout=60, env=GIT_ENV,
     )
@@ -234,36 +231,24 @@ class TestGenerator:
         assert f"base: {shas[2]}" in out.read_text()
 
 
-def _function_body(text: str, name: str) -> str:
-    start = text.index(f"{name}() {{")
-    return text[start:text.index("\n}", start)]
-
-
 class TestWrapperWiring:
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=str)
-    def test_writer_runs_through_the_isolated_pipe(self, wrapper: str):
-        body = _function_body((SCRIPTS / wrapper).read_text(encoding="utf-8"), "write_audit_context")
-        assert "origin/main:scripts/nightly_audit_context.py" in body
-        assert "/usr/bin/python3 -I -" in body
-        assert 'rm -f -- "$AUDIT_CONTEXT"' in body
-        assert "|| true" in body, "an unreachable API must never stop a nightly run"
+    """The security loops' pre-run hook writes the file; the prompts read it."""
 
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=str)
-    def test_run_phase_writes_it_after_ground_truth(self, wrapper: str):
-        body = _function_body((SCRIPTS / wrapper).read_text(encoding="utf-8"), "run_phase")
-        launch = "launch_round" if "launch_round" in body else "run_round"
-        assert body.index("ground_truth") < body.index("write_audit_context") < body.index(launch)
+    def test_the_hook_runs_the_root_installed_helper_isolated(self):
+        body = HOOK.read_text(encoding="utf-8")
+        assert '"$PY" -I "$RUNNER_DIR/lib/nightly_audit_context.py"' in body
+        assert 'rm -f -- "$SCRATCH/audit-context.md"' in body
+        call = body[body.index("nightly_audit_context.py"):]
+        assert "|| true" in call.split("\nfi", 1)[0], "an unreachable API must never stop a nightly run"
 
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=str)
-    def test_the_skill_points_the_audit_at_the_file(self, wrapper: str):
-        text = _skill(wrapper)
-        start = text.index("\n", text.index("\n" + WRAPPERS[wrapper][1]) + 1)
+    def test_it_is_written_after_the_ground_truth_checkout_and_only_for_audit(self):
+        body = HOOK.read_text(encoding="utf-8")
+        assert body.index("checkout -f --quiet --detach") < body.index('rm -f -- "$SCRATCH/audit-context.md"')
+        assert body.index('rm -f -- "$SCRATCH/audit-context.md"') < body.index('if [[ "$PHASE" == audit ]]')
+
+    @pytest.mark.parametrize("loop", PROMPTS)
+    def test_the_prompt_points_the_audit_at_the_file_in_its_scratch(self, loop: str):
+        text = _prompt(loop)
+        start = text.index("\n", text.index("\n" + PROMPTS[loop]) + 1)
         audit = text[start:].split("\n## ", 1)[0]
-        assert "audit-context.md" in audit, wrapper
-
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=str)
-    def test_the_file_lives_in_the_skills_scratch(self, wrapper: str):
-        text = (SCRIPTS / wrapper).read_text(encoding="utf-8")
-        line = next(l for l in text.splitlines() if l.startswith("AUDIT_CONTEXT="))
-        scratch = line.split("$WEEKEND_ROOT/", 1)[1].split("/", 1)[0]
-        assert f"~/radon-weekend/{scratch}/audit-context.md" in _skill(wrapper), (scratch, wrapper)
+        assert "$RADON_RUNNER_LOOP_STATE/scratch/audit-context.md" in audit, loop

@@ -214,6 +214,54 @@ Incident: 2026-07-08, P1.
 
 ---
 
+## tv-alerts-hrana-read-timeout
+
+**`radon-tv-alerts.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) on a single hrana read timeout.** Peak: 2026-09-28
+21:30Z, page `01374b995572a545deb4ce62905c643c`. Next timer (21:32)
+exited 0 (`processed: 0`).
+
+- **Mechanism:** `Type=oneshot`, no `Restart=`. At 21:27:27Z `run()`
+  raised `HranaHttpError: TimeoutError: The read operation timed out`
+  (`HRANA_TIMEOUT_S=4`). The error heartbeat at 21:27:31Z timed out the
+  same way, so `main` returned 1. Sibling writers in that minute
+  (trin, host-metrics, nextjs-db-watchdog, grok heartbeat,
+  knowledge-ingest) logged the same timeout and stayed up, because
+  they already treat it as non-fatal or retry. `requires_ib` is false.
+  Edge and `:8321/health/lite` stayed authenticated. The 21:28 host
+  snapshot shows this unit `active_state=failed` and nothing else in
+  the radon set failed. Current unit is `Result=success`.
+- **Detection:** journal `[tv-alerts-drain] cycle failed: TimeoutError:
+  The read operation timed out` then `health write failed: TimeoutError:
+  The read operation timed out`. `systemctl show` on that invocation
+  is `exit-code` / `NRestarts=0` / `ExecMainStatus=1`. Exec span is
+  about 8s (two hrana budgets), not `TimeoutStartSec=120`. Prior and
+  next cycles log `{"processed": 0, ...}`.
+- **Discriminating check:** Python Turso canary `SELECT 1` succeeds
+  (64 ms at diagnosis). Canary fail → Turso platform, stand down. Do
+  not restart-flap. Same-minute sibling timeout lines that say
+  `non-fatal` / `heartbeat failed` / `retrying` confirm the stall is
+  the shared read, not this script's SQL. `Result=start-limit-hit` is
+  `tv-alerts-start-limit-healthy-drain`. `Result=signal` or exit 143
+  inside a deploy window is `deploy-stop-clean-oneshot-signal`.
+  `/health/lite` down → API, stand down. A statement error (not a
+  read timeout) still fails the oneshot on purpose.
+- **Remediation (code):** a read timeout logs
+  `cycle read timeout non-fatal` and exits 0. No ok heartbeat and no
+  error heartbeat, so a standing outage still goes stale inside the
+  20-minute `tv-alerts-drain` window. Unprocessed rows stay
+  unprocessed for the next 5-minute fire. Other exceptions still
+  record error health and exit 1. Do not `reset-failed`. The unit is
+  not on `RERUNNABLE_ONESHOT_UNITS`. After deploy, the next timer is
+  enough. The 21:32 fire already recovered this page.
+- **Regression:**
+  `scripts/tests/test_tv_alerts_drain.py::test_empty_poll_read_timeout_does_not_fail_the_oneshot`,
+  `test_ok_heartbeat_read_timeout_does_not_fail_the_oneshot`,
+  `test_hrana_statement_error_still_fails_the_oneshot`.
+- **Code:** `scripts/tv_alerts_drain.py` (`_read_timeout`, `main`).
+
+---
+
 ## deploy-stop-clean-oneshot-signal
 
 **`Type=oneshot` scan units page P1 `Result=signal` when deploy
@@ -2113,6 +2161,61 @@ on Turso's connection cap.** Peak: 2026-09-25 20:00:19Z, page `c11fbc4a…`.
 
 ---
 
+## flow-refresh-discover-partial-400
+
+**`radon-flow-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when discover scores candidates and one darkpool
+ticker raises `UWAPIError`.** Peak: 2026-10-02 14:02:26Z, page
+`b224647c0c4bb160c0be3aae3f182dff`. Scanner and flow-analysis in the
+same fire exited OK.
+
+- **Mechanism:** hourly `POST /discover?force=true` runs
+  `discover.py --min-alerts 3 --dp-pages 2`. Any
+  `provider_failures` entry, including a single darkpool skip,
+  stamped top-level `error: required provider data unavailable`
+  on a payload that also had `candidates`. `_run_flow_tab` maps
+  that key to HTTP 400 and does not write `data/discover.json`.
+  The wrapper treats non-2xx that is not a capacity shed as
+  indeterminate and exits 1. `Type=oneshot` has no `Restart=`,
+  so `NRestarts=0`. Darkpool caches for the scored names are
+  already on disk. Mirror and alerts stay skipped
+  (`degraded`). `/health/lite` stays authenticated.
+- **Detection:** unit journal scanner OK, flow-analysis OK, then
+  `discover FastAPI outcome indeterminate (curl=0, http=400)`
+  about 30s after the discover POST (not instant, not ~120s).
+  `data/discover.json` mtime stays on the previous clean run.
+  `data/darkpool_cache/*` mtimes fall inside the POST window.
+  `systemctl show` is `exit-code` / `ExecMainStatus=1` /
+  `NRestarts=0`.
+- **Discriminating check:** HTTP 400, not 502. Body detail is
+  `required provider data unavailable`. Darkpool cache writes
+  during the POST mean the options-flow fetch worked and at
+  least one ticker was scored. Instant `Subprocess capacity
+  exhausted` is `flow-refresh-capacity-502`. A ~120s flow-analysis
+  502 is `flow-refresh-analysis-timeout`. `curl: (7)` then
+  fallback is `flow-refresh-connect-refused`. `Result=signal`
+  or exit 143 is deploy stop-clean. Options-flow itself raising
+  `UWAPIError` (no darkpool writes, empty candidates) stays a
+  hard 400 on purpose. If `/health/lite` is down too, stand down.
+- **Remediation (code):** keep `degraded` and `provider_failures`
+  when any ticker is skipped, and set the hard `error` only when
+  `candidates` is empty. The API then returns 200 and writes the
+  disk cache. `main` still does not mirror or alert on
+  `degraded`, so a partial book is not published to Turso and
+  does not heartbeat `discover` `ok`. A total miss still 400s
+  and the oneshot still exits 1. Do not `reset-failed`. The next
+  timer after deploy is enough. The unit is not on
+  `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `scripts/tests/test_discover.py::test_partial_darkpool_skip_keeps_scored_candidates_without_a_hard_error`,
+  `test_partial_darkpool_skip_does_not_mirror_or_alert`,
+  `test_every_darkpool_miss_still_sets_the_hard_error`,
+  `scripts/api/tests/test_flow_tab_cooldown.py::test_scored_discover_with_one_provider_skip_is_cached_not_http_400`,
+  `test_discover_with_no_candidates_and_a_hard_error_stays_http_400`.
+- **Code:** `scripts/discover.py` (`_apply_provider_failures`).
+
+---
+
 ## orders-sync-capacity-shed-stale
 
 **Autonomous `orders-sync` loop pages P1 `kind=stale` during RTH when
@@ -2529,9 +2632,12 @@ duplicate.** Peak: 2026-09-22 11:35Z, page `e1297eea…`.
   `twr_status=degraded` is `flex-pull-twr-degraded-exit`.
   `classified_as=activity` with `outcome=coverage_unverified` is
   `flex-pull-activity-nav`.
-  `Result=timeout` is `flex-pull-ingest-timeout`. An uncovered exec, or
-  a quantity or notional disagreement, stays unverified and is operator
-  reconciliation, not this fix. If `/health/lite` is down too → API, stand down.
+  `Result=timeout` is `flex-pull-ingest-timeout`. A quantity gap equal
+  to same-day BAG envelopes (`right='?'` or a Spread/BAG structure, no
+  strike) is `flex-pull-bag-envelope-as-stock`. An uncovered exec, or a
+  quantity or notional disagreement that remains after those envelopes
+  are excluded, stays unverified and is operator reconciliation, not
+  this fix. If `/health/lite` is down too → API, stand down.
 - **Remediation (code):** after the bounded journal walk exhausts, pending
   Flex executions are covered when individual-fill reconciliation returns
   no uncovered executions and no disagreements. Disagreements and truly
@@ -2546,6 +2652,53 @@ duplicate.** Peak: 2026-09-22 11:35Z, page `e1297eea…`.
 - **Code:** `scripts/flex_delivery_ingest.py` (`delivery_rows_present`).
 
 ---
+
+## flex-pull-bag-envelope-as-stock
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+after a stock assignment whose Flex quantity matches the stock fill, because
+same-day BAG envelopes were summed as stock.** Peak: 2026-09-29 12:35Z,
+page `a7d2483d17687fb7f327d2e22fe1b0bc`. Same file failed again 2026-09-30
+11:31Z and 12:30Z. Span about 50s, not `TimeoutStartSec`. `:8321/health/lite`
+stayed authenticated.
+
+- **Mechanism:** `Trade_History.20260925` is an applied duplicate. Flex
+  trade `1000000001` is SPCX stock, 1000 shares at $149
+  (notional 149,000), the 149-put assignment. The journal stock row
+  matches that fill (`0000abcd.00000001.02.01`). Four combo envelopes
+  the same day (`right='?'`, structure `Long Spread (BAG)`, 50+20+19+11
+  contracts, net prices -0.15/-0.41) have no strike, so `_fill_contract`
+  maps them to `SPCX|STK`. Signed qty becomes 1100 and notional
+  148,972 ($28 light, the envelopes' net debit). `rehydrate_from_executions`
+  flags a disagreement, `delivery_rows_present` returns false, and the
+  oneshot exits 1 on `coverage_unverified` / `classified_as=trades`.
+  The option legs (puts and calls with strike and right) stay on their
+  own contract keys and are not the gap. `Type=oneshot` has no `Restart=`.
+- **Detection:** journal `Flex aggregate disagrees with individual fills`
+  for `SPCX|STK` with `flex_qty=1000`, `fills_qty=1100`,
+  `flex_notional=149000`, `fills_notional=148972`,
+  `flex_exec_ids=['1000000001']`, then
+  `ingest_failed` `outcome=coverage_unverified` `classified_as=trades`
+  on `U0000000.Trade_History.20260925.20260925.xml.pgp`.
+  `systemctl show` → `exit-code` / `NRestarts=0`. The 07:30 ET run and
+  the 08:30 ET retry both log it.
+- **Discriminating check:** the qty gap equals the same-day BAG contract
+  count (here 100) and the notional gap equals those envelopes' signed
+  debit (here $28), while the stock fill alone matches Flex. A remaining
+  gap after envelopes are excluded is still operator reconciliation
+  (`flex-pull-trade-coverage`). A Flex id that is the live five-part
+  exec id minus `.01` is `flex-pull-live-exec-id`. `Result=timeout` is
+  `flex-pull-ingest-timeout`. If `/health/lite` is down too → API, stand down.
+- **Remediation (code):** skip a combo envelope in the individual-fill
+  totals when it has no option bucket. Real stock shares still disagree.
+  Do not replay the delivery. Do not restart-flap; the next timer
+  retries. After deploy, `systemctl reset-failed radon-flex-pull.service`
+  if that retry has not yet fired.
+- **Regression:**
+  `test_journal_rehydrate.py::TestFlexAggregateNeverOverridesIndividualFills::test_bag_combo_envelope_is_not_extra_stock_on_an_assignment`,
+  `test_real_extra_stock_shares_still_disagree_with_flex`.
+- **Code:** `scripts/journal_rehydrate.py` (`_is_combo_envelope`,
+  `_individual_fill_totals`).
 
 ## flex-pull-live-exec-id
 
@@ -3029,6 +3182,203 @@ after the IB-skip path has already chosen the cached payload.** Peak:
   `scripts/tests/test_grok_page_ledger_timeout.py::TestLedgerReadTimeout`.
 - **Code:** `scripts/grok_page_responder.py` (`_ledger_read_timeout`).
 
+## grok-page-responder-missing-binary
+
+**`radon-grok-page-responder.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when `GROK_BIN` is not on disk.** Peak: 2026-09-30
+00:05:00Z, page `3b990bb8496e24785a14a4df32e79a4e`.
+
+- **Mechanism:** `Type=oneshot`, no `Restart=`. The UTC-day action cap
+  skipped every cycle from 23:40Z through midnight (`actioned_today: 6`),
+  so the poller never exec'd grok while the cap held. At 00:00Z the cap
+  reset and an actionable page was waiting. `run_cycle` probed with
+  `subprocess.run([GROK_BIN, "--version"])`. `/home/radon/.local/bin/grok`
+  was absent. `FileNotFoundError` is not `GrokRuntimeError`, so
+  `resolve_latest` never refused and never read LKG. The exception
+  escaped `run_cycle` (`except BaseException: raise`) and the interpreter
+  exited 1. systemd recorded `Result=exit-code`, `NRestarts=0`. The same
+  traceback repeated every ~30s (about 114 lines an hour) from 00:00:12Z
+  until 17:31:53Z. The symlink and `/var/lib/radon/grok_lkg.json` both
+  have mtime 17:32Z (`grok 1.0.44`). The watchdog paged this unit about
+  itself. `requires_ib` is false. Exec span is milliseconds, not
+  `TimeoutStartSec`.
+- **Detection:** journal traceback ends at
+  `FileNotFoundError: [Errno 2] No such file or directory: '/home/radon/.local/bin/grok'`
+  in `_default_grok_runner` ← `grok_runtime._run` ← `probe_cli` ←
+  `resolve_latest` ← `_runtime_from_track`. Cycles before midnight the
+  same evening log `skipped: daily_action_cap` and exit 0.
+- **Discriminating check:** `ls` of `GROK_BIN` fails at the crash and
+  the next line is not `skipped: grok_runtime`. A hrana
+  `TimeoutError` at `claim_page` / `complete_page` is
+  `grok-page-responder-ledger-timeout`. `grok --version` exiting
+  nonzero is already `GrokRuntimeError` and already refuses. `Result=signal`
+  or exit 143 inside a deploy window is
+  `deploy-stop-clean-oneshot-signal`. `/health/lite` down is the API,
+  stand down. Anonymous `/api/service-health` 401 is not this exit.
+  Not `ib-gateway-grouped`. A `PermissionError` on a present binary
+  still fails the oneshot.
+- **Remediation (code):** `_run` turns `FileNotFoundError` into
+  `GrokRuntimeError`. No trusted LKG refuses the cycle: exit 0, page left
+  pending, no fallback pushover, and heartbeat `error` with the reason so
+  the watchdog error bucket still pages once (`paused` never alerts and
+  would hide the outage). An LKG is used only when
+  `grok_runtime.lkg_binary_problem` passes: absolute, present, regular,
+  executable, not world-writable, owned by root or the unit user, and not
+  under `/tmp`, `/var/tmp`, `/dev/shm`, the system temp dir, a
+  `pytest-of-*` basetemp, or the responder clone. A rejected LKG logs
+  `grok last-known-good binary rejected (<reason>)` and counts as no LKG.
+  Do not restart-flap. Installing the CLI is the upgrader.
+  This page's binary was already on disk at 17:32Z. The unit is not
+  on `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `scripts/tests/test_grok_page_missing_binary.py::TestMissingGrokBinary`,
+  `::TestLkgBinaryIsTrusted`.
+- **Code:** `scripts/grok_runtime.py` (`_run`, `lkg_binary_problem`),
+  `scripts/grok_page_responder.py` (`_load_trusted_lkg`; `error` row and
+  no pin warning on a refuse).
+
+## grok-upgrade-update-rejects-no-auto-update
+
+**`radon-grok-upgrade.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when the daily track-latest install calls `grok update`
+with a flag that subcommand does not accept.** Peak: 2026-09-29
+07:43:31Z, page `a57b867dba07bd932da040bf13804a1e`, paged 07:45:01Z.
+
+- **Mechanism:** `Type=oneshot`, no `Restart=`. Exec span was 1s, not
+  `TimeoutStartSec=1200`. `/var/lib/radon/grok_lkg.json` was absent, so
+  `decide_upgrade` treated the live default (`grok-4.7`) as a model
+  change. `grok update --check --json` on CLI 1.0.3 returned
+  `currentVersion` / `latestVersion` (`1.0.3` -> `1.0.44`,
+  `updateAvailable: true`). `parse_update_check` only read `current` /
+  `latest`, so `cli_version` stayed empty and the install argv was
+  `grok update --no-auto-update`. That flag is valid on the incident
+  and smoke `grok` invocation, not on `grok update`. The CLI exited 1
+  with `error: unexpected argument '--no-auto-update' found`. The
+  failure heartbeat then called `write_service_health_http(...,
+  last_error=...)`, which does not take that keyword
+  (`error=` is a dict). The oneshot still exited 1. `requires_ib` is
+  false. Edge and `:8321/health/lite` stayed up
+  (`auth_state=authenticated`).
+- **Detection:** journal line `candidate grok update failed: error:
+  unexpected argument '--no-auto-update' found` plus
+  `grok upgrade heartbeat non-fatal: write_service_health_http() got
+  an unexpected keyword argument 'last_error'`. `systemctl show
+  radon-grok-upgrade.service -p Result,NRestarts,ExecMainStatus` →
+  `exit-code` / `0` / `1`.
+- **Discriminating check:** `grok update --help` has `--check`,
+  `--json`, `--version`, and no `--no-auto-update`. `grok update
+  --check --json` uses `currentVersion` and `latestVersion`. Python
+  Turso canary is not this exit (the process died before a ledger
+  read). `/api/service-health` 401 without the probe token is
+  anonymous. No `/home/radon/.radon-deploy-transition.json`.
+  `Result=signal` or exit 143 inside a deploy window is
+  `deploy-stop-clean-oneshot-signal`. Not `ib-gateway-grouped`.
+- **Remediation (code):** parse `currentVersion` / `latestVersion`
+  (old keys still work). Call `grok update` or `grok update --version
+  <latest>` with no `--no-auto-update`. Pass the failure string as
+  `error={"message": ...}`. Do not restart-flap; the unit is not on
+  `RERUNNABLE_ONESHOT_UNITS`. The timer resolves its candidate at run time;
+  verify the smoke/promotion result and LKG record using
+  [binary recovery](grok-page-responder.md#binary-recovery). Do not infer
+  the installed version or LKG availability from this historical incident.
+- **Regression:** `scripts/tests/test_grok_upgrade.py`
+  (`test_parse_update_check_grok_103_version_keys`,
+  `test_update_argv_omits_flag_grok_update_rejects`,
+  `test_pins_latest_version_and_promotes`,
+  `test_failure_passes_error_dict_not_last_error`).
+- **Code:** `scripts/grok_upgrade.py` (`parse_update_check`,
+  `install_candidate_cli`, `_record_health`).
+
+## grok-upgrade-update-rollback-needs-symlink
+
+**`radon-grok-upgrade.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when `grok update` cannot `readlink` the candidate
+binary.** Peak: 2026-10-01 07:41:52Z, page
+`2e9419cb9d0d15abc107af4f2bb97ee4`, paged 07:45:01Z. Exec span was about
+3s, not `TimeoutStartSec=1200`. Exit status 1.
+
+- **Mechanism:** `Type=oneshot`, no `Restart=`. LKG was CLI 1.0.44 /
+  `grok-4.7`. `decide_upgrade` asked for 1.0.46. `install_candidate_cli`
+  `copy2`'d the resolved live ELF onto
+  `$GROK_HOME/bin/grok` (a regular file) and ran
+  `grok update --version 1.0.46` with `HOME` and `GROK_HOME` set to the
+  candidate. CLI 1.0.44 captures rollback with `readlink` of that path.
+  A regular file returns `EINVAL`. The CLI exited 1 with
+  `Error: Auto-update failed: capturing rollback state for
+  <candidate>/bin/grok: reading prior symlink target
+  <candidate>/bin/grok: Invalid argument (os error 22)`. The upgrader
+  slices stderr to 300 characters before the heartbeat, so the journal
+  line ends at `Invalid arg`. Live symlinks and
+  `/var/lib/radon/grok_lkg.json` stayed on 1.0.44 (mtime 2026-09-30
+  17:32Z). `requires_ib` is false. `/health/lite` stayed
+  `auth_state=authenticated`. The unpromoted candidate directory was
+  removed.
+- **Detection:** journal line `candidate grok update failed: Installing
+  Grok 1.0.46 (current: 1.0.44)...` and `reading prior symlink target`.
+  `systemctl show radon-grok-upgrade.service -p
+  Result,NRestarts,ExecMainStatus` → `exit-code` / `0` / `1`.
+- **Discriminating check:** stage a private copy two ways and run
+  `grok update --version 1.0.46` with `HOME` and `GROK_HOME` on that
+  tree only. A regular file at `bin/grok` reproduces os error 22. A
+  relative symlink `bin/grok -> ../downloads/grok-linux-x86_64` (payload
+  is a distinct copy of the ELF) installs 1.0.46 and retargets the
+  symlink at `../downloads/grok-1.0.46-linux-x86_64`. Confirm the live
+  inode and mtime of `/home/radon/.grok/downloads/grok-linux-x86_64`,
+  `/home/radon/.grok/bin/grok`, and `/home/radon/.local/bin/grok` do
+  not change. Python Turso canary is not this exit (no ledger read).
+  `/api/service-health` 401 without the probe token is anonymous. No
+  `/home/radon/.radon-deploy-transition.json`. `Result=signal` or exit
+  143 inside a deploy window is `deploy-stop-clean-oneshot-signal`.
+  A `pytest-of-` target on the live symlink is
+  `grok-live-binary-relinked-by-pytest`. `unexpected argument
+  '--no-auto-update'` is `grok-upgrade-update-rejects-no-auto-update`.
+  Not `ib-gateway-grouped`.
+- **Remediation (code):** copy the resolved CLI to
+  `<candidate>/downloads/grok-linux-x86_64` and symlink
+  `<candidate>/bin/grok` to `../downloads/grok-linux-x86_64` before
+  `grok update`. Do not point that symlink at the live ELF. Do not
+  restart-flap. The unit is not on `RERUNNABLE_ONESHOT_UNITS`. The
+  next 07:40 UTC timer installs 1.0.46 after this deploys. Live stays
+  on 1.0.44 until that promote.
+- **Regression:** `scripts/tests/test_grok_upgrade.py`
+  (`test_update_readlink_needs_installer_symlink`).
+- **Code:** `scripts/grok_upgrade.py` (`_stage_candidate_binary`,
+  `install_candidate_cli`).
+
+## grok-live-binary-relinked-by-pytest
+
+**`radon-grok-upgrade.service` and `radon-grok-page-responder.service`
+fail with `FileNotFoundError: /home/radon/.local/bin/grok`.** First seen
+2026-09-29 07:51Z.
+
+- **Mechanism:** `/home/radon/.local/bin/grok` links to
+  `/home/radon/.grok/bin/grok`, and that link pointed into
+  `/tmp/pytest-of-radon/.../scratch/candidate/bin/grok`. A pytest run in
+  the responder clone (a Grok fix session) ran
+  `test_pins_latest_version_and_promotes`. `promote_live_symlink` then
+  relinked `Path.home()/.grok/bin/grok` whenever that directory existed,
+  so the real installer entry was repointed at the test candidate. Pytest
+  pruned its old basetemp and the link dangled.
+- **Discriminating check:** `readlink -f /home/radon/.local/bin/grok` and
+  `readlink /home/radon/.grok/bin/grok` show a `pytest-of-` path. A
+  promote by the timer points only into `/var/lib/radon/grok-upgrade`.
+- **Remediation (ops):** follow the canonical
+  [binary recovery procedure](grok-page-responder.md#binary-recovery),
+  including target validation, runtime-lock exclusion, verification and
+  rollback. An existing LKG record alone does not authorize relinking or
+  executing its target.
+- **Remediation (code):** the upgrader moves only `--live-bin` and an
+  explicit `--alias-bin` (the unit passes `/home/radon/.grok/bin/grok`),
+  and refuses a candidate outside `--scratch`. Upgrade tests fake HOME,
+  and `scripts/tests/conftest.py` fails any test that changes the host's
+  real `~/.grok/bin/grok` or `~/.local/bin/grok`.
+- **Regression:** `scripts/tests/test_grok_upgrade.py`
+  (`fake_home`, `TestPromoteTouchesOnlyGivenPaths`),
+  `cloud/tests/test_grok_upgrade_setup.py`
+  (`test_upgrade_unit_names_every_link_it_may_move`).
+- **Code:** `scripts/grok_upgrade.py` (`promote_live_symlink`, `main`),
+  `cloud/services/radon-grok-upgrade.service`.
+
 ## Grok auto-response on iPhone P1 pages
 
 Canonical: [`grok-page-responder.md`](grok-page-responder.md).
@@ -3071,11 +3421,12 @@ silent.
 
 ## newsfeed-share-missing-subscription-502
 
-**POST `/api/newsfeed/share` 502s with toast "Voice rewrite unavailable. Showing the original copy."** Peak: 2026-09-19 16:09:36Z.
+**Symptom:** opening the Share panel leaves the original copy and reports that a verified draft could not be generated. The subscription-mount incident on 2026-09-19 returned HTTP 502; the route now streams after access and input validation, so a model failure arrives as an `error` event inside HTTP 200.
 
-- **Mechanism:** Next.js `chat()` meters SuperGrok / Claude Max grants from `~/.grok` and `~/.claude`. `2aba1229` stopped binding those dirs into `radon-nextjs` (internet-facing, refresh tokens). Prepaid `ANTHROPIC_API_KEY` / `XAI_API_KEY` in the container env are ignored unless `RADON_LADDER_ALLOW_PREPAID=1`. Auto-prefer then falls through to Anthropic and throws `Missing Anthropic subscription`. The share route maps that to 502. `radon-api` and `radon-newsfeed` still had the mounts.
-- **Discriminating check:** `journalctl -u radon-nextjs` contains `[newsfeed/share] voice rewrite failed: Error: Missing Anthropic subscription`. `docker inspect radon-nextjs.service` has no `/home/radon/.claude` or `.grok` bind. Caddy 502 from `response_header_timeout` is an empty body and takes ~30s; this 502 is immediate JSON.
-- **Remediation (code):** bind `.grok` / `.codex` / `.claude` into `radon-nextjs.service` the same way as api/newsfeed/research. Relay stays unbound. Share calls pass `reasoningEffort: "low"` so grok-4.6 does not spend the 1600-token budget on hidden reasoning. `parseVoiceCopy` accepts fenced JSON.
-- **Regression:** `cloud/tests/test_app_runtime.py::test_run_nextjs_binds_subscription_credential_dirs_readonly`, `test_run_relay_gets_no_subscription_credential_binds`, `web/tests/newsfeed-share-api.test.ts`, `web/tests/newsfeed-voice.test.ts`.
-- **Code:** `cloud/scripts/radon-app-runtime.sh`, `web/app/api/newsfeed/share/route.ts`, `web/lib/newsfeedVoice.ts`.
-- **Host:** next deploy of `radon-app-runtime` then restart `radon-nextjs`. Confirm `docker inspect` shows the three binds and a share rewrite returns 200.
+- **Prerequisites:** operator access to the Share panel and read-only access to Next.js service logs and container mount metadata. Credential binding and billing policy belong to [the credential runtime owner](operations.md#encrypted-credential-store-profile-credentials-tab).
+- **Blast radius:** voice rewrite and share export only. Keep the original article available; credential or deployment changes can also affect the assistant in the same Next.js container.
+- **Diagnosis:** inspect the failed request's event stream and the matching `[newsfeed/share] voice rewrite failed` log. Missing-subscription errors require checking the expected read-only mounts and subscription availability against the owner above. Inspect mount metadata only, never dump container environment values or token files. A proxy response without a stream is a separate edge failure.
+- **Stop:** do not infer success from response headers, enable prepaid billing to mask missing subscription access, or restart services solely because a draft failed.
+- **Verify:** an authorized Share attempt must receive a `result` event containing the verified draft and update the preview. HTTP 200 alone is not recovery; an `error` event or a stream ending without a draft is failure. The wire contract and rejection cases are pinned by [`newsfeed-share-api.test.ts`](../web/tests/newsfeed-share-api.test.ts).
+- **Rollback:** keep using the sanitized original copy while the operator follows the [deployment and rollback owner](../cloud/CLAUDE.md#deployment-contract) for any required runtime repair. Do not apply ad hoc mount or billing changes.
+- **Escalate:** provide the request time, terminal event type and sanitized Next.js error to the operator. Never attach grants, cookies or the container environment.

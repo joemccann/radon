@@ -584,7 +584,7 @@ tail -f ~/ibc/logs/ibc-gateway-service.log
 
 ### Config (`~/ibc/config.secure.ini`)
 Credentials are not stored in this file. The secure runner reads them from Keychain at launch, writes a temporary `0600` runtime config, and removes it after exit.
-- `ExistingSessionDetectedAction=primary` — Gateway reconnects if bumped
+- `ExistingSessionDetectedAction=primaryoverride` - Gateway yields the session to your own IBKR login instead of reclaiming it
 - `AcceptIncomingConnectionAction=accept` — suppress API connection prompt
 - `AutoRestartTime=` - disabled; bypasses the shared lease
 - `ColdRestartTime=` - disabled; a cold restart can mint an unleased push
@@ -630,3 +630,7 @@ Reference: `docs/ibc-remote-access.md`
 
 ### Legacy
 `scripts/setup_ibc.sh` is legacy and is no longer the active service-management path on this machine.
+
+### Relay depth recovery
+
+REL-021b / R-040: rejected positional depth operations invalidate both sides of the book and remove pending snapshots before emitting `depth-unavailable`. They do not refresh feed health. The relay cancels the old depth ticket and requests a fresh book, at most once per subject per 30 monotonic seconds; late events for the old ticket are ignored. A failed cancellation refuses another ticket. This recovery is driven by incoming depth events; the existing stale-feed recovery still covers a silent connection.

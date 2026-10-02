@@ -71,7 +71,6 @@ from api.ib_gateway import (
 from api import ib_gateway
 from api import services as admin_services
 from clients.ib_client import DEFAULT_GATEWAY_PORT
-from api.pool_order_manage import pool_cancel_order, pool_modify_order
 from api.order_audit import record_order_event
 from api.auth import verify_clerk_jwt, verify_clerk_bearer, verify_api_key, is_trusted_local_request, is_private_net_probe
 from api.ws_ticket import create_ticket, validate_ticket
@@ -432,6 +431,17 @@ async def _ib_recovery_heartbeat_tick() -> None:
     if ib_pool is None:
         return
     try:
+        # IBKR operator hold: the Gateway is down on purpose while the operator
+        # uses the shared IBKR login. Pool reconnects and the radon-api
+        # self-restart ladder have nothing to recover; stand down.
+        hold = await admin_services.operator_hold_state()
+        if hold and hold.get("held"):
+            if not _pool_recovery_state.get("held_logged"):
+                logger.warning("IB recovery heartbeat standing down: IBKR operator hold %s", hold)
+                _pool_recovery_state["held_logged"] = True
+            _pool_recovery_state["consecutive_failures"] = 0
+            return
+        _pool_recovery_state["held_logged"] = False
         await check_ib_gateway(pool_status=ib_pool.status(), pool=ib_pool)
         await _recover_stuck_pool_guarded()
     except Exception:
@@ -964,7 +974,10 @@ async def auth_middleware(request: Request, call_next):
     # only way to disable auth is the explicit, loud, dev-only opt-in below —
     # never set RADON_AUTH_DISABLED on a public deployment.
     if not os.environ.get("CLERK_JWKS_URL"):
-        if os.environ.get("RADON_AUTH_DISABLED") == "1":
+        # REL-021b / R-037: a development bypass must not open a public
+        # Hetzner deployment when its JWKS configuration is missing.
+        mode = os.environ.get("RADON_MODE", "local").strip().lower()
+        if os.environ.get("RADON_AUTH_DISABLED") == "1" and mode == "local":
             return await call_next(request)
         return JSONResponse(
             status_code=503,
@@ -2070,6 +2083,9 @@ async def health_lite():
         "service_state": gw.get("service_state", "unknown"),
         "upstream_dead": gw.get("upstream_dead", False),
         "port_listening": gw.get("port_listening", False),
+        # Coarse: held or not. Lets the relay and health daemon read a down
+        # Gateway as the operator's hold, not an outage.
+        "operator_hold": bool((gw.get("operator_hold") or {}).get("held")),
         "loop_lag_ms": round(loop_lag_ms, 3),
     }
 
@@ -2155,7 +2171,7 @@ def _is_app_role_gateway_mutation(request: Request) -> bool:
     if request.method != "POST":
         return False
     path = request.url.path.rstrip("/")
-    if path in {"/ib/restart", "/ib/reset-backoff"}:
+    if path in {"/ib/restart", "/ib/reset-backoff", "/ib/operator-hold"}:
         return True
     prefix = "/admin/services/"
     if not path.startswith(prefix):
@@ -2198,7 +2214,23 @@ async def ib_restart():
     helper owns the 2FA push lease and the latched-transition state machine;
     pool reconnect after auth is the recovery heartbeat's job
     (feedback_ib_pool_stuck_after_2fa).
+
+    Refused with 423 during an IBKR operator hold: a login now would kick
+    the operator off the shared IBKR username. The relay's stale-data
+    escalation lands here too and treats 423 as "stand down".
     """
+    hold = await admin_services.operator_hold_state()
+    if hold and hold.get("held"):
+        raise HTTPException(
+            status_code=423,
+            detail={
+                "restarted": False,
+                "reason": "operator_hold",
+                "code": "OPERATOR_HOLD",
+                "operator_hold": hold,
+                "error": admin_services.OPERATOR_HOLD_DETAIL,
+            },
+        )
     if ib_gateway.is_cloud_mode() and _gateway_unit_controllable():
         action = await admin_services.control_unit(admin_services.GATEWAY_UNIT, "restart")
         if action.ok:
@@ -2209,6 +2241,12 @@ async def ib_restart():
                 "detail": action.detail,
                 "note": "Gateway cycling — approve the IBKR Mobile 2FA push to complete login.",
             }
+        if action.returncode == admin_services.OPERATOR_HOLD_RC:
+            raise HTTPException(
+                status_code=423,
+                detail={"restarted": False, "reason": "operator_hold", "code": "OPERATOR_HOLD",
+                        "error": action.detail},
+            )
         raise HTTPException(
             status_code=503,
             detail={
@@ -2251,34 +2289,98 @@ async def ib_reset_backoff():
     return result
 
 
+@app.get("/ib/operator-hold")
+async def ib_operator_hold_status():
+    """The IBKR operator hold (broker-authoritative; mirrored on the app)."""
+    return {"operator_hold": await admin_services.operator_hold_state()}
+
+
+@app.post("/ib/operator-hold")
+async def ib_operator_hold_set(request: Request):
+    """Set (``{"held": true, "reason": ...}``) or clear (``{"held": false}``)
+    the IBKR operator hold on the broker.
+
+    Hold: the broker writes the hold, then stops the Gateway, so the operator
+    can log in to IBKR Mobile / the web portal without the Gateway fighting
+    for the shared username. Clear: the broker removes it and logs the
+    Gateway in once (one 2FA push). Operator JWT only on the app host.
+    """
+    _require_bounded_body(request)
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="body must be JSON")
+    held = body.get("held") if isinstance(body, dict) else None
+    if not isinstance(held, bool):
+        raise HTTPException(status_code=400, detail="held must be true or false")
+    reason = str(body.get("reason") or "").strip()[:200]
+    if held and not reason:
+        raise HTTPException(status_code=400, detail="reason is required to set the hold")
+    expires_at = body.get("expires_at") or None
+    if expires_at is not None and not isinstance(expires_at, str):
+        raise HTTPException(status_code=400, detail="expires_at must be an ISO time string")
+    actor = _admin_actor(request)
+    status, payload = await admin_services.set_operator_hold(
+        held, reason=reason, actor=actor, expires_at=expires_at,
+    )
+    logger.warning(
+        "IBKR operator hold %s by %s: status=%s detail=%s",
+        "SET" if held else "CLEARED", actor, status, str(payload.get("detail") or "")[:200],
+    )
+    if status != 200:
+        raise HTTPException(status_code=status if 400 <= status < 600 else 502, detail=payload)
+    return payload
+
+
 # ---------------------------------------------------------------------------
 # Operator admin — service control (systemd-backed)
 # ---------------------------------------------------------------------------
 
+def _admin_actor(request: Request) -> str:
+    """Who asked, for the service-control audit line (JWT ``sub`` or ``local``)."""
+    user = getattr(request.state, "user", None)
+    if isinstance(user, dict) and user.get("sub"):
+        return str(user["sub"])
+    return "local"
+
+
+def _audit_admin_action(actor: str, result) -> None:
+    logger.info(
+        "admin service action actor=%s unit=%s action=%s ok=%s rc=%s detail=%s",
+        actor, result.unit, result.action, result.ok, result.returncode,
+        (result.detail or "")[:200],
+    )
+
+
 @app.get("/admin/services")
 async def admin_services_list():
-    """List radon-* systemd units with current load/active/sub state.
+    """List radon-* units with current load/active/sub state.
 
-    On non-systemd hosts (laptop dev), returns the placeholder catalogue with
-    ``supported=False`` so the UI can render a graceful "not controllable
-    from here" state. Status payload is identical to the systemd path.
+    ``supported`` is True only when this process can run actions (local
+    systemctl, or the radon-control socket in the app container).
+    ``status_source`` says once where the rows came from. On a laptop the
+    placeholder catalogue renders with ``supported=False``.
     """
-    supported = admin_services.is_systemd_available()
-    units = await admin_services.list_units_with_status()
+    snapshot = await admin_services.services_snapshot()
     return {
-        "supported": supported,
+        "supported": snapshot["supported"],
+        "status_source": snapshot["status_source"],
         "host_role": admin_services.host_role(),
-        "units": [u.to_dict() for u in units],
+        "units": snapshot["units"],
     }
 
 
 @app.post("/admin/services/{unit}/{action}")
-async def admin_service_action(unit: str, action: str):
-    """Run ``systemctl <action> <unit>``. Allowlist-gated to radon-* units."""
-    result = await admin_services.control_unit(unit, action)
+async def admin_service_action(unit: str, action: str, request: Request):
+    """Run ``<action>`` on an allowlisted radon-* unit, audited with the actor."""
+    actor = _admin_actor(request)
+    result = await admin_services.control_unit(unit, action, actor=actor)
+    _audit_admin_action(actor, result)
     if not result.ok:
         if result.returncode == admin_services.PUSH_LOCK_HELD_RC:
             raise HTTPException(status_code=409, detail=result.to_dict())
+        if result.returncode == admin_services.OPERATOR_HOLD_RC:
+            raise HTTPException(status_code=423, detail=result.to_dict())
         if result.returncode == admin_services.REMOTE_UNREACHABLE_RC:
             # REL-171 (R-500): a dead mTLS link to the broker is a gateway
             # timeout, not a caller error.
@@ -2288,7 +2390,7 @@ async def admin_service_action(unit: str, action: str):
 
 
 @app.post("/admin/stack/restart")
-async def admin_stack_restart():
+async def admin_stack_restart(request: Request):
     """Run the operator CLI's ``radon restart`` to cycle every radon-* unit.
 
     The TCP response may not survive the restart (FastAPI itself is one of
@@ -2296,7 +2398,9 @@ async def admin_stack_restart():
     as acceptance; a dropped request is indeterminate and status polling is
     required before a safe retry.
     """
-    result = await admin_services.restart_full_stack()
+    actor = _admin_actor(request)
+    result = await admin_services.restart_full_stack(actor=actor)
+    _audit_admin_action(actor, result)
     if not result.ok:
         if result.returncode == admin_services.PUSH_LOCK_HELD_RC:
             raise HTTPException(status_code=409, detail=result.to_dict())
@@ -2333,9 +2437,13 @@ async def uw_usage_record(
 
     if not (1 <= count <= 500):
         raise HTTPException(status_code=400, detail="count must be between 1 and 500")
-    await asyncio.to_thread(
-        record_hits, count, caller=caller or "web", endpoint=endpoint
-    )
+    try:
+        await asyncio.to_thread(
+            record_hits, count, caller=caller or "web", endpoint=endpoint
+        )
+    except TimeoutError as exc:
+        # REL-052 / NF-5: bounded contention is explicit, never a false count.
+        raise HTTPException(status_code=503, detail=str(exc), headers={"Retry-After": "1"}) from exc
     return usage_snapshot()
 
 
@@ -3220,10 +3328,11 @@ async def orders_cancel(request: Request):
         args.extend(["--perm-id", str(perm_id)])
 
     result = await _run_ib_script_with_recovery("ib_order_manage.py", args, timeout=15)
+    if isinstance(result.data, dict) and result.data.get("status") == "error":
+        # REL-021b / R-024: coded details survive the web error coercer.
+        raise HTTPException(status_code=502, detail={"code": "ORDER_CANCEL_FAILED", **result.data})
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
-    if result.data and result.data.get("status") == "error":
-        raise HTTPException(status_code=502, detail=result.data.get("message", "Cancel failed"))
     # REL-019: audit-trail the successful cancel (best-effort).
     data = result.data or {}
     await record_order_event(
@@ -3310,10 +3419,11 @@ async def orders_modify(request: Request):
         args.append("--no-outside-rth")
 
     result = await _run_ib_script_with_recovery("ib_order_manage.py", args, timeout=15)
+    if isinstance(result.data, dict) and result.data.get("status") == "error":
+        # REL-021b / R-024: retain order identity and broker diagnostics.
+        raise HTTPException(status_code=502, detail={"code": "ORDER_MODIFY_FAILED", **result.data})
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
-    if result.data and result.data.get("status") == "error":
-        raise HTTPException(status_code=502, detail=result.data.get("message", "Modify failed"))
     # REL-019: audit-trail the successful modify (best-effort).
     data = result.data or {}
     await record_order_event(
@@ -6462,9 +6572,9 @@ def _knowledge_search_in_thread(
                 raise
             if query_embedding is not None:
                 # The vector statement is what blows the Hrana bound under load.
-                # 384-d vector_top_k is 0.3-1.6s normally and >4s on a cold
-                # host (2026-08-30 03:05Z post-deploy 503s). 2048-d exact
-                # cosine scan is about 1s p50 / 1.8s p95. Retry without the
+                # Both legs are exact cosine scans since 0089/0090; 2048-d is
+                # about 1s p50 / 1.8s p95 and a cold host has exceeded 4s
+                # (2026-08-30 03:05Z post-deploy 503s). Retry without the
                 # leg that just timed out rather than re-running it.
                 logger.warning("knowledge: hybrid retrieval timed out; retrying FTS-only")
                 query_embedding = None

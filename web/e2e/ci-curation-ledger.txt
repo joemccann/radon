@@ -1,3 +1,15 @@
+# REVIEWED 2026-10-01 admin-service-controls.spec.ts - App-host Service controls
+#   through the radon-control socket. 1/1 Chromium against local next dev :3047
+#   (isolated AdminWorkspace bundle, clear-admin-component harness, fixture
+#   transport): real descriptions, "running 3h 12m", one status-source line,
+#   Stop disarmed on radon-api, one POST on the full restart path. Wire-level
+#   pins live in Vitest admin-action-request-assertions. Held out of
+#   e2e-financial-smoke pending next start preflight.
+admin-service-controls.spec.ts
+# REVIEWED 2026-09-30 credit-vix-tab.spec.ts - New CREDIT/VIX tab. Verified via
+#   Vitest credit-vix-api (missing 200, Turso vs disk) and credit-vix-panel
+#   (strip values, state tone, freshness rail 22:25 UTC, no front-run copy).
+#   Playwright spec is local-only. Held out of e2e-financial-smoke.
 # REVIEWED 2026-09-25 admin-panel.spec.ts - Static adaptation opens header gateway
 #   and service dialogs before existing controls/sort assertions; writer and status
 #   assertions retain their native disclosures. No local suite execution.
@@ -73,11 +85,13 @@ account-day-move-ib-daily-pnl.spec.ts
 admin-panel.spec.ts
 admin-visual-snapshot.spec.ts
 book-depth-client-nav.spec.ts
+book-head-stability.spec.ts
 book-montage-spacing.spec.ts
 bpi-tab.spec.ts
 cash-flows-section.spec.ts
 cash-flows-withdrawal-may8.spec.ts
 catalyst-card-weekend.spec.ts
+catalysts-scrollbar-autohide.spec.ts
 chain-held-leg-prices.spec.ts
 chain-sticky-header.spec.ts
 chain-strikes-selector.spec.ts
@@ -92,6 +106,7 @@ clear-workspace-interactions.spec.ts
 cor-tab.spec.ts
 crcl-spread-builder.spec.ts
 credit-spread-tab.spec.ts
+credit-vix-tab.spec.ts
 crox-bull-call-stale-price.spec.ts
 cta-page.spec.ts
 cta-stale-banner.spec.ts
@@ -105,6 +120,11 @@ dispersion-tab.spec.ts
 divyield-tab.spec.ts
 dollar-delta-leverage.spec.ts
 ma-ratio-tab.spec.ts
+# REVIEWED 2026-09-30 rsi-oversold-tab.spec.ts - Mirrors ma-ratio-tab: page.route
+#   mocked /api/rsi-oversold, no live IB/network/DB. Vitest rsi-oversold-panel
+#   and rsi-oversold-api cover the strip and missing contract. Held out of
+#   e2e-financial-smoke pending next start preflight.
+rsi-oversold-tab.spec.ts
 calm-streak-tab.spec.ts
 fill-toast.spec.ts
 header-fullscreen.spec.ts
@@ -306,6 +326,21 @@ ws-connection-stability.spec.ts
 #   verification passed in the 65/65 mobile financial group.
 # REVIEWED 2026-09-06 mobile-short-strangle-skew.spec.ts — compiled mobile
 #   Chromium next start verification passed in the 65/65 mobile group.
+# REVIEWED 2026-09-29 bpi-tab.spec.ts - added a 1440px geometry test: the
+#   NDX/SPX/RUT switcher shares the Bullish Percent Index title row, sits right
+#   of the title, and is inset >= 12px from the card. 3/3 Chromium under next
+#   dev. Vitest bpi-panel pins the header-actions placement in CI. Held out
+#   pending next start preflight.
+# REVIEWED 2026-09-29 catalysts-scrollbar-autohide.spec.ts - computed
+#   scrollbar-color of an injected expanded Catalysts list: transparent thumb
+#   at rest, visible with is-scrolling and on hover. 1/1 Chromium under next
+#   dev. Vitest catalysts-quadrant pins the is-scrolling toggle in CI.
+#   Held out pending next start preflight.
+# REVIEWED 2026-09-29 book-head-stability.spec.ts - desktop book head geometry
+#   (pill + tape toggle hold still across a 2- to 4-decimal tick, never clipped)
+#   at 1024/1280/1366/1920. 4/4 Chromium under next dev; fails on the pre-fix
+#   CSS. Vitest depth-book-render + depth-format are the CI pin (reserved
+#   widths). Held out pending next start preflight, like book-montage-spacing.
 # REVIEWED 2026-09-06 book-montage-spacing.spec.ts — T-454 moved the screenshot
 #   off a hardcoded /tmp path onto testInfo.outputPath and attached it to the
 #   report. Compiled Chromium passed locally against next start (7 passed in
@@ -380,3 +415,7 @@ ws-connection-stability.spec.ts
 #   the real registered callback executes in clerk-route-teardown.test.ts
 #   (3 passed). Scenario assertions are unchanged. Browser preflight remains
 #   outstanding; no local Chromium launch or browser pass is claimed.
+# REVIEWED 2026-09-30 clear-research.spec.ts - held out: the mobile deck is
+#   now closed with Escape (the esc x header button was removed) and the spec
+#   asserts the deck header carries no esc/x hint. Chain and book at 390px and
+#   1440px passed locally in Chromium against next dev (4 passed).

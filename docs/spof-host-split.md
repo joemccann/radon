@@ -100,6 +100,11 @@ untrusted. `check-env.py` accepts any private v4 for
 `IB_GATEWAY_HOST`, so a non-`10.0/16` network deploys green and then every
 private-net probe is silently unauthenticated.
 
+Clerk key rotation must remain immediately discoverable on both hosts.
+The FastAPI and hosted MCP JWKS clients set PyJWT 2.15's
+`cooldown_duration=0`, preserving Radon's existing per-kid negative caches
+and bounded lookups instead of imposing a global refresh delay across kids.
+
 Broker VM:
 
 - `RADON_HOST_ROLE=broker`
@@ -176,23 +181,51 @@ Operator commands after the cut:
   not in `RADON_IB_REMOTE_ALLOW` (`source not allowlisted`) or the client
   certificate's CN/DNS SAN is not in `RADON_IB_REMOTE_CLIENT_NAMES`
   (`client certificate not allowlisted`); `409` the request was refused, not
-  failed — a held 2FA lease or the 60s per-verb cooldown, with the reason in
-  `detail`. Expiry also shows the Gateway row as `load_state=remote`,
+  failed — a held 2FA lease, the 60s per-verb cooldown, or (for `start` and
+  `restart`) an IBKR login throttle the watchdog recorded in
+  `/var/lib/radon/ib-watchdog-state.json` (quiet period in
+  `scripts/utils/ib_login_throttle.py`; the detail names the UTC time a login
+  is allowed again), with the reason in `detail`. Expiry also shows the Gateway row as `load_state=remote`,
   `active_state=unknown`. For 502/403, re-run the mint script and steps 1-3;
-  Gateway itself is untouched. A 409 needs no action but time.
+  Gateway itself is untouched. A 409 from a held 2FA lease or the 60s cooldown
+  needs no action but time. A 409 from an IBKR login throttle means do not log
+  in until the UTC time in `detail`. During market-data hours the watchdog
+  retries then. Outside those hours, one app-path restart after that time is
+  the recovery. Broker-local `radon restart` and a broker-host
+  `POST /ib/restart` call the helper directly and are another login. See
+  [Gate 6](ib-gateway-recovery.md#6-watchdog-login-throttle-hold-2026-09-26).
   Reversal: `systemctl disable --now radon-ib-gateway-remote.service` on
   the broker and unset `RADON_IB_REMOTE_URL` on the app (controls go
   read-only, no error).
-- The API image has no `systemctl`. App-plane rows on `/admin` therefore
-  come from the host health daemon (`127.0.0.1:8330/status`) with
-  `load_state=host-health` and `can_control=false`. Gateway status stays
-  on the remote ladder above. Start, stop, and restart of app units stay
-  unavailable from that container.
+- The API image has no `systemctl` or `sudo`. App-plane rows and actions on
+  `/admin` go through `radon-control.service`, a host daemon on a unix
+  socket that only the radon-api container mounts (contract:
+  [operations.md, Host control socket](operations.md#host-control-socket-radon-controlservice)).
+  `/admin/services` then reports `supported=true` and
+  `status_source=host-control`, with real unit descriptions, uptimes and
+  per-unit `allowed_actions`. When the socket is absent or the daemon is
+  down, rows fall back to the host health daemon (`127.0.0.1:8330/status`,
+  `status_source=host-health`, `can_control=false`) and the panel is
+  read-only. Gateway status stays on the remote ladder above.
 - App `Restart All Services` stays app-plane. It does not cycle Gateway.
+  Through the control socket it is answered first and runs detached, since
+  it restarts radon-api itself.
 
 Do not put the broker in Falkenstein. Do not run two Gateways. Do not
 restore a broker snapshot beside a live broker. Do not start a standby
 FastAPI pool against a live Gateway.
+
+## IBKR operator hold
+
+The broker daemon (`scripts/ib_gateway_remote/serve.py`) answers `start` and
+`restart` with `423 OPERATOR_HOLD`, without running the helper, while
+`radon ib release` holds the Gateway out of the operator's shared IBKR
+login. Its `/status` payload carries `operator_hold`. `stop` and
+`reset-lease` stay open. `POST /hold` (JSON `reason`, `actor`) writes the
+hold and runs the helper `stop`, with no cooldown. `POST /unhold` removes it and
+runs one `start` through the usual cooldown and login-throttle gates. The app
+reaches both through FastAPI `POST /ib/operator-hold` (operator JWT). Runbook:
+`docs/ib-gateway-recovery.md`.
 
 ## Never
 

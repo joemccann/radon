@@ -38,50 +38,50 @@ class _FakeCursor:
 class _FakeDb:
     def __init__(self, rows):
         self._rows = [
-            (f"test-{index:08d}", *row)
+            (f"test-{index:08d}", *row, index)
             for index, row in enumerate(rows, start=1)
         ]
         self.calls = []
 
     def execute(self, sql, params=()):
         self.calls.append((sql, params))
-        cursor = str(params[0])
+        cursor = int(params[0])
         tickers = {str(value) for value in params[1:-1]}
         limit = int(params[-1])
         matches = []
         for row in self._rows:
-            trade_id, payload_json, _filled_at, _written_at = row
+            trade_id, payload_json, _filled_at, _written_at, rowid = row
             payload = json.loads(payload_json)
             ticker = str(payload.get("ticker") or payload.get("symbol") or "").upper()
-            if trade_id > cursor and ticker in tickers:
+            if rowid > cursor and ticker in tickers:
                 matches.append(row)
         return _FakeCursor(matches[:limit])
 
 
 class _CursorPagedDb:
-    """Driver-faithful cursor fake for journal trade_id pagination."""
+    """Driver-faithful cursor fake for journal insertion-order pagination."""
 
     def __init__(self, rows):
-        self._rows = rows
+        self._rows = [(*row, index) for index, row in enumerate(rows, start=1)]
         self.calls = []
 
     def execute(self, sql, params=()):
         self.calls.append((sql, params))
-        assert "trade_id > ?" in sql
-        assert "ORDER BY trade_id ASC" in sql
+        assert "rowid > ?" in sql
+        assert "ORDER BY rowid ASC" in sql
         assert "LIMIT ?" in sql
 
-        cursor = str(params[0])
+        cursor = int(params[0])
         tickers = {str(value) for value in params[1:-1]}
         limit = int(params[-1])
         matches = []
         for row in self._rows:
-            trade_id, payload_json, _filled_at, _written_at = row
+            trade_id, payload_json, _filled_at, _written_at, rowid = row
             payload = json.loads(payload_json)
             ticker = str(payload.get("ticker") or payload.get("symbol") or "").upper()
-            if trade_id > cursor and ticker in tickers:
+            if rowid > cursor and ticker in tickers:
                 matches.append(row)
-        matches.sort(key=lambda row: row[0])
+        matches.sort(key=lambda row: row[-1])
         return _FakeCursor(matches[:limit])
 
 
@@ -541,7 +541,7 @@ def test_build_journal_basis_lookup_batches_all_option_contracts_in_one_query():
     batched = ib_sync.build_journal_basis_lookup(client, db=batched_db)
 
     assert len(batched_db.calls) == 1
-    assert batched_db.calls[0][1] == ("", "NVDA", "WULF", 200)
+    assert batched_db.calls[0][1] == (0, "NVDA", "WULF", 200)
     expected_bytes = json.dumps(
         {"basis": legacy_basis, "net_qty": legacy_net_qty},
         sort_keys=True,
@@ -555,7 +555,7 @@ def test_build_journal_basis_lookup_batches_all_option_contracts_in_one_query():
     assert actual_bytes == expected_bytes
 
 
-def test_batched_journal_basis_pages_by_trade_id_and_preserves_ordered_bytes(monkeypatch):
+def test_batched_journal_basis_pages_by_rowid_and_preserves_ordered_bytes(monkeypatch):
     """Each Hrana response is bounded without changing chronological semantics."""
     rows = [
         # trade_id order deliberately disagrees with effective-time order. The
@@ -688,9 +688,9 @@ def test_batched_journal_basis_pages_by_trade_id_and_preserves_ordered_bytes(mon
     assert paged_bytes == expected_bytes
     assert len(single_page_db.calls) == 1
     assert len(paged_db.calls) == 3
-    assert paged_db.calls[0][1] == ("", "NVDA", "WULF", 2)
-    assert paged_db.calls[1][1] == ("002-nvda", "NVDA", "WULF", 2)
-    assert paged_db.calls[2][1] == ("999-open-last-by-id", "NVDA", "WULF", 2)
+    assert paged_db.calls[0][1] == (0, "NVDA", "WULF", 2)
+    assert paged_db.calls[1][1] == (2, "NVDA", "WULF", 2)
+    assert paged_db.calls[2][1] == (5, "NVDA", "WULF", 2)
 
 
 def test_build_journal_basis_lookup_batch_failure_keeps_ib_fallback(capsys):

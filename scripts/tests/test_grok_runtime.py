@@ -172,3 +172,25 @@ class TestStamp:
         assert grok_runtime.parse_cli_version(
             "grok 1.0.41 (4220f3b224a6) [stable]"
         ) == "1.0.41"
+
+
+
+def test_default_runtime_lock_lives_in_its_own_dir(monkeypatch):
+    """T-518: always check the sandbox-compatible default, even on custom hosts."""
+    import runpy
+
+    monkeypatch.delenv("RADON_GROK_RUNTIME_LOCK", raising=False)
+    # Re-evaluate import-time configuration without mutating the shared module.
+    runtime = runpy.run_path(grok_runtime.__file__)
+    assert str(runtime["DEFAULT_LOCK_PATH"]) == (
+        "/var/lib/radon/grok-runtime/grok-runtime.lock"
+    )
+
+
+def test_runtime_lock_honors_explicit_override(monkeypatch, tmp_path):
+    import runpy
+
+    lock = tmp_path / "custom-runtime.lock"
+    monkeypatch.setenv("RADON_GROK_RUNTIME_LOCK", str(lock))
+    runtime = runpy.run_path(grok_runtime.__file__)
+    assert runtime["DEFAULT_LOCK_PATH"] == lock

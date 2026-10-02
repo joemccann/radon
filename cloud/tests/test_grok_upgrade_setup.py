@@ -56,4 +56,17 @@ def test_upgrade_timer_is_daily_0740_utc():
     service = (CLOUD / "services" / "radon-grok-upgrade.service").read_text()
     assert "grok_upgrade.py" in service
     assert "/var/lib/radon/grok_lkg.json" in service
-    assert "/var/lib/radon/grok-runtime.lock" in service
+    assert "/var/lib/radon/grok-runtime/grok-runtime.lock" in service
+
+
+def test_upgrade_unit_names_every_link_it_may_move():
+    """grok_upgrade.py never derives ~/.grok from HOME (2026-09-29 incident).
+
+    The unit must name both entries explicitly, and the alias must be the
+    installer path the responder and subscription-token units put on PATH.
+    """
+    service = (CLOUD / "services" / "radon-grok-upgrade.service").read_text()
+    exec_start = next(l for l in service.splitlines() if l.startswith("ExecStart="))
+    assert "--live-bin /home/radon/.local/bin/grok" in exec_start
+    assert "--alias-bin /home/radon/.grok/bin/grok" in exec_start
+    assert "--scratch /var/lib/radon/grok-upgrade" in exec_start

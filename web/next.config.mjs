@@ -67,6 +67,7 @@ const HOST_DATA_TRACE_ROUTES = [
 ];
 
 const config = {
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   outputFileTracingRoot: resolve(__dirname, ".."),
   outputFileTracingExcludes: Object.fromEntries(
     HOST_DATA_TRACE_ROUTES.map((route) => [route, HOST_DATA_TRACE_EXCLUDES]),

@@ -169,6 +169,73 @@ def test_db_failure_records_error_health_and_exits_nonzero(env, monkeypatch):
     assert health and health[-1][0] == "error"
 
 
+# Page 01374b995572a545deb4ce62905c643c (2026-09-28 21:30Z). A fleet
+# hrana read stall (siblings logged the same TimeoutError and stayed
+# up) escaped main(). systemd recorded Result=exit-code, NRestarts=0.
+# The next timer is 5 minutes away. One miss fits the 20-minute
+# heartbeat window. A statement error is not that stall.
+_READ_TIMEOUT = "TimeoutError: The read operation timed out"
+
+
+def test_empty_poll_read_timeout_does_not_fail_the_oneshot(env, monkeypatch, capsys):
+    """21:27:27Z: the unprocessed-row read raised HranaHttpError
+    TimeoutError. Exit 0, no digest, no health write. Painting ok
+    would hide a standing Turso outage; painting error pages via the
+    error bucket while the row is still the last good heartbeat."""
+    from db.hrana_http import HranaHttpError
+
+    _, pushes, health = env
+
+    def boom(sql, args=()):
+        raise HranaHttpError(_READ_TIMEOUT)
+
+    monkeypatch.setattr(drain, "_query", boom)
+    assert drain.main([]) == 0
+    assert pushes == []
+    assert health == []
+    err = capsys.readouterr().err
+    assert "cycle read timeout non-fatal" in err
+    assert _READ_TIMEOUT in err
+    assert "cycle failed" not in err
+
+
+def test_ok_heartbeat_read_timeout_does_not_fail_the_oneshot(env, monkeypatch, capsys):
+    """Same minute: an empty cycle finished the reads, then
+    record_service_health timed out and the error-heartbeat retry
+    timed out. That is still not an exit-code failure."""
+    from db.hrana_http import HranaHttpError
+
+    _, pushes, health = env
+
+    def boom(state, error=None):
+        raise HranaHttpError(_READ_TIMEOUT)
+
+    monkeypatch.setattr(drain, "_record_health", boom)
+    assert drain.main([]) == 0
+    assert pushes == []
+    assert health == []
+    err = capsys.readouterr().err
+    assert "cycle read timeout non-fatal" in err
+    assert "health write failed" not in err
+
+
+def test_hrana_statement_error_still_fails_the_oneshot(env, monkeypatch, capsys):
+    from db.hrana_http import HranaHttpError
+
+    _, pushes, health = env
+
+    def boom(sql, args=()):
+        raise HranaHttpError("SQLite input error: no such column: finished_at")
+
+    monkeypatch.setattr(drain, "_query", boom)
+    assert drain.main([]) == 1
+    assert pushes == []
+    assert health and health[-1][0] == "error"
+    err = capsys.readouterr().err
+    assert "cycle failed" in err
+    assert "non-fatal" not in err
+
+
 def test_missing_pushover_creds_does_not_stamp_digest(env, monkeypatch):
     conn, pushes, health = env
     monkeypatch.delenv("PUSHOVER_USER")

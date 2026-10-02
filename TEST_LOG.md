@@ -1062,3 +1062,73 @@ Cloud, three consecutive runs, identical failure list: 2318 passed, 10 failed, 8
 Pytest on Homebrew Python aborted at collection three times (missing Pillow, pypdfium2, then pdf-inspector). Those libraries were installed in a throwaway virtual environment, not in the repo. Two full runs then passed: 16044 passed, 13 skipped, 94 deselected, 1 xpassed. An intervening run is not a gate result: its PATH omitted `/sbin`, so `sha256sum` was missing, and the run crossed midnight Eastern, so an import-time session date disagreed with a fill created after the roll. Those four failures are outside this branch's diff. After the roll, the session-date tests and the node resolver passed in isolation.
 
 Reduced scope was P0 and P1. No P0 was open. T-493, T-495, T-510, and T-512 stay open because they are P2.
+
+
+## Remediation 2026-09-28 (testing/2026-09-28, reduced P0/P1)
+
+Tonight's audit timed out before a new checkpoint. Open P0/P1 carried forward from issue #83 (2026-09-27 remediate): T-130 operator-only, T-488. P2 T-493, T-495, T-510, T-512 stay open under `RADON_WEEKEND_REDUCED=1`. T-511 and T-513 stay on open PR #766 and were not redone.
+
+| Finding | Status | Red/green evidence |
+|---|---|---|
+| T-488 | DONE | `test_backup_start_rejection_does_not_commit_restore_and_can_retry` failed before the edit: return code 1, `deploy-root-helper.sh: line 678: services[@]: unbound variable`. The supervised child is `#!/bin/bash` (bash 3.2.57); an empty `services` array under `set -u` aborts `recover` before the restore marker. The same four loops now use the helper's existing `${arr[@]+"${arr[@]}"}` form. `TestRootHelper`: 35 passed, 1 skipped (flock absent). Timeouts and assertions were not loosened. |
+| T-130 | operator-only | `ci.yml` still warns and exits 0 when `TURSO_DEMO_DB_URL` and `TURSO_DEMO_APP_DB_URL` are unset. `test_demo_isolation_is_wired.py`: 8 passed. Operator must provision those two repository secrets. |
+
+
+
+## Remediation 2026-09-29
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-515 | DONE | Original hook: 9 failed / 6 passed; live-tick reproduction 3/3 red. Deadline-owned eligibility and lifecycle cleanup: 25 related tests passed; hook coverage 100% lines / 98% branches / 100% functions. Fake-only Playwright pacing case added; browser evidence belongs to PR CI. |
+| T-514 | DONE | Seven files reproduced 27 shared-scratch failures in isolated serial runs. Fixture-owned scratch paths preserve actual shell control flow and assertions: 33 passed. Production wrappers and other users' files unchanged. |
+| T-516 | DONE | Manual-guard mutation: 4 failed / 3 passed. Actual TypeScript CLI with fake boundaries: 7 passed; production migration unchanged. |
+| T-493 | DONE | Old suite accepted a missing live volume update. Behavioral replacements reject four update/delivery mutations; 5 passed with fake IB emitter and real handlers. |
+| T-495 | DONE locally; CI browser pending | Old reader failed both class-rename cases; 23 reader/component cases passed and Playwright discovered 5 scenarios. Semantic locators and observed scroll replace presentation selectors and fixed sleep; actual browser/screenshots assigned to PR CI. |
+| T-512 | DONE | Premature-commit mutation escaped the old test as XPASS and failed the new SQLite-trigger rollback assertion. Full file: 8 passed, no xfail; fresh-connection visibility and retry remain covered. |
+| T-130 | DONE upstream | Main CI run 36502433090/job 109196861726 executed the actual demo-isolation guard successfully; local wiring 8 passed. Required secret names exist; no secret values inspected. |
+| T-510 | DONE upstream retirement | Obsolete controlling-TTY suite and entry point removed together; replacement runner cleanup tests passed all three delta repetitions. |
+| T-435 | operator-only | Retained prior three-attempt diagnosis. Acceptance: isolated keyless compile-mode CI build/server and real /portfolio-to-/setup redirect without x-radon-authless-test. |
+
+Closing verification details and exact counts are appended to TEST_AUDIT.md; external CI/browser/delivery receipts belong to rolling issue #83.
+
+2026-09-29 CI follow-up: T-495 browser acceptance is DONE at e028b4e4 (four scenarios, eight reviewed desktop/390px light/dark screenshots). T-515's new browser fixture red-failed on startup request counting; the controlled missing-close condition now begins after page readiness with all cooldown assertions retained. Final exact-head evidence belongs to issue #83.
+
+
+## Remediation 2026-09-30
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-517 | DONE | Held-date SQL mutation: 3 failed / 17 passed; empty-fetch mutation: 9 failed / 11 passed. All 11 original report tests accept both mutations and remain intact. Added fake HTTP boundary backed by read-only SQLite execution: 20 report tests pass. Date/query, request, decoding, fallback and refusal paths execute; `_pt_bounds`, `_hrana`, `fetch_rows` each measure 100% statement/branch coverage (whole module 84%). Product code unchanged. |
+| T-518 | DONE | Wrong runtime-lock default under a synthetic inherited override: original regression skips; isolated import-time configuration test fails (1 failed / 16 passed). Correct source: 17 passed, including explicit override precedence, with no environment-dependent skip or mutation of the shared module. |
+
+All three delta repetitions passed: Python 946, Vitest 134, cloud 24 per repetition. Three serial closing rounds and the exact detached-base cloud failure-list comparison are appended to TEST_AUDIT.md. The first closing Python run had one subscription-login failure; its unchanged file passed 103/103 alone and both later full rounds passed. T-435 remains operator-only with its existing keyless-build/browser acceptance criteria. External delivery and CI receipts belong to rolling issue #83.
+
+
+## Remediation 2026-10-01
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-519 | DONE | Three history-scanner cases plus fake-origin pickup fail in each of three delta repetitions. Every outgoing commit patch, including merge resolutions, is now scanned. Scanner/pickup focused gate passes; no live push occurs in tests. |
+| T-520 | DONE | Six non-restrictive guard expressions and four skipped-dependency status overrides bypass the original checker. All ten fail three times; positive guard implication and success-aware inheritance produce 47 passing security tests. Workflows unchanged. |
+| T-521 | DONE | Request/reducer/L2-delivery mutations each yield 1 failed / 7 passed; all three old source-text tests accept each defect. Executable relay boundary suite plus old tests: 8 passed. Product relay unchanged. |
+| T-522 | DONE | Wrong contract: 1 failed / 55 passed; missing disconnect: 11 failed / 45 passed; unlimited wait: 1 failed / 55 passed. All 41 old tests accept all mutations. Fake IB boundary: 56 combined passed; real broker leg and coroutine each 100% statement/branch coverage. Product fetcher unchanged. |
+| T-523 | DONE | Synthetic private filename is echoed by refusal: 1 failed / 41 passed. Suppressing only private diagnostic paths retains refusal and clean-path context: 42 scanner cases pass. |
+| T-524 | DONE | Binary-addition and pure-rename paths bypass the old scanner: 2 failed / 42 passed. Independent commit path enumeration rejects both; 44 scanner cases and 185 combined focused Python tests pass. |
+| T-435 | DONE upstream | PR #816, merge 2640fd61; actual keyless setup browser run 36737302600/job 109962391922, 1 passed with observed 307 Location at head 8fc11512. No authless header; isolated compile-mode bundle and server. |
+
+Standing/delta gates, closing full rounds and the exact detached-base cloud FAILED-list comparison are recorded in TEST_AUDIT.md. Exact-head CI/browser and external delivery receipts belong to rolling issue #83.
+
+Closing verification 2026-10-01: all three rounds pass Python 13448 / Vitest 10300 / cloud 2400, with Python 2 skips and 23 subtests, cloud 7 skips. Every cloud FAILED-list comparison against the clean detached base has zero additions and zero removals. No load-flake exception or test weakening was needed.
+
+
+## Remediation 2026-10-02
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-525 | DONE | Kernel PID substituted for UID: all 57 old tests pass; 5 new identity cases fail. Fake getsockopt with the real decoder/admission path: 64 combined pass. No product decoder change. |
+| T-526 | DONE | Buffering read substituted for streaming read: all 30 old tests pass; both new delivery cases fail. Handshake-controlled loopback SSE fixture: 32 combined pass. No product proxy change. |
+| T-527 | DONE | Four malformed successful health responses clear a known hold at baseline: 4 failed / 8 passed. Explicit-boolean validation and real poller/timer execution: 77 related pass. Timer-bypass mutation passes 4 old source checks but fails all 12 new cases. |
+
+Standing gates, three delta repetitions and closing full-gate counts are recorded in TEST_AUDIT.md. Exact-head CI/browser evidence and notification delivery status belong to rolling issue #83.
+
+Closing verification 2026-10-02: three rounds each passed Python 13,826 / Vitest 10,365 / cloud 2,452; Python 2 skips and 23 subtests, cloud 7 skips. All three sorted cloud FAILED lists match the empty detached-base list, with 0 additions and 0 removals.

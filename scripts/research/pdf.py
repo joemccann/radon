@@ -149,6 +149,20 @@ def text_anchors(pdf_path, pages):
     return records
 
 
+def creation_date(pdf_path):
+    try:
+        with pypdfium2.PdfDocument(str(pdf_path)) as document:
+            return document.get_metadata_value('CreationDate') or document.get_metadata_value('ModDate') or None
+    except Exception:
+        return None
+
+
+def figures_catalogue(pdf_path, pages, output, extras):
+    from research.figures import catalogue
+    found = catalogue(pdf_path, pages, output, extras=extras)
+    return {'figures': list(found), 'skipped_pages': found.skipped_pages}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('pdf')
@@ -158,9 +172,18 @@ def main():
     parser.add_argument('--crop', help='normalized left,top,right,bottom in displayed page')
     parser.add_argument('--render-only', action='store_true')
     parser.add_argument('--anchors-only', action='store_true')
+    parser.add_argument('--figures-only', action='store_true', help='figure catalogue; extras JSON on stdin')
+    parser.add_argument('--metadata-only', action='store_true')
     args = parser.parse_args()
-    if (args.render_only or args.anchors_only) and not args.pages:
-        parser.error('--render-only / --anchors-only requires --pages')
+    if (args.render_only or args.anchors_only or args.figures_only) and not args.pages:
+        parser.error('--render-only / --anchors-only / --figures-only requires --pages')
+    if args.metadata_only:
+        print(json.dumps({'created': creation_date(args.pdf)}))
+        return
+    if args.figures_only:
+        extras = json.loads(sys.stdin.read() or 'null')
+        print(json.dumps(figures_catalogue(args.pdf, [int(n) for n in args.pages.split(',')], args.output, extras)))
+        return
     if args.anchors_only:
         print(json.dumps(text_anchors(args.pdf, [int(n) for n in args.pages.split(',')])))
         return

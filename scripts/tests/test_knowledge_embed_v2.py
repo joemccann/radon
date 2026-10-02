@@ -29,6 +29,7 @@ from knowledge.store import upsert_documents  # noqa: E402
 _MIGRATION = _SCRIPTS / "db" / "migrations" / "0028_knowledge.sql"
 _MIGRATION_V2 = _SCRIPTS / "db" / "migrations" / "0087_knowledge_embedding_v2.sql"
 _MIGRATION_DROP = _SCRIPTS / "db" / "migrations" / "0089_drop_knowledge_embedding_v2_index.sql"
+_MIGRATION_DROP_V1 = _SCRIPTS / "db" / "migrations" / "0090_drop_knowledge_embedding_index.sql"
 _BOOTSTRAP = (
     "CREATE TABLE IF NOT EXISTS schema_migrations "
     "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
@@ -228,7 +229,7 @@ def test_local_backend_does_not_call_nvidia(monkeypatch):
     assert vector == [1.0] * EMBEDDING_DIM
 
 
-def test_vector_search_picks_exact_cosine_for_2048_and_ann_for_384():
+def test_vector_search_uses_exact_cosine_for_both_dimensions():
     class _Db:
         def __init__(self):
             self.sql = []
@@ -254,9 +255,43 @@ def test_vector_search_picks_exact_cosine_for_2048_and_ann_for_384():
     assert wide.args[0][-1] == 4
     assert json.loads(wide.args[0][-2]) == [0.0] * EMBEDDING_DIM_V2
     narrow = _Db()
-    _vector_top_k_search(narrow, [0.0] * EMBEDDING_DIM, 4)
-    assert "vector_top_k('idx_knowledge_embedding'" in narrow.sql[0]
+    _vector_top_k_search(narrow, [0.0] * EMBEDDING_DIM, 4, scopes=["ops"])
+    assert "vector_top_k" not in narrow.sql[0]
     assert "embedding_v2" not in narrow.sql[0]
+    assert "embedding IS NOT NULL" in narrow.sql[0]
+    assert "ORDER BY vector_distance_cos(embedding, vector32(?))" in narrow.sql[0]
+    assert "knowledge.scope IN (?)" in narrow.sql[0]
+    assert narrow.args[0][0] == "ops"
+    assert narrow.args[0][-1] == 4
+    with pytest.raises(ValueError):
+        _vector_top_k_search(narrow, [0.0] * EMBEDDING_DIM, 4, index_name="bogus")
+
+
+def test_migration_0090_drops_the_384_index_and_384_search_still_ranks():
+    """Each DiskANN row update took 10-26s on a radon fork (2026-09-28) and
+    held the single writer, so every other Turso writer timed out."""
+    drop = _MIGRATION_DROP_V1.read_text(encoding="utf-8")
+    assert "DROP INDEX IF EXISTS idx_knowledge_embedding;" in drop
+    assert "-- radon-migrate: manual" in drop
+    assert "VALUES (90," in drop
+    assert "CREATE INDEX" not in drop
+    db = _db()
+    close = [1.0] + [0.0] * (EMBEDDING_DIM - 1)
+    far = [0.0, 1.0] + [0.0] * (EMBEDDING_DIM - 2)
+    upsert_documents(db, [
+        KnowledgeDoc(source="docs", scope="ops", doc_key="far", content="beta", embedding=far),
+        KnowledgeDoc(source="docs", scope="ops", doc_key="close", content="alpha", embedding=close),
+        KnowledgeDoc(source="docs", scope="ops", doc_key="none", content="gamma"),
+    ])
+    for _ in range(2):
+        for stmt in _split(drop):
+            db.execute(stmt)
+        db.commit()
+    names = {row[0] for row in db.execute("SELECT name FROM sqlite_master").fetchall()}
+    assert "idx_knowledge_embedding" not in names
+    ids = _vector_top_k_search(db, close, 5, scopes=["ops"])
+    keys = [db.execute("SELECT doc_key FROM knowledge WHERE id = ?", (i,)).fetchone()[0] for i in ids]
+    assert keys == ["close", "far"]
 
 
 def test_migration_0087_creates_the_index_and_0089_drops_it():
@@ -388,3 +423,62 @@ def test_ingest_reuses_only_matching_widths(monkeypatch):
     _embed_docs([fresh], lambda texts: [[0.2] * EMBEDDING_DIM])
     assert fresh.embedding == [0.2] * EMBEDDING_DIM
     assert len(fresh.embedding_v2) == EMBEDDING_DIM_V2
+
+
+# --- NVIDIA rate limits (2026-09-30): one key, one host-wide pace ----------------
+
+class _Limiter:
+    def __init__(self, allow=True):
+        self.allow = allow
+        self.events = []
+
+    def acquire(self, max_wait):
+        self.events.append("acquire")
+        return self.allow
+
+    def note_429(self, retry_after):
+        self.events.append("429")
+
+    def note_auth_failure(self, status):
+        self.events.append(f"auth{status}")
+
+    def note_success(self):
+        self.events.append("ok")
+
+
+def _pace_with(monkeypatch, limiter):
+    import clients.model_ladder as ladder
+    monkeypatch.setattr(ladder, "_nvidia_limiter", lambda env, post: limiter)
+
+
+def test_embed_is_paced_and_records_success(monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
+    limiter = _Limiter()
+    _pace_with(monkeypatch, limiter)
+    embed_query(["what failed"], post=_vectors(1))
+    assert limiter.events == ["acquire", "ok"]
+
+
+def test_embed_sends_nothing_when_the_budget_is_spent(monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
+    _pace_with(monkeypatch, _Limiter(allow=False))
+    post = _vectors(1)
+    with pytest.raises(RuntimeError, match="rate_limited_local"):
+        embed_query(["what failed"], post=post)
+    assert post.bodies == []
+
+
+def test_embed_429_and_403_feed_the_shared_limiter(monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
+    monkeypatch.setattr("knowledge.embed.time.sleep", lambda _s: None)
+    limiter = _Limiter()
+    _pace_with(monkeypatch, limiter)
+    with pytest.raises(RuntimeError):
+        embed_query(["q"], post=_vectors(1, status=429))
+    assert "429" in limiter.events
+    limiter.events.clear()
+    post = _vectors(1, status=403)
+    with pytest.raises(RuntimeError):
+        embed_query(["q"], post=post)
+    assert limiter.events == ["acquire", "auth403"]
+    assert len(post.bodies) == 1, "a 403 is never retried"

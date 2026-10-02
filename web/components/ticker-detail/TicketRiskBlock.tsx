@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { payoffCurve, type PayoffLeg } from "@/lib/order/payoff";
+import type { OrderPresentationSummary } from "@/lib/order/types";
 
 /**
  * Risk panel for the docked ticket rail.
@@ -29,6 +30,8 @@ type TicketRiskBlockProps = {
   total: number | null;
   totalLabel?: string;
   isCredit: boolean;
+  /** Whole-spread figures when held options cover this order (held leg at its basis). */
+  withHeldLegs?: OrderPresentationSummary["withHeldLegs"];
 };
 
 const DASH = "---";
@@ -48,6 +51,19 @@ function usd(value: number | null, fractionDigits = 2, magnitude = false): strin
     minimumFractionDigits: fractionDigits,
     maximumFractionDigits: fractionDigits,
   })}`;
+}
+
+/** Signed P&L: "+" for a gain, "-" for a loss, toned to match. */
+function SignedCell({ label, value, unbounded = false }: { label: string; value: number | null; unbounded?: boolean }) {
+  if (unbounded) return <Cell label={label} value="UNBOUNDED" tone="gain" />;
+  const shown = usd(value);
+  return (
+    <Cell
+      label={label}
+      value={value != null && value > 0 ? `+${shown}` : shown}
+      tone={value == null || value === 0 ? undefined : value > 0 ? "gain" : "loss"}
+    />
+  );
 }
 
 function Cell({ label, value, tone }: { label: string; value: string; tone?: "gain" | "loss" | "warn" }) {
@@ -74,6 +90,7 @@ export default function TicketRiskBlock({
   total,
   totalLabel = "TOTAL",
   isCredit,
+  withHeldLegs = null,
 }: TicketRiskBlockProps) {
   const curve = useMemo(() => payoffCurve(legs, netPremium, { spot }), [legs, netPremium, spot]);
 
@@ -112,12 +129,23 @@ export default function TicketRiskBlock({
       </div>
 
       <div className="ticket-risk-grid">
-        <Cell label="MAX GAIN" value={usd(maxGain, 2, true)} tone={maxGain != null ? "gain" : undefined} />
-        <Cell
-          label="MAX LOSS"
-          value={maxLossUnbounded ? "UNBOUNDED" : usd(maxLoss, 2, true)}
-          tone={maxLossUnbounded || maxLoss != null ? "loss" : undefined}
-        />
+        {withHeldLegs != null ? (
+          // Against a held leg the clamped magnitudes mislead: a credit wider
+          // than the spread reads "MAX LOSS $0" when it locks in a gain.
+          <>
+            <SignedCell label="BEST CASE" value={withHeldLegs.orderBest} unbounded={withHeldLegs.bestUnbounded} />
+            <SignedCell label="WORST CASE" value={withHeldLegs.orderWorst} />
+          </>
+        ) : (
+          <>
+            <Cell label="MAX GAIN" value={usd(maxGain, 2, true)} tone={maxGain != null ? "gain" : undefined} />
+            <Cell
+              label="MAX LOSS"
+              value={maxLossUnbounded ? "UNBOUNDED" : usd(maxLoss, 2, true)}
+              tone={maxLossUnbounded || maxLoss != null ? "loss" : undefined}
+            />
+          </>
+        )}
         <Cell label="BREAKEVENS" value={breakevenLabel} />
         <Cell label="P(PROFIT)" value={DASH} />
         <Cell
@@ -131,6 +159,31 @@ export default function TicketRiskBlock({
           tone={fundsAfter != null && fundsAfter < 0 ? "loss" : undefined}
         />
       </div>
+
+      {withHeldLegs != null && (
+        <>
+          {/* BEST / WORST CASE above price the held leg at $0 (already paid
+              for). These price the resulting spread with that leg at its
+              cost basis. Signed: a spread that loses everywhere has a
+              negative best case. */}
+          <div className="ticket-risk-head ticket-risk-head--spread" data-testid="ticket-risk-spread">
+            <span>
+              SPREAD · INCL. HELD LEG
+              {withHeldLegs.heldBasisDollars != null
+                ? ` @ ${usd(withHeldLegs.heldBasisDollars, 0)} BASIS`
+                : " · BASIS UNKNOWN"}
+            </span>
+          </div>
+          <div className="ticket-risk-grid">
+            <SignedCell
+              label="SPREAD BEST CASE"
+              value={withHeldLegs.spreadBest}
+              unbounded={withHeldLegs.bestUnbounded}
+            />
+            <SignedCell label="SPREAD WORST CASE" value={withHeldLegs.spreadWorst} />
+          </div>
+        </>
+      )}
 
       <div className="ticket-risk-total">
         <span>

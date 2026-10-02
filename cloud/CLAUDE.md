@@ -59,6 +59,18 @@ verb listed in full in `sudoers.d/radon-ops` with no wildcard. Callers:
 `ib-gateway-control.sh` (still `User=radon`, so the 2FA lease and guard files
 under `/var/lib/radon` keep their ownership) and `scripts/jvm_forensics.py`.
 
+`compose-up` refuses with exit 73 while the IBKR operator hold
+(`/var/lib/radon/ib-operator-hold.json`) is set, and a root-only `kill` verb
+(not in sudoers) backs `radon ib release`. `setup-vps.sh install_ib_hold`
+installs that command root-owned as `/usr/local/sbin/radon-ib-hold`, and the
+stdlib hold CLI it runs (`python3.13 -I`) as `/usr/local/lib/radon/ib_operator_hold.py`,
+never the radon-owned checkout copy; runbook
+in `docs/ib-gateway-recovery.md`. The compose body pins
+`EXISTING_SESSION_DETECTED_ACTION=primaryoverride`, outside the env file, so a
+logged-in Gateway yields to the operator's own IBKR login. A changed compose
+body reaches the broker only through a manual reinstall of
+`/etc/radon/ib-gateway-compose.yml` and a container recreate, which is one login.
+
 The compose body it runs lives at `/etc/radon/ib-gateway-compose.yml`, a
 control-plane artifact, NOT `cloud/docker-compose.yml` in the checkout: root
 acting on a file its caller can rewrite is the same escalation with extra
@@ -265,7 +277,10 @@ topology state is durable across reboot under `/var/lib/radon/deploy`.
 resume that exact replay-safe oneshot during `restart-managed` / `recover`.
 Do not replay other oneshots or start a backup that was dormant. Once restore
 is recorded, repeated recovery does not restart the dump, including after an
-off-box failure. A rejected start submission fails recovery before the restore
+off-box failure. A second `recover` with nothing left to start is a finished
+restore: the helper's child is `/bin/bash`, and on bash 3.2 an empty
+`services` or `timers` list is an unbound variable under `set -u`, so those
+walks use `${arr[@]+"${arr[@]}"}`. A rejected start submission fails recovery before the restore
 marker is written and can be retried. Once accepted, the eventual dump/upload
 result belongs to backup health, not application rollback. Deploy does not
 manufacture a healthy heartbeat.
@@ -284,6 +299,10 @@ A failed batched stop retries loaded units, tolerating a retired inventory entry
 only when successful probes report `LoadState=not-found`, `ActiveState=inactive`
 and an empty `FragmentPath`. Unknown states, probe errors and loaded-unit stop
 failures remain fatal. Recovery preserves the inventory and active snapshot.
+Transient `radon-*` units (`systemd-run`, `Transient=yes`) never enter the
+inventory: systemd discards one once stopped, so a transition that stopped it
+could not restore it (2026-09-28, `radon-forktest.timer` failed a deploy and its
+rollback). One batched `systemctl show` decides; a failed query keeps every unit.
 The Python image keeps application source root-owned and provisions only
 `/home/radon/radon/logs` for the runtime user; its non-root build smoke verifies
 log creation, writing and rotation while source directories remain unwritable.
@@ -440,7 +459,7 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
 
 ## Systemd And Drift
 
-`setup-vps.sh` includes the `radon-aa-frontier-refresh`, `radon-ai-cycle-backfill`,
+`setup-vps.sh` includes the `radon-credit-vix`, `radon-aa-frontier-refresh`, `radon-ai-cycle-backfill`,
 `radon-ai-cycle`, `radon-liquidcompute`, `radon-subscription-tokens` and
 `radon-panic-index` service/timer pairs in the full-host installation inventory.
 Setup installs those pairs and enables only their timers; existing hosts receive
@@ -467,8 +486,9 @@ Spec: [`docs/tradingview-integration.md`](../docs/tradingview-integration.md).
 `RADON_SLM_TAGGER_MODE` stays `off`. Spec: [`docs/ml/newsfeed-slm-tagger.md`](../docs/ml/newsfeed-slm-tagger.md).
 
 `setup-vps.sh` also inventories `radon-knowledge-eval.{service,timer}` so a
-fresh host has the unit files. `enable_services` skips both until a human
-reviews the draft golden set. The repo ships an initial live baseline in
+fresh host has the unit files. `enable_services` skips both on every setup.
+It does not inspect the baseline file. Leave that skip until a human reviews
+the draft golden set. The repo ships an initial live baseline in
 `scripts/knowledge/golden_eval_baseline.json`; enabling the timer before
 that review would page on a draft gate. The unit
 writes no `service_health` row (`EXEMPT_UNITS` `gap:`); a failed run pages
@@ -485,6 +505,15 @@ and pages via Pushover plus the unit watchdog. The job heartbeats
 `service_health` as `grok-upgrade` (26h daily window). Contract:
 [`docs/grok-page-responder.md`](../docs/grok-page-responder.md).
 `cloud/tests/test_grok_upgrade_setup.py` pins the inventory-and-enable.
+The unit names every link the upgrader may move (`--live-bin`,
+`--alias-bin ~/.grok/bin/grok`); `grok_upgrade.py` never derives a path
+from HOME, so a test run in the responder clone cannot relink the live CLI.
+
+`setup-vps.sh` inventories `radon-rsi-oversold.{service,timer}` and
+`enable_services` enables the timer. Daily 23:05 UTC, twenty minutes
+after `radon-ma-ratio`. Oneshot `scripts/rsi_oversold_scan.py`,
+`TimeoutStartSec=2100`. Heartbeat `rsi-oversold` (26h). Spec:
+[`docs/indicators/rsi-oversold.md`](../docs/indicators/rsi-oversold.md).
 
 
 Canonical unit files are copied root-owned to `/etc/systemd/system`; they are
@@ -529,6 +558,16 @@ Compose, systemd, polkit, sudoers, and installed helpers with this source; on
 `RADON_HOST_ROLE=app` the Compose and `ib-gateway-control` surfaces are
 role-skipped because Gateway runtime surfaces are absent by design there. It
 must never read or report `.env*` contents.
+
+`setup-vps.sh` inventories `radon-control.service` and `enable_services`
+enables it: the host control socket the containerised radon-api uses for the
+`/admin` Service controls (`/run/radon-control`, bind-mounted by
+`radon-app-runtime` into radon-api only; runs `sudo -n /usr/local/bin/radon`
+under the existing `radon-ops` grant). Existing hosts get the body through the
+`installed-units.sha256` pin; being a `.service` it is never enabled by
+`install-units`, so the app host needs one `systemctl enable --now
+radon-control.service`. `operator-radon.sh` excludes it from `radon
+stop|start|restart`. Contract: `docs/operations.md` "Host control socket".
 
 `radon-health.service` remains runtime-isolated from the trading cascade: no
 Gateway `Requires=` or `After=` dependency. Coordinated release restart and

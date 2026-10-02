@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Dedicated VPS clone + stripped env for the Grok P1 responder.
 # Run as root on the production host. Does not touch /home/radon/radon.
-#
-#   bash cloud/scripts/setup-grok-page-responder.sh
+# Run it from a root-only stage of /opt/radon-provision/radon.git, never
+# from the deploy checkout: docs/grok-page-responder.md "Install (VPS)".
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLONE="${RADON_PAGE_RESPONDER_DIR:-/home/radon/radon-page-responder}"
 ENV_FILE="${RADON_PAGE_RESPONDER_ENV:-/home/radon/radon-page-responder.env}"
 PROD_ENV="${RADON_DEPLOY_ENV_FILE:-/home/radon/radon-cloud/.env}"
-ORIGIN_URL="${RADON_PAGE_RESPONDER_ORIGIN:-git@github.com:joemccann/radon.git}"
+ORIGIN_URL="${RADON_PAGE_RESPONDER_ORIGIN:-https://github.com/joemccann/radon.git}"
 MARKER="$CLONE/.radon-page-responder"
 
 if [[ "$(id -u)" -ne 0 ]]; then
@@ -16,50 +17,51 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 2
 fi
 
+# Root runs this script and its helpers, so a tree radon can write (the
+# deploy checkout) would let radon choose what root executes.
+is_root_owned_tree() {
+  local dir="$1" perms uid
+  while :; do
+    read -r perms _ uid _ < <(ls -ldn -- "$dir")
+    [[ "$uid" == 0 && "${perms:5:1}" != w && "${perms:8:1}" != w ]] || return 1
+    [[ "$dir" == / ]] && return 0
+    dir="$(dirname -- "$dir")"
+  done
+}
+if ! is_root_owned_tree "$(cd "$SCRIPT_DIR" && pwd -P)"; then
+  echo "refusing: $SCRIPT_DIR is not a root-owned tree; stage it from" \
+    "/opt/radon-provision/radon.git (docs/grok-page-responder.md)" >&2
+  exit 77
+fi
+
 echo "[1/5] dedicated clone $CLONE"
 if [[ ! -d "$CLONE/.git" ]]; then
   sudo -u radon git clone "$ORIGIN_URL" "$CLONE"
 fi
+# Public HTTPS origin: the responder unit hides ~/.ssh from the agent.
+sudo -u radon git -C "$CLONE" remote set-url origin "$ORIGIN_URL"
 sudo -u radon bash -c "touch '$MARKER'"
 sudo -u radon git -C "$CLONE" config user.name "radon-grok-responder"
 sudo -u radon git -C "$CLONE" config user.email "ops@radon.run"
 
 echo "[2/5] stripped env $ENV_FILE"
 umask 077
-tmp="$(mktemp)"
-python3.13 - "$PROD_ENV" "$tmp" <<'PY'
-import sys
-from pathlib import Path
-src, dest = Path(sys.argv[1]), Path(sys.argv[2])
-keep = ("TURSO_DB_URL", "TURSO_AUTH_TOKEN", "PUSHOVER_USER", "PUSHOVER_TOKEN")
-optional = ("GH_TOKEN",)
-wanted = {k: None for k in keep}
-extras = {k: None for k in optional}
-for raw in src.read_text().splitlines():
-    line = raw.strip()
-    if not line or line.startswith("#") or "=" not in line:
-        continue
-    key, _, value = line.partition("=")
-    if key in wanted:
-        wanted[key] = value
-    if key in extras:
-        extras[key] = value
-missing = [k for k, v in wanted.items() if not v]
-if missing:
-    raise SystemExit("missing in production env: " + ", ".join(missing))
-optional_lines = [f"{k}={extras[k]}" for k in optional if extras[k]]
-dest.write_text(
-    "\n".join(f"{k}={wanted[k]}" for k in keep)
-    + (("\n" + "\n".join(optional_lines)) if optional_lines else "")
-    + "\nGROK_PAGE_NO_DOTENV=1\nGROK_PAGE_SYNC_REMOTE=1\n"
-    + "GROK_BIN=/home/radon/.local/bin/grok\n"
-)
-PY
-chown radon:radon "$tmp"
-chmod 600 "$tmp"
-mv "$tmp" "$ENV_FILE"
-chown radon:radon "$ENV_FILE"
-chmod 600 "$ENV_FILE"
+# Both env files sit in radon's home, so radon reads and publishes them;
+# root only builds from private copies and never touches either by name.
+work="$(mktemp -d)"
+trap 'rm -rf -- "$work"' EXIT
+sudo -u radon cat -- "$PROD_ENV" >"$work/prod.env"
+if sudo -u radon test -f "$ENV_FILE"; then
+  sudo -u radon cat -- "$ENV_FILE" >"$work/existing.env"
+fi
+# Secrets from the production env only; operator GROK_PAGE_* flags
+# (RESPONDER/AUTOSHIP/AUTOPUSH/MAX_ACTIONS_PER_DAY) carried over from the
+# current file so a rerun never silently disables the responder.
+python3.13 "$SCRIPT_DIR/grok_responder_env.py" \
+  "$work/prod.env" "$work/existing.env" "$work/out.env"
+sudo -u radon bash -c \
+  'set -euo pipefail; umask 077; tmp="$(mktemp "$1.XXXXXX")"; cat >"$tmp"; mv -f "$tmp" "$1"' \
+  _ "$ENV_FILE" <"$work/out.env"
 
 echo "[3/5] python venv + bun in the clone"
 sudo -u radon bash -lc "
@@ -82,6 +84,11 @@ if [[ -x /home/radon/.grok/bin/grok && ! -e /home/radon/.local/bin/grok ]]; then
   sudo -u radon ln -sf /home/radon/.grok/bin/grok /home/radon/.local/bin/grok
 fi
 install -d -o radon -g radon -m 0750 /var/lib/radon
+# Runtime lock dir (responder-writable) and upgrade scratch (not). The
+# responder unit mounts ~/.grok/{bin,hooks,downloads} read-only; create them
+# so the read-only mount covers them rather than being skipped.
+sudo -u radon install -d -m 0750 /var/lib/radon/grok-runtime /var/lib/radon/grok-upgrade
+sudo -u radon mkdir -p /home/radon/.grok/bin /home/radon/.grok/hooks /home/radon/.grok/downloads
 if [[ -x /home/radon/.local/bin/grok && -x "$CLONE/.venv/bin/python" ]]; then
   sudo -u radon -H "$CLONE/.venv/bin/python" "$CLONE/scripts/grok_upgrade.py" \
     --seed-if-missing \

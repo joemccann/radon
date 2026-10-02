@@ -48,6 +48,16 @@
       "note": "App/broker split contract: mTLS Gateway control, cert lifecycle, role env checks. Recurring runbook drift class (DOC-002/006/009/010/017/018/019)."
     },
     {
+      "id": "host-control",
+      "globs": [
+        "scripts/control_service/**",
+        "scripts/api/host_control.py",
+        "cloud/services/radon-control.service"
+      ],
+      "owners": ["docs/operations.md"],
+      "note": "Host control socket for the /admin Service controls: transport, allowlist, self-protection, audit, rollout."
+    },
+    {
       "id": "api-trust-boundary",
       "globs": ["scripts/api/auth.py"],
       "owners": ["scripts/api/CLAUDE.md", "docs/spof-host-split.md"],
@@ -72,18 +82,25 @@
     {
       "id": "nightly-loops",
       "globs": [
-        "scripts/*_weekend.sh",
         "scripts/*_nightly.sh",
-        "scripts/weekend_notify.py",
-        "scripts/weekend_redact.py",
-        "scripts/weekend_prune.py",
         "scripts/nightly_*.py",
-        "scripts/nvidia_budget.py",
         "scripts/github_pr_output.py",
-        "config/com.radon.*-daily.plist"
+        "scripts/security_claude_ladder.py",
+        "scripts/claude_cli_env_drift.py",
+        "config/com.radon.external-probe-dispatch.plist"
       ],
       "owners": ["docs/operations.md"],
-      "note": "operations.md is the one place indexing all five nightly loops: fire times, clone + marker rails, the model pin and the status vocabulary an operator reads off a page. #219 changed operator-facing behaviour in all five wrappers with no owner update (DOC-032/033/034/040). Loop SEMANTICS stay in .claude/skills/<loop>/SKILL.md; only the operator contract belongs here."
+      "note": "operations.md is the one place indexing every nightly loop: fire times, the runner clone rail, the model ladder and the status vocabulary an operator reads off a page. #219 changed operator-facing behaviour in all five wrappers with no owner update (DOC-032/033/034/040). Every loop now runs on scripts/runner/run_loop.sh; loop SEMANTICS stay in .claude/runner-prompts/<loop>.md; only the operator contract belongs here."
+    },
+    {
+      "id": "nightly-runner",
+      "globs": [
+        "scripts/runner/**",
+        "scripts/nvidia_rate_limit.py",
+        ".claude/runner-prompts/**"
+      ],
+      "owners": ["docs/runner.md"],
+      "note": "The one-file runner that replaces the per-loop wrappers: install, the bot-user boundary, loop config and migration state."
     },
     {
       "id": "streaks-source-ladder",
@@ -96,6 +113,18 @@
       "globs": ["scripts/credential_validators.py"],
       "owners": ["docs/operations.md"],
       "note": "The Credentials tab refuses values on egress pins an operator cannot see from the UI (DOC-067)."
+    },
+    {
+      "id": "credential-redaction",
+      "globs": ["scripts/credential_redaction.py"],
+      "owners": ["docs/security-audit-playbook.md"],
+      "note": "Shared redaction and publication shapes recur across security reports and incident egress (DOC-145)."
+    },
+    {
+      "id": "research-worker",
+      "globs": ["scripts/research/worker.py"],
+      "owners": ["docs/dropbox-research.md"],
+      "note": "Research lifecycle, bounded processing and publication recovery share the existing worker owner (DOC-146)."
     },
     {
       "id": "model-ladder",
@@ -164,6 +193,12 @@
       "note": "Store-wins-over-.env precedence, master-key loss recovery, and setup-mode entry/exit are operator contracts (DOC-051)."
     },
     {
+      "id": "db-backup-recovery",
+      "globs": ["cloud/scripts/db_backup.py"],
+      "owners": ["docs/cloud-services.md"],
+      "note": "Backup retention and resumed-read consistency have both drifted from the recovery owner; changes must preserve the documented recovery boundary."
+    },
+    {
       "id": "deploy-provisioning",
       "globs": [
         "cloud/scripts/deploy.sh",
@@ -196,7 +231,8 @@
       "globs": [
         "scripts/knowledge/**",
         "scripts/db/migrations/0087_knowledge_embedding_v2.sql",
-        "scripts/tests/test_knowledge_embed_v2.py"
+        "scripts/tests/test_knowledge_embed_v2.py",
+        "cloud/services/radon-knowledge-eval.service"
       ],
       "owners": ["docs/knowledge-embeddings.md"],
       "note": "Dual-dimension vector contract (384d bge + 2048d nemotron), query fallback, dual-write ingest, backfill order, and env vars. Drift test pins schema and coverage logic (DOC-129)."

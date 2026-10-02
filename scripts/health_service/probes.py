@@ -413,6 +413,26 @@ def aggregate_state(probe_results: dict, units: dict,
     nested_api_state = _nested_api_state(probe_results)
     if nested_api_state is not None:
         dependency_states.append(nested_api_state)
+    # REL-167 / R-468: a live unit does not prove its broker socket/session
+    # recovered. ProbeCache persists these independent first-seen timestamps.
+    # Preserve REL-243: remote broker loss on the app host is degraded only.
+    role = resolve_host_role() if host_role is None else host_role
+    if probes_current and role != "app":
+        gateway_unit = (units or {}).get(GATEWAY_UNIT, {})
+        suppressed = (units_current and isinstance(gateway_unit, dict)
+                      and _gateway_dwell_suppressed(gateway_unit, now_et))
+        if not suppressed:
+            gateway_probe = (probe_results or {}).get('ib-gateway', {})
+            broker_probe = (probe_results or {}).get('radon-api', {})
+            for state, dwell in (
+                (gateway_probe.get('state'), gateway_probe.get('non_up_secs'))
+                if isinstance(gateway_probe, dict) else (None, None),
+                (nested_api_state, broker_probe.get('broker_non_up_secs'))
+                if isinstance(broker_probe, dict) else (None, None),
+            ):
+                if (state in _DOWNISH and type(dwell) in (int, float)
+                        and math.isfinite(dwell) and dwell >= DEPENDENCY_DWELL_LIMIT_SECS):
+                    dependency_stuck = True
     states = serving_states + dependency_states
 
     if any(state in _DOWNISH for state in serving_states):

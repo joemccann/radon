@@ -2686,3 +2686,225 @@ changed-surface instance.
 |---|---|---|---|---|
 | REL-257 | P2 | R-678 | **Make Liquid Compute observation replacement atomic and report every persistence failure.** Replace an observation identity without a committed delete-before-insert gap, and translate every production collection/persistence exception into the existing bounded error heartbeat before non-zero exit. | Red first: seed a valid old observation, inject a failure into its replacement write, and assert the old row remains queryable; inject `HranaHttpError` from each persistence step and assert exactly one `liquidcompute` error health write plus non-zero exit; a successful replacement still updates both index and observation records. |
 | REL-257 | P2 | R-678 | **Make repeated Flex budget exhaustion durable and operator-visible without misclassifying one successful newest-first partial run.** Persist a bounded consecutive-budget/deferred-tail signal keyed to the delivery population; after the configured bound write a non-healthy state (or an explicitly watchdog-evaluated degraded state), and clear it only after a full catch-up. Preserve newest-first priority and the successful fresh-statement path. | Fault injection, red first: two consecutive runs with an applied newest statement and a forced expired budget produce an operator-visible degraded/error watchdog outcome; a complete next run clears it. Assert a single partial run remains distinguishable but does not page, and that repeated partial runs do not reset the watchdog failure sequence. |
+
+## Delta audit 2026-09-29
+
+Range: `5c27667c87f314feaf7fbbcaad03613fd9e00546..c274a773228ed29226721694370d3a1c2739494e`.
+28 commits, 253 changed paths, 382 paths with direct codemap importers. New
+runner/configuration paths absent from the prior codemap were followed with
+`rg`. Serial review covered connectivity, persistence, resource lifetime,
+failure propagation, trading safety and observability. No open reliability PR
+reserved work or IDs; trusted issue #81 comments reserve IDs through R-709.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-710 | P1 | `scripts/runner/run_loop.sh:97-146` | Runner lock acquisition treated missing ownership metadata or an unavailable process fingerprint as a dead owner and deleted the active clone. Concurrent stale-lock reclaimers were uncoordinated. REL-291: four fault injections must preserve the clone and refuse agent launch; verified dead/reused owners still recover and live owners still skip. |
+| R-711 | P1 | `scripts/grok_upgrade.py:144-176,217-244,356-413` | Candidate installation executed the live self-updater, reused a directory still serving a prior promotion, and fell back to the live pathname when no candidate existed. Failed smoke could therefore replace the incident responder's executable; promotion could unlink it or create a self-symlink. REL-292 acceptance: failed self-update and a second failed upgrade preserve live/LKG bytes; a wrong candidate version refuses; failed link preparation preserves the prior entry. |
+| R-712 | P2 | `scripts/grok_upgrade.py:273-285`; `scripts/db/hrana_http.py:189-198` | Every upgrade heartbeat carrying a diagnostic passed unsupported `last_error=`, raised TypeError before writing, and swallowed it as a telemetry outage. Both failed smoke and lock deferral lost their health details. REL-293 acceptance: autospec the real writer and prove exactly one structured `error.message` write for each diagnostic outcome. |
+| R-713 | P2 | `scripts/ir_ensure_pr.py:261-280,320-325` | Resuming an existing incident PR used `gh pr edit`, whose retired Projects-classic GraphQL query aborts on this repository. Pickup/responder then report failure despite the PR already existing. REL-294 acceptance: reproduce the GraphQL rejection, update the exact PR through REST with literal multiline body preserved, and propagate PATCH failure. |
+| R-714 | P2 | `web/lib/usePreviousClose.ts:61-122` | Live ticks release a failed previous-close request before Retry-After expires, while effect cleanup can cancel its only wakeup. REL-295 acceptance: hold a request across live ticks, return 429 with a 30-second wait, assert no early POST and exactly one recovery POST with the correct payload; inspect the recovered day change in the browser. |
+
+### Inherited acceptance recheck
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-678 (Liquid Compute) | P2 | `scripts/ai_cycle/store.py:114-160`; `scripts/ai_cycle/liquidcompute.py:150-173,204-228` | The earlier insert-before-delete repair deleted the replacement too, and partial multi-row writes were committed independently. Production CLI failures also emitted two heartbeats; isolated SQLite failures attempted production telemetry. Existing REL-257 acceptance is retained: real SQL fault injection must preserve the old batch, successful and identical replacement retain exactly one observation per identity, and production failures write one error heartbeat with nonzero exit. |
+| R-319 (inherited REL-108) | P2 | `scripts/clients/journal_basis.py:303-360` | SQLite fault injection confirms that a digit-prefixed fill inserted after the first ep-prefixed page disappears from the text-ID scan. Acceptance retains bounded pages and effective-time ordering while returning the concurrent insertion; a failed later page must raise rather than return partial basis. Broader NF-2 full-table reads remain separate. |
+| NF-3 / REL-236 (inherited) | P2 | `web/components/InstrumentDetailModal.tsx:141`; `web/components/ticker-detail/BookTab.tsx:334`; `web/components/ticker-detail/OrderTab.tsx:1118`; `web/components/WorkspaceSections.tsx:3094` | T-462 already wires the optional prop, but supplies only WebSocket connectivity. A fresh armed Modify remains enabled after the same open socket reports `ib_connected=false`. Acceptance: known broker loss must issue no modify request; healthy recovery with a fresh quote must submit the exact authorized payload. |
+| R-037 / REL-021b (inherited) | P2 | `scripts/api/server.py:966-974` | With missing JWKS, `RADON_AUTH_DISABLED=1` admitted an untrusted order request even in Hetzner mode. Acceptance: inject the public request into middleware with an order-handler tripwire; normalized Hetzner mode must return 503 without calling the handler, while explicit local development and trusted/exempt paths retain their contracts. |
+| R-030 / REL-021b (elapsed-time scheduling) | P2 | `scripts/monitor_daemon/handlers/base.py:139-187,332-340` | A backwards wall-clock step stalls periodic handlers, a forwards step runs them early, and elapsed duration can become negative. Acceptance: injected independent wall/monotonic clocks retain the interval and nonnegative duration; a restored future wall timestamp cannot embargo a handler longer than one interval. Calendar-policy changes are outside this elapsed-time repair. |
+| R-467 / REL-166 (inherited) | P2 | `scripts/clients/ib_client.py:723-743` | Missing, zero or negative non-combo prices bypassed meaningful notional measurement; stop triggers were not passed to the dollar guard. Acceptance: unpriced/invalid orders and over-notional stops make zero socket calls; valid LMT/BAG and protective STP bracket legs still place through mocked transport. |
+| NF-5 / REL-052 (inherited) | P2 | `scripts/utils/uw_budget.py:107-129,205-242`; `scripts/api/server.py:2340-2348` | A held budget flock pins the request worker indefinitely; interrupted history rewrites truncate the prior archive, and unreadable history is treated as empty. Acceptance: a real competing process times out without changing counts and succeeds after release; interrupted/unreadable history preserves old bytes; the route returns a controlled 503. |
+
+
+### Backlog and acceptance (2026-09-29)
+
+| ID | Sev | Findings | Task | Acceptance |
+|---|---|---|---|---|
+| REL-291 | P1 | R-710 | DONE: preserve uncertain runner ownership. | Four lock fault injections refuse before clone deletion; valid live/dead/reused-owner controls remain green. |
+| REL-292 | P1 | R-711 | DONE: isolate and atomically promote CLI candidates. | Failed self-update, second upgrade, wrong version and failed link preparation preserve live/LKG bytes. |
+| REL-293 | P2 | R-712 | DONE: use the actual health writer signature. | Autospecced failed-smoke and lock-defer diagnostics each write one structured error. |
+| REL-294 | P2 | R-713 | DONE: update existing incident PRs through REST. | Retired GraphQL fails red; exact REST endpoint/body succeeds and PATCH failure propagates. |
+| REL-295 | P2 | R-714 | DONE: retain previous-close retry deadlines across ticks. | Browser holds one request across ticks, observes no POST during Retry-After, then one exact recovery request and the corrected day change. |
+
+Audited through: c274a773228ed29226721694370d3a1c2739494e on 2026-09-29 — 5 new findings
+
+### Standing sweep and inherited review
+
+- Placement chokepoints remain wired: `ib_place_order.py:240-255`, `ib_execute.py:443-455`, `ib_order_manage.py:199-308`, `exit_order_service.py:343-352`, and `monitor_daemon/handlers/exit_orders.py:490,735,764-766`. Function-level funnel/bracket tests and permanent halt/limit drills pass. R-467's missing-price gap is repaired above.
+- `_NON_IDEMPOTENT_IB_SCRIPTS` remains the placement-only set at `scripts/api/server.py:5657,5766,5844`; the exit-order acknowledgement poll remains in `_confirm_placement` at `scripts/monitor_daemon/handlers/exit_orders.py:202`; `daemon_state` uses `_hrana_execute` at `scripts/db/writer.py:2486-2499`.
+- Full writer/catalog standing checks: 57 passed. Permanent eight-file Python drill command: 95 passed. Expanded monitor/expiry/funnel/dwell checks: 530 passed. No live broker, vendor, database, host, service or production-halt operation ran.
+- R-709/REL-290 was merged in #780 and its six wrappers were subsequently retired by #784/#785/#786/#791. The current runner/fault-hook suites passed 152 tests. The checkpoint's R-679 external-probe candidate is not a service_health writer: dedicated probe freshness and dispatch/dead-man tests pass in the 125-test inherited gate. Its absence from service_health catalogs is not a missing monitor; the canonical repository R-679 identity is untouched.
+- Both historically duplicated R-678/REL-257 identities remain distinguished. Liquid Compute is repaired here; the already-merged Flex budget progression passes its inherited fault suite. REL-109's old identity-set blocker is superseded by the existing authoritative-fill implementation and its executed tests (128-test overlay union). NF-7's partial-expiry residual is already implemented and its six-contract residual test passes in the 530-test monitor union.
+- NF-1 is operator-only: `scripts/app_preferences.py:218-232` deliberately defaults the all-placer 2.5% cap preference off; `scripts/bankroll_guard.py:233-284` enforces it when enabled using a fresh snapshot. Verify the operator setting and enable it through Settings / Order Limits, then verify fresh/over-cap/stale admission on the approved deployment. No production preference was read or changed.
+- NF-4 source handling and gross-fill reconstruction tests pass in the inherited gate. Legacy rows lacking authoritative gross detail remain operator-only: run the backfill's default dry-run, identify each rejected aggregate, rebuild gross-fill metadata from original Flex executions, and apply only reviewed metadata corrections. Never infer hidden turnover from net quantities.
+- NF-5 is repaired above. NF-6 retains the demo-mirror TypeError classifier candidate (`scripts/db/mirror_market_snapshots_to_demo.js:80-82`); knowledge ingest now has bounded exponential jitter and retries prepared persistence only (`scripts/knowledge/ingest.py:503-537`), covered by the merged implementation and CI. NF-8 catalog population checks hold; this delta's diagnostic-heartbeat defect is R-712, repaired here.
+
+Historical candidates below remain OPEN for the next nightly pass, with their original fault-injection acceptance retained. They are not counted as newly verified findings, not labelled BLOCKED without attempts, and not silently closed. Closing CI and repair time is reserved before expanding these cross-subsystem changes.
+
+| ID | Sev | Findings | Task | Acceptance |
+|---|---|---|---|---|
+| REL-108 / NF-2 | P2 | R-319 DONE; remaining full-history readers | Bound remaining native/full-table journal reads, including journal_sync recovery and coverage. | Multi-page fixtures retain every row in deterministic order; a failed page returns no partial state; a hung transport is bounded without a surviving GIL-blocking worker. Concurrent insert criterion for R-319 passes here; update/delete snapshot isolation is not claimed. |
+| REL-052 / NF-6 | P2 | Historical retry classifier remainder | Reproduce the demo mirror's programming-error classification. | Programming TypeError makes one attempt; actual transient transport errors retain a bounded retry budget and surface exhaustion. |
+| REL-158 | P2 | R-438, R-439 | Recheck container env failure and notify-message filtering. Socket mode/owner are already fixed; full acceptance remains. | Failed env renderer starts no container; notify socket is owned correctly at 0600; MAINPID=1 is not relayed while READY/WATCHDOG/STATUS are. |
+| REL-167 / NF-10 | P2 | R-468 | Preserve dependency dwell across health-daemon restart and extend it to probes. | A restored 1000-second fault is down on the first evaluation; persistent broker-probe/2FA failures escalate; 899 seconds stays degraded and 901 seconds becomes down. |
+| REL-108 | P2 | R-282, R-296, R-301, R-302, R-303, R-314, R-315, R-316, R-317, R-318 | Reproduce the remaining historical operability tasks before changing them. | Preserve the full task-specific acceptance in the original REL-108 backlog row: quote freshness, vendor error health, migration target refusal, polkit/migration separation, deploy timeout text, transcript bounds, unknown-section 404, theme token parity, share failure/timeout, and measured percentile copy. |
+| REL-021b | P2 | R-024, R-025, R-027, R-028, R-030 calendar half, R-032, R-034, R-035, R-036, R-039, R-040, R-041, R-044, R-046, R-047 | Re-triage the remaining original operability candidates against subsequent fixes. R-037 and R-030 interval clock are DONE here; external dead-man R-026 has executed coverage. | Preserve original red-first acceptance. Later REL-209/R-625 explicitly retain RTH monitoring when the extended calendar fails; any calendar/tzdata change must preserve those fault tests. Keep structured errors/digest, bounded queues/caches/subscriptions, truthful health, dead-code/doc consistency, lock-aware lifecycle and migration/health-floor contracts. |
+| REL-087 | P2 | R-232 | Operator/design-only container lifecycle membership. | Explicit reaping is implemented; require a supported Docker/systemd ownership design before changing cgroup membership. Never restore the rejected unit-as-cgroup-parent proposal. |
+| REL-228 | P1 | R-619 | Existing source uses root:radon-secrets 0040 and denies host-user group membership; closing evidence assigned to cloud CI. | Host radon cannot read staged key; container can; failed container removal retains the credential. No host permission experiment is permitted in this run. |
+| REL-261 | P2 | R-682 historical reservation | Retain the ledger's unresolved identifier without reallocating it. | Its original acceptance is not in the current audit ledger or latest trusted checkpoint. Recover the original accepted task before reproduction; do not invent a replacement defect for this ID. |
+
+## Delta audit 2026-09-30
+
+Range `c274a773228ed29226721694370d3a1c2739494e..e3063f0c16ddcdead832df49553c6035e6501597`:
+13 commits, 127 changed paths, 303 paths including direct codemap importers.
+Trusted checkpoint: collaborator comment on issue #81 dated 2026-09-29.
+No open `reliability/` PR reserved findings or identifiers. New identifiers
+remain available after R-714 / REL-295; inherited IDs are not reallocated.
+
+The delta review covered order admission and journal cursor callers, atomic
+AI-cycle transactions and knowledge transport, monotonic handler scheduling,
+runner ownership and redaction, Grok installation/isolation, research expiry
+and migration replay, assistant knowledge isolation and bounded rounds,
+previous-close retry state, and display-only layout changes. Connectivity,
+persistence, resource lifetime, error propagation, safety and observability
+were evaluated against those changes. No new delta defect was verified.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-438 (inherited REL-158) | P2 | `cloud/scripts/radon-app-runtime.sh:543-571,726-737` | Failed environment rendering or allowlist filtering can start the container with an incomplete file. Acceptance: failing sed, missing input and filter I/O failure all exit 71 with zero engine run calls; preserve the prior complete copy and remove temporary files. Existing successful rendering and credential-boundary tests remain mandatory. |
+| R-439 (inherited REL-158) | P2 | `cloud/scripts/radon-app-runtime.sh:471-504` | The owner-only notify socket still forwards container-supplied control messages. Acceptance: MAINPID, STOPPING, RELOADING and watchdog-control fields never cross the proxy; READY=1, WATCHDOG=1 and STATUS survive mixed datagrams, with socket ownership and mode unchanged. |
+
+### Standing sweep
+
+- Actual placement sites remain behind the existing application halt gates and
+  transport limits: `scripts/ib_place_order.py:240-255,559`,
+  `scripts/ib_execute.py:443-455,491`, `scripts/ib_order_manage.py:199-308`,
+  `scripts/exit_order_service.py:343-352,443`,
+  `scripts/monitor_daemon/handlers/exit_orders.py:490-502,735-766` and
+  `scripts/clients/ib_client.py:698-743,802-816,844-893`.
+- The placement-only `_NON_IDEMPOTENT_IB_SCRIPTS` set and refusal/retry checks
+  remain at `scripts/api/server.py:5657,5766,5844`.
+- The acknowledgement poll remains at
+  `scripts/monitor_daemon/handlers/exit_orders.py:202-220`; daemon-state writes
+  still use `_hrana_execute` at `scripts/db/writer.py:2486-2500`.
+- Whole-population writer/catalog and placement/bracket gates: 108 passed.
+  No new service-health producer is missing either watchdog catalog.
+
+Audited through: e3063f0c16ddcdead832df49553c6035e6501597 on 2026-09-30 — 0 new findings
+
+### Remediation evidence
+
+- R-438 / REL-158 DONE: five render/filter faults failed twice, then the
+  complete runtime suite passed 103 tests; previous rendered bytes are retained.
+- R-439 / REL-158 DONE: control-datagram fault failed twice, then 104 runtime
+  tests passed. Owner-only socket and allowed health notices remain intact.
+
+### Further inherited acceptance
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-024 / REL-021b | P2 | `scripts/api/subprocess.py:348-365`; `scripts/api/server.py:3230-3236,3327-3333` | DONE: nonzero subprocess exits discarded rejection dictionaries, and cancel/modify routes flattened successful-exit error payloads. Four wire-level fault cases failed twice; structured broker and order fields now reach coded 502 details while nonzero remains failure. Legacy uncoded rejection payloads receive an operation code so the web coercer retains them. |
+| R-301 / REL-108 | P2 | `scripts/db/migrate.py:371-394` | DONE: an omitted library argument silently selected production. Fault injection now proves main() refuses before target resolution; explicit main([]), main(['--demo']) and CLI argument forwarding retain their contracts. Red 1 failed twice; focused migration/replay union 58 passed. |
+| R-302 / REL-108 | P2 | `scripts/grok_page_responder.py:89-116,393-421`; `cloud/config/polkit/50-radon-services.rules:41-66` | DONE: a qualifying failed demo-mirror page automatically started its migration-bearing unit. Red-first fake-systemctl reproduction failed twice; remove the unit from responder and polkit grants, retaining the normal scheduled timer and benign scan reruns. Acceptance: no start/reset-failed for that unit and no matching grant; focused responder/runtime/docs union 175 passed. |
+
+| REL-108 / NF-2 (inherited) | P2 | `scripts/monitor_daemon/handlers/journal_sync.py:55-60,303-339,344-351,447-450,571-583` | DONE: history scans used unbounded native reads. Seven fault cases failed twice; bounded HTTP, insertion-keyset pagination and a scan deadline now preserve complete-or-unavailable results. SQLite fixtures prove concurrent insertion and later-page failure across all three scans. Recovery ordering is restored after pagination; no concurrent update/delete snapshot guarantee is claimed. |
+
+| R-041 / REL-021b | P2 | `scripts/monitor_daemon/handlers/journal_sync.py:3-14,119-140` | DONE: the module documentation incorrectly promised a persistent execution cache. Two mocked execute cycles prove separate connect/fetch/disconnect lifecycles; the documentation assertion failed twice before correction. Polling and broker behavior are unchanged. |
+
+## Delta audit 2026-10-01
+
+Trusted issue #81 checkpoint: e3063f0c16ddcdead832df49553c6035e6501597.
+Audited main tip: 731716e54b1e85e98b591cbd79e9d18adf7a1ec7.
+Range: 20 commits, 160 changed paths; codemap direct-importer expansion gives
+450 paths. No open reliability PR reserved an identifier or covered a finding.
+The previous high-water marks were R-714 and REL-295.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-715 | P1 | `scripts/ir_push_gate.py:111-155,174-193` | The publication gate scanned only the final diff, missed branch names and empty-file names, and echoed private filenames in refusals. An identifier committed then deleted remained publishable through Git history. Acceptance: disposable Git histories with edited/deleted/renamed sensitive evidence, empty private filenames, binary additions and plus-prefixed lines all refuse; branch-only checks refuse private names; findings never echo the synthetic identifier. REL-296. |
+| R-716 | P2 | `scripts/fetch_credit_vix.py:465-550`; `web/lib/dbFirstRead.ts:134-138`; `web/components/CreditVixPanel.tsx:92-102` | Disjoint nonempty source dates produced no aligned sample but refreshed an old cache with an ok heartbeat. Source-down reserves also omitted the missing marker consumed by existing readers. Acceptance: disjoint legs with cache produce error and missing/stale_source without history writes; no-cache failure raises; no-db makes no writes; valid unchanged aligned sessions retain healthy weekend behavior. REL-297. |
+
+Standing sweeps: 89 passed across timer writer discovery, real-exemption
+population, both catalogs, final order-limit funnels and bracket guards.
+The placement scan retains caller halt checks in `ib_place_order.py:240-255`,
+`ib_order_manage.py:202-204`, `ib_execute.py:442-455`,
+`exit_order_service.py:343-347` and `exit_orders.py:490-502`;
+`IBClient` retains transport limits at `ib_client.py:711-743,867-893`.
+`server.py:5659,5768,5846` retains the non-idempotent placement refusal;
+`exit_orders.py:203-219,766-780` retains acknowledgement polling;
+`db/writer.py:2564-2590` retains the Hrana daemon-state writer.
+New credit-vix and rsi-oversold writers are registered in both catalogs.
+
+Delta review covered publication/recovery authority and bounded subprocesses,
+JWKS rotation and outage classification, indicator persistence and freshness,
+BAG execution coverage, model-response classification, deployment environment
+rendering and notification filtering, workflow secret isolation, route readers,
+and changed interfaces at their codemap callers. The new RSI CLI already
+records failed cycles (`rsi_oversold_scan.py:368-374`); no missing-heartbeat
+finding is asserted from its run() name alone. No new order placement exists
+in this delta. Historical unused pooled-order management remains R-039.
+
+NEW_FINDINGS and REL-021b were re-triaged against the trusted checkpoint.
+NF-1/NF-4 retain operator-only acceptance. NF-2 journal readers and R-024,
+R-301, R-302, R-438, R-439, R-041 are covered by the merged previous-night
+repairs. The remaining 28 inherited candidates retain their original
+acceptance on issue #81; inspection does not close them. R-303's stale deploy
+budget explanation and R-039's unused pooled-management import remain
+reproducible candidates for this night's inherited work. Existing health
+unit dwell is memory-only (`health_service/serve.py:170,200-207`); relay cache,
+queue and depth candidates remain separate historical work, not new IDs.
+
+Audited through: 731716e54b1e85e98b591cbd79e9d18adf7a1ec7 on 2026-10-01 — 2 new findings
+
+### Inherited remediation 2026-10-01
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| REL-052 / NF-6 | P2 | `scripts/db/mirror_market_snapshots_to_demo.js:80-98,109-128` | DONE: every TypeError was retried as transport failure. Red-first injected programming errors in purge/read/write each ran three times; now each runs once. Realistic fetch failures retain bounded retry, successful recovery and surfaced exhaustion. Focused gates: 104 passed. |
+
+Inherited R-039 / REL-021b resolved with ten repeated red faults and 134 scripts / 138 API passes: the unused server import is removed; legacy helpers enforce original-client ownership and halted-modification refusal. Owned cancellation and broker-error propagation remain covered.
+
+Inherited R-046 / REL-021b resolved: missing-tzdata faults fail closed with visible errors, while valid RTH fallback survives calendar-only failures. Two repeated red faults; 125 focused passes.
+
+Inherited R-034 / REL-021b resolved: expired option closes leave memory and disk at startup/daily cache use, while current and future expiries survive. Two repeated red faults; 81 focused passes, including three isolated actual-JavaScript cache cases.
+
+## Delta audit 2026-10-02
+
+Trusted checkpoint: `731716e54b1e85e98b591cbd79e9d18adf7a1ec7`; target `cb47c52a`.
+Range: 30 commits, 185 changed paths, 392 paths including direct codemap importers.
+No open reliability PRs at startup; existing IDs reserved through R-716 / REL-297.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-717 | P1 | `cloud/scripts/ib-operator-hold.sh:56-76` | DONE: Release interpreted every non-true inspection as a stopped Gateway, including permission failures and timeouts. REL-298 acceptance: failing, malformed and timed-out fake Docker probes never print RELEASED or clear the hold; explicit stopped/missing probes still succeed. Four faults failed twice before repair. |
+| R-718 | P2 | `scripts/utils/ib_operator_hold.py:106-125`; `scripts/ib_watchdog.py:1815-1818` | DONE: Invalid UTF-8 raised out of hold_state, aborting watchdog cycles and broker status instead of returning a held flag. REL-299 acceptance: arbitrary invalid bytes and corrupt held reasons still return held, the CLI returns 73 with valid JSON, and original flag bytes remain untouched. Three faults failed twice. |
+| R-719 | P1 | `scripts/nvidia_rate_limit.py:160-234`; `scripts/clients/model_ladder.py:1540-1548` | DONE: Blocking mutex/flock ignored acquire(max_wait) and could stall every model caller and response bookkeeping behind a suspended holder. REL-300 acceptance: held thread/file locks refuse admission within budget without consuming a slot; metadata operations fail within a monotonic bound; proxy returns 503 with no unpaced upstream request and closes a response whose bookkeeping fails. Six contention faults failed twice. |
+| R-720 | P2 | `cloud/scripts/ib-operator-hold.sh:42-47` | DONE: Console/sudo invocation without SSH_CLIENT raises nounset inside actor substitution, leaving successful hold changes anonymously attributed. REL-301 acceptance: release/resume without SSH_CLIENT emit no unbound-variable error and both audit rows retain the local operator identity. One fault failed twice; 20 cloud tests passed. |
+
+### Inherited remediation 2026-10-02
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-047 / REL-021b | P2 | `scripts/db/migrations/0026_scan_snapshots.sql:16-24` | Direct SQL application omitted migration 26 bookkeeping. The isolated SQLite fault failed twice; the file now records itself idempotently and preserves existing snapshots on replay. Focused migration suites: 57 passed; isolated health contracts: 84 passed. The deploy health floor remains covered by existing Caddy contracts. |
+
+
+| R-040 / REL-021b | P2 | `scripts/ib_realtime_server.js:1772-1830,2882-2898` | DONE: rejected depth deltas refreshed feed health and never repaired positional desynchronization. Four event-handler faults failed twice; four buffered-stale-book faults also failed twice. Invalidate both ladders/pending snapshots, signal unavailable, and cancel/rebuild at most once per 30 monotonic seconds; unknown cancellation refuses allocation. Focused relay suites: 13 passed. |
+| R-468 / REL-167 / NF-10 | P2 | `scripts/health_service/serve.py:106-175,214-236,281-287,433-455`; `scripts/health_service/probes.py:417-440` | DONE: first-seen outage age was process-local and absent for broker probes/auth. Four missing-durability acceptance cases failed twice. Shared atomic state survives restart, clears recovery, preserves other namespaces and previous bytes on failed replacement. Probe/auth dwell escalates combined/broker hosts while preserving the newer app-host degraded-only policy, clean off-hours suppression, and unknown/stale evidence. Focused health/consumer suites: 259 passed. |
+| R-030 / REL-021b (calendar half) | P2 | `scripts/monitor_daemon/daemon.py:155-233` | DONE: the normal RTH gate ignored holidays and early closes. Five admission/fallback faults failed twice; intersect the valid Eastern clock with the calendar, preserving explicit calendar-independent equity_ext monitoring fallback (REL-209/R-625) and missing-tzdata refusal. Focused calendar/daemon/grace/timezone suites: 62 passed. |
+
+| REL-108 / NF-2 (exit-orders) | P2 | `scripts/monitor_daemon/handlers/exit_orders.py:32-35,102-142,264-319` | DONE: the original NF-2 exit-order reader still used native libSQL and unbounded full-table scans after the journal-sync repair. Five faults failed twice; bounded HTTP plus insertion-key pagination now covers pending orders and legacy-ID updates. An additional real-connection fake-wire test failed twice until autocommit was respected. Deadline/cursor failures expose no partial work; read-back and durable guards remain intact. Monitor/funnel/transport suites: 567 passed. |
+
+### Scope, standing checks and inherited triage
+
+Connectivity/resource review covered the shared NVIDIA callers and proxy, root Gateway stop/hold paths, relay depth admission/recovery, host-control socket readers and cached JWKS callers. Host control keeps a 4096-byte request cap and peer UID authorization (`scripts/control_service/serve.py:92,136,291-293`); cached-key lookup remains local before network admission (`scripts/api/auth.py:249-276`). Held-leg risk still carries unknown-basis state instead of inventing a finite loss (`web/lib/order/risk/internal/computeOrderRisk.ts:988-993,1075`). No additional actionable delta defect was verified in these callers.
+
+All production placement calls remain behind the client halt and limits funnels (`scripts/clients/ib_client.py:698-743,855-893`). `_NON_IDEMPOTENT_IB_SCRIPTS` retains placement refusal/no replay (`scripts/api/server.py:5760,5869,5947`); exit-order acknowledgement polling remains invoked (`scripts/monitor_daemon/handlers/exit_orders.py:224,790`); daemon state remains on Hrana (`scripts/db/writer.py:2564-2577`). Writer parity, exemption validity, quantity/notional funnels and brackets: 89 passed. Permanent Python drills: 95 passed.
+
+NEW_FINDINGS triage preserves NF-1/NF-4 operator acceptance and NF-3's stale/farm-down remainder. The previously repaired NF-5 budget bounds and NF-6 classifier are not reopened. NF-2 exit-order transport/pagination was still present and is repaired above. NF-7's six-contract partial-expiry residual is already implemented: 9 isolated expiry tests pass. NF-8/NF-9 parity remains covered by the standing sweeps; NF-10 dependency dwell is repaired above with the newer app-role policy preserved. Remaining REL-108 and REL-021b candidates keep their acceptance on issue #81; inspection does not close them or allocate duplicate IDs.
+
+REL-108 / R-303 is operator-only: the prepared comment correction and parsed-workflow test passed (1 red twice, 48 green), but GitHub rejected the push because this token lacks workflow scope. That unpublished commit was removed; no existing test or executable gate was changed. Operator action: with workflow-write authorization, change the deploy explanation in `.github/workflows/ci.yml` from SSH 36m/job 40m to SSH 55m/job 60m, retaining the configured limits and documenting the prior-release lock wait; restore a parsed-workflow assertion tying those comment values to configuration.
+
+REL-298 closing bound: four additional faults failed twice with 48 unknown inspections per release; the repaired three-valued probe performs one unknown observation per shutdown stage while retaining convergence polling for confirmed-running containers. Release/shim suites: 57 passed. No RELEASED claim is made without stopped/missing evidence.
+
+Audited through: cb47c52ab055221fd7d88ead72ff28acb554e7d7 on 2026-10-02 — 4 new findings
