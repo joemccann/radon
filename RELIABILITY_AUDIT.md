@@ -2878,3 +2878,4 @@ No open reliability PRs at startup; existing IDs reserved through R-716 / REL-29
 | ID | Sev | Location | Failure / acceptance |
 |---|---|---|---|
 | R-717 | P1 | `cloud/scripts/ib-operator-hold.sh:56-76` | Release interpreted every non-true inspection as a stopped Gateway, including permission failures and timeouts. REL-298 acceptance: failing, malformed and timed-out fake Docker probes never print RELEASED or clear the hold; explicit stopped/missing probes still succeed. Four faults failed twice before repair. |
+| R-718 | P2 | `scripts/utils/ib_operator_hold.py:106-125`; `scripts/ib_watchdog.py:1815-1818` | Invalid UTF-8 raised out of hold_state, aborting watchdog cycles and broker status instead of returning a held flag. REL-299 acceptance: arbitrary invalid bytes and corrupt held reasons still return held, the CLI returns 73 with valid JSON, and original flag bytes remain untouched. Three faults failed twice. |
