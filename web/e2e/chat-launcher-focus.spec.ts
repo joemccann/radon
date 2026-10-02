@@ -160,3 +160,31 @@ test("Radon Chat keeps an active short turn grouped with the composer", async ({
   await expect(dialog.getByTestId("chat-message-assistant").last()).toBeInViewport();
   await expect(composer).toBeInViewport();
 });
+
+test("Radon Chat expands to full screen and restores the window", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await stubShellApis(page);
+  await stubPendingAssistant(page);
+  await page.goto("/alerts");
+
+  const dialog = await openChat(page);
+  const composer = dialog.getByLabel("Ask Radon");
+  await composer.fill("Read MU flow");
+  await composer.press("Enter");
+  await expect(dialog.getByTestId("chat-message-user").last()).toContainText("Read MU flow");
+
+  const panel = dialog.getByTestId("chat-launcher-panel");
+  const windowed = await panel.boundingBox();
+  expect(windowed!.width).toBeLessThan(1000);
+
+  await dialog.getByRole("button", { name: "Enter full screen" }).click();
+  await expect(dialog).toHaveAttribute("data-expanded", "true");
+  await expect.poll(async () => (await panel.boundingBox())?.width).toBe(1440);
+  expect((await panel.boundingBox())!.height).toBe(900);
+  await expect(composer).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("chat-full-screen.png") });
+
+  await dialog.getByRole("button", { name: "Exit full screen" }).click();
+  await expect(dialog).not.toHaveAttribute("data-expanded", "true");
+  await expect.poll(async () => (await panel.boundingBox())?.width).toBe(windowed!.width);
+});
