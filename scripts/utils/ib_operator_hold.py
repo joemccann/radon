@@ -103,7 +103,10 @@ def hold_state() -> dict:
     if not stat.S_ISREG(info.st_mode):
         return _untrusted("not a regular file")
     try:
-        raw = path.read_text(encoding="utf-8")
+        # REL-299 / R-718: only the ASCII prefix authorizes a clear flag.
+        # Corrupt UTF-8 in diagnostic fields must not crash every reader.
+        # Replacement preserves the prefix decision used by the root shim.
+        raw = path.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         return _untrusted(str(exc))
     detail = _parse_detail(raw)

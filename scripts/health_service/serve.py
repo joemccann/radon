@@ -20,8 +20,12 @@ from __future__ import annotations
 
 import hmac
 import json
+import logging
+import math
 import os
+from pathlib import Path
 import subprocess
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -101,12 +105,77 @@ def run_probes() -> dict:
     return results
 
 
+class DwellStore:
+    """REL-167 / R-468: shared, atomic first-seen state; background I/O only."""
+
+    def __init__(self, path=None):
+        self.path = Path(path) if path is not None else None
+        self._lock = threading.Lock()
+        self._since = {}
+        self._dirty = False
+        if self.path is not None:
+            try:
+                with self.path.open('rb') as stream:
+                    raw = stream.read(65537)
+                if len(raw) > 65536:
+                    raise ValueError('oversized dwell state')
+                value = json.loads(raw)
+                if not isinstance(value, dict):
+                    raise ValueError('invalid dwell state')
+                self._since = {key: stamp for key, stamp in value.items()
+                               if isinstance(key, str) and type(stamp) in (int, float)
+                               and math.isfinite(stamp) and stamp >= 0}
+            except FileNotFoundError:
+                pass
+            except (OSError, ValueError):
+                logging.getLogger(__name__).warning('Dependency dwell state could not be restored')
+
+    def stamp(self, namespace, states, now):
+        with self._lock:
+            before = dict(self._since)
+            prefix = namespace + ':'
+            for key in list(self._since):
+                if key.startswith(prefix) and key[len(prefix):] not in states:
+                    self._since.pop(key)
+            result = {}
+            for name, state in states.items():
+                key = prefix + name
+                if state == 'up':
+                    self._since.pop(key, None)
+                    result[name] = None
+                else:
+                    # A backwards clock step must not create a negative dwell.
+                    since = min(self._since.setdefault(key, now), now)
+                    self._since[key] = since
+                    result[name] = round(now - since, 1)
+            self._dirty = self._dirty or before != self._since
+            if self.path is not None and self._dirty:
+                staged = None
+                try:
+                    self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    with tempfile.NamedTemporaryFile(mode='w', dir=self.path.parent,
+                                                     prefix='.health-dwell-', delete=False) as stream:
+                        staged = stream.name
+                        json.dump(self._since, stream, allow_nan=False)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    os.replace(staged, self.path)
+                    self._dirty = False
+                except OSError:
+                    logging.getLogger(__name__).warning('Dependency dwell state could not be persisted')
+                finally:
+                    if staged is not None:
+                        Path(staged).unlink(missing_ok=True)
+            return result
+
+
 class ProbeCache:
     """Refresh live probes in one background sweep, never per HTTP request."""
 
-    def __init__(self, fetch_fn=run_probes, interval: float = 5.0):
+    def __init__(self, fetch_fn=run_probes, interval: float = 5.0, dwell_store=None):
         self._fetch_fn = fetch_fn
         self._interval = interval
+        self._dwell = dwell_store if dwell_store is not None else DwellStore()
         self._lock = threading.Lock()
         self._value: dict = {}
         # `refresh_once` swallows every exception and keeps the last value, so
@@ -136,9 +205,23 @@ class ProbeCache:
             value = self._fetch_fn()
             if not isinstance(value, dict):
                 return
+            now = time.time()
+            states = {name: item.get('state', 'unknown') for name, item in value.items()
+                      if name in probes.DEPENDENCY_PROBES and isinstance(item, dict)}
+            nested = probes._nested_api_state(value)
+            if nested is not None:
+                states['radon-api:broker'] = nested
+            dwell = self._dwell.stamp('probe', states, now)
+            value = {name: dict(item) if isinstance(item, dict) else item
+                     for name, item in value.items()}
+            for name in states:
+                if name == 'radon-api:broker':
+                    value['radon-api']['broker_non_up_secs'] = dwell[name]
+                else:
+                    value[name]['non_up_secs'] = dwell[name]
             with self._lock:
                 self._value = value
-                self._updated = time.time()
+                self._updated = now
         except Exception:
             pass
 
@@ -155,7 +238,7 @@ class UnitStateCache:
     afford it. On failure it keeps the last value; staleness is exposed as age.
     """
 
-    def __init__(self, units, interval: float = UNIT_REFRESH_SECS, timeout: float = 3.0):
+    def __init__(self, units, interval: float = UNIT_REFRESH_SECS, timeout: float = 3.0, dwell_store=None):
         self._units = list(units)
         self._interval = interval
         self._timeout = timeout
@@ -167,7 +250,7 @@ class UnitStateCache:
         # that died two seconds ago and one failed for a week were the same
         # input, and the dependency suppression made the second edge-green
         # forever. R-382.
-        self._non_up_since: dict = {}
+        self._dwell = dwell_store if dwell_store is not None else DwellStore()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, name="unit-state-cache", daemon=True)
 
@@ -195,16 +278,10 @@ class UnitStateCache:
             if out.returncode != 0 or set(parsed) != set(self._units):
                 return
             now = time.time()
+            dwell = self._dwell.stamp('unit', {uid: props.get('state', 'unknown')
+                                             for uid, props in parsed.items()}, now)
             for uid, props in parsed.items():
-                if props.get("state") == "up":
-                    self._non_up_since.pop(uid, None)
-                    props["non_up_secs"] = None
-                else:
-                    since = self._non_up_since.setdefault(uid, now)
-                    props["non_up_secs"] = round(now - since, 1)
-            for uid in list(self._non_up_since):
-                if uid not in parsed:
-                    self._non_up_since.pop(uid, None)
+                props['non_up_secs'] = dwell[uid]
             with self._lock:
                 self._value = parsed
                 self._updated = now
@@ -327,9 +404,10 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
 
-def build_server(bind: str = BIND, port: int = PORT, units=UNITS):
-    cache = UnitStateCache(units)
-    probe_cache = ProbeCache()
+def build_server(bind: str = BIND, port: int = PORT, units=UNITS, dwell_path=None):
+    dwell = DwellStore(dwell_path)
+    cache = UnitStateCache(units, dwell_store=dwell)
+    probe_cache = ProbeCache(dwell_store=dwell)
     sh_cache = turso_http.ServiceHealthCache(
         ttl=SERVICE_HEALTH_TTL, timeout=SERVICE_HEALTH_TIMEOUT,
     )
@@ -346,7 +424,8 @@ def build_server(bind: str = BIND, port: int = PORT, units=UNITS):
 
 
 def main():
-    server, cache = build_server()
+    server, cache = build_server(dwell_path=os.environ.get(
+        'RADON_HEALTH_DWELL_PATH', '/var/lib/radon/health-dependency-dwell.json'))
     probe_cache = server.probe_cache
     cache.refresh_once()  # warm the unit cache before accepting traffic
     probe_cache.refresh_once()

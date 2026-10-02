@@ -152,3 +152,13 @@ def test_future_expiry_is_not_expired():
 def test_cli_rejects_a_bad_expiry_without_writing(tmp_path):
     assert hold.main(["hold", "--actor", "ssh:t", "--expires-at", "tomorrow"]) == 64
     assert not _hold_file(tmp_path).exists()
+
+
+@pytest.mark.parametrize("raw", [b"\xff", b'{"held": true, "reason": "\xff"}', b'{"held": true}\x80'])
+def test_non_utf8_hold_remains_readable_and_held(tmp_path, raw, capsys):
+    """REL-299 / R-718: corrupt detail cannot crash recovery/status readers."""
+    _hold_file(tmp_path).write_bytes(raw)
+    assert hold.hold_state()["held"] is True
+    assert hold.main(["status"]) == hold.HELD_RC
+    assert json.loads(capsys.readouterr().out)["held"] is True
+    assert _hold_file(tmp_path).read_bytes() == raw

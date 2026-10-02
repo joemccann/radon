@@ -6,6 +6,7 @@ Applies under `scripts/monitor_daemon/`. Root and `scripts/AGENTS.md` also apply
 
 - `scripts/monitor_daemon/daemon.py:is_market_hours()` uses `datetime.now(ZoneInfo("America/New_York"))`.
 - Never reintroduce hardcoded EST/EDT offsets. Missing tzdata logs an error and refuses market-hours admission; ungated handlers continue. Calendar-only failures retain the valid RTH clock fallback (REL-021b / R-046).
+- RTH admission honors the calendar source of truth for holidays and early closes (REL-021b / R-030); the equity_ext monitoring fallback explicitly retains the calendar-independent RTH clock (REL-209 / R-625).
 - Real-time fill monitor, exit orders, and portfolio sync are market-hours gated.
 - Flex-token check and rehydrate-style journal sync run 24/7 where configured; cash-flow sync is not registered.
 
@@ -33,3 +34,5 @@ Applies under `scripts/monitor_daemon/`. Root and `scripts/AGENTS.md` also apply
 ## Journal History Read Bounds
 
 REL-108 / NF-2: journal-sync uses the shared urllib Hrana connection, not native libsql, for history and prior-quantity reads. Recovery, execution coverage and mirror scans use 200-row insertion cursors with a 30-second scan deadline; each HTTP request has the shared transport timeout. A failed page exposes no partial state. Recovery restores effective-time ordering after pagination. Concurrent inserts are included; concurrent update/delete snapshot isolation is not claimed.
+
+REL-108 / NF-2: exit-orders also uses the bounded HTTP connection. Pending-order and legacy-ID fallback scans use 200-row insertion pages and a 30-second scan deadline, exposing no partial orders on failure. Placement priority remains newest-first after the scan. Default HTTP updates autocommit; injected stores retain their explicit commit contract. Read-back verification and durable unrecorded-placement guards remain required.

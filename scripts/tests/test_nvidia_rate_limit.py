@@ -8,6 +8,7 @@ Every test uses a fake clock or a local fake upstream; nothing reaches NVIDIA.
 from __future__ import annotations
 
 import http.client
+import fcntl
 import json
 import socket
 import threading
@@ -83,6 +84,67 @@ def test_an_unwritable_state_path_falls_back_to_in_process_pacing(tmp_path):
     assert lim.acquire(max_wait=60)
     assert lim.acquire(max_wait=60)
     assert clock.now - 1_000_000.0 == pytest.approx(2.0)
+
+
+@pytest.mark.parametrize("lock_kind", ["file", "thread"])
+def test_busy_state_lock_refuses_admission_without_waiting(tmp_path, lock_kind):
+    """REL-300 / R-719: max_wait=0 also bounds state-lock admission."""
+    lim = nrl.RateLimiter(tmp_path / "rate.json")
+    done = threading.Event()
+    results = []
+    lock_file = open(str(lim.path) + ".lock", "a")
+    if lock_kind == "file":
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+    else:
+        lim._mutex.acquire()
+
+    def attempt():
+        results.append(lim.acquire(max_wait=0))
+        done.set()
+
+    worker = threading.Thread(target=attempt)
+    worker.start()
+    try:
+        returned_while_locked = done.wait(1)
+    finally:
+        if lock_kind == "thread":
+            lim._mutex.release()
+        lock_file.close()
+        worker.join(timeout=2)
+    assert returned_while_locked, "state contention exceeded the caller's admission budget"
+    assert results == [False]
+    assert not lim.path.exists(), "refused admission must not consume a send slot"
+    assert lim.acquire(max_wait=0) is True
+
+
+@pytest.mark.parametrize("method,args", [("note_success", ()), ("note_429", (30,)), ("note_auth_failure", (403,)), ("tripped_until", ())])
+def test_busy_state_lock_surfaces_bounded_metadata_failure(tmp_path, monkeypatch, method, args):
+    """REL-300: response bookkeeping must not pin a caller after its HTTP deadline."""
+    monkeypatch.setattr(nrl, "STATE_LOCK_TIMEOUT_S", 0.05, raising=False)
+    lim = nrl.RateLimiter(tmp_path / "rate.json")
+    done = threading.Event()
+    errors = []
+
+    def attempt():
+        try:
+            getattr(lim, method)(*args)
+        except RuntimeError as exc:
+            errors.append(str(exc))
+        finally:
+            done.set()
+
+    with open(str(lim.path) + ".lock", "a") as locked:
+        fcntl.flock(locked, fcntl.LOCK_EX)
+        worker = threading.Thread(target=attempt)
+        worker.start()
+        try:
+            returned_while_locked = done.wait(1)
+        finally:
+            fcntl.flock(locked, fcntl.LOCK_UN)
+            worker.join(timeout=2)
+    assert returned_while_locked, "response bookkeeping waited indefinitely for a state lock"
+    assert errors and "state lock" in errors[0]
+    assert not lim.path.exists()
 
 
 # --- 429 / 403 ----------------------------------------------------------------
@@ -244,6 +306,44 @@ def test_proxy_forwards_the_request_and_the_bearer_untouched(proxy):
     assert up.requests[0]["path"] == "/v1/chat/completions"
     assert up.requests[0]["headers"]["authorization"] == "Bearer nvapi-TESTTESTTEST"
     assert up.requests[0]["body"] == b'{"model":"m"}'
+
+
+def test_proxy_reports_busy_state_without_sending_upstream(proxy, monkeypatch):
+    """REL-300: contention is a bounded wire error, never an unpaced request."""
+    monkeypatch.setattr(nrl, "STATE_LOCK_TIMEOUT_S", 0.05)
+    up, srv, lim = proxy([])
+    with open(str(lim.path) + ".lock", "a") as locked:
+        fcntl.flock(locked, fcntl.LOCK_EX)
+        resp, body = _post(srv)
+    assert resp.status == 503
+    assert "state lock" in json.loads(body)["error"]
+    assert up.requests == []
+
+
+def test_proxy_closes_upstream_when_response_bookkeeping_is_busy(proxy, monkeypatch):
+    monkeypatch.setattr(nrl, "STATE_LOCK_TIMEOUT_S", 0.05)
+    up, srv, lim = proxy([(200, {}, b"{}")])
+    note_success = lim.note_success
+    connect = srv.connect
+    connections = []
+
+    def capture_connection():
+        connection = connect()
+        connections.append(connection)
+        return connection
+
+    def blocked_note():
+        with open(str(lim.path) + ".lock", "a") as locked:
+            fcntl.flock(locked, fcntl.LOCK_EX)
+            note_success()
+
+    monkeypatch.setattr(srv, "connect", capture_connection)
+    monkeypatch.setattr(lim, "note_success", blocked_note)
+    resp, body = _post(srv)
+    assert resp.status == 503
+    assert "state lock" in json.loads(body)["error"]
+    assert len(up.requests) == 1
+    assert len(connections) == 1 and connections[0].sock is None
 
 
 def test_proxy_streams_sse_through(proxy):

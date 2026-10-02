@@ -49,6 +49,7 @@ DEFAULT_TRIP_AFTER = 5
 DEFAULT_TRIP_SECS = 900.0
 DEFAULT_AUTH_BLOCK_SECS = 900.0
 DEFAULT_PORT = 18431
+STATE_LOCK_TIMEOUT_S = 0.25
 UPSTREAM = "https://integrate.api.nvidia.com"
 HEALTH_PATH = "/__radon_nvidia_proxy"
 
@@ -119,6 +120,10 @@ def _env_number(env: Mapping[str, str], name: str, default: float) -> float:
     return value if value > 0 else default
 
 
+class RateLimitStateBusy(RuntimeError):
+    """REL-300 / R-719: shared pacing state was not available within its budget."""
+
+
 class RateLimiter:
     """Host-wide pacing plus 429 / 403 back-off for one NVIDIA key."""
 
@@ -161,8 +166,15 @@ class RateLimiter:
         )
 
     @contextlib.contextmanager
-    def _state(self):
-        with self._mutex:
+    def _state(self, wait_budget: float | None = None):
+        # A suspended holder must not freeze every model caller. The thread
+        # mutex and cross-process flock share one real, monotonic deadline;
+        # pacing timestamps still use the injected wall clock for persistence.
+        budget = STATE_LOCK_TIMEOUT_S if wait_budget is None else min(STATE_LOCK_TIMEOUT_S, max(0.0, wait_budget))
+        deadline = time.monotonic() + budget
+        if not self._mutex.acquire(timeout=budget):
+            raise RateLimitStateBusy("NVIDIA rate state lock unavailable")
+        try:
             if self.path is None or fcntl is None:
                 yield self._memory
                 return
@@ -172,7 +184,15 @@ class RateLimiter:
                 yield self._memory
                 return
             with lock:
-                fcntl.flock(lock, fcntl.LOCK_EX)
+                while True:
+                    try:
+                        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise RateLimitStateBusy("NVIDIA rate state lock unavailable") from None
+                        time.sleep(min(0.01, remaining))
                 try:
                     state = json.loads(self.path.read_text())
                     if not isinstance(state, dict):
@@ -189,6 +209,8 @@ class RateLimiter:
                         os.replace(tmp, self.path)
                     except OSError:
                         self._memory.update(state)
+        finally:
+            self._mutex.release()
 
     def _trip(self, state: dict, until: float) -> None:
         state["tripped_until"] = max(float(state.get("tripped_until", 0)), until)
@@ -202,13 +224,16 @@ class RateLimiter:
         interval = 60.0 / self.rpm
         deadline = self.clock() + max(0.0, max_wait)
         while True:
-            with self._state() as state:
-                now = self.clock()
-                tripped = float(state.get("tripped_until", 0))
-                ready = max(float(state.get("next_at", 0)), float(state.get("cooldown_until", 0)), tripped)
-                if ready <= now:
-                    state["next_at"] = now + interval
-                    return True
+            try:
+                with self._state(deadline - self.clock()) as state:
+                    now = self.clock()
+                    tripped = float(state.get("tripped_until", 0))
+                    ready = max(float(state.get("next_at", 0)), float(state.get("cooldown_until", 0)), tripped)
+                    if ready <= now:
+                        state["next_at"] = now + interval
+                        return True
+            except RateLimitStateBusy:
+                return False
             if tripped > now or ready > deadline:
                 return False
             self.sleep(max(0.01, min(ready - now, 5.0)))
@@ -307,6 +332,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             with srv.slots:
                 self._send_upstream(body)
+        except RateLimitStateBusy:
+            self._reply(503, b'{"error":"nvidia rate state lock unavailable"}')
         finally:
             srv.touch(-1)
 
@@ -331,9 +358,11 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             status = resp.status
             if status == 200 or status < 400:
-                srv.limiter.note_success()
-                self._stream(resp)
-                conn.close()
+                try:
+                    srv.limiter.note_success()
+                    self._stream(resp)
+                finally:
+                    conn.close()
                 return
             data = resp.read(65536)
             conn.close()
