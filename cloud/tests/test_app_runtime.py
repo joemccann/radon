@@ -1300,6 +1300,7 @@ def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
         "XAI_API_KEY=k-xai\n"
         "OPENAI_API_KEY=k-oai\n"
         "GEMINI_API_KEY=k-gem\n"
+        "ANTIGRAVITY_MODEL=m-agy\n"
         "NVIDIA_API_KEY=k-nv\n"
         "CEREBRAS_API_KEY=k2\n"
         "RADON_PYTHON_BIN=/usr/bin/python3.13\n"
@@ -1325,6 +1326,7 @@ def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
     assert GATEWAY_SECRET_KEY not in keys
     assert "CLERK_SECRET_KEY" not in keys
     assert "MENTHORQ_PASS" not in keys
+    assert "GEMINI_API_KEY" not in keys  # retired: Google is the Antigravity CLI only
     assert {
         "NODE_ENV",
         "TURSO_DB_URL",
@@ -1334,7 +1336,7 @@ def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
         "RADON_LADDER_ALLOW_PREPAID",
         "XAI_API_KEY",
         "OPENAI_API_KEY",
-        "GEMINI_API_KEY",
+        "ANTIGRAVITY_MODEL",
         "NVIDIA_API_KEY",
         "CEREBRAS_API_KEY",
         "RADON_PYTHON_BIN",
