@@ -68,6 +68,35 @@ _GENERIC_ASSIGNMENT_PATTERNS = [
 
 _SECRET_SCRUB_PATTERNS = _SPECIFIC_SCRUB_PATTERNS + _GENERIC_ASSIGNMENT_PATTERNS
 
+# Detection-grade generic shape: a credential-named key assigned an opaque
+# LITERAL (env line, export, JSON/YAML, quoted code). Opaque means 16+ chars of
+# key alphabet with letters and digits, no dots, parens or `$` (so expressions
+# and references stay clean) and no placeholder word.
+_SECRET_LITERAL_ASSIGNMENT = re.compile(
+    rf"[\"']?[A-Za-z0-9_-]*{_SECRET_KEY}[A-Za-z0-9_-]*[\"']?\s*[:=]\s*[\"']?"
+    r"(?P<value>[A-Za-z0-9_+/=~-]{16,})(?![A-Za-z0-9_+/=~.(\[$-])",
+    re.IGNORECASE,
+)
+_PLACEHOLDER = re.compile(
+    r"test|fake|dummy|example|sample|placeholder|changeme|redacted|your|x{4}",
+    re.IGNORECASE,
+)
+
+
+def find_secret_assignments(text: str) -> list[str]:
+    """``["[redacted-secret]"]`` when ``text`` assigns a literal opaque value
+    to a credential-named key, else ``[]``. Never returns the value.
+    """
+    for match in _SECRET_LITERAL_ASSIGNMENT.finditer(text or ""):
+        value = match.group("value")
+        if (
+            re.search(r"[A-Za-z]", value)
+            and re.search(r"\d", value)
+            and not _PLACEHOLDER.search(value)
+        ):
+            return ["[redacted-secret]"]
+    return []
+
 
 def find_credential_shapes(text: str) -> list[str]:
     """Labels of specific credential shapes present in ``text``.

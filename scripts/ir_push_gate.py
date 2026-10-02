@@ -8,7 +8,8 @@ Two checks, both fail closed:
 2. The commit range (added diff lines, file names, commit messages) and the
    PR title/body must carry no private identifier: IB account ids, long
    numeric Flex exec ids, dotted-hex IB exec ids, or any specific credential
-   shape from the canonical scrubber (``credential_redaction``). A hit
+   shape from the canonical scrubber (``credential_redaction``), or an
+   opaque literal assigned to a credential-named key. A hit
    refuses the push; the work stays local. Nothing is redacted in place,
    because silently rewriting code or history hides what leaked.
 
@@ -24,7 +25,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
-from credential_redaction import find_credential_shapes
+from credential_redaction import find_credential_shapes, find_secret_assignments
 
 AUTOPUSH_ENV = "GROK_PAGE_AUTOPUSH"
 _FALSEY = {"", "0", "false", "no", "off"}
@@ -81,6 +82,8 @@ def find_private_identifiers(text: str) -> list[str]:
         kind = f"credential {label}"
         if kind not in found:
             found.append(kind)
+    if find_secret_assignments(text or ""):
+        found.append("credential assignment")
     return found
 
 
