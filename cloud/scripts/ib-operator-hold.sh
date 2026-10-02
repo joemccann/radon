@@ -41,7 +41,9 @@ require_root() {
 
 actor() {
   local who="${SUDO_USER:-${USER:-root}}"
-  local from="${SSH_CLIENT%% *}"
+  # REL-301 / R-720: console/sudo sessions need no SSH environment.
+  local from="${SSH_CLIENT:-}"
+  from="${from%% *}"
   printf 'ssh:%s@%s\n' "$who" "${from:-local}"
 }
 
@@ -53,17 +55,31 @@ hold_cli() {
   "$HOLD_PYTHON" "$HOLD_CLI" "$@"
 }
 
-gateway_running() {
-  [[ "$(timeout "$STEP_TIMEOUT_SECS" "$DOCKER_GW" inspect-running 2>/dev/null)" == "true" ]]
+gateway_stopped() {
+  # REL-298 / R-717: an unavailable Docker daemon cannot confirm logout.
+  # Accept an explicit stopped state or Docker's exact missing-container
+  # response; timeouts, permission failures and malformed output stay unknown.
+  local output rc=0
+  output=$(timeout "$STEP_TIMEOUT_SECS" "$DOCKER_GW" inspect-running 2>&1) || rc=$?
+  if (( rc == 0 )); then
+    [[ "$output" == "false" ]] && return 0
+    [[ "$output" == "true" ]] && return 1
+  elif [[ "$rc" == 1 && "$output" == "Error: No such object: ib-gateway" ]]; then
+    return 0
+  fi
+  return 2 # unknown, distinct from confirmed running
 }
 
 wait_until_stopped() {
-  local poll
+  local poll rc
   for (( poll = 0; poll < RELEASE_POLLS; poll++ )); do
-    gateway_running || return 0
+    if gateway_stopped; then return 0; else rc=$?; fi
+    # Unknown observations cannot converge by polling a broken observer.
+    # Advance to the next shutdown stage without multiplying 30s timeouts.
+    (( rc == 1 )) || return "$rc"
     sleep "$RELEASE_POLL_SECS"
   done
-  ! gateway_running
+  gateway_stopped
 }
 
 # Graceful first (releases the 2FA lease), then a root compose-down that
@@ -101,7 +117,7 @@ release() {
   fi
 
   if ! stop_gateway; then
-    echo "radon ib: FAILED - Gateway container STILL RUNNING; it may still hold the IBKR session" >&2
+    echo "radon ib: FAILED - Gateway container STILL RUNNING or state unknown; it may still hold the IBKR session" >&2
     audit_line "release failed: container still running"
     exit 1
   fi
