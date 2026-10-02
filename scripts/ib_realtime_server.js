@@ -826,7 +826,9 @@ async function refreshOperatorHold() {
   try {
     const res = await fetch(IB_HEALTH_LITE_URL, { signal: AbortSignal.timeout(5_000) });
     if (!res.ok) return;
-    const held = operatorHoldFromHealth(await res.json());
+    const body = await res.json();
+    if (typeof body?.operator_hold !== "boolean") return;
+    const held = operatorHoldFromHealth(body);
     if (held !== operatorHoldActive) {
       console.log(`[stale-data] IBKR operator hold ${held ? "ON: standing down" : "OFF: normal recovery"}`);
     }

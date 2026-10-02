@@ -8783,6 +8783,17 @@ Six findings have red/green evidence; three full serial rounds pass Python 13448
 
 Review: pending; fake-only verification, full suites and Vitest assigned to CI.
 
+## Nightly testing 2026-10-02
+
+- [x] T1 Build toolchain, recover trusted checkpoint, select authorized branch. depends_on: []
+- [x] T2 Audit delta and importers, reconcile ledgers, run standing gates and delta repetitions. depends_on: [T1]
+- [x] T3 Repair every verified finding with red/green evidence. depends_on: [T2]
+- [x] T4 Run three serial closing gate rounds and hygiene review. depends_on: [T3]
+- [ ] T5 Publish substantive draft, verify exact-head CI and post one rolling comment. depends_on: [T4]
+
+### Review 2026-10-02
+
+Three verified findings have red/green evidence. All nine closing gates pass, and every cloud failure-list comparison matches the clean detached base. Product change is limited to the relay poller; prior ledger entries, reliability ledgers and codemap files are unchanged. Publication, exact-head CI and the single rolling-issue receipt are the remaining external steps. The held-out admin browser preflight and missing Pushover environment remain operator-only delivery items.
 ## Nightly reliability 2026-10-02
 
 - [x] T1 depends_on: [] Install toolchain, recover trusted checkpoint and create authorized branch.

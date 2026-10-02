@@ -1119,3 +1119,16 @@ All three delta repetitions passed: Python 946, Vitest 134, cloud 24 per repetit
 Standing/delta gates, closing full rounds and the exact detached-base cloud FAILED-list comparison are recorded in TEST_AUDIT.md. Exact-head CI/browser and external delivery receipts belong to rolling issue #83.
 
 Closing verification 2026-10-01: all three rounds pass Python 13448 / Vitest 10300 / cloud 2400, with Python 2 skips and 23 subtests, cloud 7 skips. Every cloud FAILED-list comparison against the clean detached base has zero additions and zero removals. No load-flake exception or test weakening was needed.
+
+
+## Remediation 2026-10-02
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-525 | DONE | Kernel PID substituted for UID: all 57 old tests pass; 5 new identity cases fail. Fake getsockopt with the real decoder/admission path: 64 combined pass. No product decoder change. |
+| T-526 | DONE | Buffering read substituted for streaming read: all 30 old tests pass; both new delivery cases fail. Handshake-controlled loopback SSE fixture: 32 combined pass. No product proxy change. |
+| T-527 | DONE | Four malformed successful health responses clear a known hold at baseline: 4 failed / 8 passed. Explicit-boolean validation and real poller/timer execution: 77 related pass. Timer-bypass mutation passes 4 old source checks but fails all 12 new cases. |
+
+Standing gates, three delta repetitions and closing full-gate counts are recorded in TEST_AUDIT.md. Exact-head CI/browser evidence and notification delivery status belong to rolling issue #83.
+
+Closing verification 2026-10-02: three rounds each passed Python 13,826 / Vitest 10,365 / cloud 2,452; Python 2 skips and 23 subtests, cloud 7 skips. All three sorted cloud FAILED lists match the empty detached-base list, with 0 additions and 0 removals.

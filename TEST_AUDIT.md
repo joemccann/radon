@@ -10885,3 +10885,61 @@ Detached base `731716e5` cloud gate: 2400 passed / 7 skipped in 803.64s. The sor
 All three closing cloud FAILED lists are empty. Each comparison against the actual detached-base list has zero additions and zero removals. No isolated rerun or baseline exception was needed.
 
 Review: six verified findings have red/green evidence. Only the incident-response publication gate changes production behavior; broker and relay sources are restored unchanged. Existing assertions are retained and no skip, xfail, tolerance, timeout, coverage threshold or exclusion is weakened. Generated codemap and reliability ledgers are untouched. Focused checks run again before each finding commit. Exact-head CI/browser and notification receipts are recorded externally on rolling issue #83 so recording them does not change the tested head.
+
+## Delta audit 2026-10-02
+
+Audited `731716e54b1e85e98b591cbd79e9d18adf7a1ec7..cb47c52ab055221fd7d88ead72ff28acb554e7d7`: 30 commits, 185 changed paths. The newest trusted collaborator comment on rolling issue #83 supplied the checkpoint. No open `testing/` PR existed at intake. IDs continue after T-524.
+
+Read the architecture index and incoming codemap edges, then confirmed direct, dynamic and subprocess consumers with `rg`. The graph predates the new host-control, hold and NVIDIA proxy modules. Inverse review covered peer admission, hold propagation, recovery timers, order ownership, held-leg basis and signed extrema, hidden-tab depth demand, cached signing keys, provider fallback, root responder staging, incident push history and nightly queue reconciliation. All execution used fake dependencies or loopback test servers.
+
+### T-525 — P1 — host-control socket tests bypass the kernel credential decoder
+
+`scripts/tests/test_control_service.py:334` replaces `peer_uid` for every socket integration scenario, while `scripts/control_service/serve.py:391` decodes the actual Linux PID/UID/GID tuple. Returning PID instead of UID passes all 57 original tests, including authorization cases. The new fake-kernel boundary tests reject that mutation with 5 failures / 2 passes and verify refusal without command execution when credentials are unavailable.
+
+Acceptance: decode the kernel UID, allow only root/the service UID, and reject foreign UIDs even when PID or GID equals an allowed identity. No host command executes in the fixture.
+
+### T-526 — P2 — completed-response equality does not prove streaming delivery
+
+`scripts/tests/test_nvidia_rate_limit.py:249` consumes the complete response before asserting SSE bytes. Replacing `read1` with buffering `read` at `scripts/nvidia_rate_limit.py:373` passes all 30 original tests. Both new transport cases fail: the loopback provider cannot finish until the downstream client acknowledges its first event. Production already streams correctly; only regression tests are retained.
+
+Acceptance: deliver the first event before provider completion for chunked and content-length responses, then deliver the exact remaining bytes and close the fixture servers. Synchronization uses an event handshake; timeouts only bound a defective run.
+
+### T-527 — P2 — source-string hold checks miss a real loss of the held state
+
+`web/tests/relay-operator-hold.test.ts:58` checks source substrings and branch ordering without executing the poller or timer. `scripts/ib_realtime_server.js:819` promises to retain the last value on unknown state, but its poller turns a successful response without a boolean `operator_hold` into a clear. Four real malformed-response cases fail against the audited source. The new suite executes the actual AST-selected poller, restart handler and stale timer with fake transport, health writer and recovery effects.
+
+Acceptance: only explicit boolean health state changes the latch; malformed success, HTTP failure, transport failure and JSON failure preserve a known hold; restart refusals latch it; held connected/disconnected timer cycles write held health and perform no recovery action. An explicit false restores normal disconnected health. Reject a mutation that removes the hold from the live timer decision while all original source checks still pass.
+
+### Standing sweeps and prior findings
+
+- Standing gates: Python 13,815 passed / 2 skipped / 23 subtests; Vitest 10,353 passed in 1,043 files; cloud 2,452 passed / 7 skipped. Full output was saved before inspection.
+- CI discovery remains broad (`pyproject.toml:31`, `vitest.config.ts:45`, `.github/workflows/ci.yml:342`). The Python 56 and Vitest 75/71/65 ratchets and measured surfaces are unchanged. Capability skips were inspected; no new blanket exclusion or bypass was verified.
+- The changed held-leg browser spec is named in `.github/workflows/ci.yml:808`. The changed admin-service spec remains explicitly held out by `web/e2e/ci-curation-ledger.txt:1` pending next-start preflight; its request behavior has executable Vitest coverage. Browser execution and screenshots cannot be produced locally in this run.
+- Re-triaged TEST_LOG and NEW_FINDINGS. T-519 through T-524 are resolved in merged PR #831; T-435 is resolved in merged PR #816. Historical constructor inventory at `scripts/tests/test_service_registration_completeness.py:488`, Day Move/calendar notes (T-210/T-386), spread timestamps (T-217) and payload-contract failure (T-079) do not yield a new reproduced finding. The trusted checkpoint carries no open testing finding.
+
+Audited through: cb47c52ab055221fd7d88ead72ff28acb554e7d7 on 2026-10-02 — 3 new findings
+
+
+## Remediation 2026-10-02
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-525 | DONE | PID-as-UID mutation passes all 57 original tests, fails 5 new identity cases. Real decoder plus fake kernel/runner: 64 combined tests pass. Unknown identity refuses without execution. Production decoder unchanged. |
+| T-526 | DONE | Buffering-read mutation passes all 30 original tests, fails both new streaming cases. Client acknowledgement controls provider completion for both transfer encodings: 32 combined tests pass. Production proxy unchanged. |
+| T-527 | DONE | Actual malformed-response defect: 4 failed / 8 passed. Poller now accepts only explicit boolean state. Timer-bypass mutation passes all 4 original checks, fails all 12 new behavioral cases; restored source passes 77 related tests. Maintained hold documentation now states the unknown-state contract. |
+
+All three changed-file repetitions passed: Python 1,000, Vitest 430, cloud 876 per repetition (37 / 17 / 9 files). The two changed browser files could not run locally; curated held-leg browser evidence belongs to PR CI, and the explicitly held-out admin-service spec remains unexecuted here. No source assertion, timeout, tolerance, test selection or coverage threshold was weakened.
+
+### Closing verification 2026-10-02
+
+| Closing round | Python passed | Vitest passed | Cloud passed |
+|---|---:|---:|---:|
+| 1 | 13,826 | 10,365 | 2,452 |
+| 2 | 13,826 | 10,365 | 2,452 |
+| 3 | 13,826 | 10,365 | 2,452 |
+
+Each Python round also passed 23 subtests and skipped 2 cases; each cloud round skipped 7 cases. Each Vitest round passed 1,044 files. All nine gates completed successfully, without a load-flake exception.
+
+Detached base cb47c52a cloud gate: 2,452 passed / 7 skipped. Its sorted FAILED list is empty. Each of the three closing cloud FAILED lists is also empty: 0 additions and 0 removals in every exact list comparison. Homebrew Bash, OpenSSL and Caddy were selected through PATH; no repository environment workaround was added.
+
+Syntax audit passed for 2 TOML, 5 JSON, 5 YAML and 13 shell files from the merged delta; the changed relay JavaScript also passes node --check. Final whitespace/secret review and exact-head CI receipts are recorded on rolling issue #83.
