@@ -1116,3 +1116,5 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 ## 2026-09-25 — Recovery controls must stay discoverable
 - Keep gateway lifecycle and service recovery available beside Trading controls even when broker health is nominal. A conditional attention action and buried diagnostics do not satisfy rapid operator access.
+
+- 2026-10-01: When diffing pytest failures (with vs without a change), run with `--color=no` (or `-p no:sugar`) before grepping `^FAILED`. ANSI codes made both lists empty and hid a real regression that CI then caught.

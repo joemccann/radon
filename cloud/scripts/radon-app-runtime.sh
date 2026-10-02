@@ -763,11 +763,14 @@ cmd_run() {
   local cred_dir
   case "$unit" in
     radon-api.service|radon-newsfeed.service|radon-research.service|radon-nextjs.service)
-      for cred_dir in .grok .codex .claude; do
+      for cred_dir in .grok .codex .claude .gemini; do
         if [[ -d "${subscription_home}/${cred_dir}" ]]; then
           set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:ro"
         fi
       done
+      if [[ -d "${subscription_home}/.local/bin" ]]; then
+        set -- "$@" -v "${subscription_home}/.local/bin:/home/radon/.local/bin:ro"
+      fi
       ;;
   esac
   set -- "$@" --env HOME=/home/radon
