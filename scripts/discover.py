@@ -444,6 +444,26 @@ def _provider_failure(operation: str, exc: Exception, ticker: str | None = None)
     return failure
 
 
+def _apply_provider_failures(result: dict, provider_failures: list) -> None:
+    """Record skipped tickers without turning a scored scan into a hard error.
+
+    The flow-tab route maps a top-level ``error`` to HTTP 400 and then drops
+    the payload. The hourly oneshot treats that 400 as a failed unit
+    (2026-10-02 14:02Z, page b224647c). A scan that scored candidates is
+    degraded: keep the skips, do not publish or alert, and leave the hard
+    error for a result that has nothing to cache.
+    """
+    if not provider_failures:
+        return
+    result["degraded"] = True
+    result["provider_failures"] = sorted(
+        provider_failures,
+        key=lambda failure: (failure.get("ticker", ""), failure["operation"]),
+    )
+    if not result.get("candidates"):
+        result["error"] = "required provider data unavailable"
+
+
 def discover_targeted(tickers: list, dp_days: int = 3,
                       min_premium: int = 50000, top: int = 20,
                       max_workers: int = 10,
@@ -519,15 +539,7 @@ def discover_targeted(tickers: list, dp_days: int = 3,
         "candidates_found": len(candidates),
         "candidates": candidates[:top],
     }
-    if provider_failures:
-        result.update({
-            "degraded": True,
-            "error": "required provider data unavailable",
-            "provider_failures": sorted(
-                provider_failures,
-                key=lambda failure: (failure.get("ticker", ""), failure["operation"]),
-            ),
-        })
+    _apply_provider_failures(result, provider_failures)
     return result
 
 
@@ -634,15 +646,7 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
         "candidates_found": len(candidates),
         "candidates": candidates[:top]
     }
-    if provider_failures:
-        result.update({
-            "degraded": True,
-            "error": "required provider data unavailable",
-            "provider_failures": sorted(
-                provider_failures,
-                key=lambda failure: (failure.get("ticker", ""), failure["operation"]),
-            ),
-        })
+    _apply_provider_failures(result, provider_failures)
     return result
 
 
