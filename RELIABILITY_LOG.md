@@ -886,3 +886,5 @@ Closing local gates (2026-09-30): permanent Python drills 95 passed; standing wr
 | REL-300 / R-719 | DONE | RED 6 failed twice; GREEN 148 passed | Share a monotonic 250-ms bound across thread mutex and nonblocking flock; acquire also respects shorter admission budgets and refuses instead of sending unpaced. Response metadata failures surface explicitly; the proxy returns 503 and closes the upstream connection. Real held-lock faults, recovery-after-release, wire refusal and connection cleanup are covered. |
 
 | REL-301 / R-720 | DONE | RED 1 failed twice; GREEN 20 passed | Default missing SSH_CLIENT before stripping its address suffix; console release/resume now retain actor identity and avoid swallowed nounset errors. The lifecycle and hold semantics are unchanged. |
+
+| REL-021b / R-047 | DONE | RED 1 failed twice; GREEN 57 migration + 84 health + 51 Caddy passed | Migration 0026 records its version when applied directly; replay preserves both the version and snapshot rows. Existing health/Caddy outage-floor contracts remain green; no production schema or service operation occurred. |

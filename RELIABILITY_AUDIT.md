@@ -2881,3 +2881,9 @@ No open reliability PRs at startup; existing IDs reserved through R-716 / REL-29
 | R-718 | P2 | `scripts/utils/ib_operator_hold.py:106-125`; `scripts/ib_watchdog.py:1815-1818` | Invalid UTF-8 raised out of hold_state, aborting watchdog cycles and broker status instead of returning a held flag. REL-299 acceptance: arbitrary invalid bytes and corrupt held reasons still return held, the CLI returns 73 with valid JSON, and original flag bytes remain untouched. Three faults failed twice. |
 | R-719 | P1 | `scripts/nvidia_rate_limit.py:160-234`; `scripts/clients/model_ladder.py:1540-1548` | Blocking mutex/flock ignored acquire(max_wait) and could stall every model caller and response bookkeeping behind a suspended holder. REL-300 acceptance: held thread/file locks refuse admission within budget without consuming a slot; metadata operations fail within a monotonic bound; proxy returns 503 with no unpaced upstream request and closes a response whose bookkeeping fails. Six contention faults failed twice. |
 | R-720 | P2 | `cloud/scripts/ib-operator-hold.sh:42-47` | Console/sudo invocation without SSH_CLIENT raises nounset inside actor substitution, leaving successful hold changes anonymously attributed. REL-301 acceptance: release/resume without SSH_CLIENT emit no unbound-variable error and both audit rows retain the local operator identity. One fault failed twice; 20 cloud tests passed. |
+
+### Inherited remediation 2026-10-02
+
+| ID | Sev | Location | Failure / acceptance |
+|---|---|---|---|
+| R-047 / REL-021b | P2 | `scripts/db/migrations/0026_scan_snapshots.sql:16-24` | Direct SQL application omitted migration 26 bookkeeping. The isolated SQLite fault failed twice; the file now records itself idempotently and preserves existing snapshots on replay. Focused migration suites: 57 passed; isolated health contracts: 84 passed. The deploy health floor remains covered by existing Caddy contracts. |
