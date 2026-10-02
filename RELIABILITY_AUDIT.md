@@ -2868,3 +2868,13 @@ Inherited R-039 / REL-021b resolved with ten repeated red faults and 134 scripts
 Inherited R-046 / REL-021b resolved: missing-tzdata faults fail closed with visible errors, while valid RTH fallback survives calendar-only failures. Two repeated red faults; 125 focused passes.
 
 Inherited R-034 / REL-021b resolved: expired option closes leave memory and disk at startup/daily cache use, while current and future expiries survive. Two repeated red faults; 81 focused passes, including three isolated actual-JavaScript cache cases.
+
+## Delta audit 2026-10-02
+
+Trusted checkpoint: `731716e54b1e85e98b591cbd79e9d18adf7a1ec7`; target `cb47c52a`.
+Range: 30 commits, 185 changed paths, 392 paths including direct codemap importers.
+No open reliability PRs at startup; existing IDs reserved through R-716 / REL-297.
+
+| ID | Sev | Location | Failure / acceptance |
+|---|---|---|---|
+| R-717 | P1 | `cloud/scripts/ib-operator-hold.sh:56-76` | Release interpreted every non-true inspection as a stopped Gateway, including permission failures and timeouts. REL-298 acceptance: failing, malformed and timed-out fake Docker probes never print RELEASED or clear the hold; explicit stopped/missing probes still succeed. Four faults failed twice before repair. |

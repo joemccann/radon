@@ -8782,3 +8782,13 @@ Six findings have red/green evidence; three full serial rounds pass Python 13448
 - [ ] T5 depends_on: [T4] Post one durable issue comment and record final review.
 
 Review: pending; fake-only verification, full suites and Vitest assigned to CI.
+
+## Nightly reliability 2026-10-02
+
+- [x] T1 depends_on: [] Install toolchain, recover trusted checkpoint and create authorized branch.
+- [ ] T2 depends_on: [T1] Audit delta and codemap importers; run standing sweeps and re-triage inherited candidates.
+- [ ] T3 depends_on: [T2] Repair verified findings serially with repeated red and focused green evidence.
+- [ ] T4 depends_on: [T3] Run permanent drills, validate, publish substantive draft and await exact-head CI.
+- [ ] T5 depends_on: [T4] Post one durable rolling comment and complete review.
+
+Review: pending; mock-only execution. Full suites and Vitest assigned to CI.

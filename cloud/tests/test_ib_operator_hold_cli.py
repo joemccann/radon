@@ -168,3 +168,21 @@ def test_setup_installs_the_hold_command_root_owned():
     text = SETUP.read_text(encoding="utf-8")
     assert "install_ib_hold() {" in text
     assert "/usr/local/sbin/radon-ib-hold" in text
+
+
+@pytest.mark.parametrize("probe", ["exit 1", "echo false; exit 1", "echo garbage; exit 0", "exit 124"])
+def test_release_never_confirms_an_unknown_container_state(box, tmp_path, probe):
+    """REL-298 / R-717: failed Docker observation is not a stopped Gateway."""
+    _stub(tmp_path / "docker-gw", f'case "$1" in inspect-running) echo probe >> "$PROBE_LOG"; {probe} ;; esac\nexit 0\n')
+    result = box.run("release", STUB_CONTROL_STOP_RC="74", SSH_CLIENT="", PROBE_LOG=str(tmp_path / "probes"))
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "RELEASED" not in result.stdout
+    assert box.held()
+    assert len((tmp_path / "probes").read_text().splitlines()) == 3, "one unknown probe per stop stage"
+
+
+def test_release_accepts_only_the_named_container_missing(box, tmp_path):
+    _stub(tmp_path / "docker-gw", 'case "$1" in inspect-running) echo "Error: No such object: ib-gateway" >&2; exit 1 ;; esac\nexit 0\n')
+    result = box.run("release", SSH_CLIENT="")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "RELEASED" in result.stdout
