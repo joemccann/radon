@@ -2890,3 +2890,5 @@ No open reliability PRs at startup; existing IDs reserved through R-716 / REL-29
 
 
 | R-040 / REL-021b | P2 | `scripts/ib_realtime_server.js:1772-1830,2882-2898` | DONE: rejected depth deltas refreshed feed health and never repaired positional desynchronization. Four event-handler faults failed twice; four buffered-stale-book faults also failed twice. Invalidate both ladders/pending snapshots, signal unavailable, and cancel/rebuild at most once per 30 monotonic seconds; unknown cancellation refuses allocation. Focused relay suites: 13 passed. |
+
+| R-468 / REL-167 / NF-10 | P2 | `scripts/health_service/serve.py:106-175,214-236,281-287,433-455`; `scripts/health_service/probes.py:417-440` | DONE: first-seen outage age was process-local and absent for broker probes/auth. Four missing-durability acceptance cases failed twice. Shared atomic state survives restart, clears recovery, preserves other namespaces and previous bytes on failed replacement. Probe/auth dwell escalates combined/broker hosts while preserving the newer app-host degraded-only policy, clean off-hours suppression, and unknown/stale evidence. Focused health/consumer suites: 259 passed. |
