@@ -76,17 +76,18 @@ The explicit recovery SSH rule remains until tailnet access is verified.
 
 ## 3. Enroll and restrict the tailnet
 
-Run on the host, complete the displayed browser login, and assign `tag:radon-slm`
-in the existing Tailscale admin console:
+Run on the host, complete the displayed browser login, and assign `tag:radon-gpu`
+in the Tailscale admin console:
 
 ```sh
 tailscale up --hostname=radon-slm --accept-routes=false --accept-dns=false
 tailscale ip -4
 ```
 
-Review existing tailnet policy first. A new narrow rule does not override an
-existing allow-all grant. Permit the app node to `tag:radon-slm` TCP8350 and the
-operator/admin nodes to TCP22; deny other peer access to the GPU node. Do not
+The tailnet policy is code: [`cloud/tailscale/policy.hujson`](../cloud/tailscale/policy.hujson)
+grants `tag:radon-app` TCP8350 and `group:operator` TCP22 on `tag:radon-gpu`,
+and nothing else. Apply it first ([operations.md, Tailnet policy](operations.md#tailnet-policy-cloudtailscalepolicyhujson));
+while the old allow-all grant is live, a narrow rule restricts nothing. Do not
 advertise routes or exit-node service. Avoid reusable auth keys and command-line
 secrets. Verify two independent SSH connections before closing public recovery.
 

@@ -114,8 +114,10 @@ Broker VM:
   when the 10.x exists).
 - Own control-plane bootstrap. Gateway + helper + lease + watchdog only.
 - Watchdog `HEALTH_URL=http://10.0.0.2:8321/health`. `/health` is
-  trust-scoped: only a `10.0.0.0/16`, tailnet, or loopback peer without
-  forwarding headers gets `auth_state`. A probe via `app.radon.run` reads
+  trust-scoped: only a `10.0.0.0/16`, trusted tailnet, or loopback peer
+  without forwarding headers gets `auth_state`. The tailnet half is
+  `RADON_TRUSTED_TAILNET_PEERS` once `RADON_TAILNET_TRUST_MODE=enforce`
+  (`scripts/api/auth.py`); the `10.0.0.0/16` probe scope does not change. A probe via `app.radon.run` reads
   `{"status":"ok"}` and the watchdog goes blind.
 - Secrets subset: TWS user/pass, VNC, session policy. Not `UW_TOKEN`.
 
@@ -166,8 +168,11 @@ Operator commands after the cut:
      allowlist, default `radon-app`, matching the `DNS:radon-app` SAN the
      mint script writes. An empty value is a `ConfigError` at startup, not a
      silent open door; set it only if you mint a client cert under a
-     different name. Bind is `10.0.0.4`, never `0.0.0.0`. Hetzner firewall:
-     8340 and 4001 from `10.0.0.2` only.
+     different name. Bind is `10.0.0.4`, never `0.0.0.0`. 8340 and 4001
+     from `10.0.0.2` only is the broker ufw set (`cloud/scripts/host-firewall.sh
+     --role broker`); a Hetzner Cloud Firewall cannot express it because it
+     filters the public interface only (`cloud/hetzner/firewalls/`, runbook in
+     operations.md).
   Verify from the app host, no Gateway side effect:
   `curl --cacert /etc/radon/ib-remote/ca.pem --cert /etc/radon/ib-remote/client.pem --key /etc/radon/ib-remote/client-key.pem https://10.0.0.4:8340/healthz`
   → `{"ok":true,"service":"ib-gateway-remote"}`.

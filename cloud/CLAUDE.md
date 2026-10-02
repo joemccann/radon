@@ -15,6 +15,7 @@ cloud/
     bootstrap-control-plane.sh
     deploy.sh
     deploy-root-helper.sh
+    host-firewall.sh         # operator-run ufw rulesets (app/broker), never on deploy
     ib-gateway-control.sh
     setup-vps.sh
   services/                  # canonical systemd units and timers
@@ -376,6 +377,11 @@ successfully, and the stated schema and core-service checks were green.
 It must not start, stop, restart, or enable Radon services, Docker, IB Gateway,
 Caddy, polkit, or journald. Do not use the full `setup-vps.sh` as a live upgrade
 shortcut; setup also provisions packages, firewall, Caddy, and service state.
+Its `open_firewall` RESETS ufw to the declared app ruleset (byte-for-byte
+mirror of `scripts/host-firewall.sh`, pinned by `tests/test_host_firewall.py`):
+no blanket `tailscale0` allow, 8321 only from `10.0.0.4` and
+`RADON_FW_OPERATOR_SOURCES`. Live hosts change through `host-firewall.sh`
+(dry run by default), never deploy; runbook `docs/operations.md` "Host firewalls".
 Setup pins GitHub's published ed25519 SSH host key (no first-contact keyscan),
 provisions the secret-store credential as 32 raw bytes, and prepares the
 radon-replaceable media directory with create-then-verify + `chown
