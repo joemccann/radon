@@ -2887,3 +2887,6 @@ No open reliability PRs at startup; existing IDs reserved through R-716 / REL-29
 | ID | Sev | Location | Failure / acceptance |
 |---|---|---|---|
 | R-047 / REL-021b | P2 | `scripts/db/migrations/0026_scan_snapshots.sql:16-24` | Direct SQL application omitted migration 26 bookkeeping. The isolated SQLite fault failed twice; the file now records itself idempotently and preserves existing snapshots on replay. Focused migration suites: 57 passed; isolated health contracts: 84 passed. The deploy health floor remains covered by existing Caddy contracts. |
+
+
+| R-040 / REL-021b | P2 | `scripts/ib_realtime_server.js:1772-1830,2882-2898` | DONE: rejected depth deltas refreshed feed health and never repaired positional desynchronization. Four event-handler faults failed twice; four buffered-stale-book faults also failed twice. Invalidate both ladders/pending snapshots, signal unavailable, and cancel/rebuild at most once per 30 monotonic seconds; unknown cancellation refuses allocation. Focused relay suites: 13 passed. |

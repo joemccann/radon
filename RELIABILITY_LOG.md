@@ -888,3 +888,6 @@ Closing local gates (2026-09-30): permanent Python drills 95 passed; standing wr
 | REL-301 / R-720 | DONE | RED 1 failed twice; GREEN 20 passed | Default missing SSH_CLIENT before stripping its address suffix; console release/resume now retain actor identity and avoid swallowed nounset errors. The lifecycle and hold semantics are unchanged. |
 
 | REL-021b / R-047 | DONE | RED 1 failed twice; GREEN 57 migration + 84 health + 51 Caddy passed | Migration 0026 records its version when applied directly; replay preserves both the version and snapshot rows. Existing health/Caddy outage-floor contracts remain green; no production schema or service operation occurred. |
+
+
+| REL-021b / R-040 | DONE | RED 4 failed twice; buffered-book RED 4 failed twice; GREEN 13 passed | Only applied depth frames refresh feed health. Positional desynchronization clears both ladders and pending client snapshots, signals unavailable and starts a fresh ticket after successful cancellation. Per-subject monotonic pacing bounds repeated bad books; failed cancellation refuses allocation, old ticket events are ignored, other symbols remain buffered. Both L1/L2 event paths run through actual extracted relay code with fake broker callbacks; no socket or credentials. Vitest depth contracts remain assigned to CI. |
