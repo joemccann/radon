@@ -97,7 +97,7 @@ The subscription-token vault reuses this same store rather than adding a second
 crypto system. `scripts/subscription_tokens.py` seals each agent CLI's OAuth
 credential file verbatim under the registry names
 `SUBSCRIPTION_TOKEN_ANTHROPIC`, `SUBSCRIPTION_TOKEN_CODEX`,
-`SUBSCRIPTION_TOKEN_GROK` and `SUBSCRIPTION_TOKEN_GEMINI`, and restores or
+`SUBSCRIPTION_TOKEN_GROK` and `SUBSCRIPTION_TOKEN_ANTIGRAVITY`, and restores or
 refreshes them on a timer. A store that fails to open is reported as
 `store_unavailable` (exit 78), never as an empty vault. Runbook:
 [`docs/subscription-tokens.md`](subscription-tokens.md).
@@ -169,7 +169,7 @@ exits 75. `ExecStopPost` still reaps.
 **Subscription credential binds (2026-09-18).** `radon-app-runtime` also
 binds the operator's CLI subscription grants, each read-only and only when the
 directory exists on the host: `/home/radon/.grok`, `/home/radon/.codex`,
-`/home/radon/.claude` and `/home/radon/.local/bin` (the `agy` CLI the gemini
+`/home/radon/.claude` and `/home/radon/.local/bin` (the `agy` CLI the antigravity
 rung shells out to) land at
 the same paths inside the containers whose unit
 runs an LLM consumer (`radon-api`, `radon-newsfeed`, `radon-research`,
@@ -181,7 +181,7 @@ into the relay. Antigravity is the one read-write grant: `agy` refreshes its
 token and writes logs and project state on every run, so
 `/home/radon/.gemini/antigravity-cli` and `/home/radon/.gemini/config` (Google's
 fixed paths) are bound read-write and shared with the host, keeping one rotating
-token store. The rest of `~/.gemini` (the retired Gemini CLI) is never mounted.
+token store. The rest of `~/.gemini` (the retired Gemini CLI's `oauth_creds.json`) is never mounted.
 The Python and Next.js model ladders use the
 [subscription-tier billing and recovery policy](oauth-subscription-auth.md#radon-http-model-ladder-server).
 Prepaid fallback for those tiers requires the explicit `RADON_LADDER_ALLOW_PREPAID`
@@ -454,7 +454,7 @@ Stable fx path (2026-09-26). `com.radon.fx-stable-sync` (installed by `bash scri
 | `radon-refresh.timer` | 60s | Schedules data-refresh sweeps |
 | `radon-vcg-refresh.timer` | Mon-Fri 13-21 UTC every 5 min | Autonomous VCG scan |
 | `radon-portfolio-sync.timer` | Mon-Fri 04:00-19:59 ET every 60s | Autonomous portfolio sync. Window matches `fill_monitor`'s `session_window=equity_ext` (04:00-20:00 ET) so outsideRth fills reach the positions table instead of waiting for the next cash open; `run_portfolio_refresh.sh` re-checks `is_equity_ext_session_et()` and exits 0 on holidays and outside the session. |
-| `radon-cta-sync.timer` | Mon-Fri 18:15 / 19:00 / 21:30 UTC | MenthorQ CTA refresh. Vision cascade: anthropic -> grok -> cursor -> codex -> gemini -> nvidia -> cerebras |
+| `radon-cta-sync.timer` | Mon-Fri 18:15 / 19:00 / 21:30 UTC | MenthorQ CTA refresh. Vision cascade: anthropic -> grok -> cursor -> codex -> antigravity -> nvidia -> cerebras |
 | `radon-bpi.timer` | Mon-Fri 21:30 / 23:30 UTC; Tue-Sat 11:00 UTC | BPI after the close, same-evening Yahoo catch-up, morning catch-up |
 | `radon-ma-ratio.timer` | daily 22:45 UTC | SPX pct above 50d MA over pct above 200d MA (after the close; 5 min behind divyield). Spec: [`indicators/ma-ratio.md`](indicators/ma-ratio.md) |
 | `radon-rsi-oversold.timer` | daily 23:05 UTC | SPX pct of members with Wilder RSI(14) strictly below 30 (after the close; 20 min behind ma-ratio so the shared member-close store is already fresh). Spec: [`indicators/rsi-oversold.md`](indicators/rsi-oversold.md) |
