@@ -8788,7 +8788,9 @@ Review: pending; fake-only verification, full suites and Vitest assigned to CI.
 - [x] T1 depends_on: [] Install toolchain, recover trusted checkpoint and create authorized branch.
 - [x] T2 depends_on: [T1] Audit delta and codemap importers; run standing sweeps and re-triage inherited candidates.
 - [x] T3 depends_on: [T2] Repair verified findings serially with repeated red and focused green evidence.
-- [ ] T4 depends_on: [T3] Run permanent drills, validate, publish substantive draft and await exact-head CI.
-- [ ] T5 depends_on: [T4] Post one durable rolling comment and complete review.
+- [x] T4 depends_on: [T3] Run permanent drills, validate, publish substantive draft and await exact-head CI.
+- [x] T5 depends_on: [T4] Post one durable rolling comment and complete review.
 
 Review: delta and direct importers audited; four new and five inherited repairs have red/green evidence. R-303 is operator-only after GitHub rejected workflow publication. Permanent drills 95 passed. No live systems, credentials, main push, merge, codemap changes or test-ledger edits. Publication/CI and the one durable issue comment remain tracked by T4/T5; final receipts belong on issue #81.
+
+Delivery review: draft https://github.com/joemccann/radon/pull/866; source head `22e88dfc454d7f2246493948af46d43fe310887b` completed all 24 required contexts, 32 passing checks total and seven non-applicable skips. Exactly one durable comment posted: https://github.com/joemccann/radon/issues/81#issuecomment-5947930686. Nine repairs resolved; 20 historical candidates retain acceptance. R-303 workflow publication and Pushover delivery remain operator-only; notification credentials were absent on both environment-only checks. No merge or live operation occurred. This receipt changes only the checklist; its own exact-head CI is watched before ending the session.
