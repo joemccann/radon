@@ -1362,3 +1362,18 @@ class TestGrokBinaryRecoveryDocumentation:
         upgrade = _section(cases, "grok-upgrade-update-rejects-no-auto-update")
         assert "LKG is still absent" not in upgrade
         assert "timer installs\n  `1.0.44`" not in upgrade
+
+
+class TestOperatorHoldDesignBoundary:
+    """DOC-152: proposed release extensions are not deployed safety gates."""
+
+    def test_proposal_defers_operator_actions_to_current_runbook(self):
+        design = (_ROOT / "docs/ibkr-session-release.md").read_text()
+        preface = design.split("## 1.", 1)[0]
+        assert "[current operator procedure](ib-gateway-recovery.md#runbook-flatten-from-ibkr-mobile-while-the-app-is-down)" in preface
+        assert "historical proposal, not deployed guarantees" in preface
+        assert "does not set a trading halt" in preface
+        assert "does not stop local Gateways" in preface
+        for flag in ("--full", "--with-trading", "--force-lease"):
+            assert flag in preface
+        assert "Do not execute the proposed procedures below" in preface
