@@ -58,6 +58,12 @@
       "note": "Host control socket for the /admin Service controls: transport, allowlist, self-protection, audit, rollout."
     },
     {
+      "id": "network-trust",
+      "globs": ["cloud/tailscale/**", "cloud/ibc-overrides/**"],
+      "owners": ["docs/operations.md"],
+      "note": "Ops Plane step 2 network trust: tailnet policy, host firewalls, Hetzner Cloud Firewalls. All operator-applied; the runbook is the only place the apply order lives."
+    },
+    {
       "id": "api-trust-boundary",
       "globs": ["scripts/api/auth.py"],
       "owners": ["scripts/api/CLAUDE.md", "docs/spof-host-split.md"],
