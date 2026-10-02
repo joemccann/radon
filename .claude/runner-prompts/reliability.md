@@ -84,6 +84,7 @@ This machine is slow and shared with other scheduled loops: a full pytest run th
    - Title: `Reliability <date>: <plain-language issue>`.
    - Body: exactly three sections, **Issue discovered**, **What was done to fix it** and **Next**, with one `- **Component**: what happened.` bullet per finding. What was done to fix it also says what ran locally (focused suites and drills) and what was left to CI (full pytest, `cloud/tests`, Vitest and its drill).
    - Next holds only operator-only or blocked actions. When `cloud/services/*` changed, it names the root `bootstrap-control-plane.sh` install-copy the operator runs before merge. If there are none, it says `Fixed with green deployment`.
+   - The runner sends every Pushover notification, including `radon PR green`. Pushover credentials are absent from your environment by design: do not send one, and do not list it under Next.
    - Audit tables, SHA ranges, finding inventories and gate counts stay on the rolling issue, not in the PR. To change the body later use `gh api -X PATCH repos/{owner}/{repo}/pulls/<n> -F body=@<file>` (this repo's `gh pr edit --body-file` aborts).
 4. **Watch CI:** `gh pr checks <url> --watch --interval 30`.
    - On a failure, read the failing job with `gh run view <run-id> --log-failed`; it often prints nothing on this repo, so then fetch `gh api repos/joemccann/radon/actions/jobs/<job-id>/logs`. Fix the root cause on the branch (failing test first when the fix is in source), commit, push, and watch again.

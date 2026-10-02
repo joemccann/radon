@@ -668,6 +668,10 @@ permission.
 
 ## Private reporting and notifications
 
+The runner sends every Pushover notification, including `radon PR green`.
+Pushover credentials are absent from your environment by design: do not send
+one, and do not list it under Next.
+
 The public repository receives no audit ledger. Do not run `gh issue
 comment`, `gh issue create`, or `gh issue edit`. The runner posts the only
 public GitHub issue comment, already sanitized, on the rolling issue

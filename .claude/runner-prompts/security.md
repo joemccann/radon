@@ -894,6 +894,10 @@ permission.
 
 ## Private reporting and notifications
 
+The runner sends every Pushover notification, including `radon PR green`.
+Pushover credentials are absent from your environment by design: do not send
+one, and do not list it under Next.
+
 The private run record contains: run ID, immutable SHAs, range, trigger, mode,
 duration, completion state; exact pinned tool/plugin/model versions and
 sanitized exit status; coverage dimensions and explicitly skipped/blocked
