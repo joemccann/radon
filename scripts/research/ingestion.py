@@ -44,15 +44,24 @@ class GuardedClient:
     def __init__(self, client, backoff):
         self.client, self.backoff = client, backoff
 
-    def list_page(self, *args, **kwargs):
+    def _guarded(self, method, *args, **kwargs):
         remaining = self.backoff.remaining()
         if remaining:
             raise DropboxError('Provider backoff active', status=429, retry_after=remaining)
         try:
-            return self.client.list_page(*args, **kwargs)
+            return getattr(self.client, method)(*args, **kwargs)
         except Exception as error:
             self.backoff.record(error)
             raise
+
+    def list_page(self, *args, **kwargs):
+        return self._guarded('list_page', *args, **kwargs)
+
+    def __getattr__(self, name):
+        # Month listing is optional on the wrapped client; discovery probes for it.
+        if name == 'folder_names' and hasattr(self.client, name):
+            return lambda *args, **kwargs: self._guarded(name, *args, **kwargs)
+        raise AttributeError(name)
 
 
 def extract_pdf(pdf, output):
