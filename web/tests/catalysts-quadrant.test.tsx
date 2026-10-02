@@ -10,7 +10,7 @@
  *  - fossil snapshots (past-only rows) render the empty state
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
+import { act, render, screen, cleanup, fireEvent, within } from "@testing-library/react";
 
 import CatalystsQuadrant from "@/components/dashboard/CatalystsQuadrant";
 import type { CatalystData, CatalystRow } from "@/lib/useCatalysts";
@@ -128,6 +128,25 @@ describe("CatalystsQuadrant", () => {
 
     fireEvent.click(within(section).getByRole("button", { name: /SHOW LESS/ }));
     expect(section.querySelectorAll(".catalyst-group__row")).toHaveLength(6);
+  });
+
+  it("marks the expanded list is-scrolling only while it scrolls, so the scrollbar can auto-hide (2026-09-29)", () => {
+    freeze("2026-08-04T14:00:00Z");
+    payload = snapshot(
+      Array.from({ length: 12 }, (_, i) =>
+        row({ title: `Print ${i}`, date: "2026-08-05", days_until: 1 }),
+      ),
+    );
+    render(<CatalystsQuadrant positionTickers={new Set()} />);
+    const section = sectionFor("ECONOMIC DATA");
+    fireEvent.click(within(section).getByRole("button", { name: /SHOW ALL 12/ }));
+    const list = section.querySelector(".catalyst-group__rows--scroll")!;
+
+    expect(list.classList.contains("is-scrolling")).toBe(false);
+    fireEvent.scroll(list);
+    expect(list.classList.contains("is-scrolling")).toBe(true);
+    act(() => { vi.advanceTimersByTime(2_000); });
+    expect(list.classList.contains("is-scrolling")).toBe(false);
   });
 
   it("flags held tickers and leads its category with them", () => {

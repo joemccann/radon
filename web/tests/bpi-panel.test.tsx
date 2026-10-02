@@ -97,6 +97,17 @@ describe("BpiPanel", () => {
     expect(screen.getByTestId("bpi-index-chip-SPX").getAttribute("aria-pressed")).toBe("false");
   });
 
+  it("seats the desktop index switcher in the section header, not flush against the card edge (2026-09-29)", () => {
+    // The NDX/SPX/RUT chips rendered directly in the card body with no inset,
+    // touching the left border and the header hairline. They belong with the
+    // title, in the header's actions slot.
+    render(<BpiPanel />);
+
+    const nav = screen.getByTestId("bpi-index-chips");
+    expect(nav.closest(".section-header-actions")).toBeTruthy();
+    expect(nav.closest(".section-header")).toBeTruthy();
+  });
+
   it("renders the readout row: BPI to 1 decimal, members bullish/total, as-of session", () => {
     render(<BpiPanel />);
 

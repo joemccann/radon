@@ -28,6 +28,7 @@ from grok_page_responder import (
     run_cycle,
     sync_remote_clone,
 )
+import grok_runtime
 from watchdog import units as units_mod
 from watchdog.check import CheckOutcome
 from watchdog.pages import (
@@ -124,6 +125,15 @@ class TestEnqueueFromDispatch:
         assert excerpt.endswith("</untrusted-excerpt>")
         assert len(excerpt) < 500
         assert "IGNORE PREVIOUS" not in excerpt or "..." in excerpt
+
+    def test_excerpt_redacts_credential_shapes(self):
+        # Page text reaches a commit body and a public PR; a service error
+        # that echoes a credential must not carry it there.
+        token = "gh" + "p_" + "Q" * 36
+        excerpt = sanitize_excerpt(f"push failed: token={token} for origin")
+        assert token not in excerpt
+        assert "push failed" in excerpt
+        assert excerpt.startswith("<untrusted-excerpt>")
 
     def test_enqueue_failure_does_not_break_dispatch(self, db_conn, monkeypatch):
         from watchdog import notify
@@ -228,13 +238,120 @@ class TestResponder:
     def test_builds_grok_command_from_prompt_file(self, tmp_path):
         prompt = tmp_path / "page.prompt.txt"
         prompt.write_text("diagnose")
-        cmd = build_grok_command(prompt, tmp_path)
+        cmd = build_grok_command(prompt, tmp_path, model="grok-4.7")
         assert "--prompt-file" in cmd
         assert str(prompt) in cmd
         assert "--always-approve" in cmd
         assert "--output-format" in cmd
         assert "json" in cmd
+        assert cmd[cmd.index("-m") + 1] == "grok-4.7"
+        assert cmd[cmd.index("--reasoning-effort") + 1] == "high"
+        assert "--no-auto-update" in cmd
         assert "-p" not in cmd
+
+    def test_build_grok_command_refuses_implicit_model(self, tmp_path):
+        prompt = tmp_path / "page.prompt.txt"
+        prompt.write_text("diagnose")
+        with pytest.raises(grok_runtime.GrokRuntimeError, match="implicit"):
+            build_grok_command(prompt, tmp_path)
+
+    def test_refused_pin_does_not_launch_grok(self, db_conn, tmp_path, monkeypatch):
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        enqueue_delivered_page(
+            service="vcg-scan",
+            severity="P1",
+            kind="stale",
+            message="silent",
+            now=NOW,
+        )
+        called = []
+
+        def runner(cmd, **_kwargs):
+            called.append(cmd)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        runtime = grok_runtime.ResolvedRuntime(
+            model="grok-4.7",
+            reasoning_effort="high",
+            cli_version="1.0.3",
+            binary_path="grok",
+            used_fallback=True,
+            warning="no default model; refusing implicit CLI default",
+            refused=True,
+            source="none",
+        )
+        rc = run_cycle(tmp_path, now=NOW, grok_runner=runner, pin_runtime=runtime)
+        assert rc == 0
+        assert called == []
+        status = db_conn.execute("SELECT status FROM watchdog_pages").fetchone()[0]
+        assert status == "pending"
+
+    def test_incident_error_retries_last_known_good(self, db_conn, tmp_path, monkeypatch):
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        lkg_path = tmp_path / "grok_lkg.json"
+        lkg_path.write_text(json.dumps({
+            "cli_version": "1.0.3",
+            "binary_path": str(tmp_path / "lkg-grok"),
+            "model": "grok-4.6",
+            "reasoning_effort": "high",
+            "promoted_at": "2026-09-01T00:00:00Z",
+            "smoke_result": "stand_down: previous",
+        }), encoding="utf-8")
+        monkeypatch.setenv("RADON_GROK_LKG_PATH", str(lkg_path))
+        monkeypatch.setenv("RADON_GROK_RUNTIME_LOCK", str(tmp_path / "runtime.lock"))
+        # The fake binary is never exec'd (runner is stubbed); the trust
+        # check on a real path is test_grok_page_missing_binary.py.
+        monkeypatch.setattr(
+            grok_runtime, "lkg_binary_problem", lambda *_a, **_k: None
+        )
+        enqueue_delivered_page(
+            service="vcg-scan",
+            severity="P1",
+            kind="stale",
+            message="silent",
+            now=NOW,
+        )
+        calls: list[list[str]] = []
+
+        def runner(cmd, **_kwargs):
+            calls.append(list(cmd))
+            if "-m" in cmd and cmd[cmd.index("-m") + 1] == "grok-4.7":
+                return SimpleNamespace(
+                    returncode=1, stdout="", stderr="model grok-4.7 is unavailable"
+                )
+            return SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps({
+                    "text": "RESULT: stand_down | recovered on last-known-good"
+                }),
+                stderr="",
+            )
+
+        runtime = grok_runtime.ResolvedRuntime(
+            model="grok-4.7",
+            reasoning_effort="high",
+            cli_version="1.0.41",
+            binary_path="grok",
+            used_fallback=False,
+            warning=None,
+            refused=False,
+            source="models",
+        )
+        with patch("grok_page_responder._send_followup"), patch(
+            "grok_page_responder._send_pin_warning"
+        ) as warn:
+            rc = run_cycle(
+                tmp_path, now=NOW, grok_runner=runner, pin_runtime=runtime
+            )
+        assert rc == 0
+        assert len(calls) == 2
+        assert calls[0][calls[0].index("-m") + 1] == "grok-4.7"
+        assert calls[1][calls[1].index("-m") + 1] == "grok-4.6"
+        assert "--no-auto-update" in calls[0] and "--no-auto-update" in calls[1]
+        warn.assert_called_once()
+        result = db_conn.execute("SELECT result FROM watchdog_pages").fetchone()[0]
+        assert "stand_down" in result
+        assert "Ran grok-4.6 on CLI 1.0.3." in result
 
     def test_followup_push_is_not_emergency(self):
         payload = build_followup_payload(
@@ -261,6 +378,10 @@ class TestResponder:
         assert "silent for 23m" in prompt
         assert "stand_down" in prompt
         assert "incident-response" in prompt
+        assert "## What broke" in prompt
+        assert "## Root cause" in prompt
+        assert "## Still open" in prompt
+        assert "grok incident fix on" in prompt
 
     def test_parse_result_line_from_json(self):
         raw = json.dumps({
@@ -291,14 +412,27 @@ class TestResponder:
                 stderr="",
             )
 
+        runtime = grok_runtime.ResolvedRuntime(
+            model="grok-4.7",
+            reasoning_effort="high",
+            cli_version="1.0.41",
+            binary_path="grok",
+            used_fallback=False,
+            warning=None,
+            refused=False,
+            source="models",
+        )
         with patch("grok_page_responder._send_followup") as followup:
-            rc = run_cycle(tmp_path, now=NOW, grok_runner=runner)
+            rc = run_cycle(
+                tmp_path, now=NOW, grok_runner=runner, pin_runtime=runtime
+            )
         assert rc == 0
         row = db_conn.execute(
             "SELECT status, result FROM watchdog_pages"
         ).fetchone()
         assert row[0] == "done"
         assert "stand_down" in row[1]
+        assert "Ran grok-4.7 on CLI 1.0.41." in row[1]
         followup.assert_called_once()
 
     def test_failed_run_releases_then_skips(self, db_conn, tmp_path, monkeypatch):
@@ -316,6 +450,7 @@ class TestResponder:
         def boom(*_a, **_k):
             return SimpleNamespace(returncode=1, stdout="", stderr="auth failed")
 
+        monkeypatch.setenv("RADON_GROK_LKG_PATH", str(tmp_path / "absent.json"))
         run_cycle(tmp_path, now=NOW, grok_runner=boom)
         assert db_conn.execute(
             "SELECT status, attempts FROM watchdog_pages WHERE page_id=?", (pid,)
@@ -345,7 +480,55 @@ class TestResponder:
         with patch("grok_page_responder.subprocess.run") as run:
             run.return_value = SimpleNamespace(returncode=0, stdout="")
             assert sync_remote_clone(tmp_path) == "synced"
-            assert run.call_count == 3
+            assert run.call_count == 4
+
+    def test_sync_returns_a_parked_fix_branch_to_main(self, tmp_path, monkeypatch):
+        # A run that leaves the clone on its fix/* branch must not pin every
+        # later cycle to stale code behind a silent "ff-failed".
+        def git(cwd, *args):
+            out = subprocess.run(["git", *args], cwd=cwd, capture_output=True,
+                                 text=True, check=True)
+            return out.stdout.strip()
+
+        public, seed, clone = (tmp_path / n for n in ("public.git", "seed", "clone"))
+        git(tmp_path, "init", "-q", "--bare", "-b", "main", str(public))
+        git(tmp_path, "clone", "-q", str(public), str(seed))
+        git(seed, "config", "user.email", "t@example.com")
+        git(seed, "config", "user.name", "t")
+        (seed / "a.txt").write_text("1\n")
+        git(seed, "add", "a.txt")
+        git(seed, "commit", "-qm", "base")
+        git(seed, "push", "-q", "--no-verify", "origin", "HEAD:main")
+        git(tmp_path, "clone", "-q", str(public), str(clone))
+        git(clone, "config", "user.email", "t@example.com")
+        git(clone, "config", "user.name", "t")
+        git(clone, "checkout", "-qb", "fix/parked")
+        (clone / "b.txt").write_text("fix\n")
+        git(clone, "add", "b.txt")
+        git(clone, "commit", "-qm", "fix: local")
+        (seed / "a.txt").write_text("2\n")
+        git(seed, "commit", "-qam", "main moves on")
+        git(seed, "push", "-q", "--no-verify", "origin", "HEAD:main")
+
+        monkeypatch.setenv("GROK_PAGE_SYNC_REMOTE", "1")
+        monkeypatch.setattr("grok_page_responder.PUBLIC_REPO_URL", str(public))
+        assert sync_remote_clone(clone) == "synced"
+        assert git(clone, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+        assert git(clone, "rev-parse", "HEAD") == git(seed, "rev-parse", "HEAD")
+        assert git(clone, "log", "-1", "--format=%s", "fix/parked") == "fix: local"
+
+    def test_sync_fetches_over_public_https(self, tmp_path, monkeypatch):
+        # The unit hides ~/.ssh from the agent; main is public, so the sync
+        # needs no credential and must not depend on the clone's origin URL.
+        monkeypatch.setenv("GROK_PAGE_SYNC_REMOTE", "1")
+        with patch("grok_page_responder.subprocess.run") as run:
+            run.return_value = SimpleNamespace(returncode=0, stdout="")
+            assert sync_remote_clone(tmp_path) == "synced"
+        fetch = run.call_args_list[1].args[0]
+        assert fetch == [
+            "git", "fetch", "https://github.com/joemccann/radon.git",
+            "+refs/heads/main:refs/remotes/origin/main",
+        ]
 
     def test_lock_skips_overlapping_cycle(self, db_conn, tmp_path, monkeypatch):
         # REL-030: the responder now fails CLOSED, so an enabled cycle is an
@@ -545,6 +728,24 @@ class TestSignalKilledOneshotRerun:
                 tmp_path, now=NOW, grok_runner=grok, systemctl_runner=systemctl
             )
         return rc, followup
+
+    def test_rel108_migration_bearing_unit_never_auto_reruns(self, tmp_path, monkeypatch):
+        """R-302: data-refresh permission must not grant schema migration."""
+        import grok_page_responder as responder
+
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        monkeypatch.setattr(responder, "DEPLOY_TRANSITION_JOURNAL", tmp_path / "no-transition")
+        page = {"page_id": "synthetic", "service": "radon-demo-mirror.service", "kind": "unit"}
+        log = []
+        result = attempt_oneshot_rerun(
+            page, now=NOW, systemctl_runner=_fake_systemctl(next_elapse=self.FARAWAY, log=log),
+        )
+        assert result is None
+        assert not any(args[0] in {"start", "reset-failed", "restart"} for args in log)
+        root = Path(__file__).resolve().parents[3]
+        assert "migrate.py --demo" in (root / "cloud/services/radon-demo-mirror.service").read_text()
+        rules = (root / "cloud/config/polkit/50-radon-services.rules").read_text()
+        assert '"radon-demo-mirror.service": true' not in rules
 
     def test_faraway_timer_reruns_instead_of_standing_down(
         self, db_conn, tmp_path, monkeypatch

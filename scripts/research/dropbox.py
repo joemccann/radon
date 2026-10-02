@@ -190,6 +190,27 @@ class DropboxClient:
             entries.append(item)
         return {**page, 'entries': entries}
 
+    def folder_names(self, relative):
+        """Lowercase names of the direct child folders, so discovery can see how a day folder is spelled."""
+        self.ready()
+        path = self.path(relative)
+        page = self._rpc('files/list_folder', {'path': path, 'recursive': False, 'limit': 2000})
+        names = []
+        for _ in range(100):
+            if not isinstance(page.get('entries'), list) or not isinstance(page.get('has_more'), bool):
+                raise DropboxError('Invalid listing response')
+            for item in page['entries']:
+                self.validate(item)
+                parent, _, name = item['path_lower'].rpartition('/')
+                if parent != path.lower():
+                    raise DropboxError('Listing escaped requested folder')
+                if item['.tag'] == 'folder':
+                    names.append(name)
+            if not page['has_more']:
+                return names
+            page = self._rpc('files/list_folder/continue', {'cursor': page.get('cursor')})
+        raise DropboxError('Dropbox pagination limit exceeded')
+
     def download(self, entry, output_dir):
         self.ready()
         self.validate(entry)

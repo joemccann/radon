@@ -6,7 +6,13 @@ contains ``docs-skip: <reason>``).
 """
 from __future__ import annotations
 
+import gzip
 import json
+import shlex
+import shutil
+import sqlite3
+import sys
+import types
 import os
 import re
 import subprocess
@@ -431,6 +437,74 @@ class TestDbBackupRunbook:
         assert "present in B2" in text
 
 
+class TestRecoveryInstructions:
+    def test_scratch_restore_is_repeatable_and_rejects_bad_input(self, tmp_path):
+        if not shutil.which("sqlite3"):
+            pytest.skip("sqlite3 CLI is required for the documented scratch drill")
+        text = (_ROOT / "docs/cloud-services.md").read_text()
+        section = text.split("### Restore runbook", 1)[1]
+        command = re.search(r"```bash\n(.*?)```", section, re.S).group(1)
+        backup = tmp_path / "data/db_backups/radon-fixture.sql.gz"
+        backup.parent.mkdir(parents=True)
+        with gzip.open(backup, "wt") as out:
+            out.write("CREATE TABLE journal(id); INSERT INTO journal VALUES(1); "
+                      "CREATE TABLE service_health(id); INSERT INTO service_health VALUES(1);")
+        command = command.replace("<stamp>", "fixture")
+        # Reject the old shared /tmp target before executing any doc shell.
+        assert "mktemp -d" in command, "scratch restore must allocate a private fresh directory"
+        env = {"PATH": os.defpath, "TMPDIR": str(tmp_path), "HOME": str(tmp_path)}
+        for _ in range(2):
+            result = subprocess.run(["bash", "-c", command], cwd=tmp_path,
+                                    env=env, capture_output=True, text=True)
+            assert result.returncode == 0, result.stderr
+        databases = sorted(tmp_path.glob("radon-restore.*/restore.db"))
+        assert len(databases) == 2
+        for database in databases:
+            with sqlite3.connect(database) as db:
+                assert db.execute("SELECT COUNT(*) FROM journal").fetchone() == (1,)
+        backup.write_bytes(b"not a gzip dump")
+        result = subprocess.run(["bash", "-c", command], cwd=tmp_path,
+                                env=env, capture_output=True, text=True)
+        assert result.returncode != 0, "invalid backup must stop the restore drill"
+        assert "Scratch restore:" not in result.stdout
+        with gzip.open(backup, "wt") as out:
+            out.write("THIS IS NOT SQL;")
+        result = subprocess.run(["bash", "-c", command], cwd=tmp_path,
+                                env=env, capture_output=True, text=True)
+        assert result.returncode != 0, "SQL errors must stop the restore drill"
+        assert "Scratch restore:" not in result.stdout
+
+    def test_contributing_uses_reviewed_branches(self):
+        text = (_ROOT / "CONTRIBUTING.md").read_text()
+        assert "All work commits to `main`" not in text
+        assert "pull request" in text.lower()
+        assert "Never push directly to `main`" in text
+
+    def test_knowledge_documented_test_paths_exist(self):
+        text = (_ROOT / "docs/knowledge-embeddings.md").read_text()
+        paths = set(re.findall(r"scripts/tests/test_[a-z0-9_]+\.py", text))
+        assert paths
+        assert all((_ROOT / path).is_file() for path in paths), paths
+
+    def test_knowledge_coverage_command_uses_real_imports(self, monkeypatch, capsys):
+        text = (_ROOT / "docs/knowledge-embeddings.md").read_text()
+        line = next(line for line in text.splitlines() if "**Verify backfill complete:**" in line)
+        command = re.search(r"`([^`]+)`", line).group(1)
+        args = shlex.split(command)
+        program = args[args.index("-c") + 1]
+        # The only substituted module is the external DB client. Execute the
+        # documented imports and real coverage query against an offline DB.
+        with sqlite3.connect(":memory:") as db:
+            db.execute("CREATE TABLE knowledge(embedding_v2 BLOB)")
+            client = types.ModuleType("scripts.db.client")
+            client.get_db = lambda: db
+            monkeypatch.setitem(sys.modules, "scripts.db.client", client)
+            from scripts.knowledge import embed
+            monkeypatch.setattr(embed, "_coverage_cache", {"at": None, "ready": None})
+            exec(program, {})
+            assert capsys.readouterr().out.strip() == "True"
+
+
 class TestOwnership:
     def test_matcher_requires_an_owner_when_a_glob_hits(self):
         rules = [
@@ -594,7 +668,7 @@ class TestPrivateNetTrustScope:
 # ── DOC-021: TEST_LOG.md is an append-only ledger ─────────────────
 #
 # 4584e84a (#213) replaced the 543-line ledger with its one new row: header
-# and 176 prior T-rows vanished from HEAD while testing-weekend/SKILL.md kept
+# and 176 prior T-rows vanished from HEAD while the testing loop's manual kept
 # declaring the file append-only and reading it at pre-flight. Rows may only
 # be added relative to the base the change is reviewed against.
 
@@ -632,7 +706,7 @@ class TestTestLogLedgerIsAppendOnly:
         was, is_now = len(_LEDGER_ROW.findall(before)), len(_LEDGER_ROW.findall(now))
         assert is_now >= was, (
             f"TEST_LOG.md has {is_now} T-rows but {base} has {was}: the ledger "
-            "is append-only (testing-weekend/SKILL.md rail 4); restore the rows"
+            "is append-only (.claude/runner-prompts/testing.md); restore the rows"
         )
 
 
@@ -672,26 +746,16 @@ class TestTestingLedgersHaveNoConflictMarkers:
 
 
 # DOC-032 / DOC-033 (2026-09-01): docs/operations.md is the one place that
-# indexes all five nightly loops. Its "all fire 00:00 local" sentence had been
-# wrong since the loops were staggered, and its rails named only the shared
-# runner marker while every wrapper also requires a per-loop one. Both facts
-# are mechanically derivable, so pin them instead of re-reading the prose.
+# indexes every nightly loop. Its fire times had drifted from the schedules, and
+# its rails once named only a shared runner marker. Both facts are mechanically
+# derivable, so pin them instead of re-reading the prose. Since the runner
+# cutover (2026-09-28) the schedule is each loop env's SCHEDULE_HOUR:MINUTE and
+# the clone rail is the runner clone ~/radon-runner/work/<loop>.
 
-_LOOPS = {
-    "reliability": ("com.radon.reliability-daily.plist", "reliability_weekend.sh"),
-    "testing": ("com.radon.testing-daily.plist", "testing_weekend.sh"),
-    "ci-performance": ("com.radon.ci-performance-daily.plist", "ci_performance_nightly.sh"),
-    "documentation": ("com.radon.documentation-daily.plist", "documentation_nightly.sh"),
-    "security": ("com.radon.security-daily.plist", "security_nightly.sh"),
-}
-
-
-_LOOP_SKILLS = {
-    "reliability": "reliability-weekend",
-    "testing": "testing-weekend",
-    "ci-performance": "ci-performance",
-    "documentation": "documentation-nightly",
-    "security": "security-nightly",
+_LOOP_ENVS = _ROOT / "scripts" / "runner" / "loops"
+_SECURITY_PROMPTS = {
+    "security": _ROOT / ".claude" / "runner-prompts" / "security.md",
+    "security-deepsec": _ROOT / ".claude" / "runner-prompts" / "security-deepsec.md",
 }
 
 
@@ -699,17 +763,22 @@ def _operations_text() -> str:
     return (_ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
 
 
-class TestNightlyLoopIndex:
-    def test_each_loop_row_states_the_plist_fire_time(self):
-        import plistlib
+def _schedule(loop: str) -> str:
+    values = {}
+    for line in (_LOOP_ENVS / f"{loop}.env").read_text(encoding="utf-8").splitlines():
+        if line.startswith(("SCHEDULE_HOUR=", "SCHEDULE_MINUTE=")):
+            key, value = line.split("=", 1)
+            values[key] = int(value)
+    return f"{values['SCHEDULE_HOUR']:02d}:{values['SCHEDULE_MINUTE']:02d}"
 
+
+class TestNightlyLoopIndex:
+    def test_each_loop_row_states_the_scheduled_fire_time(self):
         text = _operations_text()
-        for loop, (plist_name, _) in _LOOPS.items():
-            plist = _ROOT / "config" / plist_name
-            assert plist.is_file(), f"{plist} is missing"
-            with plist.open("rb") as fh:
-                when = plistlib.load(fh)["StartCalendarInterval"]
-            fires = f"{when['Hour']:02d}:{when['Minute']:02d}"
+        loops = sorted(p.stem for p in _LOOP_ENVS.glob("*.env"))
+        assert {"security", "security-deepsec"} <= set(loops)
+        for loop in loops:
+            fires = _schedule(loop)
             row = next(
                 (ln for ln in text.splitlines() if ln.startswith(f"| {loop} |")),
                 None,
@@ -719,46 +788,36 @@ class TestNightlyLoopIndex:
             )
             assert f"| {fires} |" in row, (
                 f"docs/operations.md says {row.strip()} but "
-                f"{plist_name} fires at {fires}"
+                f"scripts/runner/loops/{loop}.env fires at {fires}"
             )
 
-    def test_the_per_loop_runner_marker_rail_is_stated(self):
-        assert ".radon-<loop>-runner" in _operations_text(), (
-            "docs/operations.md must state that a wrapper needs BOTH "
-            ".radon-weekend-runner and its own .radon-<loop>-runner marker; "
-            "every wrapper refuses the clone without the second one"
+    def test_the_runner_clone_rail_is_stated(self):
+        assert "`~/radon-runner/work/<loop>`" in _operations_text(), (
+            "docs/operations.md must state that the security loops refuse a "
+            "phase outside their own runner clone"
         )
 
-    def test_each_wrapper_actually_requires_its_own_marker(self):
-        for loop, (_, wrapper) in _LOOPS.items():
-            text = (_ROOT / "scripts" / wrapper).read_text(encoding="utf-8")
-            assert f".radon-{loop}-runner" in text, (
-                f"scripts/{wrapper} no longer names .radon-{loop}-runner; "
-                "docs/operations.md documents that marker as the rail"
-            )
+    def test_the_pre_run_hook_actually_enforces_the_clone_rail(self):
+        text = (_ROOT / "scripts" / "runner" / "hooks" / "security_pre.sh").read_text(encoding="utf-8")
+        assert '$HOME/radon-runner/work/$LOOP' in text
+        assert "remote.origin.url" in text
 
     def test_deepsec_failure_has_a_safe_operator_path(self):
-        """DOC-109: a failed DeepSec loop is never an in-run repair (it is the
-        sixth loop since 2026-09-18, still operator-bootstrapped)."""
+        """DOC-109: a failed DeepSec loop is never an in-run repair (it is
+        operator-bootstrapped)."""
         text = _operations_text()
         assert "A `failed` DeepSec status is operator-only" in text
         assert "DeepSec itself stays operator-bootstrapped (rail 8)" in text
-        assert "`launchctl list | grep radon`" in text
+        assert "`sudo launchctl print system/com.radon.runner.security-deepsec`" in text
         assert "Do not bootstrap or restart DeepSec from a nightly run." in text
 
-    # DOC-084 (2026-09-04): three SKILL.md rails named only
-    # `.radon-weekend-runner`, so an agent reading its own rail believed the
-    # shared marker was the whole gate while its wrapper also required the
-    # per-loop one.
-    @pytest.mark.parametrize("loop,skill", sorted(_LOOP_SKILLS.items()))
-    def test_each_skill_rail_names_its_own_marker(self, loop, skill):
-        text = (_ROOT / ".claude" / "skills" / skill / "SKILL.md").read_text(
-            encoding="utf-8"
-        )
-        assert f".radon-{loop}-runner" in text, (
-            f".claude/skills/{skill}/SKILL.md states the runner-clone rail "
-            f"without .radon-{loop}-runner, but scripts/"
-            f"{_LOOPS[loop][1]} refuses the clone without it"
+    # DOC-084 (2026-09-04): the prompts' clone rail must name the loop's own
+    # runner clone, not a generic one.
+    @pytest.mark.parametrize("loop", sorted(_SECURITY_PROMPTS))
+    def test_each_prompt_rail_names_its_own_clone(self, loop):
+        text = _SECURITY_PROMPTS[loop].read_text(encoding="utf-8")
+        assert f"`~/radon-runner/work/{loop}`" in text, (
+            f"the {loop} prompt states the clone rail without its runner clone"
         )
 
 
@@ -1147,15 +1206,222 @@ class TestNightlyRecoveryOwnerDrift:
         assert "different query" in case
         assert "unparseable" in case
 
-    def test_runner_permissions_link_launcher_without_copied_roots(self):
+    def test_nightly_loops_link_the_runner_not_a_retired_wrapper(self):
         doc = (_ROOT / "docs/operations.md").read_text()
         assert 'writable_roots=["$REPO/.git"' not in doc
-        assert "../scripts/documentation_nightly.sh" in doc
-        assert "Codex sandbox writable roots omit that host gitdir" in doc
-        assert ".gitdirs-agent/<loop>.git" in doc
+        assert "../scripts/security_nightly.sh" not in doc
+        assert "[docs/runner.md](runner.md)" in doc
+        assert "`scripts/runner/hooks/security_pre.sh`" in doc
 
     def test_provisioning_defers_to_owner_without_retired_override(self):
         """DOC-129: setup recovery must not recommend an ignored trust override."""
         doc = (_ROOT / "docs/operations.md").read_text()
         assert "RADON_PROVENANCE_REMOTE_REF" not in doc
         assert "../cloud/CLAUDE.md#privileged-bootstrap" in doc
+
+
+class TestExternalProbeDispatchProcedure:
+    """DOC-142: the mini dispatcher is an operator install, not a one-line aside."""
+
+    def test_install_and_verify_match_the_plist_and_workflow(self):
+        ops = (_ROOT / "docs/operations.md").read_text(encoding="utf-8")
+        health = ops.split("## Health monitoring", 1)[1].split("## Service Health", 1)[0]
+        assert "### External probe dispatch" in health
+        section = health.split("### External probe dispatch", 1)[1]
+        workflow = (
+            _ROOT / ".github/workflows/external-health-probe.yml"
+        ).read_text(encoding="utf-8")
+        cron = 'cron: "1-56/5 * * * *"'
+        assert cron in workflow
+        assert "1-56/5 * * * *" in health
+        assert "*/5" not in health
+        assert "bash scripts/setup_external_probe_dispatch.sh" in section
+        assert "com.radon.external-probe-dispatch.plist" in section
+        assert "__HOME__" in section
+        assert "external-probe-dispatch.log" in section
+        assert "external-probe-dispatch.err" in section
+        assert "gh auth status" in section
+        assert "StartInterval" in section and "300" in section
+        assert "does not cancel an in-flight" in section
+        assert 'cancel-in-progress: false' in workflow
+        assert "launchctl bootout" in section
+        assert "RADON_PROBE_FRESHNESS_TOKEN" in health
+        assert "TURSO_DB_URL" in health and "TURSO_AUTH_TOKEN" in health
+        script = (_ROOT / "scripts/setup_external_probe_dispatch.sh").read_text(
+            encoding="utf-8"
+        )
+        assert 'sed "s|__HOME__|$HOME|g"' in script
+        assert "external-probe-dispatch.{log,err}" in script
+        plist = (
+            _ROOT / "config/com.radon.external-probe-dispatch.plist"
+        ).read_text(encoding="utf-8")
+        assert "<integer>300</integer>" in plist
+        assert "external-probe-dispatch.log" in plist
+        assert "external-probe-dispatch.err" in plist
+        assert "gh" in plist and "external-health-probe.yml" in plist
+
+
+class TestModelLadderByteCapOwner:
+    """DOC-144: vision HTTP responses share the text ladder's byte cap."""
+
+    def test_extract_via_vision_cap_is_owned(self):
+        rules = {r["id"]: r for r in _load_owners()["rules"]}
+        rule = rules["model-ladder"]
+        assert rule["globs"] == ["scripts/clients/model_ladder.py"]
+        assert rule["owners"] == ["docs/dropbox-research.md"]
+        doc = (_ROOT / "docs/dropbox-research.md").read_text(encoding="utf-8")
+        ladder = doc.split("### Model ladder (shared HTTP)", 1)[1].split(
+            "### Verified host placement", 1
+        )[0]
+        assert "extract_via_vision" in ladder
+        assert "2,000,000" in ladder
+        assert "Antigravity" in ladder
+        source = (_ROOT / "scripts/clients/model_ladder.py").read_text(encoding="utf-8")
+        vision = source.split("def extract_via_vision(", 1)[1].split("\ndef ", 1)[0]
+        assert "max_response_bytes: int = 2_000_000" in vision
+        call = source.split("def _call_vision_provider(", 1)[1].split("\ndef ", 1)[0]
+        assert call.count("max_bytes=max_response_bytes") == 6
+        assert "_antigravity_complete" in call
+
+
+class TestShareRecoveryDoc:
+    def test_share_recovery_requires_a_verified_stream_result(self):
+        doc = (_ROOT / "docs/incident-runbook.md").read_text()
+        case = doc.split("## newsfeed-share-missing-subscription-502", 1)[1].split("\n## ", 1)[0]
+        assert "HTTP 200 alone" in case
+        assert "`result`" in case and "`error`" in case
+        assert "operations.md#encrypted-credential-store-profile-credentials-tab" in case
+        for label in ("Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verify", "Rollback", "Escalate"):
+            assert f"**{label}:**" in case
+
+
+class TestNightlyReportingDoc:
+    def test_nightly_reporting_scopes_match_the_runner_prompts(self):
+        ops = (_ROOT / "docs/operations.md").read_text()
+        cycle = next(line for line in ops.splitlines() if "**Cycle shape" in line)
+        assert cycle.startswith("**Cycle shape (security and DeepSec).**")
+        checkpoint = next(line for line in ops.splitlines() if "**No-op checkpoints" in line)
+        listed = re.search(r"runner loops \(([^)]+)\)", checkpoint).group(1)
+        loops = {name.strip() for name in listed.split(",")}
+        prompts = _ROOT / ".claude/runner-prompts"
+        expected = {
+            name for name in ("reliability", "testing", "ci-performance", "documentation")
+            if "audited-through:" in (prompts / f"{name}.md").read_text()
+        }
+        assert loops == expected
+        assert "runner.md#9-smoke-test-bot-shell" in ops
+
+
+class TestResearchCutCommandDoc:
+    @pytest.mark.parametrize("module", ["worker", "harness", "cut_report"])
+    def test_documented_research_commands_resolve_from_repository_root(self, module):
+        doc = (_ROOT / "docs/dropbox-research.md").read_text()
+        commands = re.findall(r"`([^`]*\bpython[\d.]* -m research\." + module + r"\b[^`]*)`", doc)
+        assert commands, f"No documented research.{module} invocation"
+        for command in commands:
+            argv = shlex.split(command)
+            env = {"PATH": os.environ["PATH"]}
+            while "=" in argv[0]:
+                key, value = argv.pop(0).split("=", 1)
+                env[key] = value
+            argv[0] = sys.executable
+            # --help exits at argparse, before private files, auth or network.
+            result = subprocess.run([*argv, "--help"], cwd=_ROOT, env=env, text=True, capture_output=True, timeout=10)
+            assert result.returncode == 0, f"{command}: {result.stderr}"
+            if module == "cut_report":
+                assert "--from-json" in result.stdout
+            for flag in (arg for arg in argv if arg.startswith("--")):
+                assert flag in result.stdout, f"Undocumented parser flag: {flag}"
+
+
+class TestCloudModeDocumentation:
+    def test_cloud_thin_mode_has_one_owner(self):
+        launcher = (_ROOT / "scripts/cloud.sh").read_text()
+        dev = (_ROOT / "scripts/dev").read_text()
+        assert 'export RADON_DEV_PROFILE="cloud-thin"' in launcher
+        thin = dev.split('if [[ "$PROFILE" == "cloud-thin" ]]; then', 1)[1].split("\nfi", 1)[0]
+        assert "exec next dev" in thin
+        owner = (_ROOT / "docs/cloud-services.md").read_text()
+        assert "cloud-thin" in _section(owner, "Mode switch")
+        assert "laptop runs only Next.js" in owner
+        for path in ("README.md", "CLAUDE.md"):
+            text = (_ROOT / path).read_text()
+            assert "docs/cloud-services.md#mode-switch" in text
+            assert "Next.js + newsfeed" not in text
+        assert "not in `setup-vps.sh` yet" not in owner
+
+
+class TestGrokBinaryRecoveryDocumentation:
+    def test_incident_recovery_defers_to_trusted_locked_owner(self):
+        cases = (_ROOT / "docs/incident-runbook.md").read_text()
+        case = _section(cases, "grok-live-binary-relinked-by-pytest")
+        assert "grok-page-responder.md#binary-recovery" in case
+        owner = _section((_ROOT / "docs/grok-page-responder.md").read_text(), "Binary recovery")
+        for required in ("lkg_binary_problem", "exclusive_lock", "stop", "verify", "rollback", "escalate"):
+            assert required in owner.casefold(), required
+        upgrade = _section(cases, "grok-upgrade-update-rejects-no-auto-update")
+        assert "LKG is still absent" not in upgrade
+        assert "timer installs\n  `1.0.44`" not in upgrade
+
+
+class TestOperatorHoldDesignBoundary:
+    """DOC-152: proposed release extensions are not deployed safety gates."""
+
+    def test_proposal_defers_operator_actions_to_current_runbook(self):
+        design = (_ROOT / "docs/ibkr-session-release.md").read_text()
+        preface = design.split("## 1.", 1)[0]
+        assert "[current operator procedure](ib-gateway-recovery.md#runbook-flatten-from-ibkr-mobile-while-the-app-is-down)" in preface
+        assert "historical proposal, not deployed guarantees" in preface
+        assert "does not set a trading halt" in preface
+        assert "does not stop local Gateways" in preface
+        for flag in ("--full", "--with-trading", "--force-lease"):
+            assert flag in preface
+        assert "Do not execute the proposed procedures below" in preface
+
+
+class TestCredentialSetupOwners:
+    """DOC-150/151: setup instructions must select the implemented auth path."""
+
+    def test_probe_overview_defers_credential_setup_to_environment_owner(self):
+        ops = (_ROOT / "docs/operations.md").read_text()
+        health = ops.split("## Health monitoring", 1)[1].split("## Service Health", 1)[0]
+        overview, procedure = health.split("### External probe dispatch", 1)
+        assert "Repo secrets the workflow reads" not in overview
+        assert "Credential placement" in overview
+        workflow = (_ROOT / ".github/workflows/external-health-probe.yml").read_text()
+        environment = re.search(r"^    environment: (\S+)$", workflow, re.M).group(1)
+        assert f"`{environment}` GitHub Environment" in procedure
+        for name in set(re.findall(r"secrets\.([A-Z_]+)", workflow)):
+            assert f"`{name}`" in procedure
+        assert "not in repository secrets" in procedure
+
+    def test_antigravity_setup_uses_the_cli_owner_without_prepaid_exception(self):
+        research = (_ROOT / "docs/dropbox-research.md").read_text()
+        row = next(line for line in research.splitlines() if line.startswith("| antigravity |"))
+        assert "oauth-subscription-auth.md#radon-http-model-ladder-server" in row
+        assert "Antigravity CLI" in row
+        assert "GEMINI_OAUTH_TOKEN" not in row and "GEMINI_API_KEY" not in row
+        owner = _section((_ROOT / "docs/oauth-subscription-auth.md").read_text(), "Radon HTTP model ladder (server)")
+        assert "Gemini" not in owner and "GEMINI_API_KEY" not in owner
+        assert "no Google API key or OAuth-token path at all, under any flag" in owner
+        assert "Weekend bash wrappers" not in owner
+        assert "[nightly runner](runner.md)" in owner
+
+
+class TestRecurringOwnerCoverage:
+    """DOC-143/145/146/148: actual paths must trigger their existing owner."""
+
+    @pytest.mark.parametrize("source,owner", [
+        ("config/com.radon.external-probe-dispatch.plist", "docs/operations.md"),
+        ("scripts/credential_redaction.py", "docs/security-audit-playbook.md"),
+        ("scripts/research/worker.py", "docs/dropbox-research.md"),
+        ("cloud/services/radon-knowledge-eval.service", "docs/knowledge-embeddings.md"),
+    ])
+    def test_recurring_contract_cannot_change_without_owner(self, source, owner):
+        assert (_ROOT / source).is_file()
+        rules = _load_owners()["rules"]
+        matching = [rule for rule in rules if any(_matches(source, glob) for glob in rule["globs"])]
+        assert matching, f"No documentation owner for {source}"
+        assert any(owner in rule["owners"] for rule in matching)
+        assert _violations([source], matching), "Mapped source alone must fail ownership"
+        assert _violations([source, owner], matching) == []

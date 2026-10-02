@@ -33,6 +33,7 @@ vi.mock("@/components/Modal", () => ({
 /** Feed connectivity the four production surfaces read. Mutable so the
  *  disconnected and connected cases exercise the SAME call-site wiring. */
 let feedConnectedState = false;
+let brokerConnectedState = true;
 vi.mock("@/lib/RealtimePricesContext", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/RealtimePricesContext")>();
   return {
@@ -40,12 +41,14 @@ vi.mock("@/lib/RealtimePricesContext", async (importOriginal) => {
     useRealtimePrices: () => ({
       ...actual.useRealtimePrices(),
       connected: feedConnectedState,
+      ibConnected: brokerConnectedState,
     }),
   };
 });
 
 beforeEach(() => {
   feedConnectedState = false;
+  brokerConnectedState = true;
 });
 
 afterEach(() => {
@@ -163,6 +166,18 @@ describe("OrderTab modify gate wired to the live feed (T-462)", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(mutationCalls(calls)).toEqual([]);
     expect(calls.some((c) => c.url === "/api/orders/modify")).toBe(false);
+  });
+
+  it("REL-236 broker loss disarms submit even with an open relay and fresh quote", async () => {
+    feedConnectedState = true;
+    brokerConnectedState = false;
+    const calls = recordFetch();
+    renderOrderTab();
+    const submit = openAndArmModify();
+    expect(submit.disabled).toBe(true);
+    expect(screen.getByText("Live feed disconnected. Submit disabled until quotes resume.")).toBeTruthy();
+    fireEvent.click(submit);
+    expect(mutationCalls(calls)).toEqual([]);
   });
 
   it("CONNECTED: the same armed state submits the exact modify request", async () => {

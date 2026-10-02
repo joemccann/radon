@@ -519,11 +519,14 @@ def test_runtime_code_paths_are_canonical_while_secret_path_remains_stable() -> 
         for path in (CLOUD_ROOT / "services").glob("radon-*.*")
         if path.suffix in {".service", ".timer"}
     }
-    stripped = "radon-grok-page-responder.service"
+    stripped = {
+        "radon-grok-page-responder.service",
+        "radon-grok-upgrade.service",
+    }
     for name, text in unit_texts.items():
         for line in text.splitlines():
             if line.startswith("EnvironmentFile="):
-                if name == stripped:
+                if name in stripped:
                     assert line == (
                         "EnvironmentFile=/home/radon/radon-page-responder.env"
                     ), name
@@ -540,7 +543,7 @@ def test_runtime_code_paths_are_canonical_while_secret_path_remains_stable() -> 
                     assert line == f"EnvironmentFile={CANONICAL_ENV_FILE}", name
             if line.startswith(("WorkingDirectory=", "ExecStart=", "ExecStop=")):
                 assert "/home/radon/radon-cloud" not in line, f"{name}: {line}"
-                if name == stripped:
+                if name in stripped:
                     assert "/home/radon/radon-page-responder" in line, name
 
     gateway = GATEWAY_HELPER.read_text(encoding="utf-8")

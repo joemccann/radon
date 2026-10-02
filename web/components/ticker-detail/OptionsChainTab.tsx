@@ -208,6 +208,7 @@ function StrikeRow({
           </td>
           <td
             className={`chain-cell chain-mid chain-clickable${callTint}`}
+            data-testid={`chain-call-mid-${strike}`}
             onClick={() => onClickCall(strike, "BUY")}
             title="Buy call"
           >
@@ -949,6 +950,7 @@ function OrderBuilder({
             total={riskState.summary.totalCost ?? null}
             totalLabel={riskState.summary.totalLabel ?? "TOTAL"}
             isCredit={netPremiumForPayoff(payoffLegs, isCombo, signedLimitPrice) < 0}
+            withHeldLegs={riskState.summary.withHeldLegs ?? null}
           />
         )}
 
@@ -1624,7 +1626,7 @@ export default function OptionsChainTab({
               <col className="chain-anchor-strike-col" />
               {sideFilter !== "calls" && Array.from({ length: 8 }, (_, index) => <col key={`put-${index}`} />)}
             </colgroup>
-            <thead>
+            <thead data-testid="chain-columns-header">
               <tr>
                 {sideFilter !== "puts" && (
                   <>

@@ -33,11 +33,37 @@ if str(_SCRIPTS_DIR) not in sys.path:
 import grok_fix_pickup as pickup  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _autopush_on(monkeypatch):
+    """Pickup fails closed without it; the off case is tested explicitly."""
+    monkeypatch.setenv("GROK_PAGE_AUTOPUSH", "1")
+
+
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
     proc = subprocess.run(
         ["git", *args], cwd=cwd, capture_output=True, text=True, timeout=60
     )
     return proc
+
+
+def _valid_ir_message(name: str) -> str:
+    return (
+        f"fix: repair {name} timeout\n\n"
+        "## What broke\n"
+        f"The {name} unit failed with Result=exit-code and paged P1. "
+        "Page abcdef0123456789abcdef0123456789 first seen 2026-09-26T17:15:00Z. "
+        "Error excerpt: TimeoutError on the ledger read.\n\n"
+        "## Root cause\n"
+        "A Turso read timeout escaped run_cycle and marked the oneshot failed.\n\n"
+        "## What changed\n"
+        "- app.py: treat the ledger timeout as non-fatal and exit 0.\n\n"
+        "## How it was verified\n"
+        "Focused pytest for the timeout path passed locally.\n\n"
+        "## Risk and rollback\n"
+        "The timeout matcher is broad. Rollback by reverting this commit.\n\n"
+        "## Still open\n"
+        "Whether a duplicate grok run can follow a complete_page timeout.\n"
+    )
 
 
 def _commit(repo: Path, relpath: str, body: str, message: str) -> None:
@@ -76,10 +102,15 @@ def world(tmp_path: Path) -> dict:
     return {"origin": origin, "vps": vps, "mini": mini}
 
 
-def _vps_branch(world: dict, name: str, relpath: str = "app.py") -> None:
+def _vps_branch(
+    world: dict,
+    name: str,
+    relpath: str = "app.py",
+    message: str | None = None,
+) -> None:
     vps = world["vps"]
     assert _git(vps, "checkout", "-q", "-b", name).returncode == 0
-    _commit(vps, relpath, "x = 2\n", f"fix: {name}")
+    _commit(vps, relpath, "x = 2\n", message or _valid_ir_message(name))
 
 
 class _FakeEnsurePr:
@@ -92,6 +123,8 @@ class _FakeEnsurePr:
 
 
 def _run(world: dict, ensure=None, **kwargs):
+    kwargs.setdefault("list_ci_urls", lambda _head: [])
+    kwargs.setdefault("lookup_page", lambda **_kw: None)
     return pickup.pickup_once(
         world["mini"],
         source=str(world["vps"]),
@@ -113,6 +146,20 @@ class TestHappyPath:
         assert "refs/heads/fix/relay-restart" in listed.stdout
         assert len(ensure.calls) == 1
         assert ensure.calls[0]["head"] == "fix/relay-restart"
+        assert ensure.calls[0]["title"].startswith("IR: ")
+        assert "Result=exit-code" in ensure.calls[0]["issue"]
+        body = ensure.calls[0]["body"]
+        for heading in (
+            "What broke",
+            "Root cause",
+            "What changed",
+            "How it was verified",
+            "Risk and rollback",
+            "Still open",
+        ):
+            assert f"## {heading}" in body
+        assert "grok incident fix on" not in body
+        assert ensure.calls[0]["update_existing"] is True
 
     def test_second_run_reconciles_the_pr_without_another_push(self, world):
         _vps_branch(world, "fix/relay-restart")
@@ -124,6 +171,30 @@ class TestHappyPath:
         assert [r["action"] for r in results] == ["picked_up"]
         assert len(ensure.calls) == 1
         assert results[0]["url"] == "https://github.com/x/y/pull/1"
+
+    def test_enriches_body_from_page_row_and_ci_urls(self, world):
+        _vps_branch(world, "fix/relay-restart")
+        ensure = _FakeEnsurePr()
+        page = {
+            "page_id": "abcdef0123456789abcdef0123456789",
+            "severity": "P1",
+            "paged_at": "2026-09-26T17:15:04Z",
+            "result": "code_fix: ledger timeout no longer fails the oneshot",
+        }
+        results = _run(
+            world,
+            ensure=ensure,
+            lookup_page=lambda **_kw: page,
+            list_ci_urls=lambda _head: [
+                "https://github.com/joemccann/radon/actions/runs/36361801938"
+            ],
+        )
+        assert results[0]["action"] == "picked_up"
+        body = ensure.calls[0]["body"]
+        assert "abcdef0123456789abcdef0123456789" in body
+        assert "36361801938" in body
+        assert "P1" in body
+        assert ensure.calls[0]["incident_id"] == page["page_id"]
 
 
 class TestRefusals:
@@ -190,6 +261,60 @@ class TestNeverMerges:
             assert not pickup.is_pickup_branch(bad), bad
         assert pickup.is_pickup_branch("fix/relay-restart")
         assert pickup.is_pickup_branch("fix/leap_reports.502")
+
+
+class TestDescriptionGate:
+    def test_placeholder_body_is_refused_without_a_pr(self, world):
+        _vps_branch(
+            world,
+            "fix/x",
+            message="grok incident fix on fix/x",
+        )
+        ensure = _FakeEnsurePr()
+        alerts: list[tuple[str, str]] = []
+        results = _run(
+            world,
+            ensure=ensure,
+            alerter=lambda branch, reason: alerts.append((branch, reason)),
+        )
+        assert [r["action"] for r in results] == ["refused"]
+        assert "IR description" in results[0]["reason"]
+        assert ensure.calls == []
+        listed = _git(world["origin"], "for-each-ref", "--format=%(refname)")
+        assert "fix/x" not in listed.stdout
+        assert alerts and alerts[0][0] == "fix/x"
+
+    def test_empty_commit_body_is_refused(self, world):
+        _vps_branch(world, "fix/empty", message="fix: empty")
+        ensure = _FakeEnsurePr()
+        results = _run(world, ensure=ensure)
+        assert results[0]["action"] == "refused"
+        assert ensure.calls == []
+
+    def test_current_bad_body_is_rejected(self, world):
+        _vps_branch(
+            world,
+            "fix/grok-page-ledger-timeout",
+            message="grok incident fix on fix/grok-page-ledger-timeout",
+        )
+        ensure = _FakeEnsurePr()
+        results = _run(world, ensure=ensure)
+        assert results[0]["action"] == "refused"
+        assert "placeholder" in results[0]["reason"].lower() or "missing" in results[0]["reason"].lower()
+        assert ensure.calls == []
+
+
+def test_main_exits_nonzero_when_a_description_is_invalid(world, monkeypatch):
+    monkeypatch.setattr(
+        pickup,
+        "pickup_once",
+        lambda *_a, **_k: [{
+            "branch": "fix/x",
+            "action": "refused",
+            "reason": "IR description: missing sections: What broke",
+        }],
+    )
+    assert pickup.main(["--repo", str(world["mini"]), "--source", str(world["vps"])]) == 1
 
 
 def test_pr_failure_after_push_is_retried_without_new_commit(world):
@@ -445,3 +570,180 @@ class TestPickupPlistSelfRefresh:
         tip = _git(clone, "rev-parse", "fix/keep-me").stdout
         assert tip.strip()
         assert (clone / "app.py").read_text(encoding="utf-8") == "main\n"
+
+
+class TestPushGate:
+    """2026-09-30: pickup pushed fix/* and opened public PRs while the
+    responder env said GROK_PAGE_AUTOPUSH=0; one diff and its commit
+    messages carried private account and exec ids. Ids are invented."""
+
+    @pytest.mark.parametrize("raw", [None, "0", ""])
+    def test_autopush_off_pushes_nothing_and_opens_no_pr(
+        self, world, monkeypatch, raw
+    ):
+        if raw is None:
+            monkeypatch.delenv("GROK_PAGE_AUTOPUSH", raising=False)
+        else:
+            monkeypatch.setenv("GROK_PAGE_AUTOPUSH", raw)
+        _vps_branch(world, "fix/relay-restart")
+        ensure = _FakeEnsurePr()
+
+        results = _run(world, ensure=ensure)
+
+        assert [r["action"] for r in results] == ["disabled"]
+        assert "GROK_PAGE_AUTOPUSH" in results[0]["reason"]
+        listed = _git(world["origin"], "for-each-ref", "--format=%(refname)")
+        assert "fix/relay-restart" not in listed.stdout
+        assert ensure.calls == []
+
+    def test_cli_exits_zero_when_disabled(self, world, monkeypatch, capsys):
+        monkeypatch.delenv("GROK_PAGE_AUTOPUSH", raising=False)
+        rc = pickup.main(["--repo", str(world["mini"]), "--source", str(world["vps"])])
+        assert rc == 0
+        assert '"action": "disabled"' in capsys.readouterr().out
+
+    @pytest.mark.parametrize(
+        "where, leak",
+        [
+            ("diff", "U" + "1234567"),
+            ("diff", "0000abcd" + ".1234ef56" + ".01.01"),
+            ("message", "98765" + "43210987"),
+            ("message", "DU" + "7654321"),
+            ("diff", "gh" + "p_" + "Z" * 36),
+        ],
+        ids=["account", "ib_exec", "flex_exec", "paper_account", "gh_token"],
+    )
+    def test_private_ids_keep_the_branch_local(self, world, where, leak):
+        vps = world["vps"]
+        assert _git(vps, "checkout", "-q", "-b", "fix/journal-leak").returncode == 0
+        message = _valid_ir_message("fix/journal-leak")
+        content = "x = 2\n"
+        if where == "diff":
+            content += f"ROW = '{leak}'\n"
+        else:
+            message += f"\nJournal row: {leak} filled.\n"
+        _commit(vps, "app.py", content, message)
+        ensure = _FakeEnsurePr()
+        alerts: list[tuple[str, str]] = []
+
+        results = _run(world, ensure=ensure, alerter=lambda b, r: alerts.append((b, r)))
+
+        assert [r["action"] for r in results] == ["refused"]
+        reason = results[0]["reason"]
+        assert reason.startswith("private identifiers found")
+        assert leak not in reason
+        assert alerts and leak not in alerts[0][1]
+        listed = _git(world["origin"], "for-each-ref", "--format=%(refname)")
+        assert "fix/journal-leak" not in listed.stdout
+        assert ensure.calls == []
+
+    def test_clean_tip_cannot_publish_a_private_identifier_in_earlier_history(self, world):
+        vps = world["vps"]
+        _vps_branch(world, "fix/history-leak")
+        leak = "0000abcd" + ".1234ef56" + ".01.01"
+        _commit(vps, "app.py", f"ROW = '{leak}'\n", _valid_ir_message("fix/history-leak"))
+        _commit(vps, "app.py", "x = 3\n", _valid_ir_message("fix/history-leak"))
+        ensure = _FakeEnsurePr()
+        alerts = []
+        results = _run(world, ensure=ensure, alerter=lambda b, r: alerts.append((b, r)))
+        assert [r["action"] for r in results] == ["refused"]
+        assert "ib_exec_id" in results[0]["reason"]
+        assert leak not in str(results) + str(alerts)
+        assert alerts and alerts[0][0] == "fix/history-leak"
+        assert ensure.calls == []
+        assert "fix/history-leak" not in _git(
+            world["origin"], "for-each-ref", "--format=%(refname)"
+        ).stdout
+
+    def test_plist_ships_with_autopush_off(self):
+        plist = plistlib.loads(PLIST.read_bytes())
+        env = plist["EnvironmentVariables"]
+        assert env.get("GROK_PAGE_AUTOPUSH") == "0"
+
+    def test_stale_pickup_code_refuses_to_run(self, world, monkeypatch):
+        """A clone that stopped refreshing ran pre-#773 code with none of
+        these gates. Running from a clone behind origin/main is refused."""
+        monkeypatch.setattr(
+            pickup, "__file__", str(world["mini"] / "scripts" / "grok_fix_pickup.py")
+        )
+        seed = world["origin"].parent / "seed"
+        _commit(seed, "app.py", "x = 3\n", "main moves on")
+        assert _git(seed, "push", "-q", "origin", "main").returncode == 0
+        _vps_branch(world, "fix/relay-restart")
+
+        with pytest.raises(pickup.PickupError, match="older than origin/main"):
+            _run(world)
+
+
+# --- credentials from the weekend .env --------------------------------------
+# launchd gives pickup only HOME, PATH and GROK_PAGE_AUTOPUSH, so refusal
+# alerts (Pushover) and watchdog_pages enrichment (Turso) silently did
+# nothing. Pickup now reads exactly those four keys from the operator's
+# ~/radon-weekend/.env, the same file the plist's launch-failure page reads.
+
+ENV_KEYS = ("PUSHOVER_USER", "PUSHOVER_TOKEN", "TURSO_DB_URL", "TURSO_AUTH_TOKEN")
+
+
+@pytest.fixture
+def clean_env(monkeypatch):
+    for key in (*ENV_KEYS, "IB_FLEX_TOKEN"):
+        monkeypatch.delenv(key, raising=False)
+
+
+def _env_file(path: Path, body: str, mode: int = 0o600) -> Path:
+    path.write_text(body)
+    path.chmod(mode)
+    return path
+
+
+def test_loads_only_the_allowlisted_keys(tmp_path, clean_env):
+    f = _env_file(tmp_path / ".env", (
+        "# comment\n"
+        "PUSHOVER_USER=u-example\n"
+        "PUSHOVER_TOKEN='t-example'\n"
+        'TURSO_DB_URL="libsql://example.invalid"\n'
+        "export TURSO_AUTH_TOKEN=a-example\n"
+        "IB_FLEX_TOKEN=must-not-load\n"
+    ))
+    assert pickup.load_operator_env(f) == sorted(ENV_KEYS)
+    assert os.environ["PUSHOVER_USER"] == "u-example"
+    assert os.environ["PUSHOVER_TOKEN"] == "t-example"
+    assert os.environ["TURSO_DB_URL"] == "libsql://example.invalid"
+    assert os.environ["TURSO_AUTH_TOKEN"] == "a-example"
+    assert "IB_FLEX_TOKEN" not in os.environ
+
+
+def test_the_process_environment_wins(tmp_path, clean_env, monkeypatch):
+    monkeypatch.setenv("PUSHOVER_USER", "from-env")
+    f = _env_file(tmp_path / ".env", "PUSHOVER_USER=from-file\nPUSHOVER_TOKEN=t\n")
+    assert pickup.load_operator_env(f) == ["PUSHOVER_TOKEN"]
+    assert os.environ["PUSHOVER_USER"] == "from-env"
+
+
+@pytest.mark.parametrize("mode", [0o644, 0o620, 0o602])
+def test_a_group_or_world_accessible_file_is_ignored(tmp_path, clean_env, mode):
+    f = _env_file(tmp_path / ".env", "PUSHOVER_USER=u\n", mode)
+    assert pickup.load_operator_env(f) == []
+    assert "PUSHOVER_USER" not in os.environ
+
+
+def test_a_symlinked_or_missing_file_is_ignored(tmp_path, clean_env):
+    real = _env_file(tmp_path / "real.env", "PUSHOVER_USER=u\n")
+    link = tmp_path / ".env"
+    link.symlink_to(real)
+    assert pickup.load_operator_env(link) == []
+    assert pickup.load_operator_env(tmp_path / "absent.env") == []
+    assert "PUSHOVER_USER" not in os.environ
+
+
+def test_main_reads_the_env_file_beside_the_pickup_clone(world, clean_env, monkeypatch):
+    _env_file(world["mini"].parent / ".env", "PUSHOVER_USER=u-beside\nPUSHOVER_TOKEN=t\n")
+    seen = {}
+
+    def fake_pickup_once(*_a, **_k):
+        seen["user"] = os.environ.get("PUSHOVER_USER")
+        return []
+
+    monkeypatch.setattr(pickup, "pickup_once", fake_pickup_once)
+    assert pickup.main(["--repo", str(world["mini"]), "--source", str(world["vps"])]) == 0
+    assert seen["user"] == "u-beside"

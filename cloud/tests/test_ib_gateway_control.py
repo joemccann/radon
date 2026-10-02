@@ -83,6 +83,9 @@ exit 2
         "RADON_DEPLOY_LOCK_FILE": str(tmp_path / "deploy.lock"),
         "RADON_GATEWAY_CONTROL_ALLOW_ROOT": "1",
         "IB_2FA_LOCK_PATH": str(lock),
+        "RADON_IB_OPERATOR_HOLD_PATH": str(tmp_path / "ib-operator-hold.json"),
+        "RADON_IB_OPERATOR_HOLD_AUDIT": str(tmp_path / "ib-operator-hold.jsonl"),
+        "RADON_IB_OPERATOR_HOLD_OWNER_UID": str(os.getuid()),
         "FAKE_DOCKER_STATE": str(state),
         "FAKE_DOCKER_LOG": str(log),
     }
@@ -349,6 +352,8 @@ def test_control_does_not_depend_on_live_app_venv(control_env, tmp_path):
     lock_cli = app_dir / "scripts" / "utils" / "ib_2fa_lock.py"
     lock_cli.parent.mkdir(parents=True)
     lock_cli.write_text(LOCK_CLI.read_text())
+    hold_cli = lock_cli.parent / "ib_operator_hold.py"
+    hold_cli.write_text((APP_ROOT / "scripts" / "utils" / "ib_operator_hold.py").read_text())
     broken_python = app_dir / ".venv" / "bin" / "python"
     broken_python.parent.mkdir(parents=True)
     broken_python.write_text("broken deploy artifact\n")
@@ -1338,4 +1343,57 @@ def test_role_in_legacy_env_file_still_read_when_canonical_is_absent(control_env
 
     assert result.returncode != 0
     assert "RADON_HOST_ROLE=app" in result.stderr
+    assert state.read_text().strip() == "stopped"
+
+
+# --- operator hold ----------------------------------------------------------
+# 2026-09-25: the Gateway reclaimed the operator's shared IBKR session three
+# times. While `radon ib release` holds, no lifecycle verb may log in.
+
+
+def _hold(env: dict[str, str]) -> None:
+    result = subprocess.run(
+        [sys.executable, str(APP_ROOT / "scripts" / "utils" / "ib_operator_hold.py"),
+         "hold", "--reason", "operator web login", "--actor", "test"],
+        env=env, text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("verb", ["start", "restart"])
+def test_login_verbs_are_refused_while_held(control_env, verb):
+    env, state, log, lock = control_env
+    state.write_text("stopped\n")
+    _hold(env)
+
+    result = _run_control(env, verb)
+
+    assert result.returncode == 73, result.stderr
+    assert "operator hold" in result.stderr
+    assert not lock.exists()
+    assert not log.exists() or "compose-up" not in log.read_text()
+
+
+def test_preheld_watchdog_restart_is_refused_and_its_lease_released(control_env):
+    env, state, log, lock = control_env
+    state.write_text("running\n")
+    _acquire(env, "scripts.ib_watchdog.trigger_restart")
+    _hold(env)
+
+    result = _run_control(env, "restart-preheld", "scripts.ib_watchdog.trigger_restart")
+
+    assert result.returncode == 73, result.stderr
+    assert not lock.exists(), "a refused restart must not strand the watchdog lease"
+    assert state.read_text().strip() == "running"
+    assert not log.exists() or "compose-" not in log.read_text()
+
+
+def test_stop_still_works_while_held(control_env):
+    env, state, log, _lock = control_env
+    state.write_text("running\n")
+    _hold(env)
+
+    result = _run_control(env, "stop")
+
+    assert result.returncode == 0, result.stderr
     assert state.read_text().strip() == "stopped"

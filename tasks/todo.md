@@ -1,3 +1,60 @@
+# Task: Mount Antigravity in App Container Runtime (2026-09-28)
+
+- [x] T1 depends_on: [] Failing test in cloud/tests/test_app_runtime.py for .gemini and .local/bin container mounts.
+- [x] T2 depends_on: [T1] Update cloud/scripts/radon-app-runtime.sh to bind .gemini and .local/bin read-only for app units.
+- [x] T3 depends_on: [T2] Verify test_app_runtime.py passes and run focused cloud test suites.
+- [x] T4 depends_on: [T3] Deploy updated radon-app-runtime to ib-gateway and verify radon-research.service.
+
+Review: .gemini and .local/bin mounted read-only for app units in radon-app-runtime.sh; test_app_runtime 99/99 green; deployed to /usr/local/sbin/radon-app-runtime on ib-gateway; radon-research.service active with dropbox-research state transitioning to ok in Turso.
+
+# Task: DeepSec operator-only re-verify (2026-10-01)
+
+- [x] T1 depends_on: [] Failing tests: prompt requires re-verify + open/closed/unverifiable; closed items stay out of Next; DS-2026-09-20-03 closed with #689 / e5c4e627 / setup-vps.sh L39-47.
+- [x] T2 depends_on: [T1] Helper + committed closed ledger + prompt/docs. last-audited.json keeps closed_queue. No VPS.
+- [ ] T3 depends_on: [T2] Focused pytest green. READY PR vs main, CI green. No merge.
+
+# Task: Runner Pushover dotenv allowlist (2026-10-01)
+
+- [x] T1 depends_on: [] Failing tests in scripts/tests/test_runner_pushover_env.py: dotenv pair, allowlist, no eval, values never logged, missing, half-pair, agents never see keys, dotenv-path file, plist/installer.
+- [x] T2 depends_on: [T1] run_loop.sh allowlist parser + precedence; install.sh writes dotenv-path; notify logs curl status; docs/runner.md.
+- [ ] T3 depends_on: [T2] Focused pytest green, READY PR vs main, CI green. No merge.
+
+# Task: Grok setup hardening (2026-09-30)
+
+- [x] T1 depends_on: [] Failing tests: promote touches only explicit paths (never Path.home()/.grok), candidate must live under scratch, real ~/.grok and ~/.local/bin untouched by any scripts test.
+- [x] T2 depends_on: [T1] grok_upgrade explicit `--alias-bin`; unit passes it; hermetic HOME in upgrade tests.
+- [x] T3 depends_on: [] Failing test: responder env rebuild keeps GROK_PAGE_* operator flags, drops old secrets; extract env builder.
+- [ ] T4 depends_on: [T2, T3] Focused pytest + cloud grok tests green, docs, draft PR vs main, CI green. No merge, no VPS.
+
+Review: promote_live_symlink relinked Path.home()/.grok/bin/grok whenever it existed, so the upgrade test run in the responder clone repointed the real entry at a pytest candidate. Upgrader now moves only --live-bin and an explicit --alias-bin under a --scratch containment check; tests fake HOME; conftest fails any test that touches the real grok entries. Setup step [2/5] keeps GROK_PAGE_* operator flags, secrets only from production.
+
+# Task: RSI OVERSOLD breadth (2026-09-30)
+
+- [ ] T1 depends_on: [] Failing tests: Wilder RSI, strict 30/10 boundaries, gates, migration 0092, writer, panel/API/lockstep.
+- [ ] T2 depends_on: [T1] Mirror MA RATIO: scan, history table, API, `/regime/rsi-oversold`, 23:05 UTC timer.
+- [ ] T3 depends_on: [T2] Focused suites green. Draft PR vs main, CI green, ready when green. No merge. Turso read-only.
+
+# Task: HELD_EXPIRED honest PDF cut + hold timestamps (2026-09-29)
+
+- [ ] T1 depends_on: [] Failing tests: cut-report buckets/labels (no "retries exhausted"), Sep 28 fixture counts, held_at on hold, expire sets expired_at and leaves updated_at, TTL uses held_at, migration 0091 backfill.
+- [ ] T2 depends_on: [T1] cut_report.py + workflow_dispatch, publish.py sweep/record_outcome, migration 0091, docs/dropbox-research.md.
+- [ ] T3 depends_on: [T2] Focused pytest green. Ready PR vs main. No merge.
+
+# Task: tv-alerts hrana read timeout (2026-09-29)
+
+- [x] T1 depends_on: [] Failing test: empty-poll and ok-heartbeat TimeoutError must exit 0 and must not paint health; statement error still exits 1.
+- [x] T2 depends_on: [T1] main() treats that read timeout as non-fatal; runbook case.
+- [x] T3 depends_on: [T2] Focused pytest green. Commit on fix/tv-alerts-read-timeout. No push.
+
+Review: page 01374b99 was a fleet hrana read stall. Canary 64 ms, health lite authenticated, next fire 21:32Z processed 0. tv-alerts was the oneshot that still exited 1. Timeout now exits 0 with no health paint. Statement errors still exit 1. 22 passed. No push.
+
+# Task: IR PR descriptions + Grok pin (2026-09-28)
+
+- [x] T1 depends_on: [] Validator + pickup/autopush refuse placeholders; tests on title/body.
+- [x] T2 depends_on: [T1] Track-latest resolver, LKG state, responder `-m`/fallback/lock.
+- [x] T3 depends_on: [T2] Daily enabled upgrade timer, smoke/promote/stay-fail, runbook.
+- [ ] T4 depends_on: [T3] Draft PR vs main, CI green, no merge.
+
 # Task: Knowledge golden eval v2 (2026-09-27)
 
 - [x] T1 depends_on: [] Opt-in retrieve.py legs/recency/cap hooks; defaults identical.
@@ -8637,3 +8694,147 @@ CI repair review: befea93d preserved21 new gateway/service component regressions
 ## Review
 - Removed the three production-derived journal labels rather than substituting synthetic brokerage history; retained all pre-existing semantic journal coverage.
 - Regression rejects long numeric journal identifiers in the tracked golden set. Focused fixture tests pass; the affected suite is blocked locally because Python 3.13 lacks `libsql_experimental` and package installation is network-denied, while Python 3.14's extension segfaults.
+# Task: PR #766 follow-up, demo CI guard and Linux deploy cleanup (2026-09-28)
+
+## Dependency graph and checklist
+- [x] T1 depends_on: [] Confirm PR state, CI wiring, demo database identity, and the Linux cleanup tests.
+- [x] T2 depends_on: [T1] Provision both repository CI demo URL secrets and verify their registration.
+- [x] T3 depends_on: [T1] Reproduce and repair deploy child cleanup on Linux CI, preserving the fixed test timeout.
+- [ ] T4 depends_on: [T2, T3] Open follow-up PR, verify every applicable exact-head CI check, and send the required notification.
+
+## Review
+- Both secrets point to Turso `radon-demo` and appear in `gh secret list`; the push-only guard will run on the next main push.
+- Linux cloud CI on `5f7c36ab` red-failed at the preheld gateway gate (status 66). The fixture now reports it inactive, reaches the hanging stop child, and Linux cloud CI passed on `6156ac79`; the harness remains `timeout=5`.
+
+## Nightly testing 2026-09-29
+
+- [x] T1 depends_on: [] Build isolated toolchain, inspect open testing PRs, recover trusted checkpoint.
+- [x] T2 depends_on: [T1] Audit 3cc3d84a..c274a773 using import graph, run standing gates and repeat local changed tests three times, reconcile ledgers; browser repetitions assigned to CI.
+- [x] T3 depends_on: [T2] Remediate verified findings with red/green evidence, one commit per finding.
+- [x] T4 depends_on: [T3] Complete three serial full-gate rounds and baseline cloud failure-list comparison.
+- [x] T5 depends_on: [T4] Prepare substantive draft-PR and durable issue inputs; publication, exact-head CI, browser and notification receipts are tracked on issue #83.
+
+Review: six separate red/green finding commits; three serial closing rounds recorded in TEST_AUDIT.md, with two earlier load-sensitive failures explicitly retained beside green isolated reruns. Cloud FAILED lists match the detached base. Targeted hook coverage: 100% lines, 98% branches, 100% functions. Browser and external delivery receipts belong to issue #83. Fake-only tests; no live services, credential inspection, main pushes or merges.
+
+## Nightly reliability 2026-09-29
+
+- [x] T1 depends_on: [] Install isolated Python toolchain, read trusted checkpoint and open PRs, select tonight's branch.
+- [x] T2 depends_on: [T1] Audit 5c27667c..c274a773 and codemap importers; verify standing sweeps and inherited acceptance.
+- [x] T3 depends_on: [T2] Fix verified findings serially with fault-injection red/green and focused gates.
+- [ ] T4 depends_on: [T3] Run permanent drills, validate diff, publish substantive draft PR and await exact-head CI.
+- [ ] T5 depends_on: [T4] Record one durable issue comment and final review.
+
+Review: pending; only mocks/local fixtures and GitHub operations are authorized. Full suites and Vitest are assigned to CI.
+
+Nightly review update: REL-291 red 4, green runner/hooks 152; standing catalogs 57 passed. Remaining repairs and closing verification pending.
+
+Nightly closing review (2026-09-29): 12 repaired findings, including five new IDs R-710 through R-714. All reproductions confirmed serially before fixes. Python drills 95 passed; standing catalogs 57 passed; inherited acceptance 125 passed; expanded monitor 530 passed. Two production-browser regressions passed and screenshots inspected; TypeScript, build and six curation checks passed. Changed YAML parsed, runner bash syntax and diff checks passed, gitleaks found no secrets. Full pytest/cloud/Vitest and its idempotency drill remain assigned to exact-head PR CI. Remaining historical acceptance is explicit in the audit appendix; no invented BLOCKED status. Runner credentials are stripped from agent execution; no Pushover credentials are available here, and no secret file was sought. Publication, CI and one issue comment remain the final steps.
+
+Publication review: the runner PAT rejected workflow updates. Removed the unpublished workflow edits from local history and consolidated both new browser cases into the existing CI-selected order-safety spec. No CI gate changed; production browser 3 passed and curation 6 passed after consolidation.
+
+Delivery review: draft https://github.com/joemccann/radon/pull/795 is published. CI ticket fixtures were corrected without changing assertions; all eight Vitest shards then passed. Stop modification received the same trigger-price fault injection (red twice, focused green 175). Documentation owner gate red twice, then 71 passed after maintained docs were updated. Exact final-head CI and the single durable issue comment remain pending; GitHub's managed AI scanner separately reports an unsupported model and requires provider/operator repair.
+
+# Nightly CI performance audit — 2026-09-29
+
+- [x] T1 depends_on: [] Read open performance PRs, rolling checkpoint, ledger, and rules.
+- [x] T2 depends_on: [T1] Classify 30 organic main runs and reconstruct release critical paths.
+- [x] T3 depends_on: [T2] Rank safe candidates; implement qualifying experiments with red/green contracts.
+- [ ] T4 depends_on: [T3] Verify, publish substantive changes if any, and record one rolling issue comment.
+
+Review: CIP-015 is the sole qualifying critical-path experiment; 136 focused tests and 49 cloud contracts passed. Collection retains all 38 original cases and adds 3. No production source, gate, shard, timeout or deployment behavior changed. Release gain remains VALIDATING; PR CI and one rolling issue comment are pending.
+# Task: AI chat chart prompt and repetitive completion (2026-09-29)
+
+## Dependency graph
+
+- T1 depends_on: [] - Trace production turn, replay exact prompt and image, record failing regressions.
+- T2 depends_on: [T1] - Preserve live reads after knowledge lookup without exposing retrieval to tool-capable rounds; reject repetitive output with bounded recovery.
+- T3 depends_on: [T2] - Focused/full verification, browser screenshot, live prompt replay, review.
+- T4 depends_on: [T3] - Publish a reviewable PR, verify exact-head CI, send the required green notification.
+
+## Checklist
+
+- [x] T1 Trace and reproduce
+- [x] T2 Patch and regression coverage
+- [x] T3 Verify and review
+- [ ] T4 PR and exact-head verification
+
+## Review
+
+- Original Turso turn matched (18:06:31.410Z, grok-4.7, image_count 1). Five red regressions captured. Patched live chart replay reaches rank_spreads and get_option_chain in six rounds; thirteen successful tool events; no order. Final verification: 401 unique focused tests passed across 47 files; 12 Playwright tests passed; repetition detector coverage 100%; TypeScript and focused ESLint passed. Desktop/mobile screenshots reviewed. Initial full web run: 9693 passed, 9 failed, 10 skipped; it overlapped final source edits and browser verification. Every failed file passes in the fresh focused runs. Exact-head CI pending. Trace: tasks/ai-chat-repetition-2026-09-29.md.
+
+## Nightly testing 2026-09-30
+- [x] T1 Build isolated toolchain and read trusted checkpoint/open PRs. depends_on: []
+- [x] T2 Audit delta/import graph, standing gates and legacy inventory. depends_on: [T1]
+- [x] T3 Repair verified findings with red/green evidence. depends_on: [T2]
+- [x] T4 Run three serial closing gate rounds and hygiene review. depends_on: [T3]
+- [ ] T5 Publish substantive draft, watch exact-head CI, post one rolling comment. depends_on: [T4]
+
+### Review
+T-517 and T-518 are verified with rejected mutations and 37 focused passes; no product code changes. Delta repetitions and three full serial closing rounds are complete. The first closing Python failure passed 103/103 alone; later full rounds passed. Cloud lists add zero failures against the detached base. Publication/CI/notification receipts and final delivery status are tracked on rolling issue #83 after this prepublication checkpoint. Only testing/2026-09-30 may be pushed; T-435 retains its operator action.
+
+## Nightly reliability 2026-09-30
+
+- [x] T1 depends_on: [] Install isolated toolchain, recover trusted checkpoint, inspect open reliability PRs and create authorized branch.
+- [x] T2 depends_on: [T1] Audit c274a773..e3063f0c and codemap importers; execute standing sweeps and re-triage inherited acceptance.
+- [x] T3 depends_on: [T2] Repair verified findings serially with fault-injection red/green and focused gates.
+- [ ] T4 depends_on: [T3] Run permanent drills and validation; publish substantive draft PR and await exact-head CI.
+- [ ] T5 depends_on: [T4] Post exactly one durable issue comment and complete review.
+
+Review: seven inherited findings repaired in separate commits with repeated serial red evidence and focused green gates. Permanent Python drills: 95 passed; catalog/admission sweep: 108 passed. No new delta findings. Full suites, cloud gates and Vitest belong to PR CI. Historical candidates retain their original acceptance on issue #81; no inspection-only closure. No production access. Publication and exact-head CI pending.
+
+# Task: T-435 keyless setup-gate browser test (2026-09-30)
+
+- [x] T1 depends_on: [] Isolated keyless compile-mode build (`.next-setup-gate`, skip production trace audit) + Playwright config/spec outside `web/e2e/` + vitest contract.
+- [x] T2 depends_on: [T1] New non-gating `e2e-setup-gate` CI job + `test_ci_setup_gate_job.py` pin.
+- [ ] T3 depends_on: [T2] Ready PR vs main. Exact-head CI green. No merge.
+
+## Nightly testing 2026-10-01
+- [x] T1 Build toolchain, recover checkpoint and select authorized branch. depends_on: []
+- [x] T2 Audit delta/importers, reconcile ledgers, run standing gates and three delta repetitions. depends_on: [T1]
+- [x] T3 Repair verified findings with red/green evidence. depends_on: [T2]
+- [x] T4 Complete three serial closing rounds and hygiene review. depends_on: [T3]
+- [x] T5 Prepare draft PR and rolling-comment artifacts; track publication and exact-head CI receipts on issue #83. depends_on: [T4]
+
+### Review
+Six findings have red/green evidence; three full serial rounds pass Python 13448, Vitest 10300 and cloud 2400 each. Cloud FAILED lists match the empty detached-base list. TypeScript and targeted coverage pass. Fake-only execution; no production access, credential-file lookup, main push or merge. Publication, exact-head CI/browser results and the single final checkpoint are recorded on issue #83 after committing, avoiding a change to the head whose checks are being reported.
+
+## Nightly reliability 2026-10-01
+
+- [x] T1 depends_on: [] Install toolchain, recover trusted checkpoint, inspect open PRs, create tonight’s branch.
+- [x] T2 depends_on: [T1] Audit main delta and codemap callers; re-triage standing candidates and safety sweeps.
+- [ ] T3 depends_on: [T2] Repair verified findings serially with red/green fault injection and focused gates.
+- [ ] T4 depends_on: [T3] Run drills, validate changes, publish substantive draft, watch exact-head CI.
+- [ ] T5 depends_on: [T4] Post one durable issue comment and record final review.
+
+Review: pending; fake-only verification, full suites and Vitest assigned to CI.
+
+## Nightly documentation 2026-10-02
+
+- [x] T1 depends_on: [] Recover trusted checkpoint, inspect open PRs, create authorized branch.
+- [x] T2 depends_on: [T1] Audit every delta commit and reconcile inherited findings against source and open PRs.
+- [x] T3 depends_on: [T2] Repair verified documentation defects with minimal owner changes and red/green contracts.
+- [ ] T4 depends_on: [T3] Verify, publish one draft PR, watch exact-head CI, post one rolling issue comment.
+
+Review: 22 commits / 146 paths audited through cb47c52a. Four inherited ownership gaps and four source-backed documentation defects corrected; DOC-149 disproved by four resolving CommonMark links. New contracts failed before owner corrections. Runtime behavior, CI gates and generated codemap remain unchanged. Publication, exact-head CI and the one rolling-issue comment remain pending.
+## Nightly testing 2026-10-02
+
+- [x] T1 Build toolchain, recover trusted checkpoint, select authorized branch. depends_on: []
+- [x] T2 Audit delta and importers, reconcile ledgers, run standing gates and delta repetitions. depends_on: [T1]
+- [x] T3 Repair every verified finding with red/green evidence. depends_on: [T2]
+- [x] T4 Run three serial closing gate rounds and hygiene review. depends_on: [T3]
+- [ ] T5 Publish substantive draft, verify exact-head CI and post one rolling comment. depends_on: [T4]
+
+### Review 2026-10-02
+
+Three verified findings have red/green evidence. All nine closing gates pass, and every cloud failure-list comparison matches the clean detached base. Product change is limited to the relay poller; prior ledger entries, reliability ledgers and codemap files are unchanged. Publication, exact-head CI and the single rolling-issue receipt are the remaining external steps. The held-out admin browser preflight and missing Pushover environment remain operator-only delivery items.
+## Nightly reliability 2026-10-02
+
+- [x] T1 depends_on: [] Install toolchain, recover trusted checkpoint and create authorized branch.
+- [x] T2 depends_on: [T1] Audit delta and codemap importers; run standing sweeps and re-triage inherited candidates.
+- [x] T3 depends_on: [T2] Repair verified findings serially with repeated red and focused green evidence.
+- [x] T4 depends_on: [T3] Run permanent drills, validate, publish substantive draft and await exact-head CI.
+- [x] T5 depends_on: [T4] Post one durable rolling comment and complete review.
+
+Review: delta and direct importers audited; four new and five inherited repairs have red/green evidence. R-303 is operator-only after GitHub rejected workflow publication. Permanent drills 95 passed. No live systems, credentials, main push, merge, codemap changes or test-ledger edits. Publication/CI and the one durable issue comment remain tracked by T4/T5; final receipts belong on issue #81.
+
+Delivery review: draft https://github.com/joemccann/radon/pull/866; source head `22e88dfc454d7f2246493948af46d43fe310887b` completed all 24 required contexts, 32 passing checks total and seven non-applicable skips. Exactly one durable comment posted: https://github.com/joemccann/radon/issues/81#issuecomment-5947930686. Nine repairs resolved; 20 historical candidates retain acceptance. R-303 workflow publication and Pushover delivery remain operator-only; notification credentials were absent on both environment-only checks. No merge or live operation occurred. This receipt changes only the checklist; its own exact-head CI is watched before ending the session.

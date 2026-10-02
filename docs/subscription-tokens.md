@@ -2,7 +2,7 @@
 
 Four agent CLIs authenticate against the operator's subscriptions rather than
 metered API keys: Claude Code (anthropic), OpenAI Codex, xAI Grok and Google
-Antigravity (`agy`, managed under the provider row `gemini`). Each keeps an OAuth credential file in the `radon` home
+Antigravity (`agy`, provider row `antigravity`). Each keeps an OAuth credential file in the `radon` home
 directory on the app VPS. `scripts/clients/model_ladder.py` reads the anthropic,
 codex and grok files directly, so a deleted or expired file silently demotes the
 whole subscription band to prepaid keys.
@@ -29,7 +29,7 @@ throwaway home so no live credential was touched.
 | anthropic | `~/.claude/.credentials.json` (`CLAUDE_CONFIG_DIR`) | `claudeAiOauth.expiresAt` | `claude -p`, then token endpoint with the public client id | `claude -p ... --max-turns 1` | paste-code: `claude auth login --claudeai` over SSH |
 | codex | `~/.codex/auth.json` (`CODEX_HOME`) | `exp` claim of the access-token JWT (ten days) | `codex exec`, then token endpoint with the public client id | `codex exec --skip-git-repo-check ...` | **push**: device code |
 | grok | `~/.grok/auth.json` | `expires_at` (earliest entry) | `grok -p`, then OIDC-discovered token endpoint | `grok -p ...` | **push**: device code |
-| gemini (= Antigravity, `agy`) | `~/.gemini/antigravity-cli/antigravity-oauth-token` | `token.expiry` | `agy models`, then Google's token endpoint with the CLI's public client id | `agy models` (authenticated, not a model call) | paste-code: `agy -p ok` over SSH, 60s window |
+| antigravity (`agy`) | `~/.gemini/antigravity-cli/antigravity-oauth-token` | `token.expiry` | `agy models`, then Google's token endpoint with the CLI's public client id | `agy models` (authenticated, not a model call) | paste-code: `agy -p ok` over SSH, 60s window |
 
 `grok` and `agy` install to `~/.local/bin`. The unit puts it on `PATH`, and the
 daemon searches `~/.local/bin` and `~/.grok/bin` itself so a manual run finds
@@ -82,7 +82,7 @@ Registry names in the vault:
     SUBSCRIPTION_TOKEN_ANTHROPIC
     SUBSCRIPTION_TOKEN_CODEX
     SUBSCRIPTION_TOKEN_GROK
-    SUBSCRIPTION_TOKEN_GEMINI   (the Antigravity token)
+    SUBSCRIPTION_TOKEN_ANTIGRAVITY
 
 The store validates registry names against `^[A-Z][A-Z0-9_]{0,63}$`, so these
 are upper case.
@@ -178,10 +178,10 @@ does NOT write the file). Claude's login wants the code typed back into the
 CLI, which no push can do. With the refresh grant fixed and the daily keepalive
 it should be rare.
 
-### gemini (Antigravity CLI): paste-code over SSH
+### antigravity (`agy`): paste-code over SSH
 
-Google retired the Gemini CLI OAuth client for individuals on 2026-09-18; the
-`gemini` provider row reads the Antigravity CLI (`agy`) token. `agy` is
+The `antigravity` provider row reads the Antigravity CLI (`agy`) token from
+`~/.gemini/antigravity-cli` (Google's fixed path). `agy` is
 installed on the VPS at `~/.local/bin/agy` via
 `curl -fsSL https://antigravity.google/cli/install.sh | bash`.
 It has no login subcommand: any first run prints a Google OAuth URL and waits

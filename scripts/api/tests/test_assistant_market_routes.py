@@ -142,3 +142,77 @@ def test_uw_chain_without_expiry_returns_breakdown(client):
     body = resp.json()
     assert body["expirations"][0]["expiry"] == "2026-09-18"
     assert "contracts" not in body or body.get("contracts") == []
+
+
+def test_uw_chain_breakdown_reads_live_uw_expires_shape(client):
+    """UW /expiry-breakdown rows key the date as `expires` and carry no dte (SPCX 2026-10-02)."""
+
+    class _UW:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get_stock_state(self, ticker):
+            return {"data": {"close": "158.61"}}
+
+        def get_expiry_breakdown(self, ticker):
+            return {
+                "data": [
+                    {"expires": "2026-10-30", "open_interest": 73147, "volume": 64064, "chains": 128},
+                    {"expires": "2026-12-18", "open_interest": 25400, "volume": 11497, "chains": 128},
+                ]
+            }
+
+    with patch("api.routes.assistant_market.UWClient", return_value=_UW()), patch(
+        "api.routes.assistant_market._today_iso", return_value="2026-10-02"
+    ):
+        resp = client.get("/options/uw-chain?symbol=SPCX")
+
+    assert resp.status_code == 200
+    rows = resp.json()["expirations"]
+    assert [row["expiry"] for row in rows] == ["2026-10-30", "2026-12-18"]
+    assert rows[0]["dte"] == 28
+    assert rows[0]["oi"] == 73147
+    assert rows[0]["volume"] == 64064
+
+
+def test_uw_chain_contracts_carry_greeks(client):
+    row = {
+        "option_symbol": "SPCX261030C00172500",
+        "nbbo_bid": "3.20",
+        "nbbo_ask": "3.25",
+        "implied_volatility": "0.452356040528371",
+        "delta": 0.2756,
+        "gamma": 0.0165,
+        "theta": -0.1204,
+        "vega": 0.1469,
+        "open_interest": 507,
+        "volume": 27097,
+    }
+
+    class _UW:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get_stock_state(self, ticker):
+            return {"data": {"close": "158.61"}}
+
+        def get_option_contracts(self, ticker, **kwargs):
+            return {"data": [row]}
+
+    with patch("api.routes.assistant_market.UWClient", return_value=_UW()):
+        resp = client.get("/options/uw-chain?symbol=SPCX&expiry=2026-10-30")
+
+    contract = resp.json()["contracts"][0]
+    assert contract["strike"] == 172.5
+    assert contract["right"] == "C"
+    assert contract["mid"] == 3.225
+    assert contract["delta"] == 0.2756
+    assert contract["gamma"] == 0.0165
+    assert contract["theta"] == -0.1204
+    assert contract["vega"] == 0.1469

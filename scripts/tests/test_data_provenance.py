@@ -111,6 +111,19 @@ class TestPerLegProvenance:
         )
         assert pure["source_by_ticker"] != mixed["source_by_ticker"]
 
+    def test_credit_vix_publishes_the_per_ticker_sources(self):
+        import fetch_credit_vix as mod
+
+        payload = mod.build_output(
+            [{
+                "date": "2026-09-29", "shy_close": 81.16, "hyg_close": 77.36,
+                "vix_close": 16.04, "spread": 3.80,
+            }],
+            source="ib+cboe",
+            source_by_ticker={"SHY": "ib", "HYG": "ib", "VIX": "cboe"},
+        )
+        assert payload["source_by_ticker"] == {"SHY": "ib", "HYG": "ib", "VIX": "cboe"}
+
     def test_the_iei_cascade_returns_the_map_alongside_the_collapsed_string(self):
         import fetch_iei_hyg as mod
 

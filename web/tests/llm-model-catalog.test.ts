@@ -44,7 +44,6 @@ const PROVIDER_ENV_KEYS = [
   "XAI_API_KEY",
   "GROK_API_KEY",
   "OPENAI_API_KEY",
-  "GEMINI_API_KEY",
   "LLM_PROVIDER",
 ];
 

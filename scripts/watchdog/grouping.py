@@ -111,10 +111,14 @@ def fetch_health() -> dict:
     except (urllib_error.URLError, urllib_error.HTTPError, OSError, ValueError, json.JSONDecodeError) as exc:
         log.warning("watchdog /health probe failed: %s", exc)
         return {"auth_state": "unknown"}
-    # FastAPI shape: {"ib_gateway": {"auth_state": "..."}}
+    # FastAPI shape: {"ib_gateway": {"auth_state": "...", "operator_hold": {...}}}
     ib_gateway = data.get("ib_gateway") if isinstance(data, dict) else None
     if isinstance(ib_gateway, dict):
-        return {"auth_state": ib_gateway.get("auth_state") or "unknown"}
+        out = {"auth_state": ib_gateway.get("auth_state") or "unknown"}
+        hold = ib_gateway.get("operator_hold")
+        if isinstance(hold, dict) and hold.get("held") is True:
+            out["operator_hold"] = True
+        return out
     # Some legacy shapes put auth_state at top level.
     if isinstance(data, dict) and "auth_state" in data:
         return {"auth_state": data.get("auth_state") or "unknown"}
@@ -312,7 +316,8 @@ def dispatch_with_grouping(*, outcomes: Iterable[CheckOutcome], now: datetime) -
     dispatcher_errors: list[str] = []
     suppressed_count = 0
     warmup_suppressed = False
-    if len(ib_failing) >= GROUPING_THRESHOLD:
+    health_payload: dict = {}
+    if ib_failing:
         # fetch_health is best-effort but a raised exception (test-double
         # or future bug) must not abort the whole dispatch — fall through
         # to per-service alerts in that case.
@@ -321,6 +326,19 @@ def dispatch_with_grouping(*, outcomes: Iterable[CheckOutcome], now: datetime) -
         except Exception as exc:  # noqa: BLE001 — protect alert dispatch
             log.warning("fetch_health raised: %s — falling back to per-service", exc)
             health_payload = {"auth_state": "unknown"}
+    if health_payload.get("operator_hold") is True:
+        # IBKR operator hold: the Gateway is down on purpose while the operator
+        # uses the shared IBKR login. The broker's ib-watchdog pages HELD once
+        # with who and why; an "IB Gateway unreachable, radon restart" page
+        # here would tell the operator to log back in and kick themselves.
+        log.info(
+            "IBKR operator hold active; absorbing %d IB-dependent failure(s) "
+            "without paging: %s",
+            len(ib_failing),
+            ",".join(sorted(o.service for o in ib_failing)),
+        )
+        grouped_handled = {o.service for o in ib_failing}
+    elif len(ib_failing) >= GROUPING_THRESHOLD:
         auth_state = health_payload.get("auth_state") or "unknown"
         if auth_state in GROUPING_AUTH_STATES:
             if (

@@ -76,6 +76,12 @@ evidence; paste that evidence before claiming the step done.
 - One logical change per commit; docs/runbook updates for THIS incident belong
   in the same commit. No secrets/PII. Claim in the message only what was
   actually verified.
+- The commit body MUST include these markdown sections, each with real
+  content (not TODO, not the branch name, not "grok incident fix on"):
+  What broke (symptom, failing job or alert, page id, first-seen time,
+  run or log links, error excerpt); Root cause; What changed (each file);
+  How it was verified; Risk and rollback; Still open. Pickup opens the PR
+  from this body and refuses a placeholder.
 
 ## 6. Update the runbook + lessons
 

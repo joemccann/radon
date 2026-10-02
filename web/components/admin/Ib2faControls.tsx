@@ -139,7 +139,12 @@ export default function Ib2faControls({
     : powerState === "transitional"
       ? "Gateway is mid-transition. Wait for it to settle."
       : null;
-  const pushDisabledReason = forcePushDisabledReason({ pushLock, pending: false });
+  // IBKR operator hold: every login is refused by the broker (423) and would
+  // kick the operator off the shared IBKR username, so say why up front.
+  const operatorHoldReason = health?.ib_gateway?.operator_hold?.held === true
+    ? "IBKR operator hold active. Use Resume Gateway in the hold card."
+    : null;
+  const pushDisabledReason = operatorHoldReason ?? forcePushDisabledReason({ pushLock, pending: false });
   const startDisabledReason = lifecycleDisabledReason ?? transitionDisabledReason ??
     (powerState === "running" ? "Gateway is already running." : !onStartGateway ? "Gateway start control is unavailable." : pushDisabledReason);
   const stopDisabledReason = lifecycleDisabledReason ?? transitionDisabledReason ??
@@ -148,7 +153,7 @@ export default function Ib2faControls({
     (!onRestartGateway ? "Gateway restart control is unavailable." : pushDisabledReason);
   const powerDisabledReason = powerState === "stopped" ? startDisabledReason : stopDisabledReason;
   const powerDisabled = anyPending || powerDisabledReason !== null;
-  const disableReason = lifecycleDisabledReason ?? transitionDisabledReason ??
+  const disableReason = lifecycleDisabledReason ?? transitionDisabledReason ?? operatorHoldReason ??
     forcePushDisabledReason({ pushLock, pending: anyPending });
   const disableForce = disableReason !== null;
   const stackDisabledReason = !primaryObservationCurrent || apiUnreachable

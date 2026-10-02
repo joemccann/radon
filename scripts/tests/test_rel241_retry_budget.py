@@ -20,6 +20,8 @@ import stat
 import subprocess
 from pathlib import Path
 
+from scripts.tests.shell_sandbox import stage_shell_script
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SCRIPT = REPO_ROOT / "scripts" / "run_portfolio_refresh.sh"
 UNIT = REPO_ROOT / "cloud" / "services" / "radon-portfolio-sync.service"
@@ -91,8 +93,9 @@ def _run_script_under_sustained_502(tmp_path: Path) -> tuple[int, list[int], lis
         "PATH": f"{shim}:{os.environ['PATH']}",
         "RADON_PYTHON_BIN": str(shim / "python-stub"),
     }
+    script = stage_shell_script(SCRIPT, tmp_path / "repo" / "scripts" / SCRIPT.name, tmp_path / "scratch")
     result = subprocess.run(
-        ["bash", str(SCRIPT)],
+        ["bash", str(script)],
         capture_output=True,
         text=True,
         env=env,

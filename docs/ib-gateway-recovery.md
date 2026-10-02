@@ -96,10 +96,20 @@ A failure *inside radon-api*, not the gateway: after the user approves the 2FA p
 - It records the error in `service_health` once per episode with the time of its retry: "do not restart the Gateway".
 - After 15 minutes with no new throttled attempt (doubling to a 60-minute cap), it makes **one** fresh login under the push lock, so you get a push to approve.
 - Any new throttled attempt, including your own, restarts the quiet period.
-- Outside market-data hours it never retries: restart once yourself, 15+ minutes after the last attempt.
+- Outside market-data hours it never retries. The app path still refuses `start` and `restart` until the quiet period below. After the UTC time that refusal names, restart once from the app admin control and approve the push.
 - The episode lives in the watchdog state file, so it survives the 5-minute log window. It ends on `authenticated`, on `awaiting_2fa`, or on a login that got past the throttle.
 
-Tests: `scripts/tests/test_ib_watchdog_login_throttle.py`.
+**Operator action while that state file has `login_throttle_since` set.** Prerequisite: split topology, watchdog state at `/var/lib/radon/ib-watchdog-state.json`. Blast radius: one login attempt is another IBKR failed login and restarts the quiet period. It does not send an order. Safe diagnosis: read the `ib-watchdog` `service_health` error and, from the app, the admin Start or Restart error. Do not run `docker compose`, `docker restart`, or broker-local `radon restart` to probe it.
+
+The app admin Start/Restart path is the broker daemon (`scripts/ib_gateway_remote/serve.py`). `start` and `restart` return HTTP 409 until `login_throttle_since` plus the quiet period. That period is 900 seconds, doubled for each `login_throttle_retries` already spent, capped at 3600 seconds (`scripts/utils/ib_login_throttle.py`). The `detail` names the UTC time a login is allowed. A 409 did not log in. `stop` and `reset-lease` are not gated.
+
+During market-data hours the watchdog makes the one retry. Do not restart it yourself. Outside those hours the watchdog does not retry, so after the UTC time in the 409, restart once from the app admin control and approve the push. The off-hours `service_health` sentence still says a flat "15+ minutes" (`scripts/ib_watchdog.py`). Follow the 409 time when they differ.
+
+Stop when another 409 comes back, or the Gateway log still ends in `Too many failed login attempts`. Verification: after the allowed login, `/health` moves to `awaiting_2fa` or `authenticated` and the watchdog clears `login_throttle_since`. Rollback: nothing to undo. An early login restarts the quiet period; wait for the new time. Escalation: one login after the 409 time, then stop.
+
+Broker-local `radon restart` and a broker-host `POST /ib/restart` call `/usr/local/bin/radon-ib-gateway-control` directly (`cloud/scripts/operator-radon.sh` `gateway_control`; `scripts/api/services.py` `_control_gateway` when the host role is not `app`). They do not read the throttle file.
+
+Tests: `scripts/tests/test_ib_watchdog_login_throttle.py`, `scripts/tests/test_ib_gateway_remote_login_throttle.py`.
 
 ---
 
@@ -132,11 +142,49 @@ Next.js footer reads via `useIBStatusContext().displayStatus` (polls `/api/admin
 
 `radon restart` (whole-stack) restarts all `radon-*` units. Use after a sustained outage.
 
+**IBKR operator hold (log in to IBKR yourself).** The Gateway shares the operator's IBKR username, and IBKR allows one session per username (2026-09-25: with `ExistingSessionDetectedAction=primary` the Gateway kicked every web login). The hold keeps the Gateway logged out, and every automatic login path stands down until someone clears it. It lives on the broker (`/var/lib/radon/ib-operator-hold.json`), so it works with the app host down.
+
+Set and clear it from any of these:
+
+- Broker, as root: `radon ib release [--reason TEXT] [--expires-at ISO]` writes the hold, then stops the Gateway: helper `stop`, falling back to the root shim's `compose-down`, then `kill`, never waiting on the deploy lock. It prints `RELEASED` only once the container is gone. `radon ib resume` clears it, makes sure `radon-ib-watchdog.timer` runs, and starts the Gateway once. `radon ib status` prints the hold, the Gateway and the timer. Console and sudo sessions without SSH metadata retain the operator name with a local origin in the hold audit (REL-301 / R-720).
+- Release confirmation requires Docker to report the container stopped or explicitly absent. A timeout, permission failure or malformed inspection leaves the hold set and returns failure; it never prints `RELEASED` (REL-298 / R-717).
+- Admin panel (app up): Gateway controls, IBKR operator hold card. Hold needs a reason and a typed `HOLD`. Resume confirms once. This is `POST /api/admin/ib/operator-hold` to FastAPI `POST /ib/operator-hold` (operator JWT), then the broker daemon's mTLS `POST /hold` or `/unhold`. `/hold` writes the hold, then runs the helper `stop`. `/unhold` removes the hold, then runs one `start`, unless the 60s verb cooldown or an IBKR login throttle refuses it. In that case the hold is still cleared and the watchdog takes over.
+- Automatic: with `ExistingSessionDetectedAction=primaryoverride` (pinned in `cloud/docker-compose.yml`), IBC hands the session to your login and exits. The Gateway log shows `Other session may be primary, so end this session ... (scenario 6)`, or `scenario 4` when a fresh Gateway login loses to your session. When that is the latest login event and the Gateway is down, the watchdog sets the hold with actor `auto:ib-watchdog` instead of restarting it.
+
+While held:
+
+| Path | Behaviour |
+|---|---|
+| Root shim `compose-up`, helper `start\|restart\|restart-preheld` | exit 73 (`radon-ib-gateway.service` treats 73 as success) |
+| `radon-ib-watchdog` (timer keeps running) | outcome `operator_hold`, no probe, no restart, no lease. `service_health[ib-watchdog]` is `ok` and names who, why and when. Pushover sends ONE normal-priority `IB Gateway HELD` page per hold. Clearing sends one `hold cleared` page |
+| Broker daemon `start\|restart` | `423 OPERATOR_HOLD` with the hold in the body |
+| FastAPI `/ib/restart`, admin Gateway `start\|restart` | `423`, and no request leaves the app host. `stop` still works |
+| FastAPI 15s recovery heartbeat (pool reconnect, radon-api self-restart ladder) | skipped |
+| Relay stale-tick ladder | no `disconnected` error row, no reconnect ladder, no `/ib/restart` escalation. It writes an `ok` row with `reason: operator_hold` |
+| Watchdog IB-outage grouping | IB-dependent failures are absorbed without a page. No `radon restart` advice |
+| IBC 2FA relogin | already off (`TWOFA_TIMEOUT_ACTION=exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT=no`, no `AUTO_RESTART_TIME`), so no push spam |
+
+Any flag that is unreadable, malformed, symlinked or not root-owned counts as held, and its reason and actor still show. Invalid UTF-8 in diagnostic fields is replaced for display without changing the canonical clear-prefix decision or rewriting the flag (REL-299 / R-718). Holds set by the admin panel and the watchdog are written by `radon`. A non-root clear removes the flag, because absent means not held. An `--expires-at` that has passed reads `expired` but stays held. An expiring hold would log back in and kick you. From the laptop when broker Tailscale SSH is down: `ssh -J radon@5.78.148.38 root@10.0.0.4 radon ib release`. Design: [`ibkr-session-release.md`](ibkr-session-release.md).
+
+### Runbook: flatten from IBKR Mobile while the app is down
+
+Prerequisite: the broker (`radon-broker`) and the Gateway are up, and the app host is not. Blast radius: Radon has no IB data and cannot place or manage orders until you resume. Resting orders at IBKR stay live, and you manage them yourself.
+
+1. If you can reach the broker, run `radon ib release --reason "flatten from mobile"` as root first (`ssh root@radon-broker`, or the jump host line above). Wait about 30 seconds.
+2. If you cannot reach it, log in to IBKR Mobile or the web portal anyway. Once the broker runs the `primaryoverride` compose, the Gateway yields, and within about a minute the watchdog sets the hold (`auto:ib-watchdog`) and pages `IB Gateway HELD` once. Before that rollout, IBC takes the session back and kicks you; use step 1.
+3. Flatten. Nothing on the broker logs the Gateway back in while held. An `IB Gateway HELD` page is expected. Do not run `radon restart`, Start Gateway or `docker compose` to "fix" it.
+4. When done, log out of IBKR Mobile and the web portal. With `primaryoverride` a fresh Gateway login still takes the session and would end yours.
+5. Clear the hold: `radon ib resume` on the broker, or Resume Gateway in /admin once the app is back. Approve the one IBKR Mobile push. The watchdog pages `hold cleared`.
+6. Verify: `radon ib status` shows `"held": false` and `gateway: running`, `/health` reaches `auth_state=authenticated`, and the pool self-heal reconnects within 15 to 60 seconds.
+
+Rollback: `radon ib resume`. Escalation: if `radon ib release` prints `FAILED ... STILL RUNNING`, power the broker off from the Hetzner console. That ends the Gateway session, and a reboot under the hold stays logged out.
+
+
 ---
 
 ## What NOT to Do
 
-- **Do not keep forcing restarts when no push arrives.** Check the Gateway log for `Too many failed login attempts` first. Each restart is another failed login, and IBKR keeps throttling. Wait 15+ minutes with no attempts, then restart once (Gate 6).
+- **Do not keep forcing restarts when no push arrives.** Check the Gateway log for `Too many failed login attempts` first. Each login is another failed attempt. Wait for the UTC time the app-path 409 names (Gate 6), then restart once from that path. Do not use broker-local `radon restart` during the quiet period.
 
 - **Do not re-enable IBC-side relogin on 2FA timeout** (`TWOFA_TIMEOUT_ACTION: exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT: "no"` in `docker/ib-gateway/docker-compose.yml`). VPS counterpart uses IBC default (`no`). IBC's relogin bypasses the push lock and reintroduces the stacked-push bug.
 - **Do not piecemeal `systemctl stop radon-<one>`** — a clean stop does not `Restart=always` back, so the unit stays down until something starts it. Use `radon restart` instead. (Stopping `radon-ib-gateway` no longer cascade-stops api/relay/monitor: since 44e89e1b they are `After=`-ordered only, never `PartOf=`; a 2FA restart leaves the app plane up. See `docs/spof-host-split.md`.) See `feedback_use_radon_restart_not_piecemeal_systemctl.md`.

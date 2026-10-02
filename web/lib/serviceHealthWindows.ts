@@ -183,6 +183,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
 
   // ``ma-ratio`` — radon-ma-ratio.timer fires daily 22:45 UTC every calendar day (weekend runs are unchanged-data heartbeats), so a uniform 26h window matches its div-yield sibling; shared price_history_daily member closes (Yahoo sweep) + Turso only, no IB.
   "ma-ratio": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
+  // ``rsi-oversold`` — radon-rsi-oversold.timer fires daily 23:05 UTC every calendar day (weekend runs are unchanged-data heartbeats), so a uniform 26h window matches its ma-ratio sibling; shared price_history_daily member closes (Yahoo sweep) + Turso only, no IB.
+  "rsi-oversold": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
   // ``calm-streak``: radon-calm-streak.timer fires 02:40 and 14:30 UTC every calendar day (304 runs are heartbeats), so a uniform 26h window; Cboe SPX HTTP + Turso only.
   "calm-streak": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
@@ -224,6 +227,10 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
 
   // ``iei-hyg`` — radon-iei-hyg.timer fires daily 21:55 UTC; IB → UW → Yahoo cascade, so requires_ib stays false.
   "iei-hyg": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
+  // ``credit-vix`` — radon-credit-vix.timer fires daily 22:25 UTC; SHY/HYG
+  // equity cascade plus IB Index → Cboe → Yahoo VIX, so requires_ib stays false.
+  "credit-vix": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``hy-ad``: radon-hyad.timer fires Tue..Sat 11:00 UTC, the morning after
   // FINRA TRACE end-of-day finalization (T+1). A uniform 120h window covers
@@ -584,6 +591,12 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // (GROK_TIMEOUT_SECS = 1h) plus the ticket bookkeeping around it. 90m.
   // Without this row a wedged poller was invisible for 2h40m (2026-08-14).
   "grok-page-responder": { open: 90 * MIN, extended: 90 * MIN, closed: 90 * MIN, category: "scheduled", requires_ib: false },
+
+  // ``grok-upgrade`` is the daily Grok CLI/model track-latest oneshot
+  // (scripts/grok_upgrade.py via radon-grok-upgrade.timer, 07:40 UTC).
+  // Smoke then auto-promote, or stay on last-known-good. Pure xAI CLI +
+  // Turso heartbeat — no IB. 26h window = daily cadence + timer jitter.
+  "grok-upgrade": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``portfolio-archive`` is the portfolio_snapshots cold-archive oneshot
   // (scripts/archive_portfolio_snapshots.py via radon-portfolio-archive.timer

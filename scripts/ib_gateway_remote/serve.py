@@ -8,6 +8,7 @@ Routes:
   GET  /healthz      liveness, no helper
   GET  /status       helper status
   POST /start|stop|restart|reset-lease
+  POST /hold|unhold   IBKR operator hold (JSON body: reason, actor)
 """
 from __future__ import annotations
 
@@ -27,15 +28,22 @@ from typing import Iterable
 # interpreter); it lets /status report the broker's 2FA push lease to the app
 # host, which cannot see this VM's lock file (REL-172, R-475).
 try:
-    from utils import ib_2fa_lock
+    from utils import ib_2fa_lock, ib_operator_hold
+    from utils.ib_login_throttle import format_utc, login_throttle_retry_at
 except ImportError:  # pragma: no cover - `python -m scripts.ib_gateway_remote.serve`
-    from scripts.utils import ib_2fa_lock
+    from scripts.utils import ib_2fa_lock, ib_operator_hold
+    from scripts.utils.ib_login_throttle import format_utc, login_throttle_retry_at
 
 DEFAULT_BIND = "10.0.0.4"
 DEFAULT_PORT = 8340
 DEFAULT_ALLOW = "10.0.0.2"
 DEFAULT_CLIENT_NAMES = "radon-app"
 DEFAULT_HELPER = "/usr/local/bin/radon-ib-gateway-control"
+DEFAULT_WATCHDOG_STATE = "/var/lib/radon/ib-watchdog-state.json"
+# Verbs that start a Gateway login. Inside an IBKR login throttle each one is
+# another failed attempt (2026-09-26), so they wait out the watchdog's quiet
+# period; stop and reset-lease never log in.
+LOGIN_VERBS = frozenset({"start", "restart"})
 HELPER_TIMEOUT_S = 120.0
 # Per-connection socket timeout: covers the TLS handshake, the request line,
 # headers and body. A peer that connects and goes quiet is released here
@@ -47,6 +55,13 @@ MAX_BODY_BYTES = 4096
 PRIVATE_NET = ipaddress.ip_network("10.0.0.0/16")
 MUTATIONS = frozenset({"start", "stop", "restart", "reset-lease"})
 VERBS = MUTATIONS | {"status"}
+# The IBKR operator hold, set and cleared from the admin panel. Not helper
+# verbs: the daemon writes the hold itself (utils/ib_operator_hold.py), then
+# runs the helper's own `stop` / `start`. `hold` never logs in, so no cooldown
+# or throttle gates it; `unhold` logs in once and both gate that login.
+HOLD_VERBS = frozenset({"hold", "unhold"})
+HOLD_REASON_MAX = 200
+HOLD_ACTOR_MAX = 80
 # REL-172 (R-475): a per-verb cooldown a caller cannot clear. `stop` releases
 # the lease unconditionally and `reset-lease` exists to release it, so either
 # followed by a fresh login within seconds stacks a second IBKR push behind
@@ -234,6 +249,7 @@ def load_config(env: dict[str, str] | None = None) -> dict:
         "allow": allow,
         "client_names": client_names,
         "helper": helper,
+        "watchdog_state": source.get("RADON_IB_WATCHDOG_STATE_PATH") or DEFAULT_WATCHDOG_STATE,
         "cert": str(cert),
         "key": str(key),
         "ca": str(ca),
@@ -288,6 +304,21 @@ def cooldown_refusal(verb: str, now: float | None = None) -> str | None:
                     f"{VERB_COOLDOWN_S - elapsed:.0f}s (a fresh login now would stack a 2FA push)"
                 )
     return None
+
+
+def login_throttle_refusal(verb: str, watchdog_state: str, now: float | None = None) -> str | None:
+    """Reason a login verb is refused while IBKR throttles logins, else None."""
+    if verb not in LOGIN_VERBS:
+        return None
+    retry_at = login_throttle_retry_at(Path(watchdog_state))
+    now = time.time() if now is None else now
+    if retry_at is None or now >= retry_at:
+        return None
+    return (
+        "IBKR is refusing Gateway logins (too many failed login attempts); "
+        f"every {verb} is another failed login. Wait until {format_utc(retry_at)}, "
+        "then restart once and approve the push."
+    )
 
 
 def record_verb(verb: str, now: float | None = None) -> None:
@@ -396,7 +427,7 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
             return
         path = self.path.split("?", 1)[0]
         verb = path[1:] if path.startswith("/") else path
-        if verb not in MUTATIONS:
+        if verb not in MUTATIONS and verb not in HOLD_VERBS:
             self._refuse(404, "not found")
             return
         try:
@@ -408,14 +439,107 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
             self.close_connection = True
             self._refuse(413, f"body exceeds {MAX_BODY_BYTES} bytes")
             return
-        if length:
-            self.rfile.read(length)
+        body = self.rfile.read(length) if length else b""
+        if verb in HOLD_VERBS:
+            self._operator_hold(verb, body)
+            return
         self._helper(verb)
+
+    def _operator_hold(self, verb: str, body: bytes) -> None:
+        cfg = self.server.gateway_config
+        try:
+            request = json.loads(body.decode("utf-8")) if body else {}
+        except (UnicodeDecodeError, ValueError):
+            self._refuse(400, "body is not JSON")
+            return
+        if not isinstance(request, dict):
+            self._refuse(400, "body is not an object")
+            return
+        actor = "app:" + str(request.get("actor") or "unknown")[:HOLD_ACTOR_MAX]
+        if verb == "hold":
+            self._set_hold(cfg, request, actor)
+        else:
+            self._clear_hold(cfg, actor)
+
+    def _set_hold(self, cfg: dict, request: dict, actor: str) -> None:
+        reason = str(request.get("reason") or "operator hold from the admin panel")[:HOLD_REASON_MAX]
+        expires_at = request.get("expires_at") or None
+        hold_error = None
+        try:
+            ib_operator_hold.set_hold(reason, actor, expires_at)
+        except (OSError, ValueError, TypeError) as exc:
+            hold_error = str(exc)
+        # Stop even when the flag failed: the operator is about to log in.
+        rc, detail = run_helper(cfg["helper"], "stop", cfg["timeout"])
+        if rc == 0:
+            record_verb("stop")
+        payload = {
+            "ok": hold_error is None and rc == 0,
+            "verb": "hold",
+            "operator_hold": ib_operator_hold.hold_state(),
+            "gateway_stop": {"returncode": rc, "detail": detail},
+        }
+        if hold_error is not None:
+            payload["detail"] = f"HOLD NOT WRITTEN ({hold_error}); run `radon ib release` on the broker"
+        elif rc != 0:
+            payload["detail"] = (
+                f"hold set, but the Gateway stop failed (rc={rc}): {detail}. "
+                "Run `radon ib release` on the broker"
+            )
+        else:
+            payload["detail"] = "hold set; Gateway stopped. Wait ~30s, then log in to IBKR."
+        self._ok(payload, 200 if payload["ok"] else 502)
+
+    def _clear_hold(self, cfg: dict, actor: str) -> None:
+        try:
+            ib_operator_hold.clear_hold(actor)
+        except OSError as exc:
+            self._ok({"ok": False, "verb": "unhold", "detail": f"hold not cleared: {exc}",
+                      "operator_hold": ib_operator_hold.hold_state()}, 502)
+            return
+        state = ib_operator_hold.hold_state()
+        if state["held"]:
+            self._ok({"ok": False, "verb": "unhold", "operator_hold": state,
+                      "detail": "hold still reads held; run `radon ib resume` on the broker"}, 502)
+            return
+        # Recovery back on, never silently: one login now (one push), unless
+        # the cooldown or an IBKR login throttle says a login would hurt. The
+        # watchdog owns recovery from there.
+        refusal = cooldown_refusal("start") or login_throttle_refusal("start", cfg["watchdog_state"])
+        if refusal is not None:
+            start = {"ok": False, "returncode": CONTROL_BUSY_RC, "detail": refusal}
+        else:
+            rc, detail = run_helper(cfg["helper"], "start", cfg["timeout"])
+            if rc == 0:
+                record_verb("start")
+            start = {"ok": rc == 0, "returncode": rc, "detail": detail}
+        self._ok({
+            "ok": True,
+            "verb": "unhold",
+            "operator_hold": state,
+            "gateway_start": start,
+            "detail": "hold cleared; approve the IBKR Mobile push" if start["ok"]
+            else f"hold cleared; Gateway start deferred: {start['detail']}",
+        })
 
     def _helper(self, verb: str) -> None:
         cfg = self.server.gateway_config
+        # `radon ib release` holds the Gateway out of the IBKR username the
+        # operator shares with it; a login here would kick the operator.
+        if verb in LOGIN_VERBS and ib_operator_hold.is_held():
+            self._ok({
+                "ok": False,
+                "verb": verb,
+                "code": "OPERATOR_HOLD",
+                "detail": (
+                    "IBKR operator hold active; `radon ib resume` on the broker "
+                    "or Resume Gateway in /admin clears it"
+                ),
+                "operator_hold": ib_operator_hold.hold_state(),
+            }, 423)
+            return
         if verb in MUTATIONS:
-            refusal = cooldown_refusal(verb)
+            refusal = cooldown_refusal(verb) or login_throttle_refusal(verb, cfg["watchdog_state"])
             if refusal is not None:
                 self._ok({"ok": False, "verb": verb, "returncode": CONTROL_BUSY_RC, "detail": refusal}, 409)
                 return
@@ -433,6 +557,7 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
                 "returncode": rc,
                 "lease": broker_lease(),
                 "transition": "pending" if state == "transition-pending" else None,
+                "operator_hold": ib_operator_hold.hold_state(),
             }
             self._ok(payload, 409 if rc in {LEASE_HELD_RC, CONTROL_BUSY_RC} else 200)
             return

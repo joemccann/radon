@@ -96,7 +96,6 @@ ALL_KEYS = {
     "ANTHROPIC_API_KEY": "sk-ant-test",
     "XAI_API_KEY": "xai-test",
     "OPENAI_API_KEY": "sk-openai-test",
-    "GEMINI_API_KEY": "gem-test",
     "NVIDIA_API_KEY": "nvapi-test",
     "CEREBRAS_API_KEY": "csk-test",
     # Explicit escape hatch so prepaid-path failover tests keep exercising HTTP.
@@ -146,7 +145,7 @@ class TestLadderContract:
             "grok",
             "cursor",
             "codex",
-            "gemini",
+            "antigravity",
             "nvidia",
             "cerebras",
         )
@@ -217,6 +216,49 @@ class TestTextJsonPath:
         )
         assert result.provider == "grok"
         assert result.data == OBJ
+
+    def test_success_whose_content_mentions_billing_words_is_accepted(self):
+        # Research and distill content routinely says "capacity", "quota",
+        # "billing", "rate limit" or "overloaded". A 200 answer is judged by its
+        # envelope, never by the words the model wrote.
+        obj = {
+            "summary": (
+                "Refinery capacity is overloaded; the export quota and a billing "
+                "dispute hit after the Fed rate limit talk. Credit balance too low."
+            )
+        }
+        router = _Router(
+            {"api.anthropic.com": _anthropic_obj_ok(obj), "api.x.ai": _openai_obj_ok()}
+        )
+        result = complete_multimodal_json(
+            "evaluate", env=ALL_KEYS, post=router, stream_anthropic=False
+        )
+        assert result.provider == "anthropic"
+        assert result.data == obj
+        assert router.calls == [c for c in router.calls if "api.anthropic.com" in c]
+
+    def test_openai_shaped_success_mentioning_quota_is_accepted(self):
+        obj = {"summary": "OPEC quota cuts and pipeline capacity limits."}
+        router = _Router({"api.x.ai": _openai_obj_ok(obj)})
+        result = complete_multimodal_json(
+            "evaluate",
+            env={"XAI_API_KEY": "x", "RADON_LADDER_ALLOW_PREPAID": "1"},
+            post=router,
+            stream_anthropic=False,
+        )
+        assert result.provider == "grok"
+        assert result.data == obj
+
+    def test_200_error_envelope_still_falls_through_as_quota(self):
+        quota_200 = _Resp(
+            200, {"error": {"message": "You exceeded your current quota", "type": "insufficient_quota"}}
+        )
+        router = _Router({"api.anthropic.com": quota_200, "api.x.ai": _openai_obj_ok()})
+        result = complete_multimodal_json(
+            "evaluate", env=ALL_KEYS, post=router, stream_anthropic=False
+        )
+        assert result.provider == "grok"
+        assert "anthropic:quota_or_billing" in result.attempted
 
     def test_incomplete_anthropic_raises_response_error(self):
         router = _Router(
@@ -572,12 +614,12 @@ class TestSubscriptionAuthPreference:
         assert auth.token == "grok-sub-token"
 
     def test_google_is_antigravity_only_no_key_no_oauth_token_under_any_flag(self):
-        # Operator 2026-09-18: only Antigravity, never Gemini API keys or tokens.
-        assert "gemini" not in wired_providers({"GOOGLE_API_KEY": "goog-test"})
-        assert "gemini" not in wired_providers(
+        # Operator 2026-09-18: only the Antigravity CLI, never Google API keys or tokens.
+        assert "antigravity" not in wired_providers({"GOOGLE_API_KEY": "goog-test"})
+        assert "antigravity" not in wired_providers(
             {"GEMINI_API_KEY": "g", "GOOGLE_API_KEY": "goog-test", "RADON_LADDER_ALLOW_PREPAID": "1"}
         )
-        assert "gemini" not in wired_providers({"GEMINI_OAUTH_TOKEN": "gem-oauth"})
+        assert "antigravity" not in wired_providers({"GEMINI_OAUTH_TOKEN": "gem-oauth"})
 
     def test_anthropic_subscription_sends_oauth_beta_header(self):
         captured: list[dict] = []
@@ -726,10 +768,9 @@ class TestCodexSubscriptionGoesThroughChatGpt:
         assert any("api.openai.com" in u for u in router.calls)
 
 
-class TestGeminiRunsThroughTheAntigravityCli:
-    """Google retired the Gemini CLI OAuth client for individuals on 2026-09-18
-    and the Antigravity grant lacks the generativelanguage scope (403 live), so
-    the gemini rung shells out to `agy -p` and never calls HTTP."""
+class TestAntigravityRungRunsThroughTheCli:
+    """The Antigravity grant lacks the generativelanguage scope (403 live), so
+    the antigravity rung shells out to `agy -p` and never calls HTTP."""
 
     def _home(self, tmp_path):
         home = tmp_path / "home"
@@ -745,16 +786,16 @@ class TestGeminiRunsThroughTheAntigravityCli:
 
     def test_wired_when_the_cli_and_grant_are_present(self, tmp_path):
         env = {"HOME": str(self._home(tmp_path))}
-        auth = model_ladder._auth_for("gemini", env)
+        auth = model_ladder._auth_for("antigravity", env)
         assert auth is not None
         assert auth.kind == "subscription"
         assert auth.mechanism == "antigravity_cli"
-        assert "gemini" in wired_providers(env)
+        assert "antigravity" in wired_providers(env)
 
     def test_not_wired_without_the_cli(self, tmp_path):
         home = self._home(tmp_path)
         (home / ".local" / "bin" / "agy").unlink()
-        assert "gemini" not in wired_providers({"HOME": str(home)})
+        assert "antigravity" not in wired_providers({"HOME": str(home)})
 
     def test_text_completion_shells_out_to_agy_print_mode(self, tmp_path, monkeypatch):
         home = self._home(tmp_path)
@@ -770,10 +811,10 @@ class TestGeminiRunsThroughTheAntigravityCli:
         result = complete_text_json(
             "evaluate",
             system="You are Radon.",
-            env={"HOME": str(home), "GEMINI_MODEL": "gemini-3.8-flash-low"},
+            env={"HOME": str(home), "ANTIGRAVITY_MODEL": "gemini-3.8-flash-low"},
             post=router,
         )
-        assert result.provider == "gemini"
+        assert result.provider == "antigravity"
         assert result.data == {"ok": True}
         assert router.calls == []
         argv = calls[0]
@@ -782,6 +823,28 @@ class TestGeminiRunsThroughTheAntigravityCli:
         assert argv[argv.index("--model") + 1] == "gemini-3.8-flash-low"
         prompt = argv[argv.index("-p") + 1]
         assert "You are Radon." in prompt and "evaluate" in prompt
+
+    def test_gemini_is_not_a_rung_and_gemini_model_is_ignored(self, tmp_path, monkeypatch):
+        assert "gemini" not in MODEL_LADDER_ORDER
+        assert "gemini" not in MODEL_LADDER_TIERS
+        home = self._home(tmp_path)
+        assert "gemini" not in wired_providers({"HOME": str(home)})
+        assert model_ladder._auth_for("gemini", {"HOME": str(home)}) is None
+        calls: list[list[str]] = []
+
+        def fake_run(argv, **kwargs):
+            calls.append(list(argv))
+            import subprocess as sp
+            return sp.CompletedProcess(argv, 0, stdout=json.dumps({"status": "SUCCESS", "response": '{"ok": true}'}), stderr="")
+
+        monkeypatch.setattr(model_ladder.subprocess, "run", fake_run)
+        result = complete_text_json(
+            "evaluate",
+            env={"HOME": str(home), "GEMINI_MODEL": "gemini-3.8-flash-low"},
+            post=_Router({}),
+        )
+        assert result.provider == "antigravity"
+        assert "--model" not in calls[0]
 
     def test_images_skip_the_rung(self, tmp_path, monkeypatch):
         home = self._home(tmp_path)
@@ -926,7 +989,7 @@ class TestNoPrepaidByDefault:
         "ANTHROPIC_API_KEY": "sk-ant-prepaid",
         "XAI_API_KEY": "xai-prepaid",
         "OPENAI_API_KEY": "sk-openai-prepaid",
-        "GEMINI_API_KEY": "gem-prepaid",
+        "GEMINI_API_KEY": "gem-prepaid",  # dead key: must never wire anything
         "NVIDIA_API_KEY": "nvapi-test",
     }
 
@@ -935,7 +998,7 @@ class TestNoPrepaidByDefault:
         assert "anthropic" not in wired
         assert "grok" not in wired
         assert "codex" not in wired
-        assert "gemini" not in wired
+        assert "antigravity" not in wired
         assert "nvidia" in wired
 
     def test_prepaid_only_text_path_uses_nvidia_without_sub_http(self):
@@ -968,7 +1031,7 @@ class TestNoPrepaidByDefault:
         assert "anthropic" in wired
         assert "grok" in wired
         assert "codex" in wired
-        assert "gemini" not in wired  # Antigravity only; no prepaid Gemini path exists
+        assert "antigravity" not in wired  # CLI only; no prepaid Google path exists
 
     def test_subscription_still_preferred_when_present_with_allow_prepaid(self):
         from clients.model_ladder import _auth_for
@@ -1266,3 +1329,93 @@ class TestAntigravityCliEnvIsolation:
         )
         assert seen.get("HOME") == "/tmp/fake-home"
         assert seen.get("RADON_LADDER_NO_AUTH_FILES") == "1"
+
+
+# --- NVIDIA rate limits (2026-09-30) -------------------------------------------
+# The NVIDIA key is shared with the nightly fx loops and limited per key. The
+# ladder paces its NVIDIA calls through scripts/nvidia_rate_limit.py, skips the
+# rung (never waits long, never hammers) when the budget is spent, and reports
+# a 401/403 loudly with a redacted body snippet.
+
+
+class _FakeLimiter:
+    def __init__(self, allow=True):
+        self.allow = allow
+        self.events: list = []
+
+    def acquire(self, max_wait):
+        self.events.append(("acquire", max_wait))
+        return self.allow
+
+    def note_429(self, retry_after):
+        self.events.append(("429", retry_after))
+
+    def note_auth_failure(self, status):
+        self.events.append(("auth", status))
+
+    def note_success(self):
+        self.events.append(("ok",))
+
+
+class TestNvidiaRateLimits:
+    ENV = {"NVIDIA_API_KEY": "nvapi-test", "CEREBRAS_API_KEY": "csk-test"}
+
+    def _run(self, monkeypatch, router, limiter):
+        monkeypatch.setattr(model_ladder, "_nvidia_limiter", lambda env, post: limiter)
+        return complete_text_json("evaluate", env=self.ENV, post=router,
+                                  providers=("nvidia", "cerebras"))
+
+    def test_a_spent_budget_skips_nvidia_without_a_request(self, monkeypatch):
+        router = _Router({"api.cerebras.ai": _openai_obj_ok()})
+        limiter = _FakeLimiter(allow=False)
+        result = self._run(monkeypatch, router, limiter)
+        assert result.provider == "cerebras"
+        assert not any("nvidia" in url for url in router.calls)
+        assert "nvidia:rate_limited_local" in result.attempted
+
+    def test_a_429_records_a_cooldown_and_falls_through(self, monkeypatch):
+        router = _Router({"integrate.api.nvidia.com": _Resp(429, {"error": "Too Many Requests"}),
+                          "api.cerebras.ai": _openai_obj_ok()})
+        limiter = _FakeLimiter()
+        result = self._run(monkeypatch, router, limiter)
+        assert result.provider == "cerebras"
+        assert ("429", None) in limiter.events
+        assert sum("nvidia" in url for url in router.calls) == 1, "a 429 is never retried in place"
+
+    def test_a_403_is_logged_loudly_with_a_redacted_snippet(self, monkeypatch, caplog):
+        body = {"detail": "Authorization failed for Bearer nvapi-SECRETSECRETSECRET"}
+        router = _Router({"integrate.api.nvidia.com": _Resp(403, body),
+                          "api.cerebras.ai": _openai_obj_ok()})
+        limiter = _FakeLimiter()
+        with caplog.at_level("WARNING", logger=model_ladder.logger.name):
+            result = self._run(monkeypatch, router, limiter)
+        assert result.provider == "cerebras"
+        assert ("auth", 403) in limiter.events
+        errors = [r for r in caplog.records if r.levelname == "ERROR"]
+        assert errors and "NVIDIA AUTHORIZATION FAILED" in errors[0].getMessage()
+        text = caplog.text
+        assert "Authorization failed" in text
+        assert "SECRETSECRET" not in text
+
+    def test_success_resets_the_429_streak(self, monkeypatch):
+        router = _Router({"integrate.api.nvidia.com": _openai_obj_ok()})
+        limiter = _FakeLimiter()
+        result = self._run(monkeypatch, router, limiter)
+        assert result.provider == "nvidia"
+        assert limiter.events[0][0] == "acquire" and ("ok",) in limiter.events
+
+    def test_non_200_bodies_are_logged_as_a_short_snippet(self, caplog):
+        router = _Router({"api.cerebras.ai": _Resp(500, "upstream exploded " + "z" * 600)})
+        with caplog.at_level("WARNING", logger=model_ladder.logger.name), pytest.raises(ModelLadderExhausted):
+            complete_text_json("evaluate", env={"CEREBRAS_API_KEY": "csk-test"}, post=router,
+                               providers=("cerebras",))
+        assert "upstream exploded" in caplog.text
+        assert "z" * 300 not in caplog.text
+
+    def test_injected_posts_are_never_paced(self):
+        assert model_ladder._nvidia_limiter({}, _Router({})) is None
+
+    def test_the_network_post_uses_the_shared_host_limiter(self, tmp_path):
+        env = {"RADON_NVIDIA_RATE_STATE": str(tmp_path / "rate.json")}
+        limiter = model_ladder._nvidia_limiter(env, model_ladder._default_post)
+        assert limiter is not None and limiter.path == tmp_path / "rate.json"

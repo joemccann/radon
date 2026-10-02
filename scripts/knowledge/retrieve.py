@@ -16,9 +16,9 @@ Scope/source filters are pushed into both candidate legs (not applied after
 the fixed candidate pool) so a flooded unmatching source cannot crowd a
 scoped query out of the pool entirely.
 
-The 384-d vector leg uses server-side vector_top_k over the ANN index from
-migration 0028. The 2048-d leg is an exact cosine scan of embedding_v2
-(migration 0089 drops that DiskANN index). Callers may inject any
+Both vector legs are exact cosine scans (vector_distance_cos). Migrations
+0089 and 0090 drop the DiskANN indexes: each row update took 10-33s and held
+Turso's single writer, stalling every other writer. Callers may inject any
 `vector_search(db, embedding, pool, scopes, sources)` callable (tests use a
 numpy cosine scorer). Fusion/decay/list helpers are pure Python — importable
 and unit-testable without a DB.
@@ -38,7 +38,6 @@ LEG_WEIGHTS = {"fts": 1.0, "vector": 1.0}
 RECENCY_HALF_LIFE_DAYS: dict[str, float] = {"newsfeed": 7.0, "incidents": 14.0}
 MIN_RECENCY_FACTOR = 0.05
 CANDIDATE_POOL = 50
-VECTOR_FILTER_OVERFETCH = 4  # ANN top_k widening when filters discard candidates
 MAX_PER_SOURCE = 3
 NEIGHBOR_SPAN = 1
 
@@ -53,11 +52,12 @@ _FTS_SQL_TEMPLATE = (
     "WHERE {where} ORDER BY bm25(knowledge_fts), knowledge_fts.rowid LIMIT ?"
 )
 
-_VECTOR_INDEXES = ("idx_knowledge_embedding",)
+# Legacy index names callers may still pass. Exact scan reads neither.
+_VECTOR_INDEXES = ("idx_knowledge_embedding", "idx_knowledge_embedding_v2")
 
-_V2_EXACT_SQL = (
+_EXACT_SQL = (
     "SELECT id FROM knowledge WHERE {where} "
-    "ORDER BY vector_distance_cos(embedding_v2, vector32(?)) LIMIT ?"
+    "ORDER BY vector_distance_cos({column}, vector32(?)) LIMIT ?"
 )
 
 _NEIGHBOR_SQL = (
@@ -257,35 +257,21 @@ def _vector_top_k_search(
     sources: Sequence[str] | None = None,
     index_name: str | None = None,
 ) -> list[int]:
-    embedding_json = json.dumps(list(query_embedding))
-    if len(query_embedding) == EMBEDDING_DIM_V2:
-        # Legacy callers passed the dropped DiskANN name. Exact scan does not read it.
-        if index_name not in (None, "idx_knowledge_embedding_v2"):
-            raise ValueError("unknown knowledge vector index")
-        return _exact_cosine_v2_ids(db, embedding_json, pool, scopes, sources)
-    name = index_name or "idx_knowledge_embedding"
-    if name not in _VECTOR_INDEXES:
+    if index_name not in (None, *_VECTOR_INDEXES):
         raise ValueError("unknown knowledge vector index")
-    filter_clauses, filter_args = _knowledge_filters(scopes, sources)
-    head = "SELECT t.id FROM vector_top_k('" + name + "', vector32(?), ?) t"
-    if not filter_clauses:
-        rows = db.execute(head, (embedding_json, pool)).fetchall()
-        return [row[0] for row in rows]
-    sql = head + " JOIN knowledge ON knowledge.id = t.id WHERE {where} LIMIT ?"
-    sql = sql.format(where=" AND ".join(filter_clauses))
-    top_k = pool * VECTOR_FILTER_OVERFETCH
-    rows = db.execute(sql, (embedding_json, top_k, *filter_args, pool)).fetchall()
-    return [row[0] for row in rows]
+    column = "embedding_v2" if len(query_embedding) == EMBEDDING_DIM_V2 else "embedding"
+    return _exact_cosine_ids(db, column, json.dumps(list(query_embedding)), pool, scopes, sources)
 
 
-def _exact_cosine_v2_ids(
+def _exact_cosine_ids(
     db,
+    column: str,
     embedding_json: str,
     pool: int,
     scopes: Sequence[str] | None,
     sources: Sequence[str] | None,
 ) -> list[int]:
-    """Nearest-first ids for embedding_v2.
+    """Nearest-first ids for `column` (embedding or embedding_v2).
 
     vector_distance_cos is cosine distance (0 = identical). Ascending order
     is the same nearest-first rank vector_top_k fed into RRF. Similarity is
@@ -293,8 +279,8 @@ def _exact_cosine_v2_ids(
     weight of that rank.
     """
     filter_clauses, filter_args = _knowledge_filters(scopes, sources)
-    where = " AND ".join(["embedding_v2 IS NOT NULL", *filter_clauses])
-    sql = _V2_EXACT_SQL.format(where=where)
+    where = " AND ".join([f"{column} IS NOT NULL", *filter_clauses])
+    sql = _EXACT_SQL.format(where=where, column=column)
     rows = db.execute(sql, (*filter_args, embedding_json, pool)).fetchall()
     return [row[0] for row in rows]
 

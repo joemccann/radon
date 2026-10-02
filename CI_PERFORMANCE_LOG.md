@@ -1698,3 +1698,289 @@ python/web gate co-wall then the deploy floor (CIP-004).
 - Remediation eligibility: the completed audit supplies zero P0/P1 source-actionable findings. No lower-priority substitute is permitted. The node-image/`scripts-rs` co-wall remains work-bound with no demonstrated safe recurring >=15-second/10% reduction; cache, transfer, shard, DAG, provenance, recovery, and rollback candidates remain `INSUFFICIENT_SAMPLE` or unsafe.
 - Verification: focused protected contracts `scripts/tests/test_ci_gate_integrity.py`, `test_ci_deploy_concurrency.py`, `test_path_filter.py`, and `test_codemap.py` passed **119 tests in 14.99s**; both workflow YAML files parsed, `bash -n scripts/ci_performance_nightly.sh`, and base/branch diff checks passed. The detached serial broader stage prewrote `scripts/cloud/vitest` slots but ended without a `DONE` sentinel; it is explicitly not counted as a passing gate or performance sample.
 - Safety/impact: no workflow, test, image, cache, artifact, deploy, or trading-state source changed. Test inventory, coverage, path classification, required gates, immutable provenance, exact-SHA verification, health, recovery, rollback, cancellation, and the 40-second stability floor remain unchanged; runner-minute impact is zero. Outcome: `NO_SAFE_CHANGE` / `INSUFFICIENT_SAMPLE`; CIP-005/CIP-007/CIP-009/CIP-013 remain `VALIDATING`, CIP-004/CIP-006/CIP-008 remain `DEFERRED`. Residual bottleneck remains the required node-image/`scripts-rs` co-wall then the protected Deploy floor. Revert trigger: reject any candidate that weakens a protected rail.
+
+### 2026-09-28 - remediate - CIP-014 - branch `ci-performance/2026-09-28`
+
+- Runner state: dedicated `.radon-weekend-runner` and `.radon-ci-performance-runner` markers present. HEAD started at `origin/main` `5c27667c87f314feaf7fbbcaad03613fd9e00546`. `RADON_WEEKEND_REDUCED=1` confines this phase to verified P0/P1. The rolling issue #196 audit comment (2026-09-28) is the checkpoint; this ledger had no entry after 2026-09-17.
+- Audited range carried forward: `4f3a972770d442f6fc31c7d2c8a26faa831a3c26..5c27667c87f314feaf7fbbcaad03613fd9e00546`. `audited-through: 5c27667c87f314feaf7fbbcaad03613fd9e00546`.
+- Comparable before window (mixed/full successful main deploys, primary clock createdAt to Deploy completedAt): runs 36379054426, 36366891075, 36350192672, 36345053254, 36343933835, 36340006005, 36338310328, 36334033874, 36298313765. n=9, p50 382s, p95 430s. Queue before the first job is 2-3s and is not execution time. Representative run [36379054426](https://github.com/joemccann/radon/actions/runs/36379054426): `pytest (scripts-gh)` 231s (04:45:46Z-04:49:37Z), pytest step 213s, `test_weekend_subscription_only.py` 184.5s / 900 tests on one worker; `pytest (scripts-jm)` 178s (04:45:46Z-04:48:44Z), `test_loop_lifecycle_adversarial.py` 118.8s / 172 tests. `scripts-rs` 157s is the next wall. Node image is off the critical path on this window.
+- Hypothesis: `--dist loadfile` cannot split a module. Moving the four heavy subscription classes (53.0s, 51.3s, 38.7s, 29.9s) and the two lifecycle floors (50.8s detach, 33.0s reclaim) into separate modules the current `scripts-gh` and `scripts-jm` globs already collect lets the existing workers run them together. No new shard. Predicted push-to-deploy p50 about 330s (about 52s, 14%) once both tails fall near a 105s job and `scripts-rs` (~140-158s) becomes the wall. One-file-only split does not clear 10%. Outcome stays `VALIDATING` until five comparable mixed after-runs.
+- Changed paths: `scripts/tests/weekend_subscription_only_lib.py`, `scripts/tests/loop_lifecycle_adversarial_lib.py`, `scripts/tests/test_weekend_subscription_only_*.py`, `scripts/tests/test_loop_lifecycle_adversarial_*.py`, `scripts/tests/test_cip014_loadfile_tails.py`, `scripts/tests/test_path_filter.py` (web-fixture exemption follows the uncollected lib), `docs/operations.md`, `docs/security-approved-tools.md`. Workflow YAML, shard count, `--dist loadfile`, deploy gates, coverage, and the 40s stability window are unchanged.
+- Red then green: `test_cip014_loadfile_tails.py` failed 2 / passed 5 while both suites were single files. After the split, 7 passed. Collect-only inventory stayed 1072 (900 + 172).
+- Gates, serial on a contended host (load > 10), not a timing sample: contract set `test_ci_gate_integrity.py` `test_ci_deploy_concurrency.py` `test_path_filter.py` `test_codemap.py` `test_cip014_loadfile_tails.py` — 127 passed, 1 skipped in 22.12s. The seven slice modules — 1071 passed, 1 skipped. The detach module and the 33s reclaim case together under `-n 2 --dist loadfile` — 5 passed in 59.99s. Ruby YAML parse of `ci.yml` and `app-images.yml`, `bash -n scripts/ci_performance_nightly.sh`, and `git diff --check origin/main` passed.
+- Safety: same tests, same shard globs, same worker count. Lifecycle process cases take `tmp_path` (four read-only source comparisons are the exception). Revert if either shard flakes or `test_pytest_shard_union_equals_recursive_collection` fails. Runner minutes should fall with the two shorter jobs; no shard was added. Free plan reports no billed milliseconds.
+- Not in this reduced run: CIP-009 stays `VALIDATING` (a late Vitest shard still finishes before prestage; not source-actionable). CIP-013 stays `VALIDATING` (the codemap check is already on main; waiting on an organic nightly log). CIP-002, CIP-003, CIP-004, CIP-006, CIP-007, CIP-008 stay deferred at P2/P3. CIP-005 stays off the critical path, as the audit recorded.
+- Residual bottleneck after this lands: `scripts-rs` around 140-158s, then the protected deploy floor. Performance outcome: `VALIDATING` / `INSUFFICIENT_SAMPLE` (0 of 5 after-runs).
+
+### 2026-09-29 - CIP-015 - record Flex retry sleeps instead of waiting on fake SSH - VALIDATING
+
+**Audit and scope.** Audited `6a19490baab85b91d0dd02511c36749c8d23718c..c274a773228ed29226721694370d3a1c2739494e`
+(six commits, 164 changed paths), on `ci-performance/2026-09-29` only.
+No open `ci-performance/*` PRs. CIP-014 is merged; CIP-015 is the next ID.
+The runner migrations (#786/#791) retire the old wrapper test inventory and
+change the current bottleneck. Their speedup cannot be credited to CIP-014
+or tonight's work. This experiment changes two test files only; production
+code, workflow, shard membership and count remain unchanged.
+
+**Measurement.** Thirty organic `main` push runs, latest 36502433090.
+The implicit-repository `gh run list` initially returned an old September 19
+window; `--repo joemccann/radon` agrees with the Actions workflow API on the
+September 29 window below. `gh run view --log` omitted reusable image jobs;
+`--log --job` returned empty output, so image evidence uses the Actions job
+logs API. Tabbed workflow logs were parsed with `line.split('\t', 2)`;
+raw job logs have timestamps directly. All elapsed values use workflow
+createdAt to successful Deploy completedAt, never workflow updatedAt.
+Quantiles use linear interpolation. Warm means the image dependency steps
+are CACHED and applicable uv restores hit, not that all source layers hit.
+Queued means any required job started >15s after its actual predecessors
+completed; first-job queue is reported separately. No queue gain is claimed.
+These rolling health cohorts cross source revisions and are not an experiment
+acceptance comparison. Cold successful cohort: zero.
+
+| Class | Cache | Queue state | n | p50 | p95 | Initial queue p50/p95 | Gate p50/p95 | Runner seconds p50 | Runs |
+|---|---|---|---:|---:|---:|---|---|---:|---|
+| mixed | warm | ordinary | 6 | 359.5 | 407.2 | 2.0/3.5 | 225.5/263.5 | 2628.5 | 36502433090, 36457689300, 36445686994, 36431446311, 36428306493, 36427174355 |
+| mixed | warm | queued | 10 | 384.0 | 431.4 | 2.5/3.0 | 242.5/290.1 | 2692.5 | 36487944594, 36485793872, 36473577042, 36467607737, 36461578479, 36444746794, 36440701678, 36432859704, 36379054426, 36366891075 |
+| docs | warm | ordinary | 1 | 189.0 | 189.0 | 3.0/3.0 | 82.0/82.0 | 222.0 | 36458669324 |
+| web | warm | rerun | 1 | 2290.0 | 2290.0 | 3.0/3.0 | 133.0/133.0 | 1564.0 | 36452937300 |
+| python | warm | ordinary | 1 | 407.0 | 407.0 | 3.0/3.0 | 261.0/261.0 | 1518.0 | 36401307340 |
+
+Reliability: 19 success, 8 cancelled, 3 failure. The three failures
+(36460098792, 36443511899, 36432259362) refused stale main SHAs before
+teardown. Cancelled 36459367579 nevertheless completed a stable deployment
+in 413s; it remains excluded from performance wins. Web run 36452937300
+is attempt 2: 2290s is a REAL createdAt-to-deployment interval, not a
+skipped-job timestamp error. Attempt 1 failed durable transition recovery
+on retired `radon-forktest` units; its deploy began 16:44:58Z, and attempt 2
+began 17:17:13Z. This is recovery/degraded evidence, not a warm performance
+win. Main subsequently fixed transient-unit selection in #783. No main
+rerun or workflow dispatch was requested tonight. No rollback was observed
+in the ordinary success cohort; the failed recovery stays in this record.
+Runner usage sums job wall seconds, including non-gating work; the free-plan
+`/timing` endpoint reports zero billable ms. Rerun wall sums below describe
+the latest job listing and are lower bounds on cumulative attempts.
+
+| Run | Class/cache | State | Initial / largest gate queue | Release seconds | Runner seconds |
+|---|---|---|---|---:|---:|
+| 36502433090 | mixed/warm | success/ordinary | 2s / 4s | 303.0 | 2404 |
+| 36487944594 | mixed/warm | success/queued | 2s / 58s | 395.0 | 2478 |
+| 36487742441 | mixed/warm | cancelled/queued | 3s / 52s | none | 1916 |
+| 36487702899 | mixed/unknown/unknown | cancelled/queued | 3s / 57s | none | 1520 |
+| 36487665210 | web/warm | cancelled/ordinary | 3s / 4s | none | 1009 |
+| 36485793872 | mixed/warm | success/queued | 2s / 72s | 383.0 | 2630 |
+| 36473577042 | mixed/warm | success/queued | 2s / 39s | 357.0 | 2684 |
+| 36467607737 | mixed/warm | success/queued | 3s / 70s | 427.0 | 2678 |
+| 36461578479 | mixed/warm | success/queued | 2s / 39s | 344.0 | 2755 |
+| 36460098792 | mixed/warm | failure/queued | 2s / 39s | none | 2550 |
+| 36459367579 | mixed/warm | cancelled/queued | 3s / 22s | 413.0 | 2746 |
+| 36458669324 | docs/warm | success/ordinary | 3s / 4s | 189.0 | 222 |
+| 36457689300 | mixed/warm | success/ordinary | 2s / 6s | 334.0 | 2550 |
+| 36452937300 | web/warm | success/rerun | 3s / 1938s | 2290.0 | 1564 |
+| 36445686994 | mixed/warm | success/ordinary | 2s / 9s | 344.0 | 2617 |
+| 36444746794 | mixed/warm | success/queued | 3s / 72s | 435.0 | 2740 |
+| 36444548465 | mixed/warm | cancelled/queued | 3s / 51s | none | 1930 |
+| 36444399219 | mixed/warm | cancelled/queued | 3s / 23s | none | 1911 |
+| 36443511899 | mixed/warm | failure/ordinary | 2s / 7s | none | 2554 |
+| 36442429286 | mixed/warm | cancelled/rerun | 3s / 593s | none | 2716 |
+| 36440701678 | mixed/warm | success/queued | 3s / 39s | 342.0 | 2772 |
+| 36432859704 | mixed/warm | success/queued | 3s / 79s | 370.0 | 2682 |
+| 36432655341 | mixed/warm | cancelled/ordinary | 3s / 4s | none | 2237 |
+| 36432259362 | mixed/warm | failure/ordinary | 3s / 9s | none | 2356 |
+| 36431446311 | mixed/warm | success/ordinary | 2s / 6s | 375.0 | 2814 |
+| 36428306493 | mixed/warm | success/ordinary | 2s / 14s | 417.0 | 2773 |
+| 36427174355 | mixed/warm | success/ordinary | 4s / 4s | 378.0 | 2640 |
+| 36401307340 | python/warm | success/ordinary | 3s / 4s | 407.0 | 1518 |
+| 36379054426 | mixed/warm | success/queued | 3s / 38s | 409.0 | 2701 |
+| 36366891075 | mixed/warm | success/queued | 2s / 38s | 385.0 | 2758 |
+
+**Current critical path.** Run [36502433090](https://github.com/joemccann/radon/actions/runs/36502433090),
+SHA c274a773228ed29226721694370d3a1c2739494e, 303s total:
+2s queue -> Path filter 13s -> 2s hop -> scripts-df 142s -> 2s hop ->
+pytest coverage 19s -> 4s hop -> prepull 18s -> 4s hop -> Deploy 97s.
+Prestage runs alongside prepull, after the same complete gate set, and takes
+9s. Gates authorize at +180s. The longest actual predecessor chain is
+reconstructed from needs, not a sum of sibling durations. Python shard walls
+46-142s (3.09x max/min); Vitest 72-107s (1.49x). The next Python wall is
+npsz 107s; its gate would authorize near +145s, ahead of current +180s.
+The web coverage gate completes +137s and the node image +116s.
+
+Job breakdown below: setup is job start to first execution step; execution
+is test/build/SSH/scan steps; cleanup/gaps include artifact and post steps.
+Queue is measured after actual needs, not workflow start.
+
+| Job (Actions ID) | Queue after needs | Setup | Execution steps | Cleanup/gaps | Wall |
+|---|---:|---:|---:|---:|---:|
+| Path filter (109196150181) | 2s | 8s | 2s | 3s | 13s |
+| Secret scan (gitleaks) (109196150324) | 2s | 8s | 1s | 2s | 11s |
+| Exact app images / Build python image (109196206786) | 3s | 11s | 44s | 6s | 61s |
+| Exact app images / Build node image (109196206822) | 2s | 9s | 82s | 10s | 101s |
+| pytest (cloud al) (109196215119) | 2s | 11s | 91s | 4s | 106s |
+| pytest (cloud edge) (109196215155) | 2s | 10s | 70s | 4s | 84s |
+| Perimeter smoke (next start + curl) (109196215258) | 2s | 16s | 31s | 4s | 51s |
+| Playwright P0-financial smoke (non-gating) (109196215367) | 2s | 2s | 312s | 8s | 322s |
+| Vitest (shard 2/8) (109196215563) | 2s | 17s | 79s | 6s | 102s |
+| Vitest (shard 5/8) (109196215588) | 3s | 16s | 86s | 5s | 107s |
+| Vitest (shard 7/8) (109196215609) | 3s | 20s | 81s | 5s | 106s |
+| Vitest (shard 6/8) (109196215620) | 2s | 13s | 70s | 3s | 86s |
+| Vitest (shard 3/8) (109196215622) | 2s | 17s | 51s | 4s | 72s |
+| Vitest (shard 4/8) (109196215654) | 2s | 13s | 74s | 4s | 91s |
+| pytest (scripts-ac) (109196215711) | 2s | 18s | 48s | 4s | 70s |
+| Vitest (shard 1/8) (109196215718) | 2s | 16s | 80s | 5s | 101s |
+| Vitest (shard 8/8) (109196215748) | 2s | 12s | 77s | 3s | 92s |
+| pytest (scripts-df) (109196215801) | 2s | 17s | 123s | 2s | 142s |
+| pytest (scripts-rs) (109196215928) | 2s | 9s | 83s | 3s | 95s |
+| pytest (scripts-gh) (109196215929) | 2s | 12s | 29s | 5s | 46s |
+| pytest (scripts-npsz) (109196215974) | 2s | 9s | 95s | 3s | 107s |
+| pytest (scripts-daemons) (109196215978) | 2s | 12s | 30s | 6s | 48s |
+| pytest (scripts-i) (109196215993) | 2s | 10s | 65s | 3s | 78s |
+| pytest (scripts-jm) (109196216017) | 2s | 13s | 66s | 7s | 86s |
+| pytest (rest) (109196216079) | 4s | 8s | 62s | 4s | 74s |
+| Vitest coverage ratchet (109196711005) | 3s | 4s | 3s | 2s | 9s |
+| pytest coverage ratchet (109196861726) | 2s | 12s | 5s | 2s | 19s |
+| Prestage VPS release (109196959638) | 2s | 2s | 6s | 1s | 9s |
+| Prepull exact app images (109196959668) | 4s | 1s | 15s | 2s | 18s |
+| Deploy to VPS (109197058119) | 4s | 1s | 95s | 1s | 97s |
+
+**Images/cache/deploy.** Latest Python build/publish step 43s, image export
+2.4s, cache export 1.3s; node step 82s, Next build 28.5s, image export
+14.2s, cache export 12.3s (exports overlap; do not add them). Node context
+22.63MB/0.5s, cached dependency unpack about 26.6s. Image job IDs
+109196206786/109196206822. Current cache API inventory: 453 entries,
+10,863,611,815 bytes, 207 main entries; no measured repeated dependency miss
+in the successful sample cohort. Prepull job 109196959668 is 18s, its pull
+step 15s. Deploy job 109197058119 is 97s, SSH 95s: prestaged release reused
+00:22:04Z; promotion begins 00:22:07Z; all restarted units active
+00:22:37Z; 40-second stability confirmed 00:23:19Z; job complete
+00:23:30Z. Required health, recovery, rollback artifacts, transition journal,
+green marker, exact-SHA Python/node verification and non-cancelling deploy
+concurrency are unchanged.
+
+**Ranked candidates, before editing.**
+
+1. **CIP-015, selected:** `scripts/tests/test_flex_sftp_pull.py:804-871`
+   (base lines), `test_flex_pull_sftp_get_reset.py:96-145`, production retry
+   policy `scripts/flex_sftp_pull.py:79-80,290,305`, shard
+   `.github/workflows/ci.yml:346-347`. Latest df job 109196215801 is 142s,
+   pytest step 123s (pytest session 121.29s). Its JUnit has 118.2s total
+   testcase work, 77.3s in the Flex pull file and 14.0s in reset regressions.
+   On four CPUs the work floor is ~30s, so this is a serial file tail,
+   not work saturation. Eleven 2s+5s backoffs produce 77s in the first file;
+   two more produce 14s in the second. Replace waiting with recorded delay
+   requests and matching monotonic advancement in these fake-SSH tests.
+   Expected critical-path saving ~35s (303 -> ~268s, 11.6%), bounded by
+   npsz/web/image peers; expected runner wall reduction 60-77s (2.5-3.2%).
+   High confidence in removed waiting, medium in release gain, low safety
+   risk with unchanged assertions and added retry-policy checks. Validation:
+   focused tests plus PR Linux gates, then organic before/after cohorts.
+2. **CIP-002, DEFERRED:** node `COPY scripts` before Next compilation,
+   `docker/app/Dockerfile.node:65-66,84`; latest node job above completes
+   +116s, below projected +145s gates. Zero current critical-path gain;
+   cold/layer ownership and image verification cost remain material.
+3. **CIP-003/CIP-005, DEFERRED/INSUFFICIENT_SAMPLE:** Vitest imbalance
+   and npsz work, `.github/workflows/ci.yml:242,354-355`; latest Vitest
+   shard 5 job 109196215588 takes 107s, npsz job 109196215974 takes 107s.
+   Optimizing either alone after CIP-015 exposes the other within ~8s.
+   Additional shards raise runner usage; no demonstrated independent 15s
+   win. Low confidence, medium validation cost, no change selected.
+4. **CIP-004, DEFERRED:** duplicate fetch/scheduled-unit reconciliation,
+   `.github/workflows/ci.yml:1131`, `cloud/scripts/deploy-root-helper.sh`
+   sync-scheduled-units. Historical 8-10s ceiling; latest finalization
+   tail ~11s after stability. Medium confidence, higher recovery risk and
+   validation cost; below materiality. Do not trim restart/health/stability.
+5. **CIP-009, INSUFFICIENT_SAMPLE:** runner queue gaps 16-86s in queued
+   samples, workflow fan-out. Latest maximum gate hop 4s, so no recurring
+   source-controlled gain demonstrated; fewer shards may serialize work.
+   Queue variability cannot be counted as an experiment win.
+6. **CIP-006/CIP-007/CIP-008, DEFERRED:** deploy timing instrumentation,
+   browser setup and demo rebuild. Zero demonstrated deploy-path saving;
+   no observability-only or non-gating refactor substituted for optimization.
+
+**CIP-015 baseline/hypothesis recorded before editing.** Strict current
+inventory before cohort contains only 36502433090 (mixed/warm/ordinary):
+303s release, 142s df, 180s gate, 2404 runner-seconds. Earlier Flex df
+samples 36487944594 (139s), 36485793872 (141s), 36473577042 (145s),
+36467607737 (151s) have the same sleeping tests but different retired-wrapper
+inventory/queue conditions. They demonstrate the file cost, not five matched
+release samples. Expected saved seconds above are predictions, not measured
+after values. Revert trigger: any changed retry/outcome/timeout semantics,
+attributable flake, inventory loss, or attributable failure of acceptance.
+
+**Change and verification.** The opt-in `sftp_retry_clock` replaces only
+`flex_sftp_pull.time`; sleep calls are recorded and add to real monotonic
+elapsed time. Other modules and mtime tests retain real time. All existing
+outcome/heartbeat/file assertions remain; reset tests additionally assert
+exact 2s/5s requests, including both runs of per-account/query failures.
+Three added cases pin three attempts, (2,5,10) retry policy, 90s transport
+timeout, timeout exhaustion, host-key no-retry, and virtual elapsed budget.
+Production source and budgets were not changed.
+
+Red: the new delay assertion failed against the uninstrumented fixture
+(1 failed, 7.68s). Green: 38 existing cases passed, then 136 focused
+Flex/deadline/gate/inventory/path-filter cases passed with the three added
+policy cases. Separate cloud invocation: 49 image/action-pin contracts
+passed. Collection: 38 original, 3 added, 0 removed. Python syntax and both
+workflow YAML files parse; no YAML/JSON/TOML/shell file changed. Diff check
+and secret-pattern scan passed. Local durations are diagnostic only.
+Full suites, Vitest, Docker and workflow lint are delegated to PR CI as
+required by this runner's tool constraints; no local result claims them.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| pytest (scripts-df) | 142s | pending | TBD until 5 samples |
+
+Before is Actions run 36502433090, job 109196215801, not a local timing.
+Status VALIDATING, zero after-main samples. Acceptance requires five
+comparable before and five after: same-class/cache p50 >=10% and >=15s
+faster, p95 no worse by >5% or >15s, cold p50 <=10% worse, runner minutes
+<=20% increase unless disclosed, and every inventory/gate/provenance/health/
+recovery/rollback rail intact. Neither a green PR nor one fast main run
+accepts the experiment.
+
+**Carry-forward findings.** No previous entry is rewritten.
+
+- CIP-002/003/004/006/008: DEFERRED as ranked above. Before anchors remain
+  CIP-002 node ~82s versus cached 16-19s on 33356840635; CIP-003 web gate
+  ~106s (33359053839); CIP-004 ~7s+4s on 33598078630; CIP-006 seven of twenty
+  historical deploys with 60s gateway waits; CIP-008 27s demo work off path.
+- CIP-005: INSUFFICIENT_SAMPLE (previously VALIDATING). Before clean mixed
+  releases 235,236,237,240,247,250,252,254s recorded in stage-2 entry;
+  original shard npsz119s, rs~103-108s. Runner migrations now confound those
+  inventories; no acceptance or performance rejection inferred from them.
+- CIP-007: DEFERRED (previous comments also say VALIDATING). Historical
+  setup tails 319-448s, ordinary 5-8s; first after 34009244091 normal.
+  It is off the release critical path. Keep bounded provisioning; no claim
+  of a production latency win. Five matched step samples and unchanged spec
+  count remain its specific validation requirement.
+- CIP-009: INSUFFICIENT_SAMPLE (previously VALIDATING). Before anchors
+  34009244091,33983869958,33983574603,33983111642,33938475254,33935134766,
+  33917247042,33913674034,33912581935,33911671244: p50~256s/p95~305s,
+  observed fan-out delays 36-37s. Queue variability and changed inventory
+  prevent attributing today's release times to the fan-out reduction.
+- CIP-013: VALIDATING, safety-only, zero predicted deployment savings.
+  Before safety baseline f7bb7620 removed the freshness contract; the
+  2026-09-14 ledger records red/green and nightly-owner restoration.
+  Organic codemap merge #768 exists but Actions cannot attest the local
+  pre-publication nightly command. No host access used; nightly log proof
+  remains unavailable to this Actions-only audit.
+- CIP-014: INSUFFICIENT_SAMPLE, now superseded by wrapper retirement.
+  Prior recorded before mixed/warm runs 36340006005,36343933835,36345053254,
+  36350192672,36366891075,36379054426,36427174355,36428306493,36431446311
+  (p50 385s/p95 430s); prior after 36432859704,36440701678,36444746794,
+  36445686994,36457689300,36461578479,36467607737,36473577042
+  (p50 350s/p95 432s). That 9% reduction did not meet 10%, and mixed queue
+  conditions prevent acceptance. #786/#791 subsequently removed the target
+  wrapper suites; no further clean five-sample attribution is possible.
+  No attributable safety regression or slowdown demonstrated, and no revert
+  of retired systems is proposed. Acceptance for all performance findings
+  remains the five-before/five-after contract above, including cold samples.
+
+**Gate audit.** Branch rules expose the active main-review ruleset
+24143098, one approval plus last-push approval; no required-status-check
+contexts are returned. Classic protection is inaccessible without admin.
+Operator check: compare Settings > Branches > main > required status checks
+with the deploy needs closure. Locally the complete 12-job gate set is
+identical for prestage/prepull/deploy (plus both preparation jobs on deploy),
+including both coverage ratchets, secret scan, fail-closed path filter,
+contracts, images and perimeter smoke. All third-party action uses remain
+SHA-pinned. No gate, source ownership, artifact reuse, exact-SHA image,
+health, recovery, rollback, concurrency or stability behavior changed.

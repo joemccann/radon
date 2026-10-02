@@ -138,6 +138,27 @@ def test_fx_gets_an_nvidia_provider_that_names_the_key_not_its_value(tmp_path):
 
 
 @pytest.mark.skipif(not Path(BASH).exists(), reason="no /bin/bash")
+def test_fx_gets_a_paced_nvidia_provider_on_the_loopback_proxy(tmp_path):
+    """2026-09-30: fx:nvidia runs through the runner's NVIDIA pacing proxy."""
+    _run(tmp_path, {"NVIDIA_API_KEY": "nvapi-TEST"})
+    settings = _fx_settings(tmp_path)
+    assert settings["providers"]["nvidia-paced"] == {
+        "protocol": "openai-chat-completions",
+        "base_url": "http://127.0.0.1:18431/v1",
+        "auth": {"type": "bearer", "env": "NVIDIA_API_KEY"},
+    }, settings
+    assert settings["models"]["nvidia-paced"] == settings["models"]["nvidia"], settings
+    assert settings["providers"]["nvidia"]["base_url"] == "https://integrate.api.nvidia.com/v1", (
+        "the operator's direct provider is unchanged")
+
+
+@pytest.mark.skipif(not Path(BASH).exists(), reason="no /bin/bash")
+def test_the_paced_provider_follows_the_proxy_port(tmp_path):
+    _run(tmp_path, {"NVIDIA_API_KEY": "nvapi-TEST", "RADON_NVIDIA_PROXY_PORT": "19999"})
+    assert _fx_settings(tmp_path)["providers"]["nvidia-paced"]["base_url"] == "http://127.0.0.1:19999/v1"
+
+
+@pytest.mark.skipif(not Path(BASH).exists(), reason="no /bin/bash")
 def test_fx_gets_a_cerebras_provider_for_the_fx_cerebras_rung(tmp_path):
     _run(tmp_path, {"NVIDIA_API_KEY": "nvapi-TEST", "CEREBRAS_API_KEY": "csk-TEST"})
     settings = _fx_settings(tmp_path)

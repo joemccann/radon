@@ -22,14 +22,15 @@ import nightly_issue_prune as prune
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO / "scripts"
-WRAPPERS = (
-    SCRIPTS / "reliability_weekend.sh",
-    SCRIPTS / "testing_weekend.sh",
-    SCRIPTS / "ci_performance_nightly.sh",
-    SCRIPTS / "documentation_nightly.sh",
-    SCRIPTS / "security_nightly.sh",
-    SCRIPTS / "security_deepsec_nightly.sh",
-)
+# The security loops' dead-man is posted and pruned by the runner's post-run hook.
+HOOK = SCRIPTS / "runner" / "hooks" / "security_post.sh"
+
+
+def _report_body() -> str:
+    text = HOOK.read_text(encoding="utf-8")
+    start = text.index("\nreport() {")
+    return "\n".join(line for line in text[start:text.index("\n}", start)].splitlines()
+                     if not line.lstrip().startswith("#"))
 
 
 class TestHasOpenPr:
@@ -58,7 +59,8 @@ class TestCli:
     subprocess wiring (argv shape, --jq parsing, DELETE calls) is covered,
     not just the pure decision function."""
 
-    def _fake_gh(self, tmp_path: Path, *, open_refs: list[str], comment_ids: list[str], bodies: dict[str, str] | None = None) -> Path:
+    def _fake_gh(self, tmp_path: Path, *, open_refs: list[str], comment_ids: list[str], bodies: dict[str, str] | None = None,
+                 assoc: dict[str, str] | None = None) -> Path:
         log = tmp_path / "delete-log.txt"
         script = tmp_path / "fake-gh"
         script.write_text(
@@ -67,6 +69,7 @@ class TestCli:
             f"OPEN_REFS = {open_refs!r}\n"
             f"COMMENT_IDS = {comment_ids!r}\n"
             f"BODIES = {bodies or {}!r}\n"
+            f"ASSOC = {assoc or {}!r}\n"
             f"LOG = {str(log)!r}\n"
             "args = sys.argv[1:]\n"
             "if args[:2] == ['pr', 'list']:\n"
@@ -77,7 +80,8 @@ class TestCli:
             "        f.write(comment_id + '\\n')\n"
             "elif args[:1] == ['api']:\n"
             "    for cid in COMMENT_IDS:\n"
-            "        print(json.dumps({'id': cid, 'body': BODIES.get(cid, '')}))\n"
+            "        print(json.dumps({'id': cid, 'body': BODIES.get(cid, ''),\n"
+            "                          'author_association': ASSOC.get(cid, 'OWNER')}))\n"
             "else:\n"
             "    sys.exit(1)\n",
             encoding="utf-8",
@@ -142,6 +146,20 @@ class TestCli:
         assert proc.returncode == 0, proc.stderr
         assert sorted((tmp_path / "delete-log.txt").read_text().split()) == ["101", "103", "105"]
 
+    def test_an_outsider_checkpoint_neither_survives_nor_evicts_the_real_one(self, tmp_path):
+        gh = self._fake_gh(
+            tmp_path, open_refs=[], comment_ids=["101", "102", "103"],
+            bodies={
+                "101": "audited-through: aaaaaaa",
+                "102": "audited-through: bbbbbbb\nNO_SAFE_CHANGE",
+                "103": "audited-through: ccccccc\nNO_SAFE_CHANGE",
+            },
+            assoc={"102": "NONE", "103": "CONTRIBUTOR"},
+        )
+        proc = self._run(gh)
+        assert proc.returncode == 0, proc.stderr
+        assert sorted((tmp_path / "delete-log.txt").read_text().split()) == ["102", "103"]
+
     def test_no_comments_to_delete_is_a_clean_no_op(self, tmp_path):
         gh = self._fake_gh(tmp_path, open_refs=[], comment_ids=[])
         proc = self._run(gh)
@@ -157,57 +175,24 @@ class TestCli:
 
 
 class TestWrapperWiring:
-    """report() is the single chokepoint every phase status flows through
-    (see nightly_issue_format.py). The prune check belongs there, not
-    scattered at call sites, so no code path can skip it by accident."""
+    """report() is the single chokepoint every phase status flows through."""
 
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_report_is_the_only_place_the_prune_is_wired(self, wrapper: Path):
-        # The ordering half of this case moved to TestWrapperPostBeforePrune
-        # when R-612 inverted it (post first, prune the confirmed remainder).
-        # What still matters here is unchanged: the prune hangs off report(),
-        # the single chokepoint every phase status flows through, so no code
-        # path can skip it and none can call it twice.
-        text = wrapper.read_text(encoding="utf-8")
-        assert "prune_deadman_comments" in text, wrapper.name
-        report_start = text.index("\nreport() {")
-        report_end = text.index("\n}", report_start)
-        body = text[report_start:report_end]
-        assert body.count("prune_deadman_comments") == 1, wrapper.name
-        calls = [
-            line for line in text.splitlines()
-            if "prune_deadman_comments" in line
-            and not line.lstrip().startswith("#")
-            and "prune_deadman_comments() {" not in line
-        ]
-        assert len(calls) == 1, wrapper.name
+    def test_report_is_the_only_place_the_prune_is_wired(self):
+        text = HOOK.read_text(encoding="utf-8")
+        calls = [line for line in text.splitlines()
+                 if "nightly_issue_prune.py" in line and not line.lstrip().startswith("#")]
+        assert len(calls) == 1
+        assert "nightly_issue_prune.py" in _report_body()
 
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_prune_uses_the_isolated_origin_main_pipe(self, wrapper: Path):
-        text = wrapper.read_text(encoding="utf-8")
-        start = text.index("prune_deadman_comments() {")
-        end = text.index("\n}", start)
-        body = text[start:end]
-        assert "origin/main:scripts/nightly_issue_prune.py" in body, wrapper.name
-        assert "/usr/bin/python3 -I -" in body, wrapper.name
-        assert "--branch-prefix" in body and "PR_BRANCH_PREFIX" in body, wrapper.name
+    def test_prune_is_the_root_installed_helper_isolated_bounded_and_never_fatal(self):
+        body = _report_body()
+        call = body[body.index('"$TIMEOUT_BIN" 30'):]
+        assert '"$PY" -I "$RUNNER_DIR/lib/nightly_issue_prune.py"' in call
+        assert '--branch-prefix "$PR_BRANCH_PREFIX"' in call
+        assert "|| true" in call
 
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_prune_is_bounded_and_never_fatal(self, wrapper: Path):
-        text = wrapper.read_text(encoding="utf-8")
-        start = text.index("prune_deadman_comments() {")
-        end = text.index("\n}", start)
-        body = text[start:end]
-        assert "$TIMEOUT_BIN" in body, wrapper.name
-        assert "|| true" in body, wrapper.name
-
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_prune_is_skippable(self, wrapper: Path):
-        text = wrapper.read_text(encoding="utf-8")
-        start = text.index("prune_deadman_comments() {")
-        end = text.index("\n}", start)
-        body = text[start:end]
-        assert "RADON_WEEKEND_SKIP_ISSUE_PRUNE" in body, wrapper.name
+    def test_prune_is_skippable(self):
+        assert "RADON_WEEKEND_SKIP_ISSUE_PRUNE" in _report_body()
 
 
 class TestFailClosed:
@@ -328,62 +313,51 @@ class TestFailClosed:
 class TestWrapperPostBeforePrune:
     """R-612 (P0): the prune ran BEFORE a post whose failure was swallowed by
     `|| true`, so a gh outage during the post deleted the history and added
-    nothing. The post must be confirmed first, and the new comment kept."""
+    nothing. The post must be confirmed first, and the new comment kept.
+    Driven end to end in test_runner_security_hooks.py."""
 
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_prune_runs_only_after_a_confirmed_post(self, wrapper: Path):
-        text = wrapper.read_text(encoding="utf-8")
-        report_start = text.index("\nreport() {")
-        report_end = text.index("\n}", report_start)
-        body = "\n".join(
-            line for line in text[report_start:report_end].splitlines()
-            if not line.lstrip().startswith("#")
-        )
-        assert body.index('issue comment "$issue"') < body.index("prune_deadman_comments"), wrapper.name
+    def test_prune_runs_only_after_a_confirmed_post(self):
+        body = _report_body()
+        assert body.index('issue comment "$issue"') < body.index("nightly_issue_prune.py")
+        assert body.index('if [[ -z "$posted" ]]; then') < body.index("nightly_issue_prune.py")
 
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_a_failed_post_prunes_nothing(self, wrapper: Path):
-        text = wrapper.read_text(encoding="utf-8")
-        report_start = text.index("\nreport() {")
-        report_end = text.index("\n}", report_start)
-        body = text[report_start:report_end]
-        # The prune is reached only through the branch guarded on the post's
-        # captured output, never unconditionally after a `|| true` post.
-        assert 'if [[ -n "$posted" ]]; then' in body, wrapper.name
-        assert "prune_deadman_comments \"$issue\" \"$posted\"" in body, wrapper.name
-
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_prune_forwards_the_new_comment_id_to_keep(self, wrapper: Path):
-        text = wrapper.read_text(encoding="utf-8")
-        start = text.index("prune_deadman_comments() {")
-        end = text.index("\n}", start)
-        body = text[start:end]
-        assert "--keep" in body, wrapper.name
+    def test_prune_forwards_the_new_comment_id_to_keep(self):
+        body = _report_body()
+        assert '--keep "$keep"' in body
+        assert '[[ "$keep" =~ ^[0-9]+$ ]] || return 0' in body
 
 
 class TestDurableState:
     def test_checkpoint_and_latest_report_can_share_one_comment(self):
         comments = [
-            {"id": "1", "body": "audited-through: aaaaaaa"},
-            {"id": "2", "body": "audited-through: bbbbbbb\nNO_ACTIONABLE_DRIFT"},
-            {"id": "3", "body": "**deliver** 0 PR(s), nothing to merge"},
+            {"id": "1", "author_association": "OWNER", "body": "audited-through: aaaaaaa"},
+            {"id": "2", "author_association": "OWNER", "body": "audited-through: bbbbbbb\nNO_ACTIONABLE_DRIFT"},
+            {"id": "3", "author_association": "OWNER", "body": "**deliver** 0 PR(s), nothing to merge"},
         ]
         assert prune.state_comment_ids(comments) == {"2"}
 
     def test_creation_order_not_listing_order_controls_authoritative_checkpoint(self):
         comments = [
-            {"id": "20", "body": "audited-through: bbbbbbb"},
-            {"id": "9", "body": "audited-through: aaaaaaa"},
+            {"id": "20", "author_association": "OWNER", "body": "audited-through: bbbbbbb"},
+            {"id": "9", "author_association": "OWNER", "body": "audited-through: aaaaaaa"},
         ]
         assert prune.state_comment_ids(comments) == {"20"}
 
     def test_quoted_placeholder_is_not_a_verified_checkpoint(self):
         assert prune.state_comment_ids([
-            {"id": "1", "body": "audited-through: <verified-origin-main-sha>"},
+            {"id": "1", "author_association": "OWNER", "body": "audited-through: <verified-origin-main-sha>"},
         ]) == set()
+
+    def test_only_repository_insiders_hold_state(self):
+        assert prune.state_comment_ids([
+            {"id": "1", "author_association": "MEMBER", "body": "audited-through: aaaaaaa"},
+            {"id": "2", "author_association": "COLLABORATOR", "body": "NO_SAFE_CHANGE"},
+            {"id": "3", "author_association": "NONE", "body": "audited-through: bbbbbbb\nNO_SAFE_CHANGE"},
+            {"id": "4", "body": "audited-through: ccccccc"},
+        ]) == {"1", "2"}
 
     def test_standalone_noop_report_survives_without_a_repository_log(self):
         assert prune.state_comment_ids([
-            {"id": "1", "body": "NO_SAFE_CHANGE"},
-            {"id": "2", "body": "NIGHTLY PHASE NO-OP: loop=testing phase=audit no findings"},
+            {"id": "1", "author_association": "OWNER", "body": "NO_SAFE_CHANGE"},
+            {"id": "2", "author_association": "OWNER", "body": "NIGHTLY PHASE NO-OP: loop=testing phase=audit no findings"},
         ]) == {"2"}

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Keep one fixed-path copy of the installed Vercel fx binary for the nightly
 # loops, so macOS privacy grants (Full Disk Access, Documents, Desktop, ...)
-# survive fx upgrades. Same shape as scripts/claude_stable_sync.sh.
+# survive fx upgrades.
 #
 # Why: fx is a bare Mach-O at ~/.local/bin/fx and `fx upgrade` replaces that
 # file, so the operator re-added fx to Full Disk Access after upgrades. The
@@ -23,7 +23,9 @@ set -euo pipefail
 SRC_LINK="${RADON_FX_SOURCE:-$HOME/.local/bin/fx}"
 DEST_DIR="${RADON_FX_STABLE_DIR:-$HOME/.local/share/radon/fx-stable}"
 DEST="$DEST_DIR/fx"
-CODESIGN=/usr/bin/codesign
+# The launchd job's environment is only PATH and HOME, so this stays
+# /usr/bin/codesign in production. Tests pass an absolute double.
+CODESIGN="${RADON_FX_CODESIGN:-/usr/bin/codesign}"
 REQUIREMENT='identifier "com.vercel.fx" and anchor apple generic and certificate leaf[subject.OU] = "JW6Y669B67"'
 
 log() { echo "[fx-stable] $(date -u +%FT%TZ) $*"; }

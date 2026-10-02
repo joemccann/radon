@@ -70,9 +70,11 @@ describe.each([
   ["curve", "app/regime/curve/page.tsx"],
   ["credit", "app/regime/credit/page.tsx"],
   ["iei-hyg", "app/regime/iei-hyg/page.tsx"],
+  ["credit-vix", "app/regime/credit-vix/page.tsx"],
   ["trin", "app/regime/trin/page.tsx"],
   ["divyield", "app/regime/divyield/page.tsx"],
   ["ma-ratio", "app/regime/ma-ratio/page.tsx"],
+  ["rsi-oversold", "app/regime/rsi-oversold/page.tsx"],
   ["calm-streak", "app/regime/calm-streak/page.tsx"],
   ["hyad", "app/regime/hyad/page.tsx"],
   ["hhlev", "app/regime/hhlev/page.tsx"],
@@ -153,6 +155,9 @@ vi.mock("../components/CreditSpreadPanel", () => ({
 vi.mock("../components/IeiHygPanel", () => ({
   default: () => <div data-testid="iei-hyg-panel-stub" />,
 }));
+vi.mock("../components/CreditVixPanel", () => ({
+  default: () => <div data-testid="credit-vix-panel-stub" />,
+}));
 vi.mock("../components/TrinPanel", () => ({
   default: () => <div data-testid="trin-panel-stub" />,
 }));
@@ -161,6 +166,9 @@ vi.mock("../components/DivYieldPanel", () => ({
 }));
 vi.mock("../components/MaRatioPanel", () => ({
   default: () => <div data-testid="ma-ratio-panel-stub" />,
+}));
+vi.mock("../components/RsiOversoldPanel", () => ({
+  default: () => <div data-testid="rsi-oversold-panel-stub" />,
 }));
 vi.mock("../components/CalmStreakPanel", () => ({
   default: () => <div data-testid="calm-streak-panel-stub" />,
@@ -416,6 +424,21 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/iei-hyg");
   });
 
+  it("renders the CREDIT/VIX panel when pathname is /regime/credit-vix", () => {
+    mockedPathname = "/regime/credit-vix";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("credit-vix-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("iei-hyg-panel-stub")).toBeNull();
+    expect(within(container).queryByTestId("credit-panel-stub")).toBeNull();
+  });
+
+  it("clicking CREDIT/VIX tab pushes /regime/credit-vix", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^CREDIT\/VIX$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/credit-vix");
+  });
+
   it("renders the TRIN panel when pathname is /regime/trin", () => {
     mockedPathname = "/regime/trin";
     const { container } = render(<RegimePanel prices={{}} />);
@@ -458,6 +481,20 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^MA RATIO$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/ma-ratio");
+  });
+
+  it("renders the RSI OVERSOLD panel when pathname is /regime/rsi-oversold", () => {
+    mockedPathname = "/regime/rsi-oversold";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("rsi-oversold-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("ma-ratio-panel-stub")).toBeNull();
+  });
+
+  it("clicking RSI OVERSOLD tab pushes /regime/rsi-oversold", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^RSI OVERSOLD$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/rsi-oversold");
   });
 
   it("renders the CALM STREAK panel when pathname is /regime/calm-streak", () => {

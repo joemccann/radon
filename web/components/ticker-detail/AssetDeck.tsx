@@ -108,9 +108,6 @@ export default function AssetDeck({
     >
       <div className="asset-deck-hd">
         <span role="heading" aria-level={2}>{title}</span>
-        <button type="button" className="asset-deck-x" aria-label="Return to book and trade" onClick={() => onDeckChange(null)}>
-          esc ✕
-        </button>
       </div>
       <div className="asset-deck-body">
         {activeDeck === "c" && (

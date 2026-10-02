@@ -11,16 +11,12 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import re
 from pathlib import Path
 
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 HELPER_PY = REPO / "scripts" / "security_claude_ladder.py"
-HELPER_SH = REPO / "scripts" / "security_claude_ladder.sh"
-SECURITY = REPO / "scripts" / "security_nightly.sh"
-DEEPSEC = REPO / "scripts" / "security_deepsec_nightly.sh"
 
 MINI_20260921 = """
 Available models:
@@ -163,33 +159,27 @@ class TestCliMain:
         assert "no skip-newest ladder" in err
 
 
-class TestWrappersShareTheHelper:
-    def test_both_nightlies_source_the_same_helper(self):
-        for wrapper in (SECURITY, DEEPSEC):
-            body = wrapper.read_text(encoding="utf-8")
-            assert 'security_claude_ladder.sh' in body, wrapper.name
-            assert re.search(
-                r'\. "\$REPO/scripts/security_claude_ladder\.sh"', body
-            ), wrapper.name
-            # Policy lives in the helper, not a forever-hardcoded wrapper pin.
-            assert not re.search(
-                r'^MODEL_LADDER="\$\{RADON_WEEKEND_MODEL_LADDER:-claude-opus-5',
-                body,
-                re.M,
-            ), wrapper.name
+class TestRunnerRungs:
+    """scripts/runner/loops/security*.env name this helper as AGENTS_RESOLVER;
+    run_loop.sh runs it with --rungs and its stdout replaces AGENTS."""
 
-    def test_helper_shell_honors_override_env_and_safety(self):
-        sh = HELPER_SH.read_text(encoding="utf-8")
-        assert "RADON_WEEKEND_MODEL_LADDER" in sh
-        assert "RADON_WEEKEND_PROVIDER_LADDER" in sh
-        assert "claude-opus-5 claude-sonnet-5" in sh
-        assert "newest/fable excluded" in sh
-        assert "security_claude_ladder.py" in sh
+    def test_rungs_are_claude_agent_words(self, ladder, tmp_path, capsys):
+        fixture = tmp_path / "catalog.txt"
+        fixture.write_text(MINI_20260921, encoding="utf-8")
+        assert ladder.main(["--rungs", "--from-text", str(fixture)]) == 0
+        out, _err = capsys.readouterr()
+        assert out.strip() == "claude:claude-opus-5 claude:claude-sonnet-5 claude:claude-haiku-4-5"
 
-    def test_claude_arm_still_pins_effort_medium(self):
-        for wrapper in (SECURITY, DEEPSEC):
-            body = wrapper.read_text(encoding="utf-8")
-            arm_start = body.index("    claude)\n", body.index("launch_round() {"))
-            arm = body[arm_start:body.index(";;", arm_start)]
-            assert "--effort medium" in arm, wrapper.name
-            assert "fable" not in arm.lower()
+    def test_no_ladder_prints_no_rungs(self, ladder, tmp_path, capsys):
+        fixture = tmp_path / "catalog.txt"
+        fixture.write_text("nothing\n", encoding="utf-8")
+        assert ladder.main(["--rungs", "--from-text", str(fixture)]) == 1
+        out, _err = capsys.readouterr()
+        assert out.strip() == ""
+
+    def test_both_security_loops_resolve_through_this_helper(self):
+        for loop in ("security", "security-deepsec"):
+            env = (REPO / "scripts" / "runner" / "loops" / f"{loop}.env").read_text(encoding="utf-8")
+            assert "\nAGENTS_RESOLVER=lib/security_claude_ladder.py\n" in env, loop
+            # The safety fallback is the helper's own, never fable.
+            assert '\nAGENTS="claude:claude-opus-5 claude:claude-sonnet-5"\n' in env, loop

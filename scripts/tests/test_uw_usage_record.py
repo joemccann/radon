@@ -85,3 +85,17 @@ def test_post_uw_usage_record_rejects_out_of_range_count(app_client, tmp_path, m
     assert client.post("/uw/usage/record", params={"count": 0}).status_code == 400
     assert client.post("/uw/usage/record", params={"count": 501}).status_code == 400
     assert used(path=tmp_path / "uw_budget.json", now=None) == 0
+
+
+def test_rel052_busy_accounting_returns_retryable_failure(app_client, monkeypatch):
+    client, _server = app_client
+    import utils.uw_budget as uw_budget
+
+    def held(*args, **kwargs):
+        raise TimeoutError("UW budget lock busy")
+
+    monkeypatch.setattr(uw_budget, "record_hits", held)
+    response = client.post("/uw/usage/record")
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "1"
+    assert "lock busy" in response.json()["detail"]
