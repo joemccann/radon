@@ -234,8 +234,7 @@ line here whenever you ship a security fix.**
   but confirm the reasoning.
 - Patch order: **exploitable** first, then defense-in-depth. Patch the safe,
   high-confidence ones with red/green tests; **defer** anything needing an
-  environment-specific verification step (production build, VPS config in the
-  separate `radon-cloud` repo) and document it.
+  environment-specific verification step (production build or deployed VPS configuration) and document it.
 - **Do NOT auto-push.** `git push origin main` IS a production deploy (CI SSHes to
   Hetzner). Land perimeter/relay changes only on the operator's explicit go; after
   deploy, verify the relay + a real authed page render.
