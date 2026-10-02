@@ -41,7 +41,9 @@ require_root() {
 
 actor() {
   local who="${SUDO_USER:-${USER:-root}}"
-  local from="${SSH_CLIENT%% *}"
+  # REL-301 / R-720: console/sudo sessions need no SSH environment.
+  local from="${SSH_CLIENT:-}"
+  from="${from%% *}"
   printf 'ssh:%s@%s\n' "$who" "${from:-local}"
 }
 

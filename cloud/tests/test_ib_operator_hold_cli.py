@@ -10,6 +10,7 @@ container is really gone.
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -65,9 +66,12 @@ esac
     }
 
     class Box:
-        def run(self, *args: str, **extra: str) -> subprocess.CompletedProcess[str]:
+        def run(self, *args: str, unset: tuple[str, ...] = (), **extra: str) -> subprocess.CompletedProcess[str]:
+            child_env = {**env, **extra}
+            for key in unset:
+                child_env.pop(key, None)
             return subprocess.run(
-                ["bash", str(SCRIPT), *args], env={**env, **extra},
+                ["bash", str(SCRIPT), *args], env=child_env,
                 text=True, capture_output=True, check=False, timeout=60,
             )
 
@@ -186,3 +190,13 @@ def test_release_accepts_only_the_named_container_missing(box, tmp_path):
     result = box.run("release", SSH_CLIENT="")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "RELEASED" in result.stdout
+
+
+def test_console_hold_changes_keep_the_operator_identity(box, tmp_path):
+    """REL-301 / R-720: local root consoles have no SSH_CLIENT to expand."""
+    for verb in ("release", "resume"):
+        result = box.run(verb, unset=("SSH_CLIENT",), SUDO_USER="console-operator")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "unbound variable" not in result.stderr
+    events = [json.loads(line) for line in (tmp_path / "hold.jsonl").read_text().splitlines()]
+    assert [event["actor"] for event in events] == ["ssh:console-operator@local"] * 2
