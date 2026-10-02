@@ -1,3 +1,12 @@
+# Task: Mount Antigravity in App Container Runtime (2026-09-28)
+
+- [x] T1 depends_on: [] Failing test in cloud/tests/test_app_runtime.py for .gemini and .local/bin container mounts.
+- [x] T2 depends_on: [T1] Update cloud/scripts/radon-app-runtime.sh to bind .gemini and .local/bin read-only for app units.
+- [x] T3 depends_on: [T2] Verify test_app_runtime.py passes and run focused cloud test suites.
+- [x] T4 depends_on: [T3] Deploy updated radon-app-runtime to ib-gateway and verify radon-research.service.
+
+Review: .gemini and .local/bin mounted read-only for app units in radon-app-runtime.sh; test_app_runtime 99/99 green; deployed to /usr/local/sbin/radon-app-runtime on ib-gateway; radon-research.service active with dropbox-research state transitioning to ok in Turso.
+
 # Task: DeepSec operator-only re-verify (2026-10-01)
 
 - [x] T1 depends_on: [] Failing tests: prompt requires re-verify + open/closed/unverifiable; closed items stay out of Next; DS-2026-09-20-03 closed with #689 / e5c4e627 / setup-vps.sh L39-47.
