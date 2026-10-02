@@ -169,7 +169,8 @@ exits 75. `ExecStopPost` still reaps.
 **Subscription credential binds (2026-09-18).** `radon-app-runtime` also
 binds the operator's CLI subscription grants, each read-only and only when the
 directory exists on the host: `/home/radon/.grok`, `/home/radon/.codex`,
-`/home/radon/.claude`, `/home/radon/.gemini` (Antigravity grant) and
+`/home/radon/.claude`, `/home/radon/.gemini/antigravity-cli` (the Antigravity
+grant; Google's fixed path, the rest of `~/.gemini` is never mounted) and
 `/home/radon/.local/bin` (the `agy` CLI the gemini rung shells out to) land at
 the same paths inside the containers whose unit
 runs an LLM consumer (`radon-api`, `radon-newsfeed`, `radon-research`,

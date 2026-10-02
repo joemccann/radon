@@ -781,7 +781,9 @@ cmd_run() {
   local cred_dir
   case "$unit" in
     radon-api.service|radon-newsfeed.service|radon-research.service|radon-nextjs.service)
-      for cred_dir in .grok .codex .claude .gemini; do
+      # .gemini/antigravity-cli is where Google's agy CLI keeps its grant;
+      # the rest of ~/.gemini is the retired Gemini CLI and stays unmounted.
+      for cred_dir in .grok .codex .claude .gemini/antigravity-cli; do
         if [[ -d "${subscription_home}/${cred_dir}" ]]; then
           set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:ro"
         fi
