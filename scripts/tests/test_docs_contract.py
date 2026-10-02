@@ -1377,3 +1377,33 @@ class TestOperatorHoldDesignBoundary:
         for flag in ("--full", "--with-trading", "--force-lease"):
             assert flag in preface
         assert "Do not execute the proposed procedures below" in preface
+
+
+class TestCredentialSetupOwners:
+    """DOC-150/151: setup instructions must select the implemented auth path."""
+
+    def test_probe_overview_defers_credential_setup_to_environment_owner(self):
+        ops = (_ROOT / "docs/operations.md").read_text()
+        health = ops.split("## Health monitoring", 1)[1].split("## Service Health", 1)[0]
+        overview, procedure = health.split("### External probe dispatch", 1)
+        assert "Repo secrets the workflow reads" not in overview
+        assert "Credential placement" in overview
+        workflow = (_ROOT / ".github/workflows/external-health-probe.yml").read_text()
+        environment = re.search(r"^    environment: (\S+)$", workflow, re.M).group(1)
+        assert f"`{environment}` GitHub Environment" in procedure
+        for name in set(re.findall(r"secrets\.([A-Z_]+)", workflow)):
+            assert f"`{name}`" in procedure
+        assert "not in repository secrets" in procedure
+
+    def test_gemini_setup_uses_the_cli_owner_without_prepaid_exception(self):
+        research = (_ROOT / "docs/dropbox-research.md").read_text()
+        row = next(line for line in research.splitlines() if line.startswith("| gemini |"))
+        assert "oauth-subscription-auth.md#radon-http-model-ladder-server" in row
+        assert "Antigravity CLI" in row
+        assert "GEMINI_OAUTH_TOKEN" not in row and "GEMINI_API_KEY" not in row
+        owner = _section((_ROOT / "docs/oauth-subscription-auth.md").read_text(), "Radon HTTP model ladder (server)")
+        general = next(line for line in owner.splitlines() if line.startswith("- **Anthropic / Grok / Codex"))
+        assert "Gemini" not in general and "GEMINI_API_KEY" not in general
+        assert "no Gemini API key or OAuth-token path at all, under any flag" in owner
+        assert "Weekend bash wrappers" not in owner
+        assert "[nightly runner](runner.md)" in owner

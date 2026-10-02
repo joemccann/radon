@@ -70,7 +70,7 @@ Knowledge distill (`scripts/knowledge/distill.py` → `complete_text_json`) and 
 | grok | `~/.grok/auth.json` (device-auth) | `XAI_API_KEY`, `GROK_API_KEY` | Skip rung when auth.json absent (default). |
 | cursor | — | — | Unwired (no vision HTTP path). |
 | codex | `${CODEX_HOME:-~/.codex}/auth.json` ChatGPT+Codex OAuth `tokens.access_token` | `OPENAI_API_KEY` | Skip rung when auth.json absent (default). |
-| gemini | `GEMINI_OAUTH_TOKEN`, `GOOGLE_OAUTH_ACCESS_TOKEN` | `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_GENAI_API_KEY` | Skip rung when no OAuth token (default). |
+| gemini | [Antigravity CLI setup](oauth-subscription-auth.md#radon-http-model-ladder-server) | None | Text only; no prepaid fallback. |
 | nvidia | `NVIDIA_API_KEY` (always OK) | — | First-class before Cerebras when keyed. **Text** default `nvidia/nemotron-3-super-120b-a12b` (override `NVIDIA_TEXT_MODEL` / `NVIDIA_MODEL`). **Vision** default `meta/llama-3.2-90b-vision-instruct`; on timeout/error falls back to `meta/llama-3.2-11b-vision-instruct` (`NVIDIA_VISION_MODEL`). |
 | cerebras | `CEREBRAS_API_KEY` | — | Last rung; nothing is tried after it. Uses available credit; prepaid auto-reload stays OFF. |
 
