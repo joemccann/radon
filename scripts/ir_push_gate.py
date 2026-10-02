@@ -51,8 +51,9 @@ _CI_URL = re.compile(
 )
 _SHA = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
-# Values of the pushing process's own credentials are refused in any shape,
-# quoted, split across punctuation or not. Short values would match prose.
+# Values of the pushing process's own credentials are refused wherever they
+# appear verbatim, whatever key or quoting surrounds them. This catches
+# accidental leaks, not deliberate encoding. Short values would match prose.
 _SECRET_ENV_NAME = re.compile(r"key|token|secret|passw|_pass|_pwd|auth(?!or)|user", re.IGNORECASE)
 _MIN_SECRET_ENV_VALUE = 12
 
