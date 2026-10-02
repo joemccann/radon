@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import date
 from typing import Any, Optional
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -57,6 +58,17 @@ def normalize_expiry(value: str) -> str:
     if len(digits) == 8:
         return f"{digits[0:4]}-{digits[4:6]}-{digits[6:8]}"
     return (value or "").strip()
+
+
+def _today_iso() -> str:
+    return date.today().isoformat()
+
+
+def _dte(expiry_iso: str) -> Optional[int]:
+    try:
+        return (date.fromisoformat(expiry_iso) - date.fromisoformat(_today_iso())).days
+    except ValueError:
+        return None
 
 
 def parse_occ_symbol(symbol: str) -> dict[str, Any]:
@@ -154,6 +166,9 @@ def normalize_contract(row: dict[str, Any]) -> Optional[dict[str, Any]]:
         "oi": _to_int(row.get("open_interest") or row.get("oi")),
         "volume": _to_int(row.get("volume")),
         "delta": _to_float(row.get("delta")),
+        "gamma": _to_float(row.get("gamma")),
+        "theta": _to_float(row.get("theta")),
+        "vega": _to_float(row.get("vega")),
     }
 
 
@@ -263,13 +278,18 @@ def uw_chain(
                     for row in rows:
                         if not isinstance(row, dict):
                             continue
-                        date = normalize_expiry(str(row.get("expiry") or row.get("date") or ""))
-                        if not date:
+                        # UW keys the date as `expires` and sends no dte.
+                        expiry_date = normalize_expiry(
+                            str(row.get("expires") or row.get("expiry") or row.get("date") or "")
+                        )
+                        if not expiry_date:
                             continue
                         expirations.append(
                             {
-                                "expiry": date,
-                                "dte": _to_int(row.get("dte") or row.get("days_to_expiry")),
+                                "expiry": expiry_date,
+                                "dte": _to_int(row.get("dte")) if row.get("dte") is not None else _dte(expiry_date),
+                                "oi": _to_int(row.get("open_interest")),
+                                "volume": _to_int(row.get("volume")),
                                 "call_volume": _to_int(row.get("call_volume")),
                                 "put_volume": _to_int(row.get("put_volume")),
                             }

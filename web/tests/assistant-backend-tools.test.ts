@@ -91,6 +91,110 @@ describe("assistant backend tools", () => {
     expect(String(path)).toContain("expiry=2026-09-18");
   });
 
+  function fencedBody<T>(data: unknown): T {
+    const lines = (data as { excerpt: string }).excerpt.split("\n");
+    return JSON.parse(lines.slice(1, -1).join("\n")) as T;
+  }
+
+  it("get_option_expirations reads the IB secdef list first, same source as the chain UI", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-02T15:00:00Z"));
+    mocks.radonFetch.mockResolvedValue({ symbol: "SPCX", expirations: ["20261030", "20261218"] });
+    const { executeTool } = await import("@/lib/assistant/tools");
+
+    const result = await executeTool("get_option_expirations", { ticker: "spcx" }, PRINCIPAL);
+    vi.useRealTimers();
+    expect(result.ok).toBe(true);
+    expect(mocks.radonFetch).toHaveBeenCalledTimes(1);
+    expect(mocks.radonFetch.mock.calls[0][0]).toBe("/options/expirations?symbol=SPCX");
+    const body = fencedBody<{ source: string; expirations: Array<{ expiry: string; dte: number }> }>(
+      result.data,
+    );
+    expect(body.source).toBe("ib");
+    expect(body.expirations).toEqual([
+      { expiry: "2026-10-30", dte: 28 },
+      { expiry: "2026-12-18", dte: 77 },
+    ]);
+  });
+
+  it("get_option_expirations falls back to UW when the IB secdef read fails", async () => {
+    const { RadonApiError } = await import("@/lib/radonApi");
+    mocks.radonFetch.mockImplementation(async (path: string) => {
+      if (path.startsWith("/options/expirations")) throw new RadonApiError("gateway down", 503);
+      return { ticker: "SPCX", source: "uw", expirations: [{ expiry: "2026-10-30", dte: 28 }], contracts: [] };
+    });
+    const { executeTool } = await import("@/lib/assistant/tools");
+
+    const result = await executeTool("get_option_expirations", { ticker: "SPCX" }, PRINCIPAL);
+    expect(result.ok).toBe(true);
+    expect(mocks.radonFetch.mock.calls.map(([path]) => path)).toEqual([
+      "/options/expirations?symbol=SPCX",
+      "/options/uw-chain?symbol=SPCX",
+    ]);
+    const body = fencedBody<{ source: string; expirations: Array<{ expiry: string }> }>(result.data);
+    expect(body.source).toBe("uw");
+    expect(body.expirations[0].expiry).toBe("2026-10-30");
+  });
+
+  it("get_option_term_structure prices every expiry inside the horizon and reports ATM IV per tenor", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-02T15:00:00Z"));
+    const ivByExpiry: Record<string, number> = {
+      "2026-10-30": 0.45,
+      "2026-11-20": 0.48,
+      "2026-12-18": 0.52,
+    };
+    mocks.radonFetch.mockImplementation(async (path: string) => {
+      if (path.startsWith("/options/expirations")) {
+        return { symbol: "SPCX", expirations: ["20261030", "20261120", "20261218", "20270115"] };
+      }
+      const params = new URL(`http://x${path}`).searchParams;
+      const expiry = params.get("expiry") ?? "";
+      return {
+        ticker: "SPCX",
+        expiry,
+        spot: 158.6,
+        source: "uw",
+        contracts: [
+          { strike: 155, right: "C", bid: 12, ask: 12.4, mid: 12.2, iv: ivByExpiry[expiry] + 0.01, delta: 0.6 },
+          { strike: 160, right: "C", bid: 9, ask: 9.4, mid: 9.2, iv: ivByExpiry[expiry], delta: 0.5 },
+        ],
+      };
+    });
+    const { executeTool } = await import("@/lib/assistant/tools");
+
+    const result = await executeTool(
+      "get_option_term_structure",
+      { ticker: "SPCX", right: "C", max_dte: 90 },
+      PRINCIPAL,
+    );
+    vi.useRealTimers();
+    expect(result.ok).toBe(true);
+    const chainCalls = mocks.radonFetch.mock.calls
+      .map(([path]) => String(path))
+      .filter((path) => path.startsWith("/options/uw-chain"));
+    expect(chainCalls).toEqual([
+      "/options/uw-chain?symbol=SPCX&expiry=2026-10-30&wings=4&right=C",
+      "/options/uw-chain?symbol=SPCX&expiry=2026-11-20&wings=4&right=C",
+      "/options/uw-chain?symbol=SPCX&expiry=2026-12-18&wings=4&right=C",
+    ]);
+    const body = fencedBody<{
+      ticker: string;
+      spot: number;
+      expirations_source: string;
+      term: Array<{ expiry: string; dte: number; atm_strike: number; atm_iv: number; contracts: unknown[] }>;
+    }>(result.data);
+    expect(body.ticker).toBe("SPCX");
+    expect(body.spot).toBe(158.6);
+    expect(body.expirations_source).toBe("ib");
+    expect(body.term.map((row) => [row.expiry, row.dte, row.atm_strike, row.atm_iv])).toEqual([
+      ["2026-10-30", 28, 160, 0.45],
+      ["2026-11-20", 49, 160, 0.48],
+      ["2026-12-18", 77, 160, 0.52],
+    ]);
+    expect(body.term[0].contracts).toHaveLength(2);
+  });
+
   it("rank_spreads fetches a priced chain and returns ranked bull call payouts", async () => {
     mocks.radonFetch.mockImplementation(async (path: string) => {
       if (String(path).startsWith("/quote/")) {
