@@ -8621,3 +8621,19 @@ Dependency graph: T1 -> T2 -> T3 -> T4. Gateway implementation, header compositi
 Review: independent gateway/coverage reviews completed; shared command lock and source freshness guards implemented. TypeScript static check passed. Manual dark desktop and320px mobile fixture review confirmed direct header access, grouped Gateway commands, service inventory reflow, primary action within752px and no horizontal overflow. Tests authored for GitHub CI; no local suites or live infrastructure actions run.
 
 CI repair review: befea93d preserved21 new gateway/service component regressions; one existing copy assertion required explicit unavailable start/stop/restart wording. Cloud CI exposed an existing pipefail race in required/active unit membership checks (2261 passed,1 failed): pure-shell exact matching replaces early-exit grep pipelines and adds4096-unit topology coverage without relaxing required-unit or oneshot replay guards. No local suites.
+
+## 2026-09-27 Golden-set production-data disclosure
+
+## Dependency graph
+- T1 depends_on: [] - Confirm the reported production journal identifiers and trade details remain tracked at HEAD.
+- T2 depends_on: [T1] - Add a failing fixture-safety regression and remove production-derived labels.
+- T3 depends_on: [T2] - Run focused and full verification, review the diff, commit, and publish a PR.
+
+## Checklist
+- [x] T1 Confirm disclosure at HEAD.
+- [x] T2 Regression and minimal remediation.
+- [ ] T3 Verification and delivery.
+
+## Review
+- Removed the three production-derived journal labels rather than substituting synthetic brokerage history; retained all pre-existing semantic journal coverage.
+- Regression rejects long numeric journal identifiers in the tracked golden set. Focused fixture tests pass; the affected suite is blocked locally because Python 3.13 lacks `libsql_experimental` and package installation is network-denied, while Python 3.14's extension segfaults.
