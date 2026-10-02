@@ -1362,3 +1362,67 @@ class TestGrokBinaryRecoveryDocumentation:
         upgrade = _section(cases, "grok-upgrade-update-rejects-no-auto-update")
         assert "LKG is still absent" not in upgrade
         assert "timer installs\n  `1.0.44`" not in upgrade
+
+
+class TestOperatorHoldDesignBoundary:
+    """DOC-152: proposed release extensions are not deployed safety gates."""
+
+    def test_proposal_defers_operator_actions_to_current_runbook(self):
+        design = (_ROOT / "docs/ibkr-session-release.md").read_text()
+        preface = design.split("## 1.", 1)[0]
+        assert "[current operator procedure](ib-gateway-recovery.md#runbook-flatten-from-ibkr-mobile-while-the-app-is-down)" in preface
+        assert "historical proposal, not deployed guarantees" in preface
+        assert "does not set a trading halt" in preface
+        assert "does not stop local Gateways" in preface
+        for flag in ("--full", "--with-trading", "--force-lease"):
+            assert flag in preface
+        assert "Do not execute the proposed procedures below" in preface
+
+
+class TestCredentialSetupOwners:
+    """DOC-150/151: setup instructions must select the implemented auth path."""
+
+    def test_probe_overview_defers_credential_setup_to_environment_owner(self):
+        ops = (_ROOT / "docs/operations.md").read_text()
+        health = ops.split("## Health monitoring", 1)[1].split("## Service Health", 1)[0]
+        overview, procedure = health.split("### External probe dispatch", 1)
+        assert "Repo secrets the workflow reads" not in overview
+        assert "Credential placement" in overview
+        workflow = (_ROOT / ".github/workflows/external-health-probe.yml").read_text()
+        environment = re.search(r"^    environment: (\S+)$", workflow, re.M).group(1)
+        assert f"`{environment}` GitHub Environment" in procedure
+        for name in set(re.findall(r"secrets\.([A-Z_]+)", workflow)):
+            assert f"`{name}`" in procedure
+        assert "not in repository secrets" in procedure
+
+    def test_gemini_setup_uses_the_cli_owner_without_prepaid_exception(self):
+        research = (_ROOT / "docs/dropbox-research.md").read_text()
+        row = next(line for line in research.splitlines() if line.startswith("| gemini |"))
+        assert "oauth-subscription-auth.md#radon-http-model-ladder-server" in row
+        assert "Antigravity CLI" in row
+        assert "GEMINI_OAUTH_TOKEN" not in row and "GEMINI_API_KEY" not in row
+        owner = _section((_ROOT / "docs/oauth-subscription-auth.md").read_text(), "Radon HTTP model ladder (server)")
+        general = next(line for line in owner.splitlines() if line.startswith("- **Anthropic / Grok / Codex"))
+        assert "Gemini" not in general and "GEMINI_API_KEY" not in general
+        assert "no Gemini API key or OAuth-token path at all, under any flag" in owner
+        assert "Weekend bash wrappers" not in owner
+        assert "[nightly runner](runner.md)" in owner
+
+
+class TestRecurringOwnerCoverage:
+    """DOC-143/145/146/148: actual paths must trigger their existing owner."""
+
+    @pytest.mark.parametrize("source,owner", [
+        ("config/com.radon.external-probe-dispatch.plist", "docs/operations.md"),
+        ("scripts/credential_redaction.py", "docs/security-audit-playbook.md"),
+        ("scripts/research/worker.py", "docs/dropbox-research.md"),
+        ("cloud/services/radon-knowledge-eval.service", "docs/knowledge-embeddings.md"),
+    ])
+    def test_recurring_contract_cannot_change_without_owner(self, source, owner):
+        assert (_ROOT / source).is_file()
+        rules = _load_owners()["rules"]
+        matching = [rule for rule in rules if any(_matches(source, glob) for glob in rule["globs"])]
+        assert matching, f"No documentation owner for {source}"
+        assert any(owner in rule["owners"] for rule in matching)
+        assert _violations([source], matching), "Mapped source alone must fail ownership"
+        assert _violations([source, owner], matching) == []
