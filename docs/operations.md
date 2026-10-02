@@ -169,16 +169,20 @@ exits 75. `ExecStopPost` still reaps.
 **Subscription credential binds (2026-09-18).** `radon-app-runtime` also
 binds the operator's CLI subscription grants, each read-only and only when the
 directory exists on the host: `/home/radon/.grok`, `/home/radon/.codex`,
-`/home/radon/.claude`, `/home/radon/.gemini/antigravity-cli` (the Antigravity
-grant; Google's fixed path, the rest of `~/.gemini` is never mounted) and
-`/home/radon/.local/bin` (the `agy` CLI the gemini rung shells out to) land at
+`/home/radon/.claude` and `/home/radon/.local/bin` (the `agy` CLI the gemini
+rung shells out to) land at
 the same paths inside the containers whose unit
 runs an LLM consumer (`radon-api`, `radon-newsfeed`, `radon-research`,
 `radon-nextjs`), with `HOME=/home/radon` pinned so `Path.home()` and
 `os.homedir()` resolve to them. Next.js hosts `/api/newsfeed/share` and
 `/api/assistant`; excluding it (2026-09-19) 502'd every share rewrite with
 `Missing Anthropic subscription`. Never the whole home directory, and never
-into the relay. The Python and Next.js model ladders use the
+into the relay. Antigravity is the one read-write grant: `agy` refreshes its
+token and writes logs and project state on every run, so
+`/home/radon/.gemini/antigravity-cli` and `/home/radon/.gemini/config` (Google's
+fixed paths) are bound read-write and shared with the host, keeping one rotating
+token store. The rest of `~/.gemini` (the retired Gemini CLI) is never mounted.
+The Python and Next.js model ladders use the
 [subscription-tier billing and recovery policy](oauth-subscription-auth.md#radon-http-model-ladder-server).
 Prepaid fallback for those tiers requires the explicit `RADON_LADDER_ALLOW_PREPAID`
 opt-in; funding a prepaid wallet alone does not recover a missing subscription.

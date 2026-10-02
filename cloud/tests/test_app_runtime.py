@@ -1506,6 +1506,7 @@ def _subscription_home(tmp_path: Path) -> Path:
     (home / ".grok" / "auth.json").write_text("{}", encoding="utf-8")
     (home / ".codex").mkdir()
     (home / ".gemini" / "antigravity-cli").mkdir(parents=True)
+    (home / ".gemini" / "config").mkdir()
     (home / ".gemini" / "oauth_creds.json").write_text("{}", encoding="utf-8")
     (home / ".local" / "bin").mkdir(parents=True)
     return home
@@ -1522,16 +1523,17 @@ def test_run_api_binds_subscription_credential_dirs_readonly(tmp_path: Path) -> 
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
     assert f"{home}/.grok:/home/radon/.grok:ro" in log
     assert f"{home}/.codex:/home/radon/.codex:ro" in log
-    assert (
-        f"{home}/.gemini/antigravity-cli:/home/radon/.gemini/antigravity-cli:ro" in log
-    )
+    # agy refreshes its grant and writes logs/state on every run (live
+    # 2026-10-02: read-only binds -> "You are not logged into Antigravity").
+    for agy_dir in (".gemini/antigravity-cli", ".gemini/config"):
+        assert f"{home}/{agy_dir}:/home/radon/{agy_dir}:rw" in log
     assert f"{home}/.gemini:" not in log  # retired Gemini CLI creds stay out
     assert f"{home}/.local/bin:/home/radon/.local/bin:ro" in log
     assert ".claude:" not in log  # absent on this host: not mounted
     assert "HOME=/home/radon" in log
 
 
-def test_run_research_binds_subscription_and_antigravity_readonly(tmp_path: Path) -> None:
+def test_run_research_binds_subscription_and_antigravity(tmp_path: Path) -> None:
     home = _subscription_home(tmp_path)
     result = _run(
         tmp_path,
@@ -1542,9 +1544,10 @@ def test_run_research_binds_subscription_and_antigravity_readonly(tmp_path: Path
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
     assert f"{home}/.grok:/home/radon/.grok:ro" in log
     assert f"{home}/.codex:/home/radon/.codex:ro" in log
-    assert (
-        f"{home}/.gemini/antigravity-cli:/home/radon/.gemini/antigravity-cli:ro" in log
-    )
+    # agy refreshes its grant and writes logs/state on every run (live
+    # 2026-10-02: read-only binds -> "You are not logged into Antigravity").
+    for agy_dir in (".gemini/antigravity-cli", ".gemini/config"):
+        assert f"{home}/{agy_dir}:/home/radon/{agy_dir}:rw" in log
     assert f"{home}/.gemini:" not in log  # retired Gemini CLI creds stay out
     assert f"{home}/.local/bin:/home/radon/.local/bin:ro" in log
     assert "HOME=/home/radon" in log

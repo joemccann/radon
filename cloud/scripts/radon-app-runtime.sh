@@ -781,11 +781,20 @@ cmd_run() {
   local cred_dir
   case "$unit" in
     radon-api.service|radon-newsfeed.service|radon-research.service|radon-nextjs.service)
-      # .gemini/antigravity-cli is where Google's agy CLI keeps its grant;
-      # the rest of ~/.gemini is the retired Gemini CLI and stays unmounted.
-      for cred_dir in .grok .codex .claude .gemini/antigravity-cli; do
+      for cred_dir in .grok .codex .claude; do
         if [[ -d "${subscription_home}/${cred_dir}" ]]; then
           set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:ro"
+        fi
+      done
+      # Antigravity (agy) keeps its grant and state under Google's fixed
+      # ~/.gemini paths and must write them: it refreshes the token, logs and
+      # creates projects on every run (read-only -> "not logged into
+      # Antigravity", live 2026-10-02). Sharing the host dirs keeps one
+      # rotating token store. The rest of ~/.gemini is the retired Gemini
+      # CLI and stays unmounted.
+      for cred_dir in .gemini/antigravity-cli .gemini/config; do
+        if [[ -d "${subscription_home}/${cred_dir}" ]]; then
+          set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:rw"
         fi
       done
       if [[ -d "${subscription_home}/.local/bin" ]]; then
