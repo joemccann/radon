@@ -235,6 +235,16 @@ def run(now: Optional[datetime] = None) -> dict:
     return {"processed": len(processed_ids), "digested": len(fresh), "unresolved": unresolved}
 
 
+def _read_timeout(exc: BaseException) -> bool:
+    """True for the hrana read stall that must not fail the oneshot.
+
+    Production string: ``TimeoutError: The read operation timed out``.
+    A statement error or a missing credential still fails the unit.
+    """
+    text = str(exc)
+    return "TimeoutError" in text or "The read operation timed out" in text
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     argparse.ArgumentParser(description=__doc__.splitlines()[0]).parse_args(argv)
     try:
@@ -245,7 +255,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         pass
     try:
         summary = run()
-    except Exception as exc:  # noqa: BLE001 — heartbeat the failure, then exit non-zero
+    except Exception as exc:  # noqa: BLE001 — timeout is non-fatal; anything else exits 1
+        if _read_timeout(exc):
+            # Next fire is 5 minutes. Skip ok and error heartbeats so one
+            # stall does not page, and a standing Turso outage still goes
+            # stale inside the 20-minute window.
+            print(f"[{SERVICE}] cycle read timeout non-fatal: {exc}", file=sys.stderr)
+            return 0
         print(f"[{SERVICE}] cycle failed: {exc}", file=sys.stderr)
         try:
             _record_health("error", {"message": str(exc)[:300]})

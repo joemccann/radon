@@ -1246,6 +1246,11 @@ if command in {{"list-unit-files", "list-units"}}:
     for name in names:
         print(name, "enabled")
     raise SystemExit(0)
+if command == "show" and "--property=Id,Transient" in args:
+    for unit in args[args.index("--") + 1:]:
+        transient = "yes" if data["units"].get(unit, {{}}).get("transient") else "no"
+        print(f"Id={{unit}}\\nTransient={{transient}}\\n")
+    raise SystemExit(0)
 if command == "show":
     unit = args[1]
     if data["list_mode"] == "show-fail" and unit == "radon-demo-mirror.service":
@@ -1365,6 +1370,27 @@ for path in paths:
             recovered = subprocess.run(["bash", str(ROOT_HELPER), "recover"], env=env, capture_output=True, text=True)
             assert recovered.returncode == 0, recovered.stderr
             assert missing not in [unit for line in systemctl_log.read_text().splitlines() if line.startswith("start ") for unit in line.split()[1:]]
+
+    def test_transient_units_are_left_out_of_the_release_transition(self, tmp_path):
+        # 2026-09-28: an operator's `systemd-run` timer named radon-forktest was
+        # snapshotted, stopped (so systemd discarded it), then could not be
+        # started again; the deploy and its own rollback both failed.
+        import json
+        env, state_file, systemctl_log, _, active_state = self._root_helper_fixture(tmp_path)
+        data = json.loads(state_file.read_text())
+        data["units"]["radon-forktest.timer"] = dict(state="active", type="timer", transient=True)
+        data["units"]["radon-forktest.service"] = dict(state="inactive", type="oneshot", transient=True)
+        state_file.write_text(json.dumps(data))
+        stopped = subprocess.run(["bash", str(ROOT_HELPER), "stop-clean"], env=env, capture_output=True, text=True)
+        assert stopped.returncode == 0, stopped.stdout + stopped.stderr
+        inventory = active_state.with_name(active_state.name + ".inventory")
+        assert "radon-forktest" not in inventory.read_text()
+        assert "radon-forktest" not in active_state.read_text()
+        assert "radon-margin-debt-refresh.timer" in active_state.read_text()
+        assert json.loads(state_file.read_text())["units"]["radon-forktest.timer"]["state"] == "active"
+        recovered = subprocess.run(["bash", str(ROOT_HELPER), "recover"], env=env, capture_output=True, text=True)
+        assert recovered.returncode == 0, recovered.stdout + recovered.stderr
+        assert "radon-forktest" not in systemctl_log.read_text()
 
     def test_loaded_stop_failure_remains_fatal(self, tmp_path):
         import json
@@ -1624,21 +1650,63 @@ for path in paths:
         self, tmp_path: Path
     ) -> None:
         late_mutation = tmp_path / "late-mutation"
+        child_started = tmp_path / "child-started"
         fake_systemctl = tmp_path / "systemctl"
+        # A Python process per inventory read outlasted the 1s supervisor
+        # deadline on a loaded runner, so stop never started. Bash answers
+        # those reads. The supervisor budget only has to let stop start;
+        # systemctl's own timeout is what kills the hang. LoadState has to
+        # say loaded, or the failed stop is reported as an unverifiable
+        # unit instead of the timeout's 124.
+        units = " ".join(MANAGED_SERVICES)
+        hang = tmp_path / "hang-stop.py"
+        hang.write_text(
+            "\n".join(
+                [
+                    "import signal",
+                    "import subprocess",
+                    "import sys",
+                    "from pathlib import Path",
+                    "signal.signal(signal.SIGTERM, signal.SIG_IGN)",
+                    "child = subprocess.Popen([",
+                    "    sys.executable, '-c',",
+                    f"    \"import time; time.sleep(3); open({str(late_mutation)!r}, 'w').write('late')\",",
+                    "])",
+                    f"Path({str(child_started)!r}).touch()",
+                    "child.wait()",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
         _write_executable(
             fake_systemctl,
-            f"""#!{sys.executable}
-import signal
-import subprocess
-import sys
-if len(sys.argv) > 1 and sys.argv[1] == "list-jobs":
-    raise SystemExit(0)
-signal.signal(signal.SIGTERM, signal.SIG_IGN)
-child = subprocess.Popen([
-    sys.executable, "-c",
-    "import time; time.sleep(3); open({str(late_mutation)!r}, 'w').write('late')",
-])
-child.wait()
+            f"""#!/bin/bash
+args=()
+for arg in "$@"; do
+  [[ "$arg" == "--no-block" ]] || args+=("$arg")
+done
+case "${{args[0]}}" in
+  list-jobs) exit 0 ;;
+  list-unit-files|list-units)
+    for unit in {units}; do printf '%s enabled\\n' "$unit"; done
+    exit 0
+    ;;
+  show)
+    for arg in "${{args[@]}}"; do
+      if [[ "$arg" == "--property=Type" ]]; then printf 'simple\\n'; exit 0; fi
+      if [[ "$arg" == "--property=LoadState" ]]; then printf 'loaded\\n'; exit 0; fi
+    done
+    if [[ "${{args[1]}}" == "radon-ib-gateway-preheld-restart.service" ]]; then
+      printf 'inactive\\n'
+    else
+      printf 'active\\n'
+    fi
+    exit 0
+    ;;
+  stop) exec {sys.executable} {hang} ;;
+  *) exit 2 ;;
+esac
 """,
         )
         fake_rm = tmp_path / "rm"
@@ -1656,14 +1724,15 @@ child.wait()
                 "RADON_TEST_ACTIVE_STATE_FILE": str(tmp_path / "active-units"),
                 "RADON_TEST_REPLICA_PREFIX": str(tmp_path / "replica.db"),
                 "RADON_TEST_TIMEOUT": shutil.which("timeout") or "",
-                "RADON_TEST_ROOT_ACTION_TIMEOUT": "1",
+                "RADON_TEST_ROOT_ACTION_TIMEOUT": "15",
                 "RADON_TEST_ROOT_KILL_AFTER": "1",
             },
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=20,
         )
         assert result.returncode in {124, 137}
+        assert child_started.exists(), result.stdout + result.stderr
         time.sleep(2)
         assert not late_mutation.exists(), "timed-out root descendant mutated state later"
 

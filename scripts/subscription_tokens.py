@@ -357,12 +357,10 @@ def _codex_apply(doc, resp, now):
     return new
 
 
-# -- gemini: ~/.gemini/antigravity-cli/antigravity-oauth-token ---------------
+# -- antigravity: ~/.gemini/antigravity-cli/antigravity-oauth-token ----------
 #
-# 2026-09-18: Google retired the Gemini CLI OAuth client for individuals
-# ("This client is no longer supported for Gemini Code Assist for
-# individuals ... migrate to the Antigravity suite"). The Antigravity CLI
-# (`agy`) keeps its Google OAuth grant in a nested `token` object with an
+# ~/.gemini/antigravity-cli is Google's fixed on-disk location for the
+# Antigravity CLI. `agy` keeps its Google OAuth grant in a nested `token` object with an
 # RFC 3339 `expiry` at nanosecond precision. `agy models` is a cheap
 # authenticated call that refreshes the file in place, so it is the CLI-native
 # refresh; the token endpoint is the fallback when `agy` is not on PATH.
@@ -374,21 +372,21 @@ ANTIGRAVITY_CLIENT_ID = (
 )
 
 
-def _gemini_tokens(doc) -> Mapping[str, Any]:
+def _antigravity_tokens(doc) -> Mapping[str, Any]:
     tokens = doc.get("token")
     return tokens if isinstance(tokens, Mapping) else {}
 
 
-def _gemini_expiry(doc):
-    return _parse_rfc3339(_gemini_tokens(doc).get("expiry"))
+def _antigravity_expiry(doc):
+    return _parse_rfc3339(_antigravity_tokens(doc).get("expiry"))
 
 
-def _gemini_refresh(doc):
-    token = _gemini_tokens(doc).get("refresh_token")
+def _antigravity_refresh(doc):
+    token = _antigravity_tokens(doc).get("refresh_token")
     return token if isinstance(token, str) and token else None
 
 
-def _gemini_apply(doc, resp, now):
+def _antigravity_apply(doc, resp, now):
     new = copy.deepcopy(doc)
     tokens = new.setdefault("token", {})
     if resp.get("access_token"):
@@ -446,9 +444,7 @@ class Provider:
 
     @property
     def secret_name(self) -> str:
-        # The store validates ^[A-Z][A-Z0-9_]{0,63}$, so the registry names are
-        # the spec's identifiers upper-cased.
-        return f"SUBSCRIPTION_TOKEN_{self.name.upper()}"
+        return _secret_name(self.name)
 
     def path(self, env: Mapping[str, str]) -> Path:
         override = (env.get(self.dir_env) or "").strip() if self.dir_env else ""
@@ -468,6 +464,21 @@ class Provider:
         if client_id:
             fields["client_id"] = client_id
         return fields
+
+
+def _secret_name(provider_name: str) -> str:
+    # The store validates ^[A-Z][A-Z0-9_]{0,63}$, so the registry names are
+    # the spec's identifiers upper-cased.
+    return f"SUBSCRIPTION_TOKEN_{provider_name.upper()}"
+
+
+# old name -> current name. State written under the old name (sidecar rows,
+# the sealed vault slot) stays readable; the next write lands under the new one.
+RENAMED_PROVIDERS: dict[str, str] = {"gemini": "antigravity"}
+
+
+def _former_names(provider_name: str) -> list[str]:
+    return [old for old, new in RENAMED_PROVIDERS.items() if new == provider_name]
 
 
 PROVIDERS: dict[str, Provider] = {
@@ -540,17 +551,17 @@ PROVIDERS: dict[str, Provider] = {
         login_args=("login", "--device-auth"),
         login_hosts=("accounts.x.ai",),
     ),
-    "gemini": Provider(
-        name="gemini",
+    "antigravity": Provider(
+        name="antigravity",
         dir_env=None,
         default_subdir=".gemini/antigravity-cli",
         filename="antigravity-oauth-token",
         # Google's published OAuth 2.0 token endpoint.
         token_url="https://oauth2.googleapis.com/token",
-        read_expiry=_gemini_expiry,
-        read_refresh=_gemini_refresh,
+        read_expiry=_antigravity_expiry,
+        read_refresh=_antigravity_refresh,
         read_issuer=_no_issuer,
-        apply=_gemini_apply,
+        apply=_antigravity_apply,
         cli_binary="agy",
         # Not a model call: `agy models` is a sub-second authenticated request
         # that rewrites the token file, so it refreshes and proves the grant.
@@ -578,7 +589,14 @@ class Vault:
         self._store = store
 
     def get(self, provider: str) -> Optional[str]:
-        return self._store.get_secret(PROVIDERS[provider].secret_name)
+        secret = self._store.get_secret(PROVIDERS[provider].secret_name)
+        if secret is not None:
+            return secret
+        for former in _former_names(provider):
+            secret = self._store.get_secret(_secret_name(former))
+            if secret is not None:
+                return secret
+        return None
 
     def seal(self, provider: str, value: str) -> None:
         self._store.set_secret(
@@ -987,6 +1005,16 @@ def _unproven_since(result: ProviderResult, prior: Mapping[str, Any], now: datet
     return prior.get("unproven_since")
 
 
+def _carry_renamed_providers(sidecar: dict) -> None:
+    """Move rows keyed by a former provider name to the current one."""
+    for section in ("providers", "pages"):
+        rows = sidecar[section]
+        for old, new in RENAMED_PROVIDERS.items():
+            if old in rows:
+                rows.setdefault(new, rows[old])
+                del rows[old]
+
+
 class _Run:
     def __init__(self, rt: Runtime, mode: str, force: bool = False) -> None:
         self.rt = rt
@@ -1012,6 +1040,7 @@ class _Run:
             data = {}
         data.setdefault("providers", {})
         data.setdefault("pages", {})
+        _carry_renamed_providers(data)
         return data
 
     def save_sidecar(self, results: Sequence[ProviderResult]) -> None:

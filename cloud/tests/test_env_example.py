@@ -119,7 +119,6 @@ class TestCTAVisionModelLadder:
                 model_ladder._ANTHROPIC_KEYS,
                 model_ladder._GROK_KEYS,
                 model_ladder._CODEX_KEYS,
-                model_ladder._GEMINI_KEYS,
                 model_ladder._NVIDIA_KEYS,
                 model_ladder._CEREBRAS_KEYS,
                 getattr(model_ladder, "_OPTIONAL_LADDER_ENV", ()),
@@ -156,7 +155,7 @@ class TestIBSessionVariables:
     def test_contains_existing_session_detected_action(self, root):
         env_vars = parse_env_vars(read_env_example(root))
         assert "EXISTING_SESSION_DETECTED_ACTION" in env_vars
-        assert env_vars["EXISTING_SESSION_DETECTED_ACTION"] == "primary"
+        assert env_vars["EXISTING_SESSION_DETECTED_ACTION"] == "primaryoverride"
 
 
 class TestNodeEnvironment:

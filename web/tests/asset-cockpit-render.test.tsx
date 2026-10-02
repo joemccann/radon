@@ -17,7 +17,7 @@
 //
 // SELECTOR NOTE: the landed components select on class names, not data-testid
 // (`.cockpit-head`, `.book-region`, `.act-ticket`, `.act-position`, `.glyph-rail`,
-// `.asset-deck`, `.asset-deck-x`). These tests assert on those robust structural
+// `.asset-deck`, `.asset-deck-hd`). These tests assert on those robust structural
 // selectors + rendered text. A future hardening pass SHOULD add stable
 // data-testid hooks (cockpit-header / cockpit-book / cockpit-ticket /
 // cockpit-position / asset-deck) so the tests are not coupled to layout classes.
@@ -265,13 +265,14 @@ describe("AssetCockpit — deck open never occludes the book (flat fixture)", ()
     ).toBeTruthy();
   });
 
-  it("(e) the deck close button calls onDeckChange(null)", () => {
+  it("(e) the deck header renders no esc × close hint (rail, Back and Esc are the ways out)", () => {
     // The flat position deck renders provider-free static content.
-    const { container, onDeckChange } = renderCockpit({ activeDeck: "p" });
-    const closeBtn = container.querySelector(".asset-deck-x") as HTMLElement;
-    expect(closeBtn).toBeTruthy();
-    fireEvent.click(closeBtn);
-    expect(onDeckChange).toHaveBeenCalledWith(null);
+    const { container } = renderCockpit({ activeDeck: "p" });
+    const hd = container.querySelector(".asset-deck-hd") as HTMLElement;
+    expect(hd).toBeTruthy();
+    expect(container.querySelector(".asset-deck-x")).toBeNull();
+    expect(hd.querySelector("button")).toBeNull();
+    expect(hd.textContent ?? "").not.toMatch(/\besc\b|[×✕]/i);
   });
 
   it("(e) Esc (no input focused) calls onDeckChange(null) when a deck is open", () => {

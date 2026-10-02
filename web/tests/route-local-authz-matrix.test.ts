@@ -25,7 +25,7 @@ const ADMIN_ROUTES = ["edge-health", "health", "host-metrics", "reliability", "s
 // Guarded routes outside the security-report ROUTES list — admin actions and
 // the alerts store, all of which carry their own requireRouteAccess call.
 const GUARDED_ADMIN_ACTION_ROUTES = [
-  "admin/ib/reset-backoff", "admin/ib/restart", "admin/services",
+  "admin/ib/operator-hold", "admin/ib/reset-backoff", "admin/ib/restart", "admin/services",
   "admin/services/[unit]/[action]", "admin/stack/restart",
   "admin/trading/[action]", "admin/slm-review", "alerts", "alerts/[id]",
   // Operator credentials CRUD (PR #125): requireRouteAccess operatorOnly on
@@ -76,7 +76,7 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
   "bookmarks", "bookmarks/[post_id]", "bpi", "catalysts",
   // cor/skew2d/vol-cone/equibles-*: read-only market-data indicators (R-079
   // classification) — same posture as bpi/margin-debt/straddle.
-  "cor", "credit-spread", "dispersion", "divyield", "ma-ratio", "calm-streak", "iei-hyg", "trin", "equibles-ats-venue-share", "equibles-cot-positioning",
+  "cor", "credit-spread", "credit-vix", "dispersion", "divyield", "ma-ratio", "rsi-oversold", "calm-streak", "iei-hyg", "trin", "equibles-ats-venue-share", "equibles-cot-positioning",
   "equibles-filing-forensics", "equibles-short-crowding",
   "equibles-smart-money-13f",
   "flex-token", "flow-surprise", "futures-quote", "garch-convergence",

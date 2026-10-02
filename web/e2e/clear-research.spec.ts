@@ -72,7 +72,8 @@ for (const width of [360, 390, 768, 1440]) {
         await more.click();
         await page.getByRole("button", { name: "Company", exact: true }).click();
         await expect(page.locator('.asset-deck.open .asset-deck-hd')).toContainText("Info / Company");
-        await page.locator('.asset-deck.open .asset-deck-x').click();
+        await expect(page.locator('.asset-deck.open .asset-deck-hd')).not.toContainText(/esc|✕/i);
+        await page.keyboard.press("Escape");
         await expect(page.locator('.asset-deck')).toHaveAttribute("aria-hidden", "true");
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);

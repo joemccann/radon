@@ -1,0 +1,2163 @@
+{
+  "date": "2026-09-28",
+  "timezone": "America/Los_Angeles",
+  "rows": [
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-26",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T06:12:13.941725+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T05:44:46.643761+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T05:41:44.807515+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T05:41:44.807515+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T05:39:43.572991+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T05:32:38.198236+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T05:32:38.198236+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T05:22:57.163812+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T05:22:57.163812+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T05:19:54.525991+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T05:18:53.158565+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T05:12:34.757079+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T05:03:09.744481+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T04:54:03.479809+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T04:52:29.748014+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T04:49:35.197618+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T04:49:35.197618+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T04:49:35.197618+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T04:45:31.558257+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T04:42:29.552250+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T04:36:26.213892+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T04:31:33.402951+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T04:28:31.981262+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T04:28:31.981262+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T04:25:29.372790+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T04:17:56.568593+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T04:13:23.344566+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T04:13:23.344566+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T04:12:22.880203+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T04:12:22.880203+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T04:12:22.880203+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T04:06:19.492198+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T03:58:45.077384+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T03:52:01.457897+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T03:49:59.738992+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T03:46:56.896058+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T03:45:56.442772+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T03:31:52.779726+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T03:24:47.480550+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T03:23:46.999826+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T02:43:13.587604+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T02:38:14.660807+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T02:31:03.944536+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T02:23:57.628647+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T02:19:54.684560+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T02:19:54.684560+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T02:18:29.382928+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T02:07:16.540895+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T02:03:14.750219+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T01:58:12.860139+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T01:58:12.860139+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T01:58:12.860139+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T01:46:24.322055+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T01:37:47.560429+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T01:18:54.269466+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T01:18:54.269466+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T01:18:54.269466+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T01:06:57.169993+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T00:26:26.748277+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T00:22:23.617299+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T00:14:31.110625+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T00:06:26.795025+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "INVALID_CANDIDATE",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-29T00:00:57.602589+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T23:53:57.333871+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T23:53:57.333871+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T23:22:16.578151+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T23:20:58.225139+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T23:20:58.225139+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T23:20:58.225139+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T23:14:00.837113+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T22:44:40.623373+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T22:44:40.623373+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T22:35:54.071713+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T22:21:43.590295+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T21:57:32.575561+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T21:51:39.717062+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T21:41:10.064247+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T21:37:01.744598+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-26",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T21:28:37.816970+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-26",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T21:20:45.094323+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-26",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T21:09:59.390139+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-26",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T20:46:39.136724+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-26",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T20:40:48.891533+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-26",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T20:25:51.189417+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-26",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T20:25:51.189417+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-28",
+      "posts": 0,
+      "reason_codes": [
+        "SINGLE_STOCK_NOT_IN_BOOK"
+      ],
+      "updated_at": "2026-09-28T20:12:09.266352+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-28",
+      "posts": 0,
+      "reason_codes": [
+        "DUPLICATE_OF_PUBLISHED"
+      ],
+      "updated_at": "2026-09-28T20:12:04.209657+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-26",
+      "posts": 0,
+      "reason_codes": [
+        "INVALID_CANDIDATE",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T20:12:02.353286+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-26",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T20:06:57.727319+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-26",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T20:04:11.631621+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-26",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T20:04:11.631621+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-26",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T19:41:05.455958+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-26",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T19:41:05.455958+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-26",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T19:15:09.432945+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-26",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T19:05:15.853230+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-27",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T18:47:42.936810+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-27",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T18:29:16.079649+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T18:02:13.428193+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T17:53:57.577230+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T17:53:57.577230+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T17:42:37.052430+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T17:33:59.677910+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T17:32:15.716762+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T17:22:16.379262+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "INVALID_CANDIDATE",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T17:17:19.314537+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T17:00:05.317824+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T16:41:42.909196+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T16:03:57.028650+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T15:54:50.356935+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T15:37:22.670387+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T15:22:58.034366+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T15:15:16.690039+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T14:55:44.289546+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T14:55:44.289546+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T14:55:44.289546+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T14:26:43.217453+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T14:23:41.726852+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T14:23:41.726852+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T14:15:38.213632+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "TEXT_ONLY_WITH_FIGURES",
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T14:03:23.447660+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T14:01:22.491858+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T14:00:21.843564+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T13:55:14.727078+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "TEXT_ONLY_WITH_FIGURES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T13:49:25.199261+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T13:22:09.507049+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T12:49:31.846079+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T12:43:53.941962+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T12:43:53.941962+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-25",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T12:22:17.959100+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-24",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES",
+        "HELD_EXPIRED"
+      ],
+      "updated_at": "2026-09-28T12:01:29.468790+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-27",
+      "posts": 0,
+      "reason_codes": [
+        "DUPLICATE_OF_PUBLISHED"
+      ],
+      "updated_at": "2026-09-28T11:20:32.110797+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-27",
+      "posts": 0,
+      "reason_codes": [
+        "DUPLICATE_OF_PUBLISHED"
+      ],
+      "updated_at": "2026-09-28T10:22:47.897209+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-27",
+      "posts": 0,
+      "reason_codes": [
+        "DUPLICATE_OF_PUBLISHED"
+      ],
+      "updated_at": "2026-09-28T10:22:46.403409+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-27",
+      "posts": 0,
+      "reason_codes": [
+        "DUPLICATE_OF_PUBLISHED"
+      ],
+      "updated_at": "2026-09-28T10:22:43.833209+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-27",
+      "posts": 0,
+      "reason_codes": [
+        "DUPLICATE_OF_PUBLISHED"
+      ],
+      "updated_at": "2026-09-28T10:22:41.013867+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-27",
+      "posts": 0,
+      "reason_codes": [
+        "DUPLICATE_OF_PUBLISHED"
+      ],
+      "updated_at": "2026-09-28T10:17:27.703478+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-27",
+      "posts": 0,
+      "reason_codes": [
+        "DUPLICATE_OF_PUBLISHED"
+      ],
+      "updated_at": "2026-09-28T10:17:25.434702+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-27",
+      "posts": 0,
+      "reason_codes": [
+        "DUPLICATE_OF_PUBLISHED"
+      ],
+      "updated_at": "2026-09-28T10:17:22.944380+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-27",
+      "posts": 0,
+      "reason_codes": [
+        "DUPLICATE_OF_PUBLISHED"
+      ],
+      "updated_at": "2026-09-28T10:17:21.494146+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-27",
+      "posts": 0,
+      "reason_codes": [
+        "DUPLICATE_OF_PUBLISHED"
+      ],
+      "updated_at": "2026-09-28T10:17:17.922084+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-27",
+      "posts": 0,
+      "reason_codes": [
+        "DUPLICATE_OF_PUBLISHED"
+      ],
+      "updated_at": "2026-09-28T09:05:45.684776+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-27",
+      "posts": 0,
+      "reason_codes": [
+        "DUPLICATE_OF_PUBLISHED"
+      ],
+      "updated_at": "2026-09-28T09:05:31.720265+00:00"
+    },
+    {
+      "outcome": "dropped",
+      "folder_date": "2026-09-27",
+      "posts": 0,
+      "reason_codes": [
+        "DUPLICATE_OF_PUBLISHED"
+      ],
+      "updated_at": "2026-09-28T09:05:20.894690+00:00"
+    },
+    {
+      "outcome": "held",
+      "folder_date": "2026-09-28",
+      "posts": 0,
+      "reason_codes": [
+        "INVALID_CANDIDATE"
+      ],
+      "updated_at": "2026-09-28T22:16:30.326691+00:00"
+    },
+    {
+      "outcome": "held",
+      "folder_date": "2026-09-28",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T21:09:59.244684+00:00"
+    },
+    {
+      "outcome": "held",
+      "folder_date": "2026-09-28",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T20:51:59.243212+00:00"
+    },
+    {
+      "outcome": "held",
+      "folder_date": "2026-09-28",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T20:50:52.568550+00:00"
+    },
+    {
+      "outcome": "held",
+      "folder_date": "2026-09-28",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T20:34:02.416104+00:00"
+    },
+    {
+      "outcome": "held",
+      "folder_date": "2026-09-28",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES"
+      ],
+      "updated_at": "2026-09-28T20:17:27.921140+00:00"
+    },
+    {
+      "outcome": "held",
+      "folder_date": "2026-09-28",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES"
+      ],
+      "updated_at": "2026-09-28T20:12:23.323139+00:00"
+    },
+    {
+      "outcome": "held",
+      "folder_date": "2026-09-28",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES"
+      ],
+      "updated_at": "2026-09-28T20:09:23.144761+00:00"
+    },
+    {
+      "outcome": "held",
+      "folder_date": "2026-09-28",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T20:04:11.484852+00:00"
+    },
+    {
+      "outcome": "held",
+      "folder_date": "2026-09-28",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T19:49:16.382045+00:00"
+    },
+    {
+      "outcome": "held",
+      "folder_date": "2026-09-28",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES"
+      ],
+      "updated_at": "2026-09-28T19:26:05.586209+00:00"
+    },
+    {
+      "outcome": "held",
+      "folder_date": "2026-09-28",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES"
+      ],
+      "updated_at": "2026-09-28T19:25:57.592331+00:00"
+    },
+    {
+      "outcome": "held",
+      "folder_date": "2026-09-28",
+      "posts": 0,
+      "reason_codes": [
+        "NO_CANDIDATES"
+      ],
+      "updated_at": "2026-09-28T19:21:01.600248+00:00"
+    },
+    {
+      "outcome": "held",
+      "folder_date": "2026-09-28",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T19:07:06.844829+00:00"
+    },
+    {
+      "outcome": "held",
+      "folder_date": "2026-09-28",
+      "posts": 0,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T18:58:20.434241+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T22:42:32.447658+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T22:22:22.002064+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 5,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T21:00:20.791574+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T20:50:11.953990+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T20:37:28.019526+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 3,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T20:36:42.891460+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T20:34:58.571202+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T20:33:24.877580+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T20:32:39.377535+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T20:32:00.575886+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 2,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T20:31:09.569706+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 4,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T20:25:50.796980+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T20:19:58.738541+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 2,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T20:19:11.814821+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 3,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T20:16:08.188365+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T20:12:59.895816+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 2,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T20:12:01.084718+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T20:10:04.373235+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T20:08:28.009509+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T20:07:43.825433+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 2,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T20:06:57.469299+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 2,
+      "reason_codes": [
+        "TEXT_ONLY_WITH_FIGURES",
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T19:57:41.107355+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T19:52:19.229803+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T19:47:37.596433+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 2,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T19:46:29.090441+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 2,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T19:45:01.532018+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T19:42:27.556008+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [
+        "TEXT_ONLY_WITH_FIGURES",
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T19:41:05.167926+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T19:29:53.741430+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 3,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T19:25:41.773697+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 6,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T19:20:53.095022+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T19:10:29.204357+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T19:07:46.949640+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T19:05:55.473495+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 3,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T19:05:13.443470+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 2,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T19:02:56.149924+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T19:01:30.849109+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 1,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T19:00:16.827376+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-28",
+      "posts": 2,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T18:57:04.191177+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 4,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T16:41:42.423547+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 1,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T13:00:24.526298+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 3,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T12:38:27.946310+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T12:23:55.633509+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 3,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T12:22:17.296114+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 2,
+      "reason_codes": [
+        "INVALID_CANDIDATE",
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T12:01:29.225753+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 4,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T11:39:12.731027+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 3,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T11:35:00.954993+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 2,
+      "reason_codes": [
+        "TEXT_ONLY_WITH_FIGURES"
+      ],
+      "updated_at": "2026-09-28T11:32:54.769116+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 5,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T11:27:31.588022+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T11:13:43.835353+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 4,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T11:08:03.667771+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 2,
+      "reason_codes": [
+        "TEXT_ONLY_WITH_FIGURES"
+      ],
+      "updated_at": "2026-09-28T11:01:04.268618+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T10:59:48.321965+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 4,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T10:52:27.962658+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 6,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T10:42:06.804353+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T10:28:45.744192+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 6,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T10:12:29.206195+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 2,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T10:05:59.535801+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T10:01:52.254261+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 2,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T09:58:53.711412+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T09:55:45.606551+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 5,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T09:55:10.417857+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 1,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T09:44:12.316927+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 2,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T09:42:21.268400+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T09:41:14.027087+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 2,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T09:35:25.797887+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T09:33:23.539985+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 3,
+      "reason_codes": [
+        "TEXT_ONLY_WITH_FIGURES",
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T09:32:42.373795+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 2,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T09:30:05.285670+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-27",
+      "posts": 2,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T09:14:28.130017+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-25",
+      "posts": 1,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T07:34:49.489207+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-24",
+      "posts": 1,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T07:24:20.879887+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-24",
+      "posts": 2,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T07:22:11.040257+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-24",
+      "posts": 2,
+      "reason_codes": [
+        "TEXT_ONLY_WITH_FIGURES"
+      ],
+      "updated_at": "2026-09-28T07:21:02.358837+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-24",
+      "posts": 3,
+      "reason_codes": [],
+      "updated_at": "2026-09-28T07:19:29.185870+00:00"
+    },
+    {
+      "outcome": "published",
+      "folder_date": "2026-09-25",
+      "posts": 2,
+      "reason_codes": [
+        "VERIFY_FAILED"
+      ],
+      "updated_at": "2026-09-28T07:06:56.988327+00:00"
+    }
+  ]
+}

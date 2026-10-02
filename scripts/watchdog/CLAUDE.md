@@ -55,6 +55,8 @@ See `feedback_service_health_writer_state_not_event_content.md`.
 
 Each service window declares `requires_ib`. When IB is down, the watchdog groups IB-dependent failures whose `last_error` / check reason is IB-shaped (connection, 2FA, gateway, timeout) into a single message. A latched writer-integrity error (e.g. execution fact conflict) falls through to the per-service path. `awaiting_2fa` copy is approve-on-phone / `POST /ib/reset-backoff`. `unreachable` copy is gateway recovery (`radon restart`), not a 2FA prompt.
 
+IBKR operator hold: when `/health` `ib_gateway.operator_hold.held` is true, every IB-caused failure (even one) is absorbed with no page. The Gateway is down on purpose, and `radon restart` advice would log it back in and kick the operator. The broker `ib-watchdog` pages HELD once per hold instead. Tests: `test_grouping_operator_hold.py`. Runbook: `docs/ib-gateway-recovery.md`.
+
 Verified against each writer's source code in `test_services.py`. UW-only / Flex-only / Playwright-only writers are FALSE even if they live on the same dashboard as IB-backed services.
 
 ---

@@ -72,6 +72,7 @@ EXPECTED_SERVICE_FILES = [
     "radon-garch.service",
     "radon-garch.timer",
     "radon-health.service",
+    "radon-control.service",
     "radon-slm-tagger.service",
     "radon-slm-tagger-monitor.service",
     "radon-slm-tagger-monitor.timer",
@@ -86,6 +87,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-incident-watchdog.timer",
     "radon-grok-page-responder.service",
     "radon-grok-page-responder.timer",
+    "radon-grok-upgrade.service",
+    "radon-grok-upgrade.timer",
     "radon-leap.service",
     "radon-leap.timer",
     "radon-liquidcompute.service",
@@ -139,12 +142,16 @@ EXPECTED_SERVICE_FILES = [
     "radon-iv-spread.timer",
     "radon-iei-hyg.service",
     "radon-iei-hyg.timer",
+    "radon-credit-vix.service",
+    "radon-credit-vix.timer",
     "radon-trin.service",
     "radon-trin.timer",
     "radon-divyield.service",
     "radon-divyield.timer",
     "radon-ma-ratio.service",
     "radon-ma-ratio.timer",
+    "radon-rsi-oversold.service",
+    "radon-rsi-oversold.timer",
     "radon-calm-streak.service",
     "radon-calm-streak.timer",
     "radon-bounce-setup.service",
@@ -183,6 +190,7 @@ IB_GATEWAY_DEPENDENTS = [
 ENV_FILE_PATH = "/etc/radon/env"
 STRIPPED_ENV_SERVICES = {
     "radon-grok-page-responder.service": "/home/radon/radon-page-responder.env",
+    "radon-grok-upgrade.service": "/home/radon/radon-page-responder.env",
     "radon-flex-pull.service": "/var/lib/radon/flex-secrets/env",
     "radon-mcp.service": "/etc/radon/mcp.env",
 }
@@ -515,6 +523,12 @@ class TestIBGateway:
         svc = unit(self.FILENAME)["Service"]
         assert svc["workingdirectory"] == "/home/radon/radon/cloud"
 
+    def test_boot_under_operator_hold_is_not_a_failure(self, unit):
+        # The helper exits 73 while `radon ib release` holds the Gateway out.
+        # A failed unit would page and burn the DUR-02 start-limit brake.
+        svc = unit(self.FILENAME)["Service"]
+        assert svc["successexitstatus"] == "73"
+
     def test_exec_start_uses_gateway_control_helper(self, unit):
         svc = unit(self.FILENAME)["Service"]
         assert svc["execstart"] == "/usr/local/bin/radon-ib-gateway-control start"
@@ -804,7 +818,7 @@ class TestSecurityRemediationSchedules:
     def test_cta_sync_documents_vision_cascade_order(self, services_dir):
         raw = (services_dir / "radon-cta-sync.service").read_text()
         assert (
-            "anthropic -> grok -> cursor -> codex -> gemini -> nvidia -> cerebras"
+            "anthropic -> grok -> cursor -> codex -> antigravity -> nvidia -> cerebras"
             in raw
         )
 
@@ -1265,6 +1279,21 @@ class TestMaRatioScanBudget:
 
     def test_start_budget_ends_before_the_next_calendar_fire(self, unit):
         svc = unit("radon-ma-ratio.service")["Service"]
+        assert int(svc["timeoutstartsec"]) <= 3600
+
+
+class TestRsiOversoldScanBudget:
+    """Daily 23:05 UTC SPX member-close sweep for the RSI OVERSOLD tab.
+    Same SPX-only budget as ma-ratio. Nesting is pinned in
+    scripts/tests/test_rsi_oversold.py::TestSweepBudget."""
+
+    def test_service_start_budget_covers_the_spx_sweep(self, unit):
+        svc = unit("radon-rsi-oversold.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert int(svc["timeoutstartsec"]) >= 2100
+
+    def test_start_budget_ends_before_the_next_calendar_fire(self, unit):
+        svc = unit("radon-rsi-oversold.service")["Service"]
         assert int(svc["timeoutstartsec"]) <= 3600
 
 

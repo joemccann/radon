@@ -4,8 +4,10 @@ After IR lands a commit on ``fix/**`` and pushes it, call this helper.
 It creates a PR against ``main`` when none is open for that head, and
 no-ops when one already exists. It never merges.
 
-Fail closed: missing ``gh``, unauthenticated ``gh``, or a token without
-``pull_requests: write``. Branch-only is not a ship.
+Fail closed: ``GROK_PAGE_AUTOPUSH`` not truthy, a private identifier in
+the title, body or branch (``ir_push_gate``), a body without the six real IR
+sections (``ir_pr_description``), missing ``gh``, unauthenticated ``gh``, or
+a token without ``pull_requests: write``. Branch-only is not a ship.
 
 Fine-grained PAT on ``joemccann/radon``: Contents Read/Write and Pull
 requests Read/Write. Do not grant Administration or merge bypass.
@@ -18,11 +20,15 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
 import sys
 from pathlib import Path
 from typing import Callable
 
 import github_pr_output as pr_fmt
+import ir_pr_description
+import ir_push_gate
+from credential_redaction import scrub_credential_text
 
 IR_BRANCH_PREFIX = "fix/"
 DEFAULT_BASE = "main"
@@ -257,6 +263,38 @@ def _create_pr(
     }
 
 
+def _update_pr_body(
+    runner: Runner,
+    binary: str,
+    *,
+    repo: str,
+    number: int,
+    body: str,
+) -> None:
+    # REL-294 / R-713: gh pr edit queries retired Projects-classic fields.
+    # REST accepts the exact body without that unrelated GraphQL dependency.
+    with tempfile.NamedTemporaryFile(mode="w+", suffix=".json", encoding="utf-8") as payload:
+        json.dump({"body": body}, payload)
+        payload.flush()
+        proc = runner([
+            binary, "api", "--method", "PATCH", f"repos/{repo}/pulls/{number}",
+            "--input", payload.name,
+        ])
+    if getattr(proc, "returncode", 1) != 0:
+        _raise_from_gh(proc)
+
+
+def _require_ir_description(body: str, *, head: str) -> None:
+    """A PR body must carry the six real IR sections, never a placeholder."""
+    try:
+        ir_pr_description.validate_ir_description(body, branch=head)
+    except ir_pr_description.IrDescriptionError as exc:
+        raise IrEnsurePrError(
+            f"IR PR description invalid: {exc}. Build it from the fix "
+            "commit (ir_pr_description.description_from_commit)."
+        ) from exc
+
+
 def ensure_pr(
     *,
     head: str,
@@ -271,40 +309,73 @@ def ensure_pr(
     gh_bin: str | None = None,
     which: Callable[[str], str | None] | None = None,
     include_terminal: bool = False,
+    title: str | None = None,
+    body: str | None = None,
+    update_existing: bool = False,
+    repo_root: Path | None = None,
+    scan_base: str | None = None,
 ) -> dict:
-    """Create the IR PR if missing. Never merge. Fail closed on gh/PAT."""
+    """Create the IR PR if missing. Never merge. Fail closed on gh/PAT.
+
+    With ``repo_root`` and ``scan_base`` the branch's commits and diff are
+    scanned for private identifiers too.
+    """
     if not is_ir_branch(head):
         raise IrEnsurePrError(
             f"head must match {IR_BRANCH_PREFIX}* (got {head!r})"
         )
     head = head.removeprefix("origin/")
+    raw_title = title or format_ir_pr_title(issue=issue, incident_id=incident_id)
+    raw_body = body or format_ir_pr_body(
+        issue=issue,
+        fix=fix,
+        next_action=next_action,
+        incident_id=incident_id,
+        case_id=case_id,
+    )
+    # Refuse, never silently redact: title, body and branch are public.
+    try:
+        ir_push_gate.check_publish(
+            repo=repo_root,
+            base=scan_base,
+            ref=head,
+            title=raw_title,
+            body=raw_body,
+            runner=runner,
+        )
+    except ir_push_gate.IrPushRefused as exc:
+        raise IrEnsurePrError(str(exc)) from exc
     run = runner or _default_runner
     binary = _resolve_gh(gh_bin, which)
     _require_auth(run, binary)
+    # Safety net for generic `password=` shapes the refusal scan leaves to it.
+    resolved_title = scrub_credential_text(raw_title)
+    resolved_body = scrub_credential_text(raw_body)
     existing = _list_open_pr(
         run, binary, head=head, base=base, repo=repo, include_terminal=include_terminal
     )
     if existing:
+        if update_existing and body:
+            _require_ir_description(resolved_body, head=head)
+            number = _number_from_url(existing["url"])
+            if number is None:
+                raise IrEnsurePrError("existing PR has no valid number")
+            _update_pr_body(run, binary, repo=repo, number=number, body=resolved_body)
         return {
             "action": existing["state"].lower() if include_terminal and existing.get("state") in {"CLOSED", "MERGED"} else "exists",
             "url": existing["url"],
             "number": existing.get("number"),
             "head": head,
         }
+    _require_ir_description(resolved_body, head=head)
     return _create_pr(
         run,
         binary,
         head=head,
         base=base,
         repo=repo,
-        title=format_ir_pr_title(issue=issue, incident_id=incident_id),
-        body=format_ir_pr_body(
-            issue=issue,
-            fix=fix,
-            next_action=next_action,
-            incident_id=incident_id,
-            case_id=case_id,
-        ),
+        title=resolved_title,
+        body=resolved_body,
     )
 
 
@@ -360,18 +431,32 @@ def ensure_after_code_fix(
             "no fix/** branch found after code_fix; grok must push "
             f"{IR_BRANCH_PREFIX}<slug>. Branch-only is not a ship."
         )
-    summary = sanitize_summary(summary)
-    issue = summary or f"{page.get('service') or 'service'} P1"
-    fix_text = summary or issue
+    run = runner or _default_runner
+    commit = _git_stdout(run, ["git", "log", "-1", "--format=%B"], repo_root)
+    try:
+        title_summary, body = ir_pr_description.description_from_commit(
+            commit, branch=resolved, page=page
+        )
+    except ir_pr_description.IrDescriptionError as exc:
+        raise IrEnsurePrError(f"IR PR description invalid: {exc}") from exc
+    issue = sanitize_summary(title_summary) or sanitize_summary(summary)
     return ensure_pr(
         head=resolved,
         issue=issue,
-        fix=fix_text,
+        fix=issue,
+        title=format_ir_pr_title(
+            issue=issue,
+            incident_id=page.get("incident_id") or page.get("page_id"),
+        ),
+        body=body,
         incident_id=page.get("incident_id") or page.get("page_id"),
         case_id=page.get("case_id"),
         runner=runner,
         gh_bin=gh_bin,
         which=which,
+        update_existing=True,
+        repo_root=repo_root,
+        scan_base="origin/main",
     )
 
 
@@ -401,17 +486,31 @@ def main(argv: list[str] | None = None) -> int:
                     "no fix/** branch on HEAD; pass --head. "
                     "Branch-only is not a ship."
                 )
-        issue = args.issue or "Incident-response fix."
-        fix_text = args.fix_text or issue
+        # The body always comes from the fix commit's IR sections; there
+        # is no placeholder default. --issue only overrides the title line.
+        commit = _git_stdout(
+            _default_runner, ["git", "log", "-1", "--format=%B", head], Path.cwd()
+        )
+        try:
+            summary, body = ir_pr_description.description_from_commit(
+                commit, branch=head
+            )
+        except ir_pr_description.IrDescriptionError as exc:
+            raise IrEnsurePrError(f"IR PR description invalid: {exc}") from exc
+        issue = sanitize_summary(args.issue or summary)
         result = ensure_pr(
             head=head,
             issue=issue,
-            fix=fix_text,
+            fix=args.fix_text or issue,
             next_action=args.next_action,
             incident_id=args.incident_id,
             case_id=args.case_id,
             base=args.base,
             repo=args.repo,
+            body=body,
+            update_existing=True,
+            repo_root=Path.cwd(),
+            scan_base=f"origin/{args.base}",
         )
     except IrEnsurePrError as exc:
         print(str(exc), file=sys.stderr)

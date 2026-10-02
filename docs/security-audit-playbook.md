@@ -193,7 +193,8 @@ line here whenever you ship a security fix.**
   via dedicated group `radon-media` and a parent traverse ACL; setup and
   `publish-caddy` migrate existing hosts.
   (`cloud/tests/test_caddy_media_group.py`)
-  (`cloud/tests/test_setup_vps_privileged_paths.py`)
+  (`cloud/tests/test_setup_vps_privileged_paths.py`,
+  `cloud/tests/test_grok_responder_env.py::test_root_never_operates_by_name_inside_radon_owned_trees`)
 - **Startup never dies on stored data, and nothing unexportable persists** — a
   credential value `os.environ` cannot hold is refused at the validation
   chokepoint before any store write, and every boot-time env-export site skips
@@ -210,6 +211,12 @@ line here whenever you ship a security fix.**
   cannot; the PR helper refuses merge-shaped `gh` invocations by token scan;
   page-derived summaries are flattened before entering PR metadata.
   (`scripts/tests/test_grok_push_guard.py`)
+- **An automated publish gate scans everything the push publishes** — the IR
+  gate (`scripts/ir_push_gate.py`) scans every commit's own patch (not the
+  aggregate diff), with `--text --no-textconv` so branch attributes cannot
+  hide a blob, every added path and the branch name; content it cannot read
+  as text refuses the push. Findings never echo the matched value.
+  (`scripts/tests/test_ir_push_gate.py`)
 - **Subscription credentials stop at the trust boundary of what consumes them**
   — an unpinned third-party agent CLI subprocess gets an explicit env
   allowlist, never `os.environ` (`subscription_tokens.CLI_ENV_ALLOWLIST`,
@@ -227,8 +234,7 @@ line here whenever you ship a security fix.**
   but confirm the reasoning.
 - Patch order: **exploitable** first, then defense-in-depth. Patch the safe,
   high-confidence ones with red/green tests; **defer** anything needing an
-  environment-specific verification step (production build, VPS config in the
-  separate `radon-cloud` repo) and document it.
+  environment-specific verification step (production build or deployed VPS configuration) and document it.
 - **Do NOT auto-push.** `git push origin main` IS a production deploy (CI SSHes to
   Hetzner). Land perimeter/relay changes only on the operator's explicit go; after
   deploy, verify the relay + a real authed page render.

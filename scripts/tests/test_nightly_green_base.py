@@ -19,14 +19,9 @@ import nightly_green_base as base
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO / "scripts"
-WRAPPERS = (
-    SCRIPTS / "reliability_weekend.sh",
-    SCRIPTS / "testing_weekend.sh",
-    SCRIPTS / "ci_performance_nightly.sh",
-    SCRIPTS / "documentation_nightly.sh",
-    SCRIPTS / "security_nightly.sh",
-    SCRIPTS / "security_deepsec_nightly.sh",
-)
+# The security loops' pre-run hook; the other runner loops branch from the
+# fresh clone of main.
+HOOK = SCRIPTS / "runner" / "hooks" / "security_pre.sh"
 
 
 class TestResolve:
@@ -179,126 +174,16 @@ class TestCli:
 
 
 class TestWrapperWiring:
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_ground_truth_pins_a_green_sha(self, wrapper: Path):
-        text = wrapper.read_text(encoding="utf-8")
-        start = text.index("ground_truth() {")
-        end = text.index("\n}", start)
-        body = "\n".join(
-            l for l in text[start:end].splitlines() if not l.lstrip().startswith("#")
-        )
-        assert "resolve_green_main_sha" in body, wrapper.name
-        assert body.index("origin/main") < body.index("resolve_green_main_sha"), wrapper.name
+    """REL-187 on the runner. The behaviour (the tree ends on the resolver's
+    SHA) is driven in test_runner_security_hooks.py."""
 
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_the_resolver_runs_through_the_isolated_pipe(self, wrapper: Path):
-        text = wrapper.read_text(encoding="utf-8")
-        start = text.index("resolve_green_main_sha() {")
-        end = text.index("\n}", start)
-        body = text[start:end]
-        assert "origin/main:scripts/nightly_green_base.py" in body, wrapper.name
-        assert "/usr/bin/python3 -I -" in body, wrapper.name
-        assert "$TIMEOUT_BIN" in body, wrapper.name
+    def test_the_hook_detaches_at_the_resolved_green_sha(self):
+        body = HOOK.read_text(encoding="utf-8")
+        assert body.index("nightly_green_base.py") < body.index('checkout -f --quiet --detach "$green"')
+        assert 'green="$(hostgit rev-parse origin/main)"' in body
 
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_an_unresolvable_green_sha_is_never_fatal(self, wrapper: Path):
-        text = wrapper.read_text(encoding="utf-8")
-        start = text.index("resolve_green_main_sha() {")
-        end = text.index("\n}", start)
-        assert "|| true" in text[start:end], wrapper.name
-
-
-SENTINEL = "f" * 40
-TIP = "1" * 40
-
-FAKE_GIT = f"""#!/bin/bash
-printf '%s\\n' "$*" >> "$GIT_LOG"
-case "$*" in
-  *"rev-parse origin/main") echo "{TIP}" ;;
-  *"rev-parse --verify --quiet"*) exit 0 ;;
-esac
-exit 0
-"""
-
-
-def _extract_ground_truth(wrapper: Path) -> str:
-    text = wrapper.read_text(encoding="utf-8")
-    start = text.index("ground_truth() {")
-    end = text.index("\n}", start) + 2
-    return text[start:end]
-
-
-def _run_ground_truth(tmp_path: Path, snippet: str) -> list[str]:
-    """Execute a ground_truth snippet with a fake git + fake resolver.
-
-    Returns the argv lines the fake git recorded, in call order.
-    """
-    fakes = tmp_path / "fakes"
-    fakes.mkdir(exist_ok=True)
-    git = fakes / "git"
-    git.write_text(FAKE_GIT, encoding="utf-8")
-    git.chmod(0o755)
-    git_log = tmp_path / "git.log"
-    git_log.write_text("", encoding="utf-8")
-    driver = "\n".join(
-        [
-            "set -eo pipefail",
-            "fetch_origin_with_retry() { :; }",
-            "clear_stale_git_locks() { :; }",
-            f"resolve_green_main_sha() {{ echo {SENTINEL}; }}",
-            "align_agent_gitdir() { :; }",
-            snippet,
-            "ground_truth",
-        ]
-    )
-    env = {
-        "PATH": f"{fakes}:/usr/bin:/bin",
-        "GIT_LOG": str(git_log),
-        "REPO": str(tmp_path),
-        "HOME": str(tmp_path),
-    }
-    proc = subprocess.run(
-        ["bash", "-c", driver], cwd=tmp_path, env=env,
-        capture_output=True, text=True, timeout=60,
-    )
-    assert proc.returncode == 0, proc.stderr
-    return git_log.read_text(encoding="utf-8").splitlines()
-
-
-def _ref_moves(git_lines: list[str]) -> list[str]:
-    """Targets of every ref-moving git call (checkout / reset --hard), in order."""
-    moves = []
-    for line in git_lines:
-        argv = line.split()
-        if "checkout" in argv or ("reset" in argv and "--hard" in argv):
-            moves.append(argv[-1])
-    return moves
-
-
-class TestWrapperBehaviour:
-    """REL-187: execute the branch-selection snippet — the resolver's answer must
-    be the ref the tree actually ends up on, not just a string in the source."""
-
-    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_the_tree_ends_on_the_resolver_sha(self, wrapper: Path, tmp_path):
-        lines = _run_ground_truth(tmp_path, _extract_ground_truth(wrapper))
-        moves = _ref_moves(lines)
-        assert moves, "no ref-moving git command ran"
-        assert moves[-1] == SENTINEL, f"final ref is {moves[-1]!r}, not the green SHA"
-        after_sentinel = moves[moves.index(SENTINEL) + 1:]
-        assert "origin/main" not in after_sentinel, "checked out origin/main after resolving"
-
-    def test_a_rel187_defective_wrapper_fails_the_assertion(self, tmp_path):
-        """Red proof: a wrapper that computes the green SHA then resets to
-        origin/main anyway (the REL-187 defect verbatim) must be caught."""
-        defective = (
-            "ground_truth() {\n"
-            "  fetch_origin_with_retry\n"
-            "  local green_sha\n"
-            '  green_sha="$(resolve_green_main_sha)"\n'
-            "  git checkout -f --quiet main\n"
-            "  git reset --hard --quiet origin/main\n"
-            "}\n"
-        )
-        moves = _ref_moves(_run_ground_truth(tmp_path, defective))
-        assert moves[-1] != SENTINEL  # the behavioural check above would fail this wrapper
+    def test_the_resolver_is_the_root_installed_copy_run_isolated_and_bounded(self):
+        body = HOOK.read_text(encoding="utf-8")
+        call = body[body.index('green="$('):body.index("nightly_green_base.py") + 200]
+        assert 'bounded 60 "$PY" -I "$RUNNER_DIR/lib/nightly_green_base.py"' in call
+        assert "|| true" in call, "an unresolvable green SHA is never fatal"

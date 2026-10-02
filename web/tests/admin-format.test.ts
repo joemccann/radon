@@ -145,6 +145,13 @@ describe("forcePushDisabledReason", () => {
     expect(reason).toContain("ib_watchdog");
     expect(reason).toContain("30s");
   });
+  it("reads long locks in minutes", () => {
+    const reason = forcePushDisabledReason({
+      pushLock: { holder: "ib_watchdog", acquired_at: 0, expires_at: 0, remaining_secs: 505, reason: "watchdog" },
+      pending: false,
+    });
+    expect(reason).toBe("Another restart is running (ib_watchdog). Available in 8m 25s.");
+  });
 });
 
 describe("backoffSummary", () => {

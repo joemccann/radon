@@ -48,3 +48,9 @@ The whole point is zero shared fate: a bug here, or any trading-stack dependency
 - Release activation snapshots and restarts `radon-health` with the other code consumers, then validates the aggregate schema. The legacy deployment fallback also restarts it and requires canonical `ok` plus `overall_state` fields. These are rollout compatibility gates only: they validate field types, not a healthy verdict, so an IB outage or pending 2FA cannot block deployment. Do not turn this release coordination into a runtime systemd dependency.
 
 Full background: `project_health_daemon_tier1_tier2` (memory) + `docs/operations.md` (Health monitoring section).
+
+## Dependency fault age (REL-167 / R-468)
+
+The daemon persists first-seen timestamps in `/var/lib/radon/health-dependency-dwell.json` (`RADON_HEALTH_DWELL_PATH` override). Unit and probe refreshers share the store; load and atomic writes happen outside request handling. A restart preserves fault age, observed recovery clears it, malformed state logs a warning and starts new age evidence, and failed writes retain the prior file and retry on the next refresh. Reads are capped at 64 KiB.
+
+The local `ib-gateway` probe and nested broker/2FA state now carry independent dwell evidence and escalate after 900 seconds on combined/broker hosts. Unknown or stale probes do not prove death. Clean off-hours Gateway suppression remains; the app-host remote-broker policy above remains degraded, regardless of age. MCP retains its dependency-only policy. The shared state directory is provisioned by the existing control-plane setup; no service dependency is added.

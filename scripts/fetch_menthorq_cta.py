@@ -9,9 +9,9 @@ Credentials (project root .env, loaded via a local fallback loader):
   MENTHORQ_PASS  — MenthorQ password
 
 Vision cascade (credit/billing/quota/hard-fail fallthrough):
-  anthropic -> grok -> cursor (unwired skip) -> codex -> gemini -> nvidia -> cerebras
+  anthropic -> grok -> cursor (unwired skip) -> codex -> antigravity -> nvidia -> cerebras
   Keys: ANTHROPIC_API_KEY / CLAUDE_CODE_API_KEY / CLAUDE_API_KEY,
-  XAI_API_KEY / GROK_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY,
+  XAI_API_KEY / GROK_API_KEY, OPENAI_API_KEY,
   NVIDIA_API_KEY, CEREBRAS_API_KEY.
 
 Usage:

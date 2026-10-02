@@ -64,3 +64,10 @@ Yahoo Finance is **ABSOLUTE LAST RESORT**. Never make Yahoo the scheduled, prima
 - WS relay batches last-write-wins updates with 100ms flush.
 - Stale tick detection restarts Gateway only through the documented recovery path.
 - Performance page uses Phase A IB+cache and Phase B parallel UW/Yahoo fallback; preserve SWR behavior.
+
+## Option close cache expiry (REL-021b / R-034)
+
+The relay prunes expired contract closes at startup and on the first cache
+access/write of each Eastern day, then persists the reduced cache. Today's
+expiry remains available through the session. Late ticks cannot resurrect
+expired keys; expiry comparison uses Eastern dates, not the host timezone.

@@ -13,16 +13,13 @@ import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 DEPLOY = REPO / "cloud" / "scripts" / "deploy.sh"
 HELPER = REPO / "cloud" / "scripts" / "deploy-root-helper.sh"
 ALLOWLIST = REPO / "cloud" / "config" / "auto-sync-units.txt"
-WRAPPERS = (
-    REPO / "scripts" / "testing_weekend.sh",
-    REPO / "scripts" / "reliability_weekend.sh",
-)
+RUNNER = REPO / "scripts" / "runner" / "run_loop.sh"
+POST_HOOK = REPO / "scripts" / "runner" / "hooks" / "security_post.sh"
 
 
 # --------------------------------------------------------------------------
@@ -82,83 +79,41 @@ class TestEnableLoopIsNotTruncated:
 
 
 # --------------------------------------------------------------------------
-# R-185 — an ordinary non-zero agent exit is not a wrapper crash
+# R-185 — an ordinary non-zero agent exit is not a runner crash
 # --------------------------------------------------------------------------
-# Where each wrapper's agent loop actually RUNS (reliability_weekend.sh keeps
-# the `timeout claude` call inside run_round(), defined above the loop).
-LOOP_MARKERS = {
-    "testing_weekend.sh": "local attempt=1",
-    "reliability_weekend.sh": "local round=1",
-}
-
-
-@pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
 class TestDeadManDoesNotCryWolf:
-    def test_the_err_trap_is_disarmed_around_the_agent_loop(self, wrapper):
-        src = wrapper.read_text()
-        arm = src.index("trap on_crash ERR")
-        loop = src.index(LOOP_MARKERS[wrapper.name])
-        disarm = src.rindex("trap - ERR", 0, loop)
-        assert arm < disarm < loop, (
-            "the retry loop runs at top level with the ERR trap armed, so a "
-            "failed or timed-out agent posts a false CRASHED dead-man comment "
-            "AND then its real status"
+    def test_the_runner_treats_an_agent_exit_as_an_outcome(self):
+        src = RUNNER.read_text()
+        assert "set -uo pipefail" in src and "set -e" not in src, (
+            "under errexit a failed or timed-out agent kills the runner before "
+            "it reports the phase's real status"
         )
 
-    def test_the_trap_is_re_armed_after_the_loop(self, wrapper):
-        src = wrapper.read_text()
-        loop = src.index(LOOP_MARKERS[wrapper.name])
-        # report() used to build `tail_text=` (redacted log tail) immediately
-        # after re-arming. Issue comments are now a three-section body, so the
-        # next local after the loop is the status string handed to report().
-        loop_end = src.index("local status", loop)
-        assert "trap on_crash ERR" in src[loop:loop_end], (
-            "a genuine wrapper death after the agent finishes must still page"
-        )
-
-    def test_the_real_outcome_is_still_reported(self, wrapper, tmp_path):
-        """T-239: RUN the classifier instead of grepping for `report "OK"`.
-
-        The grep this replaces matched a literal call spelling, so it said
-        nothing about which outcomes the dead-man channels can actually carry.
-        It also could not see the defect T-239 fixed: the status used to be
-        keyed on the agent's exit code alone, and `claude -p` exits 0 after
-        killing unfinished background work, so a phase cut in half reported OK.
-        """
-        src = wrapper.read_text()
-        assert "phase_status" in src and 'report "$status"' in src, (
-            "the phase outcome must flow through one classifier the tests can "
-            "run; a bare literal call cannot be checked for what it omits"
-        )
-        start = src.index("BG_CEILING_MARKER=")
-        block = src[start:src.index("\n}\n", src.index("phase_status() {", start)) + 3]
+    def test_the_real_outcome_is_still_reported(self, tmp_path):
+        """T-239: RUN the security loops' classifier. `claude -p` exits 0
+        after killing unfinished background work, so a phase cut in half must
+        not report OK."""
+        src = POST_HOOK.read_text()
+        start = src.index("phase_status() {")
+        block = src[start:src.index("\n}\n", start) + 3]
 
         clean = tmp_path / "clean.log"
-        clean.write_text("[weekend] audit start\nall done\n", encoding="utf-8")
+        clean.write_text("audit start\nall done\n", encoding="utf-8")
         truncated = tmp_path / "truncated.log"
-        truncated.write_text(
-            "Background tasks still running after 600s; terminating.\n",
-            encoding="utf-8",
-        )
+        truncated.write_text("Background tasks still running after 600s; terminating.\n", encoding="utf-8")
 
         def status(rc: int, log: Path) -> str:
             proc = subprocess.run(
-                [
-                    shutil.which("bash") or "/bin/bash",
-                    "-c",
-                    "set -Eeuo pipefail\nCAP_SECS=7200\n"
-                    + block
-                    + f'\nphase_status {rc} "{log}"\n',
-                ],
-                capture_output=True,
-                text=True,
-                timeout=60,
+                [shutil.which("bash") or "/bin/bash", "-c",
+                 'set -uo pipefail\nBG_CEILING_MARKER="Background tasks still running after"\n'
+                 + f'PHASE_RC={rc}\nPHASE_LOG="{log}"\n' + block + "\nphase_status\n"],
+                capture_output=True, text=True, timeout=60,
             )
             assert proc.returncode == 0, (proc.returncode, proc.stderr)
             return proc.stdout.strip()
 
         assert status(0, clean) == "OK"
-        assert status(124, clean) == "TIMEOUT after 7200s"
+        assert status(124, clean) == "TIMEOUT"
         assert status(9, clean) == "FAILED (exit 9)"
         assert status(0, truncated) != "OK", (
             "a phase the harness truncated still pages OK, so the operator "
@@ -189,6 +144,8 @@ EXPECTED_AUTO_SYNC_UNITS = (
     "radon-cor.timer",
     "radon-credit-spread.service",
     "radon-credit-spread.timer",
+    "radon-credit-vix.service",
+    "radon-credit-vix.timer",
     "radon-cta-sync.service",
     "radon-cta-sync.timer",
     "radon-db-retention.service",

@@ -48,85 +48,69 @@ def _make_valid_obs(series_id="h100-us", value=2.6766, fetched_at=FETCHED, raw_h
 class TestLiquidComputeAtomicReplacement:
     """Tests for atomic observation replacement in Liquid Compute writer."""
 
-    @pytest.mark.xfail(reason="sqlite3.Cursor.execute cannot be monkeypatched; atomicity verified by code inspection and Hrana tests")
-    def test_upsert_observations_by_identity_is_atomic_on_sqlite(self, tmp_path):
-        """RED: upsert_observations_by_identity does DELETE then INSERT without transaction.
-        
-        If failure occurs between DELETE and INSERT, old observation is lost.
-        This test should FAIL against current code (no transaction), then PASS after fix.
-        
-        Note: Fault injection via monkeypatch doesn't work for sqlite3.Cursor.execute
-        (immutable type). The fix uses explicit BEGIN/COMMIT/ROLLBACK transactions
-        verified by code inspection. Hrana path is fault-injected in test_upsert_observations_by_identity_atomic_on_hrana.
-        """
+    def test_upsert_observations_by_identity_is_atomic_on_sqlite(self, tmp_path, request):
+        """A failed replacement rolls back the entire batch and releases its transaction."""
         import sqlite3
-        store = ObservationStore(tmp_path / "lc.sqlite")
+        from contextlib import closing
+
+        database = tmp_path / "lc.sqlite"
+        store = ObservationStore(database)
+        request.addfinalizer(store.close)
         store.initialize()
-        
-        # Seed an initial observation
-        payload = _payload()
-        store_rows, observations = parse_ticker(payload, HASH, FETCHED)
+        _store_rows, observations = parse_ticker(_payload(), HASH, FETCHED)
         persist_ticker(store, observations)
-        
-        # Verify initial state
-        initial_obs = store.read_observations(as_of="2026-09-15T16:00:00Z")
-        assert len(initial_obs) == 5
-        initial_h100 = next(o for o in initial_obs if o["series_id"] == "h100-us")
-        initial_value = initial_h100["value"]
-        
-        # Now try to replace with a revised value (should succeed with fix)
+        query = "SELECT * FROM ai_cycle_observations ORDER BY identity"
+        before = store.connection.execute(query).fetchall()
+        assert len(before) == 5
+
+        # Fail inside SQLite, after DELETE and after an earlier row's replacement.
+        # This avoids monkeypatching the immutable sqlite3.Cursor implementation.
+        store.connection.execute("""
+            CREATE TRIGGER reject_h100_replacement
+            BEFORE INSERT ON ai_cycle_observations
+            WHEN json_extract(NEW.payload, '$.series_id') = 'h100-us'
+            BEGIN
+                SELECT RAISE(ABORT, 'injected replacement failure');
+            END
+        """)
+        store.connection.commit()
         revised_payload = _payload()
-        revised_payload["indices"][1]["value"] = 999.0  # Changed value
+        revised_payload["indices"][1]["value"] = 999.0
         _revised_store, revised_obs = parse_ticker(revised_payload, "d" * 64, "2026-09-15T13:00:00+00:00")
-        
-        # Successful replacement should work
-        store.upsert_observations_by_identity(revised_obs)
-        
-        # Verify new value
-        remaining_obs = store.read_observations(as_of="2026-09-15T16:00:00Z")
-        remaining_h100 = next(o for o in remaining_obs if o["series_id"] == "h100-us")
-        assert remaining_h100["value"] == 999.0, "Replacement should succeed"
+        with pytest.raises(sqlite3.IntegrityError, match="injected replacement failure"):
+            store.upsert_observations_by_identity(revised_obs)
+
+        assert not store.connection.in_transaction
+        assert store.connection.execute(query).fetchall() == before
+        with closing(sqlite3.connect(database)) as observer:
+            assert observer.execute(query).fetchall() == before
+
+        # The same connection remains usable, and a retry really replaces rows.
+        store.connection.execute("DROP TRIGGER reject_h100_replacement")
+        store.connection.commit()
+        assert store.upsert_observations_by_identity(revised_obs) == 5
+        remaining = store.read_observations(as_of="2026-09-15T16:00:00Z")
+        assert len(remaining) == 5
+        assert next(row for row in remaining if row["series_id"] == "h100-us")["value"] == 999.0
 
     def test_upsert_observations_by_identity_atomic_on_hrana(self, tmp_path, monkeypatch):
-        """RED: HranaHttpError during replacement must not lose old observation.
-        
-        On Hrana: insert new rows first, then delete old. If insert fails, old data remains.
-        """
-        store = ObservationStore()  # No path = uses Hrana
+        """No independently committed DELETE may precede a failed batch."""
+        from knowledge import http_db
+        store = ObservationStore()
         store.initialize = MagicMock()
-        
-        # Create valid observations
-        initial_obs = [_make_valid_obs("h100-us", 2.6766, FETCHED, HASH)]
-        revised_obs = [_make_valid_obs("h100-us", 999.0, "2026-09-15T13:00:00+00:00", "d" * 64)]
-        
-        # Mock _query to return initial observation
-        def mock_query(sql, args=()):
-            if "SELECT" in sql and "ai_cycle_observations" in sql:
-                return [(1, json.dumps(initial_obs[0]))]
-            return []
-        
-        store._query = mock_query
-        
-        # Track calls to hrana_execute (imported locally in _execute)
-        calls = []
-        def mock_hrana_execute(sql, args=()):
-            calls.append({"sql": sql, "args": args})
-            # Fail on first INSERT (insert new row first)
-            if "INSERT" in sql and len([c for c in calls if "INSERT" in c["sql"]]) == 1:
-                raise HranaHttpError("Injected Hrana INSERT failure")
-            return MagicMock()
-        
-        monkeypatch.setattr("scripts.db.hrana_http.hrana_execute", mock_hrana_execute)
-        
-        # Attempt replacement - should fail on first INSERT
+        connection = MagicMock()
+        connection.execute_transaction.side_effect = HranaHttpError("Injected Hrana INSERT failure")
+        monkeypatch.setattr(http_db, "Connection", lambda: connection)
+        single_statement = MagicMock(side_effect=AssertionError("untransactional write"))
+        monkeypatch.setattr("scripts.db.hrana_http.hrana_execute", single_statement)
+
         with pytest.raises(HranaHttpError, match="Injected Hrana INSERT failure"):
-            store.upsert_observations_by_identity(revised_obs)
-        
-        # Verify INSERT was attempted before any DELETE
-        insert_calls = [c for c in calls if "INSERT" in c["sql"]]
-        delete_calls = [c for c in calls if "DELETE" in c["sql"]]
-        assert len(insert_calls) >= 1, "Should attempt INSERT first"
-        assert len(delete_calls) == 0, "Should not DELETE if INSERT fails (old data preserved)"
+            store.upsert_observations_by_identity([_make_valid_obs(value=999)])
+        connection.execute_transaction.assert_called_once()
+        statements = connection.execute_transaction.call_args.args[0]
+        assert [sql.split()[0] for sql, _ in statements] == ["DELETE", "INSERT"]
+        single_statement.assert_not_called()
+        connection.close.assert_called_once()
 
     def test_persist_ticker_reports_hrana_error_on_observation_failure(self, tmp_path, monkeypatch):
         """RED: HranaHttpError from upsert_observations_by_identity must surface as error health.
@@ -224,23 +208,20 @@ class TestFlexBudgetExhaustionVisibility:
     (or an explicitly watchdog-evaluated degraded state), and clear it only after a full catch-up.
     """
     
-    def test_consecutive_budget_exhaustion_writes_degraded_state(self):
-        """RED: Two consecutive budget-exhausted runs should produce degraded watchdog outcome.
-        
-        Current code: budget_spent=True + ingested>0 -> writes 'ok' with class='budget'
-        This resets error cooldown and never pages.
-        
-        After fix: track consecutive budget events, write degraded/error after threshold.
-        """
-        pytest.skip("Implementation pending - need to understand flex-pull health writing")
-    
-    def test_single_partial_run_does_not_page(self):
-        """A single partial run (budget spent but progress made) remains distinguishable but does not page."""
-        pytest.skip("Implementation pending")
-    
-    def test_complete_catchup_clears_degraded_state(self):
-        """A complete next run (no budget spend) clears the degraded state."""
-        pytest.skip("Implementation pending")
+    def test_consecutive_budget_exhaustion_writes_degraded_state(self, tmp_path, monkeypatch):
+        from scripts.tests.test_rel257_flex_budget import BudgetSweep, second_progress_stop
+
+        second_progress_stop(BudgetSweep(monkeypatch, tmp_path))
+
+    def test_single_partial_run_does_not_page(self, tmp_path, monkeypatch):
+        from scripts.tests.test_rel257_flex_budget import BudgetSweep, one_progress_stop
+
+        one_progress_stop(BudgetSweep(monkeypatch, tmp_path))
+
+    def test_complete_catchup_clears_degraded_state(self, tmp_path, monkeypatch):
+        from scripts.tests.test_rel257_flex_budget import BudgetSweep, full_run_clears_the_streak
+
+        full_run_clears_the_streak(BudgetSweep(monkeypatch, tmp_path))
 
 
 if __name__ == "__main__":

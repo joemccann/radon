@@ -8,6 +8,10 @@ existing Python venv is the path of least resistance.
 
 Idempotent: running twice with no new migrations is a no-op.
 
+Library callers must pass an explicit argument list: main(["--demo"]) for
+demo, main([]) for production. main() refuses before resolving credentials
+(REL-108 / R-301); the CLI always forwards its actual argument list.
+
 A file whose source contains a line `-- radon-migrate: manual` is skipped
 unless RADON_MIGRATE_MANUAL=1. radon-api applies migrations with
 `migrate.py --boot` under `timeout 30` (boot deadline 20s). The 0089
@@ -372,6 +376,9 @@ def apply_pending_migrations(db) -> int:
 
 
 def main(argv: list[str] | None = None) -> None:
+    # REL-108 / R-301: omission is not authorization to select production.
+    if argv is None:
+        raise SystemExit("Migration library calls require explicit arguments: [] for prod or ['--demo'] for demo")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--demo",
@@ -383,9 +390,8 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Service startup: bounded by BOOT_DEADLINE_SECONDS",
     )
-    # Explicit argv (including []) so library callers / tests are not polluted
-    # by the process's sys.argv (pytest injects the test file path).
-    args = parser.parse_args([] if argv is None else argv)
+    # Never inherit a host application's unrelated sys.argv.
+    args = parser.parse_args(argv)
 
     url, token = resolve_target(demo=args.demo)
 
@@ -407,8 +413,7 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
-    # main() parses [] when argv is None, so this forwarding IS the only
-    # thing that lets --demo reach argparse. Dropping it makes
-    # radon-demo-mirror's ExecStartPre migrate prod and exit 0.
+    # Forward the actual CLI target. Omitting the list now refuses rather
+    # than making a demo wrapper silently select production.
     # Pinned by TestMigrateEntrypointArgv in scripts/tests/test_migrate.py.
     main(sys.argv[1:])

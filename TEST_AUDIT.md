@@ -10616,3 +10616,330 @@ Delta to the resolved T-491 environment-variable isolation issue: this change in
 `scripts/tests/test_model_ladder.py:411-416` passes env={} as if it means no credentials, but `scripts/clients/model_ladder.py:215-217,283-302` resolves the real home directory and reads .codex/auth.json. The new prepaid-only cases at test lines 684-714 have the same dependency. Full gate reports 15 failures in the blast radius: model-ladder 5, research-runtime 7, vision-cascade 3. The sibling no-key/env-only assumptions appear at scripts/tests/test_research_runtime.py:62-87 and scripts/tests/test_vision_cascade.py:191-201,365,420. The same 15 failures reproduce in all three delta rounds and separately in each file (5/7/3 failures). A scratch-only ambient-auth guard makes the same files 117 passed; no repository test was changed. Read-only existing-test probe with a synthetic home proves both directions: empty synthetic home PASS; adding a fake .codex/auth.json with a canary access_token makes the unchanged no-key test FAIL AssertionError. Its must_not_post fake prevented any network call. This can change provider ordering and feed operator credentials into test doubles on authenticated workstations.
 
 Acceptance: isolate credential-file discovery across all three affected modules, opt in only to per-test synthetic subscription files, and run the file with canary credentials present/absent outside its sandbox. Both outer environments must produce identical results; explicit subscription-precedence tests must still execute. No real credential values should enter captured headers or logs.
+
+
+## Remediation 2026-09-27
+
+Reduced scope: P0 and P1 only. No P0 was open. The 2026-09-26 checkpoint (`audited-through: 3cc3d84a`) left four P1s. T-511 and T-513 are source-actionable. T-130 and T-488 stay operator-only. P2 findings T-493, T-495, T-510, and T-512 were outside this rung.
+
+### T-511 — DONE
+
+`scripts/tests/test_rel257_flex_budget.py`, `scripts/tests/test_rel257_liquidcompute_atomic.py`, and `scripts/tests/test_rel289_twr_gap_heal.py` skipped before a degraded heartbeat or a heal call. Those cases now run `flex_sftp_pull.run`, apply one statement, then exhaust the sweep budget.
+
+Red: with the degraded branch forced off, `test_consecutive_budget_runs_write_degraded` saw `ok` instead of `degraded` (1 failed). With the heal call forced off, `test_heal_twr_coverage_gaps_called_even_when_budget_spent` saw an empty call list (1 failed). Green, source restored: 16 passed across those three modules.
+
+T-130 stays operator-only. Provision `TURSO_DEMO_DB_URL` and `TURSO_DEMO_APP_DB_URL` for repository CI. The wiring half is already recorded done. An unconditional isolation run stays red until those secrets exist.
+
+T-488 stays operator-only. Reproduce the deploy helper timeout and TERM child cleanup on Linux CI without widening the fixed timeout. Three fixture attempts are already recorded. This host's bash 3.2 `services[@]` errors and the absent `caddy` binary are not that item.
+
+
+### T-513 — DONE
+
+`scripts/tests/test_fx_stable_sync.py` copied whatever was at `~/.local/bin/fx`. On this host that binary is ad-hoc signed (`Identifier=fx-…`, `Signature=adhoc`), and `scripts/fx_stable_sync.sh` correctly refused it, so the test failed. The separate-file assertion now uses a fixture that a codesign double accepts only when `--verify --strict` and the Vercel requirement (`com.vercel.fx`, team `JW6Y669B67`) are both present. The host binary is used only when `/usr/bin/codesign` accepts that requirement. `RADON_FX_CODESIGN` is unset in the launchd job, whose environment is PATH and HOME.
+
+Red: the host-binary test failed with `REFUSED` (1 failed). The controlled sample against the old hardcoded `/usr/bin/codesign` also failed with `REFUSED` (1 failed). Green: 11 passed, 1 skipped (no Vercel-signed host binary). The unsigned-binary refusal test still fails closed.
+
+
+## Remediation 2026-09-28
+
+`RADON_WEEKEND_REDUCED=1`. The 2026-09-28 audit phase timed out after the standing gates and did not post a new `audited-through` checkpoint, so this section does not advance that cursor. Authoritative open set is issue #83 comment 5864289632.
+
+- **T-488 — DONE.** The five darwin cloud failures in `cloud/tests/test_deploy_corrections.py` were `services[@]: unbound variable` at `resume_active_snapshot`, not a widened timeout. The helper re-execs through `#!/bin/bash` (3.2.57 on this host). Empty snapshot walks now use the bash 3.2 form already used by `revert_installed_units`. `TestRootHelper` 35 passed, 1 skipped. Acceptance that those tests reach their assertions is met on this host; the fixed contract timeout was not changed.
+- **T-130 — operator-only.** Provision `TURSO_DEMO_DB_URL` and `TURSO_DEMO_APP_DB_URL` for repository CI. The guard still exits 0 with a warning when they are absent.
+- **T-511, T-513 — not redone.** Already on open PR #766.
+- **T-493, T-495, T-510, T-512 — unchanged P2**, outside reduced scope.
+
+## Delta audit 2026-09-29
+
+Audited `3cc3d84a..c274a773228ed29226721694370d3a1c2739494e`: 44 commits and 293 changed paths, including 91 removals during the runner cutover. The trusted checkpoint came from the owner-authored rolling issue #83 comment. No open `testing/` PR reserved findings; the prior maximum ID was T-513.
+
+The architecture index and codemap incoming test edges identified direct importers for the changed source surfaces. Dynamic/subprocess imports were confirmed with `rg`, including the broker daemon, runner/security hooks, research intake, and cloud backup. The inverse review followed unchanged consumers of previous-close prices, model-provider output, indicator heartbeat windows, knowledge retrieval, and database migrations. In particular, stable-render previous-close tests did not describe the new backoff contract under live ticks.
+
+### T-514 — P2 — shell fixtures share global scratch files across workers and users
+
+At the audited base, `scripts/tests/test_garch_capacity_shed_retry.py:165` copied the wrapper without isolating its `scripts/run_garch_refresh.sh:158` fixed scratch filename. The LEAP, portfolio, VCG, retry-budget, and browser-digest harnesses had the same boundary. Seven files reproduced 27 failures when another OS user owned the shared scratch files. This prevented the fake HTTP/retry assertions from exercising their intended paths.
+
+Acceptance: execute the real wrapper/pipeline in fixture-owned scratch space, preserve all control-flow and response assertions, and pass the same seven files without changing another user's files or production wrappers.
+
+### T-515 — P1 — retry tests omit the live renders that bypass cooldowns
+
+At the audited base, `web/lib/usePreviousClose.ts:74` and `:107` made failed symbols eligible immediately, while the timer belonged to a dependency-sensitive effect. `web/tests/previous-close-retry-backoff.test.tsx:55` originally exercised only a stable render for Retry-After. A price update after an in-flight request received a 429 issued a second request before the 30-second deadline. Partial-success renders and ordinary failure backoff had the same missing coverage.
+
+Acceptance: live price updates and overlapping symbols cannot shorten Retry-After or exponential backoff; misses stop after five attempts; timers and late responses cannot cross unmount/session boundaries; retain valid close data and add fake-only browser coverage.
+
+### T-516 — P2 — TypeScript manual migration boundary has no executable coverage
+
+`scripts/db/migrate.ts:132` skips manual DDL unless explicitly enabled, separately from the tested Python entry point. The codemap and text search found no test executing this TypeScript CLI. Disabling that guard would run the long manual index drop on a routine migration invocation.
+
+Acceptance: execute the actual CLI with fake filesystem/client/environment boundaries; prove default/false opt-ins leave the version pending while later automatic work runs, explicit opt-in executes DDL before its version record without a transaction, failure cannot record success, and applied versions do not replay. Bypassing the guard must fail the new tests.
+
+### Standing sweeps and carried-item reconciliation
+
+- Three repeats of 58 changed Python files each produced 1271 passed and 1 XPASS (the carried T-512). Seven changed Vitest files each produced 97 passed and the newly added T-515 regression failing; that regression reproduced 3/3. Sixteen changed cloud files each produced 1062 passed and 3 skipped. The changed newsfeed-sharing Playwright spec requires CI because this runner has no browser/server.
+- Initial full gates: Python 12956 passed / 59 failed / 2 skipped / 1 XPASS; Vitest 10170 passed / 21 skipped; cloud 2320 passed / 21 failed / 7 skipped. The Python failures split into 27 T-514 fixture failures and host OpenSSL incompatibility. Installed Homebrew Bash/OpenSSL and the Python 3.13 venv repaired the host environment; no compatibility weakening was added to the repository.
+- Detached base cloud run under the repaired environment: 2341 passed / 7 skipped, with an empty FAILED list. Closing-round comparisons are recorded below.
+- `.github/workflows/ci.yml:348` retains the shard union and intentional lead-module ordering; `scripts/tests/test_ci_deploy_concurrency.py:726` and `:751` check recursive reachability. Coverage thresholds/exclusions did not change. The new platform-conditional FX skip belongs to existing T-513; no untracked skip/xfail was introduced by this remediation.
+- T-130 is resolved upstream: both required secret names were provisioned, and main CI run 36502433090, job 109196861726, emitted `DEMO ISOLATION GUARD PASSED` at 2026-09-29T00:21:25Z. The local wiring suite passed 8 tests; no secret values were read.
+- T-510 is resolved by the upstream runner cutover: the retired controlling-TTY wrapper suite was removed with its entry point; `scripts/tests/test_runner_run_loop.py:704` and `:725` exercise replacement process cleanup and passed in all three delta repetitions. T-488, T-511, and T-513 are already merged and were not reallocated.
+- The NEW_FINDINGS appendix was re-triaged: spread timestamp honesty is already T-217; calendar/production-server Day Move coverage maps to T-210/T-386; the CI uses prebuilt `next start`. The documented six-site constructor baseline remains a static-check limitation (`scripts/tests/test_service_registration_completeness.py:488`), not a newly reproduced finding. The transport-classifier and historical test-ID notes were deduplicated against their existing contracts and numbered follow-ups.
+- T-435 remains P2 operator-only under its recorded three-attempt diagnosis: provision a separate keyless compile-mode Playwright build, with its own output directory and server, then assert the setup redirect without `x-radon-authless-test`. Acceptance remains the real middleware redirect, not a unit substitute (`TEST_AUDIT.md:9555`).
+
+Audited through: c274a773228ed29226721694370d3a1c2739494e on 2026-09-29 — 3 new findings
+
+## Remediation 2026-09-29
+
+**T-515 — DONE.** `web/lib/usePreviousClose.ts:72` releases retry eligibility only at the deadline; `:42` and `:111` own cleanup and reject stale responses. Red: the original hook failed 9/15 expanded cases, including the live-tick reproduction 3/3. Green: 25 related hook tests; targeted coverage 100% lines, 98% branches, 100% functions. The fake-only Playwright scenario is at `web/e2e/chain-anchored-scroll.spec.ts:133`; browser execution is assigned to PR CI.
+
+**T-514 — DONE.** `scripts/tests/shell_sandbox.py:8` stages the actual scripts and redirects only scratch paths; the Docker digest harness uses its own temporary hash file. Red: 27 serial failures across seven files. Green: the same seven files passed 33 tests with unchanged response/retry assertions. No shared scratch file or production wrapper was changed.
+
+
+**T-516 — DONE.** `web/tests/migrate-manual.test.ts:1` executes the actual TypeScript CLI with fake filesystem, client and environment boundaries. Red: bypassing the manual guard failed 4 cases. Green: 7 cases passed, covering deferral, opt-in ordering, failure and replay without any live database. Production migration code is unchanged.
+
+
+**T-493 — DONE.** `web/tests/ib-rt-volume-relay.test.ts:33` executes actual relay declarations with a fake IB emitter and observes buffered delivery. Red: the old source-grep suite accepted deletion of the live tickSize update; replacements reject all four removed update/delivery variants. Green: 5 behavioral cases passed without a socket or production source change.
+
+
+**T-495 — DONE locally; browser evidence assigned to PR CI.** `web/e2e/fixtures/chainPaneState.ts:3` measures domain-keyed rows independently of presentation classes. The chain spec uses accessible controls, explicit header/mid IDs, observed scroll displacement and a 390px mobile viewport. Red: both old-reader cases failed after class renames. Green: 23 focused reader/component cases passed; Playwright discovered all 5 scenarios. Geometry and order assertions remain. No local browser or screenshots were available.
+
+
+**T-512 — DONE.** `scripts/tests/test_rel257_liquidcompute_atomic.py:51` injects an actual SQLite trigger failure midway through replacement, checks the entire original batch from writer and fresh observer, verifies transaction release and retains a successful retry. Red: premature-commit mutation produced XPASS in the old test and failed the new rollback assertion. Green: 8 tests passed with no xfail; production persistence is unchanged.
+
+
+### Closing verification 2026-09-29
+
+| Closing round | Python | Vitest | Cloud |
+|---|---|---|---|
+| 1 (log run 2) | 1 failed, 13016 passed, 2 skipped, 41 warnings, 23 subtests passed in 474.03s (0:07:54) | 10213 passed (10213) | 2341 passed, 7 skipped in 766.54s (0:12:46) |
+| 2 (log run 3) | 13017 passed, 2 skipped, 41 warnings, 23 subtests passed in 281.23s (0:04:41) | 10213 passed (10213) | 2341 passed, 7 skipped in 785.44s (0:13:05) |
+| 3 (log run 4) | 13017 passed, 2 skipped, 41 warnings, 23 subtests passed in 321.60s (0:05:21) | 10213 passed (10213) | 2341 passed, 7 skipped in 766.92s (0:12:46) |
+
+An earlier complete attempt had Python 13017 passed / 2 skipped, Vitest 10213 passed, and cloud 2340 passed / 1 failed / 7 skipped. The gateway-readiness file then passed 51/51 alone. Closing round 1 had a fake-login one-second deadline failure; its full file immediately passed 103/103 alone. No assertion or timeout changed. These are recorded load-sensitive observations, not silently counted as full-suite green.
+
+Detached base c274a773 cloud: 2341 passed / 7 skipped; sorted FAILED list empty. All three closing cloud lists match exactly: zero additions and zero removals. The earlier attempt added only test_concurrent_operator_mutation_cannot_interleave_stack_transaction, which passed in isolation and subsequent full rounds.
+
+Full precommit gate: Python 13017 passed / 2 skipped / 23 subtests, Vitest 10213 passed, cloud 2341 passed / 7 skipped. Structured-file parsing, shell syntax, whitespace and secret scans are recorded with delivery. Browser execution, screenshots, exact-head CI and external delivery receipts are recorded on rolling issue #83. No local browser/server was available.
+
+Final hygiene: 71 focused documentation contracts passed; 5 audited JSON and 2 YAML files parsed; 10 audited shell scripts passed bash -n. Final branch diff passed whitespace checks and gitleaks reported zero leaks. No forbidden ledger or generated codemap file changed.
+
+
+### CI browser acceptance and fixture repair 2026-09-29
+
+T-495 browser acceptance completed on CI run 36554446379/job 109360196812 at e028b4e4: all four chain geometry/order scenarios passed. Eight before/after screenshots were visually reviewed at 1440px desktop and 390px mobile in light/dark themes; rows, pane/header positions and viewport bounds remained stable.
+
+The same run exposed a T-515 browser-fixture startup assumption (227 curated cases passed, one failed): the trace contained two MU requests 15ms apart before the cooldown phase. The fixture now navigates with a valid close, installs its controlled clock after readiness, then introduces the missing close. It adds an exact zero-request precondition and preserves the one-request cooldown and two-request retry assertions. Production hook code is unchanged. Final browser/CI receipts are retained on issue #83.
+
+CI-repair local verification: full Python 13015 passed / 2 failed / 2 skipped / 23 subtests; full Vitest 10213 passed; full cloud 2340 passed / 1 failed / 7 skipped. The failing knowledge-worker, subscription-token and Caddy files passed 5/5, 103/103 and 35/35 when rerun alone. The extra cloud FAILED-list entry versus the empty base was test_a_hung_upstream_becomes_a_5xx_within_a_bound at its listener-readiness check. The three closing cloud lists above remain identical to the base. No timeout or assertion changed.
+
+T-515 CI refinement: run 36557703614 again passed 227 curated cases but exposed an earlier server-mark backfill before the socket seed, even with a valid socket close. The fixture now fulfills warmup backfills in a fixed prior trading session, switches to the measured session, then introduces the missing close. Exact zero/one/two cooldown counts remain. Production code and all local-suite surfaces are unchanged from the full repair verification above; this final browser-only refinement is verified by focused checks, Playwright discovery and exact-head CI.
+
+
+## Delta audit 2026-09-30
+
+Audited `c274a773228ed29226721694370d3a1c2739494e..e3063f0c16ddcdead832df49553c6035e6501597`: 13 commits, 127 changed paths. The newest trusted collaborator comment on rolling issue #83 supplied the checkpoint. No open `testing/` PR existed at intake. IDs continue after T-516.
+
+Read the architecture index and incoming codemap edges, then confirmed dynamic/import-time and subprocess consumers with text searches. The graph predates the newest modules: `scripts/tests/test_research_cut_report.py:11` and `web/tests/assistant-response-quality.test.ts:165` confirm imports missing from the graph. The inverse review covered journal row ordering after rowid pagination, trigger-price guards at both IB funnels, daemon monotonic scheduling, transactional replacement and replay, assistant knowledge isolation, and broker-disconnected quote gates. Existing behavioral coverage executes these boundaries with fakes; no source defect was verified in those changes.
+
+### T-517 — P2 — report retrieval can break while every report test stays green
+
+`scripts/tests/test_research_cut_report.py:147` only invokes the CLI with `--from-json`; `:156` searches source text for SELECT-only statements. Neither executes `scripts/research/cut_report.py:276` (wire request/decoding) or `:305` (Pacific-day query and fallback). Changing the held-date SQL predicate to select null timestamps leaves all 11 old tests green. A fetch that simply returns an empty list also leaves all 11 green, falsely accepting empty daily reports.
+
+Acceptance: execute the real fetch and CLI across a fake HTTP boundary backed by in-memory SQLite; assert exact endpoint/method/request shape and bounded timeout, all three date predicates including both DST transitions and the exclusive end boundary, typed-cell decoding, schema-only fallback, failure propagation and missing-configuration refusal. Wrong held-row selection and empty fetch must be rejected.
+
+### T-518 — P2 — an environment override skips the default runtime-lock regression
+
+The newly merged test at the audited base `scripts/tests/test_grok_runtime.py:178` skips whenever RADON_GROK_RUNTIME_LOCK is set. The default at `scripts/grok_runtime.py:27` must stay inside the sandbox's writable runtime directory even on hosts using custom paths. With a synthetic override, the old test reports 1 skipped against a deliberate regression to `/var/lib/radon/grok-runtime.lock`.
+
+Acceptance: evaluate the real module's import-time defaults under a controlled absent override, separately assert explicit override precedence, retain the exact sandbox-compatible pathname, and reject the wrong default even when pytest inherits an override. Never change the process-wide imported runtime object.
+
+### Standing inventory and gate review
+
+- CI's recursive Python shard union is retained at `.github/workflows/ci.yml:342`; Vitest includes and coverage thresholds, Python measurement exclusions and the 56 coverage ratchet are unchanged. Changed daemon tests remain under the recursive daemon shard (`:359`). The new report workflow is dispatch-only, while its Python tests run in the regular rs shard.
+- The three held-out browser specs have explicit reviewed entries at `web/e2e/ci-curation-ledger.txt:311`: BPI, Catalyst scrollbars and order-book geometry. Existing CI-curated chain, chat and modify-order specs remain selected. No local browser/server is available; no browser execution or screenshot is claimed locally.
+- The new optional SQLite CLI prerequisite skip in `scripts/tests/test_docs_contract.py:443` is an explicit tool-availability boundary; the tool is available here and the behavior runs. T-518 addresses the avoidable environment-dependent skip. No skip/xfail or coverage exclusion is added by this branch.
+- Re-triaged TEST_LOG and NEW_FINDINGS: T-493/T-495/T-512/T-514/T-515/T-516 are merged in #798 and retain their accepted evidence; T-130 and T-510 were closed upstream in the trusted checkpoint. Historical Day Move/calendar notes map to T-210/T-386, spread timestamp notes to T-217, and the old payload-contract failure to T-079. The six constructor sites at `scripts/tests/test_service_registration_completeness.py:488` remain an explicitly bounded static-analysis inventory, not a newly reproduced testing defect.
+- T-435 remains P2 operator-only with the prior diagnosis at `TEST_AUDIT.md:9555`: provision an isolated keyless compile-mode build/server and assert the real `/portfolio` to `/setup` redirect without `x-radon-authless-test`. `web/lib/setup/setupMode.ts:29` still defaults the publishable key from the compile-time environment; the shared browser job remains keyed (`.github/workflows/ci.yml:747`).
+
+Audited through: e3063f0c16ddcdead832df49553c6035e6501597 on 2026-09-30 — 2 new findings
+
+## Remediation 2026-09-30
+
+**T-517 — DONE.** Added `scripts/tests/test_research_cut_transport.py:15` fake wire fixture that executes production SQL in SQLite with query_only enabled. Red: held-date predicate mutation, 3 failed / 17 passed across old and new files; empty-fetch mutation, 9 failed / 11 passed. The original 11 tests remain intact. Green: 20 report tests; no production changes or external requests.
+
+**T-518 — DONE.** `scripts/tests/test_grok_runtime.py:178` now re-evaluates module configuration in an isolated runpy namespace after removing only the lock override; `:190` checks explicit override precedence. Red: wrong-default mutation under a synthetic inherited override, 1 failed / 16 passed; old test skipped. Green: 17 runtime cases under the same inherited override. Combined focused gate: 37 passed.
+
+
+### Verification 2026-09-30
+
+Standing gates: Python 13179 passed / 1 failed / 2 skipped / 23 subtests. The failing `scripts/tests/test_knowledge_enrichment_budget.py:62` raised PermissionError in process-group cleanup under suite load; the entire file immediately passed 5/5 alone. Vitest: 1032 files / 10240 passed. Cloud: 2357 passed / 7 skipped, empty FAILED list. These are separate results; the initial Python run is not described as green.
+
+Delta repetitions: all 39 changed Python test files passed 946 cases in each of three runs; all 13 changed Vitest files passed 134 cases in each run; all three changed cloud files passed 24 cases in each run. Browser execution remains with CI because this runner has no browser/server.
+
+Host-only setup uses the Python 3.13 venv with pytest-asyncio/xdist and frozen root/web Bun installs. Gate PATH uses Homebrew Bash 5.3.20, OpenSSL 3.6.4, and Caddy 2.11.4. No repository compatibility workaround was needed. Four audited JSON files and one YAML parsed; four audited shell scripts passed bash -n.
+
+Detached base e3063f0c cloud gate: 2356 passed / 1 failed / 7 skipped. The sole FAILED entry was `cloud/tests/test_caddy_edge_timeouts.py::TestEdgeMechanism::test_a_hung_upstream_becomes_a_5xx_within_a_bound`, which missed its listener-readiness assertion at `:636`. The unchanged file immediately passed 35/35 alone. This is retained as the actual sorted baseline failure list, not rewritten to an empty list from the isolated pass. Linux CI remains authoritative.
+
+
+### Three closing rounds 2026-09-30
+
+| Round | Python | Vitest | Cloud |
+|---|---|---|---|
+| 1 | 1 failed, 13190 passed, 2 skipped, 39 warnings, 23 subtests passed in 347.72s (0:05:47) | Tests  10240 passed (10240) | 2357 passed, 7 skipped in 746.51s (0:12:26) |
+| 2 | 13191 passed, 2 skipped, 39 warnings, 23 subtests passed in 207.85s (0:03:27) | Tests  10240 passed (10240) | 2357 passed, 7 skipped in 729.01s (0:12:09) |
+| 3 | 13191 passed, 2 skipped, 41 warnings, 23 subtests passed in 235.49s (0:03:55) | Tests  10240 passed (10240) | 2357 passed, 7 skipped in 725.16s (0:12:05) |
+
+Round 1's sole Python failure was `scripts/tests/test_subscription_tokens.py::test_the_real_login_runner_kills_a_login_nobody_approved` (`:1666`, zero prompts before its one-second deadline). The complete unchanged file passed 103/103 alone after the closing sequence; both later full rounds also passed this case. Neither its assertion nor its timeout was changed. Round 1 remains a recorded failure, not a green full gate.
+
+Each closing cloud FAILED list is empty. Against the actual detached-base list: zero additions, one removal (the Caddy listener-readiness case named above), in each of the three rounds.
+
+Targeted coverage: the 20 report tests pass; `_pt_bounds`, `_hrana`, and `fetch_rows` each have 100% measured statement and branch coverage. Whole-module combined statement/branch coverage is 84%; no threshold or measurement exclusion changed.
+
+Review: only two test files change executable behavior. Existing report tests are preserved, the runtime default assertion is retained, and an environment-dependent skip is removed. No product code, generated codemap, reliability ledger, live connection, order, credential file, or service is changed. Audit/transport mutation logs and every full gate were captured before reading tails. Final focused/hygiene and exact-head CI receipts are retained on rolling issue #83. Browser execution stays with CI; no local browser screenshot or 390px check is claimed.
+
+
+## Delta audit 2026-10-01
+
+Audited `e3063f0c16ddcdead832df49553c6035e6501597..731716e54b1e85e98b591cbd79e9d18adf7a1ec7`: 20 commits, 160 changed paths. The newest trusted collaborator comment on rolling issue #83 supplied the checkpoint. No open `testing/` PR existed at intake. IDs continue after T-518.
+
+Read the architecture index and incoming codemap edges, then confirmed direct, dynamic and subprocess consumers with `rg`. The graph predates the newest RSI, CREDIT/VIX and incident-response modules. Inverse review covered actual BAG legs versus aggregate journal rows, structured order errors, CLI migration arguments, rotated authentication keys, responder missing-binary recovery, runtime environment failures, model aliases, relay row budgets, and regime route/cache/cadence contracts. The verified gaps below execute the changed boundaries; no live service was contacted.
+
+### T-519 — P1 — a clean branch tip hides private data in published history
+
+At the audited base, `scripts/ir_push_gate.py:138` scans only the net merge-base-to-tip diff. `scripts/tests/test_ir_push_gate.py:114` now publishes a synthetic identifier in an intermediate commit and removes it before the tip; the old gate accepts it. Deleted diagnostic files and merge-only resolutions also escape. The pickup integration at `scripts/tests/test_grok_fix_pickup.py:640` proves the old scanner permits a push to a local fake origin.
+
+Acceptance: inspect added lines and paths from every outgoing commit, including merge resolutions; refuse before the fake push and PR creation even when the tip is clean. Existing clean branches and removal of already-public base data must still pass. Diagnostics must not expose the synthetic value.
+
+### T-520 — P1 — workflow security tests accept guards that do not restrict execution
+
+At the audited base, `scripts/tests/test_pr_workflows_hold_no_secrets.py:55` and `:153` accept a guard substring even under negation or an unrestricted OR arm. The dependency inference at `:58` also treats a guarded prerequisite as protection when `always()` or another status override lets the secret-bearing dependent run after that prerequisite is skipped. Ten new cases fail against the old checker; repository workflows themselves are not changed.
+
+Acceptance: a positive main/push guard must be required by every possible OR arm; unknown or negated atoms confer no protection. Dependency inheritance must require implicit or explicit success. Quoted guard text must not count as code, and valid nested conjunctions/disjunctions must remain accepted.
+
+### T-521 — P2 — depth tests inspect a constant without executing the broker request
+
+`web/tests/book-montage-fill-height.test.ts:14` reads the 40-row constant and a reducer declaration. Hardcoding 10 at the actual request (`scripts/ib_realtime_server.js:1696`), truncating the reducer (`:1711`), or dropping L2 delivery (`:2791`) leaves all three old tests green. Each mutation fails the new behavior test.
+
+Acceptance: execute the actual relay declarations and registered IB callbacks against fake boundaries, assert 40 SMART equity rows and 10 native futures rows at both request and subscriber delivery, and retain the cap, immutable snapshots, disabled/disconnected gates and unknown-request handling. Do not copy production relay logic into the fixture.
+
+### T-522 — P2 — CREDIT/VIX tests replace the broker leg they intend to protect
+
+`scripts/tests/test_credit_vix.py:359` and `:370` inject `fetch_ib` functions instead of executing `scripts/fetch_credit_vix.py:129`. The 41 existing tests accept a stock contract instead of an index, a missing disconnect, and an unlimited historical request. The new fake-broker tests reject all three mutations.
+
+Acceptance: execute the real leg without a socket; assert index qualification, history arguments and bounded waits, authenticated/unknown/unavailable gateway behavior, connection refusal, missing driver, qualification/history failures, empty data and cleanup. The production source remains unchanged when restored.
+
+### T-523 — P1 — refusal diagnostics repeat a private identifier from a filename
+
+At the audited base, `scripts/ir_push_gate.py:143` includes the raw path in the refusal. `scripts/grok_fix_pickup.py:406` forwards that text to the alert and result. A local fixture with a synthetic account identifier only in its filename is correctly refused but echoes that identifier; `scripts/tests/test_ir_push_gate.py:149` fails against this behavior.
+
+Acceptance: keep the refusal and identifier kind, suppress a private path in diagnostics, and preserve useful clean paths. No history or file is rewritten and no private value is sent to an alert.
+
+### T-524 — P1 — binary additions and pure renames bypass private-path checks
+
+At the audited base, `scripts/ir_push_gate.py:101` discovers paths only through `+++` text-patch headers. Git emits neither header for a binary addition or a pure rename. `scripts/tests/test_ir_push_gate.py:164` reproduces both with a synthetic private filename; both are accepted even after the history and safe-diagnostic fixes.
+
+Acceptance: independently enumerate added/modified paths from every outgoing commit, including binary additions and renames, and refuse their private identifiers without echoing the path. Existing removal-only behavior must remain accepted.
+
+### Standing inventory and gate review
+
+- CI's recursive Python shards (`.github/workflows/ci.yml:342`) and Vitest includes retain reachability for the changed tests. The Python 56 and web 75/71/65 coverage ratchets and their measurement exclusions are unchanged; the delta adds no skip/xfail or blanket exclusion.
+- Browser holdouts are explicit: CREDIT/VIX (`web/e2e/ci-curation-ledger.txt:1`), RSI (`:115`) and clear-research (`:410`). Demo workstation remains explicitly invoked by CI (`.github/workflows/ci.yml:964`), and keyless setup has an isolated job (`:967`). No local browser/server is available; no screenshot or 390px verification is claimed locally.
+- T-435 is DONE upstream in PR #816, merge `2640fd61cd7d016e42deeb08ebea7a44d8a2901c`. `web/e2e-setup-gate/setup-gate.spec.ts:5` verifies the real 307 `/portfolio` to `/setup` redirect without the authless header, plus browser navigation and API setup refusal. Successful CI run 36737302600/job 109962391922 at head `8fc11512715e2e26a08956c89a2b5bb1099af223` records the actual Location and 1 passed (3.1s), not a skipped case.
+- Re-triaged TEST_LOG and NEW_FINDINGS: T-493/T-495/T-512/T-514/T-515/T-516/T-517/T-518 are merged. T-130 and T-510 were closed in trusted earlier checkpoints. Historical Day Move/calendar notes map to T-210/T-386, timestamp notes to T-217, and the old payload-contract failure to T-079. The six constructor sites at `scripts/tests/test_service_registration_completeness.py:488` remain a bounded static-analysis inventory, not a newly reproduced defect. No carried finding remains unassigned.
+
+Audited through: 731716e54b1e85e98b591cbd79e9d18adf7a1ec7 on 2026-10-01 — 6 new findings
+
+## Remediation 2026-10-01
+
+**T-519 — DONE.** Scan every outgoing commit patch, including merge resolutions, rather than only the final tree diff. Red: three scanner regressions and one local-pickup integration fail in all three delta repetitions. Green: the scanner/pickup files pass with the refusal still occurring before push and PR creation; clean-base removals remain accepted. Maintained responder documentation now describes the history boundary.
+
+**T-520 — DONE.** The security checker now conservatively proves positive guard implication across AND/OR expressions and requires success before inheriting a prerequisite's guard. Red: six direct-guard bypasses and four status-override bypasses, repeated three times. Green: all 47 workflow-security tests, including quoted-text controls and valid nested guards. No actual workflow or secret is modified.
+
+**T-521 — DONE.** Added `web/tests/relay-depth-request-behavior.test.ts:10`, evaluating actual AST-selected relay declarations and actual depth reducers without starting sockets. Request, reducer and delivery mutations each produce 1 failed / 7 passed; the original three tests accept each defect. Restored source: 8 passed across both files. Production relay code is unchanged.
+
+**T-522 — DONE.** Added `scripts/tests/test_credit_vix_ib_boundary.py:17` fake broker fixture. Stock-contract mutation: 1 failed / 55 passed; missing disconnect: 11 failed / 45 passed; unlimited history timeout: 1 failed / 55 passed. The original 41 tests accept all three defects. Restored source: 56 passed; `fetch_ib_vix` and its `_fetch` coroutine each measure 100% statement and branch coverage (whole module 82%).
+
+**T-523 — DONE.** Replace a private diagnostic path with `[private path]` while preserving the identifier kind and refusal. Red: 1 failed / 41 passed. Green: 42 scanner cases and the pickup integration pass. This changes diagnostic text only; branch content remains untouched.
+
+**T-524 — DONE.** Enumerate commit path metadata independently of text patches with rename detection disabled and an added/modified filter. Red: 2 failed / 42 passed (binary addition and pure rename). Green: 44 scanner cases; combined publication, security and broker gate 185 passed. This inspects filenames, not binary file contents.
+
+### Verification 2026-10-01
+
+Standing gates before fixes: Python 13407 passed / 2 skipped / 23 subtests; Vitest 1038 files / 10295 passed; cloud 2400 passed / 7 skipped. All full outputs were captured before inspection.
+
+Delta repetitions execute all 28 changed Python test files, 17 changed Vitest files and six changed cloud files. Each of three repetitions reports Python 14 failed / 887 passed, Vitest 463 passed, cloud 739 passed. All 14 Python failures are the deliberately added T-519/T-520 red regressions; no pre-existing test fails. The three closing full rounds also repeat these files after repair. Browser repetition is assigned to CI; held-out specs are not represented as executed.
+
+Focused final tree: 185 Python tests passed, 8 depth tests passed, TypeScript `tsc --noEmit` passed. Final targeted coverage: publication gate 95%; CREDIT/VIX broker leg and coroutine each 100% statement/branch (138 tests passed in the coverage run). No threshold, exclusion, timeout or existing assertion was weakened.
+
+Host-only toolchain: Python 3.13 venv with pytest-asyncio/xdist, frozen Bun installs in root/web, Node 26.10.0, and Homebrew Bash/OpenSSL/Caddy on gate PATH. Nine audited JSON and three YAML files parsed; three audited shell scripts passed `bash -n`. The detached-base cloud comparison and three closing-round receipts follow below.
+
+Detached base `731716e5` cloud gate: 2400 passed / 7 skipped in 803.64s. The sorted FAILED list is empty under the same Homebrew toolchain PATH.
+
+
+### Three closing rounds 2026-10-01
+
+| Round | Python | Vitest | Cloud |
+|---|---|---|---|
+| 1 | 13448 passed, 2 skipped, 43 warnings, 23 subtests passed in 279.44s (0:04:39) | Tests  10300 passed (10300) | 2400 passed, 7 skipped in 711.91s (0:11:51) |
+| 2 | 13448 passed, 2 skipped, 43 warnings, 23 subtests passed in 279.13s (0:04:39) | Tests  10300 passed (10300) | 2400 passed, 7 skipped in 703.06s (0:11:43) |
+| 3 | 13448 passed, 2 skipped, 43 warnings, 23 subtests passed in 276.22s (0:04:36) | Tests  10300 passed (10300) | 2400 passed, 7 skipped in 704.37s (0:11:44) |
+
+All three closing cloud FAILED lists are empty. Each comparison against the actual detached-base list has zero additions and zero removals. No isolated rerun or baseline exception was needed.
+
+Review: six verified findings have red/green evidence. Only the incident-response publication gate changes production behavior; broker and relay sources are restored unchanged. Existing assertions are retained and no skip, xfail, tolerance, timeout, coverage threshold or exclusion is weakened. Generated codemap and reliability ledgers are untouched. Focused checks run again before each finding commit. Exact-head CI/browser and notification receipts are recorded externally on rolling issue #83 so recording them does not change the tested head.
+
+## Delta audit 2026-10-02
+
+Audited `731716e54b1e85e98b591cbd79e9d18adf7a1ec7..cb47c52ab055221fd7d88ead72ff28acb554e7d7`: 30 commits, 185 changed paths. The newest trusted collaborator comment on rolling issue #83 supplied the checkpoint. No open `testing/` PR existed at intake. IDs continue after T-524.
+
+Read the architecture index and incoming codemap edges, then confirmed direct, dynamic and subprocess consumers with `rg`. The graph predates the new host-control, hold and NVIDIA proxy modules. Inverse review covered peer admission, hold propagation, recovery timers, order ownership, held-leg basis and signed extrema, hidden-tab depth demand, cached signing keys, provider fallback, root responder staging, incident push history and nightly queue reconciliation. All execution used fake dependencies or loopback test servers.
+
+### T-525 — P1 — host-control socket tests bypass the kernel credential decoder
+
+`scripts/tests/test_control_service.py:334` replaces `peer_uid` for every socket integration scenario, while `scripts/control_service/serve.py:391` decodes the actual Linux PID/UID/GID tuple. Returning PID instead of UID passes all 57 original tests, including authorization cases. The new fake-kernel boundary tests reject that mutation with 5 failures / 2 passes and verify refusal without command execution when credentials are unavailable.
+
+Acceptance: decode the kernel UID, allow only root/the service UID, and reject foreign UIDs even when PID or GID equals an allowed identity. No host command executes in the fixture.
+
+### T-526 — P2 — completed-response equality does not prove streaming delivery
+
+`scripts/tests/test_nvidia_rate_limit.py:249` consumes the complete response before asserting SSE bytes. Replacing `read1` with buffering `read` at `scripts/nvidia_rate_limit.py:373` passes all 30 original tests. Both new transport cases fail: the loopback provider cannot finish until the downstream client acknowledges its first event. Production already streams correctly; only regression tests are retained.
+
+Acceptance: deliver the first event before provider completion for chunked and content-length responses, then deliver the exact remaining bytes and close the fixture servers. Synchronization uses an event handshake; timeouts only bound a defective run.
+
+### T-527 — P2 — source-string hold checks miss a real loss of the held state
+
+`web/tests/relay-operator-hold.test.ts:58` checks source substrings and branch ordering without executing the poller or timer. `scripts/ib_realtime_server.js:819` promises to retain the last value on unknown state, but its poller turns a successful response without a boolean `operator_hold` into a clear. Four real malformed-response cases fail against the audited source. The new suite executes the actual AST-selected poller, restart handler and stale timer with fake transport, health writer and recovery effects.
+
+Acceptance: only explicit boolean health state changes the latch; malformed success, HTTP failure, transport failure and JSON failure preserve a known hold; restart refusals latch it; held connected/disconnected timer cycles write held health and perform no recovery action. An explicit false restores normal disconnected health. Reject a mutation that removes the hold from the live timer decision while all original source checks still pass.
+
+### Standing sweeps and prior findings
+
+- Standing gates: Python 13,815 passed / 2 skipped / 23 subtests; Vitest 10,353 passed in 1,043 files; cloud 2,452 passed / 7 skipped. Full output was saved before inspection.
+- CI discovery remains broad (`pyproject.toml:31`, `vitest.config.ts:45`, `.github/workflows/ci.yml:342`). The Python 56 and Vitest 75/71/65 ratchets and measured surfaces are unchanged. Capability skips were inspected; no new blanket exclusion or bypass was verified.
+- The changed held-leg browser spec is named in `.github/workflows/ci.yml:808`. The changed admin-service spec remains explicitly held out by `web/e2e/ci-curation-ledger.txt:1` pending next-start preflight; its request behavior has executable Vitest coverage. Browser execution and screenshots cannot be produced locally in this run.
+- Re-triaged TEST_LOG and NEW_FINDINGS. T-519 through T-524 are resolved in merged PR #831; T-435 is resolved in merged PR #816. Historical constructor inventory at `scripts/tests/test_service_registration_completeness.py:488`, Day Move/calendar notes (T-210/T-386), spread timestamps (T-217) and payload-contract failure (T-079) do not yield a new reproduced finding. The trusted checkpoint carries no open testing finding.
+
+Audited through: cb47c52ab055221fd7d88ead72ff28acb554e7d7 on 2026-10-02 — 3 new findings
+
+
+## Remediation 2026-10-02
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-525 | DONE | PID-as-UID mutation passes all 57 original tests, fails 5 new identity cases. Real decoder plus fake kernel/runner: 64 combined tests pass. Unknown identity refuses without execution. Production decoder unchanged. |
+| T-526 | DONE | Buffering-read mutation passes all 30 original tests, fails both new streaming cases. Client acknowledgement controls provider completion for both transfer encodings: 32 combined tests pass. Production proxy unchanged. |
+| T-527 | DONE | Actual malformed-response defect: 4 failed / 8 passed. Poller now accepts only explicit boolean state. Timer-bypass mutation passes all 4 original checks, fails all 12 new behavioral cases; restored source passes 77 related tests. Maintained hold documentation now states the unknown-state contract. |
+
+All three changed-file repetitions passed: Python 1,000, Vitest 430, cloud 876 per repetition (37 / 17 / 9 files). The two changed browser files could not run locally; curated held-leg browser evidence belongs to PR CI, and the explicitly held-out admin-service spec remains unexecuted here. No source assertion, timeout, tolerance, test selection or coverage threshold was weakened.
+
+### Closing verification 2026-10-02
+
+| Closing round | Python passed | Vitest passed | Cloud passed |
+|---|---:|---:|---:|
+| 1 | 13,826 | 10,365 | 2,452 |
+| 2 | 13,826 | 10,365 | 2,452 |
+| 3 | 13,826 | 10,365 | 2,452 |
+
+Each Python round also passed 23 subtests and skipped 2 cases; each cloud round skipped 7 cases. Each Vitest round passed 1,044 files. All nine gates completed successfully, without a load-flake exception.
+
+Detached base cb47c52a cloud gate: 2,452 passed / 7 skipped. Its sorted FAILED list is empty. Each of the three closing cloud FAILED lists is also empty: 0 additions and 0 removals in every exact list comparison. Homebrew Bash, OpenSSL and Caddy were selected through PATH; no repository environment workaround was added.
+
+Syntax audit passed for 2 TOML, 5 JSON, 5 YAML and 13 shell files from the merged delta; the changed relay JavaScript also passes node --check. Final whitespace/secret review and exact-head CI receipts are recorded on rolling issue #83.

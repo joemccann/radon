@@ -20,8 +20,8 @@ Applies under `scripts/api/`. Root and `scripts/AGENTS.md` also apply. Mirrors `
 
 ## IB Gateway Modes
 
-- `docker`: local and Hetzner Docker Gateway.
-- `cloud`: laptop dev via Tailscale `ib-gateway:4001`; TCP probe only, no restart.
+- `docker`: local development Docker Gateway; lock-aware recovery owns starts.
+- `cloud`: production lifecycle delegates to the installed Gateway control helper; app-role hosts proxy control over mTLS. Laptop remote aliases remain probe-only.
 - `launchd`: legacy local IBC wrappers.
 - Switching mode via `scripts/ib mode {local|cloud}` requires dev stack restart.
 - Auto-recovery must verify port down or CLOSE_WAIT before restart. Client ID collision, VOL error, or transient timeout is not restart evidence.
@@ -32,6 +32,7 @@ Applies under `scripts/api/`. Root and `scripts/AGENTS.md` also apply. Mirrors `
 - Restart paths must acquire the cross-process 2FA push lock and respect backoff. Do not stack IBKR Mobile pushes.
 - Production Gateway actions must call `/usr/local/bin/radon-ib-gateway-control`; never pre-acquire a lease and then call the helper, and never control `radon-ib-gateway-preheld-restart.service` from the admin API.
 - `POST /ib/reset-backoff` clears in-memory restart backoff and push lock.
+- IBKR operator hold: `/health` carries `ib_gateway.operator_hold`. While held, `/ib/restart` and admin Gateway `start|restart` return 423 with no broker call, and the recovery heartbeat stands down. `GET|POST /ib/operator-hold` sets and clears it through the broker daemon `hold`/`unhold`.
 - IBC relogin on 2FA timeout is disabled; do not re-enable.
 - Watchdog stuck-2FA self-heal fires only after repeated stuck cycles when no push is in flight and backoff has elapsed.
 - If `auth_state=authenticated` but pool clients remain disconnected while a direct probe works, restart `radon-api.service`.
@@ -55,3 +56,11 @@ Applies under `scripts/api/`. Root and `scripts/AGENTS.md` also apply. Mirrors `
 - Script stdout should contain only result JSON.
 - Progress/debug output goes to stderr.
 - JSON extractors are defensive, but script discipline is the primary guarantee.
+- Failed subprocesses retain structured `status=error` data while `ok` stays false. Cancel/modify return coded 502 details with the broker fields and order identity intact (REL-021b / R-024).
+
+## Legacy order helpers (REL-021b / R-039)
+
+Production cancel/modify routes retain the original-client subprocess path.
+Do not import the unused pooled shortcut into the server. Legacy helpers
+must refuse unknown or mismatched client ownership before mutation; modify
+also respects trading halt, while owned cancellation remains available.

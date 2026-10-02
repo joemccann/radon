@@ -78,6 +78,7 @@ export default function ServiceControlPanel({
 
   const supported = services?.supported ?? false;
   const hostRole = services?.host_role;
+  const statusSourceNote = statusSourceLabel(services?.status_source);
   const units = (services?.units ?? []).filter((u) => !HIDDEN_FROM_TABLE.has(u.unit));
   const { sorted: sortedUnits, sort, toggle } = useSort<UnitStatus, ServiceSortKey>(units, serviceSortValue);
   const dependents = confirm?.action === "stop" ? unitDependents(confirm.unit) : [];
@@ -139,6 +140,9 @@ export default function ServiceControlPanel({
             ? "This host cannot start, stop, or restart services. Current status remains visible."
             : "Read-only: this browser is not on the Hetzner VPS, so controls are disabled."}
       </p>
+      {statusSourceNote && (
+        <p className="admin-card-subhead" data-testid="services-status-source">{statusSourceNote}</p>
+      )}
 
       {!observationCurrent && <p className="admin-card-note" role="status">Refresh service status before running a command.</p>}
       <div className="admin-table-scroll">
@@ -196,6 +200,20 @@ export default function ServiceControlPanel({
       />
     </section>
   );
+}
+
+/** One line naming where the rows came from, instead of repeating it per row. */
+function statusSourceLabel(source: ServicesListResponse["status_source"]): string | null {
+  switch (source) {
+    case "host-control":
+      return "Status and controls via the host control socket.";
+    case "systemd":
+      return "Status and controls via systemd on this host.";
+    case "host-health":
+      return "Status from the host health daemon. Controls need the host control service.";
+    default:
+      return null;
+  }
 }
 
 function capitalize(s: string): string {

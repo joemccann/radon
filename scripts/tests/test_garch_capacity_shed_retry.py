@@ -19,7 +19,6 @@ a slot. Do not treat every 502 as a shed.
 from __future__ import annotations
 
 import os
-import shutil
 import socket
 import stat
 import subprocess
@@ -28,6 +27,8 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+
+from scripts.tests.shell_sandbox import stage_shell_script
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 WRAPPER = "run_garch_refresh.sh"
@@ -162,7 +163,7 @@ def _repo(tmp_path: Path, marker: Path) -> tuple[Path, Path]:
     scripts_dir = repo / "scripts"
     scripts_dir.mkdir(parents=True)
     (repo / "data").mkdir()
-    shutil.copy2(SCRIPTS / WRAPPER, scripts_dir / WRAPPER)
+    stage_shell_script(SCRIPTS / WRAPPER, scripts_dir / WRAPPER, tmp_path / "scratch")
     (scripts_dir / WRAPPER).chmod(0o755)
 
     _executable(

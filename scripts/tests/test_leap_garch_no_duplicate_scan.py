@@ -17,7 +17,6 @@ accepted, so only that may fall back.
 from __future__ import annotations
 
 import os
-import shutil
 import socket
 import stat
 import subprocess
@@ -26,6 +25,8 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+
+from scripts.tests.shell_sandbox import stage_shell_script
 
 import pytest
 
@@ -112,7 +113,7 @@ def _repo(tmp_path: Path, spec: dict, marker: Path) -> tuple[Path, Path]:
     scripts_dir = repo / "scripts"
     scripts_dir.mkdir(parents=True)
     (repo / "data").mkdir()
-    shutil.copy2(SCRIPTS / spec["wrapper"], scripts_dir / spec["wrapper"])
+    stage_shell_script(SCRIPTS / spec["wrapper"], scripts_dir / spec["wrapper"], tmp_path / "scratch")
     (scripts_dir / spec["wrapper"]).chmod(0o755)
 
     # The scanner stub records that a DIRECT invocation happened.

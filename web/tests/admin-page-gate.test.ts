@@ -19,6 +19,7 @@ const OPERATOR_ADMIN_APIS = [
   "app/api/admin/services/[unit]/[action]/route.ts",
   "app/api/admin/ib/restart/route.ts",
   "app/api/admin/ib/reset-backoff/route.ts",
+  "app/api/admin/ib/operator-hold/route.ts",
   "app/api/admin/stack/restart/route.ts",
   "app/api/preferences/route.ts",
 ] as const;

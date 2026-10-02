@@ -304,12 +304,12 @@ def _paged_hrana_query(rows):
     it drives ``journal_basis``'s 200-row keyset pager over Hrana HTTP, so
     the fake stamps an ascending ``trade_id`` and honours cursor + LIMIT.
     """
-    paged = [(f"t{index:04d}", *row) for index, row in enumerate(rows)]
+    paged = [(f"t{index:04d}", *row, index + 1) for index, row in enumerate(rows)]
 
     def query(sql, args=(), timeout=None):
         cursor = args[0]
         limit = int(args[-1])
-        return [row for row in paged if row[0] > cursor][:limit]
+        return [row for row in paged if row[-1] > cursor][:limit]
 
     return query
 

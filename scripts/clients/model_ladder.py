@@ -3,15 +3,15 @@
 Joe's exact order (2026-09-10). Do not leave a band until it is exhausted or
 unavailable:
 
-  1. subscription: anthropic -> grok -> cursor -> codex -> gemini (Antigravity CLI)
+  1. subscription: anthropic -> grok -> cursor -> codex -> antigravity (``agy -p``)
   2. nvidia (API key OK)
   3. cerebras (cheap paid, last; currently paused on Hetzner)
 
-Subscription-tier rungs (Anthropic / Grok / Codex / Gemini) use **subscription
-credentials only** by default — Claude Max OAuth, Grok device-auth,
-ChatGPT+Codex OAuth, Gemini OAuth. Prepaid console wallets
-(``ANTHROPIC_API_KEY``, ``XAI_API_KEY``, ``OPENAI_API_KEY``, ``GEMINI_API_KEY``
-and aliases) are **not** used on the shared ladder unless
+Subscription-tier rungs (Anthropic / Grok / Codex / Antigravity) use
+**subscription credentials only** by default — Claude Max OAuth, Grok
+device-auth, ChatGPT+Codex OAuth, the Antigravity CLI's own Google sign-in.
+Prepaid console wallets (``ANTHROPIC_API_KEY``, ``XAI_API_KEY``,
+``OPENAI_API_KEY`` and aliases) are **not** used on the shared ladder unless
 ``RADON_LADDER_ALLOW_PREPAID=1``. Without subscription material the rung is
 skipped and the ladder continues to NVIDIA then Cerebras. Knowledge distill
 (``scripts/knowledge/distill.py`` → ``complete_text_json``) and the newsfeed
@@ -52,7 +52,7 @@ MODEL_LADDER_ORDER = (
     "grok",
     "cursor",
     "codex",
-    "gemini",
+    "antigravity",
     "nvidia",
     "cerebras",
 )
@@ -62,7 +62,7 @@ MODEL_LADDER_TIERS = {
     "grok": "subscription",
     "cursor": "subscription",
     "codex": "subscription",
-    "gemini": "subscription",
+    "antigravity": "subscription",
     "nvidia": "nvidia",
     "cerebras": "cerebras",
     "slm-tagger": "local",
@@ -73,9 +73,6 @@ MODEL_LADDER_TIERS = {
 _ANTHROPIC_PREPAID_KEYS = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY")
 _GROK_PREPAID_KEYS = ("XAI_API_KEY", "GROK_API_KEY")
 _CODEX_PREPAID_KEYS = ("OPENAI_API_KEY",)
-# Google runs ONLY through the Antigravity CLI (operator, 2026-09-18): no
-# prepaid Gemini key and no Gemini OAuth token path, under any flag.
-_GEMINI_KEYS: tuple[str, ...] = ()
 _NVIDIA_KEYS = ("NVIDIA_API_KEY",)
 _CEREBRAS_KEYS = ("CEREBRAS_API_KEY",)
 
@@ -90,9 +87,10 @@ _CLAUDE_CODE_USER_AGENT = "claude-cli/2.1.140"
 # ChatGPT subscription endpoint the codex CLI uses. api.openai.com meters the
 # prepaid wallet and rejects the grant ("no credits remaining", live 2026-09-18).
 _CHATGPT_CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
-# Google retired the Gemini CLI OAuth client for individuals on 2026-09-18 and
-# the Antigravity grant lacks the generativelanguage scope (403 live), so the
-# gemini rung shells out to the Antigravity CLI (`agy -p`) instead.
+# Google access runs ONLY through the Antigravity CLI (`agy -p`), operator
+# 2026-09-18: no Google API key or OAuth token path, under any flag. The
+# Antigravity grant lacks the generativelanguage scope (403 live), so there is
+# no HTTP path. ~/.gemini/antigravity-cli is Google's fixed on-disk location.
 _ANTIGRAVITY_TOKEN_RELPATH = Path(".gemini") / "antigravity-cli" / "antigravity-oauth-token"
 _ANTIGRAVITY_CLI_TIMEOUT_SECONDS = 120.0
 # Mirrors subscription_tokens.CLI_ENV_ALLOWLIST: everything a third-party
@@ -125,6 +123,7 @@ _OPTIONAL_LADDER_ENV = (
     "CODEX_HOME",
     "RADON_LADDER_NO_AUTH_FILES",
     "ANTIGRAVITY_CLI",
+    "ANTIGRAVITY_MODEL",
     "RADON_SLM_TAGGER_URL",
     "RADON_SLM_TAGGER_MODE",
     "RADON_SLM_TAGGER_TIMEOUT_S",
@@ -151,7 +150,7 @@ _DEFAULT_VISION_MODELS = {
     "anthropic": "claude-haiku-4-5-20251001",
     "grok": "grok-4.6",
     "codex": "gpt-5.5",
-    "gemini": "",  # Antigravity account default unless GEMINI_MODEL is set
+    "antigravity": "",  # account default unless ANTIGRAVITY_MODEL is set
     "nvidia": _NVIDIA_VISION_DEFAULT,
     # Public multimodal Chat Completions id (Cerebras changelog 2026-09).
     # llama-4-scout-17b-16e-instruct is archived. gemma-4-31b left public
@@ -165,7 +164,7 @@ _DEFAULT_TEXT_MODELS = {
     "anthropic": "claude-sonnet-4-6",
     "grok": "grok-4.6",
     "codex": "gpt-5.5",
-    "gemini": "",  # Antigravity account default unless GEMINI_MODEL is set
+    "antigravity": "",  # account default unless ANTIGRAVITY_MODEL is set
     "nvidia": _NVIDIA_TEXT_DEFAULT,
     "cerebras": "qwen-3.8-27b",
     "slm-tagger": "radon-slm-tagger",
@@ -434,7 +433,7 @@ def _antigravity_cli(env: Mapping[str, str]) -> str:
     return found or ""
 
 
-def _gemini_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
+def _antigravity_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
     """Google via the Antigravity CLI only; the token is the CLI path."""
     cli = _antigravity_cli(env)
     if cli:
@@ -487,9 +486,9 @@ def _auth_for(name: str, env: Mapping[str, str]) -> AuthMaterial | None:
         if sub is not None:
             return sub
         return _prepaid_auth(env, *_CODEX_PREPAID_KEYS, mechanism="OPENAI_API_KEY")
-    if name == "gemini":
-        # Antigravity only: no prepaid Gemini key, even under allow-prepaid.
-        return _gemini_subscription_auth(env)
+    if name == "antigravity":
+        # CLI only: no prepaid Google key, even under allow-prepaid.
+        return _antigravity_subscription_auth(env)
     if name == "nvidia":
         token = _env_get(env, *_NVIDIA_KEYS)
         if token:
@@ -535,12 +534,8 @@ def _model_for(name: str, env: Mapping[str, str], *, kind: str = "vision") -> st
                 env, "OPENAI_VISION_MODEL", "OPENAI_MODEL", default=defaults["codex"]
             )
         return _first_env_model(env, "OPENAI_MODEL", default=defaults["codex"])
-    if name == "gemini":
-        if kind == "vision":
-            return _first_env_model(
-                env, "GEMINI_VISION_MODEL", "GEMINI_MODEL", default=defaults["gemini"]
-            )
-        return _first_env_model(env, "GEMINI_MODEL", default=defaults["gemini"])
+    if name == "antigravity":
+        return _first_env_model(env, "ANTIGRAVITY_MODEL", default=defaults["antigravity"])
     if name == "nvidia":
         if kind == "vision":
             return _first_env_model(
@@ -616,11 +611,24 @@ def _classify_http_failure(status: int, body: str) -> str:
     return "provider_error"
 
 
-def _is_hard_fail(status: int, body: str) -> bool:
+def _error_envelope(payload: Any) -> str:
+    """Text of a provider error envelope inside a 2xx body, else ""."""
+    if not isinstance(payload, dict):
+        return ""
+    if payload.get("error"):
+        err = payload["error"]
+        return err if isinstance(err, str) else json.dumps(err)
+    if payload.get("type") == "error":
+        return json.dumps(payload)
+    return ""
+
+
+def _is_hard_fail(status: int, payload: Any) -> bool:
+    # A 200 is judged by its envelope only: the body is the model's answer, and
+    # research text routinely says "capacity", "quota" or "billing".
     if status != 200:
         return True
-    lowered = body.lower()
-    return any(marker in lowered for marker in _CREDIT_MARKERS)
+    return bool(_error_envelope(payload))
 
 
 def safe_error_message(error: Exception, *, max_len: int = 240) -> str:
@@ -634,6 +642,36 @@ def safe_error_message(error: Exception, *, max_len: int = 240) -> str:
         if msg:
             return msg
     return type(error).__name__
+
+
+def _nvidia_limiter(env: Mapping[str, str], post: Callable[..., Any]) -> Any:
+    """Host-wide NVIDIA pacer for real network calls; None for an injected post.
+
+    The NVIDIA key is rate limited per key (about 40 requests a minute) and
+    shared with the nightly fx loops; see scripts/nvidia_rate_limit.py.
+    """
+    if post is not _default_post:
+        return None
+    try:
+        import nvidia_rate_limit
+    except ImportError:  # imported without scripts/ on sys.path
+        import sys
+
+        sys.path.append(str(Path(__file__).resolve().parents[1]))
+        import nvidia_rate_limit
+
+    return nvidia_rate_limit.shared_limiter(env)
+
+
+def _nvidia_max_wait(env: Mapping[str, str]) -> float:
+    try:
+        return max(0.0, float((env.get("RADON_NVIDIA_LADDER_MAX_WAIT_S") or "15").strip()))
+    except ValueError:
+        return 15.0
+
+
+def _body_snippet(text: str) -> str:
+    return safe_error_message(RuntimeError(text), max_len=200) if text.strip() else ""
 
 
 def parse_json_rows(text: str) -> Optional[list[dict[str, Any]]]:
@@ -711,14 +749,6 @@ def _text_from_openai(payload: dict[str, Any]) -> str:
                 parts.append(part)
         return "".join(parts)
     return ""
-
-
-def _text_from_gemini(payload: dict[str, Any]) -> str:
-    candidates = payload.get("candidates") or []
-    if not candidates:
-        return ""
-    parts = ((candidates[0] or {}).get("content") or {}).get("parts") or []
-    return "".join(str(part.get("text") or "") for part in parts if isinstance(part, dict))
 
 
 def _default_post(
@@ -1033,7 +1063,7 @@ def _antigravity_complete(
     instruction: str,
     labeled_b64: Sequence[tuple[str, str]],
 ) -> tuple[int, str, Any]:
-    """Gemini via `agy -p`; images are not supported, so that rung is skipped."""
+    """Google via `agy -p`; images are not supported, so that rung is skipped."""
     if labeled_b64:
         return 415, "antigravity_cli: image input unsupported", None
     prompt = f"{system}\n\n{instruction}" if system else instruction
@@ -1070,7 +1100,7 @@ def _antigravity_complete(
     response = doc.get("response") if isinstance(doc, dict) else None
     if not isinstance(response, str) or str(doc.get("status", "")).upper() not in {"SUCCESS", ""}:
         return 502, completed.stdout[:2000], None
-    payload = {"candidates": [{"content": {"parts": [{"text": response}]}}]}
+    payload = {"choices": [{"message": {"content": response}}]}
     return 200, response, payload
 
 
@@ -1166,7 +1196,7 @@ def _call_vision_provider(
             stream=True,
             max_bytes=max_response_bytes,
         )
-    if name == "gemini":
+    if name == "antigravity":
         return _antigravity_complete(api_key, {}, model, "", prompt, [("image", b64)])
     if name == "nvidia":
         return _request(
@@ -1373,7 +1403,7 @@ def _call_text_provider(
             stream=True,
             max_bytes=max_response_bytes,
         )
-    if name == "gemini":
+    if name == "antigravity":
         return _antigravity_complete(api_key, {}, model, system, instruction, labeled_b64)
     if name == "nvidia":
         return _request(
@@ -1424,8 +1454,6 @@ def _call_text_provider(
 def _extract_text(name: str, payload: dict[str, Any]) -> str:
     if name == "anthropic":
         return _text_from_anthropic(payload)
-    if name == "gemini":
-        return _text_from_gemini(payload)
     return _text_from_openai(payload)
 
 
@@ -1444,6 +1472,15 @@ def _models_for_attempt(
     return (_model_for(name, env, kind=kind),)
 
 
+LAST_RESORT_PROVIDER = "cerebras"
+
+
+def _last_resort_last(order: Sequence[str]) -> tuple[str, ...]:
+    """Cerebras is the last resort: nothing runs after it, whatever the caller passed."""
+    rest = tuple(name for name in order if name != LAST_RESORT_PROVIDER)
+    return rest + ((LAST_RESORT_PROVIDER,) if LAST_RESORT_PROVIDER in order else ())
+
+
 def _run_ladder(
     *,
     env: Mapping[str, str],
@@ -1458,7 +1495,7 @@ def _run_ladder(
 ) -> tuple[Any, str, str, str, tuple[str, ...]]:
     attempted: list[str] = []
     skipped: list[str] = []
-    order = providers or MODEL_LADDER_ORDER
+    order = _last_resort_last(providers or MODEL_LADDER_ORDER)
 
     for name in order:
         if name == "cursor":
@@ -1483,7 +1520,17 @@ def _run_ladder(
         won_model = ""
         won_parsed: Any = None
         won_text = ""
+        limiter = _nvidia_limiter(env, post) if name == "nvidia" else None
         for model in models:
+            if limiter is not None and not limiter.acquire(_nvidia_max_wait(env)):
+                attempted.append(f"{name}:rate_limited_local")
+                logger.warning(
+                    "%s provider=%s skipped: NVIDIA rate budget spent or paused; "
+                    "no request sent",
+                    log_prefix,
+                    name,
+                )
+                break
             try:
                 status, raw, payload = call_provider(name, auth, model)
             except ModelResponseError:
@@ -1497,17 +1544,39 @@ def _run_ladder(
                 continue
 
             body_text = raw if isinstance(raw, str) else ""
-            if payload is None or _is_hard_fail(status, body_text):
-                code = _classify_http_failure(status, body_text)
+            if limiter is not None:
+                if status == 429:
+                    limiter.note_429(None)
+                elif status in (401, 403):
+                    limiter.note_auth_failure(status)
+                elif status == 200:
+                    limiter.note_success()
+            if name == "nvidia" and status in (401, 403):
+                logger.error(
+                    "%s NVIDIA AUTHORIZATION FAILED status=%s model=%s: key refused or "
+                    "temporarily blocked; not retried body=%r",
+                    log_prefix,
+                    status,
+                    model,
+                    _body_snippet(body_text),
+                )
+            if payload is None or _is_hard_fail(status, payload):
+                code = _classify_http_failure(
+                    status, _error_envelope(payload) if status == 200 else body_text
+                )
                 attempted.append(f"{name}:{code}")
                 logger.warning(
-                    "%s provider=%s model=%s auth=%s failed %s",
+                    "%s provider=%s model=%s auth=%s failed %s status=%s body=%r",
                     log_prefix,
                     name,
                     model,
                     auth.kind,
                     code,
+                    status,
+                    _body_snippet(body_text) if status != 200 else "",
                 )
+                if status == 429 and name == "nvidia":
+                    break
                 continue
 
             if not isinstance(payload, dict):

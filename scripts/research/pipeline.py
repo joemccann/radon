@@ -41,6 +41,35 @@ class DocumentDeadlineExceeded(EvidenceError):
     """A document exhausted its bounded review lease and must be retried."""
 
 
+PDF_CHILD_TIMEOUT_SECS = 180
+PDF_METADATA_TIMEOUT_SECS = 30
+
+
+def _run_pdf_child(pdf, output, flags, *, stdin=None, timeout=PDF_CHILD_TIMEOUT_SECS):
+    return subprocess.run([sys.executable, '-m', 'research.pdf', str(pdf), str(output), *flags],
+                          input=stdin, capture_output=True, timeout=timeout, env=pdf_subprocess_env())
+
+
+def figures_isolated(pdf, pages, output, extras=None):
+    """research.figures.catalogue run inside the rlimited research.pdf child."""
+    from research.figures import Catalogue
+    result = _run_pdf_child(pdf, output, ['--figures-only', '--pages', ','.join(map(str, pages))],
+                            stdin=json.dumps(extras or []).encode())
+    if result.returncode:
+        raise EvidenceError('Figure catalogue failed; original retained for review')
+    payload = json.loads(result.stdout)
+    return Catalogue(payload['figures'], skipped_pages=payload['skipped_pages'])
+
+
+def creation_date_isolated(pdf):
+    """The PDF Info CreationDate (or ModDate), or None when the child cannot read it."""
+    try:
+        result = _run_pdf_child(pdf, '.', ['--metadata-only'], timeout=PDF_METADATA_TIMEOUT_SECS)
+        return json.loads(result.stdout)['created'] if result.returncode == 0 else None
+    except (subprocess.TimeoutExpired, ValueError, KeyError, TypeError):
+        return None
+
+
 # Each reviewer request has a 120-second read bound (research.model.Reviewer).
 # Reserving that entire bound before starting a request keeps one accepted PDF
 # from monopolising the sole worker beyond this document lease.

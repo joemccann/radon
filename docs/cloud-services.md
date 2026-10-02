@@ -4,24 +4,11 @@ This document covers Radon's two-mode architecture introduced in Phase 0–6 of 
 
 ## Architecture (TL;DR)
 
-```
-                         Turso Cloud DB (libSQL)
-                       radon-joemccann.aws-us-west-2
-                                  ▲
-                ┌─────────────────┴─────────────────┐
-                │   direct-to-cloud, no replica     │
-                ▼                                   ▼
-         LAPTOP dev process                 HETZNER production (<prod-host>)
-         localhost:3000 (Next.js)           app.radon.run (Caddy → radon-nextjs)
-         FastAPI 8321                       FastAPI 8321 (radon-api, private)
-         IB realtime relay 8765             radon-relay, radon-monitor (host systemd)
-         newsfeed scraper (Playwright)      newsfeed scraper (Playwright, optional)
-                                            ib-gateway docker (4001)
-                                            media.radon.run (Caddy static)
-```
+Production host boundaries are owned by [the host-split runbook](spof-host-split.md).
+Laptop process ownership depends on the [selected mode](#mode-switch).
 
 - **Database**: Turso (libSQL) — every Radon process talks **directly** to the cloud DB for both reads and writes. Direct-to-cloud is the code default (DUR-07; replica is opt-in only via `RADON_DB_USE_REPLICA=1`), and the prefix drop-in `/etc/systemd/system/radon-.service.d/common.conf` sets the `RADON_DB_NO_REPLICA=1` kill switch on every `radon-*` unit as belt-and-suspenders. The embedded-replica architecture (`data/replica.db`) was retired 2026-05-20 after two same-day incidents: multi-writer WAL checkpoint contention (radon-cloud `741cfc6`) followed by single-writer frame conflicts between the replica owner and direct-cloud writers (radon-cloud `2c46232`). The libsql embedded-replica model only works when ONE host has exactly ONE writer; Radon's split between Node and Python writers can't satisfy that constraint. Reads cost +30–60 ms cloud round-trip, absorbed by SWR caching. See `feedback_libsql_replica_one_writer.md` for the full failure-mode catalog.
-- **Media**: Hetzner-hosted Caddy serves `https://media.radon.run`; the laptop's newsfeed scraper rsyncs new images over Tailscale.
+- **Media**: Hetzner-hosted Caddy serves `https://media.radon.run`. The production scraper writes to the local media mount; laptop-only media transfer is described under [Tailscale-free media push](#tailscale-free-media-push).
 - **Schedulers**: laptop launchd plists (local mode) OR Hetzner host systemd (cloud mode). Production scheduling remains host systemd. Installed per-unit drop-ins run Next.js, FastAPI, relay, monitor, and newsfeed in exact-SHA app containers; timer-owned oneshots remain on the host. Unit sources live in `/home/radon/radon/cloud/services/` and are installed through the reviewed control-plane path. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a scheduler alternative.
 - **Self-contained**: themarketear.com newsfeed scraper is now a headless Playwright flow that runs on either the laptop or Hetzner. No magic-link or Chrome Debug.app dependency.
 
@@ -41,7 +28,7 @@ In production both keys must also survive `render_env_file`'s newsfeed allowlist
 
 **Operating procedure:**
 
-1. **Laptop dev stack** — `npm run dev` keeps including the scraper as the 4th child and polls every 120s. No more "must keep Chrome Debug.app open" requirement.
+1. **Laptop dev stack**: the full profile includes the scraper; cloud-thin does not. Follow [Mode switch](#mode-switch) before launching a collector. Process commands live in [`scripts/dev`](../scripts/dev); polling is owned by the scraper scheduler.
 2. **Standalone (laptop or Hetzner)** — `node scripts/newsfeed/index.js` runs forever; `node scripts/newsfeed/index.js --once` runs a single cycle (use for smoke tests).
 3. **Storage state** — first launch authenticates with email + password (full FirebaseUI flow), then saves cookies + localStorage to `data/newsfeed-storage.json`. Subsequent runs reuse the session; the scraper still re-authenticates every ~6h to refresh cookies before they expire.
 4. **Failure capture** — any login-flow failure dumps a screenshot to `data/newsfeed-debug-<ts>.png` (gitignored) for postmortem.
@@ -51,15 +38,16 @@ In production both keys must also survive `render_env_file`'s newsfeed allowlist
 
 **Hetzner first-time setup:**
 
-1. The reviewed deploy transaction installs the Playwright browser dependency before restarting the newsfeed service (idempotent).
-2. System libs (libnspr4, libnss3, libcups2, libxkbcommon0, libgbm1, …) require **one-time** sudo install:
-   ```bash
-   sudo apt-get update
-   sudo npx playwright install-deps chromium    # installs all required apt packages
-   ```
-   Without these, the headless Chromium binary fails with `error while loading shared libraries: libnspr4.so`.
-3. `THEMARKETEAR_EMAIL` + `THEMARKETEAR_PASSWORD` are appended to `/home/radon/radon-cloud/.env`.
-4. **Hetzner runs it as `radon-newsfeed.service`** (enabled 2026-05-03 cutover). `Restart=on-failure`, `RestartSec=30`, `EnvironmentFile=/home/radon/radon-cloud/.env`. Steady-state cycle ~4s; first cold cycle does the FirebaseUI auth (~16s) then caches storage state. Tail logs:
+1. Use the reviewed deploy transaction to prepare the browser cache before
+   the newsfeed service starts. The [Node app image](../docker/app/Dockerfile.node)
+   owns the container's Chromium libraries and build-time browser installation.
+2. For `error while loading shared libraries`, inspect the deployed app image
+   and effective browser mount in
+   [`radon-app-runtime.sh`](../cloud/scripts/radon-app-runtime.sh).
+   Follow the [deployment recovery contract](../cloud/CLAUDE.md) for image repair
+   or rollback; the container's dependencies belong in its image.
+3. Configure newsfeed credentials through the [production environment owner](external-services.md).
+4. **Hetzner runs the scraper as `radon-newsfeed.service`**. The [unit](../cloud/services/radon-newsfeed.service) owns its restart and environment settings; the installed app-container drop-in and environment rendering are described in [operations](operations.md). Tail logs:
    ```bash
    ssh root@ib-gateway "journalctl -u radon-newsfeed -f"
    ```
@@ -83,6 +71,29 @@ The same SSH public key is authorized on both routes — `~/.ssh/authorized_keys
 
 ## Mode switch
 
+`cloud.sh` selects `RADON_DEV_PROFILE=cloud-thin`: the laptop runs only Next.js.
+FastAPI, relay and newsfeed collection stay on Hetzner. The full local profile
+and log-filter names are defined by [`scripts/dev`](../scripts/dev), reached
+through `web/package.json`. `--only` hides other logs; it does not disable
+collectors.
+
+**Use and prerequisites:** choose this mode when developing against the cloud
+stack; use local mode only when intentionally moving collection to the laptop.
+Read [`cloud.sh`](../scripts/cloud.sh) or [`local.sh`](../scripts/local.sh)
+before switching. These are lifecycle commands: they persist mode, change
+scheduler ownership and may stop/start a Gateway, requiring IBKR approval.
+Tailscale/SSH access and operator control of the current stack are prerequisites.
+
+**Safe diagnosis and stop conditions:** inspect `scripts/ib mode` and existing
+local listeners before launching. A VPN preflight refusal, busy dev ports, or
+pending Gateway authentication is a stop condition; do not start a second
+collector stack to work around it. **Verify** the selected profile in launcher
+output and the intended remote API/relay targets. A persisted mode does not
+reconfigure processes already running. **Rollback** a mode change by stopping
+the dev session and using the previous mode's launcher after reviewing its
+Gateway effects. **Escalate** failed authentication through the
+[Gateway recovery owner](ib-gateway-recovery.md), without repeated starts.
+
 | Action | Command |
 |--------|---------|
 | Switch to **Hetzner mode** | `scripts/cloud.sh` |
@@ -97,31 +108,12 @@ The same SSH public key is authorized on both routes — `~/.ssh/authorized_keys
 
 ### Production layout on Hetzner
 
-```
-/home/radon/
-├─ radon/                    (git checkout — main branch, fast-forwarded by CI)
-│  ├─ web/.next              (Next.js compile-mode build, regenerated each deploy)
-│  ├─ scripts/               (Python schedulers, direct-to-cloud writes via libsql client)
-│  └─ cloud/                 (canonical deploy tooling, Caddy, Compose, and unit sources)
-└─ radon-cloud/
-   ├─ .env                   (external secrets only: TURSO_DB_URL, TURSO_AUTH_TOKEN, RADON_MODE=hetzner, …)
-   └─ media/                 (rsync target for newsfeed images)
-```
-
-`data/replica.db` is intentionally absent — the embedded-replica architecture was retired 2026-05-20. If the file appears on disk (stray from a pre-migration host), it is safe to `rm` — nothing reads from it.
-
-Every `radon-*.service` (except `radon-grok-page-responder`, `radon-flex-pull` and `radon-mcp`, which load stripped files) uses `EnvironmentFile=/etc/radon/env`. `/home/radon/radon-cloud/.env` is a compatibility symlink to that file. Media is `/var/lib/radon/media` (Caddy `media.radon.run`); `/home/radon/radon-cloud/media` is a compatibility symlink. The legacy directory is not a deploy source.
-
-**Whole-stack kill switch:** `/usr/local/bin/radon` wraps all units (IB Gateway included). Run on the VPS or remotely:
-
-```bash
-radon stop      # stop IB + radon-{api,relay,monitor,newsfeed,nextjs} + refresh.timer
-radon start     # start them all (IB Gateway first)
-radon restart   # stop + start
-radon status    # systemctl list-units "radon-*"
-```
-
-From the laptop: `ssh root@ib-gateway radon stop`. Useful for off-hours shutdowns from iPhone/Termius without remembering the unit list. Installed manually 2026-05-04 — not in `setup-vps.sh` yet, so a `wipe-vps.sh` rebuild drops it.
+The [host-split runbook](spof-host-split.md) owns production topology.
+[Operations](operations.md) owns app-container mounts, credential staging and
+the installed operator CLI; [the cloud deployment contract](../cloud/CLAUDE.md)
+owns provisioning and exact-SHA release/rollback gates. The legacy
+`radon-cloud` directory is not a deploy source. Do not use a whole-stack
+restart to repair an app-only failure; it can affect Gateway authentication.
 
 ### Day-to-day deploys
 
@@ -351,7 +343,10 @@ journald on the VPS is on-box only (capped at 1G). A laptop launchd job (`~/Libr
 off. A `code_fix` + AUTOPUSH ships a `fix/**` branch and
 `scripts/ir_ensure_pr.py` opens a PR against `main` (never merges).
 Spec: [`grok-page-responder.md`](grok-page-responder.md).
-Do not install this on any clone under `~/radon-weekend/` (the six nightly loops hard-reset them every phase; table in [`operations.md`](operations.md#background-services)).
+`radon-grok-upgrade.timer` is installed enabled (daily 07:40 UTC). It
+smokes the latest stable CLI/model and auto-promotes, or stays on
+`/var/lib/radon/grok_lkg.json`. Spec in the same doc (Grok track-latest).
+Do not install this on any nightly runner clone under `/Users/_radonbot/radon-runner/work/` (each loop deletes and re-clones its own every night; table in [`operations.md`](operations.md#background-services)).
 
 ### Error tracking — Sentry (not wired; recommended next step)
 
@@ -407,6 +402,11 @@ JSON-RPC), documented for consumers at radon.run `/developers/mcp`.
   398c8636). A kid already present in the cached key set is served without
   taking the refresh gate, so a slow or contended JWKS refresh cannot stall
   verification of tokens signed by an already-known key.
+  With PyJWT 2.15, both hosted MCP and FastAPI clients explicitly set
+  `cooldown_duration=0`: Radon's per-kid bounds own refresh throttling.
+  The library's global cooldown must not deny a newly rotated Clerk key
+  after another kid's fetch; negative caches, concurrency caps and timeout
+  controls remain in place.
 - **Env**: `CLERK_JWKS_URL` / `CLERK_ISSUER` / `ALLOWED_USER_IDS` from
   `/etc/radon/mcp.env`, a stripped file `deploy.sh:write_mcp_env` (and
   `setup-vps.sh`) derives from `/etc/radon/env` on every deploy; the unit
@@ -471,22 +471,51 @@ rolling back the application. A fresh `db-backup` heartbeat still requires the
 real dump and off-box work to finish; restarting the unit does not mark it
 healthy.
 
+A dump that reconnects after a lost Hrana stream resumes after the last
+emitted rowid in a **new read transaction** (`dump_database` in
+[`db_backup.py`](../cloud/scripts/db_backup.py)). It avoids replaying an
+emitted page, but it is not a single point-in-time snapshot across that
+reconnection. A successful dump or scratch integrity check does not prove
+cross-table consistency. Review the backup journal for `transient turso
+stream error` and reconcile trade identities and dependent rows before
+choosing it for recovery. Use the platform recovery path below when a
+specific transaction boundary is required, after checking its availability.
+
 ### Restore runbook
+
+**Symptom and prerequisites:** use this procedure for lost/corrupt database
+state or to inspect a candidate backup. Retain the original dump and incident
+logs, identify the last known-good data boundary, and use a host with gzip,
+sqlite3, sufficient private scratch space, and authorized recovery access.
+Scratch diagnosis is local only. A URL swap affects every reader and writer
+using that database, including schedulers and the API's subprocesses.
+Before activation, coordinate a maintenance window, quiesce those writers,
+and preserve the old configuration and any recoverable post-backup rows.
+Do not restart IB Gateway as part of database recovery.
 
 **1. Scratch restore (verify a dump / inspect old data)** — plain sqlite3,
 no Turso involved:
 
 ```bash
-gunzip -c data/db_backups/radon-<stamp>.sql.gz | sqlite3 /tmp/radon_restore.db
-sqlite3 /tmp/radon_restore.db "SELECT COUNT(*) FROM journal; SELECT COUNT(*) FROM service_health;"
+(
+  set -eu
+  umask 077
+  dump="data/db_backups/radon-<stamp>.sql.gz"
+  restore_dir="$(mktemp -d "${TMPDIR:-/tmp}/radon-restore.XXXXXX")"
+  gzip -t "$dump"
+  gzip -dc "$dump" > "$restore_dir/dump.sql"
+  sqlite3 -bail "$restore_dir/restore.db" < "$restore_dir/dump.sql"
+  sqlite3 -bail "$restore_dir/restore.db" "PRAGMA integrity_check; SELECT COUNT(*) FROM journal; SELECT COUNT(*) FROM service_health;"
+  printf 'Scratch restore: %s/restore.db\n' "$restore_dir"
+)
 ```
 
-Run this drill after any change to `db_backup.py` and compare counts
-against prod (`PYTHONPATH` + `get_db()` per Health & observability above).
-Last drill 2026-06-12: 37 tables / 80,171 rows round-tripped exactly
-(`PRAGMA integrity_check` ok); `journal`/`executed_orders` matched prod,
-remaining deltas were post-dump live drift only (`service_health` +1 =
-host-metrics first heartbeat, `posts` +1, `portfolio_snapshots` +58).
+Run the scratch drill after changes to the backup format.
+Every invocation allocates a fresh private directory. Stop on a gzip or SQL
+error, an integrity result other than `ok`, missing expected tables, or
+unexplained differences in journal identities, amounts, or related records.
+Row counts alone are insufficient. Keep the printed scratch path for the
+comparison; do not import a second dump over an existing scratch database.
 
 **2. Full restore to a NEW Turso DB + URL swap** (DB lost/corrupted):
 
@@ -498,10 +527,33 @@ turso db tokens create radon-restore-<date>
 turso db show radon-restore-<date> --url
 ```
 
-Then swap `TURSO_DB_URL` + `TURSO_AUTH_TOKEN` in ALL THREE env files —
-laptop root `.env`, laptop `web/.env`, VPS `/home/radon/radon-cloud/.env` —
-and restart the stack (`ssh root@ib-gateway radon restart`; mind the 2FA
-push-lock rules). Do NOT repoint by editing the old DB in place.
+Validate the new database before repointing any process. The production
+runtime reads `/etc/radon/env`; follow the [environment
+contract](monorepo-cloud-migration.md#production-env-contract-after-cutover)
+for its permissions and compatibility path. Update the paired
+`TURSO_DB_URL` and `TURSO_AUTH_TOKEN` in the actual configuration of every
+participating host and process, including laptop root `.env` and `web/.env`
+when used. Resolve any stored Turso values under the [encrypted credential
+store contract](operations.md#encrypted-credential-store-profile-credentials-tab)
+before restarting: stored values override the API environment, and the
+Credentials tab refuses a different database host. Never print tokens or
+assume that editing the compatibility file switches all consumers.
+
+Resume the app through the [deployment and recovery
+contract](../cloud/CLAUDE.md#deployment-contract), retaining its exact-SHA
+and health gates. Verify the restored schema, journal reconciliation,
+effective database identity of each consumer, application health, and a
+fresh successful writer heartbeat before ending maintenance. Do not
+repoint by editing the old database in place.
+
+**Stop, rollback, escalation:** stop if the target identity, schema, writer
+quiescence, or reconciliation cannot be proved. Before writes resume,
+rollback means restoring the saved URL/token configuration and credential
+store selection, then repeating the app health checks. After writes resume,
+preserve both databases and reconcile new activity before any reversal;
+blindly swapping back can lose trades. Escalate unresolved data differences
+to the operator through the [incident runbook](incident-runbook.md), keeping
+writers quiesced and secrets out of logs and reports.
 
 **3. Partial-table surgery** (bad rows written to one table — the
 2026-05-14 MagicMock incident wrote garbage contracts to the prod
@@ -509,13 +561,13 @@ push-lock rules). Do NOT repoint by editing the old DB in place.
 
 ```bash
 # Restore the last-good dump into a scratch DB (step 1), then diff:
-sqlite3 /tmp/radon_restore.db "SELECT ib_exec_id FROM journal" | sort > /tmp/good_ids
+sqlite3 -readonly "<scratch-path>/restore.db" "SELECT ib_exec_id FROM journal"
 # Delete only the poisoned rows from prod via get_db(), keyed on ib_exec_id
 # (or INSERT the good rows back). NEVER DROP/replace the prod table wholesale —
-# writers are live against it.
+# retain unrelated rows and quiesce affected writers before applying repairs.
 ```
 
-**4. Platform PITR (Turso Point-in-Time Recovery)** — **verified 2026-07-13**
+**4. Platform PITR (Turso Point-in-Time Recovery)**
 
 ```bash
 turso auth login          # browser OAuth once
@@ -524,24 +576,9 @@ turso db list             # radon / radon-demo
 turso db show radon
 ```
 
-**Recorded org (personal / slug `joemccann`):**
-
-| Field | Value |
-|---|---|
-| Plan | **Pro** (overages enabled) |
-| PITR window | **90 days** ([pricing](https://turso.tech/pricing)) |
-| Prod DB | `radon` → `libsql://radon-joemccann.aws-us-west-2.turso.io` |
-| Size (2026-07-13) | ~670 MB; group `default` Healthy; delete protection **on** |
-| Storage quota | 1.7 GB / 50 GB |
-
-Plan matrix (for reference if the org ever changes plan):
-
-| Plan | PITR window |
-|---|---|
-| Free | 1 day |
-| Developer | 10 days |
-| Scaler | 30 days |
-| Pro | 90 days |
+Verify the current account's recovery entitlement and retained timestamps
+before selecting this path. Historical plan names, quotas and storage sizes
+are not recovery evidence. Stop if the requested timestamp is unavailable.
 
 Restore creates a **new** database (does not rewrite live in place):
 
@@ -555,16 +592,10 @@ turso db show radon-pitr-$(date +%Y%m%d) --url
 
 Then inspect read-only or swap `TURSO_DB_URL` / `TURSO_AUTH_TOKEN` like full-restore step 2. Docs: [PITR](https://docs.turso.tech/features/point-in-time-recovery).
 
-**Radon RPO (defense in depth):**
-
-| Layer | RPO (worst case) | Covers |
-|---|---|---|
-| Turso platform PITR | **90 days** (Pro) | Cloud DB to a commit timestamp |
-| Nightly SQL dump + laptop pull | ~24h (+ pull lag) | Full logical DB if Turso account is gone |
-| B2 portfolio cold-archive | Continuous for pruned months | `portfolio_snapshots` history |
-| B2 media backup | Nightly | `media.radon.run` tree |
-
-Re-check with `turso plan show` after any plan change. Nightly dumps remain mandatory.
+The recoverable boundary is the timestamp and content actually verified in
+the selected restore, not the length of the platform's retention window.
+Retain logical dumps and off-box copies even when platform recovery is
+available; portfolio and media archives cover only their respective data.
 
 ## Portfolio archive + snapshot retention (R1 / R2)
 
@@ -579,7 +610,7 @@ Re-check with `turso plan show` after any plan change. Nightly dumps remain mand
 
 ## Subscription tokens (agent CLIs)
 
-`radon-subscription-tokens.timer` fires every 30 minutes (explicit UTC, `Persistent=true`), so a one-hour access token is always refreshed at least once inside its life. The oneshot seals, refreshes and restores the anthropic / codex / grok / gemini (Antigravity `agy`) credential files through the existing encrypted secret store, proves each login with one real model call a day (the keepalive), and heartbeats the `subscription-tokens` row on every run. When a codex or grok grant is dead it starts the CLI's own device login and pages the link, so the fix is one tap; claude and agy page the SSH command. Runbook and per-provider re-auth commands: [subscription-tokens.md](subscription-tokens.md).
+`radon-subscription-tokens.timer` fires every 30 minutes (explicit UTC, `Persistent=true`), so a one-hour access token is always refreshed at least once inside its life. The oneshot seals, refreshes and restores the anthropic / codex / grok / antigravity (`agy`) credential files through the existing encrypted secret store, proves each login with one real model call a day (the keepalive), and heartbeats the `subscription-tokens` row on every run. When a codex or grok grant is dead it starts the CLI's own device login and pages the link, so the fix is one tap; claude and agy page the SSH command. Runbook and per-provider re-auth commands: [subscription-tokens.md](subscription-tokens.md).
 
 ---
 
@@ -644,6 +675,17 @@ shared IB client IDs (see above). Heartbeat `iei-hyg`. Installed by the deploy's
 `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/iei-hyg.md`](indicators/iei-hyg.md).
 
+### CREDIT/VIX (`radon-credit-vix.timer`)
+
+Daily `22:25 UTC` (`RandomizedDelaySec=300`), oneshot
+`scripts/fetch_credit_vix.py`. SHY + HYG via the iei-hyg equity cascade
+(IB Stock → Robinhood → UW → Yahoo). VIX via IB `Index('VIX','CBOE')` →
+Cboe CDN → Yahoo `^VIX` (never the equity cascade). Serialized against
+`radon-credit-spread` and `radon-iei-hyg` on the shared IB client IDs 56/69
+(see above). Heartbeat `credit-vix`. Installed by the deploy's
+`install-units` verb from `installed-units.sha256`. Spec:
+[`indicators/credit-vix.md`](indicators/credit-vix.md).
+
 ### TRIN (`radon-trin.timer`)
 
 Every 5 minutes `Mon..Fri 13:02-21:57 UTC` (2 min offset from
@@ -685,6 +727,20 @@ store via `bpi_scan.ensure_member_history`. Weekend and holiday runs are
 unchanged-data heartbeats. Heartbeat `ma-ratio`. Installed by the deploy's
 `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/ma-ratio.md`](indicators/ma-ratio.md).
+
+### RSI OVERSOLD (`radon-rsi-oversold.timer`)
+
+Daily `23:05 UTC` (`RandomizedDelaySec=300`, twenty minutes behind
+`radon-ma-ratio`'s 22:45 pass so the shared SPX member-close store is
+already fresh), oneshot `scripts/rsi_oversold_scan.py`,
+`TimeoutStartSec=2100`. Percent of current S&P 500 members whose own
+14-day Wilder RSI closed strictly below 30. Member closes ride the
+shared Turso `price_history_daily` store via
+`bpi_scan.ensure_member_history`. The 10% line is an oversold-cluster
+threshold (level condition only). Weekend and holiday runs are
+unchanged-data heartbeats. Heartbeat `rsi-oversold`. Installed by the
+deploy's `install-units` verb from `installed-units.sha256`. Spec:
+[`indicators/rsi-oversold.md`](indicators/rsi-oversold.md).
 
 ### CALM STREAK (`radon-calm-streak.timer`)
 
@@ -820,7 +876,10 @@ Nightly `06:00 UTC` (`RandomizedDelaySec=300`), oneshot
 v2 golden set. A hit@5 or MRR drop past 0.03 fails the unit so the existing
 watchdog pages. **Not enabled.** The repo now has an initial live baseline
 at `scripts/knowledge/golden_eval_baseline.json` (`placeholder: false`).
-Keep the `not-installed:` drift ack until a human reviews the draft set.
+`enable_services` skips both units on every setup and does not read that file.
+Keep the `not-installed:` drift ack until a human reviews the draft set
+(`scripts/knowledge/golden_set.json` `draft: true`). The ack reason is that
+review.
 After that review:
 
 ```

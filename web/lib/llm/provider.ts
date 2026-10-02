@@ -5,7 +5,6 @@
  *   - xAI Grok (OpenAI-compatible; preferred when XAI_API_KEY is set)
  *   - Anthropic (native Messages API; historical default)
  *   - OpenAI-compatible bases (OpenAI / Groq / DeepSeek / Ollama)
- *   - Gemini
  *
  * Request and response are normalized so call sites never see provider-specific
  * shapes. A configurable fallback provider is tried when the primary fails.
@@ -16,7 +15,7 @@
  * ChatGPT grants (lib/llm/subscriptionAuth.ts). A prepaid console key is
  * never a fallback; RADON_LADDER_ALLOW_PREPAID=1 is the only way one is read,
  * matching scripts/clients/model_ladder.py. Google runs only through the
- * Antigravity CLI on the ladder, so the gemini provider is never served here.
+ * Antigravity CLI on the server ladder and is never served here.
  */
 
 import { DEFAULT_MODELS } from "./frontier";
@@ -48,7 +47,7 @@ export type LlmTool = {
 };
 
 /** `grok` is accepted as an alias of `xai`. */
-export type LlmProviderName = "xai" | "grok" | "anthropic" | "openai" | "gemini";
+export type LlmProviderName = "xai" | "grok" | "anthropic" | "openai";
 
 export type LlmToolChoice = "auto" | "none" | "required";
 export type LlmReasoningEffort = "low" | "medium" | "high";
@@ -68,6 +67,8 @@ export type LlmChatRequest = {
   timeoutMs?: number;
   /** Per-turn abort (client hung up, wall clock); merged with the request timeout. */
   signal?: AbortSignal;
+  /** false: a caller racing providers itself owns the retry, so skip the serial fallback. */
+  fallback?: boolean;
 };
 
 export type LlmToolCall = {
@@ -98,8 +99,17 @@ const KNOWN_PROVIDERS: readonly LlmProviderName[] = [
   "grok",
   "anthropic",
   "openai",
-  "gemini",
 ];
+
+/**
+ * Model ids whose provider the web layer never serves. Google runs only
+ * through the Antigravity CLI on the server ladder (operator, 2026-09-18), so
+ * a stale `gemini-*` selection is a primary failure that goes to the
+ * configured fallback with that provider's own default model.
+ */
+const UNSERVED_MODEL_PREFIXES = ["gemini-"];
+const UNSERVED_MODEL_MESSAGE =
+  "Google is served only through the Antigravity CLI on the server ladder; not available in the web layer.";
 
 const ANTHROPIC_ENV_KEYS = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY"];
 const XAI_ENV_KEYS = ["XAI_API_KEY", "GROK_API_KEY"];
@@ -201,8 +211,12 @@ export function providerForModel(model: string | undefined): Exclude<LlmProvider
   if (id.startsWith("claude-")) return "anthropic";
   if (id.startsWith("grok-")) return "xai";
   if (id.startsWith("gpt-") || id.startsWith("o1") || id.startsWith("o3")) return "openai";
-  if (id.startsWith("gemini-")) return "gemini";
   return undefined;
+}
+
+function isUnservedModel(model: string | undefined): boolean {
+  const id = model?.trim().toLowerCase();
+  return Boolean(id && UNSERVED_MODEL_PREFIXES.some((prefix) => id.startsWith(prefix)));
 }
 
 /**
@@ -253,6 +267,21 @@ function resolveFallbackProvider(
   const normalized = normalizeProvider(configured);
   if (normalized === primary) return undefined;
   return normalized;
+}
+
+/**
+ * The second subscription a latency-sensitive caller may race against
+ * `primary`: the configured or default fallback, else the other of
+ * xAI/Anthropic when it holds a grant. A pinned LLM_PROVIDER with no
+ * configured fallback gets none, as with the serial fallback.
+ */
+export function alternateProvider(
+  primary: Exclude<LlmProviderName, "grok">,
+): Exclude<LlmProviderName, "grok"> | undefined {
+  const fallback = resolveFallbackProvider(primary);
+  if (fallback || envValue("LLM_PROVIDER")) return fallback;
+  if (primary === "anthropic") return resolveXaiAuth() ? "xai" : undefined;
+  return primary !== "xai" && hasAnthropicAuth() ? "anthropic" : undefined;
 }
 
 function maxTokensFor(request: LlmChatRequest): number {
@@ -437,7 +466,7 @@ type OpenAiOutboundMessage =
   | { role: string; content: string | OpenAiContentPart[] | null; tool_calls?: OpenAiToolCall[] }
   | { role: "tool"; tool_call_id: string; content: string };
 
-function openAiConfig(provider: Exclude<LlmProviderName, "grok" | "anthropic" | "gemini">) {
+function openAiConfig(provider: Exclude<LlmProviderName, "grok" | "anthropic">) {
   if (provider === "xai") {
     return {
       apiKey: resolveXaiAuth(),
@@ -706,15 +735,6 @@ function parseToolArguments(raw: string | undefined): Record<string, unknown> {
   }
 }
 
-// --- Gemini ---------------------------------------------------------------
-
-async function callGemini(_request: LlmChatRequest): Promise<LlmChatResponse> {
-  // Google runs only through the Antigravity CLI on the server-side ladder
-  // (operator, 2026-09-18). There is no Gemini API key or token path here,
-  // under any flag; a gemini-* selection falls to the configured fallback.
-  throw new Error("Google is served only through the Antigravity CLI on the ladder; not available in the web layer.");
-}
-
 function normalizeUsage(input: number | undefined, output: number | undefined): LlmUsage | undefined {
   if (typeof input !== "number" && typeof output !== "number") return undefined;
   return { inputTokens: input ?? 0, outputTokens: output ?? 0 };
@@ -724,8 +744,8 @@ function dispatch(
   provider: Exclude<LlmProviderName, "grok">,
   request: LlmChatRequest,
 ): Promise<LlmChatResponse> {
+  if (isUnservedModel(request.model)) return Promise.reject(new Error(UNSERVED_MODEL_MESSAGE));
   if (provider === "anthropic") return callAnthropic(request);
-  if (provider === "gemini") return callGemini(request);
   if (provider === "xai") return callOpenAiCompatible(request, "xai");
   return callOpenAiCompatible(request, "openai");
 }
@@ -754,7 +774,7 @@ export async function chat(request: LlmChatRequest): Promise<LlmChatResponse> {
   try {
     return await dispatch(provider, request);
   } catch (primaryError) {
-    const fallback = resolveFallbackProvider(provider);
+    const fallback = request.fallback === false ? undefined : resolveFallbackProvider(provider);
     if (!fallback) throw primaryError;
     console.warn(
       `[llm] ${provider} failed, falling back to ${fallback}: ${

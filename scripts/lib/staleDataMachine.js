@@ -383,6 +383,46 @@ export function shouldRequestGatewayRestart(gatewayMode) {
 }
 
 /**
+ * IBKR operator hold: the operator logged in to IBKR Mobile / the web portal
+ * with the username the Gateway shares, so the Gateway is down ON PURPOSE.
+ * Every non-healthy output of decideHealthWrite (disconnected row, degraded
+ * row, reconnect ladder, escalate → POST /ib/restart) would either page
+ * "restart the Gateway" or try to log it back in and kick the operator.
+ * While held they all collapse to one ``held`` verdict.
+ *
+ * @param {ReturnType<typeof decideHealthWrite>} decision
+ * @param {boolean} operatorHold
+ */
+export function applyOperatorHold(decision, operatorHold) {
+  if (!operatorHold) return { ...decision, held: false };
+  return {
+    action: "none",
+    heartbeat: false,
+    clearError: false,
+    degraded: false,
+    disconnected: false,
+    held: true,
+  };
+}
+
+/**
+ * True when a /health/lite body reports the IBKR operator hold.
+ * @param {unknown} body
+ */
+export function operatorHoldFromHealth(body) {
+  return Boolean(body && typeof body === "object" && body.operator_hold === true);
+}
+
+/**
+ * True when POST /ib/restart refused because of the IBKR operator hold.
+ * @param {number} status
+ * @param {unknown} body
+ */
+export function isOperatorHoldRefusal(status, body) {
+  return status === 423 || body?.detail?.code === "OPERATOR_HOLD";
+}
+
+/**
  * The tick-freshness fields the relay puts in every service_health detail
  * (ok heartbeat and R-061 degraded row alike).
  *

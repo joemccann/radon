@@ -79,20 +79,26 @@ _TRANSIENT_DB_MARKERS = (
 # newsfeed posts read: a source's full stored content in one SELECT
 # 502s once the corpus is large (2026-07-19). 200 rows that also carry an
 # 8 KB embedding_v2 blob can approach the 8 MiB response cap, so the page
-# shrinks to a byte budget before the first fetch.
-_EXISTING_BATCH_ROWS = 200
+# shrinks to a byte budget before the first fetch. 50 rows also keeps a
+# page under the 4s read timeout (~150 newsfeed rows took 2.5-4s, 2026-09-28).
+_EXISTING_BATCH_ROWS = 50
 _EXISTING_ASSUMED_ROW_BYTES = 16 * 1024
 _EXISTING_ASSUMED_V2_ROW_BYTES = 48 * 1024
 
+# Page ids through the source index first, then fetch those rows. Sorting
+# full rows made Turso read every row of the source with its embeddings
+# (newsfeed: 25s for 50 rows on a fork, 2026-09-28; 0.08s this way).
 _EXISTING_SQL = (
     "SELECT id, doc_key, chunk_ix, content, title, metadata, "
     "summary, embedding, content_hash "
-    "FROM knowledge WHERE source = ? AND id > ? ORDER BY id LIMIT ?"
+    "FROM knowledge WHERE id IN (SELECT id FROM knowledge "
+    "WHERE source = ? AND id > ? ORDER BY id LIMIT ?) ORDER BY id"
 )
 _EXISTING_SQL_V2 = (
     "SELECT id, doc_key, chunk_ix, content, title, metadata, "
     "summary, embedding, content_hash, embedding_v2 "
-    "FROM knowledge WHERE source = ? AND id > ? ORDER BY id LIMIT ?"
+    "FROM knowledge WHERE id IN (SELECT id FROM knowledge "
+    "WHERE source = ? AND id > ? ORDER BY id LIMIT ?) ORDER BY id"
 )
 
 

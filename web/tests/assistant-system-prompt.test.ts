@@ -56,6 +56,7 @@ describe("assistant system prompt", () => {
     expect(SYSTEM_PROMPT).toContain("the trade journal");
     expect(SYSTEM_PROMPT).toContain("get_quote");
     expect(SYSTEM_PROMPT).toContain("rank_spreads");
+    expect(SYSTEM_PROMPT).toContain("get_option_term_structure");
     expect(SYSTEM_PROMPT).toContain("run_evaluate");
     expect(SYSTEM_PROMPT).toContain("list_apis");
     expect(SYSTEM_PROMPT).toContain("call_api");

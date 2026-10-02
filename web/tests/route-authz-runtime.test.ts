@@ -129,6 +129,7 @@ const CONTROL_PLANE_ROUTES: ReadonlyArray<{ path: string; params?: Record<string
   { path: "admin/services/[unit]/[action]", params: { unit: "radon-api", action: "restart" } },
   { path: "admin/ib/restart" },
   { path: "admin/ib/reset-backoff" },
+  { path: "admin/ib/operator-hold" },
   { path: "admin/stack/restart" },
 ];
 // `preferences` belongs to the same operator allowlist but is not listed here:

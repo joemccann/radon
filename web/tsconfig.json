@@ -54,6 +54,8 @@
   "exclude": [
     "node_modules",
     "tests",
-    "e2e"
+    "e2e",
+    "e2e-setup-gate",
+    ".next-setup-gate"
   ]
 }

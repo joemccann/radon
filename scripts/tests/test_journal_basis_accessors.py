@@ -97,38 +97,39 @@ class _FakeDb:
 
     def execute(self, sql, params=()):
         self.calls.append((sql, params))
-        cursor = str(params[0])
+        cursor = int(params[0])
         tickers = {str(value) for value in params[1:-1]}
         limit = int(params[-1])
         matching = [
             row
             for row in self._rows
-            if self._trade_id(row) > cursor and self._ticker(row) in tickers
+            if self._rowid(row) > cursor and self._ticker(row) in tickers
         ]
-        matching.sort(key=self._trade_id)
+        matching.sort(key=self._rowid)
         return _FakeCursor(matching[:limit])
 
     @staticmethod
     def _with_trade_id(row, index):
         trade_id = f"test-{index:08d}"
         if isinstance(row, dict):
-            return {"trade_id": trade_id, **row}
+            return {"trade_id": trade_id, "journal_rowid": index, **row}
         if isinstance(row, (tuple, list)):
-            return (trade_id, *row)
+            return (trade_id, *row, index)
         return SimpleNamespace(
             trade_id=trade_id,
+            journal_rowid=index,
             payload=getattr(row, "payload", None),
             filled_at=getattr(row, "filled_at", None),
             written_at=getattr(row, "written_at", None),
         )
 
     @staticmethod
-    def _trade_id(row):
+    def _rowid(row):
         if isinstance(row, dict):
-            return str(row["trade_id"])
+            return row["journal_rowid"]
         if isinstance(row, (tuple, list)):
-            return str(row[0])
-        return str(row.trade_id)
+            return row[-1]
+        return row.journal_rowid
 
     @staticmethod
     def _ticker(row):

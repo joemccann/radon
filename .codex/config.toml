@@ -1,0 +1,9 @@
+[mcp_servers.figma]
+url = "https://mcp.figma.com/mcp"
+
+[mcp_servers.radon-kb]
+command = ".venv/bin/python"
+args = ["scripts/knowledge/mcp_server.py"]
+
+[mcp_servers.radon-kb.env]
+RADON_DB_NO_REPLICA = "1"

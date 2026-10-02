@@ -348,17 +348,17 @@ jobs:
           - shard: scripts-i
             paths: "scripts/tests/test_i*.py"
           - shard: scripts-gh
-            paths: "scripts/tests/test_weekend_wrapper_self_rewrite.py scripts/tests/test_[g-h]*.py scripts/tests/test_we*.py"
+            paths: "scripts/tests/test_[g-h]*.py scripts/tests/test_we*.py"
           - shard: scripts-jm
             paths: "scripts/tests/test_leap_garch_no_duplicate_scan.py scripts/tests/test_[j-m]*.py"
           - shard: scripts-npsz
             paths: "scripts/tests/test_vixcor.py scripts/tests/test_[n-p]*.py scripts/tests/test_[t-v]*.py scripts/tests/test_w[!e]*.py scripts/tests/test_[x-z]*.py"
           - shard: scripts-rs
-            paths: "scripts/tests/test_rel137_weekend_wrapper_survivability.py scripts/tests/test_r[!ou]*.py scripts/tests/test_s*.py"
+            paths: "scripts/tests/test_r[!ou]*.py scripts/tests/test_s*.py"
           - shard: scripts-daemons
             paths: "scripts/tests/test_monitor_daemon scripts/tests/test_watchdog scripts/tests/test_ro*.py"
           - shard: rest
-            paths: "scripts/tests/test_run_flow_refresh_wrapper.py scripts/tests/test_run_portfolio_refresh_retry.py scripts/tests/test_run_signals_refresh_wrapper.py scripts/tests/test_ru*.py scripts/api/tests scripts/trade_blotter tests"
+            paths: "scripts/tests/test_run_flow_refresh_wrapper.py scripts/tests/test_run_portfolio_refresh_retry.py scripts/tests/test_run_signals_refresh_wrapper.py scripts/tests/test_runner_run_loop.py scripts/tests/test_runner_security_hooks.py scripts/tests/test_ru*.py scripts/api/tests scripts/trade_blotter tests"
     concurrency:
       group: ci-py-tests-${{ github.ref }}-${{ matrix.shard }}
       cancel-in-progress: true
@@ -805,6 +805,7 @@ jobs:
           e2e/table-overflow-remediation.spec.ts
           e2e/performance-twr-payload.spec.ts
           e2e/leap-order-prefill.spec.ts
+          e2e/chain-held-leg-spread-risk.spec.ts
           e2e/mobile-orders-session.spec.ts
           e2e/orders-session-window.spec.ts
           e2e/vixts-tab.spec.ts
@@ -962,6 +963,52 @@ jobs:
         run: >-
           npx playwright test
           e2e/demo-workstation-data.spec.ts
+
+  e2e-setup-gate:
+    name: Playwright setup gate (keyless, non-gating)
+    # T-435: isolated KEYLESS compile-mode build (.next-setup-gate, :3100) so the
+    # real Edge middleware setup gate is observable. Must never share web/.next,
+    # port 3000 or the authless header with e2e-financial-smoke. Non-gating.
+    needs: [changes, secret-scan]
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.58.2-jammy
+    concurrency:
+      group: ci-e2e-setup-gate-${{ github.ref }}
+      cancel-in-progress: true
+    timeout-minutes: 20
+    env:
+      CI: "1"
+      NEXT_DIST_DIR: .next-setup-gate
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ""
+      CLERK_SECRET_KEY: ""
+      RADON_SETUP_COMPLETE: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: >-
+          apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=15 update -qq
+          && apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=15 install -y -qq unzip
+        timeout-minutes: 3
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.3.14"
+      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile
+        working-directory: web
+      - name: Build keyless setup-gate bundle
+        working-directory: web
+        run: bun run build:setup-gate
+      - name: Run setup-gate spec
+        working-directory: web
+        run: npx playwright test --config playwright.setup-gate.config.ts
+      - name: Upload setup-gate traces on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-setup-gate-traces
+          path: web/test-results-setup-gate/
+          retention-days: 7
 
   stage-release:
     name: Prestage VPS release
@@ -1127,8 +1174,8 @@ jobs:
     runs-on: ubuntu-latest
     # Outer budget: deploy.sh gets 15m, then 30s to kill descendants. A root
     # action can hold its lifecycle lock for 180s. Worst-case durable recovery
-    # can serialize four such helper actions after waiting 190s. SSH gets 36m
-    # and the job gets 40m so recovery remains inside the caller budget.
+    # can serialize four such helper actions after waiting 190s. SSH gets 55m
+    # and the job gets 60m so recovery remains inside the caller budget.
     timeout-minutes: 60
     # Once SSH starts it must finish. Newer green deploys queue behind the
     # running release; they never cancel it while production is between states.

@@ -27,10 +27,7 @@ REPO = Path(__file__).resolve().parents[2]
 MODULE_PATH = REPO / "scripts" / "security" / "repo_root.py"
 RESOLVER_JS = REPO / ".claude" / "workflows" / "resolveRepoRoot.mjs"
 WORKFLOWS = sorted((REPO / ".claude" / "workflows").glob("security-audit*.mjs"))
-SECURITY_WRAPPERS = (
-    REPO / "scripts" / "security_nightly.sh",
-    REPO / "scripts" / "security_deepsec_nightly.sh",
-)
+RUNNER = REPO / "scripts" / "runner" / "run_loop.sh"
 
 
 def _load_module():
@@ -191,14 +188,11 @@ def test_workflows_resolve_via_env_not_a_laptop_path():
         assert "resolveRadonRepoRoot" in text, path.name
 
 
-@pytest.mark.parametrize("wrapper", SECURITY_WRAPPERS, ids=lambda p: p.name)
-def test_security_wrappers_export_radon_repo_root(wrapper):
-    body = "\n".join(
-        line
-        for line in wrapper.read_text(encoding="utf-8").splitlines()
-        if not line.lstrip().startswith("#")
-    )
-    assert 'export RADON_REPO_ROOT="$REPO"' in body, wrapper.name
+def test_the_runner_exports_radon_repo_root_to_every_agent():
+    body = RUNNER.read_text(encoding="utf-8")
+    run_agent = body[body.index("run_agent() {"):]
+    run_agent = run_agent[:run_agent.index("\n}")]
+    assert 'export PROMPT_FILE RADON_REPO_ROOT="$WORK"' in run_agent
 
 
 def test_js_resolver_honors_the_same_order(tmp_path):

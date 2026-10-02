@@ -1,4 +1,14 @@
 # Lessons
+## 2026-09-30 — A Flex stock qty gap can be combo envelopes, not a bad fill
+
+- `flex-pull-trade-coverage` says a quantity disagreement is operator
+  reconciliation. Page `a7d2483d` looked like that (SPCX 1000 vs 1100)
+  and was not: the extra 100 was four BAG envelopes (`right='?'`, no
+  strike) that `_fill_contract` stored as `SPCX|STK`. The notional was
+  $28 light, which is the envelopes' net debit, not 100 shares at $149.
+- Before calling a stock disagreement operational, compare the gap to
+  same-day Spread/BAG rows. The stock fill alone matched Flex.
+
 ## 2026-09-25 — Review progress must survive a browser restart
 
 - Local votes alone do not resume a file-backed review: the packet and cursor must restore too. Keep packet storage local to the browser, back up decisions to the authenticated operator store, and resume the exact item without discarding existing votes.
@@ -1116,3 +1126,5 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 ## 2026-09-25 — Recovery controls must stay discoverable
 - Keep gateway lifecycle and service recovery available beside Trading controls even when broker health is nominal. A conditional attention action and buried diagnostics do not satisfy rapid operator access.
+
+- 2026-10-01: When diffing pytest failures (with vs without a change), run with `--color=no` (or `-p no:sugar`) before grepping `^FAILED`. ANSI codes made both lists empty and hid a real regression that CI then caught.

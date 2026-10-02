@@ -12,11 +12,21 @@ set -euo pipefail
 # otherwise the watcher goes down exactly when you stop what it watches.
 # Manage it explicitly with `systemctl restart radon-health` when needed.
 #
+# EXCLUDE radon-control.service for the same reason, and one more: the admin
+# panel's full-stack restart runs THIS script from inside radon-control's
+# cgroup, so quiescing it would kill the restart halfway through.
+#
 # Privilege: every mutating invocation re-enters this root-owned script through
 # one exact passwordless sudo rule. The script validates its arguments before
 # running systemctl, so neither the admin API nor a daemon receives a generic
 # systemctl capability.
 requested_action="${1:-status}"
+# `radon ib release|resume|status` (broker, root): the IBKR operator hold. It
+# must never wait on the deploy lock below, so it leaves before any of it.
+if [[ "$requested_action" == "ib" ]]; then
+  shift
+  exec "${RADON_IB_HOLD_BIN:-/usr/local/sbin/radon-ib-hold}" "$@"
+fi
 case "$requested_action" in
   stop|start|restart|status) ;;
   repair-nextjs-replica)
@@ -33,7 +43,7 @@ case "$requested_action" in
     unit_action="$2"
     unit_name="$3"
     ;;
-  *) echo "usage: radon {stop|start|restart|status|unit|repair-nextjs-replica}" >&2; exit 2 ;;
+  *) echo "usage: radon {stop|start|restart|status|unit|repair-nextjs-replica|ib}" >&2; exit 2 ;;
 esac
 
 if [[ "$requested_action" != "status" && $EUID -ne 0 \
@@ -389,7 +399,7 @@ fi
 ACTIVE_SCHEDULED_SERVICES=()
 for unit in "${ACTIVE_UNITS[@]}"; do
   case "$unit" in
-    radon-beta-*|radon-health.service|radon-ib-gateway.service|radon-ib-gateway-preheld-restart.service|radon-ib-gateway-remote.service) ;;
+    radon-beta-*|radon-health.service|radon-control.service|radon-ib-gateway.service|radon-ib-gateway-preheld-restart.service|radon-ib-gateway-remote.service) ;;
     radon-api.service|radon-nextjs.service|radon-relay.service|radon-monitor.service|radon-newsfeed.service) ;;
     radon-*.service) ACTIVE_SCHEDULED_SERVICES+=("$unit") ;;
   esac

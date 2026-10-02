@@ -33,6 +33,10 @@ WorkingDirectory=/home/radon/radon/cloud
 # stopped container must acquire the atomic cross-process lease before start.
 ExecStart=/usr/local/bin/radon-ib-gateway-control start
 ExecStop=/usr/local/bin/radon-ib-gateway-control stop
+# 73 = IBKR operator hold (`radon ib release`): the Gateway stays logged out on
+# purpose, so a boot under hold is active (exited), not failed. Resume calls
+# the helper directly, not this already-active oneshot.
+SuccessExitStatus=73
 TimeoutStartSec=90
 TimeoutStopSec=60
 

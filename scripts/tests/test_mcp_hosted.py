@@ -648,6 +648,35 @@ class TestJwksRefreshThrottle:
 
         assert mcp_auth.JWKS_REFRESH_COOLDOWN_SECONDS == api_auth.JWKS_NEGATIVE_TTL_SECONDS
 
+    @pytest.mark.parametrize("owner", ["hosted", "api"])
+    def test_newly_rotated_key_is_available_without_global_cooldown(
+        self, owner, jwks_fetches, rsa_keys, monkeypatch
+    ):
+        import jwt as pyjwt
+        from jwt.algorithms import RSAAlgorithm
+        from api import auth as api_auth
+
+        module = mcp_auth if owner == "hosted" else api_auth
+        monkeypatch.setattr(module, "_jwks_client", None)
+        jwk = RSAAlgorithm.to_jwk(rsa_keys[1], as_dict=True)
+        fetched = []
+
+        def fetch_data(client):
+            fetched.append(1)
+            kids = ["test-kid"] if len(fetched) == 1 else ["test-kid", "new-key"]
+            data = {"keys": [
+                {**jwk, "kid": kid, "use": "sig", "alg": "RS256"} for kid in kids
+            ]}
+            client.jwk_set_cache.put(data)
+            client._last_successful_fetch = time.monotonic()
+            return data
+
+        monkeypatch.setattr(pyjwt.PyJWKClient, "fetch_data", fetch_data)
+        client = module._get_jwks_client()
+        assert client.get_signing_key("test-kid").key_id == "test-kid"
+        assert client.get_signing_key("new-key").key_id == "new-key"
+        assert len(fetched) == 2
+
 
 class TestUpstreamReadsLeaveTheEventLoop:
     @pytest.fixture

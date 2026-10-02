@@ -62,7 +62,7 @@ Additional input folded in 2026-09-19 (Joe via CoS): a QLoRA practitioner guide 
 
 ### Why do this at all, in honest order
 
-1. **Ladder pressure relief and Cerebras-last hedge.** Every text tag today spends subscription quota (Anthropic, Grok, Codex, Gemini) or falls to NVIDIA, then Cerebras (paid, last). The tagger shares that ladder with knowledge distill and the research reviewer. Taking the highest-volume, lowest-difficulty caller off the paid and subscription rungs leaves quota for the callers that need frontier quality. When every keyed provider is down or quota-exhausted, posts land untagged (`tagPost` soft-fails to `null`); a local rung keeps the dashboard chips populated.
+1. **Ladder pressure relief and Cerebras-last hedge.** Every text tag today spends subscription quota (Anthropic, Grok, Codex, Antigravity) or falls to NVIDIA, then Cerebras (paid, last). The tagger shares that ladder with knowledge distill and the research reviewer. Taking the highest-volume, lowest-difficulty caller off the paid and subscription rungs leaves quota for the callers that need frontier quality. When every keyed provider is down or quota-exhausted, posts land untagged (`tagPost` soft-fails to `null`); a local rung keeps the dashboard chips populated.
 2. **Determinism and format validity.** A grammar-constrained local model returns `{"tags": [a, b, c]}` every time, and the rung validates every tag against the live taxonomy before Node sees it (HR-3). The current path sometimes returns prose or fewer than 3 tags and is dropped by `normaliseTags(...).slice(0, 3)`.
 3. **Latency, conditionally.** On Apple silicon or a 4+ vCPU host a 1.5B model answers in 1 to 4 seconds. On a 2 vCPU shared VPS it can be slower than a subscription API call. Latency is a win only where the hardware permits; section D makes the host choice explicit and section F gates enablement on measured p95.
 4. **Reusable pattern.** Dataset extract, LoRA on the Mini, GGUF export, eval harness, sidecar unit, ladder rung. Distill and reviewer heads (phase 2) reuse the pattern; they are OUT of this PR and OUT of the implement PR.
@@ -93,7 +93,7 @@ scripts/newsfeed/index.js  (radon-newsfeed.service, Hetzner, 120 s loop)
         │                └─ clients.model_ladder.complete_text_json(accept=accept_tags_payload,
         │                                                            log_prefix="newsfeed-tagger")
         │                      _run_ladder over MODEL_LADDER_ORDER:
-        │                        anthropic -> grok -> cursor(unwired) -> codex -> gemini -> nvidia -> cerebras
+        │                        anthropic -> grok -> cursor(unwired) -> codex -> antigravity -> nvidia -> cerebras
         │                      subscription creds only for the first band unless RADON_LADDER_ALLOW_PREPAID=1
         │       normaliseTags(parsed.tags).slice(0,3); exactly 3 or null
         └─ visionTagger = createVisionTagger(...)      OUT OF SCOPE (Anthropic direct)

@@ -23,6 +23,7 @@ export default function ChatLauncher({ activeSection, portfolio, prices }: ChatL
   const [loaded, setLoaded] = useState(false);
   const [shortcutReady, setShortcutReady] = useState(false);
   const [seedPrompt, setSeedPrompt] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
   const show = useCallback(() => {
@@ -31,6 +32,7 @@ export default function ChatLauncher({ activeSection, portfolio, prices }: ChatL
     setOpen(true);
   }, [open]);
   const close = useCallback(() => setOpen(false), []);
+  const toggleExpanded = useCallback(() => setExpanded((value) => !value), []);
 
   useEffect(() => subscribeAsk((prompt) => {
     setSeedPrompt(prompt);
@@ -89,11 +91,12 @@ export default function ChatLauncher({ activeSection, portfolio, prices }: ChatL
     {shortcutReady ? <span data-testid="chat-launcher-ready" hidden /> : null}
     {loaded ? createPortal(
       <div ref={dialogRef} className="chat-launcher radon-clear" hidden={!open}
+        data-expanded={expanded ? "true" : undefined}
         role="dialog" aria-modal="true" aria-label="Radon chat" aria-owns={open ? "radon-toast-viewport" : undefined} tabIndex={-1}>
         <div className="chat-launcher__scrim" onClick={close} aria-hidden="true" />
         <div className="chat-launcher__panel" data-testid="chat-launcher-panel">
           <ChatPanel activeSection={activeSection} portfolio={portfolio} prices={prices}
-            isOpen={open} onClose={close} seedPrompt={seedPrompt}
+            isOpen={open} onClose={close} expanded={expanded} onToggleExpanded={toggleExpanded} seedPrompt={seedPrompt}
             onSeedConsumed={() => setSeedPrompt(null)} />
         </div>
       </div>, document.body,

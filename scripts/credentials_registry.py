@@ -13,14 +13,14 @@ Deliberately NOT registered (decisions, not oversights; audited 2026-09-17):
 
 * Provider aliases resolved inside ``scripts/clients/model_ladder.py`` and
   ``web/lib/llm/provider.ts`` (``CLAUDE_CODE_API_KEY`` / ``CLAUDE_API_KEY`` for
-  Anthropic, ``GROK_API_KEY`` for xAI, ``GEMINI_API_KEY`` / ``GOOGLE_API_KEY``
-  / ``GOOGLE_GENAI_API_KEY`` for Gemini, ``FRED_KEY`` for FRED). Only the
+  Anthropic, ``GROK_API_KEY`` for xAI, ``FRED_KEY`` for FRED). Only the
   canonical name is manageable here; a stale alias in ``/etc/radon/env`` still
   wins inside those consumers, so rotate the alias too or remove it.
 * ``ROBINHOOD_MCP_*``: a 0600 token FILE the client rewrites on refresh, not a
   static value the store can own.
-* ``OPENAI_API_KEY`` and the Gemini keys: optional model-ladder fallbacks with
-  no Radon feature that requires them.
+* ``OPENAI_API_KEY``: an optional model-ladder fallback with no Radon feature
+  that requires it. Google has no key at all: it runs only through the
+  Antigravity CLI's own sign-in.
 * Deployment / perimeter tokens (``RADON_SERVICE_TOKEN``,
   ``RADON_PROBE_FRESHNESS_TOKEN``, ``RADON_SETUP_TOKEN``,
   ``RADON_HEALTH_STATUS_TOKEN``, ``CLERK_WEBHOOK_SECRET``, ``ALLOWED_USER_IDS``,

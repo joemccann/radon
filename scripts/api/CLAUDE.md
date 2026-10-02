@@ -26,6 +26,8 @@ After restart, IB Gateway sits at IBKR Mobile push prompt with API socket open �
 
 `/health` exposes `auth_state`, `service_state`, `upstream_dead`, `restart_backoff` (incl. `push_lock`, `attempt_count`, `next_attempt_in_secs`). **`POST /ib/reset-backoff`** clears BOTH in-memory backoff AND push lock — operator escape hatch after manual 2FA approval.
 
+**IBKR operator hold.** `/health` also carries `ib_gateway.operator_hold`, mirrored from the broker `/status` on the app role and read from the local flag elsewhere. `None` means unknown. `/health/lite` carries a boolean. While held, `/ib/restart` and admin Gateway `start|restart` return 423 without calling the broker (`services._control_gateway`), and the 15s recovery heartbeat skips pool reconnect and the self-restart ladder. `GET|POST /ib/operator-hold` reads, sets and clears the hold through the broker daemon's `hold`/`unhold` (operator JWT on the app role). Runbook: `docs/ib-gateway-recovery.md`.
+
 IBC-side relogin and schedules are **disabled** (`TWOFA_TIMEOUT_ACTION: exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT: "no"`, blank `AUTO_RESTART_TIME` and `TWS_COLD_RESTART`). The launchd setup likewise clears `AutoRestartTime`, `ColdRestartTime`, and calendar/RunAtLoad triggers. **Do not re-enable** any of them; they bypass the push lock.
 
 **4. Watchdog API-hang self-heal (2026-06-10).** Separate from stuck-2FA: `is_api_hang()` fires when the gateway is authenticated + `port_listening` but `upstream_dead` (the Java API listener wedged in place — socat accepts TCP but the API handshake times out, Docker's TCP healthcheck misses it). After 3 cycles it restarts the gateway via the lock. The api-watchdog runs as a oneshot every minute; it MUST have `TimeoutStartSec=60` (set on `radon-ib-watchdog.service`) — without it a hung cycle stalls the timer forever. The companion replica hazard (a 1.36GB replica sync every cycle) is structurally gone since DUR-07: `db.client` is direct-to-cloud by default and the fleet drop-in `radon-.service.d/common.conf` keeps `RADON_DB_NO_REPLICA=1` as belt-and-suspenders (see `feedback_gateway_api_hang_and_watchdog_self_hang`). Production `radon start/restart` and every other operator path MUST acquire the same push lease before touching the Gateway; bypasses are release-blocking defects.
@@ -53,6 +55,7 @@ All FastAPI routes JWT-protected by default.
 - **`/health/lite`** — side-effect-free, account-free coarse IB state (`auth_state`/`service_state`/`upstream_dead`/`port_listening`) for high-frequency pollers (the standalone health daemon). Calls `check_ib_gateway(pool=None)` so it NEVER triggers `reconnect_all`/heal — the 2FA-recovery heartbeat stays on `/health`. **NOT auth-exempt** (loopback daemon covered by bypass; public → 401); never add it to `AUTH_EXEMPT_PATHS`.
 - WebSocket auth via `scripts/api/ws_ticket.py` — 30s TTL.
 - **JWKS outage is not an auth verdict (REL-235):** in `scripts/api/auth.py` only PyJWT signature/claim errors populate the negative-kid cache; a timeout/OSError/5xx (including `PyJWKClientConnectionError`, which subclasses `PyJWTError`) during a JWKS fetch yields 503 and leaves the kid re-probeable, same rule as `scripts/mcp_hosted/auth.py` (REL-229). The task done-callback distinguishes the same way.
+- **Cached kid skips the in-flight bound:** a kid already in the unexpired cached JWKS set resolves in `_cached_signing_key` (`scripts/api/auth.py`) without a `MAX_JWKS_INFLIGHT` slot; only unknown kids take the bounded single-flight refetch, same rule as RC-A3 in `scripts/mcp_hosted/auth.py`.
 
 Don't return 4xx for legitimate empty/pending states; use 200 + payload flag (e.g., `missing: true`). 4xx noise in the browser console + Next.js logs masks real errors. See `feedback_http_status_for_real_errors.md`.
 
@@ -64,6 +67,12 @@ Don't return 4xx for legitimate empty/pending states; use 200 + payload flag (e.
 
 - `run_script`: spawns `<script>`, expects JSON on stdout, returns parsed dict. `_find_json_start()` accepts both `{` and `[` as JSON starts (fixed for the leap-scanner array case).
 - `run_script_raw`: returns `{ok, stdout, stderr, exit_code, timed_out}` without JSON parsing — for scripts that emit report text or write files directly.
+
+Failed `run_script` calls retain a parsed `status=error` dictionary in `data`
+while `ok` remains false and `error` keeps its existing text. Cancel/modify
+routes return that rejection as a coded 502 detail, preserving broker fields
+and order identity for `coerceRadonErrorDetail` (REL-021b / R-024). Plain-text
+infrastructure failures keep their existing response contract.
 
 CLAUDE.md project-wide rule: **No `spawn()` from Next.js.** All Python subprocess invocation goes through this layer. Callers from the Next.js side use `radonFetch` against FastAPI routes that wrap `run_script*` internally.
 
@@ -139,3 +148,10 @@ periodic callers plus a 5 s client poll re-fired every 502'd scan on the
 prior Friday). The Next.js side mirrors it with `web/lib/backgroundScan.ts`
 (in-flight dedupe + 60 s backoff on any failure). Tests:
 `scripts/api/tests/test_scan_gate.py`, `web/tests/background-scan-trigger.test.ts`.
+
+## Legacy order helpers (REL-021b / R-039)
+
+Production cancel/modify routes retain the original-client subprocess path.
+Do not import the unused pooled shortcut into the server. Legacy helpers
+must refuse unknown or mismatched client ownership before mutation; modify
+also respects trading halt, while owned cancellation remains available.

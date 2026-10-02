@@ -102,4 +102,8 @@ commits = [
   # immutable merged commit; never a secret, nothing to rotate. The line no
   # longer exists at HEAD.
   "b0322b6f2ac3ef3b7310e628a23b67b859168ac5",
+  # 2026-10-01 (PR #837): runner Pushover tests spelled SENTINEL fixtures
+  # next to a token identifier. Never a credential, nothing to rotate.
+  # Rewritten to runtime construction in the follow-up commit.
+  "5643de1d495a887c0d71d7cdc29a27b4ab291c1a",
 ]

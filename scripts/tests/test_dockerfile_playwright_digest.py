@@ -3,6 +3,7 @@ what was fetched. The build must compute and record a digest of the installed
 browser tree so any two images (or an audit) can compare what actually landed.
 Filesystem pin — no docker build required."""
 
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -36,7 +37,8 @@ def _digest_pipeline() -> str:
 
 
 def _run_pipeline(tree: Path) -> subprocess.CompletedProcess:
-    script = _digest_pipeline().replace("/ms-playwright", str(tree))
+    script = _digest_pipeline().replace("/ms-playwright", shlex.quote(str(tree)))
+    script = script.replace("/tmp/.browser-hashes", shlex.quote(str(tree.parent / ".browser-hashes")))
     return subprocess.run(
         ["bash", "-c", script], capture_output=True, text=True
     )

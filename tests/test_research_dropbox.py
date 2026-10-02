@@ -40,6 +40,14 @@ class ReaderTests(unittest.TestCase):
         folder={'.tag':'folder','path_lower':ROOT+'/2026','path_display':ROOT+'/2026'}
         self.r._rpc=Mock(return_value={'entries':[folder,item()], 'has_more':False,'cursor':'c'})
         self.assertEqual(len(self.r.list_page('2026')['entries']),1)
+    def test_folder_names_lists_direct_child_folders_only(self):
+        folder=lambda name:{'.tag':'folder','path_lower':ROOT+'/2026/october/'+name.lower(),'path_display':ROOT+'/2026/october/'+name}
+        self.r._rpc=Mock(side_effect=[{'entries':[folder('Oct 1'),item(ROOT+'/2026/october/a.pdf')],'has_more':True,'cursor':'more'},
+                                      {'entries':[folder('Oct 2')],'has_more':False,'cursor':'end'}])
+        self.assertEqual(self.r.folder_names('2026/October'),['oct 1','oct 2'])
+        self.assertEqual(self.r._rpc.call_args_list[0].args,('files/list_folder',{'path':ROOT+'/2026/October','recursive':False,'limit':2000}))
+        self.r._rpc=Mock(return_value={'entries':[{'.tag':'folder','path_lower':ROOT+'/elsewhere/oct 1','path_display':ROOT+'/elsewhere/oct 1'}],'has_more':False,'cursor':'c'})
+        with self.assertRaises(ReaderError):self.r.folder_names('2026/October')
     def test_escaped_pagination(self):
         self.r._rpc=Mock(return_value={'entries':[item(ROOT+'/other/a.pdf')],'has_more':False,'cursor':'c'})
         with self.assertRaises(ReaderError):self.r.list_page('2026','opaque')

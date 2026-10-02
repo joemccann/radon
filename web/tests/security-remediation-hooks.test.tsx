@@ -130,7 +130,7 @@ describe("request identity and client cache remediation", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
     expect(fetchMock).toHaveBeenCalledTimes(3);
     await act(async () => { await Promise.resolve(); });
     expect(result.current.AAPL?.close).toBe(99);

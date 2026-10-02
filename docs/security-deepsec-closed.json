@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "description": "Committed DeepSec operator-only closures. Sanitized finding IDs and public evidence only. The nightly loop reads this into last-audited.json and omits these IDs from PR Next unless new evidence reopens one.",
+  "closed": [
+    {
+      "id": "DS-2026-09-20-03",
+      "closed_at": "2026-09-24",
+      "pr": 689,
+      "commit": "e5c4e627",
+      "path": "cloud/scripts/setup-vps.sh",
+      "lines": "39-47",
+      "evidence": "PR #689 merge e5c4e627: setup-vps.sh L39-47 uses root-owned /opt/radon-provision pinned to the public HTTPS URL"
+    }
+  ]
+}

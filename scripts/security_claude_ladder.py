@@ -5,7 +5,7 @@ Policy (Joe 2026-09-21): list the Mini Claude Code catalog, skip the newest
 generation, run the prior / second-newest first, then the rest. Anthropic
 keeps shipping top-tier models; a static opus pin goes stale.
 
-Catalog source is the same subscription CLI the wrappers already launch
+Catalog source is the same subscription CLI the security loops launch
 (`claude models`). This module never calls the Anthropic HTTP API and unsets
 every billing-reroute key before spawning Claude Code.
 
@@ -18,8 +18,10 @@ the strongest. Within a tier the highest version wins and aliases collapse
 (`claude-opus-5[1m]` / `claude-opus-5` / `claude-opus-5-5`), so "second most
 powerful" is a real tier. Ids are emitted without `[1m]` or a date suffix.
 
-Stdout is the space-separated ladder (no newest). Empty stdout + exit 1
-means the caller must use SAFETY_LADDER and log the failure. Tests fixture
+Stdout is the space-separated ladder (no newest); with --rungs, as the
+`claude:<model>` words scripts/runner/run_loop.sh reads as AGENTS_RESOLVER.
+Empty stdout + exit 1 means the caller must use SAFETY_LADDER and log the
+failure (run_loop.sh keeps the loop env's AGENTS). Tests fixture
 the catalog via --from-text or RADON_WEEKEND_CLAUDE_CATALOG; they must not
 hit the network.
 """
@@ -43,7 +45,7 @@ CLAUDE_ID_RE = re.compile(r"claude-[a-z0-9]+(?:[-.][a-z0-9\[\]]+)+", re.I)
 DATE_SUFFIX_RE = re.compile(r"-20\d{6}$")
 BRACKET_RE = re.compile(r"\[.*?\]")
 
-# Same names the security wrappers unset. Catalog discovery must not start
+# Also in loops/security*.env AGENT_UNSET, which run_loop.sh applies first. Catalog discovery must not start
 # billing a prepaid Anthropic path.
 BILLING_REROUTE_KEYS = (
     "ANTHROPIC_API_KEY",
@@ -228,6 +230,11 @@ def main(argv: list[str] | None = None) -> int:
         metavar="PATH",
         help="Fixture catalog (use - for stdin). Tests must pass this; no network.",
     )
+    parser.add_argument(
+        "--rungs",
+        action="store_true",
+        help="Print run_loop.sh agent words (claude:<model> ...) for AGENTS_RESOLVER.",
+    )
     args = parser.parse_args(argv)
     try:
         if args.from_text:
@@ -252,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     newest = skipped[0] if skipped else "?"
     print(f"security_claude_ladder: skip-newest {newest}; ladder {' '.join(ladder)}", file=sys.stderr)
-    print(" ".join(ladder))
+    print(" ".join(f"claude:{model}" for model in ladder) if args.rungs else " ".join(ladder))
     return 0
 
 

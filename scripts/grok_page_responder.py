@@ -56,7 +56,13 @@ load_repo_dotenv()
 from watchdog import notify
 from watchdog import pages as pages_mod
 from watchdog import units as units_mod
+import grok_runtime
 import ir_ensure_pr
+
+try:
+    from db.hrana_http import HranaHttpError
+except ImportError:  # pragma: no cover - imported as scripts.grok_page_responder
+    from scripts.db.hrana_http import HranaHttpError
 
 
 GROK_TIMEOUT_SECS = 3600
@@ -67,6 +73,7 @@ LOCK_STALE_SECS = GROK_TIMEOUT_SECS + 300
 CACHE_REL = Path("data") / "cache" / "grok_pages"
 LOCK_NAME = ".responder.lock"
 HEALTH_SERVICE = "grok-page-responder"
+PUBLIC_REPO_URL = "https://github.com/joemccann/radon.git"
 
 # "Recovers on next timer" is the wrong call when that slot is most of a day
 # away (radon-vol-cone 2026-08-20: SIGTERM'd at 20:4x UTC, next slot ~22h out).
@@ -105,9 +112,8 @@ RERUNNABLE_ONESHOT_UNITS = frozenset({
     "radon-equibles-13f.service",
     "radon-equibles-ats.service",
     "radon-equibles-cot.service",
-    # Weekday 21:45 UTC; next slot is ~24h. Schema-lag / exit-code pages need
-    # a same-day re-run after migrate --demo deploys (2026-08-26 P1).
-    "radon-demo-mirror.service",
+    # REL-108 / R-302: demo-mirror's ExecStartPre applies migrations,
+    # so it is not an autonomous data-refresh action.
 })
 # Per-unit ceiling on automatic re-runs in one UTC day. The global action cap
 # bounds how often the responder acts at all, but not how often it spends that
@@ -168,12 +174,21 @@ def sync_remote_clone(repo_root: Path) -> str:
         return "status-failed"
     if (porcelain.stdout or "").strip():
         return "dirty"
+    # Public HTTPS, not the clone's origin: the unit hides ~/.ssh.
     fetch = subprocess.run(
-        ["git", "fetch", "origin", "main"],
+        ["git", "fetch", PUBLIC_REPO_URL, "+refs/heads/main:refs/remotes/origin/main"],
         cwd=repo_root, capture_output=True, text=True, timeout=60,
     )
     if fetch.returncode != 0:
         return "fetch-failed"
+    # A run leaves the clone on its fix/* branch (kept for the pickup); sync
+    # main, or every later cycle runs stale code behind "ff-failed".
+    checkout = subprocess.run(
+        ["git", "checkout", "-q", "main"],
+        cwd=repo_root, capture_output=True, text=True, timeout=30,
+    )
+    if checkout.returncode != 0:
+        return "checkout-failed"
     merged = subprocess.run(
         ["git", "merge", "--ff-only", "origin/main"],
         cwd=repo_root, capture_output=True, text=True, timeout=30,
@@ -271,14 +286,26 @@ def acquire_lock(lock_path: Path, now: datetime) -> bool:
     return True
 
 
-def build_grok_command(prompt_path: Path, repo_root: Path) -> list[str]:
+def build_grok_command(
+    prompt_path: Path,
+    repo_root: Path,
+    *,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+    grok: str | None = None,
+) -> list[str]:
+    effort = reasoning_effort or grok_runtime.reasoning_effort()
+    if not model:
+        raise grok_runtime.GrokRuntimeError("refusing implicit grok model default")
     return [
-        grok_bin(),
+        grok or grok_bin(),
         "--prompt-file", str(prompt_path),
         "--cwd", str(repo_root),
         "--always-approve",
         "--no-auto-update",
         "--no-plan",
+        "-m", model,
+        "--reasoning-effort", effort,
         "--output-format", "json",
     ]
 
@@ -454,21 +481,48 @@ def build_prompt(page: dict, *, autoship: bool, autopush: bool) -> str:
         "not a local testable defect\n\n"
         f"{ship_line}\n{push_line}\n"
         "Ignore unrelated dirty files. No em dashes in user-facing copy.\n"
+        "When AUTOSHIP commits, the commit message body MUST include these "
+        "markdown sections, each with real content (not TODO, not the branch "
+        "name, not 'grok incident fix on'):\n"
+        "## What broke\n"
+        "symptom, failing job or alert, page id, first-seen time, run or log "
+        "links, error excerpt.\n"
+        "## Root cause\n"
+        "## What changed\n"
+        "each file with a plain summary.\n"
+        "## How it was verified\n"
+        "tests, commands, CI links if known. Record the model id and CLI "
+        "version that ran (Ran <model> on CLI <version>).\n"
+        "## Risk and rollback\n"
+        "## Still open\n"
+        "Pickup opens the PR from this body. A missing or placeholder section "
+        "refuses the PR and pages.\n"
         "End with exactly one line:\n"
         "RESULT: <code_fix|stand_down|ops_only|failed> | <one-line summary>\n"
     )
 
 
-def parse_grok_result(stdout: str) -> tuple[str, str]:
+def grok_output_text(stdout: str) -> str:
+    """The assistant text from ``grok --output-format json``; plain text as-is.
+
+    The JSON form is one object whose ``text`` holds the reply. Anything that
+    is not such an object (plain output, a truncated or error payload) is
+    returned unchanged.
+    """
     text = stdout or ""
     stripped = text.strip()
     if stripped.startswith("{"):
         try:
             payload = json.loads(stripped)
-            if isinstance(payload, dict) and payload.get("text"):
-                text = str(payload["text"])
         except ValueError:
-            pass
+            return text
+        if isinstance(payload, dict) and payload.get("text"):
+            return str(payload["text"])
+    return text
+
+
+def parse_grok_result(stdout: str) -> tuple[str, str]:
+    text = grok_output_text(stdout)
     disposition = "failed"
     summary = (text.strip() or "empty grok output")[:400]
     for line in reversed(text.splitlines()):
@@ -518,7 +572,111 @@ def _send_followup(*, service: str, disposition: str, summary: str) -> None:
     notify._post_pushover(payload)
 
 
-def record_cycle_health(state: str, *, now: Optional[datetime] = None) -> None:
+def _send_pin_warning(message: str) -> None:
+    print(message, file=sys.stderr)
+    creds = notify._pushover_creds()
+    if not creds:
+        return
+    user, token = creds
+    notify._post_pushover(
+        notify.build_pushover_payload(
+            user=user,
+            token=token,
+            title="radon grok: last-known-good fallback",
+            message=message[:900],
+            severity=None,
+        )
+    )
+
+
+def _runtime_lock_path(repo_root: Path) -> Path:
+    env = os.environ.get("RADON_GROK_RUNTIME_LOCK")
+    if env:
+        return Path(env)
+    machine = grok_runtime.DEFAULT_LOCK_PATH
+    if machine.parent.is_dir() and os.access(machine.parent, os.W_OK):
+        return machine
+    return cache_dir(repo_root) / "grok-runtime.lock"
+
+
+def _lkg_path() -> Path:
+    env = os.environ.get("RADON_GROK_LKG_PATH")
+    if env:
+        return Path(env)
+    return grok_runtime.DEFAULT_LKG_PATH
+
+
+def _load_trusted_lkg(repo_root: Path | None = None) -> grok_runtime.LkgState | None:
+    """LKG state whose binary is safe to exec, else None (no fallback).
+
+    The fallback binary runs --always-approve over untrusted page text, so
+    a temp-dir, pytest-basetemp, in-clone, missing or world-writable path
+    is treated exactly like no last-known-good.
+    """
+    try:
+        lkg = grok_runtime.load_lkg(_lkg_path())
+    except grok_runtime.GrokRuntimeError:
+        return None
+    if lkg is None:
+        return None
+    problem = grok_runtime.lkg_binary_problem(
+        lkg.binary_path,
+        extra_untrusted=(repo_root,) if repo_root else (),
+    )
+    if problem:
+        print(
+            f"grok last-known-good binary rejected ({problem}): {lkg.binary_path}",
+            file=sys.stderr,
+        )
+        return None
+    return lkg
+
+
+def _runtime_from_track(
+    *,
+    probe: bool,
+    pin_runtime: grok_runtime.ResolvedRuntime | None = None,
+    grok_runner: GrokRunner | None = None,
+    repo_root: Path | None = None,
+) -> grok_runtime.ResolvedRuntime:
+    if pin_runtime is not None:
+        return pin_runtime
+    lkg = _load_trusted_lkg(repo_root)
+    if not probe:
+        if lkg is not None:
+            return grok_runtime.ResolvedRuntime(
+                model=lkg.model,
+                reasoning_effort=lkg.reasoning_effort,
+                cli_version=lkg.cli_version,
+                binary_path=lkg.binary_path,
+                used_fallback=False,
+                warning=None,
+                refused=False,
+                source="lkg",
+            )
+        return grok_runtime.ResolvedRuntime(
+            model=os.environ.get("GROK_MODEL") or "grok-4.7",
+            reasoning_effort=grok_runtime.reasoning_effort(),
+            cli_version=os.environ.get("GROK_CLI_VERSION") or "",
+            binary_path=grok_bin(),
+            used_fallback=False,
+            warning=None,
+            refused=False,
+            source="models",
+        )
+    return grok_runtime.resolve_latest(
+        grok_bin=grok_bin(),
+        runner=grok_runner or _default_grok_runner,
+        lkg=lkg,
+    )
+
+
+def record_cycle_health(
+    state: str,
+    *,
+    now: Optional[datetime] = None,
+    error: Optional[dict] = None,
+) -> None:
     """Heartbeat THIS poller, never the ticket outcome.
 
     A cycle that reaches the end is healthy even when grok stood down or
@@ -530,14 +688,29 @@ def record_cycle_health(state: str, *, now: Optional[datetime] = None) -> None:
         from db.hrana_http import write_service_health_http
     except ImportError:  # pragma: no cover — stripped clone without db/
         return
-    write_service_health_http(HEALTH_SERVICE, state, finished_at=finished)
+    write_service_health_http(
+        HEALTH_SERVICE, state, finished_at=finished, error=error
+    )
 
 
-def _heartbeat(state: str, now: datetime) -> None:
+def _heartbeat(state: str, now: datetime, *, error: Optional[dict] = None) -> None:
     try:
-        record_cycle_health(state, now=now)
+        if error is None:
+            record_cycle_health(state, now=now)
+        else:
+            record_cycle_health(state, now=now, error=error)
     except Exception as exc:  # noqa: BLE001 — telemetry must not fail a cycle
         print(f"grok page heartbeat non-fatal: {exc}", file=sys.stderr)
+
+
+def _ledger_read_timeout(exc: BaseException) -> bool:
+    """True for the hrana read stall that must not fail the oneshot.
+
+    Production string: ``TimeoutError: The read operation timed out``.
+    A statement error or missing credential still fails the unit.
+    """
+    text = str(exc)
+    return "TimeoutError" in text or "The read operation timed out" in text
 
 
 def _default_grok_runner(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -547,6 +720,7 @@ def _default_grok_runner(cmd: list[str], **kwargs) -> subprocess.CompletedProces
         text=True,
         timeout=kwargs.get("timeout", GROK_TIMEOUT_SECS),
         cwd=kwargs.get("cwd"),
+        env=grok_runtime.grok_child_env(),
     )
 
 
@@ -557,6 +731,7 @@ def run_cycle(
     grok_runner: Optional[GrokRunner] = None,
     systemctl_runner: Optional[SystemctlRunner] = None,
     ensure_ir_pr: Optional[Callable] = None,
+    pin_runtime: grok_runtime.ResolvedRuntime | None = None,
 ) -> int:
     now = now or datetime.now(timezone.utc)
     if not responder_enabled():
@@ -604,6 +779,35 @@ def run_cycle(
             _heartbeat("paused", now)
             return 0
 
+        runtime = _runtime_from_track(
+            probe=grok_runner is None,
+            pin_runtime=pin_runtime,
+            grok_runner=grok_runner,
+            repo_root=repo_root,
+        )
+        if runtime.warning and not runtime.refused:
+            # The pin is the last-known-good fallback. A refuse (no usable
+            # binary, no trusted LKG) repeats every 30s; the error row below
+            # alerts once through the watchdog's hysteresis instead.
+            _send_pin_warning(runtime.warning)
+        if runtime.refused:
+            print(json.dumps({
+                "at": now.isoformat(),
+                "skipped": "grok_runtime",
+                "warning": runtime.warning,
+            }))
+            # Exit 0 so systemd does not page every 30s, but this is an
+            # outage: pages go unanswered. `error` (not `paused`, which never
+            # alerts and stays fresh forever) lets the watchdog's error bucket
+            # page once. completed=False keeps the finally block's ok off it.
+            completed = False
+            _heartbeat(
+                "error",
+                now,
+                error={"message": f"grok runtime unavailable: {runtime.warning}"},
+            )
+            return 0
+
         page = actionable[0]
         token = uuid.uuid4().hex
         if not pages_mod.claim_page(page["page_id"], now=now, claim_token=token):
@@ -644,10 +848,54 @@ def run_cycle(
                 autopush=autopush_enabled(),
             )
         )
-        cmd = build_grok_command(prompt_path, repo_root)
+        cmd = build_grok_command(
+            prompt_path,
+            repo_root,
+            model=runtime.model,
+            reasoning_effort=runtime.reasoning_effort,
+            grok=runtime.binary_path or grok_bin(),
+        )
+
+        def _run_once(command: list[str]):
+            try:
+                return runner(command, timeout=GROK_TIMEOUT_SECS, cwd=str(repo_root)), None
+            except subprocess.TimeoutExpired:
+                return None, "timeout"
+
         try:
-            proc = runner(cmd, timeout=GROK_TIMEOUT_SECS, cwd=str(repo_root))
-        except subprocess.TimeoutExpired:
+            with grok_runtime.exclusive_lock(_runtime_lock_path(repo_root), blocking=True):
+                proc, timeout_err = _run_once(cmd)
+                stdout = getattr(proc, "stdout", "") or "" if proc else ""
+                stderr = getattr(proc, "stderr", "") or "" if proc else ""
+                returncode = getattr(proc, "returncode", 1) if proc else 124
+                if timeout_err or grok_runtime.should_retry_lkg(returncode, stdout, stderr):
+                    lkg = _load_trusted_lkg(repo_root)
+                    if lkg is not None and (
+                        lkg.model != runtime.model or lkg.binary_path != runtime.binary_path
+                    ):
+                        _send_pin_warning(
+                            f"grok {runtime.model} / CLI {runtime.cli_version} "
+                            f"failed at incident time; retrying last-known-good "
+                            f"{lkg.model} / CLI {lkg.cli_version}"
+                        )
+                        runtime = grok_runtime.runtime_from_lkg(lkg)
+                        cmd = build_grok_command(
+                            prompt_path,
+                            repo_root,
+                            model=runtime.model,
+                            reasoning_effort=runtime.reasoning_effort,
+                            grok=runtime.binary_path or grok_bin(),
+                        )
+                        proc, timeout_err = _run_once(cmd)
+        except grok_runtime.GrokRuntimeError as exc:
+            print(json.dumps({
+                "at": now.isoformat(),
+                "page_id": page["page_id"],
+                "error": f"grok runtime lock: {exc}",
+            }), file=sys.stderr)
+            return 0
+
+        if timeout_err:
             status = pages_mod.record_attempt_failure(
                 page["page_id"],
                 now=datetime.now(timezone.utc),
@@ -661,9 +909,9 @@ def run_cycle(
             }))
             return 0
 
-        returncode = getattr(proc, "returncode", 1)
-        stdout = getattr(proc, "stdout", "") or ""
-        stderr = getattr(proc, "stderr", "") or ""
+        returncode = getattr(proc, "returncode", 1) if proc else 1
+        stdout = getattr(proc, "stdout", "") or "" if proc else ""
+        stderr = getattr(proc, "stderr", "") or "" if proc else ""
         if returncode != 0:
             status = pages_mod.record_attempt_failure(
                 page["page_id"],
@@ -714,6 +962,9 @@ def run_cycle(
                 if url:
                     summary = f"{summary} {url}"
         finished = datetime.now(timezone.utc)
+        stamp = grok_runtime.runtime_stamp(runtime.model, runtime.cli_version)
+        if stamp not in summary:
+            summary = f"{summary} {stamp}".strip()
         pages_mod.complete_page(
             page["page_id"],
             status="done",
@@ -731,8 +982,20 @@ def run_cycle(
             "service": page["service"],
             "disposition": disposition,
             "summary": summary,
+            "model": runtime.model,
+            "cli_version": runtime.cli_version,
         }))
         return 0
+    except HranaHttpError as exc:
+        # A 4s ledger read stall is the heartbeat timeout's sibling: the
+        # next timer is 30s away. Exit 0 so systemd does not page this
+        # poller about itself. Skip the ok heartbeat so a standing Turso
+        # outage still goes stale.
+        completed = False
+        if _ledger_read_timeout(exc):
+            print(f"grok page ledger non-fatal: {exc}", file=sys.stderr)
+            return 0
+        raise
     except BaseException:
         # A cycle that died on Turso or git is not a healthy poll. Let the
         # row go stale rather than paint over the writer's own failure.

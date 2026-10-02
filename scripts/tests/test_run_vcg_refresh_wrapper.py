@@ -19,7 +19,6 @@ wrapper's stdout/exit code reflect the path taken.
 from __future__ import annotations
 
 import os
-import shutil
 import socket
 import stat
 import subprocess
@@ -28,6 +27,8 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+
+from scripts.tests.shell_sandbox import stage_shell_script
 
 
 def _free_port() -> int:
@@ -50,7 +51,7 @@ def _stage_wrapper(repo_dir: Path) -> Path:
     scripts_dir.mkdir(parents=True, exist_ok=True)
     src = Path(__file__).resolve().parents[1] / "run_vcg_refresh.sh"
     dst = scripts_dir / "run_vcg_refresh.sh"
-    shutil.copy2(src, dst)
+    stage_shell_script(src, dst, repo_dir / "scratch")
     dst.chmod(dst.stat().st_mode | stat.S_IXUSR)
     return dst
 

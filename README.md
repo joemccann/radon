@@ -49,7 +49,7 @@ Any gate fails, no trade. Full rules in [`CLAUDE.md`](CLAUDE.md). Strategy specs
 **Prerequisites**
 
 - Python 3.13 (3.14 has an `ib_insync` / `eventkit` incompatibility)
-- Node.js 18+ and `bun` for the terminal (`web/`). `site/` still uses npm. See [`DEVELOPMENT.md`](DEVELOPMENT.md).
+- Use the Node.js major selected by the [app image](docker/app/Dockerfile.node) and `bun` for the terminal (`web/`). Package-manager ownership: [`DEVELOPMENT.md`](DEVELOPMENT.md#runtime-and-dependencies).
 - Interactive Brokers Gateway (cloud via Tailscale, Docker, or local TWS)
 - Accounts at the services in [`.env.example`](.env.example), [`web/.env.example`](web/.env.example), and [`docs/external-services.md`](docs/external-services.md)
 
@@ -67,11 +67,13 @@ The two `.env.example` files are the canonical variable reference. Read those be
 **Dev launchers**
 
 ```bash
-scripts/cloud.sh    # default: laptop runs Next.js + newsfeed, VPS serves FastAPI/relay/IB Gateway over Tailscale
+scripts/cloud.sh    # cloud-thin laptop development
 scripts/local.sh    # fully local: laptop runs everything including the IB Gateway Docker container
 ```
 
-`cloud.sh` is the everyday workflow. `local.sh` is for offline dev or when the VPS is down. Mode persists to `.env.ib-mode`; toggle later via `scripts/ib mode local|cloud`.
+Choose a mode using the [mode-switch procedure](docs/cloud-services.md#mode-switch),
+including its Gateway and scheduler precautions. Market-data collection still
+requires upstream connectivity in local mode.
 
 Open `http://localhost:3000`. Clerk auto-bypasses on localhost in non-production.
 
@@ -152,18 +154,13 @@ Index: [`docs/README.md`](docs/README.md). External services: [`docs/external-se
 
 ## Data source priority
 
-Strict order for any price / flow / chain lookup. Full inventory: [`docs/external-services.md`](docs/external-services.md).
-
-1. **Interactive Brokers** for real-time quotes, options chains, and portfolio state
-2. **Unusual Whales** for dark pool flow, sweeps, options flow, and analyst data
-3. **Cboe official feeds** for COR1M historical fallback
-4. **Yahoo Finance** as a strict last resort
-
-Never skip to Yahoo or web scrape without trying IB then Unusual Whales first. Research surfaces (Exa) and news (themarketear, MenthorQ) are orthogonal. They do not substitute for missing price data.
+Follow the source priority and subsystem requirements in
+[`docs/external-services.md`](docs/external-services.md). Research and news
+sources do not substitute for missing market data.
 
 ## Deployment
 
-`git push origin main` is the deploy. After the CI gates pass, GitHub Actions extracts `cloud/` from the exact tested SHA into an immutable VPS runner and runs its deploy contract.
+Merging a reviewed pull request into `main` triggers the deploy. After the CI gates pass, GitHub Actions extracts `cloud/` from the exact tested SHA into an immutable VPS runner and runs its deploy contract.
 
 Canonical infra: [`cloud/`](cloud/). Recovery: [`cloud/CLAUDE.md`](cloud/CLAUDE.md) and [`docs/monorepo-cloud-migration.md`](docs/monorepo-cloud-migration.md). Confirm: `gh run list --workflow=ci.yml --limit 1`.
 

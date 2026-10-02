@@ -1,7 +1,7 @@
 """CTA vision cascade: Joe's exact provider order and credit fallthrough.
 
 Order (do not leave a band early):
-  subscription: anthropic -> grok -> cursor -> codex -> gemini
+  subscription: anthropic -> grok -> cursor -> codex -> antigravity
   nvidia (free endpoints)
   cerebras (cheap paid, last)
 
@@ -9,8 +9,8 @@ Cursor has no vision HTTP path in Radon; it is skipped as unavailable,
 not treated as a reason to leave the subscription band.
 
 Subscription-tier rungs require subscription credentials by default
-(CLAUDE_CODE_OAUTH_TOKEN, ~/.grok/auth.json, CODEX_HOME/auth.json,
-GEMINI_OAUTH_TOKEN). Prepaid console wallets do not wire those rungs
+(CLAUDE_CODE_OAUTH_TOKEN, ~/.grok/auth.json, CODEX_HOME/auth.json, the
+Antigravity CLI). Prepaid console wallets do not wire those rungs
 unless RADON_LADDER_ALLOW_PREPAID=1. NVIDIA / Cerebras API keys remain OK.
 """
 from __future__ import annotations
@@ -54,14 +54,13 @@ PREPAID_KEYS = {
     "ANTHROPIC_API_KEY": "sk-ant-test",
     "XAI_API_KEY": "xai-test",
     "OPENAI_API_KEY": "sk-openai-test",
-    "GEMINI_API_KEY": "gem-test",
     "NVIDIA_API_KEY": "nvapi-test",
     "CEREBRAS_API_KEY": "csk-test",
 }
 
 
 def _subscription_env(tmp_path: Path, **extra: str) -> dict[str, str]:
-    """Subscription-band credentials for anthropic/grok/codex/gemini + NVIDIA/Cerebras."""
+    """Subscription-band credentials for anthropic/grok/codex/antigravity + NVIDIA/Cerebras."""
     home = tmp_path / "home"
     (home / ".grok").mkdir(parents=True)
     (home / ".grok" / "auth.json").write_text(
@@ -144,13 +143,6 @@ def _openai_ok(rows=None):
     return _Resp(200, {"choices": [{"message": {"content": json.dumps(rows or ROWS)}}]})
 
 
-def _gemini_ok(rows=None):
-    return _Resp(
-        200,
-        {"candidates": [{"content": {"parts": [{"text": json.dumps(rows or ROWS)}]}}]},
-    )
-
-
 def _credit_low():
     return _Resp(
         400,
@@ -216,7 +208,7 @@ class TestCascadeContract:
             "grok",
             "cursor",
             "codex",
-            "gemini",
+            "antigravity",
             "nvidia",
             "cerebras",
         )
@@ -224,7 +216,7 @@ class TestCascadeContract:
         assert VISION_CASCADE_TIERS["grok"] == "subscription"
         assert VISION_CASCADE_TIERS["cursor"] == "subscription"
         assert VISION_CASCADE_TIERS["codex"] == "subscription"
-        assert VISION_CASCADE_TIERS["gemini"] == "subscription"
+        assert VISION_CASCADE_TIERS["antigravity"] == "subscription"
         assert VISION_CASCADE_TIERS["nvidia"] == "nvidia"
         assert VISION_CASCADE_TIERS["cerebras"] == "cerebras"
 
@@ -253,7 +245,7 @@ class TestCascadeContract:
         assert wired_vision_providers({"CLAUDE_CODE_OAUTH_TOKEN": "oauth"}) == (
             "anthropic",
         )
-        # Google is Antigravity only: a Gemini OAuth token wires nothing.
+        # Google is the Antigravity CLI only: a Google OAuth token wires nothing.
         assert wired_vision_providers({"GEMINI_OAUTH_TOKEN": "gem-oauth"}) == ()
         codex_home = tmp_path / "codex"
         codex_home.mkdir()
@@ -351,7 +343,7 @@ class TestCreditFallthrough:
         assert not any("cerebras" in u for u in router.calls)
 
     def test_prepaid_only_skips_subscription_band_and_uses_nvidia(self):
-        """Hetzner prepaid-only: do not burn ANTHROPIC/XAI/OpenAI/Gemini wallets."""
+        """Hetzner prepaid-only: do not burn ANTHROPIC/XAI/OpenAI wallets."""
         router = _Router(
             {
                 "api.anthropic.com": _credit_low(),
@@ -376,7 +368,7 @@ class TestCreditFallthrough:
         assert result.provider == "cerebras"
         assert any("nvidia" in u for u in router.calls)
 
-    def test_gemini_skips_image_input_so_nvidia_takes_the_vision_turn(self, tmp_path, monkeypatch):
+    def test_antigravity_skips_image_input_so_nvidia_takes_the_vision_turn(self, tmp_path, monkeypatch):
         # Antigravity has no image input; the rung yields without HTTP or agy.
         import clients.model_ladder as ladder
 

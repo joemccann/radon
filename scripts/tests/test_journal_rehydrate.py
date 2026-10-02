@@ -1057,6 +1057,52 @@ def _flex_fill(exec_id: str, qty: int, price: float, when: datetime,
     )
 
 
+class TestComboParentsAreNotStockFills:
+    """A BAG parent execution names no strike or expiry. It must not fall back
+    to the underlying's stock bucket and inflate the day's share count."""
+
+    DAY = datetime(2026, 4, 10, 10, 0, 0)
+
+    def _stock_row(self) -> dict:
+        return {
+            "id": 1, "date": "2026-04-10", "ticker": "SPY", "action": "BUY",
+            "decision": "IB_AUTO_IMPORT", "fill_price": 500.0, "shares": 200,
+            "structure": "Long Stock (STK)", "ib_exec_id": "0001bbbb.6a000010.01.01",
+        }
+
+    def _bag_parent(self, exec_id: str, qty: int, price: float) -> dict:
+        return {
+            "id": 2, "date": "2026-04-10", "ticker": "SPY", "action": "BUY_OPTION",
+            "decision": "IB_AUTO_IMPORT", "fill_price": price, "contracts": qty,
+            "right": "?", "structure": "Long Spread (BAG)", "ib_exec_id": exec_id,
+        }
+
+    def test_bag_parent_rows_do_not_count_toward_the_stock_bucket(self):
+        existing = {"trades": [
+            self._stock_row(),
+            self._bag_parent("0001cccc.6a000020.01.01", 3, -0.15),
+            self._bag_parent("0001cccc.6a000021.01.01", 2, -0.40),
+        ]}
+        executions = [_make_execution(
+            exec_id="9200000001", symbol="SPY", sec_type=SecurityType.STOCK,
+            side=Side.BUY, quantity=200, price=500.0, when=self.DAY,
+        )]
+        updated, imported, _skipped, _ = rehydrate_from_executions(executions, existing)
+        assert imported == 0
+        assert updated.get("aggregate_disagreements", []) == []
+
+    def test_structure_label_alone_marks_a_bag_parent(self):
+        row = self._bag_parent("0001cccc.6a000022.01.01", 1, -0.10)
+        row.pop("right")
+        existing = {"trades": [self._stock_row(), row]}
+        executions = [_make_execution(
+            exec_id="9200000002", symbol="SPY", sec_type=SecurityType.STOCK,
+            side=Side.BUY, quantity=200, price=500.0, when=self.DAY,
+        )]
+        updated, _imported, _skipped, _ = rehydrate_from_executions(executions, existing)
+        assert updated.get("aggregate_disagreements", []) == []
+
+
 class TestFlexAggregateNeverOverridesIndividualFills:
     DAY1 = datetime(2026, 4, 10, 10, 0, 0)
     DAY1_LATE = datetime(2026, 4, 10, 14, 0, 0)
@@ -1089,6 +1135,100 @@ class TestFlexAggregateNeverOverridesIndividualFills:
         [flag] = updated["aggregate_disagreements"]
         assert flag["date"] == "2026-04-10"
         assert flag["flex_qty"] == 6 and flag["fills_qty"] == 5
+
+    def test_bag_combo_envelope_is_not_extra_stock_on_an_assignment(self):
+        """Page a7d2483d: SPCX 149-put assignment is 1000 shares at $149.
+
+        The same day's BAG envelopes (right='?', 50+20+19+11 contracts,
+        net prices -0.15/-0.41) have no strike, so `_fill_contract` fell
+        them through to SPCX|STK. Coverage then saw fills 1100 /
+        notional 148972 and the oneshot exited 1.
+        """
+        day = datetime(2026, 9, 25, 16, 0, 0)
+        envelopes = [
+            ("0000abcd.00000002.01.01", 50, -0.15),
+            ("0000abcd.00000003.01.01", 20, -0.41),
+            ("0000abcd.00000004.01.01", 19, -0.41),
+            ("0000abcd.00000005.01.01", 11, -0.41),
+        ]
+        trades = [{
+            "id": 1,
+            "date": "2026-09-25",
+            "ticker": "SPCX",
+            "structure": "Long Stock (STK)",
+            "action": "BUY",
+            "fill_price": 149.0,
+            "shares": 1000,
+            "ib_exec_id": "0000abcd.00000001.02.01",
+        }]
+        for exec_id, qty, price in envelopes:
+            trades.append({
+                "id": len(trades) + 1,
+                "date": "2026-09-25",
+                "ticker": "SPCX",
+                "structure": "Long Spread (BAG)",
+                "action": "BUY_OPTION",
+                "fill_price": price,
+                "contracts": qty,
+                "right": "?",
+                "multiplier": 100.0,
+                "ib_exec_id": exec_id,
+            })
+        # Same fall-through when the envelope has no right at all.
+        trades.append({
+            "id": len(trades) + 1,
+            "date": "2026-09-25",
+            "ticker": "SPCX",
+            "structure": "Short Spread (BAG)",
+            "action": "SELL_TO_OPEN",
+            "fill_price": 0.2,
+            "contracts": 5,
+            "ib_exec_id": "0000aaaa.bbbbbbbb.01.01",
+        })
+        flex_assignment = _make_execution(
+            exec_id="1000000001",
+            symbol="SPCX",
+            sec_type=SecurityType.STOCK,
+            side=Side.BUY,
+            quantity=1000,
+            price=149.0,
+            when=day,
+        )
+        updated, imported, _skipped, _ = rehydrate_from_executions(
+            [flex_assignment], {"trades": trades}
+        )
+        assert imported == 0
+        assert len(updated["trades"]) == len(trades)
+        assert updated.get("aggregate_disagreements") == []
+
+    def test_real_extra_stock_shares_still_disagree_with_flex(self):
+        day = datetime(2026, 9, 25, 16, 0, 0)
+        existing = {"trades": [{
+            "id": 1,
+            "date": "2026-09-25",
+            "ticker": "SPCX",
+            "structure": "Long Stock (STK)",
+            "action": "BUY",
+            "fill_price": 149.0,
+            "shares": 1100,
+            "ib_exec_id": "0000abcd.00000001.02.01",
+        }]}
+        flex_assignment = _make_execution(
+            exec_id="1000000001",
+            symbol="SPCX",
+            sec_type=SecurityType.STOCK,
+            side=Side.BUY,
+            quantity=1000,
+            price=149.0,
+            when=day,
+        )
+        updated, imported, _skipped, _ = rehydrate_from_executions(
+            [flex_assignment], existing
+        )
+        assert imported == 0
+        [flag] = updated["aggregate_disagreements"]
+        assert flag["flex_qty"] == 1000
+        assert flag["fills_qty"] == 1100
 
     def test_proceeds_disagreement_is_flagged_not_booked(self):
         executions = [

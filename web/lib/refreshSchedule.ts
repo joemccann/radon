@@ -68,6 +68,9 @@ export const IV_SPREAD_REFRESH: RefreshSchedule = [daily(22, 15)];
 /** cloud/services/radon-ma-ratio.timer */
 export const MA_RATIO_REFRESH: RefreshSchedule = [daily(22, 45)];
 
+/** cloud/services/radon-rsi-oversold.timer */
+export const RSI_OVERSOLD_REFRESH: RefreshSchedule = [daily(23, 5)];
+
 /** cloud/services/radon-calm-streak.timer */
 export const CALM_STREAK_REFRESH: RefreshSchedule = [daily(2, 40), daily(14, 30)];
 
@@ -143,6 +146,9 @@ export const CREDIT_SPREAD_REFRESH: RefreshSchedule = [daily(21, 45)];
 
 /** cloud/services/radon-iei-hyg.timer */
 export const IEI_HYG_REFRESH: RefreshSchedule = [daily(21, 55)];
+
+/** cloud/services/radon-credit-vix.timer */
+export const CREDIT_VIX_REFRESH: RefreshSchedule = [daily(22, 25)];
 
 /** cloud/services/radon-trin.timer */
 export const TRIN_REFRESH: RefreshSchedule = [

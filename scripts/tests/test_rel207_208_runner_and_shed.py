@@ -47,38 +47,14 @@ class TestPathFilterCasefolds:
 
 
 class TestSetupInstallsDevRequirements:
-    @pytest.mark.parametrize(
-        "setup",
-        [
-            "setup_reliability_weekend.sh",
-            "setup_testing_weekend.sh",
-            "setup_security_nightly.sh",
-            "setup_documentation_nightly.sh",
-            "setup_ci_performance.sh",
-        ],
-    )
-    def test_the_loop_venv_gets_requirements_dev(self, setup):
-        """R-569: venv-reliability lacked pytest-asyncio — 17 async auth
-        tests false-red in this loop's own gate."""
-        body = "\n".join(
-            line for line in (SCRIPTS / setup).read_text().splitlines()
-            if not line.lstrip().startswith("#")
-        )
-        assert "requirements-dev.txt" in body, setup
-        assert "pytest_asyncio" in body or "pytest-asyncio" in body, (
-            f"{setup} does not assert the dev deps actually imported"
-        )
-
-    def test_the_runner_clone_gets_a_venv_link_for_the_kb_mcp(self):
-        body = "\n".join(
-            line
-            for line in (SCRIPTS / "setup_reliability_weekend.sh").read_text().splitlines()
-            if not line.lstrip().startswith("#")
-        )
-        assert re.search(r"ln -sfn? .*\.venv", body), (
-            ".mcp.json's radon-kb uses a relative .venv/bin/python; the "
-            "runner clone needs the link or the MCP fails ENOENT every boot"
-        )
+    @pytest.mark.parametrize("prompt", ["security.md", "security-deepsec.md"])
+    def test_the_loop_venv_gets_requirements_dev(self, prompt):
+        """R-569: a loop venv lacked pytest-asyncio — 17 async auth tests
+        false-red in the loop's own gate. The runner loops build their venv
+        from the prompt; the security pre-run hook keeps .venv/ between phases."""
+        body = (REPO / ".claude" / "runner-prompts" / prompt).read_text()
+        assert "requirements-dev.txt" in body, prompt
+        assert "pytest_asyncio" in body, f"{prompt} does not check the dev deps actually imported"
 
 
 class TestCapacityShedContract:

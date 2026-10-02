@@ -41,9 +41,10 @@
 .reviewButton:hover, .showAll:hover, .inspectButton:hover, .headerActions button:hover { background: var(--bg-panel-raised); }
 .primaryButton:hover { background: var(--signal-strong, var(--signal-core)); }
 .reviewButton:disabled { cursor: default; opacity: 0.55; }
-.primaryActions { margin-top: var(--space-5); }
+.primaryActions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); margin-top: var(--space-5); }
 .primaryActions :global(.admin-btn) { min-height: var(--touch-min); }
-.primaryActions :global(.admin-card-note) { padding: 0; margin: var(--space-2) 0 0; font-size: var(--text-meta); }
+/* The disabled reason reads as a quiet hint beside the button, not a warning panel. */
+.primaryActions :global(.admin-card-note) { flex: 1 1 16rem; min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; color: var(--text-muted); font-size: var(--text-meta); line-height: 1.5; text-wrap: pretty; }
 .showAll { margin-top: var(--space-4); width: 100%; }
 .empty { padding: var(--space-5); background: var(--bg-subtle); border: 1px solid var(--line-grid); border-radius: var(--radius); }
 .empty h3 { margin: var(--space-3) 0 var(--space-2); font-size: var(--text-panel-title); line-height: 1.4; font-weight: 550; }

@@ -6,7 +6,7 @@
  * VOLUME / HIGH LOW DAY — for a single leg AND for the combo net quote — while
  * keeping the BID/MID/ASK quick-fill buttons that set the limit price.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import PositionTradeTicket from "@/components/ticker-detail/PositionTradeTicket";
 import { legPriceKey } from "@/lib/positionUtils";
@@ -199,5 +199,26 @@ describe("PositionTradeTicket quote telemetry", () => {
     expect(limit.value).toBe("40.50");
     fireEvent.click(screen.getByRole("button", { name: /^ASK/ }));
     expect(limit.value).toBe("41.50");
+  });
+});
+
+describe("PositionTradeTicket close control", () => {
+  it("is an icon-only close with no esc hint text, and still closes the ticket", () => {
+    const position = riskReversal();
+    const onClose = vi.fn();
+    const { container } = render(
+      <PositionTradeTicket
+        position={position}
+        prices={pricesFor(position)}
+        portfolio={null}
+        target={{ kind: "combo" }}
+        onClose={onClose}
+      />,
+    );
+    const close = screen.getByRole("button", { name: "Cancel trade" });
+    expect(close.textContent ?? "").not.toMatch(/esc/i);
+    expect(container.querySelector(".position-trade-head")?.textContent ?? "").not.toMatch(/\besc\b/i);
+    fireEvent.click(close);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

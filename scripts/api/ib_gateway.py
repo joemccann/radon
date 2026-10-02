@@ -1368,6 +1368,18 @@ def _derive_auth_state(check_result: Dict, pool_status: Optional[dict]) -> str:
     return "awaiting_2fa"
 
 
+async def _operator_hold() -> Optional[Dict]:
+    """The IBKR operator hold for /health, or None when unknown. Never raises:
+    a status surface must not fail on its own decoration."""
+    from api import services  # lazy: services imports nothing from here
+
+    try:
+        return await services.operator_hold_state()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("operator hold state unavailable: %s", exc)
+        return None
+
+
 async def check_ib_gateway(
     pool_status: Optional[dict] = None,
     pool=None,
@@ -1393,6 +1405,7 @@ async def check_ib_gateway(
         # local lock file is never held by its helper. Proxy the broker's
         # lease / transition so Force 2FA and Start disarm during a push.
         await _overlay_broker_push_lock(result["restart_backoff"])
+        result["operator_hold"] = await _operator_hold()
         if not result.get("port_listening") or result.get("upstream_dead"):
             result["auth_state"] = "unreachable"
         elif pool_status:
@@ -1420,6 +1433,7 @@ async def check_ib_gateway(
 
     result["auth_state"] = _derive_auth_state(result, pool_status)
     result["restart_backoff"] = await asyncio.to_thread(restart_backoff_state)
+    result["operator_hold"] = await _operator_hold()
 
     if pool is not None:
         await handle_auth_state_transition(result["auth_state"], pool)

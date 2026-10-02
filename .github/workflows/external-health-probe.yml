@@ -21,7 +21,7 @@ name: Tier-3 external health probe
 # closes the DUR-04 "records the outage but notifies no human" residual.
 
 on:
-  # TURSO_DB_URL + TURSO_AUTH_TOKEN repo secrets are configured (verified by a
+  # TURSO_DB_URL + TURSO_AUTH_TOKEN (environment health-probe) are configured (verified by a
   # manual smoke run landing a row in external_probe).
   schedule:
     # Every 5 min is GitHub's minimum cron granularity, but dispatch is
@@ -47,6 +47,14 @@ permissions:
 jobs:
   probe:
     name: probe public edge -> Turso
+    # Holds production secrets and is dispatchable, so it runs only from main
+    # (schedule runs on main; the Mac mini dispatches with --ref main). A
+    # dispatch on any other ref would hand the secrets to that branch's code
+    # (F20260930-A01).
+    if: github.ref == 'refs/heads/main'
+    # Secrets come from a GitHub Environment whose deployment branch policy is
+    # main only, so a branch cut from an older, unguarded commit gets none.
+    environment: health-probe
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:

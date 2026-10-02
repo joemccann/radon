@@ -353,7 +353,15 @@ async def run_script(
                 f"Script exited with code {proc.returncode}",
             )
             logger.warning("Script %s failed (code %d): %s", script, proc.returncode, err_msg)
-            return ScriptResult(ok=False, error=err_msg, exit_code=proc.returncode)
+            # REL-021b / R-024: order-management rejects exit nonzero.
+            # Retain their structured context without promoting a failed
+            # process to success or replacing the existing error string.
+            try:
+                payload = _extract_json_payload(stdout)
+            except json.JSONDecodeError:
+                payload = None
+            detail = payload if isinstance(payload, dict) and payload.get("status") == "error" else None
+            return ScriptResult(ok=False, data=detail, error=err_msg, exit_code=proc.returncode)
 
         # Extract JSON from stdout (scripts may print progress before JSON).
         # `_extract_json_payload` walks lines in reverse and picks the LAST

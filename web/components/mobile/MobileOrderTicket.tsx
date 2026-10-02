@@ -727,6 +727,7 @@ export default function MobileOrderTicket({
             total={gateRiskState?.summary.totalCost ?? null}
             totalLabel={gateRiskState?.summary.totalLabel ?? "TOTAL"}
             isCredit={netPremiumForPayoff(payoffLegs, legs.length > 1, signedLimitPrice) < 0}
+            withHeldLegs={gateRiskState?.summary.withHeldLegs ?? null}
           />
 
           {/* Full risk summary — the single OrderRiskGate chokepoint. */}
@@ -1007,6 +1008,7 @@ export default function MobileOrderTicket({
                 total={gateRiskState?.summary.totalCost ?? null}
                 totalLabel={gateRiskState?.summary.totalLabel ?? "TOTAL"}
                 isCredit={netPremiumForPayoff(payoffLegs, legs.length > 1, signedLimitPrice) < 0}
+                withHeldLegs={gateRiskState?.summary.withHeldLegs ?? null}
               />
             </div>
           )}

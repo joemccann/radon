@@ -7,10 +7,12 @@ subscription. This diffs every ANTHROPIC_* / CLAUDE_CODE_* / AWS_BEARER_* name
 in the installed binary against scripts/claude_cli_env_reviewed.txt.
 
 Exit 0: nothing new. Exit 1: unreviewed names (printed). With --notify, one
-Pushover per CLI version. Review each name in context (see
-docs/security-approved-tools.md), add reroutes to BILLING_REROUTE_KEYS /
-BILLING_REROUTE_FLAGS in every loop wrapper, then append all of them to the
-reviewed list. Stdlib only.
+Pushover per CLI version. The security loops' root-owned pre-run hook
+(scripts/runner/hooks/security_pre.sh) runs the installed copy before every
+phase with --reviewed and --state-dir pointing at its own files. Review each
+name in context (see docs/security-approved-tools.md), add reroutes to
+AGENT_UNSET in scripts/runner/loops/security.env and security-deepsec.env,
+then append all of them to the reviewed list. Stdlib only.
 """
 
 from __future__ import annotations

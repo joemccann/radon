@@ -2,7 +2,7 @@
 import ErrorToast from "@/components/ErrorToast";
 
 import { userErrorMessage } from "@/lib/userError";
-import { useCallback, useMemo, useState } from "react";
+import { type UIEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useCatalysts } from "@/lib/useCatalysts";
 import {
@@ -19,6 +19,27 @@ type Props = {
 
 /** Rows shown before a category has to be expanded in full. */
 const PREVIEW_ROWS = 6;
+
+/** How long the scrollbar stays visible after the last scroll event. */
+const SCROLL_IDLE_MS = 900;
+
+/**
+ * Overlay-style scrollbar: the CSS hides the thumb unless the list is hovered
+ * or carries `is-scrolling`. The class is toggled on the element directly so a
+ * scroll never re-renders the rows.
+ */
+function useScrollActivity() {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+  return useCallback((event: UIEvent<HTMLDivElement>) => {
+    const el = event.currentTarget;
+    el.classList.add("is-scrolling");
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => el.classList.remove("is-scrolling"), SCROLL_IDLE_MS);
+  }, []);
+}
 
 function formatUpdated(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -76,6 +97,7 @@ function CategorySection({
 }) {
   const total = category.rows.length;
   const visible = isExpanded ? category.rows : category.rows.slice(0, PREVIEW_ROWS);
+  const onScroll = useScrollActivity();
 
   return (
     <div className="catalyst-group">
@@ -98,7 +120,10 @@ function CategorySection({
 
       {isOpen ? (
         <>
-          <div className={`catalyst-group__rows${isExpanded ? " catalyst-group__rows--scroll" : ""}`}>
+          <div
+            className={`catalyst-group__rows${isExpanded ? " catalyst-group__rows--scroll" : ""}`}
+            onScroll={isExpanded ? onScroll : undefined}
+          >
             {visible.map((row) => (
               <CatalystRowLine key={rowKey(row)} row={row} showFlag={category.heldCount > 0} />
             ))}

@@ -31,6 +31,7 @@ fi
 # provisioned by setup-vps rather than the app venv swapped during deploys.
 LOCK_PYTHON="${RADON_LOCK_PYTHON:-/usr/bin/python3.13}"
 LOCK_CLI="${APP_DIR}/scripts/utils/ib_2fa_lock.py"
+HOLD_CLI="${APP_DIR}/scripts/utils/ib_operator_hold.py"
 # The helper stays radon (the lease and guard files under /var/lib/radon must
 # keep their ownership), but radon is no longer in group `docker` -- that group
 # is root-equivalent. The two docker calls below go through the root shim,
@@ -53,6 +54,7 @@ LOCK_HOLDER="radon-cloud.ib-gateway-control"
 WATCHDOG_HOLDER="scripts.ib_watchdog.trigger_restart"
 CONTAINER_NAME="ib-gateway"
 LEASE_HELD_RC=75
+OPERATOR_HOLD_RC=73
 CONTROL_BUSY_RC=74
 for timeout_value in \
   "$CONTROL_LOCK_WAIT_SECS" "$DOCKER_MUTATION_TIMEOUT_SECS" \
@@ -445,6 +447,22 @@ refuse_app_role_mutation() {
   return 0
 }
 
+# `radon ib release` keeps the Gateway logged out of the IBKR username the
+# operator shares with it. Checked inside the lifecycle mutex so a release
+# racing a start cannot lose. A missing reader is a hold, never a login.
+refuse_while_operator_hold() {
+  local output
+  if [[ ! -x "$LOCK_PYTHON" || ! -f "$HOLD_CLI" ]]; then
+    echo "REFUSING Gateway login: operator hold reader unavailable" >&2
+    exit "$OPERATOR_HOLD_RC"
+  fi
+  if output=$("$LOCK_PYTHON" "$HOLD_CLI" status 2>&1); then
+    return 0
+  fi
+  echo "REFUSING Gateway login: IBKR operator hold active (radon ib resume clears it): $output" >&2
+  exit "$OPERATOR_HOLD_RC"
+}
+
 start_gateway() {
   refuse_app_role_mutation || return 1
   reconcile_pending_transition
@@ -517,6 +535,7 @@ case "${1:-}" in
     # mutex so an overlapping stop cannot invalidate the observation. Acquire
     # the deploy lock only when Docker will actually be mutated.
     acquire_lifecycle_mutex "$@"
+    refuse_while_operator_hold
     if [[ -e "$TRANSITION_PATH" ]]; then
       acquire_deploy_lock "$@"
       reconcile_pending_transition
@@ -531,11 +550,18 @@ case "${1:-}" in
   restart)
     acquire_deploy_lock "$@"
     acquire_lifecycle_mutex "$@"
+    refuse_while_operator_hold
     restart_gateway
     ;;
   restart-preheld)
     acquire_deploy_lock "$@"
     acquire_lifecycle_mutex "$@"
+    if ! (refuse_while_operator_hold); then
+      # The watchdog took the lease for this restart; refusing without
+      # releasing it would lock every Gateway control out for its TTL.
+      release_any_lease
+      exit "$OPERATOR_HOLD_RC"
+    fi
     restart_gateway_preheld "${2:-}"
     ;;
   stop)
