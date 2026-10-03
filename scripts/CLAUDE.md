@@ -193,3 +193,5 @@ preflight and before wire admission. Corrupt halt state refuses both. Modificati
 refusal precedes field mutation; cancellation stays available during a halt.
 Bracket legs pass through the same placement check individually. All tests use
 temporary halt files and fake broker calls.
+
+CI cross-tree contracts (REL-108 / R-315 / R-316): changes to the shared OG theme or CTA image admission run their offline Python acceptance modules even for web-only PRs. The brand tree also arms Python because the export theme acceptance reads the maintained accessibility kit. Keep `scripts/ci/path_filter.py` and its tree-derived routing tests in sync when adding cross-tree readers.

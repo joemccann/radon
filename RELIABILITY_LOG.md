@@ -917,3 +917,7 @@ Publication restriction: GitHub rejected the initial branch push solely because 
 Closing local verification (2026-10-03): permanent drills 95 passed; standing safety/catalog sweeps 92 passed; final image/brand/docs suite 103 passed; docs/deploy suite 123 passed, including upstream R-303's parsed comment contract. API/hold/control 77 passed, halt/client/funnel 148 passed, research/pipeline/runtime/park/docs 225 passed. Report faults and CTA band faults passed production-browser checks; real Satori export render passed visual review. Full pytest, full cloud/tests, Vitest and order-idempotency-durability remain PR CI work. No live-system access, production credential access or production halt mutation occurred.
 
 Final browser gate: 7 passed, covering all added share, CTA percentile and OG render cases against the production build. Production build/type checks and all 219 output traces passed. Secret scan: seven source commits, zero findings. No changed YAML/JSON/TOML/shell paths require syntax parsing.
+
+REL-108 closing CI repair: the new brand acceptance reader exposed a missing Python gate mapping (CI: 1 failed / 1945 passed; serial local: 1 failed / 41 passed). Two explicit web-only acceptance-selection faults also failed. Route brand edits to Python and both image/theme edits to their focused offline contracts; no gate or assertion is weakened.
+
+CI routing repair GREEN: 147 focused path-filter/image/brand/docs tests passed. Brand edits arm Python; web-only OG/CTA image edits select their respective offline acceptance modules.
