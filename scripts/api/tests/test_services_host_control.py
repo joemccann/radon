@@ -288,3 +288,38 @@ class TestRoutes:
         assert resp.status_code == 200
         assert seen == {"actor": "local"}
         assert any("unit=radon-stack" in r.getMessage() for r in caplog.records)
+
+
+class TestAppRoleGatewayRow:
+    """The app host has no Gateway unit; its row must always come from the broker."""
+
+    def test_broker_row_replaces_a_stale_local_gateway_row(self, no_systemctl, monkeypatch, tmp_path):
+        ghost = {
+            "Id": "radon-ib-gateway.service",
+            "LoadState": "not-found",
+            "ActiveState": "inactive",
+            "SubState": "dead",
+            "allowed_actions": [],
+        }
+        fake = _FakeHostControl({"status": {"ok": True, "units": [*_CONTROL_ROWS, ghost]}})
+        monkeypatch.setattr(host_control, "acall", fake)
+        monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        for name in ("ca.pem", "client.pem", "client.key"):
+            (tmp_path / name).write_text("x")
+        monkeypatch.setenv("RADON_IB_REMOTE_URL", "https://10.0.0.4:8340")
+        monkeypatch.setenv("RADON_IB_REMOTE_CA", str(tmp_path / "ca.pem"))
+        monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_CERT", str(tmp_path / "client.pem"))
+        monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_KEY", str(tmp_path / "client.key"))
+        admin_services._reset_remote_status_cache()
+        monkeypatch.setattr(
+            admin_services, "_remote_http",
+            lambda verb, timeout, body=None: (200, {"ok": True, "state": "running", "detail": "running"}),
+        )
+
+        snap = asyncio.run(admin_services.services_snapshot())
+
+        gateway_rows = [u for u in snap["units"] if u["unit"] == admin_services.GATEWAY_UNIT]
+        assert len(gateway_rows) == 1
+        assert gateway_rows[0]["load_state"] == "remote"
+        assert gateway_rows[0]["active_state"] == "active"
+        assert gateway_rows[0]["can_control"] is True
