@@ -5195,6 +5195,56 @@ async def options_expirations(symbol: str):
     return expirations_from_snapshot(snapshot)
 
 
+# Connect + qualify + secdef (each IB_REQUEST_TIMEOUT_S) plus batched snapshots.
+_IB_OPTION_QUOTES_TIMEOUT_S = 60.0
+_IB_OPTION_QUOTES_MAX_EXPIRIES = 12
+_IB_QUOTES_SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.]{0,9}$")
+_IB_QUOTES_EXPIRY_RE = re.compile(r"^\d{4}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$")
+
+
+@app.get("/options/ib-quotes")
+async def options_ib_quotes(
+    symbol: str,
+    expiries: str,
+    right: Optional[str] = None,
+    wings: int = Query(default=8, ge=1, le=20),
+):
+    """IB snapshot bid/ask/IV/greeks around spot for one or more expiries."""
+    ticker = symbol.strip().upper()
+    if not _IB_QUOTES_SYMBOL_RE.fullmatch(ticker):
+        raise HTTPException(status_code=400, detail="Invalid symbol")
+    parsed = [e.strip().replace("-", "") for e in expiries.split(",") if e.strip()]
+    if not parsed or len(parsed) > _IB_OPTION_QUOTES_MAX_EXPIRIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"expiries must list 1-{_IB_OPTION_QUOTES_MAX_EXPIRIES} dates",
+        )
+    if not all(_IB_QUOTES_EXPIRY_RE.fullmatch(e) for e in parsed):
+        raise HTTPException(status_code=400, detail="expiries must be YYYYMMDD or YYYY-MM-DD")
+    args = ["--symbol", ticker, "--expiries", ",".join(parsed), "--wings", str(wings)]
+    if right is not None and right.strip():
+        side = right.strip().upper()
+        if side not in {"C", "P"}:
+            raise HTTPException(status_code=400, detail="right must be C or P")
+        args += ["--right", side]
+
+    result = await _run_ib_script_with_recovery(
+        "ib_option_quotes.py", args, timeout=_IB_OPTION_QUOTES_TIMEOUT_S
+    )
+    if not result.ok:
+        raise HTTPException(
+            status_code=_options_chain_failure_status(result.error),
+            detail=result.error or "IB option quotes unavailable",
+        )
+    data = result.data or {}
+    if data.get("error"):
+        raise HTTPException(
+            status_code=_options_chain_failure_status(str(data["error"])),
+            detail=str(data["error"]),
+        )
+    return data
+
+
 _OPTIONS_EXPOSURE_SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
 _OPTIONS_EXPOSURE_FREQUENCIES = {"eod", "intraday"}
 
