@@ -622,3 +622,23 @@ test.describe("report share reliability", () => {
     });
   }
 });
+
+/** REL-108 / R-318: the bond callout describes the measured band. */
+test.describe("CTA bond percentile reliability", () => {
+  for (const [label, percentiles] of [["boundary", [0, 10]], ["interior", [8, 9]]] as const) {
+    test(`${label} values describe the band instead of inventing an exact percentile`, async ({page}, testInfo) => {
+      await stubReliabilityCta(page, [...percentiles]);
+      await page.goto("/cta");
+      await expect(page.getByText("2 bond contracts at or below 10th pctile, full duration short.", {exact: false})).toBeVisible();
+      await expect(page.getByText(/bond contracts at 0th pctile/)).toHaveCount(0);
+      await page.getByText("2 bond contracts at or below 10th pctile, full duration short.", {exact: false}).scrollIntoViewIfNeeded();
+      await page.screenshot({path: testInfo.outputPath(`cta-bond-${label}.png`)});
+    });
+  }
+  test("values above the band do not count as extreme shorts", async ({page}) => {
+    await stubReliabilityCta(page, [11, 9]);
+    await page.goto("/cta");
+    await expect(page.getByRole("cell", {name: "Treasury 1", exact: true})).toBeVisible();
+    await expect(page.getByText(/bond contracts at/)).toHaveCount(0);
+  });
+});
