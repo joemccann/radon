@@ -562,3 +562,63 @@ test.describe("Share PnL signed combo basis", () => {
     expect(params.get("exitPrice")).toBe("5.08");
   });
 });
+
+// REL-108 / R-317: the common report-share owner must recover from transport faults.
+import { stubReliabilityCta } from "./fixtures/reliability-cta";
+
+test.describe("report share reliability", () => {
+  test("HTML failure reports the service outage and releases sharing", async ({page}, testInfo) => {
+    await stubReliabilityCta(page);
+    const requests: {url: string; method: string; body: string | null}[] = [];
+    await page.route("**/api/menthorq/cta/share", route => {
+      requests.push({url: new URL(route.request().url()).pathname,
+        method: route.request().method(), body: route.request().postData()});
+      return route.fulfill({status: 502, contentType: "text/html", body: "<html>upstream unavailable</html>"});
+    });
+    await page.goto("/cta");
+    const share = page.getByRole("button", {name: "Share to X", exact: true});
+    await share.click();
+    await expect(page.getByRole("alert").filter({hasText: "This service is temporarily unavailable"})).toBeVisible();
+    await expect(share).toBeEnabled();
+    expect(requests).toEqual([{url: "/api/menthorq/cta/share", method: "POST", body: null}]);
+    await page.screenshot({path: testInfo.outputPath("report-share-outage.png")});
+  });
+
+  for (const phase of ["generation", "content"]) {
+    test(`hung ${phase} is bounded and a recovered request succeeds`, async ({page}, testInfo) => {
+      await stubReliabilityCta(page);
+      await page.clock.install();
+      const requests: string[] = [];
+      let recover = false;
+      await page.route("**/api/menthorq/cta/share", async route => {
+        requests.push(`${route.request().method()} ${new URL(route.request().url()).pathname}`);
+        if (phase === "generation" && !recover) return;
+        await route.fulfill({json: {preview_path: "/reports/mock-preview.html"}});
+      });
+      await page.route("**/api/menthorq/cta/share/content?*", async route => {
+        const url = new URL(route.request().url());
+        requests.push(`${route.request().method()} ${url.pathname}${url.search}`);
+        if (phase === "content" && !recover) return;
+        await route.fulfill({contentType: "text/html", body: "<html><body>Mock report preview</body></html>"});
+      });
+      await page.goto("/cta");
+      const share = page.getByRole("button", {name: "Share to X", exact: true});
+      await share.click();
+      await expect(page.getByRole("button", {name: "Generating…"})).toBeDisabled();
+      if (phase === "content") await expect.poll(() => requests.length).toBe(2);
+      await page.clock.fastForward(30_001);
+      await expect(share).toBeEnabled();
+      await expect(page.getByRole("alert").filter({hasText: "share request took too long"})).toBeVisible();
+      const initial = ["POST /api/menthorq/cta/share"];
+      const content = "GET /api/menthorq/cta/share/content?path=%2Freports%2Fmock-preview.html";
+      if (phase === "content") initial.push(content);
+      expect(requests).toEqual(initial);
+      recover = true;
+      await share.click();
+      await expect(page.getByRole("dialog", {name: "CTA Share Preview"})).toBeVisible();
+      expect(requests).toEqual([...initial, "POST /api/menthorq/cta/share", content]);
+      await expect(share).toBeEnabled();
+      await page.screenshot({path: testInfo.outputPath(`report-share-${phase}-recovered.png`)});
+    });
+  }
+});
