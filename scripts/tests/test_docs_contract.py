@@ -1442,6 +1442,23 @@ class TestSubscriptionRecoveryBillingOwner:
         assert "LoadCredentialEncrypted=radon-secret-store-key:" in unit
         assert "-m scripts.subscription_tokens --once" in unit
 
+
+class TestApiTimerOwner:
+    """DOC-157: API instructions should link schedules instead of copying them."""
+
+    def test_api_timer_instructions_defer_to_operator_and_executable_owners(self):
+        timers = _section((_ROOT / "scripts/api/CLAUDE.md").read_text(), "Autonomous Timers (Hetzner)")
+        assert "| Timer |" not in timers
+        assert "radon-cloud/services/" not in timers
+        assert "../../docs/operations.md#background-services" in timers
+        assert "../../cloud/services/" in timers
+        assert "literal env" in timers
+        ops = (_ROOT / "docs/operations.md").read_text()
+        row = next(line for line in ops.splitlines() if line.startswith("| `radon-refresh.timer` |"))
+        assert "../cloud/services/radon-refresh.timer" in row
+        assert "60s" not in row
+
+
 class TestCredentialSetupOwners:
     """DOC-150/151: setup instructions must select the implemented auth path."""
 
