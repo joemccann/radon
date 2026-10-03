@@ -1390,6 +1390,24 @@ class TestOperatorHoldDesignBoundary:
         for label in ("Symptom", "Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verification", "Rollback", "Escalation"):
             assert f"**{label}:**" in procedure
 
+
+class TestIncidentPublicationOwner:
+    """DOC-155: recovery guidance follows the gate's expanded detectors."""
+
+    def test_pickup_owner_covers_generic_and_environment_credential_refusals(self):
+        procedure = _section((_ROOT / "docs/grok-page-responder.md").read_text(),
+                             "Open-PR path: the Mac mini picks the branch up")
+        for required in ("opaque literal", "credential-named", "verbatim", "pickup process",
+                         "../scripts/ir_push_gate.py", "../scripts/credential_redaction.py"):
+            assert required in procedure, required
+        for label in ("Symptom", "Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verification", "Rollback", "Escalation"):
+            assert f"**{label}:**" in procedure
+
+    def test_publication_gate_changes_reach_the_recovery_owner(self):
+        rules = _load_owners()["rules"]
+        assert _violations(["scripts/ir_push_gate.py"], rules)
+        assert _violations(["scripts/ir_push_gate.py", "docs/grok-page-responder.md"], rules) == []
+
 class TestCredentialSetupOwners:
     """DOC-150/151: setup instructions must select the implemented auth path."""
 
