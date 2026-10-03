@@ -2077,15 +2077,18 @@ async def health_lite():
             HEALTH_LITE_GATEWAY_PROBE_TIMEOUT_SECS,
         )
         gw = {}
+    # REL-303 / R-722: only observed booleans confirm a hold or release.
+    # Broker status loss and probe timeout must remain unknown to the relay.
+    hold = gw.get("operator_hold")
+    held = hold.get("held") if isinstance(hold, dict) else None
     return {
         "status": "ok",
         "auth_state": gw.get("auth_state", "unknown"),
         "service_state": gw.get("service_state", "unknown"),
         "upstream_dead": gw.get("upstream_dead", False),
         "port_listening": gw.get("port_listening", False),
-        # Coarse: held or not. Lets the relay and health daemon read a down
-        # Gateway as the operator's hold, not an outage.
-        "operator_hold": bool((gw.get("operator_hold") or {}).get("held")),
+        # Account-free three-valued observation: true, false, or unknown.
+        "operator_hold": held if type(held) is bool else None,
         "loop_lag_ms": round(loop_lag_ms, 3),
     }
 

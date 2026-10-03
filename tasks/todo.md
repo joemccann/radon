@@ -8822,3 +8822,17 @@ Three verified findings have red/green evidence. All nine closing gates pass, an
 Review: delta and direct importers audited; four new and five inherited repairs have red/green evidence. R-303 is operator-only after GitHub rejected workflow publication. Permanent drills 95 passed. No live systems, credentials, main push, merge, codemap changes or test-ledger edits. Publication/CI and the one durable issue comment remain tracked by T4/T5; final receipts belong on issue #81.
 
 Delivery review: draft https://github.com/joemccann/radon/pull/866; source head `22e88dfc454d7f2246493948af46d43fe310887b` completed all 24 required contexts, 32 passing checks total and seven non-applicable skips. Exactly one durable comment posted: https://github.com/joemccann/radon/issues/81#issuecomment-5947930686. Nine repairs resolved; 20 historical candidates retain acceptance. R-303 workflow publication and Pushover delivery remain operator-only; notification credentials were absent on both environment-only checks. No merge or live operation occurred. This receipt changes only the checklist; its own exact-head CI is watched before ending the session.
+
+## Reliability nightly 2026-10-03
+
+- [x] T1 depends_on: [] — isolated Python toolchain; trusted checkpoint and open PR inventory.
+- [x] T2 depends_on: [T1] — audit delta plus codemap callers, standing safety sweeps and inherited candidates; 18 commits / 220 scoped paths; 92 standing passes.
+- [x] T3 depends_on: [T2] — fault-injection red/green repairs, focused gates and per-finding commits.
+- [x] T4 depends_on: [T3] — permanent drills, substantive publication and exact-head green draft PR.
+- [x] T5 depends_on: [T4] — single rolling checkpoint comment and closing review.
+
+### Review 2026-10-03
+
+Three new regressions and four inherited repairs have repeated red/green evidence. R-303's already merged correction passes the actual parsed acceptance test. Standing safety/catalog checks and 95 permanent drills pass. Fifteen historical candidates/operator tasks retain acceptance on issue #81. No live-system operation, secret lookup, main push, merge, generated codemap change or test-ledger edit occurred. T4/T5 external delivery receipts will be recorded in the single durable issue comment after exact-head CI.
+
+Delivery review: draft https://github.com/joemccann/radon/pull/882; source-verification head `bcfd8b8c8a64656cbfb16c99f634f426234b7c53` completed all 24 required contexts, 32 applicable checks and seven non-applicable skips. Exactly one rolling comment posted: https://github.com/joemccann/radon/issues/81#issuecomment-5966924908. Seven source repairs resolved; fifteen inherited candidates/operator tasks retain acceptance. Final checklist receipt changes only this file and its exact-head CI is watched before ending the session. The runner owns notifications; no notification or live-system action was performed.
