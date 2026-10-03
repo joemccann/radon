@@ -11,6 +11,7 @@ const LABELS: Record<string, string> = {
   DOC_TYPE_FX_PAIR_NOTE: "Document type: FX pair note",
   DOC_TYPE_CALENDAR: "Document type: calendar",
   HELD_EXPIRED: "Hold expired",
+  ALWAYS_PUBLISH_FALLBACK: "Always-publish fallback summary",
 };
 
 export function reasonCodeLabel(code: string): string {
