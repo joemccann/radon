@@ -20,8 +20,9 @@ The three fixes these tests pin down:
      doubling, 1h cap) with a hard cap of 3 without an intervening
      recovery to ``authenticated``; past the cap it alerts and stands down.
      Attempt state persists in the state file (oneshot process model).
-  3. IBC AutoRestartTime is disabled entirely because it cannot acquire the
-     shared lease. The only default quiet window covers server-session rollover.
+  3. IBC AutoRestartTime moved off 09:05 UTC. (2026-10-03: blank kept the
+     Gateway's stored 23:45 UTC cycle as a nightly full login, so it is now
+     pinned to 11:45 PM UTC, inside the only default quiet window.)
 """
 
 from __future__ import annotations
