@@ -2908,3 +2908,11 @@ REL-108 / R-303 is operator-only: the prepared comment correction and parsed-wor
 REL-298 closing bound: four additional faults failed twice with 48 unknown inspections per release; the repaired three-valued probe performs one unknown observation per shutdown stage while retaining convergence polling for confirmed-running containers. Release/shim suites: 57 passed. No RELEASED claim is made without stopped/missing evidence.
 
 Audited through: cb47c52ab055221fd7d88ead72ff28acb554e7d7 on 2026-10-02 — 4 new findings
+
+## Delta audit 2026-10-03
+
+Audit anchor: trusted collaborator checkpoint `cb47c52ab055221fd7d88ead72ff28acb554e7d7`; audited main `15bdb9a4bb09a3bae00fae7e6c4d3b9f8e838489`. Delta: 18 commits, 117 changed paths, 220 paths including direct codemap importers. No open reliability PR reserves findings at startup.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-722 | P1 | `scripts/api/server.py:2078-2095`; `scripts/api/ib_gateway.py:1371-1381`; `scripts/ib_realtime_server.js:826-838` | DONE (REL-303): unknown broker hold or passive-probe failure became false on health/lite, clearing a previously latched relay hold. Five isolated faults failed twice; the API-to-real-relay fault also failed. Only observed bools now confirm a hold/release; unknown remains null and retains relay hold. Focused API/hold/control tests: 77 passed. Acceptance: held → broker status unknown → explicit release produces relay hold states true → true → false; no account/actor details leak. |
