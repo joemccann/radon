@@ -1378,6 +1378,17 @@ class TestOperatorHoldDesignBoundary:
             assert flag in preface
         assert "Do not execute the proposed procedures below" in preface
 
+    def test_mobile_flatten_waits_for_confirmed_release_and_persisted_hold(self):
+        doc = (_ROOT / "docs/ib-gateway-recovery.md").read_text()
+        procedure = _section(doc, "Runbook: flatten from IBKR Mobile while the app is down")
+        release_step = next(line for line in procedure.splitlines() if line.startswith("1. "))
+        for required in ("exit status 0", "`RELEASED`", "`radon ib status`", '"held": true'):
+            assert required in release_step, required
+        for required in ("HOLD NOT WRITTEN", "state unknown", "do not clear", "before reboot"):
+            assert required in procedure, required
+        assert "does not set a trading halt" in procedure
+        for label in ("Symptom", "Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verification", "Rollback", "Escalation"):
+            assert f"**{label}:**" in procedure
 
 class TestCredentialSetupOwners:
     """DOC-150/151: setup instructions must select the implemented auth path."""
