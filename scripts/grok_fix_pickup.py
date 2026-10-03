@@ -436,7 +436,15 @@ def pickup_once(
 # launchd gives pickup only HOME, PATH and GROK_PAGE_AUTOPUSH. These are the
 # credentials pickup itself uses: Pushover for refusal alerts and Turso for the
 # watchdog_pages lookup. Nothing else is read from the operator's .env.
-OPERATOR_ENV_KEYS = ("PUSHOVER_USER", "PUSHOVER_TOKEN", "TURSO_DB_URL", "TURSO_AUTH_TOKEN")
+# The Turso token is pickup's own read-only one, read under its own name and
+# exported as TURSO_AUTH_TOKEN; the operator's TURSO_AUTH_TOKEN is never read
+# (DS-2026-09-23-03).
+OPERATOR_ENV_KEYS = {
+    "PUSHOVER_USER": "PUSHOVER_USER",
+    "PUSHOVER_TOKEN": "PUSHOVER_TOKEN",
+    "TURSO_DB_URL": "TURSO_DB_URL",
+    "GROK_PICKUP_TURSO_AUTH_TOKEN": "TURSO_AUTH_TOKEN",
+}
 
 
 def load_operator_env(path: Path) -> list[str]:
@@ -469,7 +477,7 @@ def load_operator_env(path: Path) -> list[str]:
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
         if value:
-            found[key] = value
+            found[OPERATOR_ENV_KEYS[key]] = value
     loaded = []
     for key, value in found.items():
         if not os.environ.get(key):
