@@ -185,3 +185,11 @@ The relay prunes expired contract closes at startup and on the first cache
 access/write of each Eastern day, then persists the reduced cache. Today's
 expiry remains available through the session. Late ticks cannot resurrect
 expired keys; expiry comparison uses Eastern dates, not the host timezone.
+
+## Final broker halt admission (REL-304 / R-723)
+
+`IBClient.place_order` and `modify_order` recheck the trading halt after caller
+preflight and before wire admission. Corrupt halt state refuses both. Modification
+refusal precedes field mutation; cancellation stays available during a halt.
+Bracket legs pass through the same placement check individually. All tests use
+temporary halt files and fake broker calls.
