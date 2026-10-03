@@ -1022,7 +1022,9 @@ def test_run_newsfeed_mounts_host_playwright_browsers(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
     state_dir = tmp_path / "state"
-    assert f"{state_dir / 'ms-playwright'}:/ms-playwright" in log, log
+    # Read-only: host radon processes launch the same cached browsers, so the
+    # third-party-content container must not be able to rewrite them.
+    assert f"{state_dir / 'ms-playwright'}:/ms-playwright:ro" in log, log
     assert "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright" in log
     assert f"{tmp_path / 'data' / 'newsfeed-scripts'}:/home/radon/radon/scripts/newsfeed:ro" in log, log
 

@@ -859,6 +859,8 @@ cmd_run() {
     # chromium_headless_shell-1217 there. Host deploy already caches that
     # revision at radon's ms-playwright dir. Bind it onto /ms-playwright so
     # this unit can launch without waiting for a new GHCR tag (R-234).
+    # Read-only: host radon processes launch the same cache, so the
+    # third-party-content container must not rewrite those browsers.
     # Overlay scripts/newsfeed from the live checkout so browser.js launch
     # changes apply before the next image build.
     local newsfeed_browsers newsfeed_scripts
@@ -886,7 +888,7 @@ cmd_run() {
       --security-opt "seccomp=${CHROMIUM_SECCOMP_PROFILE}" \
       --shm-size 512m \
       --env PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-      -v "${newsfeed_browsers}:/ms-playwright" \
+      -v "${newsfeed_browsers}:/ms-playwright:ro" \
       -v "${newsfeed_scripts}:/home/radon/radon/scripts/newsfeed:ro" \
       --env "RADON_NEWSFEED_MEDIA_DIR=${MEDIA_DIR_IN_CONTAINER}" \
       --env "RADON_MEDIA_REMOTE=${MEDIA_DIR_IN_CONTAINER}/"
