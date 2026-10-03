@@ -5,29 +5,38 @@ After=network.target
 # Daily oneshot. A failed smoke stays on last-known-good and pages via
 # the unit watchdog plus Pushover. Promotion takes the shared runtime lock
 # so it never swaps the live binary during an incident run.
+#
+# Trusted promote step (DS-2026-09-29-07): the code runs from the root-owned
+# copy under /usr/local/lib/radon/grok-upgrade (install-grok-upgrade-controller.sh,
+# from setup-grok-page-responder.sh) on the system interpreter with -E -S, never
+# from the responder clone or its venv, which grok rewrites over untrusted page
+# text. The clone is hidden from this unit.
+# Until setup-grok-page-responder.sh has installed the controller the fire
+# is skipped; the 26h grok-upgrade heartbeat then goes stale and pages.
+ConditionPathExists=/usr/local/lib/radon/grok-upgrade/scripts/grok_upgrade.py
 StartLimitIntervalSec=300
 StartLimitBurst=3
 
 [Service]
 Type=oneshot
 User=radon
-WorkingDirectory=/home/radon/radon-page-responder
+WorkingDirectory=/var/lib/radon/grok-upgrade
 EnvironmentFile=/home/radon/radon-page-responder.env
 Environment=GROK_PAGE_NO_DOTENV=1
 Environment=HOME=/home/radon
 Environment=PATH=/home/radon/.local/bin:/home/radon/.grok/bin:/usr/local/bin:/usr/bin:/bin
 TimeoutStartSec=1200
-ExecStart=/home/radon/radon-page-responder/.venv/bin/python /home/radon/radon-page-responder/scripts/grok_upgrade.py --grok-bin /home/radon/.local/bin/grok --live-bin /home/radon/.local/bin/grok --alias-bin /home/radon/.grok/bin/grok --lkg /var/lib/radon/grok_lkg.json --lock /var/lib/radon/grok-runtime/grok-runtime.lock --scratch /var/lib/radon/grok-upgrade
+ExecStart=/usr/bin/python3.13 -E -S /usr/local/lib/radon/grok-upgrade/scripts/grok_upgrade.py --grok-bin /home/radon/.local/bin/grok --live-bin /home/radon/.local/bin/grok --alias-bin /home/radon/.grok/bin/grok --lkg /var/lib/radon/grok_lkg.json --lock /var/lib/radon/grok-runtime/grok-runtime.lock --scratch /var/lib/radon/grok-upgrade
 StandardOutput=journal
 StandardError=journal
 NoNewPrivileges=yes
 PrivateTmp=yes
-InaccessiblePaths=/var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root /home/radon/radon-cloud -/etc/radon/env /home/radon/radon-page-responder.env -/var/lib/radon/flex-secrets -/var/lib/radon/rh-mcp -/home/radon/.ssh -/home/radon/.claude -/home/radon/.claude.json -/home/radon/.codex -/home/radon/.gnupg -/home/radon/.config/gh -/home/radon/.git-credentials
+InaccessiblePaths=/var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root /home/radon/radon-cloud -/etc/radon/env /home/radon/radon-page-responder.env -/var/lib/radon/flex-secrets -/var/lib/radon/rh-mcp -/home/radon/.ssh -/home/radon/.claude -/home/radon/.claude.json -/home/radon/.codex -/home/radon/.gnupg -/home/radon/.config/gh -/home/radon/.git-credentials /home/radon/radon-page-responder
 ReadOnlyPaths=/home/radon
 # The candidate install and smoke scratch live under /var/lib/radon/grok-upgrade,
 # outside the page responder's write set, because the promoted live symlink
 # points into it.
-ReadWritePaths=/home/radon/radon-page-responder /home/radon/.grok /home/radon/.local /var/lib/radon
+ReadWritePaths=/home/radon/.grok /home/radon/.local /var/lib/radon
 
 [Install]
 WantedBy=multi-user.target

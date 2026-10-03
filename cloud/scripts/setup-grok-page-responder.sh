@@ -33,6 +33,15 @@ if ! is_root_owned_tree "$(cd "$SCRIPT_DIR" && pwd -P)"; then
     "/opt/radon-provision/radon.git (docs/grok-page-responder.md)" >&2
   exit 77
 fi
+# The upgrade controller is installed from scripts/ in the same stage.
+STAGED_SCRIPTS="$(cd "$SCRIPT_DIR/../../scripts" && pwd -P)" || {
+  echo "refusing: no scripts/ beside cloud/ in this stage; archive \"cloud scripts\"" >&2
+  exit 77
+}
+if ! is_root_owned_tree "$STAGED_SCRIPTS"; then
+  echo "refusing: $STAGED_SCRIPTS is not a root-owned tree" >&2
+  exit 77
+fi
 
 echo "[1/5] dedicated clone $CLONE"
 if [[ ! -d "$CLONE/.git" ]]; then
@@ -89,11 +98,15 @@ install -d -o radon -g radon -m 0750 /var/lib/radon
 # so the read-only mount covers them rather than being skipped.
 sudo -u radon install -d -m 0750 /var/lib/radon/grok-runtime /var/lib/radon/grok-upgrade
 sudo -u radon mkdir -p /home/radon/.grok/bin /home/radon/.grok/hooks /home/radon/.grok/downloads
-if [[ -x /home/radon/.local/bin/grok && -x "$CLONE/.venv/bin/python" ]]; then
-  sudo -u radon -H "$CLONE/.venv/bin/python" "$CLONE/scripts/grok_upgrade.py" \
+# Trusted promote step (DS-2026-09-29-07): the upgrade unit runs a root-owned
+# copy of scripts/ from this stage, never the clone grok can rewrite.
+bash "$SCRIPT_DIR/install-grok-upgrade-controller.sh" "$STAGED_SCRIPTS"
+if [[ -x /home/radon/.local/bin/grok ]]; then
+  (cd /var/lib/radon/grok-upgrade && sudo -u radon -H \
+    /usr/bin/python3.13 -E -S /usr/local/lib/radon/grok-upgrade/scripts/grok_upgrade.py \
     --seed-if-missing \
     --grok-bin /home/radon/.local/bin/grok \
-    --lkg /var/lib/radon/grok_lkg.json \
+    --lkg /var/lib/radon/grok_lkg.json) \
     || echo "warn: LKG seed failed; first upgrade cycle will try again" >&2
 fi
 
