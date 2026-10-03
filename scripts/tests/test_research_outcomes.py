@@ -136,8 +136,9 @@ def test_expire_stale_held_updates_held_rows_and_never_publishes(monkeypatch):
     published = []
     monkeypatch.setattr(publish, "publish", lambda post: published.append(post))
     count = publish.expire_stale_held(now=datetime(2026, 9, 19, 15, 0, tzinfo=timezone.utc))
-    sql, args = calls[0]
-    assert sql == publish._EXPIRE_SQL
+    assert any("SELECT" in sql for sql, _ in calls)
+    update = next((sql, args) for sql, args in calls if "HELD_EXPIRED" in sql)
+    sql, args = update
     assert "folder_date" not in sql
     assert "HELD_EXPIRED" in sql and "outcome = 'held'" in sql
     assert "expired_at = ?" in sql
