@@ -212,6 +212,8 @@ through the root-owned `radon-docker-gw` shim instead. **Operator (live
 hosts provisioned before this change):** run `sudo gpasswd -d radon docker`,
 then verify with `id -nG radon` (no `docker` in the output).
 
+**No GitHub credential on the VPS (2026-10-03).** `setup-vps.sh` clones the public repo over anonymous HTTPS and never generates `/home/radon/.ssh/id_ed25519`; the old unregistered key was deleted. Do not add a GitHub SSH or deploy key for `radon`.
+
 **Privileged file-op hardening (2026-09-20).** `setup-vps.sh` stages
 root-installed artifacts from committed git blobs (`git cat-file`) rather
 than the working tree, and refuses to publish `mcp.env` through a
