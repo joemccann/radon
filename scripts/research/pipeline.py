@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -13,6 +14,7 @@ import unicodedata
 from decimal import Decimal
 from datetime import date, datetime, timezone
 from pathlib import Path
+from credential_redaction import scrub_credential_text
 from utils.atomic_io import atomic_save
 
 
@@ -39,6 +41,64 @@ class EvidenceError(ValueError):
 
 class DocumentDeadlineExceeded(EvidenceError):
     """A document exhausted its bounded review lease and must be retried."""
+
+
+EXTRACT_FAILED_PREFIX = 'PDF extraction failed; original retained for review'
+EXTRACT_STDERR_MAX = 300
+EXTRACT_MESSAGE_MAX = 480
+_ABS_PATH = re.compile(r'(?<![A-Za-z0-9._-])(/[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+)')
+_EXCEPTION_LINE = re.compile(r'(?:^|[\s.])(?:[A-Za-z_][\w.]*Error)\b')
+
+
+def _signal_name(returncode):
+    if not isinstance(returncode, int) or returncode >= 0:
+        return ''
+    try:
+        return signal.Signals(-returncode).name
+    except ValueError:
+        return ''
+
+
+def _decode_child_text(value):
+    if value is None:
+        return ''
+    if isinstance(value, bytes):
+        return value.decode('utf-8', 'replace')
+    return str(value)
+
+
+def _basename_host_paths(text):
+    return _ABS_PATH.sub(lambda match: Path(match.group(1)).name, text)
+
+
+def _child_stderr_tail(stderr, limit=EXTRACT_STDERR_MAX):
+    text = _basename_host_paths(scrub_credential_text(_decode_child_text(stderr)))
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    chosen = next((line for line in reversed(lines) if _EXCEPTION_LINE.search(line)), '')
+    if not chosen and lines:
+        chosen = lines[-1]
+    chosen = ' '.join(chosen.split())
+    if len(chosen) > limit:
+        chosen = chosen[:limit - 3] + '...'
+    return chosen
+
+
+def extract_failure_message(returncode=None, stderr=None, *, timeout=None):
+    """Prefix plus rc/signal and a short redacted stderr tail for health/journal."""
+    parts = []
+    if timeout is not None:
+        parts.append(f'timeout={timeout:g}s')
+    if returncode is not None:
+        name = _signal_name(returncode)
+        parts.append(f'rc={returncode}' + (f' {name}' if name else ''))
+    tail = _child_stderr_tail(stderr)
+    detail = ' '.join(parts)
+    if tail:
+        detail = f'{detail}: {tail}' if detail else tail
+    message = f'{EXTRACT_FAILED_PREFIX} ({detail})' if detail else EXTRACT_FAILED_PREFIX
+    if len(message) > EXTRACT_MESSAGE_MAX:
+        return message[:EXTRACT_MESSAGE_MAX - 3] + '...'
+    return message
 
 
 PDF_CHILD_TIMEOUT_SECS = 180
@@ -454,10 +514,14 @@ class Pipeline:
 
     def extract(self, pdf, output):
         # Isolate native PDF parsing and bound total runtime; a crashed parser cannot lose the queue item.
-        process = subprocess.run([sys.executable, '-m', 'research.pdf', str(pdf), str(output)],
-                                 capture_output=True, timeout=180, env=pdf_subprocess_env())
+        try:
+            process = subprocess.run([sys.executable, '-m', 'research.pdf', str(pdf), str(output)],
+                                     capture_output=True, timeout=180, env=pdf_subprocess_env())
+        except subprocess.TimeoutExpired as error:
+            raise EvidenceError(extract_failure_message(getattr(error, 'returncode', None),
+                                                        error.stderr, timeout=error.timeout)) from error
         if process.returncode:
-            raise EvidenceError('PDF extraction failed; original retained for review')
+            raise EvidenceError(extract_failure_message(process.returncode, process.stderr))
         return json.loads((Path(output) / 'evidence.json').read_text())
 
     def _render_fitted(self, pdf, target, figure):
