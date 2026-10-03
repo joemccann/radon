@@ -275,7 +275,10 @@ topology state is durable across reboot under `/var/lib/radon/deploy`.
 **Interrupted backups.** The release snapshot includes an active or activating
 `radon-db-backup.service`. Stop it before replacing code, then asynchronously
 resume that exact replay-safe oneshot during `restart-managed` / `recover`.
-Do not replay other oneshots or start a backup that was dormant. Once restore
+Do not replay other oneshots or start a backup that was dormant. Another
+snapshotted oneshot that stop-clean SIGTERMed (`failed`, `Result=signal`) is
+`reset-failed`, not started, so the deploy's own stop does not page; an
+exit-code failure stays visible. Once restore
 is recorded, repeated recovery does not restart the dump, including after an
 off-box failure. A second `recover` with nothing left to start is a finished
 restore: the helper's child is `/bin/bash`, and on bash 3.2 an empty

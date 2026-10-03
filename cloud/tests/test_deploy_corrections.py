@@ -1509,6 +1509,39 @@ for path in paths:
         starts = [line.split()[1:] for line in systemctl_log.read_text().splitlines() if line.startswith("start ")]
         assert sum(backup in units for units in starts) == 1
 
+    @pytest.mark.parametrize("verb", ["recover", "restart-managed"])
+    def test_oneshots_the_deploy_terminated_are_cleared_not_replayed(self, tmp_path, verb):
+        """stop-clean SIGTERMs in-flight oneshots; systemd leaves them failed
+        with Result=signal and the unit watchdog pages until the next timer
+        (radon-vol-cone 2026-10-01/02, radon-knowledge 2026-10-03). Resume
+        clears that failure without re-running the job; a genuine exit-code
+        failure stays visible."""
+        import json
+
+        env, state_file, systemctl_log, _, _ = self._root_helper_fixture(tmp_path)
+        data = json.loads(state_file.read_text())
+        data["units"]["radon-vol-cone.service"] = {"state": "activating", "type": "oneshot"}
+        data["units"]["radon-knowledge.service"] = {"state": "activating", "type": "oneshot"}
+        state_file.write_text(json.dumps(data))
+        stopped = subprocess.run(["bash", str(ROOT_HELPER), "stop-clean"], env=env, capture_output=True, text=True)
+        assert stopped.returncode == 0, stopped.stderr
+        data = json.loads(state_file.read_text())
+        data["units"]["radon-vol-cone.service"].update(state="failed", result="signal")
+        data["units"]["radon-knowledge.service"].update(state="failed", result="exit-code")
+        state_file.write_text(json.dumps(data))
+        resumed = subprocess.run(["bash", str(ROOT_HELPER), verb], env=env, capture_output=True, text=True)
+        assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+        data = json.loads(state_file.read_text())
+        assert data["units"]["radon-vol-cone.service"]["state"] == "inactive"
+        assert data["units"]["radon-knowledge.service"]["state"] == "failed"
+        log = systemctl_log.read_text().splitlines()
+        resets = [line.split()[1:] for line in log if line.startswith("reset-failed ")]
+        assert any("radon-vol-cone.service" in units for units in resets)
+        assert not any("radon-knowledge.service" in units for units in resets)
+        starts = [line.split()[1:] for line in log if line.startswith("start ")]
+        assert not any("radon-vol-cone.service" in units for units in starts)
+        assert not any("radon-knowledge.service" in units for units in starts)
+
     def test_backup_start_rejection_does_not_commit_restore_and_can_retry(self, tmp_path):
         import json
 
