@@ -543,7 +543,10 @@ def test_runtime_code_paths_are_canonical_while_secret_path_remains_stable() -> 
                     assert line == f"EnvironmentFile={CANONICAL_ENV_FILE}", name
             if line.startswith(("WorkingDirectory=", "ExecStart=", "ExecStop=")):
                 assert "/home/radon/radon-cloud" not in line, f"{name}: {line}"
-                if name in stripped:
+                if name == "radon-grok-upgrade.service":
+                    # Trusted promote step: root-owned copy, never the clone.
+                    assert "/home/radon/radon-page-responder" not in line, name
+                elif name in stripped:
                     assert "/home/radon/radon-page-responder" in line, name
 
     gateway = GATEWAY_HELPER.read_text(encoding="utf-8")

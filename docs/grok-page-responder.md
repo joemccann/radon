@@ -55,7 +55,7 @@ STORE=/opt/radon-provision/radon.git   # root-only; deploys keep it current
 SHA="$(git ls-remote https://github.com/joemccann/radon.git refs/heads/main | cut -f1)"
 git --git-dir="$STORE" cat-file -e "${SHA}^{commit}"   # fails until that deploy ran
 STAGE="$(mktemp -d /opt/radon-provision/grok-setup.XXXXXX)"
-git --git-dir="$STORE" -c tar.umask=022 archive "$SHA" cloud | tar -x -C "$STAGE"
+git --git-dir="$STORE" -c tar.umask=022 archive "$SHA" cloud scripts | tar -x -C "$STAGE"
 bash "$STAGE/cloud/scripts/setup-grok-page-responder.sh"
 rm -rf "$STAGE"
 sudo -u radon -H /home/radon/.local/bin/grok login --device-auth
@@ -276,7 +276,8 @@ responder against a live promotion.
 ### Daily upgrade timer (enabled)
 
 `radon-grok-upgrade.{service,timer}` is installed and enabled. Daily
-07:40 UTC it runs `scripts/grok_upgrade.py`: copy the resolved CLI into
+07:40 UTC it runs `scripts/grok_upgrade.py` from the root-owned controller
+copy, not the responder clone (see Trusted promote step below): copy the resolved CLI into
 `<candidate>/downloads/grok-linux-x86_64` under the configured `--scratch`
 path (`/var/lib/radon/grok-upgrade` in the unit; `data/cache/grok_upgrade`
 when omitted) and point `<candidate>/bin/grok` at it with the installer
@@ -295,6 +296,21 @@ to the first heading. The live executable is never the updater target
 - Pass: prepare replacement links, atomically switch the canonical live symlink (`--live-bin`) and the explicit `--alias-bin` (`~/.grok/bin/grok` in the unit), and write LKG with the immutable candidate path. The upgrader never derives a path from HOME and refuses a candidate outside `--scratch`. Keep the promoted directory; a later attempt gets a new directory. No PR.
 - Fail: preserve the live/LKG executable and alert via Pushover / watchdog; remove an unpromoted candidate. Health diagnostics use the writer's structured `error.message` field (REL-293 / R-712).
 - Incident lock held: skip the promote and retry next fire.
+
+**Trusted promote step (DS-2026-09-29-07).** The promoted binary is what
+the secret-bearing `radon-subscription-tokens` unit executes, so the code
+that promotes it must be out of grok's reach. The unit runs
+`/usr/bin/python3.13 -E -S /usr/local/lib/radon/grok-upgrade/scripts/grok_upgrade.py`:
+a root-owned copy of `scripts/` on the system interpreter, with no venv and
+no site-packages (the upgrader's import closure is stdlib-only). The
+responder clone is in the unit's `InaccessiblePaths`, and its working
+directory is the upgrade scratch. `setup-grok-page-responder.sh` installs
+the copy from `scripts/` in its root-owned provision stage through
+`cloud/scripts/install-grok-upgrade-controller.sh` (refuses a linked target
+or parent, builds the new tree beside the old one, then renames it into
+place), and seeds LKG from the same copy. The copy changes only when setup
+reruns: a merged upgrader fix reaches the host on the next setup rerun, not
+on deploy. Contract: `cloud/tests/test_grok_upgrade_controller.py`.
 
 ```bash
 systemctl status radon-grok-upgrade.timer
@@ -428,7 +444,9 @@ state) and `/var/lib/radon/grok-runtime` (the shared flock). `~/.grok/bin`,
 because `radon-subscription-tokens` runs `grok` and `agy` from `~/.grok/bin`
 and `~/.local/bin` with the production env. The upgrader installs candidates
 under `/var/lib/radon/grok-upgrade`, which the responder cannot write, so the
-promoted live symlink never points into a responder-writable path.
+promoted live symlink never points into a responder-writable path. The
+upgrader's own code runs from `/usr/local/lib/radon/grok-upgrade`, which is
+root-owned, so the responder cannot change what promotes either.
 `ProtectHome=tmpfs` is deliberately NOT used: it would also hide the clone and
 the venv the unit executes from.
 
@@ -468,7 +486,8 @@ running` every 30 seconds.
 | `scripts/grok_page_responder.py` | Poller |
 | `scripts/ir_pr_description.py` | IR PR section validator |
 | `scripts/grok_runtime.py` | Model resolve, LKG IO, lock, fallback |
-| `scripts/grok_upgrade.py` | Daily smoke + auto-promote |
+| `scripts/grok_upgrade.py` | Daily smoke + auto-promote (runs from the root-owned copy) |
+| `cloud/scripts/install-grok-upgrade-controller.sh` | Installs that copy under `/usr/local/lib/radon/grok-upgrade` |
 | `/var/lib/radon/grok_lkg.json` | Machine-written last-known-good |
 | `cloud/services/radon-grok-page-responder.*` | VPS timer |
 | `cloud/services/radon-grok-upgrade.*` | Daily track-latest, installed enabled |
