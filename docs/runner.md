@@ -22,7 +22,7 @@ Safety is where the runner runs, not what the script checks:
 | Agent cannot edit the runner | `run_loop.sh`, `loops/*.env`, the hooks, their `lib/` helpers, the `gh` guard and `gitconfig` installed root-owned in `/usr/local/radon-runner` |
 | Agent cannot plant a binary or git config the runner runs | The LaunchDaemon's `PATH` is `/opt/homebrew/bin:/usr/bin:/bin`; the bot's CLI directories (`~/.local/bin`, `~/.grok/bin`, `~/.bun/bin`) are prepended only for the agent. Every git the runner, the hooks and the agent run reads `/usr/local/radon-runner/gitconfig` (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM=1`), never `~/.gitconfig`, and the pre-run hook rebuilds the clone's `.git/config` before every phase |
 | No production credential in the clone | The clone gets no `.env`. The runner loads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from `RADON_RUNNER_DOTENV` or `/usr/local/radon-runner/dotenv-path` (never from the plist), then falls back to `~/.radon-runner.env`. `GH_TOKEN` loads only from `~/.radon-runner.env`. `_radonbot` and every agent share a uid, so any file the runner can read, the agent can read. The runner unsets the Pushover keys in the agent process and sends every notification itself; each runner prompt tells the agent not to send `radon PR green` or list the absent keys under Next. `GH_TOKEN` stays so the agent can push. Point the dotenv at a Pushover-only file (step 8), not the operator's full Radon `.env`. Never put a production credential or an admin token in `~/.radon-runner.env` or anywhere in the bot's home |
-| Agent cannot merge or push `main` | A separate GitHub machine account with the Write role on this repo only, used through its classic `repo` token, plus the `main-review` repository ruleset on the default branch: 1 approving review, approval of the most recent push required, stale approvals dismissed on push. Its only bypass actor is the Repository admin role in pull-request mode, so an admin merges through a PR and never pushes `main` directly; the bot account is not exempt. The 27 required status checks stay in the classic branch protection on `main`, not in the ruleset. A token of the operator's own account would not do: it acts as the admin and bypasses the ruleset |
+| Agent cannot merge or push `main` | A separate GitHub machine account with the Write role on this repo only, used through its classic token (`repo` plus `workflow`, so nightly CI work that edits `.github/workflows` can be pushed to a branch), plus the `main-review` repository ruleset on the default branch: 1 approving review, approval of the most recent push required, stale approvals dismissed on push. Its only bypass actor is the Repository admin role in pull-request mode, so an admin merges through a PR and never pushes `main` directly; the bot account is not exempt. The 27 required status checks stay in the classic branch protection on `main`, not in the ruleset. A token of the operator's own account would not do: it acts as the admin and bypasses the ruleset |
 
 The six loops in [Migration](#migration-from-the-per-loop-wrappers) use the bot runner. `scripts/codemap_nightly.sh` is separate and merges its own PR with the operator's token. Verify the live ruleset in step 8b.3 before enabling a new installation.
 
@@ -166,13 +166,13 @@ The bot pushes and opens PRs as its own account, so the `main` ruleset binds it.
    ```
 
 4. As the bot, accept at https://github.com/joemccann/radon/invitations. Confirm from your account: `gh api repos/joemccann/radon/collaborators/radon-runner-bot/permission --jq .permission` prints `write`.
-5. As the bot, open https://github.com/settings/tokens/new?scopes=repo&description=radon-runner. Keep only `repo` ticked, set Expiration to Custom with a date one year out, then Generate. Copy the `ghp_...` value into your keychain without echoing it:
+5. As the bot, open https://github.com/settings/tokens/new?scopes=repo,workflow&description=radon-runner. Keep only `repo` and `workflow` ticked, set Expiration to Custom with a date one year out, then Generate. Copy the `ghp_...` value into your keychain without echoing it:
 
    ```bash
    read -rs "T?token: "; security add-generic-password -U -s github-radon-runner-bot-token -a radon-runner-bot -w "$T"; unset T
    ```
 
-6. Check the token acts as the bot with only `repo`:
+6. Check the token acts as the bot with only `repo` and `workflow`:
 
    ```bash
    T=$(security find-generic-password -s github-radon-runner-bot-token -w)
@@ -180,7 +180,7 @@ The bot pushes and opens PRs as its own account, so the `main` ruleset binds it.
    curl -s -H "Authorization: token $T" https://api.github.com/user | grep '"login"'; unset T
    ```
 
-   Expect `x-oauth-scopes: repo`, your chosen expiry, and `"login": "radon-runner-bot"`.
+   Expect `x-oauth-scopes: repo, workflow`, your chosen expiry, and `"login": "radon-runner-bot"`.
 
 ### 8. Runner secrets (operator)
 
