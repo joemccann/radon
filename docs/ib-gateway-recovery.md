@@ -162,7 +162,7 @@ While held:
 | FastAPI 15s recovery heartbeat (pool reconnect, radon-api self-restart ladder) | skipped |
 | Relay stale-tick ladder | no `disconnected` error row, no reconnect ladder, no `/ib/restart` escalation. It writes an `ok` row with `reason: operator_hold` |
 | Watchdog IB-outage grouping | IB-dependent failures are absorbed without a page. No `radon restart` advice |
-| IBC 2FA relogin | already off (`TWOFA_TIMEOUT_ACTION=exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT=no`, no `AUTO_RESTART_TIME`), so no push spam |
+| IBC 2FA relogin | already off (`TWOFA_TIMEOUT_ACTION=exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT=no`), so no push spam. The daily `AUTO_RESTART_TIME=11:45 PM` token restart only runs while the Gateway is up, which a hold rules out |
 
 Any flag that is unreadable, malformed, symlinked or not root-owned counts as held, and its reason and actor still show. Invalid UTF-8 in diagnostic fields is replaced for display without changing the canonical clear-prefix decision or rewriting the flag (REL-299 / R-718). Holds set by the admin panel and the watchdog are written by `radon`. A non-root clear removes the flag, because absent means not held. An `--expires-at` that has passed reads `expired` but stays held. An expiring hold would log back in and kick you. From the laptop when broker Tailscale SSH is down: `ssh -J radon@5.78.148.38 root@10.0.0.4 radon ib release`. Design: [`ibkr-session-release.md`](ibkr-session-release.md).
 
