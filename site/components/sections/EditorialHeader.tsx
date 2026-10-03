@@ -48,7 +48,7 @@ export function EditorialHeader() {
           <CtaBeam>
             <a
               href={DEMO_URL}
-              className={`inline-flex min-h-11 items-center rounded-[8px] bg-accent px-3.5 font-sans text-[13px] font-medium text-canvas transition-colors hover:bg-signal-deep ${focusRing}`}
+              className={`inline-flex min-h-11 items-center whitespace-nowrap rounded-[8px] bg-accent px-3.5 font-sans text-[13px] font-medium text-canvas transition-[background-color,scale] duration-150 ease-out hover:bg-signal-deep active:scale-[0.96] ${focusRing}`}
             >
               Try the demo
             </a>
