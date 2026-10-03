@@ -180,8 +180,10 @@ runs an LLM consumer (`radon-api`, `radon-newsfeed`, `radon-research`,
 into the relay. Antigravity is the one read-write grant: `agy` refreshes its
 token and writes logs and project state on every run, so
 `/home/radon/.gemini/antigravity-cli` and `/home/radon/.gemini/config` (Google's
-fixed paths) are bound read-write and shared with the host, keeping one rotating
-token store. The rest of `~/.gemini` (the retired Gemini CLI's `oauth_creds.json`) is never mounted.
+fixed paths) are bound read-write into `radon-api`, `radon-research` and
+`radon-nextjs` and shared with the host, keeping one rotating
+token store. Newsfeed renders third-party content and gets no antigravity bind
+(its ladder falls past that rung). The rest of `~/.gemini` (the retired Gemini CLI's `oauth_creds.json`) is never mounted.
 The Python and Next.js model ladders use the
 [subscription-tier billing and recovery policy](oauth-subscription-auth.md#radon-http-model-ladder-server).
 Prepaid fallback for those tiers requires the explicit `RADON_LADDER_ALLOW_PREPAID`

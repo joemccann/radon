@@ -791,8 +791,11 @@ cmd_run() {
       # creates projects on every run (read-only -> "not logged into
       # Antigravity", live 2026-10-02). Sharing the host dirs keeps one
       # rotating token store. The rest of ~/.gemini (the retired Gemini CLI's
-      # oauth_creds.json) stays unmounted.
+      # oauth_creds.json) stays unmounted. Newsfeed renders third-party
+      # content, so it never gets a writable grant the host and the other
+      # units consume; its ladder falls past antigravity.
       for cred_dir in .gemini/antigravity-cli .gemini/config; do
+        [[ "$unit" == "radon-newsfeed.service" ]] && continue
         if [[ -d "${subscription_home}/${cred_dir}" ]]; then
           set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:rw"
         fi
