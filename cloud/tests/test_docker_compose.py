@@ -139,9 +139,12 @@ class TestEnvironment:
         content = compose_path.read_text()
         assert "VNC_SERVER_PASSWORD" in content
 
-    def test_ibc_cannot_self_schedule_an_unleased_restart(self, ib_service):
+    def test_ibc_pins_the_daily_restart_to_the_rollover_quiet_window(self, ib_service):
+        """Blank does not disable the Gateway's mandatory daily cycle: it keeps
+        the stored 11:45 PM default, which ran as a full re-login every night.
+        Pinning it makes the nightly cycle a token restart (no 2FA push)."""
         environment = ib_service["environment"]
-        assert "AUTO_RESTART_TIME=" in environment
+        assert "AUTO_RESTART_TIME=11:45 PM" in environment
         assert "TWS_COLD_RESTART=" in environment
 
 
