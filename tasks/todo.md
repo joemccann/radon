@@ -1,3 +1,12 @@
+# Task: Rubner always-publish (2026-10-03)
+
+- [x] T1 depends_on: [] Red tests: Rubner detection variants, triage/novelty/TTL exemptions, empty-SELECT and VERIFY-fail fallback, idempotent post ids, outcome flags.
+- [x] T2 depends_on: [T1] Desk in force_include.py, intake page-text plumbing, expire SELECT+skip, ALWAYS_PUBLISH_FALLBACK labels, docs.
+- [x] T3 depends_on: [T2] EvidenceError message persist (separate commit) if the research-path classifier drops the extract reason.
+- [ ] T4 depends_on: [T2, T3] Draft PR vs main, CI green. No merge. No VPS.
+
+Review: Citadel Rubner GMI always reaches the feed. VERIFY stays hard per candidate. Zero published posts after VERIFY yields one grounded summary, never an unverified figure. Held TTL skips always_publish rows. EvidenceError on the host is classified with its message; do not mutate the VPS from this branch.
+
 # Task: Mount Antigravity in App Container Runtime (2026-09-28)
 
 - [x] T1 depends_on: [] Failing test in cloud/tests/test_app_runtime.py for .gemini and .local/bin container mounts.
