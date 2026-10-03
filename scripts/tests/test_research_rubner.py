@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from research import intake, novelty, publish
+from research.pipeline import EvidenceError
 from tests.test_research_intake import (
     Reviewer, build, catalogue, extractor, selection, verdict, work,
 )
@@ -214,3 +215,11 @@ def test_outcome_row_records_always_publish_flag_and_fallback_code():
     assert json.loads(row["context_json"])["alwaysPublish"] is True
     assert "ALWAYS_PUBLISH_FALLBACK" in json.loads(row["reason_codes"])
     assert row["outcome"] == "published"
+
+
+def test_classify_error_keeps_evidence_message():
+    from research.model import classify_error
+    from research.state import _persist_error
+    err = EvidenceError("PDF extraction failed; original retained for review")
+    assert "PDF extraction failed" in classify_error(err)
+    assert "PDF extraction failed" in _persist_error(err)
