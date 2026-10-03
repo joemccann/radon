@@ -1355,6 +1355,9 @@ jobs:
             if [[ -f "$RUNNER/cloud/scripts/sync-control-plane.sh" ]]; then
               bash "$RUNNER/cloud/scripts/sync-control-plane.sh"
             fi
+            # If prestage deferred to this control-plane sync, retain the same
+            # exact-image proof and host-build fallback used by prestage.
+            export RADON_DEPLOY_USE_NODE_IMAGE_BUILD=1
             bash "$RUNNER/cloud/scripts/deploy.sh" "$SHA"
             "$RUNNER/cloud/scripts/prune-deploy-runners.py" \
               --root "$RUNNER_ROOT" \
