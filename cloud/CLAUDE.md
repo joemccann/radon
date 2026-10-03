@@ -508,6 +508,10 @@ and pages via Pushover plus the unit watchdog. The job heartbeats
 The unit names every link the upgrader may move (`--live-bin`,
 `--alias-bin ~/.grok/bin/grok`); `grok_upgrade.py` never derives a path
 from HOME, so a test run in the responder clone cannot relink the live CLI.
+The unit runs the root-owned copy `/usr/local/lib/radon/grok-upgrade` on
+`/usr/bin/python3.13 -E -S`, never the responder clone (hidden from it);
+`setup-grok-page-responder.sh` installs that copy, so an upgrader fix lands
+on the host only at a setup rerun (`cloud/tests/test_grok_upgrade_controller.py`).
 
 `setup-vps.sh` inventories `radon-rsi-oversold.{service,timer}` and
 `enable_services` enables the timer. Daily 23:05 UTC, twenty minutes
