@@ -1,5 +1,3 @@
-import { resolveRadonRepoRoot } from './resolveRepoRoot.mjs'
-
 export const meta = {
   name: 'security-audit',
   description: 'Reusable Radon security audit: fan out N dimensions, adversarially verify each finding, run a completeness + regression critic. Returns structured JSON.',
@@ -13,7 +11,8 @@ export const meta = {
 
 // ===========================================================================
 // HOW TO RUN
-//   Repo root: RADON_REPO_ROOT, then RADON_WEEKEND_REPO, then git toplevel, then cwd.
+//   Repo root: args.repoRoot (a plain absolute path), else each agent's git toplevel.
+//   Workflow({ name: 'security-audit', args: { repoRoot: '<$RADON_REPO_ROOT>' } })  // nightly runner
 //   Workflow({ name: 'security-audit' })                      // full audit
 //   Workflow({ name: 'security-audit', args: { focus: ['authn-authz','sqli'] } })  // subset
 //   Workflow({ name: 'security-audit', args: { extraDimensions: [{ key, label, scope }] } })  // extend
@@ -28,7 +27,19 @@ export const meta = {
 //   3. Mirror the change in docs/security-audit-playbook.md.
 // ===========================================================================
 
-const REPO = resolveRadonRepoRoot()
+// The Workflow runtime has no module loader, filesystem or process, so the
+// clone root arrives as args.repoRoot (the runner exports RADON_REPO_ROOT;
+// `node .claude/workflows/resolveRepoRoot.mjs --print` resolves it by hand).
+// Without it, each agent resolves its own git toplevel. It is interpolated
+// into shell commands, so anything but a plain absolute path fails closed.
+const REPO = (() => {
+  const root = args && args.repoRoot
+  if (root === undefined || root === null || root === '') return '"$(git rev-parse --show-toplevel)"'
+  if (typeof root !== 'string' || !/^\/[A-Za-z0-9._/-]*$/.test(root) || /(^|\/)\.\.(\/|$)/.test(root)) {
+    throw new Error('security-audit: args.repoRoot must be a plain absolute path')
+  }
+  return root.replace(/\/+$/, '') || '/'
+})()
 
 const PREAMBLE = `You are a senior application-security engineer auditing RADON, a production options/equities trading app for a single operator. Repo root: ${REPO}.
 
