@@ -116,4 +116,8 @@ def classify_error(error: Exception) -> str:
     """Safe error string for queue persistence and health reporting."""
     if isinstance(error, ModelError):
         return safe_error_message(error)
+    from research.pipeline import EvidenceError
+    if isinstance(error, EvidenceError):
+        message = str(error).strip()
+        return message or type(error).__name__
     return type(error).__name__
