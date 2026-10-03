@@ -190,12 +190,24 @@ origin heads differ, pickup refuses the branch instead of overwriting it.
 These checks retain the `.github/` refusal on repeated pickup runs.
 
 Pickup reads `PUSHOVER_USER`, `PUSHOVER_TOKEN`, `TURSO_DB_URL` and
-`TURSO_AUTH_TOKEN`, and nothing else, from `~/radon-weekend/.env` (the file
-beside the pickup clone, also used by the plist's launch-failure page;
-override with `--env-file`). The process environment wins. The file must be
-a regular file owned by the operator with no group or other access, or it
-is ignored. Without it, refusal alerts and the `watchdog_pages` lookup are
-skipped silently.
+`GROK_PICKUP_TURSO_AUTH_TOKEN`, and nothing else, from `~/radon-weekend/.env`
+(the file beside the pickup clone, also used by the plist's launch-failure
+page; override with `--env-file`). `GROK_PICKUP_TURSO_AUTH_TOKEN` is
+exported to the process as `TURSO_AUTH_TOKEN`; a `TURSO_AUTH_TOKEN` line in
+the file is never read. Pickup only reads `watchdog_pages`, so mint it as a
+table-scoped read token and keep nothing else in that file:
+
+```bash
+# Mac mini, operator. Value goes straight into the file, never on screen.
+f=~/radon-weekend/.env
+t="$(turso db tokens create radon -p watchdog_pages:data_read)"
+{ grep -E '^(PUSHOVER_USER|PUSHOVER_TOKEN|TURSO_DB_URL)=' "$f"; printf 'GROK_PICKUP_TURSO_AUTH_TOKEN=%s\n' "$t"; } \
+  | (umask 077; cat > "$f.new") && mv "$f.new" "$f"; unset t
+```
+
+The process environment wins. The file must be a regular file owned by the
+operator with no group or other access, or it is ignored. Without it,
+refusal alerts and the `watchdog_pages` lookup are skipped silently.
 
 Fetching from a hostile repository is a supported git operation, and nothing
 in pickup executes code out of the fetched tree. Regressions:
