@@ -521,7 +521,7 @@ class Pipeline:
             raise EvidenceError(extract_failure_message(getattr(error, 'returncode', None),
                                                         error.stderr, timeout=error.timeout)) from error
         if process.returncode:
-            raise EvidenceError(extract_failure_message(process.returncode, process.stderr))
+            raise EvidenceError(extract_failure_message(process.returncode, getattr(process, 'stderr', None)))
         return json.loads((Path(output) / 'evidence.json').read_text())
 
     def _render_fitted(self, pdf, target, figure):
