@@ -556,8 +556,10 @@ async def _host_control_statuses() -> Optional[List[UnitStatus]]:
         status.allowed_actions = actions
         status.can_control = status.load_state == "loaded" and bool(actions)
         statuses.append(status)
-    if host_role() == "app" and not any(s.unit == GATEWAY_UNIT for s in statuses):
+    if host_role() == "app":
         # The Gateway lives on the broker; its row comes from the mTLS daemon.
+        # A local row here is a leftover pre-split unit and must not shadow it.
+        statuses = [s for s in statuses if s.unit != GATEWAY_UNIT]
         statuses.append(await show_unit(GATEWAY_UNIT))
     return statuses
 
