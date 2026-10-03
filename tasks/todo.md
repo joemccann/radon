@@ -8827,6 +8827,10 @@ Delivery review: draft https://github.com/joemccann/radon/pull/866; source head 
 
 - [x] T1 depends_on: [] — isolated Python toolchain; trusted checkpoint and open PR inventory.
 - [x] T2 depends_on: [T1] — audit delta plus codemap callers, standing safety sweeps and inherited candidates; 18 commits / 220 scoped paths; 92 standing passes.
-- [ ] T3 depends_on: [T2] — fault-injection red/green repairs, focused gates and per-finding commits.
+- [x] T3 depends_on: [T2] — fault-injection red/green repairs, focused gates and per-finding commits.
 - [ ] T4 depends_on: [T3] — permanent drills, substantive publication and exact-head green draft PR.
 - [ ] T5 depends_on: [T4] — single rolling checkpoint comment and closing review.
+
+### Review 2026-10-03
+
+Three new regressions and four inherited repairs have repeated red/green evidence. R-303's already merged correction passes the actual parsed acceptance test. Standing safety/catalog checks and 95 permanent drills pass. Fifteen historical candidates/operator tasks retain acceptance on issue #81. No live-system operation, secret lookup, main push, merge, generated codemap change or test-ledger edit occurred. T4/T5 external delivery receipts will be recorded in the single durable issue comment after exact-head CI.
