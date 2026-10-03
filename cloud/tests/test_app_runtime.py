@@ -1593,6 +1593,12 @@ def test_run_newsfeed_binds_subscription_credential_dirs_readonly(tmp_path: Path
     assert result.returncode == 0, result.stderr
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
     assert f"{home}/.grok:/home/radon/.grok:ro" in log
+    # Newsfeed renders third-party content: it gets no read-write grant the
+    # host shares with other units, so the antigravity dirs stay unmounted.
+    assert ".gemini" not in log
+    for bind in log.split():
+        if bind.startswith(f"{home}/"):
+            assert bind.endswith(":ro"), bind
 
 
 def test_run_skips_subscription_binds_when_no_dir_exists(tmp_path: Path) -> None:
