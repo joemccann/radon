@@ -10,7 +10,7 @@ One loop run is what the operator would do by hand: open an agent CLI in a fresh
 
 The agent does the whole job in one session: audit, fix, push the branch, open a draft PR, watch CI. The prompt owns what the loop does; the runner owns nothing else.
 
-The two security loops (`security`, `security-deepsec`) also use the optional knobs in [Loop config](#loop-config): one session per phase (audit, remediate, deliver), a claude-only ladder from a resolver, a root-owned `gh` guard, and root-owned pre- and post-run hooks that port the old wrapper's rails (credential and billing-reroute refusals, the green-base checkout, the sanitized dead-man, the private report). [docs/operations.md](operations.md#background-services) has the operator contract.
+The two security loops (`security`, `security-deepsec`) also use the optional knobs in [Loop config](#loop-config): one session per phase (audit, remediate, deliver), a claude-only ladder from a resolver, a root-owned `gh` guard, and root-owned pre- and post-run hooks that port the old wrapper's rails (credential and billing-reroute refusals, the green-base checkout, the sanitized dead-man, the private report). [docs/operations.md](operations.md#background-services) has the operator contract. The `security` loop's native audit workflow cannot read the environment, so its prompt passes `$RADON_REPO_ROOT` as `args.repoRoot`.
 
 ## Safety boundary
 
