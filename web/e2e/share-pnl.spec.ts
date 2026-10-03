@@ -642,3 +642,45 @@ test.describe("CTA bond percentile reliability", () => {
     await expect(page.getByText(/bond contracts at/)).toHaveCount(0);
   });
 });
+
+/** REL-108 / R-316: render the real shared export theme with the OG engine. */
+import { createElement } from "react";
+import { ImageResponse } from "next/og.js";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { createRequire } from "node:module";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
+import { loadFonts } from "../lib/og-fonts";
+// Playwright runs ESM directly; compile the actual theme to CJS so its JSON
+// import is resolved just as Next resolves it, without an ESM JSON assertion.
+const ogPath = resolve(process.cwd(), "lib/og-theme.ts");
+const ogModule = {exports: {} as typeof import("../lib/og-theme")};
+runInNewContext(ts.transpileModule(readFileSync(ogPath, "utf8"), {
+  compilerOptions: {module: ts.ModuleKind.CommonJS, esModuleInterop: true},
+}).outputText, {module: ogModule, exports: ogModule.exports, require: createRequire(ogPath)});
+const { OG } = ogModule.exports;
+const brandTokens = JSON.parse(readFileSync(resolve(process.cwd(), "../brand/radon-design-tokens.json"), "utf8"));
+
+test("OG reliability plate matches accessible export-kit tokens", async ({page}, testInfo) => {
+  const kit = brandTokens.color.dark;
+  expect(OG.panelRaised).toBe(kit.bg.panelRaised);
+  expect(OG.border).toBe(kit.line.grid);
+  expect(OG.faint).toBe(kit.text.muted);
+  const response = new ImageResponse(createElement("div", {style: {
+    display: "flex", width: "100%", height: "100%", background: OG.bg,
+    color: OG.text, fontFamily: "IBM Plex Mono", padding: 24,
+  }}, createElement("div", {style: {
+    display: "flex", flexDirection: "column", width: "100%", background: OG.panel,
+    border: `1px solid ${OG.border}`, padding: 20,
+  }}, createElement("div", {style: {fontSize: 24}}, "RADON / EXPORT RELIABILITY"),
+  createElement("div", {style: {fontSize: 18, color: OG.faint, marginTop: 16}}, "Supporting measurement text"),
+  createElement("div", {style: {display: "flex", background: OG.panelRaised, color: OG.muted, padding: 12, marginTop: 16}}, "Raised instrument panel"))),
+  {width: 760, height: 240, fonts: await loadFonts()});
+  const png = Buffer.from(await response.arrayBuffer());
+  await page.route("**/reliability-og.png", route => route.fulfill({contentType: "image/png", body: png}));
+  await page.goto("/reliability-og.png");
+  await expect(page.locator("img")).toBeVisible();
+  expect(await page.locator("img").evaluate((image: HTMLImageElement) => [image.naturalWidth, image.naturalHeight])).toEqual([760, 240]);
+  await page.screenshot({path: testInfo.outputPath("accessible-og-plate.png")});
+});
