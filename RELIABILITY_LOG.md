@@ -901,3 +901,9 @@ Closing local gates (2026-09-30): permanent Python drills 95 passed; standing wr
 Closing local verification (2026-10-02): permanent Python drills 95 passed; standing safety/catalog sweeps 89 passed; monitor/docs union 600 passed before the final exit-reader repair, followed by monitor/funnel/transport union 567 passed. Health/consumer union 259 passed, pacing callers 148 passed, hold callers 114 passed, release/shim 57 passed, lifecycle 55 passed, migration 57 passed, health floor 84 passed and Caddy 51 passed. REL-298's additional inspection-budget faults failed four cases twice before the final 57-pass release suite. NF-7 existing residual behavior: 9 passed. Full project suites, cloud tests and Vitest (including order-idempotency-durability) remain PR CI work.
 
 Publication restriction: GitHub rejected the initial branch push solely because the prepared R-303 workflow-comment correction requires workflow scope. The rejected unpublished commit was removed; R-303 remains operator-only with an exact action in the dated audit and rolling issue. No remote branch was created by that rejected push, no force-push was used, and no existing test or gate was weakened.
+
+## Nightly remediation 2026-10-03
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-303 / R-722 | DONE | RED 5 failed / 2 passed twice; API-to-relay RED 6 failed / 2 passed; GREEN 77 passed | Preserve unknown operator holds as null on health/lite rather than false, including passive-probe failures and malformed held fields. Real server output drives the actual relay poller under fake transport: held, unavailable, confirmed release stays true/true/false. Coarse payload remains account-free and pool=None. Existing known-clear fixture now supplies explicit false evidence; cold-start/timeout pins require null. No broker or order call occurs. |
