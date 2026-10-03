@@ -1408,6 +1408,40 @@ class TestIncidentPublicationOwner:
         assert _violations(["scripts/ir_push_gate.py"], rules)
         assert _violations(["scripts/ir_push_gate.py", "docs/grok-page-responder.md"], rules) == []
 
+
+class TestSubscriptionRecoveryBillingOwner:
+    """DOC-156: token recovery must not promise automatic prepaid fallback."""
+
+    def test_token_daemon_intro_defers_billing_to_auth_owner(self):
+        intro = (_ROOT / "docs/subscription-tokens.md").read_text().split("## Per-provider contract", 1)[0]
+        assert "silently demotes" not in intro
+        assert "oauth-subscription-auth.md#radon-http-model-ladder-server" in intro
+        assert "unavailable" in intro
+        module_intro = (_ROOT / "scripts/subscription_tokens.py").read_text().split('"""', 2)[1]
+        assert "silently demotes" not in module_intro
+
+    def test_reauth_runbook_states_its_recovery_boundaries(self):
+        procedure = _section((_ROOT / "docs/subscription-tokens.md").read_text(),
+                             "Operator re-auth runbook")
+        for label in ("Symptom", "Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verification", "Rollback", "Escalation"):
+            assert f"**{label}:**" in procedure
+
+    def test_vault_mutations_use_the_service_credential_context(self):
+        doc = (_ROOT / "docs/subscription-tokens.md").read_text()
+        section = _section(doc, "Sealing a freshly created credential")
+        commands = re.findall(r"```bash\n(.*?)```", section, re.S)
+        assert commands
+        assert not any(re.search(r"subscription_tokens\s+--(?:seal|restore)\b", command)
+                       for command in commands), "A bare SSH shell lacks the unit's vault context"
+        assert "systemctl start radon-subscription-tokens.service" in section
+        assert "systemctl status radon-subscription-tokens.service" in section
+        assert "different store" in section and "decrypted key" in section
+        assert "operations.md#encrypted-credential-store-profile-credentials-tab" in section
+        unit = (_ROOT / "cloud/services/radon-subscription-tokens.service").read_text()
+        assert "Environment=RADON_SECRET_STORE_PATH=" in unit
+        assert "LoadCredentialEncrypted=radon-secret-store-key:" in unit
+        assert "-m scripts.subscription_tokens --once" in unit
+
 class TestCredentialSetupOwners:
     """DOC-150/151: setup instructions must select the implemented auth path."""
 
