@@ -8694,6 +8694,15 @@ CI repair review: befea93d preserved21 new gateway/service component regressions
 ## Review
 - Removed the three production-derived journal labels rather than substituting synthetic brokerage history; retained all pre-existing semantic journal coverage.
 - Regression rejects long numeric journal identifiers in the tracked golden set. Focused fixture tests pass; the affected suite is blocked locally because Python 3.13 lacks `libsql_experimental` and package installation is network-denied, while Python 3.14's extension segfaults.
+
+### PR #879 CI repair — 2026-10-02
+
+- [x] T1 depends_on: [] Inspect exact-head CI and reproduce the documentation ownership failure locally.
+- [x] T2 depends_on: [T1] Update the knowledge embeddings owner documentation to match the sanitized fixture and regression.
+- [x] T3 depends_on: [T2] Run the documentation contracts and review the repair before publication.
+- [ ] T4 depends_on: [T3] Push the repair, verify exact-head CI, and send the accepted green notification.
+
+Review: original ownership test reproduced red (1 failed); owner documentation updated with the fixture removal, six-digit identifier guard and baseline review requirement. All 89 documentation contracts pass; diff whitespace is clean. Changes limited to owner documentation and task tracking; the ownership gate remains enforced. Exact-head CI and notification receipt pending.
 # Task: PR #766 follow-up, demo CI guard and Linux deploy cleanup (2026-09-28)
 
 ## Dependency graph and checklist
