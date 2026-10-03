@@ -127,10 +127,10 @@ A reboot locks this keychain, which also holds the bot's claude.ai session (step
 
 ### 6. Provider keys for fx (operator, then bot shell)
 
-In your own tab, copy only the two keys from your agent-cli env into the bot's. `grep` runs as you, so it reads your file; `sudo` only writes the bot's:
+In your own tab, copy only the two keys from your agent-cli env into the bot's. `grep` runs as you, so it reads your file; `sudo -u _radonbot` writes the bot's as the bot (never as root, which would follow a link the bot planted):
 
 ```bash
-grep -E "^(export )?(NVIDIA_API_KEY|CEREBRAS_API_KEY)=" ~/.radon/agent-cli/env | sudo /bin/sh -c 'umask 077; d=/Users/_radonbot/.radon; install -d -m 700 -o _radonbot -g staff $d $d/agent-cli && cat > $d/agent-cli/env && chown _radonbot:staff $d/agent-cli/env'
+grep -E "^(export )?(NVIDIA_API_KEY|CEREBRAS_API_KEY)=" ~/.radon/agent-cli/env | sudo -u _radonbot /bin/sh -c 'umask 077; d=/Users/_radonbot/.radon; mkdir -p $d/agent-cli && chmod 700 $d $d/agent-cli && cat > $d/agent-cli/env'
 ```
 
 On a Mac where you have no such file, create `/Users/_radonbot/.radon/agent-cli/env` in the bot shell with `NVIDIA_API_KEY=` and `CEREBRAS_API_KEY=` lines instead. Then, in the bot shell:
@@ -187,7 +187,7 @@ The bot pushes and opens PRs as its own account, so the `main` ruleset binds it.
 Write the token into the bot's secrets file straight from your keychain:
 
 ```bash
-security find-generic-password -s github-radon-runner-bot-token -w | sudo /bin/sh -c 'umask 077; read -r t; f=/Users/_radonbot/.radon-runner.env; { grep -v "^GH_TOKEN=" "$f"; printf "GH_TOKEN=%s\n" "$t"; } > "$f.new" && chown _radonbot:staff "$f.new" && mv "$f.new" "$f"'
+security find-generic-password -s github-radon-runner-bot-token -w | sudo -u _radonbot /bin/sh -c 'umask 077; read -r t; f=/Users/_radonbot/.radon-runner.env; { grep -v "^GH_TOKEN=" "$f"; printf "GH_TOKEN=%s\n" "$t"; } > "$f.new" && mv "$f.new" "$f"'
 ```
 
 Pushover is a pair. The runner takes both keys from the first source that has both, and never mixes a half pair:
@@ -201,7 +201,7 @@ Only those two keys are read from the dotenv. `GH_TOKEN` stays in `~/.radon-runn
 `_radonbot` and every agent run as the same uid, so whatever file the runner can read, the agent can read. Pointing `RADON_RUNNER_DOTENV` at the full Radon root `.env` and granting the bot read access exposes every production key in it to the agents, which contradicts the safety table. Use a Pushover-only file, or an allowlisted copy using the step-6 pattern:
 
 ```bash
-grep -E '^(export )?(PUSHOVER_USER|PUSHOVER_TOKEN)=' /path/to/radon/.env | sudo /bin/sh -c 'umask 077; d=/Users/_radonbot/.radon; install -d -m 700 -o _radonbot -g staff $d && cat > $d/pushover.env && chown _radonbot:staff $d/pushover.env'
+grep -E '^(export )?(PUSHOVER_USER|PUSHOVER_TOKEN)=' /path/to/radon/.env | sudo -u _radonbot /bin/sh -c 'umask 077; d=/Users/_radonbot/.radon; mkdir -p $d && chmod 700 $d && cat > $d/pushover.env'
 ```
 
 Set the path at install time (a refresh without the var leaves `dotenv-path` in place). Refuse a relative path. `install.sh` never chmod, chown or copies the target `.env`. If the bot cannot read it, install prints one WARNING and continues:
@@ -267,7 +267,7 @@ The `security` and `security-deepsec` loops need the bot's own Claude Code on th
    Operator tab, register it as a write key on the private repository:
 
    ```bash
-   sudo cat /Users/_radonbot/.radon-runner-reports-key.pub | gh repo deploy-key add - -R joemccann/radon-security-reports --allow-write -t radon-runner-bot
+   sudo -u _radonbot cat /Users/_radonbot/.radon-runner-reports-key.pub | gh repo deploy-key add - -R joemccann/radon-security-reports --allow-write -t radon-runner-bot
    ```
 
 Steps 6 to 8 write into the bot's home only as the bot: your account reads your files and pipes them to a `tar` that runs as `_radonbot`, so nothing runs as root on a path the bot can write. `B` is the bot's state directory.

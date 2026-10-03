@@ -1425,3 +1425,25 @@ class TestRecurringOwnerCoverage:
         assert any(owner in rule["owners"] for rule in matching)
         assert _violations([source], matching), "Mapped source alone must fail ownership"
         assert _violations([source, owner], matching) == []
+
+
+class TestRunnerRunbookRootWrites:
+    """Root never reads, writes or chowns through a path the bot account controls."""
+
+    def test_root_commands_do_not_touch_bot_home_files(self):
+        doc = (_ROOT / "docs/runner.md").read_text()
+        offenders = [
+            line.strip() for line in doc.splitlines()
+            if re.search(r"\bsudo\s+(?!-u\s)", line)
+            and "/Users/_radonbot" in line
+            and re.search(r">|\bcat\b|\bchown\b|\bmv\b", line)
+        ]
+        assert offenders == []
+
+    def test_secret_copies_write_as_the_bot(self):
+        doc = (_ROOT / "docs/runner.md").read_text()
+        for target in ("agent-cli/env", ".radon-runner.env", "pushover.env"):
+            assert any(
+                "sudo -u _radonbot /bin/sh -c" in line and target in line and ">" in line
+                for line in doc.splitlines()
+            ), target
