@@ -82,18 +82,10 @@ CLAUDE.md project-wide rule: **No `spawn()` from Next.js.** All Python subproces
 
 ## Autonomous Timers (Hetzner)
 
-| Timer | Cadence | Endpoint |
-|---|---|---|
-| `radon-refresh.timer` | Mon–Fri */15min | direct `scripts/data_refresh.py` |
-| `radon-vcg-refresh.timer` | Mon–Fri 13–21 UTC */5min | `POST /vcg/scan` |
-| `radon-portfolio-sync.timer` | Mon–Fri 13–21 UTC */60s | `POST /portfolio/sync` |
-| `radon-cta-sync.timer` | Mon–Fri 18:15, 19:00, 21:30 UTC | `POST /menthorq/cta` |
-| `radon-leap.timer` | Mon–Fri 14:00 UTC | `POST /leap/scan` |
-| `radon-signals-refresh.timer` | Mon–Fri 09–16 ET hourly | `POST /theta-harvester/scan` + `POST /strength-confirmation/scan` |
-| `radon-llm-index.timer` | Daily 06:30 UTC | direct `scripts/llm_token_index.py --record` |
-| `radon-watchdog-{intraday,continuous,daily,error}.timer` | see `scripts/watchdog/CLAUDE.md` | reads `service_health` |
-
-Unit files in `radon-cloud/services/`; enumerated by `setup-vps.sh SERVICE_FILES`. Wrappers use literal env parser (not `set -a`) to avoid `$VAR` expansion (see `feedback_env_file_shell_expansion.md`).
+Use the [operations owner](../../docs/operations.md#background-services) for
+operator procedures. Exact schedules and commands live in the checked-in
+[systemd units](../../cloud/services/), installed by the control-plane bootstrap.
+Wrappers use literal env parsing (not `set -a`) to avoid `$VAR` expansion.
 
 ---
 
