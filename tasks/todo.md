@@ -8822,3 +8822,13 @@ Three verified findings have red/green evidence. All nine closing gates pass, an
 Review: delta and direct importers audited; four new and five inherited repairs have red/green evidence. R-303 is operator-only after GitHub rejected workflow publication. Permanent drills 95 passed. No live systems, credentials, main push, merge, codemap changes or test-ledger edits. Publication/CI and the one durable issue comment remain tracked by T4/T5; final receipts belong on issue #81.
 
 Delivery review: draft https://github.com/joemccann/radon/pull/866; source head `22e88dfc454d7f2246493948af46d43fe310887b` completed all 24 required contexts, 32 passing checks total and seven non-applicable skips. Exactly one durable comment posted: https://github.com/joemccann/radon/issues/81#issuecomment-5947930686. Nine repairs resolved; 20 historical candidates retain acceptance. R-303 workflow publication and Pushover delivery remain operator-only; notification credentials were absent on both environment-only checks. No merge or live operation occurred. This receipt changes only the checklist; its own exact-head CI is watched before ending the session.
+
+## CI performance nightly 2026-10-03
+
+- [x] T1 (depends_on: []): read open performance PRs/checkpoint and audit origin/main changes.
+- [x] T2 (depends_on: [T1]): measure 30 organic Actions runs, cache state and gate closure.
+- [x] T3 (depends_on: [T2]): rank safe critical-path candidates and implement qualifying experiments.
+- [x] T4 (depends_on: [T3]): verify substantive experiment; publication/CI blocked by confirmed repo-only token scope.
+- [ ] T5 (depends_on: [T4]): review rails and post one durable checkpoint on issue #196.
+
+Review 2026-10-03: CIP-016 reserved experiment restored against 15bdb9a4; regression red 2 failed/7 passed, green cloud 83 passed, script gate/inventory/path contracts 90 passed. YAML/inline shell/Python syntax, pinned actions, complete 12-family gate equality and diff/secret reviews pass. Full suites, Vitest, Docker builds and workflow lint require PR CI. Expected workflow-scope publication block remains; exact delivery receipt and all run strata belong in the single issue #196 checkpoint. No production access, synthetic samples, merge, main push or additional experiment ID.
