@@ -682,11 +682,15 @@ class TestPushGate:
 # ~/radon-weekend/.env, the same file the plist's launch-failure page reads.
 
 ENV_KEYS = ("PUSHOVER_USER", "PUSHOVER_TOKEN", "TURSO_DB_URL", "TURSO_AUTH_TOKEN")
+# DS-2026-09-23-03: pickup only reads watchdog_pages, so its Turso token is a
+# dedicated read-only one under its own name. The operator's general
+# TURSO_AUTH_TOKEN in the same file is never loaded.
+PICKUP_TURSO_KEY = "GROK_PICKUP_TURSO_AUTH_TOKEN"
 
 
 @pytest.fixture
 def clean_env(monkeypatch):
-    for key in (*ENV_KEYS, "IB_FLEX_TOKEN"):
+    for key in (*ENV_KEYS, PICKUP_TURSO_KEY, "IB_FLEX_TOKEN"):
         monkeypatch.delenv(key, raising=False)
 
 
@@ -702,7 +706,7 @@ def test_loads_only_the_allowlisted_keys(tmp_path, clean_env):
         "PUSHOVER_USER=u-example\n"
         "PUSHOVER_TOKEN='t-example'\n"
         'TURSO_DB_URL="libsql://example.invalid"\n'
-        "export TURSO_AUTH_TOKEN=a-example\n"
+        "export GROK_PICKUP_TURSO_AUTH_TOKEN=a-example\n"
         "IB_FLEX_TOKEN=must-not-load\n"
     ))
     assert pickup.load_operator_env(f) == sorted(ENV_KEYS)
@@ -711,6 +715,26 @@ def test_loads_only_the_allowlisted_keys(tmp_path, clean_env):
     assert os.environ["TURSO_DB_URL"] == "libsql://example.invalid"
     assert os.environ["TURSO_AUTH_TOKEN"] == "a-example"
     assert "IB_FLEX_TOKEN" not in os.environ
+
+
+def test_the_operator_turso_token_is_never_loaded(tmp_path, clean_env):
+    f = _env_file(tmp_path / ".env", (
+        "PUSHOVER_USER=u\n"
+        "TURSO_DB_URL=libsql://example.invalid\n"
+        "TURSO_AUTH_TOKEN=operator-read-write\n"
+    ))
+    assert pickup.load_operator_env(f) == ["PUSHOVER_USER", "TURSO_DB_URL"]
+    assert "TURSO_AUTH_TOKEN" not in os.environ
+
+
+def test_the_pickup_token_wins_over_the_operator_token(tmp_path, clean_env):
+    f = _env_file(tmp_path / ".env", (
+        "TURSO_AUTH_TOKEN=operator-read-write\n"
+        "GROK_PICKUP_TURSO_AUTH_TOKEN=pickup-read-only\n"
+    ))
+    assert pickup.load_operator_env(f) == ["TURSO_AUTH_TOKEN"]
+    assert os.environ["TURSO_AUTH_TOKEN"] == "pickup-read-only"
+    assert PICKUP_TURSO_KEY not in os.environ
 
 
 def test_the_process_environment_wins(tmp_path, clean_env, monkeypatch):
