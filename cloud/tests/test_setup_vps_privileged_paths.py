@@ -969,7 +969,6 @@ class TestDirectoryOwnership:
         for write in (
             "install -d -m 700 /home/radon/.ssh",
             "< /root/.ssh/authorized_keys",
-            "ssh-keygen -t ed25519",
             "tee -a /home/radon/.ssh/known_hosts",
         ):
             assert guard < body.index(write), write
@@ -1441,32 +1440,38 @@ class TestRadonSshDirectory:
         assert f"> {SSH_DIR}" not in body
         assert f"chown -R radon:radon {SSH_DIR}" not in body
         assert f"sudo -u radon install -d -m 700 {SSH_DIR}" in body
-        assert "sudo -u radon ssh-keygen -t ed25519" in body
+        assert "ssh-keygen -t" not in body
 
-    def test_fresh_host_creates_keys_as_radon(self, tmp_path: Path) -> None:
+    def test_app_clone_uses_anonymous_https(self) -> None:
+        text = SETUP.read_text(encoding="utf-8")
+        assert 'readonly RADON_REPO="https://github.com/joemccann/radon.git"' in text
+
+    def test_fresh_host_copies_authorized_keys_and_mints_no_key(
+        self, tmp_path: Path
+    ) -> None:
         ssh_dir, root_ssh, log = _ssh_harness(tmp_path)
         result = _run_preflight(tmp_path)
         assert result.returncode == 0, result.stderr
-        assert "ssh-ed25519 AAAAdeploy radon@ib-gateway" in result.stdout
+        assert "Preflight checks passed" in result.stdout
+        assert "ACTION REQUIRED" not in result.stdout
         assert _mode(ssh_dir) == "0o700"
         assert _mode(ssh_dir / "authorized_keys") == "0o600"
         assert (ssh_dir / "authorized_keys").read_text() == (
             root_ssh / "authorized_keys"
         ).read_text()
-        assert (ssh_dir / "id_ed25519").is_file()
+        assert not (ssh_dir / "id_ed25519").exists()
         calls = _calls_on(log, ssh_dir)
-        assert any(c.startswith("ssh-keygen as=radon -t ed25519") for c in calls)
+        assert not any(c.startswith("ssh-keygen as=radon -t") for c in calls)
         assert [c for c in calls if " as=root " in c] == []
 
     def test_rerun_is_idempotent_and_stays_radon(self, tmp_path: Path) -> None:
         ssh_dir, root_ssh, log = _ssh_harness(tmp_path)
         assert _run_preflight(tmp_path).returncode == 0
-        private = (ssh_dir / "id_ed25519").read_text()
         log.write_text("")
         result = _run_preflight(tmp_path)
         assert result.returncode == 0, result.stderr
         assert "Preflight checks passed" in result.stdout
-        assert (ssh_dir / "id_ed25519").read_text() == private
+        assert not (ssh_dir / "id_ed25519").exists()
         assert "github.com ssh-ed25519" in (ssh_dir / "known_hosts").read_text()
         calls = _calls_on(log, ssh_dir)
         assert not any(c.startswith("ssh-keygen as=radon -t") for c in calls)
