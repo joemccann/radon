@@ -378,6 +378,8 @@ successfully, and the stated schema and core-service checks were green.
 It must not start, stop, restart, or enable Radon services, Docker, IB Gateway,
 Caddy, polkit, or journald. Do not use the full `setup-vps.sh` as a live upgrade
 shortcut; setup also provisions packages, firewall, Caddy, and service state.
+Setup clones the public app repo over anonymous HTTPS and mints no GitHub SSH
+key for `radon` (the host holds no GitHub credential; DS-2026-09-30-02).
 Setup pins GitHub's published ed25519 SSH host key (no first-contact keyscan),
 provisions the secret-store credential as 32 raw bytes, and prepares the
 radon-replaceable media directory with create-then-verify + `chown
