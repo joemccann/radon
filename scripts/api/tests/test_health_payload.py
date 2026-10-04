@@ -231,7 +231,8 @@ class TestHealthLite:
         async def _gw(pool_status=None, pool=None):
             return {"auth_state": "awaiting_2fa", "service_state": "healthy", "upstream_dead": False,
                     "port_listening": True, "managed_accounts": ["U1234567"], "host": "127.0.0.1",
-                    "port": 4001, "restart_backoff": {"attempt": 2}, "container_state": "running"}
+                    "port": 4001, "restart_backoff": {"attempt": 2}, "container_state": "running",
+                    "operator_hold": {"held": False}}
 
         monkeypatch.setattr(server, "check_ib_gateway", _gw)
         monkeypatch.setattr(server, "ib_pool", SimpleNamespace(status=lambda: {}))
@@ -267,7 +268,7 @@ class TestHealthLite:
             "service_state": "unknown",
             "upstream_dead": False,
             "port_listening": False,
-            "operator_hold": False,
+            "operator_hold": None,
         }
 
     @pytest.mark.asyncio
@@ -288,7 +289,7 @@ class TestHealthLite:
             "service_state": "unknown",
             "upstream_dead": False,
             "port_listening": False,
-            "operator_hold": False,
+            "operator_hold": None,
         }
 
     @pytest.mark.asyncio
@@ -387,3 +388,80 @@ class TestIbRecoveryHeartbeat:
         monkeypatch.setattr(server, "ib_pool", SimpleNamespace(status=lambda: {}))
 
         await server._ib_recovery_heartbeat_tick()  # must not raise
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('hold', [None, {}, {'held': None}, {'held': 'false'}])
+async def test_rel303_lite_preserves_unknown_operator_hold(monkeypatch, hold):
+    """R-722: broker status loss must not manufacture release evidence."""
+    async def gateway(**kwargs):
+        return {'auth_state': 'unreachable', 'operator_hold': hold}
+    monkeypatch.setattr(server, 'check_ib_gateway', gateway)
+    monkeypatch.setattr(server, 'ib_pool', None)
+    result = await server.health_lite()
+    assert result['operator_hold'] is None
+    assert result['auth_state'] == 'unreachable'
+
+
+@pytest.mark.asyncio
+async def test_rel303_lite_gateway_failure_preserves_unknown_hold(monkeypatch):
+    async def gateway(**kwargs):
+        raise OSError('mock broker unavailable')
+    monkeypatch.setattr(server, 'check_ib_gateway', gateway)
+    monkeypatch.setattr(server, 'ib_pool', None)
+    assert (await server.health_lite())['operator_hold'] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('held', [True, False])
+async def test_rel303_lite_keeps_confirmed_hold_boolean(monkeypatch, held):
+    async def gateway(**kwargs):
+        return {'operator_hold': {'held': held, 'actor': 'mock', 'reason': 'private'}}
+    monkeypatch.setattr(server, 'check_ib_gateway', gateway)
+    monkeypatch.setattr(server, 'ib_pool', None)
+    result = await server.health_lite()
+    assert result['operator_hold'] is held
+    assert 'private' not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_rel303_lite_to_relay_requires_confirmed_release(monkeypatch):
+    """Actual passive API output through the relay poller, with transport faked."""
+    import json
+    from pathlib import Path
+    import shutil
+    import subprocess
+    states = iter([{'held': True}, None, {'held': False}])
+    async def gateway(**kwargs):
+        return {'operator_hold': next(states)}
+    monkeypatch.setattr(server, 'check_ib_gateway', gateway)
+    monkeypatch.setattr(server, 'ib_pool', None)
+    payloads = [await server.health_lite() for _ in range(3)]
+    node = shutil.which('node')
+    assert node, 'Node required for isolated relay transport acceptance'
+    root = Path(__file__).resolve().parents[3]
+    harness = r'''
+import fs from 'node:fs';
+import vm from 'node:vm';
+import {pathToFileURL} from 'node:url';
+const {root, payloads} = JSON.parse(fs.readFileSync(0, 'utf8'));
+const machine = await import(pathToFileURL(root + '/scripts/lib/staleDataMachine.js'));
+const source = fs.readFileSync(root + '/scripts/ib_realtime_server.js', 'utf8');
+const start = source.indexOf('async function refreshOperatorHold(');
+if (start < 0) throw Error('poller missing');
+const context = vm.createContext({...machine, operatorHoldActive: false, AbortSignal,
+  IB_HEALTH_LITE_URL: 'http://mock/health/lite', console: {log(){}},
+  fetch: async () => ({ok: true, json: async () => payloads.shift()})});
+vm.runInContext(source.slice(start, source.indexOf('\n}', start) + 2), context);
+const seen = [];
+for (let i = 0; i < 3; i++) {
+  await vm.runInContext('refreshOperatorHold()', context);
+  seen.push(context.operatorHoldActive);
+}
+console.log(JSON.stringify(seen));
+'''
+    result = subprocess.run([node, '--input-type=module', '-e', harness],
+                            input=json.dumps({'root': str(root), 'payloads': payloads}),
+                            text=True, capture_output=True, timeout=10, check=True,
+                            env={'PATH': str(Path(node).parent)})
+    assert json.loads(result.stdout) == [True, True, False]

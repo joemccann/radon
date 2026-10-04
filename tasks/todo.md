@@ -1,3 +1,9 @@
+# Task: PDF extract error detail (2026-10-03)
+
+- [x] T1 depends_on: [] Failing tests: rc + MemoryError, negative rc signal name, secret redaction, truncated stderr, prefix preserved, TimeoutExpired, persisted health/journal bound.
+- [x] T2 depends_on: [T1] Pipeline.extract appends rc/signal + redacted stderr tail; child prints type: message; classify_error length bound.
+- [ ] T3 depends_on: [T2] Focused pytest green. Draft PR vs main, CI green. No merge. No VPS.
+
 # Task: Rubner always-publish (2026-10-03)
 
 - [x] T1 depends_on: [] Red tests: Rubner detection variants, triage/novelty/TTL exemptions, empty-SELECT and VERIFY-fail fallback, idempotent post ids, outcome flags.
@@ -3721,7 +3727,7 @@ P1/P2 (steps 1-5 code) are on `main` (`26668ef8`). Timer not enabled. No SendReq
 
 ---
 
-# Task: Cash-flow Flex 1025 lockout (2026-08-21)
+# Task: Cash-flow Flex lockout (2026-08-21)
 
 ## Dependency graph
 
@@ -3739,9 +3745,9 @@ P1/P2 (steps 1-5 code) are on `main` (`26668ef8`). Timer not enabled. No SendReq
 
 ## Review
 
-- Production 2026-08-21T13:58:26Z: SendRequest 1025, class=permanent, next_attempt Monday 08:00 ET. Last success 4d earlier.
-- Mechanism: 1001×2 SendRequest + TWR 07:30 + page-driven Flex every 20 min on one token.
-- Ops: zero Flex SendRequests until the sidecar lapses. Portal Run 1442520, then `--from-file`. Do not retry Monday.
+- A production lockout was classified as permanent and protected by the shared embargo.
+- Retry behavior was removed from the affected request paths.
+- Operators can ingest an exported report with `--from-file` while the embargo is active.
 
 ## Constraints
 
@@ -3755,21 +3761,21 @@ P1/P2 (steps 1-5 code) are on `main` (`26668ef8`). Timer not enabled. No SendReq
 
 ## Dependency graph
 
-- T1 depends_on: [] - Reproduce CBRS SELL-combo modify P&L (Max Gain $1,035,835 / Max Loss $4,165) as a failing test
+- T1 depends_on: [] - Reproduce incorrect SELL-combo modify P&L as a failing test using synthetic values
 - T2 depends_on: [T1] - Match working SELL BAG to held combo and pass `closeOut.entryCostDollars`
 - T3 depends_on: [T2] - Focused Vitest + Playwright; visual confirm; no live modify
 
 ## Checklist
 
-- [x] T1 Red: modify modal close of 50x CBRS RR @ $8 shows realized P&L, not opening max gain/loss
+- [x] T1 Red: modify modal close shows realized P&L, not opening max gain/loss
 - [x] T2 Wire `findHeldComboForClose` into `ModifyOrderModal` combo `riskInput`
 - [x] T3 Green tests + screenshot of Close Credit / Est. Realized P&L
 
 ## Review
 
-- Root cause: combo modify sent the post-modify BAG through opening-risk math. Held long 205 calls covered the inverted short call, leaving a synthetic long 200 put. Max Gain = (200 + 8) x 50 x 100 minus round-trip cost = $1,035,835. Max Loss = that cost = $4,165.
+- Root cause: combo modify sent the post-modify BAG through opening-risk math instead of close-out math.
 - Fix: `findHeldComboForClose` matches SELL envelope + structure legs + qty <= held units, then `closeOut.entryCostDollars` from `resolveEntryCost`.
-- Red reproduced screenshot dollars. Green: Close Credit $40,000 / Est. Realized P&L $15,000. Playwright screenshot `web/test-results/modify-combo-close-pnl.png`.
+- Red reproduced the incorrect risk labels. Green showed close credit and estimated realized P&L. Playwright screenshot `web/test-results/modify-combo-close-pnl.png`.
 - Focused Vitest: 35 passed. Playwright: close-credit spec passed. No live broker modify.
 
 ## Constraints
@@ -8687,6 +8693,31 @@ Dependency graph: T1 -> T2 -> T3 -> T4. Gateway implementation, header compositi
 Review: independent gateway/coverage reviews completed; shared command lock and source freshness guards implemented. TypeScript static check passed. Manual dark desktop and320px mobile fixture review confirmed direct header access, grouped Gateway commands, service inventory reflow, primary action within752px and no horizontal overflow. Tests authored for GitHub CI; no local suites or live infrastructure actions run.
 
 CI repair review: befea93d preserved21 new gateway/service component regressions; one existing copy assertion required explicit unavailable start/stop/restart wording. Cloud CI exposed an existing pipefail race in required/active unit membership checks (2261 passed,1 failed): pure-shell exact matching replaces early-exit grep pipelines and adds4096-unit topology coverage without relaxing required-unit or oneshot replay guards. No local suites.
+
+## 2026-09-27 Golden-set production-data disclosure
+
+## Dependency graph
+- T1 depends_on: [] - Confirm the reported production journal identifiers and trade details remain tracked at HEAD.
+- T2 depends_on: [T1] - Add a failing fixture-safety regression and remove production-derived labels.
+- T3 depends_on: [T2] - Run focused and full verification, review the diff, commit, and publish a PR.
+
+## Checklist
+- [x] T1 Confirm disclosure at HEAD.
+- [x] T2 Regression and minimal remediation.
+- [ ] T3 Verification and delivery.
+
+## Review
+- Removed the three production-derived journal labels rather than substituting synthetic brokerage history; retained all pre-existing semantic journal coverage.
+- Regression rejects long numeric journal identifiers in the tracked golden set. Focused fixture tests pass; the affected suite is blocked locally because Python 3.13 lacks `libsql_experimental` and package installation is network-denied, while Python 3.14's extension segfaults.
+
+### PR #879 CI repair — 2026-10-02
+
+- [x] T1 depends_on: [] Inspect exact-head CI and reproduce the documentation ownership failure locally.
+- [x] T2 depends_on: [T1] Update the knowledge embeddings owner documentation to match the sanitized fixture and regression.
+- [x] T3 depends_on: [T2] Run the documentation contracts and review the repair before publication.
+- [ ] T4 depends_on: [T3] Push the repair, verify exact-head CI, and send the accepted green notification.
+
+Review: original ownership test reproduced red (1 failed); owner documentation updated with the fixture removal, six-digit identifier guard and baseline review requirement. All 89 documentation contracts pass; diff whitespace is clean. Changes limited to owner documentation and task tracking; the ownership gate remains enforced. Exact-head CI and notification receipt pending.
 # Task: PR #766 follow-up, demo CI guard and Linux deploy cleanup (2026-09-28)
 
 ## Dependency graph and checklist
@@ -8832,6 +8863,29 @@ Review: delta and direct importers audited; four new and five inherited repairs 
 
 Delivery review: draft https://github.com/joemccann/radon/pull/866; source head `22e88dfc454d7f2246493948af46d43fe310887b` completed all 24 required contexts, 32 passing checks total and seven non-applicable skips. Exactly one durable comment posted: https://github.com/joemccann/radon/issues/81#issuecomment-5947930686. Nine repairs resolved; 20 historical candidates retain acceptance. R-303 workflow publication and Pushover delivery remain operator-only; notification credentials were absent on both environment-only checks. No merge or live operation occurred. This receipt changes only the checklist; its own exact-head CI is watched before ending the session.
 
+## Nightly documentation 2026-10-03
+
+- [x] T1 depends_on: [] Read trusted checkpoint and instructions, review open PRs, create authorized branch.
+- [x] T2 depends_on: [T1] Audit every commit through 15bdb9a4 and reconcile inherited findings.
+- [x] T3 depends_on: [T2] Correct verified durable-contract defects with minimal owner changes and red/green checks.
+- [x] T4 depends_on: [T3] Verify, publish substantive draft if needed, watch exact-head CI, post one rolling comment.
+
+Review: 18 commits / 117 paths audited through 15bdb9a4. DOC-154 through DOC-158 corrected at existing owners; seven new documentation contracts failed before correction and pass after it. Documentation/path-filter 138 passed; publication/model/hold/subscription 291 passed; offline Gateway CLI 30 passed. Ten changed local links and anchors resolve; owner JSON parses; diff and secret scans clean. No runtime behavior, live operation or generated codemap changed. Draft #886 published; source head ff2d9d53029106774b3e76c1ca44c8488592070c completed 32 passing checks with seven non-applicable skips. Exactly one rolling comment posted: https://github.com/joemccann/radon/issues/202#issuecomment-5968274601. The comment carries the audit cursor, inherited closures and acceptance criteria for DOC-154 through DOC-158. This delivery receipt changes only the checklist; its own exact-head CI is watched before ending the session. Review and merge remain operator-owned; no deployment, merge or notification was performed.
+
+## Reliability nightly 2026-10-03
+
+- [x] T1 depends_on: [] — isolated Python toolchain; trusted checkpoint and open PR inventory.
+- [x] T2 depends_on: [T1] — audit delta plus codemap callers, standing safety sweeps and inherited candidates; 18 commits / 220 scoped paths; 92 standing passes.
+- [x] T3 depends_on: [T2] — fault-injection red/green repairs, focused gates and per-finding commits.
+- [x] T4 depends_on: [T3] — permanent drills, substantive publication and exact-head green draft PR.
+- [x] T5 depends_on: [T4] — single rolling checkpoint comment and closing review.
+
+### Review 2026-10-03
+
+Three new regressions and four inherited repairs have repeated red/green evidence. R-303's already merged correction passes the actual parsed acceptance test. Standing safety/catalog checks and 95 permanent drills pass. Fifteen historical candidates/operator tasks retain acceptance on issue #81. No live-system operation, secret lookup, main push, merge, generated codemap change or test-ledger edit occurred. T4/T5 external delivery receipts will be recorded in the single durable issue comment after exact-head CI.
+
+Delivery review: draft https://github.com/joemccann/radon/pull/882; source-verification head `bcfd8b8c8a64656cbfb16c99f634f426234b7c53` completed all 24 required contexts, 32 applicable checks and seven non-applicable skips. Exactly one rolling comment posted: https://github.com/joemccann/radon/issues/81#issuecomment-5966924908. Seven source repairs resolved; fifteen inherited candidates/operator tasks retain acceptance. Final checklist receipt changes only this file and its exact-head CI is watched before ending the session. The runner owns notifications; no notification or live-system action was performed.
+
 ## CI performance nightly 2026-10-03
 
 - [x] T1 (depends_on: []): read open performance PRs/checkpoint and audit origin/main changes.
@@ -8841,6 +8895,16 @@ Delivery review: draft https://github.com/joemccann/radon/pull/866; source head 
 - [ ] T5 (depends_on: [T4]): review rails and post one durable checkpoint on issue #196.
 
 Review 2026-10-03: CIP-016 reserved experiment restored against 15bdb9a4; regression red 2 failed/7 passed, green cloud 83 passed, script gate/inventory/path contracts 90 passed. YAML/inline shell/Python syntax, pinned actions, complete 12-family gate equality and diff/secret reviews pass. Full suites, Vitest, Docker builds and workflow lint require PR CI. Expected workflow-scope publication block remains; exact delivery receipt and all run strata belong in the single issue #196 checkpoint. No production access, synthetic samples, merge, main push or additional experiment ID.
+
+## Nightly reliability 2026-10-04
+
+- [x] T1 depends_on: [] Install isolated toolchain, recover trusted checkpoint and reserve tonight's branch.
+- [x] T2 depends_on: [T1] Audit delta and codemap importers; execute standing sweeps and triage inherited acceptance.
+- [x] T3 depends_on: [T2] Repair verified findings serially with fault-injection red/green and focused gates.
+- [x] T4 depends_on: [T3] Run permanent drills and validate substantive publication and change hygiene.
+- [ ] T5 depends_on: [T4] Publish one draft, await exact-head CI and post one rolling comment; record external completion receipts on issue #81.
+
+Review: delta audit finished through 6603be9b; three new source findings and inherited R-036 have repeated red/green evidence. R-035 passes executable upstream acceptance. Standing sweeps 110 passed; permanent drills 95 passed, relay 113, research/docs 280 and 305, controller/setup 18, delta scripts 153, delta API 15 and deploy lifecycle 7 passed/2 platform skips. The broader cloud delta run had 167 passes and one environment-only subprocess failure; the failing case passes alone with the venv interpreter on PATH. Substantive publication check, Python/config parsing, shell/Node syntax, diff and four-commit secret scan pass. External publication, exact-head CI and the single durable comment are pending; final completion receipts belong on issue #81 without changing the reported head. Open PR #882 reserves R-721/R-722/R-723, REL-302/REL-303/REL-304 and R-315/R-316/R-317/R-318. Only tonight's branch is eligible for push; full suites and Vitest belong to CI.
 
 ## Nightly testing 2026-10-04
 

@@ -58,15 +58,18 @@ def discover(client, state, now=None, current_only=False, on_page=None):
         if alias != scope:
             scopes.setdefault(alias, folder_date)
             padded[alias] = scope
+    watched = set(state.scopes())
     if not current_only:
-        for scope in state.scopes():
+        for scope in sorted(watched):
             scopes.setdefault(scope, None)
     added = 0
     failures = []
     retry_after = 0
     absent = set()
     for scope, folder_date in scopes.items():
-        if scope in padded and padded[scope] not in absent:
+        # REL-302 / R-721: fallback admission must not orphan a saved
+        # unpadded stream when its padded spelling later appears.
+        if scope in padded and padded[scope] not in absent and scope not in watched:
             continue
         try:
             cursor = state.cursor(scope)
