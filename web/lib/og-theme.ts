@@ -4,15 +4,17 @@
 import chartSystemSpec from "./chart-system-spec.json";
 import type { ChartFamily, ChartSeriesRole, SanctionedRenderer } from "./chartSystem";
 
+// REL-108 / R-316: accessible export-kit tokens, pinned against the brand JSON.
+// The web Clear palette is scoped independently from these public plates.
 const BRAND = {
   bg: "#0a0f14",
   panel: "#0f1519",
-  panelRaised: "#151c22",
+  panelRaised: "#1e252b",
   plot: "#10171d",
-  border: "#1e293b",
+  border: "#2e3947",
   text: "#e2e8f0",
   muted: "#94a3b8",
-  faint: "#475569",
+  faint: "#758192",
 } as const;
 
 function clampAlpha(alpha: number): number {

@@ -550,3 +550,25 @@ def test_shutdown_before_child_setsid_falls_back_to_process_signal(monkeypatch):
     monkeypatch.setattr(ingestion.os,'killpg',missing)
     ingestion.stop_consumers([child])
     assert calls==['term','kill']
+
+
+@pytest.mark.parametrize('current_only', [False, True])
+def test_rel302_watched_unpadded_cursor_survives_padded_folder_arrival(state, monkeypatch, current_only):
+    """R-721: a newly present padded alias cannot orphan an acknowledged stream."""
+    monkeypatch.setenv('RADON_RESEARCH_LOOKBACK_DAYS', '1')
+    alias = '2026/october/oct 2'
+    state.ingest_page(alias, {'cursor': 'old-cursor', 'entries': [_october('oct 2', 'old')]},
+                      '2026-10-02')
+    calls = []
+    def listing(scope, cursor):
+        calls.append((scope, cursor))
+        if scope == alias:
+            assert cursor == 'old-cursor'
+            return {'cursor': 'new-cursor', 'entries': [_october('oct 2', 'new')], 'has_more': False}
+        return {'cursor': 'padded-cursor', 'entries': [], 'has_more': False}
+    client = SimpleNamespace(list_page=listing, folder_names=lambda _: ['oct 02', 'oct 2'])
+    assert discover(client, state, datetime(2026, 10, 2, 16, tzinfo=timezone.utc),
+                    current_only=current_only) == 1
+    assert (alias, 'old-cursor') in calls
+    assert state.cursor(alias) == 'new-cursor'
+    assert state.work_count(folder_date='2026-10-02') == 2
