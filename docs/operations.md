@@ -508,6 +508,25 @@ The `/admin` Service controls modal runs on the app host, where `radon-api` is a
 
 `/admin/services` reports `status_source` once (`systemd`, `host-control`, `host-health`, `unavailable`) instead of repeating it per row. With the socket missing or the daemon down, rows fall back to `radon-health` and controls stay disarmed. Install path: `installed-units.sha256` pin, so `install-units` copies the unit on deploy; as a `.service` it is not enabled automatically (one-time `systemctl enable --now radon-control.service` on the app host; `setup-vps.sh` enables it on a fresh host).
 
+## Network trust (Ops Plane step 2)
+
+Every change here ships inert. Deploy never applies a tailnet policy, a host firewall or a Hetzner Cloud Firewall; each is an operator step below. Keep a public-IP SSH session open on the host you are changing until the new path is verified.
+
+### Tailnet policy (`cloud/tailscale/policy.hujson`)
+
+Replaces the allow-all grant. Tags `tag:radon-app` (ib-gateway), `tag:radon-broker`, `tag:radon-ops`, `tag:radon-gpu`, all owned by `group:operator`. Grants: operator devices reach each other (`autogroup:self`); `group:operator` reaches TCP 22 on every Radon tag and TCP 8321 on the app (cloud-thin `RADON_API_URL`); `tag:radon-app` reaches `tag:radon-gpu` TCP 8350 (SLM); `tag:radon-ops` reaches TCP 8341 on app and broker and TCP 443 on other ops nodes. Nothing reaches broker 4001 or 8340 over the tailnet: the order path is the private net. The file's `tests` block asserts `tag:radon-ops` cannot reach 8321, 4001, 8330, 8340 or 22; the admin console and the API refuse a save that fails it. `cloud/tests/test_tailnet_policy.py` pins the same properties in CI.
+
+The repo is public, so `group:operator` holds the placeholder `__OPERATOR_LOGIN__`. Apply (operator, once, off RTH):
+
+1. Save the live policy for rollback: admin console, Access controls, copy the editor contents to a local file (or `GET https://api.tailscale.com/api/v2/tailnet/-/acl` with an API access token, saved as `policy.before.hujson`).
+2. Add the four `tagOwners` entries to the LIVE policy first and save, keeping its current grants. Then tag the servers: Machines, `ib-gateway`, Edit ACL tags, `tag:radon-app`; `radon-broker`, `tag:radon-broker`. The app host is logged out of Tailscale (2026-10-01): run `tailscale up --advertise-tags=tag:radon-app` on it and approve the login.
+3. Render and validate: `sed 's/__OPERATOR_LOGIN__/<your tailnet login>/g' cloud/tailscale/policy.hujson > /tmp/radon-policy.hujson`, then `POST` it to `https://api.tailscale.com/api/v2/tailnet/-/acl/validate` (`Content-Type: application/hujson`, API access token): the response must be `{}`.
+4. Apply: paste `/tmp/radon-policy.hujson` into the console editor and save, or `POST` it to `.../tailnet/-/acl` the same way.
+5. Verify from the laptop: `ssh ib-gateway true`, `ssh radon-broker true`, `curl -fsS http://ib-gateway:8321/health`. From the broker: `nc -zvw3 <app tailnet ip> 22` must fail.
+6. Remove stale devices (`asymmetric-mbp-joe`, `iphone-15-pro`, `claude-code-dev`); `autogroup:member` still covers any device left logged in.
+
+Rollback: re-apply `policy.before.hujson` through step 4. Public SSH (ufw `OpenSSH` any) is the recovery path if a tag was missed.
+
 ## Health monitoring (isolated daemon + edge surface)
 
 The health surface is **decoupled from the trading stack** so it keeps reporting precisely when the stack is down. Two layers plus an off-box witness:

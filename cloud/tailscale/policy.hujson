@@ -1,0 +1,119 @@
+// Radon tailnet policy (Ops Plane step 2A). Replaces the allow-all grant.
+//
+// NOT applied by deploy. The operator applies it by hand; runbook:
+// docs/operations.md "Tailnet policy". Before applying, replace
+// __OPERATOR_LOGIN__ with the tailnet login (the repo is public, so the
+// login is not committed). The admin console and the API both run the
+// `tests` block below on save and refuse a policy that fails it.
+//
+// Pinned by cloud/tests/test_tailnet_policy.py.
+{
+  "groups": {
+    "group:operator": ["__OPERATOR_LOGIN__"],
+  },
+
+  "tagOwners": {
+    "tag:radon-app":    ["group:operator"],  // ib-gateway (5.78.148.38 / 10.0.0.2)
+    "tag:radon-broker": ["group:operator"],  // radon-broker (5.78.144.125 / 10.0.0.4)
+    "tag:radon-ops":    ["group:operator"],  // future ops-plane hosts
+    "tag:radon-gpu":    ["group:operator"],  // SLM host (docs/gpu-host-deployment.md)
+  },
+
+  "grants": [
+    // The operator's own devices (laptop, Mac mini, phone) keep reaching
+    // each other. autogroup:self never matches a tagged server.
+    {
+      "src": ["autogroup:member"],
+      "dst": ["autogroup:self"],
+      "ip":  ["*"],
+    },
+
+    // SSH to every Radon host: deploy recovery, media rsync
+    // (scripts/newsfeed/push_media.js), db_backup_pull.sh, journal_pull.sh,
+    // grok_fix_pickup.py, incident_responder.py, the phone release key.
+    {
+      "src": ["group:operator"],
+      "dst": ["tag:radon-app", "tag:radon-broker", "tag:radon-ops", "tag:radon-gpu"],
+      "ip":  ["tcp:22"],
+    },
+
+    // Cloud-thin laptop Next.js -> app FastAPI (scripts/cloud.sh,
+    // RADON_API_URL=http://ib-gateway:8321). The relay (8765) binds
+    // loopback only and the app host has no 4001 since the SPOF split, so
+    // neither is granted. The broker gets nothing but SSH: the order path
+    // is the Hetzner private net, never Tailscale.
+    {
+      "src": ["group:operator"],
+      "dst": ["tag:radon-app"],
+      "ip":  ["tcp:8321"],
+    },
+
+    // App newsfeed -> SLM tagger (vLLM on the tailnet address).
+    {
+      "src": ["tag:radon-app"],
+      "dst": ["tag:radon-gpu"],
+      "ip":  ["tcp:8350"],
+    },
+
+    // Ops plane: the host agent on app and broker, nothing else.
+    {
+      "src": ["tag:radon-ops"],
+      "dst": ["tag:radon-app", "tag:radon-broker"],
+      "ip":  ["tcp:8341"],
+    },
+    // Ops nodes talk to each other over TLS.
+    {
+      "src": ["tag:radon-ops"],
+      "dst": ["tag:radon-ops"],
+      "ip":  ["tcp:443"],
+    },
+  ],
+
+  "tests": [
+    {
+      "src": "tag:radon-ops",
+      "accept": [
+        "tag:radon-app:8341",
+        "tag:radon-broker:8341",
+        "tag:radon-ops:443",
+      ],
+      "deny": [
+        "tag:radon-app:8321",
+        "tag:radon-app:4001",
+        "tag:radon-app:8330",
+        "tag:radon-app:8340",
+        "tag:radon-app:22",
+        "tag:radon-broker:8321",
+        "tag:radon-broker:4001",
+        "tag:radon-broker:8330",
+        "tag:radon-broker:8340",
+        "tag:radon-broker:22",
+      ],
+    },
+    {
+      "src": "tag:radon-app",
+      "accept": ["tag:radon-gpu:8350"],
+      "deny": [
+        "tag:radon-broker:4001",
+        "tag:radon-broker:8340",
+        "tag:radon-broker:22",
+        "tag:radon-ops:443",
+      ],
+    },
+    {
+      "src": "__OPERATOR_LOGIN__",
+      "accept": [
+        "tag:radon-app:22",
+        "tag:radon-app:8321",
+        "tag:radon-broker:22",
+        "tag:radon-ops:22",
+      ],
+      "deny": [
+        "tag:radon-broker:4001",
+        "tag:radon-broker:8340",
+        "tag:radon-app:8330",
+        "tag:radon-ops:8341",
+      ],
+    },
+  ],
+}
