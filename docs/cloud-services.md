@@ -71,14 +71,16 @@ The same SSH public key is authorized on both routes — `~/.ssh/authorized_keys
 
 ## Realtime relay admission
 
-The relay admits at most 32 distinct L1 subjects per WebSocket client across
+The relay admits at most 512 distinct L1 subjects per WebSocket client across
 stock, option and index subscriptions (R-036 / REL-021b). Admission reserves
 capacity before asynchronous futures resolution and refuses excess subjects
 with `SUBSCRIPTION_LIMIT` before broker or state allocation. Repeating an
 existing subject remains allowed; unsubscribe and disconnect free its slot.
 A client leaving during resolution cannot open an orphan broker line.
-Implicit per-subject forwards can double that client's line demand; this
-cap leaves shared broker headroom without claiming fleet-wide reservation.
+One browser tab is one client carrying every page's subjects (the
+all-strikes chain alone streams up to 202 contracts), so the cap bounds
+runaway growth without refusing a legitimate workspace; it is not a
+fleet-wide line reservation.
 Snapshot queue saturation and cancellation retain their independent bounds.
 
 ## Mode switch
