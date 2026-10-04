@@ -185,3 +185,13 @@ The relay prunes expired contract closes at startup and on the first cache
 access/write of each Eastern day, then persists the reduced cache. Today's
 expiry remains available through the session. Late ticks cannot resurrect
 expired keys; expiry comparison uses Eastern dates, not the host timezone.
+
+## Relay subscription admission (R-036 / REL-021b)
+
+Each WebSocket client may hold at most 32 distinct L1 subjects across stocks,
+options, indexes and successive messages. Duplicates remain admissible; an
+unsubscribe or disconnect frees capacity. Refusal emits `SUBSCRIPTION_LIMIT`
+before state allocation, futures resolution or a broker request. Resolution
+rechecks subject ownership before allocating a line. Each subject can require
+one internal forward line, bounding one client's L1 demand to 64 lines before
+shared deduplication; this is a client cap, not a fleet-wide line reservation.

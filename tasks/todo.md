@@ -8845,9 +8845,9 @@ Review 2026-10-03: CIP-016 reserved experiment restored against 15bdb9a4; regres
 ## Nightly reliability 2026-10-04
 
 - [x] T1 depends_on: [] Install isolated toolchain, recover trusted checkpoint and reserve tonight's branch.
-- [ ] T2 depends_on: [T1] Audit delta and codemap importers; execute standing sweeps and triage inherited acceptance.
-- [ ] T3 depends_on: [T2] Repair verified findings serially with fault-injection red/green and focused gates.
+- [x] T2 depends_on: [T1] Audit delta and codemap importers; execute standing sweeps and triage inherited acceptance.
+- [x] T3 depends_on: [T2] Repair verified findings serially with fault-injection red/green and focused gates.
 - [ ] T4 depends_on: [T3] Run permanent drills, validate publication and await exact-head CI on one draft PR.
 - [ ] T5 depends_on: [T4] Post one rolling issue comment with retained acceptance and final review.
 
-Review: pending. Open PR #882 reserves R-721/R-722/R-723, REL-302/REL-303/REL-304 and R-315/R-316/R-317/R-318. Only tonight's branch is eligible for push; full suites and Vitest belong to CI.
+Review: delta audit finished through 6603be9b; three new source findings and inherited R-036 have repeated red/green evidence. R-035 passes executable upstream acceptance. Standing sweeps 110 passed; publication, permanent drills, exact-head CI and one durable comment remain pending. Open PR #882 reserves R-721/R-722/R-723, REL-302/REL-303/REL-304 and R-315/R-316/R-317/R-318. Only tonight's branch is eligible for push; full suites and Vitest belong to CI.
