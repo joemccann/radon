@@ -400,16 +400,7 @@ async function runRankSpreads(
     timeout: 20_000,
     token,
   })) as { last?: number; missing?: boolean };
-  const params = new URLSearchParams({
-    symbol: ticker,
-    expiry,
-    right: kind.endsWith("call") ? "C" : "P",
-    wings: "8",
-  });
-  const chain = (await radonFetch(`/options/uw-chain?${params}`, {
-    timeout: 45_000,
-    token,
-  })) as { spot?: number; contracts?: unknown; expiry?: string };
+  const chain = await loadPricedChain(ticker, expiry, kind.endsWith("call") ? "C" : "P", 8, token);
   const spot =
     (typeof chain.spot === "number" && chain.spot > 0 && chain.spot) ||
     (typeof quote.last === "number" && quote.last > 0 && quote.last) ||
@@ -425,10 +416,197 @@ async function runRankSpreads(
     ticker,
     expiry: chain.expiry ?? expiry,
     spot,
+    pricing_source: chain.source,
     kind,
     quantity,
     count: spreads.length,
     spreads,
+  };
+}
+
+type ExpiryRow = { expiry: string; dte: number | null };
+
+function isoExpiry(raw: unknown): string {
+  const digits = String(raw ?? "").replace(/[^0-9]/g, "");
+  return digits.length === 8 ? `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}` : "";
+}
+
+function dteOf(expiry: string): number | null {
+  const ms = Date.parse(`${expiry}T00:00:00Z`) - Date.parse(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+  return Number.isFinite(ms) ? Math.round(ms / 86_400_000) : null;
+}
+
+// IB secdef first (the chain UI's expiry source), UW expiry breakdown second.
+async function loadExpirations(
+  ticker: string,
+  token?: string,
+): Promise<{ source: "ib" | "uw"; expirations: ExpiryRow[] }> {
+  try {
+    const ib = (await radonFetch(`/options/expirations?symbol=${encodeURIComponent(ticker)}`, {
+      timeout: 30_000,
+      token,
+    })) as { expirations?: unknown };
+    const rows = (Array.isArray(ib.expirations) ? ib.expirations : [])
+      .map(isoExpiry)
+      .filter(Boolean)
+      .sort()
+      .map((expiry) => ({ expiry, dte: dteOf(expiry) }));
+    if (rows.length) return { source: "ib", expirations: rows };
+  } catch {
+    // fall through to UW
+  }
+  const uw = (await radonFetch(`/options/uw-chain?symbol=${encodeURIComponent(ticker)}`, {
+    timeout: 30_000,
+    token,
+  })) as { expirations?: Array<{ expiry?: unknown; dte?: unknown }> };
+  const rows = (Array.isArray(uw.expirations) ? uw.expirations : [])
+    .map((row) => ({ ...row, expiry: isoExpiry(row?.expiry) }))
+    .filter((row) => row.expiry)
+    .map((row) => ({ ...row, dte: typeof row.dte === "number" ? row.dte : dteOf(row.expiry) }));
+  return { source: "uw", expirations: rows };
+}
+
+async function runOptionExpirations(input: Record<string, unknown>, token?: string): Promise<unknown> {
+  const ticker = tickerOf(input);
+  if (!ticker) throw new Error("ticker is required.");
+  return { ticker, ...(await loadExpirations(ticker, token)) };
+}
+
+type QuoteRow = { strike?: number; right?: string; bid?: number | null; ask?: number | null; iv?: number | null };
+type PricedChain = { ticker: string; expiry: string; spot: number | null; source: "ib" | "uw"; contracts: QuoteRow[] };
+
+// The IB route waits up to 60s on the gateway; leave room for the response.
+const IB_QUOTES_TIMEOUT_MS = 70_000;
+
+function hasPricedRow(rows: QuoteRow[]): boolean {
+  return rows.some((row) => (row.bid ?? 0) > 0 || (row.ask ?? 0) > 0 || typeof row.iv === "number");
+}
+
+// IB snapshots (same feed as the chain UI) for several expiries in one gateway call.
+async function loadIbQuotes(
+  ticker: string,
+  expiries: string[],
+  right: string,
+  wings: number,
+  token?: string,
+): Promise<{ spot: number | null; byExpiry: Record<string, QuoteRow[]> } | null> {
+  const params = new URLSearchParams({ symbol: ticker, expiries: expiries.join(","), wings: String(wings) });
+  if (right) params.set("right", right);
+  try {
+    const data = (await radonFetch(`/options/ib-quotes?${params}`, { timeout: IB_QUOTES_TIMEOUT_MS, token })) as {
+      spot?: unknown;
+      expirations?: Record<string, unknown>;
+    };
+    const byExpiry: Record<string, QuoteRow[]> = {};
+    for (const [expiry, rows] of Object.entries(data.expirations ?? {})) {
+      byExpiry[isoExpiry(expiry)] = Array.isArray(rows) ? (rows as QuoteRow[]) : [];
+    }
+    const spot = typeof data.spot === "number" && data.spot > 0 ? data.spot : null;
+    return { spot, byExpiry };
+  } catch {
+    return null;
+  }
+}
+
+async function loadUwChain(ticker: string, expiry: string, right: string, wings: number, token?: string): Promise<PricedChain> {
+  const params = new URLSearchParams({ symbol: ticker, expiry, wings: String(wings) });
+  if (right) params.set("right", right);
+  const uw = (await radonFetch(`/options/uw-chain?${params}`, { timeout: 45_000, token })) as {
+    spot?: number;
+    expiry?: string;
+    contracts?: QuoteRow[];
+  };
+  return {
+    ticker,
+    expiry: uw.expiry ?? expiry,
+    spot: typeof uw.spot === "number" && uw.spot > 0 ? uw.spot : null,
+    source: "uw",
+    contracts: Array.isArray(uw.contracts) ? uw.contracts : [],
+  };
+}
+
+// IB first, UW when the gateway is down or returns no priced book.
+async function loadPricedChain(
+  ticker: string,
+  expiry: string,
+  right: string,
+  wings: number,
+  token?: string,
+): Promise<PricedChain> {
+  const iso = isoExpiry(expiry) || expiry;
+  const ib = await loadIbQuotes(ticker, [iso], right, wings, token);
+  const rows = ib?.byExpiry[iso] ?? [];
+  if (ib && hasPricedRow(rows)) return { ticker, expiry: iso, spot: ib.spot, source: "ib", contracts: rows };
+  return loadUwChain(ticker, iso, right, wings, token);
+}
+
+async function runOptionChain(input: Record<string, unknown>, token?: string): Promise<unknown> {
+  const ticker = tickerOf(input);
+  const expiry = String(input.expiry ?? "").trim();
+  if (!ticker || !expiry) throw new Error("ticker and expiry are required.");
+  const rightRaw = typeof input.right === "string" ? input.right.trim().toUpperCase() : "";
+  const right = rightRaw === "C" || rightRaw === "P" ? rightRaw : "";
+  return loadPricedChain(ticker, expiry, right, 8, token);
+}
+
+async function runTermStructure(input: Record<string, unknown>, token?: string): Promise<unknown> {
+  const ticker = tickerOf(input);
+  if (!ticker) throw new Error("ticker is required.");
+  const rightRaw = typeof input.right === "string" ? input.right.trim().toUpperCase() : "";
+  const right = rightRaw === "C" || rightRaw === "P" ? rightRaw : "";
+  const maxDte =
+    typeof input.max_dte === "number" && input.max_dte > 0 ? Math.floor(input.max_dte) : 120;
+  const maxExpiries =
+    typeof input.max_expiries === "number" && input.max_expiries > 0
+      ? Math.min(Math.floor(input.max_expiries), 12)
+      : 8;
+  const { source, expirations } = await loadExpirations(ticker, token);
+  const inWindow = expirations.filter((row) => row.dte !== null && row.dte >= 0 && row.dte <= maxDte);
+  // Sample evenly so a long weekly ladder still spans the whole horizon.
+  const step = Math.max(1, Math.ceil(inWindow.length / maxExpiries));
+  const picked = inWindow.filter((_, index) => index % step === 0).slice(0, maxExpiries);
+
+  const ib = picked.length ? await loadIbQuotes(ticker, picked.map((row) => row.expiry), right, 4, token) : null;
+  const settled = await Promise.allSettled(
+    picked.map(async (row): Promise<PricedChain> => {
+      const rows = ib?.byExpiry[row.expiry] ?? [];
+      if (ib && hasPricedRow(rows)) {
+        return { ticker, expiry: row.expiry, spot: ib.spot, source: "ib", contracts: rows };
+      }
+      return loadUwChain(ticker, row.expiry, right, 4, token);
+    }),
+  );
+  let spot = ib?.spot ?? 0;
+  const sources = new Set<string>();
+  const term = picked.map((row, index) => {
+    const outcome = settled[index];
+    if (outcome.status === "rejected") {
+      return { ...row, error: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason) };
+    }
+    const chain = outcome.value;
+    sources.add(chain.source);
+    if (!spot && chain.spot) spot = chain.spot;
+    const anchor = chain.spot ?? spot;
+    const away = (c: QuoteRow) => Math.abs((c.strike ?? 0) - anchor);
+    const atm = chain.contracts
+      .filter((c) => typeof c.iv === "number" && (!right || c.right === right))
+      .sort((a, b) => away(a) - away(b))[0];
+    return {
+      ...row,
+      pricing_source: chain.source,
+      atm_strike: atm?.strike ?? null,
+      atm_iv: atm?.iv ?? null,
+      contracts: chain.contracts,
+    };
+  });
+  const pricingSource = sources.size > 1 ? "mixed" : (sources.values().next().value ?? "none");
+  return {
+    ticker,
+    spot: spot || null,
+    right: right || "both",
+    expirations_source: source,
+    pricing_source: pricingSource,
+    term,
   };
 }
 
@@ -758,7 +936,7 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
   {
     name: "get_option_expirations",
     description:
-      "List listed option expirations with DTE and volume for a ticker. Use this when the operator has not named an expiry.",
+      "List listed option expirations with DTE for a ticker (IB first, UW fallback). Use this when the operator has not named an expiry.",
     destructive: false,
     input_schema: {
       type: "object",
@@ -767,16 +945,29 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
       },
       required: ["ticker"],
     },
-    run: (input, token) =>
-      radonFetch(`/options/uw-chain?symbol=${encodeURIComponent(tickerOf(input))}`, {
-        timeout: 30_000,
-        token,
-      }),
+    run: (input, token) => runOptionExpirations(input, token),
+  },
+  {
+    name: "get_option_term_structure",
+    description:
+      "Price the option term structure: ATM IV plus a compact priced chain (bid/ask/mid/IV/delta/gamma/theta/vega/OI) for every expiry out to max_dte. Use for term-structure, calendar, or 'where is vol cheap' questions before naming a tenor.",
+    destructive: false,
+    input_schema: {
+      type: "object",
+      properties: {
+        ticker: { type: "string", description: "Underlying symbol" },
+        right: { type: "string", enum: ["C", "P"], description: "Optional call/put filter" },
+        max_dte: { type: "number", description: "Furthest expiry in days. Default 120." },
+        max_expiries: { type: "number", description: "Expiries to price, sampled evenly. Default 8, max 12." },
+      },
+      required: ["ticker"],
+    },
+    run: (input, token) => runTermStructure(input, token),
   },
   {
     name: "get_option_chain",
     description:
-      "Fetch a compact priced option chain (bid/ask/mid/IV/OI) around spot for one expiry. Use before recommending strikes.",
+      "Fetch a compact priced option chain (bid/ask/mid/IV/delta/gamma/theta/vega) around spot for one expiry: IB snapshots first, UW fallback; `source` says which. Use before recommending strikes.",
     destructive: false,
     input_schema: {
       type: "object",
@@ -787,15 +978,7 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
       },
       required: ["ticker", "expiry"],
     },
-    run: (input, token) => {
-      const params = new URLSearchParams({
-        symbol: tickerOf(input),
-        expiry: String(input.expiry ?? "").trim(),
-      });
-      const right = typeof input.right === "string" ? input.right.trim().toUpperCase() : "";
-      if (right === "C" || right === "P") params.set("right", right);
-      return radonFetch(`/options/uw-chain?${params}`, { timeout: 45_000, token });
-    },
+    run: (input, token) => runOptionChain(input, token),
   },
   {
     name: "rank_spreads",
@@ -987,6 +1170,15 @@ export function isDestructiveTool(name: string): boolean {
 
 export function isKnowledgeTool(name: string): boolean {
   return name === "search_knowledge" || name === "find_prior_evals";
+}
+
+/**
+ * Tools whose results are untrusted retrieved text: the loop sends them
+ * through its tool-less extraction pass and holds the facts for the final
+ * answer, so they never re-enter a tool-capable round.
+ */
+export function isIsolatedResultTool(name: string): boolean {
+  return isKnowledgeTool(name) || name === "web_search";
 }
 
 /** The tool schema the model sees: name + description + input_schema only. */

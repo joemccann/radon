@@ -22,7 +22,7 @@ Applies under `scripts/newsfeed/`. Mirrors `scripts/newsfeed/CLAUDE.md`.
 ## Tagging
 
 - Posts with images use vision tagger; text-only posts use the shared model ladder (`scripts/clients/model_ladder.py`) via `model_ladder_cli.py`.
-- Ladder order: anthropic -> grok -> cursor -> codex -> gemini -> nvidia -> cerebras (last). Soft-fail when none work.
+- Ladder order: anthropic -> grok -> cursor -> codex -> antigravity -> nvidia -> cerebras (last). Soft-fail when none work.
 - Optional local rung `slm-tagger` behind `RADON_SLM_TAGGER_MODE` (default `off`). Closed vocabulary: 3 uppercase kebab tags, taxonomy-validated, `abstain:*` fall-through. Distill/reviewer never see it.
 - Exactly 3 tags per post.
 - Normalize tags to uppercase, multi-word uppercase-kebab-case, allowed chars `A-Z 0-9 - &`, case-insensitive dedupe.

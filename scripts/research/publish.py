@@ -2,16 +2,21 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 import hashlib
 import json
 import re
+import time
 
-from api.db_http import hrana_execute, hrana_transaction
+from api.db_http import HRANA_TIMEOUT_S, hrana_execute, hrana_transaction
 from research.assets import ASSET_RE, URL_PREFIX, read_asset, store_asset
+from research import force_include
 
 PT = ZoneInfo("America/Los_Angeles")
 HELD_TTL_HOURS = 24
+HELD_EXPIRY_PAGE_SIZE = 200
+HELD_EXPIRY_BUDGET_S = 30.0
 # Product clock is America/Los_Angeles. Age from held_at (fallback updated_at for
 # legacy rows). Do not overwrite updated_at; that stays the review/decision time.
 _EXPIRE_SQL = """UPDATE research_outcomes
@@ -25,6 +30,28 @@ WHERE outcome = 'held'
   AND datetime(replace(COALESCE(held_at, updated_at), 'Z', '')) < datetime(replace(?, 'Z', ''))
 RETURNING work_key"""
 
+_EXPIRE_SELECT_SQL = """SELECT rowid, work_key, publisher, series, file_name, context_json
+FROM research_outcomes
+WHERE rowid IN (
+  SELECT rowid FROM research_outcomes WHERE outcome = 'held'
+  AND rowid > ?
+  AND datetime(replace(COALESCE(held_at, updated_at), 'Z', '')) < datetime(replace(?, 'Z', ''))
+  ORDER BY rowid LIMIT ?
+)
+ORDER BY rowid"""
+
+_EXPIRE_KEYS_SQL = """UPDATE research_outcomes
+SET outcome = 'dropped',
+    reason_codes = CASE
+      WHEN instr(COALESCE(reason_codes, ''), 'HELD_EXPIRED') > 0 THEN reason_codes
+      ELSE json_insert(COALESCE(nullif(reason_codes, ''), '[]'), '$[#]', 'HELD_EXPIRED')
+    END,
+    expired_at = ?
+WHERE outcome = 'held'
+  AND work_key IN ({keys})
+  AND datetime(replace(COALESCE(held_at, updated_at), 'Z', '')) < datetime(replace(?, 'Z', ''))
+RETURNING work_key"""
+
 
 def held_cutoff(now=None, max_age_hours=HELD_TTL_HOURS):
     """now in America/Los_Angeles minus max_age_hours, returned as UTC."""
@@ -34,11 +61,57 @@ def held_cutoff(now=None, max_age_hours=HELD_TTL_HOURS):
     return (instant.astimezone(PT) - timedelta(hours=max_age_hours)).astimezone(timezone.utc)
 
 
+def _held_is_always_publish(row):
+    publisher = row[1] if len(row) > 1 else ''
+    series = row[2] if len(row) > 2 else ''
+    file_name = row[3] if len(row) > 3 else ''
+    raw = row[4] if len(row) > 4 else '{}'
+    try:
+        ctx = json.loads(raw or '{}')
+    except (TypeError, ValueError):
+        ctx = {}
+    if not isinstance(ctx, dict):
+        ctx = {}
+    if ctx.get('alwaysPublish'):
+        return True
+    identity = SimpleNamespace(publisher=publisher or '', series=series or '', publisher_folder='')
+    return force_include.always_publish(identity, filename=file_name, page_text=ctx.get('excerpt') or '')
+
+
 def expire_stale_held(max_age_hours=HELD_TTL_HOURS, now=None) -> int:
-    """Drop held outcomes older than the PT TTL. Never publishes or requeues."""
+    """R-726 / REL-307: bounded TTL pages; completed updates are replay-safe.
+
+    Never publishes or requeues. A later failure propagates with prior pages
+    committed; the next cycle resumes eligibility without duplicating reasons.
+    """
     cutoff = held_cutoff(now, max_age_hours).isoformat()
     stamp = datetime.now(timezone.utc).isoformat()
-    return len(hrana_execute(_EXPIRE_SQL, (stamp, cutoff)))
+    deadline = time.monotonic() + HELD_EXPIRY_BUDGET_S
+
+    def remaining_timeout():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('held expiry deadline exhausted')
+        return min(HRANA_TIMEOUT_S, remaining)
+
+    cursor, expired = 0, 0
+    while True:
+        rows = hrana_execute(_EXPIRE_SELECT_SQL, (cursor, cutoff, HELD_EXPIRY_PAGE_SIZE),
+                             timeout=remaining_timeout())
+        remaining_timeout()
+        if not rows:
+            return expired
+        next_cursor = int(rows[-1][0])
+        if next_cursor <= cursor:
+            raise ValueError('held expiry cursor did not advance')
+        expire_keys = [row[1] for row in rows if row[1] and not _held_is_always_publish(row[1:])]
+        if expire_keys:
+            placeholders = ','.join('?' * len(expire_keys))
+            expired += len(hrana_execute(_EXPIRE_KEYS_SQL.format(keys=placeholders),
+                                        (stamp, *expire_keys, cutoff), timeout=remaining_timeout()))
+        cursor = next_cursor
+        if len(rows) < HELD_EXPIRY_PAGE_SIZE:
+            return expired
 
 
 def stable_post_id(file_id: str, finding_key: str) -> str:
@@ -135,6 +208,13 @@ def outcome_row(work: dict, review: dict) -> dict:
         outcome, codes = "published", sorted({entry["held"] for entry in audit})
     else:
         outcome, codes = "held", sorted({entry["held"] for entry in audit}) or ["NO_CANDIDATES"]
+    extra = []
+    if review.get("always_publish_fallback"):
+        extra.append("ALWAYS_PUBLISH_FALLBACK")
+    for entry in review.get("audit") or []:
+        if isinstance(entry, dict) and entry.get("reason_code") == "ALWAYS_PUBLISH_FALLBACK":
+            extra.append("ALWAYS_PUBLISH_FALLBACK")
+    codes = sorted(set(list(codes) + extra))
     drafts = []
     for entry in audit[:8]:
         candidate = candidates.get(entry.get("claim_key")) or entry.get("candidate") or {}
@@ -148,6 +228,8 @@ def outcome_row(work: dict, review: dict) -> dict:
                "dateSource": identity.get("date_source") or "", "excerpt": str(document.get("excerpt") or "")[:900],
                "selectorReason": str(((review.get("selection") or {}).get("reason")) or "")[:600],
                "sourceUrl": document.get("source_url") or ""}
+    if review.get("always_publish"):
+        context["alwaysPublish"] = True
     return {"context_json": json.dumps(context), "work_key": work["key"], "file_id": metadata.get("id") or "", "file_name": metadata.get("name") or "",
             "publisher": identity.get("publisher") or "unknown", "series": identity.get("series") or "",
             "doc_type": identity.get("doc_type") or "", "folder_date": work.get("folder_date") or "",

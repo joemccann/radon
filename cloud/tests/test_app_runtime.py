@@ -1022,7 +1022,9 @@ def test_run_newsfeed_mounts_host_playwright_browsers(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
     state_dir = tmp_path / "state"
-    assert f"{state_dir / 'ms-playwright'}:/ms-playwright" in log, log
+    # Read-only: host radon processes launch the same cached browsers, so the
+    # third-party-content container must not be able to rewrite them.
+    assert f"{state_dir / 'ms-playwright'}:/ms-playwright:ro" in log, log
     assert "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright" in log
     assert f"{tmp_path / 'data' / 'newsfeed-scripts'}:/home/radon/radon/scripts/newsfeed:ro" in log, log
 
@@ -1300,6 +1302,7 @@ def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
         "XAI_API_KEY=k-xai\n"
         "OPENAI_API_KEY=k-oai\n"
         "GEMINI_API_KEY=k-gem\n"
+        "ANTIGRAVITY_MODEL=m-agy\n"
         "NVIDIA_API_KEY=k-nv\n"
         "CEREBRAS_API_KEY=k2\n"
         "RADON_PYTHON_BIN=/usr/bin/python3.13\n"
@@ -1325,6 +1328,7 @@ def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
     assert GATEWAY_SECRET_KEY not in keys
     assert "CLERK_SECRET_KEY" not in keys
     assert "MENTHORQ_PASS" not in keys
+    assert "GEMINI_API_KEY" not in keys  # retired: Google is the Antigravity CLI only
     assert {
         "NODE_ENV",
         "TURSO_DB_URL",
@@ -1334,7 +1338,7 @@ def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
         "RADON_LADDER_ALLOW_PREPAID",
         "XAI_API_KEY",
         "OPENAI_API_KEY",
-        "GEMINI_API_KEY",
+        "ANTIGRAVITY_MODEL",
         "NVIDIA_API_KEY",
         "CEREBRAS_API_KEY",
         "RADON_PYTHON_BIN",
@@ -1505,6 +1509,10 @@ def _subscription_home(tmp_path: Path) -> Path:
     (home / ".grok").mkdir(parents=True)
     (home / ".grok" / "auth.json").write_text("{}", encoding="utf-8")
     (home / ".codex").mkdir()
+    (home / ".gemini" / "antigravity-cli").mkdir(parents=True)
+    (home / ".gemini" / "config").mkdir()
+    (home / ".gemini" / "oauth_creds.json").write_text("{}", encoding="utf-8")
+    (home / ".local" / "bin").mkdir(parents=True)
     return home
 
 
@@ -1519,7 +1527,33 @@ def test_run_api_binds_subscription_credential_dirs_readonly(tmp_path: Path) -> 
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
     assert f"{home}/.grok:/home/radon/.grok:ro" in log
     assert f"{home}/.codex:/home/radon/.codex:ro" in log
+    # agy refreshes its grant and writes logs/state on every run (live
+    # 2026-10-02: read-only binds -> "You are not logged into Antigravity").
+    for agy_dir in (".gemini/antigravity-cli", ".gemini/config"):
+        assert f"{home}/{agy_dir}:/home/radon/{agy_dir}:rw" in log
+    assert f"{home}/.gemini:" not in log  # retired Gemini CLI creds stay out
+    assert f"{home}/.local/bin:/home/radon/.local/bin:ro" in log
     assert ".claude:" not in log  # absent on this host: not mounted
+    assert "HOME=/home/radon" in log
+
+
+def test_run_research_binds_subscription_and_antigravity(tmp_path: Path) -> None:
+    home = _subscription_home(tmp_path)
+    result = _run(
+        tmp_path,
+        ["run", "radon-research.service"],
+        extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert f"{home}/.grok:/home/radon/.grok:ro" in log
+    assert f"{home}/.codex:/home/radon/.codex:ro" in log
+    # agy refreshes its grant and writes logs/state on every run (live
+    # 2026-10-02: read-only binds -> "You are not logged into Antigravity").
+    for agy_dir in (".gemini/antigravity-cli", ".gemini/config"):
+        assert f"{home}/{agy_dir}:/home/radon/{agy_dir}:rw" in log
+    assert f"{home}/.gemini:" not in log  # retired Gemini CLI creds stay out
+    assert f"{home}/.local/bin:/home/radon/.local/bin:ro" in log
     assert "HOME=/home/radon" in log
 
 
@@ -1561,6 +1595,12 @@ def test_run_newsfeed_binds_subscription_credential_dirs_readonly(tmp_path: Path
     assert result.returncode == 0, result.stderr
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
     assert f"{home}/.grok:/home/radon/.grok:ro" in log
+    # Newsfeed renders third-party content: it gets no read-write grant the
+    # host shares with other units, so the antigravity dirs stay unmounted.
+    assert ".gemini" not in log
+    for bind in log.split():
+        if bind.startswith(f"{home}/"):
+            assert bind.endswith(":ro"), bind
 
 
 def test_run_skips_subscription_binds_when_no_dir_exists(tmp_path: Path) -> None:

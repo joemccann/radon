@@ -23,6 +23,7 @@
         "scripts/grok_runtime.py",
         "scripts/grok_upgrade.py",
         "scripts/ir_pr_description.py",
+        "scripts/ir_push_gate.py",
         "scripts/watchdog/pages.py",
         "scripts/deploy_notify.py",
         "config/com.radon.grok-page-responder.plist",
@@ -92,7 +93,8 @@
         "scripts/nightly_*.py",
         "scripts/github_pr_output.py",
         "scripts/security_claude_ladder.py",
-        "scripts/claude_cli_env_drift.py"
+        "scripts/claude_cli_env_drift.py",
+        "config/com.radon.external-probe-dispatch.plist"
       ],
       "owners": ["docs/operations.md"],
       "note": "operations.md is the one place indexing every nightly loop: fire times, the runner clone rail, the model ladder and the status vocabulary an operator reads off a page. #219 changed operator-facing behaviour in all five wrappers with no owner update (DOC-032/033/034/040). Every loop now runs on scripts/runner/run_loop.sh; loop SEMANTICS stay in .claude/runner-prompts/<loop>.md; only the operator contract belongs here."
@@ -118,6 +120,18 @@
       "globs": ["scripts/credential_validators.py"],
       "owners": ["docs/operations.md"],
       "note": "The Credentials tab refuses values on egress pins an operator cannot see from the UI (DOC-067)."
+    },
+    {
+      "id": "credential-redaction",
+      "globs": ["scripts/credential_redaction.py"],
+      "owners": ["docs/security-audit-playbook.md"],
+      "note": "Shared redaction and publication shapes recur across security reports and incident egress (DOC-145)."
+    },
+    {
+      "id": "research-worker",
+      "globs": ["scripts/research/worker.py"],
+      "owners": ["docs/dropbox-research.md"],
+      "note": "Research lifecycle, bounded processing and publication recovery share the existing worker owner (DOC-146)."
     },
     {
       "id": "model-ladder",
@@ -224,7 +238,8 @@
       "globs": [
         "scripts/knowledge/**",
         "scripts/db/migrations/0087_knowledge_embedding_v2.sql",
-        "scripts/tests/test_knowledge_embed_v2.py"
+        "scripts/tests/test_knowledge_embed_v2.py",
+        "cloud/services/radon-knowledge-eval.service"
       ],
       "owners": ["docs/knowledge-embeddings.md"],
       "note": "Dual-dimension vector contract (384d bge + 2048d nemotron), query fallback, dual-write ingest, backfill order, and env vars. Drift test pins schema and coverage logic (DOC-129)."

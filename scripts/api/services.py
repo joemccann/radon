@@ -175,7 +175,7 @@ def host_role() -> str:
 
 
 _HETZNER_PRIVATE = ipaddress.ip_network("10.0.0.0/16")
-REMOTE_VERBS = frozenset({"start", "stop", "restart", "reset-lease", "status"})
+REMOTE_VERBS = frozenset({"start", "stop", "restart", "reset-lease", "status", "hold", "unhold"})
 
 
 
@@ -556,8 +556,10 @@ async def _host_control_statuses() -> Optional[List[UnitStatus]]:
         status.allowed_actions = actions
         status.can_control = status.load_state == "loaded" and bool(actions)
         statuses.append(status)
-    if host_role() == "app" and not any(s.unit == GATEWAY_UNIT for s in statuses):
+    if host_role() == "app":
         # The Gateway lives on the broker; its row comes from the mTLS daemon.
+        # A local row here is a leftover pre-split unit and must not shadow it.
+        statuses = [s for s in statuses if s.unit != GATEWAY_UNIT]
         statuses.append(await show_unit(GATEWAY_UNIT))
     return statuses
 
@@ -667,13 +669,19 @@ def _decode_remote_body(raw: bytes) -> dict:
     return payload
 
 
-def _remote_http(verb: str, timeout: float) -> tuple[int, dict]:
+def _remote_http(verb: str, timeout: float, body: Optional[dict] = None) -> tuple[int, dict]:
     if verb not in REMOTE_VERBS:
         return -1, {"ok": False, "detail": f"verb not allowed: {verb}"}
     base = os.environ["RADON_IB_REMOTE_URL"].rstrip("/")
     path = "/status" if verb == "status" else f"/{verb}"
     method = "GET" if verb == "status" else "POST"
-    req = urllib.request.Request(base + path, method=method, data=b"" if method == "POST" else None)
+    data = None
+    headers = {}
+    if method == "POST":
+        data = json.dumps(body).encode("utf-8") if body is not None else b""
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(base + path, method=method, data=data, headers=headers)
     try:
         with urllib.request.urlopen(req, context=_remote_ssl_context(), timeout=timeout) as resp:
             return resp.status, _decode_remote_body(resp.read())
@@ -799,6 +807,8 @@ async def remote_gateway_action(action: str) -> ActionResult:
     if not isinstance(payload, dict):
         payload = {"ok": False, "detail": "broker reply is not an object", "malformed": True}
     detail = str(payload.get("detail") or payload.get("state") or payload.get("error") or "")
+    if status == OPERATOR_HOLD_RC or payload.get("code") == "OPERATOR_HOLD":
+        return ActionResult(GATEWAY_UNIT, action, False, detail, OPERATOR_HOLD_RC)
     rc = _remote_returncode(payload, status)
     if status == 409 or rc in {GATEWAY_LEASE_HELD_RC, GATEWAY_CONTROL_BUSY_RC, PUSH_LOCK_HELD_RC}:
         return ActionResult(GATEWAY_UNIT, action, False, detail, PUSH_LOCK_HELD_RC)
@@ -827,6 +837,71 @@ SYSTEMCTL_MUTATION_TIMEOUT_S = 60.0
 # holder". The route maps it to HTTP 409 (conflict, retry later) instead of
 # the generic 400/502 buckets.
 PUSH_LOCK_HELD_RC = 409
+# "refused: IBKR operator hold" (broker daemon 423, helper exit 73). The
+# routes answer 423: the Gateway is logged out on purpose so the operator can
+# use the shared IBKR username; a login now would kick them.
+OPERATOR_HOLD_RC = 423
+HELPER_OPERATOR_HOLD_RC = 73
+OPERATOR_HOLD_DETAIL = (
+    "IBKR operator hold active: the Gateway stays logged out so the operator "
+    "can use IBKR directly. Resume Gateway in /admin or `radon ib resume` on "
+    "the broker clears it."
+)
+
+
+def _normalize_hold(raw: object) -> Optional[dict]:
+    if not isinstance(raw, dict) or "held" not in raw:
+        return None
+    keep = ("held", "reason", "actor", "held_at", "expires_at", "expired", "id", "trusted")
+    out = {key: raw[key] for key in keep if key in raw}
+    out["held"] = bool(raw.get("held"))
+    return out
+
+
+async def operator_hold_state() -> Optional[dict]:
+    """The IBKR operator hold as this host can see it, or None when unknown.
+
+    App role: the broker's /status (cached, coalesced). Anywhere else: the
+    local flag. Unknown never refuses anything here; the broker still does.
+    """
+    if host_role() == "app":
+        if not is_remote_gateway_configured():
+            return None
+        status, payload = await _remote_status()
+        if status == -1 or not isinstance(payload, dict):
+            return None
+        return _normalize_hold(payload.get("operator_hold"))
+    try:
+        from utils import ib_operator_hold
+    except ImportError:  # pragma: no cover - scripts/ is on sys.path in the API
+        return None
+    return _normalize_hold(await asyncio.to_thread(ib_operator_hold.hold_state))
+
+
+async def set_operator_hold(
+    held: bool, *, reason: str, actor: str, expires_at: Optional[str] = None,
+) -> tuple[int, dict]:
+    """Set or clear the hold on the broker over mTLS. App role only: on the
+    broker itself the operator uses `radon ib release|resume`."""
+    if host_role() != "app" or not is_remote_gateway_configured():
+        return 409, {
+            "ok": False,
+            "detail": "The hold lives on the broker. On the broker run `radon ib release` or `radon ib resume`.",
+        }
+    verb = "hold" if held else "unhold"
+    body: dict = {"actor": actor}
+    if held:
+        body["reason"] = reason
+        if expires_at:
+            body["expires_at"] = expires_at
+    status, payload = await asyncio.to_thread(_remote_http, verb, REMOTE_TIMEOUT_S, body)
+    # The next /health must show the new hold, not a cached old one.
+    _reset_remote_status_cache()
+    if status == -1:
+        return 504, {"ok": False, "detail": payload.get("detail") or "broker unreachable"}
+    if not isinstance(payload, dict) or payload.get("malformed"):
+        return 502, {"ok": False, "detail": "broker reply is not an object"}
+    return status, payload
 
 
 @dataclass
@@ -973,6 +1048,13 @@ def is_gateway_control_available() -> bool:
 
 async def _control_gateway(action: str) -> ActionResult:
     """Delegate Gateway lifecycle to the helper that owns lease acquisition."""
+    if action in {"start", "restart"}:
+        # Fast refusal from the mirrored hold: no login request leaves this
+        # host. The broker daemon and helper refuse too; this one is ours.
+        hold = await operator_hold_state()
+        if hold and hold.get("held"):
+            logger.warning("Gateway %s refused: IBKR operator hold %s", action, hold)
+            return ActionResult(GATEWAY_UNIT, action, False, OPERATOR_HOLD_DETAIL, OPERATOR_HOLD_RC)
     if host_role() == "app":
         if not is_remote_gateway_configured():
             return ActionResult(
@@ -999,6 +1081,8 @@ async def _control_gateway(action: str) -> ActionResult:
     if rc in {GATEWAY_LEASE_HELD_RC, GATEWAY_CONTROL_BUSY_RC}:
         logger.warning("admin Gateway %s refused by active 2FA lease: %s", action, detail)
         return ActionResult(GATEWAY_UNIT, action, False, detail, PUSH_LOCK_HELD_RC)
+    if rc == HELPER_OPERATOR_HOLD_RC:
+        return ActionResult(GATEWAY_UNIT, action, False, detail, OPERATOR_HOLD_RC)
     return ActionResult(GATEWAY_UNIT, action, rc == 0, detail, rc)
 
 

@@ -31,6 +31,7 @@
 import { createClient, type Client } from "@libsql/client";
 import { Agent, fetch as undiciFetch } from "undici";
 import path from "node:path";
+import { assertDemoDbIsolation } from "./demo/demoDbIsolation";
 import {
   createDbOperationIdentity,
   currentDbOperationIdentity,
@@ -375,6 +376,10 @@ function projectRoot(): string {
 }
 
 export function getDb(): Client {
+  // Demo-scoped callers must never get a prod-marked client. Checked on every
+  // call, before the cache, because the principal scope varies per request
+  // and most routes take `getDb()` directly rather than going through dbExecute.
+  assertDemoDbIsolation();
   if (cached) return cached;
 
   const url = process.env.TURSO_DB_URL;
