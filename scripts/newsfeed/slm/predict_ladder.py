@@ -18,7 +18,7 @@ if str(_SCRIPTS) not in sys.path:
 
 from clients.model_ladder import accept_tags_payload, complete_text_json  # noqa: E402
 from newsfeed.slm.eval import load_jsonl  # noqa: E402
-from newsfeed.slm.predict_slm import user_content  # noqa: E402
+from newsfeed.slm.predict_slm import system_content, user_content  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 result = complete_text_json(
                     user_content(row),
-                    system=system,
+                    system=system or system_content(row),
                     accept=accept_tags_payload,
                     log_prefix="slm-bakeoff-A",
                 )

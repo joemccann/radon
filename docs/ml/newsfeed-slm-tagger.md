@@ -268,6 +268,8 @@ scripts/newsfeed/slm/
   requirements-slm.txt                # trainer pin; never the runtime requirements
 ```
 
+Benchmark arms A, B and C forward each corpus row's `messages` system prompt and user content by default. Supplying a non-empty `--system-file` overrides the system prompt for either predictor; use the same file for every arm in a comparison. Arm A still refuses `RADON_LADDER_ALLOW_PREPAID`. Fake-inference entry-point regressions in `scripts/tests/test_slm_predictors.py` cover row-specific prompts, overrides, identity, refusal and error records without invoking a model.
+
 Starting configuration (`configs/llamafactory-qwen25-1p5b-qlora-v1.yaml`), to be tuned only against `valid.jsonl`. Loss is masked (`train_on_prompt: false`). The mlx-lm YAML keeps `mask_prompt: true` for the optional Mini path:
 
 ```yaml
