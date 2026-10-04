@@ -51,6 +51,48 @@ class ReaderTests(unittest.TestCase):
     def test_escaped_pagination(self):
         self.r._rpc=Mock(return_value={'entries':[item(ROOT+'/other/a.pdf')],'has_more':False,'cursor':'c'})
         with self.assertRaises(ReaderError):self.r.list_page('2026','opaque')
+
+    def test_folder_names_preserves_cursor_and_namespace_at_http_boundary(self):
+        """T-529: ordered fake pages alone cannot detect a wrong continuation request."""
+        def folder(name):
+            path = ROOT + '/2026/october/' + name
+            return {'.tag': 'folder', 'path_lower': path, 'path_display': path}
+
+        pages = [
+            {'entries': [folder('oct 1')], 'has_more': True, 'cursor': 'first-cursor'},
+            {'entries': [folder('oct 2')], 'has_more': True, 'cursor': 'second-cursor'},
+            {'entries': [folder('oct 3')], 'has_more': False, 'cursor': 'complete'},
+        ]
+        self.r._post = Mock(side_effect=[(json.dumps(page).encode(), {}) for page in pages])
+
+        self.assertEqual(self.r.folder_names('2026/october'), ['oct 1', 'oct 2', 'oct 3'])
+        calls = self.r._post.call_args_list
+        self.assertEqual([(call.args[0], json.loads(call.args[1])) for call in calls], [
+            ('https://api.dropboxapi.com/2/files/list_folder',
+             {'path': ROOT + '/2026/october', 'recursive': False, 'limit': 2000}),
+            ('https://api.dropboxapi.com/2/files/list_folder/continue', {'cursor': 'first-cursor'}),
+            ('https://api.dropboxapi.com/2/files/list_folder/continue', {'cursor': 'second-cursor'}),
+        ])
+        for call in calls:
+            self.assertEqual(call.args[2]['Authorization'], 'Bearer fake')
+            self.assertEqual(json.loads(call.args[2]['Dropbox-API-Path-Root']),
+                             {'.tag': 'root', 'root': 'namespace'})
+
+    def test_folder_names_refuses_malformed_http_listing(self):
+        for page in ({'entries': None, 'has_more': False},
+                     {'entries': [], 'has_more': 'false'}):
+            self.r._post = Mock(return_value=(json.dumps(page).encode(), {}))
+            with self.assertRaisesRegex(ReaderError, 'Invalid listing response'):
+                self.r.folder_names('2026/october')
+
+    def test_folder_names_refuses_endless_http_pagination(self):
+        page = json.dumps({'entries': [], 'has_more': True, 'cursor': 'repeated'}).encode()
+        # A runaway implementation reaches the sentinel instead of hanging the suite.
+        self.r._post = Mock(side_effect=[(page, {})] * 101 +
+                            [AssertionError('listing exceeded its page budget')])
+        with self.assertRaisesRegex(ReaderError, 'pagination limit exceeded'):
+            self.r.folder_names('2026/october')
+
     def test_nested_and_deleted(self):
         deleted={'.tag':'deleted','path_lower':ROOT+'/2026/old','path_display':ROOT+'/2026/old'}
         self.r._rpc=Mock(return_value={'entries':[item(ROOT+'/2026/nested/a.pdf'),deleted],'has_more':False,'cursor':'c'})

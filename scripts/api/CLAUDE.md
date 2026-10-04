@@ -26,7 +26,7 @@ After restart, IB Gateway sits at IBKR Mobile push prompt with API socket open �
 
 `/health` exposes `auth_state`, `service_state`, `upstream_dead`, `restart_backoff` (incl. `push_lock`, `attempt_count`, `next_attempt_in_secs`). **`POST /ib/reset-backoff`** clears BOTH in-memory backoff AND push lock — operator escape hatch after manual 2FA approval.
 
-**IBKR operator hold.** `/health` also carries `ib_gateway.operator_hold`, mirrored from the broker `/status` on the app role and read from the local flag elsewhere. `None` means unknown. `/health/lite` carries a boolean. While held, `/ib/restart` and admin Gateway `start|restart` return 423 without calling the broker (`services._control_gateway`), and the 15s recovery heartbeat skips pool reconnect and the self-restart ladder. `GET|POST /ib/operator-hold` reads, sets and clears the hold through the broker daemon's `hold`/`unhold` (operator JWT on the app role). Runbook: `docs/ib-gateway-recovery.md`.
+**IBKR operator hold.** `/health` also carries `ib_gateway.operator_hold`, mirrored from the broker `/status` on the app role and read from the local flag elsewhere. `None` means unknown. `/health/lite` carries `true` / `false` only for a confirmed hold observation and `null` when unknown (REL-303 / R-722); the relay retains its last hold until a confirmed release. While held, `/ib/restart` and admin Gateway `start|restart` return 423 without calling the broker (`services._control_gateway`), and the 15s recovery heartbeat skips pool reconnect and the self-restart ladder. `GET|POST /ib/operator-hold` reads, sets and clears the hold through the broker daemon's `hold`/`unhold` (operator JWT on the app role). Runbook: `docs/ib-gateway-recovery.md`.
 
 IBC-side relogin is **disabled** (`TWOFA_TIMEOUT_ACTION: exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT: "no"`, blank `TWS_COLD_RESTART`). The Gateway's mandatory daily cycle cannot be disabled (a blank `AUTO_RESTART_TIME` keeps the stored 11:45 PM default as a nightly full re-login), so the container pins `AUTO_RESTART_TIME=11:45 PM` (UTC): a token restart with no push inside the watchdog's 23:40-00:15 quiet window. Weekly token expiry still asks for 2FA there; the watchdog stands down on `awaiting_2fa` (2026-07-05 storm fix). Never move it to 09:05 AM (02:05 PT push). The launchd setup clears `AutoRestartTime`, `ColdRestartTime`, and calendar/RunAtLoad triggers.
 
@@ -82,18 +82,10 @@ CLAUDE.md project-wide rule: **No `spawn()` from Next.js.** All Python subproces
 
 ## Autonomous Timers (Hetzner)
 
-| Timer | Cadence | Endpoint |
-|---|---|---|
-| `radon-refresh.timer` | Mon–Fri */15min | direct `scripts/data_refresh.py` |
-| `radon-vcg-refresh.timer` | Mon–Fri 13–21 UTC */5min | `POST /vcg/scan` |
-| `radon-portfolio-sync.timer` | Mon–Fri 13–21 UTC */60s | `POST /portfolio/sync` |
-| `radon-cta-sync.timer` | Mon–Fri 18:15, 19:00, 21:30 UTC | `POST /menthorq/cta` |
-| `radon-leap.timer` | Mon–Fri 14:00 UTC | `POST /leap/scan` |
-| `radon-signals-refresh.timer` | Mon–Fri 09–16 ET hourly | `POST /theta-harvester/scan` + `POST /strength-confirmation/scan` |
-| `radon-llm-index.timer` | Daily 06:30 UTC | direct `scripts/llm_token_index.py --record` |
-| `radon-watchdog-{intraday,continuous,daily,error}.timer` | see `scripts/watchdog/CLAUDE.md` | reads `service_health` |
-
-Unit files in `radon-cloud/services/`; enumerated by `setup-vps.sh SERVICE_FILES`. Wrappers use literal env parser (not `set -a`) to avoid `$VAR` expansion (see `feedback_env_file_shell_expansion.md`).
+Use the [operations owner](../../docs/operations.md#background-services) for
+operator procedures. Exact schedules and commands live in the checked-in
+[systemd units](../../cloud/services/), installed by the control-plane bootstrap.
+Wrappers use literal env parsing (not `set -a`) to avoid `$VAR` expansion.
 
 ---
 

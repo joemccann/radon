@@ -562,3 +562,125 @@ test.describe("Share PnL signed combo basis", () => {
     expect(params.get("exitPrice")).toBe("5.08");
   });
 });
+
+// REL-108 / R-317: the common report-share owner must recover from transport faults.
+import { stubReliabilityCta } from "./fixtures/reliability-cta";
+
+test.describe("report share reliability", () => {
+  test("HTML failure reports the service outage and releases sharing", async ({page}, testInfo) => {
+    await stubReliabilityCta(page);
+    const requests: {url: string; method: string; body: string | null}[] = [];
+    await page.route("**/api/menthorq/cta/share", route => {
+      requests.push({url: new URL(route.request().url()).pathname,
+        method: route.request().method(), body: route.request().postData()});
+      return route.fulfill({status: 502, contentType: "text/html", body: "<html>upstream unavailable</html>"});
+    });
+    await page.goto("/cta");
+    const share = page.getByRole("button", {name: "Share to X", exact: true});
+    await share.click();
+    await expect(page.getByRole("alert").filter({hasText: "This service is temporarily unavailable"})).toBeVisible();
+    await expect(share).toBeEnabled();
+    expect(requests).toEqual([{url: "/api/menthorq/cta/share", method: "POST", body: null}]);
+    await page.screenshot({path: testInfo.outputPath("report-share-outage.png")});
+  });
+
+  for (const phase of ["generation", "content"]) {
+    test(`hung ${phase} is bounded and a recovered request succeeds`, async ({page}, testInfo) => {
+      await stubReliabilityCta(page);
+      await page.clock.install();
+      const requests: string[] = [];
+      let recover = false;
+      await page.route("**/api/menthorq/cta/share", async route => {
+        requests.push(`${route.request().method()} ${new URL(route.request().url()).pathname}`);
+        if (phase === "generation" && !recover) return;
+        await route.fulfill({json: {preview_path: "/reports/mock-preview.html"}});
+      });
+      await page.route("**/api/menthorq/cta/share/content?*", async route => {
+        const url = new URL(route.request().url());
+        requests.push(`${route.request().method()} ${url.pathname}${url.search}`);
+        if (phase === "content" && !recover) return;
+        await route.fulfill({contentType: "text/html", body: "<html><body>Mock report preview</body></html>"});
+      });
+      await page.goto("/cta");
+      const share = page.getByRole("button", {name: "Share to X", exact: true});
+      await share.click();
+      await expect(page.getByRole("button", {name: "Generating…"})).toBeDisabled();
+      if (phase === "content") await expect.poll(() => requests.length).toBe(2);
+      await page.clock.fastForward(30_001);
+      await expect(share).toBeEnabled();
+      await expect(page.getByRole("alert").filter({hasText: "share request took too long"})).toBeVisible();
+      const initial = ["POST /api/menthorq/cta/share"];
+      const content = "GET /api/menthorq/cta/share/content?path=%2Freports%2Fmock-preview.html";
+      if (phase === "content") initial.push(content);
+      expect(requests).toEqual(initial);
+      recover = true;
+      await share.click();
+      await expect(page.getByRole("dialog", {name: "CTA Share Preview"})).toBeVisible();
+      expect(requests).toEqual([...initial, "POST /api/menthorq/cta/share", content]);
+      await expect(share).toBeEnabled();
+      await page.screenshot({path: testInfo.outputPath(`report-share-${phase}-recovered.png`)});
+    });
+  }
+});
+
+/** REL-108 / R-318: the bond callout describes the measured band. */
+test.describe("CTA bond percentile reliability", () => {
+  for (const [label, percentiles] of [["boundary", [0, 10]], ["interior", [8, 9]]] as const) {
+    test(`${label} values describe the band instead of inventing an exact percentile`, async ({page}, testInfo) => {
+      await stubReliabilityCta(page, [...percentiles]);
+      await page.goto("/cta");
+      await expect(page.getByText("2 bond contracts at or below 10th pctile, full duration short.", {exact: false})).toBeVisible();
+      await expect(page.getByText(/bond contracts at 0th pctile/)).toHaveCount(0);
+      await page.getByText("2 bond contracts at or below 10th pctile, full duration short.", {exact: false}).scrollIntoViewIfNeeded();
+      await page.screenshot({path: testInfo.outputPath(`cta-bond-${label}.png`)});
+    });
+  }
+  test("values above the band do not count as extreme shorts", async ({page}) => {
+    await stubReliabilityCta(page, [11, 9]);
+    await page.goto("/cta");
+    await expect(page.getByRole("cell", {name: "Treasury 1", exact: true})).toBeVisible();
+    await expect(page.getByText(/bond contracts at/)).toHaveCount(0);
+  });
+});
+
+/** REL-108 / R-316: render the real shared export theme with the OG engine. */
+import { createElement } from "react";
+import { ImageResponse } from "next/og.js";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { createRequire } from "node:module";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
+import { loadFonts } from "../lib/og-fonts";
+// Playwright runs ESM directly; compile the actual theme to CJS so its JSON
+// import is resolved just as Next resolves it, without an ESM JSON assertion.
+const ogPath = resolve(process.cwd(), "lib/og-theme.ts");
+const ogModule = {exports: {} as typeof import("../lib/og-theme")};
+runInNewContext(ts.transpileModule(readFileSync(ogPath, "utf8"), {
+  compilerOptions: {module: ts.ModuleKind.CommonJS, esModuleInterop: true},
+}).outputText, {module: ogModule, exports: ogModule.exports, require: createRequire(ogPath)});
+const { OG } = ogModule.exports;
+const brandTokens = JSON.parse(readFileSync(resolve(process.cwd(), "../brand/radon-design-tokens.json"), "utf8"));
+
+test("OG reliability plate matches accessible export-kit tokens", async ({page}, testInfo) => {
+  const kit = brandTokens.color.dark;
+  expect(OG.panelRaised).toBe(kit.bg.panelRaised);
+  expect(OG.border).toBe(kit.line.grid);
+  expect(OG.faint).toBe(kit.text.muted);
+  const response = new ImageResponse(createElement("div", {style: {
+    display: "flex", width: "100%", height: "100%", background: OG.bg,
+    color: OG.text, fontFamily: "IBM Plex Mono", padding: 24,
+  }}, createElement("div", {style: {
+    display: "flex", flexDirection: "column", width: "100%", background: OG.panel,
+    border: `1px solid ${OG.border}`, padding: 20,
+  }}, createElement("div", {style: {fontSize: 24}}, "RADON / EXPORT RELIABILITY"),
+  createElement("div", {style: {fontSize: 18, color: OG.faint, marginTop: 16}}, "Supporting measurement text"),
+  createElement("div", {style: {display: "flex", background: OG.panelRaised, color: OG.muted, padding: 12, marginTop: 16}}, "Raised instrument panel"))),
+  {width: 760, height: 240, fonts: await loadFonts()});
+  const png = Buffer.from(await response.arrayBuffer());
+  await page.route("**/reliability-og.png", route => route.fulfill({contentType: "image/png", body: png}));
+  await page.goto("/reliability-og.png");
+  await expect(page.locator("img")).toBeVisible();
+  expect(await page.locator("img").evaluate((image: HTMLImageElement) => [image.naturalWidth, image.naturalHeight])).toEqual([760, 240]);
+  await page.screenshot({path: testInfo.outputPath("accessible-og-plate.png")});
+});

@@ -3,11 +3,11 @@
 Four agent CLIs authenticate against the operator's subscriptions rather than
 metered API keys: Claude Code (anthropic), OpenAI Codex, xAI Grok and Google
 Antigravity (`agy`, provider row `antigravity`). Each keeps an OAuth credential file in the `radon` home
-directory on the app VPS. `scripts/clients/model_ladder.py` reads the anthropic,
-codex and grok files directly, so a deleted or expired file silently demotes the
-whole subscription band to prepaid keys.
+directory on the app VPS. Missing or unusable subscription credentials can make
+a ladder rung unavailable. Billing and fallback policy belong to the
+[model authentication owner](oauth-subscription-auth.md#radon-http-model-ladder-server).
 
-`scripts/subscription_tokens` is the daemon that stops that happening. On every
+`scripts/subscription_tokens` maintains those credential files. On every
 run it evaluates each provider, refreshes what it can refresh, restores what it
 can restore from the vault, proves each login with a real model call once a day,
 and when a grant is truly dead it starts the CLI's own login and pages the
@@ -130,6 +130,15 @@ Exit codes: `0` when every provider is `live`, `refreshed`, `restored` or
 
 ## Operator re-auth runbook
 
+**Symptom:** a provider reports `needs_reauth` or lacks a usable credential.
+**Prerequisites:** subscription-account access; SSH for paste-code flows. Sealing and restoring require the unit's vault credential.
+**Blast radius:** login replaces that provider's credential file; the daemon can refresh and seal other configured providers in the same run.
+**Diagnosis:** use `--check` to inspect states without refreshing, probing, logging in or paging.
+**Stop:** resolve `store_unavailable` before vault operations. A usage cap or inconclusive probe is not proof that login is dead.
+**Verification:** check unit status and the provider's sidecar state and successful keepalive evidence after login and sealing.
+**Rollback:** follow the restore procedure below; do not force an older vault copy over a newly authenticated file.
+**Escalation:** vault failures go to the [credential-store recovery owner](operations.md#encrypted-credential-store-profile-credentials-tab); client or token-endpoint errors need maintainer diagnosis.
+
 ### codex, grok: tap the link
 
 When one of these reports `needs_reauth`, the daemon starts the CLI's own device
@@ -213,24 +222,19 @@ ssh radon@ib-gateway 'sudo systemctl start radon-subscription-tokens.service'
 ssh radon@ib-gateway 'systemctl status radon-subscription-tokens.service'
 ```
 
-⛔ Run the seal through the unit, not by hand. The store key reaches the daemon
-as a systemd credential (`LoadCredentialEncrypted`). A bare shell has no such
-credential, so `scripts/secret_store.py` falls back to
-`~/.radon/secret_store.key`, auto-generates one on first use, and writes
-ciphertext the unit can never decrypt. The explicit form exists for that same
-unit context:
+Run sealing and restoration through the unit. It supplies both the configured
+database and the decrypted key via `LoadCredentialEncrypted`. A bare SSH shell
+does not inherit that context and can open a different store or fail key
+validation. Do not run `--seal` or `--restore` from that shell.
 
-```bash
-ssh radon@ib-gateway 'cd /home/radon/radon && .venv/bin/python -m scripts.subscription_tokens --seal anthropic'
-```
+If a credential file is missing, start the same unit above: its normal run
+restores the vault copy when available and re-evaluates it. Check the unit and
+provider sidecar outcome; `unbootstrapped` means there was no vault copy, so
+use the re-auth procedure. Stop on `store_unavailable` and follow the
+[credential-store recovery owner](operations.md#encrypted-credential-store-profile-credentials-tab).
 
-The inverse, for a host that lost the file outside a scheduled run:
-
-```bash
-ssh radon@ib-gateway 'cd /home/radon/radon && .venv/bin/python -m scripts.subscription_tokens --restore anthropic'
-```
-
-`--restore` refuses when the file already on disk is newer than the vault copy,
+Explicit `--seal` and `--restore` modes require that same unit credential and
+database context. `--restore` refuses when the file already on disk is newer than the vault copy,
 or does not parse, and exits 1 saying so. That is the case where you have just
 re-authenticated: seal the new file instead. Only pass `--force` when you mean
 to discard the on-disk credential and install the vault copy over it.

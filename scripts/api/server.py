@@ -1169,7 +1169,10 @@ _SECRET_SCRUB_PATTERNS = [
     (re.compile(r"libsql://[^\s'\"]+", re.IGNORECASE), "[redacted-db-url]"),
     (re.compile(r"https://[a-z0-9.-]+\.turso\.io[^\s'\"]*", re.IGNORECASE), "[redacted-db-url]"),
     (re.compile(r"(auth[_-]?token|authorization|bearer)(\s*[=:]\s*)\S+", re.IGNORECASE), r"\1\2[redacted]"),
-    (re.compile(r"eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*"), "[redacted-jwt]"),
+    # The lookbehind anchors a match to the start of a token run; without it a
+    # long run of repeated "eyJ" retries the scan from every occurrence, which
+    # is quadratic on caller-echoed details.
+    (re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*"), "[redacted-jwt]"),
     (re.compile(r"\bU\d{6,}\b"), "[redacted-account]"),
     # Named provider-key prefixes: Anthropic (sk-ant-), Clerk/Stripe (sk_live_/sk_test_).
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{6,}"), "[redacted-key]"),
@@ -2077,15 +2080,18 @@ async def health_lite():
             HEALTH_LITE_GATEWAY_PROBE_TIMEOUT_SECS,
         )
         gw = {}
+    # REL-303 / R-722: only observed booleans confirm a hold or release.
+    # Broker status loss and probe timeout must remain unknown to the relay.
+    hold = gw.get("operator_hold")
+    held = hold.get("held") if isinstance(hold, dict) else None
     return {
         "status": "ok",
         "auth_state": gw.get("auth_state", "unknown"),
         "service_state": gw.get("service_state", "unknown"),
         "upstream_dead": gw.get("upstream_dead", False),
         "port_listening": gw.get("port_listening", False),
-        # Coarse: held or not. Lets the relay and health daemon read a down
-        # Gateway as the operator's hold, not an outage.
-        "operator_hold": bool((gw.get("operator_hold") or {}).get("held")),
+        # Account-free three-valued observation: true, false, or unknown.
+        "operator_hold": held if type(held) is bool else None,
         "loop_lag_ms": round(loop_lag_ms, 3),
     }
 
