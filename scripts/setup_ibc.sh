@@ -175,8 +175,8 @@ install() {
     patch_config_setting "ReloginAfterSecondFactorAuthenticationTimeout" "no"
     echo "    ExistingSessionDetectedAction=primaryoverride"
     echo "    AcceptNonBrokerageAccountWarning=yes"
-    echo "    AutoRestartTime=disabled"
-    echo "    ColdRestartTime=disabled"
+    echo "    AutoRestartTime= (blank: the Gateway's stored daily-cycle setting applies)"
+    echo "    ColdRestartTime= (blank: the Gateway's stored daily-cycle setting applies)"
     echo "    CommandServerPort=7462"
 
     # 7. Generate plist

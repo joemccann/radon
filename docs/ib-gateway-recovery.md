@@ -41,10 +41,10 @@ does not disable that cycle.
 
 **Symptom and prerequisites:** investigate a recurring login interruption
 using the selected Gateway mode and its effective configuration.
-[`setup_ibc.sh`](../scripts/setup_ibc.sh) still writes blank restart fields
-for local launchd and labels them disabled. That installer output is not
-proof that the Gateway has no daily cycle. The launchd definition's absence
-of a start schedule also does not disable the Gateway's own cycle.
+[`setup_ibc.sh`](../scripts/setup_ibc.sh) writes blank restart fields for
+local launchd and reports that the Gateway's stored daily-cycle setting
+applies. The installer does not choose a cycle. The launchd definition's
+absence of a start schedule also does not disable the Gateway's own cycle.
 
 **Blast radius and safe diagnosis:** inspect configuration and logs without
 changing the broker session. Do not copy container clock settings into local
@@ -53,8 +53,8 @@ IBC: local configuration and timezone must be checked independently.
 throttle; follow [readiness verification](#readiness-verification) after a
 cycle instead of relying on its elapsed time or open port.
 **Rollback and escalation:** diagnosis has no rollback. Do not change restart
-settings as an incident experiment; escalate the local installer's misleading
-disabled claim for a separately tested runtime repair.
+settings as an incident experiment; escalate a wanted local cycle change for a
+separately tested installer change.
 
 ## Relay recovery
 
