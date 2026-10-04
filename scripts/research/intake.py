@@ -119,17 +119,37 @@ class Pipeline:
             raise DocumentDeadlineExceeded(f'document review deadline exhausted before {stage}')
 
     # -- whole-document duplicate index --------------------------------------
-    def _fingerprints(self):
+    def _index(self):
         try:
-            stored = json.loads((self.root / FINGERPRINTS).read_text()).get('documents', {})
-            return {k: int(v, 16) for k, v in stored.items()}
+            stored = json.loads((self.root / FINGERPRINTS).read_text())
         except (OSError, ValueError, AttributeError):
-            return {}
+            return {}, {}
+        if not isinstance(stored, dict):
+            return {}, {}
+        docs = {}
+        for key, value in (stored.get('documents') or {}).items():
+            try:
+                docs[key] = int(value, 16)
+            except (TypeError, ValueError):
+                continue
+        pubs = {key: value for key, value in (stored.get('publishers') or {}).items() if isinstance(value, str)}
+        return docs, pubs
 
-    def _remember(self, key, fp):
-        index = self._fingerprints()
-        index[key] = fp
-        atomic_save(str(self.root / FINGERPRINTS), {'documents': {k: f'{v:016x}' for k, v in index.items()}})
+    def _fingerprints(self):
+        return self._index()[0]
+
+    def _fingerprint_publishers(self):
+        return self._index()[1]
+
+    def _remember(self, key, fp, publisher=None):
+        docs, pubs = self._index()
+        docs[key] = fp
+        if publisher:
+            pubs[key] = publisher
+        atomic_save(str(self.root / FINGERPRINTS), {
+            'documents': {k: f'{v:016x}' for k, v in docs.items()},
+            'publishers': pubs,
+        })
 
     def process(self, work, pdf, recent, progress=None):
         out = self.root / 'evidence' / work['key']
@@ -171,8 +191,12 @@ class Pipeline:
 
         identity = identify.identify(text, work['metadata'], work['folder_date'], pdf_created=self.pdf_created(pdf))
         review['identity'] = identity.as_dict()
-        forced = force_include.matches(identity, filename=work['metadata'].get('name'))
+        page_one = text.get(1, '')
+        desk = force_include.match(identity, filename=work['metadata'].get('name'), page_text=page_one)
+        forced = desk is not None
+        always = bool(desk and desk.always_publish)
         review['force_include'] = forced
+        review['always_publish'] = always
         note = _operator_note(work)
         review['operator_note'] = note or None
         decision, code = triage.decide(identity, rules=learn.load_rules(self.root),
@@ -184,7 +208,8 @@ class Pipeline:
         fp = novelty.fingerprint(' '.join(text[p] for p in sorted(text)))
         duplicate = novelty.duplicate_of(fp, {k: v for k, v in self._fingerprints().items() if k != work['key']})
         review['novelty'] = {'fingerprint': fp, 'duplicate_of': duplicate}
-        if duplicate:
+        other_pub = self._fingerprint_publishers().get(duplicate) if duplicate else None
+        if duplicate and not (always and other_pub and other_pub != identity.publisher):
             return self._finish(out, review, 'dropped', reason_code='DUPLICATE_OF_PUBLISHED')
         self._checkpoint('identified')
 
@@ -328,7 +353,40 @@ class Pipeline:
                 if planned:
                     post['source']['charts'] = planned
             posts.append(post)
+        if not posts and always:
+            posts.append(self._always_publish_fallback(work, identity, text))
+            review['always_publish_fallback'] = True
+            review['audit'].append({'always_publish_fallback': True, 'reason_code': 'ALWAYS_PUBLISH_FALLBACK'})
         review['posts'] = posts
         if posts:
-            self._remember(work['key'], fp)
+            self._remember(work['key'], fp, identity.publisher)
         return self._finish(out, review, 'reviewed', items=len(posts))
+
+    def _always_publish_fallback(self, work, identity, text):
+        title, content, pages = force_include.fallback_copy(identity, text)
+        key = hashlib.sha256((work['metadata']['id'] + '\0summary').encode()).hexdigest()
+        return {
+            'id': 'research-' + key,
+            'title': title,
+            'content': content,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'tags': ['POSITIONING'],
+            'images': [],
+            'source': {
+                'kind': 'dropbox',
+                'publisher': identity.publisher,
+                'publisherSource': identity.publisher_source,
+                'url': self.publisher.store_asset(self._pdf),
+                'documentDate': identity.date,
+                'dateSource': identity.date_source,
+                'dateQuote': identity.date_quote,
+                'series': identity.series,
+                'folderDate': work['folder_date'],
+                'pages': pages,
+                'figures': [],
+                'fileId': work['metadata']['id'],
+                'revision': work['metadata']['rev'],
+                'contentHash': work['metadata']['content_hash'],
+                'pipeline': 'v2',
+            },
+        }

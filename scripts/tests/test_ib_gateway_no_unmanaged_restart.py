@@ -37,13 +37,44 @@ def test_in_tree_compose_matches_production_gateway_image_and_ports():
     assert "127.0.0.1:${IB_PAPER_PORT:-4002}:4004" in gateway["ports"]
 
 
-def test_in_tree_compose_disables_ibc_scheduled_restarts():
+def test_in_tree_compose_pins_the_daily_restart_inside_the_quiet_window():
     compose = yaml.safe_load(
         (ROOT / "docker" / "ib-gateway" / "docker-compose.yml").read_text()
     )
     env = compose["services"]["ib-gateway"]["environment"]
-    assert env["AUTO_RESTART_TIME"] == ""
+    assert env["AUTO_RESTART_TIME"] == "11:45 PM"
     assert env["TWS_COLD_RESTART"] == ""
+
+
+def test_auto_restart_time_is_valid_ibc_format_and_quiet():
+    """IBC silently ignores a malformed value (DUR-08: "23:58 ET") and falls
+    back to the stored default. It must be `HH:MM AM/PM`, in the container's
+    UTC, inside the watchdog's default quiet window."""
+    import re
+    from datetime import datetime, timezone
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import ib_watchdog
+
+    values = {
+        yaml.safe_load((ROOT / "docker" / "ib-gateway" / "docker-compose.yml").read_text())[
+            "services"]["ib-gateway"]["environment"]["AUTO_RESTART_TIME"],
+    }
+    for item in yaml.safe_load((ROOT / "cloud" / "docker-compose.yml").read_text())[
+            "services"]["ib-gateway"]["environment"]:
+        if item.startswith("AUTO_RESTART_TIME="):
+            values.add(item.split("=", 1)[1])
+    assert len(values) == 1, values
+    value = values.pop()
+    assert re.fullmatch(r"(0[1-9]|1[0-2]):[0-5]\d (AM|PM)", value), value
+    at = datetime.strptime(value, "%I:%M %p")
+    os.environ[ib_watchdog.QUIET_WINDOWS_ENV] = ib_watchdog.DEFAULT_QUIET_WINDOWS_UTC
+    try:
+        assert ib_watchdog.quiet_window_active(
+            datetime(2026, 10, 5, at.hour, at.minute, tzinfo=timezone.utc)
+        )
+    finally:
+        del os.environ[ib_watchdog.QUIET_WINDOWS_ENV]
 
 
 def test_in_tree_compose_healthcheck_selects_api_port_from_trading_mode():

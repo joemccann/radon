@@ -180,8 +180,10 @@ runs an LLM consumer (`radon-api`, `radon-newsfeed`, `radon-research`,
 into the relay. Antigravity is the one read-write grant: `agy` refreshes its
 token and writes logs and project state on every run, so
 `/home/radon/.gemini/antigravity-cli` and `/home/radon/.gemini/config` (Google's
-fixed paths) are bound read-write and shared with the host, keeping one rotating
-token store. The rest of `~/.gemini` (the retired Gemini CLI's `oauth_creds.json`) is never mounted.
+fixed paths) are bound read-write into `radon-api`, `radon-research` and
+`radon-nextjs` and shared with the host, keeping one rotating
+token store. Newsfeed renders third-party content and gets no antigravity bind
+(its ladder falls past that rung). The rest of `~/.gemini` (the retired Gemini CLI's `oauth_creds.json`) is never mounted.
 The Python and Next.js model ladders use the
 [subscription-tier billing and recovery policy](oauth-subscription-auth.md#radon-http-model-ladder-server).
 Prepaid fallback for those tiers requires the explicit `RADON_LADDER_ALLOW_PREPAID`
@@ -209,6 +211,8 @@ older provision (`gpasswd -d radon docker`); Gateway compose calls go
 through the root-owned `radon-docker-gw` shim instead. **Operator (live
 hosts provisioned before this change):** run `sudo gpasswd -d radon docker`,
 then verify with `id -nG radon` (no `docker` in the output).
+
+**No GitHub credential on the VPS (2026-10-03).** `setup-vps.sh` clones the public repo over anonymous HTTPS and never generates `/home/radon/.ssh/id_ed25519`; the old unregistered key was deleted. Do not add a GitHub SSH or deploy key for `radon`.
 
 **Privileged file-op hardening (2026-09-20).** `setup-vps.sh` stages
 root-installed artifacts from committed git blobs (`git cat-file`) rather

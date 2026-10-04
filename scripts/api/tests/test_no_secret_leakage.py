@@ -257,3 +257,27 @@ class TestNoSecretLeakageFastAPI:
 
         resp = trusted_client.post("/portfolio/sync")
         _assert_no_secret(resp, route="POST /portfolio/sync (read-back)")
+
+
+class TestScrubSecretsCost:
+    """The scrub runs on every HTTPException detail, on the event loop, and
+    some details echo caller input. Its cost must stay linear in the input."""
+
+    def test_repeated_token_prefix_scrubs_quickly(self):
+        import time
+
+        from scripts.api import server
+
+        detail = "eyJ" * 20_000
+        started = time.perf_counter()
+        server._scrub_secrets(detail)
+        assert time.perf_counter() - started < 0.1
+
+    def test_jwt_still_redacted(self):
+        from scripts.api import server
+
+        jwt = "eyJhbGciOi.eyJzdWIiOi.c2lnbmF0dXJl"
+        for text in (jwt, f"token {jwt} rejected", f"({jwt})"):
+            out = server._scrub_secrets(text)
+            assert jwt not in out
+            assert "[redacted-jwt]" in out

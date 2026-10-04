@@ -7,6 +7,7 @@ costs nothing and keeps its credentials off disk for the agent.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -115,6 +116,7 @@ HOME_CREDENTIAL_STORES = (
     "/home/radon/.claude",
     "/home/radon/.claude.json",
     "/home/radon/.codex",
+    "/home/radon/.gemini",
     "/home/radon/.gnupg",
     "/home/radon/.config/gh",
     "/home/radon/.git-credentials",
@@ -125,6 +127,25 @@ HOME_CREDENTIAL_STORES = (
 @pytest.mark.parametrize("path", HOME_CREDENTIAL_STORES)
 def test_home_credential_stores_are_inaccessible(unit, path):
     assert path in _paths(unit, "InaccessiblePaths"), (unit, path)
+
+
+# Every other agent CLI whose subscription grant the token keeper refreshes
+# keeps it under HOME. grok is the agent these units run, so its own store
+# stays reachable; a newly added provider must be denied here too.
+SUBSCRIPTION_TOKENS = Path(__file__).resolve().parents[2] / "scripts" / "subscription_tokens.py"
+
+
+def _other_provider_home_dirs() -> set[str]:
+    subdirs = re.findall(r'default_subdir="([^"]+)"', SUBSCRIPTION_TOKENS.read_text(encoding="utf-8"))
+    tops = {sub.split("/", 1)[0] for sub in subdirs}
+    assert ".grok" in tops and len(tops) > 1
+    return {f"/home/radon/{top}" for top in tops - {".grok"}}
+
+
+@pytest.mark.parametrize("unit", [RESPONDER, UPGRADE])
+def test_other_subscription_token_stores_are_inaccessible(unit):
+    missing = _other_provider_home_dirs() - _paths(unit, "InaccessiblePaths")
+    assert not missing, (unit, sorted(missing))
 
 
 def test_responder_clone_origin_needs_no_credential():

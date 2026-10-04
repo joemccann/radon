@@ -302,8 +302,8 @@ class TestQuietWindowParsing:
 
     def test_default_window_only_covers_session_rollover(self):
         assert quiet_window_active(_utc(23, 45)) is True
-        # The old IBC AUTO_RESTART_TIME is disabled; there is no corresponding
-        # quiet window that could mask an unrelated outage.
+        # The pinned IBC AUTO_RESTART_TIME (11:45 PM UTC) falls in this window;
+        # no other window could mask an unrelated outage.
         assert quiet_window_active(_utc(22, 35)) is False
 
     def test_rollover_window_wraps_midnight(self):

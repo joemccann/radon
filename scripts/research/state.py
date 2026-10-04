@@ -13,13 +13,13 @@ import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from research.model import ModelError, safe_error_message as _safe_model_message
+from research.model import ModelError, classify_error, safe_error_message as _safe_model_message
 
 
 def _persist_error(error: BaseException) -> str:
     if isinstance(error, ModelError):
         return _safe_model_message(error)
-    return type(error).__name__
+    return classify_error(error)
 
 ROOT = '/joe mccann/current'
 MONTHS = ('January February March April May June July August September October November December').split()

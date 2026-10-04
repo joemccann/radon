@@ -46,7 +46,7 @@ def test_2fa_recovery_settings_are_unchanged():
     env = _env_list(ROOT / "cloud" / "docker-compose.yml")
     assert "TWOFA_TIMEOUT_ACTION=exit" in env
     assert "RELOGIN_AFTER_TWOFA_TIMEOUT=no" in env
-    assert "AUTO_RESTART_TIME=" in env
+    assert "AUTO_RESTART_TIME=11:45 PM" in env
 
 
 def test_watchdog_recognises_the_yield_line_ibc_prints():

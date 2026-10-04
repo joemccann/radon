@@ -479,6 +479,10 @@ active_state() {
   systemctl_bounded show "$1" --property=ActiveState --value 2>/dev/null
 }
 
+unit_result() {
+  systemctl_bounded show "$1" --property=Result --value 2>/dev/null
+}
+
 unit_type() {
   if [[ "$1" == *.timer ]]; then
     printf 'timer\n'
@@ -704,6 +708,7 @@ resume_active_snapshot() {
   local services=()
   local timers=()
   local backups=()
+  local terminated=()
   local already_resumed=0
   [[ -f "$ACTIVE_STATE_FILE" ]] || return 0
   validate_active_snapshot || return 1
@@ -711,11 +716,22 @@ resume_active_snapshot() {
   while IFS=$'\t' read -r unit type extra; do
     is_core_service "$unit" && continue
     if [[ "$type" == oneshot ]]; then
-      if [[ "$unit" == radon-db-backup.service && "$already_resumed" == 0 ]]; then
-        state="$(active_state "$unit")" || return 69
-        if [[ "$state" != active && "$state" != activating ]]; then
-          backups+=("$unit")
+      if [[ "$unit" == radon-db-backup.service ]]; then
+        if [[ "$already_resumed" == 0 ]]; then
+          state="$(active_state "$unit")" || return 69
+          if [[ "$state" != active && "$state" != activating ]]; then
+            backups+=("$unit")
+          fi
         fi
+        continue
+      fi
+      # stop-clean SIGTERMed this run; systemd records Result=signal and the
+      # unit watchdog pages a failure the deploy caused. Clear it without
+      # replaying the job (the next timer runs it on the new release); an
+      # exit-code failure stays visible.
+      state="$(active_state "$unit")" || return 69
+      if [[ "$state" == failed && "$(unit_result "$unit")" == signal ]]; then
+        terminated+=("$unit")
       fi
       continue
     fi
@@ -738,6 +754,9 @@ resume_active_snapshot() {
   # never the app deployment gate. The marker prevents duplicate submissions.
   if (( ${#backups[@]} > 0 )); then
     systemctl_bounded --no-block start "${backups[@]}" || return $?
+  fi
+  if (( ${#terminated[@]} > 0 )); then
+    systemctl_bounded reset-failed "${terminated[@]}" || return $?
   fi
   : > "$RESTORED_STATE_FILE"
   chmod 0600 "$RESTORED_STATE_FILE"

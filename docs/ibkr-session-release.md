@@ -62,7 +62,7 @@ All production paths converge on **two chokepoints** on the broker:
 | S6 | Admin Gateway Start / `radon restart` from UI | app | operator | `web/components/admin/Ib2faControls.tsx`, `/admin/services/radon-ib-gateway.service/{start,restart}` |
 | S7 | `radon start|restart` (`/usr/local/bin/radon`), `sudo radon ...` granted to user radon | broker | operator / scripts | `cloud/scripts/operator-radon.sh:gateway_control`, `cloud/config/sudoers.d/radon-ops` |
 | S8 | Laptop `scripts/cloud.sh` `ssh ib-gateway radon-ib-gateway-control start` | laptop | dev start | `scripts/cloud.sh:90-95` (targets app host; stale post-split, still a start path) |
-| S9 | IBC internal relogin / `ExistingSessionDetectedAction=primary` | broker (in-container) | **IBKR "existing session" event - today's kicker** | compose env; `TWOFA_TIMEOUT_ACTION=exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT=no`, `AUTO_RESTART_TIME=` already off |
+| S9 | IBC internal relogin / `ExistingSessionDetectedAction=primary` | broker (in-container) | **IBKR "existing session" event - today's kicker** | compose env; `TWOFA_TIMEOUT_ACTION=exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT=no`, daily `AUTO_RESTART_TIME=11:45 PM` is a token restart, not a new login |
 | S10 | Local-mode FastAPI Docker auto-recovery (`restart_ib_gateway`), `scripts/docker_ib_gateway.sh`, `launchctl kickstart local.ibc-gateway` | laptop / mini | `scripts/local.sh` stacks | `scripts/api/ib_gateway.py:1429` |
 | S11 | Deploy / bootstrap | app (CI) | CI deploy is app-only and app role never execs helper; broker updates are manual root SSH | `cloud/scripts/deploy.sh:111,354`, `bootstrap-control-plane.sh` |
 
