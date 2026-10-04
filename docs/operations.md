@@ -527,6 +527,25 @@ The repo is public, so `group:operator` holds the placeholder `__OPERATOR_LOGIN_
 
 Rollback: re-apply `policy.before.hujson` through step 4. Public SSH (ufw `OpenSSH` any) is the recovery path if a tag was missed.
 
+### Tailnet trust narrowing (`scripts/api/auth.py`)
+
+FastAPI's JWT bypass trusted all of `100.64.0.0/10`. It now trusts loopback plus `RADON_TRUSTED_TAILNET_PEERS` (IPv4 `/32`s in the tailnet range; wider or non-tailnet entries are ignored, so a typo only shrinks trust). The private-net `GET /health` probe scope (`10.0.0.0/16`, `is_private_net_probe`) is unchanged.
+
+| `RADON_TAILNET_TRUST_MODE` | Unlisted tailnet peer | Empty list |
+|---|---|---|
+| unset / `log` (default) | trusted, logged `would refuse (log-only)` | whole tailnet trusted |
+| `enforce` (or any other value) | refused, logged `refused` | loopback-only |
+
+Logs are one line per peer per 10 minutes on logger `radon.auth`.
+
+Rollout (app host `/etc/radon/env`):
+
+1. Set `RADON_TRUSTED_TAILNET_PEERS=100.98.36.17/32` (operator laptop, cloud-thin `RADON_API_URL`). Nothing else calls `:8321` over the tailnet: the broker watchdog uses `10.0.0.2`, the Mac mini runners use SSH. `radon restart`.
+2. Soak at least a week: `journalctl -u radon-api --since -7d | grep 'tailnet peer'`. Every line names a caller enforce would refuse; add it or account for it.
+3. With no unexpected lines, set `RADON_TAILNET_TRUST_MODE=enforce`, `radon restart`. Verify from the laptop: `curl -fsS http://ib-gateway:8321/health` still carries `ib_gateway.auth_state`.
+
+Rollback: unset `RADON_TAILNET_TRUST_MODE` (back to log-only) and `radon restart`.
+
 ## Health monitoring (isolated daemon + edge surface)
 
 The health surface is **decoupled from the trading stack** so it keeps reporting precisely when the stack is down. Two layers plus an off-box witness:
