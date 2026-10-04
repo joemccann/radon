@@ -388,6 +388,7 @@ no blanket `tailscale0` allow, 8321 only from `10.0.0.4` and
 `RADON_FW_OPERATOR_SOURCES`. Live hosts change through `host-firewall.sh`
 (dry run by default), never deploy; runbook `docs/operations.md` "Host firewalls".
 
+
 Setup clones the public app repo over anonymous HTTPS and mints no GitHub SSH
 key for `radon` (the host holds no GitHub credential; DS-2026-09-30-02).
 Setup pins GitHub's published ed25519 SSH host key (no first-contact keyscan),
