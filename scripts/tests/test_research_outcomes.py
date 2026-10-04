@@ -220,3 +220,59 @@ def test_intake_records_the_opening_text_and_a_pdf_link_for_a_document_that_publ
     document = seen[0]["document"]
     assert document["page_count"] == 2 and document["excerpt"].startswith("## Economics Research ## 16 September 2026")
     assert len(document["excerpt"]) <= 900 and document["source_url"].endswith(".pdf")
+
+
+@pytest.mark.parametrize("protected_context", [
+    '{"alwaysPublish":true}',
+    '{"excerpt":"Scott Rubner. Citadel Securities."}',
+    '{}',
+    '[]',
+    'not-json',
+])
+def test_expiry_executes_real_sql_without_dropping_protected_or_fresh_rows(monkeypatch, protected_context):
+    """T-532: a mixed sweep must preserve protected rows at the write boundary."""
+    connection = _outcome_db()
+    connection.execute("ALTER TABLE research_outcomes ADD COLUMN context_json TEXT NOT NULL DEFAULT '{}'")
+    old = "2026-10-01T10:00:00+00:00"
+    fresh = "2026-10-04T14:00:00+00:00"
+    columns = "work_key,file_name,publisher,series,outcome,reason_codes,updated_at,held_at,context_json"
+    rows = [
+        ("old", "ordinary.pdf", "Goldman Sachs", "ordinary", "held", '["VERIFY_FAILED"]', fresh, old, "{}"),
+        ("legacy", "legacy.pdf", "Goldman Sachs", "ordinary", "held", '["HELD_EXPIRED"]', old, None, "{}"),
+        ("protected", "Citadel Rubner GMI.pdf", "Citadel", "GMI", "held", '["VERIFY_FAILED"]', old, old, protected_context),
+        ("flag-only", "other.pdf", "unknown", "other", "held", "[]", old, old, '{"alwaysPublish":true}'),
+        ("excerpt-only", "other.pdf", "unknown", "other", "held", "[]", old, old,
+         '{"excerpt":"Scott Rubner. Citadel Securities."}'),
+        ("fresh", "fresh.pdf", "Goldman Sachs", "ordinary", "held", "[]", old, fresh, "{}"),
+        ("boundary", "boundary.pdf", "Goldman Sachs", "ordinary", "held", "[]", old, "2026-10-03T15:00:00+00:00", "{}"),
+        ("published", "published.pdf", "Goldman Sachs", "ordinary", "published", "[]", old, old, "{}"),
+        ("dropped", "dropped.pdf", "Goldman Sachs", "ordinary", "dropped", "[]", old, old, "{}"),
+    ]
+    connection.executemany(f"INSERT INTO research_outcomes ({columns}) VALUES ({','.join('?' * 9)})", rows)
+    before = dict(connection.execute("SELECT work_key, json_array(outcome,reason_codes,updated_at,held_at,expired_at) FROM research_outcomes"))
+    calls = []
+
+    def execute(sql, args=(), **kwargs):
+        calls.append(sql)
+        return connection.execute(sql, args).fetchall()
+
+    monkeypatch.setattr(publish, "hrana_execute", execute)
+    monkeypatch.setattr(publish, "publish", lambda _: pytest.fail("expiry must not publish"))
+    now = datetime(2026, 10, 4, 15, 0, tzinfo=timezone.utc)
+    try:
+        assert publish.expire_stale_held(now=now) == 2
+        assert len(calls) == 2
+        for key in ("old", "legacy"):
+            result = connection.execute(
+                "SELECT outcome,reason_codes,updated_at,held_at,expired_at FROM research_outcomes WHERE work_key=?", (key,)
+            ).fetchone()
+            assert result[0] == "dropped"
+            assert json.loads(result[1]).count("HELD_EXPIRED") == 1
+            assert result[2:4] == ((fresh, old) if key == "old" else (old, None))
+            assert datetime.fromisoformat(result[4]).tzinfo is not None
+        after = dict(connection.execute("SELECT work_key, json_array(outcome,reason_codes,updated_at,held_at,expired_at) FROM research_outcomes"))
+        assert {key for key in before if before[key] != after[key]} == {"old", "legacy"}
+        assert publish.expire_stale_held(now=now) == 0
+        assert len(calls) == 3  # No second write when only protected holds remain.
+    finally:
+        connection.close()
