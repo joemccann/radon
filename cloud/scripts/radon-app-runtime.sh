@@ -791,8 +791,11 @@ cmd_run() {
       # creates projects on every run (read-only -> "not logged into
       # Antigravity", live 2026-10-02). Sharing the host dirs keeps one
       # rotating token store. The rest of ~/.gemini (the retired Gemini CLI's
-      # oauth_creds.json) stays unmounted.
+      # oauth_creds.json) stays unmounted. Newsfeed renders third-party
+      # content, so it never gets a writable grant the host and the other
+      # units consume; its ladder falls past antigravity.
       for cred_dir in .gemini/antigravity-cli .gemini/config; do
+        [[ "$unit" == "radon-newsfeed.service" ]] && continue
         if [[ -d "${subscription_home}/${cred_dir}" ]]; then
           set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:rw"
         fi
@@ -856,6 +859,8 @@ cmd_run() {
     # chromium_headless_shell-1217 there. Host deploy already caches that
     # revision at radon's ms-playwright dir. Bind it onto /ms-playwright so
     # this unit can launch without waiting for a new GHCR tag (R-234).
+    # Read-only: host radon processes launch the same cache, so the
+    # third-party-content container must not rewrite those browsers.
     # Overlay scripts/newsfeed from the live checkout so browser.js launch
     # changes apply before the next image build.
     local newsfeed_browsers newsfeed_scripts
@@ -883,7 +888,7 @@ cmd_run() {
       --security-opt "seccomp=${CHROMIUM_SECCOMP_PROFILE}" \
       --shm-size 512m \
       --env PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-      -v "${newsfeed_browsers}:/ms-playwright" \
+      -v "${newsfeed_browsers}:/ms-playwright:ro" \
       -v "${newsfeed_scripts}:/home/radon/radon/scripts/newsfeed:ro" \
       --env "RADON_NEWSFEED_MEDIA_DIR=${MEDIA_DIR_IN_CONTAINER}" \
       --env "RADON_MEDIA_REMOTE=${MEDIA_DIR_IN_CONTAINER}/"

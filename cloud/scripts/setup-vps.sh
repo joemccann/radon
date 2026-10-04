@@ -19,7 +19,8 @@ fi
 readonly RADON_DIR="${RADON_APP_DIR:-/home/radon/radon}"
 readonly CLOUD_DIR="${RADON_CLOUD_DIR:-${RADON_DIR}/cloud}"
 readonly ENV_FILE="${RADON_DEPLOY_ENV_FILE:-/etc/radon/env}"
-readonly RADON_REPO="git@github.com:joemccann/radon.git"
+# Public repo: anonymous HTTPS, so the host holds no GitHub credential.
+readonly RADON_REPO="https://github.com/joemccann/radon.git"
 readonly CLOUD_REPO="git@github.com:joemccann/radon-cloud.git"  # legacy only
 readonly PYTHON_BIN="python3.13"
 readonly BUN_VERSION="1.3.14"
@@ -841,28 +842,12 @@ preflight_checks() {
       /home/radon/.ssh/authorized_keys < /root/.ssh/authorized_keys
   fi
 
-  # Ensure radon has an SSH key for GitHub access
-  if [[ ! -f /home/radon/.ssh/id_ed25519 ]]; then
-    log_info "Generating SSH deploy key for radon user..."
-    sudo -u radon install -d -m 700 /home/radon/.ssh
-    sudo -u radon ssh-keygen -t ed25519 -C "radon@ib-gateway" -f /home/radon/.ssh/id_ed25519 -N "" -q
-    log_success "SSH key generated"
-    echo ""
-    echo -e "  ${YELLOW}ACTION REQUIRED:${NC} Add this deploy key to GitHub before continuing:"
-    echo ""
-    sudo -u radon cat /home/radon/.ssh/id_ed25519.pub
-    echo ""
-    echo "  Go to: https://github.com/settings/keys → New SSH key"
-    echo ""
-    echo -e "  ${RED}Then re-run this script to continue.${NC}"
-    exit 0
-  fi
-
   # Pin GitHub's published ed25519 host key (docs.github.com "GitHub's SSH
   # key fingerprints") instead of trusting whatever answers first contact.
   # radon writes its own known_hosts: the file is radon-replaceable after the
   # link check above, so root never appends to or chowns it.
   if ! sudo -u radon ssh-keygen -F github.com &>/dev/null; then
+    sudo -u radon install -d -m 700 /home/radon/.ssh
     printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
       | sudo -u radon tee -a /home/radon/.ssh/known_hosts >/dev/null
   fi

@@ -339,6 +339,18 @@ class TestGoldenSetFile:
             if "scopes" in entry:
                 assert set(entry["scopes"]) <= {"trading", "research", "ops"}
 
+    def test_shipped_golden_set_has_no_journal_trade_ids(self):
+        golden = json.loads(DEFAULT_GOLDEN_PATH.read_text(encoding="utf-8"))
+
+        journal_patterns = [
+            label["doc_key_pattern"]
+            for question in golden["questions"]
+            for label in question["relevant"]
+            if label["source"] == "journal"
+        ]
+
+        assert not any(re.search(r"\d{6,}", pattern) for pattern in journal_patterns)
+
 
 class TestCliInvocation:
     """The CLI must run as a direct script (systemd/operator convention shared
