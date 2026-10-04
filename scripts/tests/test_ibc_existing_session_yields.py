@@ -62,3 +62,14 @@ def test_watchdog_recognises_the_yield_line_ibc_prints():
         "session and let the other one proceed (scenario 6)"
     )
     assert parse_session_yield(line) == line
+
+
+def test_launchd_ibc_setup_does_not_claim_blank_restart_disables_cycle():
+    """DOC-159: a blank AutoRestartTime/ColdRestartTime leaves the Gateway's
+    stored daily-cycle setting in force; the installer must not print
+    "disabled" for it."""
+    setup = (ROOT / "scripts" / "setup_ibc.sh").read_text()
+    assert 'patch_config_setting "AutoRestartTime" ""' in setup
+    assert 'patch_config_setting "ColdRestartTime" ""' in setup
+    assert "RestartTime=disabled" not in setup
+    assert setup.count("Gateway's stored daily-cycle setting applies") == 2
