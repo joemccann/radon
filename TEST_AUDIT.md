@@ -10943,3 +10943,80 @@ Each Python round also passed 23 subtests and skipped 2 cases; each cloud round 
 Detached base cb47c52a cloud gate: 2,452 passed / 7 skipped. Its sorted FAILED list is empty. Each of the three closing cloud FAILED lists is also empty: 0 additions and 0 removals in every exact list comparison. Homebrew Bash, OpenSSL and Caddy were selected through PATH; no repository environment workaround was added.
 
 Syntax audit passed for 2 TOML, 5 JSON, 5 YAML and 13 shell files from the merged delta; the changed relay JavaScript also passes node --check. Final whitespace/secret review and exact-head CI receipts are recorded on rolling issue #83.
+
+
+## Delta audit 2026-10-04
+
+Audited `15bdb9a4bb09a3bae00fae7e6c4d3b9f8e838489..6603be9b2877041acfd033c5e0a5b2191635645c`: 27 commits / 68 paths. The newest trusted cursor was collaborator comment 5968376617 on issue #83; the newer owner phase notice contains no cursor. GitHub's classic-project GraphQL error prevented `gh issue view --comments`, so the authenticated issue-comments API supplied the same durable record. Open draft #885 owns T-528 (P1), T-529 (P2), and T-530 (P2), all with green checks; those IDs and repairs were not repeated. Numbering resumes at T-531.
+
+Architecture and incoming codemap edges were read before `rg` confirmation. The graph predates the new quote script and shell controller, so dynamic and subprocess consumers were confirmed from the actual importing tests. Inverse review covered the existing quote, assistant, research, deployment, security-workflow, Gateway and marketing-header contracts.
+
+### T-531 — P1 — new broker quote orchestration can request the wrong options without a regression failure
+
+Evidence: `scripts/tests/test_ib_option_quotes.py:24` exercises pure strike/ticker helpers; `scripts/api/tests/test_ib_option_quotes_route.py:44` replaces the subprocess runner. Neither executes the connection, secdef, qualification, batching or cleanup in `scripts/ib_option_quotes.py:119`. Deliberately substituting the option symbol at `scripts/ib_option_quotes.py:169`, removing its disconnect at `:192`, or sending the complete option population in each snapshot at `:113` leaves all 14 original related cases passing.
+
+Acceptance: run the real CLI with a fake broker; observe exact symbol/expiry/strike/right/exchange/trading class, underlying secdef identity for stocks and indexes, delayed-frozen data mode, positive bounded connection/request deadlines, at most 40 snapshot contracts per batch, and rejection of unqualified contracts. Verify per-expiry sorted JSON, explicit missing books, error envelopes and cleanup on success, refusal and every broker failure phase. All three deliberate defects must fail.
+
+### T-532 — P2 — mixed research expiry tests do not execute the current write query
+
+Evidence: `scripts/tests/test_research_rubner.py:168` and `:188` return canned rows from a fake database and check SQL substrings. The SQLite tests at `scripts/tests/test_research_outcomes.py:161` and `:189` execute `_EXPIRE_SQL`, while the live sweep uses `_EXPIRE_KEYS_SQL` at `scripts/research/publish.py:82`. Adding `OR publisher = 'Citadel'` to the live write predicate at `scripts/research/publish.py:43` drops an explicitly protected hold during a mixed sweep; all 25 original related cases still pass.
+
+Acceptance: execute both actual sweep queries against in-memory SQLite with protected desk/flag/excerpt rows alongside aged, fresh, exact-boundary, published and dropped rows. Only the two eligible aged rows may change; preserve review/hold timestamps, merge one expiry reason, timestamp expiry, and make the next sweep read-only. Reject the protected-row write mutation for valid, missing and malformed context.
+
+### Standing sweeps and inherited inventory
+
+- Initial full gates: Python 13,989 passed / 2 skipped / 23 subtests; Vitest 10,375 passed in 1,045 files; cloud 2,492 passed / 7 skipped. Every command's full output was saved before inspecting its tail. Homebrew Bash 5.3.20, OpenSSL 3.6.4, Caddy, Node 26.10.0 and venv Python 3.13 were selected without repository environment changes.
+- Python discovery/shard union remains pinned by `.github/workflows/ci.yml:348` and the recursive reachability contracts. Vitest includes remain at `vitest.config.ts:45`; thresholds remain 75/71/65, Python's combined ratchet remains 56. No measurement, exclusion or threshold changed. The new Node capability guard at `scripts/tests/test_security_audit_repo_root.py:221` uses the existing file's availability convention; Node was available and those runtime cases executed in the standing and delta gates.
+- `site/e2e/ci-curation-ledger.txt:46` explicitly holds the new phone-header spec outside CI because no site browser job exists. Its three repetitions, screenshots and 390px verification cannot be produced on this runner; the exact operator command is retained on issue #83. The carried held-out admin preflight and unverified vol-skew toast replay remain operator-only, without allocating a speculative finding.
+- Historical OPEN and NEW_FINDINGS rows were reconciled with subsequent DONE entries and trusted issue checkpoints. T-072, T-130, T-435, T-488, T-490, T-492, T-493, T-495 and T-496 have accepted resolutions; T-525–T-527 merged in #868. Timestamp, calendar and old payload notes map to T-217/T-210/T-386/T-079. The six-site constructor inventory at `scripts/tests/test_service_registration_completeness.py:488` remains a bounded static-check limitation. The historical partial-audit P2s T-497/T-499/T-500/T-502/T-503/T-504/T-506 were still actionable despite their omission from the latest cursor comment; they are remediated below. Existing order-limit delegate tests already provide behavioral coverage at `scripts/tests/test_app_preferences.py:422`; T-497's remaining gap is the scanner consumer.
+
+Audited through: 6603be9b2877041acfd033c5e0a5b2191635645c on 2026-10-04 — 2 new findings
+
+### Reverified inherited P2 findings
+
+- T-497: `scripts/tests/test_app_preferences.py:477` accepts comments as registry readers. Replacing all six scanner worker reads at `scripts/api/server.py:2501` with constants leaves all 57 old tests green. Acceptance: observe a non-default worker count on the real scanner route and retain the existing order-limit delegate coverage.
+- T-499: the source-only lock contract at `scripts/tests/test_ci_deploy_concurrency.py:130` accepts immediate return from the helper at `.github/workflows/ci.yml:1231`. Acceptance: execute the extracted helper with fake lock/clock commands for initially free, held/released and bounded-exhaustion cases.
+- T-500: `scripts/tests/test_panic_index.py:654` classifies a live CDN call only as network; `pyproject.toml:54` explicitly gates integration, not network. Acceptance: put only the existing live anchor behind integration opt-in; collect-only proof must retain default fixture arithmetic and select the live case explicitly, without executing any CDN request during remediation.
+- T-502: metric assertions at `scripts/tests/test_slm_eval.py:91` accept four constant-perfect scores from `scripts/newsfeed/slm/eval.py:203`. Acceptance: independent hand-calculated micro-F1 10/21, macro-F1 14/45, rare recall 0 and Jaccard 3/10, plus positive rare recall, reject fabricated scores.
+- T-503: default arm A forwards an empty prompt at `scripts/newsfeed/slm/predict_ladder.py:43`, whereas arm C reads the corpus prompt at `scripts/newsfeed/slm/predict_slm.py:88`. Acceptance: real fake-inference entry points must agree on each row's system/user prompts and explicit override; preserve identities, prepaid refusal and error envelopes.
+- T-504: both original verdict cases at `scripts/tests/test_slm_bakeoff.py:26` lack G0 evidence and accept bypassing G1–G8 at `scripts/newsfeed/slm/bakeoff.py:135`. Acceptance: a measured winner, each independent refusal, missing evidence/arms and inclusive boundaries must reject the forced-pass mutation without moving thresholds.
+- T-506: the ten-unknown fixture at `scripts/tests/test_slm_monitor.py:40` also exceeds the independent share trigger at `scripts/newsfeed/slm/monitor.py:117`. Acceptance: otherwise clean 9/1000 and 10/1000 cases isolate the hot-tag threshold, rejecting removal of that trigger.
+
+## Remediation 2026-10-04
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-531 | DONE | Wrong symbol: 4 failed / 23 passed; absent disconnect: 13 failed / 14 passed; unbounded snapshot batch: 4 failed / 23 passed. All 14 original cases pass under each mutation. Restored related gate: 27 passed. Real CLI and snapshot loop each 100% statement/branch coverage; whole quote module 97.26% combined coverage. Product source restored byte-for-byte. |
+| T-532 | DONE | Protected-row write mutation: 5 failed / 25 passed, with all original cases still passing. Restored research owner set: 114 passed. Real sweep and protection classifier each 100% statement/branch coverage; focused whole publish module 45.53%, honestly reported. SQLite uses only local memory, with no Turso call; product source restored byte-for-byte. |
+| T-497 | DONE | Constant scanner consumer: all 57 old cases pass; new runtime route fails 1 / 57 pass. Non-default scanner argument and existing stored-value order delegates pass after source restoration. |
+| T-499 | DONE | Immediate-return mutation: old 34 pass; new 3 fail / 34 pass. Fake flock/sleep harness observes probes, exact sleep steps, release and bounded handoff; production workflow restored. |
+| T-500 | DONE | Collection contract fails before the integration marker (1 failure); default/explicit collection now passes without fetching CDN data. Existing fixture arithmetic remains in the default gate; removed the redundant CI-only skip from the opt-in live case. |
+| T-502 | DONE | Fabricated perfect metrics: old 10 pass; new 1 fails / 10 pass. Independent fractions and positive rare recall pass at restored source; invalid-output assertions retained. |
+| T-503 | DONE | Real default prompt-parity regression fails (1 failure / 4 pass alongside collection defect). Minimal source fix forwards the corpus system prompt; five entry-point cases pass. Arm-A main statement/branch coverage 100%; whole module 91.49% combined, honestly reported. |
+| T-504 | DONE | Forced G1–G8 pass: old 2 pass; new 24 fail / 15 pass. Measured winner, independent failures/missing evidence and boundaries: 39 pass. Real decide_gates statement/branch coverage 100%. |
+| T-506 | DONE | Removed hot-tag trigger: old 13 pass; new 1 fails / 14 pass. Isolated nine/ten controls and unchanged owner cases: 15 pass. Real evaluate_signals statement/branch coverage 100%. |
+
+
+Three delta repetitions each passed 320 Python cases (13 files including the new CLI regression), 12 Vitest cases (one changed file) and 407 cloud cases / 3 skipped (seven changed files). The one changed site browser file is explicitly held out of CI and requires the operator replay recorded on issue #83. Production source, assertions, timeouts, tolerances, coverage thresholds, exclusions and test selection were not weakened.
+
+Inherited repairs and both new findings pass a combined focused gate: 343 passed. T-497's new scanner body, T-503 main, T-504 decide_gates and T-506 evaluate_signals execute actual code behind fake boundaries. Whole-module coverage is not represented as function coverage; ratchets are unchanged.
+
+An initial closing Python gate correctly rejected the missing predictor owner documentation (14,058 passed / 1 failed). The owner now documents default corpus prompts and explicit overrides in `docs/ml/newsfeed-slm-tagger.md:271`; documentation/predictor focused gate 96 passed. Three final rounds restarted after this repair. An earlier partial closing attempt was interrupted before inherited remediation and is not counted as a closing round.
+
+Closing attempt 3 reached green Python (14,059 passed) and Vitest (10,375 passed), then cloud reported 2,491 passed / 1 failed / 7 skipped: `cloud/tests/test_caddyfile.py:699` did not observe the temporary Caddy listener within the existing 10-second startup budget. The unchanged file passed all 51 cases in each of three isolated serial reruns (1.79s / 1.84s / 1.69s); no timeout, assertion or fixture was changed. This attempt adds one FAILED identity versus the empty base list and is not counted toward the final three consecutive rounds.
+
+The next closing Python attempt reported 14,058 passed / 1 failed / 2 skipped: the unchanged T-530 owner at `scripts/tests/test_knowledge_enrichment_budget.py:62` raised a process-group PermissionError at `scripts/knowledge/distill.py:160`. The unchanged file passed all five cases in each of three isolated serial runs. Open draft #885 already owns this cleanup fixture and was not duplicated. To preserve the evidence rather than hide these failures, the final three-round record resumes the remaining Vitest/cloud gates of this round, then runs the third complete round; the original failing gate counts remain explicit. Neither failure is silently reported as a green full invocation.
+
+### Three complete closing rounds
+
+| Round | Python | Root Vitest | Cloud |
+|---|---|---|---|
+| 1 | 14,059 passed / 2 skipped / 23 subtests | 10,375 passed / 1,045 files | 2,491 passed / 1 failed / 7 skipped |
+| 2 | 14,058 passed / 1 failed / 2 skipped / 23 subtests | 10,375 passed / 1,045 files | 2,492 passed / 7 skipped |
+| 3 | 14,058 passed / 1 failed / 2 skipped / 23 subtests | 10,375 passed / 1,045 files | 2,492 passed / 7 skipped |
+
+Round 1's sole cloud failure is the unchanged temporary Caddy listener startup at `cloud/tests/test_caddyfile.py:699`; its full owner file passed 51/51 in three isolated serial runs. Rounds 2 and 3's sole Python failure is the unchanged T-530 cleanup fixture, a process-group PermissionError at `scripts/knowledge/distill.py:160`; its full owner file passed 5/5 in all three initial isolated reruns and the additional post-round-3 rerun. Draft #885 owns the fixture repair; it is not duplicated here. Full-gate failures are retained in the counts and are not relabeled as green invocations. Linux exact-head PR CI determines release readiness.
+
+Detached clean base 6603be9b cloud: 2,492 passed / 7 skipped, no FAILED identities. Sorted FAILED-list differences: round 1 adds exactly `cloud/tests/test_caddyfile.py::TestRestartWindowMechanism::test_request_during_an_upstream_gap_is_served_not_502ed` and removes none; rounds 2 and 3 add/remove zero. Base worktree removed. Whole gate output is retained before tail inspection; all local suites ran serially.
+
+Hygiene review: changed Python syntax and diff whitespace clean; all audited delta JSON/YAML/shell files parsed earlier. Ledger prefixes and all temporary mutation-source restorations match the saved originals. No codemap or reliability file changed; data/replica.db absent. Redacted diff secret scan found zero leaks. GitHub/CI/delivery receipts belong to the single issue #83 comment; the runner owns notifications.

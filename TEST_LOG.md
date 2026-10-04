@@ -1132,3 +1132,22 @@ Closing verification 2026-10-01: all three rounds pass Python 13448 / Vitest 103
 Standing gates, three delta repetitions and closing full-gate counts are recorded in TEST_AUDIT.md. Exact-head CI/browser evidence and notification delivery status belong to rolling issue #83.
 
 Closing verification 2026-10-02: three rounds each passed Python 13,826 / Vitest 10,365 / cloud 2,452; Python 2 skips and 23 subtests, cloud 7 skips. All three sorted cloud FAILED lists match the empty detached-base list, with 0 additions and 0 removals.
+
+
+## Remediation 2026-10-04
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-531 | DONE | Each wrong-symbol, missing-disconnect and unbounded-batch mutation passes all 14 original related cases; new CLI cases fail 4, 13 and 4 respectively. Restored fake-broker gate 27 passed; real CLI/snapshot loop statement and branch coverage 100%. Product source unchanged. |
+| T-532 | DONE | Protected-row deletion in the actual write query passes all 25 original cases and fails all 5 mixed-database regressions. Restored research gate 114 passed; real expiry/classifier statement and branch coverage 100%. Actual SQL executes against memory-only SQLite; product source unchanged. |
+| T-497 | DONE | Constant scanner consumer: all 57 old cases pass; new runtime route fails 1 / 57 pass. Non-default scanner argument and existing stored-value order delegates pass after source restoration. |
+| T-499 | DONE | Immediate-return mutation: old 34 pass; new 3 fail / 34 pass. Fake flock/sleep harness observes probes, exact sleep steps, release and bounded handoff; production workflow restored. |
+| T-500 | DONE | Collection contract fails before the integration marker (1 failure); default/explicit collection now passes without fetching CDN data. Existing fixture arithmetic remains in the default gate; removed the redundant CI-only skip from the opt-in live case. |
+| T-502 | DONE | Fabricated perfect metrics: old 10 pass; new 1 fails / 10 pass. Independent fractions and positive rare recall pass at restored source; invalid-output assertions retained. |
+| T-503 | DONE | Real default prompt-parity regression fails (1 failure / 4 pass alongside collection defect). Minimal source fix forwards the corpus system prompt; five entry-point cases pass. Arm-A main statement/branch coverage 100%; whole module 91.49% combined, honestly reported. |
+| T-504 | DONE | Forced G1–G8 pass: old 2 pass; new 24 fail / 15 pass. Measured winner, independent failures/missing evidence and boundaries: 39 pass. Real decide_gates statement/branch coverage 100%. |
+| T-506 | DONE | Removed hot-tag trigger: old 13 pass; new 1 fails / 14 pass. Isolated nine/ten controls and unchanged owner cases: 15 pass. Real evaluate_signals statement/branch coverage 100%. |
+
+Standing/delta repetitions, three closing rounds, base-cloud failure-list comparison and final hygiene are recorded in TEST_AUDIT.md. External delivery, exact-head CI and operator browser receipts belong to the single issue #83 checkpoint.
+
+Closing verification 2026-10-04: three complete serial rounds are recorded in TEST_AUDIT.md. Vitest 10,375 in all three; cloud 2,491/one Caddy-startup failure then 2,492/2,492, with seven skips throughout. Python 14,059 then 14,058/one inherited T-530 failure in each of the latter rounds, two skips and 23 subtests throughout. Caddy owner 51/51 passed three isolated replays; knowledge owner 5/5 passed all four isolated replays. No failing full invocation was relabeled green. Draft #885 owns T-530; operator must merge its existing repair. Exact-head Linux CI and delivery evidence are retained on issue #83.
