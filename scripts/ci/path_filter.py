@@ -130,6 +130,7 @@ PYTHON_READS = (
     ".claude/",
     ".github/",
     ".pi/",
+    "brand/",  # REL-108 / R-316: Python pins the exported accessibility kit.
     "cloud/",
     "config/",
     "data/",
@@ -159,6 +160,14 @@ class CrossTreeContract:
 # targets focused: cloud/tests/test_caddy_edge_timeouts.py contains live timing
 # mechanism tests, so selecting the whole module would erase the speedup.
 CROSS_TREE_CONTRACTS = (
+    CrossTreeContract(
+        patterns=("web/lib/og-theme.ts",),
+        tests=("scripts/tests/test_rel108_og_brand_tokens.py",),
+    ),
+    CrossTreeContract(
+        patterns=("web/app/api/menthorq/cta/image/route.tsx",),
+        tests=("scripts/tests/test_rel108_cta_image_sections.py",),
+    ),
     CrossTreeContract(
         patterns=(
             "web/lib/*.js",

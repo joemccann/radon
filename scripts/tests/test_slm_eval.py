@@ -1,6 +1,8 @@
 """HR-6 eval metrics on a hand-computed 5-row fixture."""
 from __future__ import annotations
 
+import pytest
+
 from newsfeed.slm.contract import classify_slm_tags, normalise_tags
 from newsfeed.slm.eval import bootstrap_ci, evaluate_fixed
 
@@ -87,13 +89,22 @@ class TestMetrics:
         assert result["invalid_rate"] == 3 / 5
         assert result["exact3"] == 1 / 5
         # invalid rows contribute zero predictions (recall losses)
-        assert result["micro_f1"] > 0
-        assert 0 <= result["macro_f1"] <= 1
-        assert 0 <= result["rare_label_recall"] <= 1
-        assert 0 <= result["jaccard"] <= 1
+        assert result["micro_f1"] == pytest.approx(10 / 21)
+        assert result["macro_f1"] == pytest.approx(14 / 45)
+        assert result["rare_label_recall"] == 0
+        assert result["jaccard"] == pytest.approx(3 / 10)
 
     def test_bootstrap_ci_shape(self):
         ci = bootstrap_ci([0.1, 0.2, -0.05, 0.0, 0.15])
         assert set(ci) >= {"mean", "lo", "hi", "n"}
         assert ci["n"] == 5
         assert ci["lo"] <= ci["mean"] <= ci["hi"]
+
+
+def test_rare_label_recall_positive_control():
+    result = evaluate_fixed(
+        [{"id": "rare", "gold": ["PUTS", "SPX", "VOL"]}],
+        [{"id": "rare", "pred": {"tags": ["PUTS", "SPX", "VOL"]}}],
+        taxonomy=TAXONOMY, rare=RARE,
+    )
+    assert result["rare_label_recall"] == 1

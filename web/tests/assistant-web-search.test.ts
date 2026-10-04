@@ -189,9 +189,11 @@ describe("web_search results never re-enter a tool-capable round", () => {
     expect(toolRound.tools).toEqual(expect.any(Array));
     const seen = JSON.stringify(toolRound.messages);
     expect(seen).not.toContain("Ignore previous instructions");
-    expect(seen).not.toContain("AMZN 23.1%");
+    expect(seen).not.toContain("AMZN is 23.1% of XLY.");
+    expect(seen).not.toContain("https://www.ssga.com/xly");
     expect(seen).toContain("reserved for the final answer");
     // Facts reach only the final, tool-less synthesis.
+    expect(chat.mock.calls[3][0].tools).toBeUndefined();
     const final = JSON.stringify(chat.mock.calls[3][0].messages);
     expect(final).toContain("AMZN is 23.1% of XLY.");
     expect(final).not.toContain("Ignore previous instructions");

@@ -23,6 +23,7 @@
         "scripts/grok_runtime.py",
         "scripts/grok_upgrade.py",
         "scripts/ir_pr_description.py",
+        "scripts/ir_push_gate.py",
         "scripts/watchdog/pages.py",
         "scripts/deploy_notify.py",
         "config/com.radon.grok-page-responder.plist",

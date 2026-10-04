@@ -98,9 +98,11 @@ def test_rubner_skips_novelty_against_other_publishers(tmp_path, publisher):
 
 
 def test_rubner_empty_select_reselects_then_fallback(tmp_path, publisher):
-    reviewer = Reviewer([{"candidates": [], "reason": "first"}, {"candidates": [], "reason": "second"}])
+    reviewer = Reviewer([{"candidates": [], "reason": "first"}, {"candidates": [], "reason": "second"}, verdict()])
     posts = build_rubner(tmp_path, reviewer, publisher).process(rubner_work(), tmp_path / "r.pdf", [])
-    assert [c[0] for c in reviewer.calls] == ["text", "text"]
+    assert [c[0] for c in reviewer.calls] == ["text", "text", "multimodal"]
+    assert reviewer.calls[-1][2] == ()
+    assert '"claim_key": "summary"' in reviewer.calls[-1][1]
     review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
     assert any(a.get("force_include_reselect") for a in review["audit"])
     assert any(a.get("reason_code") == "ALWAYS_PUBLISH_FALLBACK" or a.get("always_publish_fallback")
@@ -118,7 +120,7 @@ def test_rubner_verify_fail_all_falls_back_without_unverified_numbers(tmp_path, 
     reviewer = Reviewer([selection(title="CTA +2.35z to -0.80z",
                                    content="US equity CTA positioning moved from +2.35z to -0.80z.",
                                    claim_key="cta-z", figure_ids=["f1"], text_only=False,
-                                   captions={"f1": "CTA +2.35z to -0.80z"}), failed])
+                                   captions={"f1": "CTA +2.35z to -0.80z"}), failed, verdict()])
     posts = build_rubner(tmp_path, reviewer, publisher).process(rubner_work(), tmp_path / "r.pdf", [])
     review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
     assert any(a.get("held") == "VERIFY_FAILED" for a in review["audit"])
@@ -153,8 +155,8 @@ def test_rubner_partial_verify_publishes_only_passed_no_fallback(tmp_path, publi
 
 def test_rubner_rerun_is_idempotent_same_post_ids(tmp_path, publisher):
     reviewer = Reviewer([
-        {"candidates": [], "reason": "first"}, {"candidates": [], "reason": "second"},
-        {"candidates": [], "reason": "first"}, {"candidates": [], "reason": "second"},
+        {"candidates": [], "reason": "first"}, {"candidates": [], "reason": "second"}, verdict(),
+        {"candidates": [], "reason": "first"}, {"candidates": [], "reason": "second"}, verdict(),
     ])
     pipe = build_rubner(tmp_path, reviewer, publisher)
     first = pipe.process(rubner_work(), tmp_path / "r.pdf", [])
@@ -169,7 +171,7 @@ def test_expire_skips_always_publish_held_rows(monkeypatch):
     def fake(sql, args=(), **kw):
         calls.append((sql, args))
         if "SELECT" in sql:
-            return [("rubner-key", "Citadel", "the q4 reload",
+            return [(1, "rubner-key", "Citadel", "the q4 reload",
                      "Citadel - The Q4 Reload October 1 Oct 2026.pdf",
                      json.dumps({"alwaysPublish": True, "excerpt": RUBNER_PAGE}))]
         return []
@@ -189,7 +191,7 @@ def test_expire_still_drops_ordinary_held_rows(monkeypatch):
     def fake(sql, args=(), **kw):
         calls.append((sql, args))
         if "SELECT" in sql:
-            return [("old-key", "Goldman Sachs", "tic data", "tic data.pdf", "{}")]
+            return [(1, "old-key", "Goldman Sachs", "tic data", "tic data.pdf", "{}")]
         return [("old-key",)]
 
     monkeypatch.setattr(publish, "hrana_execute", fake)
@@ -223,3 +225,54 @@ def test_classify_error_keeps_evidence_message():
     err = EvidenceError("PDF extraction failed; original retained for review")
     assert "PDF extraction failed" in classify_error(err)
     assert "PDF extraction failed" in _persist_error(err)
+
+
+@pytest.mark.parametrize("gate", intake.GATES)
+def test_rel306_fallback_requires_independent_verification(tmp_path, publisher, gate):
+    """R-725 / REL-306: an always-publish desk cannot bypass VERIFY."""
+    reviewer = Reviewer([
+        {"candidates": [], "reason": "empty"},
+        {"candidates": [], "reason": "still empty"},
+        verdict(**{gate: False, "reason": "fallback has unresolved source meaning"}),
+    ])
+    posts = build_rubner(tmp_path, reviewer, publisher).process(rubner_work(), tmp_path / "r.pdf", [])
+    assert posts == []
+    assert [c[0] for c in reviewer.calls] == ["text", "text", "multimodal"]
+    review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
+    assert any(a.get("claim_key") == "summary" and a.get("held") == "VERIFY_FAILED"
+               for a in review["audit"])
+    assert review["posts"] == []
+    assert not (tmp_path / "fingerprints.json").exists()
+    assert publish.outcome_row(rubner_work(), review)["outcome"] == "held"
+
+
+def test_rel306_fallback_verification_outage_preserves_retry(tmp_path, publisher):
+    from research.model import ModelError
+    reviewer = Reviewer([{"candidates": [], "reason": "empty"}] * 2)
+    def unavailable(prompt, images=()):
+        raise ModelError("verification unavailable")
+    reviewer.ask = unavailable
+    with pytest.raises(ModelError, match="verification unavailable"):
+        build_rubner(tmp_path, reviewer, publisher).process(rubner_work(), tmp_path / "r.pdf", [])
+    assert publisher.stored == []
+    assert not (tmp_path / "fingerprints.json").exists()
+
+
+def test_rel306_fallback_honors_remaining_document_budget(tmp_path, publisher):
+    from research.pipeline import DocumentDeadlineExceeded, REVIEWER_CALL_TIMEOUT_SECS
+    reviewer = Reviewer([{"candidates": [], "reason": "empty"}] * 2)
+    now = [0.0]
+    original = reviewer.ask_text
+    def select(prompt):
+        response = original(prompt)
+        if len(reviewer.calls) == 2:
+            now[0] = 3 * REVIEWER_CALL_TIMEOUT_SECS - REVIEWER_CALL_TIMEOUT_SECS + 1
+        return response
+    reviewer.ask_text = select
+    pipe = build_rubner(tmp_path, reviewer, publisher)
+    pipe.clock = lambda: now[0]
+    pipe.document_budget_secs = 3 * REVIEWER_CALL_TIMEOUT_SECS
+    with pytest.raises(DocumentDeadlineExceeded, match="before.*fallback"):
+        pipe.process(rubner_work(), tmp_path / "r.pdf", [])
+    assert publisher.stored == []
+    assert not (tmp_path / "fingerprints.json").exists()

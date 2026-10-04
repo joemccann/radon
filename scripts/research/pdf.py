@@ -195,6 +195,20 @@ def main():
                                 [float(v) for v in args.crop.split(',')] if args.crop else None)))
 
 
+def report_child_exception(exc, stream=None):
+    print(f'{type(exc).__name__}: {exc}', file=sys.stderr if stream is None else stream)
+
+
+def run_as_child():
+    try:
+        main()
+    except SystemExit:
+        raise
+    except BaseException as exc:
+        report_child_exception(exc)
+        raise SystemExit(1) from exc
+
+
 if __name__ == '__main__':
     import resource
     # macOS rejects RLIMIT_AS updates; the production Linux subprocess enforces it.
@@ -204,4 +218,4 @@ if __name__ == '__main__':
         resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
     resource.setrlimit(resource.RLIMIT_CPU, (150, 150))
     os.umask(0o077)
-    main()
+    run_as_child()

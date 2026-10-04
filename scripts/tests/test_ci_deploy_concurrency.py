@@ -11,9 +11,12 @@ from __future__ import annotations
 import ast
 import fnmatch
 import json
+import os
+import subprocess
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -903,3 +906,41 @@ def test_mcp_golden_report_runs_once_in_the_full_python_matrix() -> None:
     steps = jobs[job_name]["steps"]
     assert steps.index(upload) > steps.index(evaluate)
     assert "-r requirements.txt" in _job_commands(jobs[job_name])
+
+
+@pytest.mark.parametrize("failures,budget,expected_probes,expected_sleeps", [
+    (0, 20, 1, 0), (2, 30, 3, 2), (999, 20, 3, 2),
+])
+def test_real_deploy_lock_wait_with_fake_lock_and_clock(tmp_path, failures, budget, expected_probes, expected_sleeps):
+    script = _deploy_script()
+    start = script.index("wait_for_deploy_lock() {")
+    end = script.index("\nwait_for_deploy_lock", start)
+    helper = script[start:end]
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "flock").write_text(
+        "#!/bin/sh\n"
+        'n=$(cat "$PROBE_FILE" 2>/dev/null || echo 0)\n'
+        'n=$((n + 1)); echo "$n" > "$PROBE_FILE"\n'
+        '[ "$1" = -n ] && [ "$2" = "$EXPECTED_LOCK" ] && [ "$3" = true ] || exit 99\n'
+        '[ "$n" -gt "$FAILURES" ]\n'
+    )
+    (bindir / "sleep").write_text('#!/bin/sh\nprintf "%s\\n" "$1" >> "$SLEEP_FILE"\n')
+    for tool in bindir.iterdir():
+        tool.chmod(0o755)
+    probe, sleeps = tmp_path / "probes", tmp_path / "sleeps"
+    lock = str(tmp_path / "fake.lock")
+    env = {**os.environ, "PATH": str(bindir) + os.pathsep + os.environ["PATH"],
+           "PROBE_FILE": str(probe), "SLEEP_FILE": str(sleeps), "EXPECTED_LOCK": lock,
+           "FAILURES": str(failures), "DEPLOY_LOCK_FILE": lock, "DEPLOY_LOCK_WAIT_SECS": str(budget)}
+    result = subprocess.run(["bash", "-c", helper + "\nwait_for_deploy_lock"],
+                            env=env, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert int(probe.read_text()) == expected_probes
+    assert (sleeps.read_text().splitlines() if sleeps.exists() else []) == ["10"] * expected_sleeps
+    if failures > expected_probes:
+        assert "still held after 20s; handing over to deploy.sh" in result.stderr
+    elif failures:
+        assert "freed after 20s" in result.stdout
+    else:
+        assert result.stdout == result.stderr == ""

@@ -162,9 +162,12 @@ pickup refuses:
   `{"action": "disabled"}` before touching either remote;
 - a branch whose commit messages, added lines or paths in any commit
   (including merge resolutions), or PR title/body carry a private identifier
-  (`scripts/ir_push_gate.py`): IB account ids (`U`/`DU`/`F` + 6-8 digits), numeric Flex exec ids (10+
-  digits), dotted-hex IB exec ids, or a specific credential shape from
-  `credential_redaction`. The branch stays local, the reason (kind and
+  detected by [`ir_push_gate.py`](../scripts/ir_push_gate.py): account and
+  execution identifiers, credential shapes or an opaque literal assigned to
+  a credential-named key, and a verbatim credential value from the pickup process
+  environment. Exact detectors live in the gate and
+  [`credential_redaction.py`](../scripts/credential_redaction.py), not this runbook.
+  The branch stays local, the reason (kind and
   location, never the value) is logged and sent to Pushover, and nothing is
   redacted in place. Removing an identifier in a later commit does not
   make the earlier history safe to publish;
@@ -175,6 +178,15 @@ REL-296 / R-715: the gate scans each unpublished commit, including merge
 parents, so adding and then deleting an identifier still refuses publication.
 Empty and binary files, filenames and branch names are included; refusal
 messages replace private filenames with a redacted location.
+
+**Symptom:** pickup refuses publication and leaves the incident fix local.
+**Prerequisites:** access to the pickup clone and its refusal log; inspect no secret values.
+**Blast radius:** refusal blocks the fix's push and PR; it does not deploy or alter production.
+**Diagnosis:** use the logged kind and location to inspect the unpublished history and PR metadata. A clean tip does not prove clean history.
+**Stop:** never enable publication to bypass a refusal or paste the matched value into an issue.
+**Verification:** rerun the gate on the sanitized unpublished range and PR metadata; require no findings before pickup publishes it. Offline coverage is in [`test_ir_push_gate.py`](../scripts/tests/test_ir_push_gate.py).
+**Rollback:** leave the branch local with pickup disabled while correcting it.
+**Escalation:** if the identifier is already public, follow [`SECURITY.md`](../SECURITY.md); a later deletion does not remove published history.
 
 2026-09-30: a pickup install from before the refresh step (#759) ran a clone
 frozen before #773. It ignored `GROK_PAGE_AUTOPUSH`, opened
@@ -323,6 +335,15 @@ or parent, builds the new tree beside the old one, then renames it into
 place), and seeds LKG from the same copy. The copy changes only when setup
 reruns: a merged upgrader fix reaches the host on the next setup rerun, not
 on deploy. Contract: `cloud/tests/test_grok_upgrade_controller.py`.
+The two-rename controller install restores the previous tree on a failed
+publication or handled signal (R-724 / REL-305). If restoration itself fails,
+the error names the retained `.grok-upgrade.old.*/tree` backup; as root, move
+that exact directory back to `/usr/local/lib/radon/grok-upgrade` only while
+the target is absent. An unhandled power loss can leave the same backup.
+Install the repaired helper from a reviewed root-owned stage with
+`bash <stage>/cloud/scripts/install-grok-upgrade-controller.sh <stage>/scripts`;
+normal application deployment does not replace this installed code tree.
+
 
 ```bash
 systemctl status radon-grok-upgrade.timer

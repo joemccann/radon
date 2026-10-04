@@ -7,13 +7,16 @@ from zoneinfo import ZoneInfo
 import hashlib
 import json
 import re
+import time
 
-from api.db_http import hrana_execute, hrana_transaction
+from api.db_http import HRANA_TIMEOUT_S, hrana_execute, hrana_transaction
 from research.assets import ASSET_RE, URL_PREFIX, read_asset, store_asset
 from research import force_include
 
 PT = ZoneInfo("America/Los_Angeles")
 HELD_TTL_HOURS = 24
+HELD_EXPIRY_PAGE_SIZE = 200
+HELD_EXPIRY_BUDGET_S = 30.0
 # Product clock is America/Los_Angeles. Age from held_at (fallback updated_at for
 # legacy rows). Do not overwrite updated_at; that stays the review/decision time.
 _EXPIRE_SQL = """UPDATE research_outcomes
@@ -27,10 +30,15 @@ WHERE outcome = 'held'
   AND datetime(replace(COALESCE(held_at, updated_at), 'Z', '')) < datetime(replace(?, 'Z', ''))
 RETURNING work_key"""
 
-_EXPIRE_SELECT_SQL = """SELECT work_key, publisher, series, file_name, context_json
+_EXPIRE_SELECT_SQL = """SELECT rowid, work_key, publisher, series, file_name, context_json
 FROM research_outcomes
-WHERE outcome = 'held'
-  AND datetime(replace(COALESCE(held_at, updated_at), 'Z', '')) < datetime(replace(?, 'Z', ''))"""
+WHERE rowid IN (
+  SELECT rowid FROM research_outcomes WHERE outcome = 'held'
+  AND rowid > ?
+  AND datetime(replace(COALESCE(held_at, updated_at), 'Z', '')) < datetime(replace(?, 'Z', ''))
+  ORDER BY rowid LIMIT ?
+)
+ORDER BY rowid"""
 
 _EXPIRE_KEYS_SQL = """UPDATE research_outcomes
 SET outcome = 'dropped',
@@ -71,15 +79,39 @@ def _held_is_always_publish(row):
 
 
 def expire_stale_held(max_age_hours=HELD_TTL_HOURS, now=None) -> int:
-    """Drop held outcomes older than the PT TTL. Never publishes or requeues."""
+    """R-726 / REL-307: bounded TTL pages; completed updates are replay-safe.
+
+    Never publishes or requeues. A later failure propagates with prior pages
+    committed; the next cycle resumes eligibility without duplicating reasons.
+    """
     cutoff = held_cutoff(now, max_age_hours).isoformat()
     stamp = datetime.now(timezone.utc).isoformat()
-    rows = hrana_execute(_EXPIRE_SELECT_SQL, (cutoff,))
-    expire_keys = [row[0] for row in rows if row and row[0] and not _held_is_always_publish(row)]
-    if not expire_keys:
-        return 0
-    placeholders = ','.join('?' * len(expire_keys))
-    return len(hrana_execute(_EXPIRE_KEYS_SQL.format(keys=placeholders), (stamp, *expire_keys, cutoff)))
+    deadline = time.monotonic() + HELD_EXPIRY_BUDGET_S
+
+    def remaining_timeout():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('held expiry deadline exhausted')
+        return min(HRANA_TIMEOUT_S, remaining)
+
+    cursor, expired = 0, 0
+    while True:
+        rows = hrana_execute(_EXPIRE_SELECT_SQL, (cursor, cutoff, HELD_EXPIRY_PAGE_SIZE),
+                             timeout=remaining_timeout())
+        remaining_timeout()
+        if not rows:
+            return expired
+        next_cursor = int(rows[-1][0])
+        if next_cursor <= cursor:
+            raise ValueError('held expiry cursor did not advance')
+        expire_keys = [row[1] for row in rows if row[1] and not _held_is_always_publish(row[1:])]
+        if expire_keys:
+            placeholders = ','.join('?' * len(expire_keys))
+            expired += len(hrana_execute(_EXPIRE_KEYS_SQL.format(keys=placeholders),
+                                        (stamp, *expire_keys, cutoff), timeout=remaining_timeout()))
+        cursor = next_cursor
+        if len(rows) < HELD_EXPIRY_PAGE_SIZE:
+            return expired
 
 
 def stable_post_id(file_id: str, finding_key: str) -> str:
