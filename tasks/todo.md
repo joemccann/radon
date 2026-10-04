@@ -1,3 +1,9 @@
+# Task: PDF extract error detail (2026-10-03)
+
+- [x] T1 depends_on: [] Failing tests: rc + MemoryError, negative rc signal name, secret redaction, truncated stderr, prefix preserved, TimeoutExpired, persisted health/journal bound.
+- [x] T2 depends_on: [T1] Pipeline.extract appends rc/signal + redacted stderr tail; child prints type: message; classify_error length bound.
+- [ ] T3 depends_on: [T2] Focused pytest green. Draft PR vs main, CI green. No merge. No VPS.
+
 # Task: Rubner always-publish (2026-10-03)
 
 - [x] T1 depends_on: [] Red tests: Rubner detection variants, triage/novelty/TTL exemptions, empty-SELECT and VERIFY-fail fallback, idempotent post ids, outcome flags.
