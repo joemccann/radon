@@ -37,7 +37,7 @@ import {
 } from "./ib_tick_handler.js";
 import { LRUCache } from "./lib/lru-cache.js";
 import { RateLimiter } from "./lib/rate-limiter.js";
-import { MAX_SNAPSHOT_QUEUE, MAX_WS_PAYLOAD_BYTES, capItems } from "./lib/relayLimits.js";
+import { MAX_CLIENT_SUBSCRIPTIONS, MAX_SNAPSHOT_QUEUE, MAX_WS_PAYLOAD_BYTES, capItems } from "./lib/relayLimits.js";
 import {
   applyOperatorHold,
   buildRelayHealthDetail,
@@ -1964,6 +1964,18 @@ function restoreDepthSubscriptions() {
 }
 
 function subscribeClientToSymbol(client, symbol) {
+  let clientSet = clientSymbols.get(client);
+  // R-036 / REL-021b: reserve before any awaited contract resolution or
+  // broker allocation. Repeated messages and mixed instruments share a cap.
+  if (!clientSet?.has(symbol) && (clientSet?.size ?? 0) >= MAX_CLIENT_SUBSCRIPTIONS) {
+    sendMessage(client, {
+      type: "error",
+      code: "SUBSCRIPTION_LIMIT",
+      symbol,
+      message: `Subscription limit reached (${MAX_CLIENT_SUBSCRIPTIONS} subjects per client)`,
+    });
+    return false;
+  }
   let subscribers = symbolSubscribers.get(symbol);
   if (!subscribers) {
     subscribers = new Set();
@@ -1971,12 +1983,12 @@ function subscribeClientToSymbol(client, symbol) {
   }
   subscribers.add(client);
 
-  let clientSet = clientSymbols.get(client);
   if (!clientSet) {
     clientSet = new Set();
     clientSymbols.set(client, clientSet);
   }
   clientSet.add(symbol);
+  return true;
 }
 
 function unsubscribeClientFromSymbol(client, symbol) {
@@ -2447,7 +2459,7 @@ async function handleClientMessage(client, data) {
       const subscribed = [];
       // Stock subscriptions (backward compatible)
       for (const symbol of symbols) {
-        subscribeClientToSymbol(client, symbol);
+        if (!subscribeClientToSymbol(client, symbol)) continue;
         // A bare futures ROOT (e.g. "ES") must subscribe L1 against the resolved
         // front-month FUTURE, not a stock — otherwise IB resolves the equity
         // ticker of the same name (ES = Eversource Energy ~$67) and the quote bar
@@ -2462,6 +2474,8 @@ async function handleClientMessage(client, data) {
         } else {
           ibContract = stockContract(symbol, "SMART", "USD");
         }
+        // The client may unsubscribe or disconnect during futures resolution.
+        if (!clientSymbols.get(client)?.has(symbol)) continue;
         ensureSymbolState(symbol, ibContract);
         if (ibConnected) {
           startLiveSubscription(symbol, ibContract);
@@ -2488,7 +2502,7 @@ async function handleClientMessage(client, data) {
       // Option contract subscriptions
       for (const c of contracts) {
         const key = optionKey(c);
-        subscribeClientToSymbol(client, key);
+        if (!subscribeClientToSymbol(client, key)) continue;
         const ibContract = optionContract(c.symbol, c.expiry, c.strike, c.right);
         ensureSymbolState(key, ibContract);
         if (ibConnected) {
@@ -2512,7 +2526,7 @@ async function handleClientMessage(client, data) {
       // Index subscriptions (e.g. VIX, VVIX on CBOE)
       for (const idx of indexes) {
         const key = idx.symbol;
-        subscribeClientToSymbol(client, key);
+        if (!subscribeClientToSymbol(client, key)) continue;
         const ibContract = indexContract(idx.symbol, "USD", idx.exchange);
         ensureSymbolState(key, ibContract);
         if (ibConnected) {

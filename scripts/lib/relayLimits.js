@@ -9,6 +9,14 @@ export const MAX_WS_PAYLOAD_BYTES = 1024 * 1024;
 /** Most symbols / contracts / indexes honoured from one message. */
 export const MAX_ITEMS_PER_MESSAGE = 1000;
 
+/** R-036 / REL-021b: bound one client's distinct streaming subjects.
+ * A browser tab is ONE client carrying every page's subjects (portfolio,
+ * orders, watchlist, regime, futures, legs and the open chain; the
+ * all-strikes chain alone streams up to 202 contracts), so the cap stops
+ * unbounded growth without refusing a legitimate workspace.
+ */
+export const MAX_CLIENT_SUBSCRIPTIONS = 512;
+
 /** Most snapshot requests waiting on the IB pacing limiter. */
 export const MAX_SNAPSHOT_QUEUE = 1000;
 
