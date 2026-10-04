@@ -31,14 +31,64 @@ _TAILNET = ipaddress.ip_network("100.64.0.0/10")
 _HETZNER_PRIVATE = ipaddress.ip_network("10.0.0.0/16")
 
 
-def is_local_or_tailnet(host: str | None) -> bool:
-    """True for loopback or the Tailscale CGNAT range.
+# Tailnet trust is an explicit /32 list, not the whole CGNAT block (Ops Plane
+# step 2B). Rolled out log-only: RADON_TAILNET_TRUST_MODE unset or `log`
+# keeps every tailnet peer trusted and logs the ones `enforce` would refuse.
+# `enforce` (or any unknown value) trusts only RADON_TRUSTED_TAILNET_PEERS;
+# an empty list there means loopback-only. Runbook: docs/operations.md
+# "Tailnet trust narrowing".
+_TRUSTED_TAILNET_PEERS_ENV = "RADON_TRUSTED_TAILNET_PEERS"
+_TAILNET_TRUST_MODE_ENV = "RADON_TAILNET_TRUST_MODE"
+_TAILNET_REFUSAL_LOG_INTERVAL_SECONDS = 600.0
+_tailnet_refusal_logged: dict[str, float] = {}
 
-    Tailnet membership is itself an authenticated channel, so tailnet peers
-    are treated as 'local' for server-to-server calls — this is what lets
-    the laptop's Next.js (in cloud-thin mode) reach the Hetzner FastAPI
-    without forwarding a Clerk JWT. The Hetzner private net is deliberately
-    NOT here; see is_private_net_probe.
+
+def trusted_tailnet_peers() -> frozenset:
+    """Parse RADON_TRUSTED_TAILNET_PEERS: tailnet IPv4 /32s, comma or space separated.
+
+    A bare address counts as /32. Anything wider than /32 or outside
+    100.64.0.0/10 is ignored, so a typo can only shrink the trust.
+    """
+    raw = os.environ.get(_TRUSTED_TAILNET_PEERS_ENV, "")
+    peers = set()
+    for entry in raw.replace(",", " ").split():
+        try:
+            network = ipaddress.ip_network(entry, strict=True)
+        except ValueError:
+            continue
+        if network.version != 4 or network.prefixlen != 32:
+            continue
+        if network.network_address in _TAILNET:
+            peers.add(network.network_address)
+    return frozenset(peers)
+
+
+def _tailnet_enforced() -> bool:
+    mode = os.environ.get(_TAILNET_TRUST_MODE_ENV, "").strip().lower()
+    return mode not in ("", "log")
+
+
+def _log_tailnet_refusal(host: str, enforced: bool) -> None:
+    now = time.monotonic()
+    last = _tailnet_refusal_logged.get(host)
+    if last is not None and now - last < _TAILNET_REFUSAL_LOG_INTERVAL_SECONDS:
+        return
+    _tailnet_refusal_logged[host] = now
+    verdict = "refused" if enforced else "would refuse (log-only)"
+    logger.warning(
+        "tailnet peer %s not in %s: %s", host, _TRUSTED_TAILNET_PEERS_ENV, verdict
+    )
+
+
+def is_local_or_tailnet(host: str | None) -> bool:
+    """True for loopback or a trusted Tailscale peer.
+
+    Tailnet membership is an authenticated channel, so a trusted tailnet peer
+    is 'local' for server-to-server calls. This is what lets the laptop's
+    Next.js (cloud-thin mode) reach the Hetzner FastAPI without forwarding a
+    Clerk JWT. Which tailnet peers count is RADON_TRUSTED_TAILNET_PEERS,
+    gated by RADON_TAILNET_TRUST_MODE (see above). The Hetzner private net is
+    deliberately NOT here; see is_private_net_probe.
     """
     if host in ("127.0.0.1", "::1"):
         return True
@@ -48,7 +98,13 @@ def is_local_or_tailnet(host: str | None) -> bool:
         address = ipaddress.ip_address(host)
     except ValueError:
         return False
-    return address in _TAILNET
+    if address not in _TAILNET:
+        return False
+    if address in trusted_tailnet_peers():
+        return True
+    enforced = _tailnet_enforced()
+    _log_tailnet_refusal(str(address), enforced)
+    return not enforced
 
 
 def is_private_net_peer(host: str | None) -> bool:

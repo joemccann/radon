@@ -114,8 +114,10 @@ Broker VM:
   when the 10.x exists).
 - Own control-plane bootstrap. Gateway + helper + lease + watchdog only.
 - Watchdog `HEALTH_URL=http://10.0.0.2:8321/health`. `/health` is
-  trust-scoped: only a `10.0.0.0/16`, tailnet, or loopback peer without
-  forwarding headers gets `auth_state`. A probe via `app.radon.run` reads
+  trust-scoped: only a `10.0.0.0/16`, trusted tailnet, or loopback peer
+  without forwarding headers gets `auth_state`. The tailnet half is
+  `RADON_TRUSTED_TAILNET_PEERS` once `RADON_TAILNET_TRUST_MODE=enforce`
+  (`scripts/api/auth.py`); the `10.0.0.0/16` probe scope does not change. A probe via `app.radon.run` reads
   `{"status":"ok"}` and the watchdog goes blind.
 - Secrets subset: TWS user/pass, VNC, session policy. Not `UW_TOKEN`.
 
