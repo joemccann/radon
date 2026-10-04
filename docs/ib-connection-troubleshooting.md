@@ -1,6 +1,18 @@
 # IB Gateway Connection Troubleshooting
 
-Runbook for diagnosing and resolving IB Gateway connection failures in Radon.
+Runbook for local launchd connection failures. Docker setup is owned by
+[the Docker guide](ib-gateway-docker.md); production recovery is owned by
+[Gateway recovery](ib-gateway-recovery.md).
+
+**Prerequisites and blast radius:** select the Gateway mode before using local
+commands. Read-only process, socket and log checks do not place orders; a
+start, restart or process kill can interrupt all IB clients and request 2FA.
+**Safe diagnosis, stop conditions and verification:** follow
+[readiness verification](ib-gateway-recovery.md#readiness-verification), preserve
+operator holds and active leases, and verify authentication rather than just
+a listening socket. **Rollback and escalation:** diagnosis changes nothing;
+if controlled recovery fails, stop retries and escalate sanitized evidence to
+the operator. Do not clear a hold or lease to make a command succeed.
 
 ## Quick Diagnostic
 
@@ -82,7 +94,7 @@ tail -50 ~/ibc/logs/ibc-gateway-service.log
 - `ib_watchdog.py` performs an independent bounded IB protocol handshake on every cycle
 - Sustained DEAD/WEDGED verdicts enter the persisted debounce, backoff, hard-cap, and 2FA lease gates
 - Health: `GET /health` returns `ib_gateway.upstream_dead: true` when CLOSE_WAIT detected
-- WS relay: stale tick recovery requests the lock-aware FastAPI restart endpoint
+- WS relay recovery follows the [mode-specific recovery owner](ib-gateway-recovery.md#relay-recovery)
 
 **Manual fix (if auto-recovery fails):**
 ```bash
@@ -94,19 +106,14 @@ scripts/ibc_remote_control.sh ibc-restart
 
 # Verify recovery
 curl -s http://localhost:8321/health | python3.13 -m json.tool
-# Check: ib_gateway.port_listening=true, ib_gateway.upstream_dead=false
+# Check: ib_gateway.auth_state=authenticated, ib_gateway.upstream_dead=false
+# Also verify the pool roles required by the operation
 ```
 
-**If restart doesn't help:** The restart script already kills lingering processes, but if needed:
-```bash
-~/ibc/bin/stop-secure-ibc-service.sh
-sleep 5
-# Verify no Java process lingering
-pgrep -f 'ibgateway|IBC|ibcontroller'
-# If still running:
-# pkill -9 -f 'ibgateway|IBC|ibcontroller'
-scripts/ibc_remote_control.sh ibc-start
-```
+**If restart does not help:** stop further starts and inspect the controlled
+restart result and logs. Process cleanup belongs to the secure IBC wrapper;
+do not use broad process-name kills. Preserve holds and leases and escalate
+the failed recovery to the operator.
 
 ---
 
@@ -119,29 +126,19 @@ scripts/ibc_remote_control.sh ibc-start
 
 **Root cause:** Client ID collision. Another process holds the client ID that the script needs.
 
-**Client ID registry** (from `scripts/clients/ib_client.py`):
+The [client-ID allocation owner](../scripts/CLAUDE.md#client-id-ranges)
+and [`IBClient`](../scripts/clients/ib_client.py) define allocation; a static
+script-to-ID table cannot identify the connection currently holding a slot.
+The sync and order subprocesses use the automatic allocator.
 
-| Script | Client ID | Purpose |
-|--------|-----------|---------|
-| `ib_sync` | 0 | Portfolio sync |
-| `ib_orders` | 11 | Orders sync |
-| `ib_place_order` | 26 | Order placement |
-| `ib_realtime_server` | 100-102 | Real-time prices (rotates) |
-| `ib_reconcile` | 8 | Fill reconciliation |
-| `exit_order_service` | 20 | Exit order automation |
-| `blotter_service` | 25 | Trade blotter |
-
-**Fix:**
-```bash
-# Check which client IDs are connected in IB Gateway GUI
-# (Configuration > API > Active Connections)
-
-# If a stale script holds the ID, find and kill it:
-ps aux | grep ib_sync | grep -v grep
-ps aux | grep ib_orders | grep -v grep
-
-# The orphaned connections will auto-disconnect after the script exits
-```
+**Safe diagnosis:** inspect the Gateway's active connections and the failing
+script's logs without stopping an order-placement client. The
+[order-placement contract](../scripts/CLAUDE.md#order-placement-contract-ib_place_orderpy)
+requires waiting for an IB `permId` or the bounded failure outcome before
+normal disconnect; killing a placing client early can discard its order.
+Stop cleanup when ownership or order acknowledgement is uncertain. Verify
+through the existing refreshed order view, and escalate unresolved collisions
+with sanitized connection evidence instead of killing processes by name.
 
 ---
 
@@ -238,11 +235,11 @@ These mechanisms handle transient failures without intervention:
 | Persisted recovery ladder | `ib_watchdog.py` | Debounce, backoff, hard cap, auth-aware 2FA stand-down, then lease-gated restart |
 | Atomic push lease | `ib_2fa_lock.py` | OS-locked compare/write; all active leases reject reentry, including same holder |
 | Process cleanup | `restart-secure-ibc-service.sh` | Snapshots pre-existing PIDs, force-kills only survivors after SIGTERM |
-| Stale tick detection | `ib_realtime_server.js` | No ticks for 45s during market hours → restart Gateway (120s cooldown) |
+| Stale tick recovery | Relay | [Mode-specific escalation and operator gates](ib-gateway-recovery.md#relay-recovery) |
 | Reconnect loop | `ib_realtime_server.js` | 5s interval, client ID rotation on collision, subscription restoration |
 | `_IBSyncCoordinator` | FastAPI | Coalesces portfolio/orders subprocesses and caches only successful outcomes briefly |
 | Cached fallback | API routes | Serves `data/*.json` when sync fails, returns 200 not 502 |
-| IBC schedules | launchd + IBC | Disabled: no RunAtLoad/calendar, AutoRestartTime, or ColdRestartTime |
+| IBC daily cycle | Gateway | [Daily-cycle semantics and local installer limitation](ib-gateway-recovery.md#daily-cycle) |
 | 2FA timeout | IBC config | Exit with no relogin; watchdog owns the next bounded attempt after lease expiry |
 
 ---

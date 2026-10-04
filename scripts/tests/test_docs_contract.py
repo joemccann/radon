@@ -1447,3 +1447,93 @@ class TestRunnerRunbookRootWrites:
                 "sudo -u _radonbot /bin/sh -c" in line and target in line and ">" in line
                 for line in doc.splitlines()
             ), target
+
+
+class TestGatewayDailyCycleDocumentation:
+    """DOC-159: an empty IBC field is not a disabled broker daily cycle."""
+
+    @pytest.mark.parametrize("path", [
+        "docs/implement.md", "docs/ib_tws_api.md", "docs/ib-connection-troubleshooting.md",
+    ])
+    def test_local_setup_defers_cycle_semantics_to_recovery_owner(self, path):
+        text = (_ROOT / path).read_text()
+        assert "ib-gateway-recovery.md#daily-cycle" in text
+        assert "`AutoRestartTime` | blank | Disabled" not in text
+        assert "`AutoRestartTime=` - disabled" not in text
+        assert "Disabled: no RunAtLoad/calendar, AutoRestartTime, or ColdRestartTime" not in text
+
+    def test_cycle_owner_explains_blank_fields_without_copying_schedule(self):
+        owner = _section((_ROOT / "docs/ib-gateway-recovery.md").read_text(), "Daily cycle")
+        for required in ("blank", "stored", "does not disable", "setup_ibc.sh", "docker-compose.yml", "2FA", "stop", "rollback", "escalate"):
+            assert required.casefold() in owner.casefold(), required
+        assert "11:45 PM" not in owner and "4:45 PM PT" not in owner
+
+
+class TestRelayRecoveryDocumentation:
+    """DOC-160: actor and mode boundaries live beside broker recovery gates."""
+
+    @pytest.mark.parametrize("path,target", [
+        ("scripts/CLAUDE.md", "../docs/ib-gateway-recovery.md#relay-recovery"),
+        ("web/CLAUDE.md", "../docs/ib-gateway-recovery.md#relay-recovery"),
+        ("docs/ib-connection-troubleshooting.md", "ib-gateway-recovery.md#relay-recovery"),
+    ])
+    def test_relay_overviews_link_the_owner_without_contradictory_restart_claims(self, path, target):
+        text = (_ROOT / path).read_text()
+        assert target in text
+        for stale in ("never a relay-initiated Gateway restart", "NEVER restarts the IB Gateway", "45s during market hours → restart Gateway"):
+            assert stale not in text
+
+    def test_recovery_owner_explains_escalation_and_safe_operator_boundaries(self):
+        owner = _section((_ROOT / "docs/ib-gateway-recovery.md").read_text(), "Relay recovery")
+        for required in ("shouldRequestGatewayRestart", "docker", "cloud", "launchd", "POST /ib/restart", "operator hold", "lease", "backoff", "stop", "verification", "rollback", "escalate"):
+            assert required.casefold() in owner.casefold(), required
+
+
+class TestGatewayReadinessDocumentation:
+    """DOC-161: listening sockets are diagnostic evidence, not readiness."""
+
+    def test_docker_health_defers_machine_inventory_and_requires_authentication(self):
+        text = (_ROOT / "docs/ib-gateway-docker.md").read_text()
+        health = _section(text, "Healthcheck")
+        assert "docker-compose.yml" in health
+        assert "does not prove authentication" in health
+        assert "ib-gateway-recovery.md#readiness-verification" in health
+        assert "healthy**: IB Gateway API is accepting connections" not in health
+        assert "2FA pending, login failed" not in health
+        assert "4:45 PM PT" not in text
+
+    def test_startup_and_manual_recovery_require_authenticated_health(self):
+        root = (_ROOT / "CLAUDE.md").read_text()
+        startup = _section(root, "Startup Checklist")
+        assert "auth_state: authenticated" in startup
+        text = (_ROOT / "docs/ib-connection-troubleshooting.md").read_text()
+        assert "# Check: ib_gateway.auth_state=authenticated" in text
+        owner = _section((_ROOT / "docs/ib-gateway-recovery.md").read_text(), "Readiness verification")
+        for required in ("auth_state=authenticated", "managed_accounts", "unknown", "remote", "stop", "rollback", "escalate"):
+            assert required.casefold() in owner.casefold(), required
+
+
+class TestClientOwnershipDocumentation:
+    """DOC-162/163: connection cleanup must preserve order-owner identity."""
+
+    def test_collision_runbook_has_no_static_ids_or_broad_process_kill(self):
+        text = (_ROOT / "docs/ib-connection-troubleshooting.md").read_text()
+        assert "**Client ID registry**" not in text
+        assert "pkill -9" not in text
+        assert "find and kill it" not in text
+        assert "../scripts/CLAUDE.md#client-id-ranges" in text
+        assert "../scripts/CLAUDE.md#order-placement-contract-ib_place_orderpy" in text
+        assert "permId" in text
+
+    def test_api_reference_defers_allocation_and_cancel_ownership(self):
+        text = (_ROOT / "docs/ib_tws_api.md").read_text()
+        assert "Default to `clientId=0`" not in text
+        assert "cancel/modify ANY order" not in text
+        assert "Can cancel ANY order" not in text
+        assert "Can modify ANY order" not in text
+        assert "connects as master to handle TWS-placed orders" not in text
+        assert "| ID | Script | Purpose |" not in text
+        assert "../scripts/CLAUDE.md#client-id-ranges" in text
+        assert "../scripts/CLAUDE.md#cancel--modify-scripts-side" in text
+        assert "ib_order_manage.py" in text
+        assert "original" in text
