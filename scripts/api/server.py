@@ -1169,7 +1169,10 @@ _SECRET_SCRUB_PATTERNS = [
     (re.compile(r"libsql://[^\s'\"]+", re.IGNORECASE), "[redacted-db-url]"),
     (re.compile(r"https://[a-z0-9.-]+\.turso\.io[^\s'\"]*", re.IGNORECASE), "[redacted-db-url]"),
     (re.compile(r"(auth[_-]?token|authorization|bearer)(\s*[=:]\s*)\S+", re.IGNORECASE), r"\1\2[redacted]"),
-    (re.compile(r"eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*"), "[redacted-jwt]"),
+    # The lookbehind anchors a match to the start of a token run; without it a
+    # long run of repeated "eyJ" retries the scan from every occurrence, which
+    # is quadratic on caller-echoed details.
+    (re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*"), "[redacted-jwt]"),
     (re.compile(r"\bU\d{6,}\b"), "[redacted-account]"),
     # Named provider-key prefixes: Anthropic (sk-ant-), Clerk/Stripe (sk_live_/sk_test_).
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{6,}"), "[redacted-key]"),
