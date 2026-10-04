@@ -546,6 +546,12 @@ Rollout (app host `/etc/radon/env`):
 
 Rollback: unset `RADON_TAILNET_TRUST_MODE` (back to log-only) and `radon restart`.
 
+### IBC trusted API clients (`cloud/ibc-overrides/trusted-ips.txt`)
+
+`TrustedTwsApiClientIPs=127.0.0.1,10.0.0.2` (was `100.0.0.0/8`: every tailnet node plus public space). No laptop or Mac mini `/32`: local mode runs its own Docker Gateway on `127.0.0.1` (`scripts/ib mode local`), and cloud mode has no tailnet `4001` to reach since the split (broker binds `10.0.0.4` and loopback only).
+
+The file is a reference. Nothing in deploy, setup or compose reads it (`cloud/tests/test_ibc_trusted_ips.py` pins that), so merging changes nothing live. It is also moot for the Docker Gateway: the gnzsnz image relays `4003 -> 127.0.0.1:4001` with socat inside the container, so every API client reaches the Gateway as `127.0.0.1`. Who can open `4001` is decided by the compose bind address and the host and Hetzner firewalls below, not by IBC. Operator step: none. If a Gateway is ever run without the socat relay, copy this value into its IBC `config.ini` and restart it (one 2FA).
+
 ## Health monitoring (isolated daemon + edge surface)
 
 The health surface is **decoupled from the trading stack** so it keeps reporting precisely when the stack is down. Two layers plus an off-box witness:
