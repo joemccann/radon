@@ -1,10 +1,13 @@
 "use client";
 import ErrorToast from "@/components/ErrorToast";
 
-import { userErrorMessage } from "@/lib/userError";
+import { readErrorResponse, userErrorMessage } from "@/lib/userError";
 import { Download, Share2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useDialogChrome } from "@/lib/useDialogChrome";
+
+// REL-108 / R-317: one deadline covers generation, body reads and preview loading.
+const SHARE_TIMEOUT_MS = 30_000;
 
 type ShareResponse = {
   preview_path?: string;
@@ -79,14 +82,15 @@ export default function ShareReportModal({
     setSharing(true);
     setShareError(null);
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), SHARE_TIMEOUT_MS);
     try {
-      const res = await fetch(shareEndpoint, { method: "POST" });
-      const data = await res.json() as ShareResponse;
-
+      const res = await fetch(shareEndpoint, { method: "POST", signal: controller.signal });
       if (!res.ok) {
-        setShareError(userErrorMessage(data?.error, "The share image could not be prepared. Try again."));
+        setShareError(await readErrorResponse(res, "The share image could not be prepared. Try again."));
         return;
       }
+      const data = await res.json() as ShareResponse;
 
       const previewPath = data?.preview_path;
       if (!previewPath) {
@@ -97,7 +101,8 @@ export default function ShareReportModal({
       setStaleNotice(buildStaleNotice(data));
 
       const htmlRes = await fetch(
-        `${resolvedContentEndpoint}?path=${encodeURIComponent(previewPath)}`
+        `${resolvedContentEndpoint}?path=${encodeURIComponent(previewPath)}`,
+        { signal: controller.signal }
       );
       if (!htmlRes.ok) {
         setShareError("Could not load preview.");
@@ -113,8 +118,11 @@ export default function ShareReportModal({
       });
       setModalOpen(true);
     } catch (err) {
-      setShareError(userErrorMessage(err, "Unknown error"));
+      setShareError(controller.signal.aborted
+        ? "The share request took too long. Try again."
+        : userErrorMessage(err, "The share image could not be prepared. Try again."));
     } finally {
+      clearTimeout(timeout);
       setSharing(false);
     }
   }

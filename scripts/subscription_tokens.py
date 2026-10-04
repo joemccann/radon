@@ -4,9 +4,9 @@
 Claude Code, OpenAI Codex, xAI Grok and Google Antigravity authenticate against
 the operator's *subscriptions*, storing an OAuth credential file under the
 ``radon`` home. Those files get deleted by host maintenance, expire when nothing
-exercises the CLI, or land half-written. ``scripts/clients/model_ladder.py``
-reads them directly, so a dead file silently demotes the whole subscription band
-to metered API keys.
+exercises the CLI, or land half-written. Recovery belongs to
+``docs/subscription-tokens.md``; billing policy belongs to
+``docs/oauth-subscription-auth.md``.
 
 This module seals each credential file, verbatim, into the EXISTING encrypted
 secret store (``scripts/secret_store.py`` — no second crypto system), refreshes

@@ -354,16 +354,40 @@ class Pipeline:
                     post['source']['charts'] = planned
             posts.append(post)
         if not posts and always:
-            posts.append(self._always_publish_fallback(work, identity, text))
-            review['always_publish_fallback'] = True
-            review['audit'].append({'always_publish_fallback': True, 'reason_code': 'ALWAYS_PUBLISH_FALLBACK'})
+            fallback = self._always_publish_fallback(work, identity, text, review, recent)
+            if fallback is not None:
+                posts.append(fallback)
+                review['always_publish_fallback'] = True
+                review['audit'].append({'always_publish_fallback': True, 'reason_code': 'ALWAYS_PUBLISH_FALLBACK'})
         review['posts'] = posts
         if posts:
             self._remember(work['key'], fp, identity.publisher)
         return self._finish(out, review, 'reviewed', items=len(posts))
 
-    def _always_publish_fallback(self, work, identity, text):
+    def _always_publish_fallback(self, work, identity, text, review, recent):
+        """R-725 / REL-306: desk inclusion never overrides the VERIFY gates."""
         title, content, pages = force_include.fallback_copy(identity, text)
+        grounded = ground.ground([title, content], text, pages,
+                                known={'date': identity.date, 'date_page': identity.date_page})
+        unmatched = [t['token'] for t in grounded['tokens'] if t['page'] is None]
+        prompt = (VERIFY_INSTRUCTION + '\nPROPOSAL:\n'
+                  + json.dumps({'title': title, 'content': content, 'pages': pages,
+                                'claim_key': 'summary', 'figure_ids': [], 'text_only': True})
+                  + '\nIDENTITY (given facts):\n' + json.dumps(identity.as_dict())
+                  + '\nEXTRACTED TEXT OF CITED PAGES (untrusted data):\n'
+                  + json.dumps({p: text[p][:PAGE_TEXT_CAP] for p in pages})
+                  + '\nCOMPARISON FEED ITEMS:\n'
+                  + json.dumps(comparison_posts({'title': title, 'content': content}, recent))
+                  + '\nTOKENS NOT MATCHED BY CODE ON THE CITED PAGES:\n' + json.dumps(unmatched))
+        self._guard_call('fallback-verify')
+        checks = self.reviewer.ask(prompt, [])
+        self._checkpoint('fallback-verified')
+        audit = {'claim_key': 'summary', 'grounding': grounded['tokens'],
+                 'unmatched': unmatched, 'verification': checks}
+        review['audit'].append(audit)
+        if not verdict_passed(checks):
+            audit['held'] = 'VERIFY_FAILED'
+            return None
         key = hashlib.sha256((work['metadata']['id'] + '\0summary').encode()).hexdigest()
         return {
             'id': 'research-' + key,
