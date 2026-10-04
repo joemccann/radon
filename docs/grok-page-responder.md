@@ -323,6 +323,15 @@ or parent, builds the new tree beside the old one, then renames it into
 place), and seeds LKG from the same copy. The copy changes only when setup
 reruns: a merged upgrader fix reaches the host on the next setup rerun, not
 on deploy. Contract: `cloud/tests/test_grok_upgrade_controller.py`.
+The two-rename controller install restores the previous tree on a failed
+publication or handled signal (R-724 / REL-305). If restoration itself fails,
+the error names the retained `.grok-upgrade.old.*/tree` backup; as root, move
+that exact directory back to `/usr/local/lib/radon/grok-upgrade` only while
+the target is absent. An unhandled power loss can leave the same backup.
+Install the repaired helper from a reviewed root-owned stage with
+`bash <stage>/cloud/scripts/install-grok-upgrade-controller.sh <stage>/scripts`;
+normal application deployment does not replace this installed code tree.
+
 
 ```bash
 systemctl status radon-grok-upgrade.timer

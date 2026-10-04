@@ -901,3 +901,9 @@ Closing local gates (2026-09-30): permanent Python drills 95 passed; standing wr
 Closing local verification (2026-10-02): permanent Python drills 95 passed; standing safety/catalog sweeps 89 passed; monitor/docs union 600 passed before the final exit-reader repair, followed by monitor/funnel/transport union 567 passed. Health/consumer union 259 passed, pacing callers 148 passed, hold callers 114 passed, release/shim 57 passed, lifecycle 55 passed, migration 57 passed, health floor 84 passed and Caddy 51 passed. REL-298's additional inspection-budget faults failed four cases twice before the final 57-pass release suite. NF-7 existing residual behavior: 9 passed. Full project suites, cloud tests and Vitest (including order-idempotency-durability) remain PR CI work.
 
 Publication restriction: GitHub rejected the initial branch push solely because the prepared R-303 workflow-comment correction requires workflow scope. The rejected unpublished commit was removed; R-303 remains operator-only with an exact action in the dated audit and rolling issue. No remote branch was created by that rejected push, no force-push was used, and no existing test or gate was weakened.
+
+## Nightly remediation 2026-10-04
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-305 / R-724 | DONE | RED 3 failed twice; GREEN 14 passed | Controller EXIT cleanup restores the prior trusted tree after failed publication or a handled signal. A failed restoration retains the exact named backup rather than deleting the only working copy. Three shell faults use disposable directories and a fake mv; no host install, root operation or service action occurs. The owner runbook names installation and power-loss recovery; a two-rename gap remains explicit. |
