@@ -666,3 +666,23 @@ class TestOverlayDoesNotMasqueradeAsEnv:
         resolved = app_preferences.resolve("RADON_MAX_ORDER_QTY")
         assert resolved.value == 500
         assert resolved.source == "default"
+
+
+@pytest.mark.asyncio
+async def test_scanner_forwards_nondefault_worker_preference(monkeypatch):
+    from api import server
+    from unittest.mock import AsyncMock
+    calls = []
+    def resolve(key):
+        calls.append(key)
+        assert key == "RADON_SCANNER_WORKERS"
+        return 7
+    monkeypatch.setattr(server.app_preferences, "get_int", resolve)
+    runner = AsyncMock(return_value={"results": []})
+    monkeypatch.setattr(server, "_run_flow_tab", runner)
+    assert await server.scan(force=True) == {"results": []}
+    assert calls == ["RADON_SCANNER_WORKERS"]
+    assert runner.await_args.args == (
+        "scanner", "scanner.json", "scanner.py", ["--top", "25", "--workers", "7"],
+    )
+    assert runner.await_args.kwargs["force"] is True
