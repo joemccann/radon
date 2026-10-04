@@ -98,3 +98,7 @@ partial output, including otherwise valid reviewer JSON. Failure messages omit
 provider payloads; configured provider fallback remains available. Python keeps
 its existing byte limit and response-close guarantee; the web adapter consumes
 the response body before validating completion.
+
+Saved unpadded day-folder cursors remain polled even when the padded folder
+later appears (REL-302 / R-721). Current-window discovery also preserves those
+streams; a new padded listing cannot suppress already watched revisions.

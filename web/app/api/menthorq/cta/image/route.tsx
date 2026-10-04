@@ -103,6 +103,8 @@ async function loadLatestCta(
     data.tables = deduplicateTables(reconcileCtaTables(data.tables));
 
     if (section) {
+      // REL-108 / R-315: an unknown section is absent data, not a blank 200 image.
+      if (!Object.hasOwn(data.tables, section)) return null;
       const filtered: Record<string, CtaRow[]> = {};
       if (data.tables[section]) filtered[section] = data.tables[section];
       return { ...data, tables: filtered };
