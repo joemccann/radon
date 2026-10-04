@@ -702,6 +702,13 @@ class IBClient:
             IBOrderError: If the order placement fails.
         """
         self._require_connection()
+        # REL-304 / R-723: caller preflight can precede slow broker work.
+        # Recheck the kill switch at each placement/re-submit admission.
+        from trading_halt import get_halt_state, is_trading_halted
+
+        if is_trading_halted():
+            reason = get_halt_state().get("reason", "manual halt")
+            raise IBOrderError(f"Trading halted: {reason}")
         # LAST funnel. Every caller is expected to check the limits itself and
         # report the refusal in its own vocabulary, but this is the one place a
         # new call site cannot go around — a guard that lives only in the caller
@@ -850,6 +857,13 @@ class IBClient:
             IBOrderError: If the modification fails.
         """
         self._require_connection()
+        # REL-304 / R-723: caller preflight can precede slow broker work.
+        # Recheck the kill switch at each placement/re-submit admission.
+        from trading_halt import get_halt_state, is_trading_halted
+
+        if is_trading_halted():
+            reason = get_halt_state().get("reason", "manual halt")
+            raise IBOrderError(f"Trading halted: {reason}")
 
         # Apply modifications
         if "lmt_price" in kwargs:
