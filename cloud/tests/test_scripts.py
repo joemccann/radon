@@ -233,11 +233,12 @@ class TestSetupVpsEnvValidation:
 class TestSetupVpsFirewall:
     def test_opens_port_80(self, setup_vps):
         assert "80" in setup_vps
-        assert re.search(r"ufw allow 80", setup_vps)
+        # Declared ruleset lines, applied as `ufw <line>` (test_host_firewall.py).
+        assert re.search(r'echo "allow 80/tcp', setup_vps)
 
     def test_opens_port_443(self, setup_vps):
         assert "443" in setup_vps
-        assert re.search(r"ufw allow 443", setup_vps)
+        assert re.search(r'echo "allow 443/tcp', setup_vps)
 
 
 class TestSetupVpsSudoers:
