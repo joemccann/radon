@@ -74,10 +74,12 @@ expired keys; expiry comparison uses Eastern dates, not the host timezone.
 
 ## Relay subscription admission (R-036 / REL-021b)
 
-Each WebSocket client may hold at most 32 distinct L1 subjects across stocks,
+Each WebSocket client may hold at most 512 distinct L1 subjects across stocks,
 options, indexes and successive messages. Duplicates remain admissible; an
 unsubscribe or disconnect frees capacity. Refusal emits `SUBSCRIPTION_LIMIT`
 before state allocation, futures resolution or a broker request. Resolution
 rechecks subject ownership before allocating a line. Each subject can require
-one internal forward line, bounding one client's L1 demand to 64 lines before
-shared deduplication; this is a client cap, not a fleet-wide line reservation.
+one internal forward line. One browser tab is one client carrying every
+page's subjects (the all-strikes chain alone streams up to 202 contracts), so
+the cap bounds runaway growth; it is not a fleet-wide line reservation.
+`test_quota_admits_one_workspace_tab` pins it above a full workspace's demand.

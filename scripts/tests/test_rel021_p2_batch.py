@@ -156,7 +156,7 @@ import vm from 'node:vm';
 import * as limits from './scripts/lib/relayLimits.js';
 const source = fs.readFileSync('./scripts/ib_realtime_server.js', 'utf8');
 const cap = limits.MAX_CLIENT_SUBSCRIPTIONS ?? 32;
-assert.ok(cap > 0 && cap <= 40);
+assert.ok(cap > 0 && cap <= limits.MAX_ITEMS_PER_MESSAGE);
 function fn(name) {
   const match = new RegExp(`^(?:async )?function ${name}\\(`, 'm').exec(source);
   assert.ok(match, name);
@@ -303,3 +303,23 @@ if (['stocks', 'options', 'indexes'].includes(scenario)) {
     @pytest.mark.parametrize("case", ["stocks", "options", "indexes", "messages-and-recovery", "offline", "concurrent-future", "future-unsubscribed", "future-disconnected", "queue-cap", "snapshot-cancel"])
     def test_subscription_quota_at_the_broker_wire(self, case):
         self._run(case)
+
+    def test_quota_admits_one_workspace_tab(self):
+        """Each browser tab is ONE relay client carrying every page's subjects
+        (WorkspaceShell unions portfolio, orders, watchlist, regime, futures,
+        portfolio legs and the open chain). The all-strikes chain alone
+        streams 2 * (2 * WS_CAP + 1) contracts; the quota must admit that plus
+        portfolio/watchlist headroom or live quotes silently go missing."""
+        import re
+
+        root = Path(__file__).resolve().parents[2]
+        chain = (root / "web/components/ticker-detail/OptionsChainTab.tsx").read_text(encoding="utf-8")
+        ws_cap = int(re.search(r"const WS_CAP = (\d+);", chain).group(1))
+        limits = (root / "scripts/lib/relayLimits.js").read_text(encoding="utf-8")
+        quota = int(re.search(r"export const MAX_CLIENT_SUBSCRIPTIONS = (\d+);", limits).group(1))
+        per_message = int(re.search(r"export const MAX_ITEMS_PER_MESSAGE = (\d+);", limits).group(1))
+
+        chain_demand = 2 * (2 * ws_cap + 1)
+        portfolio_headroom = 128
+        assert quota >= chain_demand + portfolio_headroom
+        assert quota <= per_message
