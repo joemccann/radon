@@ -217,13 +217,14 @@ tail -f ~/ibc/logs/ibc-gateway-service.log
 3. IBC starts Gateway and the operator approves the single IBKR Mobile push.
 4. On 2FA timeout IBC exits without relogin. The watchdog waits for lease expiry before a bounded new attempt.
 
+Daily-cycle semantics and the local installer limitation are owned by
+[Gateway recovery](ib-gateway-recovery.md#daily-cycle).
+
 **Key config settings (`~/ibc/config.secure.ini`):**
 | Setting | Value | Purpose |
 |---------|-------|---------|
 | `ExistingSessionDetectedAction` | `primaryoverride` | Gateway yields the session to your own IBKR login (see `docs/ib-gateway-recovery.md`, operator hold) |
 | `AcceptIncomingConnectionAction` | `accept` | No popup for API connections |
-| `AutoRestartTime` | blank | Disabled because it cannot acquire the 2FA lease |
-| `ColdRestartTime` | blank | Disabled because it can mint an unleased weekly push |
 | `ReloginAfterSecondFactorAuthenticationTimeout` | `no` | Prevent stacked retry pushes |
 | `CommandServerPort` | `7462` | IBC command server for STOP only |
 | `IbLoginId` / `IbPassword` | unset in file | Credentials come from Keychain only |
