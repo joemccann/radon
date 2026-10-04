@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
+import signal
 import subprocess
 import sys
-import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from knowledge import distill as subject
@@ -40,41 +41,55 @@ def test_budget_is_cumulative_across_batches_and_sources():
 
 
 def test_timeout_retains_completed_summaries_and_kills_worker_group(monkeypatch, tmp_path):
-    """Ready handshake makes timeout independent of CI process startup speed."""
+    """Reap both owned group members without relying on Linux /proc or init."""
     real_popen = subprocess.Popen
-    pid_file = tmp_path / "descendant.pid"
     code = '''
-import json, subprocess, sys
-child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
-open(sys.argv[1], "w").write(str(child.pid))
+import json, sys, time
 print("READY", flush=True)
 sys.stdin.read()
 print(json.dumps([0, {"summary": "finished", "tickers": []}]), flush=True)
-child.wait()
+time.sleep(600)
 '''
     processes = []
     def ready_popen(*args, **kwargs):
-        proc = real_popen([sys.executable, "-c", code, str(pid_file)], **kwargs)
-        assert proc.stdout.readline() == "READY\n"
+        assert kwargs["start_new_session"] is True
+        # Keep the real separate group, but make pytest the parent of both
+        # members so it can reap them before the product's final cleanup call.
+        kwargs = {**kwargs, "start_new_session": False, "process_group": 0}
+        proc = real_popen([sys.executable, "-c", code], **kwargs)
         processes.append(proc)
+        assert proc.stdout.readline() == "READY\n"
+        member = real_popen(
+            [sys.executable, "-c", "import time; print('READY', flush=True); time.sleep(600)"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True,
+            process_group=proc.pid,
+        )
+        processes.append(member)
+        assert member.stdout.readline() == "READY\n"
+        member.stdout.close()
+        assert os.getpgid(member.pid) == proc.pid
+        communicate = proc.communicate
+        def communicate_and_reap_group(*args, **kwargs):
+            output = communicate(*args, **kwargs)
+            member.wait(timeout=5)
+            return output
+        monkeypatch.setattr(proc, "communicate", communicate_and_reap_group)
         return proc
     monkeypatch.setattr(subject.subprocess, "Popen", ready_popen)
-    result = subject.run_distill_batch([(None, "a"), (None, "b")], timeout=0.2, clock=lambda: 0)
-    assert result == [{"summary": "finished", "tickers": []}, None]
-    assert processes[0].poll() is not None
-    descendant = int(pid_file.read_text())
-    stat = Path(f"/proc/{descendant}/stat")
-    # SIGKILL delivery is asynchronous: poll briefly for exit or zombie.
-    deadline = time.monotonic() + 5
-    while True:
-        try:
-            state = stat.read_text().split()[2]
-        except (FileNotFoundError, ProcessLookupError):
-            state = None
-        if state in (None, "Z", "X") or time.monotonic() > deadline:
-            break
-        time.sleep(0.05)
-    assert state in (None, "Z", "X")
+    try:
+        result = subject.run_distill_batch([(None, "a"), (None, "b")], timeout=0.2, clock=lambda: 0)
+        assert result == [{"summary": "finished", "tickers": []}, None]
+        assert processes[0].poll() is not None
+        assert processes[1].poll() is not None
+        assert processes[1].returncode == -signal.SIGKILL
+    finally:
+        for process in reversed(processes):
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=5)
+            for pipe in (process.stdin, process.stdout):
+                if pipe is not None:
+                    pipe.close()
 
 
 def test_main_shares_budget_across_source_retries(monkeypatch):

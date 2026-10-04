@@ -105,7 +105,7 @@ export default function CtaPage() {
             headline: `MAX SHORT · ${formatCtaPercentileLabel(spx.percentile_3m)} pctile (3M), z ${spx.z_score_3m.toFixed(2)}.`,
             body: [
               flipped ? `Flipped from ${spx.position_1m_ago.toFixed(2)} long one month ago.` : null,
-              bondShortCount >= 2 ? `${bondShortCount} bond contracts at 0th pctile, full duration short.` : null,
+              bondShortCount >= 2 ? `${bondShortCount} bond contracts at or below 10th pctile, full duration short.` : null,
               "Violent short-covering likely on any bullish catalyst.",
             ].filter(Boolean).join(" "),
           };
