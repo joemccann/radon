@@ -651,8 +651,9 @@ class TestPanicIndexStorage:
 # ── live C.8 anchors ──────────────────────────────────────────────
 
 
+# T-500: live CDN anchors require the existing explicit integration opt-in.
 @pytest.mark.network
-@pytest.mark.skipif(os.environ.get("CI") == "true", reason="live Cboe CDN; CI uses fixtures")
+@pytest.mark.integration
 def test_live_files_reproduce_c8_anchors():
     from clients.cboe_client import CboeClient
     from lib.panic_index_math import attach_delta, attach_level, attach_z_scores, compute_stats, join_series
