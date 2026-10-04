@@ -8895,3 +8895,13 @@ Delivery review: draft https://github.com/joemccann/radon/pull/882; source-verif
 - [ ] T5 (depends_on: [T4]): review rails and post one durable checkpoint on issue #196.
 
 Review 2026-10-03: CIP-016 reserved experiment restored against 15bdb9a4; regression red 2 failed/7 passed, green cloud 83 passed, script gate/inventory/path contracts 90 passed. YAML/inline shell/Python syntax, pinned actions, complete 12-family gate equality and diff/secret reviews pass. Full suites, Vitest, Docker builds and workflow lint require PR CI. Expected workflow-scope publication block remains; exact delivery receipt and all run strata belong in the single issue #196 checkpoint. No production access, synthetic samples, merge, main push or additional experiment ID.
+
+## Nightly reliability 2026-10-04
+
+- [x] T1 depends_on: [] Install isolated toolchain, recover trusted checkpoint and reserve tonight's branch.
+- [x] T2 depends_on: [T1] Audit delta and codemap importers; execute standing sweeps and triage inherited acceptance.
+- [x] T3 depends_on: [T2] Repair verified findings serially with fault-injection red/green and focused gates.
+- [x] T4 depends_on: [T3] Run permanent drills and validate substantive publication and change hygiene.
+- [ ] T5 depends_on: [T4] Publish one draft, await exact-head CI and post one rolling comment; record external completion receipts on issue #81.
+
+Review: delta audit finished through 6603be9b; three new source findings and inherited R-036 have repeated red/green evidence. R-035 passes executable upstream acceptance. Standing sweeps 110 passed; permanent drills 95 passed, relay 113, research/docs 280 and 305, controller/setup 18, delta scripts 153, delta API 15 and deploy lifecycle 7 passed/2 platform skips. The broader cloud delta run had 167 passes and one environment-only subprocess failure; the failing case passes alone with the venv interpreter on PATH. Substantive publication check, Python/config parsing, shell/Node syntax, diff and four-commit secret scan pass. External publication, exact-head CI and the single durable comment are pending; final completion receipts belong on issue #81 without changing the reported head. Open PR #882 reserves R-721/R-722/R-723, REL-302/REL-303/REL-304 and R-315/R-316/R-317/R-318. Only tonight's branch is eligible for push; full suites and Vitest belong to CI.

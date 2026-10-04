@@ -132,7 +132,12 @@ def test_held_cutoff_is_updated_at_minus_24h_against_the_pt_clock():
 
 def test_expire_stale_held_updates_held_rows_and_never_publishes(monkeypatch):
     calls = []
-    monkeypatch.setattr(publish, "hrana_execute", lambda sql, args=(), **kw: calls.append((sql, args)) or [("old-key",)])
+    def execute(sql, args=(), **kw):
+        calls.append((sql, args))
+        if sql.lstrip().startswith("SELECT"):
+            return [(1, "old-key", "Goldman Sachs", "tic data", "tic data.pdf", "{}")]
+        return [("old-key",)]
+    monkeypatch.setattr(publish, "hrana_execute", execute)
     published = []
     monkeypatch.setattr(publish, "publish", lambda post: published.append(post))
     count = publish.expire_stale_held(now=datetime(2026, 9, 19, 15, 0, tzinfo=timezone.utc))
@@ -220,3 +225,89 @@ def test_intake_records_the_opening_text_and_a_pdf_link_for_a_document_that_publ
     document = seen[0]["document"]
     assert document["page_count"] == 2 and document["excerpt"].startswith("## Economics Research ## 16 September 2026")
     assert len(document["excerpt"]) <= 900 and document["source_url"].endswith(".pdf")
+
+
+def _rel307_store(count=801):
+    connection = _outcome_db()
+    connection.execute("ALTER TABLE research_outcomes ADD COLUMN context_json TEXT NOT NULL DEFAULT '{}'")
+    connection.executemany(
+        "INSERT INTO research_outcomes (work_key, publisher, outcome, updated_at, context_json) VALUES (?, ?, ?, ?, ?)",
+        [(f"z-{i:05}", "Goldman Sachs", "held", "2026-09-01T00:00:00+00:00",
+          json.dumps({"alwaysPublish": i % 200 == 0, "excerpt": "synthetic research text"}))
+         for i in range(count)],
+    )
+    return connection
+
+
+@pytest.mark.parametrize("fault", ["response-cap", "parameter-cap"])
+def test_rel307_large_held_history_expires_in_bounded_pages(monkeypatch, fault):
+    """R-726 / REL-307: growing outcomes must not poison TTL forever."""
+    from api.db_http import DbHttpError
+    connection = _rel307_store()
+    connection.executemany(
+        "INSERT INTO research_outcomes (work_key, outcome, updated_at) VALUES (?, ?, ?)",
+        [("fresh", "held", "2026-10-04T00:00:00+00:00"),
+         ("published", "published", "2026-09-01T00:00:00+00:00")],
+    )
+    if fault == "parameter-cap":
+        connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 256)
+    calls = []
+    def execute(sql, args=(), **kwargs):
+        rows = connection.execute(sql, args).fetchall()
+        calls.append((sql, args, len(rows)))
+        if fault == "response-cap" and sql.lstrip().startswith("SELECT") and len(rows) > 200:
+            raise DbHttpError("response exceeds transport budget")
+        return rows
+    monkeypatch.setattr(publish, "hrana_execute", execute)
+    try:
+        assert publish.expire_stale_held(now=datetime(2026, 10, 4, tzinfo=timezone.utc)) == 796
+        assert connection.execute("SELECT count(*) FROM research_outcomes WHERE outcome='held'").fetchone() == (6,)
+        assert connection.execute("SELECT outcome, expired_at FROM research_outcomes WHERE work_key='published'").fetchone() == ("published", None)
+        assert connection.execute("SELECT outcome, expired_at FROM research_outcomes WHERE work_key='fresh'").fetchone() == ("held", None)
+        assert connection.execute("SELECT count(*) FROM research_outcomes WHERE work_key LIKE 'z-%' AND updated_at='2026-09-01T00:00:00+00:00'").fetchone() == (801,)
+        assert max(len(args) for _, args, _ in calls) <= 202
+        assert max(n for sql, _, n in calls if sql.lstrip().startswith("SELECT")) <= 200
+        assert publish.expire_stale_held(now=datetime(2026, 10, 4, tzinfo=timezone.utc)) == 0
+        assert connection.execute("SELECT count(*) FROM research_outcomes WHERE reason_codes=?", ('["HELD_EXPIRED"]',)).fetchone() == (796,)
+    finally:
+        connection.close()
+
+
+def test_rel307_total_deadline_prevents_writes_after_a_stalled_scan(monkeypatch):
+    connection = _rel307_store(100)
+    elapsed = [0.0]
+    monkeypatch.setattr(publish, "time", SimpleNamespace(monotonic=lambda: elapsed[0]), raising=False)
+    def stalled(sql, args=(), **kwargs):
+        rows = connection.execute(sql, args).fetchall()
+        if sql.lstrip().startswith("SELECT"):
+            elapsed[0] = 1000.0
+        return rows
+    monkeypatch.setattr(publish, "hrana_execute", stalled)
+    try:
+        with pytest.raises(TimeoutError, match="held.*deadline"):
+            publish.expire_stale_held(now=datetime(2026, 10, 4, tzinfo=timezone.utc))
+        assert connection.execute("SELECT count(*) FROM research_outcomes WHERE outcome='held'").fetchone() == (100,)
+    finally:
+        connection.close()
+
+
+def test_rel307_later_page_failure_replays_completed_progress_safely(monkeypatch):
+    from api.db_http import DbHttpError
+    connection = _rel307_store(401)
+    reads = [0]
+    def fail_second(sql, args=(), **kwargs):
+        if sql.lstrip().startswith("SELECT"):
+            reads[0] += 1
+            if reads[0] == 2:
+                raise DbHttpError("page unavailable")
+        return connection.execute(sql, args).fetchall()
+    monkeypatch.setattr(publish, "hrana_execute", fail_second)
+    try:
+        with pytest.raises(DbHttpError, match="page unavailable"):
+            publish.expire_stale_held(now=datetime(2026, 10, 4, tzinfo=timezone.utc))
+        assert connection.execute("SELECT count(*) FROM research_outcomes WHERE outcome='dropped'").fetchone() == (199,)
+        monkeypatch.setattr(publish, "hrana_execute", lambda sql, args=(), **kw: connection.execute(sql, args).fetchall())
+        assert publish.expire_stale_held(now=datetime(2026, 10, 4, tzinfo=timezone.utc)) == 199
+        assert connection.execute("SELECT count(*) FROM research_outcomes WHERE reason_codes=?", ('["HELD_EXPIRED"]',)).fetchone() == (398,)
+    finally:
+        connection.close()

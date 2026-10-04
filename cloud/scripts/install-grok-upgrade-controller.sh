@@ -32,7 +32,24 @@ fi
 
 new="$(mktemp -d "$PARENT/.grok-upgrade.new.XXXXXX")"
 old=""
-trap 'rm -rf -- "$new" ${old:+"$old"}' EXIT
+cleanup() {
+  local status=$?
+  # R-724 / REL-305: preserve the trusted tree if the second rename fails.
+  # A failed rollback retains its backup for explicit operator recovery.
+  if [[ -n "$old" && -d "$old/tree" && ! -e "$TARGET" ]]; then
+    if ! mv -- "$old/tree" "$TARGET"; then
+      echo "controller rollback failed; previous tree retained at $old/tree" >&2
+      rm -rf -- "$new"
+      return "$status"
+    fi
+  fi
+  rm -rf -- "$new" ${old:+"$old"}
+  return "$status"
+}
+trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'exit 129' HUP
 cp -R -- "$SRC" "$new/scripts"
 find "$new" -name __pycache__ -prune -exec rm -rf -- {} +
 if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" != "1" ]]; then
