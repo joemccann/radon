@@ -673,3 +673,101 @@ class TestPushGate:
 
         with pytest.raises(pickup.PickupError, match="older than origin/main"):
             _run(world)
+
+
+# --- credentials from the weekend .env --------------------------------------
+# launchd gives pickup only HOME, PATH and GROK_PAGE_AUTOPUSH, so refusal
+# alerts (Pushover) and watchdog_pages enrichment (Turso) silently did
+# nothing. Pickup now reads exactly those four keys from the operator's
+# ~/radon-weekend/.env, the same file the plist's launch-failure page reads.
+
+ENV_KEYS = ("PUSHOVER_USER", "PUSHOVER_TOKEN", "TURSO_DB_URL", "TURSO_AUTH_TOKEN")
+# DS-2026-09-23-03: pickup only reads watchdog_pages, so its Turso token is a
+# dedicated read-only one under its own name. The operator's general
+# TURSO_AUTH_TOKEN in the same file is never loaded.
+PICKUP_TURSO_KEY = "GROK_PICKUP_TURSO_AUTH_TOKEN"
+
+
+@pytest.fixture
+def clean_env(monkeypatch):
+    for key in (*ENV_KEYS, PICKUP_TURSO_KEY, "IB_FLEX_TOKEN"):
+        monkeypatch.delenv(key, raising=False)
+
+
+def _env_file(path: Path, body: str, mode: int = 0o600) -> Path:
+    path.write_text(body)
+    path.chmod(mode)
+    return path
+
+
+def test_loads_only_the_allowlisted_keys(tmp_path, clean_env):
+    f = _env_file(tmp_path / ".env", (
+        "# comment\n"
+        "PUSHOVER_USER=u-example\n"
+        "PUSHOVER_TOKEN='t-example'\n"
+        'TURSO_DB_URL="libsql://example.invalid"\n'
+        "export GROK_PICKUP_TURSO_AUTH_TOKEN=a-example\n"
+        "IB_FLEX_TOKEN=must-not-load\n"
+    ))
+    assert pickup.load_operator_env(f) == sorted(ENV_KEYS)
+    assert os.environ["PUSHOVER_USER"] == "u-example"
+    assert os.environ["PUSHOVER_TOKEN"] == "t-example"
+    assert os.environ["TURSO_DB_URL"] == "libsql://example.invalid"
+    assert os.environ["TURSO_AUTH_TOKEN"] == "a-example"
+    assert "IB_FLEX_TOKEN" not in os.environ
+
+
+def test_the_operator_turso_token_is_never_loaded(tmp_path, clean_env):
+    f = _env_file(tmp_path / ".env", (
+        "PUSHOVER_USER=u\n"
+        "TURSO_DB_URL=libsql://example.invalid\n"
+        "TURSO_AUTH_TOKEN=operator-read-write\n"
+    ))
+    assert pickup.load_operator_env(f) == ["PUSHOVER_USER", "TURSO_DB_URL"]
+    assert "TURSO_AUTH_TOKEN" not in os.environ
+
+
+def test_the_pickup_token_wins_over_the_operator_token(tmp_path, clean_env):
+    f = _env_file(tmp_path / ".env", (
+        "TURSO_AUTH_TOKEN=operator-read-write\n"
+        "GROK_PICKUP_TURSO_AUTH_TOKEN=pickup-read-only\n"
+    ))
+    assert pickup.load_operator_env(f) == ["TURSO_AUTH_TOKEN"]
+    assert os.environ["TURSO_AUTH_TOKEN"] == "pickup-read-only"
+    assert PICKUP_TURSO_KEY not in os.environ
+
+
+def test_the_process_environment_wins(tmp_path, clean_env, monkeypatch):
+    monkeypatch.setenv("PUSHOVER_USER", "from-env")
+    f = _env_file(tmp_path / ".env", "PUSHOVER_USER=from-file\nPUSHOVER_TOKEN=t\n")
+    assert pickup.load_operator_env(f) == ["PUSHOVER_TOKEN"]
+    assert os.environ["PUSHOVER_USER"] == "from-env"
+
+
+@pytest.mark.parametrize("mode", [0o644, 0o620, 0o602])
+def test_a_group_or_world_accessible_file_is_ignored(tmp_path, clean_env, mode):
+    f = _env_file(tmp_path / ".env", "PUSHOVER_USER=u\n", mode)
+    assert pickup.load_operator_env(f) == []
+    assert "PUSHOVER_USER" not in os.environ
+
+
+def test_a_symlinked_or_missing_file_is_ignored(tmp_path, clean_env):
+    real = _env_file(tmp_path / "real.env", "PUSHOVER_USER=u\n")
+    link = tmp_path / ".env"
+    link.symlink_to(real)
+    assert pickup.load_operator_env(link) == []
+    assert pickup.load_operator_env(tmp_path / "absent.env") == []
+    assert "PUSHOVER_USER" not in os.environ
+
+
+def test_main_reads_the_env_file_beside_the_pickup_clone(world, clean_env, monkeypatch):
+    _env_file(world["mini"].parent / ".env", "PUSHOVER_USER=u-beside\nPUSHOVER_TOKEN=t\n")
+    seen = {}
+
+    def fake_pickup_once(*_a, **_k):
+        seen["user"] = os.environ.get("PUSHOVER_USER")
+        return []
+
+    monkeypatch.setattr(pickup, "pickup_once", fake_pickup_once)
+    assert pickup.main(["--repo", str(world["mini"]), "--source", str(world["vps"])]) == 0
+    assert seen["user"] == "u-beside"

@@ -15,7 +15,11 @@ cadence (quarterly + before major releases) and **add to it** as the app grows.
 
 ## How to run
 
-1. **Audit** (in Claude Code): `Workflow({ name: "security-audit" })`. Subset:
+1. **Audit** (in Claude Code): `Workflow({ name: "security-audit", args: { repoRoot: "<clone root>" } })`.
+   The Workflow runtime has no filesystem or environment, so pass the clone
+   root (`node .claude/workflows/resolveRepoRoot.mjs --print`; the nightly
+   runner exports it as `$RADON_REPO_ROOT`). Without it, each agent uses its
+   own `git rev-parse --show-toplevel`. Subset:
    `args: { focus: ["authn-authz","sqli"] }`. Extend on the fly:
    `args: { extraDimensions: [{ key, label, scope }] }`.
 2. **Capture** the workflow's returned JSON (the Workflow tool writes it to the
@@ -234,8 +238,7 @@ line here whenever you ship a security fix.**
   but confirm the reasoning.
 - Patch order: **exploitable** first, then defense-in-depth. Patch the safe,
   high-confidence ones with red/green tests; **defer** anything needing an
-  environment-specific verification step (production build, VPS config in the
-  separate `radon-cloud` repo) and document it.
+  environment-specific verification step (production build or deployed VPS configuration) and document it.
 - **Do NOT auto-push.** `git push origin main` IS a production deploy (CI SSHes to
   Hetzner). Land perimeter/relay changes only on the operator's explicit go; after
   deploy, verify the relay + a real authed page render.

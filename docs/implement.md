@@ -217,13 +217,14 @@ tail -f ~/ibc/logs/ibc-gateway-service.log
 3. IBC starts Gateway and the operator approves the single IBKR Mobile push.
 4. On 2FA timeout IBC exits without relogin. The watchdog waits for lease expiry before a bounded new attempt.
 
+Daily-cycle semantics and the local installer limitation are owned by
+[Gateway recovery](ib-gateway-recovery.md#daily-cycle).
+
 **Key config settings (`~/ibc/config.secure.ini`):**
 | Setting | Value | Purpose |
 |---------|-------|---------|
-| `ExistingSessionDetectedAction` | `primary` | Gateway reconnects if bumped |
+| `ExistingSessionDetectedAction` | `primaryoverride` | Gateway yields the session to your own IBKR login (see `docs/ib-gateway-recovery.md`, operator hold) |
 | `AcceptIncomingConnectionAction` | `accept` | No popup for API connections |
-| `AutoRestartTime` | blank | Disabled because it cannot acquire the 2FA lease |
-| `ColdRestartTime` | blank | Disabled because it can mint an unleased weekly push |
 | `ReloginAfterSecondFactorAuthenticationTimeout` | `no` | Prevent stacked retry pushes |
 | `CommandServerPort` | `7462` | IBC command server for STOP only |
 | `IbLoginId` / `IbPassword` | unset in file | Credentials come from Keychain only |
@@ -256,7 +257,7 @@ ssh joemccann@macbook-pro 'cd /Users/joemccann/dev/apps/finance/radon && ./scrip
 
 **Troubleshooting:**
 - Gateway stopped: run `./scripts/ibc_remote_control.sh ibc-start` and approve the single 2FA push
-- `ExistingSessionDetectedAction=primary` means this Gateway always wins session conflicts
+- `ExistingSessionDetectedAction=primaryoverride` means a fresh Gateway login takes the session, but a logged-in Gateway yields to your own IBKR login
 - IBC command server port 7462 is permitted for `STOP`; direct `RESTART` is forbidden because it bypasses the lease
 - `scripts/setup_ibc.sh` generates a schedule-free launchd definition and lease-gates install/manual starts
 

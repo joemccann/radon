@@ -24,10 +24,10 @@ Credentials (project root .env, loaded via a local fallback loader):
     MENTHORQ_PASS  -- MenthorQ password
 
 Vision cascade (credit/billing/quota/hard-fail fallthrough):
-    anthropic -> grok -> cursor (unwired skip) -> codex -> gemini
+    anthropic -> grok -> cursor (unwired skip) -> codex -> antigravity
     -> nvidia (free) -> cerebras (last).
     Keys: ANTHROPIC_API_KEY / CLAUDE_CODE_API_KEY / CLAUDE_API_KEY,
-    XAI_API_KEY / GROK_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY,
+    XAI_API_KEY / GROK_API_KEY, OPENAI_API_KEY,
     NVIDIA_API_KEY, CEREBRAS_API_KEY.
 """
 from __future__ import annotations
@@ -623,7 +623,7 @@ class MenthorQClient:
                 "No keyed CTA vision provider. Cascade order: "
                 + " -> ".join(VISION_CASCADE_ORDER)
                 + ". Cursor is unwired; set a remaining provider key "
-                "(Anthropic, XAI/Grok, OpenAI/Codex, Gemini, NVIDIA, Cerebras)."
+                "(Anthropic, XAI/Grok, OpenAI/Codex, Antigravity, NVIDIA, Cerebras)."
             )
 
         self._navigate({
@@ -1499,7 +1499,7 @@ class MenthorQClient:
     ) -> Optional[List[Dict[str, Any]]]:
         """Send a screenshot through the CTA vision cascade.
 
-        Order: anthropic -> grok -> cursor (unwired) -> codex -> gemini
+        Order: anthropic -> grok -> cursor (unwired) -> codex -> antigravity
         -> nvidia -> cerebras. Credit/billing/quota/hard provider fails
         fall through; the winner is logged.
         """

@@ -2161,6 +2161,61 @@ on Turso's connection cap.** Peak: 2026-09-25 20:00:19Z, page `c11fbc4a…`.
 
 ---
 
+## flow-refresh-discover-partial-400
+
+**`radon-flow-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when discover scores candidates and one darkpool
+ticker raises `UWAPIError`.** Peak: 2026-10-02 14:02:26Z, page
+`b224647c0c4bb160c0be3aae3f182dff`. Scanner and flow-analysis in the
+same fire exited OK.
+
+- **Mechanism:** hourly `POST /discover?force=true` runs
+  `discover.py --min-alerts 3 --dp-pages 2`. Any
+  `provider_failures` entry, including a single darkpool skip,
+  stamped top-level `error: required provider data unavailable`
+  on a payload that also had `candidates`. `_run_flow_tab` maps
+  that key to HTTP 400 and does not write `data/discover.json`.
+  The wrapper treats non-2xx that is not a capacity shed as
+  indeterminate and exits 1. `Type=oneshot` has no `Restart=`,
+  so `NRestarts=0`. Darkpool caches for the scored names are
+  already on disk. Mirror and alerts stay skipped
+  (`degraded`). `/health/lite` stays authenticated.
+- **Detection:** unit journal scanner OK, flow-analysis OK, then
+  `discover FastAPI outcome indeterminate (curl=0, http=400)`
+  about 30s after the discover POST (not instant, not ~120s).
+  `data/discover.json` mtime stays on the previous clean run.
+  `data/darkpool_cache/*` mtimes fall inside the POST window.
+  `systemctl show` is `exit-code` / `ExecMainStatus=1` /
+  `NRestarts=0`.
+- **Discriminating check:** HTTP 400, not 502. Body detail is
+  `required provider data unavailable`. Darkpool cache writes
+  during the POST mean the options-flow fetch worked and at
+  least one ticker was scored. Instant `Subprocess capacity
+  exhausted` is `flow-refresh-capacity-502`. A ~120s flow-analysis
+  502 is `flow-refresh-analysis-timeout`. `curl: (7)` then
+  fallback is `flow-refresh-connect-refused`. `Result=signal`
+  or exit 143 is deploy stop-clean. Options-flow itself raising
+  `UWAPIError` (no darkpool writes, empty candidates) stays a
+  hard 400 on purpose. If `/health/lite` is down too, stand down.
+- **Remediation (code):** keep `degraded` and `provider_failures`
+  when any ticker is skipped, and set the hard `error` only when
+  `candidates` is empty. The API then returns 200 and writes the
+  disk cache. `main` still does not mirror or alert on
+  `degraded`, so a partial book is not published to Turso and
+  does not heartbeat `discover` `ok`. A total miss still 400s
+  and the oneshot still exits 1. Do not `reset-failed`. The next
+  timer after deploy is enough. The unit is not on
+  `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `scripts/tests/test_discover.py::test_partial_darkpool_skip_keeps_scored_candidates_without_a_hard_error`,
+  `test_partial_darkpool_skip_does_not_mirror_or_alert`,
+  `test_every_darkpool_miss_still_sets_the_hard_error`,
+  `scripts/api/tests/test_flow_tab_cooldown.py::test_scored_discover_with_one_provider_skip_is_cached_not_http_400`,
+  `test_discover_with_no_candidates_and_a_hard_error_stays_http_400`.
+- **Code:** `scripts/discover.py` (`_apply_provider_failures`).
+
+---
+
 ## orders-sync-capacity-shed-stale
 
 **Autonomous `orders-sync` loop pages P1 `kind=stale` during RTH when
@@ -2907,7 +2962,9 @@ older than 12 min, writes `<incident_id>.diagnosis.md` and
 `<incident_id>.incident.html` beside the mirror, and fires a macOS
 notification whose body is the incident title (failing services, not a
 filename). Click opens the HTML card. Analyze-only by design — shipping a
-fix is human-gated.
+fix is human-gated. The analysis session's tool surface is an allowlist
+(`--tools Read Grep Glob --strict-mcp-config`): no MCP server or other
+built-in tool is loaded, and the deny rules remain a second layer.
 
 Do not post via `osascript -e 'display notification'`. That banner is owned
 by Script Editor, so a click opens an empty Untitled document. Delivery

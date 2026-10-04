@@ -120,17 +120,19 @@ export interface OrderPresentationSummary {
    */
   coverageNote?: string | null;
   /**
-   * Whole-spread risk when held OPTION legs cover this order: the held leg
-   * priced at its cost basis plus this order. The top-level maxGain/maxLoss
-   * stay order-only (held leg treated as already paid for). Null/absent when
-   * no held option covers the order. Gain/loss are null when the held basis
-   * is unknown.
+   * Signed expiry P&L (dollars, + gain / - loss, never clamped at 0) when
+   * held OPTION legs cover this order. `order*` treats the held leg as
+   * already paid for; `spread*` prices it at its cost basis, i.e. the whole
+   * resulting spread. Null/absent when no held option covers the order or
+   * the order is unbounded. `spread*` are null when the held basis is
+   * unknown; best values are null when `bestUnbounded`.
    */
   withHeldLegs?: {
-    maxGain: number | null;
-    maxLoss: number | null;
-    maxGainUnbounded: boolean;
-    maxLossUnbounded: boolean;
+    orderBest: number | null;
+    orderWorst: number;
+    spreadBest: number | null;
+    spreadWorst: number | null;
+    bestUnbounded: boolean;
     heldBasisDollars: number | null;
   } | null;
 }

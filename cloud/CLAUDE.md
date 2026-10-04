@@ -63,8 +63,14 @@ under `/var/lib/radon` keep their ownership) and `scripts/jvm_forensics.py`.
 `compose-up` refuses with exit 73 while the IBKR operator hold
 (`/var/lib/radon/ib-operator-hold.json`) is set, and a root-only `kill` verb
 (not in sudoers) backs `radon ib release`. `setup-vps.sh install_ib_hold`
-installs that command root-owned as `/usr/local/sbin/radon-ib-hold`; runbook
-in `docs/ib-gateway-recovery.md`.
+installs that command root-owned as `/usr/local/sbin/radon-ib-hold`, and the
+stdlib hold CLI it runs (`python3.13 -I`) as `/usr/local/lib/radon/ib_operator_hold.py`,
+never the radon-owned checkout copy; runbook
+in `docs/ib-gateway-recovery.md`. The compose body pins
+`EXISTING_SESSION_DETECTED_ACTION=primaryoverride`, outside the env file, so a
+logged-in Gateway yields to the operator's own IBKR login. A changed compose
+body reaches the broker only through a manual reinstall of
+`/etc/radon/ib-gateway-compose.yml` and a container recreate, which is one login.
 
 The compose body it runs lives at `/etc/radon/ib-gateway-compose.yml`, a
 control-plane artifact, NOT `cloud/docker-compose.yml` in the checkout: root
@@ -270,7 +276,10 @@ topology state is durable across reboot under `/var/lib/radon/deploy`.
 **Interrupted backups.** The release snapshot includes an active or activating
 `radon-db-backup.service`. Stop it before replacing code, then asynchronously
 resume that exact replay-safe oneshot during `restart-managed` / `recover`.
-Do not replay other oneshots or start a backup that was dormant. Once restore
+Do not replay other oneshots or start a backup that was dormant. Another
+snapshotted oneshot that stop-clean SIGTERMed (`failed`, `Result=signal`) is
+`reset-failed`, not started, so the deploy's own stop does not page; an
+exit-code failure stays visible. Once restore
 is recorded, repeated recovery does not restart the dump, including after an
 off-box failure. A second `recover` with nothing left to start is a finished
 restore: the helper's child is `/bin/bash`, and on bash 3.2 an empty
@@ -378,6 +387,9 @@ mirror of `scripts/host-firewall.sh`, pinned by `tests/test_host_firewall.py`):
 no blanket `tailscale0` allow, 8321 only from `10.0.0.4` and
 `RADON_FW_OPERATOR_SOURCES`. Live hosts change through `host-firewall.sh`
 (dry run by default), never deploy; runbook `docs/operations.md` "Host firewalls".
+
+Setup clones the public app repo over anonymous HTTPS and mints no GitHub SSH
+key for `radon` (the host holds no GitHub credential; DS-2026-09-30-02).
 Setup pins GitHub's published ed25519 SSH host key (no first-contact keyscan),
 provisions the secret-store credential as 32 raw bytes, and prepares the
 radon-replaceable media directory with create-then-verify + `chown
@@ -508,6 +520,10 @@ and pages via Pushover plus the unit watchdog. The job heartbeats
 The unit names every link the upgrader may move (`--live-bin`,
 `--alias-bin ~/.grok/bin/grok`); `grok_upgrade.py` never derives a path
 from HOME, so a test run in the responder clone cannot relink the live CLI.
+The unit runs the root-owned copy `/usr/local/lib/radon/grok-upgrade` on
+`/usr/bin/python3.13 -E -S`, never the responder clone (hidden from it);
+`setup-grok-page-responder.sh` installs that copy, so an upgrader fix lands
+on the host only at a setup rerun (`cloud/tests/test_grok_upgrade_controller.py`).
 
 `setup-vps.sh` inventories `radon-rsi-oversold.{service,timer}` and
 `enable_services` enables the timer. Daily 23:05 UTC, twenty minutes

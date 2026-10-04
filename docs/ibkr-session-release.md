@@ -1,6 +1,8 @@
 # IBKR Session Release (Operator Hold) - Design
 
-Status: Phase 1 implemented (2026-10-01): hold module, shim/helper/unit/watchdog/broker-daemon enforcement and `radon ib release|resume|status`. Phases 2-4 (phone trigger, app mirror and admin buttons, trading-halt coupling, local guards) are not built. Option B (second IBKR username) was declined by the operator on 2026-10-01.
+Status: Phase 1 implemented (2026-10-01): hold module, shim/helper/unit/watchdog/broker-daemon enforcement and `radon ib release|resume|status`. Phase 3 in part (2026-10-01, later the same day): broker daemon `hold`/`unhold`, FastAPI `/ib/operator-hold` plus 423 refusals, the `/health` mirror, the admin Hold / Resume card, relay and grouping stand-down, the recovery-heartbeat skip, and HELD / cleared pages once per hold. Also in that change: IBC `primaryoverride` and a watchdog auto-hold on IBC's yield line (option C plus auto-hold, section 5). `release` no longer pauses the watchdog timer, so a clear from any path brings recovery back. Not built: the phone forced-command trigger, trading-halt coupling and local-mode guards. Option B (second IBKR username) was declined by the operator on 2026-10-01. The [current operator procedure](ib-gateway-recovery.md#runbook-flatten-from-ibkr-mobile-while-the-app-is-down) owns release, verification, rollback and escalation.
+
+**Design boundary:** the inventories and sections below preserve the historical proposal, not deployed guarantees. `--full`, `--with-trading`, `--force-lease` and `status --json` are not supported by the broker CLI. Release does not set a trading halt, does not cancel resting orders, and does not stop local Gateways. Do not execute the proposed procedures below; use the current operator procedure above.
 
 Goal: one action that releases every IBKR login Radon holds and keeps it released
 (no auto-heal re-login) until the operator explicitly resumes, so the operator can
@@ -60,7 +62,7 @@ All production paths converge on **two chokepoints** on the broker:
 | S6 | Admin Gateway Start / `radon restart` from UI | app | operator | `web/components/admin/Ib2faControls.tsx`, `/admin/services/radon-ib-gateway.service/{start,restart}` |
 | S7 | `radon start|restart` (`/usr/local/bin/radon`), `sudo radon ...` granted to user radon | broker | operator / scripts | `cloud/scripts/operator-radon.sh:gateway_control`, `cloud/config/sudoers.d/radon-ops` |
 | S8 | Laptop `scripts/cloud.sh` `ssh ib-gateway radon-ib-gateway-control start` | laptop | dev start | `scripts/cloud.sh:90-95` (targets app host; stale post-split, still a start path) |
-| S9 | IBC internal relogin / `ExistingSessionDetectedAction=primary` | broker (in-container) | **IBKR "existing session" event - today's kicker** | compose env; `TWOFA_TIMEOUT_ACTION=exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT=no`, `AUTO_RESTART_TIME=` already off |
+| S9 | IBC internal relogin / `ExistingSessionDetectedAction=primary` | broker (in-container) | **IBKR "existing session" event - today's kicker** | compose env; `TWOFA_TIMEOUT_ACTION=exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT=no`, daily `AUTO_RESTART_TIME=11:45 PM` is a token restart, not a new login |
 | S10 | Local-mode FastAPI Docker auto-recovery (`restart_ib_gateway`), `scripts/docker_ib_gateway.sh`, `launchctl kickstart local.ibc-gateway` | laptop / mini | `scripts/local.sh` stacks | `scripts/api/ib_gateway.py:1429` |
 | S11 | Deploy / bootstrap | app (CI) | CI deploy is app-only and app role never execs helper; broker updates are manual root SSH | `cloud/scripts/deploy.sh:111,354`, `bootstrap-control-plane.sh` |
 
@@ -105,7 +107,7 @@ Reminder Pushover at 1h, 4h, then every 12h, plus a status chip. Writes are atom
 3. `radon-ib-gateway.service`: `SuccessExitStatus=73` so boot under hold is `active (exited)`, not `failed` (avoids a `units.py` P1 and the DUR-02 start-limit brake).
 4. `scripts/ib_watchdog.py:_run_cycle_steps`: first step; if held, outcome `operator_hold`, no probe-driven restart, no lease acquire, `service_health[ib-watchdog]=ok` with detail `operator hold since ...`.
 5. `ib_gateway_remote/serve.py`: `start|restart` -> HTTP 423 `{"code":"OPERATOR_HOLD"}`; new verbs `hold` / `unhold` (see section 4).
-6. FastAPI `/ib/restart` and `/admin/services/radon-ib-gateway*/start|restart` -> 423 when mirrored hold is set (fast refusal; broker still authoritative). Relay treats 423 as terminal for the escalation window.
+6. FastAPI `/ib/restart` and `/admin/services/radon-ib-gateway*/start|restart` -> 423 when mirrored hold is set (fast refusal; broker still authoritative). Relay treats 423 as terminal for the escalation window. Its `/health/lite` poll accepts only an explicit boolean `operator_hold`: malformed successful replies, failed requests and invalid JSON retain the last confirmed value; only an explicit `false` clears a known hold.
 7. Watchdog IB-outage grouping (`scripts/watchdog/`): while held, IB-shaped failures collapse to one P0 "IBKR operator hold active" line, no P1s.
 8. Local paths (S8, S10, H2, H3): refuse unless `ssh radon-broker radon ib status --json` returns `held:false`; unreachable -> refuse (override `RADON_ALLOW_LOCAL_IB_LOGIN=1`). Preferred: decommission H2 (`local.ibc-gateway` + `config.secure.ini` on mini) since prod is cloud.
 

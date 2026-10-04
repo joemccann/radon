@@ -18,6 +18,7 @@ set -uo pipefail
 export PATH="${RADON_RUNNER_PATH:-/opt/homebrew/bin:/usr/bin:/bin}"
 PY="${RUNNER_PYTHON:-/opt/homebrew/bin/python3.13}"
 GH="${RADON_RUNNER_GH:-/opt/homebrew/bin/gh}"
+BUN="${RADON_RUNNER_BUN:-/opt/homebrew/bin/bun}"
 GH_REPO="${RADON_WEEKEND_GH_REPO:-joemccann/radon}"
 SCRATCH="$LOOP_STATE/scratch"
 TIMEOUT_BIN="$(command -v gtimeout || command -v timeout || true)"
@@ -155,6 +156,28 @@ for keep in ${KEEP_PATHS:-}; do excludes+=("--exclude=/$keep/"); done
 hostgit clean -fdxq "${excludes[@]}"
 
 [[ -d "$LOOP_STATE/held.git" ]] || git init -q --bare "$LOOP_STATE/held.git"
+
+# The security loop's Vitest stage needs both bun projects installed: the root
+# provides vitest and vitest.config.ts, web/ the modules the tests import.
+# Frozen lockfiles and no lifecycle scripts; the trees survive the re-clone
+# (KEEP_PATHS) and reinstall only when a lockfile or package.json changes. A
+# failed install never refuses the phase: the stage skips, as before.
+install_node_modules() {
+  local dir stamp want
+  for dir in "$WORK" "$WORK/web"; do
+    [[ -f "$dir/bun.lock" && -f "$dir/package.json" ]] || continue
+    stamp="$dir/node_modules/.radon-bun-lock.sha256"
+    want="$(cat "$dir/bun.lock" "$dir/package.json" | /usr/bin/shasum -a 256 | cut -d' ' -f1)"
+    [[ -f "$stamp" && ! -L "$stamp" && "$(cat "$stamp")" == "$want" ]] && continue
+    if bounded 600 "$BUN" install --frozen-lockfile --ignore-scripts --cwd "$dir" >&2; then
+      printf '%s\n' "$want" > "$stamp"
+    else
+      rm -f -- "$stamp"
+      echo "bun install failed in ${dir#"$WORK"}; the Vitest stage will skip" >&2
+    fi
+  done
+}
+[[ "$LOOP" == security ]] && install_node_modules
 
 # Written only for the audit phase and removed before every other phase, so
 # remediate and deliver never read a stale one.

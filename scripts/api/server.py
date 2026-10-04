@@ -431,6 +431,17 @@ async def _ib_recovery_heartbeat_tick() -> None:
     if ib_pool is None:
         return
     try:
+        # IBKR operator hold: the Gateway is down on purpose while the operator
+        # uses the shared IBKR login. Pool reconnects and the radon-api
+        # self-restart ladder have nothing to recover; stand down.
+        hold = await admin_services.operator_hold_state()
+        if hold and hold.get("held"):
+            if not _pool_recovery_state.get("held_logged"):
+                logger.warning("IB recovery heartbeat standing down: IBKR operator hold %s", hold)
+                _pool_recovery_state["held_logged"] = True
+            _pool_recovery_state["consecutive_failures"] = 0
+            return
+        _pool_recovery_state["held_logged"] = False
         await check_ib_gateway(pool_status=ib_pool.status(), pool=ib_pool)
         await _recover_stuck_pool_guarded()
     except Exception:
@@ -1158,7 +1169,10 @@ _SECRET_SCRUB_PATTERNS = [
     (re.compile(r"libsql://[^\s'\"]+", re.IGNORECASE), "[redacted-db-url]"),
     (re.compile(r"https://[a-z0-9.-]+\.turso\.io[^\s'\"]*", re.IGNORECASE), "[redacted-db-url]"),
     (re.compile(r"(auth[_-]?token|authorization|bearer)(\s*[=:]\s*)\S+", re.IGNORECASE), r"\1\2[redacted]"),
-    (re.compile(r"eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*"), "[redacted-jwt]"),
+    # The lookbehind anchors a match to the start of a token run; without it a
+    # long run of repeated "eyJ" retries the scan from every occurrence, which
+    # is quadratic on caller-echoed details.
+    (re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*"), "[redacted-jwt]"),
     (re.compile(r"\bU\d{6,}\b"), "[redacted-account]"),
     # Named provider-key prefixes: Anthropic (sk-ant-), Clerk/Stripe (sk_live_/sk_test_).
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{6,}"), "[redacted-key]"),
@@ -2066,12 +2080,18 @@ async def health_lite():
             HEALTH_LITE_GATEWAY_PROBE_TIMEOUT_SECS,
         )
         gw = {}
+    # REL-303 / R-722: only observed booleans confirm a hold or release.
+    # Broker status loss and probe timeout must remain unknown to the relay.
+    hold = gw.get("operator_hold")
+    held = hold.get("held") if isinstance(hold, dict) else None
     return {
         "status": "ok",
         "auth_state": gw.get("auth_state", "unknown"),
         "service_state": gw.get("service_state", "unknown"),
         "upstream_dead": gw.get("upstream_dead", False),
         "port_listening": gw.get("port_listening", False),
+        # Account-free three-valued observation: true, false, or unknown.
+        "operator_hold": held if type(held) is bool else None,
         "loop_lag_ms": round(loop_lag_ms, 3),
     }
 
@@ -2157,7 +2177,7 @@ def _is_app_role_gateway_mutation(request: Request) -> bool:
     if request.method != "POST":
         return False
     path = request.url.path.rstrip("/")
-    if path in {"/ib/restart", "/ib/reset-backoff"}:
+    if path in {"/ib/restart", "/ib/reset-backoff", "/ib/operator-hold"}:
         return True
     prefix = "/admin/services/"
     if not path.startswith(prefix):
@@ -2200,7 +2220,23 @@ async def ib_restart():
     helper owns the 2FA push lease and the latched-transition state machine;
     pool reconnect after auth is the recovery heartbeat's job
     (feedback_ib_pool_stuck_after_2fa).
+
+    Refused with 423 during an IBKR operator hold: a login now would kick
+    the operator off the shared IBKR username. The relay's stale-data
+    escalation lands here too and treats 423 as "stand down".
     """
+    hold = await admin_services.operator_hold_state()
+    if hold and hold.get("held"):
+        raise HTTPException(
+            status_code=423,
+            detail={
+                "restarted": False,
+                "reason": "operator_hold",
+                "code": "OPERATOR_HOLD",
+                "operator_hold": hold,
+                "error": admin_services.OPERATOR_HOLD_DETAIL,
+            },
+        )
     if ib_gateway.is_cloud_mode() and _gateway_unit_controllable():
         action = await admin_services.control_unit(admin_services.GATEWAY_UNIT, "restart")
         if action.ok:
@@ -2211,6 +2247,12 @@ async def ib_restart():
                 "detail": action.detail,
                 "note": "Gateway cycling — approve the IBKR Mobile 2FA push to complete login.",
             }
+        if action.returncode == admin_services.OPERATOR_HOLD_RC:
+            raise HTTPException(
+                status_code=423,
+                detail={"restarted": False, "reason": "operator_hold", "code": "OPERATOR_HOLD",
+                        "error": action.detail},
+            )
         raise HTTPException(
             status_code=503,
             detail={
@@ -2251,6 +2293,49 @@ async def ib_reset_backoff():
         result["remote"] = remote.to_dict()
         result["broker_lease_released"] = bool(remote.ok)
     return result
+
+
+@app.get("/ib/operator-hold")
+async def ib_operator_hold_status():
+    """The IBKR operator hold (broker-authoritative; mirrored on the app)."""
+    return {"operator_hold": await admin_services.operator_hold_state()}
+
+
+@app.post("/ib/operator-hold")
+async def ib_operator_hold_set(request: Request):
+    """Set (``{"held": true, "reason": ...}``) or clear (``{"held": false}``)
+    the IBKR operator hold on the broker.
+
+    Hold: the broker writes the hold, then stops the Gateway, so the operator
+    can log in to IBKR Mobile / the web portal without the Gateway fighting
+    for the shared username. Clear: the broker removes it and logs the
+    Gateway in once (one 2FA push). Operator JWT only on the app host.
+    """
+    _require_bounded_body(request)
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="body must be JSON")
+    held = body.get("held") if isinstance(body, dict) else None
+    if not isinstance(held, bool):
+        raise HTTPException(status_code=400, detail="held must be true or false")
+    reason = str(body.get("reason") or "").strip()[:200]
+    if held and not reason:
+        raise HTTPException(status_code=400, detail="reason is required to set the hold")
+    expires_at = body.get("expires_at") or None
+    if expires_at is not None and not isinstance(expires_at, str):
+        raise HTTPException(status_code=400, detail="expires_at must be an ISO time string")
+    actor = _admin_actor(request)
+    status, payload = await admin_services.set_operator_hold(
+        held, reason=reason, actor=actor, expires_at=expires_at,
+    )
+    logger.warning(
+        "IBKR operator hold %s by %s: status=%s detail=%s",
+        "SET" if held else "CLEARED", actor, status, str(payload.get("detail") or "")[:200],
+    )
+    if status != 200:
+        raise HTTPException(status_code=status if 400 <= status < 600 else 502, detail=payload)
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -2300,6 +2385,8 @@ async def admin_service_action(unit: str, action: str, request: Request):
     if not result.ok:
         if result.returncode == admin_services.PUSH_LOCK_HELD_RC:
             raise HTTPException(status_code=409, detail=result.to_dict())
+        if result.returncode == admin_services.OPERATOR_HOLD_RC:
+            raise HTTPException(status_code=423, detail=result.to_dict())
         if result.returncode == admin_services.REMOTE_UNREACHABLE_RC:
             # REL-171 (R-500): a dead mTLS link to the broker is a gateway
             # timeout, not a caller error.
@@ -5112,6 +5199,56 @@ async def options_expirations(symbol: str):
     """List option expirations for a symbol from the shared secdef snapshot."""
     snapshot = await _option_secdef(symbol)
     return expirations_from_snapshot(snapshot)
+
+
+# Connect + qualify + secdef (each IB_REQUEST_TIMEOUT_S) plus batched snapshots.
+_IB_OPTION_QUOTES_TIMEOUT_S = 60.0
+_IB_OPTION_QUOTES_MAX_EXPIRIES = 12
+_IB_QUOTES_SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.]{0,9}$")
+_IB_QUOTES_EXPIRY_RE = re.compile(r"^\d{4}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$")
+
+
+@app.get("/options/ib-quotes")
+async def options_ib_quotes(
+    symbol: str,
+    expiries: str,
+    right: Optional[str] = None,
+    wings: int = Query(default=8, ge=1, le=20),
+):
+    """IB snapshot bid/ask/IV/greeks around spot for one or more expiries."""
+    ticker = symbol.strip().upper()
+    if not _IB_QUOTES_SYMBOL_RE.fullmatch(ticker):
+        raise HTTPException(status_code=400, detail="Invalid symbol")
+    parsed = [e.strip().replace("-", "") for e in expiries.split(",") if e.strip()]
+    if not parsed or len(parsed) > _IB_OPTION_QUOTES_MAX_EXPIRIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"expiries must list 1-{_IB_OPTION_QUOTES_MAX_EXPIRIES} dates",
+        )
+    if not all(_IB_QUOTES_EXPIRY_RE.fullmatch(e) for e in parsed):
+        raise HTTPException(status_code=400, detail="expiries must be YYYYMMDD or YYYY-MM-DD")
+    args = ["--symbol", ticker, "--expiries", ",".join(parsed), "--wings", str(wings)]
+    if right is not None and right.strip():
+        side = right.strip().upper()
+        if side not in {"C", "P"}:
+            raise HTTPException(status_code=400, detail="right must be C or P")
+        args += ["--right", side]
+
+    result = await _run_ib_script_with_recovery(
+        "ib_option_quotes.py", args, timeout=_IB_OPTION_QUOTES_TIMEOUT_S
+    )
+    if not result.ok:
+        raise HTTPException(
+            status_code=_options_chain_failure_status(result.error),
+            detail=result.error or "IB option quotes unavailable",
+        )
+    data = result.data or {}
+    if data.get("error"):
+        raise HTTPException(
+            status_code=_options_chain_failure_status(str(data["error"])),
+            detail=str(data["error"]),
+        )
+    return data
 
 
 _OPTIONS_EXPOSURE_SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")

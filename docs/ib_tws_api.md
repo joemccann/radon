@@ -14,29 +14,16 @@ Developer reference for the Interactive Brokers TWS API as used via the `ib_insy
 
 ### IB.connect()
 ```python
-ib.connect(host='127.0.0.1', port=4001, clientId=0, timeout=4.0)
+ib.connect(host='127.0.0.1', port=4001, clientId=allocated_client_id, timeout=4.0)
 ```
 
 ### Client ID Strategy
 
-**Default to `clientId=0` (master client)** unless you need concurrent connections.
-
-| clientId | Privileges | Use When |
-|----------|-----------|----------|
-| **0** (master) | Full control — can cancel/modify ANY order | Default for most operations |
-| 1-999 | Can only manage own orders | Need concurrent connections |
-
-**Why master client by default:**
-- Can cancel orders placed via TWS or other clients
-- Can modify any order regardless of origin
-- Full visibility into account state
-
-**When to use unique clientId:**
-- Running multiple scripts simultaneously (real-time streaming + sync)
-- Long-running background services that shouldn't block other connections
-- Order placement (orders get tagged with clientId for tracking)
-
-**Critical rule:** Only ONE connection can use `clientId=0` at a time. Duplicate disconnects the older session.
+Use the project's [client-ID allocation owner](../scripts/CLAUDE.md#client-id-ranges)
+and [`IBClient`](../scripts/clients/ib_client.py), rather than defaulting every
+connection to the master identity. The example above assumes an allocated ID.
+Order visibility does not grant cancellation or modification authority; use
+the [cancel/modify contract](../scripts/CLAUDE.md#cancel--modify-scripts-side).
 
 ### Market Data Type
 ```python
@@ -533,29 +520,20 @@ IB_SENTINEL = 1.7976931348623157e308  # IB uses this for "no value" (DBL_MAX)
 
 ## Client ID Registry (this project)
 
-| ID | Script | Purpose |
-|---:|--------|---------|
-| **0** | `ib_order_manage.py` | **Master client** — cancel/modify ANY order |
-| 1 | `ib_sync.py` | Portfolio sync |
-| 2 | `ib_order.py` | Order placement |
-| 11 | `ib_orders.py` | Order sync |
-| 52 | `ib_fill_monitor.py` | Fill monitoring |
-| 60 | `exit_order_service.py` | Exit order daemon |
-| 90 | `ib_reconcile.py` | Reconciliation |
-| 99 | `fetch_analyst_ratings.py` | Analyst data |
-| 100 | `ib_realtime_server.py` | Real-time streaming (Python) |
-| 101 | `ib_realtime_server.js` | Real-time streaming (Node.js) |
+Allocation is owned by the [script contract](../scripts/CLAUDE.md#client-id-ranges)
+and [`IBClient`](../scripts/clients/ib_client.py); do not maintain a second
+script-to-ID table here.
 
 ### Master Client (clientId=0)
 
-The **master client** has special privileges:
-- Can see ALL open orders from all clients (including TWS)
-- Can cancel ANY order regardless of which client placed it
-- Can modify ANY order
-
-**Important:** Only ONE connection can use `clientId=0` at a time. If TWS is using it, the API connection will be rejected (or vice versa).
-
-Use `ib_order_manage.py` for cancel/modify operations — it connects as master to handle TWS-placed orders.
+Seeing another client's order does not let the master cancel or modify it.
+[`ib_order_manage.py`](../scripts/ib_order_manage.py) discovers the original
+placing `clientId`, reconnects as that client when necessary, then refreshes
+the working order. Manual TWS orders have a separate binding step for client
+zero. Use that implementation and the
+[cancel/modify owner](../scripts/CLAUDE.md#cancel--modify-scripts-side), and
+verify the refreshed order outcome; a visible order is still live if the
+mutation failed.
 
 ---
 
@@ -582,12 +560,13 @@ tail -f ~/ibc/logs/ibc-gateway-service.log
 | Operator start/restart | Use `scripts/ibc_remote_control.sh`; held/unreadable lease fails closed |
 | 2FA timeout | IBC exits with no relogin; watchdog owns the next bounded attempt |
 
+Daily-cycle semantics and the local installer limitation are owned by
+[Gateway recovery](ib-gateway-recovery.md#daily-cycle).
+
 ### Config (`~/ibc/config.secure.ini`)
 Credentials are not stored in this file. The secure runner reads them from Keychain at launch, writes a temporary `0600` runtime config, and removes it after exit.
-- `ExistingSessionDetectedAction=primary` — Gateway reconnects if bumped
+- `ExistingSessionDetectedAction=primaryoverride` - Gateway yields the session to your own IBKR login instead of reclaiming it
 - `AcceptIncomingConnectionAction=accept` — suppress API connection prompt
-- `AutoRestartTime=` - disabled; bypasses the shared lease
-- `ColdRestartTime=` - disabled; a cold restart can mint an unleased push
 - `ReloginAfterSecondFactorAuthenticationTimeout=no`
 - `CommandServerPort=7462` - permits STOP only; do not issue RESTART directly
 
@@ -630,3 +609,7 @@ Reference: `docs/ibc-remote-access.md`
 
 ### Legacy
 `scripts/setup_ibc.sh` is legacy and is no longer the active service-management path on this machine.
+
+### Relay depth recovery
+
+REL-021b / R-040: rejected positional depth operations invalidate both sides of the book and remove pending snapshots before emitting `depth-unavailable`. They do not refresh feed health. The relay cancels the old depth ticket and requests a fresh book, at most once per subject per 30 monotonic seconds; late events for the old ticket are ignored. A failed cancellation refuses another ticket. This recovery is driven by incoming depth events; the existing stale-feed recovery still covers a silent connection.

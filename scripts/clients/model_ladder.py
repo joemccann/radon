@@ -3,15 +3,15 @@
 Joe's exact order (2026-09-10). Do not leave a band until it is exhausted or
 unavailable:
 
-  1. subscription: anthropic -> grok -> cursor -> codex -> gemini (Antigravity CLI)
+  1. subscription: anthropic -> grok -> cursor -> codex -> antigravity (``agy -p``)
   2. nvidia (API key OK)
   3. cerebras (cheap paid, last; currently paused on Hetzner)
 
-Subscription-tier rungs (Anthropic / Grok / Codex / Gemini) use **subscription
-credentials only** by default — Claude Max OAuth, Grok device-auth,
-ChatGPT+Codex OAuth, Gemini OAuth. Prepaid console wallets
-(``ANTHROPIC_API_KEY``, ``XAI_API_KEY``, ``OPENAI_API_KEY``, ``GEMINI_API_KEY``
-and aliases) are **not** used on the shared ladder unless
+Subscription-tier rungs (Anthropic / Grok / Codex / Antigravity) use
+**subscription credentials only** by default — Claude Max OAuth, Grok
+device-auth, ChatGPT+Codex OAuth, the Antigravity CLI's own Google sign-in.
+Prepaid console wallets (``ANTHROPIC_API_KEY``, ``XAI_API_KEY``,
+``OPENAI_API_KEY`` and aliases) are **not** used on the shared ladder unless
 ``RADON_LADDER_ALLOW_PREPAID=1``. Without subscription material the rung is
 skipped and the ladder continues to NVIDIA then Cerebras. Knowledge distill
 (``scripts/knowledge/distill.py`` → ``complete_text_json``) and the newsfeed
@@ -52,7 +52,7 @@ MODEL_LADDER_ORDER = (
     "grok",
     "cursor",
     "codex",
-    "gemini",
+    "antigravity",
     "nvidia",
     "cerebras",
 )
@@ -62,7 +62,7 @@ MODEL_LADDER_TIERS = {
     "grok": "subscription",
     "cursor": "subscription",
     "codex": "subscription",
-    "gemini": "subscription",
+    "antigravity": "subscription",
     "nvidia": "nvidia",
     "cerebras": "cerebras",
     "slm-tagger": "local",
@@ -73,9 +73,6 @@ MODEL_LADDER_TIERS = {
 _ANTHROPIC_PREPAID_KEYS = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY")
 _GROK_PREPAID_KEYS = ("XAI_API_KEY", "GROK_API_KEY")
 _CODEX_PREPAID_KEYS = ("OPENAI_API_KEY",)
-# Google runs ONLY through the Antigravity CLI (operator, 2026-09-18): no
-# prepaid Gemini key and no Gemini OAuth token path, under any flag.
-_GEMINI_KEYS: tuple[str, ...] = ()
 _NVIDIA_KEYS = ("NVIDIA_API_KEY",)
 _CEREBRAS_KEYS = ("CEREBRAS_API_KEY",)
 
@@ -90,9 +87,10 @@ _CLAUDE_CODE_USER_AGENT = "claude-cli/2.1.140"
 # ChatGPT subscription endpoint the codex CLI uses. api.openai.com meters the
 # prepaid wallet and rejects the grant ("no credits remaining", live 2026-09-18).
 _CHATGPT_CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
-# Google retired the Gemini CLI OAuth client for individuals on 2026-09-18 and
-# the Antigravity grant lacks the generativelanguage scope (403 live), so the
-# gemini rung shells out to the Antigravity CLI (`agy -p`) instead.
+# Google access runs ONLY through the Antigravity CLI (`agy -p`), operator
+# 2026-09-18: no Google API key or OAuth token path, under any flag. The
+# Antigravity grant lacks the generativelanguage scope (403 live), so there is
+# no HTTP path. ~/.gemini/antigravity-cli is Google's fixed on-disk location.
 _ANTIGRAVITY_TOKEN_RELPATH = Path(".gemini") / "antigravity-cli" / "antigravity-oauth-token"
 _ANTIGRAVITY_CLI_TIMEOUT_SECONDS = 120.0
 # Mirrors subscription_tokens.CLI_ENV_ALLOWLIST: everything a third-party
@@ -125,6 +123,7 @@ _OPTIONAL_LADDER_ENV = (
     "CODEX_HOME",
     "RADON_LADDER_NO_AUTH_FILES",
     "ANTIGRAVITY_CLI",
+    "ANTIGRAVITY_MODEL",
     "RADON_SLM_TAGGER_URL",
     "RADON_SLM_TAGGER_MODE",
     "RADON_SLM_TAGGER_TIMEOUT_S",
@@ -151,7 +150,7 @@ _DEFAULT_VISION_MODELS = {
     "anthropic": "claude-haiku-4-5-20251001",
     "grok": "grok-4.6",
     "codex": "gpt-5.5",
-    "gemini": "",  # Antigravity account default unless GEMINI_MODEL is set
+    "antigravity": "",  # account default unless ANTIGRAVITY_MODEL is set
     "nvidia": _NVIDIA_VISION_DEFAULT,
     # Public multimodal Chat Completions id (Cerebras changelog 2026-09).
     # llama-4-scout-17b-16e-instruct is archived. gemma-4-31b left public
@@ -165,7 +164,7 @@ _DEFAULT_TEXT_MODELS = {
     "anthropic": "claude-sonnet-4-6",
     "grok": "grok-4.6",
     "codex": "gpt-5.5",
-    "gemini": "",  # Antigravity account default unless GEMINI_MODEL is set
+    "antigravity": "",  # account default unless ANTIGRAVITY_MODEL is set
     "nvidia": _NVIDIA_TEXT_DEFAULT,
     "cerebras": "qwen-3.8-27b",
     "slm-tagger": "radon-slm-tagger",
@@ -434,7 +433,7 @@ def _antigravity_cli(env: Mapping[str, str]) -> str:
     return found or ""
 
 
-def _gemini_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
+def _antigravity_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
     """Google via the Antigravity CLI only; the token is the CLI path."""
     cli = _antigravity_cli(env)
     if cli:
@@ -487,9 +486,9 @@ def _auth_for(name: str, env: Mapping[str, str]) -> AuthMaterial | None:
         if sub is not None:
             return sub
         return _prepaid_auth(env, *_CODEX_PREPAID_KEYS, mechanism="OPENAI_API_KEY")
-    if name == "gemini":
-        # Antigravity only: no prepaid Gemini key, even under allow-prepaid.
-        return _gemini_subscription_auth(env)
+    if name == "antigravity":
+        # CLI only: no prepaid Google key, even under allow-prepaid.
+        return _antigravity_subscription_auth(env)
     if name == "nvidia":
         token = _env_get(env, *_NVIDIA_KEYS)
         if token:
@@ -535,12 +534,8 @@ def _model_for(name: str, env: Mapping[str, str], *, kind: str = "vision") -> st
                 env, "OPENAI_VISION_MODEL", "OPENAI_MODEL", default=defaults["codex"]
             )
         return _first_env_model(env, "OPENAI_MODEL", default=defaults["codex"])
-    if name == "gemini":
-        if kind == "vision":
-            return _first_env_model(
-                env, "GEMINI_VISION_MODEL", "GEMINI_MODEL", default=defaults["gemini"]
-            )
-        return _first_env_model(env, "GEMINI_MODEL", default=defaults["gemini"])
+    if name == "antigravity":
+        return _first_env_model(env, "ANTIGRAVITY_MODEL", default=defaults["antigravity"])
     if name == "nvidia":
         if kind == "vision":
             return _first_env_model(
@@ -754,14 +749,6 @@ def _text_from_openai(payload: dict[str, Any]) -> str:
                 parts.append(part)
         return "".join(parts)
     return ""
-
-
-def _text_from_gemini(payload: dict[str, Any]) -> str:
-    candidates = payload.get("candidates") or []
-    if not candidates:
-        return ""
-    parts = ((candidates[0] or {}).get("content") or {}).get("parts") or []
-    return "".join(str(part.get("text") or "") for part in parts if isinstance(part, dict))
 
 
 def _default_post(
@@ -1076,7 +1063,7 @@ def _antigravity_complete(
     instruction: str,
     labeled_b64: Sequence[tuple[str, str]],
 ) -> tuple[int, str, Any]:
-    """Gemini via `agy -p`; images are not supported, so that rung is skipped."""
+    """Google via `agy -p`; images are not supported, so that rung is skipped."""
     if labeled_b64:
         return 415, "antigravity_cli: image input unsupported", None
     prompt = f"{system}\n\n{instruction}" if system else instruction
@@ -1113,7 +1100,7 @@ def _antigravity_complete(
     response = doc.get("response") if isinstance(doc, dict) else None
     if not isinstance(response, str) or str(doc.get("status", "")).upper() not in {"SUCCESS", ""}:
         return 502, completed.stdout[:2000], None
-    payload = {"candidates": [{"content": {"parts": [{"text": response}]}}]}
+    payload = {"choices": [{"message": {"content": response}}]}
     return 200, response, payload
 
 
@@ -1209,7 +1196,7 @@ def _call_vision_provider(
             stream=True,
             max_bytes=max_response_bytes,
         )
-    if name == "gemini":
+    if name == "antigravity":
         return _antigravity_complete(api_key, {}, model, "", prompt, [("image", b64)])
     if name == "nvidia":
         return _request(
@@ -1416,7 +1403,7 @@ def _call_text_provider(
             stream=True,
             max_bytes=max_response_bytes,
         )
-    if name == "gemini":
+    if name == "antigravity":
         return _antigravity_complete(api_key, {}, model, system, instruction, labeled_b64)
     if name == "nvidia":
         return _request(
@@ -1467,8 +1454,6 @@ def _call_text_provider(
 def _extract_text(name: str, payload: dict[str, Any]) -> str:
     if name == "anthropic":
         return _text_from_anthropic(payload)
-    if name == "gemini":
-        return _text_from_gemini(payload)
     return _text_from_openai(payload)
 
 

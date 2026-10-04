@@ -85,6 +85,14 @@ class TestAnalyzeCommandPrivileges:
                               "--allowedTools")
         assert allowed == ["Read", "Grep", "Glob"]
 
+    def test_tool_surface_is_an_allowlist_without_mcp(self):
+        """Deny rules only cut what they name: MCP server tools and any new
+        built-in stay reachable unless the surface itself is allowlisted."""
+        cmd = build_analyze_command(Path("/tmp/proj/x.projection.json"))
+        assert flag_values(cmd, "--tools") == ["Read", "Grep", "Glob"]
+        assert "--strict-mcp-config" in cmd
+        assert "--mcp-config" not in cmd
+
     def test_command_denies_reading_the_raw_incident_mirror(self, tmp_path: Path):
         """Read+Glob with cwd=repo_root otherwise lets the agent glob
         data/incidents_remote/incident-*.json and read the raw hostile text

@@ -37,10 +37,13 @@ import {
 } from "./ib_tick_handler.js";
 import { LRUCache } from "./lib/lru-cache.js";
 import { RateLimiter } from "./lib/rate-limiter.js";
-import { MAX_SNAPSHOT_QUEUE, MAX_WS_PAYLOAD_BYTES, capItems } from "./lib/relayLimits.js";
+import { MAX_CLIENT_SUBSCRIPTIONS, MAX_SNAPSHOT_QUEUE, MAX_WS_PAYLOAD_BYTES, capItems } from "./lib/relayLimits.js";
 import {
+  applyOperatorHold,
   buildRelayHealthDetail,
   decideHealthWrite,
+  isOperatorHoldRefusal,
+  operatorHoldFromHealth,
   farmStateAfterIdleDrain,
   findStaleSubjectsOnLivePlane,
   isFarmStateCode,
@@ -811,6 +814,30 @@ const IB_RESTART_URL = process.env.IB_RESTART_URL || "http://127.0.0.1:8321/ib/r
 // generous but bounded so a wedged API can't leak a hung request.
 const IB_RESTART_TIMEOUT_MS = 90_000;
 
+// IBKR operator hold: the operator is using the shared IBKR username (e.g.
+// flattening from IBKR Mobile), so the Gateway is down on purpose. Read from
+// FastAPI /health/lite (loopback, side-effect free); while true the stale
+// ladder neither pages nor asks for a restart. Unknown keeps the last value.
+const IB_HEALTH_LITE_URL = process.env.IB_HEALTH_LITE_URL || "http://127.0.0.1:8321/health/lite";
+const OPERATOR_HOLD_POLL_MS = 15_000;
+let operatorHoldActive = false;
+
+async function refreshOperatorHold() {
+  try {
+    const res = await fetch(IB_HEALTH_LITE_URL, { signal: AbortSignal.timeout(5_000) });
+    if (!res.ok) return;
+    const body = await res.json();
+    if (typeof body?.operator_hold !== "boolean") return;
+    const held = operatorHoldFromHealth(body);
+    if (held !== operatorHoldActive) {
+      console.log(`[stale-data] IBKR operator hold ${held ? "ON: standing down" : "OFF: normal recovery"}`);
+    }
+    operatorHoldActive = held;
+  } catch {
+    /* keep the last known value */
+  }
+}
+
 function isUSMarketHours() {
   // Holiday + early-close aware via lib/marketCalendar.js (IBKR cache → static
   // holiday table → weekday/time). A mid-week holiday like Juneteenth is no
@@ -847,6 +874,11 @@ async function requestGatewayRestart() {
       signal: AbortSignal.timeout(IB_RESTART_TIMEOUT_MS),
     });
     const body = await res.json().catch(() => ({}));
+    if (isOperatorHoldRefusal(res.status, body)) {
+      operatorHoldActive = true;
+      console.log("[stale-data] Gateway restart refused: IBKR operator hold active; standing down");
+      return;
+    }
     console.log(
       `[stale-data] requested lock-held Gateway restart (HTTP ${res.status}): ` +
         `restarted=${body?.restarted ?? "?"} auth_state=${body?.auth_state ?? "?"}`,
@@ -1681,7 +1713,7 @@ function cleanupTapeForReconnect() {
 }
 
 function startDepthSubscription(key, contract, { kind, isFutures, requestingClient = null }) {
-  if (!DEPTH_ENABLED || !ibConnected) return;
+  if (!DEPTH_ENABLED) return;
 
   let state = symbolDepthStates.get(key);
   if (!state) {
@@ -1694,6 +1726,10 @@ function startDepthSubscription(key, contract, { kind, isFutures, requestingClie
     state.focusedAt = Date.now();
   }
 
+  // Record the subject even while IB is down: restoreDepthSubscriptions
+  // re-requests from this state on (re)connect. Returning before it existed
+  // left a subscribe made during an outage without depth or tape for good.
+  if (!ibConnected) return;
   if (state.depthTickerId != null) return; // already streaming
 
   // Cap-check via the per-client planner: only the requesting client's own
@@ -1706,9 +1742,11 @@ function startDepthSubscription(key, contract, { kind, isFutures, requestingClie
     maxConcurrent: MAX_CONCURRENT_DEPTH,
   });
   if (!admission.admit) {
+    state.awaitingBudget = true;
     emitDepthUnavailable(key, "depth-budget");
     return;
   }
+  state.awaitingBudget = false;
   for (const evictKey of admission.evictKeys) {
     stopDepthSubscription(evictKey);
     emitDepthUnavailable(evictKey, "recycled");
@@ -1725,6 +1763,7 @@ function startDepthSubscription(key, contract, { kind, isFutures, requestingClie
     state.depthTickerId = depthTickerId;
     state.ladders.bid.length = 0;
     state.ladders.ask.length = 0;
+    state.desynchronized = false;
     depthRequestIdToSymbol.set(depthTickerId, key);
     verbose(`depth subscribe ${key} kind=${kind} rows=${numRows} ticket=${depthTickerId}`);
   } catch (error) {
@@ -1734,13 +1773,14 @@ function startDepthSubscription(key, contract, { kind, isFutures, requestingClie
 
 function applyDepthDelta(key, position, marketMaker, operation, side, price, size) {
   const state = symbolDepthStates.get(key);
-  if (!state) return;
+  if (!state) return false;
   const ladder = side === 1 ? state.ladders.bid : state.ladders.ask;
   const maxRows = state.isFutures ? DEPTH_NUM_ROWS_FUTURES : DEPTH_NUM_ROWS_EQUITY;
   // Pure position-SHIFT reducer (scripts/lib/depthLadder.js, T-041): OOB
   // ops mean the ladder desynced from IB — reject rather than corrupt
   // every later position-addressed update, and never exceed the row budget.
-  const result = applyDepthOp(
+  const result = state.desynchronized || (side !== 0 && side !== 1)
+    ? { applied: false, reason: "desynchronized" } : applyDepthOp(
     ladder,
     { operation, position, price, size, marketMaker: marketMaker || null },
     maxRows,
@@ -1750,12 +1790,41 @@ function applyDepthDelta(key, position, marketMaker, operation, side, price, siz
     if (state.desyncCount === 1 || state.desyncCount % 50 === 0) {
       console.warn(
         `[depth] rejected ${result.reason} for ${key} (pos=${position}, op=${operation}, ` +
-        `desyncs=${state.desyncCount}) — ladder kept intact`,
+        `desyncs=${state.desyncCount}) — book invalidated`,
       );
     }
-    return;
+    // REL-021b / R-040: one missed positional delta invalidates the book.
+    // Only a fresh ticket can establish its positions again. Keep recovery
+    // to one attempt per subject per 30s, even across successive bad books;
+    // rejected frames must never clear the relay's stale-feed alarm.
+    if (!state.desynchronized) {
+      for (const client of depthSubscribers.get(key) || []) {
+        clientDepthBuffers.get(client)?.delete(key);
+      }
+      emitDepthUnavailable(key, "desynchronized");
+    }
+    state.desynchronized = true;
+    state.ladders.bid.length = 0;
+    state.ladders.ask.length = 0;
+    const now = performance.now();
+    if (now < (state.nextDepthRecoveryAt ?? -Infinity)) return false;
+    state.nextDepthRecoveryAt = now + 30_000;
+    if (!ibConnected || !depthSubscribers.get(key)?.size) return false;
+    if (state.depthTickerId != null) {
+      try {
+        ib.cancelMktDepth(state.depthTickerId, !state.isFutures);
+      } catch (error) {
+        console.warn(`[depth] cannot cancel desynchronized ${key}:`, error);
+        return false; // Unknown cancellation cannot authorize another ticket.
+      }
+      depthRequestIdToSymbol.delete(state.depthTickerId);
+      state.depthTickerId = null;
+    }
+    startDepthSubscription(key, state.contract, { kind: state.kind, isFutures: state.isFutures });
+    return false;
   }
   hydrateAndBroadcastDepth(key);
+  return true;
 }
 
 function serializeLadder(ladder, isFutures, kind, side) {
@@ -1843,6 +1912,19 @@ function unsubscribeClientFromDepth(client, key) {
     depthSubscribers.delete(key);
     stopDepthSubscription(key);
     stopTapeSubscription(key); // tape rides the focused depth symbol
+    admitDepthAwaitingBudget();
+  }
+}
+
+// A freed ticket goes to the longest-waiting subject refused for budget, so a
+// session refused while others held the cap gets its book once they let go.
+function admitDepthAwaitingBudget() {
+  const waiting = [...symbolDepthStates]
+    .filter(([key, state]) => state.awaitingBudget && state.depthTickerId == null && depthSubscribers.get(key)?.size)
+    .sort(([, a], [, b]) => a.focusedAt - b.focusedAt);
+  for (const [key, state] of waiting) {
+    if (collectActiveDepthTickets().length >= MAX_CONCURRENT_DEPTH) return;
+    startDepthSubscription(key, state.contract, { kind: state.kind, isFutures: state.isFutures });
   }
 }
 
@@ -1882,6 +1964,18 @@ function restoreDepthSubscriptions() {
 }
 
 function subscribeClientToSymbol(client, symbol) {
+  let clientSet = clientSymbols.get(client);
+  // R-036 / REL-021b: reserve before any awaited contract resolution or
+  // broker allocation. Repeated messages and mixed instruments share a cap.
+  if (!clientSet?.has(symbol) && (clientSet?.size ?? 0) >= MAX_CLIENT_SUBSCRIPTIONS) {
+    sendMessage(client, {
+      type: "error",
+      code: "SUBSCRIPTION_LIMIT",
+      symbol,
+      message: `Subscription limit reached (${MAX_CLIENT_SUBSCRIPTIONS} subjects per client)`,
+    });
+    return false;
+  }
   let subscribers = symbolSubscribers.get(symbol);
   if (!subscribers) {
     subscribers = new Set();
@@ -1889,12 +1983,12 @@ function subscribeClientToSymbol(client, symbol) {
   }
   subscribers.add(client);
 
-  let clientSet = clientSymbols.get(client);
   if (!clientSet) {
     clientSet = new Set();
     clientSymbols.set(client, clientSet);
   }
   clientSet.add(symbol);
+  return true;
 }
 
 function unsubscribeClientFromSymbol(client, symbol) {
@@ -2365,7 +2459,7 @@ async function handleClientMessage(client, data) {
       const subscribed = [];
       // Stock subscriptions (backward compatible)
       for (const symbol of symbols) {
-        subscribeClientToSymbol(client, symbol);
+        if (!subscribeClientToSymbol(client, symbol)) continue;
         // A bare futures ROOT (e.g. "ES") must subscribe L1 against the resolved
         // front-month FUTURE, not a stock — otherwise IB resolves the equity
         // ticker of the same name (ES = Eversource Energy ~$67) and the quote bar
@@ -2380,6 +2474,8 @@ async function handleClientMessage(client, data) {
         } else {
           ibContract = stockContract(symbol, "SMART", "USD");
         }
+        // The client may unsubscribe or disconnect during futures resolution.
+        if (!clientSymbols.get(client)?.has(symbol)) continue;
         ensureSymbolState(symbol, ibContract);
         if (ibConnected) {
           startLiveSubscription(symbol, ibContract);
@@ -2406,7 +2502,7 @@ async function handleClientMessage(client, data) {
       // Option contract subscriptions
       for (const c of contracts) {
         const key = optionKey(c);
-        subscribeClientToSymbol(client, key);
+        if (!subscribeClientToSymbol(client, key)) continue;
         const ibContract = optionContract(c.symbol, c.expiry, c.strike, c.right);
         ensureSymbolState(key, ibContract);
         if (ibConnected) {
@@ -2430,7 +2526,7 @@ async function handleClientMessage(client, data) {
       // Index subscriptions (e.g. VIX, VVIX on CBOE)
       for (const idx of indexes) {
         const key = idx.symbol;
-        subscribeClientToSymbol(client, key);
+        if (!subscribeClientToSymbol(client, key)) continue;
         const ibContract = indexContract(idx.symbol, "USD", idx.exchange);
         ensureSymbolState(key, ibContract);
         if (ibConnected) {
@@ -2805,8 +2901,7 @@ function wireIBEvents() {
     ib.on(EventName.updateMktDepth, (id, position, operation, side, price, size) => {
       const key = depthRequestIdToSymbol.get(id);
       if (!key) return;
-      markTick();
-      applyDepthDelta(key, position, null, operation, side, price, size);
+      if (applyDepthDelta(key, position, null, operation, side, price, size)) markTick();
     });
 
     // Equity / SMART L2 — marketMaker = exchange/MPID code. @stoqey/ib appends
@@ -2815,8 +2910,7 @@ function wireIBEvents() {
     ib.on(EventName.updateMktDepthL2, (id, position, marketMaker, operation, side, price, size, _isSmartDepth) => {
       const key = depthRequestIdToSymbol.get(id);
       if (!key) return;
-      markTick();
-      applyDepthDelta(key, position, marketMaker, operation, side, price, size);
+      if (applyDepthDelta(key, position, marketMaker, operation, side, price, size)) markTick();
     });
 
     // Time & Sales tape — reqTickByTickData(AllLast). @stoqey/ib arity:
@@ -2911,6 +3005,9 @@ statusBroadcastTick = setInterval(() => {
  * subscriptions / service_health row. The bounded ladder (K reconnects →
  * escalate-and-alert) and the escalation cooldown live in the machine.
  */
+void refreshOperatorHold();
+setInterval(() => { void refreshOperatorHold(); }, OPERATOR_HOLD_POLL_MS).unref?.();
+
 staleCheckTimer = setInterval(() => {
   if (shuttingDown || ibGatewayRestarting) return;
 
@@ -2934,7 +3031,7 @@ staleCheckTimer = setInterval(() => {
   // ladder is acting it owns the service_health row, so an "ok" heartbeat can
   // no longer land last and clobber the escalation's "error" row — the
   // 2026-06-18 invisibility bug where a dead relay still read state=ok.
-  const { action, heartbeat, clearError, degraded, disconnected } = decideHealthWrite({
+  const { action, heartbeat, clearError, degraded, disconnected, held } = applyOperatorHold(decideHealthWrite({
     now,
     lastTickAt: freshness.lastTickAt,
     ibConnected,
@@ -2947,7 +3044,22 @@ staleCheckTimer = setInterval(() => {
     inError: relayHealthInError,
     lastHeartbeatAt: lastTickHeartbeatAt,
     disconnectedSinceAt: ibDisconnectedSinceAt,
-  });
+  }), operatorHoldActive);
+
+  // IBKR operator hold: report HELD (writer healthy, Gateway down on purpose),
+  // never "disconnected", and never escalate to a Gateway restart.
+  if (held) {
+    staleReconnectCycles = 0;
+    relayHealthInError = false;
+    if (marketHours && subscribedSymbols > 0) {
+      void writeRelayHealth("ok", {
+        message: "IBKR operator hold: Gateway logged out on purpose; market data paused",
+        reason: "operator_hold",
+        ...buildRelayHealthDetail(now, lastTickTimestamp, freshness),
+      });
+    }
+    return;
+  }
 
   // R-168: the socket is gone during RTH with demand outstanding. The ladder
   // has nothing to say (it guards on ibConnected), so without this the relay
