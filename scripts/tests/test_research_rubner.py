@@ -171,7 +171,7 @@ def test_expire_skips_always_publish_held_rows(monkeypatch):
     def fake(sql, args=(), **kw):
         calls.append((sql, args))
         if "SELECT" in sql:
-            return [("rubner-key", "Citadel", "the q4 reload",
+            return [(1, "rubner-key", "Citadel", "the q4 reload",
                      "Citadel - The Q4 Reload October 1 Oct 2026.pdf",
                      json.dumps({"alwaysPublish": True, "excerpt": RUBNER_PAGE}))]
         return []
@@ -191,7 +191,7 @@ def test_expire_still_drops_ordinary_held_rows(monkeypatch):
     def fake(sql, args=(), **kw):
         calls.append((sql, args))
         if "SELECT" in sql:
-            return [("old-key", "Goldman Sachs", "tic data", "tic data.pdf", "{}")]
+            return [(1, "old-key", "Goldman Sachs", "tic data", "tic data.pdf", "{}")]
         return [("old-key",)]
 
     monkeypatch.setattr(publish, "hrana_execute", fake)
