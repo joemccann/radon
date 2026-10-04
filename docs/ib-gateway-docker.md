@@ -94,25 +94,22 @@ If you prefer to keep precautions active instead of bypassing, increase the limi
 ## 2FA Authentication
 
 - **First start**: Approve 2FA on IBKR Mobile app
-- **IBC schedules**: `AUTO_RESTART_TIME=11:45 PM` (container UTC, 23:45Z, inside the watchdog's 23:40-00:15 quiet window) makes the Gateway's mandatory daily cycle a token restart with no 2FA push; only weekly token expiry asks for 2FA, at 4:45 PM PT. Blank is not off: it keeps the stored 11:45 PM default, which re-logged in with a watchdog push every night. `TWS_COLD_RESTART` stays blank
+- **IBC daily cycle**: the [recovery owner](ib-gateway-recovery.md#daily-cycle) explains token restart, expiry and why a blank field is not off; compose owns the schedule
 - **2FA timeout**: IBC exits (`TWOFA_TIMEOUT_ACTION: exit`) and does not relogin
 - **Manual restart**: `scripts/docker_ib_gateway.sh restart` first acquires the
   shared 10-minute lease; a held or unreadable lease fails closed
 
 ## Healthcheck
 
-Docker's built-in healthcheck runs every 30s:
-```
-bash -c 'echo > /dev/tcp/localhost/4001'
-```
+The [compose healthcheck](../docker/ib-gateway/docker-compose.yml) owns its
+port selection, timing and startup grace. It opens a TCP socket using bash
+`/dev/tcp`; the image does not include `nc`/`netcat`.
 
-**Important:** Uses bash `/dev/tcp` builtin, NOT `nc`/`netcat` — the `gnzsnz/ib-gateway` image doesn't include netcat. Using `nc` causes the healthcheck to always fail, making the container permanently unhealthy.
-
-- **healthy**: IB Gateway API is accepting connections
-- **unhealthy**: API not responding (2FA pending, login failed, or Gateway crashed)
-- **starting**: Within 120s startup grace period
-
-Check via: `scripts/docker_ib_gateway.sh status` or `curl localhost:8321/health`
+Docker `healthy` means that socket opened; it does not prove authentication.
+A pending login can still have an open port. Read
+`scripts/docker_ib_gateway.sh status` and FastAPI `/health` without restarting,
+then follow [readiness verification](ib-gateway-recovery.md#readiness-verification)
+for prerequisites, stop conditions, verification, rollback and escalation.
 
 ## Unhealthy-container recovery (no Docker restart policy or autoheal)
 

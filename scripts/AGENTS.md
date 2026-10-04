@@ -72,6 +72,11 @@ access/write of each Eastern day, then persists the reduced cache. Today's
 expiry remains available through the session. Late ticks cannot resurrect
 expired keys; expiry comparison uses Eastern dates, not the host timezone.
 
+## Relay recovery
+
+Mode-specific escalation and operator gates are owned by
+[Gateway recovery](../docs/ib-gateway-recovery.md#relay-recovery).
+
 ## Relay subscription admission (R-036 / REL-021b)
 
 Each WebSocket client may hold at most 512 distinct L1 subjects across stocks,

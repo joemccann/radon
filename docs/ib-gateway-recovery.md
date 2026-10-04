@@ -4,6 +4,83 @@ Detailed derivation of the 2FA-aware restart + push lock + watchdog self-heal. S
 
 ---
 
+## Readiness verification
+
+**Symptom and prerequisites:** after startup, restart or a daily cycle, the
+API socket can listen while login is incomplete. Use the selected mode's
+FastAPI `/health` response and the Gateway logs; a TCP connection or Docker
+`healthy` result does not prove authentication. The [compose healthcheck](../docker/ib-gateway/docker-compose.yml)
+only opens the configured API port. `_derive_auth_state` in
+[`ib_gateway.py`](../scripts/api/ib_gateway.py) requires a connected pool
+client with non-empty `managed_accounts` to report `auth_state=authenticated`.
+
+**Blast radius and safe diagnosis:** reading health and logs does not place
+orders or request another login. Check `ib_gateway.auth_state`,
+`ib_gateway.upstream_dead`, `ib_pool`, operator hold and the push lease before
+any recovery action. `unknown` or `remote` is not authentication proof.
+
+**Stop conditions and verification:** stop manual recovery while a hold,
+active or unreadable lease, login throttle, or pending 2FA prevents it.
+Approve the existing prompt instead of generating another. Recovery requires
+`auth_state=authenticated`, no upstream failure and healthy pool roles needed
+by the operation; fresh relay ticks also matter for live pricing.
+
+**Rollback and escalation:** diagnosis changes nothing to roll back. If a
+controlled recovery fails, do not loop starts or clear safety gates. Leave a
+held Gateway held, retain sanitized health/log evidence and escalate to the
+operator using the applicable recovery procedure below.
+
+## Daily cycle
+
+The [Docker compose configuration](../docker/ib-gateway/docker-compose.yml)
+and [production compose configuration](../cloud/docker-compose.yml) own the
+IBC daily token-restart setting and timezone. A token restart can avoid a new
+login while the token remains valid; expiry can still require 2FA. A blank
+restart field leaves the Gateway's stored daily-cycle setting unchanged; it
+does not disable that cycle.
+
+**Symptom and prerequisites:** investigate a recurring login interruption
+using the selected Gateway mode and its effective configuration.
+[`setup_ibc.sh`](../scripts/setup_ibc.sh) still writes blank restart fields
+for local launchd and labels them disabled. That installer output is not
+proof that the Gateway has no daily cycle. The launchd definition's absence
+of a start schedule also does not disable the Gateway's own cycle.
+
+**Blast radius and safe diagnosis:** inspect configuration and logs without
+changing the broker session. Do not copy container clock settings into local
+IBC: local configuration and timezone must be checked independently.
+**Stop conditions and verification:** stop on an active hold, lease or login
+throttle; follow [readiness verification](#readiness-verification) after a
+cycle instead of relying on its elapsed time or open port.
+**Rollback and escalation:** diagnosis has no rollback. Do not change restart
+settings as an incident experiment; escalate the local installer's misleading
+disabled claim for a separately tested runtime repair.
+
+## Relay recovery
+
+**Symptom and prerequisites:** prices stop updating during market hours with
+outstanding subscriptions. The [decision core](../scripts/lib/staleDataMachine.js)
+owns stale thresholds and retry bounds. A silent subject on an otherwise live
+plane is resubscribed; a stale whole plane enters bounded resubscribe/socket
+reconnect recovery before escalation.
+
+`shouldRequestGatewayRestart` permits the [relay](../scripts/ib_realtime_server.js)
+to request `POST /ib/restart` after escalation in `docker` and `cloud` modes;
+`launchd` stays alert-only. The request delegates to FastAPI's push lease and
+backoff gates rather than restarting Docker directly. An operator hold
+suppresses recovery and a hold refusal makes the relay stand down.
+
+**Blast radius and safe diagnosis:** a Gateway restart can interrupt all IB
+clients and require 2FA. Read relay health/logs, Gateway health and existing
+hold/lease state first. Do not start another manual login just because ticks
+are stale; automatic recovery may already own the prompt.
+**Stop conditions and verification:** stop manual retries on an operator hold,
+pending 2FA, lease refusal, backoff or throttle. Recovery verification requires
+fresh ticks and [authenticated health](#readiness-verification).
+**Rollback and escalation:** diagnosis has no rollback; preserve holds and
+leases if recovery fails. Escalate sustained stale pricing to the operator
+with sanitized relay and Gateway evidence instead of bypassing those gates.
+
 ## Problem
 
 After a restart, IB Gateway sits at the IBKR Mobile push prompt with the API socket open. Naive health checks (`port_listening == true`) falsely report success. Worse: IBKR's backend cannot reconcile multiple pending push tokens — if a second push request fires while the first is pending, every approval shows "unsuccessful" on the user's phone.
