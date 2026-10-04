@@ -1,3 +1,18 @@
+# Task: PDF extract error detail (2026-10-03)
+
+- [x] T1 depends_on: [] Failing tests: rc + MemoryError, negative rc signal name, secret redaction, truncated stderr, prefix preserved, TimeoutExpired, persisted health/journal bound.
+- [x] T2 depends_on: [T1] Pipeline.extract appends rc/signal + redacted stderr tail; child prints type: message; classify_error length bound.
+- [ ] T3 depends_on: [T2] Focused pytest green. Draft PR vs main, CI green. No merge. No VPS.
+
+# Task: Rubner always-publish (2026-10-03)
+
+- [x] T1 depends_on: [] Red tests: Rubner detection variants, triage/novelty/TTL exemptions, empty-SELECT and VERIFY-fail fallback, idempotent post ids, outcome flags.
+- [x] T2 depends_on: [T1] Desk in force_include.py, intake page-text plumbing, expire SELECT+skip, ALWAYS_PUBLISH_FALLBACK labels, docs.
+- [x] T3 depends_on: [T2] EvidenceError message persist (separate commit) if the research-path classifier drops the extract reason.
+- [ ] T4 depends_on: [T2, T3] Draft PR vs main, CI green. No merge. No VPS.
+
+Review: Citadel Rubner GMI always reaches the feed. VERIFY stays hard per candidate. Zero published posts after VERIFY yields one grounded summary, never an unverified figure. Held TTL skips always_publish rows. EvidenceError on the host is classified with its message; do not mutate the VPS from this branch.
+
 # Task: Mount Antigravity in App Container Runtime (2026-09-28)
 
 - [x] T1 depends_on: [] Failing test in cloud/tests/test_app_runtime.py for .gemini and .local/bin container mounts.
@@ -8678,6 +8693,31 @@ Dependency graph: T1 -> T2 -> T3 -> T4. Gateway implementation, header compositi
 Review: independent gateway/coverage reviews completed; shared command lock and source freshness guards implemented. TypeScript static check passed. Manual dark desktop and320px mobile fixture review confirmed direct header access, grouped Gateway commands, service inventory reflow, primary action within752px and no horizontal overflow. Tests authored for GitHub CI; no local suites or live infrastructure actions run.
 
 CI repair review: befea93d preserved21 new gateway/service component regressions; one existing copy assertion required explicit unavailable start/stop/restart wording. Cloud CI exposed an existing pipefail race in required/active unit membership checks (2261 passed,1 failed): pure-shell exact matching replaces early-exit grep pipelines and adds4096-unit topology coverage without relaxing required-unit or oneshot replay guards. No local suites.
+
+## 2026-09-27 Golden-set production-data disclosure
+
+## Dependency graph
+- T1 depends_on: [] - Confirm the reported production journal identifiers and trade details remain tracked at HEAD.
+- T2 depends_on: [T1] - Add a failing fixture-safety regression and remove production-derived labels.
+- T3 depends_on: [T2] - Run focused and full verification, review the diff, commit, and publish a PR.
+
+## Checklist
+- [x] T1 Confirm disclosure at HEAD.
+- [x] T2 Regression and minimal remediation.
+- [ ] T3 Verification and delivery.
+
+## Review
+- Removed the three production-derived journal labels rather than substituting synthetic brokerage history; retained all pre-existing semantic journal coverage.
+- Regression rejects long numeric journal identifiers in the tracked golden set. Focused fixture tests pass; the affected suite is blocked locally because Python 3.13 lacks `libsql_experimental` and package installation is network-denied, while Python 3.14's extension segfaults.
+
+### PR #879 CI repair — 2026-10-02
+
+- [x] T1 depends_on: [] Inspect exact-head CI and reproduce the documentation ownership failure locally.
+- [x] T2 depends_on: [T1] Update the knowledge embeddings owner documentation to match the sanitized fixture and regression.
+- [x] T3 depends_on: [T2] Run the documentation contracts and review the repair before publication.
+- [ ] T4 depends_on: [T3] Push the repair, verify exact-head CI, and send the accepted green notification.
+
+Review: original ownership test reproduced red (1 failed); owner documentation updated with the fixture removal, six-digit identifier guard and baseline review requirement. All 89 documentation contracts pass; diff whitespace is clean. Changes limited to owner documentation and task tracking; the ownership gate remains enforced. Exact-head CI and notification receipt pending.
 # Task: PR #766 follow-up, demo CI guard and Linux deploy cleanup (2026-09-28)
 
 ## Dependency graph and checklist
@@ -8831,3 +8871,13 @@ Delivery review: draft https://github.com/joemccann/radon/pull/866; source head 
 - [x] T4 depends_on: [T3] Verify, publish substantive draft if needed, watch exact-head CI, post one rolling comment.
 
 Review: 18 commits / 117 paths audited through 15bdb9a4. DOC-154 through DOC-158 corrected at existing owners; seven new documentation contracts failed before correction and pass after it. Documentation/path-filter 138 passed; publication/model/hold/subscription 291 passed; offline Gateway CLI 30 passed. Ten changed local links and anchors resolve; owner JSON parses; diff and secret scans clean. No runtime behavior, live operation or generated codemap changed. Draft #886 published; source head ff2d9d53029106774b3e76c1ca44c8488592070c completed 32 passing checks with seven non-applicable skips. Exactly one rolling comment posted: https://github.com/joemccann/radon/issues/202#issuecomment-5968274601. The comment carries the audit cursor, inherited closures and acceptance criteria for DOC-154 through DOC-158. This delivery receipt changes only the checklist; its own exact-head CI is watched before ending the session. Review and merge remain operator-owned; no deployment, merge or notification was performed.
+
+## CI performance nightly 2026-10-03
+
+- [x] T1 (depends_on: []): read open performance PRs/checkpoint and audit origin/main changes.
+- [x] T2 (depends_on: [T1]): measure 30 organic Actions runs, cache state and gate closure.
+- [x] T3 (depends_on: [T2]): rank safe critical-path candidates and implement qualifying experiments.
+- [x] T4 (depends_on: [T3]): verify substantive experiment; publication/CI blocked by confirmed repo-only token scope.
+- [ ] T5 (depends_on: [T4]): review rails and post one durable checkpoint on issue #196.
+
+Review 2026-10-03: CIP-016 reserved experiment restored against 15bdb9a4; regression red 2 failed/7 passed, green cloud 83 passed, script gate/inventory/path contracts 90 passed. YAML/inline shell/Python syntax, pinned actions, complete 12-family gate equality and diff/secret reviews pass. Full suites, Vitest, Docker builds and workflow lint require PR CI. Expected workflow-scope publication block remains; exact delivery receipt and all run strata belong in the single issue #196 checkpoint. No production access, synthetic samples, merge, main push or additional experiment ID.

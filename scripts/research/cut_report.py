@@ -51,6 +51,7 @@ REASON_CODE_LABELS = {
     "DOC_TYPE_FX_PAIR_NOTE": "Document type: FX pair note",
     "DOC_TYPE_CALENDAR": "Document type: calendar",
     "HELD_EXPIRED": "Hold expired",
+    "ALWAYS_PUBLISH_FALLBACK": "Always-publish fallback summary",
 }
 
 CUT_SQL = """SELECT outcome, folder_date, file_name, publisher, series, COALESCE(posts, 0) AS posts,

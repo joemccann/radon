@@ -275,7 +275,10 @@ topology state is durable across reboot under `/var/lib/radon/deploy`.
 **Interrupted backups.** The release snapshot includes an active or activating
 `radon-db-backup.service`. Stop it before replacing code, then asynchronously
 resume that exact replay-safe oneshot during `restart-managed` / `recover`.
-Do not replay other oneshots or start a backup that was dormant. Once restore
+Do not replay other oneshots or start a backup that was dormant. Another
+snapshotted oneshot that stop-clean SIGTERMed (`failed`, `Result=signal`) is
+`reset-failed`, not started, so the deploy's own stop does not page; an
+exit-code failure stays visible. Once restore
 is recorded, repeated recovery does not restart the dump, including after an
 off-box failure. A second `recover` with nothing left to start is a finished
 restore: the helper's child is `/bin/bash`, and on bash 3.2 an empty
@@ -378,6 +381,8 @@ successfully, and the stated schema and core-service checks were green.
 It must not start, stop, restart, or enable Radon services, Docker, IB Gateway,
 Caddy, polkit, or journald. Do not use the full `setup-vps.sh` as a live upgrade
 shortcut; setup also provisions packages, firewall, Caddy, and service state.
+Setup clones the public app repo over anonymous HTTPS and mints no GitHub SSH
+key for `radon` (the host holds no GitHub credential; DS-2026-09-30-02).
 Setup pins GitHub's published ed25519 SSH host key (no first-contact keyscan),
 provisions the secret-store credential as 32 raw bytes, and prepares the
 radon-replaceable media directory with create-then-verify + `chown
@@ -508,6 +513,10 @@ and pages via Pushover plus the unit watchdog. The job heartbeats
 The unit names every link the upgrader may move (`--live-bin`,
 `--alias-bin ~/.grok/bin/grok`); `grok_upgrade.py` never derives a path
 from HOME, so a test run in the responder clone cannot relink the live CLI.
+The unit runs the root-owned copy `/usr/local/lib/radon/grok-upgrade` on
+`/usr/bin/python3.13 -E -S`, never the responder clone (hidden from it);
+`setup-grok-page-responder.sh` installs that copy, so an upgrader fix lands
+on the host only at a setup rerun (`cloud/tests/test_grok_upgrade_controller.py`).
 
 `setup-vps.sh` inventories `radon-rsi-oversold.{service,timer}` and
 `enable_services` enables the timer. Daily 23:05 UTC, twenty minutes

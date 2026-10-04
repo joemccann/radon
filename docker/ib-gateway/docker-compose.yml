@@ -25,10 +25,10 @@ services:
       # Yield to the operator's own IBKR login (IBC scenario 6) instead of
       # reclaiming it; see cloud/docker-compose.yml.
       EXISTING_SESSION_DETECTED_ACTION: primaryoverride
-      # Blank both IBC schedules. Even a normally credential-preserving auto
-      # restart becomes a full login at weekly token expiry and can mint a 2FA
-      # push without Radon's lease. The lock-aware watchdog owns every cycle.
-      AUTO_RESTART_TIME: ""
+      # Pinned daily token restart at 23:45Z (container UTC), inside the
+      # watchdog quiet window; see cloud/docker-compose.yml for why blank is
+      # not "off".
+      AUTO_RESTART_TIME: "11:45 PM"
       TWS_COLD_RESTART: ""
       # DUR-08: GC logging does NOT work via JAVA_TOOL_OPTIONS — the image's
       # launcher blanks it before starting the JVM (verified on the java

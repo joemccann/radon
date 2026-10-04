@@ -1620,52 +1620,6 @@
       ]
     },
     {
-      "id": "q-journal-latest-alab-exit",
-      "question": "What was the most recent ALAB LEAP exit and realized P&L?",
-      "category": "recent",
-      "relevant": [
-        {
-          "source": "journal",
-          "doc_key_pattern": "^9087683443\\+9359844529\\+9363238199$",
-          "grade": 3
-        },
-        {
-          "source": "journal",
-          "doc_key_pattern": "^ALAB\\|",
-          "grade": 2
-        }
-      ],
-      "note": "Turso 2026-09-27: Jan 2027 $120 LEAP closed 2026-03-02 @ 65.8 (5x) vs entry 36.9. Later ALAB rows are Sep 2026 $350 puts, not LEAP exits."
-    },
-    {
-      "id": "q-journal-wulf-adds",
-      "question": "Did I add to the WULF LEAP after the original entry?",
-      "category": "paraphrase",
-      "relevant": [
-        {
-          "source": "journal",
-          "doc_key_pattern": "^WULF\\|",
-          "grade": 3
-        },
-        {
-          "source": "journal",
-          "doc_key_pattern": "^9088163250\\+9088172895$",
-          "grade": 3
-        },
-        {
-          "source": "journal",
-          "doc_key_pattern": "^9821048741$",
-          "grade": 2
-        },
-        {
-          "source": "journal",
-          "doc_key_pattern": "^9448987493\\+",
-          "grade": 2
-        }
-      ],
-      "note": "Original 77x Jan 2027 $17 LEAP. Later Jan 2027 $31 short then buy-to-close, not additional $17 contracts."
-    },
-    {
       "id": "q-news-latest-momo",
       "question": "What is the latest newsfeed take on momentum exposure and the MoMo trendline?",
       "category": "recent",
@@ -1797,29 +1751,6 @@
           "grade": 2
         }
       ]
-    },
-    {
-      "id": "q-journal-adbe",
-      "question": "Did I evaluate or journal an ADBE bullish call spread?",
-      "category": "cross_source",
-      "relevant": [
-        {
-          "source": "journal",
-          "doc_key_pattern": "^0001505f\\.6a7dc90",
-          "grade": 3
-        },
-        {
-          "source": "journal",
-          "doc_key_pattern": "^10056961267\\+10056961654$",
-          "grade": 3
-        },
-        {
-          "source": "journal",
-          "doc_key_pattern": "^10056963667\\+10056964450$",
-          "grade": 2
-        }
-      ],
-      "note": "Journaled 2026-08-13 as ADBE $300/$350 Sep-18 bull call (long BAG). No dedicated ADBE eval report in Turso."
     },
     {
       "id": "q-journal-3dte-rr",
