@@ -1132,3 +1132,23 @@ Closing verification 2026-10-01: all three rounds pass Python 13448 / Vitest 103
 Standing gates, three delta repetitions and closing full-gate counts are recorded in TEST_AUDIT.md. Exact-head CI/browser evidence and notification delivery status belong to rolling issue #83.
 
 Closing verification 2026-10-02: three rounds each passed Python 13,826 / Vitest 10,365 / cloud 2,452; Python 2 skips and 23 subtests, cloud 7 skips. All three sorted cloud FAILED lists match the empty detached-base list, with 0 additions and 0 removals.
+
+
+## Remediation 2026-10-03
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-528 | DONE | Web facts leaked into a tool-capable round: 153 original tests pass; corrected exact-fixture assertion fails (1 failed / 152 passed). Restored importing suites: 153 passed. Citations remain withheld and final synthesis has no tools; product source unchanged. |
+| T-529 | DONE | Null folder continuation cursor: 75 original related tests pass; HTTP-boundary request assertion fails (1 failed / 77 passed). Restored related gate: 78 passed plus 23 subtests. Real RPC serialization, namespace, malformed replies and pagination budget covered; Dropbox module 100% statements/branches. Product source unchanged. |
+
+Three changed-file repetitions each pass Python 848 / Vitest 95 / cloud 756. Standing environment/load observations and subsequent isolated results are recorded in TEST_AUDIT.md; no assertion, selection, timeout, tolerance or coverage ratchet was weakened. Closing counts and detached-base cloud comparisons follow there. Exact-head CI/browser evidence belongs to rolling issue #83.
+
+### Standing-sweep follow-up 2026-10-03
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-530 | DONE | Old macOS integration accepts a leader-only kill with a surviving fake descendant; the separate fake-process unit rejects it. Repaired real-group integration rejects it too (2 failed / 3 passed across the mutated file). Restored file: 5 passed; related knowledge suites: 69 passed in each of three repetitions. Pytest owns and reaps both group members; actual SIGKILL exits replace the nonexistent-procfs check. Product source, deadlines and partial-result assertions unchanged. |
+
+The standing Python run and first closing attempt each raised PermissionError during repeated group cleanup; the unchanged file passed alone. The first closing attempt is retained separately and three complete closing rounds restart after the fixture repair.
+
+Closing verification 2026-10-03: three consecutive complete rounds each pass Python 13,931 / Vitest 10,372 / cloud 2,469. Python: 2 skips and 23 subtests; Vitest: 1,045 files with no skips; cloud: 7 skips. All three sorted cloud FAILED lists match the empty detached-base list (0 additions / 0 removals). The pre-repair failed Python attempt remains separate. External CI/browser receipts are recorded on issue #83.

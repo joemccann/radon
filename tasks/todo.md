@@ -3727,7 +3727,7 @@ P1/P2 (steps 1-5 code) are on `main` (`26668ef8`). Timer not enabled. No SendReq
 
 ---
 
-# Task: Cash-flow Flex 1025 lockout (2026-08-21)
+# Task: Cash-flow Flex lockout (2026-08-21)
 
 ## Dependency graph
 
@@ -3745,9 +3745,9 @@ P1/P2 (steps 1-5 code) are on `main` (`26668ef8`). Timer not enabled. No SendReq
 
 ## Review
 
-- Production 2026-08-21T13:58:26Z: SendRequest 1025, class=permanent, next_attempt Monday 08:00 ET. Last success 4d earlier.
-- Mechanism: 1001×2 SendRequest + TWR 07:30 + page-driven Flex every 20 min on one token.
-- Ops: zero Flex SendRequests until the sidecar lapses. Portal Run 1442520, then `--from-file`. Do not retry Monday.
+- A production lockout was classified as permanent and protected by the shared embargo.
+- Retry behavior was removed from the affected request paths.
+- Operators can ingest an exported report with `--from-file` while the embargo is active.
 
 ## Constraints
 
@@ -3761,21 +3761,21 @@ P1/P2 (steps 1-5 code) are on `main` (`26668ef8`). Timer not enabled. No SendReq
 
 ## Dependency graph
 
-- T1 depends_on: [] - Reproduce CBRS SELL-combo modify P&L (Max Gain $1,035,835 / Max Loss $4,165) as a failing test
+- T1 depends_on: [] - Reproduce incorrect SELL-combo modify P&L as a failing test using synthetic values
 - T2 depends_on: [T1] - Match working SELL BAG to held combo and pass `closeOut.entryCostDollars`
 - T3 depends_on: [T2] - Focused Vitest + Playwright; visual confirm; no live modify
 
 ## Checklist
 
-- [x] T1 Red: modify modal close of 50x CBRS RR @ $8 shows realized P&L, not opening max gain/loss
+- [x] T1 Red: modify modal close shows realized P&L, not opening max gain/loss
 - [x] T2 Wire `findHeldComboForClose` into `ModifyOrderModal` combo `riskInput`
 - [x] T3 Green tests + screenshot of Close Credit / Est. Realized P&L
 
 ## Review
 
-- Root cause: combo modify sent the post-modify BAG through opening-risk math. Held long 205 calls covered the inverted short call, leaving a synthetic long 200 put. Max Gain = (200 + 8) x 50 x 100 minus round-trip cost = $1,035,835. Max Loss = that cost = $4,165.
+- Root cause: combo modify sent the post-modify BAG through opening-risk math instead of close-out math.
 - Fix: `findHeldComboForClose` matches SELL envelope + structure legs + qty <= held units, then `closeOut.entryCostDollars` from `resolveEntryCost`.
-- Red reproduced screenshot dollars. Green: Close Credit $40,000 / Est. Realized P&L $15,000. Playwright screenshot `web/test-results/modify-combo-close-pnl.png`.
+- Red reproduced the incorrect risk labels. Green showed close credit and estimated realized P&L. Playwright screenshot `web/test-results/modify-combo-close-pnl.png`.
 - Focused Vitest: 35 passed. Playwright: close-credit spec passed. No live broker modify.
 
 ## Constraints
@@ -8871,6 +8871,20 @@ Delivery review: draft https://github.com/joemccann/radon/pull/866; source head 
 - [x] T4 depends_on: [T3] Verify, publish substantive draft if needed, watch exact-head CI, post one rolling comment.
 
 Review: 18 commits / 117 paths audited through 15bdb9a4. DOC-154 through DOC-158 corrected at existing owners; seven new documentation contracts failed before correction and pass after it. Documentation/path-filter 138 passed; publication/model/hold/subscription 291 passed; offline Gateway CLI 30 passed. Ten changed local links and anchors resolve; owner JSON parses; diff and secret scans clean. No runtime behavior, live operation or generated codemap changed. Draft #886 published; source head ff2d9d53029106774b3e76c1ca44c8488592070c completed 32 passing checks with seven non-applicable skips. Exactly one rolling comment posted: https://github.com/joemccann/radon/issues/202#issuecomment-5968274601. The comment carries the audit cursor, inherited closures and acceptance criteria for DOC-154 through DOC-158. This delivery receipt changes only the checklist; its own exact-head CI is watched before ending the session. Review and merge remain operator-owned; no deployment, merge or notification was performed.
+
+## Reliability nightly 2026-10-03
+
+- [x] T1 depends_on: [] — isolated Python toolchain; trusted checkpoint and open PR inventory.
+- [x] T2 depends_on: [T1] — audit delta plus codemap callers, standing safety sweeps and inherited candidates; 18 commits / 220 scoped paths; 92 standing passes.
+- [x] T3 depends_on: [T2] — fault-injection red/green repairs, focused gates and per-finding commits.
+- [x] T4 depends_on: [T3] — permanent drills, substantive publication and exact-head green draft PR.
+- [x] T5 depends_on: [T4] — single rolling checkpoint comment and closing review.
+
+### Review 2026-10-03
+
+Three new regressions and four inherited repairs have repeated red/green evidence. R-303's already merged correction passes the actual parsed acceptance test. Standing safety/catalog checks and 95 permanent drills pass. Fifteen historical candidates/operator tasks retain acceptance on issue #81. No live-system operation, secret lookup, main push, merge, generated codemap change or test-ledger edit occurred. T4/T5 external delivery receipts will be recorded in the single durable issue comment after exact-head CI.
+
+Delivery review: draft https://github.com/joemccann/radon/pull/882; source-verification head `bcfd8b8c8a64656cbfb16c99f634f426234b7c53` completed all 24 required contexts, 32 applicable checks and seven non-applicable skips. Exactly one rolling comment posted: https://github.com/joemccann/radon/issues/81#issuecomment-5966924908. Seven source repairs resolved; fifteen inherited candidates/operator tasks retain acceptance. Final checklist receipt changes only this file and its exact-head CI is watched before ending the session. The runner owns notifications; no notification or live-system action was performed.
 
 ## CI performance nightly 2026-10-03
 
