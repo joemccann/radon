@@ -1,0 +1,6 @@
+[
+  {"direction": "in", "protocol": "tcp", "port": "22", "source_ips": ["0.0.0.0/0", "::/0"], "description": "ssh: CI deploy (GitHub-hosted runners) and recovery"},
+  {"direction": "in", "protocol": "tcp", "port": "80", "source_ips": ["0.0.0.0/0", "::/0"], "description": "caddy http"},
+  {"direction": "in", "protocol": "tcp", "port": "443", "source_ips": ["0.0.0.0/0", "::/0"], "description": "caddy https"},
+  {"direction": "in", "protocol": "udp", "port": "41641", "source_ips": ["0.0.0.0/0", "::/0"], "description": "tailscale direct"}
+]
