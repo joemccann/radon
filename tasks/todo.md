@@ -8905,3 +8905,15 @@ Review 2026-10-03: CIP-016 reserved experiment restored against 15bdb9a4; regres
 - [ ] T5 depends_on: [T4] Publish one draft, await exact-head CI and post one rolling comment; record external completion receipts on issue #81.
 
 Review: delta audit finished through 6603be9b; three new source findings and inherited R-036 have repeated red/green evidence. R-035 passes executable upstream acceptance. Standing sweeps 110 passed; permanent drills 95 passed, relay 113, research/docs 280 and 305, controller/setup 18, delta scripts 153, delta API 15 and deploy lifecycle 7 passed/2 platform skips. The broader cloud delta run had 167 passes and one environment-only subprocess failure; the failing case passes alone with the venv interpreter on PATH. Substantive publication check, Python/config parsing, shell/Node syntax, diff and four-commit secret scan pass. External publication, exact-head CI and the single durable comment are pending; final completion receipts belong on issue #81 without changing the reported head. Open PR #882 reserves R-721/R-722/R-723, REL-302/REL-303/REL-304 and R-315/R-316/R-317/R-318. Only tonight's branch is eligible for push; full suites and Vitest belong to CI.
+
+## Nightly testing 2026-10-04
+
+- [x] T1 Build toolchain, recover trusted checkpoint and read open testing PRs. depends_on: []
+- [x] T2 Audit delta and inverse importers; run standing gates and three delta repetitions. depends_on: [T1]
+- [x] T3 Verify candidates with deliberate defects and remediate each serially. depends_on: [T2]
+- [x] T4 Complete three serial full-gate rounds, base cloud comparison and hygiene review. depends_on: [T3]
+- [ ] T5 Publish substantive draft, watch exact-head CI and post one rolling issue comment. depends_on: [T4]
+
+### Review 2026-10-04 (before publication)
+
+Nine findings have red/green evidence, including seven reverified historical P2s omitted from the latest checkpoint inventory. Focused gate 343 passed; three complete local rounds retain one unreproduced Caddy startup failure and two inherited T-530 failures, with all isolated owner replays green. Per-finding focused verification precedes each explicit-path commit. Syntax, whitespace, secret, ledger-prefix and mutation-restoration checks pass. No production operations, other-branch writes, codemap or reliability changes. T5's external PR/CI/checkpoint completion is recorded once on issue #83 after exact-head CI; this pre-publication checklist does not claim a future green result. Open draft #885 owns T-528 through T-530.
