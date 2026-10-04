@@ -1,4 +1,5 @@
 {
+  "regions": ["pdx1"],
   "ignoreCommand": "node scripts/vercel-ignore-build.mjs",
   "redirects": [
     {

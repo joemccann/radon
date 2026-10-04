@@ -25,7 +25,7 @@ const ADMIN_ROUTES = ["edge-health", "health", "host-metrics", "reliability", "s
 // Guarded routes outside the security-report ROUTES list — admin actions and
 // the alerts store, all of which carry their own requireRouteAccess call.
 const GUARDED_ADMIN_ACTION_ROUTES = [
-  "admin/ib/reset-backoff", "admin/ib/restart", "admin/services",
+  "admin/ib/operator-hold", "admin/ib/reset-backoff", "admin/ib/restart", "admin/services",
   "admin/services/[unit]/[action]", "admin/stack/restart",
   "admin/trading/[action]", "admin/slm-review", "alerts", "alerts/[id]",
   // Operator credentials CRUD (PR #125): requireRouteAccess operatorOnly on

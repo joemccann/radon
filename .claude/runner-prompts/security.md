@@ -611,7 +611,10 @@ package with no exposure, or an unsupported claim of sensitive impact.
 
 Run the repository-native finder -> independent verifier -> completeness and
 regression critic workflow after the two external engines; its role is
-adjudication and coverage, not a third vote. **Do not run its `secrets`
+adjudication and coverage, not a third vote. Invoke it as
+`Workflow({ name: "security-audit", args: { repoRoot: "<the value of $RADON_REPO_ROOT>", focus: [...] } })`;
+the Workflow runtime cannot read the environment, so pass the clone root
+explicitly. **Do not run its `secrets`
 dimension unchanged**: it instructs model agents to grep raw Git history, while
 Radon's gitleaks policy has intentional historical exceptions that may still
 hold credential material. Deterministic local gitleaks owns history inspection.
@@ -893,6 +896,10 @@ runner additionally redacts known secret shapes, which is a backstop, not
 permission.
 
 ## Private reporting and notifications
+
+The runner sends every Pushover notification, including `radon PR green`.
+Pushover credentials are absent from your environment by design: do not send
+one, and do not list it under Next.
 
 The private run record contains: run ID, immutable SHAs, range, trigger, mode,
 duration, completion state; exact pinned tool/plugin/model versions and

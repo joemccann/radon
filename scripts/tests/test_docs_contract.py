@@ -1362,3 +1362,258 @@ class TestGrokBinaryRecoveryDocumentation:
         upgrade = _section(cases, "grok-upgrade-update-rejects-no-auto-update")
         assert "LKG is still absent" not in upgrade
         assert "timer installs\n  `1.0.44`" not in upgrade
+
+
+class TestOperatorHoldDesignBoundary:
+    """DOC-152: proposed release extensions are not deployed safety gates."""
+
+    def test_proposal_defers_operator_actions_to_current_runbook(self):
+        design = (_ROOT / "docs/ibkr-session-release.md").read_text()
+        preface = design.split("## 1.", 1)[0]
+        assert "[current operator procedure](ib-gateway-recovery.md#runbook-flatten-from-ibkr-mobile-while-the-app-is-down)" in preface
+        assert "historical proposal, not deployed guarantees" in preface
+        assert "does not set a trading halt" in preface
+        assert "does not stop local Gateways" in preface
+        for flag in ("--full", "--with-trading", "--force-lease"):
+            assert flag in preface
+        assert "Do not execute the proposed procedures below" in preface
+
+    def test_mobile_flatten_waits_for_confirmed_release_and_persisted_hold(self):
+        doc = (_ROOT / "docs/ib-gateway-recovery.md").read_text()
+        procedure = _section(doc, "Runbook: flatten from IBKR Mobile while the app is down")
+        release_step = next(line for line in procedure.splitlines() if line.startswith("1. "))
+        for required in ("exit status 0", "`RELEASED`", "`radon ib status`", '"held": true'):
+            assert required in release_step, required
+        for required in ("HOLD NOT WRITTEN", "state unknown", "do not clear", "before reboot"):
+            assert required in procedure, required
+        assert "does not set a trading halt" in procedure
+        for label in ("Symptom", "Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verification", "Rollback", "Escalation"):
+            assert f"**{label}:**" in procedure
+
+
+class TestIncidentPublicationOwner:
+    """DOC-155: recovery guidance follows the gate's expanded detectors."""
+
+    def test_pickup_owner_covers_generic_and_environment_credential_refusals(self):
+        procedure = _section((_ROOT / "docs/grok-page-responder.md").read_text(),
+                             "Open-PR path: the Mac mini picks the branch up")
+        for required in ("opaque literal", "credential-named", "verbatim", "pickup process",
+                         "../scripts/ir_push_gate.py", "../scripts/credential_redaction.py"):
+            assert required in procedure, required
+        for label in ("Symptom", "Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verification", "Rollback", "Escalation"):
+            assert f"**{label}:**" in procedure
+
+    def test_publication_gate_changes_reach_the_recovery_owner(self):
+        rules = _load_owners()["rules"]
+        assert _violations(["scripts/ir_push_gate.py"], rules)
+        assert _violations(["scripts/ir_push_gate.py", "docs/grok-page-responder.md"], rules) == []
+
+
+class TestSubscriptionRecoveryBillingOwner:
+    """DOC-156: token recovery must not promise automatic prepaid fallback."""
+
+    def test_token_daemon_intro_defers_billing_to_auth_owner(self):
+        intro = (_ROOT / "docs/subscription-tokens.md").read_text().split("## Per-provider contract", 1)[0]
+        assert "silently demotes" not in intro
+        assert "oauth-subscription-auth.md#radon-http-model-ladder-server" in intro
+        assert "unavailable" in intro
+        module_intro = (_ROOT / "scripts/subscription_tokens.py").read_text().split('"""', 2)[1]
+        assert "silently demotes" not in module_intro
+
+    def test_reauth_runbook_states_its_recovery_boundaries(self):
+        procedure = _section((_ROOT / "docs/subscription-tokens.md").read_text(),
+                             "Operator re-auth runbook")
+        for label in ("Symptom", "Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verification", "Rollback", "Escalation"):
+            assert f"**{label}:**" in procedure
+
+    def test_vault_mutations_use_the_service_credential_context(self):
+        doc = (_ROOT / "docs/subscription-tokens.md").read_text()
+        section = _section(doc, "Sealing a freshly created credential")
+        commands = re.findall(r"```bash\n(.*?)```", section, re.S)
+        assert commands
+        assert not any(re.search(r"subscription_tokens\s+--(?:seal|restore)\b", command)
+                       for command in commands), "A bare SSH shell lacks the unit's vault context"
+        assert "systemctl start radon-subscription-tokens.service" in section
+        assert "systemctl status radon-subscription-tokens.service" in section
+        assert "different store" in section and "decrypted key" in section
+        assert "operations.md#encrypted-credential-store-profile-credentials-tab" in section
+        unit = (_ROOT / "cloud/services/radon-subscription-tokens.service").read_text()
+        assert "Environment=RADON_SECRET_STORE_PATH=" in unit
+        assert "LoadCredentialEncrypted=radon-secret-store-key:" in unit
+        assert "-m scripts.subscription_tokens --once" in unit
+
+
+class TestApiTimerOwner:
+    """DOC-157: API instructions should link schedules instead of copying them."""
+
+    def test_api_timer_instructions_defer_to_operator_and_executable_owners(self):
+        timers = _section((_ROOT / "scripts/api/CLAUDE.md").read_text(), "Autonomous Timers (Hetzner)")
+        assert "| Timer |" not in timers
+        assert "radon-cloud/services/" not in timers
+        assert "../../docs/operations.md#background-services" in timers
+        assert "../../cloud/services/" in timers
+        assert "literal env" in timers
+        ops = (_ROOT / "docs/operations.md").read_text()
+        row = next(line for line in ops.splitlines() if line.startswith("| `radon-refresh.timer` |"))
+        assert "../cloud/services/radon-refresh.timer" in row
+        assert "60s" not in row
+
+
+class TestCredentialSetupOwners:
+    """DOC-150/151: setup instructions must select the implemented auth path."""
+
+    def test_probe_overview_defers_credential_setup_to_environment_owner(self):
+        ops = (_ROOT / "docs/operations.md").read_text()
+        health = ops.split("## Health monitoring", 1)[1].split("## Service Health", 1)[0]
+        overview, procedure = health.split("### External probe dispatch", 1)
+        assert "Repo secrets the workflow reads" not in overview
+        assert "Credential placement" in overview
+        workflow = (_ROOT / ".github/workflows/external-health-probe.yml").read_text()
+        environment = re.search(r"^    environment: (\S+)$", workflow, re.M).group(1)
+        assert f"`{environment}` GitHub Environment" in procedure
+        for name in set(re.findall(r"secrets\.([A-Z_]+)", workflow)):
+            assert f"`{name}`" in procedure
+        assert "not in repository secrets" in procedure
+
+    def test_antigravity_setup_uses_the_cli_owner_without_prepaid_exception(self):
+        research = (_ROOT / "docs/dropbox-research.md").read_text()
+        row = next(line for line in research.splitlines() if line.startswith("| antigravity |"))
+        assert "oauth-subscription-auth.md#radon-http-model-ladder-server" in row
+        assert "Antigravity CLI" in row
+        assert "GEMINI_OAUTH_TOKEN" not in row and "GEMINI_API_KEY" not in row
+        owner = _section((_ROOT / "docs/oauth-subscription-auth.md").read_text(), "Radon HTTP model ladder (server)")
+        assert "Gemini" not in owner and "GEMINI_API_KEY" not in owner
+        assert "no Google API key or OAuth-token path at all, under any flag" in owner
+        assert "Weekend bash wrappers" not in owner
+        assert "[nightly runner](runner.md)" in owner
+
+
+class TestRecurringOwnerCoverage:
+    """DOC-143/145/146/148: actual paths must trigger their existing owner."""
+
+    @pytest.mark.parametrize("source,owner", [
+        ("config/com.radon.external-probe-dispatch.plist", "docs/operations.md"),
+        ("scripts/credential_redaction.py", "docs/security-audit-playbook.md"),
+        ("scripts/research/worker.py", "docs/dropbox-research.md"),
+        ("cloud/services/radon-knowledge-eval.service", "docs/knowledge-embeddings.md"),
+    ])
+    def test_recurring_contract_cannot_change_without_owner(self, source, owner):
+        assert (_ROOT / source).is_file()
+        rules = _load_owners()["rules"]
+        matching = [rule for rule in rules if any(_matches(source, glob) for glob in rule["globs"])]
+        assert matching, f"No documentation owner for {source}"
+        assert any(owner in rule["owners"] for rule in matching)
+        assert _violations([source], matching), "Mapped source alone must fail ownership"
+        assert _violations([source, owner], matching) == []
+
+
+class TestRunnerRunbookRootWrites:
+    """Root never reads, writes or chowns through a path the bot account controls."""
+
+    def test_root_commands_do_not_touch_bot_home_files(self):
+        doc = (_ROOT / "docs/runner.md").read_text()
+        offenders = [
+            line.strip() for line in doc.splitlines()
+            if re.search(r"\bsudo\s+(?!-u\s)", line)
+            and "/Users/_radonbot" in line
+            and re.search(r">|\bcat\b|\bchown\b|\bmv\b", line)
+        ]
+        assert offenders == []
+
+    def test_secret_copies_write_as_the_bot(self):
+        doc = (_ROOT / "docs/runner.md").read_text()
+        for target in ("agent-cli/env", ".radon-runner.env", "pushover.env"):
+            assert any(
+                "sudo -u _radonbot /bin/sh -c" in line and target in line and ">" in line
+                for line in doc.splitlines()
+            ), target
+
+
+class TestGatewayDailyCycleDocumentation:
+    """DOC-159: an empty IBC field is not a disabled broker daily cycle."""
+
+    @pytest.mark.parametrize("path", [
+        "docs/implement.md", "docs/ib_tws_api.md", "docs/ib-connection-troubleshooting.md",
+    ])
+    def test_local_setup_defers_cycle_semantics_to_recovery_owner(self, path):
+        text = (_ROOT / path).read_text()
+        assert "ib-gateway-recovery.md#daily-cycle" in text
+        assert "`AutoRestartTime` | blank | Disabled" not in text
+        assert "`AutoRestartTime=` - disabled" not in text
+        assert "Disabled: no RunAtLoad/calendar, AutoRestartTime, or ColdRestartTime" not in text
+
+    def test_cycle_owner_explains_blank_fields_without_copying_schedule(self):
+        owner = _section((_ROOT / "docs/ib-gateway-recovery.md").read_text(), "Daily cycle")
+        for required in ("blank", "stored", "does not disable", "setup_ibc.sh", "docker-compose.yml", "2FA", "stop", "rollback", "escalate"):
+            assert required.casefold() in owner.casefold(), required
+        assert "11:45 PM" not in owner and "4:45 PM PT" not in owner
+
+
+class TestRelayRecoveryDocumentation:
+    """DOC-160: actor and mode boundaries live beside broker recovery gates."""
+
+    @pytest.mark.parametrize("path,target", [
+        ("scripts/CLAUDE.md", "../docs/ib-gateway-recovery.md#relay-recovery"),
+        ("web/CLAUDE.md", "../docs/ib-gateway-recovery.md#relay-recovery"),
+        ("docs/ib-connection-troubleshooting.md", "ib-gateway-recovery.md#relay-recovery"),
+    ])
+    def test_relay_overviews_link_the_owner_without_contradictory_restart_claims(self, path, target):
+        text = (_ROOT / path).read_text()
+        assert target in text
+        for stale in ("never a relay-initiated Gateway restart", "NEVER restarts the IB Gateway", "45s during market hours → restart Gateway"):
+            assert stale not in text
+
+    def test_recovery_owner_explains_escalation_and_safe_operator_boundaries(self):
+        owner = _section((_ROOT / "docs/ib-gateway-recovery.md").read_text(), "Relay recovery")
+        for required in ("shouldRequestGatewayRestart", "docker", "cloud", "launchd", "POST /ib/restart", "operator hold", "lease", "backoff", "stop", "verification", "rollback", "escalate"):
+            assert required.casefold() in owner.casefold(), required
+
+
+class TestGatewayReadinessDocumentation:
+    """DOC-161: listening sockets are diagnostic evidence, not readiness."""
+
+    def test_docker_health_defers_machine_inventory_and_requires_authentication(self):
+        text = (_ROOT / "docs/ib-gateway-docker.md").read_text()
+        health = _section(text, "Healthcheck")
+        assert "docker-compose.yml" in health
+        assert "does not prove authentication" in health
+        assert "ib-gateway-recovery.md#readiness-verification" in health
+        assert "healthy**: IB Gateway API is accepting connections" not in health
+        assert "2FA pending, login failed" not in health
+        assert "4:45 PM PT" not in text
+
+    def test_startup_and_manual_recovery_require_authenticated_health(self):
+        root = (_ROOT / "CLAUDE.md").read_text()
+        startup = _section(root, "Startup Checklist")
+        assert "auth_state: authenticated" in startup
+        text = (_ROOT / "docs/ib-connection-troubleshooting.md").read_text()
+        assert "# Check: ib_gateway.auth_state=authenticated" in text
+        owner = _section((_ROOT / "docs/ib-gateway-recovery.md").read_text(), "Readiness verification")
+        for required in ("auth_state=authenticated", "managed_accounts", "unknown", "remote", "stop", "rollback", "escalate"):
+            assert required.casefold() in owner.casefold(), required
+
+
+class TestClientOwnershipDocumentation:
+    """DOC-162/163: connection cleanup must preserve order-owner identity."""
+
+    def test_collision_runbook_has_no_static_ids_or_broad_process_kill(self):
+        text = (_ROOT / "docs/ib-connection-troubleshooting.md").read_text()
+        assert "**Client ID registry**" not in text
+        assert "pkill -9" not in text
+        assert "find and kill it" not in text
+        assert "../scripts/CLAUDE.md#client-id-ranges" in text
+        assert "../scripts/CLAUDE.md#order-placement-contract-ib_place_orderpy" in text
+        assert "permId" in text
+
+    def test_api_reference_defers_allocation_and_cancel_ownership(self):
+        text = (_ROOT / "docs/ib_tws_api.md").read_text()
+        assert "Default to `clientId=0`" not in text
+        assert "cancel/modify ANY order" not in text
+        assert "Can cancel ANY order" not in text
+        assert "Can modify ANY order" not in text
+        assert "connects as master to handle TWS-placed orders" not in text
+        assert "| ID | Script | Purpose |" not in text
+        assert "../scripts/CLAUDE.md#client-id-ranges" in text
+        assert "../scripts/CLAUDE.md#cancel--modify-scripts-side" in text
+        assert "ib_order_manage.py" in text
+        assert "original" in text

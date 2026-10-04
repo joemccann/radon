@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import io
 
+import pytest
+
 from newsfeed.slm.monitor import evaluate_signals, main
 
 CLEAN = [
@@ -104,3 +106,18 @@ class TestExit:
             heartbeat=False,
         )
         assert code == 0
+
+
+@pytest.mark.parametrize("count,expected", [(9, []), (10, ["vocabulary_drift"])])
+def test_hot_unknown_trigger_is_independent_of_share(count, expected):
+    rows = [{"slm_status": "abstain:out_of_taxonomy", "tags_slm_raw": ["WEIRD"]}] * count
+    rows += [CLEAN[0]] * (1000 - count)
+    signals = evaluate_signals(
+        rows, rows,
+        train_distribution={"GAMMA": 1, "SPX": 1, "VOL": 1},
+        shadow_jaccard_mean=0.8,
+    )
+    assert signals["vocabulary_drift"] == count / 1000
+    assert signals["invalid_or_empty"] == 0
+    assert signals["breaches"] == expected
+    assert signals["unknown_hot"] == ({"WEIRD": 10} if count == 10 else {})

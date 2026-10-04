@@ -177,8 +177,7 @@ function readFromBuiltin(available: LlmModelProvider[]): LlmModelOption[] {
  * The default the picker preselects. Delegates precedence to provider.ts's own
  * resolveProvider() so an unspecified /api/assistant request and the picker's
  * default can never disagree. A provider it names that has no catalogued model
- * here (e.g. gemini, which the picker does not carry) falls to the first
- * available entry.
+ * here falls to the first available entry.
  */
 function pickDefaultId(models: LlmModelOption[]): string {
   if (models.length === 0) return "";

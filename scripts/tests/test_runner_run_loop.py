@@ -543,6 +543,24 @@ def test_loops_without_a_post_run_hook_post_the_dead_man_from_the_prompt(loop):
     assert "## Rolling issue comment" in body
 
 
+PUSHOVER_OWNERSHIP = (
+    "The runner sends every Pushover notification, including `radon PR green`."
+)
+
+
+@pytest.mark.parametrize(
+    "prompt", sorted((REPO / ".claude" / "runner-prompts").glob("*.md")), ids=lambda p: p.stem
+)
+def test_runner_prompts_leave_pushover_to_the_runner(prompt):
+    """run_loop.sh unsets PUSHOVER_USER / PUSHOVER_TOKEN in the agent and
+    notifies itself. Root CLAUDE.md tells agents to send `radon PR green`, so
+    without this line every runner PR listed the absent keys under Next
+    (#870)."""
+    body = prompt.read_text()
+    assert PUSHOVER_OWNERSHIP in body
+    assert "do not list it under Next" in body
+
+
 # --- claude rungs -----------------------------------------------------------
 
 
@@ -972,7 +990,7 @@ def test_the_gh_guard_shim_routes_pr_api_issue_and_alias_to_the_guard(tmp_path):
 
 
 @pytest.mark.parametrize("loop,hour,minute,marker,audit_secs,keep", [
-    ("security", 0, 40, "SECURITY-NIGHTLY PHASE COMPLETE:", 7200, None),
+    ("security", 0, 40, "SECURITY-NIGHTLY PHASE COMPLETE:", 7200, "node_modules web/node_modules"),
     ("security-deepsec", 0, 50, "SECURITY-DEEPSEC PHASE COMPLETE:", 28800, ".deepsec data/radon"),
 ])
 def test_security_loops_run_on_the_runner_in_their_old_slots(loop, hour, minute, marker, audit_secs, keep):

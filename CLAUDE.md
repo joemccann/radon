@@ -191,7 +191,7 @@ Schema: `scripts/db/migrations/0001_init.sql`. Writers: `scripts/db/writer.{js,p
 ## Startup Checklist
 
 - [ ] `scripts/cloud.sh` (default) or `scripts/local.sh`
-- [ ] `curl http://localhost:8321/health` → `ib_gateway.port_listening: true`
+- [ ] `curl http://localhost:8321/health` → `ib_gateway.auth_state: authenticated`; verify [readiness](docs/ib-gateway-recovery.md#readiness-verification)
 - [ ] Reconciliation, exit orders, CRI scan auto-running
 - [ ] Market hours: `TZ=America/New_York date +"%A %H:%M"` (9:30–16:00 ET, Mon–Fri)
 

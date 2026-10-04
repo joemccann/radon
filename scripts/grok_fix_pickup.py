@@ -30,6 +30,7 @@ import argparse
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -432,6 +433,59 @@ def pickup_once(
     return results
 
 
+# launchd gives pickup only HOME, PATH and GROK_PAGE_AUTOPUSH. These are the
+# credentials pickup itself uses: Pushover for refusal alerts and Turso for the
+# watchdog_pages lookup. Nothing else is read from the operator's .env.
+# The Turso token is pickup's own read-only one, read under its own name and
+# exported as TURSO_AUTH_TOKEN; the operator's TURSO_AUTH_TOKEN is never read
+# (DS-2026-09-23-03).
+OPERATOR_ENV_KEYS = {
+    "PUSHOVER_USER": "PUSHOVER_USER",
+    "PUSHOVER_TOKEN": "PUSHOVER_TOKEN",
+    "TURSO_DB_URL": "TURSO_DB_URL",
+    "GROK_PICKUP_TURSO_AUTH_TOKEN": "TURSO_AUTH_TOKEN",
+}
+
+
+def load_operator_env(path: Path) -> list[str]:
+    """Set the allowlisted keys from ``path``; return the names it set.
+
+    The process environment wins. The file must be a regular file (not a
+    symlink) owned by this user with no group or other access, or nothing is
+    read. Values are never printed.
+    """
+    try:
+        st = path.lstat()
+    except OSError:
+        return []
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return []
+    found: dict[str, str] = {}
+    for raw in lines:
+        line = raw.strip()
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        key, sep, value = line.partition("=")
+        key = key.strip()
+        if not sep or key not in OPERATOR_ENV_KEYS:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if value:
+            found[OPERATOR_ENV_KEYS[key]] = value
+    loaded = []
+    for key, value in found.items():
+        if not os.environ.get(key):
+            os.environ[key] = value
+            loaded.append(key)
+    return sorted(loaded)
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -442,11 +496,18 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--repo", default=".", help="local clone to work in")
     parser.add_argument("--source", default=DEFAULT_SOURCE)
     parser.add_argument("--max-commits", type=int, default=DEFAULT_MAX_COMMITS)
+    parser.add_argument(
+        "--env-file",
+        default=None,
+        help="operator .env for Pushover and Turso (default: beside the clone)",
+    )
     args = parser.parse_args(argv)
+    repo = Path(args.repo).resolve()
+    load_operator_env(Path(args.env_file) if args.env_file else repo.parent / ".env")
 
     try:
         results = pickup_once(
-            Path(args.repo).resolve(),
+            repo,
             source=args.source,
             max_commits=args.max_commits,
         )

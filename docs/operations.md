@@ -97,7 +97,7 @@ The subscription-token vault reuses this same store rather than adding a second
 crypto system. `scripts/subscription_tokens.py` seals each agent CLI's OAuth
 credential file verbatim under the registry names
 `SUBSCRIPTION_TOKEN_ANTHROPIC`, `SUBSCRIPTION_TOKEN_CODEX`,
-`SUBSCRIPTION_TOKEN_GROK` and `SUBSCRIPTION_TOKEN_GEMINI`, and restores or
+`SUBSCRIPTION_TOKEN_GROK` and `SUBSCRIPTION_TOKEN_ANTIGRAVITY`, and restores or
 refreshes them on a timer. A store that fails to open is reported as
 `store_unavailable` (exit 78), never as an empty vault. Runbook:
 [`docs/subscription-tokens.md`](subscription-tokens.md).
@@ -168,14 +168,23 @@ exits 75. `ExecStopPost` still reaps.
 
 **Subscription credential binds (2026-09-18).** `radon-app-runtime` also
 binds the operator's CLI subscription grants, each read-only and only when the
-directory exists on the host: `/home/radon/.grok`, `/home/radon/.codex` and
-`/home/radon/.claude` land at the same paths inside the containers whose unit
+directory exists on the host: `/home/radon/.grok`, `/home/radon/.codex`,
+`/home/radon/.claude` and `/home/radon/.local/bin` (the `agy` CLI the antigravity
+rung shells out to) land at
+the same paths inside the containers whose unit
 runs an LLM consumer (`radon-api`, `radon-newsfeed`, `radon-research`,
 `radon-nextjs`), with `HOME=/home/radon` pinned so `Path.home()` and
 `os.homedir()` resolve to them. Next.js hosts `/api/newsfeed/share` and
 `/api/assistant`; excluding it (2026-09-19) 502'd every share rewrite with
 `Missing Anthropic subscription`. Never the whole home directory, and never
-into the relay. The Python and Next.js model ladders use the
+into the relay. Antigravity is the one read-write grant: `agy` refreshes its
+token and writes logs and project state on every run, so
+`/home/radon/.gemini/antigravity-cli` and `/home/radon/.gemini/config` (Google's
+fixed paths) are bound read-write into `radon-api`, `radon-research` and
+`radon-nextjs` and shared with the host, keeping one rotating
+token store. Newsfeed renders third-party content and gets no antigravity bind
+(its ladder falls past that rung). The rest of `~/.gemini` (the retired Gemini CLI's `oauth_creds.json`) is never mounted.
+The Python and Next.js model ladders use the
 [subscription-tier billing and recovery policy](oauth-subscription-auth.md#radon-http-model-ladder-server).
 Prepaid fallback for those tiers requires the explicit `RADON_LADDER_ALLOW_PREPAID`
 opt-in; funding a prepaid wallet alone does not recover a missing subscription.
@@ -202,6 +211,8 @@ older provision (`gpasswd -d radon docker`); Gateway compose calls go
 through the root-owned `radon-docker-gw` shim instead. **Operator (live
 hosts provisioned before this change):** run `sudo gpasswd -d radon docker`,
 then verify with `id -nG radon` (no `docker` in the output).
+
+**No GitHub credential on the VPS (2026-10-03).** `setup-vps.sh` clones the public repo over anonymous HTTPS and never generates `/home/radon/.ssh/id_ed25519`; the old unregistered key was deleted. Do not add a GitHub SSH or deploy key for `radon`.
 
 **Privileged file-op hardening (2026-09-20).** `setup-vps.sh` stages
 root-installed artifacts from committed git blobs (`git cat-file`) rather
@@ -328,7 +339,7 @@ Three deployment modes selected by `IB_GATEWAY_MODE`:
 
 **2FA-aware restart.** After every restart, IB Gateway sits at the IBKR Mobile push prompt with the API socket already open, so port probes alone falsely report success. `restart_ib_gateway()` runs an explicit `managedAccounts()` probe; non-empty resets backoff, empty advances it (1m → 2m → 5m → 15m → 30m → 60m capped). `/health` exposes `auth_state` (`authenticated | awaiting_2fa | unreachable | unknown | remote`), `service_state` (`healthy | unhealthy | starting | reachable | unknown`), `upstream_dead`, and `restart_backoff` (attempt count, next attempt in seconds, push lock holder/TTL, last outcome). Schema-v2 `/status` treats nested broker degradation (`awaiting_2fa`, `upstream_dead`, unhealthy service) as aggregate-down even when FastAPI returns HTTP 200, and treats cloud-mode `reachable` as healthy. `POST /ib/reset-backoff` is the operator escape hatch after manually approving 2FA. **Watchdog stuck-2FA self-heal (2026-05-20):** after 3 consecutive `auth_state=awaiting_2fa` cycles with no active push or scheduled retry, the watchdog acquires the cross-process lease and invokes the fixed `radon-ib-gateway-preheld-restart.service` adapter. The adapter consumes that exact lease once and calls `/usr/local/bin/radon-ib-gateway-control`; boot, admin, operator, and laptop cloud starts use the same helper. Never run raw Docker or unmanaged `systemctl restart radon-ib-gateway.service` when the helper is installed.
 
-**IBKR operator hold.** The Gateway shares the operator's IBKR username, so it kicks any operator login. On the broker as root, `radon ib release` (installed by `setup-vps.sh install_ib_hold` as `/usr/local/sbin/radon-ib-hold`) holds the Gateway logged out until `radon ib resume`. Every start path refuses while it is held. Runbook: `docs/ib-gateway-recovery.md`.
+**IBKR operator hold.** The Gateway shares the operator's IBKR username, so it kicks any operator login. On the broker as root, `radon ib release` (installed by `setup-vps.sh install_ib_hold` as `/usr/local/sbin/radon-ib-hold`, with the hold CLI it runs staged root-owned at `/usr/local/lib/radon/ib_operator_hold.py`) holds the Gateway logged out until `radon ib resume`. Every start path refuses while it is held. Runbook: `docs/ib-gateway-recovery.md`.
 
 **Hetzner control boundary.** `radon-ib-gateway.service`, the watchdog adapter, admin controls, boot, and operator commands all call the installed monorepo helper at `/usr/local/bin/radon-ib-gateway-control` (sourced from `/home/radon/radon/cloud`). FastAPI runs with `IB_GATEWAY_MODE=cloud` and must not inspect or mutate the production Compose project directly. Set `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud`. Secrets are `/etc/radon/env` (`0640` root:radon); `/home/radon/radon-cloud/.env` is a compatibility symlink. Root demotion of the helper must run from a radon-readable cwd (never leave cwd as `/root`).
 
@@ -444,10 +455,10 @@ Stable fx path (2026-09-26). `com.radon.fx-stable-sync` (installed by `bash scri
 | `radon-ai-cycle.timer` | Daily 07:15 UTC, up to 5 min jitter | Versioned AI infrastructure observations. Partial provider access is explicit; `ai-cycle` heartbeat has a 26h freshness budget. [Collection and source configuration](ai-infrastructure-operations.md). |
 | `radon-liquidcompute.timer` | Daily 07:30 UTC, up to 5 min jitter | Liquid Compute homepage GPU index ticker. Host-tagged `liquidcompute` rows, C5 on `/regime/llm`. Third venue versus the rental book; methodology opaque until licensed. Heartbeat `liquidcompute` (26h). Enable: `systemctl enable --now radon-liquidcompute.timer`. |
 | `radon-slm-tagger-monitor.timer` | Daily 07:10 UTC, up to 5 min jitter | Newsfeed SLM tagger drift / invalid / label-shift monitor. No-op when `RADON_SLM_TAGGER_MODE` is `off` or `shadow`. Heartbeat `slm-tagger-monitor` (26h). Operator action on breach: `RADON_SLM_TAGGER_MODE=off`. Spec: [`ml/newsfeed-slm-tagger.md`](ml/newsfeed-slm-tagger.md). |
-| `radon-refresh.timer` | 60s | Schedules data-refresh sweeps |
+| `radon-refresh.timer` | [Unit schedule](../cloud/services/radon-refresh.timer) | Schedules data-refresh sweeps |
 | `radon-vcg-refresh.timer` | Mon-Fri 13-21 UTC every 5 min | Autonomous VCG scan |
 | `radon-portfolio-sync.timer` | Mon-Fri 04:00-19:59 ET every 60s | Autonomous portfolio sync. Window matches `fill_monitor`'s `session_window=equity_ext` (04:00-20:00 ET) so outsideRth fills reach the positions table instead of waiting for the next cash open; `run_portfolio_refresh.sh` re-checks `is_equity_ext_session_et()` and exits 0 on holidays and outside the session. |
-| `radon-cta-sync.timer` | Mon-Fri 18:15 / 19:00 / 21:30 UTC | MenthorQ CTA refresh. Vision cascade: anthropic -> grok -> cursor -> codex -> gemini -> nvidia -> cerebras |
+| `radon-cta-sync.timer` | Mon-Fri 18:15 / 19:00 / 21:30 UTC | MenthorQ CTA refresh. Vision cascade: anthropic -> grok -> cursor -> codex -> antigravity -> nvidia -> cerebras |
 | `radon-bpi.timer` | Mon-Fri 21:30 / 23:30 UTC; Tue-Sat 11:00 UTC | BPI after the close, same-evening Yahoo catch-up, morning catch-up |
 | `radon-ma-ratio.timer` | daily 22:45 UTC | SPX pct above 50d MA over pct above 200d MA (after the close; 5 min behind divyield). Spec: [`indicators/ma-ratio.md`](indicators/ma-ratio.md) |
 | `radon-rsi-oversold.timer` | daily 23:05 UTC | SPX pct of members with Wilder RSI(14) strictly below 30 (after the close; 20 min behind ma-ratio so the shared member-close store is already fresh). Spec: [`indicators/rsi-oversold.md`](indicators/rsi-oversold.md) |
@@ -587,7 +598,7 @@ The health surface is **decoupled from the trading stack** so it keeps reporting
   - `GET /healthz` — zero-I/O static `200` (liveness pin).
   - `GET /status` — **always `200`**; concurrent live probes (`radon-api` via `/health/lite`, relay/Next.js/IB-gateway TCP) + cached `systemctl` unit states (`active(exited)` reads `up`) + the Turso `service_health` table (read over stdlib libSQL HTTP — no libsql import; degrades to `unknown` on any failure). Degraded sources are body fields, never error codes.
 - **Caddy edge** (`app.radon.run`): `GET /edge-health/ping` — static `respond "ok" 200`, the **never-502 floor** (depends only on Caddy). `GET /edge-health/status` → `reverse_proxy 127.0.0.1:8330`. **Caveat:** every failure mode of `/edge-health/status` is ALSO `200`: an upstream 5xx (`handle_response @down`) and a dial-refused daemon (`handle_errors`, the Caddy-synthesized 502) are both rewritten to `{"reachable":false,"observer":"caddy"}`, i.e. `200` with `reachable:false` and no `ok` field. A status-code-only uptime monitor therefore reads UP in every state except Caddy dead: pin the external monitor on the body (`ok` is a boolean and `overall_state` is `up`), never on the status code. The repo prober already does (`scripts/health_probe/probe.py` `_classify_status_payload` treats the synthetic body as `invalid`). `/edge-health/ping` is the guaranteed floor.
-- **Off-box prober (Tier-3):** `.github/workflows/external-health-probe.yml` hits the public edge from off the VPS and UPSERTs to the Turso `external_probe` table (`scripts/health_probe/`), so a whole-box outage is still recorded externally. `scripts/health_probe/reader.py` flags a stale `external_probe` row after two hours (`STALE_AFTER_SECONDS`). The workflow cron is `1-56/5 * * * *` (every five minutes, off the top of the hour). GitHub's scheduler had stretched those runs to 2-5 hour gaps by 2026-09-26, past that window, so the Mac mini dispatches the same workflow every 300 seconds and the cron is the fallback while the mini is down. Install and verify are in [External probe dispatch](#external-probe-dispatch). Repo secrets the workflow reads: `TURSO_DB_URL`, `TURSO_AUTH_TOKEN`, and `RADON_PROBE_FRESHNESS_TOKEN` (no freshness token fails the job while the market is open).
+- **Off-box prober (Tier-3):** `.github/workflows/external-health-probe.yml` hits the public edge from off the VPS and UPSERTs to the Turso `external_probe` table (`scripts/health_probe/`), so a whole-box outage is still recorded externally. `scripts/health_probe/reader.py` flags a stale `external_probe` row after two hours (`STALE_AFTER_SECONDS`). The workflow cron is `1-56/5 * * * *` (every five minutes, off the top of the hour). GitHub's scheduler had stretched those runs to 2-5 hour gaps by 2026-09-26, past that window, so the Mac mini dispatches the same workflow every 300 seconds and the cron is the fallback while the mini is down. Credential placement, installation and verification are owned by [External probe dispatch](#external-probe-dispatch).
 
 **Consumers:** the always-on IB status chip (`web/lib/IBStatusContext.tsx`) reads `/edge-health/status` in prod (falls back to `/api/admin/health` in dev / as a prod safety net). The admin panel stays on `/api/admin/health` (needs `managed_accounts`). The `/health` payload itself is **trust-scoped**: public/proxied callers get `{"status":"ok"}` only; account/state detail goes to trusted peers only (loopback, tailnet `100.64.0.0/10`, Hetzner private net `10.0.0.0/16`; never a request carrying reverse-proxy forwarding headers). Any watchdog or off-box probe that needs the full payload must originate from one of those peers, not via Caddy. See `scripts/api/CLAUDE.md` and `scripts/health_service/CLAUDE.md`.
 
@@ -603,7 +614,7 @@ The Mac mini launchd agent asks GitHub to run the Tier-3 probe when the hosted c
 bash scripts/setup_external_probe_dispatch.sh
 ```
 
-`scripts/setup_external_probe_dispatch.sh` copies `config/com.radon.external-probe-dispatch.plist` to `~/Library/LaunchAgents/com.radon.external-probe-dispatch.plist`, substitutes `__HOME__` with `$HOME`, lints the plist, then `launchctl bootout`, `bootstrap`, and `enable` for `gui/$(id -u)/com.radon.external-probe-dispatch`. `StartInterval` is 300 seconds and the job runs at load. Each fire is `gh workflow run external-health-probe.yml -R joemccann/radon --ref main`. The probe job runs only when `github.ref` is `refs/heads/main`, so a dispatch on another ref is skipped and never receives the Turso or freshness secrets. Those secrets live in the `health-probe` GitHub Environment, whose deployment branch policy is `main` only, not in repository secrets; the research cut reads a read-only Turso token from the `research-cut` Environment. A branch cut from an older, unguarded commit therefore gets no production database credential. The workflow concurrency group `external-health-probe` queues at most one run and does not cancel an in-flight probe, so a mini dispatch cannot cut a cron run short.
+`scripts/setup_external_probe_dispatch.sh` copies `config/com.radon.external-probe-dispatch.plist` to `~/Library/LaunchAgents/com.radon.external-probe-dispatch.plist`, substitutes `__HOME__` with `$HOME`, lints the plist, then `launchctl bootout`, `bootstrap`, and `enable` for `gui/$(id -u)/com.radon.external-probe-dispatch`. `StartInterval` is 300 seconds and the job runs at load. Each fire is `gh workflow run external-health-probe.yml -R joemccann/radon --ref main`. The probe job runs only when `github.ref` is `refs/heads/main`, so a dispatch on another ref is skipped and never receives the Turso or freshness secrets. The workflow reads `TURSO_DB_URL`, `TURSO_AUTH_TOKEN` and `RADON_PROBE_FRESHNESS_TOKEN` from the `health-probe` GitHub Environment, which requires a `main`-only deployment branch policy. Store them there, not in repository secrets; the research cut reads a read-only Turso token from the `research-cut` Environment. With that Environment policy enforced, a branch cut from an older, unguarded commit gets no production database credential. Missing the freshness token fails the probe while the market is open. The workflow concurrency group `external-health-probe` queues at most one run and does not cancel an in-flight probe, so a mini dispatch cannot cut a cron run short.
 
 **Prerequisite.** `gh auth status` must succeed on the mini. The script still loads the agent when it does not, prints a warning, and the next interval retries. A dispatch with no `gh` login writes the stderr log and does not change Turso.
 
@@ -614,7 +625,9 @@ bash scripts/setup_external_probe_dispatch.sh
 
 **Verify** (read-only). `launchctl print "gui/$(id -u)/com.radon.external-probe-dispatch"` shows the label and the 300-second interval. The stdout log should show a `gh` dispatch rather than a traceback. A green workflow run is not proof a row landed: `scripts/health_probe/reader.py` still flags a stale `external_probe` row after two hours whichever trigger wrote it.
 
-**Stop.** `launchctl bootout "gui/$(id -u)/com.radon.external-probe-dispatch"` removes the mini dispatch. Leave `.github/workflows/external-health-probe.yml` in place: its cron is the fallback while the mini is down.
+**Stop conditions and escalation.** If GitHub authentication fails or completed runs leave the probe stale, stop reinstalling the dispatcher. The operator should inspect the existing workflow failure and its Environment configuration; do not move credentials into repository secrets to bypass an Environment refusal.
+
+**Stop / rollback.** `launchctl bootout "gui/$(id -u)/com.radon.external-probe-dispatch"` removes the mini dispatch. Leave `.github/workflows/external-health-probe.yml` in place: its cron is the fallback while the mini is down.
 
 **IVRank snapshot heartbeat (2026-09-26).** `scripts/fetch_ivrank.py` writes a heartbeat to the `service_health` table on every cycle. Previously, a Turso read timeout on the snapshot write (`upsert_scan_snapshot`) would skip the heartbeat entirely, leaving the previous day's `ok` row in place while the snapshot JSON advanced — the admin panel read "overdue" with no error to explain it. Now both the row upsert and the snapshot write are bounded independently and their failures are **folded into the heartbeat** instead of silencing it. When either write fails, the cycle records an `error` heartbeat with:
 - `class: "db_write_failed"`

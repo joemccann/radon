@@ -8,7 +8,9 @@ Two checks, both fail closed:
 2. The commit range (added diff lines, file names, commit messages) and the
    PR title/body must carry no private identifier: IB account ids, long
    numeric Flex exec ids, dotted-hex IB exec ids, or any specific credential
-   shape from the canonical scrubber (``credential_redaction``). A hit
+   shape from the canonical scrubber (``credential_redaction``), or an
+   opaque literal assigned to a credential-named key, or the value of a
+   credential in the pushing process's own environment. A hit
    refuses the push; the work stays local. Nothing is redacted in place,
    because silently rewriting code or history hides what leaked.
 
@@ -24,7 +26,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
-from credential_redaction import find_credential_shapes
+from credential_redaction import find_credential_shapes, find_secret_assignments
 
 AUTOPUSH_ENV = "GROK_PAGE_AUTOPUSH"
 _FALSEY = {"", "0", "false", "no", "off"}
@@ -48,6 +50,12 @@ _CI_URL = re.compile(
     r"(?:/(?:job|attempts)/\d+)?(?![\w/])"
 )
 _SHA = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+# Values of the pushing process's own credentials are refused wherever they
+# appear verbatim, whatever key or quoting surrounds them. This catches
+# accidental leaks, not deliberate encoding. Short values would match prose.
+_SECRET_ENV_NAME = re.compile(r"key|token|secret|passw|_pass|_pwd|auth(?!or)|user", re.IGNORECASE)
+_MIN_SECRET_ENV_VALUE = 12
 
 Runner = Callable[..., object]
 
@@ -81,7 +89,19 @@ def find_private_identifiers(text: str) -> list[str]:
         kind = f"credential {label}"
         if kind not in found:
             found.append(kind)
+    if find_secret_assignments(text or ""):
+        found.append("credential assignment")
+    if any(value in (text or "") for value in _secret_env_values()):
+        found.append("credential env value")
     return found
+
+
+def _secret_env_values() -> list[str]:
+    return [
+        value.strip()
+        for name, value in os.environ.items()
+        if _SECRET_ENV_NAME.search(name) and len(value.strip()) >= _MIN_SECRET_ENV_VALUE
+    ]
 
 
 def _safe_path(path: str) -> str:

@@ -818,7 +818,7 @@ class TestSecurityRemediationSchedules:
     def test_cta_sync_documents_vision_cascade_order(self, services_dir):
         raw = (services_dir / "radon-cta-sync.service").read_text()
         assert (
-            "anthropic -> grok -> cursor -> codex -> gemini -> nvidia -> cerebras"
+            "anthropic -> grok -> cursor -> codex -> antigravity -> nvidia -> cerebras"
             in raw
         )
 

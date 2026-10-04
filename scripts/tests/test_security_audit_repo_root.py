@@ -15,7 +15,9 @@ path in a guarded surface must fail CI.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -184,8 +186,83 @@ def test_workflows_resolve_via_env_not_a_laptop_path():
     for path in WORKFLOWS:
         text = path.read_text(encoding="utf-8")
         assert "/Users/" not in text, path.name
-        assert "RADON_REPO_ROOT" in text, path.name
-        assert "resolveRadonRepoRoot" in text, path.name
+        assert "args.repoRoot" in text, path.name
+        assert "git rev-parse --show-toplevel" in text, path.name
+
+
+def _first_statement(text: str) -> str:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("//"):
+            return stripped
+    return ""
+
+
+def test_workflows_load_in_the_workflow_runtime():
+    """The Workflow tool requires ``export const meta`` as the first statement
+    and gives the script no module loader, filesystem or ``process``. An
+    ``import`` or a Node API call means the native stage never starts."""
+    assert WORKFLOWS, "security-audit workflows missing"
+    for path in WORKFLOWS:
+        text = path.read_text(encoding="utf-8")
+        assert _first_statement(text).startswith("export const meta"), path.name
+        lines = text.splitlines()
+        imports = [line for line in lines if line.lstrip().startswith("import ")]
+        assert not imports, f"{path.name}: {imports[:2]}"
+        node_api = re.compile(r"\brequire\(|(?<![\w/.])process\.\w|['\"]node:")
+        hits = [line for line in lines if node_api.search(line)]
+        assert not hits, f"{path.name}: Node API in {hits[:2]}"
+
+
+def _run_workflow_preamble(path: Path, args):
+    """Evaluate the workflow body up to PREAMBLE with only ``args`` in scope."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is required to evaluate the workflow body")
+    body = path.read_text(encoding="utf-8").replace(
+        "export const meta", "const meta", 1
+    )
+    cut = body.index("`\n", body.index("const PREAMBLE")) + 1
+    harness = (
+        "const run = new Function('args', "
+        + json.dumps(body[:cut] + "\nreturn { REPO, PREAMBLE }")
+        + ");\n"
+        "process.stdout.write(JSON.stringify(run(JSON.parse(process.argv[1]))))\n"
+    )
+    return subprocess.run(
+        [node, "-e", harness, json.dumps(args)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
+def test_workflow_takes_repo_root_from_args(path):
+    proc = _run_workflow_preamble(path, {"repoRoot": "/srv/clone/radon"})
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout)
+    assert out["REPO"] == "/srv/clone/radon"
+    assert "/srv/clone/radon" in out["PREAMBLE"]
+
+
+@pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
+def test_workflow_without_repo_root_uses_the_agent_git_toplevel(path):
+    proc = _run_workflow_preamble(path, None)
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout)
+    assert "git rev-parse --show-toplevel" in out["REPO"]
+
+
+@pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
+@pytest.mark.parametrize(
+    "bad", ["relative/radon", "/tmp/x; rm -rf ~", "/tmp/$(id)", "/tmp/a b", "/tmp/a/../b"]
+)
+def test_workflow_rejects_an_unsafe_repo_root(path, bad):
+    proc = _run_workflow_preamble(path, {"repoRoot": bad})
+    assert proc.returncode != 0
+    assert "repoRoot" in proc.stderr
 
 
 def test_the_runner_exports_radon_repo_root_to_every_agent():

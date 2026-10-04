@@ -5,7 +5,7 @@
 //
 // Provider: shared model ladder (`scripts/clients/model_ladder.py`) via a
 // thin Python CLI so Node cannot drift from Joe's order:
-//   subscription: anthropic -> grok -> cursor -> codex -> gemini
+//   subscription: anthropic -> grok -> cursor -> codex -> antigravity
 //   nvidia (free)
 //   cerebras (cheap paid, last)
 // Soft-fails (returns null) when no keyed provider works.
