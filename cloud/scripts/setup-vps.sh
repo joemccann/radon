@@ -1317,53 +1317,95 @@ start_services() {
 
 # -- Firewall ----------------------------------------------------------------
 
+# Declared ruleset (Ops Plane step 2D). radon_fw_valid_sources and
+# radon_fw_rules are byte-for-byte copies of cloud/scripts/host-firewall.sh,
+# the operator's tool for live hosts (cloud/tests/test_host_firewall.py
+# pins the parity). No tailscale0 blanket allow: the tailnet policy
+# (cloud/tailscale/policy.hujson) and these per-/32 rules scope peers.
+# Sources come from RADON_FW_OPERATOR_SOURCES / RADON_FW_OPS_SOURCES.
+radon_fw_valid_sources() {
+  local raw="$1" entry addr octet
+  local -a out=()
+  for entry in ${raw//,/ }; do
+    addr="${entry%/32}"
+    if [[ ! "$addr" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+      echo "host-firewall: not an IPv4 /32: ${entry}" >&2
+      return 2
+    fi
+    for octet in ${addr//./ }; do
+      if (( 10#$octet > 255 )); then
+        echo "host-firewall: not an IPv4 /32: ${entry}" >&2
+        return 2
+      fi
+    done
+    out+=("$addr")
+  done
+  if (( ${#out[@]} )); then
+    printf '%s\n' "${out[@]}"
+  fi
+}
+
+# Print the ordered ufw argument lines for ROLE. No line carries a space
+# inside an argument, so callers may word-split each line.
+radon_fw_rules() {
+  local role="$1" operators ops src
+  operators="$(radon_fw_valid_sources "${RADON_FW_OPERATOR_SOURCES:-}")" || return 2
+  ops="$(radon_fw_valid_sources "${RADON_FW_OPS_SOURCES:-}")" || return 2
+
+  echo "default deny incoming"
+  echo "default allow outgoing"
+  for src in $ops; do
+    echo "allow from ${src} to any port 8341 proto tcp comment radon-ops-agent"
+    echo "deny from ${src} comment radon-ops-deny-else"
+  done
+  case "$role" in
+    app)
+      # Public SSH stays open: CI deploys over SSH from GitHub-hosted
+      # runners (ci.yml appleboy/ssh-action), whose addresses are not fixed.
+      echo "allow 22/tcp comment ssh-ci-deploy-and-recovery"
+      echo "allow 80/tcp comment caddy-http"
+      echo "allow 443/tcp comment caddy-https"
+      echo "allow 41641/udp comment tailscale-direct"
+      for src in $operators; do
+        echo "allow from ${src} to any port 8321 proto tcp comment operator-cloud-thin-api"
+      done
+      echo "allow from 10.0.0.4 to any port 8321 proto tcp comment radon-broker-health"
+      ;;
+    broker)
+      if [[ -z "$operators" ]]; then
+        echo "host-firewall: broker needs RADON_FW_OPERATOR_SOURCES (SSH would be closed)" >&2
+        return 2
+      fi
+      for src in $operators; do
+        echo "allow from ${src} to any port 22 proto tcp comment operator-ssh"
+      done
+      echo "allow from 10.0.0.2 to any port 4001 proto tcp comment app-ib-api"
+      echo "allow from 10.0.0.2 to any port 8340 proto tcp comment app-ib-gateway-remote"
+      echo "allow 41641/udp comment tailscale-direct"
+      ;;
+    *)
+      echo "host-firewall: unknown role: ${role}" >&2
+      return 2
+      ;;
+  esac
+}
+
 open_firewall() {
-  ufw default deny incoming
-  ufw default allow outgoing
-
-  # SSH is allowed before enable: switching on a default-deny firewall
-  # without it locks the operator out of the box.
-  if ufw status | grep -q "22/tcp.*ALLOW"; then
-    log_warn "Port 22 already open -- skipping"
-  else
-    ufw allow 22/tcp
-    log_success "Port 22 opened"
+  local rules line
+  local -a args
+  if ! rules="$(radon_fw_rules app)"; then
+    log_error "Refusing firewall: invalid RADON_FW_*_SOURCES"
+    return 1
   fi
-
-  if ufw status | grep -q "80/tcp.*ALLOW"; then
-    log_warn "Port 80 already open -- skipping"
-  else
-    ufw allow 80/tcp
-    log_success "Port 80 opened"
-  fi
-
-  if ufw status | grep -q "443/tcp.*ALLOW"; then
-    log_warn "Port 443 already open -- skipping"
-  else
-    ufw allow 443/tcp
-    log_success "Port 443 opened"
-  fi
-
-  if ufw status | grep -q "on tailscale0.*ALLOW"; then
-    log_warn "Tailnet ingress already open -- skipping"
-  else
-    ufw allow in on tailscale0
-    log_success "Tailnet ingress opened"
-  fi
-
-  if ufw status | grep -q "8321/tcp.*ALLOW.*10\.0\.0\.0/16"; then
-    log_warn "Port 8321 from 10.0.0.0/16 already open -- skipping"
-  else
-    ufw allow from 10.0.0.0/16 to any port 8321 proto tcp comment "radon-broker health"
-    log_success "Port 8321 opened from 10.0.0.0/16"
-  fi
-
-  if ufw status | grep -q "^Status: active"; then
-    log_warn "ufw already active -- skipping enable"
-  else
-    ufw --force enable
-    log_success "ufw enabled (default deny incoming)"
-  fi
+  # Reset + apply the whole set: the result is exactly the declared rules,
+  # with SSH allowed before the default-deny firewall is switched on.
+  ufw --force reset
+  while IFS= read -r line; do
+    read -ra args <<< "$line"
+    ufw "${args[@]}"
+  done <<< "$rules"
+  ufw --force enable
+  log_success "ufw enabled (declared app ruleset, default deny incoming)"
 }
 
 # -- SSH: keys only ----------------------------------------------------------

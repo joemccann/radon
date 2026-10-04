@@ -552,6 +552,24 @@ Rollback: unset `RADON_TAILNET_TRUST_MODE` (back to log-only) and `radon restart
 
 The file is a reference. Nothing in deploy, setup or compose reads it (`cloud/tests/test_ibc_trusted_ips.py` pins that), so merging changes nothing live. It is also moot for the Docker Gateway: the gnzsnz image relays `4003 -> 127.0.0.1:4001` with socat inside the container, so every API client reaches the Gateway as `127.0.0.1`. Who can open `4001` is decided by the compose bind address and the host and Hetzner firewalls below, not by IBC. Operator step: none. If a Gateway is ever run without the socat relay, copy this value into its IBC `config.ini` and restart it (one 2FA).
 
+### Host firewalls (`cloud/scripts/host-firewall.sh`)
+
+Declared ufw rulesets, operator-run only. Deploy (`deploy.sh`, the root helper, `ci.yml`) never calls it; `setup-vps.sh` `open_firewall` applies the same app set at bootstrap (`cloud/tests/test_host_firewall.py` pins the parity and the no-deploy fact). Default is a dry run that prints the exact `ufw` commands; `--apply` (root) runs `ufw --force reset`, the rules, `ufw --force enable`.
+
+Sources are env, IPv4 `/32` only (anything wider is refused): `RADON_FW_OPERATOR_SOURCES` (laptop `100.98.36.17`, Mac mini `100.87.184.89`, phone `100.113.204.20`, plus a public recovery address) and `RADON_FW_OPS_SOURCES` (future ops hosts; leave empty until they exist). Each ops `/32` gets `allow 8341/tcp` then `deny` everything else, ahead of every broad allow (ufw is first-match).
+
+- **App:** 22/tcp any (CI deploys over SSH from GitHub-hosted runners, whose addresses are not fixed; narrowing 22 needs the deploy path moved first), 80/443 any, 41641/udp, 8321 from operator `/32`s and from `10.0.0.4` (broker watchdog). The blanket `allow in on tailscale0` and the `10.0.0.0/16` 8321 rule are gone.
+- **Broker** (ufw inactive today): 22 from operator `/32`s only (refuses to run with none), 4001 and 8340 from `10.0.0.2`, 41641/udp, deny else.
+- **Docker caveat:** ports Docker publishes (broker `10.0.0.4:4001`) are DNAT'd before ufw's INPUT chain, so the 4001 rule documents intent but does not filter. 4001 is protected by its bind address: `10.0.0.4` is reachable only from radon-private, whose only other member is the app.
+
+Rollout, one host at a time, off RTH, with a second SSH session open:
+
+1. `RADON_FW_OPERATOR_SOURCES='100.98.36.17 100.87.184.89 100.113.204.20 <recovery-ip>' bash cloud/scripts/host-firewall.sh --role broker` and read the output.
+2. Same command with `--apply` as root on the broker. Verify: `ssh radon-broker true` from the laptop; from the app, `curl --cacert ... https://10.0.0.4:8340/healthz` (spof-host-split.md) and `/health` `auth_state=authenticated`.
+3. Repeat with `--role app` on the app host. Verify `curl -fsS https://app.radon.run/health`, the broker watchdog's `GET http://10.0.0.2:8321/health`, and a CI deploy (`gh run list --workflow=ci.yml --limit 1`).
+
+Rollback: `ufw disable` (broker: its prior state), or restore the backup `ufw --force reset` wrote under `/etc/ufw/*.rules.<timestamp>`.
+
 ## Health monitoring (isolated daemon + edge surface)
 
 The health surface is **decoupled from the trading stack** so it keeps reporting precisely when the stack is down. Two layers plus an off-box witness:

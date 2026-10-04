@@ -91,6 +91,7 @@ exit 0
 
 
 class TestOpenFirewall:
+    # The full declared ruleset is pinned in cloud/tests/test_host_firewall.py.
     def test_enables_ufw_default_deny_with_ssh_allowed_before_enable(
         self, fake_ufw: tuple[Path, Path]
     ) -> None:
@@ -101,40 +102,37 @@ class TestOpenFirewall:
 
         assert "default deny incoming" in calls
         assert "default allow outgoing" in calls
-        assert "allow 22/tcp" in calls
-        assert "allow 80/tcp" in calls
-        assert "allow 443/tcp" in calls
-        assert "allow in on tailscale0" in calls
+        assert "allow 22/tcp comment ssh-ci-deploy-and-recovery" in calls
+        assert "allow 80/tcp comment caddy-http" in calls
+        assert "allow 443/tcp comment caddy-https" in calls
         assert (
-            "allow from 10.0.0.0/16 to any port 8321 proto tcp comment radon-broker health"
+            "allow from 10.0.0.4 to any port 8321 proto tcp comment radon-broker-health"
             in calls
         )
+        # Ops Plane 2D: no blanket tailnet allow, no whole-subnet 8321.
+        assert not [c for c in calls if "tailscale0" in c or "10.0.0.0/16" in c]
         assert "--force enable" in calls
         # Lockout guard: SSH must be allowed before a default-deny firewall
         # is switched on.
-        assert calls.index("allow 22/tcp") < calls.index("--force enable")
+        ssh = calls.index("allow 22/tcp comment ssh-ci-deploy-and-recovery")
+        assert ssh < calls.index("--force enable")
         assert calls.index("default deny incoming") < calls.index("--force enable")
-        assert calls.index("--force enable") == len(calls) - 1 or all(
-            c.startswith("status") for c in calls[calls.index("--force enable") + 1 :]
-        )
+        assert calls.index("--force enable") == len(calls) - 1
 
-    def test_second_run_adds_no_rules_and_does_not_reenable(
+    def test_second_run_reapplies_the_same_declared_set(
         self, fake_ufw: tuple[Path, Path]
     ) -> None:
         fake_bin, log = fake_ufw
         first = _run_setup_function("open_firewall", fake_bin, {})
         assert first.returncode == 0, first.stderr
-        first_count = len(log.read_text(encoding="utf-8").splitlines())
+        first_calls = log.read_text(encoding="utf-8").splitlines()
 
         second = _run_setup_function("open_firewall", fake_bin, {})
         assert second.returncode == 0, second.stderr
-        second_calls = log.read_text(encoding="utf-8").splitlines()[first_count:]
+        second_calls = log.read_text(encoding="utf-8").splitlines()[len(first_calls):]
 
-        assert second_calls, "second run made no ufw calls at all"
-        assert "--force enable" not in second_calls
-        assert not [c for c in second_calls if c.startswith("allow ")], (
-            f"second run duplicated allow rules: {second_calls}"
-        )
+        assert first_calls[0] == "--force reset"
+        assert second_calls == first_calls
 
     def test_main_calls_open_firewall(self) -> None:
         text = SETUP.read_text(encoding="utf-8")
