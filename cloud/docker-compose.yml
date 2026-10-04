@@ -25,9 +25,14 @@ services:
       # watchdog. Relogin retries inside IBC would bypass the same push lock.
       - TWOFA_TIMEOUT_ACTION=exit
       - RELOGIN_AFTER_TWOFA_TIMEOUT=no
-      # IBC must not independently cycle the session and mint an unleased 2FA
-      # push. All scheduled/cold recovery belongs to the lease-aware watchdog.
-      - AUTO_RESTART_TIME=
+      # The Gateway insists on a daily cycle; blank does not disable it, it
+      # keeps the stored 11:45 PM (container UTC) default, which ran as a full
+      # re-login and a watchdog 2FA push every night. Pinning AUTO_RESTART_TIME
+      # makes that cycle a token restart with no push; only weekly token expiry
+      # needs 2FA, at 23:45Z (4:45 PM PT), inside the watchdog's 23:40-00:15
+      # quiet window. Not 09:05 AM: that slot pushed at 02:05 PT (2026-07-05).
+      # Format is IBC's `HH:MM AM/PM`; anything else is silently ignored.
+      - AUTO_RESTART_TIME=11:45 PM
       - TWS_COLD_RESTART=
 
     # 4001 is bound to loopback (combined/broker FastAPI or the helper) and to

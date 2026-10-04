@@ -1984,3 +1984,73 @@ including both coverage ratchets, secret scan, fail-closed path filter,
 contracts, images and perimeter smoke. All third-party action uses remain
 SHA-pinned. No gate, source ownership, artifact reuse, exact-SHA image,
 health, recovery, rollback, concurrency or stability behavior changed.
+
+
+## CIP-016 - reuse the gated exact image when prestage defers (2026-10-03)
+
+Status: **VALIDATING**; publication previously BLOCKED by workflow-token scope.
+This resumes the reserved, unpublished CIP-016 from issue #196's October 2
+checkpoint; the ID is not allocated to a new experiment. No open performance
+PR exists, and the ledger on origin/main still ends at CIP-015.
+
+**Pre-edit baseline and hypothesis.** Actions run 36924192928, Deploy to VPS
+job 110578504846: mixed/warm/ordinary, workflow-created to deployment-completed
+342s, gate 155s, deploy wall 163s / SSH 161s, total runner wall 2651s.
+Prestage deferred for control-plane mismatch; final deployment compiled Next
+from 20:51:12Z through its trace audit at 20:51:59Z, despite the gated exact
+image already containing that build. Enable the existing opt-in only after
+recovery and control-plane synchronization in the immutable final invocation.
+Expected net saving 40-47s on this fallback (about 12-14% of that release),
+medium confidence in recurring impact: only one matching fallback baseline.
+Runner effect: approximately 40-47 fewer seconds, under 2%, no new shards.
+Affected paths: .github/workflows/ci.yml and cloud/tests/test_ci_deploy_image_reuse.py.
+
+**Safety and revert trigger.** The original proof still requires a full
+40-character SHA, installed/target container drop-in equality, loaded unit
+paths/environment/ExecStart, no pending daemon reload, retained host BUILD_ID
+and successful exact-image pair pull. Every failed proof compiles normally;
+the independent pair verification still precedes teardown. Recovery runs
+before the opt-in. No cache key, inventory, coverage, path ownership, required
+needs, health check, 40-second stability window, rollback artifact, transition
+journal, green marker or non-cancelling deploy lock changes. Revert on any
+attributable provenance/runtime/rollback/recovery regression, flake, rail
+violation or established performance rejection. Manual invocations remain
+unopted-in.
+
+**Current Actions audit.** Origin/main 15bdb9a4bb09a3bae00fae7e6c4d3b9f8e838489,
+18 commits / 117 paths since cb47c52ab055221fd7d88ead72ff28acb554e7d7.
+Thirty organic main pushes: no synthetic workflow run or production access.
+Newest 37096358725: release 331s, all required gates authorize at +153s,
+initial queue 2s, total runner wall 2439s. Critical predecessor is node image
+111127037114 (136s wall / build 110s), then prepull 111127410108 (18s),
+then deploy 111127461351 (155s / SSH 153s). Deploy reuses prestage and spends
+about 61s waiting for advisory Gateway readiness before teardown. This wait
+and all health/recovery guarantees remain unchanged. The node-image lead
+over the next gate is only 8s; current test-family balance improvements
+usually expose a peer gate within 1-14s, below materiality. No additional
+candidate meets the measured safety/impact bar. Full cohort tables, cache
+strata, per-job timing, Linux module work and carry-forward findings are in
+tonight's single issue #196 comment. Queue changes are not code gains.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Deploy to VPS (prestage-deferred fallback) | 163s | pending | TBD until 5 samples |
+
+Before: Actions run 36924192928, job 110578504846. Zero after-main samples;
+the whole-class result must also improve, rather than accepting a rare
+fallback in isolation. Five comparable before and five after required: same
+class/cache p50 at least 10% and 15s faster; p95 no worse than 5% or 15s;
+cold p50 no worse than 10%; runner minutes no more than 20% higher unless
+disclosed; all test/gate/provenance/health/recovery/rollback rails intact.
+Neither local timing nor green PR CI establishes a win.
+
+**Verification.** Restored the checkpoint's nine-case executable regression
+on tonight's current source: 2 failed / 7 passed before, 83 passed after
+with frozen-artifact, prestage, image and action-pin contracts. Gate/inventory/
+path-filter contracts pass separately. YAML and every inline shell script
+parse; all 58 action references across the three CI/image workflows are
+pinned. Diff checks and secret-pattern review precede commit. Full suites,
+Vitest, Docker builds and workflow lint are delegated to PR CI on this
+runner; none is claimed locally. Publication and exact-head CI depend on
+GitHub accepting this workflow change; the October 2 token lacked workflow
+scope and tonight's read-only scope header still reports repo only.

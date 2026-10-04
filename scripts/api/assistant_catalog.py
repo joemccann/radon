@@ -90,6 +90,7 @@ CATALOG: dict[CatalogKey, Capability] = {
     ("GET", "/openapi.json"): "internal",
     ("GET", "/options/chain"): "read",
     ("GET", "/options/expirations"): "read",
+    ("GET", "/options/ib-quotes"): "read",
     ("GET", "/options/exposure/{symbol}"): "read",
     ("GET", "/options/rv-ratio/{symbol}"): "read",
     ("POST", "/options/rv-ratio/{symbol}/scan"): "read.spawn",

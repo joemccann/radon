@@ -18,6 +18,7 @@
 #
 agent-prompt-recipes.spec.ts
 branding.spec.ts
+header-mobile.spec.ts
 libraries-fx-pack.spec.ts
 surface-preview.spec.ts
 theme-toggle.spec.ts
@@ -41,4 +42,8 @@ theme-toggle.spec.ts
 #   since 2026-03-11. Promote when a site Playwright CI job exists.
 # REVIEWED 2026-09-05 theme-toggle.spec.ts — held out: no CI job runs site
 #   Playwright. Theme persistence via localStorage; stable since 2026-03-11.
+#   Promote when a site Playwright CI job exists.
+# REVIEWED 2026-10-03 header-mobile.spec.ts — held out: no CI job runs site
+#   Playwright. 390px header guard (demo CTA label on one line, every control
+#   inside the viewport). Red on radon.run, green on local site `next dev`.
 #   Promote when a site Playwright CI job exists.

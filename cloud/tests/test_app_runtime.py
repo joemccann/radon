@@ -1022,7 +1022,9 @@ def test_run_newsfeed_mounts_host_playwright_browsers(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
     state_dir = tmp_path / "state"
-    assert f"{state_dir / 'ms-playwright'}:/ms-playwright" in log, log
+    # Read-only: host radon processes launch the same cached browsers, so the
+    # third-party-content container must not be able to rewrite them.
+    assert f"{state_dir / 'ms-playwright'}:/ms-playwright:ro" in log, log
     assert "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright" in log
     assert f"{tmp_path / 'data' / 'newsfeed-scripts'}:/home/radon/radon/scripts/newsfeed:ro" in log, log
 
@@ -1593,6 +1595,12 @@ def test_run_newsfeed_binds_subscription_credential_dirs_readonly(tmp_path: Path
     assert result.returncode == 0, result.stderr
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
     assert f"{home}/.grok:/home/radon/.grok:ro" in log
+    # Newsfeed renders third-party content: it gets no read-write grant the
+    # host shares with other units, so the antigravity dirs stay unmounted.
+    assert ".gemini" not in log
+    for bind in log.split():
+        if bind.startswith(f"{home}/"):
+            assert bind.endswith(":ro"), bind
 
 
 def test_run_skips_subscription_binds_when_no_dir_exists(tmp_path: Path) -> None:
