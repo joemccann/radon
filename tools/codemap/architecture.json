@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-10-02T09:00:12Z",
-  "node_count": 3709,
-  "edge_count": 7692,
+  "generated_at": "2026-10-04T09:00:06Z",
+  "node_count": 3725,
+  "edge_count": 7706,
   "areas": {
-    "web": 2144,
-    "site": 155,
-    "scripts": 1278,
-    "cloud": 85,
+    "web": 2146,
+    "site": 156,
+    "scripts": 1289,
+    "cloud": 87,
     "lib": 28,
     "tests": 17,
     "tools": 2
@@ -55,7 +55,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 998
+      "count": 1000
     },
     {
       "id": "site/app",
@@ -70,7 +70,7 @@
     {
       "id": "site/e2e",
       "area": "site",
-      "count": 5
+      "count": 6
     },
     {
       "id": "site",
@@ -90,7 +90,7 @@
     {
       "id": "scripts",
       "area": "scripts",
-      "count": 174
+      "count": 175
     },
     {
       "id": "scripts/ai_cycle",
@@ -105,7 +105,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 124
+      "count": 125
     },
     {
       "id": "scripts/backtest",
@@ -210,7 +210,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 651
+      "count": 660
     },
     {
       "id": "scripts/trade_blotter",
@@ -240,7 +240,7 @@
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 74
+      "count": 76
     },
     {
       "id": "lib/tools",
@@ -330,7 +330,7 @@
     {
       "id": "scripts/api/__init__.py",
       "area": "scripts",
-      "in": 86,
+      "in": 87,
       "out": 0,
       "test": false
     },
@@ -344,7 +344,7 @@
     {
       "id": "scripts/db/client.py",
       "area": "scripts",
-      "in": 76,
+      "in": 75,
       "out": 0,
       "test": false
     },
@@ -356,17 +356,17 @@
       "test": false
     },
     {
+      "id": "scripts/api/server.py",
+      "area": "scripts",
+      "in": 47,
+      "out": 16,
+      "test": false
+    },
+    {
       "id": "web/lib/db.ts",
       "area": "web",
       "in": 61,
       "out": 1,
-      "test": false
-    },
-    {
-      "id": "scripts/api/server.py",
-      "area": "scripts",
-      "in": 46,
-      "out": 16,
       "test": false
     },
     {
@@ -524,6 +524,13 @@
       "test": false
     },
     {
+      "id": "scripts/api/auth.py",
+      "area": "scripts",
+      "in": 35,
+      "out": 0,
+      "test": false
+    },
+    {
       "id": "scripts/perf_twr_builder.py",
       "area": "scripts",
       "in": 24,
@@ -532,13 +539,6 @@
     },
     {
       "id": "scripts/utils/__init__.py",
-      "area": "scripts",
-      "in": 34,
-      "out": 0,
-      "test": false
-    },
-    {
-      "id": "scripts/api/auth.py",
       "area": "scripts",
       "in": 34,
       "out": 0,
