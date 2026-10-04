@@ -10943,3 +10943,67 @@ Each Python round also passed 23 subtests and skipped 2 cases; each cloud round 
 Detached base cb47c52a cloud gate: 2,452 passed / 7 skipped. Its sorted FAILED list is empty. Each of the three closing cloud FAILED lists is also empty: 0 additions and 0 removals in every exact list comparison. Homebrew Bash, OpenSSL and Caddy were selected through PATH; no repository environment workaround was added.
 
 Syntax audit passed for 2 TOML, 5 JSON, 5 YAML and 13 shell files from the merged delta; the changed relay JavaScript also passes node --check. Final whitespace/secret review and exact-head CI receipts are recorded on rolling issue #83.
+
+
+## Delta audit 2026-10-03
+
+Audited `cb47c52ab055221fd7d88ead72ff28acb554e7d7..15bdb9a4bb09a3bae00fae7e6c4d3b9f8e838489`: 18 commits, 117 changed paths. The newest trusted rolling-issue comment was authored by radon-runner-bot (COLLABORATOR). Eight open PRs were inspected; none used a `testing/` branch. IDs continue after T-527, with no open PR finding reallocated.
+
+Read the architecture index and incoming codemap edges before confirming imports with `rg`; the graph predates some new research/provider paths, so dynamic and subprocess consumers were also checked. Inverse review covered assistant tool/result isolation, live option reads, fullscreen chat state, provider/model fallback, scoped credential redaction, research folder discovery and review parking, scan partial-success semantics, daemon exit protection/calendar admission, durable health dwell, broker hold propagation, app-host service rows, runtime mounts and pickup publication checks.
+
+### T-528 — P1 — web isolation assertion checks a string the fixture never emits
+
+`web/tests/assistant-web-search.test.ts:165` supplies the extracted fact `AMZN is 23.1% of XLY.`, but the original negative assertion at line 192 checks `AMZN 23.1%`. The actual isolation boundary is `web/lib/assistant/loop.ts:576`: evidence is retained for final synthesis while subsequent tool rounds receive a stub. Deliberately adding the extracted facts to that stub passes all 153 tests in the 16 importing assistant suites. The corrected exact-fact assertion rejects the same mutation with 1 failed / 152 passed.
+
+Acceptance: actual extracted facts and citations are absent from the subsequent tool-capable request; facts reach final synthesis, which has no tools. Preserve the hostile-instruction refusal assertions. Product code must remain unchanged after the mutation experiment.
+
+### T-529 — P2 — ordered folder-page mocks conceal broken continuation requests
+
+`tests/test_research_dropbox.py:45` returns ordered pages regardless of request arguments and line 48 checks only the initial RPC. The new `scripts/research/dropbox.py:211` continuation can therefore send a null cursor without a regression failure: all 75 original related tests pass that mutation. A fake HTTP-boundary fixture at `tests/test_research_dropbox.py:55` executes the real RPC serializer and rejects the null-cursor mutation with 1 failed / 77 passed.
+
+Acceptance: each continuation serializes the cursor from its immediately preceding page, all requests retain the bound namespace, direct-child names from every page are returned, malformed responses refuse and endless pagination terminates at its existing budget. No live Dropbox request or token refresh is permitted.
+
+### T-530 — P2 — process-group fixture relies on orphan reaping and nonexistent macOS procfs
+
+The original `scripts/tests/test_knowledge_enrichment_budget.py:67` reads `/proc/<pid>/stat` and treats a missing file as a completed descendant. On macOS the real integration case accepts a leader-only kill while its fake descendant remains alive. The separate fake-process unit already rejects that primitive substitution; no whole-suite mutation escape is claimed. Standing and first closing runs also raise `PermissionError` at the final group-kill call (`scripts/knowledge/distill.py:197`) after the leader has exited; the unchanged file passes alone. The fixture leaves its killed grandchild's reaping to init.
+
+Acceptance: retain the partial-result and deadline assertions, exercise real SIGKILL against the worker and another verified member of its group, observe both exits through owned process handles on macOS and Linux, and reap fixture children before the product's repeated cleanup. Leader-only killing must fail the integration case. Preserve the separate fake-process cleanup contract and production source.
+
+### Standing sweeps and prior findings
+
+- Changed-file repetitions cover 25 Python, seven Vitest and four cloud test files. All three rounds pass Python 848 (plus 23 subtests), Vitest 95 and cloud 756. The changed browser spec is curated at `.github/workflows/ci.yml:825`; browser repetitions are assigned to PR CI because this session has no browser/server.
+- Standing Python gate: 13,927 passed / 2 skipped / 23 subtests, with one `PermissionError` in the process-group timeout fixture at `scripts/knowledge/distill.py:160`. Its unchanged file passes 5/5 alone. No source defect is claimed from that isolated-pass observation.
+- Standing Vitest gate: 10,351 passed / 21 skipped across 1,044 passing files and one skipped file. The existing capability check at `web/tests/helpers/python313.ts:29` uses bare Python; later gates select the venv through PATH so its NumPy-backed cases execute. The skip is already linked to T-276, not a new exclusion.
+- Standing cloud gate: 2,467 passed / 7 skipped, with two environment failures at `cloud/tests/test_app_runtime.py:542` and `cloud/tests/test_monorepo_cutover.py:394`. Selecting venv Python on PATH yields 129 passing diagnostic tests; each file also passes alone (111 and 18). Bash 5.3.20, OpenSSL and Caddy are supplied through host PATH, with no repository workaround.
+- CI collection and ratchets remain unchanged: broad Python discovery (`pyproject.toml:31`), root Vitest includes (`vitest.config.ts:41`), Python coverage 56 (`.github/workflows/ci.yml:480`) and Vitest 75/71/65 (`vitest.config.ts:113`). No new executable skip/xfail or blanket measurement exclusion was introduced by the delta.
+- TEST_LOG and NEW_FINDINGS were re-triaged against later ledger resolutions and trusted checkpoints. T-488, T-490, T-492, T-493, T-495 and T-496 have later DONE evidence; T-525 through T-527 were merged in #868. The old constructor inventory (`scripts/tests/test_service_registration_completeness.py:488`), T-210/T-386 calendar notes, T-217 timestamps and T-079 payload notes yield no additional reproduced finding. The trusted checkpoint carries no still-open verified T finding.
+- Carry operator-only browser verification from the prior checkpoint: the explicitly held-out admin-service spec (`web/e2e/ci-curation-ledger.txt:1`) and isolated replay of the unverified vol-skew toast observation (`web/e2e/vol-skew-mr-scanner.spec.ts:214`). The runner now owns notifications (`.claude/runner-prompts/testing.md:91`); the old agent credential action is superseded.
+
+Audited through: 15bdb9a4bb09a3bae00fae7e6c4d3b9f8e838489 on 2026-10-03 — 3 new findings
+
+## Remediation 2026-10-03
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-528 | DONE | Extracted-fact leak passes all 153 original assistant tests; exact fixture assertion rejects it (1 failed / 152 passed). Restored focused gate: 153 passed. Citation exclusion and tool-less final synthesis are also asserted; hostile-instruction refusal is retained. Product loop unchanged. |
+| T-529 | DONE | Null continuation cursor passes all 75 original related tests; real RPC/fake HTTP fixture rejects it (1 failed / 77 passed). Restored focused gate: 78 passed plus 23 subtests. The Dropbox module and `folder_names` each measure 100% statements and branches. Product reader unchanged. |
+| T-530 | DONE | Old integration accepts leader-only killing on macOS with a surviving fake descendant; its separate fake-process unit fails. Repaired integration also fails the mutation (whole file 2 failed / 3 passed). Restored file 5 passed; related knowledge suites pass 69 in each of three repetitions. Both group members are pytest-owned, their real group membership and SIGKILL exits are checked, and cleanup reaps them without procfs or orphan timing. Product source unchanged. |
+
+Assistant focused coverage is reported honestly: loop module 88.64% lines / 86.41% statements / 67.28% branches / 100% functions. No coverage threshold was lowered. All existing assertions and test selections remain; the exact-fact assertion is stricter. Every deliberate source mutation was restored byte-for-byte before green gates.
+
+
+### Closing verification 2026-10-03
+
+| Closing round | Python passed | Vitest passed | Cloud passed |
+|---|---:|---:|---:|
+| 1 | 13,931 | 10,372 | 2,469 |
+| 2 | 13,931 | 10,372 | 2,469 |
+| 3 | 13,931 | 10,372 | 2,469 |
+
+Each Python round also skips 2 cases and passes 23 subtests. Each Vitest round passes 1,045 files with no skips; each cloud round skips 7 cases. All nine closing gates pass. The pre-repair Python attempt (1 failed / 13,930 passed) is retained separately; no failed run is relabeled green and no baseline exception is needed after T-530.
+
+Detached base `15bdb9a4` cloud gate: 2,469 passed / 7 skipped, sorted FAILED list empty. Every closing FAILED list matches it exactly: 0 additions and 0 removals in each of the three comparisons. Host PATH selects venv Python, Homebrew Bash 5.3.20, OpenSSL and Caddy; no repository environment workaround was added.
+
+Syntax audit: 3 JSON (including the two generated codemap inputs), 1 YAML and 3 shell files from the merged delta parse; the changed relay and newsfeed JavaScript pass node --check. Original ledger prefixes are preserved byte-for-byte. Final whitespace/secret review and exact-head CI/browser receipts are recorded on rolling issue #83.
+
+Review: three verified test-infrastructure findings have red/green evidence. All production mutations were restored byte-for-byte, no production source is changed, and original partial-result/deadline/refusal checks remain. No assertion, skip, exclusion, timeout, tolerance or coverage threshold is weakened. Generated codemap and reliability ledgers are untouched. Focused checks run again before every finding commit; final external delivery receipts remain on issue #83 so recording them does not change the tested head.
