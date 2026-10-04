@@ -135,6 +135,26 @@ describe("Connection stability", () => {
     expect(delta).not.toContainEqual({ action: "unsubscribe-depth", symbol: longKey });
   });
 
+  it("a background tab releases its depth ticket and takes it back on return", async () => {
+    let visibility: DocumentVisibilityState = "visible";
+    vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
+    renderHook(() => usePrices({ symbols: ["URTY"], depthSymbols: ["URTY"], enabled: true }));
+    await flush();
+    const ws = latestWs();
+    act(() => ws.simulateOpen());
+    expect(sentMessages(ws)).toContainEqual({ action: "subscribe-depth", symbol: "URTY" });
+
+    const beforeHide = ws.sent.length;
+    visibility = "hidden";
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(sentMessages(ws).slice(beforeHide)).toEqual([{ action: "unsubscribe-depth", symbol: "URTY" }]);
+
+    const beforeShow = ws.sent.length;
+    visibility = "visible";
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(sentMessages(ws).slice(beforeShow)).toEqual([{ action: "subscribe-depth", symbol: "URTY" }]);
+  });
+
   it("does not recreate WS when symbols change", async () => {
     const { rerender } = renderHook(
       (props: { symbols: string[] }) => usePrices({ symbols: props.symbols, enabled: true }),

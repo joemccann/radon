@@ -66,7 +66,7 @@ See `scripts/cri_scan.py:_fetch_ib` for the canonical pattern. Background in `fe
 - **Parallel scanning:** `scanner.py` (15 workers), `discover.py` (10 workers). `UWRateLimitError` skips ticker.
 - **Atomic state:** `scripts/utils/atomic_io.py` — `atomic_save()` (temp + `os.replace()` + SHA-256), `verified_load()`.
 - **Batched WS relay:** per-client last-write-wins, 100ms flush. 5000 msg/s → 10 batched/s.
-- **Stale tick detection:** one silent symbol while others tick → resubscribe just that symbol (`findStaleSubjectsOnLivePlane`), never a socket bounce. Whole data plane 45s no-ticks → bounded recovery ladder (resubscribe / K=3 reconnects / **alert-only escalate**, never a relay-initiated Gateway restart). Pure core: `scripts/lib/staleDataMachine.js`.
+- **Stale tick recovery:** the [Gateway recovery owner](../docs/ib-gateway-recovery.md#relay-recovery) defines mode-specific escalation and operator gates; thresholds and retry bounds live in `scripts/lib/staleDataMachine.js`.
 - **Vectorized:** `kelly_size_batch()` (NumPy), `portfolio_greeks_vectorized()`. Cross-validated to 10⁻¹².
 - **IBClient resilience:** NO in-client auto-reconnect (REL-014 — deleted; recovery lives at higher layers: pool acquire-time reconnect, per-cycle daemon reconnects, relay stale-tick ladder); pacing (162/366: per-reqId retry count, cap 3); invalid contracts (200/354: no retry, `_failed_contracts`).
 - **Performance page:** Phase A sequential IB+cache; Phase B ThreadPool UW/Yahoo. `PERF_FETCH_WORKERS` (default 8). Disk cache TTL 15min/24h. SWR via `POST /performance/background`.
@@ -185,3 +185,25 @@ The relay prunes expired contract closes at startup and on the first cache
 access/write of each Eastern day, then persists the reduced cache. Today's
 expiry remains available through the session. Late ticks cannot resurrect
 expired keys; expiry comparison uses Eastern dates, not the host timezone.
+
+## Final broker halt admission (REL-304 / R-723)
+
+`IBClient.place_order` and `modify_order` recheck the trading halt after caller
+preflight and before wire admission. Corrupt halt state refuses both. Modification
+refusal precedes field mutation; cancellation stays available during a halt.
+Bracket legs pass through the same placement check individually. All tests use
+temporary halt files and fake broker calls.
+
+CI cross-tree contracts (REL-108 / R-315 / R-316): changes to the shared OG theme or CTA image admission run their offline Python acceptance modules even for web-only PRs. The brand tree also arms Python because the export theme acceptance reads the maintained accessibility kit. Keep `scripts/ci/path_filter.py` and its tree-derived routing tests in sync when adding cross-tree readers.
+
+## Relay subscription admission (R-036 / REL-021b)
+
+Each WebSocket client may hold at most 512 distinct L1 subjects across stocks,
+options, indexes and successive messages. Duplicates remain admissible; an
+unsubscribe or disconnect frees capacity. Refusal emits `SUBSCRIPTION_LIMIT`
+before state allocation, futures resolution or a broker request. Resolution
+rechecks subject ownership before allocating a line. Each subject can require
+one internal forward line. One browser tab is one client carrying every
+page's subjects (the all-strikes chain alone streams up to 202 contracts), so
+the cap bounds runaway growth; it is not a fleet-wide line reservation.
+`test_quota_admits_one_workspace_tab` pins it above a full workspace's demand.

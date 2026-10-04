@@ -4,6 +4,83 @@ Detailed derivation of the 2FA-aware restart + push lock + watchdog self-heal. S
 
 ---
 
+## Readiness verification
+
+**Symptom and prerequisites:** after startup, restart or a daily cycle, the
+API socket can listen while login is incomplete. Use the selected mode's
+FastAPI `/health` response and the Gateway logs; a TCP connection or Docker
+`healthy` result does not prove authentication. The [compose healthcheck](../docker/ib-gateway/docker-compose.yml)
+only opens the configured API port. `_derive_auth_state` in
+[`ib_gateway.py`](../scripts/api/ib_gateway.py) requires a connected pool
+client with non-empty `managed_accounts` to report `auth_state=authenticated`.
+
+**Blast radius and safe diagnosis:** reading health and logs does not place
+orders or request another login. Check `ib_gateway.auth_state`,
+`ib_gateway.upstream_dead`, `ib_pool`, operator hold and the push lease before
+any recovery action. `unknown` or `remote` is not authentication proof.
+
+**Stop conditions and verification:** stop manual recovery while a hold,
+active or unreadable lease, login throttle, or pending 2FA prevents it.
+Approve the existing prompt instead of generating another. Recovery requires
+`auth_state=authenticated`, no upstream failure and healthy pool roles needed
+by the operation; fresh relay ticks also matter for live pricing.
+
+**Rollback and escalation:** diagnosis changes nothing to roll back. If a
+controlled recovery fails, do not loop starts or clear safety gates. Leave a
+held Gateway held, retain sanitized health/log evidence and escalate to the
+operator using the applicable recovery procedure below.
+
+## Daily cycle
+
+The [Docker compose configuration](../docker/ib-gateway/docker-compose.yml)
+and [production compose configuration](../cloud/docker-compose.yml) own the
+IBC daily token-restart setting and timezone. A token restart can avoid a new
+login while the token remains valid; expiry can still require 2FA. A blank
+restart field leaves the Gateway's stored daily-cycle setting unchanged; it
+does not disable that cycle.
+
+**Symptom and prerequisites:** investigate a recurring login interruption
+using the selected Gateway mode and its effective configuration.
+[`setup_ibc.sh`](../scripts/setup_ibc.sh) writes blank restart fields for
+local launchd and reports that the Gateway's stored daily-cycle setting
+applies. The installer does not choose a cycle. The launchd definition's
+absence of a start schedule also does not disable the Gateway's own cycle.
+
+**Blast radius and safe diagnosis:** inspect configuration and logs without
+changing the broker session. Do not copy container clock settings into local
+IBC: local configuration and timezone must be checked independently.
+**Stop conditions and verification:** stop on an active hold, lease or login
+throttle; follow [readiness verification](#readiness-verification) after a
+cycle instead of relying on its elapsed time or open port.
+**Rollback and escalation:** diagnosis has no rollback. Do not change restart
+settings as an incident experiment; escalate a wanted local cycle change for a
+separately tested installer change.
+
+## Relay recovery
+
+**Symptom and prerequisites:** prices stop updating during market hours with
+outstanding subscriptions. The [decision core](../scripts/lib/staleDataMachine.js)
+owns stale thresholds and retry bounds. A silent subject on an otherwise live
+plane is resubscribed; a stale whole plane enters bounded resubscribe/socket
+reconnect recovery before escalation.
+
+`shouldRequestGatewayRestart` permits the [relay](../scripts/ib_realtime_server.js)
+to request `POST /ib/restart` after escalation in `docker` and `cloud` modes;
+`launchd` stays alert-only. The request delegates to FastAPI's push lease and
+backoff gates rather than restarting Docker directly. An operator hold
+suppresses recovery and a hold refusal makes the relay stand down.
+
+**Blast radius and safe diagnosis:** a Gateway restart can interrupt all IB
+clients and require 2FA. Read relay health/logs, Gateway health and existing
+hold/lease state first. Do not start another manual login just because ticks
+are stale; automatic recovery may already own the prompt.
+**Stop conditions and verification:** stop manual retries on an operator hold,
+pending 2FA, lease refusal, backoff or throttle. Recovery verification requires
+fresh ticks and [authenticated health](#readiness-verification).
+**Rollback and escalation:** diagnosis has no rollback; preserve holds and
+leases if recovery fails. Escalate sustained stale pricing to the operator
+with sanitized relay and Gateway evidence instead of bypassing those gates.
+
 ## Problem
 
 After a restart, IB Gateway sits at the IBKR Mobile push prompt with the API socket open. Naive health checks (`port_listening == true`) falsely report success. Worse: IBKR's backend cannot reconcile multiple pending push tokens — if a second push request fires while the first is pending, every approval shows "unsuccessful" on the user's phone.
@@ -142,13 +219,53 @@ Next.js footer reads via `useIBStatusContext().displayStatus` (polls `/api/admin
 
 `radon restart` (whole-stack) restarts all `radon-*` units. Use after a sustained outage.
 
-**IBKR operator hold (log in to IBKR yourself).** The Gateway shares the operator's IBKR username, and IBKR allows one session per username, so with `ExistingSessionDetectedAction=primary` the Gateway kicks any web / TWS / mobile login (2026-09-25). On the broker as root:
+**IBKR operator hold (log in to IBKR yourself).** The Gateway shares the operator's IBKR username, and IBKR allows one session per username (2026-09-25: with `ExistingSessionDetectedAction=primary` the Gateway kicked every web login). The hold keeps the Gateway logged out, and every automatic login path stands down until someone clears it. It lives on the broker (`/var/lib/radon/ib-operator-hold.json`), so it works with the app host down.
 
-- `radon ib release [--reason TEXT]` writes the hold (`/var/lib/radon/ib-operator-hold.json`), pauses `radon-ib-watchdog.timer`, then stops the Gateway: helper `stop`, falling back to the root shim's `compose-down`, then `kill`, never waiting on the deploy lock. It prints `RELEASED` only once the container is gone. Wait ~30s, then log in to IBKR.
-- `radon ib resume` (after logging out of IBKR) clears the hold, restarts the watchdog timer, and starts the Gateway once; approve the single 2FA push.
-- `radon ib status` prints the hold, the Gateway state and the timer.
+Set and clear it from any of these:
 
-While held, every start path refuses: the root shim `compose-up` and the helper `start|restart|restart-preheld` exit 73 (`radon-ib-gateway.service` treats 73 as success), the watchdog stands down with outcome `operator_hold` and an `ok` health row, and the broker daemon answers `start|restart` with `423 OPERATOR_HOLD`. Unreadable, malformed, symlinked or non-root flags count as held. The hold never expires. From the laptop when broker Tailscale SSH is down: `ssh -J radon@5.78.148.38 root@10.0.0.4 radon ib release`. Design and later phases (phone trigger, app mirror, trading halt): [`ibkr-session-release.md`](ibkr-session-release.md).
+- Broker, as root: `radon ib release [--reason TEXT] [--expires-at ISO]` writes the hold, then stops the Gateway: helper `stop`, falling back to the root shim's `compose-down`, then `kill`, never waiting on the deploy lock. It prints `RELEASED` only once the container is gone. `radon ib resume` clears it, makes sure `radon-ib-watchdog.timer` runs, and starts the Gateway once. `radon ib status` prints the hold, the Gateway and the timer. Console and sudo sessions without SSH metadata retain the operator name with a local origin in the hold audit (REL-301 / R-720).
+- Release confirmation requires Docker to report the container stopped or explicitly absent. A timeout, permission failure or malformed inspection leaves the hold set and returns failure; it never prints `RELEASED` (REL-298 / R-717).
+- Admin panel (app up): Gateway controls, IBKR operator hold card. Hold needs a reason and a typed `HOLD`. Resume confirms once. This is `POST /api/admin/ib/operator-hold` to FastAPI `POST /ib/operator-hold` (operator JWT), then the broker daemon's mTLS `POST /hold` or `/unhold`. `/hold` writes the hold, then runs the helper `stop`. `/unhold` removes the hold, then runs one `start`, unless the 60s verb cooldown or an IBKR login throttle refuses it. In that case the hold is still cleared and the watchdog takes over.
+- Automatic: with `ExistingSessionDetectedAction=primaryoverride` (pinned in `cloud/docker-compose.yml`), IBC hands the session to your login and exits. The Gateway log shows `Other session may be primary, so end this session ... (scenario 6)`, or `scenario 4` when a fresh Gateway login loses to your session. When that is the latest login event and the Gateway is down, the watchdog sets the hold with actor `auto:ib-watchdog` instead of restarting it.
+
+While held:
+
+| Path | Behaviour |
+|---|---|
+| Root shim `compose-up`, helper `start\|restart\|restart-preheld` | exit 73 (`radon-ib-gateway.service` treats 73 as success) |
+| `radon-ib-watchdog` (timer keeps running) | outcome `operator_hold`, no probe, no restart, no lease. `service_health[ib-watchdog]` is `ok` and names who, why and when. Pushover sends ONE normal-priority `IB Gateway HELD` page per hold. Clearing sends one `hold cleared` page |
+| Broker daemon `start\|restart` | `423 OPERATOR_HOLD` with the hold in the body |
+| FastAPI `/ib/restart`, admin Gateway `start\|restart` | `423`, and no request leaves the app host. `stop` still works |
+| FastAPI 15s recovery heartbeat (pool reconnect, radon-api self-restart ladder) | skipped |
+| Relay stale-tick ladder | no `disconnected` error row, no reconnect ladder, no `/ib/restart` escalation. It writes an `ok` row with `reason: operator_hold` |
+| Watchdog IB-outage grouping | IB-dependent failures are absorbed without a page. No `radon restart` advice |
+| IBC 2FA relogin | already off (`TWOFA_TIMEOUT_ACTION=exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT=no`), so no push spam. The daily `AUTO_RESTART_TIME=11:45 PM` token restart only runs while the Gateway is up, which a hold rules out |
+
+Any flag that is unreadable, malformed, symlinked or not root-owned counts as held, and its reason and actor still show. Invalid UTF-8 in diagnostic fields is replaced for display without changing the canonical clear-prefix decision or rewriting the flag (REL-299 / R-718). Holds set by the admin panel and the watchdog are written by `radon`. A non-root clear removes the flag, because absent means not held. An `--expires-at` that has passed reads `expired` but stays held. An expiring hold would log back in and kick you. From the laptop when broker Tailscale SSH is down: `ssh -J radon@5.78.148.38 root@10.0.0.4 radon ib release`. Design: [`ibkr-session-release.md`](ibkr-session-release.md).
+
+### Runbook: flatten from IBKR Mobile while the app is down
+
+**Symptom:** the app host is down and you need to manage orders through IBKR Mobile or the web portal.
+
+**Prerequisites:** broker root access and your IBKR login. If the broker is unreachable, the fallback below depends on its installed `primaryoverride` Compose body; a repository setting alone does not prove rollout.
+
+**Blast radius:** Radon has no IB data and cannot place or manage orders until you resume. Release does not set a trading halt or stop local Gateways. Resting orders at IBKR stay live, and you manage them yourself.
+
+**Diagnosis:** `radon ib status` reports the hold and Gateway state without changing them. A hold alone does not prove the Gateway stopped.
+
+**Stop:** if release fails, reports `HOLD NOT WRITTEN`, or reports `state unknown`, do not treat logout as confirmed and do not clear an existing hold to retry. Follow escalation below.
+
+1. If you can reach the broker, run `radon ib release --reason "flatten from mobile"` as root first (`ssh root@radon-broker`, or the jump host line above). Require exit status 0 and `RELEASED`, then confirm `radon ib status` shows `"held": true` and the Gateway stopped or missing. Only after confirmation, wait about 30 seconds before logging in to IBKR.
+2. If you cannot reach it, log in to IBKR Mobile or the web portal anyway. Once the broker runs the `primaryoverride` compose, the Gateway yields, and within about a minute the watchdog sets the hold (`auto:ib-watchdog`) and pages `IB Gateway HELD` once. Before that rollout, IBC takes the session back and kicks you; use step 1.
+3. Flatten. Nothing on the broker logs the Gateway back in while held. An `IB Gateway HELD` page is expected. Do not run `radon restart`, Start Gateway or `docker compose` to "fix" it.
+4. When done, log out of IBKR Mobile and the web portal. With `primaryoverride` a fresh Gateway login still takes the session and would end yours.
+5. Clear the hold: `radon ib resume` on the broker, or Resume Gateway in /admin once the app is back. Approve the one IBKR Mobile push. The watchdog pages `hold cleared`.
+6. **Verification:** `radon ib status` shows `"held": false` and `gateway: running`, `/health` reaches `auth_state=authenticated`, and the pool self-heal reconnects within 15 to 60 seconds.
+
+**Rollback:** after logging out of IBKR Mobile and the web portal, use `radon ib resume` and the verification above.
+
+**Escalation:** if shutdown cannot be confirmed or the hold cannot be written, escalate to the operator with broker console access. Emergency broker power-off ends that Gateway session. Verify the durable hold before reboot; a failed hold write does not protect the next boot.
+
 
 ---
 

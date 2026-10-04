@@ -121,6 +121,7 @@ For each finding, write down `actor -> action -> harm if stale -> source file:li
    - Title: `Documentation <date>: <plain-language issue>`.
    - Body: exactly three sections, **Issue discovered**, **What was done to fix it** and **Next**, with one `- **Component**: what happened.` bullet per finding.
    - Next holds only operator-only or blocked actions. If there are none, it says `Fixed with green deployment`.
+   - The runner sends every Pushover notification, including `radon PR green`. Pushover credentials are absent from your environment by design: do not send one, and do not list it under Next.
 5. **Watch CI:** `gh pr checks <url> --watch --interval 30`.
    - On a failure, run `gh run view <run-id> --log-failed`, fix the root cause on the branch, commit, push, and watch again.
    - Repeat until every check is green or the time budget is nearly spent.

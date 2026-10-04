@@ -523,3 +523,81 @@ def test_a_stamp_without_a_verdict_needs_a_fresh_terminal_record(rig, updated_at
     else:
         assert out["status"].startswith("INCOMPLETE"), out
         assert "audited SHA was NOT advanced" not in rig.comment()
+
+
+# --- node_modules for the security loop's Vitest stage -----------------------
+
+BUN_STUB = r"""#!/bin/bash
+printf '%s\n' "$*" >> "$CALLS/bun"
+[ -n "${STUB_BUN_FAIL:-}" ] && exit 1
+cwd=""; while [ $# -gt 0 ]; do [ "$1" = --cwd ] && cwd="$2"; shift; done
+mkdir -p "$cwd/node_modules"
+"""
+NODE_KEEP = "node_modules web/node_modules"
+
+
+def _bun_rig(rig, tmp_path):
+    bun = tmp_path / "bun-stub"
+    bun.write_text(BUN_STUB)
+    bun.chmod(0o755)
+    (rig.work / "web").mkdir()
+    for d in (rig.work, rig.work / "web"):
+        (d / "bun.lock").write_text('{"lockfileVersion": 1}\n')
+        (d / "package.json").write_text('{"name": "x"}\n')
+    _git("add", ".", cwd=rig.work)
+    _git("commit", "-qm", "bun projects", cwd=rig.work)
+    _git("push", "-q", "origin", "HEAD:main", cwd=rig.work)
+    return bun
+
+
+def _bun_calls(rig):
+    path = rig.calls / "bun"
+    return path.read_text().splitlines() if path.exists() else []
+
+
+def test_security_env_keeps_both_node_modules_trees():
+    env = (REPO / "scripts" / "runner" / "loops" / "security.env").read_text()
+    assert f'KEEP_PATHS="{NODE_KEEP}"' in env
+
+
+def test_pre_installs_both_bun_projects_frozen_without_scripts_once_per_lockfile(rig, tmp_path):
+    bun = _bun_rig(rig, tmp_path)
+    proc = rig.pre(phase="audit", KEEP_PATHS=NODE_KEEP, RADON_RUNNER_BUN=str(bun))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    calls = _bun_calls(rig)
+    if rig.loop == "security-deepsec":
+        assert calls == []
+        return
+    assert calls == [
+        f"install --frozen-lockfile --ignore-scripts --cwd {rig.work}",
+        f"install --frozen-lockfile --ignore-scripts --cwd {rig.work}/web",
+    ]
+    for d in (rig.work, rig.work / "web"):
+        assert (d / "node_modules" / ".radon-bun-lock.sha256").is_file()
+
+    # Unchanged lockfiles: the kept trees are reused, nothing reinstalls.
+    rig.pre(phase="remediate", KEEP_PATHS=NODE_KEEP, RADON_RUNNER_BUN=str(bun))
+    assert _bun_calls(rig) == calls
+
+    # A changed web lockfile reinstalls web only.
+    (rig.work / "web" / "bun.lock").write_text('{"lockfileVersion": 1, "changed": true}\n')
+    _git("commit", "-qam", "bump", cwd=rig.work)
+    _git("push", "-q", "origin", "HEAD:main", cwd=rig.work)
+    rig.pre(phase="audit", KEEP_PATHS=NODE_KEEP, RADON_RUNNER_BUN=str(bun))
+    assert _bun_calls(rig)[len(calls):] == [f"install --frozen-lockfile --ignore-scripts --cwd {rig.work}/web"]
+
+
+def test_a_failed_install_leaves_no_stamp_and_does_not_refuse_the_phase(rig, tmp_path):
+    bun = _bun_rig(rig, tmp_path)
+    proc = rig.pre(phase="audit", KEEP_PATHS=NODE_KEEP, RADON_RUNNER_BUN=str(bun), STUB_BUN_FAIL="1")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "refused=" not in proc.stdout
+    assert not (rig.work / "node_modules" / ".radon-bun-lock.sha256").exists()
+    if rig.loop == "security":
+        assert "Vitest stage will skip" in proc.stderr
+
+
+def test_the_pre_hook_names_bun_by_absolute_path():
+    pre = (HOOKS / "security_pre.sh").read_text()
+    assert 'BUN="${RADON_RUNNER_BUN:-/opt/homebrew/bin/bun}"' in pre
+    assert "command -v bun" not in pre

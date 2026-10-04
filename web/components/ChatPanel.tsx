@@ -4,7 +4,7 @@ import ErrorToast from "@/components/ErrorToast";
 import { formatOrderErrorMessage } from "@/lib/orderError";
 import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUpRight, Copy, Check, Plus, X, RotateCcw, Pencil, Activity } from "lucide-react";
+import { ArrowDown, ArrowUpRight, Copy, Check, Plus, X, RotateCcw, Pencil, Activity, Maximize2, Minimize2 } from "lucide-react";
 import { ApprovalGate, AskComposer, EngineTrace } from "@/components/agent";
 import { buildTurnSteps, describeEngines } from "@/lib/agent/turnSteps";
 import { assistantErrorMessage } from "@/lib/assistant/errorCopy";
@@ -49,6 +49,9 @@ type ChatPanelProps = {
    */
   isOpen?: boolean;
   onClose?: () => void;
+  /** Launcher full-screen state; the toggle renders only when a handler is passed. */
+  expanded?: boolean;
+  onToggleExpanded?: () => void;
   /**
    * A prompt handed over from another surface (e.g. a newsfeed follow-up chip).
    * Sent once on arrival, then reported back via onSeedConsumed.
@@ -207,6 +210,8 @@ export default function ChatPanel({
   portfolio,
   activeSection,
   onClose,
+  expanded = false,
+  onToggleExpanded,
   isOpen = true,
   seedPrompt = null,
   onSeedConsumed,
@@ -512,6 +517,7 @@ export default function ChatPanel({
         </div></div>
         <div className="chat-header-actions">
           <button type="button" className="chat-header-button" onClick={newConversation} disabled={isPlacing} aria-label="New conversation"><Plus size={16} /><span>New chat</span></button>
+          {onToggleExpanded ? <button type="button" className="chat-header-button chat-expand-button" onClick={onToggleExpanded} aria-pressed={expanded} aria-label={expanded ? "Exit full screen" : "Enter full screen"} title={expanded ? "Exit full screen" : "Full screen"}>{expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button> : null}
           {onClose ? <button type="button" className="chat-header-button" onClick={onClose} aria-label="Close chat"><X size={18} /></button> : null}
         </div>
       </header>

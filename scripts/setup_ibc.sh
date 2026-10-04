@@ -165,7 +165,7 @@ install() {
 
     # 6. Patch config.ini (preserves credentials, updates operational settings)
     echo "  Patching config.ini..."
-    patch_config_setting "ExistingSessionDetectedAction" "primary"
+    patch_config_setting "ExistingSessionDetectedAction" "primaryoverride"
     patch_config_setting "AcceptIncomingConnectionAction" "accept"
     patch_config_setting "AcceptNonBrokerageAccountWarning" "yes"
     patch_config_setting "AutoRestartTime" ""
@@ -173,10 +173,10 @@ install() {
     patch_config_setting "CommandServerPort" "7462"
     patch_config_setting "ControlFrom" ""
     patch_config_setting "ReloginAfterSecondFactorAuthenticationTimeout" "no"
-    echo "    ExistingSessionDetectedAction=primary"
+    echo "    ExistingSessionDetectedAction=primaryoverride"
     echo "    AcceptNonBrokerageAccountWarning=yes"
-    echo "    AutoRestartTime=disabled"
-    echo "    ColdRestartTime=disabled"
+    echo "    AutoRestartTime= (blank: the Gateway's stored daily-cycle setting applies)"
+    echo "    ColdRestartTime= (blank: the Gateway's stored daily-cycle setting applies)"
     echo "    CommandServerPort=7462"
 
     # 7. Generate plist

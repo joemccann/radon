@@ -10,7 +10,7 @@ One loop run is what the operator would do by hand: open an agent CLI in a fresh
 
 The agent does the whole job in one session: audit, fix, push the branch, open a draft PR, watch CI. The prompt owns what the loop does; the runner owns nothing else.
 
-The two security loops (`security`, `security-deepsec`) also use the optional knobs in [Loop config](#loop-config): one session per phase (audit, remediate, deliver), a claude-only ladder from a resolver, a root-owned `gh` guard, and root-owned pre- and post-run hooks that port the old wrapper's rails (credential and billing-reroute refusals, the green-base checkout, the sanitized dead-man, the private report). [docs/operations.md](operations.md#background-services) has the operator contract.
+The two security loops (`security`, `security-deepsec`) also use the optional knobs in [Loop config](#loop-config): one session per phase (audit, remediate, deliver), a claude-only ladder from a resolver, a root-owned `gh` guard, and root-owned pre- and post-run hooks that port the old wrapper's rails (credential and billing-reroute refusals, the green-base checkout, the sanitized dead-man, the private report). [docs/operations.md](operations.md#background-services) has the operator contract. The `security` loop's native audit workflow cannot read the environment, so its prompt passes `$RADON_REPO_ROOT` as `args.repoRoot`.
 
 ## Safety boundary
 
@@ -21,8 +21,8 @@ Safety is where the runner runs, not what the script checks:
 | Agent cannot read operator files, ssh keys, `~/.radon`, Keychain | Dedicated macOS user `_radonbot`, standard (non-admin), hidden |
 | Agent cannot edit the runner | `run_loop.sh`, `loops/*.env`, the hooks, their `lib/` helpers, the `gh` guard and `gitconfig` installed root-owned in `/usr/local/radon-runner` |
 | Agent cannot plant a binary or git config the runner runs | The LaunchDaemon's `PATH` is `/opt/homebrew/bin:/usr/bin:/bin`; the bot's CLI directories (`~/.local/bin`, `~/.grok/bin`, `~/.bun/bin`) are prepended only for the agent. Every git the runner, the hooks and the agent run reads `/usr/local/radon-runner/gitconfig` (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM=1`), never `~/.gitconfig`, and the pre-run hook rebuilds the clone's `.git/config` before every phase |
-| No production credential in the clone | The clone gets no `.env`. The runner loads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from `RADON_RUNNER_DOTENV` or `/usr/local/radon-runner/dotenv-path` (never from the plist), then falls back to `~/.radon-runner.env`. `GH_TOKEN` loads only from `~/.radon-runner.env`. `_radonbot` and every agent share a uid, so any file the runner can read, the agent can read. The runner unsets the Pushover keys in the agent process; `GH_TOKEN` stays so the agent can push. Point the dotenv at a Pushover-only file (step 8), not the operator's full Radon `.env`. Never put a production credential or an admin token in `~/.radon-runner.env` or anywhere in the bot's home |
-| Agent cannot merge or push `main` | A separate GitHub machine account with the Write role on this repo only, used through its classic `repo` token, plus the `main-review` repository ruleset on the default branch: 1 approving review, approval of the most recent push required, stale approvals dismissed on push. Its only bypass actor is the Repository admin role in pull-request mode, so an admin merges through a PR and never pushes `main` directly; the bot account is not exempt. The 27 required status checks stay in the classic branch protection on `main`, not in the ruleset. A token of the operator's own account would not do: it acts as the admin and bypasses the ruleset |
+| No production credential in the clone | The clone gets no `.env`. The runner loads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from `RADON_RUNNER_DOTENV` or `/usr/local/radon-runner/dotenv-path` (never from the plist), then falls back to `~/.radon-runner.env`. `GH_TOKEN` loads only from `~/.radon-runner.env`. `_radonbot` and every agent share a uid, so any file the runner can read, the agent can read. The runner unsets the Pushover keys in the agent process and sends every notification itself; each runner prompt tells the agent not to send `radon PR green` or list the absent keys under Next. `GH_TOKEN` stays so the agent can push. Point the dotenv at a Pushover-only file (step 8), not the operator's full Radon `.env`. Never put a production credential or an admin token in `~/.radon-runner.env` or anywhere in the bot's home |
+| Agent cannot merge or push `main` | A separate GitHub machine account with the Write role on this repo only, used through its classic token (`repo` plus `workflow`, so nightly CI work that edits `.github/workflows` can be pushed to a branch), plus the `main-review` repository ruleset on the default branch: 1 approving review, approval of the most recent push required, stale approvals dismissed on push. Its only bypass actor is the Repository admin role in pull-request mode, so an admin merges through a PR and never pushes `main` directly; the bot account is not exempt. The 27 required status checks stay in the classic branch protection on `main`, not in the ruleset. A token of the operator's own account would not do: it acts as the admin and bypasses the ruleset |
 
 The six loops in [Migration](#migration-from-the-per-loop-wrappers) use the bot runner. `scripts/codemap_nightly.sh` is separate and merges its own PR with the operator's token. Verify the live ruleset in step 8b.3 before enabling a new installation.
 
@@ -62,7 +62,7 @@ GL="$(mktemp -d)" && curl -fsSLo "$GL/gitleaks.tgz" https://github.com/gitleaks/
 sudo pmset -a sleep 0 displaysleep 10     # the Mac must stay awake at night
 ```
 
-`coreutils` provides `timeout`; the runner exits 69 without it. `node` runs Vitest for the testing loop (bun installs the packages, `npx vitest run` runs them); without it that loop leaves Vitest to PR CI. `codex` is shared from Homebrew; the other agent CLIs are installed per user in step 4.
+`coreutils` provides `timeout`; the runner exits 69 without it. `node` runs Vitest for the testing loop (bun installs the packages, `npx vitest run` runs them); without it that loop leaves Vitest to PR CI. For the security loop, `security_pre.sh` installs both bun projects (`bun install --frozen-lockfile --ignore-scripts`, root and `web/`) and `KEEP_PATHS` carries `node_modules` and `web/node_modules` across the nightly re-clone, so they reinstall only when a lockfile or `package.json` changes. A failed install skips the Vitest stage; it never refuses the phase. `codex` is shared from Homebrew; the other agent CLIs are installed per user in step 4.
 
 ### 2. Install the runner (operator)
 
@@ -127,10 +127,10 @@ A reboot locks this keychain, which also holds the bot's claude.ai session (step
 
 ### 6. Provider keys for fx (operator, then bot shell)
 
-In your own tab, copy only the two keys from your agent-cli env into the bot's. `grep` runs as you, so it reads your file; `sudo` only writes the bot's:
+In your own tab, copy only the two keys from your agent-cli env into the bot's. `grep` runs as you, so it reads your file; `sudo -u _radonbot` writes the bot's as the bot (never as root, which would follow a link the bot planted):
 
 ```bash
-grep -E "^(export )?(NVIDIA_API_KEY|CEREBRAS_API_KEY)=" ~/.radon/agent-cli/env | sudo /bin/sh -c 'umask 077; d=/Users/_radonbot/.radon; install -d -m 700 -o _radonbot -g staff $d $d/agent-cli && cat > $d/agent-cli/env && chown _radonbot:staff $d/agent-cli/env'
+grep -E "^(export )?(NVIDIA_API_KEY|CEREBRAS_API_KEY)=" ~/.radon/agent-cli/env | sudo -u _radonbot /bin/sh -c 'umask 077; d=/Users/_radonbot/.radon; mkdir -p $d/agent-cli && chmod 700 $d $d/agent-cli && cat > $d/agent-cli/env'
 ```
 
 On a Mac where you have no such file, create `/Users/_radonbot/.radon/agent-cli/env` in the bot shell with `NVIDIA_API_KEY=` and `CEREBRAS_API_KEY=` lines instead. Then, in the bot shell:
@@ -166,13 +166,13 @@ The bot pushes and opens PRs as its own account, so the `main` ruleset binds it.
    ```
 
 4. As the bot, accept at https://github.com/joemccann/radon/invitations. Confirm from your account: `gh api repos/joemccann/radon/collaborators/radon-runner-bot/permission --jq .permission` prints `write`.
-5. As the bot, open https://github.com/settings/tokens/new?scopes=repo&description=radon-runner. Keep only `repo` ticked, set Expiration to Custom with a date one year out, then Generate. Copy the `ghp_...` value into your keychain without echoing it:
+5. As the bot, open https://github.com/settings/tokens/new?scopes=repo,workflow&description=radon-runner. Keep only `repo` and `workflow` ticked, set Expiration to Custom with a date one year out, then Generate. Copy the `ghp_...` value into your keychain without echoing it:
 
    ```bash
    read -rs "T?token: "; security add-generic-password -U -s github-radon-runner-bot-token -a radon-runner-bot -w "$T"; unset T
    ```
 
-6. Check the token acts as the bot with only `repo`:
+6. Check the token acts as the bot with only `repo` and `workflow`:
 
    ```bash
    T=$(security find-generic-password -s github-radon-runner-bot-token -w)
@@ -180,14 +180,14 @@ The bot pushes and opens PRs as its own account, so the `main` ruleset binds it.
    curl -s -H "Authorization: token $T" https://api.github.com/user | grep '"login"'; unset T
    ```
 
-   Expect `x-oauth-scopes: repo`, your chosen expiry, and `"login": "radon-runner-bot"`.
+   Expect `x-oauth-scopes: repo, workflow`, your chosen expiry, and `"login": "radon-runner-bot"`.
 
 ### 8. Runner secrets (operator)
 
 Write the token into the bot's secrets file straight from your keychain:
 
 ```bash
-security find-generic-password -s github-radon-runner-bot-token -w | sudo /bin/sh -c 'umask 077; read -r t; f=/Users/_radonbot/.radon-runner.env; { grep -v "^GH_TOKEN=" "$f"; printf "GH_TOKEN=%s\n" "$t"; } > "$f.new" && chown _radonbot:staff "$f.new" && mv "$f.new" "$f"'
+security find-generic-password -s github-radon-runner-bot-token -w | sudo -u _radonbot /bin/sh -c 'umask 077; read -r t; f=/Users/_radonbot/.radon-runner.env; { grep -v "^GH_TOKEN=" "$f"; printf "GH_TOKEN=%s\n" "$t"; } > "$f.new" && mv "$f.new" "$f"'
 ```
 
 Pushover is a pair. The runner takes both keys from the first source that has both, and never mixes a half pair:
@@ -201,7 +201,7 @@ Only those two keys are read from the dotenv. `GH_TOKEN` stays in `~/.radon-runn
 `_radonbot` and every agent run as the same uid, so whatever file the runner can read, the agent can read. Pointing `RADON_RUNNER_DOTENV` at the full Radon root `.env` and granting the bot read access exposes every production key in it to the agents, which contradicts the safety table. Use a Pushover-only file, or an allowlisted copy using the step-6 pattern:
 
 ```bash
-grep -E '^(export )?(PUSHOVER_USER|PUSHOVER_TOKEN)=' /path/to/radon/.env | sudo /bin/sh -c 'umask 077; d=/Users/_radonbot/.radon; install -d -m 700 -o _radonbot -g staff $d && cat > $d/pushover.env && chown _radonbot:staff $d/pushover.env'
+grep -E '^(export )?(PUSHOVER_USER|PUSHOVER_TOKEN)=' /path/to/radon/.env | sudo -u _radonbot /bin/sh -c 'umask 077; d=/Users/_radonbot/.radon; mkdir -p $d && chmod 700 $d && cat > $d/pushover.env'
 ```
 
 Set the path at install time (a refresh without the var leaves `dotenv-path` in place). Refuse a relative path. `install.sh` never chmod, chown or copies the target `.env`. If the bot cannot read it, install prints one WARNING and continues:
@@ -267,7 +267,7 @@ The `security` and `security-deepsec` loops need the bot's own Claude Code on th
    Operator tab, register it as a write key on the private repository:
 
    ```bash
-   sudo cat /Users/_radonbot/.radon-runner-reports-key.pub | gh repo deploy-key add - -R joemccann/radon-security-reports --allow-write -t radon-runner-bot
+   sudo -u _radonbot cat /Users/_radonbot/.radon-runner-reports-key.pub | gh repo deploy-key add - -R joemccann/radon-security-reports --allow-write -t radon-runner-bot
    ```
 
 Steps 6 to 8 write into the bot's home only as the bot: your account reads your files and pipes them to a `tar` that runs as `_radonbot`, so nothing runs as root on a path the bot can write. `B` is the bot's state directory.
@@ -384,6 +384,7 @@ The build.nvidia.com key is free but rate limited per key, about 40 requests a m
 
 - fx is a closed binary, so the `fx:nvidia` rung runs it as provider `nvidia-paced` against a loopback proxy on `127.0.0.1:18431`. The runner starts the proxy on first use (detached, cwd `/`, a clean environment; it never holds the key, it forwards fx's bearer to `https://integrate.api.nvidia.com` only) and it exits after 15 idle minutes. Every loop on the Mac shares it and one state file, `/Users/_radonbot/radon-runner/nvidia-rate.json`.
 - It spaces requests to `RADON_NVIDIA_RPM` (default 20, half the key's limit, because production uses the same key), at most 2 at a time. On a 429 it honours `Retry-After` / `x-ratelimit-reset*` (default 30 s, capped at 300 s) for every loop and retries at most twice; when the budget is still spent it answers a local 429 and sends nothing upstream.
+- Shared state locking is bounded to 250 ms across the thread mutex and file lock, and admission also respects a shorter caller budget. Contention refuses a send slot; response bookkeeping surfaces an explicit state-lock error. The proxy returns 503 and closes its upstream connection instead of hanging or sending an unpaced request (REL-300 / R-719).
 - Five consecutive 429s (`RADON_NVIDIA_TRIP_AFTER_429S`) or any 401/403 trip NVIDIA for 15 minutes (`RADON_NVIDIA_TRIP_SECS`, `RADON_NVIDIA_AUTH_BLOCK_SECS`) and write `nvidia-rate.json.tripped`. The runner checks that file before `fx:nvidia` and every 10 s while it runs: a trip stops fx and exits 75, so the ladder moves to the next rung instead of hammering the key. A 401/403 is never retried and is logged as `NVIDIA AUTHORIZATION FAILED` with a redacted body snippet.
 - Log: `sudo -u _radonbot tail -40 /Users/_radonbot/radon-runner/logs/nvidia-proxy.log` (429s, trips, 403s, a short secret-free excerpt of every non-200 body).
 

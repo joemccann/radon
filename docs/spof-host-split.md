@@ -146,7 +146,10 @@ Operator commands after the cut:
 - Broker: `ssh root@<broker> radon {start|stop|restart|status}`
   Gateway via `radon-ib-gateway-control`. Does not require radon-health.
 - App admin Force 2FA / Stop / Start Gateway proxies over mTLS to
-  `https://10.0.0.4:8340` (`scripts/ib_gateway_remote/serve.py`). Setup:
+  `https://10.0.0.4:8340` (`scripts/ib_gateway_remote/serve.py`). On the
+  app role the Gateway status row always comes from the broker; a local
+  `radon-ib-gateway.service` row from `radon-control` (a leftover pre-split
+  unit) is dropped so it cannot shadow it and disarm the controls. Setup:
   1. Broker: `cloud/scripts/ib-gateway-remote-certs.sh` writes the CA,
      server, and client pairs under `/etc/radon/ib-remote`. Copy `ca.pem`,
      `client.pem`, `client-key.pem` to the app host at the same paths.
@@ -223,7 +226,11 @@ The broker daemon (`scripts/ib_gateway_remote/serve.py`) answers `start` and
 `restart` with `423 OPERATOR_HOLD`, without running the helper, while
 `radon ib release` holds the Gateway out of the operator's shared IBKR
 login. Its `/status` payload carries `operator_hold`. `stop` and
-`reset-lease` stay open. Runbook: `docs/ib-gateway-recovery.md`.
+`reset-lease` stay open. `POST /hold` (JSON `reason`, `actor`) writes the
+hold and runs the helper `stop`, with no cooldown. `POST /unhold` removes it and
+runs one `start` through the usual cooldown and login-throttle gates. The app
+reaches both through FastAPI `POST /ib/operator-hold` (operator JWT). Runbook:
+`docs/ib-gateway-recovery.md`.
 
 ## Never
 

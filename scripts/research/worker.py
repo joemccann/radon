@@ -5,6 +5,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import signal
 import time
 from datetime import datetime, timezone
@@ -49,14 +50,27 @@ def heartbeat(root, state, error=None, stage=None, local_only=False):
 
 def discover(client, state, now=None, current_only=False, on_page=None):
     dates = date_scopes(now)
-    scopes = dict(dates)
+    scopes, padded = {}, {}
+    for scope, folder_date in dates:
+        scopes[scope] = folder_date
+        # The provider has written both 'Oct 02' and 'Oct 2' for a single-digit day.
+        alias = re.sub(r' 0(\d)$', r' \1', scope)
+        if alias != scope:
+            scopes.setdefault(alias, folder_date)
+            padded[alias] = scope
+    watched = set(state.scopes())
     if not current_only:
-        for scope in state.scopes():
+        for scope in sorted(watched):
             scopes.setdefault(scope, None)
     added = 0
     failures = []
     retry_after = 0
+    absent = set()
     for scope, folder_date in scopes.items():
+        # REL-302 / R-721: fallback admission must not orphan a saved
+        # unpadded stream when its padded spelling later appears.
+        if scope in padded and padded[scope] not in absent and scope not in watched:
+            continue
         try:
             cursor = state.cursor(scope)
             if state.work_count(scope=scope, folder_date=folder_date) == 0:
@@ -76,6 +90,7 @@ def discover(client, state, now=None, current_only=False, on_page=None):
                         continue
                     if error.status == 409 and not cursor:
                         # Date folder not yet created or previously watched folder removed.
+                        absent.add(scope)
                         break
                     raise
                 page_eligible = sum(1 for entry in page['entries'] if eligible(entry))
@@ -109,6 +124,27 @@ def discover(client, state, now=None, current_only=False, on_page=None):
             if status == 429 or retry_after:
                 # Respect provider backoff before another listing or download.
                 break
+    lister = getattr(client, 'folder_names', None)
+    if lister and not retry_after:
+        # A day folder under any other spelling is a 409 above, which reads as "not created yet".
+        months = {}
+        for scope, _ in dates:
+            month, _, day = scope.rpartition('/')
+            months.setdefault(month, day.split(' ')[0])
+        for month, prefix in months.items():
+            failure = {'stage': 'discovery', 'scope_id': hashlib.sha256(month.encode()).hexdigest()[:16]}
+            try:
+                known = {f'{prefix} {day:02}' for day in range(1, 32)} | {f'{prefix} {day}' for day in range(1, 32)}
+                unknown = [name for name in lister(month) if name not in known]
+                if unknown:
+                    failures.append({**failure, 'type': 'dropbox_unrecognized_folder', 'count': len(unknown)})
+            except Exception as error:
+                status = getattr(error, 'status', None)
+                if status == 409:
+                    continue  # Month folder not created yet.
+                failures.append({**failure, 'type': classify_error(error)}
+                                | ({'status': status} if isinstance(status, int) else {}))
+                retry_after = max(retry_after, getattr(error, 'retry_after', 0) or 0)
     if failures:
         raise DiscoveryError(added, failures, retry_after)
     return added

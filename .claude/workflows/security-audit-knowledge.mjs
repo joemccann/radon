@@ -1,7 +1,3 @@
-import { resolveRadonRepoRoot } from './resolveRepoRoot.mjs'
-
-// Repo root: RADON_REPO_ROOT, then RADON_WEEKEND_REPO, then git toplevel, then cwd.
-
 export const meta = {
   name: 'security-audit-knowledge',
   description: 'Focused security audit of the Radon knowledge-base subsystem (Phases 0-3): SQLi, prompt injection, MCP trust boundary, data isolation, ingest, secrets. Finder -> adversarial verifier -> critic.',
@@ -13,7 +9,18 @@ export const meta = {
   ],
 }
 
-const REPO = resolveRadonRepoRoot()
+// Repo root: args.repoRoot (a plain absolute path), else each agent's git
+// toplevel. The Workflow runtime has no module loader, filesystem or process,
+// so the root cannot be resolved here. It is interpolated into shell
+// commands, so anything but a plain absolute path fails closed.
+const REPO = (() => {
+  const root = args && args.repoRoot
+  if (root === undefined || root === null || root === '') return '"$(git rev-parse --show-toplevel)"'
+  if (typeof root !== 'string' || !/^\/[A-Za-z0-9._/-]*$/.test(root) || /(^|\/)\.\.(\/|$)/.test(root)) {
+    throw new Error('security-audit-knowledge: args.repoRoot must be a plain absolute path')
+  }
+  return root.replace(/\/+$/, '') || '/'
+})()
 
 const PREAMBLE = `You are a senior application-security engineer auditing the NEWLY ADDED knowledge-base (KB) subsystem of RADON, a production single-operator options/equities trading app. Repo root: ${REPO}.
 

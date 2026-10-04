@@ -22,6 +22,7 @@ export type FlashTarget = {
 };
 import IbGatewayCard from "./IbGatewayCard";
 import Ib2faControls from "./Ib2faControls";
+import IbOperatorHold from "./IbOperatorHold";
 import ServiceControlPanel from "./ServiceControlPanel";
 import RestartLog from "./RestartLog";
 import AdminAttentionQueue from "./AdminAttentionQueue";
@@ -592,6 +593,11 @@ export default function AdminWorkspace() {
                 primaryActionContainer={primaryActionContainer}
                 primaryObservationCurrent={isAdminObservationCurrent(sources.health, nowTick) && isAdminObservationCurrent(sources.services, nowTick)}
                 onInspect={() => setControlsOpen("gateway")}
+              />
+              <IbOperatorHold
+                hold={health?.ib_gateway?.operator_hold}
+                disabledReason={commandPending ? "Another command is in progress." : null}
+                onAfter={refreshStatus}
               />
         </AdminControlDialog>
         <AdminControlDialog open={controlsOpen === "services"} onClose={() => setControlsOpen(null)} title="Service controls" id="service-controls">

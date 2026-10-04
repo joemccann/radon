@@ -1,7 +1,7 @@
 """LLM distillation of knowledge docs into normalized searchable summaries.
 
 Uses the shared model ladder (``clients.model_ladder.complete_text_json``):
-subscription credentials only for Anthropic/Grok/Codex/Gemini (prepaid wallets
+subscription credentials only for Anthropic/Grok/Codex/Antigravity (prepaid wallets
 skipped unless ``RADON_LADDER_ALLOW_PREPAID=1``), then NVIDIA, then Cerebras
 last. Distillation is best-effort by contract: any failure returns None and
 never raises. The raw content is FTS-searchable regardless, and a stored row
