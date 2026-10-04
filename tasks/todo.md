@@ -3727,7 +3727,7 @@ P1/P2 (steps 1-5 code) are on `main` (`26668ef8`). Timer not enabled. No SendReq
 
 ---
 
-# Task: Cash-flow Flex 1025 lockout (2026-08-21)
+# Task: Cash-flow Flex lockout (2026-08-21)
 
 ## Dependency graph
 
@@ -3745,9 +3745,9 @@ P1/P2 (steps 1-5 code) are on `main` (`26668ef8`). Timer not enabled. No SendReq
 
 ## Review
 
-- Production 2026-08-21T13:58:26Z: SendRequest 1025, class=permanent, next_attempt Monday 08:00 ET. Last success 4d earlier.
-- Mechanism: 1001×2 SendRequest + TWR 07:30 + page-driven Flex every 20 min on one token.
-- Ops: zero Flex SendRequests until the sidecar lapses. Portal Run 1442520, then `--from-file`. Do not retry Monday.
+- A production lockout was classified as permanent and protected by the shared embargo.
+- Retry behavior was removed from the affected request paths.
+- Operators can ingest an exported report with `--from-file` while the embargo is active.
 
 ## Constraints
 
@@ -3761,21 +3761,21 @@ P1/P2 (steps 1-5 code) are on `main` (`26668ef8`). Timer not enabled. No SendReq
 
 ## Dependency graph
 
-- T1 depends_on: [] - Reproduce CBRS SELL-combo modify P&L (Max Gain $1,035,835 / Max Loss $4,165) as a failing test
+- T1 depends_on: [] - Reproduce incorrect SELL-combo modify P&L as a failing test using synthetic values
 - T2 depends_on: [T1] - Match working SELL BAG to held combo and pass `closeOut.entryCostDollars`
 - T3 depends_on: [T2] - Focused Vitest + Playwright; visual confirm; no live modify
 
 ## Checklist
 
-- [x] T1 Red: modify modal close of 50x CBRS RR @ $8 shows realized P&L, not opening max gain/loss
+- [x] T1 Red: modify modal close shows realized P&L, not opening max gain/loss
 - [x] T2 Wire `findHeldComboForClose` into `ModifyOrderModal` combo `riskInput`
 - [x] T3 Green tests + screenshot of Close Credit / Est. Realized P&L
 
 ## Review
 
-- Root cause: combo modify sent the post-modify BAG through opening-risk math. Held long 205 calls covered the inverted short call, leaving a synthetic long 200 put. Max Gain = (200 + 8) x 50 x 100 minus round-trip cost = $1,035,835. Max Loss = that cost = $4,165.
+- Root cause: combo modify sent the post-modify BAG through opening-risk math instead of close-out math.
 - Fix: `findHeldComboForClose` matches SELL envelope + structure legs + qty <= held units, then `closeOut.entryCostDollars` from `resolveEntryCost`.
-- Red reproduced screenshot dollars. Green: Close Credit $40,000 / Est. Realized P&L $15,000. Playwright screenshot `web/test-results/modify-combo-close-pnl.png`.
+- Red reproduced the incorrect risk labels. Green showed close credit and estimated realized P&L. Playwright screenshot `web/test-results/modify-combo-close-pnl.png`.
 - Focused Vitest: 35 passed. Playwright: close-credit spec passed. No live broker modify.
 
 ## Constraints
