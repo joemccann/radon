@@ -8841,3 +8841,13 @@ Delivery review: draft https://github.com/joemccann/radon/pull/866; source head 
 - [ ] T5 (depends_on: [T4]): review rails and post one durable checkpoint on issue #196.
 
 Review 2026-10-03: CIP-016 reserved experiment restored against 15bdb9a4; regression red 2 failed/7 passed, green cloud 83 passed, script gate/inventory/path contracts 90 passed. YAML/inline shell/Python syntax, pinned actions, complete 12-family gate equality and diff/secret reviews pass. Full suites, Vitest, Docker builds and workflow lint require PR CI. Expected workflow-scope publication block remains; exact delivery receipt and all run strata belong in the single issue #196 checkpoint. No production access, synthetic samples, merge, main push or additional experiment ID.
+
+## Nightly reliability 2026-10-04
+
+- [x] T1 depends_on: [] Install isolated toolchain, recover trusted checkpoint and reserve tonight's branch.
+- [ ] T2 depends_on: [T1] Audit delta and codemap importers; execute standing sweeps and triage inherited acceptance.
+- [ ] T3 depends_on: [T2] Repair verified findings serially with fault-injection red/green and focused gates.
+- [ ] T4 depends_on: [T3] Run permanent drills, validate publication and await exact-head CI on one draft PR.
+- [ ] T5 depends_on: [T4] Post one rolling issue comment with retained acceptance and final review.
+
+Review: pending. Open PR #882 reserves R-721/R-722/R-723, REL-302/REL-303/REL-304 and R-315/R-316/R-317/R-318. Only tonight's branch is eligible for push; full suites and Vitest belong to CI.

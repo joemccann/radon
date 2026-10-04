@@ -2908,3 +2908,13 @@ REL-108 / R-303 is operator-only: the prepared comment correction and parsed-wor
 REL-298 closing bound: four additional faults failed twice with 48 unknown inspections per release; the repaired three-valued probe performs one unknown observation per shutdown stage while retaining convergence polling for confirmed-running containers. Release/shim suites: 57 passed. No RELEASED claim is made without stopped/missing evidence.
 
 Audited through: cb47c52ab055221fd7d88ead72ff28acb554e7d7 on 2026-10-02 — 4 new findings
+
+## Delta audit 2026-10-04
+
+Trusted checkpoint: `15bdb9a4bb09a3bae00fae7e6c4d3b9f8e838489`; target `6603be9b2877041acfd033c5e0a5b2191635645c`.
+Range: 27 commits, 68 changed paths, 146 paths including direct codemap importers.
+Open draft PR #882 reserves R-721/R-722/R-723, REL-302/REL-303/REL-304 and inherited R-315/R-316/R-317/R-318; these are not reallocated or repaired here.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-724 | P1 | `cloud/scripts/install-grok-upgrade-controller.sh:35-51` | DONE: the EXIT cleanup deleted the previous trusted controller after a failed second rename. REL-305 acceptance: publication failure or TERM after retirement restores the old bytes; failed restoration preserves a named backup. Three injected faults failed twice; 14 controller tests pass after repair. SIGKILL/power loss requires the documented exact-backup restore, not a claim of atomic directory exchange. |
