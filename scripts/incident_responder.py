@@ -377,6 +377,10 @@ def build_analyze_command(projection_path: Path,
     return [
         "claude", "-p", prompt,
         "--permission-mode", "plan",
+        # The deny list names core tools only; MCP server tools and future
+        # built-ins would stay on the surface. Allowlist the surface itself.
+        "--tools", *ANALYZE_ALLOWED_TOOLS,
+        "--strict-mcp-config",
         "--allowedTools", *ANALYZE_ALLOWED_TOOLS,
         "--disallowedTools", *denied,
     ]

@@ -2962,7 +2962,9 @@ older than 12 min, writes `<incident_id>.diagnosis.md` and
 `<incident_id>.incident.html` beside the mirror, and fires a macOS
 notification whose body is the incident title (failing services, not a
 filename). Click opens the HTML card. Analyze-only by design — shipping a
-fix is human-gated.
+fix is human-gated. The analysis session's tool surface is an allowlist
+(`--tools Read Grep Glob --strict-mcp-config`): no MCP server or other
+built-in tool is loaded, and the deny rules remain a second layer.
 
 Do not post via `osascript -e 'display notification'`. That banner is owned
 by Script Editor, so a click opens an empty Untitled document. Delivery

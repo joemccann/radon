@@ -69,6 +69,20 @@ export RADON_MEDIA_REMOTE=radon@<prod-host>:/home/radon/radon-cloud/media/
 
 The same SSH public key is authorized on both routes — `~/.ssh/authorized_keys` on the VPS is shared between the Tailscale and public-IP entry points, so no key swap is needed. Tailscale remains the secure default; only flip the env when you actively want the public path. If the public route ever needs different SSH options (custom port, identity file, `StrictHostKeyChecking`), surface them via `RADON_MEDIA_RSYNC_SSH_OPTS` (not yet wired — add when you actually need it).
 
+## Realtime relay admission
+
+The relay admits at most 512 distinct L1 subjects per WebSocket client across
+stock, option and index subscriptions (R-036 / REL-021b). Admission reserves
+capacity before asynchronous futures resolution and refuses excess subjects
+with `SUBSCRIPTION_LIMIT` before broker or state allocation. Repeating an
+existing subject remains allowed; unsubscribe and disconnect free its slot.
+A client leaving during resolution cannot open an orphan broker line.
+One browser tab is one client carrying every page's subjects (the
+all-strikes chain alone streams up to 202 contracts), so the cap bounds
+runaway growth without refusing a legitimate workspace; it is not a
+fleet-wide line reservation.
+Snapshot queue saturation and cancellation retain their independent bounds.
+
 ## Mode switch
 
 `cloud.sh` selects `RADON_DEV_PROFILE=cloud-thin`: the laptop runs only Next.js.

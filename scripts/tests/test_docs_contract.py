@@ -1378,6 +1378,86 @@ class TestOperatorHoldDesignBoundary:
             assert flag in preface
         assert "Do not execute the proposed procedures below" in preface
 
+    def test_mobile_flatten_waits_for_confirmed_release_and_persisted_hold(self):
+        doc = (_ROOT / "docs/ib-gateway-recovery.md").read_text()
+        procedure = _section(doc, "Runbook: flatten from IBKR Mobile while the app is down")
+        release_step = next(line for line in procedure.splitlines() if line.startswith("1. "))
+        for required in ("exit status 0", "`RELEASED`", "`radon ib status`", '"held": true'):
+            assert required in release_step, required
+        for required in ("HOLD NOT WRITTEN", "state unknown", "do not clear", "before reboot"):
+            assert required in procedure, required
+        assert "does not set a trading halt" in procedure
+        for label in ("Symptom", "Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verification", "Rollback", "Escalation"):
+            assert f"**{label}:**" in procedure
+
+
+class TestIncidentPublicationOwner:
+    """DOC-155: recovery guidance follows the gate's expanded detectors."""
+
+    def test_pickup_owner_covers_generic_and_environment_credential_refusals(self):
+        procedure = _section((_ROOT / "docs/grok-page-responder.md").read_text(),
+                             "Open-PR path: the Mac mini picks the branch up")
+        for required in ("opaque literal", "credential-named", "verbatim", "pickup process",
+                         "../scripts/ir_push_gate.py", "../scripts/credential_redaction.py"):
+            assert required in procedure, required
+        for label in ("Symptom", "Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verification", "Rollback", "Escalation"):
+            assert f"**{label}:**" in procedure
+
+    def test_publication_gate_changes_reach_the_recovery_owner(self):
+        rules = _load_owners()["rules"]
+        assert _violations(["scripts/ir_push_gate.py"], rules)
+        assert _violations(["scripts/ir_push_gate.py", "docs/grok-page-responder.md"], rules) == []
+
+
+class TestSubscriptionRecoveryBillingOwner:
+    """DOC-156: token recovery must not promise automatic prepaid fallback."""
+
+    def test_token_daemon_intro_defers_billing_to_auth_owner(self):
+        intro = (_ROOT / "docs/subscription-tokens.md").read_text().split("## Per-provider contract", 1)[0]
+        assert "silently demotes" not in intro
+        assert "oauth-subscription-auth.md#radon-http-model-ladder-server" in intro
+        assert "unavailable" in intro
+        module_intro = (_ROOT / "scripts/subscription_tokens.py").read_text().split('"""', 2)[1]
+        assert "silently demotes" not in module_intro
+
+    def test_reauth_runbook_states_its_recovery_boundaries(self):
+        procedure = _section((_ROOT / "docs/subscription-tokens.md").read_text(),
+                             "Operator re-auth runbook")
+        for label in ("Symptom", "Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verification", "Rollback", "Escalation"):
+            assert f"**{label}:**" in procedure
+
+    def test_vault_mutations_use_the_service_credential_context(self):
+        doc = (_ROOT / "docs/subscription-tokens.md").read_text()
+        section = _section(doc, "Sealing a freshly created credential")
+        commands = re.findall(r"```bash\n(.*?)```", section, re.S)
+        assert commands
+        assert not any(re.search(r"subscription_tokens\s+--(?:seal|restore)\b", command)
+                       for command in commands), "A bare SSH shell lacks the unit's vault context"
+        assert "systemctl start radon-subscription-tokens.service" in section
+        assert "systemctl status radon-subscription-tokens.service" in section
+        assert "different store" in section and "decrypted key" in section
+        assert "operations.md#encrypted-credential-store-profile-credentials-tab" in section
+        unit = (_ROOT / "cloud/services/radon-subscription-tokens.service").read_text()
+        assert "Environment=RADON_SECRET_STORE_PATH=" in unit
+        assert "LoadCredentialEncrypted=radon-secret-store-key:" in unit
+        assert "-m scripts.subscription_tokens --once" in unit
+
+
+class TestApiTimerOwner:
+    """DOC-157: API instructions should link schedules instead of copying them."""
+
+    def test_api_timer_instructions_defer_to_operator_and_executable_owners(self):
+        timers = _section((_ROOT / "scripts/api/CLAUDE.md").read_text(), "Autonomous Timers (Hetzner)")
+        assert "| Timer |" not in timers
+        assert "radon-cloud/services/" not in timers
+        assert "../../docs/operations.md#background-services" in timers
+        assert "../../cloud/services/" in timers
+        assert "literal env" in timers
+        ops = (_ROOT / "docs/operations.md").read_text()
+        row = next(line for line in ops.splitlines() if line.startswith("| `radon-refresh.timer` |"))
+        assert "../cloud/services/radon-refresh.timer" in row
+        assert "60s" not in row
+
 
 class TestCredentialSetupOwners:
     """DOC-150/151: setup instructions must select the implemented auth path."""

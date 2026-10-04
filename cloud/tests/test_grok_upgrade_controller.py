@@ -151,3 +151,48 @@ def test_responder_cannot_write_the_controller(path):
     text = (SERVICES / "radon-grok-page-responder.service").read_text(encoding="utf-8")
     rw = [l.split("=", 1)[1] for l in text.splitlines() if l.startswith("ReadWritePaths=")]
     assert not any(path.startswith(p.lstrip("-")) for p in " ".join(rw).split())
+
+
+@pytest.mark.parametrize("fault", ["publish-failure", "term-after-retire", "rollback-failure"])
+def test_rel305_failed_install_preserves_previous_controller(tmp_path, fault):
+    """R-724 / REL-305: two-rename failure must not erase the trusted tree."""
+    src = tmp_path / "stage" / "scripts"
+    src.mkdir(parents=True)
+    (src / "grok_upgrade.py").write_text("candidate\n")
+    target = tmp_path / "lib" / "grok-upgrade"
+    (target / "scripts").mkdir(parents=True)
+    previous = target / "scripts" / "grok_upgrade.py"
+    previous.write_bytes(b"trusted previous controller\n")
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    real_mv = shutil.which("mv")
+    shim = fake_bin / "mv"
+    shim.write_text(f"""#!/bin/bash
+case "$2" in
+  */.grok-upgrade.new.*) exit 71 ;;
+  */.grok-upgrade.old.*/tree)
+    [[ "{fault}" == rollback-failure ]] && exit 72
+    ;;
+esac
+"{real_mv}" "$@" || exit $?
+if [[ "{fault}" == term-after-retire && "$2" == "{target}" ]]; then
+  kill -TERM "$PPID"
+fi
+""")
+    shim.chmod(0o755)
+    result = subprocess.run(
+        ["bash", str(INSTALL), str(src), str(target)],
+        capture_output=True, text=True, timeout=10,
+        env={**os.environ, "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+             "RADON_HELPER_SKIP_CHOWN": "1"},
+    )
+    assert result.returncode != 0
+    if fault == "rollback-failure":
+        backups = list(target.parent.glob(".grok-upgrade.old.*/tree/scripts/grok_upgrade.py"))
+        assert len(backups) == 1, result.stderr
+        assert backups[0].read_bytes() == b"trusted previous controller\n"
+        assert str(backups[0].parents[1]) in result.stderr
+    else:
+        assert previous.is_file(), result.stderr
+        assert previous.read_bytes() == b"trusted previous controller\n"
+        assert sorted(p.name for p in target.parent.iterdir()) == ["grok-upgrade"]
