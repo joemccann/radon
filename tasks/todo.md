@@ -8939,6 +8939,10 @@ Findings before edits and value gate:
 
 - [x] T1 depends_on: [] Install isolated toolchain, read trusted checkpoint and open PR inventory, create authorized branch.
 - [x] T2 depends_on: [T1] Audit delta and codemap importers; run standing sweeps and re-triage inherited acceptance.
-- [ ] T3 depends_on: [T2] Repair verified findings serially with red/green fault injection and focused gates.
-- [ ] T4 depends_on: [T3] Run permanent drills, syntax and diff hygiene; validate substantive publication.
+- [x] T3 depends_on: [T2] Repair verified findings serially with red/green fault injection and focused gates.
+- [x] T4 depends_on: [T3] Run permanent drills, syntax and diff hygiene; validate substantive publication.
 - [ ] T5 depends_on: [T4] Publish one draft, watch exact-head CI, post one rolling checkpoint and record review.
+
+### Review 2026-10-05
+
+Audit complete through 72e09ffb: 65 commits, 112 changed paths and 300 paths including codemap callers. Two new and three inherited repairs have repeated fault-injection red/green evidence; nine remaining historical/operator candidates retain acceptance on issue #81. Standing gates 81 passed, delta acceptance 135 passed, permanent Python drills 95 passed; focused firewall 137/37, rejection 76, mode-switch 138 plus cloud owner 30, provider/caller 206 passed. Fifteen Python files, three shell files and embedded logout Python parse; no YAML/JSON/TOML changed. Diff, five-commit secret scan and substantive publication check pass. No live access, credential lookup, main push, merge, codemap edits or test-ledger edits. T5 external publication, exact-head CI and the single rolling comment are recorded on issue #81 without changing the verified head.

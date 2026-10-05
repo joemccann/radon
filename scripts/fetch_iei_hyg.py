@@ -44,8 +44,10 @@ except Exception:
     pass
 
 from db import writer
+from clients.uw_client import UWAuthError, UWRateLimitError
 from fetch_credit_spread import (
     _bar_date,
+    _uw_health_error,
     _connect_ib_with_retry,
     combine_source,
     fetch_yahoo_chart,
@@ -237,12 +239,17 @@ def fetch_uw_closes(tickers: list[str]) -> dict[str, Closes]:
                 try:
                     data = uw.get_stock_ohlc(ticker, candle_size="1d")
                     parsed = uw_regular_closes(data.get("data") or [])
+                except (UWAuthError, UWRateLimitError):
+                    # R-296 / REL-312: structural failure closes this rung.
+                    raise
                 except Exception as exc:
                     _log(f"UW: {ticker} failed: {exc}")
                     continue
                 if parsed:
                     results[ticker] = parsed
                     _log(f"UW: {ticker} {len(parsed)} bars")
+    except (UWAuthError, UWRateLimitError):
+        raise
     except Exception as exc:
         _log(f"UW connection failed: {exc}")
     return results
@@ -298,6 +305,7 @@ def fetch_closes(
     fetch_uw: Optional[FetchCloses] = None,
     fetch_rh: Optional[FetchCloses] = None,
     fetch_yahoo: Optional[FetchCloses] = None,
+    source_errors: Optional[list[dict[str, Any]]] = None,
 ) -> tuple[dict[str, Closes], str, dict[str, str]]:
     """IB first, then Robinhood for gaps, then UW, then Yahoo.
 
@@ -310,7 +318,12 @@ def fetch_closes(
     sources: dict[str, str] = {}
     _take(fetch_ib or fetch_ib_closes, wanted, "ib", closes, sources)
     _take(fetch_rh or fetch_rh_closes, wanted, "rh", closes, sources)
-    _take(fetch_uw or fetch_uw_closes, wanted, "uw", closes, sources)
+    try:
+        _take(fetch_uw or fetch_uw_closes, wanted, "uw", closes, sources)
+    except (UWAuthError, UWRateLimitError) as exc:
+        # R-296 / REL-312: keep source fault when Yahoo fills the gap.
+        if source_errors is not None:
+            source_errors.append(_uw_health_error(exc))
     _take(fetch_yahoo or fetch_yahoo_closes, wanted, "yahoo", closes, sources)
     return closes, combine_source(sources) or NO_SOURCE, dict(sources)
 
@@ -574,7 +587,8 @@ def run() -> dict[str, Any]:
     """
     _log("fetching IEI, HYG and DXY (IB -> UW -> RH -> Yahoo)")
     try:
-        closes, source, source_by_ticker = fetch_closes()
+        source_errors: list[dict[str, Any]] = []
+        closes, source, source_by_ticker = fetch_closes(source_errors=source_errors)
         cached = load_cached_series()
         if source == NO_SOURCE:
             return _serve_cached(cached)
@@ -586,7 +600,8 @@ def run() -> dict[str, Any]:
         if not new_rows:
             _log("source unchanged; refreshing snapshot only")
         payload = build_output(series, source=source, source_by_ticker=source_by_ticker)
-        persist_result(payload, new_rows, degraded=_robinhood_degradation(source_by_ticker))
+        persist_result(payload, new_rows, health_error=source_errors[0] if source_errors else None,
+                       degraded=_robinhood_degradation(source_by_ticker))
     except Exception as exc:
         _record_error_health(f"{SERVICE}: {exc}", "cycle_failed")
         raise

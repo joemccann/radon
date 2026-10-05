@@ -3022,3 +3022,14 @@ no obsolete raw Docker service cascade to resurrect. Five shell faults
 failed twice; 138 local contracts and 30 installed-operator tests pass.
 Helper installation remains an exact operator prerequisite in the rolling
 checkpoint and maintained mode-switch runbook.
+
+Inherited R-296 acceptance completed (REL-312):
+`scripts/fetch_credit_spread.py:266,351,684` and
+`scripts/fetch_iei_hyg.py:242,321,602` preserve typed authorization/quota
+faults from the UW rung in the final service heartbeat after a successful
+last-resort fallback. Both real orchestration paths are exercised with fake
+UW clients and fake persistence. Four failures repeated twice; provider,
+indicator and direct-caller union 206 passed. Existing all-sources-down
+behavior retains its source_down error; this repair specifically closes the
+previously healthy fallback acceptance. No global source-error state or
+transport retry is introduced.
