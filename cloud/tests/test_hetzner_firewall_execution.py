@@ -21,6 +21,16 @@ def tool(monkeypatch, tmp_path):
     return module
 
 
+def inventory(*names):
+    """Successful `hcloud firewall list --output json` result."""
+    return SimpleNamespace(returncode=0, stdout=json.dumps([{"name": n} for n in names]))
+
+
+INVENTORY_ARGV = ["hcloud", "firewall", "list", "--output", "json"]
+INVENTORY_KWARGS = {"capture_output": True, "text": True, "timeout": 30}
+MUTATION_KWARGS = {"timeout": 30}
+
+
 def expected_rules(name):
     """Independent security policy oracle, rather than calling the renderer."""
     ssh_sources = ["0.0.0.0/0", "::/0"] if name == "fw-radon-app" else ["93.184.216.34/32"]
@@ -39,8 +49,8 @@ def test_apply_delivers_exact_policy_and_resource_to_hcloud(tool, monkeypatch, n
 
     def run(argv, **kwargs):
         calls.append((argv, kwargs))
-        if argv[2] == "describe":
-            return SimpleNamespace(returncode=0 if exists else 1)
+        if argv[2] == "list":
+            return inventory(name) if exists else inventory("fw-unrelated")
         if argv[2] == "replace-rules":
             assert argv[:5] == ["hcloud", "firewall", "replace-rules", name, "--rules-file"]
             rules_path = Path(argv[5])
@@ -56,12 +66,13 @@ def test_apply_delivers_exact_policy_and_resource_to_hcloud(tool, monkeypatch, n
     assert tool.main(["--firewall", name, "--server", "synthetic-server",
                       "--recovery-ip", "93.184.216.34", "--apply"]) == 0
     assert len(rules_paths) == 1
-    expected = [(["hcloud", "firewall", "describe", name], {"capture_output": True, "text": True})]
+    expected = [(INVENTORY_ARGV, INVENTORY_KWARGS)]
     if not exists:
-        expected.append((["hcloud", "firewall", "create", "--name", name], {}))
+        expected.append((["hcloud", "firewall", "create", "--name", name], MUTATION_KWARGS))
     expected.extend([
-        (["hcloud", "firewall", "replace-rules", name, "--rules-file", rules_paths[0]], {}),
-        (["hcloud", "firewall", "apply-to-resource", name, "--type", "server", "--server", "synthetic-server"], {}),
+        (["hcloud", "firewall", "replace-rules", name, "--rules-file", rules_paths[0]], MUTATION_KWARGS),
+        (["hcloud", "firewall", "apply-to-resource", name, "--type", "server", "--server", "synthetic-server"],
+         MUTATION_KWARGS),
     ])
     assert calls == expected
 
@@ -72,12 +83,14 @@ def test_apply_reports_each_failure_without_running_later_mutations(tool, monkey
 
     def run(argv, **kwargs):
         calls.append(argv)
-        return SimpleNamespace(returncode=1 if argv[2] in ("describe", failed_verb) else 0)
+        if argv[2] == "list":
+            return inventory()
+        return SimpleNamespace(returncode=1 if argv[2] == failed_verb else 0)
 
     monkeypatch.setattr(tool.subprocess, "run", run)
     assert tool.main(["--firewall", "fw-radon-broker", "--server", "synthetic-server",
                       "--recovery-ip", "93.184.216.34", "--apply"]) == 1
-    sequence = ["describe", "create", "replace-rules", "apply-to-resource"]
+    sequence = ["list", "create", "replace-rules", "apply-to-resource"]
     assert [argv[2] for argv in calls] == sequence[:sequence.index(failed_verb) + 1]
     assert f"failed: hcloud firewall {failed_verb}" in capsys.readouterr().err
 
