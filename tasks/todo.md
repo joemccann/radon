@@ -8826,7 +8826,7 @@ Six findings have red/green evidence; three full serial rounds pass Python 13448
 
 - [x] T1 depends_on: [] Install toolchain, recover trusted checkpoint, inspect open PRs, create tonight’s branch.
 - [x] T2 depends_on: [T1] Audit main delta and codemap callers; re-triage standing candidates and safety sweeps.
-- [ ] T3 depends_on: [T2] Repair verified findings serially with red/green fault injection and focused gates.
+- [x] T3 depends_on: [T2] Repair verified findings serially with red/green fault injection and focused gates.
 - [ ] T4 depends_on: [T3] Run drills, validate changes, publish substantive draft, watch exact-head CI.
 - [ ] T5 depends_on: [T4] Post one durable issue comment and record final review.
 
@@ -8940,7 +8940,7 @@ Findings before edits and value gate:
 
 - [x] T1 depends_on: [] Build isolated toolchain; read open testing PRs and trusted checkpoint.
 - [x] T2 depends_on: [T1] Audit 6603be9b..72e09ffb using codemap edges, inverse tests, gates and historical findings; standing suites and three delta repetitions.
-- [ ] T3 depends_on: [T2] Repair verified findings red/green, explicit per-finding commits and append-only ledgers.
+- [x] T3 depends_on: [T2] Repair verified findings red/green, explicit per-finding commits and append-only ledgers.
 - [ ] T4 depends_on: [T3] Three consecutive serial full gates, exact base cloud failure-list comparison and hygiene.
 - [ ] T5 depends_on: [T4] Substantive publication check; one draft PR with exact-head green CI; one rolling issue comment.
 

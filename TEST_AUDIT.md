@@ -11136,3 +11136,11 @@ T-533 focused pre-commit gate: 36 passed with `-n auto`. Actual main and every n
 | T-534 | DONE | Removing the child stderr scrub passes all nine original cases; eight selected-line regressions fail (8 failed / 9 passed). Restored focused research gate: 118 passed. Synthetic credentials are scrubbed on exception and fallback lines for child failures and timeouts, and safe diagnostics reach health/journal/classification unchanged. Empty stderr retains the return code. Product source restored byte-for-byte. |
 
 T-534 focused pre-commit gate: 118 passed with `-n auto`. The actual stderr selector and decoder each have 100% statements and branches. The single-file probe's whole pipeline module is only 19.91% combined and classifier module 34.09%; those numbers are not represented as module-wide 95% coverage. Existing project ratchets remain unchanged and CI measures the full suite.
+
+### T-535 verification 2026-10-05
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-535 | DONE | Fixed-ceiling transport timeouts pass all 41 original expiry/Rubner cases but fail the new six-request budget assertion (1 failed / 41 passed). Restored focused gate: 42 passed. Real SQLite reads and writes receive the independently expected shrinking shared timeout while protected rows and expiry reasons remain correct. Product source restored byte-for-byte. |
+
+T-535 focused pre-commit gate: 42 passed with `-n auto`. Actual remaining_timeout has 100% statement/branch coverage. Whole publish module is 48.47% combined; the outer expiry function is 90% statements / 75% branches. No module-wide 95% claim is made, and no threshold is lowered. Full-suite CI remains the coverage authority.
