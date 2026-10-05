@@ -50,8 +50,16 @@ source {SETUP!s}
 
 
 @pytest.fixture
-def fake_ufw(tmp_path: Path) -> tuple[Path, Path]:
+def fake_ufw(tmp_path: Path, monkeypatch) -> tuple[Path, Path]:
     """Stateful ufw stub: records argv, answers `status` from recorded state."""
+    etc = tmp_path / "etc"
+    (etc / "ufw").mkdir(parents=True)
+    (etc / "default").mkdir()
+    (etc / "ufw/user.rules").write_text("prior ingress\n")
+    (etc / "default/ufw").write_text("ENABLED=no\n")
+    staged = tmp_path / "setup-vps.sh"
+    staged.write_text(SETUP.read_text().replace("/etc/", str(etc) + "/"))
+    monkeypatch.setitem(globals(), "SETUP", staged)
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     log = tmp_path / "ufw.log"

@@ -48,6 +48,7 @@ except Exception:
     pass
 
 from db import writer
+from clients.uw_client import UWAuthError, UWRateLimitError
 from utils.ib_preflight import (
     IB_HISTORICAL_TIMEOUT_S,
     IB_REQUEST_TIMEOUT_S,
@@ -262,12 +263,27 @@ def fetch_uw_closes(tickers: list[str]) -> dict[str, dict[str, float]]:
                     if parsed:
                         results[ticker] = parsed
                         print(f"  UW: {ticker} — {len(parsed)} bars", file=sys.stderr)
+                except (UWAuthError, UWRateLimitError):
+                    # R-296 / REL-312: structural failure closes this rung.
+                    raise
                 except Exception as exc:
                     print(f"  UW: {ticker} failed — {exc}", file=sys.stderr)
+    except (UWAuthError, UWRateLimitError):
+        raise
     except Exception as exc:
         print(f"  UW connection failed — {exc}", file=sys.stderr)
 
     return results
+
+
+def _uw_health_error(exc: UWAuthError | UWRateLimitError) -> dict[str, Any]:
+    """R-296 / REL-312: bounded class-specific health, never broker body text."""
+    return {
+        "source": "uw",
+        "class": "uw_auth" if isinstance(exc, UWAuthError) else "uw_rate_limited",
+        "message": "Unusual Whales authorization failed" if isinstance(exc, UWAuthError)
+        else "Unusual Whales quota exhausted",
+    }
 
 
 def _robinhood_degradation(sources: dict[str, str]) -> Optional[dict[str, Any]]:
@@ -302,6 +318,7 @@ def fetch_closes(
     fetch_uw: Optional[FetchCloses] = None,
     fetch_rh: Optional[FetchCloses] = None,
     fetch_yahoo: Optional[FetchCloses] = None,
+    source_errors: Optional[list[dict[str, Any]]] = None,
 ) -> tuple[dict[str, dict[str, float]], dict[str, str]]:
     """IB first, then Robinhood for gaps, then UW, then Yahoo.
 
@@ -330,7 +347,14 @@ def fetch_closes(
 
     missing = [t for t in wanted if t not in closes]
     if missing:
-        for ticker, series in uw_fn(missing).items():
+        try:
+            uw_closes = uw_fn(missing)
+        except (UWAuthError, UWRateLimitError) as exc:
+            # R-296 / REL-312: preserve cause through last-resort fallback.
+            if source_errors is not None:
+                source_errors.append(_uw_health_error(exc))
+            uw_closes = {}
+        for ticker, series in uw_closes.items():
             if series:
                 closes[ticker] = series
                 sources[ticker] = "uw"
@@ -640,7 +664,8 @@ def run() -> dict[str, Any]:
     """
     print(f"[{SERVICE}] fetching HYG and SPX (IB → UW → RH → Yahoo)", file=sys.stderr)
     try:
-        closes, sources = fetch_closes()
+        source_errors: list[dict[str, Any]] = []
+        closes, sources = fetch_closes(source_errors=source_errors)
         cached = _read_cached_series()
         source = combine_source(sources) or NO_SOURCE
         if source == NO_SOURCE:
@@ -656,7 +681,8 @@ def run() -> dict[str, Any]:
             print(f"[{SERVICE}] source unchanged; refreshing snapshot only", file=sys.stderr)
 
         payload = build_output(series, source=source, source_by_ticker=sources)
-        persist_result(payload, new_rows, degraded=_robinhood_degradation(sources))
+        persist_result(payload, new_rows, health_error=source_errors[0] if source_errors else None,
+                       degraded=_robinhood_degradation(sources))
     except Exception as exc:
         _record_error_health(f"{SERVICE}: {exc}", "cycle_failed")
         raise

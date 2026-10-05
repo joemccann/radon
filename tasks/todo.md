@@ -8950,3 +8950,24 @@ Findings and value gate before edits:
 - DOC-166 P2: research maintainer -> diagnose alias discovery using unconditional fallback-only claim -> miss existing watched revisions -> scripts/research/worker.py:61-73 -> docs/dropbox-research.md:8,107-110 -> docs/dropbox-research.md. Reader/action: distinguish new aliases from saved watched streams; harm: wrong queue diagnosis; prose explains durable cursor ownership, executable ingestion tests own the exact cases.
 - DOC-167 P2: research operator -> expect queue diagnostics to contain only error classes -> overlook persisted extraction cause while diagnosing holds -> scripts/research/model.py:115-128 and scripts/research/state.py:19-22 -> docs/dropbox-research.md:35 -> docs/dropbox-research.md. Reader/action: locate safe extraction diagnostics; harm: misleading incident diagnosis; prose only needs removal of the obsolete restriction, with existing extraction text retained. Proof: test_research_extract_error.py::test_extract_detail_reaches_health_and_journal.
 - DOC-168 P2: API maintainer -> change or diagnose Gateway daily cycle from duplicate schedule prose -> recovery and API owners drift independently -> cloud/docker-compose.yml:28-35 -> scripts/api/CLAUDE.md:31 -> docs/ib-gateway-recovery.md#daily-cycle. Reader/action: broker lifecycle implementation; harm: contradictory restart guidance; prose only needs the existing owner link, since compose owns clocks and the recovery owner owns blank-field semantics. Proof: compose and existing daily-cycle documentation contracts.
+
+# Task: Nightly testing 2026-10-05
+
+- [x] T1 depends_on: [] Build isolated toolchain; read open testing PRs and trusted checkpoint.
+- [x] T2 depends_on: [T1] Audit 6603be9b..72e09ffb using codemap edges, inverse tests, gates and historical findings; standing suites and three delta repetitions.
+- [x] T3 depends_on: [T2] Repair verified findings red/green, explicit per-finding commits and append-only ledgers.
+- [x] T4 depends_on: [T3] Three consecutive serial full gates, exact base cloud failure-list comparison and hygiene.
+- [ ] T5 depends_on: [T4] Substantive publication check; one draft PR with exact-head green CI; one rolling issue comment.
+
+Review before publication: 65 commits / 112 paths audited through 72e09ffb. T-533/T-534/T-535 have deliberate-defect red/green evidence and separate focused-gate commits; product source is restored byte-for-byte. Three consecutive serial closing rounds each pass 14,200 Python, 10,389 Vitest and 2,572 cloud cases. The clean-base cloud gate passes 2,561 cases and every sorted failure-list comparison is empty. Historical ledger/task prefixes are preserved. Four browser replay acceptances remain operator-only if the web-path-filtered CI job does not run. T5's external draft, exact-head CI and single checkpoint completion receipts will be recorded once on issue #83 without changing the reported head; this pre-publication checklist does not claim future green delivery. No production access; runner owns notifications.
+## Nightly reliability 2026-10-05
+
+- [x] T1 depends_on: [] Install isolated toolchain, read trusted checkpoint and open PR inventory, create authorized branch.
+- [x] T2 depends_on: [T1] Audit delta and codemap importers; run standing sweeps and re-triage inherited acceptance.
+- [x] T3 depends_on: [T2] Repair verified findings serially with red/green fault injection and focused gates.
+- [x] T4 depends_on: [T3] Run permanent drills, syntax and diff hygiene; validate substantive publication.
+- [ ] T5 depends_on: [T4] Publish one draft, watch exact-head CI, post one rolling checkpoint and record review.
+
+### Review 2026-10-05
+
+Audit complete through 72e09ffb: 65 commits, 112 changed paths and 300 paths including codemap callers. Two new and three inherited repairs have repeated fault-injection red/green evidence; ten remaining historical/operator candidates retain acceptance on issue #81. Standing gates 81 passed, delta acceptance 135 passed, permanent Python drills 95 passed; focused firewall 137/37, rejection 76, mode-switch 138 plus cloud owner 30, provider/caller 206 passed. Fifteen Python files, three shell files and embedded logout Python parse; no YAML/JSON/TOML changed. Diff, five-commit secret scan and substantive publication check pass. No live access, credential lookup, main push, merge, codemap edits or test-ledger edits. T5 external publication, exact-head CI and the single rolling comment are recorded on issue #81 without changing the verified head.
