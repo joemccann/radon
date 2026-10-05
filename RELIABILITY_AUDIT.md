@@ -3011,3 +3011,14 @@ from rejection notifications. API/audit/timeout/rate/notification union:
 76 passed. Digest storage failures leave the HTTP/audit outcome intact;
 all notification channels are tripwires, and both Python test subtrees
 isolate the digest path. No live notification was attempted.
+
+Inherited R-044 acceptance completed (REL-311): `scripts/local.sh:21-45`
+requests the installed broker-owned release before any local mode/scheduler
+mutation. The owner is `cloud/scripts/operator-radon.sh:24-28`, backed by
+`cloud/scripts/ib-operator-hold.sh` and the existing lease-aware gateway
+helper. Confirmed logout and durable hold fence competing sessions; failed
+release stops local startup. The current approved topology deliberately has
+no obsolete raw Docker service cascade to resurrect. Five shell faults
+failed twice; 138 local contracts and 30 installed-operator tests pass.
+Helper installation remains an exact operator prerequisite in the rolling
+checkpoint and maintained mode-switch runbook.
