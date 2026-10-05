@@ -1,6 +1,7 @@
 """GPU bootstrap regression guards; subprocesses never mutate host configuration."""
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -171,3 +172,15 @@ def test_vendor_keyrings_are_pinned_to_publisher_fingerprints():
     assert 'TAILSCALE_GPG_FINGERPRINT="2596A99EAAB33821893C0A79458CA832957F5868"' in text
     for name in ("NVIDIA_CONTAINER_GPG_FINGERPRINT", "TAILSCALE_GPG_FINGERPRINT"):
         assert f'require_pinned_keyring "$staging/' in text and f'"${name}"' in text
+
+
+def test_radon_ssh_material_is_written_as_radon_never_root():
+    """DS-2026-10-05-06: /home/radon is radon-owned, so a root by-name write
+    there follows a link radon swaps in after the -L checks."""
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    body = text[text.index("main() {") :]
+    for line in body.splitlines():
+        if "/home/radon/.ssh" not in line or not re.search(r"\b(install|cp|awk|mv|chmod|chown)\b|>", line):
+            continue
+        assert "setpriv --reuid=radon" in line, line
+    assert "/home/radon/.ssh/authorized_keys \"$keys\"" not in body

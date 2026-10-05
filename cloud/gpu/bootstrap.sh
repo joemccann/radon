@@ -197,13 +197,26 @@ PY
   fi
   [[ "$(getent passwd radon | cut -d: -f6)" == /home/radon ]] || die 'unexpected radon home directory'
   [[ ! -L /home/radon && ! -L /home/radon/.ssh && ! -L /home/radon/.ssh/authorized_keys ]] || die 'symlinked radon SSH path'
-  install -d -m 0700 -o radon -g radon /home/radon/.ssh
-  if [[ -f /home/radon/.ssh/authorized_keys ]]; then
-    awk '!seen[$0]++' /home/radon/.ssh/authorized_keys "$keys" > "$staging/radon.keys"
-  else
-    cp "$keys" "$staging/radon.keys"
-  fi
-  install -m 0600 -o radon -g radon "$staging/radon.keys" /home/radon/.ssh/authorized_keys
+  # /home/radon is radon-owned: root by name there follows a link radon swaps
+  # in after the checks above (DS-2026-10-05-06). Do every write as radon,
+  # handing it the operator keys on stdin.
+  setpriv --reuid=radon --regid=radon --clear-groups -- install -d -m 0700 /home/radon/.ssh
+  setpriv --reuid=radon --regid=radon --clear-groups -- python3 -c '
+import os, sys
+path = "/home/radon/.ssh/authorized_keys"
+lines = []
+try:
+    with open(path, encoding="utf-8") as handle:
+        lines = handle.read().splitlines()
+except FileNotFoundError:
+    pass
+lines += sys.stdin.read().splitlines()
+tmp = path + ".radon-bootstrap"
+fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+with os.fdopen(fd, "w", encoding="utf-8") as handle:
+    handle.write("".join(line + "\n" for line in dict.fromkeys(lines)))
+os.replace(tmp, path)
+' < "$keys"
   [[ ! -L /root/.ssh && ! -L /root/.ssh/authorized_keys ]] || die 'symlinked root SSH path'
   install -d -m 0700 -o root -g root /root/.ssh
   if [[ -f /root/.ssh/authorized_keys ]]; then
