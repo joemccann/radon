@@ -4,6 +4,11 @@ set -euo pipefail
 
 die() { printf 'GPU bootstrap: %s\n' "$*" >&2; exit 78; }
 
+# Publisher signing keys for the two signed-by repositories (same rule as
+# setup-vps.sh pin_apt_keyring).
+readonly NVIDIA_CONTAINER_GPG_FINGERPRINT="C95B321B61E88C1809C4F759DDCAE044F796ECB0"
+readonly TAILSCALE_GPG_FINGERPRINT="2596A99EAAB33821893C0A79458CA832957F5868"
+
 usage() {
   cat <<'USAGE'
 Usage: bootstrap.sh --role radon-slm --authorized-keys /root/operator.pub \
@@ -82,18 +87,28 @@ check_host_role() {
   fi
 }
 
+require_pinned_keyring() {
+  local keyring="$1" fingerprint="$2" label="$3" primaries
+  # apt trusts every key a signed-by keyring holds: its only primary key must
+  # be the pinned publisher.
+  primaries="$(gpg --batch --show-keys --with-colons "$keyring" 2>/dev/null \
+    | awk -F: '$1 == "pub" { want = 1; next } want && $1 == "fpr" { print $10; want = 0 }')"
+  [[ "$primaries" == "$fingerprint" ]] || die "$label apt signing key does not match the pinned fingerprint"
+}
+
 install_repositories() {
   local staging="$1"
   # Vendor HTTPS key downloads feed signed-by repositories, never shell execution.
   curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
     https://nvidia.github.io/libnvidia-container/gpgkey -o "$staging/nvidia.asc"
   gpg --batch --yes --dearmor -o "$staging/nvidia.gpg" "$staging/nvidia.asc"
+  require_pinned_keyring "$staging/nvidia.gpg" "$NVIDIA_CONTAINER_GPG_FINGERPRINT" NVIDIA
   install -m 0644 "$staging/nvidia.gpg" /usr/share/keyrings/nvidia-container-toolkit.gpg
   printf '%s\n' 'deb [arch=amd64 signed-by=/usr/share/keyrings/nvidia-container-toolkit.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/amd64 /' > "$staging/nvidia.list"
   install -m 0644 "$staging/nvidia.list" /etc/apt/sources.list.d/nvidia-container-toolkit.list
   curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
     https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg -o "$staging/tailscale.gpg"
-  gpg --batch --show-keys "$staging/tailscale.gpg" >/dev/null
+  require_pinned_keyring "$staging/tailscale.gpg" "$TAILSCALE_GPG_FINGERPRINT" Tailscale
   install -m 0644 "$staging/tailscale.gpg" /usr/share/keyrings/tailscale-archive-keyring.gpg
   printf '%s\n' 'deb [arch=amd64 signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu noble main' > "$staging/tailscale.list"
   install -m 0644 "$staging/tailscale.list" /etc/apt/sources.list.d/tailscale.list

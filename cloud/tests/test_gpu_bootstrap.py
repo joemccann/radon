@@ -141,3 +141,33 @@ def test_non_root_execution_refused():
     result = subprocess.run(["bash", str(BOOTSTRAP)], text=True, capture_output=True, check=False)
     assert result.returncode == 78
     assert "run as root" in result.stderr
+
+
+def _repository_stubs(fingerprint: str) -> str:
+    # curl/gpg/install stand-ins: the keyring holds one primary key with FPR.
+    return (
+        'curl() { while (($#)); do [[ "$1" == -o ]] && : > "$2"; shift; done; }; '
+        'gpg() { if [[ " $* " == *" --dearmor "* ]]; then '
+        'while (($#)); do [[ "$1" == -o ]] && : > "$2"; shift; done; '
+        f'else printf "pub:-:4096:1:AAAA:0:::-:::scESC:\\nfpr:::::::::{fingerprint}:\\n"; fi; }}; '
+        'install() { printf "install %s\\n" "${@: -1}"; }; '
+    )
+
+
+def test_vendor_keyring_with_an_unpinned_key_is_refused_before_install(tmp_path: Path):
+    """DS-2026-10-05-02: apt trusts every key a signed-by keyring holds."""
+    result = shell(
+        _repository_stubs("0" * 40) + 'install_repositories "$1"', str(tmp_path)
+    )
+    assert result.returncode == 78
+    assert "pinned fingerprint" in result.stderr
+    assert "/usr/share/keyrings/" not in result.stdout
+    assert "/etc/apt/sources.list.d/" not in result.stdout
+
+
+def test_vendor_keyrings_are_pinned_to_publisher_fingerprints():
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    assert 'NVIDIA_CONTAINER_GPG_FINGERPRINT="C95B321B61E88C1809C4F759DDCAE044F796ECB0"' in text
+    assert 'TAILSCALE_GPG_FINGERPRINT="2596A99EAAB33821893C0A79458CA832957F5868"' in text
+    for name in ("NVIDIA_CONTAINER_GPG_FINGERPRINT", "TAILSCALE_GPG_FINGERPRINT"):
+        assert f'require_pinned_keyring "$staging/' in text and f'"${name}"' in text
