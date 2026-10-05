@@ -2961,3 +2961,75 @@ Standing sweeps: 110 passed. Placement chokepoints and _NON_IDEMPOTENT_IB_SCRIPT
 NEW_FINDINGS and REL-021b retain the checkpoint's operator-only NF-1/NF-4 and lifecycle-design/original-task actions. NF-2's journal/exit readers and NF-5/NF-6/NF-7 retain previously executed closure; no ID is reopened from an obsolete ledger sentence. Other inherited candidates retain original acceptance on issue #81 until their fault injection is completed; none is marked fixed by inspection.
 
 Audited through: 6603be9b2877041acfd033c5e0a5b2191635645c on 2026-10-04 — 3 new findings
+
+## Delta audit 2026-10-05
+
+Trusted cursor `6603be9b2877041acfd033c5e0a5b2191635645c` through
+`72e09ffb18ceba5ebf485b66ee052b00fc7956c6`: 65 commits, 112 changed paths,
+300 paths with direct codemap importers. No open reliability PR reserved work.
+The merged October 3/4 repairs retain their previous IDs and executed acceptance.
+
+Connectivity and safety review covered the tailnet auth boundary, host/cloud
+firewalls, IBC trust, broker hold observation and final placement admission.
+State/resource/error review covered controller rollback, bounded research
+expiry and verification, parser failure redaction, demo DB isolation and their
+callers. Notification/audit durability and the inherited provider, quote, chat,
+health, ambiguous-commit and mode-switch candidates were re-triaged.
+
+Standing sweeps: halt and limit admission remain at
+`scripts/clients/ib_client.py:706,721,861,881`; the non-replay set
+remains at `scripts/api/server.py:5816,6003`; exit acknowledgement remains at
+`scripts/monitor_daemon/handlers/exit_orders.py:212,238`; daemon-state writes
+remain on Hrana at `scripts/db/writer.py:2577`. The whole-repo placement scan
+found only the existing guarded funnels. Both health catalogs retain writer
+parity, exercised with the executable catalog and funnel suites (81 passed).
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-727 / REL-308 | P2 | `cloud/hetzner/firewalls/hcloud_firewalls.py:68-72` (audit base) | Any failed existence probe was treated as absence and authorized create; every cloud CLI command was unbounded. Acceptance: unauthorized/unavailable/malformed/timed-out inventory performs no mutation; known missing inventory permits exactly one create; timed-out create/replace/attach stops with an indeterminate result, never retries, and every child has a finite deadline. Six faults failed twice before repair. |
+| R-728 / REL-309 | P1 | `cloud/scripts/host-firewall.sh:118-124`; `cloud/scripts/setup-vps.sh:1400-1406` (audit base) | Reset disables the host firewall, and failed rules/enable or termination left the previous ingress policy removed. Acceptance: both entrypoints restore prior active/inactive configuration after reset/rule/enable/TERM faults, refuse unknown initial state before mutation, clean successful snapshots, and retain named recovery bytes when rollback fails. Eight faults failed twice before repair; expanded host/setup gates 62 passed. |
+
+NF-1/NF-4 remain operator-only. NF-3 and the remaining REL-108/REL-021b
+candidates retain their original acceptance on issue #81 until executable
+acceptance is completed; no inspection-only closure is claimed. The original
+REL-261/R-682 acceptance is still absent from trusted comments and its first
+ledger-introduction commit; its ID remains reserved. REL-087/R-232 retains
+operator-owned lifecycle design acceptance. No previous fix is reopened from
+an obsolete NEW_FINDINGS sentence.
+
+Audited through: 72e09ffb18ceba5ebf485b66ee052b00fc7956c6 on 2026-10-05 — 2 new findings
+
+Inherited R-025 acceptance completed (REL-310):
+`api.order_audit.record_order_event` at `scripts/api/order_audit.py:52`
+queues explicit rejections in the existing durable P2 digest before its
+best-effort audit DB write. `scripts/api/server.py:3025` preserves typed
+nonzero-exit rejection detail while timeout/indeterminate outcomes retain
+their safety classification. Initial 5 faults failed twice; two additional
+indeterminate controls failed twice against the first implementation and
+pass after preserving timeout precedence and excluding uncertain attempts
+from rejection notifications. API/audit/timeout/rate/notification union:
+76 passed. Digest storage failures leave the HTTP/audit outcome intact;
+all notification channels are tripwires, and both Python test subtrees
+isolate the digest path. No live notification was attempted.
+
+Inherited R-044 acceptance completed (REL-311): `scripts/local.sh:21-45`
+requests the installed broker-owned release before any local mode/scheduler
+mutation. The owner is `cloud/scripts/operator-radon.sh:24-28`, backed by
+`cloud/scripts/ib-operator-hold.sh` and the existing lease-aware gateway
+helper. Confirmed logout and durable hold fence competing sessions; failed
+release stops local startup. The current approved topology deliberately has
+no obsolete raw Docker service cascade to resurrect. Five shell faults
+failed twice; 138 local contracts and 30 installed-operator tests pass.
+Helper installation remains an exact operator prerequisite in the rolling
+checkpoint and maintained mode-switch runbook.
+
+Inherited R-296 acceptance completed (REL-312):
+`scripts/fetch_credit_spread.py:266,351,684` and
+`scripts/fetch_iei_hyg.py:242,321,602` preserve typed authorization/quota
+faults from the UW rung in the final service heartbeat after a successful
+last-resort fallback. Both real orchestration paths are exercised with fake
+UW clients and fake persistence. Four failures repeated twice; provider,
+indicator and direct-caller union 206 passed. Existing all-sources-down
+behavior retains its source_down error; this repair specifically closes the
+previously healthy fallback acceptance. No global source-error state or
+transport retry is introduced.

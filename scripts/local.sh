@@ -18,6 +18,31 @@ log_error() { echo -e "${RED}[local]${NC} $*"; }
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# -- Preflight: confirm broker logout before any local mutation --------------
+# R-044 / REL-311: the broker's installed operator owns the durable hold,
+# lease-aware shutdown and logout confirmation. Unknown logout must never
+# start a competing local IBKR session or move scheduler ownership.
+log_info "Releasing the cloud IBKR session on the broker..."
+if ! python3.13 - <<'PYTHON'
+import subprocess
+import sys
+
+try:
+    result = subprocess.run([
+        "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "root@radon-broker",
+        "/usr/local/bin/radon ib release --reason local-development",
+    ], timeout=180)
+except (subprocess.TimeoutExpired, OSError):
+    print("Cloud broker logout could not be confirmed.", file=sys.stderr)
+    raise SystemExit(1)
+raise SystemExit(result.returncode)
+PYTHON
+then
+  log_error "Cloud broker logout not confirmed. Local mode was not started."
+  log_error "Verify broker access and the installed radon ib release helper before retrying."
+  exit 1
+fi
+
 # -- Step 1: Persist local Docker mode in .env.ib-mode -----------------------
 
 "$SCRIPT_DIR/ib" mode local
@@ -50,15 +75,6 @@ if command -v launchctl >/dev/null 2>&1; then
   done
 fi
 "$SCRIPT_DIR/_set_radon_mode.sh" local
-
-# -- Step 2: Stop VPS gateway ------------------------------------------------
-
-log_info "Stopping IB Gateway on Hetzner..."
-if ssh -o ConnectTimeout=5 ib-gateway "cd /home/radon/radon-cloud && docker compose down" 2>/dev/null; then
-  log_info "VPS gateway stopped."
-else
-  log_warn "Could not reach VPS (offline or already stopped). Continuing."
-fi
 
 # -- Step 3: Start local Docker gateway --------------------------------------
 

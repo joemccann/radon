@@ -8934,3 +8934,15 @@ Findings before edits and value gate:
 
 - DOC-162 P0: local recovery operator -> kill a process selected using a stale client registry -> discard an unacknowledged order or interrupt unrelated clients -> scripts/ib_place_order.py:563-643, scripts/ib_sync.py:88 and scripts/ib_orders.py:44 -> docs/ib-connection-troubleshooting.md:109-145 -> scripts/CLAUDE.md allocation/order-placement contracts. Reader/operator action is diagnosing collisions safely; harm is order loss; prose must explain cleanup boundaries while code owns allocation.
 - DOC-163 P0: cancellation developer/operator -> use master identity for any order -> cancellation/modification fails and an order remains live -> scripts/ib_order_manage.py:90-118 -> docs/ib_tws_api.md:22-39,538-558 -> scripts/CLAUDE.md Cancel / Modify. Reader/action is selecting order-owner identity; harm is a live order remaining active; prose needs to distinguish visibility from mutation authority.
+
+## Nightly reliability 2026-10-05
+
+- [x] T1 depends_on: [] Install isolated toolchain, read trusted checkpoint and open PR inventory, create authorized branch.
+- [x] T2 depends_on: [T1] Audit delta and codemap importers; run standing sweeps and re-triage inherited acceptance.
+- [x] T3 depends_on: [T2] Repair verified findings serially with red/green fault injection and focused gates.
+- [x] T4 depends_on: [T3] Run permanent drills, syntax and diff hygiene; validate substantive publication.
+- [ ] T5 depends_on: [T4] Publish one draft, watch exact-head CI, post one rolling checkpoint and record review.
+
+### Review 2026-10-05
+
+Audit complete through 72e09ffb: 65 commits, 112 changed paths and 300 paths including codemap callers. Two new and three inherited repairs have repeated fault-injection red/green evidence; ten remaining historical/operator candidates retain acceptance on issue #81. Standing gates 81 passed, delta acceptance 135 passed, permanent Python drills 95 passed; focused firewall 137/37, rejection 76, mode-switch 138 plus cloud owner 30, provider/caller 206 passed. Fifteen Python files, three shell files and embedded logout Python parse; no YAML/JSON/TOML changed. Diff, five-commit secret scan and substantive publication check pass. No live access, credential lookup, main push, merge, codemap edits or test-ledger edits. T5 external publication, exact-head CI and the single rolling comment are recorded on issue #81 without changing the verified head.

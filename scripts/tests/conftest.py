@@ -279,3 +279,11 @@ def isolated_model_credentials(tmp_path, monkeypatch):
     ):
         monkeypatch.delenv(key, raising=False)
     return home
+
+
+@pytest.fixture(autouse=True)
+def _isolate_order_rejection_digest(tmp_path, monkeypatch):
+    """R-025 / REL-310: API rejection tests cannot write the runtime digest."""
+    from watchdog import notify
+
+    monkeypatch.setattr(notify, "DIGEST_STATE_PATH", tmp_path / "rejection-digest.json")

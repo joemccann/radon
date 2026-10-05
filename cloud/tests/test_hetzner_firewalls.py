@@ -147,18 +147,19 @@ class TestTool:
         class _Res:
             def __init__(self, rc):
                 self.returncode = rc
+                self.stdout = "[]"
 
         def fake_run(argv, **kwargs):
             calls.append(argv)
-            if argv[:3] == ["hcloud", "firewall", "describe"]:
-                return _Res(1)
+            if argv[:3] == ["hcloud", "firewall", "list"]:
+                return _Res(0)
             return _Res(0)
 
         monkeypatch.setattr(tool.subprocess, "run", fake_run)
         rc = tool.main(["--firewall", "fw-radon-app", "--server", "ib-gateway", "--apply"])
         assert rc == 0
         verbs = [c[2] for c in calls]
-        assert verbs == ["describe", "create", "replace-rules", "apply-to-resource"]
+        assert verbs == ["list", "create", "replace-rules", "apply-to-resource"]
         assert calls[-1][-1] == "ib-gateway"
 
     def test_apply_stops_on_first_failure(self, monkeypatch):

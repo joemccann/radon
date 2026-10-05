@@ -96,7 +96,7 @@ stack; use local mode only when intentionally moving collection to the laptop.
 Read [`cloud.sh`](../scripts/cloud.sh) or [`local.sh`](../scripts/local.sh)
 before switching. These are lifecycle commands: they persist mode, change
 scheduler ownership and may stop/start a Gateway, requiring IBKR approval.
-Tailscale/SSH access and operator control of the current stack are prerequisites.
+Tailscale/SSH access and operator control of the current stack are prerequisites. Local mode requires root SSH access to `radon-broker` and the installed `radon ib release` helper. Before persisting mode or loading laptop schedulers, `local.sh` requests broker-owned release with a 180-second bound. Any refusal, missing helper, unreachable broker or unknown logout stops the switch before local Gateway startup (R-044 / REL-311). The durable hold remains set while using local mode; only explicitly resume the broker after the local session is stopped, following [Gateway recovery](ib-gateway-recovery.md#operator-escape-hatches).
 
 **Safe diagnosis and stop conditions:** inspect `scripts/ib mode` and existing
 local listeners before launching. A VPN preflight refusal, busy dev ports, or
@@ -234,7 +234,7 @@ marked deprecated. Don't extend them.
 | Cold-start a new VPS | Run `cloud/scripts/setup-vps.sh`, configure the production `.env`, then use `/usr/local/bin/radon start`. Setup installs the lease-aware Gateway helper and every `radon-*.service`; no raw Compose start is permitted. Laptop's `scripts/cloud.sh` flips IB host to the new VPS through the same helper. |
 | Stale `data/replica.db` from a pre-2026-05-20 host | `rm data/replica.db*` — nothing reads from it anymore. The libsql client opens cloud connections regardless of whether the file exists. |
 | Turso outage | Read paths fall through to JSON files (dual-write retains them). Writes queue in the libsql client and replay when cloud returns. |
-| Hetzner outage | Switch to `scripts/local.sh`. Laptop becomes self-sufficient against local Docker IB Gateway. |
+| Hetzner outage | `scripts/local.sh` requires confirmed broker logout; an unreachable broker refuses the switch. Confirm/release the broker session through the operator recovery procedure before local login. |
 
 ## Health & observability
 
