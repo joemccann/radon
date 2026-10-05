@@ -424,3 +424,34 @@ def test_dependency_guard_is_valid_when_success_is_required(condition):
     })
     assert non_main_reachable_secrets(text) == []
     assert unguarded_secrets(text) == []
+
+
+# Deploy credentials reach production over SSH. Every job that reads them is
+# bound to the main-only `production` Environment, so a workflow file pushed on
+# any other branch cannot obtain them even when it omits every `if:` guard.
+DEPLOY_SECRETS = {"VPS_HOST", "VPS_SSH_KEY"}
+DEPLOY_ENVIRONMENT = "production"
+
+
+def deploy_secret_jobs_outside_environment(text: str) -> list[str]:
+    bad = []
+    for name, job in (_load(text).get("jobs") or {}).items():
+        if not isinstance(job, dict) or not _secrets_in(job) & DEPLOY_SECRETS:
+            continue
+        if _environment_name(job) != DEPLOY_ENVIRONMENT:
+            bad.append(name)
+    return bad
+
+
+@pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
+def test_deploy_secrets_come_only_from_the_production_environment(path: Path) -> None:
+    assert deploy_secret_jobs_outside_environment(path.read_text(encoding="utf-8")) == []
+
+
+def test_dropping_the_environment_from_a_deploy_secret_job_is_caught() -> None:
+    wf = _load((WORKFLOWS / "ci.yml").read_text(encoding="utf-8"))
+    jobs = [n for n, j in wf["jobs"].items() if _secrets_in(j) & DEPLOY_SECRETS]
+    assert len(jobs) >= 3, jobs
+    for name in jobs:
+        del wf["jobs"][name]["environment"]
+    assert sorted(deploy_secret_jobs_outside_environment(yaml.safe_dump(wf))) == sorted(jobs)

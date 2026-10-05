@@ -1759,26 +1759,16 @@
       "relevant": [
         {
           "source": "journal",
-          "doc_key_pattern": "^EWY\\|2026-03-03\\|Risk Reversal\\|6$",
+          "doc_key_pattern": "^EWY\\|[^|]*\\|Risk Reversal",
           "grade": 3
         },
         {
           "source": "journal",
-          "doc_key_pattern": "^AAOI\\|2026-03-03\\|Risk Reversal\\|4$",
+          "doc_key_pattern": "^AAOI\\|[^|]*\\|Risk Reversal",
           "grade": 3
-        },
-        {
-          "source": "journal",
-          "doc_key_pattern": "^EWY\\|2026-03-04\\|Risk Reversal\\|11$",
-          "grade": 2
-        },
-        {
-          "source": "journal",
-          "doc_key_pattern": "^AAOI\\|2026-03-04\\|Risk Reversal",
-          "grade": 2
         }
       ],
-      "note": "EWY and AAOI Mar 6 2026 RRs logged as 3 DTE; next-day unwind / roll notes are the failure trail."
+      "note": "Short-dated (3 DTE) EWY and AAOI risk reversals; next-day unwind / roll notes are the failure trail."
     }
   ]
 }

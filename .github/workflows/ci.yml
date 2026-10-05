@@ -1044,6 +1044,9 @@ jobs:
     concurrency:
       group: ci-stage-release-${{ github.ref }}
       cancel-in-progress: true
+    # The VPS SSH secrets live in the main-only production Environment; a job
+    # outside it cannot read them (test_pr_workflows_hold_no_secrets.py).
+    environment: production
     steps:
       - name: Prestage via SSH
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
@@ -1131,6 +1134,9 @@ jobs:
     concurrency:
       group: ci-prepull-images-${{ github.ref }}
       cancel-in-progress: true
+    # The VPS SSH secrets live in the main-only production Environment; a job
+    # outside it cannot read them (test_pr_workflows_hold_no_secrets.py).
+    environment: production
     steps:
       - name: Pull exact SHA pair via installed helper
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
