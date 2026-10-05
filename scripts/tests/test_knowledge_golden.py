@@ -351,6 +351,19 @@ class TestGoldenSetFile:
 
         assert not any(re.search(r"\d{6,}", pattern) for pattern in journal_patterns)
 
+    def test_shipped_golden_set_has_no_dated_journal_trades(self):
+        """DS-2026-10-05-01: a date-keyed journal pattern or note pins a
+        production trade to its day in the public repository."""
+        golden = json.loads(DEFAULT_GOLDEN_PATH.read_text(encoding="utf-8"))
+        dated = re.compile(r"\d{4}-\d{2}-\d{2}|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2},? \d{4}")
+
+        for question in golden["questions"]:
+            journal = [label for label in question["relevant"] if label["source"] == "journal"]
+            for label in journal:
+                assert not dated.search(label["doc_key_pattern"]), question["id"]
+            if journal:
+                assert not dated.search(question.get("note", "")), question["id"]
+
 
 class TestCliInvocation:
     """The CLI must run as a direct script (systemd/operator convention shared
