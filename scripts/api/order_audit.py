@@ -12,17 +12,23 @@ shape are shared via ``db.order_events_sql``.
 
 Best-effort contract: an audit failure must NEVER change the HTTP
 response of a live-money order — every failure is swallowed into a
-WARNING log.
+WARNING log. Rejected outcomes also enqueue the existing P2 daily digest
+(R-025 / REL-310), independently of the audit DB. Indeterminate attempts
+never enqueue a rejection. This path does not send notifications.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from api.db_http import hrana_execute
 from db.order_events_sql import ORDER_EVENT_INSERT_SQL, order_event_args
+from credential_redaction import scrub_credential_text
+from watchdog.check import CheckOutcome
+from watchdog.notify import _enqueue_digest
 
 logger = logging.getLogger("radon.order_audit")
 
@@ -45,6 +51,21 @@ async def record_order_event(
         "order_event %s orderRef=%s orderId=%s permId=%s symbol=%s action=%s qty=%s status=%s",
         event_type, order_ref, order_id, perm_id, symbol, action, quantity, status,
     )
+    if event_type == "rejected" and not (detail or {}).get("indeterminate"):
+        # R-025 / REL-310: persist independently of the initiating browser and
+        # the audit DB. Enqueue only; the existing daily watchdog owns delivery.
+        code = (detail or {}).get("ib_error_code")
+        code = code if type(code) is int else "unknown"
+        message = scrub_credential_text(
+            f"{str(symbol or '?')[:32]} {str(action or '?')[:8]} {str(quantity)[:24]}: "
+            f"order rejected (IB {code}; orderRef={str(order_ref or '?')[:128]}; "
+            f"orderId={str(order_id if order_id is not None else '?')[:24]})"
+        )
+        await asyncio.to_thread(_enqueue_digest, CheckOutcome(
+            service="order-rejections", kind="order-rejected", status="error", severity="P2",
+            fired=True, message=message, consecutive_failures=1,
+            now=datetime.now(timezone.utc),
+        ))
     try:
         args = order_event_args(
             event_type,

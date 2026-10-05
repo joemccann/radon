@@ -171,6 +171,9 @@ rm -f /etc/polkit-1/rules.d/50-radon-services.rules
 log_info "Shredding radon secrets and host state..."
 find /etc/radon -type f -exec shred -u {} + 2>/dev/null || true
 rm -rf /etc/radon
+# R-728 / REL-309: decommission also removes retired ingress snapshots.
+# Active ufw configuration remains, matching the wipe's firewall contract.
+rm -rf /etc/radon-ufw-rollback.*
 rm -rf /var/lib/radon
 # Private research corpus anchored by radon-app-runtime.sh.
 rm -rf /var/lib/radon-private

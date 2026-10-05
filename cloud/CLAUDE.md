@@ -386,7 +386,7 @@ Its `open_firewall` RESETS ufw to the declared app ruleset (byte-for-byte
 mirror of `scripts/host-firewall.sh`, pinned by `tests/test_host_firewall.py`):
 no blanket `tailscale0` allow, 8321 only from `10.0.0.4` and
 `RADON_FW_OPERATOR_SOURCES`. Live hosts change through `host-firewall.sh`
-(dry run by default), never deploy; runbook `docs/operations.md` "Host firewalls".
+(dry run by default), never deploy; runbook `docs/operations.md` "Host firewalls". R-728 / REL-309 snapshots the prior ufw configuration and enabled state before reset; command failure or TERM/INT restores it. Success removes the root-only snapshot; failed rollback or SIGKILL/power loss retains the printed backup for the explicit root recovery sequence in that runbook. Both entrypoints share the identical recovery function, with isolated executable parity and fault tests. The destructive wipe removes retired ingress snapshots while retaining the active ufw policy.
 
 
 Setup clones the public app repo over anonymous HTTPS and mints no GitHub SSH
