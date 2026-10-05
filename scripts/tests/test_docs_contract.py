@@ -1534,6 +1534,7 @@ class TestGatewayDailyCycleDocumentation:
 
     @pytest.mark.parametrize("path", [
         "docs/implement.md", "docs/ib_tws_api.md", "docs/ib-connection-troubleshooting.md",
+        "scripts/api/CLAUDE.md",
     ])
     def test_local_setup_defers_cycle_semantics_to_recovery_owner(self, path):
         text = (_ROOT / path).read_text()
@@ -1617,3 +1618,64 @@ class TestClientOwnershipDocumentation:
         assert "../scripts/CLAUDE.md#cancel--modify-scripts-side" in text
         assert "ib_order_manage.py" in text
         assert "original" in text
+
+
+def _network_procedure(heading: str) -> str:
+    text = (_ROOT / "docs/operations.md").read_text()
+    start = text.index(f"### {heading}")
+    end = text.find("\n### ", start + 1)
+    return text[start:end] if end != -1 else text[start:]
+
+
+class TestNetworkTrustRolloutDocumentation:
+    """DOC-164/165: access changes need bounded recovery and proof of denial."""
+
+    @pytest.mark.parametrize("heading", ["Tailnet policy", "Tailnet trust narrowing"])
+    def test_procedure_has_recovery_boundaries(self, heading):
+        procedure = _network_procedure(heading).casefold()
+        for boundary in ("symptom", "prerequisites", "blast radius", "diagnosis",
+                         "stop", "verification", "rollback", "escalation"):
+            assert boundary in procedure, f"{heading}: missing {boundary}"
+
+    def test_trust_reload_targets_only_the_api(self):
+        procedure = _network_procedure("Tailnet trust narrowing")
+        assert "`radon restart`" not in procedure
+        assert "radon unit restart radon-api.service" in procedure
+        assert "operator-radon.sh" in procedure
+
+    def test_enforcement_verifies_denial_without_a_session(self):
+        procedure = _network_procedure("Tailnet trust narrowing")
+        assert "/health/lite" in procedure and "401" in procedure
+        assert "without credentials" in procedure
+        assert "HTTP 200" in procedure and '{"status":"ok"}' in procedure
+        assert "test_tailnet_trust_narrowing.py" in procedure
+
+    def test_policy_uses_live_inventory_and_machine_owned_grants(self):
+        procedure = _network_procedure("Tailnet policy")
+        assert "logged out of Tailscale (2026-10-01)" not in procedure
+        assert "Remove stale devices (`" not in procedure
+        assert "Grants: operator devices" not in procedure
+        assert "fresh SSH" in procedure
+        assert "record the current machine tags" in procedure
+        assert "test_tailnet_policy.py" in procedure
+
+
+class TestResearchAliasDocumentation:
+    """DOC-166: one discovery contract must preserve watched folder aliases."""
+
+    def test_discovery_does_not_claim_all_unpadded_scopes_are_fallback_only(self):
+        text = (_ROOT / "docs/dropbox-research.md").read_text()
+        assert "the unpadded spelling is listed only when the padded folder is absent" not in text
+        discovery = next(line for line in text.splitlines() if line.startswith("- `research.state`:"))
+        assert "watched" in discovery and "padded" in discovery
+        assert "test_research_ingestion.py" in discovery
+        assert "Saved unpadded day-folder cursors remain polled" not in text
+
+
+class TestResearchDiagnosticDocumentation:
+    """DOC-167: extraction detail is retained at health and queue sinks."""
+
+    def test_journal_guidance_does_not_contradict_retained_extraction_detail(self):
+        text = (_ROOT / "docs/dropbox-research.md").read_text()
+        assert "Journal output contains stage counts/error classes only." not in text
+        assert "Extraction `EvidenceError` text is persisted" in text
