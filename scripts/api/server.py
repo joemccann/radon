@@ -3022,7 +3022,10 @@ async def _orders_place_after_rate_reservation(body: dict):
     result = await _run_ib_script_with_recovery(
         "ib_place_order.py", ["--json", order_json], timeout=25
     )
-    if not result.ok:
+    if not result.ok and (
+        _is_indeterminate_place_failure(result.error)
+        or not (result.data and result.data.get("status") == "error")
+    ):
         # SPX-02: log infra failures before raising so the reason survives journald
         logger.warning(
             "orders/place infra error for %s %s %s: %s",

@@ -130,3 +130,11 @@ def _isolate_flow_reports_dir(tmp_path, monkeypatch):
 
     monkeypatch.setattr(server, "_FLOW_REPORTS_DIR", tmp_path / "flow_reports")
     yield
+
+
+@pytest.fixture(autouse=True)
+def _isolate_order_rejection_digest(tmp_path, monkeypatch):
+    """R-025 / REL-310: API rejection tests cannot write the runtime digest."""
+    from watchdog import notify
+
+    monkeypatch.setattr(notify, "DIGEST_STATE_PATH", tmp_path / "rejection-digest.json")

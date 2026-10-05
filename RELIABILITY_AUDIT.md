@@ -2998,3 +2998,16 @@ operator-owned lifecycle design acceptance. No previous fix is reopened from
 an obsolete NEW_FINDINGS sentence.
 
 Audited through: 72e09ffb18ceba5ebf485b66ee052b00fc7956c6 on 2026-10-05 — 2 new findings
+
+Inherited R-025 acceptance completed (REL-310):
+`api.order_audit.record_order_event` at `scripts/api/order_audit.py:52`
+queues explicit rejections in the existing durable P2 digest before its
+best-effort audit DB write. `scripts/api/server.py:3025` preserves typed
+nonzero-exit rejection detail while timeout/indeterminate outcomes retain
+their safety classification. Initial 5 faults failed twice; two additional
+indeterminate controls failed twice against the first implementation and
+pass after preserving timeout precedence and excluding uncertain attempts
+from rejection notifications. API/audit/timeout/rate/notification union:
+76 passed. Digest storage failures leave the HTTP/audit outcome intact;
+all notification channels are tripwires, and both Python test subtrees
+isolate the digest path. No live notification was attempted.
