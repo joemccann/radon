@@ -76,11 +76,15 @@ services:
         soft: 10240
         hard: 10240
 
+    # journald, not json-file: a watchdog restart recreates the container and
+    # json-file logs die with it, so the 2026-10-04 23:45Z weekly re-auth left
+    # no record past a 3s forensic fragment. journald keeps them on the host
+    # (`journalctl CONTAINER_TAG=ib-gateway`), bounded by journald retention;
+    # `docker logs` and the shim's `logs` verb still read them.
     logging:
-      driver: json-file
+      driver: journald
       options:
-        max-size: "10m"
-        max-file: "3"
+        tag: ib-gateway
 
 volumes:
   ib-config:

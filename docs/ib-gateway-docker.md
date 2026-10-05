@@ -95,6 +95,7 @@ If you prefer to keep precautions active instead of bypassing, increase the limi
 
 - **First start**: Approve 2FA on IBKR Mobile app
 - **IBC daily cycle**: the [recovery owner](ib-gateway-recovery.md#daily-cycle) explains token restart, expiry and why a blank field is not off; compose owns the schedule
+- **Logs**: journald driver, so they survive a watchdog recreate. On the broker as root: `journalctl CONTAINER_TAG=ib-gateway --since "<UTC time>"`. `docker logs ib-gateway` still works for the live container
 - **2FA timeout**: IBC exits (`TWOFA_TIMEOUT_ACTION: exit`) and does not relogin
 - **Manual restart**: `scripts/docker_ib_gateway.sh restart` first acquires the
   shared 10-minute lease; a held or unreadable lease fails closed

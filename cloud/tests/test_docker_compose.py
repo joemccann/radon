@@ -166,14 +166,13 @@ class TestLogging:
     def logging_config(self, ib_service):
         return ib_service["logging"]
 
-    def test_driver_is_json_file(self, logging_config):
-        assert logging_config["driver"] == "json-file"
-
-    def test_has_max_size(self, logging_config):
-        assert "max-size" in logging_config["options"]
-
-    def test_has_max_file(self, logging_config):
-        assert "max-file" in logging_config["options"]
+    def test_logs_outlive_a_container_recreate(self, logging_config):
+        """A watchdog restart recreates the container, and json-file logs go
+        with it: the 2026-10-04 23:45Z restart left only a 3s forensic
+        fragment. journald keeps them on the host, retention bounded by
+        journald, and `docker logs` still reads them."""
+        assert logging_config["driver"] == "journald"
+        assert logging_config["options"]["tag"] == "ib-gateway"
 
 
 class TestUlimits:
