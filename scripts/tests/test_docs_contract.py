@@ -1617,3 +1617,42 @@ class TestClientOwnershipDocumentation:
         assert "../scripts/CLAUDE.md#cancel--modify-scripts-side" in text
         assert "ib_order_manage.py" in text
         assert "original" in text
+
+
+def _network_procedure(heading: str) -> str:
+    text = (_ROOT / "docs/operations.md").read_text()
+    start = text.index(f"### {heading}")
+    end = text.find("\n### ", start + 1)
+    return text[start:end] if end != -1 else text[start:]
+
+
+class TestNetworkTrustRolloutDocumentation:
+    """DOC-164/165: access changes need bounded recovery and proof of denial."""
+
+    @pytest.mark.parametrize("heading", ["Tailnet policy", "Tailnet trust narrowing"])
+    def test_procedure_has_recovery_boundaries(self, heading):
+        procedure = _network_procedure(heading).casefold()
+        for boundary in ("symptom", "prerequisites", "blast radius", "diagnosis",
+                         "stop", "verification", "rollback", "escalation"):
+            assert boundary in procedure, f"{heading}: missing {boundary}"
+
+    def test_trust_reload_targets_only_the_api(self):
+        procedure = _network_procedure("Tailnet trust narrowing")
+        assert "`radon restart`" not in procedure
+        assert "radon unit restart radon-api.service" in procedure
+        assert "operator-radon.sh" in procedure
+
+    def test_enforcement_verifies_denial_without_a_session(self):
+        procedure = _network_procedure("Tailnet trust narrowing")
+        assert "/health/lite" in procedure and "401" in procedure
+        assert "without credentials" in procedure
+        assert "HTTP 200" in procedure and '{"status":"ok"}' in procedure
+        assert "test_tailnet_trust_narrowing.py" in procedure
+
+    def test_policy_uses_live_inventory_and_machine_owned_grants(self):
+        procedure = _network_procedure("Tailnet policy")
+        assert "logged out of Tailscale (2026-10-01)" not in procedure
+        assert "Remove stale devices (`" not in procedure
+        assert "Grants: operator devices" not in procedure
+        assert "fresh SSH" in procedure
+        assert "test_tailnet_policy.py" in procedure

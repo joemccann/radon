@@ -514,37 +514,89 @@ Every change here ships inert. Deploy never applies a tailnet policy, a host fir
 
 ### Tailnet policy (`cloud/tailscale/policy.hujson`)
 
-Replaces the allow-all grant. Tags `tag:radon-app` (ib-gateway), `tag:radon-broker`, `tag:radon-ops`, `tag:radon-gpu`, all owned by `group:operator`. Grants: operator devices reach each other (`autogroup:self`); `group:operator` reaches TCP 22 on every Radon tag and TCP 8321 on the app (cloud-thin `RADON_API_URL`); `tag:radon-app` reaches `tag:radon-gpu` TCP 8350 (SLM); `tag:radon-ops` reaches TCP 8341 on app and broker and TCP 443 on other ops nodes. Nothing reaches broker 4001 or 8340 over the tailnet: the order path is the private net. The file's `tests` block asserts `tag:radon-ops` cannot reach 8321, 4001, 8330, 8340 or 22; the admin console and the API refuse a save that fails it. `cloud/tests/test_tailnet_policy.py` pins the same properties in CI.
+The [checked-in policy](../cloud/tailscale/policy.hujson) owns grants, tags and
+access tests. [Offline policy tests](../cloud/tests/test_tailnet_policy.py)
+pin its boundaries; neither proves which policy or tags are installed live.
 
-The repo is public, so `group:operator` holds the placeholder `__OPERATOR_LOGIN__`. Apply (operator, once, off RTH):
+**Symptom:** peer access is broader than the declared policy, or a required
+operator path fails after a policy change.
+**Prerequisites:** operator access to the Tailscale admin console, a saved live
+policy, and verified public-IP recovery SSH to each affected host. Schedule
+changes outside regular trading hours.
+**Blast radius:** saving a policy changes access for the whole tailnet; tagging
+a server changes which grants match it. It does not restart Gateway.
+**Safe diagnosis:** inspect the live policy and machine tags in the console
+and compare them with the checked-in policy. Review device ownership from
+current inventory; a dated list is not grounds to remove a device or log a
+host back in.
 
-1. Save the live policy for rollback: admin console, Access controls, copy the editor contents to a local file (or `GET https://api.tailscale.com/api/v2/tailnet/-/acl` with an API access token, saved as `policy.before.hujson`).
-2. Add the four `tagOwners` entries to the LIVE policy first and save, keeping its current grants. Then tag the servers: Machines, `ib-gateway`, Edit ACL tags, `tag:radon-app`; `radon-broker`, `tag:radon-broker`. The app host is logged out of Tailscale (2026-10-01): run `tailscale up --advertise-tags=tag:radon-app` on it and approve the login.
-3. Render and validate: `sed 's/__OPERATOR_LOGIN__/<your tailnet login>/g' cloud/tailscale/policy.hujson > /tmp/radon-policy.hujson`, then `POST` it to `https://api.tailscale.com/api/v2/tailnet/-/acl/validate` (`Content-Type: application/hujson`, API access token): the response must be `{}`.
-4. Apply: paste `/tmp/radon-policy.hujson` into the console editor and save, or `POST` it to `.../tailnet/-/acl` the same way.
-5. Verify from the laptop: `ssh ib-gateway true`, `ssh radon-broker true`, `curl -fsS http://ib-gateway:8321/health`. From the broker: `nc -zvw3 <app tailnet ip> 22` must fail.
-6. Remove stale devices (`asymmetric-mbp-joe`, `iphone-15-pro`, `claude-code-dev`); `autogroup:member` still covers any device left logged in.
+1. Save the current console editor contents privately as `policy.before.hujson`.
+2. Replace `__OPERATOR_LOGIN__` in a local copy of the checked-in policy with
+   the operator's tailnet login. Add its `tagOwners` to the live policy first,
+   keeping existing grants, then assign the matching tags to the intended
+   machines. Enroll a host only if live inspection confirms it needs enrollment.
+3. Validate the rendered policy in the console, require its access tests to
+   pass, then save it. Stop on any failed test or uncertain host identity.
+4. **Verification:** open fresh SSH connections from the operator device to
+   the app and broker while keeping public recovery sessions open. Confirm the
+   app's direct `/health/lite` response is available from the operator device;
+   check the declared denied paths from their intended source roles. An
+   existing SSH session does not prove new connections work.
 
-Rollback: re-apply `policy.before.hujson` through step 4. Public SSH (ufw `OpenSSH` any) is the recovery path if a tag was missed.
+**Stop conditions:** do not close recovery access or remove devices until
+required paths and denied paths are verified. If validation or access fails,
+stop the rollout.
+**Rollback:** restore `policy.before.hujson` in the console and undo tag changes
+using the saved live inventory; verify fresh SSH access before continuing.
+**Escalation:** use the retained public recovery session and involve the
+operator with tailnet administration access if policy restoration fails.
 
 ### Tailnet trust narrowing (`scripts/api/auth.py`)
 
-FastAPI's JWT bypass trusted all of `100.64.0.0/10`. It now trusts loopback plus `RADON_TRUSTED_TAILNET_PEERS` (IPv4 `/32`s in the tailnet range; wider or non-tailnet entries are ignored, so a typo only shrinks trust). The private-net `GET /health` probe scope (`10.0.0.0/16`, `is_private_net_probe`) is unchanged.
+The [auth implementation](../scripts/api/auth.py) owns peer parsing and mode
+selection; [offline auth tests](../scripts/api/tests/test_tailnet_trust_narrowing.py)
+pin them. `RADON_TRUSTED_TAILNET_PEERS` selects peers eligible for FastAPI's
+JWT bypass. With `RADON_TAILNET_TRUST_MODE` unset or `log`, unlisted tailnet
+peers still receive that bypass and produce `would refuse (log-only)` logs.
+`enforce` withdraws it from unlisted peers. An empty usable list in enforcement
+leaves only loopback trusted; unknown mode values enforce too. Forwarded and
+cross-origin browser requests do not inherit peer trust. The private-net
+health probe scope is unchanged.
 
-| `RADON_TAILNET_TRUST_MODE` | Unlisted tailnet peer | Empty list |
-|---|---|---|
-| unset / `log` (default) | trusted, logged `would refuse (log-only)` | whole tailnet trusted |
-| `enforce` (or any other value) | refused, logged `refused` | loopback-only |
+**Symptom:** log-only warnings identify unlisted callers, or cloud-thin API
+access fails after enforcement.
+**Prerequisites:** operator access to the app host's `/etc/radon/env`, known
+server-to-server callers, a private record of the prior settings and recovery
+SSH. Verify the host role before changing configuration.
+**Blast radius:** bypass changes affect all FastAPI routes. Reload only the
+API with `radon unit restart radon-api.service`, supported by the
+[operator dispatcher](../cloud/scripts/operator-radon.sh); this interrupts API
+requests and pool connections but does not cycle Gateway or restart schedulers.
+**Safe diagnosis:** inspect `journalctl -u radon-api --since -7d` for `tailnet peer`
+lines and identify each caller before granting bypass. Absence of warnings
+does not prove the caller inventory is complete.
 
-Logs are one line per peer per 10 minutes on logger `radon.auth`.
+1. Set `RADON_TRUSTED_TAILNET_PEERS` to the reviewed caller addresses in the
+   host env; retain log mode and reload only the API as above.
+2. Exercise required caller paths and account for every unlisted-peer warning.
+   Do not add a peer merely to suppress its warning.
+3. Set `RADON_TAILNET_TRUST_MODE=enforce` and reload only the API.
+4. **Verification:** from a listed caller, request direct `/health/lite` without
+   credentials and require its coarse IB-state payload. From an unlisted peer
+   with network access to the API, the same request without credentials must
+   return 401. A network refusal alone cannot prove API auth. HTTP 200 from
+   `/health` alone also cannot prove bypass: untrusted callers receive only
+   `{"status":"ok"}`. Confirm required cloud-thin reads still work.
 
-Rollout (app host `/etc/radon/env`):
-
-1. Set `RADON_TRUSTED_TAILNET_PEERS=100.98.36.17/32` (operator laptop, cloud-thin `RADON_API_URL`). Nothing else calls `:8321` over the tailnet: the broker watchdog uses `10.0.0.2`, the Mac mini runners use SSH. `radon restart`.
-2. Soak at least a week: `journalctl -u radon-api --since -7d | grep 'tailnet peer'`. Every line names a caller enforce would refuse; add it or account for it.
-3. With no unexpected lines, set `RADON_TAILNET_TRUST_MODE=enforce`, `radon restart`. Verify from the laptop: `curl -fsS http://ib-gateway:8321/health` still carries `ib_gateway.auth_state`.
-
-Rollback: unset `RADON_TAILNET_TRUST_MODE` (back to log-only) and `radon restart`.
+**Stop conditions:** stop if caller identity, reload outcome or allow/deny
+verification is uncertain; do not widen the list or alter Gateway holds to
+make a probe pass.
+**Rollback:** restore the saved peer list and mode, then reload only the API
+and repeat verification. Returning to log mode restores broad tailnet bypass;
+use it only as the deliberate prior configuration.
+**Escalation:** retain sanitized refusal and unit-status evidence and involve
+the operator if required callers remain blocked or an unlisted caller retains
+bypass under enforcement.
 
 ### IBC trusted API clients (`cloud/ibc-overrides/trusted-ips.txt`)
 
