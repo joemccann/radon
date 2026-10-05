@@ -60,6 +60,40 @@ def test_extract_failure_redacts_secret_in_stderr(monkeypatch):
     assert "Bearer" not in message or "[redacted]" in message.lower()
 
 
+@pytest.mark.parametrize("timeout", [False, True])
+@pytest.mark.parametrize("line", [
+    "ValueError: parse rejected authorization: Bearer sk-ant-test1234567890abcdef",
+    "ValueError: parse rejected password='fake multi word password'",
+    "ValueError: parse rejected https://example.invalid/report?token=fake1234567890abcdef",
+    "parse rejected authorization: Bearer sk-ant-test1234567890abcdef",
+])
+def test_retained_error_line_is_redacted_before_health_and_journal(monkeypatch, tmp_path, timeout, line):
+    """T-534: a secret on the selected line must reach neither persisted sink."""
+    from research.ingestion import stage_health
+
+    stderr = ("irrelevant diagnostic\n" + line + "\n").encode()
+    expired = subprocess.TimeoutExpired("research.pdf", 180, stderr=stderr) if timeout else None
+    message = _extract(monkeypatch, stderr=stderr, side_effect=expired)
+    # Keep a positive control: dropping the diagnostic would also hide a secret.
+    assert "parse rejected" in message
+    assert "[redacted" in message
+    error = EvidenceError(message)
+    stage_health(tmp_path, "extraction", "error", error)
+    sinks = [classify_error(error), _persist_error(error),
+             json.loads((tmp_path / "health-extraction.json").read_text())["error"]]
+    assert sinks == [message] * 3
+    for sink in sinks:
+        assert "test1234567890abcdef" not in sink
+        assert "fake multi word password" not in sink
+        assert "fake1234567890abcdef" not in sink
+        assert len(sink) <= 480
+
+
+@pytest.mark.parametrize("stderr", [None, b"", ""])
+def test_empty_child_stderr_keeps_the_returncode_without_inventing_a_reason(monkeypatch, stderr):
+    assert _extract(monkeypatch, stderr=stderr) == PREFIX + " (rc=1)"
+
+
 def test_extract_failure_truncates_long_stderr(monkeypatch):
     blob = ("x" * 800) + "\nMemoryError: " + ("n" * 800)
     message = _extract(monkeypatch, returncode=1, stderr=blob.encode())

@@ -11132,3 +11132,7 @@ Standing root Vitest: 10,389 passed across 1,048 files, zero skips/failures. Sta
 Three delta repetitions each pass 668 Python cases / 23 subtests (28 changed files), 24 Vitest cases (four files), and 196 cloud cases (eight files). The changed share-pnl browser file could not run locally; its existing curated CI job owns the browser repetitions. No local screenshot or 390px check was available.
 
 T-533 focused pre-commit gate: 36 passed with `-n auto`. Actual main and every named helper have 100% statement/branch coverage; the whole firewall module measures 98.51% statements / 95.00% branches (97.70% combined). The only uncovered statement/branch is the CLI module-entry invocation. No exclusion or ratchet changed.
+
+| T-534 | DONE | Removing the child stderr scrub passes all nine original cases; eight selected-line regressions fail (8 failed / 9 passed). Restored focused research gate: 118 passed. Synthetic credentials are scrubbed on exception and fallback lines for child failures and timeouts, and safe diagnostics reach health/journal/classification unchanged. Empty stderr retains the return code. Product source restored byte-for-byte. |
+
+T-534 focused pre-commit gate: 118 passed with `-n auto`. The actual stderr selector and decoder each have 100% statements and branches. The single-file probe's whole pipeline module is only 19.91% combined and classifier module 34.09%; those numbers are not represented as module-wide 95% coverage. Existing project ratchets remain unchanged and CI measures the full suite.
