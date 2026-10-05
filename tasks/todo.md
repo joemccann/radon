@@ -8935,6 +8935,16 @@ Findings before edits and value gate:
 - DOC-162 P0: local recovery operator -> kill a process selected using a stale client registry -> discard an unacknowledged order or interrupt unrelated clients -> scripts/ib_place_order.py:563-643, scripts/ib_sync.py:88 and scripts/ib_orders.py:44 -> docs/ib-connection-troubleshooting.md:109-145 -> scripts/CLAUDE.md allocation/order-placement contracts. Reader/operator action is diagnosing collisions safely; harm is order loss; prose must explain cleanup boundaries while code owns allocation.
 - DOC-163 P0: cancellation developer/operator -> use master identity for any order -> cancellation/modification fails and an order remains live -> scripts/ib_order_manage.py:90-118 -> docs/ib_tws_api.md:22-39,538-558 -> scripts/CLAUDE.md Cancel / Modify. Reader/action is selecting order-owner identity; harm is a live order remaining active; prose needs to distinguish visibility from mutation authority.
 
+
+# Task: Nightly testing 2026-10-05
+
+- [x] T1 depends_on: [] Build isolated toolchain; read open testing PRs and trusted checkpoint.
+- [x] T2 depends_on: [T1] Audit 6603be9b..72e09ffb using codemap edges, inverse tests, gates and historical findings; standing suites and three delta repetitions.
+- [x] T3 depends_on: [T2] Repair verified findings red/green, explicit per-finding commits and append-only ledgers.
+- [x] T4 depends_on: [T3] Three consecutive serial full gates, exact base cloud failure-list comparison and hygiene.
+- [ ] T5 depends_on: [T4] Substantive publication check; one draft PR with exact-head green CI; one rolling issue comment.
+
+Review before publication: 65 commits / 112 paths audited through 72e09ffb. T-533/T-534/T-535 have deliberate-defect red/green evidence and separate focused-gate commits; product source is restored byte-for-byte. Three consecutive serial closing rounds each pass 14,200 Python, 10,389 Vitest and 2,572 cloud cases. The clean-base cloud gate passes 2,561 cases and every sorted failure-list comparison is empty. Historical ledger/task prefixes are preserved. Four browser replay acceptances remain operator-only if the web-path-filtered CI job does not run. T5's external draft, exact-head CI and single checkpoint completion receipts will be recorded once on issue #83 without changing the reported head; this pre-publication checklist does not claim future green delivery. No production access; runner owns notifications.
 ## Nightly reliability 2026-10-05
 
 - [x] T1 depends_on: [] Install isolated toolchain, read trusted checkpoint and open PR inventory, create authorized branch.
