@@ -1534,6 +1534,7 @@ class TestGatewayDailyCycleDocumentation:
 
     @pytest.mark.parametrize("path", [
         "docs/implement.md", "docs/ib_tws_api.md", "docs/ib-connection-troubleshooting.md",
+        "scripts/api/CLAUDE.md",
     ])
     def test_local_setup_defers_cycle_semantics_to_recovery_owner(self, path):
         text = (_ROOT / path).read_text()
