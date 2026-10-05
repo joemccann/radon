@@ -367,3 +367,33 @@ def test_rel307_later_page_failure_replays_completed_progress_safely(monkeypatch
         assert connection.execute("SELECT count(*) FROM research_outcomes WHERE reason_codes=?", ('["HELD_EXPIRED"]',)).fetchone() == (398,)
     finally:
         connection.close()
+
+
+def test_expiry_transport_calls_share_the_remaining_deadline(monkeypatch):
+    """T-535: logical deadline checks alone cannot bound a blocking DB call."""
+    connection = _rel307_store(5)
+    elapsed = [0.0]
+    calls = []
+    monkeypatch.setattr(publish, "time", SimpleNamespace(monotonic=lambda: elapsed[0]))
+    monkeypatch.setattr(publish, "HELD_EXPIRY_BUDGET_S", 5.0)
+    monkeypatch.setattr(publish, "HELD_EXPIRY_PAGE_SIZE", 2)
+    monkeypatch.setattr(publish, "HRANA_TIMEOUT_S", 4.0)
+
+    def execute(sql, args=(), **kwargs):
+        # Observe the actual transport option, while executing the real SQL.
+        calls.append(("read" if sql.lstrip().startswith("SELECT") else "write", kwargs.get("timeout")))
+        rows = connection.execute(sql, args).fetchall()
+        if len(calls) <= 4:
+            elapsed[0] += 1.0
+        return rows
+
+    monkeypatch.setattr(publish, "hrana_execute", execute)
+    try:
+        assert publish.expire_stale_held(now=datetime(2026, 10, 4, tzinfo=timezone.utc)) == 4
+        assert calls == [("read", 4.0), ("write", 4.0), ("read", 3.0),
+                         ("write", 2.0), ("read", 1.0), ("write", 1.0)]
+        assert connection.execute("SELECT count(*) FROM research_outcomes WHERE outcome='held'").fetchone() == (1,)
+        assert connection.execute("SELECT count(*) FROM research_outcomes WHERE reason_codes=?",
+                                  ('["HELD_EXPIRED"]',)).fetchone() == (4,)
+    finally:
+        connection.close()
