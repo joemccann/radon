@@ -24,16 +24,6 @@
           }
         ]
       }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/pending_diagnoses.py\""
-          }
-        ]
-      }
     ]
   }
 }
