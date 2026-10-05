@@ -8,7 +8,10 @@ OPERATOR-RUN ONLY; deploy never calls this. Dry run by default:
 
 prints the rendered rules and the hcloud commands. --apply runs them with the
 operator's own `hcloud` context: create the firewall if missing, replace its
-rules, attach it to the server. Rule files are <name>.json beside this file;
+rules, attach it to the server. R-727 / REL-308: inventory must be a successful
+JSON list before absence permits create. Every hcloud command has a 30-second
+deadline; a timed-out mutation is indeterminate and is never retried.
+Rule files are <name>.json beside this file;
 `__OPERATOR_RECOVERY_IP__/32` is replaced with --recovery-ip
 (or RADON_HCLOUD_RECOVERY_IP), a single public IPv4.
 
@@ -31,6 +34,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 PLACEHOLDER = "__OPERATOR_RECOVERY_IP__/32"
 FIREWALLS = ("fw-radon-app", "fw-radon-broker", "fw-radon-ops")
+HCLOUD_TIMEOUT_S = 30
 
 
 def _recovery_cidr(value: str | None) -> str:
@@ -64,10 +68,23 @@ def commands(name: str, server: str, rules_file: str) -> list[list[str]]:
 
 
 def _exists(name: str) -> bool:
+    """R-727 / REL-308: only a successful inventory can prove absence."""
     res = subprocess.run(
-        ["hcloud", "firewall", "describe", name], capture_output=True, text=True
+        ["hcloud", "firewall", "list", "--output", "json"],
+        capture_output=True, text=True, timeout=HCLOUD_TIMEOUT_S,
     )
-    return res.returncode == 0
+    if res.returncode != 0:
+        raise RuntimeError("firewall inventory unavailable; no changes made")
+    try:
+        inventory = json.loads(res.stdout)
+    except ValueError:
+        raise RuntimeError("invalid firewall inventory; no changes made") from None
+    if not isinstance(inventory, list) or any(
+        not isinstance(item, dict) or not isinstance(item.get("name"), str)
+        for item in inventory
+    ):
+        raise RuntimeError("invalid firewall inventory; no changes made")
+    return any(item["name"] == name for item in inventory)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -99,11 +116,26 @@ def main(argv: list[str] | None = None) -> int:
             print(" ".join(cmd))
         return 0
 
-    if not _exists(args.firewall):
+    try:
+        exists = _exists(args.firewall)
+    except (RuntimeError, subprocess.TimeoutExpired, OSError) as exc:
+        detail = str(exc) if isinstance(exc, RuntimeError) else "firewall inventory unavailable; no changes made"
+        print(f"hcloud_firewalls: {detail}", file=sys.stderr)
+        return 1
+    if not exists:
         planned.insert(0, ["hcloud", "firewall", "create", "--name", args.firewall])
     for cmd in planned:
         print("+ " + " ".join(cmd), flush=True)
-        if subprocess.run(cmd).returncode != 0:
+        try:
+            result = subprocess.run(cmd, timeout=HCLOUD_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            print(f"hcloud_firewalls: {cmd[2]} timed out; outcome indeterminate. "
+                  "Inspect firewall rules and attachment before another apply.", file=sys.stderr)
+            return 1
+        except OSError:
+            print(f"hcloud_firewalls: could not launch {cmd[2]}", file=sys.stderr)
+            return 1
+        if result.returncode != 0:
             print(f"hcloud_firewalls: failed: {' '.join(cmd)}", file=sys.stderr)
             return 1
     return 0
