@@ -50,7 +50,18 @@ def _ufw_lines(res):
 
 
 @pytest.fixture
-def fake_ufw(tmp_path: Path):
+def fake_ufw(tmp_path: Path, monkeypatch):
+    # Apply tests stage the production shell against a temporary /etc tree.
+    # Snapshot/rollback must never inspect the runner's host configuration.
+    etc = tmp_path / "etc"
+    (etc / "ufw").mkdir(parents=True)
+    (etc / "default").mkdir()
+    (etc / "ufw/user.rules").write_text("prior ingress\n")
+    (etc / "default/ufw").write_text("ENABLED=yes\n")
+    for name, source in (("SCRIPT", SCRIPT), ("SETUP", SETUP)):
+        staged = tmp_path / source.name
+        staged.write_text(source.read_text().replace("/etc/", str(etc) + "/"))
+        monkeypatch.setitem(globals(), name, staged)
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     log = tmp_path / "ufw.log"
@@ -174,9 +185,10 @@ class TestApply:
 
 
 class TestSetupParityAndDeploy:
-    @pytest.mark.parametrize("name", ["radon_fw_valid_sources", "radon_fw_rules"])
+    @pytest.mark.parametrize("name", ["radon_fw_valid_sources", "radon_fw_rules", "radon_fw_apply"])
     def test_setup_vps_mirrors_the_functions_byte_for_byte(self, name):
-        pattern = re.compile(rf"^{name}\(\) \{{\n.*?^\}}\n", re.S | re.M)
+        start, end = (r"\(", r"\)") if name == "radon_fw_apply" else (r"\{", r"\}")
+        pattern = re.compile(rf"^{name}\(\) {start}\n.*?^{end}\n", re.S | re.M)
         script = pattern.search(SCRIPT.read_text())
         setup = pattern.search(SETUP.read_text())
         assert script and setup, name

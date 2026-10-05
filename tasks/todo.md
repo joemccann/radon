@@ -8945,3 +8945,14 @@ Findings before edits and value gate:
 - [ ] T5 depends_on: [T4] Substantive publication check; one draft PR with exact-head green CI; one rolling issue comment.
 
 Review before publication: 65 commits / 112 paths audited through 72e09ffb. T-533/T-534/T-535 have deliberate-defect red/green evidence and separate focused-gate commits; product source is restored byte-for-byte. Three consecutive serial closing rounds each pass 14,200 Python, 10,389 Vitest and 2,572 cloud cases. The clean-base cloud gate passes 2,561 cases and every sorted failure-list comparison is empty. Historical ledger/task prefixes are preserved. Four browser replay acceptances remain operator-only if the web-path-filtered CI job does not run. T5's external draft, exact-head CI and single checkpoint completion receipts will be recorded once on issue #83 without changing the reported head; this pre-publication checklist does not claim future green delivery. No production access; runner owns notifications.
+## Nightly reliability 2026-10-05
+
+- [x] T1 depends_on: [] Install isolated toolchain, read trusted checkpoint and open PR inventory, create authorized branch.
+- [x] T2 depends_on: [T1] Audit delta and codemap importers; run standing sweeps and re-triage inherited acceptance.
+- [x] T3 depends_on: [T2] Repair verified findings serially with red/green fault injection and focused gates.
+- [x] T4 depends_on: [T3] Run permanent drills, syntax and diff hygiene; validate substantive publication.
+- [ ] T5 depends_on: [T4] Publish one draft, watch exact-head CI, post one rolling checkpoint and record review.
+
+### Review 2026-10-05
+
+Audit complete through 72e09ffb: 65 commits, 112 changed paths and 300 paths including codemap callers. Two new and three inherited repairs have repeated fault-injection red/green evidence; ten remaining historical/operator candidates retain acceptance on issue #81. Standing gates 81 passed, delta acceptance 135 passed, permanent Python drills 95 passed; focused firewall 137/37, rejection 76, mode-switch 138 plus cloud owner 30, provider/caller 206 passed. Fifteen Python files, three shell files and embedded logout Python parse; no YAML/JSON/TOML changed. Diff, five-commit secret scan and substantive publication check pass. No live access, credential lookup, main push, merge, codemap edits or test-ledger edits. T5 external publication, exact-head CI and the single rolling comment are recorded on issue #81 without changing the verified head.

@@ -1390,21 +1390,56 @@ radon_fw_rules() {
   esac
 }
 
+# R-728 / REL-309: reset disables ufw. Preserve the old policy before any
+# mutation and restore it on command failure or catchable interruption.
+radon_fw_apply() (
+  umask 077
+  radon_fw_rules_text="$1"
+  declare -a radon_fw_args
+  radon_fw_enabled="$(sed -n 's/^ENABLED=//p' /etc/default/ufw)" || exit 1
+  case "$radon_fw_enabled" in yes|no) ;; *) echo 'host-firewall: unknown prior ufw state; refusing reset' >&2; exit 1 ;; esac
+  radon_fw_backup="$(mktemp -d /etc/radon-ufw-rollback.XXXXXX)" || exit 1
+  if ! cp -a /etc/ufw "$radon_fw_backup/ufw" || ! cp -a /etc/default/ufw "$radon_fw_backup/default-ufw"; then
+    rm -rf "$radon_fw_backup"
+    exit 1
+  fi
+  radon_fw_finish() {
+    local rc="$1"
+    trap - EXIT INT TERM
+    if (( rc == 0 )); then
+      rm -rf "$radon_fw_backup"
+      return
+    fi
+    if cp -a "$radon_fw_backup/ufw/." /etc/ufw/ && cp -a "$radon_fw_backup/default-ufw" /etc/default/ufw &&
+       { if [[ "$radon_fw_enabled" == yes ]]; then ufw --force enable; else ufw --force disable; fi; }; then
+      echo 'host-firewall: previous configuration restored' >&2
+      rm -rf "$radon_fw_backup"
+    else
+      echo "host-firewall: rollback failed; previous configuration retained at $radon_fw_backup" >&2
+    fi
+    exit "$rc"
+  }
+  trap 'radon_fw_finish $?' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  echo "host-firewall: rollback backup $radon_fw_backup" >&2
+  ufw --force reset || exit "$?"
+  while IFS= read -r radon_fw_line; do
+    read -ra radon_fw_args <<< "$radon_fw_line"
+    ufw "${radon_fw_args[@]}" || exit "$?"
+  done <<< "$radon_fw_rules_text"
+  ufw --force enable || exit "$?"
+)
+
 open_firewall() {
   local rules line
-  local -a args
   if ! rules="$(radon_fw_rules app)"; then
     log_error "Refusing firewall: invalid RADON_FW_*_SOURCES"
     return 1
   fi
   # Reset + apply the whole set: the result is exactly the declared rules,
   # with SSH allowed before the default-deny firewall is switched on.
-  ufw --force reset
-  while IFS= read -r line; do
-    read -ra args <<< "$line"
-    ufw "${args[@]}"
-  done <<< "$rules"
-  ufw --force enable
+  radon_fw_apply "$rules" || return "$?"
   log_success "ufw enabled (declared app ruleset, default deny incoming)"
 }
 
