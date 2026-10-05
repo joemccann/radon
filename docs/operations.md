@@ -530,7 +530,8 @@ and compare them with the checked-in policy. Review device ownership from
 current inventory; a dated list is not grounds to remove a device or log a
 host back in.
 
-1. Save the current console editor contents privately as `policy.before.hujson`.
+1. Save the current console editor contents privately as `policy.before.hujson`
+   and record the current machine tags before changing them.
 2. Replace `__OPERATOR_LOGIN__` in a local copy of the checked-in policy with
    the operator's tailnet login. Add its `tagOwners` to the live policy first,
    keeping existing grants, then assign the matching tags to the intended

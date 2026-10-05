@@ -1656,6 +1656,7 @@ class TestNetworkTrustRolloutDocumentation:
         assert "Remove stale devices (`" not in procedure
         assert "Grants: operator devices" not in procedure
         assert "fresh SSH" in procedure
+        assert "record the current machine tags" in procedure
         assert "test_tailnet_policy.py" in procedure
 
 
