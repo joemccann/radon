@@ -33,8 +33,8 @@ if [[ "$*" == '--force reset' ]]; then
 fi
 fail=0
 case '{failure}':"$*" in
- reset:--force\ reset|rule:allow\ 80/tcp*|enable:--force\ enable|term:allow\ 80/tcp*|rollback-failure:allow\ 80/tcp*) fail=1;;
- rollback-failure:--force\ enable|rollback-failure:--force\ disable) exit 43;;
+ reset:--force\\ reset|rule:allow\\ 80/tcp*|enable:--force\\ enable|term:allow\\ 80/tcp*|rollback-failure:allow\\ 80/tcp*) fail=1;;
+ rollback-failure:--force\\ enable|rollback-failure:--force\\ disable) exit 43;;
 esac
 if (( fail )) && [[ ! -e '{failed}' ]]; then
   touch '{failed}'
