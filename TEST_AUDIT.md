@@ -11083,3 +11083,52 @@ Round 1's sole cloud failure is the unchanged temporary Caddy listener startup a
 Detached clean base 6603be9b cloud: 2,492 passed / 7 skipped, no FAILED identities. Sorted FAILED-list differences: round 1 adds exactly `cloud/tests/test_caddyfile.py::TestRestartWindowMechanism::test_request_during_an_upstream_gap_is_served_not_502ed` and removes none; rounds 2 and 3 add/remove zero. Base worktree removed. Whole gate output is retained before tail inspection; all local suites ran serially.
 
 Hygiene review: changed Python syntax and diff whitespace clean; all audited delta JSON/YAML/shell files parsed earlier. Ledger prefixes and all temporary mutation-source restorations match the saved originals. No codemap or reliability file changed; data/replica.db absent. Redacted diff secret scan found zero leaks. GitHub/CI/delivery receipts belong to the single issue #83 comment; the runner owns notifications.
+
+
+## Delta audit 2026-10-05
+
+Audited `6603be9b2877041acfd033c5e0a5b2191635645c..72e09ffb18ceba5ebf485b66ee052b00fc7956c6`: 65 commits / 112 paths. The newest trusted checkpoint is the October 4 COLLABORATOR comment on issue #83. GitHub REST supplied the comments after `gh issue view --comments` failed on the retired classic-project GraphQL field. No open testing PR existed at intake. T-528/T-529/T-530 are merged in #885; T-531/T-532 and T-497/T-499/T-500/T-502/T-503/T-504/T-506 are merged in #905. Numbering continues after T-532.
+
+Architecture and incoming codemap edges were read before confirming dynamic, subprocess and freshly added consumers with rg. The delta has 25 executable source paths; five postdate the graph. Inverse review covered broker final halt admission and cancellation, health hold propagation, client subscription quotas and asynchronous futures ownership, fallback verification, paginated expiry, research alias discovery, PDF failure diagnostics, model prompt parity, demo DB isolation, export admission/theme/sharing, controller rollback and network policy execution.
+
+### T-533 — P1 — firewall execution tests miss the applied policy
+
+The original renderer/command tests at `cloud/tests/test_hetzner_firewalls.py:122` and fake apply boundary at `:143` inspect helpers and command verbs, never the rules file consumed by hcloud. The real execution at `cloud/hetzner/firewalls/hcloud_firewalls.py:90` serializes the policy, and `:106` handles mutation results. The empty-policy, wrong-firewall and ignored-attachment mutations each pass all 25 original cases, then fail 6, 4 and 1 added cases respectively.
+
+Acceptance: execute main with fake hcloud; read the actual rules artifact, independently assert the restricted broker SSH source and each role's ports, observe exact firewall/resource arguments, distinguish existing/missing firewalls, stop and return failure at create/replace/attach, and refuse invalid recovery before any command or artifact.
+
+### T-534 — P1 — extraction redaction test hides its own credential
+
+`scripts/tests/test_research_extract_error.py:55` puts a synthetic credential on a line the selector discards in favor of the clean final exception. Removing credential scrubbing at `scripts/research/pipeline.py:75` can therefore leave the original redaction test green. The scrub-bypass mutation passes all nine original cases; the eight retained-line regressions reject it.
+
+Acceptance: place synthetic credentials on the selected exception line and selected last-line fallback, exercise failed-child and timeout paths, retain a usable diagnostic, require actual redaction, and verify the same safe message reaches classifier, journal and health sinks.
+
+### T-535 — P2 — expiry deadline tests ignore the blocking transport timeout
+
+The bounded-page tests at `scripts/tests/test_research_outcomes.py:311` and logical-deadline fixture at `:336` ignore transport kwargs. The real reads/writes at `scripts/research/publish.py:99` and `:110` must pass the remaining budget to the blocking HTTP boundary. Using the fixed HTTP ceiling instead of the remaining budget passes all 41 original outcome/Rubner cases and fails the new transport assertion.
+
+Acceptance: execute actual expiry SQL against memory-only SQLite with a fake monotonic clock and independently observe every read/write timeout; enforce both the per-call ceiling and shrinking shared deadline across multiple pages, preserving protected rows and exactly one expiry reason.
+
+Coverage thresholds, includes and excludes did not change in the delta or this remediation. Broad Python discovery and CI shard patterns reach the changed Python files; cloud's test_*.py shard reaches the new firewall file; all four changed Vitest files are included. Changed share-pnl browser cases are curated in ci.yml. The only added platform skip in host-firewall tests refuses the non-root case when running as root; it does not suppress the fake apply tests. No test assertion, skip, xfail, tolerance, deadline or ratchet is weakened.
+
+Historical OPEN and NEW_FINDINGS entries were reconciled with subsequent resolutions. T-072/T-130/T-435/T-488/T-490/T-492/T-493/T-495/T-496 and prior nightly fixes retain accepted closures. Calendar/Day Move notes map to T-210/T-386, payload notes to T-079, spread timestamps to T-217; the six-site constructor inventory at `scripts/tests/test_service_registration_completeness.py:488` is a bounded static-analysis limitation. The latest checkpoint's omitted historical P2s were repaired in merged #905. Carried phone-header, admin preflight and unverified vol-skew toast replay remain operator-only; no speculative T ID is assigned.
+
+Audited through: 72e09ffb18ceba5ebf485b66ee052b00fc7956c6 on 2026-10-05 — 3 new findings
+
+
+## Remediation 2026-10-05
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-533 | DONE | Empty policy: 6 failed / 30 passed; wrong firewall: 4 failed / 32 passed; ignored attachment failure: 1 failed / 35 passed. Every mutation passes the original 25 tests. Restored actual-main fake-hcloud gate: 36 passed. The new 11 cases inspect the consumed rules file, exact resource arguments and every mutation failure boundary. Product source restored byte-for-byte. |
+
+
+### Standing and delta verification 2026-10-05
+
+Standing Python first run: 14,134 passed / 54 failed / 2 skipped / 23 subtests. All failures were five fake-loopback mTLS files whose certificates were minted by the ambient OpenSSL. Selecting installed Homebrew OpenSSL 3.6.4 and Bash 5.3.20 on PATH, without repository edits, made each isolated owner file pass: 96 cases total. The corrected full root gate passes 14,197 cases / 2 skipped / 23 subtests. Initial failed output is retained separately, never relabeled green.
+
+Standing root Vitest: 10,389 passed across 1,048 files, zero skips/failures. Standing cloud: 2,572 passed / 7 skipped. Node 26.10.0, Python 3.13 with asyncio/xdist, frozen root/web Bun installs and Caddy are available. Every gate ran serially and wrote full output before its tail was read.
+
+Three delta repetitions each pass 668 Python cases / 23 subtests (28 changed files), 24 Vitest cases (four files), and 196 cloud cases (eight files). The changed share-pnl browser file could not run locally; its existing curated CI job owns the browser repetitions. No local screenshot or 390px check was available.
+
+T-533 focused pre-commit gate: 36 passed with `-n auto`. Actual main and every named helper have 100% statement/branch coverage; the whole firewall module measures 98.51% statements / 95.00% branches (97.70% combined). The only uncovered statement/branch is the CLI module-entry invocation. No exclusion or ratchet changed.

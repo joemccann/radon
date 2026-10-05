@@ -1170,3 +1170,10 @@ Closing verification 2026-10-03: three consecutive complete rounds each pass Pyt
 Standing/delta repetitions, three closing rounds, base-cloud failure-list comparison and final hygiene are recorded in TEST_AUDIT.md. External delivery, exact-head CI and operator browser receipts belong to the single issue #83 checkpoint.
 
 Closing verification 2026-10-04: three complete serial rounds are recorded in TEST_AUDIT.md. Vitest 10,375 in all three; cloud 2,491/one Caddy-startup failure then 2,492/2,492, with seven skips throughout. Python 14,059 then 14,058/one inherited T-530 failure in each of the latter rounds, two skips and 23 subtests throughout. Caddy owner 51/51 passed three isolated replays; knowledge owner 5/5 passed all four isolated replays. No failing full invocation was relabeled green. Draft #885 owns T-530; operator must merge its existing repair. Exact-head Linux CI and delivery evidence are retained on issue #83.
+
+
+## Remediation 2026-10-05
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-533 | DONE | Each empty-policy, wrong-firewall and ignored-attachment mutation passes all 25 old cases; new regressions fail 6 / 4 / 1 respectively. Restored fake-hcloud execution: 36 passed. Exact policy/resource, existing/missing firewall, create/replace/attach refusal and invalid-input controls execute real main. Product source unchanged. |
