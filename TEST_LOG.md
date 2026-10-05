@@ -1178,6 +1178,10 @@ Closing verification 2026-10-04: three complete serial rounds are recorded in TE
 |---|---|---|
 | T-533 | DONE | Each empty-policy, wrong-firewall and ignored-attachment mutation passes all 25 old cases; new regressions fail 6 / 4 / 1 respectively. Restored fake-hcloud execution: 36 passed. Exact policy/resource, existing/missing firewall, create/replace/attach refusal and invalid-input controls execute real main. Product source unchanged. |
 
+### T-534 verification 2026-10-05
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
 | T-534 | DONE | Removing the child stderr scrub passes all nine original cases; eight selected-line regressions fail (8 failed / 9 passed). Restored focused research gate: 118 passed. Synthetic credentials are scrubbed on exception and fallback lines for child failures and timeouts, and safe diagnostics reach health/journal/classification unchanged. Empty stderr retains the return code. Product source restored byte-for-byte. |
 
 ### T-535 verification 2026-10-05
@@ -1185,3 +1189,8 @@ Closing verification 2026-10-04: three complete serial rounds are recorded in TE
 | Finding | Status | Red / green evidence |
 |---|---|---|
 | T-535 | DONE | Fixed-ceiling transport timeouts pass all 41 original expiry/Rubner cases but fail the new six-request budget assertion (1 failed / 41 passed). Restored focused gate: 42 passed. Real SQLite reads and writes receive the independently expected shrinking shared timeout while protected rows and expiry reasons remain correct. Product source restored byte-for-byte. |
+
+
+### Closing verification 2026-10-05
+
+Three serial full-gate rounds each pass 14,200 root Python cases / 2 skips / 23 subtests, 10,389 Vitest cases across 1,048 files, and 2,572 cloud cases / 7 skips. The detached 72e09ffb cloud comparison passes 2,561 cases / 7 skips. All four sorted cloud FAILED lists are empty: zero added/removed failures in every closing round. T-533/T-534/T-535 are DONE; no new verified finding is deferred. Path-filtered browser acceptance remains operator-only and is retained on issue #83.

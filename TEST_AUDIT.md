@@ -11129,10 +11129,14 @@ Standing Python first run: 14,134 passed / 54 failed / 2 skipped / 23 subtests. 
 
 Standing root Vitest: 10,389 passed across 1,048 files, zero skips/failures. Standing cloud: 2,572 passed / 7 skipped. Node 26.10.0, Python 3.13 with asyncio/xdist, frozen root/web Bun installs and Caddy are available. Every gate ran serially and wrote full output before its tail was read.
 
-Three delta repetitions each pass 668 Python cases / 23 subtests (28 changed files), 24 Vitest cases (four files), and 196 cloud cases (eight files). The changed share-pnl browser file could not run locally; its existing curated CI job owns the browser repetitions. No local screenshot or 390px check was available.
+Three delta repetitions each pass 668 Python cases / 23 subtests (28 changed files), 24 Vitest cases (four files), and 196 cloud cases (eight files). The changed share-pnl browser file could not run locally; its curated CI job is web-path-filtered, so browser repetitions require that job or the exact operator replay recorded on issue #83. No local screenshot or 390px check was available.
 
 T-533 focused pre-commit gate: 36 passed with `-n auto`. Actual main and every named helper have 100% statement/branch coverage; the whole firewall module measures 98.51% statements / 95.00% branches (97.70% combined). The only uncovered statement/branch is the CLI module-entry invocation. No exclusion or ratchet changed.
 
+### T-534 verification 2026-10-05
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
 | T-534 | DONE | Removing the child stderr scrub passes all nine original cases; eight selected-line regressions fail (8 failed / 9 passed). Restored focused research gate: 118 passed. Synthetic credentials are scrubbed on exception and fallback lines for child failures and timeouts, and safe diagnostics reach health/journal/classification unchanged. Empty stderr retains the return code. Product source restored byte-for-byte. |
 
 T-534 focused pre-commit gate: 118 passed with `-n auto`. The actual stderr selector and decoder each have 100% statements and branches. The single-file probe's whole pipeline module is only 19.91% combined and classifier module 34.09%; those numbers are not represented as module-wide 95% coverage. Existing project ratchets remain unchanged and CI measures the full suite.
@@ -11144,3 +11148,16 @@ T-534 focused pre-commit gate: 118 passed with `-n auto`. The actual stderr sele
 | T-535 | DONE | Fixed-ceiling transport timeouts pass all 41 original expiry/Rubner cases but fail the new six-request budget assertion (1 failed / 41 passed). Restored focused gate: 42 passed. Real SQLite reads and writes receive the independently expected shrinking shared timeout while protected rows and expiry reasons remain correct. Product source restored byte-for-byte. |
 
 T-535 focused pre-commit gate: 42 passed with `-n auto`. Actual remaining_timeout has 100% statement/branch coverage. Whole publish module is 48.47% combined; the outer expiry function is 90% statements / 75% branches. No module-wide 95% claim is made, and no threshold is lowered. Full-suite CI remains the coverage authority.
+
+
+### Closing gates 2026-10-05
+
+| Round | Root Python | Root Vitest | Cloud | Failed-list comparison against base |
+|---|---|---|---|---|
+| 1 | 14,200 passed / 2 skipped / 23 subtests | 10,389 passed / 1,048 files | 2,572 passed / 7 skipped | Empty on both sides; 0 added / 0 removed |
+| 2 | 14,200 passed / 2 skipped / 23 subtests | 10,389 passed / 1,048 files | 2,572 passed / 7 skipped | Empty on both sides; 0 added / 0 removed |
+| 3 | 14,200 passed / 2 skipped / 23 subtests | 10,389 passed / 1,048 files | 2,572 passed / 7 skipped | Empty on both sides; 0 added / 0 removed |
+
+The serial detached-base comparison at 72e09ffb passes 2,561 cases / 7 skips with the identical selected toolchain. Its sorted FAILED list is empty; the head adds 11 firewall cases without changing a base failure. The comparison worktree was removed after its foreground suite exited. Nine closing gates completed consecutively with zero failures. Full outputs and per-gate receipts are retained separately for each round; no failed invocation is relabeled green.
+
+The delta's changed share-pnl browser spec needs three production-build replays when the PR's web path filter skips Playwright. No local browser, screenshot or 390px result is claimed. Inherited mobile-header, admin-controls and unverified vol-skew toast checks remain exact operator-only actions, not speculative findings. External draft/CI/checkpoint completion receipts belong in the single rolling issue #83 comment after exact-head CI.

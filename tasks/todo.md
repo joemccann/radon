@@ -8826,7 +8826,7 @@ Six findings have red/green evidence; three full serial rounds pass Python 13448
 
 - [x] T1 depends_on: [] Install toolchain, recover trusted checkpoint, inspect open PRs, create tonight’s branch.
 - [x] T2 depends_on: [T1] Audit main delta and codemap callers; re-triage standing candidates and safety sweeps.
-- [x] T3 depends_on: [T2] Repair verified findings serially with red/green fault injection and focused gates.
+- [ ] T3 depends_on: [T2] Repair verified findings serially with red/green fault injection and focused gates.
 - [ ] T4 depends_on: [T3] Run drills, validate changes, publish substantive draft, watch exact-head CI.
 - [ ] T5 depends_on: [T4] Post one durable issue comment and record final review.
 
@@ -8941,7 +8941,7 @@ Findings before edits and value gate:
 - [x] T1 depends_on: [] Build isolated toolchain; read open testing PRs and trusted checkpoint.
 - [x] T2 depends_on: [T1] Audit 6603be9b..72e09ffb using codemap edges, inverse tests, gates and historical findings; standing suites and three delta repetitions.
 - [x] T3 depends_on: [T2] Repair verified findings red/green, explicit per-finding commits and append-only ledgers.
-- [ ] T4 depends_on: [T3] Three consecutive serial full gates, exact base cloud failure-list comparison and hygiene.
+- [x] T4 depends_on: [T3] Three consecutive serial full gates, exact base cloud failure-list comparison and hygiene.
 - [ ] T5 depends_on: [T4] Substantive publication check; one draft PR with exact-head green CI; one rolling issue comment.
 
-Review: pending. No production access; runner owns notifications.
+Review before publication: 65 commits / 112 paths audited through 72e09ffb. T-533/T-534/T-535 have deliberate-defect red/green evidence and separate focused-gate commits; product source is restored byte-for-byte. Three consecutive serial closing rounds each pass 14,200 Python, 10,389 Vitest and 2,572 cloud cases. The clean-base cloud gate passes 2,561 cases and every sorted failure-list comparison is empty. Historical ledger/task prefixes are preserved. Four browser replay acceptances remain operator-only if the web-path-filtered CI job does not run. T5's external draft, exact-head CI and single checkpoint completion receipts will be recorded once on issue #83 without changing the reported head; this pre-publication checklist does not claim future green delivery. No production access; runner owns notifications.
