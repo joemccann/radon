@@ -1656,3 +1656,24 @@ class TestNetworkTrustRolloutDocumentation:
         assert "Grants: operator devices" not in procedure
         assert "fresh SSH" in procedure
         assert "test_tailnet_policy.py" in procedure
+
+
+class TestResearchAliasDocumentation:
+    """DOC-166: one discovery contract must preserve watched folder aliases."""
+
+    def test_discovery_does_not_claim_all_unpadded_scopes_are_fallback_only(self):
+        text = (_ROOT / "docs/dropbox-research.md").read_text()
+        assert "the unpadded spelling is listed only when the padded folder is absent" not in text
+        discovery = next(line for line in text.splitlines() if line.startswith("- `research.state`:"))
+        assert "watched" in discovery and "padded" in discovery
+        assert "test_research_ingestion.py" in discovery
+        assert "Saved unpadded day-folder cursors remain polled" not in text
+
+
+class TestResearchDiagnosticDocumentation:
+    """DOC-167: extraction detail is retained at health and queue sinks."""
+
+    def test_journal_guidance_does_not_contradict_retained_extraction_detail(self):
+        text = (_ROOT / "docs/dropbox-research.md").read_text()
+        assert "Journal output contains stage counts/error classes only." not in text
+        assert "Extraction `EvidenceError` text is persisted" in text
