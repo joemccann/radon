@@ -18,13 +18,30 @@ function isHeadless() {
   return raw !== "0" && raw.toLowerCase() !== "false";
 }
 
+// DS-2026-10-05-04: Playwright hands the browser this process's whole
+// environment by default, and the renderers parse third-party pages. Pass
+// only what Chromium itself reads, never the database or provider keys.
+const CHROMIUM_ENV_KEYS = [
+  "PATH", "HOME", "USER", "LOGNAME", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR",
+  "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_CACHE_HOME",
+  "FONTCONFIG_PATH", "FONTCONFIG_FILE",
+];
+
+function chromiumEnv() {
+  const env = {};
+  for (const key of CHROMIUM_ENV_KEYS) {
+    if (process.env[key] !== undefined) env[key] = process.env[key];
+  }
+  return env;
+}
+
 export function chromiumLaunchOptions({
   headless = isHeadless(),
   sandbox = process.env.PLAYWRIGHT_CHROMIUM_SANDBOX,
 } = {}) {
   const disabled = sandbox === "0" || (typeof sandbox === "string" && sandbox.toLowerCase() === "false");
-  if (!disabled) return { headless };
-  return { headless, args: ["--no-sandbox", "--disable-dev-shm-usage"] };
+  if (!disabled) return { headless, env: chromiumEnv() };
+  return { headless, env: chromiumEnv(), args: ["--no-sandbox", "--disable-dev-shm-usage"] };
 }
 
 // Chromium's own failure text when its namespace/setuid sandbox cannot start.

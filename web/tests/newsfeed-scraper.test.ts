@@ -136,6 +136,36 @@ describe("browser lifecycle", () => {
     });
   });
 
+  it("hands chromium only a non-secret environment (DS-2026-10-05-04)", async () => {
+    const root = await createTempRoot();
+    const launch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("No usable sandbox!"))
+      .mockResolvedValueOnce(fakeBrowser());
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const saved = { token: process.env.TURSO_AUTH_TOKEN, home: process.env.HOME };
+    process.env.TURSO_AUTH_TOKEN = "synthetic-db-token";
+    process.env.HOME = "/home/synthetic";
+    try {
+      await withSandboxEnv(undefined, async () => {
+        const { createBrowser } = await import("../../scripts/newsfeed/browser.js");
+        const handle = await createBrowser({ storageStatePath: path.join(root, "storage.json"), launcher: { launch } });
+        for (const call of launch.mock.calls as unknown[][]) {
+          const env = (call[0] as { env?: Record<string, string> }).env;
+          expect(env).toBeDefined();
+          expect(env).not.toHaveProperty("TURSO_AUTH_TOKEN");
+          expect(env?.HOME).toBe("/home/synthetic");
+        }
+        await handle.close();
+      });
+    } finally {
+      error.mockRestore();
+      if (saved.token === undefined) delete process.env.TURSO_AUTH_TOKEN;
+      else process.env.TURSO_AUTH_TOKEN = saved.token;
+      process.env.HOME = saved.home;
+    }
+  });
+
   it("falls back to --no-sandbox, loudly, only when the sandbox itself cannot start", async () => {
     const root = await createTempRoot();
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
