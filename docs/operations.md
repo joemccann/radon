@@ -568,7 +568,9 @@ Rollout, one host at a time, off RTH, with a second SSH session open:
 2. Same command with `--apply` as root on the broker. Verify: `ssh radon-broker true` from the laptop; from the app, `curl --cacert ... https://10.0.0.4:8340/healthz` (spof-host-split.md) and `/health` `auth_state=authenticated`.
 3. Repeat with `--role app` on the app host. Verify `curl -fsS https://app.radon.run/health`, the broker watchdog's `GET http://10.0.0.2:8321/health`, and a CI deploy (`gh run list --workflow=ci.yml --limit 1`).
 
-Rollback: `ufw disable` (broker: its prior state), or restore the backup `ufw --force reset` wrote under `/etc/ufw/*.rules.<timestamp>`.
+R-728 / REL-309: before reset, both entrypoints snapshot `/etc/ufw` and `/etc/default/ufw` under a root-only `/etc/radon-ufw-rollback.*` directory. Command failure or TERM/INT restores the prior policy and its enabled/disabled state. Successful replacement or rollback removes the snapshot. Failed rollback retains the directory and prints its path; SIGKILL/power loss also requires manual recovery from the printed snapshot.
+
+As root, set `BACKUP=<printed /etc/radon-ufw-rollback.* path>`, then run `cp -a "$BACKUP/ufw/." /etc/ufw/ && cp -a "$BACKUP/default-ufw" /etc/default/ufw`. Run `ufw --force enable` when the restored file says `ENABLED=yes`, otherwise `ufw --force disable` for `ENABLED=no`; refuse an unknown value. Verify access through the second session before removing the backup.
 
 ### Hetzner Cloud Firewalls (`cloud/hetzner/firewalls/`)
 

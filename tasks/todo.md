@@ -8934,3 +8934,11 @@ Findings before edits and value gate:
 
 - DOC-162 P0: local recovery operator -> kill a process selected using a stale client registry -> discard an unacknowledged order or interrupt unrelated clients -> scripts/ib_place_order.py:563-643, scripts/ib_sync.py:88 and scripts/ib_orders.py:44 -> docs/ib-connection-troubleshooting.md:109-145 -> scripts/CLAUDE.md allocation/order-placement contracts. Reader/operator action is diagnosing collisions safely; harm is order loss; prose must explain cleanup boundaries while code owns allocation.
 - DOC-163 P0: cancellation developer/operator -> use master identity for any order -> cancellation/modification fails and an order remains live -> scripts/ib_order_manage.py:90-118 -> docs/ib_tws_api.md:22-39,538-558 -> scripts/CLAUDE.md Cancel / Modify. Reader/action is selecting order-owner identity; harm is a live order remaining active; prose needs to distinguish visibility from mutation authority.
+
+## Nightly reliability 2026-10-05
+
+- [x] T1 depends_on: [] Install isolated toolchain, read trusted checkpoint and open PR inventory, create authorized branch.
+- [x] T2 depends_on: [T1] Audit delta and codemap importers; run standing sweeps and re-triage inherited acceptance.
+- [ ] T3 depends_on: [T2] Repair verified findings serially with red/green fault injection and focused gates.
+- [ ] T4 depends_on: [T3] Run permanent drills, syntax and diff hygiene; validate substantive publication.
+- [ ] T5 depends_on: [T4] Publish one draft, watch exact-head CI, post one rolling checkpoint and record review.

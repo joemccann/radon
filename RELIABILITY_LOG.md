@@ -934,3 +934,11 @@ CI routing repair GREEN: 147 focused path-filter/image/brand/docs tests passed. 
 R-035 / REL-021b acceptance is already implemented upstream: two new executable cases pass against the actual limiter and relay snapshot/disconnect code, including 1000 queued submissions plus refused overflow and zero cancelled-client broker calls with another client retained. No source repair or red-before claim is made for this existing behavior.
 
 Closing local verification (2026-10-04): permanent Python drills 95 passed; standing safety/catalog sweeps 110 passed; relay union 113 passed; research/docs unions 280 and 305 passed; controller/setup union 18 passed; delta scripts 153 passed; delta API 15 passed; deploy lifecycle 7 passed with 2 Darwin-inapplicable skips. Broader cloud delta: 167 passed and one subprocess interpreter failure; that failing file case passes serially with the venv interpreter on PATH. Full pytest/cloud suites, Vitest and its order-idempotency-durability drill remain exact-head PR CI work. Shell/Node syntax, changed Python/config parsing, diff hygiene and secret scan pass; no YAML/JSON/TOML file is changed. No production access, credential lookup, main push, merge, codemap modification or test-ledger edit.
+
+## Repairs 2026-10-05
+
+| ID | Status | Commit | Fault injection / verification |
+|---|---|---|---|
+| REL-309 / R-728 | DONE | this commit | RED 8 failed twice against the audit base with actual shell entrypoints and fake ufw mutating a temporary configuration tree. GREEN initial 8 passed; expanded operator/setup union 62 passed. Snapshot before reset; command failures and TERM/INT restore the previous policy and enabled state. Unknown initial state refuses without mutation. Success removes the snapshot; failed restoration retains its exact named backup. SIGKILL/power-loss recovery is the root restore sequence in docs/operations.md. Existing command-order assertions remain intact; fixtures stage an isolated /etc tree. |
+
+REL-309 closing focused verification: host/setup/shell contracts 137 passed; both changed shell files pass bash syntax, staged secret scan and diff hygiene. Full cloud/Python suites remain PR CI work.
