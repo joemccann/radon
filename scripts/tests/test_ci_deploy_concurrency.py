@@ -378,6 +378,8 @@ def test_pytest_shards_then_combines_coverage_ratchet() -> None:
     assert "test_[a-c]" in include
     assert "test_[d-f]" in include
     assert "test_i*" in include
+    assert "test_v*" in include
+    assert "test_[t-u]" in include
     assert "--cov-fail-under=0" in commands
     checkout = next(
         step
@@ -818,9 +820,10 @@ def test_pytest_coverage_ratchet_measures_branches() -> None:
 # explicitly and by the letter glob (``--keep-duplicates`` is off by default),
 # so shard membership stays glob-derived and the union contract holds.
 PYTEST_SHARD_LEAD_MODULES = {
+    "scripts-gh": ["scripts/tests/test_vixcor.py"],
     "scripts-jm": ["scripts/tests/test_leap_garch_no_duplicate_scan.py"],
     "scripts-npsz": [
-        "scripts/tests/test_vixcor.py",
+        "scripts/tests/test_path_filter.py",
     ],
     "rest": [
         "scripts/tests/test_run_flow_refresh_wrapper.py",

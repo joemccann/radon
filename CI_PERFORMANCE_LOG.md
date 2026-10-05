@@ -2054,3 +2054,54 @@ Vitest, Docker builds and workflow lint are delegated to PR CI on this
 runner; none is claimed locally. Publication and exact-head CI depend on
 GitHub accepting this workflow change; the October 2 token lacked workflow
 scope and tonight's read-only scope header still reports repo only.
+
+
+## CIP-018 - rebalance test_v* suite from scripts-npsz to scripts-gh (2026-10-05)
+
+Status: **VALIDATING**.
+
+**Pre-edit baseline and hypothesis.**
+Across 28 comparable successful main push runs, `pytest coverage ratchet` was
+the final gate authorizing deployment in 12 releases. In `py-tests`, `scripts-npsz`
+is severely work-bound on Linux runners: 95 test modules, 1950 tests, and 144.2s
+of raw test execution time (job wall 100-112s, pytest step 82-101s), dominated by
+`test_vixcor.py` (49.89s) and `test_vixts.py` (11.58s). In contrast, `scripts-gh`
+has only 32 modules and 15.4s of test execution (job wall 42-45s, pytest step 25-33s).
+Moving `test_v*.py` (11 modules, ~64s test work) and lead module `test_vixcor.py`
+from `scripts-npsz` into `scripts-gh`, and designating `test_path_filter.py` as
+the collection lead for `scripts-npsz` (`test_[n-p]*.py`, `test_[t-u]*.py`,
+`test_w[!e]*.py`, `test_[x-z]*.py`), balances test work to ~79.4s in `scripts-gh`
+and ~80.2s in `scripts-npsz`.
+Expected critical-path saving: 35-45s on `scripts-npsz` job, reducing deploy
+authorization latency by 20-27s on pytest-gated releases. Runner minutes: flat
+(work reallocated between existing shards; zero new shards). High confidence in
+balanced execution; zero production runtime risk.
+Affected paths: `.github/workflows/ci.yml`, `scripts/tests/test_ci_deploy_concurrency.py`, `CI_PERFORMANCE_LOG.md`.
+
+**Safety and revert trigger.**
+Shard membership remains glob-derived; partition tests enforce 0 overlap, 0
+missing files, and complete directory representation. All 1950 tests continue
+to execute; test isolation, coverage ratchet (56%), and deploy dependency
+closures are untouched. Revert on any module failure on its new shard in PR CI
+or the first five organic main runs, or if `scripts-npsz` or `scripts-gh` job wall
+exceeds 90s.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| pytest (scripts-npsz) | 112s | pending | TBD until 5 samples |
+
+Before: Actions run 37224252323, job 111500572258 (112s wall / 101s pytest step).
+Additional before samples: 37223269249 (111s), 37222279939 (112s), 37220425944 (100s),
+37219711133 (108s). Five comparable before and five after required: same-class/cache
+p50 at least 10% and 15s faster; p95 no worse than 5% or 15s; cold p50 no worse than 10%;
+runner minutes no more than 20% higher unless disclosed; all test/gate/provenance/health/
+recovery/rollback rails intact. Neither local timing nor green PR CI establishes a win.
+
+**Verification.**
+Added failing contract assertions in `scripts/tests/test_ci_deploy_concurrency.py`
+(`test_pytest_shards_then_combines_coverage_ratchet` and `test_heavy_pytest_modules_lead_their_shard`);
+verified red (2 failed, 35 passed), then green (37 passed) after `ci.yml` update.
+All 95 standing contract tests pass (`test_ci_deploy_concurrency.py`, `test_ci_gate_integrity.py`,
+`test_path_filter.py`). Cloud contracts pass (`test_ci_deploy_image_reuse.py`, `test_caddyfile.py`).
+`ci.yml` YAML syntax verified valid. Full test suites, Vitest, Docker builds, and workflow lint
+are delegated to PR CI per runner constraints.
