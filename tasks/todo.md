@@ -1,3 +1,12 @@
+# Task: Nightly CI performance audit (2026-10-06)
+
+- [x] T1 depends_on: [] Read open PRs/checkpoint, audit main changes, acquire Actions jobs/logs/cache/rules.
+- [x] T2 depends_on: [T1] Classify comparable runs, reconstruct gate DAG, rank safe material candidates.
+- [x] T3 depends_on: [T2] Surgical CIP-018 revert after its recorded >90s shard-wall trigger; 1 failed / 37 passed red, 159 passed green; cloud 58 passed.
+- [ ] T4 depends_on: [T3] Publish substantive draft PR only, verify exact-head CI, post one rolling issue comment.
+
+Review: No additional material optimization qualifies. CIP-018 organic run 37357797556 / job 111924636029: scripts-gh 93s wall exceeds its recorded 90s revert trigger. Restore only its shard membership and matching ownership contracts; preserve full inventory, coverage, gate and deployment guarantees.
+
 # Task: PDF extract error detail (2026-10-03)
 
 - [x] T1 depends_on: [] Failing tests: rc + MemoryError, negative rc signal name, secret redaction, truncated stderr, prefix preserved, TimeoutExpired, persisted health/journal bound.
