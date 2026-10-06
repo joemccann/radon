@@ -1032,6 +1032,8 @@ _ALLOWED_HOSTS = [
     # proxy. Pinned in code, not left to RADON_ALLOWED_HOSTS on the VM: a fresh
     # VM or a wiped .env otherwise 400s the entire demo backend silently.
     "demo-api.radon.run",
+    "radon-app",
+    # The app host's tailnet name before the rename. Drop once no caller sends it.
     "ib-gateway",
     "*.ts.net",
 ] + parse_allowed_hosts_env(os.environ.get("RADON_ALLOWED_HOSTS", ""))

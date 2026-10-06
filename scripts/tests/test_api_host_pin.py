@@ -46,7 +46,8 @@ class TestLegitimateHostFormsAreServed:
             "10.0.0.2:8321",  # Hetzner private-net broker -> app /health
             "10.0.0.4",
             "app.radon.run",
-            "ib-gateway:8321",
+            "ib-gateway:8321",  # tailnet name before the app-host rename
+            "radon-app:8321",
         ],
     )
     def test_host_is_accepted(self, host):

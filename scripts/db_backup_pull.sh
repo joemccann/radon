@@ -15,7 +15,7 @@
 # one. Restore runbook: docs/cloud-services.md "DB backup & restore".
 set -euo pipefail
 
-VPS_HOST="${RADON_DB_BACKUP_VPS:-radon@ib-gateway}"
+VPS_HOST="${RADON_DB_BACKUP_VPS:-radon@radon-app}"
 REMOTE_DIR="/home/radon/radon-cloud/backups/db"
 LOCAL_DIR="${RADON_DB_BACKUP_DIR:-$(cd "$(dirname "$0")/.." && pwd)/data/db_backups}"
 RETENTION_DAYS=30

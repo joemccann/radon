@@ -107,12 +107,12 @@ The one-time provisioning script must be run as root from the monorepo: `ssh roo
 
 ```bash
 # First run — installs everything, generates SSH key, exits
-ssh root@ib-gateway 'bash -s' < cloud/scripts/setup-vps.sh
+ssh root@radon-app 'bash -s' < cloud/scripts/setup-vps.sh
 
 # Add the printed SSH key to GitHub (Settings → SSH keys)
 
 # Second run — clones repos, builds, configures services
-ssh root@ib-gateway 'bash -s' < cloud/scripts/setup-vps.sh
+ssh root@radon-app 'bash -s' < cloud/scripts/setup-vps.sh
 ```
 
 ### 2. Complete setup (from your Mac)
@@ -206,7 +206,7 @@ curl https://your-domain.com/health
 ### Managing services
 
 ```bash
-ssh radon@ib-gateway
+ssh radon@radon-app
 
 # Status
 sudo systemctl status radon-api
@@ -231,7 +231,7 @@ radon restart   # restart Gateway, persistent daemons, and active/enabled timers
 radon status    # show systemd inventory plus real Gateway container state
 ```
 
-From the laptop: `ssh root@ib-gateway radon stop`. Designed for fast off-hours shutdowns from iPhone/Termius.
+From the laptop: `ssh root@radon-app radon stop`. Designed for fast off-hours shutdowns from iPhone/Termius.
 
 Initial provisioning installs the checked-in operator and Gateway helpers. For a live update to root-owned helpers, sudoers, polkit rules, or a unit covered by the control-plane manifest, use the root bootstrap transaction below rather than copying files or running `systemctl daemon-reload` directly.
 
@@ -323,13 +323,13 @@ threshold, backoff, and push cap. Use the operator control path for a manual
 recovery; do not bypass it with `docker compose up`:
 
 ```bash
-ssh root@ib-gateway 'radon restart'
+ssh root@radon-app 'radon restart'
 ```
 
 To access the IB Gateway GUI for debugging, set `VNC_SERVER_PASSWORD` in `.env` and tunnel VNC:
 
 ```bash
-ssh -L 5900:127.0.0.1:5900 radon@ib-gateway
+ssh -L 5900:127.0.0.1:5900 radon@radon-app
 # Connect VNC client to localhost:5900
 ```
 
@@ -404,12 +404,12 @@ pass; otherwise it is rolled back.
 
 ```bash
 # Wipe everything (keeps SSH, firewall, IP)
-ssh root@ib-gateway 'bash -s -- --force' < scripts/wipe-vps.sh
+ssh root@radon-app 'bash -s -- --force' < scripts/wipe-vps.sh
 
 # Bootstrap from scratch
-ssh root@ib-gateway 'bash -s' < scripts/setup-vps.sh
+ssh root@radon-app 'bash -s' < scripts/setup-vps.sh
 # Add SSH key to GitHub
-ssh root@ib-gateway 'bash -s' < scripts/setup-vps.sh
+ssh root@radon-app 'bash -s' < scripts/setup-vps.sh
 
 # Complete setup
 scripts/post-setup.sh
@@ -439,7 +439,7 @@ scripts/post-setup.sh
 - If your domain has existing **CAA records**, add: `0 issue "letsencrypt.org"`
 - Configure your SSH client with `IdentityFile`:
   ```
-  Host ib-gateway
+  Host radon-app
     HostName <VPS_IP>
     User radon
     IdentityFile ~/.ssh/id_ed25519

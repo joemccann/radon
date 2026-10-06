@@ -322,7 +322,7 @@ ufw --force enable</code></pre>
 
   <div class="info">
     Add your local SSH config alias for convenience:<br>
-    <code>Host ib-gateway</code><br>
+    <code>Host radon-app</code><br>
     <code>&nbsp;&nbsp;HostName &lt;VPS_IP&gt;</code><br>
     <code>&nbsp;&nbsp;User radon</code><br>
     <code>&nbsp;&nbsp;IdentityFile ~/.ssh/id_ed25519</code>
@@ -337,8 +337,8 @@ ufw --force enable</code></pre>
 
   <p>Copy <code>.env.example</code> to the VPS and fill in all secrets:</p>
 
-<pre><code>scp .env.example radon@ib-gateway:~/radon-cloud/.env
-ssh radon@ib-gateway 'chmod 600 ~/radon-cloud/.env &amp;&amp; nano ~/radon-cloud/.env'</code></pre>
+<pre><code>scp .env.example radon@radon-app:~/radon-cloud/.env
+ssh radon@radon-app 'chmod 600 ~/radon-cloud/.env &amp;&amp; nano ~/radon-cloud/.env'</code></pre>
 
   <h3>Required values</h3>
   <table>
@@ -384,12 +384,12 @@ ssh radon@ib-gateway 'chmod 600 ~/radon-cloud/.env &amp;&amp; nano ~/radon-cloud
   <p>The full setup is 3 commands from your Mac:</p>
 
 <pre><code># First run — installs everything, generates SSH key, exits
-ssh root@ib-gateway 'bash -s' < scripts/setup-vps.sh
+ssh root@radon-app 'bash -s' < scripts/setup-vps.sh
 
 # Add the printed SSH key to GitHub (Settings → SSH keys)
 
 # Second run — clones repos, builds, configures services
-ssh root@ib-gateway 'bash -s' < scripts/setup-vps.sh
+ssh root@radon-app 'bash -s' < scripts/setup-vps.sh
 
 # Complete setup — env, build, IB Gateway (auto-retry 2FA), services, data, verify
 scripts/post-setup.sh</code></pre>
@@ -433,7 +433,7 @@ scripts/post-setup.sh</code></pre>
   <div class="step-header"><span class="step-num">6</span><span class="step-title">Start and verify IB Gateway</span></div>
 
 <pre><code># SSH to VPS
-ssh radon@ib-gateway
+ssh radon@radon-app
 
 # Start the stack (IB Gateway is started through the 2FA lease gate)
 /usr/local/bin/radon start
@@ -454,7 +454,7 @@ python3.13 scripts/run_with_env.py .env bash -c \
   <h3>VNC access (for IB Gateway GUI)</h3>
   <p>If you need to interact with the IB Gateway GUI (e.g., accept agreements):</p>
 <pre><code># SSH tunnel to VNC
-ssh -L 5900:127.0.0.1:5900 radon@ib-gateway
+ssh -L 5900:127.0.0.1:5900 radon@radon-app
 
 # Connect with any VNC client to localhost:5900</code></pre>
 
@@ -566,7 +566,7 @@ scripts/migrate-data.sh
 # Or with explicit source/target
 scripts/migrate-data.sh \
   --source /Users/joemccann/dev/apps/finance/radon \
-  --target radon@ib-gateway:~/radon</code></pre>
+  --target radon@radon-app:~/radon</code></pre>
 
   <h3>What gets transferred</h3>
   <ul>
@@ -576,8 +576,8 @@ scripts/migrate-data.sh \
   </ul>
 
   <h3>Verify on VPS</h3>
-<pre><code>ssh radon@ib-gateway 'ls ~/radon/data/ | head -20'
-ssh radon@ib-gateway 'cat ~/radon/data/service_health/cta-sync.json | python3 -m json.tool'</code></pre>
+<pre><code>ssh radon@radon-app 'ls ~/radon/data/ | head -20'
+ssh radon@radon-app 'cat ~/radon/data/service_health/cta-sync.json | python3 -m json.tool'</code></pre>
 </div>
 
 <!-- STEP 10 -->
@@ -753,7 +753,7 @@ RADON_ENABLE_HSTS=1</code></pre>
 
   <h3>B. Rollback a bad deploy (VPS stays live)</h3>
 <pre><code># deploy.sh handles this automatically, but if manual:
-ssh radon@ib-gateway
+ssh radon@radon-app
 cd ~/radon
 git log --oneline -5                     # Find the good commit
 git reset --hard &lt;good-commit&gt;
@@ -762,8 +762,8 @@ cd web && npm ci && npm run build && cd ..
 sudo systemctl restart radon-nextjs radon-api radon-relay radon-monitor</code></pre>
 
   <h3>C. Restart a single crashed service</h3>
-<pre><code>ssh radon@ib-gateway 'sudo systemctl restart radon-api'
-ssh radon@ib-gateway 'journalctl -u radon-api -n 50'</code></pre>
+<pre><code>ssh radon@radon-app 'sudo systemctl restart radon-api'
+ssh radon@radon-app 'journalctl -u radon-api -n 50'</code></pre>
 </div>
 
 <!-- STEP 15 -->
@@ -775,16 +775,16 @@ ssh radon@ib-gateway 'journalctl -u radon-api -n 50'</code></pre>
   <h3>Common commands</h3>
   <table>
     <tr><th>Task</th><th>Command</th></tr>
-    <tr><td>Check all services</td><td><code>ssh radon@ib-gateway 'sudo systemctl status radon-{ib-gateway,nextjs,api,relay,monitor}'</code></td></tr>
-    <tr><td>View API logs</td><td><code>ssh radon@ib-gateway 'journalctl -u radon-api -f'</code></td></tr>
-    <tr><td>Restart a service</td><td><code>ssh radon@ib-gateway 'sudo systemctl restart radon-api'</code></td></tr>
-    <tr><td>View Caddy logs</td><td><code>ssh radon@ib-gateway 'tail -f /var/log/caddy/radon.log | jq .'</code></td></tr>
-    <tr><td>IB Gateway logs</td><td><code>ssh radon@ib-gateway 'cd ~/radon-cloud && docker compose logs --tail 100'</code></td></tr>
-    <tr><td>Start the full stack</td><td><code>ssh radon@ib-gateway '/usr/local/bin/radon start'</code></td></tr>
-    <tr><td>Restart the full stack</td><td><code>ssh radon@ib-gateway '/usr/local/bin/radon restart'</code></td></tr>
-    <tr><td>IB Gateway VNC</td><td><code>ssh -L 5900:127.0.0.1:5900 radon@ib-gateway</code></td></tr>
-    <tr><td>Manual deploy</td><td><code>ssh radon@ib-gateway 'cd ~/radon-cloud && bash scripts/deploy.sh'</code></td></tr>
-    <tr><td>Check disk usage</td><td><code>ssh radon@ib-gateway 'df -h / && du -sh ~/radon/data'</code></td></tr>
+    <tr><td>Check all services</td><td><code>ssh radon@radon-app 'sudo systemctl status radon-{ib-gateway,nextjs,api,relay,monitor}'</code></td></tr>
+    <tr><td>View API logs</td><td><code>ssh radon@radon-app 'journalctl -u radon-api -f'</code></td></tr>
+    <tr><td>Restart a service</td><td><code>ssh radon@radon-app 'sudo systemctl restart radon-api'</code></td></tr>
+    <tr><td>View Caddy logs</td><td><code>ssh radon@radon-app 'tail -f /var/log/caddy/radon.log | jq .'</code></td></tr>
+    <tr><td>IB Gateway logs</td><td><code>ssh radon@radon-app 'cd ~/radon-cloud && docker compose logs --tail 100'</code></td></tr>
+    <tr><td>Start the full stack</td><td><code>ssh radon@radon-app '/usr/local/bin/radon start'</code></td></tr>
+    <tr><td>Restart the full stack</td><td><code>ssh radon@radon-app '/usr/local/bin/radon restart'</code></td></tr>
+    <tr><td>IB Gateway VNC</td><td><code>ssh -L 5900:127.0.0.1:5900 radon@radon-app</code></td></tr>
+    <tr><td>Manual deploy</td><td><code>ssh radon@radon-app 'cd ~/radon-cloud && bash scripts/deploy.sh'</code></td></tr>
+    <tr><td>Check disk usage</td><td><code>ssh radon@radon-app 'df -h / && du -sh ~/radon/data'</code></td></tr>
   </table>
 
   <h3>After changing config files</h3>

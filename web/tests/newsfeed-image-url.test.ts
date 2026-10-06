@@ -128,7 +128,7 @@ describe("media.js — ensurePublicMediaPermissions", () => {
     expect(localMediaDest("/home/radon/radon-cloud/media/")).toBe(
       "/home/radon/radon-cloud/media",
     );
-    expect(localMediaDest("radon@ib-gateway:/home/radon/radon-cloud/media/")).toBeNull();
+    expect(localMediaDest("radon@radon-app:/home/radon/radon-cloud/media/")).toBeNull();
   });
 
   it("repairs 0600 dest files that rsync --ignore-existing will not overwrite", async () => {

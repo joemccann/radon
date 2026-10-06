@@ -13,12 +13,12 @@ import {
   pruneMediaTree,
 } from "./mediaPermissions.js";
 
-// Default target uses Tailscale's MagicDNS name `ib-gateway` — secure private route.
+// Default target uses Tailscale's MagicDNS name `radon-app` — secure private route.
 // Operators without Tailscale on the laptop can switch to the Hetzner public IP via
 //   RADON_MEDIA_REMOTE=<user>@<prod-host>:/path/to/media/
 // Same SSH key is authorized on both routes (single ~/.ssh/authorized_keys on the VPS).
 // See docs/cloud-services.md "Tailscale-free media push".
-const REMOTE = process.env.RADON_MEDIA_REMOTE ?? "radon@ib-gateway:/home/radon/radon-cloud/media/";
+const REMOTE = process.env.RADON_MEDIA_REMOTE ?? "radon@radon-app:/home/radon/radon-cloud/media/";
 const LOCAL = process.env.RADON_MEDIA_LOCAL ?? "web/public/media/";
 const RSYNC_TIMEOUT_MS = 30_000;
 // R-171: the full-tree sweep runs at most once an hour, not every cycle.
@@ -44,7 +44,7 @@ export async function pushMedia({
     // R-137: `--ignore-existing` skipped every pre-fix 0600 image forever, so
     // they stayed 403 on media.radon.run permanently, and the post-transfer
     // chmod below never runs on the DEFAULT remote route (localMediaDest is
-    // null for `radon@ib-gateway:/…`). rsync's own `--chmod` is the only
+    // null for `radon@radon-app:/…`). rsync's own `--chmod` is the only
     // thing that reaches the remote destination. Dropping --ignore-existing
     // costs nothing: filenames are content-derived and immutable, so the
     // size+mtime check skips the data and `-a` still repairs the mode.

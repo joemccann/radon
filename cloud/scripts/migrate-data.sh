@@ -8,7 +8,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 
 readonly DEFAULT_SOURCE="$HOME/dev/apps/finance/radon"
-readonly DEFAULT_TARGET="radon@ib-gateway:~/radon"
+readonly DEFAULT_TARGET="radon@radon-app:~/radon"
 readonly SNAPSHOT_NAME="radon-data-snapshot-$(date +%Y%m%d-%H%M%S).tar.gz"
 readonly SNAPSHOT_PATH="/tmp/${SNAPSHOT_NAME}"
 
