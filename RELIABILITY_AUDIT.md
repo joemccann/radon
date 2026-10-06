@@ -3069,3 +3069,9 @@ installation actions are retained on issue #81; none is closed on inspection.
 | R-730 / REL-314 | P2 | `scripts/breadth_scan.py:730-734` (audit base) | A dictionary instead of the cached history list crashed the new off-hours gate; invalid or future dates compared lexically as fresh and suppressed recovery fetches. Acceptance: structurally corrupt, non-string, invalid and future cache dates never authorize a skip; the actual CLI refetches corrupt history using only mocked providers, while valid completed-session and premarket controls still use cache. Six faults failed twice; breadth/provider/storage/caller union 102 passed after requiring the canonical completed-session date in a list row. |
 
 Audited through: 393345550d521548808d9884be0e5ab10ae48854 on 2026-10-06 — 2 new findings
+
+### Inherited ambiguous-receipt acceptance
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-032 / REL-315 | P2 | `scripts/db/writer.py:414-421` (audit base); shared retry owner `:344-364` | The existing retried DELETE selected a new LIMIT page inside each attempt. Losing a committed response deleted the following page on replay and undercounted archive progress. Acceptance: a real SQLite commit followed by one or two lost batch receipts repeats the same page, preserves post-cutoff rows and reports exactly seven removals; fallback retains that identity and a subsequent full rerun returns zero. Two faults failed twice; 112 focused archive/writer/transport tests pass. The shared wrapper's only mutation callers are this batch and stable single-key deletes; daemon/API execute and API transaction faults each prove one transport attempt, never silent replay. Existing replacement-transaction receipt-loss acceptance remains green. No new transport retry is introduced. |

@@ -966,3 +966,7 @@ REL-313 closing focused verification: 156 passed, including local inventory/logo
 | ID | Status | Red / green evidence | Change |
 |---|---|---|---|
 | REL-314 / R-730 | DONE | RED 6 failed twice; GREEN 102 passed | Require a list history with a canonical last date matching the completed session; malformed containers and invalid/future dates cannot crash admission or masquerade as completion. Actual CLI fault uses fake providers and no disk/database writes; valid post-close and premarket controls retain caching. No catch widening or source reordering. |
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-315 / R-032 | DONE | RED 2 failed twice; GREEN archive/writer/transport union 112 passed | Freeze the bounded selected keys before a batch DELETE; retries and single-key fallback retain the same identities after a committed receipt is lost. Real SQLite proves one/two lost receipts preserve exact accounting, retained rows and replay convergence. Existing fallback fake learns explicit-key SQL without changing any assertion or failure injection. Daemon/API execute and transaction paths each surface uncertainty after one fake transport call; no implicit replay or new retry policy. |
