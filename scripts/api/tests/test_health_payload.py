@@ -242,6 +242,7 @@ class TestHealthLite:
         assert isinstance(result.pop("loop_lag_ms"), float)
         assert result == {
             "status": "ok",
+            "dependencies": {"database": "unknown", "market_data": "unknown"},
             "auth_state": "awaiting_2fa",
             "service_state": "healthy",
             "upstream_dead": False,
@@ -264,6 +265,7 @@ class TestHealthLite:
         assert isinstance(result.pop("loop_lag_ms"), float)
         assert result == {
             "status": "ok",
+            "dependencies": {"database": "unknown", "market_data": "unknown"},
             "auth_state": "unknown",
             "service_state": "unknown",
             "upstream_dead": False,
@@ -285,6 +287,7 @@ class TestHealthLite:
         assert isinstance(result.pop("loop_lag_ms"), float)
         assert result == {
             "status": "ok",
+            "dependencies": {"database": "unknown", "market_data": "unknown"},
             "auth_state": "unknown",
             "service_state": "unknown",
             "upstream_dead": False,
