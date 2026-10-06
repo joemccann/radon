@@ -292,8 +292,8 @@ Do not use a copied wipe/bootstrap sequence as recovery. Review the
 through [the backup owner](../docs/cloud-services.md#db-backup--restore-dur-13),
 and follow [the exact-SHA deployment and rollback owner](CLAUDE.md#deployment-contract).
 Stop if backups, host identity, installed control-plane provenance or recovery
-access are uncertain. Rebuilding requires an operator-reviewed maintenance
-procedure; this index does not authorize a teardown.
+access are uncertain. This section supplies no executable teardown sequence;
+use the backup and deployment recovery owners above.
 
 ## Security
 

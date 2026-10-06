@@ -110,8 +110,8 @@ time. Retention is bounded by the host journal; it is not an off-host backup.
 Do not recreate the container or bypass a hold to obtain diagnostic output.
 **Verification:** match the host and incident time to the recovered entries;
 use [readiness verification](#readiness-verification) to establish authentication.
-**Rollback:** read-only diagnosis needs no rollback. Changes to the installed
-compose artifact require a separately reviewed broker maintenance procedure.
+**Rollback:** read-only diagnosis needs no rollback. Installed compose changes
+belong to the [cloud control-plane owner](../cloud/CLAUDE.md#runtime-planes).
 **Escalation:** retain sanitized timestamps and missing-log evidence for the
 operator when the installed configuration or journal retention cannot be confirmed.
 

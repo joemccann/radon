@@ -1724,6 +1724,9 @@ class TestNightlyInfrastructureOwners:
         assert "ssh root@radon-app 'radon restart'" not in readme
         assert "IBC scheduled/cold restarts are blank" not in readme
         assert "VPS services reach IB Gateway over loopback" not in readme
+        assert "operator-reviewed maintenance" not in readme
+        recovery = (_ROOT / "docs/ib-gateway-recovery.md").read_text()
+        assert "separately reviewed broker maintenance" not in recovery
         assert "../docs/ib-gateway-recovery.md" in readme
         assert "../docs/spof-host-split.md" in readme
         html = (_ROOT / "cloud/radon-cloud-deployment-guide.html").read_text()
