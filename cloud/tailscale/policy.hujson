@@ -69,6 +69,19 @@
     },
   ],
 
+  // Tailscale SSH. The app host runs `tailscale up --ssh`, so Tailscale
+  // answers port 22 on its tailnet address and admits only what this
+  // section allows; the tcp:22 grant above is not enough on its own. The
+  // broker runs plain sshd and needs no rule here.
+  "ssh": [
+    {
+      "action": "accept",
+      "src":    ["group:operator"],
+      "dst":    ["tag:radon-app"],
+      "users":  ["root", "radon"],
+    },
+  ],
+
   "tests": [
     {
       "src": "tag:radon-ops",

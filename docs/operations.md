@@ -518,6 +518,11 @@ The [checked-in policy](../cloud/tailscale/policy.hujson) owns grants, tags and
 access tests. [Offline policy tests](../cloud/tests/test_tailnet_policy.py)
 pin its boundaries; neither proves which policy or tags are installed live.
 
+The app host runs Tailscale SSH (`tailscale up --ssh`): Tailscale answers port
+22 on its tailnet address and admits only what the policy's `ssh` section
+allows, so the `tcp:22` grant alone refuses every login. The broker runs plain
+sshd and needs no `ssh` rule.
+
 **Symptom:** peer access is broader than the declared policy, or a required
 operator path fails after a policy change.
 **Prerequisites:** operator access to the Tailscale admin console, a saved live
@@ -539,7 +544,9 @@ host back in.
 3. Validate the rendered policy in the console, require its access tests to
    pass, then save it. Stop on any failed test or uncertain host identity.
 4. **Verification:** open fresh SSH connections from the operator device to
-   the app and broker while keeping public recovery sessions open. Confirm the
+   the app and broker while keeping public recovery sessions open. Connect to
+   each host's tailnet address: an SSH config alias can point at the public IP
+   and pass without touching the tailnet. Confirm the
    app's direct `/health/lite` response is available from the operator device;
    check the declared denied paths from their intended source roles. An
    existing SSH session does not prove new connections work.
