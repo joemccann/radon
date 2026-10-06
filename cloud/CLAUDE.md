@@ -218,6 +218,7 @@ only a prefix of a baked key is rejected.
 - Canonical secrets: `/etc/radon/env` (regular file, mode `0640`, owner `root:radon`)
 - Compatibility secret symlink: `/home/radon/radon-cloud/.env` -> `/etc/radon/env`
 - Canonical media: `/var/lib/radon/media` (owner `radon:radon-media`; caddy is not in group `radon`). Root changes its mode only through an `O_NOFOLLOW` fd (`chmod_dir_nofollow`); ACL changes inside it, including recursive `-R -P` walks, run as `radon` via `setpriv`
+- Control-plane rollback state (manifest, ready marker) in radon-owned `/var/lib/radon`: root restores it only through a pinned `O_NOFOLLOW` directory fd, writing a fresh `O_EXCL` temp then renaming it over the target (`restore_target`); never a by-name `rm` then `cp`
 - Private research: `/var/lib/radon-private` is a root-owned `0700` anchor;
   its `research` child is radon-owned `0700`. The worker mounts that child
   read-write and API read-only at `/var/lib/radon/research`. Seed through the
