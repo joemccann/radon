@@ -141,7 +141,7 @@ leave `auth_state=authenticated` on 4001.
 
 Operator commands after the cut:
 
-- App: `ssh root@ib-gateway radon {start|stop|restart|status}`
+- App: `ssh root@radon-app radon {start|stop|restart|status}`
   App-plane only. Does not cycle Gateway.
 - Broker: `ssh root@<broker> radon {start|stop|restart|status}`
   Gateway via `radon-ib-gateway-control`. Does not require radon-health.

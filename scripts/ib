@@ -27,7 +27,7 @@ Usage: scripts/ib mode [local|cloud]
 
   scripts/ib mode             Print the current IB Gateway mode.
   scripts/ib mode local       Use local Docker IB Gateway (127.0.0.1:4001).
-  scripts/ib mode cloud       Use Hetzner gateway via Tailscale (ib-gateway:4001).
+  scripts/ib mode cloud       Use Hetzner gateway via Tailscale (radon-app:4001).
 
 The chosen mode persists to .env.ib-mode and is read by every Radon entry
 point at startup (overlayed on top of .env). Switch once per session — no
@@ -87,7 +87,7 @@ case "$cmd" in
         write_mode docker 127.0.0.1
         ;;
       cloud)
-        write_mode cloud ib-gateway
+        write_mode cloud radon-app
         ;;
       *)
         log_error "unknown mode '$sub'"

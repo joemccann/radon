@@ -369,7 +369,7 @@ curl -s http://localhost:8321/health | python3.13 -m json.tool
 bash -c 'echo > /dev/tcp/ib-gateway/4001' && echo OK || echo FAIL
 
 # Connections on remote host
-ssh root@ib-gateway "ss -tnp | grep 4001"
+ssh root@radon-app "ss -tnp | grep 4001"
 
 # Fresh client probe
 python3.13 -c "from ib_insync import IB; ib=IB(); ib.connect('ib-gateway',4001,clientId=99,timeout=10); print('OK'); ib.disconnect()"
@@ -493,7 +493,7 @@ radon restart
 radon status
 ```
 
-From the laptop: `ssh root@ib-gateway radon stop`. The operator CLI is installed from the monorepo [`cloud/scripts/operator-radon.sh`](../cloud/scripts/operator-radon.sh) control-plane source. `radon stop|start|restart` also never touches `radon-control.service` (below).
+From the laptop: `ssh root@radon-app radon stop`. The operator CLI is installed from the monorepo [`cloud/scripts/operator-radon.sh`](../cloud/scripts/operator-radon.sh) control-plane source. `radon stop|start|restart` also never touches `radon-control.service` (below).
 
 ### Host control socket (`radon-control.service`)
 

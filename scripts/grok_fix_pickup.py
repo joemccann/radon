@@ -42,7 +42,7 @@ import ir_push_gate
 
 DEFAULT_SOURCE = os.environ.get(
     "RADON_GROK_FIX_SOURCE",
-    "ssh://radon@ib-gateway/home/radon/radon-page-responder",
+    "ssh://radon@radon-app/home/radon/radon-page-responder",
 )
 PICKUP_NAMESPACE = "refs/remotes/grok-vps/"
 DEFAULT_MAX_COMMITS = 20

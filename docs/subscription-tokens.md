@@ -164,20 +164,20 @@ Retry on demand, ignoring the cooldown. This needs no vault, so a bare shell is
 fine; the next timer run seals the new file:
 
 ```bash
-ssh radon@ib-gateway 'cd /home/radon/radon && .venv/bin/python -m scripts.subscription_tokens --reauth codex'
+ssh radon@radon-app 'cd /home/radon/radon && .venv/bin/python -m scripts.subscription_tokens --reauth codex'
 ```
 
 Every link page also carries the interactive fallback:
 
 ```bash
-ssh -t radon@ib-gateway 'codex login --device-auth'
-ssh -t radon@ib-gateway '~/.local/bin/grok login --device-auth'
+ssh -t radon@radon-app 'codex login --device-auth'
+ssh -t radon@radon-app '~/.local/bin/grok login --device-auth'
 ```
 
 ### anthropic (Claude Code): paste-code over SSH
 
 ```bash
-ssh -t radon@ib-gateway 'claude auth login --claudeai'
+ssh -t radon@radon-app 'claude auth login --claudeai'
 ```
 
 Follow the printed URL in a browser, approve, and paste the code back. This
@@ -197,7 +197,7 @@ It has no login subcommand: any first run prints a Google OAuth URL and waits
 60 seconds for the pasted code, so open the URL before running it.
 
 ```bash
-ssh -t radon@ib-gateway '~/.local/bin/agy -p ok'
+ssh -t radon@radon-app '~/.local/bin/agy -p ok'
 ```
 
 Like claude, that pasted code is why there is no push login for it. The daemon
@@ -218,8 +218,8 @@ unit: a run seals every credential file that parses, including one that is still
 live, so no separate step is needed.
 
 ```bash
-ssh radon@ib-gateway 'sudo systemctl start radon-subscription-tokens.service'
-ssh radon@ib-gateway 'systemctl status radon-subscription-tokens.service'
+ssh radon@radon-app 'sudo systemctl start radon-subscription-tokens.service'
+ssh radon@radon-app 'systemctl status radon-subscription-tokens.service'
 ```
 
 Run sealing and restoration through the unit. It supplies both the configured
@@ -252,8 +252,8 @@ Report without changing anything, in either human or machine form. `--check`
 never refreshes, probes, logs in or pages:
 
 ```bash
-ssh radon@ib-gateway 'cd /home/radon/radon && .venv/bin/python -m scripts.subscription_tokens --check'
-ssh radon@ib-gateway 'cd /home/radon/radon && .venv/bin/python -m scripts.subscription_tokens --check --json'
+ssh radon@radon-app 'cd /home/radon/radon && .venv/bin/python -m scripts.subscription_tokens --check'
+ssh radon@radon-app 'cd /home/radon/radon && .venv/bin/python -m scripts.subscription_tokens --check --json'
 ```
 
 `--once` is the mode the timer runs: evaluate, heal and (when due) probe every

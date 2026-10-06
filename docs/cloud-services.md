@@ -49,7 +49,7 @@ In production both keys must also survive `render_env_file`'s newsfeed allowlist
 3. Configure newsfeed credentials through the [production environment owner](external-services.md).
 4. **Hetzner runs the scraper as `radon-newsfeed.service`**. The [unit](../cloud/services/radon-newsfeed.service) owns its restart and environment settings; the installed app-container drop-in and environment rendering are described in [operations](operations.md). Tail logs:
    ```bash
-   ssh root@ib-gateway "journalctl -u radon-newsfeed -f"
+   ssh root@radon-app "journalctl -u radon-newsfeed -f"
    ```
    For a missing or changed unit, use the reviewed root control-plane procedure
    from [`cloud/CLAUDE.md`](../cloud/CLAUDE.md); do not copy a unit from an
@@ -59,7 +59,7 @@ In production both keys must also survive `render_env_file`'s newsfeed allowlist
 
 ### Tailscale-free media push
 
-The default rsync target (`radon@ib-gateway:/home/radon/radon-cloud/media/`) only resolves when Tailscale is up on the laptop. If the operator has shut Tailscale off (battery, conference WiFi, MagicDNS flake) the newsfeed cycle keeps scraping but logs `[push-media] non-fatal: rsync exit …` until the next cycle.
+The default rsync target (`radon@radon-app:/home/radon/radon-cloud/media/`) only resolves when Tailscale is up on the laptop. If the operator has shut Tailscale off (battery, conference WiFi, MagicDNS flake) the newsfeed cycle keeps scraping but logs `[push-media] non-fatal: rsync exit …` until the next cycle.
 
 To bypass Tailscale and push over the Hetzner public IP, export the env override before running the scraper / dev stack:
 
@@ -247,8 +247,8 @@ PYTHONPATH=scripts python3.13 -c "from db.client import get_db; \
     print(get_db().execute('SELECT service, state, updated_at FROM service_health').rows)"
 
 # Hetzner
-ssh radon@ib-gateway 'systemctl list-units "radon-*"'
-ssh radon@ib-gateway 'journalctl -u radon-api --since "1 hour ago"'
+ssh radon@radon-app 'systemctl list-units "radon-*"'
+ssh radon@radon-app 'journalctl -u radon-api --since "1 hour ago"'
 ```
 
 Service health for every dual-writing scheduler lands in the `service_health` table; the dashboard's status strip can render this without scraping logs.
@@ -445,7 +445,7 @@ JSON-RPC), documented for consumers at radon.run `/developers/mcp`.
 
 When MenthorQ's session cookie rotates, the headless Playwright run will fail. To re-establish the session:
 
-- **Hetzner mode**: `ssh radon@ib-gateway docker exec -it radon-services python3.13 scripts/cta_sync_service.py --interactive` — Playwright opens a VNC-visible Chrome for one-time MFA approval. Session persists to a named volume.
+- **Hetzner mode**: `ssh radon@radon-app docker exec -it radon-services python3.13 scripts/cta_sync_service.py --interactive` — Playwright opens a VNC-visible Chrome for one-time MFA approval. Session persists to a named volume.
 - **Local mode**: `python3 scripts/cta_sync_service.py --interactive` — opens a visible Chrome window on the laptop for MFA approval.
 
 ## Security

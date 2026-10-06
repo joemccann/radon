@@ -11,7 +11,7 @@
 # dropped SSH never leaves a truncated archive masquerading as a good one.
 set -euo pipefail
 
-VPS_HOST="${RADON_JOURNAL_VPS:-root@ib-gateway}"
+VPS_HOST="${RADON_JOURNAL_VPS:-root@radon-app}"
 ARCHIVE_DIR="${RADON_JOURNAL_ARCHIVE_DIR:-$(cd "$(dirname "$0")/.." && pwd)/data/journal_archive}"
 RETENTION_DAYS=30
 SSH_OPTS=(-o ConnectTimeout=15 -o BatchMode=yes)

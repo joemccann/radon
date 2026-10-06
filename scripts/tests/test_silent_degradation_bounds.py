@@ -187,7 +187,7 @@ class TestMediaPermissionsOnTheRemoteRoute:
     def test_rsync_sets_the_destination_mode_itself(self):
         src = (REPO / "scripts" / "newsfeed" / "push_media.js").read_text()
         assert "--chmod=F644" in src, (
-            "localMediaDest returns null for radon@ib-gateway:/…, so the "
+            "localMediaDest returns null for radon@radon-app:/…, so the "
             "post-transfer chmod never runs on the documented laptop->Hetzner "
             "path; rsync's own --chmod is the only thing that reaches it"
         )

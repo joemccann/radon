@@ -13,7 +13,7 @@
   },
 
   "tagOwners": {
-    "tag:radon-app":    ["group:operator"],  // ib-gateway (5.78.148.38 / 10.0.0.2)
+    "tag:radon-app":    ["group:operator"],  // radon-app (5.78.148.38 / 10.0.0.2)
     "tag:radon-broker": ["group:operator"],  // radon-broker (5.78.144.125 / 10.0.0.4)
     "tag:radon-ops":    ["group:operator"],  // future ops-plane hosts
     "tag:radon-gpu":    ["group:operator"],  // SLM host (docs/gpu-host-deployment.md)
@@ -38,7 +38,7 @@
     },
 
     // Cloud-thin laptop Next.js -> app FastAPI (scripts/cloud.sh,
-    // RADON_API_URL=http://ib-gateway:8321). The relay (8765) binds
+    // RADON_API_URL=http://radon-app:8321). The relay (8765) binds
     // loopback only and the app host has no 4001 since the SPOF split, so
     // neither is granted. The broker gets nothing but SSH: the order path
     // is the Hetzner private net, never Tailscale.

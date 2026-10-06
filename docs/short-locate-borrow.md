@@ -61,13 +61,13 @@ logs are `.ibgzenc`-encrypted).
 **What you can check today:**
 ```bash
 # Confirm the place call + timing (only the access line will be there):
-ssh root@ib-gateway journalctl -u radon-api --since "today" | grep "orders/place"
+ssh root@radon-app journalctl -u radon-api --since "today" | grep "orders/place"
 # Live shortability probe (read-only) — the substance behind a short reject:
 #   reqMktData(Stock(SYM,'SMART','USD'), "236", snapshot=False), read ticker.shortable (46)
 #   and ticker.shortableShares (89) for a few seconds, then cancelMktData + disconnect.
 # radon-monitor sees order errorEvents only if connected at that instant (IB routes order
 # errors to the placing clientId + client 0 only):
-ssh root@ib-gateway journalctl -u radon-monitor --since "today" | grep -i "error\|reject"
+ssh root@radon-app journalctl -u radon-monitor --since "today" | grep -i "error\|reject"
 ```
 
 **SPCX case (2026-06-12):** SELL 1 @ 170.81 DAY, permId 52686244 → final state at IB `Cancelled`,

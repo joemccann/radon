@@ -395,7 +395,7 @@ class TestMigrateOptions:
         assert "~/dev/apps/finance/radon" in migrate or "dev/apps/finance/radon" in migrate
 
     def test_default_target(self, migrate):
-        assert "radon@ib-gateway:~/radon" in migrate
+        assert "radon@radon-app:~/radon" in migrate
 
 
 class TestMigrateSnapshotCreation:

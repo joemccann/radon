@@ -31,7 +31,7 @@ Verified live (read-only, 2026-09-25):
 | Host | IBKR session holder | Evidence |
 |---|---|---|
 | broker `radon-broker` (100.67.204.57 / 10.0.0.4) | container `ib-gateway`, restart policy `no` | container netns: `172.18.0.2 -> 8.17.22.31:4000` ESTABLISHED (IBKR). Host `ss` does not show it (NAT); must use `nsenter -t <pid> -n ss` |
-| app `ib-gateway` (5.78.148.38 / 10.0.0.2) | none | uvicorn (3 sockets) + node relay (1) -> `10.0.0.4:4001` only |
+| app `radon-app` (5.78.148.38 / 10.0.0.2) | none | uvicorn (3 sockets) + node relay (1) -> `10.0.0.4:4001` only |
 | Mac mini `joes-mac-mini` | **latent**: launchd `local.ibc-gateway` (`~/ibc/bin/run-secure-ibc-gateway.sh`, `~/ibc/config.secure.ini` with creds), loaded, `RunAtLoad=false`, `KeepAlive=false`, runs=0 | `launchctl print` |
 | laptop | latent: `~/Library/LaunchAgents/local.ibc-gateway.plist.disabled`; local Docker mode `docker/ib-gateway/docker-compose.yml` via `scripts/docker_ib_gateway.sh` / `scripts/local.sh` | not loaded |
 | demo `radon-demo` | none (no java, no :400x) | `pgrep`, `ss` |

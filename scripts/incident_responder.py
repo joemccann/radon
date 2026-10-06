@@ -36,7 +36,7 @@ from incident_notify import (
 )
 from incident_notify import notify as dispatch_notification
 
-DEFAULT_REMOTE = "radon@ib-gateway"
+DEFAULT_REMOTE = "radon@radon-app"
 DEFAULT_REMOTE_DIR = "/home/radon/radon/data/incidents"
 DEFAULT_LOCAL_DIR = Path("data/incidents_remote")
 MIRROR_SENTINEL = ".radon-incident-mirror"
