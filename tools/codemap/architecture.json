@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-10-05T09:00:11Z",
-  "node_count": 3743,
-  "edge_count": 7721,
+  "generated_at": "2026-10-06T09:00:11Z",
+  "node_count": 3749,
+  "edge_count": 7724,
   "areas": {
     "web": 2150,
     "site": 156,
-    "scripts": 1298,
-    "cloud": 92,
+    "scripts": 1301,
+    "cloud": 95,
     "lib": 28,
     "tests": 17,
     "tools": 2
@@ -105,7 +105,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 126
+      "count": 127
     },
     {
       "id": "scripts/backtest",
@@ -210,7 +210,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 668
+      "count": 670
     },
     {
       "id": "scripts/trade_blotter",
@@ -245,7 +245,7 @@
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 80
+      "count": 83
     },
     {
       "id": "lib/tools",
@@ -452,17 +452,17 @@
       "test": false
     },
     {
+      "id": "scripts/watchdog/__init__.py",
+      "area": "scripts",
+      "in": 45,
+      "out": 0,
+      "test": false
+    },
+    {
       "id": "web/lib/useViewport.ts",
       "area": "web",
       "in": 43,
       "out": 1,
-      "test": false
-    },
-    {
-      "id": "scripts/watchdog/__init__.py",
-      "area": "scripts",
-      "in": 43,
-      "out": 0,
       "test": false
     },
     {
