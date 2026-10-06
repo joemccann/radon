@@ -35,8 +35,19 @@ if manifest.get("sources") != ["turso.posts"]:
     sys.exit(2)
 PY
 
+# The trainer loads third-party model and dataset code; it gets an allowlisted
+# environment (toolchain, locale, HF cache and GPU knobs), never operator tokens.
+TRAIN_ENV=()
+for name in $(compgen -e || true); do
+  case "$name" in
+    PATH|HOME|USER|LOGNAME|LANG|LC_*|TMPDIR|TERM|VIRTUAL_ENV|CONDA_PREFIX|PYTHONPATH|LD_LIBRARY_PATH|DYLD_LIBRARY_PATH \
+      |HF_HOME|HF_HUB_*|HF_DATASETS_*|TRANSFORMERS_*|CUDA_*|NVIDIA_*|PYTORCH_*|TORCH_*|OMP_NUM_THREADS)
+      TRAIN_ENV+=("$name=${!name}") ;;
+  esac
+done
+
 if [ "$TRAINER" = "mlx" ]; then
-  exec python3.13 -m mlx_lm lora --config "$MLX_CONFIG"
+  exec env -i "${TRAIN_ENV[@]}" python3.13 -m mlx_lm lora --config "$MLX_CONFIG"
 fi
 
 if [ "$TRAINER" != "llamafactory" ]; then
@@ -47,10 +58,10 @@ fi
 cp "$DATASET_INFO_SRC" "$DATA_DIR/dataset_info.json"
 
 if command -v llamafactory-cli >/dev/null 2>&1; then
-  exec llamafactory-cli train "$LF_CONFIG" dataset_dir="$DATA_DIR"
+  exec env -i "${TRAIN_ENV[@]}" llamafactory-cli train "$LF_CONFIG" dataset_dir="$DATA_DIR"
 fi
 if python3.13 -c "import llamafactory" >/dev/null 2>&1; then
-  exec python3.13 -m llamafactory.cli train "$LF_CONFIG" dataset_dir="$DATA_DIR"
+  exec env -i "${TRAIN_ENV[@]}" python3.13 -m llamafactory.cli train "$LF_CONFIG" dataset_dir="$DATA_DIR"
 fi
 echo "LLaMA-Factory is not installed. On the Mini: pip install 'llamafactory[torch,metrics]'. Or SLM_TRAINER=mlx." >&2
 exit 2

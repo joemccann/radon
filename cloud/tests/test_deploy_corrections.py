@@ -3373,6 +3373,13 @@ class TestRequiredEnvironment:
         assert target in output
         assert secret not in output
 
+    def test_deployment_guide_never_grants_radon_root_equivalent_access(self) -> None:
+        guide = (ROOT / "radon-cloud-deployment-guide.html").read_text(encoding="utf-8")
+        assert "usermod -aG docker radon" not in guide
+        assert not re.search(r"NOPASSWD:[^\n]*\*", guide)
+        assert "/etc/sudoers.d/" not in guide
+        assert "setup-vps.sh" in guide
+
     def test_deployment_guide_never_copies_full_secret_env_into_web_tree(self) -> None:
         guide = (ROOT / "radon-cloud-deployment-guide.html").read_text(encoding="utf-8")
         assert "cp ~/radon-cloud/.env ~/radon/web/.env" not in guide

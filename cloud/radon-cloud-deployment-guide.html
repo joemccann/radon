@@ -279,11 +279,8 @@ chown -R radon:radon /home/radon/.ssh
 chmod 700 /home/radon/.ssh
 chmod 600 /home/radon/.ssh/authorized_keys
 
-# Grant sudo for systemctl
-echo "radon ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart radon-*" \
-  | tee /etc/sudoers.d/radon-deploy
-echo "radon ALL=(ALL) NOPASSWD: /usr/bin/systemctl daemon-reload" \
-  | tee -a /etc/sudoers.d/radon-deploy
+# No sudo and no docker group here: setup-vps.sh (Step 5) installs the
+# scoped sudoers files and keeps radon out of the docker group.
 
 # Install base prerequisites
 apt update && apt install -y \
@@ -306,9 +303,6 @@ apt install -y python3.13 python3.13-venv python3.13-dev
 
 # Install Node.js
 apt install -y nodejs npm
-
-# Add radon to docker group
-usermod -aG docker radon
 
 # Firewall
 ufw allow OpenSSH

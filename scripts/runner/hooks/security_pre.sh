@@ -29,8 +29,10 @@ case "$LOOP" in
   *) echo "refused=security_pre.sh does not know loop $LOOP"; exit 2 ;;
 esac
 
+# $1 is the public reason (a class, never a path); $2, when set, names the
+# file and goes to the private runner log (stderr) only.
 refuse() {
-  echo "REFUSING: $1" >&2
+  echo "REFUSING: $1${2:+ ($2)}" >&2
   echo "refused=$1"
   exit 2
 }
@@ -80,7 +82,7 @@ refuse_credential_files() {
   local credential_file
   for credential_file in .env .env.ib-mode web/.env; do
     [[ -e "$credential_file" ]] || continue
-    refuse "the clone holds a credential file ($credential_file); the security loop runs credential-free only, remove it"
+    refuse "the clone holds a credential file; the security loop runs credential-free only, remove it" "$credential_file"
   done
 }
 
@@ -108,7 +110,7 @@ refuse_billing_reroute_files() {
   while IFS= read -r file; do
     [[ -f "$file" ]] || continue
     if grep -qE "$key_assign" "$file" || grep -qiE "$flag_assign" "$file"; then
-      refuse "$file holds billing-reroute credentials; this loop bills the claude.ai subscription only, remove the key line"
+      refuse "an env file holds billing-reroute credentials; this loop bills the claude.ai subscription only, remove the key line" "$file"
     fi
   done < <(
     for file in .env.local .env.*.local; do [[ -f "$file" ]] && printf '%s\n' "$file"; done
@@ -120,7 +122,7 @@ refuse_billing_reroute_files() {
     [[ -f "$file" ]] || continue
     if grep -qE '"apiKeyHelper"[[:space:]]*:[[:space:]]*"[^"]' "$file" \
        || grep -qE "$settings_key" "$file" || grep -qiE "$settings_flag" "$file"; then
-      refuse "$file holds an apiKeyHelper or billing-reroute env entry; this loop bills the claude.ai subscription only, remove it"
+      refuse "a Claude Code settings file holds an apiKeyHelper or billing-reroute env entry; this loop bills the claude.ai subscription only, remove it" "$file"
     fi
   done
 }
