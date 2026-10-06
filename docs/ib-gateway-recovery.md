@@ -91,6 +91,30 @@ Symptoms before the lock:
 
 ---
 
+## Gateway logs
+
+**Symptom:** login or recovery output disappears after a container recreate.
+**Prerequisites:** identify local Docker versus the production broker and retain
+read-only access to that host. The [production compose source](../cloud/docker-compose.yml)
+owns retained logging; the [local compose source](../docker/ib-gateway/docker-compose.yml)
+does not configure that driver. Production runs an installed root-owned compose
+artifact, so a source merge alone does not prove its logging configuration changed.
+**Blast radius:** the following diagnosis reads logs and does not change the
+Gateway, authentication, holds or leases.
+**Diagnosis:** locally, use `scripts/docker_ib_gateway.sh logs`. On the broker,
+`sudo -n /usr/local/sbin/radon-docker-gw logs` reads the live container's bounded
+recent output. For retained production output, as root use
+`journalctl CONTAINER_TAG=ib-gateway --since "<UTC time>"` with the incident's
+time. Retention is bounded by the host journal; it is not an off-host backup.
+**Stop:** an empty result is not proof of a healthy login or no prior failure.
+Do not recreate the container or bypass a hold to obtain diagnostic output.
+**Verification:** match the host and incident time to the recovered entries;
+use [readiness verification](#readiness-verification) to establish authentication.
+**Rollback:** read-only diagnosis needs no rollback. Changes to the installed
+compose artifact require a separately reviewed broker maintenance procedure.
+**Escalation:** retain sanitized timestamps and missing-log evidence for the
+operator when the installed configuration or journal retention cannot be confirmed.
+
 ## Three Gates
 
 ### 1. Cross-process push lock
@@ -101,7 +125,7 @@ Every restart path that fires a push acquires the lock first. While held, restar
 
 Required participants:
 - Local Docker recovery in `scripts/api/ib_gateway.py` and `scripts/docker_ib_gateway.sh`
-- The production `/usr/local/bin/radon-ib-gateway-control` helper installed from `radon-cloud`
+- The production `/usr/local/bin/radon-ib-gateway-control` helper installed from `cloud/`
 - `radon-ib-watchdog`, which acquires the lease and invokes the fixed `radon-ib-gateway-preheld-restart.service` adapter exactly once
 - Boot, operator, admin-panel, and laptop cloud starts, all of which delegate to the production helper instead of acquiring independently
 
@@ -288,8 +312,8 @@ Any flag that is unreadable, malformed, symlinked or not root-owned counts as he
 - `scripts/api/server.py:_recover_stuck_pool_guarded` + `_ib_recovery_heartbeat_tick` (the 15s driver)
 - `scripts/ib_watchdog.py:run_cycle`
 - `scripts/utils/ib_2fa_lock.py`
-- `radon-cloud/scripts/ib-gateway-control.sh`
-- `radon-cloud/services/radon-ib-gateway-preheld-restart.service`
+- [`cloud/scripts/ib-gateway-control.sh`](../cloud/scripts/ib-gateway-control.sh)
+- [`cloud/services/radon-ib-gateway-preheld-restart.service`](../cloud/services/radon-ib-gateway-preheld-restart.service)
 - `scripts/api/auth.py:51-54` (localhost bypass for Next.js → FastAPI)
 
 ---

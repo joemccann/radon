@@ -1691,3 +1691,17 @@ class TestNightlyInfrastructureOwners:
         assert "operations.md#encrypted-credential-store-profile-credentials-tab" in row
         assert "Resolved as `ib-gateway`" not in row
         assert "VPS that hosts FastAPI, IB Gateway" not in row
+
+    def test_gateway_logging_has_one_scope_aware_recovery_owner(self):
+        local = (_ROOT / "docs/ib-gateway-docker.md").read_text()
+        assert "ib-gateway-recovery.md#gateway-logs" in local
+        assert "journald driver" not in local
+        owner = _section((_ROOT / "docs/ib-gateway-recovery.md").read_text(), "Gateway logs")
+        assert "../cloud/docker-compose.yml" in owner
+        assert "../docker/ib-gateway/docker-compose.yml" in owner
+        assert "installed" in owner and "recreate" in owner
+        assert "journalctl CONTAINER_TAG=ib-gateway" in owner
+        assert "radon-docker-gw logs" in owner
+        assert "scripts/docker_ib_gateway.sh logs" in owner
+        for boundary in ("Symptom", "Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verification", "Rollback", "Escalation"):
+            assert f"**{boundary}:**" in owner
