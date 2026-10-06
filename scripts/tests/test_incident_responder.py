@@ -216,9 +216,9 @@ class TestCycleRetry:
 class TestCommands:
     def test_sync_command_mirrors_remote_dir(self, tmp_path):
         mirror = prepare_mirror_dir(tmp_path, "data/incidents_remote")
-        cmd = build_sync_command("radon@ib-gateway", "/home/radon/radon/data/incidents", mirror)
+        cmd = build_sync_command("radon@radon-app", "/home/radon/radon/data/incidents", mirror)
         assert cmd[0] == "rsync"
-        assert "radon@ib-gateway:/home/radon/radon/data/incidents/" in cmd
+        assert "radon@radon-app:/home/radon/radon/data/incidents/" in cmd
         assert cmd[-1] == f"{mirror}/"
 
     def test_sync_delete_never_wipes_responder_owned_files(self, tmp_path):

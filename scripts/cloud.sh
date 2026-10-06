@@ -58,16 +58,16 @@ detect_hijacking_interfaces() {
 hijacker="$(detect_hijacking_interfaces)"
 if [[ -n "$hijacker" ]]; then
   log_error "VPN tunnel ${hijacker} owns the default route — traffic to"
-  log_error "ib-gateway:4001 will be routed through it instead of Tailscale,"
+  log_error "radon-app:4001 will be routed through it instead of Tailscale,"
   log_error "and the TCP probe will time out even though the tailnet shows"
-  log_error "ib-gateway online. Disconnect the active VPN (NordVPN, ProtonVPN,"
+  log_error "radon-app online. Disconnect the active VPN (NordVPN, ProtonVPN,"
   log_error "WireGuard, Cisco AnyConnect, Cloudflare WARP, etc.) and retry."
   exit 1
 fi
 
 # -- Step 1: Verify Tailscale connectivity -----------------------------------
 
-log_info "Checking Tailscale connectivity to ib-gateway..."
+log_info "Checking Tailscale connectivity to radon-app..."
 tcp_probe() {
   python3 -c "
 import socket, sys
@@ -80,8 +80,8 @@ except Exception:
     sys.exit(1)
 " "$1" "$2" 2>/dev/null
 }
-if ! tcp_probe ib-gateway 22 && ! tcp_probe ib-gateway 4001; then
-  log_error "Cannot reach ib-gateway via Tailscale. Is Tailscale running?"
+if ! tcp_probe radon-app 22 && ! tcp_probe radon-app 4001; then
+  log_error "Cannot reach radon-app via Tailscale. Is Tailscale running?"
   exit 1
 fi
 log_info "VPS reachable."
@@ -90,7 +90,7 @@ log_info "VPS reachable."
 
 log_info "Ensuring VPS IB Gateway is running through the lease-aware helper..."
 gateway_start_output="$(
-  ssh -o ConnectTimeout=5 ib-gateway \
+  ssh -o ConnectTimeout=5 radon-app \
     "/usr/local/bin/radon-ib-gateway-control start"
 )"
 printf '%s\n' "$gateway_start_output"
@@ -133,7 +133,7 @@ fi
 # -- Step 5: Verify port 4001 reachable on VPS ------------------------------
 
 log_info "Verifying IB Gateway port 4001..."
-if tcp_probe ib-gateway 4001; then
+if tcp_probe radon-app 4001; then
   log_info "Port 4001 is open."
 else
   log_warn "Port 4001 not responding yet. Gateway may still be starting (2FA pending)."
@@ -170,12 +170,12 @@ if [[ -n "$busy" ]]; then
 fi
 
 log_info "Starting cloud-thin dev (laptop = Next.js only)..."
-log_info "  → FastAPI:  http://ib-gateway:8321 (Tailscale)"
-log_info "  → WS relay: ws://ib-gateway:8765  (Tailscale)"
+log_info "  → FastAPI:  http://radon-app:8321 (Tailscale)"
+log_info "  → WS relay: ws://radon-app:8765  (Tailscale)"
 
-export RADON_API_URL="http://ib-gateway:8321"
-export IB_REALTIME_WS_URL="ws://ib-gateway:8765"
-export NEXT_PUBLIC_IB_REALTIME_WS_URL="ws://ib-gateway:8765"
+export RADON_API_URL="http://radon-app:8321"
+export IB_REALTIME_WS_URL="ws://radon-app:8765"
+export NEXT_PUBLIC_IB_REALTIME_WS_URL="ws://radon-app:8765"
 export RADON_DEV_PROFILE="cloud-thin"
 
 cd "$PROJECT_ROOT/web"

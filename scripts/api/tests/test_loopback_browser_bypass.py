@@ -108,7 +108,7 @@ class TestLegitimateCallersStillTrusted:
         assert is_trusted_local_request(req) is True
 
     def test_cloud_thin_laptop_over_tailscale(self):
-        """scripts/cloud.sh sets RADON_API_URL=http://ib-gateway:8321."""
+        """scripts/cloud.sh sets RADON_API_URL=http://radon-app:8321."""
         req = _FakeRequest(host="100.100.5.5", headers={"Host": "ib-gateway:8321"})
         assert is_trusted_local_request(req) is True
 

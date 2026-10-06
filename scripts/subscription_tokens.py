@@ -505,7 +505,7 @@ PROVIDERS: dict[str, Provider] = {
         # `claude setup-token` only PRINTS a token; this is the command that
         # writes .credentials.json. It wants the code pasted back, so there is
         # no push login for claude.
-        reauth_command="ssh -t radon@ib-gateway 'claude auth login --claudeai'",
+        reauth_command="ssh -t radon@radon-app 'claude auth login --claudeai'",
         client_id="9d1c250a-e61b-44d9-88ed-5944d1962f5e",
     ),
     "codex": Provider(
@@ -527,7 +527,7 @@ PROVIDERS: dict[str, Provider] = {
             "token_expired",
             "please try signing in again",
         ),
-        reauth_command="ssh -t radon@ib-gateway 'codex login --device-auth'",
+        reauth_command="ssh -t radon@radon-app 'codex login --device-auth'",
         client_id="app_EMoamEEZ73f0CkXaXp7hrann",
         login_args=("login", "--device-auth"),
         login_hosts=("auth.openai.com",),
@@ -547,7 +547,7 @@ PROVIDERS: dict[str, Provider] = {
         cli_binary="grok",
         probe_args=("-p", PROBE_PROMPT),
         auth_failure_markers=("not signed in", "grok login"),
-        reauth_command="ssh -t radon@ib-gateway '~/.local/bin/grok login --device-auth'",
+        reauth_command="ssh -t radon@radon-app '~/.local/bin/grok login --device-auth'",
         login_args=("login", "--device-auth"),
         login_hosts=("accounts.x.ai",),
     ),
@@ -572,7 +572,7 @@ PROVIDERS: dict[str, Provider] = {
             "authentication failed",
         ),
         client_id=ANTIGRAVITY_CLIENT_ID,
-        reauth_command="ssh -t radon@ib-gateway '~/.local/bin/agy -p ok' then open the printed URL and paste the code within 60s, see docs/subscription-tokens.md",
+        reauth_command="ssh -t radon@radon-app '~/.local/bin/agy -p ok' then open the printed URL and paste the code within 60s, see docs/subscription-tokens.md",
     ),
 }
 
