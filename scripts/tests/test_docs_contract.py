@@ -1714,3 +1714,40 @@ class TestNightlyInfrastructureOwners:
         assert "inventory" in owner
         for boundary in ("Symptom", "Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verification", "Rollback", "Escalation"):
             assert f"**{boundary}:**" in owner
+
+    def test_cloud_overviews_do_not_prescribe_obsolete_recovery(self):
+        readme = (_ROOT / "cloud/README.md").read_text()
+        assert "generates SSH key, exits" not in readme
+        assert "Add the printed SSH key to GitHub" not in readme
+        assert "Wipe everything (keeps SSH, firewall, IP)" not in readme
+        assert "ssh -L 5900:127.0.0.1:5900 radon@radon-app" not in readme
+        assert "ssh root@radon-app 'radon restart'" not in readme
+        assert "IBC scheduled/cold restarts are blank" not in readme
+        assert "VPS services reach IB Gateway over loopback" not in readme
+        assert "../docs/ib-gateway-recovery.md" in readme
+        assert "../docs/spof-host-split.md" in readme
+        html = (_ROOT / "cloud/radon-cloud-deployment-guide.html").read_text()
+        boundary = html.split("<body>", 1)[1].split("<h1>", 1)[0]
+        assert "Historical reference" in boundary and "Do not execute" in boundary
+        assert "CLAUDE.md" in boundary and "../docs/ib-gateway-recovery.md" in boundary
+
+    def test_cloud_release_owner_does_not_make_required_images_optional(self):
+        import yaml
+
+        workflow = yaml.safe_load((_ROOT / ".github/workflows/ci.yml").read_text())
+        assert "app-images" in workflow["jobs"]["deploy"]["needs"]
+        source = (_ROOT / "cloud/scripts/deploy.sh").read_text()
+        assert 'prepull_app_images "$requested_sha"' in source
+        owner = (_ROOT / "cloud/CLAUDE.md").read_text()
+        assert "not a `ci.yml` deploy `needs`" not in owner
+        assert "images optional" not in owner
+        assert "Canonical future secrets path" not in owner
+        assert "Unit `EnvironmentFile=` is unchanged" not in owner
+        for name in ("radon-api", "radon-nextjs"):
+            unit = (_ROOT / f"cloud/services/{name}.service").read_text()
+            assert "EnvironmentFile=/etc/radon/env" in unit
+        assert "app-images" in owner and "required" in owner
+        assert "test_ci_deploy_image_reuse.py" in owner
+        readme = (_ROOT / "cloud/README.md").read_text()
+        assert "CLAUDE.md#deployment-contract" in readme
+        assert "Build Bun artifacts and Python wheels in a detached worktree" not in readme

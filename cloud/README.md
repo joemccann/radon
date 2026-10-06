@@ -40,31 +40,11 @@ cloud/
 
 ## Architecture
 
-```
-Browser (any device)
-  → Clerk OAuth (Google, GitHub, X)
-  → HTTPS/WSS
-
-Hetzner VPS
-  ├── Caddy (auto-TLS, reverse proxy)
-  │     ├── /          → Next.js (localhost:3000)
-  │     ├── /api/ib/*  → FastAPI (localhost:8321)
-  │     └── /ws        → Node relay (localhost:8765)
-  ├── Next.js — full app including API routes
-  ├── FastAPI — IB-backed endpoints, order management
-  ├── Node.js relay — realtime price streaming via WebSocket
-  ├── Monitor daemon — fill tracking, exit orders
-  ├── Data refresh timer — CRI/VCG scans (market hours)
-  └── IB Gateway (Docker, host 4001 live / 4002 paper)
-
-VPS services reach IB Gateway over loopback (IB_GATEWAY_HOST=127.0.0.1).
-Live mode maps host `4001` to the image's container `4003`; paper mode maps
-host `4002` to container `4004`. The laptop reaches the live API over Tailscale
-at `100.112.32.16:4001`. Neither host port is published on the public NIC.
-Tailscale also carries SSH.
-```
-
----
+The [host-split owner](../docs/spof-host-split.md) describes app and broker
+roles. [Runtime planes](CLAUDE.md#runtime-planes) owns process isolation;
+checked-in [units](services/), [Caddy](caddy/Caddyfile) and
+[production compose](docker-compose.yml) own exact routes, ports and bindings.
+Do not use the app host as a Gateway endpoint.
 
 ## Stack
 
@@ -82,7 +62,7 @@ Tailscale also carries SSH.
 
 - Hetzner Cloud account + VPS provisioned
 - Domain with DNS A record pointing to VPS IP
-- Tailscale for SSH management and laptop access to IB Gateway (4001)
+- Tailscale access to the app and broker paths declared in [the policy](tailscale/policy.hujson)
 - Clerk account (free tier)
 - GitHub repo access for the Radon monorepo
 
@@ -105,58 +85,27 @@ The one-time provisioning script must be run as root from the monorepo: `ssh roo
 
 ### 1. Bootstrap the VPS (one-time)
 
-```bash
-# First run — installs everything, generates SSH key, exits
-ssh root@radon-app 'bash -s' < cloud/scripts/setup-vps.sh
+Read the [provisioning and privileged-bootstrap owner](CLAUDE.md#privileged-bootstrap)
+and [setup source](scripts/setup-vps.sh) before provisioning. Setup uses anonymous
+HTTPS for the public repository and does not generate a GitHub SSH credential.
+Do not run setup against active production services as an upgrade shortcut.
 
-# Add the printed SSH key to GitHub (Settings → SSH keys)
+### 2. Complete setup
 
-# Second run — clones repos, builds, configures services
-ssh root@radon-app 'bash -s' < cloud/scripts/setup-vps.sh
-```
-
-### 2. Complete setup (from your Mac)
-
-```bash
-cloud/scripts/post-setup.sh
-```
-
-This script handles everything after bootstrap:
-1. Writes `.env` to VPS (from local `.env.production`)
-2. Writes a mode-`0600` `web/.env` containing only `NEXT_PUBLIC_*` values and rebuilds Next.js with server values injected into the build process
-3. Requests one lock-coordinated IB Gateway start and waits up to 90 seconds for 2FA
-4. Starts all remaining services
-5. Migrates `data/*.json` from local to VPS
-6. Verifies health (API, Next.js, Caddy HTTPS)
-
-> **Tip:** Store your production secrets in `.env.production` (gitignored) so `post-setup.sh` can find them automatically.
+The [environment owner](CLAUDE.md#environment-handling) and
+[post-setup source](scripts/post-setup.sh) own prerequisite checks and staging.
+Use the [host-split runbook](../docs/spof-host-split.md) for host identity and
+[Gateway readiness](../docs/ib-gateway-recovery.md#readiness-verification)
+for authentication; a coarse HTTP response is not the release gate.
 
 ### 3. Deploy application code
 
-Pushes to the Radon monorepo `main` branch trigger automatic deploys via GitHub Actions. The deploy script:
-
-1. Acquires the nonblocking production lock in an outer process-group supervisor with bounded TERM/KILL recovery
-2. Requires the tested SHA to equal the fetched `origin/main` tip; tracked host drift must already byte-match that target, while untracked runtime data is untouched
-3. Validates the shared environment contract, then builds both frozen Bun workspaces and all Python wheels in a detached target-SHA worktree before any service teardown
-4. Fsyncs a transition journal and backs up the exact live `node_modules`, `.next`, public web environment, and `.venv` artifacts
-5. Uses the root-owned fixed-argument helper to snapshot and quiesce every discovered non-beta Radon service and timer except Gateway-owned units, stopping timers first and never replaying oneshot services
-6. Promotes the staged artifacts, creates the target `.venv` offline at its final path, and restores only the previously active persistent services and timers
-7. Gates the restored topology, FastAPI `/health/lite`, Next.js HTTP, and relay TCP/HTTP; IB state remains advisory
-8. Fsyncs the `verified` phase before writing the green marker, commits the topology transition, and only then removes the journal and rollback artifacts
-
-Superseded test jobs may be canceled, but a deploy that has entered SSH is
-serialized and never canceled. If an interrupted run already moved Git HEAD,
-the durable journal makes the successor either finish a verified target or
-restore the exact prior artifacts and active topology before new work begins.
-`setup-vps.sh` and `post-setup.sh` refuse live dependency or build mutation while
-the affected production services are active.
-
-The GitHub deploy job has a 60-minute ceiling and its SSH command has 55 minutes.
-The tested worst case includes pending-journal recovery, the 900-second inner
-deadline plus 30-second kill window, and a second root recovery. Root mutation
-actions are capped at 180 seconds, verify/commit actions at 30 seconds, and one
-190-second lifecycle-lock wait is budgeted per recovery; the resulting 2,150
-seconds leaves more than ten minutes of SSH headroom for file and gate overhead.
+The [deployment owner](CLAUDE.md#deployment-contract) owns exact-SHA admission,
+required image builds, service transitions, health gates and interrupted-release
+recovery. The [CI workflow](../.github/workflows/ci.yml) and
+[deploy source](scripts/deploy.sh) own job dependencies, deadlines and artifact
+reuse. Main pushes deploy only after required gates succeed; do not substitute
+an older green check or the build-only workflow for the release's own checks.
 
 ### Control-plane changes
 
@@ -222,20 +171,13 @@ journalctl -u radon-relay -f
 
 #### Whole-stack control: `radon` wrapper
 
-A `radon` wrapper at `/usr/local/bin/radon` controls the persistent production daemons and active/enabled timers. Timer-owned oneshot jobs remain scheduler-controlled and are never launched directly. Gateway actions are delegated to the state-aware helper, which inspects actual container liveness and acquires the shared 2FA lease before any cycle:
-
-```bash
-radon stop      # stop Gateway, persistent daemons, and currently active timers
-radon start     # restore persistent daemons and the pre-stop/enabled timer set
-radon restart   # restart Gateway, persistent daemons, and active/enabled timers
-radon status    # show systemd inventory plus real Gateway container state
-```
-
-From the laptop: `ssh root@radon-app radon stop`. Designed for fast off-hours shutdowns from iPhone/Termius.
-
-Initial provisioning installs the checked-in operator and Gateway helpers. For a live update to root-owned helpers, sudoers, polkit rules, or a unit covered by the control-plane manifest, use the root bootstrap transaction below rather than copying files or running `systemctl daemon-reload` directly.
-
----
+[Operator controls](../docs/operations.md) and the
+[host-split owner](../docs/spof-host-split.md) define host-specific scope.
+App-host controls affect the app plane; broker controls own Gateway lifecycle.
+Follow [Gateway recovery](../docs/ib-gateway-recovery.md) for holds, leases,
+stop conditions and authenticated verification. Timer-owned jobs remain
+scheduler-controlled. Live control-plane refresh belongs to
+[the privileged-bootstrap owner](CLAUDE.md#privileged-bootstrap).
 
 ## Testing
 
@@ -270,70 +212,29 @@ pytest tests/ -v
 
 ## Environment & Gateway Mode
 
-The radon codebase supports three IB Gateway modes (`docker`, `cloud`, `launchd`). The code default is `docker` (for local dev). On the VPS, systemd services load env vars from `/home/radon/radon-cloud/.env` via `EnvironmentFile=`, which must include:
-
-```
-IB_GATEWAY_MODE=cloud
-```
-
-Production `.env` also requires **Backblaze B2** keys for portfolio cold-archive
-(`RADON_ARCHIVE_S3_*` — S3-compatible API to bucket `radon-archive`). Listed in
-`config/required-env.txt` and documented in root `.env.example` /
-`docs/cloud-services.md`. `radon-portfolio-archive.service` fails closed without
-them. Cloudflare R2 is not used.
-
-The production environment checker also requires `TRADING_MODE=live` with
-`IB_GATEWAY_PORT=4001`, or `TRADING_MODE=paper` with `IB_GATEWAY_PORT=4002`.
-Unsupported or mismatched pairs fail before any service transition. The
-container healthcheck probes internal port `4001` for live and `4002` for paper.
-
-**Why `cloud` on the VPS?** The radon code's `docker` mode tries to manage IB Gateway from `docker/ib-gateway/`, a directory that does not exist on the VPS. On the VPS, `radon-ib-gateway.service`, the operator, boot, and watchdog all delegate lifecycle changes to the monorepo `cloud/` lease-aware control helper. The `cloud` mode tells FastAPI and the WS relay to skip local container lifecycle management and use a TCP health check.
-
-**How env vars flow on the VPS:**
-
-1. systemd starts FastAPI/relay with `EnvironmentFile=/home/radon/radon-cloud/.env`
-2. Python's `load_dotenv("/home/radon/radon/.env")` finds no file (root `.env` is gitignored, never created on VPS) — silently skips
-3. `os.environ.get("IB_GATEWAY_MODE", "docker")` finds `cloud` from the systemd env — code default `docker` is never reached
-4. Node.js relay reads `IB_GATEWAY_MODE` from the same systemd env
-
-**Critical:** If a root `.env` is ever created at `/home/radon/radon/.env`, `load_dotenv()` would load it and could override the systemd env. Don't create one on the VPS.
-
-The deploy script writes only literal `NEXT_PUBLIC_*` lines to `web/.env` and
-sets mode `0600`. Server-side build values are parsed without interpolation and
-exist only in the build process environment. The production cloud `.env` must
-be mode `0640` root:radon. The script does **not** create a root `.env` in the radon
-directory.
-
----
+The [cloud environment owner](CLAUDE.md#environment-handling) owns staging,
+file permissions and build/runtime separation. Exact required names and role
+checks live in [required-env.txt](config/required-env.txt) and
+[check-env.py](scripts/check-env.py). [Mode switching](../docs/cloud-services.md#mode-switch)
+owns launcher effects; [Gateway recovery](../docs/ib-gateway-recovery.md)
+owns authentication and cycle semantics.
 
 ## Authentication
 
-- **Clerk** handles OAuth (Google, GitHub, X) on the frontend
-- **JWT validation** on every FastAPI and WebSocket request
-- **User allowlist** (`ALLOWED_USER_IDS` in `.env`) restricts access to specific Clerk user IDs
-- **WebSocket ticket flow**: client obtains a short-lived ticket via `POST /api/ib/ws-ticket`, then connects with `?ticket=<UUID>` (no JWT in URL)
-- `/health` is the only unauthenticated endpoint
+The [API trust boundary](../scripts/api/CLAUDE.md#authentication) and executable
+[auth implementation](../scripts/api/auth.py) own JWT and bypass behavior.
+The [WebSocket ticket implementation](../web/app/api/ib/ws-ticket/route.ts)
+owns relay admission; do not infer trust from a health response.
 
 ### IB Gateway 2FA
 
-On first login, IB Gateway requires second-factor authentication via the IBKR
-mobile app. IBC exits after an unattended timeout and Docker does not relaunch
-it. The lock-aware watchdog is the sole automated restart owner and applies its persisted
-threshold, backoff, and push cap. Use the operator control path for a manual
-recovery; do not bypass it with `docker compose up`:
-
-```bash
-ssh root@radon-app 'radon restart'
-```
-
-To access the IB Gateway GUI for debugging, set `VNC_SERVER_PASSWORD` in `.env` and tunnel VNC:
-
-```bash
-ssh -L 5900:127.0.0.1:5900 radon@radon-app
-# Connect VNC client to localhost:5900
-```
-
-`cloud/docker-compose.yml` pins `EXISTING_SESSION_DETECTED_ACTION=primaryoverride`: a fresh Gateway login takes the session, but a logged-in Gateway yields to the operator's own IBKR login, and the watchdog then sets the operator hold (`docs/ib-gateway-recovery.md`).
+Use the [Gateway recovery owner](../docs/ib-gateway-recovery.md), including
+its prerequisites, blast radius, diagnosis, stop conditions, verification,
+rollback and escalation. Identify the broker through the
+[host-split owner](../docs/spof-host-split.md); app-host restart or VNC access
+does not target the broker Gateway. The [production compose source](docker-compose.yml)
+owns GUI bindings and authentication settings; verify the installed broker
+artifact before requesting any lifecycle or GUI change.
 
 ### Clerk Production Setup
 
@@ -373,49 +274,26 @@ your-domain.com {
 
 ## Deploy Pipeline
 
-```
-Push to radon main
-  → GitHub Actions
-  → SSH to VPS
-  → Fetch and verify the tested SHA
-  → Build Bun artifacts and Python wheels in a detached worktree
-  → Fsync journal and back up the exact live runtime artifacts
-  → Snapshot topology and quiesce all non-beta Radon consumers
-  → Promote artifacts and create the target venv offline
-  → Restore the prior active topology and run the full release gate
-  → Fsync verified state, write the green marker, commit topology
-  → Recover from the journal on any failure or interruption
-```
-
----
+Use the [deployment and rollback owner](CLAUDE.md#deployment-contract) for
+source/artifact provenance, the transition journal, restored topology and the
+health gates required before the green marker. The code-controlled gate owns
+exact timing and fallback admission; this index does not duplicate its sequence.
 
 ## Rollback
 
-### Automatic (deploy failure)
-
-The deploy script restores the previous commit, dependency trees, build output,
-public web environment, Python virtual environment, and active service/timer
-topology if an unverified transition fails. A fresh deploy process resolves any
-remaining journal before it can start new work. A verified target is finalized
-only if its source, artifacts, virtual environment, topology, and full gate still
-pass; otherwise it is rolled back.
+Interrupted and failed releases use the same owner's recovery procedure.
+Verify the exact restored source, artifacts, topology and health before treating
+rollback as complete.
 
 ### Full teardown and rebuild
 
-```bash
-# Wipe everything (keeps SSH, firewall, IP)
-ssh root@radon-app 'bash -s -- --force' < scripts/wipe-vps.sh
-
-# Bootstrap from scratch
-ssh root@radon-app 'bash -s' < scripts/setup-vps.sh
-# Add SSH key to GitHub
-ssh root@radon-app 'bash -s' < scripts/setup-vps.sh
-
-# Complete setup
-scripts/post-setup.sh
-```
-
----
+Do not use a copied wipe/bootstrap sequence as recovery. Review the
+[destructive wipe source](scripts/wipe-vps.sh), verify recoverable backups
+through [the backup owner](../docs/cloud-services.md#db-backup--restore-dur-13),
+and follow [the exact-SHA deployment and rollback owner](CLAUDE.md#deployment-contract).
+Stop if backups, host identity, installed control-plane provenance or recovery
+access are uncertain. Rebuilding requires an operator-reviewed maintenance
+procedure; this index does not authorize a teardown.
 
 ## Security
 
@@ -423,13 +301,13 @@ scripts/post-setup.sh
 - User allowlist for single-tenant access control
 - WebSocket uses short-lived tickets (no JWT in URLs)
 - Caddy enforces HTTPS with auto-redirect
-- IB Gateway port 4001 is bound to loopback and the Tailscale interface IP (`100.112.32.16`) only, never to the public NIC. The VPS FastAPI uses loopback; the laptop connects over Tailscale.
+- The [host-split owner](../docs/spof-host-split.md) and [network policy](tailscale/policy.hujson) own Gateway reachability and app/broker trust boundaries.
 - `setup-vps.sh` `open_firewall()` resets ufw to the declared app ruleset (default deny incoming, no blanket `tailscale0` allow, 8321 only from `10.0.0.4` and operator `/32`s) and enables it; the rules are mirrored from the operator tool `cloud/scripts/host-firewall.sh` (runbook: `docs/operations.md` "Host firewalls")
 - Public 22/tcp is open but keys-only (password and keyboard-interactive auth disabled by the sshd drop-in `setup-vps.sh` installs); Tailscale SSH is the primary route
 - `.env` and `.env.production` are gitignored and must never be committed. A credential-shaped example previously entered repository history; credential rotation and a coordinated destructive history rewrite remain required separately.
 - GitHub Actions pinned by commit SHA
 - Deploy sudoers grants only exact invocations of the root-owned `/usr/local/sbin/radon-deploy-root` helper (`stop-clean`, `restart-managed`, `recover`, `verify-restored`, `verify-control-plane`, `commit-transition`, `install-units`, `revert-units`, `sync-scheduled-units`, plus `publish-caddy` in its own fragment); the helper discovers non-beta Radon units with a required core-service floor, owns the fixed stale-replica cleanup paths, and installs the manifest-pinned timer-owned units (`install-units`) during each deploy; a rollback reverts exactly those changes (`revert-units`). `sync-scheduled-units` re-reads allowlisted units from git objects at the GitHub main tip and never starts, stops, or enables units.
-- The IB Gateway image is digest-pinned, and IBC scheduled/cold restarts are blank so only the lease-aware watchdog can initiate a 2FA-producing cycle
+- [Gateway daily-cycle semantics](../docs/ib-gateway-recovery.md#daily-cycle) and [production compose](docker-compose.yml) own restart behavior; blank fields do not disable the stored cycle.
 - Cloud CI fetches full Git history and scans it with default Gitleaks rules plus literal TWS-assignment and credential-example rules
 - Unit files are copied to root-owned `/etc/systemd/system/` (not symlinked from user-writable paths)
 
