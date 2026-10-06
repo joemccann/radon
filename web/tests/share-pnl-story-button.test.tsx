@@ -2,6 +2,9 @@
 import React from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+
+// Coverage-instrumented CI shards run this render well past waitFor's 1s default.
+const SETTLE = { timeout: 10_000 };
 import SharePnlButton from "../components/SharePnlButton";
 
 const DATA = {
@@ -13,7 +16,8 @@ const DATA = {
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
-  fetchMock = vi.fn(async () => new Response(new Blob(["png"], { type: "image/png" }), { status: 200 }));
+  // A plain { ok, blob } keeps the Blob in jsdom's realm (File needs it there).
+  fetchMock = vi.fn(async () => ({ ok: true, blob: async () => new Blob(["png"], { type: "image/png" }) }));
   vi.stubGlobal("fetch", fetchMock);
 });
 
@@ -44,7 +48,7 @@ it("requests the 9:16 story plate and hands the PNG to the native share sheet", 
 
   fireEvent.click(openPopover());
 
-  await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(share).toHaveBeenCalledTimes(1), SETTLE);
   const url = requestedUrl();
   expect(url.pathname).toBe("/api/share/pnl");
   expect(url.searchParams.get("format")).toBe("story");
@@ -61,7 +65,7 @@ it("requests the 9:16 story plate and hands the PNG to the native share sheet", 
   // Text alongside files makes iOS drop Instagram from the share targets.
   expect(payload.text).toBeUndefined();
   expect(payload.url).toBeUndefined();
-});
+}, 20_000);
 
 it("downloads the story PNG when the browser cannot share files", async () => {
   const createObjectURL = vi.fn(() => "blob:story");
@@ -74,11 +78,11 @@ it("downloads the story PNG when the browser cannot share files", async () => {
 
   fireEvent.click(openPopover());
 
-  await waitFor(() => expect(clicks).toHaveLength(1));
+  await waitFor(() => expect(clicks).toHaveLength(1), SETTLE);
   expect(requestedUrl().searchParams.get("format")).toBe("story");
   expect(clicks[0].download).toBe("radon-pnl-story.png");
   expect(clicks[0].href).toBe("blob:story");
-});
+}, 20_000);
 
 it("treats a dismissed share sheet as a cancel, not an error", async () => {
   const share = vi.fn(async () => { throw new DOMException("cancelled", "AbortError"); });
@@ -86,10 +90,10 @@ it("treats a dismissed share sheet as a cancel, not an error", async () => {
 
   fireEvent.click(openPopover());
 
-  await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(share).toHaveBeenCalledTimes(1), SETTLE);
   await act(async () => {});
   expect(screen.queryByRole("alert")).toBeNull();
-});
+}, 20_000);
 
 it("re-arms for a second tap when the browser expired the share gesture", async () => {
   const share = vi
@@ -99,14 +103,14 @@ it("re-arms for a second tap when the browser expired the share gesture", async 
   Object.assign(navigator, { share, canShare: () => true });
 
   fireEvent.click(openPopover());
-  const retry = await screen.findByRole("button", { name: "Tap to share Story" });
+  const retry = await screen.findByRole("button", { name: "Tap to share Story" }, SETTLE);
   fireEvent.click(retry);
 
-  await waitFor(() => expect(share).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(share).toHaveBeenCalledTimes(2), SETTLE);
   // The second tap reuses the rendered PNG instead of re-requesting it.
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect((share.mock.calls[1][0] as ShareData).files![0].name).toBe("radon-pnl-story.png");
-});
+}, 20_000);
 
 it("fires nothing while both metrics are unchecked", () => {
   const share = vi.fn();

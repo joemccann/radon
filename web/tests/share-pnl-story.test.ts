@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { resolve } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "../app/api/share/pnl/route";
 import {
   SHARE_PNL_CANVAS,
@@ -30,6 +31,15 @@ const BASE = {
 };
 
 describe("share P&L story format", () => {
+  // loadFonts reads public/fonts relative to process.cwd(); CI runs vitest
+  // from the repo root, so pin cwd to web/ for the real renders.
+  beforeEach(() => {
+    vi.spyOn(process, "cwd").mockReturnValue(resolve(__dirname, ".."));
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("only accepts the literal 'story'; anything else is the X card", () => {
     expect(parseSharePnlFormat("story")).toBe("story");
     for (const v of [null, "", "card", "STORY", "1080x1920"]) {
