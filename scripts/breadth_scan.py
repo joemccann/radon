@@ -62,7 +62,11 @@ from utils.ib_preflight import (
     IB_REQUEST_TIMEOUT_S,
     ib_auth_state as _ib_auth_state,
 )
-from utils.market_calendar import is_market_open_et, most_recent_session_date
+from utils.market_calendar import (
+    is_market_open_et,
+    last_completed_session_date,
+    most_recent_session_date,
+)
 
 try:
     from db.scan_mirror import mirror_scan_snapshot  # type: ignore
@@ -713,6 +717,21 @@ def _iso_utc(raw: Any) -> str:
     return str(raw)
 
 
+def cached_history_covers_completed_session(
+    cached: Dict[str, Any], now: Optional[datetime] = None
+) -> bool:
+    """True when the cached daily history already holds the last completed
+    session's close. The generic off-hours gate keys on scan_time, so the
+    16:00 ET scan (whose daily series still ends at the prior session, since
+    today's bar was in progress) would otherwise be served all evening and the
+    chart would lag the freshness rail by a session."""
+    history = cached.get("history") or []
+    if not history or not isinstance(history[-1], dict):
+        return False
+    last_date = str(history[-1].get("date") or "")[:10]
+    return last_date >= last_completed_session_date(now)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="NYSE Market-Breadth (Advance/Decline) Scanner",
@@ -742,7 +761,7 @@ def main() -> None:
             cached = cached_scan_if_fresh(_CACHE_PATH, force=False)
         except Exception:
             cached = None
-        if cached is not None:
+        if cached is not None and cached_history_covers_completed_session(cached):
             print(
                 "  Serving cached breadth (market closed); skipping IB fetch.",
                 file=sys.stderr,
