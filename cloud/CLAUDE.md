@@ -488,6 +488,20 @@ and heals the agent-CLI subscription credentials (claude, codex, grok,
 Antigravity `agy`) from the encrypted secret store, with a daily keepalive
 probe; a dead codex or grok grant pages a one-tap login link. Runbook:
 [`docs/subscription-tokens.md`](../docs/subscription-tokens.md).
+
+**Secret-store key units (DS-2026-10-05-05).** Every unit that loads
+`radon-secret-store-key` runs through `radon-app-runtime`: `radon-api`, the
+control-plane `radon-subscription-vault.service` (base unit and drop-in), and
+the `Type=oneshot` drop-ins for `radon-ai-cycle`, `radon-ai-cycle-backfill`
+and `radon-aa-frontier-refresh`. Both drop-in gates therefore accept
+`Type=simple|notify|oneshot`. `radon-subscription-tokens` stays `User=radon`
+with no key and reaches the vault through the broker socket
+(`/run/radon-subscription-vault/vault.sock`); its `Wants=` starts the broker.
+`install-units` never enables a `.service`, so an existing host needs one
+`systemctl enable radon-subscription-vault.service` for boot start. Host
+cutover (removing the plaintext seed key): `docs/operations.md` "Secret-store
+key cutover". Contract: `cloud/tests/test_ds_secret_store_key_units.py`.
+
 `radon-tv-alerts.timer` runs every 5 minutes, 24/7 (`Persistent=false`), and
 drains TradingView webhook rows into one digest Pushover per cycle. Caddy bounds
 `/api/webhooks/tradingview/*` to TradingView's four sender IPs and a 16KB body.

@@ -161,6 +161,11 @@ readonly -a SOURCES=(
   services/radon-newsfeed.service.d/runtime-container.conf
   services/radon-research.service
   services/radon-research.service.d/runtime-container.conf
+  services/radon-subscription-vault.service
+  services/radon-subscription-vault.service.d/runtime-container.conf
+  services/radon-ai-cycle.service.d/runtime-container.conf
+  services/radon-ai-cycle-backfill.service.d/runtime-container.conf
+  services/radon-aa-frontier-refresh.service.d/runtime-container.conf
 )
 readonly -a LOGICAL_TARGETS=(
   /usr/local/sbin/radon-deploy-root
@@ -205,6 +210,11 @@ readonly -a LOGICAL_TARGETS=(
   /etc/systemd/system/radon-newsfeed.service.d/runtime-container.conf
   /etc/systemd/system/radon-research.service
   /etc/systemd/system/radon-research.service.d/runtime-container.conf
+  /etc/systemd/system/radon-subscription-vault.service
+  /etc/systemd/system/radon-subscription-vault.service.d/runtime-container.conf
+  /etc/systemd/system/radon-ai-cycle.service.d/runtime-container.conf
+  /etc/systemd/system/radon-ai-cycle-backfill.service.d/runtime-container.conf
+  /etc/systemd/system/radon-aa-frontier-refresh.service.d/runtime-container.conf
 )
 readonly -a MODES=(
   0755 0755 0755 0644 0644 0755 0755 0644
@@ -215,6 +225,7 @@ readonly -a MODES=(
   0644 0644 0644 0644 0644 0644
   0644 0644 0644 0644 0644
   0644 0644
+  0644 0644 0644 0644 0644
 )
 readonly -a KINDS=(
   shell shell shell python python shell shell compose
@@ -226,6 +237,7 @@ readonly -a KINDS=(
   systemd
   dropin dropin dropin dropin dropin
   systemd dropin
+  systemd dropin dropin dropin dropin
 )
 
 [[ "${#SOURCES[@]}" -eq "${#LOGICAL_TARGETS[@]}" && \
@@ -503,8 +515,9 @@ for index in "${!SOURCES[@]}"; do
       # Type=notify + WatchdogSec because forcing simple made systemd stop
       # requiring keepalives, and a relay with a dead socket sat
       # `active (running)` forever. Both gates refused what the repo ships.
-      grep -qE '^Type=(simple|notify)$' "$staged_path" || \
-        die "drop-in must set Type=simple or Type=notify: $relative_source"
+      # Type=oneshot: the timer-owned secret-store jobs (DS-2026-10-05-05).
+      grep -qE '^Type=(simple|notify|oneshot)$' "$staged_path" || \
+        die "drop-in must set Type=simple, Type=notify or Type=oneshot: $relative_source"
       grep -q '^ExecStart=/usr/local/sbin/radon-app-runtime run %n$' "$staged_path" || \
         die "drop-in must ExecStart radon-app-runtime: $relative_source"
       grep -q '^ExecStartPre=$' "$staged_path" || \
