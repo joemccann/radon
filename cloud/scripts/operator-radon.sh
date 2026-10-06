@@ -54,16 +54,26 @@ fi
 DEPLOY_LOCK_PATH="${RADON_DEPLOY_LOCK_FILE:-/home/radon/.radon-deploy.lock}"
 OPERATOR_PYTHON="${RADON_OPERATOR_PYTHON:-/usr/bin/python3.13}"
 UNIT_ACTION_TIMEOUT_SECS="${RADON_OPERATOR_UNIT_TIMEOUT_SECS:-20}"
+# `radon unit restart` blocks in systemctl for the stop and then the start.
+# The longest app-unit TimeoutStopSec is research (120). TimeoutStartSec is
+# the systemd default (90) where a unit does not set it. A 20s bound exited
+# 70 while radon-api was still in its halt grace and later came up healthy
+# (page 77becdbdfc506a32c447c10283efe6b4, 2026-10-06). 15s of slack lets
+# systemd return its own result before this bound fires.
+UNIT_VERB_TIMEOUT_SECS="${RADON_OPERATOR_UNIT_VERB_TIMEOUT_SECS:-225}"
 SYSTEMCTL_BATCH_TIMEOUT_SECS="${RADON_OPERATOR_BATCH_TIMEOUT_SECS:-30}"
 SYSTEMCTL_QUERY_TIMEOUT_SECS="${RADON_OPERATOR_QUERY_TIMEOUT_SECS:-10}"
 GATEWAY_ACTION_TIMEOUT_SECS="${RADON_OPERATOR_GATEWAY_TIMEOUT_SECS:-80}"
 case "$requested_action" in
-  unit) ACTION_TIMEOUT_SECS="${RADON_OPERATOR_ACTION_TIMEOUT_SECS:-40}" ;;
+  # Longer than UNIT_VERB_TIMEOUT_SECS so the lock wrapper does not SIGTERM
+  # a restart that systemctl is still allowed to finish.
+  unit) ACTION_TIMEOUT_SECS="${RADON_OPERATOR_ACTION_TIMEOUT_SECS:-240}" ;;
   repair-nextjs-replica) ACTION_TIMEOUT_SECS="${RADON_OPERATOR_ACTION_TIMEOUT_SECS:-90}" ;;
   *) ACTION_TIMEOUT_SECS="${RADON_OPERATOR_ACTION_TIMEOUT_SECS:-165}" ;;
 esac
 for timeout_value in \
-  "$UNIT_ACTION_TIMEOUT_SECS" "$SYSTEMCTL_BATCH_TIMEOUT_SECS" \
+  "$UNIT_ACTION_TIMEOUT_SECS" "$UNIT_VERB_TIMEOUT_SECS" \
+  "$SYSTEMCTL_BATCH_TIMEOUT_SECS" \
   "$SYSTEMCTL_QUERY_TIMEOUT_SECS" "$GATEWAY_ACTION_TIMEOUT_SECS" \
   "$ACTION_TIMEOUT_SECS"; do
   if [[ ! "$timeout_value" =~ ^[1-9][0-9]*$ ]]; then
@@ -249,7 +259,7 @@ run_systemctl_bounded() {
 }
 
 if [[ "$requested_action" == "unit" ]]; then
-  run_systemctl_bounded "$unit_action" "$unit_name"
+  run_systemctl_bounded "$unit_action" "$unit_name" "$UNIT_VERB_TIMEOUT_SECS"
   echo "$unit_action completed for $unit_name"
   exit 0
 fi
