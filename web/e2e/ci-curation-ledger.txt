@@ -419,3 +419,9 @@ ws-connection-stability.spec.ts
 #   now closed with Escape (the esc x header button was removed) and the spec
 #   asserts the deck header carries no esc/x hint. Chain and book at 390px and
 #   1440px passed locally in Chromium against next dev (4 passed).
+# REVIEWED 2026-10-06 mobile-risk-reversal-quote-sign.spec.ts - 2/2 mobile
+#   against isolated next dev :3351, retries=0. Real pointer actions assert
+#   signed BID/MID/ASK presets, selected negative limit, no early POST and
+#   exact confirmed mocked credit-combo payload; full-viewport screenshots
+#   inspected. All APIs intercepted. Held out pending next start preflight.
+mobile-risk-reversal-quote-sign.spec.ts
