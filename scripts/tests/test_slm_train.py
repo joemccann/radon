@@ -84,3 +84,41 @@ class TestTrainSh:
         )
         assert proc.returncode == 2
         assert "turso.posts" in proc.stderr
+
+
+class TestRemoteCode:
+    def test_no_slm_config_enables_remote_model_code(self):
+        configs = sorted((REPO / "scripts" / "newsfeed" / "slm" / "configs").glob("*.yaml"))
+        assert configs
+        for cfg in configs:
+            for line in cfg.read_text(encoding="utf-8").splitlines():
+                key, _, value = line.partition(":")
+                if key.strip() == "trust_remote_code":
+                    assert value.split("#")[0].strip().lower() == "false", cfg.name
+
+    def test_trainer_runs_under_an_env_allowlist(self, tmp_path):
+        data = tmp_path / "data"
+        data.mkdir()
+        (data / "manifest.json").write_text(json.dumps({"sources": ["turso.posts"]}), encoding="utf-8")
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        dump = tmp_path / "env.txt"
+        fake = bindir / "llamafactory-cli"
+        fake.write_text(f"#!/bin/sh\nenv > {dump}\n", encoding="utf-8")
+        fake.chmod(0o755)
+        env = {k: v for k, v in os.environ.items() if not k.endswith("_API_KEY")}
+        env.update(
+            PATH=f"{bindir}{os.pathsep}{env.get('PATH', '/usr/bin:/bin')}",
+            SLM_DATA_DIR=str(data),
+            HF_HOME=str(tmp_path / "hf"),
+            CUDA_VISIBLE_DEVICES="0",
+            TURSO_AUTH_TOKEN="qzTURSONOTREAL",
+            GH_TOKEN="qzGHNOTREAL",
+        )
+        proc = subprocess.run(["bash", str(TRAIN)], cwd=tmp_path, env=env, capture_output=True, text=True)
+        assert proc.returncode == 0, proc.stderr
+        seen = dump.read_text(encoding="utf-8")
+        assert "NOTREAL" not in seen
+        assert f"HF_HOME={tmp_path / 'hf'}" in seen
+        assert "CUDA_VISIBLE_DEVICES=0" in seen
+        assert f"PATH={bindir}" in seen
