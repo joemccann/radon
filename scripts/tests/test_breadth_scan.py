@@ -490,3 +490,76 @@ def test_scan_mirror_registers_breadth_scan_with_date_keyed_upsert(monkeypatch) 
 
     assert upserts == [(session_date, scan_time)]
     assert heartbeats == [("breadth-scan", "ok")]
+
+
+# ── off-hours cache gate: daily history must cover the closed session ──
+
+_AFTER_CLOSE_MON = datetime(2026, 10, 5, 23, 46, tzinfo=breadth_scan._ET)
+
+
+def _cached(last_history_date: str) -> dict:
+    return {
+        "scan_time": "2026-10-05T20:00:08+00:00",
+        "latest": {"session_date": "2026-10-05"},
+        "history": [
+            {"date": "2026-10-01", "net_ad": 400.0, "cum_ad": 1.0, "spy_close": 763.99},
+            {"date": last_history_date, "net_ad": 599.0, "cum_ad": 2.0, "spy_close": 769.64},
+        ],
+    }
+
+
+def test_cached_history_stale_after_close_when_last_bar_is_prior_session() -> None:
+    """2026-10-05 prod: the 16:00 ET scan (history through 10-02) satisfied the
+    off-hours gate all evening, so the chart never picked up the 10-05 close."""
+    assert breadth_scan.cached_history_covers_completed_session(
+        _cached("2026-10-02"), now=_AFTER_CLOSE_MON
+    ) is False
+
+
+def test_cached_history_fresh_after_close_when_closed_session_present() -> None:
+    assert breadth_scan.cached_history_covers_completed_session(
+        _cached("2026-10-05"), now=_AFTER_CLOSE_MON
+    ) is True
+
+
+def test_cached_history_fresh_premarket_with_prior_session_close() -> None:
+    premarket_tue = datetime(2026, 10, 6, 8, 0, tzinfo=breadth_scan._ET)
+    assert breadth_scan.cached_history_covers_completed_session(
+        _cached("2026-10-05"), now=premarket_tue
+    ) is True
+
+
+def test_cached_history_stale_when_history_missing() -> None:
+    assert breadth_scan.cached_history_covers_completed_session(
+        {"history": []}, now=_AFTER_CLOSE_MON
+    ) is False
+
+
+def test_main_refetches_after_close_when_cached_history_lags(monkeypatch, capsys) -> None:
+    monkeypatch.setattr("sys.argv", ["breadth_scan.py", "--json"])
+    monkeypatch.setattr(breadth_scan, "is_market_open_et", lambda *a, **k: False)
+    monkeypatch.setattr(
+        "utils.scan_cache_gate.cached_scan_if_fresh", lambda *a, **k: _cached("2026-10-02")
+    )
+    monkeypatch.setattr(
+        breadth_scan, "cached_history_covers_completed_session", lambda *a, **k: False
+    )
+    fetched: list[str] = []
+
+    def _live():
+        fetched.append("live")
+        return None, None
+
+    monkeypatch.setattr(breadth_scan, "_fetch_live_snapshots", _live)
+    monkeypatch.setattr(breadth_scan, "_fetch_stockcharts_daily", lambda s: [])
+    monkeypatch.setattr(breadth_scan, "_fetch_ib_bars", lambda: ([], [], []))
+    monkeypatch.setattr(breadth_scan, "_fetch_stockcharts_quote", lambda s: None)
+    monkeypatch.setattr(breadth_scan, "_read_cached_payload", lambda: None)
+    monkeypatch.setattr(
+        breadth_scan, "_load_cache_fallback", lambda m: {"history": [], "intraday": [], "latest": None}
+    )
+    monkeypatch.setattr(breadth_scan, "print_summary", lambda r: None)
+
+    breadth_scan.main()
+
+    assert fetched == ["live"]
