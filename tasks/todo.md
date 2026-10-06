@@ -8971,3 +8971,15 @@ Review before publication: 65 commits / 112 paths audited through 72e09ffb. T-53
 ### Review 2026-10-05
 
 Audit complete through 72e09ffb: 65 commits, 112 changed paths and 300 paths including codemap callers. Two new and three inherited repairs have repeated fault-injection red/green evidence; ten remaining historical/operator candidates retain acceptance on issue #81. Standing gates 81 passed, delta acceptance 135 passed, permanent Python drills 95 passed; focused firewall 137/37, rejection 76, mode-switch 138 plus cloud owner 30, provider/caller 206 passed. Fifteen Python files, three shell files and embedded logout Python parse; no YAML/JSON/TOML changed. Diff, five-commit secret scan and substantive publication check pass. No live access, credential lookup, main push, merge, codemap edits or test-ledger edits. T5 external publication, exact-head CI and the single rolling comment are recorded on issue #81 without changing the verified head.
+
+## Nightly testing 2026-10-06
+
+- [x] T1 depends_on: [] Build isolated toolchain, recover trusted checkpoint and create authorized branch.
+- [x] T2 depends_on: [T1] Audit merged delta and inverse consumers; standing gates and three changed-file repetitions; reconcile historical findings.
+- [x] T3 depends_on: [T2] Verify and repair findings serially with red/green evidence and per-finding commits.
+- [x] T4 depends_on: [T3] Three serial closing full-gate rounds, base cloud comparison and hygiene review.
+- [ ] T5 depends_on: [T4] Publish substantive draft if warranted, await exact-head CI and post one rolling issue comment.
+
+### Review 2026-10-06
+
+Audit complete through 39334555: 11 commits / 78 paths. T-536/T-537 have mutation red/green evidence, separate test-only commits and unchanged production implementations. Three serial closing rounds each pass 14,251 Python, 10,396 Vitest and 2,624 cloud cases; audited-base cloud passes 2,616 and all FAILED-list diffs are empty. Historical prefixes, frozen paths, syntax, whitespace and secret checks pass. No production access, credentials, unauthorized branch push, merge or notification. Two browser acceptances remain operator-only. T5 external publication, exact-head CI and the single rolling comment are recorded on issue #83 without changing the verified head; this pre-publication checklist does not claim future green delivery.

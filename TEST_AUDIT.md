@@ -11195,3 +11195,15 @@ Audited through: 393345550d521548808d9884be0e5ab10ae48854 on 2026-10-06 — 2 ne
 **T-536 — DONE.** `cloud/tests/test_gpu_repository_admission.py:89` executes the real installer and observes each vendor's rejected/accepted installation boundary. Contains-match mutation: two failed / six passed; Tailscale-only bypass: three failed / five passed. Each mutation passed all 45 old tests first. Restored focused gate: 53 passed. Both vendor admissions, mixed primary rejection, missing-primary rejection and legitimate subkeys are covered; no blanket shell coverage percentage is claimed. Source restored byte-for-byte.
 
 **T-537 — DONE.** `web/tests/newsfeed-browser-environment.test.ts:51` runs the real browser module in child processes with entirely synthetic environments and a fake launcher. All 17 runtime keys, their absence in sparse environments, provider/database/unknown/control-variable exclusion, normal/retry/disabled requests and context/browser cleanup are observed. The blacklist mutation passes the 36 original cases, but the new sealed-boundary tests reject it with six failed / 36 passed. Restored focused gate: 42 passed. Source restored byte-for-byte; no browser, runtime cookie file or workstation credential is accessed.
+
+### Closing verification 2026-10-06
+
+| Round | Root Python | Root Vitest | Cloud |
+|---|---|---|---|
+| 1 | 14,251 passed; 2 skipped; 23 subtests | 10,396 passed; 1,049 files | 2,624 passed; 7 skipped |
+| 2 | 14,251 passed; 2 skipped; 23 subtests | 10,396 passed; 1,049 files | 2,624 passed; 7 skipped |
+| 3 | 14,251 passed; 2 skipped; 23 subtests | 10,396 passed; 1,049 files | 2,624 passed; 7 skipped |
+
+Three consecutive full-gate rounds ran serially with separate complete logs. The identical environment-only toolchain in a detached worktree at audited base 393345550d521548808d9884be0e5ab10ae48854 passes 2,616 cloud cases / seven skips. Sorted base and all three head FAILED lists are empty; each comparison has zero added / zero removed failures. The owned comparison worktree was removed after its foreground suite exited.
+
+Review: two P1 test gaps have deliberate-defect red/green evidence and separate commits bb814a18 / 85d8f12e. All product source is restored byte-for-byte. Existing ledger/task prefixes, frozen PART A, reliability ledgers and codemap files are preserved. All extant delta syntax passes: 36 Python / nine shell / four JSON / two YAML files; no changed TOML. Whitespace and redacted secret scans pass. No test, tolerance, skip, exclusion or coverage ratchet was weakened. The two carried browser acceptances remain operator-only; no local browser screenshots are claimed. Publication, exact-head CI and the single issue checkpoint are external receipts recorded on issue #83 without changing the reported head. Runner owns notifications.
