@@ -207,3 +207,34 @@ def test_policy_tests_agree_with_the_grants(policy):
             assert granted(case["src"], target), (case["src"], target)
         for target in case.get("deny", []):
             assert not granted(case["src"], target), (case["src"], target)
+
+
+def test_tailscale_ssh_admits_only_the_operator_on_the_app_host(policy):
+    # The app host runs Tailscale SSH (`tailscale up --ssh`), so Tailscale
+    # answers port 22 on its tailnet address and admits only what this
+    # section allows. The tcp:22 grant alone leaves every login refused.
+    assert policy["ssh"] == [
+        {
+            "action": "accept",
+            "src": ["group:operator"],
+            "dst": ["tag:radon-app"],
+            "users": ["root", "radon"],
+        }
+    ]
+
+
+def test_every_tailscale_ssh_destination_has_a_port_22_grant(policy):
+    ssh_reach = {
+        (src, dst)
+        for rule in policy["ssh"]
+        for src in rule["src"]
+        for dst in rule["dst"]
+    }
+    granted = {
+        (src, dst)
+        for g in policy["grants"]
+        if "tcp:22" in g["ip"]
+        for src in g["src"]
+        for dst in g["dst"]
+    }
+    assert ssh_reach <= granted
