@@ -1705,3 +1705,12 @@ class TestNightlyInfrastructureOwners:
         assert "scripts/docker_ib_gateway.sh logs" in owner
         for boundary in ("Symptom", "Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verification", "Rollback", "Escalation"):
             assert f"**{boundary}:**" in owner
+
+    def test_cloud_firewall_recovery_stops_on_indeterminate_mutation(self):
+        owner = _network_procedure("Hetzner Cloud Firewalls").split("\n## ", 1)[0]
+        assert "hcloud_firewalls.py" in owner and "test_hcloud_firewall_faults.py" in owner
+        assert "indeterminate" in owner and "before another apply" in owner
+        assert "rules and attachment" in owner
+        assert "inventory" in owner
+        for boundary in ("Symptom", "Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verification", "Rollback", "Escalation"):
+            assert f"**{boundary}:**" in owner
