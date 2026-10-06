@@ -11,6 +11,10 @@ import type {
 } from "./types";
 import { PI_COMMAND_ALIASES, PI_COMMAND_SET } from "./data";
 import { assistantErrorMessage } from "./assistant/errorCopy";
+import { boundedAssistantHistory, textPayloadViolation } from "./assistant/requestBudget";
+
+/** R-314 / REL-317: server turn budget plus bounded response-transfer grace. */
+export const ASSISTANT_REQUEST_TIMEOUT_MS = 330_000;
 import { isTickerRouteSegment } from "./tickerRoute";
 import { placeOrderFeedback } from "./orders/placeOrderFeedback";
 import {
@@ -300,10 +304,14 @@ async function readAssistantStream(
         buffer += decoder.decode(value, { stream: true });
         drainFrames();
       }
-      if (done) break;
+      if (done || settled || failure) break;
     }
   } catch {
     // A read that throws is the same failure as a stream that stops early.
+  } finally {
+    // Terminal SSE frames settle independently of a stalled transport EOF.
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
 
   if (settled) return settled;
@@ -332,42 +340,52 @@ export async function requestAssistantTurn(
   onEvent?: (event: AssistantStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<AssistantTurn> {
-  const response = await fetch("/api/assistant", {
-    ...(signal ? { signal } : {}),
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    body: JSON.stringify({
-      messages: [...history, buildUserMessage(latestMessage, attachments)],
-      // Omitted rather than sent empty: the route treats an absent model as
-      // "unchanged behavior", and validates any id it does receive.
-      ...(model ? { model } : {}),
-    }),
-  });
-
-  // Every rejection that carries a status is written before the stream opens,
-  // so a non-2xx is still a JSON body.
-  if (!response.ok) {
-    const message = assistantErrorMessage(response.status);
-    return { failed: true, content: message, proposal: null, toolEvents: [], model: null };
+  const current = buildUserMessage(latestMessage, attachments);
+  const violation = textPayloadViolation([current]);
+  if (violation) {
+    return { failed: true, content: violation.error, proposal: null, toolEvents: [], model: null };
   }
-
-  if (response.headers?.get?.("content-type")?.includes("text/event-stream") && response.body) {
-    return readAssistantStream(response.body, latestMessage, onEvent);
+  const controller = new AbortController();
+  const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+  const timer = setTimeout(() => controller.abort(), ASSISTANT_REQUEST_TIMEOUT_MS);
+  try {
+    requestSignal.throwIfAborted();
+    const response = await fetch("/api/assistant", {
+      signal: requestSignal,
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: JSON.stringify({
+        messages: boundedAssistantHistory(history, current),
+        ...(model ? { model } : {}),
+      }),
+    });
+    requestSignal.throwIfAborted();
+    if (!response.ok) {
+      return { failed: true, content: assistantErrorMessage(response.status), proposal: null, toolEvents: [], model: null };
+    }
+    if (response.headers?.get?.("content-type")?.includes("text/event-stream") && response.body) {
+      const result = await readAssistantStream(response.body, latestMessage, onEvent);
+      requestSignal.throwIfAborted();
+      return result;
+    }
+    const payload = await readJsonBody<AssistantResponse>(response);
+    requestSignal.throwIfAborted();
+    return {
+      content: typeof payload?.content === "string" && payload.content.trim()
+        ? formatAssistantPayload(payload.content) : fallbackReply(latestMessage),
+      proposal: payload?.proposal ?? null,
+      toolEvents: Array.isArray(payload?.toolEvents) ? payload.toolEvents : [],
+      model: typeof payload?.model === "string" ? payload.model : null,
+    };
+  } catch (error) {
+    if (controller.signal.aborted && !signal?.aborted) {
+      return { failed: true, content: assistantErrorMessage(504), proposal: null, toolEvents: [], model: null };
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
   }
-
-  const payload = await readJsonBody<AssistantResponse>(response);
-
-  const content =
-    typeof payload?.content === "string" && payload.content.trim()
-      ? formatAssistantPayload(payload.content)
-      : fallbackReply(latestMessage);
-
-  return {
-    content,
-    proposal: payload?.proposal ?? null,
-    toolEvents: Array.isArray(payload?.toolEvents) ? payload.toolEvents : [],
-    model: typeof payload?.model === "string" ? payload.model : null,
-  };
 }
 
 /**
