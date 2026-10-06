@@ -348,6 +348,7 @@ export async function requestAssistantTurn(
   const controller = new AbortController();
   const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
   const timer = setTimeout(() => controller.abort(), ASSISTANT_REQUEST_TIMEOUT_MS);
+  let transportComplete = false;
   try {
     requestSignal.throwIfAborted();
     const response = await fetch("/api/assistant", {
@@ -366,10 +367,12 @@ export async function requestAssistantTurn(
     if (response.headers?.get?.("content-type")?.includes("text/event-stream") && response.body) {
       const result = await readAssistantStream(response.body, latestMessage, onEvent);
       requestSignal.throwIfAborted();
+      transportComplete = true;
       return result;
     }
     const payload = await readJsonBody<AssistantResponse>(response);
     requestSignal.throwIfAborted();
+    transportComplete = true;
     return {
       content: typeof payload?.content === "string" && payload.content.trim()
         ? formatAssistantPayload(payload.content) : fallbackReply(latestMessage),
@@ -384,7 +387,9 @@ export async function requestAssistantTurn(
     throw error;
   } finally {
     clearTimeout(timer);
-    controller.abort();
+    // A consumed response or cancelled terminal reader owns no remaining I/O.
+    // Preserve successful signal state; abort only unfinished transport.
+    if (!transportComplete) controller.abort();
   }
 }
 

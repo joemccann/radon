@@ -20,6 +20,7 @@ describe("assistant request bounds", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/assistant");
     expect(init?.method).toBe("POST");
+    expect(init?.signal?.aborted).toBe(false);
     const messages = JSON.parse(init!.body as string).messages;
     expect(messages.length).toBeLessThanOrEqual(40);
     expect(messages.reduce((n: number, m: { content: string }) => n + new TextEncoder().encode(m.content).length, 0)).toBeLessThanOrEqual(128000);

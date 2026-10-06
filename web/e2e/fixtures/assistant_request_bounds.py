@@ -98,6 +98,7 @@ if (mode === 'message') {
     assert.equal(calls[0].init.signal.aborted, true);
   } else {
     assert.equal(result.content, 'recovered');
+    assert.equal(calls[0].init.signal.aborted, false, 'completed successful request was spuriously aborted');
   }
 }
 assert.equal(created.size, 0, 'owned deadline timer leaked after settlement');
