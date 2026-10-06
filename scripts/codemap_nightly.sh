@@ -4,8 +4,7 @@
 # tools/codemap/{codemap.json,codemap.data.js,architecture.json} are generated
 # from the whole tree, so any branch that commits them conflicts with every
 # other open branch. Feature branches never touch them; this job regenerates
-# them from origin/main once a night, opens a PR, waits for the required
-# checks, and squash-merges it.
+# them from origin/main once a night and opens a PR for the operator to merge.
 #
 # Runs in its own clone (never edit it by hand; every run hard-resets it):
 #   bash scripts/setup_codemap_nightly.sh
@@ -77,8 +76,6 @@ gh pr list --state open --search "head:codemap/" --json number,headRefName \
   --jq ".[] | select(.headRefName | startswith(\"codemap/\")) | select(.headRefName != \"$BRANCH\") | .number" \
   | while IFS= read -r n; do gh pr close "$n" --delete-branch --comment "Superseded by tonight's refresh."; done
 
-# Required checks must report before a merge is allowed.
-sleep 60
-gh pr checks "$BRANCH" --required --watch --interval 60
-gh pr merge "$BRANCH" --squash --delete-branch
-echo "codemap-nightly: merged $BRANCH"
+# The main-review ruleset requires an approving review and nightly loops never
+# merge (scripts/nightly_pr_guard.py), so the refresh waits for the operator.
+echo "codemap-nightly: opened $BRANCH, awaiting operator merge"

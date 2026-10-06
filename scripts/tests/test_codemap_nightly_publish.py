@@ -95,8 +95,11 @@ def test_real_graph_change_uses_guarded_publish_before_superseding(tmp_path: Pat
     branch = calls[publish][calls[publish].index("--head") + 1]
     listing = next(call for call in calls if call[:3] == ["gh", "pr", "list"])
     assert f'.headRefName != "{branch}"' in listing[-1]
-    assert any(call[:3] == ["gh", "pr", "checks"] for call in calls)
-    assert any(call[:3] == ["gh", "pr", "merge"] for call in calls)
+    # main-review requires an approving review and nightly loops never merge
+    # (scripts/nightly_pr_guard.py): the refresh PR waits for the operator.
+    assert not any(call[:3] == ["gh", "pr", "merge"] for call in calls)
+    assert not any(call[:3] == ["gh", "pr", "checks"] for call in calls)
+    assert "awaiting operator merge" in result.stdout
 
 
 @pytest.mark.parametrize("publish_rc,expected_rc", [(3, 0), (1, 1)])
