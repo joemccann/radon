@@ -1134,3 +1134,5 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 - Freeze option-order fixtures within their intended trading session, align API/quote timestamps and assert valid expiry before transmit. WebSocket doubles must expose native ready-state constants and prove observed subscriptions.
 - When reconciling a saved test snapshot, retain current main's process-group ownership and reap/finally safeguards; replace historical green claims with current-base red/green evidence before publication.
 - When replacing stale browser fixtures, inventory and retain each still-valid interaction/assertion; stable test counts alone do not establish preserved behavioral coverage.
+
+- 2026-10-06: After committing native E2E changes, rerun the curation guard against the actual base-to-HEAD diff. Each changed held-out spec needs its own REVIEWED basename stamp dated on or after its latest git author date; grouped labels and older execution dates do not satisfy the guard. Describe fixture, static, operator and live-provider evidence separately without promoting membership or claiming unexecuted cases passed.
