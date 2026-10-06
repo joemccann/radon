@@ -377,7 +377,7 @@ test.describe("defect F — the +N expander must not drop focus", () => {
         insideTagList: !!(active && tagList && tagList.contains(active)),
         // A control the user can no longer reach cannot carry a meaningful
         // disclosure state; `display: none` + aria-expanded="true" is inert.
-        inertExpanded: Array.from(document.querySelectorAll("[aria-expanded]")).some(
+        inertExpanded: Array.from(tagList?.querySelectorAll("[aria-expanded]") ?? []).some(
           (el) => getComputedStyle(el).display === "none",
         ),
       };

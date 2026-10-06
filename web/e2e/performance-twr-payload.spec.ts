@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { installClearFixtures } from "./clear-fixtures";
 
 // ---------------------------------------------------------------------------
 // Window-relative dates. Staleness is decided at READ time from nav_as_of and
@@ -168,6 +169,8 @@ const PORTFOLIO_EMPTY = {
 
 async function openPerformanceWith(page: import("@playwright/test").Page, performancePayload: unknown) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
+  await installClearFixtures(page);
+  await page.clock.setFixedTime(new Date());
   await page.route("**/api/performance", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(performancePayload) }),
   );
@@ -192,7 +195,7 @@ async function openPerformanceWith(page: import("@playwright/test").Page, perfor
 }
 
 test.describe("/performance TWR payload contract", () => {
-  test("a valid v2 payload renders the cumulative TWR in the hero", async ({ page }) => {
+  test("a valid v2 payload renders the cumulative TWR in the hero", async ({ page }, testInfo) => {
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
 
@@ -202,7 +205,7 @@ test.describe("/performance TWR payload contract", () => {
     await expect(page.locator('[data-testid="performance-hero-subtitle"]')).toContainText("Ending equity $110,000.00");
     await expect(page.getByText("RUNTIME ERROR")).toHaveCount(0);
     expect(pageErrors.filter((message) => message.includes("length") || message.includes("toUpperCase"))).toEqual([]);
-    await page.screenshot({ path: "test-results/performance-twr-payload.png", fullPage: true });
+    await page.screenshot({ path: testInfo.outputPath("performance-twr-payload.png"), fullPage: true });
   });
 
   test("a payload without schema_version degrades to the honest --", async ({ page }) => {

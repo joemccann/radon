@@ -4,7 +4,7 @@
  * Verifies:
  *  1. /cta page loads and renders the vol-targeting model
  *  2. MenthorQ CTA tables appear below the vol-targeting model
- *  3. CTA nav item is present in the sidebar
+ *  3. More opens All workspaces and its CTA link navigates to the measurement
  *  4. Sortable table column headers are clickable
  *  5. /regime page no longer contains CTA Exposure Model
  *  6. /regime page shows CRI history chart (D3 SVG)
@@ -191,12 +191,17 @@ async function setupMocks(
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 test.describe("/cta page", () => {
-  test("CTA nav item exists in sidebar", async ({ page }) => {
+  test("CTA navigation opens through All workspaces and loads the measurement", async ({ page }) => {
     await setupMocks(page);
-    await page.goto("/cta");
-    // The nav should contain a CTA link
-    const nav = page.locator("nav, aside").first();
-    await expect(nav.locator("a[href='/cta'], a[href*='cta']")).toBeVisible({ timeout: 10_000 });
+    await page.goto("/portfolio");
+    await page.getByRole("button", { name: "Open all workspaces", exact: true }).click();
+    const nav = page.getByRole("navigation", { name: "All workspaces", exact: true });
+    await expect(nav).toBeVisible();
+    const link = nav.getByRole("link", { name: "CTA", exact: true });
+    await expect(link).toHaveAttribute("href", "/cta");
+    await link.click();
+    await expect(page).toHaveURL(/\/cta$/);
+    await expect(page.getByTestId("vol-targeting-model")).toBeVisible();
   });
 
   test("vol-targeting model renders with data-testid", async ({ page }) => {
@@ -291,7 +296,7 @@ test.describe("/cta page", () => {
     await expect(banner).toContainText("CTA CACHE STALE");
     await expect(banner).toContainText("2026-03-08");
     await expect(banner).toContainText("2026-03-09");
-    await expect(banner).toContainText("Your username or password was incorrect");
+    await expect(page.getByRole("alert").filter({ hasText: "Your username or password was incorrect" })).toBeVisible();
   });
 
   test("renders currency analysis when currency percentiles arrive as decimals", async ({ page }) => {

@@ -1,4 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+import { installClearFixtures } from "./clear-fixtures";
+
+const pageErrors = new WeakMap<Page, string[]>();
 
 /* ─── Shared mock payloads ─── */
 
@@ -39,7 +42,7 @@ const PORTFOLIO_MOCK = {
       risk_profile: "defined",
       direction: "LONG",
       contracts: 2,
-      expiry: "2026-04-17",
+      expiry: "2027-01-15",
       entry_cost: 520,
       market_value: 680,
       legs: [
@@ -60,7 +63,7 @@ const ORDERS_MOCK = {
   executed_count: 0,
 };
 
-const CHAIN_EXPIRATIONS = ["20260417", "20260515", "20260619"];
+const CHAIN_EXPIRATIONS = ["20270115", "20270219", "20270319"];
 
 const CHAIN_STRIKES = [80, 82, 84, 86, 88, 90, 92, 94, 96, 98, 100];
 
@@ -96,7 +99,9 @@ function mockPrice(symbol: string, last: number, bid: number, ask: number) {
 /* ─── API route mocks ─── */
 
 async function setupApiMocks(page: import("@playwright/test").Page) {
-  await page.unrouteAll({ behavior: "ignoreErrors" });
+  // Seed the shared browser-only Clerk identity and explicit 503 API fallback;
+  // add this suite's contract-specific responses over those fixtures.
+  await installClearFixtures(page);
 
   await page.route("**/api/regime", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(CRI_MOCK) }),
@@ -157,6 +162,7 @@ async function injectMockWebSocket(page: import("@playwright/test").Page) {
     (window as Record<string, unknown>).__wsMaxConcurrent = 0;
     (window as Record<string, unknown>).__wsActiveCount = 0;
     (window as Record<string, unknown>).__wsSubscribeCount = 0;
+    (window as Record<string, unknown>).__wsConnectedStatusCount = 0;
     (window as Record<string, unknown>).__wsSubscribeInstanceIds = new Set<number>();
 
     class MockWebSocket {
@@ -191,6 +197,8 @@ async function injectMockWebSocket(page: import("@playwright/test").Page) {
 
         // Send status: connected
         window.setTimeout(() => {
+          const w = window as Record<string, unknown>;
+          w.__wsConnectedStatusCount = (w.__wsConnectedStatusCount as number) + 1;
           this.onmessage?.({
             data: JSON.stringify({
               type: "status",
@@ -241,8 +249,8 @@ async function injectMockWebSocket(page: import("@playwright/test").Page) {
           const updates: Record<string, unknown> = {};
           const strikes = [88, 90, 92];
           for (const strike of strikes) {
-            const callKey = `PLTR_20260417_${strike}_C`;
-            const putKey = `PLTR_20260417_${strike}_P`;
+            const callKey = `PLTR_20270115_${strike}_C`;
+            const putKey = `PLTR_20270115_${strike}_P`;
             updates[callKey] = {
               symbol: callKey,
               last: strike === 90 ? 3.4 : strike < 90 ? 5.2 : 1.8,
@@ -347,31 +355,39 @@ async function injectMockWebSocket(page: import("@playwright/test").Page) {
 
 test.describe("WebSocket connection stability on ticker detail page", () => {
   test.beforeEach(async ({ page }) => {
+    const errors: string[] = [];
+    pageErrors.set(page, errors);
+    page.on("pageerror", (error) => errors.push(error.stack ?? error.message));
     await setupApiMocks(page);
+    await page.clock.setFixedTime(new Date("2026-10-03T12:00:00.000Z"));
     await injectMockWebSocket(page);
   });
 
-  test("sidebar never shows OFFLINE during page load with sequential data arrival", async ({ page }) => {
-    await page.goto("/PLTR?tab=chain");
+  test.afterEach(async ({ page }) => {
+    expect(pageErrors.get(page) ?? []).toEqual([]);
+  });
 
-    // Wait for page to render the sidebar status
-    const statusDot = page.locator(".sidebar-footer .status-dot-wrap");
-    await expect(statusDot).toBeVisible({ timeout: 10_000 });
-
-    // Give time for portfolio, orders, and chain subscriptions to arrive sequentially
-    await page.waitForTimeout(500);
-
-    // Sidebar should show CONNECTED, not OFFLINE
-    await expect(statusDot).toContainText("CONNECTED");
-
-    // Verify it never showed OFFLINE at any point —
-    // the debounced ibConnected starts truthy from mock, so there should be no flicker
-    const statusText = await statusDot.textContent();
-    expect(statusText).not.toContain("OFFLINE");
+  test("keeps footer telemetry nominal while chain subscriptions arrive", async ({ page }) => {
+    await page.goto("/PLTR");
+    const telemetry = page.getByRole("status", { name: "System telemetry" });
+    await expect(telemetry).toContainText("Nominal");
+    await page.getByRole("button", { name: /Options chain/ }).click();
+    await page.locator(".chain-row").first().waitFor();
+    const quote = page.getByTestId("chain-underlying-quote");
+    await expect(quote).toContainText("88.50", { timeout: 10_000 });
+    await expect.poll(() => page.evaluate(() =>
+      (window as Record<string, unknown>).__wsConnectedStatusCount as number,
+    )).toBeGreaterThan(0);
+    await expect.poll(() => page.evaluate(() =>
+      (window as Record<string, unknown>).__wsSubscribeCount as number,
+    )).toBeGreaterThan(0);
+    await expect(telemetry).toContainText("Nominal");
+    await expect(page.getByRole("alert").filter({ hasText: "IB Gateway · uplink lost. Reconnect in progress." })).toHaveCount(0);
   });
 
   test("option chain shows bid/ask values, not triple-dash placeholders", async ({ page }) => {
-    await page.goto("/PLTR?tab=chain");
+    await page.goto("/PLTR");
+    await page.getByRole("button", { name: /Options chain/ }).click();
 
     // Wait for the chain tab to render with strikes
     const chainTable = page.locator(".chain-row");
@@ -409,7 +425,8 @@ test.describe("WebSocket connection stability on ticker detail page", () => {
   });
 
   test("usePrices does not tear down and recreate the WS when subscriptions change", async ({ page }) => {
-    await page.goto("/PLTR?tab=chain");
+    await page.goto("/PLTR");
+    await page.getByRole("button", { name: /Options chain/ }).click();
 
     // Wait for everything to settle — portfolio, orders, chain subscriptions all arrive
     await page.waitForTimeout(2000);
@@ -424,7 +441,7 @@ test.describe("WebSocket connection stability on ticker detail page", () => {
 
     // usePrices should create exactly 1 WS that receives subscribe messages.
     // Before the fix, this would be 3+ (one per subscription change: portfolio → orders → chain).
-    expect(subscribeWsCount).toBeLessThanOrEqual(1);
+    expect(subscribeWsCount).toBe(1);
 
     // Verify max concurrent is bounded (usePrices + useIBStatus + possible getSnapshot/TickerSearch)
     const maxConcurrent = await page.evaluate(() => (window as Record<string, unknown>).__wsMaxConcurrent);
@@ -432,22 +449,22 @@ test.describe("WebSocket connection stability on ticker detail page", () => {
   });
 
   test("quote telemetry shows option price for positioned ticker, not underlying", async ({ page }) => {
-    await page.goto("/PLTR?tab=chain");
+    await page.goto("/PLTR");
+    await page.getByRole("button", { name: /Options chain/ }).click();
 
     // Wait for price data to arrive and render
     await page.waitForTimeout(1500);
 
     // The hero quote telemetry should be visible
-    const heroLeft = page.locator(".ticker-detail-hero-left");
-    await expect(heroLeft).toBeVisible({ timeout: 10_000 });
+    const heldQuote = page.getByTestId("chain-held-quote");
+    await expect(heldQuote).toBeVisible({ timeout: 10_000 });
 
     // For a Long Call position, the quote should show the option price (~$3.40),
     // NOT the underlying stock price ($88.50).
     // The label should reference the option contract, not just "PLTR"
-    const heroText = await heroLeft.textContent();
-
-    // The position pill should be present
-    expect(heroText).toContain("LONG");
-    expect(heroText).toContain("Long Call");
+    const instrument = page.getByTestId("chain-instrument-sidebar");
+    await expect(instrument).toContainText("Long Call");
+    await expect(heldQuote).toContainText("$3.40");
+    await expect(heldQuote).not.toContainText("$88.50");
   });
 });

@@ -28,7 +28,6 @@ const regimeLoaded: Record<string, string> = {
   short: '[data-testid="short-crowding-table"]', skew: '[data-testid="skew-chart-section"]', skew2d: '[data-testid="skew2d-chart-section"]',
   straddle: '[data-testid="straddle-chart-section"]', streaks: '[data-testid="streaks-chart-section"]', trin: '[data-testid="trin-chart-section"]',
   vcg: '[data-testid="vcg-history-chart-section"]', vixcor: '[data-testid="vixcor-chart-section"]', vixts: '[data-testid="vixts-chart-section"]',
-  "panic-index": '[data-testid="panic-index-chart-section"]',
 };
 
 export const CLEAR_ROUTE_CASES: ClearRouteCase[] = [
@@ -40,6 +39,7 @@ export const CLEAR_ROUTE_CASES: ClearRouteCase[] = [
   { source: "app/performance/page.tsx", path: "/performance", selector: '[data-testid="performance-panel"]' },
   { source: "app/orders/page.tsx", path: "/orders", selector: '[data-testid="orders-command-strip"]' },
   { source: "app/scanner/page.tsx", path: "/scanner", selector: '[data-testid="flow-order-link-AAPL"], [data-testid="mobile-scanner-list"]' },
+  { source: "app/research-workbench/page.tsx", path: "/research-workbench", selector: '[data-testid="research-workbench"]' },
   { source: "app/watchlist/page.tsx", path: "/watchlist", selector: '[data-testid="watchlist-row-AAPL"]' },
   { source: "app/discover/page.tsx", path: "/discover", destination: "/scanner?mode=discover", selector: '[data-testid="discover-order-link-MSFT"]' },
   { source: "app/flow-analysis/page.tsx", path: "/flow-analysis", selector: '[data-testid="mobile-flow-list"], .table-wrap:has(td:text-is("Long Stock"))', text: "AAPL" },
@@ -55,7 +55,7 @@ export const CLEAR_ROUTE_CASES: ClearRouteCase[] = [
   { source: "app/preferences/page.tsx", path: "/preferences", selector: '[data-testid="preference-input-RADON_MAX_ORDER_QTY"]' },
   { source: "app/profile/page.tsx", path: "/profile", selector: ".profile-field__input" },
   { source: "app/regime/page.tsx", path: "/regime", regimeTab: "cri", selector: regimeLoaded.cri },
-  ...regimePages.map((tab) => ({ source: `app/regime/${tab}/page.tsx`, path: `/regime/${tab}`, regimeTab: tab, selector: regimeLoaded[tab] })),
+  ...regimePages.map((tab) => ({ source: `app/regime/${tab}/page.tsx`, path: `/regime/${tab}`, regimeTab: tab, ...(tab === "panic-index" ? { text: "No panic proxy reading yet" } : { selector: regimeLoaded[tab] }) })),
   { source: "app/regime/vol-cone/page.tsx", path: "/regime/vol-cone", destination: "/scanner?mode=vol-cone", selector: '[data-testid="vol-cone-chart-section"]' },
   { source: "app/internals/page.tsx", path: "/internals", destination: "/regime/cri", selector: regimeLoaded.cri, regimeTab: "cri" },
   { source: "app/setup/page.tsx", path: "/setup", selector: '[data-testid="setup-wizard"]' },

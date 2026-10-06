@@ -1128,3 +1128,9 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 - Keep gateway lifecycle and service recovery available beside Trading controls even when broker health is nominal. A conditional attention action and buried diagnostics do not satisfy rapid operator access.
 
 - 2026-10-01: When diffing pytest failures (with vs without a change), run with `--color=no` (or `-p no:sugar`) before grepping `^FAILED`. ANSI codes made both lists empty and hid a real regression that CI then caught.
+
+## 2026-10-06 - Tester Army verification and recovery
+- Launch verification with env -i and an explicit allowlist of toolchain and synthetic fixture variables. Inspect owned processes by PID and command name only; never print full process arguments, environments or credential values.
+- Freeze option-order fixtures within their intended trading session, align API/quote timestamps and assert valid expiry before transmit. WebSocket doubles must expose native ready-state constants and prove observed subscriptions.
+- When reconciling a saved test snapshot, retain current main's process-group ownership and reap/finally safeguards; replace historical green claims with current-base red/green evidence before publication.
+- When replacing stale browser fixtures, inventory and retain each still-valid interaction/assertion; stable test counts alone do not establish preserved behavioral coverage.

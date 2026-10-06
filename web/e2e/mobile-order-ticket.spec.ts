@@ -309,7 +309,7 @@ test.describe("Mobile order ticket — Phase 1-3 UX", () => {
     await expect(strip).toContainText("Bull Call Spread");
   });
 
-  test("size controls own the sheet scroll; risk pins below them, footer stays compact", async ({ page }) => {
+  test("size controls own the sheet scroll; risk pins below them, footer stays compact", async ({ page }, testInfo) => {
     await stubChainApis(page);
     await page.goto("/AAPL?tab=chain");
 
@@ -336,6 +336,7 @@ test.describe("Mobile order ticket — Phase 1-3 UX", () => {
     // layout forced on every other test in this file) adds 25 to the qty.
     await page.getByTestId("mobile-order-ticket-leg-AAPL_20260320_200_C-qty-25").click();
     await expect(page.getByTestId("mobile-order-ticket-legs")).toContainText("26x");
+    await page.screenshot({ path: testInfo.outputPath("mobile-order-sheet-reachable.png") });
 
     // One sheet scroll: the risk grid + payoff live in the body scroller,
     // never in the pinned footer, and the footer is a compact thumb-zone.
@@ -388,4 +389,28 @@ test.describe("Mobile order ticket — Phase 1-3 UX", () => {
     await expect(strip).toBeVisible();
     await expect(strip).toContainText("1 LEG");
   });
+});
+
+test('missing combo quotes withhold the expiry curve and keep review disarmed', async ({ page }, testInfo) => {
+  await stubChainApis(page);
+  const placed: Request[] = [];
+  await page.route('**/api/orders/place', route => { placed.push(route.request()); return route.fulfill({ json: { ok: true } }); });
+  await page.goto('/AAPL?tab=chain');
+  await page.getByTestId('mobile-chain-call-200').click();
+  await page.getByTestId('mobile-chain-detail-buy').click();
+  await page.getByTestId('mobile-chain-call-210').click();
+  await page.getByTestId('mobile-chain-detail-sell').click();
+  await page.getByTestId('mobile-chain-pending-strip').click();
+  const ticket = page.getByTestId('mobile-order-ticket');
+  await expect(ticket).toBeVisible();
+  await expect(page.getByTestId('mobile-order-ticket-review')).toBeDisabled();
+  await expect(ticket.getByRole('img', { name: 'Profit and loss at expiry' })).toHaveCount(0);
+  await expect(ticket.getByText('Expiry payoff cannot be measured from the current price and legs.')).toBeVisible();
+  const invalidSvg = await ticket.locator('svg').evaluateAll(nodes => nodes.flatMap(node => Array.from(node.querySelectorAll('*')).flatMap(el => Array.from(el.attributes).filter(attr => /NaN|Infinity/.test(attr.value)).map(attr => attr.value))));
+  expect(invalidSvg).toEqual([]);
+  expect(placed).toHaveLength(0);
+  const dismiss = page.getByRole('button', { name: 'Dismiss', exact: true });
+  if (await dismiss.isVisible()) await dismiss.click();
+  await ticket.getByTestId('payoff-unmeasured').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('missing-combo-quote-payoff.png') });
 });

@@ -129,7 +129,7 @@ describe("mobile ticket payoff is per-1x, like the desktop rail", () => {
 
     const cell = await waitFor(() => {
       const label = [...document.querySelectorAll(".ticket-risk-cell-label")].find(
-        (n) => n.textContent === "BREAKEVENS",
+        (n) => n.textContent === "ORDER BREAKEVENS",
       );
       expect(label).toBeTruthy();
       return label!.parentElement!;
@@ -159,7 +159,7 @@ describe("mobile ticket payoff is per-1x, like the desktop rail", () => {
 
     const cell = await waitFor(() => {
       const label = [...document.querySelectorAll(".ticket-risk-cell-label")].find(
-        (n) => n.textContent === "BREAKEVENS",
+        (n) => n.textContent === "ORDER BREAKEVENS",
       );
       expect(label).toBeTruthy();
       return label!.parentElement!;

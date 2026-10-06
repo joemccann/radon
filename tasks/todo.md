@@ -8971,3 +8971,14 @@ Review before publication: 65 commits / 112 paths audited through 72e09ffb. T-53
 ### Review 2026-10-05
 
 Audit complete through 72e09ffb: 65 commits, 112 changed paths and 300 paths including codemap callers. Two new and three inherited repairs have repeated fault-injection red/green evidence; ten remaining historical/operator candidates retain acceptance on issue #81. Standing gates 81 passed, delta acceptance 135 passed, permanent Python drills 95 passed; focused firewall 137/37, rejection 76, mode-switch 138 plus cloud owner 30, provider/caller 206 passed. Fifteen Python files, three shell files and embedded logout Python parse; no YAML/JSON/TOML changed. Diff, five-commit secret scan and substantive publication check pass. No live access, credential lookup, main push, merge, codemap edits or test-ledger edits. T5 external publication, exact-head CI and the single rolling comment are recorded on issue #81 without changing the verified head.
+
+## Tester Army publication, 2026-10-06
+
+- [x] T1 depends_on: [] Recover the saved Tester Army delta onto current main in an isolated branch, preserving original work and excluding private rescue artifacts.
+- [x] T2 depends_on: [T1] Sol 6.1 per-project reconciliation and review; reproduce product regressions and verify focused repairs.
+- [x] T3 depends_on: [T2] Luna 6 independent browser/API verification, full local gates and publication/secret hygiene.
+- [ ] T4 depends_on: [T3] Commit and create PR; watch every expected check on the exact head until green; send one accepted Pushover notification.
+
+### Review
+
+API review complete: current-main red 41 failures, focused green 82, independent Luna green 82, full API 1179, changed executable lines 28/28 covered. Full scripts/root: 13143 passed, 2 skipped, 23 subtests, one unchanged login-runner timing failure whose focused repeat passed. Full root Vitest: 10386 passed, 21 skipped; unchanged coverage ratchets pass, changed executable web lines 46/46 covered. Site: production TesterArmy 27/27 and retained Playwright 13/13; status regression red/green proved. Workstation: production SDK 77/77, 135 distinct retained cases verified, session fixture 1/1, performance/sidebar 8/8 and visual review complete. Three live-data and five operator cases remain unverified; one existing skip. Actionlint and final staged/commit secret scans gate publication. Exact-head CI and notification receipts will be recorded in the PR without preclaiming success; October 3 receipts remain historical evidence.

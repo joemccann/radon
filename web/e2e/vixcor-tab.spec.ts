@@ -279,7 +279,7 @@ test.describe("/regime/vixcor — VIX vs COR3M correlation tab", () => {
 
     const block = page.locator('[data-testid="vixcor-base-rate"]');
     await block.waitFor({ timeout: 15_000 });
-    await expect(block).toContainText("AFTER A BREAKDOWN");
+    await expect(block).toContainText("FORWARD VIX DRAWUP, BREAKDOWNS VERSUS ALL SESSIONS");
     await expect(block).toContainText("ALL SESSIONS");
     await expect(block.locator('[data-testid="vixcor-base-rate-row-5"]')).toContainText("+3.9%");
     await expect(block.locator('[data-testid="vixcor-base-rate-row-5"]')).toContainText("+9.0%");

@@ -13,6 +13,14 @@ const PORTFOLIO = {
   avg_kelly_optimal: null,
   exposure: {},
   violations: [],
+  risk_budget: {
+    clusters: [],
+    breaches: [],
+    aggregate_exposure: 0,
+    insufficient_data: [],
+    corr_threshold: 0.7,
+    book_budget: 0.025,
+  },
   positions: [
     {
       id: 1,
@@ -90,7 +98,33 @@ const ORDERS = {
 };
 
 async function stubApis(page: import("@playwright/test").Page) {
+  await page.addInitScript(() => {
+    class MockWebSocket {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSING = 2;
+      static CLOSED = 3;
+      readyState = MockWebSocket.CONNECTING;
+      onopen: ((event?: unknown) => void) | null = null;
+      onmessage: ((event: { data: string }) => void) | null = null;
+      onclose: ((event?: unknown) => void) | null = null;
+      onerror: ((event?: unknown) => void) | null = null;
+      constructor() {
+        setTimeout(() => {
+          this.readyState = MockWebSocket.OPEN;
+          this.onopen?.({});
+          this.onmessage?.({ data: JSON.stringify({ type: "status", ib_connected: true, subscriptions: [] }) });
+        }, 0);
+      }
+      send() {}
+      close() { this.readyState = MockWebSocket.CLOSED; this.onclose?.({}); }
+    }
+    // @ts-expect-error test-only replacement
+    window.WebSocket = MockWebSocket;
+  });
   await page.unrouteAll({ behavior: "ignoreErrors" });
+  await page.route(/^https?:\/\/(?!localhost:|127\.0\.0\.1:)/, (route) => route.abort());
+  await page.route("**/api/**", (route) => route.fulfill({ status: 503, body: "Unmocked API blocked by test fixture" }));
 
   await page.route("**/api/portfolio**", (route) =>
     route.fulfill({

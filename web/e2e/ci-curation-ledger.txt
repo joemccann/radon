@@ -1,3 +1,28 @@
+# REVIEWED 2026-10-06 performance-page.spec.ts - Current V2 panel has ten
+#   clickable core/advanced cards, TWR chained after removing external flows,
+#   Sharpe and Max DD. First/last card interaction and modal closing stay
+#   asserted. Sortino and the unconditional Warnings section were removed by
+#   current main's V2 panel; the old equity-ratio YTD formula is invalid with
+#   flows and is replaced by the exact TWR formula. No production gate changes.
+# REVIEWED 2026-10-03 CROX and CTA browser contracts - CROX financial values
+#   retain guarded $1.65 spread/$26,895 mark/$27,613 initial basis, now targeted
+#   by visible column headers. CTA follows More/All workspaces navigation;
+#   stale warning dates and available tables stay separate from ErrorToast.
+#   Focused red CROX1 + CTA2; repaired selected contracts4/4 passed Chromium
+#   next start :3343 with unique /tmp output, no production/curation change.
+# REVIEWED 2026-10-03 clear-all-pages.spec.ts panic-index - Canonical manifest
+#   now asserts the explicit empty state for the unavailable panic fixture,
+#   matching the panel data gate and SDK. Independent desktop/mobile chart
+#   assertions failed before repair; focused desktop/mobile 2/2 and SDK 1/1
+#   passed after repair. No measurement fabricated or guard relaxed.
+# REVIEWED 2026-10-03 admin-panel.spec.ts - Corrected authless assumption:
+#   /admin requires server-owned Clerk operator authorization; localhost bypass
+#   headers do not admit that gate. Independent authless execution failed to
+#   render the panel. Guard and existing curation remain unchanged.
+# REVIEWED 2026-10-03 regime-closed-refresh.spec.ts - Replaced fake DOM/polling
+#   with the actual CRI route: OPEN-clock 60s GET refresh and CLOSED-clock
+#   paused timer, no POST. 2/2 Chromium on isolated next start :3343.
+#   Existing financial-smoke curation remains unchanged.
 # REVIEWED 2026-10-01 admin-service-controls.spec.ts - App-host Service controls
 #   through the radon-control socket. 1/1 Chromium against local next dev :3047
 #   (isolated AdminWorkspace bundle, clear-admin-component harness, fixture

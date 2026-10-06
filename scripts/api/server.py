@@ -2534,16 +2534,38 @@ async def discover(force: bool = False):
     )
 
 
+async def _analytics_body(request: Request) -> dict:
+    try:
+        body = await request.json()
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object") from None
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+    return body
+
+
+def _analytics_positive_integer(body: dict, field: str, default: int) -> int:
+    value = body.get(field, default)
+    if isinstance(value, str) and re.fullmatch(r"[0-9]+", value):
+        try:
+            value = int(value)
+        except ValueError:
+            value = None
+    if type(value) is not int or value <= 0:
+        raise HTTPException(status_code=400, detail=f"{field} must be a positive integer")
+    return value
+
+
 @app.post("/forecast/chronos")
 async def forecast_chronos(request: Request):
     """Chronos-2 quantile forecast for a ticker flow-history metric."""
     if test_mode:
         return demo_disabled_payload("Chronos forecasting")
-    body = await request.json()
+    body = await _analytics_body(request)
     ticker = str(body.get("ticker", "")).upper()
     metric = str(body.get("metric", "flow_strength"))
-    horizon = int(body.get("horizon", 10))
-    lookback = int(body.get("lookback", 120))
+    horizon = _analytics_positive_integer(body, "horizon", 10)
+    lookback = _analytics_positive_integer(body, "lookback", 120)
     result = await run_script(
         "chronos_forecast.py",
         ["--ticker", ticker, "--metric", metric, "--horizon", str(horizon),
@@ -2661,10 +2683,10 @@ async def flow_surprise(request: Request):
     """Flow-surprise residual: ranked watchlist, or one ticker if provided."""
     if test_mode:
         return demo_disabled_payload("Flow surprise")
-    body = await request.json()
+    body = await _analytics_body(request)
     metric = str(body.get("metric", "flow_strength"))
-    top = int(body.get("top", 20))
-    lookback = int(body.get("lookback", 250))
+    top = _analytics_positive_integer(body, "top", 20)
+    lookback = _analytics_positive_integer(body, "lookback", 250)
     args = ["--metric", metric, "--top", str(top), "--lookback", str(lookback)]
     ticker = body.get("ticker")
     if ticker:
