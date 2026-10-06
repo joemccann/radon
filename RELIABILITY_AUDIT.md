@@ -3033,3 +3033,31 @@ indicator and direct-caller union 206 passed. Existing all-sources-down
 behavior retains its source_down error; this repair specifically closes the
 previously healthy fallback acceptance. No global source-error state or
 transport retry is introduced.
+
+## Delta audit 2026-10-06
+
+Trusted collaborator checkpoint `72e09ffb18ceba5ebf485b66ee052b00fc7956c6`;
+audited main `393345550d521548808d9884be0e5ab10ae48854`. Range: 12 commits,
+78 changed paths, 134 paths including direct codemap importers. Open reliability
+PR inventory was empty; IDs remain reserved through R-728 / REL-312.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-729 / REL-313 | P1 | `scripts/cloud.sh:83-110,174-181`; `scripts/ib:90` (audit base); topology `cloud/tailscale/policy.hujson:39-50`, `cloud/caddy/Caddyfile:37-38` | Cloud admission started the Gateway on the app host before stopping the local session, had no total SSH deadline, and directed relay traffic to a loopback-only, denied tailnet port. The renamed persisted IB target also pointed at the app, which owns no broker. Acceptance: real staged launcher refuses busy ports and unknown/failed local logout before remote admission; confirmed logout precedes exactly one bounded broker-owner start; failed/unknown/held/unready health prevents mode and workspace startup; successful startup uses the app API and existing ticket-authenticated Caddy relay, never opens broker/relay tailnet ports. Nine initial faults, the persisted-host fault and unknown-local-inventory fault each failed twice. |
+
+Review covered connectivity and safety through split-host caller defaults,
+Gateway admission and host/cloud firewall recovery; state/persistence through
+rejection digest, fallback provider health, breadth cache and research outcomes;
+resources/error handling through Chromium environment isolation, pinned GPU
+repository admission, subprocess deadlines and CI shard ownership. Existing
+merged firewall/provider/rejection repairs retain their IDs. No live transport,
+provider, database, scheduler or broker was used.
+
+Standing placement scan reads the only wire calls at
+`scripts/clients/ib_client.py:750,907`: halt/limit guards remain at
+`:706,721,861,881`. `_NON_IDEMPOTENT_IB_SCRIPTS` remains at
+`scripts/api/server.py:5821,5930,6008`; exit acknowledgement remains at
+`scripts/monitor_daemon/handlers/exit_orders.py:212,238,790`; daemon-state uses
+Hrana at `scripts/db/writer.py:2577`. Writer parity/exemptions and actual
+funnel/bracket tests pass: 78. Remaining inherited acceptance and operator
+installation actions are retained on issue #81; none is closed on inspection.
