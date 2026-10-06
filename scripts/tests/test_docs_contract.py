@@ -1679,3 +1679,15 @@ class TestResearchDiagnosticDocumentation:
         text = (_ROOT / "docs/dropbox-research.md").read_text()
         assert "Journal output contains stage counts/error classes only." not in text
         assert "Extraction `EvidenceError` text is persisted" in text
+
+
+class TestNightlyInfrastructureOwners:
+    """DOC-169..173: source-backed infrastructure and recovery owners."""
+
+    def test_external_services_defers_host_roles_to_topology_owner(self):
+        doc = (_ROOT / "docs/external-services.md").read_text()
+        row = next(line for line in doc.splitlines() if line.startswith("| **Hetzner Cloud** |"))
+        assert "spof-host-split.md" in row
+        assert "operations.md#encrypted-credential-store-profile-credentials-tab" in row
+        assert "Resolved as `ib-gateway`" not in row
+        assert "VPS that hosts FastAPI, IB Gateway" not in row
