@@ -20,6 +20,7 @@ import {
   applyOperatorHold,
   operatorHoldFromHealth,
   isOperatorHoldRefusal,
+  marketDataIsDegraded,
 } from "./staleDataMachine.js";
 
 const NOW = 1_700_000_000_000;
@@ -639,5 +640,20 @@ describe("IBKR operator hold (Gateway down on purpose while the operator uses IB
     expect(isOperatorHoldRefusal(423, {})).toBe(true);
     expect(isOperatorHoldRefusal(503, { detail: { code: "OPERATOR_HOLD" } })).toBe(true);
     expect(isOperatorHoldRefusal(503, { detail: { reason: "2fa_push_in_flight" } })).toBe(false);
+  });
+});
+
+describe("NF-3 / REL-318 requested data-plane verdict", () => {
+  const base = { now: NOW, isMarketHours: true, operatorHoldActive: false,
+    freshness: { activeSubscriptions: 1, subscribedSymbols: 1, lastTickAt: NOW } };
+  it("separates fresh, silent and nulled subscriptions from socket liveness", () => {
+    expect(marketDataIsDegraded(base)).toBe(false);
+    expect(marketDataIsDegraded({ ...base, freshness: { ...base.freshness, lastTickAt: STALE_TICK_AT } })).toBe(true);
+    expect(marketDataIsDegraded({ ...base, freshness: { ...base.freshness, activeSubscriptions: 0 } })).toBe(true);
+  });
+  it("keeps closed markets and zero demand idle while requested operator holds disarm", () => {
+    expect(marketDataIsDegraded({ ...base, isMarketHours: false, freshness: { ...base.freshness, lastTickAt: STALE_TICK_AT } })).toBe(false);
+    expect(marketDataIsDegraded({ ...base, freshness: { ...base.freshness, activeSubscriptions: 0, subscribedSymbols: 0 } })).toBe(false);
+    expect(marketDataIsDegraded({ ...base, operatorHoldActive: true })).toBe(true);
   });
 });
