@@ -1,3 +1,13 @@
+## PR #938 conflict repair (2026-10-07)
+- [ ] T1 Inspect conflicts and preserve both branches' audit, task, and training-owner documentation. depends_on: []
+- [ ] T2 Merge main, resolve conflicts, and statically verify record and training-contract preservation. depends_on: [T1]
+- [ ] T3 Push the repaired head, wait for all applicable GitHub CI checks, and record green notification evidence. depends_on: [T2]
+Dependency graph: T1 -> T2 -> T3.
+
+### Review
+- PR https://github.com/joemccann/radon/pull/938; original head 6334926dae407855aaa50dbdbb8878ba8518d4dc.
+- No local test suites or builds; GitHub runners own verification.
+
 # Task: PDF extract error detail (2026-10-03)
 
 - [x] T1 depends_on: [] Failing tests: rc + MemoryError, negative rc signal name, secret redaction, truncated stderr, prefix preserved, TimeoutExpired, persisted health/journal bound.
