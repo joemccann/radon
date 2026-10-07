@@ -72,6 +72,8 @@ from urllib import request as urllib_request
 
 import fcntl
 
+from utils.outcome_metrics import record_outcome
+
 from .check import CheckOutcome
 from . import cooldown as cooldown_mod
 
@@ -259,11 +261,14 @@ def _post_pushover(payload: dict) -> Optional[str]:
     try:
         status, body = _http_post(PUSHOVER_API_URL, payload)
     except Exception as exc:  # noqa: BLE001 — channel transport failures must surface
+        record_outcome("notification", "error")
         log.warning("pushover transport failure: %s", exc)
         return f"pushover transport failed: {exc}"
     if status >= 400:
+        record_outcome("notification", "error")
         log.warning("pushover non-2xx (%s): %r", status, body[:200])
         return f"pushover {status}: {body[:200].decode('utf-8', 'replace').strip() or 'no body'}"
+    record_outcome("notification", "success")
     return None
 
 
@@ -341,6 +346,7 @@ def _emit_pushover(outcome: CheckOutcome) -> ChannelResult:
         return CHANNEL_NOT_APPLICABLE
     creds = _pushover_creds()
     if not creds:
+        record_outcome("notification", "skipped")
         return _unconfigured_pushover()
     user, token = creds
     payload = build_pushover_payload(
@@ -523,6 +529,7 @@ def flush_daily_digest(*, now: datetime) -> Optional[str]:
             # No external channel: drop this locked batch so the file cannot grow
             # unbounded. A concurrent enqueue waits and is written afterwards.
             _save_digest_state({"pending": [], "last_sent_at": state.get("last_sent_at")})
+            record_outcome("notification", "skipped")
             log.info("digest skipped (no Pushover creds) — %d entries dropped", len(pending))
             return None
 

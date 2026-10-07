@@ -30,6 +30,7 @@ import urllib.request
 from typing import Any, Sequence
 
 from health_service.turso_http import _cell_value, http_url_from_libsql, read_env
+from utils.outcome_metrics import measure_operation
 
 # Default per-statement bound. Direct-to-cloud Turso reads are 30-60 ms in
 # steady state; 4 s absorbs a slow tail while keeping a wedged request far
@@ -106,6 +107,7 @@ def _rows_as_tuples(result: dict) -> list[tuple]:
     ]
 
 
+@measure_operation("database")
 def hrana_execute(
     sql: str, args: Sequence[Any] = (), timeout: float = HRANA_TIMEOUT_S
 ) -> list[tuple]:
@@ -131,6 +133,7 @@ def hrana_execute(
         raise DbHttpError(f"{type(exc).__name__}: {exc}") from exc
 
 
+@measure_operation("database")
 def hrana_transaction(statements: Sequence[tuple[str, Sequence[Any]]], timeout: float = HRANA_TIMEOUT_S) -> None:
     """Commit a bounded batch atomically, rolling back after any failed step.
 

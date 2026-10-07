@@ -15,9 +15,11 @@ from urllib.parse import urlsplit
 
 try:  # scripts/ on sys.path
     from db.hrana_http import HranaHttpError, _encode_arg, _refuse_pytest_pollution
+    from utils.outcome_metrics import measure_operation
     from health_service.turso_http import http_url_from_libsql, read_env
 except ImportError:  # python -m scripts.ai_cycle.liquidcompute (REL-257)
     from scripts.db.hrana_http import HranaHttpError, _encode_arg, _refuse_pytest_pollution
+    from scripts.utils.outcome_metrics import measure_operation
     from scripts.health_service.turso_http import http_url_from_libsql, read_env
 
 REQUEST_TIMEOUT = 4.0
@@ -202,6 +204,7 @@ class Connection:
         self._baton = None
         self._transaction = False
 
+    @measure_operation("database")
     def execute(self, sql, args=()):
         if self._poisoned:
             raise TransportError("Hrana stream unusable; open a fresh connection")
@@ -246,6 +249,7 @@ class Connection:
             self._discard()
             raise
 
+    @measure_operation("database")
     def execute_transaction(self, statements):
         """Queue all dependent SQL and cleanup before awaiting any receipt.
 
