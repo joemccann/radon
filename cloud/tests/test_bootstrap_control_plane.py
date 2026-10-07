@@ -174,6 +174,10 @@ ARTIFACTS = (
     ),
     Artifact("services/radon-research.service", "/etc/systemd/system/radon-research.service", 0o644),
     Artifact("services/radon-research.service.d/runtime-container.conf", "/etc/systemd/system/radon-research.service.d/runtime-container.conf", 0o644),
+    Artifact("services/radon-subscription-tokens.service", "/etc/systemd/system/radon-subscription-tokens.service", 0o644),
+    Artifact("services/radon-ai-cycle.service", "/etc/systemd/system/radon-ai-cycle.service", 0o644),
+    Artifact("services/radon-ai-cycle-backfill.service", "/etc/systemd/system/radon-ai-cycle-backfill.service", 0o644),
+    Artifact("services/radon-aa-frontier-refresh.service", "/etc/systemd/system/radon-aa-frontier-refresh.service", 0o644),
 )
 
 
