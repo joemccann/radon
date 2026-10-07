@@ -166,8 +166,7 @@ test.describe("Ticker Search E2E", () => {
       };
     });
 
-    await page.goto("/portfolio");
-    await page.waitForLoadState("networkidle");
+    await page.goto("/portfolio", { waitUntil: "domcontentloaded" });
 
     // 1. Search input exists
     const searchInput = page.locator('input[role="combobox"]');
@@ -262,8 +261,7 @@ test.describe("Ticker Search E2E", () => {
       };
     });
 
-    await page.goto("/portfolio");
-    await page.waitForLoadState("networkidle");
+    await page.goto("/portfolio", { waitUntil: "domcontentloaded" });
 
     const searchInput = page.locator('input[role="combobox"]');
     await searchInput.fill("A");
@@ -355,8 +353,7 @@ test.describe("Ticker Search E2E", () => {
       };
     });
 
-    await page.goto("/portfolio");
-    await page.waitForLoadState("networkidle");
+    await page.goto("/portfolio", { waitUntil: "domcontentloaded" });
 
     // Search and select AAPL
     const searchInput = page.locator('input[role="combobox"]');
@@ -372,8 +369,8 @@ test.describe("Ticker Search E2E", () => {
     await page.waitForURL("**/AAPL", { timeout: 5000 });
     expect(page.url()).toContain("/AAPL");
 
-    // Page should show ticker detail content with AAPL
-    const content = page.locator(".ticker-detail-content");
-    await expect(content).toBeVisible({ timeout: 5000 });
+    // The current ticker route is a cockpit workspace; the legacy
+    // `.ticker-detail-content` wrapper no longer exists.
+    await expect(page.getByTestId("cockpit-head")).toContainText("AAPL", { timeout: 5000 });
   });
 });

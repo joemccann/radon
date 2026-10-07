@@ -91,7 +91,15 @@ test.describe("/regime/margin — Margin Debt Acceleration tab", () => {
     await yoy.waitFor({ timeout: 10_000 });
     await expect(yoy).toHaveText("+53.7%");
     // >= +50% growth reads as froth -> var(--warning) (dark theme resolve).
-    await expect(yoy).toHaveCSS("color", "rgb(212, 145, 10)");
+    const warningColor = await page.evaluate(() => {
+      const probe = document.createElement("span");
+      probe.style.color = "var(--warning)";
+      document.body.append(probe);
+      const resolved = getComputedStyle(probe).color;
+      probe.remove();
+      return resolved;
+    });
+    await expect(yoy).toHaveCSS("color", warningColor);
 
     await expect(page.locator('[data-testid="margin-debt-strip-level"]')).toContainText("$1,415.6bn");
     await expect(page.locator('[data-testid="margin-debt-strip-month"]')).toContainText("2026-05");

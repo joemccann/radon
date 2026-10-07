@@ -15,6 +15,14 @@ const PORTFOLIO = {
   avg_kelly_optimal: null,
   exposure: {},
   violations: [],
+  risk_budget: {
+    clusters: [],
+    breaches: [],
+    aggregate_exposure: 0,
+    insufficient_data: [],
+    corr_threshold: 0.7,
+    book_budget: 0.025,
+  },
   positions: [],
 };
 
@@ -143,6 +151,8 @@ function installMockWebSocket(page: import("@playwright/test").Page) {
 }
 
 function stubApis(page: import("@playwright/test").Page) {
+  page.route(/^https?:\/\/(?!localhost:|127\.0\.0\.1:)/, (route) => route.abort());
+  page.route("**/api/**", (route) => route.fulfill({ status: 503, body: "Unmocked API blocked by test fixture" }));
   const portfolioGuard = watchPortfolioRequests(page);
 
   page.route("**/api/orders", (route) =>
@@ -175,15 +185,16 @@ test("modify modal shows the resting sell limit as the effective ask", async ({ 
   await installMockWebSocket(page);
   const portfolioGuard = stubApis(page);
 
-  await page.goto("http://127.0.0.1:3000/orders");
+  await page.goto("/orders");
 
   const row = page.getByRole("row", { name: /AAOI Short \$90 Put 2026-03-27/ });
   await expect(row).toBeVisible();
   await row.getByRole("button", { name: "MODIFY" }).click();
 
   const dialog = page.locator(".modify-order-modal");
-  await expect(dialog).toContainText(/ASK\s*\$5\.05/);
-  await expect(dialog).not.toContainText(/ASK\s*\$5\.10/);
+  const askPreset = dialog.locator(".btn-quick").filter({ hasText: /^ASK 5\.05$/ });
+  await expect(askPreset).toBeVisible();
+  await expect(dialog.locator(".price-bar-item").filter({ hasText: "ASK" }).locator(".price-bar-value")).toHaveText("$5.10");
 
   // No /api/portfolio* request may escape the mock into the real server.
   await portfolioGuard.assertAllRouted();

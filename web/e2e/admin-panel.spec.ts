@@ -7,9 +7,10 @@
  *   3. Clicking the confirm button POSTs to /api/admin/ib/restart.
  *   4. Push lock state from /health disables the Force button.
  *
- * Uses ``RADON_AUTHLESS_TEST=1`` (set by playwright.config.ts) so Clerk's
- * sign-in wall is bypassed for localhost. FastAPI is stubbed at the
- * Next.js route boundary so the test never reaches port 8321.
+ * The server-owned /admin operator gate requires Clerk operator authorization.
+ * RADON_AUTHLESS_TEST and its localhost header do not admit this route.
+ * These API mocks isolate transport after authorized rendering; they cannot
+ * establish operator access. Deterministic authless runs retain this limitation.
  */
 import { expect, test } from "@playwright/test";
 

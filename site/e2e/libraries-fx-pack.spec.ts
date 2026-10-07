@@ -20,11 +20,13 @@ test.describe("libraries.dev pack C — marketing", () => {
     });
     await page.locator("#discipline").scrollIntoViewIfNeeded();
     await expect(page.locator(".gates")).toBeVisible();
+    await expect(page.locator(".gates")).toHaveCSS("opacity", "1");
     await page.locator("#discipline").screenshot({
       path: `${SHOT_DIR}/site_gates_metal_dark.png`,
     });
     await page.locator("#expression").scrollIntoViewIfNeeded();
     await expect(page.locator(".pipeline")).toBeVisible();
+    await expect(page.locator(".pipeline")).toHaveCSS("opacity", "1");
     await page.locator("#expression").screenshot({
       path: `${SHOT_DIR}/site_method_markers_dark.png`,
     });

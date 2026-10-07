@@ -39,12 +39,13 @@ function formatMiB(bytes) {
 
 export async function auditOutputTraces({
   webRoot = process.cwd(),
+  distDir = process.env.NEXT_DIST_DIR || ".next",
   maxFiles = DEFAULT_MAX_FILES,
   maxBytes = DEFAULT_MAX_BYTES,
 } = {}) {
   const resolvedWebRoot = resolve(webRoot);
   const repoRoot = resolve(resolvedWebRoot, "..");
-  const traceRoot = join(resolvedWebRoot, ".next", "server", "app");
+  const traceRoot = join(resolvedWebRoot, distDir, "server", "app");
   const manifests = await findTraceManifests(traceRoot);
   if (manifests.length === 0) {
     throw new Error(`output trace audit found no app manifests under ${traceRoot}`);

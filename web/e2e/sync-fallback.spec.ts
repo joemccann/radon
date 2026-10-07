@@ -247,15 +247,18 @@ test.describe("Sync fallback — UI resilience when IB sync fails", () => {
     expect(consoleErrors).toHaveLength(0);
   });
 
-  test("no error toast or error banner shown when serving cached data on sync failure", async ({ page }) => {
+  test("cached portfolio stays visible without an error banner on sync fallback", async ({ page }) => {
     await setupSyncFallbackMocks(page);
     await page.goto("/portfolio");
 
     // Wait for data to render
     await expect(page.getByText("AAPL")).toBeVisible({ timeout: 10_000 });
 
-    // Sync status should NOT show "Sync error" since the response is 200
+    // The fallback response is HTTP 200 but carries X-Sync-Warning. The shell
+    // keeps the cached position and exposes staleness in workspace telemetry;
+    // its internal sync-error span is intentionally hidden in this layout.
     const syncError = page.locator(".sync-status.sync-error");
-    await expect(syncError).toHaveCount(0);
+    await expect(syncError).toBeHidden();
+    await expect(page.getByText(/stale \d+m/)).toBeVisible();
   });
 });

@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 const PORTFOLIO_MOCK = {
   bankroll: 100_000,
   peak_value: 100_000,
-  last_sync: new Date().toISOString(),
+  last_sync: "2026-03-20T15:00:00.000Z",
   total_deployed_pct: 1.2,
   total_deployed_dollars: 1_200,
   remaining_capacity_pct: 98.8,
@@ -72,7 +72,7 @@ const PORTFOLIO_MOCK = {
 };
 
 const ORDERS_EMPTY = {
-  last_sync: new Date().toISOString(),
+  last_sync: "2026-03-20T15:00:00.000Z",
   open_orders: [],
   executed_orders: [],
   open_count: 0,
@@ -102,7 +102,7 @@ const PRICE_FIXTURES = {
     vega: null,
     impliedVol: null,
     undPrice: null,
-    timestamp: new Date().toISOString(),
+    timestamp: "2026-03-20T15:00:00.000Z",
   },
   IWM_20260326_247_C: {
     symbol: "IWM_20260326_247_C",
@@ -126,7 +126,7 @@ const PRICE_FIXTURES = {
     vega: null,
     impliedVol: null,
     undPrice: 244.65,
-    timestamp: new Date().toISOString(),
+    timestamp: "2026-03-20T15:00:00.000Z",
   },
   IWM_20260326_243_P: {
     symbol: "IWM_20260326_243_P",
@@ -150,7 +150,7 @@ const PRICE_FIXTURES = {
     vega: null,
     impliedVol: null,
     undPrice: 244.65,
-    timestamp: new Date().toISOString(),
+    timestamp: "2026-03-20T15:00:00.000Z",
   },
 };
 
@@ -255,7 +255,7 @@ async function stubApis(page: import("@playwright/test").Page) {
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        as_of: new Date().toISOString(),
+        as_of: "2026-03-20T15:00:00.000Z",
         summary: { realized_pnl: 0 },
         closed_trades: [],
         open_trades: [],
@@ -271,13 +271,16 @@ async function stubApis(page: import("@playwright/test").Page) {
   );
 }
 
-test("IWM ticker detail preserves signed combo leg and order quotes", async ({ page }) => {
+test("IWM ticker detail preserves signed combo leg and order quotes", async ({ page, baseURL }) => {
+  await page.clock.setFixedTime(new Date("2026-03-20T15:00:00.000Z"));
   await installMockWebSocket(page);
   await stubApis(page);
 
+  const requests: unknown[] = [];
   let placedBody: Record<string, unknown> | null = null;
   await page.route("**/api/orders/place", async (route) => {
     placedBody = JSON.parse(route.request().postData() ?? "{}");
+    requests.push({ url: route.request().url(), method: route.request().method(), body: placedBody });
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -292,33 +295,40 @@ test("IWM ticker detail preserves signed combo leg and order quotes", async ({ p
     });
   });
 
-  await page.goto("http://127.0.0.1:3000/IWM?posId=12&tab=position");
+  await page.goto("/IWM?posId=12&tab=position");
 
-  await page.getByRole("button", { name: /Legs \(2\)/i }).click();
+  await expect(page.locator(".position-summary-grid")).toContainText("Mark Price");
+  await expect(page.locator(".position-summary-grid")).toContainText("-$0.40");
 
   const shortRow = page.locator(".pos-legs-table tbody tr").filter({ hasText: "SHORT" }).first();
   await expect(shortRow).toContainText("-$3.57");
-  await expect(shortRow).toContainText("-$3.88");
+  await expect(shortRow).toContainText("-$3.83");
+  await expect(shortRow).not.toContainText("-$3.88");
 
   const longRow = page.locator(".pos-legs-table tbody tr").filter({ hasText: "LONG" }).first();
   await expect(longRow).toContainText("$3.46");
-  await expect(longRow).toContainText("$3.63");
+  await expect(longRow).toContainText("$3.43");
+  await expect(longRow).not.toContainText("$3.63");
 
-  await page.getByRole("button", { name: "Order" }).click();
+  await page.getByTestId("pos-trade-combo").click();
 
   const strip = page.locator(".spread-price-strip");
   await expect(strip).toContainText("-$0.46");
   await expect(strip).toContainText("-$0.40");
   await expect(strip).toContainText("-$0.34");
 
-  await page.getByRole("button", { name: /MID -0.40/i }).click();
+  await page.getByRole("button", { name: /MID \$?-0.40/i }).click();
 
-  const input = page.locator(".modify-price-input").first();
+  const ticket = page.getByTestId("position-trade-ticket");
+  const input = ticket.locator(".modify-price-input");
   await expect(input).toHaveValue("-0.40");
 
-  await page.getByRole("button", { name: "Place Combo Order" }).click();
+  expect(requests).toHaveLength(0);
+  await ticket.getByRole("button", { name: "Review Order" }).click();
+  expect(requests).toHaveLength(0);
   await page.getByRole("button", { name: "Confirm Order" }).click();
 
   expect(placedBody).not.toBeNull();
   expect(placedBody?.limitPrice).toBe(-0.4);
+  expect(requests).toEqual([{ url: new URL("/api/orders/place", baseURL).href, method: "POST", body: { type: "combo", symbol: "IWM", action: "SELL", quantity: 50, limitPrice: -0.4, tif: "DAY", legs: [{ expiry: "20260326", strike: 247, right: "C", action: "BUY", ratio: 1 }, { expiry: "20260326", strike: 243, right: "P", action: "SELL", ratio: 1 }] } }]);
 });

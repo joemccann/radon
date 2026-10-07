@@ -94,13 +94,15 @@ export default function TicketRiskBlock({
 }: TicketRiskBlockProps) {
   const curve = useMemo(() => payoffCurve(legs, netPremium, { spot }), [legs, netPremium, spot]);
 
+  const measuredBreakevens = curve.breakevens.filter(Number.isFinite);
   const breakevenLabel =
-    curve.breakevens.length === 0
+    measuredBreakevens.length === 0
       ? DASH
-      : curve.breakevens.map((b) => b.toFixed(2)).join(" / ");
+      : measuredBreakevens.map((b) => b.toFixed(2)).join(" / ");
 
   const geometry = useMemo(() => {
-    if (curve.points.length === 0) return null;
+    if (!Number.isFinite(netPremium) || curve.points.length === 0
+      || !curve.points.every(point => Number.isFinite(point.underlying) && Number.isFinite(point.pnl))) return null;
     const xs = curve.points.map((p) => p.underlying);
     const loX = Math.min(...xs);
     const hiX = Math.max(...xs);
@@ -111,13 +113,16 @@ export default function TicketRiskBlock({
     const loY = midY - spanY / 2;
     const toX = (u: number) => ((u - loX) / spanX) * CURVE_W;
     const toY = (p: number) => CURVE_H - ((p - loY) / spanY) * CURVE_H;
+    const zeroY = toY(0);
+    const points = curve.points.map(point => [toX(point.underlying), toY(point.pnl)]);
+    if (![spanX, spanY, loY, zeroY, ...curve.breakevens.map(toX), ...points.flat()].every(Number.isFinite)) return null;
     return {
       toX,
       toY,
-      zeroY: toY(0),
-      polyline: curve.points.map((p) => `${toX(p.underlying).toFixed(1)},${toY(p.pnl).toFixed(1)}`).join(" "),
+      zeroY,
+      polyline: points.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" "),
     };
-  }, [curve]);
+  }, [curve, netPremium]);
 
   return (
     <div className="ticket-risk" data-testid="ticket-risk">
@@ -146,7 +151,7 @@ export default function TicketRiskBlock({
             />
           </>
         )}
-        <Cell label="BREAKEVENS" value={breakevenLabel} />
+        <Cell label="ORDER BREAKEVENS" value={breakevenLabel} />
         <Cell label="P(PROFIT)" value={DASH} />
         <Cell
           label="MARGIN REQ"
@@ -194,10 +199,11 @@ export default function TicketRiskBlock({
         </span>
       </div>
 
+      {!geometry && <div className="ticket-risk-payoff-label" data-testid="payoff-unmeasured">Expiry payoff cannot be measured from the current price and legs.</div>}
       {geometry && (
         <div className="ticket-risk-payoff-wrap">
           {/* This curve and the BREAKEVENS cell are the per-combo figures. */}
-          <div className="ticket-risk-payoff-label">AT EXPIRY · PER 1× COMBO</div>
+          <div className="ticket-risk-payoff-label">AT EXPIRY · ORDER LEGS ONLY · PER 1× COMBO</div>
           <svg
             className="ticket-risk-payoff"
             viewBox={`0 0 ${CURVE_W} ${CURVE_H}`}

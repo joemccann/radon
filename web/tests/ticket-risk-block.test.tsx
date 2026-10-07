@@ -52,7 +52,7 @@ describe("TicketRiskBlock", () => {
     expect(cell(container, "MAX LOSS")).toBe("UNBOUNDED");
     expect(cell(container, "MARGIN REQ")).toBe("$4,120");
     // Derived from exact payoff arithmetic, not from the design's screenshot.
-    expect(cell(container, "BREAKEVENS")).toBe("242.02 / 282.98");
+    expect(cell(container, "ORDER BREAKEVENS")).toBe("242.02 / 282.98");
   });
 
   it("shows --- for probability of profit rather than inventing one", () => {
@@ -132,4 +132,20 @@ describe("TicketRiskBlock", () => {
     );
     expect(container.querySelector(".ticket-risk-payoff")).toBeNull();
   });
+});
+
+it.each([NaN, Infinity, 1e308])('withholds the expiry curve when execution premium is unmeasured (%s)', netPremium => {
+  const { container, getByText } = render(<TicketRiskBlock legs={STRANGLE} netPremium={netPremium} spot={261.34} maxGain={null} maxLoss={null} maxLossUnbounded={false} marginRequirement={null} fundsAfter={null} total={null} isCredit={false} />);
+  expect(container.querySelector('svg')).toBeNull();
+  expect(getByText('Expiry payoff cannot be measured from the current price and legs.')).toBeTruthy();
+  expect(container.innerHTML).not.toMatch(/(?:NaN|Infinity)/);
+});
+
+
+it('withholds nonfinite break-even labels when a finite spot overflows the payoff range', () => {
+  const { container, getByText } = render(<TicketRiskBlock legs={[{ action: 'BUY', right: 'C', strike: 100, quantity: 1 }]} netPremium={1} spot={1.6e308} maxGain={null} maxLoss={null} maxLossUnbounded={false} marginRequirement={null} fundsAfter={null} total={null} isCredit={false} />);
+  expect(cell(container, 'ORDER BREAKEVENS')).toBe('---');
+  expect(container.querySelector('svg')).toBeNull();
+  expect(getByText('Expiry payoff cannot be measured from the current price and legs.')).toBeTruthy();
+  expect(container.innerHTML).not.toMatch(/NaN|Infinity/);
 });

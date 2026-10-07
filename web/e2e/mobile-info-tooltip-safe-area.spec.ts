@@ -99,7 +99,7 @@ test.use({ viewport: { width: 320, height: 568 } });
  * the safe-area inset the layout already publishes as `--safe-top`.
  */
 test.describe("InfoTooltip safe area", () => {
-  test("keeps the popup clear of the notch inset on a phone", async ({ page }) => {
+  test("keeps the popup clear of the notch inset on a phone", async ({ page }, testInfo) => {
     await stubApis(page);
     await page.goto("/scanner?mode=vol-skew-mr");
     await expect(page.getByTestId("vol-skew-mr-section")).toBeVisible();
@@ -122,5 +122,8 @@ test.describe("InfoTooltip safe area", () => {
     expect(box.left).toBeGreaterThanOrEqual(8);
     expect(box.right).toBeLessThanOrEqual(320 - 8);
     expect(box.bottom).toBeLessThanOrEqual(568 - 8);
+    await testInfo.attach("tooltip-bounds", { body: JSON.stringify(box), contentType: "application/json" });
+    await page.screenshot({ path: testInfo.outputPath("mobile-tooltip-safe-area-viewport.png") });
+    await popup.screenshot({ path: testInfo.outputPath("mobile-tooltip-safe-area.png") });
   });
 });

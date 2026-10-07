@@ -174,7 +174,7 @@ export default function FractionalKellyPositionSizingPage() {
                   confidence="Arithmetic"
                   caption="Worked example, derived line by line. The structure fixes the odds, the signal estimates the probability, and the cap has the final word."
                 >
-                  <div className="overflow-x-auto">
+                  <div className="overflow-x-auto" role="region" aria-label="Kelly worked example" tabIndex={0}>
                     <table className="w-full border-collapse font-mono text-[13px]">
                       <tbody>
                         {workedExampleRows.map((row) => (

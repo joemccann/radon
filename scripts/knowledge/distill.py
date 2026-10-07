@@ -172,6 +172,7 @@ def run_distill_batch(docs, timeout, *, clock=None):
     started = clock()
     results = [None] * len(docs)
     process = None
+    timeout_group_reaped = False
     output = ""
     try:
         process = subprocess.Popen(
@@ -186,6 +187,7 @@ def run_distill_batch(docs, timeout, *, clock=None):
             output = exc.output or ""
             _kill_worker_group(process)
             output, _ = process.communicate(timeout=5)
+            timeout_group_reaped = process.poll() is not None
     except subprocess.TimeoutExpired as exc:
         output = exc.output or output
         print("[knowledge-distill] worker cleanup deadline reached", file=sys.stderr)
@@ -194,7 +196,10 @@ def run_distill_batch(docs, timeout, *, clock=None):
     finally:
         if process is not None:
             # Also kill CLI descendants after normal exit or parent cancellation.
-            _kill_worker_group(process)
+            # A timeout already killed the entire group. Once the worker is
+            # reaped, its group ID can be recycled; never signal that ID again.
+            if not timeout_group_reaped:
+                _kill_worker_group(process)
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:

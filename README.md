@@ -175,6 +175,8 @@ cd web && bunx playwright test                   # E2E
 
 Mocked API calls cover most of the surface. Order-route integration uses an isolated test-mode FastAPI harness (`web/tests/fastapiHarness.ts`) that never reuses the broker-backed `localhost:8321` server.
 
+The isolated [TesterArmy flow suites](docs/testing-tester-army.md) run the workstation and public-site journeys with version-locked browser engines and retain reports and screenshots in CI.
+
 ## Maintainers and help
 
 Maintained by Joe McCann. Single operator. Clones are unsupported. See [`SUPPORT.md`](SUPPORT.md).

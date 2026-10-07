@@ -118,3 +118,27 @@ describe("netPremiumForPayoff", () => {
     expect(curve.breakevens[0]).toBeCloseTo(972.98, 1);
   });
 });
+
+
+describe("breakevens next to strike kinks", () => {
+  it.each([
+    { action: "BUY", right: "C", premium: 0.01, expected: 100.01 },
+    { action: "SELL", right: "C", premium: -0.01, expected: 100.01 },
+    { action: "BUY", right: "P", premium: 0.01, expected: 99.99 },
+    { action: "SELL", right: "P", premium: -0.01, expected: 99.99 },
+  ] as const)("$action $right 100 at premium $premium has exact break-even $expected", ({ action, right, premium, expected }) => {
+    const legs: PayoffLeg[] = [{ action, right, strike: 100, quantity: 1 }];
+    const curve = payoffCurve(legs, premium, { spot: 100 });
+    expect(curve.breakevens).toHaveLength(1);
+    expect(curve.breakevens[0]).toBeCloseTo(expected, 10);
+    expect(payoffAtExpiry(legs, premium, curve.breakevens[0])).toBeCloseTo(0, 10);
+  });
+});
+
+
+it('retains a short-call break-even exactly at the sampled upper endpoint', () => {
+  const legs: PayoffLeg[] = [{ action: 'SELL', right: 'C', strike: 100, quantity: 1 }];
+  const curve = payoffCurve(legs, -15, { spot: 100 });
+  expect(curve.breakevens).toEqual([115]);
+  expect(payoffAtExpiry(legs, -15, 115)).toBe(0);
+});

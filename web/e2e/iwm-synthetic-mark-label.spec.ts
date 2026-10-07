@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 const PORTFOLIO_MOCK = {
   bankroll: 100_000,
   peak_value: 100_000,
-  last_sync: new Date().toISOString(),
+  last_sync: "2026-03-20T15:00:00.000Z",
   total_deployed_pct: 1.2,
   total_deployed_dollars: 1_200,
   remaining_capacity_pct: 98.8,
@@ -71,7 +71,7 @@ const PORTFOLIO_MOCK = {
 };
 
 const ORDERS_EMPTY = {
-  last_sync: new Date().toISOString(),
+  last_sync: "2026-03-20T15:00:00.000Z",
   open_orders: [],
   executed_orders: [],
   open_count: 0,
@@ -101,7 +101,7 @@ const PRICE_FIXTURES = {
     vega: null,
     impliedVol: null,
     undPrice: null,
-    timestamp: new Date().toISOString(),
+    timestamp: "2026-03-20T15:00:00.000Z",
   },
   IWM_20260326_247_C: {
     symbol: "IWM_20260326_247_C",
@@ -125,7 +125,7 @@ const PRICE_FIXTURES = {
     vega: null,
     impliedVol: null,
     undPrice: 245.37,
-    timestamp: new Date().toISOString(),
+    timestamp: "2026-03-20T15:00:00.000Z",
   },
   IWM_20260326_243_P: {
     symbol: "IWM_20260326_243_P",
@@ -149,7 +149,7 @@ const PRICE_FIXTURES = {
     vega: null,
     impliedVol: null,
     undPrice: 245.37,
-    timestamp: new Date().toISOString(),
+    timestamp: "2026-03-20T15:00:00.000Z",
   },
 };
 
@@ -254,7 +254,7 @@ async function stubApis(page: import("@playwright/test").Page) {
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        as_of: new Date().toISOString(),
+        as_of: "2026-03-20T15:00:00.000Z",
         summary: { realized_pnl: 0 },
         closed_trades: [],
         open_trades: [],
@@ -271,12 +271,13 @@ async function stubApis(page: import("@playwright/test").Page) {
 }
 
 test("synthetic combo telemetry shows MARK instead of stale LAST for IWM", async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-03-20T15:00:00.000Z"));
   await installMockWebSocket(page);
   await stubApis(page);
 
-  await page.goto("http://127.0.0.1:3000/IWM?posId=13&tab=position");
+  await page.goto("/IWM?posId=13&tab=position");
 
-  const hero = page.locator(".price-bar").first();
+  const hero = page.getByTestId("chain-held-quote");
   await expect(hero).toContainText("MARK");
   await expect(hero).toContainText("$0.26");
   await expect(hero).not.toContainText("-$0.25");

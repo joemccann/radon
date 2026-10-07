@@ -22,7 +22,8 @@
     "test:ib": "python3.13 ../scripts/test_ib_realtime.py",
     "ib:start": "bash ../scripts/docker_ib_gateway.sh start",
     "ib:stop": "bash ../scripts/docker_ib_gateway.sh stop",
-    "ib:status": "bash ../scripts/docker_ib_gateway.sh status"
+    "ib:status": "bash ../scripts/docker_ib_gateway.sh status",
+    "test:tester-army": "npm --prefix tester-army test"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.5.9",

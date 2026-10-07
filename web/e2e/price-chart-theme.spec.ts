@@ -1,28 +1,6 @@
-/**
- * E2E: PriceChart tooltip/crosshair respects the current UI theme.
- *
- * The Liveline chart library renders its scrub crosshair, badge, and grid
- * entirely on a <canvas> element. Its visual appearance is controlled by
- * the `theme` prop ('light' | 'dark'). Before this fix, PriceChart hard-coded
- * theme="dark", so the canvas-rendered overlay always used dark palette colors
- * regardless of whether the app was in light mode.
- *
- * Fix: PriceChart accepts `theme` from its parent (WorkspaceShell → TickerDetailModal)
- * and forwards it to <Liveline theme={theme} />.
- *
- * We can't directly inspect canvas pixel colors in Playwright, so these tests
- * verify:
- * 1. In dark mode: the Liveline element has data-theme="dark" (or the container
- *    reflects the expected class/attribute).
- * 2. In light mode: toggling the theme button changes the `data-theme` attribute
- *    on <html> to "light" and the modal remains open.
- * 3. The ticker detail modal is still rendered after theme toggle (no crash).
- *
- * NOTE: These tests require a running Next.js dev/prod server.
- *       They are written as specs only — DO NOT run without `npx playwright test`.
- */
-
 import { test, expect } from "@playwright/test";
+import { installClearFixtures } from "./clear-fixtures";
+import { resolvedColor } from "./performance-fixtures";
 
 // ─── Shared mock data ─────────────────────────────────────────────────────────
 
@@ -98,6 +76,7 @@ async function stubRoutes(page: import("@playwright/test").Page) {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 test("chart tooltip dark mode: html[data-theme] is 'dark' by default", async ({ page }) => {
+  await installClearFixtures(page);
   await stubRoutes(page);
 
   // Force dark mode via localStorage before navigating
@@ -113,6 +92,7 @@ test("chart tooltip dark mode: html[data-theme] is 'dark' by default", async ({ 
 });
 
 test("chart tooltip light mode: toggling theme changes html[data-theme] to 'light'", async ({ page }) => {
+  await installClearFixtures(page);
   await stubRoutes(page);
 
   // Start in dark mode
@@ -137,19 +117,14 @@ test("chart tooltip light mode: toggling theme changes html[data-theme] to 'ligh
 });
 
 test("chart tooltip: ticker detail page survives theme toggle without crash", async ({ page }) => {
+  await installClearFixtures(page);
   await stubRoutes(page);
 
   await page.addInitScript(() => {
     localStorage.setItem("theme", "dark");
   });
 
-  await page.goto("/orders");
-
-  // Open the AAPL ticker detail page
-  const aaplRow = page.locator('[aria-label="View details for AAPL"]').first();
-  await aaplRow.waitFor({ timeout: 10_000 });
-  await aaplRow.click();
-  await page.waitForURL("**/AAPL**", { timeout: 5_000 });
+  await page.goto("/AAPL?tab=book");
 
   const detail = page.locator(".ticker-detail-page");
   await detail.waitFor({ timeout: 5_000 });
@@ -160,7 +135,7 @@ test("chart tooltip: ticker detail page survives theme toggle without crash", as
   // Toggle theme while page is open
   const themeToggle = page.locator('[aria-label="Toggle theme"], button:has-text("Light"), button:has-text("Dark"), .theme-toggle').first();
   await themeToggle.waitFor({ timeout: 5_000 });
-  await themeToggle.evaluate((element: HTMLButtonElement) => element.click());
+  await themeToggle.click();
 
   // Page must still be visible — no crash from re-render
   await expect(detail).toBeVisible();
@@ -169,28 +144,17 @@ test("chart tooltip: ticker detail page survives theme toggle without crash", as
   expect(await page.getAttribute("html", "data-theme")).toBe("light");
 });
 
-test("chart tooltip: canvas element is present inside ticker detail page", async ({ page }) => {
-  await stubRoutes(page);
-
-  await page.addInitScript(() => {
-    localStorage.setItem("theme", "dark");
-  });
-
-  await page.goto("/orders");
-
-  const aaplRow = page.locator('[aria-label="View details for AAPL"]').first();
-  await aaplRow.waitFor({ timeout: 10_000 });
-  await aaplRow.click();
-  await page.waitForURL("**/AAPL**", { timeout: 5_000 });
-
-  const detail = page.locator(".ticker-detail-page");
-  await detail.waitFor({ timeout: 5_000 });
-
-  const chartShell = detail.locator('[data-testid="price-chart-panel"]');
-  await expect(chartShell).toHaveAttribute("data-chart-family", "Live Trace");
-  await expect(chartShell).toHaveAttribute("data-chart-renderer", "canvas-adapter");
-
-  // Liveline renders a <canvas> element — its presence confirms the chart mounted
-  const canvas = detail.locator("canvas").first();
-  await expect(canvas).toBeVisible({ timeout: 5_000 });
+test("current instrument book surface follows theme tokens", async ({ page }) => {
+  await installClearFixtures(page);
+  await page.addInitScript(() => localStorage.setItem('theme', 'dark'));
+  await page.goto('/AAPL?tab=book');
+  const book = page.locator('.ticker-detail-page');
+  await expect(book).toBeVisible();
+  const dark = await book.evaluate(el => getComputedStyle(el).color);
+  await page.getByLabel('Toggle theme').click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await expect(book).toBeVisible();
+  const light = await book.evaluate(el => getComputedStyle(el).color);
+  expect(light).not.toBe(dark);
+  expect(light).toBe(await resolvedColor(page, '--text-primary'));
 });

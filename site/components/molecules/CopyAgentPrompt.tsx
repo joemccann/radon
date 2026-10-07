@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   formatAgentPrompt,
   writeClipboard,
@@ -22,6 +22,18 @@ export function CopyAgentPrompt({ prompt, showView = true }: Props) {
   const titleId = useId();
   const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
   const [open, setOpen] = useState(false);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const dialog = dialogRef.current;
+    dialog?.showModal();
+    return () => {
+      dialog?.close();
+      triggerRef.current?.focus();
+    };
+  }, [open]);
 
   async function copy() {
     setStatus(await writeClipboard(markdown));
@@ -36,6 +48,7 @@ export function CopyAgentPrompt({ prompt, showView = true }: Props) {
         <button
           type="button"
           className={`font-mono text-[11px] tracking-[0.04em] text-secondary underline decoration-grid underline-offset-4 transition-colors hover:text-signal-deep ${focusRing}`}
+          ref={triggerRef}
           onClick={() => setOpen(true)}
         >
           View prompt
@@ -49,18 +62,24 @@ export function CopyAgentPrompt({ prompt, showView = true }: Props) {
         {status === "copied" ? "Copied" : status === "failed" ? "Copy failed" : ""}
       </span>
       {open ? (
-        <div
-          className="fixed inset-0 z-[70] flex items-center justify-center bg-canvas/80 p-6"
-          role="presentation"
-          onClick={() => setOpen(false)}
+        <dialog
+          ref={dialogRef}
+          aria-labelledby={titleId}
+          onClose={() => setOpen(false)}
+          onKeyDown={(event) => {
+            if (event.key === "Tab") {
+              event.preventDefault();
+              event.currentTarget.querySelector<HTMLButtonElement>("button")?.focus();
+            }
+          }}
+          onClick={(event) => {
+            if (event.target !== event.currentTarget) return;
+            const bounds = event.currentTarget.getBoundingClientRect();
+            if (event.clientX < bounds.left || event.clientX > bounds.right ||
+                event.clientY < bounds.top || event.clientY > bounds.bottom) setOpen(false);
+          }}
+          className="m-auto max-h-[80vh] w-[calc(100%_-_3rem)] max-w-[760px] overflow-auto rounded-[4px] border border-grid bg-figure-bg p-6 backdrop:bg-canvas/80"
         >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={titleId}
-            className="max-h-[80vh] w-full max-w-[760px] overflow-auto rounded-[4px] border border-grid bg-figure-bg p-6"
-            onClick={(event) => event.stopPropagation()}
-          >
             <div className="mb-4 flex items-start justify-between gap-4">
               <h2
                 id={titleId}
@@ -79,8 +98,7 @@ export function CopyAgentPrompt({ prompt, showView = true }: Props) {
             <pre className="whitespace-pre-wrap font-mono text-[12px] leading-[1.55] text-secondary">
               {markdown}
             </pre>
-          </div>
-        </div>
+        </dialog>
       ) : null}
     </div>
   );

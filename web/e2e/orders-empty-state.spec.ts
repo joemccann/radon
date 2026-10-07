@@ -34,7 +34,10 @@ const ORDERS_EMPTY = {
 };
 
 const BLOTTER_EMPTY = {
-  as_of: new Date().toISOString(),
+  // No `as_of` means the 30-day window has not been pulled yet. This empty
+  // state should invite the first refresh instead of claiming a searched
+  // window came back empty.
+  as_of: null,
   summary: { realized_pnl: 0 },
   closed_trades: [],
   open_trades: [],
@@ -105,7 +108,9 @@ test.describe("/orders empty-state surfaces", () => {
     await setupEmptyMocks(page);
     await page.goto("/orders");
 
-    await page.locator('[data-testid="historical-trades-toggle"]').click();
+    // With no working orders, the workspace starts the historical section open.
+    // Clicking here would collapse it and hide the empty state under test.
+    await expect(page.locator('[data-testid="historical-trades-toggle"]')).toHaveAttribute("aria-expanded", "true");
 
     const empty = page.locator('[data-testid="historical-trades-empty"]');
     await empty.waitFor({ timeout: 10_000 });

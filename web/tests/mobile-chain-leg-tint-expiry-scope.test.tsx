@@ -7,7 +7,7 @@
 
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import MobileChainLadder from "../components/mobile/MobileChainLadder";
 import { optionKey } from "../lib/pricesProtocol";
@@ -63,9 +63,37 @@ function renderLadder(legs: OrderLeg[], prices: Record<string, never> = {}, side
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("Mobile chain ladder leg tint", () => {
+  it("updates reserved ladder space when the pending strip resizes and disconnects its observer", () => {
+    let height = 61; let resized: () => void = () => {}; const disconnect = vi.fn(); const observe = vi.fn();
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { resized = callback; }
+      observe = observe; disconnect = disconnect;
+    });
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      return { x: 0, y: 0, top: 0, left: 0, right: 393, bottom: height, width: 393, height: (this as HTMLElement).dataset.testid === 'mobile-chain-pending-strip' ? height : 0, toJSON: () => ({}) } as DOMRect;
+    });
+    const { unmount } = renderLadder([leg(NEAR)]);
+    expect(observe).toHaveBeenCalledWith(screen.getByTestId('mobile-chain-pending-strip'));
+    height = 86; act(() => resized());
+    expect(screen.getByTestId('mobile-chain-ladder').style.paddingBottom).toBe('86px');
+    unmount(); expect(disconnect).toHaveBeenCalledOnce();
+  });
+  it("reserves the measured pending strip and removes it while a detail sheet is open", () => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      return { x: 0, y: 0, top: 0, left: 0, right: 393, bottom: 61, width: 393, height: (this as HTMLElement).dataset.testid === "mobile-chain-pending-strip" ? 61 : 0, toJSON: () => ({}) } as DOMRect;
+    });
+    renderLadder([leg(NEAR)]);
+    expect(screen.getByTestId("mobile-chain-ladder").style.paddingBottom).toBe("61px");
+    expect(screen.getByTestId("mobile-chain-pending-strip")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("mobile-chain-call-970"));
+    expect(screen.getByTestId("mobile-chain-detail-sheet")).toBeTruthy();
+    expect(screen.queryByTestId("mobile-chain-pending-strip")).toBeNull();
+  });
+
   it("tints a cell whose leg is on the visible expiry", () => {
     renderLadder([leg(NEAR)]);
     const cell = screen.getByTestId("mobile-chain-call-970");

@@ -40,7 +40,7 @@ export function PlateFrame({
         <span className="max-w-[64ch] font-serif text-[14.5px] italic leading-[1.45] text-secondary">
           {caption}
         </span>
-        <span className="flex flex-shrink-0 gap-[14px] whitespace-nowrap font-mono text-[10.5px] uppercase tracking-[0.05em] text-muted">
+        <span className="flex flex-wrap gap-[14px] font-mono text-[10.5px] uppercase tracking-[0.05em] text-muted">
           <span>
             Source <b className="font-medium text-signal-deep">{source}</b>
           </span>

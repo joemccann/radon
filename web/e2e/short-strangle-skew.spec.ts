@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const EXPIRY = "20260717";
+const EXPIRY = "20270115";
 
 const PORTFOLIO = {
   bankroll: 100_000,
@@ -137,6 +137,7 @@ async function installMockWebSocket(page: Page) {
 }
 
 test("short strangle proposals show skew and signed delta telemetry", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-10-03T12:00:00.000Z") });
   await stubApis(page);
   await installMockWebSocket(page);
 

@@ -13,6 +13,14 @@ const PORTFOLIO = {
   avg_kelly_optimal: null,
   exposure: {},
   violations: [],
+  risk_budget: {
+    clusters: [],
+    breaches: [],
+    aggregate_exposure: 0,
+    insufficient_data: [],
+    corr_threshold: 0.7,
+    book_budget: 0.025,
+  },
   positions: [
     {
       id: 1,
@@ -173,7 +181,7 @@ const MSFT_PRICE_FIXTURES = {
     vega: null,
     impliedVol: null,
     undPrice: null,
-    timestamp: new Date().toISOString(),
+    timestamp: "2026-06-25T15:00:00.000Z",
   },
   MSFT_20260717_350_P: {
     symbol: "MSFT_20260717_350_P",
@@ -197,7 +205,7 @@ const MSFT_PRICE_FIXTURES = {
     vega: null,
     impliedVol: 0.28,
     undPrice: 355.54,
-    timestamp: new Date().toISOString(),
+    timestamp: "2026-06-25T15:00:00.000Z",
   },
   MSFT_20260717_375_C: {
     symbol: "MSFT_20260717_375_C",
@@ -221,7 +229,31 @@ const MSFT_PRICE_FIXTURES = {
     vega: null,
     impliedVol: 0.28,
     undPrice: 355.54,
-    timestamp: new Date().toISOString(),
+    timestamp: "2026-06-25T15:00:00.000Z",
+  },
+};
+
+const AAOI_PRICE_FIXTURES = {
+  AAOI: {
+    symbol: "AAOI", last: 95.19, lastIsCalculated: false, bid: 95.18, ask: 95.20,
+    bidSize: 10, askSize: 10, volume: 1000, high: null, low: null, open: null,
+    close: 95.0, week52High: null, week52Low: null, avgVolume: null, delta: null,
+    gamma: null, theta: null, vega: null, impliedVol: null, undPrice: null,
+    timestamp: "2026-03-18T15:00:00.000Z",
+  },
+  AAOI_20260327_90_P: {
+    symbol: "AAOI_20260327_90_P", last: 5.0, lastIsCalculated: false, bid: 4.9, ask: 5.1,
+    bidSize: 10, askSize: 10, volume: 100, high: null, low: null, open: null,
+    close: 5.0, week52High: null, week52Low: null, avgVolume: null, delta: -0.4,
+    gamma: 0.02, theta: -0.1, vega: 0.08, impliedVol: 0.5, undPrice: 95.19,
+    timestamp: "2026-03-18T15:00:00.000Z",
+  },
+  AAOI_20260327_98_C: {
+    symbol: "AAOI_20260327_98_C", last: 3.0, lastIsCalculated: false, bid: 2.9, ask: 3.1,
+    bidSize: 10, askSize: 10, volume: 100, high: null, low: null, open: null,
+    close: 3.0, week52High: null, week52Low: null, avgVolume: null, delta: 0.4,
+    gamma: 0.02, theta: -0.1, vega: 0.08, impliedVol: 0.5, undPrice: 95.19,
+    timestamp: "2026-03-18T15:00:00.000Z",
   },
 };
 
@@ -299,6 +331,8 @@ async function installMockWebSocket(
 
 async function stubApis(page: import("@playwright/test").Page) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
+  await page.route(/^https?:\/\/(?!localhost:|127\.0\.0\.1:)/, (route) => route.abort());
+  await page.route("**/api/**", (route) => route.fulfill({ status: 503, body: "Unmocked API blocked by test fixture" }));
 
   await page.route("**/api/portfolio**", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO) }),
@@ -329,6 +363,8 @@ async function stubApis(page: import("@playwright/test").Page) {
 
 test.describe("Combo order modify flow", () => {
   test("submits combo replacement payload with edited quantity and legs", async ({ page }) => {
+    await page.clock.install({ time: new Date("2026-03-18T15:00:00.000Z") });
+    await installMockWebSocket(page, AAOI_PRICE_FIXTURES);
     await stubApis(page);
 
     let modifyBody: Record<string, unknown> | null = null;
@@ -397,8 +433,10 @@ test.describe("Combo order modify flow", () => {
     await expect(modal.locator("#modify-leg-1-ratio")).toBeVisible();
 
     await modal.locator("#modify-quantity-input").fill("75");
-    await modal.locator("#modify-price-input").fill("0.75");
     await modal.locator("#modify-leg-1-strike").fill("100");
+    // Editing combo structure clears the old net price; enter the replacement
+    // limit after the final structure change, as an operator must.
+    await modal.locator("#modify-price-input").fill("0.75");
     await modal.getByRole("button", { name: /modify order/i }).click();
 
     await expect.poll(() => modifyBody).not.toBeNull();
@@ -461,8 +499,11 @@ test.describe("Combo order modify flow", () => {
   });
 
   test("shows signed negative risk reversal prices and submits a negative replacement limit", async ({ page }) => {
+    await page.clock.install({ time: new Date("2026-06-25T15:00:00.000Z") });
     await installMockWebSocket(page, MSFT_PRICE_FIXTURES);
     await page.unrouteAll({ behavior: "ignoreErrors" });
+    await page.route(/^https?:\/\/(?!localhost:|127\.0\.0\.1:)/, (route) => route.abort());
+    await page.route("**/api/**", (route) => route.fulfill({ status: 503, body: "Unmocked API blocked by test fixture" }));
 
     await page.route("**/api/portfolio**", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MSFT_PORTFOLIO) }),

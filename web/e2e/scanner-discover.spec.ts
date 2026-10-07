@@ -93,7 +93,7 @@ test.describe("Scanner discover mode", () => {
     await expect(page).toHaveURL(/\/scanner\?mode=discover$/);
     await expect(page.getByRole("tab", { name: "Discover" })).toHaveAttribute("aria-selected", "true");
     await expect(page.getByText("Discovery Candidates")).toBeVisible();
-    await expect(page.getByRole("button", { name: "View details for MSFT" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "MSFT" })).toHaveAttribute("href", "/MSFT?deck=c&src=discover");
   });
 
   test("discover mode renders mobile cards without horizontal overflow", async ({ page }) => {

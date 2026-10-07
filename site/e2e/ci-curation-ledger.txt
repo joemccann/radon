@@ -25,21 +25,22 @@ theme-toggle.spec.ts
 
 # ── REVIEWED annotations (mirrors web/e2e T-438 format) ──────────────────────
 #
-# REVIEWED 2026-09-05 agent-prompt-recipes.spec.ts — held out: no CI job runs
+# REVIEWED 2026-10-06 agent-prompt-recipes.spec.ts — held out: no CI job runs
 #   site Playwright. Landed via PR #299 (cursor/agent-prompt-recipes-ci-ea14)
 #   with local Chromium runs against a site `next start`; clipboard permissions
 #   need a real browser context. Promote when a site Playwright CI job exists.
-# REVIEWED 2026-09-05 libraries-fx-pack.spec.ts — held out: no CI job runs site
+# REVIEWED 2026-10-06 libraries-fx-pack.spec.ts — held out: no CI job runs site
 #   Playwright, and the spec writes theme screenshots to FX_SHOT_DIR (default
-#   /opt/cursor/artifacts, absent on the CI runner). Verified locally against a
-#   site `next start`. Promote when a site Playwright CI job exists and the
-#   shot dir is runner-safe.
+#   /opt/cursor/artifacts, absent on the CI runner). Production Chromium run
+#   verifies dark CTA/gate/flow surfaces and waits for reveal opacity before
+#   capture. Promote when a site Playwright CI job exists and the shot dir is
+#   runner-safe.
 # REVIEWED 2026-09-05 branding.spec.ts — held out: no CI job runs site
 #   Playwright. Favicon/head assertions; stable since 2026-03-11. Promote with
 #   the rest when a site Playwright CI job exists.
-# REVIEWED 2026-09-05 surface-preview.spec.ts — held out: no CI job runs site
-#   Playwright. Layout-overflow guard on the product-plate metrics grid; stable
-#   since 2026-03-11. Promote when a site Playwright CI job exists.
+# REVIEWED 2026-10-06 surface-preview.spec.ts — held out: no CI job runs site
+#   Playwright. Current four regime illustrations stay inside their cards.
+#   Replaces the removed legacy performance-tile selector; verified locally.
 # REVIEWED 2026-09-05 theme-toggle.spec.ts — held out: no CI job runs site
 #   Playwright. Theme persistence via localStorage; stable since 2026-03-11.
 #   Promote when a site Playwright CI job exists.
@@ -47,3 +48,11 @@ theme-toggle.spec.ts
 #   Playwright. 390px header guard (demo CTA label on one line, every control
 #   inside the viewport). Red on radon.run, green on local site `next dev`.
 #   Promote when a site Playwright CI job exists.
+agent-prompt-keyboard.spec.ts
+# REVIEWED 2026-10-06 agent-prompt-keyboard.spec.ts — held out: no CI job runs
+#   site Playwright. Covers dialog initial focus, Tab/Shift+Tab containment,
+#   Escape with trigger focus restoration, 390px horizontal overflow, keyboard
+#   table scrolling, and mobile dialog/backdrop behavior. Promote when a site
+#   Playwright CI job exists.
+#   Additive TesterArmy CI also covers dialog focus, Tab/Shift+Tab, Escape,
+#   and trigger focus restoration.

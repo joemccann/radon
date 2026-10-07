@@ -131,7 +131,7 @@ describe("mobile ticket transmit gate", () => {
     await waitFor(() => expect(document.querySelector(".ticket-risk")).toBeTruthy());
     const labels = [...document.querySelectorAll(".ticket-risk-cell-label")].map((n) => n.textContent);
     expect(labels).toEqual(
-      expect.arrayContaining(["MAX GAIN", "MAX LOSS", "BREAKEVENS", "MARGIN REQ"]),
+      expect.arrayContaining(["MAX GAIN", "MAX LOSS", "ORDER BREAKEVENS", "MARGIN REQ"]),
     );
   });
 

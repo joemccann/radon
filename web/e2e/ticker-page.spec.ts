@@ -138,20 +138,12 @@ test.describe("Ticker Page E2E", () => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
     stubApis(page);
 
-    await page.goto("/AAPL");
-    await page.waitForLoadState("networkidle");
+    await page.goto("/AAPL", { waitUntil: "domcontentloaded" });
 
-    // Should show ticker detail content
-    const content = page.locator(".ticker-detail-page");
-    await expect(content).toBeVisible({ timeout: 5000 });
-
-    // Should show tab bar
-    const tabs = page.locator(".ticker-tabs");
-    await expect(tabs).toBeVisible();
-
-    // Breadcrumb should show AAPL
-    const breadcrumb = page.locator(".breadcrumb");
-    await expect(breadcrumb).toContainText("AAPL");
+    const instrument = page.getByRole("complementary", { name: "AAPL instrument" });
+    await expect(instrument).toBeVisible();
+    await expect(instrument.getByRole("heading", { name: "AAPL" })).toBeVisible();
+    await expect(instrument.getByRole("button", { name: /Options chain/ })).toBeVisible();
   });
 
   test("/aapl redirects to /AAPL (case normalization)", async ({ page }) => {
@@ -168,32 +160,30 @@ test.describe("Ticker Page E2E", () => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
     stubApis(page);
 
-    await page.goto("/AAPL");
-    await page.waitForLoadState("networkidle");
+    await page.goto("/AAPL", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("complementary", { name: "AAPL instrument" })).toBeVisible();
 
-    // Click on Chain tab
-    const chainTab = page.locator(".ticker-tab", { hasText: "Chain" });
-    await expect(chainTab).toBeVisible();
-    await chainTab.click();
+    const chainView = page.getByRole("button", { name: /Options chain/ });
+    await chainView.click();
 
-    // URL should update with ?tab=chain
-    await page.waitForURL("**/AAPL?tab=chain", { timeout: 5000 });
-    expect(page.url()).toContain("tab=chain");
+    // The current instrument workspace uses a deck key; legacy tab URLs remain
+    // accepted for existing bookmarks.
+    await page.waitForURL("**/AAPL?deck=c", { timeout: 5000 });
+    expect(page.url()).toContain("deck=c");
 
-    // Chain tab should be active
-    await expect(chainTab).toHaveClass(/active/);
+    await expect(chainView).toHaveAttribute("aria-current", "page");
   });
 
   test("direct nav to /AAPL?tab=ratings opens on Ratings tab", async ({ page }) => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
     stubApis(page);
 
-    await page.goto("/AAPL?tab=ratings");
-    await page.waitForLoadState("networkidle");
+    await page.goto("/AAPL?tab=ratings", { waitUntil: "domcontentloaded" });
 
-    // Ratings tab should be active
-    const ratingsTab = page.locator(".ticker-tab", { hasText: "Ratings" });
-    await expect(ratingsTab).toHaveClass(/active/);
+    const instrument = page.getByRole("complementary", { name: "AAPL instrument" });
+    await expect(instrument).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Ratings" })).toBeVisible();
+    await expect(instrument.locator("summary")).toHaveAttribute("aria-label", "Ratings, more instrument views");
   });
 
   test("back button returns to previous page", async ({ page }) => {
@@ -201,17 +191,14 @@ test.describe("Ticker Page E2E", () => {
     stubApis(page);
 
     // Start on portfolio page
-    await page.goto("/portfolio");
-    await page.waitForLoadState("networkidle");
+    await page.goto("/portfolio", { waitUntil: "domcontentloaded" });
 
     // Navigate to ticker page
-    await page.goto("/AAPL");
-    await page.waitForLoadState("networkidle");
+    await page.goto("/AAPL", { waitUntil: "domcontentloaded" });
 
-    // Click back button
-    const backBtn = page.locator(".ticker-back-nav");
-    await expect(backBtn).toBeVisible();
-    await backBtn.click();
+    const positionsLink = page.getByRole("complementary", { name: "AAPL instrument" }).getByRole("link", { name: "Positions" });
+    await expect(positionsLink).toBeVisible();
+    await positionsLink.click();
 
     // Should go back to portfolio
     await page.waitForURL("**/portfolio", { timeout: 5000 });

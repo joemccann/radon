@@ -110,12 +110,20 @@ test.describe("Mobile orders list", () => {
 
     const modify = page.getByTestId("mobile-order-action-modify");
     const cancel = page.getByTestId("mobile-order-action-cancel");
+    // BottomSheet enters with a transform animation. Wait for its final frame
+    // before measuring the steady-state touch target.
+    await page.waitForFunction((selector) => {
+      const element = document.querySelector(selector);
+      return element && element.getAnimations().every((animation) => animation.playState !== "running");
+    }, '[data-testid="mobile-order-action-sheet"]');
     const m = await modify.boundingBox();
     const c = await cancel.boundingBox();
     expect(m).not.toBeNull();
     expect(c).not.toBeNull();
-    if (m) expect(m.height).toBeGreaterThanOrEqual(44);
-    if (c) expect(c.height).toBeGreaterThanOrEqual(44);
+    // Chromium can return 43.99994 for an exact 44 CSS px box under a device
+    // scale transform. Allow only sub-millipixel rounding noise.
+    if (m) expect(m.height).toBeGreaterThanOrEqual(44 - 0.001);
+    if (c) expect(c.height).toBeGreaterThanOrEqual(44 - 0.001);
   });
 
   test("Escape dismisses the action sheet", async ({ page }) => {

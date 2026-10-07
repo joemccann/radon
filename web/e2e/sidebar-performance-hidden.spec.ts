@@ -62,9 +62,13 @@ test.describe("Sidebar navigation", () => {
     await setupMocks(page);
     await page.goto("/portfolio");
 
-    await expect(page.getByRole("link", { name: "Portfolio" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Orders" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Performance" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Discover" })).toHaveCount(0);
+    const primaryNavigation = page.getByRole("navigation", { name: "Primary navigation" });
+    await expect(primaryNavigation.getByRole("link", { name: "Portfolio", exact: true })).toBeVisible();
+    await expect(primaryNavigation.getByRole("link", { name: "Positions", exact: true })).toBeVisible();
+    await expect(primaryNavigation.getByRole("link", { name: "Performance" })).toHaveCount(0);
+    await expect(primaryNavigation.getByRole("link", { name: "Discover" })).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Open all workspaces", exact: true }).click();
+    await expect(page.getByRole("navigation", { name: "All workspaces" }).getByRole("link", { name: "Orders", exact: true })).toBeVisible();
   });
 });

@@ -1,3 +1,76 @@
+# Current-head Tester Army review receipts, 2026-10-06. Membership unchanged.
+# Luna fixture verification: 135 distinct retained cases green; separate SDK 77/77.
+# Operator authorization and live-provider measurements are not fixture coverage.
+# REVIEWED 2026-10-06 admin-panel.spec.ts - Static operator-gate and locator review only; five operator-authorized cases remain unverified. Authless does not admit /admin; no browser pass claimed.
+# REVIEWED 2026-10-06 crcl-spread-builder.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 crox-bull-call-stale-price.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 cta-page.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 cta-stale-banner.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 ib-mfa-reconnect-alert.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 iei-hyg-tab.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 internals-market-closed.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 iwm-synthetic-mark-label.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 iwm-ticker-detail-combo-sign.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 margin-debt-tab.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 mobile-info-tooltip-safe-area.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 mobile-newsfeed-layout.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 mobile-order-ticket.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 mobile-orders.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 mobile-scanner-mode-tabs-overflow.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 modify-combo-order.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 modify-order-confirmation.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 modify-order-resting-limit.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 modify-order-spread-telemetry.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 open-order-single-detail.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 orders-empty-state.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 performance-chart-axes.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 performance-chart-theme.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 performance-market-closed.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 performance-page.spec.ts - Seven current V2 cases passed with sidebar (8/8); final nonfuture session case 1/1. Attached order trace pins no initial POST and one manual POST before performance GET; unchanged TWR/NAV.
+# REVIEWED 2026-10-06 portfolio-market-closed.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 portfolio-ratio-risk-reversal-label.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 price-chart-theme.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 regime-closed-refresh.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 regime-live-index-stream.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 regime-live-index-streaming.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 risk-reversal-skew.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 scanner-discover.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 short-strangle-skew.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 sidebar-performance-hidden.spec.ts - Passed with performance cases (8/8); primary Portfolio/Positions visibility, More Orders visibility and absent primary Performance/Discover retained.
+# REVIEWED 2026-10-06 spread-price-bar.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 sync-fallback.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 theta-harvester-scanner.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 ticker-page.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 ticker-search-live.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 vixcor-tab.spec.ts - Luna verified deterministic fixture cases and retained measurement assertions; three deliberately unmocked live-data cases unavailable, not claimed passed.
+# REVIEWED 2026-10-06 watchlist-page.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+# REVIEWED 2026-10-06 ws-connection-stability.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
+
+# REVIEWED 2026-10-06 performance-page.spec.ts - Current V2 panel has ten
+#   clickable core/advanced cards, TWR chained after removing external flows,
+#   Sharpe and Max DD. First/last card interaction and modal closing stay
+#   asserted. Sortino and the unconditional Warnings section were removed by
+#   current main's V2 panel; the old equity-ratio YTD formula is invalid with
+#   flows and is replaced by the exact TWR formula. No production gate changes.
+# REVIEWED 2026-10-03 CROX and CTA browser contracts - CROX financial values
+#   retain guarded $1.65 spread/$26,895 mark/$27,613 initial basis, now targeted
+#   by visible column headers. CTA follows More/All workspaces navigation;
+#   stale warning dates and available tables stay separate from ErrorToast.
+#   Focused red CROX1 + CTA2; repaired selected contracts4/4 passed Chromium
+#   next start :3343 with unique /tmp output, no production/curation change.
+# REVIEWED 2026-10-03 clear-all-pages.spec.ts panic-index - Canonical manifest
+#   now asserts the explicit empty state for the unavailable panic fixture,
+#   matching the panel data gate and SDK. Independent desktop/mobile chart
+#   assertions failed before repair; focused desktop/mobile 2/2 and SDK 1/1
+#   passed after repair. No measurement fabricated or guard relaxed.
+# REVIEWED 2026-10-03 admin-panel.spec.ts - Corrected authless assumption:
+#   /admin requires server-owned Clerk operator authorization; localhost bypass
+#   headers do not admit that gate. Independent authless execution failed to
+#   render the panel. Guard and existing curation remain unchanged.
+# REVIEWED 2026-10-03 regime-closed-refresh.spec.ts - Replaced fake DOM/polling
+#   with the actual CRI route: OPEN-clock 60s GET refresh and CLOSED-clock
+#   paused timer, no POST. 2/2 Chromium on isolated next start :3343.
+#   Existing financial-smoke curation remains unchanged.
 # REVIEWED 2026-10-06 mobile-ticket-session-refresh.spec.ts - iPhone resume race:
 #   first /api/orders/place answers 401 x-clerk-auth-status: signed-out, the
 #   SessionRefreshFetch interceptor refreshes via a stubbed signed-in window.Clerk

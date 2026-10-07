@@ -1,9 +1,10 @@
+import { DEMO_URL } from "@/lib/editorial-content";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { EditorialEyebrow } from "@/components/atoms/EditorialEyebrow";
 import { EditorialFooter } from "@/components/sections/EditorialFooter";
 import { EditorialHeader } from "@/components/sections/EditorialHeader";
-import { DEMO_APP_URL, STATUS_PAGE_ROBOTS, siteUrl } from "@/lib/seo";
+import { STATUS_PAGE_ROBOTS, siteUrl } from "@/lib/seo";
 
 /**
  * Public system-surface map (P3).
@@ -35,7 +36,7 @@ const surfaces = [
   },
   {
     name: "Public demo",
-    url: DEMO_APP_URL,
+    url: DEMO_URL,
     host: "Vercel + isolated Turso",
     data: "Synthetic positions and paper fills. Separate database from production.",
   },

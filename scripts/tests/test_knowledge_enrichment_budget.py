@@ -1,6 +1,7 @@
 """Optional enrichment must never consume the hourly ingestion window."""
 from __future__ import annotations
 
+import io
 from pathlib import Path
 import os
 import signal
@@ -131,3 +132,60 @@ def test_cleanup_timeout_keeps_partial_result_and_closes_pipes(monkeypatch):
     assert subject.run_distill_batch([(None, "raw")], 1) == [{"summary": "kept", "tickers": []}]
     assert kills == [123, 123]
     assert process.stdin.closed and process.stdout.closed
+
+
+def test_timeout_reaped_worker_does_not_signal_group_twice(monkeypatch):
+    """A completed group kill must not target a recycled/restricted group ID."""
+    class Process:
+        pid = 123
+        stdin = io.StringIO()
+        stdout = io.StringIO()
+        calls = 0
+        returncode = None
+
+        def communicate(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise subprocess.TimeoutExpired("worker", 1)
+            self.returncode = -signal.SIGKILL
+            return '[0, {"summary":"kept", "tickers":[]}]\n', None
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, **kwargs):
+            return self.returncode
+
+    process = Process()
+    kills = []
+
+    def killpg(pid, sig):
+        kills.append((pid, sig))
+        if len(kills) > 1:
+            raise PermissionError("group no longer belongs to this worker")
+
+    monkeypatch.setattr(subject.subprocess, "Popen", lambda *a, **k: process)
+    monkeypatch.setattr(subject.os, "killpg", killpg)
+    assert subject.run_distill_batch([(None, "raw")], 1) == [{"summary": "kept", "tickers": []}]
+    assert kills == [(123, signal.SIGKILL)]
+    assert process.stdin.closed and process.stdout.closed
+
+
+def test_normal_exit_still_kills_cli_descendants(monkeypatch):
+    class Process:
+        pid = 123
+        stdin = io.StringIO()
+        stdout = io.StringIO()
+
+        def communicate(self, *args, **kwargs):
+            return '[0, {"summary":"kept", "tickers":[]}]\n', None
+
+        def wait(self, **kwargs):
+            return 0
+
+    process = Process()
+    kills = []
+    monkeypatch.setattr(subject.subprocess, "Popen", lambda *a, **k: process)
+    monkeypatch.setattr(subject.os, "killpg", lambda pid, sig: kills.append((pid, sig)))
+    assert subject.run_distill_batch([(None, "raw")], 1) == [{"summary": "kept", "tickers": []}]
+    assert kills == [(123, signal.SIGKILL)]

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { installClearFixtures } from "./clear-fixtures";
 
 test.use({ serviceWorkers: "block" });
 
@@ -29,6 +30,9 @@ const ORDERS = {
 };
 
 async function stubApis(page: Page) {
+  // Reuse the canonical browser-only Clerk session fixture so useWatchlist can
+  // finish client auth initialization and load identity-scoped rows.
+  await installClearFixtures(page);
   await page.route("**/api/watchlist", async (route) => {
     await route.fulfill({
       status: 200,

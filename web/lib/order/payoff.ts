@@ -71,6 +71,7 @@ export function netPremiumForPayoff(
 /** Linear interpolation of the zero crossing between two sampled points. */
 function zeroCrossing(a: PayoffPoint, b: PayoffPoint): number | null {
   if (a.pnl === 0) return a.underlying;
+  if (b.pnl === 0) return b.underlying;
   if ((a.pnl < 0) === (b.pnl < 0)) return null;
   const span = b.pnl - a.pnl;
   if (span === 0) return null;
@@ -104,11 +105,14 @@ export function payoffCurve(
   const to = hi + margin;
   const step = (to - from) / (SAMPLE_COUNT - 1);
 
-  const points: PayoffPoint[] = [];
+  // Expiry payoff is piecewise linear, with slope changes at every strike.
+  // Sample each kink exactly so zero crossing never interpolates across it.
+  const underlyingPrices = new Set(strikes.filter(strike => Number.isFinite(strike) && strike >= from && strike <= to));
   for (let i = 0; i < SAMPLE_COUNT; i += 1) {
-    const underlying = from + i * step;
-    points.push({ underlying, pnl: payoffAtExpiry(legs, netPremium, underlying) });
+    underlyingPrices.add(from + i * step);
   }
+  const points: PayoffPoint[] = [...underlyingPrices].sort((a, b) => a - b)
+    .map(underlying => ({ underlying, pnl: payoffAtExpiry(legs, netPremium, underlying) }));
 
   const breakevens: number[] = [];
   for (let i = 1; i < points.length; i += 1) {

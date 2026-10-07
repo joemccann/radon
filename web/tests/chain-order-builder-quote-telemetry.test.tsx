@@ -224,6 +224,18 @@ describe("Options chain order builder quote telemetry", () => {
     expect(panel!.textContent ?? "").not.toMatch(/—/);
   });
 
+  it.each([["BUY", 2], ["SELL", 0]] as const)("keeps native single-leg bid/ask sides for %s", async (_action, cellIndex) => {
+    const builder = await builderAfter(() => clickCallCell(970, cellIndex));
+    const input = builder.querySelector(".modify-price-input") as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe("12.50"));
+    const bid = within(builder).getByRole("button", { name: "BID 12.10", exact: true });
+    const ask = within(builder).getByRole("button", { name: "ASK 12.90", exact: true });
+    fireEvent.click(bid);
+    expect(input.value).toBe("12.10");
+    fireEvent.click(ask);
+    expect(input.value).toBe("12.90");
+  });
+
   it("shows the net combo telemetry without regressing the tappable price strip", async () => {
     const builder = await builderAfter(() => {
       clickCallCell(970, 2); // BUY 970 call
