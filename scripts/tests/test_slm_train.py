@@ -147,7 +147,7 @@ def test_trainer_namespace_never_forwards_credentials(tmp_path, credential_name)
     )
     trainer.chmod(0o755)
     env = {
-        "PATH": f"{binaries}{os.pathsep}/opt/homebrew/bin:/usr/bin:/bin",
+        "PATH": f"{binaries}{os.pathsep}{Path(sys.executable).parent}{os.pathsep}{os.defpath}",
         "SLM_DATA_DIR": str(data),
         credential_name: "synthetic-credential-only",
         "HF_HUB_CACHE": str(tmp_path / "cache"),
