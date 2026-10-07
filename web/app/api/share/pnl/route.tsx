@@ -2,7 +2,7 @@ import { ImageResponse } from "next/og";
 import { loadFonts } from "@/lib/og-fonts";
 import { OG } from "@/lib/og-theme";
 import { rateLimit, clientIp, SHARE_PNL_LIMIT, SHARE_WINDOW_MS } from "@/lib/rateLimit";
-import { sharePnlHeroLayout } from "@/lib/sharePnlHero";
+import { SHARE_PNL_CANVAS, parseSharePnlFormat, sharePnlHeroLayout } from "@/lib/sharePnlHero";
 
 export const runtime = "nodejs";
 // A satori render holding the whole bitmap must not run unbounded (R-310).
@@ -45,6 +45,58 @@ function fmtTimePST(isoTime: string): string {
   }
 }
 
+/** Radon mark + wordmark. `scale` 1 is the 1200x630 card; the story plate
+ *  renders it larger so it survives the phone-sized frame. */
+function radonBrand(scale: number) {
+  const px = (v: number) => `${v * scale}px`;
+  return (
+    <div style={{ display: "flex", flexDirection: "row", alignItems: "center" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: px(40),
+          height: px(40),
+          borderRadius: "50%",
+          border: `${px(2)} solid #05AD98`,
+          marginRight: px(16),
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: px(24),
+            height: px(24),
+            borderRadius: "50%",
+            border: `${px(1.5)} solid #048A7A`,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              width: px(6),
+              height: px(6),
+              borderRadius: "50%",
+              background: OG.text,
+            }}
+          />
+        </div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        <span style={{ fontSize: px(20), fontWeight: 700, color: OG.text, letterSpacing: "0.12em" }}>
+          RADON
+        </span>
+        <span style={{ fontSize: px(10), fontWeight: 500, color: "#05AD98", letterSpacing: "0.15em" }}>
+          TERMINAL
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export const radonCapability = "internal";
 
 export async function GET(request: Request) {
@@ -73,6 +125,7 @@ export async function GET(request: Request) {
     const exitTime = searchParams.get("exitTime") ?? "";
     const holdTime = searchParams.get("holdTime") ?? "";
     const time = searchParams.get("time") ?? "";
+    const format = parseSharePnlFormat(searchParams.get("format"));
 
     if (!description) {
       return new Response("Missing description", { status: 400 });
@@ -88,10 +141,10 @@ export async function GET(request: Request) {
     // Build hero text parts
     const heroDollar = pnl != null && Number.isFinite(pnl) ? fmtDollar(pnl) : null;
     const heroPct = pnlPct != null && Number.isFinite(pnlPct) ? fmtPct(pnlPct) : null;
-    const heroLayout = sharePnlHeroLayout({
-      dollar: heroDollar != null,
-      pct: heroPct != null,
-    });
+    const heroLayout = sharePnlHeroLayout(
+      { dollar: heroDollar != null, pct: heroPct != null },
+      format,
+    );
 
     const fmtSignedPrice = (v: number): string =>
       v < 0 ? `-$${Math.abs(v).toFixed(2)}` : `$${v.toFixed(2)}`;
@@ -131,6 +184,148 @@ export async function GET(request: Request) {
     // Legacy: show executed time if no entry/exit times provided
     if (time && !entryTime && !exitTime) {
       detailItems.push({ label: "EXECUTED", value: time });
+    }
+
+    if (format === "story") {
+      const canvas = SHARE_PNL_CANVAS.story;
+      return new ImageResponse(
+        (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              width: `${canvas.width}px`,
+              height: `${canvas.height}px`,
+              background: OG.bg,
+              fontFamily: "IBM Plex Mono",
+              color: OG.text,
+              // Instagram overlays the profile row on the top ~250px and the
+              // reply bar on the bottom ~340px; keep every glyph between them.
+              padding: "260px 72px 340px 72px",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                fontSize: "22px",
+                fontWeight: 700,
+                color: accentColor,
+                letterSpacing: "0.18em",
+              }}
+            >
+              REALIZED P&amp;L
+            </div>
+            <div
+              style={{
+                display: "flex",
+                fontSize: "44px",
+                fontWeight: 400,
+                color: OG.text,
+                lineHeight: "1.25",
+                marginTop: "20px",
+              }}
+            >
+              {description}
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                flexGrow: 1,
+              }}
+            >
+              {heroDollar ? (
+                <span
+                  style={{
+                    fontSize: `${heroLayout.dollarFontSizePx}px`,
+                    fontWeight: 700,
+                    color: accentColor,
+                    lineHeight: "1",
+                  }}
+                >
+                  {heroDollar}
+                </span>
+              ) : null}
+              {heroPct ? (
+                <span
+                  style={{
+                    fontSize: `${heroLayout.pctFontSizePx}px`,
+                    fontWeight: 700,
+                    color: accentColor,
+                    lineHeight: "1",
+                    marginTop: heroDollar ? "24px" : "0",
+                  }}
+                >
+                  {heroPct}
+                </span>
+              ) : null}
+              <div
+                style={{
+                  display: "flex",
+                  width: "120px",
+                  height: "4px",
+                  background: accentColor,
+                  marginTop: "40px",
+                }}
+              />
+            </div>
+
+            {detailItems.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", marginBottom: "48px" }}>
+                {detailItems.map((item, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      display: "flex",
+                      flexDirection: "row",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "24px 0",
+                      borderTop: `1px solid ${OG.border}`,
+                    }}
+                  >
+                    <span
+                      style={{
+                        color: OG.muted,
+                        fontSize: "20px",
+                        fontWeight: 700,
+                        letterSpacing: "0.1em",
+                      }}
+                    >
+                      {item.label}
+                    </span>
+                    <span style={{ color: OG.text, fontSize: "28px" }}>{item.value}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                paddingTop: "40px",
+                borderTop: `1px solid ${OG.border}`,
+              }}
+            >
+              {radonBrand(1.8)}
+              <span style={{ fontSize: "26px", color: OG.muted, fontWeight: 400 }}>
+                radon.run
+              </span>
+            </div>
+          </div>
+        ),
+        {
+          width: canvas.width,
+          height: canvas.height,
+          fonts: fonts as any,
+        },
+      );
     }
 
     return new ImageResponse(
@@ -266,51 +461,7 @@ export async function GET(request: Request) {
               borderTop: `1px solid ${OG.border}`,
             }}
           >
-            <div style={{ display: "flex", flexDirection: "row", alignItems: "center" }}>
-              {/* Radon icon: concentric circles */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: "40px",
-                  height: "40px",
-                  borderRadius: "50%",
-                  border: "2px solid #05AD98",
-                  marginRight: "16px",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    width: "24px",
-                    height: "24px",
-                    borderRadius: "50%",
-                    border: "1.5px solid #048A7A",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      width: "6px",
-                      height: "6px",
-                      borderRadius: "50%",
-                      background: OG.text,
-                    }}
-                  />
-                </div>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column" }}>
-                <span style={{ fontSize: "20px", fontWeight: 700, color: OG.text, letterSpacing: "0.12em" }}>
-                  RADON
-                </span>
-                <span style={{ fontSize: "10px", fontWeight: 500, color: "#05AD98", letterSpacing: "0.15em" }}>
-                  TERMINAL
-                </span>
-              </div>
-            </div>
+            {radonBrand(1)}
             <span style={{ fontSize: "14px", color: OG.muted, fontWeight: 400 }}>
               Executed with Radon
             </span>
@@ -318,8 +469,8 @@ export async function GET(request: Request) {
         </div>
       ),
       {
-        width: 1200,
-        height: 630,
+        width: SHARE_PNL_CANVAS.card.width,
+        height: SHARE_PNL_CANVAS.card.height,
         fonts: fonts as any,
       },
     );

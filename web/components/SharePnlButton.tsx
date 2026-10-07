@@ -8,6 +8,11 @@ import { formatHoldDuration } from "@/lib/holdTime";
 
 const POPOVER_EXIT_MS = 120;
 const POPOVER_EXIT_REDUCED_MS = 80;
+const STORY_FILENAME = "radon-pnl-story.png";
+
+function isDomError(err: unknown, name: string): boolean {
+  return typeof err === "object" && err != null && (err as { name?: unknown }).name === name;
+}
 
 export type SharePnlData = {
   description: string;
@@ -81,6 +86,9 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
   const [copying, setCopying] = useState(false);
   const [shareError, setShareError] = useState<unknown>(null);
   const [copied, setCopied] = useState(false);
+  // Story PNG held for a second tap when the browser expired the share gesture
+  // while the image rendered (Safari's transient activation is short).
+  const [storyFile, setStoryFile] = useState<File | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -142,7 +150,12 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
     };
   }, [mounted]);
 
-  const generateImage = useCallback(async () => {
+  // A held story PNG is stale once the metric toggles change.
+  useEffect(() => {
+    setStoryFile(null);
+  }, [showDollar, showPct]);
+
+  const generateImage = useCallback(async (format: "card" | "story" = "card") => {
     const params = new URLSearchParams();
     params.set("description", data.description);
     if (showDollar && data.pnl != null) params.set("pnl", String(data.pnl));
@@ -158,6 +171,7 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
       params.set("fillPrice", String(data.fillPrice));
     }
     if (data.time) params.set("time", data.time);
+    if (format === "story") params.set("format", "story");
 
     const res = await fetch(`/api/share/pnl?${params.toString()}`);
     if (!res.ok) throw new Error("Failed to generate image");
@@ -211,6 +225,45 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
       setOpen(false);
     }
   }, [copying, generateImage, copyToClipboard, data, showDollar, showPct]);
+
+  /** Instagram has no web intent for Stories: hand the 9:16 PNG to the OS
+   *  share sheet (Instagram > Story on iOS / Android), else download it. */
+  const handleShareStory = useCallback(async () => {
+    if (copying) return;
+    setCopying(true);
+    setShareError(null);
+    let keepOpen = false;
+    try {
+      const file = storyFile
+        ?? new File([await generateImage("story")], STORY_FILENAME, { type: "image/png" });
+      const shareData: ShareData = { files: [file] };
+      if (typeof navigator.share === "function" && navigator.canShare?.(shareData)) {
+        try {
+          await navigator.share(shareData);
+          setStoryFile(null);
+        } catch (err) {
+          if (isDomError(err, "NotAllowedError") && !storyFile) {
+            setStoryFile(file);
+            keepOpen = true;
+          } else if (!isDomError(err, "AbortError")) {
+            throw err;
+          }
+        }
+      } else {
+        const href = URL.createObjectURL(file);
+        const link = document.createElement("a");
+        link.href = href;
+        link.download = STORY_FILENAME;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(href), 0);
+      }
+    } catch (err) {
+      setShareError(err);
+    } finally {
+      setCopying(false);
+      if (!keepOpen) setOpen(false);
+    }
+  }, [copying, generateImage, storyFile]);
 
   return (
     <div style={{ position: "relative", display: "inline-flex" }} ref={popoverRef}>
@@ -266,6 +319,14 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
               disabled={copying || (!showDollar && !showPct)}
             >
               {copied ? "Copied!" : "Copy"}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary share-pnl-action share-pnl-action--story"
+              onClick={handleShareStory}
+              disabled={copying || (!showDollar && !showPct)}
+            >
+              {storyFile ? "Tap to share Story" : "Instagram Story"}
             </button>
           </div>
         </div>

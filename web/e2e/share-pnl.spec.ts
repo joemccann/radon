@@ -563,6 +563,72 @@ test.describe("Share PnL signed combo basis", () => {
   });
 });
 
+test.describe("Share PnL Instagram Story", () => {
+  test("story route renders a 1080x1920 PNG", async ({ request }) => {
+    const response = await request.get("/api/share/pnl", {
+      params: { description: "Closed AAOI (Long $115 Call)", pnlPct: "44.08", format: "story" },
+    });
+    expect(response.ok()).toBe(true);
+    expect(response.headers()["content-type"]).toBe("image/png");
+    const png = await response.body();
+    expect(png.readUInt32BE(16)).toBe(1080);
+    expect(png.readUInt32BE(20)).toBe(1920);
+  });
+
+  test("downloads the story plate when the browser cannot share files", async ({ page }, testInfo) => {
+    await page.addInitScript(() => {
+      // Desktop Chrome: no file share target, so the button must download.
+      Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
+      Object.defineProperty(navigator, "canShare", { configurable: true, value: undefined });
+    });
+    await stubOrdersShareApis(page);
+    let storyUrl: string | null = null;
+    await page.route("**/api/share/pnl?*", (route) => {
+      storyUrl = route.request().url();
+      return route.fulfill({ status: 200, contentType: "image/png", body: PNG_1X1 });
+    });
+
+    const popover = await openSharePopover(page);
+    const story = popover.getByRole("button", { name: "Instagram Story" });
+    await expect(story).toBeVisible();
+    const shot = testInfo.outputPath("share-popover-story.png");
+    await popover.screenshot({ path: shot });
+    await testInfo.attach("share-popover-story", { path: shot, contentType: "image/png" });
+
+    const download = page.waitForEvent("download");
+    await story.click();
+    expect((await download).suggestedFilename()).toBe("radon-pnl-story.png");
+    const url = new URL(storyUrl ?? "http://localhost");
+    expect(url.pathname).toBe("/api/share/pnl");
+    expect(url.searchParams.get("format")).toBe("story");
+  });
+
+  test("hands the story PNG to the native share sheet when files are shareable", async ({ page }) => {
+    await page.addInitScript(() => {
+      const w = window as unknown as { __shared: { name: string; type: string; size: number }[] };
+      w.__shared = [];
+      Object.defineProperty(navigator, "canShare", { configurable: true, value: () => true });
+      Object.defineProperty(navigator, "share", {
+        configurable: true,
+        value: async (data: ShareData) => {
+          for (const f of data.files ?? []) w.__shared.push({ name: f.name, type: f.type, size: f.size });
+        },
+      });
+    });
+    await stubOrdersShareApis(page);
+    await page.route("**/api/share/pnl?*", (route) =>
+      route.fulfill({ status: 200, contentType: "image/png", body: PNG_1X1 }),
+    );
+
+    const popover = await openSharePopover(page);
+    await popover.getByRole("button", { name: "Instagram Story" }).click();
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { __shared: unknown[] }).__shared))
+      .toEqual([{ name: "radon-pnl-story.png", type: "image/png", size: PNG_1X1.length }]);
+    await expect(popover).not.toBeVisible();
+  });
+});
+
 // REL-108 / R-317: the common report-share owner must recover from transport faults.
 import { stubReliabilityCta } from "./fixtures/reliability-cta";
 

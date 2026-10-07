@@ -12704,6 +12704,7 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 
 .share-pnl-popover-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
 }
@@ -12713,6 +12714,11 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   font-size: 11px;
   padding: 6px 10px;
   white-space: nowrap;
+}
+
+/* Story share sits on its own row under the X actions. */
+.share-pnl-action--story {
+  flex-basis: 100%;
 }
 
 /* ─── Options Chain ─── */
