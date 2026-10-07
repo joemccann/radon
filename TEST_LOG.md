@@ -1194,3 +1194,10 @@ Closing verification 2026-10-04: three complete serial rounds are recorded in TE
 ### Closing verification 2026-10-05
 
 Three serial full-gate rounds each pass 14,200 root Python cases / 2 skips / 23 subtests, 10,389 Vitest cases across 1,048 files, and 2,572 cloud cases / 7 skips. The detached 72e09ffb cloud comparison passes 2,561 cases / 7 skips. All four sorted cloud FAILED lists are empty: zero added/removed failures in every closing round. T-533/T-534/T-535 are DONE; no new verified finding is deferred. Path-filtered browser acceptance remains operator-only and is retained on issue #83.
+
+
+## Remediation 2026-10-07
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-538 | DONE | Original discovery probe exposes synthetic provider/database/control values: 3 failed / 11 passed; all 7 original cases remain green. Isolating the probe with the existing trainer allowlist yields 14 passed. Exact process receipts cover CLI/module/MLX and failed discovery; owner docs updated. |

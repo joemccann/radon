@@ -60,7 +60,7 @@ cp "$DATASET_INFO_SRC" "$DATA_DIR/dataset_info.json"
 if command -v llamafactory-cli >/dev/null 2>&1; then
   exec env -i "${TRAIN_ENV[@]}" llamafactory-cli train "$LF_CONFIG" dataset_dir="$DATA_DIR"
 fi
-if python3.13 -c "import llamafactory" >/dev/null 2>&1; then
+if env -i "${TRAIN_ENV[@]}" python3.13 -c "import llamafactory" >/dev/null 2>&1; then
   exec env -i "${TRAIN_ENV[@]}" python3.13 -m llamafactory.cli train "$LF_CONFIG" dataset_dir="$DATA_DIR"
 fi
 echo "LLaMA-Factory is not installed. On the Mini: pip install 'llamafactory[torch,metrics]'. Or SLM_TRAINER=mlx." >&2

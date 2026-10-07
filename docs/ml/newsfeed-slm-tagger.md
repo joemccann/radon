@@ -238,7 +238,7 @@ Exactly one base ships in v1. Changing it is a version bump (section E), not a c
 
 ### D.3 Train stack
 
-Default trainer: **[LLaMA-Factory](https://github.com/hiyouga/LlamaFactory)** QLoRA/LoRA on `Qwen/Qwen2.5-1.5B-Instruct` (`[HR-1]` arm C). Train only; inference stays GGUF (llama.cpp) or vLLM/MLX sidecar. Zero spend, no prepaid key anywhere in the loop. `train.sh` refuses any `*_API_KEY` and execs the trainer under an allowlisted environment (toolchain, locale, HF cache, GPU knobs), and the config sets `trust_remote_code: false`.
+Default trainer: **[LLaMA-Factory](https://github.com/hiyouga/LlamaFactory)** QLoRA/LoRA on `Qwen/Qwen2.5-1.5B-Instruct` (`[HR-1]` arm C). Train only; inference stays GGUF (llama.cpp) or vLLM/MLX sidecar. Zero spend, no prepaid key anywhere in the loop. `train.sh` refuses any `*_API_KEY` and runs every trainer entry, including the LLaMA-Factory import-discovery probe, under an allowlisted environment (toolchain, locale, HF cache, GPU knobs), and the config sets `trust_remote_code: false`.
 
 On CUDA, the committed YAML uses bitsandbytes 4-bit (`quantization_bit: 4`, `quantization_method: bnb`). On the Mac Mini, bitsandbytes QLoRA is not available; run the same LLaMA-Factory recipe as LoRA on MPS (drop the quantization keys for that run) or the optional mlx-lm path (`SLM_TRAINER=mlx`). Do not rent a GPU to manufacture QLoRA.
 
