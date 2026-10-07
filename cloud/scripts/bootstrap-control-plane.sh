@@ -232,6 +232,7 @@ readonly -a MODES=(
   0644 0644 0644 0644 0644
   0644 0644
   0644 0644 0644 0644
+  0644 0644 0644 0644
 )
 readonly -a KINDS=(
   shell shell shell python python shell shell compose
@@ -243,6 +244,7 @@ readonly -a KINDS=(
   systemd
   dropin dropin dropin dropin dropin
   systemd dropin
+  systemd systemd systemd systemd
   systemd systemd systemd systemd
 )
 

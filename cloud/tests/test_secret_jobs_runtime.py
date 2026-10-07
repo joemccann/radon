@@ -193,3 +193,29 @@ def test_secret_job_systemd_replaces_all_host_execution(unit):
     assert "/home/radon" not in path
     for installer in ("bootstrap-control-plane.sh", "deploy-root-helper.sh"):
         assert f"services/{unit}" in (CLOUD / "scripts" / installer).read_text()
+
+
+def test_secret_job_control_plane_metadata_is_complete_and_paired():
+    import re
+    tables = {}
+    for script, names in (
+        ("bootstrap-control-plane.sh", ("SOURCES", "LOGICAL_TARGETS", "MODES", "KINDS")),
+        ("deploy-root-helper.sh", ("CONTROL_PLANE_SOURCES", "CONTROL_PLANE_TARGETS", "CONTROL_PLANE_MODES")),
+    ):
+        text = (CLOUD / "scripts" / script).read_text()
+        arrays = []
+        for name in names:
+            match = re.search(rf"readonly -a {name}=\((.*?)\)", text, re.S)
+            assert match, (script, name)
+            arrays.append(shlex.split(match.group(1)))
+        assert len({len(array) for array in arrays}) == 1, script
+        sources, targets, modes = arrays[:3]
+        tables[script] = sources
+        for job in JOBS:
+            for unit in (job, job.replace(".service", ".timer")):
+                index = sources.index("services/" + unit)
+                assert targets[index] == "/etc/systemd/system/" + unit
+                assert int(modes[index], 8) == 0o644
+                if len(arrays) == 4:
+                    assert arrays[3][index] == "systemd"
+    assert tables["bootstrap-control-plane.sh"] == tables["deploy-root-helper.sh"]
