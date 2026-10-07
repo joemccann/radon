@@ -1679,3 +1679,78 @@ class TestResearchDiagnosticDocumentation:
         text = (_ROOT / "docs/dropbox-research.md").read_text()
         assert "Journal output contains stage counts/error classes only." not in text
         assert "Extraction `EvidenceError` text is persisted" in text
+
+
+class TestNightlyInfrastructureOwners:
+    """DOC-169..173: source-backed infrastructure and recovery owners."""
+
+    def test_external_services_defers_host_roles_to_topology_owner(self):
+        doc = (_ROOT / "docs/external-services.md").read_text()
+        row = next(line for line in doc.splitlines() if line.startswith("| **Hetzner Cloud** |"))
+        assert "spof-host-split.md" in row
+        assert "operations.md#encrypted-credential-store-profile-credentials-tab" in row
+        assert "Resolved as `ib-gateway`" not in row
+        assert "VPS that hosts FastAPI, IB Gateway" not in row
+
+    def test_gateway_logging_has_one_scope_aware_recovery_owner(self):
+        local = (_ROOT / "docs/ib-gateway-docker.md").read_text()
+        assert "ib-gateway-recovery.md#gateway-logs" in local
+        assert "journald driver" not in local
+        owner = _section((_ROOT / "docs/ib-gateway-recovery.md").read_text(), "Gateway logs")
+        assert "../cloud/docker-compose.yml" in owner
+        assert "../docker/ib-gateway/docker-compose.yml" in owner
+        assert "installed" in owner and "recreate" in owner
+        assert "journalctl CONTAINER_TAG=ib-gateway" in owner
+        assert "radon-docker-gw logs" in owner
+        assert "scripts/docker_ib_gateway.sh logs" in owner
+        for boundary in ("Symptom", "Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verification", "Rollback", "Escalation"):
+            assert f"**{boundary}:**" in owner
+
+    def test_cloud_firewall_recovery_stops_on_indeterminate_mutation(self):
+        owner = _network_procedure("Hetzner Cloud Firewalls").split("\n## ", 1)[0]
+        assert "hcloud_firewalls.py" in owner and "test_hcloud_firewall_faults.py" in owner
+        assert "indeterminate" in owner and "before another apply" in owner
+        assert "rules and attachment" in owner
+        assert "inventory" in owner
+        for boundary in ("Symptom", "Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verification", "Rollback", "Escalation"):
+            assert f"**{boundary}:**" in owner
+
+    def test_cloud_overviews_do_not_prescribe_obsolete_recovery(self):
+        readme = (_ROOT / "cloud/README.md").read_text()
+        assert "generates SSH key, exits" not in readme
+        assert "Add the printed SSH key to GitHub" not in readme
+        assert "Wipe everything (keeps SSH, firewall, IP)" not in readme
+        assert "ssh -L 5900:127.0.0.1:5900 radon@radon-app" not in readme
+        assert "ssh root@radon-app 'radon restart'" not in readme
+        assert "IBC scheduled/cold restarts are blank" not in readme
+        assert "VPS services reach IB Gateway over loopback" not in readme
+        assert "operator-reviewed maintenance" not in readme
+        recovery = (_ROOT / "docs/ib-gateway-recovery.md").read_text()
+        assert "separately reviewed broker maintenance" not in recovery
+        assert "../docs/ib-gateway-recovery.md" in readme
+        assert "../docs/spof-host-split.md" in readme
+        html = (_ROOT / "cloud/radon-cloud-deployment-guide.html").read_text()
+        boundary = html.split("<body>", 1)[1].split("<h1>", 1)[0]
+        assert "Historical reference" in boundary and "Do not execute" in boundary
+        assert "CLAUDE.md" in boundary and "../docs/ib-gateway-recovery.md" in boundary
+
+    def test_cloud_release_owner_does_not_make_required_images_optional(self):
+        import yaml
+
+        workflow = yaml.safe_load((_ROOT / ".github/workflows/ci.yml").read_text())
+        assert "app-images" in workflow["jobs"]["deploy"]["needs"]
+        source = (_ROOT / "cloud/scripts/deploy.sh").read_text()
+        assert 'prepull_app_images "$requested_sha"' in source
+        owner = (_ROOT / "cloud/CLAUDE.md").read_text()
+        assert "not a `ci.yml` deploy `needs`" not in owner
+        assert "images optional" not in owner
+        assert "Canonical future secrets path" not in owner
+        assert "Unit `EnvironmentFile=` is unchanged" not in owner
+        for name in ("radon-api", "radon-nextjs"):
+            unit = (_ROOT / f"cloud/services/{name}.service").read_text()
+            assert "EnvironmentFile=/etc/radon/env" in unit
+        assert "app-images" in owner and "required" in owner
+        assert "test_ci_deploy_image_reuse.py" in owner
+        readme = (_ROOT / "cloud/README.md").read_text()
+        assert "CLAUDE.md#deployment-contract" in readme
+        assert "Build Bun artifacts and Python wheels in a detached worktree" not in readme
