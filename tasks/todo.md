@@ -3,11 +3,11 @@
 - [x] T1 depends_on: [] HF API pick: newest small Qwen chat model near 1.5B, sha, license, trust_remote_code, version floors.
 - [x] T2 depends_on: [T1] Failing test pins 40-hex model_revision, trust_remote_code false, template, SLM_LF_CONFIG.
 - [x] T3 depends_on: [T2] Candidate YAML, dependency floor, docs. Baseline pin stays untouched.
-- [ ] T4 depends_on: [T3] Focused pytest green. Train/eval as far as this VM allows. Draft PR, CI green, no merge.
+- [x] T4 depends_on: [T3] Focused pytest green. Train/eval as far as this VM allows. Draft PR, CI green, no merge.
 
 Dependency graph: T1 -> T2 -> T3 -> T4.
 
-Review: Qwen/Qwen3.5-2B sha 15852e8c16360a2fea060d615a32b45270f8a8fc, Apache-2.0, trust_remote_code false on transformers 5.6.0 AutoConfig. Focused pytest 18 passed. Export split train 3038 / valid 1195 / test 1772. No GPU, 4 GiB free, no swap; weights 4.55 GB and 3.09 GB were not loaded. train.sh exit 2, LLaMA-Factory absent. No F1 numbers.
+Review: Qwen/Qwen3.5-2B sha 15852e8c16360a2fea060d615a32b45270f8a8fc, Apache-2.0, trust_remote_code false on transformers 5.6.0 AutoConfig. Focused pytest 18 passed. Export split train 3038 / valid 1195 / test 1772. No GPU, 4 GiB free, no swap; weights 4.55 GB and 3.09 GB were not loaded. train.sh exit 2, LLaMA-Factory absent. No F1 numbers. PR 945. CI run 37638349367 success on 7f401cdd. Not merged.
 
 # Task: Neutral Implied MV formatting (2026-10-07)
 
