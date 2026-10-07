@@ -49,6 +49,7 @@ import {
   isFarmStateCode,
   nextFarmStateCode,
   summarizeSubscriptionFreshness,
+  marketDataIsDegraded,
   shouldRequestGatewayRestart,
   STALE_DATA_THRESHOLD_MS,
   STALE_CHECK_INTERVAL_MS,
@@ -766,6 +767,7 @@ const reconnectGate = createReconnectGate({ delayMs: RECONNECT_MS });
 let ibClientGeneration = 0;
 let nextRequestId = 1;
 let statusBroadcastTick = null;
+let lastMarketDataDegraded = null;
 let ibConnectionIssue = null;
 
 /* ─── Stale Data Detection ─────────────────────────────────────────────────
@@ -1135,6 +1137,7 @@ function sendStatus(client) {
   sendMessage(client, {
     type: "status",
     ib_connected: ibConnected,
+    market_data_degraded: relayMarketDataDegraded(),
     ib_issue: ibConnectionIssue?.code ?? null,
     ib_status_message: ibConnectionIssue?.operatorMessage ?? null,
     subscriptions,
@@ -1145,6 +1148,19 @@ function broadcastStatus() {
   for (const client of clients) {
     sendStatus(client);
   }
+}
+
+/** NF-3 / REL-318: use the same subjects/clock as the stale-data owner. */
+function relayMarketDataDegraded() {
+  const now = Date.now();
+  const subjects = [...symbolSubscribers.keys()].map(symbol => {
+    const state = symbolStates.get(symbol);
+    return { active: state?.tickerId != null, lastTickAt: state?.lastTickAt };
+  });
+  return marketDataIsDegraded({
+    freshness: summarizeSubscriptionFreshness(subjects, now), now,
+    isMarketHours: isUSMarketHours(), operatorHoldActive,
+  });
 }
 
 function clearSnapshot(requestId) {
@@ -2993,7 +3009,9 @@ pingIntervalTimer = setInterval(() => {
 }, PING_INTERVAL_MS);
 
 statusBroadcastTick = setInterval(() => {
-  if (ibConnected) return;
+  const degraded = relayMarketDataDegraded();
+  if (ibConnected && degraded === lastMarketDataDegraded) return;
+  lastMarketDataDegraded = degraded;
   for (const client of clients) {
     sendStatus(client);
   }

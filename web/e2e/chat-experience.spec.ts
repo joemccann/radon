@@ -416,3 +416,87 @@ test("the toast stack stays clear of the chat composer in a phone-width window",
   // Moving the stack must not mean hiding the failure it reports.
   await expect(toast).toBeVisible();
 });
+
+test("REL-317: a stalled assistant request times out and permits a fresh turn", async ({ page }, testInfo) => {
+  const { mutations } = await installFixtures(page);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let count = 0;
+  await page.route("**/api/assistant", async route => {
+    count += 1;
+    expect(route.request().method()).toBe("POST");
+    expect(new URL(route.request().url()).pathname).toBe("/api/assistant");
+    if (count === 1) {
+      await held;
+      try { await reply(route, "Discard the late response."); } catch { /* timed-out request */ }
+    } else {
+      await reply(route, "The recovered answer is ready.");
+    }
+  });
+  await page.goto("/alerts");
+  const dialog = await openChat(page);
+  const composer = dialog.getByRole("textbox", { name: "Ask Radon" });
+  await page.clock.install();
+  try {
+    await composer.fill("Explain the latest flow evidence");
+    await composer.press("Enter");
+    await expect.poll(() => count).toBe(1);
+    await page.clock.fastForward(330_001);
+    await expect(dialog.getByTestId("chat-messages")).toHaveAttribute("aria-busy", "false", { timeout: 2000 });
+    await page.clock.resume();
+    await expect(page.getByRole("alert").filter({ hasText: "The request took too long. Please try again." })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("rel317-chat-deadline.png"), animations: "disabled" });
+    await composer.fill("Explain the current volatility evidence");
+    await composer.press("Enter");
+    await expect(dialog.getByTestId("chat-message-assistant").last()).toContainText("The recovered answer is ready.");
+    expect(count).toBe(2);
+    expect(mutations).toEqual(["/api/assistant", "/api/assistant"]);
+    await page.screenshot({ path: testInfo.outputPath("rel317-chat-recovered.png") });
+  } finally {
+    release();
+    await page.clock.resume();
+  }
+});
+
+
+test("REL-317: a stalled SSE body is aborted and releases the composer", async ({ page }, testInfo) => {
+  const { mutations } = await installFixtures(page);
+  const server = createServer((request, response) => {
+    response.setHeader("Access-Control-Allow-Origin", "*");
+    response.setHeader("Access-Control-Allow-Headers", "*");
+    if (request.method === "OPTIONS") { response.end(); return; }
+    response.setHeader("Content-Type", "text/event-stream");
+    response.write("event: start\ndata: {}\n\n");
+    // Deliberately no terminal frame or EOF. Browser owns cancellation.
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as { port: number };
+  let count = 0;
+  await page.route("**/api/assistant", async route => {
+    count += 1;
+    if (count === 1) await route.continue({ url: `http://127.0.0.1:${address.port}/stall` });
+    else await reply(route, "The stream recovered.");
+  });
+  try {
+    await page.goto("/alerts");
+    const dialog = await openChat(page);
+    const composer = dialog.getByRole("textbox", { name: "Ask Radon" });
+    await page.clock.install();
+    await composer.fill("Explain the market evidence");
+    await composer.press("Enter");
+    await expect(dialog.getByTestId("chat-messages")).toHaveAttribute("aria-busy", "true");
+    await expect.poll(() => count).toBe(1);
+    await expect(dialog.getByRole("button", { name: "Stop response", exact: true })).toBeVisible();
+    await page.clock.fastForward(330_001);
+    await expect(dialog.getByTestId("chat-messages")).toHaveAttribute("aria-busy", "false");
+    await page.clock.resume();
+    await composer.fill("Explain the new evidence");
+    await composer.press("Enter");
+    await expect(dialog.getByTestId("chat-message-assistant").last()).toContainText("The stream recovered.");
+    expect(mutations).toEqual(["/api/assistant", "/api/assistant"]);
+    await page.screenshot({ path: testInfo.outputPath("rel317-stream-recovered.png"), animations: "disabled" });
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});

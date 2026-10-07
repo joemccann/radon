@@ -68,6 +68,8 @@ export type UsePricesOptions = {
 };
 
 export type UsePricesReturn = {
+  /** REL-318: requested market data is degraded while the socket may be open. */
+  marketDataDegraded?: boolean;
   /** Current prices keyed by symbol */
   prices: Record<string, PriceData>;
   /** Fundamentals data keyed by symbol (from IB generic tick 258) */
@@ -134,6 +136,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
   const [tape, setTape] = useState<Record<string, Trade[]>>({});
   const [connected, setConnected] = useState(false);
   const [ibConnected, setIbConnected] = useState(false);
+  const [marketDataDegraded, setMarketDataDegraded] = useState(false);
   const [ibIssue, setIbIssue] = useState<string | null>(null);
   const [ibStatusMessage, setIbStatusMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -646,6 +649,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
           }
           case "status":
             setIbConnected(message.ib_connected);
+            setMarketDataDegraded(message.market_data_degraded === true);
             setIbIssue(message.ib_issue ?? null);
             setIbStatusMessage(message.ib_status_message ?? null);
             break;
@@ -934,6 +938,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     tape,
     connected,
     ibConnected,
+    marketDataDegraded,
     ibIssue,
     ibStatusMessage,
     error,

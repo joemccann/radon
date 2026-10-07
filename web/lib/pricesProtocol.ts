@@ -90,6 +90,8 @@ export type WSPongMessage = {
 
 export type WSStatusMessage = {
   type: "status";
+  /** REL-318: optional only for rolling upgrades from older relays. */
+  market_data_degraded?: boolean;
   ib_connected: boolean;
   ib_issue: string | null;
   ib_status_message: string | null;

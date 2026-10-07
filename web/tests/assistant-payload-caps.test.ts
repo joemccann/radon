@@ -77,6 +77,18 @@ describe("RC-B4: assistant turn payload caps", () => {
     expect(res.status).toBe(413);
   });
 
+  it("REL-317: rejects multibyte message text before entering the loop", async () => {
+    const { POST } = await import("@/app/api/assistant/route");
+    const res = await POST(postRequest({ messages: [{ role: "user", content: "字".repeat(12000) }] }) as never);
+    expect(res.status).toBe(413);
+  });
+
+  it("REL-317: counts text blocks across the whole turn", async () => {
+    const { POST } = await import("@/app/api/assistant/route");
+    const messages = Array.from({ length: 5 }, () => ({ role: "user", content: [{ type: "text", text: "x".repeat(30000) }] }));
+    expect((await POST(postRequest({ messages }) as never)).status).toBe(413);
+  });
+
   it("still accepts a normal turn", async () => {
     const { POST } = await import("@/app/api/assistant/route");
     const res = await POST(

@@ -64,3 +64,11 @@ Production cancel/modify routes retain the original-client subprocess path.
 Do not import the unused pooled shortcut into the server. Legacy helpers
 must refuse unknown or mismatched client ownership before mutation; modify
 also respects trading halt, while owned cancellation remains available.
+
+## Passive dependency health (R-028 / REL-316)
+
+Trusted `/health` and protected `/health/lite` include only coarse database/feed
+verdicts. The bounded Hrana observation runs in a worker alongside the passive
+Gateway probe; it never heals, reconnects or writes rows. Public `/health` stays
+liveness-only. Unknown or malformed evidence cannot become healthy; preserve
+idle/off-hours and stale/farm-down semantics without raw diagnostics.

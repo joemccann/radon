@@ -322,3 +322,15 @@ tab with nothing to show reports it (2026-08-24: 963 "Too Many Requests"
 banners from five aligned tabs).
 Tests: `tests/auto-sync-claim.test.ts`, `tests/use-portfolio-sync-429.test.ts`,
 `tests/use-orders-sync-429.test.ts`.
+
+## Requested market-data health (NF-3 / REL-318)
+
+Relay status carries `market_data_degraded` independently of `ib_connected`.
+The relay derives it from the same requested L1 subjects and 45s freshness
+window as its stale-data owner; off-hours and zero demand remain idle.
+Connected degradation/recovery edges are broadcast on the existing 5s status
+cadence. Both browser socket owners consume it: telemetry reads degraded,
+and every order owner requires relay, broker and non-degraded market data
+before its existing quote-age and risk gates. Missing fields support older
+relays during rolling updates; no instantaneous individual-farm verdict is
+claimed. Do not add another recovery action or relax the quote-age gate.

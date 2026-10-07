@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { runAssistantLoop, type AssistantModelSelection, type AssistantTurn, type ToolEvent } from "@/lib/assistant/loop";
 import { assistantErrorMessage } from "@/lib/assistant/errorCopy";
+import { textPayloadViolation } from "@/lib/assistant/requestBudget";
 import { recordAssistantTurn, type AssistantTurnToolCall } from "@/lib/assistant/telemetry";
 import { enforceDemoAiQuota } from "@/lib/demo/enforceAiQuota";
 import { etCalendarDateString } from "@/lib/journal/rangePnl";
@@ -88,6 +89,8 @@ function turnPayloadViolation(rawMessages: unknown): PayloadViolation | null {
   if (rawMessages.length > MAX_MESSAGES_PER_TURN) {
     return { status: 400, error: `At most ${MAX_MESSAGES_PER_TURN} messages per turn.` };
   }
+  const textViolation = textPayloadViolation(rawMessages);
+  if (textViolation) return textViolation;
   let bytes = 0;
   let images = 0;
   for (const item of rawMessages) {
