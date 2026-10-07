@@ -17,8 +17,10 @@ def isolated_metrics(caplog, monkeypatch):
     # rather than treating a missing import as the fault reproduction.
     module = sys.modules.get("utils.outcome_metrics")
     if module:
-        clock = iter([0.0] + [10.0] * 100)
-        monkeypatch.setattr(module, "METRICS", module.OutcomeCounters(clock=lambda: next(clock)))
+        now = [0.0]
+        collector = module.OutcomeCounters(clock=lambda: now[0])
+        now[0] = 10.0
+        monkeypatch.setattr(module, "METRICS", collector)
 
 
 def sample(caplog, operation):

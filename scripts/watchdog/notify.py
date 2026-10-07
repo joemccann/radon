@@ -249,7 +249,8 @@ def cancel_emergency(tag: str) -> Optional[str]:
         # Idempotent recovery: no active receipt with this tag remains.
         log.info("emergency push tag=%s already absent", tag)
         return None
-    if status >= 400:
+    # REL-322 / R-733: a redirect/refusal is not an accepted operation.
+    if not 200 <= status < 300:
         log.warning("pushover cancel non-2xx (%s): %r", status, body[:200])
         return f"pushover cancel {status}"
     log.info("cancelled emergency push(es) tag=%s", tag)
@@ -264,7 +265,8 @@ def _post_pushover(payload: dict) -> Optional[str]:
         record_outcome("notification", "error")
         log.warning("pushover transport failure: %s", exc)
         return f"pushover transport failed: {exc}"
-    if status >= 400:
+    # REL-322 / R-733: a redirect/refusal is not an accepted operation.
+    if not 200 <= status < 300:
         record_outcome("notification", "error")
         log.warning("pushover non-2xx (%s): %r", status, body[:200])
         return f"pushover {status}: {body[:200].decode('utf-8', 'replace').strip() or 'no body'}"

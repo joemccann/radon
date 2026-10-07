@@ -3051,3 +3051,13 @@ Inherited R-027 / REL-320: core operations now report fixed-label process counts
 Audit complete: 393345550d521548808d9884be0e5ab10ae48854..8afaaa61f09789bc272910d0dbce048780ef4dd9, three commits and 21 changed paths; codemap direct importers add no paths. `rg` also confirmed shell entrypoint and maintained runbook consumers. Connectivity, persistence, resources, error handling, safety and observability were reviewed for the changed surfaces; the codemap JSON refresh is read-only audit input. NEW_FINDINGS and REL-021b were reconciled against trusted 2026-10-06 acceptance and open #922; no repaired/open-PR ID is reallocated. R-027 core acceptance is resolved above; four retained candidates remain operator-only.
 
 Audited through: 8afaaa61f09789bc272910d0dbce048780ef4dd9 on 2026-10-07 — 2 new findings
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-733 / REL-322 | P1 | `scripts/watchdog/notify.py:244-276,575-630` | HTTP 300/307/308 refusals returned by the actual HTTPError seam were treated as accepted notification/cancellation. A rejected P1 could arm its cooldown and enqueue a page receipt; rejected emergency cancellation reported success. Acceptance: fake urllib refusal at exact POST endpoints preserves the error, records dispatcher failure, makes no cooldown/page write and no replay; accepted 2xx and idempotent cancel-404 controls remain green. Six faults failed twice; notifier and direct-caller union 513 passed. DONE. |
+
+R-733 was verified while widening R-027 to the notifier's response admission. The fix narrows success to the existing documented 2xx contract; no catch is widened and no retry is added.
+
+Audited through: 8afaaa61f09789bc272910d0dbce048780ef4dd9 on 2026-10-07 — 3 new findings
+
+Closing standing sweeps retain halt/limits at `scripts/clients/ib_client.py:707-745,864-903`, authoritative wire calls at `:752,910`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:5821,6008`, exit ack polling at `scripts/monitor_daemon/handlers/exit_orders.py:224-250`, and Hrana daemon-state writes at `scripts/db/writer.py:2567-2594`. Whole-repo `placeOrder`/`place_order` enumeration contains only the established guarded funnels; every scheduled health writer remains in both catalogs, with existing explicit exemptions checked. No metric sample writes a service_health row. Standing executable gates: 131 passed; permanent Python drills: 95 passed. Open #922 IDs were read from its actual diff (highest R-730 / REL-318) and its exact head remained green; no overlapping repair was repeated.
