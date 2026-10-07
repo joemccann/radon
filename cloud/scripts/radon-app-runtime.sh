@@ -6,7 +6,7 @@ set -euo pipefail
 # radon is not in group docker.
 # Never Gateway, Caddy, health, or the engine socket.
 
-readonly APP_UNITS="radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research.service"
+readonly APP_UNITS="radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research.service radon-subscription-tokens.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
 
 # Where the media volume lands INSIDE the container. Fixed regardless of the
 # host path, because Caddy's root and the newsfeed's download dir must agree.
@@ -86,7 +86,6 @@ readonly SECRET_STORE_CREDENTIAL_NAME=radon-secret-store-key
 # root:radon-secrets 0040, and the container gets the gid at start via
 # --group-add. Only root can grant that group, and only for this container.
 readonly SECRET_STORE_CREDENTIAL_GROUP=radon-secrets
-readonly SECRET_STORE_CREDENTIAL_CONTAINER_DIR=/run/credentials/radon-api.service
 readonly SECRET_STORE_DB_CONTAINER_PATH=/home/radon/radon/data/secret_store/secrets.db
 readonly SECRET_STORE_CREDENTIAL_STAGE_ROOT="${NOTIFY_PROXY_DIR}/credentials"
 STAGED_CREDENTIAL_UNIT=""
@@ -96,11 +95,23 @@ usage() {
   exit 64
 }
 
+# The key-bearing scheduled jobs have narrow state mounts only.
+is_isolated_job() {
+  [[ "$1" != "radon-api.service" ]] && is_secret_store_unit "$1"
+}
+
+is_secret_store_unit() {
+  case "$1" in
+    radon-api.service|radon-subscription-tokens.service|radon-ai-cycle.service|radon-ai-cycle-backfill.service|radon-aa-frontier-refresh.service) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 cleanup_runtime_credential() {
   local unit="$1"
   local credential_dir="${SECRET_STORE_CREDENTIAL_STAGE_ROOT}/${unit}"
   local credential_file="${credential_dir}/${SECRET_STORE_CREDENTIAL_NAME}"
-  [[ "$unit" == "radon-api.service" ]] || return 0
+  is_secret_store_unit "$unit" || return 0
   if [[ -d "$credential_dir" ]]; then
     chmod 0700 "$credential_dir" 2>/dev/null || true
     rm -f "$credential_file"
@@ -133,7 +144,11 @@ credential_group_gid() {
 
 assert_radon_cannot_open_credential_group() {
   local groups
-  groups="$("$ID_BIN" -nG radon 2>/dev/null)" || groups=""
+  groups="$("$ID_BIN" -nG radon 2>/dev/null)" || {
+    echo "radon-app-runtime: cannot verify radon credential-group isolation" >&2
+    return 78
+  }
+  [[ -n "$groups" ]] || return 78
   case " $groups " in
     *" ${SECRET_STORE_CREDENTIAL_GROUP} "*)
       echo "radon-app-runtime: radon must not be a member of ${SECRET_STORE_CREDENTIAL_GROUP}" >&2
@@ -632,10 +647,15 @@ PY_RESEARCH
 prepare_private_dir() {
   local ids="$1" dir="$2" label="$3"
   "$PYTHON" - "$dir" "$ids" "${RADON_APP_RUNTIME_TEST_MODE:-0}" "$label" <<'PY_PRIVATE_DIR' || exit 78
-import os, sys
+import os, stat, sys
+from pathlib import Path
 path, ids, test, label = sys.argv[1], sys.argv[2], sys.argv[3] == '1', sys.argv[4]
 uid, gid = (os.getuid(), os.getgid()) if test else tuple(int(part) for part in ids.split(':'))
 try:
+    # Refuse symlink parents before any privileged ownership operation.
+    for parent in Path(path).parents:
+        if stat.S_ISLNK(parent.lstat().st_mode):
+            raise OSError('symlink parent')
     try:
         os.mkdir(path, 0o700)
     except FileExistsError:
@@ -665,7 +685,7 @@ cmd_run() {
   ids="$("$ID_BIN" -u radon):$("$ID_BIN" -g radon)"
   workdir=/home/radon/radon
   case "$unit" in
-    radon-api.service|radon-monitor.service|radon-research.service) image="$(python_image)" ;;
+    radon-api.service|radon-monitor.service|radon-research.service|radon-subscription-tokens.service|radon-ai-cycle.service|radon-ai-cycle-backfill.service|radon-aa-frontier-refresh.service) image="$(python_image)" ;;
     radon-nextjs.service)
       image="$(node_image)"
       workdir=/home/radon/radon/web
@@ -683,7 +703,7 @@ cmd_run() {
   fi
 
   local credential_gid=""
-  if [[ "$unit" == "radon-api.service" ]]; then
+  if is_secret_store_unit "$unit"; then
     validate_api_startup_inputs
     assert_radon_cannot_open_credential_group || exit $?
     credential_gid="$(credential_group_gid)" || exit $?
@@ -711,7 +731,7 @@ cmd_run() {
   reap_container "$unit"
   cleanup_runtime_credential "$unit"
 
-  if [[ "$unit" == "radon-api.service" ]]; then
+  if is_secret_store_unit "$unit"; then
     prepare_private_dir "$ids" "${DATA_DIR}/secret_store" "secret store"
     stage_api_credential "$unit" "$credential_gid"
   fi
@@ -724,7 +744,7 @@ cmd_run() {
   # one thing an app genuinely writes outside media/ is the shared 2FA lease,
   # which now has its own subdirectory. Create it here: the container can no
   # longer mkdir it, because the parent is not mounted. R-381.
-  if [[ "$unit" != "radon-research.service" ]]; then
+  if [[ "$unit" != "radon-research.service" ]] && ! is_isolated_job "$unit"; then
     prepare_private_dir "$ids" "$LEASE_DIR" "2FA lease"
   fi
 
@@ -760,7 +780,7 @@ cmd_run() {
     set -- "$@" --cgroup-parent=system.slice
   fi
 
-  if [[ "$unit" != "radon-research.service" ]]; then
+  if [[ "$unit" != "radon-research.service" ]] && ! is_isolated_job "$unit"; then
     set -- "$@" \
       -v "${DATA_DIR}:/home/radon/radon/data" \
       -v "${MEDIA_DIR}:${MEDIA_DIR_IN_CONTAINER}" \
@@ -769,7 +789,7 @@ cmd_run() {
 
   # Subscription grants (2026-09-18). The model ladders meter against the
   # operator's subscriptions, never prepaid keys, and read the CLI credential
-  # files under ~radon (kept live by radon-subscription-tokens on the HOST).
+  # files under ~radon (kept live by the isolated subscription token job).
   # No container could see them, so every container-side rung silently fell
   # to prepaid credits; when the xAI team ran dry the newsfeed voice rewrite
   # died. Bind each dir that exists, read-only, and pin HOME so Path.home()
@@ -800,12 +820,50 @@ cmd_run() {
           set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:rw"
         fi
       done
-      if [[ -d "${subscription_home}/.local/bin" ]]; then
+      if [[ "$unit" != "radon-api.service" && -d "${subscription_home}/.local/bin" ]]; then
         set -- "$@" -v "${subscription_home}/.local/bin:/home/radon/.local/bin:ro"
       fi
       ;;
   esac
   set -- "$@" --env HOME=/home/radon
+  if is_isolated_job "$unit"; then
+    # No checkout, venv, media, lease, or executable credential-home mounts.
+    set -- "$@" -v "${DATA_DIR}/secret_store:/home/radon/radon/data/secret_store" \
+      --env PATH=/usr/local/bin:/usr/bin:/bin
+    case "$unit" in
+      radon-subscription-tokens.service)
+        prepare_private_dir "$ids" "${STATE_DIR}/subscription-tokens" "subscription state"
+        set -- "$@" --env RADON_SUBSCRIPTION_ISOLATED=1 \
+          --env CODEX_HOME=/home/radon/.codex --env CLAUDE_CONFIG_DIR=/home/radon/.claude \
+          --env GROK_AUTH_FILE=/home/radon/.grok/auth.json \
+          -v "${STATE_DIR}/subscription-tokens:/var/lib/radon/subscription-tokens"
+        for cred_dir in .grok .codex .claude; do
+          prepare_private_dir "$ids" "${subscription_home}/${cred_dir}" "subscription credential"
+          set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:rw"
+        done
+        local gemini_dir="${subscription_home}/.gemini"
+        prepare_private_dir "$ids" "$gemini_dir" "subscription gemini parent"
+        for cred_dir in antigravity-cli config; do
+          prepare_private_dir "$ids" "${gemini_dir}/${cred_dir}" "subscription credential"
+          set -- "$@" -v "${gemini_dir}/${cred_dir}:/home/radon/.gemini/${cred_dir}:rw"
+        done
+        ;;
+      *)
+        local ai_state="${RADON_AI_CYCLE_STATE_DIR:-${subscription_home}/.radon/ai-cycle}"
+        prepare_private_dir "$ids" "${subscription_home}/.radon" "AI state parent"
+        prepare_private_dir "$ids" "$ai_state" "AI cycle state"
+        set -- "$@" -v "${ai_state}:/home/radon/.radon/ai-cycle"
+        ;;
+    esac
+  fi
+  if is_secret_store_unit "$unit"; then
+    local credential_host_dir="${SECRET_STORE_CREDENTIAL_STAGE_ROOT}/${unit}"
+    local credential_container_dir="/run/credentials/${unit}"
+    set -- "$@" --group-add "$credential_gid" \
+      --env "CREDENTIALS_DIRECTORY=${credential_container_dir}" \
+      --env "RADON_SECRET_STORE_PATH=${SECRET_STORE_DB_CONTAINER_PATH}" \
+      --mount "type=bind,src=${credential_host_dir},dst=${credential_container_dir},readonly"
+  fi
   if [[ "$unit" == "radon-research.service" || "$unit" == "radon-api.service" ]]; then
     local research_dir research_mode=ro
     research_dir="$(prepare_research_dir "$ids")" || exit $?
@@ -840,12 +898,6 @@ cmd_run() {
     prepare_private_dir "$ids" "$CONTROL_DIR" "host control socket"
     set -- "$@" -v "${CONTROL_DIR}:${CONTROL_DIR_IN_CONTAINER}" \
       --env "RADON_CONTROL_SOCKET=${CONTROL_DIR_IN_CONTAINER}/control.sock"
-    local credential_host_dir="${SECRET_STORE_CREDENTIAL_STAGE_ROOT}/${unit}"
-    set -- "$@" \
-      --group-add "$credential_gid" \
-      --env "CREDENTIALS_DIRECTORY=${SECRET_STORE_CREDENTIAL_CONTAINER_DIR}" \
-      --env "RADON_SECRET_STORE_PATH=${SECRET_STORE_DB_CONTAINER_PATH}" \
-      --mount "type=bind,src=${credential_host_dir},dst=${SECRET_STORE_CREDENTIAL_CONTAINER_DIR},readonly"
   fi
 
   if [[ -n "${NOTIFY_SOCKET:-}" && "${NOTIFY_SOCKET}" == /* ]]; then
@@ -898,6 +950,18 @@ cmd_run() {
   case "$unit" in
     radon-api.service)
       set -- "$@" sh -c 'python scripts/db/migrate.py --boot && python scripts/secret_store.py && exec uvicorn scripts.api.server:app --host 0.0.0.0 --port 8321 --proxy-headers --forwarded-allow-ips 127.0.0.1'
+      ;;
+    radon-subscription-tokens.service)
+      set -- "$@" sh -c 'python scripts/secret_store.py && exec python -m scripts.subscription_tokens --once'
+      ;;
+    radon-ai-cycle.service)
+      set -- "$@" sh -c 'python scripts/secret_store.py && exec python -m scripts.ai_cycle.collect --record'
+      ;;
+    radon-ai-cycle-backfill.service)
+      set -- "$@" sh -c 'python scripts/secret_store.py && exec python -m scripts.ai_cycle.collect --record --backfill --start 2006-12-31 --sources vercel,gpu-rental,sec,eia,noaa,openrouter --checkpoint /home/radon/.radon/ai-cycle/backfill-checkpoint.json --max-requests 400'
+      ;;
+    radon-aa-frontier-refresh.service)
+      set -- "$@" sh -c 'python scripts/secret_store.py && exec python -m scripts.aa_frontier_refresh'
       ;;
     radon-research.service)
       set -- "$@" python -m research.worker --daemon

@@ -54,6 +54,10 @@ readonly -a CONTROL_PLANE_SOURCES=(
   services/radon-newsfeed.service.d/runtime-container.conf
   services/radon-research.service
   services/radon-research.service.d/runtime-container.conf
+  services/radon-subscription-tokens.service
+  services/radon-ai-cycle.service
+  services/radon-ai-cycle-backfill.service
+  services/radon-aa-frontier-refresh.service
 )
 readonly -a CONTROL_PLANE_TARGETS=(
   /usr/local/sbin/radon-deploy-root
@@ -98,6 +102,10 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/systemd/system/radon-newsfeed.service.d/runtime-container.conf
   /etc/systemd/system/radon-research.service
   /etc/systemd/system/radon-research.service.d/runtime-container.conf
+  /etc/systemd/system/radon-subscription-tokens.service
+  /etc/systemd/system/radon-ai-cycle.service
+  /etc/systemd/system/radon-ai-cycle-backfill.service
+  /etc/systemd/system/radon-aa-frontier-refresh.service
 )
 readonly -a CONTROL_PLANE_MODES=(
   755 755 755 644 644 755 755 644
@@ -107,6 +115,7 @@ readonly -a CONTROL_PLANE_MODES=(
   644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644
   644 644 644 644 644
   644 644
+  644 644 644 644
 )
 
 if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
