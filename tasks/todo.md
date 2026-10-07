@@ -9005,3 +9005,11 @@ Audit complete through 39334555: 11 commits / 78 paths. T-536/T-537 have mutatio
 Audit through 39334555: 12 commits, 78 changed paths, 134 paths including codemap callers. Two new and four inherited repairs have repeated fault-injection red/green evidence. Focused suites: cloud admission 156, breadth/callers 102, archive/transport 112, API health 90, scripts health 337, assistant native acceptance 8, relay 13; Chrome chat 14 and modify 4, with screenshot inspection and TypeScript green. Permanent Python drills 95, standing gates 78. Fourteen Python files and two shell files parse; no YAML/JSON/TOML changed. Diff hygiene, six-commit secret scan and substantive publication check pass. R-027 counters remain an open inherited candidate with exact acceptance on issue #81, alongside four operator-only findings and two unconfirmed installation actions; no candidate is closed on inspection. T5 draft publication, registered exact-head CI and the single rolling comment are recorded on issue #81 after delivery, without a bookkeeping-only push. No live access, credentials, main push, merge, codemap or test-ledger edits.
 
 T5 CI repair review: unchanged successful-replacement signal assertion failed in Vitest shard 5; the native request-owner completion control reproduced red twice. Only unfinished transports are aborted during cleanup; completed responses retain successful signal state. Eight native acceptance and fourteen Chrome lifecycle regressions pass without weakening the original assertion. Exact-head CI is restarted after the ordinary repair push; all preceding heads are superseded.
+
+## PR #924 CI repair 2026-10-07
+
+- [x] T1 depends_on: [] Inspect exact-head CI failure and isolated relay harness.
+- [x] T2 depends_on: [T1] Repair the harness surgically and inspect syntax/diff.
+- [ ] T3 depends_on: [T2] Push to existing PR, await every applicable exact-head CI check, and deliver one accepted Pushover notification.
+
+Dependency graph: T1 -> T2 -> T3. No local test suites; use GitHub runners.
