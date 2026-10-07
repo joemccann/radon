@@ -48,6 +48,26 @@ Dependency graph: T1 -> T2 -> T3.
 - Preserved both task logs and ledger receipt sections; 156 unique hold-outs + 48 curated specs = 204 classified, with no missing/stale/duplicate entries or overlap. Server AST and both documentation additions verified. No local suites. Prior PR green notification already accepted; do not duplicate it.
 
 
+## PR #938 conflict repair (2026-10-07)
+- [x] T1 Inspect conflicts and preserve both branches' audit, task, and training-owner documentation. depends_on: []
+- [x] T2 Merge main, resolve conflicts, and statically verify record and training-contract preservation. depends_on: [T1]
+- [ ] T3 Push the repaired head, wait for all applicable GitHub CI checks, and record green notification evidence. depends_on: [T2]
+Dependency graph: T1 -> T2 -> T3.
+
+### Review
+- PR https://github.com/joemccann/radon/pull/938; original head 6334926dae407855aaa50dbdbb8878ba8518d4dc.
+- Both audit/log branches preserved verbatim; task records retained. Training documentation preserves discovery isolation, exact environment allowlist, pinned model revision, and human-review gates. Merged training shell/Python syntax and resolved-file whitespace checks passed. No local suites/builds; GitHub runners own verification.
+## PR #931 conflict repair (2026-10-07)
+- [x] T1 Inspect conflicts and preserve both branches' task and lesson records. depends_on: []
+- [x] T2 Merge current main, resolve conflicts, and statically verify record preservation. depends_on: [T1]
+- [ ] T3 Push the repaired head and wait for all applicable exact-head GitHub checks. depends_on: [T2]
+Dependency graph: T1 -> T2 -> T3.
+
+### Review
+- PR https://github.com/joemccann/radon/pull/931; original head d295ae937afe48bfeda792fb3a8355f74ff980df.
+- Both task branches and all 835/839 nonblank lesson records preserved; conflict markers removed and diff whitespace check passed. No local suites. Prior PR green notification already accepted; do not duplicate it.
+
+
 # Task: PDF extract error detail (2026-10-03)
 
 - [x] T1 depends_on: [] Failing tests: rc + MemoryError, negative rc signal name, secret redaction, truncated stderr, prefix preserved, TimeoutExpired, persisted health/journal bound.
@@ -62,6 +82,30 @@ Dependency graph: T1 -> T2 -> T3.
 - [ ] T4 depends_on: [T2, T3] Draft PR vs main, CI green. No merge. No VPS.
 
 Review: Citadel Rubner GMI always reaches the feed. VERIFY stays hard per candidate. Zero published posts after VERIFY yields one grounded summary, never an unverified figure. Held TTL skips always_publish rows. EvidenceError on the host is classified with its message; do not mutate the VPS from this branch.
+
+## DS-2026-10-05-05 trusted runtime isolation
+- [x] T1 Inspect immutable-image service dependencies and runtime contracts. depends_on: []
+- [x] T2 Containerize four secret-store jobs through root-owned runtime and protected credential staging. depends_on: [T1]
+- [x] T3 Add regression coverage for isolation, unit wiring, commands, mounts, and cleanup. depends_on: [T1, T2]
+- [x] T4 Document design and create PR. depends_on: [T2, T3]
+- [ ] T5 Verify all exact-head GitHub checks and send the accepted green notification. depends_on: [T4]
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5; T1 -> T3; T2 -> T4.
+
+### Review
+- PR: https://github.com/joemccann/radon/pull/943, branch codex/secrets-trusted-runtime.
+- Four services and their timers are paired control-plane artifacts; immutable-image commands preserve existing cadence, timeout/exit behavior and persistent state.
+- Subscription probes use locked vendor binaries and auth-only temporary homes, preserving token rotation without importing host hooks or configuration.
+- Root directory preparation pins ancestor descriptors; the root subscription dispatcher does not re-own shared StateDirectory state.
+- Runtime and image regression coverage added; static shell syntax, Python parsing and diff whitespace checks passed. No local suites or builds run.
+- CI repair commits update deployment hashes, metadata cardinality, documentation contracts, auto-sync membership and health-writer discovery.
+- Final static review found no additional actionable issues. Merged main while preserving both task records. Exact PR head 50c8dc0fcc4e88460abe412f103fa9a38add2659: 32 checks passed, 7 non-applicable skipped, 0 pending/failing; both native image builds passed.
+- One normal-priority Pushover notification titled radon PR green was accepted (status=1). The PR notification has been delivered once; do not send a duplicate. A newer-main integration now requires exact-head CI again.
+
+### Rebase onto #932 (2026-10-07)
+- [x] T6 Merge origin/main (#932, 6198bd51); keep #932's drop-ins, broker, staging, manifest and tests. depends_on: [T5]
+- [x] T7 Keep only additive hardening: pinned image CLIs, no host ~/.local/bin in radon-api, ancestor-pinned private dirs, fail-closed group check, extra runtime tests. depends_on: [T6]
+- [ ] T8 Exact-head CI green. depends_on: [T7]
+- Dropped as duplicate or superseded by #932: base-unit User=root rewrites, base unit/timer control-plane and auto-sync moves, containerized subscription-tokens and its auth-only CLI homes, duplicate runtime cases and command/parity tests.
 
 # Task: Mount Antigravity in App Container Runtime (2026-09-28)
 
@@ -9021,6 +9065,29 @@ Review before publication: 65 commits / 112 paths audited through 72e09ffb. T-53
 ### Review 2026-10-05
 
 Audit complete through 72e09ffb: 65 commits, 112 changed paths and 300 paths including codemap callers. Two new and three inherited repairs have repeated fault-injection red/green evidence; ten remaining historical/operator candidates retain acceptance on issue #81. Standing gates 81 passed, delta acceptance 135 passed, permanent Python drills 95 passed; focused firewall 137/37, rejection 76, mode-switch 138 plus cloud owner 30, provider/caller 206 passed. Fifteen Python files, three shell files and embedded logout Python parse; no YAML/JSON/TOML changed. Diff, five-commit secret scan and substantive publication check pass. No live access, credential lookup, main push, merge, codemap edits or test-ledger edits. T5 external publication, exact-head CI and the single rolling comment are recorded on issue #81 without changing the verified head.
+
+
+# Task: Nightly testing 2026-10-07
+
+- [x] T1 depends_on: [] Build credential-free toolchain; read trusted checkpoint and open testing PRs; branch from origin/main.
+- [x] T2 depends_on: [T1] Audit 39334555..8afaaa61 and inverse test consumers; standing gates and three changed-file repetitions; reconcile inherited findings.
+- [x] T3 depends_on: [T2] Verify each actionable gap with a passing-old/failing-new mutation, restore source, run focused gates and commit one finding per commit.
+- [x] T4 depends_on: [T3] Three consecutive serial full-gate rounds; clean-base cloud FAILED-list comparison; syntax, whitespace and secret checks; append ledgers and review.
+- [ ] T5 depends_on: [T4] Substantive classifier; push only testing/2026-10-07; one draft PR and exact-head green CI; one durable issue #83 comment.
+
+Review: Four verified findings have red/green receipts (T-538/T-540/T-541 P1; T-539 P2). Delta repetitions pass 230 Python and 156 cloud cases each; new YAML owner passes 8 cases three times. Four separate finding commits and three consecutive full closing rounds pass 14,292 Python, 10,390 Vitest and 2,617 cloud cases each; corrected clean-base cloud also passes 2,617 and all closing FAILED-list comparisons are empty. The earlier Caddy startup failure remains recorded separately with its 51-case isolated pass. Delivery remains pending; T5 external draft, exact-head CI and the single checkpoint completion receipt will be recorded on issue #83 without changing the verified head. No production connections, credential lookup, notification, main push or merge authorized.
+## Mobile risk-reversal quote preset signs, 2026-10-06
+
+- [x] T1 depends_on: [] Reproduce negative BID/MID preset labels and selection: five component failures and two mobile browser failures before the fix.
+- [x] T2 depends_on: [T1] Preserve signed net quotes in preset labels and selected limit values.
+- [x] T3 depends_on: [T2] Verify 51 focused units, two mobile mocked order cases, six curation checks, dark/light screenshots and diff hygiene; record review.
+- [ ] T4 depends_on: [T3] Publish the isolated fix PR, verify all applicable checks on its exact head and confirm the required normal-priority Pushover receipt.
+
+### Review
+
+Product change is limited to four sign-preserving expressions in MobileOrderTicket. Six added component regressions cover a risk-reversal book crossing zero and all-negative BID/MID/ASK presets. Red: five component failures and two mobile failures; green: 51 component/risk/order tests, two real-pointer mobile cases (retries=0), six curation checks. Browser cases confirm exact BUY combo envelopes with SELL call/BUY put legs and negative limit prices, no early POST, and explicit unbounded-risk acknowledgment. Dark/light full-viewport screenshots inspected under /tmp/radon-risk-reversal-sign-dark/ and /tmp/radon-risk-reversal-sign-final/. Fresh-route source typecheck passes with zero diagnostics; standard tsc reports three missing workflow imports from the pre-existing .next/dev/types/validator.ts. An additional retained mobile-skew case failed when a Clerk error overlay intercepted its click; its short-strangle case passed. No financial/auth gate or CI suite was changed. The new browser spec is explicitly held out pending production-server preflight. Generated test build and tsconfig additions removed; no live order was sent.
+
+Publication verification: branch updated to main 05edd0566; its CI and VPS deployment completed successfully. Full local coverage attempts were interrupted under approximately 9.7 GiB swap usage; the first had unrelated lazy-loader timeouts, and the serial attempt recorded an equibles-contract sorting failure. These are incomplete runs, not coverage or full-suite success. All applicable GitHub checks on the published exact head must finish successfully before PR-green notification and completion.
 
 ## Tester Army publication, 2026-10-06
 

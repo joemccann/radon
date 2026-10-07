@@ -1,0 +1,15 @@
+{
+  "version": "1.3.1",
+  "source": "https://antigravity.google/cli/install.sh",
+  "manifest_base": "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/",
+  "platforms": {
+    "amd64": {
+      "url": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.3.1-4582356770750464/linux-x64/cli_linux_x64.tar.gz",
+      "sha512": "3b8349d72678795baf8788481815e20d7acf3b80f9d2f867a607e712bc6be7fb18fd7d4fcf3aeee4ae593b0f469684c6d3497524f10a4c426a1a2bdec20b1f68"
+    },
+    "arm64": {
+      "url": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.3.1-4582356770750464/linux-arm/cli_linux_arm64.tar.gz",
+      "sha512": "c41b8cd8c526eb043fa0b019377ab8109190b547624f17f5255868ace79cd8e9195a60ac7b89478101127effbe049341c4108ed0ead4b160968704a8b79d8799"
+    }
+  }
+}

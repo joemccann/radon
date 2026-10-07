@@ -10,6 +10,8 @@ import sys
 import pytest
 from pathlib import Path
 
+import yaml
+
 from newsfeed.slm.contract import SLM_BASE_ID
 
 REPO = Path(__file__).resolve().parents[2]
@@ -213,6 +215,10 @@ class TestQwen35Candidate:
 
 
 class TestRemoteCode:
+    def test_effective_llamafactory_config_explicitly_disables_remote_code(self):
+        config = yaml.safe_load(LF_YAML.read_text(encoding="utf-8"))
+        assert config.get("trust_remote_code") is False
+
     def test_no_slm_config_enables_remote_model_code(self):
         configs = sorted((REPO / "scripts" / "newsfeed" / "slm" / "configs").glob("*.yaml"))
         assert configs

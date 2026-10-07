@@ -1203,3 +1203,29 @@ Three serial full-gate rounds each pass 14,200 root Python cases / 2 skips / 23 
 | T-537 | DONE | A whole-environment copy deleting only TURSO_AUTH_TOKEN passes all 36 original browser cases. Sealed synthetic child environments reject it in all six complete/sparse and normal/retry/disabled cases (6 failed / 36 passed). Restored focused gate: 42 passed. Every fake launch preserves required runtime keys and excludes provider/database/unknown/control values; cleanup is observed. Source restored byte-for-byte; no actual browser or credential access. |
 
 Closing 2026-10-06: three consecutive serial rounds each pass 14,251 root Python cases / two skips / 23 subtests, 10,396 Vitest cases / 1,049 files and 2,624 cloud cases / seven skips. The identical-toolchain audited-base cloud run passes 2,616 / seven skips. All four sorted FAILED lists are empty; each head/base diff has zero added and zero removed failures. All product source and historical ledger prefixes are preserved; no test or ratchet was weakened. Final draft/CI/checkpoint receipts live on issue #83.
+
+## Remediation 2026-10-07
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-538 | DONE | Original discovery probe exposes synthetic provider/database/control values: 3 failed / 11 passed; all 7 original cases remain green. Isolating the probe with the existing trainer allowlist yields 14 passed. Exact process receipts cover CLI/module/MLX and failed discovery; owner docs updated. |
+| T-540 | DONE | All 15 complete-cookie regressions fail against original Python/Bash redactors; fixed focused formatter/hook/PR-rendering/docs gate: 361 passed. Actual fake-GitHub comments cover both security loop variants; following diagnostics and sink contracts remain unchanged. Owner docs updated. |
+| T-541 | DONE | Quoted true passes all 7 original tests but fails the new parsed-value assertion (1 failed / 7 passed); missing flag also fails, quoted false passes 8. Restored configuration owner passes 8 cases in three serial runs. Product YAML is byte-identical; existing literal checks retained. |
+| T-539 | DONE | Legacy display-only sanitizer mutation leaves all 3 original helper tests green and fails all 3 new real-reviewer output cases. Restored reviewer: 6 passed; complete output, readable text, original evidence and explicit-clock records verified. Product reviewer source restored byte-for-byte. |
+
+
+### Closing gates 2026-10-07
+
+| Round | Root Python | Root Vitest | Cloud | Failed-list comparison against base |
+|---|---|---|---|---|
+| 1 | 14,292 passed / 2 skipped / 23 subtests | 10,390 passed / 1,048 files | 2,617 passed / 7 skipped | Empty on both sides; 0 added / 0 removed |
+| 2 | 14,292 passed / 2 skipped / 23 subtests | 10,390 passed / 1,048 files | 2,617 passed / 7 skipped | Empty on both sides; 0 added / 0 removed |
+| 3 | 14,292 passed / 2 skipped / 23 subtests | 10,390 passed / 1,048 files | 2,617 passed / 7 skipped | Empty on both sides; 0 added / 0 removed |
+
+Three consecutive serial rounds complete without failure. The clean-base cloud gate at 8afaaa61 passes 2,617 cases / 7 skips; its sorted FAILED list and all three closing lists are empty. The detached comparison worktree was removed. No test or coverage threshold changed to accommodate the local toolchain.
+
+One earlier closing attempt is retained as failed: root Python 14,292 passed / 2 skips / 23 subtests, Vitest 10,390 passed / 1,048 files, cloud 2,616 passed / 1 failed / 7 skips. Its sole addition to the base FAILED list was cloud/tests/test_caddyfile.py::TestRestartWindowMechanism::test_request_during_an_upstream_gap_is_served_not_502ed (listener startup at cloud/tests/test_caddyfile.py:699). The complete owner file passed 51 cases alone; no source/assertion changes were made and all three full rounds were restarted. This failure is not relabeled green.
+
+Standing Python passed 14,264 cases / 2 skips / 23 subtests. Initial Vitest ran 10,369 cases / 21 skips and initial cloud ran 2,615 cases / 2 failures / 7 skips with ambient Python outside the venv; corrected PATH selects the isolated Python, modern Bash/OpenSSL and Caddy. The initial cloud FAILED entries were test_app_runtime.py::test_notify_proxy_outlives_the_run_handoff_and_relays_while_docker_runs and test_monorepo_cutover.py::test_precloud_rollback_keeps_immutable_journal_support; the latter selected ambient Python 3.9 and rejected zip(strict=True). The two cloud owner files then passed 129 cases serially. Full pre-commit gates passed 14,292 Python, 10,390 Vitest and 2,617 cloud cases. Changed-file repetitions passed 230 Python and 156 cloud cases / 3 skips in each of three runs; the subsequently added YAML semantic case passed its eight-case owner in three supplemental runs.
+
+Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) and 6 (T-539) cases after a full green pre-commit round. T-538/T-540/T-541/T-539 are DONE with separate commits and retained red/green receipts. Frozen ledger prefixes, restored reviewer/YAML bytes, syntax, bash -n, whitespace, secret scan and absence of data/replica.db verified. No codemap or reliability-ledger edits. Inherited marketing-header and admin-preflight browser acceptance remains operator-only on issue #83; no local screenshot/390px result claimed. Exact-head draft/CI and the single checkpoint receipt are recorded externally on issue #83.
