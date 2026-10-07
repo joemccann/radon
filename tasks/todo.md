@@ -8981,6 +8981,17 @@ Review before publication: 65 commits / 112 paths audited through 72e09ffb. T-53
 
 Audit complete through 72e09ffb: 65 commits, 112 changed paths and 300 paths including codemap callers. Two new and three inherited repairs have repeated fault-injection red/green evidence; ten remaining historical/operator candidates retain acceptance on issue #81. Standing gates 81 passed, delta acceptance 135 passed, permanent Python drills 95 passed; focused firewall 137/37, rejection 76, mode-switch 138 plus cloud owner 30, provider/caller 206 passed. Fifteen Python files, three shell files and embedded logout Python parse; no YAML/JSON/TOML changed. Diff, five-commit secret scan and substantive publication check pass. No live access, credential lookup, main push, merge, codemap edits or test-ledger edits. T5 external publication, exact-head CI and the single rolling comment are recorded on issue #81 without changing the verified head.
 
+## Nightly testing 2026-10-06
+
+- [x] T1 depends_on: [] Build isolated toolchain, recover trusted checkpoint and create authorized branch.
+- [x] T2 depends_on: [T1] Audit merged delta and inverse consumers; standing gates and three changed-file repetitions; reconcile historical findings.
+- [x] T3 depends_on: [T2] Verify and repair findings serially with red/green evidence and per-finding commits.
+- [x] T4 depends_on: [T3] Three serial closing full-gate rounds, base cloud comparison and hygiene review.
+- [ ] T5 depends_on: [T4] Publish substantive draft if warranted, await exact-head CI and post one rolling issue comment.
+
+### Review 2026-10-06
+
+Audit complete through 39334555: 11 commits / 78 paths. T-536/T-537 have mutation red/green evidence, separate test-only commits and unchanged production implementations. Three serial closing rounds each pass 14,251 Python, 10,396 Vitest and 2,624 cloud cases; audited-base cloud passes 2,616 and all FAILED-list diffs are empty. Historical prefixes, frozen paths, syntax, whitespace and secret checks pass. No production access, credentials, unauthorized branch push, merge or notification. Two browser acceptances remain operator-only. T5 external publication, exact-head CI and the single rolling comment are recorded on issue #83 without changing the verified head; this pre-publication checklist does not claim future green delivery.
 ## Nightly reliability 2026-10-06
 
 - [x] T1 depends_on: [] Install isolated toolchain, recover trusted checkpoint and open PR inventory, create authorized branch.
@@ -8994,3 +9005,11 @@ Audit complete through 72e09ffb: 65 commits, 112 changed paths and 300 paths inc
 Audit through 39334555: 12 commits, 78 changed paths, 134 paths including codemap callers. Two new and four inherited repairs have repeated fault-injection red/green evidence. Focused suites: cloud admission 156, breadth/callers 102, archive/transport 112, API health 90, scripts health 337, assistant native acceptance 8, relay 13; Chrome chat 14 and modify 4, with screenshot inspection and TypeScript green. Permanent Python drills 95, standing gates 78. Fourteen Python files and two shell files parse; no YAML/JSON/TOML changed. Diff hygiene, six-commit secret scan and substantive publication check pass. R-027 counters remain an open inherited candidate with exact acceptance on issue #81, alongside four operator-only findings and two unconfirmed installation actions; no candidate is closed on inspection. T5 draft publication, registered exact-head CI and the single rolling comment are recorded on issue #81 after delivery, without a bookkeeping-only push. No live access, credentials, main push, merge, codemap or test-ledger edits.
 
 T5 CI repair review: unchanged successful-replacement signal assertion failed in Vitest shard 5; the native request-owner completion control reproduced red twice. Only unfinished transports are aborted during cleanup; completed responses retain successful signal state. Eight native acceptance and fourteen Chrome lifecycle regressions pass without weakening the original assertion. Exact-head CI is restarted after the ordinary repair push; all preceding heads are superseded.
+
+## PR #924 CI repair 2026-10-07
+
+- [x] T1 depends_on: [] Inspect exact-head CI failure and isolated relay harness.
+- [x] T2 depends_on: [T1] Repair the harness surgically and inspect syntax/diff.
+- [ ] T3 depends_on: [T2] Push to existing PR, await every applicable exact-head CI check, and deliver one accepted Pushover notification.
+
+Dependency graph: T1 -> T2 -> T3. No local test suites; use GitHub runners.
