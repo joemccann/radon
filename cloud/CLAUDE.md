@@ -590,6 +590,25 @@ stop|start|restart`. Contract: `docs/operations.md` "Host control socket".
 Gateway `Requires=` or `After=` dependency. Coordinated release restart and
 schema validation do not change that zero-shared-fate runtime design.
 
+## Secret-store scheduled job isolation
+
+`radon-subscription-tokens`, `radon-ai-cycle`, `radon-ai-cycle-backfill`, and
+`radon-aa-frontier-refresh` are root-dispatched image oneshots, independent of
+host-runtime defaults for other timers. They execute only the release Python
+image through `/usr/local/sbin/radon-app-runtime`, with non-root container
+credentials and per-unit root:radon-secrets master-key staging. No host checkout,
+virtualenv or executable directory is mounted. AI jobs persist only secret-store
+and AI-cycle state; subscription maintenance persists known credential directories
+and its sidecar/lock, using pinned image CLIs with auth-only temporary homes.
+
+All four base service files are control-plane artifacts in the paired bootstrap
+and deploy-helper inventories. Keep their installed-units SHA256 pins current.
+Deploy the image, wrapper and unit definitions together. Timers retain their
+cadence and units retain timeout/exit contracts. Stops reap the named container
+before removing its staged key; a surviving orphan preserves its key and fails
+cleanup. Missing keys and an unverifiable credential-group boundary fail closed.
+See `docs/operations.md` and `docs/subscription-tokens.md` for credential recovery.
+
 ## Verification
 
 Run from the monorepo root:

@@ -1440,7 +1440,11 @@ class TestSubscriptionRecoveryBillingOwner:
         unit = (_ROOT / "cloud/services/radon-subscription-tokens.service").read_text()
         assert "Environment=RADON_SECRET_STORE_PATH=" in unit
         assert "LoadCredentialEncrypted=radon-secret-store-key:" in unit
-        assert "-m scripts.subscription_tokens --once" in unit
+        assert "User=root" in unit
+        assert "ExecStart=/usr/local/sbin/radon-app-runtime run %n" in unit
+        assert "ExecStartPre=/home/radon" not in unit
+        runtime = (_ROOT / "cloud/scripts/radon-app-runtime.sh").read_text()
+        assert "exec python -m scripts.subscription_tokens --once" in runtime
 
 
 class TestApiTimerOwner:
