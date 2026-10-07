@@ -105,6 +105,17 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("IBStatusProvider", () => {
+  it("REL-318: displays an open-socket market-data outage as unhealthy until recovery", async () => {
+    const { result } = renderHook(() => useIBStatusContext(), { wrapper });
+    await flushSocketOpen();
+    act(() => latestWs().simulateOpen());
+    act(() => latestWs().simulateMessage({ type: "status", ib_connected: true, market_data_degraded: true }));
+    expect(result.current.ibConnected).toBe(true);
+    expect(result.current.displayStatus).toBe("unhealthy");
+    act(() => latestWs().simulateMessage({ type: "status", ib_connected: true, market_data_degraded: false }));
+    expect(result.current.displayStatus).toBe("connected");
+  });
+
   it("renders children", () => {
     const { result } = renderHook(() => useIBStatusContext(), { wrapper });
     expect(result.current).toBeDefined();

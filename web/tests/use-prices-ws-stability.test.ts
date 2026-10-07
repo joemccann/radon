@@ -76,6 +76,18 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("Connection stability", () => {
+  it("REL-318: preserves broker liveness while exposing degraded market data", async () => {
+    const { result } = renderHook(() => usePrices({ symbols: ["AAPL"], enabled: true }));
+    await flush();
+    act(() => latestWs().simulateOpen());
+    act(() => latestWs().simulateMessage({ type: "status", ib_connected: true, market_data_degraded: true }));
+    expect(result.current.connected).toBe(true);
+    expect(result.current.ibConnected).toBe(true);
+    expect(result.current.marketDataDegraded).toBe(true);
+    act(() => latestWs().simulateMessage({ type: "status", ib_connected: true, market_data_degraded: false }));
+    expect(result.current.marketDataDegraded).toBe(false);
+  });
+
   it("caps simultaneous depth subjects at the relay's three-ticket budget", async () => {
     renderHook(() => usePrices({
       symbols: ["SLV"],

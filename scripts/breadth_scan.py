@@ -726,10 +726,11 @@ def cached_history_covers_completed_session(
     today's bar was in progress) would otherwise be served all evening and the
     chart would lag the freshness rail by a session."""
     history = cached.get("history") or []
-    if not history or not isinstance(history[-1], dict):
+    # R-730 / REL-314: a malformed or future date is not completion evidence.
+    if not isinstance(history, list) or not history or not isinstance(history[-1], dict):
         return False
-    last_date = str(history[-1].get("date") or "")[:10]
-    return last_date >= last_completed_session_date(now)
+    last_date = history[-1].get("date")
+    return isinstance(last_date, str) and last_date == last_completed_session_date(now)
 
 
 def main() -> None:

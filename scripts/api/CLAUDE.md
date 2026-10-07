@@ -151,3 +151,14 @@ Production cancel/modify routes retain the original-client subprocess path.
 Do not import the unused pooled shortcut into the server. Legacy helpers
 must refuse unknown or mismatched client ownership before mutation; modify
 also respects trading halt, while owned cancellation remains available.
+
+## Passive dependency health (R-028 / REL-316)
+
+Trusted `/health` and protected `/health/lite` include coarse `dependencies`
+verdicts for database reachability and market data. One relay heartbeat is read
+through bounded API Hrana in a worker thread, concurrently with the existing
+observational Gateway probe. Database uncertainty never becomes a healthy feed;
+malformed or future timestamps remain unknown, stale ticks and farm faults
+remain degraded, and no-subscriber/off-hours observations remain idle. Public
+`/health` stays liveness-only. This read never heals, reconnects, writes health
+rows or exposes raw provider errors/accounts/topology.

@@ -62,7 +62,7 @@ _FENCE_RE = re.compile(r"```.*?```", re.S)
 # (spaces inside) or led by an auth scheme word ("Authorization: Basic <value>").
 _SECRET_ASSIGN_RE = re.compile(
     r"\b([A-Za-z0-9_-]*(?:TOKEN|SECRET|PASSWORD|PASSWD|PASS|AUTH|CREDENTIAL|"
-    r"API[-_]?KEY|[-_]KEY)[A-Za-z0-9_-]*)([\"']?\s*[=:]\s*)"
+    r"API[-_]?KEY|[-_]KEY|COOKIE|SESS(?:ION)?[-_]?ID|_SESSION|CSRF|XSRF)[A-Za-z0-9_-]*)([\"']?\s*[=:]\s*)"
     r"(?:(?:basic|bearer|digest|token)\s+)?(?:\"[^\"\n]*\"|'[^'\n]*'|\S+)",
     re.I,
 )
@@ -82,12 +82,13 @@ _CREDENTIAL_LITERAL_RE = re.compile(
     r"|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})"
 )
 _EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w.-]+\.\w+\b")
-# App routes (/api/..., /v1/...) with any query or fragment. Not filesystem
+# App routes (/api/..., /v1/...) with any query or fragment, including
+# dynamic segments ([id], :id, {id}). Not filesystem
 # roots: lock-held comments name $REPO and $RUNNER_LOCK (/Users/..., /tmp/...,
 # /home/...).
 _ROUTE_RE = re.compile(
     r"(?<![\w.])(/(?!Users\b|home\b|tmp\b|private\b|var\b|opt\b)"
-    r"[a-z][\w.-]*(?:(?:/[\w.-]+)+(?:[?#]\S*)?|[?#]\S*))"
+    r"[a-z][\w.-]*(?:(?:/[\w.:\[\]{}-]+)+(?:[?#]\S*)?|[?#]\S*))"
 )
 # Any scheme, not just http(s): database, cache and socket URIs carry
 # credentials in their userinfo or query.

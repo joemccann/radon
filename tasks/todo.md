@@ -1,3 +1,12 @@
+# Task: Nightly CI performance audit (2026-10-06)
+
+- [x] T1 depends_on: [] Read open PRs/checkpoint, audit main changes, acquire Actions jobs/logs/cache/rules.
+- [x] T2 depends_on: [T1] Classify comparable runs, reconstruct gate DAG, rank safe material candidates.
+- [x] T3 depends_on: [T2] Surgical CIP-018 revert after its recorded >90s shard-wall trigger; 1 failed / 37 passed red, 159 passed green; cloud 58 passed.
+- [ ] T4 depends_on: [T3] Publish substantive draft PR only, verify exact-head CI, post one rolling issue comment.
+
+Review: No additional material optimization qualifies. CIP-018 organic run 37357797556 / job 111924636029: scripts-gh 93s wall exceeds its recorded 90s revert trigger. Restore only its shard membership and matching ownership contracts; preserve full inventory, coverage, gate and deployment guarantees.
+
 # Task: PDF extract error detail (2026-10-03)
 
 - [x] T1 depends_on: [] Failing tests: rc + MemoryError, negative rc signal name, secret redaction, truncated stderr, prefix preserved, TimeoutExpired, persisted health/journal bound.
@@ -8983,3 +8992,16 @@ Audit complete through 72e09ffb: 65 commits, 112 changed paths and 300 paths inc
 ### Review 2026-10-06
 
 Audit complete through 39334555: 11 commits / 78 paths. T-536/T-537 have mutation red/green evidence, separate test-only commits and unchanged production implementations. Three serial closing rounds each pass 14,251 Python, 10,396 Vitest and 2,624 cloud cases; audited-base cloud passes 2,616 and all FAILED-list diffs are empty. Historical prefixes, frozen paths, syntax, whitespace and secret checks pass. No production access, credentials, unauthorized branch push, merge or notification. Two browser acceptances remain operator-only. T5 external publication, exact-head CI and the single rolling comment are recorded on issue #83 without changing the verified head; this pre-publication checklist does not claim future green delivery.
+## Nightly reliability 2026-10-06
+
+- [x] T1 depends_on: [] Install isolated toolchain, recover trusted checkpoint and open PR inventory, create authorized branch.
+- [x] T2 depends_on: [T1] Audit delta and codemap importers; verify standing sweeps and inherited candidates.
+- [x] T3 depends_on: [T2] Repair verified findings serially with repeated red/green fault injection and focused gates.
+- [x] T4 depends_on: [T3] Run permanent drills, syntax and diff hygiene, substantive publication check.
+- [ ] T5 depends_on: [T4] Publish one draft, watch exact-head CI and post one durable rolling comment.
+
+### Review 2026-10-06
+
+Audit through 39334555: 12 commits, 78 changed paths, 134 paths including codemap callers. Two new and four inherited repairs have repeated fault-injection red/green evidence. Focused suites: cloud admission 156, breadth/callers 102, archive/transport 112, API health 90, scripts health 337, assistant native acceptance 8, relay 13; Chrome chat 14 and modify 4, with screenshot inspection and TypeScript green. Permanent Python drills 95, standing gates 78. Fourteen Python files and two shell files parse; no YAML/JSON/TOML changed. Diff hygiene, six-commit secret scan and substantive publication check pass. R-027 counters remain an open inherited candidate with exact acceptance on issue #81, alongside four operator-only findings and two unconfirmed installation actions; no candidate is closed on inspection. T5 draft publication, registered exact-head CI and the single rolling comment are recorded on issue #81 after delivery, without a bookkeeping-only push. No live access, credentials, main push, merge, codemap or test-ledger edits.
+
+T5 CI repair review: unchanged successful-replacement signal assertion failed in Vitest shard 5; the native request-owner completion control reproduced red twice. Only unfinished transports are aborted during cleanup; completed responses retain successful signal state. Eight native acceptance and fourteen Chrome lifecycle regressions pass without weakening the original assertion. Exact-head CI is restarted after the ordinary repair push; all preceding heads are superseded.

@@ -69,3 +69,13 @@ def test_scraped_text_reaches_the_tty_without_control_bytes():
     # The title renders on ONE line; embedded newlines cannot spoof fields.
     title_lines = [line for line in shown.splitlines() if line.startswith("Title: ")]
     assert title_lines == ["Title:  [2JFed cuts Tags: SPOOF"]
+
+
+def test_bidi_and_format_controls_are_stripped_before_the_tty():
+    from newsfeed.slm.review_cli import tty_safe
+
+    hostile = "Fed ‮STUC‬ ⁦x⁩ ​ok‏﻿؜ "
+    shown = tty_safe(hostile)
+    for ch in "‮‬⁦⁩​‏﻿؜ ":
+        assert ch not in shown, hex(ord(ch))
+    assert tty_safe("Fed cuts 25bp: SPX → 5000") == "Fed cuts 25bp: SPX → 5000"

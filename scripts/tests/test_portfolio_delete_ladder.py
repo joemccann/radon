@@ -48,8 +48,13 @@ class FakeHranaStore:
             self.batch_attempts += 1
             if self.batch_attempts <= self.fail_batch_deletes:
                 raise HranaHttpError("HTTPError: 502 upstream forward failed")
-            limit = params[1]
-            doomed = [k for k in self.keys if k < cutoff][:limit]
+            # Both legacy SELECT-page and explicit frozen-key batch SQL
+            # execute the same fake-store semantics without weakening faults.
+            if "SELECT" in sql:
+                limit = params[1]
+                doomed = [k for k in self.keys if k < cutoff][:limit]
+            else:
+                doomed = list(params)
             self.keys = [k for k in self.keys if k not in doomed]
             return []
         # single-key DELETE — params = (taken_at,)
