@@ -1,8 +1,8 @@
 # Trusted subscription CLI payloads
 
 The Python image contains root-owned Claude, Codex, Grok and Antigravity
-executables. Secret-bearing probes must never bind-mount host CLI binaries or
-load host npm modules. The image's unprivileged build smoke checks all four
+executables. A container that holds the secret-store key group (`radon-api`)
+must never bind-mount host CLI binaries or load host npm modules. The image's unprivileged build smoke checks all four
 versions and confirms the executable and its parent are unwritable.
 
 The npm package and complete lockfile pin official distributions and native

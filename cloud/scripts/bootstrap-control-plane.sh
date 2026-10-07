@@ -161,14 +161,11 @@ readonly -a SOURCES=(
   services/radon-newsfeed.service.d/runtime-container.conf
   services/radon-research.service
   services/radon-research.service.d/runtime-container.conf
-  services/radon-subscription-tokens.service
-  services/radon-subscription-tokens.timer
-  services/radon-ai-cycle.service
-  services/radon-ai-cycle.timer
-  services/radon-ai-cycle-backfill.service
-  services/radon-ai-cycle-backfill.timer
-  services/radon-aa-frontier-refresh.service
-  services/radon-aa-frontier-refresh.timer
+  services/radon-subscription-vault.service
+  services/radon-subscription-vault.service.d/runtime-container.conf
+  services/radon-ai-cycle.service.d/runtime-container.conf
+  services/radon-ai-cycle-backfill.service.d/runtime-container.conf
+  services/radon-aa-frontier-refresh.service.d/runtime-container.conf
 )
 readonly -a LOGICAL_TARGETS=(
   /usr/local/sbin/radon-deploy-root
@@ -213,14 +210,11 @@ readonly -a LOGICAL_TARGETS=(
   /etc/systemd/system/radon-newsfeed.service.d/runtime-container.conf
   /etc/systemd/system/radon-research.service
   /etc/systemd/system/radon-research.service.d/runtime-container.conf
-  /etc/systemd/system/radon-subscription-tokens.service
-  /etc/systemd/system/radon-subscription-tokens.timer
-  /etc/systemd/system/radon-ai-cycle.service
-  /etc/systemd/system/radon-ai-cycle.timer
-  /etc/systemd/system/radon-ai-cycle-backfill.service
-  /etc/systemd/system/radon-ai-cycle-backfill.timer
-  /etc/systemd/system/radon-aa-frontier-refresh.service
-  /etc/systemd/system/radon-aa-frontier-refresh.timer
+  /etc/systemd/system/radon-subscription-vault.service
+  /etc/systemd/system/radon-subscription-vault.service.d/runtime-container.conf
+  /etc/systemd/system/radon-ai-cycle.service.d/runtime-container.conf
+  /etc/systemd/system/radon-ai-cycle-backfill.service.d/runtime-container.conf
+  /etc/systemd/system/radon-aa-frontier-refresh.service.d/runtime-container.conf
 )
 readonly -a MODES=(
   0755 0755 0755 0644 0644 0755 0755 0644
@@ -231,8 +225,7 @@ readonly -a MODES=(
   0644 0644 0644 0644 0644 0644
   0644 0644 0644 0644 0644
   0644 0644
-  0644 0644 0644 0644
-  0644 0644 0644 0644
+  0644 0644 0644 0644 0644
 )
 readonly -a KINDS=(
   shell shell shell python python shell shell compose
@@ -244,8 +237,7 @@ readonly -a KINDS=(
   systemd
   dropin dropin dropin dropin dropin
   systemd dropin
-  systemd systemd systemd systemd
-  systemd systemd systemd systemd
+  systemd dropin dropin dropin dropin
 )
 
 [[ "${#SOURCES[@]}" -eq "${#LOGICAL_TARGETS[@]}" && \
@@ -305,13 +297,54 @@ DAEMON_RELOAD_FAILED=0
 declare -a TRANSACTION_TARGETS=()
 declare -a BACKUP_EXISTED=()
 
+# The manifest and ready marker sit in radon-owned /var/lib/radon, so a by-name
+# rm then cp there lets radon plant a link in between (DS-2026-10-05-03).
+# Restore through a pinned directory fd: build the backup under a fresh temp
+# name, then rename it over the target, which replaces a link, never follows it.
 restore_target() {
   local index="$1" target="$2"
-  rm -f -- "$target"
-  if [[ "${BACKUP_EXISTED[$index]:-0}" == "1" ]]; then
-    mkdir -p "$(dirname "$target")"
-    cp -a -- "$BACKUP_DIR/$index" "$target"
-  fi
+  "$PYTHON_BIN" - "$BACKUP_DIR/$index" "$target" "${BACKUP_EXISTED[$index]:-0}" "$TEST_MODE" <<'PY_RESTORE_TARGET'
+import os, secrets, stat, sys
+backup, target, existed, test = sys.argv[1], sys.argv[2], sys.argv[3] == "1", sys.argv[4] == "1"
+parent, name = os.path.split(target)
+os.makedirs(parent, exist_ok=True)
+dfd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    if not existed:
+        try:
+            os.unlink(name, dir_fd=dfd)
+        except FileNotFoundError:
+            pass
+        sys.exit(0)
+    info = os.lstat(backup)
+    tmp = f".radon-restore.{name}.{secrets.token_hex(8)}"
+    if stat.S_ISLNK(info.st_mode):
+        os.symlink(os.readlink(backup), tmp, dir_fd=dfd)
+    else:
+        src = os.open(backup, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dfd)
+            try:
+                while chunk := os.read(src, 1 << 16):
+                    view = memoryview(chunk)
+                    while view:
+                        view = view[os.write(fd, view):]
+                if not test:
+                    os.fchown(fd, info.st_uid, info.st_gid)
+                os.fchmod(fd, stat.S_IMODE(info.st_mode))
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        finally:
+            os.close(src)
+    try:
+        os.rename(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd)
+    except OSError:
+        os.unlink(tmp, dir_fd=dfd)
+        raise
+finally:
+    os.close(dfd)
+PY_RESTORE_TARGET
 }
 
 rollback_bundle() {
@@ -523,8 +556,9 @@ for index in "${!SOURCES[@]}"; do
       # Type=notify + WatchdogSec because forcing simple made systemd stop
       # requiring keepalives, and a relay with a dead socket sat
       # `active (running)` forever. Both gates refused what the repo ships.
-      grep -qE '^Type=(simple|notify)$' "$staged_path" || \
-        die "drop-in must set Type=simple or Type=notify: $relative_source"
+      # Type=oneshot: the timer-owned secret-store jobs (DS-2026-10-05-05).
+      grep -qE '^Type=(simple|notify|oneshot)$' "$staged_path" || \
+        die "drop-in must set Type=simple, Type=notify or Type=oneshot: $relative_source"
       grep -q '^ExecStart=/usr/local/sbin/radon-app-runtime run %n$' "$staged_path" || \
         die "drop-in must ExecStart radon-app-runtime: $relative_source"
       grep -q '^ExecStartPre=$' "$staged_path" || \

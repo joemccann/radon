@@ -221,6 +221,7 @@ only a prefix of a baked key is rejected.
 - Canonical secrets: `/etc/radon/env` (regular file, mode `0640`, owner `root:radon`)
 - Compatibility secret symlink: `/home/radon/radon-cloud/.env` -> `/etc/radon/env`
 - Canonical media: `/var/lib/radon/media` (owner `radon:radon-media`; caddy is not in group `radon`). Root changes its mode only through an `O_NOFOLLOW` fd (`chmod_dir_nofollow`); ACL changes inside it, including recursive `-R -P` walks, run as `radon` via `setpriv`
+- Control-plane rollback state (manifest, ready marker) in radon-owned `/var/lib/radon`: root restores it only through a pinned `O_NOFOLLOW` directory fd, writing a fresh `O_EXCL` temp then renaming it over the target (`restore_target`); never a by-name `rm` then `cp`
 - Private research: `/var/lib/radon-private` is a root-owned `0700` anchor;
   its `research` child is radon-owned `0700`. The worker mounts that child
   read-write and API read-only at `/var/lib/radon/research`. Seed through the
@@ -486,6 +487,25 @@ and heals the agent-CLI subscription credentials (claude, codex, grok,
 Antigravity `agy`) from the encrypted secret store, with a daily keepalive
 probe; a dead codex or grok grant pages a one-tap login link. Runbook:
 [`docs/subscription-tokens.md`](../docs/subscription-tokens.md).
+
+**Secret-store key units (DS-2026-10-05-05).** Every unit that loads
+`radon-secret-store-key` runs through `radon-app-runtime`: `radon-api`, the
+control-plane `radon-subscription-vault.service` (base unit and drop-in), and
+the `Type=oneshot` drop-ins for `radon-ai-cycle`, `radon-ai-cycle-backfill`
+and `radon-aa-frontier-refresh`. Both drop-in gates therefore accept
+`Type=simple|notify|oneshot`. `radon-subscription-tokens` stays `User=radon`
+with no key and reaches the vault through the broker socket
+(`/run/radon-subscription-vault/vault.sock`); its `Wants=` starts the broker.
+`install-units` never enables a `.service`, so an existing host needs one
+`systemctl enable radon-subscription-vault.service` for boot start. Host
+cutover (removing the plaintext seed key): `docs/operations.md` "Secret-store
+key cutover". Contract: `cloud/tests/test_ds_secret_store_key_units.py`.
+The Python image carries integrity-pinned `claude`, `codex`, `grok` and `agy`
+(`docker/app/vendor-clis/`), so `radon-api` never mounts host
+`~/.local/bin` while it holds the key group. Root `prepare_private_dir` pins
+every ancestor with `O_NOFOLLOW`, and an unverifiable `id -nG radon` refuses
+every key-bearing start. Contract: `cloud/tests/test_secret_jobs_runtime.py`.
+
 `radon-tv-alerts.timer` runs every 5 minutes, 24/7 (`Persistent=false`), and
 drains TradingView webhook rows into one digest Pushover per cycle. Caddy bounds
 `/api/webhooks/tradingview/*` to TradingView's four sender IPs and a 16KB body.
@@ -587,26 +607,6 @@ stop|start|restart`. Contract: `docs/operations.md` "Host control socket".
 `radon-health.service` remains runtime-isolated from the trading cascade: no
 Gateway `Requires=` or `After=` dependency. Coordinated release restart and
 schema validation do not change that zero-shared-fate runtime design.
-
-## Secret-store scheduled job isolation
-
-`radon-subscription-tokens`, `radon-ai-cycle`, `radon-ai-cycle-backfill`, and
-`radon-aa-frontier-refresh` are root-dispatched image oneshots, independent of
-host-runtime defaults for other timers. They execute only the release Python
-image through `/usr/local/sbin/radon-app-runtime`, with non-root container
-credentials and per-unit root:radon-secrets master-key staging. No host checkout,
-virtualenv or executable directory is mounted. AI jobs persist only secret-store
-and AI-cycle state; subscription maintenance persists known credential directories
-and its sidecar/lock, using pinned image CLIs with auth-only temporary homes.
-
-All four base service files and their timers are control-plane artifacts in the paired bootstrap
-and deploy-helper inventories. Keep their installed-units SHA256 pins current. They are excluded from scheduled
-unit auto-sync so unit/wrapper/image changes converge through the same deploy.
-Deploy the image, wrapper and unit definitions together. Timers retain their
-cadence and units retain timeout/exit contracts. Stops reap the named container
-before removing its staged key; a surviving orphan preserves its key and fails
-cleanup. Missing keys and an unverifiable credential-group boundary fail closed.
-See `docs/operations.md` and `docs/subscription-tokens.md` for credential recovery.
 
 ## Verification
 

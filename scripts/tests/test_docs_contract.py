@@ -1438,13 +1438,11 @@ class TestSubscriptionRecoveryBillingOwner:
         assert "different store" in section and "decrypted key" in section
         assert "operations.md#encrypted-credential-store-profile-credentials-tab" in section
         unit = (_ROOT / "cloud/services/radon-subscription-tokens.service").read_text()
-        assert "Environment=RADON_SECRET_STORE_PATH=" in unit
-        assert "LoadCredentialEncrypted=radon-secret-store-key:" in unit
-        assert "User=root" in unit
-        assert "ExecStart=/usr/local/sbin/radon-app-runtime run %n" in unit
-        assert "ExecStartPre=/home/radon" not in unit
-        runtime = (_ROOT / "cloud/scripts/radon-app-runtime.sh").read_text()
-        assert "exec python -m scripts.subscription_tokens --once" in runtime
+        # DS-2026-10-05-05: the vault context is the broker socket, never the key.
+        assert "Environment=RADON_SUBSCRIPTION_VAULT_SOCKET=" in unit
+        assert "LoadCredentialEncrypted" not in unit
+        assert "radon-subscription-vault.service" in section
+        assert "-m scripts.subscription_tokens --once" in unit
 
 
 class TestApiTimerOwner:

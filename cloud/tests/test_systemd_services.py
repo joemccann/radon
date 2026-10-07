@@ -95,6 +95,7 @@ EXPECTED_SERVICE_FILES = [
     "radon-liquidcompute.timer",
     "radon-subscription-tokens.service",
     "radon-subscription-tokens.timer",
+    "radon-subscription-vault.service",
     "radon-llm-index.service",
     "radon-llm-index.timer",
     "radon-nextjs-db-watchdog.service",
@@ -207,10 +208,6 @@ STATIC_SERVICES = {
 # stays root, and like the drift audit it executes a root-owned
 # control-plane copy, never the radon-writable checkout.
 ROOT_REQUIRED_SERVICES = {
-    "radon-subscription-tokens.service",
-    "radon-ai-cycle.service",
-    "radon-ai-cycle-backfill.service",
-    "radon-aa-frontier-refresh.service",
     "radon-drift-audit.service",
     "radon-disk-cleanup.service",
 }
@@ -268,8 +265,7 @@ class TestAiCycleCredentials:
             "Environment=RADON_SECRET_STORE_PATH="
             "/home/radon/radon/data/secret_store/secrets.db"
         ) in lines
-        assert "execstartpre" not in svc
-        assert svc["execstart"] == "/usr/local/sbin/radon-app-runtime run %n"
+        assert "scripts/secret_store.py" in svc["execstartpre"]
 
     def test_waits_for_frontier_refresh_without_requiring_success(self, unit):
         section = unit(self.FILENAME)["Unit"]
@@ -290,33 +286,37 @@ class TestSubscriptionTokens:
     SERVICE = "radon-subscription-tokens.service"
     TIMER = "radon-subscription-tokens.timer"
 
-    def test_root_dispatches_container_with_private_umask(self, unit):
+    def test_runs_as_radon_with_private_umask(self, unit):
         svc = unit(self.SERVICE)["Service"]
         assert svc["type"] == "oneshot"
-        assert svc["user"] == "root"
+        assert svc["user"] == "radon"
         assert svc["umask"] == "0077"
-        assert svc["workingdirectory"] == "/"
+        assert svc["workingdirectory"] == "/home/radon/radon"
         assert svc["environmentfile"] == ENV_FILE_PATH
 
-    def test_loads_the_encrypted_secret_store(self, unit, services_dir):
+    def test_reaches_the_vault_through_the_broker_without_the_key(self, unit, services_dir):
+        # DS-2026-10-05-05: this unit runs third-party CLIs out of
+        # radon-writable directories, so it never loads the master key. The
+        # broker radon-subscription-vault (inside radon-app-runtime) does.
         svc = unit(self.SERVICE)["Service"]
-        assert svc["loadcredentialencrypted"] == (
-            "radon-secret-store-key:"
-            "/etc/credstore.encrypted/radon-secret-store-key"
-        )
+        assert "loadcredentialencrypted" not in svc
+        assert "execstartpre" not in svc
         lines = (services_dir / self.SERVICE).read_text(
             encoding="utf-8"
         ).splitlines()
         assert (
-            "Environment=RADON_SECRET_STORE_PATH="
-            "/home/radon/radon/data/secret_store/secrets.db"
+            "Environment=RADON_SUBSCRIPTION_VAULT_SOCKET="
+            "/run/radon-subscription-vault/vault.sock"
         ) in lines
-        assert "execstartpre" not in svc
-        assert svc["execstart"] == "/usr/local/sbin/radon-app-runtime run %n"
+        section = unit(self.SERVICE)["Unit"]
+        assert section["wants"] == "radon-subscription-vault.service"
+        assert "radon-subscription-vault.service" in section["after"].split()
 
     def test_runs_the_once_mode_within_a_finite_budget(self, unit):
         svc = unit(self.SERVICE)["Service"]
-        assert svc["execstart"] == "/usr/local/sbin/radon-app-runtime run %n"
+        assert svc["execstart"].endswith(
+            "/home/radon/radon/.venv/bin/python -m scripts.subscription_tokens --once"
+        )
         # A oneshot that outlives its own slot blocks every later refresh.
         assert int(svc["timeoutstartsec"]) < 1800
 
@@ -330,19 +330,27 @@ class TestSubscriptionTokens:
         svc = unit(self.SERVICE)["Service"]
         assert svc["successexitstatus"] == "1"
 
-    def test_runtime_owns_only_the_subscription_state_directory(self, unit):
+    def test_owns_the_state_directory_its_sidecar_lives_in(self, unit):
+        # The sidecar under /var/lib/radon carries the 12h page cooldowns and
+        # the consecutive-error streak. Without an owned state directory the
+        # write fails and both reset on every run, so a needs_reauth provider
+        # would page every 30 minutes forever.
         svc = unit(self.SERVICE)["Service"]
-        # A root StateDirectory=radon recursively changes shared state ownership.
-        assert "statedirectory" not in svc
-        runtime = (Path(__file__).resolve().parents[1] / "scripts/radon-app-runtime.sh").read_text()
-        assert 'prepare_private_dir "$ids" "${STATE_DIR}/subscription-tokens"' in runtime
+        assert svc["statedirectory"] == "radon"
+        assert svc["statedirectorymode"] == "0750"
 
-    def test_container_lifecycle_is_owned_by_systemd(self, unit):
+    def test_sandboxes_the_third_party_cli_runs(self, unit):
+        # The unit executes unpinned third-party CLIs (agy, grok, codex) out
+        # of radon-writable ~/.local/bin with the full production env file
+        # loaded. It cannot use ProtectSystem=strict (it rewrites credential
+        # files across /home/radon), but privilege escalation, setuid
+        # payloads, shared /tmp, and retained capabilities are all closable.
         svc = unit(self.SERVICE)["Service"]
-        assert svc["delegate"] == "yes"
-        assert svc["killmode"] == "mixed"
-        assert svc["execstop"] == "/usr/local/sbin/radon-app-runtime halt %n 30"
-        assert svc["execstoppost"] == "/usr/local/sbin/radon-app-runtime stop %n"
+        assert svc["nonewprivileges"] == "yes"
+        assert svc["privatetmp"] == "yes"
+        assert svc["restrictsuidsgid"] == "yes"
+        assert svc["protectsystem"] == "full"
+        assert svc["capabilityboundingset"] == ""
 
     def test_timer_refreshes_twice_an_hour_in_explicit_utc_with_catchup(
         self, services_dir
@@ -374,9 +382,8 @@ class TestAaFrontierRefresh:
             "Environment=RADON_SECRET_STORE_PATH="
             "/home/radon/radon/data/secret_store/secrets.db"
         ) in lines
-        assert "execstartpre" not in svc
-        assert svc["execstart"] == "/usr/local/sbin/radon-app-runtime run %n"
-        assert svc["user"] == "root"
+        assert "scripts/secret_store.py" in svc["execstartpre"]
+        assert svc["execstart"].endswith("-m scripts.aa_frontier_refresh")
 
     def test_runs_daily_before_ai_cycle_with_catchup(self, unit):
         timer = unit(self.TIMER)["Timer"]
@@ -411,9 +418,11 @@ class TestAiCycleBackfill:
         assert svc["type"] == "oneshot"
         assert svc["timeoutstartsec"] == "1200"
         assert svc["loadcredentialencrypted"].startswith("radon-secret-store-key:")
-        assert svc["user"] == "root"
-        assert "execstartpre" not in svc
-        assert svc["execstart"] == "/usr/local/sbin/radon-app-runtime run %n"
+        command = svc["execstart"]
+        assert "--backfill --start 2006-12-31" in command
+        assert "--checkpoint /home/radon/.radon/ai-cycle/backfill-checkpoint.json" in command
+        assert "--max-requests 400" in command
+        assert "scripts/secret_store.py" in svc["execstartpre"]
 
     def test_runs_before_daily_collection_and_catches_up(self, unit):
         timer = unit(self.TIMER)["Timer"]

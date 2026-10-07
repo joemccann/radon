@@ -165,14 +165,6 @@ def _health_names_written_by(unit_stem: str) -> set[str]:
     exec_start = "\n".join(
         line for line in unit.splitlines() if line.startswith("ExecStart")
     )
-    if "/usr/local/sbin/radon-app-runtime run %n" in exec_start:
-        # Follow only this unit's immutable-image command, not every runtime job.
-        runtime = (REPO / "cloud/scripts/radon-app-runtime.sh").read_text()
-        blocks = re.findall(
-            rf"^    {re.escape(unit_stem)}\.service\)\n(.*?)^      ;;",
-            runtime, re.MULTILINE | re.DOTALL,
-        )
-        exec_start += "\n" + "\n".join(blocks)
     names: set[str] = set()
     for rel in _exec_targets(exec_start):
         path = _resolve(rel)
@@ -488,18 +480,3 @@ class TestEveryTimerBackedUnitIsAccountedFor:
         assert not unresolved, (
             f"ExecStart targets that resolve to no file in-tree: {unresolved}"
         )
-
-
-@pytest.mark.parametrize("unit, expected", [
-    ("radon-subscription-tokens", "subscription-tokens"),
-    ("radon-aa-frontier-refresh", "aa-frontier-basket"),
-    ("radon-ai-cycle", "ai-cycle"),
-    ("radon-ai-cycle-backfill", "ai-cycle-backfill"),
-])
-def test_isolated_runtime_job_health_writer_remains_discoverable(unit, expected):
-    names = _health_names_written_by(unit)
-    assert expected in names
-    if unit != "radon-subscription-tokens":
-        assert "subscription-tokens" not in names
-    if unit != "radon-aa-frontier-refresh":
-        assert "aa-frontier-basket" not in names

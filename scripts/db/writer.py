@@ -20,12 +20,14 @@ from typing import Any, Optional
 try:
     # When imported as `scripts.db.writer` from project root.
     from .client import get_db
+    from ..utils.outcome_metrics import measure_operation
     from .order_events_sql import ORDER_EVENT_INSERT_SQL, order_event_args
     from ..clients.journal_basis import normalize_expiry_compact
 except ImportError:  # pragma: no cover
     # When imported flat after sys.path.insert(scripts/) like the existing
     # services do (cta_sync_service.py et al).
     from db.client import get_db  # type: ignore[no-redef]
+    from utils.outcome_metrics import measure_operation
     from db.order_events_sql import ORDER_EVENT_INSERT_SQL, order_event_args  # type: ignore[no-redef]
     from clients.journal_basis import normalize_expiry_compact  # type: ignore[no-redef]
 
@@ -750,6 +752,7 @@ def mark_flex_delivery_applied(content_sha256: str) -> bool:
     return isinstance(applied, int) and applied > 0
 
 
+@measure_operation("journal_upsert")
 def upsert_journal_entry(trade_id: str, payload: dict[str, Any], filled_at: Optional[str] = None) -> None:
     """Upsert one journal row over bounded Hrana HTTP (real socket timeout).
 

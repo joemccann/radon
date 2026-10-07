@@ -31,8 +31,7 @@ throwaway home so no live credential was touched.
 | grok | `~/.grok/auth.json` | `expires_at` (earliest entry) | `grok -p`, then OIDC-discovered token endpoint | `grok -p ...` | **push**: device code |
 | antigravity (`agy`) | `~/.gemini/antigravity-cli/antigravity-oauth-token` | `token.expiry` | `agy models`, then Google's token endpoint with the CLI's public client id | `agy models` (authenticated, not a model call) | paste-code: `agy -p ok` over SSH, 60s window |
 
-Manual host `grok` and `agy` installs use `~/.local/bin`. The isolated timer
-uses pinned image binaries and a temporary auth-only HOME. Outside that timer, the
+`grok` and `agy` install to `~/.local/bin`. The unit puts it on `PATH`, and the
 daemon searches `~/.local/bin` and `~/.grok/bin` itself so a manual run finds
 them too.
 
@@ -223,10 +222,14 @@ ssh radon@radon-app 'sudo systemctl start radon-subscription-tokens.service'
 ssh radon@radon-app 'systemctl status radon-subscription-tokens.service'
 ```
 
-Run sealing and restoration through the unit. It supplies both the configured
-database and the decrypted key via `LoadCredentialEncrypted`. A bare SSH shell
-does not inherit that context and can open a different store or fail key
-validation. Do not run `--seal` or `--restore` from that shell.
+Run sealing and restoration through the unit. The unit never holds the
+decrypted key (DS-2026-10-05-05): it names the socket of
+`radon-subscription-vault.service`, the broker that runs inside
+`radon-app-runtime`, opens the configured database with the key staged for its
+container, and serves only the four CLI credential slots. The unit `Wants=` the
+broker, so starting the unit starts it. A bare SSH shell does not inherit that
+context and can open a different store or fail key validation. Do not run
+`--seal` or `--restore` from that shell.
 
 If a credential file is missing, start the same unit above: its normal run
 restores the vault copy when available and re-evaluates it. Check the unit and
@@ -286,18 +289,8 @@ or recorded in `service_health`. Token material is rendered as
 `<redacted len=N>`. CLI output is classified and discarded, never logged. The
 OAuth client ids in the provider table are the vendors' published public-client
 ids, not secrets. The daemon runs as `radon` with `UMask=0077`; the vault is
-the existing encrypted secret store, whose key is delivered by systemd
-`LoadCredentialEncrypted`, so there is no second crypto system to rotate or
-back up.
-
-## Trusted runtime isolation
-
-The subscription timer dispatches the release Python image through the
-root-owned `radon-app-runtime`. The master key is staged with root ownership
-and the isolated `radon-secrets` group; the host radon account cannot read it.
-Only credential data and the vault sidecar/lock persist through narrow mounts.
-CLIs in the image have pinned versions. Probes and push login run in fresh
-temporary homes with only their provider auth JSON, excluding host hooks,
-configuration, MCP servers and executable directories. A rotated or newly
-created auth JSON is copied back after the CLI process group is reaped.
-Host manual commands retain their existing CLI discovery behavior.
+the existing encrypted secret store, so there is no second crypto system to
+rotate or back up. Its key is delivered by systemd `LoadCredentialEncrypted` to
+the `radon-subscription-vault` broker container only; the daemon, which runs
+the third-party CLIs, reaches the vault over the broker socket and never holds
+the key.

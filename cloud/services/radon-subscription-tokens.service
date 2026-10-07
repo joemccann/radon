@@ -1,28 +1,41 @@
 [Unit]
 Description=Radon subscription token vault (seal, refresh, probe, restore, push-login agent CLI credentials)
-After=network.target
+# DS-2026-10-05-05: the vault broker holds the secret-store key; this unit
+# reaches the four CLI credential slots only through its socket.
+Wants=radon-subscription-vault.service
+After=network.target radon-subscription-vault.service
 StartLimitIntervalSec=1800
 StartLimitBurst=5
 
 [Service]
 Type=oneshot
-User=root
+User=radon
 UMask=0077
-WorkingDirectory=/
-Environment=RADON_RUNTIME=container
-Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-Delegate=yes
-KillMode=mixed
+WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
 Environment=RADON_DB_NO_REPLICA=1
-Environment=RADON_SECRET_STORE_PATH=/home/radon/radon/data/secret_store/secrets.db
-# Root dispatches the release image; CLI execution and credentials stay isolated.
-LoadCredentialEncrypted=radon-secret-store-key:/etc/credstore.encrypted/radon-secret-store-key
-# The runtime prepares only the subscription sidecar directory as radon.
-# StateDirectory=radon here would recursively re-own shared state as root.
-ExecStart=/usr/local/sbin/radon-app-runtime run %n
-ExecStop=/usr/local/sbin/radon-app-runtime halt %n 30
-ExecStopPost=/usr/local/sbin/radon-app-runtime stop %n
+Environment=RADON_SUBSCRIPTION_VAULT_SOCKET=/run/radon-subscription-vault/vault.sock
+# The Antigravity and Grok installers place `agy` and `grok` in ~/.local/bin;
+# the daemon prefers each CLI-native refresh. (The module also searches that
+# directory itself, so a manual run outside this unit finds them too.)
+Environment=PATH=/home/radon/.local/bin:/usr/local/bin:/usr/bin:/bin
+# The CLIs this unit runs (agy, grok, codex) are unpinned third-party
+# binaries out of radon-writable ~/.local/bin, with the production env file
+# loaded, so the unit holds no secret-store key (DS-2026-10-05-05): the
+# broker radon-subscription-vault does. ProtectSystem=strict is off the
+# table because the unit rewrites credential files across /home/radon;
+# everything else closes.
+NoNewPrivileges=yes
+PrivateTmp=yes
+RestrictSUIDSGID=yes
+ProtectSystem=full
+CapabilityBoundingSet=
+# The sidecar /var/lib/radon/subscription-tokens/state.json carries the page
+# cooldowns and the consecutive-error streak. Without this the directory is not
+# owned by radon and every run silently loses both.
+StateDirectory=radon
+StateDirectoryMode=0750
+ExecStart=/home/radon/radon/.venv/bin/python -m scripts.subscription_tokens --once
 StandardOutput=journal
 StandardError=journal
 # --once exits 1 whenever a provider is needs_reauth or error, which is the

@@ -52,6 +52,12 @@ Dependency graph: T1 -> T2 -> T3 -> T4 -> T5; T1 -> T3; T2 -> T4.
 - Final static review found no additional actionable issues. Merged main while preserving both task records. Exact PR head 50c8dc0fcc4e88460abe412f103fa9a38add2659: 32 checks passed, 7 non-applicable skipped, 0 pending/failing; both native image builds passed.
 - One normal-priority Pushover notification titled radon PR green was accepted (status=1). The PR notification has been delivered once; do not send a duplicate. A newer-main integration now requires exact-head CI again.
 
+### Rebase onto #932 (2026-10-07)
+- [x] T6 Merge origin/main (#932, 6198bd51); keep #932's drop-ins, broker, staging, manifest and tests. depends_on: [T5]
+- [x] T7 Keep only additive hardening: pinned image CLIs, no host ~/.local/bin in radon-api, ancestor-pinned private dirs, fail-closed group check, extra runtime tests. depends_on: [T6]
+- [ ] T8 Exact-head CI green. depends_on: [T7]
+- Dropped as duplicate or superseded by #932: base-unit User=root rewrites, base unit/timer control-plane and auto-sync moves, containerized subscription-tokens and its auth-only CLI homes, duplicate runtime cases and command/parity tests.
+
 # Task: Mount Antigravity in App Container Runtime (2026-09-28)
 
 - [x] T1 depends_on: [] Failing test in cloud/tests/test_app_runtime.py for .gemini and .local/bin container mounts.
@@ -9053,6 +9059,18 @@ Audit through 39334555: 12 commits, 78 changed paths, 134 paths including codema
 
 T5 CI repair review: unchanged successful-replacement signal assertion failed in Vitest shard 5; the native request-owner completion control reproduced red twice. Only unfinished transports are aborted during cleanup; completed responses retain successful signal state. Eight native acceptance and fourteen Chrome lifecycle regressions pass without weakening the original assertion. Exact-head CI is restarted after the ordinary repair push; all preceding heads are superseded.
 
+## Nightly reliability 2026-10-07
+
+- [x] T1 depends_on: [] Install isolated toolchain, recover checkpoint/open PR ownership and create authorized branch.
+- [x] T2 depends_on: [T1] Audit delta and codemap importers; standing safety/catalog sweeps and retained candidate triage.
+- [x] T3 depends_on: [T2] Reproduce verified findings serially, repair minimally and run focused gates before per-finding commits.
+- [x] T4 depends_on: [T3] Permanent drills, syntax/diff/secret review and substantive publication check.
+- [ ] T5 depends_on: [T4] Publish substantive draft if needed, watch exact-head CI and post exactly one durable checkpoint.
+
+
+### Review 2026-10-07 (before publication)
+
+Three delta commits / 21 changed paths audited through 8afaaa61; codemap inverse edges add no paths and shell/runbook consumers were confirmed with rg. Three new findings plus retained R-027 core acceptance have repeated fault injection and four separate REL commits. Focused owners 1118 (collector 100% branch/statement coverage), notifications/callers 513, trainer 18, publisher/guard 168, standing gates 131, delta union 182, security hooks 106 and cloud delta 13 passed. Permanent Python drills 95 passed. Syntax, diff hygiene, append-only ledger prefixes, secret scan and substantive check pass. Four operator-only candidates and unconfirmed controller/hold-helper installation remain on issue #81. Open #922 owns its prior six repairs and is read-only. Diagnostic counters explicitly exclude native libSQL/other notification implementations and durable execution accounting. Full suites and the Vitest durability drill are assigned to PR CI. T5's draft, exact-head registration/green and single rolling checkpoint receipts will be recorded on issue #81 without another bookkeeping-only push. No live access, credentials, production halt, main push/merge, codemap or test-ledger edit; the runner owns notifications.
 # Task: Confirm VPS Grok hardening closure (2026-10-07)
 
 - [x] T1 depends_on: [] Identify DS-2026-09-29-07 and inspect production units.
