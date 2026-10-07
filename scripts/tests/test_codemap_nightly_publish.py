@@ -109,3 +109,17 @@ def test_publish_recheck_preserves_older_prs_when_nothing_is_published(tmp_path:
     assert not any(call[0] == "gh" for call in calls)
     if publish_rc == 3:
         assert "0 PR(s), nothing to merge" in result.stdout
+
+
+@pytest.mark.parametrize("owner", ["docs/runner.md", ".pi/AGENTS.md"])
+def test_codemap_owners_match_observed_human_merge_contract(tmp_path: Path, owner: str):
+    """REL-321 / R-732: onboarding must not promise a prohibited self-merge."""
+    result, calls = run_runner(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert not any(call[:3] == ["gh", "pr", "merge"] for call in calls)
+    assert "awaiting operator merge" in result.stdout
+    paragraph = next(line for line in (REPO / owner).read_text().splitlines()
+                     if "scripts/codemap_nightly.sh" in line)
+    assert "merges its own PR" not in paragraph
+    assert "operator's token" not in paragraph
+    assert "operator review and merge" in paragraph

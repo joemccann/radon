@@ -37,11 +37,18 @@ PY
 
 # The trainer loads third-party model and dataset code; it gets an allowlisted
 # environment (toolchain, locale, HF cache and GPU knobs), never operator tokens.
+# REL-319 / R-731: namespaces also contain credential variables; admit exact
+# cache/offline/device options rather than every variable sharing a prefix.
 TRAIN_ENV=()
 for name in $(compgen -e || true); do
   case "$name" in
     PATH|HOME|USER|LOGNAME|LANG|LC_*|TMPDIR|TERM|VIRTUAL_ENV|CONDA_PREFIX|PYTHONPATH|LD_LIBRARY_PATH|DYLD_LIBRARY_PATH \
-      |HF_HOME|HF_HUB_*|HF_DATASETS_*|TRANSFORMERS_*|CUDA_*|NVIDIA_*|PYTORCH_*|TORCH_*|OMP_NUM_THREADS)
+      |HF_HOME|HF_HUB_CACHE|HF_HUB_OFFLINE|HF_HUB_DISABLE_TELEMETRY|HF_HUB_DISABLE_PROGRESS_BARS \
+      |HF_HUB_DOWNLOAD_TIMEOUT|HF_HUB_ETAG_TIMEOUT|HF_DATASETS_CACHE|HF_DATASETS_OFFLINE \
+      |TRANSFORMERS_CACHE|TRANSFORMERS_OFFLINE|TRANSFORMERS_VERBOSITY \
+      |CUDA_HOME|CUDA_PATH|CUDA_VISIBLE_DEVICES|CUDA_DEVICE_ORDER|CUDA_LAUNCH_BLOCKING \
+      |NVIDIA_VISIBLE_DEVICES|NVIDIA_DRIVER_CAPABILITIES|PYTORCH_CUDA_ALLOC_CONF \
+      |PYTORCH_ALLOC_CONF|PYTORCH_ENABLE_MPS_FALLBACK|TORCH_HOME|TORCH_LOGS|OMP_NUM_THREADS)
       TRAIN_ENV+=("$name=${!name}") ;;
   esac
 done

@@ -36,6 +36,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Union
 
 from dotenv import load_dotenv
 from ib_insync import IB, FlexReport, Option
+from utils.outcome_metrics import count_operation
 
 # Load root .env so IB_GATEWAY_HOST/PORT are available before defaults are computed.
 # .env.ib-mode (managed by scripts/ib mode) overlays it so a single toggle there
@@ -747,7 +748,8 @@ class IBClient:
         if violation:
             raise IBOrderError(violation["message"])
         try:
-            trade = self._ib.placeOrder(contract, order)
+            with count_operation("order_submit"):
+                trade = self._ib.placeOrder(contract, order)
             self.logger.info(
                 "Placed order: %s %s %s @ %s (orderId=%s)",
                 order.action,
@@ -904,7 +906,8 @@ class IBClient:
             raise IBOrderError(violation["message"])
 
         try:
-            trade = self._ib.placeOrder(contract, order)
+            with count_operation("order_modify"):
+                trade = self._ib.placeOrder(contract, order)
             self.logger.info(
                 "Modified order: orderId=%s new fields=%s",
                 getattr(order, "orderId", "?"),

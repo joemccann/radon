@@ -21,6 +21,11 @@ vs process-bound paths: ``scripts/db/client.py`` module docstring.
 
 from __future__ import annotations
 
+try:
+    from ..utils.outcome_metrics import measure_operation
+except ImportError:  # flat script imports
+    from utils.outcome_metrics import measure_operation
+
 import base64
 import json
 import os
@@ -141,6 +146,7 @@ def _refuse_pytest_pollution() -> None:
         )
 
 
+@measure_operation("database")
 def hrana_execute(
     sql: str, args: Sequence[Any] = (), timeout: float = HRANA_TIMEOUT_S
 ) -> None:
@@ -163,6 +169,7 @@ def hrana_execute(
         raise HranaHttpError(f"{type(exc).__name__}: {exc}") from exc
 
 
+@measure_operation("database")
 def hrana_query(
     sql: str, args: Sequence[Any] = (), timeout: float = HRANA_TIMEOUT_S
 ) -> list[tuple]:
