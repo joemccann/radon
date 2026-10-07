@@ -79,6 +79,7 @@ export type IBStatusState = {
 
 type StatusMessage = {
   type: "status";
+  market_data_degraded?: boolean;
   ib_connected: boolean;
 };
 
@@ -115,6 +116,7 @@ type HealthPayload = {
 };
 
 function deriveDisplayStatus(args: {
+  marketDataDegraded?: boolean;
   wsConnected: boolean;
   ibConnected: boolean;
   authState: IBAuthState | null;
@@ -126,7 +128,7 @@ function deriveDisplayStatus(args: {
   if (!args.wsConnected) return "relay_offline";
   if (args.upstreamDead === true || args.authState === "unreachable") return "unreachable";
   if (args.authState === "awaiting_2fa") return "awaiting_2fa";
-  if (args.serviceState === "unhealthy") return "unhealthy";
+  if (args.serviceState === "unhealthy" || args.marketDataDegraded) return "unhealthy";
   if (args.authState === "unknown" || args.serviceState === "unknown") return "unhealthy";
   if (args.authState === "authenticated" && args.serviceState === "healthy") return "connected";
   // Fall back to the legacy WS-relay flag when /health hasn't responded yet.
@@ -263,6 +265,7 @@ function IBStatusCoreProvider({
   getToken: (() => Promise<string | null>) | undefined;
 }) {
   const [wsConnected, setWsConnected] = useState(false);
+  const [marketDataDegraded, setMarketDataDegraded] = useState(false);
   const [ibConnected, setIbConnected] = useState(true); // assume connected until told otherwise
   const [disconnectedSince, setDisconnectedSince] = useState<number | null>(null);
   const [authState, setAuthState] = useState<IBAuthState | null>(null);
@@ -364,6 +367,7 @@ function IBStatusCoreProvider({
         if (msg.type === "status") {
           const nowConnected = (msg as StatusMessage).ib_connected;
           setIbConnected(nowConnected);
+          setMarketDataDegraded(msg.market_data_degraded === true);
 
           if (nowConnected) {
             setDisconnectedSince(null);
@@ -525,6 +529,7 @@ function IBStatusCoreProvider({
         : "relay_offline";
 
   const displayStatus = deriveDisplayStatus({
+    marketDataDegraded,
     wsConnected,
     ibConnected,
     authState,
