@@ -47,6 +47,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from api.ib_pool import IBPool
 from api import db_http
+from api.health_dependencies import health_dependencies
 from db.service_health_sql import SERVICE_HEALTH_UPSERT_SQL, service_health_upsert_args
 from api.demo_scan import demo_disabled_payload, demo_scan_response
 from api.subprocess import run_script, run_module, run_script_raw, ScriptResult
@@ -2005,6 +2006,7 @@ async def health(request: Request):
     # request is strictly observational: the unbounded
     # _ib_recovery_heartbeat_loop exclusively owns recovery, preventing page
     # polling from starting a reconnect cycle or a second 2FA path.
+    dependencies = asyncio.create_task(health_dependencies())
     try:
         gw = await asyncio.wait_for(
             check_ib_gateway(pool_status=pool_status, pool=None),
@@ -2032,6 +2034,7 @@ async def health(request: Request):
         "ib_gateway": gw,
         "ib_pool": pool_status or {},
         "uw": uw_available,
+        "dependencies": await dependencies,
     }
 
 
@@ -2070,6 +2073,7 @@ async def health_lite():
     """
     loop_lag_ms = await _measure_event_loop_lag_ms()
     pool_status = ib_pool.status() if ib_pool else None
+    dependencies = asyncio.create_task(health_dependencies())
     try:
         gw = await asyncio.wait_for(
             check_ib_gateway(pool_status=pool_status, pool=None),
@@ -2088,6 +2092,7 @@ async def health_lite():
     held = hold.get("held") if isinstance(hold, dict) else None
     return {
         "status": "ok",
+        "dependencies": await dependencies,
         "auth_state": gw.get("auth_state", "unknown"),
         "service_state": gw.get("service_state", "unknown"),
         "upstream_dead": gw.get("upstream_dead", False),
@@ -2534,16 +2539,38 @@ async def discover(force: bool = False):
     )
 
 
+async def _analytics_body(request: Request) -> dict:
+    try:
+        body = await request.json()
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object") from None
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+    return body
+
+
+def _analytics_positive_integer(body: dict, field: str, default: int) -> int:
+    value = body.get(field, default)
+    if isinstance(value, str) and re.fullmatch(r"[0-9]+", value):
+        try:
+            value = int(value)
+        except ValueError:
+            value = None
+    if type(value) is not int or value <= 0:
+        raise HTTPException(status_code=400, detail=f"{field} must be a positive integer")
+    return value
+
+
 @app.post("/forecast/chronos")
 async def forecast_chronos(request: Request):
     """Chronos-2 quantile forecast for a ticker flow-history metric."""
     if test_mode:
         return demo_disabled_payload("Chronos forecasting")
-    body = await request.json()
+    body = await _analytics_body(request)
     ticker = str(body.get("ticker", "")).upper()
     metric = str(body.get("metric", "flow_strength"))
-    horizon = int(body.get("horizon", 10))
-    lookback = int(body.get("lookback", 120))
+    horizon = _analytics_positive_integer(body, "horizon", 10)
+    lookback = _analytics_positive_integer(body, "lookback", 120)
     result = await run_script(
         "chronos_forecast.py",
         ["--ticker", ticker, "--metric", metric, "--horizon", str(horizon),
@@ -2661,10 +2688,10 @@ async def flow_surprise(request: Request):
     """Flow-surprise residual: ranked watchlist, or one ticker if provided."""
     if test_mode:
         return demo_disabled_payload("Flow surprise")
-    body = await request.json()
+    body = await _analytics_body(request)
     metric = str(body.get("metric", "flow_strength"))
-    top = int(body.get("top", 20))
-    lookback = int(body.get("lookback", 250))
+    top = _analytics_positive_integer(body, "top", 20)
+    lookback = _analytics_positive_integer(body, "lookback", 250)
     args = ["--metric", metric, "--top", str(top), "--lookback", str(lookback)]
     ticker = body.get("ticker")
     if ticker:

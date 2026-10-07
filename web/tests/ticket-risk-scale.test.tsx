@@ -145,7 +145,7 @@ describe("ticket payoff is per 1x combo on every surface", () => {
   it("mobile prices a 10-lot short call's breakeven at the same level as a 1-lot", async () => {
     renderMobile(shortCallLegs(10));
     await waitFor(() => expect(document.querySelector(".ticket-risk")).toBeTruthy());
-    expect(riskCell("BREAKEVENS")).toBe(SHORT_CALL_BREAKEVEN);
+    expect(riskCell("ORDER BREAKEVENS")).toBe(SHORT_CALL_BREAKEVEN);
   });
 
   it("mobile states that same breakeven in the unbounded-risk acknowledgement", async () => {
@@ -161,7 +161,7 @@ describe("ticket payoff is per 1x combo on every surface", () => {
     fireEvent.change(inputs[0], { target: { value: "10" } });
     fireEvent.change(inputs[1], { target: { value: "2.98" } });
     await waitFor(() => expect(builder.querySelector(".ticket-risk")).toBeTruthy());
-    expect(riskCell("BREAKEVENS")).toBe(SHORT_CALL_BREAKEVEN);
+    expect(riskCell("ORDER BREAKEVENS")).toBe(SHORT_CALL_BREAKEVEN);
   });
 
   it("scales the stock-to-zero loss once, not once per contract", async () => {

@@ -93,3 +93,20 @@ describe("the heading states the scale each group carries", () => {
     expect((wrap?.textContent ?? "")).toMatch(/PER 1\D?\s*COMBO/i);
   });
 });
+
+
+it('distinguishes order-leg payoff and break-even from the covered spread risk summary', () => {
+  const { container, getByText } = renderBlock({ withHeldLegs: {
+    orderBest: 1000, orderWorst: 200, spreadBest: 700, spreadWorst: -100,
+    bestUnbounded: false, heldBasisDollars: 300,
+  } });
+  expect(getByText('AT EXPIRY · ORDER LEGS ONLY · PER 1× COMBO')).toBeTruthy();
+  expect(cell(container, 'ORDER BREAKEVENS').textContent).toContain('102.00');
+  expect(cell(container, 'SPREAD WORST CASE').textContent).toContain('-$100.00');
+});
+
+it('states order-leg scope when held-stock coverage has no option spread summary', () => {
+  const { container, getByText } = renderBlock({ withHeldLegs: null });
+  expect(getByText('AT EXPIRY · ORDER LEGS ONLY · PER 1× COMBO')).toBeTruthy();
+  expect(cell(container, 'ORDER BREAKEVENS').textContent).toContain('102.00');
+});

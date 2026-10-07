@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 /**
- * Scanner mode strip on a phone: eight modes overflow a 393px viewport, so
+ * Scanner mode strip on a phone: nine modes overflow a 393px viewport, so
  * the shell must SAY so — edge fades driven by data-overflow-left/right.
  * Before this shipped the strip could end flush at the viewport edge and
  * read as three-tabs-total.
@@ -52,20 +52,21 @@ async function stubApis(page: Page) {
   });
 }
 
-test("overflowing mode strip shows a trailing fade, and the fade follows the scroll", async ({ page }) => {
+test("overflowing mode strip shows a trailing fade, and the fade follows the scroll", async ({ page }, testInfo) => {
   await stubApis(page);
   await page.goto("/scanner");
 
   const shell = page.locator(".scanner-mode-tabs-shell");
   const strip = page.locator(".scanner-mode-tabs");
   await expect(shell).toBeVisible();
-  await expect(strip.getByRole("tab")).toHaveCount(8);
+  await expect(strip.getByRole("tab")).toHaveCount(9);
+  for (const label of ["Flow Signals", "Discover", "Theta Harvester", "7-Step Strength", "LEAP", "GARCH", "VOL CONE", "Vol/Skew MR", "Bounce Setup"]) await expect(strip.getByRole("tab", { name: label, exact: true })).toHaveCount(1);
 
   // At rest the strip is scrolled to the start: content off-screen to the
   // right only.
   await expect(shell).toHaveAttribute("data-overflow-left", "false");
   await expect(shell).toHaveAttribute("data-overflow-right", "true");
-  await page.screenshot({ path: "test-results/scanner-tabs-overflow-start.png" });
+  await page.screenshot({ path: testInfo.outputPath("scanner-tabs-overflow-start.png") });
 
   // Scroll to the end: the affordance flips sides.
   await strip.evaluate((el) => {
@@ -73,5 +74,5 @@ test("overflowing mode strip shows a trailing fade, and the fade follows the scr
   });
   await expect(shell).toHaveAttribute("data-overflow-left", "true");
   await expect(shell).toHaveAttribute("data-overflow-right", "false");
-  await page.screenshot({ path: "test-results/scanner-tabs-overflow-end.png" });
+  await page.screenshot({ path: testInfo.outputPath("scanner-tabs-overflow-end.png") });
 });

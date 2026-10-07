@@ -1,12 +1,45 @@
+# Task: Neutral Implied MV formatting (2026-10-07)
+
+- [x] T1 depends_on: [] Inspect PositionTable, scoped instructions, existing regression and CI configuration.
+- [x] T2 depends_on: [T1] Add regressions and format position/expanded-leg Implied MV like Initial Value; retain negative signs and unavailable placeholders.
+- [x] T3 depends_on: [T1] Add Playwright coverage with computed neutral color and screenshot evidence; independent review.
+- [ ] T4 depends_on: [T2, T3] Repair legacy rate-resolution and browser readiness expectations from CI; resolve newer-main task-log conflicts; create PR and verify all applicable GitHub CI checks at exact head; no local suites.
+- [ ] T5 depends_on: [T4] Record review evidence and send accepted normal-priority Pushover notification.
+
+Dependency graph: T1 -> T2, T3; T2 + T3 -> T4 -> T5.
+
+Review: GitHub run 37621162918 / head 10ba235d reproduced the positive-plus and directional-color regressions. Existing signed currency helper preserves negative liabilities; row classes match Initial Value. Independent review passed. Dark/light browser cases and screenshot uploads are registered in CI; final exact-head results pending. CI 37621600997 passed new component regressions and identified a legacy rate-resolution expectation of positive plus signs; update only its expected currency formatting. Browser run 37622020570 passed 240 existing cases and the new light-theme case on retry; add an explicit visible-header wait before reading the initial-value column index. No local suites.
+
+# Task: Nightly CI performance audit (2026-10-06)
+
+- [x] T1 depends_on: [] Read open PRs/checkpoint, audit main changes, acquire Actions jobs/logs/cache/rules.
+- [x] T2 depends_on: [T1] Classify comparable runs, reconstruct gate DAG, rank safe material candidates.
+- [x] T3 depends_on: [T2] Surgical CIP-018 revert after its recorded >90s shard-wall trigger; 1 failed / 37 passed red, 159 passed green; cloud 58 passed.
+- [ ] T4 depends_on: [T3] Publish substantive draft PR only, verify exact-head CI, post one rolling issue comment.
+
+Review: No additional material optimization qualifies. CIP-018 organic run 37357797556 / job 111924636029: scripts-gh 93s wall exceeds its recorded 90s revert trigger. Restore only its shard membership and matching ownership contracts; preserve full inventory, coverage, gate and deployment guarantees.
+
+## PR #934 conflict repair (2026-10-07)
+- [x] T1 Inspect conflicts and preserve both branches' task and curation records. depends_on: []
+- [x] T2 Merge current main, resolve conflicts, and statically verify the merged files. depends_on: [T1]
+- [ ] T3 Push the repaired PR head and wait for all applicable GitHub checks to pass. depends_on: [T2]
+Dependency graph: T1 -> T2 -> T3.
+
+### Review
+- PR https://github.com/joemccann/radon/pull/934; original head eac19327a60cf0ec710c59dc8345980591f16aec.
+- Preserved both task logs and ledger receipt sections; 156 unique hold-outs + 48 curated specs = 204 classified, with no missing/stale/duplicate entries or overlap. Server AST and both documentation additions verified. No local suites. Prior PR green notification already accepted; do not duplicate it.
+
+
 ## PR #938 conflict repair (2026-10-07)
-- [ ] T1 Inspect conflicts and preserve both branches' audit, task, and training-owner documentation. depends_on: []
-- [ ] T2 Merge main, resolve conflicts, and statically verify record and training-contract preservation. depends_on: [T1]
+- [x] T1 Inspect conflicts and preserve both branches' audit, task, and training-owner documentation. depends_on: []
+- [x] T2 Merge main, resolve conflicts, and statically verify record and training-contract preservation. depends_on: [T1]
 - [ ] T3 Push the repaired head, wait for all applicable GitHub CI checks, and record green notification evidence. depends_on: [T2]
 Dependency graph: T1 -> T2 -> T3.
 
 ### Review
 - PR https://github.com/joemccann/radon/pull/938; original head 6334926dae407855aaa50dbdbb8878ba8518d4dc.
-- No local test suites or builds; GitHub runners own verification.
+- Both audit/log branches preserved verbatim; task records retained. Training documentation preserves discovery isolation, exact environment allowlist, pinned model revision, and human-review gates. Merged training shell/Python syntax and resolved-file whitespace checks passed. No local suites/builds; GitHub runners own verification.
+
 
 # Task: PDF extract error detail (2026-10-03)
 
@@ -8992,3 +9025,87 @@ Audit complete through 72e09ffb: 65 commits, 112 changed paths and 300 paths inc
 - [ ] T5 depends_on: [T4] Substantive classifier; push only testing/2026-10-07; one draft PR and exact-head green CI; one durable issue #83 comment.
 
 Review: Four verified findings have red/green receipts (T-538/T-540/T-541 P1; T-539 P2). Delta repetitions pass 230 Python and 156 cloud cases each; new YAML owner passes 8 cases three times. Four separate finding commits and three consecutive full closing rounds pass 14,292 Python, 10,390 Vitest and 2,617 cloud cases each; corrected clean-base cloud also passes 2,617 and all closing FAILED-list comparisons are empty. The earlier Caddy startup failure remains recorded separately with its 51-case isolated pass. Delivery remains pending; T5 external draft, exact-head CI and the single checkpoint completion receipt will be recorded on issue #83 without changing the verified head. No production connections, credential lookup, notification, main push or merge authorized.
+
+## Tester Army publication, 2026-10-06
+
+- [x] T1 depends_on: [] Recover the saved Tester Army delta onto current main in an isolated branch, preserving original work and excluding private rescue artifacts.
+- [x] T2 depends_on: [T1] Sol 6.1 per-project reconciliation and review; reproduce product regressions and verify focused repairs.
+- [x] T3 depends_on: [T2] Luna 6 independent browser/API verification, full local gates and publication/secret hygiene.
+- [ ] T4 depends_on: [T3] Commit and create PR; watch every expected check on the exact head until green; send one accepted Pushover notification.
+
+### Review
+
+API review complete: current-main red 41 failures, focused green 82, independent Luna green 82, full API 1179, changed executable lines 28/28 covered. Full scripts/root: 13143 passed, 2 skipped, 23 subtests, one unchanged login-runner timing failure whose focused repeat passed. Full root Vitest: 10386 passed, 21 skipped; unchanged coverage ratchets pass, changed executable web lines 46/46 covered. Site: production TesterArmy 27/27 and retained Playwright 13/13; status regression red/green proved. Workstation: production SDK 77/77, 135 distinct retained cases verified, session fixture 1/1, performance/sidebar 8/8 and visual review complete. Three live-data and five operator cases remain unverified; one existing skip. Actionlint and final staged/commit secret scans gate publication. Exact-head CI and notification receipts will be recorded in the PR without preclaiming success; October 3 receipts remain historical evidence.
+
+## Nightly documentation 2026-10-06
+
+- [x] T1 depends_on: [] Recover trusted checkpoint, inspect open PRs and create authorized branch.
+- [x] T2 depends_on: [T1] Audit every delta commit and inherited acceptance against current source.
+- [x] T3 depends_on: [T2] Correct verified owner drift with focused red/green contracts.
+- [ ] T4 depends_on: [T3] Verify, publish substantive changes if any, watch exact-head CI and post one rolling comment.
+
+Findings and value gate before edits:
+- DOC-169 P1: setup/recovery operator -> locate the production application or broker -> use the wrong host for configuration or recovery -> cloud/tailscale/policy.hujson:1 and scripts/api/server.py:1035 -> docs/external-services.md:44 -> docs/spof-host-split.md. Reader/action: select the service owner; harm: blocked configuration/recovery. Prose explains host roles; exact topology and credential paths remain in their existing owners, linked rather than repeated. Proof: role refusal and policy contracts.
+- DOC-170 P2: local Docker operator -> retrieve logs after container recreation -> expect broker journald on a local Docker deployment -> cloud/docker-compose.yml:84 and docker/ib-gateway/docker-compose.yml:1 -> docs/ib-gateway-docker.md:98 -> docs/ib-gateway-recovery.md. Reader/action: select the retained log source; harm: wrong diagnosis command or missing evidence. Prose distinguishes source/deployed configuration and read-only diagnosis; exact logging driver/tag stays in compose. Proof: compose test and shim logs verb.
+- DOC-171 P1: network operator -> recover from a failed cloud firewall replacement -> blindly repeat an indeterminate mutation or proceed without attachment verification -> cloud/hetzner/firewalls/hcloud_firewalls.py:116-140 -> docs/operations.md:643 -> docs/operations.md. Reader/action: stop and inspect rules/attachment before retry; harm: lost recovery access or incomplete protection. Prose owns safe apply/recovery order; tool owns timeouts and commands. Proof: offline fault suite.
+
+- DOC-172 P0: recovery/provisioning operator -> execute duplicated cloud instructions -> lose host data without recovery, misroute Gateway recovery, or treat obsolete auth/health claims as gates -> cloud/scripts/setup-vps.sh:1045-1063 and cloud/scripts/operator-radon.sh:504, cloud/CLAUDE.md:395 -> cloud/README.md:109,323,432 and cloud/radon-cloud-deployment-guide.html -> cloud/CLAUDE.md and existing recovery/topology owners. Reader/action: choose safe provisioning and broker recovery; harm: destructive reset or wrong session handling. Prose is necessary for owner routing and historical non-execution boundaries; exact commands remain in owners/source. Proof: setup, host-role, existing bootstrap/recovery contracts. Unique Clerk/DNS prerequisites remain in the README pending operator/provider verification; no claims about live provider state are added.
+
+- DOC-173 P1: release operator -> plan deployment without app images -> omit a required exact-SHA gate or diagnose the wrong execution plane -> .github/workflows/ci.yml:1163 and cloud/scripts/deploy.sh:1823 -> cloud/CLAUDE.md:35-41,261 and cloud/README.md:deployment copy -> cloud/CLAUDE.md. Reader/action: identify mandatory release artifacts; harm: blocked recovery/deployment. Prose distinguishes code defaults from installed per-unit execution and directs release diagnostics to enforced gates. Proof: workflow dependency closure, image-reuse contracts and installed drop-in admission source; live installation is not inferred.
+
+Review before publication: 11 commits / 78 changed paths audited through 393345550d521548808d9884be0e5ab10ae48854. Merged #914 closes DOC-164 through DOC-168; DOC-159 retains operator-only effective local cycle/timezone verification. DOC-169 through DOC-173 correct topology discoverability, scoped log diagnosis, uncertain firewall recovery, obsolete cloud instructions and required image/environment admission. Five new owner contracts failed before corrections; closing docs/path-filter 167 passed and focused cloud 101 passed. All 62 added/changed local links and anchors resolve; no external links added. Safe parser/help, Python AST, whitespace and redacted secret-pattern checks pass; no machine config formats changed. Open #922 owns cloud admission and breadth runtime repairs, #924 owns GPU/browser acceptance, #921 owns workflow experiment restoration, #923 owns codemap. No runtime behavior, live systems, credential reads, notification actions, codemap edits or enforcement weakening. Draft #925 is published. Final source review removed unsupported approval wording from owner routing; the strengthened overview case failed before correction and passes afterward. Five focused commits and 63 resolved local links are the closing state; latest-head CI and the single rolling comment remain pending. External receipts belong on issue #202.
+## Nightly testing 2026-10-06
+
+- [x] T1 depends_on: [] Build isolated toolchain, recover trusted checkpoint and create authorized branch.
+- [x] T2 depends_on: [T1] Audit merged delta and inverse consumers; standing gates and three changed-file repetitions; reconcile historical findings.
+- [x] T3 depends_on: [T2] Verify and repair findings serially with red/green evidence and per-finding commits.
+- [x] T4 depends_on: [T3] Three serial closing full-gate rounds, base cloud comparison and hygiene review.
+- [ ] T5 depends_on: [T4] Publish substantive draft if warranted, await exact-head CI and post one rolling issue comment.
+
+### Review 2026-10-06
+
+Audit complete through 39334555: 11 commits / 78 paths. T-536/T-537 have mutation red/green evidence, separate test-only commits and unchanged production implementations. Three serial closing rounds each pass 14,251 Python, 10,396 Vitest and 2,624 cloud cases; audited-base cloud passes 2,616 and all FAILED-list diffs are empty. Historical prefixes, frozen paths, syntax, whitespace and secret checks pass. No production access, credentials, unauthorized branch push, merge or notification. Two browser acceptances remain operator-only. T5 external publication, exact-head CI and the single rolling comment are recorded on issue #83 without changing the verified head; this pre-publication checklist does not claim future green delivery.
+## Nightly reliability 2026-10-06
+
+- [x] T1 depends_on: [] Install isolated toolchain, recover trusted checkpoint and open PR inventory, create authorized branch.
+- [x] T2 depends_on: [T1] Audit delta and codemap importers; verify standing sweeps and inherited candidates.
+- [x] T3 depends_on: [T2] Repair verified findings serially with repeated red/green fault injection and focused gates.
+- [x] T4 depends_on: [T3] Run permanent drills, syntax and diff hygiene, substantive publication check.
+- [ ] T5 depends_on: [T4] Publish one draft, watch exact-head CI and post one durable rolling comment.
+
+### Review 2026-10-06
+
+Audit through 39334555: 12 commits, 78 changed paths, 134 paths including codemap callers. Two new and four inherited repairs have repeated fault-injection red/green evidence. Focused suites: cloud admission 156, breadth/callers 102, archive/transport 112, API health 90, scripts health 337, assistant native acceptance 8, relay 13; Chrome chat 14 and modify 4, with screenshot inspection and TypeScript green. Permanent Python drills 95, standing gates 78. Fourteen Python files and two shell files parse; no YAML/JSON/TOML changed. Diff hygiene, six-commit secret scan and substantive publication check pass. R-027 counters remain an open inherited candidate with exact acceptance on issue #81, alongside four operator-only findings and two unconfirmed installation actions; no candidate is closed on inspection. T5 draft publication, registered exact-head CI and the single rolling comment are recorded on issue #81 after delivery, without a bookkeeping-only push. No live access, credentials, main push, merge, codemap or test-ledger edits.
+
+T5 CI repair review: unchanged successful-replacement signal assertion failed in Vitest shard 5; the native request-owner completion control reproduced red twice. Only unfinished transports are aborted during cleanup; completed responses retain successful signal state. Eight native acceptance and fourteen Chrome lifecycle regressions pass without weakening the original assertion. Exact-head CI is restarted after the ordinary repair push; all preceding heads are superseded.
+
+## Nightly reliability 2026-10-07
+
+- [x] T1 depends_on: [] Install isolated toolchain, recover checkpoint/open PR ownership and create authorized branch.
+- [x] T2 depends_on: [T1] Audit delta and codemap importers; standing safety/catalog sweeps and retained candidate triage.
+- [x] T3 depends_on: [T2] Reproduce verified findings serially, repair minimally and run focused gates before per-finding commits.
+- [x] T4 depends_on: [T3] Permanent drills, syntax/diff/secret review and substantive publication check.
+- [ ] T5 depends_on: [T4] Publish substantive draft if needed, watch exact-head CI and post exactly one durable checkpoint.
+
+
+### Review 2026-10-07 (before publication)
+
+Three delta commits / 21 changed paths audited through 8afaaa61; codemap inverse edges add no paths and shell/runbook consumers were confirmed with rg. Three new findings plus retained R-027 core acceptance have repeated fault injection and four separate REL commits. Focused owners 1118 (collector 100% branch/statement coverage), notifications/callers 513, trainer 18, publisher/guard 168, standing gates 131, delta union 182, security hooks 106 and cloud delta 13 passed. Permanent Python drills 95 passed. Syntax, diff hygiene, append-only ledger prefixes, secret scan and substantive check pass. Four operator-only candidates and unconfirmed controller/hold-helper installation remain on issue #81. Open #922 owns its prior six repairs and is read-only. Diagnostic counters explicitly exclude native libSQL/other notification implementations and durable execution accounting. Full suites and the Vitest durability drill are assigned to PR CI. T5's draft, exact-head registration/green and single rolling checkpoint receipts will be recorded on issue #81 without another bookkeeping-only push. No live access, credentials, production halt, main push/merge, codemap or test-ledger edit; the runner owns notifications.
+# Task: Confirm VPS Grok hardening closure (2026-10-07)
+
+- [x] T1 depends_on: [] Identify DS-2026-09-29-07 and inspect production units.
+- [x] T2 depends_on: [T1] Confirm controller root ownership, provision hash, isolated interpreter and Gemini confinement.
+- [x] T3 depends_on: [T1] Locate nightly durable closure mechanism; private runner SSH unavailable.
+- [x] T4 depends_on: [T2, T3] Record sanitized closure evidence in committed ledger for automatic nightly reconciliation.
+- [ ] T5 depends_on: [T4] Publish PR, verify exact-head GitHub CI and accepted Pushover delivery.
+
+Dependency graph: T1 -> T2, T3; T2 + T3 -> T4 -> T5.
+
+Review: VPS checks at 2026-10-07T12:45:35Z confirm root:root 0644, no writable or linked controller entries, hash matching provision main 1c58cb3e, /usr/bin/python3.13 -E -S, Gemini hidden in both effective units, active timers and successful upgrade. No setup rerun needed. Private runner unreachable; committed ledger feeds durable closed_queue on nightly reverify. No local test suites.
+## PR #924 CI repair 2026-10-07
+
+- [x] T1 depends_on: [] Inspect exact-head CI failure and isolated relay harness.
+- [x] T2 depends_on: [T1] Repair the harness surgically and inspect syntax/diff.
+- [ ] T3 depends_on: [T2] Push to existing PR, await every applicable exact-head CI check, and deliver one accepted Pushover notification.
+
+Dependency graph: T1 -> T2 -> T3. No local test suites; use GitHub runners.

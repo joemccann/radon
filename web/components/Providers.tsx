@@ -12,6 +12,7 @@ import { OfflineStatusProvider } from "@/lib/offline/OfflineStatusContext";
 import { RouteRefreshProvider } from "@/lib/RouteRefreshContext";
 import ClerkThemeBridge from "@/components/ClerkThemeBridge";
 import SignOutCachePurge from "@/components/SignOutCachePurge";
+import SessionRefreshFetch from "@/components/SessionRefreshFetch";
 
 // Inlined at build/dev start. In first-run setup mode (no Clerk keys) the
 // Clerk-only wrappers (ClerkThemeBridge, SignOutCachePurge) cannot mount —
@@ -56,6 +57,7 @@ export default function Providers({
   return (
     <ThemeProvider>
       <ClerkThemeBridge>
+        <SessionRefreshFetch />
         <SignOutCachePurge />
         {core}
       </ClerkThemeBridge>

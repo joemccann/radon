@@ -337,6 +337,18 @@ export default function MobileChainLadder({
 }: MobileChainLadderProps) {
   const [selected, setSelected] = useState<SelectedCell | null>(null);
   const [ticketOpen, setTicketOpen] = useState(false);
+  const pendingStripRef = useRef<HTMLDivElement>(null);
+  const [pendingStripHeight, setPendingStripHeight] = useState(0);
+  useLayoutEffect(() => {
+    const strip = pendingStripRef.current;
+    if (!strip) return;
+    const measure = () => setPendingStripHeight(strip.getBoundingClientRect().height);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(strip);
+    return () => observer.disconnect();
+  }, [orderLegs.length, ticketOpen, selected]);
   const upperPaneRef = useRef<HTMLDivElement>(null);
   const lowerPaneRef = useRef<HTMLDivElement>(null);
   const strikes = useMemo(() => visibleStrikes.map(({ strike }) => strike), [visibleStrikes]);
@@ -519,7 +531,7 @@ export default function MobileChainLadder({
         {showPuts && <div className="mobile-chain__side-label">PUTS</div>}
       </div>
 
-        <div className="mobile-chain__ladder chain-anchor-panes" data-testid="mobile-chain-ladder">
+        <div className="mobile-chain__ladder chain-anchor-panes" style={{ paddingBottom: orderLegs.length > 0 ? pendingStripHeight : 0 }} data-testid="mobile-chain-ladder">
           <div
             ref={upperPaneRef}
             className="chain-anchor-pane chain-anchor-pane--upper"
@@ -566,7 +578,7 @@ export default function MobileChainLadder({
           </div>
         </div>
 
-      {orderLegs.length > 0 ? (
+      {orderLegs.length > 0 && !ticketOpen && selected === null ? (
         // F2: single thumb bar. Tapping the bar (the primary Review affordance)
         // opens the ticket; the Clear control stops propagation so it discards
         // without opening.
@@ -574,6 +586,7 @@ export default function MobileChainLadder({
           role="button"
           tabIndex={0}
           className="mobile-chain__pending-strip"
+          ref={pendingStripRef}
           onClick={() => setTicketOpen(true)}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") {

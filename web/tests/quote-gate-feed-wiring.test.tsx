@@ -34,6 +34,7 @@ vi.mock("@/components/Modal", () => ({
  *  disconnected and connected cases exercise the SAME call-site wiring. */
 let feedConnectedState = false;
 let brokerConnectedState = true;
+let marketDataDegradedState = false;
 vi.mock("@/lib/RealtimePricesContext", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/RealtimePricesContext")>();
   return {
@@ -42,6 +43,7 @@ vi.mock("@/lib/RealtimePricesContext", async (importOriginal) => {
       ...actual.useRealtimePrices(),
       connected: feedConnectedState,
       ibConnected: brokerConnectedState,
+      marketDataDegraded: marketDataDegradedState,
     }),
   };
 });
@@ -49,6 +51,7 @@ vi.mock("@/lib/RealtimePricesContext", async (importOriginal) => {
 beforeEach(() => {
   feedConnectedState = false;
   brokerConnectedState = true;
+  marketDataDegradedState = false;
 });
 
 afterEach(() => {
@@ -171,6 +174,19 @@ describe("OrderTab modify gate wired to the live feed (T-462)", () => {
   it("REL-236 broker loss disarms submit even with an open relay and fresh quote", async () => {
     feedConnectedState = true;
     brokerConnectedState = false;
+    const calls = recordFetch();
+    renderOrderTab();
+    const submit = openAndArmModify();
+    expect(submit.disabled).toBe(true);
+    expect(screen.getByText("Live feed disconnected. Submit disabled until quotes resume.")).toBeTruthy();
+    fireEvent.click(submit);
+    expect(mutationCalls(calls)).toEqual([]);
+  });
+
+  it("REL-318: degraded market data disarms submit with both sockets open", () => {
+    feedConnectedState = true;
+    brokerConnectedState = true;
+    marketDataDegradedState = true;
     const calls = recordFetch();
     renderOrderTab();
     const submit = openAndArmModify();

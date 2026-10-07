@@ -174,6 +174,11 @@ ARTIFACTS = (
     ),
     Artifact("services/radon-research.service", "/etc/systemd/system/radon-research.service", 0o644),
     Artifact("services/radon-research.service.d/runtime-container.conf", "/etc/systemd/system/radon-research.service.d/runtime-container.conf", 0o644),
+    Artifact("services/radon-subscription-vault.service", "/etc/systemd/system/radon-subscription-vault.service", 0o644),
+    Artifact("services/radon-subscription-vault.service.d/runtime-container.conf", "/etc/systemd/system/radon-subscription-vault.service.d/runtime-container.conf", 0o644),
+    Artifact("services/radon-ai-cycle.service.d/runtime-container.conf", "/etc/systemd/system/radon-ai-cycle.service.d/runtime-container.conf", 0o644),
+    Artifact("services/radon-ai-cycle-backfill.service.d/runtime-container.conf", "/etc/systemd/system/radon-ai-cycle-backfill.service.d/runtime-container.conf", 0o644),
+    Artifact("services/radon-aa-frontier-refresh.service.d/runtime-container.conf", "/etc/systemd/system/radon-aa-frontier-refresh.service.d/runtime-container.conf", 0o644),
 )
 
 
@@ -681,4 +686,54 @@ def test_atomic_install_writes_through_one_nofollow_fd() -> None:
     body = text[start : text.index("\n}\n", start)]
     assert "O_NOFOLLOW" in body and "dir_fd=dfd" in body
     for by_name in ("install -m", "mv -f", "chmod "):
+        assert by_name not in body, by_name
+
+
+@pytest.mark.parametrize("state_file", ["control-plane-ready", "control-plane-manifest.sha256"])
+def test_rollback_restores_state_files_without_following_a_planted_link(
+    tmp_path: Path, state_file: str,
+) -> None:
+    """DS-2026-10-05-03: the state files live in radon-owned /var/lib/radon.
+    Rollback removed and recopied them by name, so a link radon planted between
+    the two landed root's copy in whatever file the link named."""
+    sandbox = _sandbox(tmp_path)
+    snapshot = _seed_bundle(sandbox)
+    victim = tmp_path / "victim"
+    victim.write_bytes(b"root-only\n")
+    state_path = sandbox.rootfs / "var/lib/radon" / state_file
+    real_rm = shutil.which("rm")
+    assert real_rm
+    shim_bin = tmp_path / "shim-bin"
+    _write_executable(
+        shim_bin / "rm",
+        f"""#!/bin/bash
+"{real_rm}" "$@"
+rc=$?
+for arg in "$@"; do
+  if [[ "$arg" == "{state_path}" ]]; then
+    ln -sfn "{victim}" "{state_path}"
+  fi
+done
+exit "$rc"
+""",
+    )
+
+    result = sandbox.run(
+        RADON_BOOTSTRAP_TEST_TERM_AFTER_RELOAD="1",
+        PATH=f"{shim_bin}:{os.environ['PATH']}",
+    )
+
+    assert result.returncode == 143, result.stdout + result.stderr
+    assert victim.read_bytes() == b"root-only\n"
+    assert not state_path.is_symlink()
+    _assert_snapshot(snapshot)
+
+
+def test_restore_target_writes_through_one_nofollow_fd() -> None:
+    """DS-2026-10-05-03: rollback must not reopen a radon-reachable name."""
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    start = text.index("restore_target() {")
+    body = text[start : text.index("\n}\n", start)]
+    assert "O_NOFOLLOW" in body and "dir_fd=dfd" in body
+    for by_name in ("cp -a", "rm -f", "mkdir -p"):
         assert by_name not in body, by_name

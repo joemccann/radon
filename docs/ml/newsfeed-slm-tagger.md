@@ -238,7 +238,7 @@ Exactly one base ships in v1. Changing it is a version bump (section E), not a c
 
 ### D.3 Train stack
 
-Default trainer: **[LLaMA-Factory](https://github.com/hiyouga/LlamaFactory)** QLoRA/LoRA on `Qwen/Qwen2.5-1.5B-Instruct` (`[HR-1]` arm C). Train only; inference stays GGUF (llama.cpp) or vLLM/MLX sidecar. Zero spend, no prepaid key anywhere in the loop. `train.sh` refuses any `*_API_KEY` and runs every trainer entry, including the LLaMA-Factory import-discovery probe, under an allowlisted environment (toolchain, locale, HF cache, GPU knobs), and the config sets `trust_remote_code: false`.
+Default trainer: **[LLaMA-Factory](https://github.com/hiyouga/LlamaFactory)** QLoRA/LoRA on `Qwen/Qwen2.5-1.5B-Instruct` (`[HR-1]` arm C). Train only; inference stays GGUF (llama.cpp) or vLLM/MLX sidecar. Zero spend, no prepaid key anywhere in the loop. `train.sh` refuses any `*_API_KEY` and runs every trainer entry, including the LLaMA-Factory import-discovery probe, under an allowlisted environment (toolchain, locale and the explicit cache/offline/device options in `train.sh`), rather than forwarding every HF/transformer/GPU-prefixed variable (REL-319 / R-731). Credential-bearing names in those namespaces are excluded. The config sets `trust_remote_code: false` and pins `model_revision: 989aa7980e4cf806f80c7fef2b1adb7bc71aa306` (Hugging Face main, lastModified 2024-09-25), the same commit as `cloud/gpu/pins.json`. LLaMA-Factory reads `model_revision` and passes it as `revision` to `from_pretrained`. A bare `revision` key is unused and the parser rejects it. `train.sh` passes the YAML to `llamafactory-cli train` unchanged.
 
 On CUDA, the committed YAML uses bitsandbytes 4-bit (`quantization_bit: 4`, `quantization_method: bnb`). On the Mac Mini, bitsandbytes QLoRA is not available; run the same LLaMA-Factory recipe as LoRA on MPS (drop the quantization keys for that run) or the optional mlx-lm path (`SLM_TRAINER=mlx`). Do not rent a GPU to manufacture QLoRA.
 
@@ -275,6 +275,7 @@ Starting configuration (`configs/llamafactory-qwen25-1p5b-qlora-v1.yaml`), to be
 ```yaml
 # LLaMA-Factory (default). See configs/llamafactory-qwen25-1p5b-qlora-v1.yaml
 model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct
+model_revision: 989aa7980e4cf806f80c7fef2b1adb7bc71aa306
 quantization_bit: 4
 finetuning_type: lora
 train_on_prompt: false
@@ -667,7 +668,7 @@ Red/green order is mandatory (`CLAUDE.md` TDD rule). Every item names its test o
 - [ ] Extract run on a credentialed host; `manifest.json` counts in the PR body; corpus not in the diff (`git status` clean of `data/slm/`).
 
 **Train and export**
-- [x] `[HR-2]` `configs/llamafactory-qwen25-1p5b-qlora-v1.yaml` names `Qwen/Qwen2.5-1.5B-Instruct`; mlx-lm YAML remains the Mini alternative; a test pins the base id in both configs and in `manifest.json`.
+- [x] `[HR-2]` `configs/llamafactory-qwen25-1p5b-qlora-v1.yaml` names `Qwen/Qwen2.5-1.5B-Instruct` and pins `model_revision` to a 40-hex commit; mlx-lm YAML remains the Mini alternative; a test pins the base id in both configs and in `manifest.json`.
 - [x] `[HR-5]` LLaMA-Factory `train_on_prompt: false` and mlx `mask_prompt: true` pinned by test; `train.sh` refuses any `*_API_KEY` in env (subprocess test with a fake key) and refuses a data dir whose manifest lists a source other than `turso.posts`.
 - [ ] Training run on the Mini; loss curve numbers in the model card only (`[HR-6]`: not in the gate table).
 - [ ] `export.sh` produces adapter, F16 GGUF, Q4_K_M GGUF; `manifest.json` sha256s match uploaded B2 objects; `models/slm-tagger/v1/MODEL_CARD.md` carries the honesty label verbatim.

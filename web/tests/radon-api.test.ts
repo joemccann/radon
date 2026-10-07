@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 
 /**
  * Tests for web/lib/radonApi.ts — the fetch helper that ALL migrated routes
@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  */
 
 // Mock global fetch before importing radonApi
+vi.stubEnv("RADON_API_URL", "http://localhost:8321");
 const mockFetch = vi.fn();
 globalThis.fetch = mockFetch as unknown as typeof fetch;
 
@@ -33,6 +34,10 @@ function textResponse(text: string, status = 500): Response {
 
 beforeEach(() => {
   mockFetch.mockReset();
+});
+
+afterAll(() => {
+  vi.unstubAllEnvs();
 });
 
 // =============================================================================

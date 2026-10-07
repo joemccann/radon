@@ -20,12 +20,14 @@ from typing import Any, Optional
 try:
     # When imported as `scripts.db.writer` from project root.
     from .client import get_db
+    from ..utils.outcome_metrics import measure_operation
     from .order_events_sql import ORDER_EVENT_INSERT_SQL, order_event_args
     from ..clients.journal_basis import normalize_expiry_compact
 except ImportError:  # pragma: no cover
     # When imported flat after sys.path.insert(scripts/) like the existing
     # services do (cta_sync_service.py et al).
     from db.client import get_db  # type: ignore[no-redef]
+    from utils.outcome_metrics import measure_operation
     from db.order_events_sql import ORDER_EVENT_INSERT_SQL, order_event_args  # type: ignore[no-redef]
     from clients.journal_basis import normalize_expiry_compact  # type: ignore[no-redef]
 
@@ -371,8 +373,10 @@ def delete_portfolio_snapshots_before(cutoff: str, batch_size: int = PORTFOLIO_D
     Payload-free: only selects/deletes ``taken_at`` keys in batches so catch-up
     ``--delete-only`` runs stay memory-cheap after B2 already holds the archive.
     Strategy (quiet Turso, measured 2026-07-12):
-      1. DELETE ... WHERE taken_at IN (SELECT ... LIMIT N)  — fast path
-      2. on transport timeout, fall back to single-key DELETEs for that page
+      1. Read a bounded page of stable keys, then DELETE those exact keys.
+      2. On transport timeout, fall back to single-key DELETEs for that page.
+    R-032 / REL-315: receipt loss must replay the same keys, never select the
+    following page inside the retried mutation.
     Bounded Hrana HTTP only. Resumable across process restarts.
     """
     try:
@@ -383,54 +387,8 @@ def delete_portfolio_snapshots_before(cutoff: str, batch_size: int = PORTFOLIO_D
     total = 0
     use_batch = True
     while True:
-        # Probe remaining work cheaply — also the loop exit when empty.
-        probe = _hrana_with_retry(
-            lambda: hrana_query(
-                "SELECT taken_at FROM portfolio_snapshots "
-                "WHERE taken_at < ? ORDER BY taken_at LIMIT 1",
-                (cutoff,),
-                timeout=_DELETE_HTTP_TIMEOUT_S,
-            )
-        )
-        if not probe:
-            return total
-
-        if use_batch:
-            try:
-                # Hrana has no rowcount — count the page BEFORE deleting it.
-                # `total += batch_size` reported 200 deletions for a 7-row
-                # tail and the inflated figure went verbatim into the
-                # archive job's service_health detail (T-046).
-                count_rows = _hrana_with_retry(
-                    lambda: hrana_query(
-                        "SELECT COUNT(*) FROM ("
-                        "SELECT taken_at FROM portfolio_snapshots "
-                        "WHERE taken_at < ? ORDER BY taken_at LIMIT ?)",
-                        (cutoff, batch_size),
-                        timeout=_DELETE_HTTP_TIMEOUT_S,
-                    )
-                )
-                page_count = int(count_rows[0][0]) if count_rows and count_rows[0] else 0
-                _hrana_with_retry(
-                    lambda: hrana_execute(
-                        "DELETE FROM portfolio_snapshots WHERE taken_at IN ("
-                        "SELECT taken_at FROM portfolio_snapshots "
-                        "WHERE taken_at < ? ORDER BY taken_at LIMIT ?)",
-                        (cutoff, batch_size),
-                        timeout=_DELETE_HTTP_TIMEOUT_S,
-                    )
-                )
-                total += page_count
-                continue
-            except Exception as exc:  # noqa: BLE001
-                print(
-                    f"[portfolio-delete] batch={batch_size} failed ({exc}); "
-                    "falling back to single-key for this page",
-                    flush=True,
-                )
-                use_batch = False
-
-        # Single-key fallback page.
+        # Freeze the page identity before any mutation. A committed DELETE
+        # with a lost receipt must not advance a LIMIT subquery on replay.
         rows = _hrana_with_retry(
             lambda: hrana_query(
                 "SELECT taken_at FROM portfolio_snapshots "
@@ -442,6 +400,28 @@ def delete_portfolio_snapshots_before(cutoff: str, batch_size: int = PORTFOLIO_D
         ids = [str(r[0]) for r in rows if r and r[0] is not None]
         if not ids:
             return total
+
+        if use_batch:
+            try:
+                placeholders = ",".join("?" for _ in ids)
+                _hrana_with_retry(
+                    lambda: hrana_execute(
+                        f"DELETE FROM portfolio_snapshots WHERE taken_at IN ({placeholders})",
+                        tuple(ids),
+                        timeout=_DELETE_HTTP_TIMEOUT_S,
+                    )
+                )
+                total += len(ids)
+                continue
+            except Exception as exc:  # noqa: BLE001
+                print(
+                    f"[portfolio-delete] batch={batch_size} failed ({exc}); "
+                    "falling back to single-key for this page",
+                    flush=True,
+                )
+                use_batch = False
+
+        # The fallback shares the frozen page even if the batch committed.
         page_deleted = 0
         for taken_at in ids:
             try:
@@ -772,6 +752,7 @@ def mark_flex_delivery_applied(content_sha256: str) -> bool:
     return isinstance(applied, int) and applied > 0
 
 
+@measure_operation("journal_upsert")
 def upsert_journal_entry(trade_id: str, payload: dict[str, Any], filled_at: Optional[str] = None) -> None:
     """Upsert one journal row over bounded Hrana HTTP (real socket timeout).
 

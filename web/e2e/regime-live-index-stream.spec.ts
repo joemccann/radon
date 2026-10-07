@@ -23,7 +23,7 @@ const CRI_MOCK_OPEN = {
   },
   cta: { exposure_pct: 95, forced_reduction_pct: 0, est_selling_bn: 0 },
   menthorq_cta: null,
-  history: [],
+  history: [{ date: "2026-03-12", vix: 24.0, vvix: 115.0, spy: 555.0, cor1m: 29.31 }],
 };
 
 const LIVE_BATCH = {
@@ -49,7 +49,7 @@ const LIVE_BATCH = {
     vega: null,
     impliedVol: null,
     undPrice: null,
-    timestamp: "2026-03-12T17:05:00.000Z",
+    timestamp: "2026-03-13T18:05:00.000Z",
   },
   VVIX: {
     symbol: "VVIX",
@@ -73,7 +73,7 @@ const LIVE_BATCH = {
     vega: null,
     impliedVol: null,
     undPrice: null,
-    timestamp: "2026-03-12T17:05:00.000Z",
+    timestamp: "2026-03-13T18:05:00.000Z",
   },
   COR1M: {
     symbol: "COR1M",
@@ -97,7 +97,7 @@ const LIVE_BATCH = {
     vega: null,
     impliedVol: null,
     undPrice: null,
-    timestamp: "2026-03-12T17:05:00.000Z",
+    timestamp: "2026-03-13T18:05:00.000Z",
   },
   SPY: {
     symbol: "SPY",
@@ -121,7 +121,7 @@ const LIVE_BATCH = {
     vega: null,
     impliedVol: null,
     undPrice: null,
-    timestamp: "2026-03-12T17:05:00.000Z",
+    timestamp: "2026-03-13T18:05:00.000Z",
   },
 };
 
@@ -207,6 +207,7 @@ async function setupMocks(page: import("@playwright/test").Page) {
 
 test.describe("/regime page — live websocket index stream", () => {
   test("replaces cached CRI values with live batch prices for VIX, VVIX, and COR1M", async ({ page }) => {
+    await page.clock.install({ time: new Date("2026-03-13T18:10:00.000Z") });
     const tracker = await setupMocks(page);
     await page.goto("/regime");
 

@@ -24,6 +24,14 @@ const PORTFOLIO_WITH_SINGLE_CALL = {
   avg_kelly_optimal: null,
   exposure: {},
   violations: [],
+  risk_budget: {
+    clusters: [],
+    breaches: [],
+    aggregate_exposure: 0,
+    insufficient_data: [],
+    corr_threshold: 0.7,
+    book_budget: 0.025,
+  },
   positions: [
     {
       id: 1,
@@ -144,7 +152,7 @@ const PRICES = {
 };
 
 function stubApis(page: import("@playwright/test").Page) {
-  page.route("**/api/portfolio", (route) =>
+  page.route("**/api/portfolio**", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -205,74 +213,64 @@ function stubApis(page: import("@playwright/test").Page) {
   page.route("**/api/prices", (route) => route.abort());
 }
 
+async function installMockWebSocket(page: import("@playwright/test").Page) {
+  await page.addInitScript((fixtures) => {
+    class MockWebSocket {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSING = 2;
+      static CLOSED = 3;
+      readyState = MockWebSocket.CONNECTING;
+      onopen: ((event?: unknown) => void) | null = null;
+      onmessage: ((event: { data: string }) => void) | null = null;
+      onclose: ((event?: unknown) => void) | null = null;
+      onerror: ((event?: unknown) => void) | null = null;
+      constructor() {
+        setTimeout(() => {
+          this.readyState = MockWebSocket.OPEN;
+          this.onopen?.({});
+          this.onmessage?.({ data: JSON.stringify({ type: "status", ib_connected: true, subscriptions: [] }) });
+          this.onmessage?.({ data: JSON.stringify({ type: "batch", updates: fixtures }) });
+        }, 0);
+      }
+      send() {}
+      close() { this.readyState = MockWebSocket.CLOSED; this.onclose?.({}); }
+    }
+    // @ts-expect-error test-only replacement
+    window.WebSocket = MockWebSocket;
+  }, PRICES);
+}
+
 test.describe("Modify-order spread telemetry", () => {
   test("shows raw spread dollars and midpoint percent in the modify modal", async ({ page }) => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
+    await page.route(/^https?:\/\/(?!localhost:|127\.0\.0\.1:)/, (route) => route.abort());
+    await page.route("**/api/**", (route) => route.fulfill({ status: 503, body: "Unmocked API blocked by test fixture" }));
+    await installMockWebSocket(page);
     stubApis(page);
 
-    await page.goto("http://127.0.0.1:3000/portfolio");
-
-    await page.evaluate((prices) => {
-      for (const [, priceData] of Object.entries(prices)) {
-        window.dispatchEvent(
-          new CustomEvent("ws-price", {
-            detail: {
-              type: "price",
-              symbol: (priceData as { symbol: string }).symbol,
-              data: priceData,
-            },
-          }),
-        );
-      }
-    }, PRICES);
-
-    const detailLink = page.locator('[aria-label="View details for AAOI"]').first();
-    await detailLink.waitFor({ timeout: 10_000 });
-    await detailLink.click();
-    await page.waitForURL("**/AAOI**", { timeout: 5_000 });
-
-    const tickerPage = page.locator(".ticker-detail-page");
-    await tickerPage.waitFor({ timeout: 5_000 });
-
-    // Re-inject prices after page navigation (prices lost on route change)
-    await page.evaluate((prices) => {
-      for (const [, priceData] of Object.entries(prices)) {
-        window.dispatchEvent(
-          new CustomEvent("ws-price", {
-            detail: {
-              type: "price",
-              symbol: (priceData as { symbol: string }).symbol,
-              data: priceData,
-            },
-          }),
-        );
-      }
-    }, PRICES);
-
-    const orderTab = tickerPage.locator(".ticker-tab", { hasText: /^Order/ }).first();
-    await orderTab.click();
-
-    const modifyButton = tickerPage.locator(".btn-modify").first();
-    await modifyButton.waitFor({ timeout: 5_000 });
-    await modifyButton.click();
+    await page.goto("/orders");
+    const row = page.getByRole("row", { name: /AAOI/ }).first();
+    await expect(row).toBeVisible();
+    await row.getByRole("button", { name: "MODIFY" }).click();
 
     const modifyModal = page.locator(".modify-dialog");
     await modifyModal.waitFor({ timeout: 5_000 });
 
     const bidText = await modifyModal
-      .locator(".modify-market-row")
+      .locator(".price-bar-item")
       .filter({ hasText: "BID" })
-      .locator(".modify-market-value")
+      .locator(".price-bar-value")
       .textContent();
     const askText = await modifyModal
-      .locator(".modify-market-row")
+      .locator(".price-bar-item")
       .filter({ hasText: "ASK" })
-      .locator(".modify-market-value")
+      .locator(".price-bar-value")
       .textContent();
     const spreadValue = modifyModal
-      .locator(".modify-market-row")
+      .locator(".price-bar-item")
       .filter({ hasText: "SPREAD" })
-      .locator(".modify-market-value");
+      .locator(".price-bar-value");
 
     const bid = parsePrice(bidText);
     const ask = parsePrice(askText);

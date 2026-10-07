@@ -19,6 +19,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 from .base import BaseHandler, et_session_date
+from utils.outcome_metrics import record_outcome
 from clients.ib_client import IBClient, DEFAULT_HOST
 
 try:
@@ -190,6 +191,7 @@ class FillMonitorHandler(BaseHandler):
                             "prev_avg_price": self.known_orders[order_id].get("avg_fill_price"),
                         }
                         result["fills"].append(fill_info)
+                        record_outcome("fill_detected", "success")
                         
                         logger.info(
                             f"Fill detected: #{order_id} {order.action} {newly_filled}x "
@@ -259,6 +261,7 @@ class FillMonitorHandler(BaseHandler):
 
                 if genuinely_filled:
                     result["complete_fills"] += 1
+                    record_outcome("filled_order_removed", "success")
                     logger.info(f"Order completed: #{order_id} {prev_order.get('symbol')}")
                     if self.send_notifications:
                         self._notify_complete(completed_info)

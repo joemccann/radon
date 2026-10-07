@@ -69,18 +69,13 @@
     },
   ],
 
-  // Tailscale SSH. The app host runs `tailscale up --ssh`, so Tailscale
-  // answers port 22 on its tailnet address and admits only what this
-  // section allows; the tcp:22 grant above is not enough on its own. The
-  // broker runs plain sshd and needs no rule here.
-  "ssh": [
-    {
-      "action": "accept",
-      "src":    ["group:operator"],
-      "dst":    ["tag:radon-app"],
-      "users":  ["root", "radon"],
-    },
-  ],
+  // No Tailscale SSH rules. Tailscale SSH authenticates the source node,
+  // not the local user, and every operator-owned node (including the shared
+  // Mac mini that runs the unprivileged nightly-loop user) matches
+  // group:operator. Every Radon host runs plain sshd with per-user key auth
+  // and Tailscale SSH off (`tailscale set --ssh=false`); the tcp:22 grant
+  // above reaches that sshd.
+  "ssh": [],
 
   "tests": [
     {

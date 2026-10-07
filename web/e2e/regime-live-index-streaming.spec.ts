@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { installClearFixtures } from "./clear-fixtures";
 
 const CRI_MOCK_OPEN = {
   scan_time: "2026-03-12T10:00:00",
@@ -23,7 +24,7 @@ const CRI_MOCK_OPEN = {
   },
   cta: { exposure_pct: 95, forced_reduction_pct: 0, est_selling_bn: 0 },
   menthorq_cta: null,
-  history: [],
+  history: [{ date: "2026-03-12", vix: 24.23, vvix: 122.49, spy: 555.0, cor1m: 28.97 }],
 };
 
 const LIVE_INDEX_PRICES = {
@@ -49,7 +50,7 @@ const LIVE_INDEX_PRICES = {
     vega: null,
     impliedVol: null,
     undPrice: null,
-    timestamp: "2026-03-12T10:05:00.000Z",
+    timestamp: "2026-03-13T18:05:00.000Z",
   },
   VVIX: {
     symbol: "VVIX",
@@ -73,7 +74,7 @@ const LIVE_INDEX_PRICES = {
     vega: null,
     impliedVol: null,
     undPrice: null,
-    timestamp: "2026-03-12T10:05:00.000Z",
+    timestamp: "2026-03-13T18:05:00.000Z",
   },
   COR1M: {
     symbol: "COR1M",
@@ -97,12 +98,12 @@ const LIVE_INDEX_PRICES = {
     vega: null,
     impliedVol: null,
     undPrice: null,
-    timestamp: "2026-03-12T10:05:00.000Z",
+    timestamp: "2026-03-13T18:05:00.000Z",
   },
 };
 
 async function setupMocks(page: import("@playwright/test").Page) {
-  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await installClearFixtures(page);
 
   await page.route("**/api/regime", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(CRI_MOCK_OPEN) }),
@@ -125,15 +126,24 @@ async function setupMocks(page: import("@playwright/test").Page) {
   await page.route("**/api/previous-close", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ closes: {} }) }),
   );
+  await page.route("**/api/index-quote**", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ price: null }) }),
+  );
 
   await page.addInitScript((livePrices) => {
     class MockWebSocket {
+      public static CONNECTING = 0;
+      public static OPEN = 1;
+      public static CLOSING = 2;
+      public static CLOSED = 3;
       public url: string;
       public readyState = 0;
       public onopen: ((event: Event) => void) | null = null;
       public onmessage: ((event: MessageEvent<string>) => void) | null = null;
       public onclose: ((event: Event) => void) | null = null;
       public onerror: ((event: Event) => void) | null = null;
+      private requested = new Set<string>();
+      private sentPrices = false;
 
       constructor(url: string) {
         this.url = url;
@@ -149,8 +159,12 @@ async function setupMocks(page: import("@playwright/test").Page) {
           indexes?: Array<{ symbol: string; exchange: string }>;
         };
         if (parsed.action !== "subscribe") return;
-        const requested = new Set((parsed.indexes ?? []).map((entry) => entry.symbol));
-        if (!requested.has("VIX") || !requested.has("VVIX") || !requested.has("COR1M")) return;
+        const requestedIndexes = (parsed.indexes ?? []).map((entry) => entry.symbol);
+        const observed = (window as Window & { __regimeIndexSubscriptions?: string[] }).__regimeIndexSubscriptions ??= [];
+        observed.push(...requestedIndexes);
+        for (const symbol of requestedIndexes) this.requested.add(symbol);
+        if (this.sentPrices || !["VIX", "VVIX", "COR1M"].every((symbol) => this.requested.has(symbol))) return;
+        this.sentPrices = true;
 
         window.setTimeout(() => {
           this.onmessage?.({
@@ -192,7 +206,13 @@ async function setupMocks(page: import("@playwright/test").Page) {
 test.describe("/regime page — live index stream values", () => {
   test("subscribes to VIX, VVIX, and COR1M and renders their live websocket prices", async ({ page }) => {
     await setupMocks(page);
+    await page.clock.setFixedTime(new Date("2026-03-13T18:10:00.000Z"));
     await page.goto("/regime");
+
+    await expect(page.locator("[data-workspace-section='regime']")).toBeVisible();
+    await expect.poll(() => page.evaluate(() =>
+      (window as Window & { __regimeIndexSubscriptions?: string[] }).__regimeIndexSubscriptions ?? [],
+    )).toEqual(expect.arrayContaining(["VIX", "VVIX", "COR1M"]));
 
     const vixCell = page.locator('[data-testid="strip-vix"]');
     const vvixCell = page.locator('[data-testid="strip-vvix"]');

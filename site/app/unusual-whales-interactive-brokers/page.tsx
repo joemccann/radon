@@ -249,7 +249,7 @@ export default function UnusualWhalesInteractiveBrokersPage() {
                   confidence="High"
                   caption="Two subscriptions feed the live instrument; the demo at demo.radon.run needs neither. The Unusual Whales link on this page is a referral link."
                 >
-                  <div className="overflow-x-auto">
+                  <div className="overflow-x-auto" role="region" aria-label="Data source requirements" tabIndex={0}>
                     <table className="scan-table">
                       <thead>
                         <tr>

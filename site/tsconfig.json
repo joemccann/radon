@@ -40,9 +40,14 @@
     ".next-dev-webpack/types/**/*.ts",
     ".next-dev-webpack/dev/types/**/*.ts",
     ".next-seo-audit/types/**/*.ts",
-    ".next-seo-audit/dev/types/**/*.ts"
+    ".next-seo-audit/dev/types/**/*.ts",
+    ".next-tester-army/types/**/*.ts",
+    ".next-tester-army/dev/types/**/*.ts",
+    ".next-site-playwright/types/**/*.ts",
+    ".next-site-playwright/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "tester-army"
   ]
 }
