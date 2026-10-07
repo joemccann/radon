@@ -229,12 +229,24 @@ Why this and not the others in the 1 to 3B class:
 | Qwen2.5-1.5B-Instruct | Apache 2.0 | Mature paths in mlx-lm (`mlx_lm.convert -q`, `mlx_lm.lora`, `mlx_lm.fuse`) and llama.cpp (`convert_hf_to_gguf.py`, `llama-server` with json_schema grammars); 1.5B is the largest size whose Q4_K_M (about 1.1 GB file, about 1.5 GB resident at 2k context) can plausibly share a small VPS; strong instruction following for its size | **v1 base, arms B and C** |
 | Qwen2.5-3B-Instruct | Apache 2.0 | Same toolchain; about 2 GB resident at Q4_K_M | **Upgrade only on a quality-gate failure** |
 | Qwen2.5-0.5B-Instruct | Apache 2.0 | Half the memory (Q8_0 about 0.6 GB); weaker on rarer tags | **Downgrade only on a memory-gate failure** |
-| Qwen3.5-0.8B / 2B (recommended in `radon-small-model.md`) | Apache 2.0 | Newer; hybrid thinking must be disabled for classification; toolchain support for the newer architecture is a per-version check | Not in v1. Newness is not a reason on its own; a family change is a v2 decision after the 3B upgrade path is exhausted. |
+| Qwen3.5-2B (`Qwen/Qwen3.5-2B`, post-trained chat, not `-Base`) | Apache 2.0 | Newest Qwen generation that publishes a non-preview chat model in the 1-2B band (Qwen3.6 and Qwen3.8 have no 1-2B checkpoint; 2B is closer to 1.5B than 0.8B). Hybrid GatedDeltaNet plus a vision tower. Thinking must stay off for the JSON contract. Native in transformers >=5.2.0 (`auto_map` absent), so `trust_remote_code: false`. Pinned `model_revision` `15852e8c16360a2fea060d615a32b45270f8a8fc` | Evaluation candidate only (`configs/llamafactory-qwen35-2b-qlora-v1.yaml`, `SLM_LF_CONFIG`). Not the shipped v1 base. |
 | Llama-3.2-1B / 3B-Instruct | Llama 3.2 Community License | Attribution and naming obligations, acceptable-use terms | Rejected on licence friction for zero capability gain |
 | Phi-4-mini | MIT | 3.8B, too large for the serve host; no evidence it beats Qwen at 1.5B on short classification | Rejected on size |
 | Gemma 4 E4B | Apache 2.0 | 4.5B effective; the image path is the only reason to want it and vision is out of scope | Rejected for v1 |
 
 Exactly one base ships in v1. Changing it is a version bump (section E), not a config flag.
+
+Joe approved a side-by-side evaluation of `Qwen/Qwen3.5-2B` against the pinned 1.5B baseline. The candidate does not replace `SLM_BASE_ID` or `cloud/gpu/pins.json`. Select it with `SLM_LF_CONFIG=scripts/newsfeed/slm/configs/llamafactory-qwen35-2b-qlora-v1.yaml` (or pass that path as `train.sh`'s first argument). Unset, `train.sh` still trains the 1.5B YAML.
+
+Hugging Face `author=Qwen` search on 2026-10-07: the newest small instruct/chat checkpoint near 1.5B is `Qwen/Qwen3.5-2B` (created 2026-02-28, lastModified 2026-03-02, sha `15852e8c16360a2fea060d615a32b45270f8a8fc`, Apache-2.0, `pipeline_tag` image-text-to-text, tag `conversational`, base `Qwen/Qwen3.5-2B-Base`). This generation drops the `-Instruct` suffix; the non-Base repo is the post-trained chat model. `config.json` has `architectures: [Qwen3_5ForConditionalGeneration]`, `model_type: qwen3_5`, and no `auto_map`. That class is absent from transformers v5.1.0 and registered in `modeling_auto.py` at v5.2.0, so `trust_remote_code: false` works from transformers 5.2.0. LLaMA-Factory v0.9.5 (2026-05-30) is the first release with the `qwen3_5_nothink` template and Qwen3.5 support. Its own pin is `transformers>=4.55.0,<=5.6.0,!=4.52.0,!=4.57.0`.
+
+Hyperparameters that differ from the 1.5B YAML, and why:
+
+- `template: qwen3_5_nothink` and `enable_thinking: false`. The `qwen3_5` template is a reasoning template and would train a think span into a 64-token JSON label.
+- `lora_target` adds `in_proj_qkv`, `in_proj_z`, `in_proj_b`, `in_proj_a`, `out_proj`. Eighteen of the twenty-four text layers are GatedDeltaNet. The 1.5B list only adapts the six full-attention blocks and the MLP.
+- `freeze_vision_tower: true` and `freeze_multi_modal_projector: true`. Tagger rows are text. Both already default true; the YAML pins them.
+- `cutoff_len` stays 1024 and `learning_rate` stays `1.0e-4`. LLaMA-Factory's Qwen3.5 LoRA example uses 1e-4 (1e-5 is the full-finetune example). An exported train row is about 5500 tokens on both the Qwen3.5 and Qwen2.5 tokenizers, so 1024 truncates both recipes. Raising only the candidate cutoff would confound the base comparison.
+- `output_dir` is `models/slm-tagger/qwen35-2b-eval/adapter` so the run cannot overwrite `models/slm-tagger/v1/adapter`.
 
 ### D.3 Train stack
 
@@ -253,7 +265,7 @@ Files (implement PR):
 ```
 scripts/newsfeed/slm/
   review_cli.py        C.4 human-ok capture
-  train.sh             llamafactory-cli train (default); SLM_TRAINER=mlx optional; refuses any *_API_KEY
+  train.sh             llamafactory-cli train (default); SLM_LF_CONFIG selects a YAML; SLM_TRAINER=mlx optional; refuses any *_API_KEY
   export.sh            llamafactory-cli export (or mlx_lm.fuse) -> convert_hf_to_gguf.py -> llama-quantize
   eval.py              section F metrics; reads predictions JSONL, prints one JSON object
   predict_slm.py       held-out posts -> llama-server -> predictions JSONL with latency per row (arms B and C; --arm flag)
@@ -262,6 +274,7 @@ scripts/newsfeed/slm/
   monitor.py           section I.3 post-deploy drift query; one JSON object, exit 3 on threshold breach
   shadow.py            section I shadow-mode row writer (imported by model_ladder_cli.py)
   configs/llamafactory-qwen25-1p5b-qlora-v1.yaml
+  configs/llamafactory-qwen35-2b-qlora-v1.yaml   # evaluation candidate; not the v1 base
   configs/llamafactory-export-v1.yaml
   configs/dataset_info.json
   configs/qwen25-1p5b-qlora-v1.yaml   # mlx-lm Mini alternative only
@@ -668,7 +681,7 @@ Red/green order is mandatory (`CLAUDE.md` TDD rule). Every item names its test o
 - [ ] Extract run on a credentialed host; `manifest.json` counts in the PR body; corpus not in the diff (`git status` clean of `data/slm/`).
 
 **Train and export**
-- [x] `[HR-2]` `configs/llamafactory-qwen25-1p5b-qlora-v1.yaml` names `Qwen/Qwen2.5-1.5B-Instruct` and pins `model_revision` to a 40-hex commit; mlx-lm YAML remains the Mini alternative; a test pins the base id in both configs and in `manifest.json`.
+- [x] `[HR-2]` `configs/llamafactory-qwen25-1p5b-qlora-v1.yaml` names `Qwen/Qwen2.5-1.5B-Instruct` and pins `model_revision` to a 40-hex commit; mlx-lm YAML remains the Mini alternative; a test pins the base id in both configs and in `manifest.json`. `configs/llamafactory-qwen35-2b-qlora-v1.yaml` is an evaluation candidate (`Qwen/Qwen3.5-2B` at `15852e8c16360a2fea060d615a32b45270f8a8fc`, `trust_remote_code: false`, template `qwen3_5_nothink`) selected only via `SLM_LF_CONFIG`.
 - [x] `[HR-5]` LLaMA-Factory `train_on_prompt: false` and mlx `mask_prompt: true` pinned by test; `train.sh` refuses any `*_API_KEY` in env (subprocess test with a fake key) and refuses a data dir whose manifest lists a source other than `turso.posts`.
 - [ ] Training run on the Mini; loss curve numbers in the model card only (`[HR-6]`: not in the gate table).
 - [ ] `export.sh` produces adapter, F16 GGUF, Q4_K_M GGUF; `manifest.json` sha256s match uploaded B2 objects; `models/slm-tagger/v1/MODEL_CARD.md` carries the honesty label verbatim.

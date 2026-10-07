@@ -1,3 +1,7 @@
 # Train-only. Never install into the runtime / production venv.
 # Used by scripts/newsfeed/slm/train.sh on the Mini or a CUDA host.
-llamafactory[torch,metrics]>=0.9.3
+# Qwen3.5-2B needs the qwen3_5_nothink template (LLaMA-Factory >=0.9.5,
+# 2026-05-30) and native Qwen3_5ForConditionalGeneration (transformers >=5.2.0).
+# LLaMA-Factory 0.9.5 rejects transformers >5.6.0 and ==4.57.0.
+llamafactory[torch,metrics]>=0.9.5
+transformers>=5.2.0
