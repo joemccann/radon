@@ -3036,10 +3036,18 @@ transport retry is introduced.
 
 ## Delta audit 2026-10-07
 
-| ID | Sev | Evidence | Failure mode |
+| ID | Sev | Where | Finding |
 |---|---|---|---|
 | R-731 / REL-319 | P1 | `scripts/newsfeed/slm/train.sh:41-56` | Prefix wildcards admitted credential-bearing HF, transformer and GPU variables into the third-party trainer despite its credential isolation contract. Eight synthetic faults failed twice; exact cache/offline/device option names replace those prefixes. Acceptance: actual shell launcher with fake trainer excludes eight credential names while preserving cache, offline and device controls; no credential file or external provider is accessed. DONE, focused trainer/reviewer suite 18 passed. |
 
 Inherited REL-021b / R-027 core acceptance is DONE with REL-320: injected order/fill/journal success, DB errors and notification outcomes have observable counters/rates. Native libSQL and other notification implementations are explicitly outside the bounded core coverage. NF-1/NF-4 and REL-087/R-232, REL-261/R-682 remain operator-only. Open draft #922 owns R-729/R-730 and REL-313 through REL-318; its repairs are excluded from this branch.
 
 Inherited R-027 / REL-320: core operations now report fixed-label process counts/rates independently of uptime. Read code: `scripts/clients/ib_client.py:751-752,909-910`, `scripts/db/writer.py:777-792`, `scripts/db/hrana_http.py:149-195`, `scripts/knowledge/http_db.py:207-302`, `scripts/api/db_http.py:110-184`, `scripts/monitor_daemon/handlers/fill_monitor.py:193-194,263-264`, `scripts/watchdog/notify.py:258-273,348-351`. Fault acceptance failed five cases twice; separate API/HTTP connection receipt cases, shared-import identity and terminal-removal distinction also failed twice. GREEN: 1118 focused cases; new collector 100% statement/branch coverage. Fixed labels, concurrency, absent-channel denominators, monotonic rates and quiet/terminal log flushes are tested. No SQL, account identity or provider text reaches metric samples. Existing safety gates, exception propagation and transport attempt counts are unchanged; counters are observational, not an exactly-once ledger.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-732 / REL-321 | P2 | `docs/runner.md:27`; `.pi/AGENTS.md:22`; `scripts/codemap_nightly.sh:79-81` | Codemap onboarding and the Codex mirror promised self-merge with the operator token after the launcher became human-merge-only. Acceptance: run the actual shell under fake GitHub commands, verify zero merge calls, and require both owner paragraphs to state operator review/merge without the self-merge/token claim. Two faults failed twice; focused publisher/guard suite 168 passed. DONE. |
+
+Audit complete: 393345550d521548808d9884be0e5ab10ae48854..8afaaa61f09789bc272910d0dbce048780ef4dd9, three commits and 21 changed paths; codemap direct importers add no paths. `rg` also confirmed shell entrypoint and maintained runbook consumers. Connectivity, persistence, resources, error handling, safety and observability were reviewed for the changed surfaces; the codemap JSON refresh is read-only audit input. NEW_FINDINGS and REL-021b were reconciled against trusted 2026-10-06 acceptance and open #922; no repaired/open-PR ID is reallocated. R-027 core acceptance is resolved above; four retained candidates remain operator-only.
+
+Audited through: 8afaaa61f09789bc272910d0dbce048780ef4dd9 on 2026-10-07 — 2 new findings

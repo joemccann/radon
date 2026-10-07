@@ -8975,7 +8975,7 @@ Audit complete through 72e09ffb: 65 commits, 112 changed paths and 300 paths inc
 ## Nightly reliability 2026-10-07
 
 - [x] T1 depends_on: [] Install isolated toolchain, recover checkpoint/open PR ownership and create authorized branch.
-- [ ] T2 depends_on: [T1] Audit delta and codemap importers; standing safety/catalog sweeps and retained candidate triage.
-- [ ] T3 depends_on: [T2] Reproduce verified findings serially, repair minimally and run focused gates before per-finding commits.
+- [x] T2 depends_on: [T1] Audit delta and codemap importers; standing safety/catalog sweeps and retained candidate triage.
+- [x] T3 depends_on: [T2] Reproduce verified findings serially, repair minimally and run focused gates before per-finding commits.
 - [ ] T4 depends_on: [T3] Permanent drills, syntax/diff/secret review and substantive publication check.
 - [ ] T5 depends_on: [T4] Publish substantive draft if needed, watch exact-head CI and post exactly one durable checkpoint.
