@@ -601,8 +601,9 @@ virtualenv or executable directory is mounted. AI jobs persist only secret-store
 and AI-cycle state; subscription maintenance persists known credential directories
 and its sidecar/lock, using pinned image CLIs with auth-only temporary homes.
 
-All four base service files are control-plane artifacts in the paired bootstrap
-and deploy-helper inventories. Keep their installed-units SHA256 pins current.
+All four base service files and their timers are control-plane artifacts in the paired bootstrap
+and deploy-helper inventories. Keep their installed-units SHA256 pins current. They are excluded from scheduled
+unit auto-sync so unit/wrapper/image changes converge through the same deploy.
 Deploy the image, wrapper and unit definitions together. Timers retain their
 cadence and units retain timeout/exit contracts. Stops reap the named container
 before removing its staged key; a surviving orphan preserves its key and fails

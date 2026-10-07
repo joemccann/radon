@@ -27,6 +27,15 @@ MANIFEST = CLOUD_ROOT / "config" / "installed-units.sha256"
 SERVICES_DIR = CLOUD_ROOT / "services"
 
 CONTROL_PLANE_UNITS = {
+    "radon-subscription-tokens.service",
+    "radon-subscription-tokens.timer",
+    "radon-ai-cycle.service",
+    "radon-ai-cycle.timer",
+    "radon-ai-cycle-backfill.service",
+    "radon-ai-cycle-backfill.timer",
+    "radon-aa-frontier-refresh.service",
+    "radon-aa-frontier-refresh.timer",
+
     "radon-health.service",
     "radon-ib-gateway-preheld-restart.service",
     "radon-ib-watchdog.service",
