@@ -3,12 +3,12 @@
 - [x] T1 depends_on: [] Inspect PositionTable, scoped instructions, existing regression and CI configuration.
 - [x] T2 depends_on: [T1] Add regressions and format position/expanded-leg Implied MV like Initial Value; retain negative signs and unavailable placeholders.
 - [x] T3 depends_on: [T1] Add Playwright coverage with computed neutral color and screenshot evidence; independent review.
-- [ ] T4 depends_on: [T2, T3] Create PR and verify all applicable GitHub CI checks at exact head; no local suites.
+- [ ] T4 depends_on: [T2, T3] Repair legacy rate-resolution formatting expectations from CI; create PR and verify all applicable GitHub CI checks at exact head; no local suites.
 - [ ] T5 depends_on: [T4] Record review evidence and send accepted normal-priority Pushover notification.
 
 Dependency graph: T1 -> T2, T3; T2 + T3 -> T4 -> T5.
 
-Review: GitHub run 37621162918 / head 10ba235d reproduced the positive-plus and directional-color regressions. Existing signed currency helper preserves negative liabilities; row classes match Initial Value. Independent review passed. Dark/light browser cases and screenshot uploads are registered in CI; final exact-head results pending. No local suites.
+Review: GitHub run 37621162918 / head 10ba235d reproduced the positive-plus and directional-color regressions. Existing signed currency helper preserves negative liabilities; row classes match Initial Value. Independent review passed. Dark/light browser cases and screenshot uploads are registered in CI; final exact-head results pending. CI 37621600997 passed new component regressions and identified a legacy rate-resolution expectation of positive plus signs; update only its expected currency formatting. No local suites.
 
 # Task: PDF extract error detail (2026-10-03)
 
