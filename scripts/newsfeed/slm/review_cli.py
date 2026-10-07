@@ -23,9 +23,12 @@ from newsfeed.slm.eval import gold_tags, load_jsonl  # noqa: E402
 
 
 # Scraped post text reaches the reviewer's terminal verbatim; C0/C1 control
-# bytes (ANSI escapes, bare newlines) could spoof the review display and bias
-# the promotion gate. Strip them before echoing.
-_TTY_UNSAFE_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+# bytes (ANSI escapes, bare newlines) and Unicode bidi / format controls
+# (reordering, isolates, zero-width, line separators) could spoof the review
+# display and bias the promotion gate. Strip them before echoing.
+_TTY_UNSAFE_RE = re.compile(
+    "[\x00-\x1f\x7f-\x9f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]"
+)
 
 
 def tty_safe(text: str) -> str:

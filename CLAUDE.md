@@ -21,7 +21,7 @@ Sub-directory CLAUDE.md files auto-load when cwd is anywhere under that subtree.
 
 ## Code path map
 
-Read `tools/codemap/architecture.json` before searching for a module or reconstructing imports. Full graph: `tools/codemap/codemap.json` (`meta`, `groups`, `nodes`, `edges`; `edges` are `[src, dst]` indexes into `nodes`). Do not walk the tree to reconstruct imports. A nightly job (`scripts/codemap_nightly.sh`, 02:00 local) regenerates them and merges its own PR; never commit `tools/codemap/*.json` or `codemap.data.js` from a feature branch (it conflicts every open PR).
+Read `tools/codemap/architecture.json` before searching for a module or reconstructing imports. Full graph: `tools/codemap/codemap.json` (`meta`, `groups`, `nodes`, `edges`; `edges` are `[src, dst]` indexes into `nodes`). Do not walk the tree to reconstruct imports. A nightly job (`scripts/codemap_nightly.sh`, 02:00 local) regenerates them and opens a refresh PR for the operator to merge; never commit `tools/codemap/*.json` or `codemap.data.js` from a feature branch (it conflicts every open PR).
 
 ## Reference docs — read explicitly when needed
 
