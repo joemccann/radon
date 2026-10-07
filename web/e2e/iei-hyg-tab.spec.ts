@@ -134,7 +134,8 @@ test.describe("/regime/iei-hyg - IEI/HYG ratio tab", () => {
 
     await page.goto("/regime/iei-hyg");
 
-    await expect(page.getByText("No IEI/HYG snapshot")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("No Treasury vs high yield snapshot")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("iei-hyg-chart-section")).toHaveCount(0);
     expect(failedApiResponses).toEqual([]);
   });
 });

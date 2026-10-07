@@ -1,39 +1,23 @@
 import { expect, test } from "../../web/node_modules/@playwright/test";
 
-test.describe("site surface preview metrics", () => {
-  test("keeps the Radon Performance metric value inside its own tile", async ({ page }) => {
+test.describe("site surface previews", () => {
+  test("keeps current regime illustrations inside their cards", async ({ page }) => {
     await page.setViewportSize({ width: 2048, height: 900 });
     await page.goto("/");
-
-    const performanceCard = page.locator("article").filter({
-      has: page.getByText("Radon Performance"),
-    }).first();
-    await expect(performanceCard).toBeVisible();
-
-    const metricsGrid = performanceCard.locator("div.grid").first();
-    const metricTiles = metricsGrid.locator(":scope > div");
-    await expect(metricTiles).toHaveCount(2);
-
-    const metricsTile = metricTiles.nth(0);
-    const anchorTile = metricTiles.nth(1);
-    const metricsValue = metricsTile.locator(".mono-metric-value");
-
-    const [metricsTileBox, anchorTileBox, metricsValueBox] = await Promise.all([
-      metricsTile.boundingBox(),
-      anchorTile.boundingBox(),
-      metricsValue.boundingBox(),
-    ]);
-
-    expect(metricsTileBox).not.toBeNull();
-    expect(anchorTileBox).not.toBeNull();
-    expect(metricsValueBox).not.toBeNull();
-
-    const metricsRightEdge = metricsValueBox!.x + metricsValueBox!.width;
-    const tileRightEdge = metricsTileBox!.x + metricsTileBox!.width;
-    const tileDividerGap = tileRightEdge - metricsRightEdge;
-    const neighborDividerGap = anchorTileBox!.x - metricsRightEdge;
-
-    expect(tileDividerGap).toBeGreaterThanOrEqual(12);
-    expect(neighborDividerGap).toBeGreaterThanOrEqual(12);
+    const regime = page.locator("#regime");
+    await regime.scrollIntoViewIfNeeded();
+    const cards = regime.locator(".grid > div");
+    await expect(cards).toHaveCount(4);
+    for (const card of await cards.all()) {
+      await expect(card).toBeVisible();
+      const graphic = card.getByRole("img");
+      await expect(graphic).toBeVisible();
+      const cardBox = await card.boundingBox();
+      const graphicBox = await graphic.boundingBox();
+      expect(cardBox).not.toBeNull();
+      expect(graphicBox).not.toBeNull();
+      expect(graphicBox!.x).toBeGreaterThanOrEqual(cardBox!.x);
+      expect(graphicBox!.x + graphicBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width);
+    }
   });
 });

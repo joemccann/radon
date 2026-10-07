@@ -27,6 +27,22 @@ The `knowledge` table carries two vector columns:
 - **Disable:** `RADON_KB_EMBED_DISABLED=1` turns off all embeddings; ingest writes FTS-only rows (`embedding` and `embedding_v2` both NULL).
 - **Transient write retries:** source and prepared-write retries wait `_retry_delay(attempt)` in `scripts/knowledge/ingest.py`: 12s doubling to a 60s cap, plus up to 25% jitter. Turso reaps an abandoned idle transaction after 10s (up to 300s if it is still running), so a shorter wait queues the retry behind the orphan's writer lock. Replay is safe because upserts are idempotent on `content_hash`.
 
+## Optional summary worker cleanup
+
+`scripts/knowledge/distill.py:run_distill_batch` runs each optional summary wave
+in its own process group. A timeout sends SIGKILL to that group and preserves
+completed summaries from stdout. Once that group kill succeeds and the worker
+is reaped, final cleanup does not signal the same group ID again. Final cleanup
+still kills CLI descendants after normal worker exit and retries the group
+kill when timeout cleanup has not reaped the worker. Signaling permission
+errors are not suppressed.
+
+`scripts/tests/test_knowledge_enrichment_budget.py` covers partial-result
+retention, stalled cleanup retries, normal-exit descendant cleanup, and a
+second-signal permission failure after successful timeout cleanup. Its real
+child-process check owns and reaps both process-group members, verifies
+SIGKILL exit status, and closes their pipes on macOS and Linux.
+
 ## Bounded HTTP persistence
 
 `scripts/knowledge/http_db.py` provides a schema-independent Hrana connection.

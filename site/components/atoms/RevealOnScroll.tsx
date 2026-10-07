@@ -62,7 +62,7 @@ export function RevealOnScroll({
     <Tag
       ref={ref}
       id={id}
-      className={["reveal", shown ? "in" : "", className].filter(Boolean).join(" ")}
+      className={["reveal min-w-0", shown ? "in" : "", className].filter(Boolean).join(" ")}
     >
       {children}
     </Tag>

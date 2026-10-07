@@ -139,16 +139,19 @@ export default function InfoTooltip({ text, ariaLabel, triggerTestId, contentTes
    */
   const placement = (() => {
     if (!rect || popupHeight === null) return null;
-    const viewportWidth = typeof window === "undefined" ? 1024 : window.innerWidth;
-    const viewportHeight = typeof window === "undefined" ? 768 : window.innerHeight;
-    const top = safeAreaTop() + TOOLTIP_MARGIN;
-    const bottom = viewportHeight - TOOLTIP_MARGIN;
+    const viewport = typeof window === "undefined" ? null : window.visualViewport;
+    const viewportWidth = viewport?.width ?? (typeof window === "undefined" ? 1024 : window.innerWidth);
+    const viewportHeight = viewport?.height ?? (typeof window === "undefined" ? 768 : window.innerHeight);
+    const offsetLeft = viewport?.offsetLeft ?? 0;
+    const offsetTop = viewport?.offsetTop ?? 0;
+    const top = offsetTop + safeAreaTop() + TOOLTIP_MARGIN;
+    const bottom = offsetTop + viewportHeight - TOOLTIP_MARGIN;
 
     const width = Math.min(TOOLTIP_WIDTH, viewportWidth - TOOLTIP_MARGIN * 2);
     const left = clamp(
       rect.left + rect.width / 2 - width / 2,
-      TOOLTIP_MARGIN,
-      viewportWidth - TOOLTIP_MARGIN - width,
+      offsetLeft + TOOLTIP_MARGIN,
+      offsetLeft + viewportWidth - TOOLTIP_MARGIN - width,
     );
 
     const maxHeight = Math.max(0, bottom - top);

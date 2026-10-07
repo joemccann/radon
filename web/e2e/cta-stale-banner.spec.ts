@@ -84,7 +84,7 @@ test("CTA page shows a stale-data warning while still rendering the last availab
   await expect(banner).toContainText("CTA positioning is stale");
   await expect(banner).toContainText("Expected 2026-03-12");
   await expect(banner).toContainText("Latest available 2026-03-11");
-  await expect(banner).toContainText("username or password was incorrect");
+  await expect(page.getByRole("alert").filter({ hasText: "Your username or password was incorrect" })).toBeVisible();
 
   await expect(page.locator('[data-testid="sortable-cta-table"]').first()).toBeVisible();
 });

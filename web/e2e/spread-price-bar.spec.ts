@@ -218,18 +218,22 @@ test.describe("Spread PriceBar — net pricing from per-leg WS data", () => {
     expect(parseFloat(lastText!.replace("$", "").replace(",", ""))).toBeLessThan(20);
   });
 
-  test("falls back to underlying when per-leg prices are unavailable", async ({ page }) => {
+  test("does not substitute underlying for unavailable spread prices", async ({ page }) => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
     stubApis(page);
+    let subscriptionSeen = false;
+    await page.routeWebSocket(/(?:localhost|127\.0\.0\.1):(?:18765|8765)|\/ws(?:\?|$)/, (socket) => {
+      socket.onMessage((raw) => {
+        const message = JSON.parse(raw.toString());
+        if (message.action !== "subscribe" || !message.symbols?.includes("GOOG")) return;
+        subscriptionSeen = true;
+        socket.send(JSON.stringify({ type: "status", ib_connected: true, subscriptions: ["GOOG"] }));
+        socket.send(JSON.stringify({ type: "batch", updates: { GOOG: PRICES.GOOG } }));
+      });
+    });
 
     await page.goto("/portfolio");
-
-    // Only inject underlying price, NOT leg prices
-    await page.evaluate((price) => {
-      window.dispatchEvent(
-        new CustomEvent("ws-price", { detail: { type: "price", symbol: price.symbol, data: price } }),
-      );
-    }, PRICES.GOOG);
+    await expect.poll(() => subscriptionSeen).toBe(true);
 
     const googLink = page.locator('[aria-label="View details for GOOG"]').first();
     await googLink.waitFor({ timeout: 10_000 });
@@ -239,16 +243,13 @@ test.describe("Spread PriceBar — net pricing from per-leg WS data", () => {
     const detail = page.locator(".ticker-detail-page");
     await detail.waitFor({ timeout: 5_000 });
 
-    // Re-inject underlying price only after page navigation
-    await page.evaluate((price) => {
-      window.dispatchEvent(
-        new CustomEvent("ws-price", { detail: { type: "price", symbol: price.symbol, data: price } }),
-      );
-    }, PRICES.GOOG);
-
-    // Should fall back to underlying when leg prices are missing
+    // The intercepted realtime transport supplies only the underlying quote.
+    // Spread close-ticket telemetry must remain empty without both leg quotes.
     const priceBar = detail.locator(".price-bar");
     await priceBar.waitFor({ timeout: 5_000 });
-    await expect(priceBar).toContainText("(underlying)");
+    await expect(priceBar).toHaveText("No real-time data");
+    const underlyingQuote = detail.getByRole("region", { name: "Underlying quote" });
+    await expect(underlyingQuote).toContainText("$307.84");
+    await expect(priceBar).not.toContainText("$307.84");
   });
 });

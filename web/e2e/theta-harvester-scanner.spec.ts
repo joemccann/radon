@@ -187,10 +187,11 @@ test.describe("theta harvester scanner", () => {
       return {
         headingShare: headingRect.width / headerRect.width,
         controlsRightGap: headerRect.right - controlsRect.right,
+        expectedRightGap: Number.parseFloat(getComputedStyle(header).paddingRight),
       };
     });
     expect(headerGeometry.headingShare).toBeLessThan(0.25);
-    expect(headerGeometry.controlsRightGap).toBeLessThanOrEqual(17);
+    expect(Math.abs(headerGeometry.controlsRightGap - headerGeometry.expectedRightGap)).toBeLessThanOrEqual(0.5);
 
     await page.getByRole("button", { name: /scan ndx/i }).click();
     await expect.poll(() => scanBodies.length).toBe(1);
