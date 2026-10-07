@@ -8994,3 +8994,11 @@ Audit complete through 72e09ffb: 65 commits, 112 changed paths and 300 paths inc
 Audit through 39334555: 12 commits, 78 changed paths, 134 paths including codemap callers. Two new and four inherited repairs have repeated fault-injection red/green evidence. Focused suites: cloud admission 156, breadth/callers 102, archive/transport 112, API health 90, scripts health 337, assistant native acceptance 8, relay 13; Chrome chat 14 and modify 4, with screenshot inspection and TypeScript green. Permanent Python drills 95, standing gates 78. Fourteen Python files and two shell files parse; no YAML/JSON/TOML changed. Diff hygiene, six-commit secret scan and substantive publication check pass. R-027 counters remain an open inherited candidate with exact acceptance on issue #81, alongside four operator-only findings and two unconfirmed installation actions; no candidate is closed on inspection. T5 draft publication, registered exact-head CI and the single rolling comment are recorded on issue #81 after delivery, without a bookkeeping-only push. No live access, credentials, main push, merge, codemap or test-ledger edits.
 
 T5 CI repair review: unchanged successful-replacement signal assertion failed in Vitest shard 5; the native request-owner completion control reproduced red twice. Only unfinished transports are aborted during cleanup; completed responses retain successful signal state. Eight native acceptance and fourteen Chrome lifecycle regressions pass without weakening the original assertion. Exact-head CI is restarted after the ordinary repair push; all preceding heads are superseded.
+
+## DS-2026-10-05-05 trusted runtime isolation
+- [ ] T1 Inspect immutable-image service dependencies and runtime contracts. depends_on: []
+- [ ] T2 Containerize four secret-store jobs through root-owned runtime and protected credential staging. depends_on: [T1]
+- [ ] T3 Add regression coverage for isolation, unit wiring, commands, mounts, and cleanup. depends_on: [T1, T2]
+- [ ] T4 Document design, create PR, verify all exact-head GitHub CI and notify. depends_on: [T2, T3]
+Dependency graph: T1 -> T2 -> T3 -> T4; T1 -> T3; T2 -> T4.
+Review: pending. Local suites prohibited; validation runs on GitHub.

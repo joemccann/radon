@@ -87,8 +87,9 @@ restarting, not from the tab. Deleting a stored secret does not unset the
 already-exported value in the running process — it takes effect at the next
 FastAPI restart.
 
-The LLM regime collector runs as a separate systemd process, so
-`radon-ai-cycle.service` loads the same encrypted store and master key directly.
+The LLM regime collector runs as a non-root container dispatched by the
+root-owned `radon-app-runtime`. Its systemd unit loads the encrypted master
+key for protected staging, never for host checkout or virtualenv execution.
 Its Profile group exposes OpenRouter, Artificial Analysis (including the fixed
 model basket), Vast.ai, EIA and the SEC contact user agent. Stored values win
 over `/etc/radon/env` on the collector's next run.
@@ -127,12 +128,12 @@ completes (the encrypted store keeps the value; REL-216).
 `radon-secret-store-key` in `$CREDENTIALS_DIRECTORY`, then the key file at
 `$RADON_SECRET_STORE_KEY_FILE` (default `~/.radon/secret_store.key`,
 auto-generated 0600 on first use). Production
-`radon-api.service` loads
+`radon-api.service` and the four isolated secret-store jobs load
 `/etc/credstore.encrypted/radon-secret-store-key` with
 `LoadCredentialEncrypted=`. The root container wrapper validates the decrypted
 value is a regular, non-symlink 32-byte file, stages a copy under
 `/run/radon-app-runtime/credentials/`, and mounts only that directory
-read-only into the API container. The key is never passed through Docker
+read-only into the corresponding non-root container. The key is never passed through Docker
 arguments or environment values; the staged plaintext is removed by
 `ExecStopPost` after the container stops. The wrapper runs the container
 with Podman (`--cgroups=split`, so it lives in the unit's own cgroup) when
@@ -191,11 +192,12 @@ opt-in; funding a prepaid wallet alone does not recover a missing subscription.
 NVIDIA and Cerebras have separate rung policies in that owner. Check subscription
 availability and the credential binds before changing billing policy.
 `radon-subscription-tokens`
-keeps the files live on the host ([subscription-tokens.md](subscription-tokens.md)).
+keeps the host credential files live through narrow writable data mounts
+([subscription-tokens.md](subscription-tokens.md)).
 
 The staged copy is `root:radon-secrets 0040` in a `root:radon-secrets 0050`
 directory, and the container is granted that gid at start with
-`--group-add` (R-619). The API container runs `--user radon`, so a copy owned
+`--group-add` (R-619). Each key-bearing container runs `--user radon`, so a copy owned
 by uid `radon` would be readable by anything else that account can start; the
 owner bits are empty and only root can grant `radon-secrets`, so the delivery
 channel is one the `radon` account cannot open for itself. `radon` is never a
@@ -204,6 +206,30 @@ finds the account in it, and `radon-app-runtime` exits 78 before staging
 anything if the group is missing or `radon` has joined it. Adding the
 `radon-panic-index` service/timer pair to the setup-vps inventory does not
 change this staging path, the `radon-secrets` group, or docker-group stripping.
+
+**Scheduled secret-store jobs.** `radon-subscription-tokens`, `radon-ai-cycle`,
+`radon-ai-cycle-backfill`, and `radon-aa-frontier-refresh` are root-dispatched
+oneshots using the release Python image. They receive a separate per-unit
+credential directory with the same R-619 owner, group and mode checks as the
+API. The container uses the host radon UID with no capabilities and no new
+privileges. Missing/invalid keys or an unverifiable credential-group boundary
+fail startup. Stop cleanup reaps the container before removing its staged key.
+No host checkout, virtualenv or `~/.local/bin` is mounted into these jobs.
+
+AI jobs mount only `data/secret_store/` and `~/.radon/ai-cycle/` (raw evidence,
+frontier state, budget and backfill checkpoint). Subscription maintenance also
+mounts its state directory and known provider credential directories. It uses
+version-pinned image CLIs and a fresh temporary HOME per probe/login, seeded
+only with the provider's JSON auth file. Host configuration, hooks and local
+executables are excluded; only a bounded regular JSON auth file is copied back
+when the CLI rotates or creates credentials. Provider grant files remain
+accessible to their existing host consumers. The API also uses the image CLI
+rather than mounting host `~/.local/bin` with its master key.
+
+Deploy installs all four unit files through the root-owned control-plane
+manifest; timers keep their existing cadence and exit/timeout contracts.
+Install the new release image and control-plane files together. Reverting just
+the unit files restores host execution and does not preserve this isolation.
 
 `radon` is deliberately NOT in group `docker` (root-equivalent on this
 host): `setup-vps.sh` never adds it and strips a membership left by an

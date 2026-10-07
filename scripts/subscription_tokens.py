@@ -34,6 +34,7 @@ import queue
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -700,7 +701,12 @@ def _home(env: Mapping[str, str]) -> Path:
     return Path(home) if home else Path.home()
 
 
+ISOLATED_CLI_PATH = "/usr/local/bin:/usr/bin:/bin"
+
+
 def cli_search_path(env: Mapping[str, str]) -> str:
+    if env.get("RADON_SUBSCRIPTION_ISOLATED") == "1":
+        return ISOLATED_CLI_PATH
     local = [str(_home(env) / subdir) for subdir in LOCAL_BIN_DIRS]
     inherited = (env.get("PATH") or os.defpath).split(os.pathsep)
     return os.pathsep.join(local + inherited)
@@ -713,6 +719,63 @@ def cli_env(provider: Provider, env: Mapping[str, str]) -> dict:
     child["HOME"] = str(_home(env))
     child["PATH"] = cli_search_path(env)
     return child
+
+
+def _credential_text(path: Path) -> str:
+    """Read only a bounded regular auth file, never a link or device."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "r", encoding="utf-8") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise OSError("subscription auth must be a regular file")
+        try:
+            text = handle.read(1024 * 1024 + 1)
+        except UnicodeError as exc:
+            raise OSError("subscription auth must be UTF-8 JSON") from exc
+    if len(text) > 1024 * 1024:
+        raise OSError("subscription auth exceeds the size limit")
+    try:
+        doc = json.loads(text)
+    except (ValueError, UnicodeError) as exc:
+        raise OSError("subscription auth must be JSON") from exc
+    if not isinstance(doc, dict):
+        raise OSError("subscription auth must be a JSON object")
+    return text
+
+
+@contextlib.contextmanager
+def _isolated_cli_home(provider: Provider, env: Mapping[str, str], workdir: str):
+    """Expose auth only; host configs, hooks and executables stay outside HOME."""
+    if env.get("RADON_SUBSCRIPTION_ISOLATED") != "1":
+        yield cli_env(provider, env)
+        return
+    source = provider.path(env)
+    child = cli_env(provider, env)
+    child["HOME"] = str(Path(workdir) / "home")
+    child["DISABLE_AUTOUPDATER"] = "1"
+    for name, directory in (
+        ("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
+        ("XDG_CACHE_HOME", "cache"), ("XDG_RUNTIME_DIR", "run"),
+    ):
+        child[name] = str(Path(workdir) / directory)
+        Path(child[name]).mkdir(mode=0o700)
+    if provider.dir_env:
+        child[provider.dir_env] = str(Path(child["HOME"]) / provider.default_subdir)
+    target = provider.path(child)
+    target.parent.mkdir(parents=True, mode=0o700)
+    try:
+        before = _credential_text(source)
+    except FileNotFoundError:
+        before = None
+    if before is not None:
+        atomic_write_credential(target, before)
+    yield child
+    # Preserve vendor rotation/login, never write config or a symlink back.
+    try:
+        after = _credential_text(target)
+    except FileNotFoundError:
+        return
+    if after != before:
+        atomic_write_credential(source, after)
 
 
 @contextlib.contextmanager
@@ -732,13 +795,13 @@ def _provider_cli(
     """
     with tempfile.TemporaryDirectory(
         prefix="radon-subscription-cli-", ignore_cleanup_errors=True
-    ) as workdir:
+    ) as workdir, _isolated_cli_home(provider, env, workdir) as child_env:
         proc = subprocess.Popen(
             [binary, *args],
             stdin=subprocess.DEVNULL,
             stdout=stdout,
             stderr=subprocess.STDOUT,
-            env=cli_env(provider, env),
+            env=child_env,
             cwd=workdir,
             start_new_session=True,
         )

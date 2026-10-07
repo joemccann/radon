@@ -31,7 +31,8 @@ throwaway home so no live credential was touched.
 | grok | `~/.grok/auth.json` | `expires_at` (earliest entry) | `grok -p`, then OIDC-discovered token endpoint | `grok -p ...` | **push**: device code |
 | antigravity (`agy`) | `~/.gemini/antigravity-cli/antigravity-oauth-token` | `token.expiry` | `agy models`, then Google's token endpoint with the CLI's public client id | `agy models` (authenticated, not a model call) | paste-code: `agy -p ok` over SSH, 60s window |
 
-`grok` and `agy` install to `~/.local/bin`. The unit puts it on `PATH`, and the
+Manual host `grok` and `agy` installs use `~/.local/bin`. The isolated timer
+uses pinned image binaries and a temporary auth-only HOME. Outside that timer, the
 daemon searches `~/.local/bin` and `~/.grok/bin` itself so a manual run finds
 them too.
 
@@ -288,3 +289,15 @@ ids, not secrets. The daemon runs as `radon` with `UMask=0077`; the vault is
 the existing encrypted secret store, whose key is delivered by systemd
 `LoadCredentialEncrypted`, so there is no second crypto system to rotate or
 back up.
+
+## Trusted runtime isolation
+
+The subscription timer dispatches the release Python image through the
+root-owned `radon-app-runtime`. The master key is staged with root ownership
+and the isolated `radon-secrets` group; the host radon account cannot read it.
+Only credential data and the vault sidecar/lock persist through narrow mounts.
+CLIs in the image have pinned versions. Probes and push login run in fresh
+temporary homes with only their provider auth JSON, excluding host hooks,
+configuration, MCP servers and executable directories. A rotated or newly
+created auth JSON is copied back after the CLI process group is reaped.
+Host manual commands retain their existing CLI discovery behavior.
