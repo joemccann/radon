@@ -485,6 +485,16 @@ def test_hook_detail_is_sanitized_before_it_reaches_the_public_issue(rig):
     assert "[REDACTED]" in comment
 
 
+@pytest.mark.parametrize("header", ["Cookie", "Set-Cookie", "cOoKiE"])
+def test_cookie_headers_are_fully_redacted_at_the_public_comment_boundary(rig, header):
+    rig.post(PHASE_REFUSED=f"{header}: first=qzFirstNOTREAL; opaque=qzSecondNOTREAL\nretry after review")
+    comment = rig.comment()
+    assert comment
+    assert "NOTREAL" not in comment, comment
+    assert "[REDACTED]" in comment
+    assert "retry after review" in comment
+
+
 def test_the_deadman_issue_is_created_when_absent(rig):
     rig.post(output=f"{rig.marker} audit run_id=r1\n", STUB_ISSUE="")
 
