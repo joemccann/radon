@@ -39,6 +39,15 @@ Compute deletes and reinserts each observation identity within that transaction,
 so a failed insert preserves the prior batch. The connection itself creates no
 knowledge-specific schema.
 
+Connection `execute` and `execute_transaction` outcomes also contribute to the
+fixed-label `database` counters (REL-320 / R-027). One conditional transaction
+is one observed operation, rather than one count per statement. Failed or lost
+receipts count as errors even when the caller later recovers; no retry is added
+by telemetry. Bounded `operation_metrics` log samples report process-lifetime
+counts, monotonic rates and error ratios without SQL or source content. The
+[core counter contract](cloud-services.md#host-metrics-dur-12) describes restart
+resets, scope and why these observations are not a durable execution ledger.
+
 ## Backfill
 
 **Use when:** v2 coverage is incomplete or knowledge ingestion causes writer
