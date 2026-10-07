@@ -449,11 +449,11 @@ export default function MobileOrderTicket({
   };
 
   // F3: one-tap quote quick-set. Mirrors PositionTradeTicket BID/MID/ASK
-  // buttons — writes the abs magnitude into the text input (same as the ±
-  // stepper), marks the price manual, and drops back to the build view.
+  // buttons — preserves the signed net quote in the text input, marks the
+  // price manual, and drops back to the build view.
   const setPriceFromQuote = (value: number | null) => {
     if (value == null) return;
-    const next = Math.abs(value).toFixed(2);
+    const next = value.toFixed(2);
     if (!isCombo && isStopOrderType(orderType)) {
       setStopPriceText(next);
     } else {
@@ -855,7 +855,7 @@ export default function MobileOrderTicket({
                 data-testid="mobile-order-ticket-quote-bid"
                 aria-label="Set limit to bid"
               >
-                {signedQuote.bid != null ? fmtPrice(Math.abs(signedQuote.bid)) : "—"}
+                {signedQuote.bid != null ? fmtPrice(signedQuote.bid) : "—"}
               </button>
               <span className="mobile-ticket__quote-label">Mid</span>
               <button
@@ -866,7 +866,7 @@ export default function MobileOrderTicket({
                 data-testid="mobile-order-ticket-quote-mid"
                 aria-label="Set limit to mid"
               >
-                {signedQuote.mid != null ? fmtPrice(Math.abs(signedQuote.mid)) : "—"}
+                {signedQuote.mid != null ? fmtPrice(signedQuote.mid) : "—"}
               </button>
               <span className="mobile-ticket__quote-label">Ask</span>
               <button
@@ -877,7 +877,7 @@ export default function MobileOrderTicket({
                 data-testid="mobile-order-ticket-quote-ask"
                 aria-label="Set limit to ask"
               >
-                {signedQuote.ask != null ? fmtPrice(Math.abs(signedQuote.ask)) : "—"}
+                {signedQuote.ask != null ? fmtPrice(signedQuote.ask) : "—"}
               </button>
             </div>
 

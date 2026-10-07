@@ -1,3 +1,4 @@
+
 # Task: Neutral Implied MV formatting (2026-10-07)
 
 - [x] T1 depends_on: [] Inspect PositionTable, scoped instructions, existing regression and CI configuration.
@@ -39,6 +40,15 @@ Dependency graph: T1 -> T2 -> T3.
 ### Review
 - PR https://github.com/joemccann/radon/pull/938; original head 6334926dae407855aaa50dbdbb8878ba8518d4dc.
 - Both audit/log branches preserved verbatim; task records retained. Training documentation preserves discovery isolation, exact environment allowlist, pinned model revision, and human-review gates. Merged training shell/Python syntax and resolved-file whitespace checks passed. No local suites/builds; GitHub runners own verification.
+## PR #931 conflict repair (2026-10-07)
+- [x] T1 Inspect conflicts and preserve both branches' task and lesson records. depends_on: []
+- [x] T2 Merge current main, resolve conflicts, and statically verify record preservation. depends_on: [T1]
+- [ ] T3 Push the repaired head and wait for all applicable exact-head GitHub checks. depends_on: [T2]
+Dependency graph: T1 -> T2 -> T3.
+
+### Review
+- PR https://github.com/joemccann/radon/pull/931; original head d295ae937afe48bfeda792fb3a8355f74ff980df.
+- Both task branches and all 835/839 nonblank lesson records preserved; conflict markers removed and diff whitespace check passed. No local suites. Prior PR green notification already accepted; do not duplicate it.
 
 
 # Task: PDF extract error detail (2026-10-03)
@@ -9025,6 +9035,18 @@ Audit complete through 72e09ffb: 65 commits, 112 changed paths and 300 paths inc
 - [ ] T5 depends_on: [T4] Substantive classifier; push only testing/2026-10-07; one draft PR and exact-head green CI; one durable issue #83 comment.
 
 Review: Four verified findings have red/green receipts (T-538/T-540/T-541 P1; T-539 P2). Delta repetitions pass 230 Python and 156 cloud cases each; new YAML owner passes 8 cases three times. Four separate finding commits and three consecutive full closing rounds pass 14,292 Python, 10,390 Vitest and 2,617 cloud cases each; corrected clean-base cloud also passes 2,617 and all closing FAILED-list comparisons are empty. The earlier Caddy startup failure remains recorded separately with its 51-case isolated pass. Delivery remains pending; T5 external draft, exact-head CI and the single checkpoint completion receipt will be recorded on issue #83 without changing the verified head. No production connections, credential lookup, notification, main push or merge authorized.
+## Mobile risk-reversal quote preset signs, 2026-10-06
+
+- [x] T1 depends_on: [] Reproduce negative BID/MID preset labels and selection: five component failures and two mobile browser failures before the fix.
+- [x] T2 depends_on: [T1] Preserve signed net quotes in preset labels and selected limit values.
+- [x] T3 depends_on: [T2] Verify 51 focused units, two mobile mocked order cases, six curation checks, dark/light screenshots and diff hygiene; record review.
+- [ ] T4 depends_on: [T3] Publish the isolated fix PR, verify all applicable checks on its exact head and confirm the required normal-priority Pushover receipt.
+
+### Review
+
+Product change is limited to four sign-preserving expressions in MobileOrderTicket. Six added component regressions cover a risk-reversal book crossing zero and all-negative BID/MID/ASK presets. Red: five component failures and two mobile failures; green: 51 component/risk/order tests, two real-pointer mobile cases (retries=0), six curation checks. Browser cases confirm exact BUY combo envelopes with SELL call/BUY put legs and negative limit prices, no early POST, and explicit unbounded-risk acknowledgment. Dark/light full-viewport screenshots inspected under /tmp/radon-risk-reversal-sign-dark/ and /tmp/radon-risk-reversal-sign-final/. Fresh-route source typecheck passes with zero diagnostics; standard tsc reports three missing workflow imports from the pre-existing .next/dev/types/validator.ts. An additional retained mobile-skew case failed when a Clerk error overlay intercepted its click; its short-strangle case passed. No financial/auth gate or CI suite was changed. The new browser spec is explicitly held out pending production-server preflight. Generated test build and tsconfig additions removed; no live order was sent.
+
+Publication verification: branch updated to main 05edd0566; its CI and VPS deployment completed successfully. Full local coverage attempts were interrupted under approximately 9.7 GiB swap usage; the first had unrelated lazy-loader timeouts, and the serial attempt recorded an equibles-contract sorting failure. These are incomplete runs, not coverage or full-suite success. All applicable GitHub checks on the published exact head must finish successfully before PR-green notification and completion.
 
 ## Tester Army publication, 2026-10-06
 
