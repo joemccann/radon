@@ -22,6 +22,18 @@ TRAIN = REPO / "scripts" / "newsfeed" / "slm" / "train.sh"
 REQS = REPO / "scripts" / "newsfeed" / "slm" / "requirements-slm.txt"
 
 
+def _req_pins(text: str) -> dict[str, str]:
+    pins: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, sep, version = line.partition("==")
+        if sep:
+            pins[name.strip()] = version.split()[0]
+    return pins
+
+
 def _yaml_fields(text: str) -> dict[str, str]:
     fields: dict[str, str] = {}
     for line in text.splitlines():
@@ -145,9 +157,21 @@ class TestQwen35Candidate:
         assert fields["freeze_vision_tower"] == "true"
         assert fields["freeze_multi_modal_projector"] == "true"
         assert fields["output_dir"] != "models/slm-tagger/v1/adapter"
-        reqs = REQS.read_text(encoding="utf-8")
-        assert "llamafactory[torch,metrics]>=0.9.5" in reqs
-        assert "transformers>=5.2.0" in reqs
+        reqs = _req_pins(REQS.read_text(encoding="utf-8"))
+        assert reqs["llamafactory"] == "0.9.5"
+        assert reqs["transformers"] == "5.6.0"
+        assert reqs["torch"] == "2.14.1"
+        assert reqs["peft"] == "0.18.1"
+        assert reqs["bitsandbytes"] == "0.50.2"
+        assert reqs["accelerate"] == "1.11.0"
+        assert reqs["datasets"] == "4.0.0"
+        assert reqs["trl"] == "0.24.0"
+        assert reqs["tokenizers"] == "0.22.2"
+        fleet = (REPO / "requirements.txt").read_text(encoding="utf-8")
+        assert "llamafactory" not in fleet
+        assert "transformers" not in fleet
+        assert "tokenizers==0.23.1" in fleet
+        assert "huggingface-hub==1.24.0" in fleet
         sh = TRAIN.read_text(encoding="utf-8")
         assert "SLM_LF_CONFIG" in sh
         assert "llamafactory-qwen25-1p5b-qlora-v1.yaml" in sh

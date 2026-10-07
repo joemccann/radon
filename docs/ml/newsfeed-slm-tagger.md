@@ -252,6 +252,8 @@ Hyperparameters that differ from the 1.5B YAML, and why:
 
 Default trainer: **[LLaMA-Factory](https://github.com/hiyouga/LlamaFactory)** QLoRA/LoRA on `Qwen/Qwen2.5-1.5B-Instruct` (`[HR-1]` arm C). Train only; inference stays GGUF (llama.cpp) or vLLM/MLX sidecar. Zero spend, no prepaid key anywhere in the loop. `train.sh` refuses any `*_API_KEY` and execs the trainer under an allowlisted environment (toolchain, locale and the explicit cache/offline/device options in `train.sh`), rather than forwarding every HF/transformer/GPU-prefixed variable (REL-319 / R-731). Credential-bearing names in those namespaces are excluded. The config sets `trust_remote_code: false` and pins `model_revision: 989aa7980e4cf806f80c7fef2b1adb7bc71aa306` (Hugging Face main, lastModified 2024-09-25), the same commit as `cloud/gpu/pins.json`. LLaMA-Factory reads `model_revision` and passes it as `revision` to `from_pretrained`. A bare `revision` key is unused and the parser rejects it. `train.sh` passes the YAML to `llamafactory-cli train` unchanged.
 
+`requirements-slm.txt` is a uv lock for that train venv only (Python 3.13, manylinux x86_64). LLaMA-Factory 0.9.5 has no `[torch,metrics]` extra. The lock pins `llamafactory==0.9.5`, `transformers==5.6.0`, `torch==2.14.1`, `peft==0.18.1`, `bitsandbytes==0.50.2`, `accelerate==1.11.0`, `datasets==4.0.0`, `trl==0.24.0`, `tokenizers==0.22.2`. It stays out of `requirements.txt`: the fleet pins `tokenizers==0.23.1` and `huggingface-hub==1.24.0` for fastembed, and transformers 5.6.0 requires `tokenizers<=0.23.0`. Knowledge embeddings stay on fastembed. Forecasting keeps `requirements-forecasting.txt`.
+
 On CUDA, the committed YAML uses bitsandbytes 4-bit (`quantization_bit: 4`, `quantization_method: bnb`). On the Mac Mini, bitsandbytes QLoRA is not available; run the same LLaMA-Factory recipe as LoRA on MPS (drop the quantization keys for that run) or the optional mlx-lm path (`SLM_TRAINER=mlx`). Do not rent a GPU to manufacture QLoRA.
 
 Optional dual-path: **mlx-lm** remains a documented Mini alternative (`configs/qwen25-1p5b-qlora-v1.yaml`). It is not the default and must not delay the bakeoff.
@@ -278,7 +280,7 @@ scripts/newsfeed/slm/
   configs/llamafactory-export-v1.yaml
   configs/dataset_info.json
   configs/qwen25-1p5b-qlora-v1.yaml   # mlx-lm Mini alternative only
-  requirements-slm.txt                # trainer pin; never the runtime requirements
+  requirements-slm.txt                # train-only uv lock; never the runtime requirements
 ```
 
 Benchmark arms A, B and C forward each corpus row's `messages` system prompt and user content by default. Supplying a non-empty `--system-file` overrides the system prompt for either predictor; use the same file for every arm in a comparison. Arm A still refuses `RADON_LADDER_ALLOW_PREPAID`. Fake-inference entry-point regressions in `scripts/tests/test_slm_predictors.py` cover row-specific prompts, overrides, identity, refusal and error records without invoking a model.

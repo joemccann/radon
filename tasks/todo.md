@@ -1,3 +1,10 @@
+# Task: SLM QLoRA lock isolation (2026-10-07)
+
+- [x] T1 depends_on: [] Resolve LLaMA-Factory 0.9.5 ranges with uv. Isolate from the fleet requirements.
+- [ ] T2 depends_on: [T1] Push to PR 945. CI green. No merge.
+
+Review: uv 0.12.9 resolved llamafactory==0.9.5, transformers==5.6.0, torch==2.14.1, peft==0.18.1, bitsandbytes==0.50.2, accelerate==1.11.0, datasets==4.0.0, trl==0.24.0, tokenizers==0.22.2. Fleet stays tokenizers==0.23.1. Tests 18 + 64 + 43 passed.
+
 # Task: Newsfeed SLM Qwen3.5-2B evaluation config (2026-10-07)
 
 - [x] T1 depends_on: [] HF API pick: newest small Qwen chat model near 1.5B, sha, license, trust_remote_code, version floors.
