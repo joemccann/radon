@@ -1,0 +1,30 @@
+[Unit]
+Description=Radon subscription token vault broker (the only holder of the secret-store key for radon-subscription-tokens)
+After=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+# DS-2026-10-05-05. Production runs this through radon-app-runtime
+# (radon-subscription-vault.service.d/runtime-container.conf). The broker
+# opens the encrypted store and serves only the four agent-CLI credential
+# slots over RADON_SUBSCRIPTION_VAULT_SOCKET; radon-subscription-tokens runs
+# the CLIs as radon and never sees the key.
+Type=simple
+User=radon
+UMask=0077
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=RADON_DB_NO_REPLICA=1
+Environment=RADON_SECRET_STORE_PATH=/home/radon/radon/data/secret_store/secrets.db
+Environment=RADON_SUBSCRIPTION_VAULT_SOCKET=/run/radon-subscription-vault/vault.sock
+LoadCredentialEncrypted=radon-secret-store-key:/etc/credstore.encrypted/radon-secret-store-key
+ExecStartPre=/home/radon/radon/.venv/bin/python3.13 /home/radon/radon/scripts/secret_store.py
+ExecStart=/home/radon/radon/.venv/bin/python -m scripts.subscription_vault --serve
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

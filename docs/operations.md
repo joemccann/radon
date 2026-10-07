@@ -126,13 +126,23 @@ completes (the encrypted store keeps the value; REL-216).
 **Master key.** Resolution order: systemd credential
 `radon-secret-store-key` in `$CREDENTIALS_DIRECTORY`, then the key file at
 `$RADON_SECRET_STORE_KEY_FILE` (default `~/.radon/secret_store.key`,
-auto-generated 0600 on first use). Production
-`radon-api.service` loads
+auto-generated 0600 on first use). Production loads
 `/etc/credstore.encrypted/radon-secret-store-key` with
-`LoadCredentialEncrypted=`. The root container wrapper validates the decrypted
-value is a regular, non-symlink 32-byte file, stages a copy under
-`/run/radon-app-runtime/credentials/`, and mounts only that directory
-read-only into the API container. The key is never passed through Docker
+`LoadCredentialEncrypted=` in exactly five units, each run through
+`radon-app-runtime` by its `runtime-container.conf` drop-in: `radon-api`,
+`radon-subscription-vault`, `radon-ai-cycle`, `radon-ai-cycle-backfill` and
+`radon-aa-frontier-refresh` (DS-2026-10-05-05). The root container wrapper
+validates the decrypted value is a regular, non-symlink 32-byte file, stages a
+copy under `/run/radon-app-runtime/credentials/<unit>/`, and mounts only that
+directory read-only into that unit's container. The four store jobs get
+`data/secret_store` and their own state (`~/.radon/ai-cycle`, or the broker
+socket directory `/run/radon-subscription-vault`), never the rest of `data/`,
+media, the 2FA lease or any CLI grant. `radon-subscription-tokens` runs the
+agy, grok and codex CLIs as `radon` and holds no key: it reaches the four CLI
+credential slots through the `radon-subscription-vault` broker socket, and the
+broker serves nothing else from the store.
+`cloud/tests/test_ds_secret_store_key_units.py` fails CI if any unit loads the
+key without the root wrapper. The key is never passed through Docker
 arguments or environment values; the staged plaintext is removed by
 `ExecStopPost` after the container stops. The wrapper runs the container
 with Podman (`--cgroups=split`, so it lives in the unit's own cgroup) when
@@ -195,7 +205,7 @@ keeps the files live on the host ([subscription-tokens.md](subscription-tokens.m
 
 The staged copy is `root:radon-secrets 0040` in a `root:radon-secrets 0050`
 directory, and the container is granted that gid at start with
-`--group-add` (R-619). The API container runs `--user radon`, so a copy owned
+`--group-add` (R-619). The containers run `--user radon`, so a copy owned
 by uid `radon` would be readable by anything else that account can start; the
 owner bits are empty and only root can grant `radon-secrets`, so the delivery
 channel is one the `radon` account cannot open for itself. `radon` is never a
@@ -204,6 +214,61 @@ finds the account in it, and `radon-app-runtime` exits 78 before staging
 anything if the group is missing or `radon` has joined it. Adding the
 `radon-panic-index` service/timer pair to the setup-vps inventory does not
 change this staging path, the `radon-secrets` group, or docker-group stripping.
+
+R-619 scope, stated narrowly: the staging channel protects the key from the
+host `radon` account only while nothing else hands that account the same 32
+bytes. Two things still do, and neither is closed by this channel. First, a
+plaintext copy of the master key at
+`/home/radon/radon/data/secret_store/secret_store.key`, owned by `radon`, named
+by `RADON_SECRET_STORE_KEY_FILE` in `/etc/radon/env` (the seed the credstore
+was encrypted from). Remove it with the cutover below. Second, the `radon-api`
+container also gets `/home/radon/.local/bin` (the `agy` CLI its antigravity
+rung runs) and a writable `~/.gemini/antigravity-cli`, both radon-writable,
+while it holds the key group. A replaced `agy` runs with the key readable.
+That gap stays open until the API's agy rung moves out of the key-holding
+container.
+
+**Secret-store key cutover (operator, once, after 16:00 ET and only once the
+DS-2026-10-05-05 deploy is green).** Before that deploy the four units still
+receive the key as `User=radon`, so removing the file would close nothing. No
+unit needs the file: every key-loading unit resolves the systemd credential
+first. After the env line is gone, a `radon` shell that opens the store falls
+back to `~/.radon/secret_store.key`, which is a different key, so never open
+the production store from a shell (the rule in
+[subscription-tokens.md](subscription-tokens.md#sealing-a-freshly-created-credential)).
+
+```bash
+# as root on the app host
+systemctl cat radon-ai-cycle.service radon-ai-cycle-backfill.service \
+  radon-aa-frontier-refresh.service radon-subscription-vault.service \
+  | grep -c '^ExecStart=/usr/local/sbin/radon-app-runtime run %n$'   # expect 4
+systemctl enable --now radon-subscription-vault.service
+systemctl is-active radon-subscription-vault.service                # active
+systemctl start --no-block radon-subscription-tokens.service
+# after it finishes (minutes; it probes each CLI):
+journalctl -u radon-subscription-tokens.service -n 20 --no-pager   # no store_unavailable
+# the plaintext seed copy of the master key, and the env line that names it
+shred -u /home/radon/radon/data/secret_store/secret_store.key
+cp -p /etc/radon/env /etc/radon/env.pre-ds0505
+sed -i '/^RADON_SECRET_STORE_KEY_FILE=/d' /etc/radon/env
+grep -c '^RADON_SECRET_STORE_KEY_FILE=' /etc/radon/env               # expect 0
+stat -c '%U:%G %a' /etc/radon/env                                    # root:radon 640
+systemctl start radon-aa-frontier-refresh.service
+journalctl -u radon-aa-frontier-refresh.service -n 20 --no-pager     # exits 0
+shred -u /etc/radon/env.pre-ds0505
+```
+
+Verification: `curl -fsS http://127.0.0.1:8321/health` answers and the Profile
+Credentials tab lists its keys; `radon-subscription-tokens` reports no `store_unavailable`;
+`ls /home/radon/radon/data/secret_store/` shows `secrets.db` only. Rollback:
+the master key is still in `/etc/credstore.encrypted/radon-secret-store-key`,
+so no key is lost. If a unit needs the host fallback back, recreate the file
+from it as root (`systemd-creds decrypt --name=radon-secret-store-key
+/etc/credstore.encrypted/radon-secret-store-key
+/home/radon/radon/data/secret_store/secret_store.key`, owned `radon:radon`,
+owner-only) and restore the env line from `/etc/radon/env.pre-ds0505`.
+Doing that reopens the gap. `/home/radon/.radon/secret_store.key` is a
+different key for an unrelated legacy store; this cutover does not touch it.
 
 `radon` is deliberately NOT in group `docker` (root-equivalent on this
 host): `setup-vps.sh` never adds it and strips a membership left by an

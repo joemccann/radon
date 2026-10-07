@@ -95,6 +95,7 @@ EXPECTED_SERVICE_FILES = [
     "radon-liquidcompute.timer",
     "radon-subscription-tokens.service",
     "radon-subscription-tokens.timer",
+    "radon-subscription-vault.service",
     "radon-llm-index.service",
     "radon-llm-index.timer",
     "radon-nextjs-db-watchdog.service",
@@ -293,20 +294,23 @@ class TestSubscriptionTokens:
         assert svc["workingdirectory"] == "/home/radon/radon"
         assert svc["environmentfile"] == ENV_FILE_PATH
 
-    def test_loads_the_encrypted_secret_store(self, unit, services_dir):
+    def test_reaches_the_vault_through_the_broker_without_the_key(self, unit, services_dir):
+        # DS-2026-10-05-05: this unit runs third-party CLIs out of
+        # radon-writable directories, so it never loads the master key. The
+        # broker radon-subscription-vault (inside radon-app-runtime) does.
         svc = unit(self.SERVICE)["Service"]
-        assert svc["loadcredentialencrypted"] == (
-            "radon-secret-store-key:"
-            "/etc/credstore.encrypted/radon-secret-store-key"
-        )
+        assert "loadcredentialencrypted" not in svc
+        assert "execstartpre" not in svc
         lines = (services_dir / self.SERVICE).read_text(
             encoding="utf-8"
         ).splitlines()
         assert (
-            "Environment=RADON_SECRET_STORE_PATH="
-            "/home/radon/radon/data/secret_store/secrets.db"
+            "Environment=RADON_SUBSCRIPTION_VAULT_SOCKET="
+            "/run/radon-subscription-vault/vault.sock"
         ) in lines
-        assert "scripts/secret_store.py" in svc["execstartpre"]
+        section = unit(self.SERVICE)["Unit"]
+        assert section["wants"] == "radon-subscription-vault.service"
+        assert "radon-subscription-vault.service" in section["after"].split()
 
     def test_runs_the_once_mode_within_a_finite_budget(self, unit):
         svc = unit(self.SERVICE)["Service"]

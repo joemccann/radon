@@ -6,7 +6,14 @@ set -euo pipefail
 # radon is not in group docker.
 # Never Gateway, Caddy, health, or the engine socket.
 
-readonly APP_UNITS="radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research.service"
+readonly APP_UNITS="radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research.service radon-subscription-vault.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
+# DS-2026-10-05-05: every unit that opens the encrypted secret store. Each gets
+# the master key only through the radon-secrets staging below, inside image
+# code, never as a User=radon host process running the radon-writable venv.
+readonly SECRET_STORE_UNITS="radon-api.service radon-subscription-vault.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
+# Store-only jobs: no media, no 2FA lease, no subscription grants, no control
+# socket. Only the secret_store directory and their own state.
+readonly STORE_JOB_UNITS="radon-subscription-vault.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
 
 # Where the media volume lands INSIDE the container. Fixed regardless of the
 # host path, because Caddy's root and the newsfeed's download dir must agree.
@@ -34,6 +41,8 @@ if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
   GREEN_MARKER_FILE="${RADON_TEST_GREEN_MARKER:-${STATE_DIR}/last-green}"
   TRANSITION_JOURNAL_FILE="${RADON_TEST_TRANSITION_JOURNAL:-${STATE_DIR}/transition.json}"
   CHROMIUM_SECCOMP_PROFILE="${RADON_TEST_SECCOMP_PROFILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/config/seccomp/chromium.json}"
+  AI_CYCLE_DIR="${RADON_TEST_AI_CYCLE_DIR:-${STATE_DIR}/ai-cycle}"
+  SUBSCRIPTION_VAULT_DIR="${RADON_TEST_SUBSCRIPTION_VAULT_DIR:-${STATE_DIR}/subscription-vault}"
 else
   if (( EUID != 0 )); then
     echo "radon-app-runtime must run as root" >&2
@@ -77,7 +86,14 @@ else
   # Root-owned control-plane copy of cloud/config/seccomp/chromium.json. Never
   # the checkout: radon can write that, and could widen its own filter.
   CHROMIUM_SECCOMP_PROFILE=/etc/radon/seccomp/chromium.json
+  # ai-cycle collector state (raw archive, checkpoints, budgets). Never the
+  # rest of ~/.radon, which holds an unrelated legacy store and its key.
+  AI_CYCLE_DIR=/home/radon/.radon/ai-cycle
+  # Broker socket directory; /run is root-owned, so the anchor is trusted.
+  SUBSCRIPTION_VAULT_DIR=/run/radon-subscription-vault
 fi
+readonly AI_CYCLE_DIR_IN_CONTAINER=/home/radon/.radon/ai-cycle
+readonly SUBSCRIPTION_VAULT_DIR_IN_CONTAINER=/run/radon-subscription-vault
 
 readonly SECRET_STORE_CREDENTIAL_NAME=radon-secret-store-key
 # R-619. The container runs --user radon, so a staged key owned by uid radon
@@ -86,7 +102,6 @@ readonly SECRET_STORE_CREDENTIAL_NAME=radon-secret-store-key
 # root:radon-secrets 0040, and the container gets the gid at start via
 # --group-add. Only root can grant that group, and only for this container.
 readonly SECRET_STORE_CREDENTIAL_GROUP=radon-secrets
-readonly SECRET_STORE_CREDENTIAL_CONTAINER_DIR=/run/credentials/radon-api.service
 readonly SECRET_STORE_DB_CONTAINER_PATH=/home/radon/radon/data/secret_store/secrets.db
 readonly SECRET_STORE_CREDENTIAL_STAGE_ROOT="${NOTIFY_PROXY_DIR}/credentials"
 STAGED_CREDENTIAL_UNIT=""
@@ -96,11 +111,22 @@ usage() {
   exit 64
 }
 
+in_list() {
+  local candidate="$1" item
+  for item in $2; do
+    [[ "$candidate" == "$item" ]] && return 0
+  done
+  return 1
+}
+
+uses_secret_store() { in_list "$1" "$SECRET_STORE_UNITS"; }
+is_store_job() { in_list "$1" "$STORE_JOB_UNITS"; }
+
 cleanup_runtime_credential() {
   local unit="$1"
   local credential_dir="${SECRET_STORE_CREDENTIAL_STAGE_ROOT}/${unit}"
   local credential_file="${credential_dir}/${SECRET_STORE_CREDENTIAL_NAME}"
-  [[ "$unit" == "radon-api.service" ]] || return 0
+  uses_secret_store "$unit" || return 0
   if [[ -d "$credential_dir" ]]; then
     chmod 0700 "$credential_dir" 2>/dev/null || true
     rm -f "$credential_file"
@@ -143,7 +169,7 @@ assert_radon_cannot_open_credential_group() {
   return 0
 }
 
-stage_api_credential() {
+stage_secret_store_credential() {
   local unit="$1" gid="$2"
   local source credential_dir credential_file staged_size
   validate_api_startup_inputs
@@ -281,14 +307,7 @@ node_image() {
   resolve_image 'ghcr.io/joemccann/radon-node'
 }
 
-is_app_unit() {
-  local candidate="$1"
-  local unit
-  for unit in $APP_UNITS; do
-    [[ "$candidate" == "$unit" ]] && return 0
-  done
-  return 1
-}
+is_app_unit() { in_list "$1" "$APP_UNITS"; }
 
 refuse_host_plane() {
   local unit="$1"
@@ -666,6 +685,9 @@ cmd_run() {
   workdir=/home/radon/radon
   case "$unit" in
     radon-api.service|radon-monitor.service|radon-research.service) image="$(python_image)" ;;
+    radon-subscription-vault.service|radon-ai-cycle.service|radon-ai-cycle-backfill.service|radon-aa-frontier-refresh.service)
+      image="$(python_image)"
+      ;;
     radon-nextjs.service)
       image="$(node_image)"
       workdir=/home/radon/radon/web
@@ -683,7 +705,7 @@ cmd_run() {
   fi
 
   local credential_gid=""
-  if [[ "$unit" == "radon-api.service" ]]; then
+  if uses_secret_store "$unit"; then
     validate_api_startup_inputs
     assert_radon_cannot_open_credential_group || exit $?
     credential_gid="$(credential_group_gid)" || exit $?
@@ -711,10 +733,18 @@ cmd_run() {
   reap_container "$unit"
   cleanup_runtime_credential "$unit"
 
-  if [[ "$unit" == "radon-api.service" ]]; then
+  if uses_secret_store "$unit"; then
     prepare_private_dir "$ids" "${DATA_DIR}/secret_store" "secret store"
-    stage_api_credential "$unit" "$credential_gid"
+    stage_secret_store_credential "$unit" "$credential_gid"
   fi
+  case "$unit" in
+    radon-ai-cycle.service|radon-ai-cycle-backfill.service|radon-aa-frontier-refresh.service)
+      prepare_private_dir "$ids" "$AI_CYCLE_DIR" "ai-cycle state"
+      ;;
+    radon-subscription-vault.service)
+      prepare_private_dir "$ids" "$SUBSCRIPTION_VAULT_DIR" "subscription vault socket"
+      ;;
+  esac
 
   # The container gets NARROW binds, never $STATE_DIR itself. /var/lib/radon
   # holds control-plane-ready, the manifest digest and the root deploy
@@ -724,7 +754,7 @@ cmd_run() {
   # one thing an app genuinely writes outside media/ is the shared 2FA lease,
   # which now has its own subdirectory. Create it here: the container can no
   # longer mkdir it, because the parent is not mounted. R-381.
-  if [[ "$unit" != "radon-research.service" ]]; then
+  if [[ "$unit" != "radon-research.service" ]] && ! is_store_job "$unit"; then
     prepare_private_dir "$ids" "$LEASE_DIR" "2FA lease"
   fi
 
@@ -760,7 +790,20 @@ cmd_run() {
     set -- "$@" --cgroup-parent=system.slice
   fi
 
-  if [[ "$unit" != "radon-research.service" ]]; then
+  if is_store_job "$unit"; then
+    # DS-2026-10-05-05: the store and nothing else of data/.
+    set -- "$@" -v "${DATA_DIR}/secret_store:/home/radon/radon/data/secret_store"
+    case "$unit" in
+      radon-subscription-vault.service)
+        set -- "$@" \
+          -v "${SUBSCRIPTION_VAULT_DIR}:${SUBSCRIPTION_VAULT_DIR_IN_CONTAINER}" \
+          --env "RADON_SUBSCRIPTION_VAULT_SOCKET=${SUBSCRIPTION_VAULT_DIR_IN_CONTAINER}/vault.sock"
+        ;;
+      *)
+        set -- "$@" -v "${AI_CYCLE_DIR}:${AI_CYCLE_DIR_IN_CONTAINER}"
+        ;;
+    esac
+  elif [[ "$unit" != "radon-research.service" ]]; then
     set -- "$@" \
       -v "${DATA_DIR}:/home/radon/radon/data" \
       -v "${MEDIA_DIR}:${MEDIA_DIR_IN_CONTAINER}" \
@@ -840,12 +883,15 @@ cmd_run() {
     prepare_private_dir "$ids" "$CONTROL_DIR" "host control socket"
     set -- "$@" -v "${CONTROL_DIR}:${CONTROL_DIR_IN_CONTAINER}" \
       --env "RADON_CONTROL_SOCKET=${CONTROL_DIR_IN_CONTAINER}/control.sock"
+  fi
+  if uses_secret_store "$unit"; then
     local credential_host_dir="${SECRET_STORE_CREDENTIAL_STAGE_ROOT}/${unit}"
+    local credential_container_dir="/run/credentials/${unit}"
     set -- "$@" \
       --group-add "$credential_gid" \
-      --env "CREDENTIALS_DIRECTORY=${SECRET_STORE_CREDENTIAL_CONTAINER_DIR}" \
+      --env "CREDENTIALS_DIRECTORY=${credential_container_dir}" \
       --env "RADON_SECRET_STORE_PATH=${SECRET_STORE_DB_CONTAINER_PATH}" \
-      --mount "type=bind,src=${credential_host_dir},dst=${SECRET_STORE_CREDENTIAL_CONTAINER_DIR},readonly"
+      --mount "type=bind,src=${credential_host_dir},dst=${credential_container_dir},readonly"
   fi
 
   if [[ -n "${NOTIFY_SOCKET:-}" && "${NOTIFY_SOCKET}" == /* ]]; then
@@ -901,6 +947,20 @@ cmd_run() {
       ;;
     radon-research.service)
       set -- "$@" python -m research.worker --daemon
+      ;;
+    # DS-2026-10-05-05: the same module and arguments as each base unit's
+    # host ExecStart (pinned by cloud/tests/test_ds_secret_store_key_units.py).
+    radon-subscription-vault.service)
+      set -- "$@" sh -c 'python scripts/secret_store.py && exec python -m scripts.subscription_vault --serve'
+      ;;
+    radon-ai-cycle.service)
+      set -- "$@" sh -c 'python scripts/secret_store.py && exec python -m scripts.ai_cycle.collect --record'
+      ;;
+    radon-ai-cycle-backfill.service)
+      set -- "$@" sh -c 'python scripts/secret_store.py && exec python -m scripts.ai_cycle.collect --record --backfill --start 2006-12-31 --sources vercel,gpu-rental,sec,eia,noaa,openrouter --checkpoint /home/radon/.radon/ai-cycle/backfill-checkpoint.json --max-requests 400'
+      ;;
+    radon-aa-frontier-refresh.service)
+      set -- "$@" sh -c 'python scripts/secret_store.py && exec python -m scripts.aa_frontier_refresh'
       ;;
     radon-monitor.service)
       set -- "$@" python -m scripts.monitor_daemon.run --daemon
