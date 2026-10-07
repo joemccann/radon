@@ -1,0 +1,11 @@
+{
+  "name": "radon-trusted-vendor-clis",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Immutable CLI dependencies for isolated subscription credential probes",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.292",
+    "@openai/codex": "0.160.1",
+    "@xai-official/grok": "1.0.46"
+  }
+}

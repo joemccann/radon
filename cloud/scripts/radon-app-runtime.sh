@@ -159,7 +159,11 @@ credential_group_gid() {
 
 assert_radon_cannot_open_credential_group() {
   local groups
-  groups="$("$ID_BIN" -nG radon 2>/dev/null)" || groups=""
+  groups="$("$ID_BIN" -nG radon 2>/dev/null)" || {
+    echo "radon-app-runtime: cannot verify radon credential-group isolation" >&2
+    return 78
+  }
+  [[ -n "$groups" ]] || return 78
   case " $groups " in
     *" ${SECRET_STORE_CREDENTIAL_GROUP} "*)
       echo "radon-app-runtime: radon must not be a member of ${SECRET_STORE_CREDENTIAL_GROUP}" >&2
@@ -652,14 +656,26 @@ prepare_private_dir() {
   local ids="$1" dir="$2" label="$3"
   "$PYTHON" - "$dir" "$ids" "${RADON_APP_RUNTIME_TEST_MODE:-0}" "$label" <<'PY_PRIVATE_DIR' || exit 78
 import os, sys
+from pathlib import Path
 path, ids, test, label = sys.argv[1], sys.argv[2], sys.argv[3] == '1', sys.argv[4]
 uid, gid = (os.getuid(), os.getgid()) if test else tuple(int(part) for part in ids.split(':'))
+parent_fd = None
 try:
+    # Pin each ancestor; a host rename/link swap cannot redirect root's writes.
+    parts = Path(path).parts
+    if not parts or parts[0] != '/' or '..' in parts:
+        raise OSError('directory must be absolute without traversal')
+    flags = os.O_NOFOLLOW | os.O_DIRECTORY | os.O_RDONLY
+    parent_fd = os.open('/', flags)
+    for part in parts[1:-1]:
+        child_fd = os.open(part, flags, dir_fd=parent_fd)
+        os.close(parent_fd)
+        parent_fd = child_fd
     try:
-        os.mkdir(path, 0o700)
+        os.mkdir(parts[-1], 0o700, dir_fd=parent_fd)
     except FileExistsError:
         pass
-    fd = os.open(path, os.O_NOFOLLOW | os.O_DIRECTORY | os.O_RDONLY)
+    fd = os.open(parts[-1], flags, dir_fd=parent_fd)
     try:
         os.fchown(fd, uid, gid)
         os.fchmod(fd, 0o700)
@@ -668,6 +684,9 @@ try:
 except OSError:
     print(f'radon-app-runtime: {label} directory is a symlink or unusable; refusing', file=sys.stderr)
     raise SystemExit(78)
+finally:
+    if parent_fd is not None:
+        os.close(parent_fd)
 PY_PRIVATE_DIR
 }
 
@@ -843,7 +862,8 @@ cmd_run() {
           set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:rw"
         fi
       done
-      if [[ -d "${subscription_home}/.local/bin" ]]; then
+      # The API holds the secret-store key; it runs the image's pinned agy.
+      if [[ "$unit" != "radon-api.service" && -d "${subscription_home}/.local/bin" ]]; then
         set -- "$@" -v "${subscription_home}/.local/bin:/home/radon/.local/bin:ro"
       fi
       ;;

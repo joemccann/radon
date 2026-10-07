@@ -803,8 +803,8 @@ preflight_checks() {
   # R-619: the app-plane API container runs --user radon, so the plaintext
   # secret-store master key must not be handed over as a file uid radon can
   # open. radon-app-runtime stages it root:radon-secrets 0040 and grants the
-  # gid to that one container with --group-add. radon is never a member --
-  # the runtime refuses to start the API if it ever becomes one.
+  # gid to each approved image with --group-add. radon is never a member --
+  # the runtime refuses every key-bearing job if it ever becomes one.
   if ! getent group radon-secrets &>/dev/null; then
     log_info "Creating radon-secrets group..."
     groupadd --system radon-secrets
