@@ -4,6 +4,9 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
+
+import pytest
 from pathlib import Path
 
 from newsfeed.slm.contract import SLM_BASE_ID
@@ -122,3 +125,40 @@ class TestRemoteCode:
         assert f"HF_HOME={tmp_path / 'hf'}" in seen
         assert "CUDA_VISIBLE_DEVICES=0" in seen
         assert f"PATH={bindir}" in seen
+
+
+@pytest.mark.parametrize("credential_name", [
+    "HF_HUB_TOKEN", "HF_HUB_ACCESS_TOKEN", "HF_DATASETS_TOKEN",
+    "TRANSFORMERS_TOKEN", "CUDA_AUTH_TOKEN", "NVIDIA_NGC_TOKEN",
+    "PYTORCH_PASSWORD", "TORCH_SECRET",
+])
+def test_trainer_namespace_never_forwards_credentials(tmp_path, credential_name):
+    """REL-319 / R-731: allowed namespace prefixes are not safe values."""
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "manifest.json").write_text(json.dumps({"sources": ["turso.posts"]}))
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    captured = tmp_path / "names.json"
+    trainer = binaries / "llamafactory-cli"
+    trainer.write_text(
+        f"#!{sys.executable}\nimport json, os\n"
+        f"open({str(captured)!r}, 'w').write(json.dumps(sorted(os.environ)))\n"
+    )
+    trainer.chmod(0o755)
+    env = {
+        "PATH": f"{binaries}{os.pathsep}{Path(sys.executable).parent}{os.pathsep}{os.defpath}",
+        "SLM_DATA_DIR": str(data),
+        credential_name: "synthetic-credential-only",
+        "HF_HUB_CACHE": str(tmp_path / "cache"),
+        "HF_HUB_OFFLINE": "1",
+        "TRANSFORMERS_OFFLINE": "1",
+        "CUDA_VISIBLE_DEVICES": "0",
+    }
+    proc = subprocess.run(["bash", str(TRAIN)], cwd=tmp_path, env=env,
+                          capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    names = json.loads(captured.read_text())
+    assert credential_name not in names
+    assert {"PATH", "HF_HUB_CACHE", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE",
+            "CUDA_VISIBLE_DEVICES"} <= set(names)

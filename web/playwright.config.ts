@@ -49,6 +49,9 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
+      // Mobile-only specs belong to the iPhone project. The mixed switcher
+      // file retains its explicit desktop VIX financial regression.
+      testIgnore: ["**/*.test.js", /mobile-(?!combo-instrument-switcher\.spec\.ts$).*\.spec\.ts$/],
       use: { ...devices["Desktop Chrome"] },
     },
     {

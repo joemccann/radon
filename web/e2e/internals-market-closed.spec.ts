@@ -80,7 +80,7 @@ async function setupMocks(page: import("@playwright/test").Page) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
   await freezeToClosedWeekend(page);
 
-  await page.route("**/api/internals", (route) =>
+  await page.route("**/api/regime", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -126,14 +126,14 @@ async function setupMocks(page: import("@playwright/test").Page) {
 }
 
 test.describe("/internals closed-market load", () => {
-  test("renders internals data instead of hanging on Loading internals", async ({ page }) => {
+  test("redirects the retired internals route to the populated CRI workspace", async ({ page }) => {
     await setupMocks(page);
-    await page.goto("http://127.0.0.1:3000/internals");
+    await page.goto("/internals");
 
-    await expect(page.locator('[data-testid="strip-internals-nq-skew"] .regime-strip-value')).toHaveText("+0.1250");
-    await expect(page.locator('[data-testid="strip-internals-spx-skew"] .regime-strip-value')).toHaveText("-0.2250");
-    await expect(page.locator('[data-testid="internals-nq-skew-chart"]')).toBeVisible();
-    await expect(page.locator('[data-testid="internals-spx-skew-chart"]')).toBeVisible();
+    await expect(page).toHaveURL(/\/regime\/cri$/);
+    await expect(page.locator('[data-testid="strip-vix"]:visible').first()).toContainText("24.23");
+    await expect(page.locator(".regime-hero, .m-regime-headline").filter({ visible: true }).first()).toBeVisible();
+    await expect(page.getByTestId("internals-nq-skew-chart")).toHaveCount(0);
     await expect(page.locator(".regime-empty", { hasText: "Loading internals..." })).toHaveCount(0);
   });
 });

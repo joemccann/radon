@@ -204,7 +204,7 @@ def test_refresh_install_file_gates_dropin_content() -> None:
     arm = _dropin_gate_arm(ROOT_HELPER.read_text(encoding="utf-8"))
     # The pattern, not the bare word: the refusal message names both types, so
     # asserting "Type=simple" passed on the echo line alone.
-    assert "Type=(simple|notify)" in arm
+    assert "Type=(simple|notify|oneshot)" in arm
     assert "radon-app-runtime" in arm
     assert "ExecStartPre=" in arm
     assert "radon-ib-gateway" in arm
@@ -267,7 +267,7 @@ def test_the_two_privileged_gates_enforce_the_same_dropin_rules() -> None:
     assert match, "bootstrap has no dropin validator"
     boot_arm = match.group(1)
     for rule in (
-        "Type=(simple|notify)", "radon-app-runtime", "ExecStartPre=",
+        "Type=(simple|notify|oneshot)", "radon-app-runtime", "ExecStartPre=",
         "radon-ib-gateway", "/home/radon",
     ):
         assert rule in arm, rule

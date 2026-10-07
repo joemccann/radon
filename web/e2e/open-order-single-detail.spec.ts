@@ -206,18 +206,19 @@ async function stubApis(page: import("@playwright/test").Page) {
   return portfolioGuard;
 }
 
-test.describe("Orders open-order single detail rendering", () => {
-  test("renders single option order detail alongside combo detail", async ({ page }) => {
+test.describe("Orders open-order contract detail rendering", () => {
+  test("renders single-option and separate risk-reversal leg orders", async ({ page }) => {
     const portfolioGuard = await stubApis(page);
-    await page.goto("http://127.0.0.1:3000/orders");
+    await page.goto("/orders");
 
     const singleOptionRow = page.locator("tbody tr").filter({ hasText: "AAOI" }).filter({ hasText: "$5.00" }).first();
     await expect(singleOptionRow).toBeVisible({ timeout: 10_000 });
     await expect(singleOptionRow).toContainText("Long $105 Call 2026-03-20");
 
-    const comboRow = page.locator("tbody tr").filter({ hasText: "Risk Reversal" }).first();
-    await expect(comboRow).toContainText("Short Put 85");
-    await expect(comboRow).toContainText("Long Call 115");
+    const shortPutRow = page.locator("tbody tr").filter({ hasText: "Short $85 Put 2026-04-17" });
+    await expect(shortPutRow).toBeVisible();
+    const longCallRow = page.locator("tbody tr").filter({ hasText: "Long $115 Call 2026-04-17" });
+    await expect(longCallRow).toBeVisible();
 
     // No /api/portfolio* request may escape the mock into the real server.
     await portfolioGuard.assertAllRouted();

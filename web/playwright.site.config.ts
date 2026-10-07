@@ -17,7 +17,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "cd ../site && NEXT_DIST_DIR=.next-site-playwright npx next dev -p 3336 --webpack",
+    command: "cd ../site && NEXT_DIST_DIR=.next-site-playwright npx next dev --hostname 127.0.0.1 -p 3336 --webpack",
     url: "http://127.0.0.1:3336",
     reuseExistingServer: true,
     timeout: 60_000,

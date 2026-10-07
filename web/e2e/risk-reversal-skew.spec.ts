@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const EXPIRY = "20260717";
+const EXPIRY = "20270115";
 
 const PORTFOLIO = {
   bankroll: 100_000,
@@ -137,6 +137,7 @@ async function installMockWebSocket(page: Page) {
 }
 
 test("risk reversal proposals show skew and signed delta telemetry", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-10-03T12:00:00.000Z") });
   await stubApis(page);
   await installMockWebSocket(page);
 
@@ -154,12 +155,12 @@ test("risk reversal proposals show skew and signed delta telemetry", async ({ pa
   await expect(panel).toContainText("RISK REVERSAL SKEW");
   await expect(panel).toContainText("IV SKEW");
   await expect(panel).toContainText("+12.0 pt");
-  await expect(panel).toContainText("CALL Δ");
-  await expect(panel).toContainText("+0.184");
-  await expect(panel).toContainText("LONG LEG");
-  await expect(panel).toContainText("PUT Δ");
-  await expect(panel).toContainText("+0.231");
-  await expect(panel).toContainText("SHORT LEG");
+  await expect(panel).toContainText("CALL IV");
+  await expect(panel).toContainText("$115");
+  await expect(panel).toContainText("PUT IV");
+  await expect(panel).toContainText("$105");
+  await expect(panel).not.toContainText("CALL Δ");
+  await expect(panel).not.toContainText("PUT Δ");
   await expect(panel).toContainText("NET Δ");
   await expect(panel).toContainText("+42 sh");
 });

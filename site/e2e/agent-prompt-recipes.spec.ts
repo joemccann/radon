@@ -10,7 +10,8 @@ test.describe("Copy agent prompt and developer recipes", () => {
     const dossierCopy = page.getByRole("button", { name: "Copy agent prompt" });
     await expect(dossierCopy.first()).toBeVisible();
     await dossierCopy.first().click();
-    await expect(page.getByRole("status")).toHaveText(/Copied|Copy failed/);
+    await expect(page.getByRole("status")).toHaveText("Copied");
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("# Radon Terminal - Crash Risk Index");
 
     await page.getByRole("button", { name: "View prompt" }).first().click();
     await expect(page.getByRole("dialog", { name: "Agent prompt" })).toBeVisible();

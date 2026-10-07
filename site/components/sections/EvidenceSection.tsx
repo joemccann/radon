@@ -28,7 +28,7 @@ export function EvidenceSection() {
               {auditEntries.map((entry) => (
                 <div
                   key={`${entry.date}-${entry.ticker}`}
-                  className="grid grid-cols-[92px_1fr_auto] items-baseline gap-[14px] border-b border-hairline-soft py-3"
+                  className="grid grid-cols-[52px_minmax(0,1fr)_auto] sm:grid-cols-[92px_minmax(0,1fr)_auto] items-baseline gap-[14px] border-b border-hairline-soft py-3"
                 >
                   <span className="text-muted">{entry.date}</span>
                   <span className="text-secondary">
@@ -46,7 +46,7 @@ export function EvidenceSection() {
               ))}
             </div>
 
-            <p className="mt-[18px] flex gap-[14px] font-mono text-[10.5px] uppercase tracking-[0.05em] text-muted">
+            <p className="mt-[18px] flex flex-wrap gap-[14px] font-mono text-[10.5px] uppercase tracking-[0.05em] text-muted">
               <span>
                 Source <b className="font-medium text-signal-deep">IB journal</b>
               </span>

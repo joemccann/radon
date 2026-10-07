@@ -362,11 +362,13 @@ function OrderBuilder({
 
   const signedNetPrices = useMemo(() => {
     return {
-      bid: signedNetPrice(netPrices.bid),
+      // A single SELL leg's net book is -ask/-bid. Restore the contract's
+      // native bid/ask sides before making its per-option premium positive.
+      bid: signedNetPrice(!isCombo && legs[0]?.action === "SELL" ? netPrices.ask : netPrices.bid),
       mid: signedNetPrice(netPrices.mid),
-      ask: signedNetPrice(netPrices.ask),
+      ask: signedNetPrice(!isCombo && legs[0]?.action === "SELL" ? netPrices.bid : netPrices.ask),
     };
-  }, [netPrices.bid, netPrices.mid, netPrices.ask, signedNetPrice]);
+  }, [netPrices.bid, netPrices.mid, netPrices.ask, signedNetPrice, isCombo, legs]);
 
   // One quote for whatever is being ticketed: the contract's own book for a
   // single leg, the net combo book wrapped as a PriceData for a spread. Both

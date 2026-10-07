@@ -27,6 +27,22 @@ The `knowledge` table carries two vector columns:
 - **Disable:** `RADON_KB_EMBED_DISABLED=1` turns off all embeddings; ingest writes FTS-only rows (`embedding` and `embedding_v2` both NULL).
 - **Transient write retries:** source and prepared-write retries wait `_retry_delay(attempt)` in `scripts/knowledge/ingest.py`: 12s doubling to a 60s cap, plus up to 25% jitter. Turso reaps an abandoned idle transaction after 10s (up to 300s if it is still running), so a shorter wait queues the retry behind the orphan's writer lock. Replay is safe because upserts are idempotent on `content_hash`.
 
+## Optional summary worker cleanup
+
+`scripts/knowledge/distill.py:run_distill_batch` runs each optional summary wave
+in its own process group. A timeout sends SIGKILL to that group and preserves
+completed summaries from stdout. Once that group kill succeeds and the worker
+is reaped, final cleanup does not signal the same group ID again. Final cleanup
+still kills CLI descendants after normal worker exit and retries the group
+kill when timeout cleanup has not reaped the worker. Signaling permission
+errors are not suppressed.
+
+`scripts/tests/test_knowledge_enrichment_budget.py` covers partial-result
+retention, stalled cleanup retries, normal-exit descendant cleanup, and a
+second-signal permission failure after successful timeout cleanup. Its real
+child-process check owns and reaps both process-group members, verifies
+SIGKILL exit status, and closes their pipes on macOS and Linux.
+
 ## Bounded HTTP persistence
 
 `scripts/knowledge/http_db.py` provides a schema-independent Hrana connection.
@@ -38,6 +54,15 @@ must prove replay idempotency rather than infer that no commit happened. Liquid
 Compute deletes and reinserts each observation identity within that transaction,
 so a failed insert preserves the prior batch. The connection itself creates no
 knowledge-specific schema.
+
+Connection `execute` and `execute_transaction` outcomes also contribute to the
+fixed-label `database` counters (REL-320 / R-027). One conditional transaction
+is one observed operation, rather than one count per statement. Failed or lost
+receipts count as errors even when the caller later recovers; no retry is added
+by telemetry. Bounded `operation_metrics` log samples report process-lifetime
+counts, monotonic rates and error ratios without SQL or source content. The
+[core counter contract](cloud-services.md#host-metrics-dur-12) describes restart
+resets, scope and why these observations are not a durable execution ledger.
 
 ## Backfill
 

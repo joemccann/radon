@@ -1,12 +1,3 @@
-## PR #931 conflict repair (2026-10-07)
-- [ ] T1 Inspect conflicts and preserve both branches' task and lesson records. depends_on: []
-- [ ] T2 Merge current main, resolve conflicts, and statically verify record preservation. depends_on: [T1]
-- [ ] T3 Push the repaired head and wait for all applicable exact-head GitHub checks. depends_on: [T2]
-Dependency graph: T1 -> T2 -> T3.
-
-### Review
-- PR https://github.com/joemccann/radon/pull/931; original head d295ae937afe48bfeda792fb3a8355f74ff980df.
-- No local test suites. Prior PR green notification already accepted; do not duplicate it.
 
 # Task: Neutral Implied MV formatting (2026-10-07)
 
@@ -28,6 +19,28 @@ Review: GitHub run 37621162918 / head 10ba235d reproduced the positive-plus and 
 - [ ] T4 depends_on: [T3] Publish substantive draft PR only, verify exact-head CI, post one rolling issue comment.
 
 Review: No additional material optimization qualifies. CIP-018 organic run 37357797556 / job 111924636029: scripts-gh 93s wall exceeds its recorded 90s revert trigger. Restore only its shard membership and matching ownership contracts; preserve full inventory, coverage, gate and deployment guarantees.
+
+## PR #934 conflict repair (2026-10-07)
+- [x] T1 Inspect conflicts and preserve both branches' task and curation records. depends_on: []
+- [x] T2 Merge current main, resolve conflicts, and statically verify the merged files. depends_on: [T1]
+- [ ] T3 Push the repaired PR head and wait for all applicable GitHub checks to pass. depends_on: [T2]
+Dependency graph: T1 -> T2 -> T3.
+
+### Review
+- PR https://github.com/joemccann/radon/pull/934; original head eac19327a60cf0ec710c59dc8345980591f16aec.
+- Preserved both task logs and ledger receipt sections; 156 unique hold-outs + 48 curated specs = 204 classified, with no missing/stale/duplicate entries or overlap. Server AST and both documentation additions verified. No local suites. Prior PR green notification already accepted; do not duplicate it.
+
+
+## PR #931 conflict repair (2026-10-07)
+- [x] T1 Inspect conflicts and preserve both branches' task and lesson records. depends_on: []
+- [x] T2 Merge current main, resolve conflicts, and statically verify record preservation. depends_on: [T1]
+- [ ] T3 Push the repaired head and wait for all applicable exact-head GitHub checks. depends_on: [T2]
+Dependency graph: T1 -> T2 -> T3.
+
+### Review
+- PR https://github.com/joemccann/radon/pull/931; original head d295ae937afe48bfeda792fb3a8355f74ff980df.
+- Both task branches and all 835/839 nonblank lesson records preserved; conflict markers removed and diff whitespace check passed. No local suites. Prior PR green notification already accepted; do not duplicate it.
+
 
 # Task: PDF extract error detail (2026-10-03)
 
@@ -9015,6 +9028,18 @@ Audit complete through 72e09ffb: 65 commits, 112 changed paths and 300 paths inc
 Product change is limited to four sign-preserving expressions in MobileOrderTicket. Six added component regressions cover a risk-reversal book crossing zero and all-negative BID/MID/ASK presets. Red: five component failures and two mobile failures; green: 51 component/risk/order tests, two real-pointer mobile cases (retries=0), six curation checks. Browser cases confirm exact BUY combo envelopes with SELL call/BUY put legs and negative limit prices, no early POST, and explicit unbounded-risk acknowledgment. Dark/light full-viewport screenshots inspected under /tmp/radon-risk-reversal-sign-dark/ and /tmp/radon-risk-reversal-sign-final/. Fresh-route source typecheck passes with zero diagnostics; standard tsc reports three missing workflow imports from the pre-existing .next/dev/types/validator.ts. An additional retained mobile-skew case failed when a Clerk error overlay intercepted its click; its short-strangle case passed. No financial/auth gate or CI suite was changed. The new browser spec is explicitly held out pending production-server preflight. Generated test build and tsconfig additions removed; no live order was sent.
 
 Publication verification: branch updated to main 05edd0566; its CI and VPS deployment completed successfully. Full local coverage attempts were interrupted under approximately 9.7 GiB swap usage; the first had unrelated lazy-loader timeouts, and the serial attempt recorded an equibles-contract sorting failure. These are incomplete runs, not coverage or full-suite success. All applicable GitHub checks on the published exact head must finish successfully before PR-green notification and completion.
+
+## Tester Army publication, 2026-10-06
+
+- [x] T1 depends_on: [] Recover the saved Tester Army delta onto current main in an isolated branch, preserving original work and excluding private rescue artifacts.
+- [x] T2 depends_on: [T1] Sol 6.1 per-project reconciliation and review; reproduce product regressions and verify focused repairs.
+- [x] T3 depends_on: [T2] Luna 6 independent browser/API verification, full local gates and publication/secret hygiene.
+- [ ] T4 depends_on: [T3] Commit and create PR; watch every expected check on the exact head until green; send one accepted Pushover notification.
+
+### Review
+
+API review complete: current-main red 41 failures, focused green 82, independent Luna green 82, full API 1179, changed executable lines 28/28 covered. Full scripts/root: 13143 passed, 2 skipped, 23 subtests, one unchanged login-runner timing failure whose focused repeat passed. Full root Vitest: 10386 passed, 21 skipped; unchanged coverage ratchets pass, changed executable web lines 46/46 covered. Site: production TesterArmy 27/27 and retained Playwright 13/13; status regression red/green proved. Workstation: production SDK 77/77, 135 distinct retained cases verified, session fixture 1/1, performance/sidebar 8/8 and visual review complete. Three live-data and five operator cases remain unverified; one existing skip. Actionlint and final staged/commit secret scans gate publication. Exact-head CI and notification receipts will be recorded in the PR without preclaiming success; October 3 receipts remain historical evidence.
+
 ## Nightly documentation 2026-10-06
 
 - [x] T1 depends_on: [] Recover trusted checkpoint, inspect open PRs and create authorized branch.
@@ -9057,6 +9082,18 @@ Audit through 39334555: 12 commits, 78 changed paths, 134 paths including codema
 
 T5 CI repair review: unchanged successful-replacement signal assertion failed in Vitest shard 5; the native request-owner completion control reproduced red twice. Only unfinished transports are aborted during cleanup; completed responses retain successful signal state. Eight native acceptance and fourteen Chrome lifecycle regressions pass without weakening the original assertion. Exact-head CI is restarted after the ordinary repair push; all preceding heads are superseded.
 
+## Nightly reliability 2026-10-07
+
+- [x] T1 depends_on: [] Install isolated toolchain, recover checkpoint/open PR ownership and create authorized branch.
+- [x] T2 depends_on: [T1] Audit delta and codemap importers; standing safety/catalog sweeps and retained candidate triage.
+- [x] T3 depends_on: [T2] Reproduce verified findings serially, repair minimally and run focused gates before per-finding commits.
+- [x] T4 depends_on: [T3] Permanent drills, syntax/diff/secret review and substantive publication check.
+- [ ] T5 depends_on: [T4] Publish substantive draft if needed, watch exact-head CI and post exactly one durable checkpoint.
+
+
+### Review 2026-10-07 (before publication)
+
+Three delta commits / 21 changed paths audited through 8afaaa61; codemap inverse edges add no paths and shell/runbook consumers were confirmed with rg. Three new findings plus retained R-027 core acceptance have repeated fault injection and four separate REL commits. Focused owners 1118 (collector 100% branch/statement coverage), notifications/callers 513, trainer 18, publisher/guard 168, standing gates 131, delta union 182, security hooks 106 and cloud delta 13 passed. Permanent Python drills 95 passed. Syntax, diff hygiene, append-only ledger prefixes, secret scan and substantive check pass. Four operator-only candidates and unconfirmed controller/hold-helper installation remain on issue #81. Open #922 owns its prior six repairs and is read-only. Diagnostic counters explicitly exclude native libSQL/other notification implementations and durable execution accounting. Full suites and the Vitest durability drill are assigned to PR CI. T5's draft, exact-head registration/green and single rolling checkpoint receipts will be recorded on issue #81 without another bookkeeping-only push. No live access, credentials, production halt, main push/merge, codemap or test-ledger edit; the runner owns notifications.
 # Task: Confirm VPS Grok hardening closure (2026-10-07)
 
 - [x] T1 depends_on: [] Identify DS-2026-09-29-07 and inspect production units.

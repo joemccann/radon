@@ -70,9 +70,29 @@ beforeEach(() => setViewport(390, 844));
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("InfoTooltip on a phone viewport", () => {
+  it("keeps the popup inside an offset mobile visual viewport", () => {
+    vi.stubGlobal("visualViewport", { width: 314, height: 568, offsetLeft: 6, offsetTop: 0 });
+    setViewport(320, 568);
+    mockRects(190, 0, 210);
+    const popup = openTooltip();
+    const geometry = box(popup);
+    expect(geometry.left - 6).toBeGreaterThanOrEqual(8);
+    expect(geometry.left - 6 + Number.parseFloat(geometry.width)).toBeLessThanOrEqual(306);
+  });
+
+  it("keeps an unclamped anchor in layout coordinates when the visual viewport shifts", () => {
+    vi.stubGlobal("visualViewport", { width: 600, height: 800, offsetLeft: 20, offsetTop: 30 });
+    setViewport(600, 800);
+    mockRects(400, 300, 100);
+    const geometry = box(openTooltip(), 100);
+    expect(geometry.left).toBe(176.5);
+    expect(geometry.top).toBe(294);
+  });
+
   it("never opens above the top of the safe viewport", () => {
     mockRects(190, 60, 450);
 
