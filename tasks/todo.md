@@ -8977,7 +8977,7 @@ Audit complete through 72e09ffb: 65 commits, 112 changed paths and 300 paths inc
 
 - [x] T1 depends_on: [] Build credential-free toolchain; read trusted checkpoint and open testing PRs; branch from origin/main.
 - [x] T2 depends_on: [T1] Audit 39334555..8afaaa61 and inverse test consumers; standing gates and three changed-file repetitions; reconcile inherited findings.
-- [ ] T3 depends_on: [T2] Verify each actionable gap with a passing-old/failing-new mutation, restore source, run focused gates and commit one finding per commit.
+- [x] T3 depends_on: [T2] Verify each actionable gap with a passing-old/failing-new mutation, restore source, run focused gates and commit one finding per commit.
 - [ ] T4 depends_on: [T3] Three consecutive serial full-gate rounds; clean-base cloud FAILED-list comparison; syntax, whitespace and secret checks; append ledgers and review.
 - [ ] T5 depends_on: [T4] Substantive classifier; push only testing/2026-10-07; one draft PR and exact-head green CI; one durable issue #83 comment.
 
