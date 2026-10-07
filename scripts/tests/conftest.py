@@ -287,3 +287,14 @@ def _isolate_order_rejection_digest(tmp_path, monkeypatch):
     from watchdog import notify
 
     monkeypatch.setattr(notify, "DIGEST_STATE_PATH", tmp_path / "rejection-digest.json")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_health_dependency_probe(monkeypatch):
+    """R-028 / REL-316: endpoint tests never query the runtime health DB."""
+    async def unknown():
+        return {"database": "unknown", "market_data": "unknown"}
+    for name in ("api.server", "scripts.api.server"):
+        module = sys.modules.get(name)
+        if module is not None:
+            monkeypatch.setattr(module, "health_dependencies", unknown)

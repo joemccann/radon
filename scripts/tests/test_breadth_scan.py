@@ -563,3 +563,38 @@ def test_main_refetches_after_close_when_cached_history_lags(monkeypatch, capsys
     breadth_scan.main()
 
     assert fetched == ["live"]
+
+
+@pytest.mark.parametrize('history', [
+    {'date': '2026-10-05'},
+    [{'date': 'not-a-date'}],
+    [{'date': '2026-13-99'}],
+    [{'date': '9999-12-31'}],
+    [{'date': 99991231}],
+])
+def test_rel314_corrupt_or_future_history_never_proves_closed_session(history):
+    """R-730: invalid cached dates cannot authorize an off-hours fetch skip."""
+    assert breadth_scan.cached_history_covers_completed_session(
+        {'history': history}, now=_AFTER_CLOSE_MON,
+    ) is False
+
+
+def test_rel314_main_refetches_structurally_corrupt_history(monkeypatch, capsys):
+    """Execute real admission with a corrupt cache and fake all provider I/O."""
+    monkeypatch.setattr('sys.argv', ['breadth_scan.py', '--json'])
+    monkeypatch.setattr(breadth_scan, 'is_market_open_et', lambda: False)
+    monkeypatch.setattr(breadth_scan, 'last_completed_session_date', lambda *a: '2026-10-05')
+    monkeypatch.setattr('utils.scan_cache_gate.cached_scan_if_fresh',
+                        lambda *a, **kw: {'history': {'date': '2026-10-05'}})
+    fetched = []
+    monkeypatch.setattr(breadth_scan, '_fetch_live_snapshots',
+                        lambda: fetched.append('live') or (None, None))
+    monkeypatch.setattr(breadth_scan, '_fetch_stockcharts_daily', lambda *a: [])
+    monkeypatch.setattr(breadth_scan, '_fetch_ib_bars', lambda: ([], [], []))
+    monkeypatch.setattr(breadth_scan, '_fetch_stockcharts_quote', lambda *a: None)
+    monkeypatch.setattr(breadth_scan, '_read_cached_payload', lambda: None)
+    monkeypatch.setattr(breadth_scan, '_load_cache_fallback',
+                        lambda *a: {'history': [], 'intraday': [], 'latest': None})
+    monkeypatch.setattr(breadth_scan, 'print_summary', lambda *a: None)
+    breadth_scan.main()
+    assert fetched == ['live']

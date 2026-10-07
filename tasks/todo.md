@@ -8971,3 +8971,17 @@ Review before publication: 65 commits / 112 paths audited through 72e09ffb. T-53
 ### Review 2026-10-05
 
 Audit complete through 72e09ffb: 65 commits, 112 changed paths and 300 paths including codemap callers. Two new and three inherited repairs have repeated fault-injection red/green evidence; ten remaining historical/operator candidates retain acceptance on issue #81. Standing gates 81 passed, delta acceptance 135 passed, permanent Python drills 95 passed; focused firewall 137/37, rejection 76, mode-switch 138 plus cloud owner 30, provider/caller 206 passed. Fifteen Python files, three shell files and embedded logout Python parse; no YAML/JSON/TOML changed. Diff, five-commit secret scan and substantive publication check pass. No live access, credential lookup, main push, merge, codemap edits or test-ledger edits. T5 external publication, exact-head CI and the single rolling comment are recorded on issue #81 without changing the verified head.
+
+## Nightly reliability 2026-10-06
+
+- [x] T1 depends_on: [] Install isolated toolchain, recover trusted checkpoint and open PR inventory, create authorized branch.
+- [x] T2 depends_on: [T1] Audit delta and codemap importers; verify standing sweeps and inherited candidates.
+- [x] T3 depends_on: [T2] Repair verified findings serially with repeated red/green fault injection and focused gates.
+- [x] T4 depends_on: [T3] Run permanent drills, syntax and diff hygiene, substantive publication check.
+- [ ] T5 depends_on: [T4] Publish one draft, watch exact-head CI and post one durable rolling comment.
+
+### Review 2026-10-06
+
+Audit through 39334555: 12 commits, 78 changed paths, 134 paths including codemap callers. Two new and four inherited repairs have repeated fault-injection red/green evidence. Focused suites: cloud admission 156, breadth/callers 102, archive/transport 112, API health 90, scripts health 337, assistant native acceptance 8, relay 13; Chrome chat 14 and modify 4, with screenshot inspection and TypeScript green. Permanent Python drills 95, standing gates 78. Fourteen Python files and two shell files parse; no YAML/JSON/TOML changed. Diff hygiene, six-commit secret scan and substantive publication check pass. R-027 counters remain an open inherited candidate with exact acceptance on issue #81, alongside four operator-only findings and two unconfirmed installation actions; no candidate is closed on inspection. T5 draft publication, registered exact-head CI and the single rolling comment are recorded on issue #81 after delivery, without a bookkeeping-only push. No live access, credentials, main push, merge, codemap or test-ledger edits.
+
+T5 CI repair review: unchanged successful-replacement signal assertion failed in Vitest shard 5; the native request-owner completion control reproduced red twice. Only unfinished transports are aborted during cleanup; completed responses retain successful signal state. Eight native acceptance and fourteen Chrome lifecycle regressions pass without weakening the original assertion. Exact-head CI is restarted after the ordinary repair push; all preceding heads are superseded.
