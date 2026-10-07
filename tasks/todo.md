@@ -8996,9 +8996,9 @@ Audit through 39334555: 12 commits, 78 changed paths, 134 paths including codema
 T5 CI repair review: unchanged successful-replacement signal assertion failed in Vitest shard 5; the native request-owner completion control reproduced red twice. Only unfinished transports are aborted during cleanup; completed responses retain successful signal state. Eight native acceptance and fourteen Chrome lifecycle regressions pass without weakening the original assertion. Exact-head CI is restarted after the ordinary repair push; all preceding heads are superseded.
 
 ## DS-2026-10-05-05 trusted runtime isolation
-- [ ] T1 Inspect immutable-image service dependencies and runtime contracts. depends_on: []
-- [ ] T2 Containerize four secret-store jobs through root-owned runtime and protected credential staging. depends_on: [T1]
-- [ ] T3 Add regression coverage for isolation, unit wiring, commands, mounts, and cleanup. depends_on: [T1, T2]
+- [x] T1 Inspect immutable-image service dependencies and runtime contracts. depends_on: []
+- [x] T2 Containerize four secret-store jobs through root-owned runtime and protected credential staging. depends_on: [T1]
+- [x] T3 Add regression coverage for isolation, unit wiring, commands, mounts, and cleanup. depends_on: [T1, T2]
 - [ ] T4 Document design, create PR, verify all exact-head GitHub CI and notify. depends_on: [T2, T3]
 Dependency graph: T1 -> T2 -> T3 -> T4; T1 -> T3; T2 -> T4.
-Review: pending. Local suites prohibited; validation runs on GitHub.
+Review: runtime and credential CLI boundary reviewed; immutable CLI image integration and exact-head GitHub validation pending. Local suites prohibited.

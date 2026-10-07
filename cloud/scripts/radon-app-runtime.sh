@@ -647,20 +647,27 @@ PY_RESEARCH
 prepare_private_dir() {
   local ids="$1" dir="$2" label="$3"
   "$PYTHON" - "$dir" "$ids" "${RADON_APP_RUNTIME_TEST_MODE:-0}" "$label" <<'PY_PRIVATE_DIR' || exit 78
-import os, stat, sys
+import os, sys
 from pathlib import Path
 path, ids, test, label = sys.argv[1], sys.argv[2], sys.argv[3] == '1', sys.argv[4]
 uid, gid = (os.getuid(), os.getgid()) if test else tuple(int(part) for part in ids.split(':'))
+parent_fd = None
 try:
-    # Refuse symlink parents before any privileged ownership operation.
-    for parent in Path(path).parents:
-        if stat.S_ISLNK(parent.lstat().st_mode):
-            raise OSError('symlink parent')
+    # Pin each ancestor; a host rename/link swap cannot redirect root's writes.
+    parts = Path(path).parts
+    if not parts or parts[0] != '/' or '..' in parts:
+        raise OSError('directory must be absolute without traversal')
+    flags = os.O_NOFOLLOW | os.O_DIRECTORY | os.O_RDONLY
+    parent_fd = os.open('/', flags)
+    for part in parts[1:-1]:
+        child_fd = os.open(part, flags, dir_fd=parent_fd)
+        os.close(parent_fd)
+        parent_fd = child_fd
     try:
-        os.mkdir(path, 0o700)
+        os.mkdir(parts[-1], 0o700, dir_fd=parent_fd)
     except FileExistsError:
         pass
-    fd = os.open(path, os.O_NOFOLLOW | os.O_DIRECTORY | os.O_RDONLY)
+    fd = os.open(parts[-1], flags, dir_fd=parent_fd)
     try:
         os.fchown(fd, uid, gid)
         os.fchmod(fd, 0o700)
@@ -669,6 +676,9 @@ try:
 except OSError:
     print(f'radon-app-runtime: {label} directory is a symlink or unusable; refusing', file=sys.stderr)
     raise SystemExit(78)
+finally:
+    if parent_fd is not None:
+        os.close(parent_fd)
 PY_PRIVATE_DIR
 }
 
