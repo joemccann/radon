@@ -10,6 +10,15 @@
       "path": "cloud/scripts/setup-vps.sh",
       "lines": "39-47",
       "evidence": "PR #689 merge e5c4e627: setup-vps.sh L39-47 uses root-owned /opt/radon-provision pinned to the public HTTPS URL"
+    },
+    {
+      "id": "DS-2026-09-29-07",
+      "closed_at": "2026-10-07",
+      "pr": 891,
+      "commit": "5e957b784a67666aed77a871b01334f9cedf0ba6",
+      "path": "cloud/services/radon-grok-upgrade.service",
+      "lines": "16-34",
+      "evidence": "VPS confirmed 2026-10-07T12:45:35Z: /usr/local/lib/radon/grok-upgrade/scripts/grok_upgrade.py root:root 0644 with root-owned, non-writable parents and import tree; SHA256 a1366b5466d5b13210ff2192ed5154fae36cfeef2333fc8c5607cc4d885c4429 matches root-owned provision store pinned main 1c58cb3e4d3f9f63622edd1d89c4041dc386a3f9. Effective upgrade ExecStart uses /usr/bin/python3.13 -E -S; upgrade and responder InaccessiblePaths include /home/radon/.gemini. Both timers active; upgrader Result=success, ExecMainStatus=0; controller --help succeeds under -E -S. Trusted setup/controller installation from PR #891 is present."
     }
   ]
 }
