@@ -1,3 +1,13 @@
+## PR #931 conflict repair (2026-10-07)
+- [ ] T1 Inspect conflicts and preserve both branches' task and lesson records. depends_on: []
+- [ ] T2 Merge current main, resolve conflicts, and statically verify record preservation. depends_on: [T1]
+- [ ] T3 Push the repaired head and wait for all applicable exact-head GitHub checks. depends_on: [T2]
+Dependency graph: T1 -> T2 -> T3.
+
+### Review
+- PR https://github.com/joemccann/radon/pull/931; original head d295ae937afe48bfeda792fb3a8355f74ff980df.
+- No local test suites. Prior PR green notification already accepted; do not duplicate it.
+
 # Task: Neutral Implied MV formatting (2026-10-07)
 
 - [x] T1 depends_on: [] Inspect PositionTable, scoped instructions, existing regression and CI configuration.
