@@ -518,10 +518,12 @@ The [checked-in policy](../cloud/tailscale/policy.hujson) owns grants, tags and
 access tests. [Offline policy tests](../cloud/tests/test_tailnet_policy.py)
 pin its boundaries; neither proves which policy or tags are installed live.
 
-The app host runs Tailscale SSH (`tailscale up --ssh`): Tailscale answers port
-22 on its tailnet address and admits only what the policy's `ssh` section
-allows, so the `tcp:22` grant alone refuses every login. The broker runs plain
-sshd and needs no `ssh` rule.
+The policy has no `ssh` rules: Tailscale SSH authenticates the source node,
+not the local user, so a rule for `group:operator` also admits every other
+user on an operator-owned node such as the shared Mac mini. Every Radon host
+runs plain sshd with key auth and Tailscale SSH off
+(`tailscale set --ssh=false`); the `tcp:22` grant reaches that sshd on the
+tailnet address.
 
 **Symptom:** peer access is broader than the declared policy, or a required
 operator path fails after a policy change.
@@ -541,8 +543,9 @@ host back in.
    the operator's tailnet login. Add its `tagOwners` to the live policy first,
    keeping existing grants, then assign the matching tags to the intended
    machines. Enroll a host only if live inspection confirms it needs enrollment.
-3. Validate the rendered policy in the console, require its access tests to
-   pass, then save it. Stop on any failed test or uncertain host identity.
+3. From a public-IP session on the app host, run `tailscale set --ssh=false`
+   so tailnet port 22 reaches sshd. Validate the rendered policy in the
+   console, require its access tests to pass, then save it. Stop on any failed test or uncertain host identity.
 4. **Verification:** open fresh SSH connections from the operator device to
    the app and broker while keeping public recovery sessions open. Connect to
    each host's tailnet address: an SSH config alias can point at the public IP
