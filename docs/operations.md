@@ -435,7 +435,7 @@ For security, DeepSec and codemap, publication must use `python3.13 scripts/nigh
 
 Documentation reads the newest #202 `audited-through:` checkpoint (48-hour fallback when none) and posts one rolling comment every night, as specified in [its prompt](../.claude/runner-prompts/documentation.md). Inspect its `RESULT:` line and exact-head PR checks using the [runner completion check](runner.md#9-smoke-test-bot-shell).
 
-**Codemap refresh (02:00, not an agent loop).** `scripts/codemap_nightly.sh` / `config/com.radon.codemap-nightly.plist` runs in `~/radon-weekend/radon-codemap`: regenerates `tools/codemap/*` from `origin/main`, verifies the regenerated artifacts against the live import graph (`CODEMAP_NIGHTLY=1` unskips `TestCommittedArtifacts::test_matches_live_graph`; CI skips it because committed maps trail main between refreshes), then checks the staged tree with `nightly_publish.py check --base HEAD --index`. Timestamp-only refreshes exit without a commit or PR; substantive graph changes are committed and published through the shared publisher as a `codemap/<date>` PR, wait for required checks, then squash-merge. Feature branches never commit those artifacts. Install: `bash scripts/setup_codemap_nightly.sh`.
+**Codemap refresh (02:00, not an agent loop).** `scripts/codemap_nightly.sh` / `config/com.radon.codemap-nightly.plist` runs in `~/radon-weekend/radon-codemap`: regenerates `tools/codemap/*` from `origin/main`, verifies the regenerated artifacts against the live import graph (`CODEMAP_NIGHTLY=1` unskips `TestCommittedArtifacts::test_matches_live_graph`; CI skips it because committed maps trail main between refreshes), then checks the staged tree with `nightly_publish.py check --base HEAD --index`. Timestamp-only refreshes exit without a commit or PR; substantive graph changes are committed and published through the shared publisher as a `codemap/<date>` PR that supersedes older refresh PRs and waits for the operator to merge (the `main-review` ruleset requires an approving review; the job never merges). Feature branches never commit those artifacts. Install: `bash scripts/setup_codemap_nightly.sh`.
 
 Stable fx path (2026-09-26). `com.radon.fx-stable-sync` (installed by `bash scripts/setup_fx_stable_sync.sh`) runs `scripts/fx_stable_sync.sh` from an installed copy at load, whenever `~/.local/bin` changes, and daily at 23:45. It copies `~/.local/bin/fx` to `~/.local/share/radon/fx-stable/fx` (APFS clone) only after `/usr/bin/codesign --verify --strict` passes against Vercel's designated requirement (`com.vercel.fx`, team `JW6Y669B67`). The launchd job does not set `RADON_FX_CODESIGN`; that variable exists so a test can supply a signature double without relaxing the requirement. No nightly loop reads that copy any more: the runner's agents run as `_radonbot` from its own `~/.local/bin`.
 
@@ -518,10 +518,12 @@ The [checked-in policy](../cloud/tailscale/policy.hujson) owns grants, tags and
 access tests. [Offline policy tests](../cloud/tests/test_tailnet_policy.py)
 pin its boundaries; neither proves which policy or tags are installed live.
 
-The app host runs Tailscale SSH (`tailscale up --ssh`): Tailscale answers port
-22 on its tailnet address and admits only what the policy's `ssh` section
-allows, so the `tcp:22` grant alone refuses every login. The broker runs plain
-sshd and needs no `ssh` rule.
+The policy has no `ssh` rules: Tailscale SSH authenticates the source node,
+not the local user, so a rule for `group:operator` also admits every other
+user on an operator-owned node such as the shared Mac mini. Every Radon host
+runs plain sshd with key auth and Tailscale SSH off
+(`tailscale set --ssh=false`); the `tcp:22` grant reaches that sshd on the
+tailnet address.
 
 **Symptom:** peer access is broader than the declared policy, or a required
 operator path fails after a policy change.
@@ -541,8 +543,9 @@ host back in.
    the operator's tailnet login. Add its `tagOwners` to the live policy first,
    keeping existing grants, then assign the matching tags to the intended
    machines. Enroll a host only if live inspection confirms it needs enrollment.
-3. Validate the rendered policy in the console, require its access tests to
-   pass, then save it. Stop on any failed test or uncertain host identity.
+3. From a public-IP session on the app host, run `tailscale set --ssh=false`
+   so tailnet port 22 reaches sshd. Validate the rendered policy in the
+   console, require its access tests to pass, then save it. Stop on any failed test or uncertain host identity.
 4. **Verification:** open fresh SSH connections from the operator device to
    the app and broker while keeping public recovery sessions open. Connect to
    each host's tailnet address: an SSH config alias can point at the public IP
@@ -641,14 +644,38 @@ As root, set `BACKUP=<printed /etc/radon-ufw-rollback.* path>`, then run `cp -a 
 - **fw-radon-ops:** 22 from the recovery `/32`; 80, 443 any; 41641/udp any.
 - No 4001/8340 rules: Hetzner Cloud Firewalls filter the public interface only, so the app-to-broker private-net path (`10.0.0.2` -> `10.0.0.4:4001/8340`) never passes them. That path is held by the bind addresses and the broker ufw set above.
 
-Rollout (operator laptop, `hcloud context use <project>`):
+**Symptom:** firewall apply fails, reports an unavailable inventory, or times
+out while replacing rules or attaching a firewall.
+**Prerequisites:** the operator's intended `hcloud` context, independently
+confirmed provider server identity, a saved copy of the prior rules and
+attachment, and a second recovery SSH session. Provider server names are not
+Tailscale hostnames; the app's provider name remains `ib-gateway`.
+**Blast radius:** replacement or attachment changes public access to the selected
+server; a partial apply can leave its rules or attachment changed.
+**Diagnosis:** inspect the [tool](../cloud/hetzner/firewalls/hcloud_firewalls.py)
+and its [offline refusal tests](../cloud/tests/test_hcloud_firewall_faults.py).
+An unavailable or malformed inventory refuses before mutation. A mutation timeout
+is indeterminate, not proof that the provider rejected it: inspect live
+rules and attachment before another apply. Do not infer absence from an error.
+
+Rollout, one server at a time:
 
 1. Dry run: `python3 cloud/hetzner/firewalls/hcloud_firewalls.py --firewall fw-radon-broker --server radon-broker --recovery-ip <your public ip>`.
-2. Same with `--apply`. Verify from the laptop over the tailnet: `ssh radon-broker true`; from the app: the 8340 `/healthz` probe (spof-host-split.md) and `/health` `auth_state=authenticated`.
-3. `--firewall fw-radon-app --server ib-gateway --apply`. Verify `curl -fsS https://app.radon.run/health` and that the next CI deploy is green.
-4. `fw-radon-ops` only once an ops server exists.
+2. Same with `--apply`, only after reviewing the rendered rules and target. From a fresh laptop connection to the broker's tailnet address, verify SSH; from the app verify the broker's 8340 `/healthz` and authenticated readiness through the [host-split owner](spof-host-split.md).
+3. Repeat the dry-run/apply sequence for `--firewall fw-radon-app --server ib-gateway`, retaining the recovery address. Verify fresh SSH, `https://app.radon.run/health`, and the expected deployed SHA through the [deployment owner](../cloud/CLAUDE.md#deployment-contract).
+4. Apply `fw-radon-ops` only after independently identifying its server.
 
-Rollback: `hcloud firewall remove-from-resource <fw> --type server --server <name>`.
+**Stop:** stop on any refusal, timeout, unexpected rules/attachment or failed
+fresh-access check. Never replay an uncertain mutation to discover its outcome.
+**Verification:** compare the installed rules and attached server against the
+reviewed dry run; successful command exit alone does not establish reachability.
+**Rollback:** restore the saved prior rules and attachment after inspecting the
+actual outcome. `hcloud firewall remove-from-resource <fw> --type server --server <name>`
+removes an attachment only; it does not restore replaced rules. Detach only when
+that matches the saved prior state and the recovery path is verified.
+**Escalation:** preserve sanitized failure and target evidence, keep the second
+session open, and involve the operator with provider access if state or recovery
+access cannot be established. Do not continue to the next server.
 
 Protection (once, both servers): `hcloud server enable-protection ib-gateway delete rebuild` and `hcloud server enable-protection radon-broker delete rebuild`. Verify `hcloud server describe <name> -o json | jq .protection` shows `delete` and `rebuild` true. Disable with `disable-protection` before a deliberate rebuild (spof-host-split.md "Never").
 

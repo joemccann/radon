@@ -31,16 +31,19 @@ Production is three planes. Do not collapse them.
   Caddy, Tailscale, Docker engine, `radon-health` on `127.0.0.1:8330`,
   `/usr/local/sbin/radon-deploy-root`, `/usr/local/bin/radon-ib-gateway-control`.
 - **Broker plane** (already Docker): digest-pinned IB Gateway in
-  `cloud/docker-compose.yml`. This is the only production container.
-- **App plane** (host default, images optional): Next.js, FastAPI, relay,
-  monitor, newsfeed, and timer-owned oneshots. Default `RADON_RUNTIME=host`.
-  Images live in `docker/app`. Production ExecStart stays host binaries
-  until per-unit `runtime-container.conf` drop-ins are installed. The
-  root wrapper is `/usr/local/sbin/radon-app-runtime` (`pull` via sudoers;
+  `cloud/docker-compose.yml`. App images have a separate release boundary.
+- **App plane:** Next.js, FastAPI, relay, monitor, newsfeed and timer-owned
+  oneshots. The installed per-unit `runtime-container.conf` determines container
+  execution; the host environment default alone does not identify the running
+  plane. [The runtime owner](../docs/cloud-services.md#runtime-planes)
+  and checked-in `docker/app` plus unit drop-ins own the configuration.
+  `/usr/local/sbin/radon-app-runtime` is the root wrapper (`pull` via sudoers;
   `run` is systemd-only and does not take the deploy lock). Do not put
-  `User=radon` on `docker run`. App-plane images must not own Gateway,
-  Caddy, health, or the Docker engine socket. Image builds are a separate
-  workflow, not a `ci.yml` deploy `needs`.
+  `User=radon` on `docker run`. App containers must not own Gateway, Caddy,
+  health or the Docker engine socket.
+  The root [CI workflow](../.github/workflows/ci.yml) makes `app-images` a required
+  deploy dependency; [image admission tests](tests/test_ci_deploy_image_reuse.py)
+  pin the gate and exact-SHA pair proof. The build-only workflow does not replace it.
 
 After `radon-deploy-root refresh-control-plane` is installed (helper +
 sudoers), a unit-only push does not need root SSH. The SHA that *adds*
@@ -218,6 +221,7 @@ only a prefix of a baked key is rejected.
 - Canonical secrets: `/etc/radon/env` (regular file, mode `0640`, owner `root:radon`)
 - Compatibility secret symlink: `/home/radon/radon-cloud/.env` -> `/etc/radon/env`
 - Canonical media: `/var/lib/radon/media` (owner `radon:radon-media`; caddy is not in group `radon`). Root changes its mode only through an `O_NOFOLLOW` fd (`chmod_dir_nofollow`); ACL changes inside it, including recursive `-R -P` walks, run as `radon` via `setpriv`
+- Control-plane rollback state (manifest, ready marker) in radon-owned `/var/lib/radon`: root restores it only through a pinned `O_NOFOLLOW` directory fd, writing a fresh `O_EXCL` temp then renaming it over the target (`restore_target`); never a by-name `rm` then `cp`
 - Private research: `/var/lib/radon-private` is a root-owned `0700` anchor;
   its `research` child is radon-owned `0700`. The worker mounts that child
   read-write and API read-only at `/var/lib/radon/research`. Seed through the
@@ -256,14 +260,12 @@ Pushes to `main` run the root CI workflow. The deploy job:
    secrets into the checkout.
 6. Verifies the installed root control plane against the root-written manifest
    before any dependency build, service stop, or transition journal write.
-7. Builds frozen Bun workspaces and Python wheels in a detached worktree before
-   teardown, then pre-pulls the release's app image pair
-   (`radon-app-runtime pull <sha>`, sudoers-granted) while the current
-   release still serves; the same verb drops SHA-tagged pairs that are
-   neither the target nor in use by a running container (R-431).
-   Then `preflight_database` runs a bounded Turso `SELECT 1` (3 x 10s); if
-   Turso does not answer, the deploy refuses teardown and the current release
-   keeps serving (2026-09-25 brownout outage).
+7. Prepares target-SHA artifacts before teardown. The
+   [deploy source](scripts/deploy.sh) owns frozen build, prestage and verified
+   image-reuse admission. The parallel prepull job is an optimization; deploy
+   still requires the exact-SHA app image pair locally before teardown and
+   refuses if its pull fails. A bounded database preflight also refuses teardown
+   when Turso does not answer, leaving the current release serving.
 8. Fsyncs a durable transition journal, snapshots active services and timers,
    promotes artifacts, restores the prior topology, and runs code-controlled
    gates.
@@ -289,7 +291,7 @@ marker is written and can be retried. Once accepted, the eventual dump/upload
 result belongs to backup health, not application rollback. Deploy does not
 manufacture a healthy heartbeat.
 
-**Auto-deploy mechanics (moved from root `CLAUDE.md`).** `.github/workflows/ci.yml` runs the Vitest + pytest gate (including `cloud/tests`) then deploys on green: it SSHes to Hetzner, materializes an immutable `cloud/` runner from the release SHA under `~/.radon-deploy-runners/`, and runs that runner's `deploy.sh '$SHA'`. The deploy job remains bound to the GitHub Environment `Production` for deployment history, URL metadata, environment-scoped configuration, and a main-only deployment branch policy; it has no required-reviewer rule, so no manual approval is needed after the automated gates pass. Host secrets stay at `~/radon-cloud/.env` (`RADON_DEPLOY_ENV_FILE`). After root bootstrap publishes `/var/lib/radon/control-plane-ready`, legacy dual-checkout deploy is retired for new releases; pre-ready SHAs still use the compatibility path. The SSH script first waits a bounded time (`RADON_DEPLOY_LOCK_WAIT_SECS`, default 480s) for a still-finishing previous release to free `~/.radon-deploy.lock`, so back-to-back green merges queue instead of failing on the lock (2026-09-19, run 35463319654); `deploy.sh` itself stays non-blocking and still refuses with exit 75 if the lock is held after the wait. Before `deploy.sh`, the deploy job runs `cloud/scripts/sync-control-plane.sh` → `radon-deploy-root sync-control-plane`, which installs the GitHub-main-tip control-plane bundle (helper, sudoers, polkit, control-plane units, drop-ins) via that tip's own bootstrap, so control-plane edits and root hot-patches need no manual bootstrap (R-430, 2026-08-29). Confirm: `gh run list --workflow=ci.yml --limit 1`. Migration/rollback: `docs/monorepo-cloud-migration.md`. `deploy.sh` then `publish-caddy`: stage, `caddy validate`, atomic install, `systemctl reload caddy` (30s), then `systemctl restart caddy` (60s) if reload is TERMed. The helper supervisor budget for publish-caddy is 300s so reload+restart both fit; 180s was consumed by a wedged reload and restart never ran (`11a0575d`, `868ee0f2`). Checked-in Caddy configuration provides HTTPS with an HTTP redirect for the dedicated MCP host; follow the [hosted-MCP owner](../docs/cloud-services.md#hosted-mcp-radon-mcpservice-issue-232-chunk-1) for operator TLS verification before changing the published consumer URL. Do not add a new `/var/log/caddy/*.log` path: root `caddy validate` creates that file as root:root and the caddy user cannot start (`mcp.log` took the edge down on 8628705d). Cutover lessons: `tasks/lessons.md` (2026-07-11). The deploy health-gates the relay restart: before tearing services down (while the current radon-api still serves `/health`), `wait_for_gateway_ready` confirms the IB gateway is authenticated + port_listening (bounded 60s, warn-and-proceed). The relay self-heals on reconnect and raises a `service_health` row (`ib-realtime-relay`) instead of looping silently on no-ticks.
+**Auto-deploy mechanics (moved from root `CLAUDE.md`).** `.github/workflows/ci.yml` runs the Vitest + pytest gate (including `cloud/tests`) then deploys on green: it SSHes to Hetzner, materializes an immutable `cloud/` runner from the release SHA under `~/.radon-deploy-runners/`, and runs that runner's `deploy.sh '$SHA'`. The deploy job remains bound to the GitHub Environment `Production` for deployment history, URL metadata, environment-scoped configuration, and a main-only deployment branch policy; it has no required-reviewer rule, so no manual approval is needed after the automated gates pass. Host secrets remain outside the checkout; [Environment Handling](#environment-handling) owns canonical and compatibility paths. After root bootstrap publishes `/var/lib/radon/control-plane-ready`, legacy dual-checkout deploy is retired for new releases; pre-ready SHAs still use the compatibility path. The SSH script first waits a bounded time (`RADON_DEPLOY_LOCK_WAIT_SECS`, default 480s) for a still-finishing previous release to free `~/.radon-deploy.lock`, so back-to-back green merges queue instead of failing on the lock (2026-09-19, run 35463319654); `deploy.sh` itself stays non-blocking and still refuses with exit 75 if the lock is held after the wait. Before `deploy.sh`, the deploy job runs `cloud/scripts/sync-control-plane.sh` → `radon-deploy-root sync-control-plane`, which installs the GitHub-main-tip control-plane bundle (helper, sudoers, polkit, control-plane units, drop-ins) via that tip's own bootstrap, so control-plane edits and root hot-patches need no manual bootstrap (R-430, 2026-08-29). Confirm: `gh run list --workflow=ci.yml --limit 1`. Migration/rollback: `docs/monorepo-cloud-migration.md`. `deploy.sh` then `publish-caddy`: stage, `caddy validate`, atomic install, `systemctl reload caddy` (30s), then `systemctl restart caddy` (60s) if reload is TERMed. The helper supervisor budget for publish-caddy is 300s so reload+restart both fit; 180s was consumed by a wedged reload and restart never ran (`11a0575d`, `868ee0f2`). Checked-in Caddy configuration provides HTTPS with an HTTP redirect for the dedicated MCP host; follow the [hosted-MCP owner](../docs/cloud-services.md#hosted-mcp-radon-mcpservice-issue-232-chunk-1) for operator TLS verification before changing the published consumer URL. Do not add a new `/var/log/caddy/*.log` path: root `caddy validate` creates that file as root:root and the caddy user cannot start (`mcp.log` took the edge down on 8628705d). Cutover lessons: `tasks/lessons.md` (2026-07-11). The deploy health-gates the relay restart: before tearing services down (while the current radon-api still serves `/health`), `wait_for_gateway_ready` confirms the IB gateway is authenticated + port_listening (bounded 60s, warn-and-proceed). The relay self-heals on reconnect and raises a `service_health` row (`ib-realtime-relay`) instead of looping silently on no-ticks.
 
 The root helper normally polls service state for 60 seconds. Production stops
 of `radon-research.service` instead allow 150 seconds: its canonical unit has
@@ -448,17 +450,14 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
   `IB_GATEWAY_HOST=127.0.0.1` on `RADON_HOST_ROLE=combined` (default) and
   `broker`. App-role hosts must use an RFC1918 address, never Tailscale
   CGNAT and never a public NIC. See `docs/spof-host-split.md`.
-- Canonical future secrets path: `/etc/radon/env`. Compatibility path
-  `/home/radon/radon-cloud/.env` remains until one green host cutover.
-  `deploy.sh` prefers `/etc/radon/env` when that path is a regular file.
-  Unit `EnvironmentFile=` is unchanged.
+- Canonical secrets path: `/etc/radon/env`; service units load it through
+  `EnvironmentFile=`. `/home/radon/radon-cloud/.env` is the compatibility path.
+  `deploy.sh` prefers the canonical path when it is a regular file.
 - Compose interpolation and service `env_file` both receive the explicit
   external env path through `RADON_COMPOSE_ENV_FILE` (compatibility file:
   `/home/radon/radon-cloud/.env`).
-- `docker/app` images are not production runtime until the per-unit
-  drop-ins are installed. Default remains host binaries
-  (`RADON_RUNTIME=host`). `.github/workflows/app-images.yml` builds
-  images and is not a `ci.yml` deploy `needs`.
+- [Runtime planes](#runtime-planes) owns execution mode and required release
+  image admission; per-unit drop-ins own the runtime overlay.
 - `web/.env` contains only `NEXT_PUBLIC_*` build values and is mode `0600`.
   Never copy the complete production env into the web tree.
 - Setup validates the stable env before dependency installation or builds.
