@@ -1,3 +1,13 @@
+# Task: Neutral Implied MV formatting (2026-10-07)
+
+- [x] T1 depends_on: [] Inspect PositionTable, scoped instructions, existing regression and CI configuration.
+- [ ] T2 depends_on: [T1] Add regressions and format position/expanded-leg Implied MV like Initial Value; retain negative signs and unavailable placeholders.
+- [ ] T3 depends_on: [T1] Add Playwright coverage with computed neutral color and screenshot evidence; independent review.
+- [ ] T4 depends_on: [T2, T3] Create PR and verify all applicable GitHub CI checks at exact head; no local suites.
+- [ ] T5 depends_on: [T4] Record review evidence and send accepted normal-priority Pushover notification.
+
+Dependency graph: T1 -> T2, T3; T2 + T3 -> T4 -> T5.
+
 # Task: PDF extract error detail (2026-10-03)
 
 - [x] T1 depends_on: [] Failing tests: rc + MemoryError, negative rc signal name, secret redaction, truncated stderr, prefix preserved, TimeoutExpired, persisted health/journal bound.
