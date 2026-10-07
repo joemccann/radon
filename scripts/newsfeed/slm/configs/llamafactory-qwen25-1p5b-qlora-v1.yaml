@@ -5,6 +5,9 @@
 
 ### model
 model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct
+# LLaMA-Factory reads model_revision and passes it as from_pretrained(revision=).
+# A bare `revision` key is unused and the parser rejects it. HF main, 2024-09-25.
+model_revision: 989aa7980e4cf806f80c7fef2b1adb7bc71aa306
 quantization_bit: 4
 quantization_method: bnb
 # Qwen2.5 is a native transformers architecture; never run hub-supplied code.

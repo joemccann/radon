@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -39,6 +40,27 @@ class TestConfig:
         assert "radon_slm_tagger" in info
         assert info["radon_slm_tagger"]["formatting"] == "sharegpt"
         assert info["radon_slm_tagger"]["columns"]["messages"] == "messages"
+
+    def test_llamafactory_pins_40_hex_model_revision(self):
+        # LLaMA-Factory's ModelArguments field is model_revision. loader.py
+        # forwards it as from_pretrained(revision=...). A bare `revision` key
+        # is unused and HfArgumentParser rejects it unless ALLOW_EXTRA_ARGS.
+        text = LF_YAML.read_text(encoding="utf-8")
+        pins = json.loads((REPO / "cloud" / "gpu" / "pins.json").read_text(encoding="utf-8"))
+        fields = {}
+        for line in text.splitlines():
+            if not line or line.lstrip().startswith("#"):
+                continue
+            key, sep, value = line.partition(":")
+            if sep:
+                fields[key.strip()] = value.split("#", 1)[0].strip()
+        revision = fields.get("model_revision", "")
+        assert re.fullmatch(r"[0-9a-f]{40}", revision)
+        assert revision == "989aa7980e4cf806f80c7fef2b1adb7bc71aa306"
+        assert revision == pins["model_revision"]
+        assert "revision" not in fields
+        sh = TRAIN.read_text(encoding="utf-8")
+        assert 'llamafactory-cli train "$LF_CONFIG"' in sh
 
     def test_mlx_alt_still_pins_mask_prompt(self):
         text = MLX_YAML.read_text(encoding="utf-8")
