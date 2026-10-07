@@ -1,3 +1,13 @@
+## PR #934 conflict repair (2026-10-07)
+- [ ] T1 Inspect conflicts and preserve both branches' task and curation records. depends_on: []
+- [ ] T2 Merge current main, resolve conflicts, and statically verify the merged files. depends_on: [T1]
+- [ ] T3 Push the repaired PR head and wait for all applicable GitHub checks to pass. depends_on: [T2]
+Dependency graph: T1 -> T2 -> T3.
+
+### Review
+- PR https://github.com/joemccann/radon/pull/934; original head eac19327a60cf0ec710c59dc8345980591f16aec.
+- No local test suites. Prior PR green notification already accepted; do not duplicate it.
+
 # Task: PDF extract error detail (2026-10-03)
 
 - [x] T1 depends_on: [] Failing tests: rc + MemoryError, negative rc signal name, secret redaction, truncated stderr, prefix preserved, TimeoutExpired, persisted health/journal bound.
