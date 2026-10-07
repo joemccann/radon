@@ -9087,3 +9087,24 @@ Review: VPS checks at 2026-10-07T12:45:35Z confirm root:root 0644, no writable o
 - [ ] T3 depends_on: [T2] Push to existing PR, await every applicable exact-head CI check, and deliver one accepted Pushover notification.
 
 Dependency graph: T1 -> T2 -> T3. No local test suites; use GitHub runners.
+# TradingView MCP research client, 2026-10-07
+
+- [x] T1 depends_on: [] Audit integration history and current vendor contract; isolate from operator WIP.
+- [x] T2 depends_on: [T1] Write client/auth/API design and ownership boundaries.
+- [x] T3 depends_on: [T2] Red/green client protocol, normalization and authentication tests.
+- [x] T4 depends_on: [T3] CLI and protected API integration; update integration owner/runbook.
+- [x] T5 depends_on: [T4] Luna verification, SDK protocol checks, coverage and full local gates.
+- [x] T6 depends_on: [T5] Review final diff and record unresolved account/data gates.
+- [ ] T7 depends_on: [T4] Operator-consented live symbol and OHLCV probes; confirm source payload compatibility.
+
+Review: 186 focused tests passed with 99% combined coverage; core and API are 100%.
+Full Python roots passed 16,991 cases; cloud has two base-reproduced macOS setgid
+failures and one Caddy startup timeout that passed twice in isolation. Remote
+output-schema references were rejected after failing retrieval regressions.
+Credential staging/atomic artifacts are gitignored, with git check-ignore red/green
+evidence. Credential persistence reuses the shared atomic writer; file/directory
+fsync regression passed after failing before the repair. Full Vitest passed 10,437
+tests across 1,054 files; closing scripts suite passed 13,062. Final 15-file diff
+and scoped commit passed gitleaks with no leaks. GitHub exact-head CI receipts are
+recorded on the PR before delivery. Operator-consented live reads remain pending.
+No full-history indicator claim, production credential deployment or account writes.
