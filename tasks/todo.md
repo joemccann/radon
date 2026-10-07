@@ -8,7 +8,7 @@
 
 Dependency graph: T1 -> T2, T3; T2 + T3 -> T4 -> T5.
 
-Review: GitHub run 37621162918 / head 10ba235d reproduced the positive-plus and directional-color regressions. Existing signed currency helper preserves negative liabilities; row classes match Initial Value. Independent review passed. Dark/light browser cases and screenshot uploads are registered in CI; final exact-head results pending. CI 37621600997 passed new component regressions and identified a legacy rate-resolution expectation of positive plus signs; update only its expected currency formatting. No local suites.
+Review: GitHub run 37621162918 / head 10ba235d reproduced the positive-plus and directional-color regressions. Existing signed currency helper preserves negative liabilities; row classes match Initial Value. Independent review passed. Dark/light browser cases and screenshot uploads are registered in CI; final exact-head results pending. CI 37621600997 passed new component regressions and identified a legacy rate-resolution expectation of positive plus signs; update only its expected currency formatting. Browser run 37622020570 passed 240 existing cases and the new light-theme case on retry; add an explicit visible-header wait before reading the initial-value column index. No local suites.
 
 # Task: PDF extract error detail (2026-10-03)
 

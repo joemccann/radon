@@ -77,6 +77,7 @@ for (const theme of ["dark", "light"] as const) {
     await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
 
     const table = page.getByTestId("defined-risk-section").getByTestId("position-table");
+    await expect(table.getByRole("columnheader", { name: "Initial Value", exact: true })).toBeVisible();
     const headers = await table.getByRole("columnheader").allTextContents();
     const initialIndex = headers.findIndex((header) => header.trim() === "Initial Value");
     expect(initialIndex).toBeGreaterThanOrEqual(0);
