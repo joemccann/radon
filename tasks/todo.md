@@ -9018,6 +9018,17 @@ Audit through 39334555: 12 commits, 78 changed paths, 134 paths including codema
 
 T5 CI repair review: unchanged successful-replacement signal assertion failed in Vitest shard 5; the native request-owner completion control reproduced red twice. Only unfinished transports are aborted during cleanup; completed responses retain successful signal state. Eight native acceptance and fourteen Chrome lifecycle regressions pass without weakening the original assertion. Exact-head CI is restarted after the ordinary repair push; all preceding heads are superseded.
 
+# Task: Confirm VPS Grok hardening closure (2026-10-07)
+
+- [x] T1 depends_on: [] Identify DS-2026-09-29-07 and inspect production units.
+- [x] T2 depends_on: [T1] Confirm controller root ownership, provision hash, isolated interpreter and Gemini confinement.
+- [x] T3 depends_on: [T1] Locate nightly durable closure mechanism; private runner SSH unavailable.
+- [x] T4 depends_on: [T2, T3] Record sanitized closure evidence in committed ledger for automatic nightly reconciliation.
+- [ ] T5 depends_on: [T4] Publish PR, verify exact-head GitHub CI and accepted Pushover delivery.
+
+Dependency graph: T1 -> T2, T3; T2 + T3 -> T4 -> T5.
+
+Review: VPS checks at 2026-10-07T12:45:35Z confirm root:root 0644, no writable or linked controller entries, hash matching provision main 1c58cb3e, /usr/bin/python3.13 -E -S, Gemini hidden in both effective units, active timers and successful upgrade. No setup rerun needed. Private runner unreachable; committed ledger feeds durable closed_queue on nightly reverify. No local test suites.
 ## PR #924 CI repair 2026-10-07
 
 - [x] T1 depends_on: [] Inspect exact-head CI failure and isolated relay harness.
