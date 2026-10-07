@@ -3033,3 +3033,11 @@ indicator and direct-caller union 206 passed. Existing all-sources-down
 behavior retains its source_down error; this repair specifically closes the
 previously healthy fallback acceptance. No global source-error state or
 transport retry is introduced.
+
+## Delta audit 2026-10-07
+
+| ID | Sev | Evidence | Failure mode |
+|---|---|---|---|
+| R-731 / REL-319 | P1 | `scripts/newsfeed/slm/train.sh:41-56` | Prefix wildcards admitted credential-bearing HF, transformer and GPU variables into the third-party trainer despite its credential isolation contract. Eight synthetic faults failed twice; exact cache/offline/device option names replace those prefixes. Acceptance: actual shell launcher with fake trainer excludes eight credential names while preserving cache, offline and device controls; no credential file or external provider is accessed. DONE, focused trainer/reviewer suite 18 passed. |
+
+Open inherited acceptance: REL-021b / R-027 requires injected order/fill/journal success, DB errors and notification outcomes with observable counters/rates; NF-1/NF-4 and REL-087/R-232, REL-261/R-682 remain operator-only. Open draft #922 owns R-729/R-730 and REL-313 through REL-318; its repairs are excluded from this branch.
