@@ -3033,3 +3033,91 @@ indicator and direct-caller union 206 passed. Existing all-sources-down
 behavior retains its source_down error; this repair specifically closes the
 previously healthy fallback acceptance. No global source-error state or
 transport retry is introduced.
+
+## Delta audit 2026-10-06
+
+Trusted collaborator checkpoint `72e09ffb18ceba5ebf485b66ee052b00fc7956c6`;
+audited main `393345550d521548808d9884be0e5ab10ae48854`. Range: 12 commits,
+78 changed paths, 134 paths including direct codemap importers. Open reliability
+PR inventory was empty; IDs remain reserved through R-728 / REL-312.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-729 / REL-313 | P1 | `scripts/cloud.sh:83-110,174-181`; `scripts/ib:90` (audit base); topology `cloud/tailscale/policy.hujson:39-50`, `cloud/caddy/Caddyfile:37-38` | Cloud admission started the Gateway on the app host before stopping the local session, had no total SSH deadline, and directed relay traffic to a loopback-only, denied tailnet port. The renamed persisted IB target also pointed at the app, which owns no broker. Acceptance: real staged launcher refuses busy ports and unknown/failed local logout before remote admission; confirmed logout precedes exactly one bounded broker-owner start; failed/unknown/held/unready health prevents mode and workspace startup; successful startup uses the app API and existing ticket-authenticated Caddy relay, never opens broker/relay tailnet ports. Nine initial faults, the persisted-host fault and unknown-local-inventory fault each failed twice. |
+
+Review covered connectivity and safety through split-host caller defaults,
+Gateway admission and host/cloud firewall recovery; state/persistence through
+rejection digest, fallback provider health, breadth cache and research outcomes;
+resources/error handling through Chromium environment isolation, pinned GPU
+repository admission, subprocess deadlines and CI shard ownership. Existing
+merged firewall/provider/rejection repairs retain their IDs. No live transport,
+provider, database, scheduler or broker was used.
+
+Standing placement scan reads the only wire calls at
+`scripts/clients/ib_client.py:750,907`: halt/limit guards remain at
+`:706,721,861,881`. `_NON_IDEMPOTENT_IB_SCRIPTS` remains at
+`scripts/api/server.py:5821,5930,6008`; exit acknowledgement remains at
+`scripts/monitor_daemon/handlers/exit_orders.py:212,238,790`; daemon-state uses
+Hrana at `scripts/db/writer.py:2577`. Writer parity/exemptions and actual
+funnel/bracket tests pass: 78. Remaining inherited acceptance and operator
+installation actions are retained on issue #81; none is closed on inspection.
+
+### Breadth cache admission
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-730 / REL-314 | P2 | `scripts/breadth_scan.py:730-734` (audit base) | A dictionary instead of the cached history list crashed the new off-hours gate; invalid or future dates compared lexically as fresh and suppressed recovery fetches. Acceptance: structurally corrupt, non-string, invalid and future cache dates never authorize a skip; the actual CLI refetches corrupt history using only mocked providers, while valid completed-session and premarket controls still use cache. Six faults failed twice; breadth/provider/storage/caller union 102 passed after requiring the canonical completed-session date in a list row. |
+
+Audited through: 393345550d521548808d9884be0e5ab10ae48854 on 2026-10-06 — 2 new findings
+
+### Inherited ambiguous-receipt acceptance
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-032 / REL-315 | P2 | `scripts/db/writer.py:414-421` (audit base); shared retry owner `:344-364` | The existing retried DELETE selected a new LIMIT page inside each attempt. Losing a committed response deleted the following page on replay and undercounted archive progress. Acceptance: a real SQLite commit followed by one or two lost batch receipts repeats the same page, preserves post-cutoff rows and reports exactly seven removals; fallback retains that identity and a subsequent full rerun returns zero. Two faults failed twice; 112 focused archive/writer/transport tests pass. The shared wrapper's only mutation callers are this batch and stable single-key deletes; daemon/API execute and API transaction faults each prove one transport attempt, never silent replay. Existing replacement-transaction receipt-loss acceptance remains green. No new transport retry is introduced. |
+
+### Inherited dependency-health acceptance
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-028 / REL-316 | P2 | `scripts/api/server.py:2024-2032,2103-2111` (audit base); relay metadata `scripts/lib/staleDataMachine.js:448-458` | A connected/authenticated broker was the only dependency observation on health/lite: stale/farm-down market data and failed storage had no verdict. Four endpoint faults failed twice. Three false-observation controls also failed twice during implementation. Acceptance: actual bounded fake Hrana rows expose stale ticks, old heartbeats and farm errors with the socket open; failed/stalled DB observations never become healthy feed; fresh recovery is up, quiet/off-hours is idle, malformed/future evidence is unknown. Public health reads no dependencies and retains liveness-only output; protected lite exposes only coarse flags with no account, error or topology leak. Dependency and Gateway probes execute concurrently, preserving the existing request deadline and pool=None contract. No new writer, recovery action or transport retry. |
+
+### Inherited conversation-bound acceptance
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-314 / REL-317 | P2 | `web/lib/chat.ts:296-317,342-359` (audit base); `web/app/api/assistant/route.ts:80-111` | Unlimited browser history reaches the model until the broad serialized cap, and stalled headers/SSE or a terminal frame without EOF leave the operator's turn busy indefinitely. Acceptance: actual request owner with fake fetch rejects oversized multibyte current text before POST; newest context remains within 40 messages and 128 KB UTF-8 while current prompt is unchanged; server admission rejects per-message/aggregate text excess; headers/body deadlines abort the owned transport and clear timers; terminal frames cancel/release readers without waiting for EOF. Browser faults prove the composer recovers for a fresh turn and no order mutation occurs. Seven native faults and the widget busy-state fault each failed twice; 8 native and 14 browser regressions pass. Byte bounds conservatively bound text token input; image limits remain separate and unchanged. |
+
+### Inherited feed-degradation acceptance
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| NF-3 / REL-318 (REL-236 remainder) | P2 | `scripts/ib_realtime_server.js:1132-1141,2995-3001` (audit base); `web/components/WorkspaceSections.tsx:3094-3096`; `web/lib/usePrices.ts:647-651` | Relay status reported only broker socket liveness and suppressed connected broadcasts. All four feed-gated order owners therefore accepted a fresh quote during an independently degraded data plane. Acceptance: real extracted relay status with stale/nulled/held subjects remains degraded with an open socket, fresh/idle/closed controls stay clear, connected status cadence publishes fault/recovery once per edge, and the production widget disables an otherwise armed modify ticket, emits zero blocked requests and recovers with exactly one expected POST. Seven native status/cadence cases and the browser fault failed twice; 13 focused Python and 4 browser tests pass; disabled reason/degraded telemetry screenshot inspected and TypeScript passes. The 45 s owner threshold and five-minute per-quote age gate are preserved. |
+
+## Delta audit 2026-10-07
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-731 / REL-319 | P1 | `scripts/newsfeed/slm/train.sh:41-56` | Prefix wildcards admitted credential-bearing HF, transformer and GPU variables into the third-party trainer despite its credential isolation contract. Eight synthetic faults failed twice; exact cache/offline/device option names replace those prefixes. Acceptance: actual shell launcher with fake trainer excludes eight credential names while preserving cache, offline and device controls; no credential file or external provider is accessed. DONE, focused trainer/reviewer suite 18 passed. |
+
+Inherited REL-021b / R-027 core acceptance is DONE with REL-320: injected order/fill/journal success, DB errors and notification outcomes have observable counters/rates. Native libSQL and other notification implementations are explicitly outside the bounded core coverage. NF-1/NF-4 and REL-087/R-232, REL-261/R-682 remain operator-only. Open draft #922 owns R-729/R-730 and REL-313 through REL-318; its repairs are excluded from this branch.
+
+Inherited R-027 / REL-320: core operations now report fixed-label process counts/rates independently of uptime. Read code: `scripts/clients/ib_client.py:751-752,909-910`, `scripts/db/writer.py:777-792`, `scripts/db/hrana_http.py:149-195`, `scripts/knowledge/http_db.py:207-302`, `scripts/api/db_http.py:110-184`, `scripts/monitor_daemon/handlers/fill_monitor.py:193-194,263-264`, `scripts/watchdog/notify.py:258-273,348-351`. Fault acceptance failed five cases twice; separate API/HTTP connection receipt cases, shared-import identity and terminal-removal distinction also failed twice. GREEN: 1118 focused cases; new collector 100% statement/branch coverage. Fixed labels, concurrency, absent-channel denominators, monotonic rates and quiet/terminal log flushes are tested. No SQL, account identity or provider text reaches metric samples. Existing safety gates, exception propagation and transport attempt counts are unchanged; counters are observational, not an exactly-once ledger.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-732 / REL-321 | P2 | `docs/runner.md:27`; `.pi/AGENTS.md:22`; `scripts/codemap_nightly.sh:79-81` | Codemap onboarding and the Codex mirror promised self-merge with the operator token after the launcher became human-merge-only. Acceptance: run the actual shell under fake GitHub commands, verify zero merge calls, and require both owner paragraphs to state operator review/merge without the self-merge/token claim. Two faults failed twice; focused publisher/guard suite 168 passed. DONE. |
+
+Audit complete: 393345550d521548808d9884be0e5ab10ae48854..8afaaa61f09789bc272910d0dbce048780ef4dd9, three commits and 21 changed paths; codemap direct importers add no paths. `rg` also confirmed shell entrypoint and maintained runbook consumers. Connectivity, persistence, resources, error handling, safety and observability were reviewed for the changed surfaces; the codemap JSON refresh is read-only audit input. NEW_FINDINGS and REL-021b were reconciled against trusted 2026-10-06 acceptance and open #922; no repaired/open-PR ID is reallocated. R-027 core acceptance is resolved above; four retained candidates remain operator-only.
+
+Audited through: 8afaaa61f09789bc272910d0dbce048780ef4dd9 on 2026-10-07 — 2 new findings
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-733 / REL-322 | P1 | `scripts/watchdog/notify.py:244-276,575-630` | HTTP 300/307/308 refusals returned by the actual HTTPError seam were treated as accepted notification/cancellation. A rejected P1 could arm its cooldown and enqueue a page receipt; rejected emergency cancellation reported success. Acceptance: fake urllib refusal at exact POST endpoints preserves the error, records dispatcher failure, makes no cooldown/page write and no replay; accepted 2xx and idempotent cancel-404 controls remain green. Six faults failed twice; notifier and direct-caller union 513 passed. DONE. |
+
+R-733 was verified while widening R-027 to the notifier's response admission. The fix narrows success to the existing documented 2xx contract; no catch is widened and no retry is added.
+
+Audited through: 8afaaa61f09789bc272910d0dbce048780ef4dd9 on 2026-10-07 — 3 new findings
+
+Closing standing sweeps retain halt/limits at `scripts/clients/ib_client.py:707-745,864-903`, authoritative wire calls at `:752,910`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:5821,6008`, exit ack polling at `scripts/monitor_daemon/handlers/exit_orders.py:224-250`, and Hrana daemon-state writes at `scripts/db/writer.py:2567-2594`. Whole-repo `placeOrder`/`place_order` enumeration contains only the established guarded funnels; every scheduled health writer remains in both catalogs, with existing explicit exemptions checked. No metric sample writes a service_health row. Standing executable gates: 131 passed; permanent Python drills: 95 passed. Open #922 IDs were read from its actual diff (highest R-730 / REL-318) and its exact head remained green; no overlapping repair was repeated.

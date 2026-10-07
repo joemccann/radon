@@ -7,7 +7,7 @@
 
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 afterEach(cleanup);
 
@@ -157,7 +157,59 @@ describe("PositionTable — Implied column", () => {
     const T = yearsToExpiry(expiry, new Date())!;
     const notional = bsPut(spot, 295, T, 0, sigma) * 75 * 100;
     const expectedAbs = `$${Math.round(notional).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
-    expect(row.textContent).toContain(`+${expectedAbs}`);
+    const cell = row.querySelector('td[title^="Implied market value"]')!;
+    expect(cell.textContent).toBe(expectedAbs);
+    expect(cell.className).toBe("right");
+  });
+
+  it("preserves short notional signs without gain/loss coloring", () => {
+    enableAllImpliedColumns();
+    const short: PortfolioPosition = {
+      ...AMD_LONG_PUT,
+      direction: "SHORT",
+      legs: AMD_LONG_PUT.legs.map((leg) => ({ ...leg, direction: "SHORT" })),
+    };
+    render(<PositionTable positions={[short]} prices={{
+      AMD: pd({ last: 280 }),
+      [`AMD_${expiry.replace(/-/g, "")}_295_P`]: pd({ impliedVol: 0.45 }),
+    }} />);
+    const cell = screen.getByText("AMD").closest("tr")!
+      .querySelector('td[title^="Implied market value"]')!;
+    expect(cell.textContent).toMatch(/^-\$/);
+    expect(cell.className).toBe("right");
+  });
+
+  it("uses neutral unsigned-positive formatting for expanded long and short legs", () => {
+    enableAllImpliedColumns();
+    const spread: PortfolioPosition = {
+      ...AMD_LONG_PUT,
+      structure: "Put Spread $295/$290",
+      structure_type: "Put Spread",
+      legs: [
+        AMD_LONG_PUT.legs[0],
+        { ...AMD_LONG_PUT.legs[0], direction: "SHORT", strike: 290 },
+      ],
+    };
+    render(<PositionTable positions={[spread]} prices={{
+      AMD: pd({ last: 280 }),
+      [`AMD_${expiry.replace(/-/g, "")}_295_P`]: pd({ impliedVol: 0.45 }),
+      [`AMD_${expiry.replace(/-/g, "")}_290_P`]: pd({ impliedVol: 0.45 }),
+    }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Expand legs for AMD" }));
+    const cells = Array.from(document.querySelectorAll('td[title^="Implied market value"]'));
+    expect(cells).toHaveLength(3);
+    expect(cells[1].textContent).toMatch(/^\$/);
+    expect(cells[2].textContent).toMatch(/^-\$/);
+    for (const cell of cells.slice(1)) expect(cell.className).toBe("right cell-muted");
+  });
+
+  it("keeps unavailable implied market values neutral", () => {
+    enableAllImpliedColumns();
+    render(<PositionTable positions={[AMD_LONG_PUT]} prices={{}} />);
+    const cell = screen.getByText("AMD").closest("tr")!
+      .querySelector('td[title^="Implied market value"]')!;
+    expect(cell.textContent).toBe("—");
+    expect(cell.className).toBe("right");
   });
 
   it("renders BS-derived implied price for an option position with streamed IV", () => {

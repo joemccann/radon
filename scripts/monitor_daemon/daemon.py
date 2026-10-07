@@ -458,6 +458,9 @@ class MonitorDaemon:
         in the daemon_state table replaces the monolithic JSON blob; the
         JSON file is still written for disaster-recovery fallback.
         """
+        from utils.outcome_metrics import METRICS
+
+        METRICS.emit()
         if not self.state_file:
             return
 
