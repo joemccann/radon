@@ -1,3 +1,15 @@
+# Task: Neutral Implied MV formatting (2026-10-07)
+
+- [x] T1 depends_on: [] Inspect PositionTable, scoped instructions, existing regression and CI configuration.
+- [x] T2 depends_on: [T1] Add regressions and format position/expanded-leg Implied MV like Initial Value; retain negative signs and unavailable placeholders.
+- [x] T3 depends_on: [T1] Add Playwright coverage with computed neutral color and screenshot evidence; independent review.
+- [ ] T4 depends_on: [T2, T3] Repair legacy rate-resolution and browser readiness expectations from CI; resolve newer-main task-log conflicts; create PR and verify all applicable GitHub CI checks at exact head; no local suites.
+- [ ] T5 depends_on: [T4] Record review evidence and send accepted normal-priority Pushover notification.
+
+Dependency graph: T1 -> T2, T3; T2 + T3 -> T4 -> T5.
+
+Review: GitHub run 37621162918 / head 10ba235d reproduced the positive-plus and directional-color regressions. Existing signed currency helper preserves negative liabilities; row classes match Initial Value. Independent review passed. Dark/light browser cases and screenshot uploads are registered in CI; final exact-head results pending. CI 37621600997 passed new component regressions and identified a legacy rate-resolution expectation of positive plus signs; update only its expected currency formatting. Browser run 37622020570 passed 240 existing cases and the new light-theme case on retry; add an explicit visible-header wait before reading the initial-value column index. No local suites.
+
 # Task: Nightly CI performance audit (2026-10-06)
 
 - [x] T1 depends_on: [] Read open PRs/checkpoint, audit main changes, acquire Actions jobs/logs/cache/rules.
@@ -9018,6 +9030,17 @@ T5 CI repair review: unchanged successful-replacement signal assertion failed in
 ### Review 2026-10-07 (before publication)
 
 Three delta commits / 21 changed paths audited through 8afaaa61; codemap inverse edges add no paths and shell/runbook consumers were confirmed with rg. Three new findings plus retained R-027 core acceptance have repeated fault injection and four separate REL commits. Focused owners 1118 (collector 100% branch/statement coverage), notifications/callers 513, trainer 18, publisher/guard 168, standing gates 131, delta union 182, security hooks 106 and cloud delta 13 passed. Permanent Python drills 95 passed. Syntax, diff hygiene, append-only ledger prefixes, secret scan and substantive check pass. Four operator-only candidates and unconfirmed controller/hold-helper installation remain on issue #81. Open #922 owns its prior six repairs and is read-only. Diagnostic counters explicitly exclude native libSQL/other notification implementations and durable execution accounting. Full suites and the Vitest durability drill are assigned to PR CI. T5's draft, exact-head registration/green and single rolling checkpoint receipts will be recorded on issue #81 without another bookkeeping-only push. No live access, credentials, production halt, main push/merge, codemap or test-ledger edit; the runner owns notifications.
+# Task: Confirm VPS Grok hardening closure (2026-10-07)
+
+- [x] T1 depends_on: [] Identify DS-2026-09-29-07 and inspect production units.
+- [x] T2 depends_on: [T1] Confirm controller root ownership, provision hash, isolated interpreter and Gemini confinement.
+- [x] T3 depends_on: [T1] Locate nightly durable closure mechanism; private runner SSH unavailable.
+- [x] T4 depends_on: [T2, T3] Record sanitized closure evidence in committed ledger for automatic nightly reconciliation.
+- [ ] T5 depends_on: [T4] Publish PR, verify exact-head GitHub CI and accepted Pushover delivery.
+
+Dependency graph: T1 -> T2, T3; T2 + T3 -> T4 -> T5.
+
+Review: VPS checks at 2026-10-07T12:45:35Z confirm root:root 0644, no writable or linked controller entries, hash matching provision main 1c58cb3e, /usr/bin/python3.13 -E -S, Gemini hidden in both effective units, active timers and successful upgrade. No setup rerun needed. Private runner unreachable; committed ledger feeds durable closed_queue on nightly reverify. No local test suites.
 ## PR #924 CI repair 2026-10-07
 
 - [x] T1 depends_on: [] Inspect exact-head CI failure and isolated relay harness.

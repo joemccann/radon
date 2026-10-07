@@ -325,11 +325,11 @@ function LegRow({
       )}
       {showImplied && columns.implied_market_value && (
         <td
-          className={`right cell-muted ${legImpliedMv != null ? (legImpliedMv >= 0 ? "positive" : "negative") : ""}`}
+          className="right cell-muted"
           title="Implied market value: BS price × contracts × 100, signed"
         >
           {legImpliedMv != null
-            ? `${legImpliedMv >= 0 ? "+" : "-"}${fmtUsd(Math.abs(legImpliedMv))}`
+            ? fmtSignedUsd(legImpliedMv)
             : "—"}
         </td>
       )}
@@ -528,11 +528,11 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
         )}
         {showImplied && columns.implied_market_value && (
           <td
-            className={`right ${impliedNotional != null ? (impliedNotional >= 0 ? "positive" : "negative") : ""}`}
+            className="right"
             title="Implied market value: BS price × contracts × multiplier, signed"
           >
             {impliedNotional != null
-              ? `${impliedNotional >= 0 ? "+" : "-"}${fmtUsd(Math.abs(impliedNotional))}`
+              ? fmtSignedUsd(impliedNotional)
               : "—"}
           </td>
         )}
