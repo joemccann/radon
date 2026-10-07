@@ -757,3 +757,31 @@ def test_bash_issue_sanitizer_redacts_dynamic_routes_and_session_values(tmp_path
     proc = subprocess.run(["/bin/bash", str(script)], capture_output=True, text=True, timeout=30)
     assert proc.returncode == 0, proc.stderr
     assert "NOTREAL" not in proc.stdout, proc.stdout
+
+
+@pytest.mark.parametrize("header", ["Cookie", "Set-Cookie", "cOoKiE"])
+def test_all_cookie_header_values_are_redacted_without_losing_the_next_line(header):
+    text = f"{header}: first=qzFirstNOTREAL; opaque=qzSecondNOTREAL\nretry after review"
+    out = nif.sanitize(text)
+    assert "NOTREAL" not in out, out
+    assert out == f"{header}: [REDACTED]\nretry after review"
+
+
+@pytest.mark.parametrize("header", ["Cookie", "Set-Cookie", "cOoKiE"])
+@pytest.mark.parametrize("fn", ["_sanitize_issue_text", "_redact_secret_classes"])
+def test_both_bash_sinks_redact_complete_cookie_headers(tmp_path: Path, header: str, fn: str):
+    src = HOOK.read_text(encoding="utf-8")
+    start = src.index(f"{fn}() {{")
+    body = _secret_ere_block(src) + src[start:src.index("\n}\n", start) + 3]
+    text = f"{header}: first=qzFirstNOTREAL; opaque=qzSecondNOTREAL\nretry after review"
+    call = (f"_sanitize_issue_text {shlex.quote(text)}" if fn == "_sanitize_issue_text"
+            else f"printf '%s' {shlex.quote(text)} | _redact_secret_classes")
+    script = tmp_path / "cookie.sh"
+    script.write_text("#!/bin/bash\nset -euo pipefail\n" + body + "\n" + call + "\n")
+    proc = subprocess.run(["/bin/bash", str(script)], capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    assert "NOTREAL" not in proc.stdout, proc.stdout
+    # The public sink historically removes credential names as well as values;
+    # the private sink retains the header name. Both keep the next diagnostic.
+    expected = "[REDACTED]" if fn == "_sanitize_issue_text" else f"{header}: [REDACTED]"
+    assert proc.stdout == f"{expected}\nretry after review"

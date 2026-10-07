@@ -58,6 +58,9 @@ RETRY_NEXT = "The next fire retries this phase."
 REDACTED = "[REDACTED]"
 
 _FENCE_RE = re.compile(r"```.*?```", re.S)
+# A cookie header can contain multiple opaque values separated by spaces.
+# Redact its entire value while preserving diagnostics on following lines.
+_COOKIE_HEADER_RE = re.compile(r"(\b(?:set-)?cookie[ \t]*:[ \t]*)[^\r\n]*", re.I)
 # The key may be quoted (JSON) or a hyphenated header name, the value quoted
 # (spaces inside) or led by an auth scheme word ("Authorization: Basic <value>").
 _SECRET_ASSIGN_RE = re.compile(
@@ -181,6 +184,7 @@ def sanitize(text: str) -> str:
         return text
     # Preserve the one operator URL the quota ladder names, then restore.
     text = _USAGE_KEEP_RE.sub("\x00USAGE\x00", text)
+    text = _COOKIE_HEADER_RE.sub(lambda m: f"{m.group(1)}{REDACTED}", text)
     text = _URL_RE.sub(REDACTED, text)
     text = _ROUTE_RE.sub(REDACTED, text)
     text = _FILE_LINE_RE.sub(REDACTED, text)

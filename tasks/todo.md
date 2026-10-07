@@ -31,6 +31,15 @@ Dependency graph: T1 -> T2 -> T3.
 - Preserved both task logs and ledger receipt sections; 156 unique hold-outs + 48 curated specs = 204 classified, with no missing/stale/duplicate entries or overlap. Server AST and both documentation additions verified. No local suites. Prior PR green notification already accepted; do not duplicate it.
 
 
+## PR #938 conflict repair (2026-10-07)
+- [x] T1 Inspect conflicts and preserve both branches' audit, task, and training-owner documentation. depends_on: []
+- [x] T2 Merge main, resolve conflicts, and statically verify record and training-contract preservation. depends_on: [T1]
+- [ ] T3 Push the repaired head, wait for all applicable GitHub CI checks, and record green notification evidence. depends_on: [T2]
+Dependency graph: T1 -> T2 -> T3.
+
+### Review
+- PR https://github.com/joemccann/radon/pull/938; original head 6334926dae407855aaa50dbdbb8878ba8518d4dc.
+- Both audit/log branches preserved verbatim; task records retained. Training documentation preserves discovery isolation, exact environment allowlist, pinned model revision, and human-review gates. Merged training shell/Python syntax and resolved-file whitespace checks passed. No local suites/builds; GitHub runners own verification.
 ## PR #931 conflict repair (2026-10-07)
 - [x] T1 Inspect conflicts and preserve both branches' task and lesson records. depends_on: []
 - [x] T2 Merge current main, resolve conflicts, and statically verify record preservation. depends_on: [T1]
@@ -9016,6 +9025,16 @@ Review before publication: 65 commits / 112 paths audited through 72e09ffb. T-53
 
 Audit complete through 72e09ffb: 65 commits, 112 changed paths and 300 paths including codemap callers. Two new and three inherited repairs have repeated fault-injection red/green evidence; ten remaining historical/operator candidates retain acceptance on issue #81. Standing gates 81 passed, delta acceptance 135 passed, permanent Python drills 95 passed; focused firewall 137/37, rejection 76, mode-switch 138 plus cloud owner 30, provider/caller 206 passed. Fifteen Python files, three shell files and embedded logout Python parse; no YAML/JSON/TOML changed. Diff, five-commit secret scan and substantive publication check pass. No live access, credential lookup, main push, merge, codemap edits or test-ledger edits. T5 external publication, exact-head CI and the single rolling comment are recorded on issue #81 without changing the verified head.
 
+
+# Task: Nightly testing 2026-10-07
+
+- [x] T1 depends_on: [] Build credential-free toolchain; read trusted checkpoint and open testing PRs; branch from origin/main.
+- [x] T2 depends_on: [T1] Audit 39334555..8afaaa61 and inverse test consumers; standing gates and three changed-file repetitions; reconcile inherited findings.
+- [x] T3 depends_on: [T2] Verify each actionable gap with a passing-old/failing-new mutation, restore source, run focused gates and commit one finding per commit.
+- [x] T4 depends_on: [T3] Three consecutive serial full-gate rounds; clean-base cloud FAILED-list comparison; syntax, whitespace and secret checks; append ledgers and review.
+- [ ] T5 depends_on: [T4] Substantive classifier; push only testing/2026-10-07; one draft PR and exact-head green CI; one durable issue #83 comment.
+
+Review: Four verified findings have red/green receipts (T-538/T-540/T-541 P1; T-539 P2). Delta repetitions pass 230 Python and 156 cloud cases each; new YAML owner passes 8 cases three times. Four separate finding commits and three consecutive full closing rounds pass 14,292 Python, 10,390 Vitest and 2,617 cloud cases each; corrected clean-base cloud also passes 2,617 and all closing FAILED-list comparisons are empty. The earlier Caddy startup failure remains recorded separately with its 51-case isolated pass. Delivery remains pending; T5 external draft, exact-head CI and the single checkpoint completion receipt will be recorded on issue #83 without changing the verified head. No production connections, credential lookup, notification, main push or merge authorized.
 ## Mobile risk-reversal quote preset signs, 2026-10-06
 
 - [x] T1 depends_on: [] Reproduce negative BID/MID preset labels and selection: five component failures and two mobile browser failures before the fix.
