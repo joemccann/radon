@@ -248,7 +248,7 @@ function impliedCells(): string[] {
 const price = (v: number) =>
   `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const signedUsd = (v: number) =>
-  `${v >= 0 ? "+" : "-"}$${Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+  `${v < 0 ? "-" : ""}$${Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 
 /** Header net + both leg cells for Implied, then the same for Implied MV. */
 function expectedCells(r: number): string[] {
