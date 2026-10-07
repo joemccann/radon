@@ -378,8 +378,7 @@ def test_pytest_shards_then_combines_coverage_ratchet() -> None:
     assert "test_[a-c]" in include
     assert "test_[d-f]" in include
     assert "test_i*" in include
-    assert "test_v*" in include
-    assert "test_[t-u]" in include
+    assert "test_[t-v]" in include
     assert "--cov-fail-under=0" in commands
     checkout = next(
         step
@@ -820,10 +819,9 @@ def test_pytest_coverage_ratchet_measures_branches() -> None:
 # explicitly and by the letter glob (``--keep-duplicates`` is off by default),
 # so shard membership stays glob-derived and the union contract holds.
 PYTEST_SHARD_LEAD_MODULES = {
-    "scripts-gh": ["scripts/tests/test_vixcor.py"],
     "scripts-jm": ["scripts/tests/test_leap_garch_no_duplicate_scan.py"],
     "scripts-npsz": [
-        "scripts/tests/test_path_filter.py",
+        "scripts/tests/test_vixcor.py",
     ],
     "rest": [
         "scripts/tests/test_run_flow_refresh_wrapper.py",
@@ -947,3 +945,25 @@ def test_real_deploy_lock_wait_with_fake_lock_and_clock(tmp_path, failures, budg
         assert "freed after 20s" in result.stdout
     else:
         assert result.stdout == result.stderr == ""
+
+
+def test_cip018_revert_restores_v_suite_ownership_and_early_collection() -> None:
+    """The recorded 90s trigger fired; restore ownership without dropping tests."""
+    rows = {
+        str(row["shard"]): str(row["paths"]).split()
+        for row in _workflow()["jobs"]["py-tests"]["strategy"]["matrix"]["include"]
+    }
+    root = WORKFLOW.parents[2]
+    v_modules = sorted((root / "scripts/tests").glob("test_v*.py"))
+    assert v_modules, "the reverted test family must exist"
+    for module in v_modules:
+        relative = module.relative_to(root).as_posix()
+        owners = {
+            shard for shard, patterns in rows.items()
+            if any(fnmatch.fnmatch(relative, pattern) for pattern in patterns)
+        }
+        assert owners == {"scripts-npsz"}, f"{relative}: restored owners {owners}"
+    assert rows["scripts-npsz"][0] == "scripts/tests/test_vixcor.py"
+    assert rows["scripts-gh"] == [
+        "scripts/tests/test_[g-h]*.py", "scripts/tests/test_we*.py"
+    ]

@@ -348,11 +348,11 @@ jobs:
           - shard: scripts-i
             paths: "scripts/tests/test_i*.py"
           - shard: scripts-gh
-            paths: "scripts/tests/test_vixcor.py scripts/tests/test_[g-h]*.py scripts/tests/test_v*.py scripts/tests/test_we*.py"
+            paths: "scripts/tests/test_[g-h]*.py scripts/tests/test_we*.py"
           - shard: scripts-jm
             paths: "scripts/tests/test_leap_garch_no_duplicate_scan.py scripts/tests/test_[j-m]*.py"
           - shard: scripts-npsz
-            paths: "scripts/tests/test_path_filter.py scripts/tests/test_[n-p]*.py scripts/tests/test_[t-u]*.py scripts/tests/test_w[!e]*.py scripts/tests/test_[x-z]*.py"
+            paths: "scripts/tests/test_vixcor.py scripts/tests/test_[n-p]*.py scripts/tests/test_[t-v]*.py scripts/tests/test_w[!e]*.py scripts/tests/test_[x-z]*.py"
           - shard: scripts-rs
             paths: "scripts/tests/test_r[!ou]*.py scripts/tests/test_s*.py"
           - shard: scripts-daemons
