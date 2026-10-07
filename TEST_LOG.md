@@ -1201,3 +1201,4 @@ Three serial full-gate rounds each pass 14,200 root Python cases / 2 skips / 23 
 | Finding | Status | Red / green evidence |
 |---|---|---|
 | T-538 | DONE | Original discovery probe exposes synthetic provider/database/control values: 3 failed / 11 passed; all 7 original cases remain green. Isolating the probe with the existing trainer allowlist yields 14 passed. Exact process receipts cover CLI/module/MLX and failed discovery; owner docs updated. |
+| T-540 | DONE | All 15 complete-cookie regressions fail against original Python/Bash redactors; fixed focused formatter/hook/PR-rendering/docs gate: 361 passed. Actual fake-GitHub comments cover both security loop variants; following diagnostics and sink contracts remain unchanged. Owner docs updated. |
