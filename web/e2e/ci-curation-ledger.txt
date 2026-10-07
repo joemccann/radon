@@ -1,3 +1,12 @@
+# REVIEWED 2026-10-06 mobile-ticket-session-refresh.spec.ts - iPhone resume race:
+#   first /api/orders/place answers 401 x-clerk-auth-status: signed-out, the
+#   SessionRefreshFetch interceptor refreshes via a stubbed signed-in window.Clerk
+#   and resends once; asserts two identical POSTs, success shown, no session copy.
+#   1/1 mobile Chromium against local next dev :3047; red with the mount removed.
+#   Wire-level pins live in Vitest mobile-ticket-session-refresh and
+#   session-refresh-fetch. Held out of e2e-financial-smoke pending next start
+#   preflight, same as mobile-order-ticket.spec.ts.
+mobile-ticket-session-refresh.spec.ts
 # REVIEWED 2026-10-01 admin-service-controls.spec.ts - App-host Service controls
 #   through the radon-control socket. 1/1 Chromium against local next dev :3047
 #   (isolated AdminWorkspace bundle, clear-admin-component harness, fixture
