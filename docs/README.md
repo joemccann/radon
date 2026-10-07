@@ -15,7 +15,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Operator contributing rules | [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | Security reports | [`SECURITY.md`](../SECURITY.md) |
 | Support policy (unsupported clones) | [`SUPPORT.md`](../SUPPORT.md) |
-| External services, credential setup, and optional service fallbacks (incl. Robinhood read-only MCP, ranked after IB and before UW for price data and analyst consensus; host secret locations; text JSON model ladder with Cerebras last) | [`docs/external-services.md`](external-services.md) |
+| External service prerequisites, with links to topology and credential recovery owners | [`docs/external-services.md`](external-services.md) |
 | TradingView integration (alert webhook ingress + operator runbook, read-only MCP client, ladder placement) | [`docs/tradingview-integration.md`](tradingview-integration.md) |
 | Knowledge embeddings, backfill and retrieval verification | [`docs/knowledge-embeddings.md`](knowledge-embeddings.md) |
 | CLI commands | [`docs/scripts-reference.md`](scripts-reference.md) |

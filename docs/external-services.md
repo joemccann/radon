@@ -41,7 +41,7 @@ for FastAPI and scripts, plus `web/.env` for Next.js.
 
 | Service | Purpose | Notes |
 |---|---|---|
-| **Hetzner Cloud** | VPS that hosts FastAPI, IB Gateway (docker), the WS relay, the monitor daemon, the newsfeed, Caddy, and `media.radon.run`. Host secrets live in `/etc/radon/env` (0640 root:radon, canonical; `/home/radon/radon-cloud/.env` is the compatibility symlink) — IB Flex, Turso, Backblaze B2 archive, and the Robinhood MCP bootstrap keys. The Robinhood token file is the one secret NOT in that env file: it sits at `/var/lib/radon/rh-mcp/rh-mcp.json` (0600) because the refresh loop must rewrite it. | Resolved as `ib-gateway` via Tailscale on the laptop |
+| **Hetzner Cloud** | Hosts the production app and broker roles described by the [host-split owner](spof-host-split.md). | Credential placement and recovery: [operations](operations.md#encrypted-credential-store-profile-credentials-tab); environment contract: [cloud owner](../cloud/CLAUDE.md#environment-handling). |
 | **Backblaze B2** | Cold storage for archived portfolio snapshot months (`portfolio_snapshots/YYYY-MM.jsonl.gz`). | Bucket `radon-archive` |
 | **Tailscale** | Mesh VPN between laptop and VPS. The laptop reaches the app host (`radon-app`) on SSH and FastAPI `:8321` only; the allowed paths are declared in `cloud/tailscale/policy.hujson`. | [tailscale.com](https://tailscale.com/) |
 | **Caddy** | TLS termination + reverse proxy on the VPS. Serves `app.radon.run` and `media.radon.run`. | Canonical config: [`cloud/caddy/`](../cloud/caddy/) |

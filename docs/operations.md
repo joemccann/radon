@@ -641,14 +641,38 @@ As root, set `BACKUP=<printed /etc/radon-ufw-rollback.* path>`, then run `cp -a 
 - **fw-radon-ops:** 22 from the recovery `/32`; 80, 443 any; 41641/udp any.
 - No 4001/8340 rules: Hetzner Cloud Firewalls filter the public interface only, so the app-to-broker private-net path (`10.0.0.2` -> `10.0.0.4:4001/8340`) never passes them. That path is held by the bind addresses and the broker ufw set above.
 
-Rollout (operator laptop, `hcloud context use <project>`):
+**Symptom:** firewall apply fails, reports an unavailable inventory, or times
+out while replacing rules or attaching a firewall.
+**Prerequisites:** the operator's intended `hcloud` context, independently
+confirmed provider server identity, a saved copy of the prior rules and
+attachment, and a second recovery SSH session. Provider server names are not
+Tailscale hostnames; the app's provider name remains `ib-gateway`.
+**Blast radius:** replacement or attachment changes public access to the selected
+server; a partial apply can leave its rules or attachment changed.
+**Diagnosis:** inspect the [tool](../cloud/hetzner/firewalls/hcloud_firewalls.py)
+and its [offline refusal tests](../cloud/tests/test_hcloud_firewall_faults.py).
+An unavailable or malformed inventory refuses before mutation. A mutation timeout
+is indeterminate, not proof that the provider rejected it: inspect live
+rules and attachment before another apply. Do not infer absence from an error.
+
+Rollout, one server at a time:
 
 1. Dry run: `python3 cloud/hetzner/firewalls/hcloud_firewalls.py --firewall fw-radon-broker --server radon-broker --recovery-ip <your public ip>`.
-2. Same with `--apply`. Verify from the laptop over the tailnet: `ssh radon-broker true`; from the app: the 8340 `/healthz` probe (spof-host-split.md) and `/health` `auth_state=authenticated`.
-3. `--firewall fw-radon-app --server ib-gateway --apply`. Verify `curl -fsS https://app.radon.run/health` and that the next CI deploy is green.
-4. `fw-radon-ops` only once an ops server exists.
+2. Same with `--apply`, only after reviewing the rendered rules and target. From a fresh laptop connection to the broker's tailnet address, verify SSH; from the app verify the broker's 8340 `/healthz` and authenticated readiness through the [host-split owner](spof-host-split.md).
+3. Repeat the dry-run/apply sequence for `--firewall fw-radon-app --server ib-gateway`, retaining the recovery address. Verify fresh SSH, `https://app.radon.run/health`, and the expected deployed SHA through the [deployment owner](../cloud/CLAUDE.md#deployment-contract).
+4. Apply `fw-radon-ops` only after independently identifying its server.
 
-Rollback: `hcloud firewall remove-from-resource <fw> --type server --server <name>`.
+**Stop:** stop on any refusal, timeout, unexpected rules/attachment or failed
+fresh-access check. Never replay an uncertain mutation to discover its outcome.
+**Verification:** compare the installed rules and attached server against the
+reviewed dry run; successful command exit alone does not establish reachability.
+**Rollback:** restore the saved prior rules and attachment after inspecting the
+actual outcome. `hcloud firewall remove-from-resource <fw> --type server --server <name>`
+removes an attachment only; it does not restore replaced rules. Detach only when
+that matches the saved prior state and the recovery path is verified.
+**Escalation:** preserve sanitized failure and target evidence, keep the second
+session open, and involve the operator with provider access if state or recovery
+access cannot be established. Do not continue to the next server.
 
 Protection (once, both servers): `hcloud server enable-protection ib-gateway delete rebuild` and `hcloud server enable-protection radon-broker delete rebuild`. Verify `hcloud server describe <name> -o json | jq .protection` shows `delete` and `rebuild` true. Disable with `disable-protection` before a deliberate rebuild (spof-host-split.md "Never").
 
