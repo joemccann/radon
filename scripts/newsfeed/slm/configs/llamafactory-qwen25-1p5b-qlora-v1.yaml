@@ -7,7 +7,8 @@
 model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct
 quantization_bit: 4
 quantization_method: bnb
-trust_remote_code: true
+# Qwen2.5 is a native transformers architecture; never run hub-supplied code.
+trust_remote_code: false
 
 ### method
 stage: sft

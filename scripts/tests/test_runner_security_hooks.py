@@ -225,7 +225,11 @@ def test_pre_refuses_a_credential_file(rig, path):
     proc = rig.pre()
 
     assert proc.returncode == 2
-    assert f"credential file ({path})" in proc.stdout
+    reason = next(line for line in proc.stdout.splitlines() if line.startswith("refused="))
+    # The refusal reason reaches the public dead-man; the path stays in the
+    # private runner log (stderr).
+    assert "credential file" in reason and path not in reason, reason
+    assert path in proc.stderr
 
 
 @pytest.mark.parametrize("path,body,refused", [
@@ -246,12 +250,19 @@ def test_pre_refuses_billing_reroute_files(rig, path, body, refused):
     proc = rig.pre()
 
     assert (proc.returncode == 2) == refused, proc.stdout + proc.stderr
+    if refused:
+        reason = next(line for line in proc.stdout.splitlines() if line.startswith("refused="))
+        assert path not in reason and str(rig.work) not in reason, reason
+        assert path in proc.stderr
 
 
 def test_pre_refuses_a_reroute_in_the_bots_own_claude_settings(rig):
     (rig.home / ".claude").mkdir()
     (rig.home / ".claude" / "settings.json").write_text('{"env": {"ANTHROPIC_API_KEY": "sk-ant-x"}}')
-    assert rig.pre().returncode == 2
+    proc = rig.pre()
+    assert proc.returncode == 2
+    reason = next(line for line in proc.stdout.splitlines() if line.startswith("refused="))
+    assert str(rig.home) not in reason and "settings.json" not in reason, reason
 
 
 def test_pre_arms_the_branch_only_deliver_record_before_deliver(rig):
@@ -293,7 +304,7 @@ def test_timeout_truncation_and_failure_are_named(rig):
 
 def test_killed_and_refused_come_from_the_runner(rig):
     assert rig.post(PHASE_STATUS="KILLED (SIGTERM)")["status"].startswith("KILLED (SIGTERM)")
-    out = rig.post(PHASE_REFUSED="the clone holds a credential file (.env)")
+    out = rig.post(PHASE_REFUSED="the clone holds a credential file; remove it")
     assert out["status"].startswith("REFUSED")
 
 

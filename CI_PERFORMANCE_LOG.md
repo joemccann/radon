@@ -2105,3 +2105,85 @@ All 95 standing contract tests pass (`test_ci_deploy_concurrency.py`, `test_ci_g
 `test_path_filter.py`). Cloud contracts pass (`test_ci_deploy_image_reuse.py`, `test_caddyfile.py`).
 `ci.yml` YAML syntax verified valid. Full test suites, Vitest, Docker builds, and workflow lint
 are delegated to PR CI per runner constraints.
+
+## 2026-10-06 - CIP-018 review and surgical revert
+
+Status: **REJECTED** under its recorded shard-wall revert trigger. Restoration
+is **VALIDATING** until PR CI completes; no production performance win is
+claimed. CIP-019 remains unused. This entry appends evidence without rewriting
+the original experiment or its five before anchors.
+
+**Trigger and decision recorded before the workflow repair.** Organic main
+run [37357797556](https://github.com/joemccann/radon/actions/runs/37357797556),
+job [111924636029](https://github.com/joemccann/radon/actions/runs/37357797556/job/111924636029),
+`pytest (scripts-gh)`: 93s wall, 76s pytest execution, 11s setup, 1s startup,
+3s queue reported separately. The original CIP-018 entry says to revert if
+`scripts-npsz` or `scripts-gh` wall exceeds 90s. This is the sixth successful
+post-merge run (nine successful post-merge runs observed). The recorded
+wall-time trigger has no first-five limit; the module-failure trigger does. It is an ordinary mixed/warm run, without an anomalous
+checkout/cache/setup interval. Linux JUnit records 957 tests / 75.4s test work
+in gh and 1638 tests / 48.9s work in npsz. The full release succeeded in 259s;
+this is a predeclared experiment stop, not evidence of a failed deployment or
+an attribution claim about a whole-release regression.
+
+**Before and after evidence.** Original before anchors are retained:
+37224252323, 37223269249, 37222279939, 37220425944, 37219711133. Today's
+Actions job timestamps give npsz walls 112/111/112/92/116s respectively,
+which corrects the previous ledger's 100/108s for the last two without
+rewriting it. Path-filter logs arm both full gates on these five runs;
+37224252323 is startup-degraded, 37223269249 ordinary, the other three
+queued. Do not pool them to claim acceptance. All post-merge successful
+runs are 37411423244, 37409193643, 37406286981, 37357797556, 37351413778,
+37347531671, 37344719250, 37343432200, 37339970805. No synthetic samples.
+The current 30-run window has only three pre-merge mixed/warm/ordinary
+releases versus five after: before p50/p95 268.0/279.7s, after 286.0/306.8s.
+Inventories and host preparation also changed; this is descriptive, not a
+causal slower-release comparison. Neither this small before cohort nor the
+PR-only 58s shard timing establishes the required five-before/five-after win.
+
+**Restoration hypothesis and expected cost.** Restore exactly the two glob
+rows and original heavy-module lead ownership from before #910. No shard is
+added; the same work remains on nine machines. npsz will likely return toward
+its 100-116s baseline and gh toward 39-51s. Gate closure may lengthen by
+roughly 0-25s depending on sibling gates. This is disclosed recovery of a
+rejected experiment, not a new time-saving proposal. Runner minutes are
+expected approximately flat; no measured post-revert main sample exists.
+Affected paths: `.github/workflows/ci.yml` and
+`scripts/tests/test_ci_deploy_concurrency.py`, plus this append-only record
+and the task checklist. Main-only Production environment bindings added by
+#915 remain intact. No unrelated main changes are reverted.
+
+| Job | Before restoration | After restoration | % change |
+|---|---|---|---|
+| pytest (scripts-gh) | 93s | pending | TBD until 5 samples |
+| pytest (scripts-npsz) | 60s | pending | TBD until 5 samples |
+
+Both rows cite run 37357797556; npsz job 111924636164. These are the stopped
+experiment's current job walls, not a promise of faster restoration.
+
+**Safety and verification.** New glob-derived V-family ownership/early-lead
+regression: 1 failed / 37 passed on the optimized workflow before the repair.
+The repair restores original owners and strict matching pins; full partition,
+recursive inventory union, coverage and production-host gate contracts remain
+required. It preserves fail-closed path classification, 56% Python and all
+Vitest coverage ratchets, every `needs` and result guard, exact 40-character
+image pair proof before teardown, fallback/recovery, retained artifacts,
+transition journal, green marker, 40-second stability and non-cancelling
+deploy concurrency. Revert the restoration only through a new reviewed
+experiment with matched Linux/release evidence; never loosen the trigger or
+a gate to call CIP-018 accepted. Focused green results and exact-head CI are
+recorded in the PR and tonight's one issue #196 comment. Local full suites,
+Vitest, Docker builds and workflow lint are left to PR CI per runner contract.
+
+**Audit and ranking.** Main 393345550d521548808d9884be0e5ab10ae48854:
+11 commits / 78 paths since actual checkpoint
+72e09ffb18ceba5ebf485b66ee052b00fc7956c6. The previous issue's 72e09ffb full
+marker was invalid; its short prefix resolves uniquely and matches Actions
+run 37224252323's head SHA. No open ci-performance/* PR existed at entry.
+Date-filtered Actions API and gh query agree on the newest 30 organic main
+runs: 26 success, one hosted-runner acquisition failure, three cancellations.
+No completed sample is discarded from reliability; zero rollback observed.
+Full cohort tables, critical path, Linux module timings, cache classifications,
+per-job queue/setup/execution, candidate rankings and all carried findings are
+in tonight's rolling comment, as required by this run's explicit delivery
+contract. No other candidate passes recurring materiality and safety together.

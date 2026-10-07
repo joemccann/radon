@@ -717,3 +717,43 @@ def test_route_query_and_fragment_are_redacted_with_the_route(route: str):
     out = nif.sanitize(f"the call {route} returned")
     assert "NOTREAL" not in out, out
     assert out == "the call [REDACTED] returned"
+
+
+@pytest.mark.parametrize("route", [
+    "/api/orders/[id]?code=qz4NOTREAL", "/api/orders/:id?code=qz5NOTREAL", "/api/orders/{id}#qz6NOTREAL",
+])
+def test_dynamic_route_segments_are_redacted_with_their_query(route: str):
+    out = nif.sanitize(f"the call {route} returned")
+    assert "NOTREAL" not in out and "[id]" not in out and ":id" not in out, out
+    assert out == "the call [REDACTED] returned"
+
+
+_SESSION_VALUES = [
+    "Cookie: sessionid=qz7NOTREAL", "Set-Cookie: __session=qz8NOTREAL; Path=/",
+    "SESSION_ID=qz9NOTREAL", "csrf=qzANOTREAL", "XSRF-COOKIE: qzBNOTREAL",
+]
+
+
+@pytest.mark.parametrize("text", _SESSION_VALUES)
+def test_cookie_and_session_values_are_redacted(text: str):
+    out = nif.sanitize(f"the request sent {text} upstream")
+    assert "NOTREAL" not in out, out
+    assert "[REDACTED]" in out
+
+
+def test_session_prose_is_not_redacted():
+    text = "the session ended cleanly: no cookie was read"
+    assert nif.sanitize(text) == text
+
+
+def test_bash_issue_sanitizer_redacts_dynamic_routes_and_session_values(tmp_path: Path):
+    src = HOOK.read_text(encoding="utf-8")
+    start = src.index("_sanitize_issue_text() {")
+    body = _secret_ere_block(src) + src[start:src.index("\n}\n", start) + 3]
+    text = " ; ".join(["/api/orders/[id]?code=qzCNOTREAL", "/admin/x/:id?k=qzDNOTREAL", *_SESSION_VALUES])
+    script = tmp_path / "run.sh"
+    script.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + body
+                      + f"\n_sanitize_issue_text {shlex.quote(text)}\n", encoding="utf-8")
+    proc = subprocess.run(["/bin/bash", str(script)], capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    assert "NOTREAL" not in proc.stdout, proc.stdout

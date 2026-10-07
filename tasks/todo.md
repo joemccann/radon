@@ -3,12 +3,21 @@
 - [x] T1 depends_on: [] Inspect PositionTable, scoped instructions, existing regression and CI configuration.
 - [x] T2 depends_on: [T1] Add regressions and format position/expanded-leg Implied MV like Initial Value; retain negative signs and unavailable placeholders.
 - [x] T3 depends_on: [T1] Add Playwright coverage with computed neutral color and screenshot evidence; independent review.
-- [ ] T4 depends_on: [T2, T3] Repair legacy rate-resolution formatting expectations from CI; create PR and verify all applicable GitHub CI checks at exact head; no local suites.
+- [ ] T4 depends_on: [T2, T3] Repair legacy rate-resolution and browser readiness expectations from CI; resolve newer-main task-log conflicts; create PR and verify all applicable GitHub CI checks at exact head; no local suites.
 - [ ] T5 depends_on: [T4] Record review evidence and send accepted normal-priority Pushover notification.
 
 Dependency graph: T1 -> T2, T3; T2 + T3 -> T4 -> T5.
 
 Review: GitHub run 37621162918 / head 10ba235d reproduced the positive-plus and directional-color regressions. Existing signed currency helper preserves negative liabilities; row classes match Initial Value. Independent review passed. Dark/light browser cases and screenshot uploads are registered in CI; final exact-head results pending. CI 37621600997 passed new component regressions and identified a legacy rate-resolution expectation of positive plus signs; update only its expected currency formatting. Browser run 37622020570 passed 240 existing cases and the new light-theme case on retry; add an explicit visible-header wait before reading the initial-value column index. No local suites.
+
+# Task: Nightly CI performance audit (2026-10-06)
+
+- [x] T1 depends_on: [] Read open PRs/checkpoint, audit main changes, acquire Actions jobs/logs/cache/rules.
+- [x] T2 depends_on: [T1] Classify comparable runs, reconstruct gate DAG, rank safe material candidates.
+- [x] T3 depends_on: [T2] Surgical CIP-018 revert after its recorded >90s shard-wall trigger; 1 failed / 37 passed red, 159 passed green; cloud 58 passed.
+- [ ] T4 depends_on: [T3] Publish substantive draft PR only, verify exact-head CI, post one rolling issue comment.
+
+Review: No additional material optimization qualifies. CIP-018 organic run 37357797556 / job 111924636029: scripts-gh 93s wall exceeds its recorded 90s revert trigger. Restore only its shard membership and matching ownership contracts; preserve full inventory, coverage, gate and deployment guarantees.
 
 # Task: PDF extract error detail (2026-10-03)
 
@@ -8983,3 +8992,17 @@ Review before publication: 65 commits / 112 paths audited through 72e09ffb. T-53
 ### Review 2026-10-05
 
 Audit complete through 72e09ffb: 65 commits, 112 changed paths and 300 paths including codemap callers. Two new and three inherited repairs have repeated fault-injection red/green evidence; ten remaining historical/operator candidates retain acceptance on issue #81. Standing gates 81 passed, delta acceptance 135 passed, permanent Python drills 95 passed; focused firewall 137/37, rejection 76, mode-switch 138 plus cloud owner 30, provider/caller 206 passed. Fifteen Python files, three shell files and embedded logout Python parse; no YAML/JSON/TOML changed. Diff, five-commit secret scan and substantive publication check pass. No live access, credential lookup, main push, merge, codemap edits or test-ledger edits. T5 external publication, exact-head CI and the single rolling comment are recorded on issue #81 without changing the verified head.
+
+## Nightly reliability 2026-10-06
+
+- [x] T1 depends_on: [] Install isolated toolchain, recover trusted checkpoint and open PR inventory, create authorized branch.
+- [x] T2 depends_on: [T1] Audit delta and codemap importers; verify standing sweeps and inherited candidates.
+- [x] T3 depends_on: [T2] Repair verified findings serially with repeated red/green fault injection and focused gates.
+- [x] T4 depends_on: [T3] Run permanent drills, syntax and diff hygiene, substantive publication check.
+- [ ] T5 depends_on: [T4] Publish one draft, watch exact-head CI and post one durable rolling comment.
+
+### Review 2026-10-06
+
+Audit through 39334555: 12 commits, 78 changed paths, 134 paths including codemap callers. Two new and four inherited repairs have repeated fault-injection red/green evidence. Focused suites: cloud admission 156, breadth/callers 102, archive/transport 112, API health 90, scripts health 337, assistant native acceptance 8, relay 13; Chrome chat 14 and modify 4, with screenshot inspection and TypeScript green. Permanent Python drills 95, standing gates 78. Fourteen Python files and two shell files parse; no YAML/JSON/TOML changed. Diff hygiene, six-commit secret scan and substantive publication check pass. R-027 counters remain an open inherited candidate with exact acceptance on issue #81, alongside four operator-only findings and two unconfirmed installation actions; no candidate is closed on inspection. T5 draft publication, registered exact-head CI and the single rolling comment are recorded on issue #81 after delivery, without a bookkeeping-only push. No live access, credentials, main push, merge, codemap or test-ledger edits.
+
+T5 CI repair review: unchanged successful-replacement signal assertion failed in Vitest shard 5; the native request-owner completion control reproduced red twice. Only unfinished transports are aborted during cleanup; completed responses retain successful signal state. Eight native acceptance and fourteen Chrome lifecycle regressions pass without weakening the original assertion. Exact-head CI is restarted after the ordinary repair push; all preceding heads are superseded.

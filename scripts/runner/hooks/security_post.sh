@@ -233,7 +233,7 @@ decide() {
 # Credential assignments, case-insensitive (BSD sed has no I flag): the key
 # may be quoted (JSON) or a hyphenated header name, the value quoted (spaces
 # inside) or led by an auth scheme word. POSIX ERE takes the longest alternative.
-_SECRET_KEY_ERE='[A-Za-z0-9_-]*([Tt][Oo][Kk][Ee][Nn]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss]|[Aa][Uu][Tt][Hh]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll]|[Aa][Pp][Ii][-_]?[Kk][Ee][Yy]|[-_][Kk][Ee][Yy])[A-Za-z0-9_-]*'
+_SECRET_KEY_ERE='[A-Za-z0-9_-]*([Tt][Oo][Kk][Ee][Nn]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss]|[Aa][Uu][Tt][Hh]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll]|[Aa][Pp][Ii][-_]?[Kk][Ee][Yy]|[-_][Kk][Ee][Yy]|[Cc][Oo][Oo][Kk][Ii][Ee]|[Ss][Ee][Ss][Ss]([Ii][Oo][Nn])?[-_]?[Ii][Dd]|_[Ss][Ee][Ss][Ss][Ii][Oo][Nn]|[CcXx][Ss][Rr][Ff])[A-Za-z0-9_-]*'
 _SECRET_SEP_ERE="[\"']?[[:space:]]*[=:][[:space:]]*"
 _SECRET_VALUE_ERE="(\"[^\"]*\"|'[^']*'|([Bb]asic|[Bb]earer|[Dd]igest|[Tt]oken)[[:space:]]+[^[:space:]]+|[^[:space:]]+)"
 
@@ -297,7 +297,7 @@ _sanitize_issue_text() {
   text="${text//claude.ai\/settings\/usage/$'\x01USAGE\x01'}"
   text="$(printf '%s' "$text" | /usr/bin/sed -E \
     -e 's,[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]]+,[REDACTED],g' \
-    -e 's,(^|[^[:alnum:].])/(api|admin)/[A-Za-z0-9._/-]+,\1[REDACTED],g' \
+    -e 's,(^|[^[:alnum:].])/(api|admin)/[^[:space:]]+,\1[REDACTED],g' \
     -e 's,[A-Za-z0-9./_-]+\.(py|ts|tsx|js|mjs|cjs|sh|go|rb|java|json|yml|yaml|toml|md):[0-9]+,[REDACTED],g' \
     -e 's,[Bb]earer [^[:space:]]+,Bearer [REDACTED],g' \
     -e 's#(^|[^[:alnum:]_])(sk-(ant-)?[A-Za-z0-9_-]{20,}|sk_(live|test)_[A-Za-z0-9]{6,}|(xai|nvapi|csk)-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|xox[abpors]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})#\1[REDACTED]#g' \

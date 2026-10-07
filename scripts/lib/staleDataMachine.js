@@ -455,3 +455,10 @@ export function buildRelayHealthDetail(now, lastTickTimestamp, freshness) {
     subscribed_symbols: freshness.subscribedSymbols,
   };
 }
+
+/** NF-3 / REL-318: an open broker socket does not certify requested L1 ticks. */
+export function marketDataIsDegraded({ freshness, now, isMarketHours, operatorHoldActive }) {
+  if (!isMarketHours || freshness.subscribedSymbols === 0) return false;
+  if (operatorHoldActive) return true;
+  return freshness.activeSubscriptions === 0 || now - freshness.lastTickAt > STALE_DATA_THRESHOLD_MS;
+}
