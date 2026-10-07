@@ -605,6 +605,23 @@ class Vault:
 
 
 def open_vault(env: Mapping[str, str]) -> Vault:
+    # DS-2026-10-05-05: in production this process runs third-party CLIs out of
+    # radon-writable directories, so it never holds the master key. The unit
+    # names the broker socket; the broker (radon-subscription-vault, inside
+    # radon-app-runtime) is the only process that opens the store, and it
+    # serves only the four CLI credential slots.
+    socket_path = (env.get("RADON_SUBSCRIPTION_VAULT_SOCKET") or "").strip()
+    if socket_path:
+        try:
+            try:
+                from .subscription_vault import connect_vault
+            except ImportError:  # pragma: no cover - direct script execution
+                from subscription_vault import connect_vault  # type: ignore
+            return connect_vault(socket_path)  # type: ignore[return-value]
+        except VaultUnavailable:
+            raise
+        except Exception as exc:  # noqa: BLE001 - every open failure is fatal here
+            raise VaultUnavailable(f"{type(exc).__name__}: {exc}") from exc
     # The import is INSIDE the guard: a venv rebuilt without `cryptography`, or
     # any import-time error in secret_store.py, is "the store could not be
     # opened" (R-621), not a traceback that skips the sidecar, the heartbeat,
