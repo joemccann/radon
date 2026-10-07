@@ -85,13 +85,13 @@ function makeLeg(overrides: Partial<OrderLeg> = {}): OrderLeg {
   };
 }
 
-function renderTicket(legs: OrderLeg[]) {
+function renderTicket(legs: OrderLeg[], prices = PRICES) {
   return render(
     <MobileOrderTicket
       open
       ticker={TICKER}
       legs={legs}
-      prices={PRICES}
+      prices={prices}
       spot={210}
       portfolio={EMPTY_PORTFOLIO}
       onClose={() => {}}
@@ -173,5 +173,39 @@ describe("MobileOrderTicket quote telemetry", () => {
     expect(
       (screen.getByTestId("mobile-order-ticket-price-input") as HTMLInputElement).value,
     ).toBe("3.40");
+  });
+
+  it.each([
+    ["bid", "-0.90"],
+    ["mid", "-0.15"],
+    ["ask", "0.60"],
+  ])("preserves the signed risk-reversal %s in the preset and selected limit", (side, value) => {
+    renderTicket([
+      makeLeg({ action: "SELL", quantity: 25 }),
+      makeLeg({ id: PUT_KEY, action: "BUY", right: "P", strike: 190, quantity: 25 }),
+    ], {
+      [CALL_KEY]: makePrice(CALL_KEY, 8.10, 8.85),
+      [PUT_KEY]: makePrice(PUT_KEY, 7.95, 8.70),
+    });
+
+    expect(valueFor(side.toUpperCase())).toBe(`$${value}`);
+    const preset = screen.getByTestId(`mobile-order-ticket-quote-${side}`);
+    expect(preset.textContent).toBe(`$${value}`);
+    fireEvent.click(preset);
+    expect((screen.getByTestId("mobile-order-ticket-price-input") as HTMLInputElement).value).toBe(value);
+  });
+
+  it.each([
+    ["bid", "-2.40"],
+    ["mid", "-2.10"],
+    ["ask", "-1.80"],
+  ])("preserves the credit-combo %s when tapping its preset", (side, value) => {
+    renderTicket([
+      makeLeg({ action: "SELL" }),
+      makeLeg({ id: PUT_KEY, action: "BUY", right: "P", strike: 190 }),
+    ]);
+    fireEvent.click(screen.getByTestId(`mobile-order-ticket-quote-${side}`));
+    expect((screen.getByTestId("mobile-order-ticket-price-input") as HTMLInputElement).value).toBe(value);
+    expect(screen.getByTestId(`mobile-order-ticket-quote-${side}`).textContent).toBe(`$${value}`);
   });
 });
