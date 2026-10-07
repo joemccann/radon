@@ -87,8 +87,9 @@ restarting, not from the tab. Deleting a stored secret does not unset the
 already-exported value in the running process — it takes effect at the next
 FastAPI restart.
 
-The LLM regime collector runs as a separate systemd process, so
-`radon-ai-cycle.service` loads the same encrypted store and master key directly.
+The LLM regime collector runs as a non-root container dispatched by the
+root-owned `radon-app-runtime`. Its systemd unit loads the encrypted master
+key for protected staging, never for host checkout or virtualenv execution.
 Its Profile group exposes OpenRouter, Artificial Analysis (including the fixed
 model basket), Vast.ai, EIA and the SEC contact user agent. Stored values win
 over `/etc/radon/env` on the collector's next run.
@@ -187,7 +188,9 @@ runs an LLM consumer (`radon-api`, `radon-newsfeed`, `radon-research`,
 `os.homedir()` resolve to them. Next.js hosts `/api/newsfeed/share` and
 `/api/assistant`; excluding it (2026-09-19) 502'd every share rewrite with
 `Missing Anthropic subscription`. Never the whole home directory, and never
-into the relay. Antigravity is the one read-write grant: `agy` refreshes its
+into the relay. `radon-api` holds the secret-store key group, so it never
+gets `~/.local/bin`: its antigravity rung runs the image's integrity-pinned
+`/usr/local/bin/agy` (`docker/app/vendor-clis/`). Antigravity is the one read-write grant: `agy` refreshes its
 token and writes logs and project state on every run, so
 `/home/radon/.gemini/antigravity-cli` and `/home/radon/.gemini/config` (Google's
 fixed paths) are bound read-write into `radon-api`, `radon-research` and
@@ -222,10 +225,11 @@ plaintext copy of the master key at
 `/home/radon/radon/data/secret_store/secret_store.key`, owned by `radon`, named
 by `RADON_SECRET_STORE_KEY_FILE` in `/etc/radon/env` (the seed the credstore
 was encrypted from). Remove it with the cutover below. Second, the `radon-api`
-container also gets `/home/radon/.local/bin` (the `agy` CLI its antigravity
-rung runs) and a writable `~/.gemini/antigravity-cli`, both radon-writable,
-while it holds the key group. A replaced `agy` runs with the key readable.
-That gap stays open until the API's agy rung moves out of the key-holding
+container gets a writable, radon-writable `~/.gemini/antigravity-cli` while it
+holds the key group. The `agy` binary itself is image-owned and
+integrity-pinned (host `~/.local/bin` is not mounted into the API), but agy
+state the host account can rewrite still reaches a key-holding process. That
+gap stays open until the API's agy rung moves out of the key-holding
 container.
 
 **Secret-store key cutover (operator, once, after 16:00 ET and only once the

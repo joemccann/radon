@@ -2,7 +2,24 @@
 # drop-in is installed. Default remains host binaries.
 # Build from repo root:
 #   cp docker/app/.dockerignore .dockerignore && docker build -f docker/app/Dockerfile.python .
+# DS-2026-10-05-05: probes use image-owned vendor binaries, never host executables.
+# npm's lock verifies every payload; arbitrary lifecycle hooks stay disabled.
+FROM node:22.22.0-bookworm-slim@sha256:dd9d21971ec4395903fa6143c2b9267d048ae01ca6d3ea96f16cb30df6187d94 AS vendor-clis
+WORKDIR /opt/radon-clis
+COPY docker/app/vendor-clis/package.json docker/app/vendor-clis/package-lock.json ./
+RUN npm ci --ignore-scripts --include=optional --no-audit --no-fund
+COPY docker/app/vendor-clis/install-native.cjs ./
+RUN node install-native.cjs
+
 FROM python:3.13-slim
+
+COPY --from=vendor-clis /usr/local/bin/node /usr/local/bin/node
+COPY --from=vendor-clis /opt/radon-clis /opt/radon-clis
+COPY docker/app/vendor-clis/antigravity.json docker/app/vendor-clis/install-antigravity.py /opt/radon-clis/
+RUN python /opt/radon-clis/install-antigravity.py \
+    && for cli in claude codex grok agy; do ln -s /opt/radon-clis/bin/$cli /usr/local/bin/$cli; done \
+    && chmod -R a-w /opt/radon-clis
+ENV DISABLE_AUTOUPDATER=1
 
 RUN groupadd --gid 1000 radon \
     && useradd --system --uid 1000 --gid 1000 --create-home --home-dir /home/radon --shell /usr/sbin/nologin radon \
@@ -41,6 +58,21 @@ COPY scripts ./scripts
 RUN install -d -o radon -g radon -m 0755 /home/radon/radon/logs
 
 USER radon
+
+# Run by GitHub's image build: verify real native payloads and root ownership.
+RUN python - <<'PY'
+import os
+import subprocess
+from pathlib import Path
+
+for cli, version in {"claude": "2.1.292", "codex": "0.160.1", "grok": "1.0.46", "agy": "1.3.1"}.items():
+    executable = Path("/usr/local/bin", cli).resolve()
+    assert executable.stat().st_uid == 0, executable
+    assert not os.access(executable, os.W_OK), executable
+    assert not os.access(executable.parent, os.W_OK), executable.parent
+    result = subprocess.run([cli, "--version"], capture_output=True, text=True, timeout=30, check=True)
+    assert version in result.stdout + result.stderr, (cli, result.stdout, result.stderr)
+PY
 
 # Monitor log permissions smoke: fail the build before an unwritable image ships.
 RUN python - <<'PY'

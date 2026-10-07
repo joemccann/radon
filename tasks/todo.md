@@ -66,6 +66,30 @@ Dependency graph: T1 -> T2 -> T3.
 
 Review: Citadel Rubner GMI always reaches the feed. VERIFY stays hard per candidate. Zero published posts after VERIFY yields one grounded summary, never an unverified figure. Held TTL skips always_publish rows. EvidenceError on the host is classified with its message; do not mutate the VPS from this branch.
 
+## DS-2026-10-05-05 trusted runtime isolation
+- [x] T1 Inspect immutable-image service dependencies and runtime contracts. depends_on: []
+- [x] T2 Containerize four secret-store jobs through root-owned runtime and protected credential staging. depends_on: [T1]
+- [x] T3 Add regression coverage for isolation, unit wiring, commands, mounts, and cleanup. depends_on: [T1, T2]
+- [x] T4 Document design and create PR. depends_on: [T2, T3]
+- [ ] T5 Verify all exact-head GitHub checks and send the accepted green notification. depends_on: [T4]
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5; T1 -> T3; T2 -> T4.
+
+### Review
+- PR: https://github.com/joemccann/radon/pull/943, branch codex/secrets-trusted-runtime.
+- Four services and their timers are paired control-plane artifacts; immutable-image commands preserve existing cadence, timeout/exit behavior and persistent state.
+- Subscription probes use locked vendor binaries and auth-only temporary homes, preserving token rotation without importing host hooks or configuration.
+- Root directory preparation pins ancestor descriptors; the root subscription dispatcher does not re-own shared StateDirectory state.
+- Runtime and image regression coverage added; static shell syntax, Python parsing and diff whitespace checks passed. No local suites or builds run.
+- CI repair commits update deployment hashes, metadata cardinality, documentation contracts, auto-sync membership and health-writer discovery.
+- Final static review found no additional actionable issues. Merged main while preserving both task records. Exact PR head 50c8dc0fcc4e88460abe412f103fa9a38add2659: 32 checks passed, 7 non-applicable skipped, 0 pending/failing; both native image builds passed.
+- One normal-priority Pushover notification titled radon PR green was accepted (status=1). The PR notification has been delivered once; do not send a duplicate. A newer-main integration now requires exact-head CI again.
+
+### Rebase onto #932 (2026-10-07)
+- [x] T6 Merge origin/main (#932, 6198bd51); keep #932's drop-ins, broker, staging, manifest and tests. depends_on: [T5]
+- [x] T7 Keep only additive hardening: pinned image CLIs, no host ~/.local/bin in radon-api, ancestor-pinned private dirs, fail-closed group check, extra runtime tests. depends_on: [T6]
+- [ ] T8 Exact-head CI green. depends_on: [T7]
+- Dropped as duplicate or superseded by #932: base-unit User=root rewrites, base unit/timer control-plane and auto-sync moves, containerized subscription-tokens and its auth-only CLI homes, duplicate runtime cases and command/parity tests.
+
 # Task: Mount Antigravity in App Container Runtime (2026-09-28)
 
 - [x] T1 depends_on: [] Failing test in cloud/tests/test_app_runtime.py for .gemini and .local/bin container mounts.

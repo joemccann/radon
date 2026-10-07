@@ -112,7 +112,10 @@ class TestAppDockerfilesExist:
 class TestPythonImage:
     def test_base_and_cmd(self) -> None:
         text = PYTHON_DF.read_text(encoding="utf-8")
-        assert _from_images(text) == ["python:3.13-slim"]
+        images = _from_images(text)
+        assert images[-1] == "python:3.13-slim"
+        assert len(images) == 2
+        assert images[0].startswith("node:22.22.0-bookworm-slim@sha256:")
         assert "COPY requirements.txt" in text
         assert "scripts/requirements-api.txt" in text
         assert "WORKDIR /home/radon/radon" in text

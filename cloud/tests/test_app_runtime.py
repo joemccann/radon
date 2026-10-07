@@ -1532,7 +1532,7 @@ def test_run_api_binds_subscription_credential_dirs_readonly(tmp_path: Path) -> 
     for agy_dir in (".gemini/antigravity-cli", ".gemini/config"):
         assert f"{home}/{agy_dir}:/home/radon/{agy_dir}:rw" in log
     assert f"{home}/.gemini:" not in log  # retired Gemini CLI creds stay out
-    assert f"{home}/.local/bin:/home/radon/.local/bin:ro" in log
+    assert f"{home}/.local/bin:" not in log
     assert ".claude:" not in log  # absent on this host: not mounted
     assert "HOME=/home/radon" in log
 
