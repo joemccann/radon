@@ -8999,6 +8999,15 @@ T5 CI repair review: unchanged successful-replacement signal assertion failed in
 - [x] T1 Inspect immutable-image service dependencies and runtime contracts. depends_on: []
 - [x] T2 Containerize four secret-store jobs through root-owned runtime and protected credential staging. depends_on: [T1]
 - [x] T3 Add regression coverage for isolation, unit wiring, commands, mounts, and cleanup. depends_on: [T1, T2]
-- [ ] T4 Document design, create PR, verify all exact-head GitHub CI and notify. depends_on: [T2, T3]
-Dependency graph: T1 -> T2 -> T3 -> T4; T1 -> T3; T2 -> T4.
-Review: runtime and credential CLI boundary reviewed; immutable CLI image integration and exact-head GitHub validation pending. Local suites prohibited.
+- [x] T4 Document design and create PR. depends_on: [T2, T3]
+- [ ] T5 Verify all exact-head GitHub checks and send the accepted green notification. depends_on: [T4]
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5; T1 -> T3; T2 -> T4.
+
+### Review
+- PR: https://github.com/joemccann/radon/pull/943, branch codex/secrets-trusted-runtime.
+- Four services and their timers are paired control-plane artifacts; immutable-image commands preserve existing cadence, timeout/exit behavior and persistent state.
+- Subscription probes use locked vendor binaries and auth-only temporary homes, preserving token rotation without importing host hooks or configuration.
+- Root directory preparation pins ancestor descriptors; the root subscription dispatcher does not re-own shared StateDirectory state.
+- Runtime and image regression coverage added; static shell syntax, Python parsing and diff whitespace checks passed. No local suites or builds run.
+- CI repair commits update deployment hashes, metadata cardinality, documentation contracts, auto-sync membership and health-writer discovery.
+- Final static review found no additional actionable issues. GitHub has not registered the expected suites at 59c4ff8b yet; completion remains pending exact-head green checks.
