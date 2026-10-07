@@ -3381,6 +3381,49 @@ fail with `FileNotFoundError: /home/radon/.local/bin/grok`.** First seen
 - **Code:** `scripts/grok_upgrade.py` (`promote_live_symlink`, `main`),
   `cloud/services/radon-grok-upgrade.service`.
 
+## api-unit-restart-operator-timeout
+
+**`radon unit restart radon-api.service` exits 70 while the API restart
+succeeds, and the caller unit pages P1 `Result=exit-code` (`NRestarts=0`).**
+Peak: 2026-10-06 20:15Z, page `77becdbdfc506a32c447c10283efe6b4`. Transient
+unit `radon-trusted-peers-restart.service` (not in the repo), description
+"Restart radon-api after close to load RADON_TRUSTED_TAILNET_PEERS".
+
+- **Mechanism:** ExecStart was `/usr/local/bin/radon unit restart radon-api.service`.
+  `UNIT_ACTION_TIMEOUT_SECS` defaulted to 20, and the `unit` verb's deploy-lock
+  wrapper defaulted to 40. `run_systemctl_bounded` treats systemctl exit 124
+  or 137 as exit 70 (`REFUSING unit action: systemctl timed out`). The API
+  container stops through `radon-app-runtime halt` with a 30s grace, then
+  starts again. This run exited 70 at 20.5s (20:10:00Z to 20:10:20Z).
+  `radon-api` went inactive at 20:10:27Z and active at 20:11:03Z
+  (`Result=success`). The transient unit stayed `failed`. It is `Type=simple`,
+  so the oneshot exit-code latch does not downgrade the re-page. IB was
+  unused. `/health/lite` stayed authenticated and `:8330` `overall_state`
+  stayed `up`.
+- **Detection:** `systemctl show` on the caller is `exit-code` / `NRestarts=0`
+  / `ExecMainStatus=70` / `Transient=yes`, ExecStart is `radon unit restart`,
+  and the target unit's `ActiveEnterTimestamp` is after the caller's
+  `ExecMainExitTimestamp` with `Result=success`.
+- **Discriminating check:** exit 70 plus a target that becomes active. A
+  target that stays inactive is a real stop/start failure, still P1.
+  `Result=signal` or exit 143 inside a deploy window is
+  `deploy-stop-clean-oneshot-signal`. If `/health/lite` is down too, stand
+  down and treat it as the API, not this wrapper. Do not `radon restart`
+  (that cycles Gateway).
+- **Remediation (code):** the `unit` verb waits `UNIT_VERB_TIMEOUT_SECS`
+  (225s: longest app-unit `TimeoutStopSec` 120 plus default `TimeoutStartSec`
+  90 plus 15s slack). The lock wrapper for that verb is 240s so it does not
+  SIGTERM the child first. Other verbs keep their shorter bounds. Do not
+  restart the API again; it is already up. `systemctl reset-failed` on the
+  transient caller clears the latched failed unit. The control daemon's
+  panel restart cap (`UNIT_TIMEOUT_S` 60s) is a separate caller.
+- **Regression:**
+  `cloud/tests/test_operator_unit_restart_budget.py`
+  (`test_unit_verb_budget_covers_stop_then_start`,
+  `test_unit_restart_that_outlives_its_bound_exits_70`).
+- **Code:** `cloud/scripts/operator-radon.sh` (`UNIT_VERB_TIMEOUT_SECS`,
+  `unit` verb `ACTION_TIMEOUT_SECS`).
+
 ## Grok auto-response on iPhone P1 pages
 
 Canonical: [`grok-page-responder.md`](grok-page-responder.md).
