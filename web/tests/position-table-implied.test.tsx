@@ -195,7 +195,7 @@ describe("PositionTable — Implied column", () => {
       [`AMD_${expiry.replace(/-/g, "")}_295_P`]: pd({ impliedVol: 0.45 }),
       [`AMD_${expiry.replace(/-/g, "")}_290_P`]: pd({ impliedVol: 0.45 }),
     }} />);
-    fireEvent.click(screen.getByText("AMD").closest("tr")!);
+    fireEvent.click(screen.getByRole("button", { name: "Expand legs for AMD" }));
     const cells = Array.from(document.querySelectorAll('td[title^="Implied market value"]'));
     expect(cells).toHaveLength(3);
     expect(cells[1].textContent).toMatch(/^\$/);
