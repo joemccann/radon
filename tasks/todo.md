@@ -8998,6 +8998,17 @@ Findings and value gate before edits:
 - DOC-173 P1: release operator -> plan deployment without app images -> omit a required exact-SHA gate or diagnose the wrong execution plane -> .github/workflows/ci.yml:1163 and cloud/scripts/deploy.sh:1823 -> cloud/CLAUDE.md:35-41,261 and cloud/README.md:deployment copy -> cloud/CLAUDE.md. Reader/action: identify mandatory release artifacts; harm: blocked recovery/deployment. Prose distinguishes code defaults from installed per-unit execution and directs release diagnostics to enforced gates. Proof: workflow dependency closure, image-reuse contracts and installed drop-in admission source; live installation is not inferred.
 
 Review before publication: 11 commits / 78 changed paths audited through 393345550d521548808d9884be0e5ab10ae48854. Merged #914 closes DOC-164 through DOC-168; DOC-159 retains operator-only effective local cycle/timezone verification. DOC-169 through DOC-173 correct topology discoverability, scoped log diagnosis, uncertain firewall recovery, obsolete cloud instructions and required image/environment admission. Five new owner contracts failed before corrections; closing docs/path-filter 167 passed and focused cloud 101 passed. All 62 added/changed local links and anchors resolve; no external links added. Safe parser/help, Python AST, whitespace and redacted secret-pattern checks pass; no machine config formats changed. Open #922 owns cloud admission and breadth runtime repairs, #924 owns GPU/browser acceptance, #921 owns workflow experiment restoration, #923 owns codemap. No runtime behavior, live systems, credential reads, notification actions, codemap edits or enforcement weakening. Draft #925 is published. Final source review removed unsupported approval wording from owner routing; the strengthened overview case failed before correction and passes afterward. Five focused commits and 63 resolved local links are the closing state; latest-head CI and the single rolling comment remain pending. External receipts belong on issue #202.
+## Nightly testing 2026-10-06
+
+- [x] T1 depends_on: [] Build isolated toolchain, recover trusted checkpoint and create authorized branch.
+- [x] T2 depends_on: [T1] Audit merged delta and inverse consumers; standing gates and three changed-file repetitions; reconcile historical findings.
+- [x] T3 depends_on: [T2] Verify and repair findings serially with red/green evidence and per-finding commits.
+- [x] T4 depends_on: [T3] Three serial closing full-gate rounds, base cloud comparison and hygiene review.
+- [ ] T5 depends_on: [T4] Publish substantive draft if warranted, await exact-head CI and post one rolling issue comment.
+
+### Review 2026-10-06
+
+Audit complete through 39334555: 11 commits / 78 paths. T-536/T-537 have mutation red/green evidence, separate test-only commits and unchanged production implementations. Three serial closing rounds each pass 14,251 Python, 10,396 Vitest and 2,624 cloud cases; audited-base cloud passes 2,616 and all FAILED-list diffs are empty. Historical prefixes, frozen paths, syntax, whitespace and secret checks pass. No production access, credentials, unauthorized branch push, merge or notification. Two browser acceptances remain operator-only. T5 external publication, exact-head CI and the single rolling comment are recorded on issue #83 without changing the verified head; this pre-publication checklist does not claim future green delivery.
 ## Nightly reliability 2026-10-06
 
 - [x] T1 depends_on: [] Install isolated toolchain, recover trusted checkpoint and open PR inventory, create authorized branch.
@@ -9011,3 +9022,11 @@ Review before publication: 11 commits / 78 changed paths audited through 3933455
 Audit through 39334555: 12 commits, 78 changed paths, 134 paths including codemap callers. Two new and four inherited repairs have repeated fault-injection red/green evidence. Focused suites: cloud admission 156, breadth/callers 102, archive/transport 112, API health 90, scripts health 337, assistant native acceptance 8, relay 13; Chrome chat 14 and modify 4, with screenshot inspection and TypeScript green. Permanent Python drills 95, standing gates 78. Fourteen Python files and two shell files parse; no YAML/JSON/TOML changed. Diff hygiene, six-commit secret scan and substantive publication check pass. R-027 counters remain an open inherited candidate with exact acceptance on issue #81, alongside four operator-only findings and two unconfirmed installation actions; no candidate is closed on inspection. T5 draft publication, registered exact-head CI and the single rolling comment are recorded on issue #81 after delivery, without a bookkeeping-only push. No live access, credentials, main push, merge, codemap or test-ledger edits.
 
 T5 CI repair review: unchanged successful-replacement signal assertion failed in Vitest shard 5; the native request-owner completion control reproduced red twice. Only unfinished transports are aborted during cleanup; completed responses retain successful signal state. Eight native acceptance and fourteen Chrome lifecycle regressions pass without weakening the original assertion. Exact-head CI is restarted after the ordinary repair push; all preceding heads are superseded.
+
+## PR #924 CI repair 2026-10-07
+
+- [x] T1 depends_on: [] Inspect exact-head CI failure and isolated relay harness.
+- [x] T2 depends_on: [T1] Repair the harness surgically and inspect syntax/diff.
+- [ ] T3 depends_on: [T2] Push to existing PR, await every applicable exact-head CI check, and deliver one accepted Pushover notification.
+
+Dependency graph: T1 -> T2 -> T3. No local test suites; use GitHub runners.

@@ -11161,3 +11161,49 @@ T-535 focused pre-commit gate: 42 passed with `-n auto`. Actual remaining_timeou
 The serial detached-base comparison at 72e09ffb passes 2,561 cases / 7 skips with the identical selected toolchain. Its sorted FAILED list is empty; the head adds 11 firewall cases without changing a base failure. The comparison worktree was removed after its foreground suite exited. Nine closing gates completed consecutively with zero failures. Full outputs and per-gate receipts are retained separately for each round; no failed invocation is relabeled green.
 
 The delta's changed share-pnl browser spec needs three production-build replays when the PR's web path filter skips Playwright. No local browser, screenshot or 390px result is claimed. Inherited mobile-header, admin-controls and unverified vol-skew toast checks remain exact operator-only actions, not speculative findings. External draft/CI/checkpoint completion receipts belong in the single rolling issue #83 comment after exact-head CI.
+
+## Delta audit 2026-10-06
+
+Range: 72e09ffb18ceba5ebf485b66ee052b00fc7956c6..393345550d521548808d9884be0e5ab10ae48854, 11 commits / 78 paths. Latest trusted checkpoint: October 5 comment by radon-runner-bot (COLLABORATOR) on issue #83. No open testing PR exists; numbering continues after T-535.
+
+Architecture and incoming codemap edges were read before rg confirmation of dynamic, subprocess and direct importing tests. Changed test inventory: 14 Python, 10 cloud and two Vitest files. Inverse review covered the order-rejection/digest paths, source ladders, host rename callers, browser launch, firewall replacement and breadth cache consumers. Shared conftest changes affect the wider Python suite, which is covered by the full rounds rather than represented as a narrow fixture-only repeat.
+
+### T-536 — P1: GPU publisher tests miss extra trusted keys and second-vendor bypass
+
+Evidence: `cloud/tests/test_gpu_bootstrap.py:158` only supplies an invalid first-vendor key; `:169` checks the second vendor through source strings. The actual primary-key admission is `cloud/gpu/bootstrap.sh:90`, with the second vendor invoked at `:111`. A contains-match admitting a pinned-plus-foreign primary, and a Tailscale-only validation bypass, each pass all 45 original tests. Product behavior is correct today; the defect is missed regression detection.
+
+Acceptance: run the actual repository installer through fake curl/gpg/install, refuse foreign or mixed primaries and a pinned subkey without a primary for both vendors before their install, and admit each exact publisher with ordinary subkeys. Inspect exact installed destinations and rendered signed-by repositories independently. Both deliberate defects must fail.
+
+### T-537 — P1: Chromium isolation checks only one forbidden variable
+
+Evidence: `web/tests/newsfeed-scraper.test.ts:139` checks absence of TURSO_AUTH_TOKEN and preservation of HOME; `scripts/newsfeed/browser.js:30` owns the allowlist delivered by `:55`. Replacing the allowlist with an ambient-environment copy that deletes only that one variable passes all 36 original browser tests, admitting provider credentials and future unknown values. Product behavior is correct today.
+
+Acceptance: observe every actual fake-launch request with a sealed synthetic process environment in normal, automatic sandbox-retry and explicit no-sandbox modes; preserve required runtime values, omit absent runtime values, and exclude database/provider/unknown/control variables. The blacklist mutation must fail. No actual browser or credential lookup.
+
+### Standing sweeps and inherited inventory
+
+Standing gates: 14,251 Python passed / two skips / 23 subtests; 10,390 Vitest passed across 1,048 files; 2,616 cloud passed / seven skips. Every changed-file repetition (three serial rounds) passes 442 Python, 56 Vitest and 271 cloud cases. All full outputs are retained separately. Toolchain selection uses the venv Python, Homebrew Bash/OpenSSL and installed Caddy, with no repo compatibility workaround.
+
+Gate discovery remains broad at `pyproject.toml:31` and `vitest.config.ts:45`. The CI shard rebalance at `.github/workflows/ci.yml:350` retains the recursive union contracts (`scripts/tests/test_ci_deploy_concurrency.py:742`, `:761`). No threshold, measured surface, exclusion, new unlinked skip/xfail or browser-curation change was found.
+
+Historical OPEN/NEW_FINDINGS rows were reconciled with subsequent resolutions: T-488/T-490/T-492/T-493/T-495/T-496 and the T-497/T-499/T-500/T-502/T-503/T-504/T-506 repairs retain accepted closures. The six-site constructor inventory at `scripts/tests/test_service_registration_completeness.py:488` remains a bounded static-analysis limitation; changed UW paths have executable health tests at `scripts/tests/test_uw_ladder_health.py:15`. Calendar/Day Move, spread timestamp and payload notes remain deduplicated against T-210/T-386/T-217/T-079. No still-open verified T finding was carried by the checkpoint. Marketing-header and admin-preflight browser replay remain operator-only; the prior volatility replay is resolved in the trusted checkpoint.
+
+Audited through: 393345550d521548808d9884be0e5ab10ae48854 on 2026-10-06 — 2 new findings
+
+## Remediation 2026-10-06
+
+**T-536 — DONE.** `cloud/tests/test_gpu_repository_admission.py:89` executes the real installer and observes each vendor's rejected/accepted installation boundary. Contains-match mutation: two failed / six passed; Tailscale-only bypass: three failed / five passed. Each mutation passed all 45 old tests first. Restored focused gate: 53 passed. Both vendor admissions, mixed primary rejection, missing-primary rejection and legitimate subkeys are covered; no blanket shell coverage percentage is claimed. Source restored byte-for-byte.
+
+**T-537 — DONE.** `web/tests/newsfeed-browser-environment.test.ts:51` runs the real browser module in child processes with entirely synthetic environments and a fake launcher. All 17 runtime keys, their absence in sparse environments, provider/database/unknown/control-variable exclusion, normal/retry/disabled requests and context/browser cleanup are observed. The blacklist mutation passes the 36 original cases, but the new sealed-boundary tests reject it with six failed / 36 passed. Restored focused gate: 42 passed. Source restored byte-for-byte; no browser, runtime cookie file or workstation credential is accessed.
+
+### Closing verification 2026-10-06
+
+| Round | Root Python | Root Vitest | Cloud |
+|---|---|---|---|
+| 1 | 14,251 passed; 2 skipped; 23 subtests | 10,396 passed; 1,049 files | 2,624 passed; 7 skipped |
+| 2 | 14,251 passed; 2 skipped; 23 subtests | 10,396 passed; 1,049 files | 2,624 passed; 7 skipped |
+| 3 | 14,251 passed; 2 skipped; 23 subtests | 10,396 passed; 1,049 files | 2,624 passed; 7 skipped |
+
+Three consecutive full-gate rounds ran serially with separate complete logs. The identical environment-only toolchain in a detached worktree at audited base 393345550d521548808d9884be0e5ab10ae48854 passes 2,616 cloud cases / seven skips. Sorted base and all three head FAILED lists are empty; each comparison has zero added / zero removed failures. The owned comparison worktree was removed after its foreground suite exited.
+
+Review: two P1 test gaps have deliberate-defect red/green evidence and separate commits bb814a18 / 85d8f12e. All product source is restored byte-for-byte. Existing ledger/task prefixes, frozen PART A, reliability ledgers and codemap files are preserved. All extant delta syntax passes: 36 Python / nine shell / four JSON / two YAML files; no changed TOML. Whitespace and redacted secret scans pass. No test, tolerance, skip, exclusion or coverage ratchet was weakened. The two carried browser acceptances remain operator-only; no local browser screenshots are claimed. Publication, exact-head CI and the single issue checkpoint are external receipts recorded on issue #83 without changing the reported head. Runner owns notifications.

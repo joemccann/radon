@@ -447,7 +447,7 @@ async def test_rel303_lite_to_relay_requires_confirmed_release(monkeypatch):
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {pathToFileURL} from 'node:url';
-const {root, payloads} = JSON.parse(fs.readFileSync(0, 'utf8'));
+const {root, payloads} = JSON.parse(process.argv[1]);
 const machine = await import(pathToFileURL(root + '/scripts/lib/staleDataMachine.js'));
 const source = fs.readFileSync(root + '/scripts/ib_realtime_server.js', 'utf8');
 const start = source.indexOf('async function refreshOperatorHold(');
@@ -455,7 +455,9 @@ if (start < 0) throw Error('poller missing');
 const context = vm.createContext({...machine, operatorHoldActive: false, AbortSignal,
   IB_HEALTH_LITE_URL: 'http://mock/health/lite', console: {log(){}},
   fetch: async () => ({ok: true, json: async () => payloads.shift()})});
-vm.runInContext(source.slice(start, source.indexOf('\n}', start) + 2), context);
+const end = source.indexOf('\n}', start);
+if (end < start) throw Error('poller boundary missing');
+vm.runInContext(source.slice(start, end + 2), context);
 const seen = [];
 for (let i = 0; i < 3; i++) {
   await vm.runInContext('refreshOperatorHold()', context);
@@ -463,8 +465,10 @@ for (let i = 0; i < 3; i++) {
 }
 console.log(JSON.stringify(seen));
 '''
-    result = subprocess.run([node, '--input-type=module', '-e', harness],
-                            input=json.dumps({'root': str(root), 'payloads': payloads}),
+    # Pass the small synthetic payload directly; the child needs no stdin pipe.
+    result = subprocess.run([node, '--input-type=module', '-e', harness,
+                             json.dumps({'root': str(root), 'payloads': payloads})],
+                            stdin=subprocess.DEVNULL,
                             text=True, capture_output=True, timeout=10, check=True,
                             env={'PATH': str(Path(node).parent)})
     assert json.loads(result.stdout) == [True, True, False]
