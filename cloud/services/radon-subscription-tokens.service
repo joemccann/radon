@@ -18,11 +18,8 @@ Environment=RADON_DB_NO_REPLICA=1
 Environment=RADON_SECRET_STORE_PATH=/home/radon/radon/data/secret_store/secrets.db
 # Root dispatches the release image; CLI execution and credentials stay isolated.
 LoadCredentialEncrypted=radon-secret-store-key:/etc/credstore.encrypted/radon-secret-store-key
-# The sidecar /var/lib/radon/subscription-tokens/state.json carries the page
-# cooldowns and the consecutive-error streak. Without this the directory is not
-# owned by radon and every run silently loses both.
-StateDirectory=radon
-StateDirectoryMode=0750
+# The runtime prepares only the subscription sidecar directory as radon.
+# StateDirectory=radon here would recursively re-own shared state as root.
 ExecStart=/usr/local/sbin/radon-app-runtime run %n
 ExecStop=/usr/local/sbin/radon-app-runtime halt %n 30
 ExecStopPost=/usr/local/sbin/radon-app-runtime stop %n

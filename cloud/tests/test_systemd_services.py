@@ -330,14 +330,12 @@ class TestSubscriptionTokens:
         svc = unit(self.SERVICE)["Service"]
         assert svc["successexitstatus"] == "1"
 
-    def test_owns_the_state_directory_its_sidecar_lives_in(self, unit):
-        # The sidecar under /var/lib/radon carries the 12h page cooldowns and
-        # the consecutive-error streak. Without an owned state directory the
-        # write fails and both reset on every run, so a needs_reauth provider
-        # would page every 30 minutes forever.
+    def test_runtime_owns_only_the_subscription_state_directory(self, unit):
         svc = unit(self.SERVICE)["Service"]
-        assert svc["statedirectory"] == "radon"
-        assert svc["statedirectorymode"] == "0750"
+        # A root StateDirectory=radon recursively changes shared state ownership.
+        assert "statedirectory" not in svc
+        runtime = (Path(__file__).resolve().parents[1] / "scripts/radon-app-runtime.sh").read_text()
+        assert 'prepare_private_dir "$ids" "${STATE_DIR}/subscription-tokens"' in runtime
 
     def test_container_lifecycle_is_owned_by_systemd(self, unit):
         svc = unit(self.SERVICE)["Service"]
