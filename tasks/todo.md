@@ -9011,7 +9011,7 @@ T5 CI repair review: unchanged successful-replacement signal assertion failed in
 - [x] T2 Containerize four secret-store jobs through root-owned runtime and protected credential staging. depends_on: [T1]
 - [x] T3 Add regression coverage for isolation, unit wiring, commands, mounts, and cleanup. depends_on: [T1, T2]
 - [x] T4 Document design and create PR. depends_on: [T2, T3]
-- [ ] T5 Verify all exact-head GitHub checks and send the accepted green notification. depends_on: [T4]
+- [x] T5 Verify all exact-head GitHub checks and send the accepted green notification. depends_on: [T4]
 Dependency graph: T1 -> T2 -> T3 -> T4 -> T5; T1 -> T3; T2 -> T4.
 
 ### Review
@@ -9021,7 +9021,8 @@ Dependency graph: T1 -> T2 -> T3 -> T4 -> T5; T1 -> T3; T2 -> T4.
 - Root directory preparation pins ancestor descriptors; the root subscription dispatcher does not re-own shared StateDirectory state.
 - Runtime and image regression coverage added; static shell syntax, Python parsing and diff whitespace checks passed. No local suites or builds run.
 - CI repair commits update deployment hashes, metadata cardinality, documentation contracts, auto-sync membership and health-writer discovery.
-- Final static review found no additional actionable issues. Merged current main while preserving both task records; completion remains pending exact-head green checks.
+- Final static review found no additional actionable issues. Merged main while preserving both task records. Exact PR head 50c8dc0fcc4e88460abe412f103fa9a38add2659: 32 checks passed, 7 non-applicable skipped, 0 pending/failing; both native image builds passed.
+- One normal-priority Pushover notification titled radon PR green was accepted (status=1). Final evidence is recorded in the PR body; this local review update does not change the verified source head.
 
 ## PR #924 CI repair 2026-10-07
 
