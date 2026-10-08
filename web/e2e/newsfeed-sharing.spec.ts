@@ -457,7 +457,7 @@ for (const width of [1440, 393]) {
       await expect(caption).toHaveValue(expected);
       await panel.getByRole("button", { name: "Copy caption", exact: true }).click();
       await expect.poll(() => page.evaluate(() => (window as unknown as { shareCapture: ShareCapture }).shareCapture.copied)).toBe(expected);
-      await panel.screenshot({ path: testInfo.outputPath(`morgan-stanley-full-x-caption-${width}.png`) });
+      await panel.screenshot({ path: testInfo.outputPath(`morgan-stanley-full-x-share-${width}.png`) });
       await share.click();
       await share.click();
       await expect(caption).toHaveValue(expected);
