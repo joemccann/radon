@@ -1,3 +1,467 @@
-# Train-only. Never install into the runtime / production venv.
-# Used by scripts/newsfeed/slm/train.sh on the Mini or a CUDA host.
-llamafactory[torch,metrics]>=0.9.3
+# Train-only lock. Never install into the runtime / production venv.
+# pip install -r scripts/newsfeed/slm/requirements-slm.txt
+#
+# Resolved with uv 0.12.9, Python 3.13, x86_64-manylinux_2_28, against
+# LLaMA-Factory 0.9.5's declared ranges intersected with
+# transformers>=5.2.0 (native Qwen3_5ForConditionalGeneration; 5.1.0 lacks
+# the class) and bitsandbytes>=0.39.0 (LLaMA-Factory's 4-bit QLoRA check).
+# 0.9.5 has no [torch,metrics] extra. torch, peft, trl, accelerate, and
+# datasets are core dependencies. Its bounds:
+#   transformers>=4.55.0,<=5.6.0,!=4.52.0,!=4.57.0
+#   peft>=0.18.0,<=0.18.1
+#   trl>=0.18.0,<=0.24.0
+#   accelerate>=1.3.0,<=1.11.0
+#   datasets>=2.16.0,<=4.0.0
+#   torch>=2.4.0
+#
+# Isolated from requirements.txt. The fleet pins tokenizers==0.23.1 and
+# huggingface-hub==1.24.0 for fastembed. This lock resolves
+# tokenizers==0.22.2 (transformers 5.6.0 requires tokenizers<=0.23.0) and
+# huggingface-hub==1.33.0. pandas, numpy, fastapi, and torch also diverge.
+# requirements-forecasting.txt keeps its own torch pin.
+#
+accelerate==1.11.0
+    # via
+    #   -r /tmp/slm-qlora.in
+    #   llamafactory
+    #   peft
+    #   trl
+aiofiles==24.1.0
+    # via gradio
+aiohappyeyeballs==2.7.1
+    # via aiohttp
+aiohttp==3.14.4
+    # via fsspec
+aiosignal==1.4.0
+    # via aiohttp
+annotated-doc==0.0.5
+    # via
+    #   fastapi
+    #   typer
+annotated-types==0.8.0
+    # via pydantic
+antlr4-python3-runtime==4.9.3
+    # via omegaconf
+anyio==4.15.1
+    # via
+    #   gradio
+    #   httpx
+    #   sse-starlette
+    #   starlette
+attrs==26.1.0
+    # via aiohttp
+audioop-lts==0.2.2
+    # via gradio
+av==16.0.0
+    # via llamafactory
+bitsandbytes==0.50.2
+    # via -r /tmp/slm-qlora.in
+brotli==1.2.0
+    # via gradio
+certifi==2026.7.22
+    # via
+    #   httpcore
+    #   httpx
+    #   requests
+cffi==2.1.1
+    # via cryptography
+charset-normalizer==3.5.2
+    # via requests
+click==8.5.0
+    # via
+    #   huggingface-hub
+    #   uvicorn
+contourpy==1.4.0
+    # via matplotlib
+cryptography==50.0.2
+    # via modelscope-hub
+cuda-bindings==13.4.3
+    # via torch
+cuda-pathfinder==1.8.3
+    # via cuda-bindings
+cuda-toolkit==13.0.3.0
+    # via torch
+cycler==0.12.1
+    # via matplotlib
+datasets==4.0.0
+    # via
+    #   -r /tmp/slm-qlora.in
+    #   llamafactory
+    #   trl
+dill==0.3.8
+    # via
+    #   datasets
+    #   multiprocess
+docstring-parser==0.18.0
+    # via tyro
+einops==0.8.2
+    # via llamafactory
+fastapi==0.142.2
+    # via
+    #   gradio
+    #   llamafactory
+ffmpy==1.0.0
+    # via gradio
+filelock==4.0.12
+    # via
+    #   datasets
+    #   huggingface-hub
+    #   modelscope
+    #   modelscope-hub
+    #   torch
+fire==0.7.1
+    # via llamafactory
+fonttools==4.66.1
+    # via matplotlib
+frozenlist==1.8.0
+    # via
+    #   aiohttp
+    #   aiosignal
+fsspec==2025.3.0
+    # via
+    #   datasets
+    #   gradio-client
+    #   huggingface-hub
+    #   torch
+gradio==5.50.0
+    # via llamafactory
+gradio-client==1.14.0
+    # via gradio
+groovy==0.1.2
+    # via gradio
+h11==0.16.0
+    # via
+    #   httpcore
+    #   uvicorn
+hf-transfer==0.1.9
+    # via llamafactory
+hf-xet==1.7.0
+    # via huggingface-hub
+httpcore==1.0.9
+    # via httpx
+httpx==0.28.1
+    # via
+    #   gradio
+    #   gradio-client
+    #   huggingface-hub
+    #   safehttpx
+huggingface-hub==1.33.0
+    # via
+    #   accelerate
+    #   datasets
+    #   gradio
+    #   gradio-client
+    #   peft
+    #   tokenizers
+    #   transformers
+idna==3.20
+    # via
+    #   anyio
+    #   httpx
+    #   requests
+    #   yarl
+jinja2==3.1.6
+    # via
+    #   gradio
+    #   torch
+kiwisolver==1.5.1
+    # via matplotlib
+llamafactory==0.9.5
+    # via -r /tmp/slm-qlora.in
+markdown-it-py==4.2.0
+    # via rich
+markupsafe==3.0.4
+    # via
+    #   gradio
+    #   jinja2
+matplotlib==3.11.2
+    # via llamafactory
+mdurl==0.1.2
+    # via markdown-it-py
+modelscope==1.40.1
+    # via llamafactory
+modelscope-hub==0.4.5
+    # via modelscope
+mpmath==1.3.0
+    # via sympy
+multidict==6.9.1
+    # via
+    #   aiohttp
+    #   yarl
+multiprocess==0.70.16
+    # via datasets
+networkx==3.7
+    # via torch
+numpy==2.5.3
+    # via
+    #   accelerate
+    #   bitsandbytes
+    #   contourpy
+    #   datasets
+    #   gradio
+    #   llamafactory
+    #   matplotlib
+    #   pandas
+    #   peft
+    #   scipy
+    #   torchvision
+    #   transformers
+nvidia-cublas==13.1.1.3
+    # via
+    #   cuda-toolkit
+    #   nvidia-cudnn-cu13
+    #   nvidia-cusolver
+nvidia-cuda-cupti==13.0.85
+    # via cuda-toolkit
+nvidia-cuda-nvrtc==13.0.88
+    # via
+    #   cuda-toolkit
+    #   nvidia-cublas
+nvidia-cuda-runtime==13.0.96
+    # via cuda-toolkit
+nvidia-cudnn-cu13==9.24.0.43
+    # via torch
+nvidia-cufft==12.0.0.61
+    # via cuda-toolkit
+nvidia-cufile==1.15.1.6
+    # via cuda-toolkit
+nvidia-curand==10.4.0.35
+    # via cuda-toolkit
+nvidia-cusolver==12.0.4.66
+    # via cuda-toolkit
+nvidia-cusparse==12.6.3.3
+    # via
+    #   cuda-toolkit
+    #   nvidia-cusolver
+nvidia-cusparselt-cu13==0.8.1
+    # via torch
+nvidia-nccl-cu13==2.30.7
+    # via torch
+nvidia-nvjitlink==13.4.92
+    # via
+    #   cuda-toolkit
+    #   nvidia-cufft
+    #   nvidia-cusolver
+    #   nvidia-cusparse
+nvidia-nvshmem-cu13==3.4.5
+    # via torch
+nvidia-nvtx==13.0.85
+    # via cuda-toolkit
+omegaconf==2.3.1
+    # via llamafactory
+opentelemetry-api==1.45.1
+    # via fastapi
+orjson==3.13.0
+    # via gradio
+packaging==26.3
+    # via
+    #   accelerate
+    #   bitsandbytes
+    #   datasets
+    #   gradio
+    #   gradio-client
+    #   huggingface-hub
+    #   llamafactory
+    #   matplotlib
+    #   modelscope
+    #   peft
+    #   transformers
+pandas==2.3.3
+    # via
+    #   datasets
+    #   gradio
+    #   llamafactory
+peft==0.18.1
+    # via
+    #   -r /tmp/slm-qlora.in
+    #   llamafactory
+pillow==11.3.0
+    # via
+    #   gradio
+    #   matplotlib
+    #   torchvision
+propcache==0.5.4
+    # via
+    #   aiohttp
+    #   yarl
+protobuf==7.36.2
+    # via llamafactory
+psutil==7.2.2
+    # via
+    #   accelerate
+    #   peft
+pyarrow==25.0.1
+    # via datasets
+pycparser==3.0
+    # via cffi
+pydantic==2.12.3
+    # via
+    #   fastapi
+    #   gradio
+    #   llamafactory
+pydantic-core==2.41.4
+    # via pydantic
+pydub==0.25.1
+    # via gradio
+pygments==2.21.0
+    # via rich
+pyparsing==3.3.3
+    # via matplotlib
+python-dateutil==2.9.0.post0
+    # via
+    #   matplotlib
+    #   pandas
+python-multipart==0.0.32
+    # via gradio
+pytz==2026.5
+    # via pandas
+pyyaml==6.0.3
+    # via
+    #   accelerate
+    #   datasets
+    #   gradio
+    #   huggingface-hub
+    #   llamafactory
+    #   omegaconf
+    #   peft
+    #   transformers
+regex==2026.9.29
+    # via
+    #   tiktoken
+    #   transformers
+requests==2.34.2
+    # via
+    #   datasets
+    #   modelscope
+    #   modelscope-hub
+    #   tiktoken
+    #   torchdata
+rich==15.0.0
+    # via
+    #   typer
+    #   tyro
+ruff==0.16.10
+    # via gradio
+safehttpx==0.1.7
+    # via gradio
+safetensors==0.8.0
+    # via
+    #   accelerate
+    #   llamafactory
+    #   peft
+    #   transformers
+scipy==1.18.1
+    # via llamafactory
+semantic-version==2.10.0
+    # via gradio
+sentencepiece==0.2.2
+    # via llamafactory
+setuptools==84.0.0
+    # via
+    #   modelscope
+    #   torch
+shellingham==1.5.4
+    # via typer
+shtab==1.12.1
+    # via tyro
+six==1.17.0
+    # via python-dateutil
+sse-starlette==3.5.0
+    # via llamafactory
+starlette==0.52.1
+    # via
+    #   fastapi
+    #   gradio
+    #   sse-starlette
+sympy==1.14.0
+    # via torch
+termcolor==3.3.0
+    # via fire
+tiktoken==0.14.0
+    # via llamafactory
+tokenizers==0.22.2
+    # via transformers
+tomlkit==0.13.3
+    # via gradio
+torch==2.14.1
+    # via
+    #   -r /tmp/slm-qlora.in
+    #   accelerate
+    #   bitsandbytes
+    #   llamafactory
+    #   peft
+    #   torchdata
+    #   torchvision
+torchaudio==2.11.0
+    # via
+    #   -r /tmp/slm-qlora.in
+    #   llamafactory
+torchdata==0.11.0
+    # via
+    #   -r /tmp/slm-qlora.in
+    #   llamafactory
+torchvision==0.29.1
+    # via
+    #   -r /tmp/slm-qlora.in
+    #   llamafactory
+tqdm==4.70.1
+    # via
+    #   datasets
+    #   huggingface-hub
+    #   modelscope
+    #   modelscope-hub
+    #   peft
+    #   transformers
+transformers==5.6.0
+    # via
+    #   -r /tmp/slm-qlora.in
+    #   llamafactory
+    #   peft
+    #   trl
+triton==3.8.0
+    # via torch
+trl==0.24.0
+    # via
+    #   -r /tmp/slm-qlora.in
+    #   llamafactory
+typer==0.27.3
+    # via
+    #   gradio
+    #   transformers
+typing-extensions==4.16.0
+    # via
+    #   anyio
+    #   fastapi
+    #   gradio
+    #   gradio-client
+    #   huggingface-hub
+    #   opentelemetry-api
+    #   pydantic
+    #   pydantic-core
+    #   torch
+    #   typing-inspection
+    #   tyro
+typing-inspection==0.4.4
+    # via
+    #   fastapi
+    #   pydantic
+tyro==0.8.14
+    # via llamafactory
+tzdata==2026.5
+    # via pandas
+urllib3==2.8.0
+    # via
+    #   modelscope
+    #   modelscope-hub
+    #   requests
+    #   torchdata
+uvicorn==0.54.0
+    # via
+    #   gradio
+    #   llamafactory
+websockets==15.0.1
+    # via gradio-client
+xxhash==4.0.1
+    # via datasets
+yarl==1.25.1
+    # via aiohttp

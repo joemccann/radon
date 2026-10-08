@@ -7,7 +7,9 @@ ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 TRAINER="${SLM_TRAINER:-llamafactory}"
 DATA_DIR="${SLM_DATA_DIR:-$ROOT/data/slm/tagger/v1}"
 MANIFEST="$DATA_DIR/manifest.json"
-LF_CONFIG="${1:-$ROOT/scripts/newsfeed/slm/configs/llamafactory-qwen25-1p5b-qlora-v1.yaml}"
+# Default stays the Qwen2.5-1.5B baseline. SLM_LF_CONFIG selects another YAML
+# (the Qwen3.5-2B evaluation candidate). A positional argument wins over both.
+LF_CONFIG="${1:-${SLM_LF_CONFIG:-$ROOT/scripts/newsfeed/slm/configs/llamafactory-qwen25-1p5b-qlora-v1.yaml}}"
 MLX_CONFIG="${SLM_MLX_CONFIG:-$ROOT/scripts/newsfeed/slm/configs/qwen25-1p5b-qlora-v1.yaml}"
 DATASET_INFO_SRC="$ROOT/scripts/newsfeed/slm/configs/dataset_info.json"
 
@@ -70,5 +72,5 @@ fi
 if env -i "${TRAIN_ENV[@]}" python3.13 -c "import llamafactory" >/dev/null 2>&1; then
   exec env -i "${TRAIN_ENV[@]}" python3.13 -m llamafactory.cli train "$LF_CONFIG" dataset_dir="$DATA_DIR"
 fi
-echo "LLaMA-Factory is not installed. On the Mini: pip install 'llamafactory[torch,metrics]'. Or SLM_TRAINER=mlx." >&2
+echo "LLaMA-Factory is not installed. pip install -r scripts/newsfeed/slm/requirements-slm.txt in the train venv only. Or SLM_TRAINER=mlx." >&2
 exit 2

@@ -17,8 +17,34 @@ from newsfeed.slm.contract import SLM_BASE_ID
 REPO = Path(__file__).resolve().parents[2]
 MLX_YAML = REPO / "scripts" / "newsfeed" / "slm" / "configs" / "qwen25-1p5b-qlora-v1.yaml"
 LF_YAML = REPO / "scripts" / "newsfeed" / "slm" / "configs" / "llamafactory-qwen25-1p5b-qlora-v1.yaml"
+QWEN35_YAML = REPO / "scripts" / "newsfeed" / "slm" / "configs" / "llamafactory-qwen35-2b-qlora-v1.yaml"
+QWEN35_REVISION = "15852e8c16360a2fea060d615a32b45270f8a8fc"
 DATASET_INFO = REPO / "scripts" / "newsfeed" / "slm" / "configs" / "dataset_info.json"
 TRAIN = REPO / "scripts" / "newsfeed" / "slm" / "train.sh"
+REQS = REPO / "scripts" / "newsfeed" / "slm" / "requirements-slm.txt"
+
+
+def _req_pins(text: str) -> dict[str, str]:
+    pins: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, sep, version = line.partition("==")
+        if sep:
+            pins[name.strip()] = version.split()[0]
+    return pins
+
+
+def _yaml_fields(text: str) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for line in text.splitlines():
+        if not line or line.lstrip().startswith("#"):
+            continue
+        key, sep, value = line.partition(":")
+        if sep:
+            fields[key.strip()] = value.split("#", 1)[0].strip()
+    return fields
 
 
 class TestConfig:
@@ -111,6 +137,81 @@ class TestTrainSh:
         )
         assert proc.returncode == 2
         assert "turso.posts" in proc.stderr
+
+
+class TestQwen35Candidate:
+    def test_pins_revision_template_and_refuses_remote_code(self):
+        fields = _yaml_fields(QWEN35_YAML.read_text(encoding="utf-8"))
+        assert fields["model_name_or_path"] == "Qwen/Qwen3.5-2B"
+        assert re.fullmatch(r"[0-9a-f]{40}", fields["model_revision"])
+        assert fields["model_revision"] == QWEN35_REVISION
+        assert fields["model_revision"] != "989aa7980e4cf806f80c7fef2b1adb7bc71aa306"
+        assert "revision" not in fields
+        assert fields["trust_remote_code"] == "false"
+        assert fields["template"] == "qwen3_5_nothink"
+        assert fields["enable_thinking"] == "false"
+        assert "in_proj_qkv" in fields["lora_target"].split(",")
+        assert "out_proj" in fields["lora_target"].split(",")
+        assert "q_proj" in fields["lora_target"].split(",")
+        assert fields["cutoff_len"] == "1024"
+        assert fields["learning_rate"] == "1.0e-4"
+        assert fields["train_on_prompt"] == "false"
+        assert fields["freeze_vision_tower"] == "true"
+        assert fields["freeze_multi_modal_projector"] == "true"
+        assert fields["output_dir"] != "models/slm-tagger/v1/adapter"
+        reqs = _req_pins(REQS.read_text(encoding="utf-8"))
+        assert reqs["llamafactory"] == "0.9.5"
+        assert reqs["transformers"] == "5.6.0"
+        assert reqs["torch"] == "2.14.1"
+        assert reqs["peft"] == "0.18.1"
+        assert reqs["bitsandbytes"] == "0.50.2"
+        assert reqs["accelerate"] == "1.11.0"
+        assert reqs["datasets"] == "4.0.0"
+        assert reqs["trl"] == "0.24.0"
+        assert reqs["tokenizers"] == "0.22.2"
+        fleet = (REPO / "requirements.txt").read_text(encoding="utf-8")
+        assert "llamafactory" not in fleet
+        assert "transformers" not in fleet
+        assert "tokenizers==0.23.1" in fleet
+        assert "huggingface-hub==1.24.0" in fleet
+        sh = TRAIN.read_text(encoding="utf-8")
+        assert "SLM_LF_CONFIG" in sh
+        assert "llamafactory-qwen25-1p5b-qlora-v1.yaml" in sh
+
+    def test_slm_lf_config_selects_candidate_and_default_stays_baseline(self, tmp_path):
+        data = tmp_path / "data"
+        data.mkdir()
+        (data / "manifest.json").write_text(json.dumps({"sources": ["turso.posts"]}), encoding="utf-8")
+        binaries = tmp_path / "bin"
+        binaries.mkdir()
+        captured = tmp_path / "argv.json"
+        trainer = binaries / "llamafactory-cli"
+        trainer.write_text(
+            f"#!{sys.executable}\nimport json, sys\n"
+            f"open({str(captured)!r}, 'w').write(json.dumps(sys.argv))\n",
+            encoding="utf-8",
+        )
+        trainer.chmod(0o755)
+        env = {
+            "PATH": f"{binaries}{os.pathsep}{Path(sys.executable).parent}{os.pathsep}{os.defpath}",
+            "SLM_DATA_DIR": str(data),
+        }
+        proc = subprocess.run(
+            ["bash", str(TRAIN)], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30
+        )
+        assert proc.returncode == 0, proc.stderr
+        argv = json.loads(captured.read_text(encoding="utf-8"))
+        assert str(LF_YAML) in argv
+        assert str(QWEN35_YAML) not in argv
+
+        env["SLM_LF_CONFIG"] = str(QWEN35_YAML)
+        proc = subprocess.run(
+            ["bash", str(TRAIN)], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30
+        )
+        assert proc.returncode == 0, proc.stderr
+        argv = json.loads(captured.read_text(encoding="utf-8"))
+        assert str(QWEN35_YAML) in argv
+        assert str(LF_YAML) not in argv
 
 
 class TestRemoteCode:
