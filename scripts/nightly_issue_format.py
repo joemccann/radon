@@ -113,7 +113,7 @@ _FILE_LINE_RE = re.compile(
 # Operator / broker / demo account-looking tokens, not pids.
 _ACCOUNT_RE = re.compile(
     r"\b(?:user\s+)?(?:radon)?(?:trader|operator)\d+\b"
-    r"|\b(?:U|DU|account)[-_]?\d{5,}\b",
+    r"|\b(?:U|DU|(?-i:F)|account)[-_]?\d{5,}\b",
     re.I,
 )
 _LOG_POINTER_RE = re.compile(

@@ -800,3 +800,8 @@ def test_private_key_blocks_are_redacted(label: str):
 def test_public_key_blocks_are_not_redacted():
     text = "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE\n-----END PUBLIC KEY-----"
     assert nif.sanitize(text) == text
+
+
+def test_advisor_master_account_ids_are_redacted():
+    assert nif.sanitize("allocations under F1234567 failed") == "allocations under [REDACTED] failed"
+    assert nif.sanitize("commit f1234567 landed") == "commit f1234567 landed"

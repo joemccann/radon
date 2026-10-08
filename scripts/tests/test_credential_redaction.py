@@ -115,3 +115,21 @@ def test_private_key_blocks_are_redacted_and_detected():
     assert "NOTREAL" not in truncated
     public = "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE\n-----END PUBLIC KEY-----"
     assert scrub_credential_text(public) == public
+
+
+def test_cookie_headers_and_session_keys_are_redacted():
+    for text in (
+        "Cookie: sessionid=qz1NOTREAL; other=qz2NOTREAL",
+        "Set-Cookie: __session=qz3NOTREAL; Path=/",
+        "SESSION_ID=qz4NOTREAL", "csrf=qz5NOTREAL", '{"xsrf": "qz6NOTREAL"}',
+    ):
+        body = scrub_credential_text(f"upstream sent {text}\nretry after review")
+        assert "NOTREAL" not in body, body
+        assert body.endswith("\nretry after review"), body
+    prose = "the session ended cleanly: no cookie was read"
+    assert scrub_credential_text(prose) == prose
+
+
+def test_advisor_master_account_ids_are_redacted():
+    body = scrub_credential_text("accounts F1234567 U7654321 DU1234567")
+    assert body == "accounts [redacted-account] [redacted-account] [redacted-account]"
