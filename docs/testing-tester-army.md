@@ -4,9 +4,8 @@ Radon's browser projects have independent [TesterArmy e2e](https://github.com/te
 packages at `web/tester-army` and `site/tester-army`. Their locked SDK/browser
 dependencies are separate from the existing Playwright suites. The existing
 financial, authorization and deployment gates remain in place.
-The existing financial Playwright smoke and the new TesterArmy workflow are
-independent browser checks; neither is added to the production deploy job's
-dependencies by this integration.
+The existing financial Playwright smoke and the TesterArmy workflow are
+independent browser checks; neither is a dependency of the production deploy job.
 
 ## Install and run
 
@@ -21,7 +20,8 @@ env -i PATH="$PATH" HOME="$HOME" npm ci --prefix site/tester-army
 ```
 
 Install Chromium through each isolated package so its version matches the
-engine. The versions currently match, so the second command reuses the cache.
+engine. When both packages pin the same Playwright version, the second command
+reuses the cache.
 
 ```sh
 (cd web/tester-army && env -i PATH="$PATH" HOME="$HOME" npx playwright install chromium)
@@ -87,44 +87,3 @@ env -i PATH="$PATH" HOME="$HOME" NODE_ENV=test ASSISTANT_MOCK=1 \
   TURSO_DB_URL= TURSO_AUTH_TOKEN= TURSO_DEMO_DB_URL= TURSO_DEMO_AUTH_TOKEN= \
   node node_modules/vitest/vitest.mjs run --config vitest.config.ts --coverage
 ```
-
-## Publication verification, 2026-10-06
-
-Base: `8afaaa61f09789bc272910d0dbce048780ef4dd9`. Sol 6.1 reconciles each project;
-Luna 6 independently verifies the restored contracts and browser journeys.
-October 3 results are historical evidence only.
-
-- API/worker regressions on current main: 41 failed, 24 passed; restored focused
-  cases: 82 passed, independently repeated by Luna: 82 passed. Changed executable
-  lines: 28/28 covered. Full API: 1179 passed.
-- Full scripts/root Python suite: 13143 passed, 2 skipped, 23 subtests passed;
-  one unchanged login-runner timing test failed its 1-second synthetic prompt
-  window under full-suite load and passed unchanged on focused repeat (1 passed).
-  The backend matrix records the command and failure precisely.
-- Workstation units: 16 regression failures/36 passes against current main;
-  restored cases 52/52 green; all ten changed unit files 86/86 green. Full root
-  Vitest with unchanged coverage gates: 1047 passed files, 1 skipped file,
-  10386 passed tests, 21 skipped tests. Statements 82.03%, branches 74.00%,
-  functions 80.96%, lines 85.03%. The five product fixes cover 46/46 changed
-  executable lines (100%). SDK typecheck and output-trace audit 4/4 pass.
-- Site: production build, application/SDK TypeScript checks and isolated
-  TesterArmy 27/27 pass. Three native UI
-  cases fail against current-main product sources; restored retained Playwright
-  13/13 pass. The status signup-link proof fails on main and passes on the fix;
-  its temporary proof spec is removed. Mobile visual evidence is retained in
-  the ignored project artifact directory.
-- Workstation: production build, application/SDK TypeScript checks and fresh
-  TesterArmy 77/77 pass (cache off, retries 0). Independent Luna verified 135
-  distinct retained native cases; three provider-backed VIXCOR cases lacked
-  local live data, five admin cases require authorized Clerk operator access,
-  and one existing case is skipped. These cases are not reported green.
-  The repaired session-advance fixture passes 1/1 with a nonfuture timestamp;
-  performance/sidebar assertions pass 8/8. Signed combo quotes, native option
-  SELL quotes, payoff geometry and mobile sheet containment were visually
-  reviewed against the production build.
-- Exact-head GitHub CI receipts are recorded in the PR after publication.
-
-Publication hygiene: workflow Actionlint passed; the initial 114-file candidate
-scan found zero secrets. Final staged-file and commit scans are mandatory before
-pushing. Private migration bundles, security branches, reports, generated
-fixtures and dependency directories are excluded from publication.
