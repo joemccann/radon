@@ -10,7 +10,7 @@ Every milestone-5 structure pass writes a trade-spec HTML report. Every closed t
 |---|---|---|
 | Trade Spec | `.pi/skills/html-report/trade-specification-template.html` | `reports/{ticker}-evaluation-{YYYY-MM-DD}.html` |
 | P&L | `.pi/skills/html-report/pnl-template.html` | `reports/pnl-{TICKER}-{YYYY-MM-DD}.html` |
-| Share PnL Card | `next/og` (Satori), 1200×630 PNG | `web/app/api/share/pnl/route.tsx` |
+| Share PnL Card | `next/og` (Satori) PNG from `GET /api/share/pnl` | `web/app/api/share/pnl/route.tsx` |
 
 Reference rendered output: `reports/goog-evaluation-2026-03-04.html`.
 
@@ -52,6 +52,6 @@ Capital at Risk = max-loss for defined-risk structures, full debit for long prem
 
 ## Share Card (Social)
 
-`web/app/api/share/pnl/route.tsx` renders a 1200×630 PNG via `next/og` (Satori). Brand-tokenised. Used by the operator's share workflow — output goes to `/share/pnl/<id>` and the card image links from there.
+`GET /api/share/pnl` renders a brand-tokenised PNG via `next/og` (Satori). The operator share popover fetches this route. Pass `format=story` for the Instagram Story plate; any other value, including an omitted `format`, is the X / Open Graph plate. Canvas sizes live in `SHARE_PNL_CANVAS` (`web/lib/sharePnlHero.ts`); `parseSharePnlFormat` is the only admission rule.
 
-Smoke-tested via E2E; not unit-testable inside vitest because of the `next/og` ImageResponse runtime.
+Layout and both formats are covered by Vitest (`web/tests/share-pnl-story.test.ts`, `web/tests/share-pnl-hero-layout.test.ts`) and E2E (`web/e2e/share-pnl.spec.ts`).

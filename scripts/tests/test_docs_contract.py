@@ -1756,3 +1756,44 @@ class TestNightlyInfrastructureOwners:
         readme = (_ROOT / "cloud/README.md").read_text()
         assert "CLAUDE.md#deployment-contract" in readme
         assert "Build Bun artifacts and Python wheels in a detached worktree" not in readme
+
+
+class TestSharePnlReportOwner:
+    """DOC-174: share P&L formats stay in the report owner, sizes stay in source."""
+
+    def test_reports_owner_routes_formats_to_share_canvas_source(self):
+        text = (_ROOT / "docs/reports.md").read_text()
+        assert "/api/share/pnl" in text
+        assert "format=story" in text
+        assert "SHARE_PNL_CANVAS" in text
+        assert "web/lib/sharePnlHero.ts" in text
+        assert "not unit-testable" not in text
+        assert "/share/pnl/<id>" not in text
+        hero = (_ROOT / "web/lib/sharePnlHero.ts").read_text()
+        assert "width: 1080" in hero and "height: 1920" in hero
+        assert "width: 1200" in hero and "height: 630" in hero
+        assert "parseSharePnlFormat" in hero
+
+
+class TestTesterArmyToolchainOwner:
+    """DOC-175: TesterArmy is a verification tool, not a production deploy gate."""
+
+    def test_development_map_points_at_tester_army_owner(self):
+        text = (_ROOT / "DEVELOPMENT.md").read_text()
+        assert "TesterArmy" in text
+        assert "docs/testing-tester-army.md" in text
+
+    def test_tester_army_owner_omits_dated_integration_copy(self):
+        text = (_ROOT / "docs/testing-tester-army.md").read_text()
+        assert "currently match" not in text
+        assert "the new TesterArmy" not in text
+        assert "by this integration" not in text
+        assert "Publication verification" not in text
+        assert "production deploy" in text
+
+    def test_production_deploy_does_not_wait_on_tester_army(self):
+        import yaml
+
+        workflow = yaml.safe_load((_ROOT / ".github/workflows/ci.yml").read_text())
+        needs = workflow["jobs"]["deploy"]["needs"]
+        assert all("tester" not in str(item).lower() for item in needs)
