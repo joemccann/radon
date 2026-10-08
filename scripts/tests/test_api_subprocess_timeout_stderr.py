@@ -20,6 +20,27 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 import api.subprocess as api_subprocess  # noqa: E402
 
 
+def _run_leaving_a_current_loop(coro):
+    """asyncio.run() clears the thread's current loop; later tests that call
+    asyncio.get_event_loop() would then raise. Run on a private loop and
+    install a fresh one as current afterwards."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
+
+def test_running_a_script_keeps_a_current_event_loop(tmp_path, monkeypatch):
+    (tmp_path / "noop.py").write_text("print('{}')\n")
+    monkeypatch.setattr(api_subprocess, "SCRIPTS_DIR", tmp_path)
+
+    _run_leaving_a_current_loop(api_subprocess.run_script("noop.py", timeout=10))
+
+    assert asyncio.get_event_loop() is not None
+
+
 def test_timeout_logs_the_childs_stderr_tail(tmp_path, monkeypatch, caplog):
     (tmp_path / "slow_sync.py").write_text(
         "import sys, time\n"
@@ -30,7 +51,7 @@ def test_timeout_logs_the_childs_stderr_tail(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(api_subprocess, "SCRIPTS_DIR", tmp_path)
 
     with caplog.at_level(logging.ERROR, logger=api_subprocess.logger.name):
-        result = asyncio.run(api_subprocess.run_script("slow_sync.py", timeout=1.5))
+        result = _run_leaving_a_current_loop(api_subprocess.run_script("slow_sync.py", timeout=1.5))
 
     assert not result.ok
     assert result.error == "Script timed out after 1.5s"
@@ -48,7 +69,7 @@ def test_success_still_parses_stdout_and_ignores_stderr(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(api_subprocess, "SCRIPTS_DIR", tmp_path)
 
-    result = asyncio.run(api_subprocess.run_script("ok_sync.py", timeout=10))
+    result = _run_leaving_a_current_loop(api_subprocess.run_script("ok_sync.py", timeout=10))
 
     assert result.ok
     assert result.data == {"status": "ok"}
