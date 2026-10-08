@@ -168,6 +168,7 @@ def test_wipe_removes_the_control_plane_bootstrap_installs():
     targets = installed + [
         "/etc/systemd/system/radon-.service.d",
         "/etc/systemd/journald.conf.d/radon.conf",
+        "/etc/systemd/journald.conf.d/zz-radon.conf",
     ]
     missing = [target for target in targets if not _removes(body, target)]
     assert not missing, (

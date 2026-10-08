@@ -27,7 +27,7 @@ cloud/
 
 Production is three planes. Do not collapse them.
 
-- **Host plane** (never container): systemd, journald, polkit, sudoers,
+- **Host plane** (never container): systemd, journald (drop-in `journald.conf.d/zz-radon.conf`: 1G cap, no syslog copy), polkit, sudoers,
   Caddy, Tailscale, Docker engine, `radon-health` on `127.0.0.1:8330`,
   `/usr/local/sbin/radon-deploy-root`, `/usr/local/bin/radon-ib-gateway-control`.
 - **Broker plane** (already Docker): digest-pinned IB Gateway in

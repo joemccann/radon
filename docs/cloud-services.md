@@ -348,7 +348,7 @@ TradingView alert fires `POST` to `app.radon.run/api/webhooks/tradingview/<TV_WE
 
 ### Log shipping (DUR-12)
 
-journald on the VPS is on-box only (capped at 1G). A laptop launchd job (`~/Library/LaunchAgents/com.radon.journal-pull.plist`, daily + RunAtLoad) runs `scripts/journal_pull.sh`, which ssh-pulls `journalctl --since yesterday -o export | gzip` into `data/journal_archive/` (gitignored) and prunes local snapshots older than 30 days. Laptop-initiated by design — VPS-push to a sleeping laptop fails silently (media-rsync precedent). Inspect a snapshot with `zcat <file> | journalctl --file=- ...` or `gunzip` + `journalctl --root` import tooling.
+journald on the VPS is on-box only (capped at 1G) and the only copy: `ForwardToSyslog=no` in `/etc/systemd/journald.conf.d/zz-radon.conf` (from `cloud/services/journald-radon.conf`; the `zz-` name sorts after Ubuntu's vendor `syslog.conf`, which sets it back to `yes`). Read VPS logs with `journalctl`, not `/var/log/syslog`. A laptop launchd job (`~/Library/LaunchAgents/com.radon.journal-pull.plist`, daily + RunAtLoad) runs `scripts/journal_pull.sh`, which ssh-pulls `journalctl --since yesterday -o export | gzip` into `data/journal_archive/` (gitignored) and prunes local snapshots older than 30 days. Laptop-initiated by design — VPS-push to a sleeping laptop fails silently (media-rsync precedent). Inspect a snapshot with `zcat <file> | journalctl --file=- ...` or `gunzip` + `journalctl --root` import tooling.
 
 ### Grok P1 responder (dedicated VPS clone)
 
