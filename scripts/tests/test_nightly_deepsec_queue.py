@@ -249,3 +249,27 @@ class TestSeededFindingIsClosed:
         assert str(SEEDED_PR) in json.dumps(seeded)
         assert SEEDED_COMMIT in json.dumps(seeded)
         assert "closed_at" in seeded
+
+
+class TestOperatorVerifiedClosures:
+    """Operator-verified closures carried as Next every night until ledgered."""
+
+    def test_ledger_closes_operator_verified_ids(self):
+        import nightly_deepsec_queue as q
+
+        data = json.loads(LEDGER.read_text(encoding="utf-8"))
+        closed = {row["id"]: row for row in data["closed"]}
+        expected = {
+            "DS-2026-10-04-01": (915, "1f21f367"),
+            "DS-2026-09-29-03": (848, "0c946ebd"),
+            "DS-2026-09-23-02": (None, None),
+        }
+        for item_id, (pr, commit) in expected.items():
+            assert item_id in closed, item_id
+            row = closed[item_id]
+            assert row["closed_at"] == "2026-10-08"
+            assert row["evidence"]
+            if pr is not None:
+                assert row["pr"] == pr
+                assert row["commit"].startswith(commit)
+        assert set(q.load_ledger(LEDGER)) >= set(expected)
