@@ -5,6 +5,10 @@
  * Attaches Clerk JWT when available for authenticated requests.
  */
 
+import { isStaleSocketFailure } from "@/lib/upstreamFailure";
+
+export { classifyUpstreamFailure, type UpstreamFailure } from "@/lib/upstreamFailure";
+
 const RADON_API = process.env.RADON_API_URL || "http://localhost:8321";
 
 /**
@@ -58,6 +62,21 @@ export function radonErrorDetailText(detail: RadonErrorDetail): string {
   return typeof detail === "string" ? detail : JSON.stringify(detail);
 }
 
+/**
+ * A reused socket the server already closed fails before any byte of the
+ * request is processed, so replaying a read is safe. Writes are never
+ * replayed: /portfolio/sync and every order route are not idempotent.
+ */
+function isRetryableStaleSocket(
+  error: unknown,
+  method: string | undefined,
+  signal: AbortSignal,
+): boolean {
+  if (signal.aborted) return false;
+  const verb = (method ?? "GET").toUpperCase();
+  return (verb === "GET" || verb === "HEAD") && isStaleSocketFailure(error);
+}
+
 export async function radonFetchResponse(
   path: string,
   opts?: RequestInit & { timeout?: number; token?: string },
@@ -79,11 +98,15 @@ export async function radonFetchResponse(
   const signal = fetchOpts.signal
     ? AbortSignal.any([fetchOpts.signal, timeoutSignal])
     : timeoutSignal;
-  const res = await fetch(`${RADON_API}${path}`, {
+  const request = () => fetch(`${RADON_API}${path}`, {
     ...fetchOpts,
     headers,
     cache: fetchOpts.cache ?? "no-store",
     signal,
+  });
+  const res = await request().catch((error: unknown) => {
+    if (!isRetryableStaleSocket(error, fetchOpts.method, signal)) throw error;
+    return request();
   });
   if (!res.ok) {
     let detail: RadonErrorDetail;

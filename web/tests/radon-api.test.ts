@@ -281,3 +281,63 @@ describe("radonFetch — network errors", () => {
     await expect(radonFetch("/health")).rejects.toThrow("ENOTFOUND");
   });
 });
+
+// =============================================================================
+// Stale keep-alive socket: one transparent retry for idempotent reads only
+// =============================================================================
+
+function resetSocketError(code = "ECONNRESET"): TypeError {
+  return new TypeError("fetch failed", { cause: Object.assign(new Error("other side closed"), { code }) });
+}
+
+describe("radonFetch — stale keep-alive socket", () => {
+  it("retries a GET once when the reused socket was reset", async () => {
+    mockFetch
+      .mockRejectedValueOnce(resetSocketError())
+      .mockResolvedValueOnce(jsonResponse({ status: "ok" }));
+
+    await expect(radonFetch("/health")).resolves.toEqual({ status: "ok" });
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch.mock.calls[1][0]).toBe("http://localhost:8321/health");
+  });
+
+  it("never retries a POST: the upstream may already have acted", async () => {
+    mockFetch.mockRejectedValueOnce(resetSocketError());
+
+    await expect(radonFetch("/portfolio/sync", { method: "POST" })).rejects.toThrow("fetch failed");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry a refused connection (upstream is down, not a stale socket)", async () => {
+    mockFetch.mockRejectedValueOnce(resetSocketError("ECONNREFUSED"));
+
+    await expect(radonFetch("/health")).rejects.toThrow("fetch failed");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries at most once", async () => {
+    mockFetch.mockRejectedValue(resetSocketError("UND_ERR_SOCKET"));
+
+    await expect(radonFetch("/health")).rejects.toThrow("fetch failed");
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("classifyUpstreamFailure", () => {
+  it("names a fired timeout signal as a timeout", async () => {
+    const { classifyUpstreamFailure } = await import("../lib/radonApi");
+    expect(classifyUpstreamFailure(new DOMException("The operation was aborted due to timeout", "TimeoutError"))).toBe("timeout");
+  });
+
+  it("names a socket-level fetch failure as unreachable", async () => {
+    const { classifyUpstreamFailure } = await import("../lib/radonApi");
+    expect(classifyUpstreamFailure(resetSocketError("ECONNREFUSED"))).toBe("unreachable");
+    expect(classifyUpstreamFailure(new TypeError("fetch failed"))).toBe("unreachable");
+  });
+
+  it("leaves an HTTP error from FastAPI unclassified", async () => {
+    const { classifyUpstreamFailure } = await import("../lib/radonApi");
+    expect(classifyUpstreamFailure(new RadonApiError(500, "boom"))).toBeNull();
+    expect(classifyUpstreamFailure(new Error("other"))).toBeNull();
+  });
+});

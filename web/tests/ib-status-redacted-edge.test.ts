@@ -103,3 +103,9 @@ describe("isAggregateOnlyHealthPayload — when to ask the rich proxy why", () =
     expect(isAggregateOnlyHealthPayload({ ib_gateway: { auth_state: "authenticated" } })).toBe(false);
   });
 });
+
+describe("parseIbHealth — proxy reports radon-api unreachable", () => {
+  it("returns null so the chip keeps its last verdict through a restart window", () => {
+    expect(parseIbHealth({ status: "unreachable", missing: true, api_reachable: false, reason: "unreachable" } as never)).toBeNull();
+  });
+});

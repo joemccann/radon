@@ -13,7 +13,7 @@
     "dev:prices": "node ../scripts/ib_realtime_server.js",
     "build": "next build --experimental-build-mode=compile && node scripts/audit-output-traces.mjs",
     "build:setup-gate": "NEXT_DIST_DIR=.next-setup-gate next build --experimental-build-mode=compile",
-    "start": "next start",
+    "start": "next start --keepAliveTimeout 130000",
     "typecheck": "tsc --noEmit",
     "lint": "eslint app components lib middleware.ts",
     "test": "NODE_ENV=test ASSISTANT_MOCK=1 vitest run --config ../vitest.config.ts web/tests",

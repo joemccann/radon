@@ -148,6 +148,39 @@ describe("operator polling integration", () => {
 });
 
 
+describe("broker poll while radon-api restarts", () => {
+  it("reads the proxy's 200 missing verdict as an unreachable API, not a malformed observation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    let apiDown = false;
+    const missing = { status: "unreachable", missing: true, api_reachable: false, reason: "unreachable", error: "radon-api is unreachable", upstream_error: "fetch failed" };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const payloads: Record<string, unknown> = {
+        "/api/admin/health": apiDown ? missing : HEALTH,
+        "/api/admin/services": SERVICES,
+        "/api/admin/edge-health": { ...EDGE, reachable: true },
+        "/api/admin/reliability": { events: [], baseline: {} },
+        "/api/admin/host-metrics": { rows: [] },
+        "/api/admin/slo": { rows: [] },
+        "/api/admin/trading/status": { halted: false },
+        "/api/admin/demo-users": { users: [] },
+      };
+      return new Response(JSON.stringify(payloads[url]), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const settle = async () => { await act(async () => { for (let i = 0; i < 10; i += 1) await Promise.resolve(); }); };
+    render(<AdminWorkspace />);
+    await settle();
+    apiDown = true;
+    await act(async () => { vi.advanceTimersByTime(5_100); });
+    await settle();
+    expect(screen.getByTestId("overview-broker").textContent).toContain("Last known");
+    expect(document.body.textContent).toContain("radon-api is unreachable");
+    expect(document.body.textContent).not.toContain("Invalid broker observation");
+  });
+});
+
+
 describe("trading status observation freshness", () => {
   it.each([false, true])("marks a failed refresh Unknown and neutral (compact=%s)", async (compact) => {
     vi.useFakeTimers();

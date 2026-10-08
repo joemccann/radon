@@ -35,3 +35,18 @@ def test_phase_timer_emit_writes_stderr_json(capsys):
     assert [p["phase"] for p in parsed["phases"]] == ["connect", "permId"]
     assert parsed["total_s"] == 1.0
     assert payload == parsed
+
+
+def test_streaming_timer_writes_each_mark_as_it_happens():
+    """A run killed mid-flight must still show the phases it finished."""
+    ticks = iter([0.0, 0.3, 9.1])
+    lines: list[str] = []
+    timer = PhaseTimer("ib_sync", clock=lambda: next(ticks), sink=lines.append, stream_marks=True)
+
+    timer.mark("connect")
+    assert [json.loads(line) for line in lines] == [
+        {"event": "ib_hot_path_phase", "job": "ib_sync", "phase": "connect", "elapsed_s": 0.3},
+    ]
+    timer.mark("sleep")
+    assert json.loads(lines[-1])["phase"] == "sleep"
+    assert json.loads(lines[-1])["elapsed_s"] == 9.1

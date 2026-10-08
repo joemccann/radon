@@ -300,6 +300,42 @@ async def _shielded_wait(proc) -> None:
     await asyncio.shield(asyncio.ensure_future(proc.wait()))
 
 
+STDERR_TAIL_BYTES = 2048
+
+
+async def _drain_stream(stream: Optional[asyncio.StreamReader], sink: bytearray) -> None:
+    if stream is None:
+        return
+    while chunk := await stream.read(65536):
+        sink.extend(chunk)
+
+
+async def _collect_output(
+    proc: asyncio.subprocess.Process,
+    stdout_buf: bytearray,
+    stderr_buf: bytearray,
+) -> None:
+    """communicate(), but into caller-owned buffers that survive a timeout."""
+    stdout = getattr(proc, "stdout", None)
+    stderr = getattr(proc, "stderr", None)
+    if stdout is None and stderr is None:
+        # No pipes to drain incrementally: nothing partial to keep.
+        out, err = await proc.communicate()
+        stdout_buf.extend(out or b"")
+        stderr_buf.extend(err or b"")
+        return
+    await asyncio.gather(
+        _drain_stream(stdout, stdout_buf),
+        _drain_stream(stderr, stderr_buf),
+    )
+    await proc.wait()
+
+
+def _stderr_tail(stderr_buf: bytearray) -> str:
+    tail = bytes(stderr_buf[-STDERR_TAIL_BYTES:]).decode("utf-8", errors="replace").strip()
+    return tail.replace("\n", " | ") or "<empty>"
+
+
 async def run_script(
     script: str,
     args: Optional[List[str]] = None,
@@ -329,6 +365,8 @@ async def run_script(
     cmd = [sys.executable, str(script_path)] + (args or [])
     work_dir = cwd or str(SCRIPTS_DIR)
     proc: Optional[asyncio.subprocess.Process] = None
+    stdout_buf = bytearray()
+    stderr_buf = bytearray()
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -339,12 +377,12 @@ async def run_script(
             start_new_session=True,
         )
 
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout
+        await asyncio.wait_for(
+            _collect_output(proc, stdout_buf, stderr_buf), timeout=timeout
         )
 
-        stdout = stdout_bytes.decode("utf-8", errors="replace")
-        stderr = stderr_bytes.decode("utf-8", errors="replace")
+        stdout = stdout_buf.decode("utf-8", errors="replace")
+        stderr = stderr_buf.decode("utf-8", errors="replace")
 
         if proc.returncode != 0:
             err_msg = _extract_error_message(
@@ -375,7 +413,12 @@ async def run_script(
         return ScriptResult(ok=True, data=payload)
 
     except asyncio.TimeoutError:
-        logger.error("Script %s timed out after %.0fs", script, timeout)
+        logger.error(
+            "Script %s timed out after %.0fs; stderr tail: %s",
+            script,
+            timeout,
+            _stderr_tail(stderr_buf),
+        )
         await _terminate_child(proc)
         return ScriptResult(ok=False, error=f"Script timed out after {timeout}s")
 

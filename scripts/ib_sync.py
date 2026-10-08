@@ -20,6 +20,7 @@ import math
 import os
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Tuple
@@ -851,7 +852,38 @@ def _et_today() -> str:
     return datetime.now(ZoneInfo("America/New_York")).date().isoformat()
 
 
-def _safe_option_history(client: IBClient, contract, what_to_show: str):
+OPTION_HISTORY_REQUEST_TIMEOUT_S = 5.0
+# Total history time one sync run may spend across every leg. ib_sync runs
+# under a 30s kill with a p50 of 26s; two sequential 5s requests per illiquid
+# leg is what pushed the tail past it.
+OPTION_HISTORY_BUDGET_S = 6.0
+MIN_OPTION_HISTORY_REQUEST_S = 0.5
+
+
+class OptionHistoryBudget:
+    """Wall-clock allowance for option history requests in one sync run."""
+
+    def __init__(self, seconds: float, *, clock=time.monotonic) -> None:
+        self._clock = clock
+        self._deadline = clock() + seconds
+
+    def request_timeout(self) -> Optional[float]:
+        """Timeout for the next request, or None once the budget is spent."""
+        remaining = self._deadline - self._clock()
+        if remaining < MIN_OPTION_HISTORY_REQUEST_S:
+            return None
+        return min(OPTION_HISTORY_REQUEST_TIMEOUT_S, remaining)
+
+    def __repr__(self) -> str:
+        return f"OptionHistoryBudget(remaining={self._deadline - self._clock():.2f}s)"
+
+
+def _safe_option_history(
+    client: IBClient,
+    contract,
+    what_to_show: str,
+    timeout: float = OPTION_HISTORY_REQUEST_TIMEOUT_S,
+):
     try:
         return client.get_historical_data(
             contract,
@@ -859,7 +891,7 @@ def _safe_option_history(client: IBClient, contract, what_to_show: str):
             bar_size="1 min",
             what_to_show=what_to_show,
             use_rth=True,
-            timeout=5.0,
+            timeout=timeout,
         )
     except Exception as exc:
         label = getattr(contract, "localSymbol", None) or getattr(contract, "symbol", "?")
@@ -867,14 +899,27 @@ def _safe_option_history(client: IBClient, contract, what_to_show: str):
         return None
 
 
-def _option_history_bars(client: IBClient, contract):
-    trade_bars = _safe_option_history(client, contract, "TRADES")
+def _option_history_bars(client: IBClient, contract, budget: Optional[OptionHistoryBudget] = None):
+    def request(what_to_show: str):
+        timeout = OPTION_HISTORY_REQUEST_TIMEOUT_S if budget is None else budget.request_timeout()
+        if timeout is None:
+            return None
+        return _safe_option_history(client, contract, what_to_show, timeout)
+
+    trade_bars = request("TRADES")
     if last_traded_bar_price(trade_bars) is not None:
         return trade_bars, None
-    return trade_bars, _safe_option_history(client, contract, "MIDPOINT")
+    return trade_bars, request("MIDPOINT")
 
 
-def _stamp_position_price(pos: dict, ticker, session_marks: dict, client: IBClient, today: str) -> bool:
+def _stamp_position_price(
+    pos: dict,
+    ticker,
+    session_marks: dict,
+    client: IBClient,
+    today: str,
+    history_budget: Optional[OptionHistoryBudget] = None,
+) -> bool:
     """Write marketPrice fields from the live ticker, session cache, or history."""
     sec_type = pos.get("secType")
     key = None
@@ -888,7 +933,7 @@ def _stamp_position_price(pos: dict, ticker, session_marks: dict, client: IBClie
     contract = pos.get("contract")
 
     def fetch():
-        return _option_history_bars(client, contract)
+        return _option_history_bars(client, contract, history_budget)
 
     price, is_calculated, updated = poll_contract_mark(
         sec_type=sec_type,
@@ -1292,8 +1337,9 @@ def fetch_market_prices(client: IBClient, positions: list) -> list:
     session_marks = load_session_marks()
     today = _et_today()
     dirty = False
+    history_budget = OptionHistoryBudget(OPTION_HISTORY_BUDGET_S)
     for pos, ticker in zip(positions, tickers):
-        dirty = _stamp_position_price(pos, ticker, session_marks, client, today) or dirty
+        dirty = _stamp_position_price(pos, ticker, session_marks, client, today, history_budget) or dirty
         client.cancel_market_data(pos['contract'])
         del pos['contract']  # Remove non-serializable contract object
     if dirty:
@@ -2077,7 +2123,7 @@ def main():
     args = parser.parse_args()
 
     # Connect
-    timer = PhaseTimer("ib_sync")
+    timer = PhaseTimer("ib_sync", stream_marks=True)
     client = connect_ib(args.host, args.port, args.client_id or "auto")
     timer.mark("connect")
 
@@ -2169,12 +2215,14 @@ def main():
             session_marks = load_session_marks()
             today = _et_today()
             dirty = False
+            history_budget = OptionHistoryBudget(OPTION_HISTORY_BUDGET_S)
             for pos, ticker in zip(positions, tickers):
-                dirty = _stamp_position_price(pos, ticker, session_marks, client, today) or dirty
+                dirty = _stamp_position_price(pos, ticker, session_marks, client, today, history_budget) or dirty
                 client.ib.cancelMktData(pos['contract'])
                 del pos['contract']
             if dirty:
                 save_session_marks(session_marks)
+            timer.mark("prices")
 
             # Per-position PnL
             def _valid_daily(val):
@@ -2247,6 +2295,7 @@ def main():
                     margin_observed_through=margin_observed_through,
                     allow_empty=args.allow_empty,
                 )
+                timer.mark("persist")
             except Exception as exc:
                 db_save_error = exc
                 if args.db_optional:

@@ -361,3 +361,58 @@ class TestCacheRoundtrip:
         path = tmp_path / "cache.json"
         save_session_marks({META_KEY: {"last": 0, "close": CLOSE}}, path)
         assert load_session_marks(path) == {}
+
+
+class TestOptionHistoryBudget:
+    """One sync run shares one history budget across every leg.
+
+    Each option leg with no live tick and no fresh session mark cost up to two
+    sequential 5s history requests (TRADES, then MIDPOINT). A handful of
+    illiquid or off-hours legs pushed ib_sync (p50 26s) past its 30s kill on
+    7% of runs. The run now spends at most OPTION_HISTORY_BUDGET_S on history
+    in total; legs past the budget keep their existing fallback.
+    """
+
+    def _leg(self, n):
+        from types import SimpleNamespace
+
+        pos = dict(secType="OPT", symbol=f"T{n}", expiry="20261016", strike=100 + n,
+                   right="C", position=1, contract=SimpleNamespace(symbol=f"T{n}"))
+        ticker = SimpleNamespace(marketPrice=lambda: None, bid=None, ask=None, close=CLOSE, last=None)
+        return pos, ticker
+
+    def test_ten_hanging_legs_finish_within_the_run_budget(self):
+        from unittest.mock import Mock
+        import ib_sync
+
+        clock = {"now": 0.0}
+        client = Mock()
+
+        def hang(*_args, timeout, **_kwargs):
+            clock["now"] += timeout
+            raise TimeoutError()
+
+        client.get_historical_data.side_effect = hang
+        budget = ib_sync.OptionHistoryBudget(ib_sync.OPTION_HISTORY_BUDGET_S, clock=lambda: clock["now"])
+
+        for n in range(10):
+            pos, ticker = self._leg(n)
+            ib_sync._stamp_position_price(pos, ticker, {}, client, TODAY, history_budget=budget)
+
+        assert clock["now"] <= ib_sync.OPTION_HISTORY_BUDGET_S
+        assert ib_sync.OPTION_HISTORY_BUDGET_S <= 8.0
+        timeouts = [call.kwargs["timeout"] for call in client.get_historical_data.call_args_list]
+        assert all(0 < t <= 5.0 for t in timeouts)
+
+    def test_an_exhausted_budget_skips_history_and_keeps_the_fallback(self):
+        from unittest.mock import Mock
+        import ib_sync
+
+        client = Mock()
+        budget = ib_sync.OptionHistoryBudget(0.0, clock=lambda: 0.0)
+        pos, ticker = self._leg(1)
+        marks = {}
+
+        assert ib_sync._stamp_position_price(pos, ticker, marks, client, TODAY, history_budget=budget) is False
+        client.get_historical_data.assert_not_called()
+        assert pos["marketPrice"] is None

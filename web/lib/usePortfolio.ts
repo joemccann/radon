@@ -9,11 +9,21 @@ import {
   reportOfflineServed,
 } from "./offline/offlineSignals";
 import { useRouteRefreshKey } from "./RouteRefreshContext";
+import { BROWSER_PRODUCER_SYNC_TIMEOUT_MS } from "./edgeBudget";
 
 const POLL_INTERVAL_MS = 30_000;
 const MAX_RATE_LIMIT_BACKOFF_MS = 15 * 60_000;
 const GET_FETCH_TIMEOUT_MS = 12_000;
-const POST_FETCH_TIMEOUT_MS = 42_000;
+/** Re-read delay after the route reports the IB sync still running
+ *  server-side: long enough for a typical sync to land in Turso. */
+export const SYNC_PENDING_REPOLL_MS = 10_000;
+const EDGE_PENDING_MESSAGE = "IB sync still running - showing latest snapshot";
+
+/** Caddy's own 502/504 page: the edge gave up, the shielded sync did not. */
+function isOpaqueEdgeTimeout(res: Response): boolean {
+  const isJson = (res.headers.get("content-type") ?? "").includes("application/json");
+  return !isJson && (res.status === 502 || res.status === 504);
+}
 
 type UsePortfolioReturn = {
   data: PortfolioData | null;
@@ -173,12 +183,17 @@ export function usePortfolio(
       const res = await fetch("/api/portfolio", {
         method: "POST",
         cache: "no-store",
-        signal: AbortSignal.timeout(POST_FETCH_TIMEOUT_MS),
+        signal: AbortSignal.timeout(BROWSER_PRODUCER_SYNC_TIMEOUT_MS),
       });
       // A sibling tab or device already spent this window's producer budget;
       // its snapshot arrives on the next poll (a separate, unlimited-so-far
       // read bucket, so the poll is deliberately NOT backed off here).
       if (res.status === 429) return;
+      if (isOpaqueEdgeTimeout(res)) {
+        if (mountedRef.current) setError(EDGE_PENDING_MESSAGE);
+        scheduleNext(SYNC_PENDING_REPOLL_MS);
+        return;
+      }
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { error?: string }).error ?? "Sync failed");
@@ -203,13 +218,14 @@ export function usePortfolio(
         warningSnapshotRef.current = null;
         setError(null);
       }
+      if (res.headers.get("X-Sync-Pending") === "1") scheduleNext(SYNC_PENDING_REPOLL_MS);
     } catch (err) {
       if (mountedRef.current) setError(err instanceof Error ? err.message : "Sync failed");
     } finally {
       syncingRef.current = false;
       if (mountedRef.current) setSyncing(false);
     }
-  }, [includeEntryDates]);
+  }, [includeEntryDates, scheduleNext]);
 
   const syncNow = useCallback(() => {
     void doSync();

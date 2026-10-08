@@ -108,3 +108,29 @@ def test_ib_sync_main_emits_connect_qualify_sleep_timing(monkeypatch, capsys):
     assert "connect" in phases
     assert "qualify" in phases
     assert "sleep" in phases
+
+
+def test_ib_sync_streams_each_phase_before_the_run_ends(monkeypatch, capsys):
+    """run_script logs the stderr tail of a killed ib_sync; the tail must
+    already name the phases that finished, since emit() never runs."""
+    client = MagicMock()
+    client.ib.managedAccounts.return_value = ["DU1"]
+    client.ib.reqPnL.return_value = MagicMock(dailyPnL=1.0, unrealizedPnL=1.0, realizedPnL=0.0)
+    client.wait_until = MagicMock(return_value=True)
+
+    monkeypatch.setattr(ib_sync, "connect_ib", lambda *a, **k: client)
+    monkeypatch.setattr(ib_sync, "get_account_summary", lambda *a, **k: {"NetLiquidation": 100000})
+    monkeypatch.setattr(ib_sync, "build_journal_basis_lookup", lambda *a, **k: {})
+    monkeypatch.setattr(ib_sync, "fetch_positions", lambda *a, **k: [])
+    monkeypatch.setattr(ib_sync, "collapse_positions", lambda positions: [])
+    monkeypatch.setattr(ib_sync, "display_portfolio", lambda *a, **k: None)
+    monkeypatch.setattr(sys, "argv", ["ib_sync.py", "--no-prices", "--skip-audit"])
+    ib_sync.main()
+
+    streamed = [
+        json.loads(line)
+        for line in capsys.readouterr().err.splitlines()
+        if '"ib_hot_path_phase"' in line
+    ]
+    assert [record["phase"] for record in streamed][:1] == ["connect"]
+    assert all(record["job"] == "ib_sync" for record in streamed)
