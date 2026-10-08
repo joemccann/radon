@@ -16,7 +16,7 @@ The Radon employs six strategies, each exploiting informational or structural ad
 | **Crash Risk Index** | CTA deleveraging | SPY puts, tail hedges | 3-5 days | Defined (long puts/spreads) |
 
 See also: [`strategy-garch-convergence.md`](strategy-garch-convergence.md) for the full GARCH Convergence Spreads specification.
-See also: [`cross_asset_volatility_credit_gap_spec_(VCG).md`](cross_asset_volatility_credit_gap_spec_(VCG).md) for the full VCG mathematical specification.
+See also: [`cross_asset_volatility_credit_gap_spec_(VCG).md`](cross_asset_volatility_credit_gap_spec_%28VCG%29.md) for the full VCG mathematical specification.
 
 ---
 
@@ -468,7 +468,7 @@ python3.13 scripts/risk_reversal.py IWM --json
 
 ## Strategy 5: Volatility-Credit Gap (VCG-R)
 
-*Strategy overhauled 2026-03-23. VIX gate inverted, HDR removed, severity tiers added. See full spec: [`cross_asset_volatility_credit_gap_spec_(VCG).md`](cross_asset_volatility_credit_gap_spec_(VCG).md)*
+*Strategy overhauled 2026-03-23. VIX gate inverted, HDR removed, severity tiers added. See full spec: [`cross_asset_volatility_credit_gap_spec_(VCG).md`](cross_asset_volatility_credit_gap_spec_%28VCG%29.md)*
 
 ### Thesis
 
@@ -707,7 +707,7 @@ Every field in the VCG-R scan JSON output (`--json`) and HTML report is defined 
 | VIX panic threshold | 40–48 | 40–48 | Unchanged |
 | Sign discipline | Both β < 0 | Both β < 0 | Unchanged |
 
-Full mathematical specification: [`cross_asset_volatility_credit_gap_spec_(VCG).md`](cross_asset_volatility_credit_gap_spec_(VCG).md)
+Full mathematical specification: [`cross_asset_volatility_credit_gap_spec_(VCG).md`](cross_asset_volatility_credit_gap_spec_%28VCG%29.md)
 
 ---
 

@@ -5,7 +5,9 @@
 Radon owns a private, read-only research client for the official
 `https://mcp.tradingview.com/mcp` Streamable HTTP server. Existing Ultimate access
 is sufficient. This is separate from the webhook receiver and does not replace
-IB execution or the existing price-provider order.
+IB execution or the existing price-provider order. SDK-created OAuth metadata
+requests omit User-Agent; stamp `User-Agent: radon/2.0` on every auth request or
+the vendor returns 403.
 
 Use the already pinned Python `mcp==1.28.1` SDK for protocol negotiation and
 OAuth discovery, PKCE, dynamic client registration, refresh and session framing.
@@ -18,9 +20,8 @@ HTTP operations and complete research calls have finite deadlines.
 It opens official browser consent and accepts the OAuth callback only on a
 temporary 127.0.0.1 listener. SDK state validation and PKCE are mandatory.
 The loopback callback avoids adding a public auth-exempt endpoint to Radon.
-This replaces the speculative app.radon.run callback requirement for this
-single-operator first release. Production receives its own protected token file
-through the existing operator credential deployment mechanism.
+Production receives its own protected token file through the existing operator
+credential deployment mechanism.
 
 Persist OAuth tokens, expiry and registered client metadata atomically in a
 0600 regular file configured by `TRADINGVIEW_MCP_TOKEN_FILE`, defaulting to
@@ -44,7 +45,7 @@ Deny every tool except the explicit, documented research allowlist. Exclude all
 alert and watchlist mutations and `get_active_watchlist` (can create/activate
 lists despite its read-only label). Discover available tools and honor their
 input schemas without widening the allowlist. No news story bodies or alert fire
-messages in this first release. Structured responses or JSON text content are
+messages. Structured responses or JSON text content are
 accepted; `isError`, partial provider errors and malformed payloads stay errors.
 No fabricated zeroes or swallowed auth failures. Empty search/calendar arrays
 remain legitimate empty results; empty OHLCV is unusable history and stays an error.
@@ -74,20 +75,7 @@ bounded error codes. Credentials are never returned.
 
 TradingView serves explicit research reads for unique coverage. Existing
 commodity price priority remains IB > Robinhood > UW > specialized official >
-Yahoo. This release does not insert TradingView into automatic price failover;
-the integration roadmap's proposed position remains future work.
-
-## Verification plan
-
-Record failing tests before modules exist. Test OAuth file permissions, atomic
-updates and expiry, blocked interactive consent in unattended calls, protocol
-initialization/tool calls, allowlist rejection before network, schema validation,
-structured/text/error payloads, timeouts/rate limits, and OHLCV normalization.
-Exercise actual SDK against an in-process fake server or mock HTTP transport.
-Test CLI and API usable paths, missing credentials and private caching/auth
-registration. Luna runs serial focused checks followed by relevant broader gates.
-Live operator consent and authenticated symbol/bar probes are separate evidence;
-mocked tests do not claim live data. Capture only sanitized source payloads.
+Yahoo. The client is not in automatic price failover.
 
 ## Record-high breadth dependency
 
@@ -101,31 +89,8 @@ skills after these source gates pass.
 
 ## Primary reference
 
-[TradingView official MCP documentation](https://www.tradingview.com/mcp/docs),
-checked 2026-10-07. Vendor beta schemas may evolve; live tool discovery is required.
-
-## Verification evidence, 2026-10-07
-
-Sol 6.1 implemented the client and authentication modules. Luna 6 independently
-exercised SDK discovery, registration, PKCE, state rejection, credential refresh,
-and the protected CLI/API surfaces. Final focused verification passes 186 tests;
-combined statement/branch coverage is 99% (client 100%, auth 99%, API 100%, CLI 96%).
-Input and output schemas reject remote references before SDK validation, keeping
-schema resolution inside the client's network boundary. Regression tests proved
-remote output references attempted retrieval before the repair.
-
-Complete Python roots: scripts 13,062 passed, 2 skipped; API 1,212 passed; trade
-blotter 25 passed; cloud 2,692 passed, 7 skipped, 3 failed. Two cloud setgid-mode
-assertions reproduce unchanged at base `1a0b888c4` on macOS. The Caddy startup
-timeout passes in both targeted base runs. These remain separate from the focused
-green client verification. Full JavaScript verification passes 10,437 tests across
-1,054 files, with 21 tests and one file skipped. Upstream exact-head CI receipts
-are recorded on the pull request before delivery.
-
-Live official OAuth discovery reaches TradingView's consent page. A missing
-User-Agent on SDK-created metadata requests caused HTTP 403; stamped
-`User-Agent: radon/2.0` requests reach the official metadata endpoint (HTTP 200).
-No authenticated tool call is claimed until operator consent and live probes pass.
+[TradingView official MCP documentation](https://www.tradingview.com/mcp/docs).
+Vendor beta schemas may evolve; live tool discovery is required.
 
 ## Operator setup and research
 
