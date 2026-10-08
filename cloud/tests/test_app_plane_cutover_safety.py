@@ -252,6 +252,76 @@ class TestImageBuildCarriesPublicEnv:
         assert concurrency.get("cancel-in-progress") is True
 
 
+def _image_cache_step(job: dict) -> dict:
+    step = next(item for item in job["steps"] if item.get("id") == "image-cache")
+    assert step["name"] == "Select image cache"
+    assert set(step["env"]) == {"IMAGE_REPO", "GHA_SCOPE"}
+    return step
+
+
+def _run_image_cache_selector(
+    job: dict, *, ref: str, event: str, inspect_status: int
+) -> tuple[str, str]:
+    import os
+    import tempfile
+
+    step = _image_cache_step(job)
+    with tempfile.TemporaryDirectory() as tmp:
+        output = Path(tmp) / "github-output"
+        bin_dir = Path(tmp) / "bin"
+        bin_dir.mkdir()
+        docker = bin_dir / "docker"
+        docker.write_text(
+            "#!/bin/bash\n"
+            "if [ \"$1\" = \"buildx\" ] && [ \"$2\" = \"imagetools\" ] && [ \"$3\" = \"inspect\" ]; then\n"
+            f"  exit {inspect_status}\n"
+            "fi\n"
+            "echo unexpected docker call >&2\n"
+            "exit 99\n",
+            encoding="utf-8",
+        )
+        docker.chmod(0o755)
+        env = os.environ.copy()
+        env.update(
+            GITHUB_OUTPUT=str(output),
+            GITHUB_REF=ref,
+            GITHUB_EVENT_NAME=event,
+            PATH=f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
+        )
+        env.update({key: str(value) for key, value in step["env"].items()})
+        completed = subprocess.run(
+            ["bash", "-euo", "pipefail", "-c", step["run"]],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr
+        return _parse_github_output(output.read_text(encoding="utf-8"))
+
+
+def _parse_github_output(text: str) -> tuple[str, str]:
+    cache_from = ""
+    cache_to = ""
+    lines = text.splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if line.startswith("cache_from<<"):
+            marker = line.split("<<", 1)[1]
+            index += 1
+            body = []
+            while index < len(lines) and lines[index] != marker:
+                body.append(lines[index])
+                index += 1
+            cache_from = "\n".join(body)
+        elif line.startswith("cache_to="):
+            cache_to = line.split("=", 1)[1]
+        index += 1
+    assert cache_from and cache_to
+    return cache_from, cache_to
+
+
 class TestImageBuildUsesRemoteCache:
     def test_python_image_runs_a_hardened_browser_smoke(self):
         jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
@@ -308,19 +378,70 @@ class TestImageBuildUsesRemoteCache:
         assert "github.event_name == 'push'" in config["push"]
         assert f"ghcr.io/joemccann/{image}:${{{{ github.sha }}}}" in config["tags"]
         assert f"ghcr.io/joemccann/{image}:latest" in config["tags"]
-        assert config["cache-from"] == f"type=gha,scope={scope}"
-        assert config["cache-to"] == f"type=gha,mode=max,scope={scope}"
+        # The build consumes the selector outputs. A literal GHA cache-to here
+        # would again block deploy on the Actions cache upload after GHCR
+        # already has the exact SHA.
+        assert config["cache-from"] == "${{ steps.image-cache.outputs.cache_from }}"
+        assert config["cache-to"] == "${{ steps.image-cache.outputs.cache_to }}"
+        step = _image_cache_step(jobs[job_name])
+        assert step["env"]["IMAGE_REPO"] == f"ghcr.io/joemccann/{image}"
+        assert step["env"]["GHA_SCOPE"] == scope
+        missing_from, missing_to = _run_image_cache_selector(
+            jobs[job_name],
+            ref="refs/heads/main",
+            event="push",
+            inspect_status=1,
+        )
+        warm_from, warm_to = _run_image_cache_selector(
+            jobs[job_name],
+            ref="refs/heads/main",
+            event="push",
+            inspect_status=0,
+        )
+        pr_from, pr_to = _run_image_cache_selector(
+            jobs[job_name],
+            ref="refs/pull/1/merge",
+            event="pull_request",
+            inspect_status=1,
+        )
+        # A missing buildcache tag must not fail the publish. Keep reading the
+        # existing GHA cache until the registry tag exists.
+        assert missing_from == f"type=gha,scope={scope}"
+        assert missing_to == (
+            f"type=registry,ref=ghcr.io/joemccann/{image}:buildcache,mode=max"
+        )
+        assert warm_from.splitlines() == [
+            f"type=registry,ref=ghcr.io/joemccann/{image}:buildcache",
+            f"type=gha,scope={scope}",
+        ]
+        assert warm_to == missing_to
+        assert ":latest" not in warm_to and "github.sha" not in warm_to
+        assert pr_from == f"type=gha,scope={scope}"
+        assert pr_to == f"type=gha,mode=max,scope={scope}"
+        assert "packages:write" not in pr_to
 
     def test_python_and_node_do_not_share_a_cache_scope(self):
         jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
-        scopes = []
+        repos = []
         for job_name in ("python-image", "node-image"):
-            build_step = next(
-                step for step in jobs[job_name]["steps"]
-                if step.get("uses") == BUILD_PUSH_ACTION
-            )
-            scopes.append(build_step["with"]["cache-to"])
-        assert len(set(scopes)) == 2
+            repos.append(_image_cache_step(jobs[job_name])["env"]["IMAGE_REPO"])
+        assert repos == [
+            "ghcr.io/joemccann/radon-python",
+            "ghcr.io/joemccann/radon-node",
+        ]
+        assert len(set(repos)) == 2
+
+    def test_deploy_paths_do_not_pull_the_buildcache_tag(self):
+        """The registry cache tag is not a deploy fallback. Production still
+        pulls the exact 40-character SHA."""
+        root = WORKFLOW.parents[2]
+        for relative in (
+            "cloud/scripts/deploy.sh",
+            "cloud/scripts/deploy-root-helper.sh",
+            "cloud/scripts/radon-app-runtime.sh",
+        ):
+            text = (root / relative).read_text(encoding="utf-8")
+            assert "buildcache" not in text, relative
 
     def test_no_serial_shell_build_tag_or_push_remains(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
