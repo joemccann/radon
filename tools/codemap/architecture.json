@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-10-07T09:00:09Z",
-  "node_count": 3749,
-  "edge_count": 7724,
+  "generated_at": "2026-10-08T09:00:08Z",
+  "node_count": 3800,
+  "edge_count": 7804,
   "areas": {
-    "web": 2150,
-    "site": 156,
-    "scripts": 1301,
-    "cloud": 95,
+    "web": 2171,
+    "site": 159,
+    "scripts": 1323,
+    "cloud": 100,
     "lib": 28,
     "tests": 17,
     "tools": 2
@@ -20,12 +20,12 @@
     {
       "id": "web/components",
       "area": "web",
-      "count": 270
+      "count": 271
     },
     {
       "id": "web/e2e",
       "area": "web",
-      "count": 214
+      "count": 220
     },
     {
       "id": "web/e2e-setup-gate",
@@ -40,7 +40,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 418
+      "count": 420
     },
     {
       "id": "web/public",
@@ -50,12 +50,17 @@
     {
       "id": "web/scripts",
       "area": "web",
-      "count": 2
+      "count": 3
+    },
+    {
+      "id": "web/tester-army",
+      "area": "web",
+      "count": 4
     },
     {
       "id": "web/tests",
       "area": "web",
-      "count": 1003
+      "count": 1010
     },
     {
       "id": "site/app",
@@ -70,7 +75,7 @@
     {
       "id": "site/e2e",
       "area": "site",
-      "count": 6
+      "count": 7
     },
     {
       "id": "site",
@@ -88,9 +93,14 @@
       "count": 2
     },
     {
+      "id": "site/tester-army",
+      "area": "site",
+      "count": 2
+    },
+    {
       "id": "scripts",
       "area": "scripts",
-      "count": 175
+      "count": 177
     },
     {
       "id": "scripts/ai_cycle",
@@ -105,7 +115,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 127
+      "count": 132
     },
     {
       "id": "scripts/backtest",
@@ -120,7 +130,7 @@
     {
       "id": "scripts/clients",
       "area": "scripts",
-      "count": 23
+      "count": 25
     },
     {
       "id": "scripts/control_service",
@@ -210,7 +220,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 670
+      "count": 682
     },
     {
       "id": "scripts/trade_blotter",
@@ -220,7 +230,7 @@
     {
       "id": "scripts/utils",
       "area": "scripts",
-      "count": 44
+      "count": 45
     },
     {
       "id": "scripts/watchdog",
@@ -245,7 +255,7 @@
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 83
+      "count": 88
     },
     {
       "id": "lib/tools",
@@ -272,14 +282,14 @@
     {
       "id": "web/lib/types.ts",
       "area": "web",
-      "in": 279,
+      "in": 281,
       "out": 1,
       "test": false
     },
     {
       "id": "web/lib/pricesProtocol.ts",
       "area": "web",
-      "in": 199,
+      "in": 200,
       "out": 0,
       "test": false
     },
@@ -305,6 +315,13 @@
       "test": false
     },
     {
+      "id": "scripts/db/writer.py",
+      "area": "scripts",
+      "in": 93,
+      "out": 5,
+      "test": false
+    },
+    {
       "id": "web/components/WorkspaceShell.tsx",
       "area": "web",
       "in": 56,
@@ -319,24 +336,17 @@
       "test": false
     },
     {
-      "id": "scripts/db/writer.py",
+      "id": "scripts/api/__init__.py",
       "area": "scripts",
       "in": 92,
-      "out": 5,
+      "out": 0,
       "test": false
     },
     {
       "id": "scripts/db/__init__.py",
       "area": "scripts",
-      "in": 88,
+      "in": 90,
       "out": 1,
-      "test": false
-    },
-    {
-      "id": "scripts/api/__init__.py",
-      "area": "scripts",
-      "in": 88,
-      "out": 0,
       "test": false
     },
     {
@@ -396,17 +406,17 @@
       "test": false
     },
     {
+      "id": "scripts/db/hrana_http.py",
+      "area": "scripts",
+      "in": 53,
+      "out": 3,
+      "test": false
+    },
+    {
       "id": "web/lib/dbFirstRead.ts",
       "area": "web",
       "in": 49,
       "out": 5,
-      "test": false
-    },
-    {
-      "id": "scripts/db/hrana_http.py",
-      "area": "scripts",
-      "in": 51,
-      "out": 2,
       "test": false
     },
     {
@@ -445,17 +455,17 @@
       "test": false
     },
     {
+      "id": "scripts/watchdog/__init__.py",
+      "area": "scripts",
+      "in": 46,
+      "out": 0,
+      "test": false
+    },
+    {
       "id": "web/components/RequestError.tsx",
       "area": "web",
       "in": 44,
       "out": 2,
-      "test": false
-    },
-    {
-      "id": "scripts/watchdog/__init__.py",
-      "area": "scripts",
-      "in": 45,
-      "out": 0,
       "test": false
     },
     {
@@ -475,7 +485,7 @@
     {
       "id": "scripts/clients/ib_client.py",
       "area": "scripts",
-      "in": 36,
+      "in": 37,
       "out": 3,
       "test": false
     },
@@ -496,6 +506,13 @@
     {
       "id": "web/lib/refreshSchedule.ts",
       "area": "web",
+      "in": 36,
+      "out": 0,
+      "test": false
+    },
+    {
+      "id": "scripts/api/auth.py",
+      "area": "scripts",
       "in": 36,
       "out": 0,
       "test": false
@@ -529,7 +546,7 @@
       "test": false
     },
     {
-      "id": "scripts/api/auth.py",
+      "id": "scripts/utils/__init__.py",
       "area": "scripts",
       "in": 35,
       "out": 0,
@@ -540,13 +557,6 @@
       "area": "scripts",
       "in": 24,
       "out": 11,
-      "test": false
-    },
-    {
-      "id": "scripts/utils/__init__.py",
-      "area": "scripts",
-      "in": 34,
-      "out": 0,
       "test": false
     }
   ],
