@@ -9,12 +9,12 @@ import {
   reportOfflineServed,
 } from "./offline/offlineSignals";
 import { useRouteRefreshKey } from "./RouteRefreshContext";
+import { BROWSER_PRODUCER_SYNC_TIMEOUT_MS } from "./edgeBudget";
 
 const POLL_INTERVAL_MS = 30_000;
 /** Ceiling for the failure backoff. R-263. */
 const MAX_POLL_INTERVAL_MS = 5 * 60_000;
 const GET_FETCH_TIMEOUT_MS = 12_000;
-const POST_FETCH_TIMEOUT_MS = 42_000;
 
 type UseOrdersReturn = {
   data: OrdersData | null;
@@ -148,7 +148,7 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
       const res = await fetch("/api/orders", {
         method: "POST",
         cache: "no-store",
-        signal: AbortSignal.timeout(POST_FETCH_TIMEOUT_MS),
+        signal: AbortSignal.timeout(BROWSER_PRODUCER_SYNC_TIMEOUT_MS),
       });
       // A sibling tab or device already spent this window's producer budget;
       // its snapshot arrives on the next poll. Coalescence, not degradation.

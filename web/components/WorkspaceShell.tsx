@@ -13,7 +13,11 @@ import { usePortfolio } from "@/lib/usePortfolio";
 import { useOrders } from "@/lib/useOrders";
 import { useMarketHours, MarketState } from "@/lib/useMarketHours";
 import { useAutoSyncOnStale } from "@/lib/useAutoSyncOnStale";
-import { useSnapshotStaleness } from "@/lib/useSnapshotStaleness";
+import {
+  PORTFOLIO_SNAPSHOT_STALE_THRESHOLD_MS,
+  SNAPSHOT_STALE_THRESHOLD_MS,
+  useSnapshotStaleness,
+} from "@/lib/useSnapshotStaleness";
 import { useToast } from "@/lib/useToast";
 import { useOrderActions } from "@/lib/OrderActionsContext";
 import { useRealtimePrices } from "@/lib/RealtimePricesContext";
@@ -526,7 +530,10 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
     state: snapshotState,
     staleAgeMinutes,
     tick: stalenessTick,
-  } = useSnapshotStaleness(lastSync);
+  } = useSnapshotStaleness(
+    lastSync,
+    isOrdersPage ? SNAPSHOT_STALE_THRESHOLD_MS : PORTFOLIO_SNAPSHOT_STALE_THRESHOLD_MS,
+  );
 
   // R-149: no snapshot at all is a BLACKOUT, and "Awaiting first sample" read
   // as a benign startup state for the rest of the session.

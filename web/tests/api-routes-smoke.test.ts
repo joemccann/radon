@@ -433,12 +433,13 @@ describe("GET /api/admin/health", () => {
     expect(body.auth_state).toBe("authenticated");
   });
 
-  it("returns 502 envelope when FastAPI is unreachable", async () => {
+  it("returns a 200 missing verdict when FastAPI is unreachable", async () => {
     mockRadonFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
     const { GET } = await import("../app/api/admin/health/route");
     const res = await GET();
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(200);
     const body = (await jsonOf(res)) as Record<string, unknown>;
+    expect(body.missing).toBe(true);
     expect(body.error).toBeDefined();
   });
 });

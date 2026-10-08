@@ -1,6 +1,8 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
 import { NextResponse } from "next/server";
 import { radonFetch } from "@/lib/radonApi";
+import { PRODUCER_SYNC_WAIT_MS } from "@/lib/edgeBudget";
+import { markSyncFallback } from "@/lib/syncFallback";
 import { readOrdersSnapshotFromDb } from "@/lib/orders/readOrdersFromDb";
 import { invalidateOrdersSnapshotCache } from "@/lib/orders/ordersReadCache";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
@@ -62,12 +64,12 @@ export async function POST(): Promise<Response> {
   try {
     // Coalesce concurrent POSTs
     if (!syncInFlight) {
-      syncInFlight = radonFetch("/orders/refresh", { method: "POST", timeout: 35_000 })
+      syncInFlight = radonFetch("/orders/refresh", { method: "POST", timeout: PRODUCER_SYNC_WAIT_MS })
         .then(() => {})
         .finally(() => { syncInFlight = null; });
     }
     await syncInFlight;
-  } catch {
+  } catch (syncError) {
     invalidateOrdersSnapshotCache();
     let cached;
     try {
@@ -83,8 +85,7 @@ export async function POST(): Promise<Response> {
     }
     if (cached.last_sync) {
       console.warn("[Orders] Sync failed, serving latest Turso snapshot");
-      const res = NextResponse.json(cached);
-      res.headers.set("X-Sync-Warning", "IB sync failed - serving latest Turso snapshot");
+      const res = markSyncFallback(NextResponse.json(cached), syncError);
       return setNoStoreResponseHeaders(res, requestId);
     }
     return setNoStoreResponseHeaders(

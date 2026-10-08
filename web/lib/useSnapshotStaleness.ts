@@ -3,6 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 export const SNAPSHOT_STALE_THRESHOLD_MS = 60_000;
+/**
+ * radon-portfolio-sync.timer writes every 60s and one sync run takes up to
+ * ~61s at p99, so a healthy portfolio snapshot can be ~2 minutes old. At 60s
+ * every tab auto-fired the producer POST about once a minute, doubling the
+ * IB sync load the timer already carries.
+ */
+export const PORTFOLIO_SNAPSHOT_STALE_THRESHOLD_MS = 150_000;
 const STALENESS_TICK_MS = 30_000;
 
 /**
@@ -26,7 +33,7 @@ export type SnapshotStaleness = {
   tick: number;
 };
 
-function evaluate(lastSync: string | null, now: number): {
+function evaluate(lastSync: string | null, now: number, thresholdMs: number): {
   state: SnapshotState;
   staleAgeMinutes: number | null;
 } {
@@ -35,7 +42,7 @@ function evaluate(lastSync: string | null, now: number): {
   if (Number.isNaN(syncedAt)) return { state: "unknown", staleAgeMinutes: null };
   const ageMs = now - syncedAt;
   return {
-    state: ageMs > SNAPSHOT_STALE_THRESHOLD_MS ? "stale" : "fresh",
+    state: ageMs > thresholdMs ? "stale" : "fresh",
     staleAgeMinutes: Math.max(1, Math.floor(ageMs / 60_000)),
   };
 }
@@ -55,23 +62,26 @@ function evaluate(lastSync: string | null, now: number): {
  * healthy steady state re-rendered WorkspaceShell and every non-memoised
  * child every 30s in every open tab for nothing.
  */
-export function useSnapshotStaleness(lastSync: string | null): SnapshotStaleness {
+export function useSnapshotStaleness(
+  lastSync: string | null,
+  thresholdMs: number = SNAPSHOT_STALE_THRESHOLD_MS,
+): SnapshotStaleness {
   const [tick, setTick] = useState(0);
-  const stateRef = useRef<SnapshotState>(evaluate(lastSync, Date.now()).state);
+  const stateRef = useRef<SnapshotState>(evaluate(lastSync, Date.now(), thresholdMs).state);
 
   useEffect(() => {
-    stateRef.current = evaluate(lastSync, Date.now()).state;
+    stateRef.current = evaluate(lastSync, Date.now(), thresholdMs).state;
     const id = setInterval(() => {
-      const next = evaluate(lastSync, Date.now()).state;
+      const next = evaluate(lastSync, Date.now(), thresholdMs).state;
       const changed = next !== stateRef.current;
       stateRef.current = next;
       if (changed || next !== "fresh") setTick((t) => t + 1);
     }, STALENESS_TICK_MS);
     return () => clearInterval(id);
-  }, [lastSync]);
+  }, [lastSync, thresholdMs]);
 
   return useMemo(() => {
-    const { state, staleAgeMinutes } = evaluate(lastSync, Date.now());
+    const { state, staleAgeMinutes } = evaluate(lastSync, Date.now(), thresholdMs);
     return { isStale: state !== "fresh", state, staleAgeMinutes, tick };
-  }, [lastSync, tick]);
+  }, [lastSync, thresholdMs, tick]);
 }

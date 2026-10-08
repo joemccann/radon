@@ -22,10 +22,12 @@ class PhaseTimer:
         *,
         clock: Callable[[], float] = time.monotonic,
         sink: Optional[Callable[[str], None]] = None,
+        stream_marks: bool = False,
     ) -> None:
         self.job = job
         self._clock = clock
         self._sink = sink
+        self._stream_marks = stream_marks
         self._t0 = clock()
         self.phases: list[dict[str, Any]] = []
 
@@ -33,7 +35,18 @@ class PhaseTimer:
         elapsed_s = round(self._clock() - self._t0, 4)
         record = {"phase": phase, "elapsed_s": elapsed_s}
         self.phases.append(record)
+        if self._stream_marks:
+            # A job killed at its timeout never reaches emit(); each streamed
+            # mark is what the parent logs from the stderr tail.
+            self._write({"event": "ib_hot_path_phase", "job": self.job, **record})
         return record
+
+    def _write(self, payload: dict[str, Any]) -> None:
+        line = json.dumps(payload, separators=(",", ":"))
+        if self._sink is not None:
+            self._sink(line)
+        else:
+            print(line, file=sys.stderr, flush=True)
 
     def as_dict(self) -> dict[str, Any]:
         total_s = self.phases[-1]["elapsed_s"] if self.phases else 0.0
@@ -46,9 +59,5 @@ class PhaseTimer:
 
     def emit(self) -> dict[str, Any]:
         payload = self.as_dict()
-        line = json.dumps(payload, separators=(",", ":"))
-        if self._sink is not None:
-            self._sink(line)
-        else:
-            print(line, file=sys.stderr)
+        self._write(payload)
         return payload

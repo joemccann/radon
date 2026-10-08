@@ -131,7 +131,9 @@ export default function AdminWorkspace() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? `health ${res.status}`);
       }
-      const data = (await res.json()) as AdminHealthPayload;
+      const data = (await res.json()) as AdminHealthPayload & { missing?: boolean; error?: string };
+      // The proxy answers 200 + missing while radon-api restarts.
+      if (data?.missing) throw new Error(data.error ?? "radon-api is unreachable");
       if (!data?.ib_gateway || !data.ib_pool) throw new Error("Invalid broker observation");
       setHealth(data);
       setHealthObservedAt(Date.now());
