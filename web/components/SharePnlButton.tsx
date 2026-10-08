@@ -77,10 +77,11 @@ export function buildTweetText(
   return blocks.join("\n\n");
 }
 
-export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps) {
-  const [open, setOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
-  const [exiting, setExiting] = useState(false);
+type SharePnlActions = ReturnType<typeof useSharePnl>;
+
+/** Owns the share toggles and the copy / tweet / story actions for one P&L.
+ *  `onActionSettled` fires when an action finishes and the surface may close. */
+function useSharePnl(data: SharePnlData, onActionSettled?: () => void) {
   const [showDollar, setShowDollar] = useState(false);
   const [showPct, setShowPct] = useState(true);
   const [copying, setCopying] = useState(false);
@@ -89,12 +90,203 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
   // Story PNG held for a second tap when the browser expired the share gesture
   // while the image rendered (Safari's transient activation is short).
   const [storyFile, setStoryFile] = useState<File | null>(null);
+
+  // A held story PNG is stale once the metric toggles change.
+  useEffect(() => {
+    setStoryFile(null);
+  }, [showDollar, showPct]);
+
+  const generateImage = useCallback(async (format: "card" | "story" = "card") => {
+    const params = new URLSearchParams();
+    params.set("description", data.description);
+    if (showDollar && data.pnl != null) params.set("pnl", String(data.pnl));
+    if (showPct && data.pnlPct != null) params.set("pnlPct", String(data.pnlPct));
+    // Note: commission is intentionally NOT passed to the image API
+    if (data.entryPrice != null) params.set("entryPrice", String(data.entryPrice));
+    if (data.exitPrice != null) params.set("exitPrice", String(data.exitPrice));
+    if (data.entryTime) params.set("entryTime", data.entryTime);
+    if (data.exitTime) params.set("exitTime", data.exitTime);
+    const holdTime = formatHoldDuration(data.entryTime, data.exitTime);
+    if (holdTime) params.set("holdTime", holdTime);
+    if (data.fillPrice != null && data.entryPrice == null && data.exitPrice == null) {
+      params.set("fillPrice", String(data.fillPrice));
+    }
+    if (data.time) params.set("time", data.time);
+    if (format === "story") params.set("format", "story");
+
+    const res = await fetch(`/api/share/pnl?${params.toString()}`);
+    if (!res.ok) throw new Error("Failed to generate image");
+    return res.blob();
+  }, [data, showDollar, showPct]);
+
+  const copyToClipboard = useCallback(async (blob: Blob) => {
+    await navigator.clipboard.write([
+      new ClipboardItem({ "image/png": blob }),
+    ]);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, []);
+
+  const handleCopy = useCallback(async () => {
+    if (copying) return;
+    setCopying(true);
+    setShareError(null);
+    try {
+      const blob = await generateImage();
+      await copyToClipboard(blob);
+    } catch (err) {
+      setShareError(err);
+    } finally {
+      setCopying(false);
+      onActionSettled?.();
+    }
+  }, [copying, generateImage, copyToClipboard, onActionSettled]);
+
+  const handleCopyAndTweet = useCallback(async () => {
+    if (copying) return;
+    setCopying(true);
+    setShareError(null);
+    try {
+      const blob = await generateImage();
+      await copyToClipboard(blob);
+      const text = buildTweetText(
+        data.description,
+        data.pnl,
+        data.pnlPct,
+        showDollar,
+        showPct,
+        formatHoldDuration(data.entryTime, data.exitTime),
+      );
+      const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
+      window.open(tweetUrl, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setShareError(err);
+    } finally {
+      setCopying(false);
+      onActionSettled?.();
+    }
+  }, [copying, generateImage, copyToClipboard, data, showDollar, showPct, onActionSettled]);
+
+  /** Instagram has no web intent for Stories: hand the 9:16 PNG to the OS
+   *  share sheet (Instagram > Story on iOS / Android), else download it. */
+  const handleShareStory = useCallback(async () => {
+    if (copying) return;
+    setCopying(true);
+    setShareError(null);
+    let keepOpen = false;
+    try {
+      const file = storyFile
+        ?? new File([await generateImage("story")], STORY_FILENAME, { type: "image/png" });
+      const shareData: ShareData = { files: [file] };
+      if (typeof navigator.share === "function" && navigator.canShare?.(shareData)) {
+        try {
+          await navigator.share(shareData);
+          setStoryFile(null);
+        } catch (err) {
+          if (isDomError(err, "NotAllowedError") && !storyFile) {
+            setStoryFile(file);
+            keepOpen = true;
+          } else if (!isDomError(err, "AbortError")) {
+            throw err;
+          }
+        }
+      } else {
+        const href = URL.createObjectURL(file);
+        const link = document.createElement("a");
+        link.href = href;
+        link.download = STORY_FILENAME;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(href), 0);
+      }
+    } catch (err) {
+      setShareError(err);
+    } finally {
+      setCopying(false);
+      if (!keepOpen) onActionSettled?.();
+    }
+  }, [copying, generateImage, storyFile, onActionSettled]);
+
+  return {
+    showDollar, setShowDollar, showPct, setShowPct, copying, copied, storyFile, shareError,
+    handleCopy, handleCopyAndTweet, handleShareStory,
+  };
+}
+
+function SharePnlOptions({ share }: { share: SharePnlActions }) {
+  const noMetric = !share.showDollar && !share.showPct;
+  return (
+    <>
+      <div className="share-pnl-popover-title">Share Options</div>
+      <label className="share-pnl-checkbox">
+        <input
+          type="checkbox"
+          checked={share.showDollar}
+          onChange={(e) => share.setShowDollar(e.target.checked)}
+        />
+        <span>P&amp;L $</span>
+      </label>
+      <label className="share-pnl-checkbox">
+        <input
+          type="checkbox"
+          checked={share.showPct}
+          onChange={(e) => share.setShowPct(e.target.checked)}
+        />
+        <span>P&amp;L %</span>
+      </label>
+      <div className="share-pnl-popover-actions">
+        <button
+          type="button"
+          className="btn-primary share-pnl-action"
+          onClick={share.handleCopyAndTweet}
+          disabled={share.copying || noMetric}
+        >
+          {share.copying ? "Generating..." : "Copy & Tweet"}
+        </button>
+        <button
+          type="button"
+          className="btn-secondary share-pnl-action"
+          onClick={share.handleCopy}
+          disabled={share.copying || noMetric}
+        >
+          {share.copied ? "Copied!" : "Copy"}
+        </button>
+        <button
+          type="button"
+          className="btn-secondary share-pnl-action share-pnl-action--story"
+          onClick={share.handleShareStory}
+          disabled={share.copying || noMetric}
+        >
+          {share.storyFile ? "Tap to share Story" : "Instagram Story"}
+        </button>
+      </div>
+    </>
+  );
+}
+
+const SHARE_ERROR_FALLBACK = "The P&L image could not be copied. Try again.";
+
+/** Share options rendered in place, e.g. inside an expanded mobile card. */
+export function SharePnlPanel({ data, testId }: { data: SharePnlData; testId?: string }) {
+  const share = useSharePnl(data);
+  return (
+    <div className="share-pnl-panel" role="group" aria-label="Share options" data-testid={testId}>
+      <RequestError error={share.shareError} fallback={SHARE_ERROR_FALLBACK} />
+      <SharePnlOptions share={share} />
+    </div>
+  );
+}
+
+export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps) {
+  const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [exiting, setExiting] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const close = useCallback(() => setOpen(false), []);
   useDismissablePopover(popoverRef, close, open);
+  const share = useSharePnl(data, close);
 
   // Keep the popover mounted through a short exit transition so open/close
   // retargets via CSS (not keyframe restart).
@@ -150,124 +342,9 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
     };
   }, [mounted]);
 
-  // A held story PNG is stale once the metric toggles change.
-  useEffect(() => {
-    setStoryFile(null);
-  }, [showDollar, showPct]);
-
-  const generateImage = useCallback(async (format: "card" | "story" = "card") => {
-    const params = new URLSearchParams();
-    params.set("description", data.description);
-    if (showDollar && data.pnl != null) params.set("pnl", String(data.pnl));
-    if (showPct && data.pnlPct != null) params.set("pnlPct", String(data.pnlPct));
-    // Note: commission is intentionally NOT passed to the image API
-    if (data.entryPrice != null) params.set("entryPrice", String(data.entryPrice));
-    if (data.exitPrice != null) params.set("exitPrice", String(data.exitPrice));
-    if (data.entryTime) params.set("entryTime", data.entryTime);
-    if (data.exitTime) params.set("exitTime", data.exitTime);
-    const holdTime = formatHoldDuration(data.entryTime, data.exitTime);
-    if (holdTime) params.set("holdTime", holdTime);
-    if (data.fillPrice != null && data.entryPrice == null && data.exitPrice == null) {
-      params.set("fillPrice", String(data.fillPrice));
-    }
-    if (data.time) params.set("time", data.time);
-    if (format === "story") params.set("format", "story");
-
-    const res = await fetch(`/api/share/pnl?${params.toString()}`);
-    if (!res.ok) throw new Error("Failed to generate image");
-    return res.blob();
-  }, [data, showDollar, showPct]);
-
-  const copyToClipboard = useCallback(async (blob: Blob) => {
-    await navigator.clipboard.write([
-      new ClipboardItem({ "image/png": blob }),
-    ]);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, []);
-
-  const handleCopy = useCallback(async () => {
-    if (copying) return;
-    setCopying(true);
-    setShareError(null);
-    try {
-      const blob = await generateImage();
-      await copyToClipboard(blob);
-    } catch (err) {
-      setShareError(err);
-    } finally {
-      setCopying(false);
-      setOpen(false);
-    }
-  }, [copying, generateImage, copyToClipboard]);
-
-  const handleCopyAndTweet = useCallback(async () => {
-    if (copying) return;
-    setCopying(true);
-    setShareError(null);
-    try {
-      const blob = await generateImage();
-      await copyToClipboard(blob);
-      const text = buildTweetText(
-        data.description,
-        data.pnl,
-        data.pnlPct,
-        showDollar,
-        showPct,
-        formatHoldDuration(data.entryTime, data.exitTime),
-      );
-      const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
-      window.open(tweetUrl, "_blank", "noopener,noreferrer");
-    } catch (err) {
-      setShareError(err);
-    } finally {
-      setCopying(false);
-      setOpen(false);
-    }
-  }, [copying, generateImage, copyToClipboard, data, showDollar, showPct]);
-
-  /** Instagram has no web intent for Stories: hand the 9:16 PNG to the OS
-   *  share sheet (Instagram > Story on iOS / Android), else download it. */
-  const handleShareStory = useCallback(async () => {
-    if (copying) return;
-    setCopying(true);
-    setShareError(null);
-    let keepOpen = false;
-    try {
-      const file = storyFile
-        ?? new File([await generateImage("story")], STORY_FILENAME, { type: "image/png" });
-      const shareData: ShareData = { files: [file] };
-      if (typeof navigator.share === "function" && navigator.canShare?.(shareData)) {
-        try {
-          await navigator.share(shareData);
-          setStoryFile(null);
-        } catch (err) {
-          if (isDomError(err, "NotAllowedError") && !storyFile) {
-            setStoryFile(file);
-            keepOpen = true;
-          } else if (!isDomError(err, "AbortError")) {
-            throw err;
-          }
-        }
-      } else {
-        const href = URL.createObjectURL(file);
-        const link = document.createElement("a");
-        link.href = href;
-        link.download = STORY_FILENAME;
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(href), 0);
-      }
-    } catch (err) {
-      setShareError(err);
-    } finally {
-      setCopying(false);
-      if (!keepOpen) setOpen(false);
-    }
-  }, [copying, generateImage, storyFile]);
-
   return (
     <div style={{ position: "relative", display: "inline-flex" }} ref={popoverRef}>
-      <RequestError error={shareError} fallback="The P&L image could not be copied. Try again." />
+      <RequestError error={share.shareError} fallback={SHARE_ERROR_FALLBACK} />
       <button
         type="button"
         className="share-pnl-button"
@@ -286,49 +363,7 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
           role="dialog"
           aria-label="Share options"
         >
-          <div className="share-pnl-popover-title">Share Options</div>
-          <label className="share-pnl-checkbox">
-            <input
-              type="checkbox"
-              checked={showDollar}
-              onChange={(e) => setShowDollar(e.target.checked)}
-            />
-            <span>P&amp;L $</span>
-          </label>
-          <label className="share-pnl-checkbox">
-            <input
-              type="checkbox"
-              checked={showPct}
-              onChange={(e) => setShowPct(e.target.checked)}
-            />
-            <span>P&amp;L %</span>
-          </label>
-          <div className="share-pnl-popover-actions">
-            <button
-              type="button"
-              className="btn-primary share-pnl-action"
-              onClick={handleCopyAndTweet}
-              disabled={copying || (!showDollar && !showPct)}
-            >
-              {copying ? "Generating..." : "Copy & Tweet"}
-            </button>
-            <button
-              type="button"
-              className="btn-secondary share-pnl-action"
-              onClick={handleCopy}
-              disabled={copying || (!showDollar && !showPct)}
-            >
-              {copied ? "Copied!" : "Copy"}
-            </button>
-            <button
-              type="button"
-              className="btn-secondary share-pnl-action share-pnl-action--story"
-              onClick={handleShareStory}
-              disabled={copying || (!showDollar && !showPct)}
-            >
-              {storyFile ? "Tap to share Story" : "Instagram Story"}
-            </button>
-          </div>
+          <SharePnlOptions share={share} />
         </div>
       ) : null}
     </div>
