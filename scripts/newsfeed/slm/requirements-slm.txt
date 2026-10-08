@@ -83,7 +83,7 @@ cuda-toolkit==13.0.3.0
     # via torch
 cycler==0.12.1
     # via matplotlib
-datasets==4.0.0
+datasets==5.0.1
     # via
     #   -r /tmp/slm-qlora.in
     #   llamafactory
