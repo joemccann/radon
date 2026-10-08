@@ -261,6 +261,9 @@ line here whenever you ship a security fix.**
   finding stays actionable. Verified both directions — the raw findings JSON
   trips gitleaks, the rendered report does not.
   Tests: `scripts/tests/test_security_report_redaction.py`.
+  The canonical scrubber `scripts/credential_redaction.py` and the public
+  issue/PR sanitizer also redact multi-line private-key blocks, including a
+  block cut off before its END line.
 
   Redaction is a backstop for the renderer, not a licence to put secrets in the
   JSON. If a value is genuinely needed to reproduce a finding, reference where
