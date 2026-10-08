@@ -26,8 +26,8 @@ Live file -> repo source of truth (install command, for when live is stale):
       installed atomically by setup-vps.sh:install_gateway_control
   /etc/polkit-1/rules.d/50-radon-services.rules <- config/polkit/50-radon-services.rules
       sudo install -m 0644 config/polkit/50-radon-services.rules /etc/polkit-1/rules.d/
-  /etc/systemd/journald.conf.d/radon.conf <- services/journald-radon.conf
-      sudo install -m 0644 services/journald-radon.conf /etc/systemd/journald.conf.d/radon.conf
+  /etc/systemd/journald.conf.d/zz-radon.conf <- services/journald-radon.conf
+      sudo install -m 0644 services/journald-radon.conf /etc/systemd/journald.conf.d/zz-radon.conf
   /etc/systemd/system/radon-.service.d/common.conf <- services/radon-.service.d/common.conf
       installed by setup-vps.sh:install_fleet_dropin
   /usr/local/sbin/radon-deploy-root <- scripts/deploy-root-helper.sh
@@ -125,7 +125,7 @@ FILE_PAIRS = [
         "polkit",
     ),
     (
-        "/etc/systemd/journald.conf.d/radon.conf",
+        "/etc/systemd/journald.conf.d/zz-radon.conf",
         "services/journald-radon.conf",
         "journald-dropin",
     ),
