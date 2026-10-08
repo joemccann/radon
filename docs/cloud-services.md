@@ -671,6 +671,10 @@ Both units are **control-plane**, so `install-units` skips them by design and
 the root `bootstrap-control-plane.sh` run is what installs them and clears
 their `config/installed-units.sha256` entries.
 
+### radon-api keep-alive (pending unit install)
+
+`radon-api.service`'s base `ExecStart` carries `--timeout-keep-alive 75` (PR #965) to match the `radon-app-runtime` container launch that production actually runs. The manifest pins the new hash and `cloud/config/drift-allowlist.conf` acknowledges `unit-mismatch:radon-api.service` until the root install-copy lands; remove the ack once `install-units` promotes it.
+
 ### CREDIT spread (`radon-credit-spread.timer`)
 
 Daily `21:45 UTC` (`RandomizedDelaySec=300`), oneshot
