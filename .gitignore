@@ -294,3 +294,8 @@ models/**/fused/
 
 # migrate.py --boot: host-local proof the schema is current (scripts/db/migrate.py)
 data/schema_version.*
+
+# Operator-owned TradingView OAuth credentials and refresh lock.
+/data/tradingview_mcp_token.json
+/data/tradingview_mcp_token.json.lock
+/data/.tradingview-*

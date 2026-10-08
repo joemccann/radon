@@ -252,20 +252,26 @@ it to `new` alone and restart again. Both values pass during the overlap.
 
 ## Phase 2 — alert lifecycle
 
-Alerts are created in the TradingView UI against the Phase 1 URL. Ultimate's open-ended
-expiry means they do not silently die after two months. Once Rail B exists,
-`update_alert` re-points them in bulk (this is what makes secret rotation practical) and
-`get_alerts_log` reconciles fires against `tv_alert_events` — the only way to detect a
-delivery TradingView dropped, since it never retries.
+Alerts are created and updated in the TradingView UI against the Phase 1 URL.
+Ultimate's open-ended expiry means they do not silently die after two months.
+The official MCP contract checked October 7 does not permit creating webhook alerts
+or updating webhook-enabled alerts. Secret rotation therefore requires UI updates;
+the former bulk `update_alert` plan was unsupported. Reconciliation of fire logs is
+separate future work; the research client's allowlist excludes those messages.
 
 ## Phase 3 — MCP client (read-only)
 
-Copy `scripts/clients/robinhood_client.py`, which already solves this exact problem:
-OAuth 2.1 with PKCE over streamable HTTP, a 0600 token file with mandatory refresh, an
-enforced read-tool allowlist, and a clean no-op when unconfigured. Python, not Next:
-`mcp==1.28.1` is already pinned in `requirements.txt` and `web/package.json` has no MCP
-SDK. The OAuth redirect must be on **`app.radon.run`** (Caddy); `radon.run` is the
-Vercel marketing site.
+The implementation is `scripts/clients/tradingview_client.py` and
+`scripts/clients/tradingview_auth.py`, using the pinned `mcp==1.28.1` SDK for
+Streamable HTTP and OAuth discovery, PKCE, registration and refresh. It enforces
+a research-tool allowlist and stores credentials atomically in an owned 0600 file.
+Unconfigured access is explicit and cannot initiate browser consent unattended.
+
+The private operator CLI is `python3.13 scripts/tradingview_mcp.py`; protected
+FastAPI routes are under `/research/tradingview`. See
+[client design and operator setup](tradingview-mcp-client.md). Local operator consent
+uses an ephemeral loopback callback; there is no public callback or auth exemption
+on either app.radon.run or the Vercel marketing host.
 
 Ladder placement, per the operator review of 2026-09-15:
 
@@ -287,10 +293,10 @@ News: TradingView serves the per-ticker slot Radon has empty today. The Market E
 remains the curated macro newsfeed. Store ids, links and short snippets only;
 TradingView content must never reach the public share routes.
 
-Watchlists: `list_watchlists`, `get_watchlist` and `get_active_watchlist` read the
-operator's real lists once the token exists. This is a single-operator integration like
-Robinhood, not a per-user "connect your account" flow. Start read-only: the write tools
-can delete or overwrite a list, so sync is opt-in per direction.
+Watchlists: `list_watchlists` and `get_watchlist` read the operator's lists once
+authorized. `get_active_watchlist` is excluded because it can activate or create a
+list despite its read-only vendor label. This is a single-operator integration,
+not a per-user "connect your account" flow. Account write tools remain prohibited.
 
 ## Non-goals
 
