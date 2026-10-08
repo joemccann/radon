@@ -1,5 +1,4 @@
 import type { MarketEarPost } from "./useNewsfeedPosts";
-import { getImageSource } from "./newsfeedSource";
 import { withoutEmDashes } from "./copyPunctuation";
 
 export type SharePost = MarketEarPost & { href: string; isoTimestamp: string };
@@ -20,12 +19,6 @@ export function sanitizeShareText(text: string): string {
     .split("\n").map(line => line.replace(/[ \t]+/g, " ").trim().replace(/^[:;,·]\s*/, ""))
     .filter(line => !/^(?:source\s*:|[·,:;-])+$/i.test(line))
     .join("\n").replace(/\n{3,}/g, "\n\n").trim();
-}
-
-function shareSource(post: SharePost, imageUrl = post.images?.[0]): string {
-  const publisher = post.source?.publisher ?? getImageSource(post, imageUrl);
-  if (!publisher || /(?:market[\s-]*ear|zero[\s-]*hedge)/i.test(publisher)) return "";
-  return `Source: ${cleanText(publisher)}${post.source?.documentDate ? ` · ${post.source.documentDate}` : ""}`;
 }
 
 function cleanText(text: string): string {
@@ -165,12 +158,42 @@ export function assembleShareCaption(title: string, content: string, source = ""
   return sanitizeShareText(caption);
 }
 
-export function buildShareCaption(post: SharePost, imageUrl = post.images?.[0]): string {
-  return assembleShareCaption(post.title, post.content || "", shareSource(post, imageUrl));
+// Only known institutional accounts are substituted; unknown sources keep their names.
+const X_SOURCE_HANDLES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/(?<![\w@$])Morgan\s+Stanley\b/gi, "@morganstanley"],
+  [/(?<![\w@$])MS\b/g, "@morganstanley"],
+  [/(?<![\w@$])Goldman(?:\s+Sachs)?\b/gi, "@GoldmanSachs"],
+  [/(?<![\w@$])(?:J\.?\s*P\.?\s*Morgan|JPMorgan)\b/gi, "@jpmorgan"],
+  [/(?<![\w@$])(?:Citigroup|Citibank|Citi)\b/gi, "@Citi"],
+  [/(?<![\w@$])(?:Bank\s+of\s+America|BofA)\b/gi, "@BankofAmerica"],
+  [/(?<![\w@$])Barclays\b/gi, "@Barclays"],
+  [/(?<![\w@$])BNP\s+Paribas\b/gi, "@BNPParibas"],
+  [/(?<![\w@$])Bloomberg\b/gi, "@business"],
+  [/(?<![\w@$])Reuters\b/gi, "@Reuters"],
+  [/(?<![\w@$])Ramp\b/g, "@tryramp"],
+];
+
+/** X copy keeps the entire post; source footers and private paths are not exported. */
+export function sanitizeXShareText(text: string): string {
+  const clean = sanitizeShareText(stripResearchPaths(text))
+    .split("\n").filter(line => !/^source\s*:/i.test(line.trim())).join("\n");
+  // Existing handles, URLs and email addresses must not be rewritten inside tokens.
+  return clean.split(/(https?:\/\/[^\s]+|www\.[^\s]+|[\w.+-]+@[\w.-]+|@[\w]+)/gi)
+    .map((part, index) => index % 2 ? part : X_SOURCE_HANDLES.reduce(
+      (value, [pattern, handle]) => value.replace(pattern, handle), part,
+    )).join("").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+export function buildShareCaption(post: SharePost, _imageUrl = post.images?.[0]): string {
+  const title = sanitizeXShareText(post.title);
+  const content = sanitizeXShareText(post.content || "");
+  // Keep existing paragraph boundaries; add breathing room to single-block prose.
+  const paragraphs = (content.includes("\n") ? content.split(/\n+/) : splitSentences(content)).filter(Boolean);
+  return [title, ...paragraphs].filter(Boolean).join("\n\n");
 }
 
 export function buildXShareUrl(caption: string): string {
-  return `https://twitter.com/intent/tweet?${new URLSearchParams({ text: sanitizeShareText(caption) })}`;
+  return `https://twitter.com/intent/tweet?${new URLSearchParams({ text: sanitizeXShareText(caption) })}`;
 }
 
 /** Break long words as well as prose, so provider text cannot escape the card. */
@@ -252,7 +275,7 @@ export async function renderShareCard(post: SharePost, imageUrl: string | undefi
   ctx.fillText(dateLabel, 1080 - 72 - ctx.measureText(dateLabel).width, 220);
   ctx.fillStyle = LINE;
   ctx.fillRect(72, 269, 936, 2);
-  // Same copy and layout as the X caption: hook, then bullets and implication.
+  // Media cards use compact copy to fit the fixed portrait canvas.
   const [hook = post.title, ...paragraphs] = assembleShareCaption(post.title, post.content || "").split("\n\n");
   ctx.fillStyle = INK;
   ctx.font = `600 54px ${sans}`;

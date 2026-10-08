@@ -118,20 +118,20 @@ for (const width of [1440, 393]) {
       await panel.screenshot({ path: testInfo.outputPath(`share-compose-during-rewrite-${width}.png`) });
 
       releaseRewrite();
-      await expect(caption).toHaveValue(rewrittenCaption);
+      await expect(caption).toHaveValue(fallbackCaption);
       await expect.poll(() => page.evaluate(() => (window as unknown as { previewGate: { pending: boolean } }).previewGate.pending), { timeout: 30_000 }).toBe(true);
       await expect(caption).toBeEnabled();
       await expect(panel.getByText("Preparing preview…", { exact: true })).toBeVisible();
       await expect(panel.getByRole("button", { name: "Download Story image" })).toBeDisabled();
       await expect(panel.getByRole("button", { name: "Download Reels / TikTok video" })).toBeDisabled();
-      await openComposer(rewrittenCaption);
+      await openComposer(fallbackCaption);
       await panel.screenshot({ path: testInfo.outputPath(`share-compose-during-preview-${width}.png`) });
       await page.evaluate(() => (window as unknown as { previewGate: { release: () => void } }).previewGate.release());
       await expect(panel.getByRole("button", { name: "Download Story image" })).toBeEnabled();
-      expect(new URL((await compose.getAttribute("href"))!).searchParams.get("text")).toBe(rewrittenCaption);
+      expect(new URL((await compose.getAttribute("href"))!).searchParams.get("text")).toBe(fallbackCaption);
       const drawn = await page.evaluate(() => (window as unknown as { shareCapture: ShareCapture }).shareCapture.drawn.join(" "));
       expect(drawn).toContain("Seasonality, the setup");
-      // The story card mirrors the X caption (hook + short paragraphs) with today's date and no source footer.
+      // Media uses the voice draft while the X caption retains the original post.
       expect(drawn).toContain("Positioning, the tell.");
       expect(drawn).toContain("Returns: -2.5%.");
       expect(drawn).not.toMatch(/Source:|EXCERPT|SEP 7, 2026/);
@@ -171,12 +171,13 @@ test("news sharing retains sanitized fallback and retries a failed voice rewrite
   expect(await panel.getByRole("textbox", { name: "Post caption" }).inputValue()).toContain(post.title);
   expect(await panel.getByRole("textbox", { name: "Post caption" }).inputValue()).not.toMatch(excludedPublisher);
   await expect(panel.getByRole("button", { name: "Download Story image" })).toBeEnabled();
+  const originalCaption = await panel.getByRole("textbox", { name: "Post caption" }).inputValue();
   await failure.getByRole("button", { name: "Try again" }).click();
-  await expect(panel.getByRole("textbox", { name: "Post caption" })).toHaveValue("Retry succeeds\n\nPositioning remains the tell.");
-  expect(requests).toBe(2);
+  await expect(panel.getByRole("textbox", { name: "Post caption" })).toHaveValue(originalCaption);
+  await expect.poll(() => requests).toBe(2);
 });
 
-test("voice rewrite shows progress while pending and applies the streamed draft", async ({ page }, testInfo) => {
+test("voice rewrite shows progress while retaining the original X caption", async ({ page }, testInfo) => {
   test.setTimeout(90_000);
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
@@ -200,9 +201,10 @@ test("voice rewrite shows progress while pending and applies the streamed draft"
   await expect(bar).toBeVisible();
   await expect(panel.getByRole("status")).toHaveText("Starting rewrite…");
   await expect(bar).toHaveAttribute("aria-valuetext", /^Starting rewrite, [1-9]\d*s elapsed$/, { timeout: 5_000 });
+  const originalCaption = await panel.getByRole("textbox", { name: "Post caption" }).inputValue();
   await panel.screenshot({ path: testInfo.outputPath("voice-rewrite-progress.png") });
   release();
-  await expect(panel.getByRole("textbox", { name: "Post caption" })).toHaveValue("Streamed draft lands\n\nPositioning stays near neutral.");
+  await expect(panel.getByRole("textbox", { name: "Post caption" })).toHaveValue(originalCaption);
   await expect(bar).toHaveCount(0);
 });
 
@@ -239,9 +241,11 @@ test("equity-issuance fallback is hook plus short paragraphs and Compose on X st
     expect(caption).toContain("$700bn");
     expect(caption).not.toMatch(/^[•●▪◦*-]\s/m);
     expect(caption.split("\n\n").length).toBeGreaterThan(1);
-    expect(caption).toMatch(/Source: Goldman Midday Market Intelligence · 2026-09-17\s*$/);
-    expect(caption.length).toBeLessThanOrEqual(400);
-    expect(caption).not.toContain("Sarah Herring");
+    expect(caption).not.toContain("Source:");
+    expect(caption.length).toBeGreaterThan(400);
+    expect(caption).toContain("@GoldmanSachs estimates");
+    expect(caption).toContain("Sarah Herring");
+    expect(caption).toContain("The $700bn figure is a meaningful supply overhang and a headwind rather than a gale.");
     await expect(compose).toBeEnabled();
     const popupReady = page.waitForEvent("popup");
     await compose.click();
@@ -332,7 +336,10 @@ for (const width of [1440, 393]) {
     await expect(preview).toBeVisible({ timeout: 30_000 });
     await expect(preview).toHaveJSProperty("naturalWidth", 1080);
     await expect(preview).toHaveJSProperty("naturalHeight", 1920);
-    await expect(panel.getByRole("textbox", { name: "Post caption" })).toHaveValue(/Source: Synthetic Bank/);
+    const originalCaption = await panel.getByRole("textbox", { name: "Post caption" }).inputValue();
+    expect(originalCaption).toContain(post.title);
+    expect(originalCaption).toContain("Source evidence does not establish a crowded short liquidation.");
+    expect(originalCaption).not.toMatch(/Source:|@Synthetic/);
     await panel.getByRole("textbox", { name: "Post caption" }).fill("Edited yen analysis & source attribution");
     const compose = panel.getByRole("link", { name: "Compose on X" });
     expect(new URL((await compose.getAttribute("href"))!).searchParams.get("text")).toBe("Edited yen analysis & source attribution");
@@ -401,5 +408,67 @@ for (const width of [1440, 393]) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
+  });
+}
+
+for (const width of [1440, 393]) {
+  test(`X sharing retains the complete Morgan Stanley post after rewrite and cached reopen at ${width}px`, async ({ page }, testInfo) => {
+    test.setTimeout(90_000);
+    const fixture = {
+      ...post,
+      id: "morgan-stanley-ai-cds",
+      title: "Morgan Stanley: AI CDS basket trades ~45bp wider than CDX IG, and protection is still its preferred credit-derivatives expression",
+      content: 'Morgan Stanley’s AI CDS basket now trades ~45bp wider than CDX IG.\n\nMS says buying CDS protection "remains our preferred way of playing the AI story in the credit derivatives market." The reason is not just a bearish default call. MS expects "increasing needs for non-economic hedging to manage counterparty exposure," even in a benign scenario where AI investments are profitable and continue.\n\nThat is an important distinction. The hedge bid can grow even if the capex cycle keeps working. More AI financing creates more counterparty exposure, and that creates more demand for protection.',
+      source: { ...source, publisher: "Tyler Durden", documentDate: "2026-10-07" },
+    };
+    const expected = `${fixture.title}\n\n${fixture.content}`.replace(/Morgan Stanley|\bMS\b/g, "@morganstanley");
+    let requests = 0;
+    let releaseRewrite!: () => void;
+    const rewriteReady = new Promise<void>(resolve => { releaseRewrite = resolve; });
+    await page.setViewportSize({ width, height: 1000 });
+    await page.addInitScript(() => {
+      const capture: ShareCapture = { drawn: [], copied: "" };
+      Object.assign(window, { shareCapture: capture });
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText: async (text: string) => { capture.copied = text; } },
+      });
+    });
+    await page.route("**/api/newsfeed/share", async route => {
+      requests += 1;
+      await rewriteReady;
+      await route.fulfill({ json: { title: "Short credit hook", content: "Buy protection.", caption: "Short rewritten caption" } });
+    });
+    await page.route("**/api/newsfeed/posts**", route => route.fulfill({ json: [fixture] }));
+    await page.route("**/api/newsfeed/research/files/*.png", route => route.fulfill({ contentType: "image/svg+xml", body: svg }));
+    try {
+      await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+      const item = page.getByTestId("news-feed-item").filter({ hasText: fixture.title });
+      const share = item.getByRole("button", { name: "Share", exact: true });
+      await share.click();
+      const panel = item.getByRole("region", { name: "Share news item" });
+      const caption = panel.getByRole("textbox", { name: "Post caption" });
+      const compose = panel.getByRole("link", { name: "Compose on X" });
+      await expect(caption).toHaveValue(expected);
+      expect(expected.length).toBeGreaterThan(400);
+      expect(new URL((await compose.getAttribute("href"))!).searchParams.get("text")).toBe(expected);
+      releaseRewrite();
+      await expect(caption).toBeEnabled();
+      await expect(caption).toHaveValue(expected);
+      await panel.getByRole("button", { name: "Copy caption", exact: true }).click();
+      await expect.poll(() => page.evaluate(() => (window as unknown as { shareCapture: ShareCapture }).shareCapture.copied)).toBe(expected);
+      await panel.screenshot({ path: testInfo.outputPath(`morgan-stanley-full-x-caption-${width}.png`) });
+      await share.click();
+      await share.click();
+      await expect(caption).toHaveValue(expected);
+      expect(new URL((await compose.getAttribute("href"))!).searchParams.get("text")).toBe(expected);
+      expect(requests).toBe(1);
+      expect(expected).not.toContain("Source:");
+      expect(expected).not.toContain("Tyler Durden");
+      expect(expected).toContain("and that creates more demand for protection.");
+    } finally {
+      releaseRewrite();
+      await page.unrouteAll({ behavior: "wait" });
+    }
   });
 }
