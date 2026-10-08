@@ -1192,3 +1192,61 @@ def test_every_daemon_gives_the_bot_a_private_tmpdir():
     src = (REPO / "scripts" / "runner" / "install.sh").read_text()
     configure = src.split("configure_user() {", 1)[1].split("\n}\n", 1)[0]
     assert '"$BOT_HOME/radon-runner/tmp"' in configure
+
+
+# --- claude.ai subscription token ---------------------------------------------
+# A LaunchDaemon cannot read the bot's login keychain, so `claude` reports
+# "Not logged in" there; the runner hands claude rungs CLAUDE_CODE_OAUTH_TOKEN
+# from ~/.radon-runner.env (a `claude setup-token` value, subscription billed).
+
+
+def _with_claude_token(rig, token="sk-ant-oat01-dummy"):
+    env_file = Path(rig.env()["HOME"]) / ".radon-runner.env"
+    env_file.write_text(env_file.read_text() + f"CLAUDE_CODE_OAUTH_TOKEN={token}\n")
+    return token
+
+
+def test_a_claude_rung_gets_the_oauth_token_from_the_bot_file(rig):
+    token = _with_claude_token(rig)
+    rig.configure(AGENTS="claude:claude-opus-5")
+    proc = rig.run()
+
+    assert proc.returncode == 0, proc.stderr + rig.log()
+    env = (rig.calls / "claude.env").read_text().splitlines()
+    assert f"CLAUDE_CODE_OAUTH_TOKEN={token}" in env
+    log = rig.log()
+    assert "claude: CLAUDE_CODE_OAUTH_TOKEN present" in log
+    assert token not in log
+
+
+def test_non_claude_rungs_never_see_the_oauth_token(rig):
+    token = _with_claude_token(rig)
+    rig.configure(AGENTS="grok")
+    rig.run(CLAUDE_CODE_OAUTH_TOKEN="inherited-dummy")
+
+    env = (rig.calls / "grok.env").read_text()
+    assert token not in env and "inherited-dummy" not in env
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
+
+
+def test_the_resolver_gets_the_oauth_token_off_its_command_line(rig):
+    token = _with_claude_token(rig)
+    rig.configure(AGENTS="claude:safety-model", ALLOWED_AGENTS="claude", AGENTS_RESOLVER="lib/resolver.py")
+    rig.resolver(
+        "import os\n"
+        f"assert os.environ.get('CLAUDE_CODE_OAUTH_TOKEN') == {token!r}\n"
+        "print('claude:resolved-model')\n"
+    )
+    proc = rig.run()
+
+    assert proc.returncode == 0, proc.stderr + rig.log()
+    assert "--model resolved-model" in _claude_argv(rig)
+
+
+def test_without_a_token_the_runner_says_so_and_claude_falls_back_to_its_login(rig):
+    rig.configure(AGENTS="claude")
+    rig.run()
+
+    env = (rig.calls / "claude.env").read_text()
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
+    assert "claude: CLAUDE_CODE_OAUTH_TOKEN absent" in rig.log()

@@ -18,6 +18,7 @@ RUNNER_PYTHON="${RADON_RUNNER_PYTHON:-/opt/homebrew/bin/python3.13}"
 TIMED_OUT=124
 HOOK_SECS="${RADON_RUNNER_HOOK_SECS:-900}"
 AGENT_PID=""
+CLAUDE_OAUTH=""
 HOOK_PID=""
 PHASE=""
 # The runner, its hooks and helpers resolve binaries only from root- or
@@ -89,6 +90,7 @@ _dotenv_set() {
     PUSHOVER_USER) _DOTENV_PUSHOVER_USER="$2" ;;
     PUSHOVER_TOKEN) _DOTENV_PUSHOVER_TOKEN="$2" ;;
     GH_TOKEN) _DOTENV_GH_TOKEN="$2" ;;
+    CLAUDE_CODE_OAUTH_TOKEN) _DOTENV_CLAUDE_TOKEN="$2" ;;
   esac
 }
 
@@ -128,6 +130,7 @@ _dotenv_read_file() {
   _DOTENV_PUSHOVER_USER=""
   _DOTENV_PUSHOVER_TOKEN=""
   _DOTENV_GH_TOKEN=""
+  _DOTENV_CLAUDE_TOKEN=""
   _DOTENV_VAL=""
   [[ -f "$file" && -r "$file" ]] || return 0
   while IFS= read -r line || [[ -n "${line:-}" ]]; do
@@ -167,14 +170,26 @@ _radon_dotenv_path() {
 }
 
 # Pair from the first source that has BOTH keys (env, Radon dotenv, bot file).
-# GH_TOKEN loads only from the bot file. Values are never logged.
+# GH_TOKEN and CLAUDE_CODE_OAUTH_TOKEN load only from the bot file. Values
+# are never logged.
 load_secrets() {
   local dotenv_path from="" checked
   dotenv_path="$(_radon_dotenv_path)"
 
-  _dotenv_read_file "$SECRETS_FILE" "GH_TOKEN"
+  _dotenv_read_file "$SECRETS_FILE" "GH_TOKEN CLAUDE_CODE_OAUTH_TOKEN"
   if [[ -n "${_DOTENV_GH_TOKEN}" ]]; then
     export GH_TOKEN="$_DOTENV_GH_TOKEN"
+  fi
+  # A LaunchDaemon cannot read the bot's login keychain, so the keychain
+  # claude.ai session reads as "Not logged in"; a `claude setup-token` value
+  # bills the same subscription. Held unexported: only claude rungs and the
+  # resolver (which runs `claude models`) receive it.
+  CLAUDE_OAUTH="$_DOTENV_CLAUDE_TOKEN"
+  unset CLAUDE_CODE_OAUTH_TOKEN
+  if [[ -n "$CLAUDE_OAUTH" ]]; then
+    log "claude: CLAUDE_CODE_OAUTH_TOKEN present (source: $SECRETS_FILE)"
+  else
+    log "claude: CLAUDE_CODE_OAUTH_TOKEN absent; claude rungs rely on the keychain login"
   fi
 
   if [[ -n "${PUSHOVER_USER:-}" && -n "${PUSHOVER_TOKEN:-}" ]]; then
@@ -281,7 +296,8 @@ resolve_agents() {
   [[ -n "$AGENTS_RESOLVER" ]] || return 0
   # It runs the agent CLI itself (`claude models`), so it gets the agent's
   # PATH and never the Pushover keys.
-  out="$(env -u PUSHOVER_USER -u PUSHOVER_TOKEN PATH="$AGENT_PATH_PREFIX:$RUNNER_PATH" \
+  out="$([[ -z "$CLAUDE_OAUTH" ]] || export CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_OAUTH"
+    env -u PUSHOVER_USER -u PUSHOVER_TOKEN PATH="$AGENT_PATH_PREFIX:$RUNNER_PATH" \
     "$TIMEOUT_BIN" 120 "$RUNNER_PYTHON" -I "$RUNNER_DIR/$AGENTS_RESOLVER" --rungs 2>>"$LOG")" || out=""
   out="$(printf '%s' "$out" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')"
   if [[ -n "$out" ]]; then
@@ -544,6 +560,7 @@ run_agent() {
     # The security prompts' native audit workflows resolve the clone from it.
     export PROMPT_FILE RADON_REPO_ROOT="$WORK"
     export PATH="$AGENT_PATH_PREFIX:$PATH"
+    [[ "$agent" != claude || -z "$CLAUDE_OAUTH" ]] || export CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_OAUTH"
     [[ "$GH_GUARD" != 1 ]] || export PATH="$RUNNER_DIR/guard/$LOOP:$PATH"
     exec "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$TIMEOUT_SECS" \
       /bin/bash "$SELF" --launch "$agent" "$provider" ) >> "$LOG" 2>&1 &

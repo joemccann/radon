@@ -21,7 +21,7 @@ Safety is where the runner runs, not what the script checks:
 | Agent cannot read operator files, ssh keys, `~/.radon`, Keychain | Dedicated macOS user `_radonbot`, standard (non-admin), hidden |
 | Agent cannot edit the runner | `run_loop.sh`, `loops/*.env`, the hooks, their `lib/` helpers, the `gh` guard and `gitconfig` installed root-owned in `/usr/local/radon-runner` |
 | Agent cannot plant a binary or git config the runner runs | The LaunchDaemon's `PATH` is `/opt/homebrew/bin:/usr/bin:/bin`; the bot's CLI directories (`~/.local/bin`, `~/.grok/bin`, `~/.bun/bin`) are prepended only for the agent. Every git the runner, the hooks and the agent run reads `/usr/local/radon-runner/gitconfig` (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM=1`), never `~/.gitconfig`, and the pre-run hook rebuilds the clone's `.git/config` before every phase |
-| No production credential in the clone | The clone gets no `.env`. The runner loads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from `RADON_RUNNER_DOTENV` or `/usr/local/radon-runner/dotenv-path` (never from the plist), then falls back to `~/.radon-runner.env`. `GH_TOKEN` loads only from `~/.radon-runner.env`. `_radonbot` and every agent share a uid, so any file the runner can read, the agent can read. The runner unsets the Pushover keys in the agent process and sends every notification itself; each runner prompt tells the agent not to send `radon PR green` or list the absent keys under Next. `GH_TOKEN` stays so the agent can push. Point the dotenv at a Pushover-only file (step 8), not the operator's full Radon `.env`. Never put a production credential or an admin token in `~/.radon-runner.env` or anywhere in the bot's home |
+| No production credential in the clone | The clone gets no `.env`. The runner loads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from `RADON_RUNNER_DOTENV` or `/usr/local/radon-runner/dotenv-path` (never from the plist), then falls back to `~/.radon-runner.env`. `GH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` load only from `~/.radon-runner.env`; the Claude token reaches claude rungs and the ladder resolver only. `_radonbot` and every agent share a uid, so any file the runner can read, the agent can read. The runner unsets the Pushover keys in the agent process and sends every notification itself; each runner prompt tells the agent not to send `radon PR green` or list the absent keys under Next. `GH_TOKEN` stays so the agent can push. Point the dotenv at a Pushover-only file (step 8), not the operator's full Radon `.env`. Never put a production credential or an admin token in `~/.radon-runner.env` or anywhere in the bot's home |
 | Agent cannot merge or push `main` | A separate GitHub machine account with the Write role on this repo only, used through its classic token (`repo` plus `workflow`, so nightly CI work that edits `.github/workflows` can be pushed to a branch), plus the `main-review` repository ruleset on the default branch: 1 approving review, approval of the most recent push required, stale approvals dismissed on push. Its only bypass actor is the Repository admin role in pull-request mode, so an admin merges through a PR and never pushes `main` directly; the bot account is not exempt. The 27 required status checks stay in the classic branch protection on `main`, not in the ruleset. A token of the operator's own account would not do: it acts as the admin and bypasses the ruleset |
 
 The six loops in [Migration](#migration-from-the-per-loop-wrappers) use the bot runner. `scripts/codemap_nightly.sh` is separate and opens a refresh PR for operator review and merge; the job never merges. Verify the live ruleset in step 8b.3 before enabling a new installation.
@@ -38,7 +38,7 @@ Where things live when you are done:
 | `/usr/local/radon-runner/hooks/`, `lib/`, `guard/<loop>/gh` | root | The security loops' pre/post-run hooks, the helpers they and the `gh` guard run (copied from `scripts/`), and the guard shim |
 | `/Library/LaunchDaemons/com.radon.runner.<loop>.plist` | root | The nightly schedule, run as `_radonbot` |
 | `/usr/local/radon-runner/dotenv-path` | root, 644 | Absolute path to the Pushover dotenv. Written only when install is run with `RADON_RUNNER_DOTENV`. A later install without that var leaves the file in place. Never a secret value |
-| `/Users/_radonbot/.radon-runner.env` | bot, 600 | `GH_TOKEN` and, as legacy fallback, `PUSHOVER_USER` / `PUSHOVER_TOKEN`. The agent can read it (it runs as the bot); the runner unsets the Pushover keys in the agent process. Never a production or admin credential |
+| `/Users/_radonbot/.radon-runner.env` | bot, 600 | `GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN` (claude.ai subscription, from `claude setup-token`) and, as legacy fallback, `PUSHOVER_USER` / `PUSHOVER_TOKEN`. The agent can read it (it runs as the bot); the runner unsets the Pushover keys in the agent process. Never a production or admin credential |
 | `/Users/_radonbot/.radon/agent-cli/env` | bot, 600 | `NVIDIA_API_KEY`, `CEREBRAS_API_KEY` for the fx agents |
 | `/Users/_radonbot/radon-runner/work/<loop>` | bot | Tonight's clone, deleted and re-cloned every run |
 | `/Users/_radonbot/radon-runner/logs/<loop>/<date>.log` | bot, 700 | The run log, kept 14 days |
@@ -123,7 +123,7 @@ agy prints a Google URL and waits 60 seconds for the pasted code. Then check it:
 ~/.local/bin/agy -p="reply ok" --output-format text
 ```
 
-A reboot locks this keychain, which also holds the bot's claude.ai session (step 8b.4). After one, run `security unlock-keychain ~/Library/Keychains/login.keychain-db` in the bot shell, then check `~/.local/bin/claude auth status`. Until then the agy rung fails and those loops move to the next agent, and both security loops (claude only) fail every phase.
+A reboot locks this keychain. After one, run `security unlock-keychain ~/Library/Keychains/login.keychain-db` in the bot shell. Until then the agy rung fails and those loops move to the next agent. The security loops do not depend on it: they authenticate with `CLAUDE_CODE_OAUTH_TOKEN` (step 8b.4).
 
 ### 6. Provider keys for fx (operator, then bot shell)
 
@@ -258,6 +258,15 @@ The `security` and `security-deepsec` loops need the bot's own Claude Code on th
    claude models && /opt/homebrew/bin/codex login status && gitleaks version   # expect 8.30.1
    ```
 
+   The keychain session works in the bot shell but not under launchd: the daemon cannot read the bot's login keychain, so every claude rung and the ladder resolver print `Not logged in · Please run /login` (both security loops failed every phase this way on 2026-10-08). Mint a one-year subscription token and put it in the bot's secrets file, never on a command line:
+
+   ```bash
+   ~/.local/bin/claude setup-token   # copy the sk-ant-oat01-... value it prints
+   read -rs "T?token: "; f=~/.radon-runner.env; umask 077; { grep -v '^CLAUDE_CODE_OAUTH_TOKEN=' "$f"; printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$T"; } > "$f.new" && mv "$f.new" "$f"; unset T
+   ```
+
+   The next fire logs `claude: CLAUDE_CODE_OAUTH_TOKEN present`. Rotate it before it expires.
+
 5. Bot shell, the reports deploy key:
 
    ```bash
@@ -356,7 +365,7 @@ failures with the loop name and sanitized log, never credentials.
 | Rotate the GitHub token (before its expiry) | step 7.5 to 7.6, then step 8 |
 | Release a held security P0/P1 | `sudo -u _radonbot sh -c 'echo "released: <finding-id>" >> ~/radon-runner/state/<loop>/scratch/<run-id>/run-record.md'` |
 | Read a security loop's private report | the Pushover page's "Open private report" link (`joemccann/radon-security-reports`) |
-| After a reboot | `security unlock-keychain ~/Library/Keychains/login.keychain-db` in the bot shell, then `~/.local/bin/claude auth status`. Until then agy fails and both security loops fail every phase |
+| After a reboot | `security unlock-keychain ~/Library/Keychains/login.keychain-db` in the bot shell. Until then agy fails |
 | Re-sign a CLI | the bot shell, then the sign-in command from step 4 |
 
 ## Troubleshooting
@@ -366,6 +375,7 @@ An uncertain lock requires operator inspection of its recorded PID and process s
 | Symptom | Cause | Fix |
 |---|---|---|
 | `sudo: a password is required` from an agent or script | `sudo` needs your password at a terminal | Run the command yourself in Terminal |
+| Security loop log: `Not logged in · Please run /login` | `CLAUDE_CODE_OAUTH_TOKEN` missing or expired in `~/.radon-runner.env` | Step 8b.4 `claude setup-token`, then kick the loop |
 | "Keychain Not Found ... antigravity" dialog | The bot has no login keychain | Cancel, then step 5 |
 | `--check` passes but paths show your home | You ran it in your own tab | Rerun it in the bot shell |
 | GitHub signup: "email ... already associated with an account" | One email per GitHub account | Use a different address |
