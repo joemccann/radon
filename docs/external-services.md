@@ -36,6 +36,7 @@ for FastAPI and scripts, plus `web/.env` for Next.js.
 | **Cerebras** | Last rung of the shared model ladder (cheap paid). Not a primary caller. | `CEREBRAS_API_KEY` | [cerebras.ai](https://www.cerebras.ai/inference) |
 | **Artificial Analysis** | Legacy LLM list-price proxy and fixed inference basket (`/regime/llm`). New collector reserves a 450-request UTC daily budget; entitlement and redistribution rights require verification. | `ARTIFICIAL_ANALYSIS_API_KEY` | [artificialanalysis.ai](https://artificialanalysis.ai/login) → Insights dashboard |
 | **Exa** | Company and market research surfaces. | `EXA_API_KEY` | [dashboard.exa.ai](https://dashboard.exa.ai/api-keys) |
+| **TradingView** | Alert webhook ingress and optional read-only MCP research. The research client is not in automatic price failover. Setup: [`tradingview-integration.md`](tradingview-integration.md), [`tradingview-mcp-client.md`](tradingview-mcp-client.md). | `TV_WEBHOOK_PATH_TOKEN`, `TV_WEBHOOK_SECRET` (Next.js / `/etc/radon/env`); `TRADINGVIEW_MCP_TOKEN_FILE` (owned JSON, default `data/tradingview_mcp_token.json`) | [tradingview.com/mcp/docs](https://www.tradingview.com/mcp/docs) |
 
 ## Infrastructure (production)
 
