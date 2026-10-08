@@ -8,9 +8,12 @@ import { fmtPrice } from "@/lib/positionUtils";
 import Card from "./Card";
 import BuySellRow from "./BuySellRow";
 import SectionEmptyState from "../SectionEmptyState";
+import { SharePnlPanel, type SharePnlData } from "../SharePnlButton";
 
 type MobileExecutedListProps = {
   groups: PositionFillGroup[];
+  /** Share payload for a closed group with realized P&L; null hides sharing. */
+  shareDataFor?: (group: PositionFillGroup) => SharePnlData | null;
 };
 
 function fmtPnl(value: number | null | undefined): { text: string; tone: "positive" | "negative" | "muted" } {
@@ -37,7 +40,7 @@ function fillContractLabel(fill: PositionFillGroup["fills"][number]): string {
   return fill.contract.secType;
 }
 
-export default function MobileExecutedList({ groups }: MobileExecutedListProps) {
+export default function MobileExecutedList({ groups, shareDataFor }: MobileExecutedListProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   if (groups.length === 0) {
@@ -59,7 +62,9 @@ export default function MobileExecutedList({ groups }: MobileExecutedListProps) 
         const pnl = fmtPnl(group.totalPnL);
         const cardTone = isCancelled ? "warning" : pnl.tone === "positive" ? "positive" : pnl.tone === "negative" ? "negative" : "default";
         const isExpanded = expandedId === group.id;
-        const canExpand = group.fills.length > 1;
+        const shareData = shareDataFor?.(group) ?? null;
+        const hasFillDetail = group.fills.length > 1;
+        const canExpand = hasFillDetail || shareData != null;
         const cleanDescription = group.description.replace(/^(Opened|Closed)\s+\w+\s*/, "");
         const pillLabel = isCancelled ? "CANCELLED" : group.isClosing ? "CLOSE" : "OPEN";
         const pillClass = isCancelled ? "cancelled" : group.isClosing ? "distrib" : "accum";
@@ -71,6 +76,7 @@ export default function MobileExecutedList({ groups }: MobileExecutedListProps) 
               testId={`mobile-executed-${group.id}`}
               ariaLabel={`${group.symbol} ${pillLabel}`}
               onClick={canExpand ? () => setExpandedId(isExpanded ? null : group.id) : undefined}
+              ariaExpanded={canExpand ? isExpanded : undefined}
             >
               <div className="mobile-card__title-row">
                 <div className="mobile-card__title">
@@ -111,7 +117,7 @@ export default function MobileExecutedList({ groups }: MobileExecutedListProps) 
                 ) : null}
               </div>
 
-              {isExpanded ? (
+              {isExpanded && hasFillDetail ? (
                 <div className="mobile-card__detail" data-testid={`mobile-executed-${group.id}-fills`}>
                   {group.fills.map((fill, idx) => {
                     const side = fillSide(fill.side);
@@ -144,6 +150,13 @@ export default function MobileExecutedList({ groups }: MobileExecutedListProps) 
                       </div>
                     );
                   })}
+                </div>
+              ) : null}
+
+              {isExpanded && shareData ? (
+                // Taps on the share controls must not collapse the card.
+                <div className="mobile-card__share" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                  <SharePnlPanel data={shareData} testId={`mobile-executed-${group.id}-share`} />
                 </div>
               ) : null}
             </Card>

@@ -396,8 +396,8 @@ ws-connection-stability.spec.ts
 #   start verification passed in the 65/65 mobile financial group.
 # REVIEWED 2026-09-06 mobile-cockpit-book-layout.spec.ts — compiled mobile
 #   Chromium next start verification passed in the 65/65 mobile group.
-# REVIEWED 2026-09-06 mobile-executed-journal.spec.ts — compiled mobile Chromium
-#   next start verification passed in the 65/65 mobile financial group.
+# REVIEWED 2026-10-08 mobile-executed-journal.spec.ts — local mobile Chromium
+#   393x852 run 5/5, incl. the tap-to-share wire assertion (PR #957).
 # REVIEWED 2026-09-06 mobile-newsfeed-layout.spec.ts — compiled mobile Chromium
 #   next start verification passed in the 65/65 mobile financial group.
 # REVIEWED 2026-09-06 mobile-order-ticket.spec.ts — compiled mobile Chromium

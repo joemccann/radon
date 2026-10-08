@@ -16727,6 +16727,15 @@ body[data-mobile="true"] .toast button {
   gap: 6px;
 }
 
+.mobile-card__share {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-dim);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: default;
+}
+
 .mobile-card__title-row {
   display: flex;
   align-items: flex-start;
