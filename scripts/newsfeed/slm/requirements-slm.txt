@@ -275,7 +275,7 @@ peft==0.18.1
     # via
     #   -r /tmp/slm-qlora.in
     #   llamafactory
-pillow==11.3.0
+pillow==12.3.0
     # via
     #   gradio
     #   matplotlib
