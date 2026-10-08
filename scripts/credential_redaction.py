@@ -13,6 +13,16 @@ _SECRET_KEY = (
 )
 
 _SPECIFIC_SCRUB_PATTERNS = [
+    # PEM / OpenSSH / PGP private-key blocks span lines; a block cut off
+    # before its END line is redacted to the end of the text.
+    (
+        re.compile(
+            r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----"
+            r"(?:.*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----|.*)",
+            re.S,
+        ),
+        "[redacted-private-key]",
+    ),
     (re.compile(r"libsql://[^\s'\"]+", re.IGNORECASE), "[redacted-db-url]"),
     (re.compile(r"https://[a-z0-9.-]+\.turso\.io[^\s'\"]*", re.IGNORECASE), "[redacted-db-url]"),
     # "Bearer <token>" is the literal HTTP header value shape (space, not an

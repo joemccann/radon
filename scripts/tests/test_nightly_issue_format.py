@@ -785,3 +785,18 @@ def test_both_bash_sinks_redact_complete_cookie_headers(tmp_path: Path, header: 
     # the private sink retains the header name. Both keep the next diagnostic.
     expected = "[REDACTED]" if fn == "_sanitize_issue_text" else f"{header}: [REDACTED]"
     assert proc.stdout == f"{expected}\nretry after review"
+
+
+@pytest.mark.parametrize("label", ["PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY", "OPENSSH PRIVATE KEY"])
+def test_private_key_blocks_are_redacted(label: str):
+    block = (f"-----BEGIN {label}-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEqzNOTREAL\n"
+             f"AAAAC3NzaC1lZDI1NTE5AAAAIqzNOTREAL\n-----END {label}-----")
+    out = nif.sanitize(f"the log showed\n{block}\nthen exited")
+    assert "NOTREAL" not in out and "BEGIN" not in out, out
+    assert out == "the log showed\n[REDACTED]\nthen exited"
+    assert "NOTREAL" not in nif.sanitize(f"cut off -----BEGIN {label}-----\nqzNOTREAL")
+
+
+def test_public_key_blocks_are_not_redacted():
+    text = "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE\n-----END PUBLIC KEY-----"
+    assert nif.sanitize(text) == text
