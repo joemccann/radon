@@ -124,6 +124,8 @@ preserved verbatim, and a value neither dotenv dialect can encode is dropped
 from the env write and reported as an `env_refused` outcome while setup still
 completes (the encrypted store keeps the value; REL-216).
 
+**FastAPI keep-alive.** `radon-app-runtime` launches the radon-api container's uvicorn with `--timeout-keep-alive 75` so the API outlasts the Next.js fetch pool's idle sockets; a shorter server idle timeout closes sockets Next.js still reuses, which surfaces as intermittent 502s. `cloud/tests/test_keepalive_ordering.py` pins the ordering across Caddy, Next.js and uvicorn.
+
 **Master key.** Resolution order: systemd credential
 `radon-secret-store-key` in `$CREDENTIALS_DIRECTORY`, then the key file at
 `$RADON_SECRET_STORE_KEY_FILE` (default `~/.radon/secret_store.key`,
