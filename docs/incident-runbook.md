@@ -1256,6 +1256,51 @@ function and fails the same way until this fix is deployed.
 
 ---
 
+## ai-cycle-backfill-sec-append-timeout
+
+**`radon-ai-cycle-backfill.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when a 100-row SEC observation insert exceeds the 4s Hrana
+budget on every retry.** Peak: 2026-10-08 05:38Z, page `9d9445d6…`.
+Timer next ~24h. Edge and `:8321/health/lite` stayed up.
+
+- **Mechanism:** `--backfill` walks windows, then `append_observations`
+  sends 100-row `INSERT OR IGNORE` statements (~190KB). SEC companyfacts
+  for the moved end date is one window (`sec:2006-12-31:<yesterday>`), so
+  the key misses the checkpoint every day and the full history is inserted
+  again. Vercel and gpu-rental committed. SEC landed through part of MU
+  (ids about 878500-888418, `fetched_at` 05:35:54Z-05:35:56Z). A later
+  batch timed out three times under `HRANA_TIMEOUT_S=4`. `HranaHttpError`
+  is not in the window handler's catch list, so `_write_health` recorded
+  `Collection failed; inspect sanitized source statuses` and the process
+  exited 1 before the checkpoint rename. `Type=oneshot` has no `Restart=`.
+  ExecMain 05:32:05Z-05:38:15Z, `ExecMainStatus=1`, under
+  `TimeoutStartSec=1200`. Python Turso canary `SELECT 1` 46 ms. Replay of
+  the same 106 batches saw tails of 4.4s and 6.0s (one timeout plus a
+  retry that succeeded). This is not the 2026-09-23 snapshot row cap:
+  distinct identities were 107407, under `_SNAPSHOT_MAX_ROWS`.
+- **Detection:** journal is root-only (`User=root` via
+  `radon-app-runtime`). `service_health[ai-cycle-backfill]` is `error`
+  with that sanitized message. No `sec:…:<yesterday>` line in
+  `backfill-checkpoint.json`. New `ai_cycle_observations` rows with
+  `source_id=sec` and today's `fetched_at` stop before TSM.
+- **Discriminating check:** Turso canary `SELECT 1` succeeds. A timed
+  100-row SEC insert exceeds or hugs 4s. Canary fail too means Turso
+  platform, stand down. `Result=signal` is deploy stop-clean. IB
+  `/health/lite` down means API/IB, stand down. Do not `reset-failed`
+  and start before this writer is live: the same 100-row statement still
+  exhausts the retry budget.
+- **Remediation (code):** after the 4s retry budget, halve the batch and
+  insert each half. Stop at 25 rows so a dead Turso is not turned into
+  one-row retries. After deploy, the next 05:30 UTC backfill (or one
+  `radon unit restart radon-ai-cycle-backfill.service`) finishes the
+  window. Inserts are `INSERT OR IGNORE`, so the rows already committed
+  are kept.
+- **Regression:**
+  `test_ai_cycle_core.py::test_cloud_observation_append_splits_when_the_hrana_batch_times_out`.
+- **Code:** `scripts/ai_cycle/store.py` (`_insert_observations`).
+
+---
+
 ## liquidcompute-ticker-snapshot-timeout
 
 **`radon-liquidcompute.service` oneshot pages P1 `Result=timeout`
