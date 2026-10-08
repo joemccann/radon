@@ -263,7 +263,8 @@ line here whenever you ship a security fix.**
   Tests: `scripts/tests/test_security_report_redaction.py`.
   The canonical scrubber `scripts/credential_redaction.py` and the public
   issue/PR sanitizer also redact multi-line private-key blocks, including a
-  block cut off before its END line.
+  block cut off before its END line, and both cover cookie headers,
+  session/CSRF keys and U, DU and F IB account ids.
 
   Redaction is a backstop for the renderer, not a licence to put secrets in the
   JSON. If a value is genuinely needed to reproduce a finding, reference where
