@@ -44,7 +44,7 @@ ExecStartPre=/home/radon/radon/.venv/bin/python3.13 /home/radon/radon/scripts/se
 # feedback_libsql_replica_one_writer.md) reserves the replica for
 # nextjs; FastAPI streams writes straight to Turso.
 Environment=RADON_DB_NO_REPLICA=1
-ExecStart=/home/radon/radon/.venv/bin/uvicorn scripts.api.server:app --host 0.0.0.0 --port 8321 --proxy-headers --forwarded-allow-ips 127.0.0.1
+ExecStart=/home/radon/radon/.venv/bin/uvicorn scripts.api.server:app --host 0.0.0.0 --port 8321 --proxy-headers --forwarded-allow-ips 127.0.0.1 --timeout-keep-alive 75
 Restart=always
 RestartSec=5
 

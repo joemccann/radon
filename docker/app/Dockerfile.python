@@ -98,4 +98,4 @@ PY
 
 RUN python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); browser = p.chromium.launch(headless=True); page = browser.new_page(); page.set_content('<title>radon-browser-smoke</title>'); assert page.title() == 'radon-browser-smoke'; browser.close(); p.stop()"
 
-CMD ["uvicorn", "scripts.api.server:app", "--host", "0.0.0.0", "--port", "8321", "--proxy-headers", "--forwarded-allow-ips", "127.0.0.1"]
+CMD ["uvicorn", "scripts.api.server:app", "--host", "0.0.0.0", "--port", "8321", "--proxy-headers", "--forwarded-allow-ips", "127.0.0.1", "--timeout-keep-alive", "75"]
