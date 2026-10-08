@@ -5,6 +5,7 @@ import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import {
   getRequestId,
   jsonApiError,
+  scrubSecrets,
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
 import { ADMIN_HEALTH_UPSTREAM_TIMEOUT_MS } from "@/lib/edgeBudget";
@@ -26,7 +27,7 @@ export const radonCapability = "admin";
  */
 function unreachableHealthResponse(requestId: string, error: unknown): Response {
   const reason = classifyUpstreamFailure(error) ?? "unreachable";
-  const detail = error instanceof Error ? error.message : "health probe failed";
+  const detail = scrubSecrets(error instanceof Error ? error.message : "health probe failed");
   return setNoStoreResponseHeaders(
     NextResponse.json({
       status: "unreachable",
