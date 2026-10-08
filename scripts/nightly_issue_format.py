@@ -84,6 +84,13 @@ _CREDENTIAL_LITERAL_RE = re.compile(
     r"|AKIA[0-9A-Z]{16}"
     r"|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})"
 )
+# PEM / OpenSSH / PGP private-key blocks span lines; a block cut off before
+# its END line is redacted to the end of the text.
+_PRIVATE_KEY_BLOCK_RE = re.compile(
+    r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----"
+    r"(?:.*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----|.*)",
+    re.S,
+)
 _EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w.-]+\.\w+\b")
 # App routes (/api/..., /v1/...) with any query or fragment, including
 # dynamic segments ([id], :id, {id}). Not filesystem
@@ -106,7 +113,7 @@ _FILE_LINE_RE = re.compile(
 # Operator / broker / demo account-looking tokens, not pids.
 _ACCOUNT_RE = re.compile(
     r"\b(?:user\s+)?(?:radon)?(?:trader|operator)\d+\b"
-    r"|\b(?:U|DU|account)[-_]?\d{5,}\b",
+    r"|\b(?:U|DU|(?-i:F)|account)[-_]?\d{5,}\b",
     re.I,
 )
 _LOG_POINTER_RE = re.compile(
@@ -184,6 +191,7 @@ def sanitize(text: str) -> str:
         return text
     # Preserve the one operator URL the quota ladder names, then restore.
     text = _USAGE_KEEP_RE.sub("\x00USAGE\x00", text)
+    text = _PRIVATE_KEY_BLOCK_RE.sub(REDACTED, text)
     text = _COOKIE_HEADER_RE.sub(lambda m: f"{m.group(1)}{REDACTED}", text)
     text = _URL_RE.sub(REDACTED, text)
     text = _ROUTE_RE.sub(REDACTED, text)

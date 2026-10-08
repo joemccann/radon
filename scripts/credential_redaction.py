@@ -9,10 +9,21 @@ from typing import Any
 # `_pass` / `_pwd` need the underscore so prose ("tests pass: 3") survives.
 _SECRET_KEY = (
     r"(?:api[_-]?key|access[_-]?key|secret[_-]?key|access[_-]?token"
-    r"|client[_-]?secret|password|passwd|secret|token|_pass|_pwd)"
+    r"|client[_-]?secret|password|passwd|secret|token|_pass|_pwd"
+    r"|sess(?:ion)?[-_]?id|_session|csrf|xsrf)"
 )
 
 _SPECIFIC_SCRUB_PATTERNS = [
+    # PEM / OpenSSH / PGP private-key blocks span lines; a block cut off
+    # before its END line is redacted to the end of the text.
+    (
+        re.compile(
+            r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----"
+            r"(?:.*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----|.*)",
+            re.S,
+        ),
+        "[redacted-private-key]",
+    ),
     (re.compile(r"libsql://[^\s'\"]+", re.IGNORECASE), "[redacted-db-url]"),
     (re.compile(r"https://[a-z0-9.-]+\.turso\.io[^\s'\"]*", re.IGNORECASE), "[redacted-db-url]"),
     # "Bearer <token>" is the literal HTTP header value shape (space, not an
@@ -29,7 +40,7 @@ _SPECIFIC_SCRUB_PATTERNS = [
         r"\1\2[redacted]",
     ),
     (re.compile(r"eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*"), "[redacted-jwt]"),
-    (re.compile(r"\bD?U\d{6,}\b"), "[redacted-account]"),
+    (re.compile(r"\b(?:D?U|F)\d{6,}\b"), "[redacted-account]"),
     (re.compile(r"(://[^\s/:@]+:)[^\s/@]+@"), r"\1[redacted]@"),
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{6,}"), "[redacted-key]"),
     (re.compile(r"\bsk_(?:live|test)_[A-Za-z0-9]{6,}\b"), "[redacted-key]"),
@@ -47,6 +58,8 @@ _SPECIFIC_SCRUB_PATTERNS = [
 # ordinary code (`token = uuid4().hex`), so detection uses only the
 # specific shapes above.
 _GENERIC_ASSIGNMENT_PATTERNS = [
+    # A cookie header carries several opaque values; redact through end of line.
+    (re.compile(r"(\b(?:set-)?cookie[ \t]*:[ \t]*)[^\r\n]*", re.IGNORECASE), r"\1[redacted-secret]"),
     # Generic key-value assignment (env files, config dumps, JSON), last so a
     # value the specific shapes above already tagged keeps its tag. A quoted
     # value is redacted through its closing quote (multi-word passwords).
