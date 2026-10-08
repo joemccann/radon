@@ -113,6 +113,40 @@ def test_cloud_writes_fail_fast_on_statement_errors(monkeypatch):
     assert len(calls) == 1
 
 
+def test_cloud_observation_append_splits_when_the_hrana_batch_times_out(monkeypatch):
+    """100-row SEC batches blew the 4s Hrana budget on every retry.
+
+    2026-10-08 05:38Z radon-ai-cycle-backfill (page 9d9445d69eb682e03ad2ddc4ede62e7f):
+    append committed MSFT through part of MU, then HranaHttpError TimeoutError
+    escaped the window handler. Checkpoint stayed on the previous window and
+    the oneshot exited 1. A statement that still times out at 100 and 50 rows
+    must be halved until it fits, not fail the unit.
+    """
+    from scripts.db import hrana_http
+
+    calls = []
+
+    def flaky(sql, args=(), timeout=4):
+        width = sql.count("(?,?,?,?,?)")
+        calls.append(width)
+        if width > 25:
+            raise hrana_http.HranaHttpError("TimeoutError: The read operation timed out")
+
+    monkeypatch.setattr(hrana_http, "hrana_execute", flaky)
+    monkeypatch.setattr("scripts.ai_cycle.store.time.sleep", lambda _delay: None)
+    rows = []
+    for i in range(100):
+        row = observation()
+        row["series_id"] = f"sec-batch-{i}"
+        row["value"] = i + 1
+        rows.append(row)
+    store = ObservationStore()
+    store._initialized = True
+    assert store.append_observations(rows) == 100
+    assert sum(width for width in calls if width <= 25) == 100
+    assert any(width > 25 for width in calls)
+
+
 def test_source_status_cloud_write_is_retry_idempotent(monkeypatch):
     from scripts.db import hrana_http
 

@@ -33,6 +33,11 @@ _SNAPSHOT_PAGE_SIZE = 500
 _SNAPSHOT_PERSIST_DEADLINE_SECONDS = 900
 _SNAPSHOT_MAX_ROWS = 500_000
 _SNAPSHOT_READ_DEADLINE_SECONDS = _SNAPSHOT_PERSIST_DEADLINE_SECONDS
+# 100-row SEC inserts are ~190KB and can exceed HRANA_TIMEOUT_S=4 on every
+# retry (2026-10-08 backfill). Halve until the statement fits; do not walk
+# down to single rows when Turso itself is not answering.
+_OBSERVATION_WRITE_BATCH = 100
+_OBSERVATION_BATCH_FLOOR = 25
 
 
 class ObservationStore:
@@ -84,32 +89,44 @@ class ObservationStore:
                 expected = len(response_members[(group, row["fetched_at"], row["raw_hash"])])
                 row["metadata"] = {**row["metadata"], "response_group": group, "response_row_count": expected}
         self.initialize()
-        for offset in range(0, len(validated), 100):
-            batch = validated[offset : offset + 100]
-            args = []
-            for row in batch:
-                payload = canonical(row)
-                identity = canonical(
-                    [
-                        row[key]
-                        for key in (
-                            "indicator_id",
-                            "series_id",
-                            "source_id",
-                            "period_start",
-                            "period_end",
-                            "methodology_version",
-                            "cohort_version",
-                        )
-                    ]
-                )
-                args.extend((digest(payload.encode()), available_at(row), row["period_end"], identity, payload))
+        for offset in range(0, len(validated), _OBSERVATION_WRITE_BATCH):
+            self._insert_observations(validated[offset : offset + _OBSERVATION_WRITE_BATCH])
+        return len(validated)
+
+    def _insert_observations(self, batch):
+        args = []
+        for row in batch:
+            payload = canonical(row)
+            identity = canonical(
+                [
+                    row[key]
+                    for key in (
+                        "indicator_id",
+                        "series_id",
+                        "source_id",
+                        "period_start",
+                        "period_end",
+                        "methodology_version",
+                        "cohort_version",
+                    )
+                ]
+            )
+            args.extend((digest(payload.encode()), available_at(row), row["period_end"], identity, payload))
+        from scripts.db.hrana_http import HranaHttpError
+
+        try:
             self._execute(
                 "INSERT OR IGNORE INTO ai_cycle_observations (fingerprint,available_at,period_end,identity,payload) VALUES "
                 + ",".join("(?,?,?,?,?)" for _ in batch),
                 args,
             )
-        return len(validated)
+        except HranaHttpError as exc:
+            transient = any(marker in str(exc) for marker in _TRANSIENT_HRANA_MARKERS)
+            if not transient or len(batch) <= _OBSERVATION_BATCH_FLOOR:
+                raise
+            mid = len(batch) // 2
+            self._insert_observations(batch[:mid])
+            self._insert_observations(batch[mid:])
 
     def upsert_observations_by_identity(self, rows):
         """REL-257 / R-678: replace identities in one all-or-nothing batch.
