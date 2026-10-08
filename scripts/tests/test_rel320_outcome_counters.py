@@ -288,3 +288,67 @@ def test_removed_order_with_execution_is_distinct_from_a_new_fill_delta(monkeypa
     metrics = sample(caplog, "filled_order_removed")
     assert metrics["success"] == 1
     assert not any('"operation": "fill_detected"' in r.message for r in caplog.records)
+
+
+def _raise_metrics_fault(*_args, **_kwargs):
+    raise RuntimeError("synthetic metrics fault")
+
+
+def test_metrics_fault_cannot_rewrite_a_completed_broker_call(monkeypatch):
+    """A counter failure after placeOrder must not look like a rejected order.
+
+    The transmitted-order guard in ib_place_order only arms after place_order
+    returns. Reporting the live submit as IBOrderError lets a later cycle
+    submit again, and it also hides the broker's own refusal.
+    """
+    from clients.ib_client import IBClient, IBOrderError
+    from utils import outcome_metrics
+    import trading_halt
+
+    monkeypatch.setattr(trading_halt, "is_trading_halted", lambda: False)
+    monkeypatch.setattr(outcome_metrics.METRICS, "record", _raise_metrics_fault)
+    broker = MagicMock()
+    trade = SimpleNamespace(order=SimpleNamespace(orderId=7))
+    broker.placeOrder.return_value = trade
+    client = IBClient.__new__(IBClient)
+    client._ib = broker
+    client.logger = logging.getLogger("metrics-fault")
+    client._require_connection = lambda: None
+    contract = SimpleNamespace(secType="STK", symbol="FAKE")
+    order = SimpleNamespace(action="BUY", totalQuantity=1, lmtPrice=2, orderType="LMT")
+
+    assert client.place_order(contract, order) is trade
+
+    broker.placeOrder.side_effect = RuntimeError("synthetic socket refusal")
+    with pytest.raises(IBOrderError, match="synthetic socket refusal"):
+        client.place_order(contract, order)
+    assert broker.placeOrder.call_count == 2
+
+
+def test_metrics_fault_cannot_skip_fill_persistence_or_journal_upsert(monkeypatch):
+    from db import writer
+    from monitor_daemon.handlers import fill_monitor as owner
+    from utils import outcome_metrics
+
+    monkeypatch.setattr(outcome_metrics.METRICS, "record", _raise_metrics_fault)
+    writes = []
+    monkeypatch.setattr(writer, "_hrana_execute", lambda *args, **kwargs: writes.append(args))
+    writer.upsert_journal_entry("fake-trade", {"symbol": "FAKE"})
+    assert writes, "a committed journal upsert was reported as a failure"
+
+    trade = MagicMock()
+    trade.order.orderId, trade.order.action, trade.order.totalQuantity = 5, "BUY", 25
+    trade.order.lmtPrice = 1.0
+    trade.orderStatus.status, trade.orderStatus.filled = "Submitted", 10
+    trade.orderStatus.remaining, trade.orderStatus.avgFillPrice = 15, 0.98
+    trade.contract.symbol, trade.contract.localSymbol = "FAKE", "FAKE-STK"
+    broker = MagicMock()
+    broker.get_open_orders.return_value = [trade]
+    monkeypatch.setattr(owner, "IBClient", lambda: broker)
+    handler = owner.FillMonitorHandler(send_notifications=False)
+    monkeypatch.setattr(handler, "_mirror_ib_orders_snapshot", lambda client: None)
+    persisted = []
+    monkeypatch.setattr(handler, "_persist_fill_to_journal", lambda *args: persisted.append(args))
+    handler.known_orders = {5: {"filled": 0}}
+    assert handler.execute()["partial_fills"] == 1
+    assert persisted, "fill journal write was skipped after a metrics fault"

@@ -11268,3 +11268,33 @@ One earlier closing attempt is retained as failed: root Python 14,292 passed / 2
 Standing Python passed 14,264 cases / 2 skips / 23 subtests. Initial Vitest ran 10,369 cases / 21 skips and initial cloud ran 2,615 cases / 2 failures / 7 skips with ambient Python outside the venv; corrected PATH selects the isolated Python, modern Bash/OpenSSL and Caddy. The initial cloud FAILED entries were test_app_runtime.py::test_notify_proxy_outlives_the_run_handoff_and_relays_while_docker_runs and test_monorepo_cutover.py::test_precloud_rollback_keeps_immutable_journal_support; the latter selected ambient Python 3.9 and rejected zip(strict=True). The two cloud owner files then passed 129 cases serially. Full pre-commit gates passed 14,292 Python, 10,390 Vitest and 2,617 cloud cases. Changed-file repetitions passed 230 Python and 156 cloud cases / 3 skips in each of three runs; the subsequently added YAML semantic case passed its eight-case owner in three supplemental runs.
 
 Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) and 6 (T-539) cases after a full green pre-commit round. T-538/T-540/T-541/T-539 are DONE with separate commits and retained red/green receipts. Frozen ledger prefixes, restored reviewer/YAML bytes, syntax, bash -n, whitespace, secret scan and absence of data/replica.db verified. No codemap or reliability-ledger edits. Inherited marketing-header and admin-preflight browser acceptance remains operator-only on issue #83; no local screenshot/390px result claimed. Exact-head draft/CI and the single checkpoint receipt are recorded externally on issue #83.
+
+## Delta audit 2026-10-08
+
+Range `8afaaa61f09789bc272910d0dbce048780ef4dd9..08c227ad49fe76ac3afcd360bfc62aa47cd1488e`: 23 commits / 268 paths. Newest trusted checkpoint is the 2026-10-07 collaborator comment on issue #83 (`audited-through: 8afaaa61f09789bc272910d0dbce048780ef4dd9`). No open `testing/` pull request. Numbering continues after T-541. TradingView research, secret-store isolation, signed mobile quotes, session refresh, implied market value, payoff sampling, breadth completion, and the outcome counters were read against the tests that import them. No new skip, xfail, coverage-threshold drop, or shard exclusion was found. The historical delta touches far more than one owner file; the standing full gates are the repetition for that set. The file this night changed was repeated three times on its own.
+
+### T-542 — P1 — a metrics fault rewrites a live order and can skip the fill record
+
+`scripts/utils/outcome_metrics.py` `record_outcome` is called from `scripts/clients/ib_client.py` around the `placeOrder` call and from `scripts/monitor_daemon/handlers/fill_monitor.py` before `_persist_fill_to_journal`. `record` is not isolated. A raised counter becomes `IBOrderError: Failed to place order: synthetic metrics fault` after `placeOrder` has already returned, so `ib_place_order.py` never marks the submit transmitted. The same raise replaces a real broker refusal, and it aborts `upsert_journal_entry` / fill persistence. Probe before the new tests: `placeOrder_calls 1` and `SUCCESS_PATH IBOrderError`. Red: the two new cases, 2 failed. The existing owner tests do not inject a counter failure, so they stay green on this defect.
+
+Acceptance: a counter exception after a successful fake `placeOrder` returns that trade and does not call the broker again; a later broker refusal is still `IBOrderError` naming the broker fault; a counter exception does not skip a journal upsert or fill persistence.
+
+Audited through: 08c227ad49fe76ac3afcd360bfc62aa47cd1488e on 2026-10-08 — 1 new finding
+
+## Remediation 2026-10-08
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-542 | DONE | Original recorder: 2 failed (`Failed to place order: synthetic metrics fault` after a successful fake submit, and `RuntimeError` before the journal upsert). `record_outcome` now swallows counter and log failures. Owner file: 17 passed in each of three serial runs. Product order, fill, and database behavior is otherwise unchanged. |
+
+### Closing gates 2026-10-08
+
+Corrected toolchain for every counted gate: Homebrew OpenSSL and Bash on `PATH`, `python3` pointing at the 3.13 venv, and Homebrew Caddy. The first root pytest, before that PATH, was 54 failed / 14,644 passed, all `CERTIFICATE_VERIFY_FAILED` from `/usr/bin/openssl` (LibreSSL) certificates. Re-running `scripts/tests/test_ib_gateway_remote.py` with Homebrew OpenSSL passed 19. Corrected standing root pytest: 14,698 passed / 2 skipped / 23 subtests. Standing Vitest: 10,443 passed / 21 skipped / 1,054 files. Standing cloud before the Python shim: 3 failed / 2,749 passed / 8 skipped. `test_precloud_rollback_keeps_immutable_journal_support` and `test_notify_proxy_outlives_the_run_handoff_and_relays_while_docker_runs` then passed together once `python3` was 3.13. The caddy upstream-gap case fails alone on this host and at the audited base SHA.
+
+| Round | Root Python | Root Vitest | Cloud | Failed-list diff against base `8afaaa61` |
+|---|---|---|---|---|
+| 1 | 14,700 passed / 2 skipped / 23 subtests | 10,443 passed / 21 skipped / 1,054 files | 1 failed / 2,751 passed / 8 skipped | 0 added / 0 removed |
+| 2 | 14,700 passed / 2 skipped / 23 subtests | 10,443 passed / 21 skipped / 1,054 files | 1 failed / 2,751 passed / 8 skipped | 0 added / 0 removed |
+| 3 | 14,700 passed / 2 skipped / 23 subtests | 10,443 passed / 21 skipped / 1,054 files | 1 failed / 2,751 passed / 8 skipped | 0 added / 0 removed |
+
+The only shared FAILED node is `cloud/tests/test_caddyfile.py::TestRestartWindowMechanism::test_request_during_an_upstream_gap_is_served_not_502ed`. Base cloud at `8afaaa61` with the same toolchain: 1 failed / 2,615 passed / 8 skipped. Linux CI remains the authority for that suite. No threshold was lowered and no test was skipped to go green. Inherited header-mobile and admin-service-controls browser acceptance stays operator-only. No local screenshot or 390px result is claimed.
