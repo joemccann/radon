@@ -2187,3 +2187,71 @@ Full cohort tables, critical path, Linux module timings, cache classifications,
 per-job queue/setup/execution, candidate rankings and all carried findings are
 in tonight's rolling comment, as required by this run's explicit delivery
 contract. No other candidate passes recurring materiality and safety together.
+
+## CIP-019 - stop holding publish on the Actions cache upload (2026-10-08)
+
+Status: **VALIDATING**.
+
+**Pre-edit baseline and hypothesis.**
+BuildKit already pushed the exact SHA image, then kept the image job, and
+therefore prepull and deploy, waiting on `cache-to: type=gha,mode=max`.
+The upload is a different store from GHCR, so it re-sends blobs the registry
+push already finished. Measured `sending cache export` durations:
+
+| Run | Job | Export | What it blocked |
+|---|---|---|---|
+| 37664940638 | 112941785137 python | 403.7s | Push finished 18:15:25Z; export finished 18:22:24Z. Build step 604s. Successful deploy clock 853s. Workflow conclusion failure (non-gating Playwright apt). |
+| 37472489871 | 112299418661 node | 104.2s | Cold node was the authorizing gate. Release 440s, gates 248s, build step 198s. |
+| 37637121211 | 112846333863 node | 55.4s | Node was the authorizing gate. Release 442s, build step 130s. Also runner-queued. |
+| 37406286981 | 112084550530 node | 44.8s | Node was the authorizing gate. Release 338s, build step 137s. |
+
+Warm exports are not the authorizing gate: 37721713558 python export 2.1s
+(build step 71s, gates +156s, release 293s) and node export 0.8s (build step
+5s). Main now writes `type=registry,ref=<image>:buildcache,mode=max` on the
+same GHCR package the SHA push just filled, and reads that tag only after
+`imagetools inspect` succeeds. Until the tag exists, cache-from stays the
+existing GHA scope so the first post-merge build is not a forced miss.
+Pull requests still write only the GHA cache because their caller token
+cannot push packages. Expected critical-path save is the post-push part of
+the export on image-authorizing runs (about 30-90s typical, about 400s on
+the 403.7s sample) and about 0s on warm test-bound releases. Confidence
+medium: registry blob mounts were not timed before merge. Runner minutes
+should fall on those cold image jobs and stay flat on warm hits. No new
+shard.
+
+**Safety and revert trigger.**
+Deploy, prepull and the runtime still address `ghcr.io/joemccann/radon-python`
+and `radon-node` by the 40-character SHA. `buildcache` is absent from
+`deploy.sh`, `deploy-root-helper.sh` and `radon-app-runtime.sh`. Exact SHA
+and `:latest` tags are unchanged. Provenance stays off. The python image
+still loads and runs the hardened browser smoke before the job succeeds.
+A missing `buildcache` tag does not fail the build. PR cache export still
+does not need `packages:write`. No test inventory, coverage, path ownership,
+`needs`, health check, 40-second stability window, rollback artifact,
+transition journal, green marker or non-cancelling deploy lock changes.
+Revert if a main or PR image job fails on the missing cache tag, if the
+registry export is slower than the GHA export it replaced, if any deploy
+path pulls `buildcache`, or if provenance, health or rollback regresses.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Exact app images / Build python image | 604s | pending | TBD until 5 samples |
+| Exact app images / Build node image | 198s | pending | TBD until 5 samples |
+
+Before rows are the cold build steps that included the blocking export:
+python run 37664940638 job 112941785137, node run 37472489871 job
+112299418661. They are not warm p50. Five comparable image-authorizing
+before and five after runs are required: same-class p50 at least 10% and
+15s faster; p95 no worse than 5% or 15s; cold p50 no worse than 10%;
+runner minutes no more than 20% higher unless disclosed; every test, gate,
+provenance, health, recovery and rollback rail intact. Warm test-bound
+releases are a separate class and are not expected to move. Neither local
+timing nor green PR CI establishes a win.
+
+**Verification.**
+`TestImageBuildUsesRemoteCache` was red on the old literal GHA `cache-to`
+(2 failed) and red again on the missing-tag case (2 failed) before the
+selector learned to keep GHA cache-from when `buildcache` is absent. Green
+after: 10 passed in that class plus the PR token-scope tests. Workflow YAML
+parses. Both selector scripts pass `bash -n`. Full suites, Vitest, Docker
+builds and workflow lint are left to PR CI.
