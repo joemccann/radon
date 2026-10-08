@@ -123,7 +123,7 @@ fsspec==2025.3.0
     #   gradio-client
     #   huggingface-hub
     #   torch
-gradio==5.50.0
+gradio==6.16.0
     # via llamafactory
 gradio-client==1.14.0
     # via gradio
