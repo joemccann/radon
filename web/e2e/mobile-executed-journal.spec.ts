@@ -132,6 +132,48 @@ test.describe("Mobile executed orders", () => {
     await page.screenshot({ path: testInfo.outputPath("mobile-executed.png") });
   });
 
+  test("tapping a closed fill expands share actions that request the P&L card", async ({ page }, testInfo) => {
+    await setupBaseMocks(page);
+    const closingFill = {
+      ...ORDERS_WITH_FILL.executed_orders[0],
+      execId: "exec-close",
+      side: "SLD",
+      avgPrice: 6.55,
+      realizedPNL: 1520.25,
+      time: `${TODAY}T15:30:00Z`,
+    };
+    await page.route("**/api/orders", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...ORDERS_WITH_FILL, executed_count: 1, executed_orders: [closingFill] }) }),
+    );
+    const shareRequests: string[] = [];
+    await page.route("**/api/share/pnl**", (route) => {
+      shareRequests.push(route.request().url());
+      return route.fulfill({ status: 200, contentType: "image/png", body: Buffer.from([0x89, 0x50, 0x4e, 0x47]) });
+    });
+    await page.goto("/orders");
+
+    const card = page.getByTestId("mobile-executed-list").locator('[aria-label="AAPL CLOSE"]');
+    await expect(card).toBeVisible();
+    await expect(page.locator('[data-testid$="-share"]')).toHaveCount(0);
+    await card.click();
+    await expect(card).toHaveAttribute("aria-expanded", "true");
+    const panel = card.locator('[data-testid$="-share"]');
+    await expect(panel.getByRole("button", { name: "Copy & Tweet" })).toBeVisible();
+    await panel.getByRole("checkbox", { name: "P&L $" }).click();
+    await expect(card).toHaveAttribute("aria-expanded", "true");
+    expect(shareRequests).toHaveLength(0);
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { write: async () => undefined } });
+    });
+    await panel.getByRole("button", { name: "Copy", exact: true }).click();
+    await expect.poll(() => shareRequests.length).toBe(1);
+    const url = new URL(shareRequests[0]);
+    expect(url.pathname).toBe("/api/share/pnl");
+    expect(url.searchParams.get("pnl")).toBe("1520.25");
+    await panel.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath("mobile-executed-share.png") });
+  });
+
   test("desktop executed-orders table is hidden on mobile", async ({ page }) => {
     await setupBaseMocks(page);
     await page.route("**/api/orders", (route) =>

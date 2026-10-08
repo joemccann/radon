@@ -3891,7 +3891,12 @@ function OrdersSections({
               testId="today-executed-empty"
             />
           ) : showMobileOrders ? (
-            <MobileExecutedList groups={execGroupSort.sorted} />
+            <MobileExecutedList
+              groups={execGroupSort.sorted}
+              shareDataFor={(group) => group.isClosing && group.totalPnL != null
+                ? positionGroupShareData(group, positionGroups, portfolio?.positions, portfolio?.trade_log_dates, portfolio?.contract_open_dates)
+                : null}
+            />
           ) : (
             <div className="table-wrap" data-testid="executed-table-scroll">
             <table>
