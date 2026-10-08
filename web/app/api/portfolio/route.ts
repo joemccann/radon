@@ -8,6 +8,8 @@ import {
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
 import { dbExecute } from "@/lib/dbExecute";
+import { PRODUCER_SYNC_WAIT_MS } from "@/lib/edgeBudget";
+import { markSyncFallback } from "@/lib/syncFallback";
 import { demoDbIsolationViolation } from "@/lib/demo/demoDbIsolation";
 import { buildContractEntryDates, type JournalEntryRow } from "@/lib/entryDates";
 import {
@@ -238,7 +240,7 @@ export async function POST(): Promise<Response> {
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {
-    const data = await radonFetch("/portfolio/sync", { method: "POST", timeout: 35_000 });
+    const data = await radonFetch("/portfolio/sync", { method: "POST", timeout: PRODUCER_SYNC_WAIT_MS });
     // The sync can publish both a portfolio snapshot and new journal fills;
     // do not merge its live response with pre-sync entry-date maps.
     invalidatePortfolioReadCaches();
@@ -246,7 +248,7 @@ export async function POST(): Promise<Response> {
       withoutPortfolioEntryDates(data),
     );
     return setNoStoreResponseHeaders(response, requestId);
-  } catch {
+  } catch (syncError) {
     // The upstream can time out after publishing both snapshot and fills.
     // Invalidate every derived read before resolving the indeterminate result.
     invalidatePortfolioReadCaches();
@@ -270,8 +272,7 @@ export async function POST(): Promise<Response> {
     }
     if (snapshot) {
       console.warn("[Portfolio] Sync failed, serving latest Turso snapshot");
-      const res = NextResponse.json(snapshot.data);
-      res.headers.set("X-Sync-Warning", "IB sync failed - serving latest Turso snapshot");
+      const res = markSyncFallback(NextResponse.json(snapshot.data), syncError);
       return setNoStoreResponseHeaders(res, requestId);
     }
     return setNoStoreResponseHeaders(
