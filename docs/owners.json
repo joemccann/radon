@@ -258,6 +258,17 @@
       "globs": ["docs/mobile/**", "apps/ios/**"],
       "owners": ["docs/mobile/iphone-app-direction.md"],
       "note": "iPhone path is foundation-only. Direction doc owns the loop, trading-safety contract, and the apps/ios stub. No Xcode project."
+    },
+    {
+      "id": "tradingview-mcp",
+      "globs": [
+        "scripts/clients/tradingview_client.py",
+        "scripts/clients/tradingview_auth.py",
+        "scripts/tradingview_mcp.py",
+        "scripts/api/routes/tradingview.py"
+      ],
+      "owners": ["docs/tradingview-mcp-client.md"],
+      "note": "Read-only research client, OAuth token file, CLI and JWT research routes. Phase 3 plan language drifted from the shipped allowlist (DOC-176)."
     }
   ]
 }

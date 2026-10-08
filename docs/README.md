@@ -50,7 +50,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Social-share voice provenance and export constraints | [`docs/joe-mccann-social-voice.md`](joe-mccann-social-voice.md) |
 | Equibles market-structure API | [`docs/equibles-api.md`](equibles-api.md) |
 | Strategy specs | [`docs/strategies.md`](strategies.md) |
-| VCG-R research notes | [`docs/cross_asset_volatility_credit_gap_spec_(VCG).md`](cross_asset_volatility_credit_gap_spec_(VCG).md) |
+| VCG-R research notes | [`docs/cross_asset_volatility_credit_gap_spec_(VCG).md`](cross_asset_volatility_credit_gap_spec_%28VCG%29.md) |
 | GARCH convergence | [`docs/strategy-garch-convergence.md`](strategy-garch-convergence.md) |
 | Options structures | [`docs/options-structures.md`](options-structures.md) |
 | Evaluation pipeline | [`docs/evaluation.md`](evaluation.md) |

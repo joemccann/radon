@@ -51,7 +51,8 @@ Radon log **plus a digested Pushover**, never one push per fire; MCP stays read-
   401. A message with no secret (TradingView's default crossing text) is
   accepted: TradingView does not retry a 401, so rejecting it drops the fire.
 - Rotation: both env vars accept a comma-separated pair so old and new are valid during
-  an overlap window; alerts are re-pointed in bulk later via MCP `update_alert`.
+  an overlap window. Re-point every alert in the TradingView UI; the research client
+  forbids `update_alert`. Follow **Rotate a secret** below.
 
 ### Handler order (the whole design)
 
@@ -254,7 +255,7 @@ it to `new` alone and restart again. Both values pass during the overlap.
 
 Alerts are created and updated in the TradingView UI against the Phase 1 URL.
 Ultimate's open-ended expiry means they do not silently die after two months.
-The official MCP contract checked October 7 does not permit creating webhook alerts
+The official MCP contract does not permit creating webhook alerts
 or updating webhook-enabled alerts. Secret rotation therefore requires UI updates;
 the former bulk `update_alert` plan was unsupported. Reconciliation of fire logs is
 separate future work; the research client's allowlist excludes those messages.
@@ -273,30 +274,17 @@ FastAPI routes are under `/research/tradingview`. See
 uses an ephemeral loopback callback; there is no public callback or auth exemption
 on either app.radon.run or the Vercel marketing host.
 
-Ladder placement, per the operator review of 2026-09-15:
+Explicit operator research reads use this client. It is not in automatic price failover.
+Commodity price priority remains IB > Robinhood > UW > Cboe > Yahoo.
+Scheduled analyst, newsfeed and execution paths do not call it.
 
-- **TradingView is primary where it fills a gap**: economic and earnings calendars,
-  fundamentals and financial history, filings and transcripts, cross-asset screener,
-  watchlists, FX and crypto coverage, per-ticker news.
-- **TradingView first, Unusual Whales second** for analyst *consensus* and price
-  targets. UW's shared daily budget is needed for the flow endpoints only UW can serve,
-  and TradingView's limit is its own. UW keeps analyst *rating-change events*
-  (`/screener/analysts`: firm, analyst, upgrade or downgrade, target, timestamp), which
-  TradingView has no equivalent for.
-- **TradingView below the official feeds and above Yahoo** for any price series:
-  IB > Robinhood > UW > Cboe/Treasury/FINRA > TradingView > Yahoo.
-- **Never** for greeks, implied vol, option chains or open interest, dark pool, sweeps,
-  GEX, depth, or execution. TradingView serves none of it, and no Gate 1-3 input may
-  come from TradingView.
-
-News: TradingView serves the per-ticker slot Radon has empty today. The Market Ear
-remains the curated macro newsfeed. Store ids, links and short snippets only;
+**Never** for greeks, implied vol, option chains or open interest, dark pool, sweeps,
+GEX, depth, or execution. No Gate 1-3 input may come from TradingView.
 TradingView content must never reach the public share routes.
 
-Watchlists: `list_watchlists` and `get_watchlist` read the operator's lists once
-authorized. `get_active_watchlist` is excluded because it can activate or create a
-list despite its read-only vendor label. This is a single-operator integration,
-not a per-user "connect your account" flow. Account write tools remain prohibited.
+`get_active_watchlist` is excluded because it can activate or create a list despite
+its read-only vendor label. Alert and watchlist mutations are excluded. This is a
+single-operator integration, not a per-user "connect your account" flow.
 
 ## Non-goals
 

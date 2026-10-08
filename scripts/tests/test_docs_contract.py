@@ -1498,6 +1498,10 @@ class TestRecurringOwnerCoverage:
         ("scripts/credential_redaction.py", "docs/security-audit-playbook.md"),
         ("scripts/research/worker.py", "docs/dropbox-research.md"),
         ("cloud/services/radon-knowledge-eval.service", "docs/knowledge-embeddings.md"),
+        ("scripts/clients/tradingview_client.py", "docs/tradingview-mcp-client.md"),
+        ("scripts/clients/tradingview_auth.py", "docs/tradingview-mcp-client.md"),
+        ("scripts/tradingview_mcp.py", "docs/tradingview-mcp-client.md"),
+        ("scripts/api/routes/tradingview.py", "docs/tradingview-mcp-client.md"),
     ])
     def test_recurring_contract_cannot_change_without_owner(self, source, owner):
         assert (_ROOT / source).is_file()
@@ -1797,3 +1801,52 @@ class TestTesterArmyToolchainOwner:
         workflow = yaml.safe_load((_ROOT / ".github/workflows/ci.yml").read_text())
         needs = workflow["jobs"]["deploy"]["needs"]
         assert all("tester" not in str(item).lower() for item in needs)
+
+
+class TestTradingViewMcpResearchOwner:
+    """DOC-176/177/179: shipped MCP client is explicit research, not failover."""
+
+    def test_integration_matches_research_only_client(self):
+        text = (_ROOT / "docs/tradingview-integration.md").read_text()
+        assert "via MCP `update_alert`" not in text
+        assert "TradingView > Yahoo" not in text
+        assert "not in automatic price failover" in text
+        assert "IB > Robinhood > UW > Cboe > Yahoo" in text
+        client = (_ROOT / "scripts/clients/tradingview_client.py").read_text()
+        allowlist = client[client.index("SAFE_RESEARCH_TOOLS"):client.index("}", client.index("SAFE_RESEARCH_TOOLS"))]
+        for tool in ("update_alert", "create_alert", "delete_alert",
+                     "get_active_watchlist", "get_news_story", "get_alerts_log"):
+            assert tool not in allowlist, tool
+
+    def test_mcp_client_owner_omits_dated_verification_receipt(self):
+        text = (_ROOT / "docs/tradingview-mcp-client.md").read_text()
+        assert "Verification evidence" not in text
+        assert "Verification plan" not in text
+        assert "checked 2026-10-07" not in text
+        assert "this first release" not in text
+        assert "User-Agent" in text and "radon/2.0" in text
+        assert "TRADINGVIEW_MCP_TOKEN_FILE" in text
+        assert "GET /research/tradingview/status" in text
+        assert "python3.13 scripts/tradingview_mcp.py auth" in text
+        auth = (_ROOT / "scripts/clients/tradingview_auth.py").read_text()
+        assert 'outgoing.headers["User-Agent"] = "radon/2.0"' in auth
+
+    def test_external_services_points_at_tradingview_owners(self):
+        services = (_ROOT / "docs/external-services.md").read_text()
+        assert "TRADINGVIEW_MCP_TOKEN_FILE" in services
+        assert "tradingview-integration.md" in services
+        assert "tradingview-mcp-client.md" in services
+        example = (_ROOT / ".env.example").read_text()
+        assert "TRADINGVIEW_MCP_TOKEN_FILE" in example
+
+
+class TestVcgSpecIndexLinks:
+    """DOC-178: parentheses in the VCG spec filename break unencoded Markdown links."""
+
+    def test_index_and_strategy_links_encode_parentheses(self):
+        encoded = "cross_asset_volatility_credit_gap_spec_%28VCG%29.md"
+        raw = "](cross_asset_volatility_credit_gap_spec_(VCG).md)"
+        for rel in ("docs/README.md", "docs/strategies.md"):
+            text = (_ROOT / rel).read_text()
+            assert encoded in text, rel
+            assert raw not in text, rel
