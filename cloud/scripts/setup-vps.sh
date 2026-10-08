@@ -1254,8 +1254,11 @@ copy_systemd_services() {
 # for rationale (beta crash loop grew the journal to 3.9G).
 install_journald_limits() {
   log_info "Installing journald disk cap (SystemMaxUse=1G)..."
+  # zz- sorts after Ubuntu's /usr/lib/systemd/journald.conf.d/syslog.conf
+  # (ForwardToSyslog=yes), which otherwise overrides ForwardToSyslog=no.
+  rm -f /etc/systemd/journald.conf.d/radon.conf
   stage_from_checkout "${CLOUD_DIR}/services/journald-radon.conf" \
-    /etc/systemd/journald.conf.d/radon.conf 0644
+    /etc/systemd/journald.conf.d/zz-radon.conf 0644
   # journald.conf(5): changes apply on a restart of systemd-journald. Not a
   # radon unit; restart keeps the sockets up and does not drop log streams.
   systemctl restart systemd-journald
