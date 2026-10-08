@@ -84,6 +84,7 @@ from api.routes.credentials import (
 from api.routes.assistant_market import router as assistant_market_router
 from api.routes.streaks import router as streaks_router
 from api.routes.research import router as research_router
+from api.routes.tradingview import router as tradingview_router
 from api.routes.ai_cycle import router as ai_cycle_router
 
 import app_preferences
@@ -901,6 +902,7 @@ app.include_router(credentials_router)
 app.include_router(assistant_market_router)
 app.include_router(streaks_router)
 app.include_router(research_router)
+app.include_router(tradingview_router)
 app.include_router(ai_cycle_router)
 
 # Explicit origin allowlist (was a `https://.*\.radon\.run` wildcard regex). The
