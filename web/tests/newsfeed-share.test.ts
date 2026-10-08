@@ -15,26 +15,17 @@ const equityIssuance: SharePost = {
   },
 };
 
-function assertXCaption(caption: string) {
-  const body = caption.split("\n\n").slice(1).filter(line => !/^Source: /.test(line));
-  expect(body.length).toBeGreaterThanOrEqual(1);
-  expect(body.length).toBeLessThanOrEqual(3);
-  expect(caption).not.toMatch(/^[•●▪◦*-]\s/m);
-  for (const line of body) expect(line).toMatch(/[.!?%)"'\u201d]$/);
-  expect(caption).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
-  expect(caption.length).toBeLessThanOrEqual(SHARE_CAPTION_SOFT_CAP);
-}
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("social captions", () => {
-  it("keeps the original image provider in Market Ear share captions", () => {
+  it("does not append image-provider attribution to X share captions", () => {
     const image = "https://media.radon.run/adoption.png";
     const attributed = { ...post, images: [image], imageSources: { [image]: "Ramp" } };
-    expect(buildShareCaption(attributed)).toContain("Source: Ramp");
+    expect(buildShareCaption(attributed)).toBe("Yen hedge demand jumps\n\nPositioning is near neutral.");
     expect(buildShareCaption(attributed)).not.toMatch(/market[\s-]*ear/i);
     const other = "https://media.radon.run/other.png";
     const multi = { ...attributed, images: [image, other], imageSources: { [image]: "Ramp", [other]: "Goldman Sachs" } };
-    expect(buildShareCaption(multi, other)).toContain("Source: Goldman Sachs");
+    expect(buildShareCaption(multi, other)).toBe(buildShareCaption(attributed));
     expect(buildShareCaption(multi, other)).not.toContain("Ramp");
   });
   it("does not reuse an unrelated image provider or excluded publisher", () => {
@@ -68,14 +59,14 @@ describe("social captions", () => {
     expect(url.origin + url.pathname).toBe("https://twitter.com/intent/tweet");
     expect(url.searchParams.get("text")).toBe(caption);
   });
-  it("exports private research attribution without a private URL or document IDs", () => {
+  it("omits private research attribution, URLs and document IDs", () => {
     const privatePost: SharePost = { ...post, href: "/api/newsfeed/research/files/secret.pdf", source: {
       kind: "dropbox", publisher: "J.P. Morgan", documentDate: "2026-09-03", folderDate: "2026-09-07", pages: [2], figures: [],
       fileId: "file-private-id", revision: "private-revision", contentHash: "secret", url: "/api/newsfeed/research/files/secret.pdf",
     } };
     const caption = buildShareCaption(privatePost);
-    expect(caption).toBe("Yen hedge demand jumps\n\nPositioning is near neutral.\n\nSource: J.P. Morgan · 2026-09-03");
-    expect(caption).toContain("Source: J.P. Morgan");
+    expect(caption).toBe("Yen hedge demand jumps\n\nPositioning is near neutral.");
+    expect(caption).not.toContain("Source:");
     expect(caption).not.toMatch(/secret|private|\/api\//);
   });
   it.each(["http://localhost:3000/newsfeed", "https://app.radon.run/api/newsfeed/research/files/secret.pdf", "https://10.0.0.1/private", "javascript:alert(1)", "https://themarketear.com@evil.test/posts/x", "/newsfeed"])("does not export unestablished public href %s", href => {
@@ -84,22 +75,26 @@ describe("social captions", () => {
   it("removes authenticated research paths embedded in post text and strips permalink query secrets", () => {
     expect(buildShareCaption({ ...post, content: "Chart /api/newsfeed/research/files/secret.png", href: `${post.href}?token=secret` })).not.toContain("secret");
   });
-  it("builds an X-native fallback for the equity-issuance $252bn / $700bn post", () => {
+  it("preserves the complete equity-issuance title, names, numbers and every sentence", () => {
     const caption = buildShareCaption(equityIssuance);
-    assertXCaption(caption);
-    expect(caption.split("\n")[0]).toMatch(/\$252bn/i);
-    expect(caption.split("\n")[0]).not.toMatch(/\$700bn/i);
+    expect(caption.split("\n\n")[0]).toBe(equityIssuance.title.replace("Goldman", "@GoldmanSachs"));
+    expect(caption.length).toBeGreaterThan(SHARE_CAPTION_SOFT_CAP);
+    expect(caption.replace(/\s+/g, " ")).toBe(
+      `${equityIssuance.title} ${equityIssuance.content}`.replace(/\bGoldman\b/g, "@GoldmanSachs"),
+    );
     expect(caption).toContain("$252bn");
     expect(caption).toContain("$700bn");
-    expect(caption).toMatch(/overhang|headwind|hyperscaler|AI/i);
-    expect(caption).toMatch(/Source: Goldman Midday Market Intelligence · 2026-09-17\s*$/);
-    expect(caption.split("\n\n").pop()).toMatch(/^Source: /);
-    expect(caption).not.toContain("Sarah Herring");
-    expect(caption).not.toContain("Richard Ramsden");
-    expect(caption).not.toMatch(/across IPOs/i);
+    expect(caption).toContain("Sarah Herring and Chris Hussey");
+    expect(caption).toContain("Richard Ramsden");
+    expect(caption).toContain("across IPOs, follow-ons, convertibles, and SPACs");
+    expect(caption).toContain("The driver here is straightforward:");
+    expect(caption).toContain("This is not just a tech story.");
+    expect(caption).toContain("for fuller context.");
+    expect(caption).toContain("even if the desk characterizes it as a headwind rather than a gale.");
+    expect(caption).not.toContain("Source:");
     expect(new URL(buildXShareUrl(caption)).searchParams.get("text")).toBe(caption);
   });
-  it("turns rewritten bullets into sentences and keeps source last", () => {
+  it("spaces all original bullet lines without adding a source footer", () => {
     const caption = buildShareCaption({
       ...equityIssuance,
       title: "US corps raised a record $252bn in 2Q equity supply",
@@ -107,12 +102,52 @@ describe("social captions", () => {
     });
     expect(caption).toBe(
       "US corps raised a record $252bn in 2Q equity supply\n\n"
-      + "Goldman sees ~$700bn total equity supply in 2026.\n\n"
-      + "AI infra / hyperscaler capex is a big slice.\n\n"
-      + "Supply overhang = headwind, not a gale.\n\n"
-      + "Source: Goldman Midday Market Intelligence · 2026-09-17",
+      + "• @GoldmanSachs sees ~$700bn total equity supply in 2026\n\n"
+      + "• AI infra / hyperscaler capex is a big slice\n\n"
+      + "• Supply overhang = headwind, not a gale",
     );
-    assertXCaption(caption);
+  });
+  it("shares the complete Morgan Stanley screenshot post with bank handles", () => {
+    const title = "Morgan Stanley: AI CDS basket trades ~45bp wider than CDX IG, and protection is still its preferred credit-derivatives expression";
+    const content = 'Morgan Stanley’s AI CDS basket now trades ~45bp wider than CDX IG.\n\nMS says buying CDS protection "remains our preferred way of playing the AI story in the credit derivatives market." The reason is not just a bearish default call. MS expects "increasing needs for non-economic hedging to manage counterparty exposure," even in a benign scenario where AI investments are profitable and continue.\n\nThat is an important distinction. The hedge bid can grow even if the capex cycle keeps working. More AI financing creates more counterparty exposure, and that creates more demand for protection.';
+    const caption = buildShareCaption({ ...post, title, content, source: {
+      kind: "dropbox", publisher: "Tyler Durden", documentDate: "2026-10-07", folderDate: "2026-10-07",
+      pages: [13], figures: [], fileId: "private-id", revision: "r", contentHash: "h", url: "/private.pdf",
+    } });
+    expect(caption.startsWith(title.replace("Morgan Stanley", "@morganstanley") + "\n\n")).toBe(true);
+    expect(caption).toContain("@morganstanley’s AI CDS basket now trades ~45bp wider than CDX IG.");
+    expect(caption).toContain('@morganstanley says buying CDS protection "remains our preferred way of playing the AI story in the credit derivatives market."');
+    expect(caption).toContain('The reason is not just a bearish default call.');
+    expect(caption).toContain('@morganstanley expects "increasing needs for non-economic hedging to manage counterparty exposure," even in a benign scenario where AI investments are profitable and continue.');
+    expect(caption.endsWith("More AI financing creates more counterparty exposure, and that creates more demand for protection.")).toBe(true);
+    expect(caption.length).toBeGreaterThan(SHARE_CAPTION_SOFT_CAP);
+    expect(caption).not.toMatch(/Source:|Tyler Durden|2026-10-07|\bMS\b|Morgan Stanley/);
+    expect(new URL(buildXShareUrl(caption)).searchParams.get("text")).toBe(caption);
+  });
+  it("maps known names at word boundaries and leaves unknown names and existing handles intact", () => {
+    const content = "MS, Morgan Stanley, Goldman Sachs and J.P. Morgan agree. @morganstanley @GoldmanSachs @jpmorgan agree too. MSFT, CMS and Acme Research disagree.";
+    const caption = buildShareCaption({ ...post, title: "Bank outlook", content });
+    expect(caption).toContain("@morganstanley, @morganstanley, @GoldmanSachs and @jpmorgan agree.");
+    expect(caption).toContain("@morganstanley @GoldmanSachs @jpmorgan agree too.");
+    expect(caption).toContain("MSFT, CMS and Acme Research disagree.");
+    expect(caption).not.toContain("@@");
+    expect(new URL(buildXShareUrl(caption)).searchParams.get("text")).toBe(caption);
+  });
+  it.each([
+    ["Citigroup", "@Citi"], ["Citi", "@Citi"], ["Bank of America", "@BankofAmerica"],
+    ["BofA", "@BankofAmerica"], ["Barclays", "@Barclays"], ["BNP Paribas", "@BNPParibas"],
+    ["Bloomberg", "@business"], ["Reuters", "@Reuters"], ["Ramp", "@tryramp"],
+  ])("uses the known source handle for %s", (name, handle) => {
+    expect(buildShareCaption({ ...post, title: name, content: `${name} sees demand.` }))
+      .toBe(`${handle}\n\n${handle} sees demand.`);
+  });
+  it("preserves URLs, email addresses, cashtags and lowercase ramp prose", () => {
+    const content = "See https://example.com/Goldman and research@Goldman.com. $MS and MSFT rise as capex ramps up. The capex ramp continues.";
+    expect(new URL(buildXShareUrl(content)).searchParams.get("text")).toBe(content);
+  });
+  it("removes any source line from manually edited X copy and preserves all other copy", () => {
+    const caption = "MS sees hedging demand.\n\nSource: Tyler Durden · 2026-10-07\n\nGoldman Sachs sees issuance.\nSource: Acme Research\n\nJ.P. Morgan sees demand.";
+    expect(new URL(buildXShareUrl(caption)).searchParams.get("text")).toBe("@morganstanley sees hedging demand.\n\n@GoldmanSachs sees issuance.\n\n@jpmorgan sees demand.");
   });
   it("assembles a voice caption as blank-line separated sentences", () => {
     const caption = assembleShareCaption("Seasonality", "• 104 to 130\n• Year 3, month +9.");
