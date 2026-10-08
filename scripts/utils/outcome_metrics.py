@@ -69,7 +69,19 @@ METRICS = OutcomeCounters()
 
 
 def record_outcome(operation: str, outcome: str) -> None:
-    METRICS.record(operation, outcome)
+    """Observation only. A counter or log failure must not change the caller.
+
+    place_order reports failure before ib_place_order can mark the submit as
+    transmitted, and the fill monitor records a fill before it writes the
+    journal. Either path would treat a metrics fault as a missed broker action.
+    """
+    try:
+        METRICS.record(operation, outcome)
+    except Exception:
+        try:
+            log.warning("operation_metrics observation failed for %s", operation)
+        except Exception:
+            return
 
 
 @contextmanager
