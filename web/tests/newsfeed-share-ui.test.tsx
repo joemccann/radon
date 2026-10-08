@@ -222,7 +222,9 @@ describe("news feed sharing", () => {
     expect(caption).not.toContain("Source:");
     expect(caption).toContain("@GoldmanSachs estimates");
     expect(caption).toContain("Supply overhang is a headwind, not a gale.");
-    expect(caption.length).toBeGreaterThan(400);
+    expect(caption.replace(/\s+/g, " ")).toBe(
+      `${equityIssuance.title} ${equityIssuance.content}`.replace(/\bGoldman\b/g, "@GoldmanSachs"),
+    );
     expect(compose.getAttribute("aria-disabled")).not.toBe("true");
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
     await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
