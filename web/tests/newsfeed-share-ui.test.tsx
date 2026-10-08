@@ -52,11 +52,55 @@ async function openShare() {
 }
 
 describe("news feed sharing", () => {
-  it("uses the voice draft for captions and image/video rendering", async () => {
+
+  it("shares the complete Morgan Stanley post before and after rewriting and cached reopening", async () => {
+    const original = {
+      ...post,
+      id: "morgan-stanley-ai-cds",
+      title: "Morgan Stanley: AI CDS basket trades ~45bp wider than CDX IG, and protection is still its preferred credit-derivatives expression",
+      content: 'Morgan Stanley’s AI CDS basket now trades ~45bp wider than CDX IG.\n\nMS says buying CDS protection "remains our preferred way of playing the AI story in the credit derivatives market." The reason is not just a bearish default call. MS expects "increasing needs for non-economic hedging to manage counterparty exposure," even in a benign scenario where AI investments are profitable and continue.\n\nThat is an important distinction. The hedge bid can grow even if the capex cycle keeps working. More AI financing creates more counterparty exposure, and that creates more demand for protection.',
+      source: { ...equityIssuance.source, publisher: "Tyler Durden", documentDate: "2026-10-07" },
+    };
+    let resolveRewrite!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementation(() => new Promise<Response>(resolve => { resolveRewrite = resolve; }));
+    const { unmount } = render(<NewsfeedShare post={original} />);
+    fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
+    const expected = `${original.title}\n\n${original.content}`.replace(/Morgan Stanley|\bMS\b/g, "@morganstanley");
+    const caption = screen.getByRole("textbox", { name: "Post caption" }) as HTMLTextAreaElement;
+    expect(caption.value).toBe(expected);
+    expect(expected.length).toBeGreaterThan(400);
+    expect(new URL(screen.getByRole("link", { name: "Compose on X" }).getAttribute("href")!).searchParams.get("text")).toBe(expected);
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    await act(async () => { resolveRewrite({ ok: true, json: async () => ({ title: "Short AI credit hook", content: "Buy protection.", caption: "Short rewritten caption" }) } as Response); });
+    await waitFor(() => expect(caption.disabled).toBe(false));
+    expect(caption.value).toBe(expected);
+    fireEvent.click(screen.getByRole("button", { name: "Copy caption" }));
+    await waitFor(() => expect(clipboard).toHaveBeenCalledWith(expected));
+    unmount();
+    render(<NewsfeedShare post={{ ...original }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
+    expect((screen.getByRole("textbox", { name: "Post caption" }) as HTMLTextAreaElement).value).toBe(expected);
+    expect(new URL(screen.getByRole("link", { name: "Compose on X" }).getAttribute("href")!).searchParams.get("text")).toBe(expected);
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("mentions known banks by handle without guessing an unknown source handle", async () => {
+    render(<NewsfeedShare post={{ ...post, title: "Goldman Sachs and J.P. Morgan", content: "Goldman sees supply grow. Synthetic Bank agrees.", source: { ...equityIssuance.source, publisher: "Synthetic Bank" } }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
+    const caption = (screen.getByRole("textbox", { name: "Post caption" }) as HTMLTextAreaElement).value;
+    expect(caption).toContain("@GoldmanSachs and @jpmorgan");
+    expect(caption).toContain("@GoldmanSachs sees supply grow.");
+    expect(caption).toContain("Synthetic Bank agrees.");
+    expect(caption).not.toContain("@Synthetic");
+    expect(caption).not.toContain("Source:");
+    await waitFor(() => expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(false));
+  });
+
+  it("keeps the original caption while using the voice draft for image/video rendering", async () => {
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ title: "Hedge demand is back.", content: "Positioning is neutral. Source: ZeroHedge" }) } as Response);
     render(<NewsfeedShare post={post} />);
     await openShare();
-    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Hedge demand is back\n\nPositioning is neutral.");
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Yen hedge demand\n\nHedge demand increased.");
     expect(engine.renderShareCard).toHaveBeenCalledWith(expect.objectContaining({ title: "Hedge demand is back.", content: "Positioning is neutral." }), undefined);
     expect(fetch).toHaveBeenCalledWith("/api/newsfeed/share", expect.objectContaining({ method: "POST", cache: "no-store" }));
   });
@@ -64,7 +108,7 @@ describe("news feed sharing", () => {
   it.each([
     { imageUrl: "/chart-1.png", provider: "Ramp", otherProvider: "Goldman Sachs" },
     { imageUrl: "/chart-2.png", provider: "Goldman Sachs", otherProvider: "Ramp" },
-  ])("preserves $provider in copied and X captions when the rewrite omits the selected image source", async ({ imageUrl, provider, otherProvider }) => {
+  ])("omits the $provider footer from copied and X captions while retaining media attribution", async ({ imageUrl, provider, otherProvider }) => {
     const attributed = {
       ...post,
       imageSources: { "/chart-1.png": "Ramp", "/chart-2.png": "Goldman Sachs" },
@@ -76,9 +120,9 @@ describe("news feed sharing", () => {
     render(<NewsfeedShare post={attributed} imageUrl={imageUrl} />);
     await openShare();
     const caption = (screen.getByRole("textbox", { name: "Post caption" }) as HTMLTextAreaElement).value;
-    expect(caption).toContain("Hedge demand is back");
-    expect(caption).toContain("Positioning remains neutral.");
-    expect(caption).toContain(`Source: ${provider}`);
+    expect(caption).toBe("Yen hedge demand\n\nHedge demand increased.");
+    expect(caption).not.toContain("Source:");
+    expect(caption).not.toContain(provider);
     expect(caption).not.toContain(otherProvider);
     fireEvent.click(screen.getByRole("button", { name: "Copy caption" }));
     await waitFor(() => expect(clipboard).toHaveBeenCalledWith(caption));
@@ -133,7 +177,7 @@ describe("news feed sharing", () => {
     expect(bar.getAttribute("aria-valuetext")).toMatch(/^Still drafting\. Trying a second model, \d+s elapsed$/);
     await act(async () => { push("stage", { stage: "checking" }); push("result", { title: "Hedge demand is back.", content: "Positioning remains neutral." }); finish(); });
     await waitFor(() => expect(screen.queryByRole("progressbar")).toBeNull());
-    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Hedge demand is back\n\nPositioning remains neutral.");
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Yen hedge demand\n\nHedge demand increased.");
   });
 
   it("surfaces a streamed server error as the rewrite toast", async () => {
@@ -144,7 +188,7 @@ describe("news feed sharing", () => {
     expect(screen.queryByRole("progressbar")).toBeNull();
   });
 
-  it("updates the X intent after rewriting without waiting for the preview", async () => {
+  it("preserves the original X intent after rewriting without waiting for the preview", async () => {
     let resolveRewrite!: (response: Response) => void;
     vi.mocked(fetch).mockImplementation(() => new Promise<Response>(resolve => { resolveRewrite = resolve; }));
     engine.renderShareCard.mockImplementation(() => new Promise(() => {}));
@@ -157,7 +201,7 @@ describe("news feed sharing", () => {
       resolveRewrite({ ok: true, json: async () => ({ title: "Hedge demand is back.", content: "Positioning remains neutral." }) } as Response);
     });
     await waitFor(() => expect(engine.renderShareCard).toHaveBeenLastCalledWith(expect.objectContaining({ title: "Hedge demand is back." }), undefined));
-    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe("Hedge demand is back\n\nPositioning remains neutral.");
+    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe("Yen hedge demand\n\nHedge demand increased.");
     expect(compose.getAttribute("aria-disabled")).not.toBe("true");
     expect(screen.getByText("Preparing preview…")).not.toBeNull();
     expect((screen.getByRole("button", { name: "Download Story image" }) as HTMLButtonElement).disabled).toBe(true);
@@ -175,8 +219,12 @@ describe("news feed sharing", () => {
     expect(caption).toContain("$700bn");
     expect(caption).not.toMatch(/^[•●▪◦*-]\s/m);
     expect(caption.split("\n\n").length).toBeGreaterThan(1);
-    expect(caption).toMatch(/Source: Goldman Midday Market Intelligence · 2026-09-17\s*$/);
-    expect(caption.length).toBeLessThanOrEqual(400);
+    expect(caption).not.toContain("Source:");
+    expect(caption).toContain("@GoldmanSachs estimates");
+    expect(caption).toContain("Supply overhang is a headwind, not a gale.");
+    expect(caption.replace(/\s+/g, " ")).toBe(
+      `${equityIssuance.title} ${equityIssuance.content}`.replace(/\bGoldman\b/g, "@GoldmanSachs"),
+    );
     expect(compose.getAttribute("aria-disabled")).not.toBe("true");
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
     await waitFor(() => expect(fetch).toHaveBeenCalledOnce());

@@ -9176,3 +9176,15 @@ tests across 1,054 files; closing scripts suite passed 13,062. Final 15-file dif
 and scoped commit passed gitleaks with no leaks. GitHub exact-head CI receipts are
 recorded on the PR before delivery. Operator-consented live reads remain pending.
 No full-history indicator claim, production credential deployment or account writes.
+
+## X share full post (2026-10-07)
+
+Dependency graph: T1 -> T2 + T3 -> T4.
+- [x] T1 depends_on: [] Inspect share path and record requirements; isolated branch preserves current checkout.
+- [x] T2 depends_on: [T1] Preserve original full caption with paragraph spacing, known source handles, no source footer; retain media renderer.
+- [x] T3 depends_on: [T1] Update unit and browser regressions for complete captions and rewrite/cache preservation.
+- [ ] T4 depends_on: [T2, T3] Publish PR, verify exact-head CI and browser artifact, send accepted Pushover notification.
+
+Plan review: formatting only for X; voice rewriting remains limited to media preview. No local suites. Unknown sources retain their name rather than guessing handles.
+
+Review: Full original caption is independent of media voice drafts and cache. Ten verified bank/source accounts are mapped; existing handles, URLs, emails and cashtags remain intact. Source footer removed for copy and composer. Unit and desktop/mobile browser regressions include the supplied MS post and final paragraph. No local suites; exact-head CI pending.

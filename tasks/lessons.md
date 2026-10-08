@@ -1139,3 +1139,6 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 - When replacing stale browser fixtures, inventory and retain each still-valid interaction/assertion; stable test counts alone do not establish preserved behavioral coverage.
 
 - 2026-10-06: After committing native E2E changes, rerun the curation guard against the actual base-to-HEAD diff. Each changed held-out spec needs its own REVIEWED basename stamp dated on or after its latest git author date; grouped labels and older execution dates do not satisfy the guard. Describe fixture, static, operator and live-provider evidence separately without promoting membership or claiming unexecuted cases passed.
+
+## 2026-10-07 - Complete explicit share changes
+- An audit status is not a prohibition on implementing an explicit request. Preserve the original full post when the user requests formatting only; do not replace it with a summarized voice draft.
