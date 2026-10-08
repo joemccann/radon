@@ -412,7 +412,7 @@ tqdm==4.70.1
     #   modelscope-hub
     #   peft
     #   transformers
-transformers==5.6.0
+transformers==5.10.1
     # via
     #   -r /tmp/slm-qlora.in
     #   llamafactory
