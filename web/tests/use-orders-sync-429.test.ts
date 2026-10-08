@@ -50,3 +50,28 @@ describe("useOrders sync POST rate-limited", () => {
     expect(result.current.data?.last_sync).toBe(orders.last_sync);
   });
 });
+
+describe("useOrders sync POST under the edge budget", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("aborts the refresh POST before Caddy's 30s edge bound", async () => {
+    const { BROWSER_PRODUCER_SYNC_TIMEOUT_MS } = await import("../lib/edgeBudget");
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    const fetchMock = vi.fn(async () => jsonResponse(orders));
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useOrders(true));
+    await waitFor(() => expect(result.current.data).not.toBeNull());
+
+    await act(async () => {
+      result.current.syncNow();
+    });
+    await waitFor(() => expect(result.current.syncing).toBe(false));
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, (init as RequestInit | undefined)?.method]))
+      .toContainEqual(["/api/orders", "POST"]);
+    expect(timeoutSpy).toHaveBeenCalledWith(BROWSER_PRODUCER_SYNC_TIMEOUT_MS);
+  });
+});
