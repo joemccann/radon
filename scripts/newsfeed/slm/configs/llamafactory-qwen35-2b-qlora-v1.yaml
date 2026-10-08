@@ -1,0 +1,80 @@
+### LLaMA-Factory QLoRA evaluation candidate. Not the v1 base.
+### Baseline stays configs/llamafactory-qwen25-1p5b-qlora-v1.yaml.
+### Select with SLM_LF_CONFIG, or pass this file as train.sh's first argument.
+### Needs llamafactory>=0.9.5 and transformers>=5.2.0 (native qwen3_5).
+### LLaMA-Factory 0.9.5 itself rejects transformers>5.6.0 and ==4.57.0.
+### HR-4: eval_dataset is the time-split valid.jsonl. Never a random holdout.
+### HR-5: train_on_prompt false = loss on assistant JSON only (mask_prompt).
+
+### model
+model_name_or_path: Qwen/Qwen3.5-2B
+# HF main, created 2026-02-28, lastModified 2026-03-02. Post-trained chat
+# checkpoint (the non-Base repo). Apache-2.0. auto_map is absent, so
+# transformers>=5.2.0 loads Qwen3_5ForConditionalGeneration with no hub code.
+model_revision: 15852e8c16360a2fea060d615a32b45270f8a8fc
+quantization_bit: 4
+quantization_method: bnb
+# Native architecture. Do not run hub-supplied code.
+trust_remote_code: false
+
+### method
+stage: sft
+do_train: true
+finetuning_type: lora
+lora_rank: 16
+lora_alpha: 32
+lora_dropout: 0.05
+# 18 of 24 text layers are GatedDeltaNet (in_proj_qkv, in_proj_z, in_proj_b,
+# in_proj_a, out_proj). The Qwen2.5 list only hits the 6 full-attention blocks
+# (q/k/v/o) and the SwiGLU MLP, which would leave the linear-attention path frozen.
+lora_target: q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj,in_proj_qkv,in_proj_z,in_proj_b,in_proj_a,out_proj
+# Text-only tagger rows. The vision tower and projector are unused; both
+# already default true in LLaMA-Factory and are pinned so a later default flip
+# cannot train them.
+freeze_vision_tower: true
+freeze_multi_modal_projector: true
+train_on_prompt: false
+
+### dataset
+dataset_dir: data/slm/tagger/v1
+dataset: radon_slm_tagger
+eval_dataset: radon_slm_tagger_valid
+# qwen3_5 is a ReasoningTemplate and would train a think span into the
+# 64-token JSON label. qwen3_5_nothink does not. enable_thinking false is
+# the data-arg for the same contract if the template class later grows a
+# reasoning path.
+template: qwen3_5_nothink
+enable_thinking: false
+# Unchanged from the 1.5B config. Exported train rows are about 5500 tokens
+# on both tokenizers (system prompt carries the taxonomy), so 1024 truncates
+# both recipes the same way. Raising only this cutoff would confound the base
+# comparison. Qwen3.5's 262144 native context is not used here.
+cutoff_len: 1024
+preprocessing_num_workers: 4
+dataloader_num_workers: 2
+
+### output
+# Separate from models/slm-tagger/v1/adapter so this run cannot clobber the baseline.
+output_dir: models/slm-tagger/qwen35-2b-eval/adapter
+logging_steps: 10
+save_steps: 200
+eval_strategy: steps
+eval_steps: 100
+plot_loss: true
+overwrite_output_dir: true
+save_only_model: false
+report_to: none
+
+### train
+per_device_train_batch_size: 8
+gradient_accumulation_steps: 1
+# Unchanged. LLaMA-Factory's Qwen3.5 LoRA example uses 1e-4. The 1e-5 figure
+# is the full-finetune example, which unfreezes the base. Same schedule as
+# the 1.5B config so the comparison is the base, not the optimizer.
+learning_rate: 1.0e-4
+num_train_epochs: 3.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.05
+bf16: true
+ddp_timeout: 180000000
+seed: 20260919

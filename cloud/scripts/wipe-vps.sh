@@ -87,7 +87,7 @@ rm -f /etc/systemd/system/radon-*.timer
 rm -rf /etc/systemd/system/radon-.service.d
 rm -rf /etc/systemd/system/radon-*.service.d
 rm -rf /etc/systemd/system/radon-*.timer.d
-rm -f /etc/systemd/journald.conf.d/radon.conf
+rm -f /etc/systemd/journald.conf.d/radon.conf /etc/systemd/journald.conf.d/zz-radon.conf
 systemctl daemon-reload
 
 # -- Docker cleanup -----------------------------------------------------------
