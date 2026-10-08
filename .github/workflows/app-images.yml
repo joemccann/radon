@@ -2,7 +2,10 @@ name: App-plane images
 
 # Builds radon-python / radon-node as sibling jobs so wall clock is the
 # slower image, not python+node+four sequential pushes. Each image exports
-# both registry tags in one BuildKit operation and has an isolated GHA cache.
+# both registry tags in one BuildKit operation. Main writes an isolated
+# registry build cache on that same package (tag buildcache, never a deploy
+# ref). Pull requests keep an isolated GHA cache because this workflow's
+# pull_request caller has no packages:write token.
 # Main CI calls this workflow and gates deploy on the exact SHA pair. Pull
 # requests invoke it directly as a build-only image contract.
 
@@ -33,6 +36,38 @@ jobs:
         run: |
           set -euo pipefail
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Select image cache
+        id: image-cache
+        env:
+          IMAGE_REPO: ghcr.io/joemccann/radon-python
+          GHA_SCOPE: radon-python
+        run: |
+          set -euo pipefail
+          # GHA cache export kept this job, and deploy behind it, after GHCR
+          # already had the exact SHA (403s on run 37664940638, 104s on run
+          # 37472489871). Registry cache mounts those blobs. buildcache is
+          # not a deploy tag. PRs cannot push packages, so they stay on GHA.
+          if [ "$GITHUB_REF" = "refs/heads/main" ] && [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            # Missing buildcache is the steady state until the first export.
+            # A failed inspect must not fail the publish; GHA remains readable.
+            cache_from="type=gha,scope=${GHA_SCOPE}"
+            if docker buildx imagetools inspect "${IMAGE_REPO}:buildcache" >/dev/null 2>&1; then
+              cache_from="type=registry,ref=${IMAGE_REPO}:buildcache"$'\n'"type=gha,scope=${GHA_SCOPE}"
+            fi
+            {
+              echo "cache_from<<EOF"
+              printf '%s\n' "$cache_from"
+              echo "EOF"
+              echo "cache_to=type=registry,ref=${IMAGE_REPO}:buildcache,mode=max"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "cache_from<<EOF"
+              echo "type=gha,scope=${GHA_SCOPE}"
+              echo "EOF"
+              echo "cache_to=type=gha,mode=max,scope=${GHA_SCOPE}"
+            } >> "$GITHUB_OUTPUT"
+          fi
       - name: Build and publish python image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
@@ -44,8 +79,8 @@ jobs:
           tags: |
             ghcr.io/joemccann/radon-python:${{ github.sha }}
             ghcr.io/joemccann/radon-python:latest
-          cache-from: type=gha,scope=radon-python
-          cache-to: type=gha,mode=max,scope=radon-python
+          cache-from: ${{ steps.image-cache.outputs.cache_from }}
+          cache-to: ${{ steps.image-cache.outputs.cache_to }}
           provenance: false
       - name: Smoke hardened Python browser runtime
         run: |
@@ -89,6 +124,36 @@ jobs:
         run: |
           set -euo pipefail
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Select image cache
+        id: image-cache
+        env:
+          IMAGE_REPO: ghcr.io/joemccann/radon-node
+          GHA_SCOPE: radon-node
+        run: |
+          set -euo pipefail
+          # Same boundary as the python image: do not hold the exact-SHA
+          # publish on a GHA cache upload. buildcache is not a deploy tag.
+          if [ "$GITHUB_REF" = "refs/heads/main" ] && [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            # Missing buildcache is the steady state until the first export.
+            # A failed inspect must not fail the publish; GHA remains readable.
+            cache_from="type=gha,scope=${GHA_SCOPE}"
+            if docker buildx imagetools inspect "${IMAGE_REPO}:buildcache" >/dev/null 2>&1; then
+              cache_from="type=registry,ref=${IMAGE_REPO}:buildcache"$'\n'"type=gha,scope=${GHA_SCOPE}"
+            fi
+            {
+              echo "cache_from<<EOF"
+              printf '%s\n' "$cache_from"
+              echo "EOF"
+              echo "cache_to=type=registry,ref=${IMAGE_REPO}:buildcache,mode=max"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "cache_from<<EOF"
+              echo "type=gha,scope=${GHA_SCOPE}"
+              echo "EOF"
+              echo "cache_to=type=gha,mode=max,scope=${GHA_SCOPE}"
+            } >> "$GITHUB_OUTPUT"
+          fi
       - name: Build and publish node image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
@@ -103,6 +168,6 @@ jobs:
             NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
             NEXT_PUBLIC_RADON_API_URL=${{ vars.NEXT_PUBLIC_RADON_API_URL }}
             NEXT_PUBLIC_IB_REALTIME_WS_URL=${{ vars.NEXT_PUBLIC_IB_REALTIME_WS_URL }}
-          cache-from: type=gha,scope=radon-node
-          cache-to: type=gha,mode=max,scope=radon-node
+          cache-from: ${{ steps.image-cache.outputs.cache_from }}
+          cache-to: ${{ steps.image-cache.outputs.cache_to }}
           provenance: false
