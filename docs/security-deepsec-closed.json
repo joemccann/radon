@@ -19,6 +19,28 @@
       "path": "cloud/services/radon-grok-upgrade.service",
       "lines": "16-34",
       "evidence": "VPS confirmed 2026-10-07T12:45:35Z: /usr/local/lib/radon/grok-upgrade/scripts/grok_upgrade.py root:root 0644 with root-owned, non-writable parents and import tree; SHA256 a1366b5466d5b13210ff2192ed5154fae36cfeef2333fc8c5607cc4d885c4429 matches root-owned provision store pinned main 1c58cb3e4d3f9f63622edd1d89c4041dc386a3f9. Effective upgrade ExecStart uses /usr/bin/python3.13 -E -S; upgrade and responder InaccessiblePaths include /home/radon/.gemini. Both timers active; upgrader Result=success, ExecMainStatus=0; controller --help succeeds under -E -S. Trusted setup/controller installation from PR #891 is present."
+    },
+    {
+      "id": "DS-2026-10-04-01",
+      "closed_at": "2026-10-08",
+      "pr": 915,
+      "commit": "1f21f367e679e705c0b378c7cfb37fa000f8061b",
+      "path": ".github/workflows/ci.yml",
+      "lines": "1067,1157",
+      "evidence": "PR #915 merge 1f21f367 binds both VPS deploy jobs to environment: production. GitHub API 2026-10-08T22:08Z: VPS_HOST and VPS_SSH_KEY exist only in the Production environment, whose deployment branch policy allows only main; the repository-level Actions list holds neither."
+    },
+    {
+      "id": "DS-2026-09-29-03",
+      "closed_at": "2026-10-08",
+      "pr": 848,
+      "commit": "0c946ebddd90ce53a119f7c0dd522711a7e76e88",
+      "path": "cloud/scripts/grok_responder_env.py",
+      "evidence": "PR #848 merge 0c946ebd stops the responder falling back to the production Turso credential. VPS confirmed 2026-10-08T22:08Z: /home/radon/radon-page-responder.env radon:radon 0600 (rewritten 2026-10-07) carries no GitHub credential; its Turso credential is table-scoped (watchdog_pages read/update, service_health read/add/update, service_health_events add)."
+    },
+    {
+      "id": "DS-2026-09-23-02",
+      "closed_at": "2026-10-08",
+      "evidence": "Operator-approved close. GitHub API 2026-10-08T22:08Z: ruleset 24587201 runner-bot-nightly-only (active, created 2026-10-06) blocks creation, update and deletion on every ref except the nightly prefixes (reliability, testing, documentation, ci-performance, security, security-deepsec, codemap, dependabot, factory), bypass only the admin role and listed apps; radon-runner-bot holds write, not admin. Ruleset 24143098 main-review requires a PR with 1 approval on main; branch protection enforces admins and disallows force pushes."
     }
   ]
 }
