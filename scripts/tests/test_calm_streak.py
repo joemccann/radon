@@ -265,6 +265,67 @@ class TestRun:
         assert [c[0] for c in writes] == ["guard", "snapshot", "health"]
 
 
+class TestHeartbeatTimeout:
+    def test_main_exits_zero_when_the_ok_heartbeat_times_out(
+        self, writes, monkeypatch, capsys,
+    ):
+        """Page 4d8870f0ead060af734f223e7e2c1f03 (2026-10-09 14:30Z): the
+        Cboe cycle finished, then record_service_health('ok') raised
+        HranaHttpError 'TimeoutError: The read operation timed out'.
+        The bare call aborted before the JSON mirror and main() exited 1
+        (Result=exit-code, NRestarts=0). Sibling vol-cone logged the same
+        stall as non-fatal. The heartbeat is telemetry. A committed cycle
+        must exit 0 and still write the JSON fallback."""
+        from db.hrana_http import HranaHttpError
+        import fetch_calm_streak as mod
+
+        monkeypatch.setattr(mod, "_read_json_cache", lambda: None)
+        monkeypatch.setattr(
+            mod, "_fetch_source",
+            lambda if_modified_since: (RAW, "Tue, 15 Sep 2026 13:02:41 GMT"),
+        )
+        monkeypatch.setattr(mod, "_latest_stored_date", lambda: "2026-09-10")
+        monkeypatch.setattr(mod, "last_completed_session_date", lambda now: "2026-09-14")
+
+        def boom(*_a, **_k):
+            raise HranaHttpError("TimeoutError: The read operation timed out")
+
+        monkeypatch.setattr(mod.writer, "record_service_health", boom)
+
+        assert mod.main([]) == 0
+        assert ("rows", 2) in writes
+        assert ("snapshot", "calm-streak") in [(c[0], c[1]) for c in writes if c[0] == "snapshot"]
+        fallback = json.loads(mod.CALM_STREAK_JSON.read_text())
+        assert fallback["data_date"] == "2026-09-14"
+        assert fallback["missing"] is False
+        err = capsys.readouterr().err
+        assert "service_health heartbeat failed" in err
+        assert "TimeoutError: The read operation timed out" in err
+        assert "run failed" not in err
+
+    def test_row_upsert_failure_still_fails_the_oneshot(self, writes, monkeypatch, capsys):
+        """A timeout on the history upsert is the cycle failing, not
+        telemetry. main() must still exit 1 and skip the JSON mirror.
+        That is the shadowed-migration exit, not this heartbeat stall."""
+        import fetch_calm_streak as mod
+
+        monkeypatch.setattr(mod, "_read_json_cache", lambda: None)
+        monkeypatch.setattr(mod, "_fetch_source", lambda if_modified_since: (RAW, None))
+        monkeypatch.setattr(mod, "_latest_stored_date", lambda: "2026-09-10")
+        monkeypatch.setattr(mod, "last_completed_session_date", lambda now: "2026-09-14")
+
+        def boom(*_a, **_k):
+            raise TimeoutError("The read operation timed out")
+
+        monkeypatch.setattr(mod.writer, "upsert_calm_streak_rows", boom)
+
+        assert mod.main([]) == 1
+        assert not mod.CALM_STREAK_JSON.exists()
+        err = capsys.readouterr().err
+        assert "run failed" in err
+        assert "heartbeat failed" not in err
+
+
 class TestStorage:
     @pytest.fixture()
     def db(self):
