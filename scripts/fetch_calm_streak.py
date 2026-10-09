@@ -202,6 +202,20 @@ def _record_error(scan_time: str, message: str) -> None:
         print(f"[calm-streak] error heartbeat non-fatal: {exc}", file=sys.stderr)
 
 
+def _record_ok_heartbeat(scan_time: str) -> None:
+    """Best-effort ok heartbeat.
+
+    A Turso read timeout must not fail the oneshot after the Cboe cycle
+    has committed (page 4d8870f0, 2026-10-09: HranaHttpError on this write
+    became Result=exit-code / NRestarts=0). Row and snapshot failures
+    still raise. Matches fetch_trin._record_health.
+    """
+    try:
+        writer.record_service_health(SERVICE, "ok", finished_at=scan_time)
+    except Exception as exc:  # noqa: BLE001 - heartbeat is telemetry
+        print(f"[calm-streak] service_health heartbeat failed: {exc}", file=sys.stderr)
+
+
 # ── persistence + orchestration ───────────────────────────────────
 
 def persist_result(payload: dict[str, Any], rows: list[dict[str, Any]], *, use_db: bool = True) -> None:
@@ -211,7 +225,7 @@ def persist_result(payload: dict[str, Any], rows: list[dict[str, Any]], *, use_d
         if rows:
             writer.upsert_calm_streak_rows(rows, recorded_at=scan_time)
         writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
-        writer.record_service_health(SERVICE, "ok", finished_at=scan_time)
+        _record_ok_heartbeat(scan_time)
     _write_json_cache(payload)
 
 

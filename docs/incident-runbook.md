@@ -2055,6 +2055,59 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
 
 ---
 
+## calm-streak-hrana-read-timeout
+
+**`radon-calm-streak.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when the ok heartbeat's hrana read times out.** Peak:
+2026-10-09 14:30Z, page `4d8870f0ead060af734f223e7e2c1f03`.
+
+- **Mechanism:** `Type=oneshot`, no `Restart=`. The 14:30 UTC timer
+  started at 14:30:42Z and Python exited 1 at 14:30:48Z
+  (`ExecMainStatus=1`). That span is one `HRANA_TIMEOUT_S=4` plus a
+  short Cboe GET, not `FETCH_TIMEOUT_S=30` and not
+  `TimeoutStartSec=300`. `persist_result` calls
+  `record_service_health("ok")` through hrana after the row and
+  snapshot writes. The bare call raised
+  `TimeoutError: The read operation timed out`, so `main` printed
+  `run failed` and the JSON mirror stayed on the 02:41Z success
+  (`data_date` 2026-10-08, streak 13). `requires_ib` is false. The
+  same second, `radon-vol-cone` logged
+  `[vol-cone] intraday health row non-fatal: TimeoutError: The read
+  operation timed out` and stayed up. Host-metrics `wrote_db` true at
+  14:30:17Z and 14:32:17Z. `:8321/health/lite` stayed authenticated
+  with `database=up`. This is not `calm-streak-shadowed-migration`
+  (no `no such table`).
+- **Detection:** journal `[calm-streak] run failed: TimeoutError: The
+  read operation timed out`; `systemctl show` → `exit-code` / `0` /
+  `1`. Exec span about 6s. No `stored max-date probe non-fatal` line
+  and no `source unchanged (304)` line on this fire. Prior 02:40Z
+  cycle logged `streak=13 rows_upserted=1`.
+- **Discriminating check:** a same-minute sibling line that says
+  `non-fatal` / `heartbeat failed` for the same `TimeoutError`, plus
+  `/health/lite` `database=up`. Python Turso canary `SELECT 1`
+  succeeding confirms it. Canary fail, or host-metrics unable to
+  write, is a Turso platform outage: stand down, do not
+  restart-flap. `no such table: calm_streak_history` is
+  `calm-streak-shadowed-migration`. `Result=signal` or exit 143
+  inside a deploy window is `deploy-stop-clean-oneshot-signal`.
+  `Result=timeout` with Exec span equal to `TimeoutStartSec` is a
+  sync-libsql hang, a different class. A statement error (not a read
+  timeout) on the history upsert still fails the oneshot.
+- **Remediation (code):** `_record_ok_heartbeat` catches the ok
+  heartbeat, logs `service_health heartbeat failed`, and still writes
+  `data/calm_streak.json`. The oneshot exits 0. No ok heartbeat is
+  written on the stall, so a standing Turso outage still goes stale
+  inside the 26-hour `calm-streak` window. Row and snapshot failures
+  still raise and `main` still exits 1. Do not `reset-failed` as the
+  fix. The unit is not on `RERUNNABLE_ONESHOT_UNITS`. After deploy,
+  the next timer (02:40 or 14:30 UTC) clears the latch.
+- **Regression:**
+  `scripts/tests/test_calm_streak.py::TestHeartbeatTimeout::test_main_exits_zero_when_the_ok_heartbeat_times_out`,
+  `test_row_upsert_failure_still_fails_the_oneshot`.
+- **Code:** `scripts/fetch_calm_streak.py` (`_record_ok_heartbeat`).
+
+---
+
 ## signals-refresh-capacity-502
 
 **`radon-signals-refresh.service` oneshot pages P1 `Result=exit-code` when
