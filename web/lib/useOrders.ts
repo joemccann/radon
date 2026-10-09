@@ -9,12 +9,19 @@ import {
   reportOfflineServed,
 } from "./offline/offlineSignals";
 import { useRouteRefreshKey } from "./RouteRefreshContext";
-import { BROWSER_PRODUCER_SYNC_TIMEOUT_MS } from "./edgeBudget";
+import { BROWSER_PRODUCER_SYNC_TIMEOUT_MS, SYNC_PENDING_REPOLL_MS } from "./edgeBudget";
 
 const POLL_INTERVAL_MS = 30_000;
 /** Ceiling for the failure backoff. R-263. */
 const MAX_POLL_INTERVAL_MS = 5 * 60_000;
 const GET_FETCH_TIMEOUT_MS = 12_000;
+const EDGE_PENDING_MESSAGE = "IB sync still running - showing latest snapshot";
+
+/** Caddy's own 502/504 page: the edge gave up, the shielded sync did not. */
+function isOpaqueEdgeTimeout(res: Response): boolean {
+  const isJson = (res.headers.get("content-type") ?? "").includes("application/json");
+  return !isJson && (res.status === 502 || res.status === 504);
+}
 
 type UseOrdersReturn = {
   data: OrdersData | null;
@@ -153,6 +160,11 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
       // A sibling tab or device already spent this window's producer budget;
       // its snapshot arrives on the next poll. Coalescence, not degradation.
       if (res.status === 429) return;
+      if (isOpaqueEdgeTimeout(res)) {
+        if (mountedRef.current) setError(EDGE_PENDING_MESSAGE);
+        scheduleNext(SYNC_PENDING_REPOLL_MS);
+        return;
+      }
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { error?: string }).error ?? "Sync failed");
@@ -170,13 +182,14 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
         warningSnapshotRef.current = null;
         setError(null);
       }
+      if (res.headers.get("X-Sync-Pending") === "1") scheduleNext(SYNC_PENDING_REPOLL_MS);
     } catch (err) {
       if (mountedRef.current) setError(err instanceof Error ? err.message : "Sync failed");
     } finally {
       syncingRef.current = false;
       if (mountedRef.current) setSyncing(false);
     }
-  }, []);
+  }, [scheduleNext]);
 
   const syncNow = useCallback(() => {
     void triggerSync();
