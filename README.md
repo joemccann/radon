@@ -5,7 +5,7 @@
 </p>
 
 ![CI](https://github.com/joemccann/radon/actions/workflows/ci.yml/badge.svg)
-![version](https://img.shields.io/badge/version-0.8.1-05AD98)
+![version](https://img.shields.io/badge/version-0.8.2-05AD98)
 ![license](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-05AD98)
 
 **Market-structure reconstruction.** Radon surfaces convex options trades from dark pool and OTC flow, the volatility surface, and cross-asset positioning. Every candidate runs a hard three-gate framework before sizing.
