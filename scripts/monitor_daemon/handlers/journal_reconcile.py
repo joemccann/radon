@@ -197,6 +197,10 @@ def _executed_orders_in_window(db: Any, since_ts: str) -> list[dict[str, Any]]:
     return result
 
 
+_UNSET_RIGHT = "?"
+_RIGHTED_SEC_TYPES = frozenset({"OPT", "FOP", "BAG"})
+
+
 def _extract_contract_key(payload: dict[str, Any]) -> tuple[str, str, str, str]:
     """Return (ticker, strike_str, right, expiry) from an executed_orders payload."""
     contract = payload.get("contract") or {}
@@ -206,6 +210,11 @@ def _extract_contract_key(payload: dict[str, Any]) -> tuple[str, str, str, str]:
     ticker = _normalize_ticker(str(contract.get("symbol") or payload.get("symbol") or "").upper())
     strike = str(contract.get("strike") or payload.get("strike") or "")
     right = str(contract.get("right") or payload.get("right") or "")
+    # IB sends "?" for an unset right; a stock fill keyed ('TQQQ', '', '?', '')
+    # never matched its journaled day ('TQQQ', '', '', ''). BAG and option
+    # rights stay as delivered.
+    if right == _UNSET_RIGHT and str(contract.get("secType") or "").upper() not in _RIGHTED_SEC_TYPES:
+        right = ""
     # expiry may be ISO or compact — normalise to compact YYYYMMDD for comparison
     expiry_raw = str(contract.get("expiry") or contract.get("lastTradeDateOrContractMonth") or "")
     # compact form: strip dashes if ISO
