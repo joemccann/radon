@@ -22,6 +22,10 @@ import {
 import { filledQuantity } from "@/lib/orders/modifyQuantity";
 
 export const runtime = "nodejs";
+// The replace fetch is 180s and the fresh refresh is 10s. The edge handle for
+// this path waits 200s, inside this budget, so a finished modify can still
+// write its own body.
+export const maxDuration = 210;
 
 type ModifyBody = {
   orderId?: number;

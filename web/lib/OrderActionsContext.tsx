@@ -46,6 +46,15 @@ const OrderActionsContext = createContext<OrderActionsContextValue | null>(null)
 const POLL_INTERVAL_MS = 5_000;
 const POLL_MAX_COUNT = 24; // ~2 min
 
+/** Caddy's empty 504. The broker call may already have landed. */
+const MODIFY_STATUS_UNKNOWN =
+  "Modify status unknown. The change may already be at IB. Check the order before sending it again.";
+
+function isOpaqueEdgeTimeout(res: Response): boolean {
+  const isJson = (res.headers.get("content-type") ?? "").includes("application/json");
+  return !isJson && (res.status === 502 || res.status === 504);
+}
+
 export function OrderActionsProvider({ children }: { children: ReactNode }) {
   const [pendingCancels, setPendingCancels] = useState<Map<number, OpenOrder>>(new Map());
   const [pendingModifies, setPendingModifies] = useState<Map<number, PendingModify>>(new Map());
@@ -280,6 +289,18 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orderId: order.orderId, permId: order.permId, ...requestBody, outsideRth }),
       });
+      if (isOpaqueEdgeTimeout(res)) {
+        pushNotification({ type: "warning", message: MODIFY_STATUS_UNKNOWN, duration: 0 });
+        if (!request.replaceOrder && (request.newPrice != null || request.newQuantity != null)) {
+          setPendingModifies((prev) => new Map(prev).set(order.permId, {
+            order,
+            newPrice: request.newPrice,
+            newQuantity: request.newQuantity,
+          }));
+          startModifyPoll(order, request);
+        }
+        return;
+      }
       const json = await res.json();
       if (!res.ok) {
         pushNotification({ type: "error", message: json.error || "Modify failed" });

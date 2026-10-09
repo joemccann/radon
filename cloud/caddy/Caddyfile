@@ -222,12 +222,29 @@
         }
     }
 
+    # Combo replace on this path is a what-if, a cancel, and a place, then a
+    # fresh orders sync. The handler writes no header until that returns, and
+    # the replace fetch is allowed 180s. On the catch-all 30s guard the browser
+    # received Caddy's empty 504 after IB had already accepted the replacement
+    # (2026-10-09). Scoped to this path. No retry loop: a replayed POST would
+    # cancel and place again.
+    handle /api/orders/modify {
+        reverse_proxy 127.0.0.1:3000 {
+            transport http {
+                dial_timeout 5s
+                response_header_timeout 200s
+                read_timeout 300s
+            }
+        }
+    }
+
     handle {
         reverse_proxy 127.0.0.1:3000 {
             lb_try_duration 15s
             lb_try_interval 250ms
 
-            # This block serves POST /api/orders/place, /cancel and /modify.
+            # This block serves POST /api/orders/place and /cancel.
+            # /api/orders/modify has its own handle above.
             # Without lb_retry_match the restriction rests on an unpinned Caddy
             # default, and there is no idempotency key anywhere on this path
             # (R-009: orderRef never returned; R-022: no server-side submission
