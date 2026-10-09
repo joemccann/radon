@@ -3512,3 +3512,53 @@ The Grok page responder owns open diagnoses. No session-start hook surfaces
 - **Verify:** an authorized Share attempt must receive a `result` event containing the verified draft and update the preview. HTTP 200 alone is not recovery; an `error` event or a stream ending without a draft is failure. The wire contract and rejection cases are pinned by [`newsfeed-share-api.test.ts`](../web/tests/newsfeed-share-api.test.ts).
 - **Rollback:** keep using the sanitized original copy while the operator follows the [deployment and rollback owner](../cloud/CLAUDE.md#deployment-contract) for any required runtime repair. Do not apply ad hoc mount or billing changes.
 - **Escalate:** provide the request time, terminal event type and sanitized Next.js error to the operator. Never attach grants, cookies or the container environment.
+
+---
+
+## aa-frontier-ok-heartbeat-exit
+
+**`radon-aa-frontier-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) after the basket is already current, when the ok
+service_health write raises.** Peak: 2026-10-08 22:14Z, page
+`57803bcca18b6fcfe4630c1d8b0bd82e`. The next start (22:22Z) exited 0.
+
+- **Mechanism:** Daily 07:00 UTC timer. `Type=oneshot`, no `Restart=`.
+  The 07:00 run wrote `~/.radon/ai-cycle/aa-frontier-refresh.json`
+  (`completed_date=2026-10-08`) and left `aa-frontier-basket` ok. A
+  later start the same UTC day takes the already-current short circuit
+  and does not rewrite that file. `main` then called `_write_health("ok")`
+  inside the same `try` that maps every non-`CatalogError` to exit 1 and
+  an error health row. The stored detail was exactly
+  `{"message": "Artificial Analysis frontier refresh failed"}` at
+  22:14:39Z. Host metrics showed the service `failed` from 22:15:43Z
+  until a start at 22:22:16Z exited 0 (health ok 22:22:18Z, state file
+  still 07:00:50Z). `NRestarts=0`. Edge and `:8321/health/lite` stayed
+  up. Not IB. The error row itself was written, so Turso was accepting
+  writes in that second.
+- **Detection:** journal stdout
+  `{"status": "error", "reason": "Artificial Analysis frontier refresh failed"}`
+  with no catalog sentence (`HTTP`, `transport failed`, `incomplete`,
+  `No eligible`). `systemctl show` on that invocation is `exit-code` /
+  `NRestarts=0` / `ExecMainStatus=1`. State file `checked_at` stays on
+  the earlier success. `service_health_events` for `aa-frontier-basket`
+  goes ok to error with that generic message, then ok on the next
+  successful start.
+- **Discriminating check:** detail message is the generic string, not a
+  `CatalogError` sentence, and the state file was not rewritten in the
+  failed run. A `CatalogError` (HTTP status, transport, incomplete
+  catalog, missing provider, read-back mismatch) still exits 1 on
+  purpose. `Result=signal` or exit 143 inside a deploy window is
+  `deploy-stop-clean-oneshot-signal`. Python Turso `SELECT 1` failing
+  in the same minute is a platform outage: stand down, do not
+  restart-flap. If `/health/lite` is down too, stand down.
+- **Remediation (code):** the ok heartbeat is best-effort. A failure
+  there logs `service_health heartbeat failed` and the oneshot still
+  exits 0, without writing an error row. Refresh failures still record
+  error health, include the exception class, and exit 1. Do not
+  `reset-failed` as the fix. The unit is not on
+  `RERUNNABLE_ONESHOT_UNITS`. The 22:22 start already cleared this
+  page. The next timer is 07:00 UTC.
+- **Regression:**
+  `scripts/tests/test_aa_frontier_refresh.py::test_ok_heartbeat_timeout_does_not_fail_the_oneshot`,
+  `test_refresh_failure_still_exits_one_and_names_the_exception_class`.
+- **Code:** `scripts/aa_frontier_refresh.py` (`_record_ok_health`, `main`).
