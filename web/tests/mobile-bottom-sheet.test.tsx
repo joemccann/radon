@@ -119,16 +119,16 @@ describe("BottomSheet", () => {
     cleanup();
   });
 
-  // The iOS keyboard shrinks only the VISUAL viewport; the fixed sheet root
-  // stays full-height, leaving the footer (Review / Confirm & send) buried
-  // behind the keyboard with no way to scroll it into view. The sheet must
-  // measure the keyboard overlap from visualViewport and lift itself above it.
-  it("tracks the keyboard overlap from visualViewport into --keyboard-inset", () => {
+  // iOS can resolve a fixed `inset: 0` root against a layout viewport that
+  // extends past the visible screen (keyboard open, or iOS 26 standalone drift
+  // after scrolling). A bottom-anchored sheet then renders partly off-screen
+  // with its footer unreachable. The root must be pinned to the VISUAL
+  // viewport: top = offsetTop, height = visible height.
+  it("pins the sheet root to the visual viewport", () => {
     const viewport = new EventTarget() as EventTarget & { height: number; offsetTop: number };
     viewport.height = 800;
     viewport.offsetTop = 0;
     Object.defineProperty(window, "visualViewport", { value: viewport, configurable: true });
-    Object.defineProperty(window, "innerHeight", { value: 800, configurable: true, writable: true });
 
     render(
       <BottomSheet open onClose={() => {}} title="t" testId="sheet">
@@ -137,15 +137,18 @@ describe("BottomSheet", () => {
     );
 
     const root = screen.getByTestId("sheet");
-    expect(root.style.getPropertyValue("--keyboard-inset")).toBe("0px");
+    expect(root.style.getPropertyValue("--vv-top")).toBe("0px");
+    expect(root.style.getPropertyValue("--vv-height")).toBe("800px");
 
-    viewport.height = 500; // keyboard opened: 300px of overlap
+    viewport.height = 500; // keyboard opened
     viewport.dispatchEvent(new Event("resize"));
-    expect(root.style.getPropertyValue("--keyboard-inset")).toBe("300px");
+    expect(root.style.getPropertyValue("--vv-height")).toBe("500px");
 
-    viewport.height = 800; // keyboard dismissed
-    viewport.dispatchEvent(new Event("resize"));
-    expect(root.style.getPropertyValue("--keyboard-inset")).toBe("0px");
+    viewport.height = 618; // visible area shifted within a taller layout viewport
+    viewport.offsetTop = 234;
+    viewport.dispatchEvent(new Event("scroll"));
+    expect(root.style.getPropertyValue("--vv-top")).toBe("234px");
+    expect(root.style.getPropertyValue("--vv-height")).toBe("618px");
 
     Object.defineProperty(window, "visualViewport", { value: undefined, configurable: true });
     cleanup();
