@@ -1472,6 +1472,56 @@ on a Turso heartbeat timeout while the cycle added no new rows.** Peak:
 
 ---
 
+## gex-scan-missed-cycle-stale
+
+**`gex-scan` pages P1 `stale` during RTH after one missed 15-minute
+refresh, while the driver and the sibling scans stay quiet.** Peak:
+2026-10-09 18:40Z, page `eeef09595a01893b4e31abd5cbda352e`. Alert text:
+`silent for 23m (window 15m) market open`.
+
+- **Mechanism:** `radon-refresh.timer` fires every 15 minutes and runs
+  cri, then vcg, then `gex_scan.py --no-mq` last. gex heartbeats only
+  when that child finishes. R-422 copied vcg-scan's 15-minute open
+  window. vcg also has a 5-minute timer, so 15 minutes is three missed
+  cycles there. gex has no timer of its own, so 15 minutes is zero
+  missed cycles. `data-refresh` and `cri-scan` already use 35 minutes
+  (two missed fires). At 18:16:14Z the 18:15 cycle logged
+  `gex_scan.py complete`. The 18:30 cycle finished cri and vcg, logged
+  `Running gex_scan.py` at 18:30:41Z, and took SIGTERM at 18:30:42Z
+  (`ExecMainCode=2`, `ExecMainStatus=15`, `Result=success`). The green
+  marker is 18:31:55Z, so this was deploy stop-clean, not a gex
+  failure. The 18:40 intraday check saw a 23m46s old ok row and paged.
+  The next timer was 18:45Z.
+- **Detection:** journal `Running gex_scan.py` with no `gex_scan.py
+  complete` on that fire; `systemctl show radon-refresh.service` has
+  `ExecMainCode=2` / `ExecMainStatus=15` inside a minute of
+  `/home/radon/.radon-last-green-deploy`. Neighbouring cycles log
+  `Data refresh complete (cri: OK, vcg: OK, gex: OK)`. `:8321/health/lite`
+  stays authenticated. The stale message names window 15m.
+- **Discriminating check:** last ok gex line is one timer slot back,
+  and the killed slot's cri and vcg lines completed. A gex `failed` /
+  `timed out` line with an error heartbeat is a real scan failure
+  (the soft-fail path already refreshes `updated_at`). `Result=signal`
+  or exit 143 on the unit is `deploy-stop-clean-oneshot-signal` (a
+  different page kind). Python Turso `SELECT 1` failing in the same
+  minute is a platform outage: stand down. If `/health/lite` is down
+  too, stand down.
+- **Remediation (code):** gex-scan open window is 35 minutes, the same
+  budget as `data-refresh`. One missed fire stays healthy. Two missed
+  fires still page P1. Do not restart the gateway. Do not
+  `reset-failed` the refresh unit when `Result=success`. The next
+  timer rewrites the row.
+- **Regression:**
+  `scripts/tests/test_watchdog/test_gex_scan_missed_cycle.py`
+  (`test_one_missed_refresh_cycle_does_not_page`,
+  `test_two_missed_refresh_cycles_still_page_p1`,
+  `test_gex_open_window_matches_the_15_minute_driver_not_vcg`),
+  `web/tests/probe-freshness.test.ts` (one missed cycle fresh, the
+  next not).
+- **Code:** `scripts/watchdog/services.py`, `web/lib/serviceHealthWindows.ts`.
+
+---
+
 ## menthorq-dashboard-session-expiry
 
 ### 2026-09-09: discriminate payload rejection before reminting
