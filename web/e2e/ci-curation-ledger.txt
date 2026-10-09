@@ -398,6 +398,7 @@ ws-connection-stability.spec.ts
 #   Chromium next start verification passed in the 65/65 mobile group.
 # REVIEWED 2026-10-08 mobile-executed-journal.spec.ts — local mobile Chromium
 #   393x852 run 5/5, incl. the tap-to-share wire assertion (PR #957).
+# REVIEWED 2026-10-09 mobile-executed-journal.spec.ts - local Chrome 393x852: share panel sits outside the pressable card, Story is above the fills, and the tall close hands radon-pnl-story.png to the share sheet. 4/4 Mobile executed orders passed.
 # REVIEWED 2026-09-06 mobile-newsfeed-layout.spec.ts — compiled mobile Chromium
 #   next start verification passed in the 65/65 mobile financial group.
 # REVIEWED 2026-09-06 mobile-order-ticket.spec.ts — compiled mobile Chromium
