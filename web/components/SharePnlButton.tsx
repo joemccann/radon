@@ -10,6 +10,19 @@ const POPOVER_EXIT_MS = 120;
 const POPOVER_EXIT_REDUCED_MS = 80;
 const STORY_FILENAME = "radon-pnl-story.png";
 
+/** A download started from a click must outlive the object URL. Revoking on
+ *  the next macrotask cancels it. */
+function downloadBlobFile(file: Blob, filename: string) {
+  const href = URL.createObjectURL(file);
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 1500);
+}
+
 function isDomError(err: unknown, name: string): boolean {
   return typeof err === "object" && err != null && (err as { name?: unknown }).name === name;
 }
@@ -88,13 +101,28 @@ function useSharePnl(data: SharePnlData, onActionSettled?: () => void) {
   const [shareError, setShareError] = useState<unknown>(null);
   const [copied, setCopied] = useState(false);
   // Story PNG held for a second tap when the browser expired the share gesture
-  // while the image rendered (Safari's transient activation is short).
+  // while the image rendered (Safari's transient activation is short), or for
+  // a download click when the browser cannot share files.
   const [storyFile, setStoryFile] = useState<File | null>(null);
+  const [storyPreviewUrl, setStoryPreviewUrl] = useState<string | null>(null);
+  const previewRef = useRef<string | null>(null);
+
+  const replacePreview = useCallback((next: string | null) => {
+    const prev = previewRef.current;
+    if (prev && prev !== next) URL.revokeObjectURL(prev);
+    previewRef.current = next;
+    setStoryPreviewUrl(next);
+  }, []);
+
+  useEffect(() => () => {
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+  }, []);
 
   // A held story PNG is stale once the metric toggles change.
   useEffect(() => {
     setStoryFile(null);
-  }, [showDollar, showPct]);
+    replacePreview(null);
+  }, [showDollar, showPct, replacePreview]);
 
   const generateImage = useCallback(async (format: "card" | "story" = "card") => {
     const params = new URLSearchParams();
@@ -167,36 +195,45 @@ function useSharePnl(data: SharePnlData, onActionSettled?: () => void) {
     }
   }, [copying, generateImage, copyToClipboard, data, showDollar, showPct, onActionSettled]);
 
-  /** Instagram has no web intent for Stories: hand the 9:16 PNG to the OS
-   *  share sheet (Instagram > Story on iOS / Android), else download it. */
+  /** Instagram has no web intent for Stories. Hand the 9:16 PNG to the OS
+   *  share sheet when it can take a file. Otherwise keep the image on screen
+   *  and download it from a later click: a download started after the render
+   *  await is no longer a user gesture, and revoking the blob URL immediately
+   *  cancels it. */
   const handleShareStory = useCallback(async () => {
     if (copying) return;
-    setCopying(true);
     setShareError(null);
+    const nativeShare = (file: File) =>
+      typeof navigator.share === "function" && !!navigator.canShare?.({ files: [file] });
+    if (storyFile && storyPreviewUrl && !nativeShare(storyFile)) {
+      downloadBlobFile(storyFile, STORY_FILENAME);
+      return;
+    }
+
+    setCopying(true);
     let keepOpen = false;
     try {
       const file = storyFile
         ?? new File([await generateImage("story")], STORY_FILENAME, { type: "image/png" });
-      const shareData: ShareData = { files: [file] };
-      if (typeof navigator.share === "function" && navigator.canShare?.(shareData)) {
+      if (nativeShare(file)) {
         try {
-          await navigator.share(shareData);
+          await navigator.share({ files: [file] });
           setStoryFile(null);
+          replacePreview(null);
         } catch (err) {
           if (isDomError(err, "NotAllowedError") && !storyFile) {
             setStoryFile(file);
             keepOpen = true;
           } else if (!isDomError(err, "AbortError")) {
-            throw err;
+            setStoryFile(file);
+            replacePreview(URL.createObjectURL(file));
+            keepOpen = true;
           }
         }
       } else {
-        const href = URL.createObjectURL(file);
-        const link = document.createElement("a");
-        link.href = href;
-        link.download = STORY_FILENAME;
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(href), 0);
+        setStoryFile(file);
+        replacePreview(URL.createObjectURL(file));
+        keepOpen = true;
       }
     } catch (err) {
       setShareError(err);
@@ -204,10 +241,10 @@ function useSharePnl(data: SharePnlData, onActionSettled?: () => void) {
       setCopying(false);
       if (!keepOpen) onActionSettled?.();
     }
-  }, [copying, generateImage, storyFile, onActionSettled]);
+  }, [copying, generateImage, storyFile, storyPreviewUrl, onActionSettled, replacePreview]);
 
   return {
-    showDollar, setShowDollar, showPct, setShowPct, copying, copied, storyFile, shareError,
+    showDollar, setShowDollar, showPct, setShowPct, copying, copied, storyFile, storyPreviewUrl, shareError,
     handleCopy, handleCopyAndTweet, handleShareStory,
   };
 }
@@ -233,6 +270,13 @@ function SharePnlOptions({ share }: { share: SharePnlActions }) {
         />
         <span>P&amp;L %</span>
       </label>
+      {share.storyPreviewUrl ? (
+        <img
+          className="share-pnl-story-preview"
+          src={share.storyPreviewUrl}
+          alt="Instagram story preview"
+        />
+      ) : null}
       <div className="share-pnl-popover-actions">
         <button
           type="button"
@@ -256,7 +300,7 @@ function SharePnlOptions({ share }: { share: SharePnlActions }) {
           onClick={share.handleShareStory}
           disabled={share.copying || noMetric}
         >
-          {share.storyFile ? "Tap to share Story" : "Instagram Story"}
+          {share.storyPreviewUrl ? "Download Story" : share.storyFile ? "Tap to share Story" : "Instagram Story"}
         </button>
       </div>
     </>
@@ -340,7 +384,7 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
       window.removeEventListener("resize", place);
       document.removeEventListener("scroll", place, true);
     };
-  }, [mounted]);
+  }, [mounted, share.storyPreviewUrl]);
 
   return (
     <div style={{ position: "relative", display: "inline-flex" }} ref={popoverRef}>

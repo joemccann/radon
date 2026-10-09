@@ -70,7 +70,8 @@ export default function MobileExecutedList({ groups, shareDataFor }: MobileExecu
         const pillClass = isCancelled ? "cancelled" : group.isClosing ? "distrib" : "accum";
 
         return (
-          <div key={group.id} className={canExpand ? "m-card-press" : undefined}>
+          <div key={group.id}>
+            <div className={canExpand ? "m-card-press" : undefined}>
             <Card
               tone={cardTone}
               testId={`mobile-executed-${group.id}`}
@@ -117,49 +118,54 @@ export default function MobileExecutedList({ groups, shareDataFor }: MobileExecu
                 ) : null}
               </div>
 
-              {isExpanded && hasFillDetail ? (
-                <div className="mobile-card__detail" data-testid={`mobile-executed-${group.id}-fills`}>
-                  {group.fills.map((fill, idx) => {
-                    const side = fillSide(fill.side);
-                    const label = `${fill.quantity}x ${fillContractLabel(fill)}`;
-                    const price = fill.avgPrice != null ? fmtPrice(fill.avgPrice) : "--";
-                    const sub = formatExecutedFillTime(fill.time);
-
-                    if (side) {
-                      return (
-                        <BuySellRow
-                          key={`${fill.execId}-${idx}`}
-                          side={side}
-                          label={label}
-                          price={price}
-                          sub={sub}
-                        />
-                      );
-                    }
-
-                    // Fallback for unrecognised sides (e.g. CANCELLED sub-fills)
-                    return (
-                      <div key={`${fill.execId}-${idx}`} className="mobile-card__leg-row">
-                        <div className="mobile-card__leg-desc">
-                          {fill.side} {fill.quantity}x {fillContractLabel(fill)}
-                        </div>
-                        <div className="mobile-card__leg-metrics">
-                          <span className="mobile-card__leg-meta">{price}</span>
-                          <span className="mobile-card__leg-meta">{sub}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : null}
-
-              {isExpanded && shareData ? (
-                // Taps on the share controls must not collapse the card.
-                <div className="mobile-card__share" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                  <SharePnlPanel data={shareData} testId={`mobile-executed-${group.id}-share`} />
-                </div>
-              ) : null}
             </Card>
+            </div>
+            {isExpanded && (shareData || hasFillDetail) ? (
+              <div className="mobile-executed-expand">
+                {shareData ? (
+                  // Outside the pressable card: its press scale moves a tall
+                  // fill list far enough that the Story tap never lands.
+                  <div className="mobile-card__share" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                    <SharePnlPanel data={shareData} testId={`mobile-executed-${group.id}-share`} />
+                  </div>
+                ) : null}
+                {hasFillDetail ? (
+                  <div className="mobile-card__detail" data-testid={`mobile-executed-${group.id}-fills`}>
+                    {group.fills.map((fill, idx) => {
+                      const side = fillSide(fill.side);
+                      const label = `${fill.quantity}x ${fillContractLabel(fill)}`;
+                      const price = fill.avgPrice != null ? fmtPrice(fill.avgPrice) : "--";
+                      const sub = formatExecutedFillTime(fill.time);
+
+                      if (side) {
+                        return (
+                          <BuySellRow
+                            key={`${fill.execId}-${idx}`}
+                            side={side}
+                            label={label}
+                            price={price}
+                            sub={sub}
+                          />
+                        );
+                      }
+
+                      // Fallback for unrecognised sides (e.g. CANCELLED sub-fills)
+                      return (
+                        <div key={`${fill.execId}-${idx}`} className="mobile-card__leg-row">
+                          <div className="mobile-card__leg-desc">
+                            {fill.side} {fill.quantity}x {fillContractLabel(fill)}
+                          </div>
+                          <div className="mobile-card__leg-metrics">
+                            <span className="mobile-card__leg-meta">{price}</span>
+                            <span className="mobile-card__leg-meta">{sub}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         );
       })}
