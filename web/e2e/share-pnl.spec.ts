@@ -575,9 +575,9 @@ test.describe("Share PnL Instagram Story", () => {
     expect(png.readUInt32BE(20)).toBe(1920);
   });
 
-  test("downloads the story plate when the browser cannot share files", async ({ page }, testInfo) => {
+  test("shows the story image, then downloads it when the browser cannot share files", async ({ page }, testInfo) => {
     await page.addInitScript(() => {
-      // Desktop Chrome: no file share target, so the button must download.
+      // Desktop Chrome: no file share target, so the image stays on screen.
       Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
       Object.defineProperty(navigator, "canShare", { configurable: true, value: undefined });
     });
@@ -591,13 +591,20 @@ test.describe("Share PnL Instagram Story", () => {
     const popover = await openSharePopover(page);
     const story = popover.getByRole("button", { name: "Instagram Story" });
     await expect(story).toBeVisible();
+    await story.click();
+    const preview = popover.getByRole("img", { name: "Instagram story preview" });
+    await expect(preview).toBeVisible();
+    await expect(preview).toHaveAttribute("src", /^blob:/);
+    await expect(popover).toBeVisible();
+    await expect(popover.getByRole("button", { name: "Download Story" })).toBeVisible();
     const shot = testInfo.outputPath("share-popover-story.png");
     await popover.screenshot({ path: shot });
     await testInfo.attach("share-popover-story", { path: shot, contentType: "image/png" });
 
     const download = page.waitForEvent("download");
-    await story.click();
+    await popover.getByRole("button", { name: "Download Story" }).click();
     expect((await download).suggestedFilename()).toBe("radon-pnl-story.png");
+    await expect(popover).toBeVisible();
     const url = new URL(storyUrl ?? "http://localhost");
     expect(url.pathname).toBe("/api/share/pnl");
     expect(url.searchParams.get("format")).toBe("story");

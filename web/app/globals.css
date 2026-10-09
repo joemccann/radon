@@ -12721,6 +12721,20 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   flex-basis: 100%;
 }
 
+.share-pnl-story-preview {
+  display: block;
+  width: 220px;
+  max-width: 100%;
+  height: auto;
+  max-height: 360px;
+  object-fit: contain;
+  object-position: center top;
+  margin-top: 12px;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  background: var(--bg-base);
+}
+
 /* ─── Options Chain ─── */
 
 .chain-expiry-bar {
@@ -16734,6 +16748,29 @@ body[data-mobile="true"] .toast button {
   font-family: var(--font-mono);
   font-size: 12px;
   cursor: default;
+}
+
+/* Share and fills sit under the summary, outside the pressable card.
+   The press scale on a tall fill list moves the Story control off the finger. */
+.mobile-executed-expand {
+  margin-top: -1px;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border-dim);
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  padding: 0 12px 12px;
+}
+
+.m-card-press:has(+ .mobile-executed-expand) .mobile-card {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom-color: transparent;
+}
+
+.mobile-executed-expand .mobile-card__share {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 8px;
 }
 
 .mobile-card__title-row {

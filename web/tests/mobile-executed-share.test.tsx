@@ -115,7 +115,32 @@ describe("MobileExecutedList share on tap", () => {
     expect(screen.queryByTestId("mobile-executed-crwd-close-share")).toBeNull();
   });
 
-  it("opening fills expose no share actions", () => {
+  it("puts the story control outside the pressable card, ahead of the fill list", async () => {
+    const leg = fill("SLD");
+    const multi: PositionFillGroup = {
+      ...CLOSE_GROUP,
+      fills: [leg, { ...leg, execId: "exec-SLD-2", quantity: 50 }],
+    };
+    render(<MobileExecutedList groups={[multi]} shareDataFor={shareDataFor} />);
+    fireEvent.click(screen.getByTestId("mobile-executed-crwd-close"));
+
+    const card = screen.getByTestId("mobile-executed-crwd-close");
+    const story = screen.getByRole("button", { name: "Instagram Story" });
+    const fills = screen.getByTestId("mobile-executed-crwd-close-fills");
+    expect(card.contains(story)).toBe(false);
+    expect(story.closest(".m-card-press")).toBeNull();
+    expect(story.closest("[role='button']")).toBeNull();
+    expect(story.compareDocumentPosition(fills) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(story);
+    expect(card.getAttribute("aria-expanded")).toBe("true");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const url = new URL(String(fetchMock.mock.calls[0][0]), "http://localhost");
+    expect(url.pathname).toBe("/api/share/pnl");
+    expect(url.searchParams.get("format")).toBe("story");
+    expect(card.getAttribute("aria-expanded")).toBe("true");
+  });
+
+it("opening fills expose no share actions", () => {
     render(<MobileExecutedList groups={[OPEN_GROUP]} shareDataFor={shareDataFor} />);
     const card = screen.getByTestId("mobile-executed-crwd-open");
     fireEvent.click(card);

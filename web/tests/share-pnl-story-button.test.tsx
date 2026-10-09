@@ -67,7 +67,7 @@ it("requests the 9:16 story plate and hands the PNG to the native share sheet", 
   expect(payload.url).toBeUndefined();
 }, 20_000);
 
-it("downloads the story PNG when the browser cannot share files", async () => {
+it("shows the story image, then downloads it on a fresh click, when the browser cannot share files", async () => {
   const createObjectURL = vi.fn(() => "blob:story");
   const revokeObjectURL = vi.fn();
   Object.assign(URL, { createObjectURL, revokeObjectURL });
@@ -78,10 +78,19 @@ it("downloads the story PNG when the browser cannot share files", async () => {
 
   fireEvent.click(openPopover());
 
-  await waitFor(() => expect(clicks).toHaveLength(1), SETTLE);
+  const preview = await screen.findByRole("img", { name: "Instagram story preview" }, SETTLE);
+  expect(preview.getAttribute("src")).toBe("blob:story");
+  expect(screen.getByRole("dialog", { name: "Share options" })).toBeTruthy();
+  expect(clicks).toHaveLength(0);
   expect(requestedUrl().searchParams.get("format")).toBe("story");
+
+  fireEvent.click(screen.getByRole("button", { name: "Download Story" }));
+
+  expect(clicks).toHaveLength(1);
   expect(clicks[0].download).toBe("radon-pnl-story.png");
   expect(clicks[0].href).toBe("blob:story");
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("dialog", { name: "Share options" })).toBeTruthy();
 }, 20_000);
 
 it("treats a dismissed share sheet as a cancel, not an error", async () => {

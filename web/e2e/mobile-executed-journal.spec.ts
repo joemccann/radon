@@ -157,7 +157,8 @@ test.describe("Mobile executed orders", () => {
     await expect(page.locator('[data-testid$="-share"]')).toHaveCount(0);
     await card.click();
     await expect(card).toHaveAttribute("aria-expanded", "true");
-    const panel = card.locator('[data-testid$="-share"]');
+    const panel = page.locator('[data-testid$="-share"]');
+    await expect(card.locator('[data-testid$="-share"]')).toHaveCount(0);
     await expect(panel.getByRole("button", { name: "Copy & Tweet" })).toBeVisible();
     await panel.getByRole("checkbox", { name: "P&L $" }).click();
     await expect(card).toHaveAttribute("aria-expanded", "true");
@@ -172,6 +173,73 @@ test.describe("Mobile executed orders", () => {
     expect(url.searchParams.get("pnl")).toBe("1520.25");
     await panel.scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath("mobile-executed-share.png") });
+  });
+
+  test("a tall close keeps Story above the fills and hands the PNG to the share sheet", async ({ page }, testInfo) => {
+    await page.addInitScript(() => {
+      const w = window as unknown as { __shared: { name: string; type: string }[] };
+      w.__shared = [];
+      Object.defineProperty(navigator, "canShare", { configurable: true, value: () => true });
+      Object.defineProperty(navigator, "share", {
+        configurable: true,
+        value: async (data: ShareData) => {
+          for (const file of data.files ?? []) w.__shared.push({ name: file.name, type: file.type });
+        },
+      });
+    });
+    await setupBaseMocks(page);
+    const legs = Array.from({ length: 8 }, (_, i) => ({
+      execId: `exec-aaoi-${i}`,
+      symbol: "AAOI",
+      contract: {
+        conId: 5000 + i,
+        symbol: "AAOI",
+        secType: "OPT",
+        strike: i % 2 === 0 ? 110 : 113,
+        right: i % 2 === 0 ? "P" : "C",
+        expiry: "20261009",
+      },
+      side: "SLD",
+      quantity: 1,
+      avgPrice: 0.35,
+      commission: 0.65,
+      realizedPNL: 250.5,
+      time: `${TODAY}T15:30:0${i}Z`,
+      exchange: "SMART",
+      permId: 2011740827,
+    }));
+    await page.route("**/api/orders", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ...ORDERS_WITH_FILL, executed_count: legs.length, executed_orders: legs }),
+      }),
+    );
+    await page.route("**/api/share/pnl**", (route) =>
+      route.fulfill({ status: 200, contentType: "image/png", body: Buffer.from([0x89, 0x50, 0x4e, 0x47]) }),
+    );
+    await page.goto("/orders");
+
+    const card = page.getByTestId("mobile-executed-list").locator('[aria-label="AAOI CLOSE"]');
+    await expect(card).toBeVisible();
+    await card.click();
+    const story = page.getByRole("button", { name: "Instagram Story" });
+    const fills = page.locator('[data-testid$="-fills"]');
+    await expect(story).toBeVisible();
+    await expect(fills).toBeVisible();
+    await expect(card.locator('[data-testid$="-share"]')).toHaveCount(0);
+    const storyBox = await story.boundingBox();
+    const fillsBox = await fills.boundingBox();
+    expect(storyBox).not.toBeNull();
+    expect(fillsBox).not.toBeNull();
+    expect(storyBox!.y + storyBox!.height).toBeLessThanOrEqual(fillsBox!.y + 1);
+    await story.click();
+    await expect(card).toHaveAttribute("aria-expanded", "true");
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __shared: { name: string; type: string }[] }).__shared)).toEqual([
+      { name: "radon-pnl-story.png", type: "image/png" },
+    ]);
+    await story.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath("mobile-executed-story.png") });
   });
 
   test("desktop executed-orders table is hidden on mobile", async ({ page }) => {
