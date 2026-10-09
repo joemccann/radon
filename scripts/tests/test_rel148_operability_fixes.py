@@ -49,10 +49,14 @@ class TestEveryTimerDrivenScanIsWatched:
             f"service only if it is in this catalog: {missing}"
         )
 
-    def test_gex_scan_carries_vcg_scans_windows(self):
+    def test_gex_scan_window_matches_the_refresh_driver_not_vcg(self):
+        # vcg's 15-minute window is three misses of its 5-minute timer.
+        # gex only runs on the 15-minute driver, so that copy pages the
+        # first missed fire (page eeef0959). The driver budget is 35 min.
         from watchdog.services import SCHEDULED_SERVICES
 
-        assert SCHEDULED_SERVICES["gex-scan"]["open"] == SCHEDULED_SERVICES["vcg-scan"]["open"]
+        assert SCHEDULED_SERVICES["gex-scan"]["open"] == SCHEDULED_SERVICES["data-refresh"]["open"]
+        assert SCHEDULED_SERVICES["gex-scan"]["open"] != SCHEDULED_SERVICES["vcg-scan"]["open"]
 
     def test_the_web_catalog_no_longer_calls_it_on_demand(self):
         windows = (REPO / "web" / "lib" / "serviceHealthWindows.ts").read_text(encoding="utf-8")
