@@ -12,8 +12,9 @@ trips and `/edge-health/status` keeps answering 200: a total front-end hang is
 indistinguishable at the edge from a healthy idle system.
 
 R-220: the final `handle` block serves every browser request not matching
-`/ws*`, `/api/ib/*` or `/edge-health/*` — including `POST /api/orders/place`,
-`/cancel` and `/modify` — and enables a 15 s retry loop with no `retry_match`.
+`/ws*`, `/api/ib/*` or `/edge-health/*` — including `POST /api/orders/place`
+and `/cancel` — and enables a 15 s retry loop with no `retry_match`.
+`/api/orders/modify` has its own handle.
 Whether Caddy replays a POST severed mid-flight depends on an unpinned
 third-party default; relying on that default to protect order non-duplication
 is itself the defect, since there is no idempotency key anywhere on this path
@@ -324,6 +325,86 @@ class TestScannerScanRoutesHaveTheirOwnBound:
             "re-spawning heavy scanner subprocesses"
         )
 
+
+MODIFY_MATCHER = "/api/orders/modify"
+MODIFY_ROUTE = REPO / "web" / "app" / "api" / "orders" / "modify" / "route.ts"
+ORDERS_FRESH_REFRESH = REPO / "web" / "lib" / "orders" / "ordersFreshRefresh.ts"
+
+
+def _timeout_literals_s(path: Path) -> list[float]:
+    source = path.read_text(encoding="utf-8")
+    return [
+        int(match.group(1).replace("_", "")) / 1000
+        for match in re.finditer(r"timeout:\s*([\d_]+)", source)
+    ]
+
+
+class TestModifyRouteOutlivesTheCatchAll:
+    """2026-10-09: POST /api/orders/modify 504'd at Caddy while IB filled the order.
+
+    A combo modify is a what-if, a cancel, and a place, then a fresh orders
+    sync, and the handler writes no header until that returns. The catch-all
+    30s guard closed the browser with an empty 504. The client called that
+    "Modify request failed", and the next click replaced the working order
+    again. CRWD BUY 100 was accepted at 5.75 under that 504, then cancelled
+    and filled at 5.8 on the retry.
+    """
+
+    def _modify_block(self, caddy_dir):
+        content = read_caddyfile(caddy_dir)
+        return reverse_proxy_block(handle_block(content, MODIFY_MATCHER), APP_UPSTREAM)
+
+    def test_modify_has_its_own_handle(self, caddy_dir):
+        block = self._modify_block(caddy_dir)
+        assert _directive_seconds(block, "response_header_timeout") is not None, (
+            "/api/orders/modify rides the catch-all 30s guard, so a replace "
+            "that IB has already accepted reaches the browser as an empty 504"
+        )
+
+    def test_the_modify_handle_precedes_the_catch_all(self, caddy_dir):
+        active = strip_comments(read_caddyfile(caddy_dir))
+        modify = active.find("handle " + MODIFY_MATCHER)
+        catch_all = re.search(r"handle\s*\{", active)
+        assert modify != -1 and catch_all
+        assert modify < catch_all.start(), (
+            "a catch-all declared first swallows /api/orders/modify and the "
+            "dedicated bound never applies"
+        )
+
+    def test_the_modify_bound_outlasts_the_route_waits(self, caddy_dir):
+        seconds = _directive_seconds(self._modify_block(caddy_dir), "response_header_timeout")
+        route_wait = max(_timeout_literals_s(MODIFY_ROUTE))
+        refresh_wait = max(_timeout_literals_s(ORDERS_FRESH_REFRESH))
+        # The handler writes the header only after both waits, plus the snapshot read.
+        needed = route_wait + refresh_wait + 5
+        assert seconds is not None and seconds >= needed, (
+            f"response_header_timeout {seconds}s is under the route's "
+            f"{route_wait}s replace fetch plus the {refresh_wait}s refresh"
+        )
+        read_timeout = _directive_seconds(self._modify_block(caddy_dir), "read_timeout")
+        assert read_timeout is not None and seconds <= read_timeout
+
+    def test_the_modify_bound_stays_inside_the_route_budget(self, caddy_dir):
+        seconds = _directive_seconds(self._modify_block(caddy_dir), "response_header_timeout")
+        source = MODIFY_ROUTE.read_text(encoding="utf-8")
+        match = re.search(r"maxDuration\s*=\s*(\d+)", source)
+        assert match, "the modify route does not state maxDuration"
+        assert seconds is not None and seconds <= int(match.group(1)), (
+            f"the edge waits {seconds}s for a route that gives itself "
+            f"{match.group(1)}s"
+        )
+
+    def test_the_modify_block_never_replays_the_post(self, caddy_dir):
+        block = self._modify_block(caddy_dir)
+        assert retry_window_seconds(block) == 0, (
+            "a retry window on /api/orders/modify would cancel and place a second time"
+        )
+
+    def test_the_catch_all_guard_stays_at_30s(self, caddy_dir):
+        seconds = _directive_seconds(
+            proxy_block(read_caddyfile(caddy_dir), APP_UPSTREAM), "response_header_timeout"
+        )
+        assert seconds == 30
 
 
 # ── Mechanism tests ──────────────────────────────────────────────────────
