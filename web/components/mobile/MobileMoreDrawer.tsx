@@ -7,10 +7,10 @@ import { useClerk, useUser } from "@clerk/nextjs";
 import { useTheme } from "@/lib/ThemeContext";
 import { useIBStatusContext } from "@/lib/IBStatusContext";
 import { navItems, NAV_GROUP_LABEL, NAV_GROUP_ORDER } from "@/lib/data";
+import ReleaseStatus from "@/components/ReleaseStatus";
 
 // Preserved for legacy test wiring check: { label: "Options", href: "/options"
 
-const BUILD_VERSION = process.env.NEXT_PUBLIC_BUILD_VERSION ?? null;
 const EXIT_MS = 200;
 const EXIT_REDUCED_MS = 120;
 
@@ -224,12 +224,7 @@ function MobileMoreDrawerView({
               </span>
             )}
           </div>
-          {BUILD_VERSION ? (
-            <div className="mobile-drawer__status">
-              <span>Build</span>
-              <span className="mobile-drawer__status-value">{BUILD_VERSION}</span>
-            </div>
-          ) : null}
+          <ReleaseStatus placement="drawer" />
           <button
             type="button"
             className="mobile-drawer__link"

@@ -235,6 +235,13 @@ class TestNodeImage:
         assert "/home/radon/radon/web/.next/cache" in text
         assert "/home/radon/radon/web/public/data" in text
 
+    def test_node_image_build_receives_the_release_sha(self) -> None:
+        text = NODE_DF.read_text(encoding="utf-8")
+        assert "ARG RADON_RELEASE_SHA" in text
+        assert "ENV RADON_RELEASE_SHA=$RADON_RELEASE_SHA" in text
+        workflow = (REPO_ROOT / ".github" / "workflows" / "app-images.yml").read_text(encoding="utf-8")
+        assert "RADON_RELEASE_SHA=${{ github.sha }}" in workflow
+
     def test_clerk_public_env_is_required_at_build(self, tmp_path) -> None:
         text = NODE_DF.read_text(encoding="utf-8")
         assert 'ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""' not in text

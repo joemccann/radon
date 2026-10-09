@@ -1,7 +1,9 @@
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
+import { readReleaseIdentity } from "./scripts/release-identity.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const release = readReleaseIdentity();
 
 /**
  * Baseline security headers for all routes. HSTS only when explicitly safe
@@ -67,6 +69,12 @@ const HOST_DATA_TRACE_ROUTES = [
 ];
 
 const config = {
+  env: {
+    NEXT_PUBLIC_RADON_VERSION: release.version,
+    NEXT_PUBLIC_RADON_GIT_SHA: release.sha,
+    NEXT_PUBLIC_RADON_BUILT_AT: release.builtAt,
+    NEXT_PUBLIC_RADON_CHANNEL: release.channel,
+  },
   distDir: process.env.NEXT_DIST_DIR || ".next",
   outputFileTracingRoot: resolve(__dirname, ".."),
   outputFileTracingExcludes: Object.fromEntries(

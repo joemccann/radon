@@ -2,6 +2,7 @@
 
 import { useRef, useEffect, useCallback, useState, useId, type ReactNode } from "react";
 import { ChevronDown, Maximize2, Minimize2, Moon, Sun } from "lucide-react";
+import ReleaseStatus from "./ReleaseStatus";
 import TickerSearch from "./TickerSearch";
 import { useTickerNav } from "@/lib/useTickerNav";
 import { useIBStatusContext, type IBDisplayStatus } from "@/lib/IBStatusContext";
@@ -211,6 +212,7 @@ export default function Header({
           <span>{isStale ? `Stale${staleAgeMinutes != null ? ` ${staleAgeMinutes}m` : ""}` : integrity.text}</span>
           <ChevronDown size={12} aria-hidden />
         </button>
+        <ReleaseStatus />
         <TickerSearch
           ref={searchRef}
           onSelect={handleSelect}

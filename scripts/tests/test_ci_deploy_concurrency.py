@@ -40,6 +40,7 @@ TEST_JOBS = (
     "py-coverage",
     "cloud-tests",
     "perimeter-smoke",
+    "release-version",
 )
 
 
@@ -635,6 +636,7 @@ def test_deploy_accepts_skipped_test_jobs() -> None:
         "py-tests",
         "cloud-tests",
         "perimeter-smoke",
+        "release-version",
         "web-coverage",
         "py-coverage",
     ):

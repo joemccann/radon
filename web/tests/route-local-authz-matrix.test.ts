@@ -86,7 +86,7 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
   // are present in this deployment, never any key material — same posture as
   // its llm-token-index sibling, so the middleware perimeter is the only layer.
   "models", "prices",
-  "risk-free-rate", "skew", "skew2d", "straddle", "vixcor", "vixts", "panic-index",
+  "risk-free-rate", "skew", "skew2d", "straddle", "version", "vixcor", "vixts", "panic-index",
   "vol-cone", "watchlist", "watchlist/[symbol]", "yield-curve",
   "yield-curve/live",
 ] as const;
