@@ -292,6 +292,11 @@ class TestNightlyTemplateMatchesFormatter:
         assert "Red/green TDD" in text
         assert "Issue discovered" not in text
 
+    def test_default_human_template_requires_operator_next_steps(self):
+        text = (REPO / ".github" / "pull_request_template.md").read_text(encoding="utf-8")
+        assert "## Operator Next Steps" in text
+        assert "deploy" in text.lower()
+
 
 class TestSkillsInstructTheFormatter:
     @pytest.mark.parametrize("loop", LOOPS)

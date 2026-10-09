@@ -110,15 +110,48 @@ def validate_ir_description(
     return sections
 
 
+_FORENSIC_TAIL = re.compile(
+    r"\b(?:last successful|journalctl|error excerpt)\b.*",
+    re.I | re.S,
+)
+_ALERT_TEXT = re.compile(
+    r"""\s*\balert text\s+(?:"[^"]*"|'[^']*'|\u201c[^\u201d]*\u201d)\.?""",
+    re.I,
+)
+_PAGE_LABEL = re.compile(r"\s*\bpage\s+[a-f0-9]{32}\b", re.I)
+_ISO_STAMP = re.compile(
+    r"\s*\bat\s+\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?Z?\b"
+    r"|\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?Z?\b"
+)
+
+
+def condense_ir_title(text: str) -> str:
+    """One clause. Page ids, clocks, alert quotes, and log lines stay in the body."""
+    cleaned = _FORENSIC_TAIL.sub("", text or "")
+    cleaned = _ALERT_TEXT.sub("", cleaned)
+    cleaned = _PAGE_LABEL.sub("", cleaned)
+    cleaned = PAGE_ID_RE.sub("", cleaned)
+    cleaned = _ISO_STAMP.sub("", cleaned)
+    cleaned = re.sub(r"\(\s*\)", "", cleaned)
+    cleaned = cleaned.replace("\u2014", " ").replace("\u2013", " ")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    cleaned = re.sub(r"\s+([,.;])", r"\1", cleaned)
+    cleaned = re.sub(r"(?:[,;]\s*){2,}", ", ", cleaned)
+    cleaned = re.sub(r",\s+(?=[A-Z])", ". ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip(" ,;:-")
+
+
 def title_from_sections(sections: dict[str, str]) -> str:
-    """First What-broke line, markdown stripped, for the PR title."""
+    """First What-broke line, markdown stripped and condensed, for the PR title."""
     body = sections.get("What broke") or ""
     for line in body.splitlines():
         cleaned = _MD_BULLET.sub("", line.strip())
         cleaned = _MD_BOLD.sub(r"\1", cleaned)
-        cleaned = cleaned.split(":", 1)[-1].strip() if cleaned.lower().startswith("symptom") else cleaned
+        if cleaned.lower().startswith("symptom"):
+            cleaned = cleaned.split(":", 1)[-1].strip()
         if cleaned:
-            return cleaned
+            return condense_ir_title(cleaned) or "incident-response fix"
     return "incident-response fix"
 
 

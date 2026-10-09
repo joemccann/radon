@@ -118,6 +118,47 @@ class TestIrPrCopy:
         )
         assert title.startswith("IR 20260914T120000Z-leap:")
 
+    def test_opaque_page_id_and_forensic_dump_collapse(self):
+        """Page eeef0959 shipped the alert, the clock, and journalctl as the title."""
+        page = "eeef09595a01893b4e31abd5cbda352e"
+        dump = (
+            "gex-scan paged P1 stale at 2026-10-09T18:40:00Z, "
+            f"page {page}, alert text \"silent for 23m (window 15m) market open\". "
+            "Market was open (14:40 ET). Last successful line was "
+            "journalctl -u radon-refr- #980"
+        )
+        expected = "IR: gex-scan paged P1 stale. Market was open (14:40 ET)."
+        assert ir.format_ir_pr_title(issue=dump, incident_id=page) == expected
+        assert ir.format_ir_pr_title(issue=f"IR {page}: {dump}", incident_id=page) == expected
+        assert ir.format_ir_pr_title(issue=expected, incident_id=page) == expected
+        assert page not in expected
+        assert len(expected) <= 72
+
+    def test_parenthetical_page_id_does_not_leave_empty_parens(self):
+        page = "4d8870f0ead060af734f223e7e2c1f03"
+        dump = (
+            f"radon-calm-streak.service paged P1 at 2026-10-09T14:35:00Z "
+            f"(page {page}) after the 14:30 UTC oneshot. systemd recorded "
+            "Result=exit-code, NRestarts=0, ExecMainStatus=1."
+        )
+        title = ir.format_ir_pr_title(issue=dump, incident_id=page)
+        assert title == (
+            "IR: radon-calm-streak.service paged P1 after the 14:30 UTC oneshot."
+        )
+        assert "()" not in title
+        assert page not in title
+
+    def test_long_clean_sentence_clips_on_a_word(self):
+        sentence = (
+            "gex-scan stayed silent through the regular session "
+            "after the freshness window elapsed"
+        )
+        title = ir.format_ir_pr_title(issue=sentence)
+        assert len(title) <= 72
+        body = title.removeprefix("IR: ")
+        assert sentence.startswith(body)
+        assert body == sentence or sentence[len(body)] == " "
+
     def test_body_reuses_nightly_headings_and_links_the_incident(self):
         body = ir.format_ir_pr_body(
             issue="Leap reports died on a PermissionError 502.",
@@ -173,6 +214,37 @@ class TestEnsurePr:
         assert "fix/leap-reports-permission-502" in create[0]
         assert "--title" in create[0]
         assert "--body" in create[0]
+
+    def test_create_refuses_a_forensic_dump_as_the_title(self):
+        page = "eeef09595a01893b4e31abd5cbda352e"
+        dump = (
+            f"IR {page}: gex-scan paged P1 stale at 2026-10-09T18:40:00Z, "
+            f"page {page}, alert text \"silent for 23m (window 15m) market open\". "
+            "Market was open (14:40 ET). Last successful line was "
+            "journalctl -u radon-refr- #980"
+        )
+        runner = FakeRunner({
+            ("gh", "auth", "status"): FakeProc(0, stdout="Logged in"),
+            ("gh", "pr", "list"): FakeProc(0, stdout="[]\n"),
+            ("gh", "pr", "create"): FakeProc(
+                0, stdout="https://github.com/joemccann/radon/pull/980\n"
+            ),
+        })
+        ir.ensure_pr(
+            head="fix/gex-scan-stale-page",
+            issue=dump,
+            fix="Recorded a heartbeat on the skip path.",
+            incident_id=page,
+            title=dump,
+            body=VALID_BODY,
+            runner=runner,
+            gh_bin="gh",
+        )
+        create = [c for c in runner.calls if c[:3] == ["gh", "pr", "create"]]
+        title = create[0][create[0].index("--title") + 1]
+        assert title == "IR: gex-scan paged P1 stale. Market was open (14:40 ET)."
+        assert page not in title
+        assert "journalctl" not in title
 
     def test_credential_in_title_or_body_refuses_instead_of_redacting(self):
         """A credential shape in PR text is a leak to report, not to hide."""
