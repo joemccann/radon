@@ -83,26 +83,25 @@ export function BottomSheet({
     };
   }, [open, mounted]);
 
-  // The iOS keyboard shrinks only the visual viewport; this fixed root keeps
-  // its layout-viewport height, so the sticky footer ends up behind the
-  // keyboard with no way to scroll it into view. Track the overlap into
-  // --keyboard-inset: the root pads its bottom by it (lifting the sheet) and
-  // .m-sheet clamps its max-height by it.
+  // iOS can lay a fixed `inset: 0` root against a layout viewport taller than
+  // the visible screen (keyboard open, or standalone drift after scrolling),
+  // which hangs the bottom-anchored sheet off-screen with its footer out of
+  // reach. Pin the root to the visual viewport instead.
   useEffect(() => {
     if (!mounted || !portalTarget) return;
     const viewport = window.visualViewport;
     const root = panelRef.current;
     if (!viewport || !root) return;
-    const syncKeyboardInset = () => {
-      const overlap = window.innerHeight - viewport.height - viewport.offsetTop;
-      root.style.setProperty("--keyboard-inset", `${Math.max(0, Math.round(overlap))}px`);
+    const pinToVisualViewport = () => {
+      root.style.setProperty("--vv-top", `${Math.round(viewport.offsetTop)}px`);
+      root.style.setProperty("--vv-height", `${Math.round(viewport.height)}px`);
     };
-    syncKeyboardInset();
-    viewport.addEventListener("resize", syncKeyboardInset);
-    viewport.addEventListener("scroll", syncKeyboardInset);
+    pinToVisualViewport();
+    viewport.addEventListener("resize", pinToVisualViewport);
+    viewport.addEventListener("scroll", pinToVisualViewport);
     return () => {
-      viewport.removeEventListener("resize", syncKeyboardInset);
-      viewport.removeEventListener("scroll", syncKeyboardInset);
+      viewport.removeEventListener("resize", pinToVisualViewport);
+      viewport.removeEventListener("scroll", pinToVisualViewport);
     };
   }, [mounted, portalTarget, panelRef]);
 
@@ -158,7 +157,7 @@ export function BottomSheet({
   };
 
   // Routed through --sheet-max-h (not inline max-height) so the .m-sheet rule
-  // can clamp the caller's ceiling against the keyboard-adjusted viewport.
+  // can clamp the caller's ceiling against the visible viewport height.
   const sheetStyle = (maxHeight ? { "--sheet-max-h": maxHeight } : {}) as React.CSSProperties;
   const rootClass = exiting
     ? "mobile-sheet-root mobile-sheet-root--exiting"
