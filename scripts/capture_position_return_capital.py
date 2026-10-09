@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import sys
+from bisect import bisect_left, bisect_right
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -109,23 +110,74 @@ def _epoch(value: str) -> float:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
 
 
+class _SampleIndex:
+    """Bracketing margin samples for one account, each timestamp parsed once.
+
+    `before` is the LAST sample, in list order, observed through `first`;
+    `after` is the FIRST sample, in list order, observed from `last`. The
+    linear version re-parsed every sample per event: 238 events x 61.7k
+    samples took ~11 s inside the 30 s orders/portfolio sync budget.
+    """
+
+    def __init__(self, samples: list[dict[str, Any]]) -> None:
+        self._samples = samples
+        by_through = sorted(
+            (_epoch(sample["observed_through"]), index) for index, sample in enumerate(samples)
+        )
+        self._throughs = [epoch for epoch, _ in by_through]
+        self._latest_index_through: list[int] = []
+        latest = -1
+        for _, index in by_through:
+            latest = max(latest, index)
+            self._latest_index_through.append(latest)
+        by_from = sorted(
+            (_epoch(sample["observed_from"]), index) for index, sample in enumerate(samples)
+        )
+        self._froms = [epoch for epoch, _ in by_from]
+        self._earliest_index_from = [0] * len(by_from)
+        earliest = len(samples)
+        for position in range(len(by_from) - 1, -1, -1):
+            earliest = min(earliest, by_from[position][1])
+            self._earliest_index_from[position] = earliest
+
+    def bracket(
+        self, first: float, last: float
+    ) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
+        count_through = bisect_right(self._throughs, first)
+        before = (
+            self._samples[self._latest_index_through[count_through - 1]]
+            if count_through else None
+        )
+        start_from = bisect_left(self._froms, last)
+        after = (
+            self._samples[self._earliest_index_from[start_from]]
+            if start_from < len(self._froms) else None
+        )
+        return before, after
+
+
 def _bracketing_samples(
-    samples: list[dict[str, Any]],
+    index: Optional[_SampleIndex],
     executions: list[dict[str, Any]],
 ) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
+    if index is None:
+        return None, None
     first = min(_epoch(item["filled_at"]) for item in executions)
     last = max(_epoch(item["filled_at"]) for item in executions)
-    before = [sample for sample in samples if _epoch(sample["observed_through"]) <= first]
-    after = [sample for sample in samples if _epoch(sample["observed_from"]) >= last]
-    return (before[-1] if before else None, after[0] if after else None)
+    return index.bracket(first, last)
 
 
 def build_reconciliation_plan(db: Any, *, max_window_seconds: int = 120) -> dict[str, Any]:
     executions = _load_executions(db)
     transactions = group_execution_transactions(executions)
     replay = replay_transactions(transactions)
-    samples_by_account = _load_samples(db)
-    normalized_execs = [item for group in transactions for item in group]
+    sample_index = {
+        account_id: _SampleIndex(samples)
+        for account_id, samples in _load_samples(db).items()
+    }
+    normalized_execs = [
+        (_epoch(item["filled_at"]), item) for group in transactions for item in group
+    ]
     capital_by_instance: dict[str, float] = {}
     observations: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
@@ -133,7 +185,7 @@ def build_reconciliation_plan(db: Any, *, max_window_seconds: int = 120) -> dict
     for event in replay["events"]:
         account_id = event["account_id"]
         before, after = _bracketing_samples(
-            samples_by_account.get(account_id, []), event["executions"]
+            sample_index.get(account_id), event["executions"]
         )
         if before is None or after is None or before["sample_id"] == after["sample_id"]:
             rejected.append({"event_id": event["event_id"], "reason": "missing-distinct-margin-samples"})
@@ -141,8 +193,8 @@ def build_reconciliation_plan(db: Any, *, max_window_seconds: int = 120) -> dict
         start = _epoch(before["observed_from"])
         end = _epoch(after["observed_through"])
         window_execs = [
-            item for item in normalized_execs
-            if item["account_id"] == account_id and start <= _epoch(item["filled_at"]) <= end
+            item for filled, item in normalized_execs
+            if item["account_id"] == account_id and start <= filled <= end
         ]
         isolation = validate_margin_window(
             event,
@@ -218,113 +270,213 @@ def build_reconciliation_plan(db: Any, *, max_window_seconds: int = 120) -> dict
     }
 
 
+_WRITE_CHUNK = 100
+
+
+def _chunks(rows: list[Any]) -> list[list[Any]]:
+    return [rows[offset:offset + _WRITE_CHUNK] for offset in range(0, len(rows), _WRITE_CHUNK)]
+
+
+def _insert_rows(db: Any, head: str, rows: list[tuple[Any, ...]], tail: str = "") -> None:
+    """One multi-row statement per chunk: a remote round trip per row blew the sync budget."""
+    for chunk in _chunks(rows):
+        placeholders = "(" + ", ".join("?" for _ in chunk[0]) + ")"
+        params = [value for row in chunk for value in row]
+        db.execute(f"{head} VALUES {', '.join(placeholders for _ in chunk)} {tail}", params)
+
+
+def _load_ledger_state(db: Any) -> dict[str, Any]:
+    """What the ledger already holds, read once instead of once per row."""
+    instances = {
+        str(_row_value(row, 0, "instance_id"))
+        for row in db.execute("SELECT instance_id FROM position_instances").fetchall() or []
+    }
+    events = {
+        str(row[0]): tuple(row[1:])
+        for row in db.execute(
+            """SELECT event_id, instance_id, kind, transaction_key, effective_at,
+                      before_legs, after_legs, exec_ids, source_digest
+               FROM position_instance_events"""
+        ).fetchall() or []
+    }
+    executions: dict[tuple[str, str, str], list[tuple[Any, ...]]] = {}
+    for row in db.execute(
+        """SELECT event_id, account_id, exec_id, revision, con_id, perm_id,
+                  order_ref, signed_quantity, price, multiplier, currency, filled_at
+           FROM position_event_executions"""
+    ).fetchall() or []:
+        executions.setdefault((str(row[0]), str(row[1]), str(row[2])), []).append(tuple(row))
+    observations = {
+        str(_row_value(row, 0, "observation_id"))
+        for row in db.execute(
+            "SELECT observation_id FROM position_capital_observations"
+        ).fetchall() or []
+    }
+    return {
+        "instances": instances,
+        "events": events,
+        "executions": executions,
+        "observations": observations,
+    }
+
+
+def _instance_row(instance: dict[str, Any], events: list[dict[str, Any]], stamp: str) -> tuple[Any, ...]:
+    opening_event = next(
+        event for event in events
+        if event["instance_id"] == instance["instance_id"] and event["kind"] == "OPEN"
+    )
+    return (
+        instance["instance_id"], instance["account_id"], instance["strategy_key"],
+        instance["episode"], instance["opened_at"],
+        opening_event["executions"][0]["exec_id"], stamp,
+    )
+
+
+def _event_row(event: dict[str, Any]) -> tuple[Any, ...]:
+    event_payload = {
+        "event_id": event["event_id"],
+        "before_legs": event["before_legs"],
+        "after_legs": event["after_legs"],
+        "executions": [
+            {
+                "exec_id": item["exec_id"],
+                "revision": item.get("revision", 0),
+                "quantity": item["signed_quantity"],
+                "price": item["price"],
+            }
+            for item in event["executions"]
+        ],
+    }
+    return (
+        event["instance_id"], event["kind"], event["transaction_key"], event["effective_at"],
+        _canonical(event["before_legs"]), _canonical(event["after_legs"]),
+        _canonical([item["exec_id"] for item in event["executions"]]),
+        _sha(event_payload),
+    )
+
+
+def _event_execution_row(event: dict[str, Any], item: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        event["event_id"], item["account_id"], item["exec_id"], int(item.get("revision") or 0),
+        item["con_id"], item["perm_id"], item["order_ref"] or None,
+        item["signed_quantity"], item["price"], item["multiplier"],
+        item["currency"], item["filled_at"],
+    )
+
+
+def _is_revised(prior: list[tuple[Any, ...]], row: tuple[Any, ...]) -> bool:
+    return any(
+        int(existing[3] or 0) != row[3] or float(existing[8] or 0) != float(row[8])
+        for existing in prior
+    )
+
+
+def _observation_row(observation: dict[str, Any], stamp: str) -> tuple[Any, ...]:
+    return (
+        observation["observation_id"], observation["instance_id"],
+        observation["through_event_id"], observation["amount"],
+        observation["delta_amount"], observation["before_sample_id"],
+        observation["after_sample_id"], observation["currency"],
+        _canonical(observation["evidence"]), observation["idempotency_key"], stamp,
+    )
+
+
+def _ledger_changes(plan: dict[str, Any], state: dict[str, Any], stamp: str) -> dict[str, list[Any]]:
+    """Only the rows the ledger lacks or holds differently."""
+    changes: dict[str, list[Any]] = {
+        "instances": [], "events": [], "voided": [], "replaced": [], "executions": [],
+        "observations": [],
+    }
+    replacements: dict[tuple[Any, ...], tuple[Any, ...]] = {}
+    for instance in plan["instances"]:
+        if instance["instance_id"] not in state["instances"]:
+            changes["instances"].append(_instance_row(instance, plan["events"], stamp))
+    for event in plan["events"]:
+        row = _event_row(event)
+        if state["events"].get(event["event_id"]) != row:
+            changes["events"].append((event["event_id"], *row, stamp))
+        for item in event["executions"]:
+            execution = _event_execution_row(event, item)
+            prior = state["executions"].get(execution[:3], [])
+            if _is_revised(prior, execution) and event["event_id"] not in changes["voided"]:
+                changes["voided"].append(event["event_id"])
+            if prior != [execution]:
+                replacements[execution[:3]] = execution
+    # Last row per key wins, as the per-row DELETE + INSERT it replaces did.
+    changes["replaced"] = list(replacements)
+    changes["executions"] = list(replacements.values())
+    for observation in plan["observations"]:
+        if observation["observation_id"] not in state["observations"]:
+            changes["observations"].append(_observation_row(observation, stamp))
+    return changes
+
+
+def _write_ledger_changes(db: Any, changes: dict[str, list[Any]]) -> None:
+    _insert_rows(
+        db,
+        """INSERT OR IGNORE INTO position_instances
+           (instance_id, account_id, strategy_key, episode, opened_at,
+            opening_exec_id, created_at)""",
+        changes["instances"],
+    )
+    _insert_rows(
+        db,
+        """INSERT INTO position_instance_events
+           (event_id, instance_id, kind, transaction_key, effective_at,
+            before_legs, after_legs, exec_ids, source_digest, recorded_at)""",
+        changes["events"],
+        """ON CONFLICT(event_id) DO UPDATE SET
+             effective_at=excluded.effective_at,
+             before_legs=excluded.before_legs,
+             after_legs=excluded.after_legs,
+             exec_ids=excluded.exec_ids,
+             source_digest=excluded.source_digest,
+             recorded_at=excluded.recorded_at""",
+    )
+    for chunk in _chunks(changes["voided"]):
+        db.execute(
+            "UPDATE position_capital_observations SET status='VOID', amount=NULL "
+            "WHERE status='VALID' AND through_event_id IN ("
+            + ", ".join("?" for _ in chunk) + ")",
+            chunk,
+        )
+    for chunk in _chunks(changes["replaced"]):
+        db.execute(
+            "DELETE FROM position_event_executions WHERE (event_id, account_id, exec_id) IN ("
+            + ", ".join("(?, ?, ?)" for _ in chunk) + ")",
+            [value for key in chunk for value in key],
+        )
+    _insert_rows(
+        db,
+        """INSERT INTO position_event_executions
+           (event_id, account_id, exec_id, revision, con_id, perm_id,
+            order_ref, signed_quantity, price, multiplier, currency, filled_at)""",
+        changes["executions"],
+    )
+    _insert_rows(
+        db,
+        """INSERT OR IGNORE INTO position_capital_observations
+           (observation_id, instance_id, through_event_id, amount, delta_amount,
+            before_sample_id, after_sample_id, currency, evidence, idempotency_key,
+            recorded_at, status, method, quality, source)""",
+        [
+            (*row, "VALID", "OBSERVED_INIT_MARGIN_DELTA", "observed", "ib-account-values")
+            for row in changes["observations"]
+        ],
+    )
+
+
 def apply_reconciliation_plan(db: Any, plan: dict[str, Any]) -> dict[str, int]:
-    """Atomically project the canonical execution revisions into the ledger."""
+    """Atomically project the canonical execution revisions into the ledger.
+
+    Runs inside every 30 s orders/portfolio sync, so it writes only what
+    changed, in multi-row statements. One SELECT + DELETE + INSERT per
+    execution (~5k round trips) never reached COMMIT inside that budget.
+    """
     stamp = _now_iso()
     try:
         db.execute("BEGIN")
-        for instance in plan["instances"]:
-            opening_event = next(
-                event for event in plan["events"]
-                if event["instance_id"] == instance["instance_id"] and event["kind"] == "OPEN"
-            )
-            db.execute(
-                """INSERT OR IGNORE INTO position_instances
-                   (instance_id, account_id, strategy_key, episode, opened_at,
-                    opening_exec_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    instance["instance_id"], instance["account_id"], instance["strategy_key"],
-                    instance["episode"], instance["opened_at"],
-                    opening_event["executions"][0]["exec_id"], stamp,
-                ),
-            )
-        for event in plan["events"]:
-            event_payload = {
-                "event_id": event["event_id"],
-                "before_legs": event["before_legs"],
-                "after_legs": event["after_legs"],
-                "executions": [
-                    {
-                        "exec_id": item["exec_id"],
-                        "revision": item.get("revision", 0),
-                        "quantity": item["signed_quantity"],
-                        "price": item["price"],
-                    }
-                    for item in event["executions"]
-                ],
-            }
-            db.execute(
-                """INSERT INTO position_instance_events
-                   (event_id, instance_id, kind, transaction_key, effective_at,
-                    before_legs, after_legs, exec_ids, source_digest, recorded_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(event_id) DO UPDATE SET
-                     effective_at=excluded.effective_at,
-                     before_legs=excluded.before_legs,
-                     after_legs=excluded.after_legs,
-                     exec_ids=excluded.exec_ids,
-                     source_digest=excluded.source_digest,
-                     recorded_at=excluded.recorded_at""",
-                (
-                    event["event_id"], event["instance_id"], event["kind"],
-                    event["transaction_key"], event["effective_at"],
-                    _canonical(event["before_legs"]), _canonical(event["after_legs"]),
-                    _canonical([item["exec_id"] for item in event["executions"]]),
-                    _sha(event_payload), stamp,
-                ),
-            )
-            for item in event["executions"]:
-                revision = int(item.get("revision") or 0)
-                prior = db.execute(
-                    """SELECT revision, price FROM position_event_executions
-                       WHERE event_id=? AND account_id=? AND exec_id=?""",
-                    (event["event_id"], item["account_id"], item["exec_id"]),
-                ).fetchall()
-                if any(
-                    int(_row_value(row, 0, "revision") or 0) != revision
-                    or float(_row_value(row, 1, "price") or 0) != float(item["price"])
-                    for row in prior or []
-                ):
-                    db.execute(
-                        """UPDATE position_capital_observations
-                           SET status='VOID', amount=NULL
-                           WHERE through_event_id=? AND status='VALID'""",
-                        (event["event_id"],),
-                    )
-                db.execute(
-                    """DELETE FROM position_event_executions
-                       WHERE event_id=? AND account_id=? AND exec_id=?""",
-                    (event["event_id"], item["account_id"], item["exec_id"]),
-                )
-                db.execute(
-                    """INSERT INTO position_event_executions
-                       (event_id, account_id, exec_id, revision, con_id, perm_id,
-                        order_ref, signed_quantity, price, multiplier, currency, filled_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        event["event_id"], item["account_id"], item["exec_id"], revision,
-                        item["con_id"], item["perm_id"], item["order_ref"] or None,
-                        item["signed_quantity"], item["price"], item["multiplier"],
-                        item["currency"], item["filled_at"],
-                    ),
-                )
-        for observation in plan["observations"]:
-            db.execute(
-                """INSERT OR IGNORE INTO position_capital_observations
-                   (observation_id, instance_id, through_event_id, status, method,
-                    quality, amount, delta_amount, before_sample_id, after_sample_id,
-                    currency, source, evidence, idempotency_key, recorded_at)
-                   VALUES (?, ?, ?, 'VALID', 'OBSERVED_INIT_MARGIN_DELTA',
-                           'observed', ?, ?, ?, ?, ?, 'ib-account-values', ?, ?, ?)""",
-                (
-                    observation["observation_id"], observation["instance_id"],
-                    observation["through_event_id"], observation["amount"],
-                    observation["delta_amount"], observation["before_sample_id"],
-                    observation["after_sample_id"], observation["currency"],
-                    _canonical(observation["evidence"]), observation["idempotency_key"], stamp,
-                ),
-            )
+        _write_ledger_changes(db, _ledger_changes(plan, _load_ledger_state(db), stamp))
         db.commit()
     except BaseException:
         db.rollback()
