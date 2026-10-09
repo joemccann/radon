@@ -168,6 +168,7 @@ jobs:
             NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
             NEXT_PUBLIC_RADON_API_URL=${{ vars.NEXT_PUBLIC_RADON_API_URL }}
             NEXT_PUBLIC_IB_REALTIME_WS_URL=${{ vars.NEXT_PUBLIC_IB_REALTIME_WS_URL }}
+            RADON_RELEASE_SHA=${{ github.sha }}
           cache-from: ${{ steps.image-cache.outputs.cache_from }}
           cache-to: ${{ steps.image-cache.outputs.cache_to }}
           provenance: false

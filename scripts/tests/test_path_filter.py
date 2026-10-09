@@ -176,6 +176,9 @@ _NON_REPOSITORY_WEB_FIXTURES = {
     "cloud/tests/test_deploy_corrections.py",
     "cloud/tests/test_deploy_resilience.py",
     "cloud/tests/test_setup_vps_privileged_paths.py",
+    # Builds a temporary git repo whose package.json lives at web/. It does
+    # not read the checkout's web tree.
+    "scripts/tests/test_release_version.py",
 }
 _DYNAMIC_WEB_READER_MODULES = {
     # Their tracked web paths live in parameter tables and are joined to ROOT
