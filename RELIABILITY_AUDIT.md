@@ -3121,3 +3121,15 @@ R-733 was verified while widening R-027 to the notifier's response admission. Th
 Audited through: 8afaaa61f09789bc272910d0dbce048780ef4dd9 on 2026-10-07 — 3 new findings
 
 Closing standing sweeps retain halt/limits at `scripts/clients/ib_client.py:707-745,864-903`, authoritative wire calls at `:752,910`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:5821,6008`, exit ack polling at `scripts/monitor_daemon/handlers/exit_orders.py:224-250`, and Hrana daemon-state writes at `scripts/db/writer.py:2567-2594`. Whole-repo `placeOrder`/`place_order` enumeration contains only the established guarded funnels; every scheduled health writer remains in both catalogs, with existing explicit exemptions checked. No metric sample writes a service_health row. Standing executable gates: 131 passed; permanent Python drills: 95 passed. Open #922 IDs were read from its actual diff (highest R-730 / REL-318) and its exact head remained green; no overlapping repair was repeated.
+
+## Delta audit 2026-10-09
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-734 / REL-323 | P2 | `web/lib/useOrders.ts:155-172` (audit base) | POST `/api/orders` now returns the Turso snapshot with `X-Sync-Pending` when the shielded IB refresh is still running (`web/app/api/orders/route.ts:64-88`, `web/lib/syncFallback.ts:12-16`), matching `/api/portfolio`. `usePortfolio` re-reads at 10s and treats an opaque Caddy 504 as pending (`web/lib/usePortfolio.ts:192-221`); `useOrders` ignored both headers and classified the 504 as `Sync failed`. Cancel/modify then stayed on the pre-refresh book until the 30s poll. Acceptance: a fake pending POST produces no GET until `SYNC_PENDING_REPOLL_MS`, then at least one `/api/orders` GET; an HTML 504 is not `Sync failed` and also re-reads. RED 2 failed / 1 passed; GREEN 12 focused Vitest passed. |
+
+Inherited operator-only items remain: NF-1 (live bankroll admission), NF-4 (legacy Flex reconstruction), REL-087 / R-232 (container lifecycle design), REL-261 / R-682 (recover original task before reuse). No open `reliability/` PR. Highest prior IDs R-733 / REL-322. NEW_FINDINGS and REL-021b have no new changed-surface instance beyond this pairing miss.
+
+Standing sweeps HOLD: halt/limits at `scripts/clients/ib_client.py:708-749,864-906`, wire `placeOrder` at `:752,910`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:5850,5959,6037`, exit ack at `scripts/monitor_daemon/handlers/exit_orders.py:224-250,790`, Hrana daemon-state at `scripts/db/writer.py:2545-2558`. Whole-repo placement enumeration contains only the established guarded funnels. No new `service_health` writer in the range.
+
+Audited through: b9fca322686d1b0bb6df90641ce37694189f52e2 on 2026-10-09 — 1 new finding

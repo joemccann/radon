@@ -22,6 +22,11 @@ export const PRODUCER_SYNC_WAIT_MS = 20_000;
  *  (sync wait plus the fallback read), short of the edge. */
 export const BROWSER_PRODUCER_SYNC_TIMEOUT_MS = 28_000;
 
+/** Re-read delay after a producer-sync POST reports the IB job still running
+ *  server-side. Long enough for a typical sync to land in Turso, short of the
+ *  30s poll. Shared by usePortfolio and useOrders (REL-323 / R-734). */
+export const SYNC_PENDING_REPOLL_MS = 10_000;
+
 /**
  * FastAPI /health bounds its gateway probe at 2.5s, so a healthy upstream
  * answers well inside this. It stays below the dashboard's 5s health abort so
