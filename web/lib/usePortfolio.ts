@@ -9,14 +9,13 @@ import {
   reportOfflineServed,
 } from "./offline/offlineSignals";
 import { useRouteRefreshKey } from "./RouteRefreshContext";
-import { BROWSER_PRODUCER_SYNC_TIMEOUT_MS } from "./edgeBudget";
+import { BROWSER_PRODUCER_SYNC_TIMEOUT_MS, SYNC_PENDING_REPOLL_MS } from "./edgeBudget";
+
+export { SYNC_PENDING_REPOLL_MS } from "./edgeBudget";
 
 const POLL_INTERVAL_MS = 30_000;
 const MAX_RATE_LIMIT_BACKOFF_MS = 15 * 60_000;
 const GET_FETCH_TIMEOUT_MS = 12_000;
-/** Re-read delay after the route reports the IB sync still running
- *  server-side: long enough for a typical sync to land in Turso. */
-export const SYNC_PENDING_REPOLL_MS = 10_000;
 const EDGE_PENDING_MESSAGE = "IB sync still running - showing latest snapshot";
 
 /** Caddy's own 502/504 page: the edge gave up, the shielded sync did not. */
