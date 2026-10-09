@@ -335,7 +335,10 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // entirely, so nothing on either side noticed a frozen feed. NYSE A/D +
   // TICK internals sampled from IB index feeds, so requires_ib=true. Windows
   // mirror scripts/watchdog/services.py. R-236.
-  "breadth-scan": { open: 15 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "scheduled", requires_ib: true },
+  // Extended folds into closed like every RTH-scoped writer: the last
+  // heartbeat lands ~16:35 ET and the next at the 09:30 bell, so 30m read
+  // stale on /admin through every pre-market and evening session.
+  "breadth-scan": { open: 15 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
   // ``vcg-scan`` has an autonomous 5-min cadence during market hours
   // (radon-vcg-refresh.timer / com.radon.vcg-refresh). The 15-min open
   // window tolerates 3 missed cycles before flagging — long enough to
