@@ -15,6 +15,7 @@ import json
 import math
 import os
 import re
+import sys
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timezone
@@ -358,6 +359,22 @@ def _write_health(state: str, started: str, error: dict[str, str] | None = None)
     )
 
 
+def _record_ok_health(started: str) -> None:
+    """Best-effort ok heartbeat.
+
+    A Turso blip on this write must not fail the oneshot after the basket
+    refresh has already succeeded, and must not replace the row with error
+    (page 57803bcca18b6fcfe4630c1d8b0bd82e, 2026-10-08 22:14Z).
+    """
+    try:
+        _write_health("ok", started)
+    except Exception as exc:  # noqa: BLE001: heartbeat is telemetry
+        print(
+            f"[aa-frontier-refresh] service_health heartbeat failed: {exc}",
+            file=sys.stderr,
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state", type=Path, default=DEFAULT_STATE_PATH)
@@ -371,13 +388,17 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps({"status": "busy"}))
                 return 0
             result = run_once(store=SecretStore(), state_path=args.state, force=args.force)
-        _write_health("ok", started)
-        print(json.dumps(result, sort_keys=True))
-        return 0
     except CatalogError as exc:
         error = {"message": str(exc)}
-    except Exception:
-        error = {"message": "Artificial Analysis frontier refresh failed"}
+    except Exception as exc:
+        error = {
+            "message": "Artificial Analysis frontier refresh failed",
+            "class": type(exc).__name__,
+        }
+    else:
+        _record_ok_health(started)
+        print(json.dumps(result, sort_keys=True))
+        return 0
     try:
         _write_health("error", started, error)
     except Exception:

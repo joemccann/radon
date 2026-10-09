@@ -471,3 +471,73 @@ def test_real_encrypted_store_round_trip(tmp_path):
     assert store.get_secret(BASKET_SECRET) == result["basket"]
     metadata = next(entry for entry in store.list_secrets() if entry["name"] == BASKET_SECRET)
     assert metadata["updated_by"] == "aa-frontier-refresh"
+
+
+def test_ok_heartbeat_timeout_does_not_fail_the_oneshot(monkeypatch, tmp_path, capsys):
+    """Page 57803bcca18b6fcfe4630c1d8b0bd82e (2026-10-08 22:14Z): the
+    same-day basket was already current, then the ok service_health write
+    raised. main() caught that as a generic failure, wrote an error row,
+    and exited 1. systemd recorded Result=exit-code / NRestarts=0 and the
+    unit watchdog paged P1. A heartbeat blip must not fail the oneshot or
+    replace a good row with error."""
+    from scripts.db.hrana_http import HranaHttpError
+
+    calls: list[tuple[str, object]] = []
+
+    def boom(service, state, **kwargs):
+        calls.append((service, state, kwargs.get("error")))
+        raise HranaHttpError("TimeoutError: The read operation timed out")
+
+    monkeypatch.setattr(refresh_module, "run_once", lambda **_kwargs: {
+        "status": "already-current",
+        "basket": "kept",
+        "providers": 8,
+    })
+    monkeypatch.setattr(
+        "scripts.db.hrana_http.write_service_health_http",
+        boom,
+    )
+
+    code = refresh_module.main([
+        "--state", str(tmp_path / "state.json"),
+        "--lock", str(tmp_path / "refresh.lock"),
+    ])
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert calls == [("aa-frontier-basket", "ok", None)]
+    assert "already-current" in captured.out
+    assert "heartbeat failed" in captured.err
+    assert "error" not in captured.out
+
+
+def test_refresh_failure_still_exits_one_and_names_the_exception_class(
+    monkeypatch, tmp_path, capsys,
+):
+    """A real refresh failure still fails the oneshot. The health row names
+    the exception class so the next page is not only the generic string."""
+    calls: list[tuple[str, object]] = []
+
+    def record(service, state, **kwargs):
+        calls.append((service, state, kwargs.get("error")))
+
+    def explode(**_kwargs):
+        raise RuntimeError("secret store busy")
+
+    monkeypatch.setattr(refresh_module, "run_once", explode)
+    monkeypatch.setattr(
+        "scripts.db.hrana_http.write_service_health_http",
+        record,
+    )
+
+    code = refresh_module.main([
+        "--state", str(tmp_path / "state.json"),
+        "--lock", str(tmp_path / "refresh.lock"),
+    ])
+    captured = capsys.readouterr()
+
+    assert code == 1
+    assert calls[0][0] == "aa-frontier-basket"
+    assert calls[0][1] == "error"
+    assert calls[0][2]["class"] == "RuntimeError"
+    assert "frontier refresh failed" in captured.out
