@@ -127,6 +127,23 @@ def test_fetch_uses_frequency_specific_url_and_bearer_header_without_caching():
     assert all(call["headers"]["Authorization"] == f"Bearer {token}" for call in session.calls)
 
 
+def test_fetch_targets_the_cf_api_host_the_dashboard_uses():
+    """2026-10-09: MenthorQ moved the data API to cf.menthorq.io; the old
+    gateway.menthorq.io host 401s every valid premium token."""
+    session = _Session([_Response(_exposure_payload()), _Response(_levels_payload())])
+    client = MenthorQDashboardClient(access_token=_jwt(), http_session=session)
+
+    client.fetch_exposure("MU", "eod")
+
+    assert session.calls[0]["url"] == (
+        "https://cf.menthorq.io/clickhouse-api/api/web/v1"
+        "/options/net-gex-by-expiration/MU?frequency=eod"
+    )
+    assert session.calls[1]["url"] == (
+        "https://cf.menthorq.io/clickhouse-api/api/web/v1/gamma-levels/MU/eod"
+    )
+
+
 def test_passes_provider_usd_gex_through_unscaled_and_maps_all_seven_levels():
     session = _Session([_Response(_exposure_payload()), _Response(_levels_payload())])
     client = MenthorQDashboardClient(access_token=_jwt(), http_session=session)

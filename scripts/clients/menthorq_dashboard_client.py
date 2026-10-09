@@ -53,7 +53,9 @@ DEFAULT_STORAGE_STATE_PATH = (
 _AUTH_COOKIE_PREFIXES = ("cognito", "__Secure-authjs.session-token")
 SESSION_URL = "https://dashboard.menthorq.io/api/auth/session"
 BOOTSTRAP_URL = "https://dashboard.menthorq.io/en/options/exposure?symbol=MU"
-API_ROOT = "https://gateway.menthorq.io/clickhouse-api/api/web/v1"
+# 2026-10-09: the dashboard moved its data API to cf.menthorq.io; the old
+# gateway.menthorq.io host now 401s every valid premium access token.
+API_ROOT = "https://cf.menthorq.io/clickhouse-api/api/web/v1"
 # A real Chrome UA: the WAF in front of menthorq.com serves a bot
 # challenge to Playwright's default "HeadlessChrome" agent, which is
 # why the automated re-login silently failed (2026-08-07).
