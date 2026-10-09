@@ -1,3 +1,12 @@
+# Task: IR PR titles (2026-10-09)
+
+- [x] T1 depends_on: [] Failing tests for page eeef0959 title dump.
+- [x] T2 depends_on: [T1] Condense titles in format_ir_pr_title and rewrite the title inside ensure_pr.
+- [x] T3 depends_on: [] Human PR template with Operator Next Steps.
+- [ ] T4 depends_on: [T2, T3] PR, CI green, one Pushover. No merge.
+
+Dependency graph: T1 -> T2; T3 parallel; T4 last.
+
 # Task: SLM QLoRA lock isolation (2026-10-07)
 
 - [x] T1 depends_on: [] Resolve LLaMA-Factory 0.9.5 ranges with uv. Isolate from the fleet requirements.

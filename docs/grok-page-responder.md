@@ -259,8 +259,13 @@ Pickup no longer opens a PR whose issue and fix lines are
 `grok incident fix on fix/<slug>`. Grok's commit body is the source. It
 must contain these sections, each with real content:
 
-- What broke (symptom, failing job or alert, page id, first-seen time,
-  run or log links, error excerpt)
+- What broke. The first line is the PR title: one sentence naming the
+  service and the failure. Page id, first-seen time, run or log links, and
+  the error excerpt go on the following lines. `format_ir_pr_title` still
+  strips a 32-hex page id, an ISO timestamp, an alert quotation, and any
+  `journalctl` or "last successful line" tail, then clips on a word at 72
+  characters. A short human incident slug may prefix the title (`IR <slug>:`).
+  A page id never does. The id stays in the body.
 - Root cause
 - What changed (each file)
 - How it was verified

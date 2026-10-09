@@ -59,7 +59,10 @@ _PAT_MARKERS = (
 )
 
 SUMMARY_MAX_CHARS = 300
+IR_TITLE_MAX = 72
 _CONTROL_RUN = re.compile(r"[\x00-\x1f\x7f]+")
+_OPAQUE_PAGE_ID = re.compile(r"\A[a-f0-9]{32}\Z")
+_EXISTING_IR_PREFIX = re.compile(r"\AIR(?:\s+\S+)?:\s*")
 
 Runner = Callable[..., object]
 
@@ -91,17 +94,41 @@ def is_ir_branch(name: str) -> bool:
     return ref.startswith(IR_BRANCH_PREFIX) and len(ref) > len(IR_BRANCH_PREFIX)
 
 
+def _title_incident_id(incident_id: str | None) -> str | None:
+    """A short human slug may prefix the title. A 32-hex page id may not."""
+    text = (incident_id or "").strip()
+    if not text or _OPAQUE_PAGE_ID.fullmatch(text):
+        return None
+    if any(ch.isspace() for ch in text) or len(text) > 40:
+        return None
+    return text
+
+
+def _clip_title(title: str, limit: int) -> str:
+    if len(title) <= limit:
+        return title
+    head = title[:limit]
+    if " " in head:
+        head = head.rsplit(" ", 1)[0]
+    return head.rstrip(" ,;:-")
+
+
 def format_ir_pr_title(
     *,
     issue: str,
     incident_id: str | None = None,
 ) -> str:
-    summary = pr_fmt._title_summary(issue, field="issue")
-    prefix = f"IR {incident_id}: " if incident_id else "IR: "
-    title = prefix + summary
-    if len(title) > pr_fmt.GITHUB_PR_TITLE_MAX:
-        return title[: pr_fmt.GITHUB_PR_TITLE_MAX]
-    return title
+    """`IR: <one sentence>` or `IR <slug>: <one sentence>`. Max 72 characters.
+
+    The page id, the alert quotation, and the log excerpt belong in the body.
+    A caller that already prefixed `IR <id>:` is normalized, not stacked.
+    """
+    raw = pr_fmt._title_summary(issue, field="issue")
+    raw = _EXISTING_IR_PREFIX.sub("", raw, count=1)
+    summary = ir_pr_description.condense_ir_title(raw) or "incident response fix"
+    slug = _title_incident_id(incident_id)
+    prefix = f"IR {slug}: " if slug else "IR: "
+    return _clip_title(prefix + summary, IR_TITLE_MAX)
 
 
 def format_ir_pr_body(
@@ -325,7 +352,9 @@ def ensure_pr(
             f"head must match {IR_BRANCH_PREFIX}* (got {head!r})"
         )
     head = head.removeprefix("origin/")
-    raw_title = title or format_ir_pr_title(issue=issue, incident_id=incident_id)
+    raw_title = format_ir_pr_title(
+        issue=title or issue, incident_id=incident_id
+    )
     raw_body = body or format_ir_pr_body(
         issue=issue,
         fix=fix,

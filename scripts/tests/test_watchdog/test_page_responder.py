@@ -379,6 +379,7 @@ class TestResponder:
         assert "stand_down" in prompt
         assert "incident-response" in prompt
         assert "## What broke" in prompt
+        assert "The first line under ## What broke is the PR title" in prompt
         assert "## Root cause" in prompt
         assert "## Still open" in prompt
         assert "grok incident fix on" in prompt
