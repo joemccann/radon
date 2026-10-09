@@ -653,11 +653,29 @@ def _fill_contract(ticker: Any, strike: Any, right: Any, expiry: Any) -> Optiona
     ) or f"{symbol}|STK"
 
 
-def _individual_fill_totals(trades: List[Dict[str, Any]]) -> Dict[Tuple[str, str], Dict[str, float]]:
-    """(contract, date) → signed qty and gross notional of individual fills."""
+def _matches_known_execution(trade: Dict[str, Any], known_ids: set[str], known_roots: set[str]) -> bool:
+    """True when this journal row IS one of the already-journaled Flex executions."""
+    ids = _existing_exec_ids([trade])
+    return bool(ids & known_ids) or bool(_existing_exec_roots(ids) & known_roots)
+
+
+def _individual_fill_totals(
+    trades: List[Dict[str, Any]],
+    known_exec_ids: Iterable[str] = (),
+) -> Dict[Tuple[str, str], Dict[str, float]]:
+    """(contract, date) → signed qty and gross notional of individual fills.
+
+    Fills that match an already-journaled Flex execution are left out: that
+    execution was dropped before reconciliation, so counting its fill would
+    compare the day's remainder against the whole day.
+    """
+    known_ids = set(known_exec_ids)
+    known_roots = _existing_exec_roots(known_ids)
     totals: Dict[Tuple[str, str], Dict[str, float]] = {}
     for trade in trades:
         if not _is_individual_fill_row(trade) or _is_bag_parent_row(trade):
+            continue
+        if known_ids and _matches_known_execution(trade, known_ids, known_roots):
             continue
         # A combo envelope has no strike, so the STK fallback would add its
         # contract count to a same-day stock assignment.
@@ -685,6 +703,7 @@ def _individual_fill_totals(trades: List[Dict[str, Any]]) -> Dict[Tuple[str, str
 def _reconcile_against_individual_fills(
     executions: List[Any],
     trades: List[Dict[str, Any]],
+    known_exec_ids: Iterable[str] = (),
 ) -> Tuple[List[Any], int, List[Dict[str, Any]]]:
     """Drop Flex executions whose (contract, day) individual fills already cover.
 
@@ -694,7 +713,7 @@ def _reconcile_against_individual_fills(
     flagged (logged + returned), not booked. Returns (uncovered executions,
     covered group count, disagreements).
     """
-    totals = _individual_fill_totals(trades)
+    totals = _individual_fill_totals(trades, known_exec_ids)
     if not totals:
         return executions, 0, []
     groups: Dict[Tuple[str, str], List[Any]] = defaultdict(list)
@@ -775,7 +794,9 @@ def rehydrate_from_executions(
     skipped = len(_group_executions(known_executions)) if known_executions else 0
 
     new_executions, covered, disagreements = _reconcile_against_individual_fills(
-        _drop_superseded_executions(new_executions), trades
+        _drop_superseded_executions(new_executions),
+        trades,
+        known_exec_ids=(str(e.exec_id) for e in known_executions),
     )
     skipped += covered
 

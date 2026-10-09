@@ -1277,3 +1277,68 @@ class TestFlexAggregateNeverOverridesIndividualFills:
         assert result["ok"] is True
         assert result["imported"] == 0
         assert len(result["aggregate_disagreements"]) == 1
+
+
+class TestDayPartlyJournaledByExactExecId:
+    """Page 2026-10-09 radon-flex-pull: the 08:30 ET re-pull of an applied
+    Trade_History failed coverage_unverified on TQQQ 2026-10-08.
+
+    One order filled 343 + 9657 shares. journal_sync booked the 9657 under
+    their exact IB exec ids; the 343 landed only as a fill-monitor row. The
+    5 known Flex rows were dropped as already journaled, then the 343
+    remainder was reconciled against the whole day's individual fills
+    (9657), so a fully covered day read as a disagreement.
+    """
+
+    DAY = datetime(2026, 10, 8, 18, 39, 11)
+
+    def _stock_row(self, exec_id: str, shares: int, decision: str = "IB_AUTO_IMPORT") -> dict:
+        return {
+            "id": 1, "date": "2026-10-08", "ticker": "TQQQ", "action": "BUY",
+            "decision": decision, "fill_price": 80.85, "shares": shares,
+            "structure": "Long Stock (STK)", "ib_exec_id": exec_id,
+        }
+
+    def _flex(self, exec_id: str, qty: int) -> Execution:
+        return _make_execution(
+            exec_id=exec_id, symbol="TQQQ", sec_type=SecurityType.STOCK,
+            side=Side.BUY, quantity=qty, price=80.85, when=self.DAY,
+        )
+
+    KNOWN = [
+        ("00010196.6ac7cdef.01.01", 1800),
+        ("00010196.6ac7cdf0.01.01", 1656),
+        ("00010196.6ac7cdf1.01.01", 1800),
+        ("00010196.6ac7cdf2.01.01", 2204),
+        ("00010196.6ac7cdf3.01.01", 2197),
+    ]
+
+    def test_known_fills_are_not_reconciled_against_the_remainder(self):
+        trades = [self._stock_row(eid, qty) for eid, qty in self.KNOWN]
+        trades.append(self._stock_row(
+            "fill-monitor:con-72539702:order-1887973117:2026-10-08:filled-343",
+            343, decision="FILL_MONITOR_AUTO_IMPORT",
+        ))
+        executions = [self._flex(eid, qty) for eid, qty in self.KNOWN]
+        executions.append(self._flex("0002bd08.6ac773f7.01.01", 343))
+
+        updated, imported, _skipped, _ = rehydrate_from_executions(
+            executions, {"trades": trades}
+        )
+
+        assert imported == 0
+        assert updated.get("aggregate_disagreements", []) == []
+
+    def test_unmatched_fills_still_disagree_with_the_unmatched_remainder(self):
+        trades = [self._stock_row(eid, qty) for eid, qty in self.KNOWN]
+        trades.append(self._stock_row("0002bd08.6ac773f8.01.01", 300))
+        executions = [self._flex(eid, qty) for eid, qty in self.KNOWN]
+        executions.append(self._flex("0002bd08.6ac773f7.01.01", 343))
+
+        updated, imported, _skipped, _ = rehydrate_from_executions(
+            executions, {"trades": trades}
+        )
+
+        assert imported == 0
+        [flag] = updated["aggregate_disagreements"]
+        assert flag["flex_qty"] == 343 and flag["fills_qty"] == 300
