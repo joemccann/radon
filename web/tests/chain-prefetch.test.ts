@@ -86,6 +86,13 @@ describe("useChainPrefetch hook", () => {
     // Should have try/catch around fetch
     expect(hookSource).toMatch(/try\s*\{[^]*?fetch[^]*?catch/s);
   });
+
+  it("stops new prefetches once the option-secdef snapshot TTL elapses", () => {
+    expect(hookSource).toMatch(/PREFETCH_SNAPSHOT_TTL_MS\s*=\s*60_000/);
+    expect(hookSource).toMatch(
+      /Date\.now\(\)\s*-\s*startedAt\s*>=\s*PREFETCH_SNAPSHOT_TTL_MS[\s\S]*?fetch\(/,
+    );
+  });
 });
 
 describe("OptionsChainTab integration with prefetch", () => {

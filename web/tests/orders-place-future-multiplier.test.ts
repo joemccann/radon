@@ -94,64 +94,86 @@ function placeCall() {
   return mockRadonFetch.mock.calls.find(([url]) => url === "/orders/place");
 }
 
+function chainCalls() {
+  return mockRadonFetch.mock.calls.filter(([url]) =>
+    typeof url === "string" && url.startsWith("/futures/chain?symbol="),
+  );
+}
+
 describe("POST /api/orders/place futures multiplier is server-resolved", () => {
-  it("forwards the contract-resolved multiplier on the /orders/place wire body", async () => {
+  it("uses the FUTURES_ROOTS multiplier for VIX and does not call the chain", async () => {
     const { POST } = await import("../app/api/orders/place/route");
     const response = await POST(futureRequest());
     expect(response.status).toBe(200);
-
-    const chainCall = mockRadonFetch.mock.calls.find(([url]) =>
-      typeof url === "string" && url.startsWith("/futures/chain?symbol="),
-    );
-    expect(chainCall?.[0]).toBe("/futures/chain?symbol=VIX");
-
-    expect(placeCall()).toBeDefined();
+    expect(chainCalls()).toHaveLength(0);
     const wireBody = JSON.parse(placeCall()![1].body as string);
     expect(wireBody.type).toBe("future");
     expect(wireBody.conId).toBe(12345);
     expect(wireBody.multiplier).toBe(1000);
+    const refresh = mockRadonFetch.mock.calls.find(([url]) => url === "/orders/refresh");
+    expect(refresh?.[1]?.headers?.["X-Radon-Orders-Fresh"]).toBe("1");
   });
 
-  it("resolves the multiplier when the client omits it", async () => {
+  it("resolves VIX, SPX, NDX, and RUT from the root table when the client omits multiplier", async () => {
     const { POST } = await import("../app/api/orders/place/route");
-    // quantity varies so the idempotency content hash differs from other tests
-    const response = await POST(futureRequest({ multiplier: undefined, quantity: 2 }));
-    expect(response.status).toBe(200);
-    const wireBody = JSON.parse(placeCall()![1].body as string);
-    expect(wireBody.multiplier).toBe(1000);
+    const expected: Record<string, number> = { VIX: 1000, SPX: 50, NDX: 20, RUT: 50 };
+    let quantity = 2;
+    for (const [symbol, multiplier] of Object.entries(expected)) {
+      mockRadonFetch.mockClear();
+      const response = await POST(futureRequest({
+        symbol, multiplier: undefined, quantity, conId: 12345,
+      }));
+      expect(response.status).toBe(200);
+      expect(chainCalls()).toHaveLength(0);
+      const wireBody = JSON.parse(placeCall()![1].body as string);
+      expect(wireBody.multiplier).toBe(multiplier);
+      quantity += 1;
+    }
   });
 
-  it("refuses a client multiplier that mismatches the contract's and fires no order", async () => {
+  it("refuses a client multiplier that mismatches the root table and fires no order", async () => {
     const { POST } = await import("../app/api/orders/place/route");
     const response = await POST(futureRequest({ multiplier: 100 }));
     expect(response.status).toBe(400);
     expect(placeCall()).toBeUndefined();
+    expect(chainCalls()).toHaveLength(0);
   });
 
-  it("fails closed when the contract cannot be resolved from the chain", async () => {
+  it("fails closed when an unknown root's contract is not on the chain", async () => {
     const { POST } = await import("../app/api/orders/place/route");
-    const response = await POST(futureRequest({ conId: 99999 }));
+    const response = await POST(futureRequest({ symbol: "CL", conId: 99999, multiplier: undefined }));
     expect(response.status).toBe(422);
     expect(placeCall()).toBeUndefined();
+    expect(chainCalls()[0]?.[0]).toBe("/futures/chain?symbol=CL");
   });
 
-  it("fails closed when the chain fetch itself fails", async () => {
+  it("fails closed when the chain fetch itself fails for an unknown root", async () => {
     mockRadonFetch.mockImplementation((url: string) => {
-      if (url.startsWith("/futures/chain")) return Promise.reject(new Error("down"));
+      if (typeof url === "string" && url.startsWith("/futures/chain")) {
+        return Promise.reject(new Error("down"));
+      }
       return Promise.resolve({ status: "ok" });
     });
     const { POST } = await import("../app/api/orders/place/route");
-    const response = await POST(futureRequest());
+    const response = await POST(futureRequest({ symbol: "ES", multiplier: undefined, quantity: 8 }));
     expect(response.status).toBe(422);
     expect(placeCall()).toBeUndefined();
+    expect(chainCalls()[0]?.[0]).toBe("/futures/chain?symbol=ES");
   });
 
-  it("resolves by expiry+exchange when conId is absent", async () => {
+  it("resolves an unknown root by expiry+exchange when conId is absent", async () => {
     const { POST } = await import("../app/api/orders/place/route");
     const response = await POST(
-      futureRequest({ conId: undefined, expiry: "20261216", multiplier: undefined, quantity: 3 }),
+      futureRequest({
+        symbol: "CL",
+        conId: undefined,
+        expiry: "20261216",
+        multiplier: undefined,
+        quantity: 3,
+      }),
     );
     expect(response.status).toBe(200);
+    expect(chainCalls()[0]?.[0]).toBe("/futures/chain?symbol=CL");
     const wireBody = JSON.parse(placeCall()![1].body as string);
     expect(wireBody.multiplier).toBe(1000);
   });

@@ -6,11 +6,12 @@ import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import { OPTION_EXPIRY_PATTERN } from "@/lib/requestBounds";
 
 /**
- * GET /api/index-options/chain?symbol=VIX[&expiry=YYYYMMDD]
+ * GET /api/index-options/chain?symbol=VIX&expiry=YYYYMMDD
  *
- * Proxy to FastAPI /index-options/chain. Returns every listed option
- * contract for the index symbol (or filtered to one expiry) with the
- * IB conId so order placement can reference contracts unambiguously.
+ * Proxy to FastAPI /index-options/chain. Expiry is required; missing or
+ * blank expiry is rejected before the upstream call. Returns the listed
+ * option contracts for that expiry with the IB conId so order placement
+ * can reference contracts unambiguously.
  *
  * Currently scoped to VIX/SPX/NDX/RUT/XSP — see INDEX_OPTION_ROOTS in
  * scripts/clients/contract_resolver.py.
@@ -30,7 +31,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const normalizedSymbol = symbol?.toUpperCase() ?? "";
   if (!new Set(["VIX", "SPX", "NDX", "RUT", "XSP"]).has(normalizedSymbol)
-    || (expiry !== "" && !OPTION_EXPIRY_PATTERN.test(expiry))) {
+    || !OPTION_EXPIRY_PATTERN.test(expiry)) {
     return setNoStoreResponseHeaders(
       NextResponse.json(
         { error: "valid symbol and expiry required", code: "BAD_REQUEST" },

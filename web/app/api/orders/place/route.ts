@@ -1,6 +1,6 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
 
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { RadonApiError, radonFetch, radonErrorDetailText } from "@/lib/radonApi";
 import {
   EMPTY_ORDERS,
@@ -28,6 +28,8 @@ import {
   IndeterminatePlacementError,
 } from "@/lib/orders/orderIdempotency";
 import { invalidateOrdersSnapshotCache } from "@/lib/orders/ordersReadCache";
+import { ordersFreshRefreshInit } from "@/lib/orders/ordersFreshRefresh";
+import { FUTURES_ROOT_MULTIPLIERS } from "@/lib/futuresRootMultipliers";
 
 export const runtime = "nodejs";
 
@@ -346,7 +348,10 @@ export async function POST(request: Request): Promise<Response> {
     // closed before anything reaches IB.
     let futuresMultiplier: number | null = null;
     if (body.type === "future") {
-      futuresMultiplier = await resolveFuturesMultiplier(body);
+      const knownRoot = FUTURES_ROOT_MULTIPLIERS[body.symbol.toUpperCase()];
+      // Known roots skip /futures/chain on the place request. Any other
+      // symbol still resolves from the chain and still fails closed.
+      futuresMultiplier = knownRoot ?? await resolveFuturesMultiplier(body);
       if (futuresMultiplier == null) {
         return setNoStoreResponseHeaders(
           jsonApiError({
@@ -496,15 +501,20 @@ export async function POST(request: Request): Promise<Response> {
     }
     const orderResult = placement.value;
 
-    // Refresh orders after placement
+    // The order is already at IB. Do not hold the 200 on /orders/refresh.
+    // Invalidate again when that refresh settles: a GET during it would
+    // otherwise store the pre-place rows for the snapshot TTL.
     invalidateOrdersSnapshotCache();
+    const refresh = radonFetch("/orders/refresh", ordersFreshRefreshInit())
+      .catch(() => undefined)
+      .finally(() => {
+        invalidateOrdersSnapshotCache();
+      });
     try {
-      await radonFetch("/orders/refresh", { method: "POST", timeout: 10_000 });
+      after(() => refresh);
     } catch {
-      // Non-fatal — order was placed, refresh failed
-    } finally {
-      // A GET racing the refresh may have repopulated the old snapshot.
-      invalidateOrdersSnapshotCache();
+      // Vitest calls the handler outside a Next request scope. The promise
+      // is already running; after() only keeps it alive on the server.
     }
     const orders = await readOrdersSnapshotBestEffort();
 

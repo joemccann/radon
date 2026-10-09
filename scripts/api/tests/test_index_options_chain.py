@@ -53,16 +53,17 @@ def test_chain_returns_payload(client):
         return _fake_script_result(ok=True, data=payload)
 
     with patch("scripts.api.server.run_script", side_effect=_stub) as run_mock:
-        resp = client.get("/index-options/chain?symbol=VIX")
+        resp = client.get("/index-options/chain?symbol=VIX&expiry=20260616")
     assert resp.status_code == 200
     body = resp.json()
     assert body["symbol"] == "VIX"
     assert body["tradingClass"] == "VIX"
     assert body["expirations"] == ["20260616", "20260721"]
-    args, _ = run_mock.call_args
+    args, kwargs = run_mock.call_args
     assert args[0] == "ib_chain.py"
     assert "option" in args[1]
     assert "VIX" in args[1]
+    assert kwargs["timeout"] == 24.0
 
 
 def test_unsupported_symbol_returns_400(client):
@@ -81,18 +82,20 @@ def test_expiry_passed_through(client):
     with patch("scripts.api.server.run_script", side_effect=_stub) as run_mock:
         resp = client.get("/index-options/chain?symbol=VIX&expiry=20260616")
     assert resp.status_code == 200
-    args, _ = run_mock.call_args
+    args, kwargs = run_mock.call_args
     assert "--expiry" in args[1]
     assert "20260616" in args[1]
+    assert kwargs["timeout"] == 24.0
 
 
 def test_subprocess_failure_returns_502(client):
     async def _stub(*args, **kwargs):
         return _fake_script_result(ok=False, error="boom", exit_code=1)
 
-    with patch("scripts.api.server.run_script", side_effect=_stub):
-        resp = client.get("/index-options/chain?symbol=VIX")
+    with patch("scripts.api.server.run_script", side_effect=_stub) as run_mock:
+        resp = client.get("/index-options/chain?symbol=VIX&expiry=20260616")
     assert resp.status_code == 502
+    assert run_mock.called
 
 
 def test_case_insensitive(client):
@@ -103,7 +106,19 @@ def test_case_insensitive(client):
         return _fake_script_result(ok=True, data=payload)
 
     with patch("scripts.api.server.run_script", side_effect=_stub) as run_mock:
-        resp = client.get("/index-options/chain?symbol=vix")
+        resp = client.get("/index-options/chain?symbol=vix&expiry=20260616")
     assert resp.status_code == 200
     args, _ = run_mock.call_args
     assert "VIX" in args[1]
+
+
+def test_missing_expiry_returns_400_without_spawn(client):
+    with patch("scripts.api.server.run_script") as run_mock:
+        resp = client.get("/index-options/chain?symbol=VIX")
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "expiry is required"
+    run_mock.assert_not_called()
+    with patch("scripts.api.server.run_script") as blank_mock:
+        blank = client.get("/index-options/chain?symbol=VIX&expiry=%20")
+    assert blank.status_code == 400
+    blank_mock.assert_not_called()

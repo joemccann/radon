@@ -59,18 +59,17 @@ describe("GET /api/index-options/chain", () => {
   it("returns 502 envelope when FastAPI fails", async () => {
     mockRadonFetch.mockRejectedValueOnce(new Error("upstream down"));
     const { GET } = await import("../app/api/index-options/chain/route");
-    const res = await GET(req("http://localhost/api/index-options/chain?symbol=VIX"));
+    const res = await GET(req("http://localhost/api/index-options/chain?symbol=VIX&expiry=20260617"));
     expect(res.status).toBe(502);
+    expect(mockRadonFetch).toHaveBeenCalled();
   });
 
-  it("accepts request without expiry (full chain)", async () => {
-    mockRadonFetch.mockResolvedValueOnce({
-      symbol: "VIX", exchange: "CBOE", tradingClass: "VIX",
-      expirations: [], contracts: [], count: 0,
-    });
+  it("rejects request without expiry", async () => {
     const { GET } = await import("../app/api/index-options/chain/route");
-    const res = await GET(req("http://localhost/api/index-options/chain?symbol=VIX"));
-    expect(res.status).toBe(200);
-    expect(mockRadonFetch.mock.calls[0][0]).not.toContain("expiry=");
+    const missing = await GET(req("http://localhost/api/index-options/chain?symbol=VIX"));
+    expect(missing.status).toBe(400);
+    const blank = await GET(req("http://localhost/api/index-options/chain?symbol=VIX&expiry="));
+    expect(blank.status).toBe(400);
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 });

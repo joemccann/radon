@@ -3,14 +3,11 @@
  *
  * T-169 — the post-mutation orders-cache invalidation, driven behaviourally.
  *
- * `place` / `cancel` / `modify` all do: invalidate → await `/orders/refresh`
- * → invalidate AGAIN in `finally` → read back. Deleting only the second
- * invalidate left every source-text assertion green, because the first call
- * still bridges the regex. The bug it hides is real: a concurrent
- * `GET /api/orders` served DURING the refresh stores the PRE-fill rowset at the
- * current cache generation (`lib/dbCache.ts:108-114`), and the mutating route's
- * own read then hits that entry inside the 2s TTL — so the operator's response
- * omits the change they just made.
+ * `cancel` / `modify` do: invalidate → await `/orders/refresh` → invalidate
+ * AGAIN → read back. `place` returns when FastAPI accepts the order and
+ * starts `/orders/refresh` without awaiting it. The refresh `finally` still
+ * invalidates: a GET during the refresh stores the pre-place rows, and
+ * without that second invalidate the next poll would keep them for the TTL.
  *
  * These tests force the cache on (`RADON_DB_CACHE_FORCE=1`, otherwise
  * `dbCache.ts:88` bypasses it under NODE_ENV=test), hold `/orders/refresh` open
@@ -173,7 +170,7 @@ async function raceGetThroughRefresh(
 }
 
 describe("POST /api/orders/place vs a GET racing the refresh", () => {
-  it("returns the just-placed order even though a concurrent GET cached the pre-fill snapshot", async () => {
+  it("returns 200 while refresh is held, and a GET after finally sees the placed order", async () => {
     openRows = [openRow(1, 5)];
     const refresh = refreshGate();
     mockRadonFetch.mockImplementation((url: string) => {
@@ -191,12 +188,31 @@ describe("POST /api/orders/place vs a GET racing the refresh", () => {
       body: JSON.stringify({ type: "stock", symbol: "PLTR", action: "BUY", quantity: 100, limitPrice: 150 }),
     }));
 
-    const { racedOpenIds } = await raceGetThroughRefresh(posted, [openRow(1, 5), openRow(2, 150)], refresh);
-    expect(racedOpenIds).toEqual([1]); // the racing poll really did see pre-fill state
-
+    await refresh.entered;
     const response = await posted;
     expect(response.status).toBe(200);
-    expect(openOrderIds(await response.json())).toContain(2);
+    expect(openOrderIds(await response.json())).not.toContain(2);
+    const refreshCall = mockRadonFetch.mock.calls.find(([url]) => url === "/orders/refresh");
+    expect(refreshCall?.[1]?.headers?.["X-Radon-Orders-Fresh"]).toBe("1");
+
+    const { GET } = await import("../app/api/orders/route");
+    const during = await GET();
+    const duringIds = ((await during.json()) as { open_orders: Array<{ orderId: number }> })
+      .open_orders.map((order) => order.orderId);
+    expect(duringIds).toEqual([1]);
+
+    openRows = [openRow(1, 5), openRow(2, 150)];
+    const cached = await GET();
+    const cachedIds = ((await cached.json()) as { open_orders: Array<{ orderId: number }> })
+      .open_orders.map((order) => order.orderId);
+    expect(cachedIds).toEqual([1]);
+
+    refresh.landed.resolve({ status: "ok" });
+    await refresh.landed.promise;
+    const afterRefresh = await GET();
+    const afterIds = ((await afterRefresh.json()) as { open_orders: Array<{ orderId: number }> })
+      .open_orders.map((order) => order.orderId);
+    expect(afterIds).toContain(2);
   });
 });
 
@@ -223,6 +239,8 @@ describe("POST /api/orders/cancel vs a GET racing the refresh", () => {
     const response = await cancelled;
     expect(response.status).toBe(200);
     expect(openOrderIds(await response.json())).not.toContain(2);
+    const refreshCall = mockRadonFetch.mock.calls.find(([url]) => url === "/orders/refresh");
+    expect(refreshCall?.[1]?.headers?.["X-Radon-Orders-Fresh"]).toBe("1");
   });
 });
 

@@ -591,7 +591,6 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
             "Rejected",
         }
         while _clock() < deadline:
-            client.sleep(0.5)
             if trade.order.permId != 0:
                 break
             s = trade.orderStatus.status if trade.orderStatus else ""
@@ -599,6 +598,7 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
                 break
             if ib_errors:
                 break
+            client.sleep(0.5)
 
         timer.mark("permId")
 
