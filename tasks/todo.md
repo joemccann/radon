@@ -9205,3 +9205,13 @@ Dependency graph: T1 -> T2 + T3 -> T4.
 Plan review: formatting only for X; voice rewriting remains limited to media preview. No local suites. Unknown sources retain their name rather than guessing handles.
 
 Review: Full original caption is independent of media voice drafts and cache. Ten verified bank/source accounts are mapped; existing handles, URLs, emails and cashtags remain intact. Source footer removed for copy and composer. Unit and desktop/mobile browser regressions include the supplied MS post and final paragraph. No local suites; exact-head CI pending.
+
+## Release status (2026-10-09)
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+- [x] T1 depends_on: [] Semver fold from 0.7.0 at eb5e5206. Breaking major, feat minor, other runtime patch. Docs, tests, CI, and lockfiles do not move.
+- [x] T2 depends_on: [T1] `/api/version` no-store plus header and mobile drawer status. Compare SHA. Reload is explicit.
+- [x] T3 depends_on: [T2] Vitest, pytest, and a browser pass.
+- [ ] T4 depends_on: [T3] PR, exact-head CI green, one Pushover.
+
+Review: Fold from 0.7.0 at eb5e5206 lands this feat at 0.8.0. Header and drawer compare the deploy SHA. Local channel does not poll. Playwright release-status 2 passed on 127.0.0.1:3456.

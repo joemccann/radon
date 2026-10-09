@@ -1028,6 +1028,20 @@ jobs:
           path: web/test-results-setup-gate/
           retention-days: 7
 
+  release-version:
+    name: Release version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: ci-release-version-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Check semver matches commits since 0.7.0
+        run: python3 scripts/release_version.py --check
+
   stage-release:
     name: Prestage VPS release
     # This job SSHes into the live trading host and runs the pushed commit's
@@ -1042,7 +1056,7 @@ jobs:
     # were found missing here. R-299. It also asserts every gate job appears in
     # the `if:` BELOW: `!cancelled()` is a status function, so GitHub drops the
     # implicit success() on `needs` and only the expression gates. R-324.
-    needs: [secret-scan, changes, app-images, contract-cloud-tests, contract-script-tests, contract-root-tests, web-tests, web-coverage, py-tests, py-coverage, cloud-tests, perimeter-smoke]
+    needs: [secret-scan, changes, app-images, contract-cloud-tests, contract-script-tests, contract-root-tests, web-tests, web-coverage, py-tests, py-coverage, cloud-tests, perimeter-smoke, release-version]
     if: >-
       github.ref == 'refs/heads/main' && github.event_name == 'push' && !cancelled()
       && needs.secret-scan.result == 'success'
@@ -1057,6 +1071,7 @@ jobs:
       && (needs.py-coverage.result == 'success' || needs.py-coverage.result == 'skipped')
       && (needs.cloud-tests.result == 'success' || needs.cloud-tests.result == 'skipped')
       && (needs.perimeter-smoke.result == 'success' || needs.perimeter-smoke.result == 'skipped')
+      && (needs.release-version.result == 'success' || needs.release-version.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:
@@ -1132,7 +1147,7 @@ jobs:
     # Safe to overlap prestage: every code/test gate and the exact image build
     # are green before this fixed installed helper touches the host. The job is
     # cancelable because it never stops or restarts a service.
-    needs: [secret-scan, changes, app-images, contract-cloud-tests, contract-script-tests, contract-root-tests, web-tests, web-coverage, py-tests, py-coverage, cloud-tests, perimeter-smoke]
+    needs: [secret-scan, changes, app-images, contract-cloud-tests, contract-script-tests, contract-root-tests, web-tests, web-coverage, py-tests, py-coverage, cloud-tests, perimeter-smoke, release-version]
     if: >-
       github.ref == 'refs/heads/main' && github.event_name == 'push' && !cancelled()
       && needs.secret-scan.result == 'success'
@@ -1147,6 +1162,7 @@ jobs:
       && (needs.py-coverage.result == 'success' || needs.py-coverage.result == 'skipped')
       && (needs.cloud-tests.result == 'success' || needs.cloud-tests.result == 'skipped')
       && (needs.perimeter-smoke.result == 'success' || needs.perimeter-smoke.result == 'skipped')
+      && (needs.release-version.result == 'success' || needs.release-version.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -1178,7 +1194,7 @@ jobs:
     # Combine genuinely needs its own barrier VM, so this costs
     # the deploy critical path ~1min. Gating and that latency cannot both be
     # had; a coverage regression must be able to fail the release.
-    needs: [secret-scan, changes, app-images, contract-cloud-tests, contract-script-tests, contract-root-tests, web-tests, web-coverage, py-tests, py-coverage, cloud-tests, perimeter-smoke, stage-release, prepull-images]
+    needs: [secret-scan, changes, app-images, contract-cloud-tests, contract-script-tests, contract-root-tests, web-tests, web-coverage, py-tests, py-coverage, cloud-tests, perimeter-smoke, release-version, stage-release, prepull-images]
     if: >-
       github.ref == 'refs/heads/main' && github.event_name == 'push' && !cancelled()
       && needs.secret-scan.result == 'success'
@@ -1193,6 +1209,7 @@ jobs:
       && (needs.py-coverage.result == 'success' || needs.py-coverage.result == 'skipped')
       && (needs.cloud-tests.result == 'success' || needs.cloud-tests.result == 'skipped')
       && (needs.perimeter-smoke.result == 'success' || needs.perimeter-smoke.result == 'skipped')
+      && (needs.release-version.result == 'success' || needs.release-version.result == 'skipped')
       && (needs.stage-release.result == 'success' || needs.stage-release.result == 'failure' || needs.stage-release.result == 'skipped')
       && (needs.prepull-images.result == 'success' || needs.prepull-images.result == 'failure')
     runs-on: ubuntu-latest
