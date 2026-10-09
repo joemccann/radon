@@ -63,6 +63,9 @@ describe("SERVICE_FRESHNESS_WINDOWS", () => {
       "journal-sync",
       "fill-monitor",
       "orders-read-compare",
+      // radon-breadth.timer is RTH-scoped; its last heartbeat lands ~16:35 ET,
+      // so a 30m extended window showed it stale on /admin every premarket.
+      "breadth-scan",
     ];
     for (const service of services) {
       const extended = getFreshnessWindowMs(service, "extended");
