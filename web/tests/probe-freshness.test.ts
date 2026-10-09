@@ -9,9 +9,9 @@
  *                heartbeat detail (last_tick_at), dead-relay detected via
  *                the heartbeat row's own updated_at.
  *   vcg_scan   — scheduled RTH cadence; fresh within its `open` window.
- *   gex_scan   — ON-DEMAND writer today: quiet is expected at any hour, so
- *                it is never applicable (fresh=null). Flips automatically
- *                if its category in SERVICE_FRESHNESS_WINDOWS changes.
+ *   gex_scan   - scheduled on the 15-minute refresh driver. Fresh inside
+ *                the 35-minute open window (one missed fire). Not applicable
+ *                while the market is closed.
  *   journal    — fills are only expected during RTH; the newest journal
  *                row must be within the weekend-covering window.
  *
@@ -265,6 +265,22 @@ describe("evaluateScanCheck — gex-scan (scheduled writer)", () => {
     expect(
       evaluateScanCheck("gex-scan", iso(OPEN_NOW - 7 * 86_400_000), "open", OPEN_NOW).fresh,
     ).toBe(false);
+  });
+
+  it("keeps one missed 15-minute cycle fresh and pages the one after that", () => {
+    // Page eeef09595a01893b4e31abd5cbda352e: 23m46s after the last ok scan.
+    // The open window has to match the 15-minute driver (35m), not vcg (15m).
+    const oneMiss = evaluateScanCheck("gex-scan", iso(OPEN_NOW - (23 * 60 + 46) * 1000), "open", OPEN_NOW);
+    expect(oneMiss.fresh).toBe(true);
+    expect(oneMiss.age_secs).toBe(23 * 60 + 46);
+    const twoMisses = evaluateScanCheck(
+      "gex-scan",
+      iso(OPEN_NOW - (38 * 60 + 46) * 1000),
+      "open",
+      OPEN_NOW,
+    );
+    expect(twoMisses.fresh).toBe(false);
+    expect(twoMisses.age_secs).toBe(38 * 60 + 46);
   });
 
   it("is still not applicable while the market is closed", () => {

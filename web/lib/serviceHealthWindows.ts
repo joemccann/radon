@@ -67,7 +67,7 @@ const DAY = 24 * HOUR;
  *   flex-token-check     25h (daily)
  *   flex-web-service     8d on-demand (1025 lockout heartbeat only)
  *   cri-scan             35m open, 1d closed
- *   gex-scan             30m open, 1d closed
+ *   gex-scan             35m open, 3d closed   (15-min driver; two missed fires)
  *   vcg-scan             15m open, 1d closed   (5-min cadence; 3 missed cycles)
  *   cta-sync             35m open, 1d closed
  *   replica-watchdog     24h while the replica file exists
@@ -321,12 +321,13 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Friday-evening finishes because the prior 1-day closed window was
   // shorter than the weekend gap.
   "cri-scan": { open: 35 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
-  // ``gex-scan`` still flows through ``record_service_health`` only when
-  // a user POSTs the scan endpoint, so it's on-demand for banner purposes.
-  // Source: scripts/gex_scan.py uses UWClient only — no IB dependency.
-  // SCHEDULED, not on-demand: data_refresh's 15-minute RTH driver runs it, so
-  // the same windows as its vcg-scan sibling. R-422.
-  "gex-scan": { open: 15 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: false },
+  // ``gex-scan`` is scheduled on data_refresh's 15-minute RTH driver.
+  // The open window matches ``data-refresh`` (35 min, two missed fires),
+  // not vcg-scan. vcg's 15-minute window assumes vcg's own 5-minute timer.
+  // gex has no timer of its own and runs last, so one missed cycle,
+  // including a deploy stop-clean during gex, pages before the next fire
+  // (page eeef0959, 2026-10-09 18:40Z). UWClient only, no IB dependency.
+  "gex-scan": { open: 35 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: false },
   "gamma-rotation-scan": { open: 30 * MIN, extended: 30 * MIN, closed: 1 * DAY, category: "on-demand", requires_ib: false },
   // ``breadth-scan`` is SCHEDULED, not on-demand: radon-breadth.timer fires
   // every 5 min across ET trading hours. It was catalogued on-demand, which
