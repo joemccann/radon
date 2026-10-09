@@ -7,6 +7,7 @@ type StrikesCache = Map<string, number[]>;
 const PREFETCH_INITIAL_DELAY_MS = 3000; // wait for selected expiry to load first
 const PREFETCH_DELAY_MS = 1500; // stagger between prefetch requests (IB pacing)
 const PREFETCH_CONCURRENCY = 1; // serial to avoid overwhelming IB Gateway
+const PREFETCH_SNAPSHOT_TTL_MS = 60_000; // matches OPTION_SECDEF_TTL_S (60s)
 
 /**
  * Prefetches option chain strikes for all expirations in the background.
@@ -50,6 +51,7 @@ export function useChainPrefetch(
 
   // Background prefetch of non-selected expirations
   useEffect(() => {
+    const startedAt = Date.now();
     const exps = expirationsKey ? expirationsKey.split("|") : [];
     if (!enabled || exps.length <= 1 || !selectedExpiry) return;
 
@@ -80,6 +82,7 @@ export function useChainPrefetch(
             await new Promise((r) => setTimeout(r, PREFETCH_DELAY_MS));
           }
           if (controller.signal.aborted) return;
+          if (Date.now() - startedAt >= PREFETCH_SNAPSHOT_TTL_MS) return;
 
           const res = await fetch(
             `/api/options/chain?symbol=${encodeURIComponent(ticker)}&expiry=${expiry}`,

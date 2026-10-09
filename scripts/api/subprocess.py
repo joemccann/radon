@@ -336,6 +336,17 @@ def _stderr_tail(stderr_buf: bytearray) -> str:
     return tail.replace("\n", " | ") or "<empty>"
 
 
+def _log_place_order_hot_path_timing(script: str, stderr: str) -> None:
+    """Success drops stderr. Journal only the place-order timing line."""
+    if Path(script).name != "ib_place_order.py":
+        return
+    for line in reversed(stderr.splitlines()):
+        stripped = line.strip()
+        if "ib_hot_path_timing" in stripped:
+            logger.info("%s", stripped)
+            return
+
+
 async def run_script(
     script: str,
     args: Optional[List[str]] = None,
@@ -407,6 +418,7 @@ async def run_script(
         # print containing a Python list literal (e.g. `ratios=[1, 1]`)
         # doesn't get mistaken for the result.
         payload = _extract_json_payload(stdout)
+        _log_place_order_hot_path_timing(script, stderr)
         if payload is None:
             # Some scripts write to files instead of stdout (rawOutput pattern)
             return ScriptResult(ok=True, data={})

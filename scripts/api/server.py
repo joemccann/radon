@@ -26,9 +26,9 @@ from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Iterable, List, Optional, Tuple
+from typing import Annotated, Any, Awaitable, Callable, Iterable, List, Optional, Tuple
 
-from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import FastAPI, BackgroundTasks, Depends, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.datastructures import MutableHeaders
@@ -212,31 +212,75 @@ class _IBSyncCoordinator:
         self,
         key: str,
         operation: Callable[[], Awaitable[_IBSyncOutcome]],
+        *,
+        fresh: bool = False,
     ) -> _IBSyncOutcome:
-        lock = self._bind_running_loop()
-        async with lock:
-            state = self._states.setdefault(
-                key,
-                {"task": None, "last_success_at": 0.0, "last_outcome": None},
-            )
-            cached = state["last_outcome"]
-            if (
-                cached is not None
-                and time.monotonic() - state["last_success_at"] < self.min_age_secs
-            ):
-                return cached
-            task = state["task"]
-            if task is None:
-                task = asyncio.create_task(self._execute(key, operation))
-                state["task"] = task
-        # A disconnected browser must not cancel the shared subprocess for all
-        # other callers. The coordinator task owns its own cleanup.
-        return await asyncio.shield(task)
+        """Single-flight a sync.
+
+        fresh=False keeps the min-age cache and joins any in-flight task.
+        fresh=True may use a cached or in-flight result only when that sync
+        STARTED at or after this call arrived. An older in-flight task is
+        waited out, then this call loops. Finish time is not freshness.
+        """
+        arrived = time.monotonic()
+        while True:
+            lock = self._bind_running_loop()
+            wait_for: Optional[asyncio.Task] = None
+            join: Optional[asyncio.Task] = None
+            async with lock:
+                state = self._states.setdefault(
+                    key,
+                    {
+                        "task": None,
+                        "last_success_at": 0.0,
+                        "last_outcome": None,
+                        "task_started_at": 0.0,
+                        "last_success_started_at": 0.0,
+                    },
+                )
+                cached = state["last_outcome"]
+                if fresh:
+                    if (
+                        cached is not None
+                        and cached.ok
+                        and state.get("last_success_started_at", 0.0) >= arrived
+                    ):
+                        return cached
+                elif (
+                    cached is not None
+                    and time.monotonic() - state["last_success_at"] < self.min_age_secs
+                ):
+                    return cached
+                task = state.get("task")
+                if task is not None and (
+                    (not fresh) or state.get("task_started_at", 0.0) >= arrived
+                ):
+                    join = task
+                elif task is not None and not task.done():
+                    wait_for = task
+                else:
+                    started_at = time.monotonic()
+                    task = asyncio.create_task(
+                        self._execute(key, operation, started_at)
+                    )
+                    state["task"] = task
+                    state["task_started_at"] = started_at
+                    join = task
+            if wait_for is not None:
+                # The older sync is not this caller's result. Wait it out
+                # without cancelling it, then look again.
+                await asyncio.shield(wait_for)
+                continue
+            assert join is not None
+            # A disconnected browser must not cancel the shared subprocess
+            # for every other caller. The coordinator task owns cleanup.
+            return await asyncio.shield(join)
 
     async def _execute(
         self,
         key: str,
         operation: Callable[[], Awaitable[_IBSyncOutcome]],
+        started_at: float,
     ) -> _IBSyncOutcome:
         outcome: Optional[_IBSyncOutcome] = None
         try:
@@ -247,12 +291,26 @@ class _IBSyncCoordinator:
             async with lock:
                 state = self._states.setdefault(
                     key,
-                    {"task": None, "last_success_at": 0.0, "last_outcome": None},
+                    {
+                        "task": None,
+                        "last_success_at": 0.0,
+                        "last_outcome": None,
+                        "task_started_at": 0.0,
+                        "last_success_started_at": 0.0,
+                    },
                 )
-                if outcome is not None and outcome.ok:
+                # A newer success must not be overwritten by an older task
+                # whose bookkeeping runs late.
+                if (
+                    outcome is not None
+                    and outcome.ok
+                    and started_at >= state.get("last_success_started_at", 0.0)
+                ):
                     state["last_success_at"] = time.monotonic()
+                    state["last_success_started_at"] = started_at
                     state["last_outcome"] = outcome
-                state["task"] = None
+                if state.get("task") is asyncio.current_task():
+                    state["task"] = None
 
 
 IB_SYNC_MIN_AGE_SECS = _bounded_env_int(
@@ -305,8 +363,10 @@ async def _coordinated_portfolio_sync() -> _IBSyncOutcome:
     return await _ib_sync_coordinator.run("portfolio", _portfolio_sync_operation)
 
 
-async def _coordinated_orders_sync() -> _IBSyncOutcome:
-    return await _ib_sync_coordinator.run("orders", _orders_sync_operation)
+async def _coordinated_orders_sync(*, fresh: bool = False) -> _IBSyncOutcome:
+    return await _ib_sync_coordinator.run(
+        "orders", _orders_sync_operation, fresh=fresh
+    )
 
 
 # Pool-recovery escalation guard. Mirrors ib_gateway._auth_transition_state but
@@ -2896,16 +2956,21 @@ async def _bg_sync_via_subprocess():
 
 
 @app.post("/orders/refresh")
-async def orders_refresh():
+async def orders_refresh(
+    x_radon_orders_fresh: Annotated[Optional[str], Header()] = None,
+):
     """Sync orders from IB, then return the Turso orders snapshot.
 
     Scripts auto-allocate client IDs from subprocess range (20-49).
     Auto-restarts IB Gateway on ECONNREFUSED and retries once.
+
+    ``X-Radon-Orders-Fresh: 1`` (place, cancel, modify) refuses a snapshot
+    whose sync started before this request. Page-load sync omits the header.
     """
     if test_mode:
         return {"status": "ok", "orders": []}
 
-    outcome = await _coordinated_orders_sync()
+    outcome = await _coordinated_orders_sync(fresh=x_radon_orders_fresh == "1")
     if not outcome.ok:
         raise HTTPException(status_code=502, detail=outcome.error)
     return outcome.payload or {}
@@ -3006,7 +3071,7 @@ def _is_indeterminate_place_failure(error: Optional[str]) -> bool:
 
 
 @app.post("/orders/place")
-async def orders_place(request: Request):
+async def orders_place(request: Request, background_tasks: BackgroundTasks):
     """Place an order via IB (on-demand connection, client_id=26)."""
     _refuse_if_trading_halted()
     body = await request.json()
@@ -3018,7 +3083,7 @@ async def orders_place(request: Request):
     reserved_ref = body["orderRef"]
     _refuse_if_order_rate_exceeded(reserved_ref)
     try:
-        return await _orders_place_after_rate_reservation(body)
+        return await _orders_place_after_rate_reservation(body, background_tasks)
     finally:
         # Drop the orderRef tag so a later request that repeats a
         # client-supplied ref claims a new slot. The timestamp stays;
@@ -3026,7 +3091,35 @@ async def orders_place(request: Request):
         _consume_order_rate_reservation(reserved_ref)
 
 
-async def _orders_place_after_rate_reservation(body: dict):
+_PENDING_ORDER_AUDITS: set[asyncio.Task] = set()
+
+
+def _schedule_submitted_audit(
+    background: Optional[BackgroundTasks],
+    **kwargs: Any,
+) -> None:
+    """Record a successful submit after the HTTP response is sent.
+
+    Reject and indeterminate audits stay on the response path. The insert
+    never raises. BackgroundTasks keeps TestClient deterministic; a direct
+    caller (no request) keeps a strong reference so the task is not dropped.
+    """
+
+    async def _run() -> None:
+        await record_order_event("submitted", **kwargs)
+
+    if background is not None:
+        background.add_task(_run)
+        return
+    task = asyncio.create_task(_run())
+    _PENDING_ORDER_AUDITS.add(task)
+    task.add_done_callback(_PENDING_ORDER_AUDITS.discard)
+
+
+async def _orders_place_after_rate_reservation(
+    body: dict,
+    background: Optional[BackgroundTasks] = None,
+):
     """Body of /orders/place after the per-minute slot is reserved."""
     if test_mode:
         order_id, perm_id = _next_test_order_ids()
@@ -3121,10 +3214,11 @@ async def _orders_place_after_rate_reservation(body: dict):
             detail=error_detail,
         )
         raise HTTPException(status_code=502, detail=error_detail)
-    # REL-019: audit-trail the successful submission (best-effort).
+    # REL-019: audit-trail the successful submission off the response.
+    # Reject and indeterminate above still await the insert before 502/504.
     data = result.data or {}
-    await record_order_event(
-        "submitted",
+    _schedule_submitted_audit(
+        background,
         order_ref=data.get("orderRef"),
         order_id=data.get("orderId"),
         perm_id=data.get("permId"),
@@ -3191,7 +3285,7 @@ def _internal_json_request(payload: dict) -> Request:
 
 
 @app.post("/orders/replace")
-async def orders_replace(request: Request):
+async def orders_replace(request: Request, background_tasks: BackgroundTasks):
     """Preflight, cancel, and place a replacement with explicit partial state."""
     _refuse_if_trading_halted()
     body = await request.json()
@@ -3222,7 +3316,7 @@ async def orders_replace(request: Request):
     _refuse_if_order_rate_exceeded(reserved_ref)
     try:
         return await _orders_replace_after_rate_reservation(
-            cancel_orders, replacement,
+            cancel_orders, replacement, background_tasks,
         )
     finally:
         _consume_order_rate_reservation(reserved_ref)
@@ -3285,7 +3379,9 @@ async def _cancel_confirmed_at_broker(target: dict) -> bool:
     return str(payload.get("status") or "") in ("Cancelled", "ApiCancelled")
 
 
-async def _orders_replace_after_rate_reservation(cancel_orders, replacement):
+async def _orders_replace_after_rate_reservation(
+    cancel_orders, replacement, background: Optional[BackgroundTasks] = None,
+):
     """Body of /orders/replace after the per-minute slot is reserved."""
     # Complete every non-transmitting validation before the first cancellation.
     await orders_whatif(_internal_json_request(replacement))
@@ -3320,7 +3416,7 @@ async def _orders_replace_after_rate_reservation(cancel_orders, replacement):
                 "permId": target.get("permId"),
                 "status": (result or {}).get("finalStatus", "cancelled"),
             })
-        placed = await _orders_place_after_rate_reservation(replacement)
+        placed = await _orders_place_after_rate_reservation(replacement, background)
     except HTTPException as exc:
         status = exc.status_code if exc.status_code == 504 else 502
         raise HTTPException(
@@ -4636,17 +4732,18 @@ async def event_odds_get(ticker: str):
 
 # ── Index options chain (Phase 3 — VIX et al.) ──────────────────────
 
-_INDEX_OPTIONS_CHAIN_TIMEOUT_S = 45.0  # patched in tests
+# Under the Next.js 25s abort so a slow child cannot outlive the client.
+_INDEX_OPTIONS_CHAIN_TIMEOUT_S = 24.0
 
 
 @app.get("/index-options/chain")
 async def index_options_chain(symbol: str, expiry: str = ""):
-    """List CBOE-listed index option contracts for `symbol`.
+    """List CBOE-listed index option contracts for one expiry of `symbol`.
 
     Subprocess-backed (ib_chain.py --kind option) for the same reason
     /futures/chain is — cross-thread event loop deadlock on the pool's
-    data client when result sets exceed ~50 contracts. VIX/SPX/NDX
-    chains routinely return 1000+ contracts when expiry is unscoped.
+    data client when result sets exceed ~50 contracts. An unscoped
+    VIX/SPX/NDX book is 1000+ contracts, so expiry is required.
     """
     from clients.contract_resolver import supports_index_options
 
@@ -4656,10 +4753,10 @@ async def index_options_chain(symbol: str, expiry: str = ""):
             status_code=400,
             detail=f"index options not supported for {symbol_upper}; supported: VIX, SPX, NDX, RUT, XSP",
         )
+    if not expiry.strip():
+        raise HTTPException(status_code=400, detail="expiry is required")
 
-    args = ["--kind", "option", "--symbol", symbol_upper]
-    if expiry:
-        args.extend(["--expiry", expiry])
+    args = ["--kind", "option", "--symbol", symbol_upper, "--expiry", expiry]
 
     result = await run_script("ib_chain.py", args, timeout=_INDEX_OPTIONS_CHAIN_TIMEOUT_S)
     if not result.ok:

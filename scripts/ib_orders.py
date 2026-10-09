@@ -162,14 +162,20 @@ def fetch_open_orders(client: IBClient) -> list:
     resolved_legs: dict = {}
     if combo_con_ids:
         from ib_insync import Contract as IBContract
-        for con_id in combo_con_ids:
-            try:
-                c = IBContract(conId=con_id)
-                qualified = client.qualify_contracts(c)
-                if qualified:
-                    resolved_legs[con_id] = qualified[0]
-            except Exception:
-                pass  # Skip unresolvable legs — frontend falls back to portfolio
+        legs = [IBContract(conId=con_id) for con_id in combo_con_ids]
+        try:
+            qualified = client.qualify_contracts(*legs)
+            for contract in qualified or []:
+                resolved_legs[contract.conId] = contract
+        except Exception:
+            for con_id in combo_con_ids:
+                try:
+                    c = IBContract(conId=con_id)
+                    qualified = client.qualify_contracts(c)
+                    if qualified:
+                        resolved_legs[con_id] = qualified[0]
+                except Exception:
+                    pass  # Skip unresolvable legs — frontend falls back to portfolio
 
     orders = []
     for trade in trades:
