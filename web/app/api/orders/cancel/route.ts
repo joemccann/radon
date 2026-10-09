@@ -12,6 +12,7 @@ import {
   readOrdersSnapshotFromDb,
 } from "@/lib/orders/readOrdersFromDb";
 import { invalidateOrdersSnapshotCache } from "@/lib/orders/ordersReadCache";
+import { ordersFreshRefreshInit } from "@/lib/orders/ordersFreshRefresh";
 import {
   isWorkingOrderMissingDetail,
   workingOrderMissingMessage,
@@ -79,7 +80,7 @@ export async function POST(request: Request): Promise<Response> {
     invalidateOrdersSnapshotCache();
     let refreshed = false;
     try {
-      await radonFetch("/orders/refresh", { method: "POST", timeout: 10_000 });
+      await radonFetch("/orders/refresh", ordersFreshRefreshInit());
       refreshed = true;
     } catch {
       // Non-fatal for THIS response, but the read below would otherwise hit
@@ -106,7 +107,7 @@ export async function POST(request: Request): Promise<Response> {
         // snapshot with it for every reader. R-252.
         let refreshedAfterMiss = false;
         try {
-          await radonFetch("/orders/refresh", { method: "POST", timeout: 10_000 });
+          await radonFetch("/orders/refresh", ordersFreshRefreshInit());
           refreshedAfterMiss = true;
         } catch {
           // Non-fatal
