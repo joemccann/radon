@@ -1,4 +1,15 @@
 # Lessons
+## 2026-10-09 — IR PR titles are one sentence, never the page dump
+
+- `format_ir_pr_title` used to prefix the 32-hex page id and keep the
+  first `What broke` line, then hard-cut at 256. Page `eeef0959` shipped
+  as `IR eeef0959…: gex-scan paged P1 stale at <timestamp>, page eeef0959…,
+  alert text "…", journalctl -u radon-refr-`.
+- The title is `IR: <service and failure>` (or `IR <human-slug>:`).
+  Page id, clock, alert quote, and journalctl stay in the body.
+  `ensure_pr` rewrites a caller-supplied title, so a dump cannot skip
+  the condenser.
+
 ## 2026-09-30 — A Flex stock qty gap can be combo envelopes, not a bad fill
 
 - `flex-pull-trade-coverage` says a quantity disagreement is operator

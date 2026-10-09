@@ -80,6 +80,26 @@ class TestValidator:
 
 
 class TestCompose:
+    def test_title_drops_a_forensic_first_line(self):
+        page = "eeef09595a01893b4e31abd5cbda352e"
+        dump = (
+            "gex-scan paged P1 stale at 2026-10-09T18:40:00Z, "
+            f"page {page}, alert text \"silent for 23m (window 15m) market open\". "
+            "Market was open (14:40 ET). Last successful line was "
+            "journalctl -u radon-refr- #980"
+        )
+        body = VALID_BODY.replace(
+            "Symptom: radon-grok-page-responder.service exited Result=exit-code and\n"
+            "paged P1 about itself. Page a1c550c1f43ba50af5bd701cb697acd4 first seen\n"
+            "2026-09-26T17:15:04Z. Error excerpt: HranaHttpError TimeoutError on complete_page.",
+            dump,
+        )
+        title, rendered = desc.description_from_commit(body)
+        assert title == "gex-scan paged P1 stale. Market was open (14:40 ET)."
+        assert page not in title
+        assert "journalctl" not in title
+        assert page in rendered
+
     def test_title_and_body_include_page_and_ci(self):
         title, body = desc.description_from_commit(
             VALID_BODY,
