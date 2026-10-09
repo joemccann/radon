@@ -290,6 +290,25 @@ Any flag that is unreadable, malformed, symlinked or not root-owned counts as he
 
 **Escalation:** if shutdown cannot be confirmed or the hold cannot be written, escalate to the operator with broker console access. Emergency broker power-off ends that Gateway session. Verify the durable hold before reboot; a failed hold write does not protect the next boot.
 
+---
+
+## Upgrading the Gateway image
+
+The `cloud_ib-config` named volume mounts over `/home/ibgateway/Jts`, the same directory the image installs the Gateway into (`Jts/ibgateway/<version>`). Docker seeds a named volume from the image only when the volume is created, so the live volume holds only the version it was born with. A digest bump alone starts IBC against a version directory the volume hides, and the login fails.
+
+Before the cutover restart, copy the new version directory into the volume from the new image. The copy is additive and leaves the running version's directory alone:
+
+```bash
+NEW=sha256:<new index digest>
+docker pull "ghcr.io/gnzsnz/ib-gateway@$NEW"
+VER=$(docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "ghcr.io/gnzsnz/ib-gateway@$NEW" | sed -n 's/^IB_GATEWAY_VERSION=//p')
+docker run --rm --network none --entrypoint /bin/bash -v cloud_ib-config:/seed \
+  "ghcr.io/gnzsnz/ib-gateway@$NEW" \
+  -c "test -e /seed/ibgateway/$VER || cp -a /home/ibgateway/Jts/ibgateway/$VER /seed/ibgateway/"
+```
+
+Then install the new compose body at `/etc/radon/ib-gateway-compose.yml` by hand (the broker gets no control-plane install from CI), confirm `radon-docker-gw config-check`, and run one lease-held `radon-ib-gateway-control restart` outside market hours. That is one 2FA push. Rollback is the previous compose body and one more restart; the old image stays local because disk cleanup never prunes `ghcr.io/gnzsnz/ib-gateway`.
+
 
 ---
 

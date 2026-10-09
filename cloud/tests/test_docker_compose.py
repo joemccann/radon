@@ -40,7 +40,7 @@ class TestServiceDefinition:
     def test_image_matches_production_verified_digest(self, ib_service):
         assert ib_service["image"] == (
             "ghcr.io/gnzsnz/ib-gateway@sha256:"
-            "1bbdeb1bb467ee6546810733b3709c5146ad1cdc6cd2a486b6f75dcf35a67c75"
+            "1e2236804ac949b789197c225a048c0c891c9958f948c87166226e5b647ff581"
         )
 
     def test_restart_owned_by_lock_aware_watchdog(self, ib_service):
