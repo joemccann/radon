@@ -239,6 +239,20 @@ def run(*, now: Optional[datetime] = None, use_db: bool = True) -> dict[str, Any
         source, last_modified = _fetch_source(ims)
         if source is None and not cached:
             source, last_modified = _fetch_source(None)
+    except json.JSONDecodeError as exc:
+        # Page 2fbaca4f629c975ab1fe0dbe5bc6f825 (2026-10-10): cdn-api
+        # _SPX.json is content-length 0. json.load must not latch the
+        # oneshot when last-good already holds the completed session.
+        # No heartbeat, so a standing empty origin still goes stale.
+        if cached:
+            print(
+                f"[calm-streak] source body unusable; keeping last-good: {exc}",
+                file=sys.stderr,
+            )
+            return cached
+        if use_db:
+            _record_error(scan_time, f"fetch failed: {exc}")
+        raise
     except Exception as exc:  # noqa: BLE001 — keep last-good snapshot
         if use_db:
             _record_error(scan_time, f"fetch failed: {exc}")
