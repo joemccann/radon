@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -2321,78 +2322,214 @@ def _execution_fact_columns(item: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
-def upsert_position_execution_fact(payload: dict[str, Any], *, db: Any = None) -> bool:
-    """Persist a lossless IB execution fact without overwriting its identity.
+# Orders-sync re-sends IB's whole session fill snapshot every cycle. Over the
+# direct-to-cloud Hrana transport every statement is a sequential round trip
+# (~55-117 ms), so per-fill writes cost 2-3 trips each and a 385-fill day
+# could not finish inside the 30 s subprocess timeout. Reads and writes go as
+# chunks bounded by bound parameters (Hrana rules 2 and 4 in scripts/CLAUDE.md).
+_MAX_BOUND_PARAMS = 2000
 
-    Repeated syncs are idempotent. New rows hash the pinned lifecycle
-    field set. A hash mismatch only raises when stored economic columns
-    also disagree, so leftover hashes and late IB enrichment do not
-    freeze orders-sync.
+
+def _chunked(rows: list, size: int):
+    for start in range(0, len(rows), size):
+        yield rows[start:start + size]
+
+
+def _row_placeholders(rows: int, width: int) -> str:
+    row = "(" + ", ".join(["?"] * width) + ")"
+    return ", ".join([row] * rows)
+
+
+@dataclass
+class ExecutionFactBatch:
+    """Outcome of one batched fact write: rows written plus per-fill failures.
+
+    A failure is ``(exec_id, exception)``. ValueError covers both an economic
+    conflict and a malformed execution, exactly what the single-row writer
+    raised; one bad fill never blocks the rest of the batch.
     """
+
+    written: int = 0
+    failures: list[tuple[str, Exception]] = field(default_factory=list)
+
+
+_EXECUTION_FACT_COLUMNS = (
+    "account_id", "exec_id", "revision", "payload_sha256", "perm_id", "order_ref",
+    "con_id", "side", "quantity", "price", "multiplier", "currency", "filled_at",
+    "payload", "ingested_at",
+)
+
+
+def _execution_fact_codec():
     try:
         from ..position_return_capital import _iso, normalize_execution
     except ImportError:  # pragma: no cover - flat scripts/ import mode
         from position_return_capital import _iso, normalize_execution  # type: ignore[no-redef]
+    return normalize_execution, _iso
 
-    item = normalize_execution(payload)
-    revision = int(payload.get("revision") or 1)
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-    payload_hash = _execution_identity_hash(item)
-    target = db or get_db()
-    row = target.execute(
-        """SELECT payload_sha256, con_id, side, quantity, price, filled_at
-           FROM position_execution_facts
-           WHERE account_id = ? AND exec_id = ? AND revision = ?""",
-        (item["account_id"], item["exec_id"], revision),
-    ).fetchone()
-    if row is not None:
-        existing_hash = _row_value(row, "payload_sha256", 0)
-        if existing_hash != payload_hash:
-            if not _execution_economically_conflicts(row, item, payload, iso_ts=_iso):
-                # Tolerated drift: same fill, newer metadata. Converge the
-                # pinned hash, the stored payload AND every denormalized
-                # column so late IB enrichment (perm_id, order_ref) and gate-
-                # tolerated restatements (avgPrice-derived price, multiplier,
-                # currency) reach the ledger instead of leaving the row
-                # permanently self-contradictory (R-077, T-098).
-                target.execute(
-                    """UPDATE position_execution_facts
-                       SET payload_sha256 = ?, payload = ?,
-                           perm_id = ?, order_ref = ?, con_id = ?, side = ?,
-                           quantity = ?, price = ?, multiplier = ?, currency = ?,
-                           filled_at = ?
-                       WHERE account_id = ? AND exec_id = ? AND revision = ?""",
-                    (
-                        payload_hash, canonical, *_execution_fact_columns(item),
-                        item["account_id"], item["exec_id"], revision,
-                    ),
-                )
-                target.commit()
-                return True
-            logger.warning(
-                "execution fact conflict for %s:%s:%s",
-                item["account_id"], item["exec_id"], revision,
-            )
-            raise ValueError(
-                f"execution fact conflict for {item['account_id']}:{item['exec_id']}:{revision}"
-            )
-        return False
 
-    target.execute(
-        """
-        INSERT INTO position_execution_facts
-          (account_id, exec_id, revision, payload_sha256, perm_id, order_ref,
-           con_id, side, quantity, price, multiplier, currency, filled_at,
-           payload, ingested_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            item["account_id"], item["exec_id"], revision, payload_hash,
-            *_execution_fact_columns(item), canonical, _now_iso(),
-        ),
+def _prepare_execution_facts(
+    payloads: list[dict[str, Any]],
+    normalize_execution,
+    result: ExecutionFactBatch,
+) -> list[dict[str, Any]]:
+    prepared = []
+    for payload in payloads:
+        try:
+            item = normalize_execution(payload)
+        except Exception as exc:  # noqa: BLE001 - reported per fill, like the single-row writer
+            result.failures.append((str(payload.get("execId") or payload.get("exec_id") or ""), exc))
+            continue
+        revision = int(payload.get("revision") or 1)
+        prepared.append({
+            "key": (item["account_id"], item["exec_id"], revision),
+            "item": item,
+            "payload": payload,
+            "hash": _execution_identity_hash(item),
+            "canonical": json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str),
+        })
+    return prepared
+
+
+def _stored_fact_state(fact: dict[str, Any]) -> dict[str, Any]:
+    item = fact["item"]
+    return {
+        "payload_sha256": fact["hash"], "con_id": item["con_id"], "side": item["side"],
+        "quantity": item["quantity"], "price": item["price"], "filled_at": item["filled_at"],
+    }
+
+
+def _stored_execution_facts(db: Any, prepared: list[dict[str, Any]]) -> dict[tuple, dict[str, Any]]:
+    """Batch-read existing facts, keyed (account_id, exec_id, revision).
+
+    Grouped by account so every chunk is a PK-prefix seek.
+    """
+    exec_ids_by_account: dict[str, list[str]] = {}
+    for fact in prepared:
+        account_id, exec_id, _ = fact["key"]
+        exec_ids_by_account.setdefault(account_id, []).append(exec_id)
+    stored: dict[tuple, dict[str, Any]] = {}
+    for account_id, exec_ids in exec_ids_by_account.items():
+        for chunk in _chunked(sorted(set(exec_ids)), _MAX_BOUND_PARAMS - 1):
+            rows = db.execute(
+                "SELECT account_id, exec_id, revision, payload_sha256, con_id, side, "
+                "quantity, price, filled_at FROM position_execution_facts "
+                f"WHERE account_id = ? AND exec_id IN ({', '.join(['?'] * len(chunk))})",
+                (account_id, *chunk),
+            ).fetchall()
+            for row in rows:
+                stored[(row[0], row[1], int(row[2]))] = {
+                    "payload_sha256": row[3], "con_id": row[4], "side": row[5],
+                    "quantity": row[6], "price": row[7], "filled_at": row[8],
+                }
+    return stored
+
+
+def _classify_execution_facts(
+    prepared: list[dict[str, Any]],
+    stored: dict[tuple, dict[str, Any]],
+    iso_ts,
+    result: ExecutionFactBatch,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split facts into (inserts, tolerated-drift converges); record conflicts.
+
+    Runs in snapshot order and folds each accepted fact back into ``stored``
+    so a repeated exec_id is judged against its predecessor, as the
+    sequential single-row writer did.
+    """
+    inserts: list[dict[str, Any]] = []
+    converges: list[dict[str, Any]] = []
+    for fact in prepared:
+        row = stored.get(fact["key"])
+        if row is None:
+            inserts.append(fact)
+        elif row["payload_sha256"] == fact["hash"]:
+            continue
+        elif _execution_economically_conflicts(row, fact["item"], fact["payload"], iso_ts=iso_ts):
+            account_id, exec_id, revision = fact["key"]
+            logger.warning("execution fact conflict for %s:%s:%s", account_id, exec_id, revision)
+            result.failures.append((
+                exec_id,
+                ValueError(f"execution fact conflict for {account_id}:{exec_id}:{revision}"),
+            ))
+            continue
+        else:
+            converges.append(fact)
+        stored[fact["key"]] = _stored_fact_state(fact)
+    return inserts, converges
+
+
+def _execution_fact_values(fact: dict[str, Any], ingested_at: str) -> tuple[Any, ...]:
+    account_id, exec_id, revision = fact["key"]
+    return (
+        account_id, exec_id, revision, fact["hash"],
+        *_execution_fact_columns(fact["item"]), fact["canonical"], ingested_at,
     )
+
+
+# New facts never overwrite: a row that appeared since the batch read is
+# left for the next cycle's hash comparison instead of being clobbered.
+_EXECUTION_FACT_INSERT_CONFLICT = "ON CONFLICT(account_id, exec_id, revision) DO NOTHING"
+
+# Tolerated drift (same fill, newer metadata) converges the pinned hash, the
+# stored payload AND every denormalized column so late IB enrichment
+# (perm_id, order_ref) and gate-tolerated restatements (avgPrice-derived
+# price, multiplier, currency) reach the ledger instead of leaving the row
+# permanently self-contradictory (R-077, T-098). ingested_at is preserved.
+_EXECUTION_FACT_CONVERGE_CONFLICT = (
+    "ON CONFLICT(account_id, exec_id, revision) DO UPDATE SET "
+    + ", ".join(
+        f"{column} = excluded.{column}"
+        for column in _EXECUTION_FACT_COLUMNS[3:-1]
+    )
+)
+
+
+def _write_execution_facts(db: Any, facts: list[dict[str, Any]], conflict_clause: str) -> None:
+    ingested_at = _now_iso()
+    width = len(_EXECUTION_FACT_COLUMNS)
+    for chunk in _chunked(facts, _MAX_BOUND_PARAMS // width):
+        db.execute(
+            f"INSERT INTO position_execution_facts ({', '.join(_EXECUTION_FACT_COLUMNS)}) "
+            f"VALUES {_row_placeholders(len(chunk), width)} {conflict_clause}",
+            tuple(value for fact in chunk for value in _execution_fact_values(fact, ingested_at)),
+        )
+
+
+def upsert_position_execution_facts(
+    payloads: list[dict[str, Any]], *, db: Any = None,
+) -> ExecutionFactBatch:
+    """Persist a session's IB execution facts without overwriting identity.
+
+    One chunked read, then only new or tolerated-drift rows written as
+    chunked multi-row statements and one commit. Unchanged facts cost
+    nothing. A pinned-hash mismatch is a conflict only when stored economic
+    columns also disagree; conflicts are logged, reported per fill, and
+    never written.
+    """
+    normalize_execution, iso_ts = _execution_fact_codec()
+    result = ExecutionFactBatch()
+    prepared = _prepare_execution_facts(payloads, normalize_execution, result)
+    if not prepared:
+        return result
+    target = db or get_db()
+    stored = _stored_execution_facts(target, prepared)
+    inserts, converges = _classify_execution_facts(prepared, stored, iso_ts, result)
+    if not inserts and not converges:
+        return result
+    _write_execution_facts(target, inserts, _EXECUTION_FACT_INSERT_CONFLICT)
+    _write_execution_facts(target, converges, _EXECUTION_FACT_CONVERGE_CONFLICT)
     target.commit()
-    return True
+    result.written = len(inserts) + len(converges)
+    return result
+
+
+def upsert_position_execution_fact(payload: dict[str, Any], *, db: Any = None) -> bool:
+    """Single-fill form: True when written, False when unchanged, raises on conflict."""
+    result = upsert_position_execution_facts([payload], db=db)
+    if result.failures:
+        raise result.failures[0][1]
+    return result.written > 0
 
 
 def insert_account_margin_sample(
@@ -2456,6 +2593,63 @@ def insert_account_margin_sample(
     target.commit()
     return sample_id
 
+
+
+def _stored_executed_orders(db: Any, exec_ids: list[str]) -> dict[str, tuple[Any, ...]]:
+    stored: dict[str, tuple[Any, ...]] = {}
+    for chunk in _chunked(exec_ids, _MAX_BOUND_PARAMS):
+        rows = db.execute(
+            "SELECT exec_id, perm_id, payload, fill_time FROM executed_orders "
+            f"WHERE exec_id IN ({', '.join(['?'] * len(chunk))})",
+            tuple(chunk),
+        ).fetchall()
+        for row in rows:
+            stored[row[0]] = (row[1], row[2], row[3])
+    return stored
+
+
+def upsert_executed_orders_for_session(
+    orders: list[tuple[str, dict[str, Any], str, Optional[int]]],
+) -> int:
+    """Write a session's fills into executed_orders, skipping unchanged rows.
+
+    Each order is ``(exec_id, payload, fill_time, perm_id)``. One chunked read
+    of the stored rows, then only rows whose payload, perm_id or fill_time
+    changed (e.g. a journal realized-P&L overlay landing a cycle late) are
+    upserted as chunked multi-row statements with one commit. Each chunk is
+    one statement, so a failure leaves old rows in place, never a partial
+    row. Returns the number of rows written.
+    """
+    if not orders:
+        return 0
+    incoming = {
+        exec_id: (int(perm_id) if perm_id is not None else None, json.dumps(payload), fill_time)
+        for exec_id, payload, fill_time, perm_id in orders
+    }
+    db = get_db()
+    stored = _stored_executed_orders(db, list(incoming))
+    changed = [(exec_id, *row) for exec_id, row in incoming.items() if stored.get(exec_id) != row]
+    if not changed:
+        return 0
+    recorded_at = _now_iso()
+    for chunk in _chunked(changed, _MAX_BOUND_PARAMS // 5):
+        db.execute(
+            f"""
+            INSERT INTO executed_orders (exec_id, perm_id, payload, fill_time, recorded_at)
+            VALUES {_row_placeholders(len(chunk), 5)}
+            ON CONFLICT(exec_id) DO UPDATE SET
+              perm_id     = excluded.perm_id,
+              payload     = excluded.payload,
+              fill_time   = excluded.fill_time,
+              recorded_at = excluded.recorded_at
+            WHERE executed_orders.payload IS NOT excluded.payload
+               OR executed_orders.perm_id IS NOT excluded.perm_id
+               OR executed_orders.fill_time IS NOT excluded.fill_time
+            """,
+            tuple(value for row in chunk for value in (*row, recorded_at)),
+        )
+    db.commit()
+    return len(changed)
 
 
 def upsert_executed_order(

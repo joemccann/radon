@@ -181,3 +181,48 @@ def test_orders_sync_cycle_heartbeats_ok_with_working_orders(
     )
     assert [state for state, _ in cycle_rows] == ["ok"]
     assert _select_perm_ids(libsql_db) == [9001, 9002]
+
+
+def test_batched_fill_writes_round_trip_through_real_libsql(libsql_db):
+    """The batched executed_orders + fact writers must be binding-legal
+    (tuple params, multi-row VALUES, upsert WHERE) on the real PyO3 binding."""
+    import re
+
+    import db.writer as writer_mod
+
+    migrations = _SCRIPTS_DIR / "db" / "migrations"
+    libsql_db.execute(
+        "CREATE TABLE IF NOT EXISTS schema_migrations "
+        "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+    )
+    for name in ("0004_orders_and_ephemeral.sql", "0037_position_return_capital.sql"):
+        sql = "\n".join(
+            re.sub(r"^\s*--.*$", "", line)
+            for line in (migrations / name).read_text(encoding="utf-8").splitlines()
+        )
+        for stmt in re.split(r";\s*$", sql, flags=re.MULTILINE):
+            if stmt.strip():
+                libsql_db.execute(stmt)
+    libsql_db.commit()
+
+    fills = [
+        {
+            "execId": f"0001f4e8.{i:08x}.01.01", "account_id": "U0000001",
+            "permId": 70_000 + i, "side": "BOT", "quantity": 2.0, "price": 4.15,
+            "time": "2026-10-09T14:31:02+00:00", "currency": "USD", "multiplier": 100,
+            "contract": {"conId": 600_000 + i, "symbol": "MU", "secType": "OPT"},
+        }
+        for i in range(450)
+    ]
+    rows = [(f["execId"], f, f["time"], f["permId"]) for f in fills]
+
+    assert writer_mod.upsert_executed_orders_for_session(rows) == 450
+    assert writer_mod.upsert_executed_orders_for_session(rows) == 0
+    assert writer_mod.upsert_position_execution_facts(fills, db=libsql_db).written == 450
+    assert writer_mod.upsert_position_execution_facts(fills, db=libsql_db).written == 0
+
+    counts = [
+        libsql_db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        for table in ("executed_orders", "position_execution_facts")
+    ]
+    assert counts == [450, 450]
