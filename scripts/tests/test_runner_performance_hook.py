@@ -95,7 +95,7 @@ def test_probe_is_pulled_over_the_pinned_forced_command_key(rig):
                 f"UserKnownHostsFile={rig.home}/.ssh/radon_perf_known_hosts"):
         assert opt in argv
     assert argv[argv.index("-i") + 1] == f"{rig.home}/.ssh/radon_perf_probe"
-    assert "radon@radon-app" in argv
+    assert "radon@5.78.148.38" in argv
     assert oct((rig.state / "prod-probe.json").stat().st_mode & 0o777) == "0o600"
 
 
