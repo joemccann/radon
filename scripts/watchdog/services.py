@@ -443,6 +443,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # web/lib/serviceHealthWindows.ts and db-backup. Turso + local disk
     # (+ optional S3) — no IB dependency.
     "portfolio-archive": {"open": 48 * _HOUR, "closed": 48 * _HOUR, "requires_ib": False},
+    # research-archive — monthly evidence archive to B2 then prune
+    # (scripts/research/archive.py via radon-research-archive.timer, 1st of
+    # the month 04:20 UTC). 33d window = longest month + jitter + a 2-day
+    # grace, mirrors web/lib/serviceHealthWindows.ts. B2 + local disk, no IB.
+    "research-archive": {"open": 33 * _DAY, "closed": 33 * _DAY, "requires_ib": False},
     # db-retention — daily keep-latest sweep for append-only scan tables
     # (scripts/db_retention_sweep.py via radon-db-retention.timer).
     "db-retention": {"open": 48 * _HOUR, "closed": 48 * _HOUR, "requires_ib": False},
@@ -701,6 +706,8 @@ BUCKETS: dict[str, list[str]] = {
         "journal-expiry-sweep",
         # Nightly portfolio_snapshots cold-archive on the VPS — 48h window.
         "portfolio-archive",
+        # Monthly research evidence archive to B2 — 33d window.
+        "research-archive",
         # Nightly keep-latest snapshot retention sweep on the VPS — 48h window.
         "db-retention",
         # Nightly media.radon.run tree backup to B2 — 48h window.

@@ -125,6 +125,8 @@ readonly SERVICE_FILES=(
   radon-disk-cleanup.timer
   radon-portfolio-archive.service
   radon-portfolio-archive.timer
+  radon-research-archive.service
+  radon-research-archive.timer
   radon-media-backup.service
   radon-media-backup.timer
   radon-db-retention.service

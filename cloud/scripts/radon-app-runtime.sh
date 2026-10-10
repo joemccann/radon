@@ -6,7 +6,7 @@ set -euo pipefail
 # radon is not in group docker.
 # Never Gateway, Caddy, health, or the engine socket.
 
-readonly APP_UNITS="radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research.service radon-subscription-vault.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
+readonly APP_UNITS="radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research.service radon-research-archive.service radon-subscription-vault.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
 # DS-2026-10-05-05: every unit that opens the encrypted secret store. Each gets
 # the master key only through the radon-secrets staging below, inside image
 # code, never as a User=radon host process running the radon-writable venv.
@@ -121,6 +121,8 @@ in_list() {
 
 uses_secret_store() { in_list "$1" "$SECRET_STORE_UNITS"; }
 is_store_job() { in_list "$1" "$STORE_JOB_UNITS"; }
+# Units that own the private research bind read-write and nothing else.
+is_research_unit() { [[ "$1" == "radon-research.service" || "$1" == "radon-research-archive.service" ]]; }
 
 cleanup_runtime_credential() {
   local unit="$1"
@@ -703,7 +705,7 @@ cmd_run() {
   ids="$("$ID_BIN" -u radon):$("$ID_BIN" -g radon)"
   workdir=/home/radon/radon
   case "$unit" in
-    radon-api.service|radon-monitor.service|radon-research.service) image="$(python_image)" ;;
+    radon-api.service|radon-monitor.service|radon-research.service|radon-research-archive.service) image="$(python_image)" ;;
     radon-subscription-vault.service|radon-ai-cycle.service|radon-ai-cycle-backfill.service|radon-aa-frontier-refresh.service)
       image="$(python_image)"
       ;;
@@ -773,7 +775,7 @@ cmd_run() {
   # one thing an app genuinely writes outside media/ is the shared 2FA lease,
   # which now has its own subdirectory. Create it here: the container can no
   # longer mkdir it, because the parent is not mounted. R-381.
-  if [[ "$unit" != "radon-research.service" ]] && ! is_store_job "$unit"; then
+  if ! is_research_unit "$unit" && ! is_store_job "$unit"; then
     prepare_private_dir "$ids" "$LEASE_DIR" "2FA lease"
   fi
 
@@ -822,7 +824,7 @@ cmd_run() {
         set -- "$@" -v "${AI_CYCLE_DIR}:${AI_CYCLE_DIR_IN_CONTAINER}"
         ;;
     esac
-  elif [[ "$unit" != "radon-research.service" ]]; then
+  elif ! is_research_unit "$unit"; then
     set -- "$@" \
       -v "${DATA_DIR}:/home/radon/radon/data" \
       -v "${MEDIA_DIR}:${MEDIA_DIR_IN_CONTAINER}" \
@@ -869,10 +871,10 @@ cmd_run() {
       ;;
   esac
   set -- "$@" --env HOME=/home/radon
-  if [[ "$unit" == "radon-research.service" || "$unit" == "radon-api.service" ]]; then
+  if is_research_unit "$unit" || [[ "$unit" == "radon-api.service" ]]; then
     local research_dir research_mode=ro
     research_dir="$(prepare_research_dir "$ids")" || exit $?
-    [[ "$unit" == "radon-research.service" ]] && research_mode=rw
+    is_research_unit "$unit" && research_mode=rw
     set -- "$@" --env RADON_RESEARCH_DIR=/var/lib/radon/research \
       -v "${research_dir}:/var/lib/radon/research:${research_mode}"
   fi
@@ -967,6 +969,11 @@ cmd_run() {
       ;;
     radon-research.service)
       set -- "$@" python -m research.worker --daemon
+      ;;
+    # Same script as the base unit's host ExecStart; this bind is the only
+    # place the private root is readable.
+    radon-research-archive.service)
+      set -- "$@" python scripts/research/archive.py
       ;;
     # DS-2026-10-05-05: the same module and arguments as each base unit's
     # host ExecStart (pinned by cloud/tests/test_ds_secret_store_key_units.py).

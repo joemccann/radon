@@ -885,6 +885,19 @@ than duplicating commands in this runbook.
 
 The API credential staging/cleanup contract remains in force when research mount provisioning fails: decrypted credential files must be removed on failure as well as normal stop. The research worker receives no API master-key mount, public media mount, or IB lease mount. Dropbox offline credentials and the model provider key remain in restricted runtime configuration. Apply migration 71 and verify private media before publication, then enable the worker. Full import and activation order: [Dropbox research](dropbox-research.md).
 
+### Research evidence archive
+
+`radon-research-archive.timer` fires on the 1st of every month at 04:20 UTC (`RandomizedDelaySec=900`, `Persistent=true`). Its `runtime-container.conf` drop-in runs `scripts/research/archive.py` through `radon-app-runtime` with the same read/write private research bind as the worker and nothing else (no data, media, lease or subscription binds), so it needs no new host grant. It uploads `evidence/<key>/` directories to the `RADON_ARCHIVE_S3_*` bucket under `research/evidence/<YYYY-MM>/<key>/` (`RADON_RESEARCH_ARCHIVE_PREFIX` overrides `research/`), with `Content-MD5` and the SHA-256 in object metadata, then HEAD-verifies size and SHA-256. A directory is pruned only when every file verified, its `state.sqlite` work row is still settled (or absent), and each file is unchanged since verification. Candidates are older than the start of the month and at least 7 days old; pending or processing work is skipped. `assets/` (served to subscribers) and `downloads/` (cached PDFs that queued reviews hash-check) are never touched. Per-run ceilings: 20 GiB, 20,000 directories. Heartbeat `research-archive` (33-day window). Missing B2 credentials fail closed with no deletes.
+
+Operator commands (app host, as root):
+
+```bash
+systemctl start radon-research-archive.service        # run now
+journalctl -u radon-research-archive.service -n 50    # JSON summary line
+```
+
+A dry run (no B2 calls, no deletes) needs the private bind, so run it inside the research container: `python scripts/research/archive.py --dry-run`. Restore an archived document by copying its `research/evidence/<YYYY-MM>/<key>/` prefix back into `evidence/<key>/` through the container bind; the offline harness reads restored evidence unchanged.
+
 ## Production Build Constraint
 
 Next.js 16 prerender crashes on `/_global-error` and `/_not-found` because the root ClerkProvider context isn't materialised in isolated workers. `web/package.json` build pins `next build --experimental-build-mode=compile`. The error and not-found shells (`app/error.tsx`, `app/[ticker]/not-found.tsx`, `app/global-error.tsx`) use plain `<a>` and pure JSX (no `next/link`, `useEffect`, or `globals.css`) for the same reason.
