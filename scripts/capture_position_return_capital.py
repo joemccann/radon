@@ -79,13 +79,67 @@ def _load_executions(db: Any) -> list[dict[str, Any]]:
     return [item[1] for item in sorted(latest.values(), key=lambda item: item[0][1])]
 
 
-def _load_samples(db: Any) -> dict[str, list[dict[str, Any]]]:
-    rows = db.execute(
-        """SELECT sample_id, account_id, observed_from, observed_through, initial_margin,
-                  maintenance_margin, currency, positions
-           FROM account_margin_samples
-           ORDER BY account_id ASC, observed_from ASC, observed_through ASC, sample_id ASC"""
-    ).fetchall()
+# Stored timestamps compare as text; a bound one second wide absorbs the
+# fractional-second and offset spellings that sort out of time order.
+_TEXT_ORDER_SLACK_SECONDS = 1
+
+
+def _iso_bound(epoch: float) -> str:
+    return datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _fill_spans(events: list[dict[str, Any]]) -> list[tuple[str, float, float]]:
+    return [
+        (
+            event["account_id"],
+            min(_epoch(item["filled_at"]) for item in event["executions"]),
+            max(_epoch(item["filled_at"]) for item in event["executions"]),
+        )
+        for event in events
+        if event["executions"]
+    ]
+
+
+def _merged_windows(
+    spans: list[tuple[str, float, float]], max_window_seconds: int
+) -> list[tuple[str, float, float]]:
+    """Per-account sample windows around each fill, overlaps merged.
+
+    A valid pair has after_through - before_from <= max_window_seconds, so
+    both samples start inside [first_fill - max, last_fill + max].
+    """
+    reach = max_window_seconds + _TEXT_ORDER_SLACK_SECONDS
+    merged: list[tuple[str, float, float]] = []
+    for account_id, first, last in sorted(spans):
+        start, end = first - reach, last + reach
+        if merged and merged[-1][0] == account_id and start <= merged[-1][2]:
+            merged[-1] = (account_id, merged[-1][1], max(merged[-1][2], end))
+        else:
+            merged.append((account_id, start, end))
+    return merged
+
+
+def _samples_query(windows: list[tuple[str, float, float]]) -> tuple[str, tuple[Any, ...]]:
+    """One statement; each window row seeks the (account_id, observed_from) index.
+
+    A VALUES list, not an OR per window: Turso caps expression depth at 100.
+    """
+    rows = ", ".join("(?, ?, ?)" for _ in windows)
+    params = tuple(
+        value for account_id, start, end in windows
+        for value in (account_id, _iso_bound(start), _iso_bound(end))
+    )
+    sql = f"""WITH windows(account_id, low, high) AS (VALUES {rows})
+           SELECT s.sample_id, s.account_id, s.observed_from, s.observed_through,
+                  s.initial_margin, s.maintenance_margin, s.currency, s.positions
+           FROM windows w CROSS JOIN account_margin_samples s
+           WHERE s.account_id = w.account_id AND s.observed_from BETWEEN w.low AND w.high
+           ORDER BY s.account_id ASC, s.observed_from ASC, s.observed_through ASC,
+                    s.sample_id ASC"""
+    return sql, params
+
+
+def _group_samples(rows: Any) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in rows or []:
         try:
@@ -104,6 +158,16 @@ def _load_samples(db: Any) -> dict[str, list[dict[str, Any]]]:
         }
         grouped.setdefault(item["account_id"], []).append(item)
     return grouped
+
+
+def _load_samples(
+    db: Any, windows: list[tuple[str, float, float]]
+) -> dict[str, list[dict[str, Any]]]:
+    """Only samples that can bracket a fill: the table grows ~1.2k rows a day."""
+    if not windows:
+        return {}
+    sql, params = _samples_query(windows)
+    return _group_samples(db.execute(sql, params).fetchall())
 
 
 def _epoch(value: str) -> float:
@@ -171,9 +235,10 @@ def build_reconciliation_plan(db: Any, *, max_window_seconds: int = 120) -> dict
     executions = _load_executions(db)
     transactions = group_execution_transactions(executions)
     replay = replay_transactions(transactions)
+    windows = _merged_windows(_fill_spans(replay["events"]), max_window_seconds)
     sample_index = {
         account_id: _SampleIndex(samples)
-        for account_id, samples in _load_samples(db).items()
+        for account_id, samples in _load_samples(db, windows).items()
     }
     normalized_execs = [
         (_epoch(item["filled_at"]), item) for group in transactions for item in group
@@ -278,10 +343,13 @@ def _chunks(rows: list[Any]) -> list[list[Any]]:
 
 
 def _insert_rows(db: Any, head: str, rows: list[tuple[Any, ...]], tail: str = "") -> None:
-    """One multi-row statement per chunk: a remote round trip per row blew the sync budget."""
+    """One multi-row statement per chunk: a remote round trip per row blew the sync budget.
+
+    Parameters bind as a tuple: libsql's execute() raises TypeError on a list.
+    """
     for chunk in _chunks(rows):
         placeholders = "(" + ", ".join("?" for _ in chunk[0]) + ")"
-        params = [value for row in chunk for value in row]
+        params = tuple(value for row in chunk for value in row)
         db.execute(f"{head} VALUES {', '.join(placeholders for _ in chunk)} {tail}", params)
 
 
@@ -438,13 +506,13 @@ def _write_ledger_changes(db: Any, changes: dict[str, list[Any]]) -> None:
             "UPDATE position_capital_observations SET status='VOID', amount=NULL "
             "WHERE status='VALID' AND through_event_id IN ("
             + ", ".join("?" for _ in chunk) + ")",
-            chunk,
+            tuple(chunk),
         )
     for chunk in _chunks(changes["replaced"]):
         db.execute(
             "DELETE FROM position_event_executions WHERE (event_id, account_id, exec_id) IN ("
             + ", ".join("(?, ?, ?)" for _ in chunk) + ")",
-            [value for key in chunk for value in key],
+            tuple(value for key in chunk for value in key),
         )
     _insert_rows(
         db,
@@ -466,17 +534,45 @@ def _write_ledger_changes(db: Any, changes: dict[str, list[Any]]) -> None:
     )
 
 
-def apply_reconciliation_plan(db: Any, plan: dict[str, Any]) -> dict[str, int]:
+_PLAN_DIGEST_KEY = "return_capital_plan_digest"
+
+
+def _plan_digest(plan: dict[str, Any]) -> str:
+    """Everything the apply writes, so an equal digest means nothing to write."""
+    return _sha({key: plan[key] for key in ("instances", "events", "observations")})
+
+
+def _stored_digest(db: Any) -> Optional[str]:
+    rows = db.execute(
+        "SELECT value FROM app_config WHERE key = ?", (_PLAN_DIGEST_KEY,)
+    ).fetchall()
+    return str(_row_value(rows[0], 0, "value")) if rows else None
+
+
+def _record_digest(db: Any, digest: str, stamp: str) -> None:
+    db.execute(
+        """INSERT INTO app_config (key, value, updated_at) VALUES (?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""",
+        (_PLAN_DIGEST_KEY, digest, stamp),
+    )
+
+
+def apply_reconciliation_plan(
+    db: Any, plan: dict[str, Any], *, digest: Optional[str] = None
+) -> dict[str, int]:
     """Atomically project the canonical execution revisions into the ledger.
 
     Runs inside every 30 s orders/portfolio sync, so it writes only what
     changed, in multi-row statements. One SELECT + DELETE + INSERT per
     execution (~5k round trips) never reached COMMIT inside that budget.
+    A `digest` commits with the ledger, so a failed apply leaves the gate open.
     """
     stamp = _now_iso()
     try:
         db.execute("BEGIN")
         _write_ledger_changes(db, _ledger_changes(plan, _load_ledger_state(db), stamp))
+        if digest is not None:
+            _record_digest(db, digest, stamp)
         db.commit()
     except BaseException:
         db.rollback()
@@ -489,9 +585,14 @@ def apply_reconciliation_plan(db: Any, plan: dict[str, Any]) -> dict[str, int]:
 
 
 def reconcile_position_return_capital(db: Any, *, apply: bool = False) -> dict[str, Any]:
+    """Replay every fact each cycle; touch the ledger only when the plan changed.
+
+    The full replay keeps exec-id corrections voiding old observations, and
+    the windowed sample read lets a late after-sample complete an event.
+    """
     plan = build_reconciliation_plan(db)
     result = {
-        "status": "applied" if apply else "preview",
+        "status": "preview",
         "executions": plan["executions"],
         "transactions": plan["transactions"],
         "instances": len(plan["instances"]),
@@ -500,8 +601,14 @@ def reconcile_position_return_capital(db: Any, *, apply: bool = False) -> dict[s
         "rejected": plan["rejected"],
         "errors": plan["errors"],
     }
-    if apply:
-        result["written"] = apply_reconciliation_plan(db, plan)
+    if not apply:
+        return result
+    digest = _plan_digest(plan)
+    if _stored_digest(db) == digest:
+        result["status"] = "unchanged"
+        return result
+    result["status"] = "applied"
+    result["written"] = apply_reconciliation_plan(db, plan, digest=digest)
     return result
 
 
