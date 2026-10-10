@@ -213,7 +213,7 @@ export default function AtsVenueSharePanel() {
           <AtsVenueShareTable rows={rows} />
         </div>
 
-        <div style={FOOTNOTE_BLOCK} data-testid="ats-venue-share-footnotes">
+        <div className="section-footnote" style={FOOTNOTE_BLOCK} data-testid="ats-venue-share-footnotes">
           <div style={MONO_FOOTNOTE} data-testid="ats-venue-share-methodnote">
             {methodNote(data.week_start_date, data.thresholds)}
           </div>

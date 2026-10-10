@@ -288,16 +288,7 @@ export default function EquiblesCotPanel() {
             ariaLabel="COT positioning history range brush"
           />
         )}
-        <div
-          data-testid="cot-methodnote"
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "var(--text-meta)",
-            color: "var(--text-muted)",
-            lineHeight: "1.7",
-            marginTop: "8px",
-          }}
-        >
+        <div className="section-footnote" data-testid="cot-methodnote">
           {methodologyFootnote(
             contract.report_date,
             data.lookback_days ?? DEFAULT_LOOKBACK_DAYS,

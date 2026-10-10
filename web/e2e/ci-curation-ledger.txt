@@ -43,6 +43,7 @@
 # REVIEWED 2026-10-06 ticker-page.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
 # REVIEWED 2026-10-06 ticker-search-live.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
 # REVIEWED 2026-10-06 vixcor-tab.spec.ts - Luna verified deterministic fixture cases and retained measurement assertions; three deliberately unmocked live-data cases unavailable, not claimed passed.
+# REVIEWED 2026-10-10 vixcor-tab.spec.ts - Local Chrome measured the base-rate note at padLeft 22px desktop and 16px at 390px, matching the section header. Spec stays held out of CI Playwright.
 # REVIEWED 2026-10-06 watchlist-page.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
 # REVIEWED 2026-10-06 ws-connection-stability.spec.ts - Current-source assertion/diff review and Luna isolated production Chromium fixture verification; included in 135 distinct retained green cases. Financial/interaction assertions retained; held-out membership unchanged.
 

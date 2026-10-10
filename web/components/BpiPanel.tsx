@@ -300,14 +300,7 @@ export default function BpiPanel() {
               ariaLabel="Bullish percent history brush"
             />
           )}
-          <div
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: "var(--text-meta)",
-              color: "var(--text-muted)",
-              marginTop: "8px",
-            }}
-          >
+          <div className="section-footnote">
             {CHART_FOOTNOTE}
           </div>
         </div>

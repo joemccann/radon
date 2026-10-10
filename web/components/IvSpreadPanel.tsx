@@ -318,26 +318,14 @@ export default function IvSpreadPanel() {
         )}
 
         <div
+          className="section-footnote"
           data-testid="iv-spread-stats"
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "var(--text-meta)",
-            color: "var(--text-muted)",
-            marginTop: "8px",
-            whiteSpace: "pre-wrap",
-          }}
+          style={{ whiteSpace: "pre-wrap" }}
         >
           {statsLine}
         </div>
 
-        <div
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "var(--text-meta)",
-            color: "var(--text-muted)",
-            marginTop: "8px",
-          }}
-        >
+        <div className="section-footnote">
           {SOURCE_FOOTNOTE}
         </div>
       </div>

@@ -276,14 +276,7 @@ export default function VixCorPanel() {
           />
         )}
 
-        <div
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "var(--text-meta)",
-            color: "var(--text-muted)",
-            marginTop: "8px",
-          }}
-        >
+        <div className="section-footnote" data-testid="vixcor-source-footnote">
           {SOURCE_FOOTNOTE}
         </div>
       </div>
@@ -343,7 +336,7 @@ export default function VixCorPanel() {
               </tbody>
             </table>
           </div>
-          <div className="vixcor-base-rate-note">{BASE_RATE_FOOTNOTE}</div>
+          <div className="section-footnote" data-testid="vixcor-base-rate-note">{BASE_RATE_FOOTNOTE}</div>
         </div>
       ) : null}
     </>
