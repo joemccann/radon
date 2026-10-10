@@ -565,6 +565,19 @@ their TLT position.
 
 ---
 
+## orders-modify-edge-504
+
+**Symptom:** the orders screen says the modify status is unknown, or the browser records a non-JSON 502 or 504 on `POST /api/orders/modify`.
+**Prerequisites:** read-only access to the open-order book. Caddy's access log is root-readable at `/var/log/caddy/radon.log`. Do not send another modify in order to diagnose this.
+**Blast radius:** a combo modify cancels the working order and then places a replacement. The broker may already have accepted that replacement when the browser gave up. Sending it again cancels the new working order and places another one.
+**Diagnosis:** an empty non-JSON 502 or 504 does not prove the broker rejected the change. `handle /api/orders/modify` in [`cloud/caddy/Caddyfile`](../cloud/caddy/Caddyfile) is its own edge handle and is declared ahead of the catch-all, so the catch-all header timeout is not the bound for this path. The route writes no response header until the replace and the fresh orders sync both return. The seconds are pinned by `TestModifyRouteOutlivesTheCatchAll` in [`cloud/tests/test_caddy_edge_timeouts.py`](../cloud/tests/test_caddy_edge_timeouts.py), not by this page.
+**Stop:** do not send the modify again until the open-order book has been checked. The screen copy is `Check the order before sending it again.`
+**Verification:** the open book shows the intended working order, and no second modify request was sent while the status was unknown.
+**Rollback:** putting this path back on the catch-all alone returns the empty 504 while the broker is still working. Leave the dedicated handle in place.
+**Escalation:** when the book and the broker disagree, escalate with the request time and the open-order rows. Do not attach account identifiers.
+
+---
+
 ## trin-health-heartbeat-turso-timeout
 
 **`radon-trin.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
@@ -1497,7 +1510,8 @@ refresh, while the driver and the sibling scans stay quiet.** Peak:
   `ExecMainCode=2` / `ExecMainStatus=15` inside a minute of
   `/home/radon/.radon-last-green-deploy`. Neighbouring cycles log
   `Data refresh complete (cri: OK, vcg: OK, gex: OK)`. `:8321/health/lite`
-  stays authenticated. The stale message names window 15m.
+  stays authenticated. That historical page named window 15m. A later
+  page names the current open window, 35 minutes, which is two missed fires.
 - **Discriminating check:** last ok gex line is one timer slot back,
   and the killed slot's cri and vcg lines completed. A gex `failed` /
   `timed out` line with an error heartbeat is a real scan failure
@@ -1519,6 +1533,15 @@ refresh, while the driver and the sibling scans stay quiet.** Peak:
   `web/tests/probe-freshness.test.ts` (one missed cycle fresh, the
   next not).
 - **Code:** `scripts/watchdog/services.py`, `web/lib/serviceHealthWindows.ts`.
+
+**Symptom:** `gex-scan` is stale during regular hours while the refresh driver and the sibling scans stayed quiet.
+**Prerequisites:** read-only journal for `radon-refresh.service` and the `gex-scan` health row. Do not restart the Gateway to collect them.
+**Blast radius:** gamma freshness only. Treating one missed fire as a failure restarts work the next timer rewrites. Ignoring two missed fires leaves the gamma row stale through the session.
+**Diagnosis:** one missed 15-minute fire stays inside the 35 minute open window and does not page. Two missed fires still page. The 2026-10-09 page named window 15m because the window had been copied from `vcg-scan`.
+**Stop:** do not restart the Gateway. Do not `reset-failed` `radon-refresh.service` when `Result=success`. If `/health/lite` is down, or a Turso `SELECT 1` fails in the same minute, stand down.
+**Verification:** the next timer logs `gex_scan.py complete` and the ok row is inside the open window.
+**Rollback:** the window lives in `scripts/watchdog/services.py` and `web/lib/serviceHealthWindows.ts`. Reverting those lines restores the false page on one missed fire.
+**Escalation:** a gex `failed` or `timed out` line with an error heartbeat is a real scan failure. Give the operator that line and the sibling cri and vcg lines.
 
 ---
 
