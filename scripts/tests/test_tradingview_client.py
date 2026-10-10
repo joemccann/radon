@@ -536,3 +536,84 @@ def test_local_output_schema_keeps_sdk_result_validation(make_client, valid):
     else:
         assert_code("TV_PROTOCOL_ERROR", client.get_ohlcv("INDEX:MAHN"))
     assert any(call["method"] == "tools/call" for call in server.calls)
+
+
+PROVIDER_NAMES = {
+    "search_symbols": "mcp-tv-search-symbols",
+    "get_ohlcv": "mcp-tv-get-ohlcv",
+}
+
+
+def provider_server(**kwargs):
+    server = FakeServer(**kwargs)
+    for tool in server.tools:
+        tool["name"] = PROVIDER_NAMES.get(tool["name"], tool["name"])
+    return server
+
+
+def test_official_provider_names_discover_as_canonical_research_tools(make_client):
+    server = provider_server()
+    server.tools.append({"name": "mcp-tv-delete-alert", "inputSchema": {"type": "object"}})
+    client, _ = make_client(server)
+    tools = run(client.list_tools())
+    assert {tool["name"]: tool["provider_name"] for tool in tools} == PROVIDER_NAMES
+
+
+@pytest.mark.parametrize("name", ["search_symbols", "mcp-tv-search-symbols"])
+def test_official_search_mapping_preserves_arguments_and_result(make_client, name):
+    server = provider_server(payload={"symbols": []})
+    client, _ = make_client(server)
+    arguments = {"query": "NYSE 52 week highs", "type_filter": "index"}
+    assert run(client.call_tool(name, arguments)) == {"symbols": []}
+    assert server.calls[-1]["params"] == {"name": "mcp-tv-search-symbols", "arguments": arguments}
+
+
+def test_official_ohlcv_mapping_keeps_normalization_and_history_limits(make_client):
+    client, server = make_client(provider_server())
+    result = run(client.get_ohlcv("INDEX:MAHN", count=5000))
+    assert server.calls[-1]["params"]["name"] == "mcp-tv-get-ohlcv"
+    assert result["returned_count"] == 1
+    assert result["history_complete"] is False
+    assert result["bars"][0]["timestamp"] == 1791293400
+
+
+@pytest.mark.parametrize("annotations", [{"readOnlyHint": False}, {"destructiveHint": True}])
+def test_official_mapping_cannot_fall_back_past_unsafe_provider(make_client, annotations):
+    server = provider_server()
+    server.tools[0]["annotations"] = annotations
+    server.tools.append({"name": "get_ohlcv", "inputSchema": server.schema})
+    client, _ = make_client(server)
+    assert_code("TV_TOOL_UNAVAILABLE", client.get_ohlcv("INDEX:MAHN"))
+    assert not any(call["method"] == "tools/call" for call in server.calls)
+
+
+def test_official_mapping_honors_provider_schema_before_call(make_client):
+    server = provider_server()
+    client, _ = make_client(server)
+    assert_code("TV_INVALID_ARGUMENT", client.call_tool("mcp-tv-get-ohlcv", {
+        "symbol": "INDEX:MAHN", "unexpected": True}))
+    assert not any(call["method"] == "tools/call" for call in server.calls)
+
+
+@pytest.mark.parametrize("count", [5001, True])
+def test_official_ohlcv_alias_enforces_count_limit_before_network(monkeypatch, count):
+    monkeypatch.setattr(tv, "_build_oauth_provider", lambda _: pytest.fail("auth reached"))
+    assert_code("TV_INVALID_ARGUMENT", tv.TradingViewClient().call_tool(
+        "mcp-tv-get-ohlcv", {"symbol": "INDEX:MAHN", "count": count}))
+
+
+@pytest.mark.parametrize("name", ["mcp-tv-delete-alert", "mcp-watchlist-get-active-watchlist",
+                                  "mcp-tv-get-news-story", "mcp-tv-search-symbols-extra"])
+def test_unmapped_provider_names_remain_forbidden_before_network(monkeypatch, name):
+    monkeypatch.setattr(tv, "_build_oauth_provider", lambda _: pytest.fail("auth reached"))
+    assert_code("TV_TOOL_FORBIDDEN", tv.TradingViewClient().call_tool(name, {}))
+
+
+def test_official_provider_is_preferred_when_both_safe_names_exist(make_client):
+    server = provider_server()
+    server.tools.append({"name": "get_ohlcv", "inputSchema": server.schema})
+    client, _ = make_client(server)
+    result = run(client.get_ohlcv("INDEX:MAHN"))
+    assert result["returned_count"] == 1
+    assert server.calls[-1]["params"]["name"] == "mcp-tv-get-ohlcv"
+    assert sum(tool["name"] == "get_ohlcv" for tool in run(client.list_tools())) == 1
