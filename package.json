@@ -1,5 +1,5 @@
 {
-  "version": "0.8.2",
+  "version": "0.8.1",
   "type": "module",
   "scripts": {
     "db:migrate": "bun run scripts/db/migrate.ts"
