@@ -45,6 +45,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-disk-cleanup.timer",
     "radon-portfolio-archive.service",
     "radon-portfolio-archive.timer",
+    "radon-research-archive.service",
+    "radon-research-archive.timer",
     "radon-media-backup.service",
     "radon-media-backup.timer",
     "radon-db-retention.service",
@@ -597,6 +599,28 @@ class TestPortfolioArchive:
         timer = unit("radon-portfolio-archive.timer")["Timer"]
         assert "05:40" in timer["oncalendar"]
         assert timer.get("persistent") == "true"
+
+
+class TestResearchArchive:
+    """Monthly research evidence archive to B2, verify-before-prune."""
+
+    def test_oneshot_runs_the_archive_with_a_bounded_budget(self, unit):
+        svc = unit("radon-research-archive.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert svc["execstart"].endswith("/home/radon/radon/scripts/research/archive.py")
+        assert "--no-prune" not in svc["execstart"] and "--dry-run" not in svc["execstart"]
+        assert 3600 <= int(svc["timeoutstartsec"]) <= 6 * 3600
+
+    def test_timer_fires_on_the_first_of_every_month(self, unit):
+        timer = unit("radon-research-archive.timer")["Timer"]
+        assert timer["oncalendar"] == "*-*-01 04:20:00 UTC"
+        assert timer["persistent"] == "true"
+        assert int(timer["randomizeddelaysec"]) > 0
+
+    def test_runs_in_the_container_that_owns_the_private_bind(self, services_dir):
+        dropin = (services_dir / "radon-research-archive.service.d" / "runtime-container.conf").read_text()
+        assert "Type=oneshot" in dropin.splitlines()
+        assert "ExecStart=/usr/local/sbin/radon-app-runtime run %n" in dropin.splitlines()
 
 
 class TestDbRetention:

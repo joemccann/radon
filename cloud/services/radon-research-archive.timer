@@ -1,0 +1,11 @@
+[Unit]
+Description=Radon monthly research evidence archive (1st of the month)
+
+[Timer]
+# 1st of every month, ahead of the 05:40 UTC database maintenance window.
+OnCalendar=*-*-01 04:20:00 UTC
+Persistent=true
+RandomizedDelaySec=900
+
+[Install]
+WantedBy=timers.target
