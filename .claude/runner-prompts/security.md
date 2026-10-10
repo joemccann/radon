@@ -509,7 +509,8 @@ invented default (operator policy 2026-08-31; a fabricated $25 cap killed the
 2026-08-31 attempt mid-scan). `claude auth status` prints JSON on the runner
 (`loggedIn`, `authMethod`, `subscriptionType`):
 
-- **claude.ai subscription** (`authMethod` `claude.ai` — Max/Pro/Team): pass
+- **claude.ai subscription** (`authMethod` `claude.ai`, or `oauth_token` for
+  the runner's `claude setup-token` subscription token — Max/Pro/Team): pass
   NO `--max-budget-usd` at all. There is no dollar cap; the outer wall-clock
   deadline is the bound.
 - **API key** (logged in, any other `authMethod`): pass
@@ -525,14 +526,22 @@ not unlock. When bootstrapped, require the checked-out `HEAD` to equal
 parsing — if ancestry fails, run the approved full scan or fail closed),
 then, with `umask 077`:
 
+The agent's shell does not inherit `CLAUDE_CODE_OAUTH_TOKEN` (the runner
+hands it to the agent process only), so load it from the bot's secrets file
+first. Never echo it.
+
 ```sh
+if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -r "$HOME/.radon-runner.env" ]; then
+  CLAUDE_CODE_OAUTH_TOKEN="$(grep '^CLAUDE_CODE_OAUTH_TOKEN=' "$HOME/.radon-runner.env" | tail -1 | cut -d= -f2-)"
+  export CLAUDE_CODE_OAUTH_TOKEN
+fi
 CLAUDE_AUTH="$(claude auth status 2>/dev/null || true)"
 if ! printf '%s' "$CLAUDE_AUTH" | grep -q '"loggedIn"[[:space:]]*:[[:space:]]*true'; then
   # OPERATOR_REQUIRED: Claude Code is not authenticated on the runner.
   exit_stage_operator_required
 fi
 CLAUDE_BUDGET=""
-if ! printf '%s' "$CLAUDE_AUTH" | grep -q '"authMethod"[[:space:]]*:[[:space:]]*"claude\.ai"'; then
+if ! printf '%s' "$CLAUDE_AUTH" | grep -Eq '"authMethod"[[:space:]]*:[[:space:]]*"(claude\.ai|oauth_token)"'; then
   CLAUDE_BUDGET="--max-budget-usd 50"   # API key; subscription runs uncapped
 fi
 # This is a SECOND claude process, so the runner's own `--model` does not
