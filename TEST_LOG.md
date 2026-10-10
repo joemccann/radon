@@ -1235,3 +1235,10 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | ID | Status | Evidence |
 |---|---|---|
 | T-542 | DONE | Original `record_outcome` turns a successful fake `placeOrder` into `IBOrderError` and raises before journal upsert and fill persistence: 2 failed. After the observation guard, `scripts/tests/test_rel320_outcome_counters.py` passed 17 in each of three serial runs. Closing rounds: root Python 14,700 passed / 2 skipped / 23 subtests, Vitest 10,443 passed / 21 skipped, cloud 1 failed / 2,751 passed / 8 skipped, matching the base SHA's single caddy FAILED node. |
+
+## 2026-10-10
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-543 | DONE | Restoring an awaited success insert left `test_records_submitted_event_with_order_ref_and_perm_id` passed and `test_submitted_audit_does_not_hold_the_place_result` at `TimeoutError` (1 failed / 1 passed). Deferring the rejection insert failed the original row case and the new wait (2 failed). Restored owner file: 18 passed, three serial runs. Product source unchanged. |
+| T-544 | DONE | Adding `X-Radon-Orders-Fresh` on `POST /api/orders` left the URL, method, and timeout checks green and failed the new header assertion (1 failed / 4 passed). Restored file: 5 passed, three serial runs. Product source unchanged. Closing rounds: root Python 14,800 passed / 2 skipped / 23 subtests, Vitest 10,509 passed / 21 skipped, cloud 2,765 passed / 8 skipped, FAILED-list diff against `208bb3d6` empty on all three rounds. | |
