@@ -130,6 +130,8 @@ describe("POST /api/orders edge budget", () => {
     expect(response.status).toBe(200);
     expect(upstreamCall()).toEqual({ url: `${RADON_API}/orders/refresh`, method: "POST" });
     expect(timeoutSpy).toHaveBeenCalledWith(PRODUCER_SYNC_WAIT_MS);
+    const headers = new Headers((mockFetch.mock.calls[0][1] as RequestInit).headers);
+    expect(headers.get("X-Radon-Orders-Fresh")).toBeNull();
   });
 
   it("serves the Turso orders snapshot as sync-pending when the wait elapses", async () => {
