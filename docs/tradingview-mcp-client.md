@@ -44,7 +44,12 @@ initialization. Missing optional SDK is a coded dependency error on use.
 Deny every tool except the explicit, documented research allowlist. Exclude all
 alert and watchlist mutations and `get_active_watchlist` (can create/activate
 lists despite its read-only label). Discover available tools and honor their
-input schemas without widening the allowlist. No news story bodies or alert fire
+input schemas without widening the allowlist. Canonical `search_symbols` and
+`get_ohlcv` map explicitly to official provider names `mcp-tv-search-symbols` and
+`mcp-tv-get-ohlcv`; legacy unprefixed names remain compatible. Discovery exposes
+canonical `name` plus `provider_name` for mapped tools. Calls accept either exact
+name, apply the same argument limits, and use the discovered provider schema and
+annotations. An unsafe official tool never falls back to its legacy alias. No news story bodies or alert fire
 messages. Structured responses or JSON text content are
 accepted; `isError`, partial provider errors and malformed payloads stay errors.
 No fabricated zeroes or swallowed auth failures. Empty search/calendar arrays
@@ -56,8 +61,9 @@ and sorted `bars` of `{timestamp, open, high, low, close, volume}`.
 Reject nonfinite numbers, boolean numeric values, inconsistent OHLC, duplicates
 and malformed timestamps. Volume may be null. Unix seconds remain the source
 timestamp; never invent an exchange session date from a UTC midnight.
-Bound count to 1..5000; the vendor documents no historical date cursor, so
-truncated windows never claim all-time coverage or a confirmed SPX all-time high.
+Bound count to 1..5000. The current provider advertises date-window paging, but
+this helper does not page or establish historical continuity. Truncated windows
+never claim all-time coverage or a confirmed SPX all-time high.
 
 ### Radon surfaces
 
@@ -127,3 +133,13 @@ Private API examples:
 They retain Radon's JWT perimeter and return `Cache-Control: private, no-store`.
 Source-specific responses include permission/licensing metadata as provided;
 availability through MCP does not authorize public redistribution.
+
+## Live mapping verification, 2026-10-10
+
+Authenticated discovery returns official `mcp-tv-search-symbols` and
+`mcp-tv-get-ohlcv`. Exact mappings expose both through canonical research names.
+Live high/low searches returned `INDEX:MAHN` (52-Week Highs NYSE) and
+`INDEX:MALN` (52-Week Lows NYSE). Both daily probes returned 5000 validated bars with original timestamps and
+`history_complete=false`. The source timestamps span MAHN 2006-10-25 through
+2026-10-09 and MALN 2006-08-28 through 2026-10-09 (UTC dates). This confirms
+client access, not universe/count parity or complete indicator history.
