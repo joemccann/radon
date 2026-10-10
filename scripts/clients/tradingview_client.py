@@ -29,6 +29,13 @@ SAFE_RESEARCH_TOOLS = frozenset({
     "get_documents", "get_document_view", "get_earnings_calendar",
     "get_economic_calendar", "get_dividends_calendar",
 })
+# Exact aliases only: never infer permitted tools from a provider prefix.
+PROVIDER_TOOL_NAMES = {
+    "search_symbols": "mcp-tv-search-symbols",
+    "get_ohlcv": "mcp-tv-get-ohlcv",
+}
+CANONICAL_TOOL_NAMES = {provider: canonical for canonical, provider in PROVIDER_TOOL_NAMES.items()}
+
 _MESSAGES = {
     "TV_NOT_CONFIGURED": "TradingView credentials are not configured.",
     "TV_AUTH_REQUIRED": "TradingView authorization is required.",
@@ -330,18 +337,31 @@ class TradingViewClient:
                                             seen.add(cursor)
                                         else:
                                             raise TradingViewClientError("TV_SCHEMA_ERROR")
-                                        safe = {key: value for key, value in tools.items()
-                                                if key in SAFE_RESEARCH_TOOLS and not (
-                                                    value.annotations and (value.annotations.readOnlyHint is False
-                                                                          or value.annotations.destructiveHint is True))}
+                                        safe = {}
+                                        for canonical in sorted(SAFE_RESEARCH_TOOLS):
+                                            provider_name = PROVIDER_TOOL_NAMES.get(canonical)
+                                            tool = tools.get(provider_name) if provider_name else None
+                                            if tool is None:
+                                                tool = tools.get(canonical)
+                                            if tool is not None and not (
+                                                tool.annotations and (tool.annotations.readOnlyHint is False
+                                                                      or tool.annotations.destructiveHint is True)
+                                            ):
+                                                safe[canonical] = tool
                                         if name is None:
-                                            return [tool.model_dump(mode="json", exclude_none=True) for tool in safe.values()]
+                                            catalog = []
+                                            for canonical, tool in safe.items():
+                                                entry = tool.model_dump(mode="json", exclude_none=True)
+                                                if tool.name != canonical:
+                                                    entry.update(name=canonical, provider_name=tool.name)
+                                                catalog.append(entry)
+                                            return catalog
                                         if name not in safe:
                                             raise TradingViewClientError("TV_TOOL_UNAVAILABLE")
                                         _validate_schema(safe[name].inputSchema, arguments, jsonschema)
                                         if safe[name].outputSchema is not None:
                                             _validate_schema(safe[name].outputSchema, None, jsonschema)
-                                        return _decode_result(await session.call_tool(name, arguments,
+                                        return _decode_result(await session.call_tool(safe[name].name, arguments,
                                             read_timeout_seconds=timedelta(seconds=self.timeout)))
                         finally:
                             monitor.cancel()
@@ -352,7 +372,10 @@ class TradingViewClient:
         return await self._request()
 
     async def call_tool(self, name, arguments):
-        if not isinstance(name, str) or name not in SAFE_RESEARCH_TOOLS:
+        if not isinstance(name, str):
+            raise TradingViewClientError("TV_TOOL_FORBIDDEN")
+        name = CANONICAL_TOOL_NAMES.get(name, name)
+        if name not in SAFE_RESEARCH_TOOLS:
             raise TradingViewClientError("TV_TOOL_FORBIDDEN")
         if not isinstance(arguments, dict):
             raise TradingViewClientError("TV_INVALID_ARGUMENT")

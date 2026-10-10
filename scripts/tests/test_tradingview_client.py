@@ -607,3 +607,13 @@ def test_official_ohlcv_alias_enforces_count_limit_before_network(monkeypatch, c
 def test_unmapped_provider_names_remain_forbidden_before_network(monkeypatch, name):
     monkeypatch.setattr(tv, "_build_oauth_provider", lambda _: pytest.fail("auth reached"))
     assert_code("TV_TOOL_FORBIDDEN", tv.TradingViewClient().call_tool(name, {}))
+
+
+def test_official_provider_is_preferred_when_both_safe_names_exist(make_client):
+    server = provider_server()
+    server.tools.append({"name": "get_ohlcv", "inputSchema": server.schema})
+    client, _ = make_client(server)
+    result = run(client.get_ohlcv("INDEX:MAHN"))
+    assert result["returned_count"] == 1
+    assert server.calls[-1]["params"]["name"] == "mcp-tv-get-ohlcv"
+    assert sum(tool["name"] == "get_ohlcv" for tool in run(client.list_tools())) == 1
