@@ -24,7 +24,7 @@ Safety is where the runner runs, not what the script checks:
 | No production credential in the clone | The clone gets no `.env`. The runner loads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from `RADON_RUNNER_DOTENV` or `/usr/local/radon-runner/dotenv-path` (never from the plist), then falls back to `~/.radon-runner.env`. `GH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` load only from `~/.radon-runner.env`; the Claude token reaches claude rungs and the ladder resolver only. `_radonbot` and every agent share a uid, so any file the runner can read, the agent can read. The runner unsets the Pushover keys in the agent process and sends every notification itself; each runner prompt tells the agent not to send `radon PR green` or list the absent keys under Next. `GH_TOKEN` stays so the agent can push. Point the dotenv at a Pushover-only file (step 8), not the operator's full Radon `.env`. Never put a production credential or an admin token in `~/.radon-runner.env` or anywhere in the bot's home |
 | Agent cannot merge or push `main` | A separate GitHub machine account with the Write role on this repo only, used through its classic token (`repo` plus `workflow`, so nightly CI work that edits `.github/workflows` can be pushed to a branch), plus the `main-review` repository ruleset on the default branch: 1 approving review, approval of the most recent push required, stale approvals dismissed on push. Its only bypass actor is the Repository admin role in pull-request mode, so an admin merges through a PR and never pushes `main` directly; the bot account is not exempt. The 27 required status checks stay in the classic branch protection on `main`, not in the ruleset. A token of the operator's own account would not do: it acts as the admin and bypasses the ruleset |
 
-The six loops in [Migration](#migration-from-the-per-loop-wrappers) use the bot runner. `scripts/codemap_nightly.sh` is separate and opens a refresh PR for operator review and merge; the job never merges. Verify the live ruleset in step 8b.3 before enabling a new installation.
+The seven loops in [Migration](#migration-from-the-per-loop-wrappers) use the bot runner. `scripts/codemap_nightly.sh` is separate and opens a refresh PR for operator review and merge; the job never merges. Verify the live ruleset in step 8b.3 before enabling a new installation.
 
 ## Set up a new Mac
 
@@ -69,7 +69,7 @@ sudo pmset -a sleep 0 displaysleep 10     # the Mac must stay awake at night
 ```bash
 RI="$(mktemp -d)" && /usr/bin/git clone https://github.com/joemccann/radon.git "$RI"
 /bin/bash "$RI/scripts/runner/install.sh" --print-plist documentation   # review
-sudo /bin/bash "$RI/scripts/runner/install.sh" documentation ci-performance testing reliability security security-deepsec
+sudo /bin/bash "$RI/scripts/runner/install.sh" documentation ci-performance performance testing reliability security security-deepsec
 /bin/rm -rf "$RI"
 ```
 
@@ -95,7 +95,7 @@ The prompt shows `_radonbot@...`. Before running a check, confirm its output pat
 
 ### 4. Agent CLIs (bot shell)
 
-Install and sign in to every agent the loop's `AGENTS` names (`grok codex agy fx:nvidia fx:cerebras` for documentation, ci-performance, testing and reliability; `claude` for the two security loops, step 8b). The sign-ins print a URL or a device code: open it in your own browser, signed in to the account that owns the subscription.
+Install and sign in to every agent the loop's `AGENTS` names (`grok codex agy fx:nvidia fx:cerebras` for documentation, ci-performance, performance, testing and reliability; `claude` for the two security loops, step 8b). The sign-ins print a URL or a device code: open it in your own browser, signed in to the account that owns the subscription.
 
 | Agent | Install (bot shell) | Sign in (bot shell) | Binary the runner uses |
 |---|---|---|---|
@@ -207,7 +207,7 @@ grep -E '^(export )?(PUSHOVER_USER|PUSHOVER_TOKEN)=' /path/to/radon/.env | sudo 
 Set the path at install time (a refresh without the var leaves `dotenv-path` in place). Refuse a relative path. `install.sh` never chmod, chown or copies the target `.env`. If the bot cannot read it, install prints one WARNING and continues:
 
 ```bash
-sudo RADON_RUNNER_DOTENV=/Users/_radonbot/.radon/pushover.env /bin/bash /path/to/clone/scripts/runner/install.sh reliability testing documentation ci-performance security security-deepsec
+sudo RADON_RUNNER_DOTENV=/Users/_radonbot/.radon/pushover.env /bin/bash /path/to/clone/scripts/runner/install.sh reliability testing documentation ci-performance performance security security-deepsec
 sudo -u _radonbot test -r /Users/_radonbot/.radon/pushover.env && echo readable
 ```
 
@@ -314,7 +314,7 @@ Steps 6 to 8 write into the bot's home only as the bot: your account reads your 
    cd ~/radon-runner/state/security-deepsec/keep/.deepsec && npm ci && ./node_modules/.bin/deepsec --version   # expect 2.3.8
    ```
 
-10. Operator tab, after the PR that moved the loops merges, install all six loops (step 2), then smoke one:
+10. Operator tab, after the PR that moved the loops merges, install all seven loops (step 2), then smoke one:
 
     ```bash
     sudo launchctl kickstart system/com.radon.runner.security && sudo -u _radonbot tail -f /Users/_radonbot/radon-runner/logs/security/$(date +%F).log
@@ -326,6 +326,29 @@ Steps 6 to 8 write into the bot's home only as the bot: your account reads your 
     gh repo deploy-key list -R joemccann/radon-security-reports   # note the old key's id
     gh repo deploy-key delete <old-key-id> -R joemccann/radon-security-reports && rm ~/radon-weekend/.security-reports-deploy-key ~/radon-weekend/.security-reports-deploy-key.pub && rm -rf ~/radon-weekend/radon-security ~/radon-weekend/radon-security-deepsec ~/radon-weekend/radon-security-deepsec.pre-provision-20260915125818 ~/radon-weekend/.gitdirs/security*.git ~/radon-weekend/.gitdirs-agent/security*.git ~/radon-weekend/.security-nightly-scratch ~/radon-weekend/.security-deepsec-scratch ~/radon-weekend/.security-deliver ~/radon-weekend/.security-deepsec-deliver ~/radon-weekend/.security-reports ~/radon-weekend/venv-security ~/radon-weekend/venv-security-deepsec ~/radon-weekend/.runner-state/radon-security*
     ```
+
+### 8c. Performance loop production probe (operator, bot shell, VPS)
+
+The `performance` loop reads production through one forced-command ssh key: the VPS runs `cloud/scripts/perf_probe.py` (read-only, stdlib, as `radon`, never root) for that key and nothing else, whatever the client sends. The pre-run hook (`scripts/runner/hooks/performance_pre.sh`) pulls the snapshot into `state/performance/prod-probe.json`; the agent never connects. Without this step the loop still runs, and its probe file records why the snapshot is missing.
+
+1. Bot shell: mint the key and pin the host key (no trust on first use):
+
+   ```bash
+   ssh-keygen -t ed25519 -N '' -C radon-perf-probe -f ~/.ssh/radon_perf_probe
+   ssh-keyscan -t ed25519 radon-app > ~/.ssh/radon_perf_known_hosts   # then compare against: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the VPS
+   chmod 600 ~/.ssh/radon_perf_probe ~/.ssh/radon_perf_known_hosts
+   ```
+
+2. VPS, as `radon`: append one line to `~/.ssh/authorized_keys` (the `restrict` option disables pty, agent, X11 and port forwarding):
+
+   ```
+   restrict,command="/usr/bin/python3 -I /home/radon/radon/cloud/scripts/perf_probe.py" ssh-ed25519 AAAA... radon-perf-probe
+   ```
+
+3. `PERF_SSH_TARGET` in `scripts/runner/loops/performance.env` must name that host as Tailscale resolves it from the Mac (default `radon@radon-app`). Re-run `install.sh performance` after changing it.
+4. Verify from the bot shell: `ssh -i ~/.ssh/radon_perf_probe -o IdentitiesOnly=yes -o UserKnownHostsFile=~/.ssh/radon_perf_known_hosts radon@radon-app anything | python3 -m json.tool | head` prints the probe JSON, and `... radon@radon-app -t bash` still prints only JSON (no shell).
+
+Revoke by deleting the `authorized_keys` line.
 
 ### 9. Smoke test (bot shell)
 
@@ -423,6 +446,7 @@ Every agent gets `RADON_RUNNER_LOOP_STATE` (the loop's state directory), `RADON_
 | Loop | State |
 |---|---|
 | documentation | Cut over: runs at 03:00 on branch `documentation/<date>` as `_radonbot`, dead-man label `documentation-nightly` (#202); the prompt posts the rolling-issue comment every night (no `POST_RUN` hook); the old wrapper, setup script, LaunchAgent and skill are deleted |
+| performance | New loop: runs at 22:00 (01:00 ET) on branch `performance/<date>`, one 4h phase, dead-man label `performance-nightly`; pre-run hook pins the green base and pulls the production probe (8c) |
 | ci-performance | Cut over: runs at 00:20 on branch `ci-performance/<date>`; `scripts/ci_performance_nightly.sh` and its LaunchAgent are deleted |
 | testing | Cut over: runs at 00:10 on branch `testing/<date>` (4h budget, for the closing three rounds of the full gates); `scripts/testing_weekend.sh`, its setup script, LaunchAgent, skill and portable prompts are deleted. It gets no scoped Turso or Unusual Whales key: the suites need none |
 | reliability | Cut over: runs at 00:00 on branch `reliability/<date>`; `scripts/reliability_weekend.sh`, its setup script, LaunchAgent, skill and portable prompts are deleted. Full pytest, `cloud/tests` and Vitest run in PR CI; the night runs focused suites and the drills |
