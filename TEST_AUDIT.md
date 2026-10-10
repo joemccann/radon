@@ -11317,7 +11317,13 @@ Acceptance: a hung success insert returns the placed order before the insert sta
 
 Acceptance: the page-load POST carries no `X-Radon-Orders-Fresh` header. Place, cancel, and modify keep sending it.
 
-Audited through: 208bb3d687e9216db0c0f185f4b73fa4c30d4fbd on 2026-10-10 — 2 new findings
+### T-545 — P1 — the recorded release is 0.8.2 while commits since 0.7.0 fold to 0.8.1
+
+`scripts/release_version.py:163` compares root and web `package.json` with the fold from `eb5e52066462`. A minor bump resets the patch (`scripts/release_version.py:91`), so the two runtime patches before `feat(web)` (#982) do not survive into 0.8.x. #982 wrote `0.8.2` in the same commit that added the checker. The later runtime patch in #981 moves the fold to 0.8.1. `python3 scripts/release_version.py --check` exited 1: `release version is 0.8.2 (web 0.8.2); commits since eb5e52066462 require 0.8.1`. The classifier and the unit tests were left as they are. `scripts/release_version.py --write` is the supported correction; version fields and `README.md` are not runtime (`scripts/release_version.py:63`).
+
+Acceptance: `--check` exits 0 and prints `0.8.1`. Root `package.json`, `web/package.json`, and the README version badge all read 0.8.1. The fold rules are unchanged.
+
+Audited through: 208bb3d687e9216db0c0f185f4b73fa4c30d4fbd on 2026-10-10 — 3 new findings
 
 ## Remediation 2026-10-10
 
@@ -11325,6 +11331,7 @@ Audited through: 208bb3d687e9216db0c0f185f4b73fa4c30d4fbd on 2026-10-10 — 2 ne
 |---|---|---|
 | T-543 | DONE | Awaited success insert: new case `TimeoutError`, original submitted-row case passed. Deferred rejection: original case `len([]) == 0` and new case `TimeoutError`. Restored source. `scripts/api/tests/test_order_audit_trail.py` 18 passed in each of three serial runs. Product source unchanged. |
 | T-544 | DONE | Fresh header on page-load: 1 failed / 4 passed, and the timeout assertion in that same case had already passed. Header removed. `web/tests/producer-sync-edge-budget.test.ts` 5 passed in each of three serial runs. Product source unchanged. |
+| T-545 | DONE | `--check` on the recorded 0.8.2 exited 1 and named 0.8.1. `--write` set both package files to 0.8.1; the README badge moved with them. `--check` then printed `0.8.1` and exited 0. `scripts/tests/test_release_version.py` passed. Classifier unchanged. The three closing rounds above predate this correction; those suites do not execute the version fields. |
 
 ### Closing gates 2026-10-10
 
