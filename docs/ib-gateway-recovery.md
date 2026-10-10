@@ -294,6 +294,15 @@ Any flag that is unreadable, malformed, symlinked or not root-owned counts as he
 
 ## Upgrading the Gateway image
 
+**Symptom:** a Gateway image change fails login, or a rollback would put an unsupported build back on the broker.
+**Prerequisites:** the digest comes from the image line in [production compose](../cloud/docker-compose.yml) and [local compose](../docker/ib-gateway/docker-compose.yml). Do not copy that digest into this page. Both comments say the same support floor: drops support for builds below 10.50.1 on 2026-12-15.
+**Blast radius:** one lease-held restart is one 2FA push and drops every IB client until login completes. A digest bump that skips the volume copy below fails login because IBC looks for a version directory the old volume hides.
+**Diagnosis:** read `IB_GATEWAY_VERSION` from the new image. Confirm `/seed/ibgateway/$VER` is missing before the copy. Confirm the installed body at `/etc/radon/ib-gateway-compose.yml` is the one `radon-docker-gw config-check` renders.
+**Stop:** stop if a hold, an unreadable lease, or a login throttle is active. Do not restart during the cash session. Do not roll back onto a build the compose comment says IBKR has dropped.
+**Verification:** after the restart, [readiness verification](#readiness-verification) reaches `auth_state=authenticated`. The running container's image digest matches the compose image line.
+**Rollback:** the previous compose body and one more lease-held restart, only while that body is still on a supported build. The old image stays local because disk cleanup never prunes `ghcr.io/gnzsnz/ib-gateway`.
+**Escalation:** if the version directory cannot be copied or login does not reach authenticated, leave the previous supported body installed and escalate with the digest and the sanitized login error.
+
 The `cloud_ib-config` named volume mounts over `/home/ibgateway/Jts`, the same directory the image installs the Gateway into (`Jts/ibgateway/<version>`). Docker seeds a named volume from the image only when the volume is created, so the live volume holds only the version it was born with. A digest bump alone starts IBC against a version directory the volume hides, and the login fails.
 
 Before the cutover restart, copy the new version directory into the volume from the new image. The copy is additive and leaves the running version's directory alone:
@@ -307,7 +316,7 @@ docker run --rm --network none --entrypoint /bin/bash -v cloud_ib-config:/seed \
   -c "test -e /seed/ibgateway/$VER || cp -a /home/ibgateway/Jts/ibgateway/$VER /seed/ibgateway/"
 ```
 
-Then install the new compose body at `/etc/radon/ib-gateway-compose.yml` by hand (the broker gets no control-plane install from CI), confirm `radon-docker-gw config-check`, and run one lease-held `radon-ib-gateway-control restart` outside market hours. That is one 2FA push. Rollback is the previous compose body and one more restart; the old image stays local because disk cleanup never prunes `ghcr.io/gnzsnz/ib-gateway`.
+Then install the new compose body at `/etc/radon/ib-gateway-compose.yml` by hand (the broker gets no control-plane install from CI), confirm `radon-docker-gw config-check`, and run one lease-held `radon-ib-gateway-control restart` outside market hours. That is one 2FA push.
 
 
 ---

@@ -1762,6 +1762,42 @@ class TestNightlyInfrastructureOwners:
         assert "Build Bun artifacts and Python wheels in a detached worktree" not in readme
 
 
+_RUNBOOK_BOUNDARIES = (
+    "Symptom",
+    "Prerequisites",
+    "Blast radius",
+    "Diagnosis",
+    "Stop",
+    "Verification",
+    "Rollback",
+    "Escalation",
+)
+
+_GATEWAY_SUPPORT_FLOOR = "drops support for builds below 10.50.1 on 2026-12-15"
+
+
+class TestDocumentation20261010:
+    """DOC-181..183: contracts that drifted after audited-through 08c227ad."""
+
+    def test_gateway_upgrade_owner_keeps_the_support_floor(self):
+        digests = set()
+        for rel in ("cloud/docker-compose.yml", "docker/ib-gateway/docker-compose.yml"):
+            text = (_ROOT / rel).read_text()
+            assert _GATEWAY_SUPPORT_FLOOR in text
+            match = re.search(r"ghcr.io/gnzsnz/ib-gateway@(sha256:[0-9a-f]{64})", text)
+            assert match, rel
+            digests.add(match.group(1))
+        assert len(digests) == 1
+        owner = _section(
+            (_ROOT / "docs/ib-gateway-recovery.md").read_text(),
+            "Upgrading the Gateway image",
+        )
+        assert _GATEWAY_SUPPORT_FLOOR in owner
+        assert "previous compose body" in owner
+        assert next(iter(digests)) not in owner
+        for boundary in _RUNBOOK_BOUNDARIES:
+            assert f"**{boundary}:**" in owner
+
 class TestSharePnlReportOwner:
     """DOC-174: share P&L formats stay in the report owner, sizes stay in source."""
 
