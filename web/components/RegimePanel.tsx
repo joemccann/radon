@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AlertTriangle, Check, Shield, X, Zap } from "lucide-react";
 import { useViewport } from "@/lib/useViewport";
@@ -367,8 +367,32 @@ export default function RegimePanel({
     [cri?.score, cri?.level, activeCorr, railVcgData, railGexData, railDispersionData],
   );
 
+  const mobileTabsRef = useRef<HTMLDivElement>(null);
+  const tabStripRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const scrollHorizontal = (container: HTMLElement | null, selector: string) => {
+      if (!container) return;
+      const activeEl = container.querySelector<HTMLElement>(selector);
+      if (!activeEl) return;
+      const targetLeft =
+        activeEl.offsetLeft - container.clientWidth / 2 + activeEl.clientWidth / 2;
+      if (typeof container.scrollTo === "function") {
+        container.scrollTo({ left: Math.max(0, targetLeft), behavior: "smooth" });
+      } else {
+        container.scrollLeft = Math.max(0, targetLeft);
+      }
+    };
+
+    const frame = requestAnimationFrame(() => {
+      scrollHorizontal(mobileTabsRef.current, ".m-chip--active");
+      scrollHorizontal(tabStripRef.current, ".ticker-tab.active");
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeTab]);
+
   const tabBar = compact ? (
-    <div className="m-regime-tabs" role="tablist" aria-label="Regime tabs">
+    <div className="m-regime-tabs" ref={mobileTabsRef} role="tablist" aria-label="Regime tabs">
       {(["cri", "vcg", "gex", "grg", "breadth", "ma-ratio", "rsi-oversold", "trin", "divyield", "hyad", "bpi", "margin", "hhlev", "credit", "iei-hyg", "credit-vix", "straddle", "cor", "streaks", "vixcor", "vixts", "panic-index", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "calm-streak", "cot", "ats", "short", "backtest"] as RegimeTab[]).map((t) => (
         <button
           key={t}
@@ -386,7 +410,7 @@ export default function RegimePanel({
     <>
       <RegimeRail activeTab={activeTab} onSelect={goToTab} statuses={railStatuses} />
       {/* Narrow-desktop fallback (<1100px): the flat strip, CSS-toggled against the rail. */}
-      <div className="ticker-tabs regime-tab-strip" style={{ marginBottom: "16px" }}>
+      <div className="ticker-tabs regime-tab-strip" ref={tabStripRef} style={{ marginBottom: "16px" }}>
         {REGIME_TABS.map((t) => (
           <button key={t} className={`ticker-tab ${activeTab === t ? "active" : ""}`} onClick={() => goToTab(t)}>
             {REGIME_TAB_LABEL[t]}

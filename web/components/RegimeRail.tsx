@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   REGIME_RAIL_GROUPS,
   REGIME_TABS,
@@ -26,6 +26,7 @@ type RegimeRailProps = {
  */
 export default function RegimeRail({ activeTab, onSelect, statuses }: RegimeRailProps) {
   const [filter, setFilter] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
 
   const groups = useMemo(() => {
     const needle = filter.trim().toLowerCase();
@@ -38,6 +39,39 @@ export default function RegimeRail({ activeTab, onSelect, statuses }: RegimeRail
     }).filter((group) => group.tabs.length > 0);
   }, [filter, statuses]);
 
+  const scrollToActiveTab = useCallback((tab: RegimeTab, behavior: ScrollBehavior = "smooth") => {
+    const list = listRef.current;
+    if (!list) return;
+    const item = list.querySelector<HTMLElement>(`[data-tab="${tab}"]`);
+    if (!item) return;
+
+    const listRect = list.getBoundingClientRect();
+    const itemRect = item.getBoundingClientRect();
+
+    const prefersReducedMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const scrollBehavior = prefersReducedMotion ? "auto" : behavior;
+
+    const targetScrollTop =
+      listRect.height > 0
+        ? list.scrollTop + (itemRect.top - listRect.top) - listRect.height / 2 + itemRect.height / 2
+        : item.offsetTop - (list.clientHeight || 0) / 2 + (item.clientHeight || 0) / 2;
+
+    if (typeof list.scrollTo === "function") {
+      list.scrollTo({ top: Math.max(0, targetScrollTop), behavior: scrollBehavior });
+    } else {
+      list.scrollTop = Math.max(0, targetScrollTop);
+    }
+  }, []);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      scrollToActiveTab(activeTab);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeTab, filter, scrollToActiveTab]);
+
   return (
     <nav className="regime-rail" aria-label="Regime indicators">
       <div className="regime-rail__filter">
@@ -49,7 +83,7 @@ export default function RegimeRail({ activeTab, onSelect, statuses }: RegimeRail
           onChange={(e) => setFilter(e.target.value)}
         />
       </div>
-      <div className="regime-rail__list">
+      <div className="regime-rail__list" ref={listRef}>
         {groups.map((group) => (
           <div key={group.label} className="regime-rail__group">
             <div className="regime-rail__group-head">
@@ -69,7 +103,10 @@ export default function RegimeRail({ activeTab, onSelect, statuses }: RegimeRail
                   aria-label={`${REGIME_TAB_LABEL[tab]}: ${group.label}`}
                   aria-current={active ? "page" : undefined}
                   className={`regime-rail__item${active ? " active" : ""}`}
-                  onClick={() => onSelect(tab)}
+                  onClick={() => {
+                    scrollToActiveTab(tab);
+                    onSelect(tab);
+                  }}
                 >
                   <span className={`regime-rail__dot regime-rail__dot--${status?.tone ?? "neutral"}`} aria-hidden="true" />
                   <span className="regime-rail__name">{REGIME_TAB_LABEL[tab]}</span>

@@ -227,6 +227,158 @@ describe("RegimeRail — grouped rail rendering + navigation", () => {
     const { container } = renderRail();
     expect(container.querySelector('[data-tab="vcg"]')!.getAttribute("aria-label")).toBe("VCG: Composite");
   });
+
+  it("auto-scrolls navigation rail to activeTab on mount and centers the indicator", async () => {
+    const scrollToSpy = vi.fn();
+    const originalScrollTo = HTMLElement.prototype.scrollTo;
+    HTMLElement.prototype.scrollTo = scrollToSpy;
+
+    try {
+      const { container } = render(
+        <RegimeRail activeTab="divyield" onSelect={vi.fn()} statuses={{}} />,
+      );
+
+      const list = container.querySelector(".regime-rail__list") as HTMLElement;
+      const targetItem = container.querySelector('[data-tab="divyield"]') as HTMLElement;
+
+      vi.spyOn(list, "getBoundingClientRect").mockReturnValue({
+        top: 100,
+        bottom: 700,
+        height: 600,
+        left: 0,
+        right: 240,
+        width: 240,
+        x: 0,
+        y: 100,
+        toJSON: () => {},
+      });
+
+      vi.spyOn(targetItem, "getBoundingClientRect").mockReturnValue({
+        top: 900,
+        bottom: 932,
+        height: 32,
+        left: 0,
+        right: 240,
+        width: 240,
+        x: 0,
+        y: 900,
+        toJSON: () => {},
+      });
+
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+
+      expect(scrollToSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          top: expect.any(Number),
+          behavior: "smooth",
+        }),
+      );
+      const lastCall = scrollToSpy.mock.calls[scrollToSpy.mock.calls.length - 1][0];
+      expect(lastCall.top).toBe(516);
+    } finally {
+      HTMLElement.prototype.scrollTo = originalScrollTo;
+    }
+  });
+
+  it("auto-scrolls immediately when an indicator is clicked", () => {
+    const scrollToSpy = vi.fn();
+    const originalScrollTo = HTMLElement.prototype.scrollTo;
+    HTMLElement.prototype.scrollTo = scrollToSpy;
+
+    try {
+      const { container, onSelect } = renderRail({ activeTab: "cri" });
+      const list = container.querySelector(".regime-rail__list") as HTMLElement;
+      const targetItem = container.querySelector('[data-tab="divyield"]') as HTMLElement;
+
+      vi.spyOn(list, "getBoundingClientRect").mockReturnValue({
+        top: 100,
+        bottom: 700,
+        height: 600,
+        left: 0,
+        right: 240,
+        width: 240,
+        x: 0,
+        y: 100,
+        toJSON: () => {},
+      });
+
+      vi.spyOn(targetItem, "getBoundingClientRect").mockReturnValue({
+        top: 850,
+        bottom: 882,
+        height: 32,
+        left: 0,
+        right: 240,
+        width: 240,
+        x: 0,
+        y: 850,
+        toJSON: () => {},
+      });
+
+      fireEvent.click(targetItem);
+
+      expect(onSelect).toHaveBeenCalledWith("divyield");
+      expect(scrollToSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          top: 466,
+          behavior: "smooth",
+        }),
+      );
+    } finally {
+      HTMLElement.prototype.scrollTo = originalScrollTo;
+    }
+  });
+
+  it("respects prefers-reduced-motion: reduce by using auto scrolling", async () => {
+    const scrollToSpy = vi.fn();
+    const originalScrollTo = HTMLElement.prototype.scrollTo;
+    HTMLElement.prototype.scrollTo = scrollToSpy;
+
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = vi.fn().mockImplementation((query) => ({
+      matches: query === "(prefers-reduced-motion: reduce)",
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+
+    try {
+      const { container } = renderRail({ activeTab: "skew2d" });
+      const targetItem = container.querySelector('[data-tab="skew2d"]') as HTMLElement;
+      fireEvent.click(targetItem);
+
+      expect(scrollToSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          behavior: "auto",
+        }),
+      );
+    } finally {
+      HTMLElement.prototype.scrollTo = originalScrollTo;
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+
+  it("scrolls only the rail container and does not scroll the window", () => {
+    const listScrollSpy = vi.fn();
+    const windowScrollSpy = vi.spyOn(window, "scrollTo");
+    const originalScrollTo = HTMLElement.prototype.scrollTo;
+    HTMLElement.prototype.scrollTo = listScrollSpy;
+
+    try {
+      const { container } = renderRail({ activeTab: "cri" });
+      const targetItem = container.querySelector('[data-tab="divyield"]') as HTMLElement;
+      fireEvent.click(targetItem);
+
+      expect(listScrollSpy).toHaveBeenCalled();
+      expect(windowScrollSpy).not.toHaveBeenCalled();
+    } finally {
+      HTMLElement.prototype.scrollTo = originalScrollTo;
+      windowScrollSpy.mockRestore();
+    }
+  });
 });
 
 /* ─── 4. RegimePanel wiring pin ────────────────────────── */
