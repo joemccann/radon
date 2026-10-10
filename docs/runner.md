@@ -376,6 +376,7 @@ An uncertain lock requires operator inspection of its recorded PID and process s
 |---|---|---|
 | `sudo: a password is required` from an agent or script | `sudo` needs your password at a terminal | Run the command yourself in Terminal |
 | Security loop log: `Not logged in · Please run /login` | `CLAUDE_CODE_OAUTH_TOKEN` missing or expired in `~/.radon-runner.env` | Step 8b.4 `claude setup-token`, then kick the loop |
+| Security log: `Claude Security did not run (OPERATOR_REQUIRED)`, claude `auth status` logged out | The agent's shell does not inherit `CLAUDE_CODE_OAUTH_TOKEN`; Stage 4 reads it from `~/.radon-runner.env` itself, so the token there is missing or expired | `sudo -H -u _radonbot sh -c 'cd; CLAUDE_CODE_OAUTH_TOKEN=$(grep ^CLAUDE_CODE_OAUTH_TOKEN= .radon-runner.env \| cut -d= -f2-) .local/bin/claude auth status'`; re-mint with step 8b.4 if logged out |
 | "Keychain Not Found ... antigravity" dialog | The bot has no login keychain | Cancel, then step 5 |
 | `--check` passes but paths show your home | You ran it in your own tab | Rerun it in the bot shell |
 | GitHub signup: "email ... already associated with an account" | One email per GitHub account | Use a different address |
