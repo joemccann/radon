@@ -12,6 +12,7 @@ hrana HTTP transport — the API process never touches sync libsql).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -20,6 +21,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from fastapi import BackgroundTasks, HTTPException
 from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -112,6 +114,46 @@ class TestPlaceSuccess:
         assert row[LIMIT_PRICE] == 200.0
         assert row[STATUS] == "Submitted"
 
+    @pytest.mark.asyncio
+    async def test_submitted_audit_does_not_hold_the_place_result(self, monkeypatch):
+        """A hung success insert must not hold the place result.
+
+        TestClient runs FastAPI background tasks before it returns, so the
+        existing submitted-row case stays green if the insert moves back onto
+        the response. This calls the reservation body directly.
+        """
+        from scripts.api import server
+
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def hang(*_args, **_kwargs):
+            entered.set()
+            await release.wait()
+            return True
+
+        monkeypatch.setattr(server, "record_order_event", hang)
+        monkeypatch.setattr(server, "test_mode", False)
+        monkeypatch.setattr(
+            server,
+            "_run_ib_script_with_recovery",
+            _fake_recovery(_successful_place_result()),
+        )
+        background = BackgroundTasks()
+        body = {**_STOCK_ORDER, "orderRef": "radon-testref"}
+
+        result = await asyncio.wait_for(
+            server._orders_place_after_rate_reservation(body, background),
+            timeout=1,
+        )
+
+        assert result["status"] == "ok"
+        assert result["orderId"] == 42
+        assert not entered.is_set()
+        release.set()
+        await background()
+        assert entered.is_set()
+
     def test_emits_info_log_without_account_numbers(
         self, trusted_client, captured_events, monkeypatch, caplog
     ):
@@ -164,6 +206,48 @@ class TestPlaceRejection:
         assert row[SYMBOL] == "AAPL"
         detail = json.loads(row[DETAIL])
         assert detail["ib_error_code"] == 201
+
+    @pytest.mark.asyncio
+    async def test_rejected_place_awaits_the_audit_before_raising(self, monkeypatch):
+        """The 502 must not leave before the rejected row is written."""
+        from scripts.api import server
+
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def hang(*_args, **_kwargs):
+            entered.set()
+            await release.wait()
+            return True
+
+        rejection = SimpleNamespace(
+            ok=True,
+            error=None,
+            data={
+                "status": "error",
+                "message": "Order rejected — margin",
+                "ib_error_code": 201,
+                "orderRef": "radon-rejref",
+            },
+        )
+        monkeypatch.setattr(server, "record_order_event", hang)
+        monkeypatch.setattr(server, "test_mode", False)
+        monkeypatch.setattr(
+            server, "_run_ib_script_with_recovery", _fake_recovery(rejection)
+        )
+        background = BackgroundTasks()
+        body = {**_STOCK_ORDER, "orderRef": "radon-rejref"}
+
+        task = asyncio.create_task(
+            server._orders_place_after_rate_reservation(body, background)
+        )
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        assert not task.done()
+        release.set()
+        with pytest.raises(HTTPException) as exc_info:
+            await task
+        assert exc_info.value.status_code == 502
+        assert background.tasks == []
 
     def test_rejection_detail_scrubs_account_numbers(
         self, trusted_client, captured_events, monkeypatch
