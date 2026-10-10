@@ -196,12 +196,13 @@ def compute_index(
     """
     rows = _extract_model_rows(aa_response)
     by_id = {row.get("id"): row for row in rows if isinstance(row, dict) and row.get("id")}
+    by_slug = {row.get("slug"): row for row in rows if isinstance(row, dict) and row.get("slug")}
 
     components: dict[str, dict[str, float]] = {}
     blended: list[float] = []
 
     for model_id in model_ids:
-        row = by_id.get(model_id)
+        row = by_slug.get(model_id) or by_id.get(model_id)
         if row is None:
             logging.info("[llm_token_index] model %s not in AA response — skipping", model_id)
             continue
