@@ -326,6 +326,106 @@ class TestHeartbeatTimeout:
         assert "heartbeat failed" not in err
 
 
+class _EmptyCboeBody:
+    """HTTP 200 application/json with a zero-length body.
+
+    Live shape on 2026-10-10: cdn.cboe.com 307s to cdn-api.cboe.com, and
+    _SPX.json is an empty object (etag of the empty file). json.load
+    raises Expecting value: line 1 column 1 (char 0).
+    """
+
+    status = 200
+
+    def __init__(self):
+        self.headers = {
+            "Content-Type": "application/json",
+            "Content-Length": "0",
+            "Last-Modified": "Sat, 10 Oct 2026 12:04:00 GMT",
+        }
+
+    def read(self, _n=-1):
+        return b""
+
+    def geturl(self):
+        return "https://cdn-api.cboe.com/api/global/delayed_quotes/charts/historical/_SPX.json"
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+
+class TestEmptySourceBody:
+    def test_empty_cboe_200_keeps_last_good_and_exits_zero(
+        self, writes, monkeypatch, capsys,
+    ):
+        """Page 2fbaca4f629c975ab1fe0dbe5bc6f825 (2026-10-10 14:30Z).
+
+        The 02:40 cycle had already stored Friday 2026-10-09 (streak 14).
+        The 14:30 cycle's Cboe GET followed the 307 and got HTTP 200
+        content-length 0. json.load raised, main() printed run failed,
+        and the oneshot exited 1 (Result=exit-code, NRestarts=0). An
+        empty body must keep that snapshot, skip both heartbeats, and
+        exit 0 so the unit does not latch until the next timer.
+        """
+        import fetch_calm_streak as mod
+
+        cached = build_output(
+            compute_streaks(LATE),
+            scan_time="2026-10-10T02:40:53+00:00",
+            source_last_modified="Sat, 10 Oct 2026 02:02:01 GMT",
+        )
+        cached["data_date"] = "2026-10-09"
+        cached["current"]["streak"] = 14
+        text = json.dumps(cached)
+        mod.CALM_STREAK_JSON.write_text(text)
+        monkeypatch.setattr(mod, "urlopen", lambda *_a, **_k: _EmptyCboeBody())
+
+        assert mod.main([]) == 0
+        err = capsys.readouterr().err
+        assert "source body unusable; keeping last-good" in err
+        assert "Expecting value: line 1 column 1 (char 0)" in err
+        assert "run failed" not in err
+        assert writes == []
+        assert mod.CALM_STREAK_JSON.read_text() == text
+
+    def test_empty_body_without_a_cache_still_fails(self, writes, monkeypatch, capsys):
+        import fetch_calm_streak as mod
+
+        monkeypatch.setattr(mod, "_read_json_cache", lambda: None)
+        monkeypatch.setattr(mod, "urlopen", lambda *_a, **_k: _EmptyCboeBody())
+
+        assert mod.main([]) == 1
+        err = capsys.readouterr().err
+        assert "run failed" in err
+        assert "keeping last-good" not in err
+        assert ("health", "calm-streak", "error") in writes
+        assert not mod.CALM_STREAK_JSON.exists()
+
+    def test_http_error_still_fails_the_oneshot(self, writes, monkeypatch, capsys):
+        import fetch_calm_streak as mod
+        from urllib.error import HTTPError
+
+        cached = build_output(
+            compute_streaks(LATE),
+            scan_time="2026-10-10T02:40:53+00:00",
+            source_last_modified="Sat, 10 Oct 2026 02:02:01 GMT",
+        )
+        mod.CALM_STREAK_JSON.write_text(json.dumps(cached))
+
+        def boom(*_a, **_k):
+            raise HTTPError(mod.CBOE_SPX_URL, 503, "unavailable", hdrs=None, fp=None)
+
+        monkeypatch.setattr(mod, "urlopen", boom)
+
+        assert mod.main([]) == 1
+        err = capsys.readouterr().err
+        assert "run failed" in err
+        assert "keeping last-good" not in err
+        assert ("health", "calm-streak", "error") in writes
+
+
 class TestStorage:
     @pytest.fixture()
     def db(self):

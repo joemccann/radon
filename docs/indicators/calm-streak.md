@@ -109,6 +109,12 @@ Seams monkeypatched by tests: `_fetch_source(if_modified_since) -> (payload_or_N
    run on an empty table therefore backfills from 1985 (~10.5k rows, 27 chunked
    statements); later runs write only new sessions.
 4. Fetch failure: `service_health` `error`, no snapshot write, exit non-zero.
+   An empty or non-JSON body (`JSONDecodeError`, including
+   `Expecting value: line 1 column 1 (char 0)` on a zero-length 200)
+   with a last-good cache is not that failure: log
+   `source body unusable; keeping last-good`, write no heartbeat, exit 0.
+   No cache still exits non-zero. A standing empty origin goes stale
+   inside the 26-hour window because the ok heartbeat is not refreshed.
 
 Write order in `persist_result`: `writer.ensure_no_replica_for_writers()` →
 `writer.upsert_calm_streak_rows(rows, recorded_at=scan_time)` (skipped when `rows`
