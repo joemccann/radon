@@ -284,6 +284,40 @@ test.describe("/regime/vixcor — VIX vs COR3M correlation tab", () => {
     await expect(block.locator('[data-testid="vixcor-base-rate-row-5"]')).toContainText("+3.9%");
     await expect(block.locator('[data-testid="vixcor-base-rate-row-5"]')).toContainText("+9.0%");
 
+    // The caption shares the section header's inline inset and stays off the
+    // card stroke. The chart source line uses the same inset against its title.
+    const pads = await page.evaluate(() => {
+      const read = (sel: string) => {
+        const el = document.querySelector(sel);
+        if (!el) return null;
+        const s = getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        return {
+          padLeft: parseFloat(s.paddingLeft),
+          padRight: parseFloat(s.paddingRight),
+          padBottom: parseFloat(s.paddingBottom),
+          fontSize: parseFloat(s.fontSize),
+          textLeft: r.left + parseFloat(s.paddingLeft),
+        };
+      };
+      return {
+        note: read('[data-testid="vixcor-base-rate-note"]'),
+        header: read('[data-testid="vixcor-base-rate"] .section-header'),
+        source: read('[data-testid="vixcor-source-footnote"]'),
+        chartTitle: read('[data-testid="vixcor-chart-section"] .section-header'),
+      };
+    });
+    expect(pads.note).not.toBeNull();
+    expect(pads.header).not.toBeNull();
+    expect(pads.note!.padLeft).toBe(pads.header!.padLeft);
+    expect(pads.note!.padRight).toBe(pads.header!.padLeft);
+    expect(pads.note!.padBottom).toBeGreaterThanOrEqual(16);
+    expect(pads.note!.fontSize).toBeGreaterThanOrEqual(12);
+    expect(pads.note!.textLeft).toBeCloseTo(pads.header!.textLeft, 0);
+    expect(pads.source!.padLeft).toBe(pads.chartTitle!.padLeft);
+    expect(pads.source!.textLeft).toBeCloseTo(pads.chartTitle!.textLeft, 0);
+    await block.screenshot({ path: "/tmp/vixcor-base-rate-footnote.png" });
+
     // The ban is on the CLAIM, not on its negation — the sanctioned copy says
     // "not a warning" / "not a forecast", which is the point. Same convention
     // as web/tests/vixcor-panel.test.tsx.

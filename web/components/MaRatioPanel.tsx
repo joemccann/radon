@@ -294,14 +294,7 @@ export default function MaRatioPanel() {
           />
         )}
 
-        <div
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "var(--text-meta)",
-            color: "var(--text-muted)",
-            marginTop: "8px",
-          }}
-        >
+        <div className="section-footnote">
           {SOURCE_FOOTNOTE}
         </div>
       </div>

@@ -765,6 +765,14 @@ describe("VixCorPanel — base-rate block shows the median and the +20% share", 
     expect(text).toContain("on the median the two are indistinguishable at 42 sessions");
     expect(text).not.toContain("below the all-session base rate at every horizon");
   });
+
+  it("insets the base-rate footnote to the section header, inside the card", () => {
+    renderPanel(hookState({ data: buildData() }));
+    const note = screen.getByTestId("vixcor-base-rate-note");
+    expect(note.classList.contains("section-footnote")).toBe(true);
+    expect(note.parentElement?.className).toContain("section");
+    expect(note.textContent).toContain("This is a regime description, not a forecast.");
+  });
 });
 
 /* ─── Over-claim and brand-token guards ──────────────── */
