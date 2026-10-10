@@ -61,7 +61,6 @@ export type AtsVenueShareData = {
   week_start_date: string | null;
   thresholds: AtsVenueShareThresholds | null;
   current: AtsVenueShareRow[];
-  series: Record<string, AtsVenueShareRow[]>;
   errors: AtsVenueShareError[];
   universe?: AtsUniverseMeta;
   carried_forward?: string[];

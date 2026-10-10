@@ -244,3 +244,93 @@ describe("GET /api/vol-cone", () => {
     expect(route.dynamic).toBe("force-dynamic");
   });
 });
+
+// The full row is ~9.6 MB in production and the selected-name chart reads
+// its per-name series, so the route keeps the shape and caches the read.
+describe("GET /api/vol-cone read cache", () => {
+  let executeCount = 0;
+
+  beforeEach(() => {
+    process.env.RADON_DB_CACHE_FORCE = "1";
+    executeCount = 0;
+    mockGetDb.mockImplementation(() => ({
+      execute: (stmt: Parameters<Client["execute"]>[0]) => {
+        executeCount += 1;
+        return db.execute(stmt);
+      },
+    }) as unknown as Client);
+  });
+
+  afterEach(() => {
+    delete process.env.RADON_DB_CACHE_FORCE;
+    mockGetDb.mockImplementation(() => db);
+  });
+
+  it("single-flights concurrent requests into one Turso read", async () => {
+    await insertSnapshot(buildPayload());
+    const { GET } = await import("../app/api/vol-cone/route");
+    await Promise.all([GET(), GET(), GET()]);
+    expect(executeCount).toBe(1);
+  });
+
+  it("serves from cache inside the TTL and rereads after it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-09-08T15:00:00Z"));
+      await insertSnapshot(buildPayload({ scan_time: "2026-09-08T14:45:00Z" }));
+      const { GET } = await import("../app/api/vol-cone/route");
+      await GET();
+      vi.setSystemTime(new Date("2026-09-08T15:00:59Z"));
+      await GET();
+      expect(executeCount).toBe(1);
+      vi.setSystemTime(new Date("2026-09-08T15:01:01Z"));
+      await GET();
+      expect(executeCount).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("judges freshness at serve time, not when the read was cached", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-09-06T20:00:00Z")); // Sunday, closed window
+      const fridayEod = "2026-09-04T20:45:00Z";
+      await insertSnapshot(buildPayload({ scan_time: fridayEod }), fridayEod);
+      const { GET } = await import("../app/api/vol-cone/route");
+      expect((await jsonOf(await GET())).missing).toBeUndefined();
+      vi.setSystemTime(new Date("2026-09-06T20:00:30Z"));
+      // Same cached read; only the clock moved. Freshness must still be computed now.
+      expect((await jsonOf(await GET())).missing).toBeUndefined();
+      expect(executeCount).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never caches an empty read, so the first real row is served immediately", async () => {
+    const { GET } = await import("../app/api/vol-cone/route");
+    expect((await jsonOf(await GET())).missing).toBe(true);
+    await insertSnapshot(buildPayload());
+    const json = await jsonOf(await GET());
+    expect(json.missing).toBeUndefined();
+    expect(json.count).toBe(2);
+  });
+
+  it("never caches a missing:true degraded row", async () => {
+    await insertSnapshot(buildPayload({ missing: true, scan_time: "2026-01-01T00:00:00Z" }), "2026-01-01T00:00:00Z");
+    const { GET } = await import("../app/api/vol-cone/route");
+    await GET();
+    await insertSnapshot(buildPayload());
+    expect((await jsonOf(await GET())).count).toBe(2);
+  });
+
+  it("keeps the per-name series the selected-name chart reads", async () => {
+    await insertSnapshot(buildPayload({
+      names: [{ ticker: "NVDA", series: [{ date: "2026-08-12", atm_iv: 0.38 }] }],
+    }));
+    const { GET } = await import("../app/api/vol-cone/route");
+    const json = await jsonOf(await GET());
+    expect((json.names as Payload[])[0].series).toEqual([{ date: "2026-08-12", atm_iv: 0.38 }]);
+  });
+});

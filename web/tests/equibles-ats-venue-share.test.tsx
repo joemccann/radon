@@ -190,7 +190,6 @@ function data(overrides: Partial<AtsVenueShareData> = {}): AtsVenueShareData {
       z_window_weeks: 52,
       min_history_weeks: 12,
     },
-    series: {},
     errors: [],
     ...overrides,
     current,

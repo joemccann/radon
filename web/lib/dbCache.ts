@@ -29,12 +29,16 @@ const generations = new Map<string, number>();
 
 const DEFAULT_MAX_STALE_MS = 60_000;
 
-export interface CachedReadOpts {
+export interface CachedReadOpts<T = unknown> {
   /** Serve the last good value if the refresh fetch throws (e.g. a Turso
    * HTTP-pipeline stall), bounded by `maxStaleMs`. Off by default. */
   staleWhileError?: boolean;
   /** Upper bound on how old a value may be to satisfy `staleWhileError`. */
   maxStaleMs?: number;
+  /** Store the value only when this returns true. An empty or degraded read
+   * then refetches on the next call instead of pinning last-known-good out
+   * of the cache for a whole TTL (feedback_dont_cache_empty_results). */
+  shouldCache?: (value: T) => boolean;
 }
 
 export interface CachedReadResult<T> {
@@ -46,7 +50,7 @@ export interface CachedReadResult<T> {
 
 function staleResult<T>(
   hit: Entry<T> | undefined,
-  opts: CachedReadOpts,
+  opts: CachedReadOpts<T>,
   error: unknown,
 ): CachedReadResult<T> {
   if (opts.staleWhileError && hit) {
@@ -67,7 +71,7 @@ export async function cachedRead<T>(
   key: string,
   ttlMs: number,
   fetcher: () => Promise<T>,
-  opts: CachedReadOpts = {},
+  opts: CachedReadOpts<T> = {},
 ): Promise<T> {
   return (await cachedReadResult(key, ttlMs, fetcher, opts)).value;
 }
@@ -79,7 +83,7 @@ export async function cachedReadResult<T>(
   key: string,
   ttlMs: number,
   fetcher: () => Promise<T>,
-  opts: CachedReadOpts = {},
+  opts: CachedReadOpts<T> = {},
 ): Promise<CachedReadResult<T>> {
   // Bypass entirely under test so route handlers (which mock @/lib/db and call
   // their GET repeatedly) see a fresh read each call. The cache's own unit test
@@ -107,7 +111,8 @@ export async function cachedReadResult<T>(
 
   const fetchPromise = (async () => {
     const value = await fetcher();
-    if ((generations.get(key) ?? 0) === generation) {
+    const isCurrentGeneration = (generations.get(key) ?? 0) === generation;
+    if (isCurrentGeneration && (opts.shouldCache?.(value) ?? true)) {
       store.set(key, { value, freshUntil: Date.now() + ttlMs, storedAt: Date.now() });
     }
     return value;
