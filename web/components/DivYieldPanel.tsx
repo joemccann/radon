@@ -233,14 +233,7 @@ export default function DivYieldPanel() {
             ariaLabel="Dividend yield breadth history range brush"
           />
         )}
-        <div
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "var(--text-meta)",
-            color: "var(--text-muted)",
-            marginTop: "8px",
-          }}
-        >
+        <div className="section-footnote">
           {SURVIVORSHIP_CAVEAT}
         </div>
       </div>

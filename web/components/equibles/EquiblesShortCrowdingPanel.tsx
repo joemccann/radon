@@ -254,15 +254,7 @@ export default function EquiblesShortCrowdingPanel() {
           <ShortCrowdingTable entries={entries} />
         </div>
 
-        <div
-          data-testid="short-crowding-footnote"
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "var(--text-meta)",
-            color: "var(--text-muted)",
-            marginTop: "8px",
-          }}
-        >
+        <div className="section-footnote" data-testid="short-crowding-footnote">
           {FOOTNOTE} {BORROW_NOTE} {freshnessNote(data.latest_settlement_date ?? entries[0]?.settlement_date ?? null)}
         </div>
       </div>

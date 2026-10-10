@@ -30,6 +30,19 @@
   background: transparent;
 }
 
+.radon-clear .section-footnote {
+  padding-inline: 22px;
+  font-family: var(--font-sans);
+  font-size: var(--text-meta);
+  line-height: 1.6;
+  letter-spacing: 0;
+}
+
+.radon-clear .section > .section-footnote {
+  padding: 16px 22px 22px;
+  border-top: 1px solid var(--line-grid);
+}
+
 .radon-clear :is(.section-title, .modal-title, .instrument-section__title) {
   font-family: var(--font-sans);
   font-size: var(--text-panel-title);
@@ -369,6 +382,8 @@ body.radon-clear[data-mobile="true"] :is(
   body.radon-clear[data-mobile="true"] .content:has(> .dashboard-surface) { padding: 22px; }
   .radon-clear .section { margin-bottom: 20px; }
   .radon-clear .section-header { min-height: 56px; padding: 16px; }
+  .radon-clear .section-footnote { padding-inline: 16px; }
+  .radon-clear .section > .section-footnote { padding: 14px 16px 16px; }
   .radon-clear :is(.section-title, .instrument-section__title) { font-size: 17px; }
   .radon-clear .metric-card { padding: 16px 12px; }
   .radon-clear .metric-value { font-size: 24px; }
