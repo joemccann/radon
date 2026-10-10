@@ -11298,3 +11298,49 @@ Corrected toolchain for every counted gate: Homebrew OpenSSL and Bash on `PATH`,
 | 3 | 14,700 passed / 2 skipped / 23 subtests | 10,443 passed / 21 skipped / 1,054 files | 1 failed / 2,751 passed / 8 skipped | 0 added / 0 removed |
 
 The only shared FAILED node is `cloud/tests/test_caddyfile.py::TestRestartWindowMechanism::test_request_during_an_upstream_gap_is_served_not_502ed`. Base cloud at `8afaaa61` with the same toolchain: 1 failed / 2,615 passed / 8 skipped. Linux CI remains the authority for that suite. No threshold was lowered and no test was skipped to go green. Inherited header-mobile and admin-service-controls browser acceptance stays operator-only. No local screenshot or 390px result is claimed.
+
+## Delta audit 2026-10-10
+
+Range `08c227ad49fe76ac3afcd360bfc62aa47cd1488e..208bb3d687e9216db0c0f185f4b73fa4c30d4fbd`: 31 commits / 186 paths. Newest trusted checkpoint is the 2026-10-08 collaborator comment on issue #83 (`audited-through: 08c227ad49fe76ac3afcd360bfc62aa47cd1488e`). No open pull request, and no open `testing/` head. Numbering continues after T-542. The checkpoint carried no open verified T finding. T-542 is merged in #951.
+
+The codemap at the start of the range has no incoming test edge for `scripts/clients/ib_timing.py` or `cloud/scripts/drift_audit.py`, and it does not contain the new release, edge-budget, or orders-fresh modules. `rg` confirms those paths are executed by `scripts/tests/test_ib_timing.py`, `cloud/tests/test_drift_audit.py`, `web/tests/release-status.test.tsx`, `web/tests/edge-budget-contract.test.ts`, and `web/tests/orders-place-cache-race.test.ts`. Inverse review covered the orders coordinator freshness rule, the place success audit, the page-load orders refresh, the journal remainder reconciliation, and the modify edge bound. No new skip, xfail, coverage-threshold drop, or shard exclusion. The Playwright smoke matrix is pinned by `scripts/tests/test_ci_e2e_smoke_shards.py`. The merged delta touches 80 test files; the three full rounds below are that repetition. The two files changed tonight were also repeated on their own before commit.
+
+### T-543 — P1 — a hung success audit can hold the place result again without the old test noticing
+
+`scripts/api/server.py:3097` schedules the submitted insert after the response. `scripts/api/tests/test_order_audit_trail.py:92` reads the row through TestClient, which finishes background work before it returns. Restoring `await record_order_event("submitted", ...)` at the success return left that case passed and timed out the new direct call (1 failed / 1 passed). Moving the rejection insert onto `BackgroundTasks` left the original rejection case at 0 rows and timed out the new wait (2 failed).
+
+Acceptance: a hung success insert returns the placed order before the insert starts, and the row is written when the background tasks run. A hung rejection does not raise 502 until that insert has started, and it is not queued on background tasks.
+
+### T-544 — P1 — page-load orders refresh can demand a fresh broker book without a failing test
+
+`web/app/api/orders/route.ts:67` posts `/orders/refresh` with method and timeout only. Place, cancel, and modify send `X-Radon-Orders-Fresh`. `web/tests/producer-sync-edge-budget.test.ts` checked URL, method, and timeout. Adding the fresh header left those checks green and failed only the new header assertion (`expected '1' to be null`, 1 failed / 4 passed).
+
+Acceptance: the page-load POST carries no `X-Radon-Orders-Fresh` header. Place, cancel, and modify keep sending it.
+
+### T-545 — P1 — the recorded release is 0.8.2 while commits since 0.7.0 fold to 0.8.1
+
+`scripts/release_version.py:163` compares root and web `package.json` with the fold from `eb5e52066462`. A minor bump resets the patch (`scripts/release_version.py:91`), so the two runtime patches before `feat(web)` (#982) do not survive into 0.8.x. #982 wrote `0.8.2` in the same commit that added the checker. The later runtime patch in #981 moves the fold to 0.8.1. `python3 scripts/release_version.py --check` exited 1: `release version is 0.8.2 (web 0.8.2); commits since eb5e52066462 require 0.8.1`. The classifier and the unit tests were left as they are. `scripts/release_version.py --write` is the supported correction; version fields and `README.md` are not runtime (`scripts/release_version.py:63`).
+
+Acceptance: `--check` exits 0 and prints `0.8.1`. Root `package.json`, `web/package.json`, and the README version badge all read 0.8.1. The fold rules are unchanged.
+
+Audited through: 208bb3d687e9216db0c0f185f4b73fa4c30d4fbd on 2026-10-10 — 3 new findings
+
+## Remediation 2026-10-10
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-543 | DONE | Awaited success insert: new case `TimeoutError`, original submitted-row case passed. Deferred rejection: original case `len([]) == 0` and new case `TimeoutError`. Restored source. `scripts/api/tests/test_order_audit_trail.py` 18 passed in each of three serial runs. Product source unchanged. |
+| T-544 | DONE | Fresh header on page-load: 1 failed / 4 passed, and the timeout assertion in that same case had already passed. Header removed. `web/tests/producer-sync-edge-budget.test.ts` 5 passed in each of three serial runs. Product source unchanged. |
+| T-545 | DONE | `--check` on the recorded 0.8.2 exited 1 and named 0.8.1. `--write` set both package files to 0.8.1; the README badge moved with them. `--check` then printed `0.8.1` and exited 0. `scripts/tests/test_release_version.py` passed. Classifier unchanged. The three closing rounds above predate this correction; those suites do not execute the version fields. |
+
+### Closing gates 2026-10-10
+
+Uncorrected root pytest, before Homebrew OpenSSL was first on `PATH`, was 54 failed / 14,746 passed. All 54 were `CERTIFICATE_VERIFY_FAILED` in the gateway remote suites. That run is not a closing round. With Homebrew OpenSSL 3.6.5, Bash 5.3.20, and `python3` pointed at the 3.13 venv, the earlier cloud attempt was 2 failed / 2,763 passed / 8 skipped (`test_notify_proxy_outlives_the_run_handoff_and_relays_while_docker_runs`, `test_precloud_rollback_keeps_immutable_journal_support` via `/usr/bin/python3` 3.9). Those two passed together in 2.05s once `python3` was 3.13. Not a closing round.
+
+| Round | Root Python | Root Vitest | Cloud | Failed-list diff against base `208bb3d6` |
+|---|---|---|---|---|
+| 1 | 14,800 passed / 2 skipped / 23 subtests | 10,509 passed / 21 skipped / 1,066 files (1 file skipped) | 2,765 passed / 8 skipped | 0 added / 0 removed |
+| 2 | 14,800 passed / 2 skipped / 23 subtests | 10,509 passed / 21 skipped / 1,066 files (1 file skipped) | 2,765 passed / 8 skipped | 0 added / 0 removed |
+| 3 | 14,800 passed / 2 skipped / 23 subtests | 10,509 passed / 21 skipped / 1,066 files (1 file skipped) | 2,765 passed / 8 skipped | 0 added / 0 removed |
+
+Base cloud at `208bb3d6` with the same toolchain: 2,765 passed / 8 skipped, sorted FAILED list empty. Every closing FAILED list is empty. The comparison worktree was removed. No threshold was lowered and no test was skipped to go green. Inherited header-mobile and admin-service-controls browser acceptance stays operator-only. No local screenshot or 390px result is claimed.
