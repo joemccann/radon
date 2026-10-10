@@ -1798,6 +1798,41 @@ class TestDocumentation20261010:
         for boundary in _RUNBOOK_BOUNDARIES:
             assert f"**{boundary}:**" in owner
 
+    def test_modify_edge_timeout_runbook_forbids_a_blind_retry(self):
+        ui = (_ROOT / "web/lib/OrderActionsContext.tsx").read_text()
+        warning = "Check the order before sending it again."
+        assert warning in ui
+        caddy = (_ROOT / "cloud/caddy/Caddyfile").read_text()
+        assert "handle /api/orders/modify" in caddy
+        section = _section(
+            (_ROOT / "docs/incident-runbook.md").read_text(),
+            "orders-modify-edge-504",
+        )
+        assert warning in section
+        assert "POST /api/orders/modify" in section
+        assert "TestModifyRouteOutlivesTheCatchAll" in section
+        assert "catch-all" in section
+        assert "does not prove" in section
+        for boundary in _RUNBOOK_BOUNDARIES:
+            assert f"**{boundary}:**" in section
+
+    def test_gex_missed_cycle_runbook_uses_the_two_miss_window(self):
+        windows = (_ROOT / "web/lib/serviceHealthWindows.ts").read_text()
+        assert '"gex-scan": { open: 35 * MIN' in windows
+        watchdog = (_ROOT / "scripts/watchdog/services.py").read_text()
+        assert '"gex-scan":         {"open": 35 * _MIN' in watchdog
+        section = _section(
+            (_ROOT / "docs/incident-runbook.md").read_text(),
+            "gex-scan-missed-cycle-stale",
+        )
+        folded = section.lower()
+        assert "35 minutes" in folded
+        assert "two missed" in folded
+        assert "The stale message names window 15m." not in section
+        for boundary in _RUNBOOK_BOUNDARIES:
+            assert f"**{boundary}:**" in section
+
+
 class TestSharePnlReportOwner:
     """DOC-174: share P&L formats stay in the report owner, sizes stay in source."""
 
