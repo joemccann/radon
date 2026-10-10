@@ -345,7 +345,7 @@ The `performance` loop reads production through one forced-command ssh key: the 
    restrict,command="/usr/bin/python3 -I /home/radon/radon/cloud/scripts/perf_probe.py" ssh-ed25519 AAAA... radon-perf-probe
    ```
 
-3. `PERF_SSH_TARGET` in `scripts/runner/loops/performance.env` must name that host as Tailscale resolves it from the Mac (default `radon@radon-app`). Re-run `install.sh performance` after changing it.
+3. `PERF_SSH_TARGET` in `scripts/runner/loops/performance.env` must name that host as Tailscale resolves it from the Mac (default `radon@5.78.148.38`; the bot has no ssh config, so use an address, not an alias). Re-run `install.sh performance` after changing it.
 4. Verify from the bot shell: `ssh -i ~/.ssh/radon_perf_probe -o IdentitiesOnly=yes -o UserKnownHostsFile=~/.ssh/radon_perf_known_hosts radon@radon-app anything | python3 -m json.tool | head` prints the probe JSON, and `... radon@radon-app -t bash` still prints only JSON (no shell).
 
 Revoke by deleting the `authorized_keys` line.
