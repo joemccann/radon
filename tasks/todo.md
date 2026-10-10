@@ -9224,3 +9224,14 @@ Dependency graph: T1 -> T2 -> T3 -> T4.
 - [ ] T4 depends_on: [T3] PR, exact-head CI green, one Pushover.
 
 Review: Fold from 0.7.0 at eb5e5206 lands this feat at 0.8.0. Header and drawer compare the deploy SHA. Local channel does not poll. Playwright release-status 2 passed on 127.0.0.1:3456.
+
+# Task: TradingView provider tool mapping (2026-10-10)
+
+- [x] T1 depends_on: [] Inspect merged client and discover current provider search/OHLCV schemas.
+- [ ] T2 depends_on: [T1] Add provider-name regressions and exact explicit mappings, preserving legacy names and security boundaries.
+- [ ] T3 depends_on: [T2] Repeat authenticated tool/search/OHLCV probes and independent static review.
+- [ ] T4 depends_on: [T3] Publish PR and verify every applicable exact-head CI check on GitHub; accepted Pushover delivery.
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+Review: No local suites; live research probes only. Preserve current branch, canonical protected credentials, deny-by-default allowlist, validation and incomplete-history flags.
