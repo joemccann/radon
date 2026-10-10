@@ -438,13 +438,19 @@ def parse_sec(payload, digest, fetched, entity, start, end):
                             "fiscal_year": fact.get("fy"),
                             "fiscal_period": fact.get("fp"),
                             "duration": "ytd" if fact.get("start") else "instant",
-                            "verified_statement": entity in ("MSFT", "AMZN", "GOOGL", "META", "ORCL")
-                            and tag
-                            in (
-                                "NetCashProvidedByUsedInOperatingActivities",
-                                "PaymentsToAcquireProductiveAssets"
-                                if entity == "AMZN"
-                                else "PaymentsToAcquirePropertyPlantAndEquipment",
+                            "verified_statement": (
+                                entity in ("MSFT", "AMZN", "GOOGL", "META", "ORCL")
+                                and tag
+                                in (
+                                    "NetCashProvidedByUsedInOperatingActivities",
+                                    "PaymentsToAcquireProductiveAssets"
+                                    if entity == "AMZN"
+                                    else "PaymentsToAcquirePropertyPlantAndEquipment",
+                                )
+                            )
+                            or (
+                                entity in HARDWARE_ISSUERS
+                                and tag in ("AccountsReceivableNetCurrent", "InventoryNet", "CostOfRevenue", "Revenues")
                             ),
                             "statement_check": "Reviewed issuer taxonomy mapping; later rows schema-validated, not individually audited",
                             "mapping_version": "cash-flow-tags-v1",
