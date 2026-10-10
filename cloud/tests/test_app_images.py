@@ -113,7 +113,8 @@ class TestPythonImage:
     def test_base_and_cmd(self) -> None:
         text = PYTHON_DF.read_text(encoding="utf-8")
         images = _from_images(text)
-        assert images[-1] == "python:3.13-slim"
+        # DS-2026-10-09-01: the runtime base is digest-pinned like the vendor stage.
+        assert re.fullmatch(r"python:3\.13\.\d+-slim@sha256:[0-9a-f]{64}", images[-1])
         assert len(images) == 2
         assert images[0].startswith("node:22.22.0-bookworm-slim@sha256:")
         assert "COPY requirements.txt" in text
