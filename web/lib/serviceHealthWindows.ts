@@ -610,6 +610,12 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // (+ optional S3) — no IB dependency.
   "portfolio-archive": { open: 48 * HOUR, extended: 48 * HOUR, closed: 48 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``research-archive`` is the monthly private research evidence archive
+  // (scripts/research/archive.py via radon-research-archive.timer, 1st of
+  // the month 04:20 UTC): upload to B2, verify, then prune local copies.
+  // 33d window = longest month + timer jitter + a 2-day grace. No IB.
+  "research-archive": { open: 33 * DAY, extended: 33 * DAY, closed: 33 * DAY, category: "scheduled", requires_ib: false },
+
   // ``db-retention`` is the daily keep-latest sweep for append-only scan
   // snapshot tables (scripts/db_retention_sweep.py via
   // radon-db-retention.timer, 07:22 UTC). Does not touch portfolio_snapshots
