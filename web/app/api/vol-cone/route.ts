@@ -3,6 +3,7 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
+import { cachedRead } from "@/lib/dbCache";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead, staleCollapse, isMissingPayload } from "@/lib/dbFirstRead";
 import { getFreshnessWindowMs, getMarketStateFromDate } from "@/lib/serviceHealthWindows";
 // Disable Next.js static caching: this handler reads live disk state
@@ -40,6 +41,25 @@ const MISSING_VOL_CONE = {
 // writer through Tuesday.
 const maxAgeMs = () => getFreshnessWindowMs("vol-cone", getMarketStateFromDate());
 
+// The row is ~9.6 MB and the selected-name chart reads every name's series, so
+// the route keeps the shape and caches the read instead. The fastest writer
+// (radon-vol-cone-intraday.timer) lands a snapshot every 15m in RTH; a 60s
+// TTL keeps the panel within a minute of each write while collapsing tab and
+// user fan-out to one transfer per minute per process.
+const READ_CACHE_TTL_MS = 60_000;
+
+type VolConeRead = TimestampedRead<Record<string, unknown>>;
+
+function isCacheableRead(read: VolConeRead | null): boolean {
+  return read !== null && !isMissingPayload(read.data);
+}
+
+function cachedSource(source: string, read: () => Promise<VolConeRead | null>) {
+  return () => cachedRead(`scan:vol-cone:${source}`, READ_CACHE_TTL_MS, read, {
+    shouldCache: isCacheableRead,
+  });
+}
+
 async function readVolConeFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
   const db = getDb();
   const result = await db.execute({
@@ -61,13 +81,16 @@ async function readVolConeFromDisk(): Promise<TimestampedRead<Record<string, unk
   return { data, timestampMs: contentTimestampMs(data.scan_time) };
 }
 
+const readCachedVolConeFromDb = cachedSource("db", readVolConeFromDb);
+const readCachedVolConeFromDisk = cachedSource("disk", readVolConeFromDisk);
+
 export const radonCapability = "read";
 
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const result = await dbFirstRead({
-    fromDb: readVolConeFromDb,
-    fromDisk: readVolConeFromDisk,
+    fromDb: readCachedVolConeFromDb,
+    fromDisk: readCachedVolConeFromDisk,
     maxAgeMs: maxAgeMs(),
     label: "vol-cone",
     // R-193: a writer that ran, produced nothing and still stamped a

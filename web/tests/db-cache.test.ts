@@ -106,6 +106,15 @@ describe("cachedRead", () => {
     ).rejects.toThrow("turso down");
   });
 
+  it("never stores a value that shouldCache rejects (empty reads refetch next call)", async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce("v1");
+    const opts = { shouldCache: (value: string | null) => value !== null };
+    expect(await cachedRead("k", 9999, fetcher, opts)).toBeNull();
+    expect(await cachedRead("k", 9999, fetcher, opts)).toBe("v1");
+    expect(await cachedRead("k", 9999, fetcher, opts)).toBe("v1");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
   it("invalidateCache forces a refetch", async () => {
     const fetcher = vi.fn().mockResolvedValueOnce("v1").mockResolvedValueOnce("v2");
     expect(await cachedRead("k", 9999, fetcher)).toBe("v1");
