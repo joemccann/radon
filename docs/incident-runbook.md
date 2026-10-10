@@ -2143,6 +2143,8 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
   `Result=timeout` with Exec span equal to `TimeoutStartSec` is a
   sync-libsql hang, a different class. A statement error (not a read
   timeout) on the history upsert still fails the oneshot.
+  `Expecting value: line 1 column 1 (char 0)` on an empty Cboe body is
+  `calm-streak-empty-cboe-body`.
 - **Remediation (code):** `_record_ok_heartbeat` catches the ok
   heartbeat, logs `service_health heartbeat failed`, and still writes
   `data/calm_streak.json`. The oneshot exits 0. No ok heartbeat is
@@ -2155,6 +2157,66 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
   `scripts/tests/test_calm_streak.py::TestHeartbeatTimeout::test_main_exits_zero_when_the_ok_heartbeat_times_out`,
   `test_row_upsert_failure_still_fails_the_oneshot`.
 - **Code:** `scripts/fetch_calm_streak.py` (`_record_ok_heartbeat`).
+
+---
+
+## calm-streak-empty-cboe-body
+
+**`radon-calm-streak.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when Cboe returns an empty `_SPX.json` body.** Peak:
+2026-10-10 14:30Z, page `2fbaca4f629c975ab1fe0dbe5bc6f825`.
+
+- **Mechanism:** `Type=oneshot`, no `Restart=`. The 14:30 UTC timer
+  started and Python exited 1 in the same second
+  (`ExecMainStatus=1`, CPU about 90ms). That span is one tiny GET,
+  not `FETCH_TIMEOUT_S=30` and not `TimeoutStartSec=300`.
+  `cdn.cboe.com/.../historical/_SPX.json` answers HTTP 307 to
+  `https://cdn-api.cboe.com/api/global/delayed_quotes/charts/historical/_SPX.json`.
+  The new object is HTTP 200 `application/json` with
+  `content-length: 0`, etag `d41d8cd98f00b204e9800998ecf8427e` (the
+  empty file), `Last-Modified: Sat, 10 Oct 2026 12:04:00 GMT`.
+  `json.load` raises `Expecting value: line 1 column 1 (char 0)`.
+  `main` prints `run failed` and exits 1. The 02:40Z cycle had
+  already stored Friday's session (`data_date` 2026-10-09, streak
+  14, `source_last_modified` `Sat, 10 Oct 2026 02:02:01 GMT`).
+  `requires_ib` is false. `:8321/health/lite` stayed authenticated
+  with `database=up`. Sibling `_COR1M.json` on the same host was a
+  normal 652 KB body. `SPX_History.csv` still has closes through
+  2026-10-09 but has no high/low, so it cannot compute the band.
+  This is not `calm-streak-hrana-read-timeout` (no `TimeoutError`,
+  exec span is not one hrana budget). This is not
+  `calm-streak-shadowed-migration` (no `no such table`).
+- **Detection:** journal `[calm-streak] run failed: Expecting value:
+  line 1 column 1 (char 0)`; `systemctl show` → `exit-code` / `0` /
+  `1`. Exec span is the same second. Prior cycle the same UTC day
+  logged `streak=14 rows_upserted=1`. A direct GET of the redirected
+  URL is `content-length: 0`.
+- **Discriminating check:** reproduce with urllib (it follows the
+  307) and with `curl -L`. Both get a 200 whose body is empty, with
+  and without `If-Modified-Since`. An unconditional GET is empty
+  too, so a second fetch is not the fix. Python Turso is not on
+  this path: `/health/lite` `database=up` and the process never
+  reaches the row upsert. Canary failure or `/health/lite` down is
+  a different outage: stand down. `TimeoutError: The read operation
+  timed out` is `calm-streak-hrana-read-timeout`. `no such table:
+  calm_streak_history` is `calm-streak-shadowed-migration`.
+  `Result=signal` or exit 143 inside a deploy window is
+  `deploy-stop-clean-oneshot-signal`. A statement error on the
+  history upsert still fails the oneshot. HTTP 5xx still fails the
+  oneshot. An empty body with no last-good cache still fails.
+- **Remediation (code):** `JSONDecodeError` with a last-good cache
+  logs `source body unusable; keeping last-good` and `main` exits 0.
+  No ok heartbeat and no error heartbeat, so a standing empty origin
+  still goes stale inside the 26-hour `calm-streak` window. The JSON
+  mirror is left on the previous success. Do not `reset-failed`.
+  The unit is not on `RERUNNABLE_ONESHOT_UNITS`. After deploy, the
+  next timer (02:40 or 14:30 UTC) clears the latch even if the
+  object is still empty.
+- **Regression:**
+  `scripts/tests/test_calm_streak.py::TestEmptySourceBody::test_empty_cboe_200_keeps_last_good_and_exits_zero`,
+  `test_empty_body_without_a_cache_still_fails`,
+  `test_http_error_still_fails_the_oneshot`.
+- **Code:** `scripts/fetch_calm_streak.py` (`run`).
 
 ---
 
