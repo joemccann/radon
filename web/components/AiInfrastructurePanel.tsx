@@ -106,7 +106,11 @@ export function AiInfrastructureView({ data, error, loading, refresh }: { data: 
   useEffect(() => { const value = new URLSearchParams(window.location.search).get("pane"); const previous: Record<string, string> = { demand: "adoption", compute: "compute", delivery: "buildout", finance: "funding" }; if (value && previous[value]) setStage(previous[value]); }, []);
   const active = AI_INDUSTRY_STAGES.find(item => item.id === stage) ?? { id: "additional", name: "Additional evidence", question: "What else is being measured?", watch: "Review coverage and methodology before interpreting new measures.", main: "" };
   const indicators = data?.indicators.filter(indicator => industryStage(indicator) === stage) ?? [];
-  const current = indicators.find(indicator => indicator.id === measureId) ?? indicators.find(indicator => indicator.id === active.main) ?? indicators[0];
+  const mainIndicator = indicators.find(indicator => indicator.id === active.main);
+  const fallbackIndicator = (mainIndicator && mainIndicator.status !== "unavailable")
+    ? mainIndicator
+    : (indicators.find(indicator => indicator.status === "available") ?? mainIndicator ?? indicators[0]);
+  const current = indicators.find(indicator => indicator.id === measureId) ?? fallbackIndicator;
   const measures = data?.indicators.filter(indicator => indicator.id !== "M1") ?? [];
   const available = measures.filter(indicator => indicator.status === "available").length;
   const sources = (data?.sources ?? []).filter(source => source.id !== "ib" && source.id !== "uw");
@@ -118,7 +122,15 @@ export function AiInfrastructureView({ data, error, loading, refresh }: { data: 
     <header className={styles.heading}><div><span className={styles.eyebrow}>Industry research</span><h1>AI Industry</h1><p className={styles.subtitle}>Follow the value chain from adoption to cash returns.</p></div><button type="button" onClick={refresh} disabled={loading}>{loading ? "Loading…" : "Refresh snapshot"}</button></header>
     <div className={styles.snapshotMeta}><span>{measures.length} measures</span><span>{sources.length} sources</span><span>Snapshot {aiObservationDate(data?.as_of)}</span></div>
     {error ? <RequestError error={error} fallback="The AI Industry snapshot could not be refreshed. Try again." retainedData={Boolean(data)} /> : null}
-    <div className={styles.stageCards} role="tablist" aria-label="AI Industry value chain">{stageTabs.map((item, i) => <button key={item.id} id={`ai-tab-${item.id}`} role="tab" type="button" aria-selected={stage === item.id} aria-controls="ai-stage-evidence" tabIndex={stage === item.id || ((stage === "capability" || stage === "additional") && i === 0) ? 0 : -1} onClick={() => chooseStage(item.id)} onKeyDown={event => { if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return; event.preventDefault(); const next = event.key === "Home" ? 0 : event.key === "End" ? stageTabs.length - 1 : (i + (event.key === "ArrowRight" ? 1 : stageTabs.length - 1)) % stageTabs.length; chooseStage(stageTabs[next].id); document.getElementById(`ai-tab-${stageTabs[next].id}`)?.focus(); }}><span className={styles.eyebrow}>0{i + 1}</span><strong>{item.short}</strong><span>{item.subtitle}</span></button>)}</div>
+    <div className={styles.stageCards} role="tablist" aria-label="AI Industry value chain">{stageTabs.map((item, i) => {
+      const stageMeasures = data?.indicators.filter(indicator => industryStage(indicator) === item.id) ?? [];
+      const stageAvailable = stageMeasures.filter(ind => ind.status === "available").length;
+      return <button key={item.id} id={`ai-tab-${item.id}`} role="tab" type="button" aria-selected={stage === item.id} aria-controls="ai-stage-evidence" tabIndex={stage === item.id || ((stage === "capability" || stage === "additional") && i === 0) ? 0 : -1} onClick={() => chooseStage(item.id)} onKeyDown={event => { if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return; event.preventDefault(); const next = event.key === "Home" ? 0 : event.key === "End" ? stageTabs.length - 1 : (i + (event.key === "ArrowRight" ? 1 : stageTabs.length - 1)) % stageTabs.length; chooseStage(stageTabs[next].id); document.getElementById(`ai-tab-${stageTabs[next].id}`)?.focus(); }}>
+        <span className={styles.eyebrow}>0{i + 1}{stageMeasures.length ? ` · ${stageAvailable}/${stageMeasures.length} available` : ""}</span>
+        <strong>{item.short}</strong>
+        <span>{item.subtitle}</span>
+      </button>;
+    })}</div>
     <div className={styles.capability}><span>A separate lens</span><button type="button" aria-pressed={stage === "capability"} onClick={() => chooseStage("capability")}>Model capability</button><span>Task quality is distinct from paid adoption.</span></div>
     <div id="ai-stage-evidence" role={stage === "capability" || stage === "additional" ? "region" : "tabpanel"} aria-label={active.name} aria-labelledby={stage === "capability" || stage === "additional" ? undefined : `ai-tab-${stage}`}>
       <div className={styles.paneIntro}><span className={styles.eyebrow}>{active.name}</span><h2>{active.question}</h2><p>{active.watch}</p></div>

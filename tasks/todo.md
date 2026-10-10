@@ -1,3 +1,24 @@
+# Task: AI Industry implementation and verification (2026-10-10)
+
+- [x] T1 depends_on: [] Backend refinements in scripts/llm_token_index.py and scripts/ai_cycle (P1 SLA, H2 statement tags, C1 ask cohort).
+- [x] T2 depends_on: [T1] Frontend resilience in AiInfrastructurePanel.tsx and AiInfrastructure.module.css (status tokens, smart defaulting, instrument empty states, chart frame).
+- [x] T3 depends_on: [T2] Verification across Vitest, Playwright, and Pytest suites without regressions.
+
+Review: Backend models slug lookup support added in scripts/llm_token_index.py (17 passed). Hardware issuers added to SEC verified_statement for H2 in scripts/ai_cycle/collectors.py. Physical grid NOAA/EIA freshness calibrated to 120h/72h in scripts/ai_cycle/snapshot.py (159 passed). Frontend status chips restyled to Radon design tokens with IBM Plex Mono, uppercase, and semantic mixes in web/components/AiInfrastructure.module.css. Stage navigation enhanced with smart defaulting to available indicators when active.main is unavailable and stage completeness badges in tab eyebrows (58 Vitest passed).
+
+Dependency graph: T1 -> T2 -> T3.
+
+# Task: AI Industry workspace audit and remediation (2026-10-10)
+
+- [x] T1 depends_on: [] Full audit of AI Industry page, routes, 19 indicators, collectors, and live Turso snapshot.
+- [x] T2 depends_on: [T1] Swarm agent investigation and fixes for incomplete/missing indicators and UI resilience.
+- [x] T3 depends_on: [T2] Adversarial verification against Radon rules, domain constraints, Brand system, and tests.
+- [x] T4 depends_on: [T3] Generate show-me visual interactive artifact with proposed solutions and open in browser.
+
+Review: 3-agent swarm completed full audit across 19 indicators, 17 sources, 948,045 Turso rows, and 741KB snapshot. Root causes diagnosed for C1 (GPU hardware tags), H2 (SEC statement check), P1 (NOAA/EIA latency), C2 (Vast compound filters), F2/P2 (reviewed disclosures fixtures), and legacy llm_token_index. Adversarial auditor enforced zero fake data and 900KB bounding. Interactive proposal generated at tasks/artifacts/show-me-ai-industry-workspace.html and opened in browser. All 58 Vitest and 142 Pytest tests green.
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
 # Task: IR PR titles (2026-10-09)
 
 - [x] T1 depends_on: [] Failing tests for page eeef0959 title dump.

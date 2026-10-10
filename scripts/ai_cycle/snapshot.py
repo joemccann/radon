@@ -191,9 +191,13 @@ def build_snapshot(store, as_of=None):
             for row in newest.values():
                 cadence = SOURCES[row["source_id"]]["cadence"]
                 end = datetime.fromisoformat(row["period_end"].replace("Z", "+00:00"))
-                if cadence in ("daily", "hourly", "live", "monthly", "snapshot") and now - end > timedelta(
-                    hours=62 * 24 if cadence == "monthly" else 72 if cadence in ("daily", "snapshot") else 48
-                ):
+                hours = (
+                    62 * 24 if cadence == "monthly"
+                    else 120 if row["source_id"] == "noaa"
+                    else 72 if cadence in ("daily", "snapshot") or row["source_id"] == "eia"
+                    else 48
+                )
+                if cadence in ("daily", "hourly", "live", "monthly", "snapshot") and now - end > timedelta(hours=hours):
                     state, reason = (
                         "stale",
                         "Observation period is stale; a recent fetch does not refresh measurement age.",
