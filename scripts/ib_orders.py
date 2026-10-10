@@ -273,6 +273,32 @@ def _overlay_journal_realized_pnl(executed: list) -> None:
         print(f"  Warning: journal realized P&L overlay skipped: {exc}", file=sys.stderr)
 
 
+def _session_executions(executed: list) -> list[dict]:
+    return [e for e in executed if isinstance(e.get("execId"), str) and e.get("execId")]
+
+
+def _executed_order_rows(executions: list[dict]) -> list[tuple]:
+    rows = []
+    for e in executions:
+        perm_id = e.get("permId")
+        rows.append((e["execId"], e, e.get("time") or "", perm_id if isinstance(perm_id, int) else None))
+    return rows
+
+
+def _write_execution_facts(executions: list[dict], upsert_facts) -> None:
+    """Fact-ledger write is advisory: conflicts and failures warn, never abort."""
+    try:
+        result = upsert_facts(executions)
+    except Exception as exc:  # noqa: BLE001 - migration may not be live yet
+        print(f"  Warning: execution-ledger write skipped: {exc}", file=sys.stderr)
+        return
+    for exec_id, exc in result.failures:
+        if isinstance(exc, ValueError):
+            print(f"  Warning: execution fact conflict for {exec_id}: {exc}", file=sys.stderr)
+        else:
+            print(f"  Warning: execution-ledger write skipped: {exc}", file=sys.stderr)
+
+
 def _dual_write_orders_to_db(data: dict) -> None:
     """Persist an IB order snapshot into open_orders + executed_orders."""
     try:
@@ -280,8 +306,8 @@ def _dual_write_orders_to_db(data: dict) -> None:
         from db.writer import (
             ensure_no_replica_for_writers,
             replace_open_orders_for_session,
-            upsert_position_execution_fact,
-            upsert_executed_order,
+            upsert_executed_orders_for_session,
+            upsert_position_execution_facts,
         )
     except ImportError:
         return
@@ -311,26 +337,11 @@ def _dual_write_orders_to_db(data: dict) -> None:
             # sees it.
             _overlay_journal_realized_pnl(data.get("executed_orders", []))
 
-            # Executed orders: per-row upsert keyed by execId. IB's exec_id is
-            # globally unique within an account, so INSERT OR REPLACE is safe.
-            for e in data.get("executed_orders", []):
-                exec_id = e.get("execId")
-                if not isinstance(exec_id, str) or not exec_id:
-                    continue
-                fill_time = e.get("time") or ""
-                perm_id = e.get("permId")
-                if not isinstance(perm_id, int):
-                    perm_id = None
-                upsert_executed_order(exec_id, e, fill_time, perm_id=perm_id)
-                try:
-                    upsert_position_execution_fact(e)
-                except ValueError as exc:
-                    print(
-                        f"  Warning: execution fact conflict for {exec_id}: {exc}",
-                        file=sys.stderr,
-                    )
-                except Exception as exc:  # noqa: BLE001 - migration may not be live yet
-                    print(f"  Warning: execution-ledger write skipped: {exc}", file=sys.stderr)
+            # Executed orders + execution facts: one batched, diffed write per
+            # table keyed by execId (the overlaid payload is what gets diffed).
+            executions = _session_executions(data.get("executed_orders", []))
+            upsert_executed_orders_for_session(_executed_order_rows(executions))
+            _write_execution_facts(executions, upsert_position_execution_facts)
 
             try:
                 from capture_position_return_capital import reconcile_position_return_capital

@@ -8,6 +8,7 @@ import importlib
 import sys
 import types
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -35,10 +36,19 @@ def mock_writer(monkeypatch: pytest.MonkeyPatch):
     fake.ensure_no_replica_for_writers = lambda: calls["ensure_no_replica_for_writers"].append(True)  # type: ignore[attr-defined]
     fake.record_service_health = lambda *a, **kw: calls["record_service_health"].append((a, kw))  # type: ignore[attr-defined]
     fake.replace_open_orders_for_session = lambda rows: calls["replace_open_orders_for_session"].append(rows)  # type: ignore[attr-defined]
-    fake.upsert_executed_order = lambda exec_id, payload, fill_time, perm_id=None: calls["upsert_executed_order"].append(  # type: ignore[attr-defined]
-        {"exec_id": exec_id, "payload": payload, "fill_time": fill_time, "perm_id": perm_id}
-    )
-    fake.upsert_position_execution_fact = lambda payload: calls["upsert_position_execution_fact"].append(payload)  # type: ignore[attr-defined]
+    def upsert_executed_orders_for_session(rows):
+        calls["upsert_executed_order"].extend(
+            {"exec_id": exec_id, "payload": payload, "fill_time": fill_time, "perm_id": perm_id}
+            for exec_id, payload, fill_time, perm_id in rows
+        )
+        return len(rows)
+
+    def upsert_position_execution_facts(payloads):
+        calls["upsert_position_execution_fact"].extend(payloads)
+        return SimpleNamespace(written=len(payloads), failures=[])
+
+    fake.upsert_executed_orders_for_session = upsert_executed_orders_for_session  # type: ignore[attr-defined]
+    fake.upsert_position_execution_facts = upsert_position_execution_facts  # type: ignore[attr-defined]
 
     monkeypatch.setitem(sys.modules, "db.writer", fake)
 
@@ -169,17 +179,21 @@ def _executed(exec_id: str, *, price: float = 4.25) -> dict:
     }
 
 
-def test_dual_write_keeps_remaining_fills_after_one_economic_conflict(mock_writer):
+def test_dual_write_keeps_remaining_fills_after_one_economic_conflict(mock_writer, capsys):
     import ib_orders
 
     fake = sys.modules["db.writer"]
 
-    def maybe_conflict(payload):
-        mock_writer["upsert_position_execution_fact"].append(payload)
-        if payload.get("execId") == "exec-conflict":
-            raise ValueError("execution fact conflict for U1:exec-conflict:1")
+    def maybe_conflict(payloads):
+        mock_writer["upsert_position_execution_fact"].extend(payloads)
+        failures = [
+            (p["execId"], ValueError(f"execution fact conflict for U1:{p['execId']}:1"))
+            for p in payloads
+            if p.get("execId") == "exec-conflict"
+        ]
+        return SimpleNamespace(written=len(payloads) - len(failures), failures=failures)
 
-    fake.upsert_position_execution_fact = maybe_conflict  # type: ignore[attr-defined]
+    fake.upsert_position_execution_facts = maybe_conflict  # type: ignore[attr-defined]
     ib_orders._dual_write_orders_to_db({
         "last_sync": "2026-05-07T00:00:00Z",
         "open_orders": [],
@@ -203,6 +217,28 @@ def test_dual_write_keeps_remaining_fills_after_one_economic_conflict(mock_write
     states = [args[1] for args, _ in mock_writer["record_service_health"]]
     assert "error" not in states
     assert "ok" in states
+    assert "Warning: execution fact conflict for exec-conflict:" in capsys.readouterr().err
+
+
+def test_dual_write_tolerates_fact_ledger_outage(mock_writer, capsys):
+    import ib_orders
+
+    fake = sys.modules["db.writer"]
+
+    def ledger_missing(payloads):
+        raise RuntimeError("no such table: position_execution_facts")
+
+    fake.upsert_position_execution_facts = ledger_missing  # type: ignore[attr-defined]
+    ib_orders._dual_write_orders_to_db({
+        "last_sync": "2026-05-07T00:00:00Z",
+        "open_orders": [],
+        "executed_orders": [_executed("exec-ok-1")],
+    })
+
+    assert [row["exec_id"] for row in mock_writer["upsert_executed_order"]] == ["exec-ok-1"]
+    states = [args[1] for args, _ in mock_writer["record_service_health"]]
+    assert "error" not in states
+    assert "Warning: execution-ledger write skipped:" in capsys.readouterr().err
 
 
 def test_dual_write_records_error_on_writer_exception(monkeypatch: pytest.MonkeyPatch, mock_writer):
