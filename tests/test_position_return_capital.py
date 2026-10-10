@@ -282,6 +282,9 @@ def _ledger_db() -> sqlite3.Connection:
     db.execute("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT)")
     migration = ROOT / "scripts" / "db" / "migrations" / "0037_position_return_capital.sql"
     db.executescript(migration.read_text())
+    db.execute(
+        "CREATE TABLE app_config (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
     return db
 
 

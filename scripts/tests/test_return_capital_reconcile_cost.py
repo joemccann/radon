@@ -63,7 +63,7 @@ def test_plan_parses_each_sample_timestamp_once(monkeypatch):
     monkeypatch.setattr(rc, "group_execution_transactions", lambda execs: [])
     monkeypatch.setattr(rc, "replay_transactions",
                         lambda txns: {"events": events, "instances": [], "errors": []})
-    monkeypatch.setattr(rc, "_load_samples", lambda db: {"U1": samples})
+    monkeypatch.setattr(rc, "_load_samples", lambda db, windows: {"U1": samples})
     monkeypatch.setattr(rc, "validate_margin_window",
                         lambda *a, **k: {"valid": False, "reason": "test"})
     calls = {"n": 0}
