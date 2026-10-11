@@ -58,7 +58,27 @@ def verdict(**overrides):
     return value
 
 
+def offered_ids(instruction):
+    return json.loads(instruction.split("\nATTACHED IDS:\n", 1)[1])
+
+
+def match(passing=None, **overrides):
+    """A FIGURE MATCH reply: every id in `passing` is a labelled chart of the finding, the rest are not."""
+    def reply(offered):
+        figures = []
+        for i in offered:
+            ok = passing is None or i in passing
+            figure = {"id": i, "is_chart": ok, "visible_text": ["Net foreign purchases of US equities"] if ok else [],
+                      "shows": "chart" if ok else "logo", "supports_finding": ok, "caption": f"{i} matched caption"}
+            figure.update(overrides.get(i, {}))
+            figures.append(figure)
+        return {"figures": figures}
+    reply.figure_match = True
+    return reply
+
+
 class Reviewer:
+    """Scripted reviewer. FIGURE MATCH calls are answered by a queued match(...) or, if none is next, pass every figure."""
     model = "test"
 
     def __init__(self, responses):
@@ -69,6 +89,11 @@ class Reviewer:
         return self.responses.pop(0)
 
     def ask(self, instruction, images=()):
+        if instruction.startswith(intake.FIGURE_MATCH_INSTRUCTION):
+            self.calls.append(("match", instruction, tuple(images)))
+            queued = self.responses[0] if self.responses else None
+            reply = self.responses.pop(0) if getattr(queued, "figure_match", False) else match()
+            return reply(offered_ids(instruction))
         self.calls.append(("multimodal", instruction, tuple(images)))
         return self.responses.pop(0)
 
@@ -87,8 +112,9 @@ def build(tmp_path, reviewer, publisher):
 def test_two_model_calls_select_is_text_only_verify_carries_one_crop(tmp_path, publisher):
     reviewer = Reviewer([selection(), verdict()])
     posts = build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
-    assert [c[0] for c in reviewer.calls] == ["text", "multimodal"]
-    assert reviewer.calls[1][2] and reviewer.calls[1][2][0][0].startswith("Figure f1")
+    assert [c[0] for c in reviewer.calls] == ["text", "match", "multimodal"]
+    assert reviewer.calls[1][2][0][0].startswith("Figure f1"), "FIGURE MATCH looks at the crop"
+    assert reviewer.calls[2][2] and reviewer.calls[2][2][0][0].startswith("Figure f1")
     select_prompt = reviewer.calls[0][1]
     assert '"publisher": "Goldman Sachs"' in select_prompt and '"date": "2026-09-16"' in select_prompt and '"dateSource": "text"' in select_prompt
     assert '"id": "f1"' in select_prompt and "12-month rolling sum" in select_prompt
@@ -174,10 +200,10 @@ def test_book_is_not_consulted_for_non_single_stock_documents(tmp_path, publishe
 def test_ungrounded_number_reaches_verify_with_unmatched_hint(tmp_path, publisher):
     reviewer = Reviewer([selection(title="Foreign investors bought $47bn of US equities in July"), verdict()])
     posts = build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
-    assert len(reviewer.calls) == 2
-    assert "TOKENS NOT MATCHED BY CODE" in reviewer.calls[1][1] and "$47bn" in reviewer.calls[1][1]
+    assert len(reviewer.calls) == 3
+    assert "TOKENS NOT MATCHED BY CODE" in reviewer.calls[2][1] and "$47bn" in reviewer.calls[2][1]
     review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
-    entry = next(a for a in review["audit"] if a.get("claim_key") == "tic-july-equity-buying")
+    entry = next(a for a in review["audit"] if a.get("claim_key") == "tic-july-equity-buying" and "unmatched" in a)
     assert entry["unmatched"] == ["$47bn"] and "held" not in entry
     assert len(posts) == 1 and posts[0]["id"].startswith("research-")
 
@@ -203,7 +229,7 @@ def test_duplicate_of_published_document_is_dropped_before_any_call(tmp_path, pu
     again = dict(work(), key="m" * 64)
     again["metadata"] = dict(again["metadata"], id="id:two")
     assert pipe.process(again, tmp_path / "r.pdf", []) == []
-    assert len(reviewer.calls) == 2
+    assert len(reviewer.calls) == 3
     review = json.loads((tmp_path / "evidence" / ("m" * 64) / "review.json").read_text())
     assert review["outcome"] == "dropped" and review["reason_code"] == "DUPLICATE_OF_PUBLISHED"
 
@@ -257,7 +283,7 @@ def test_text_only_on_cited_figures_reselect_attaches_and_continues(tmp_path, pu
     pipe = intake.Pipeline(tmp_path, reviewer, publisher, extractor=extractor,
                            figure_catalogue=catalogue_on(1), pdf_created=lambda pdf: None)
     posts = pipe.process(work(), tmp_path / "r.pdf", [])
-    assert [c[0] for c in reviewer.calls] == ["text", "text", "multimodal"]
+    assert [c[0] for c in reviewer.calls] == ["text", "text", "match", "multimodal"]
     assert "RESELECT" in reviewer.calls[1][1] and "f1" in reviewer.calls[1][1]
     review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
     assert not any(a.get("held") == "TEXT_ONLY_WITH_FIGURES" for a in review["audit"])
@@ -364,7 +390,7 @@ def test_long_title_body_and_claim_key_reach_verify(tmp_path, publisher):
     assert len(title) >= 200 and len(content) >= 3000 and len(claim_key) >= 200
     reviewer = Reviewer([selection(title=title, content=content, claim_key=claim_key), verdict()])
     posts = build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
-    assert len(reviewer.calls) == 2 and len(posts) == 1
+    assert len(reviewer.calls) == 3 and len(posts) == 1
     expected = "research-" + hashlib.sha256(("id:one\0" + claim_key.strip().lower()).encode()).hexdigest()
     assert posts[0]["id"] == expected
 
@@ -386,7 +412,7 @@ def test_em_dash_title_reaches_verify(tmp_path, publisher):
     reviewer = Reviewer([selection(title="Foreign investors bought $45bn of US equities in July \u2014 TIC"), verdict()])
     posts = build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
     review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
-    assert len(reviewer.calls) == 2 and len(posts) == 1
+    assert len(reviewer.calls) == 3 and len(posts) == 1
     assert not any(a.get("held") == "INVALID_CANDIDATE" for a in review["audit"])
 
 
@@ -411,7 +437,7 @@ def test_force_include_overrides_a_series_denylist_drop(tmp_path, publisher, mon
 def test_force_include_empty_select_reselects_once_then_publishes(tmp_path, publisher):
     reviewer = Reviewer([{"candidates": [], "reason": "nothing measured"}, selection(), verdict()])
     posts = build(tmp_path, reviewer, publisher).process(bofa_flow_show(), tmp_path / "r.pdf", [])
-    assert [c[0] for c in reviewer.calls] == ["text", "text", "multimodal"]
+    assert [c[0] for c in reviewer.calls] == ["text", "text", "match", "multimodal"]
     assert "empty candidates is incorrect" in reviewer.calls[0][1]
     assert "RESELECT" in reviewer.calls[1][1] and "always in scope" in reviewer.calls[1][1]
     review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
@@ -458,3 +484,77 @@ def test_validate_candidate_drops_length_and_page_ceiling_keeps_shape():
         intake.validate_candidate(_candidate(figure_ids=["f9"], text_only=False), 12, cat)
     with pytest.raises(EvidenceError, match="Unknown figure id"):
         intake.validate_candidate(_candidate(figure_ids=["f1"] * 7, text_only=False), 12, cat)
+
+
+def logo_and_chart(pdf, pages, output_dir, dpi=216):
+    """BTIG 2026-10-07 page 2: a letterhead crop (f1) sits beside the chart the copy is about (f2)."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("f1.png", "f2.png"):
+        (output_dir / name).write_bytes(b"\x89PNG\r\n\x1a\n" + name.encode())
+    return [{"id": "f1", "page": 2, "bbox": [0.6965, 0.0371, 0.8918, 0.0736], "objects": 1, "kind": "raster",
+             "title": None, "source_line": None, "image_file": "f1.png", "width": 358, "height": 87},
+            {"id": "f2", "page": 2, "bbox": [0.1095, 0.1005, 0.8104, 0.433], "objects": 1, "kind": "raster",
+             "title": None, "source_line": None, "image_file": "f2.png", "width": 1287, "height": 790}]
+
+
+def build_logo(tmp_path, reviewer, publisher):
+    return intake.Pipeline(tmp_path, reviewer, publisher, extractor=extractor, figure_catalogue=logo_and_chart,
+                           pdf_created=lambda pdf: None)
+
+
+def audit_of(tmp_path):
+    return json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())["audit"]
+
+
+def test_letterhead_picked_blind_is_replaced_by_the_chart_the_copy_describes(tmp_path, publisher):
+    reviewer = Reviewer([selection(figure_ids=["f1"], pages=[1, 2], captions={"f1": "TIC equity purchases"}),
+                         match(passing={"f2"}), verdict()])
+    posts = build_logo(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
+    assert [c[0] for c in reviewer.calls] == ["text", "match", "multimodal"]
+    assert [label for label, _ in reviewer.calls[1][2]] == ["Figure f1, source page 2", "Figure f2, source page 2"]
+    assert offered_ids(reviewer.calls[1][1]) == ["f1", "f2"] and "Foreign investors bought $45bn" in reviewer.calls[1][1]
+    assert [str(path).endswith("f2.png") for _, path in reviewer.calls[2][2]] == [True], "VERIFY sees only the matched chart"
+    assert len(posts) == 1 and len(posts[0]["images"]) == 1
+    assert posts[0]["source"]["figures"][0]["caption"] == "f2 matched caption"
+    assert [p for p in publisher.stored if p.endswith(".png")] == [str(tmp_path / "evidence" / ("k" * 64) / "figures" / "f2.png")]
+    entry = next(a for a in audit_of(tmp_path) if "figure_match" in a)
+    assert entry["selected"] == ["f1"] and entry["attached"] == ["f2"] and "held" not in entry
+
+
+def test_selected_chart_that_matches_is_kept_without_adding_others(tmp_path, publisher):
+    reviewer = Reviewer([selection(figure_ids=["f2"], pages=[2], captions={"f2": "selector caption"}), match(), verdict()])
+    posts = build_logo(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
+    assert [f["caption"] for f in posts[0]["source"]["figures"]] == ["selector caption"]
+
+
+def test_no_figure_showing_the_finding_holds_and_publishes_nothing(tmp_path, publisher):
+    reviewer = Reviewer([selection(figure_ids=["f1"], pages=[2]), match(passing=set())])
+    posts = build_logo(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
+    assert posts == [] and not any(p.endswith(".png") for p in publisher.stored)
+    assert [c[0] for c in reviewer.calls] == ["text", "match"], "no VERIFY for a mismatched figure"
+    assert any(a.get("held") == "FIGURE_MISMATCH" for a in audit_of(tmp_path))
+
+
+def test_a_chart_claim_without_transcribed_labels_does_not_pass():
+    claimed = {"figures": [{"id": "f1", "is_chart": True, "supports_finding": True, "visible_text": [], "shows": "x"},
+                           {"id": "f2", "is_chart": True, "supports_finding": True, "visible_text": [" "], "shows": "x"},
+                           {"id": "f3", "is_chart": False, "supports_finding": True, "visible_text": ["BTIG"], "shows": "logo"},
+                           {"id": "f9", "is_chart": True, "supports_finding": True, "visible_text": ["RSI (14)"], "shows": "x"},
+                           {"id": "f4", "is_chart": True, "supports_finding": True, "visible_text": ["RSI (14)"], "shows": "x"}]}
+    assert set(intake.figure_match_passed(claimed, {"f1", "f2", "f3", "f4"})) == {"f4"}
+    assert intake.figure_match_passed({"figures": "nope"}, {"f1"}) == {}
+    assert intake.figure_match_passed(None, {"f1"}) == {}
+
+
+def test_malformed_figure_match_holds(tmp_path, publisher):
+    bad = lambda offered: {"verdict": "looks fine"}
+    bad.figure_match = True
+    reviewer = Reviewer([selection(figure_ids=["f2"], pages=[2]), bad])
+    assert build_logo(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", []) == []
+    assert any(a.get("held") == "FIGURE_MISMATCH" for a in audit_of(tmp_path))
+
+
+def test_select_catalogue_carries_each_figure_bbox(tmp_path, publisher):
+    reviewer = Reviewer([selection(figure_ids=["f2"], pages=[2]), verdict()])
+    build_logo(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
+    assert '"bbox": [0.6965, 0.0371, 0.8918, 0.0736]' in reviewer.calls[0][1]

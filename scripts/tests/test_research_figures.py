@@ -139,7 +139,7 @@ def test_catalogue_numbers_figures_across_pages_and_renders_crops(chart_pdf, tmp
 def test_isolated_catalogue_matches_in_process_and_renders_in_the_child(chart_pdf, tmp_path, monkeypatch):
     from research.pipeline import figures_isolated
     monkeypatch.setenv("PYTHONPATH", str(SCRIPTS))
-    extras = [{"page": 1, "bbox": [0.05, 0.9, 0.3, 0.98]}]
+    extras = [{"page": 1, "bbox": [0.05, 0.86, 0.45, 0.99]}]
     expected = figures.catalogue(chart_pdf, [1], tmp_path / "direct", extras=extras)
     isolated = figures_isolated(chart_pdf, [1], tmp_path / "child", extras=extras)
     assert list(isolated) == list(expected)
@@ -251,3 +251,85 @@ def test_catalogue_reports_skipped_pages(tmp_path, monkeypatch):
     catalogue = figures.catalogue(path, [1], tmp_path / "out")
     assert catalogue == []
     assert catalogue.skipped_pages == [{"page": 1, "reason": "invalid_bbox"}]
+
+
+def _multipage(contents, image=None):
+    """One PDF with one page per content stream, sharing Helvetica and the optional gray image."""
+    objs = [b"<< /Type /Catalog /Pages 2 0 R >>", None, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    if image is not None:
+        iw, ih, data = image
+        objs.append(b"<< /Type /XObject /Subtype /Image /Width " + str(iw).encode() + b" /Height " + str(ih).encode()
+                    + b" /ColorSpace /DeviceGray /BitsPerComponent 8 /Length " + str(len(data)).encode()
+                    + b" >>\nstream\n" + data + b"\nendstream")
+    resources = "/Font << /F1 3 0 R >>" + (" /XObject << /Im1 4 0 R >>" if image is not None else "")
+    kids = []
+    for content in contents:
+        stream = zlib.compress(content.encode())
+        objs.append(b"<< /Length " + str(len(stream)).encode() + b" /Filter /FlateDecode >>\nstream\n" + stream + b"\nendstream")
+        objs.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {W} {H}] /Contents {len(objs)} 0 R /Resources << {resources} >> >>".encode())
+        kids.append(f"{len(objs)} 0 R")
+    objs[1] = f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {len(kids)} >>".encode()
+    out, offsets = bytearray(b"%PDF-1.4\n"), []
+    for i, body in enumerate(objs, 1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n".encode()
+    out += b"".join(f"{o:010d} 00000 n \n".encode() for o in offsets)
+    out += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    return bytes(out)
+
+
+def test_logo_sized_extra_box_is_not_a_figure(chart_pdf, tmp_path):
+    # Nemotron tags letterhead logos as pictures (BTIG 2026-10-07: 0.195 x 0.037 of the page).
+    logo = {"page": 1, "bbox": [0.6965, 0.0371, 0.8918, 0.0736], "origin": "nemotron"}
+    found = figures.catalogue(chart_pdf, [1], tmp_path / "out", extras=[logo])
+    assert [f.get("origin") for f in found] == [None], "only the detected chart survives"
+
+
+def test_running_header_repeated_on_every_page_is_not_a_figure(tmp_path):
+    # A letterhead raster in the same spot on every page renders identically and is never a chart.
+    # Large enough to pass every size gate, so only the repeat rule can drop it.
+    header = image_chart(420, 680, 580, 780)
+    path = tmp_path / "running.pdf"
+    path.write_bytes(_multipage([header + chart(72, 300, 540, 600), header + chart(72, 100, 540, 500)], image=(8, 8, GRAY)))
+    extras = [{"page": n, "bbox": [420 / W, 12 / H, 580 / W, 112 / H]} for n in (1, 2)]
+    found = figures.catalogue(path, [1, 2], tmp_path / "out", extras=extras)
+    assert [(f["id"], f["page"], f["kind"]) for f in found] == [("f1", 1, "vector"), ("f2", 2, "vector")]
+    for figure in found:
+        assert (tmp_path / "out" / figure["image_file"]).is_file()
+        assert figure["bbox"][1] > 112 / H, "the header is not part of the chart"
+
+
+def test_identical_chart_on_two_pages_is_kept_once_not_dropped(tmp_path):
+    # A deck that repeats one chart body-side is not letterhead: keep the first, drop the copy.
+    path = tmp_path / "repeat.pdf"
+    path.write_bytes(_multipage([chart(72, 300, 540, 600), chart(72, 300, 540, 600)]))
+    found = figures.catalogue(path, [1, 2], tmp_path / "out")
+    assert [(f["id"], f["page"]) for f in found] == [("f1", 1)]
+
+
+def test_page_frame_artwork_does_not_swallow_the_chart(tmp_path):
+    # BTIG page one: a full-height sidebar fused every drawn object into a whole-page "figure".
+    sidebar = "0 0 66 792 re f\n0 760 66 32 re f\n"
+    path = tmp_path / "sidebar.pdf"
+    path.write_bytes(_pdf(sidebar + chart(72, 400, 540, 680)))
+    found = figures.detect(path, 1)
+    assert len(found) == 1
+    l, t, r, b = found[0]["bbox"]
+    assert l >= 66 / W - 0.01 and t > 0.05 and b < 0.95
+
+
+def test_sidebar_only_page_yields_nothing(tmp_path):
+    path = tmp_path / "frame.pdf"
+    path.write_bytes(_pdf("0 0 66 792 re f\n0 760 66 32 re f\n0 0 612 4 re f\n" + text(100, 700, "Disclosures")))
+    assert figures.detect(path, 1) == []
+
+
+def test_extra_box_spanning_two_detected_charts_is_not_a_third_figure(tmp_path):
+    # Nemotron boxed a whole page's two charts as one picture (BTIG page 4): it duplicates both.
+    path = tmp_path / "stacked.pdf"
+    path.write_bytes(_pdf(image_chart(72, 420, 540, 700) + image_chart(72, 80, 540, 380), image=(8, 8, GRAY)))
+    union = {"page": 1, "bbox": [70 / W, 90 / H, 542 / W, 714 / H]}
+    found = figures.catalogue(path, [1], tmp_path / "out", extras=[union])
+    assert len(found) == 2 and all(f.get("origin") is None for f in found)
