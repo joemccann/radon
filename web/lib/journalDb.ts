@@ -119,13 +119,19 @@ async function importReconciliationToJournal(
   }
   if (result.trades.length === 0) return result;
 
-  const db = getDb();
-  const writtenAt = new Date().toISOString();
-  for (const trade of result.trades) {
-    const payload = trade as Record<string, unknown>;
-    const isCorrection = typeof payload.ib_exec_id_corrected === "string";
-    await db.execute({
-      sql: `
+  await writeImportedTrades(result.trades);
+  return result;
+}
+
+// One client.batch() is one Turso HTTP pipeline. Per-row execute() was one
+// round-trip per fill. 50 statements keeps a fat journal payload under the
+// pipeline cap while a backfill stays a handful of requests.
+const JOURNAL_IMPORT_BATCH_ROWS = 50;
+
+function journalUpsertStatement(trade: Record<string, unknown>, writtenAt: string) {
+  const isCorrection = typeof trade.ib_exec_id_corrected === "string";
+  return {
+    sql: `
         INSERT INTO journal (trade_id, payload, filled_at, written_at)
         VALUES (?, ?, ?, ?)
         ON CONFLICT(trade_id) DO ${isCorrection ? `UPDATE SET
@@ -133,16 +139,22 @@ async function importReconciliationToJournal(
           filled_at = excluded.filled_at,
           written_at = excluded.written_at` : "NOTHING"}
       `,
-      args: [
-        tradeIdFor(payload),
-        JSON.stringify(payload),
-        filledAtFor(payload),
-        writtenAt,
-      ],
-    });
-  }
+    args: [
+      tradeIdFor(trade),
+      JSON.stringify(trade),
+      filledAtFor(trade),
+      writtenAt,
+    ],
+  };
+}
 
-  return result;
+async function writeImportedTrades(trades: SyncResult["trades"]): Promise<void> {
+  const db = getDb();
+  const writtenAt = new Date().toISOString();
+  const statements = trades.map((trade) => journalUpsertStatement(trade as Record<string, unknown>, writtenAt));
+  for (let offset = 0; offset < statements.length; offset += JOURNAL_IMPORT_BATCH_ROWS) {
+    await db.batch(statements.slice(offset, offset + JOURNAL_IMPORT_BATCH_ROWS), "write");
+  }
 }
 
 export async function importLatestReconciliationToJournal(): Promise<SyncResult> {

@@ -1,12 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const execute = vi.fn();
-vi.mock("@/lib/db", () => ({ getDb: () => ({ execute }) }));
+const batch = vi.fn(async () => []);
+vi.mock("@/lib/db", () => ({ getDb: () => ({ execute, batch }) }));
 
 import { importLatestReconciliationToJournal } from "@/lib/journalDb";
 
 describe("journal reconciliation concurrency", () => {
-  beforeEach(() => execute.mockReset());
+  beforeEach(() => {
+    execute.mockReset();
+    batch.mockClear();
+  });
 
   it("cannot overwrite a richer row inserted after the initial read", async () => {
     execute
@@ -19,7 +23,7 @@ describe("journal reconciliation concurrency", () => {
 
     await importLatestReconciliationToJournal();
 
-    const insert = execute.mock.calls[2][0];
+    const insert = batch.mock.calls[0][0][0];
     expect(insert.sql).toMatch(/ON CONFLICT\(trade_id\) DO NOTHING/);
     expect(insert.sql).not.toMatch(/DO UPDATE/);
   });
