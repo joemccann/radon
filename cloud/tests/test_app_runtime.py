@@ -9,6 +9,7 @@ control). pull is a short root action via sudoers; run is systemd-only.
 from __future__ import annotations
 
 import functools
+import json
 import os
 import re
 import sys
@@ -225,7 +226,7 @@ def test_usage_is_pull_or_run_or_stop_unit() -> None:
     # `notify-proxy` (R-429) is the in-cgroup sd_notify forwarder `run`
     # spawns for itself; it is never a sudoers verb.
     text = RUNTIME.read_text(encoding="utf-8")
-    assert "usage: radon-app-runtime {pull [<sha>]|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" in text
+    assert "usage: radon-app-runtime {pull [<sha>]|prune|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" in text
     assert "notify-proxy" not in SUDOERS.read_text(encoding="utf-8")
 
 
@@ -301,6 +302,152 @@ def test_pull_with_matching_digests_skips_layer_pulls_and_prunes_stale_pairs(tmp
         f"rmi ghcr.io/joemccann/radon-python:{stale}",
     ])
     assert "gnzsnz" not in "\n".join(lines) and "ib-gateway" not in "\n".join(lines)
+
+
+# Post-deploy prune (no argument). The stub reports running images from
+# RADON_STUB_RUNNING, local tags from RADON_STUB_TAGS, and fails `rmi` for any
+# ref listed in RADON_STUB_RMI_FAIL.
+_PRUNE_DOCKER = """#!/bin/bash
+printf '%s\\n' "$*" >> {log}
+case "$1 $2" in
+  "ps --format")
+    for image in ${{RADON_STUB_RUNNING:-}}; do printf '%s\\n' "$image"; done
+    ;;
+  "images --format")
+    for t in ${{RADON_STUB_TAGS:-}}; do printf '%s:%s\\n' "$4" "$t"; done
+    ;;
+esac
+if [[ "$1" == "rmi" ]]; then
+  for bad in ${{RADON_STUB_RMI_FAIL:-}}; do [[ "$2" == "$bad" ]] && exit 2; done
+fi
+exit 0
+"""
+
+_NODE = "ghcr.io/joemccann/radon-node"
+_PY = "ghcr.io/joemccann/radon-python"
+_CUR, _PREV, _STALE1, _STALE2 = "a" * 40, "b" * 40, "c" * 40, "e" * 40
+
+
+def _prune(tmp_path: Path, *, green: str | None, tags: str, running: str | None = None,
+           journal: str | None = None, extra: dict[str, str] | None = None):
+    # Isolated marker and journal paths: _runtime_env rewrites state/last-green.
+    marker = tmp_path / "prune-green"
+    journal_file = tmp_path / "prune-transition.json"
+    marker.unlink(missing_ok=True)
+    journal_file.unlink(missing_ok=True)
+    if green is not None:
+        marker.write_text(green)
+    if journal is not None:
+        journal_file.write_text(journal)
+    log = tmp_path / "docker.log"
+    log.unlink(missing_ok=True)
+    result = _run(
+        tmp_path,
+        ["prune"],
+        extra_env={
+            "RADON_TEST_GREEN_MARKER": str(marker),
+            "RADON_TEST_TRANSITION_JOURNAL": str(journal_file),
+            "RADON_STUB_TAGS": tags,
+            "RADON_STUB_RUNNING": running if running is not None else f"{_NODE}:{_CUR} {_PY}:{_CUR}",
+            **(extra or {}),
+        },
+        docker_body=_PRUNE_DOCKER,
+    )
+    lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    return result, sorted(line for line in lines if line.startswith("rmi "))
+
+
+def _rmi(*shas: str) -> list[str]:
+    return sorted(f"rmi {repo}:{sha}" for sha in shas for repo in (_NODE, _PY))
+
+
+def test_prune_keeps_running_and_previous_green_and_removes_every_stale_tag(tmp_path: Path) -> None:
+    result, removed = _prune(
+        tmp_path,
+        green=f"{_CUR}\n{_PREV}\n",
+        tags=f"latest {_CUR} {_PREV} {_STALE1} {_STALE2} weird-tag",
+    )
+    assert result.returncode == 0, result.stderr
+    # Two stale tags (possibly on one image) each get their own rmi, so the
+    # image is gone once its last stale tag is removed.
+    assert removed == _rmi(_STALE1, _STALE2)
+
+
+def test_prune_never_removes_an_image_a_running_container_uses(tmp_path: Path) -> None:
+    result, removed = _prune(
+        tmp_path,
+        green=f"{_CUR}\n{_PREV}\n",
+        tags=f"{_CUR} {_PREV} {_STALE1}",
+        running=f"{_NODE}:{_STALE1} {_PY}:{_CUR}",
+    )
+    assert result.returncode == 0, result.stderr
+    assert removed == [f"rmi {_PY}:{_STALE1}"]
+
+
+def test_prune_removes_nothing_while_the_deploy_lock_is_held(tmp_path: Path) -> None:
+    import fcntl
+    _runtime_env(tmp_path)
+    lock = tmp_path / "state" / "deploy.lock"
+    with open(lock, "r+") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result, removed = _prune(tmp_path, green=f"{_CUR}\n{_PREV}\n", tags=f"{_CUR} {_PREV} {_STALE1}")
+    assert result.returncode == 0, result.stderr
+    assert removed == []
+    assert "BlockingIOError" in result.stderr
+
+
+def test_prune_skips_without_a_recorded_previous_release(tmp_path: Path) -> None:
+    for green in (f"{_CUR}\n", f"{_CUR}\nnot-a-sha\n", None):
+        result, removed = _prune(tmp_path, green=green, tags=f"{_CUR} {_PREV} {_STALE1}")
+        assert result.returncode == 0, result.stderr
+        assert removed == [], green
+        assert "image prune skipped" in result.stderr
+
+
+def test_prune_with_a_pending_transition_protects_both_journal_shas(tmp_path: Path) -> None:
+    journal = json.dumps({"version": 1, "requested_sha": _STALE1, "previous_sha": _PREV})
+    result, removed = _prune(
+        tmp_path,
+        green=f"{_CUR}\n",
+        tags=f"{_CUR} {_PREV} {_STALE1} {_STALE2}",
+        running=f"{_NODE}:{_PREV} {_PY}:{_PREV}",
+        journal=journal,
+    )
+    assert result.returncode == 0, result.stderr
+    # The journal names the rollback pair; the green marker is not consulted.
+    assert removed == _rmi(_CUR, _STALE2)
+
+
+def test_prune_with_an_invalid_journal_removes_nothing(tmp_path: Path) -> None:
+    result, removed = _prune(
+        tmp_path, green=f"{_CUR}\n{_PREV}\n", tags=f"{_CUR} {_STALE1}", journal="{}",
+    )
+    assert result.returncode == 0, result.stderr
+    assert removed == []
+
+
+def test_prune_skips_when_no_app_container_is_running(tmp_path: Path) -> None:
+    result, removed = _prune(tmp_path, green=f"{_CUR}\n{_PREV}\n", tags=f"{_CUR} {_STALE1}", running="")
+    assert result.returncode == 0, result.stderr
+    assert removed == []
+
+
+def test_prune_continues_past_a_refused_rmi(tmp_path: Path) -> None:
+    result, removed = _prune(
+        tmp_path,
+        green=f"{_CUR}\n{_PREV}\n",
+        tags=f"{_CUR} {_PREV} {_STALE1} {_STALE2}",
+        extra={"RADON_STUB_RMI_FAIL": f"{_NODE}:{_STALE1}"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert removed == _rmi(_STALE1, _STALE2)
+    assert f"rmi {_NODE}:{_STALE1} failed" in result.stderr
+
+
+def test_prune_takes_no_argument(tmp_path: Path) -> None:
+    result = _run(tmp_path, ["prune", _STALE1])
+    assert result.returncode != 0
+    assert "usage:" in result.stderr
 
 
 _CONCURRENT_PULL_DOCKER = """#!/bin/bash
@@ -1160,6 +1307,9 @@ def test_sudoers_grants_exact_pull_not_run() -> None:
     # that is not 40 hex chars, so the glob cannot reach `run` or a shell.
     assert "/usr/local/sbin/radon-app-runtime pull [0-9a-f]*" in text
     assert "radon-app-runtime pull *" not in text
+    # Post-deploy cleanup verb: listed in full, no argument, no wildcard.
+    assert "/usr/local/sbin/radon-app-runtime prune" in text
+    assert "radon-app-runtime prune *" not in text
     assert "radon-app-runtime run" not in text
     assert "radon-app-runtime *" not in text
     assert "docker.sock" not in text
