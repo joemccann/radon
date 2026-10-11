@@ -601,7 +601,12 @@ The drift audit runs from `/home/radon/radon/cloud` and compares live Caddy,
 Compose, systemd, polkit, sudoers, and installed helpers with this source; on
 `RADON_HOST_ROLE=app` the Compose and `ib-gateway-control` surfaces are
 role-skipped because Gateway runtime surfaces are absent by design there. It
-must never read or report `.env*` contents.
+must never read or report `.env*` contents. There is no beta carve-out: beta
+host artifacts were removed 2026-10-11, so a live `radon-beta*` unit or
+sudoers fragment is `config-drift` (`tests/test_beta_sunset.py`).
+
+Host swap is `/swapfile` (2G, `/etc/fstab`) from `setup-vps.sh:ensure_swapfile`;
+idempotent, refuses a symlinked path. Runbook: `docs/operations.md` "Host swap".
 
 `setup-vps.sh` inventories `radon-control.service` and `enable_services`
 enables it: the host control socket the containerised radon-api uses for the
