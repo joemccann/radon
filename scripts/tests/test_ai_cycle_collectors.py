@@ -515,6 +515,35 @@ def test_ramp_token_series_form_their_own_snapshot_panel(tmp_path):
     assert panel["source_ids"] == ["ramp"]
 
 
+def test_ramp_token_panel_leads_with_prices_then_totals_before_minor_makers(tmp_path):
+    from scripts.ai_cycle.snapshot import build_snapshot, compact_snapshot
+    from scripts.ai_cycle.store import ObservationStore
+
+    prices = [
+        {"usage_date": "2026-09-01", "token_type": kind, "model_maker": maker,
+         "token_cost_usd_7d": 1000.0, "token_count_7d": 1_000_000_000}
+        for kind in ("all_tokens", "uncached_input", "output") for maker in ("anthropic", "openai")
+    ]
+    makers = ("alibaba", "amazon", "anthropic", "cursor", "deepseek", "google", "meta", "openai", "xai")
+    volumes = [
+        {"period_grain": "weekly", "period_start": "2026-08-24", "period_end": "2026-08-30", "metric_key": key,
+         "dimension_type": "model", "series_key": f"{maker}-model", "model_maker": maker, "metric_value": 10.0}
+        for key in ("token_volume", "token_spend") for maker in makers
+    ]
+    store = ObservationStore(tmp_path / "ramp-order.sqlite")
+    store.initialize()
+    store.append_observations(
+        parse_ramp_curated({**RAMP_TOKEN_PAYLOAD, "token_prices": prices, "token_volumes": volumes}, HASH, FETCHED)
+    )
+    panel = next(i for i in compact_snapshot(build_snapshot(store, "2026-09-08T00:00:00Z"))["indicators"] if i["id"] == "D7")
+    ids = [metric["id"] for metric in panel["metrics"]]
+    assert ids[:2] == ["tokens.price.blended.anthropic", "tokens.price.blended.openai"]
+    assert set(ids[:6]) == {f"tokens.price.{k}.{m}" for k in ("blended", "input", "output") for m in ("anthropic", "openai")}
+    assert ids[6:8] == ["tokens.volume.all", "tokens.spend.all"]
+    charted = {point["series_id"].split(":")[0] for point in panel["history"]}
+    assert {"tokens.volume.all", "tokens.spend.all"} <= charted
+
+
 def test_ramp_bundled_fixture_loads_into_snapshot(tmp_path):
     from scripts.ai_cycle.collect import main
     from scripts.ai_cycle.snapshot import build_snapshot
