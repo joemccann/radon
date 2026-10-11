@@ -909,4 +909,9 @@ Page and setup failures use the shared safe error presentation boundary (`web/li
 
 ### SPX breadth OAuth deployment
 
-The SPX breadth timer reads the configured TradingView OAuth store on the host. Follow the explicit local consent procedure in [TradingView MCP](tradingview-mcp-client.md), using the production account and the configured owned 0600 file inside an owned private directory. Unattended collection refreshes existing credentials and never opens consent. The timer inventory adds no credentials to `/etc/radon/env`; configure only the token-file path there, keeping rotating credentials in the private store. Do not commit the store or copy a developer account token during deployment. Missing or rejected credentials produce an error heartbeat while preserving previously stored observations.
+The SPX breadth timer reads the configured TradingView OAuth store on the host.
+Follow the explicit local consent procedure in [TradingView MCP](tradingview-mcp-client.md), using the production account and the configured owned 0600 file inside an owned private directory.
+Unattended collection refreshes existing credentials and never opens consent.
+The timer inventory adds no credentials to `/etc/radon/env`; configure only the token-file path there, keeping rotating credentials in the private store.
+Do not commit the store or copy a developer account token during deployment.
+Missing or rejected credentials produce an error heartbeat while preserving previously stored observations.
