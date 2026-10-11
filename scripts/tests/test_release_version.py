@@ -85,8 +85,39 @@ def _repo(tmp_path: Path) -> tuple[Path, str]:
     return repo, _git(repo, "rev-parse", "HEAD")
 
 
+def _pin_is_present(repo: Path) -> bool:
+    return (
+        subprocess.run(
+            ["git", "-C", str(repo), "cat-file", "-e", f"{rv.base_sha()}^{{commit}}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode
+        == 0
+    )
+
+
 def test_recorded_packages_match_commits_since_the_pin() -> None:
-    """The release-version job reads this tree. A hand bump past the fold stays green in the fixture tests."""
+    """The release-version job reads this tree. Fixture tests never open it.
+
+    scripts-rs checks out with fetch-depth 1, so the 0.7.0 pin is absent and
+    `check` dies in `cat-file` before it can compare versions. Deepen that
+    clone once, without blobs. scripts-df stays the only shard that clones
+    full history up front.
+    """
+    if not _pin_is_present(rv.ROOT):
+        subprocess.check_call(
+            [
+                "git",
+                "-C",
+                str(rv.ROOT),
+                "fetch",
+                "--no-tags",
+                "--filter=blob:none",
+                "--unshallow",
+                "origin",
+            ]
+        )
+        assert _pin_is_present(rv.ROOT)
     assert rv.check(rv.ROOT) == rv.expected_version(rv.ROOT)
 
 
