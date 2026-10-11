@@ -1247,17 +1247,17 @@ WHERE service LIKE 'equibles-%' ORDER BY finished_at DESC;
 
 The staging clone was never finished. Repo copies of `deploy/beta/`, the
 Caddy `beta.radon.run` site, and `cloud/config/sudoers.d/radon-beta` are
-gone. Deploy still skips leftover `radon-beta-*` units so a host that still
-has them is not torn down as production.
+gone. Host leftovers were removed on 2026-10-11: the `radon-beta-*` units,
+`/home/radon/radon-beta`, and the 4G beta swapfile. The drift audit no longer
+carves out `radon-beta*`; a reappearing beta unit or sudoers fragment is
+`config-drift`. Do not recreate. `cloud/tests/test_beta_sunset.py` pins this.
 
-On the VPS, when convenient (not a deploy blocker):
+Host swap is `/swapfile` (2G, `/etc/fstab`), provisioned by
+`setup-vps.sh:ensure_swapfile`. The app host has 7.6G RAM and ran ~150M of
+swap, so 2G is headroom, not working set.
 
-```bash
-sudo systemctl disable --now radon-beta-nextjs radon-beta-api radon-beta-health
-sudo rm -f /etc/systemd/system/radon-beta-*.service /etc/sudoers.d/radon-beta
-sudo systemctl daemon-reload
-# drop DNS A for beta.radon.run, Clerk satellite, Turso DB radon-beta, /home/radon/radon-beta
-```
+Operator-only remnants outside the host: DNS A for `beta.radon.run`, the
+Clerk satellite, and the Turso DB `radon-beta`.
 
 ## Known gaps
 
