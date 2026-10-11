@@ -375,13 +375,27 @@ green_marker_matches() {
   [[ "$(head -n 1 "$GREEN_MARKER_FILE" 2>/dev/null)" == "$requested_sha" ]]
 }
 
+# Line 1 is the green release; line 2 is the release it replaced, which
+# `radon-app-runtime prune` keeps as the rollback image pair. Readers of
+# line 1 (green_marker_matches) are unaffected.
 write_green_marker() {
   local requested_sha="$1"
-  local marker_dir marker_tmp
+  local marker_dir marker_tmp previous_sha=""
+  if [[ -f "$GREEN_MARKER_FILE" ]]; then
+    previous_sha="$(sed -n 1p "$GREEN_MARKER_FILE" 2>/dev/null || true)"
+    if [[ "$previous_sha" == "$requested_sha" ]]; then
+      previous_sha="$(sed -n 2p "$GREEN_MARKER_FILE" 2>/dev/null || true)"
+    fi
+    [[ "$previous_sha" =~ ^[0-9a-f]{40}$ ]] || previous_sha=""
+  fi
   marker_dir="$(dirname "$GREEN_MARKER_FILE")"
   umask 077
   marker_tmp="$(mktemp "${marker_dir}/.radon-green.XXXXXX")"
-  printf '%s\n' "$requested_sha" > "$marker_tmp"
+  if [[ -n "$previous_sha" ]]; then
+    printf '%s\n%s\n' "$requested_sha" "$previous_sha" > "$marker_tmp"
+  else
+    printf '%s\n' "$requested_sha" > "$marker_tmp"
+  fi
   chmod 0600 "$marker_tmp"
   mv -f "$marker_tmp" "$GREEN_MARKER_FILE"
 }
@@ -2034,7 +2048,23 @@ supervise_deploy_command() {
   esac
   trap - TERM INT HUP
   exec 9>&-
+  if (( exit_code == 0 )); then
+    prune_app_images_after_deploy
+  fi
   return "$exit_code"
+}
+
+# Runs only after FD 9 is closed: the pruner takes the deploy lock itself and
+# skips while anyone holds it. Best effort; a skipped prune never fails a deploy.
+prune_app_images_after_deploy() {
+  if ! sudo -n -l -- "$APP_RUNTIME_HELPER" prune >/dev/null 2>&1; then
+    log_warn "App image prune is not granted; skipping"
+    return 0
+  fi
+  if ! timeout 120 sudo -n "$APP_RUNTIME_HELPER" prune; then
+    log_warn "App image prune failed; stale release images remain"
+  fi
+  return 0
 }
 
 run_bounded_deploy() {

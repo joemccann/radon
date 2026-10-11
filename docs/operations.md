@@ -867,6 +867,15 @@ in a detached target-SHA worktree, journals and restores the active topology,
 and gates FastAPI `/health/lite`, Next.js HTTP, relay TCP/HTTP, and stable core
 service restart counts. IB state remains advisory.
 
+After a green deploy the supervisor releases the deploy lock and runs
+`sudo -n /usr/local/sbin/radon-app-runtime prune`. It keeps only the running
+release image pair and the previous green pair (green marker lines 1 and 2,
+or both transition-journal SHAs while one is pending) and removes every other
+`ghcr.io/joemccann/radon-{python,node}:<sha>` tag. It removes nothing while
+the lock is held, without a recorded previous release, or with no running app
+container. A skipped or failed prune never fails the deploy. Manual run, as
+radon, with no deploy in flight: the same command.
+
 The deploy job is capped at 60 minutes and SSH at 55 minutes. The inner deploy
 gets 900 seconds plus a 30-second kill window. Root mutation actions get 180
 seconds, verify/commit actions get 30 seconds, and lifecycle-lock contention may
