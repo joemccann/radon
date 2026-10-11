@@ -658,6 +658,10 @@ def test_release_tag_follows_a_green_deploy_on_main() -> None:
     job = _workflow()["jobs"]["release-tag"]
     assert job["needs"] == ["deploy"] or job["needs"] == "deploy"
     assert "needs.deploy.result == 'success'" in job["if"]
+    # Without a status function GitHub's implicit success() also requires every
+    # transitive upstream job to succeed, so a path-filtered (skipped) test job
+    # skipped the tag after a green deploy (run 38143090047). R-324.
+    assert "!cancelled()" in job["if"]
     assert "refs/heads/main" in job["if"]
     assert job["permissions"] == {"contents": "write"}
     assert job["concurrency"]["cancel-in-progress"] == "false"
