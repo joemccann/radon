@@ -1,0 +1,16 @@
+.metrics :global(.regime-strip) {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.metrics :global(.regime-strip-cell:nth-child(n)) {
+  grid-column: auto;
+}
+@media (max-width: 1180px) {
+  .metrics :global(.regime-strip) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 760px) {
+  .metrics :global(.regime-strip) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

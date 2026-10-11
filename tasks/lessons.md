@@ -1153,3 +1153,6 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 ## 2026-10-07 - Complete explicit share changes
 - An audit status is not a prohibition on implementing an explicit request. Preserve the original full post when the user requests formatting only; do not replace it with a summarized voice draft.
+
+## 2026-10-10 - Recover the original breadth chart before defining a signal
+- The supplied reference is dated2026-09-18 and has SPX, percent of S&P500 stocks above their200-day moving average, and S&P500 new-highs-minus-new-lows percent. Do not substitute the separate September21 one-day rally screen, NYSE counts, or an invented binary trigger. Preserve the exact reference date/values and distinguish provider parity from visual similarity.

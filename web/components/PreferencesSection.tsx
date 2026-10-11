@@ -264,13 +264,12 @@ export default function PreferencesSection() {
               const dirty = isDirty(entry);
               return (
                 <div className="preferences-row settings-preference" data-testid={`preference-row-${entry.key}`} key={entry.key}>
-                  <div className="preferences-row__head">
-                    <label className="preferences-row__label" htmlFor={`preference-${entry.key}`}>
-                      {entry.label}
-                    </label>
-                  </div>
-
                   <div className="settings-preference__copy">
+                    <div className="preferences-row__head">
+                      <label className="preferences-row__label" htmlFor={`preference-${entry.key}`}>
+                        {entry.label}
+                      </label>
+                    </div>
                     <p className="preferences-row__description" id={`preference-description-${entry.key}`}>
                       {entry.description}
                     </p>
@@ -355,6 +354,7 @@ export default function PreferencesSection() {
                   </div>
 
                   <div className="admin-actions-row">
+                    {dirty ? <span className="settings-draft-status" role="status">Unsaved</span> : null}
                     <button
                       type="button"
                       className="admin-btn admin-btn-primary"
@@ -362,7 +362,7 @@ export default function PreferencesSection() {
                       disabled={!dirty || busy || storeUnavailable || Boolean(inputError)}
                       onClick={() => { void saveRow(entry); }}
                     >
-                      Save
+                      {busy ? "Saving..." : "Save"}
                     </button>
                     <button
                       type="button"

@@ -76,6 +76,7 @@ const PINNED: Record<string, PinnedCapability> = {
   "headlines": "internal",
   "hhlev": "read",
   "hyad": "read",
+  "record-high-breadth": "read",
   "ib/ws-ticket": "admin",
   "iei-hyg": "read",
   "index-options/chain": "read",
