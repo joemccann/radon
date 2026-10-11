@@ -1345,26 +1345,33 @@ async def _read_orders_snapshot_from_db() -> dict[str, Any]:
     cutoff = (
         datetime.now(timezone.utc) - timedelta(hours=ORDERS_EXECUTED_LOOKBACK_HOURS)
     ).isoformat().replace("+00:00", "Z")
-    open_rows_task = asyncio.to_thread(
-        db_http.hrana_execute,
-        """
-        SELECT payload, updated_at
-        FROM open_orders
-        ORDER BY updated_at DESC
-        """,
-        (),
+    # One /v2/pipeline round-trip for both reads (PERF-002).
+    results = await asyncio.to_thread(
+        db_http.hrana_execute_many,
+        [
+            (
+                """
+                SELECT payload, updated_at
+                FROM open_orders
+                ORDER BY updated_at DESC
+                """,
+                (),
+            ),
+            (
+                """
+                SELECT payload, fill_time
+                FROM executed_orders
+                WHERE fill_time >= ?
+                ORDER BY fill_time DESC
+                """,
+                (cutoff,),
+            ),
+        ],
     )
-    executed_rows_task = asyncio.to_thread(
-        db_http.hrana_execute,
-        """
-        SELECT payload, fill_time
-        FROM executed_orders
-        WHERE fill_time >= ?
-        ORDER BY fill_time DESC
-        """,
-        (cutoff,),
-    )
-    open_rows, executed_rows = await asyncio.gather(open_rows_task, executed_rows_task)
+    for result in results:
+        if isinstance(result, Exception):
+            raise result
+    open_rows, executed_rows = results
 
     from utils.working_orders import is_prior_session_day_order
 
@@ -6192,17 +6199,27 @@ async def cash_flows(
     # Bounded hrana read (db_http) — sync libsql is banned in this process;
     # this route runs on every /orders view, the exact hot path the 06-11
     # wedge took down.
+    # One /v2/pipeline round-trip for the rows AND the sync-status row
+    # (PERF-001); each statement keeps its own failure fallback.
+    status_rows: Any = None
     try:
-        raw_rows = await asyncio.to_thread(
-            db_http.hrana_execute,
-            """
-            SELECT id, date, type, amount, currency, description, raw_type, synced_at
-            FROM cash_flows
-            WHERE date >= ?
-            ORDER BY date DESC, id DESC
-            """,
-            (cutoff_iso,),
+        raw_rows, status_rows = await asyncio.to_thread(
+            db_http.hrana_execute_many,
+            [
+                (
+                    """
+                    SELECT id, date, type, amount, currency, description, raw_type, synced_at
+                    FROM cash_flows
+                    WHERE date >= ?
+                    ORDER BY date DESC, id DESC
+                    """,
+                    (cutoff_iso,),
+                ),
+                (_CASH_FLOW_SYNC_STATUS_SQL, _CASH_FLOW_SYNC_STATUS_ARGS),
+            ],
         )
+        if isinstance(raw_rows, Exception):
+            raise raw_rows
         for row in raw_rows:
             rows.append({
                 "id": row[0],
@@ -6251,7 +6268,7 @@ async def cash_flows(
     # ("Statement could not be generated"). When throttle is active we
     # surface the next_attempt_at so the operator knows when fresh data
     # will land instead of guessing.
-    sync_status = await asyncio.to_thread(_load_cash_flow_sync_status)
+    sync_status = await asyncio.to_thread(_load_cash_flow_sync_status, status_rows)
 
     return {
         "rows": rows,
@@ -6264,7 +6281,15 @@ async def cash_flows(
     }
 
 
-def _load_cash_flow_sync_status() -> dict[str, Any]:
+_CASH_FLOW_SYNC_STATUS_SQL = """
+            SELECT state, last_attempt_finished_at, last_error
+            FROM service_health
+            WHERE service = ?
+            """
+_CASH_FLOW_SYNC_STATUS_ARGS = ("cash-flow-sync",)
+
+
+def _load_cash_flow_sync_status(prefetched_rows: Any = None) -> dict[str, Any]:
     """Read service_health[cash-flow-sync] and surface throttle/error context.
 
     Returns a payload safe for the public route to expose:
@@ -6285,6 +6310,9 @@ def _load_cash_flow_sync_status() -> dict[str, Any]:
 
     All exceptions are swallowed; the route shouldn't 500 because we
     couldn't read service_health.
+
+    `prefetched_rows` carries the rows (or the per-statement error) when the
+    caller already read them in its own pipeline; None means read here.
     """
     payload: dict[str, Any] = {
         "state": "unknown",
@@ -6297,14 +6325,14 @@ def _load_cash_flow_sync_status() -> dict[str, Any]:
     try:
         # Bounded hrana read; runs off-loop via asyncio.to_thread at the
         # call site. Sync libsql is banned in this process.
-        rows = db_http.hrana_execute(
-            """
-            SELECT state, last_attempt_finished_at, last_error
-            FROM service_health
-            WHERE service = ?
-            """,
-            ("cash-flow-sync",),
-        )
+        if prefetched_rows is None:
+            rows = db_http.hrana_execute(
+                _CASH_FLOW_SYNC_STATUS_SQL, _CASH_FLOW_SYNC_STATUS_ARGS
+            )
+        elif isinstance(prefetched_rows, Exception):
+            raise prefetched_rows
+        else:
+            rows = prefetched_rows
         row = rows[0] if rows else None
         if row is None:
             return payload

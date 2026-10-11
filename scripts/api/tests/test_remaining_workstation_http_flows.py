@@ -153,15 +153,16 @@ def test_cash_flows_db_query_type_filter_summary_and_sync_http(bounded, monkeypa
         return rows
 
     sync = {"state": "error", "last_error": {"message": "Flex throttled"}, "next_attempt_at": "2026-10-03T13:00:00Z"}
-    monkeypatch.setattr(server.db_http, "hrana_execute", execute)
-    monkeypatch.setattr(server, "_load_cash_flow_sync_status", lambda: sync)
+    monkeypatch.setattr(server.db_http, "hrana_execute_many", lambda stmts: [execute(sql, params) for sql, params in stmts])
+    monkeypatch.setattr(server, "_load_cash_flow_sync_status", lambda *_: sync)
     response = client.get("/cash-flows?days=2&types=Deposit,%20Withdrawal")
     assert response.status_code == 200
     names = ["id", "date", "type", "amount", "currency", "description", "raw_type", "synced_at"]
     assert response.json() == {"rows": [dict(zip(names, row)) for row in rows[:2]], "count": 2,
         "from_date": "2026-10-01", "summary": {"deposits": 100, "withdrawals": -25, "dividends": 0, "net": 75},
         "last_synced_at": "2026-10-03T09:00:00Z", "sync_status": sync, "db_error": None}
-    assert calls == [("SELECT id, date, type, amount, currency, description, raw_type, synced_at FROM cash_flows WHERE date >= ? ORDER BY date DESC, id DESC", ("2026-10-01",))]
+    assert calls == [("SELECT id, date, type, amount, currency, description, raw_type, synced_at FROM cash_flows WHERE date >= ? ORDER BY date DESC, id DESC", ("2026-10-01",)),
+                     ("SELECT state, last_attempt_finished_at, last_error FROM service_health WHERE service = ?", ("cash-flow-sync",))]
 
 
 @pytest.mark.parametrize("fallback_error", [False, True])
@@ -170,8 +171,8 @@ def test_cash_flows_json_fallback_cutoff_and_missing_http(bounded, monkeypatch, 
     from utils import atomic_io
     calls = []
     monkeypatch.setattr(server, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(server.db_http, "hrana_execute", lambda *args: (_ for _ in ()).throw(RuntimeError("DB offline")))
-    monkeypatch.setattr(server, "_load_cash_flow_sync_status", lambda: {"state": "unknown"})
+    monkeypatch.setattr(server.db_http, "hrana_execute_many", lambda *args: (_ for _ in ()).throw(RuntimeError("DB offline")))
+    monkeypatch.setattr(server, "_load_cash_flow_sync_status", lambda *_: {"state": "unknown"})
     row = {"id": 1, "date": "2026-10-02", "type": "Dividend", "amount": 4, "currency": "USD", "description": "paid", "raw_type": "DIV", "synced_at": None}
 
     def load(path):
@@ -193,8 +194,8 @@ def test_cash_flows_all_types_include_interest_and_fees_in_net_http(bounded, mon
     server, client = bounded
     rows = [(1, "2026-10-03", "Interest", 3, "USD", "interest", "INT", None),
             (2, "2026-10-03", "Fee", -1, "USD", "fee", "FEE", None)]
-    monkeypatch.setattr(server.db_http, "hrana_execute", lambda sql, params: rows)
-    monkeypatch.setattr(server, "_load_cash_flow_sync_status", lambda: {"state": "ok"})
+    monkeypatch.setattr(server.db_http, "hrana_execute_many", lambda stmts: [rows for _ in stmts])
+    monkeypatch.setattr(server, "_load_cash_flow_sync_status", lambda *_: {"state": "ok"})
     response = client.get("/cash-flows?types=")
     assert response.status_code == 200
     assert [row["type"] for row in response.json()["rows"]] == ["Interest", "Fee"]
@@ -206,8 +207,8 @@ def test_cash_flows_all_types_include_interest_and_fees_in_net_http(bounded, mon
 def test_cash_flows_json_fallback_retains_type_filter_http(bounded, monkeypatch):
     server, client = bounded
     from utils import atomic_io
-    monkeypatch.setattr(server.db_http, "hrana_execute", lambda *args: (_ for _ in ()).throw(RuntimeError("DB offline")))
-    monkeypatch.setattr(server, "_load_cash_flow_sync_status", lambda: {"state": "unknown"})
+    monkeypatch.setattr(server.db_http, "hrana_execute_many", lambda *args: (_ for _ in ()).throw(RuntimeError("DB offline")))
+    monkeypatch.setattr(server, "_load_cash_flow_sync_status", lambda *_: {"state": "unknown"})
     dividend = {"id": 1, "date": "2026-10-03", "type": "Dividend", "amount": 4, "synced_at": "2026-10-03T10:00:00Z"}
     fee = {"id": 2, "date": "2026-10-03", "type": "Fee", "amount": -1, "synced_at": "2026-10-03T11:00:00Z"}
     monkeypatch.setattr(atomic_io, "verified_load", lambda path: {"rows": [dividend, fee]})
