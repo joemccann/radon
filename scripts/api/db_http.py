@@ -61,17 +61,24 @@ def _encode_arg(value: Any) -> dict[str, Any]:
 def _post_pipeline(
     http_origin: str, token: str, sql: str, args: Sequence[Any], timeout: float
 ) -> dict:
-    payload = json.dumps(
+    return _post_statements(http_origin, token, [(sql, args)], timeout)
+
+
+def _post_statements(
+    http_origin: str,
+    token: str,
+    statements: Sequence[tuple[str, Sequence[Any]]],
+    timeout: float,
+) -> dict:
+    requests: list[dict[str, Any]] = [
         {
-            "requests": [
-                {
-                    "type": "execute",
-                    "stmt": {"sql": sql, "args": [_encode_arg(a) for a in args]},
-                },
-                {"type": "close"},
-            ]
+            "type": "execute",
+            "stmt": {"sql": sql, "args": [_encode_arg(a) for a in args]},
         }
-    ).encode("utf-8")
+        for sql, args in statements
+    ]
+    requests.append({"type": "close"})
+    payload = json.dumps({"requests": requests}).encode("utf-8")
     req = urllib.request.Request(
         http_origin.rstrip("/") + "/v2/pipeline",
         data=payload,
@@ -86,11 +93,11 @@ def _post_pipeline(
     return json.loads(raw.decode("utf-8"))
 
 
-def _execute_result(body: dict) -> dict:
+def _execute_result(body: dict, index: int = 0) -> dict:
     results = body.get("results") or []
-    if not results:
+    if len(results) <= index:
         raise DbHttpError("empty pipeline response")
-    first = results[0]
+    first = results[index]
     if first.get("type") != "ok":
         error = first.get("error") or {}
         raise DbHttpError(str(error.get("message") or "statement failed"))
@@ -131,6 +138,41 @@ def hrana_execute(
         raise
     except Exception as exc:
         raise DbHttpError(f"{type(exc).__name__}: {exc}") from exc
+
+
+@measure_operation("database")
+def hrana_execute_many(
+    statements: Sequence[tuple[str, Sequence[Any]]],
+    timeout: float = HRANA_TIMEOUT_S,
+) -> list[list[tuple] | DbHttpError]:
+    """Run independent read statements in ONE /v2/pipeline round-trip.
+
+    Not a transaction: each statement succeeds or fails on its own, so the
+    result list holds rows (as in :func:`hrana_execute`) or the
+    :class:`DbHttpError` for that statement, in input order. Missing creds
+    or a transport/protocol failure raise :class:`DbHttpError`.
+    """
+    if not statements or len(statements) > 100:
+        raise ValueError("hrana_execute_many requires 1..100 statements")
+    db_url, token = read_env()
+    http_origin = http_url_from_libsql(db_url)
+    if not http_origin or not token:
+        raise DbHttpError("TURSO_DB_URL / TURSO_AUTH_TOKEN not configured")
+    try:
+        body = _post_statements(
+            http_origin, token, [(sql, tuple(args)) for sql, args in statements], timeout
+        )
+    except Exception as exc:
+        raise DbHttpError(f"{type(exc).__name__}: {exc}") from exc
+    out: list[list[tuple] | DbHttpError] = []
+    for index in range(len(statements)):
+        try:
+            out.append(_rows_as_tuples(_execute_result(body, index)))
+        except DbHttpError as exc:
+            out.append(exc)
+        except Exception as exc:
+            out.append(DbHttpError(f"{type(exc).__name__}: {exc}"))
+    return out
 
 
 @measure_operation("database")

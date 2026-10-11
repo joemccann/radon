@@ -125,3 +125,41 @@ class TestHranaExecute:
 
     def test_default_timeout_is_bounded(self):
         assert 0 < db_http.HRANA_TIMEOUT_S <= 10
+
+
+class TestHranaExecuteMany:
+    def test_one_post_carries_every_statement_then_close(self, creds):
+        posts: list = []
+
+        def fake_urlopen(req, timeout=None):
+            posts.append(json.loads(req.data.decode("utf-8")))
+            ok = _pipeline_body(["n"], [[{"type": "integer", "value": "1"}]])["results"][0]
+            err = {"type": "error", "error": {"message": "no such table: nope"}}
+            close = {"type": "ok", "response": {"type": "close"}}
+            return _FakeResponse(json.dumps({"results": [ok, err, close]}).encode("utf-8"))
+
+        with patch.object(db_http.urllib.request, "urlopen", fake_urlopen):
+            first, second = db_http.hrana_execute_many(
+                [("SELECT 1 AS n", ()), ("SELECT * FROM nope WHERE x = ?", ("a",))]
+            )
+
+        assert len(posts) == 1
+        assert [r["type"] for r in posts[0]["requests"]] == ["execute", "execute", "close"]
+        assert posts[0]["requests"][1]["stmt"]["args"] == [{"type": "text", "value": "a"}]
+        assert first == [(1,)]
+        assert isinstance(second, db_http.DbHttpError)
+        assert "no such table" in str(second)
+
+    def test_transport_error_raises(self, creds):
+        with patch.object(db_http, "_post_statements", side_effect=TimeoutError("timed out")):
+            with pytest.raises(db_http.DbHttpError, match="TimeoutError"):
+                db_http.hrana_execute_many([("SELECT 1", ())])
+
+    def test_missing_creds_raise(self, monkeypatch):
+        monkeypatch.delenv("TURSO_DB_URL", raising=False)
+        with pytest.raises(db_http.DbHttpError, match="not configured"):
+            db_http.hrana_execute_many([("SELECT 1", ())])
+
+    def test_statement_count_is_bounded(self, creds):
+        with pytest.raises(ValueError):
+            db_http.hrana_execute_many([])
