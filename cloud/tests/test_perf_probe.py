@@ -97,6 +97,28 @@ def test_journal_emits_counts_and_collapsed_templates_never_raw_lines():
     assert out["top"] == [{"unit": "radon-api.service", "count": 2, "template": "slow query # ms on #"}]
 
 
+def test_journal_templates_carry_no_credential_shaped_text():
+    secret = "Zq" + "8vT3kLm9" * 3
+    lines = [
+        {"_SYSTEMD_UNIT": "radon-api.service", "MESSAGE": f"upstream rejected key {secret}"},
+        {"_SYSTEMD_UNIT": "radon-api.service", "MESSAGE": f"GET https://u:pw{secret}@h.example/x?token={secret}&a=b failed"},
+        {"_SYSTEMD_UNIT": "radon-api.service", "MESSAGE": f"Authorization: Bearer {secret[:12]} refused"},
+        {"_SYSTEMD_UNIT": "radon-api.service", "MESSAGE": "password=hunter2xyz for ops@example.com"},
+        {"_SYSTEMD_UNIT": "radon-api.service", "MESSAGE": 'bad body {"password":"hunter3", "api_key": \'shortkey\'}'},
+    ]
+
+    def run(argv, timeout=None):
+        return "\n".join(json.dumps(x) for x in lines)
+
+    out = perf_probe.journal(run)
+    templates = " | ".join(row["template"] for row in out["top"])
+    for leaked in (secret, secret[:12], "u:pw", "hunter2xyz", "ops@example.com", "a=b", "hunter3", "shortkey"):
+        assert leaked not in templates, templates
+    assert "upstream rejected key #" in templates
+    assert "GET https://#@h.example/x?# failed" in templates
+    assert out["per_unit"] == {"radon-api.service": 5}
+
+
 def test_http_latency_reports_percentiles_status_and_errors():
     class Resp:
         status = 200
