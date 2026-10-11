@@ -9257,6 +9257,28 @@ Dependency graph: T1 -> T2 -> T3 -> T4.
 
 Review: Authenticated discovery exposes 2 mapped research tools; high/low searches return MAHN/MALN. Both daily probes return 5000 validated bars; source timestamps cover MAHN 2006-10-25 to 2026-10-09 and MALN 2006-08-28 to 2026-10-09 (UTC), history_complete=false. Independent static review passed; dual-name preference regression added. No local suites, no production token deployment. Regression-only head 03120b6 pending red GitHub evidence; repaired head will receive full CI.
 
+# Task: Record-high breadth indicator (2026-10-10)
+
+- [x] T1 depends_on: [] Original chart received:2026-09-18 SPX7650.50, S&P500 above200-day52.00%, new-highs-minus-new-lows-4.40%; observational three-pane indicator with no invented binary trigger.
+- [x] T2 depends_on: [] Validate live TradingView history depth, high/low pair metadata and existing collector/storage/API/UI contracts.
+- [x] T3 depends_on: [T1, T2] Implement pure calculation, collector, migration, scheduled updates and protected API with regression coverage.
+- [x] T4 depends_on: [T1, T2] Implement Radon indicator UI, methodology, honest missing-data states and browser/component coverage.
+- [ ] T5 depends_on: [T3, T4] Publish PR, verify exact-head CI/browser artifacts, repair failures and send accepted Pushover.
+
+Dependency graph: T1 + T2 -> T3, T4; T3 + T4 -> T5.
+
+Review: Formula/source parity is a prerequisite, not an inferred trading rule. Local suites forbidden; all suites on GitHub runners. Isolated branch codex/record-high-breadth. No production token deployment or unsupported historical claims.
+
+Validation review: Supplied original chart resolves the specification. Formula verified against StockCharts primary documentation. Live TradingView reference parity is mismatch: SPX7650.50 exact, above20049.50 versus52.00, normalized net per500-4.80 versus-4.40. Actual universe denominator and finalization unverified. Implement the clearly labelled provider variant; retain rawcounts, normalization provenance, incompletehistory and originalreference.
+
+Source correction: Supplied StockCharts image establishes2026-09-18 reference. Build SPX Breadth as descriptive three-pane chart with explicit provider parity and incomplete-history metadata. Do not implement the unrelated September21 >=1% screen or claim validated1973/1999 events. Source agent validates S&P500 above200-day and net-highlow symbols before collection wiring.
+
+Live collector review:2026-10-11T04:47:31Z read-only collect succeeded,5028 uniondates,2026-10-09 currentSPX7811.54/above20047.70%/highs15/lows5/net500base2.00%,missing=false,degraded=false.660 historical0.01count observations quarantinedwithrawprovenance,neverinferredzero. Independentreviewpassedcalculation/gaps/freshness; no local suites.
+
+CI repair review: exact headbd82f2e5 reproduced missing indicator-index/operations/provisioningowner updates, bareAPI getDb().execute bypass, and atomiccache checksumfixture mismatch. Register docs, usebounded dbExecute and verifyactualatomicchecksum. Pending exact-headrerun; no local suites.
+
+Visual verification review: runtime headc5b9a0da passed all3newPlaywrightcases; artifactinspection identifiedmobileaxisclipping. ScopedaxisFormat nowcompactinteger ticks withfulltooltipprecision; addedfont-ready390px/desktop tickbounds regressions and3desktop pane screenshots. Browserfixture current counts/derivedreading nowconsistent. No local suites.
+
 ## Desktop credentials and preferences UX (2026-10-10)
 
 Dependency graph: T1 -> T2 + T3 -> T4 -> T5.

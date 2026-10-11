@@ -527,6 +527,7 @@ Stable fx path (2026-09-26). `com.radon.fx-stable-sync` (installed by `bash scri
 | `radon-ai-cycle.timer` | Daily 07:15 UTC, up to 5 min jitter | Versioned AI infrastructure observations. Partial provider access is explicit; `ai-cycle` heartbeat has a 26h freshness budget. [Collection and source configuration](ai-infrastructure-operations.md). |
 | `radon-liquidcompute.timer` | Daily 07:30 UTC, up to 5 min jitter | Liquid Compute homepage GPU index ticker. Host-tagged `liquidcompute` rows, C5 on `/regime/llm`. Third venue versus the rental book; methodology opaque until licensed. Heartbeat `liquidcompute` (26h). Enable: `systemctl enable --now radon-liquidcompute.timer`. |
 | `radon-slm-tagger-monitor.timer` | Daily 07:10 UTC, up to 5 min jitter | Newsfeed SLM tagger drift / invalid / label-shift monitor. No-op when `RADON_SLM_TAGGER_MODE` is `off` or `shadow`. Heartbeat `slm-tagger-monitor` (26h). Operator action on breach: `RADON_SLM_TAGGER_MODE=off`. Spec: [`ml/newsfeed-slm-tagger.md`](ml/newsfeed-slm-tagger.md). |
+| `radon-record-high-breadth.timer` | Daily 18:15 America/New_York, up to 60s jitter | TradingView provider-coherent SPX breadth comparison; `record-high-breadth` heartbeat 26h. [Source parity and gaps](indicators/record-high-breadth-source-parity.md). Requires explicit-consent owned 0600 OAuth store configured via `TRADINGVIEW_MCP_TOKEN_FILE`; missing credentials fail clearly and retain the previous snapshot. |
 | `radon-refresh.timer` | [Unit schedule](../cloud/services/radon-refresh.timer) | Schedules data-refresh sweeps |
 | `radon-vcg-refresh.timer` | Mon-Fri 13-21 UTC every 5 min | Autonomous VCG scan |
 | `radon-portfolio-sync.timer` | Mon-Fri 04:00-19:59 ET every 60s | Autonomous portfolio sync. Window matches `fill_monitor`'s `session_window=equity_ext` (04:00-20:00 ET) so outsideRth fills reach the positions table instead of waiting for the next cash open; `run_portfolio_refresh.sh` re-checks `is_equity_ext_session_et()` and exits 0 on holidays and outside the session. |
@@ -905,3 +906,12 @@ Next.js 16 prerender crashes on `/_global-error` and `/_not-found` because the r
 ### User-facing request errors
 
 Page and setup failures use the shared safe error presentation boundary (`web/lib/userError.ts`). UI messages explain the failure and recovery without exposing JSON envelopes, HTML, backend paths or stack traces. Scanner retries preserve prior results and requested tickers; unconfirmed order requests instruct the operator to check order status first. HTTP statuses and server diagnostic bodies remain unchanged. The route-family review is recorded in [the page error audit](audits/page-error-audit-20260917.md).
+
+### SPX breadth OAuth deployment
+
+The SPX breadth timer reads the configured TradingView OAuth store on the host.
+Follow the explicit local consent procedure in [TradingView MCP](tradingview-mcp-client.md), using the production account and the configured owned 0600 file inside an owned private directory.
+Unattended collection refreshes existing credentials and never opens consent.
+The timer inventory adds no credentials to `/etc/radon/env`; configure only the token-file path there, keeping rotating credentials in the private store.
+Do not commit the store or copy a developer account token during deployment.
+Missing or rejected credentials produce an error heartbeat while preserving previously stored observations.

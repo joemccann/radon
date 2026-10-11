@@ -1,0 +1,450 @@
+{
+  "probed_at": "2026-10-11T04:41:49.640251+00:00",
+  "reference_session": "2026-09-18",
+  "reference_source": "User-supplied StockCharts chart",
+  "reference": {
+    "spx_close": 7650.5,
+    "above_200dma_pct": 52.0,
+    "net_new_highs_lows_pct": -4.4
+  },
+  "series": {
+    "MAHP": {
+      "source": "tradingview",
+      "symbol": "INDEX:MAHP",
+      "interval": "1D",
+      "fetched_at": "2026-10-11T03:41:26.507913+00:00",
+      "requested_count": 5000,
+      "returned_count": 2584,
+      "history_complete": false,
+      "first_timestamp": 1467379800,
+      "last_timestamp": 1791552600,
+      "reference_bar": {
+        "timestamp": 1789738200,
+        "open": 5,
+        "high": 5,
+        "low": 5,
+        "close": 5,
+        "volume": null
+      },
+      "latest_bar": {
+        "timestamp": 1791552600,
+        "open": 15,
+        "high": 15,
+        "low": 15,
+        "close": 15,
+        "volume": null
+      }
+    },
+    "MALP": {
+      "source": "tradingview",
+      "symbol": "INDEX:MALP",
+      "interval": "1D",
+      "fetched_at": "2026-10-11T03:41:25.988046+00:00",
+      "requested_count": 5000,
+      "returned_count": 2545,
+      "history_complete": false,
+      "first_timestamp": 1467725400,
+      "last_timestamp": 1791552600,
+      "reference_bar": {
+        "timestamp": 1789738200,
+        "open": 29,
+        "high": 29,
+        "low": 29,
+        "close": 29,
+        "volume": null
+      },
+      "latest_bar": {
+        "timestamp": 1791552600,
+        "open": 5,
+        "high": 5,
+        "low": 5,
+        "close": 5,
+        "volume": null
+      }
+    },
+    "S5TH": {
+      "source": "tradingview",
+      "symbol": "INDEX:S5TH",
+      "interval": "1D",
+      "fetched_at": "2026-10-11T04:41:49.640251+00:00",
+      "requested_count": 5000,
+      "returned_count": 5000,
+      "history_complete": false,
+      "first_timestamp": 1157376600,
+      "last_timestamp": 1791552600,
+      "reference_bar": {
+        "timestamp": 1789738200,
+        "open": 48.9,
+        "high": 50.49,
+        "low": 48.11,
+        "close": 49.5,
+        "volume": null
+      },
+      "latest_bar": {
+        "timestamp": 1791552600,
+        "open": 48.1,
+        "high": 48.3,
+        "low": 47.3,
+        "close": 47.7,
+        "volume": null
+      }
+    },
+    "SPX": {
+      "source": "tradingview",
+      "symbol": "SP:SPX",
+      "interval": "1D",
+      "fetched_at": "2026-10-11T04:41:44.426528+00:00",
+      "requested_count": 5000,
+      "returned_count": 5000,
+      "history_complete": false,
+      "first_timestamp": 1164205800,
+      "last_timestamp": 1791552600,
+      "reference_bar": {
+        "timestamp": 1789738200,
+        "open": 7657.17,
+        "high": 7657.17,
+        "low": 7610.52,
+        "close": 7650.5,
+        "volume": 6050102942
+      },
+      "latest_bar": {
+        "timestamp": 1791552600,
+        "open": 7786.36,
+        "high": 7820.57,
+        "low": 7779.34,
+        "close": 7811.54,
+        "volume": 2645750862
+      }
+    }
+  },
+  "source_parity": "mismatch",
+  "universe_count_verified": false,
+  "comparison": {
+    "spx_close_difference": 0.0,
+    "above_200dma_difference_pp": -2.5,
+    "highs": 5,
+    "lows": 29,
+    "net_count": -24,
+    "illustrative_net_pct_per_500": -4.8,
+    "illustrative_net_pct_difference_pp": -0.4,
+    "illustrative_denominator_is_not_verified": true
+  },
+  "discovery": {
+    "S5TH-search": {
+      "data": {
+        "count": 2,
+        "symbols": [
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 Stocks Above 200-Day Average",
+            "exchange": "INDEX",
+            "logoid": "country/US",
+            "symbol": "INDEX:S5TH",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 Technology Hardware, Storage & Peripherals (Sub Ind)",
+            "exchange": "SP",
+            "logoid": "",
+            "symbol": "SP:S5THSP",
+            "type": "index"
+          }
+        ]
+      },
+      "success": true
+    },
+    "HLP-search": {
+      "data": {
+        "count": 10,
+        "symbols": [
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 Low Volatility High Dividend Index",
+            "exchange": "SP",
+            "logoid": "s-and-p-global",
+            "symbol": "SP:SP5LVHD",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 Low Volatility High Dividend Index (GBP)",
+            "exchange": "SP",
+            "logoid": "",
+            "symbol": "SP:SP5LHBP",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 Low Volatility High Dividend Index (CHF)",
+            "exchange": "SP",
+            "logoid": "",
+            "symbol": "SP:SP5LHFP",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 Low Volatility High Dividend Index (GBP) Hedged",
+            "exchange": "SP",
+            "logoid": "",
+            "symbol": "SP:SP5LHBHP",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 Low Volatility High Dividend Index (EUR) Hedged",
+            "exchange": "SP",
+            "logoid": "",
+            "symbol": "SP:SP5LHEHP",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 Low Volatility High Dividend Index (CHF) Hedged",
+            "exchange": "SP",
+            "logoid": "",
+            "symbol": "SP:SP5LHFHP",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 Low Volatility High Dividend Index (GBP) Net Total Return",
+            "exchange": "SP",
+            "logoid": "",
+            "symbol": "SP:SP5LHBN",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 Low Volatility High Dividend Index (CHF) Net Total Return",
+            "exchange": "SP",
+            "logoid": "",
+            "symbol": "SP:SP5LHFN",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 Low Volatility High Dividend Index Net Total Return",
+            "exchange": "SP",
+            "logoid": "",
+            "symbol": "SP:SP5LVHDN",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 Low Volatility High Dividend Index (GBP) Hedged Net Total Return",
+            "exchange": "SP",
+            "logoid": "",
+            "symbol": "SP:SP5LHBHN",
+            "type": "index"
+          }
+        ]
+      },
+      "success": true
+    },
+    "issues-search": {
+      "data": {
+        "count": 10,
+        "symbols": [
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 Net Total Return Daily Risk Control 15% Index (USD) Total Return",
+            "exchange": "SP",
+            "logoid": "",
+            "symbol": "SP:SPXN15TE",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 and S&P Bitcoin 70/30 Blend Index (USD) Net Total Return",
+            "exchange": "SP",
+            "logoid": "",
+            "symbol": "SP:SPBXT7UN",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 and S&P Bitcoin 70/30 Blend Index (USD) Total Return",
+            "exchange": "SP",
+            "logoid": "",
+            "symbol": "SP:SPBXT7UT",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 Total Return",
+            "exchange": "SP",
+            "logoid": "",
+            "symbol": "SP:SPXTR",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 (Net Total Return",
+            "exchange": "SP",
+            "logoid": "",
+            "symbol": "SP:SPTR500N",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 (KRW) Total Return",
+            "exchange": "SP",
+            "logoid": "",
+            "symbol": "SP:SPXKRT",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 Top 50 Total Return",
+            "exchange": "SP",
+            "logoid": "",
+            "symbol": "SP:SP5T5T",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 Energy Total Return",
+            "exchange": "SP",
+            "logoid": "",
+            "symbol": "SP:SPTRENRS",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 Growth Total Return",
+            "exchange": "SP",
+            "logoid": "",
+            "symbol": "SP:SPTRSGX",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "S&P 500 Value Total Return",
+            "exchange": "SP",
+            "logoid": "",
+            "symbol": "SP:SPTRSVX",
+            "type": "index"
+          }
+        ]
+      },
+      "success": true
+    },
+    "SPXHLP-search": {
+      "data": {
+        "count": 5,
+        "symbols": [
+          {
+            "currency_logoid": "",
+            "description": "SPHL Short Sale Volume",
+            "exchange": "FINRA",
+            "logoid": "",
+            "symbol": "FINRA:SPHL_SHORT_VOLUME",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "SPLP Short Sale Volume",
+            "exchange": "FINRA",
+            "logoid": "",
+            "symbol": "FINRA:SPLP_SHORT_VOLUME",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "SPXH Short Sale Volume",
+            "exchange": "FINRA",
+            "logoid": "",
+            "symbol": "FINRA:SPXH_SHORT_VOLUME",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "SPXL Short Sale Volume",
+            "exchange": "FINRA",
+            "logoid": "",
+            "symbol": "FINRA:SPXL_SHORT_VOLUME",
+            "type": "index"
+          },
+          {
+            "currency_logoid": "",
+            "description": "SPXP Short Sale Volume",
+            "exchange": "FINRA",
+            "logoid": "",
+            "symbol": "FINRA:SPXP_SHORT_VOLUME",
+            "type": "index"
+          }
+        ]
+      },
+      "success": true
+    }
+  },
+  "historical_count_units": {
+    "MAHP": {
+      "invalid_count": 94,
+      "raw_value_frequencies": {
+        "0.01": 94
+      },
+      "examples": [
+        {
+          "timestamp": 1518100200,
+          "open": 0.01,
+          "high": 0.01,
+          "low": 0.01,
+          "close": 0.01,
+          "volume": null
+        },
+        {
+          "timestamp": 1518186600,
+          "open": 0.01,
+          "high": 0.01,
+          "low": 0.01,
+          "close": 0.01,
+          "volume": null
+        },
+        {
+          "timestamp": 1522243800,
+          "open": 0.01,
+          "high": 0.01,
+          "low": 0.01,
+          "close": 0.01,
+          "volume": null
+        }
+      ],
+      "interpretation": "unverified; quarantine as missing counts, never round to zero"
+    },
+    "MALP": {
+      "invalid_count": 566,
+      "raw_value_frequencies": {
+        "0.01": 566
+      },
+      "examples": [
+        {
+          "timestamp": 1486737000,
+          "open": 0.01,
+          "high": 0.01,
+          "low": 0.01,
+          "close": 0.01,
+          "volume": null
+        },
+        {
+          "timestamp": 1486996200,
+          "open": 0.01,
+          "high": 0.01,
+          "low": 0.01,
+          "close": 0.01,
+          "volume": null
+        },
+        {
+          "timestamp": 1487082600,
+          "open": 0.01,
+          "high": 0.01,
+          "low": 0.01,
+          "close": 0.01,
+          "volume": null
+        }
+      ],
+      "interpretation": "unverified; quarantine as missing counts, never round to zero"
+    }
+  }
+}

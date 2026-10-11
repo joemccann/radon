@@ -46,6 +46,7 @@ All current 67 App Router pages appear exactly once in the manifest test. Four g
 | `/regime/grg` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/regime/hhlev` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/regime/hyad` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
+| `/regime/record-high-breadth` | explicit missing measurement state; three-pane ranges and source parity | canonical Clear inventory checks the missing state; record-high-breadth-tab.spec.ts covers loaded desktop/mobile charts |
 | `/regime/iei-hyg` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/regime/iv-spread` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/regime/ivrank` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |

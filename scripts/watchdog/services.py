@@ -200,6 +200,8 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # window. Shared price_history_daily member closes (Yahoo sweep) + Turso
     # — no IB dependency.
     "rsi-oversold":     {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # Daily 18:15 Eastern TradingView source-coherent breadth comparison.
+    "record-high-breadth": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # calm-streak — radon-calm-streak.timer, daily 02:40 + 14:30 UTC every
     # calendar day (304 runs heartbeat). Uniform 26h window. Cboe official
     # SPX daily OHLC — no IB dependency.
@@ -619,6 +621,7 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 23:05 UTC SPX RSI(14)<30 breadth sweep — hourly check
         # surfaces a missed run within 1h of the 26h window expiring.
         "rsi-oversold",
+        "record-high-breadth",
         # Daily 02:40 + 14:30 UTC Cboe SPX intraday-band streak pull — hourly
         # check surfaces a missed run within 1h of the 26h window expiring.
         "calm-streak",
