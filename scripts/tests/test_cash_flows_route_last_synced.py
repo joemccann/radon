@@ -81,6 +81,11 @@ def app_with_inmem_db(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple]:
         return conn.execute(sql, tuple(args)).fetchall()
 
     monkeypatch.setattr(db_http_mod, "hrana_execute", fake_hrana_execute)
+    monkeypatch.setattr(
+        db_http_mod,
+        "hrana_execute_many",
+        lambda stmts, timeout=None: [fake_hrana_execute(sql, args) for sql, args in stmts],
+    )
 
     from fastapi.testclient import TestClient
     from api import server

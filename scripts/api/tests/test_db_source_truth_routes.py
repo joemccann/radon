@@ -118,6 +118,7 @@ def test_orders_refresh_returns_turso_snapshot_not_orders_json(trusted_client, m
     monkeypatch.setattr(server, "test_mode", False)
     monkeypatch.setattr(server, "_run_ib_script_with_recovery", fake_run)
     monkeypatch.setattr(server.db_http, "hrana_execute", fake_hrana_execute)
+    monkeypatch.setattr(server.db_http, "hrana_execute_many", lambda stmts, timeout=None: [fake_hrana_execute(sql, args) for sql, args in stmts])
     monkeypatch.setattr(server, "_read_cache", fail_disk_read)
 
     response = trusted_client.post("/orders/refresh")
@@ -145,6 +146,7 @@ def test_orders_refresh_allows_empty_turso_snapshot(trusted_client, monkeypatch)
     monkeypatch.setattr(server, "test_mode", False)
     monkeypatch.setattr(server, "_run_ib_script_with_recovery", fake_run)
     monkeypatch.setattr(server.db_http, "hrana_execute", fake_hrana_execute)
+    monkeypatch.setattr(server.db_http, "hrana_execute_many", lambda stmts, timeout=None: [fake_hrana_execute(sql, args) for sql, args in stmts])
     monkeypatch.setattr(
         server,
         "_read_cache",
