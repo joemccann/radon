@@ -107,7 +107,7 @@ readonly SECRET_STORE_CREDENTIAL_STAGE_ROOT="${NOTIFY_PROXY_DIR}/credentials"
 STAGED_CREDENTIAL_UNIT=""
 
 usage() {
-  echo "usage: radon-app-runtime {pull [<sha>]|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
+  echo "usage: radon-app-runtime {pull [<sha>]|prune|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
   exit 64
 }
 
@@ -381,6 +381,16 @@ cmd_pull() {
   return 0
 }
 
+# `prune` (no argument) is the post-deploy cleanup. `pull` runs while deploy.sh
+# holds the deploy lock, so its nonblocking prune always skipped (CI run
+# 38112966371: BlockingIOError in prestage, prepull and deploy) and nine
+# ~6.5G release pairs filled the disk in one evening. deploy.sh calls this
+# verb after its supervisor releases the lock, once the green marker names
+# the new release on line 1 and the release it replaced on line 2.
+cmd_prune() {
+  prune_stale_app_images ""
+}
+
 prune_stale_app_images() {
   "$PYTHON" - "$DOCKER" "$1" "$DEPLOY_LOCK_FILE" "$GREEN_MARKER_FILE" "$TRANSITION_JOURNAL_FILE" <<'PYCODE'
 import fcntl, json, os, re, stat, subprocess, sys
@@ -403,7 +413,7 @@ try:
         if not stat.S_ISREG(os.fstat(lock.fileno()).st_mode):
             skip("deploy lock is not a regular file")
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        protected = {target}
+        protected = {target} if target else set()
         journal = Path(journal_path)
         if journal.exists() or journal.is_symlink():
             state = json.loads(journal.read_text())
@@ -413,10 +423,15 @@ try:
                 skip("invalid transition journal")
             protected.update((state["requested_sha"], state["previous_sha"]))
         else:
-            previous = Path(green_path).read_text().splitlines()[0]
-            if not sha(previous):
+            green = Path(green_path).read_text().splitlines()
+            if not green or not sha(green[0]):
                 skip("invalid green marker")
-            protected.add(previous)
+            protected.add(green[0])
+            if not target:
+                # Line 1 is the running release; line 2 is the rollback pair.
+                if len(green) < 2 or not sha(green[1]):
+                    skip("green marker records no previous release")
+                protected.add(green[1])
         repos = ("ghcr.io/joemccann/radon-node", "ghcr.io/joemccann/radon-python")
         in_use = {image for image in command("ps", "--format", "{{.Image}}", "--filter", "name=radon-")
                   if any(image.startswith(repo + ":") or image.startswith(repo + "@") for repo in repos)}
@@ -428,8 +443,14 @@ try:
                 prefix, separator, tag = image.rpartition(":")
                 if prefix == repo and sha(tag) and tag not in protected and image not in in_use:
                     stale.append(image)
+        # One rmi per tag: an image carrying several stale tags is deleted when
+        # its last tag goes. A refused rmi (image still referenced) keeps the
+        # rest of the sweep going.
         for image in stale:
-            command("rmi", image)
+            try:
+                command("rmi", image)
+            except subprocess.SubprocessError as exc:
+                print(f"radon-app-runtime: rmi {image} failed ({type(exc).__name__})", file=sys.stderr)
 except (OSError, ValueError, IndexError, subprocess.SubprocessError) as exc:
     skip(f"deploy lock or rollback state unavailable ({type(exc).__name__})")
 PYCODE
@@ -1019,6 +1040,10 @@ case "$1" in
   pull)
     [[ $# -eq 1 || $# -eq 2 ]] || usage
     cmd_pull "${2:-}"
+    ;;
+  prune)
+    [[ $# -eq 1 ]] || usage
+    cmd_prune
     ;;
   run)
     [[ $# -eq 2 ]] || usage
