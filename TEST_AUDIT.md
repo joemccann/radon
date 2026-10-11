@@ -11355,4 +11355,10 @@ Range `208bb3d687e9216db0c0f185f4b73fa4c30d4fbd..0627874b30398f0f04631846e0c86a2
 
 Acceptance: `--check` exits 0 and prints `0.12.0`. Root `package.json`, `web/package.json`, and the README version badge all read `0.12.0`. The fold rules are unchanged. A direct `check(ROOT)` case fails when the recorded version is ahead of the fold.
 
-Audited through: 0627874b30398f0f04631846e0c86a2fbc7e9403 on 2026-10-11 — 1 new finding
+### T-547 — P2 — slug lookup added in #995 is invisible to the token-index tests
+
+`scripts/llm_token_index.py:205` (`980f264f`) resolves a basket key with `by_slug.get(model_id) or by_id.get(model_id)`. `scripts/tests/test_llm_token_index.py` builds every AA row with `id` equal to the basket key and no `slug` (`_aa_response`, line 40). Replacing line 205 with `by_id.get(model_id)` left that file at 17 passed. A row whose `id` is a publisher uuid and whose `slug` is `gpt-4o` then raises `ValueError: None of the requested model IDs were found`. The product line is already correct. The missing test is the defect.
+
+Acceptance: `TestComputeIndex::test_basket_key_matches_slug_when_publisher_id_differs` fails when line 205 reads only `by_id`, and passes with the slug-or-id lookup restored. Product source stays unchanged.
+
+Audited through: 0627874b30398f0f04631846e0c86a2fbc7e9403 on 2026-10-11 — 2 new findings
