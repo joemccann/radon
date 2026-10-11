@@ -53,6 +53,7 @@ SOURCE_HISTORY_STARTS = {
     "openrouter": "2025-01-01",
     "vercel": "2025-10-01",
     "gpu-rental": "2026-07-05",
+    "ramp": "2025-01-01",
 }
 SOURCE_WINDOW_DAYS = {
     "openrouter": 7,
@@ -82,7 +83,7 @@ def source_windows(source, start, end, *, backfill):
     first = max(date.fromisoformat(start), date.fromisoformat(floor)).isoformat()
     if date.fromisoformat(first) > date.fromisoformat(end):
         return []
-    if source in ("sec", "gpu-rental"):
+    if source in ("sec", "gpu-rental", "ramp"):
         return [(first, end)]
     return list(windows(first, end, SOURCE_WINDOW_DAYS[source]))
 
@@ -237,6 +238,7 @@ def _main(argv=None):
                         last,
                         env=env,
                         basket=tuple(filter(None, basket.split(","))),
+                        full_history=args.backfill,
                     )
                 status = dict(
                     source_id=source,

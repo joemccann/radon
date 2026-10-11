@@ -359,6 +359,162 @@ def test_ramp_curated_rejects_digest_mismatch():
         parse_ramp_curated(payload, HASH, FETCHED)
 
 
+RAMP_TOKEN_PAYLOAD = {
+    "source_url": "https://ramp.com/data/ai-index",
+    "methodology_version": "ramp-spend-intensity-v2-jun2026",
+    "cohort_version": "ramp-us-business-panel-70k-v2",
+    "spend_per_employee": [],
+    "adoption_overall": [],
+    "token_prices": [
+        {"usage_date": "2026-09-01", "token_type": "all_tokens", "model_maker": "anthropic",
+         "token_cost_usd_7d": 3_000_000.0, "token_count_7d": 4_000_000_000_000},
+        {"usage_date": "2026-09-01", "token_type": "uncached_input", "model_maker": "anthropic",
+         "token_cost_usd_7d": 1_000_000.0, "token_count_7d": 500_000_000_000},
+        {"usage_date": "2026-09-01", "token_type": "output", "model_maker": "openai",
+         "token_cost_usd_7d": 2_500_000.0, "token_count_7d": 250_000_000_000},
+    ],
+    "token_volumes": [
+        {"period_grain": "weekly", "period_start": "2026-08-24", "period_end": "2026-08-30",
+         "metric_key": "token_volume", "dimension_type": "model", "series_key": "model-a",
+         "model_maker": "anthropic", "metric_value": 700},
+        {"period_grain": "weekly", "period_start": "2026-08-24", "period_end": "2026-08-30",
+         "metric_key": "token_volume", "dimension_type": "model", "series_key": "model-b",
+         "model_maker": "anthropic", "metric_value": 300},
+        {"period_grain": "weekly", "period_start": "2026-08-24", "period_end": "2026-08-30",
+         "metric_key": "token_volume", "dimension_type": "model", "series_key": "model-c",
+         "model_maker": "openai", "metric_value": 1000},
+        {"period_grain": "weekly", "period_start": "2026-08-24", "period_end": "2026-08-30",
+         "metric_key": "token_spend", "dimension_type": "model", "series_key": "model-c",
+         "model_maker": "openai", "metric_value": 12.5},
+    ],
+}
+
+
+def _ramp_token_rows(payload=RAMP_TOKEN_PAYLOAD):
+    rows = parse_ramp_curated(payload, HASH, FETCHED)
+    return {row["series_id"]: row for row in rows}
+
+
+def test_ramp_token_price_is_cost_per_million_tokens_by_type_and_maker():
+    rows = _ramp_token_rows()
+    blended = rows["tokens.price.blended.anthropic"]
+    assert blended["indicator_id"] == "D7"
+    assert blended["unit"] == "USD/Mtok"
+    assert blended["value"] == pytest.approx(0.75)
+    assert (blended["period_start"], blended["period_end"]) == ("2026-08-26", "2026-09-01")
+    assert rows["tokens.price.input.anthropic"]["value"] == pytest.approx(2.0)
+    assert rows["tokens.price.output.openai"]["value"] == pytest.approx(10.0)
+
+
+def test_ramp_token_volume_and_spend_sum_models_by_maker_and_in_total():
+    rows = _ramp_token_rows()
+    assert rows["tokens.volume.anthropic"]["value"] == 1000
+    assert rows["tokens.volume.openai"]["value"] == 1000
+    assert rows["tokens.volume.all"]["value"] == 2000
+    assert rows["tokens.volume.all"]["unit"] == "tokens/week"
+    assert rows["tokens.spend.openai"]["value"] == pytest.approx(12.5)
+    assert rows["tokens.spend.all"]["unit"] == "USD/week"
+    assert "tokens.spend.anthropic" not in rows
+    assert rows["tokens.volume.all"]["period_end"] == "2026-08-30"
+
+
+def test_ramp_token_rows_reject_duplicate_and_unknown_shapes():
+    duplicate = {**RAMP_TOKEN_PAYLOAD, "token_prices": RAMP_TOKEN_PAYLOAD["token_prices"][:1] * 2}
+    with pytest.raises(SourceError, match="Duplicate Ramp token price"):
+        parse_ramp_curated(duplicate, HASH, FETCHED)
+    unknown = [{**RAMP_TOKEN_PAYLOAD["token_prices"][0], "token_type": "cached_input"}]
+    with pytest.raises(SourceError, match="Ramp token type"):
+        parse_ramp_curated({**RAMP_TOKEN_PAYLOAD, "token_prices": unknown}, HASH, FETCHED)
+    zero_count = [{**RAMP_TOKEN_PAYLOAD["token_prices"][0], "token_count_7d": 0}]
+    with pytest.raises(SourceError, match="Ramp token count"):
+        parse_ramp_curated({**RAMP_TOKEN_PAYLOAD, "token_prices": zero_count}, HASH, FETCHED)
+
+
+def test_ramp_token_rows_skip_periods_not_complete_before_fetch():
+    today = FETCHED[:10]
+    prices = [{**RAMP_TOKEN_PAYLOAD["token_prices"][0], "usage_date": today}]
+    volumes = [{**RAMP_TOKEN_PAYLOAD["token_volumes"][0], "period_end": today}]
+    adoption = [{"date_month": "2026-08-01", "adoption_rate_pct": 56.13}]
+    payload = {**RAMP_TOKEN_PAYLOAD, "adoption_overall": adoption, "token_prices": prices, "token_volumes": volumes}
+    rows = parse_ramp_curated(payload, HASH, FETCHED)
+    assert {row["indicator_id"] for row in rows} == {"D5"}
+
+
+def test_live_ramp_html_bounds_token_history_to_recent_window():
+    from scripts.ai_cycle.collectors import parse_ramp_html
+
+    old = {**RAMP_TOKEN_PAYLOAD["token_prices"][0], "usage_date": "2025-03-01"}
+    props = {
+        "adoptionOverall": [{"date_month": "2023-01-01", "adoption_rate_pct": 7.46}],
+        "spendPerEmployee": [{"date_month": "2023-09-01", "median_pepm": 2.5,
+                               "top_10_percent_median_pepm": 70.04, "top_1_percent_median_pepm": 874.89}],
+        "tokenPrices": [old, *RAMP_TOKEN_PAYLOAD["token_prices"]],
+        "tokenVolumes": RAMP_TOKEN_PAYLOAD["token_volumes"],
+    }
+    html = "<script>self.__next_f.push(" + json.dumps([1, "1:" + json.dumps(props)]) + ")</script>"
+    rows = parse_ramp_html(html, HASH, "2026-09-07T12:00:00+00:00")
+    token_rows = [row for row in rows if row["indicator_id"] == "D7"]
+    assert {row["period_end"] for row in token_rows if row["series_id"].startswith("tokens.price")} == {"2026-09-01"}
+    assert any(row["series_id"] == "tokens.volume.all" for row in token_rows)
+    assert len([row for row in rows if row["indicator_id"] == "D5"]) == 4
+
+
+def _ramp_html_with_old_token_history():
+    old_price = {**RAMP_TOKEN_PAYLOAD["token_prices"][0], "usage_date": "2025-03-01"}
+    old_volume = {**RAMP_TOKEN_PAYLOAD["token_volumes"][0], "period_start": "2025-02-24", "period_end": "2025-03-02"}
+    props = {
+        "adoptionOverall": [{"date_month": "2023-01-01", "adoption_rate_pct": 7.46}],
+        "spendPerEmployee": [{"date_month": "2023-09-01", "median_pepm": 2.5,
+                               "top_10_percent_median_pepm": 70.04, "top_1_percent_median_pepm": 874.89}],
+        "tokenPrices": [old_price, *RAMP_TOKEN_PAYLOAD["token_prices"]],
+        "tokenVolumes": [old_volume, *RAMP_TOKEN_PAYLOAD["token_volumes"]],
+    }
+    return "<script>self.__next_f.push(" + json.dumps([1, "1:" + json.dumps(props)]) + ")</script>"
+
+
+def test_live_ramp_html_full_history_keeps_every_published_token_period():
+    from scripts.ai_cycle.collectors import parse_ramp_html
+
+    rows = parse_ramp_html(_ramp_html_with_old_token_history(), HASH, "2026-09-07T12:00:00+00:00", full_history=True)
+    token_rows = [row for row in rows if row["indicator_id"] == "D7"]
+    assert {"2025-03-01", "2026-09-01"} <= {row["period_end"] for row in token_rows if "price" in row["series_id"]}
+    assert {"2025-03-02", "2026-08-30"} <= {row["period_end"] for row in token_rows if "volume" in row["series_id"]}
+
+
+def test_ramp_backfill_window_spans_published_history_and_reaches_the_parser(tmp_path, monkeypatch):
+    from scripts.ai_cycle import collect
+
+    assert SOURCE_HISTORY_STARTS["ramp"] == "2025-01-01"
+    assert source_windows("ramp", "2009-01-01", "2026-10-01", backfill=True) == [("2025-01-01", "2026-10-01")]
+    seen = []
+
+    def fake_collect_source(source, transport, start, end, **kwargs):
+        seen.append((source, kwargs.get("full_history")))
+        return []
+
+    monkeypatch.setattr(collect, "collect_source", fake_collect_source)
+    common = ["--sources", "ramp", "--end", "2026-10-01", "--archive", str(tmp_path / "raw")]
+    collect.main([*common, "--start", "2025-01-01", "--backfill"])
+    collect.main([*common, "--start", "2026-09-25"])
+    assert seen == [("ramp", True), ("ramp", False)]
+
+
+def test_ramp_token_series_form_their_own_snapshot_panel(tmp_path):
+    from scripts.ai_cycle.snapshot import build_snapshot
+    from scripts.ai_cycle.store import ObservationStore
+
+    store = ObservationStore(tmp_path / "ramp-tokens.sqlite")
+    store.initialize()
+    store.append_observations(parse_ramp_curated(RAMP_TOKEN_PAYLOAD, HASH, FETCHED))
+    snapshot = build_snapshot(store, "2026-09-08T00:00:00Z")
+    panel = next(item for item in snapshot["indicators"] if item["id"] == "D7")
+    assert panel["pane"] == "demand"
+    assert panel["status"] == "available"
+    ids = {metric["id"] for metric in panel["metrics"]}
+    assert {"tokens.price.blended.anthropic", "tokens.volume.all", "tokens.spend.all"} <= ids
+    assert panel["source_ids"] == ["ramp"]
+
+
 def test_ramp_bundled_fixture_loads_into_snapshot(tmp_path):
     from scripts.ai_cycle.collect import main
     from scripts.ai_cycle.snapshot import build_snapshot
