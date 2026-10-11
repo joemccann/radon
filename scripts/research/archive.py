@@ -47,6 +47,7 @@ import sqlite3
 import stat
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -58,6 +59,12 @@ SETTLED = frozenset({"complete", "published", "deleted", "superseded"})
 KEY_RE = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}\Z")
 DEFAULT_MIN_AGE_DAYS = 7
 DEFAULT_MAX_DIRS = 20_000
+#: Per-file B2 round trips (HEAD, PUT, HEAD) dominate; serial ran ~1 GiB/hour
+#: on evidence dirs of many small pages and hit the unit's 4h timeout.
+DEFAULT_WORKERS = 16
+#: Stop starting new dirs here so the run exits clean (and heartbeats) before
+#: TimeoutStartSec kills it; the next run resumes, uploads are idempotent.
+DEFAULT_DEADLINE_SECS = 3 * 3600
 DEFAULT_MAX_BYTES = 20 * 1024 ** 3
 MAX_FILES_PER_DIR = 5_000
 MAX_FILE_BYTES = 1024 ** 3
@@ -126,6 +133,7 @@ def _s3_client(cfg: dict):
         aws_secret_access_key=cfg["secret_key"], region_name=cfg["region"],
         config=Config(connect_timeout=S3_CONNECT_TIMEOUT, read_timeout=S3_READ_TIMEOUT,
                       retries={"max_attempts": S3_MAX_ATTEMPTS, "mode": "standard"},
+                      max_pool_connections=DEFAULT_WORKERS,
                       # Content-MD5 is the integrity check; skip the optional
                       # CRC trailer so only headers B2 documents are sent.
                       request_checksum_calculation="when_required",
@@ -229,23 +237,34 @@ def _upload(client, bucket: str, key: str, local: LocalFile) -> None:
     _retry(put)
 
 
-def _archive_dir(client, cfg: dict, key: str, month: str, files: list[LocalFile]) -> tuple[list[LocalFile], int, int]:
+def _archive_one(client, cfg: dict, key: str, month: str, item: LocalFile) -> tuple[LocalFile, int]:
+    local = _digest(item)
+    object_key = f"{cfg['prefix']}evidence/{month}/{key}/{local.rel}"
+    if _verify_object(client, cfg["bucket"], object_key, local):
+        return local, 0
+    _upload(client, cfg["bucket"], object_key, local)
+    if not _verify_object(client, cfg["bucket"], object_key, local):
+        raise RuntimeError(f"verification failed for {object_key}")
+    return local, 1
+
+
+def _archive_dir(client, cfg: dict, key: str, month: str, files: list[LocalFile],
+                 workers: int = DEFAULT_WORKERS) -> tuple[list[LocalFile], int, int]:
     """Upload what is missing; return (verified files, files uploaded, bytes uploaded).
 
     Raises on the first file that cannot be verified, so a partial directory
     never reaches the prune step.
     """
     verified, uploaded, uploaded_bytes = [], 0, 0
-    for item in files:
-        local = _digest(item)
-        object_key = f"{cfg['prefix']}evidence/{month}/{key}/{local.rel}"
-        if not _verify_object(client, cfg["bucket"], object_key, local):
-            _upload(client, cfg["bucket"], object_key, local)
-            uploaded += 1
-            uploaded_bytes += local.size
-            if not _verify_object(client, cfg["bucket"], object_key, local):
-                raise RuntimeError(f"verification failed for {object_key}")
-        verified.append(local)
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        futures = [pool.submit(_archive_one, client, cfg, key, month, item) for item in files]
+        # result() re-raises the first failure; the pool still drains, and the
+        # caller never prunes a directory with an unverified file.
+        for future in futures:
+            local, sent = future.result()
+            verified.append(local)
+            uploaded += sent
+            uploaded_bytes += local.size if sent else 0
     return verified, uploaded, uploaded_bytes
 
 
@@ -274,15 +293,18 @@ def _prune(directory: Path, verified: list[LocalFile]) -> bool:
 
 def run_archive(root: Path, cfg: dict, *, client, now: datetime | None = None, dry_run: bool = False,
                 prune: bool = True, min_age_days: int = DEFAULT_MIN_AGE_DAYS,
-                max_dirs: int = DEFAULT_MAX_DIRS, max_bytes: int = DEFAULT_MAX_BYTES) -> dict:
+                max_dirs: int = DEFAULT_MAX_DIRS, max_bytes: int = DEFAULT_MAX_BYTES,
+                workers: int = DEFAULT_WORKERS, deadline_secs: float | None = None,
+                clock=time.monotonic) -> dict:
     root = Path(root)
+    started = clock()
     now = now or _utcnow()
     cutoff_ns = int(compute_cutoff(now, min_age_days).timestamp() * 1_000_000_000)
     evidence = root / "evidence"
     summary = {"cutoff": compute_cutoff(now, min_age_days).isoformat(), "dry_run": dry_run,
                "candidate_dirs": 0, "candidate_bytes": 0, "archived_dirs": 0, "uploaded_files": 0,
                "uploaded_bytes": 0, "pruned_dirs": 0, "pruned_bytes": 0, "errors": [],
-               "skipped": {"recent": 0, "in_flight": 0, "unsafe": 0, "budget": 0}}
+               "skipped": {"recent": 0, "in_flight": 0, "unsafe": 0, "budget": 0, "deadline": 0}}
     if not evidence.is_dir():
         return summary  # research never ran on this host
     statuses = _settled_status(root)
@@ -314,10 +336,13 @@ def run_archive(root: Path, cfg: dict, *, client, now: datetime | None = None, d
         summary["candidate_bytes"] += size
         if dry_run:
             continue
+        if deadline_secs is not None and clock() - started >= deadline_secs:
+            summary["skipped"]["deadline"] += 1
+            continue
 
         month = datetime.fromtimestamp(newest / 1e9, timezone.utc).strftime("%Y-%m")
         try:
-            verified, uploaded, uploaded_bytes = _archive_dir(client, cfg, name, month, files)
+            verified, uploaded, uploaded_bytes = _archive_dir(client, cfg, name, month, files, workers)
         except Exception as exc:  # noqa: BLE001 - one bad dir must not stop the run
             summary["errors"].append({"key": name, "error": f"{type(exc).__name__}: {exc}"[:200]})
             continue
@@ -355,6 +380,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-age-days", type=int, default=DEFAULT_MIN_AGE_DAYS)
     parser.add_argument("--max-dirs", type=int, default=DEFAULT_MAX_DIRS)
     parser.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES)
+    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
+    parser.add_argument("--deadline-secs", type=int, default=DEFAULT_DEADLINE_SECS)
     args = parser.parse_args(argv)
     started_at = _utcnow().isoformat()
 
@@ -369,7 +396,8 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.root), cfg or {"bucket": "", "prefix": DEFAULT_PREFIX},
             client=None if args.dry_run else _s3_client(cfg), now=_utcnow(), dry_run=args.dry_run,
             prune=not args.no_prune, min_age_days=max(0, args.min_age_days),
-            max_dirs=max(0, args.max_dirs), max_bytes=max(0, args.max_bytes))
+            max_dirs=max(0, args.max_dirs), max_bytes=max(0, args.max_bytes),
+            workers=max(1, args.workers), deadline_secs=max(0, args.deadline_secs))
     except Exception as exc:  # noqa: BLE001
         detail = {"message": f"{type(exc).__name__}: {exc}"[:300]}
         print(detail["message"], file=sys.stderr)
