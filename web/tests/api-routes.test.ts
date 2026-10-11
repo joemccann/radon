@@ -71,7 +71,15 @@ vi.mock("@/lib/orders/readOrdersFromDb", () => ({
 }));
 
 const mockExecute = vi.fn().mockResolvedValue({ rows: [] });
-vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => ({ execute: mockExecute }) }));
+const mockBatch = vi.fn(async (statements: Array<{ sql: string; args?: unknown[] }>) => {
+  const results = [];
+  for (const statement of statements) results.push(await mockExecute(statement));
+  return results;
+});
+vi.mock("@/lib/db", () => ({
+  resetDb: () => {},
+  getDb: () => ({ execute: mockExecute, batch: mockBatch }),
+}));
 
 // Mock @tools/schemas/ib-orders (TypeBox schema import)
 vi.mock("@tools/schemas/ib-orders", () => ({
