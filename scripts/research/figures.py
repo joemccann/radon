@@ -2,7 +2,12 @@
 
 Charts in bank research are vector paths (axes, gridlines, series, bars) or
 raster images. Drawn objects are clustered by proximity; each cluster that is
-large enough becomes a figure. Axis tick and legend text adjacent to the
+large enough becomes a figure. Page artwork (a path that bleeds to a page
+edge: sidebars, header bands, rules; an image touching three edges or covering
+the page) is removed before clustering, so it cannot bridge a logo into a chart, model-proposed boxes
+pass the same size gates, and an element that renders identically on more
+than one page is letterhead (header/footer band: dropped everywhere) or a
+repeated copy (kept once). Axis tick and legend text adjacent to the
 cluster is pulled into the crop. The nearest text line above (title) and the
 nearest ``Source:`` line below are attached as optional metadata and, when
 found, included in the crop. Nothing here consults a model.
@@ -11,8 +16,10 @@ Coordinates in results are normalized [left, top, right, bottom] in the
 displayed page frame, origin top-left, matching research.pdf.render crops.
 """
 from __future__ import annotations
+import hashlib
 import math
 import re
+import shutil
 from pathlib import Path
 
 import pypdfium2 as pdfium
@@ -27,6 +34,8 @@ MAX_IMAGE_AREA = 0.9   # a page-sized scan or background is not a chart
 TEXT_REACH = 0.03      # tick/legend text within this distance joins the crop
 LINE_REACH = 0.07      # title above / source below within this distance
 MARGIN = 0.006
+EDGE = 0.005           # a box within this of a page edge touches it
+RUNNING_BAND = 0.15    # repeats wholly inside the top or bottom band are letterhead
 SOURCE_RE = re.compile(r'^\s*(?:source|sources|note|notes)\s*[:：]', re.I)
 
 
@@ -68,6 +77,21 @@ def _to_displayed(box, rotation):
     if turn == 270:
         return [top, 1 - right, bottom, 1 - left]
     return box
+
+
+def _edges(box):
+    return sum((box[0] <= EDGE, box[1] <= EDGE, box[2] >= 1 - EDGE, box[3] >= 1 - EDGE))
+
+
+def _page_artwork(box, is_image=True):
+    """Chart paths sit inside the margins; a path bleeding to an edge is a sidebar, header band or rule."""
+    return (_edges(box) >= (3 if is_image else 1)
+            or (box[2] - box[0]) * (box[3] - box[1]) > MAX_IMAGE_AREA)
+
+
+def _chart_sized(box):
+    w, h = box[2] - box[0], box[3] - box[1]
+    return w * h >= MIN_AREA and min(w, h) >= MIN_SIDE
 
 
 def _gap(a, b):
@@ -159,8 +183,9 @@ def _figures_on_page(pdf_path, page_number):
                 box = _norm(obj.get_bounds(), frame)
             except pdfium.PdfiumError:
                 continue
-            if box[2] > box[0] and box[3] > box[1]:
-                items.append((box, obj.type == pdfium_c.FPDF_PAGEOBJ_IMAGE))
+            is_image = obj.type == pdfium_c.FPDF_PAGEOBJ_IMAGE
+            if box[2] > box[0] and box[3] > box[1] and not _page_artwork(box, is_image):
+                items.append((box, is_image))
         textpage = page.get_textpage()
         lines = _lines(textpage, frame)
         textpage.close()
@@ -170,9 +195,9 @@ def _figures_on_page(pdf_path, page_number):
         w, h = box[2] - box[0], box[3] - box[1]
         if not (count >= MIN_OBJECTS or images >= 1):
             continue
-        if w * h < MIN_AREA or min(w, h) < MIN_SIDE:
+        if not _chart_sized(box):
             continue
-        if images >= 1 and w * h > MAX_IMAGE_AREA:
+        if (images >= 1 and w * h > MAX_IMAGE_AREA) or _edges(box) >= 3:
             continue
         title, source = _attach(box, lines, LINE_REACH)
         crop = _grow_text(box, lines, TEXT_REACH)
@@ -202,38 +227,63 @@ def catalogue(pdf_path, pages, output_dir, dpi=216, extras=None):
     extras are Nemotron picture boxes ({page, bbox}) already in the displayed
     frame. A box that overlaps a detected figure is not rendered twice.
     """
-    from research.pdf import render
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True, mode=0o700)
-    result, skipped = [], []
+    staged, skipped = [], []
     for number in pages:
         found, reason = _figures_on_page(pdf_path, number)
         if reason:
             skipped.append({'page': number, 'reason': reason})
-        for figure in found:
-            _append_figure(result, pdf_path, output, dpi, figure)
+        staged.extend(found)
     for extra in extras or []:
         if not isinstance(extra, dict) or extra.get('page') not in pages:
             continue
         box = _extra_box(extra.get('bbox'))
-        if box is None:
+        if box is None or not _chart_sized(box) or _page_artwork(box):
             continue
-        if any(row['page'] == extra['page'] and _iou(row['bbox'], box) > 0.5 for row in result):
+        if any(row['page'] == extra['page'] and (_iou(row['bbox'], box) > 0.5 or _covered(row['bbox'], box) > 0.8)
+               for row in staged):
             continue
-        figure = {'page': extra['page'], 'bbox': [round(v, 4) for v in box], 'objects': extra.get('objects') or 1,
-                  'kind': extra.get('kind') or 'raster', 'title': extra.get('title'),
-                  'source_line': extra.get('source_line'), 'origin': extra.get('origin') or 'nemotron'}
-        _append_figure(result, pdf_path, output, dpi, figure)
+        staged.append({'page': extra['page'], 'bbox': [round(v, 4) for v in box], 'objects': extra.get('objects') or 1,
+                       'kind': extra.get('kind') or 'raster', 'title': extra.get('title'),
+                       'source_line': extra.get('source_line'), 'origin': extra.get('origin') or 'nemotron'})
+    rendered = [_render_figure(pdf_path, output / '.staging' / str(n), dpi, figure) for n, figure in enumerate(staged)]
+    result = []
+    for figure, record, digest in _drop_running(rendered):
+        index = len(result) + 1
+        target = output / f'f{index}'
+        if target.exists():
+            shutil.rmtree(target)
+        Path(record['dir']).rename(target)
+        result.append({'id': f'f{index}', **figure, 'image_file': f'f{index}/' + record['image_file'],
+                       'width': record['width'], 'height': record['height']})
+    shutil.rmtree(output / '.staging', ignore_errors=True)
     return Catalogue(result, skipped_pages=skipped)
 
 
-def _append_figure(result, pdf_path, output, dpi, figure):
+def _render_figure(pdf_path, target, dpi, figure):
+    from PIL import Image
     from research.pdf import render
-    index = len(result) + 1
-    target = output / f'f{index}'
     record = render(pdf_path, target, [figure['page']], dpi=dpi, crop=figure['bbox'])[0]
-    result.append({'id': f'f{index}', **figure, 'image_file': f'f{index}/' + record['image_file'],
-                   'width': record['width'], 'height': record['height']})
+    with Image.open(Path(target) / record['image_file']) as image:
+        digest = hashlib.sha256(image.convert('L').tobytes() + repr(image.size).encode()).hexdigest()
+    return figure, dict(record, dir=str(target)), digest
+
+
+def _drop_running(rendered):
+    """Identical pixels on two or more pages: letterhead in the top/bottom band, else a repeat kept once."""
+    pages = {}
+    for figure, _record, digest in rendered:
+        pages.setdefault(digest, set()).add(figure['page'])
+    kept, seen = [], set()
+    for figure, record, digest in rendered:
+        if len(pages[digest]) > 1:
+            box = figure['bbox']
+            if box[3] <= RUNNING_BAND or box[1] >= 1 - RUNNING_BAND or digest in seen:
+                continue
+        seen.add(digest)
+        kept.append((figure, record, digest))
+    return kept
 
 
 def _extra_box(box):
@@ -244,6 +294,14 @@ def _extra_box(box):
     if not (0 <= box[0] < box[2] <= 1 and 0 <= box[1] < box[3] <= 1):
         return None
     return [float(n) for n in box]
+
+
+def _covered(inner, outer) -> float:
+    """Share of `inner` that lies inside `outer`."""
+    left, top = max(inner[0], outer[0]), max(inner[1], outer[1])
+    right, bottom = min(inner[2], outer[2]), min(inner[3], outer[3])
+    area = (inner[2] - inner[0]) * (inner[3] - inner[1])
+    return max(0.0, right - left) * max(0.0, bottom - top) / area if area > 0 else 0.0
 
 
 def _iou(a, b) -> float:

@@ -109,7 +109,7 @@ def test_want_more_revises_the_same_post_and_is_not_judged_a_duplicate_of_itself
     posts = build(tmp_path, reviewer, publisher).process(noted, tmp_path / "r.pdf", recent)
     assert [p["id"] for p in posts] == [post_id], "the revision updates the existing post in place"
     assert "REVISE THIS PUBLISHED ITEM" in reviewer.calls[0][1]
-    verify_prompt = reviewer.calls[1][1]
+    verify_prompt = reviewer.calls[-1][1]
     assert post_id not in verify_prompt and "research-other" in verify_prompt
 
 
