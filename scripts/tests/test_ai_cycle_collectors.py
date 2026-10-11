@@ -459,6 +459,46 @@ def test_live_ramp_html_bounds_token_history_to_recent_window():
     assert len([row for row in rows if row["indicator_id"] == "D5"]) == 4
 
 
+def _ramp_html_with_old_token_history():
+    old_price = {**RAMP_TOKEN_PAYLOAD["token_prices"][0], "usage_date": "2025-03-01"}
+    old_volume = {**RAMP_TOKEN_PAYLOAD["token_volumes"][0], "period_start": "2025-02-24", "period_end": "2025-03-02"}
+    props = {
+        "adoptionOverall": [{"date_month": "2023-01-01", "adoption_rate_pct": 7.46}],
+        "spendPerEmployee": [{"date_month": "2023-09-01", "median_pepm": 2.5,
+                               "top_10_percent_median_pepm": 70.04, "top_1_percent_median_pepm": 874.89}],
+        "tokenPrices": [old_price, *RAMP_TOKEN_PAYLOAD["token_prices"]],
+        "tokenVolumes": [old_volume, *RAMP_TOKEN_PAYLOAD["token_volumes"]],
+    }
+    return "<script>self.__next_f.push(" + json.dumps([1, "1:" + json.dumps(props)]) + ")</script>"
+
+
+def test_live_ramp_html_full_history_keeps_every_published_token_period():
+    from scripts.ai_cycle.collectors import parse_ramp_html
+
+    rows = parse_ramp_html(_ramp_html_with_old_token_history(), HASH, "2026-09-07T12:00:00+00:00", full_history=True)
+    token_rows = [row for row in rows if row["indicator_id"] == "D7"]
+    assert {"2025-03-01", "2026-09-01"} <= {row["period_end"] for row in token_rows if "price" in row["series_id"]}
+    assert {"2025-03-02", "2026-08-30"} <= {row["period_end"] for row in token_rows if "volume" in row["series_id"]}
+
+
+def test_ramp_backfill_window_spans_published_history_and_reaches_the_parser(tmp_path, monkeypatch):
+    from scripts.ai_cycle import collect
+
+    assert SOURCE_HISTORY_STARTS["ramp"] == "2025-01-01"
+    assert source_windows("ramp", "2009-01-01", "2026-10-01", backfill=True) == [("2025-01-01", "2026-10-01")]
+    seen = []
+
+    def fake_collect_source(source, transport, start, end, **kwargs):
+        seen.append((source, kwargs.get("full_history")))
+        return []
+
+    monkeypatch.setattr(collect, "collect_source", fake_collect_source)
+    common = ["--sources", "ramp", "--end", "2026-10-01", "--archive", str(tmp_path / "raw")]
+    collect.main([*common, "--start", "2025-01-01", "--backfill"])
+    collect.main([*common, "--start", "2026-09-25"])
+    assert seen == [("ramp", True), ("ramp", False)]
+
+
 def test_ramp_token_series_form_their_own_snapshot_panel(tmp_path):
     from scripts.ai_cycle.snapshot import build_snapshot
     from scripts.ai_cycle.store import ObservationStore

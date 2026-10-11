@@ -662,7 +662,7 @@ def _ramp_embedded_table(content, key):
     return table
 
 
-def parse_ramp_html(html, digest, fetched):
+def parse_ramp_html(html, digest, fetched, *, full_history=False):
     """Read the publisher's embedded public tables; never execute page scripts."""
     chunks = []
     for match in re.finditer(r"self\.__next_f\.push\((.*?)\)</script>", html, re.S):
@@ -686,7 +686,7 @@ def parse_ramp_html(html, digest, fetched):
         if any(row.get(field) in (None, "", "$undefined") for field in
                ("median_pepm", "top_10_percent_median_pepm", "top_1_percent_median_pepm")):
             raise SourceError("Ramp public spend table is incomplete")
-    token_prices, token_volumes = _ramp_recent_token_tables(content, fetched)
+    token_prices, token_volumes = _ramp_token_tables(content, fetched, full_history)
     return parse_ramp_curated(dict(
         source_url=URLS["ramp"], methodology_version="ramp-spend-intensity-v2-jun2026",
         cohort_version="ramp-us-business-panel-70k-v2", published_at=None,
@@ -931,13 +931,15 @@ def ramp_token_observations(payload, source_url, digest, fetched, published):
     )
 
 
-def _ramp_recent_token_tables(content, fetched):
-    """Live pages replay full history on every fetch; keep only the revisable recent tail."""
+def _ramp_token_tables(content, fetched, full_history):
+    """Live pages replay full history on every fetch; daily runs keep only the revisable recent tail."""
+    prices = _ramp_embedded_table(content, "tokenPrices") or []
+    volumes = _ramp_embedded_table(content, "tokenVolumes") or []
+    if full_history:
+        return prices, volumes
     today = date.fromisoformat(fetched[:10])
     price_floor = (today - timedelta(days=RAMP_LIVE_PRICE_DAYS)).isoformat()
     volume_floor = (today - timedelta(days=RAMP_LIVE_VOLUME_DAYS)).isoformat()
-    prices = _ramp_embedded_table(content, "tokenPrices") or []
-    volumes = _ramp_embedded_table(content, "tokenVolumes") or []
     return (
         [row for row in prices if row["usage_date"] >= price_floor],
         [row for row in volumes if row["period_end"] >= volume_floor],
@@ -1300,7 +1302,7 @@ def parse_vast(payload, digest, fetched):
     ]
 
 
-def collect_source(source, transport, start, end, *, env=None, basket=()):
+def collect_source(source, transport, start, end, *, env=None, basket=(), full_history=False):
     env = os.environ if env is None else env
     if source == "openrouter":
         key = env.get("OPENROUTER_API_KEY")
@@ -1412,7 +1414,7 @@ def collect_source(source, transport, start, end, *, env=None, basket=()):
         return parse_opendesi(html, digest, fetched, published=_http_published(meta.get("last_modified")))
     if source == "ramp":
         html, digest, fetched, _meta = transport.fetch_html(URLS[source])
-        return parse_ramp_html(html, digest, fetched)
+        return parse_ramp_html(html, digest, fetched, full_history=full_history)
     if source == "liquidcompute":
         from .liquidcompute import fetch_ticker, parse_ticker
 
