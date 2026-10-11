@@ -677,14 +677,16 @@ body.radon-clear[data-mobile="true"] :is(
 }
 .radon-clear .preferences-group__header .admin-btn { min-height: 40px; }
 .radon-clear .settings-preference {
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
-  grid-template-areas: "copy control" "copy actions" "error error";
-  align-items: center;
-  gap: 8px 32px;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  grid-template-areas: "copy control" "copy actions";
+  align-items: start;
+  gap: 12px 32px;
   padding: 22px;
   border-top-color: var(--line-grid);
 }
-.radon-clear .settings-preference__copy { grid-area: copy; min-width: 0; display: grid; gap: 8px; }
+/* Copy is a flex stack: legacy named grid areas must not create implicit tracks. */
+.radon-clear .settings-preference__copy { grid-area: copy; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.radon-clear .settings-preference .preferences-row__control { grid-area: control; min-width: 0; }
 .radon-clear .settings-preference .preferences-row__head { margin: 0; }
 .radon-clear .settings-preference .preferences-row__label {
   color: var(--text-primary);
@@ -695,22 +697,38 @@ body.radon-clear[data-mobile="true"] :is(
 }
 .radon-clear .settings-preference .preferences-row__description {
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
-  max-width: 68ch;
+  max-width: 65ch;
+  text-wrap: pretty;
 }
 .radon-clear .settings-preference__details,
 .radon-clear .credentials-field__details { color: var(--text-muted); font-size: 12px; }
 .radon-clear .settings-preference__details summary,
 .radon-clear .credentials-field__details summary {
   width: fit-content;
-  min-height: 32px;
+  min-height: 40px;
   display: flex;
   align-items: center;
   cursor: pointer;
   color: var(--signal-core-text);
-  list-style-position: inside;
+  list-style: none;
+  gap: 8px;
 }
+.radon-clear .settings-preference__details summary::-webkit-details-marker,
+.radon-clear .credentials-field__details summary::-webkit-details-marker { display: none; }
+.radon-clear .settings-preference__details summary::before,
+.radon-clear .credentials-field__details summary::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-inline-end: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 150ms ease;
+}
+.radon-clear .settings-preference__details[open] summary::before,
+.radon-clear .credentials-field__details[open] summary::before { transform: rotate(45deg); }
 .radon-clear .settings-preference__details .preferences-row__metaline {
   padding-top: 4px;
   gap: 6px 10px;
@@ -726,7 +744,8 @@ body.radon-clear[data-mobile="true"] :is(
   background: var(--bg-subtle);
   font-family: var(--font-sans);
   font-size: 16px;
-  text-align: left;
+  font-variant-numeric: tabular-nums;
+  text-align: start;
 }
 .radon-clear .settings-preference__input:hover:not(:disabled) { border-color: var(--text-muted); }
 .radon-clear .settings-preference__input:focus-visible { background: var(--bg-panel); }
@@ -743,23 +762,38 @@ body.radon-clear[data-mobile="true"] :is(
 }
 .radon-clear .settings-preference .preferences-row__toggle input { width: 20px; height: 20px; }
 .radon-clear .settings-preference .admin-actions-row { grid-area: actions; justify-content: flex-end; gap: 8px; }
-.radon-clear .settings-preference .admin-btn { min-height: 40px; }
+.radon-clear .settings-preference .admin-btn { min-width: 64px; min-height: 40px; }
+.radon-clear .settings-draft-status { margin-inline-end: auto; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.radon-clear .settings-preference .admin-btn,
+.radon-clear .settings-service .admin-btn {
+  transition: transform 150ms ease, background-color 150ms ease, border-color 150ms ease;
+}
+.radon-clear .settings-preference .admin-btn:active:not(:disabled),
+.radon-clear .settings-service .admin-btn:active:not(:disabled) { transform: scale(0.96); }
+.radon-clear .settings-preference__details summary:focus-visible,
+.radon-clear .credentials-field__details summary:focus-visible {
+  outline: 2px solid var(--signal-core);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
 .radon-clear .settings-preference .admin-card-error { grid-area: error; }
 
 .radon-clear .settings-service { display: block; padding: 22px; }
 .radon-clear .settings-service + .settings-service { border-top-color: var(--line-grid); }
 .radon-clear .settings-service > .preferences-row__head { align-items: center; gap: 8px; }
-.radon-clear .settings-service > .preferences-row__head .preferences-row__label { font-size: 16px; font-weight: 600; }
-.radon-clear .settings-service > .preferences-row__description { margin-top: 6px; max-width: 70ch; font-size: 13px; line-height: 1.5; }
+.radon-clear .settings-service > .preferences-row__head .preferences-row__label { margin: 0; font-size: 16px; font-weight: 600; }
+.radon-clear .settings-service__status { margin-inline-start: auto; color: var(--text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.radon-clear .settings-service > .preferences-row__description { margin-top: 6px; max-width: 65ch; font-size: 14px; line-height: 1.5; text-wrap: pretty; }
 .radon-clear .settings-service .credentials-fields { margin-top: 12px; gap: 0; }
 .radon-clear .settings-service .credentials-field {
-  grid-template-columns: minmax(180px, 0.7fr) minmax(300px, 1.3fr);
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 1.3fr);
   gap: 8px 24px;
   align-items: center;
   padding: 14px 0;
   border-top: 1px solid var(--line-grid);
 }
 .radon-clear .settings-service .credentials-field__meta { gap: 4px; cursor: default; }
+.radon-clear .settings-service .credentials-field__meta .preferences-row__meta { font-family: var(--font-sans); line-height: 1.5; overflow-wrap: anywhere; }
 .radon-clear .settings-service .credentials-field__title .preferences-row__label { font-size: 14px; font-weight: 500; cursor: pointer; }
 .radon-clear .settings-service .credentials-field__inputrow { display: flex; gap: 8px; }
 .radon-clear .settings-service .credentials-field__input {
@@ -773,10 +807,18 @@ body.radon-clear[data-mobile="true"] :is(
 .radon-clear .settings-service .credentials-field__input::placeholder { color: var(--text-muted); opacity: 1; }
 .radon-clear .settings-service .credentials-field__inputrow .admin-btn { min-height: 44px; flex: none; }
 .radon-clear .settings-service .credentials-field__reveal { min-width: 58px; }
-.radon-clear .settings-service .credentials-field__details summary { min-height: 28px; }
+.radon-clear .settings-service .credentials-field__details summary { min-height: 40px; }
 .radon-clear .settings-service > .admin-actions-row { justify-content: flex-end; padding-top: 8px; }
 .radon-clear .settings-service > .admin-actions-row .admin-btn { min-height: 44px; }
 .radon-clear .settings-service [data-testid^="credential-notice-"] { margin-top: 12px; }
+
+@media (max-width: 900px) {
+  .radon-clear .settings-preference {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "copy" "control" "actions";
+  }
+  .radon-clear .settings-service .credentials-field { grid-template-columns: minmax(0, 1fr); }
+}
 
 @media (max-width: 640px) {
   .radon-clear .preferences-shell { gap: 14px; }
@@ -785,7 +827,7 @@ body.radon-clear[data-mobile="true"] :is(
   .radon-clear .preferences-group__header .admin-btn { min-height: 44px; }
   .radon-clear .settings-preference {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "copy" "control" "actions" "error";
+    grid-template-areas: "copy" "control" "actions";
     gap: 12px;
     padding: 18px 16px;
   }
@@ -814,4 +856,13 @@ body.radon-clear[data-mobile="true"] :is(
   .radon-clear .credentials-field__details summary,
   .radon-clear .settings-preference .admin-btn,
   .radon-clear .settings-service .credentials-field__inputrow .admin-btn { min-height: 44px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .radon-clear .settings-preference .admin-btn,
+  .radon-clear .settings-service .admin-btn,
+  .radon-clear .settings-preference__details summary::before,
+  .radon-clear .credentials-field__details summary::before { transition: none; }
+  .radon-clear .settings-preference .admin-btn:active:not(:disabled),
+  .radon-clear .settings-service .admin-btn:active:not(:disabled) { transform: none; }
 }

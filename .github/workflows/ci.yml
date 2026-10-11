@@ -820,6 +820,7 @@ jobs:
           e2e/vixts-tab.spec.ts
           e2e/panic-index-tab.spec.ts
           e2e/hyad-tab.spec.ts
+          e2e/record-high-breadth-tab.spec.ts
           e2e/research-workbench.spec.ts
           e2e/newsfeed-research-media.spec.ts
           e2e/newsfeed-sharing.spec.ts
@@ -828,6 +829,7 @@ jobs:
           e2e/vol-skew-mr-scanner.spec.ts
           e2e/ai-industry.spec.ts
           e2e/clear-shell.spec.ts
+          e2e/profile-settings-layout.spec.ts
           e2e/clear-admin-component.spec.ts
           e2e/admin-action-queue.spec.ts
           e2e/chat-experience.spec.ts
@@ -938,6 +940,13 @@ jobs:
           name: hyad-history-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/hyad-history-*.png
           retention-days: 7
+      - name: Upload SPX breadth screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: record-high-breadth-screenshots-shard-${{ matrix.shard }}
+          path: web/test-results/**/record-high-breadth-*.png
+          retention-days: 7
       - name: Upload table overflow screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -951,6 +960,13 @@ jobs:
         with:
           name: admin-freshness-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/*-admin-component.png
+          retention-days: 7
+      - name: Upload profile settings screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: profile-settings-screenshots-shard-${{ matrix.shard }}
+          path: web/test-results/**/profile-settings-*.png
           retention-days: 7
       - name: Upload traces on failure
         if: failure()

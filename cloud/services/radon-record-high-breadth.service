@@ -1,0 +1,19 @@
+[Unit]
+Description=Radon SPX Breadth (TradingView descriptive source variant)
+After=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/record_high_breadth_scan.py
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=240
+
+[Install]
+WantedBy=multi-user.target

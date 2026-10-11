@@ -636,3 +636,7 @@ adversarial regression coverage. Tests must use isolated roots and must never
 write host `/etc`, `/usr/local`, `/var/lib`, production data, or real secrets.
 
 Image pre-pull compares each cached release tag with its registry manifest digest before skipping layer downloads. App-image pruning takes the existing deploy lock nonblockingly, preserves the target and durable transition/last-green rollback SHAs plus running images, and skips cleanup when rollback evidence or the running app population is unavailable. Runtime starts still allow the exact local image during registry outages.
+
+### SPX breadth scheduled comparison
+
+`setup-vps.sh` inventories `radon-record-high-breadth.{service,timer}` and enables the timer on full-host setup. The bounded auto-sync manifest installs both files on existing app-plane hosts. The daily 18:15 America/New_York run reconciles TradingView MCP source history, writes `record-high-breadth` service health, and retains prior data on authentication failure. Its 26h freshness budget also covers weekend heartbeat runs. Provision the production OAuth store through explicit consent and configure `TRADINGVIEW_MCP_TOKEN_FILE`; setup does not install or copy account credentials. This provider-coherent comparison does not change generic commodity-price failover. Source-universe and history limits are documented in `docs/indicators/record-high-breadth-source-parity.md`.

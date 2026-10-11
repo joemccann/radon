@@ -80,7 +80,7 @@ export const KNOWN_API_SEGMENTS: ReadonlySet<string> = new Set([
   "journal", "knowledge", "leap", "llm-token-index", "ma-ratio", "rsi-oversold",
   "margin-debt", "menthorq", "models", "newsfeed", "options", "orders",
   "paper", "performance", "pi", "portfolio", "preferences", "previous-close",
-  "prices", "probe", "profile", "regime", "research", "risk-free-rate", "scanner",
+  "prices", "probe", "profile", "record-high-breadth", "regime", "research", "risk-free-rate", "scanner",
   "service-health", "setup", "share", "short-availability", "skew", "skew2d",
   "straddle", "streaks", "ticker", "trin", "vcg", "version", "vixcor", "vixts", "panic-index",
   "vol-cone", "watchlist", "webhooks", "yield-curve",

@@ -204,6 +204,8 @@ EXPECTED_AUTO_SYNC_UNITS = (
     "radon-perf-twr.timer",
     "radon-portfolio-archive.service",
     "radon-portfolio-archive.timer",
+    "radon-record-high-breadth.service",
+    "radon-record-high-breadth.timer",
     "radon-signals-refresh.service",
     "radon-signals-refresh.timer",
     "radon-skew.service",

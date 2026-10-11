@@ -161,6 +161,9 @@ export const DIV_YIELD_REFRESH: RefreshSchedule = [daily(22, 40)];
 /** cloud/services/radon-hyad.timer */
 export const HY_AD_REFRESH: RefreshSchedule = [{ weekdays: TUE_SAT, hours: [11], minutes: [0] }];
 
+/** cloud/services/radon-record-high-breadth.timer */
+export const RECORD_HIGH_BREADTH_REFRESH: RefreshSchedule = [{ tz: "America/New_York", hours: [18], minutes: [15] }];
+
 /** cloud/services/radon-hhlev.timer */
 export const HH_LEV_REFRESH: RefreshSchedule = [daily(13, 20)];
 
