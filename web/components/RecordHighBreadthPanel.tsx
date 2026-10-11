@@ -38,10 +38,10 @@ export default function RecordHighBreadthPanel() {
     headline="No aligned S&P 500 breadth session yet"
     secondary="A completed session requires SPX, stocks above their 200-day average, and both 52-week high and low counts. The daily collector supplies these measurements." /></>;
   const current = data.current;
-  const spx: ChartSeries<Row> = { key: "spx_close", label: "SPX close", color: chartSeriesColor("primary"), axis: "left", format: (value) => breadthValue(value) };
-  const above: ChartSeries<Row> = { key: "above_200_pct", label: "Above 200-day SMA", color: chartSeriesColor("primary"), axis: "left", format: (value) => breadthValue(value, "%") };
-  const positive: ChartSeries<Row> = { key: "positive", label: "Net highs (% of 500)", color: chartSeriesColor("primary"), axis: "left", renderAs: "bar", format: (value) => breadthValue(value, "%") };
-  const negative: ChartSeries<Row> = { key: "negative", label: "Net lows (% of 500)", color: chartSeriesColor("fault"), axis: "left", renderAs: "bar", format: (value) => breadthValue(value, "%") };
+  const spx: ChartSeries<Row> = { key: "spx_close", label: "SPX close", color: chartSeriesColor("primary"), axis: "left", axisFormat: (value) => value.toFixed(0), format: (value) => breadthValue(value) };
+  const above: ChartSeries<Row> = { key: "above_200_pct", label: "Above 200-day SMA", color: chartSeriesColor("primary"), axis: "left", axisFormat: (value) => `${value.toFixed(0)}%`, format: (value) => breadthValue(value, "%") };
+  const positive: ChartSeries<Row> = { key: "positive", label: "Net highs (% of 500)", color: chartSeriesColor("primary"), axis: "left", renderAs: "bar", axisFormat: (value) => `${value.toFixed(0)}%`, format: (value) => breadthValue(value, "%") };
+  const negative: ChartSeries<Row> = { key: "negative", label: "Net lows (% of 500)", color: chartSeriesColor("fault"), axis: "left", renderAs: "bar", axisFormat: (value) => `${value.toFixed(0)}%`, format: (value) => breadthValue(value, "%") };
   const parity = data.source?.parity;
   const available = series.filter(point => point.spx_close != null && point.above_200_pct != null && point.net_high_low_per_500 != null);
   return <>

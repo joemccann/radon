@@ -9276,3 +9276,5 @@ Source correction: Supplied StockCharts image establishes2026-09-18 reference. B
 Live collector review:2026-10-11T04:47:31Z read-only collect succeeded,5028 uniondates,2026-10-09 currentSPX7811.54/above20047.70%/highs15/lows5/net500base2.00%,missing=false,degraded=false.660 historical0.01count observations quarantinedwithrawprovenance,neverinferredzero. Independentreviewpassedcalculation/gaps/freshness; no local suites.
 
 CI repair review: exact headbd82f2e5 reproduced missing indicator-index/operations/provisioningowner updates, bareAPI getDb().execute bypass, and atomiccache checksumfixture mismatch. Register docs, usebounded dbExecute and verifyactualatomicchecksum. Pending exact-headrerun; no local suites.
+
+Visual verification review: runtime headc5b9a0da passed all3newPlaywrightcases; artifactinspection identifiedmobileaxisclipping. ScopedaxisFormat nowcompactinteger ticks withfulltooltipprecision; addedfont-ready390px/desktop tickbounds regressions and3desktop pane screenshots. Browserfixture current counts/derivedreading nowconsistent. No local suites.
