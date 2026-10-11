@@ -1410,7 +1410,7 @@ jobs:
     # made each merge conflict the open queue. The version is folded from
     # history after the merge and tagged only once it is serving.
     needs: [deploy]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.deploy.result == 'success'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && !cancelled() && needs.deploy.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
