@@ -888,7 +888,7 @@ The API credential staging/cleanup contract remains in force when research mount
 
 ### Research evidence archive
 
-`radon-research-archive.timer` fires on the 1st of every month at 04:20 UTC (`RandomizedDelaySec=900`, `Persistent=true`). Its `runtime-container.conf` drop-in runs `scripts/research/archive.py` through `radon-app-runtime` with the same read/write private research bind as the worker and nothing else (no data, media, lease or subscription binds), so it needs no new host grant. It uploads `evidence/<key>/` directories to the `RADON_ARCHIVE_S3_*` bucket under `research/evidence/<YYYY-MM>/<key>/` (`RADON_RESEARCH_ARCHIVE_PREFIX` overrides `research/`), with `Content-MD5` and the SHA-256 in object metadata, then HEAD-verifies size and SHA-256. A directory is pruned only when every file verified, its `state.sqlite` work row is still settled (or absent), and each file is unchanged since verification. Candidates are older than the start of the month and at least 7 days old; pending or processing work is skipped. `assets/` (served to subscribers) and `downloads/` (cached PDFs that queued reviews hash-check) are never touched. Per-run ceilings: 20 GiB, 20,000 directories. Heartbeat `research-archive` (33-day window). Missing B2 credentials fail closed with no deletes.
+`radon-research-archive.timer` fires on the 1st of every month at 04:20 UTC (`RandomizedDelaySec=900`, `Persistent=true`). Its `runtime-container.conf` drop-in runs `scripts/research/archive.py` through `radon-app-runtime` with the same read/write private research bind as the worker and nothing else (no data, media, lease or subscription binds), so it needs no new host grant. It uploads `evidence/<key>/` directories to the `RADON_ARCHIVE_S3_*` bucket under `research/evidence/<YYYY-MM>/<key>/`. `RADON_RESEARCH_ARCHIVE_PREFIX` overrides `research/`. The job does not use `RADON_ARCHIVE_S3_PREFIX`. Each object is stored with `Content-MD5` and the SHA-256 in object metadata, then HEAD-verifies size and SHA-256. A directory is pruned only when every file verified, its `state.sqlite` work row is still settled (or absent), and each file is unchanged since verification. Candidates are older than the start of the month and at least 7 days old; pending or processing work is skipped. `assets/` (served to subscribers) and `downloads/` (cached PDFs that queued reviews hash-check) are never touched. Per-run ceilings: 20 GiB, 20,000 directories. The run also stops opening new directories after 3 hours, inside the 4-hour unit timeout, so the process can exit and heartbeat before systemd kills it. Heartbeat `research-archive` (33-day window). An ok heartbeat does not mean the backlog is empty: the JSON summary can count remaining directories in `skipped.deadline` or `skipped.budget`, and those directories stay on disk for the next run. Missing B2 credentials fail closed with no deletes.
 
 Operator commands (app host, as root):
 
@@ -898,6 +898,15 @@ journalctl -u radon-research-archive.service -n 50    # JSON summary line
 ```
 
 A dry run (no B2 calls, no deletes) needs the private bind, so run it inside the research container: `python scripts/research/archive.py --dry-run`. Restore an archived document by copying its `research/evidence/<YYYY-MM>/<key>/` prefix back into `evidence/<key>/` through the container bind; the offline harness reads restored evidence unchanged.
+
+- **Symptom:** the `research-archive` row is error, or an ok row still has `skipped.deadline` or `skipped.budget` above zero while evidence directories remain.
+- **Prerequisites:** the private research bind and complete `RADON_ARCHIVE_S3_*` credentials. The portfolio prefix is not one of them.
+- **Blast radius:** only verified `evidence/<key>/` directories are removed locally. `assets/` and `downloads/` stay. Unverified directories stay.
+- **Safe diagnosis:** read the JSON summary in the unit journal. Do not treat an ok heartbeat as a finished copy.
+- **Stop conditions:** missing credentials exit 2 and delete nothing. A directory that fails verification stays on disk and the heartbeat is error.
+- **Verification:** `pruned_dirs` counts only directories removed after HEAD verification. `skipped.deadline` and `skipped.budget` are still local.
+- **Rollback:** copy the `research/evidence/<YYYY-MM>/<key>/` objects back into `evidence/<key>/` through the container bind.
+- **Escalation:** a stale 33-day heartbeat or a repeating error is a backup gap. Do not delete evidence by hand to clear it.
 
 ## Production Build Constraint
 

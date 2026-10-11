@@ -1108,6 +1108,8 @@ RADON_ARCHIVE_S3_PREFIX=portfolio_snapshots/
 
 Smoke: `python3 scripts/archive_portfolio_snapshots.py --dry-run` must print `"s3_configured": true` when env is loaded.
 
+Research evidence in this bucket is a separate job. Its prefix and the meaning of an ok heartbeat are in [Research evidence archive](operations.md#research-evidence-archive).
+
 Export streams keyset pages into monthly partitions (bounded `batch_size` in-flight
 payloads — never materializes the full fat table). Crash-safe order is always
 archive + verify + B2 upload, then `delete_portfolio_snapshots_before`.

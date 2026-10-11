@@ -1937,7 +1937,7 @@ def _markdown_heading(path: str, heading: str) -> str:
 
 
 class TestDocumentation20261011:
-    """DOC-184: contracts that drifted after audited-through 208bb3d6."""
+    """DOC-184..185: contracts that drifted after audited-through 208bb3d6."""
 
     def test_perf_probe_pins_the_same_host_the_loop_dials(self):
         env = (_ROOT / "scripts/runner/loops/performance.env").read_text()
@@ -1958,6 +1958,30 @@ class TestDocumentation20261011:
         assert '"$target"' in section
         assert "StrictHostKeyChecking=yes" in section
         assert target in section
+        for boundary in ("Symptom", "Prerequisites", "Blast radius", "Safe diagnosis",
+                         "Stop conditions", "Verification", "Rollback", "Escalation"):
+            assert f"**{boundary}:**" in section
+
+    def test_research_archive_ok_heartbeat_can_leave_directories(self):
+        src = (_ROOT / "scripts/research/archive.py").read_text()
+        match = re.search(r"DEFAULT_DEADLINE_SECS = (\d+) \* 3600", src)
+        assert match, "archive deadline constant moved"
+        hours = int(match.group(1))
+        assert "RADON_ARCHIVE_S3_PREFIX" in src and "never" in src
+        unit = (_ROOT / "cloud/services/radon-research-archive.service").read_text()
+        timeout = int(next(
+            line.split("=", 1)[1]
+            for line in unit.splitlines()
+            if line.startswith("TimeoutStartSec=")
+        ))
+        assert hours * 3600 <= timeout - 1800
+        section = _markdown_heading("docs/operations.md", "Research evidence archive")
+        assert f"{hours} hours" in section
+        assert f"{timeout // 3600}-hour unit timeout" in section
+        assert "skipped.deadline" in section
+        assert "skipped.budget" in section
+        assert "does not use `RADON_ARCHIVE_S3_PREFIX`" in section
+        assert "ok heartbeat does not mean the backlog is empty" in section
         for boundary in ("Symptom", "Prerequisites", "Blast radius", "Safe diagnosis",
                          "Stop conditions", "Verification", "Rollback", "Escalation"):
             assert f"**{boundary}:**" in section
