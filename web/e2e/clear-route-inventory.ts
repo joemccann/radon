@@ -12,7 +12,7 @@ export type ClearRouteCase = {
 const regimePages = [
   "ats", "backtest", "bpi", "breadth", "calm-streak", "cor", "cot", "credit", "cri",
   "credit-vix", "curve", "dispersion", "divyield", "gex", "grg", "hhlev", "hyad", "iei-hyg",
-  "iv-spread", "ivrank", "ma-ratio", "margin", "rsi-oversold", "short", "skew", "skew2d",
+  "iv-spread", "ivrank", "record-high-breadth", "ma-ratio", "margin", "rsi-oversold", "short", "skew", "skew2d",
   "straddle", "streaks", "trin", "vcg", "vixcor", "vixts", "panic-index",
 ] as const;
 
@@ -55,7 +55,7 @@ export const CLEAR_ROUTE_CASES: ClearRouteCase[] = [
   { source: "app/preferences/page.tsx", path: "/preferences", selector: '[data-testid="preference-input-RADON_MAX_ORDER_QTY"]' },
   { source: "app/profile/page.tsx", path: "/profile", selector: ".profile-field__input" },
   { source: "app/regime/page.tsx", path: "/regime", regimeTab: "cri", selector: regimeLoaded.cri },
-  ...regimePages.map((tab) => ({ source: `app/regime/${tab}/page.tsx`, path: `/regime/${tab}`, regimeTab: tab, ...(tab === "panic-index" ? { text: "No panic proxy reading yet" } : { selector: regimeLoaded[tab] }) })),
+  ...regimePages.map((tab) => ({ source: `app/regime/${tab}/page.tsx`, path: `/regime/${tab}`, regimeTab: tab, ...(tab === "panic-index" ? { text: "No panic proxy reading yet" } : tab === "record-high-breadth" ? { text: "No aligned S&P 500 breadth session yet" } : { selector: regimeLoaded[tab] }) })),
   { source: "app/regime/vol-cone/page.tsx", path: "/regime/vol-cone", destination: "/scanner?mode=vol-cone", selector: '[data-testid="vol-cone-chart-section"]' },
   { source: "app/internals/page.tsx", path: "/internals", destination: "/regime/cri", selector: regimeLoaded.cri, regimeTab: "cri" },
   { source: "app/setup/page.tsx", path: "/setup", selector: '[data-testid="setup-wizard"]' },

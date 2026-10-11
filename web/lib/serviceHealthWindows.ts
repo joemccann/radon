@@ -237,6 +237,8 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // the T+1 lag plus 3-day weekends and bond-market-only holidays; older
   // means the writer is down. FINRA HTTP only, no IB.
   "hy-ad": { open: 120 * HOUR, extended: 120 * HOUR, closed: 120 * HOUR, category: "scheduled", requires_ib: false },
+  // TradingView provider-coherent breadth comparison, daily 18:15 New York.
+  "record-high-breadth": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``hhlev``: radon-hhlev.timer fires daily 13:20 UTC every calendar day,
   // a cheap conditional check of the quarterly Fed Z.1 household leverage

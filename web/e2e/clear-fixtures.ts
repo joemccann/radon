@@ -58,6 +58,7 @@ const fixtures: Record<string, unknown> = {
   "/api/vixts": VixtsFixture(),
   "/api/vixcor": VixcorFixture(),
   "/api/hyad": HyadFixture(),
+  "/api/record-high-breadth": { missing: true, scan_time: null, data_date: null, current: null, series: [] },
   "/api/hhlev": HhlevFixture(),
   "/api/ma-ratio": MaRatioFixture(),
   "/api/rsi-oversold": RsiOversoldFixture(),
