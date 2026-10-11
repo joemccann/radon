@@ -1921,3 +1921,43 @@ class TestVcgSpecIndexLinks:
             text = (_ROOT / rel).read_text()
             assert encoded in text, rel
             assert raw not in text, rel
+
+
+def _markdown_heading(path: str, heading: str) -> str:
+    text = (_ROOT / path).read_text()
+    marker = f"### {heading}"
+    start = text.find(marker)
+    assert start != -1, f"{path} is missing ### {heading}"
+    rest = text[start:]
+    stops = [pos for pos in (
+        rest.find("\n### ", len(marker)),
+        rest.find("\n## ", len(marker)),
+    ) if pos != -1]
+    return rest if not stops else rest[:min(stops)]
+
+
+class TestDocumentation20261011:
+    """DOC-184: contracts that drifted after audited-through 208bb3d6."""
+
+    def test_perf_probe_pins_the_same_host_the_loop_dials(self):
+        env = (_ROOT / "scripts/runner/loops/performance.env").read_text()
+        target = next(
+            line.split("=", 1)[1].strip()
+            for line in env.splitlines()
+            if line.startswith("PERF_SSH_TARGET=")
+        )
+        host = target.split("@", 1)[1]
+        assert host and "@" not in host
+        hook = (_ROOT / "scripts/runner/hooks/performance_pre.sh").read_text()
+        assert 'StrictHostKeyChecking=yes' in hook
+        assert "PERF_SSH_TARGET" in hook
+        section = _markdown_heading("docs/runner.md", "8c. Performance loop production probe (operator, bot shell, VPS)")
+        assert "ssh-keyscan -t ed25519 radon-app" not in section
+        assert "radon@radon-app" not in section
+        assert 'ssh-keyscan -t ed25519 "$host"' in section
+        assert '"$target"' in section
+        assert "StrictHostKeyChecking=yes" in section
+        assert target in section
+        for boundary in ("Symptom", "Prerequisites", "Blast radius", "Safe diagnosis",
+                         "Stop conditions", "Verification", "Rollback", "Escalation"):
+            assert f"**{boundary}:**" in section
