@@ -1256,6 +1256,34 @@ copy_systemd_services() {
 
 # DUR-02 (2026-06-12): cap journald disk usage. See services/journald-radon.conf
 # for rationale (beta crash loop grew the journal to 3.9G).
+# Host swap (2026-10-11). The only swap used to be a 4G file left by the
+# retired staging stack. 2G covers a ~7.6G RAM app host, which sits near 150M of
+# swap use. Idempotent: an active swapfile is left alone; fstab gets one entry.
+ensure_swapfile() {
+  local swapfile="${RADON_SWAPFILE:-/swapfile}"
+  local size="${RADON_SWAP_SIZE:-2G}"
+  local fstab="${RADON_FSTAB:-/etc/fstab}"
+  local active
+  log_info "Ensuring host swap ${swapfile} (${size})..."
+  if [[ -L "$swapfile" ]] || { [[ -e "$swapfile" ]] && [[ ! -f "$swapfile" ]]; }; then
+    log_error "${swapfile} is not a regular file; refusing to make swap on it"
+    return 1
+  fi
+  active="$(swapon --show=NAME --noheadings)"
+  if grep -qxF -- "$swapfile" <<<"$active"; then
+    log_info "${swapfile} already active"
+  else
+    [[ -f "$swapfile" ]] || fallocate -l "$size" "$swapfile"
+    chmod 600 "$swapfile"
+    mkswap "$swapfile"
+    swapon "$swapfile"
+  fi
+  if ! grep -qE "^${swapfile}[[:space:]]+none[[:space:]]+swap[[:space:]]" "$fstab"; then
+    printf '%s none swap sw 0 0\n' "$swapfile" >> "$fstab"
+  fi
+  log_success "Swap ${swapfile} active and persisted in ${fstab}"
+}
+
 install_journald_limits() {
   log_info "Installing journald disk cap (SystemMaxUse=1G)..."
   # zz- sorts after Ubuntu's /usr/lib/systemd/journald.conf.d/syslog.conf
@@ -1906,6 +1934,7 @@ main() {
   install_gateway_control
   install_journald_limits
   install_fleet_dropin
+  ensure_swapfile
   enable_services
   open_firewall
   install_sshd_keys_only

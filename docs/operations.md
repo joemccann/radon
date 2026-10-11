@@ -917,6 +917,13 @@ A dry run (no B2 calls, no deletes) needs the private bind, so run it inside the
 - **Rollback:** copy the `research/evidence/<YYYY-MM>/<key>/` objects back into `evidence/<key>/` through the container bind.
 - **Escalation:** a stale 33-day heartbeat or a repeating error is a backup gap. Do not delete evidence by hand to clear it.
 
+## Host swap
+
+- **Owner:** `cloud/scripts/setup-vps.sh:ensure_swapfile`. `/swapfile`, 2G, one `/swapfile none swap sw 0 0` line in `/etc/fstab`.
+- **Sizing:** the app host has 7.6G RAM and ran ~150M of swap on the retired 4G beta swapfile (removed 2026-10-11). 2G is headroom.
+- **Existing host:** as root, `bash -c 'RADON_SETUP_SOURCE_ONLY=1 source cloud/scripts/setup-vps.sh && ensure_swapfile'`. Idempotent; refuses a symlinked path. Verify with `swapon --show`.
+- **Resize:** add the new file and `swapon` it before `swapoff` of the old one, so the host is never without swap.
+
 ## Production Build Constraint
 
 Next.js 16 prerender crashes on `/_global-error` and `/_not-found` because the root ClerkProvider context isn't materialised in isolated workers. `web/package.json` build pins `next build --experimental-build-mode=compile`. The error and not-found shells (`app/error.tsx`, `app/[ticker]/not-found.tsx`, `app/global-error.tsx`) use plain `<a>` and pure JSX (no `next/link`, `useEffect`, or `globals.css`) for the same reason.

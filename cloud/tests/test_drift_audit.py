@@ -216,15 +216,6 @@ def test_shipped_allowlist_entries_all_carry_expiries():
     assert missing == [], f"allowlist entries without expires=YYYY-MM-DD: {missing}"
 
 
-class TestUntrackedClassification:
-    def test_retired_beta_units_stay_known_untracked(self):
-        assert da.classify_untracked_unit("radon-beta-api.service") == "known-untracked"
-        assert da.classify_untracked_unit("radon-beta-nextjs.service") == "known-untracked"
-
-    def test_other_untracked_units_are_drift(self):
-        assert da.classify_untracked_unit("radon-mystery.service") == "drift"
-
-
 def test_git_repo_is_parent_of_cloud_root():
     assert da.GIT_REPO == da.REPO.parent
 
@@ -485,10 +476,10 @@ class TestSummary:
     def test_clean_run_notes_known_untracked(self):
         summary = da.build_last_error(
             [], allowed={"not-installed:radon-llm-index.timer": "gated"},
-            known_untracked=["radon-beta-api.service"],
+            known_untracked=["role-skipped:compose"],
         )
         assert summary["drift_count"] == 0
-        assert "radon-beta-api.service" in summary["note"]
+        assert "role-skipped:compose" in summary["note"]
         assert summary["allowed_count"] == 1
 
     def test_allowlisted_pending_is_reported_distinctly_from_clean(self):

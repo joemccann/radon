@@ -55,7 +55,7 @@ Every change, agent-authored or not, goes through the same gates. The gates them
 ## Retired
 
 - **npm** — replaced by bun for root and `web/`. `site/` still uses npm.
-- **beta.radon.run** — staging clone never finished; sunset 2026-08-20. Leftover `radon-beta-*` units on the VPS are ignored by deploy. Do not recreate.
+- **beta.radon.run** — staging clone never finished; sunset 2026-08-20, host units and checkout removed 2026-10-11. Do not recreate.
 - **libsql embedded replica** (`data/replica.db`) — decommissioned 2026-05-20 after WAL conflicts; all DB access is direct-to-Turso. Delete the file if it reappears.
 
 ## What this file is not
