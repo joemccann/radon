@@ -11361,4 +11361,10 @@ Acceptance: `--check` exits 0 and prints `0.12.0`. Root `package.json`, `web/pac
 
 Acceptance: `TestComputeIndex::test_basket_key_matches_slug_when_publisher_id_differs` fails when line 205 reads only `by_id`, and passes with the slug-or-id lookup restored. Product source stays unchanged.
 
-Audited through: 0627874b30398f0f04631846e0c86a2fbc7e9403 on 2026-10-11 — 2 new findings
+### T-548 — P2 — NOAA 120h and EIA 72h windows added in #995 have no snapshot test
+
+`scripts/ai_cycle/snapshot.py:194` (`980f264f`) keeps a NOAA row fresh for 120 hours and an EIA row fresh for 72 hours. NOAA's registry cadence is `daily` (72 hours on the old formula) and EIA's is `hourly` (48 hours). Restoring that formula left `scripts/tests/test_ai_cycle_core.py` at 47 passed, while a 100-hour NOAA day and a 60-hour EIA day flipped from `incomplete` to `stale`. P1 stays `incomplete` inside the window because it has no `validated_transform` (`snapshot.py:213`). The product formula is already correct.
+
+Acceptance: `test_noaa_and_eia_keep_the_widened_staleness_windows` fails when the hours formula drops the NOAA and EIA branches, and passes with those branches restored. A 121-hour NOAA day and an 80-hour EIA day stay `stale`. Product source stays unchanged.
+
+Audited through: 0627874b30398f0f04631846e0c86a2fbc7e9403 on 2026-10-11 — 3 new findings
