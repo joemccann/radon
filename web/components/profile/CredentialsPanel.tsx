@@ -224,6 +224,9 @@ export default function CredentialsPanel() {
             const notice = notices[service.id];
             const dirty = Object.keys(draftValuesFor(service)).length > 0;
             const slug = serviceSlug(service.id);
+            const configuredCount = service.fields.filter((field) =>
+              field.configured || field.env_fallback || field.exported_only,
+            ).length;
             return (
               <div
                 className="preferences-row preferences-row--service settings-service"
@@ -231,7 +234,7 @@ export default function CredentialsPanel() {
                 key={service.id}
               >
                 <div className="preferences-row__head">
-                  <span className="preferences-row__label">{service.label}</span>
+                  <h3 className="preferences-row__label">{service.label}</h3>
                   {service.slow ? (
                     <span className="preferences-badge preferences-badge--restart">
                       Longer verification
@@ -240,6 +243,9 @@ export default function CredentialsPanel() {
                   {!service.validator ? (
                     <span className="preferences-badge">Not checked live</span>
                   ) : null}
+                  <span className="settings-service__status">
+                    {configuredCount} of {service.fields.length} configured
+                  </span>
                 </div>
                 {service.note ? (
                   <p className="preferences-row__description">{service.note}</p>
@@ -324,6 +330,9 @@ export default function CredentialsPanel() {
                 </div>
 
                 <div className="admin-actions-row">
+                  <span className="settings-draft-status" role="status">
+                    {dirty ? "Unsaved changes" : "Stored values stay hidden"}
+                  </span>
                   <button
                     type="button"
                     className="admin-btn admin-btn-primary"
