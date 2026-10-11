@@ -49,6 +49,25 @@ def _from_images(text: str) -> list[str]:
     return [line.split()[1] for line in text.splitlines() if line.startswith("FROM ")]
 
 
+# Tag plus manifest-list digest. A tag-only ref (node:22-bookworm-slim) refloats.
+_PINNED_FROM = re.compile(
+    r"^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*"
+    r":[A-Za-z0-9][A-Za-z0-9._-]*"
+    r"@sha256:[0-9a-f]{64}$"
+)
+
+
+def _from_image_refs(text: str) -> list[str]:
+    refs: list[str] = []
+    for line in text.splitlines():
+        if not line.startswith("FROM "):
+            continue
+        parts = line.split()
+        image = parts[2] if parts[1].startswith("--") else parts[1]
+        refs.append(image)
+    return refs
+
+
 def _final_user(text: str) -> str | None:
     last_from = 0
     lines = text.splitlines()
@@ -182,12 +201,33 @@ class TestPythonImage:
             assert check in smoke
 
 
+class TestBaseImageDigests:
+    """DS-2026-10-11-03: every production app FROM is tag@sha256."""
+
+    def test_every_app_dockerfile_from_is_digest_pinned(self) -> None:
+        dockerfiles = sorted(DOCKER_APP.glob("Dockerfile.*"))
+        assert dockerfiles, "docker/app/Dockerfile.* missing"
+        for path in dockerfiles:
+            refs = _from_image_refs(path.read_text(encoding="utf-8"))
+            assert refs, path.name
+            for ref in refs:
+                assert _PINNED_FROM.fullmatch(ref), f"{path.name}: {ref}"
+
+
 class TestNodeImage:
     def test_base_copies_and_cmd(self) -> None:
         text = NODE_DF.read_text(encoding="utf-8")
         images = _from_images(text)
-        assert images[-1] == "node:22-bookworm-slim"
-        assert any("bun" in image for image in images)
+        # Index digest of node:22.23.3-bookworm-slim, the current
+        # node:22-bookworm-slim resolution (registry, 2026-10-11).
+        assert images[-1] == (
+            "node:22.23.3-bookworm-slim"
+            "@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392"
+        )
+        assert images[0] == (
+            "oven/bun:1.3.14"
+            "@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4"
+        )
         assert "1.3.14" in text
         assert "COPY web/" in text or "COPY web" in text
         assert "scripts/" in text
