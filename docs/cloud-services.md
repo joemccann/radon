@@ -776,6 +776,10 @@ heartbeats. Heartbeat `calm-streak`. Installed by the deploy's
 `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/calm-streak.md`](indicators/calm-streak.md).
 
+### SPX breadth (`radon-record-high-breadth.timer`)
+
+Post-close TradingView comparison on the app host. Cadence and the OAuth store are the [operations timer row](operations.md). Formula and source gaps are [source parity](indicators/record-high-breadth-source-parity.md). This unit does not install account credentials.
+
 ### BOUNCE SETUP (`radon-bounce-setup.timer`)
 
 `Mon..Fri 21:10 UTC` (`RandomizedDelaySec=120`, `Persistent=true`), oneshot

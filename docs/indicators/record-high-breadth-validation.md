@@ -16,4 +16,4 @@ The bounded 5,000-bar response is incomplete. Shared breadth observations begin 
 
 A protected read-only DB-first Next route serves the stored snapshot, with a disk fallback and explicit unavailable state. The Regime workspace renders three panels, range controls, freshness, methodology, historical coverage and reference parity. A post-close systemd timer updates the indicator and writes service health.
 
-No local test suites are permitted. Formula, session alignment, invalid/missing inputs, persistence, API, UI and browser regressions run on GitHub CI at the exact PR head. Production OAuth credential provisioning is an operator deployment prerequisite; this change does not copy local tokens to the VPS.
+Formula, session alignment, invalid counts, persistence, the API route and the panel are covered by `scripts/tests/test_record_high_breadth.py` and the web route tests. CI runs those suites at the PR head. Production OAuth provisioning is [SPX breadth OAuth deployment](../operations.md#spx-breadth-oauth-deployment).

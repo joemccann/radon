@@ -1937,7 +1937,7 @@ def _markdown_heading(path: str, heading: str) -> str:
 
 
 class TestDocumentation20261011:
-    """DOC-184..185: contracts that drifted after audited-through 208bb3d6."""
+    """DOC-184..187: contracts that drifted after audited-through 208bb3d6."""
 
     def test_perf_probe_pins_the_same_host_the_loop_dials(self):
         env = (_ROOT / "scripts/runner/loops/performance.env").read_text()
@@ -1985,3 +1985,28 @@ class TestDocumentation20261011:
         for boundary in ("Symptom", "Prerequisites", "Blast radius", "Safe diagnosis",
                          "Stop conditions", "Verification", "Rollback", "Escalation"):
             assert f"**{boundary}:**" in section
+
+    def test_mcp_client_defers_shipped_breadth_to_its_owner(self):
+        scan = (_ROOT / "scripts/record_high_breadth_scan.py").read_text()
+        for symbol in ("SP:SPX", "INDEX:S5TH", "INDEX:MAHP", "INDEX:MALP"):
+            assert symbol in scan
+        timer = (_ROOT / "cloud/services/radon-record-high-breadth.timer").read_text()
+        assert "OnCalendar=" in timer
+        text = (_ROOT / "docs/tradingview-mcp-client.md").read_text()
+        assert "after these source gates pass" not in text
+        assert "2001 or 2005" not in text
+        assert "still needs validated paired NYSE" not in text
+        assert "before choosing a series" not in text
+        assert "Live mapping verification, 2026-10-10" not in text
+        assert "indicators/record-high-breadth-source-parity.md" in text
+        assert "SP:SPX" in text and "INDEX:S5TH" in text
+
+    def test_breadth_validation_does_not_forbid_the_suite(self):
+        text = (_ROOT / "docs/indicators/record-high-breadth-validation.md").read_text()
+        assert "No local test suites are permitted" not in text
+        assert "scripts/tests/test_record_high_breadth.py" in text
+        assert (_ROOT / "scripts/tests/test_record_high_breadth.py").is_file()
+        cloud = (_ROOT / "docs/cloud-services.md").read_text()
+        assert "radon-record-high-breadth.timer" in cloud
+        assert "operations.md" in cloud
+        assert "research-evidence-archive" in cloud
