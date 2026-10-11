@@ -11368,3 +11368,23 @@ Acceptance: `TestComputeIndex::test_basket_key_matches_slug_when_publisher_id_di
 Acceptance: `test_noaa_and_eia_keep_the_widened_staleness_windows` fails when the hours formula drops the NOAA and EIA branches, and passes with those branches restored. A 121-hour NOAA day and an 80-hour EIA day stay `stale`. Product source stays unchanged.
 
 Audited through: 0627874b30398f0f04631846e0c86a2fbc7e9403 on 2026-10-11 — 3 new findings
+
+## Remediation 2026-10-11
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-546 | DONE | Live `check(ROOT)` raised `SystemExit` for recorded 0.12.4 versus fold 0.12.0 (1 failed). `--write` set both package files to 0.12.0 and the README badge followed. `--check` printed 0.12.0. `scripts/tests/test_release_version.py` 17 passed. Fold rules unchanged. |
+| T-547 | DONE | Id-only lookup left `scripts/tests/test_llm_token_index.py` at 17 passed. The slug case then raised `ValueError` for `gpt-4o`. Restored slug-or-id lookup: 18 passed. Product source unchanged. |
+| T-548 | DONE | The pre-#995 cadence formula left `scripts/tests/test_ai_cycle_core.py` at 47 passed and marked a 100h NOAA day stale. The new window test failed that mutation. Restored formula: 48 passed. Product source unchanged. |
+
+### Closing gates 2026-10-11
+
+Delta Python files, three runs: 670 passed each. Delta Vitest files, three runs: 13 files / 238 passed each. Closing rounds used Homebrew OpenSSL, Bash 5.3.20, caddy, and the 3.13 venv. No threshold was lowered and no test was skipped to go green. Playwright specs in the delta were not executed here. No local screenshot or 390px result is claimed.
+
+| Round | Root Python | Root Vitest | Cloud | Failed-list diff against base `208bb3d6` |
+|---|---|---|---|---|
+| 1 | 14,953 passed / 2 skipped / 23 subtests | 10,566 passed / 1,071 files | 2,794 passed / 8 skipped | 0 added / 0 removed |
+| 2 | 14,953 passed / 2 skipped / 23 subtests | 10,566 passed / 1,071 files | 2,794 passed / 8 skipped | 0 added / 0 removed |
+| 3 | 14,953 passed / 2 skipped / 23 subtests | 10,566 passed / 1,071 files | 2,794 passed / 8 skipped | 0 added / 0 removed |
+
+Base cloud at `208bb3d6` with the same toolchain: 2,765 passed / 8 skipped, sorted FAILED list empty. Every closing FAILED list is empty. The count difference is tests added on main after that SHA. The comparison worktree was removed.
