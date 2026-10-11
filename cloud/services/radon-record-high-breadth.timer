@@ -1,0 +1,12 @@
+[Unit]
+Description=Radon SPX Breadth - daily 18:15 Eastern
+
+[Timer]
+# Conservative after-close collection, not a TradingView finality guarantee.
+# Calendar-day runs reconcile revisions and heartbeat unchanged weekends.
+OnCalendar=*-*-* 18:15:00 America/New_York
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

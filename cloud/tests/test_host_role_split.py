@@ -108,6 +108,8 @@ class TestAutoSyncStrays:
         "radon-hhlev.timer",
         "radon-hyad.service",
         "radon-hyad.timer",
+        "radon-record-high-breadth.service",
+        "radon-record-high-breadth.timer",
         "radon-vixts.service",
         "radon-vixts.timer",
     )

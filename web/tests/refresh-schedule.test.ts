@@ -26,6 +26,7 @@ import {
   GEX_REFRESH,
   HH_LEV_REFRESH,
   HY_AD_REFRESH,
+  RECORD_HIGH_BREADTH_REFRESH,
   IEI_HYG_REFRESH,
   IV_RANK_REFRESH,
   IV_SPREAD_REFRESH,
@@ -136,6 +137,7 @@ const PINNED: Array<[string, RefreshSchedule, string[]]> = [
   ["TRIN", TRIN_REFRESH, ["radon-trin.timer"]],
   ["dividend yield", DIV_YIELD_REFRESH, ["radon-divyield.timer"]],
   ["HY A/D", HY_AD_REFRESH, ["radon-hyad.timer"]],
+  ["SPX breadth", RECORD_HIGH_BREADTH_REFRESH, ["radon-record-high-breadth.timer"]],
   ["HH leverage", HH_LEV_REFRESH, ["radon-hhlev.timer"]],
 ];
 
