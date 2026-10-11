@@ -294,3 +294,69 @@ class TestConfigAndMain:
         monkeypatch.setattr(archive, "_utcnow", lambda: NOW)
         assert archive.main(["--root", str(root)]) == 1
         assert beats[-1][0] == "error"
+
+
+class SlowS3(FakeS3):
+    """Each call holds a slot briefly so overlapping calls are observable."""
+
+    def __init__(self):
+        super().__init__()
+        import threading
+        self._lock = threading.Lock()
+        self.inflight = 0
+        self.peak = 0
+
+    def _enter(self):
+        import time as _time
+        with self._lock:
+            self.inflight += 1
+            self.peak = max(self.peak, self.inflight)
+        _time.sleep(0.02)
+        with self._lock:
+            self.inflight -= 1
+
+    def put_object(self, **kw):
+        self._enter()
+        return super().put_object(**kw)
+
+    def head_object(self, **kw):
+        self._enter()
+        return super().head_object(**kw)
+
+
+class TestThroughput:
+    def test_files_in_one_dir_upload_concurrently(self, root):
+        files = {f"page-{i:04d}.md": f"# {i}".encode() for i in range(16)}
+        _state(root, [])
+        _evidence(root, "w-many", OLD, files)
+        client = SlowS3()
+        summary = _run(root, client, workers=8)
+        assert summary["pruned_dirs"] == 1 and summary["uploaded_files"] == 16
+        assert client.peak > 1, "per-file B2 round trips must overlap"
+
+    def test_one_failed_file_in_a_parallel_dir_still_deletes_nothing(self, root):
+        files = {f"page-{i:04d}.md": f"# {i}".encode() for i in range(8)}
+        _state(root, [])
+        directory = _evidence(root, "w-bad", OLD, files)
+        client = SlowS3()
+        client.fail_put.add("research/evidence/2026-08/w-bad/page-0005.md")
+        summary = _run(root, client, workers=8)
+        assert summary["pruned_dirs"] == 0 and len(summary["errors"]) == 1
+        assert sorted(p.name for p in directory.iterdir()) == sorted(files)
+
+    def test_deadline_stops_new_dirs_cleanly_before_the_unit_timeout(self, root):
+        _state(root, [])
+        for key in ("w-a", "w-b", "w-c"):
+            _evidence(root, key, OLD)
+        ticks = iter([0.0, 0.0, 100.0, 100.0, 100.0, 100.0])
+        summary = _run(root, FakeS3(), deadline_secs=50, clock=lambda: next(ticks, 100.0))
+        assert summary["pruned_dirs"] == 1
+        assert summary["skipped"]["deadline"] == 2
+        assert summary["errors"] == []
+        assert (root / "evidence" / "w-b").exists() and (root / "evidence" / "w-c").exists()
+
+    def test_default_deadline_leaves_headroom_under_the_unit_timeout(self):
+        unit = (archive.Path(archive.__file__).resolve().parents[2]
+                / "cloud" / "services" / "radon-research-archive.service").read_text()
+        timeout = int(next(l.split("=", 1)[1] for l in unit.splitlines() if l.startswith("TimeoutStartSec=")))
+        assert archive.DEFAULT_DEADLINE_SECS <= timeout - 1800
