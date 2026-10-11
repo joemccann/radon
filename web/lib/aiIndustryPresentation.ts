@@ -12,7 +12,8 @@ export const AI_INDUSTRY_STAGES = [
       "D2",
       "D3",
       "D4",
-      "D5"
+      "D5",
+      "D7"
     ],
     "main": "D5",
     "limit": "These are samples of individual platforms, not the whole AI market.",
@@ -111,6 +112,12 @@ export const AI_MEASURE_COPY: Record<string, { name: string; definition: string;
     "definition": "Typical monthly AI spending per employee among businesses measured by Ramp. This captures payments for AI tools rather than free use.",
     "relevance": "Helps you judge whether business adoption is turning into paid demand.",
     "limit": "Ramp customers are a business sample, not the whole market. Keep the median separate from the highest-spending 10% and 1%."
+  },
+  "D7": {
+    "name": "AI token prices & volume",
+    "definition": "What businesses measured by Ramp actually paid per million tokens to Anthropic and OpenAI (blended, input and output), plus weekly token volume and spend by model maker.",
+    "relevance": "Falling prices alongside rising volume suggest cheaper inference is widening use. Falling prices with flat volume suggest weaker pricing power for model makers.",
+    "limit": "Ramp customers are a business sample, not the whole market. Price is observed spend over tokens, so cached tokens and model mix move it. Spend divided by volume is not a price; read the price series."
   },
   "C1": {
     "name": "GPU rental prices",
