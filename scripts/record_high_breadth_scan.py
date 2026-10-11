@@ -164,7 +164,7 @@ async def collect(client=None, *, now=None):
 
 def persist_result(payload):
     if payload["missing"]:
-        raise RuntimeError("no aligned finalized-session observations; retaining prior snapshot")
+        raise RuntimeError("no aligned completed-session observations; retaining prior snapshot")
     writer.ensure_no_replica_for_writers()
     complete_rows = [row for row in payload["series"] if all(row[field] is not None for field in SYMBOLS)]
     writer.upsert_record_high_breadth_rows(complete_rows, recorded_at=payload["scan_time"])

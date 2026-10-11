@@ -80,7 +80,7 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
   "equibles-filing-forensics", "equibles-short-crowding",
   "equibles-smart-money-13f",
   "flex-token", "flow-surprise", "futures-quote", "garch-convergence",
-  "hhlev", "hyad", "index-quote",
+  "hhlev", "hyad", "record-high-breadth", "index-quote",
   "informed-flow/[ticker]", "ivrank", "iv-spread", "llm-token-index", "margin-debt",
   // models: read-only chat model picker catalog. Reports WHICH provider keys
   // are present in this deployment, never any key material — same posture as

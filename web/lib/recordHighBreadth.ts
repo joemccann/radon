@@ -25,7 +25,7 @@ export interface RecordHighBreadthData {
     denominator_verified: boolean;
     source_finality: string;
     parity?: { status: string; reference_date: string; reference: { spx_close: number; above_200_pct: number; net_high_low_pct: number }; tradingview: { spx_close: number | null; above_200_pct: number | null; net_high_low_per_500: number | null } | null };
-    invalid_observations?: { date: string; field: string; timestamp: number; raw_value: number; reason: string }[];
+    invalid_observations?: { date: string; field: string; timestamp: number; raw_value: number | string | boolean; reason: string }[];
     missing_sessions?: { date: string; fields: string[] }[];
     coverage?: Record<string, { first_date: string | null; last_date: string | null; returned_count: number; fetched_at: string }>;
   };

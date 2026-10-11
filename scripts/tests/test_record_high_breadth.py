@@ -166,7 +166,11 @@ def test_persistence_only_complete_rows_and_atomic_snapshot(monkeypatch, tmp_pat
     scan.persist_result(payload)
     assert mock.upsert_record_high_breadth_rows.call_args.args[0] == [payload["series"][1]]
     mock.upsert_scan_snapshot.assert_called_once_with(scan.SERVICE, payload["scan_time"], payload)
-    assert json.loads((tmp_path / "breadth.json").read_text()) == payload
+    saved = json.loads((tmp_path / "breadth.json").read_text())
+    checksum = saved.pop("_checksum")
+    from utils.atomic_io import _compute_checksum
+    assert checksum == _compute_checksum(payload)
+    assert saved == payload
 
 
 def test_no_join_retains_prior_snapshot(monkeypatch):
