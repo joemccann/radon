@@ -2048,7 +2048,9 @@ supervise_deploy_command() {
   esac
   trap - TERM INT HUP
   exec 9>&-
-  if (( exit_code == 0 )); then
+  # Prestage leaves the green marker alone, and the unlocked prepull job may
+  # be pulling the target pair right now; pruning here removed it.
+  if (( exit_code == 0 )) && [[ "${RADON_DEPLOY_STAGE:-0}" != "1" ]]; then
     prune_app_images_after_deploy
   fi
   return "$exit_code"
