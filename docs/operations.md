@@ -694,7 +694,7 @@ Declared ufw rulesets, operator-run only. Deploy (`deploy.sh`, the root helper, 
 
 Sources are env, IPv4 `/32` only (anything wider is refused): `RADON_FW_OPERATOR_SOURCES` (laptop `100.98.36.17`, Mac mini `100.87.184.89`, phone `100.113.204.20`, plus a public recovery address) and `RADON_FW_OPS_SOURCES` (future ops hosts; leave empty until they exist). Each ops `/32` gets `allow 8341/tcp` then `deny` everything else, ahead of every broad allow (ufw is first-match).
 
-- **App:** 22/tcp any (CI deploys over SSH from GitHub-hosted runners, whose addresses are not fixed; narrowing 22 needs the deploy path moved first), 80/443 any, 41641/udp, 8321 from operator `/32`s and from `10.0.0.4` (broker watchdog). The blanket `allow in on tailscale0` and the `10.0.0.0/16` 8321 rule are gone.
+- **App:** 22/tcp from any (see [App public SSH](#app-public-ssh) below), 80/443 any, 41641/udp, 8321 from operator `/32`s and from `10.0.0.4` (broker watchdog). The blanket `allow in on tailscale0` and the `10.0.0.0/16` 8321 rule are gone.
 - **Broker** (ufw inactive today): 22 from operator `/32`s only (refuses to run with none), 4001 and 8340 from `10.0.0.2`, 41641/udp, deny else.
 - **Docker caveat:** ports Docker publishes (broker `10.0.0.4:4001`) are DNAT'd before ufw's INPUT chain, so the 4001 rule documents intent but does not filter. 4001 is protected by its bind address: `10.0.0.4` is reachable only from radon-private, whose only other member is the app.
 
@@ -712,10 +712,26 @@ As root, set `BACKUP=<printed /etc/radon-ufw-rollback.* path>`, then run `cp -a 
 
 `fw-radon-app.json`, `fw-radon-broker.json`, `fw-radon-ops.json` are `hcloud firewall replace-rules` rule files, inbound only (anything not listed is dropped; outbound is open). `hcloud_firewalls.py` renders `__OPERATOR_RECOVERY_IP__/32` from `--recovery-ip` (one public IPv4) and prints the commands; `--apply` runs them with your own `hcloud` context. Deploy never calls it (`cloud/tests/test_hetzner_firewalls.py` pins the shapes and that fact).
 
-- **fw-radon-app:** 22, 80, 443 any; 41641/udp any. SSH stays open to any because CI deploys over SSH from GitHub-hosted runners; restricting it needs the deploy path moved first.
+- **fw-radon-app:** 22 from any (see [App public SSH](#app-public-ssh) below), 80, 443 any; 41641/udp any.
 - **fw-radon-broker:** 22 from the recovery `/32`; 41641/udp any. No web ports.
 - **fw-radon-ops:** 22 from the recovery `/32`; 80, 443 any; 41641/udp any.
 - No 4001/8340 rules: Hetzner Cloud Firewalls filter the public interface only, so the app-to-broker private-net path (`10.0.0.2` -> `10.0.0.4:4001/8340`) never passes them. That path is held by the bind addresses and the broker ufw set above.
+
+#### App public SSH
+
+`fw-radon-app.json` allows tcp/22 from `0.0.0.0/0` and `::/0`. The app ufw ruleset allows `22/tcp` with no source. The port is reachable from the public internet. Login still requires the `radon` SSH key.
+
+That opening stays because `.github/workflows/ci.yml` jobs `stage-release`, `prepull-images`, and `deploy` run on GitHub-hosted `ubuntu-latest` and SSH to `secrets.VPS_HOST` with `appleboy/ssh-action`. Those runners are not on the tailnet. UDP 41641 is Tailscale WireGuard, not the deploy SSH path. [`policy.hujson`](../cloud/tailscale/policy.hujson) grants tcp/22 only to `group:operator`, ships no CI tag, and sets `ssh` to `[]` (plain sshd, Tailscale SSH off). No workflow joins Tailscale, and the repo has no auth-key secret for one.
+
+Merging this tree does not change the live Hetzner firewall or ufw. `deploy.sh`, the root helper, `setup-vps.sh`, and `ci.yml` never call `hcloud`. `hcloud_firewalls.py` and `host-firewall.sh` are dry-run by default. Applying a narrower tcp/22 rule while those three jobs still target the public host drops the next production deploy.
+
+Do not close public SSH until all of the following are done, in order:
+
+1. Keep a second SSH session on the app host's tailnet address open. Do not `--apply` a tcp/22 rule whose sources are not `0.0.0.0/0` and `::/0` until step 3 is a green deploy.
+2. In the Tailscale admin console, add a CI-only tag owned by `group:operator`, grant that tag tcp/22 to `tag:radon-app` only, and save the policy. The checked-in policy is not live until that save. Create an auth key for that tag and store it as a GitHub Production environment secret. Change the three `ci.yml` SSH jobs so the runner joins the tailnet and uses the app host's tailnet address. Confirm `gh run list --workflow=ci.yml --limit 1` is a green deploy on that path.
+3. Only then narrow `fw-radon-app.json` tcp/22 and the app `allow 22/tcp` line in `host-firewall.sh` to operator recovery `/32`s. Dry-run both. Apply off regular trading hours with the rollout above (`hcloud_firewalls.py --apply` for `fw-radon-app`, then `host-firewall.sh --role app --apply` as root). Verify a fresh tailnet SSH session and the next CI deploy.
+
+`cloud/tests/test_hetzner_firewalls.py` refuses a narrower app tcp/22 rule while those jobs still SSH from GitHub-hosted runners to `secrets.VPS_HOST`.
 
 **Symptom:** firewall apply fails, reports an unavailable inventory, or times
 out while replacing rules or attaching a firewall.

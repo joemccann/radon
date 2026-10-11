@@ -7,14 +7,16 @@ the rule shapes so an edit cannot quietly open a service port publicly.
 
 Hetzner Cloud Firewalls filter the public interface only; radon-private
 traffic (app 10.0.0.2 -> broker 4001/8340) never passes them, so those
-ports must never appear here. App SSH stays open to any: CI deploys over
-SSH from GitHub-hosted runners with unfixed addresses.
+ports must never appear here. App SSH stays open to any while CI deploys
+over SSH from GitHub-hosted runners. See
+test_app_public_ssh_stays_while_ci_deploys_from_github_hosted_runners.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -66,6 +68,52 @@ def test_app_shape():
         ("in", "tcp", "443", tuple(ANY)),
         ("in", "udp", "41641", tuple(ANY)),
     }
+
+
+_CI = ROOT.parent / ".github" / "workflows" / "ci.yml"
+_HOST_FW = ROOT / "scripts" / "host-firewall.sh"
+_PUBLIC_SSH_JOBS = ("stage-release", "prepull-images", "deploy")
+
+
+def _ci_job(text: str, name: str) -> str:
+    match = re.search(
+        rf"^  {re.escape(name)}:\n(.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
+        text,
+        re.M | re.S,
+    )
+    assert match, name
+    return match.group(1)
+
+
+def test_app_public_ssh_stays_while_ci_deploys_from_github_hosted_runners():
+    """tcp/22 on the app public NIC stays world-open until CI leaves it.
+
+    The three production SSH jobs run on ubuntu-latest and connect to
+    secrets.VPS_HOST. They do not join the tailnet. UDP 41641 is WireGuard,
+    not that SSH path. Narrowing fw-radon-app.json or the app ufw 22 rule
+    before those jobs move blackholes the next deploy. Merging does not
+    apply either firewall.
+    """
+    workflows = sorted((ROOT.parent / ".github" / "workflows").glob("*.yml"))
+    ssh_workflows = [
+        path.name
+        for path in workflows
+        if "appleboy/ssh-action@" in path.read_text(encoding="utf-8")
+    ]
+    assert ssh_workflows == ["ci.yml"]
+    ci = _CI.read_text(encoding="utf-8")
+    for name in _PUBLIC_SSH_JOBS:
+        body = _ci_job(ci, name)
+        assert "runs-on: ubuntu-latest" in body, name
+        assert "appleboy/ssh-action@" in body, name
+        assert "host: ${{ secrets.VPS_HOST }}" in body, name
+        assert "tailscale" not in body.lower(), name
+    ssh = [rule for rule in _rules("fw-radon-app") if rule["port"] == "22"]
+    assert len(ssh) == 1
+    assert ssh[0]["protocol"] == "tcp"
+    assert ssh[0]["source_ips"] == ANY
+    host_fw = _HOST_FW.read_text(encoding="utf-8")
+    assert 'echo "allow 22/tcp comment ssh-ci-deploy-and-recovery"' in host_fw
 
 
 def test_broker_shape():
