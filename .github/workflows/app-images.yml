@@ -96,6 +96,13 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The release version is folded from commit history here, not
+          # committed by PRs; the image context excludes .git.
+          fetch-depth: 0
+      - name: Derive release version
+        id: release
+        run: echo "version=$(python3 scripts/release_version.py)" >> "$GITHUB_OUTPUT"
       - name: Validate public build environment
         env:
           # NEXT_PUBLIC_* are COMPILE-TIME inlined by the Next build, so an
@@ -169,6 +176,7 @@ jobs:
             NEXT_PUBLIC_RADON_API_URL=${{ vars.NEXT_PUBLIC_RADON_API_URL }}
             NEXT_PUBLIC_IB_REALTIME_WS_URL=${{ vars.NEXT_PUBLIC_IB_REALTIME_WS_URL }}
             RADON_RELEASE_SHA=${{ github.sha }}
+            RADON_RELEASE_VERSION=${{ steps.release.outputs.version }}
           cache-from: ${{ steps.image-cache.outputs.cache_from }}
           cache-to: ${{ steps.image-cache.outputs.cache_to }}
           provenance: false
