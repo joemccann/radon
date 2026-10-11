@@ -2,8 +2,9 @@
 
 Fault injection for three ops-plane bounds the 2026-08-22 delta left open:
 
-* R-114: the retired `radon-beta` sudoers fragment red-flags `config-drift`
-  forever because only *units* have a known-untracked classification.
+* R-114: superseded 2026-10-11. The beta host artifacts are removed, so a
+  `radon-beta` fragment is plain drift again; `cloud/tests/test_beta_sunset.py`
+  pins that.
 * R-115: the "a fix has deployed since" oneshot rerun keys off a marker that
   every green deploy touches, so a unit failing for an environmental reason
   is re-run once per unrelated merge to main, indefinitely.
@@ -29,50 +30,6 @@ def _load(name: str, rel: str):
 
 
 da = _load("drift_audit_relc", "cloud/scripts/drift_audit.py")
-
-
-# --------------------------------------------------------------------------
-# R-114 — retired beta sudoers fragments are notes, not config-drift
-# --------------------------------------------------------------------------
-class TestRetiredBetaSudoers:
-    def test_beta_fragment_is_classified_known_untracked(self):
-        assert da.classify_untracked_sudoers("radon-beta") == "known-untracked"
-
-    def test_other_untracked_fragments_are_still_drift(self):
-        assert da.classify_untracked_sudoers("radon-mystery") == "drift"
-
-    def test_check_sudoers_notes_the_beta_fragment_instead_of_drifting(
-        self, tmp_path, monkeypatch
-    ):
-        live = tmp_path / "sudoers.d"
-        live.mkdir()
-        (live / "radon-beta").write_text("radon-beta ALL=(root) NOPASSWD: /bin/true\n")
-        (live / "radon-mystery").write_text("radon ALL=(root) NOPASSWD: /bin/false\n")
-        monkeypatch.setattr(da, "SUDOERS_DIR", live)
-        monkeypatch.setattr(da, "REPO", tmp_path / "empty-repo")
-
-        drifts: list[dict] = []
-        known: list[str] = []
-        da._check_sudoers(drifts, known)
-
-        assert known == ["radon-beta"]
-        assert [d["id"] for d in drifts] == ["untracked-sudoers:radon-mystery"]
-
-    def test_gather_threads_sudoers_notes_into_known_untracked(self, monkeypatch):
-        monkeypatch.setattr(da, "FILE_PAIRS", ())
-        monkeypatch.setattr(da, "_check_compose", lambda drifts: None)
-        monkeypatch.setattr(da, "_check_units", lambda drifts, known: None)
-        monkeypatch.setattr(da, "_check_env_invariants", lambda drifts: None)
-        monkeypatch.setattr(da, "_check_repo_dirty", lambda drifts: None)
-        monkeypatch.setattr(da, "_read_repo", lambda rel: "")
-
-        def fake_sudoers(drifts, known):
-            known.append("radon-beta")
-
-        monkeypatch.setattr(da, "_check_sudoers", fake_sudoers)
-        drifts, _allowed, known = da.gather()
-        assert drifts == []
-        assert known == ["radon-beta"]
 
 
 # --------------------------------------------------------------------------

@@ -54,10 +54,7 @@ copy. The fleet prefix drop-in (radon-.service.d/common.conf) is compared
 separately as a plain file pair, not folded into every unit.
 
 Also checked:
-  * live radon-* units absent from services/ -> drift. Retired
-    radon-beta-* leftovers (the staging stack was never finished) stay
-    "known-untracked" so a host that still has them does not redden
-    config-drift. Do not recreate them. Remove them on the VPS.
+  * live radon-* units absent from services/ -> drift.
   * Environment invariant: every installed radon-*.service must carry
     RADON_DB_NO_REPLICA=1 (supplied fleet-wide by the prefix drop-in),
     asserted via `systemctl show -p Environment`.
@@ -386,23 +383,6 @@ def partition_allowlisted(
             }
         )
     return drifts, allowed
-
-
-def classify_untracked_unit(name: str) -> str:
-    """Retired radon-beta-* leftovers stay notes, not config-drift errors."""
-    return "known-untracked" if name.startswith("radon-beta-") else "drift"
-
-
-def classify_untracked_sudoers(name: str) -> str:
-    """Same sunset rule for sudoers fragments as for units.
-
-    2b1e7162 deleted `config/sudoers.d/radon-beta` but the live fragment
-    survives on the host, so without this the beta sunset red-flags
-    `config-drift` on every audit forever and the signal stops meaning
-    anything. The fragment name has no `-` suffix, so the unit prefix
-    (`radon-beta-`) does not match it.
-    """
-    return "known-untracked" if name.startswith("radon-beta") else "drift"
 
 
 def build_last_error(
@@ -758,12 +738,9 @@ def _check_units(drifts: list[dict], known_untracked: list[str]) -> None:
                 )
 
     for name in sorted(set(live_units) - set(repo_units)):
-        if classify_untracked_unit(name) == "known-untracked":
-            known_untracked.append(name)
-        else:
-            drifts.append(
-                {"id": f"untracked-unit:{name}", "detail": str(live_units[name])}
-            )
+        drifts.append(
+            {"id": f"untracked-unit:{name}", "detail": str(live_units[name])}
+        )
 
 
 def _check_sudoers(drifts: list[dict], known_untracked: list[str]) -> None:
@@ -778,10 +755,7 @@ def _check_sudoers(drifts: list[dict], known_untracked: list[str]) -> None:
     for live in sorted(SUDOERS_DIR.glob("radon*")):
         if live.name in repo_frags:
             continue
-        if classify_untracked_sudoers(live.name) == "known-untracked":
-            known_untracked.append(live.name)
-        else:
-            drifts.append({"id": f"untracked-sudoers:{live.name}", "detail": str(live)})
+        drifts.append({"id": f"untracked-sudoers:{live.name}", "detail": str(live)})
 
 
 def _check_env_invariants(drifts: list[dict]) -> None:
