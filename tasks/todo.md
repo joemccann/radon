@@ -9291,3 +9291,12 @@ Dependency graph: T1 -> T2 + T3 -> T4 -> T5.
 Plan review: keep Clear light/dark tokens, masked secrets, server validation, per-row save/reset and widening confirmation. No local test suites; GitHub runners own test execution. Desktop two-column rows collapse before either column becomes cramped.
 
 Review: independent static review approved layout, inherited-grid isolation, label associations, toast portals and reduced-motion behavior. Detailed better-ui Before/After tables: docs/reviews/2026-10-10-settings-ui.md. Regression-only PR #1007 head 67799898 verifies baseline failure before repair. Six Playwright cases cover light/dark at 1440, 834 and 390px, including masked credentials and synthetic save requests. CI screenshot inspection and repaired exact-head checks pending.
+
+# VPS breadth activation release gate (2026-10-10)
+
+Dependency graph: T1 -> T2 -> T3.
+- [x] T1 depends_on: [] Confirm VPS OAuth refresh/live SPX read and production release gate failure.
+- [x] T2 depends_on: [T1] Reconcile generated package versions to squash-main fold 0.12.0; no runtime code change.
+- [ ] T3 depends_on: [T2] Verify exact-head CI, merge repair, confirm production deployment, activate timer and verify stored breadth.
+
+Review: private VPS store is radon-owned 0600 in 0700 directory; environment path configured. Live upstream read returned SPX7811.54. Release repair only changes generated version metadata; no local suites.
