@@ -440,6 +440,9 @@ def test_held_deploy_lock_fails_closed(tmp_path: Path) -> None:
     (
         "home/radon/.radon-deploy-transition.json",
         "var/lib/radon/ib-gateway-transition.json",
+        "var/lib/radon-deploy/active-units",
+        "var/lib/radon-deploy/active-units.inventory",
+        "var/lib/radon-deploy/active-units.restored",
         "var/lib/radon/deploy/active-units",
         "var/lib/radon/deploy/active-units.inventory",
         "var/lib/radon/deploy/active-units.restored",
@@ -450,6 +453,9 @@ def test_held_deploy_lock_fails_closed(tmp_path: Path) -> None:
         "root-active-units",
         "root-active-units-inventory",
         "root-active-units-restored",
+        "legacy-root-active-units",
+        "legacy-root-active-units-inventory",
+        "legacy-root-active-units-restored",
     ),
 )
 def test_pending_transition_refuses_install(tmp_path: Path, transition: str) -> None:
