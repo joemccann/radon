@@ -243,6 +243,16 @@ class TestNodeImage:
         workflow = (REPO_ROOT / ".github" / "workflows" / "app-images.yml").read_text(encoding="utf-8")
         assert "RADON_RELEASE_SHA=${{ github.sha }}" in workflow
 
+    def test_node_image_build_receives_the_derived_release_version(self) -> None:
+        text = NODE_DF.read_text(encoding="utf-8")
+        assert "ARG RADON_RELEASE_VERSION" in text
+        assert "ENV RADON_RELEASE_VERSION=$RADON_RELEASE_VERSION" in text
+        workflow = (REPO_ROOT / ".github" / "workflows" / "app-images.yml").read_text(encoding="utf-8")
+        node = workflow.split("  node-image:", 1)[1]
+        assert "fetch-depth: 0" in node
+        assert "python3 scripts/release_version.py" in node
+        assert "RADON_RELEASE_VERSION=${{ steps.release.outputs.version }}" in node
+
     def test_clerk_public_env_is_required_at_build(self, tmp_path) -> None:
         text = NODE_DF.read_text(encoding="utf-8")
         assert 'ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""' not in text

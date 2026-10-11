@@ -13,6 +13,22 @@ export function pickReleaseSha({ override, gitSha, githubSha }) {
   return "unknown";
 }
 
+const SEMVER = /^\d+\.\d+\.\d+$/;
+
+// The version is derived from commit history, never committed by a PR. The
+// image build has no .git, so it receives the derived value as an override.
+export function pickReleaseVersion({ override, history, packageVersion }) {
+  const pinned = String(override || "").trim();
+  if (SEMVER.test(pinned)) return pinned;
+  try {
+    const derived = String(history() || "").trim();
+    if (SEMVER.test(derived)) return derived;
+  } catch {
+    // no history available; fall through to the package field
+  }
+  return packageVersion;
+}
+
 export function resolveReleaseIdentity({ version, sha, nodeEnv, now }) {
   const clean = /^[0-9a-f]{7,40}$/.test(sha || "") ? sha.slice(0, 12) : "unknown";
   const channel = nodeEnv === "production" && clean !== "unknown" ? "production" : "local";
@@ -25,7 +41,15 @@ export function resolveReleaseIdentity({ version, sha, nodeEnv, now }) {
 }
 
 export function readReleaseIdentity(nodeEnv = process.env.NODE_ENV, now = new Date().toISOString().replace(/\.\d{3}Z$/, "Z")) {
-  const version = JSON.parse(readFileSync(resolve(WEB_ROOT, "package.json"), "utf8")).version;
+  const version = pickReleaseVersion({
+    override: process.env.RADON_RELEASE_VERSION,
+    history: () => execFileSync("python3", [resolve(WEB_ROOT, "..", "scripts", "release_version.py")], {
+      cwd: resolve(WEB_ROOT, ".."),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }),
+    packageVersion: JSON.parse(readFileSync(resolve(WEB_ROOT, "package.json"), "utf8")).version,
+  });
   let gitSha = "";
   try {
     gitSha = execFileSync("git", ["rev-parse", "--short=12", "HEAD"], {

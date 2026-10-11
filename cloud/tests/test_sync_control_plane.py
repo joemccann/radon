@@ -328,6 +328,80 @@ supervise_deploy_command bash -c 'printf deployed > {tmp_path / "deployed"}'
         assert (tmp_path / "recovered").exists()
         assert (tmp_path / "deployed").exists()
 
+    def _post_deploy_prune(self, tmp_path, *, deploy_rc: int, granted: bool = True):
+        log = tmp_path / "sudo.log"
+        lock = tmp_path / "deploy.lock"
+        probe = (
+            "import fcntl,sys; f=open(sys.argv[1],'r+'); "
+            "fcntl.flock(f, fcntl.LOCK_EX|fcntl.LOCK_NB); print('free')"
+        )
+        shell = f"""
+set -euo pipefail
+source {DEPLOY}
+flock() {{ return 0; }}
+timeout() {{ if [[ "$1" == --signal=* ]]; then shift 3; else shift; fi; "$@"; }}
+sudo() {{
+  printf '%s\\n' "$*" >> {log}
+  if [[ "$1" == "-n" && "$2" == "-l" ]]; then return {0 if granted else 1}; fi
+  # The pruner must find the deploy lock free (FD 9 closed).
+  if [[ "$*" == *" prune" ]]; then
+    {sys.executable} -c {shlex.quote(probe)} {lock} >> {log} 2>&1 || echo held >> {log}
+  fi
+  return 0
+}}
+supervise_deploy_command bash -c 'exit {deploy_rc}'
+"""
+        result = subprocess.run(
+            ["bash", "-c", shell],
+            env={**os.environ, "RADON_DEPLOY_LOCK_FILE": str(lock),
+                 "RADON_DEPLOY_TRANSITION_JOURNAL": str(tmp_path / "none.json"),
+                 "DEPLOY_TIMEOUT": "30", "DEPLOY_KILL_AFTER": "5"},
+            capture_output=True, text=True, timeout=30,
+        )
+        return result, (log.read_text(encoding="utf-8").splitlines() if log.exists() else [])
+
+    def test_green_deploy_prunes_app_images_after_releasing_the_deploy_lock(self, tmp_path):
+        import fcntl
+        result, lines = self._post_deploy_prune(tmp_path, deploy_rc=0)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "-n /usr/local/sbin/radon-app-runtime prune" in lines
+        assert "free" in lines and "held" not in lines
+        # The real supervisor holds an flock on FD 9 while the body runs; the
+        # prune call sits after `exec 9>&-` in the same function.
+        body = function_body(DEPLOY.read_text(encoding="utf-8"), "supervise_deploy_command")
+        assert body.rindex("exec 9>&-") < body.index("prune_app_images_after_deploy")
+        del fcntl
+
+    def test_failed_deploy_does_not_prune(self, tmp_path):
+        result, lines = self._post_deploy_prune(tmp_path, deploy_rc=3)
+        assert result.returncode == 3
+        assert not any("prune" in line for line in lines)
+
+    def test_ungranted_prune_is_skipped_without_failing_the_deploy(self, tmp_path):
+        result, lines = self._post_deploy_prune(tmp_path, deploy_rc=0, granted=False)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "-n /usr/local/sbin/radon-app-runtime prune" not in lines
+        assert "not granted" in result.stdout + result.stderr
+
+    def _green(self, tmp_path, existing: str | None, sha: str) -> str:
+        marker = tmp_path / "green"
+        if existing is not None:
+            marker.write_text(existing, encoding="utf-8")
+        shell = f"set -euo pipefail\nsource {DEPLOY}\nwrite_green_marker {sha}\n"
+        result = subprocess.run(["bash", "-c", shell], env={**os.environ, "RADON_DEPLOY_GREEN_MARKER": str(marker)},
+                                capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stdout + result.stderr
+        return marker.read_text(encoding="utf-8")
+
+    def test_green_marker_records_the_release_it_replaced(self, tmp_path):
+        a, b, c = "a" * 40, "b" * 40, "c" * 40
+        assert self._green(tmp_path, None, a) == f"{a}\n"
+        assert self._green(tmp_path, f"{a}\n", b) == f"{b}\n{a}\n"
+        assert self._green(tmp_path, f"{b}\n{a}\n", c) == f"{c}\n{b}\n"
+        # Redeploying the green SHA keeps its rollback pair.
+        assert self._green(tmp_path, f"{c}\n{b}\n", c) == f"{c}\n{b}\n"
+        assert self._green(tmp_path, "garbage\n", a) == f"{a}\n"
+
     def _prepull(self, tmp_path, *, granted: bool, pull_rc: int = 0):
         log = tmp_path / "sudo.log"
         shell = f"""

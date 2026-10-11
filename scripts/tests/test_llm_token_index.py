@@ -149,6 +149,28 @@ class TestComputeIndex:
                 input_weight=0.7,
             )
 
+    def test_basket_key_matches_slug_when_publisher_id_differs(self):
+        """AA can key a model by slug while `id` is a publisher uuid. Id-only lookup drops the basket."""
+        from llm_token_index import compute_index
+
+        payload = {
+            "status": 200,
+            "data": [
+                {
+                    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                    "slug": "gpt-4o",
+                    "pricing": {
+                        "price_1m_input_tokens": 2.5,
+                        "price_1m_output_tokens": 10.0,
+                    },
+                }
+            ],
+        }
+        result = compute_index(payload, model_ids=["gpt-4o"], input_weight=0.7)
+        assert "gpt-4o" in result.components
+        assert result.components["gpt-4o"]["input_per_mtok"] == pytest.approx(2.5)
+        assert result.raw_avg_usd == pytest.approx(0.7 * 2.5 + 0.3 * 10.0)
+
 
 # ─── Normalization: first day = 1.0, doubled raw = 2.0 ───────────────
 

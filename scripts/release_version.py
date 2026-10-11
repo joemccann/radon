@@ -6,9 +6,11 @@ running app moves one digit: a breaking marker moves major, ``feat`` moves
 minor, and any other runtime change moves patch. Docs, tests, CI, lockfiles,
 and the version fields themselves do not move it.
 
-``--check`` fails when root and web ``package.json`` disagree with that fold.
-The build stamps the committed version plus the git SHA. A stale tab notices
-the SHA, including when the digits did not move.
+PRs never edit the version. The node image build passes this fold in as
+``RADON_RELEASE_VERSION`` and CI tags ``vX.Y.Z`` after a green deploy. The
+``package.json`` fields are only a fallback when no history is available, and
+``--check`` is an optional local audit, not a CI gate. A stale tab notices the
+SHA, including when the digits did not move.
 """
 
 from __future__ import annotations
