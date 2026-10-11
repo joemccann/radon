@@ -198,11 +198,37 @@ def units(run=_run):
 
 
 _NOISE = re.compile(r"(0x[0-9a-f]+|[0-9a-f]{8,}|\d+(\.\d+)?)", re.I)
+# Credential-shaped text a warning line can carry; the snapshot is read by
+# third-party agents, so it is collapsed before a template is kept.
+_SECRETS = (
+    (re.compile(r"(://)[^/\s@]+@"), r"\1#@"),
+    (re.compile(r"\?[^\s\"']*"), "?#"),
+    (re.compile(r"\b(bearer|basic)\s+\S+", re.I), r"\1 #"),
+    (re.compile(r"\b(\w*(?:token|secret|passw(?:or)?d|api[_-]?key|auth\w*|cookie|session)\w*)([\"']?)\s*[=:]\s*"
+                r"(\"[^\"]*\"|'[^']*'|\S+)", re.I), r"\1\2=#"),
+    (re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"), "#"),
+)
+_OPAQUE = re.compile(r"[\w+/=-]{20,}")
+
+
+def _opaque(match):
+    run = match.group(0)
+    if any(c.isdigit() for c in run) and any(c.isalpha() for c in run):
+        return "#"
+    return run
+
+
+def _template(msg):
+    for pattern, repl in _SECRETS:
+        msg = pattern.sub(repl, msg)
+    msg = _OPAQUE.sub(_opaque, msg)
+    return _NOISE.sub("#", msg)[:160]
 
 
 def journal(run=_run):
     """Warning-and-worse counts per radon unit plus the most frequent
-    templates (digits and hex collapsed, 160 chars). Counts, not log lines."""
+    templates (credential-shaped text, digits and hex collapsed, 160 chars).
+    Counts, not log lines."""
     raw = run(["journalctl", "--no-pager", "-q", "-o", "json", "-p", "warning",
                "--since", JOURNAL_SINCE, "-u", "radon-*"], timeout=60)
     per_unit, templates = {}, {}
@@ -216,7 +242,7 @@ def journal(run=_run):
         if not isinstance(msg, str):
             continue
         per_unit[unit] = per_unit.get(unit, 0) + 1
-        key = (unit, _NOISE.sub("#", msg)[:160])
+        key = (unit, _template(msg))
         templates[key] = templates.get(key, 0) + 1
     top = sorted(templates.items(), key=lambda kv: -kv[1])[:JOURNAL_TOP]
     return {"since": JOURNAL_SINCE, "per_unit": per_unit,

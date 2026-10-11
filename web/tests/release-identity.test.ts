@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pickReleaseSha, resolveReleaseIdentity } from "../scripts/release-identity.mjs";
+import { pickReleaseSha, pickReleaseVersion, resolveReleaseIdentity } from "../scripts/release-identity.mjs";
 
 describe("resolveReleaseIdentity", () => {
   it("stamps a production build and leaves a dev build local", () => {
@@ -48,5 +48,31 @@ describe("resolveReleaseIdentity", () => {
       nodeEnv: "production",
       now: "2026-10-09T18:00:00Z",
     })).toMatchObject({ channel: "local", sha: "unknown", builtAt: "" });
+  });
+});
+
+describe("pickReleaseVersion", () => {
+  it("prefers the version the image build derived from history", () => {
+    expect(pickReleaseVersion({ override: "0.12.3", history: () => "0.12.1", packageVersion: "0.7.0" })).toBe("0.12.3");
+  });
+
+  it("derives from history before trusting a committed package version", () => {
+    expect(pickReleaseVersion({ override: "", history: () => "0.12.1", packageVersion: "0.7.0" })).toBe("0.12.1");
+    expect(pickReleaseVersion({ override: "not-semver", history: () => "0.12.1\n", packageVersion: "0.7.0" })).toBe("0.12.1");
+  });
+
+  it("does not run history when the override is valid", () => {
+    const history = () => {
+      throw new Error("no history in the image");
+    };
+    expect(pickReleaseVersion({ override: "1.0.0", history, packageVersion: "0.7.0" })).toBe("1.0.0");
+  });
+
+  it("falls back to the package version when history is unavailable", () => {
+    const history = () => {
+      throw new Error("no history");
+    };
+    expect(pickReleaseVersion({ override: undefined, history, packageVersion: "0.9.0" })).toBe("0.9.0");
+    expect(pickReleaseVersion({ override: "", history: () => "garbage", packageVersion: "0.9.0" })).toBe("0.9.0");
   });
 });

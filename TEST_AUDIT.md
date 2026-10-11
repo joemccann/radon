@@ -11344,3 +11344,47 @@ Uncorrected root pytest, before Homebrew OpenSSL was first on `PATH`, was 54 fai
 | 3 | 14,800 passed / 2 skipped / 23 subtests | 10,509 passed / 21 skipped / 1,066 files (1 file skipped) | 2,765 passed / 8 skipped | 0 added / 0 removed |
 
 Base cloud at `208bb3d6` with the same toolchain: 2,765 passed / 8 skipped, sorted FAILED list empty. Every closing FAILED list is empty. The comparison worktree was removed. No threshold was lowered and no test was skipped to go green. Inherited header-mobile and admin-service-controls browser acceptance stays operator-only. No local screenshot or 390px result is claimed.
+
+## Delta audit 2026-10-11
+
+Range `208bb3d687e9216db0c0f185f4b73fa4c30d4fbd..0627874b30398f0f04631846e0c86a2fbc7e9403`: 25 commits / 157 paths. Newest trusted checkpoint is the 2026-10-10 collaborator comment on issue #83 (`audited-through: 208bb3d687e9216db0c0f185f4b73fa4c30d4fbd`). No open `testing/` pull request. Numbering continues after T-545. The checkpoint carried no open verified T finding. #983 is merged.
+
+### T-546 — P1 — the recorded release is 0.12.4 while commits since 0.7.0 fold to 0.12.0
+
+`scripts/release_version.py:163` compares root and web `package.json` with the fold from `eb5e52066462`. #1008 wrote `0.12.4` in the breadth commit. The fold after that commit is `0.12.0` (`feat` resets the patch). `python3 scripts/release_version.py --check` exited 1: `release version is 0.12.4 (web 0.12.4); commits since eb5e52066462 require 0.12.0`. The same command failed the Release version job on main at `0627874b` (run 38113960848). `scripts/tests/test_release_version.py` fixture cases do not read this tree, so they stayed green. The README badge still said `0.8.2`.
+
+Acceptance: `--check` exits 0 and prints `0.12.0`. Root `package.json`, `web/package.json`, and the README version badge all read `0.12.0`. The fold rules are unchanged. A direct `check(ROOT)` case fails when the recorded version is ahead of the fold.
+
+### T-547 — P2 — slug lookup added in #995 is invisible to the token-index tests
+
+`scripts/llm_token_index.py:205` (`980f264f`) resolves a basket key with `by_slug.get(model_id) or by_id.get(model_id)`. `scripts/tests/test_llm_token_index.py` builds every AA row with `id` equal to the basket key and no `slug` (`_aa_response`, line 40). Replacing line 205 with `by_id.get(model_id)` left that file at 17 passed. A row whose `id` is a publisher uuid and whose `slug` is `gpt-4o` then raises `ValueError: None of the requested model IDs were found`. The product line is already correct. The missing test is the defect.
+
+Acceptance: `TestComputeIndex::test_basket_key_matches_slug_when_publisher_id_differs` fails when line 205 reads only `by_id`, and passes with the slug-or-id lookup restored. Product source stays unchanged.
+
+### T-548 — P2 — NOAA 120h and EIA 72h windows added in #995 have no snapshot test
+
+`scripts/ai_cycle/snapshot.py:194` (`980f264f`) keeps a NOAA row fresh for 120 hours and an EIA row fresh for 72 hours. NOAA's registry cadence is `daily` (72 hours on the old formula) and EIA's is `hourly` (48 hours). Restoring that formula left `scripts/tests/test_ai_cycle_core.py` at 47 passed, while a 100-hour NOAA day and a 60-hour EIA day flipped from `incomplete` to `stale`. P1 stays `incomplete` inside the window because it has no `validated_transform` (`snapshot.py:213`). The product formula is already correct.
+
+Acceptance: `test_noaa_and_eia_keep_the_widened_staleness_windows` fails when the hours formula drops the NOAA and EIA branches, and passes with those branches restored. A 121-hour NOAA day and an 80-hour EIA day stay `stale`. Product source stays unchanged.
+
+Audited through: 0627874b30398f0f04631846e0c86a2fbc7e9403 on 2026-10-11 — 3 new findings
+
+## Remediation 2026-10-11
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-546 | DONE | Live `check(ROOT)` raised `SystemExit` for recorded 0.12.4 versus fold 0.12.0 (1 failed). `--write` set both package files to 0.12.0 and the README badge followed. `--check` printed 0.12.0. `scripts/tests/test_release_version.py` 17 passed. Fold rules unchanged. |
+| T-547 | DONE | Id-only lookup left `scripts/tests/test_llm_token_index.py` at 17 passed. The slug case then raised `ValueError` for `gpt-4o`. Restored slug-or-id lookup: 18 passed. Product source unchanged. |
+| T-548 | DONE | The pre-#995 cadence formula left `scripts/tests/test_ai_cycle_core.py` at 47 passed and marked a 100h NOAA day stale. The new window test failed that mutation. Restored formula: 48 passed. Product source unchanged. |
+
+### Closing gates 2026-10-11
+
+Delta Python files, three runs: 670 passed each. Delta Vitest files, three runs: 13 files / 238 passed each. Closing rounds used Homebrew OpenSSL, Bash 5.3.20, caddy, and the 3.13 venv. No threshold was lowered and no test was skipped to go green. Playwright specs in the delta were not executed here. No local screenshot or 390px result is claimed.
+
+| Round | Root Python | Root Vitest | Cloud | Failed-list diff against base `208bb3d6` |
+|---|---|---|---|---|
+| 1 | 14,953 passed / 2 skipped / 23 subtests | 10,566 passed / 1,071 files | 2,794 passed / 8 skipped | 0 added / 0 removed |
+| 2 | 14,953 passed / 2 skipped / 23 subtests | 10,566 passed / 1,071 files | 2,794 passed / 8 skipped | 0 added / 0 removed |
+| 3 | 14,953 passed / 2 skipped / 23 subtests | 10,566 passed / 1,071 files | 2,794 passed / 8 skipped | 0 added / 0 removed |
+
+Base cloud at `208bb3d6` with the same toolchain: 2,765 passed / 8 skipped, sorted FAILED list empty. Every closing FAILED list is empty. The count difference is tests added on main after that SHA. The comparison worktree was removed.

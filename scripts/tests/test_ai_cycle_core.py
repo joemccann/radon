@@ -75,6 +75,46 @@ def test_store_vintages_and_unknown_publication():
     assert new["shadow"]["state"] == "insufficient_evidence"
 
 
+def test_noaa_and_eia_keep_the_widened_staleness_windows():
+    """#995 widened NOAA daily from 72h to 120h and EIA hourly from 48h to 72h.
+
+    The cadence default marks a 100h NOAA day and a 60h EIA day stale. P1
+    without a validated transform stays incomplete inside the window.
+    """
+
+    def status(source_id, as_of):
+        store = ObservationStore(":memory:")
+        eia = source_id == "eia"
+        store.append_observations(
+            [
+                {
+                    **observation(),
+                    "indicator_id": "P1",
+                    "series_id": "PJM.DOM.daily-average-load" if eia else "dom-mean-temp",
+                    "source_id": source_id,
+                    "unit": "MW" if eia else "degC",
+                    "period_start": "2026-08-01T00:00:00Z",
+                    "period_end": "2026-08-01T00:00:00Z",
+                    "fetched_at": "2026-08-01T01:00:00Z",
+                    "source_url": (
+                        "https://www.eia.gov/electricity/gridmonitor/"
+                        if eia
+                        else "https://www.ncei.noaa.gov/access/services/data/v1"
+                    ),
+                    "methodology_version": "eia-daily-hour-ending-v3" if eia else "v1",
+                    "lineage_group": source_id,
+                }
+            ]
+        )
+        snap = build_snapshot(store, as_of)
+        return next(row["status"] for row in snap["indicators"] if row["id"] == "P1")
+
+    assert status("noaa", "2026-08-05T04:00:00Z") == "incomplete"  # 100h, inside 120
+    assert status("noaa", "2026-08-06T01:00:00Z") == "stale"  # 121h
+    assert status("eia", "2026-08-03T12:00:00Z") == "incomplete"  # 60h, inside 72
+    assert status("eia", "2026-08-04T08:00:00Z") == "stale"  # 80h
+
+
 def test_batch_validation_before_writes():
     store = ObservationStore(":memory:")
     with pytest.raises(ValueError):

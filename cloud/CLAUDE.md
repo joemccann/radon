@@ -37,7 +37,7 @@ Production is three planes. Do not collapse them.
   execution; the host environment default alone does not identify the running
   plane. [The runtime owner](../docs/cloud-services.md#runtime-planes)
   and checked-in `docker/app` plus unit drop-ins own the configuration.
-  `/usr/local/sbin/radon-app-runtime` is the root wrapper (`pull` via sudoers;
+  `/usr/local/sbin/radon-app-runtime` is the root wrapper (`pull` and no-argument `prune` via sudoers;
   `run` is systemd-only and does not take the deploy lock). Do not put
   `User=radon` on `docker run`. App containers must not own Gateway, Caddy,
   health or the Docker engine socket.
@@ -635,7 +635,7 @@ Deployment, rollback, locking, bootstrap, and unit-path changes require
 adversarial regression coverage. Tests must use isolated roots and must never
 write host `/etc`, `/usr/local`, `/var/lib`, production data, or real secrets.
 
-Image pre-pull compares each cached release tag with its registry manifest digest before skipping layer downloads. App-image pruning takes the existing deploy lock nonblockingly, preserves the target and durable transition/last-green rollback SHAs plus running images, and skips cleanup when rollback evidence or the running app population is unavailable. Runtime starts still allow the exact local image during registry outages.
+Image pre-pull compares each cached release tag with its registry manifest digest before skipping layer downloads. App-image pruning takes the existing deploy lock nonblockingly, preserves the target and durable transition/last-green rollback SHAs plus running images, and skips cleanup when rollback evidence or the running app population is unavailable. `pull` always runs under the deploy lock, so its prune always skips; the real cleanup is `radon-app-runtime prune`, which `deploy.sh` calls after a green deploy once the supervisor has closed the lock fd. The green marker holds the green SHA on line 1 and the release it replaced on line 2; `prune` keeps both (or both transition-journal SHAs while one is pending), skips without line 2, and removes every other SHA tag with one `rmi` per tag. Runtime starts still allow the exact local image during registry outages.
 
 ### SPX breadth scheduled comparison
 

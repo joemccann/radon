@@ -14,6 +14,16 @@ API_SNAPSHOT_MAX_BYTES = 900_000
 _MAX_CHART_SERIES = 8
 _MAX_CHART_POINTS = 120
 _MAX_STRIP_METRICS = 8
+_RAMP_TOKEN_LEAD = (
+    "tokens.price.blended.anthropic",
+    "tokens.price.blended.openai",
+    "tokens.price.input.anthropic",
+    "tokens.price.input.openai",
+    "tokens.price.output.anthropic",
+    "tokens.price.output.openai",
+    "tokens.volume.all",
+    "tokens.spend.all",
+)
 
 
 def vintage_rank(row):
@@ -170,6 +180,9 @@ def build_snapshot(store, as_of=None):
                 return (0 if lab_tokens else 1, -metric["value"] if lab_tokens else 0, metric["id"])
             if indicator_id == "D2":
                 return (0 if metric["methodology_version"] == "openrouter-app-aggregate-v2" else 1, metric["id"])
+            if indicator_id == "D7":
+                lead = _RAMP_TOKEN_LEAD.index(metric["id"]) if metric["id"] in _RAMP_TOKEN_LEAD else len(_RAMP_TOKEN_LEAD)
+                return (lead, metric["id"])
             if indicator_id == "D6":
                 overall_score = metric["id"].startswith("overall.") and metric["id"].endswith(".avg_score")
                 return (0 if overall_score else 1, metric["id"])
