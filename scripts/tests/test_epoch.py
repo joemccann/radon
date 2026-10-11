@@ -186,7 +186,7 @@ def test_snapshot_surfaces_s1_as_experimental_research(tmp_path):
     store = ObservationStore(":memory:")
     store.append_observations(_models() + _centers())
     snapshot = build_snapshot(store, "2026-09-22T16:00:00Z")
-    assert len(snapshot["indicators"]) == 19
+    assert len(snapshot["indicators"]) == 20
     panel = next(item for item in snapshot["indicators"] if item["id"] == "S1")
     assert panel["status"] == "experimental"
     assert "not a trade signal" in panel["reason"].lower()

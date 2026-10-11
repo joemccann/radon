@@ -59,7 +59,7 @@ def test_invalid_values(value):
 
 def test_store_vintages_and_unknown_publication():
     store = ObservationStore(":memory:")
-    assert len(build_snapshot(store)["indicators"]) == 19
+    assert len(build_snapshot(store)["indicators"]) == 20
     first = observation()
     store.append_observations([first, first])
     revised = {**first, "value": 120, "fetched_at": "2026-08-05T00:00:00Z", "published_at": "2026-08-02T00:00:00Z"}
