@@ -20,6 +20,7 @@ const measures: [string, string, AiPane, string, string][] = [
   ["D4", "Independent host activity", "demand", "tokens", "lambda"],
   ["D5", "Ramp business AI spend", "demand", "USD/employee-month", "ramp"],
   ["D6", "Design-task model quality", "demand", "score", "designarena"],
+  ["D7", "Ramp token economics", "demand", "USD/Mtok", "ramp"],
   ["C1", "Matched GPU asking prices", "compute", "USD/GPU-hour", "vast"],
   ["C2", "Rentable GPU supply", "compute", "GPUs", "runpod"],
   ["C3", "Model inference prices", "compute", "USD/million tokens", "openrouter"],
@@ -85,7 +86,7 @@ test.describe("AI Industry value chain", () => {
   test("four stages, separate capability and 17 measurement explanations without empty M1", async ({ page }) => {
     await ready(page);
     await expect(page.getByRole("heading", { name: "AI Industry", exact: true })).toBeVisible();
-    await expect(page.getByText("17 measures", { exact: true })).toBeVisible();
+    await expect(page.getByText("18 measures", { exact: true })).toBeVisible();
     await expect(page.getByText("14 sources", { exact: true })).toBeVisible();
     await expect(page.getByText("What is already priced in?", { exact: true })).toHaveCount(0);
     await expect(page.getByTestId("ai-coverage-ib")).toHaveCount(0);

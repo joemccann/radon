@@ -40,6 +40,19 @@ describe("AI infrastructure evidence", () => {
     expect(thirdVenue.textContent).toContain("opaque until licensed");
     expect(thirdVenue.querySelector('[data-testid="ai-source-liquidcompute"]')?.textContent).toContain("Liquid Compute GPU index");
   });
+  it("shows Ramp token economics in the Adoption stage with its price unit", () => {
+    const spend = aiFixture.indicators.find(item => item.id === "D5")!;
+    const price = { ...spend.metrics[0], id: "tokens.price.blended.anthropic", label: "Blended token price, Anthropic", value: 0.82, unit: "USD/Mtok" };
+    const token = { ...spend, id: "D7", title: "Ramp token economics", metrics: [price], history: spend.history.map(point => ({ ...point, series_id: price.id, label: price.label, unit: "USD/Mtok", value: 0.8 })) };
+    render(<AiInfrastructureView data={{ ...aiFixture, indicators: [...aiFixture.indicators, token] }} error={null} loading={false} refresh={() => {}} />);
+    const guide = screen.getByTestId("ai-indicator-D7");
+    expect(guide.textContent).toContain("AI token prices & volume");
+    expect(guide.querySelector('[data-testid="ai-source-ramp"]')?.textContent).toContain("Ramp AI Index");
+    fireEvent.change(screen.getByLabelText("Measure"), { target: { value: "D7" } });
+    const card = screen.getAllByTestId("ai-observation-card").find(item => item.textContent?.includes("Blended token price, Anthropic"));
+    expect(card?.textContent).toContain("0.82");
+    expect(card?.textContent).toContain("USD/Mtok");
+  });
   it("keeps a page-level coverage board for every snapshot source on every pane", () => {
     render(<AiInfrastructureView data={aiFixture} error={null} loading={false} refresh={() => {}} />);
     const board = screen.getByTestId("ai-source-coverage");
