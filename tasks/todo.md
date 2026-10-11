@@ -9278,3 +9278,16 @@ Live collector review:2026-10-11T04:47:31Z read-only collect succeeded,5028 unio
 CI repair review: exact headbd82f2e5 reproduced missing indicator-index/operations/provisioningowner updates, bareAPI getDb().execute bypass, and atomiccache checksumfixture mismatch. Register docs, usebounded dbExecute and verifyactualatomicchecksum. Pending exact-headrerun; no local suites.
 
 Visual verification review: runtime headc5b9a0da passed all3newPlaywrightcases; artifactinspection identifiedmobileaxisclipping. ScopedaxisFormat nowcompactinteger ticks withfulltooltipprecision; addedfont-ready390px/desktop tickbounds regressions and3desktop pane screenshots. Browserfixture current counts/derivedreading nowconsistent. No local suites.
+
+## Desktop credentials and preferences UX (2026-10-10)
+
+Dependency graph: T1 -> T2 + T3 -> T4 -> T5.
+- [x] T1 depends_on: [] Inspect screenshot, scoped Clear rules and settings components; isolate latest main in /tmp/radon-credentials-ux.
+- [x] T2 depends_on: [T1] Rebuild preference rows with label/description together, aligned value/actions, discoverable metadata; polish credential service fields and status without changing persistence or risk gates.
+- [x] T3 depends_on: [T1] Add desktop/tablet/mobile Playwright geometry regressions and screenshot artifacts; inspect CI browser coverage.
+- [ ] T4 depends_on: [T2, T3] Static review and rendered browser verification; document every better-ui change in Before/After review.
+- [ ] T5 depends_on: [T4] Create PR, verify every applicable exact-head GitHub CI check, deliver accepted Pushover notification.
+
+Plan review: keep Clear light/dark tokens, masked secrets, server validation, per-row save/reset and widening confirmation. No local test suites; GitHub runners own test execution. Desktop two-column rows collapse before either column becomes cramped.
+
+Review: independent static review approved layout, inherited-grid isolation, label associations, toast portals and reduced-motion behavior. Detailed better-ui Before/After tables: docs/reviews/2026-10-10-settings-ui.md. Regression-only PR #1007 head 67799898 verifies baseline failure before repair. Six Playwright cases cover light/dark at 1440, 834 and 390px, including masked credentials and synthetic save requests. CI screenshot inspection and repaired exact-head checks pending.

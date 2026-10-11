@@ -829,6 +829,7 @@ jobs:
           e2e/vol-skew-mr-scanner.spec.ts
           e2e/ai-industry.spec.ts
           e2e/clear-shell.spec.ts
+          e2e/profile-settings-layout.spec.ts
           e2e/clear-admin-component.spec.ts
           e2e/admin-action-queue.spec.ts
           e2e/chat-experience.spec.ts
@@ -959,6 +960,13 @@ jobs:
         with:
           name: admin-freshness-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/*-admin-component.png
+          retention-days: 7
+      - name: Upload profile settings screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: profile-settings-screenshots-shard-${{ matrix.shard }}
+          path: web/test-results/**/profile-settings-*.png
           retention-days: 7
       - name: Upload traces on failure
         if: failure()
