@@ -776,6 +776,10 @@ heartbeats. Heartbeat `calm-streak`. Installed by the deploy's
 `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/calm-streak.md`](indicators/calm-streak.md).
 
+### SPX breadth (`radon-record-high-breadth.timer`)
+
+Post-close TradingView comparison on the app host. Cadence and the OAuth store are the [operations timer row](operations.md). Formula and source gaps are [source parity](indicators/record-high-breadth-source-parity.md). This unit does not install account credentials.
+
 ### BOUNCE SETUP (`radon-bounce-setup.timer`)
 
 `Mon..Fri 21:10 UTC` (`RandomizedDelaySec=120`, `Persistent=true`), oneshot
@@ -1107,6 +1111,8 @@ RADON_ARCHIVE_S3_PREFIX=portfolio_snapshots/
 ```
 
 Smoke: `python3 scripts/archive_portfolio_snapshots.py --dry-run` must print `"s3_configured": true` when env is loaded.
+
+Research evidence in this bucket is a separate job. Its prefix and the meaning of an ok heartbeat are in [Research evidence archive](operations.md#research-evidence-archive).
 
 Export streams keyset pages into monthly partitions (bounded `batch_size` in-flight
 payloads — never materializes the full fat table). Crash-safe order is always

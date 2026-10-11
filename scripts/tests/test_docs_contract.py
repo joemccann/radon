@@ -1921,3 +1921,92 @@ class TestVcgSpecIndexLinks:
             text = (_ROOT / rel).read_text()
             assert encoded in text, rel
             assert raw not in text, rel
+
+
+def _markdown_heading(path: str, heading: str) -> str:
+    text = (_ROOT / path).read_text()
+    marker = f"### {heading}"
+    start = text.find(marker)
+    assert start != -1, f"{path} is missing ### {heading}"
+    rest = text[start:]
+    stops = [pos for pos in (
+        rest.find("\n### ", len(marker)),
+        rest.find("\n## ", len(marker)),
+    ) if pos != -1]
+    return rest if not stops else rest[:min(stops)]
+
+
+class TestDocumentation20261011:
+    """DOC-184..187: contracts that drifted after audited-through 208bb3d6."""
+
+    def test_perf_probe_pins_the_same_host_the_loop_dials(self):
+        env = (_ROOT / "scripts/runner/loops/performance.env").read_text()
+        target = next(
+            line.split("=", 1)[1].strip()
+            for line in env.splitlines()
+            if line.startswith("PERF_SSH_TARGET=")
+        )
+        host = target.split("@", 1)[1]
+        assert host and "@" not in host
+        hook = (_ROOT / "scripts/runner/hooks/performance_pre.sh").read_text()
+        assert 'StrictHostKeyChecking=yes' in hook
+        assert "PERF_SSH_TARGET" in hook
+        section = _markdown_heading("docs/runner.md", "8c. Performance loop production probe (operator, bot shell, VPS)")
+        assert "ssh-keyscan -t ed25519 radon-app" not in section
+        assert "radon@radon-app" not in section
+        assert 'ssh-keyscan -t ed25519 "$host"' in section
+        assert '"$target"' in section
+        assert "StrictHostKeyChecking=yes" in section
+        assert target in section
+        for boundary in ("Symptom", "Prerequisites", "Blast radius", "Safe diagnosis",
+                         "Stop conditions", "Verification", "Rollback", "Escalation"):
+            assert f"**{boundary}:**" in section
+
+    def test_research_archive_ok_heartbeat_can_leave_directories(self):
+        src = (_ROOT / "scripts/research/archive.py").read_text()
+        match = re.search(r"DEFAULT_DEADLINE_SECS = (\d+) \* 3600", src)
+        assert match, "archive deadline constant moved"
+        hours = int(match.group(1))
+        assert "RADON_ARCHIVE_S3_PREFIX" in src and "never" in src
+        unit = (_ROOT / "cloud/services/radon-research-archive.service").read_text()
+        timeout = int(next(
+            line.split("=", 1)[1]
+            for line in unit.splitlines()
+            if line.startswith("TimeoutStartSec=")
+        ))
+        assert hours * 3600 <= timeout - 1800
+        section = _markdown_heading("docs/operations.md", "Research evidence archive")
+        assert f"{hours} hours" in section
+        assert f"{timeout // 3600}-hour unit timeout" in section
+        assert "skipped.deadline" in section
+        assert "skipped.budget" in section
+        assert "does not use `RADON_ARCHIVE_S3_PREFIX`" in section
+        assert "ok heartbeat does not mean the backlog is empty" in section
+        for boundary in ("Symptom", "Prerequisites", "Blast radius", "Safe diagnosis",
+                         "Stop conditions", "Verification", "Rollback", "Escalation"):
+            assert f"**{boundary}:**" in section
+
+    def test_mcp_client_defers_shipped_breadth_to_its_owner(self):
+        scan = (_ROOT / "scripts/record_high_breadth_scan.py").read_text()
+        for symbol in ("SP:SPX", "INDEX:S5TH", "INDEX:MAHP", "INDEX:MALP"):
+            assert symbol in scan
+        timer = (_ROOT / "cloud/services/radon-record-high-breadth.timer").read_text()
+        assert "OnCalendar=" in timer
+        text = (_ROOT / "docs/tradingview-mcp-client.md").read_text()
+        assert "after these source gates pass" not in text
+        assert "2001 or 2005" not in text
+        assert "still needs validated paired NYSE" not in text
+        assert "before choosing a series" not in text
+        assert "Live mapping verification, 2026-10-10" not in text
+        assert "indicators/record-high-breadth-source-parity.md" in text
+        assert "SP:SPX" in text and "INDEX:S5TH" in text
+
+    def test_breadth_validation_does_not_forbid_the_suite(self):
+        text = (_ROOT / "docs/indicators/record-high-breadth-validation.md").read_text()
+        assert "No local test suites are permitted" not in text
+        assert "scripts/tests/test_record_high_breadth.py" in text
+        assert (_ROOT / "scripts/tests/test_record_high_breadth.py").is_file()
+        cloud = (_ROOT / "docs/cloud-services.md").read_text()
+        assert "radon-record-high-breadth.timer" in cloud
+        assert "operations.md" in cloud
+        assert "research-evidence-archive" in cloud

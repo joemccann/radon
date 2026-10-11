@@ -329,15 +329,22 @@ Steps 6 to 8 write into the bot's home only as the bot: your account reads your 
 
 ### 8c. Performance loop production probe (operator, bot shell, VPS)
 
-The `performance` loop reads production through one forced-command ssh key: the VPS runs `cloud/scripts/perf_probe.py` (read-only, stdlib, as `radon`, never root) for that key and nothing else, whatever the client sends. The pre-run hook (`scripts/runner/hooks/performance_pre.sh`) pulls the snapshot into `state/performance/prod-probe.json`; the agent never connects. Without this step the loop still runs, and its probe file records why the snapshot is missing.
+The `performance` loop reads production through one forced-command ssh key: the VPS runs `cloud/scripts/perf_probe.py` (read-only, stdlib, as `radon`, never root) for that key and nothing else, whatever the client sends. The pre-run hook (`scripts/runner/hooks/performance_pre.sh`) pulls the snapshot into `state/performance/prod-probe.json` with `StrictHostKeyChecking=yes` against the bot's pinned known_hosts file. The agent never connects. Without this step the loop still runs, and its probe file records why the snapshot is missing.
 
-1. Bot shell: mint the key and pin the host key (no trust on first use):
+The checked-in target is `radon@5.78.148.38` (`PERF_SSH_TARGET` in `scripts/runner/loops/performance.env`). The bot has no ssh config, so this value is an address, not a Host alias. `ssh-keyscan` and the verification ssh must use that same address. A known_hosts line recorded under another name does not match it, so a check against the other name can succeed while the nightly probe fails.
+
+1. Bot shell: read the installed target, mint the key, and pin that host key (no trust on first use):
 
    ```bash
+   target=$(sed -n 's/^PERF_SSH_TARGET=//p' /usr/local/radon-runner/loops/performance.env | tail -n 1 | tr -d "\"'")
+   host=${target#*@}
    ssh-keygen -t ed25519 -N '' -C radon-perf-probe -f ~/.ssh/radon_perf_probe
-   ssh-keyscan -t ed25519 radon-app > ~/.ssh/radon_perf_known_hosts   # then compare against: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the VPS
+   ssh-keyscan -t ed25519 "$host" > ~/.ssh/radon_perf_known_hosts
+   ssh-keygen -lf ~/.ssh/radon_perf_known_hosts
    chmod 600 ~/.ssh/radon_perf_probe ~/.ssh/radon_perf_known_hosts
    ```
+
+   Compare that fingerprint with `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the VPS before appending a key.
 
 2. VPS, as `radon`: append one line to `~/.ssh/authorized_keys` (the `restrict` option disables pty, agent, X11 and port forwarding):
 
@@ -345,10 +352,28 @@ The `performance` loop reads production through one forced-command ssh key: the 
    restrict,command="/usr/bin/python3 -I /home/radon/radon/cloud/scripts/perf_probe.py" ssh-ed25519 AAAA... radon-perf-probe
    ```
 
-3. `PERF_SSH_TARGET` in `scripts/runner/loops/performance.env` must name that host as Tailscale resolves it from the Mac (default `radon@5.78.148.38`; the bot has no ssh config, so use an address, not an alias). Re-run `install.sh performance` after changing it.
-4. Verify from the bot shell: `ssh -i ~/.ssh/radon_perf_probe -o IdentitiesOnly=yes -o UserKnownHostsFile=~/.ssh/radon_perf_known_hosts radon@radon-app anything | python3 -m json.tool | head` prints the probe JSON, and `... radon@radon-app -t bash` still prints only JSON (no shell).
+3. Changing `PERF_SSH_TARGET` requires a new `ssh-keyscan` of the new address and `install.sh performance`.
+4. Verify from the bot shell, using the same `$target` as step 1:
 
-Revoke by deleting the `authorized_keys` line.
+   ```bash
+   ssh -i ~/.ssh/radon_perf_probe -o IdentitiesOnly=yes -o BatchMode=yes \
+     -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/radon_perf_known_hosts \
+     -T "$target" probe | python3 -m json.tool | head
+   ssh -i ~/.ssh/radon_perf_probe -o IdentitiesOnly=yes -o BatchMode=yes \
+     -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/radon_perf_known_hosts \
+     "$target" -t bash | head
+   ```
+
+   The first command prints the probe JSON. The second still prints only JSON.
+
+- **Symptom:** `state/performance/prod-probe.json` records an ssh failure, or a name-based ssh succeeds while the loop target is an address.
+- **Prerequisites:** bot shell, the installed `PERF_SSH_TARGET`, and a fingerprint that matches the VPS host key.
+- **Blast radius:** the forced command runs `perf_probe.py` only. It does not open a shell.
+- **Safe diagnosis:** compare `ssh-keygen -lf` on the pinned file with the VPS host key. Do not turn off strict host-key checking.
+- **Stop conditions:** the fingerprints differ, or the known_hosts line is not for the address in `PERF_SSH_TARGET`. Do not append `authorized_keys`.
+- **Verification:** ssh to that exact `$target` prints JSON, and requesting a shell still prints only JSON.
+- **Rollback:** delete the `authorized_keys` line.
+- **Escalation:** leave the loop running. It records a missing snapshot and does not open its own connection.
 
 ### 9. Smoke test (bot shell)
 
