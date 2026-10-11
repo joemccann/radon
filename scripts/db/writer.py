@@ -3468,3 +3468,31 @@ def upsert_twr_subperiod_rows(rows: list[dict[str, Any]]) -> None:
 
 def _as_float(value: Any) -> Optional[float]:
     return float(value) if value is not None else None
+
+
+def upsert_record_high_breadth_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """Bounded idempotent source observations; NULL preserves missing sessions."""
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        params = []
+        for row in chunk:
+            params.extend((row["date"], row.get("spx_close"), row.get("above_200_pct"),
+                           row.get("new_highs"), row.get("new_lows"),
+                           row.get("net_high_low_per_500"),
+                           json.dumps(row.get("source_timestamps", {})), stamp))
+        placeholders = ", ".join("(?, ?, ?, ?, ?, ?, ?, ?)" for _ in chunk)
+        db.execute(
+            "INSERT INTO record_high_breadth_history "
+            "(date, spx_close, above_200_pct, new_highs, new_lows, net_high_low_per_500, source_timestamps, recorded_at) "
+            f"VALUES {placeholders} ON CONFLICT(date) DO UPDATE SET "
+            "spx_close=excluded.spx_close, above_200_pct=excluded.above_200_pct, "
+            "new_highs=excluded.new_highs, new_lows=excluded.new_lows, "
+            "net_high_low_per_500=excluded.net_high_low_per_500, "
+            "source_timestamps=excluded.source_timestamps, recorded_at=excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
