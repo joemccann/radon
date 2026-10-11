@@ -85,6 +85,11 @@ def _repo(tmp_path: Path) -> tuple[Path, str]:
     return repo, _git(repo, "rev-parse", "HEAD")
 
 
+def test_recorded_packages_match_commits_since_the_pin() -> None:
+    """The release-version job reads this tree. A hand bump past the fold stays green in the fixture tests."""
+    assert rv.check(rv.ROOT) == rv.expected_version(rv.ROOT)
+
+
 def test_check_fails_until_the_package_version_matches_the_fold(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo, base = _repo(tmp_path)
     monkeypatch.setenv("RADON_RELEASE_BASE_SHA", base)

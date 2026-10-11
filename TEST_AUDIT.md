@@ -11344,3 +11344,15 @@ Uncorrected root pytest, before Homebrew OpenSSL was first on `PATH`, was 54 fai
 | 3 | 14,800 passed / 2 skipped / 23 subtests | 10,509 passed / 21 skipped / 1,066 files (1 file skipped) | 2,765 passed / 8 skipped | 0 added / 0 removed |
 
 Base cloud at `208bb3d6` with the same toolchain: 2,765 passed / 8 skipped, sorted FAILED list empty. Every closing FAILED list is empty. The comparison worktree was removed. No threshold was lowered and no test was skipped to go green. Inherited header-mobile and admin-service-controls browser acceptance stays operator-only. No local screenshot or 390px result is claimed.
+
+## Delta audit 2026-10-11
+
+Range `208bb3d687e9216db0c0f185f4b73fa4c30d4fbd..0627874b30398f0f04631846e0c86a2fbc7e9403`: 25 commits / 157 paths. Newest trusted checkpoint is the 2026-10-10 collaborator comment on issue #83 (`audited-through: 208bb3d687e9216db0c0f185f4b73fa4c30d4fbd`). No open `testing/` pull request. Numbering continues after T-545. The checkpoint carried no open verified T finding. #983 is merged.
+
+### T-546 — P1 — the recorded release is 0.12.4 while commits since 0.7.0 fold to 0.12.0
+
+`scripts/release_version.py:163` compares root and web `package.json` with the fold from `eb5e52066462`. #1008 wrote `0.12.4` in the breadth commit. The fold after that commit is `0.12.0` (`feat` resets the patch). `python3 scripts/release_version.py --check` exited 1: `release version is 0.12.4 (web 0.12.4); commits since eb5e52066462 require 0.12.0`. The same command failed the Release version job on main at `0627874b` (run 38113960848). `scripts/tests/test_release_version.py` fixture cases do not read this tree, so they stayed green. The README badge still said `0.8.2`.
+
+Acceptance: `--check` exits 0 and prints `0.12.0`. Root `package.json`, `web/package.json`, and the README version badge all read `0.12.0`. The fold rules are unchanged. A direct `check(ROOT)` case fails when the recorded version is ahead of the fold.
+
+Audited through: 0627874b30398f0f04631846e0c86a2fbc7e9403 on 2026-10-11 — 1 new finding
