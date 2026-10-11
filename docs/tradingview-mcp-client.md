@@ -85,13 +85,14 @@ Yahoo. The client is not in automatic price failover.
 
 ## Record-high breadth dependency
 
-The requested indicator still needs validated paired NYSE high/low universes,
-source finalization, legal storage/display scope and historical continuity.
-TradingView exports presently reach 2001 or 2005 for candidate breadth pairs;
-they do not establish 1999/1929 events or match the supplied chart counts.
-The MCP client makes direct probes possible without treating missing history as
-valid negative signal days. Indicator UI/timers/storage follow the indicator
-skills after these source gates pass.
+The shipped collector reads `SP:SPX`, `INDEX:S5TH`, `INDEX:MAHP` and
+`INDEX:MALP` through this client. Source parity, coverage windows and the
+display contract live in
+[record-high breadth source parity](indicators/record-high-breadth-source-parity.md).
+The timer and the production token file live in [operations](operations.md).
+NYSE `INDEX:MAHN` and `INDEX:MALN` are a different universe and do not fill
+those panels. This client stays out of generic price failover. Missing history
+stays an error, not a zero.
 
 ## Primary reference
 
@@ -112,8 +113,8 @@ python3.13 scripts/tradingview_mcp.py ohlcv INDEX:MAHN --count 5000
 python3.13 scripts/tradingview_mcp.py call get_economic_symbols --arguments '{"country":"US","search":"inflation"}'
 ```
 
-These are private research reads. Exact breadth candidates must be resolved and
-compared as pairs before choosing a series. The CLI does not store research data
+These are private research reads. The shipped breadth series is the one named
+above. The CLI does not store research data
 automatically. For production, configure `TRADINGVIEW_MCP_TOKEN_FILE` outside the
 checkout, keep its directory private and its file owned by the service user with
 mode 0600; transfer through the operator's secure credential deployment channel.
@@ -133,13 +134,3 @@ Private API examples:
 They retain Radon's JWT perimeter and return `Cache-Control: private, no-store`.
 Source-specific responses include permission/licensing metadata as provided;
 availability through MCP does not authorize public redistribution.
-
-## Live mapping verification, 2026-10-10
-
-Authenticated discovery returns official `mcp-tv-search-symbols` and
-`mcp-tv-get-ohlcv`. Exact mappings expose both through canonical research names.
-Live high/low searches returned `INDEX:MAHN` (52-Week Highs NYSE) and
-`INDEX:MALN` (52-Week Lows NYSE). Both daily probes returned 5000 validated bars with original timestamps and
-`history_complete=false`. The source timestamps span MAHN 2006-10-25 through
-2026-10-09 and MALN 2006-08-28 through 2026-10-09 (UTC dates). This confirms
-client access, not universe/count parity or complete indicator history.
