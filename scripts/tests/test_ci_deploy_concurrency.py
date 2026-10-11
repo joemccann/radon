@@ -40,7 +40,6 @@ TEST_JOBS = (
     "py-coverage",
     "cloud-tests",
     "perimeter-smoke",
-    "release-version",
 )
 
 
@@ -636,12 +635,35 @@ def test_deploy_accepts_skipped_test_jobs() -> None:
         "py-tests",
         "cloud-tests",
         "perimeter-smoke",
-        "release-version",
         "web-coverage",
         "py-coverage",
     ):
         assert f"needs.{job}.result == 'skipped'" in deploy_if
     assert "needs.changes.result == 'success'" in deploy_if
+
+
+def test_pull_requests_never_carry_the_release_version() -> None:
+    # A committed version every PR had to match forced each PR to rewrite the
+    # same package.json line, so every merge conflicted the open queue. The
+    # version is derived from history at image build and tagged after deploy.
+    jobs = _workflow()["jobs"]
+    assert "release-version" not in jobs
+    assert "release_version.py --check" not in WORKFLOW.read_text(encoding="utf-8")
+    for name, job in jobs.items():
+        needs = job.get("needs", [])
+        assert "release-version" not in (needs if isinstance(needs, list) else [needs]), name
+
+
+def test_release_tag_follows_a_green_deploy_on_main() -> None:
+    job = _workflow()["jobs"]["release-tag"]
+    assert job["needs"] == ["deploy"] or job["needs"] == "deploy"
+    assert "needs.deploy.result == 'success'" in job["if"]
+    assert "refs/heads/main" in job["if"]
+    assert job["permissions"] == {"contents": "write"}
+    assert job["concurrency"]["cancel-in-progress"] == "false"
+    steps = job["steps"]
+    assert any(str(step.get("with", {}).get("fetch-depth")) == "0" for step in steps)
+    assert any("python3 scripts/release_version.py" in step.get("run", "") for step in steps)
 
 
 def test_cloud_infra_shards_partition_cloud_tests() -> None:
