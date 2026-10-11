@@ -174,6 +174,15 @@ _ROWS = [
         "Monthly median, top-10% and top-1% AI spend per employee from Ramp card and bill-pay transactions. Paid usage only; free tools excluded. Top-1% cohort is volatile.",
     ),
     (
+        "D7",
+        "Ramp token economics",
+        "demand",
+        "P0",
+        ["ramp"],
+        [],
+        "Observed Anthropic and OpenAI token price per million tokens (blended, uncached input, output) as trailing seven-day cost over count, plus weekly token volume and spend summed by model maker. Ramp business panel; free tools excluded. Price is observed spend, never a list price.",
+    ),
+    (
         "D6",
         "OpenDesign Arena model quality",
         "demand",

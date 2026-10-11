@@ -651,6 +651,17 @@ def _month_bounds(day):
     return start.isoformat(), end.isoformat()
 
 
+def _ramp_embedded_table(content, key):
+    match = re.search('"' + key + r'"\s*:\s*', content)
+    if not match:
+        return None
+    try:
+        table, _ = json.JSONDecoder().raw_decode(content[match.end():])
+    except ValueError as exc:
+        raise SourceError("Ramp public table is invalid") from exc
+    return table
+
+
 def parse_ramp_html(html, digest, fetched):
     """Read the publisher's embedded public tables; never execute page scripts."""
     chunks = []
@@ -664,13 +675,9 @@ def parse_ramp_html(html, digest, fetched):
     content = "".join(chunks)
     tables = {}
     for key in ("adoptionOverall", "spendPerEmployee"):
-        match = re.search('"' + key + r'"\s*:\s*', content)
-        if not match:
+        tables[key] = _ramp_embedded_table(content, key)
+        if tables[key] is None:
             raise SourceError("Ramp public table schema changed")
-        try:
-            tables[key], _ = json.JSONDecoder().raw_decode(content[match.end():])
-        except ValueError as exc:
-            raise SourceError("Ramp public table is invalid") from exc
         if not isinstance(tables[key], list) or not tables[key]:
             raise SourceError("Ramp public table is empty")
         if any(_month_bounds(row["date_month"])[1] >= fetched[:10] for row in tables[key]):
@@ -679,10 +686,12 @@ def parse_ramp_html(html, digest, fetched):
         if any(row.get(field) in (None, "", "$undefined") for field in
                ("median_pepm", "top_10_percent_median_pepm", "top_1_percent_median_pepm")):
             raise SourceError("Ramp public spend table is incomplete")
+    token_prices, token_volumes = _ramp_recent_token_tables(content, fetched)
     return parse_ramp_curated(dict(
         source_url=URLS["ramp"], methodology_version="ramp-spend-intensity-v2-jun2026",
         cohort_version="ramp-us-business-panel-70k-v2", published_at=None,
         adoption_overall=tables["adoptionOverall"], spend_per_employee=tables["spendPerEmployee"],
+        token_prices=token_prices, token_volumes=token_volumes,
         methodology_notes=["Live publisher tables; historical values may be revised. Publication time not disclosed."],
     ), digest, fetched)
 
@@ -791,9 +800,148 @@ def parse_ramp_curated(payload, digest, fetched):
                 },
             )
         )
+    result += ramp_token_observations(payload, source_url, digest, fetched, published)
     if not result:
         raise SourceError("Ramp curated import produced no observations")
     return result
+
+
+RAMP_TOKEN_METHODOLOGY = "ramp-token-economics-v1"
+RAMP_TOKEN_COHORT = "ramp-us-business-panel-token-v1"
+RAMP_PRICE_KINDS = {"all_tokens": "blended", "uncached_input": "input", "output": "output"}
+RAMP_VOLUME_METRICS = {
+    "token_volume": ("volume", "tokens/week", "Weekly token volume"),
+    "token_spend": ("spend", "USD/week", "Weekly token spend"),
+}
+RAMP_MAKER_NAMES = {"openai": "OpenAI", "xai": "xAI"}
+RAMP_PRICE_WINDOW_DAYS = 7
+RAMP_LIVE_PRICE_DAYS = 14
+RAMP_LIVE_VOLUME_DAYS = 28
+TOKENS_PER_MTOK = 1_000_000
+
+
+def _ramp_maker_name(maker):
+    return RAMP_MAKER_NAMES.get(maker, maker.title())
+
+
+def _ramp_token_row(series_id, value, unit, start, end, label, context, **metadata):
+    source_url, digest, fetched, published = context
+    return observation(
+        "ramp",
+        "D7",
+        series_id,
+        value,
+        unit,
+        start,
+        end,
+        digest,
+        fetched,
+        published=published,
+        url=source_url,
+        cohort=RAMP_TOKEN_COHORT,
+        methodology_version=RAMP_TOKEN_METHODOLOGY,
+        metadata={
+            "label": label,
+            "license": "Public published research; attribution to Ramp Economics Lab",
+            "measurement_limits": ["Ramp business card and bill-pay panel; free tools and personal accounts excluded"],
+            **metadata,
+        },
+    )
+
+
+def _ramp_price_observations(rows, context):
+    fetched_day = context[2][:10]
+    result, seen = [], set()
+    for row in rows:
+        kind = RAMP_PRICE_KINDS.get(row.get("token_type"))
+        if kind is None:
+            raise SourceError("Ramp token type is not recognised")
+        maker, day = row.get("model_maker"), row.get("usage_date")
+        if not isinstance(maker, str) or not isinstance(day, str):
+            raise SourceError("Ramp token price maker and date are required")
+        if (kind, maker, day) in seen:
+            raise SourceError("Duplicate Ramp token price observation")
+        seen.add((kind, maker, day))
+        if day >= fetched_day:
+            continue
+        count, cost = number(row["token_count_7d"]), number(row["token_cost_usd_7d"])
+        if count <= 0 or cost < 0:
+            raise SourceError("Ramp token count must be positive and cost nonnegative")
+        start = (date.fromisoformat(day) - timedelta(days=RAMP_PRICE_WINDOW_DAYS - 1)).isoformat()
+        result.append(
+            _ramp_token_row(
+                f"tokens.price.{kind}.{maker}",
+                cost / count * TOKENS_PER_MTOK,
+                "USD/Mtok",
+                start,
+                day,
+                f"{kind.title()} token price, {_ramp_maker_name(maker)}",
+                context,
+                definition="Trailing seven-day token cost divided by token count, per million tokens",
+                entity=maker,
+                token_type=row["token_type"],
+                cost_usd_7d=cost,
+                token_count_7d=count,
+            )
+        )
+    return result
+
+
+def _ramp_volume_observations(rows, context):
+    fetched_day = context[2][:10]
+    totals, seen = {}, set()
+    for row in rows:
+        metric = RAMP_VOLUME_METRICS.get(row.get("metric_key"))
+        if metric is None or row.get("period_grain") != "weekly" or row.get("dimension_type") != "model":
+            continue
+        key = (row["metric_key"], row["series_key"], row["period_start"])
+        if key in seen:
+            raise SourceError("Duplicate Ramp token volume observation")
+        seen.add(key)
+        if row["period_end"] >= fetched_day:
+            continue
+        window = (row["period_start"], row["period_end"])
+        for maker in (row["model_maker"], "all"):
+            total_key = (row["metric_key"], maker, window)
+            totals[total_key] = totals.get(total_key, 0) + number(row["metric_value"])
+    result = []
+    for (metric_key, maker, (start, end)), value in sorted(totals.items()):
+        kind, unit, title = RAMP_VOLUME_METRICS[metric_key]
+        scope = "all makers" if maker == "all" else _ramp_maker_name(maker)
+        result.append(
+            _ramp_token_row(
+                f"tokens.{kind}.{maker}",
+                value,
+                unit,
+                start,
+                end,
+                f"{title}, {scope}",
+                context,
+                definition="Sum of per-model weekly values; do not divide spend by volume, use tokens.price.*",
+                entity=maker,
+            )
+        )
+    return result
+
+
+def ramp_token_observations(payload, source_url, digest, fetched, published):
+    context = (source_url, digest, fetched, published)
+    return _ramp_price_observations(payload.get("token_prices") or [], context) + _ramp_volume_observations(
+        payload.get("token_volumes") or [], context
+    )
+
+
+def _ramp_recent_token_tables(content, fetched):
+    """Live pages replay full history on every fetch; keep only the revisable recent tail."""
+    today = date.fromisoformat(fetched[:10])
+    price_floor = (today - timedelta(days=RAMP_LIVE_PRICE_DAYS)).isoformat()
+    volume_floor = (today - timedelta(days=RAMP_LIVE_VOLUME_DAYS)).isoformat()
+    prices = _ramp_embedded_table(content, "tokenPrices") or []
+    volumes = _ramp_embedded_table(content, "tokenVolumes") or []
+    return (
+        [row for row in prices if row["usage_date"] >= price_floor],
+        [row for row in volumes if row["period_end"] >= volume_floor],
+    )
 
 
 OPENDESI_UA = "RadonAICycle/1.0 (open-design-arena collector; +https://github.com/joemccann/radon)"
