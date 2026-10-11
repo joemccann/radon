@@ -328,7 +328,7 @@ supervise_deploy_command bash -c 'printf deployed > {tmp_path / "deployed"}'
         assert (tmp_path / "recovered").exists()
         assert (tmp_path / "deployed").exists()
 
-    def _post_deploy_prune(self, tmp_path, *, deploy_rc: int, granted: bool = True):
+    def _post_deploy_prune(self, tmp_path, *, deploy_rc: int, granted: bool = True, stage: str = "0"):
         log = tmp_path / "sudo.log"
         lock = tmp_path / "deploy.lock"
         probe = (
@@ -355,6 +355,7 @@ supervise_deploy_command bash -c 'exit {deploy_rc}'
             ["bash", "-c", shell],
             env={**os.environ, "RADON_DEPLOY_LOCK_FILE": str(lock),
                  "RADON_DEPLOY_TRANSITION_JOURNAL": str(tmp_path / "none.json"),
+                 "RADON_DEPLOY_STAGE": stage,
                  "DEPLOY_TIMEOUT": "30", "DEPLOY_KILL_AFTER": "5"},
             capture_output=True, text=True, timeout=30,
         )
@@ -375,6 +376,17 @@ supervise_deploy_command bash -c 'exit {deploy_rc}'
     def test_failed_deploy_does_not_prune(self, tmp_path):
         result, lines = self._post_deploy_prune(tmp_path, deploy_rc=3)
         assert result.returncode == 3
+        assert not any("prune" in line for line in lines)
+
+    def test_green_prestage_does_not_prune(self, tmp_path):
+        """2026-10-11, CI runs for 964a58a1 and 4262b4c8: prestage and the
+        unlocked prepull job run in parallel. Prestage exited 0, its supervisor
+        pruned every SHA tag outside the green marker, and that removed the
+        target pair prepull had just pulled ("exact release image pair is
+        incomplete after pull"). Only a deploy moves the green marker, so only
+        a deploy prunes."""
+        result, lines = self._post_deploy_prune(tmp_path, deploy_rc=0, stage="1")
+        assert result.returncode == 0, result.stdout + result.stderr
         assert not any("prune" in line for line in lines)
 
     def test_ungranted_prune_is_skipped_without_failing_the_deploy(self, tmp_path):
