@@ -9,7 +9,7 @@ import { aiDate, aiObservationDate, historyGroups, sourceHref, type AiHistoryPoi
 import { useAiInfrastructure } from "@/lib/useAiInfrastructure";
 import LlmTokenIndexCard from "./LlmTokenIndexCard";
 import AiIndustryHistoryChart from "./AiIndustryHistoryChart";
-import { AI_INDUSTRY_STAGES, industryStage, measureCopy } from "@/lib/aiIndustryPresentation";
+import { AI_INDUSTRY_STAGES, industryStage, measureCopy, seriesCadence } from "@/lib/aiIndustryPresentation";
 import styles from "./AiInfrastructure.module.css";
 
 function SourceLink({ url, children }: { url: string; children: React.ReactNode }) {
@@ -79,7 +79,7 @@ function SelectedMeasure({ indicator, sources, inspect }: { indicator: AiIndicat
     <p className={styles.reading}>{copy.definition}</p>
     <p className={styles.note}>{indicator.reason}</p>
     {groups.length ? <label className={styles.seriesSelect}>Observation series<select value={Math.min(seriesIndex, groups.length - 1)} onChange={event => setSeriesIndex(Number(event.target.value))}>{groups.map((group, index) => <option key={`${group[0].source_id}-${group[0].series_id}-${group[0].unit}`} value={index}>{aiMetricLabel(group[0])} · {aiMetricDisplay(group[0]).unit} · {sources.find(item => item.id === group[0].source_id)?.name ?? group[0].source_id}</option>)}</select></label> : null}
-    {points ? <AiIndustryHistoryChart key={`${points[0].source_id}-${points[0].series_id}-${points[0].unit}`} points={points} cadence={source?.cadence} sourceLabel={source?.name} observationCount={coverage?.observation_count} /> : <p className={styles.empty}>No comparable history is available. Missing observations are not zero.</p>}
+    {points ? <AiIndustryHistoryChart key={`${points[0].source_id}-${points[0].series_id}-${points[0].unit}`} points={points} cadence={seriesCadence(coverage, source)} sourceLabel={source?.name} observationCount={coverage?.observation_count} /> : <p className={styles.empty}>No comparable history is available. Missing observations are not zero.</p>}
     {indicator.history_series_count && indicator.history_series_count > groups.length ? <p className={styles.note}>{groups.length} of {indicator.history_series_count} stored series shown, prioritized by the latest reported measurements. Source totals cover the entire publisher.</p> : null}
     <div className={styles.interpretation}><div><h4>Why it matters</h4><p>{copy.relevance}</p></div><div><h4>What it cannot prove</h4><p>{copy.limit}</p></div></div>
     {indicator.metrics.length ? <details className={styles.observations}><summary>Latest reported observations ({indicator.metrics.length})</summary><dl className={styles.metrics}>{indicator.metrics.map(metric => {

@@ -1,4 +1,4 @@
-import type { AiIndicator } from "./aiInfrastructure";
+import type { AiHistoryCoverage, AiIndicator, AiSource } from "./aiInfrastructure";
 
 export const AI_INDUSTRY_STAGES = [
   {
@@ -214,4 +214,9 @@ export function industryStage(indicator: AiIndicator): string {
 
 export function measureCopy(indicator: AiIndicator) {
   return AI_MEASURE_COPY[indicator.id] ?? { name: indicator.title, definition: indicator.methodology, relevance: "Additional source evidence. Review its coverage and methodology before connecting it to an investment thesis.", limit: indicator.reason };
+}
+
+/** Chart cadence: the series' own grain when the snapshot reports one, else the source cadence. */
+export function seriesCadence(coverage: AiHistoryCoverage | undefined, source: AiSource | undefined): string | undefined {
+  return coverage?.cadence ?? source?.cadence;
 }

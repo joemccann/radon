@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timedelta
 
 from .model import response_group, utc
-from .registry import INDICATORS, SOURCES
+from .registry import INDICATORS, SOURCES, series_cadence
 from .shadow import evaluate_shadow
 from .transforms import InsufficientEvidence, complete_daily_windows
 
@@ -162,6 +162,7 @@ def build_snapshot(store, as_of=None):
                             "metadata",
                         )
                     },
+                    **({"cadence": cadence} if (cadence := series_cadence(id, row["series_id"])) else {}),
                 }
             )
 
@@ -695,7 +696,8 @@ def compact_snapshot(snapshot, max_bytes=API_SNAPSHOT_MAX_BYTES):
             history.extend(displayed)
             indicator["history_coverage"].append(dict(source_id=_key[0], series_id=_key[1], unit=_key[2],
                 observation_count=len(points), displayed_count=len(displayed), observed_from=points[0]["date"],
-                observed_through=points[-1]["date"]))
+                observed_through=points[-1]["date"],
+                **({"cadence": cadence} if (cadence := series_cadence(indicator.get("id"), _key[1] or "")) else {})))
         indicator["history"] = history
     def encoded():
         return json.dumps(compact, sort_keys=True, separators=(",", ":"), allow_nan=False)
