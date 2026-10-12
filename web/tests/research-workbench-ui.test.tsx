@@ -23,6 +23,8 @@ describe("source-grounded research workbench", () => {
     expect(screen.getByText("Unsaved. Reloading clears this workspace.")).toBeTruthy();
     expect(screen.queryByText(/Trace the claim/)).toBeNull();
     expect(screen.queryByText(/0 sources/)).toBeNull();
+    expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).not.toContain("Start with a source you trust");
+    expect(screen.queryByText("Keep the original date and exact passage.")).toBeNull();
     addSource();
     expect(screen.getByRole("heading", { name: "Evidence to decision" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "No sources yet" })).toBeNull();

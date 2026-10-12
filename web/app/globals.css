@@ -21557,6 +21557,12 @@ body[data-mobile="true"] .content:has(.profile-surface--mobile) {
   text-transform: none;
   color: var(--text-secondary);
 }
+.alerts-form__select {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+}
 .alerts-form__submit {
   font-family: var(--font-sans);
   font-size: 13px;
