@@ -117,4 +117,28 @@ describe("WatchlistContent", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sort by Added" }));
     expect(symbols()).toEqual(["watchlist-row-NVDA", "watchlist-row-AAPL", "watchlist-row-MSFT"]);
   });
+
+  it("leaves flat, order-free rows blank and writes holdings in trader notation", () => {
+    const portfolio = {
+      positions: [
+        {
+          ticker: "MSFT",
+          structure: "Long Call $300.0",
+          expiry: "2026-11-20",
+          legs: [{ direction: "LONG", contracts: 1, type: "Call", strike: 300, entry_cost: 0, avg_cost: 0, market_price: null, market_value: null }],
+        },
+      ],
+    } as never;
+    render(<WatchlistContent prices={{ AAPL: price(212, 210) }} portfolio={portfolio} orders={null} />);
+
+    const aapl = screen.getByTestId("watchlist-row-AAPL");
+    expect(aapl.textContent).not.toMatch(/FLAT|NO ORDERS|UNASSIGNED/);
+    expect(aapl.textContent).toContain("Jul 1");
+
+    const msft = screen.getByTestId("watchlist-row-MSFT");
+    expect(msft.textContent).toContain("300C");
+    expect(msft.textContent).not.toContain("$300.0");
+    expect(msft.querySelector('[title="Expires Nov 20"]')).toBeTruthy();
+    expect(screen.getByText(/Blank means flat with no orders/)).toBeTruthy();
+  });
 });

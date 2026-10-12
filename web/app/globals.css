@@ -1912,6 +1912,23 @@ body {
   color: var(--text-primary);
 }
 
+.watchlist-row__status,
+.watchlist-row__orders,
+.watchlist-row__added {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.watchlist-row__orders--open {
+  color: var(--warn-text);
+}
+
+.watchlist-legend {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-meta);
+}
+
 @media (max-width: 899px) {
   .watchlist-board__head {
     display: none;
@@ -7329,6 +7346,52 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
   border-color: var(--border-dim);
   background: color-mix(in srgb, var(--text-muted) 8%, transparent);
 }
+
+/* Desktop open-orders table: direction is ink on the action, state is plain
+   text, the session window reads as a muted suffix, actions show on hover. */
+.order-action-text,
+.order-intent-text,
+.order-status-text {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+.order-action-text { color: var(--text-secondary); }
+.order-action-text.positive { color: var(--positive); }
+.order-action-text.negative { color: var(--negative); }
+.order-intent-text { margin-left: 6px; color: var(--text-muted); }
+.order-status-text--working,
+.order-status-text--done,
+.order-status-text--neutral { color: var(--text-primary); }
+.order-status-text--partial,
+.order-status-text--pending { color: var(--warn-text); }
+.order-status-text--inactive { color: var(--text-muted); }
+
+.open-order-status-cell .order-session-chip {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-weight: 400;
+}
+
+@media (hover: hover) {
+  .open-order-row .actions-cell > .btn-order-action {
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+  .open-order-row:hover .actions-cell > .btn-order-action,
+  .open-order-row:focus-within .actions-cell > .btn-order-action,
+  .open-order-row--selected .actions-cell > .btn-order-action {
+    opacity: 1;
+  }
+}
+
+.journal-source-note {
+  padding: 8px 16px 0;
+  color: var(--text-muted);
+  font-size: var(--text-meta);
+}
+.journal-date-cell { white-space: nowrap; }
 
 .order-session-count {
   color: var(--text-muted);
