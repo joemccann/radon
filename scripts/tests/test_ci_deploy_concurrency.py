@@ -670,6 +670,86 @@ def test_release_tag_follows_a_green_deploy_on_main() -> None:
     assert any("python3 scripts/release_version.py" in step.get("run", "") for step in steps)
 
 
+def _release_tag_script() -> str:
+    job = _workflow()["jobs"]["release-tag"]
+    scripts = [step.get("run", "") for step in job["steps"] if "release_version.py" in step.get("run", "")]
+    assert len(scripts) == 1
+    return scripts[0]
+
+
+def _release_tag_fakes(tmp_path: Path, *, tag_exists: bool) -> dict[str, str]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "calls.log"
+    exists = tmp_path / "tag-exists"
+    if tag_exists:
+        exists.write_text("present\n", encoding="utf-8")
+    (bin_dir / "python3").write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"python3 $*\" >> {log}\n"
+        "printf '1.2.3\\n'\n",
+        encoding="utf-8",
+    )
+    (bin_dir / "git").write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"git $*\" >> {log}\n"
+        "if [ \"$1\" = rev-parse ]; then\n"
+        f"  [ -f {exists} ]\n"
+        "  exit $?\n"
+        "fi\n"
+        "if [ \"$1\" = rev-list ]; then\n"
+        "  printf 'already\\n'\n"
+        "fi\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    for name in ("python3", "git"):
+        (bin_dir / name).chmod(0o755)
+    return {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "GITHUB_SHA": "c" * 40,
+    }
+
+
+def _run_release_tag(tmp_path: Path, *, tag_exists: bool) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    result = subprocess.run(
+        ["bash", "-c", _release_tag_script()],
+        env=_release_tag_fakes(tmp_path, tag_exists=tag_exists),
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    log = tmp_path / "calls.log"
+    lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    return result, lines
+
+
+def test_release_tag_script_tags_the_deployed_sha_and_pushes_only_that_ref(tmp_path: Path) -> None:
+    result, lines = _run_release_tag(tmp_path, tag_exists=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    sha = "c" * 40
+    assert lines == [
+        "python3 scripts/release_version.py",
+        "git rev-parse -q --verify refs/tags/v1.2.3",
+        f"git tag v1.2.3 {sha}",
+        "git push origin refs/tags/v1.2.3",
+    ]
+
+
+def test_release_tag_script_leaves_an_existing_tag_where_it_is(tmp_path: Path) -> None:
+    result, lines = _run_release_tag(tmp_path, tag_exists=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "already tagged" in result.stdout
+    assert lines == [
+        "python3 scripts/release_version.py",
+        "git rev-parse -q --verify refs/tags/v1.2.3",
+        "git rev-list -n 1 v1.2.3",
+    ]
+    assert not any(line.startswith("git tag ") or line.startswith("git push ") for line in lines)
+
+
 def test_cloud_infra_shards_partition_cloud_tests() -> None:
     root = WORKFLOW.parents[2]
     assignments: dict[str, list[str]] = {}
