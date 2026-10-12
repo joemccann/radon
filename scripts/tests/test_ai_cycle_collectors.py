@@ -544,6 +544,53 @@ def test_ramp_token_panel_leads_with_prices_then_totals_before_minor_makers(tmp_
     assert {"tokens.volume.all", "tokens.spend.all"} <= charted
 
 
+def test_ramp_token_series_carry_their_own_cadence(tmp_path):
+    """D7 prices are daily and volume/spend weekly; the Ramp source stays monthly for D5."""
+    from scripts.ai_cycle.snapshot import build_snapshot, compact_snapshot
+    from scripts.ai_cycle.store import ObservationStore
+
+    store = ObservationStore(tmp_path / "ramp-cadence.sqlite")
+    store.initialize()
+    store.append_observations(parse_ramp_curated(RAMP_TOKEN_PAYLOAD, HASH, FETCHED))
+    snapshot = compact_snapshot(build_snapshot(store, "2026-09-08T00:00:00Z"))
+    panel = next(item for item in snapshot["indicators"] if item["id"] == "D7")
+    metrics = {metric["id"]: metric for metric in panel["metrics"]}
+    assert metrics["tokens.price.blended.anthropic"]["cadence"] == "daily"
+    assert metrics["tokens.volume.all"]["cadence"] == "weekly"
+    assert metrics["tokens.spend.all"]["cadence"] == "weekly"
+    coverage = {item["series_id"].split(":")[0]: item for item in panel["history_coverage"]}
+    assert coverage["tokens.price.blended.anthropic"]["cadence"] == "daily"
+    assert coverage["tokens.volume.all"]["cadence"] == "weekly"
+    assert coverage["tokens.spend.all"]["cadence"] == "weekly"
+    assert next(item for item in snapshot["sources"] if item["id"] == "ramp")["cadence"] == "monthly"
+
+
+def test_ramp_spend_series_keep_source_cadence_and_monthly_staleness(tmp_path):
+    from scripts.ai_cycle.snapshot import build_snapshot, compact_snapshot
+    from scripts.ai_cycle.store import ObservationStore
+
+    store = ObservationStore(tmp_path / "ramp-d5.sqlite")
+    store.initialize()
+    payload = {
+        **RAMP_TOKEN_PAYLOAD,
+        "spend_per_employee": [{"date_month": "2026-08-01", "median_pepm": 12.5}],
+        "token_prices": [],
+        "token_volumes": [],
+    }
+    store.append_observations(parse_ramp_curated(payload, HASH, FETCHED))
+
+    def d5(as_of):
+        return next(i for i in compact_snapshot(build_snapshot(store, as_of))["indicators"] if i["id"] == "D5")
+
+    fresh = d5("2026-09-08T00:00:00Z")
+    assert fresh["status"] == "available"
+    assert all("cadence" not in metric for metric in fresh["metrics"])
+    assert all("cadence" not in item for item in fresh["history_coverage"])
+    # 62-day monthly window: Aug 31 + 61 days is fresh, + 63 days is stale.
+    assert d5("2026-10-31T00:00:00Z")["status"] == "available"
+    assert d5("2026-11-02T00:00:00Z")["status"] == "stale"
+
+
 def test_ramp_bundled_fixture_loads_into_snapshot(tmp_path):
     from scripts.ai_cycle.collect import main
     from scripts.ai_cycle.snapshot import build_snapshot
