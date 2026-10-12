@@ -152,6 +152,7 @@ def _number_in_quote(value, unit, quote, *, allow_range=False):
         scale = {'million': 'mn', 'billion': 'bn', 'trillion': 'tn'}[monetary.group(2).lower()]
         literal = currency + ' ' + amount + scale
     elif short_money:
+        currency = ground._currency(short_money.group(1))
         literal = short_money.group(1) + amount + short_money.group(2)
     elif normalized in ('%', 'bp', 'year', 'x'):
         literal = amount + normalized
@@ -161,8 +162,33 @@ def _number_in_quote(value, unit, quote, *, allow_range=False):
         if re.search(r'[$€£¥]|\b[A-Z]{3}\b', unit) or ground.normalize(unit).casefold() not in ground.normalize(quote).casefold():
             return False
         literal = amount
+    if monetary or short_money:
+        # Require currency on the numeric occurrence, retaining unit headers.
+        filtered = list(quote)
+        for match in ground.NUMBER_RE.finditer(quote):
+            if ground._currency(match.group('cur')) != currency:
+                filtered[match.start():match.end()] = ' ' * (match.end() - match.start())
+        quote = ''.join(filtered)
     if ground.ground([literal], {1: quote}, [1])['passed']:
         return True
+    return False
+
+
+def _range_in_quote(low, high, unit, quote):
+    quote = _exact_measurement_quote(quote, allow_range=True)
+    numbers = ground._page_numbers(quote)
+    for token, position in numbers:
+        sign = -1 if token.sign == '-' else 1
+        if len(token.values) != 2 or sorted(sign * float(value) for value in token.values) != [low, high]:
+            continue
+        # Both endpoints must come from this single range, not other amounts.
+        filtered = list(quote)
+        for other, start in numbers:
+            if start != position:
+                filtered[start:start + len(other.token)] = ' ' * len(other.token)
+        excerpt = ''.join(filtered)
+        if all(_number_in_quote(value, unit, excerpt, allow_range=True) for value in (low, high)):
+            return True
     return False
 
 
@@ -180,10 +206,14 @@ def valid_evidence(plan, evidence, pages):
         quote_valid = isinstance(quote, str) and bool(quote.strip()) and len(quote) <= 2000 and not any(ord(c) < 32 and c not in '\n\r\t' for c in quote)
         if type(page) is not int or page not in pages or not quote_valid or ground.normalize(quote) not in ground.normalize(pages[page]):
             return False
+        if plan['kind'] == 'range':
+            if not _range_in_quote(row['low'], row['high'], plan['unit'], quote):
+                return False
+            continue
         quantities = ((row['x'], plan['xUnit']), (row['y'], plan['yUnit'])) if plan['kind'] == 'scatter' else (
-            ((row['low'], plan['unit']), (row['high'], plan['unit'])) if plan['kind'] == 'range' else ((row['value'], plan['unit']),)
+            ((row['value'], plan['unit']),)
         )
-        if any(not _number_in_quote(value, unit, quote, allow_range=plan['kind'] == 'range') for value, unit in quantities):
+        if any(not _number_in_quote(value, unit, quote) for value, unit in quantities):
             return False
     annotations = [plan.get(key, '') for key in ('title', 'metric', 'note', 'sourceNote')] + [row['label'] for row in rows(plan)]
     if not ground.ground(annotations, pages, list(pages))['passed']:
