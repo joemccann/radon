@@ -98,6 +98,20 @@ class Reviewer:
         return self.responses.pop(0)
 
 
+class EmptyChartAgent:
+    """Other orchestration tests keep chart generation offline and explicit."""
+    env = {}
+
+    def __init__(self, **kwargs):
+        pass
+
+    def ask_text(self, instruction):
+        return {'charts': [], 'reason': 'No chart selected by this orchestration fixture'}
+
+    def ask(self, instruction, images=()):
+        raise AssertionError('Empty chart plans must not invoke image review')
+
+
 @pytest.fixture
 def publisher():
     stored = []
@@ -106,7 +120,8 @@ def publisher():
 
 
 def build(tmp_path, reviewer, publisher):
-    return intake.Pipeline(tmp_path, reviewer, publisher, extractor=extractor, figure_catalogue=catalogue, pdf_created=lambda pdf: None)
+    return intake.Pipeline(tmp_path, reviewer, publisher, extractor=extractor, figure_catalogue=catalogue, pdf_created=lambda pdf: None,
+                           chart_producer=EmptyChartAgent(), chart_reviewer=EmptyChartAgent())
 
 
 def test_two_model_calls_select_is_text_only_verify_carries_one_crop(tmp_path, publisher):
@@ -246,17 +261,16 @@ def test_text_only_finding_publishes_without_images(tmp_path, publisher):
     reviewer = Reviewer([selection(figure_ids=[], text_only=True, captions={}), verdict()])
     posts = build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
     assert len(posts) == 1 and posts[0]["images"] == [] and reviewer.calls[1][2] == ()
-    bars = posts[0]["source"]["charts"][0]["bars"]
-    assert [(bar["label"], bar["value"]) for bar in bars] == [("Foreign investors", 45), ("Official investors", 12)]
+    assert posts[0]['source']['chartGeneration']['status'] == 'no_comparable_data'
+    assert 'charts' not in posts[0]['source']
 
 
-def test_text_only_comparable_yields_store_a_chart_plan(tmp_path, publisher):
+def test_text_only_without_a_reviewed_png_does_not_store_a_browser_plan(tmp_path, publisher):
     content = "Name A yields 3.5-4.0%. Name B sits at 2.1%."
     reviewer = Reviewer([selection(title="Two printed yields", content=content, figure_ids=[], text_only=True, captions={}), verdict()])
     posts = build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
-    charts = posts[0]["source"]["charts"]
-    assert charts[0]["kind"] == "range" and charts[0]["axis"] == [0, 6]
-    assert [mark["label"] for mark in charts[0]["marks"]] == ["Name A", "Name B"]
+    assert 'charts' not in posts[0]['source']
+    assert posts[0]['source']['chartGeneration']['status'] == 'no_comparable_data'
 
 
 def test_figured_finding_does_not_store_a_generated_chart(tmp_path, publisher):
@@ -558,3 +572,121 @@ def test_select_catalogue_carries_each_figure_bbox(tmp_path, publisher):
     reviewer = Reviewer([selection(figure_ids=["f2"], pages=[2]), verdict()])
     build_logo(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
     assert '"bbox": [0.6965, 0.0371, 0.8918, 0.0736]' in reviewer.calls[0][1]
+
+
+def test_generated_png_is_reviewed_by_separate_agent_before_publication(tmp_path, publisher):
+    from research.generated_charts import REVIEW_GATES
+    plan = {'kind': 'bar', 'title': 'Foreign purchases by asset', 'unit': '$bn', 'axis': [0, 50], 'ticks': [0, 10, 20, 30, 40, 50],
+            'bars': [{'id': 'equities', 'label': 'US equities', 'value': 45}, {'id': 'treasuries', 'label': 'Treasuries', 'value': 12}]}
+    producer = Reviewer([{'charts': [{'plan': plan, 'evidence': [{'id': row['id'], 'page': 1, 'source_quote': PAGE1} for row in plan['bars']]}]}])
+    image_agent = Reviewer([{**{key: True for key in REVIEW_GATES}, 'visible_data': plan['bars'], 'reason': 'Exact sourced values, labelled units and zero baseline.',
+                             'visible_attribution':{'publisher':'Goldman Sachs','radon_url':'https://radon.run'}}])
+    def renderer(plan, path, **kwargs):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b'\x89PNG\r\n\x1a\nrendered pixels')
+        return {'path': str(path), 'width': 2400, 'height': 1440, 'renderer': 'test-renderer'}
+    claim_agent = Reviewer([selection(figure_ids=[], text_only=True, captions={}), verdict()])
+    pipe = intake.Pipeline(tmp_path, claim_agent, publisher, extractor=extractor, figure_catalogue=lambda *a: [],
+                           pdf_created=lambda pdf: None, chart_producer=producer, chart_reviewer=image_agent, chart_renderer=renderer)
+    posts = pipe.process(work(), tmp_path / 'r.pdf', [])
+    assert posts[0]['images'][0].endswith('.png')
+    assert posts[0]['source']['figures'][0]['generated'] is True
+    assert posts[0]['source']['chartGeneration']['status'] == 'passed'
+    assert posts[0]['source']['chartGeneration']['charts'][0]['review']['visible_data'] == plan['bars']
+    assert image_agent.calls[0][2][0][1].read_bytes().startswith(b'\x89PNG')
+    assert len(claim_agent.calls) == 2 and len(image_agent.calls) == 1
+
+
+def test_rejected_generated_image_preserves_text_and_disables_browser_fallback(tmp_path, publisher):
+    producer = Reviewer([{'charts': [{'plan': {'kind': 'bar', 'title': 'Wrong', 'unit': '%', 'axis': [4, 6], 'ticks': [4, 5, 6],
+                           'bars': [{'id': 'a', 'label': 'A', 'value': 4.15}, {'id': 'b', 'label': 'B', 'value': 4.35}]}, 'evidence': []}]}])
+    claims = Reviewer([selection(figure_ids=[], text_only=True, captions={}), verdict()])
+    pipe = intake.Pipeline(tmp_path, claims, publisher, extractor=extractor, figure_catalogue=lambda *a: [],
+                           pdf_created=lambda pdf: None, chart_producer=producer, chart_reviewer=Reviewer([]))
+    posts = pipe.process(work(), tmp_path / 'r.pdf', [])
+    assert len(posts) == 1 and posts[0]['images'] == []
+    assert posts[0]['source']['chartGeneration']['status'] == 'rejected'
+    assert 'charts' not in posts[0]['source']
+
+
+def test_optional_chart_budget_does_not_discard_verified_article(tmp_path, publisher):
+    from research.pipeline import DocumentDeadlineExceeded
+    reviewer = Reviewer([selection(figure_ids=[], text_only=True, captions={}), verdict()])
+    pipe = intake.Pipeline(tmp_path, reviewer, publisher, extractor=extractor, figure_catalogue=lambda *a: [],
+                           pdf_created=lambda pdf: None, chart_producer=EmptyChartAgent(), chart_reviewer=EmptyChartAgent())
+    original = pipe._guard_call
+    def guard(stage):
+        if stage == 'chart-plan':
+            raise DocumentDeadlineExceeded('Optional chart budget exhausted')
+        original(stage)
+    pipe._guard_call = guard
+    posts = pipe.process(work(), tmp_path / 'r.pdf', [])
+    assert len(posts) == 1 and posts[0]['images'] == []
+    assert posts[0]['source']['chartGeneration']['status'] == 'unavailable'
+    assert posts[0]['source']['chartGeneration']['attempts'] == [{'status':'budget_unavailable'}]
+
+
+@pytest.mark.parametrize('role,labels', [
+    ('publisher_logo', ['LSEG', 'DATA & ANALYTICS']),
+    ('publisher_logo', ['LSEG DATA & ANALYTICS']),
+    ('legal_owner', ['© 2026 London Stock Exchange Group plc. All rights reserved.']),
+])
+def test_publisher_logo_is_read_from_boundary_page_pixels_when_text_has_no_brand(tmp_path, publisher, role, labels):
+    identity = intake.identify.identify({1:'THE DAY AHEAD',11:'Closing page'}, work()['metadata'] | {'path_lower':'/joe mccann/current/2026/october/oct 9/other/report.pdf'}, '2026-10-09')
+    assert identity.publisher == 'unknown'
+    logo = Reviewer([{'publisher':'LSEG','page':11,'role':role,'identified_as_publisher':True,
+                      'readable':True,'no_conflicts':True,'visible_text':labels}])
+    def page_renderer(pdf, output, pages):
+        output.mkdir(parents=True,exist_ok=True)
+        values=[]
+        for page in pages:
+            name=f'page-{page:04d}.png';(output/name).write_bytes(b'\x89PNG\r\n\x1a\nlogo')
+            values.append({'page_number':page,'image_file':name})
+        return values
+    pipe=intake.Pipeline(tmp_path, Reviewer([]), publisher, publisher_reviewer=logo,publisher_renderer=page_renderer)
+    pipe._deadline=pipe.clock()+600
+    audit={}
+    resolved=pipe._resolve_publisher(identity,tmp_path/'r.pdf',{1:'THE DAY AHEAD',11:'Closing page'},11,tmp_path/'publisher',audit)
+    assert resolved.publisher=='LSEG' and resolved.publisher_page==11
+    assert resolved.publisher_quote == '\n'.join(labels)
+    assert len(logo.calls[0][2])==2
+    assert audit['publisher_identification']['status']=='verified'
+
+
+def test_ambiguous_body_brand_never_becomes_publisher(tmp_path,publisher):
+    identity=intake.identify.identify({1:'Market commentary'}, work()['metadata'] | {'path_lower':'/joe mccann/current/2026/october/oct 9/other/report.pdf'}, '2026-10-09')
+    def renderer(pdf,output,pages):
+        output.mkdir(parents=True,exist_ok=True);(output/'page.png').write_bytes(b'\x89PNG\r\n\x1a\nlogo')
+        return [{'page_number':1,'image_file':'page.png'}]
+    reviewer=Reviewer([{'publisher':'LSEG','page':1,'role':'quoted_company','identified_as_publisher':True,
+                       'readable':True,'no_conflicts':True,'visible_text':['LSEG']}])
+    pipe=intake.Pipeline(tmp_path,Reviewer([]),publisher,publisher_reviewer=reviewer,publisher_renderer=renderer)
+    pipe._deadline=pipe.clock()+600
+    audit={}
+    assert pipe._resolve_publisher(identity,tmp_path/'r.pdf',{1:'Market commentary'},1,tmp_path/'publisher',audit).publisher=='unknown'
+    assert audit['publisher_identification']['status']=='unresolved'
+
+
+@pytest.mark.parametrize('role,labels', [
+    ('publisher_logo', ['LSEG DATA & ANALYTICS']),
+    ('legal_owner', ['© 2026 London Stock Exchange Group plc. All rights reserved.']),
+])
+def test_publisher_evidence_preserves_the_approved_visual_role_in_posts(tmp_path, publisher, role, labels):
+    logo = Reviewer([{'publisher':'LSEG','page':2,'role':role,'identified_as_publisher':True,
+                      'readable':True,'no_conflicts':True,'visible_text':labels}])
+    def renderer(pdf, output, pages):
+        output.mkdir(parents=True, exist_ok=True)
+        items = []
+        for page in pages:
+            name=f'page-{page}.png'; (output/name).write_bytes(b'\x89PNG\r\n\x1a\nlogo')
+            items.append({'page_number':page,'image_file':name})
+        return items
+    claims=Reviewer([selection(figure_ids=[],text_only=True,captions={}),verdict()])
+    pipe=intake.Pipeline(tmp_path,claims,publisher,extractor=extractor,figure_catalogue=lambda *a:[],
+                         pdf_created=lambda pdf:None,publisher_reviewer=logo,publisher_renderer=renderer,
+                         chart_producer=EmptyChartAgent(),chart_reviewer=EmptyChartAgent())
+    metadata=work() | {'metadata':work()['metadata'] | {'path_lower':'/joe mccann/current/2026/september/sep 17/other/report.pdf'}}
+    posts=pipe.process(metadata,tmp_path/'r.pdf',[])
+    assert len(posts)==1
+    assert posts[0]['source']['publisher']=='LSEG'
+    assert posts[0]['source']['publisherEvidence']=={'page':2,'source_quote':'\n'.join(labels),'kind':role}

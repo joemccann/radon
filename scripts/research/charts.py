@@ -7,12 +7,16 @@ from __future__ import annotations
 
 import math
 import re
+from datetime import datetime, timezone
 
 STOP = {
     "The", "Its", "It", "But", "That", "This", "Earlier", "Credit", "Markets",
     "Rates", "An", "US", "HY", "AI", "GS", "PMI", "Fed", "September", "Virginia",
     "Jan", "Sep", "Global", "Research", "Deutsche", "Bank", "Finance", "Government",
 }
+MONTHS = "January February March April May June July August September October November December".split()
+MONTH = r"(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\s+\d{4})?"
+METRIC = re.compile(r"\b(consumer inflation expectations|(?:one-year-ahead\s+)?expected inflation rate|inflation expectations|unemployment rate|policy rate|inflation rate|inflation|unemployment|yields?|returns?|returned)\b", re.I)
 ISSUER = re.compile(r"\b(finance|government|construction|supranational|technology|energy|corporate)\b", re.I)
 
 
@@ -36,7 +40,22 @@ def _num(value: float):
 
 
 def _sentences(text: str) -> list:
-    shielded = re.sub(r"(\d)\.(\d)", lambda match: match.group(1) + "\0" + match.group(2), text)
+    # A repeated title/body comparison may lack title punctuation. Split only
+    # complete repetitions; a source line wrap within a comparison stays intact.
+    lines, parts = text.split("\n"), []
+    for index, line in enumerate(lines):
+        if index == len(lines) - 1:
+            parts.append(line)
+            continue
+        after = lines[index + 1]
+        left, right = METRIC.search(line), METRIC.search(after)
+        values = lambda body: re.findall(r"[+-]?\d+(?:\.\d+)?%", body)
+        prior_values = values(line)
+        boundary = left and right and left.group(0).lower() == right.group(0).lower() and len(prior_values) >= 2 and prior_values == values(after)
+        parts.append(line + ("." if boundary else "\n"))
+    # A sentence stop replaces a newline, so the raw source offsets stay intact.
+    separated = "".join(parts)
+    shielded = re.sub(r"(\d)\.(\d)", lambda match: match.group(1) + "\0" + match.group(2), separated)
     found = []
     for match in re.finditer(r"[^.!?]+[.!?]+|[^.!?]+$", shielded):
         raw = match.group(0)
@@ -174,13 +193,75 @@ def _percent_label(text: str, sentences: list, index: int) -> str:
     return name
 
 
+def _period_timestamp(period: str):
+    match = re.fullmatch(r"([A-Za-z]+)\s+(\d{4})", period)
+    if not match:
+        return None
+    month = next((index + 1 for index, name in enumerate(MONTHS) if match.group(1).lower() in {name.lower(), name[:3].lower()}), None)
+    if month is None:
+        return None
+    return int(datetime(int(match.group(2)), month, 1, tzinfo=timezone.utc).timestamp() * 1000)
+
+
+def _metric(text: str) -> str:
+    match = METRIC.search(text)
+    if match:
+        term = match.group(1).lower()
+        if term in {"return", "returns", "returned"}:
+            return "Return"
+        if term in {"yield", "yields"}:
+            return "Yield"
+        return term[:1].upper() + term[1:]
+    if re.search(r"\d+\s*-\s*year|\bHY\b|financing|coupon|cleared", text, re.I):
+        return "Yield"
+    return ""
+
+
+def _temporal_percentages(text: str) -> list:
+    """Bind each stated percentage to its period, never to a nearby verb."""
+    found = []
+    for sentence in _sentences(text):
+        body = sentence["text"]
+        metric = METRIC.search(body)
+        if not metric:
+            continue
+        hits = list(re.finditer(r"(?<![\d.-])([+-]?\d+(?:\.\d+)?)%", body))
+        if len(hits) < 2:
+            continue
+        prefix = body[:metric.start()]
+        prefix_period = re.search(r"\b(" + MONTH + r")\s*$", prefix, re.I)
+        title_prefix = prefix[:prefix_period.start()] if prefix_period else prefix
+        subject = re.sub(r"['’]s\s*$", "", title_prefix.strip()).strip()
+        if not re.fullmatch(r"[A-Za-z][A-Za-z '’-]{0,60}", subject):
+            subject = ""
+        metric_label = _metric(metric.group(0))
+        title = f"{subject} {metric_label.lower()}".strip()
+        ready = []
+        for index, hit in enumerate(hits):
+            next_start = hits[index + 1].start() if index + 1 < len(hits) else len(body)
+            after = body[hit.end():next_start]
+            period = re.match(r"\s+in\s+(" + MONTH + r")\b", after, re.I)
+            label = period.group(1) if period else prefix_period.group(1) if index == 0 and prefix_period else ""
+            if not label:
+                break
+            value = float(hit.group(1))
+            # A from-clause explicitly identifies the earlier observation, including December -> January.
+            before = body[(hits[index - 1].end() if index else 0):hit.start()]
+            order = 0 if re.search(r"\bfrom\s*$", before, re.I) else 1
+            ready.append({"label": title, "metric": metric_label, "unit": "%", "role": "level", "low": value, "high": value,
+                          "at": sentence["start"] + hit.start(), "time": label, "order": order, "span": (sentence["start"] + hit.start(), sentence["start"] + hit.end())})
+        if len(ready) == len(hits):
+            found.extend(ready)
+    return found
+
+
 def _dedupe(items: list) -> list:
     seen, kept = set(), []
     for item in items:
         key = (
             (item["unit"], item["role"], item["label"].lower(), item["low"], item["high"], item.get("time", ""), item.get("window", ""))
             if item.get("time") or item.get("window")
-            else (item["unit"], item["role"], item["low"], item["high"])
+            else (item["unit"], item["role"], item["label"].lower() if item["unit"] == "%" else "", item.get("metric", ""), item["low"], item["high"])
         )
         if key in seen:
             continue
@@ -209,6 +290,10 @@ def _extract(text: str) -> list:
             return False
         consumed.append((start, end))
         return True
+
+    for item in _temporal_percentages(text):
+        if take(*item["span"]):
+            found.append(item)
 
     grew = re.compile(
         r"grew from\s+~?\s*([€$£])\s*(\d+(?:\.\d+)?)\s*(bn|mn|million|billion)\s+in\s+([A-Z][a-z]+\s+\d{4})\s+to\s+~?\s*([€$£])\s*(\d+(?:\.\d+)?)\s*(bn|mn|million|billion)\s+in\s+([A-Z][a-z]+\s+\d{4})",
@@ -240,6 +325,8 @@ def _extract(text: str) -> list:
         label = _percent_label(text, sentences, match.start())
         if not label:
             continue
+        if float(match.group(1)) > float(match.group(2)):
+            continue
         sentence = _sentence_at(sentences, match.start())
         detail = re.search(r"\$(\d+(?:\.\d+)?)bn", sentence["text"], re.I) if sentence else None
         found.append({"label": label, "unit": "%", "role": "level", "low": float(match.group(1)), "high": float(match.group(2)), "at": match.start(), "detail": f"${detail.group(1)}bn" if detail else ""})
@@ -255,7 +342,7 @@ def _extract(text: str) -> list:
     for match in re.finditer(r"(\d+(?:\.\d+)?)%\s*chance\b", text, re.I):
         take(match.start(), match.end())
 
-    for match in re.finditer(r"~?(\d+(?:\.\d+)?)%", text):
+    for match in re.finditer(r"(?<![\d.-])~?([+-]?\d+(?:\.\d+)?)%", text):
         if not take(match.start(), match.end()):
             continue
         label = _percent_label(text, sentences, match.start())
@@ -305,6 +392,10 @@ def _extract(text: str) -> list:
         if not label:
             continue
         found.append({"label": label, "unit": "years", "role": "level", "low": float(match.group(1)), "high": float(match.group(1)), "at": match.start()})
+    for item in found:
+        if item["unit"] == "%" and not item.get("metric"):
+            sentence = _sentence_at(sentences, item["at"])
+            item["metric"] = _metric(text[_clause_start(text, item["at"], sentence["start"]):item["at"]]) if sentence else ""
     return _dedupe(found)
 
 
@@ -330,10 +421,21 @@ def _build(text: str) -> list:
     for items in lines.values():
         if len(items) < 2:
             continue
-        ordered = sorted(items, key=lambda item: item["at"])
+        ordered = sorted(items, key=lambda item: (item.get("order", 1), item["at"]))
         scale = _frame([item["low"] for item in ordered])
-        plans.append({"kind": "line", "title": ordered[0]["label"], "unit": ordered[0]["unit"], **scale,
-                      "points": [{"id": _unique(item.get("time") or item["label"], ids), "label": item.get("time") or item["label"], "value": _num(item["low"])} for item in ordered]})
+        if ordered[0]["unit"] == "%":
+            plans.append({"kind": "bar", "title": ordered[0]["label"], "metric": ordered[0]["metric"], "unit": "%", **scale,
+                          "bars": [{"id": _unique(item["time"], ids), "label": item["time"], "value": _num(item["low"])} for item in ordered]})
+        else:
+            points = []
+            for item in ordered:
+                period = item.get("time") or item["label"]
+                stamp = _period_timestamp(period)
+                if stamp is None:
+                    continue
+                points.append({"id": _unique(period, ids), "label": period, "value": _num(item["low"]), "timestamp": stamp})
+            points.sort(key=lambda point: point["timestamp"])
+            plans.append({"kind": "line", "title": ordered[0]["label"], "unit": ordered[0]["unit"], **scale, "points": points})
         consume(ordered)
 
     by_label = {}
@@ -357,24 +459,39 @@ def _build(text: str) -> list:
                           "points": [{"id": _unique(point["label"], ids), "label": point["label"], "x": _num(point["x"]), "y": _num(point["y"])} for point in points]})
             consume([obs for point in points for obs in point["obs"]])
 
-    levels = [item for item in free() if item["unit"] == "%" and item["role"] == "level"]
-    if any(item["low"] != item["high"] for item in levels) or len(levels) >= 2:
+    level_groups = {}
+    for item in free():
+        if item["unit"] == "%" and item["role"] == "level":
+            level_groups.setdefault(item.get("metric", ""), []).append(item)
+    if "Yield" in level_groups and "" in level_groups:
+        inferred = [item for item in level_groups[""] if re.search(r"\bsits at\b", (_sentence_at(_sentences(text), item["at"]) or {}).get("text", ""), re.I)]
+        level_groups["Yield"].extend(inferred)
+        level_groups[""] = [item for item in level_groups[""] if item not in inferred]
+    for metric, levels in level_groups.items():
+        interval = any(item["low"] != item["high"] for item in levels)
+        if not interval and (len(levels) < 2 or not metric):
+            continue
         marks = sorted(levels, key=lambda item: (-item["high"], -item["low"], item["label"]))
-        reference = _reference(text)
-        scale = _frame([*[mark["high"] for mark in marks], *([reference["value"]] if reference else [])])
-        plan = {"kind": "range", "title": "Dollar yields" if re.search(r"dollar yield", text, re.I) else "Yields", "unit": "%", **scale,
-                "marks": [{"id": _unique(mark["label"], ids), "label": mark["label"], "detail": mark.get("detail") or "",
-                           "low": _num(mark["low"]), "high": _num(mark["high"]), "estimated": bool(mark.get("estimated"))} for mark in marks]}
-        if reference:
-            plan["reference"] = reference
-        if any(mark.get("estimated") for mark in marks):
-            plan["sourceNote"] = "Desk band places the printed phrase on the axis. Not a printed coupon."
-        plans.append(plan)
+        reference = _reference(text) if metric == "Yield" else None
+        scale = _frame([*[value for mark in marks for value in (mark["low"], mark["high"])], *([reference["value"]] if reference else [])])
+        title = "Dollar yields" if metric == "Yield" and re.search(r"dollar yield", text, re.I) else "Yields" if metric == "Yield" else metric or "Percentages"
+        if not interval:
+            plans.append({"kind": "bar", "title": title, "metric": metric, "unit": "%", **scale,
+                          "bars": [{"id": _unique(mark["label"], ids), "label": mark["label"], "value": _num(mark["low"])} for mark in marks]})
+        else:
+            chart = {"kind": "range", "title": title, "metric": metric, "unit": "%", **scale,
+                     "marks": [{"id": _unique(mark["label"], ids), "label": mark["label"], "detail": mark.get("detail") or "",
+                                "low": _num(mark["low"]), "high": _num(mark["high"]), "estimated": bool(mark.get("estimated"))} for mark in marks]}
+            if reference:
+                chart["reference"] = reference
+            if any(mark.get("estimated") for mark in marks):
+                chart["sourceNote"] = "Desk band places the printed phrase on the axis. Not a printed coupon."
+            plans.append(chart)
         consume(marks)
 
     groups = {}
     for item in free():
-        if item["role"] == "change" and item["unit"] == "%" and not item.get("window"):
+        if item["unit"] == "%" and (item["role"] == "level" or not item.get("window")):
             continue
         groups.setdefault(f"{item['unit']}|{item.get('detail') or ''}|{item['role']}", []).append(item)
     for key, items in groups.items():
@@ -412,7 +529,7 @@ def _hits(sentence: str, unit: str) -> list:
     if unit == "%":
         for match in re.finditer(r"(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)%", sentence):
             hits.append({"index": match.start(), "end": match.end(), "values": [float(match.group(1)), float(match.group(2))]})
-        for match in re.finditer(r"(?<![\d.-])(\d+(?:\.\d+)?)%", sentence):
+        for match in re.finditer(r"(?<![\d.-])([+-]?\d+(?:\.\d+)?)%", sentence):
             if any(hit["index"] <= match.start() < hit["end"] for hit in hits):
                 continue
             hits.append({"index": match.start(), "end": match.end(), "values": [float(match.group(1))]})
@@ -438,6 +555,9 @@ def _words(label: str) -> list:
 
 def _grounded(text: str, label: str, value: float, unit: str, estimated: bool = False) -> bool:
     sentences = _sentences(text)
+    temporal = _temporal_percentages(text)
+    if any(item["time"].lower() == label.lower() for item in temporal):
+        return any(item["time"].lower() == label.lower() and item["unit"] == unit and _close(item["low"], value) for item in temporal)
     words = _words(label)
     for index, sentence in enumerate(sentences):
         previous = f"{sentences[index - 1]['text']} " if re.match(r"^(Its|It|That|This)\b", sentence["text"]) and index else ""
@@ -464,7 +584,7 @@ def _grounded(text: str, label: str, value: float, unit: str, estimated: bool = 
                 if label == "Week" and re.search(r"\bweek\b", before, re.I):
                     return True
                 continue
-            if re.fullmatch(r"[A-Z][a-z]{2}\s+\d{4}", label):
+            if _period_timestamp(label) is not None:
                 if label in after:
                     return True
                 continue
@@ -481,8 +601,11 @@ def _grounded(text: str, label: str, value: float, unit: str, estimated: bool = 
 
 def _verify(plan_item: dict, text: str) -> bool:
     kind = plan_item["kind"]
+    if plan_item.get("unit") == "%" and re.search(r"\byields?\b", plan_item["title"], re.I):
+        if not any(_metric(sentence["text"]) == "Yield" for sentence in _sentences(text)):
+            return False
     if kind == "line":
-        return len(plan_item["points"]) >= 2 and all(_grounded(text, point["label"], point["value"], plan_item["unit"]) for point in plan_item["points"])
+        return len(plan_item["points"]) >= 2 and all(_grounded(text, point["label"], point["value"], plan_item["unit"]) and ("timestamp" not in point or point["timestamp"] == _period_timestamp(point["label"])) for point in plan_item["points"])
     if kind == "bar":
         return len(plan_item["bars"]) >= 2 and all(_grounded(text, row["label"], row["value"], plan_item["unit"]) for row in plan_item["bars"])
     if kind == "range":

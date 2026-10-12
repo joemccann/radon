@@ -11,10 +11,17 @@ RUN npm ci --ignore-scripts --include=optional --no-audit --no-fund
 COPY docker/app/vendor-clis/install-native.cjs ./
 RUN node install-native.cjs
 
+FROM node:22.22.0-bookworm-slim@sha256:dd9d21971ec4395903fa6143c2b9267d048ae01ca6d3ea96f16cb30df6187d94 AS chart-runtime
+WORKDIR /opt/radon-charts
+COPY docker/app/chart-runtime/package.json docker/app/chart-runtime/package-lock.json ./
+RUN npm ci --ignore-scripts --omit=dev --no-audit --no-fund
+
 FROM python:3.13.16-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f
 
 COPY --from=vendor-clis /usr/local/bin/node /usr/local/bin/node
 COPY --from=vendor-clis /opt/radon-clis /opt/radon-clis
+COPY --from=chart-runtime /opt/radon-charts /opt/radon-charts
+COPY web/public/fonts/Inter-Variable.woff2 web/public/fonts/IBMPlexMono-400.woff2 /opt/radon-charts/fonts/
 COPY docker/app/vendor-clis/antigravity.json docker/app/vendor-clis/install-antigravity.py /opt/radon-clis/
 RUN python /opt/radon-clis/install-antigravity.py \
     && for cli in claude codex grok agy; do ln -s /opt/radon-clis/bin/$cli /usr/local/bin/$cli; done \
@@ -53,6 +60,7 @@ RUN python -m playwright install --with-deps --only-shell chromium \
     && rm -rf /var/lib/apt/lists/*
 
 COPY scripts ./scripts
+RUN chmod -R a-w /opt/radon-charts
 
 # Monitor logging needs a writable directory; the app and import tree stay root-owned.
 RUN install -d -o radon -g radon -m 0755 /home/radon/radon/logs
@@ -97,5 +105,23 @@ log_file.with_suffix(".log.1").unlink()
 PY
 
 RUN python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); browser = p.chromium.launch(headless=True); page = browser.new_page(); page.set_content('<title>radon-browser-smoke</title>'); assert page.title() == 'radon-browser-smoke'; browser.close(); p.stop()"
+
+# Exercise the actual research renderer as the runtime user, without web deps
+# or network access. Missing D3, font or Chromium payloads fail the image gate.
+RUN python - <<'PY'
+import sys
+import tempfile
+from pathlib import Path
+sys.path.insert(0, 'scripts')
+from research.chart_render import render_chart
+plan = {'kind': 'bar', 'title': 'Research renderer smoke', 'unit': '%',
+        'axis': [0, 5], 'ticks': [0, 1, 2, 3, 4, 5],
+        'bars': [{'id': 'prior', 'label': 'Prior', 'value': 4.15},
+                 {'id': 'current', 'label': 'Current', 'value': 4.35}]}
+with tempfile.TemporaryDirectory() as folder:
+    result = render_chart(plan, Path(folder) / 'smoke.png', publisher='Runtime smoke')
+    assert result['width'] == 2400
+    assert not result['geometry']['text_overflow']
+PY
 
 CMD ["uvicorn", "scripts.api.server:app", "--host", "0.0.0.0", "--port", "8321", "--proxy-headers", "--forwarded-allow-ips", "127.0.0.1", "--timeout-keep-alive", "75"]

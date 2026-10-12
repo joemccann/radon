@@ -9,7 +9,7 @@ import pytest
 from research import intake, novelty, publish
 from research.pipeline import EvidenceError
 from tests.test_research_intake import (
-    Reviewer, build, catalogue, extractor, selection, verdict, work,
+    Reviewer, EmptyChartAgent, build, catalogue, extractor, selection, verdict, work,
 )
 from tests.test_research_force_include import RUBNER_PAGE
 
@@ -44,7 +44,8 @@ def rubner_catalogue(pdf, pages, output_dir, dpi=216):
 
 def build_rubner(tmp_path, reviewer, publisher):
     return intake.Pipeline(tmp_path, reviewer, publisher, extractor=rubner_extractor,
-                           figure_catalogue=rubner_catalogue, pdf_created=lambda pdf: None)
+                           figure_catalogue=rubner_catalogue, pdf_created=lambda pdf: None,
+                           chart_producer=EmptyChartAgent(), chart_reviewer=EmptyChartAgent())
 
 
 def test_rubner_overrides_triage_drops(tmp_path, publisher, monkeypatch):
@@ -88,7 +89,8 @@ def test_rubner_skips_novelty_against_other_publishers(tmp_path, publisher):
                           {"page_number": 2, "markdown_file": "page-0002.md"}]}
     rubner = dict(rubner_work("CS Rubner October the Q4 Reload.pdf"), key="r" * 64)
     other = intake.Pipeline(tmp_path, reviewer, publisher, extractor=dup_extract,
-                            figure_catalogue=catalogue, pdf_created=lambda pdf: None)
+                            figure_catalogue=catalogue, pdf_created=lambda pdf: None,
+                            chart_producer=EmptyChartAgent(), chart_reviewer=EmptyChartAgent())
     posts = other.process(rubner, tmp_path / "r.pdf", [])
     review = json.loads((tmp_path / "evidence" / ("r" * 64) / "review.json").read_text())
     assert review["novelty"]["duplicate_of"] == "k" * 64

@@ -10,7 +10,7 @@ from dataclasses import dataclass, asdict
 from datetime import date, datetime
 
 # Dropbox folders that group by topic rather than by publisher.
-TOPIC_FOLDERS = {'nuclear', 'other', 'week ahead', 'misc'}
+TOPIC_FOLDERS = {'nuclear', 'other', 'week ahead', 'misc', 'unknown', 'unidentified', 'unverified'}
 
 PUBLISHER_DISPLAY = {
     'goldman sachs': 'Goldman Sachs', 'jp morgan': 'J.P. Morgan', 'bank of america': 'BofA Global Research',
@@ -20,6 +20,7 @@ PUBLISHER_DISPLAY = {
     'mufg': 'MUFG', 'rabobank': 'RaboResearch', 'pnc': 'PNC Economics', 'rbc': 'RBC Capital Markets', 'safra': 'Bank J Safra Sarasin',
     'standard chartered': 'Standard Chartered', 'apollo': 'Apollo', 'jefferies': 'Jefferies', 'bnp paribas': 'BNP Paribas',
     'morgan stanley': 'Morgan Stanley', 'kb securities': 'KB Securities', 'seb': 'SEB',
+    'lseg': 'LSEG', 'london stock exchange group': 'LSEG', 'london stock exchange group plc': 'LSEG',
 }
 
 # Brand tokens looked for on page 1 when the folder is a topic, ordered longest first.
@@ -34,6 +35,17 @@ PAGE_BRANDS = [
     ('PNC Economics', r'\bPNC\b'), ('Standard Chartered', r'Standard Chartered'), ('Apollo', r'\bApollo\b'),
     ('Bank J Safra Sarasin', r'Safra Sarasin'), ('BNP Paribas', r'BNP Paribas'),
 ]
+
+# Ownership statements outrank cited banks and data-provider names in report prose.
+# The brand must immediately follow the copyright marker/year, not occur later
+# in a data credit. End pages are searched first; the quote stays source-exact.
+LEGAL_PUBLISHERS = [
+    ("LSEG", r"(?:London\s*Stock\s*Exchange\s*Group(?:\s+plc)?|LSEG)\b"),
+    *PAGE_BRANDS,
+]
+_COPYRIGHT_PREFIX = r"(?:©|\bcopyright\b|\(c\))\s*(?:copyright\s*)?(?:(?:19|20)\d{2}(?:\s*[-–/]\s*(?:(?:19|20)?\d{2}))?\s*)?[\s*_]*"
+_COPYRIGHT_TAIL = r"(?:[ \t]+(?:Inc\.?|LLC|LLP|Limited|plc))?(?:[ \t]+(?:19|20)\d{2})?[ \t]*\.?(?:[ \t]*\**[ \t]*All rights reserved\.?)?"
+
 
 MONTHS = 'january|february|march|april|may|june|july|august|september|october|november|december'
 MONTHS_ABBR = 'jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec'
@@ -70,6 +82,8 @@ class Identity:
     doc_type: str                # calendar | single_stock | conference | fx_pair_note | digest | research
     doc_type_reason: str
     tickers: tuple = ()          # single-name candidates; gates single_stock against the operator book (research.triage)
+    publisher_page: int | None = None
+    publisher_quote: str | None = None
 
     def as_dict(self):
         return asdict(self)
@@ -85,6 +99,18 @@ def _brand_on_page(text):
     for display, pattern in PAGE_BRANDS:
         if re.search(pattern, head):
             return display
+    return None
+
+
+def _publisher_ownership(page_text):
+    from research.nemotron_parse import grounding_text
+    for number in sorted(page_text, reverse=True):
+        text = grounding_text(page_text[number])
+        for display, owner in LEGAL_PUBLISHERS:
+            pattern = _COPYRIGHT_PREFIX + r"(?:" + owner + r")" + _COPYRIGHT_TAIL
+            match = re.search(pattern, text[-3000:], re.I)
+            if match:
+                return display, number, match.group(0)
     return None
 
 
@@ -175,11 +201,21 @@ def identify(page_text, metadata, folder_date, pdf_created=None):
     name = metadata.get('name') or metadata.get('path_lower', '').split('/')[-1]
     from research.nemotron_parse import grounding_text
     page_one = grounding_text(page_text.get(1, '')) if page_text else ''
+    attribution_page, attribution_quote = None, None
     if folder and folder not in TOPIC_FOLDERS:
         publisher, source = PUBLISHER_DISPLAY.get(folder, folder.title()), 'folder'
     else:
-        brand = _brand_on_page(page_one)
-        publisher, source = (brand, 'page') if brand else ('unknown', 'none')
+        ownership = _publisher_ownership(page_text)
+        if ownership:
+            publisher, attribution_page, attribution_quote = ownership
+            source = 'page'
+        else:
+            brand = _brand_on_page(page_one)
+            publisher, source = (brand, 'page') if brand else ('unknown', 'none')
+            if brand:
+                attribution_page = 1
+                pattern = next(pattern for display, pattern in PAGE_BRANDS if display == brand)
+                attribution_quote = re.search(pattern, page_one[:3000]).group(0)
 
     limit = date.fromisoformat(folder_date) if folder_date else None
     found = None
@@ -205,4 +241,5 @@ def identify(page_text, metadata, folder_date, pdf_created=None):
 
     kind, reason = doc_type(name, page_one)
     names = tickers(name, page_one) if kind == 'single_stock' else ()
-    return Identity(publisher, source, folder, series(name), found[0], found[1], found[2], found[3], kind, reason, names)
+    return Identity(publisher, source, folder, series(name), found[0], found[1], found[2], found[3], kind, reason, names,
+                    publisher_page=attribution_page, publisher_quote=attribution_quote)
