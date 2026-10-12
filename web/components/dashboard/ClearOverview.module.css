@@ -34,7 +34,7 @@
 .historyEmpty { display: flex; flex-direction: column; justify-content: center; min-height: 166px; padding: 18px 0; }
 .historyEmpty strong, .positionEmpty strong { font-size: 16px; font-weight: 550; }
 .historyEmpty p, .positionEmpty p { max-width: 420px; margin: 9px 0; color: var(--text-muted); font-size: 14px; line-height: 1.6; }
-.metrics { display: grid; grid-template-columns: 1.15fr 0.85fr 1.1fr; margin: 0; padding: 18px 0; }
+.metrics { display: grid; grid-template-columns: 1fr 1fr; margin: 0; padding: 18px 0; }
 .metrics > div { min-width: 0; padding: 0 18px; border-left: 1px solid var(--line-grid); }
 .metrics > div:first-child { padding-left: 0; border-left: 0; }
 .metrics > div:last-child { padding-right: 0; }
@@ -63,23 +63,16 @@
 .sourceNote { margin: 16px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
 .rail { background: var(--bg-subtle); border-radius: 10px; padding: 25px 24px; }
 .risk { scroll-margin-top: 100px; }
-.risk > p:first-of-type { margin: 18px 0 15px; font-size: 13px; }
-.riskValue { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; }
-.riskValue strong { font-size: 28px; font-weight: 500; letter-spacing: -0.045em; font-variant-numeric: tabular-nums; }
-.riskValue strong small { font-size: 18px; }
-.riskTrack { margin: 12px 0; height: 6px; background: var(--line-grid); border-radius: 3px; overflow: hidden; }
-.riskTrack span { display: block; height: 100%; background: var(--positive); }
-.riskTrack[data-tone="attention"] span { background: var(--warning); }
-.riskTrack[data-tone="critical"] span { background: var(--negative); }
-.riskDescription, .exposure p { color: var(--text-muted); font-size: 13px; line-height: 1.65; }
-.riskDescription { margin: 12px 0 0; }
-.exposure { margin: 16px 0 23px; padding: 24px 0 18px; border-top: 1px solid var(--line-grid); border-bottom: 1px solid var(--line-grid); }
-.exposure h3 { margin: 0 0 18px; font-size: 15px; font-weight: 550; }
-.exposure dl { margin: 0; }
-.exposure dl > div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 14px; font-size: 12px; }
-.exposure dt { color: var(--text-muted); }
-.exposure dd { margin: 0; font-size: 14px; font-variant-numeric: tabular-nums; }
-.exposure p { margin: 18px 0 0; }
+.riskFinding { margin: 0; font-size: 17px; font-weight: 600; line-height: 1.35; letter-spacing: -0.02em; }
+.risk > p { margin: 10px 0 0; font-size: 13px; line-height: 1.5; }
+.riskLedger { margin: 16px 0 0; }
+.riskLedger > div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line-grid); font-size: 13px; }
+.riskLedger dt { color: var(--text-muted); }
+.riskLedger dd { margin: 0; font-size: 14px; font-variant-numeric: tabular-nums; }
+.riskLedger dd[data-tone="positive"] { color: var(--positive); }
+.riskLedger dd[data-tone="negative"] { color: var(--negative); }
+.riskLedger dd[data-tone="attention"] { color: var(--warning); }
+.risk > .riskLinks { display: flex; gap: 8px; margin-top: 14px; color: var(--text-muted); }
 .mobileRisk { display: none; }
 .intelligenceHeading { margin: 38px 0 22px; padding-top: 30px; border-top: 1px solid var(--line-grid); scroll-margin-top: 115px; }
 .intelligenceHeading h2 { margin: 0; font-size: 24px; font-weight: 550; letter-spacing: -0.035em; }
@@ -99,8 +92,7 @@
 
 @media (max-width: 850px) {
   .overview { grid-template-columns: 1fr; gap: 32px; }
-  .rail { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
-  .exposure { border-top: 0; margin: 0; padding-top: 0; border-bottom: 0; }
+  .rail { display: block; }
   .securityMark { display: grid; }
   .balance { font-size: 54px; }
 }
@@ -119,7 +111,7 @@
   .periods { gap: 0; }
   .periods button { width: 44px; min-width: 44px; }
   .chartDates, .chartNote { font-size: 12px; }
-  .metrics { padding: 20px 0; grid-template-columns: 1.13fr 0.82fr 1.12fr; }
+  .metrics { padding: 20px 0; grid-template-columns: 1fr 1fr; }
   .metrics > div { padding: 0 10px; }
   .metrics dt { font-size: 12px; line-height: 1.4; min-height: 34px; margin-bottom: 4px; }
   .metrics dd { font-size: clamp(14px, 4.3vw, 19px); }
@@ -138,9 +130,6 @@
   .positionPnl { grid-column: 2; grid-row: 1 / 3; }
   .positionPnl small { display: block; margin-top: 6px; }
   .rail { display: block; padding: 24px; }
-  .riskDescription, .exposure p { font-size: 14px; }
-  .exposure { margin: 22px 0; padding: 24px 0 18px; border-top: 1px solid var(--line-grid); border-bottom: 1px solid var(--line-grid); }
-  .exposure dl > div { font-size: 13px; }
 }
 
 @media (max-width: 374px) {

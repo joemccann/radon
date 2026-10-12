@@ -99,7 +99,8 @@ describe("Clear portfolio overview", () => {
     render(<ClearOverview portfolio={null} />);
     expect(screen.getByTestId("clear-account-value").textContent).toBe("---");
     expect(screen.getByText("Waiting for your portfolio")).toBeDefined();
-    expect(screen.getAllByText("Margin data unavailable")).toHaveLength(2);
+    expect(screen.getByText("Margin data unavailable")).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Margin data unavailable." })).toBeDefined();
     expect(screen.queryByText("0.0%")).toBeNull();
   });
 
@@ -115,7 +116,8 @@ describe("Clear portfolio overview", () => {
     const positionLink = within(positions).getByRole("link", { name: /XYZ/ });
     expect(positionLink.getAttribute("href")).toBe("/XYZ?posId=17");
     expect(positionLink.textContent).toContain("+$100");
-    expect(screen.getAllByText("Margin needs attention")).toHaveLength(2);
+    expect(screen.getByText("Margin needs attention")).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Margin needs attention. One position has undefined risk." })).toBeDefined();
     expect(screen.queryByText("Research workspace")).toBeNull();
     expect(screen.queryByRole("heading", { name: "Follow the evidence." })).toBeNull();
     expect(screen.queryByRole("link", { name: /News, signals/ })).toBeNull();
