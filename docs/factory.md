@@ -32,6 +32,7 @@ UI, copy, tests, docs, indicator vertical slices that follow `.claude/skills/new
 - No Playwright / chrome-cdp in the sandbox. Live browser is a human step.
 - Never load production secrets into the sandbox. Setup is `scripts/factory_sandbox_setup.sh` (bun + pip only).
 - Factory brain writes: trusted callers only. Unattended runs cannot poison it.
+- The draft PR body follows [`.github/pull_request_template.md`](../.github/pull_request_template.md): Summary, What changed, Test plan, Risk and rollback, Operator Next Steps, Checklist, in that order, each filled in. The `PR body template` CI check (`scripts/ci/check_pr_body.py`) fails any other shape, so the factory's PR-writing station must read the template from the checkout and validate its body with `python3 scripts/ci/check_pr_body.py --body-file <file>` before opening the PR.
 
 ## Deploy the factory app
 

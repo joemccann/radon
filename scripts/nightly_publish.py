@@ -7,6 +7,7 @@ Exit 0 means substantive/published, 3 means no substantive change, 1 error.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import shutil
@@ -32,6 +33,25 @@ CODEMAP_PATHS = frozenset({
 
 class PublishError(RuntimeError):
     """Insufficient evidence to publish safely."""
+
+
+def pr_body_errors(text: str) -> list[str]:
+    """Run scripts/ci/check_pr_body.py on a PR body.
+
+    Loaded by path, not imported: the runner copies this file and the
+    validator flat into a root-owned lib directory and runs them with
+    `python -I`, which puts no script directory on sys.path.
+    """
+    here = Path(__file__).resolve().parent
+    for candidate in (here / "check_pr_body.py", here / "ci" / "check_pr_body.py"):
+        if candidate.is_file():
+            spec = importlib.util.spec_from_file_location("radon_check_pr_body", candidate)
+            if spec is None or spec.loader is None:
+                break
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module.find_errors(text)
+    raise PublishError("PR body validator check_pr_body.py is unavailable")
 
 
 def run(args: list[str], repo: Path, *, env: dict[str, str] | None = None) -> str:
@@ -147,8 +167,12 @@ def publish(*, base: str, head: str, title: str, body_file: Path, repo: Path) ->
         return verdict
     if not body_file.is_file():
         raise PublishError("PR body file is unavailable")
-    # Readability must be established before publishing a branch.
-    body_file.read_text(encoding="utf-8")
+    # Readability and the PR template must be established before publishing a branch.
+    errors = pr_body_errors(body_file.read_text(encoding="utf-8"))
+    if errors:
+        raise PublishError(
+            "PR body does not follow .github/pull_request_template.md: " + "; ".join(errors)
+        )
     existing = _json_command([
         "gh", "pr", "list", "--state", "open", "--base", base,
         "--head", head, "--json", "url,headRefOid,isCrossRepository", "--limit", "100",

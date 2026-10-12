@@ -23,7 +23,7 @@ GUARD_PYTHON="${RADON_RUNNER_PYTHON:-/opt/homebrew/bin/python3.13}"
 # and the gh guard run these, never the agent-writable clone's copies.
 LIB_FILES="nightly_pr_guard.py nightly_publish.py nightly_issue_prune.py nightly_green_base.py
   nightly_audit_context.py nightly_deliver.py security_claude_ladder.py claude_cli_env_drift.py
-  claude_cli_env_reviewed.txt nvidia_rate_limit.py"
+  claude_cli_env_reviewed.txt nvidia_rate_limit.py ci/check_pr_body.py"
 
 # Root installs from $SRC, so every path it reads must be one only root or the
 # operator can change: each directory from / down to the clone owned by one of
@@ -52,7 +52,7 @@ check_source() {
   done
   local paths=("$tree/scripts/runner") file
   for file in $LIB_FILES; do paths+=("$tree/scripts/$file"); done
-  bad="$({ find "$tree" "$tree/scripts" -maxdepth 0 \( \( ! -user 0 ! -user "$uid" \) -o -perm -0020 -o -perm -0002 \) -print
+  bad="$({ find "$tree" "$tree/scripts" "$tree/scripts/ci" -maxdepth 0 \( \( ! -user 0 ! -user "$uid" \) -o -perm -0020 -o -perm -0002 \) -print
     find "${paths[@]}" \( \( ! -user 0 ! -user "$uid" \) -o -perm -0020 -o -perm -0002 -o -type l \) -print; } 2>&1 | head -n 1)"
   [[ -z "$bad" ]] || refuse "$bad"
 }
@@ -199,7 +199,7 @@ install_runner() {
     [[ -f "$file" ]] && install -o root -g wheel -m 755 "$file" "$PREFIX/hooks/$(basename "$file")"
   done
   for file in $LIB_FILES; do
-    install -o root -g wheel -m 755 "$SRC/../$file" "$PREFIX/lib/$file"
+    install -o root -g wheel -m 755 "$SRC/../$file" "$PREFIX/lib/${file##*/}"
   done
   write_dotenv_path
 }

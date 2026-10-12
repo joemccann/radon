@@ -1,14 +1,23 @@
 """Structured IR PR descriptions. Pickup and autopush refuse placeholders.
 
-Grok's commit body is the source of truth. A missing, empty, or placeholder
-section must not become a GitHub PR. Pickup and the responder's autopush
-path both call :func:`validate_ir_description` before create or edit.
+Grok's commit body is the source of truth and keeps its six IR sections
+(What broke, Root cause, What changed, How it was verified, Risk and
+rollback, Still open). The PR body renders them into the repository PR
+template (.github/pull_request_template.md, checked by
+scripts/ci/check_pr_body.py): Summary = What broke + Root cause, What
+changed, Test plan = How it was verified, Risk and rollback, Operator Next
+Steps = Still open, Checklist. A missing, empty, or placeholder section
+must not become a GitHub PR: pickup and the responder's autopush path
+validate the commit with :func:`validate_ir_description` and the PR body
+with :func:`validate_ir_pr_body` before create or edit.
 """
 
 from __future__ import annotations
 
 import re
 from typing import Iterable
+
+from ci import check_pr_body
 
 REQUIRED_SECTIONS = (
     "What broke",
@@ -20,6 +29,7 @@ REQUIRED_SECTIONS = (
 )
 
 SECTION_MIN_CHARS = 24
+ROOT_CAUSE_LABEL = "**Root cause:**"
 PLACEHOLDER_MARKERS = (
     "todo",
     "grok incident fix on",
@@ -198,10 +208,56 @@ def compose_ir_pr_body(
         stamp = f"Ran {model} on CLI {cli_version}."
         if stamp not in verified:
             merged["How it was verified"] = f"{verified}\n\n{stamp}".strip()
-    parts = []
-    for name in REQUIRED_SECTIONS:
-        parts.append(f"## {name}\n\n{merged[name].strip()}\n")
+    summary = (
+        f"{merged['What broke'].strip()}\n\n"
+        f"{ROOT_CAUSE_LABEL} {merged['Root cause'].strip()}"
+    )
+    rendered = {
+        "Summary": summary,
+        "What changed": merged["What changed"],
+        "Test plan": merged["How it was verified"],
+        "Risk and rollback": merged["Risk and rollback"],
+        "Operator Next Steps": merged["Still open"],
+        "Checklist": check_pr_body.render_checklist(),
+    }
+    parts = [
+        f"## {name}\n\n{rendered[name].strip()}\n"
+        for name in check_pr_body.REQUIRED_SECTIONS
+    ]
     return "\n".join(parts).rstrip() + "\n"
+
+
+def validate_ir_pr_body(text: str, *, branch: str | None = None) -> dict[str, str]:
+    """An IR PR body: the repository template, rendered from real IR sections.
+
+    Returns the template sections or raises :class:`IrDescriptionError`.
+    """
+    errors = check_pr_body.find_errors(text)
+    if errors:
+        raise IrDescriptionError(
+            "IR PR body does not follow the PR template: " + "; ".join(errors)
+        )
+    sections = check_pr_body.parse_sections(text)
+    broke, sep, cause = sections["Summary"].partition(ROOT_CAUSE_LABEL)
+    if not sep:
+        raise IrDescriptionError(
+            f"IR PR body Summary has no {ROOT_CAUSE_LABEL} line; build it from "
+            "the fix commit (description_from_commit)"
+        )
+    checks = {
+        "Summary": broke,
+        "Root cause": cause,
+        "What changed": sections["What changed"],
+        "Test plan": sections["Test plan"],
+        "Risk and rollback": sections["Risk and rollback"],
+        "Operator Next Steps": sections["Operator Next Steps"],
+    }
+    bad = [name for name, value in checks.items() if is_placeholder(value, branch=branch)]
+    if bad:
+        raise IrDescriptionError(
+            "IR PR body has placeholder or short sections: " + ", ".join(bad)
+        )
+    return sections
 
 
 def description_from_commit(
@@ -232,5 +288,5 @@ def description_from_commit(
         model=model,
         cli_version=cli_version,
     )
-    validate_ir_description(body, branch=branch)
+    validate_ir_pr_body(body, branch=branch)
     return title_from_sections(sections), body

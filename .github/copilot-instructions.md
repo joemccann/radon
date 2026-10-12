@@ -47,3 +47,7 @@ The interface should evoke **calm authority** — the quiet confidence of a well
 - Panel padding: 16-20px. Component gap: 12-16px.
 - All colors via tokens — no raw hex in components.
 - WCAG AA contrast ratios required.
+
+## Pull requests
+
+Every PR body follows `.github/pull_request_template.md` (Summary, What changed, Test plan, Risk and rollback, Operator Next Steps, Checklist, in order, each filled in). The `PR body template` check (`scripts/ci/check_pr_body.py`) fails any other shape.

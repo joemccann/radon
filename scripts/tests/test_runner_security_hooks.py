@@ -83,6 +83,7 @@ def rig(request, tmp_path):
         shutil.copy2(hook, runner / "hooks" / hook.name)
     for name in LIB:
         shutil.copy2(REPO / "scripts" / name, runner / "lib" / name)
+    shutil.copy2(REPO / "scripts" / "ci" / "check_pr_body.py", runner / "lib" / "check_pr_body.py")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "gh").write_text(GH_STUB)

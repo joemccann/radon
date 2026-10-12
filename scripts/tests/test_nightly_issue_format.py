@@ -405,10 +405,12 @@ class TestWrappersAndSkillsUseTheTemplate:
         assert "'**%s** %s **%s**'" in fmt, wrapper.name
 
     @pytest.mark.parametrize("skill", SKILLS, ids=lambda p: p.stem)
-    def test_skill_tells_the_agent_to_use_the_three_headings(self, skill: Path):
+    def test_skill_pr_body_uses_the_pr_template_not_the_issue_headings(self, skill: Path):
+        # Security agents write no issue comments; the only write-up they
+        # author is the PR, which follows the one PR template.
         text = skill.read_text(encoding="utf-8")
-        assert "**Issue discovered**" in text, skill
-        assert "**What was done to fix it**" in text, skill
+        assert ".github/pull_request_template.md" in text, skill
+        assert "**Issue discovered**" not in text, skill
         assert "Fixed with green deployment" in text, skill
 
     def test_security_skill_puts_the_write_up_on_the_github_issue(self):

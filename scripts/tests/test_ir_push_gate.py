@@ -17,6 +17,7 @@ from types import SimpleNamespace
 import pytest
 
 import ir_ensure_pr as ir
+import ir_pr_description
 import ir_push_gate as gate
 
 ACCOUNT = "U" + "1234567"
@@ -28,13 +29,17 @@ GH_TOKEN = "gh" + "p_" + "Z" * 36
 # An opaque provider key no specific shape knows (Pushover-like).
 OPAQUE = "q8Zr" + "3mWx" + "7Tn2" + "Lp5v" + "9Hd4" + "Ke6s" + "Y1"
 
-VALID_BODY = (
+IR_COMMIT_BODY = (
     "## What broke\n\nThe relay unit failed with Result=exit-code at 12:00Z.\n\n"
     "## Root cause\n\nA ledger read timeout escaped run_cycle and exited 1.\n\n"
     "## What changed\n\n- relay.py: treat the ledger timeout as non-fatal.\n\n"
     "## How it was verified\n\nFocused relay pytest passed locally, 9 cases.\n\n"
     "## Risk and rollback\n\nLow; revert the commit to restore the old path.\n\n"
     "## Still open\n\nNothing beyond watching the next scheduled relay run.\n"
+)
+# The PR body: the repo PR template rendered from the IR commit sections.
+VALID_BODY = ir_pr_description.compose_ir_pr_body(
+    ir_pr_description.validate_ir_description(IR_COMMIT_BODY)
 )
 
 
@@ -234,7 +239,7 @@ class TestScanCommitRange:
         assert PAPER_ACCOUNT not in str(exc.value)
 
     def test_clean_branch_has_no_findings(self, repo):
-        _commit(repo, "x = 2\n", "fix: relay\n\n" + VALID_BODY)
+        _commit(repo, "x = 2\n", "fix: relay\n\n" + IR_COMMIT_BODY)
         assert gate.scan_commit_range(repo, "main", "fix/relay") == []
 
     def test_removed_lines_are_not_findings(self, repo):
@@ -324,7 +329,7 @@ class TestScanCommitRangeOpaqueContent:
 
     def test_record_separator_in_a_message_cannot_hide_an_id(self, repo):
         _commit(repo, "x = 2\n", f"fix: relay\n\nnote\x1e{ACCOUNT}")
-        _commit(repo, "x = 3\n", "fix: relay\n\n" + VALID_BODY)
+        _commit(repo, "x = 3\n", "fix: relay\n\n" + IR_COMMIT_BODY)
         with pytest.raises(gate.IrPushRefused, match="commit log"):
             gate.scan_commit_range(repo, "main", "fix/relay")
 
@@ -340,7 +345,7 @@ class TestScanCommitRangeOpaqueContent:
 
     def test_id_added_then_removed_inside_the_branch_is_found(self, repo):
         _commit(repo, f"x = 2\nEXEC = '{IB_EXEC}'\n", "fix: relay")
-        _commit(repo, "x = 2\n", "fix: relay\n\n" + VALID_BODY)
+        _commit(repo, "x = 2\n", "fix: relay\n\n" + IR_COMMIT_BODY)
         self._add(repo, f"{ACCOUNT}.txt", b"")
         _git(repo, "rm", "-q", f"{ACCOUNT}.txt")
         _git(repo, "commit", "-q", "-m", "fix: drop")
@@ -430,7 +435,7 @@ class TestEnsurePrFailsClosed:
 
     def test_commit_range_is_scanned_when_repo_given(self, monkeypatch, repo):
         monkeypatch.setenv("GROK_PAGE_AUTOPUSH", "1")
-        _commit(repo, f"x = 2  # {ACCOUNT}\n", "fix: relay\n\n" + VALID_BODY)
+        _commit(repo, f"x = 2  # {ACCOUNT}\n", "fix: relay\n\n" + IR_COMMIT_BODY)
         calls: list = []
         with pytest.raises(ir.IrEnsurePrError, match="ib_account_id in diff"):
             ir.ensure_pr(
@@ -444,7 +449,7 @@ class TestCliBuildsARealBody:
     def test_cli_body_comes_from_the_commit_not_a_placeholder(self, monkeypatch, capsys):
         monkeypatch.setenv("GROK_PAGE_AUTOPUSH", "1")
         monkeypatch.setattr(
-            ir, "_git_stdout", lambda *_a, **_k: "fix: relay\n\n" + VALID_BODY
+            ir, "_git_stdout", lambda *_a, **_k: "fix: relay\n\n" + IR_COMMIT_BODY
         )
         seen: dict = {}
         monkeypatch.setattr(
@@ -452,7 +457,7 @@ class TestCliBuildsARealBody:
             lambda **k: seen.update(k) or {"action": "created", "url": "https://x/pull/1"},
         )
         assert ir.main(["--head", "fix/relay"]) == 0
-        assert "## What broke" in seen["body"]
+        assert "## Summary" in seen["body"] and "**Root cause:**" in seen["body"]
         assert "Incident-response fix." not in json.dumps(seen, default=str)
         assert seen["issue"].startswith("The relay unit failed")
 

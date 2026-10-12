@@ -16,6 +16,16 @@ SPEC = importlib.util.spec_from_file_location("nightly_pr_guard", ROOT / "script
 mod = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(mod)
 
+# .github/pull_request_template.md, filled in (scripts/ci/check_pr_body.py).
+BODY = (
+    "## Summary\n\nA substantive correction.\n\n"
+    "## What changed\n\nfix.py now refuses the input.\n\n"
+    "## Test plan\n\nFocused pytest: 3 passed. Full suites left to CI.\n\n"
+    "## Risk and rollback\n\nRevert the merge commit.\n\n"
+    "## Operator Next Steps\n\nNone\n\n"
+    "## Checklist\n\n- [x] Red/green TDD\n"
+)
+
 
 @pytest.mark.parametrize("args", [
     ["pr", "checks", "1"], ["issue", "comment", "1", "--body", "done"],
@@ -54,11 +64,12 @@ def test_creation_classifies_remote_head_and_fails_closed(verdict, refused):
     def run(args, **kwargs):
         calls.append(args)
         return subprocess.CompletedProcess(args, verdict if "check" in args else 0, "", "")
+    args = ["pr", "create", "--head=testing/today", "--base=main", "--body", BODY]
     if refused:
         with pytest.raises(mod.Refused):
-            mod.guard(["pr", "create", "--head=testing/today", "--base=main"], run=run)
+            mod.guard(args, run=run)
     else:
-        mod.guard(["pr", "create", "--head=testing/today", "--base=main"], run=run)
+        mod.guard(args, run=run)
     assert calls[1][-1] == "+refs/heads/testing/today:refs/remotes/origin/testing/today"
     assert calls[-1][-4:] == ["--base", "origin/main", "--head", "origin/testing/today"]
 
@@ -82,6 +93,9 @@ def test_the_installed_shim_routes_pr_creation_through_an_effective_guard(tmp_pa
     prefix = tmp_path / "prefix"
     (prefix / "lib").mkdir(parents=True)
     shutil.copy2(ROOT / "scripts" / "nightly_pr_guard.py", prefix / "lib" / "nightly_pr_guard.py")
+    shutil.copy2(ROOT / "scripts" / "ci" / "check_pr_body.py", prefix / "lib" / "check_pr_body.py")
+    body_file = tmp_path / "body.md"
+    body_file.write_text(BODY)
     (prefix / "lib" / "nightly_publish.py").write_text(f"raise SystemExit({verdict})\n")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -100,7 +114,8 @@ def test_the_installed_shim_routes_pr_creation_through_an_effective_guard(tmp_pa
     (bin_dir / "gh").chmod(0o700)
     run_env = {**os.environ, "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"]}
     subprocess.run([str(bin_dir / "gh"), "pr", "checks", "12"], env=run_env, check=True, timeout=15)
-    result = subprocess.run([str(bin_dir / "gh"), "pr", "create", "--base", "main", "--head", "testing/today"],
+    result = subprocess.run([str(bin_dir / "gh"), "pr", "create", "--base", "main", "--head", "testing/today",
+                             "--body-file", str(body_file)],
                             env=run_env, capture_output=True, text=True, timeout=15)
     lines = called.read_text().splitlines()
     assert lines[0] == "pr checks 12"
@@ -244,3 +259,38 @@ def test_reads_and_updates_with_leading_flags_still_pass(args):
 def test_creation_is_refused_with_a_query_or_fragment_suffix(args):
     with pytest.raises(mod.Refused, match="API creation"):
         mod.guard(args)
+
+
+def _passing_run(a, **kwargs):
+    return subprocess.CompletedProcess(a, 0, "", "")
+
+
+@pytest.mark.parametrize("body_args", [
+    [],
+    ["--body", "fixed it"],
+    ["--fill"],
+    ["--body-file", "-"],
+    ["--body", "## Issue discovered\n\nX.\n\n## What was done to fix it\n\nY.\n\n## Next\n\nFixed with green deployment\n"],
+])
+def test_pr_body_off_the_template_is_refused(body_args):
+    with pytest.raises(mod.Refused, match="pull_request_template"):
+        mod.guard(["pr", "create", "--head", "testing/today", "--base", "main", *body_args], run=_passing_run)
+
+
+@pytest.mark.parametrize("style", ["--body", "-b", "--body-file", "-F", "--body-file="])
+def test_pr_body_on_the_template_passes(tmp_path, style):
+    path = tmp_path / "body.md"
+    path.write_text(BODY)
+    if style in ("--body", "-b"):
+        extra = [style, BODY]
+    elif style.endswith("="):
+        extra = [style + str(path)]
+    else:
+        extra = [style, str(path)]
+    mod.guard(["pr", "create", "--head", "testing/today", "--base", "main", *extra], run=_passing_run)
+
+
+def test_unreadable_body_file_is_refused(tmp_path):
+    with pytest.raises(mod.Refused, match="body"):
+        mod.guard(["pr", "create", "--head", "testing/today", "--base", "main",
+                   "--body-file", str(tmp_path / "missing.md")], run=_passing_run)

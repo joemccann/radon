@@ -9,6 +9,16 @@ import pytest
 
 from scripts import nightly_publish as subject
 
+# .github/pull_request_template.md, filled in (scripts/ci/check_pr_body.py).
+BODY = (
+    "## Summary\n\nA substantive correction.\n\n"
+    "## What changed\n\nfix.py now refuses the input.\n\n"
+    "## Test plan\n\nFocused pytest: 3 passed. Full suites left to CI.\n\n"
+    "## Risk and rollback\n\nRevert the merge commit.\n\n"
+    "## Operator Next Steps\n\nNone\n\n"
+    "## Checklist\n\n- [x] Red/green TDD\n"
+)
+
 
 def git(repo: Path, *args: str) -> str:
     return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
@@ -185,7 +195,7 @@ def remote(repo, tmp_path):
 
 def publication(repo):
     body = repo.parent / "body.md"
-    body.write_text("A substantive correction.\n\nValidation: CI.\n")
+    body.write_text(BODY)
     return subject.publish(base="main", head="nightly/test", title="Nightly correction", body_file=body, repo=repo)
 
 
@@ -418,6 +428,22 @@ def test_unreadable_body_cannot_publish_a_branch(repo, remote, monkeypatch, bad_
     assert not any(cmd[:2] == ["git", "push"] or cmd[0] == "gh" for cmd in calls)
 
 
+@pytest.mark.parametrize("text", [
+    "A substantive correction.\n\nValidation: CI.\n",
+    "## Issue discovered\n\nX.\n\n## What was done to fix it\n\nY.\n\n## Next\n\nFixed with green deployment\n",
+    BODY.replace("Revert the merge commit.", "<!-- later -->"),
+])
+def test_body_off_the_pr_template_cannot_publish_a_branch(repo, remote, monkeypatch, text):
+    write(repo, "fix.py")
+    commit(repo)
+    calls = mock_gh(monkeypatch, repo)
+    body = repo.parent / "off-template.md"
+    body.write_text(text)
+    with pytest.raises(subject.PublishError, match="pull_request_template"):
+        subject.publish(base="main", head="nightly/test", title="Fix", body_file=body, repo=repo)
+    assert not any(cmd[:2] == ["git", "push"] or cmd[0] == "gh" for cmd in calls)
+
+
 def test_main_branch_cannot_be_published_as_its_own_pr(repo, monkeypatch):
     calls = mock_gh(monkeypatch, repo)
     with pytest.raises(subject.PublishError, match="must differ"):
@@ -498,7 +524,7 @@ def test_publish_cli_returns_verified_pr_json(repo, remote, monkeypatch, capsys)
     commit(repo)
     mock_gh(monkeypatch, repo)
     body = repo.parent / "body.md"
-    body.write_text("Concrete correction and validation.\n")
+    body.write_text(BODY)
     monkeypatch.chdir(repo)
     assert subject.main(["publish", "--head", "nightly/test", "--title", "Fix", "--body-file", str(body)]) == 0
     assert json.loads(capsys.readouterr().out)["pr_url"].endswith("/42")

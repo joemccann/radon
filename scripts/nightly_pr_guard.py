@@ -8,9 +8,14 @@ here, with RADON_NIGHTLY_LOOP baked in (the security loops list their
 subscription-only env names in scripts/runner/loops/security*.env
 AGENT_UNSET). This prevents an accidental direct gh command from bypassing
 publication policy. It is not a sandbox against a malicious agent.
+
+`gh pr create` must carry its body in --body/--body-file, and that body must
+follow .github/pull_request_template.md (check_pr_body.py, copied beside this
+file by install.sh; the repo copy lives in scripts/ci/).
 """
 from __future__ import annotations
 
+import importlib.util
 import os
 from pathlib import Path
 import re
@@ -117,6 +122,38 @@ def refused_action(args: list[str], loop: str = "") -> str:
     return ""
 
 
+TEMPLATE = ".github/pull_request_template.md"
+
+
+def _pr_body_errors(text: str) -> list[str]:
+    here = Path(__file__).resolve().parent
+    for candidate in (here / "check_pr_body.py", here / "ci" / "check_pr_body.py"):
+        if candidate.is_file():
+            spec = importlib.util.spec_from_file_location("radon_check_pr_body", candidate)
+            if spec is None or spec.loader is None:
+                break
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module.find_errors(text)
+    raise Refused("PR body validator check_pr_body.py is unavailable; rerun install.sh")
+
+
+def check_pr_body(args: list[str]) -> None:
+    """The body of `gh pr create` must follow the repository PR template."""
+    body_file = option(args, "--body-file", "-F")
+    body = option(args, "--body", "-b")
+    if body_file == "-":
+        raise Refused(f"PR body from stdin cannot be checked; pass --body-file with {TEMPLATE} filled in")
+    if body_file:
+        try:
+            body = Path(body_file).read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise Refused(f"PR body file is unreadable ({exc.__class__.__name__}); no PR submitted") from exc
+    errors = _pr_body_errors(body)
+    if errors:
+        raise Refused(f"PR body does not follow {TEMPLATE}: " + "; ".join(errors))
+
+
 def guard(args: list[str], *, run=subprocess.run, loop: str = "") -> None:
     reason = refused_action(args, loop)
     if reason:
@@ -140,6 +177,7 @@ def guard(args: list[str], *, run=subprocess.run, loop: str = "") -> None:
     if result.returncode:
         reason = "no substantive changes" if result.returncode == 3 else "publication check failed"
         raise Refused(f"{reason}; no PR submitted. Use the rolling issue for audit-only results.")
+    check_pr_body(args)
 
 
 def main(argv: list[str] | None = None) -> int:
