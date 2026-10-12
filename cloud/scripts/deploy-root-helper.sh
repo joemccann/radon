@@ -126,6 +126,7 @@ readonly -a CONTROL_PLANE_MODES=(
 if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
   readonly HELPER_TEST_MODE=1
   readonly STATE_DIR="$(dirname "${RADON_TEST_ACTIVE_STATE_FILE:?test active-state file is required}")"
+  readonly LEGACY_STATE_DIR="${RADON_TEST_LEGACY_STATE_DIR:-}"
   readonly SYSTEMCTL="${RADON_TEST_SYSTEMCTL:?test systemctl is required}"
   readonly SYSTEMD_ANALYZE="${RADON_TEST_SYSTEMD_ANALYZE:-}"
   readonly RM="${RADON_TEST_RM:?test rm is required}"
@@ -184,7 +185,10 @@ else
   readonly RM=/usr/bin/rm
   readonly SYNC=/usr/bin/sync
   readonly INSTALL=/usr/bin/install
-  readonly STATE_DIR=/var/lib/radon/deploy
+  # Under root-owned /var/lib, never radon-owned /var/lib/radon: radon could
+  # rename a child of its own directory and substitute one it controls.
+  readonly STATE_DIR=/var/lib/radon-deploy
+  readonly LEGACY_STATE_DIR=/var/lib/radon/deploy
   readonly ACTIVE_STATE_FILE="${STATE_DIR}/active-units"
   readonly FLOCK=/usr/bin/flock
   readonly TIMEOUT=/usr/bin/timeout
@@ -257,10 +261,74 @@ CONTROL_PLANE_SOURCE_ROOT="$CLOUD_SOURCE"
 
 prepare_state_dir() {
   if (( HELPER_TEST_MODE == 1 )); then
-    mkdir -p "$STATE_DIR"
+    [[ -L "$STATE_DIR" ]] || mkdir -p "$STATE_DIR"
   else
-    "$INSTALL" -d -m 0700 -o root -g root "$STATE_DIR"
+    [[ -L "$STATE_DIR" ]] || "$INSTALL" -d -m 0700 -o root -g root "$STATE_DIR"
   fi
+  if ! directory_is_root_owned "$STATE_DIR"; then
+    echo "deploy state directory is not a root-owned directory: $STATE_DIR" >&2
+    exit 77
+  fi
+  [[ -n "$LEGACY_STATE_DIR" ]] && migrate_legacy_state
+  return 0
+}
+
+# One-time move of a transition journaled under the pre-move state directory,
+# so a helper upgraded between stop-clean and restart-managed still restores
+# it. The legacy parent is radon-owned: read only through a pinned
+# O_NOFOLLOW fd of a root-owned, non-writable directory, and only root-owned
+# regular files. Nothing moves once the new directory holds state.
+migrate_legacy_state() {
+  "$SESSION_PYTHON" - "$LEGACY_STATE_DIR" "$STATE_DIR" "$HELPER_TEST_MODE" <<'PY_MIGRATE_STATE'
+import os, re, secrets, stat, sys
+legacy, target, test = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
+owner = os.getuid() if test else 0
+names = re.compile(r"^(active-units(\.inventory|\.restored)?|installed-units\.transaction|unit-backup\.radon-[A-Za-z0-9@_.-]+)$")
+try:
+    sfd = os.open(legacy, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+except (FileNotFoundError, NotADirectoryError):
+    sys.exit(0)
+except OSError as exc:
+    if exc.errno == 40:  # ELOOP: a link where the directory was
+        sys.exit(0)
+    raise
+tfd = os.open(target, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    info = os.fstat(sfd)
+    if info.st_uid != owner or info.st_mode & 0o022:
+        sys.exit(0)
+    if any(names.match(entry) for entry in os.listdir(tfd)):
+        sys.exit(0)
+    for entry in sorted(os.listdir(sfd)):
+        if not names.match(entry):
+            continue
+        fd = os.open(entry, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=sfd)
+        try:
+            meta = os.fstat(fd)
+            if not stat.S_ISREG(meta.st_mode) or meta.st_uid != owner:
+                continue
+            chunks = []
+            while chunk := os.read(fd, 65536):
+                chunks.append(chunk)
+        finally:
+            os.close(fd)
+        tmp = f".{entry}.{secrets.token_hex(8)}"
+        out = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=tfd)
+        try:
+            view = memoryview(b"".join(chunks))
+            while view:
+                view = view[os.write(out, view):]
+            os.fchmod(out, stat.S_IMODE(meta.st_mode) & 0o644)
+            os.fsync(out)
+        finally:
+            os.close(out)
+        os.rename(tmp, entry, src_dir_fd=tfd, dst_dir_fd=tfd)
+        os.fsync(tfd)
+        os.unlink(entry, dir_fd=sfd)
+finally:
+    os.close(sfd)
+    os.close(tfd)
+PY_MIGRATE_STATE
 }
 
 if (( $# != 1 )); then

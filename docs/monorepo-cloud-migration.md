@@ -40,7 +40,7 @@ radon/                          # sole product repo
 | `/home/radon/radon/cloud` | Infra + deploy scripts (same SHA as app) |
 | `/home/radon/.radon-deploy-runners/<sha>.<run>/cloud` | Immutable support bundle; current plus four newest inactive bundles retained |
 | `/etc/radon/env` | Canonical host secrets (`0640`, `root:radon`); `/home/radon/radon-cloud/.env` is the compatibility symlink |
-| `/var/lib/radon/deploy` | Reboot-durable root topology transition state |
+| `/var/lib/radon-deploy` | Reboot-durable root topology transition state |
 | `/var/lib/radon/control-plane-ready` | Root-published compatibility marker for monorepo deploys |
 
 ---
