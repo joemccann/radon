@@ -427,6 +427,24 @@ def test_explicit_closed_ranges_remain_source_exact_range_marks():
     assert gc.valid_evidence(plan, evidence, {1: ' '.join(quotes)})
 
 
+def test_currency_unit_requires_currency_in_each_source_quote():
+    assert gc._number_in_quote(1, 'USD billion', 'Revenue was $1bn.')
+    assert not gc._number_in_quote(1, 'USD billion', 'Revenue was 1bn.')
+    assert not gc._number_in_quote(1, 'USD billion', 'Revenue was €1bn.')
+
+
+def test_range_endpoints_must_be_linked_as_one_source_measurement():
+    quote = ('Asia yields were 3%; Europe yields were 4%; '
+             'Africa yields were 2%; North America yields were 5%.')
+    plan = {'kind': 'range', 'title': 'Reported yields by region', 'metric': 'Yield', 'unit': '%',
+            'axis': [0, 6], 'ticks': [0, 2, 4, 6],
+            'marks': [{'id': 'asia', 'label': 'Asia yields', 'low': 3, 'high': 4, 'estimated': False},
+                      {'id': 'africa', 'label': 'Africa yields', 'low': 2, 'high': 5, 'estimated': False}]}
+    evidence = [{'id': row['id'], 'page': 1, 'source_quote': quote} for row in plan['marks']]
+    assert gc.valid_plan(plan)
+    assert not gc.valid_evidence(plan, evidence, {1: quote})
+
+
 
 def test_wider_than_spread_bound_is_not_an_exact_observed_spread():
     quote = 'At wider than 150bps. An earlier closing spread was 130bp.'
