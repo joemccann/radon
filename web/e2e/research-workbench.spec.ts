@@ -9,7 +9,7 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 1000 }, { name: 
     await page.goto("/research-workbench", { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("chat-launcher-ready")).toBeAttached();
     const workbench = page.getByTestId("research-workbench");
-    await expect(workbench.getByRole("heading", { name: "Evidence to decision", exact: true })).toBeVisible();
+    await expect(workbench.getByRole("heading", { name: "No sources yet", exact: true })).toBeVisible();
     await workbench.getByLabel("Published", { exact: true }).fill("2026-09-01");
     await workbench.getByLabel("Ticker (optional)").fill("AAPL");
     await workbench.getByLabel("Original HTTPS URL (optional)").fill("https://example.com/filing");
