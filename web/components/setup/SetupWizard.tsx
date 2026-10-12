@@ -212,7 +212,7 @@ export default function SetupWizard() {
             />
             <button
               type="button"
-              className="admin-btn admin-btn-primary"
+              className="admin-btn admin-btn-primary setup-token-submit"
               data-testid="setup-token-submit"
               disabled={!token.trim() || tokenBusy}
               onClick={() => {

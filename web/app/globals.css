@@ -21730,8 +21730,14 @@ body[data-mobile="true"] .alerts-rule__channel {
 /* /setup token step: a secret, not a number; it takes the whole row. */
 .setup-token-input {
   flex: 1 1 auto;
+  min-width: 0;
   width: 100%;
   text-align: left;
+}
+
+.setup-token-submit {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .preferences-row__toggle {

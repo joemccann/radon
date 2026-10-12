@@ -32,4 +32,14 @@ describe("/setup token step (plate 65)", () => {
     expect(rule?.[1]).toMatch(/width:\s*100%/);
     expect(rule?.[1]).toMatch(/text-align:\s*left/);
   });
+
+  it("keeps Begin setup on one line beside the field", () => {
+    render(<SetupWizard />);
+    const submit = screen.getByRole("button", { name: "Begin setup" });
+    expect(submit.className).toContain("setup-token-submit");
+    const css = readFileSync(path.join(__dirname, "../app/globals.css"), "utf8");
+    const rule = css.match(/\.setup-token-submit\s*\{([^}]*)\}/);
+    expect(rule?.[1]).toMatch(/white-space:\s*nowrap/);
+    expect(rule?.[1]).toMatch(/flex-shrink:\s*0/);
+  });
 });
