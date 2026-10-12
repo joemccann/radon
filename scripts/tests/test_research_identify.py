@@ -152,3 +152,53 @@ def test_parenthesized_ticker_on_page_one_is_a_candidate():
 def test_non_single_stock_documents_carry_no_ticker_candidates():
     ident = identify.identify({1: "## Economics Research ## 16 September 2026 (US) outlook"}, meta("tic data.pdf"), FOLDER)
     assert ident.doc_type == "research" and ident.tickers == ()
+
+
+@pytest.mark.parametrize('folder', ['other', 'week ahead', 'unknown', ''])
+def test_last_page_legal_publisher_beats_cited_banks_in_body(folder):
+    quote = '© 2026 London Stock Exchange Group plc. All rights reserved.'
+    pages = {1: '# The Day Ahead\nGoldman Sachs said yields would rise. Reuters photo credit.',
+             6: 'T-Mobile US slid 13.27%. LSEG provides market data.',
+             11: '# The Day Ahead\n' + quote + '\nLSEG\n10 Paternoster Square, London'}
+    ident = identify.identify(pages, meta('the day ahead.pdf', folder), '2026-10-09')
+    assert ident.publisher == 'LSEG'
+    assert ident.publisher_source == 'page'
+    assert ident.publisher_page == 11
+    assert ident.publisher_quote == quote
+    assert ident.publisher_quote in pages[ident.publisher_page]
+
+
+@pytest.mark.parametrize('quote', [
+    '©2026London Stock Exchange Group plc. All rights reserved.',
+    'Copyright 2026 LSEG. All rights reserved.',
+    '© London Stock Exchange Group plc 2026. All rights reserved.',
+])
+def test_lseg_legal_footer_variants_are_grounded(quote):
+    ident = identify.identify({1: 'A markets wrap.', 9: quote}, meta('wrap.pdf', 'other'), FOLDER)
+    assert ident.publisher == 'LSEG'
+    assert ident.publisher_page == 9
+    assert ident.publisher_quote in quote
+
+
+def test_named_folder_priority_is_unchanged_and_new_fields_default():
+    ident = identify.identify({1: 'Goldman Sachs Research', 11: '© 2026 London Stock Exchange Group plc. All rights reserved.'},
+                              meta('gs research.pdf'), FOLDER)
+    assert ident.publisher == 'Goldman Sachs' and ident.publisher_source == 'folder'
+    assert ident.publisher_page is None and ident.publisher_quote is None
+
+
+@pytest.mark.parametrize('text', [
+    'LSEG market data shows that Reuters quoted Goldman Sachs.',
+    'Photo: REUTERS/Adam Gray. LSEG shares rose.',
+    '© 2026 Independent Publisher. Data supplied by LSEG.',
+])
+def test_body_mentions_photo_credits_and_data_credits_do_not_attribute_lseg(text):
+    ident = identify.identify({1: 'A markets wrap.', 11: text}, meta('lseg reuters wrap.pdf', 'other'), FOLDER)
+    assert ident.publisher == 'unknown' and ident.publisher_source == 'none'
+    assert ident.publisher_page is None and ident.publisher_quote is None
+
+
+@pytest.mark.parametrize('folder', ['lseg', 'london stock exchange group', 'london stock exchange group plc'])
+def test_lseg_folder_aliases_use_canonical_display(folder):
+    ident = identify.identify({1: 'The Day Ahead'}, meta('wrap.pdf', folder), FOLDER)
+    assert ident.publisher == 'LSEG' and ident.publisher_source == 'folder'

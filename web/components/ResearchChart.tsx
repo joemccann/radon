@@ -3,14 +3,22 @@ import { Group } from "@visx/group";
 import { scaleBand, scaleLinear } from "@visx/scale";
 import { Bar, Circle, Line } from "@visx/shape";
 
-import type { ChartPlan } from "@/lib/planCharts";
+import { periodTimestamp, type ChartPlan } from "@/lib/planCharts";
 
 const WIDTH = 720;
+
+function ChartAttribution({ height }: { height: number }) {
+  return (
+    <a href="https://radon.run" aria-label="Radon website">
+      <text x={WIDTH - 24} y={height + 20} fill="var(--text-muted)" fontSize={12} fontFamily="var(--font-sans)" textAnchor="end">https://radon.run</text>
+    </a>
+  );
+}
 
 function formatValue(value: number, unit: string): string {
   if (unit === "bp") return `${value > 0 ? "+" : ""}${value} bp`;
   if (unit === "z") return `${value}z`;
-  if (unit === "%") return Number.isInteger(value) ? value.toFixed(0) : value.toFixed(2);
+  if (unit === "%") return `${round(value)}%`;
   const text = String(round(value));
   return text;
 }
@@ -31,7 +39,7 @@ function RangeFigure({ plan }: { plan: Extract<ChartPlan, { kind: "range" }> }) 
     padding: 0.42,
   });
   return (
-    <svg role="img" aria-label={plan.title} viewBox={`0 0 ${WIDTH} ${height}`} width="100%" data-axis-min={plan.axis[0]} data-axis-max={plan.axis[1]} data-unit={plan.unit}>
+    <svg role="img" aria-label={plan.title} viewBox={`0 0 ${WIDTH} ${height + 28}`} width="100%" data-axis-min={plan.axis[0]} data-axis-max={plan.axis[1]} data-unit={plan.unit}>
       <title>{plan.title}</title>
       {plan.ticks.map((tick) => (
         <Group key={`tick-${tick}`}>
@@ -56,7 +64,7 @@ function RangeFigure({ plan }: { plan: Extract<ChartPlan, { kind: "range" }> }) 
           <text x={xScale(plan.reference.value)} y={12} fill="var(--text-secondary)" fontSize={12} fontFamily="var(--font-mono)" textAnchor="middle">{plan.reference.label}</text>
         </Group>
       ) : null}
-      <text x={(margin.left + plotRight) / 2} y={height - 8} fill="var(--text-muted)" fontSize={12} fontFamily="var(--font-sans)" textAnchor="middle">{plan.unit === "%" ? "Yield %" : plan.unit}</text>
+      <text x={(margin.left + plotRight) / 2} y={height - 8} fill="var(--text-muted)" fontSize={12} fontFamily="var(--font-sans)" textAnchor="middle">{plan.metric ? `${plan.metric} (${plan.unit})` : plan.unit}</text>
       {plan.marks.map((mark) => {
         const cy = (yScale(mark.id) ?? 0) + yScale.bandwidth() / 2;
         const color = mark.estimated ? "var(--warn)" : mark.low === mark.high ? "var(--neutral)" : "var(--signal-core)";
@@ -81,6 +89,7 @@ function RangeFigure({ plan }: { plan: Extract<ChartPlan, { kind: "range" }> }) 
           </Group>
         );
       })}
+      <ChartAttribution height={height} />
     </svg>
   );
 }
@@ -97,7 +106,7 @@ function BarFigure({ plan }: { plan: Extract<ChartPlan, { kind: "bar" }> }) {
     padding: 0.38,
   });
   return (
-    <svg role="img" aria-label={plan.title} viewBox={`0 0 ${WIDTH} ${height}`} width="100%" data-axis-min={plan.axis[0]} data-axis-max={plan.axis[1]} data-unit={plan.unit}>
+    <svg role="img" aria-label={plan.title} viewBox={`0 0 ${WIDTH} ${height + 28}`} width="100%" data-axis-min={plan.axis[0]} data-axis-max={plan.axis[1]} data-unit={plan.unit}>
       <title>{plan.title}</title>
       {plan.ticks.map((tick) => (
         <Group key={`tick-${tick}`}>
@@ -105,7 +114,7 @@ function BarFigure({ plan }: { plan: Extract<ChartPlan, { kind: "bar" }> }) {
           <text x={xScale(tick)} y={plotBottom + 18} fill="var(--text-muted)" fontSize={12} fontFamily="var(--font-mono)" textAnchor="middle">{tick}</text>
         </Group>
       ))}
-      <text x={plotRight} y={height - 8} fill="var(--text-muted)" fontSize={12} fontFamily="var(--font-sans)" textAnchor="end">{plan.unit}</text>
+      <text x={plotRight} y={height - 8} fill="var(--text-muted)" fontSize={12} fontFamily="var(--font-sans)" textAnchor="end">{plan.metric ? `${plan.metric} (${plan.unit})` : plan.unit}</text>
       {plan.bars.map((row) => {
         const y = yScale(row.id) ?? 0;
         const x0 = xScale(0);
@@ -118,6 +127,7 @@ function BarFigure({ plan }: { plan: Extract<ChartPlan, { kind: "bar" }> }) {
           </Group>
         );
       })}
+      <ChartAttribution height={height} />
     </svg>
   );
 }
@@ -133,14 +143,20 @@ function LineFigure({ plan }: { plan: Extract<ChartPlan, { kind: "line" }> }) {
     range: [margin.left, plotRight],
     padding: 0.4,
   });
-  const coords = plan.points.map((point) => ({
+  const timestamps = plan.points.map(point => point.timestamp ?? periodTimestamp(point.label));
+  const dated = timestamps.every(stamp => stamp !== undefined && Number.isFinite(stamp));
+  const dates = timestamps.map(stamp => stamp ?? 0);
+  const timeScale = dated && Math.min(...dates) !== Math.max(...dates)
+    ? scaleLinear<number>({domain: [Math.min(...dates), Math.max(...dates)], range: [margin.left + 16, plotRight - 16]})
+    : undefined;
+  const coords = plan.points.map((point, index) => ({
     point,
-    x: (xScale(point.id) ?? 0) + xScale.bandwidth() / 2,
+    x: timeScale ? timeScale(dates[index]) : (xScale(point.id) ?? 0) + xScale.bandwidth() / 2,
     y: yScale(point.value),
   }));
   const path = coords.map((coord, index) => `${index === 0 ? "M" : "L"}${coord.x} ${coord.y}`).join(" ");
   return (
-    <svg role="img" aria-label={plan.title} viewBox={`0 0 ${WIDTH} ${height}`} width="100%" data-axis-min={plan.axis[0]} data-axis-max={plan.axis[1]} data-unit={plan.unit}>
+    <svg role="img" aria-label={plan.title} viewBox={`0 0 ${WIDTH} ${height + 28}`} width="100%" data-axis-min={plan.axis[0]} data-axis-max={plan.axis[1]} data-unit={plan.unit}>
       <title>{plan.title}</title>
       {plan.ticks.map((tick) => (
         <Group key={`tick-${tick}`}>
@@ -156,6 +172,7 @@ function LineFigure({ plan }: { plan: Extract<ChartPlan, { kind: "line" }> }) {
           <text x={x} y={plotBottom + 18} fill="var(--text-primary)" fontSize={12} fontFamily="var(--font-sans)" textAnchor="middle">{point.label}</text>
         </Group>
       ))}
+      <ChartAttribution height={height} />
     </svg>
   );
 }
@@ -168,7 +185,7 @@ function ScatterFigure({ plan }: { plan: Extract<ChartPlan, { kind: "scatter" }>
   const xScale = scaleLinear<number>({ domain: [...plan.xAxis], range: [margin.left, plotRight] });
   const yScale = scaleLinear<number>({ domain: [...plan.yAxis], range: [plotBottom, margin.top] });
   return (
-    <svg role="img" aria-label={plan.title} viewBox={`0 0 ${WIDTH} ${height}`} width="100%" data-axis-min={plan.xAxis[0]} data-axis-max={plan.xAxis[1]} data-unit={plan.xUnit}>
+    <svg role="img" aria-label={plan.title} viewBox={`0 0 ${WIDTH} ${height + 28}`} width="100%" data-axis-min={plan.xAxis[0]} data-axis-max={plan.xAxis[1]} data-unit={plan.xUnit}>
       <title>{plan.title}</title>
       {plan.xTicks.map((tick) => (
         <Line key={`x-${tick}`} from={{ x: xScale(tick), y: margin.top }} to={{ x: xScale(tick), y: plotBottom }} stroke={tick === 0 ? "var(--line-grid)" : "var(--chart-grid)"} strokeWidth={1} />
@@ -189,6 +206,7 @@ function ScatterFigure({ plan }: { plan: Extract<ChartPlan, { kind: "scatter" }>
           <text x={xScale(point.x) + 8} y={yScale(point.y) - 8} fill="var(--text-primary)" fontSize={12} fontFamily="var(--font-sans)">{point.label}</text>
         </Group>
       ))}
+      <ChartAttribution height={height} />
     </svg>
   );
 }
@@ -201,7 +219,7 @@ export function ResearchChart({ plan }: { plan: ChartPlan }) {
       {plan.kind === "bar" ? <BarFigure plan={plan} /> : null}
       {plan.kind === "line" ? <LineFigure plan={plan} /> : null}
       {plan.kind === "scatter" ? <ScatterFigure plan={plan} /> : null}
-      {plan.kind === "bar" && plan.note ? <p style={noteStyle}>{plan.note}</p> : null}
+      {(plan.kind === "bar" || plan.kind === "line") && plan.note ? <p style={noteStyle}>{plan.note}</p> : null}
       {plan.kind === "range" && plan.sourceNote ? <p style={noteStyle}>{plan.sourceNote}</p> : null}
     </figure>
   );

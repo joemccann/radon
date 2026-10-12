@@ -131,3 +131,43 @@ describe("DashboardNewsFeed generated charts", () => {
     expect(item.querySelector(".news-feed-figure img")?.getAttribute("src")).toBe(chart);
   });
 });
+
+describe('semantic chart rendering', () => {
+  afterEach(cleanup);
+  it('places the Radon URL inside every generated SVG chart', () => {
+    render(<PlannedCharts plans={planCharts(GS)} date="2026-09-24" />);
+    const charts = screen.getAllByRole('img');
+    expect(charts.length).toBeGreaterThan(1);
+    for (const chart of charts) {
+      expect(chart.textContent).toContain('https://radon.run');
+      expect(chart.querySelector('a')?.getAttribute('href')).toBe('https://radon.run');
+    }
+  });
+  it('labels percentages with the observed metric and unit', () => {
+    render(<PlannedCharts plans={planCharts('Japan September Consumer Inflation Expectations Rose to 4.35% From 4.15% in August, First Increase in Five Months')} date="2026-09-30" />);
+    const chart = screen.getByRole('img', {name: 'Japan consumer inflation expectations'});
+    expect(chart.textContent).toContain('Consumer inflation expectations (%)');
+    expect(chart.textContent).toContain('4.15%');
+    expect(chart.textContent).toContain('4.35%');
+    expect(chart.textContent).not.toContain('Yield');
+    expect(chart.querySelectorAll('rect')).toHaveLength(2);
+  });
+  it('spaces dated line observations by elapsed time', () => {
+    render(<PlannedCharts date="2026-09-30" plans={[{kind:'line', title:'Assets', unit:'$bn', axis:[0, 40], ticks:[0, 20, 40], points:[
+      {id:'jan', label:'Jan 2025', value:10, timestamp:Date.UTC(2025,0,1)},
+      {id:'feb', label:'Feb 2025', value:12, timestamp:Date.UTC(2025,1,1)},
+      {id:'sep', label:'Sep 2026', value:39, timestamp:Date.UTC(2026,8,1)},
+    ]}]} />);
+    const points = [...screen.getByRole('img', {name:'Assets'}).querySelectorAll('circle')].map(p => Number(p.getAttribute('cx')));
+    expect((points[1]-points[0])/(points[2]-points[0])).toBeCloseTo(31/608, 4);
+    expect(screen.getByRole('img', {name:'Assets'}).textContent).toContain('https://radon.run');
+  });
+  it('keeps attribution inside scatter chart exports', () => {
+    render(<PlannedCharts date="2026-10-09" plans={[{kind:'scatter',title:'Duration and yield',
+      xUnit:'years',yUnit:'%',xAxis:[0,10],yAxis:[0,6],xTicks:[0,5,10],yTicks:[0,2,4,6],
+      points:[{id:'a',label:'Issuer A',x:2,y:3},{id:'b',label:'Issuer B',x:6,y:4}]}]} />);
+    const chart = screen.getByRole('img', {name:'Duration and yield'});
+    expect(chart.textContent).toContain('https://radon.run');
+    expect(chart.querySelector('a')?.getAttribute('href')).toBe('https://radon.run');
+  });
+});

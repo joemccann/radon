@@ -204,3 +204,75 @@ describe("planCharts", () => {
     expect(chartsForPost({ title: "SoftBank", content: GS, source: { ...post.source, figures: [] }, images: [] })).toHaveLength(2);
   });
 });
+
+const JAPAN = 'Japan September Consumer Inflation Expectations Rose to 4.35% From 4.15% in August, First Increase in Five Months';
+
+describe('semantic source comparisons', () => {
+  it('uses chronological months and the stated metric without a fabricated history', () => {
+    const plans = planCharts(JAPAN);
+    expect(plans).toHaveLength(1);
+    const chart = bar(plans[0]);
+    expect(chart.title).toBe('Japan consumer inflation expectations');
+    expect(chart).toHaveProperty('metric', 'Consumer inflation expectations');
+    expect(chart.axis[0]).toBe(0);
+    expect(chart.unit).toBe('%');
+    expect(chart.bars.map(p => [p.label, p.value])).toEqual([['August', 4.15], ['September', 4.35]]);
+    expect(verifyChart(chart, JAPAN)).toBe(true);
+    expect(verifyChart({...chart, bars: chart.bars.map(p => ({...p, value: p.value === 4.15 ? 4.35 : 4.15}))}, JAPAN)).toBe(false);
+  });
+
+  it('keeps equal observations and year rollover periods', () => {
+    const chart = bar(planCharts('Japan January consumer inflation expectations were 4.15%, unchanged from 4.15% in December.')[0]);
+    expect(chart.bars.map(p => [p.label, p.value])).toEqual([['December', 4.15], ['January', 4.15]]);
+  });
+
+  it('uses bars for categories and preserves signed values', () => {
+    const chart = bar(planCharts('Fund A returned -2.5%. Fund B returned 3.1%.')[0]);
+    expect(chart.title).not.toBe('Yields');
+    expect(chart.bars.map(p => [p.label, p.value])).toEqual([['Fund B', 3.1], ['Fund A', -2.5]]);
+    expect(bar(planCharts('Fund A yields 4%. Fund B yields 4%.')[0]).bars).toHaveLength(2);
+  });
+
+  it('rejects reversed ranges, unlabelled changes, and incomparable metrics', () => {
+    expect(planCharts('Fund A returned 4-2%.')).toEqual([]);
+    const chart = range(planCharts('Fund A returned 2-4%.')[0]);
+    expect(chart.title).not.toBe('Yields');
+    expect([chart.marks[0].low, chart.marks[0].high]).toEqual([2, 4]);
+    expect(planCharts('Fund A fell 2.5%. Fund B rose 3.1%.')).toEqual([]);
+    expect(planCharts('Japan inflation is 2.5%. Japan unemployment is 3.1%.')).toEqual([]);
+  });
+});
+
+describe('stored semantic fidelity', () => {
+  it('rejects an old Japan yield plan and reparses the stated periods', () => {
+    const stale: ChartPlan = {kind:'range', title:'Yields', unit:'%', axis:[0,6], ticks:[0,2,4,6], marks:[
+      {id:'expectations-rose',label:'Expectations Rose',detail:'',low:4.35,high:4.35,estimated:false},
+      {id:'from',label:'From',detail:'',low:4.15,high:4.15,estimated:false}]};
+    expect(verifyChart(stale, JAPAN)).toBe(false);
+    expect(chartsForPost({title:JAPAN, source:{kind:'dropbox',charts:[stale]}})[0].kind).toBe('bar');
+    expect(planCharts('Japan inflation is 2.5% and unemployment is 3.1%.')).toEqual([]);
+  });
+  it('keeps reviewed generation states from rendering legacy fallback charts', () => {
+    expect(chartsForPost({title:JAPAN, source:{kind:'dropbox',chartGeneration:{status:'rejected'}}})).toEqual([]);
+  });
+  it('does not trust invented timestamp spacing', () => {
+    const text='Tokenized assets grew from $10bn in January 2025 to $39bn in September 2026.';
+    const chart=planCharts(text)[0];
+    expect(chart.kind).toBe('line');
+    if(chart.kind !== 'line') return;
+    expect(chart.points[0].timestamp).toBe(Date.UTC(2025,0,1));
+    expect(verifyChart({...chart,points:chart.points.map(p=>({...p,timestamp:0}))},text)).toBe(false);
+  });
+});
+
+describe('title and body temporal boundaries', () => {
+  it('deduplicates a repeated comparison when the title lacks closing punctuation', () => {
+    const raw='Japan September Consumer Inflation Expectations Rose to 4.35% From 4.15% in August\nJapan September consumer inflation expectations rose to 4.35% from 4.15% in August.';
+    const chart=bar(planCharts(raw)[0]);
+    expect(chart.bars.map(p=>[p.label,p.value])).toEqual([['August',4.15],['September',4.35]]);
+  });
+  it('preserves a source statement wrapped between the two observations', () => {
+    const chart=bar(planCharts('Japan September consumer inflation expectations rose to 4.35%\nfrom 4.15% in August.')[0]);
+    expect(chart.bars.map(p=>[p.label,p.value])).toEqual([['August',4.15],['September',4.35]]);
+  });
+});

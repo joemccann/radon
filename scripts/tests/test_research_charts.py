@@ -50,3 +50,76 @@ def test_two_dollar_flows_are_a_bar():
     plans = charts.plan("Foreign investors bought $45bn of US equities. Official investors added $12bn.")
     assert plans[0]["kind"] == "bar"
     assert [(bar["label"], bar["value"]) for bar in plans[0]["bars"]] == [("Foreign investors", 45), ("Official investors", 12)]
+
+JAPAN = "Japan September Consumer Inflation Expectations Rose to 4.35% From 4.15% in August, First Increase in Five Months"
+
+
+def test_month_comparison_has_metric_and_chronological_source_periods():
+    plans = charts.plan(JAPAN)
+    assert len(plans) == 1
+    chart = plans[0]
+    assert chart['kind'] == 'bar'
+    assert chart['title'] == 'Japan consumer inflation expectations'
+    assert chart['metric'] == 'Consumer inflation expectations'
+    assert chart['unit'] == '%' and chart['axis'][0] == 0
+    assert [(p['label'], p['value']) for p in chart['bars']] == [('August', 4.15), ('September', 4.35)]
+    assert charts._verify(chart, JAPAN)
+    swapped = {**chart, 'bars': [{**chart['bars'][0], 'value': 4.35}, {**chart['bars'][1], 'value': 4.15}]}
+    assert not charts._verify(swapped, JAPAN)
+
+
+def test_equal_month_values_are_two_observations_and_year_rollover_is_chronological():
+    text = 'Japan January consumer inflation expectations were 4.15%, unchanged from 4.15% in December.'
+    chart = charts.plan(text)[0]
+    assert [(p['label'], p['value']) for p in chart['bars']] == [('December', 4.15), ('January', 4.15)]
+
+
+def test_generic_percent_categories_are_bars_and_negative_values_keep_their_sign():
+    chart = charts.plan('Fund A returned -2.5%. Fund B returned 3.1%.')[0]
+    assert chart['kind'] == 'bar' and chart['title'] != 'Yields'
+    assert [(p['label'], p['value']) for p in chart['bars']] == [('Fund B', 3.1), ('Fund A', -2.5)]
+
+
+def test_named_category_equal_values_are_not_deduped():
+    chart = charts.plan('Fund A yields 4%. Fund B yields 4%.')[0]
+    assert len(chart['bars']) == 2
+
+
+def test_reversed_range_is_rejected_and_numeric_range_keeps_reported_endpoints():
+    assert charts.plan('Fund A returned 4-2%.') == []
+    chart = charts.plan('Fund A returned 2-4%.')[0]
+    assert chart['kind'] == 'range' and chart['title'] != 'Yields'
+    assert (chart['marks'][0]['low'], chart['marks'][0]['high']) == (2, 4)
+
+
+def test_signed_change_and_distinct_metrics_are_not_pooled_as_levels():
+    assert charts.plan('Fund A fell 2.5%. Fund B rose 3.1%.') == []
+    assert charts.plan('Japan inflation is 2.5%. Japan unemployment is 3.1%.') == []
+
+
+def test_temporal_values_keep_their_metric_and_reject_stale_verb_labels():
+    fake = {'kind':'range', 'title':'Yields', 'unit':'%', 'axis':[0,6], 'ticks':[0,2,4,6], 'marks':[
+        {'id':'expectations-rose','label':'Expectations Rose','detail':'','low':4.35,'high':4.35,'estimated':False},
+        {'id':'from','label':'From','detail':'','low':4.15,'high':4.15,'estimated':False}]}
+    assert not charts._verify(fake, JAPAN)
+    assert charts.plan('Japan inflation is 2.5% and unemployment is 3.1%.') == []
+
+
+def test_full_month_money_series_does_not_crash_and_keeps_dates():
+    chart = charts.plan('Tokenized assets grew from $10bn in January 2025 to $39bn in September 2026.')[0]
+    assert chart['kind'] == 'line'
+    assert chart['points'][0]['timestamp'] < chart['points'][1]['timestamp']
+
+
+def test_unpunctuated_title_and_repeated_body_share_one_temporal_comparison():
+    raw = ('Japan September Consumer Inflation Expectations Rose to 4.35% From 4.15% in August\n'
+           'Japan September consumer inflation expectations rose to 4.35% from 4.15% in August.')
+    chart = charts.plan(raw)[0]
+    assert chart['kind'] == 'bar'
+    assert [(p['label'], p['value']) for p in chart['bars']] == [('August', 4.15), ('September', 4.35)]
+
+
+def test_temporal_statement_survives_source_line_wrapping():
+    raw = 'Japan September consumer inflation expectations rose to 4.35%\nfrom 4.15% in August.'
+    chart = charts.plan(raw)[0]
+    assert [(p['label'], p['value']) for p in chart['bars']] == [('August', 4.15), ('September', 4.35)]
