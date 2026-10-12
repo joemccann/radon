@@ -68,9 +68,13 @@ function AtsVenueShareTable({ rows }: { rows: AtsVenueShareRow[] }) {
             <td className="right">{formatZ(row.avg_ats_print_size_z)}</td>
             <td className="right">{formatSharePct(row.short_volume_pct)}</td>
             <td className="right">{formatGap(venueDivergence(row))}</td>
-            <td>
-              <SignalChip row={row} />
-            </td>
+            {row.classification === "neutral" ? (
+              <td title={row.classification_reason ?? undefined} />
+            ) : (
+              <td>
+                <SignalChip row={row} />
+              </td>
+            )}
           </tr>
         ))}
       </tbody>

@@ -21,7 +21,7 @@ import {
   formatContracts,
   formatPercentile,
   formatReportDate,
-  formatReportFreshness,
+  reportAgeDays,
   formatShareOfOi,
   formatZScore,
   selectContract,
@@ -166,7 +166,7 @@ export default function EquiblesCotPanel() {
     },
   ];
 
-  const freshness = formatReportFreshness(contract.report_date, new Date());
+  const reportAge = reportAgeDays(contract.report_date, new Date());
   const biasTone = CONTRARIAN_TONE[contract.contrarian_bias];
 
   return (
@@ -194,7 +194,7 @@ export default function EquiblesCotPanel() {
             <MetricCell label="REPORTED" value={formatReportDate(contract.report_date)} />
           </div>
         ) : (
-          <RegimeStrip>
+          <RegimeStrip columns={4}>
             <RegimeStripCell
               testId="cot-strip-net"
               label="NET SPECULATOR"
@@ -225,7 +225,7 @@ export default function EquiblesCotPanel() {
               testId="cot-strip-reported"
               label="REPORTED"
               value={formatReportDate(contract.report_date)}
-              sub={<>{freshness}</>}
+              sub={reportAge != null ? <>{reportAge <= 0 ? "today" : `${reportAge}d old`}</> : null}
             />
           </RegimeStrip>
         )}

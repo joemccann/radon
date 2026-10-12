@@ -280,6 +280,20 @@ describe("BpiPanel session staleness", () => {
     expect(screen.getByTestId("bpi-strip-session").textContent).toContain("2026-08-13");
     expect(screen.queryByTestId("bpi-session-stale")).toBeNull();
   });
+
+  it("says stale once as a plain warning word, not a pill, and keeps the date on one line (plate 37)", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-13T19:22:00-04:00"));
+    renderNdx("2026-08-12");
+
+    const mark = screen.getByTestId("bpi-session-stale");
+    expect(mark.style.border).toBe("");
+    expect(mark.style.borderRadius).toBe("");
+    expect(mark.textContent).toBe("STALE");
+    const value = screen.getByTestId("bpi-strip-session").querySelector(".regime-strip-value > span") as HTMLElement;
+    expect(value.style.whiteSpace).toBe("nowrap");
+    expect(screen.getByTestId("bpi-strip-session").textContent).not.toMatch(/DAILY CLOSE SERIES/);
+  });
 });
 
 describe("BpiChart pins", () => {

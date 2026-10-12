@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import { Network } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
@@ -36,6 +36,20 @@ const COR_TOOLTIP =
 
 const SOURCE_FOOTNOTE =
   "Cboe COR1M, COR3M, COR6M and COR1Y daily closes since 2006-01. Stats span each tenor's non-null sessions, not the visible range.";
+
+/** Tenor and range share one labelled row so neither selector reads as orphaned. */
+const CONTROL_ROW: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "baseline",
+  columnGap: "28px",
+  rowGap: "4px",
+};
+const CONTROL_GROUP: CSSProperties = { display: "flex", alignItems: "baseline", gap: "10px" };
+const CONTROL_LABEL: CSSProperties = {
+  fontSize: "var(--text-meta)",
+  color: "var(--text-muted)",
+};
 
 interface CorPanelChartRow extends CorChartRow {
   /** Never populated: CriHistoryChart wants a two-series tuple; the left slot stays inert. */
@@ -216,30 +230,37 @@ export default function CorPanel() {
 
       {/* ── Implied correlation chart ─────────────────────── */}
       <div className="breadth-history-block" data-testid="cor-chart-section">
-        <HistoryRangeChips
-          active={activePreset}
-          onChange={(slug) => {
-            setCustomRange(null);
-            setPreset(slug);
-          }}
-          maxSessions={total}
-          ariaLabel="Implied correlation chart range"
-          dataTestId="cor-range-chips"
-        />
-
-        <nav className="history-range-chips" aria-label="Implied correlation tenor" data-testid="cor-tenor-chips">
-          {TENOR_OPTIONS.map((option) => (
-            <button
-              key={option.key}
-              type="button"
-              className={`history-range-chip${tenor === option.key ? " is-active" : ""}`}
-              aria-pressed={tenor === option.key}
-              onClick={() => setTenor(option.key)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </nav>
+        <div data-testid="cor-chart-controls" style={CONTROL_ROW}>
+          <div style={CONTROL_GROUP}>
+            <span style={CONTROL_LABEL}>Tenor</span>
+            <nav className="history-range-chips" aria-label="Implied correlation tenor" data-testid="cor-tenor-chips">
+              {TENOR_OPTIONS.map((option) => (
+                <button
+                  key={option.key}
+                  type="button"
+                  className={`history-range-chip${tenor === option.key ? " is-active" : ""}`}
+                  aria-pressed={tenor === option.key}
+                  onClick={() => setTenor(option.key)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </nav>
+          </div>
+          <div style={CONTROL_GROUP}>
+            <span style={CONTROL_LABEL}>Range</span>
+            <HistoryRangeChips
+              active={activePreset}
+              onChange={(slug) => {
+                setCustomRange(null);
+                setPreset(slug);
+              }}
+              maxSessions={total}
+              ariaLabel="Implied correlation chart range"
+              dataTestId="cor-range-chips"
+            />
+          </div>
+        </div>
 
         <CriHistoryChart
           history={slice}
