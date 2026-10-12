@@ -7,7 +7,7 @@
  *  - DashboardSurface mounts <CatalystCard/> (Upcoming Catalysts surface).
  *  - The flow-analysis surface mounts <InformedFlowPanel ticker={...}/> for the
  *    active ticker (Congress & Insider Activity surface).
- *  - The alerts page renders <AlertsPanel/> (Signal Alert Rules surface).
+ *  - The alerts page renders <AlertsPanel/> (Signal alerts surface).
  *  - WorkspaceShell navItems include a reachable Alerts entry.
  *
  * Data hooks are mocked so no live UW/IB/Turso/network is touched.
@@ -114,7 +114,7 @@ describe("FU3 panel mounts", () => {
   it("alerts surface mounts the AlertsPanel via WorkspaceSections", async () => {
     render(<WorkspaceSections section="alerts" />);
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: /signal alert rules/i })).toBeTruthy(),
+      expect(screen.getByRole("heading", { name: /signal alerts/i })).toBeTruthy(),
     );
   });
 });

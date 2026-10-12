@@ -150,6 +150,23 @@ describe("Scanner flow header tooltips", () => {
     }
   });
 
+  it("renders flow direction as an arrow + word, not an outlined pill (no-slop 07)", () => {
+    render(<WorkspaceSections section="scanner" />);
+
+    const dir = screen.getByTestId("scanner-dir-AAPL");
+    expect(dir.className).not.toMatch(/\bpill\b/);
+    expect(dir.className).toContain("flow-dir--accum");
+    expect(dir.textContent).toBe("▲ Accum");
+  });
+
+  it("discover score is a rank, not a direction: no tone class (no-slop 08)", () => {
+    searchParamsMock.mockReturnValue(new URLSearchParams("mode=discover"));
+    render(<WorkspaceSections section="scanner" />);
+
+    const score = screen.getByText("72.5");
+    expect(score.className).not.toMatch(/bullish|bearish|neutral/);
+  });
+
   it("renders discover candidates as a scanner mode", () => {
     searchParamsMock.mockReturnValue(new URLSearchParams("mode=discover"));
 

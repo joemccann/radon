@@ -563,11 +563,6 @@ export default function PerformancePanel({ portfolioLastSync = null, marketState
               {sourcePillLabel}
             </span>
             <span className="pill neutral">{returnSessions} SESSIONS</span>
-            {view.risk.max_drawdown.value != null ? (
-              <span className={`pill ${view.risk.max_drawdown.value < -0.1 ? "undefined" : "defined"}`}>
-                MAX DD {fmtPct(view.risk.max_drawdown.value)}
-              </span>
-            ) : null}
           </div>
         </div>
       </div>

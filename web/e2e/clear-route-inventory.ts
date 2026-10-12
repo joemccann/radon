@@ -51,7 +51,7 @@ export const CLEAR_ROUTE_CASES: ClearRouteCase[] = [
   { source: "app/options/exposure/page.tsx", path: "/options/exposure?symbol=AAPL", destination: "/options/net-gex?symbol=AAPL", selector: '[data-testid="options-exposure-table-wrap"]' },
   { source: "app/journal/page.tsx", path: "/journal", selector: '[data-testid="journal-trade-count"]', text: "MSFT" },
   { source: "app/cta/page.tsx", path: "/cta", selector: '[data-testid="vol-targeting-model"]', text: "SPX" },
-  { source: "app/alerts/page.tsx", path: "/alerts", selector: ".alerts-rule", text: "Flow Strength > 70" },
+  { source: "app/alerts/page.tsx", path: "/alerts", selector: ".alerts-rule", text: "Flow strength > 70" },
   { source: "app/preferences/page.tsx", path: "/preferences", selector: '[data-testid="preference-input-RADON_MAX_ORDER_QTY"]' },
   { source: "app/profile/page.tsx", path: "/profile", selector: ".profile-field__input" },
   { source: "app/regime/page.tsx", path: "/regime", regimeTab: "cri", selector: regimeLoaded.cri },
