@@ -355,3 +355,14 @@ describe("CorPanel — chart", () => {
     }
   });
 });
+
+describe("CorPanel — one labelled range control row (plate 39)", () => {
+  it("names the tenor and range selectors in one row", () => {
+    renderPanel(hookState({ data: buildData() }));
+    const row = screen.getByTestId("cor-chart-controls");
+    expect(row.textContent).toMatch(/^Tenor/);
+    expect(row.textContent).toContain("Range");
+    expect(row.contains(screen.getByTestId("cor-tenor-chips"))).toBe(true);
+    expect(row.contains(screen.getByTestId("cor-range-chips"))).toBe(true);
+  });
+});

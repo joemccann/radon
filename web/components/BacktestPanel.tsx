@@ -157,7 +157,19 @@ export default function BacktestPanel() {
         </div>
       )}
 
-      {metrics && (
+      {metrics && metrics.n_trades === 0 && (
+        <div className="backtest-empty">
+          <div
+            data-testid="backtest-finding"
+            style={{ color: "var(--text-primary)", fontSize: "18px", fontWeight: 600 }}
+          >
+            {`${metrics.n_trades} trades. The entry rule never fired over the available history.`}
+          </div>
+          <div style={{ marginTop: "8px" }}>Performance metrics appear once at least one trade exists.</div>
+        </div>
+      )}
+
+      {metrics && metrics.n_trades > 0 && (
         <>
           <div className="backtest-metric-grid">
             <MetricCard label="Sharpe" value={fmtRatio(metrics.sharpe)} />
@@ -170,12 +182,6 @@ export default function BacktestPanel() {
             <MetricCard label="Trades" value={String(metrics.n_trades)} />
           </div>
 
-          {metrics.n_trades === 0 ? (
-            <div className="backtest-empty">
-              No entry signals fired over the available history. The documented
-              entry rule never triggered. This is a valid result, not an error.
-            </div>
-          ) : (
             <div className="backtest-chart">
               <HistoryRangeChips
                 active={activePreset}
@@ -201,7 +207,6 @@ export default function BacktestPanel() {
                 testIdPrefix="backtest-brush"
               />
             </div>
-          )}
         </>
       )}
     </div>

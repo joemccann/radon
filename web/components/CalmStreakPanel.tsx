@@ -167,6 +167,7 @@ export default function CalmStreakPanel() {
               testId="calm-streak-strip-state"
               label="STATE"
               value={<span data-testid="calm-streak-state" style={{ color, whiteSpace: "nowrap" }}>{state}</span>}
+              sub={<><span data-testid="calm-streak-percentile">{percentileText}</span> PERCENTILE</>}
             />
             <RegimeStripCell
               testId="calm-streak-strip-band"
@@ -185,11 +186,6 @@ export default function CalmStreakPanel() {
               label="RECORD"
               value={<span data-testid="calm-streak-max">{stats.max.streak}</span>}
               sub={<>{stats.max.date ?? "---"}</>}
-            />
-            <RegimeStripCell
-              testId="calm-streak-strip-percentile"
-              label="PERCENTILE"
-              value={<span data-testid="calm-streak-percentile">{percentileText}</span>}
             />
           </RegimeStrip>
         )}

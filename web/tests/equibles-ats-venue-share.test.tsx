@@ -402,3 +402,21 @@ describe("AtsVenueSharePanel — freshness rail", () => {
     expect(screen.getByTestId("ats-venue-share-strip-coverage").textContent).not.toMatch(/WATCHLIST SCOPE/i);
   });
 });
+
+describe("AtsVenueSharePanel — signal only when signal (plate 35)", () => {
+  it("leaves neutral rows blank and keeps chips on accumulation / distribution", () => {
+    mockState({
+      data: data({
+        current: [
+          row(),
+          row({ ticker: "STLN", classification: "neutral", classification_reason: "share z only" }),
+        ],
+      }),
+    });
+    render(<AtsVenueSharePanel />);
+    const neutral = within(screen.getByTestId("ats-venue-share-row-STLN"));
+    expect(neutral.queryByText("NEUTRAL")).toBeNull();
+    expect(neutral.getByTitle("share z only").textContent).toBe("");
+    expect(within(screen.getByTestId("ats-venue-share-row-AAPL")).getByText("ACCUMULATION")).toBeTruthy();
+  });
+});

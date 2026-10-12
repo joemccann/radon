@@ -11065,6 +11065,17 @@ tr {
   }
 }
 
+/* Opt-in four-cell strip (RegimeStrip columns={4}): no dead fifth tile. */
+@media (min-width: 761px) {
+  .regime-strip.regime-strip--cols-4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .regime-strip--cols-4 > .regime-strip-cell:nth-child(n) {
+    grid-column: auto;
+  }
+}
+
 @media (max-width: 760px) {
   .regime-strip {
     grid-template-columns: 1fr;
