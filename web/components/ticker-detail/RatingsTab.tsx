@@ -171,8 +171,8 @@ export default function RatingsTab({ ticker, active, currentPrice }: RatingsTabP
           icon={Gauge}
           headline={`Analyst ratings for ${ticker} could not be loaded`}
           variant="compact"
+          action={{ label: "Try again", onClick: () => { void fetchRatings(); } }}
         />
-        <button type="button" className="btn-secondary" onClick={() => { void fetchRatings(); }}>Try again</button>
       </div>
     );
   }

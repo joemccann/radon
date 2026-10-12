@@ -23,6 +23,8 @@ describe("RatingsTab error panel", () => {
     expect(screen.queryByText("Reload data")).toBeNull();
     const retries = screen.getAllByRole("button", { name: /try again|retry/i });
     expect(retries).toHaveLength(1);
+    // Retry shares the centered empty-state axis with the heading.
+    expect(retries[0].closest(".section-empty-state")).not.toBeNull();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     fireEvent.click(retries[0]);
