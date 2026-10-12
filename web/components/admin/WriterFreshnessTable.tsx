@@ -1,5 +1,7 @@
 "use client";
 
+import { Fragment, useState, type MouseEvent } from "react";
+import { ChevronRight } from "lucide-react";
 import ErrorToast from "@/components/ErrorToast";
 
 import { userErrorMessage } from "@/lib/userError";
@@ -8,6 +10,7 @@ import { humanizeDetail } from "@/lib/adminFormat";
 import type { ServiceHealthRow } from "@/lib/adminTypes";
 import { useSort } from "@/lib/useSort";
 import SortTh from "../SortTh";
+import ServiceLogDisclosure from "./ServiceLogDisclosure";
 
 type WriterSortKey = "service" | "state" | "freshness" | "lastRun" | "detail";
 
@@ -114,9 +117,42 @@ function WriterRow({ row }: { row: ServiceHealthRow }) {
         row.state === "ok" ? "Last run completed." : "Writer update failed. Review service logs for details.",
       )
     : null;
+  // Only a failing or stale writer discloses its logs; healthy rows stay inert.
+  const expandable = row.state === "error" || stale;
+  const [expanded, setExpanded] = useState(false);
+  const toggle = () => setExpanded((v) => !v);
+  const detailId = `writer-logs-${row.service}`;
+  const onRowClick = (e: MouseEvent<HTMLTableRowElement>) => {
+    if ((e.target as HTMLElement).closest("button, a, input, label")) return;
+    toggle();
+  };
   return (
-    <tr data-testid={`writer-row-${row.service}`}>
-      <td data-label="Writer" className="admin-unit-name">{row.service}</td>
+    <Fragment>
+    <tr
+      data-testid={`writer-row-${row.service}`}
+      className={expandable ? `admin-row-expandable${expanded ? " admin-row-expanded" : ""}` : undefined}
+      aria-expanded={expandable ? expanded : undefined}
+      onClick={expandable ? onRowClick : undefined}
+    >
+      <td data-label="Writer" className="admin-unit-name">
+        {expandable ? (
+          <span className="admin-disclosure-cell">
+            <button
+              type="button"
+              className="admin-disclosure-btn"
+              aria-expanded={expanded}
+              aria-controls={expanded ? detailId : undefined}
+              aria-label={`${expanded ? "Hide" : "Show"} logs for ${row.service}`}
+              onClick={toggle}
+            >
+              <ChevronRight size={12} aria-hidden className="admin-disclosure-chevron" />
+            </button>
+            {row.service}
+          </span>
+        ) : (
+          row.service
+        )}
+      </td>
       <td data-label="State">
         <span className={`admin-pill admin-pill-${stateTone}`}>{row.state}</span>
       </td>
@@ -134,6 +170,18 @@ function WriterRow({ row }: { row: ServiceHealthRow }) {
         {detail ?? "--"}
       </td>
     </tr>
+    {expandable && expanded && (
+      <tr className="admin-journal-row" id={detailId}>
+        <td colSpan={5}>
+          <ServiceLogDisclosure
+            service={row.service}
+            lastError={row.last_error ?? null}
+            lastRunIso={row.last_attempt_started_at ?? row.last_attempt_finished_at ?? row.updated_at ?? null}
+          />
+        </td>
+      </tr>
+    )}
+    </Fragment>
   );
 }
 

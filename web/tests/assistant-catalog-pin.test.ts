@@ -26,6 +26,7 @@ const PINNED: Record<string, PinnedCapability> = {
   "admin/ib/operator-hold": "admin",
   "admin/ib/reset-backoff": "admin",
   "admin/ib/restart": "admin",
+  "admin/logs": "admin",
   "admin/reliability": "admin",
   "admin/services": "admin",
   "admin/services/[unit]/[action]": "admin",
