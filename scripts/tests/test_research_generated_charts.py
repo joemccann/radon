@@ -429,6 +429,24 @@ def test_explicit_closed_ranges_remain_source_exact_range_marks():
 
 
 def test_wider_than_spread_bound_is_not_an_exact_observed_spread():
-    quote = 'At wider than 150bps, the spread surpassed the 130bp mark.'
+    quote = 'At wider than 150bps. An earlier closing spread was 130bp.'
     assert not gc._number_in_quote(150, 'bp', quote)
     assert gc._number_in_quote(130, 'bp', quote)
+
+
+@pytest.mark.parametrize('quote', [
+    'The spread surpassed 130bp.',
+    'The spread surpassed the 130bp mark.',
+    'The spread passed 130bp.',
+    'The spread has passed the 130bp mark.',
+    'The spread exceeded the 130bp mark.',
+])
+def test_crossing_a_spread_mark_does_not_report_an_exact_observation(quote):
+    assert not gc._number_in_quote(130, 'bp', quote)
+
+
+@pytest.mark.parametrize('qualifier', ['or more', 'or less'])
+def test_suffixed_percentage_bounds_preserve_a_separate_exact_observation(qualifier):
+    quote = f'The deficit may be 5.4% {qualifier}. The earlier reported deficit was 5.0%.'
+    assert not gc._number_in_quote(5.4, '%', quote)
+    assert gc._number_in_quote(5.0, '%', quote)

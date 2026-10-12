@@ -114,8 +114,8 @@ def valid_plan(plan):
 
 _APPROXIMATE_OR_BOUND = re.compile(
     r'(?:\b(?:above|below|over|under|roughly|about|approximately|around|circa|nearly|almost|'
-    r'exceeds?|exceeded|topped)|\b(?:at\s+(?:least|most)|(?:no\s+)?(?:more|less|greater|fewer|wider|higher|lower)\s+than|up\s+to)'
-    r'|[~≈≃≤≥]|[<>]=?)\s*(?:US)?\s*$', re.I,
+    r'exceeds?|exceeded|topped|surpass(?:ed|es|ing)?|pass(?:ed|es|ing)?)|\b(?:at\s+(?:least|most)|(?:no\s+)?(?:more|less|greater|fewer|wider|higher|lower)\s+than|up\s+to)'
+    r'|[~≈≃≤≥]|[<>]=?)\s*(?:the\s+)?(?:US)?\s*$', re.I,
 )
 
 
@@ -125,8 +125,9 @@ def _exact_measurement_quote(quote, allow_range=False):
     filtered = list(text)
     for match in ground.NUMBER_RE.finditer(text):
         prefix = text[max(0, match.start() - 80):match.start()]
+        suffix_bound = re.match(r'\s+or\s+(?:more|less)\b', text[match.end():], re.I)
         is_range = match.group('v2') is not None or match.group('v2b') is not None
-        if _APPROXIMATE_OR_BOUND.search(prefix) or (is_range and not allow_range):
+        if _APPROXIMATE_OR_BOUND.search(prefix) or suffix_bound or (is_range and not allow_range):
             filtered[match.start():match.end()] = ' ' * (match.end() - match.start())
     return ''.join(filtered)
 

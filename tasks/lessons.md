@@ -1168,3 +1168,4 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 - Grounding a numeric literal does not establish an exact observation: reject approximate values and strict bounds as exact points, scoped to that occurrence so later exact guidance remains usable.
 - Require independent explicit compatibility and estimation-status image gates. Labels, color or explanatory notes cannot make P/E comparable to EV/EBITDA, or turn a lower bound into an exact measured value.
 - Regeneration must visually verify source dates and boundary-page publisher evidence before replacing stored provenance; preserve article publication timestamps.
+- A surpassed or passed market level is a threshold, not an exact observation; an exact comparison needs a separately reported measurement.
