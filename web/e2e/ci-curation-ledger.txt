@@ -511,3 +511,4 @@ ws-connection-stability.spec.ts
 #   exact confirmed mocked credit-combo payload; full-viewport screenshots
 #   inspected. All APIs intercepted. Held out pending next start preflight.
 mobile-risk-reversal-quote-sign.spec.ts
+# REVIEWED 2026-10-12 options-exposure.spec.ts - only shipped tabs render; local Chromium next dev run of options-exposure + research-workbench specs, 9 passed

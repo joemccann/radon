@@ -240,9 +240,9 @@ describe("OptionsWorkspacePanel — Rel Vol tab wiring", () => {
     const relVol = screen.getByRole("tab", { name: "Rel Vol" });
     expect(relVol.getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("tab", { name: "Net GEX" }).getAttribute("aria-selected")).toBe("false");
-    // The reserved VIX slot stays planned and disabled.
-    const volatility = screen.getByRole("tab", { name: /VIX \/ Volatility/ });
-    expect(volatility.getAttribute("aria-disabled")).toBe("true");
+    // The reserved VIX slot stays unshipped: listed once as coming, never a tab.
+    expect(screen.queryByRole("tab", { name: /VIX \/ Volatility/ })).toBeNull();
+    expect(screen.getByText(/Coming: .*VIX \/ Volatility/)).toBeTruthy();
     // Panel mounted with the carried symbol.
     expect(screen.getByText("SMH / SPY")).toBeTruthy();
   });
