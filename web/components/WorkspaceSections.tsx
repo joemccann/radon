@@ -60,6 +60,7 @@ import TableSearch from "./TableSearch";
 import SortTh from "./SortTh";
 import { usePriceDirection } from "@/lib/usePriceDirection";
 import { fmtPrice, fmtPriceOrCalculated, fmtUsd, legPriceKey, resolveRealtimePrice } from "@/lib/positionUtils";
+import { formatShortDate, journalStructureNotation } from "@/lib/traderNotation";
 import {
   buildOpenOrderDisplayRows,
   type OpenOrderDisplayRow,
@@ -78,7 +79,7 @@ import {
   mapOrderStatus,
   resolveOrderIntent,
   resolveSingleLegLastPrice,
-  statusPillClass,
+  statusTextClass,
   summarizeOpenOrderRows,
 } from "@/lib/orders/orderDisplay";
 import {
@@ -2466,6 +2467,27 @@ function JournalSections() {
     return v >= 0 ? "bullish" : "bearish";
   };
 
+  // Columns with no value on any listed row are dropped; a status shared by
+  // every row is stated once above the table instead of repeated per row.
+  const journalCols = useMemo(() => {
+    const anyLeg = (pick: (leg: NonNullable<TradeEntry["legs"]>[number]) => unknown) =>
+      rangedTrades.some((t) => t.legs?.some((leg) => pick(leg) != null));
+    const allImported =
+      rangedTrades.length > 0 && rangedTrades.every((t) => t.decision === "IB_AUTO_IMPORT");
+    const maxRisk = rangedTrades.some((t) => t.max_risk != null) || anyLeg((leg) => leg.close_price);
+    const gates = rangedTrades.some((t) => (t.gates_passed?.length ?? 0) > 0 || (t.gates_failed?.length ?? 0) > 0);
+    return {
+      status: !allImported,
+      allImported,
+      maxRisk,
+      realized: rangedTrades.some((t) => t.realized_pnl != null) || anyLeg((leg) => leg.leg_pnl),
+      ror: rangedTrades.some((t) => t.return_on_risk != null),
+      gates,
+      edge: rangedTrades.some((t) => t.edge_analysis?.edge_type != null),
+      untagged: !maxRisk && !gates,
+    };
+  }, [rangedTrades]);
+
   const rangeLabel =
     rangeFrom && rangeTo
       ? rangeFrom === rangeTo
@@ -2617,6 +2639,11 @@ function JournalSections() {
             <MobileJournalList trades={sortedTrades} />
           </div>
         )}
+        {rangedTrades.length > 0 && !showMobileJournal && journalCols.allImported && (
+          <div className="journal-source-note" data-testid="journal-source-note">
+            {journalCols.untagged ? "Imported from IB · risk and gates not yet tagged" : "Imported from IB"}
+          </div>
+        )}
         {rangedTrades.length > 0 && !showMobileJournal && (
           <div className="section-body table-wrap">
             <table>
@@ -2626,14 +2653,14 @@ function JournalSections() {
                   <SortTh<JournalSortKey> label="Date" sortKey="date" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<JournalSortKey> label="Ticker" sortKey="ticker" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<JournalSortKey> label="Structure" sortKey="structure" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<JournalSortKey> label="Status" sortKey="decision" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  {journalCols.status && <SortTh<JournalSortKey> label="Status" sortKey="decision" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
                   <SortTh<JournalSortKey> label="Qty" sortKey="qty" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<JournalSortKey> label="Entry Cost" sortKey="entry_cost" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<JournalSortKey> label="Max Risk" sortKey="max_risk" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<JournalSortKey> label="Realized P&L" sortKey="realized_pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<JournalSortKey> label="RoR" sortKey="ror" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<JournalSortKey> label="Gates" sortKey="gates" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<JournalSortKey> label="Edge" sortKey="edge" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  {journalCols.maxRisk && <SortTh<JournalSortKey> label="Max Risk" sortKey="max_risk" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
+                  {journalCols.realized && <SortTh<JournalSortKey> label="Realized P&L" sortKey="realized_pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
+                  {journalCols.ror && <SortTh<JournalSortKey> label="RoR" sortKey="ror" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
+                  {journalCols.gates && <SortTh<JournalSortKey> label="Gates" sortKey="gates" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
+                  {journalCols.edge && <SortTh<JournalSortKey> label="Edge" sortKey="edge" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
                 </tr>
               </thead>
               <tbody>
@@ -2646,7 +2673,7 @@ function JournalSections() {
                     <React.Fragment key={t.id}>
                       <tr>
                         <td className="cell-muted">{t.id}</td>
-                        <td>{t.date}</td>
+                        <td className="journal-date-cell" title={t.date}>{formatShortDate(t.date) ?? t.date}</td>
                         <td>
                           <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                             <TickerLink ticker={t.ticker} />
@@ -2661,15 +2688,15 @@ function JournalSections() {
                             )}
                           </span>
                         </td>
-                        <td>{t.structure}</td>
-                        <td><span className={decisionClass(t.decision)}>{t.decision}</span></td>
+                        <td title={t.structure}>{journalStructureNotation(t.structure)}</td>
+                        {journalCols.status && <td><span className={decisionClass(t.decision)}>{t.decision}</span></td>}
                         <td className="right">{qty ?? "--"}</td>
                         <td className="right">{fmtJournalUsd(cost)}</td>
-                        <td className="right">{fmtJournalUsd(t.max_risk)}</td>
-                        <td className="right"><span className={pnlClass(t.realized_pnl)}>{fmtJournalUsd(t.realized_pnl)}{t.return_on_risk != null ? ` (${(t.return_on_risk * 100) >= 0 ? "+" : ""}${(t.return_on_risk * 100).toFixed(1)}%)` : ""}</span></td>
-                        <td className="right">{t.return_on_risk != null ? `${(t.return_on_risk * 100).toFixed(1)}%` : "--"}</td>
-                        <td className="cell-muted">{t.gates_passed?.join(", ") || t.gates_failed?.join(", ") || "--"}</td>
-                        <td className="cell-muted">{t.edge_analysis?.edge_type ?? "--"}</td>
+                        {journalCols.maxRisk && <td className="right">{fmtJournalUsd(t.max_risk)}</td>}
+                        {journalCols.realized && <td className="right"><span className={pnlClass(t.realized_pnl)}>{fmtJournalUsd(t.realized_pnl)}{t.return_on_risk != null ? ` (${(t.return_on_risk * 100) >= 0 ? "+" : ""}${(t.return_on_risk * 100).toFixed(1)}%)` : ""}</span></td>}
+                        {journalCols.ror && <td className="right">{t.return_on_risk != null ? `${(t.return_on_risk * 100).toFixed(1)}%` : "--"}</td>}
+                        {journalCols.gates && <td className="cell-muted">{t.gates_passed?.join(", ") || t.gates_failed?.join(", ") || "--"}</td>}
+                        {journalCols.edge && <td className="cell-muted">{t.edge_analysis?.edge_type ?? "--"}</td>}
                       </tr>
                       {hasLegs && isExpanded && t.legs!.map((leg, i) => (
                         <tr key={`${t.id}-leg-${i}`} className="leg-row">
@@ -2677,14 +2704,14 @@ function JournalSections() {
                           <td className="cell-muted">{leg.expiry ?? "--"}</td>
                           <td />
                           <td className="cell-muted">{leg.type ?? "--"}{leg.strike != null ? ` $${leg.strike}` : ""}</td>
-                          <td />
+                          {journalCols.status && <td />}
                           <td className="right cell-muted">{leg.contracts ?? "--"}</td>
                           <td className="right cell-muted">{leg.open_price != null ? `$${leg.open_price.toFixed(2)}` : "--"}</td>
-                          <td className="right cell-muted">{leg.close_price != null ? `$${leg.close_price.toFixed(2)}` : "--"}</td>
-                          <td className="right"><span className={pnlClass(leg.leg_pnl)}>{leg.leg_pnl != null ? fmtJournalUsd(leg.leg_pnl) : "--"}</span></td>
-                          <td />
-                          <td />
-                          <td />
+                          {journalCols.maxRisk && <td className="right cell-muted">{leg.close_price != null ? `$${leg.close_price.toFixed(2)}` : "--"}</td>}
+                          {journalCols.realized && <td className="right"><span className={pnlClass(leg.leg_pnl)}>{leg.leg_pnl != null ? fmtJournalUsd(leg.leg_pnl) : "--"}</span></td>}
+                          {journalCols.ror && <td />}
+                          {journalCols.gates && <td />}
+                          {journalCols.edge && <td />}
                         </tr>
                       ))}
                     </React.Fragment>
@@ -3646,7 +3673,7 @@ function OrdersSections({
                           {isPending && <Loader2 size={12} className="cancel-spinner" />}
                         </td>
                         <td>
-                          <span className="pill neutral">COMBO</span>
+                          <span className="order-action-text">Combo</span>
                         </td>
                         {orderColumns.orderType && <td>{o.structure}</td>}
                         {orderColumns.totalQuantity && <td className="right">{comboQtyLabel}</td>}
@@ -3683,7 +3710,7 @@ function OrdersSections({
                         )}
                         <td className="open-order-status-cell">
                           <span
-                            className={statusPillClass(comboStatus.tone)}
+                            className={statusTextClass(comboStatus.tone)}
                             title={comboStatus.raw}
                           >
                             {comboStatus.label}
@@ -3776,12 +3803,12 @@ function OrdersSections({
                           </span>
                         ) : null}
                         {intent !== "UNKNOWN" && (
-                          <span className="order-intent-pill">{intent}</span>
+                          <span className="order-intent-text">{intent}</span>
                         )}
                         {isPending && <Loader2 size={12} className="cancel-spinner" />}
                       </td>
                       <td>
-                        <span className={`pill ${o.order.action === "BUY" ? "accum" : "distrib"}`}>
+                        <span className={`order-action-text ${o.order.action === "BUY" ? "positive" : "negative"}`}>
                           {o.order.action}
                         </span>
                       </td>
@@ -3824,7 +3851,7 @@ function OrdersSections({
                       )}
                       <td className="open-order-status-cell">
                         <span
-                          className={statusPillClass(singleStatus.tone)}
+                          className={statusTextClass(singleStatus.tone)}
                           title={singleStatus.raw}
                         >
                           {singleStatus.label}

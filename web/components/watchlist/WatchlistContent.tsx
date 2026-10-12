@@ -9,6 +9,7 @@ import { useWatchlist, type WatchlistEntry } from "@/lib/useWatchlist";
 import { fmtPrice } from "@/lib/positionUtils";
 import { useSort, type SortDirection } from "@/lib/useSort";
 import StarToggle from "@/components/StarToggle";
+import { formatShortDate, positionHoldingNotation } from "@/lib/traderNotation";
 
 type WatchlistContentProps = {
   prices?: Record<string, PriceData>;
@@ -46,12 +47,6 @@ function quoteFor(price?: PriceData): WatchQuote {
     pct: (abs / Math.abs(close)) * 100,
     tone: abs > 0 ? "positive" : abs < 0 ? "negative" : "neutral",
   };
-}
-
-function formatDateLabel(value: string): string {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "UNMAPPED";
-  return parsed.toLocaleDateString(undefined, { month: "short", day: "2-digit" }).toUpperCase();
 }
 
 function findPosition(symbol: string, portfolio: PortfolioData | null | undefined): PortfolioPosition | null {
@@ -143,7 +138,12 @@ function WatchlistRow({
         onClick={() => onOpen(entry.symbol)}
       >
         <span className="watchlist-row__symbol mono">{entry.symbol}</span>
-        <span className="watchlist-row__label">{label}</span>
+        <span
+          className="watchlist-row__label"
+          title={position?.expiry ? `Expires ${formatShortDate(position.expiry) ?? position.expiry}` : undefined}
+        >
+          {label}
+        </span>
         <span className="watchlist-row__last mono">
           {quote.last != null ? fmtPrice(quote.last) : "---"}
         </span>
@@ -156,12 +156,12 @@ function WatchlistRow({
           <span className="watchlist-row__change mono neutral">NO MARK</span>
         )}
         <span className={`watchlist-row__status mono${position ? " watchlist-row__status--held" : ""}`}>
-          {position ? "HELD" : "FLAT"}
+          {position ? "Held" : ""}
         </span>
         <span className={`watchlist-row__orders mono${orderCount > 0 ? " watchlist-row__orders--open" : ""}`}>
-          {orderCount > 0 ? `${orderCount} ORDER${orderCount === 1 ? "" : "S"}` : "NO ORDERS"}
+          {orderCount > 0 ? `${orderCount} order${orderCount === 1 ? "" : "s"}` : ""}
         </span>
-        <span className="watchlist-row__added mono">{formatDateLabel(entry.added_at)}</span>
+        <span className="watchlist-row__added mono">{formatShortDate(entry.added_at) ?? ""}</span>
       </button>
       <StarToggle active size="sm" onToggle={() => onRemove(entry.symbol)} />
     </li>
@@ -184,7 +184,7 @@ export default function WatchlistContent({
         quote: quoteFor(prices?.[entry.symbol]),
         position,
         orderCount: openOrderCount(entry.symbol, orders),
-        label: position?.structure ?? entry.sector ?? "UNASSIGNED",
+        label: position ? positionHoldingNotation(position) : entry.sector ?? "",
       };
     }),
     [orders, portfolio, prices, watchlist],
@@ -286,6 +286,7 @@ export default function WatchlistContent({
           ))}
         </ul>
       </div>
+      <p className="watchlist-legend">Blank means flat with no orders. Strikes in trader notation; expiry on hover.</p>
     </section>
   );
 }

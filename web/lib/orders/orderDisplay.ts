@@ -351,6 +351,11 @@ export function formatDistanceDelta(delta: number): string {
   return body;
 }
 
+/** Plain-text status for the desktop open-orders table: tone carried by ink, not a pill. */
+export function statusTextClass(tone: OrderStatusTone): string {
+  return `order-status-text order-status-text--${tone}`;
+}
+
 export function statusPillClass(tone: OrderStatusTone): string {
   switch (tone) {
     case "partial":
