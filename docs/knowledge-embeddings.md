@@ -18,6 +18,8 @@ The `knowledge` table carries two vector columns:
 
 `v2_coverage_ready` returns false while **any** `knowledge.embedding_v2` is NULL. The check is cached for 60 seconds. A missing column or failed read also returns false.
 
+After fusion, `hybrid_search` attaches adjacent chunks (`±NEIGHBOR_SPAN`) for the winner set in **one** `SELECT` over `(source, doc_key, chunk_ix)` (PERF-004). Callers that discard neighbors pass `with_neighbors=False`. The FastAPI `/knowledge/search` default of 8 hits used to POST one Hrana `/v2/pipeline` per winner. Budget: `scripts/tests/test_knowledge_retrieve.py`.
+
 ## Ingest behavior
 
 - **Dual-write (default):** Every ingested `KnowledgeDoc` writes both vectors when `RADON_KB_EMBED_DUAL_WRITE` is not `0`/`false`/`off`/`no` (default: on). The 384-d column stays current for the fallback.
