@@ -64,7 +64,7 @@ test("research rejects corrupt workspace imports without discarding evidence", a
   await expect(page.getByTestId("chat-launcher-ready")).toBeAttached();
   await page.getByLabel("Import workspace JSON").setInputFiles({ name: "corrupt.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify({ version: 1, documents: [], facts: [{ id: "fake", documentId: "missing", kind: "metric" }] })) });
   await expect(page.getByRole("alert").filter({ hasText: "missing source" })).toBeVisible();
-  await expect(page.getByText(/0 sources/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No sources yet", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Controls", exact: true }).click();
   const report = { schema_version: 1, mode: "offline-contracts", generated_at: "2026-09-10T15:00:00Z", metrics: { total: 2, passed: 1, failed: 1, contract_accuracy: .5, p50_ms: 1, p95_ms: 5 }, queries: [{ query: "identity", passed: true, latency_ms: 1, error_class: null }, { query: "deny", passed: false, latency_ms: 5, error_class: "AssertionError" }] };
   await page.getByLabel("Import MCP evaluator report").setInputFiles({ name: "evaluation.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(report)) });
