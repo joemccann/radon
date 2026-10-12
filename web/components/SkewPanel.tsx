@@ -65,6 +65,14 @@ function formatDayTick(d: Date): string {
   });
 }
 
+/** Trader date from an ISO day: "2026-10-16" -> "Oct 16". */
+function formatTraderDate(iso: string | null | undefined): string {
+  if (!iso) return "---";
+  const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
 export default function SkewPanel({ marketState }: { marketState?: MarketState }) {
   const { data, loading, syncing, lastSync } = useSkew(marketState ?? null);
   const { isMobile, hasMounted } = useViewport();
@@ -171,11 +179,6 @@ export default function SkewPanel({ marketState }: { marketState?: MarketState }
             <MetricCell label="Z-SCORE" value={formatZ(z)} />
             <MetricCell label="25D PUT IV" value={formatIvPct(current.put_iv)} />
             <MetricCell label="25D CALL IV" value={formatIvPct(current.call_iv)} />
-            <MetricCell label="HIGH" value={formatSkewChange(stats.high)} />
-            <MetricCell label="LOW" value={formatSkewChange(stats.low)} />
-            <MetricCell label="STDDEV" value={formatSkewRatio(stats.stddev)} />
-            <MetricCell label="LATEST DATE" value={current.date} />
-            <MetricCell label="TENOR" value="30D CM" />
           </div>
         ) : (
           <RegimeStrip>
@@ -213,43 +216,33 @@ export default function SkewPanel({ marketState }: { marketState?: MarketState }
               value={formatIvPct(current.call_iv)}
               sub={<>INTERPOLATED AT +0.25 DELTA</>}
             />
-            <RegimeStripCell
-              testId="skew-strip-high"
-              label="HIGH"
-              value={formatSkewChange(stats.high)}
-              sub={<>LARGEST DAILY RISE</>}
-            />
-            <RegimeStripCell
-              testId="skew-strip-low"
-              label="LOW"
-              value={formatSkewChange(stats.low)}
-              sub={<>LARGEST DAILY DROP</>}
-            />
-            <RegimeStripCell
-              testId="skew-strip-stddev"
-              label="STDDEV"
-              value={formatSkewRatio(stats.stddev)}
-              sub={<>POPULATION, ALL NON NULL CHANGES</>}
-            />
-            <RegimeStripCell
-              testId="skew-strip-date"
-              label="LATEST DATE"
-              value={current.date}
-              sub={current.is_intraday ? <>INTRADAY{asOf ? ` · AS OF ${asOf}` : ""}</> : <>FINAL SESSION</>}
-            />
-            <RegimeStripCell
-              testId="skew-strip-tenor"
-              label="TENOR"
-              value="30D CM"
-              sub={
-                <>
-                  {current.expiry} ({current.dte}D) X {current.expiry_far ?? current.expiry} (
-                  {current.dte_far ?? current.dte}D)
-                </>
-              }
-            />
           </RegimeStrip>
         )}
+
+        <dl className="skew-ledger" data-testid="skew-ledger">
+          <div data-testid="skew-ledger-range">
+            <dt>Daily change range</dt>
+            <dd>{formatSkewChange(stats.low)} to {formatSkewChange(stats.high)}</dd>
+          </div>
+          <div data-testid="skew-ledger-stddev">
+            <dt>Std dev of change</dt>
+            <dd>{formatSkewRatio(stats.stddev)}</dd>
+          </div>
+          <div data-testid="skew-ledger-tenor">
+            <dt>Brackets, 30d constant maturity</dt>
+            <dd>
+              {formatTraderDate(current.expiry)} ({current.dte}d) / {formatTraderDate(current.expiry_far ?? current.expiry)} (
+              {current.dte_far ?? current.dte}d)
+            </dd>
+          </div>
+          <div data-testid="skew-ledger-date">
+            <dt>Latest session</dt>
+            <dd>
+              {formatTraderDate(current.date)}
+              {current.is_intraday ? `, intraday${asOf ? ` as of ${asOf}` : ""}` : ", final"}
+            </dd>
+          </div>
+        </dl>
 
         <FreshnessRail
           schedule={SKEW_REFRESH}

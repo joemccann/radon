@@ -3440,6 +3440,32 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
   border-top: 1px solid var(--border-dim);
 }
 
+/* Skew stats ledger: secondary statistics as label/value rows under the
+   hero strip, so they stop competing with the skew level for weight. */
+.skew-ledger {
+  margin: 0;
+  padding: 4px 16px 8px;
+}
+
+.skew-ledger > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border-dim);
+}
+
+.skew-ledger dt {
+  color: var(--text-muted);
+}
+
+.skew-ledger dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
 /* ───────────────────────────────────────────────────────────
    Instrument-panel grammar primitives (brand-identity.md § 4).
    Opt-in classes that any panel can use to express the brand:

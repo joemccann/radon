@@ -99,9 +99,9 @@ test.describe("/regime/skew — SPX 1M 25-delta put/call skew tab", () => {
     await expect(page.locator('[data-testid="skew-strip-z"]')).toContainText("-3.0");
     await expect(page.locator('[data-testid="skew-strip-put-iv"]')).toContainText("16.0%");
     await expect(page.locator('[data-testid="skew-strip-call-iv"]')).toContainText("12.3%");
-    await expect(page.locator('[data-testid="skew-strip-tenor"]')).toContainText("2026-09-18");
+    await expect(page.locator('[data-testid="skew-ledger-tenor"]')).toContainText("Sep 18");
     await expect(page.locator('[data-testid="skew-live-status"]')).toContainText("LIVE");
-    await expect(page.locator('[data-testid="skew-strip-date"]')).toContainText("INTRADAY");
+    await expect(page.locator('[data-testid="skew-ledger-date"]')).toContainText("intraday");
   });
 
   test("renders the chart, the view chips, and the brush", async ({ page }) => {

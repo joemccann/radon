@@ -89,6 +89,16 @@ function divergenceLabel(divergence: BreadthDivergence): string {
   return divergence.toUpperCase();
 }
 
+/** Finding-style panel title, derived from the divergence verdict. */
+export function breadthHeadline(divergence: BreadthDivergence): string {
+  switch (divergence) {
+    case "bearish": return "Breadth diverging bearish from SPY";
+    case "bullish": return "Breadth diverging bullish from SPY";
+    case "none":    return "Breadth in line with SPY";
+    default:        return "NYSE Breadth";
+  }
+}
+
 function divergenceColor(divergence: BreadthDivergence): string {
   switch (divergence) {
     case "bearish": return "var(--negative)";
@@ -330,6 +340,7 @@ export default function BreadthPanel({ marketState }: BreadthPanelProps) {
     latest.net_ad != null && latest.net_ad_prev != null
       ? latest.net_ad - latest.net_ad_prev
       : null;
+  const tickReporting = latest.tick != null && Number.isFinite(latest.tick);
   const divergenceChip = (
     <span
       className="breadth-divergence-chip"
@@ -355,7 +366,7 @@ export default function BreadthPanel({ marketState }: BreadthPanelProps) {
         <div className="section-header">
           <div className="section-title">
             <Activity size={14} />
-            NYSE Breadth
+            <span data-testid="breadth-title">{breadthHeadline(latest.divergence)}</span>
             <InfoTooltip text="Market breadth from NYSE internals: net advance/decline (AD-NYSE), TICK-NYSE, and the cumulative A/D line vs SPY. NET BREADTH 20D sums the last 20 daily net A/D readings (advancers minus decliners), which equals the 20-session change in the cumulative A/D line. DIVERGENCE flags BEARISH when SPY is up over 1% in 20 sessions while that sum is negative (fewer stocks rising than falling under a rising tape), and BULLISH on the mirror image." />
           </div>
           {lastSync && (
@@ -373,7 +384,9 @@ export default function BreadthPanel({ marketState }: BreadthPanelProps) {
             </div>
             <div className="m-regime-grid2x2" data-testid="breadth-mobile-grid">
               <MetricCell label="NET A/D" value={fmtSigned(latest.net_ad)} tone={signTone(latest.net_ad)} />
-              <MetricCell label="TICK" value={fmtSigned(latest.tick)} tone={signTone(latest.tick)} />
+              {tickReporting && (
+                <MetricCell label="TICK" value={fmtSigned(latest.tick)} tone={signTone(latest.tick)} />
+              )}
               <MetricCell label="NET BREADTH 20D" value={fmtSigned(latest.cum_ad_change_20d)} tone={signTone(latest.cum_ad_change_20d)} />
               <MetricCell
                 label="SESSIONS POS"
@@ -390,12 +403,14 @@ export default function BreadthPanel({ marketState }: BreadthPanelProps) {
               change={<PointChange change={netAdDelta} label="vs prior" />}
               sub={<>ADVANCERS MINUS DECLINERS</>}
             />
-            <RegimeStripCell
-              testId="breadth-strip-tick"
-              label="TICK"
-              value={fmtSigned(latest.tick)}
-              sub={<>TICK-NYSE LAST</>}
-            />
+            {tickReporting && (
+              <RegimeStripCell
+                testId="breadth-strip-tick"
+                label="TICK"
+                value={fmtSigned(latest.tick)}
+                sub={<>TICK-NYSE LAST</>}
+              />
+            )}
             <RegimeStripCell
               testId="breadth-strip-cum-ad-20d"
               label="NET BREADTH 20D"
@@ -419,6 +434,12 @@ export default function BreadthPanel({ marketState }: BreadthPanelProps) {
               sub={<>SPY 20D VS 20-SESSION NET BREADTH</>}
             />
           </RegimeStrip>
+        )}
+
+        {!tickReporting && (
+          <div className="section-footnote" data-testid="breadth-tick-missing">
+            TICK not reporting
+          </div>
         )}
 
         <FreshnessRail
