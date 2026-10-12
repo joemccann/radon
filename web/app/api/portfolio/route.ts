@@ -39,6 +39,9 @@ const DB_READ_TIMEOUT_MS = 3_000;
  * The canonical source is the `journal` table. Missing rows or query
  * failures return an empty map; this route never falls back to
  * the old flat trade-log mirror.
+ *
+ * The ticker expression and IS NOT NULL filter match idx_journal_ticker
+ * (migration 0095) textually; change one, change both.
  */
 async function loadTradeLogDates(): Promise<Record<string, string>> {
   try {
@@ -78,6 +81,9 @@ async function loadTradeLogDates(): Promise<Record<string, string>> {
  * position's true entry day even once it is fully closed and gone from the
  * portfolio, which the per-ticker trade_log_dates MAX cannot give. Correct
  * across re-opens, duplicated session/Flex rows, and out-of-order fills.
+ *
+ * The right/strike WHERE clause matches idx_journal_option_contract
+ * (migration 0095) textually; change one, change both.
  */
 async function loadContractOpenDates(): Promise<Record<string, string>> {
   try {
