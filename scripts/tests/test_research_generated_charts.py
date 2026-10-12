@@ -314,3 +314,90 @@ def test_visible_source_and_exact_radon_url_must_match_rendered_credits(tmp_path
     reviewed=verdict()
     reviewed['visible_attribution']=attribution
     assert generate(tmp_path,reviewed=reviewed)[0]['status']=='rejected'
+
+
+BOUNDED_REVENUE_QUOTE = (
+    "After guiding for FY27 AI revenue well above $100bn in March, the company's "
+    "most recent guidance from September was for $115bn."
+)
+
+
+def test_revenue_guidance_floor_is_not_an_exact_observation_but_later_guidance_is():
+    assert not gc._number_in_quote(100, 'USD billion', BOUNDED_REVENUE_QUOTE)
+    assert gc._number_in_quote(115, 'USD billion', BOUNDED_REVENUE_QUOTE)
+
+
+def test_floor_label_and_note_cannot_turn_a_bound_into_a_source_exact_point():
+    plan = {'kind': 'bar', 'title': 'AI revenue guidance', 'metric': 'Revenue guidance',
+            'unit': 'USD billion', 'axis': [0, 150], 'ticks': [0, 50, 100, 150],
+            'bars': [{'id': 'prior', 'label': 'Prior guidance floor', 'value': 100},
+                     {'id': 'latest', 'label': 'Latest guidance', 'value': 115}],
+            'note': 'The prior bar shows a lower bound, not an exact measured amount.'}
+    evidence = [{'id': row['id'], 'page': 1, 'source_quote': BOUNDED_REVENUE_QUOTE}
+                for row in plan['bars']]
+    assert gc.valid_plan(plan)
+    assert not gc.valid_evidence(plan, evidence, {1: BOUNDED_REVENUE_QUOTE})
+
+
+@pytest.mark.parametrize('quote,value', [
+    ('The deficit is approximately 5.4%.', 5.4),
+    ('The deficit is roughly 5.4%.', 5.4),
+    ('The deficit is about 5.4%.', 5.4),
+    ('The deficit is around 5.4%.', 5.4),
+    ('The deficit is ~5.4%.', 5.4),
+    ('The yield is above 4.75%.', 4.75),
+    ('The yield has topped 4.75% in recent weeks.', 4.75),
+    ('The yield is at least 4.75%.', 4.75),
+    ('The yield is more than 4.75%.', 4.75),
+    ('The yield is greater than 4.75%.', 4.75),
+    ('The yield is >4.75%.', 4.75),
+    ('The yield is below 4.75%.', 4.75),
+    ('The yield is at most 4.75%.', 4.75),
+    ('The yield is less than 4.75%.', 4.75),
+    ('The yield is no more than 4.75%.', 4.75),
+    ('The yield is <4.75%.', 4.75),
+])
+def test_approximate_or_bounded_percentages_are_not_exact_points(quote, value):
+    assert not gc._number_in_quote(value, '%', quote)
+
+
+def test_qualifier_on_another_observation_does_not_disqualify_an_exact_forecast():
+    quote = 'Earlier estimates were above 4.75%, but the current forecast is 5.4%.'
+    assert not gc._number_in_quote(4.75, '%', quote)
+    assert gc._number_in_quote(5.4, '%', quote)
+    assert gc._number_in_quote(5.4, '%', 'The bank forecasts a deficit of 5.4%.')
+
+
+@pytest.mark.parametrize('gate', ['compatible_measurements', 'estimation_status_correct'])
+def test_pixel_review_requires_explicit_comparison_and_estimation_status_gates(gate):
+    reviewed = verdict(compatible_measurements=True, estimation_status_correct=True)
+    reviewed.pop(gate)
+    assert not gc.review_passed(reviewed, PLAN, 'Goldman Sachs')
+
+
+def test_legacy_seven_true_image_gates_are_insufficient():
+    assert not gc.review_passed(verdict(), PLAN, 'Goldman Sachs')
+
+
+@pytest.mark.parametrize('plan', [
+    {'kind': 'bar', 'title': 'IPP valuation multiples', 'metric': 'Target EV/EBITDA',
+     'unit': 'x', 'axis': [0, 25], 'ticks': [0, 5, 10, 15, 20, 25],
+     'bars': [{'id': 'ceg', 'label': 'CEG (P/E basis)', 'value': 21},
+              {'id': 'vst', 'label': 'VST (EV/EBITDA basis)', 'value': 10}],
+     'note': 'The different denominators are identified in the labels.'},
+    {'kind': 'bar', 'title': 'China forecasts', 'metric': 'Year-over-year growth',
+     'unit': '%', 'axis': [0, 30], 'ticks': [0, 10, 20, 30],
+     'bars': [{'id': 'exports', 'label': 'Exports', 'value': 24.8},
+              {'id': 'cpi', 'label': 'CPI inflation', 'value': 1}],
+     'note': 'The different metrics are distinguished by color and explanatory copy.'},
+])
+def test_same_unit_labels_notes_and_colors_do_not_make_measurements_compatible(plan):
+    reviewed = verdict(visible_data=plan['bars'], compatible_measurements=False,
+                       estimation_status_correct=True)
+    assert gc.valid_plan(plan)
+    assert not gc.review_passed(reviewed, plan, 'Goldman Sachs')
+
+
+def test_source_values_still_fail_if_image_misstates_estimation_status():
+    reviewed = verdict(compatible_measurements=True, estimation_status_correct=False)
+    assert not gc.review_passed(reviewed, PLAN, 'Goldman Sachs')
