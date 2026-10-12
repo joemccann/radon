@@ -512,3 +512,6 @@ ws-connection-stability.spec.ts
 #   inspected. All APIs intercepted. Held out pending next start preflight.
 mobile-risk-reversal-quote-sign.spec.ts
 # REVIEWED 2026-10-12 options-exposure.spec.ts - only shipped tabs render; local Chromium next dev run of options-exposure + research-workbench specs, 9 passed
+# REVIEWED 2026-10-12 skew-tab.spec.ts - selectors moved from skew-strip-{tenor,date}
+#   to the new skew-ledger rows (trader dates). 3/3 chromium against local
+#   next dev :3047 with stubbed APIs.
