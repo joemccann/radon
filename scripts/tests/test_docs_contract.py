@@ -2013,7 +2013,7 @@ class TestDocumentation20261011:
 
 
 class TestDocumentation20261012:
-    """DOC-188: app-image prune keep-sets drifted after audited-through 0627874b."""
+    """DOC-188..189: contracts that drifted after audited-through 0627874b."""
 
     def test_app_image_prune_states_both_keep_sets(self):
         runtime = (_ROOT / "cloud/scripts/radon-app-runtime.sh").read_text()
@@ -2041,3 +2041,20 @@ class TestDocumentation20261012:
         assert "preserves the target and durable transition/last-green rollback SHAs" not in claude
         assert "docs/operations.md#app-image-prune" in claude
         assert "exact local image during registry outages" in claude
+
+    def test_retired_beta_units_stay_out_of_the_deploy_transition(self):
+        helper = (_ROOT / "cloud/scripts/deploy-root-helper.sh").read_text()
+        assert '[[ "$unit" == radon-beta-* ]] && return 0' in helper
+        serve = (_ROOT / "scripts/control_service/serve.py").read_text()
+        assert 'unit.startswith("radon-beta-")' in serve
+        operator = (_ROOT / "cloud/scripts/operator-radon.sh").read_text()
+        assert '[[ "${3:-}" == radon-beta-* ]]' in operator
+        section = _section(
+            (_ROOT / "docs/cloud-services.md").read_text(),
+            "Retired: beta.radon.run (2026-08-20)",
+        )
+        assert "unit_is_excluded" in section
+        assert "does not stop" in section
+        assert "radon unit" in section
+        assert "config-drift" in section
+        assert "no actions" in section
