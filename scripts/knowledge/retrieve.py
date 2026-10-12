@@ -60,12 +60,6 @@ _EXACT_SQL = (
     "ORDER BY vector_distance_cos({column}, vector32(?)) LIMIT ?"
 )
 
-_NEIGHBOR_SQL = (
-    "SELECT chunk_ix, content FROM knowledge "
-    "WHERE source = ? AND doc_key = ? AND chunk_ix BETWEEN ? AND ? AND chunk_ix != ? "
-    "ORDER BY chunk_ix"
-)
-
 
 # ── pure fusion / decay helpers (no DB) ──────────────────────────────
 
@@ -153,14 +147,14 @@ def hybrid_search(
 ) -> list[dict]:
     """Returns result rows best-first, each a dict of `knowledge` columns plus
     `score` and — unless `with_neighbors=False` — `neighbors` (adjacent chunks
-    of the same document; one extra SELECT per winner, so callers that discard
-    neighbors opt out).
+    of the same document; one extra SELECT for the whole winner set, so
+    callers that discard neighbors opt out).
 
     `rerank` reorders the FULL deduped candidate pool — (score, row) pairs
     best-first — before the per-source cap and the limit cut, so a caller can
     promote a doc class the fused ranking buries (prior-evals: thesis docs
     behind dozens of fill rows) without overfetching or extra statements.
-    Neighbor SELECTs still run only for the final winners.
+    Neighbor SELECT still runs only for the final winners.
 
     Opt-in scoring hooks (defaults keep production ranking identical):
     `legs=None` runs both FTS and vector; `legs=("fts",)` / `("vector",)`
@@ -217,7 +211,7 @@ def hybrid_search(
     winners = (cap_per_source(pool) if apply_source_cap else list(pool))[:limit]
     if not with_neighbors:
         return [_scored_result(score, row) for score, row in winners]
-    return [_result_with_neighbors(db, score, row) for score, row in winners]
+    return _results_with_neighbors(db, winners)
 
 
 def _normalize_legs(legs: Sequence[str] | None) -> frozenset[str]:
@@ -321,20 +315,42 @@ def _scored_result(score: float, row: dict) -> dict:
     return result
 
 
-def _result_with_neighbors(db, score: float, row: dict) -> dict:
-    neighbor_rows = db.execute(
-        _NEIGHBOR_SQL,
-        (
-            row["source"], row["doc_key"],
-            row["chunk_ix"] - NEIGHBOR_SPAN, row["chunk_ix"] + NEIGHBOR_SPAN,
-            row["chunk_ix"],
-        ),
-    ).fetchall()
-    result = _scored_result(score, row)
-    result["neighbors"] = [
-        {"chunk_ix": chunk_ix, "content": content} for chunk_ix, content in neighbor_rows
-    ]
-    return result
+def _results_with_neighbors(db, winners: Sequence[tuple[float, dict]]) -> list[dict]:
+    """Attach adjacent chunks in one SELECT (PERF-004).
+
+    Each winner used to POST its own Hrana `/v2/pipeline` for ±NEIGHBOR_SPAN
+    chunks. The API default limit is 8, so that was eight sequential TLS
+    round-trips after fusion. Winners are already unique on (source, doc_key).
+    """
+    results = [_scored_result(score, row) for score, row in winners]
+    if not winners:
+        return results
+    clauses: list[str] = []
+    args: list = []
+    for _score, row in winners:
+        clauses.append(
+            "(source = ? AND doc_key = ? AND chunk_ix BETWEEN ? AND ? AND chunk_ix != ?)"
+        )
+        args.extend(
+            (
+                row["source"],
+                row["doc_key"],
+                row["chunk_ix"] - NEIGHBOR_SPAN,
+                row["chunk_ix"] + NEIGHBOR_SPAN,
+                row["chunk_ix"],
+            )
+        )
+    sql = (
+        "SELECT source, doc_key, chunk_ix, content FROM knowledge WHERE "
+        + " OR ".join(clauses)
+        + " ORDER BY source, doc_key, chunk_ix"
+    )
+    grouped: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    for source, doc_key, chunk_ix, content in db.execute(sql, tuple(args)).fetchall():
+        grouped[(source, doc_key)].append({"chunk_ix": chunk_ix, "content": content})
+    for result in results:
+        result["neighbors"] = grouped.get((result["source"], result["doc_key"]), [])
+    return results
 
 
 def _parse_iso(value: str) -> datetime:

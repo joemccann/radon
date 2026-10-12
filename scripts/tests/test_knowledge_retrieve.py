@@ -342,6 +342,39 @@ class TestDedupAndNeighbors:
         assert "neighbors" not in results[0]
         assert [s for s in recording.statements if "chunk_ix BETWEEN" in s] == []
 
+    def test_neighbor_expansion_is_one_statement_for_eight_winners(self, db):
+        """PERF-004: neighbor expansion used to POST one Hrana statement per
+        winner. Eight assistant hits were eight sequential /v2/pipeline trips.
+        """
+        sources = ("docs", "journal", "evals", "incidents")
+        docs = []
+        for ix in range(8):
+            source = sources[ix % len(sources)]
+            key = f"doc-{ix}"
+            docs.extend(
+                [
+                    _doc(source=source, doc_key=key, chunk_ix=0, content="intro context"),
+                    _doc(
+                        source=source,
+                        doc_key=key,
+                        chunk_ix=1,
+                        content="cobalt cobalt note",
+                    ),
+                    _doc(source=source, doc_key=key, chunk_ix=2, content="outro context"),
+                ]
+            )
+        upsert_documents(db, docs)
+        recording = _RecordingDb(db)
+
+        results = hybrid_search(recording, "cobalt", limit=8)
+
+        assert len(results) == 8
+        neighbor_selects = [s for s in recording.statements if "chunk_ix BETWEEN" in s]
+        assert len(neighbor_selects) == 1, neighbor_selects
+        for result in results:
+            assert [n["chunk_ix"] for n in result["neighbors"]] == [0, 2]
+            assert result["neighbors"][0]["content"] == "intro context"
+
 
 class TestPerSourceCap:
     def test_flooded_source_is_capped_but_others_survive(self, db):
