@@ -9358,3 +9358,5 @@ Dependency graph: T1 -> T2 -> T3 -> T4.
 - [ ] T4 depends_on: [T3] Regenerate nine selected articles with literal evidence, independent fresh image review and verified report-date corrections, then guarded publication and production visual verification.
 
 Review: No production row mutations yet. Preserve article claims and publication timestamps; correct only visually proven source-report metadata. Invalid charts remain withheld.
+
+Hardening red evidence: PR #1047 head b04d698e8a2ee876c3acdc1c50de373f344ad0ed, CI 38315381303 job 115030713009 reproduced all 25 new failures; 2,444 other shard tests passed. Source changes follow only after this red head.

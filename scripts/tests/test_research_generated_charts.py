@@ -16,7 +16,8 @@ PROPOSAL = {'charts': [{'plan': PLAN, 'evidence': [
 
 def verdict(**updates):
     value = {key: True for key in ('interpretable', 'appropriate_chart_type', 'faithful_to_source',
-             'labels_units_periods_correct', 'honest_axes', 'readable', 'no_invented_data')}
+             'labels_units_periods_correct', 'honest_axes', 'readable', 'no_invented_data',
+             'compatible_measurements', 'estimation_status_correct')}
     value.update(visible_data=copy.deepcopy(PLAN['bars']), reason='August and September expectations, correctly ordered and labelled.',
                  visible_attribution={'publisher':'Goldman Sachs','radon_url':'https://radon.run'})
     value.update(updates)
@@ -88,7 +89,8 @@ def test_unresolved_publisher_requires_honest_source_pdf_credit(tmp_path):
 
 
 @pytest.mark.parametrize('field', ['interpretable', 'appropriate_chart_type', 'faithful_to_source',
-                                 'labels_units_periods_correct', 'honest_axes', 'readable', 'no_invented_data'])
+                                 'labels_units_periods_correct', 'honest_axes', 'readable', 'no_invented_data',
+                                 'compatible_measurements', 'estimation_status_correct'])
 def test_any_review_failure_prevents_attachment(tmp_path, field):
     result, _, _ = generate(tmp_path, reviewed=verdict(**{field: False}))
     assert result['status'] == 'rejected' and result['charts'] == []
@@ -376,7 +378,10 @@ def test_pixel_review_requires_explicit_comparison_and_estimation_status_gates(g
 
 
 def test_legacy_seven_true_image_gates_are_insufficient():
-    assert not gc.review_passed(verdict(), PLAN, 'Goldman Sachs')
+    reviewed = verdict()
+    reviewed.pop('compatible_measurements')
+    reviewed.pop('estimation_status_correct')
+    assert not gc.review_passed(reviewed, PLAN, 'Goldman Sachs')
 
 
 @pytest.mark.parametrize('plan', [
@@ -401,3 +406,29 @@ def test_same_unit_labels_notes_and_colors_do_not_make_measurements_compatible(p
 def test_source_values_still_fail_if_image_misstates_estimation_status():
     reviewed = verdict(compatible_measurements=True, estimation_status_correct=False)
     assert not gc.review_passed(reviewed, PLAN, 'Goldman Sachs')
+
+
+@pytest.mark.parametrize('value', [76, 88])
+def test_range_endpoints_cannot_be_republished_as_exact_points(value):
+    quote = 'Spread share was 76-88% during the roll.'
+    assert not gc._number_in_quote(value, '%', quote)
+    assert gc._number_in_quote(value, '%', quote, allow_range=True)
+
+
+def test_explicit_closed_ranges_remain_source_exact_range_marks():
+    plan = {'kind': 'range', 'title': 'Reported yield ranges', 'unit': '%',
+            'axis': [0, 6], 'ticks': [0, 2, 4, 6],
+            'marks': [{'id': 'a', 'label': 'A', 'low': 3, 'high': 4, 'estimated': False},
+                      {'id': 'b', 'label': 'B', 'low': 4, 'high': 5, 'estimated': False}]}
+    quotes = ['A yields ranged from 3-4%.', 'B yields ranged from 4-5%.']
+    evidence = [{'id': row['id'], 'page': 1, 'source_quote': quote}
+                for row, quote in zip(plan['marks'], quotes)]
+    assert gc.valid_plan(plan)
+    assert gc.valid_evidence(plan, evidence, {1: ' '.join(quotes)})
+
+
+
+def test_wider_than_spread_bound_is_not_an_exact_observed_spread():
+    quote = 'At wider than 150bps, the spread surpassed the 130bp mark.'
+    assert not gc._number_in_quote(150, 'bp', quote)
+    assert gc._number_in_quote(130, 'bp', quote)

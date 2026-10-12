@@ -1163,3 +1163,8 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 - Never export Source: unknown. Check full PDF boundary pages, footer logos and the final-page ownership/contact block before resolving publisher identity; retain the actual attribution page and quote separately from measurement pages. A missing brand in the first-page text header does not establish an unknown publisher.
 - Include https://radon.run on every Radon-generated chart. Preserve the original source credit alongside Radon's creation credit, and verify both on the final PNG.
+
+## 2026-10-12 Generated chart audit false approvals
+- Grounding a numeric literal does not establish an exact observation: reject approximate values and strict bounds as exact points, scoped to that occurrence so later exact guidance remains usable.
+- Require independent explicit compatibility and estimation-status image gates. Labels, color or explanatory notes cannot make P/E comparable to EV/EBITDA, or turn a lower bound into an exact measured value.
+- Regeneration must visually verify source dates and boundary-page publisher evidence before replacing stored provenance; preserve article publication timestamps.
