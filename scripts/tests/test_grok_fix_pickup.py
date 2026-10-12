@@ -150,14 +150,15 @@ class TestHappyPath:
         assert "Result=exit-code" in ensure.calls[0]["issue"]
         body = ensure.calls[0]["body"]
         for heading in (
-            "What broke",
-            "Root cause",
+            "Summary",
             "What changed",
-            "How it was verified",
+            "Test plan",
             "Risk and rollback",
-            "Still open",
+            "Operator Next Steps",
+            "Checklist",
         ):
             assert f"## {heading}" in body
+        assert "**Root cause:**" in body
         assert "grok incident fix on" not in body
         assert ensure.calls[0]["update_existing"] is True
 

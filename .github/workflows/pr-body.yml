@@ -1,0 +1,40 @@
+name: PR body
+
+# Every PR body must follow .github/pull_request_template.md (the six
+# sections of PR #1047, in order, filled in). Agents open PRs with
+# `gh pr create --body`, which never shows the template, so this check is
+# the hard gate. Validator and the single exemption (dependabot[bot]):
+# scripts/ci/check_pr_body.py. `edited` re-runs it when the body is fixed.
+#
+# No secrets: the body reaches the shell only through env, never `${{ }}`
+# inside `run:`.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-body-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-body:
+    name: PR body template
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/ci/check_pr_body.py
+          sparse-checkout-cone-mode: false
+
+      - name: Check the PR body against the template
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: python3 scripts/ci/check_pr_body.py --body-env PR_BODY --author "$PR_AUTHOR"

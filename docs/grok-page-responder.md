@@ -272,9 +272,14 @@ must contain these sections, each with real content:
 - Risk and rollback
 - Still open
 
-`ir_ensure_pr.ensure_pr` refuses to create or edit a PR whose body lacks
-these sections, and its CLI builds the body from the head commit (there is
-no placeholder default). A missing, empty, TODO, branch-name, or
+The PR body renders those sections into the repository PR template
+(`.github/pull_request_template.md`, enforced by the `PR body template` CI
+check): Summary is What broke plus a `**Root cause:**` line, Test plan is
+How it was verified, Operator Next Steps is Still open, and the template
+Checklist follows. `ir_ensure_pr.ensure_pr` refuses to create or edit a PR
+whose body is not that rendering (`ir_pr_description.validate_ir_pr_body`),
+and its CLI builds the body from the head commit (there is no placeholder
+default). A missing, empty, TODO, branch-name, or
 `grok incident fix on` section is refused: pickup logs, sends a normal-priority Pushover, exits non-zero for
 that branch, and leaves it for the next cycle. The responder's AUTOPUSH
 path uses the same validator. Pickup also folds in the `watchdog_pages`
@@ -286,7 +291,7 @@ adds CI run URLs on a later cycle once `gh run list` has them.
 Default is the newest stable CLI and the live default model. The responder
 resolves the model id at run time from `grok models` (or the promoted
 last-known-good) and always passes it with `-m`. Every log line,
-`watchdog_pages.result`, commit body, and PR `How it was verified` records
+`watchdog_pages.result`, commit body, and PR Test plan records
 `Ran <model> on CLI <version>`. `--no-auto-update` stays on at incident
 time so the CLI never upgrades itself mid-run.
 
