@@ -58,6 +58,16 @@ TRIN_DAILY_KEEP_SESSIONS = 1500       # daily $TRIN chart (~6y)
 # hourly chart read them, so this is deliberately the tightest of the five.
 TRIN_SAMPLES_KEEP_ROWS = 4000
 
+# account_margin_samples (~1.2k rows a day, PR #989 follow-up). Only samples
+# near a fill can bracket a return-capital event, so old ones are dead weight
+# unless an observation cites them or an unreconciled fill could still pair
+# them. 121 s = the reconciler's 120 s max window + its 1 s text-order slack
+# (capture_position_return_capital._merged_windows).
+MARGIN_SAMPLES_KEEP_DAYS = 90
+MARGIN_SAMPLES_BRACKET_WINDOW_S = 121
+MARGIN_SAMPLES_DELETE_BATCH = 500
+MARGIN_SAMPLES_MAX_BATCHES = 20  # <= 10k rows a run; steady state is ~1.2k
+
 
 @dataclass(frozen=True)
 class KeepLatestPolicy:
@@ -127,7 +137,71 @@ class KeepDaysPolicy:
         return (f"-{self.days} days",)
 
 
-Policy = KeepLatestPolicy | KeepLatestPerPartitionPolicy | KeepDaysPolicy
+@dataclass(frozen=True)
+class MarginSampleRetentionPolicy:
+    """Delete ``account_margin_samples`` older than ``days`` in bounded batches.
+
+    Kept regardless of age: any sample a ``position_capital_observations`` row
+    cites (VALID or VOID), and any sample whose ``observed_from`` lies within
+    ``bracket_window_s`` of a fill that no VALID observation covers yet, so
+    the reconciler's plan cannot change under it. Each statement deletes at
+    most ``batch_size`` rows and a run issues at most ``max_batches``
+    (Hrana bounding rules, scripts/CLAUDE.md).
+    """
+
+    table: str = "account_margin_samples"
+    days: int = MARGIN_SAMPLES_KEEP_DAYS
+    bracket_window_s: int = MARGIN_SAMPLES_BRACKET_WINDOW_S
+    batch_size: int = MARGIN_SAMPLES_DELETE_BATCH
+    max_batches: int = MARGIN_SAMPLES_MAX_BATCHES
+
+    def delete_sql(self) -> str:
+        # Text timestamps: '%SZ' truncates the fraction, and a fractional fill
+        # ('...:01.9Z') sorts below its whole second ('...:01Z'), so the bounds
+        # cover at least bracket_window_s on both sides. Fact exec_ids carry
+        # the IB correction suffix the ledger strips (`root.NN`).
+        # NOT IN must never see a NULL reference: one would delete nothing.
+        return """DELETE FROM account_margin_samples WHERE sample_id IN (
+  SELECT s.sample_id FROM account_margin_samples s
+  WHERE s.observed_from < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)
+    AND s.sample_id NOT IN (
+      SELECT before_sample_id FROM position_capital_observations
+       WHERE before_sample_id IS NOT NULL
+      UNION
+      SELECT after_sample_id FROM position_capital_observations
+       WHERE after_sample_id IS NOT NULL)
+    AND NOT EXISTS (
+      SELECT 1 FROM position_execution_facts f
+       WHERE f.account_id = s.account_id
+         AND f.filled_at BETWEEN strftime('%Y-%m-%dT%H:%M:%SZ', s.observed_from, ?)
+                             AND strftime('%Y-%m-%dT%H:%M:%SZ', s.observed_from, ?)
+         AND NOT EXISTS (
+           SELECT 1 FROM position_event_executions e
+             JOIN position_capital_observations o
+               ON o.through_event_id = e.event_id AND o.status = 'VALID'
+            WHERE e.account_id = f.account_id
+              AND e.con_id = f.con_id
+              AND (e.exec_id = f.exec_id
+                   OR substr(f.exec_id, 1, length(e.exec_id) + 1) = e.exec_id || '.')))
+  LIMIT ?)
+RETURNING sample_id"""
+
+    def delete_args(self) -> tuple[Any, ...]:
+        # Tuple, never list: libsql's execute() raises TypeError on a list.
+        return (
+            f"-{self.days} days",
+            f"-{self.bracket_window_s} seconds",
+            f"+{self.bracket_window_s} seconds",
+            self.batch_size,
+        )
+
+
+Policy = (
+    KeepLatestPolicy
+    | KeepLatestPerPartitionPolicy
+    | KeepDaysPolicy
+    | MarginSampleRetentionPolicy
+)
 
 # Ordered list applied by the daily sweep. Portfolio is excluded (R1 archive).
 # service_health_events is pruned by flex_token_check (DUR-11).
@@ -189,6 +263,7 @@ SNAPSHOT_RETENTION_POLICIES: Sequence[Policy] = (
     KeepLatestPolicy("credit_vix_history", "date", CREDIT_VIX_KEEP_SESSIONS),
     KeepLatestPolicy("trin_daily", "date", TRIN_DAILY_KEEP_SESSIONS),
     KeepLatestPolicy("trin_samples", "ts", TRIN_SAMPLES_KEEP_ROWS),
+    MarginSampleRetentionPolicy(),
 )
 
 
@@ -197,12 +272,30 @@ def _rowcount(cursor: Any) -> int:
     return deleted if isinstance(deleted, int) and deleted >= 0 else 0
 
 
+def _apply_batched(run_batch: Callable[[], int], policy: MarginSampleRetentionPolicy) -> int:
+    """Repeat one bounded DELETE until a short batch or ``max_batches``."""
+    total = 0
+    for _ in range(policy.max_batches):
+        deleted = run_batch()
+        total += deleted
+        if deleted < policy.batch_size:
+            break
+    return total
+
+
 def apply_policy(db: Any, policy: Policy) -> int:
     """Execute one policy's DELETE and commit. Returns rows deleted (best-effort).
 
     Prefer :func:`apply_policy_http` in production oneshots — the sync libsql
     client has no timeout and hung the first fleet retention run (2026-07-12).
     """
+    if isinstance(policy, MarginSampleRetentionPolicy):
+        def run_batch() -> int:
+            rows = db.execute(policy.delete_sql(), policy.delete_args()).fetchall()
+            db.commit()
+            return len(rows or [])
+
+        return _apply_batched(run_batch, policy)
     cursor = db.execute(policy.delete_sql(), policy.delete_args())
     db.commit()
     return _rowcount(cursor)
@@ -219,6 +312,18 @@ def apply_policy_http(policy: Policy, *, timeout: float = RETENTION_HTTP_TIMEOUT
     Rowcount is unavailable on this transport (returns 0); success is the
     absence of an exception.
     """
+    if isinstance(policy, MarginSampleRetentionPolicy):
+        try:
+            from .hrana_http import hrana_query
+        except ImportError:  # pragma: no cover
+            from db.hrana_http import hrana_query  # type: ignore[no-redef]
+
+        # RETURNING rows are the only rowcount this transport gives back.
+        return _apply_batched(
+            lambda: len(hrana_query(policy.delete_sql(), policy.delete_args(), timeout=timeout)),
+            policy,
+        )
+
     try:
         from .hrana_http import hrana_execute
     except ImportError:  # pragma: no cover
