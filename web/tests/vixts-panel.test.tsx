@@ -15,6 +15,7 @@
  * Spec: docs/indicators/vixts.md.
  */
 import React from "react";
+import { expectStripFillsGrid } from "./helpers/stripFit";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -225,6 +226,11 @@ describe("VixTsPanel — header strip", () => {
     // The freshness rail owns the Cboe session date; the strip must not repeat it.
     expect(screen.queryByTestId("vixts-source-updated")).toBeNull();
     expect(screen.getByTestId("vixts-freshness-rail").textContent).toContain(DATA_DATE);
+  });
+
+  it("fills the strip grid with no empty cells", () => {
+    const { container } = renderPanel(hookState({ data: buildData() }));
+    expectStripFillsGrid(container);
   });
 
   it("labels a backwardated curve via the shared helper", () => {

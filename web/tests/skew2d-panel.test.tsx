@@ -6,6 +6,7 @@
  * Spec: docs/indicators/skew2d.md.
  */
 import React from "react";
+import { expectStripFillsGrid } from "./helpers/stripFit";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -211,6 +212,8 @@ describe("Skew2dPanel", () => {
     expect(screen.queryByTestId("skew2d-strip-tenor")).toBeNull();
     const level = screen.getByTestId("skew2d-strip-level").textContent ?? "";
     expect(level).toContain("30D CM 2026-08-21 (14D)");
+
+    expectStripFillsGrid(container);
 
     // NaN guard: no chart path may contain the string NaN
     const paths = Array.from(container.querySelectorAll("path"));

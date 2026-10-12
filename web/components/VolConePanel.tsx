@@ -1,5 +1,7 @@
 "use client";
 
+import type { CSSProperties } from "react";
+
 import RequestError from "./RequestError";
 
 import { useMemo, useState, type MouseEvent } from "react";
@@ -238,7 +240,7 @@ export default function VolConePanel() {
             />
           </div>
         ) : (
-          <RegimeStrip>
+          <div className="regime-strip-fit" style={{ "--fit-cols": 6, "--fit-cols-md": 3 } as CSSProperties}><RegimeStrip>
             <RegimeStripCell
               testId="vol-cone-strip-hits"
               label="HITS"
@@ -279,7 +281,7 @@ export default function VolConePanel() {
               value={data.source_as_of ?? "---"}
               sub={<>{source.sub}</>}
             />
-          </RegimeStrip>
+          </RegimeStrip></div>
         )}
       </div>
 

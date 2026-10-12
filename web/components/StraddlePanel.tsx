@@ -1,5 +1,7 @@
 "use client";
 
+import type { CSSProperties } from "react";
+
 import { useMemo, useState } from "react";
 import { Activity } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
@@ -172,7 +174,7 @@ export default function StraddlePanel({
             <MetricCell label="SOURCE" value={formatSourceDate(vix1dLastModified)} />
           </div>
         ) : (
-          <RegimeStrip>
+          <div className="regime-strip-fit" style={{ "--fit-cols": 4, "--fit-cols-md": 4 } as CSSProperties}><RegimeStrip>
             <RegimeStripCell
               testId="straddle-strip-live"
               label="LIVE"
@@ -234,7 +236,7 @@ export default function StraddlePanel({
                 </>
               }
             />
-          </RegimeStrip>
+          </RegimeStrip></div>
         )}
 
         <FreshnessRail

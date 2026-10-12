@@ -22122,6 +22122,19 @@ body[data-mobile="true"] .alerts-rule__channel {
    carries the validation verdict. Brand tokens only, 4px max radius.
    Spec: docs/indicators/vixcor.md section G. */
 
+/* Per-page opt-in: the panel sets --fit-cols / --fit-cols-md to exact
+   divisors of its tile count so no grid row ends in an empty cell. */
+.regime-strip-fit .regime-strip { grid-template-columns: repeat(var(--fit-cols), minmax(0, 1fr)); }
+.regime-strip-fit .regime-strip-cell:nth-child(n) { grid-column: auto; }
+
+@media (max-width: 1180px) {
+  .regime-strip-fit .regime-strip { grid-template-columns: repeat(var(--fit-cols-md), minmax(0, 1fr)); }
+}
+
+@media (max-width: 760px) {
+  .regime-strip-fit .regime-strip { grid-template-columns: 1fr; }
+}
+
 /* Six strip cells, so the shared five-column grid would leave a bare
    quarter-row of border tone. Re-column to an exact divisor of six. */
 .vixcor-strip .regime-strip { grid-template-columns: repeat(6, minmax(0, 1fr)); }

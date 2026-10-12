@@ -1,5 +1,7 @@
 "use client";
 
+import type { CSSProperties } from "react";
+
 import { useMemo, useState } from "react";
 import { Sigma } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
@@ -160,7 +162,7 @@ export function Skew2dPanel({ marketState }: { marketState?: MarketState }) {
             <MetricCell label="STDDEV" value={formatSkew2dRatio(stats.stddev)} />
           </div>
         ) : (
-          <RegimeStrip>
+          <div className="regime-strip-fit" style={{ "--fit-cols": 6, "--fit-cols-md": 3 } as CSSProperties}><RegimeStrip>
             <RegimeStripCell
               testId="skew2d-strip-change"
               label="CHANGE"
@@ -205,7 +207,7 @@ export function Skew2dPanel({ marketState }: { marketState?: MarketState }) {
               value={formatSkew2dRatio(stats.stddev)}
               sub={<>POPULATION, ALL NON NULL 2D CHANGES</>}
             />
-          </RegimeStrip>
+          </RegimeStrip></div>
         )}
 
         <FreshnessRail

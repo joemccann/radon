@@ -12,6 +12,7 @@
  * docs/indicators/straddle.md.
  */
 import React from "react";
+import { expectStripFillsGrid } from "./helpers/stripFit";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -224,6 +225,11 @@ describe("StraddlePanel — header strip", () => {
     expect(screen.getByText("36.8%")).toBeTruthy(); // breakeven hit rate
     expect(screen.getByText("0.47%")).toBeTruthy(); // implied 1d straddle
     expect(screen.getByText("05 Aug 2026")).toBeTruthy(); // vix1d Last-Modified
+  });
+
+  it("fills the strip grid with no empty cells", () => {
+    const { container } = renderPanel(hookState({ data: buildData() }));
+    expectStripFillsGrid(container);
   });
 
   it("does not spend hero tiles on dates the freshness rail already owns", () => {

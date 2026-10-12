@@ -1,5 +1,7 @@
 "use client";
 
+import type { CSSProperties } from "react";
+
 import { useMemo, useState } from "react";
 import { Activity } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
@@ -206,7 +208,7 @@ export default function VixTsPanel() {
             <MetricCell label="VIX 3M" value={formatIndex(current.vix3m)} />
           </div>
         ) : (
-          <RegimeStrip>
+          <div className="regime-strip-fit" style={{ "--fit-cols": 4, "--fit-cols-md": 2 } as CSSProperties}><RegimeStrip>
             <RegimeStripCell
               testId="vixts-strip-ratio"
               label="RATIO"
@@ -235,7 +237,7 @@ export default function VixTsPanel() {
               value={<span data-testid="vixts-vix3m">{formatIndex(current.vix3m)}</span>}
               sub={<>3-MONTH IMPLIED VOLATILITY</>}
             />
-          </RegimeStrip>
+          </RegimeStrip></div>
         )}
 
         <FreshnessRail
