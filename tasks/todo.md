@@ -9295,9 +9295,11 @@ Review: independent static review approved layout, inherited-grid isolation, lab
 # Mobile cockpit price formatting (2026-10-12)
 
 Dependency graph: T1 -> T2 + T3 -> T4.
-- [ ] T1 depends_on: [] Trace supplied CRWD three-leg screenshot and identify mobile clipping/formatting root cause.
-- [ ] T2 depends_on: [T1] Make scoped responsive fix preserving quote signs, precision and order behavior.
-- [ ] T3 depends_on: [T1] Add browser geometry/readout regressions for mobile three-leg and signed-price cases.
+- [x] T1 depends_on: [] Trace supplied CRWD three-leg screenshot and identify mobile clipping/formatting root cause.
+- [x] T2 depends_on: [T1] Make scoped responsive fix preserving quote signs, precision and order behavior.
+- [x] T3 depends_on: [T1] Add browser geometry/readout regressions for mobile three-leg and signed-price cases.
 - [ ] T4 depends_on: [T2,T3] Publish PR, verify all exact-head CI, inspect screenshot artifacts and deliver accepted Pushover.
 
 Plan review: isolated checkout preserves unrelated task edits. No local suites; Playwright runs on GitHub. Clear incumbent visual identity retained.
+
+Regression review: baseline b7c9c79a GitHub job114924498855 reproduced selector text escape42.57px at320 and24.53px at393. Fourfocusedregressions retain quotes3.52/3.07/3.98 and negativepremium signs. Signedmidfixture corrected to actualtwo-decimal output-4.47; no productionformatters altered. Fixpinsintrinsic selector width; scrolling retains alllegs.

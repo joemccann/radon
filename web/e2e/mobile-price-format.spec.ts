@@ -176,7 +176,7 @@ for (const width of [320, 393, 1440]) {
 test("negative combo premiums keep their signs at 320px", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 844 });
   await installFixtures(page, true);
-  await expect(page.locator(".ckp-quote-price")).toHaveText(["$-4.93", "$-4.48", "$-4.02"]);
+  await expect(page.locator(".ckp-quote-price")).toHaveText(["$-4.93", "$-4.47", "$-4.02"]);
   for (const cell of await page.locator(".ckp-quote-cell").all()) await expectTextFits(cell);
   for (const stat of await page.locator(".book-head-stat").all()) await expectTextFits(stat);
   await page.screenshot({ path: testInfo.outputPath("mobile-price-format-credit-320.png"), fullPage: true });
