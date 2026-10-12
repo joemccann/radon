@@ -11388,3 +11388,42 @@ Delta Python files, three runs: 670 passed each. Delta Vitest files, three runs:
 | 3 | 14,953 passed / 2 skipped / 23 subtests | 10,566 passed / 1,071 files | 2,794 passed / 8 skipped | 0 added / 0 removed |
 
 Base cloud at `208bb3d6` with the same toolchain: 2,765 passed / 8 skipped, sorted FAILED list empty. Every closing FAILED list is empty. The count difference is tests added on main after that SHA. The comparison worktree was removed.
+
+## Delta audit 2026-10-12
+
+Range `0627874b30398f0f04631846e0c86a2fbc7e9403..66719c09424fa2df47878ca148705dab4f45d06c`: 13 commits / 59 paths. Newest trusted checkpoint is the 2026-10-11 collaborator comment on issue #83 (`audited-through: 0627874b30398f0f04631846e0c86a2fbc7e9403`). No open `testing/` pull request. #1014 is merged. Numbering continues after T-548. The checkpoint carried no open verified T finding. Open PR #1025 is `performance/2026-10-11` and is outside this loop.
+
+The codemap refreshed at the start of the range (`56a860b9`) does not contain the later journal-batch or release-tag edges. `rg` confirms `web/lib/journalDb.ts` is imported by `web/tests/journal-import-batch-budget.test.ts` and `web/tests/journal-db-concurrency.test.ts`, and `.github/workflows/ci.yml` is loaded by `scripts/tests/test_ci_deploy_concurrency.py`. Inverse review of the batch move, the tag job, figure match, image prune, host swap, probe redaction, and the D7 ordering found two gaps. No new skip, xfail, coverage-threshold drop, or shard exclusion. Changed Python tests sit in the `test_[a-c]` and later letter shards. The new Vitest file is under `web/tests/`.
+
+### T-549 — P1 — a corrected journal fill can be stored as insert-nothing after the batch move
+
+`web/lib/journalDb.ts:132` still chooses `DO UPDATE` when `ib_exec_id_corrected` is a string, and `web/lib/journalDb.ts:156` sends the batch as `"write"`. `web/tests/journal-import-batch-budget.test.ts` (before this night) and `web/tests/journal-db-concurrency.test.ts:28` only observe `DO NOTHING` on a new fill. Forcing the correction flag false left those cases green and wrote `DO NOTHING` for an `ORDER.01` row corrected by `ORDER.02` (1 failed / 3 passed). Changing the batch mode to `"read"` left the same three cases green and failed only the new mode assertion (1 failed / 3 passed). The product lines were already correct.
+
+Acceptance: an existing `ORDER.01` fill plus a newer `ORDER.02` correction is one `DO UPDATE` statement whose trade id stays `ORDER.01` and whose payload keeps `ib_exec_id_corrected` and the corrected price, inside `batch(..., "write")`. A new fill in the same batch stays `DO NOTHING`. Either mutation fails this case and leaves the 40-row and 101-row budget cases green.
+
+### T-550 — P2 — the release tag step is not executed, so a missing push still passes
+
+`.github/workflows/ci.yml:1426` tags `v$(python3 scripts/release_version.py)` at `GITHUB_SHA` and pushes `refs/tags/<tag>`, unless that tag already exists (`ci.yml:1430`). `scripts/tests/test_ci_deploy_concurrency.py:657` checks that the job needs a green deploy and that some step mentions `release_version.py`. Deleting the push left that structural case and the existing-tag case green and failed only the new call log (1 failed / 2 passed). Removing the existing-tag guard left the structural case green and retagged (2 failed / 1 passed). The workflow text was already correct.
+
+Acceptance: with fake `python3` and `git`, an absent tag records `git tag v1.2.3 <GITHUB_SHA>` and `git push origin refs/tags/v1.2.3`. An existing tag records no `git tag` and no `git push`. The structural deploy-needs assertions stay.
+
+Audited through: 66719c09424fa2df47878ca148705dab4f45d06c on 2026-10-12 — 2 new findings
+
+## Remediation 2026-10-12
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-549 | DONE | Correction flag forced false: 1 failed / 3 passed (`DO NOTHING` on `ORDER.01`). Batch mode `"read"`: 1 failed / 3 passed (`expected 'read' to be 'write'`). Restored `web/lib/journalDb.ts`. `web/tests/journal-import-batch-budget.test.ts` 3 passed in each of three serial runs. Product source unchanged. |
+| T-550 | DONE | Push deleted: 1 failed / 2 passed, structural case still green. Existing-tag guard deleted: 2 failed / 1 passed, structural case still green. Restored `.github/workflows/ci.yml`. `scripts/tests/test_ci_deploy_concurrency.py` 42 passed in each of three serial runs. Workflow text unchanged. |
+
+### Closing gates 2026-10-12
+
+Delta Python files, three runs: 413 passed each. Delta cloud files, three runs: 285 passed each. Delta Vitest files, three runs: 6 files / 70 passed each. Not a closing round: root pytest with `/opt/homebrew/bin/openssl` (OpenSSL 4.0.3) first on `PATH` was 54 failed / 14,915 passed, all `CERTIFICATE_VERIFY_FAILED` / missing AKI in the gateway remote suites. Reordering `/opt/homebrew/opt/openssl@3/bin` ahead of that binary cleared it. No threshold was lowered and no test was skipped to go green. Playwright specs were not executed here. No local screenshot or 390px result is claimed.
+
+| Round | Root Python | Root Vitest | Cloud | Failed-list diff against base `66719c09` |
+|---|---|---|---|---|
+| 1 | 14,969 passed / 2 skipped / 23 subtests | 10,575 passed / 1,072 files | 2,820 passed / 8 skipped | 0 added / 0 removed |
+| 2 | 14,969 passed / 2 skipped / 23 subtests | 10,575 passed / 1,072 files | 2,820 passed / 8 skipped | 0 added / 0 removed |
+| 3 | 14,969 passed / 2 skipped / 23 subtests | 10,575 passed / 1,072 files | 2,820 passed / 8 skipped | 0 added / 0 removed |
+
+Base cloud at `66719c09` with OpenSSL 3.6.5, Bash 5.3.20, caddy, and the 3.13 venv: 2,820 passed / 8 skipped, sorted FAILED list empty. Every closing FAILED list is empty. The comparison worktree was removed.
