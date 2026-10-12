@@ -57,7 +57,7 @@ function yoyTone(v: number | null | undefined): "pos" | "neg" | "warn" | "mut" {
 }
 
 export default function MarginDebtPanel() {
-  const { data, loading, syncing, lastSync } = useMarginDebt();
+  const { data, loading, syncing } = useMarginDebt();
   const { isMobile, hasMounted } = useViewport();
   const compact = hasMounted && isMobile;
 
@@ -137,11 +137,6 @@ export default function MarginDebtPanel() {
             Margin Debt Acceleration
             <InfoTooltip text="FINRA member-firm margin debit balances vs the S&P 500, monthly since 1959. Year-over-year acceleration above +50% has preceded every major top (2000, 2007, 2021): extreme growth in borrowed exposure is froth, not health. YoY contraction marks forced deleveraging." />
           </div>
-          {lastSync && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
-              {new Date(lastSync).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
-            </span>
-          )}
         </div>
 
         {compact ? (
@@ -156,12 +151,22 @@ export default function MarginDebtPanel() {
             <MetricCell label="SOURCE" value={formatSourceDate(data.source_last_modified)} />
           </div>
         ) : (
-          <RegimeStrip>
+          <RegimeStrip className="regime-strip--fit">
             <RegimeStripCell
               testId="margin-debt-strip-level"
-              label="MARGIN DEBT"
+              label={
+                <>
+                  MARGIN DEBT <span data-testid="margin-debt-strip-month">{current.date}</span>
+                </>
+              }
               value={formatLevelBn(current.level)}
-              sub={<>FINRA DEBIT BALANCES</>}
+              sub={
+                <>
+                  FINRA, RELEASED{" "}
+                  <span data-testid="margin-debt-strip-source">{formatSourceDate(data.source_last_modified)}</span>
+                  {" · "}SERIES SINCE 1959
+                </>
+              }
             />
             <RegimeStripCell
               testId="margin-debt-strip-yoy"
@@ -172,18 +177,6 @@ export default function MarginDebtPanel() {
                 </span>
               }
               sub={<>ABOVE +50% READS AS FROTH</>}
-            />
-            <RegimeStripCell
-              testId="margin-debt-strip-month"
-              label="LATEST MONTH"
-              value={current.date}
-              sub={<>MONTHLY SERIES SINCE 1959</>}
-            />
-            <RegimeStripCell
-              testId="margin-debt-strip-source"
-              label="SOURCE UPDATED"
-              value={formatSourceDate(data.source_last_modified)}
-              sub={<>FINRA MARGIN STATISTICS</>}
             />
           </RegimeStrip>
         )}

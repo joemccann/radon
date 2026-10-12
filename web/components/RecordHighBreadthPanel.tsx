@@ -43,6 +43,8 @@ export default function RecordHighBreadthPanel() {
   const positive: ChartSeries<Row> = { key: "positive", label: "Net highs (% of 500)", color: chartSeriesColor("primary"), axis: "left", renderAs: "bar", axisFormat: (value) => `${value.toFixed(0)}%`, format: (value) => breadthValue(value, "%") };
   const negative: ChartSeries<Row> = { key: "negative", label: "Net lows (% of 500)", color: chartSeriesColor("fault"), axis: "left", renderAs: "bar", axisFormat: (value) => `${value.toFixed(0)}%`, format: (value) => breadthValue(value, "%") };
   const parity = data.source?.parity;
+  const estimated = data.source?.denominator_verified !== true;
+  const estFlag = <span data-testid="record-high-breadth-net-flag" title="Source variant; denominator unverified. See note below." style={{ marginLeft: 6, fontSize: "var(--text-meta)", color: "var(--warning)", fontFamily: "var(--font-mono)" }}>EST</span>;
   const available = series.filter(point => point.spx_close != null && point.above_200_pct != null && point.net_high_low_per_500 != null);
   return <>
     {requestError}
@@ -51,12 +53,11 @@ export default function RecordHighBreadthPanel() {
       <div className={styles.metrics}><RegimeStrip>
         <RegimeStripCell testId="record-high-breadth-strip-spx" label="SPX CLOSE" value={<span data-testid="record-high-breadth-spx">{breadthValue(current.spx_close)}</span>} />
         <RegimeStripCell testId="record-high-breadth-strip-above" label="ABOVE 200-DAY SMA" value={<span data-testid="record-high-breadth-above">{breadthValue(current.above_200_pct, "%")}</span>} />
-        <RegimeStripCell testId="record-high-breadth-strip-net" label="NET HIGH-LOW % (500 BASE)" value={<span data-testid="record-high-breadth-net">{breadthValue(current.net_high_low_per_500, "%")}</span>} sub={<>Highs {current.new_highs ?? "---"} / lows {current.new_lows ?? "---"}</>} />
-        <RegimeStripCell testId="record-high-breadth-strip-date" label="ALIGNED SESSION" value={data.data_date ?? "---"} />
+        <RegimeStripCell testId="record-high-breadth-strip-net" label="NET HIGH-LOW % (500 BASE)" value={<><span data-testid="record-high-breadth-net">{breadthValue(current.net_high_low_per_500, "%")}</span>{estimated && estFlag}</>} sub={<>Highs {current.new_highs ?? "---"} / lows {current.new_lows ?? "---"}</>} />
       </RegimeStrip></div>
       <FreshnessRail schedule={RECORD_HIGH_BREADTH_REFRESH} asOf={data.data_date} testId="record-high-breadth-freshness" />
       <div className="section-footnote" data-testid="record-high-breadth-source">
-        TradingView source variant. The net count is normalized per 500; the actual issue denominator is unverified.
+        {estimated && <span style={{ color: "var(--warning)", fontFamily: "var(--font-mono)" }}>EST </span>}TradingView source variant. The net count is normalized per 500; the actual issue denominator is unverified.
         {data.source?.history_complete === false && " Available history is incomplete; comparisons with 1973 and 1999 are unverified."}
         {data.source?.lagging && ` Latest expected session ${data.source.expected_session_date} is incomplete; showing the last aligned session.`}
         {data.source?.source_finality === "unverified" && " Provider finality is unverified."}

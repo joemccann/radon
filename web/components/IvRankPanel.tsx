@@ -116,6 +116,8 @@ export default function IvRankPanel() {
   const current = data.current;
   const regime = ivrankRegime(current.iv_rank) ?? current.regime;
   const regimeTone = ivrankRegimeColor(regime);
+  // A muted band tone is right for a caption, never for the headline figure.
+  const headlineTone = regimeTone === "var(--text-muted)" ? "var(--text-primary)" : regimeTone;
   const uwCheck = data.uw_check;
   const uwSub =
     uwCheck && uwCheck.iv_rank != null ? `UW CROSS-CHECK ${formatRank(uwCheck.iv_rank)}` : null;
@@ -209,7 +211,7 @@ export default function IvRankPanel() {
               testId="ivrank-strip-rank"
               label="IV RANK"
               value={
-                <span data-testid="ivrank-rank-value" style={{ color: regimeTone }}>
+                <span data-testid="ivrank-rank-value" style={{ color: headlineTone }}>
                   {formatRank(current.iv_rank)}
                 </span>
               }
@@ -247,7 +249,7 @@ export default function IvRankPanel() {
               value={
                 <span
                   data-testid="ivrank-regime-value"
-                  style={{ color: regimeTone, whiteSpace: "nowrap" }}
+                  style={{ color: headlineTone, whiteSpace: "nowrap" }}
                 >
                   {regime ?? "---"}
                 </span>

@@ -207,7 +207,19 @@ describe("MaRatioPanel — content", () => {
     expect(q.getByTestId("ma-ratio-state").textContent).toBe("50D LAGGING");
     expect(q.getByTestId("ma-ratio-pct50").textContent).toBe("46.5%");
     expect(q.getByTestId("ma-ratio-pct200").textContent).toBe("64.6%");
-    expect(q.getByTestId("ma-ratio-signal").textContent).toBe("---");
+    expect(q.getByTestId("ma-ratio-signal").textContent).toBe("NO SIGNAL");
+  });
+
+  it("spends no tile on a placeholder when there is no signal: SPX leads, no signal is a caption", () => {
+    hookState.current.data = buildData();
+    const { container } = render(<MaRatioPanel />);
+    const q = within(container);
+    expect(q.queryByTestId("ma-ratio-strip-signal")).toBeNull();
+    const spx = q.getByTestId("ma-ratio-strip-spx");
+    expect(spx.contains(q.getByTestId("ma-ratio-signal"))).toBe(true);
+    for (const v of Array.from(container.querySelectorAll(".regime-strip-value"))) {
+      expect(v.textContent).not.toBe("---");
+    }
   });
 
   it("labels a zone reading and a turn-up signal", () => {
