@@ -9332,9 +9332,31 @@ Correction verification review: Actual original telecom PDF page 11 confirms LSE
 ## Publish and regenerate research charts (2026-10-12)
 
 Dependency graph: T1 -> T2 -> T3 -> T4.
-- [ ] T1 depends_on: [] Review final source and runtime packaging, honor lessons requiring full suites in GitHub CI, commit only code/tests/docs with no proprietary preview assets.
-- [ ] T2 depends_on: [T1] Open and attach PR, verify expected exact-head CI green, send one accepted Pushover receipt.
-- [ ] T3 depends_on: [T2] Merge authorized PR, verify production deployment of the resulting SHA and chart runtime.
+- [x] T1 depends_on: [] Review final source and runtime packaging, honor lessons requiring full suites in GitHub CI, commit only code/tests/docs with no proprietary preview assets.
+- [x] T2 depends_on: [T1] Open and attach PR, verify expected exact-head CI green, send one accepted Pushover receipt.
+- [x] T3 depends_on: [T2] Merge authorized PR, verify production deployment of the resulting SHA and chart runtime.
 - [ ] T4 depends_on: [T3] Regenerate the three existing articles with source evidence and independent image approval, preserve IDs/copy and verify authenticated production feed/lightbox.
 
 Review: User explicitly authorized merge, deployment and mutation of these three articles. Back up original records and use conditional updates to avoid overwriting concurrent changes; preserve source PDFs, article claims and timestamps.
+
+Publication review: PR #1046, exact head a5611accfd87ba604b192088a01d2b581b4b4655, 36 passing applicable checks and 8 expected skipped checks; both image builds and all browser shards passed. One Pushover accepted, request 3ca74726-b26a-42a8-824c-0b202743c895. Ordinary merge refused: active main-review ruleset 24143098 requires one independent latest-push approval; no reviews exist. Auto-merge is disabled. No administrative bypass or production mutation performed. One-off regeneration script has independently reviewed pinned source baselines, complete private backups, asset/pixel-review validation and atomic three-row CAS; isolated SQL rehearsal proved complete commit, concurrent-edit rollback and partial-update rollback. Await eligible approval or explicit operator authorization of the configured PR administrator exception before merge/deploy/regeneration.
+
+Operator continuation: explicitly authorized administrator merge. PR #1046 merged as 79bb0544961f087de2fb804040eb682c729e4ac3 after unchanged-head 36 green checks. Production CI/deploy run 38312998507 is registered and being watched; regeneration remains gated on the deployed image and reviewed source/asset checks.
+
+Scope extension: User also authorized refreshing today's generated charts. Read-only inventory of publication-day 2026-10-12 America/Los_Angeles found 229 research rows and 8 legacy generated-chart articles, overlapping Japan and telecom. Union with original examples is 9 distinct posts. Source-report dates remain unchanged; no source report is dated October 12. Expanded job pins all nine reviewed baselines and checkpoints each preparation before an atomic guarded publication.
+
+Deployment review: main CI/deploy run 38312998507 concluded success at merge SHA 79bb0544961f087de2fb804040eb682c729e4ac3. Independent production checker verified checkout, green deploy marker and running exact-tag research image, six active app units, fresh schema-v3 health up, intake v2 and immutable D3/fonts/Chromium. Nine-article preparation remains gated on final independent scratch-script review.
+
+Runtime QA follow-up: first nine-article prepare produced four prepared records and five rejected proposals, with zero article-row mutations. Independent Sol/Luna review also vetoed FERC mixed EV/EBITDA versus P/E and ASIC's strict lower bound drawn as an exact100 value. Scope stays nine articles. Add source-bound rejection and explicit comparison/status image gates; stage a scoped follow-up PR, green CI and deploy before final regeneration. Manual source-grounded revision plans will receive fresh image audits. Original source report dates require cover/cited-header verification where existing metadata conflicts.
+
+## Generated-chart verification hardening (2026-10-12)
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+- [x] T1 depends_on: [] Preserve failed production preparation; independently identify unlike measurements and bounded values approved by the existing seven-gate auditor.
+- [ ] T2 depends_on: [T1] Publish regression-only CI head, observe failures, reject bounded/approximate point evidence and require explicit compatibility/estimation image gates.
+- [ ] T3 depends_on: [T2] Verify exact-head CI, notify accepted green, admin merge and deploy the scoped hardening.
+- [ ] T4 depends_on: [T3] Regenerate nine selected articles with literal evidence, independent fresh image review and verified report-date corrections, then guarded publication and production visual verification.
+
+Review: No production row mutations yet. Preserve article claims and publication timestamps; correct only visually proven source-report metadata. Invalid charts remain withheld.
+
+Hardening red evidence: PR #1047 head b04d698e8a2ee876c3acdc1c50de373f344ad0ed, CI 38315381303 job 115030713009 reproduced all 25 new failures; 2,444 other shard tests passed. Source changes follow only after this red head.
