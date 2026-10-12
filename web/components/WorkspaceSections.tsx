@@ -149,6 +149,7 @@ import GarchConvergenceScanner from "./GarchConvergenceScanner";
 import VolConePanel from "./VolConePanel";
 import FlowAnalysisTickerInput from "./flow-analysis/FlowAnalysisTickerInput";
 import { InformedFlowPanel } from "./flow-analysis/InformedFlowPanel";
+import FlowScanSummary from "./flow-analysis/FlowScanSummary";
 import { AlertsPanel } from "./alerts/AlertsPanel";
 import ResearchWorkbench from "@/components/research/ResearchWorkbench";
 import { MarketState } from "@/lib/useMarketHours";
@@ -1127,6 +1128,8 @@ function FlowSectionsBody() {
   }, [data]);
 
   const actionItems = againstArr.filter((p) => p.strength >= 15);
+  // Once a scan has landed, zero-count buckets collapse into the summary line.
+  const scanSettled = data != null && !syncing;
 
   if (hasMounted && isMobile) {
     const segmentRows: Record<FlowSegment, FlowAnalysisPosition[]> = {
@@ -1236,7 +1239,17 @@ function FlowSectionsBody() {
         </div>
       )}
 
-      <div className="section">
+      {scanSettled && (
+        <div className="section">
+          <FlowScanSummary
+            counts={{ supports: supportsArr.length, against: againstArr.length, neutral: neutralArr.length, watch: watchArr.length }}
+            scanned={totalScanned}
+            scannedAt={lastSync ? new Date(lastSync).toLocaleTimeString() : null}
+          />
+        </div>
+      )}
+
+      {(!scanSettled || supportsArr.length > 0) && <div className="section">
         <div className="section-header">
           <div className="section-title">
             <CheckCircle2 size={14} />
@@ -1261,9 +1274,9 @@ function FlowSectionsBody() {
             <div className="alert-item">{syncing ? "Scanning portfolio flow..." : "No supporting flow detected"}</div>
           )}
         </div>
-      </div>
+      </div>}
 
-      <div className="section">
+      {(!scanSettled || againstArr.length > 0) && <div className="section">
         <div className="section-header">
           <div className="section-title">
             <TrendingDown size={14} />
@@ -1279,9 +1292,9 @@ function FlowSectionsBody() {
             <SectionEmptyState icon={TrendingDown} headline="No contradicting flow detected" />
           )}
         </div>
-      </div>
+      </div>}
 
-      <div className="section">
+      {(!scanSettled || neutralArr.length > 0) && <div className="section">
         <div className="section-header">
           <div className="section-title">
             <Circle size={14} />
@@ -1297,9 +1310,9 @@ function FlowSectionsBody() {
             <SectionEmptyState icon={Circle} headline="No neutral positions" />
           )}
         </div>
-      </div>
+      </div>}
 
-      <div className="section">
+      {(!scanSettled || watchArr.length > 0) && <div className="section">
         <div className="section-header">
           <div className="section-title">
             <Bell size={14} />
@@ -1315,7 +1328,7 @@ function FlowSectionsBody() {
             <SectionEmptyState icon={Bell} headline="No watch items" />
           )}
         </div>
-      </div>
+      </div>}
 
       <div className="section">
         <div className="report-meta">

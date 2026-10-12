@@ -125,6 +125,8 @@ export default function ClearOverview({ portfolio, prices = EMPTY_PRICES }: { po
   const balance = account.value == null ? "---" : accountUsd.format(account.value);
   const [wholeBalance, decimals] = balance.split(".");
   const riskTitle = margin.degraded ? "Margin data unavailable" : needsAttention ? "Margin needs attention" : "Margin cushion";
+  const undefinedRisk = portfolio?.undefined_risk_count ?? 0;
+  const riskFinding = `${margin.degraded ? "Margin data unavailable." : needsAttention ? "Margin needs attention." : "Margin is comfortable."}${portfolio ? ` ${undefinedRisk === 0 ? "No position has" : undefinedRisk === 1 ? "One position has" : `${undefinedRisk} positions have`} undefined risk.` : ""}`;
 
   return (
     <div className={styles.overview} data-testid="clear-overview">
@@ -140,7 +142,6 @@ export default function ClearOverview({ portfolio, prices = EMPTY_PRICES }: { po
         <dl className={styles.metrics}>
           <div><dt>Buying power</dt><dd>{money(account.buyingPower)}</dd></div>
           <div><dt>Margin used</dt><dd>{account.marginUsedPct == null ? "---" : `${account.marginUsedPct.toFixed(1)}%`}</dd></div>
-          <div><dt>Net dollar delta</dt><dd title={exposure.complete ? "Sum of position delta × underlying price" : "Complete underlying prices and provider option deltas required"}>{signedMoney(exposure.dollarDelta)}</dd></div>
         </dl>
         <Link className={styles.mobileRisk} data-tone={margin.level === "critical" ? "critical" : needsAttention ? "attention" : "neutral"} href="#clear-risk-details">
           {needsAttention || margin.degraded ? <CircleAlert size={20} aria-hidden="true" /> : <ShieldCheck size={20} aria-hidden="true" />}
@@ -173,18 +174,14 @@ export default function ClearOverview({ portfolio, prices = EMPTY_PRICES }: { po
       </div>
       <aside className={styles.rail} aria-label="Risk and research">
         <section id="clear-risk-details" className={styles.risk} aria-labelledby="clear-risk-title">
-          <div className={styles.sectionHeading}><h2 id="clear-risk-title">Risk at a glance</h2><ShieldCheck size={20} aria-hidden="true" /></div>
-          <p className={margin.level === "critical" ? styles.criticalText : needsAttention ? styles.attentionText : styles.secondary}>{riskTitle}</p>
-          <div className={styles.riskValue}><span>Available cushion</span><strong>{margin.cushionPct == null ? "---" : <>{margin.cushionPct.toFixed(1)}<small>%</small></>}</strong></div>
-          {margin.cushionPct != null ? <div className={styles.riskTrack} data-tone={margin.level === "critical" ? "critical" : needsAttention ? "attention" : "neutral"}><span style={{ width: `${Math.max(0, Math.min(100, margin.cushionPct))}%` }} /></div> : null}
-          <p className={styles.riskDescription}>{margin.degraded ? "Current net liquidation and excess liquidity are needed to assess margin." : needsAttention ? margin.message : "Excess liquidity / net liquidation. Margin cushion is not a maximum-loss limit."}</p>
-          <Link href="/portfolio" className={styles.textLink}>Review positions <ArrowRight size={16} aria-hidden="true" /></Link>
-        </section>
-        <section className={styles.exposure} aria-labelledby="clear-exposure-title">
-          <h3 id="clear-exposure-title">Exposure</h3>
-          <dl><div><dt>Net dollar delta</dt><dd>{signedMoney(exposure.dollarDelta)}</dd></div><div><dt>Undefined-risk positions</dt><dd>{portfolio ? portfolio.undefined_risk_count : "---"}</dd></div></dl>
-          <p>{exposure.complete ? "Sensitivity to underlying prices, not a repriced stress scenario." : "Current underlying prices and provider Greeks are required for every option leg."}</p>
-          <Link href="/regime/cri" className={styles.textLink}>View market risk <ArrowUpRight size={16} aria-hidden="true" /></Link>
+          <h2 id="clear-risk-title" className={styles.riskFinding}>{riskFinding}</h2>
+          {margin.degraded || needsAttention ? <p className={margin.level === "critical" ? styles.criticalText : styles.attentionText}>{margin.degraded ? "Current net liquidation and excess liquidity are needed to assess margin." : margin.message}</p> : null}
+          <dl className={styles.riskLedger}>
+            <div><dt title="Excess liquidity / net liquidation. Margin cushion is not a maximum-loss limit.">Margin cushion</dt><dd>{margin.cushionPct == null ? "---" : `${margin.cushionPct.toFixed(1)}%`}</dd></div>
+            <div><dt title={exposure.complete ? "Sum of position delta × underlying price. Sensitivity to underlying prices, not a repriced stress scenario." : "Current underlying prices and provider Greeks are required for every option leg."}>Net dollar delta</dt><dd data-tone={exposure.dollarDelta == null || exposure.dollarDelta === 0 ? "neutral" : exposure.dollarDelta > 0 ? "positive" : "negative"}>{signedMoney(exposure.dollarDelta)}</dd></div>
+            <div><dt>Undefined-risk positions</dt><dd data-tone={undefinedRisk ? "attention" : "neutral"}>{portfolio ? undefinedRisk : "---"}</dd></div>
+          </dl>
+          <p className={styles.riskLinks}><Link href="/portfolio" className={styles.textLink}>Review positions</Link><span aria-hidden="true">·</span><Link href="/regime/cri" className={styles.textLink}>Market risk</Link></p>
         </section>
       </aside>
     </div>

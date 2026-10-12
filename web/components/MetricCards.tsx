@@ -65,6 +65,8 @@ type CardDef = {
   tone: "positive" | "negative" | "neutral";
   /** Optional subtitle rendered between value and change line. */
   subtitle?: ReactNode;
+  /** The one figure the row leads with (net liquidation). */
+  hero?: boolean;
 };
 
 function activateMetricControl(event: KeyboardEvent<HTMLDivElement>) {
@@ -78,7 +80,7 @@ function MetricCard({ card, onClick }: { card: CardDef; onClick?: () => void }) 
   const descriptionId = useId();
   return (
     <div
-      className={`metric-card${onClick ? " metric-card-clickable" : ""}`}
+      className={`metric-card${card.hero ? " metric-card-hero" : ""}${onClick ? " metric-card-clickable" : ""}`}
       onClick={onClick}
       onKeyDown={onClick ? activateMetricControl : undefined}
       role={onClick ? "button" : undefined}
@@ -207,6 +209,8 @@ function AccountRow({
     displayValue != null && priorNetLiq != null && priorNetLiq > 0
       ? (displayValue / priorNetLiq) * 100
       : null;
+  // A $0.00 accrual is a dead tile: it gets no equal-weight box beside net liq.
+  const showDividends = acct.dividends != null && acct.dividends !== 0;
   const dayPnlChange =
     dayPnlPct != null
       ? `${dayPnlPct >= 0 ? "+" : ""}${dayPnlPct.toFixed(2)}% · ${displayLabel}`
@@ -214,9 +218,9 @@ function AccountRow({
   return (
     <>
       <SectionHeader label="ACCOUNT" collapsed={collapsed} onToggle={onToggle} />
-      {!collapsed && <div className="metrics-grid">
+      {!collapsed && <div className={showDividends ? "metrics-grid" : "metrics-grid-3"}>
         <MetricCard
-          card={{ label: "Net Liquidation", value: fmtExact(acct.net_liquidation), change: "BANKROLL", tone: "neutral" }}
+          card={{ label: "Net Liquidation", value: fmtExact(acct.net_liquidation), change: "BANKROLL", tone: "neutral", hero: true }}
           onClick={onNetLiqClick}
         />
         <MetricCard
@@ -236,10 +240,10 @@ function AccountRow({
           card={{ label: "Unrealized P&L", value: fmtSignedExact(acct.unrealized_pnl), change: "OPEN POSITIONS", tone: acct.unrealized_pnl !== 0 ? tone(acct.unrealized_pnl) : "neutral" }}
           onClick={onUnrealizedClick}
         />
-        <MetricCard
+        {showDividends ? <MetricCard
           card={{ label: "Dividends", value: fmtExact(acct.dividends), change: "ACCRUED", tone: acct.dividends > 0 ? "positive" : "neutral" }}
           onClick={onDividendsClick}
-        />
+        /> : null}
       </div>}
     </>
   );
