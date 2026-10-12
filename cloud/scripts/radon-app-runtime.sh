@@ -38,6 +38,8 @@ if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
   NOTIFY_PROXY_DIR="${RADON_TEST_NOTIFY_PROXY_DIR:-${STATE_DIR}/notify}"
   CONTROL_DIR="${RADON_TEST_CONTROL_DIR:-${STATE_DIR}/control}"
   DEPLOY_LOCK_FILE="${RADON_TEST_DEPLOY_LOCK:-${STATE_DIR}/deploy.lock}"
+  PULL_LOCK_FILE="${RADON_TEST_PULL_LOCK:-${STATE_DIR}/image-pull.lock}"
+  PULL_LOCK_WAIT_SECS="${RADON_TEST_PULL_LOCK_WAIT_SECS:-300}"
   GREEN_MARKER_FILE="${RADON_TEST_GREEN_MARKER:-${STATE_DIR}/last-green}"
   TRANSITION_JOURNAL_FILE="${RADON_TEST_TRANSITION_JOURNAL:-${STATE_DIR}/transition.json}"
   CHROMIUM_SECCOMP_PROFILE="${RADON_TEST_SECCOMP_PROFILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/config/seccomp/chromium.json}"
@@ -81,6 +83,9 @@ else
   NOTIFY_PROXY_DIR=/run/radon-app-runtime
   CONTROL_DIR=/run/radon-control
   DEPLOY_LOCK_FILE=/home/radon/.radon-deploy.lock
+  # Root-only: /run is root-owned and this verb creates the directory 0755.
+  PULL_LOCK_FILE=/run/radon-app-runtime/image-pull.lock
+  PULL_LOCK_WAIT_SECS=300
   GREEN_MARKER_FILE=/home/radon/.radon-last-green-deploy
   TRANSITION_JOURNAL_FILE=/home/radon/.radon-deploy-transition.json
   # Root-owned control-plane copy of cloud/config/seccomp/chromium.json. Never
@@ -333,6 +338,45 @@ refuse_host_plane() {
 # failed the ~60s HTTP gate on a container still downloading (2026-08-28
 # 4b332fd8 was the last green deploy; 33265501795 and 33266517375 rolled back
 # mid-pull). Untagged SHA pairs at ~5.8G each also filled the 75G disk.
+#
+# Every pull holds a SHARED lock on PULL_LOCK_FILE (fd 9) from before the
+# first layer fetch until the verb exits, so concurrent pulls never wait on
+# each other. Every prune takes it EXCLUSIVE without blocking and skips while
+# any other pull holds it: the CI prepull runs without the deploy lock, and a
+# post-green prune from the previous run's deploy could otherwise delete the
+# tag it just pulled. A pull waits at most PULL_LOCK_WAIT_SECS for a running
+# prune and never waits on the deploy lock, so the two cannot deadlock.
+acquire_pull_lock() {
+  mkdir -p -m 0755 "${PULL_LOCK_FILE%/*}" || {
+    echo "radon-app-runtime: pull lock directory is unavailable" >&2
+    return 71
+  }
+  if [[ -L "$PULL_LOCK_FILE" ]] || { [[ -e "$PULL_LOCK_FILE" ]] && [[ ! -f "$PULL_LOCK_FILE" ]]; }; then
+    echo "radon-app-runtime: pull lock is not a regular file" >&2
+    return 71
+  fi
+  exec 9<>"$PULL_LOCK_FILE" || return 71
+  "$PYTHON" - "$PULL_LOCK_FILE" "$PULL_LOCK_WAIT_SECS" <<'PYCODE'
+import fcntl, os, stat, sys, time
+path, wait = sys.argv[1], float(sys.argv[2])
+opened, named = os.fstat(9), os.lstat(path)
+if not stat.S_ISREG(opened.st_mode) or not stat.S_ISREG(named.st_mode) \
+        or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino):
+    print("radon-app-runtime: pull lock is not a regular file", file=sys.stderr)
+    raise SystemExit(71)
+deadline = time.monotonic() + wait
+while True:
+    try:
+        fcntl.flock(9, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        break
+    except BlockingIOError:
+        if time.monotonic() >= deadline:
+            print("radon-app-runtime: an image prune still holds the pull lock", file=sys.stderr)
+            raise SystemExit(75)
+        time.sleep(0.2)
+PYCODE
+}
+
 cmd_pull() {
   local target="${1:-}" tag python_ref node_ref python_pid node_pid
   local status=0
@@ -347,6 +391,7 @@ cmd_pull() {
   fi
   python_ref="ghcr.io/joemccann/radon-python:${tag}"
   node_ref="ghcr.io/joemccann/radon-node:${tag}"
+  acquire_pull_lock || return $?
 
   # The gated prepull job and the deploy both call this exact verb. When the
   # pair is local and matches registry digests, no layers need pulling.
@@ -358,9 +403,9 @@ cmd_pull() {
     && image_matches_registry "$node_ref"; then
     printf 'exact release image pair already local: %s\n' "$tag" >&2
   else
-    "$DOCKER" pull "$python_ref" &
+    "$DOCKER" pull "$python_ref" 9>&- &
     python_pid=$!
-    "$DOCKER" pull "$node_ref" &
+    "$DOCKER" pull "$node_ref" 9>&- &
     node_pid=$!
     if ! wait "$python_pid"; then
       status=1
@@ -377,7 +422,7 @@ cmd_pull() {
       return 69
     fi
   fi
-  [[ -n "$target" ]] && prune_stale_app_images "$target"
+  [[ -n "$target" ]] && prune_stale_app_images "$target" 1
   return 0
 }
 
@@ -385,17 +430,20 @@ cmd_pull() {
 # after a green deploy, never when RADON_DEPLOY_STAGE=1, after the supervisor
 # closes the lock fd. `pull` from deploy.sh holds that lock, so its prune
 # skips. The CI prepull job runs `pull` without the lock, so its prune runs
-# and protects the target SHA plus green line 1, not line 2.
+# and protects the target SHA plus green line 1, not line 2. Either prune
+# skips while another process holds the pull lock (see acquire_pull_lock).
 cmd_prune() {
-  prune_stale_app_images ""
+  mkdir -p -m 0755 "${PULL_LOCK_FILE%/*}" 2>/dev/null || true
+  prune_stale_app_images "" 0
 }
 
+# $2 is 1 when the caller already holds the pull lock shared on fd 9.
 prune_stale_app_images() {
-  "$PYTHON" - "$DOCKER" "$1" "$DEPLOY_LOCK_FILE" "$GREEN_MARKER_FILE" "$TRANSITION_JOURNAL_FILE" <<'PYCODE'
+  "$PYTHON" - "$DOCKER" "$1" "$DEPLOY_LOCK_FILE" "$GREEN_MARKER_FILE" "$TRANSITION_JOURNAL_FILE" "$PULL_LOCK_FILE" "$2" <<'PYCODE'
 import fcntl, json, os, re, stat, subprocess, sys
 from pathlib import Path
 
-docker, target, lock_path, green_path, journal_path = sys.argv[1:]
+docker, target, lock_path, green_path, journal_path, pull_lock_path, pull_lock_held = sys.argv[1:]
 def skip(reason):
     print(f"radon-app-runtime: image prune skipped: {reason}", file=sys.stderr)
     raise SystemExit(0)
@@ -404,6 +452,22 @@ def command(*args):
                           check=True, timeout=20).stdout.splitlines()
 def sha(value):
     return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value)
+
+# Exclusive and non-blocking: another pull's shared hold means a tag may be
+# mid-pull or unverified. Inside `pull <sha>` this converts our own shared
+# hold on the inherited fd. It never waits, so it cannot deadlock.
+try:
+    if pull_lock_held == "1":
+        pull_fd = 9
+    else:
+        pull_fd = os.open(pull_lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    if not stat.S_ISREG(os.fstat(pull_fd).st_mode):
+        skip("pull lock is not a regular file")
+    fcntl.flock(pull_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    skip("app image pull in progress")
+except OSError as exc:
+    skip(f"pull lock unavailable ({type(exc).__name__})")
 
 try:
     # Do not create a root-owned lock that would prevent radon from deploying.
