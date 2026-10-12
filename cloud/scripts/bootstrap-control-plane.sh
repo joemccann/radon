@@ -86,7 +86,9 @@ done
 readonly DEPLOY_LOCK_PATH="$(root_path /home/radon/.radon-deploy.lock)"
 readonly APP_TRANSITION_PATH="$(root_path /home/radon/.radon-deploy-transition.json)"
 readonly GATEWAY_TRANSITION_PATH="$(root_path /var/lib/radon/ib-gateway-transition.json)"
-readonly ROOT_ACTIVE_UNITS_PATH="$(root_path /var/lib/radon/deploy/active-units)"
+readonly ROOT_ACTIVE_UNITS_PATH="$(root_path /var/lib/radon-deploy/active-units)"
+# Pre-move location: a host upgraded mid-transition still holds it there.
+readonly LEGACY_ROOT_ACTIVE_UNITS_PATH="$(root_path /var/lib/radon/deploy/active-units)"
 readonly ROOT_INVENTORY_PATH="${ROOT_ACTIVE_UNITS_PATH}.inventory"
 readonly ROOT_RESTORED_PATH="${ROOT_ACTIVE_UNITS_PATH}.restored"
 readonly MANIFEST_PATH="$(root_path /var/lib/radon/control-plane-manifest.sha256)"
@@ -112,7 +114,9 @@ fi
 
 for transition_path in \
   "$APP_TRANSITION_PATH" "$GATEWAY_TRANSITION_PATH" \
-  "$ROOT_ACTIVE_UNITS_PATH" "$ROOT_INVENTORY_PATH" "$ROOT_RESTORED_PATH"; do
+  "$ROOT_ACTIVE_UNITS_PATH" "$ROOT_INVENTORY_PATH" "$ROOT_RESTORED_PATH" \
+  "$LEGACY_ROOT_ACTIVE_UNITS_PATH" "${LEGACY_ROOT_ACTIVE_UNITS_PATH}.inventory" \
+  "${LEGACY_ROOT_ACTIVE_UNITS_PATH}.restored"; do
   if [[ -e "$transition_path" || -L "$transition_path" ]]; then
     die "pending transition exists: $transition_path" 75
   fi

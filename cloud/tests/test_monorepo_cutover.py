@@ -560,7 +560,7 @@ def test_runtime_code_paths_are_canonical_while_secret_path_remains_stable() -> 
 
 def test_root_transition_snapshot_is_durable_across_reboot() -> None:
     helper = ROOT_HELPER.read_text(encoding="utf-8")
-    assert "/var/lib/radon/deploy" in helper
+    assert "readonly STATE_DIR=/var/lib/radon-deploy" in helper
     assert "/run/radon-deploy-active-units" not in helper
     assert "ACTIVE_STATE_FILE" in helper
     assert "INVENTORY_FILE" in helper

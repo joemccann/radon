@@ -227,7 +227,7 @@ only a prefix of a baked key is rejected.
   read-write and API read-only at `/var/lib/radon/research`. Seed through the
   container mount; host user radon cannot traverse the anchor.
 - Compatibility media symlink: `/home/radon/radon-cloud/media` -> `/var/lib/radon/media`
-- Durable privileged deploy state: `/var/lib/radon/deploy`
+- Durable privileged deploy state: `/var/lib/radon-deploy` (root `0700` under root-owned `/var/lib`; never a child of radon-owned `/var/lib/radon`). The helper moves a transition journaled at the pre-move `/var/lib/radon/deploy` once, through a pinned `O_NOFOLLOW` fd, and bootstrap refuses while either holds one
 - Root provision store (root's clone of the pinned remote):
   `/opt/radon-provision/radon.git`
 - Control-plane manifest/readiness:
@@ -273,7 +273,7 @@ Pushes to `main` run the root CI workflow. The deploy job:
 
 The journal helper is loaded from the immutable runner so rollback to a commit
 that predates `cloud/` cannot delete its own recovery implementation. Root
-topology state is durable across reboot under `/var/lib/radon/deploy`.
+topology state is durable across reboot under `/var/lib/radon-deploy`.
 
 **Interrupted backups.** The release snapshot includes an active or activating
 `radon-db-backup.service`. Stop it before replacing code, then asynchronously
@@ -576,7 +576,7 @@ bumped is left uninstalled (the drift audit then flags it), so the
 drift-allowlist acknowledgment still covers a deliberate pending window;
 `tests/test_unit_install_acknowledgment.py` fails CI otherwise. A unit
 absent from the manifest is never installed. `install-units` journals what
-it promoted under `/var/lib/radon/deploy`; a rollback runs
+it promoted under `/var/lib/radon-deploy`; a rollback runs
 `radon-deploy-root revert-units` after the checkout restore and before
 `recover`, which disables and removes the units the failed release added and
 restores the bodies it replaced. `commit-transition` closes the journal.
