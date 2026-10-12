@@ -13,6 +13,8 @@
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent, cleanup } from "@testing-library/react";
+import { readFileSync } from "fs";
+import { resolve } from "path";
 
 import { AlertsPanel } from "@/components/alerts/AlertsPanel";
 
@@ -50,15 +52,43 @@ describe("AlertsPanel", () => {
     mockFetchSequence([() => new Response(JSON.stringify({ rules: [SAMPLE_RULE] }), { status: 200 })]);
     render(<AlertsPanel />);
     await waitFor(() => expect(screen.getByText("AAPL")).toBeTruthy());
-    // the rule row renders the HUMAN-READABLE predicate "Flow Strength > 70"
-    // (not the raw snake_case metric key)
-    expect(screen.getByText(/Flow Strength\s*>\s*70/)).toBeTruthy();
+    // the rule row renders the HUMAN-READABLE, sentence-case predicate
+    // "Flow strength > 70" (not the raw snake_case metric key)
+    expect(screen.getByText(/Flow strength\s*>\s*70/)).toBeTruthy();
+    expect(screen.getByText("1 rule")).toBeTruthy();
   });
 
   it("renders the empty state when there are no rules", async () => {
     mockFetchSequence([() => new Response(JSON.stringify({ rules: [] }), { status: 200 })]);
     render(<AlertsPanel />);
     await waitFor(() => expect(screen.getByText(/no alert rules/i)).toBeTruthy());
+  });
+
+  it("speaks in sentence case: title, count, labels and empty copy (no-slop 11)", async () => {
+    mockFetchSequence([() => new Response(JSON.stringify({ rules: [] }), { status: 200 })]);
+    render(<AlertsPanel />);
+    await waitFor(() => expect(screen.getByText(/no alert rules/i)).toBeTruthy());
+    expect(screen.getByRole("heading", { name: "Signal alerts" })).toBeTruthy();
+    expect(screen.getByText("No rules")).toBeTruthy();
+    expect(screen.getByText("Send to")).toBeTruthy();
+    const empty = screen.getByText(/no alert rules/i);
+    expect(empty.className).toContain("alerts-empty");
+    expect(empty.textContent).toContain("Get pinged when flow crosses a line, e.g. AAPL flow strength > 70.");
+    expect(screen.getByRole("option", { name: "Flow strength" })).toBeTruthy();
+  });
+
+  it("alerts CSS keeps labels, button and empty copy out of tracked uppercase mono (no-slop 11)", () => {
+    const css = readFileSync(resolve(__dirname, "../app/globals.css"), "utf8");
+    const block = (selector: string) => {
+      const start = css.indexOf(`${selector} {`);
+      expect(start).toBeGreaterThan(-1);
+      return css.slice(start, css.indexOf("}", start));
+    };
+    for (const sel of [".alerts-form__label", ".alerts-form__submit", ".alerts-empty", ".alerts-count"]) {
+      const body = block(sel);
+      expect(body).toContain("text-transform: none");
+      expect(body).toContain("font-family: var(--font-sans)");
+    }
   });
 
   it("surfaces an error when the list fetch fails", async () => {

@@ -158,6 +158,17 @@ describe("Flow Signals order link", () => {
     expect(link.textContent).toBe("GRRR");
   });
 
+  it("drops the Sustained column when no row has a sustained streak (no-slop 07)", () => {
+    render(<WorkspaceSections section="scanner" />);
+
+    const headers = Array.from(document.querySelectorAll("th")).map((th) => th.textContent ?? "");
+    expect(headers.some((h) => h.includes("Sustained"))).toBe(false);
+    expect(headers.some((h) => h.includes("Prints"))).toBe(true);
+    expect(screen.getByTestId("scanner-sustained-hidden").textContent).toBe(
+      "Sustained column hidden: no ticker has a streak.",
+    );
+  });
+
   it("omits the link for a row with no tradable signal", () => {
     render(<WorkspaceSections section="scanner" />);
 

@@ -1457,6 +1457,8 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
   const [garchScanError, setGarchScanError] = useState<string | null>(null);
   const signals = data?.top_signals ?? [];
   const { sorted, sort, toggle } = useSort(signals, scannerSigExtract);
+  // A column that reads "—" on every row carries no information; drop it.
+  const showSustained = signals.some((row) => row.sustained_days > 0);
   const { isMobile, hasMounted } = useViewport();
   const [sortKey, setSortKey] = useState<ScannerSortKey>("score");
 
@@ -2017,7 +2019,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
                   <SortTh<ScannerSortKey> label="Score" sortKey="score" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...scannerHelpProps("Score", "score")} />
                   <SortTh<ScannerSortKey> label="Strength" sortKey="strength" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...scannerHelpProps("Strength", "strength")} />
                   <SortTh<ScannerSortKey> label="Buy Ratio" sortKey="buy_ratio" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...scannerHelpProps("Buy Ratio", "buy-ratio")} />
-                  <SortTh<ScannerSortKey> label="Sustained" sortKey="sustained_days" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...scannerHelpProps("Sustained", "sustained")} />
+                  {showSustained && <SortTh<ScannerSortKey> label="Sustained" sortKey="sustained_days" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...scannerHelpProps("Sustained", "sustained")} />}
                   <SortTh<ScannerSortKey> label="Prints" sortKey="num_prints" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...scannerHelpProps("Prints", "prints")} />
                 </tr>
               </thead>
@@ -2025,7 +2027,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
                 {sorted.map((row) => {
                   const orderHref = flowOrderHref(row);
                   return (
-                    <tr key={`scanner-${row.ticker}`}>
+                    <tr key={`scanner-${row.ticker}`} className={row.signal === "WEAK" ? "scanner-row--weak" : undefined}>
                       <td>
                         {orderHref ? (
                           <Link
@@ -2041,20 +2043,29 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
                         )}
                       </td>
                       <td><span className={signalClass(row.signal)}>{row.signal}</span></td>
-                      <td><span className={`pill ${dirClass(row.direction)}`}>{row.direction}</span></td>
+                      <td>
+                        <span className={`flow-dir flow-dir--${dirClass(row.direction)}`} data-testid={`scanner-dir-${row.ticker}`}>
+                          {row.direction === "ACCUMULATION" ? "▲ Accum" : row.direction === "DISTRIBUTION" ? "▼ Dist" : row.direction}
+                        </span>
+                      </td>
                       <td className="right">
                         {row.score.toFixed(1)}
                         <SigMeter value={row.score} tone={row.direction === "ACCUMULATION" ? "pos" : row.direction === "DISTRIBUTION" ? "neg" : "mut"} />
                       </td>
                       <td className="right">{row.strength.toFixed(1)}</td>
                       <td className="right">{row.buy_ratio != null ? `${(row.buy_ratio * 100).toFixed(1)}%` : "—"}</td>
-                      <td className="right">{row.sustained_days > 0 ? `${row.sustained_days}d` : "—"}</td>
+                      {showSustained && <td className="right">{row.sustained_days > 0 ? `${row.sustained_days}d` : "—"}</td>}
                       <td className="right">{row.num_prints.toLocaleString()}</td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
+            {!showSustained && (
+              <div className="report-meta" data-testid="scanner-sustained-hidden">
+                Sustained column hidden: no ticker has a streak.
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -2167,12 +2178,6 @@ function DiscoverSections() {
     if (dir === "ACCUMULATION") return "bullish";
     if (dir === "DISTRIBUTION") return "bearish";
     return "neutral";
-  };
-
-  const scoreClass = (score: number) => {
-    if (score >= 60) return "bullish";
-    if (score >= 40) return "neutral";
-    return "bearish";
   };
 
   const discoverMobileSortKeys = DISCOVER_MOBILE_SORT_KEYS;
@@ -2323,7 +2328,7 @@ function DiscoverSections() {
                   <tr key={c.ticker}>
                     <td><DiscoverTickerCell candidate={c} /></td>
                     <td className="right">
-                      <span className={scoreClass(c.score)}>{c.score.toFixed(1)}</span>
+                      <span>{c.score.toFixed(1)}</span>
                     </td>
                     <td><span className={dpClass(c.dp_direction)}>{c.dp_direction}</span></td>
                     <td className="right">{c.dp_strength.toFixed(1)}</td>
