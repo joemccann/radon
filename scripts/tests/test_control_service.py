@@ -322,6 +322,241 @@ class TestStatus:
         assert rows[1]["LastTriggerUSec"] == "Wed 2026-05-20 10:00:00 UTC"
 
 
+class FakeLogRunner:
+    """Stdout-capturing runner stand-in for the read-only `logs` op."""
+
+    def __init__(self, rc: int = 0, stdout: str = "", stderr: str = "") -> None:
+        self.calls: list[tuple[list[str], float]] = []
+        self.rc = rc
+        self.stdout = stdout
+        self.stderr = stderr
+
+    def __call__(self, argv, timeout):
+        self.calls.append((list(argv), timeout))
+        return self.rc, self.stdout, self.stderr
+
+
+def _jline(us: int, message, priority="6") -> str:
+    row = {"__REALTIME_TIMESTAMP": str(us), "__CURSOR": "s=abc", "MESSAGE": message}
+    if priority is not None:
+        row["PRIORITY"] = priority
+    return json.dumps(row)
+
+
+class TestLogs:
+    def _controller(self, tmp_path, log_runner):
+        return make_controller(tmp_path, FakeRunner(), log_runner=log_runner)
+
+    def test_logs_execs_the_sudoers_granted_operator_argv(self, tmp_path):
+        runner = FakeLogRunner(stdout=_jline(1_760_000_000_123_456, "boom", "3") + "\n")
+        controller = self._controller(tmp_path, runner)
+        reply = controller.handle(
+            {"op": "logs", "unit": "radon-cor.service", "actor": "user_abc"}, peer_uid=os.getuid(),
+        )
+        assert reply["ok"] is True, reply
+        assert runner.calls == [(
+            ["/usr/bin/sudo", "-n", "/usr/local/bin/radon", "logs", "radon-cor.service"],
+            serve.LOGS_TIMEOUT_S,
+        )]
+        assert serve.LOGS_TIMEOUT_S == 15.0
+        assert reply["unit"] == "radon-cor.service"
+        assert reply["truncated"] is False
+        assert reply["entries"] == [
+            {"ts": "2025-10-09T08:53:20.123456Z", "priority": 3, "message": "boom"},
+        ]
+
+    @pytest.mark.parametrize("unit", [
+        "radon-cor.timer",  # journal is per service; the API maps timer -> service
+        "radon-api",
+        "radon-beta-api.service",
+        "radon-unknown.service",  # well formed, not loaded
+        "radon-ib-gateway-preheld-restart.service",  # internal: fails is_valid_unit
+        "ssh.service",
+        "-n 9999",
+        "--since=yesterday",
+        "radon-api.service; id",
+        "",
+        7,
+        None,
+    ])
+    def test_logs_refuses_without_exec(self, tmp_path, unit):
+        runner = FakeLogRunner()
+        controller = self._controller(tmp_path, runner)
+        request = {"op": "logs", "actor": "x"}
+        if unit is not None:
+            request["unit"] = unit
+        reply = controller.handle(request, peer_uid=os.getuid())
+        assert reply["ok"] is False and reply["refused"] is True
+        assert runner.calls == []
+
+    def test_logs_refuses_extra_fields(self, tmp_path):
+        runner = FakeLogRunner()
+        controller = self._controller(tmp_path, runner)
+        reply = controller.handle(
+            {"op": "logs", "unit": "radon-cor.service", "lines": 5000}, peer_uid=os.getuid(),
+        )
+        assert reply["ok"] is False and reply["refused"] is True
+        assert runner.calls == []
+
+    def test_logs_refuses_a_foreign_peer(self, tmp_path):
+        runner = FakeLogRunner()
+        controller = self._controller(tmp_path, runner)
+        reply = controller.handle({"op": "logs", "unit": "radon-cor.service"}, peer_uid=os.getuid() + 4242)
+        assert reply["ok"] is False
+        assert runner.calls == []
+
+    def test_logs_success_is_not_audited_but_failure_is(self, tmp_path, capsys):
+        ok = self._controller(tmp_path, FakeLogRunner(stdout=""))
+        ok.handle({"op": "logs", "unit": "radon-cor.service", "actor": "a"}, peer_uid=os.getuid())
+        assert "radon-control audit" not in capsys.readouterr().err
+        bad = self._controller(tmp_path, FakeLogRunner(rc=1, stderr="Failed to open journal"))
+        reply = bad.handle({"op": "logs", "unit": "radon-cor.service", "actor": "a"}, peer_uid=os.getuid())
+        assert reply["ok"] is False and not reply.get("refused")
+        assert "Failed to open journal" in reply["error"]
+        assert reply["returncode"] == 1
+        lines = [l for l in capsys.readouterr().err.splitlines() if "radon-control audit" in l]
+        event = json.loads(lines[0].split("audit ", 1)[1])
+        assert event["op"] == "logs" and event["unit"] == "radon-cor.service"
+        assert event["result"] == "failed"
+
+    def test_logs_reports_a_timeout(self, tmp_path):
+        controller = self._controller(tmp_path, FakeLogRunner(rc=serve.TIMEOUT_RC, stderr="timed out after 15s"))
+        reply = controller.handle({"op": "logs", "unit": "radon-cor.service"}, peer_uid=os.getuid())
+        assert reply["ok"] is False
+        assert reply["returncode"] == serve.TIMEOUT_RC
+
+    def test_unloaded_registry_failure_is_an_error_not_a_crash(self, tmp_path):
+        def boom():
+            raise OSError("dbus down")
+
+        runner = FakeLogRunner()
+        controller = serve.Controller(
+            runner=FakeRunner(), log_runner=runner, loaded_units=boom,
+            unit_rows=lambda: [], deploy_lock_path=tmp_path / "l", spawn=lambda fn: None,
+        )
+        reply = controller.handle({"op": "logs", "unit": "radon-cor.service"}, peer_uid=os.getuid())
+        assert reply["ok"] is False
+        assert runner.calls == []
+
+
+class TestLogsReplyBudget:
+    def test_non_ascii_journal_still_fits_the_socket_reply_cap(self, tmp_path):
+        # 300 x 2000 non-ASCII chars json-escape to ~3.6 MB; host_control
+        # refuses any reply over 2 MiB, which would hide the whole journal.
+        raw = "\n".join(_jline(1_000_000 + i, "\u00e9" * 2500, "3") for i in range(300))
+        controller = make_controller(tmp_path, FakeRunner(), log_runner=FakeLogRunner(stdout=raw))
+        reply = controller.handle({"op": "logs", "unit": "radon-cor.service"}, peer_uid=os.getuid())
+        assert reply["ok"] is True
+        encoded = (json.dumps(reply, separators=(",", ":")) + "\n").encode("utf-8")
+        assert len(encoded) <= serve.host_control.MAX_REPLY_BYTES
+        assert reply["truncated"] is True
+        assert 0 < len(reply["entries"]) < 300
+        # The newest lines are the ones kept.
+        assert reply["entries"][-1]["ts"] == serve.parse_journal_json(raw)[0][-1]["ts"]
+
+    def test_fit_reply_budget_keeps_everything_that_fits(self):
+        entries = [{"ts": "t", "priority": 6, "message": "m"}] * 3
+        kept, dropped = serve.journal_entries.fit_reply_budget(entries, 10_000)
+        assert kept == entries and dropped is False
+
+
+class TestJournalParsing:
+    def test_orders_oldest_to_newest_and_parses_priority(self):
+        raw = "\n".join([
+            _jline(1_000_000, "first", "6"),
+            _jline(2_000_000, "second", "4"),
+            _jline(3_000_000, "third", None),
+        ])
+        entries, truncated = serve.parse_journal_json(raw, limit=300)
+        assert [e["message"] for e in entries] == ["first", "second", "third"]
+        assert [e["priority"] for e in entries] == [6, 4, None]
+        assert entries[0]["ts"] == "1970-01-01T00:00:01.000000Z"
+        assert truncated is False
+
+    def test_byte_array_message_is_decoded_with_replacement(self):
+        raw = _jline(1_000_000, list("héllo".encode("utf-8")) + [0xFF], "3")
+        entries, _ = serve.parse_journal_json(raw, limit=300)
+        assert entries[0]["message"] == "héllo�"
+
+    def test_bad_json_and_non_object_lines_are_skipped(self):
+        raw = "\n".join([
+            "not json at all",
+            "[1, 2]",
+            _jline(1_000_000, "kept"),
+            '{"MESSAGE": "no timestamp"}',
+            '{"__REALTIME_TIMESTAMP": "abc", "MESSAGE": "bad ts"}',
+            "",
+        ])
+        entries, _ = serve.parse_journal_json(raw, limit=300)
+        assert [e["message"] for e in entries] == ["kept"]
+
+    def test_null_message_is_reported_not_dropped(self):
+        # journalctl -o json prints null for a field over 4096 bytes.
+        entries, _ = serve.parse_journal_json(_jline(1_000_000, None), limit=300)
+        assert len(entries) == 1
+        assert "too large" in entries[0]["message"]
+
+    def test_long_message_is_capped(self):
+        entries, _ = serve.parse_journal_json(_jline(1_000_000, "x" * 5000), limit=300)
+        assert len(entries[0]["message"]) <= serve.MAX_LOG_MESSAGE_CHARS == 2000
+
+    def test_truncated_when_the_tail_limit_is_reached(self):
+        raw = "\n".join(_jline(i * 1_000_000, f"m{i}") for i in range(1, 6))
+        entries, truncated = serve.parse_journal_json(raw, limit=5)
+        assert len(entries) == 5 and truncated is True
+        _, short = serve.parse_journal_json(raw, limit=300)
+        assert short is False
+
+    def test_non_numeric_priority_is_null(self):
+        entries, _ = serve.parse_journal_json(_jline(1_000_000, "m", "warn"), limit=300)
+        assert entries[0]["priority"] is None
+
+
+class TestRedaction:
+    @pytest.mark.parametrize("text,secret", [
+        ("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1In0.c2lnbmF0dXJl", "eyJhbGciOiJIUzI1NiJ9"),
+        ("GET /api?token=abc123def456&x=1", "abc123def456"),
+        ("UW_TOKEN=0f1e2d3c4b5a69788796a5b4c3d2e1f0", "0f1e2d3c4b5a6978"),
+        ("api_key=SuperSecretValue99", "SuperSecretValue99"),
+        ("client_secret=hunter2hunter2", "hunter2hunter2"),
+        ("password=correct-horse-battery", "correct-horse-battery"),
+        ('{"password": "p@ssw0rd!"}', "p@ssw0rd!"),
+        ("using key sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789", "AbCdEfGhIjKlMnOp"),
+        ("digest " + "a1" * 32, "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"),
+        ("blob Zm9vYmFyYmF6cXV4UXV1eFF1dXhRdXV4UXV1eDEyMzQ1Ng end", "Zm9vYmFyYmF6cXV4UXV1eFF1"),
+        # Colon forms: HTTP headers, YAML-ish config dumps, Python dict reprs.
+        ("password: hunter2hunter2", "hunter2hunter2"),
+        ("x-api-key: abcDEF12345678", "abcDEF12345678"),
+        ("{'api_key': 'abcDEF123456'}", "abcDEF123456"),
+        ('auth_token: "abcdEFGH1234"', "abcdEFGH1234"),
+        ("Authorization: Basic dXNlcjpwYXNzd29yZA==", "dXNlcjpwYXNzd29yZA=="),
+        ("dsn postgres://admin:S3cretPw@db.host:5432/x", "S3cretPw"),
+        ("jwt eyJhbGciOiJFZERTQSJ9.eyJpYXQiOjE3MH0.QWxhZGRpbg", "eyJpYXQiOjE3MH0"),
+    ])
+    def test_secrets_are_redacted(self, text, secret):
+        out = serve.redact_secrets(text)
+        assert secret not in out
+        assert "[REDACTED]" in out
+
+    @pytest.mark.parametrize("text", [
+        "KeyError: 'radon-api.service'",
+        "Traceback (most recent call last):",
+        "deployed 607f4adf0123456789abcdef0123456789abcdef",  # 40-hex git SHA stays
+        "page 77becdbdfc506a32c447c10283efe6b4 acked",  # 32-hex page id stays
+        "/home/radon/radon/scripts/api/server.py line 42",
+        "radon-ib-gateway-preheld-restart.service failed with result exit-code",
+        "GET https://radon.run/api/admin/logs 200",
+        "sort_key: ticker",
+        "at 12:30:01 key rotation done",
+    ])
+    def test_diagnostics_survive(self, text):
+        assert serve.redact_secrets(text) == text
+
+    def test_parsed_entries_are_redacted(self):
+        entries, _ = serve.parse_journal_json(_jline(1_000_000, "auth Bearer abcdefghijklmnop"), limit=300)
+        assert "abcdefghijklmnop" not in entries[0]["message"]
+
+
 def _short_socket_dir() -> str:
     # AF_UNIX paths are capped near 104 bytes on macOS; tmp_path is too long.
     return tempfile.mkdtemp(prefix="rc-", dir="/tmp")

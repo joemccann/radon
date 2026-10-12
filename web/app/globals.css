@@ -19997,6 +19997,143 @@ body[data-mobile="true"] td.right {
 .admin-skeleton-line { height: 11px; }
 .admin-skeleton-row td { padding-top: 16px; padding-bottom: 16px; }
 
+/* --- Progressive log disclosure (Writer Freshness, Service Control) --- */
+.admin-row-expandable { cursor: pointer; }
+.admin-row-expandable:hover > td,
+.admin-row-expanded > td {
+  background: color-mix(in srgb, var(--neutral) 6%, transparent);
+}
+.admin-disclosure-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.admin-disclosure-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.admin-disclosure-btn:hover { color: var(--text-primary); }
+.admin-disclosure-btn:focus-visible {
+  outline: 2px solid var(--positive);
+  outline-offset: 1px;
+}
+.admin-disclosure-chevron { transition: transform 120ms ease-out; }
+.admin-disclosure-btn[aria-expanded="true"] .admin-disclosure-chevron { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) {
+  .admin-disclosure-chevron { transition: none; }
+}
+.admin-log-row > td {
+  padding: 0 8px 10px;
+  background: color-mix(in srgb, var(--neutral) 6%, transparent);
+}
+.admin-log-disclosure {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  background: var(--bg-panel-raised);
+  min-width: 0;
+}
+.admin-log-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.admin-log-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.admin-log-unit { color: var(--text-primary); overflow-wrap: anywhere; }
+.admin-log-filter {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.admin-log-raw { display: flex; flex-direction: column; gap: 4px; }
+.admin-log-raw-label {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--negative);
+}
+.admin-log-raw-error {
+  margin: 0;
+  padding: 8px;
+  border-left: 2px solid var(--negative);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--negative) 6%, transparent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.admin-log-loading { display: flex; flex-direction: column; gap: 6px; }
+.admin-log-empty,
+.admin-log-note {
+  margin: 0;
+  color: var(--text-muted);
+}
+.admin-log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.admin-log-entry {
+  display: grid;
+  grid-template-columns: max-content 52px minmax(0, 1fr) max-content;
+  gap: 8px;
+  padding: 3px 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-dim) 60%, transparent);
+  color: var(--text-secondary);
+}
+.admin-log-entry:last-child { border-bottom: none; }
+.admin-log-ts { color: var(--text-muted); }
+.admin-log-level { font-weight: 600; }
+.admin-log-message { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-primary); }
+.admin-log-entry-negative .admin-log-level,
+.admin-log-entry-negative .admin-log-message { color: var(--negative); }
+.admin-log-entry-warning .admin-log-level,
+.admin-log-entry-warning .admin-log-message { color: var(--warn-text); }
+.admin-log-entry-current {
+  background: color-mix(in srgb, var(--neutral) 8%, transparent);
+}
+.admin-log-run {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+@media (max-width: 640px) {
+  .admin-log-entry {
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+  .admin-log-message { grid-column: 1 / -1; }
+  .admin-disclosure-btn { width: 28px; height: 28px; }
+}
+
 /* Pulsing dot for transitional (Starting/Stopping) verdicts. */
 .admin-status-dot-pulse { animation: admin-dot-pulse 1.1s ease-in-out infinite; }
 @keyframes admin-dot-pulse {
