@@ -190,19 +190,19 @@ export default function SetupWizard() {
       <main className="preferences-shell" data-testid="setup-wizard" style={{ maxWidth: 560, margin: "48px auto", padding: "0 16px" }}>
         <section className="admin-card preferences-group">
           <header className="admin-card-header">
-            <span className="admin-card-title">Radon first-run setup</span>
+            <h1 className="admin-card-title">Paste the setup token from your terminal</h1>
           </header>
           <p className="preferences-row__description">
-            No credentials are configured yet, so the whole app is parked here
-            until you finish setup. Proof of ownership is the setup token
-            printed in the terminal that launched Radon.
+            The terminal that launched Radon printed it. No credentials are
+            configured yet, so every route lands here until setup finishes.
           </p>
           <div className="preferences-row__control">
             <input
-              className="order-input preferences-row__input"
+              className="order-input preferences-row__input setup-token-input"
               type="password"
               autoComplete="off"
-              placeholder="Paste the setup token"
+              aria-label="Setup token"
+              placeholder="Setup token"
               value={token}
               data-testid="setup-token-input"
               onChange={(e) => setToken(e.target.value)}
@@ -212,14 +212,14 @@ export default function SetupWizard() {
             />
             <button
               type="button"
-              className="admin-btn admin-btn-primary"
+              className="admin-btn admin-btn-primary setup-token-submit"
               data-testid="setup-token-submit"
               disabled={!token.trim() || tokenBusy}
               onClick={() => {
                 void submitToken();
               }}
             >
-              {tokenBusy ? "Checking..." : "Begin"}
+              {tokenBusy ? "Checking..." : "Begin setup"}
             </button>
           </div>
           {tokenError ? (
