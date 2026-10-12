@@ -859,6 +859,115 @@ class TestPersistBudget:
         assert SWEEP_BUDGET_S + PERSIST_BUDGET_S <= unit_timeout
 
 
+class TestSnapshotOmitsSeries:
+    """2026-09-15 is the last scan_snapshots row (54,244,408 bytes; the per-
+    ticker `series` map is ~99% of it). Every later cycle (09-29, 10-06)
+    recorded health `ok` and upserted rows, but spent PERSIST_BUDGET_S on
+    weekly upserts (26,000 of ~180,000 on 10-06) and returned before the
+    snapshot. The series already lives in equibles_ats_venue_share; the
+    snapshot carries current + metadata only, and lands first."""
+
+    def _payload(self, tickers: int = 300, weeks: int = 60) -> dict:
+        series = {
+            f"T{i:04d}": [
+                {
+                    "week_start_date": f"2025-{1 + w // 28:02d}-{1 + w % 28:02d}",
+                    "ats_share_pct": 30.0,
+                    "classification": "neutral",
+                    "classification_reason": "insufficient history: 3 of 12 weeks",
+                }
+                for w in range(weeks)
+            ]
+            for i in range(tickers)
+        }
+        return build_payload(series, scan_time="2026-10-06T09:19:57Z", errors=[])
+
+    def _capture(self, monkeypatch, *, budget: float = 100.0):
+        monkeypatch.setattr(mod, "PERSIST_BUDGET_S", budget, raising=False)
+        calls: list[tuple[str, tuple]] = []
+
+        def fake_hrana(sql, args=(), timeout=4.0):
+            calls.append((sql, tuple(args)))
+
+        monkeypatch.setattr("db.hrana_http.hrana_execute", fake_hrana)
+        monkeypatch.setattr("db.writer.ensure_no_replica_for_writers", lambda: None)
+        return calls
+
+    @staticmethod
+    def _snapshot_calls(calls):
+        return [c for c in calls if c[0].startswith("INSERT OR REPLACE INTO scan_snapshots")]
+
+    @staticmethod
+    def _upsert_calls(calls):
+        return [c for c in calls if "INTO equibles_ats_venue_share" in c[0]]
+
+    def test_snapshot_row_has_no_series_and_is_bounded(self, monkeypatch):
+        calls = self._capture(monkeypatch)
+        payload = self._payload()
+        full_bytes = len(json.dumps(payload))
+
+        mod._write_db_cache(payload, payload["scan_time"])
+
+        [snapshot] = self._snapshot_calls(calls)
+        stored = json.loads(snapshot[1][2])
+        assert "series" not in stored
+        assert stored["current"] == payload["current"]
+        assert stored["count"] == payload["count"]
+        assert stored["tickers"] == payload["tickers"]
+        # current is one row per ticker; series was weeks x tickers.
+        assert len(snapshot[1][2]) < full_bytes / 20
+        # The caller's payload (disk cache, carry-forward) keeps its series.
+        assert "series" in payload
+
+    def test_every_series_row_lands_in_bounded_tuple_param_chunks(self, monkeypatch):
+        calls = self._capture(monkeypatch)
+        payload = self._payload(tickers=7, weeks=60)
+
+        mod._write_db_cache(payload, payload["scan_time"])
+
+        upserts = self._upsert_calls(calls)
+        params_per_row = len(mod._ROW_COLUMNS) + 1
+        written = []
+        for sql, params in upserts:
+            assert isinstance(params, tuple)
+            assert len(params) % params_per_row == 0
+            assert len(params) // params_per_row <= mod._UPSERT_CHUNK_ROWS
+            for start in range(0, len(params), params_per_row):
+                written.append((params[start], params[start + 1]))
+        assert len(written) == 7 * 60
+        assert {t for t, _ in written} == set(payload["series"])
+
+    def test_snapshot_lands_before_the_weekly_upserts(self, monkeypatch):
+        calls = self._capture(monkeypatch)
+        payload = self._payload(tickers=10, weeks=60)
+
+        mod._write_db_cache(payload, payload["scan_time"])
+
+        first_snapshot = calls.index(self._snapshot_calls(calls)[0])
+        first_upsert = calls.index(self._upsert_calls(calls)[0])
+        assert first_snapshot < first_upsert
+
+    def test_snapshot_still_lands_when_upserts_exhaust_the_budget(self, monkeypatch):
+        import time as _time
+
+        monkeypatch.setattr(mod, "PERSIST_BUDGET_S", 0.3, raising=False)
+        calls: list[str] = []
+
+        def slow_hrana(sql, args=(), timeout=4.0):
+            calls.append(sql)
+            if "INTO equibles_ats_venue_share" in sql:
+                _time.sleep(0.1)
+
+        monkeypatch.setattr("db.hrana_http.hrana_execute", slow_hrana)
+        monkeypatch.setattr("db.writer.ensure_no_replica_for_writers", lambda: None)
+        payload = self._payload(tickers=40, weeks=60)  # 2400 rows, 12 chunks
+
+        mod._write_db_cache(payload, payload["scan_time"])
+
+        assert any(sql.startswith("INSERT OR REPLACE INTO scan_snapshots") for sql in calls)
+        assert sum("INTO equibles_ats_venue_share" in sql for sql in calls) < 12
+
+
 # ── migration + upsert (sqlite3 stand-in for libsql) ───────────────
 
 

@@ -142,6 +142,17 @@ describe("GET /api/equibles-ats-venue-share payload", () => {
     expect(text.length).toBeLessThan(JSON.stringify(stored).length / 50);
   });
 
+  it("serves the writer's series-less snapshot with the same shape", async () => {
+    const { series: _series, ...snapshot } = buildPayload();
+    await insertSnapshot(snapshot);
+    const { json } = await getJson();
+    expect(json).not.toHaveProperty("series");
+    expect(json).not.toHaveProperty("missing");
+    expect((json.current as Payload[]).map((r) => r.ticker)).toEqual(["AAPL", "NVDA"]);
+    expect(json).toMatchObject({ count: 2, tickers: ["AAPL", "NVDA"], week_start_date: "2026-08-03" });
+    expect(json.thresholds).toMatchObject({ z_window_weeks: 52 });
+  });
+
   it("strips the series map from the disk fallback too", async () => {
     mockReadFile.mockResolvedValue(JSON.stringify(buildPayload()));
     const { json } = await getJson();

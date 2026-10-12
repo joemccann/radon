@@ -39,9 +39,10 @@ const READ_CACHE_TTL_MS = 60 * 60_000;
 
 type VenueShareRead = TimestampedRead<Record<string, unknown>>;
 
-// The writer's per-ticker `series` map is ~99% of the row (53.65 MB of 54.2 MB
-// in production) and no view reads it. json_remove drops it inside Turso so it
-// never crosses the wire; dropSeries covers the disk copy.
+// The writer no longer stores the per-ticker `series` map in scan_snapshots (it
+// lives in equibles_ats_venue_share). Older rows still carry it (53.65 MB of a
+// 54.2 MB row) and no view reads it, so json_remove drops it inside Turso; the
+// disk copy keeps it for carry-forward, so dropSeries covers that.
 function dropSeries(payload: Record<string, unknown>): Record<string, unknown> {
   const { series: _series, ...rest } = payload;
   return rest;

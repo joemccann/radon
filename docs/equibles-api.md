@@ -136,6 +136,14 @@ universe is portfolio, then watchlist, then Nasdaq-100, Russell 2000, S&P
 the index tail rotates and prior series carry forward so a Tuesday that
 cannot finish ~2500 names still keeps last week's rows (R-558).
 
+Persistence, inside `PERSIST_BUDGET_S`: the `scan_snapshots` row holds
+`current` + metadata only (no `series`) and is written first. After it come
+the chunked upserts of the per-ticker weekly series into
+`equibles_ats_venue_share`. The disk JSON keeps the full payload because
+carry-forward reads its `series`. Until 2026-10 the snapshot embedded the
+series (54 MB). Upserts used up the budget before it was written, so the
+2026-09-15 row stayed the latest.
+
 ### 13F institutional
 
 | Endpoint | Params | meta | Response |
