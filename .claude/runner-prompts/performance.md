@@ -83,9 +83,9 @@ Violating any rail is a failed run.
 2. **Push:** `git push -u origin <branch>` (the header's branch only).
 3. **Open one draft PR** with `gh pr create --draft --base main`:
    - Title: `Performance <date>: <plain-language bottleneck>`.
-   - Body: exactly three sections, **Issue discovered**, **What was done to fix it** and **Next**, one `- **Component**: what happened.` bullet per finding, each with its before/after number. What was done also says what ran locally and what was left to CI.
-   - Next holds only operator-only or blocked actions (index migrations, unit or infra changes) with the exact change. If none, `Fixed with green deployment`.
-   - The runner sends every Pushover notification, including `radon PR green`. Pushover credentials are absent from your environment by design: do not send one, and do not list it under Next.
+   - Body: copy `.github/pull_request_template.md` into a file and fill every section in order (Summary, What changed, Test plan, Risk and rollback, Operator Next Steps, Checklist), one `- **Component**: what happened.` bullet per finding in Summary and per fix in What changed. Check it with `python3.13 scripts/ci/check_pr_body.py --body-file <file>` and pass `--body-file <file>` to `gh pr create`; the gh guard and the `PR body template` CI check refuse any other shape. Each finding carries its before/after number. Test plan says what ran locally and what was left to CI.
+   - Operator Next Steps holds only operator-only or blocked actions (index migrations, unit or infra changes) with the exact change. If none, `None. Fixed with green deployment.`
+   - The runner sends every Pushover notification, including `radon PR green`. Pushover credentials are absent from your environment by design: do not send one, and do not list it under Operator Next Steps.
    - To change the body later use `gh api -X PATCH repos/{owner}/{repo}/pulls/<n> -F body=@<file>`.
 4. **Watch CI:** `gh pr checks <url> --watch --interval 30`. On a failure read `gh run view <run-id> --log-failed` (or `gh api repos/joemccann/radon/actions/jobs/<job-id>/logs` when that is empty), fix the root cause, push, and watch again until green or the budget is nearly spent. Keep at least 45 minutes of the budget for this step.
 

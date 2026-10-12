@@ -119,9 +119,9 @@ For each finding, write down `actor -> action -> harm if stale -> source file:li
 3. **Push:** `git push -u origin <branch>`. Never push to `main`, never force-push, never merge.
 4. **Open one draft PR** against main with `gh pr create --draft --base main`:
    - Title: `Documentation <date>: <plain-language issue>`.
-   - Body: exactly three sections, **Issue discovered**, **What was done to fix it** and **Next**, with one `- **Component**: what happened.` bullet per finding.
-   - Next holds only operator-only or blocked actions. If there are none, it says `Fixed with green deployment`.
-   - The runner sends every Pushover notification, including `radon PR green`. Pushover credentials are absent from your environment by design: do not send one, and do not list it under Next.
+   - Body: copy `.github/pull_request_template.md` into a file and fill every section in order (Summary, What changed, Test plan, Risk and rollback, Operator Next Steps, Checklist), one `- **Component**: what happened.` bullet per finding in Summary and per fix in What changed. Check it with `python3.13 scripts/ci/check_pr_body.py --body-file <file>` and pass `--body-file <file>` to `gh pr create`; the gh guard and the `PR body template` CI check refuse any other shape.
+   - Operator Next Steps holds only operator-only or blocked actions. If none, `None. Fixed with green deployment.`
+   - The runner sends every Pushover notification, including `radon PR green`. Pushover credentials are absent from your environment by design: do not send one, and do not list it under Operator Next Steps.
 5. **Watch CI:** `gh pr checks <url> --watch --interval 30`.
    - On a failure, run `gh run view <run-id> --log-failed`, fix the root cause on the branch, commit, push, and watch again.
    - Repeat until every check is green or the time budget is nearly spent.

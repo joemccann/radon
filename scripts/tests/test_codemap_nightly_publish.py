@@ -13,6 +13,8 @@ import sys
 
 import pytest
 
+from ci import check_pr_body
+
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "codemap_nightly.sh"
 
@@ -43,6 +45,8 @@ elif name == "python3.13" and args[:1] == ["scripts/nightly_publish.py"]:
     if args[1] == "check":
         sys.exit(int(os.environ["CHECK_RC"]))
     if args[1] == "publish":
+        body = Path(args[args.index("--body-file") + 1]).read_text()
+        Path(os.environ["BODY_COPY"]).write_text(body)
         rc = int(os.environ["PUBLISH_RC"])
         print(json.dumps({"status": "published" if rc == 0 else "noop" if rc == 3 else "error"}))
         sys.exit(rc)
@@ -60,6 +64,7 @@ elif name == "gh" and args[:2] == ["pr", "list"]:
         "CALLS_FILE": str(calls),
         "CHECK_RC": str(check_rc),
         "PUBLISH_RC": str(publish_rc),
+        "BODY_COPY": str(tmp_path / "body-copy.md"),
     }
     result = subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True, timeout=15)
     recorded = [json.loads(line) for line in calls.read_text().splitlines()]
@@ -100,6 +105,14 @@ def test_real_graph_change_uses_guarded_publish_before_superseding(tmp_path: Pat
     assert not any(call[:3] == ["gh", "pr", "merge"] for call in calls)
     assert not any(call[:3] == ["gh", "pr", "checks"] for call in calls)
     assert "awaiting operator merge" in result.stdout
+
+
+def test_refresh_pr_body_follows_the_pr_template(tmp_path: Path):
+    result, _calls = run_runner(tmp_path)
+    assert result.returncode == 0, result.stderr
+    body = (tmp_path / "body-copy.md").read_text()
+    assert check_pr_body.find_errors(body) == []
+    assert "tools/codemap" in check_pr_body.parse_sections(body)["What changed"]
 
 
 @pytest.mark.parametrize("publish_rc,expected_rc", [(3, 0), (1, 1)])

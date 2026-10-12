@@ -1,10 +1,12 @@
 """Format GitHub PR titles and bodies for Radon nightly (and related) loops.
 
-The five unattended loops open PRs. Operators read those PRs for three
-things: what went wrong, what this PR changed, and whether anything still
-must happen outside of CI pushing a new deployment. Audit tables, SHA
-ranges, finding inventories and gate counts belong on the rolling GitHub
-issue and in the loop ledgers, not here.
+Every PR body follows .github/pull_request_template.md, enforced by the
+`PR body template` CI check (scripts/ci/check_pr_body.py): Summary (what
+went wrong), What changed, Test plan, Risk and rollback, Operator Next
+Steps (only what still must happen outside of CI pushing a new
+deployment), Checklist. Audit tables, SHA ranges, finding inventories and
+gate counts belong on the rolling GitHub issue and in the loop ledgers,
+not here.
 
 --issue/--fix/--next take one bullet per line (`- **Component**: what
 happened.`), not a single dense paragraph; each bullet's own internal
@@ -22,6 +24,7 @@ import re
 import sys
 from datetime import date
 
+from ci.check_pr_body import REQUIRED_SECTIONS, find_errors, render_checklist
 from nightly_issue_format import sanitize
 
 LOOP_TITLES = {
@@ -32,10 +35,11 @@ LOOP_TITLES = {
 # Loops whose PR text is redacted like their dead-man comment (rail 7).
 SANITIZED_LOOPS = frozenset({"security", "security-deepsec"})
 
-ISSUE_HEADING = "Issue discovered"
-FIX_HEADING = "What was done to fix it"
-NEXT_HEADING = "Next"
+(ISSUE_HEADING, FIX_HEADING, TEST_HEADING, RISK_HEADING, NEXT_HEADING,
+ CHECKLIST_HEADING) = REQUIRED_SECTIONS
 GREEN_DEPLOYMENT = "Fixed with green deployment"
+DEFAULT_NEXT = f"None. {GREEN_DEPLOYMENT}."
+DEFAULT_RISK = "Revert the merge commit; main redeploys on green CI."
 GITHUB_PR_TITLE_MAX = 256
 _DATE = re.compile(r"\A\d{4}-\d{2}-\d{2}\Z")
 
@@ -98,33 +102,54 @@ def format_pr_body(
     *,
     issue: str,
     fix: str,
+    test_plan: str,
+    risk: str | None = None,
     next_action: str | None = None,
 ) -> str:
-    """Three sections, in order. Default Next is a green deployment."""
+    """The template's six sections, in order. Default Next is a green deployment."""
     issue_text = _clean(issue, field="issue")
     fix_text = _clean(fix, field="fix")
-    next_text = _normalize_multiline(next_action) or GREEN_DEPLOYMENT
-    return (
-        f"## {ISSUE_HEADING}\n\n"
-        f"{issue_text}\n\n"
-        f"## {FIX_HEADING}\n\n"
-        f"{fix_text}\n\n"
-        f"## {NEXT_HEADING}\n\n"
-        f"{next_text}\n"
+    test_text = _clean(test_plan, field="test_plan")
+    risk_text = _normalize_multiline(risk) or DEFAULT_RISK
+    next_text = _normalize_multiline(next_action) or DEFAULT_NEXT
+    body = (
+        f"## {ISSUE_HEADING}\n\n{issue_text}\n\n"
+        f"## {FIX_HEADING}\n\n{fix_text}\n\n"
+        f"## {TEST_HEADING}\n\n{test_text}\n\n"
+        f"## {RISK_HEADING}\n\n{risk_text}\n\n"
+        f"## {NEXT_HEADING}\n\n{next_text}\n\n"
+        f"## {CHECKLIST_HEADING}\n\n{render_checklist()}\n"
     )
+    errors = find_errors(body)
+    if errors:
+        raise ValueError("PR body does not follow the template: " + "; ".join(errors))
+    return body
 
 
-def render(*, loop: str, date: str, issue: str, fix: str, next_action: str | None) -> dict[str, str]:
+def render(
+    *,
+    loop: str,
+    date: str,
+    issue: str,
+    fix: str,
+    test_plan: str,
+    risk: str | None = None,
+    next_action: str | None,
+) -> dict[str, str]:
     title = format_pr_title(loop=loop, date=date, issue=issue)
     if loop in SANITIZED_LOOPS:
         # Public repo: the body gets the same redaction as the rolling-issue
         # comment (routes, file:line, secrets, accounts).
         issue = sanitize(issue)
         fix = sanitize(fix)
+        test_plan = sanitize(test_plan)
+        risk = sanitize(risk) if risk else risk
         next_action = sanitize(next_action) if next_action else next_action
     return {
         "title": title,
-        "body": format_pr_body(issue=issue, fix=fix, next_action=next_action),
+        "body": format_pr_body(
+            issue=issue, fix=fix, test_plan=test_plan, risk=risk, next_action=next_action
+        ),
     }
 
 
@@ -145,6 +170,16 @@ def main(argv: list[str] | None = None) -> int:
         help="what this PR actually changed: one bullet per line",
     )
     parser.add_argument(
+        "--test-plan",
+        required=True,
+        help="what ran and its result (command, count, run id); what was left to CI",
+    )
+    parser.add_argument(
+        "--risk",
+        default=None,
+        help="risk and rollback path (default: revert the merge commit)",
+    )
+    parser.add_argument(
         "--next",
         dest="next_action",
         default=None,
@@ -161,6 +196,8 @@ def main(argv: list[str] | None = None) -> int:
         date=args.date,
         issue=args.issue,
         fix=args.fix,
+        test_plan=args.test_plan,
+        risk=args.risk,
         next_action=args.next_action,
     )
     if args.json:

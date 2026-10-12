@@ -13,6 +13,15 @@
             "command": "git diff --cached | grep -iE '(api[_-]?key|password|secret|token)\\s*=' && exit 1 || exit 0"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/ci/check_pr_body.py\" hook"
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [

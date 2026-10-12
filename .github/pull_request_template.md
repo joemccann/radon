@@ -1,3 +1,7 @@
+<!-- Required on every PR, human or agent. CI check "PR body template"
+     (scripts/ci/check_pr_body.py) fails a body that is missing, reorders or
+     leaves empty any section below, or keeps a <placeholder>. -->
+
 ## Summary
 
 <!-- One or two sentences: what broke or what this ships, and why. -->
@@ -31,5 +35,5 @@
 
 - [ ] Red/green TDD (failing test, then fix)
 - [ ] Stage only the files this change owns (no `git add -A`)
-- [ ] Owner doc updated, or the commit message has `docs-skip: <reason>`
+- [ ] Owner doc updated, or the commit message has a `docs-skip:` reason
 - [ ] Previous main deploy finished before this push

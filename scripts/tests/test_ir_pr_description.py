@@ -12,6 +12,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 import ir_pr_description as desc  # noqa: E402
+from ci import check_pr_body  # noqa: E402
 
 VALID_BODY = """fix: keep the page responder green on a ledger timeout
 
@@ -113,8 +114,17 @@ class TestCompose:
             ci_urls=["https://github.com/joemccann/radon/actions/runs/36361801938"],
         )
         assert "exited Result=exit-code" in title or "paged P1" in title
-        for heading in desc.REQUIRED_SECTIONS:
-            assert f"## {heading}" in body
+        # The PR body follows .github/pull_request_template.md; the commit
+        # keeps the six IR sections.
+        assert check_pr_body.find_errors(body) == []
+        sections = check_pr_body.parse_sections(body)
+        assert "radon-grok-page-responder.service exited" in sections["Summary"]
+        assert "Root cause:" in sections["Summary"]
+        assert "run_cycle treated a hrana timeout" in sections["Summary"]
+        assert "catch ledger read timeouts" in sections["What changed"]
+        assert "Focused pytest for the new timeout tests" in sections["Test plan"]
+        assert "Rollback: revert this commit." in sections["Risk and rollback"]
+        assert "Why Grok waited" in sections["Operator Next Steps"]
         assert "a1c550c1f43ba50af5bd701cb697acd4" in body
         assert "P1" in body
         assert "36361801938" in body
@@ -125,7 +135,7 @@ class TestCompose:
             VALID_BODY + "\nRan grok-4.7 on CLI 1.0.41.\n",
             branch="fix/grok-page-ledger-timeout",
         )
-        verified = desc.parse_ir_sections(body)["How it was verified"]
+        verified = check_pr_body.parse_sections(body)["Test plan"]
         assert "Ran grok-4.7 on CLI 1.0.41." in verified
 
     def test_extracts_page_id(self):
@@ -133,3 +143,29 @@ class TestCompose:
             desc.extract_page_id(VALID_BODY)
             == "a1c550c1f43ba50af5bd701cb697acd4"
         )
+
+
+class TestIrPrBodyGate:
+    def _body(self) -> str:
+        return desc.compose_ir_pr_body(desc.validate_ir_description(VALID_BODY))
+
+    def test_composed_body_passes(self):
+        body = self._body()
+        assert desc.validate_ir_pr_body(body, branch="fix/x")["Summary"]
+
+    def test_legacy_ir_heading_body_is_refused(self):
+        with pytest.raises(desc.IrDescriptionError, match="template"):
+            desc.validate_ir_pr_body(VALID_BODY)
+
+    def test_summary_without_a_root_cause_is_refused(self):
+        body = self._body()
+        summary = check_pr_body.parse_sections(body)["Summary"]
+        broke = summary.split("**Root cause:**", 1)[0]
+        with pytest.raises(desc.IrDescriptionError, match="Root cause"):
+            desc.validate_ir_pr_body(body.replace(summary, broke.strip()))
+
+    def test_placeholder_section_is_refused(self):
+        body = self._body()
+        tests = check_pr_body.parse_sections(body)["Test plan"]
+        with pytest.raises(desc.IrDescriptionError, match="Test plan"):
+            desc.validate_ir_pr_body(body.replace(tests, "TODO"), branch="fix/x")

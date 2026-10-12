@@ -207,7 +207,10 @@ class TestSummaryIsFlattened:
             ir_ensure_pr.ensure_pr = orig
         assert "\n" not in captured["issue"]
         assert "\x07" not in captured["issue"]
-        assert "## What broke" in captured["body"]
+        # The PR body is the repo template rendered from the IR commit.
+        assert "## Summary" in captured["body"]
+        assert "The oneshot exited Result=exit-code" in captured["body"]
+        assert "## What broke" not in captured["body"]
         assert captured["update_existing"] is True
 
     def test_ensure_after_code_fix_refuses_a_placeholder_commit(self, tmp_path):

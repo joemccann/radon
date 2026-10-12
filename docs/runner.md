@@ -8,7 +8,7 @@ One loop run is what the operator would do by hand: open an agent CLI in a fresh
 4. Run the first agent in `AGENTS` under `timeout`. The next agent runs only if one exits non-zero; a timeout ends the night. Anything the agent left running is killed with its process group.
 5. Look up the PR for the branch and send one Pushover message with the agent's `RESULT:` line and the PR link.
 
-The agent does the whole job in one session: audit, fix, push the branch, open a draft PR, watch CI. The prompt owns what the loop does; the runner owns nothing else.
+The agent does the whole job in one session: audit, fix, push the branch, open a draft PR, watch CI. Every PR body follows `.github/pull_request_template.md`; the gh guard (`nightly_pr_guard.py`), `nightly_publish.py publish` and the `PR body template` CI check refuse any other shape (`scripts/ci/check_pr_body.py`, installed beside the guard by `install.sh`). The prompt owns what the loop does; the runner owns nothing else.
 
 The two security loops (`security`, `security-deepsec`) also use the optional knobs in [Loop config](#loop-config): one session per phase (audit, remediate, deliver), a claude-only ladder from a resolver, a root-owned `gh` guard, and root-owned pre- and post-run hooks that port the old wrapper's rails (credential and billing-reroute refusals, the green-base checkout, the sanitized dead-man, the private report). [docs/operations.md](operations.md#background-services) has the operator contract. The `security` loop's native audit workflow cannot read the environment, so its prompt passes `$RADON_REPO_ROOT` as `args.repoRoot`.
 

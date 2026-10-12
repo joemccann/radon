@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 import github_pr_output as pr
+from ci import check_pr_body
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO / "scripts"
@@ -26,25 +27,53 @@ PROMPTS = REPO / ".claude" / "runner-prompts"
 LOOPS = ("security",)
 # The security loops' dead-man is posted by the runner's root-owned post-run hook.
 WRAPPERS = (SCRIPTS / "runner" / "hooks" / "security_post.sh",)
-ISSUE_HEADING = "## Issue discovered"
-FIX_HEADING = "## What was done to fix it"
-NEXT_HEADING = "## Next"
+ISSUE_HEADING = "## Summary"
+FIX_HEADING = "## What changed"
+TEST_HEADING = "## Test plan"
+RISK_HEADING = "## Risk and rollback"
+NEXT_HEADING = "## Operator Next Steps"
+CHECKLIST_HEADING = "## Checklist"
 GREEN = "Fixed with green deployment"
+TEST_PLAN = "Focused pytest: 12 passed. Full suites left to CI."
 
 
 def _body(**kwargs) -> str:
+    kwargs.setdefault("test_plan", TEST_PLAN)
     return pr.format_pr_body(**kwargs)
 
 
+def _next_block(body: str) -> str:
+    return body.split(NEXT_HEADING, 1)[1].split(CHECKLIST_HEADING, 1)[0].strip()
+
+
 class TestFormatPrBody:
-    def test_three_sections_in_order(self):
+    def test_template_sections_in_order(self):
         body = _body(
             issue="The TLS handshake ran on the accept thread.",
             fix="Handshake now runs per connection under a socket timeout.",
         )
-        assert body.index(ISSUE_HEADING) < body.index(FIX_HEADING) < body.index(NEXT_HEADING)
         headings = [ln for ln in body.splitlines() if ln.startswith("## ")]
-        assert headings == [ISSUE_HEADING, FIX_HEADING, NEXT_HEADING]
+        assert headings == [f"## {s}" for s in check_pr_body.REQUIRED_SECTIONS]
+        assert check_pr_body.find_errors(body) == []
+
+    def test_test_plan_and_risk_are_carried(self):
+        body = _body(issue="A.", fix="B.", risk="Fails closed; revert the merge commit.")
+        assert body.split(TEST_HEADING, 1)[1].split(RISK_HEADING, 1)[0].strip() == TEST_PLAN
+        assert "Fails closed; revert the merge commit." in body
+
+    def test_default_risk_is_a_revert(self):
+        body = _body(issue="A.", fix="B.")
+        risk = body.split(RISK_HEADING, 1)[1].split(NEXT_HEADING, 1)[0].strip()
+        assert risk == pr.DEFAULT_RISK
+        assert "revert" in risk.lower()
+
+    def test_checklist_is_the_template_checklist(self):
+        body = _body(issue="A.", fix="B.")
+        assert body.split(CHECKLIST_HEADING, 1)[1].strip() == check_pr_body.render_checklist()
+
+    def test_empty_test_plan_is_refused(self):
+        with pytest.raises(ValueError, match="test_plan"):
+            pr.format_pr_body(issue="A.", fix="B.", test_plan="  ")
 
     def test_plain_language_issue_and_fix(self):
         body = _body(
@@ -59,8 +88,8 @@ class TestFormatPrBody:
             issue="Shard imbalance stretched the python gate.",
             fix="Moved the 45s floor module onto its own shard.",
         )
-        next_block = body.split(NEXT_HEADING, 1)[1].strip()
-        assert next_block == GREEN
+        assert _next_block(body) == pr.DEFAULT_NEXT
+        assert GREEN in pr.DEFAULT_NEXT
 
     def test_explicit_next_replaces_the_default(self):
         body = _body(
@@ -68,8 +97,7 @@ class TestFormatPrBody:
             fix="Pinned the new unit hash in the install manifest.",
             next_action="Run the root bootstrap-control-plane.sh install-copy before merge.",
         )
-        next_block = body.split(NEXT_HEADING, 1)[1].strip()
-        assert next_block == (
+        assert _next_block(body) == (
             "Run the root bootstrap-control-plane.sh install-copy before merge."
         )
         assert GREEN not in body
@@ -80,7 +108,7 @@ class TestFormatPrBody:
             fix="B.",
             next_action="   ",
         )
-        assert body.split(NEXT_HEADING, 1)[1].strip() == GREEN
+        assert _next_block(body) == pr.DEFAULT_NEXT
 
     def test_no_audit_dump_scaffolding(self):
         body = _body(issue="A.", fix="B.")
@@ -134,8 +162,7 @@ class TestBulletedSections:
                 "- **Operator**: pins the repository key by fingerprint."
             ),
         )
-        next_block = body.split(NEXT_HEADING, 1)[1].strip()
-        assert next_block == (
+        assert _next_block(body) == (
             "- **Deploy**: writes the derived env file.\n"
             "- **Operator**: pins the repository key by fingerprint."
         )
@@ -195,7 +222,7 @@ class TestZeroFindingDeadman:
         )
         assert "No new defect this cycle." in body
         assert "No code change." in body
-        assert body.split(NEXT_HEADING, 1)[1].strip() == "No deploy needed."
+        assert _next_block(body) == "No deploy needed."
         assert GREEN not in body
 
 
@@ -214,13 +241,15 @@ class TestCli:
             "--date", "2026-09-01",
             "--issue", "The TLS handshake ran on the accept thread.",
             "--fix", "Handshake now runs per connection under a socket timeout.",
+            "--test-plan", "Focused pytest: 12 passed.",
             "--json",
         )
         assert proc.returncode == 0, proc.stderr
         payload = json.loads(proc.stdout)
         assert payload["title"] == "DeepSec 2026-09-01"
         assert ISSUE_HEADING in payload["body"]
-        assert payload["body"].rstrip().endswith(GREEN)
+        assert check_pr_body.find_errors(payload["body"]) == []
+        assert GREEN in _next_block(payload["body"])
 
     def test_security_json_title_is_date_only(self):
         issue = "A sanitized one-line description of the patched class."
@@ -229,6 +258,7 @@ class TestCli:
             "--date", "2026-09-01",
             "--issue", issue,
             "--fix", "The chokepoint now refuses the input.",
+            "--test-plan", "Focused pytest: 12 passed.",
             "--json",
         )
         assert proc.returncode == 0, proc.stderr
@@ -242,6 +272,7 @@ class TestCli:
             "--date", "2026-08-31",
             "--issue", "A skipped test never ran.",
             "--fix", "The test now executes against HEAD.",
+            "--test-plan", "Focused pytest: 3 passed.",
             "--next", "No deploy needed.",
         )
         assert proc.returncode == 0, proc.stderr
@@ -257,6 +288,7 @@ class TestCli:
             "--date", "2026-09-01",
             "--issue", issue,
             "--fix", "Handshake now runs per connection under a socket timeout.",
+            "--test-plan", "Focused pytest: 12 passed.",
             "--json",
         )
         assert proc.returncode == 0, proc.stderr
@@ -270,6 +302,7 @@ class TestCli:
             "--date", "2026-09-01 A sanitized one-line description of the patched class.",
             "--issue", "A sanitized one-line description of the patched class.",
             "--fix", "The chokepoint now refuses the input.",
+            "--test-plan", "Focused pytest: 12 passed.",
             "--json",
         )
         assert proc.returncode == 2
@@ -277,17 +310,13 @@ class TestCli:
         assert proc.stdout == ""
 
 
-class TestNightlyTemplateMatchesFormatter:
-    def test_template_has_the_three_headings_and_green_default(self):
-        text = (REPO / ".github" / "PULL_REQUEST_TEMPLATE" / "nightly.md").read_text(
-            encoding="utf-8"
-        )
-        assert ISSUE_HEADING in text
-        assert FIX_HEADING in text
-        assert NEXT_HEADING in text
-        assert GREEN in text
+class TestOneTemplateForEveryPr:
+    def test_no_alternate_pr_templates(self):
+        # One template for humans and agents; the legacy three-section
+        # nightly template is gone.
+        assert not (REPO / ".github" / "PULL_REQUEST_TEMPLATE").exists()
 
-    def test_default_human_template_is_untouched(self):
+    def test_default_template_is_the_validator_template(self):
         text = (REPO / ".github" / "pull_request_template.md").read_text(encoding="utf-8")
         assert "Red/green TDD" in text
         assert "Issue discovered" not in text
@@ -300,14 +329,14 @@ class TestNightlyTemplateMatchesFormatter:
 
 class TestSkillsInstructTheFormatter:
     @pytest.mark.parametrize("loop", LOOPS)
-    def test_skill_names_the_formatter_and_the_three_headings(self, loop):
+    def test_skill_names_the_formatter_and_the_template(self, loop):
         raw = (PROMPTS / f"{loop}.md").read_text(encoding="utf-8")
         text = " ".join(raw.split())
         assert "## Pull request output" in raw, loop
         assert "scripts/github_pr_output.py" in text, loop
-        assert "Issue discovered" in text, loop
-        assert "What was done to fix it" in text, loop
-        assert GREEN in text, loop
+        assert ".github/pull_request_template.md" in text, loop
+        assert "--test-plan" in text, loop
+        assert "Issue discovered" not in text, loop
 
     @pytest.mark.parametrize("loop", LOOPS)
     def test_pull_request_output_uses_guarded_creation_and_can_update(self, loop):
@@ -373,14 +402,13 @@ class TestSecurityBodyIsRedacted:
             date="2026-09-02",
             issue=f"Reached {self.ROUTE} with {self.SECRET} in the request.",
             fix="The chokepoint now refuses the input.",
+            test_plan=f"Probed {self.ROUTE} with {self.SECRET}; refused.",
             next_action=f"Rotate {self.SECRET} before merge.",
         )
         assert "NOT-A-REAL-KEY-1234" not in payload["body"]
         assert self.ROUTE not in payload["body"]
         assert "[REDACTED]" in payload["body"]
-        assert ISSUE_HEADING in payload["body"]
-        assert FIX_HEADING in payload["body"]
-        assert NEXT_HEADING in payload["body"]
+        assert check_pr_body.find_errors(payload["body"]) == []
 
     def test_cli_security_json_body_is_redacted(self):
         proc = subprocess.run(
@@ -391,6 +419,8 @@ class TestSecurityBodyIsRedacted:
                 "--date", "2026-09-02",
                 "--issue", f"Reached {self.ROUTE} with {self.SECRET} in the request.",
                 "--fix", "The chokepoint now refuses the input.",
+                "--test-plan", "Focused pytest: 12 passed.",
+            "--test-plan", "Focused pytest: 12 passed.",
                 "--json",
             ],
             capture_output=True,
