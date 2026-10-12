@@ -474,4 +474,15 @@ describe("open-order session window", () => {
     expect(optionRow.querySelector('[data-testid="order-session-chip"]')?.textContent).toBe("RTH");
     expect(tqqqRow.querySelector('[data-testid="order-session-chip"]')?.textContent).toBe("EXT");
   });
+
+  it("renders direction and state as plain text, not pills, keeping the session chip", () => {
+    renderMixedSessionOrders();
+    const row = screen.getByTestId("open-order-row-1-1001");
+    expect(row.querySelector(".pill")).toBeNull();
+    expect(row.querySelector(".order-status-pill")).toBeNull();
+    expect(row.querySelector(".order-intent-pill")).toBeNull();
+    expect(row.querySelector(".order-status-text")).toBeTruthy();
+    expect(row.querySelector(".order-action-text")).toBeTruthy();
+    expect(row.querySelector('[data-testid="order-session-chip"]')?.textContent).toBe("RTH");
+  });
 });
