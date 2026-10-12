@@ -366,3 +366,42 @@ describe("GexPanel — freshness rail", () => {
     expect(rail.textContent).toContain("Next sample");
   });
 });
+
+describe("GexPanel — level card notation", () => {
+  afterEach(() => cleanup());
+
+  function cards(container: HTMLElement) {
+    return Array.from(container.querySelectorAll(".gex-level-card")).map((c) => ({
+      value: c.querySelector(".gex-level-value")?.textContent ?? "",
+      sub: c.querySelector(".gex-level-sub")?.textContent ?? "",
+    }));
+  }
+
+  it("prints integer strikes without dead decimals", () => {
+    const { container } = renderWithData();
+    expect(cards(container).map((c) => c.value)).toEqual(["5,537", "5,700", "5,605", "5,500", "5,000"]);
+  });
+
+  it("puts the sign before the dollar and keeps the per $1 unit", () => {
+    const { container } = renderWithData();
+    const accel = cards(container)[3].sub;
+    expect(accel).toContain("-$13.5K per $1");
+    expect(accel).not.toContain("$-");
+  });
+
+  it("omits a zero gamma instead of printing +$0", () => {
+    const { container } = renderWithData();
+    expect(cards(container)[0].sub).toBe("-0.82%");
+  });
+
+  it("joins level figures without em dashes", () => {
+    const { container } = renderWithData();
+    for (const c of cards(container)) expect(c.sub).not.toContain("—");
+  });
+
+  it("keeps decimals on a fractional strike", () => {
+    const data = { ...MOCK_GEX_DATA, levels: { ...MOCK_GEX_DATA.levels, put_wall: { strike: 5002.5, gamma: 10, distance: 0, distance_pct: -10 } } };
+    const { container } = renderWithData(data);
+    expect(cards(container)[4].value).toBe("5,002.50");
+  });
+});
