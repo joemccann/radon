@@ -450,6 +450,175 @@ def test_prune_takes_no_argument(tmp_path: Path) -> None:
     assert "usage:" in result.stderr
 
 
+# --- Pull lock (PR #1020 follow-up) -------------------------------------------
+# Prepull runs `pull <sha>` without the deploy lock. A post-green prune from the
+# previous run's deploy could delete the tag prepull had just pulled. `pull`
+# now holds a shared pull lock from before the first layer fetch until the pair
+# is verified; every prune takes that lock exclusively without blocking and
+# skips while another pull holds it.
+
+
+def _pull_lock(tmp_path: Path) -> Path:
+    _runtime_env(tmp_path)
+    return tmp_path / "state" / "image-pull.lock"
+
+
+def _hold(path: Path, mode: int):
+    import fcntl
+    handle = open(path, "a+")
+    fcntl.flock(handle, mode | fcntl.LOCK_NB)
+    return handle
+
+
+def test_prune_skips_while_another_pull_holds_the_pull_lock(tmp_path: Path) -> None:
+    import fcntl
+    held = _hold(_pull_lock(tmp_path), fcntl.LOCK_SH)
+    try:
+        result, removed = _prune(tmp_path, green=f"{_CUR}\n{_PREV}\n", tags=f"{_CUR} {_PREV} {_STALE1}")
+    finally:
+        held.close()
+    assert result.returncode == 0, result.stderr
+    assert removed == []
+    assert "image prune skipped: app image pull in progress" in result.stderr
+
+
+def test_prune_proceeds_once_the_pull_lock_is_free(tmp_path: Path) -> None:
+    import fcntl
+    # A lock file left by a finished pull is not a held lock.
+    _hold(_pull_lock(tmp_path), fcntl.LOCK_SH).close()
+    result, removed = _prune(tmp_path, green=f"{_CUR}\n{_PREV}\n", tags=f"{_CUR} {_PREV} {_STALE1}")
+    assert result.returncode == 0, result.stderr
+    assert removed == _rmi(_STALE1)
+
+
+def test_pull_prune_skips_while_a_concurrent_pull_holds_the_pull_lock(tmp_path: Path) -> None:
+    import fcntl
+    target, previous, stale = "a" * 40, "b" * 40, "c" * 40
+    held = _hold(_pull_lock(tmp_path), fcntl.LOCK_SH)
+    try:
+        result = _run(
+            tmp_path,
+            ["pull", target],
+            extra_env={"RADON_STUB_PREVIOUS": previous, "RADON_STUB_TAGS": f"{target} {previous} {stale}"},
+            docker_body=_IMAGE_STORE_DOCKER,
+        )
+    finally:
+        held.close()
+    assert result.returncode == 0, result.stderr
+    assert "rmi " not in result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert "image prune skipped: app image pull in progress" in result.stderr
+
+
+# Every docker call made while pulling and verifying records whether an
+# exclusive (prune-style) lock on the pull lock could be taken at that moment.
+_PULL_LOCK_PROBE_DOCKER = """#!/bin/bash
+printf '%s\\n' "$*" >> {log}
+probe() {{
+  "$RADON_STUB_PY" - "$RADON_STUB_LOCK" <<'PY' 9>&-
+import fcntl, sys
+with open(sys.argv[1], "a+") as handle:
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        print("free")
+    except BlockingIOError:
+        print("held")
+PY
+}}
+case "$1 $2" in
+  "manifest inspect") exit 0 ;;
+  "image inspect") printf '%s %s\\n' "$3" "$(probe)" >> "$RADON_STUB_PROBES"; exit 0 ;;
+esac
+if [[ "$1" == "pull" ]]; then
+  printf 'pull %s %s\\n' "$2" "$(probe)" >> "$RADON_STUB_PROBES"
+fi
+exit 0
+"""
+
+
+def test_pull_holds_the_pull_lock_while_pulling_and_verifying(tmp_path: Path) -> None:
+    import fcntl
+    lock = _pull_lock(tmp_path)
+    probes = tmp_path / "probes"
+    result = _run(
+        tmp_path,
+        ["pull", "a" * 40],
+        extra_env={"RADON_STUB_PY": sys.executable, "RADON_STUB_LOCK": str(lock),
+                   "RADON_STUB_PROBES": str(probes)},
+        docker_body=_PULL_LOCK_PROBE_DOCKER,
+    )
+    assert result.returncode == 0, result.stderr
+    lines = probes.read_text(encoding="utf-8").splitlines()
+    assert any(line.startswith("pull ") for line in lines), lines
+    assert all(line.endswith(" held") for line in lines), lines
+    # Released once the verb exits: the next prune is not blocked by it.
+    _hold(lock, fcntl.LOCK_EX).close()
+
+
+def test_pull_waits_a_bounded_time_for_a_running_prune(tmp_path: Path) -> None:
+    import fcntl
+    held = _hold(_pull_lock(tmp_path), fcntl.LOCK_EX)
+    try:
+        started = time.monotonic()
+        result = _run(tmp_path, ["pull", "a" * 40], extra_env={"RADON_TEST_PULL_LOCK_WAIT_SECS": "1"})
+        elapsed = time.monotonic() - started
+    finally:
+        held.close()
+    assert result.returncode == 75, result.stderr
+    assert "pull lock" in result.stderr
+    assert elapsed < 8
+    log = result.docker_log  # type: ignore[attr-defined]
+    assert not log.exists() or "pull " not in log.read_text(encoding="utf-8")
+
+
+def test_pull_under_a_held_deploy_lock_completes_without_deadlock(tmp_path: Path) -> None:
+    # deploy.sh holds ~/.radon-deploy.lock across its own `pull <sha>`. The
+    # pull lock must not wait on it, and the prune inside pull must skip.
+    import fcntl
+    _runtime_env(tmp_path)
+    target, previous, stale = "a" * 40, "b" * 40, "c" * 40
+    with open(tmp_path / "state" / "deploy.lock", "r+") as deploy_lock:
+        fcntl.flock(deploy_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = _run(
+            tmp_path,
+            ["pull", target],
+            extra_env={"RADON_STUB_PREVIOUS": previous, "RADON_STUB_TAGS": f"{target} {previous} {stale}"},
+            docker_body=_IMAGE_STORE_DOCKER,
+            timeout=10,
+        )
+    assert result.returncode == 0, result.stderr
+    assert "rmi " not in result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert "BlockingIOError" in result.stderr
+
+
+def test_prune_under_a_held_deploy_lock_releases_the_pull_lock(tmp_path: Path) -> None:
+    # A prune that loses the deploy lock must not leave the pull lock held.
+    import fcntl
+    lock = _pull_lock(tmp_path)
+    with open(tmp_path / "state" / "deploy.lock", "r+") as deploy_lock:
+        fcntl.flock(deploy_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result, removed = _prune(tmp_path, green=f"{_CUR}\n{_PREV}\n", tags=f"{_CUR} {_STALE1}")
+    assert result.returncode == 0, result.stderr
+    assert removed == []
+    _hold(lock, fcntl.LOCK_EX).close()
+
+
+def test_pull_refuses_a_symlinked_pull_lock(tmp_path: Path) -> None:
+    lock = _pull_lock(tmp_path)
+    victim = tmp_path / "victim"
+    victim.write_text("keep\n")
+    lock.symlink_to(victim)
+    result = _run(tmp_path, ["pull", "a" * 40])
+    assert result.returncode != 0
+    assert victim.read_text() == "keep\n"
+    log = result.docker_log  # type: ignore[attr-defined]
+    assert not log.exists() or "pull " not in log.read_text(encoding="utf-8")
+
+
+def test_production_pull_lock_lives_in_the_root_only_runtime_dir() -> None:
+    text = RUNTIME.read_text(encoding="utf-8")
+    assert "PULL_LOCK_FILE=/run/radon-app-runtime/image-pull.lock" in text
+
+
 _CONCURRENT_PULL_DOCKER = """#!/bin/bash
 printf '%s\\n' "$*" >> {log}
 if [[ "$1 $2" == "image inspect" ]]; then

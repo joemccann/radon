@@ -870,6 +870,8 @@ service restart counts. IB state remains advisory.
 
 `pull <sha>` and the no-argument `prune` delete different tags. Both take the deploy lock without blocking and skip when they cannot, when rollback state is invalid, or when no running app container is using a managed image. A tag a running app container still references is kept.
 
+Every `pull` holds the pull lock (`/run/radon-app-runtime/image-pull.lock`, shared) from before the first layer fetch until the verb exits, past pair verification. Both prunes take that lock exclusively without blocking and print `image prune skipped: app image pull in progress` while another pull holds it. A no-argument prune started while prepull is pulling therefore skips instead of deleting the pair prepull is fetching. A pull waits up to 300 seconds for a running prune, then exits 75. Neither lock waits on the other, so a pull under the deploy lock cannot deadlock.
+
 `pull <sha>` protects that SHA. When the transition journal exists it also protects both journal SHAs and does not read the green marker. When the journal is absent it protects green-marker line 1 and does not add green-marker line 2. `pull` from `deploy.sh` holds the deploy lock, so this prune skips. The CI prepull job runs `pull` without the deploy lock, so this prune runs.
 
 The no-argument `prune` protects green-marker line 1 and line 2, or both journal SHAs while a journal exists. It skips when line 2 is missing. `deploy.sh` calls it only after a green deploy, and not when `RADON_DEPLOY_STAGE=1` (prestage runs beside prepull). A skipped or failed prune does not fail the deploy.
@@ -878,12 +880,12 @@ The no-argument `prune` protects green-marker line 1 and line 2, or both journal
 - **Prerequisites:** the deploy lock is a regular file, rollback state parses, and a running app container is present. Otherwise the verb skips.
 - **Blast radius:** `rmi` of SHA tags outside the keep-set above. Gateway images are outside this sweep. A skip leaves the extra tags on disk.
 - **Safe diagnosis:** name the verb before deleting anything. `pull <sha>` and no-argument `prune` do not protect the same lines.
-- **Stop conditions:** do not run no-argument `prune` while prepull is pulling a SHA that is not already green-marker line 1 or line 2. Do not prune from prestage.
+- **Stop conditions:** do not prune from prestage. A prune that skips with `app image pull in progress` is working as designed; do not retry it until prepull exits.
 - **Verification:** the command prints removed tags or `image prune skipped`, and the running pair plus green-marker line 2 are still local. `cloud/tests/test_app_runtime.py` and `cloud/tests/test_sync_control_plane.py` pin the keep-set.
 - **Rollback:** line 2 is the previous pair. If a `pull <sha>` already removed it, do not invent a local image from a deleted tag. Follow the deploy rollback in [`cloud/CLAUDE.md`](../cloud/CLAUDE.md).
-- **Escalation:** a no-argument prune that removes the pair prepull just wrote is a failed prepull, not a failed production deploy. Stop the manual prune. The deploy job pulls the pair again.
+- **Escalation:** a pull that exits 75 on the pull lock is a failed prepull, not a failed production deploy. The deploy job pulls the pair again under the deploy lock.
 
-Manual run, as radon, only when no deploy lock is held and prepull is not fetching: `sudo -n /usr/local/sbin/radon-app-runtime prune`.
+Manual run, as radon, only when no deploy lock is held: `sudo -n /usr/local/sbin/radon-app-runtime prune`. It skips on its own while a pull holds the pull lock.
 
 The deploy job is capped at 60 minutes and SSH at 55 minutes. The inner deploy
 gets 900 seconds plus a 30-second kill window. Root mutation actions get 180
