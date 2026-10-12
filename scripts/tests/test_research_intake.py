@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from research import intake, model
+from research import intake, model, publish
 
 PAGE1 = ("## Economics Research ## 16 September 2026 | 5:20PM EDT # TIC Data: Continued Purchases of US Equities in July. "
          "Foreign investors bought $45bn of US equities in July, the second consecutive month above $40bn. "
@@ -175,6 +175,30 @@ def test_single_stock_off_book_is_dropped_without_a_model_call(tmp_path, publish
     assert posts == [] and reviewer.calls == []
     review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
     assert review["outcome"] == "dropped" and review["reason_code"] == "SINGLE_STOCK_NOT_IN_BOOK"
+
+
+def test_unknown_publisher_is_held_before_any_model_call(tmp_path, publisher):
+    # PAGE1/PAGE2 name no publisher the scorer accepts; filed under a topic folder the source is unknown.
+    reviewer = Reviewer([selection(), verdict()])
+    posts = build(tmp_path, reviewer, publisher).process(work(folder="other"), tmp_path / "r.pdf", [])
+    assert posts == [] and reviewer.calls == []
+    review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
+    assert review["identity"]["publisher"] == "unknown"
+    assert review["outcome"] == "held"
+    row = publish.outcome_row(work(folder="other"), review)
+    assert row["outcome"] == "held" and json.loads(row["reason_codes"]) == ["PUBLISHER_UNKNOWN"]
+
+
+def test_publisher_found_in_a_topic_folder_reaches_selection(tmp_path, publisher):
+    def named(pdf, out):
+        result = extractor(pdf, out)
+        (out / "page-0002.md").write_text(PAGE2 + "\n© 2026 Northern Trust Corporation. All rights reserved.")
+        return result
+    reviewer = Reviewer([{"candidates": [], "reason": "nothing new"}])
+    pipe = intake.Pipeline(tmp_path, reviewer, publisher, extractor=named, figure_catalogue=catalogue, pdf_created=lambda pdf: None)
+    pipe.process(work(folder="other"), tmp_path / "r.pdf", [])
+    review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
+    assert review["identity"]["publisher"] == "Northern Trust" and [c[0] for c in reviewer.calls] == ["text"]
 
 
 def test_single_stock_in_book_reaches_selection(tmp_path, publisher):

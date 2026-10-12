@@ -33,7 +33,7 @@ PAGE_BRANDS = [
     ('Canaccord Genuity', r'\bCanaccord\b'), ('BTIG', r'\bBTIG\b|@btig\.com'), ('TS Lombard', r'\bTS Lombard\b'),
     ('Societe Generale', r'Societe Generale|@sgcib\.com'), ('RaboResearch', r'\bRabo(?:Research|bank)\b'),
     ('PNC Economics', r'\bPNC\b'), ('Standard Chartered', r'Standard Chartered'), ('Apollo', r'\bApollo\b'),
-    ('Bank J Safra Sarasin', r'Safra Sarasin'), ('BNP Paribas', r'BNP Paribas'),
+    ('Bank J Safra Sarasin', r'Safra Sarasin'), ('BNP Paribas', r'BNP Paribas'), ('Citadel Securities', r'\bCitadel\b'),
 ]
 
 # Ownership statements outrank cited banks and data-provider names in report prose.
@@ -72,7 +72,7 @@ _MONTH_INDEX['sept'] = 9
 @dataclass
 class Identity:
     publisher: str
-    publisher_source: str        # folder | page | none
+    publisher_source: str        # folder | page | document | none
     publisher_folder: str
     series: str
     date: str | None
@@ -112,6 +112,155 @@ def _publisher_ownership(page_text):
             if match:
                 return display, number, match.group(0)
     return None
+
+
+# --- publisher discovery for topic folders ----------------------------------
+# A topic-folder PDF from a firm outside PAGE_BRANDS names its publisher in
+# the copyright line, an "issued by" sentence, a running footer or its web and
+# email domains, usually on the last pages. Each kind of evidence scores; a
+# bare legal-entity mention never wins alone (a single-stock note says
+# "Apple Inc." more often than it names its broker).
+_SUFFIX = (r'(?:Co\.,?\s*Ltd\.?|L\.\s?L\.\s?C\.?|LLC|L\.\s?P\.?|LP|Inc\.?|Incorporated|Ltd\.?|Limited|plc|PLC|Corporation|Corp\.?'
+           r'|AG|S\.A\.|SA|N\.V\.|NV|GmbH|SE|LLP)')
+_CAP = r"(?:[A-Z][\w&'’.\-]*|&)"
+# Words that end a name when two-column extraction runs the next sentence into it.
+_STOP = r"(?:Follow|Visit|All|Please|For|Head|Registered|This|The|Member|Authori[sz]ed|Regulated|Incorporated|Is|Are|Has|And|Or|It|Its|We|Our|In|On|At|To|As|If|With|Their)\b"
+_NAME = rf"{_CAP}(?:[ \t]+(?:(?!{_STOP}){_CAP}|of|and|de|du|la|des)){{0,6}}"
+_ENTITY_RE = re.compile(rf"(?<![\w&])({_NAME}),?[ \t]+{_SUFFIX}(?![\w])")
+# Firm-shaped names with no legal suffix: "Commonwealth Bank of Australia", "Fiera Capital".
+_ORG_RE = re.compile(rf"(?<![\w&])({_CAP}(?:[ \t]+(?:(?!{_STOP}){_CAP}|of|and|de|du|la|des)){{0,4}}[ \t]+"
+                     r"(?:Bank(?:[ \t]+of[ \t]+[A-Z]\w+)?|Capital|Securities|Asset Management|Investment Management|Investments?"
+                     r"|Partners|Advisors|Advisers|Financial|Economics))(?![\w])")
+_COPYRIGHT_RE = re.compile(rf"(?:(?:©|\((?i:c)\)|\b(?i:copyright)\b)[\s:]*)+(?:\[?(?:19|20)\d\d\]?[\s,]*)?(?:by[ \t]+)?(?:the[ \t]+)?({_NAME}(?:,?[ \t]+{_SUFFIX})?)")
+_ISSUER_RE = re.compile(rf"\b(?:prepared|issued|published|communicated|produced|written|approved)[ \t]+by[ \t]+(?:the[ \t]+)?({_NAME}(?:,?[ \t]+{_SUFFIX})?)")
+_DOMAIN_RE = re.compile(r'(?:@|\bwww\.|https?://|\b)((?:[a-z0-9-]+\.)*([a-z0-9][a-z0-9-]{2,})\.(?:com|net|org|co\.uk|com\.au|eu|ch|de|fr|nl|jp|lu|ie|it|es|se|no|dk|fi|at|be|nz|ca|sg|hk))\b', re.I)
+# Data vendors, regulators and citation sources: their names and domains appear in every
+# disclaimer and chart footer without ever being the publisher.
+_THIRD_PARTY = re.compile(
+    r"^(?:s&p|standard & poor|dow jones|bloomberg|msci|factset|refinitiv|ice\b|intercontinental exchange|morningstar|haver"
+    r"|macrobond|datastream|ftse|russell|federal reserve|fred$|reuters|the wall street journal"
+    r"|moody|fitch|ishares|google|microsoft|apple|amazon|linkedin|twitter|youtube|facebook|instagram|adobe|capital iq"
+    r"|bureau of|u\.?s\.? department|financial conduct|monetary authority|securities and|commodity futures|the content|all rights"
+    r"|all\b|our\b|this|these|the information|information|important|disclaimer|source|data|notes?|figure|chart|exhibit|table|page)", re.I)
+_CITATION_DOMAINS = {
+    'reuters', 'bloomberg', 'wsj', 'ft', 'nytimes', 'cnbc', 'marketwatch', 'barrons', 'economist', 'sec', 'federalreserve',
+    'linkedin', 'twitter', 'x', 'youtube', 'facebook', 'instagram', 'google', 'gmail', 'outlook', 'yahoo', 'apple', 'amazon',
+    'microsoft', 'adobe', 'msci', 'spglobal', 'spdji', 'factset', 'morningstar', 'refinitiv', 'theice', 'ishares', 'wikipedia',
+    'imf', 'worldbank', 'oecd', 'bis', 'ecb', 'europa', 'treasury', 'bls', 'bea', 'census', 'stlouisfed', 'newyorkfed',
+    'finra', 'coinmarketcap', 'fca', 'mas', 'sfc', 'esma', 'bit', 'doi', 'github', 'medium', 'substack', 'eia',
+}
+_DISPLAY_TAIL = re.compile(r'(?:[\s,]+(?:Group Holdings|Holdings|Pty|Company|Co\.?|Corporation|Corp\.?|Incorporated|Inc\.?|LLC|L\.\s?L\.\s?C\.?'
+                           r'|L\.\s?P\.?|LP|LLP|Ltd\.?|Limited|plc|PLC|AG|S\.A\.|SA|N\.V\.|NV|GmbH|SE))+\s*$')
+_ALIASES = {'londonstockexchangegroup': 'LSEG'}
+# Email and web domains whose label does not spell the firm.
+_DOMAIN_BRANDS = {'sgcib': 'Societe Generale', 'gs': 'Goldman Sachs', 'jpmorgan': 'J.P. Morgan', 'jpmchase': 'J.P. Morgan',
+                  'bofa': 'BofA Global Research', 'baml': 'BofA Global Research', 'db': 'Deutsche Bank Research',
+                  'ms': 'Morgan Stanley', 'ntrs': 'Northern Trust', 'lloydsbank': 'Lloyds Bank', 'incomeresearch': 'IR+M'}
+_LEAD_NOISE = re.compile(r'^(?:(?:\d{4}|The|By)\s+|.*?\b(?:Division|Department|Unit|Desk) of (?:the )?)')
+
+
+def _key(name):
+    return re.sub(r'[^a-z0-9]', '', name.casefold())
+
+
+def _display(name):
+    name = re.sub(r'[*_`|]+', ' ', name)
+    name = _LEAD_NOISE.sub('', re.sub(r'\s+', ' ', name).strip(' ,.;:-'))
+    letters = [c for c in name if c.isalpha()]
+    if letters and all(c.isupper() for c in letters) and len(letters) > 5:
+        name = ' '.join(word if len(word) <= 3 and '.' not in word else word.title() for word in name.split())
+    # Two-column extraction runs the next sentence on: "Ares Management. Interests ..."
+    name = re.split(r'(?<=[A-Za-z]{4})\.\s', name, maxsplit=1)[0]
+    name = _DISPLAY_TAIL.sub('', name).strip(' ,.;:-&')
+    return _ALIASES.get(_key(name), name)
+
+
+def _plain(text):
+    return re.sub(r'</?u>|[*_`#>]+', ' ', text)
+
+
+def _running_lines(pages):
+    """Lines repeated on several pages: running headers and footers."""
+    seen = {}
+    for text in pages:
+        for line in {re.sub(r'\s+', ' ', _plain(raw)).strip(' |') for raw in text.splitlines()}:
+            if 3 <= len(line) <= 160 and re.search(r'[A-Za-z]{3}', line):
+                seen[line] = seen.get(line, 0) + 1
+    floor = max(2, -(-len(pages) * 3 // 10))
+    return [line for line, count in seen.items() if count >= floor]
+
+
+def _discover_publisher(page_text):
+    """Best publisher name from copyright, issuer, footer and domain evidence, or None."""
+    numbers = sorted(page_text)
+    if not numbers:
+        return None
+    # Image-derived (OCR) text counts here: a publisher name is not a figure the copy has to ground.
+    from research.nemotron_parse import _FENCE_CLOSE, _FENCE_OPEN
+    pages = {n: _plain((page_text[n] or '').replace(_FENCE_OPEN, ' ').replace(_FENCE_CLOSE, ' ')) for n in numbers}
+    focus_numbers = list(dict.fromkeys([*numbers[:2], *numbers[-3:]]))
+    focus = [pages[n] for n in focus_numbers]
+    scores, names = {}, {}
+
+    def add(raw, weight):
+        name = _display(raw)
+        key = _key(name)
+        if len(key) < 3 or _THIRD_PARTY.match(name) or not re.search(r'[A-Za-z]{2}', name):
+            return None
+        scores[key] = scores.get(key, 0) + weight
+        names.setdefault(key, name)
+        return key
+
+    for text in focus:
+        for match in _COPYRIGHT_RE.finditer(text):
+            add(match.group(1), 6)
+        for match in _ISSUER_RE.finditer(text):
+            add(match.group(1), 5)
+    entity_hits = {}
+    for text in focus:
+        for match in (*_ENTITY_RE.finditer(text), *_ORG_RE.finditer(text)):
+            key = add(match.group(1), 0)
+            if key:
+                entity_hits[key] = entity_hits.get(key, 0) + 1
+    for key, hits in entity_hits.items():
+        scores[key] += min(hits, 3)
+    for text in focus:
+        brand = _brand_on_page(text[-4000:])
+        if brand:
+            add(brand, 2)
+    for line in _running_lines(list(pages.values())):
+        for segment in re.split(r'\s*\|\s*|\s{3,}', line):
+            if not re.search(r'\d{2}', segment) and not _DOMAIN_RE.search(segment) and 1 <= len(segment.split()) <= 7:
+                add(segment, 2)
+
+    domains = {}
+    for number, text in pages.items():
+        for match in _DOMAIN_RE.finditer(text):
+            label = match.group(2).lower()
+            if label not in _CITATION_DOMAINS:
+                domains[label] = domains.get(label, 0) + (2 if number in focus_numbers else 1)
+    def initials(key):
+        return ''.join(w[0] for w in re.findall(r"[A-Za-z][\w'’.&+-]*", names[key]) if w.lower() not in ('of', 'and', 'the')).lower()
+
+    for label, count in domains.items():
+        stems = {label.replace('-', '')} | {part for part in label.split('-') if len(part) >= 4}
+        matched = [key for key in scores if initials(key) == label] or [key for key in scores if any(len(stem) >= 4 and (stem in key or key.startswith(stem[:max(5, len(key))])) for stem in stems)]
+        for key in matched:
+            scores[key] += 4
+        if label in _DOMAIN_BRANDS:
+            add(_DOMAIN_BRANDS[label], 4 + min(count, 3))
+        elif not matched and count >= 2:
+            stem = label.split('-')[0]
+            spelled = re.search(rf'\b{re.escape(stem)}\b', ' '.join(pages.values()), re.I)
+            spelled = spelled.group(0) if spelled and not spelled.group(0).islower() else stem.title()
+            add(spelled, 4)
+
+    if not scores:
+        return None
+    # A base name gathers half the weight of its own variants ("X Asset Management" over "X Asset Management UK").
+    ranked = {key: score + 0.5 * sum(other for k, other in scores.items() if k != key and k.startswith(key)) for key, score in scores.items()}
+    best = max(ranked, key=lambda key: (ranked[key], -len(key)))
+    return names[best] if ranked[best] >= 5 else None
 
 
 def _month(token):
@@ -211,7 +360,8 @@ def identify(page_text, metadata, folder_date, pdf_created=None):
             source = 'page'
         else:
             brand = _brand_on_page(page_one)
-            publisher, source = (brand, 'page') if brand else ('unknown', 'none')
+            found = None if brand else _discover_publisher(page_text or {})
+            publisher, source = (brand, 'page') if brand else (found, 'document') if found else ('unknown', 'none')
             if brand:
                 attribution_page = 1
                 pattern = next(pattern for display, pattern in PAGE_BRANDS if display == brand)
