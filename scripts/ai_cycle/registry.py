@@ -127,6 +127,17 @@ SOURCES = {
     for id, name, url, cadence, license in _SOURCE_ROWS
 }
 
+# Series-level cadence where a source publishes series on different grains.
+# Source cadence still owns staleness; this only describes the series itself.
+_SERIES_CADENCE = {
+    "D7": (("tokens.price.", "daily"), ("tokens.volume.", "weekly"), ("tokens.spend.", "weekly")),
+}
+
+
+def series_cadence(indicator_id, series_id):
+    return next((cadence for prefix, cadence in _SERIES_CADENCE.get(indicator_id, ()) if series_id.startswith(prefix)), None)
+
+
 _ROWS = [
     (
         "D1",

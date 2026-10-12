@@ -4,9 +4,11 @@ export interface AiMetric {
   period_start: string; period_end: string; published_at: string | null; fetched_at: string;
   source_id: string; source_url: string; measurement: string; methodology_version: string;
   cohort_version: string; lineage_group: string; raw_hash: string; metadata: Record<string, unknown>;
+  /** Series grain when it differs from the source cadence (e.g. Ramp D7 daily prices). */
+  cadence?: string;
 }
 export interface AiHistoryPoint { date: string; value: number; unit: string; series_id: string; label: string; source_id: string }
-export interface AiHistoryCoverage { source_id: string; series_id: string; unit: string; observation_count: number; displayed_count: number; observed_from: string; observed_through: string }
+export interface AiHistoryCoverage { source_id: string; series_id: string; unit: string; observation_count: number; displayed_count: number; observed_from: string; observed_through: string; cadence?: string }
 export interface AiIndicator {
   id: string; title: string; pane: AiPane; priority: string; status: string; reason: string;
   methodology: string; tickers: string[]; source_ids: string[]; metrics: AiMetric[]; history: AiHistoryPoint[];

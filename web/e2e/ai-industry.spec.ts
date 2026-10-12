@@ -83,6 +83,34 @@ test.describe("AI Industry value chain", () => {
       await page.getByTestId("ai-unchanged-observations").screenshot({ path: testInfo.outputPath(`ai-industry-unchanged-summary-${width}.png`) });
     }
   });
+  test("D7 chart caption uses series cadence; D5 keeps the monthly source cadence", async ({ page }, testInfo) => {
+    const cadence = structuredClone(snapshot);
+    cadence.sources.find(item => item.id === "ramp")!.cadence = "monthly";
+    const token = cadence.indicators.find(item => item.id === "D7")!;
+    const series = [
+      ["tokens.price.blended.anthropic:ramp-token-v1:c", "Blended token price, Anthropic", "USD/Mtok", "daily", 1],
+      ["tokens.volume.all:ramp-token-v1:c", "Token volume, all makers", "tokens", "weekly", 7],
+    ] as const;
+    token.history = series.flatMap(([series_id, label, unit, , step]) => Array.from({ length: 30 }, (_, i) => ({
+      date: new Date(Date.UTC(2026, 6, 1 + i * step)).toISOString().slice(0, 10), value: 3 + (i % 5) / 10, unit, source_id: "ramp", series_id, label,
+    })));
+    token.history_coverage = series.map(([series_id, , unit, seriesCadence]) => ({ source_id: "ramp", series_id, unit, observation_count: 30, displayed_count: 30, observed_from: "2026-07-01", observed_through: "2026-09-30", cadence: seriesCadence }));
+    await page.route("**/api/ai-cycle", route => route.fulfill({ json: cadence }));
+    await ready(page);
+    const measure = page.getByRole("combobox", { name: "Measure", exact: true });
+    await measure.selectOption("D5");
+    const chart = page.getByTestId("ai-industry-history-chart");
+    await expect(chart).toContainText("Ramp AI Index · monthly");
+    await measure.selectOption("D7");
+    await expect(chart).toContainText("USD/Mtok · Ramp AI Index · daily");
+    await page.setViewportSize({ width: 1440, height: 1400 });
+    await chart.evaluate(el => el.scrollIntoView({ block: "center" }));
+    await chart.screenshot({ path: testInfo.outputPath("ai-industry-d7-daily-caption.png") });
+    await page.getByRole("combobox", { name: "Observation series", exact: true }).selectOption({ index: 1 });
+    await expect(chart).toContainText("Ramp AI Index · weekly");
+    await expect(chart).not.toContainText("monthly");
+    await chart.screenshot({ path: testInfo.outputPath("ai-industry-d7-weekly-caption.png") });
+  });
   test("four stages, separate capability and 17 measurement explanations without empty M1", async ({ page }) => {
     await ready(page);
     await expect(page.getByRole("heading", { name: "AI Industry", exact: true })).toBeVisible();
