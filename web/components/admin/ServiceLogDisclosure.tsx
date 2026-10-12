@@ -101,7 +101,7 @@ export default function ServiceLogDisclosure({ service, unit, lastError, lastRun
       {lastError && (
         <div className="admin-journal-raw">
           <span className="admin-journal-raw-label">Last error</span>
-          <pre className="admin-journal-raw-error" data-testid="service-log-raw-error">{lastError}</pre>
+          <pre className="admin-journal-raw-record" data-testid="service-log-raw-error">{lastError}</pre>
         </div>
       )}
 

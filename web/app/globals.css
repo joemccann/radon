@@ -20074,7 +20074,7 @@ body[data-mobile="true"] td.right {
   text-transform: uppercase;
   color: var(--negative);
 }
-.admin-journal-raw-error {
+.admin-journal-raw-record {
   margin: 0;
   padding: 8px;
   border-left: 2px solid var(--negative);
