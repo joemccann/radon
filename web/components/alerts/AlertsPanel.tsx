@@ -21,9 +21,9 @@ const OPS = [">", "<", ">=", "<="] as const;
  *  representative placeholder. `value` stays the raw snake_case key the engine
  *  reads; only the displayed label is humanised. */
 const METRIC_META: Record<string, { label: string; range: [number, number]; placeholder: string }> = {
-  flow_strength: { label: "Flow Strength", range: [0, 100], placeholder: "70" },
-  score: { label: "Signal Score", range: [0, 100], placeholder: "70" },
-  buy_ratio: { label: "Buy Ratio", range: [0, 1], placeholder: "0.65" },
+  flow_strength: { label: "Flow strength", range: [0, 100], placeholder: "70" },
+  score: { label: "Signal score", range: [0, 100], placeholder: "70" },
+  buy_ratio: { label: "Buy ratio", range: [0, 1], placeholder: "0.65" },
 };
 const METRICS = Object.keys(METRIC_META);
 
@@ -116,9 +116,9 @@ export function AlertsPanel() {
     <section className="snapshot-card">
       <header className="snapshot-card__header">
         <p className="panel-eyebrow">Alerts</p>
-        <h3 className="panel-title">Signal Alert Rules</h3>
-        <span className="snapshot-card__see-all">
-          {rules.length} {rules.length === 1 ? "RULE" : "RULES"}
+        <h3 className="panel-title">Signal alerts</h3>
+        <span className="alerts-count">
+          {rules.length === 0 ? "No rules" : `${rules.length} ${rules.length === 1 ? "rule" : "rules"}`}
         </span>
       </header>
 
@@ -168,7 +168,7 @@ export function AlertsPanel() {
           />
         </div>
         <div className="alerts-form__field">
-          <span className="alerts-form__label">Channel</span>
+          <span className="alerts-form__label">Send to</span>
           <select aria-label="Channel" className="filter-select" value={channel} onChange={(e) => setChannel(e.target.value)}>
             {CHANNELS.map((c) => (
               <option key={c} value={c}>
@@ -193,7 +193,10 @@ export function AlertsPanel() {
         ) : error ? (
           <RequestError error={error} onRetry={() => void retry()} />
         ) : rules.length === 0 ? (
-          <div className="snapshot-card__empty">No alert rules yet. Add one above, e.g. AAPL Flow Strength &gt; 70.</div>
+          <div className="alerts-empty">
+            No alert rules yet. Get pinged when flow crosses a line, e.g.{" "}
+            <span className="alerts-empty__example">AAPL flow strength &gt; 70</span>.
+          </div>
         ) : (
           <ul className="snapshot-rows">
             {rules.map((rule) => (

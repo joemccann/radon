@@ -151,6 +151,19 @@ function stubPerformance(data: unknown) {
   });
 }
 
+describe("PerformancePanel states each figure once (no-slop 06)", () => {
+  it("Max DD is stated once, by its tile, not again as a hero pill", () => {
+    readingOn(FIXTURE_READ_INSTANT, () => {
+      stubV2(goldenOkPayload());
+      render(<PerformancePanel />);
+
+      expect(screen.getByTestId("performance-value-max-drawdown").textContent).toMatch(/\d/);
+      const hero = document.querySelector(".performance-hero") as HTMLElement;
+      expect(hero.textContent ?? "").not.toMatch(/MAX DD/i);
+    });
+  });
+});
+
 describe("PerformancePanel TWR snapshot", () => {
   it("renders the desktop panel from a v2 payload that omits reconstruction arrays", () => {
     readingOn(FIXTURE_READ_INSTANT, () => {
