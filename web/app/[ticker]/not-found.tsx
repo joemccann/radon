@@ -2,7 +2,7 @@ import { pageMetadata } from "@/lib/pageTitle";
 
 // Plain anchor, no next/link — Next.js 16 prerenders /_not-found in a
 // worker without a layout-router context, and Link triggers a useContext
-// invariant during static generation.
+// invariant during static generation. Pure JSX: no hooks, no globals.css.
 
 export const metadata = pageMetadata("Instrument not found");
 
@@ -14,28 +14,29 @@ export default function TickerNotFound() {
       alignItems: "center",
       justifyContent: "center",
       minHeight: "60vh",
-      fontFamily: "var(--font-mono)",
       color: "var(--text-secondary)",
-      gap: "16px",
+      gap: "12px",
+      padding: "0 16px",
+      textAlign: "center",
     }}>
-      <span style={{ fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fault, #E85D6C)" }}>
-        404: Instrument Not Found
-      </span>
-      <span style={{ fontSize: "12px" }}>
-        The requested ticker path is not a valid instrument identifier.
-      </span>
+      <h1 style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text-primary)" }}>
+        No instrument at this address
+      </h1>
+      <p style={{ margin: 0, fontSize: "14px" }}>
+        Check the symbol, or search from the dashboard with ⌘K.
+      </p>
       {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- next/link triggers a useContext invariant during /_not-found prerender */}
       <a
         href="/dashboard"
         style={{
-          fontSize: "11px",
-          color: "var(--signal-core, #05AD98)",
+          fontSize: "14px",
+          color: "var(--signal-core)",
           textDecoration: "none",
-          borderBottom: "1px solid var(--signal-core, #05AD98)",
+          borderBottom: "1px solid var(--signal-core)",
           paddingBottom: "1px",
         }}
       >
-        Return to Dashboard
+        Back to dashboard
       </a>
     </div>
   );

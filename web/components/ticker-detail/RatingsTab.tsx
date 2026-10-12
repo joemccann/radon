@@ -164,7 +164,17 @@ export default function RatingsTab({ ticker, active, currentPrice }: RatingsTabP
     return <div className="tab-loading"><div className="tab-loading-text">Loading ratings...</div></div>;
   }
   if (error) {
-    return <div className="tab-empty"><RequestError error={error} fallback="This instrument data could not be loaded. Try again." onRetry={() => { void fetchRatings(); }} /><button type="button" className="btn-secondary" onClick={() => { void fetchRatings(); }}>Reload data</button></div>;
+    return (
+      <div className="tab-empty">
+        <RequestError error={error} fallback="Analyst ratings could not be loaded." />
+        <SectionEmptyState
+          icon={Gauge}
+          headline={`Analyst ratings for ${ticker} could not be loaded`}
+          variant="compact"
+        />
+        <button type="button" className="btn-secondary" onClick={() => { void fetchRatings(); }}>Try again</button>
+      </div>
+    );
   }
   if (!data) {
     return (
