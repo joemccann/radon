@@ -98,6 +98,16 @@ class TestImageWorkflowTokenScope:
         assert "packages: write" in text
 
 
+@pytest.mark.parametrize("dockerfile", [PYTHON_DF, NODE_DF], ids=lambda p: p.name)
+def test_every_production_base_is_digest_pinned(dockerfile: Path) -> None:
+    """DS-2026-10-09-01 / DS-2026-10-11-03: a tag-only FROM lets a registry
+    republish change the production image on the next rebuild."""
+    images = _from_images(dockerfile.read_text(encoding="utf-8"))
+    assert images
+    unpinned = [i for i in images if not re.search(r"@sha256:[0-9a-f]{64}$", i)]
+    assert not unpinned, f"{dockerfile.name} has tag-only bases: {unpinned}"
+
+
 class TestAppDockerfilesExist:
     def test_python_dockerfile_exists(self) -> None:
         assert PYTHON_DF.is_file()
@@ -186,8 +196,9 @@ class TestNodeImage:
     def test_base_copies_and_cmd(self) -> None:
         text = NODE_DF.read_text(encoding="utf-8")
         images = _from_images(text)
-        assert images[-1] == "node:22-bookworm-slim"
-        assert any("bun" in image for image in images)
+        # DS-2026-10-11-03: both stages are digest-pinned like the Python image.
+        assert re.fullmatch(r"node:22\.\d+\.\d+-bookworm-slim@sha256:[0-9a-f]{64}", images[-1])
+        assert re.fullmatch(r"oven/bun:1\.3\.14@sha256:[0-9a-f]{64}", images[0])
         assert "1.3.14" in text
         assert "COPY web/" in text or "COPY web" in text
         assert "scripts/" in text
