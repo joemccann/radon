@@ -56,6 +56,14 @@ function formatDxy(v: number | null | undefined): string {
   return v.toFixed(2);
 }
 
+/** "2026-09-18" -> "Sep 18". The 52W window makes the year implicit. */
+function formatShortDate(raw: string | null | undefined): string {
+  if (!raw) return "---";
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
 function finiteOrNull(v: number | null | undefined): number | null {
   return v != null && Number.isFinite(v) ? v : null;
 }
@@ -170,6 +178,7 @@ export default function IeiHygPanel() {
             <MetricCell label="SOURCE" value={sourceText} />
           </div>
         ) : (
+          <div className="iei-hyg-strip">
           <RegimeStrip>
             <RegimeStripCell
               testId="iei-hyg-strip-ratio"
@@ -212,11 +221,11 @@ export default function IeiHygPanel() {
                 <span style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
                   <span>
                     <span data-testid="iei-hyg-low">{formatRatio(current.ratio_52w_low)}</span>{" "}
-                    {formatSessionDate(current.low_date)}
+                    {formatShortDate(current.low_date)}
                   </span>
                   <span>
                     <span data-testid="iei-hyg-high">{formatRatio(current.ratio_52w_high)}</span>{" "}
-                    {formatSessionDate(current.high_date)}
+                    {formatShortDate(current.high_date)}
                   </span>
                 </span>
               }
@@ -228,6 +237,7 @@ export default function IeiHygPanel() {
               sub={<span data-testid="iei-hyg-source">{sourceText}</span>}
             />
           </RegimeStrip>
+          </div>
         )}
 
         <FreshnessRail

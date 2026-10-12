@@ -22133,6 +22133,18 @@ body[data-mobile="true"] .alerts-rule__channel {
   .vixcor-strip .regime-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
+/* /regime/iei-hyg: four strip cells; re-column so no empty fifth cell pads the row. */
+.iei-hyg-strip .regime-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+@media (max-width: 1180px) {
+  .iei-hyg-strip .regime-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .iei-hyg-strip .regime-strip-cell:nth-child(n) { grid-column: auto; }
+}
+
+@media (max-width: 760px) {
+  .iei-hyg-strip .regime-strip { grid-template-columns: 1fr; }
+}
+
 .vixcor-chart-panel { padding: 16px; }
 .vixcor-chart-content { min-width: 0; }
 .vixcor-chart-shell { position: relative; width: 100%; }
