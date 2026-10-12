@@ -792,14 +792,14 @@ export default function RegimePanel({
           )}
 
           {/* ── Row 2: Live Tickers Strip ─────────────── */}
-          <RegimeStrip>
+          <RegimeStrip cadence={marketOpen ? undefined : "daily"}>
             <RegimeStripCell
               testId="strip-vix"
               label={<>VIX <LiveBadge live={effectiveHasLiveVix} /></>}
               value={fmt(vixVal)}
               change={<DayChange last={liveVix} close={vixClose} />}
               sub={<>5d RoC: {fmtPct(data?.vix_5d_roc, 1)}</>}
-              timestamp={vixLastTs ?? "---"}
+              timestamp={vixLastTs ?? undefined}
             />
             <RegimeStripCell
               testId="strip-vvix"
@@ -807,7 +807,7 @@ export default function RegimePanel({
               value={fmt(vvixVal)}
               change={<DayChange last={liveVvix} close={vvixClose} />}
               sub={<>VVIX/VIX: {fmt(vvixVixRatio)}</>}
-              timestamp={vvixLastTs ?? "---"}
+              timestamp={vvixLastTs ?? undefined}
             />
             <RegimeStripCell
               testId="strip-cor1m"

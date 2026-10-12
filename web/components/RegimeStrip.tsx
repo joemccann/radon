@@ -15,7 +15,7 @@ export function LiveBadge({ live, variant }: { live: boolean; variant?: BadgeVar
     resolved === "live" ? "LIVE"
     : "DAILY";
   return (
-    <span className="regime-badge" style={{ background: bg, color }}>
+    <span className="regime-badge" data-variant={resolved} style={{ background: bg, color }}>
       {label}
     </span>
   );
@@ -74,6 +74,7 @@ export function RegimeStripCell({ testId, label, value, change, sub, timestamp }
   );
 }
 
-export function RegimeStrip({ children }: { children: ReactNode }) {
-  return <div className="regime-strip">{children}</div>;
+/** `cadence="daily"` means the panel states the cadence once elsewhere, so per-tile DAILY pills hide. */
+export function RegimeStrip({ children, cadence }: { children: ReactNode; cadence?: "daily" }) {
+  return <div className="regime-strip" data-cadence={cadence}>{children}</div>;
 }

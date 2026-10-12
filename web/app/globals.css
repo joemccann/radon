@@ -11261,6 +11261,11 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   text-transform: uppercase;
 }
 
+/* Cadence stated once by the panel (market-closed banner): drop the per-tile DAILY pills. */
+.regime-strip[data-cadence="daily"] .regime-badge[data-variant="daily"] {
+  display: none;
+}
+
 /* Panel inner title (used inside regime-components and regime-triggers) */
 .regime-panel-title {
   font-family: var(--font-mono);
