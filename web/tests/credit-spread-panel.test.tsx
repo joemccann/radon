@@ -297,3 +297,17 @@ describe("CreditSpreadPanel — freshness rail", () => {
     expect(rail.textContent).toContain("Next sample");
   });
 });
+
+describe("CreditSpreadPanel — finding title", () => {
+  it.each([
+    ["divergent", "Credit is not confirming equities"],
+    ["coupled", "Credit is confirming equities"],
+    ["risk-off", "Credit and equities are both falling"],
+    ["credit-lead", "Credit is holding up while equities fall"],
+  ] as const)("titles the %s regime from data", (regime, title) => {
+    const data = buildData();
+    data.current = { ...data.current!, regime };
+    renderPanel(hookState({ data }));
+    expect(screen.getByTestId("credit-spread-title").textContent).toBe(title);
+  });
+});

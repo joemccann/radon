@@ -268,3 +268,43 @@ describe("BreadthPanel — freshness rail", () => {
     expect(rail.textContent).toContain("Next sample");
   });
 });
+
+describe("BreadthPanel — finding title + dead TICK slot", () => {
+  function withLatest(patch: Partial<NonNullable<BreadthData["latest"]>>) {
+    const data = buildBreadthData();
+    data.latest = { ...data.latest!, ...patch };
+    renderPanel(hookState({ data }));
+  }
+
+  it("titles a bearish divergence as the finding", () => {
+    withLatest({ divergence: "bearish" });
+    expect(screen.getByTestId("breadth-title").textContent).toBe("Breadth diverging bearish from SPY");
+  });
+
+  it("titles a bullish divergence as the finding", () => {
+    withLatest({ divergence: "bullish" });
+    expect(screen.getByTestId("breadth-title").textContent).toBe("Breadth diverging bullish from SPY");
+  });
+
+  it("titles no divergence as breadth in line with SPY", () => {
+    withLatest({ divergence: "none" });
+    expect(screen.getByTestId("breadth-title").textContent).toBe("Breadth in line with SPY");
+  });
+
+  it("falls back to the neutral title when divergence is unknown", () => {
+    withLatest({ divergence: null });
+    expect(screen.getByTestId("breadth-title").textContent).toBe("NYSE Breadth");
+  });
+
+  it("drops the TICK tile and notes it when TICK is not reporting", () => {
+    withLatest({ tick: null });
+    expect(screen.queryByTestId("breadth-strip-tick")).toBeNull();
+    expect(screen.getByTestId("breadth-tick-missing").textContent).toBe("TICK not reporting");
+  });
+
+  it("keeps the TICK tile when TICK reports", () => {
+    withLatest({ tick: 250 });
+    expect(screen.getByTestId("breadth-strip-tick")).toBeTruthy();
+    expect(screen.queryByTestId("breadth-tick-missing")).toBeNull();
+  });
+});

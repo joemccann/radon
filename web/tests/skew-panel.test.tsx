@@ -246,7 +246,7 @@ describe("SkewPanel — header strip", () => {
     expect(screen.getByText("-3.0")).toBeTruthy(); // z-score
     expect(screen.getByText("16.0%")).toBeTruthy(); // 25d put IV
     expect(screen.getByText("12.3%")).toBeTruthy(); // 25d call IV
-    expect(screen.getByTestId("skew-strip-date").textContent).toContain("2026-08-05"); // latest date
+    expect(screen.getByTestId("skew-ledger-date").textContent).toContain("Aug 5"); // latest date
   });
 
   it("tones a beyond-2-sigma change as a warning", () => {
@@ -269,7 +269,7 @@ describe("SkewPanel — header strip", () => {
     renderPanel(hookState({ data, lastSync: data.scan_time }));
 
     expect(screen.getByTestId("skew-live-status").textContent).toContain("LIVE");
-    expect(screen.getByTestId("skew-strip-date").textContent).toContain("INTRADAY");
+    expect(screen.getByTestId("skew-ledger-date").textContent).toContain("intraday");
   });
 });
 
@@ -352,5 +352,26 @@ describe("SkewPanel — freshness rail", () => {
     const rail = screen.getByTestId("skew-freshness-rail");
     expect(rail.textContent).toContain("2026-08-26");
     expect(rail.textContent).not.toContain("T21:52");
+  });
+});
+
+describe("SkewPanel — hero + stats ledger", () => {
+  it("keeps the five live readings in the strip and moves the stats to a ledger", () => {
+    renderPanel(hookState({ data: buildData() }));
+    for (const id of ["high", "low", "stddev", "date", "tenor"]) {
+      expect(screen.queryByTestId(`skew-strip-${id}`)).toBeNull();
+    }
+    expect(screen.getByTestId("skew-ledger-range").textContent).toContain("-0.16 to +0.13");
+    expect(screen.getByTestId("skew-ledger-stddev").textContent).toContain("0.04");
+  });
+
+  it("prints bracket expiries as trader dates", () => {
+    const data = buildData({
+      current: { ...buildData().current!, expiry: "2026-10-16", dte: 4, expiry_far: "2026-11-20", dte_far: 39 },
+    });
+    renderPanel(hookState({ data }));
+    const tenor = screen.getByTestId("skew-ledger-tenor").textContent ?? "";
+    expect(tenor).toContain("Oct 16 (4d) / Nov 20 (39d)");
+    expect(tenor).not.toContain("2026-10-16");
   });
 });
