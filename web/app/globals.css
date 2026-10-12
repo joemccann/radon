@@ -15815,12 +15815,11 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
 }
 
 .grg-score {
-  margin-top: 10px;
+  margin-top: 6px;
+  color: var(--text-secondary);
   font-family: var(--font-mono);
-  font-size: clamp(48px, 6vw, 78px);
+  font-size: var(--text-body);
   font-weight: 700;
-  line-height: 0.95;
-  letter-spacing: -0.08em;
 }
 
 .grg-state {
@@ -15841,7 +15840,7 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
 
 .grg-metric-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 

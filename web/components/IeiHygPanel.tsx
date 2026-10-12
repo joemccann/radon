@@ -131,6 +131,12 @@ export default function IeiHygPanel() {
   ];
 
   const sourceText = `${(data.source ?? "---").toUpperCase()} ${formatSessionDate(current.date)}`;
+  // Linear position of the ratio inside its own 52W low-high span (0 = low, 100 = high).
+  const rangeSpan = current.ratio_52w_high - current.ratio_52w_low;
+  const rangePos =
+    Number.isFinite(current.ratio) && Number.isFinite(rangeSpan) && rangeSpan > 0
+      ? Math.min(100, Math.max(0, ((current.ratio - current.ratio_52w_low) / rangeSpan) * 100))
+      : null;
 
   return (
     <>
@@ -138,7 +144,7 @@ export default function IeiHygPanel() {
         <div className="section-header">
           <div className="section-title">
             <Scale size={14} />
-            TREASURIES VS HIGH YIELD
+            Treasuries vs High Yield
             <InfoTooltip text={INFO_TOOLTIP} />
           </div>
           <PanelRefreshError error={error} testId="iei-hyg-refresh-error" />
@@ -182,16 +188,38 @@ export default function IeiHygPanel() {
               sub={<>{current.window_sessions} SESSION WINDOW</>}
             />
             <RegimeStripCell
-              testId="iei-hyg-strip-low"
-              label="52W LOW"
-              value={<span data-testid="iei-hyg-low">{formatRatio(current.ratio_52w_low)}</span>}
-              sub={<>{formatSessionDate(current.low_date)}</>}
-            />
-            <RegimeStripCell
-              testId="iei-hyg-strip-high"
-              label="52W HIGH"
-              value={<span data-testid="iei-hyg-high">{formatRatio(current.ratio_52w_high)}</span>}
-              sub={<>{formatSessionDate(current.high_date)}</>}
+              testId="iei-hyg-strip-range"
+              label="52W RANGE"
+              value={
+                <span style={{ display: "block", position: "relative", height: "4px", margin: "10px 0 8px", background: "var(--line-grid)" }}>
+                  {rangePos != null && (
+                    <span
+                      data-testid="iei-hyg-range-marker"
+                      data-pos={rangePos.toFixed(1)}
+                      style={{
+                        position: "absolute",
+                        left: `calc(${rangePos.toFixed(1)}% - 1px)`,
+                        top: "-5px",
+                        width: "3px",
+                        height: "14px",
+                        background: "var(--text-primary)",
+                      }}
+                    />
+                  )}
+                </span>
+              }
+              sub={
+                <span style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
+                  <span>
+                    <span data-testid="iei-hyg-low">{formatRatio(current.ratio_52w_low)}</span>{" "}
+                    {formatSessionDate(current.low_date)}
+                  </span>
+                  <span>
+                    <span data-testid="iei-hyg-high">{formatRatio(current.ratio_52w_high)}</span>{" "}
+                    {formatSessionDate(current.high_date)}
+                  </span>
+                </span>
+              }
             />
             <RegimeStripCell
               testId="iei-hyg-strip-dxy"

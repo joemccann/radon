@@ -169,6 +169,19 @@ describe("IeiHygPanel", () => {
     expect(screen.getByTestId("iei-hyg-brush")).toBeTruthy();
   });
 
+  it("draws the 52W low and high as one range tile with the ratio placed on it", () => {
+    mockUseIeiHyg.mockReturnValue(hookState({ data: buildData() }));
+    renderPanel();
+    expect(screen.queryByTestId("iei-hyg-strip-low")).toBeNull();
+    expect(screen.queryByTestId("iei-hyg-strip-high")).toBeNull();
+    const range = screen.getByTestId("iei-hyg-strip-range");
+    expect(range.textContent).toContain("1.4623");
+    expect(range.textContent).toContain("1.4758");
+    // Ratio 1.4623 sits on the 52W low: linear position 0% of the low-high span.
+    expect(screen.getByTestId("iei-hyg-range-marker").getAttribute("data-pos")).toBe("0.0");
+    expect(screen.getByText("Treasuries vs High Yield")).toBeTruthy();
+  });
+
   it("never emits NaN into chart paths, including across null DXY gaps", () => {
     mockUseIeiHyg.mockReturnValue(hookState({ data: buildData() }));
     const { container } = renderPanel();

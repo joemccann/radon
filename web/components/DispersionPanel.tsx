@@ -263,7 +263,12 @@ export default function DispersionPanel() {
                   {regime}
                 </span>
               }
-              sub={<>{regimeDetail}</>}
+              sub={
+                <>
+                  {coverage} · source <span data-testid="dispersion-source-updated">{sourceSession}</span> ·{" "}
+                  <span data-testid="dispersion-source">{sourceText}</span>
+                </>
+              }
             />
             <RegimeStripCell
               testId="dispersion-strip-z-stock"
@@ -288,16 +293,6 @@ export default function DispersionPanel() {
               label="SURFACE GAP"
               value={<span data-testid="dispersion-gap">{formatZ(current.surface_gap)}</span>}
               sub={<>max(stock, sector) minus VIX</>}
-            />
-            <RegimeStripCell
-              testId="dispersion-strip-source-updated"
-              label="SOURCE UPDATED"
-              value={<span data-testid="dispersion-source-updated">{sourceSession}</span>}
-              sub={
-                <>
-                  {coverage} · <span data-testid="dispersion-source">{sourceText}</span>
-                </>
-              }
             />
           </RegimeStrip>
         )}

@@ -43,11 +43,11 @@ interface CreditVixChartRow {
 
 const TONE_COLOR = {
   positive: "var(--positive)",
-  negative: "var(--negative)",
+  warning: "var(--warn-text)",
   muted: "var(--text-muted)",
 } as const;
 
-const TONE_MOBILE = { positive: "pos", negative: "neg", muted: "mut" } as const;
+const TONE_MOBILE = { positive: "pos", warning: "warn", muted: "mut" } as const;
 
 function stateColor(state: CreditVixState | null | undefined): string {
   return TONE_COLOR[stateTone(state)];

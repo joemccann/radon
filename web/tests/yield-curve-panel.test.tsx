@@ -62,9 +62,9 @@ describe("spreadColor — inversion tones", () => {
     expect(spreadColor(0.24)).toBe("var(--warning)");
   });
 
-  it("a steep curve reads positive (0.25 boundary is positive)", () => {
-    expect(spreadColor(0.25)).toBe("var(--positive)");
-    expect(spreadColor(0.47)).toBe("var(--positive)");
+  it("a steep curve is a level, not a gain: plain text, never P&L green", () => {
+    expect(spreadColor(0.25)).toBe("var(--text-primary)");
+    expect(spreadColor(0.47)).toBe("var(--text-primary)");
   });
 
   it("missing reads muted", () => {
@@ -241,7 +241,7 @@ describe("YieldCurvePanel — header strip", () => {
   it("tones the spread by the inversion thresholds", () => {
     renderPanel(hookState({ data: buildData() }));
     const spread = screen.getByTestId("yield-curve-spread-value");
-    expect(spread.style.color).toBe("var(--positive)");
+    expect(spread.style.color).toBe("var(--text-primary)");
   });
 
   it("tones an inverted curve negative", () => {
@@ -291,7 +291,7 @@ describe("YieldCurvePanel — chart + controls", () => {
     renderPanel(hookState({ data: buildData() }));
     const live = screen.getByTestId("yield-curve-live-value");
     expect(live.textContent).toBe("+0.99%");
-    expect(live.style.color).toBe("var(--positive)");
+    expect(live.style.color).toBe("var(--text-primary)");
     expect(screen.getByText(/AS OF 3:35 PM ET/)).toBeTruthy();
     expect(screen.getByText("10Y-3M LIVE")).toBeTruthy();
   });

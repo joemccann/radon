@@ -134,10 +134,26 @@ describe("GammaRotationPanel", () => {
     expect(container.textContent).toContain("Gamma Rotation Gap");
     expect(container.textContent).toContain("+2.68σ");
     expect(container.textContent).toContain("TOP WATCH");
-    expect(container.textContent).toContain("SPY GEX");
-    expect(container.textContent).toContain("TLT GEX");
     expect(container.textContent).toContain("Top identification");
     expect(container.querySelector("[data-testid='grg-chart']")).toBeTruthy();
+  });
+
+  it("leads the hero with the reading and does not repeat per-asset GEX already in the asset cards", () => {
+    mockUseGammaRotation.mockReturnValue({ data: MOCK_GRG, loading: false, error: null });
+    const { container } = render(<GammaRotationPanel />);
+    const hero = container.querySelector(".grg-hero") as HTMLElement;
+    expect(hero).toBeTruthy();
+    expect(hero.textContent).not.toContain("SPY GEX");
+    expect(hero.textContent).not.toContain("TLT GEX");
+    expect(hero.querySelectorAll(".grg-metric-card").length).toBe(2);
+    const state = hero.querySelector(".grg-state") as HTMLElement;
+    const score = hero.querySelector(".grg-score") as HTMLElement;
+    expect(state.textContent).toBe("Risk-on divergence");
+    expect(score.textContent).toContain("+2.68σ");
+    // State precedes the residual in document order.
+    expect(state.compareDocumentPosition(score) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Asset cards still carry the GEX values.
+    expect(container.querySelectorAll(".grg-asset-card").length).toBe(2);
   });
 
   it("breaks paths at missing observations and labels an expanded z-score domain", () => {

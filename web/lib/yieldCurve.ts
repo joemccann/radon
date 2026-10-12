@@ -65,7 +65,8 @@ export function spreadColor(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return "var(--text-muted)";
   if (v < 0) return "var(--negative)";
   if (v < FLAT_CURVE_THRESHOLD_PCT) return "var(--warning)";
-  return "var(--positive)";
+  // A positive curve is a level, not a gain: no P&L green.
+  return "var(--text-primary)";
 }
 
 /** "2026-07-31" -> "31 Jul 2026". */
