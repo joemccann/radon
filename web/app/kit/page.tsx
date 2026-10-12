@@ -55,6 +55,9 @@ export default function KitPage() {
           }}
         >
           Radon Contributor Kit / Component Spec
+          <span data-testid="kit-sample-note" style={{ display: "block", marginTop: 4, fontSize: 12, textTransform: "none", letterSpacing: 0 }}>
+            Sample values. Nothing on this page is a live reading.
+          </span>
         </p>
         <button
           onClick={toggleTheme}

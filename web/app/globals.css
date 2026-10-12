@@ -1127,10 +1127,6 @@ body {
   background: var(--bg-panel-raised);
 }
 
-.profile-bookmark__thumb--empty {
-  display: block;
-}
-
 .profile-bookmark__body {
   display: flex;
   flex-direction: column;
@@ -7044,12 +7040,6 @@ tr.leg-row td {
   text-decoration: none;
 }
 .trial-expired-cta:hover { filter: brightness(1.08); }
-
-.trial-expired-countdown {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
-}
 
 /* ── Order Action Buttons ── */
 
@@ -21735,6 +21725,13 @@ body[data-mobile="true"] .alerts-rule__channel {
   width: 120px;
   text-align: right;
   font-family: var(--font-mono);
+}
+
+/* /setup token step: a secret, not a number; it takes the whole row. */
+.setup-token-input {
+  flex: 1 1 auto;
+  width: 100%;
+  text-align: left;
 }
 
 .preferences-row__toggle {
