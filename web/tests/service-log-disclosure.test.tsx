@@ -217,9 +217,9 @@ describe("<ServiceLogDisclosure />", () => {
     stubFetch();
     render(<ServiceLogDisclosure service="dropbox-research" />);
     const err = await screen.findByText("Traceback: KeyError 'cursor'");
-    expect(err.closest("li")?.className).toContain("admin-log-entry-negative");
+    expect(err.closest("li")?.className).toContain("admin-journal-entry-negative");
     const warn = screen.getByText("rate limited, retrying");
-    expect(warn.closest("li")?.className).toContain("admin-log-entry-warning");
+    expect(warn.closest("li")?.className).toContain("admin-journal-entry-warning");
   });
 
   it("Errors only defaults ON when warnings exist and can be turned off", async () => {

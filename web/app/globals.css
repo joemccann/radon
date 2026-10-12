@@ -20031,11 +20031,11 @@ body[data-mobile="true"] td.right {
 @media (prefers-reduced-motion: reduce) {
   .admin-disclosure-chevron { transition: none; }
 }
-.admin-log-row > td {
+.admin-journal-row > td {
   padding: 0 8px 10px;
   background: color-mix(in srgb, var(--neutral) 6%, transparent);
 }
-.admin-log-disclosure {
+.admin-journal-disclosure {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -20045,21 +20045,21 @@ body[data-mobile="true"] td.right {
   background: var(--bg-panel-raised);
   min-width: 0;
 }
-.admin-log-header {
+.admin-journal-header {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
 }
-.admin-log-title {
+.admin-journal-title {
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
-.admin-log-unit { color: var(--text-primary); overflow-wrap: anywhere; }
-.admin-log-filter {
+.admin-journal-unit { color: var(--text-primary); overflow-wrap: anywhere; }
+.admin-journal-filter {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
@@ -20067,14 +20067,14 @@ body[data-mobile="true"] td.right {
   color: var(--text-secondary);
   cursor: pointer;
 }
-.admin-log-raw { display: flex; flex-direction: column; gap: 4px; }
-.admin-log-raw-label {
+.admin-journal-raw { display: flex; flex-direction: column; gap: 4px; }
+.admin-journal-raw-label {
   font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--negative);
 }
-.admin-log-raw-error {
+.admin-journal-raw-error {
   margin: 0;
   padding: 8px;
   border-left: 2px solid var(--negative);
@@ -20086,13 +20086,13 @@ body[data-mobile="true"] td.right {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.admin-log-loading { display: flex; flex-direction: column; gap: 6px; }
-.admin-log-empty,
-.admin-log-note {
+.admin-journal-loading { display: flex; flex-direction: column; gap: 6px; }
+.admin-journal-empty,
+.admin-journal-note {
   margin: 0;
   color: var(--text-muted);
 }
-.admin-log-list {
+.admin-journal-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -20101,7 +20101,7 @@ body[data-mobile="true"] td.right {
   font-family: var(--font-mono);
   font-size: 12px;
 }
-.admin-log-entry {
+.admin-journal-entry {
   display: grid;
   grid-template-columns: max-content 52px minmax(0, 1fr) max-content;
   gap: 8px;
@@ -20109,28 +20109,28 @@ body[data-mobile="true"] td.right {
   border-bottom: 1px solid color-mix(in srgb, var(--border-dim) 60%, transparent);
   color: var(--text-secondary);
 }
-.admin-log-entry:last-child { border-bottom: none; }
-.admin-log-ts { color: var(--text-muted); }
-.admin-log-level { font-weight: 600; }
-.admin-log-message { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-primary); }
-.admin-log-entry-negative .admin-log-level,
-.admin-log-entry-negative .admin-log-message { color: var(--negative); }
-.admin-log-entry-warning .admin-log-level,
-.admin-log-entry-warning .admin-log-message { color: var(--warn-text); }
-.admin-log-entry-current {
+.admin-journal-entry:last-child { border-bottom: none; }
+.admin-journal-ts { color: var(--text-muted); }
+.admin-journal-level { font-weight: 600; }
+.admin-journal-message { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-primary); }
+.admin-journal-entry-negative .admin-journal-level,
+.admin-journal-entry-negative .admin-journal-message { color: var(--negative); }
+.admin-journal-entry-warning .admin-journal-level,
+.admin-journal-entry-warning .admin-journal-message { color: var(--warn-text); }
+.admin-journal-entry-current {
   background: color-mix(in srgb, var(--neutral) 8%, transparent);
 }
-.admin-log-run {
+.admin-journal-run {
   font-size: 10px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
 @media (max-width: 640px) {
-  .admin-log-entry {
+  .admin-journal-entry {
     grid-template-columns: max-content minmax(0, 1fr);
   }
-  .admin-log-message { grid-column: 1 / -1; }
+  .admin-journal-message { grid-column: 1 / -1; }
   .admin-disclosure-btn { width: 28px; height: 28px; }
 }
 

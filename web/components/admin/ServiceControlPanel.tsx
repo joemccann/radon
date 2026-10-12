@@ -346,7 +346,7 @@ function ServiceRow({
       </td>
     </tr>
     {expandable && expanded && (
-      <tr className="admin-log-row" id={detailId}>
+      <tr className="admin-journal-row" id={detailId}>
         <td colSpan={4}>
           <ServiceLogDisclosure unit={unit.unit} />
         </td>
