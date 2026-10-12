@@ -2010,3 +2010,34 @@ class TestDocumentation20261011:
         assert "radon-record-high-breadth.timer" in cloud
         assert "operations.md" in cloud
         assert "research-evidence-archive" in cloud
+
+
+class TestDocumentation20261012:
+    """DOC-188: app-image prune keep-sets drifted after audited-through 0627874b."""
+
+    def test_app_image_prune_states_both_keep_sets(self):
+        runtime = (_ROOT / "cloud/scripts/radon-app-runtime.sh").read_text()
+        assert 'prune_stale_app_images "$target"' in runtime
+        assert "if not target:" in runtime
+        assert 'skip("green marker records no previous release")' in runtime
+        deploy = (_ROOT / "cloud/scripts/deploy.sh").read_text()
+        assert '"${RADON_DEPLOY_STAGE:-0}" != "1"' in deploy
+        ops = (_ROOT / "docs/operations.md").read_text()
+        assert "Cleanup preserves the target and durable rollback SHAs" not in ops
+        section = _markdown_heading("docs/operations.md", "App image prune")
+        assert "`pull <sha>`" in section
+        assert "green-marker line 1" in section
+        assert "does not add green-marker line 2" in section
+        assert "no-argument" in section
+        assert "skips when line 2 is missing" in section
+        assert "RADON_DEPLOY_STAGE" in section
+        assert "without the deploy lock" in section
+        assert "while prepull is pulling" in section
+        assert "running app container" in section
+        for boundary in ("Symptom", "Prerequisites", "Blast radius", "Safe diagnosis",
+                         "Stop conditions", "Verification", "Rollback", "Escalation"):
+            assert f"**{boundary}:**" in section
+        claude = (_ROOT / "cloud/CLAUDE.md").read_text()
+        assert "preserves the target and durable transition/last-green rollback SHAs" not in claude
+        assert "docs/operations.md#app-image-prune" in claude
+        assert "exact local image during registry outages" in claude
