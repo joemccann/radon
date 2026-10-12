@@ -2013,7 +2013,7 @@ class TestDocumentation20261011:
 
 
 class TestDocumentation20261012:
-    """DOC-188..189: contracts that drifted after audited-through 0627874b."""
+    """DOC-188..190: contracts that drifted after audited-through 0627874b."""
 
     def test_app_image_prune_states_both_keep_sets(self):
         runtime = (_ROOT / "cloud/scripts/radon-app-runtime.sh").read_text()
@@ -2058,3 +2058,18 @@ class TestDocumentation20261012:
         assert "radon unit" in section
         assert "config-drift" in section
         assert "no actions" in section
+
+    def test_release_version_is_the_deployed_tag(self):
+        readme = (_ROOT / "README.md").read_text()
+        assert "badge/version-" not in readme
+        assert "https://img.shields.io/github/v/tag/joemccann/radon" in readme
+        deploy = _section((_ROOT / "docs/operations.md").read_text(), "Deployment")
+        assert "scripts/release_version.py" in deploy
+        assert "package.json" in deploy
+        assert "can lag" in deploy
+        assert "release-tag" in deploy
+        ci = (_ROOT / ".github/workflows/ci.yml").read_text()
+        start = ci.index("  release-tag:")
+        job = ci[start:start + 900]
+        assert "!cancelled()" in job
+        assert "needs.deploy.result == 'success'" in job
