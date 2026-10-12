@@ -1156,3 +1156,5 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 ## 2026-10-10 - Recover the original breadth chart before defining a signal
 - The supplied reference is dated2026-09-18 and has SPX, percent of S&P500 stocks above their200-day moving average, and S&P500 new-highs-minus-new-lows percent. Do not substitute the separate September21 one-day rally screen, NYSE counts, or an invented binary trigger. Preserve the exact reference date/values and distinguish provider parity from visual similarity.
+
+- For mobile option-book formatting reports, verify full direction/strike text fits inside each selector button; document overflow and visibility checks alone miss text clipped by adjacent flex items. Keep nowrap scrolling items from shrinking and preserve signed price precision.

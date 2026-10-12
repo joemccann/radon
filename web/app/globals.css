@@ -8294,6 +8294,7 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
 }
 
 .combo-book-selector__label {
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   padding: 0 12px;
@@ -8306,6 +8307,9 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
 }
 
 .combo-book-selector__button {
+  /* Keep the entire direction and strike together in the scrolling strip.
+     Shrinking a nowrap button lets its text run beneath the next button. */
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 8px;
