@@ -396,3 +396,19 @@ describe("EquiblesCotPanel — freshness copy derived from data + timer", () => 
     expect(note).toMatch(/Next refresh (Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d{4}-\d{2}-\d{2} 01:00 UTC/);
   });
 });
+
+describe("EquiblesCotPanel — report date said once (plate 40)", () => {
+  it("prints the report date once and its age beside it", () => {
+    renderPanel(hookState({ data: buildData() }));
+    const date = formatReportDate(latestReportTuesday().toISOString().slice(0, 10));
+    const text = screen.getByTestId("cot-strip-reported").textContent ?? "";
+    expect(text.split(date).length - 1).toBe(1);
+    expect(text).toMatch(/(\d+d old|today)/);
+  });
+
+  it("sizes the strip to its four cells so no dead tile pads the row", () => {
+    const { container } = renderPanel(hookState({ data: buildData() }));
+    const strip = container.querySelector(".regime-strip");
+    expect(strip?.classList.contains("regime-strip--cols-4")).toBe(true);
+  });
+});

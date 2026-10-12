@@ -103,16 +103,8 @@ function BpiSessionStaleMark() {
       data-testid="bpi-session-stale"
       style={{
         marginLeft: "8px",
-        fontFamily: "var(--font-mono)",
         fontSize: "var(--text-meta)",
-        fontWeight: 700,
-        letterSpacing: "0.08em",
         color: "var(--warning)",
-        border: "1px solid var(--warning)",
-        padding: "2px 5px",
-        textTransform: "uppercase",
-        lineHeight: 1,
-        borderRadius: "999px",
       }}
     >
       STALE
@@ -180,12 +172,11 @@ function BpiReadout({ payload, compact }: { payload: BpiPayload; compact: boolea
         testId="bpi-strip-session"
         label="AS OF SESSION"
         value={
-          <>
+          <span style={{ whiteSpace: "nowrap" }}>
             {payload.as_of_session}
             {sessionStale ? <BpiSessionStaleMark /> : null}
-          </>
+          </span>
         }
-        sub={<>DAILY CLOSE SERIES</>}
       />
     </RegimeStrip>
   );
