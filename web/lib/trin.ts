@@ -71,6 +71,27 @@ export function stateLabel(state: TrinState | null | undefined): string {
   return "---";
 }
 
+const SOURCE_PART_LABEL: Record<string, string> = {
+  ib: "IB LIVE",
+  "ib-frozen": "IB FROZEN",
+  "ib-delayed": "IB DELAYED",
+  "ib-delayed-frozen": "IB DELAYED FROZEN",
+  "ib-skipped": "IB NOT SAMPLED",
+  "ib-failed": "IB FAILED",
+  stockcharts: "STOCKCHARTS DAILY",
+  cache: "CACHED DAILY",
+};
+
+/** The writer's `<live>+<daily>` token (scripts/fetch_trin.py) as plain
+ *  provenance. Unknown parts are shown uppercased, never dropped. */
+export function formatTrinSource(raw: string | null | undefined): string {
+  if (!raw) return "---";
+  return raw
+    .split("+")
+    .map((part) => SOURCE_PART_LABEL[part.trim().toLowerCase()] ?? part.trim().toUpperCase())
+    .join(" · ");
+}
+
 export type TrinTone = "positive" | "negative" | "muted";
 
 export function stateTone(state: TrinState | null | undefined): TrinTone {

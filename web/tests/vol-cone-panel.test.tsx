@@ -232,6 +232,19 @@ describe("VolConePanel — strip + table + chart", () => {
     expect(screen.getByText("CHEAP WINGS")).toBeTruthy();
   });
 
+  it("labels the wing score as a cone percentile so 0% reads as cheapest, not empty", () => {
+    // wing_score = mean of the 10C and 10P cone percentiles (fetch_vol_cone.py);
+    // 0% means both wings sit at the cone floor, which is what CHEAP WINGS asserts.
+    renderPanel(hookState({ data: buildData() }));
+    const wing = screen.getByTestId("vol-cone-strip-wing").textContent ?? "";
+    expect(wing).toContain("WING %ILE");
+    expect(wing).toContain("0% = CHEAPEST IN CONE");
+    expect(wing).not.toContain("WING SCORE");
+    const atm = screen.getByTestId("vol-cone-strip-atm").textContent ?? "";
+    expect(atm).toContain("VOL POINTS");
+    expect(atm).not.toContain("DECIMAL IV x 100");
+  });
+
   it("renders the selected cone title", () => {
     renderPanel(hookState({ data: buildData() }));
     expect(screen.getByText("NVDA 2026-09-18 90/10 VOL CONE")).toBeTruthy();

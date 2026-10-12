@@ -255,13 +255,13 @@ export default function VolConePanel() {
               testId="vol-cone-strip-atm"
               label="ATM IV"
               value={formatIvPct(current.atm_iv)}
-              sub={<>DECIMAL IV x 100</>}
+              sub={<>VOL POINTS</>}
             />
             <RegimeStripCell
               testId="vol-cone-strip-wing"
-              label="WING SCORE"
+              label="WING %ILE"
               value={formatPercentile(current.wing_score)}
-              sub={<>MEAN OF 10C AND 10P RANKS</>}
+              sub={<>0% = CHEAPEST IN CONE</>}
             />
             <RegimeStripCell
               testId="vol-cone-strip-regime"

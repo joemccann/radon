@@ -21,7 +21,7 @@ import {
   type RangePresetSlug,
 } from "@/lib/historyRange";
 import { TRIN_REFRESH } from "@/lib/refreshSchedule";
-import { ZONE_HIGH, ZONE_LOW, formatTrin, stateLabel, stateTone, type TrinState } from "@/lib/trin";
+import { ZONE_HIGH, ZONE_LOW, formatTrin, formatTrinSource, stateLabel, stateTone, type TrinState } from "@/lib/trin";
 import { useTrin } from "@/lib/useTrin";
 import { useViewport } from "@/lib/useViewport";
 
@@ -150,7 +150,7 @@ export default function TrinPanel() {
     },
   ];
 
-  const sourceText = (data.source ?? "---").toUpperCase();
+  const sourceText = formatTrinSource(data.source);
   const advDecText = `${formatCount(current.adv)} / ${formatCount(current.dec)}`;
   const volumeText = `${formatCompactVolume(current.up_vol)} / ${formatCompactVolume(current.down_vol)} VOL`;
 

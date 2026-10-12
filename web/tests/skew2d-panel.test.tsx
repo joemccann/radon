@@ -206,6 +206,12 @@ describe("Skew2dPanel", () => {
     expect(screen.getByRole("button", { name: /CHANGE/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /LEVEL/i })).toBeTruthy();
 
+    // The freshness rail owns the session date; tenor rides on LEVEL, not its own tile.
+    expect(screen.queryByTestId("skew2d-strip-date")).toBeNull();
+    expect(screen.queryByTestId("skew2d-strip-tenor")).toBeNull();
+    const level = screen.getByTestId("skew2d-strip-level").textContent ?? "";
+    expect(level).toContain("30D CM 2026-08-21 (14D)");
+
     // NaN guard: no chart path may contain the string NaN
     const paths = Array.from(container.querySelectorAll("path"));
     for (const p of paths) {

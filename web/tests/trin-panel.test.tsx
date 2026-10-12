@@ -13,6 +13,7 @@ import {
   ZONE_LOW,
   ZONE_NEAR,
   formatTrin,
+  formatTrinSource,
   stateLabel,
   stateTone,
   type TrinData,
@@ -20,6 +21,24 @@ import {
 } from "@/lib/trin";
 
 describe("trin helpers", () => {
+  it("translates the writer's source token into plain provenance", () => {
+    expect(formatTrinSource("ib+stockcharts")).toBe("IB LIVE · STOCKCHARTS DAILY");
+    expect(formatTrinSource("ib-skipped+stockcharts")).toBe("IB NOT SAMPLED · STOCKCHARTS DAILY");
+    expect(formatTrinSource("ib-failed+cache")).toBe("IB FAILED · CACHED DAILY");
+    expect(formatTrinSource("ib-delayed+stockcharts")).toBe("IB DELAYED · STOCKCHARTS DAILY");
+    expect(formatTrinSource(null)).toBe("---");
+    // An unknown token is shown, never dropped or invented.
+    expect(formatTrinSource("foo+bar")).toBe("FOO · BAR");
+  });
+
+  it("never leaks the raw pipeline token into the strip", () => {
+    mockUseTrin.mockReturnValue(hookState({ data: buildData({ source: "ib-skipped+stockcharts" }) }));
+    render(<TrinPanel />);
+    const src = screen.getByTestId("trin-source").textContent ?? "";
+    expect(src).not.toMatch(/ib-skipped|IB-SKIPPED|\+/);
+    expect(src).toContain("IB NOT SAMPLED · STOCKCHARTS DAILY");
+  });
+
   it("formats TRIN at two decimals and guards nulls", () => {
     expect(formatTrin(0.6123)).toBe("0.61");
     expect(formatTrin(null)).toBe("---");

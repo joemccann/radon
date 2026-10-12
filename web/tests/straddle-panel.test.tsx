@@ -226,6 +226,14 @@ describe("StraddlePanel — header strip", () => {
     expect(screen.getByText("05 Aug 2026")).toBeTruthy(); // vix1d Last-Modified
   });
 
+  it("does not spend hero tiles on dates the freshness rail already owns", () => {
+    renderPanel(hookState({ data: buildData() }));
+    expect(screen.queryByTestId("straddle-strip-date")).toBeNull();
+    // The Cboe file date rides under IMPLIED 1D, the figure it sources.
+    const implied = screen.getByTestId("straddle-strip-implied").textContent ?? "";
+    expect(implied).toContain("CBOE VIX1D 05 Aug 2026");
+  });
+
   it("tones the last ratio by the strict breakeven inequality", () => {
     renderPanel(hookState({ data: buildData() }));
     const last = screen.getByTestId("straddle-last-value");
