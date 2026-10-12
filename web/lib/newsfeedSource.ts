@@ -11,12 +11,19 @@ export type ResearchSource = {
   documentDate: string;
   folderDate: string;
   pages: number[];
-  figures: { url: string; page: number; caption: string }[];
+  figures: { url: string; page: number; caption: string; generated?: boolean; pages?: number[] }[];
   fileId: string;
   revision: string;
   contentHash: string;
   /** Chart plan for a text-only finding. Absent when the post has source figures. */
   charts?: ChartPlan[];
+  /** Presence disables unreviewed client synthesis, including failed attempts. */
+  chartGeneration?: {
+    version: number;
+    status: "passed" | "rejected" | "unavailable" | "no_comparable_data";
+    charts: unknown[];
+    attempts: unknown[];
+  };
 };
 export const PRIVATE_RESEARCH_ASSET = /^\/api\/newsfeed\/research\/files\/[a-f0-9]{64}\.(?:png|pdf)(?:#page=[1-9]\d*)?$/;
 export function parseResearchSource(value: unknown): ResearchSource | undefined {

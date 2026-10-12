@@ -17,6 +17,7 @@ export type RangePlan = {
   kind: "range";
   title: string;
   unit: string;
+  metric?: string;
   axis: [number, number];
   ticks: number[];
   marks: RangeMark[];
@@ -28,9 +29,11 @@ export type BarPlan = {
   kind: "bar";
   title: string;
   unit: string;
+  metric?: string;
   axis: [number, number];
   ticks: number[];
   bars: { id: string; label: string; value: number }[];
+  orientation?: "horizontal" | "vertical";
   note?: string;
 };
 
@@ -38,9 +41,11 @@ export type LinePlan = {
   kind: "line";
   title: string;
   unit: string;
+  metric?: string;
   axis: [number, number];
   ticks: number[];
-  points: { id: string; label: string; value: number }[];
+  points: { id: string; label: string; value: number; timestamp?: number }[];
+  note?: string;
 };
 
 export type ScatterPlan = {
@@ -63,6 +68,8 @@ const STOP = new Set([
   "Jan", "Sep", "Global", "Research", "Deutsche", "Bank", "Finance", "Government",
 ]);
 
+const MONTH = "(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\\s+\\d{4})?";
+const METRIC = /\b(consumer inflation expectations|(?:one-year-ahead\s+)?expected inflation rate|inflation expectations|unemployment rate|policy rate|inflation rate|inflation|unemployment|yields?|returns?|returned)\b/i;
 const ISSUER = /\b(finance|government|construction|supranational|technology|energy|corporate)\b/i;
 
 type Sentence = { start: number; end: number; text: string };
@@ -75,6 +82,9 @@ type Obs = {
   high: number;
   at: number;
   time?: string;
+  metric?: string;
+  order?: number;
+  span?: Span;
   window?: string;
   estimated?: boolean;
   detail?: string;
@@ -89,7 +99,19 @@ function round(value: number): number {
 }
 
 function sentences(text: string): Sentence[] {
-  const shielded = text.replace(/(\d)\.(\d)/g, "$1\u0000$2");
+  // Split a complete repeated title/body comparison, retaining source line wraps.
+  const lines = text.split("\n");
+  const separated = lines.map((line, index) => {
+    const next = lines[index + 1];
+    if (next === undefined) return line;
+    const left = line.match(METRIC), right = next.match(METRIC);
+    const values = (value: string) => value.match(/[+-]?\d+(?:\.\d+)?%/g) ?? [];
+    const priorValues = values(line);
+    const boundary = left && right && left[0].toLowerCase() === right[0].toLowerCase()
+      && priorValues.length >= 2 && JSON.stringify(priorValues) === JSON.stringify(values(next));
+    return line + (boundary ? "." : "\n");
+  }).join("");
+  const shielded = separated.replace(/(\d)\.(\d)/g, "$1\u0000$2");
   const found: Sentence[] = [];
   for (const match of shielded.matchAll(/[^.!?]+[.!?]+|[^.!?]+$/g)) {
     const raw = match[0];
@@ -217,13 +239,72 @@ function percentLabel(text: string, list: Sentence[], index: number): string {
   return name;
 }
 
+export function periodTimestamp(period: string): number | undefined {
+  const match = /^([A-Za-z]+)\s+(\d{4})$/.exec(period);
+  if (!match) return undefined;
+  const months = "January February March April May June July August September October November December".split(" ");
+  const month = months.findIndex(name => [name.toLowerCase(), name.slice(0, 3).toLowerCase()].includes(match[1].toLowerCase()));
+  return month < 0 ? undefined : Date.UTC(Number(match[2]), month, 1);
+}
+
+
+function metricFor(text: string): string {
+  const match = text.match(METRIC);
+  if (match) {
+    const term = match[1].toLowerCase();
+    if (/^(return|returns|returned)$/.test(term)) return "Return";
+    if (/^yields?$/.test(term)) return "Yield";
+    return term.charAt(0).toUpperCase() + term.slice(1);
+  }
+  if (/\d+\s*-\s*year|\bHY\b|financing|coupon|cleared/i.test(text)) return "Yield";
+  return "";
+}
+
+function temporalPercentages(text: string): Obs[] {
+  const found: Obs[] = [];
+  for (const sentence of sentences(text)) {
+    const body = sentence.text;
+    const metric = body.match(METRIC);
+    if (!metric) continue;
+    const hits = [...body.matchAll(/(?<![\d.-])([+-]?\d+(?:\.\d+)?)%/g)];
+    if (hits.length < 2) continue;
+    const prefix = body.slice(0, metric.index);
+    const prefixPeriod = prefix.match(new RegExp(`\\b(${MONTH})\\s*$`, "i"));
+    const titlePrefix = prefixPeriod ? prefix.slice(0, prefixPeriod.index) : prefix;
+    let subject = titlePrefix.trim().replace(/['’]s\s*$/, "").trim();
+    if (!/^[A-Za-z][A-Za-z '’-]{0,60}$/.test(subject)) subject = "";
+    const metricLabel = metricFor(metric[0]);
+    const title = `${subject} ${metricLabel.toLowerCase()}`.trim();
+    const ready: Obs[] = [];
+    for (let index = 0; index < hits.length; index += 1) {
+      const hit = hits[index];
+      const at = hit.index!;
+      const end = at + hit[0].length;
+      const nextStart = hits[index + 1]?.index ?? body.length;
+      const after = body.slice(end, nextStart);
+      const period = after.match(new RegExp(`^\\s+in\\s+(${MONTH})\\b`, "i"));
+      const label = period?.[1] ?? (index === 0 ? prefixPeriod?.[1] : undefined);
+      if (!label) break;
+      const value = Number(hit[1]);
+      const previous = hits[index - 1];
+      const before = body.slice(previous ? previous.index! + previous[0].length : 0, at);
+      ready.push({label: title, metric: metricLabel, unit: "%", role: "level", low: value, high: value,
+        at: sentence.start + at, time: label, order: /\bfrom\s*$/i.test(before) ? 0 : 1,
+        span: {start: sentence.start + at, end: sentence.start + end}});
+    }
+    if (ready.length === hits.length) found.push(...ready);
+  }
+  return found;
+}
+
+
 function dedupe(items: Obs[]): Obs[] {
   const seen = new Set<string>();
   const kept: Obs[] = [];
   for (const item of items) {
     const key = item.time || item.window
       ? [item.unit, item.role, item.label.toLowerCase(), item.low, item.high, item.time ?? "", item.window ?? ""].join("|")
-      : [item.unit, item.role, item.low, item.high].join("|");
+      : [item.unit, item.role, item.unit === "%" ? item.label.toLowerCase() : "", item.metric ?? "", item.low, item.high].join("|");
     if (seen.has(key)) continue;
     seen.add(key);
     kept.push(item);
@@ -251,6 +332,10 @@ function extract(text: string): Obs[] {
     consumed.push({ start, end });
     return true;
   };
+
+  for (const item of temporalPercentages(text)) {
+    if (item.span && take(item.span.start, item.span.end)) found.push(item);
+  }
 
   for (const match of text.matchAll(/grew from\s+~?\s*([€$£])\s*(\d+(?:\.\d+)?)\s*(bn|mn|million|billion)\s+in\s+([A-Z][a-z]+\s+\d{4})\s+to\s+~?\s*([€$£])\s*(\d+(?:\.\d+)?)\s*(bn|mn|million|billion)\s+in\s+([A-Z][a-z]+\s+\d{4})/gi)) {
     const start = match.index ?? 0;
@@ -281,6 +366,7 @@ function extract(text: string): Obs[] {
     if (!take(start, end)) continue;
     const label = percentLabel(text, list, start);
     if (!label) continue;
+    if (Number(match[1]) > Number(match[2])) continue;
     const sentence = sentenceAt(list, start);
     const detail = sentence?.text.match(/\$(\d+(?:\.\d+)?)bn/i);
     found.push({
@@ -310,7 +396,7 @@ function extract(text: string): Obs[] {
     take(start, start + match[0].length);
   }
 
-  for (const match of text.matchAll(/~?(\d+(?:\.\d+)?)%/g)) {
+  for (const match of text.matchAll(/(?<![\d.-])~?([+-]?\d+(?:\.\d+)?)%/g)) {
     const start = match.index ?? 0;
     const end = start + match[0].length;
     if (!take(start, end)) continue;
@@ -369,6 +455,12 @@ function extract(text: string): Obs[] {
     found.push({ label, unit: "years", role: "level", low: Number(match[1]), high: Number(match[1]), at: start });
   }
 
+  for (const item of found) {
+    if (item.unit === "%" && !item.metric) {
+      const sentence = sentenceAt(list, item.at);
+      item.metric = sentence ? metricFor(text.slice(clauseStart(text, item.at, sentence.start), item.at)) : "";
+    }
+  }
   return dedupe(found);
 }
 
@@ -393,15 +485,16 @@ function build(text: string): ChartPlan[] {
   }
   for (const items of lineKeys.values()) {
     if (items.length < 2) continue;
-    const ordered = [...items].sort((a, b) => a.at - b.at);
+    const ordered = [...items].sort((a, b) => (a.order ?? 1) - (b.order ?? 1) || a.at - b.at);
     const scale = frame(ordered.map((item) => item.low));
-    plans.push({
-      kind: "line",
-      title: ordered[0].label,
-      unit: ordered[0].unit,
-      ...scale,
-      points: ordered.map((item) => ({ id: uniqueId(item.time ?? item.label, ids), label: item.time ?? item.label, value: item.low })),
-    });
+    if (ordered[0].unit === "%") {
+      plans.push({kind: "bar", title: ordered[0].label, metric: ordered[0].metric, unit: "%", ...scale,
+        bars: ordered.map(item => ({id: uniqueId(item.time!, ids), label: item.time!, value: item.low}))});
+    } else {
+      const points = ordered.map(item => ({id: uniqueId(item.time!, ids), label: item.time!, value: item.low,
+        timestamp: periodTimestamp(item.time!)})).filter(point => point.timestamp !== undefined).sort((a, b) => a.timestamp! - b.timestamp!);
+      plans.push({kind: "line", title: ordered[0].label, unit: ordered[0].unit, ...scale, points});
+    }
     consume(ordered);
   }
 
@@ -437,36 +530,43 @@ function build(text: string): ChartPlan[] {
     }
   }
 
-  const levels = free().filter((item) => item.unit === "%" && item.role === "level");
-  if (levels.some((item) => item.low !== item.high) || levels.length >= 2) {
-    const marks = [...levels].sort((a, b) => b.high - a.high || b.low - a.low || a.label.localeCompare(b.label));
-    const reference = referenceFor(text);
-    const scale = frame([...marks.map((mark) => mark.high), ...(reference ? [reference.value] : [])]);
-    const plan: RangePlan = {
-      kind: "range",
-      title: /dollar yield/i.test(text) ? "Dollar yields" : "Yields",
-      unit: "%",
-      ...scale,
-      marks: marks.map((mark) => ({
-        id: uniqueId(mark.label, ids),
-        label: mark.label,
-        detail: mark.detail ?? "",
-        low: mark.low,
-        high: mark.high,
-        estimated: mark.estimated === true,
-      })),
-    };
-    if (reference) plan.reference = reference;
-    if (marks.some((mark) => mark.estimated)) {
-      plan.sourceNote = "Desk band places the printed phrase on the axis. Not a printed coupon.";
+  const levelGroups = new Map<string, Obs[]>();
+  for (const item of free()) {
+    if (item.unit === "%" && item.role === "level") {
+      const metric = item.metric ?? "";
+      levelGroups.set(metric, [...(levelGroups.get(metric) ?? []), item]);
     }
-    plans.push(plan);
+  }
+  if (levelGroups.has("Yield") && levelGroups.has("")) {
+    const unknown = levelGroups.get("")!;
+    const inferred = unknown.filter(item => /\bsits at\b/i.test(sentenceAt(sentences(text), item.at)?.text ?? ""));
+    levelGroups.get("Yield")!.push(...inferred);
+    levelGroups.set("", unknown.filter(item => !inferred.includes(item)));
+  }
+  for (const [metric, levels] of levelGroups) {
+    const interval = levels.some(item => item.low !== item.high);
+    if (!interval && (levels.length < 2 || !metric)) continue;
+    const marks = [...levels].sort((a, b) => b.high - a.high || b.low - a.low || a.label.localeCompare(b.label));
+    const reference = metric === "Yield" ? referenceFor(text) : undefined;
+    const scale = frame([...marks.flatMap(mark => [mark.low, mark.high]), ...(reference ? [reference.value] : [])]);
+    const title = metric === "Yield" ? (/dollar yield/i.test(text) ? "Dollar yields" : "Yields") : metric || "Percentages";
+    if (!interval) {
+      plans.push({kind: "bar", title, metric, unit: "%", ...scale,
+        bars: marks.map(mark => ({id: uniqueId(mark.label, ids), label: mark.label, value: mark.low}))});
+    } else {
+      const plan: RangePlan = {kind: "range", title, metric, unit: "%", ...scale,
+        marks: marks.map(mark => ({id: uniqueId(mark.label, ids), label: mark.label, detail: mark.detail ?? "",
+          low: mark.low, high: mark.high, estimated: mark.estimated === true}))};
+      if (reference) plan.reference = reference;
+      if (marks.some(mark => mark.estimated)) plan.sourceNote = "Desk band places the printed phrase on the axis. Not a printed coupon.";
+      plans.push(plan);
+    }
     consume(marks);
   }
 
   const groups = new Map<string, Obs[]>();
   for (const item of free()) {
-    if (item.role === "change" && item.unit === "%" && !item.window) continue;
+    if (item.unit === "%" && (item.role === "level" || !item.window)) continue;
     const key = `${item.unit}|${item.detail ?? ""}|${item.role}`;
     groups.set(key, [...(groups.get(key) ?? []), item]);
   }
@@ -526,7 +626,7 @@ function hitsIn(sentence: string, unit: string): Hit[] {
     for (const match of sentence.matchAll(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)%/g)) {
       hits.push({ index: match.index ?? 0, end: (match.index ?? 0) + match[0].length, values: [Number(match[1]), Number(match[2])] });
     }
-    for (const match of sentence.matchAll(/(?<![\d.-])(\d+(?:\.\d+)?)%/g)) {
+    for (const match of sentence.matchAll(/(?<![\d.-])([+-]?\d+(?:\.\d+)?)%/g)) {
       const index = match.index ?? 0;
       if (hits.some((hit) => index >= hit.index && index < hit.end)) continue;
       hits.push({ index, end: index + match[0].length, values: [Number(match[1])] });
@@ -554,6 +654,10 @@ function hitsIn(sentence: string, unit: string): Hit[] {
 
 function grounded(text: string, label: string, value: number, unit: string, estimated = false): boolean {
   const list = sentences(text);
+  const temporal = temporalPercentages(text);
+  if (temporal.some(item => item.time?.toLowerCase() === label.toLowerCase())) {
+    return temporal.some(item => item.time?.toLowerCase() === label.toLowerCase() && item.unit === unit && close(item.low, value));
+  }
   const words = labelWords(label);
   for (let index = 0; index < list.length; index += 1) {
     const sentence = list[index];
@@ -581,7 +685,7 @@ function grounded(text: string, label: string, value: number, unit: string, esti
         if (label === "Week" && /\bweek\b/i.test(before)) return true;
         continue;
       }
-      if (/^[A-Z][a-z]{2}\s+\d{4}$/.test(label)) {
+      if (periodTimestamp(label) !== undefined) {
         if (after.includes(label)) return true;
         continue;
       }
@@ -600,8 +704,11 @@ function grounded(text: string, label: string, value: number, unit: string, esti
 /** A plan stands only when every plotted number sits with its label in the text. */
 export function verifyChart(plan: ChartPlan, raw: string): boolean {
   const text = normalize(raw);
+  if (plan.kind !== "scatter" && plan.unit === "%" && /\byields?\b/i.test(plan.title)) {
+    if (!sentences(text).some(sentence => metricFor(sentence.text) === "Yield")) return false;
+  }
   if (plan.kind === "line") {
-    return plan.points.length >= 2 && plan.points.every((point) => grounded(text, point.label, point.value, plan.unit));
+    return plan.points.length >= 2 && plan.points.every((point) => grounded(text, point.label, point.value, plan.unit) && (point.timestamp === undefined || point.timestamp === periodTimestamp(point.label)));
   }
   if (plan.kind === "bar") {
     return plan.bars.length >= 2 && plan.bars.every((row) => grounded(text, row.label, row.value, plan.unit));
@@ -669,12 +776,14 @@ type ChartPost = {
     kind?: string;
     figures?: unknown[];
     charts?: ChartPlan[];
+    chartGeneration?: { status: string };
   };
 };
 
 /** Generated charts are for text-only research posts. A source figure wins. */
 export function chartsForPost(post: ChartPost): ChartPlan[] {
   if (post.source?.kind !== "dropbox") return [];
+  if (post.source.chartGeneration) return [];
   if ((post.source.figures?.length ?? 0) > 0) return [];
   if ((post.images?.length ?? 0) > 0) return [];
   const stored = post.source.charts;

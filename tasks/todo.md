@@ -9303,3 +9303,38 @@ Dependency graph: T1 -> T2 + T3 -> T4.
 Plan review: isolated checkout preserves unrelated task edits. No local suites; Playwright runs on GitHub. Clear incumbent visual identity retained.
 
 Regression review: baseline b7c9c79a GitHub job114924498855 reproduced selector text escape42.57px at320 and24.53px at393. Fourfocusedregressions retain quotes3.52/3.07/3.98 and negativepremium signs. Signedmidfixture corrected to actualtwo-decimal output-4.47; no productionformatters altered. Fixpinsintrinsic selector width; scrolling retains alllegs.
+
+## Research text-only chart quality (2026-10-12)
+
+Dependency graph: T1 -> T2 + T3 -> T4 -> T5.
+- [x] T1 depends_on: [] Audit planners/publication and retrieve three actual text-only newsfeed findings with PDF provenance; evaluate visualization libraries against primary guidance.
+- [x] T2 depends_on: [T1] Repair semantic chart selection and add deterministic high-resolution PNG rendering with source data and period labels.
+- [x] T3 depends_on: [T1] Integrate independent rendered-image review before attaching generated charts; fail closed on review errors and preserve source provenance.
+- [x] T4 depends_on: [T2, T3] Red/green focused verification, relevant browser E2E, and independent Sol/Luna image and source-data review.
+- [x] T5 depends_on: [T4] Deliver three sourced PNG previews and review artifact; record verification and remaining deployment status.
+
+Review: Source documents are untrusted data. Charts encode only grounded observations; no invented history, 3D distortion, or automatic publication of unreviewed images.
+
+Verification review (2026-10-12): 764 research Python tests, 37 focused Vitest tests, 2 desktop/mobile Playwright cases passed; TypeScript and diff checks clean. Renderer 32 tests and 96% measured branch/statement coverage; generated-chart validation 97% measured coverage. Actual live semantic generation plus separate image review passed 3/3; Sol and Luna independently inspected all three final PNGs against cited PDF text and recorded image SHA-256. Production AMD64 Python image build and non-root 2400px renderer smoke passed. Gallery embeds images/fonts and passed desktop/mobile overflow/image-load checks. Local branch codex/research-chart-quality; no live post mutation, PR, or deployment.
+
+## Chart source attribution and Radon credit correction (2026-10-12)
+
+Dependency graph: T1 -> T2 + T3 -> T4.
+- [x] T1 depends_on: [] Verify telecom PDF footer logo and last-page legal publisher evidence; preserve original source capture.
+- [x] T2 depends_on: [T1] Resolve publisher from document branding/footer evidence, retain attribution-page provenance, visually inspect boundary pages when text identity is unresolved; never display Source: unknown.
+- [x] T3 depends_on: [] Include https://radon.run on every generated PNG and legacy chart frame; prevent footer overlap.
+- [x] T4 depends_on: [T2, T3] Re-render all three examples, repeat independent image/source review, refresh gallery and test evidence.
+
+Review: User supplied LSEG logo and last-page ownership evidence. Source identification must inspect more than cited measurement pages or the page-one header. Radon credit supplements original publisher attribution.
+
+Correction verification review: Actual original telecom PDF page 11 confirms LSEG ownership; document and manifest hashes are independently retained. All three regenerated 2400px PNGs passed fresh service image review plus independent Sol/Luna pixel and source checks; exact publisher and https://radon.run credits are required for acceptance. Sol found the combined LSEG wordmark and legal-owner vision matching gap; four failing regressions reproduced before repair, then 47 intake tests passed. Closing research suite: 803 passed; focused frontend: 39 passed; desktop/mobile browser: 2 passed; TypeScript and whitespace clean. Gallery image loading and overflow checks passed at 1440px and 390px. Local changes and previews only; no live feed mutation, PR, or deployment.
+
+## Publish and regenerate research charts (2026-10-12)
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+- [ ] T1 depends_on: [] Review final source and runtime packaging, honor lessons requiring full suites in GitHub CI, commit only code/tests/docs with no proprietary preview assets.
+- [ ] T2 depends_on: [T1] Open and attach PR, verify expected exact-head CI green, send one accepted Pushover receipt.
+- [ ] T3 depends_on: [T2] Merge authorized PR, verify production deployment of the resulting SHA and chart runtime.
+- [ ] T4 depends_on: [T3] Regenerate the three existing articles with source evidence and independent image approval, preserve IDs/copy and verify authenticated production feed/lightbox.
+
+Review: User explicitly authorized merge, deployment and mutation of these three articles. Back up original records and use conditional updates to avoid overwriting concurrent changes; preserve source PDFs, article claims and timestamps.

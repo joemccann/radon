@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -125,8 +126,11 @@ class TestPythonImage:
         images = _from_images(text)
         # DS-2026-10-09-01: the runtime base is digest-pinned like the vendor stage.
         assert re.fullmatch(r"python:3\.13\.\d+-slim@sha256:[0-9a-f]{64}", images[-1])
-        assert len(images) == 2
-        assert images[0].startswith("node:22.22.0-bookworm-slim@sha256:")
+        assert len(images) == 3
+        for image in images[:2]:
+            assert re.fullmatch(r"node:22\.22\.0-bookworm-slim@sha256:[0-9a-f]{64}", image)
+        assert f"FROM {images[0]} AS vendor-clis" in text
+        assert f"FROM {images[1]} AS chart-runtime" in text
         assert "COPY requirements.txt" in text
         assert "scripts/requirements-api.txt" in text
         assert "WORKDIR /home/radon/radon" in text
@@ -136,6 +140,34 @@ class TestPythonImage:
         assert "8321" in text
         assert "--proxy-headers" in text
         assert "127.0.0.1" in text
+
+    def test_chart_runtime_ships_locked_d3_and_local_fonts_read_only(self) -> None:
+        text = PYTHON_DF.read_text(encoding="utf-8")
+        stage = text.split(" AS chart-runtime", 1)[1].split("\nFROM ", 1)[0]
+        assert "WORKDIR /opt/radon-charts" in stage
+        assert "COPY docker/app/chart-runtime/package.json docker/app/chart-runtime/package-lock.json ./" in stage
+        assert "npm ci --ignore-scripts --omit=dev --no-audit --no-fund" in stage
+        package = json.loads((DOCKER_APP / "chart-runtime/package.json").read_text())
+        lock = json.loads((DOCKER_APP / "chart-runtime/package-lock.json").read_text())
+        assert package["dependencies"] == {"d3": "7.9.0"}
+        assert lock["packages"][""]["dependencies"] == package["dependencies"]
+        assert lock["packages"]["node_modules/d3"]["version"] == "7.9.0"
+        assert lock["packages"]["node_modules/d3"]["integrity"].startswith("sha512-")
+        assert "COPY --from=chart-runtime /opt/radon-charts /opt/radon-charts" in text
+        assert "COPY web/public/fonts/Inter-Variable.woff2 web/public/fonts/IBMPlexMono-400.woff2 /opt/radon-charts/fonts/" in text
+        assert "RUN chmod -R a-w /opt/radon-charts" in text
+        assert text.index("RUN chmod -R a-w /opt/radon-charts") < text.index("USER radon")
+        for name in ("Inter-Variable.woff2", "IBMPlexMono-400.woff2"):
+            assert (REPO_ROOT / "web/public/fonts" / name).is_file()
+
+    def test_real_chart_export_is_smoked_as_the_runtime_user(self) -> None:
+        text = PYTHON_DF.read_text(encoding="utf-8")
+        smoke = text.split("# Exercise the actual research renderer", 1)[1]
+        assert text.index("USER radon") < text.index("# Exercise the actual research renderer")
+        assert "from research.chart_render import render_chart" in smoke
+        assert "render_chart(plan, Path(folder) / 'smoke.png'" in smoke
+        assert "assert result['width'] == 2400" in smoke
+        assert "assert not result['geometry']['text_overflow']" in smoke
 
     def test_user_radon_is_final(self) -> None:
         text = PYTHON_DF.read_text(encoding="utf-8")
