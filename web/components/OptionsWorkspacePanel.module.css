@@ -15,26 +15,13 @@
   font-size: 12px;
 }
 
-.planned {
+.comingNote {
+  margin-left: auto;
+  align-self: center;
+  padding-left: 12px;
   color: var(--text-muted);
-  cursor: default;
-}
-
-.planned:hover {
-  color: var(--text-muted);
-}
-
-.plannedLabel {
-  padding: 2px 5px;
-  color: var(--text-muted);
-  border: 1px solid var(--line-grid);
-  border-radius: 999px;
-  font-family: var(--font-mono);
   font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0;
-  line-height: 1;
-  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .tab:focus-visible {

@@ -159,7 +159,7 @@ test("Options workspace opens its Net GEX tab with the captured controls and cli
 
   await expect(page.getByRole("heading", { name: "Options", exact: true })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Net GEX" })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByRole("tab", { name: /DEX/ })).toHaveAttribute("aria-disabled", "true");
+  await expect(page.getByRole("tab", { name: /DEX/ })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Options exposure" })).toBeVisible();
   await expect(page.getByLabel("Exposure metric")).toHaveValue("net_gex");
   await expect(page.getByLabel("Strike range")).toHaveValue("10");

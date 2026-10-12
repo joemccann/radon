@@ -96,9 +96,8 @@ export default function OptionsWorkspacePanel({ symbol }: OptionsWorkspacePanelP
   return (
     <div className={styles.workspace} data-testid="options-workspace">
       <div className={`ticker-tabs ${styles.tabBar}`} role="tablist" aria-label="Options measurements">
-        {TABS.map((tab) => {
+        {TABS.filter((tab) => tab.available).map((tab) => {
           const isActive = activeTab === tab.id;
-          const isAvailable = tab.available;
           return (
             <button
               key={tab.id}
@@ -106,16 +105,16 @@ export default function OptionsWorkspacePanel({ symbol }: OptionsWorkspacePanelP
               type="button"
               role="tab"
               aria-selected={isActive}
-              aria-disabled={isAvailable ? undefined : "true"}
-              tabIndex={isAvailable ? 0 : -1}
-              className={`ticker-tab ${styles.tab}${isActive ? " active" : ""}${isAvailable ? "" : ` ${styles.planned}`}`}
-              onClick={isAvailable ? () => goToTab(tab.id) : undefined}
+              className={`ticker-tab ${styles.tab}${isActive ? " active" : ""}`}
+              onClick={() => goToTab(tab.id)}
             >
               {tab.label}
-              {!isAvailable ? <span className={styles.plannedLabel}>Planned</span> : null}
             </button>
           );
         })}
+        <span className={styles.comingNote}>
+          Coming: {TABS.filter((tab) => !tab.available).map((tab) => tab.label).join(", ")}
+        </span>
       </div>
 
       <div role="tabpanel" aria-label={activeTab === "rv-ratio" ? "Rel Vol" : "Net GEX"}>

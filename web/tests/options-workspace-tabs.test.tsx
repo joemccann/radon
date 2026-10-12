@@ -32,8 +32,9 @@ describe("OptionsWorkspacePanel", () => {
 
     expect(screen.getByRole("tablist", { name: "Options measurements" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Net GEX" }).getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByRole("tab", { name: /DEX/ }).getAttribute("aria-disabled")).toBe("true");
-    expect(screen.getByRole("tab", { name: /Greeks/ }).getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Net GEX", "Rel Vol"]);
+    expect(screen.queryByText("Planned")).toBeNull();
+    expect(screen.getByText("Coming: DEX, Greeks, Open Interest, VIX / Volatility")).toBeTruthy();
     expect(screen.getByRole("search", { name: "Options ticker" })).toBeTruthy();
     expect(screen.queryByTestId("net-gex-panel")).toBeNull();
   });

@@ -146,7 +146,7 @@ export default function ResearchWorkbench({ portfolio }: { portfolio?: Portfolio
     } catch (reason) { setError(userErrorMessage(reason, "Export failed.")); }
   };
   return <div className={styles.workbench} data-testid="research-workbench">
-    <header className={styles.header}><div><h2>Evidence to decision</h2><p>Trace the claim. Compare the periods. Review the trade.</p><span className={styles.meta}>{workspace.documents.length} sources · {workspace.facts.length} cited facts · Unsaved evidence</span></div>
+    <header className={styles.header}>{workspace.documents.length ? <div><h2>Evidence to decision</h2><span className={styles.meta}>{workspace.documents.length} sources · {workspace.facts.length} cited facts · Unsaved evidence</span></div> : <div><h2>No sources yet</h2><p>Paste a filing, earnings transcript, desk note or deal email, or import a Radon newsfeed note.</p><span className={styles.meta}>Unsaved. Reloading clears this workspace.</span></div>}
       <div className={styles.actions}><button className={styles.button} onClick={() => fileRef.current?.click()}>Import evidence</button><button className={styles.button} disabled={!workspace.documents.length} onClick={() => download("json")}>Save evidence</button></div>
       <input ref={fileRef} type="file" accept="application/json,.json" hidden aria-label="Import workspace JSON" onChange={(event) => void importFile(event.target.files?.[0])} />
     </header>

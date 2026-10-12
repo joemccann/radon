@@ -16,6 +16,17 @@ function addSource(text = "2026-Q2 Revenue: $120 million\n2026-Q2 Capex: $30 mil
   fireEvent.submit(screen.getByRole("button", { name: "Add source", exact: true }).closest("form")!);
 }
 describe("source-grounded research workbench", () => {
+  it("collapses the empty header to one prompt without a tagline or zero counts", () => {
+    render(<ResearchWorkbench />);
+    expect(screen.getByRole("heading", { name: "No sources yet" })).toBeTruthy();
+    expect(screen.getByText("Paste a filing, earnings transcript, desk note or deal email, or import a Radon newsfeed note.")).toBeTruthy();
+    expect(screen.getByText("Unsaved. Reloading clears this workspace.")).toBeTruthy();
+    expect(screen.queryByText(/Trace the claim/)).toBeNull();
+    expect(screen.queryByText(/0 sources/)).toBeNull();
+    addSource();
+    expect(screen.getByRole("heading", { name: "Evidence to decision" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "No sources yet" })).toBeNull();
+  });
   it("extracts cited figures, preserves exact passages, and computes a comparable capex ratio", () => {
     render(<ResearchWorkbench />); addSource();
     expect(screen.getByText(/1 sources/)).toBeTruthy();
@@ -36,7 +47,7 @@ describe("source-grounded research workbench", () => {
     fireEvent.change(screen.getByLabelText("Source text"), { target: { value: "An imported claim" } });
     fireEvent.submit(screen.getByRole("button", { name: "Add source", exact: true }).closest("form")!);
     expect(screen.getByRole("alert").textContent).toMatch(/HTTPS/);
-    expect(screen.getByText(/0 sources/)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "No sources yet" })).toBeTruthy();
   });
   it("rejects unsupported citations rather than attaching invented numeric evidence", () => {
     render(<ResearchWorkbench />); addSource("2026-Q2 Revenue: $120 million");
