@@ -83,11 +83,9 @@ test("Rel Vol tab is reachable from Net GEX with the symbol carried through", as
   const relVolTab = page.getByRole("tab", { name: "Rel Vol" });
   await expect(relVolTab).toBeVisible();
   await expect(relVolTab).toHaveAttribute("aria-selected", "false");
-  // The reserved VIX/term-structure slot stays planned and disabled.
-  await expect(page.getByRole("tab", { name: /VIX \/ Volatility/ })).toHaveAttribute(
-    "aria-disabled",
-    "true",
-  );
+  // Unbuilt views are not tabs; the reserved VIX slot is named in the Coming note.
+  await expect(page.getByRole("tab", { name: /VIX/ })).toHaveCount(0);
+  await expect(page.getByText(/Coming:.*VIX \/ Volatility/)).toBeVisible();
 
   await relVolTab.click();
   await expect(page).toHaveURL(/\/options\/rv-ratio\?symbol=SMH$/);

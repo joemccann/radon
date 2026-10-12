@@ -41,7 +41,6 @@
   border-radius: var(--radius-lg);
 }
 
-.entryEyebrow,
 .entryForm label {
   color: var(--text-muted);
   font-family: var(--font-sans);

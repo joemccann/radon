@@ -75,6 +75,8 @@ describe("TickerFlowReport — cached figures while a scan is in flight", () => 
     const badge = container.querySelector(".ticker-flow-badge");
     expect(badge?.getAttribute("data-status")).toBe("scanning");
     expect(badge?.getAttribute("data-stale")).toBe("true");
+    // Plate 26: an old verdict is demoted, not the hero.
+    expect(badge?.classList.contains("ticker-flow-badge--stale")).toBe(true);
     expect(screen.getByTestId("flow-hero-stale").textContent).toContain("LAST GOOD SCAN");
     expect(screen.getByTestId("flow-hero-stale").textContent).toContain("2026-09-21");
     expect(screen.queryByTestId("flow-stale-age")).toBeNull();
@@ -113,6 +115,7 @@ describe("TickerFlowReport — cached figures while a scan is in flight", () => 
     expect(screen.queryByTestId("flow-scan-progress")).toBeNull();
     expect(screen.queryByTestId("flow-hero-stale")).toBeNull();
     expect(screen.queryByTestId("flow-stale-age")).toBeNull();
+    expect(document.querySelector(".ticker-flow-badge--stale")).toBeNull();
     const refresh = screen.getByLabelText("Refresh flow report");
     expect(refresh.getAttribute("aria-busy")).not.toBe("true");
     expect(refresh.querySelector("[data-testid='thinking-wait']")).toBeNull();

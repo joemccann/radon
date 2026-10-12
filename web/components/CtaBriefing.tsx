@@ -17,6 +17,8 @@ type CtaBriefingProps = {
   estSellingBn: number | null;
   /** Session-to-session change in implied cut vs AUM ($B). */
   dayChangeBn?: number | null;
+  /** Latest cache date when the CTA cache is stale; dates the posture instead of a verdict pill. */
+  staleAsOf?: string | null;
 };
 
 /* ─── Helpers ────────────────────────────────────────── */
@@ -299,7 +301,7 @@ function buildNarrative(
 
 /* ─── Component ──────────────────────────────────────── */
 
-export default function CtaBriefing({ tables, estSellingBn, dayChangeBn = null }: CtaBriefingProps) {
+export default function CtaBriefing({ tables, estSellingBn, dayChangeBn = null, staleAsOf = null }: CtaBriefingProps) {
   const main = tables.main ?? [];
   const commodity = tables.commodity ?? [];
   const spx = getSpxRow(main);
@@ -333,17 +335,26 @@ export default function CtaBriefing({ tables, estSellingBn, dayChangeBn = null }
     >
       {/* ── Header row ── */}
       <div className="cta-briefing-header">
-        <span
-          className="cta-briefing-regime-pill"
-          style={{
-            color: posture.cssColor,
-            borderColor: posture.borderColor,
-            background: posture.bgColor,
-          }}
-        >
-          {posture.label}
-        </span>
-        <span className="cta-briefing-label">CTA EQUITY POSTURE</span>
+        {staleAsOf ? (
+          <span className="cta-briefing-stale-posture" data-testid="cta-stale-posture">
+            CTA equity posture as of {staleAsOf}:{" "}
+            <span style={{ color: posture.cssColor }}>{posture.label.toLowerCase()}</span>
+          </span>
+        ) : (
+          <>
+            <span
+              className="cta-briefing-regime-pill"
+              style={{
+                color: posture.cssColor,
+                borderColor: posture.borderColor,
+                background: posture.bgColor,
+              }}
+            >
+              {posture.label}
+            </span>
+            <span className="cta-briefing-label">CTA EQUITY POSTURE</span>
+          </>
+        )}
       </div>
 
       {/* ── Metric cards ── */}

@@ -39,6 +39,20 @@ describe("OptionsWorkspacePanel", () => {
     expect(screen.queryByTestId("net-gex-panel")).toBeNull();
   });
 
+  it("names the active tab in the empty entry and says what loading returns", () => {
+    render(<OptionsWorkspacePanel />);
+    expect(screen.getByRole("heading", { level: 2, name: "Net GEX" })).toBeTruthy();
+    expect(screen.getByText("Reconstructs strike-level dealer gamma exposure for one underlying.")).toBeTruthy();
+    expect(screen.queryByText("OPTIONS / NET GEX")).toBeNull();
+    cleanup();
+
+    pathname = "/options/rv-ratio";
+    render(<OptionsWorkspacePanel />);
+    expect(screen.getByRole("heading", { level: 2, name: "Rel Vol" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Net GEX" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Load rel vol" })).toBeTruthy();
+  });
+
   it("rejects an invalid ticker without starting a measurement", () => {
     render(<OptionsWorkspacePanel />);
 
