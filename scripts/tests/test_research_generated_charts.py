@@ -433,6 +433,27 @@ def test_currency_unit_requires_currency_in_each_source_quote():
     assert not gc._number_in_quote(1, 'USD billion', 'Revenue was €1bn.')
 
 
+@pytest.mark.parametrize(('unit', 'quote'), [
+    ('USD billion', 'Revenue was USD 1 billion.'),
+    ('USD billion', 'Revenue (billion): USD 1.'),
+    ('$bn', 'Revenue was $1bn.'),
+    ('EUR million', 'Revenue was €1mn.'),
+    ('£tn', 'Revenue was £1tn.'),
+])
+def test_explicit_currency_occurrences_and_unit_headers_remain_supported(unit, quote):
+    assert gc._number_in_quote(1, unit, quote)
+
+
+@pytest.mark.parametrize(('unit', 'quote'), [
+    ('$bn', 'Revenue was 1bn.'),
+    ('$bn', 'Revenue was €1bn.'),
+    ('USD billion', 'Expenses were $2bn; revenue was 1bn.'),
+    ('USD billion', 'Expenses were $2bn; revenue was €1bn.'),
+])
+def test_currency_cannot_be_borrowed_from_another_numeric_occurrence(unit, quote):
+    assert not gc._number_in_quote(1, unit, quote)
+
+
 def test_range_endpoints_must_be_linked_as_one_source_measurement():
     quote = ('Asia yields were 3%; Europe yields were 4%; '
              'Africa yields were 2%; North America yields were 5%.')
@@ -443,6 +464,38 @@ def test_range_endpoints_must_be_linked_as_one_source_measurement():
     evidence = [{'id': row['id'], 'page': 1, 'source_quote': quote} for row in plan['marks']]
     assert gc.valid_plan(plan)
     assert not gc.valid_evidence(plan, evidence, {1: quote})
+
+
+@pytest.mark.parametrize('quote', [
+    'Yield was 3-4%.',
+    'Yield was 3%-4%.',
+    'Yield was 3 to 4 percent.',
+    'Yield (%) was 3-4.',
+])
+def test_one_explicit_closed_range_and_unit_header_remain_supported(quote):
+    assert gc._range_in_quote(3, 4, '%', quote)
+
+
+@pytest.mark.parametrize(('low', 'high', 'quote'), [
+    (3, 3, 'Yield was 3-4%.'),
+    (3, 5, 'Yield was 3-4%; a separate yield was 5%.'),
+    (3, 4, 'Yield was 3-5%; a separate yield was 4%.'),
+    (3, 4, 'Spread was 3-4bp; separate yields were 3% and 4%.'),
+    (3, 4, 'Yield was about 3-4%.'),
+    (3, 4, 'Yield was above 3-4%.'),
+])
+def test_closed_range_pair_cannot_borrow_values_or_units(low, high, quote):
+    assert not gc._range_in_quote(low, high, '%', quote)
+
+
+def test_explicit_degenerate_closed_range_remains_exact():
+    assert gc._range_in_quote(3, 3, '%', 'Yield was 3-3%.')
+
+
+def test_closed_monetary_range_requires_matching_currency_on_the_range():
+    quote = 'Revenue was €3-4bn; expenses were $3bn and $4bn.'
+    assert gc._range_in_quote(3, 4, 'EUR billion', quote)
+    assert not gc._range_in_quote(3, 4, 'USD billion', quote)
 
 
 

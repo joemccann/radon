@@ -9360,3 +9360,7 @@ Dependency graph: T1 -> T2 -> T3 -> T4.
 Review: No production row mutations yet. Preserve article claims and publication timestamps; correct only visually proven source-report metadata. Invalid charts remain withheld.
 
 Hardening red evidence: PR #1047 head b04d698e8a2ee876c3acdc1c50de373f344ad0ed, CI 38315381303 job 115030713009 reproduced all 25 new failures; 2,444 other shard tests passed. Source changes follow only after this red head.
+
+Remaining grounding review: User merged PR #1047 as 0d13b547fe207f9e1c8dce7e6b1cdd71b1ed2903 while the interrupted regression commit was local. Its exact head d912b054 passed 34 applicable checks; Pushover accepted request f9e50c84-c5d1-4775-8117-204a38aae203. Independent Luna review found missing-currency acceptance and fabricated range links. New branch codex/research-chart-grounding-completion starts from merged main; regression-only commit eb184063 adds two cases, with source repair gated on fresh CI red and preceding deployment completion.
+
+Remaining grounding red evidence: PR #1054 exact head 7b6fc79029d6f5f1e411428430a39162c3235eb6, CI 38317612906 job 115037983114 reproduced both new failures with 2,482 other shard tests passing. Repair remains scoped to generated-chart evidence and is followed by full exact-head CI.
