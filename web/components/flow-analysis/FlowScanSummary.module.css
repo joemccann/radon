@@ -1,0 +1,7 @@
+.summary { padding: 4px 0 2px; }
+.finding { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; color: var(--text-primary); }
+.detail { margin: 6px 0 0; font-size: 13px; color: var(--text-muted); }
+.counts { display: flex; flex-wrap: wrap; gap: 24px; margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--line-grid); font-size: 14px; }
+.counts > div { display: flex; gap: 6px; }
+.counts dt { color: var(--text-muted); }
+.counts dd { margin: 0; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }

@@ -3266,6 +3266,12 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
   transition: color 300ms ease-in-out;
 }
 
+.metric-card-hero .metric-value {
+  font-family: var(--font-mono);
+  font-size: calc(var(--text-metric) * 1.6);
+  font-weight: 500;
+}
+
 /* ───────────────────────────────────────────────────────────
    SpectralLoader — brand-true loading state (brand-identity.md § 6).
    Replaces the generic shimmer pattern below for new panels. Existing
