@@ -2010,3 +2010,66 @@ class TestDocumentation20261011:
         assert "radon-record-high-breadth.timer" in cloud
         assert "operations.md" in cloud
         assert "research-evidence-archive" in cloud
+
+
+class TestDocumentation20261012:
+    """DOC-188..190: contracts that drifted after audited-through 0627874b."""
+
+    def test_app_image_prune_states_both_keep_sets(self):
+        runtime = (_ROOT / "cloud/scripts/radon-app-runtime.sh").read_text()
+        assert 'prune_stale_app_images "$target"' in runtime
+        assert "if not target:" in runtime
+        assert 'skip("green marker records no previous release")' in runtime
+        deploy = (_ROOT / "cloud/scripts/deploy.sh").read_text()
+        assert '"${RADON_DEPLOY_STAGE:-0}" != "1"' in deploy
+        ops = (_ROOT / "docs/operations.md").read_text()
+        assert "Cleanup preserves the target and durable rollback SHAs" not in ops
+        section = _markdown_heading("docs/operations.md", "App image prune")
+        assert "`pull <sha>`" in section
+        assert "green-marker line 1" in section
+        assert "does not add green-marker line 2" in section
+        assert "no-argument" in section
+        assert "skips when line 2 is missing" in section
+        assert "RADON_DEPLOY_STAGE" in section
+        assert "without the deploy lock" in section
+        assert "while prepull is pulling" in section
+        assert "running app container" in section
+        for boundary in ("Symptom", "Prerequisites", "Blast radius", "Safe diagnosis",
+                         "Stop conditions", "Verification", "Rollback", "Escalation"):
+            assert f"**{boundary}:**" in section
+        claude = (_ROOT / "cloud/CLAUDE.md").read_text()
+        assert "preserves the target and durable transition/last-green rollback SHAs" not in claude
+        assert "docs/operations.md#app-image-prune" in claude
+        assert "exact local image during registry outages" in claude
+
+    def test_retired_beta_units_stay_out_of_the_deploy_transition(self):
+        helper = (_ROOT / "cloud/scripts/deploy-root-helper.sh").read_text()
+        assert '[[ "$unit" == radon-beta-* ]] && return 0' in helper
+        serve = (_ROOT / "scripts/control_service/serve.py").read_text()
+        assert 'unit.startswith("radon-beta-")' in serve
+        operator = (_ROOT / "cloud/scripts/operator-radon.sh").read_text()
+        assert '[[ "${3:-}" == radon-beta-* ]]' in operator
+        section = _section(
+            (_ROOT / "docs/cloud-services.md").read_text(),
+            "Retired: beta.radon.run (2026-08-20)",
+        )
+        assert "unit_is_excluded" in section
+        assert "does not stop" in section
+        assert "radon unit" in section
+        assert "config-drift" in section
+        assert "no actions" in section
+
+    def test_release_version_is_the_deployed_tag(self):
+        readme = (_ROOT / "README.md").read_text()
+        assert "badge/version-" not in readme
+        assert "https://img.shields.io/github/v/tag/joemccann/radon" in readme
+        deploy = _section((_ROOT / "docs/operations.md").read_text(), "Deployment")
+        assert "scripts/release_version.py" in deploy
+        assert "package.json" in deploy
+        assert "can lag" in deploy
+        assert "release-tag" in deploy
+        ci = (_ROOT / ".github/workflows/ci.yml").read_text()
+        start = ci.index("  release-tag:")
+        job = ci[start:start + 900]
+        assert "!cancelled()" in job
+        assert "needs.deploy.result == 'success'" in job

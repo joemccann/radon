@@ -381,12 +381,11 @@ cmd_pull() {
   return 0
 }
 
-# `prune` (no argument) is the post-deploy cleanup. `pull` runs while deploy.sh
-# holds the deploy lock, so its nonblocking prune always skipped (CI run
-# 38112966371: BlockingIOError in prestage, prepull and deploy) and nine
-# ~6.5G release pairs filled the disk in one evening. deploy.sh calls this
-# verb after its supervisor releases the lock, once the green marker names
-# the new release on line 1 and the release it replaced on line 2.
+# `prune` (no argument) is the post-deploy cleanup. deploy.sh calls it only
+# after a green deploy, never when RADON_DEPLOY_STAGE=1, after the supervisor
+# closes the lock fd. `pull` from deploy.sh holds that lock, so its prune
+# skips. The CI prepull job runs `pull` without the lock, so its prune runs
+# and protects the target SHA plus green line 1, not line 2.
 cmd_prune() {
   prune_stale_app_images ""
 }

@@ -329,9 +329,8 @@ extending the allowlist in `render_env_file`; the contract tests in
 an entire key token in the baked client bundle before starting Next.js.
 
 Pre-pull compares registry and local image digests before reusing cached
-release tags. Cleanup preserves the target and durable rollback SHAs, takes
-the existing deploy lock nonblockingly, and skips pruning when rollback
-metadata or the running app population is unavailable.
+release tags. Which tags a prune may delete is the
+[app image prune](#app-image-prune) procedure.
 
 There is no escrow, and `secrets.db` is
 bound to its key by fingerprint (`key_binding` table): with rows present and
@@ -867,14 +866,24 @@ in a detached target-SHA worktree, journals and restores the active topology,
 and gates FastAPI `/health/lite`, Next.js HTTP, relay TCP/HTTP, and stable core
 service restart counts. IB state remains advisory.
 
-After a green deploy the supervisor releases the deploy lock and runs
-`sudo -n /usr/local/sbin/radon-app-runtime prune`. It keeps only the running
-release image pair and the previous green pair (green marker lines 1 and 2,
-or both transition-journal SHAs while one is pending) and removes every other
-`ghcr.io/joemccann/radon-{python,node}:<sha>` tag. It removes nothing while
-the lock is held, without a recorded previous release, or with no running app
-container. A skipped or failed prune never fails the deploy. Manual run, as
-radon, with no deploy in flight: the same command.
+### App image prune
+
+`pull <sha>` and the no-argument `prune` delete different tags. Both take the deploy lock without blocking and skip when they cannot, when rollback state is invalid, or when no running app container is using a managed image. A tag a running app container still references is kept.
+
+`pull <sha>` protects that SHA. When the transition journal exists it also protects both journal SHAs and does not read the green marker. When the journal is absent it protects green-marker line 1 and does not add green-marker line 2. `pull` from `deploy.sh` holds the deploy lock, so this prune skips. The CI prepull job runs `pull` without the deploy lock, so this prune runs.
+
+The no-argument `prune` protects green-marker line 1 and line 2, or both journal SHAs while a journal exists. It skips when line 2 is missing. `deploy.sh` calls it only after a green deploy, and not when `RADON_DEPLOY_STAGE=1` (prestage runs beside prepull). A skipped or failed prune does not fail the deploy.
+
+- **Symptom:** the app disk fills with `ghcr.io/joemccann/radon-python` and `radon-node` SHA tags, or prepull reports `exact release image pair is incomplete after pull`.
+- **Prerequisites:** the deploy lock is a regular file, rollback state parses, and a running app container is present. Otherwise the verb skips.
+- **Blast radius:** `rmi` of SHA tags outside the keep-set above. Gateway images are outside this sweep. A skip leaves the extra tags on disk.
+- **Safe diagnosis:** name the verb before deleting anything. `pull <sha>` and no-argument `prune` do not protect the same lines.
+- **Stop conditions:** do not run no-argument `prune` while prepull is pulling a SHA that is not already green-marker line 1 or line 2. Do not prune from prestage.
+- **Verification:** the command prints removed tags or `image prune skipped`, and the running pair plus green-marker line 2 are still local. `cloud/tests/test_app_runtime.py` and `cloud/tests/test_sync_control_plane.py` pin the keep-set.
+- **Rollback:** line 2 is the previous pair. If a `pull <sha>` already removed it, do not invent a local image from a deleted tag. Follow the deploy rollback in [`cloud/CLAUDE.md`](../cloud/CLAUDE.md).
+- **Escalation:** a no-argument prune that removes the pair prepull just wrote is a failed prepull, not a failed production deploy. Stop the manual prune. The deploy job pulls the pair again.
+
+Manual run, as radon, only when no deploy lock is held and prepull is not fetching: `sudo -n /usr/local/sbin/radon-app-runtime prune`.
 
 The deploy job is capped at 60 minutes and SSH at 55 minutes. The inner deploy
 gets 900 seconds plus a 30-second kill window. Root mutation actions get 180
@@ -884,7 +893,11 @@ consume 190 seconds once per recovery. The tested double-recovery bound is
 gate overhead.
 
 Git HEAD equality alone is not success. Confirm the durable release with
-`gh run list --workflow=ci.yml --limit 1`. For the exact privileged bootstrap,
+`gh run list --workflow=ci.yml --limit 1`. The app version tag is `v` plus
+the history fold from `scripts/release_version.py`. The `release-tag` job
+pushes it after that deploy succeeds, including when earlier test jobs were
+skipped. Root and web `package.json` version fields are a fallback when that
+history is unavailable, and they can lag the tag. For the exact privileged bootstrap,
 recovery, and rollback sequence, follow [`cloud/CLAUDE.md`](../cloud/CLAUDE.md)
 and [`docs/monorepo-cloud-migration.md`](monorepo-cloud-migration.md) rather
 than duplicating commands in this runbook.

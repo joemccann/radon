@@ -1249,8 +1249,12 @@ The staging clone was never finished. Repo copies of `deploy/beta/`, the
 Caddy `beta.radon.run` site, and `cloud/config/sudoers.d/radon-beta` are
 gone. Host leftovers were removed on 2026-10-11: the `radon-beta-*` units,
 `/home/radon/radon-beta`, and the 4G beta swapfile. The drift audit no longer
-carves out `radon-beta*`; a reappearing beta unit or sudoers fragment is
-`config-drift`. Do not recreate. `cloud/tests/test_beta_sunset.py` pins this.
+carves out `radon-beta*`. A reappearing unit or sudoers fragment is
+`config-drift`. `unit_is_excluded` in `cloud/scripts/deploy-root-helper.sh`
+still matches `radon-beta-*`, so the next deploy does not stop that unit.
+`radon unit` refuses the name, and stack stop, start, and restart skip it.
+The control socket allows no actions on it. Do not recreate.
+`cloud/tests/test_beta_sunset.py` pins the drift half.
 
 Host swap is `/swapfile` (2G, `/etc/fstab`), provisioned by
 `setup-vps.sh:ensure_swapfile`. The app host has 7.6G RAM and ran ~150M of
