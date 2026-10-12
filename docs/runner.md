@@ -304,7 +304,7 @@ Steps 6 to 8 write into the bot's home only as the bot: your account reads your 
    bot /bin/mkdir -p -m 700 $B/security-deepsec/keep/.deepsec $B/security-deepsec/keep/data/radon
    tar -C ~/radon-weekend/radon-security-deepsec/.deepsec -cf - package.json package-lock.json pnpm-workspace.yaml deepsec.config.ts generated-matchers.ts AGENTS.md README.md | bot tar -C $B/security-deepsec/keep/.deepsec -xf -
    tar -C ~/radon-weekend/radon-security-deepsec/data/radon -cf - . | bot tar -C $B/security-deepsec/keep/data/radon -xf -
-   bot find $B/security-deepsec/keep/data/radon -name '*.json' -exec sed -i '' 's#/Users/asymmetricholdingsltd./radon-weekend/radon-security-deepsec#/Users/_radonbot/radon-runner/work/security-deepsec#g' {} +
+   bot find $B/security-deepsec/keep/data/radon -name '*.json' -exec sed -i '' 's#/Users/joemccann-mac-mini/radon-weekend/radon-security-deepsec#/Users/_radonbot/radon-runner/work/security-deepsec#g' {} +
    ```
 
 9. Bot shell, unbundle the held branches into each loop's private bare repository, then bootstrap DeepSec (rail 8: the operator does this, never a nightly run):
