@@ -89,6 +89,13 @@ mobile-ticket-session-refresh.spec.ts
 #   pins live in Vitest admin-action-request-assertions. Held out of
 #   e2e-financial-smoke pending next start preflight.
 admin-service-controls.spec.ts
+# REVIEWED 2026-10-12 admin-log-disclosure.spec.ts - Writer row journal
+#   disclosure. 1/1 Chromium (isolated AdminWorkspace bundle, fixture
+#   transport): healthy row inert, no /api/admin/logs GET before expand, exact
+#   GET ?service=dropbox-research on expand, raw last_error, errors-only
+#   default. Wire-level pins live in Vitest service-log-disclosure. Held out
+#   of e2e-financial-smoke pending next start preflight.
+admin-log-disclosure.spec.ts
 # REVIEWED 2026-09-30 credit-vix-tab.spec.ts - New CREDIT/VIX tab. Verified via
 #   Vitest credit-vix-api (missing 200, Turso vs disk) and credit-vix-panel
 #   (strip values, state tone, freshness rail 22:25 UTC, no front-run copy).

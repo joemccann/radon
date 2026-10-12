@@ -22,8 +22,13 @@ host as ``radon`` and is the only bridge:
   refused for them and Restart (like the full-stack restart) is answered
   first and run detached after a short delay. This daemon refuses to act on
   itself, and ``radon stop|restart`` excludes it.
+* Logs (read-only): ``{"op":"logs","unit":"radon-NAME.service"}`` runs
+  exactly ``sudo -n /usr/local/bin/radon logs <unit>`` (fixed journalctl
+  argv in the operator) for a loaded, allowlisted, non-beta ``.service`` and
+  replies with parsed, secret-redacted entries, oldest first.
 * Audit: one ``radon-control audit {json}`` journald line per request with
-  the actor the API forwarded, the peer uid, unit, verb and result.
+  the actor the API forwarded, the peer uid, unit, verb and result. Read-only
+  ops (status, logs) are audited only when refused or failed.
 
 Wire format: one JSON object per line each way (``api.host_control``).
 """
@@ -46,9 +51,11 @@ from typing import Callable, Optional
 
 try:
     from api import host_control
+    from api import journal_entries
     from api import services as registry
 except ImportError:  # `python -m scripts.control_service.serve` from the repo root
     from scripts.api import host_control
+    from scripts.api import journal_entries
     from scripts.api import services as registry
 
 CONTROL_UNIT = "radon-control.service"
@@ -58,6 +65,8 @@ VERBS = ("start", "stop", "restart")
 # Mirrors operator-radon.sh's own `unit` argument check, which is stricter
 # than the API allowlist (the suffix is mandatory there).
 UNIT_RE = re.compile(r"^radon-[a-z0-9-]+\.(?:service|timer)$")
+# Mirrors operator-radon.sh's `logs` argument check: services only.
+LOG_UNIT_RE = re.compile(r"^radon-[a-z0-9-]+\.service$")
 REFUSED_UNITS = frozenset({
     CONTROL_UNIT,
     registry.GATEWAY_UNIT,
@@ -82,10 +91,11 @@ STATUS_PROPERTIES = (
     "ExecMainStatus",
     "LastTriggerUSec",
 )
-OPS = frozenset({"ping", "status", "unit", "stack-restart"})
+OPS = frozenset({"ping", "status", "unit", "stack-restart", "logs"})
 _OP_KEYS = {
     "ping": frozenset({"op"}),
     "status": frozenset({"op"}),
+    "logs": frozenset({"op", "unit", "actor"}),
     "unit": frozenset({"op", "verb", "unit", "actor"}),
     "stack-restart": frozenset({"op", "actor"}),
 }
@@ -97,6 +107,14 @@ UNIT_TIMEOUT_S = 60.0
 STACK_TIMEOUT_S = 180.0
 DETACH_DELAY_S = 1.0
 STATUS_CACHE_S = 3.0
+# The operator bounds journalctl at 10s; this covers sudo and the reply.
+LOGS_TIMEOUT_S = 15.0
+MAX_LOG_MESSAGE_CHARS = journal_entries.MAX_LOG_MESSAGE_CHARS
+# The API refuses a reply over host_control.MAX_REPLY_BYTES; leave headroom
+# for the envelope so a non-ASCII-heavy journal still answers.
+LOGS_REPLY_BUDGET_BYTES = host_control.MAX_REPLY_BYTES - 64 * 1024
+parse_journal_json = journal_entries.parse_journal_json
+redact_secrets = journal_entries.redact_secrets
 # operator-radon.sh exits 74 when the deploy/control lock is held.
 LOCK_HELD_RC = 74
 TIMEOUT_RC = 124
@@ -163,6 +181,28 @@ def run_command(argv: list[str], timeout: float) -> tuple[int, str]:
         return 127, f"exec failed: {exc}"
     detail = (proc.stderr or "").strip() or (proc.stdout or "").strip()
     return (proc.returncode if proc.returncode is not None else 1), detail[-2000:]
+
+
+def run_capture(argv: list[str], timeout: float) -> tuple[int, str, str]:
+    """Exec a fixed argv (no shell) and return (returncode, stdout, stderr)."""
+    try:
+        proc = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=timeout,
+            check=False,
+            shell=False,
+            env=dict(_ENV),
+            stdin=subprocess.DEVNULL,
+        )
+    except subprocess.TimeoutExpired:
+        return TIMEOUT_RC, "", f"timed out after {timeout:.0f}s"
+    except OSError as exc:
+        return 127, "", f"exec failed: {exc}"
+    rc = proc.returncode if proc.returncode is not None else 1
+    return rc, proc.stdout or "", (proc.stderr or "").strip()[-2000:]
 
 
 def parse_show_blocks(raw: str) -> list[dict]:
@@ -247,6 +287,7 @@ class Controller:
         self,
         *,
         runner: Callable[[list[str], float], tuple[int, str]] = run_command,
+        log_runner: Callable[[list[str], float], tuple[int, str, str]] = run_capture,
         loaded_units: Optional[Callable[[], list[str]]] = None,
         unit_rows: Optional[Callable[[], list[dict]]] = None,
         deploy_lock_path: Optional[Path] = None,
@@ -254,6 +295,7 @@ class Controller:
         detach_delay: float = DETACH_DELAY_S,
     ) -> None:
         self.runner = runner
+        self.log_runner = log_runner
         self.loaded_units = loaded_units or systemd_loaded_units
         self.unit_rows = unit_rows or (lambda: systemd_unit_rows(self.loaded_units()))
         self.deploy_lock_path = Path(deploy_lock_path or registry.DEPLOY_LOCK_FILE)
@@ -300,6 +342,8 @@ class Controller:
             return {"ok": True, "service": "radon-control", "version": 1}
         if op == "status":
             return self._status()
+        if op == "logs":
+            return self._logs(request)
         if op == "stack-restart":
             return self._detached(
                 [SUDO_PATH, "-n", OPERATOR_PATH, "restart"], STACK_TIMEOUT_S,
@@ -327,6 +371,31 @@ class Controller:
         with self._status_lock:
             self._status_cache = (now, out)
         return {"ok": True, "units": out}
+
+    def _logs(self, request: dict) -> dict:
+        unit = request.get("unit")
+        if (
+            not isinstance(unit, str)
+            or not LOG_UNIT_RE.match(unit)
+            or unit.startswith("radon-beta-")
+            or not registry.is_valid_unit(unit)
+        ):
+            return _refuse("unit not allowed for logs")
+        try:
+            loaded = set(self.loaded_units())
+        except (OSError, subprocess.SubprocessError) as exc:
+            return {"ok": False, "error": f"unit registry unavailable: {exc}", "returncode": -1}
+        if unit not in loaded:
+            return _refuse(f"{unit} is not a loaded radon unit")
+        rc, stdout, stderr = self.log_runner(
+            [SUDO_PATH, "-n", OPERATOR_PATH, "logs", unit], LOGS_TIMEOUT_S,
+        )
+        if rc != 0:
+            detail = stderr or f"exited {rc}"
+            return {"ok": False, "returncode": rc, "error": f"journal read failed: {detail[-300:]}"}
+        entries, truncated = parse_journal_json(stdout)
+        entries, dropped = journal_entries.fit_reply_budget(entries, LOGS_REPLY_BUDGET_BYTES)
+        return {"ok": True, "unit": unit, "entries": entries, "truncated": truncated or dropped}
 
     def _unit(self, request: dict) -> dict:
         verb = request.get("verb")

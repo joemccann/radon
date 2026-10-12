@@ -18,7 +18,12 @@ radon ALL=(root) NOPASSWD: /usr/sbin/faillock --user radon
 
 # --- read-only diagnostic helpers ---
 # No journalctl grant: a wildcard unit argument would admit every journalctl
-# option as root. Read unit logs as root over ssh instead.
+# option as root. Unit logs go through `radon logs radon-NAME.service`
+# instead: the root-owned operator validates argc (exactly one unit) and the
+# ^radon-[a-z0-9-]+\.service$ regex, refuses radon-beta-*, then builds a fixed
+# journalctl argv (-u <unit> -n 300 -o json, MESSAGE and PRIORITY only). The
+# caller supplies no journalctl option. Feeds the /admin log disclosure.
+radon ALL=(root) NOPASSWD: /usr/local/bin/radon logs radon-*.service
 radon ALL=(root) NOPASSWD: /usr/bin/docker logs ib-gateway
 
 # --- Gateway container control (replaces radon's group `docker` membership) ---
