@@ -72,12 +72,30 @@ function interpretationLabel(interpretation: string): string {
   }
 }
 
-function regimeBadgeColor(regime: string): string {
-  switch (regime) {
-    case "PANIC":      return "var(--extreme)";
-    case "TRANSITION": return "var(--warning)";
-    default:           return "var(--signal-core)";
+/** Sentence-case verdict phrase; the headline is the single owner of the interpretation. */
+function verdictPhrase(interpretation: string): string {
+  switch (interpretation) {
+    case "RISK_OFF":   return "risk-off";
+    case "EDR":        return "early divergence";
+    case "WATCH":      return "watch";
+    case "BOUNCE":     return "bounce";
+    case "NORMAL":     return "normal";
+    case "PANIC":      return "panic";
+    case "SUPPRESSED": return "signal suppressed, beta sign reversed";
+    default:           return "insufficient data";
   }
+}
+
+function verdictDetail(sig: NonNullable<VcgData["signal"]>): string {
+  const panic = sig.pi_panic > 0
+    ? `Panic adjustment applied (π ${sig.pi_panic.toFixed(2)}, ${sig.regime.toLowerCase()})`
+    : "No panic adjustment applied";
+  const tier = sig.tier != null ? `Tier ${sig.tier} active` : "no active severity tier";
+  const { vvix_pct, vix_pct } = sig.attribution;
+  const driver = vvix_pct >= vix_pct
+    ? `VVIX drives ${vvix_pct.toFixed(0)}% of the read`
+    : `VIX drives ${vix_pct.toFixed(0)}% of the read`;
+  return `${panic}, ${tier}. ${driver}.`;
 }
 
 function tierColor(tier: 1 | 2 | 3 | null): string {
@@ -270,10 +288,6 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
             <InfoTooltip text="Volatility-Credit Gap: detects divergence between the vol complex (VIX/VVIX) and credit markets (HYG). Signals: RISK_OFF (tier 1–2), EDR (early divergence), BOUNCE (counter-signal), NORMAL." />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
-            {/* Regime badge */}
-            <span className="pill pill--solid" style={{ background: regimeBadgeColor(sig.regime) }}>
-              {sig.regime}
-            </span>
             {/* RISK-OFF */}
             {sig.ro === 1 && (
               <span className="pill pill--solid" style={{ background: "var(--fault)" }}>
@@ -320,21 +334,29 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
 
         <FreshnessRail schedule={VCG_REFRESH} asOf={asOf} testId="vcg-freshness-rail" />
 
+        <div style={{ padding: "16px 16px 0" }}>
+          <div data-testid="vcg-verdict" style={{ fontSize: "var(--text-metric)", fontWeight: 600, color: "var(--text-primary)" }}>
+            {data.credit_proxy} {verdictPhrase(sig.interpretation)}: VCG{" "}
+            <span style={{ fontFamily: "var(--font-mono)", color: interpColor }}>{fmtZ(sig.vcg)}σ</span>
+          </div>
+          <div data-testid="vcg-verdict-detail" style={{ marginTop: "4px", fontSize: "var(--text-body)", color: "var(--text-muted)" }}>
+            {verdictDetail(sig)}
+          </div>
+        </div>
+
         <div className="metrics-grid">
           <div className="metric-card">
             <div className="metric-label">VCG Z-Score</div>
             <div className="metric-value" style={{ color: interpColor }}>
               {fmtZ(sig.vcg)}
             </div>
-            <div className="metric-change" style={{ color: interpColor }}>
-              {interpretationLabel(sig.interpretation)}
-            </div>
+            <div className="metric-change neutral">20-session z</div>
           </div>
           <div className="metric-card">
             <div className="metric-label">VCG Adj (Panic-Adj)</div>
             <div className="metric-value">{fmtZ(sig.vcg_adj)}</div>
             <div className="metric-change neutral">
-              {sig.pi_panic > 0 ? `π = ${sig.pi_panic.toFixed(2)} SUPPRESSED` : "NO SUPPRESSION"}
+              {`π ${sig.pi_panic.toFixed(2)}`}
             </div>
           </div>
           <div className="metric-card">
@@ -360,13 +382,6 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
             Signal Detail
             <InfoTooltip text="Severity tier (1=critical, 2=high, 3=elevated), VVIX amplifier, and bounce conditions. Tier activates when ro=1 (Tier 1/2) or edr=1 (Tier 3)." />
           </div>
-          {/* Overall signal pill */}
-          <span
-            className="pill pill--solid"
-            style={{ background: interpColor }}
-          >
-            {interpretationLabel(sig.interpretation)}
-          </span>
         </div>
 
         <div className="metrics-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>

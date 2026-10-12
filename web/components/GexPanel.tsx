@@ -32,9 +32,10 @@ function fmtNum(v: number | null | undefined, decimals = 2): string {
 function fmtGex(v: number | null | undefined): string {
   if (v == null) return "---";
   const absVal = Math.abs(v);
-  if (absVal >= 1_000_000) return `${v >= 0 ? "+" : ""}$${(v / 1_000_000).toFixed(1)}M`;
-  if (absVal >= 1_000) return `${v >= 0 ? "+" : ""}$${(v / 1_000).toFixed(1)}K`;
-  return `${v >= 0 ? "+" : ""}$${v.toFixed(0)}`;
+  const sign = v >= 0 ? "+" : "-";
+  if (absVal >= 1_000_000) return `${sign}$${(absVal / 1_000_000).toFixed(1)}M`;
+  if (absVal >= 1_000) return `${sign}$${(absVal / 1_000).toFixed(1)}K`;
+  return `${sign}$${absVal.toFixed(0)}`;
 }
 
 function fmtPct(v: number | null | undefined): string {
@@ -45,6 +46,12 @@ function fmtPct(v: number | null | undefined): string {
 function fmtPrice(v: number | null | undefined): string {
   if (v == null) return "---";
   return v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Strikes are listed on whole points; keep decimals only for fractional strikes. */
+function fmtStrike(v: number | null | undefined): string {
+  if (v == null) return "---";
+  return Number.isInteger(v) ? v.toLocaleString("en-US") : fmtPrice(v);
 }
 
 function biasColor(direction: string): string {
@@ -127,9 +134,10 @@ function LevelCard({ label, level, labelColor }: {
   return (
     <div className="gex-level-card">
       <div className="gex-level-label" style={{ color: labelColor }}>{label}</div>
-      <div className="gex-level-value">{fmtPrice(level.strike)}</div>
+      <div className="gex-level-value">{fmtStrike(level.strike)}</div>
       <div className="gex-level-sub">
-        {fmtPct(level.distance_pct)} &mdash; {fmtGex(level.gamma)} per $1
+        {fmtPct(level.distance_pct)}
+        {level.gamma ? ` · ${fmtGex(level.gamma)} per $1` : ""}
       </div>
     </div>
   );
