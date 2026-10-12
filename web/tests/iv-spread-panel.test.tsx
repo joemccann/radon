@@ -279,6 +279,21 @@ describe("IvSpreadPanel — summary strip", () => {
     expect(screen.getByTestId("iv-spread-regime-value").textContent).toBe("NORMAL");
   });
 
+  it("folds the regime into the SPREAD caption so the strip has no orphan cell", () => {
+    mockUseIvSpread.mockReturnValue(hookState());
+    render(<IvSpreadPanel />);
+    expect(screen.queryByTestId("iv-spread-strip-regime")).toBeNull();
+    const spreadCell = screen.getByTestId("iv-spread-strip-spread");
+    expect(spreadCell.contains(screen.getByTestId("iv-spread-regime-value"))).toBe(true);
+    expect(spreadCell.parentElement!.querySelectorAll(".regime-strip-cell")).toHaveLength(5);
+  });
+
+  it("renders the headline spread at full contrast when the band tone is muted", () => {
+    mockUseIvSpread.mockReturnValue(hookState());
+    render(<IvSpreadPanel />);
+    expect(screen.getByTestId("iv-spread-spread-value").getAttribute("style")).toContain("var(--text-primary)");
+  });
+
   it("colours the spread and regime with the band token", () => {
     mockUseIvSpread.mockReturnValue(
       hookState({

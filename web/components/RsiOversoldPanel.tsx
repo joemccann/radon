@@ -133,6 +133,8 @@ export default function RsiOversoldPanel() {
   const pct = finiteOrNull(current.pct_below_30);
   const state = pct != null ? rsiOversoldStateLabel(pct) : null;
   const stateColor = state ? rsiOversoldStateColor(state) : "var(--text-muted)";
+  // A muted band tone is right for a caption, never for the headline figure.
+  const headlineTone = stateColor === "var(--text-muted)" ? "var(--text-primary)" : stateColor;
   const threshold = data.threshold ?? RSI_OVERSOLD_THRESHOLD;
   const clock = formatClockTime(data.scan_time);
 
@@ -206,11 +208,11 @@ export default function RsiOversoldPanel() {
               testId="rsi-oversold-strip-pct"
               label="PCT < 30"
               value={
-                <span data-testid="rsi-oversold-value" style={{ color: stateColor }}>
+                <span data-testid="rsi-oversold-value" style={{ color: headlineTone }}>
                   {formatRsiPct(pct)}
                 </span>
               }
-              sub={<>RSI(14) STRICTLY BELOW 30</>}
+              sub={<>Members with RSI(14) below 30</>}
             />
             <RegimeStripCell
               testId="rsi-oversold-strip-state"
@@ -220,7 +222,7 @@ export default function RsiOversoldPanel() {
                   {state ?? "---"}
                 </span>
               }
-              sub={<>THRESHOLD {threshold.toFixed(0)}%</>}
+              sub={<>Cluster threshold {threshold.toFixed(0)}%</>}
             />
             <RegimeStripCell
               testId="rsi-oversold-strip-members"
@@ -230,7 +232,7 @@ export default function RsiOversoldPanel() {
                   {current.count_below_30} / {current.eligible}
                 </span>
               }
-              sub={<>BELOW 30 / ELIGIBLE</>}
+              sub={<>Below 30 of eligible</>}
             />
             <RegimeStripCell
               testId="rsi-oversold-strip-highest"
@@ -240,13 +242,13 @@ export default function RsiOversoldPanel() {
                   {current.highest_since ?? "---"}
                 </span>
               }
-              sub={<>PRIOR SESSION AT OR ABOVE LATEST</>}
+              sub={<>Last session this high or higher</>}
             />
             <RegimeStripCell
               testId="rsi-oversold-strip-spx"
               label="SPX CLOSE"
               value={<span data-testid="rsi-oversold-spx">{formatSpxClose(current.spx_close)}</span>}
-              sub={<>{current.cross_up ? "CROSS UP" : "NO CROSS"}</>}
+              sub={<>{current.cross_up ? "Crossed up through threshold" : "No cross"}</>}
             />
           </RegimeStrip>
         )}

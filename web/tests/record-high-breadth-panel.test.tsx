@@ -22,6 +22,17 @@ describe("S&P 500 breadth source variant", () => {
     expect(screen.getByTestId("record-high-breadth-source").textContent).toContain("actual issue denominator is unverified");
     expect(screen.getByTestId("record-high-breadth-source").textContent).toContain("1973 and 1999 are unverified");
   });
+  it("flags the unverified net figure as an estimate instead of a prose caveat", () => {
+    render(<Panel />);
+    const net = screen.getByTestId("record-high-breadth-strip-net");
+    expect(net.querySelector('[data-testid="record-high-breadth-net-flag"]')?.textContent).toBe("EST");
+    expect(screen.getByTestId("record-high-breadth-source").textContent).toMatch(/^EST /);
+    expect(screen.queryByTestId("record-high-breadth-strip-date")).toBeNull();
+    cleanup();
+    hook.mockReturnValue({ data: { ...data, source: { ...data.source!, denominator_verified: true } }, loading: false });
+    render(<Panel />);
+    expect(screen.queryByTestId("record-high-breadth-net-flag")).toBeNull();
+  });
   it("preserves null gaps in all panes", () => {
     hook.mockReturnValue({ data: { ...data, series: [point, { ...point, date: "2026-09-21", spx_close: null, above_200_pct: null, net_high_low_per_500: null }] }, loading: false });
     render(<Panel />);

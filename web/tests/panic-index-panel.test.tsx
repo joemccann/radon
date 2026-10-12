@@ -237,7 +237,20 @@ describe("PanicIndexPanel — honesty + strip", () => {
     expect(screen.getByTestId("panic-index-vvix").textContent).toBe("87.72");
     expect(screen.getByTestId("panic-index-ts").textContent).toBe("0.8323");
     expect(screen.getByTestId("panic-index-skew").textContent).toBe("145.70");
-    expect(screen.getByTestId("panic-index-source-updated").textContent).toBe(DATA_DATE);
+    expect(screen.queryByTestId("panic-index-source-updated")).toBeNull();
+  });
+
+  it("leads with the composite and moves the four legs into a table", () => {
+    renderPanel(hookState({ data: buildData() }));
+    const level = screen.getByTestId("panic-index-strip-level");
+    expect(level.parentElement!.querySelectorAll(".regime-strip-cell")).toHaveLength(3);
+    const table = screen.getByTestId("panic-index-legs");
+    expect(table.tagName).toBe("TABLE");
+    const rows = table.querySelectorAll("tbody tr");
+    expect(rows).toHaveLength(4);
+    expect(rows[0].textContent).toContain("VIX");
+    expect(table.contains(screen.getByTestId("panic-index-skew"))).toBe(true);
+    expect(screen.queryByText("SOURCE UPDATED")).toBeNull();
   });
 
   it("switches the rank cell between decline, surge, and ---", () => {
@@ -268,6 +281,9 @@ describe("PanicIndexPanel — honesty + strip", () => {
     });
     renderPanel(hookState({ data: withOverlay }));
     expect(screen.getByTestId("panic-index-skew25d").textContent).toBe("1.12");
+    const overlayRow = screen.getByTestId("panic-index-skew25d").closest("tr")!;
+    expect(overlayRow.textContent).toMatch(/excluded/i);
+    expect(screen.getByTestId("panic-index-legs").querySelectorAll("tbody tr")).toHaveLength(5);
   });
 });
 

@@ -257,6 +257,13 @@ describe("IvRankPanel — summary strip", () => {
     expect(screen.getByText(/10\.5%\s*-\s*26\.3%/)).toBeTruthy();
   });
 
+  it("renders the headline rank and regime at full contrast when the band tone is muted", () => {
+    mockUseIvRank.mockReturnValue(hookState());
+    render(<IvRankPanel />);
+    expect(screen.getByTestId("ivrank-rank-value").getAttribute("style")).toContain("var(--text-primary)");
+    expect(screen.getByTestId("ivrank-regime-value").getAttribute("style")).toContain("var(--text-primary)");
+  });
+
   it("renders the UW cross-check sub-label when present", () => {
     mockUseIvRank.mockReturnValue(hookState());
     render(<IvRankPanel />);

@@ -137,7 +137,8 @@ export default function MaRatioPanel() {
   const state = ratio != null ? maRatioStateLabel(ratio) : null;
   const stateColor = state ? maRatioStateColor(state) : "var(--text-muted)";
   const turnUp = maRatioZoneTurnUp(series as MaRatioPoint[]);
-  const signalText = turnUp ? "TURN UP FROM ZONE" : isInSignalZone(ratio) ? "IN ZONE" : "---";
+  const hasSignal = turnUp || isInSignalZone(ratio);
+  const signalText = turnUp ? "TURN UP FROM ZONE" : hasSignal ? "IN ZONE" : "NO SIGNAL";
   const signalColor = turnUp ? "var(--positive)" : isInSignalZone(ratio) ? "var(--warning)" : "var(--text-muted)";
   const clock = formatClockTime(data.scan_time);
 
@@ -241,16 +242,25 @@ export default function MaRatioPanel() {
               value={<span data-testid="ma-ratio-pct200">{formatMaPct(current.pct_above_200)}</span>}
               sub={<>{current.count_above_200} OF {current.eligible_200} MEMBERS</>}
             />
-            <RegimeStripCell
-              testId="ma-ratio-strip-signal"
-              label="SIGNAL"
-              value={
-                <span data-testid="ma-ratio-signal" style={{ color: signalColor, whiteSpace: "nowrap" }}>
-                  {signalText}
-                </span>
-              }
-              sub={<>SPX {formatSpxClose(current.spx_close)}</>}
-            />
+            {hasSignal ? (
+              <RegimeStripCell
+                testId="ma-ratio-strip-signal"
+                label="SIGNAL"
+                value={
+                  <span data-testid="ma-ratio-signal" style={{ color: signalColor, whiteSpace: "nowrap" }}>
+                    {signalText}
+                  </span>
+                }
+                sub={<>SPX {formatSpxClose(current.spx_close)}</>}
+              />
+            ) : (
+              <RegimeStripCell
+                testId="ma-ratio-strip-spx"
+                label="SPX"
+                value={formatSpxClose(current.spx_close)}
+                sub={<span data-testid="ma-ratio-signal">{signalText}</span>}
+              />
+            )}
           </RegimeStrip>
         )}
 

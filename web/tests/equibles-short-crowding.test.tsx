@@ -270,9 +270,25 @@ describe("EquiblesShortCrowdingPanel", () => {
     );
   });
 
-  it("marks the IB borrow join as unresolved rather than faking a number", async () => {
+  it("marks the IB borrow join as unresolved once, not a column of dashes", async () => {
     await renderPanel({ data: payload() });
-    expect(screen.getByTestId("short-crowding-borrow-GME").textContent).toBe("---");
+    expect(screen.queryByTestId("short-crowding-borrow-GME")).toBeNull();
+    expect(screen.queryByText("Borrow Fee")).toBeNull();
+    expect(screen.getByTestId("short-crowding-footnote").textContent).toMatch(/not joined into this board/);
+  });
+
+  it("keeps the borrow column when any row has a resolved fee, with --- for the rest", async () => {
+    const data = payload();
+    data.entries[0] = entry({ borrow: { source: "ib-short-availability", resolved: true, fee_rate: 3.25 } as ShortCrowdingEntry["borrow"] });
+    await renderPanel({ data });
+    expect(screen.getByTestId("short-crowding-borrow-GME").textContent).toBe("3.3%");
+    expect(screen.getByTestId("short-crowding-borrow-AAPL").textContent).toBe("---");
+  });
+
+  it("renders gate readings as plain colored text, not bordered pills", async () => {
+    await renderPanel({ data: payload() });
+    const chip = screen.getByTestId("short-crowding-upside-GME");
+    expect(chip.getAttribute("style") ?? "").not.toContain("border");
   });
 
   it("renders --- for a ticker with no squeeze score", async () => {
