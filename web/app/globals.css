@@ -11076,6 +11076,20 @@ tr {
   }
 }
 
+/* Opt-in strip that fits its cells to one row: a panel with fewer than five
+   headline figures spans the row instead of leaving empty grid columns. */
+@media (min-width: 761px) {
+  .regime-strip.regime-strip--fit {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+  }
+
+  .regime-strip.regime-strip--fit > .regime-strip-cell:nth-child(n) {
+    grid-column: auto;
+  }
+}
+
 @media (max-width: 760px) {
   .regime-strip {
     grid-template-columns: 1fr;

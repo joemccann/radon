@@ -379,15 +379,23 @@ describe("MarginDebtPanel — freshness rail", () => {
     expect(rail.textContent).not.toContain("Next sample");
   });
 
-  it("keeps the LATEST MONTH and SOURCE UPDATED cells alongside the rail", () => {
+  it("carries one freshness line: month and release fold into the level cell, no timestamp tiles", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-26T10:00:00Z"));
-    renderPanel(hookState({ data: buildData() }));
+    renderPanel(hookState({ data: buildData(), lastSync: "2026-08-26T09:00:00Z" }));
     act(() => {
       vi.advanceTimersByTime(0);
     });
+    const level = screen.getByTestId("margin-debt-strip-level");
+    expect(level.contains(screen.getByTestId("margin-debt-strip-month"))).toBe(true);
+    expect(level.contains(screen.getByTestId("margin-debt-strip-source"))).toBe(true);
     expect(screen.getByTestId("margin-debt-strip-month").textContent).toContain("2026-05");
     expect(screen.getByTestId("margin-debt-strip-source").textContent).toContain("16 Jun 2026");
+    expect(level.parentElement!.querySelectorAll(".regime-strip-cell")).toHaveLength(2);
+    const header = document.querySelector(".section-header")!;
+    expect(header.textContent).not.toMatch(/\d{1,2}:\d{2}/);
+    expect(screen.queryByText("LATEST MONTH")).toBeNull();
+    expect(screen.queryByText("SOURCE UPDATED")).toBeNull();
   });
 
   it("passes a full YYYY-MM-DD current date through unchanged", () => {

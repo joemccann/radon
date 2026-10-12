@@ -64,6 +64,10 @@ function freshnessNote(settlementDate: string | null): string {
   return `${latest} Checked daily. Next refresh ${nextRefreshLabel(SHORT_CROWDING_REFRESH)}.`.trim();
 }
 
+function hasBorrowFee(entry: ShortCrowdingEntry): entry is ShortCrowdingEntry & { borrow: { fee_rate: number } } {
+  return !!entry.borrow?.resolved && entry.borrow.fee_rate != null;
+}
+
 function IntensityChip({
   testId,
   label,
@@ -80,9 +84,6 @@ function IntensityChip({
         fontFamily: "var(--font-mono)",
         fontSize: "var(--text-meta)",
         color: intensityColor(intensity),
-        border: `1px solid ${intensityColor(intensity)}`,
-        borderRadius: "4px",
-        padding: "1px 4px",
         whiteSpace: "nowrap",
       }}
     >
@@ -91,7 +92,7 @@ function IntensityChip({
   );
 }
 
-function ShortCrowdingTable({ entries }: { entries: ShortCrowdingEntry[] }) {
+function ShortCrowdingTable({ entries, showBorrow }: { entries: ShortCrowdingEntry[]; showBorrow: boolean }) {
   const { sorted, sort, toggle } = useSort(entries, crowdingExtract);
   return (
     <table className="data-table" data-testid="short-crowding-table">
@@ -105,19 +106,21 @@ function ShortCrowdingTable({ entries }: { entries: ShortCrowdingEntry[] }) {
           <SortTh<CrowdingSortKey> label="Short Interest %" sortKey="si" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
           <SortTh<CrowdingSortKey> label="Tier" sortKey="tier" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
           <SortTh<CrowdingSortKey> label="Readings" sortKey="readings" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<CrowdingSortKey> label="Borrow Fee" sortKey="borrow" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          {showBorrow && (
+            <SortTh<CrowdingSortKey> label="Borrow Fee" sortKey="borrow" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          )}
         </tr>
       </thead>
       <tbody>
         {sorted.map((entry) => (
-          <ScoreboardRow key={entry.ticker} entry={entry} />
+          <ScoreboardRow key={entry.ticker} entry={entry} showBorrow={showBorrow} />
         ))}
       </tbody>
     </table>
   );
 }
 
-function ScoreboardRow({ entry }: { entry: ShortCrowdingEntry }) {
+function ScoreboardRow({ entry, showBorrow }: { entry: ShortCrowdingEntry; showBorrow: boolean }) {
   const changeColor =
     entry.short_position_change_pct == null
       ? "var(--text-muted)"
@@ -160,11 +163,11 @@ function ScoreboardRow({ entry }: { entry: ShortCrowdingEntry }) {
           />
         </span>
       </td>
-      <td className="right" data-testid={`short-crowding-borrow-${entry.ticker}`}>
-        {entry.borrow?.resolved && entry.borrow.fee_rate != null
-          ? formatPercent(entry.borrow.fee_rate)
-          : "---"}
-      </td>
+      {showBorrow && (
+        <td className="right" data-testid={`short-crowding-borrow-${entry.ticker}`}>
+          {hasBorrowFee(entry) ? formatPercent(entry.borrow.fee_rate) : "---"}
+        </td>
+      )}
     </tr>
   );
 }
@@ -251,7 +254,7 @@ export default function EquiblesShortCrowdingPanel() {
 
       <div className="section">
         <div className="table-wrap">
-          <ShortCrowdingTable entries={entries} />
+          <ShortCrowdingTable entries={entries} showBorrow={entries.some(hasBorrowFee)} />
         </div>
 
         <div className="section-footnote" data-testid="short-crowding-footnote">
