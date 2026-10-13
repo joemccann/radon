@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import MobileAppBar from "./MobileAppBar";
 import MobileTabBar from "./MobileTabBar";
 import MobileMoreDrawer from "./MobileMoreDrawer";
@@ -24,7 +25,15 @@ type MobileShellProps = {
 export default function MobileShell({ title, isPageHeading, ibConnected, lastSync }: MobileShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
+  const closeSearch = useCallback(() => setSearchOpen(false), []);
+  const openSearch = useCallback(() => {
+    // Commit the input before this click returns so mobile Safari can focus it
+    // and present the keyboard within the user's opening gesture.
+    flushSync(() => setSearchOpen(true));
+    searchInputRef.current?.focus({ preventScroll: true });
+  }, []);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -40,7 +49,7 @@ export default function MobileShell({ title, isPageHeading, ibConnected, lastSyn
         title={title}
         isPageHeading={isPageHeading}
         ibConnected={ibConnected}
-        onOpenSearch={() => setSearchOpen(true)}
+        onOpenSearch={openSearch}
         onOpenMore={() => setDrawerOpen(true)}
       />
       <MobileTabBar onOpenMore={() => setDrawerOpen(true)} />
@@ -51,8 +60,9 @@ export default function MobileShell({ title, isPageHeading, ibConnected, lastSyn
         lastSync={lastSync}
       />
       <MobileTickerSearch
+        ref={searchInputRef}
         open={searchOpen}
-        onClose={() => setSearchOpen(false)}
+        onClose={closeSearch}
       />
     </div>
   );
