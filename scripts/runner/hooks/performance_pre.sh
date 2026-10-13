@@ -10,6 +10,8 @@
 #    $LOOP_STATE/prod-probe.json, where the prompt tells the agent to read it.
 #    The key's authorized_keys line pins the command, so whatever this side
 #    sends, the host runs the probe and nothing else (docs/runner.md 8c).
+# 3. Prunes superseded comments from the rolling dead-man issue once any
+#    prior PR has merged, keeping the latest durable checkpoint.
 #
 # Production being unreachable never refuses the phase: the agent still has
 # the local surfaces, and the probe file records why the snapshot is missing.
@@ -50,6 +52,21 @@ if [[ ! "$green" =~ ^[0-9a-f]{40}$ ]] || ! hostgit rev-parse --verify --quiet "$
 fi
 hostgit checkout -f --quiet --detach "$green" || refuse "could not check out the green base"
 echo "base=$green"
+
+prune_deadman() {
+  [[ "${RADON_WEEKEND_SKIP_ISSUE_PRUNE:-0}" == 1 ]] && return 0
+  local pruner="$RUNNER_DIR/lib/nightly_issue_prune.py"
+  [[ -f "$pruner" ]] || pruner="$WORK/scripts/nightly_issue_prune.py"
+  [[ -f "$pruner" ]] || return 0
+  local issue
+  issue="$(bounded 30 "$GH" issue list -R "$GH_REPO" --label performance-nightly --state open \
+    --json number -q '.[0].number' 2>/dev/null || true)"
+  [[ -n "$issue" ]] || return 0
+  bounded 30 "$PY" -I "$pruner" --gh-bin "$GH" --issue "$issue" \
+    --branch-prefix "performance/" >/dev/null 2>&1 || true
+}
+
+prune_deadman
 
 probe_error() {
   "$PY" -I -c 'import json,sys,time; json.dump({"error": sys.argv[1], "taken_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, open(sys.argv[2], "w"))' \
