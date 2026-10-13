@@ -500,3 +500,40 @@ def test_compact_chart_header_and_wrapped_sources_and_notes_stay_inside(tmp_path
     assert fig["bbox"][1] > (H - 740) / H
     assert fig["bbox"][3] >= (H - 330) / H
     assert fig["bbox"][3] < (H - 310) / H
+
+
+def test_compound_clip_keeps_every_visible_subpath(tmp_path):
+    path = tmp_path / "compound-clip.pdf"
+    # These two disjoint rectangles are one compound clip. Intersecting their
+    # separate envelopes would wrongly erase both visible halves of the plot.
+    path.write_bytes(_pdf("q 72 400 180 280 re 360 400 180 280 re W n\n"
+                          + chart(72, 400, 540, 680) + "Q\n"))
+    fig = figures.detect(path, 1)[0]
+    assert fig["bbox"][0] <= 72 / W
+    assert fig["bbox"][2] >= 540 / W
+
+
+@pytest.mark.parametrize("invalid_point", [True, False])
+def test_unusable_clip_metadata_falls_back_to_conservative_bounds(monkeypatch, invalid_point):
+    raw = figures.pdfium_c
+    monkeypatch.setattr(raw, "FPDFPageObj_GetClipPath", lambda obj: object())
+    monkeypatch.setattr(raw, "FPDFClipPath_CountPaths", lambda clip: 1)
+    monkeypatch.setattr(raw, "FPDFClipPath_CountPathSegments", lambda clip, index: 1)
+    monkeypatch.setattr(raw, "FPDFClipPath_GetPathSegment", lambda *args: object())
+
+    def point(segment, x, y):
+        x.value, y.value = float("nan"), 0
+        return invalid_point
+
+    monkeypatch.setattr(raw, "FPDFPathSegment_GetPoint", point)
+    assert figures._clip_bounds(object()) is None
+
+
+def test_clipped_form_geometry_precedes_page_rotation(tmp_path):
+    content = "q 40 40 300 120 re W n\n" + chart(0, 0, 500, 250) + "Q\n"
+    path = tmp_path / "rotated-clip.pdf"
+    matrices = [(0.8, 0, 0, 1.1, 100, 350)]
+    path.write_bytes(_form_pdf(content, matrices))
+    expected = figures._to_displayed(figures.detect(path, 1)[0]["bbox"], 90)
+    path.write_bytes(_form_pdf(content, matrices, extras="/Rotate 90"))
+    assert figures.detect(path, 1)[0]["bbox"] == pytest.approx(expected, abs=0.0001)

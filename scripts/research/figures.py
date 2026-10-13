@@ -20,6 +20,7 @@ import hashlib
 import math
 import re
 import shutil
+from ctypes import c_float
 from pathlib import Path
 
 import pypdfium2 as pdfium
@@ -120,7 +121,7 @@ def _cluster(items, gap):
 
 
 def _lines(textpage, frame):
-    """Text rectangles as normalized boxes with their text, top to bottom."""
+    """Physical text lines, joining adjacent PDFium fragments on one baseline."""
     lines = []
     for index in range(min(textpage.count_rects(), 600)):
         left, bottom, right, top = textpage.get_rect(index)
@@ -129,7 +130,18 @@ def _lines(textpage, frame):
         value = textpage.get_text_bounded(left, bottom, right, top).strip()
         if value:
             lines.append((_norm((left, bottom, right, top), frame), value))
-    return sorted(lines, key=lambda item: item[0][1])
+    rows = []
+    for box, value in sorted(lines, key=lambda item: (item[0][1], item[0][0])):
+        for index, (other, text) in enumerate(rows):
+            overlap = min(box[3], other[3]) - max(box[1], other[1])
+            height = min(box[3] - box[1], other[3] - other[1])
+            if overlap >= height * 0.3 and _gap(box, other) <= GAP:
+                parts = [(other[0], text), (box[0], value)]
+                rows[index] = (_union(other, box), ' '.join(t for _, t in sorted(parts)))
+                break
+        else:
+            rows.append((box, value))
+    return sorted(rows, key=lambda item: item[0][1])
 
 
 def _grow_text(box, lines, reach):
@@ -148,15 +160,46 @@ def _grow_text(box, lines, reach):
 
 def _attach(box, lines, reach):
     """Nearest text line just above (title) and nearest Source line just below."""
+    # Chart-local rows join subtitle/source fragments even when typesetting
+    # leaves a large gap between them. Do not join neighboring columns.
+    rows = []
+    for lb, value in lines:
+        if lb[2] <= box[0] or lb[0] >= box[2]:
+            continue
+        for index, (other, parts) in enumerate(rows):
+            overlap = min(lb[3], other[3]) - max(lb[1], other[1])
+            if overlap >= min(lb[3] - lb[1], other[3] - other[1]) * 0.3:
+                rows[index] = (_union(other, lb), parts + [(lb[0], value)])
+                break
+        else:
+            rows.append((lb, [(lb[0], value)]))
+    lines = sorted([(lb, ' '.join(value for _, value in sorted(parts))) for lb, parts in rows],
+                   key=lambda item: item[0][1])
     title = source = None
     above = [(box[1] - lb[3], lb, value) for lb, value in lines if lb[3] <= box[1] + 0.002 and box[1] - lb[3] <= reach
              and lb[2] > box[0] and lb[0] < box[2] and not SOURCE_RE.match(value)]
     if above:
         title = min(above, key=lambda item: item[0])
+        # A title/subtitle block has compact line spacing. Stop at the blank
+        # paragraph gutter, rather than treating the preceding prose as a title.
+        for lb, value in reversed(lines):
+            if (lb[3] <= title[1][1] and title[1][1] - lb[3] <= GAP
+                    and lb[2] > box[0] and lb[0] < box[2] and not SOURCE_RE.match(value)):
+                title = (title[0], _union(title[1], lb), value + '\n' + title[2])
     below = [(lb[1] - box[3], lb, value) for lb, value in lines if lb[1] >= box[3] - 0.002 and lb[1] - box[3] <= reach
              and lb[2] > box[0] and lb[0] < box[2] and SOURCE_RE.match(value)]
     if below:
         source = min(below, key=lambda item: item[0])
+        # Sources and notes can wrap over several lines. Continue only across
+        # compact, similarly sized lines, so the next body paragraph stays out.
+        last = source[1]
+        for lb, _value in lines:
+            height = lb[3] - lb[1]
+            if (lb[1] >= last[1] and lb[1] - last[3] <= GAP
+                    and height <= (last[3] - last[1]) * 1.4
+                    and lb[2] > box[0] and lb[0] < box[2]):
+                source = (source[0], _union(source[1], lb), source[2])
+                last = lb
     return title, source
 
 
@@ -168,7 +211,49 @@ def _kind(count, images):
     return 'mixed'
 
 
-def _drawn_bounds(page, form=None, parent_matrix=None, depth=0):
+def _clip_bounds(obj):
+    """Conservative envelope of the object's clip, in its containing frame.
+
+    Path bounds include invisible series points outside the plot viewport.
+    Clip segments (including Bezier control points) bound the visible region;
+    union all subpaths rather than incorrectly intersecting compound shapes.
+    Like get_bounds(), PDFium has already applied the object's own matrix.
+    """
+    clip = pdfium_c.FPDFPageObj_GetClipPath(obj)
+    points = []
+    for index in range(max(0, pdfium_c.FPDFClipPath_CountPaths(clip))):
+        count = pdfium_c.FPDFClipPath_CountPathSegments(clip, index)
+        if count < 0:
+            return None
+        for segment_index in range(count):
+            segment = pdfium_c.FPDFClipPath_GetPathSegment(clip, index, segment_index)
+            x, y = c_float(), c_float()
+            if not segment or not pdfium_c.FPDFPathSegment_GetPoint(segment, x, y):
+                return None
+            if not math.isfinite(x.value) or not math.isfinite(y.value):
+                return None
+            points.append((x.value, y.value))
+    if not points:
+        return None
+    return (min(p[0] for p in points), min(p[1] for p in points),
+            max(p[0] for p in points), max(p[1] for p in points))
+
+
+def _intersection(a, b):
+    if b is None:
+        return a
+    return (max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3]))
+
+
+def _transformed_bounds(bounds, matrix):
+    left, bottom, right, top = bounds
+    points = [matrix.on_point(x, y) for x, y in
+              ((left, bottom), (left, top), (right, bottom), (right, top))]
+    return (min(p[0] for p in points), min(p[1] for p in points),
+            max(p[0] for p in points), max(p[1] for p in points))
+
+
+def _drawn_bounds(page, form=None, parent_matrix=None, depth=0, ancestor_clip=None):
     """Yield drawn bounds in page coordinates, composing ancestor Form matrices.
 
     PDFium reports a child's bounds in its containing Form's coordinate frame.
@@ -177,21 +262,25 @@ def _drawn_bounds(page, form=None, parent_matrix=None, depth=0):
     """
     matrix = parent_matrix or pdfium.PdfMatrix()
     for obj in page.get_objects(max_depth=1, form=form):
+        clip = _clip_bounds(obj)
+        page_clip = _transformed_bounds(clip, matrix) if clip is not None else None
+        if ancestor_clip is not None:
+            page_clip = _intersection(page_clip, ancestor_clip) if page_clip is not None else ancestor_clip
         if obj.type == pdfium_c.FPDF_PAGEOBJ_FORM:
             if depth < 7:
-                yield from _drawn_bounds(page, obj, obj.get_matrix().multiply(matrix), depth + 1)
+                yield from _drawn_bounds(page, obj, obj.get_matrix().multiply(matrix), depth + 1, page_clip)
             continue
         if obj.type not in DRAWN:
             continue
         try:
-            left, bottom, right, top = obj.get_bounds()
-            points = [matrix.on_point(x, y) for x, y in
-                      ((left, bottom), (left, top), (right, bottom), (right, top))]
+            bounds = _intersection(obj.get_bounds(), clip)
+            if bounds[2] <= bounds[0] or bounds[3] <= bounds[1]:
+                continue
+            bounds = _intersection(_transformed_bounds(bounds, matrix), page_clip)
         except pdfium.PdfiumError:
             continue
-        bounds = (min(p[0] for p in points), min(p[1] for p in points),
-                  max(p[0] for p in points), max(p[1] for p in points))
-        if all(math.isfinite(v) for v in bounds):
+        if (all(math.isfinite(v) for v in bounds)
+                and bounds[2] > bounds[0] and bounds[3] > bounds[1]):
             yield bounds, obj.type == pdfium_c.FPDF_PAGEOBJ_IMAGE
 
 
