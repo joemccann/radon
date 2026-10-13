@@ -1,3 +1,14 @@
+# Task: Two-second market-hours portfolio/orders polling (2026-10-13)
+
+- [x] T1 depends_on: [] Inspect current hooks, market state, callers, rate limits and regression coverage.
+- [x] T2 depends_on: [T1] Add configurable healthy polling intervals; use 2 seconds for OPEN and existing 30 seconds otherwise; preserve inactive/hidden and failure/rate-limit guards.
+- [x] T3 depends_on: [T1] Add fake-timer and mocked browser coverage for cadence and market-state transitions.
+- [ ] T4 depends_on: [T2, T3] Repair startup-hook and browser-curation contracts from CI; create PR, verify exact-head GitHub CI and browser evidence, notify once green.
+
+Dependency graph: T1 -> T2, T3; T2 + T3 -> T4.
+
+Review: WorkspaceShell uses existing OPEN state for a 2-second healthy snapshot cadence. Extended cadence remains 30 seconds; closed portfolio polling remains paused and orders page remains 30 seconds. Deduplication, pending-sync10 seconds and original failure/rate-limit floors retained. Added 22 fake-timer hook regressions and 4 mocked browser cases with screenshots. No local suites. CI38426522529 passed all three browser shards and the new hook cases, and identified startup-spy options and held-out browser curation expectations; align the spy and curate the modified existing spec. Final exact-head CI pending.
+
 # Task: AI Industry implementation and verification (2026-10-10)
 
 - [x] T1 depends_on: [] Backend refinements in scripts/llm_token_index.py and scripts/ai_cycle (P1 SLA, H2 statement tags, C1 ask cohort).

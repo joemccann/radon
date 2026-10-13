@@ -36,13 +36,14 @@ type UsePortfolioReturn = {
 type UsePortfolioOptions = {
   initialSnapshot?: PortfolioSnapshotSeed;
   includeEntryDates?: boolean;
+  pollIntervalMs?: number;
 };
 
 export function usePortfolio(
   active: boolean = true,
   options: UsePortfolioOptions = {},
 ): UsePortfolioReturn {
-  const { initialSnapshot, includeEntryDates = false } = options;
+  const { initialSnapshot, includeEntryDates = false, pollIntervalMs = POLL_INTERVAL_MS } = options;
   const endpoint = includeEntryDates
     ? "/api/portfolio?include=entry-dates"
     : "/api/portfolio";
@@ -63,6 +64,8 @@ export function usePortfolio(
   const currentEndpointRef = useRef(endpoint);
   const lastReadAtRef = useRef(0);
   const rateLimitedUntilRef = useRef(0);
+  const failureRetryUntilRef = useRef(0);
+  const pollIntervalRef = useRef(pollIntervalMs);
   const hasDataRef = useRef(initialSnapshot !== undefined);
   const initialLoadStartedRef = useRef(initialSnapshot !== undefined);
   const previousActiveRef = useRef(active);
@@ -72,6 +75,7 @@ export function usePortfolio(
   const lastRouteKeyRef = useRef(routeKey);
   const lastEndpointRef = useRef(endpoint);
   activeRef.current = active;
+  pollIntervalRef.current = pollIntervalMs;
   currentEndpointRef.current = endpoint;
 
   const fetchPortfolio = useCallback(async (): Promise<number | null> => {
@@ -98,14 +102,15 @@ export function usePortfolio(
         || endpoint !== currentEndpointRef.current
       ) return retryDelayMs;
       if (res.status === 429) {
+        retryDelayMs = POLL_INTERVAL_MS;
         const retryAfterSeconds = Number(res.headers.get("Retry-After"));
         if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
           retryDelayMs = Math.min(
             MAX_RATE_LIMIT_BACKOFF_MS,
             Math.max(POLL_INTERVAL_MS, Math.ceil(retryAfterSeconds * 1_000)),
           );
-          rateLimitedUntilRef.current = Date.now() + retryDelayMs;
         }
+        rateLimitedUntilRef.current = Date.now() + retryDelayMs;
         // A limited cached read is not degradation while a snapshot is on
         // screen; only a cold tab with nothing to show reports it.
         if (hasDataRef.current) return retryDelayMs;
@@ -122,6 +127,7 @@ export function usePortfolio(
         || generation !== dataGenerationRef.current
       ) return retryDelayMs;
       hasDataRef.current = true;
+      failureRetryUntilRef.current = 0;
       setData(json);
       setLastSync(json.last_sync);
       const warning = res.headers.get("X-Sync-Warning");
@@ -142,6 +148,8 @@ export function usePortfolio(
         && isCurrentRead
         && generation === dataGenerationRef.current
       ) {
+        retryDelayMs = retryDelayMs ?? POLL_INTERVAL_MS;
+        failureRetryUntilRef.current = Date.now() + retryDelayMs;
         setError(err instanceof Error ? err.message : "Unknown error");
       }
     } finally {
@@ -159,16 +167,21 @@ export function usePortfolio(
   const scheduleNext = useCallback((delay: number) => {
     if (!mountedRef.current || !activeRef.current) return;
     if (timerRef.current) clearTimeout(timerRef.current);
-    const rateLimitDelay = Math.max(0, rateLimitedUntilRef.current - Date.now());
+    // Interval changes must not shorten an outstanding retry deadline.
+    const retryDelay = Math.max(
+      0,
+      rateLimitedUntilRef.current - Date.now(),
+      failureRetryUntilRef.current - Date.now(),
+    );
     timerRef.current = setTimeout(() => {
       void pollCachedRef.current();
-    }, Math.max(delay, rateLimitDelay));
+    }, Math.max(delay, retryDelay));
   }, []);
 
   const pollCached = useCallback(async () => {
     const retryDelayMs = await fetchPortfolio();
     if (mountedRef.current && activeRef.current) {
-      scheduleNext(retryDelayMs ?? POLL_INTERVAL_MS);
+      scheduleNext(retryDelayMs ?? pollIntervalRef.current);
     }
   }, [fetchPortfolio, scheduleNext]);
   pollCachedRef.current = pollCached;
@@ -280,8 +293,8 @@ export function usePortfolio(
     }
     if (active) {
       const freshReadInFlight = readingEndpointRef.current !== null;
-      const recentlyRead = Date.now() - lastReadAtRef.current < POLL_INTERVAL_MS;
-      scheduleNext(becameActive && !freshReadInFlight && !recentlyRead ? 500 : POLL_INTERVAL_MS);
+      const recentlyRead = Date.now() - lastReadAtRef.current < pollIntervalMs;
+      scheduleNext(becameActive && !freshReadInFlight && !recentlyRead ? 500 : pollIntervalMs);
     }
 
     return () => {
@@ -290,18 +303,18 @@ export function usePortfolio(
         timerRef.current = null;
       }
     };
-  }, [active, scheduleNext]);
+  }, [active, pollIntervalMs, scheduleNext]);
 
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
-      if (Date.now() - lastReadAtRef.current < POLL_INTERVAL_MS) return;
+      if (Date.now() - lastReadAtRef.current < pollIntervalMs) return;
       if (active) scheduleNext(500);
       else void fetchPortfolio();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [scheduleNext, active, fetchPortfolio]);
+  }, [scheduleNext, active, fetchPortfolio, pollIntervalMs]);
 
   return { data, loading, syncing, error, lastSync, syncNow };
 }
