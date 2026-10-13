@@ -53,6 +53,8 @@ for (const width of [320, 393]) {
     await expect(input).toBeFocused();
     await expect(overlay).toBeVisible();
     expect(await input.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(16);
+    await input.evaluate((el) => (el as HTMLInputElement).blur());
+    await expect(input).not.toBeFocused();
     await input.tap();
     await expect(input).toBeFocused();
     // Keyboard input, unlike locator.fill(), does not focus the input for us.
@@ -63,8 +65,14 @@ for (const width of [320, 393]) {
       end: (el as HTMLInputElement).selectionEnd,
     }))).toEqual({ start: 2, end: 2 });
     await expect(overlay.getByRole("option")).toContainText("AAPL");
+    // Synthetic Clear fixtures can emit unrelated provider/recovery toasts;
+    // dismiss them so the visual artifact shows the input and result row.
+    const dismiss = page.getByRole("button", { name: "Dismiss", exact: true });
+    for (let i = 0; i < 5 && await dismiss.count(); i++) await dismiss.first().tap();
+    await expect(dismiss).toHaveCount(0);
     await input.tap();
     await expect(input).toBeFocused();
+    await expect(overlay.getByRole("option")).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath(`mobile-search-focus-${width}.png`), animations: "disabled" });
     await overlay.getByRole("option").tap();
     await expect(page).toHaveURL(/\/AAPL$/);
