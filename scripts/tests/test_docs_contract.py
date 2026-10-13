@@ -2073,3 +2073,23 @@ class TestDocumentation20261012:
         job = ci[start:start + 900]
         assert "!cancelled()" in job
         assert "needs.deploy.result == 'success'" in job
+
+
+class TestDocumentation20261013:
+    """DOC-191..194: contracts that drifted after audited-through 66719c09."""
+
+    def test_unreadable_admin_journal_stays_http_200(self):
+        source = (_ROOT / "scripts/api/service_logs.py").read_text()
+        assert "available=False" in source
+        assert "never a 500" in source
+        route = (_ROOT / "scripts/api/server.py").read_text()
+        assert "An unreadable journal is 200" in route
+        logs = _section(
+            (_ROOT / "docs/operations.md").read_text(),
+            "Host control socket (`radon-control.service`)",
+        )
+        bullet = next(line for line in logs.splitlines() if line.startswith("- **Logs"))
+        assert "neither returns 200" not in bullet
+        assert "still 200" in bullet
+        assert "available: false" in bullet
+        assert "malformed query is 400" in bullet
