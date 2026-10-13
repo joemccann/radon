@@ -76,6 +76,17 @@ describe("complex combo per-leg P&L", () => {
     expect(pos.legs.map(leg=>resolveLegPnl(pos,leg,quotes).todayPnl)).toEqual([500,-50]);
     expect(getTodayPnlDollars(pos,quotes)).toBe(450);
   });
+  it("normalizes a signed short snapshot mark before applying direction once", () => {
+    const pos=position(), quotes=prices();
+    pos.legs[1].market_price=-17.72; pos.legs[1].market_value=-99999;
+    quotes.SNDK_20261023_1600_C={...quotes.SNDK_20261023_1600_C,last:null,bid:null,ask:null,close:20};
+    const leg=resolveLegPnl(pos,pos.legs[1],quotes);
+    expect(leg.marketValue).toBe(-17720);
+    expect(leg.pnl).toBe(-4704);
+    expect(leg.todayPnl).toBe(2280);
+    expect(resolveRealtimeMarketValue(pos,quotes)).toBe(28780);
+    expect(getPnlDollars(pos,resolveRealtimeMarketValue(pos,quotes))).toBe(13505);
+  });
   it("accepts an explicit contract multiplier without multiplying avg_cost again", () => {
     const pos=position();
     const leg={...pos.legs[0],contracts:2,multiplier:10,market_price:65,market_value:1300,entry_cost:1000,avg_cost:500};

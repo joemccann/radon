@@ -682,6 +682,9 @@ function computeRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData>)
   for (const leg of pos.legs) {
     // Preserve the legacy zero-contract fallback when there are no holdings.
     if (!Number.isFinite(leg.contracts) || leg.contracts <= 0) continue;
+    // Single-leg snapshots keep the published position value authoritative
+    // when no mark resolves. Hybrid per-leg snapshot fallback is combo-only.
+    if (pos.legs.length === 1 && resolvedLegMark(pos, leg, prices) == null) return null;
     const marketValue = resolveLegPnl(pos, leg, prices).marketValue;
     if (marketValue == null) return null;
     rtMv += marketValue;
@@ -800,7 +803,9 @@ function resolvedLegMark(
     : leg.type === "Stock"
       ? prices?.[pos.ticker] ?? prices?.[pos.ticker.toUpperCase()] ?? null
       : null;
-  return resolveRealtimePrice(lp, leg.market_price, Boolean(leg.market_price_is_calculated)).price;
+  const fallbackMark = leg.market_price != null && Number.isFinite(leg.market_price)
+    ? Math.abs(leg.market_price) : null;
+  return resolveRealtimePrice(lp, fallbackMark, Boolean(leg.market_price_is_calculated)).price;
 }
 
 function resolvedLegPreviousCloseValue(
