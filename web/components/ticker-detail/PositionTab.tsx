@@ -18,9 +18,9 @@ import {
   resolveRealtimePrice,
   resolveSpreadPriceData,
   getPnlDollars,
-  getPnlPct,
-  resolveReturnCapital,
-  describeReturnCapital,
+  getDisplayReturnPct,
+  resolveDisplayReturnBasis,
+  describeDisplayReturnBasis,
 } from "@/lib/positionUtils";
 import { fmtSignedPrice, fmtUsd, toneClass } from "@/lib/format";
 import PositionTradeTicket from "./PositionTradeTicket";
@@ -316,8 +316,8 @@ function PositionView({
   const markUnits = isCombo ? heldComboUnits(position) : position.contracts;
   const lastPrice = rtData?.lastPrice ?? (mv != null && markUnits > 0 ? mv / (markUnits * getMultiplier(position)) : null);
   const pnl = getPnlDollars(position, mv);
-  const pnlPct = getPnlPct(position, mv);
-  const returnTitle = describeReturnCapital(resolveReturnCapital(position));
+  const pnlPct = getDisplayReturnPct(position, mv);
+  const returnTitle = describeDisplayReturnBasis(resolveDisplayReturnBasis(position));
   const lastPriceLabel = !isStock && position.legs.length > 1 ? "Mark Price" : "Last Price";
 
   return (

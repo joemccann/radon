@@ -14,9 +14,9 @@ import {
   getAvgEntry,
   getInitialValue,
   getPnlDollars,
-  getPnlPct,
-  resolveReturnCapital,
-  describeReturnCapital,
+  getDisplayReturnPct,
+  resolveDisplayReturnBasis,
+  describeDisplayReturnBasis,
   getMultiplier,
   getLegMultiplier,
   resolveLegPnl,
@@ -129,8 +129,8 @@ function PositionCard({ pos, prices, showExpiry, riskFreeRate, onLegClick }: { p
   // helper as the desktop Initial Value column.
   const displayEc = getInitialValue(pos);
   const pnl = getPnlDollars(pos, mv);
-  const pnlPct = getPnlPct(pos, mv);
-  const returnTitle = describeReturnCapital(resolveReturnCapital(pos));
+  const pnlPct = getDisplayReturnPct(pos, mv);
+  const returnTitle = describeDisplayReturnBasis(resolveDisplayReturnBasis(pos));
   const todayPnl = getTodayPnlDollars(pos, prices);
   // Stocks AND options: same helpers as the desktop Day Chg column.
   const dailyChg = isStock ? getStockDailyChg(pos, prices) : getOptionDailyChg(pos, prices);
@@ -388,13 +388,8 @@ function LegItem({ leg, pnlValues, prices, ticker, expiry, showImplied, riskFree
     >
       <div className="mobile-card__leg-head">
         <span className="mobile-card__leg-desc">{description}</span>
-        <div className="mobile-card__leg-pnl" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, color: toneColor(tone) }}>
+        <div className="mobile-card__leg-pnl" style={{ color: toneColor(tone) }}>
           <span data-testid="position-leg-pnl" aria-label="Total P&L">{fmtPnl(legPnl)}</span>
-          <span style={{ display: "block", fontSize: 12 }}>
-          <span data-testid="position-leg-pnl-pct" aria-label="P&L % of entry value" title="P&L % of entry value">
-            {legPnlPct != null ? `${legPnlPct >= 0 ? "+" : "-"}${Math.abs(legPnlPct).toFixed(1)}%` : "—"}
-          </span> of entry
-          </span>
         </div>
       </div>
       <div className="mobile-card__leg-grid">
@@ -418,6 +413,12 @@ function LegItem({ leg, pnlValues, prices, ticker, expiry, showImplied, riskFree
         <span className="mobile-card__leg-cell" title={pnlValues.todayBasis === "entry" ? "Today P&L from this leg's entry basis" : pnlValues.todayBasis === "previous-close" ? "Today P&L from this leg's previous close" : "Today P&L requires this leg's mark and baseline"}>
           <span className="mobile-card__leg-cell-k">Today P&L</span>
           <span data-testid="position-leg-today-pnl" className="mobile-card__leg-cell-v" style={{ color: toneColor(toneFor(legTodayPnl)) }}>{fmtPnl(legTodayPnl)}</span>
+        </span>
+        <span data-testid="position-leg-return-cell" className="mobile-card__leg-cell" title="P&L % of entry value">
+          <span className="mobile-card__leg-cell-k">Return %</span>
+          <span data-testid="position-leg-pnl-pct" className="mobile-card__leg-cell-v" aria-label="P&L % of entry value" title="P&L % of entry value" style={{ color: toneColor(toneFor(legPnlPct)) }}>
+            {legPnlPct != null ? `${legPnlPct >= 0 ? "+" : "-"}${Math.abs(legPnlPct).toFixed(1)}%` : "—"}
+          </span>
         </span>
         {/* Signed like the desktop LegRow: a short leg's MV and Initial Value
             are credits and must reconcile to the signed header (R-244). */}

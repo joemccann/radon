@@ -1,16 +1,12 @@
 import { describe, expect, it } from "vitest";
 import * as positionUtils from "@/lib/positionUtils";
+import { getDisplayReturnPct, resolveDisplayReturnBasis, describeDisplayReturnBasis } from "@/lib/positionUtils";
 import type { PortfolioPosition } from "@/lib/types";
 
-// Namespace lookup keeps the tests-first baseline type-checkable while CI
-// proves the display API is absent. Replace with direct imports in the fix.
-const display = positionUtils as unknown as {
-  getDisplayReturnPct: (pos: PortfolioPosition, mv?: number | null) => number | null;
-  resolveDisplayReturnBasis: (pos: PortfolioPosition) => {
-    amount: number;
-    kind: string;
-  } | null;
-  describeDisplayReturnBasis: (basis: unknown) => string;
+const display = {
+  getDisplayReturnPct,
+  resolveDisplayReturnBasis,
+  describeDisplayReturnBasis,
 };
 
 function sndk(): PortfolioPosition {

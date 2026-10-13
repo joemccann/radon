@@ -79,7 +79,7 @@ for (const width of [1440, 393]) {
     } else {
       const card = page.getByTestId("mobile-position-SNDK");
       await expect(card.getByTestId("mobile-position-pnl")).toHaveText("+$10,575");
-      await expect(card).toContainText("+69.2%");
+      await expect(card).toContainText("+69.23%");
       await expect(card.getByTestId("mobile-position-today")).toContainText("+$5,850");
       await card.getByRole("button", { name: "SNDK Combo (3 legs)", exact: true }).click();
       await expect(card.getByTestId("position-leg-pnl")).toHaveText(["+$10,384", "-$4,534", "+$4,725"]);
