@@ -145,7 +145,7 @@ describe("position return surfaces use the shared basis", () => {
     expect(screen.getByText(/\+\$10,575 \(69\.2%\)/).getAttribute("title")).toContain("net entry debit");
     detail.unmount();
     render(<PnlBreakdownModal open title="Unrealized P&L" formula="Market value - entry cost" col1Header="Entry Cost" col2Header="Mkt Value" pctHeader="Return %" rows={rows} total={10575} onClose={() => undefined} />);
-    expect(screen.getByText("+69.23%").getAttribute("title")).toContain("net entry debit");
+    expect(screen.getByText("+69.2%").getAttribute("title")).toContain("net entry debit");
   });
 
   it("keeps the breakdown helper in parity with positionUtils", () => {

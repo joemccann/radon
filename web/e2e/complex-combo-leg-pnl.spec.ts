@@ -18,6 +18,11 @@ async function installFixtures(page: Page, sameDay = false, missingClose = false
     return [key, { ...quote, symbol: key, last: leg.market_price, bid: null, ask: null, close: missingClose && i === 2 ? null : [60, 20, 40][i] }];
   })) };
   await page.addInitScript((updates) => {
+    localStorage.setItem("radon:columns:positions-undefined", JSON.stringify({
+      structure: false, qty: true, direction: false, avg_entry: true, last_price: true,
+      implied: false, implied_market_value: false, daily_chg: false, today_pnl: true,
+      market_value: false, entry_cost: false, initial_value: true, pnl: true, pnl_pct: true, expiry: true,
+    }));
     class MockRelay {
       readyState = 0;
       onopen: ((e?: unknown) => void) | null = null;
