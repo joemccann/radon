@@ -26,7 +26,10 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 import ib_sync  # noqa: E402
 
-TODAY_ET = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+# One simulated session for both fixture fills and expected dates. A live
+# collection-time date can diverge from fill construction across ET midnight.
+SESSION_TIME_ET = datetime(2026, 8, 27, 11, tzinfo=ZoneInfo("America/New_York"))
+TODAY_ET = SESSION_TIME_ET.strftime("%Y-%m-%d")
 
 
 def _position(*, position=25, avg_cost=555.0, strike=575.0, right="C", expiry="20260828"):
@@ -56,7 +59,7 @@ def _fill(*, side, shares, price=5.55, when=None, strike=575.0, expiry="20260828
         shares=shares,
         avgPrice=price,
         price=price,
-        time=when or datetime.now(ZoneInfo("America/New_York")).replace(hour=11, minute=0, second=0, microsecond=0),
+        time=when or SESSION_TIME_ET,
     )
     return SimpleNamespace(contract=contract, execution=execution)
 
