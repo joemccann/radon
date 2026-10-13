@@ -511,6 +511,17 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
                 data-ticker-item
                 role="option"
                 aria-selected={i === activeIndex}
+                onPointerDown={(e) => {
+                  if (e.pointerType !== "touch" && e.pointerType !== "pen") return;
+                  e.preventDefault(); // retain focus and suppress compatibility mouse events
+                }}
+                onPointerUp={(e) => {
+                  if (e.pointerType !== "touch" && e.pointerType !== "pen") return;
+                  // A pan produces pointercancel instead of pointerup, so a
+                  // scroll gesture must not select the result it started on.
+                  e.preventDefault();
+                  handleSelect(r.symbol);
+                }}
                 onMouseDown={(e) => {
                   e.preventDefault(); // prevent input blur
                   handleSelect(r.symbol);
@@ -598,6 +609,8 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
                 {/* Watchlist star — stop propagation so starring doesn't
                     select the row / navigate to the ticker. */}
                 <span
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onPointerUp={(e) => e.stopPropagation()}
                   onMouseDown={(e) => {
                     e.preventDefault();
                     e.stopPropagation();

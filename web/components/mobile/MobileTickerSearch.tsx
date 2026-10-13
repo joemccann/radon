@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import TickerSearch from "@/components/TickerSearch";
@@ -15,8 +15,10 @@ type MobileTickerSearchProps = {
  * input + dropdown so the WS streaming search results carry over from desktop.
  * On select, navigates to the ticker detail page and closes the overlay.
  */
-export default function MobileTickerSearch({ open, onClose }: MobileTickerSearchProps) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
+const MobileTickerSearch = forwardRef<HTMLInputElement, MobileTickerSearchProps>(function MobileTickerSearch(
+  { open, onClose },
+  inputRef,
+) {
   const router = useRouter();
 
   useEffect(() => {
@@ -27,12 +29,9 @@ export default function MobileTickerSearch({ open, onClose }: MobileTickerSearch
     window.addEventListener("keydown", handleKey);
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    // Focus the input shortly after mount so the keyboard pops up on iOS.
-    const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 80);
     return () => {
       window.removeEventListener("keydown", handleKey);
       document.body.style.overflow = previousOverflow;
-      window.clearTimeout(focusTimer);
     };
   }, [open, onClose]);
 
@@ -64,4 +63,6 @@ export default function MobileTickerSearch({ open, onClose }: MobileTickerSearch
       </div>
     </div>
   );
-}
+});
+
+export default MobileTickerSearch;

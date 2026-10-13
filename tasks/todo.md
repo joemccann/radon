@@ -9413,6 +9413,12 @@ Final review: head 7a026b118fb22ca03200b3781386a48452893df8, 37 successful check
 Dependency graph: T1 -> T2 -> T3.
 Acceptance: leg P&L / abs(leg entry dollars) *100, signed results, zero/missing basis unavailable. Display explicitly as entry-value P&L %, distinct from aggregate verified-capital Return %.
 
+## Mobile search tap focus (2026-10-13)
+- [ ] T1 Trace mobile search gesture/focus lifecycle and add red regressions. depends_on: []
+- [ ] T2 Fix the minimal focus/keyboard path while preserving search selection/dismissal. depends_on: [T1]
+- [ ] T3 Exact-head CI, mobile browser screenshots, notification and closing review. depends_on: [T2]
+Dependency graph: T1 -> T2 -> T3.
+No local test suites; use GitHub runners. Existing original checkout task edits preserved.
 ## Return column and calculable combo return (2026-10-13)
 - [x] T1 Validate requested return basis, existing provenance and screenshot math. depends_on: []
 - [x] T2 Add calculation, column placement and browser red regressions. depends_on: [T1]

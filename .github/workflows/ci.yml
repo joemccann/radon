@@ -821,6 +821,7 @@ jobs:
           e2e/chain-held-leg-spread-risk.spec.ts
           e2e/mobile-orders-session.spec.ts
           e2e/mobile-price-format.spec.ts
+          e2e/mobile-search-focus.spec.ts
           e2e/orders-session-window.spec.ts
           e2e/portfolio-orders-polling.spec.ts
           e2e/portfolio-request-cadence.spec.ts
@@ -851,6 +852,13 @@ jobs:
         with:
           name: complex-combo-leg-pnl-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/*complex-combo-leg-pnl*.png
+          if-no-files-found: ignore
+      - name: Upload mobile search focus screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mobile-search-focus-screenshots-shard-${{ matrix.shard }}
+          path: web/test-results/**/*mobile-search-focus*.png
           if-no-files-found: ignore
       - name: Upload portfolio and orders polling screenshots
         if: always()
