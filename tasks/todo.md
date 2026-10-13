@@ -9382,3 +9382,11 @@ Plan review: reuse existing /api/orders/place and OrderRiskGate. Selected LONG l
 Review: Selected subsets use validated held identities, GCD ratios, selected signed basis and full-portfolio retained-risk projection. Working orders reserve exact economic close contracts; unknown snapshots fail closed. Relay/broker/degraded feed and oldest selected quote are checked before placement, including idle review age. Independent core, reservation and React reviews found no blockers. Desktop/mobile production preflight: 7 passed with mocked broker transport and screenshots inspected; no live orders. Full Python: 15,387 passed, 2 skipped using OpenSSL3 and an empty test-process MENTHORQ_USER to isolate ambient fallback. Docs/CI curation repairs preserve existing gates. TypeScript and scoped ESLint passed. Closing full Vitest: 10,787 passed, 21 skipped. Requested PR green and admin merge remain pending; their delivery receipts will be recorded on the PR without a bookkeeping-only source push.
 
 CI repair review: PR #1059 head e19f6ac8 failed two existing session-date assertions when collection and fill construction crossed ET midnight (CI 38344220211, scripts-rs job 115121830455). Both day-boundary controls failed before repair and passed after pinning fixture timestamps to one simulated session. Seven focused tests and the full Python suite (15,387 passed, 2 skipped) passed; original assertions and production date handling remain unchanged. Independent review found no blocker.
+
+## Combo per-leg P&L refactor (2026-10-13)
+- [ ] T1 Trace per-leg basis, marks and aggregate behavior; specify SNDK reconciliation. depends_on: []
+- [ ] T2 Add unit and browser regressions and record baseline failures in GitHub CI. depends_on: [T1]
+- [ ] T3 Implement shared leg calculations and desktop/mobile parity. depends_on: [T1,T2]
+- [ ] T4 Independent Sol and Luna verification; fix findings. depends_on: [T3]
+- [ ] T5 Exact-head CI green, visual verification, Pushover and final review. depends_on: [T4]
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
