@@ -21,6 +21,12 @@ import type { LinearOrderRiskInput } from "@/lib/order/risk/useOrderRisk";
 
 const notifications = vi.hoisted(() => ({ push: vi.fn() }));
 
+// These are armed placement fixtures; the root feed must satisfy the same
+// connectivity gate as production before testing the deduplicated response.
+vi.mock("@/lib/RealtimePricesContext", () => ({
+  useRealtimePrices: () => ({ connected: true, ibConnected: true, marketDataDegraded: false }),
+}));
+
 vi.mock("@/lib/OrderActionsContext", () => ({
   useOrderActions: () => ({
     pendingCancels: new Map(),

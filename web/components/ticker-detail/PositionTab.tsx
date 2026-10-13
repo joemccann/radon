@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useTickerDetailOptional } from "@/lib/TickerDetailContext";
-import type { PortfolioData, PortfolioPosition } from "@/lib/types";
+import type { OrdersData, PortfolioData, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import {
   fmtPrice,
@@ -28,14 +28,15 @@ import SortTh from "../SortTh";
 import { heldComboUnits, type TradeTarget } from "@/lib/order/positionTrade";
 import { useSort } from "@/lib/useSort";
 
-type LegSortKey = "direction" | "type" | "strike" | "qty" | "entry" | "market";
-type IndexedLeg = { leg: PortfolioPosition["legs"][number]; index: number };
+type LegSortKey = "direction" | "type" | "strike" | "expiry" | "qty" | "entry" | "market";
+type IndexedLeg = { leg: PortfolioPosition["legs"][number]; index: number; expiry: string };
 
 function legExtract(row: IndexedLeg, key: LegSortKey): string | number | null {
   switch (key) {
     case "direction": return row.leg.direction;
     case "type": return row.leg.type;
     case "strike": return row.leg.strike ?? null;
+    case "expiry": return row.expiry;
     case "qty": return row.leg.contracts;
     case "entry": return row.leg.avg_cost;
     case "market": return row.leg.market_price;
@@ -50,6 +51,7 @@ type PositionTabProps = {
   portfolio?: PortfolioData | null;
   /** Fired after a trade is placed so the parent can refresh. */
   onOrderPlaced?: () => void;
+  orders?: OrdersData | null;
 };
 
 function isTradeableLeg(leg: PortfolioPosition["legs"][number]): boolean {
@@ -60,20 +62,29 @@ function LegsDisclosure({
   position,
   prices,
   onTradeLeg,
+  selectedIndices,
+  onSelectLeg,
+  onSelectAll,
 }: {
   position: PortfolioPosition;
   prices: Record<string, PriceData>;
   onTradeLeg: (index: number) => void;
+  selectedIndices: number[];
+  onSelectLeg: (index: number) => void;
+  onSelectAll: () => void;
 }) {
   const ctx = useTickerDetailOptional();
   const focusedBookKey = ctx?.focusedBookKey ?? null;
   // Default expanded: the legs ARE the actionable surface for a combo.
   const [expanded, setExpanded] = useState(true);
   const indexedLegs = useMemo(
-    () => position.legs.map((leg, index) => ({ leg, index })),
-    [position.legs],
+    () => position.legs.map((leg, index) => ({ leg, index, expiry: leg.expiry ?? position.expiry })),
+    [position.legs, position.expiry],
   );
   const { sorted, sort, toggle } = useSort(indexedLegs, legExtract);
+  const selectable = indexedLegs.filter(({ leg }) => isTradeableLeg(leg) && Number.isInteger(leg.contracts) && leg.contracts > 0);
+  const allSelected = selectable.length > 0 && selectable.every(({ index }) => selectedIndices.includes(index));
+  const showExpiryColumn = new Set(indexedLegs.map((row) => row.expiry.replace(/-/g, ""))).size > 1;
 
   return (
     <div className="position-legs">
@@ -90,9 +101,17 @@ function LegsDisclosure({
         <table className="pos-legs-table">
           <thead>
             <tr>
+              <th className="pos-leg-selection-cell">
+                <label className="pos-leg-select-control">
+                  <input type="checkbox" aria-label="Select all option legs" checked={allSelected}
+                    ref={(node) => { if (node) node.indeterminate = selectedIndices.length > 0 && !allSelected; }}
+                    disabled={selectable.length === 0} onChange={onSelectAll} />
+                </label>
+              </th>
               <SortTh<LegSortKey> label="Direction" sortKey="direction" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
               <SortTh<LegSortKey> label="Type" sortKey="type" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
               <SortTh<LegSortKey> label="Strike" sortKey="strike" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+              {showExpiryColumn && <SortTh<LegSortKey> label="Expiry" sortKey="expiry" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
               <SortTh<LegSortKey> label="Qty" sortKey="qty" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
               <SortTh<LegSortKey> label="Entry" sortKey="entry" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
               <SortTh<LegSortKey> label="Market" sortKey="market" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
@@ -101,7 +120,7 @@ function LegsDisclosure({
             </tr>
           </thead>
           <tbody>
-            {sorted.map(({ leg, index: i }) => {
+            {sorted.map(({ leg, index: i, expiry }) => {
               const key = legPriceKey(position.ticker, position.expiry, leg);
               const legPrice = key ? prices[key] : null;
               const legMktResolved = resolveRealtimePrice(
@@ -113,10 +132,19 @@ function LegsDisclosure({
               const signedEntry = legSign * (Math.abs(leg.avg_cost) / (leg.type === "Stock" ? 1 : 100));
               const signedMarket = legMktResolved != null ? legSign * legMktResolved : null;
               return (
-                <tr key={i}>
+                <tr key={i} data-selected={selectedIndices.includes(i) || undefined}>
+                  <td className="pos-leg-selection-cell">
+                    <label className="pos-leg-select-control">
+                      <input type="checkbox" aria-label={`Select ${leg.direction} ${leg.type} $${leg.strike}${showExpiryColumn ? ` expiring ${expiry}` : ""}`}
+                        checked={selectedIndices.includes(i)}
+                        disabled={!isTradeableLeg(leg) || !Number.isInteger(leg.contracts) || leg.contracts <= 0}
+                        onChange={() => onSelectLeg(i)} data-testid={`pos-leg-select-${i}`} />
+                    </label>
+                  </td>
                   <td className={leg.direction === "LONG" ? "positive" : "negative"}>{leg.direction}</td>
                   <td>{leg.type}</td>
                   <td className="right">{leg.strike != null ? `$${leg.strike}` : "---"}</td>
+                  {showExpiryColumn && <td>{expiry}</td>}
                   <td className="right">{leg.contracts}</td>
                   <td className={`right ${toneClass(signedEntry) !== "neutral" ? toneClass(signedEntry) : ""}`}>
                     {fmtSignedPrice(signedEntry)}
@@ -165,8 +193,17 @@ function LegsDisclosure({
   );
 }
 
-export default function PositionTab({ position, prices, portfolio, onOrderPlaced }: PositionTabProps) {
-  const [tradeTarget, setTradeTarget] = useState<TradeTarget | null>(null);
+export default function PositionTab({ position, prices, portfolio, orders, onOrderPlaced }: PositionTabProps) {
+  const ctx = useTickerDetailOptional();
+  // Counts and contract identities anchor selections across sorting and quote updates.
+  // A broker refresh that changes the held legs invalidates the old selection/ticket.
+  const identity = JSON.stringify([position.id, position.ticker, position.expiry,
+    position.legs.map((leg) => [leg.direction, leg.type, leg.strike, leg.expiry, leg.contracts])]);
+  const [selection, setSelection] = useState<{ identity: string; indices: number[] }>({ identity, indices: [] });
+  const selectedIndices = selection.identity === identity ? selection.indices : [];
+  const [trade, setTrade] = useState<{ identity: string; target: TradeTarget } | null>(null);
+  const tradeTarget = trade?.identity === identity ? trade.target : null;
+  const setTradeTarget = (target: TradeTarget | null) => setTrade(target ? { identity, target } : null);
   const isCombo = position.structure_type !== "Stock" && position.legs.length > 1;
   const isSingleOption =
     position.structure_type !== "Stock" &&
@@ -180,6 +217,7 @@ export default function PositionTab({ position, prices, portfolio, onOrderPlaced
         position={position}
         prices={prices}
         portfolio={portfolio}
+        orders={orders === undefined ? ctx?.orders : orders}
         target={tradeTarget}
         onClose={() => setTradeTarget(null)}
         onOrderPlaced={onOrderPlaced}
@@ -195,6 +233,15 @@ export default function PositionTab({ position, prices, portfolio, onOrderPlaced
       isCombo={isCombo}
       onTradeCombo={() => setTradeTarget({ kind: "combo" })}
       onTradeLeg={(index) => setTradeTarget({ kind: "leg", index })}
+      selectedIndices={selectedIndices}
+      onTradeSelected={() => setTradeTarget({ kind: "legs", indices: selectedIndices })}
+      onSelectLeg={(index) => setSelection({ identity, indices: selectedIndices.includes(index)
+        ? selectedIndices.filter((i) => i !== index) : [...selectedIndices, index].sort((a, b) => a - b) })}
+      onSelectAll={() => {
+        const indices = position.legs.flatMap((leg, index) => isTradeableLeg(leg) && Number.isInteger(leg.contracts) && leg.contracts > 0 ? [index] : []);
+        setSelection({ identity, indices: selectedIndices.length === indices.length ? [] : indices });
+      }}
+      onClearSelection={() => setSelection({ identity, indices: [] })}
     />
   );
 }
@@ -206,6 +253,11 @@ function PositionView({
   isCombo,
   onTradeCombo,
   onTradeLeg,
+  selectedIndices,
+  onTradeSelected,
+  onSelectLeg,
+  onSelectAll,
+  onClearSelection,
 }: {
   position: PortfolioPosition;
   prices: Record<string, PriceData>;
@@ -213,6 +265,11 @@ function PositionView({
   isCombo: boolean;
   onTradeCombo: () => void;
   onTradeLeg: (index: number) => void;
+  selectedIndices: number[];
+  onTradeSelected: () => void;
+  onSelectLeg: (index: number) => void;
+  onSelectAll: () => void;
+  onClearSelection: () => void;
 }) {
   const isStock = position.structure_type === "Stock";
   const spreadPriceData = useMemo(
@@ -346,12 +403,22 @@ function PositionView({
               {position.legs[0].direction === "LONG" ? "Sell to Close" : "Buy to Close"}
             </button>
           )}
-          {isCombo && <span className="position-trade-actions-hint">or trade a single leg below</span>}
+          {isCombo && <span className="position-trade-actions-hint">Select legs below to close a spread</span>}
         </div>
       )}
 
       {position.legs.length > 1 && (
-        <LegsDisclosure position={position} prices={prices} onTradeLeg={onTradeLeg} />
+        <>
+          <div className="position-leg-selection-actions">
+            <button type="button" className="position-trade-cta" disabled={selectedIndices.length === 0}
+              onClick={onTradeSelected} data-testid="pos-trade-selected">
+              Close Selected Legs ({selectedIndices.length})
+            </button>
+            {selectedIndices.length > 0 && <button type="button" className="btn-secondary" onClick={onClearSelection}>Clear selection</button>}
+          </div>
+          <LegsDisclosure position={position} prices={prices} onTradeLeg={onTradeLeg}
+            selectedIndices={selectedIndices} onSelectLeg={onSelectLeg} onSelectAll={onSelectAll} />
+        </>
       )}
     </div>
   );
