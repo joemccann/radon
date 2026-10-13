@@ -2073,3 +2073,69 @@ class TestDocumentation20261012:
         job = ci[start:start + 900]
         assert "!cancelled()" in job
         assert "needs.deploy.result == 'success'" in job
+
+
+class TestDocumentation20261013:
+    """DOC-191..194: contracts that drifted after audited-through 66719c09."""
+
+    def test_unreadable_admin_journal_stays_http_200(self):
+        source = (_ROOT / "scripts/api/service_logs.py").read_text()
+        assert "available=False" in source
+        assert "never a 500" in source
+        route = (_ROOT / "scripts/api/server.py").read_text()
+        assert "An unreadable journal is 200" in route
+        logs = _section(
+            (_ROOT / "docs/operations.md").read_text(),
+            "Host control socket (`radon-control.service`)",
+        )
+        bullet = next(line for line in logs.splitlines() if line.startswith("- **Logs"))
+        assert "neither returns 200" not in bullet
+        assert "still 200" in bullet
+        assert "available: false" in bullet
+        assert "malformed query is 400" in bullet
+
+    def test_margin_sample_sweep_keeps_bracket_evidence(self):
+        retention = (_ROOT / "scripts/db/retention.py").read_text()
+        assert "MARGIN_SAMPLES_KEEP_DAYS = 90" in retention
+        assert "MARGIN_SAMPLES_BRACKET_WINDOW_S = 121" in retention
+        assert "position_capital_observations" in retention
+        assert "status = 'VALID'" in retention
+        cloud = (_ROOT / "docs/cloud-services.md").read_text()
+        row = next(line for line in cloud.splitlines() if "radon-db-retention.timer" in line)
+        assert "account_margin_samples" in row
+        assert "MARGIN_SAMPLES_KEEP_DAYS" in row
+        assert "MARGIN_SAMPLES_BRACKET_WINDOW_S" in row
+        assert "position_capital_observations" in row
+        assert "VALID" in row
+        assert "journal or portfolio" in row
+
+    def test_unknown_publisher_is_held_before_selection(self):
+        intake = (_ROOT / "scripts/research/intake.py").read_text()
+        process = intake.split("def _process", 1)[1].split("\n    def ", 1)[0]
+        assert process.index("PUBLISHER_UNKNOWN") < process.index("fingerprint(")
+        identify = (_ROOT / "scripts/research/identify.py").read_text()
+        assert "TOPIC_FOLDERS" in identify
+        assert "_discover_publisher" in identify
+        doc = (_ROOT / "docs/dropbox-research.md").read_text()
+        assert "publisher from the Dropbox folder," not in doc
+        assert "PUBLISHER_UNKNOWN" in doc
+        assert "before fingerprinting" in doc
+        assert "always-publish" in doc
+
+    def test_ramp_d7_cadence_is_not_the_monthly_source(self):
+        sys.path.insert(0, str(_ROOT))
+        from scripts.ai_cycle.collectors import RAMP_PRICE_WINDOW_DAYS
+        from scripts.ai_cycle.registry import series_cadence
+
+        assert series_cadence("D7", "tokens.price.blended.anthropic") == "daily"
+        assert series_cadence("D7", "tokens.volume.all") == "weekly"
+        assert series_cadence("D7", "tokens.spend.all") == "weekly"
+        cell = next(
+            line for line in (_ROOT / "docs/ai-infrastructure-operations.md").read_text().splitlines()
+            if line.startswith("| Ramp AI Index |")
+        )
+        assert f"{RAMP_PRICE_WINDOW_DAYS}-day" in cell
+        assert "daily" in cell
+        assert "weekly" in cell
+        assert "source cadence stays monthly" in cell
+        assert "staleness" in cell
