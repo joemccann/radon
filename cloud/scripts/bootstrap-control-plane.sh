@@ -97,17 +97,39 @@ readonly STATE_DIR="$(dirname "$MANIFEST_PATH")"
 readonly LOGICAL_MANIFEST_PATH="/var/lib/radon/control-plane-manifest.sha256"
 
 mkdir -p "$(dirname "$DEPLOY_LOCK_PATH")"
-if [[ ! -e "$DEPLOY_LOCK_PATH" && ! -L "$DEPLOY_LOCK_PATH" ]]; then
-  if [[ "$TEST_MODE" == "1" ]]; then
-    install -m 0600 /dev/null "$DEPLOY_LOCK_PATH"
-  else
-    install -m 0600 -o radon -g radon /dev/null "$DEPLOY_LOCK_PATH"
-  fi
-fi
+# The lock sits in radon's home, so radon can swap its name at any moment.
+# Create it with one O_EXCL|O_NOFOLLOW open, open it without O_CREAT, and
+# accept the fd only when it is the regular file the name still holds.
+"$PYTHON_BIN" - "$DEPLOY_LOCK_PATH" "$TEST_MODE" <<'PY_CREATE_LOCK' || \
+  die "cannot create deploy/control lock: $DEPLOY_LOCK_PATH"
+import os
+import pwd
+import sys
+
+path, test_mode = sys.argv[1], sys.argv[2]
+try:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+except FileExistsError:
+    raise SystemExit(0)
+try:
+    if test_mode != "1":
+        account = pwd.getpwnam("radon")
+        os.fchown(fd, account.pw_uid, account.pw_gid)
+    os.fchmod(fd, 0o600)
+finally:
+    os.close(fd)
+PY_CREATE_LOCK
 [[ -f "$DEPLOY_LOCK_PATH" && ! -L "$DEPLOY_LOCK_PATH" ]] || \
   die "deploy/control lock is not a regular file: $DEPLOY_LOCK_PATH"
-exec {DEPLOY_LOCK_FD}<>"$DEPLOY_LOCK_PATH" || \
+exec {DEPLOY_LOCK_FD}<"$DEPLOY_LOCK_PATH" || \
   die "cannot open deploy/control lock: $DEPLOY_LOCK_PATH"
+"$PYTHON_BIN" -c '
+import os, stat, sys
+held, named = os.fstat(int(sys.argv[1])), os.lstat(sys.argv[2])
+sys.exit(not (stat.S_ISREG(named.st_mode)
+              and (held.st_dev, held.st_ino) == (named.st_dev, named.st_ino)))
+' "$DEPLOY_LOCK_FD" "$DEPLOY_LOCK_PATH" || \
+  die "deploy/control lock changed while opening: $DEPLOY_LOCK_PATH"
 if ! "$FLOCK_BIN" -n "$DEPLOY_LOCK_FD"; then
   die "deploy/control lock is held: $DEPLOY_LOCK_PATH" 75
 fi

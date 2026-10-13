@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import sys
 from pathlib import Path
 
@@ -113,6 +114,40 @@ class TestAssistantCatalog:
         )
         for path in scans:
             assert capability_for("POST", path) == "read.spawn", path
+
+    def test_routes_that_run_a_script_are_never_plain_reads(self):
+        """A plain read skips MAX_SPAWN_PER_TURN in the chat dispatcher, so a
+        handler that spawns a subprocess must be pinned read.spawn or
+        stricter (REL-177 class)."""
+        from scripts.api.assistant_catalog import capability_for
+
+        api_dir = SCRIPTS_DIR / "api"
+        sources = [api_dir / "server.py", *sorted((api_dir / "routes").glob("*.py"))]
+        spawning = []
+        for source in sources:
+            for node in ast.walk(ast.parse(source.read_text())):
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                called = {
+                    call.func.id if isinstance(call.func, ast.Name) else getattr(call.func, "attr", None)
+                    for call in ast.walk(node)
+                    if isinstance(call, ast.Call)
+                }
+                if not called & {"run_script", "run_script_raw"}:
+                    continue
+                for dec in node.decorator_list:
+                    if (
+                        isinstance(dec, ast.Call)
+                        and isinstance(dec.func, ast.Attribute)
+                        and dec.func.attr in {"get", "post", "put", "delete"}
+                        and dec.args
+                        and isinstance(dec.args[0], ast.Constant)
+                    ):
+                        spawning.append((dec.func.attr.upper(), dec.args[0].value))
+
+        assert ("GET", "/ticker/ratings") in spawning
+        plain = [key for key in spawning if capability_for(*key) == "read"]
+        assert plain == [], f"subprocess-backed routes pinned plain read: {plain}"
 
     def test_backtest_refresh_is_a_mutation_not_a_read(self, monkeypatch):
         """refresh spawns a 180s subprocess that persists to Turso: it must

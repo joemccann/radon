@@ -744,3 +744,55 @@ def test_restore_target_writes_through_one_nofollow_fd() -> None:
     assert "O_NOFOLLOW" in body and "dir_fd=dfd" in body
     for by_name in ("cp -a", "rm -f", "mkdir -p"):
         assert by_name not in body, by_name
+
+
+def test_deploy_lock_creation_never_writes_through_a_raced_link(tmp_path: Path) -> None:
+    """The lock lives in radon's home, so radon can swap its name for a link to
+    a directory after the existence check. Creation must not follow it."""
+    sandbox = _sandbox(tmp_path)
+    victim = tmp_path / "victim-dir"
+    victim.mkdir()
+    # GNU install is the production one; BSD install renames over the link.
+    real_install = shutil.which("ginstall") or shutil.which("install")
+    assert real_install
+    shim_bin = tmp_path / "shim-bin"
+    _write_executable(
+        shim_bin / "install",
+        f"""#!/bin/bash
+for arg in "$@"; do
+  if [[ "$arg" == "{sandbox.lock_path}" ]]; then
+    ln -sfn "{victim}" "{sandbox.lock_path}"
+  fi
+done
+exec "{real_install}" "$@"
+""",
+    )
+
+    sandbox.run(PATH=f"{shim_bin}:{os.environ['PATH']}")
+
+    assert list(victim.iterdir()) == []
+
+
+def test_deploy_lock_is_created_as_a_private_regular_file(tmp_path: Path) -> None:
+    sandbox = _sandbox(tmp_path)
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    info = os.lstat(sandbox.lock_path)
+    assert stat.S_ISREG(info.st_mode)
+    assert stat.S_IMODE(info.st_mode) == 0o600
+
+
+def test_deploy_lock_link_is_refused(tmp_path: Path) -> None:
+    sandbox = _sandbox(tmp_path)
+    target = tmp_path / "elsewhere.lock"
+    target.write_bytes(b"")
+    sandbox.lock_path.parent.mkdir(parents=True, exist_ok=True)
+    sandbox.lock_path.symlink_to(target)
+
+    result = sandbox.run()
+
+    assert result.returncode != 0
+    assert "lock" in result.stderr.lower()
+    assert not _manifest_path(sandbox.rootfs).exists()
