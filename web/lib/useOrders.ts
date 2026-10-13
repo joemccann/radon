@@ -33,7 +33,10 @@ type UseOrdersReturn = {
   updateData: (data: OrdersData) => void;
 };
 
-export function useOrders(active: boolean = true): UseOrdersReturn {
+export function useOrders(
+  active: boolean = true,
+  pollIntervalMs: number = POLL_INTERVAL_MS,
+): UseOrdersReturn {
   const [data, setData] = useState<OrdersData | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -58,9 +61,12 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
   const failureStreakRef = useRef(0);
   const errorRef = useRef<string | null>(null);
   const activeRef = useRef(active);
+  const pollIntervalRef = useRef(pollIntervalMs);
+  const failureRetryUntilRef = useRef(0);
   const routeKey = useRouteRefreshKey();
   const lastRouteKeyRef = useRef(routeKey);
   activeRef.current = active;
+  pollIntervalRef.current = pollIntervalMs;
 
   const fetchOrders = useCallback(async () => {
     if (readingRef.current) return;
@@ -105,7 +111,7 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       void pollCachedRef.current();
-    }, delay);
+    }, Math.max(delay, failureRetryUntilRef.current - Date.now()));
   }, []);
 
   const pollCached = useCallback(async () => {
@@ -121,7 +127,7 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
       // walked `failureStreakRef` up every 30s while backgrounded, so the
       // first real failure after the tab returned jumped straight to the
       // 5-minute ceiling instead of the first rung. R-263.
-      if (mountedRef.current && activeRef.current) scheduleNext(POLL_INTERVAL_MS);
+      if (mountedRef.current && activeRef.current) scheduleNext(pollIntervalRef.current);
       return;
     }
     let failed = false;
@@ -138,10 +144,10 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
     else failureStreakRef.current = 0;
     // And back off on failure. The route answers a Turso outage with 503 by
     // design, and the next poll was still exactly 30s later, forever. R-263.
-    const delay = Math.min(
-      MAX_POLL_INTERVAL_MS,
-      POLL_INTERVAL_MS * 2 ** Math.max(0, failureStreakRef.current),
-    );
+    const delay = failed
+      ? Math.min(MAX_POLL_INTERVAL_MS, POLL_INTERVAL_MS * 2 ** failureStreakRef.current)
+      : pollIntervalRef.current;
+    failureRetryUntilRef.current = failed ? Date.now() + delay : 0;
     if (mountedRef.current && activeRef.current) scheduleNext(delay);
   }, [fetchOrders, scheduleNext]);
   pollCachedRef.current = pollCached;
@@ -222,7 +228,7 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
-    if (active) scheduleNext(becameActive ? 500 : POLL_INTERVAL_MS);
+    if (active) scheduleNext(becameActive ? 500 : pollIntervalMs);
 
     return () => {
       if (timerRef.current) {
@@ -230,7 +236,7 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
         timerRef.current = null;
       }
     };
-  }, [active, scheduleNext]);
+  }, [active, pollIntervalMs, scheduleNext]);
 
   const updateData = useCallback((newData: OrdersData) => {
     dataGenerationRef.current += 1;

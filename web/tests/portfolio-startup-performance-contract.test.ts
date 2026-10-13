@@ -326,7 +326,7 @@ describe("portfolio startup performance contracts", () => {
     render(React.createElement(WorkspaceShell, { section: "orders", initialPortfolio: seed } as never));
     expect(usePortfolioSpy).toHaveBeenCalledWith(
       expect.any(Boolean),
-      { initialSnapshot: seed, includeEntryDates: true },
+      { initialSnapshot: seed, includeEntryDates: true, pollIntervalMs: expect.any(Number) },
     );
 
     cleanup();
@@ -335,7 +335,7 @@ describe("portfolio startup performance contracts", () => {
     render(React.createElement(WorkspaceShell, { section: "portfolio", initialPortfolio: seed } as never));
     expect(usePortfolioSpy).toHaveBeenCalledWith(
       expect.any(Boolean),
-      { initialSnapshot: seed, includeEntryDates: false },
+      { initialSnapshot: seed, includeEntryDates: false, pollIntervalMs: expect.any(Number) },
     );
   });
 
