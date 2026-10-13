@@ -9422,3 +9422,16 @@ Dependency graph: T1 -> T2 -> T3 -> T4.
 Acceptance: dollar P&L only in P&L; percentages in Return. SNDK pictured $10,575 P&L / $15,275 net debit = 69.2%. Leg percentages retain own absolute entry-value basis. Preserve financial signs, zero/missing-data integrity, verified capital provenance; label any entry-value fallback explicitly and do not invent risk capital for credits.
 
 Baseline evidence: cab1a987, GitHub CI38429636088/job115408226153: 7/7 new Return column regressions failed (136 existing files passed). Implementation follows captured red.
+
+## P&L story entry/exit timing (2026-10-13)
+
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
+- [x] T1 depends_on: [] Reproduce the supplied TQQQ story against canonical journal/fill evidence; trace entry-time transport and render.
+- [x] T2 depends_on: [T1] Write failing data-path, story-render and mobile share regressions for entry/exit timing and hold duration.
+- [x] T3 depends_on: [T2] Repair the smallest affected source path without inventing unavailable timestamps or altering P&L arithmetic.
+- [x] T4 depends_on: [T3] Run focused and full gates, browser E2E and inspect the actual rendered story; update incident docs.
+- [ ] T5 depends_on: [T4] Publish the fix PR using the required template, wait for every exact-head CI check and confirm one green Pushover receipt.
+
+Plan review: The screenshot already renders the exit timestamp. Entry time and duration must come from matched executions or canonical journal evidence, including fully closed stock positions; missing precision remains explicit.
+
+Verification review: Live canonical twenty-fill TQQQ sequence reproduced four stock-timing failures; export-content tests reproduced three rendering failures. Focused share suites: 56 passed. New timing helper: 100% line coverage, 96.66% branches. Full Vitest after latest-main rebase: 10,885 passed, 21 skipped; full Python: 15,394 passed, 2 skipped (OpenSSL3 and isolated MENTHORQ_USER as before). TypeScript/scoped ESLint clean. Production compile and 12 desktop/mobile Playwright cases passed. Actual 1080x1920 story and iPhone preview visually inspected: ENTRY 8:46 AM PDT, HELD 44 minutes, EXIT 9:30 AM PDT; supplied P&L and existing entry-price identity preserved. No broker actions or journal writes. Delivery receipts will be recorded on the PR without a bookkeeping-only source push.

@@ -9,6 +9,8 @@
 
 import { test, expect, type Page } from "@playwright/test";
 import type { CashFlowResponse } from "../lib/useCashFlows";
+import tqqqFills from "../tests/fixtures/pnl-story-tqqq-fills.json" with { type: "json" };
+import { writeFile } from "node:fs/promises";
 
 const TODAY = "2026-05-06";
 const CASH_FLOWS_EMPTY = {
@@ -109,6 +111,45 @@ async function setupBaseMocks(page: Page) {
 }
 
 test.describe("Mobile executed orders", () => {
+  test("pictured TQQQ Story carries entry, exit and hold timing into the real PNG", async ({ page }, testInfo) => {
+    await setupBaseMocks(page);
+    await page.clock.setFixedTime(new Date("2026-10-13T17:00:00Z"));
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "canShare", { configurable: true, value: () => false });
+    });
+    await page.route("**/api/orders", (route) => route.fulfill({ json: {
+      ...ORDERS_WITH_FILL, executed_count: tqqqFills.length, executed_orders: tqqqFills,
+    } }));
+    let storyUrl: string | null = null;
+    let png: Buffer | null = null;
+    await page.route("**/api/share/pnl**", async (route) => {
+      storyUrl = route.request().url();
+      const response = await route.fetch();
+      expect(response.status()).toBe(200);
+      png = await response.body();
+      await route.fulfill({ response });
+    });
+    await page.goto("/orders");
+    const close = page.getByTestId("mobile-executed-list").locator('[aria-label="TQQQ CLOSE"]');
+    await expect(close).toContainText("+$11,435.65");
+    await close.click();
+    const panel = page.locator('[data-testid$="-share"]');
+    await panel.getByRole("checkbox", { name: "P&L $", exact: true }).check();
+    await panel.getByRole("checkbox", { name: "P&L %", exact: true }).uncheck();
+    await panel.getByRole("button", { name: "Instagram Story", exact: true }).click();
+    const preview = panel.getByRole("img", { name: "Instagram story preview" });
+    await expect(preview).toBeVisible();
+    const params = new URL(storyUrl!).searchParams;
+    expect(params.get("entryTime")).toBe("2026-10-13T15:46:31+00:00");
+    expect(params.get("exitTime")).toBe("2026-10-13T16:30:30+00:00");
+    expect(params.get("holdTime")).toBe("44 minutes");
+    expect(params.get("format")).toBe("story");
+    await expect.poll(() => preview.evaluate((img: HTMLImageElement) => [img.naturalWidth, img.naturalHeight])).toEqual([1080, 1920]);
+    const imagePath = testInfo.outputPath("tqqq-story-entry-exit-held.png");
+    await writeFile(imagePath, png!);
+    await testInfo.attach("TQQQ story timing", { path: imagePath, contentType: "image/png" });
+    await panel.screenshot({ path: testInfo.outputPath("tqqq-mobile-story-preview.png") });
+  });
   test("MobileExecutedList renders a card for each fill group", async ({ page }, testInfo) => {
     await setupBaseMocks(page);
     await page.route("**/api/orders", (route) =>
