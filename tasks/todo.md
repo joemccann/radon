@@ -9385,8 +9385,10 @@ CI repair review: PR #1059 head e19f6ac8 failed two existing session-date assert
 
 ## Combo per-leg P&L refactor (2026-10-13)
 - [x] T1 Trace per-leg basis, marks and aggregate behavior; specify SNDK reconciliation. depends_on: []
-- [ ] T2 Add unit and browser regressions and record baseline failures in GitHub CI. depends_on: [T1]
+- [x] T2 Add unit and browser regressions and record baseline failures in GitHub CI. depends_on: [T1]
 - [x] T3 Implement shared leg calculations and desktop/mobile parity. depends_on: [T1,T2]
-- [ ] T4 Independent Sol and Luna verification; fix findings. depends_on: [T3]
+- [x] T4 Independent Sol and Luna verification; fix findings. depends_on: [T3]
 - [ ] T5 Exact-head CI green, visual verification, Pushover and final review. depends_on: [T4]
 Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
+
+Review checkpoint: baseline e15d6a26 GitHub CI 38412502774 failed as expected (new leg-helper tests: 11 failures, 1263 passes in affected shard). Sol and Luna independently verified signed SNDK 13505 total and 8780 daily, quantities, multipliers, basis and missing-data behavior. Local suites not run; static TypeScript/ESLint and diff checks passed. Exact-head green CI and screenshots pending.
