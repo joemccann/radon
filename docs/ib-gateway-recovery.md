@@ -292,6 +292,28 @@ Any flag that is unreadable, malformed, symlinked or not root-owned counts as he
 
 ---
 
+## JVM garbage collection
+
+**Symptom:** the Gateway process is alive, port 4001 accepts TCP, and the API handshake stops. A thread dump shows the 768m heap committed full and CPU near 250% on a 4-core host.
+**Cause:** IB's `ibgateway.vmoptions` sets `-XX:ParallelGCThreads=20` and `-XX:ConcGCThreads=5`. On this broker those are desktop defaults. JDK 25's own G1 ergonomics for 4 cores are 4 parallel threads and 1 concurrent thread. Twenty stop-the-world threads oversubscribe every young collection. Five concurrent threads run while the API is serving. The 2026-10-13 19:16 UTC dump was that case: heap 785654K of 786432K, container at 246% CPU, session average 0.32 cores.
+**Do not resize the host.** Compose sets no memory cap. At that dump RSS was 1.6 GiB and the host still had 6.1 GiB free. The ceiling is `-Xmx768m`.
+**Applied 2026-10-13, below the keep marker** in `cloud_ib-config` at `Jts/ibgateway/10.50.1f/ibgateway.vmoptions`:
+
+```
+-XX:ParallelGCThreads=4
+-XX:ConcGCThreads=1
+-Xlog:gc*:file=/home/ibgateway/Jts/gc.log:time,uptime,level,tags:filecount=5,filesize=10M
+```
+
+A later `-XX` flag overrides the vendor `20` and `5` above the marker. Lines above `### keep on update` are replaced when the Gateway version directory is upgraded. The June 2026 stdout GC log was above that marker and did not survive the 10.50.1f volume. `JAVA_TOOL_OPTIONS` does not work: the image blanks it. `JAVA_HEAP_SIZE` rewrites only `-Xmx`.
+
+**Left unchanged on purpose.** Stay on G1. Keep `-XX:MaxGCPauseMillis=200`. Do not drop parallel threads below 4: during a stop-the-world pause the API is already stopped, and fewer threads make that pause longer. Do not raise `-Xmx` until one cash session of `gc.log` shows `Evacuation Failure` or `Pause Full` between 9:30 and 16:00 ET. Do not hand-edit `InitiatingHeapOccupancyPercent`. Adaptive IHOP is already on, and the occupancy at the cash open was not measured.
+
+**Verification:** after the lease-held restart, the Java command line contains `ParallelGCThreads=4` and `ConcGCThreads=1`, and `/home/ibgateway/Jts/gc.log` exists on the volume. `/health` reaches `auth_state=authenticated`.
+**Rollback:** remove the three lines under the keep marker and run one more lease-held restart. The vendor block above the marker becomes active again.
+
+---
+
 ## Upgrading the Gateway image
 
 **Symptom:** a Gateway image change fails login, or a rollback would put an unsupported build back on the broker.
@@ -328,6 +350,7 @@ Then install the new compose body at `/etc/radon/ib-gateway-compose.yml` by hand
 - **Do not re-enable IBC-side relogin on 2FA timeout** (`TWOFA_TIMEOUT_ACTION: exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT: "no"` in `docker/ib-gateway/docker-compose.yml`). VPS counterpart uses IBC default (`no`). IBC's relogin bypasses the push lock and reintroduces the stacked-push bug.
 - **Do not piecemeal `systemctl stop radon-<one>`** — a clean stop does not `Restart=always` back, so the unit stays down until something starts it. Use `radon restart` instead. (Stopping `radon-ib-gateway` no longer cascade-stops api/relay/monitor: since 44e89e1b they are `After=`-ordered only, never `PartOf=`; a 2FA restart leaves the app plane up. See `docs/spof-host-split.md`.) See `feedback_use_radon_restart_not_piecemeal_systemctl.md`.
 - **Do not assume `auth_state=authenticated` means the pool is healthy.** After 2FA resolves, the FastAPI `ib_pool` can stay stuck disconnected. As of 2026-06-24 (46ba1e1) the `recover_stuck_pool` self-heal (Gate 5) reconnects it in ~15-60s with no operator action, so **do not reflexively restart radon-api** — give the heartbeat a minute. `systemctl restart radon-api.service` remains the emergency override if the self-heal genuinely fails. See `feedback_ib_pool_stuck_after_2fa.md`.
+- **Do not set Gateway GC flags with `JAVA_TOOL_OPTIONS` or above `### keep on update`.** The launcher blanks the env var, and an upgrade replaces everything above the marker. Put overrides under the marker in `ibgateway.vmoptions`. See [JVM garbage collection](#jvm-garbage-collection).
 - **Do not call `docker compose`, `docker restart`, or `systemctl restart radon-ib-gateway.service` directly.** Those paths bypass real-container inspection or split one logical cycle across multiple control planes. Use the admin Gateway action or `/usr/local/bin/radon restart`; both use the authoritative helper and refuse while any 2FA lease is active. Clear a lease with `POST /ib/reset-backoff` only after verifying no push is actually in flight.
 - **Do not run a synchronous libsql write on the FastAPI event loop.** A hung Turso write freezes the whole API (`/health` times out, which also fails `deploy.sh`'s gateway-ready gate). Offload to a thread. See `feedback_no_sync_libsql_on_fastapi_event_loop`.
 
