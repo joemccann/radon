@@ -62,7 +62,7 @@ async function installFixtures(page: Page, sameDay = false, missingClose = false
 
 for (const width of [1440, 393]) {
   test(`complex ratio combo reconciles per-leg total and today P&L at ${width}px`, async ({ page }, testInfo) => {
-    await page.setViewportSize({ width, height: 1000 });
+    await page.setViewportSize({ width, height: width > 640 ? 1400 : 1000 });
     await installFixtures(page);
     await expect.poll(() => page.evaluate(() => document.querySelector('[data-testid="position-cell-today-pnl"]')?.textContent ?? document.querySelector('[data-testid="mobile-position-today"]')?.textContent)).toContain("+$8,780");
     if (width > 640) {
