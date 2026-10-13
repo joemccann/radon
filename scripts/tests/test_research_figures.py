@@ -243,6 +243,106 @@ def test_rotated_page_crop_lands_on_displayed_chart(tmp_path):
     _assert_chart_fills_crop(path, found[0]["bbox"], tmp_path, "rotated")
 
 
+def _form_pdf(content, matrices, extras="", image=None):
+    """Nest content in Form XObjects; matrices run outermost to innermost."""
+    def stream(dictionary, value):
+        packed = zlib.compress(value.encode())
+        return (dictionary + f" /Length {len(packed)} /Filter /FlateDecode >>\nstream\n").encode() + packed + b"\nendstream"
+
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        (f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {W} {H}] /Contents 4 0 R "
+         f"/Resources << /XObject << /Fm 6 0 R >> >> {extras} >>").encode(),
+        stream("<<", "/Fm Do"),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    for index, matrix in enumerate(matrices):
+        final = index == len(matrices) - 1
+        resources = "/Font << /F1 5 0 R >>" if final else f"/XObject << /Fm {7 + index} 0 R >>"
+        if final and image is not None:
+            resources += f" /XObject << /Im1 {6 + len(matrices)} 0 R >>"
+        dictionary = ("<< /Type /XObject /Subtype /Form /BBox [0 0 612 792] "
+                      + f"/Matrix [{' '.join(map(str, matrix))}] /Resources << {resources} >>")
+        objects.append(stream(dictionary, content if final else "/Fm Do"))
+    if image is not None:
+        iw, ih, data = image
+        objects.append(f"<< /Type /XObject /Subtype /Image /Width {iw} /Height {ih} "
+                       f"/ColorSpace /DeviceGray /BitsPerComponent 8 /Length {len(data)} >>\nstream\n".encode()
+                       + data + b"\nendstream")
+    out, offsets = bytearray(b"%PDF-1.4\n"), []
+    for index, body in enumerate(objects, 1):
+        offsets.append(len(out))
+        out += f"{index} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode()
+    out += b"".join(f"{offset:010d} 00000 n \n".encode() for offset in offsets)
+    out += f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    return bytes(out)
+
+
+@pytest.mark.parametrize("matrices", [
+    [(1, 0, 0, 1, 50, 350)],
+    [(0.8, 0, 0, 1.1, 100, 350)],
+    [(0.8, 0, 0, 1.1, 100, 350), (0.7, 0, 0, 0.8, 30, 20)],
+])
+def test_form_chart_bounds_include_all_ancestor_transforms(tmp_path, matrices):
+    import pypdfium2
+    # Bank decks put plots near their Form's local origin, then place the Form
+    # higher on the page. Untransformed bounds crop footer labels instead.
+    content = text(20, 215, "Crowded Longs and Shorts", 12) + chart(20, 20, 420, 190)
+    path = tmp_path / "forms.pdf"
+    path.write_bytes(_form_pdf(content, matrices))
+    found = figures.detect(path, 1)
+    assert len(found) == 1
+    transform = pypdfium2.PdfMatrix()
+    for matrix in matrices:
+        transform = pypdfium2.PdfMatrix(*matrix).multiply(transform)
+    left, bottom = transform.on_point(20, 20)
+    right, top = transform.on_point(420, 190)
+    l, t, r, b = found[0]["bbox"]
+    assert l <= left / W and r >= right / W
+    assert t <= 1 - top / H and b >= 1 - bottom / H
+    assert found[0]["title"] == "Crowded Longs and Shorts"
+    assert b < 0.6, "the crop covers the placed plot, not the Form-local footer strip"
+
+
+def test_form_chart_own_matrix_is_not_applied_twice(tmp_path):
+    import pypdfium2
+    content = "q 0.7 0 0 0.8 30 20 cm\n" + chart(20, 20, 420, 190) + "Q\n"
+    path = tmp_path / "own-matrix.pdf"
+    path.write_bytes(_form_pdf(content, [(0.8, 0, 0, 1.1, 100, 350)]))
+    with pypdfium2.PdfDocument(str(path)) as document:
+        actual = list(figures._drawn_bounds(document[0]))
+    union = actual[0][0]
+    for bounds, _image in actual[1:]:
+        union = (min(union[0], bounds[0]), min(union[1], bounds[1]),
+                 max(union[2], bounds[2]), max(union[3], bounds[3]))
+    assert union == pytest.approx((135.2, 389.6, 359.2, 539.2), abs=2), union
+
+
+def test_raster_chart_in_nested_forms_uses_page_bounds(tmp_path):
+    path = tmp_path / "raster-forms.pdf"
+    path.write_bytes(_form_pdf(image_chart(20, 20, 420, 190),
+                               [(0.8, 0, 0, 1.1, 100, 350), (0.7, 0, 0, 0.8, 30, 20)],
+                               image=(8, 8, GRAY)))
+    fig = figures.detect(path, 1)[0]
+    assert fig["kind"] == "raster"
+    l, t, r, b = fig["bbox"]
+    assert l <= 135.2 / W and r >= 359.2 / W
+    assert t <= 1 - 539.2 / H and b >= 1 - 389.6 / H
+    assert b < 0.6
+
+
+def test_form_transform_precedes_displayed_page_rotation(tmp_path):
+    path = tmp_path / "rotated-form.pdf"
+    matrices = [(0.8, 0, 0, 1.1, 100, 350)]
+    path.write_bytes(_form_pdf(chart(20, 20, 420, 190), matrices))
+    expected = figures._to_displayed(figures.detect(path, 1)[0]["bbox"], 90)
+    path.write_bytes(_form_pdf(chart(20, 20, 420, 190), matrices, extras="/Rotate 90"))
+    assert figures.detect(path, 1)[0]["bbox"] == pytest.approx(expected, abs=0.0001)
+
+
 def test_catalogue_reports_skipped_pages(tmp_path, monkeypatch):
     import pypdfium2
     path = tmp_path / "chart.pdf"
