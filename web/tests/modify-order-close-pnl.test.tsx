@@ -568,3 +568,102 @@ describe("ModifyOrderModal combo close-out P&L", () => {
     expect(onConfirm).toHaveBeenCalled();
   });
 });
+
+function sndkSubsetClose() {
+  const expiry = "2026-10-23";
+  const order: OpenOrder = {
+    ...cbrsComboOrder(), symbol: "SNDK Combo", totalQuantity: 10, remaining: 10, limitPrice: 56,
+    contract: { symbol: "SNDK", secType: "BAG", conId: 10, comboLegs: [
+      { conId: 11, action: "SELL", ratio: 1, symbol: "SNDK", right: "C", strike: 1600, expiry },
+      { conId: 12, action: "BUY", ratio: 1, symbol: "SNDK", right: "C", strike: 1450, expiry },
+    ] },
+  };
+  const portfolio = cbrsHeldReversal();
+  portfolio.positions = [{ ...portfolio.positions[0], ticker: "SNDK", expiry, contracts: 10,
+    entry_cost: 15_275, legs: [
+      { ...portfolio.positions[0].legs[1], direction: "LONG", type: "Call", strike: 1450,
+        contracts: 10, expiry, avg_cost: 5276.6, entry_cost: 52_766 },
+      { ...portfolio.positions[0].legs[0], direction: "SHORT", type: "Call", strike: 1600,
+        contracts: 10, expiry, avg_cost: 1301.6, entry_cost: -13_016 },
+      { ...portfolio.positions[0].legs[0], direction: "SHORT", type: "Put", strike: 1400,
+        contracts: 5, expiry, avg_cost: 4895, entry_cost: -24_475 },
+    ],
+  }];
+  return { order, portfolio };
+}
+
+function renderSndkSubset(order: OpenOrder, portfolio: PortfolioData, otherOrders: OpenOrder[] = []) {
+  render(<ModifyOrderModal order={order} loading={false} portfolio={portfolio}
+    openOrders={{ open_orders: [order, ...otherOrders] }} onConfirm={vi.fn()} onClose={() => {}} />);
+  fireEvent.change(screen.getByLabelText(/New Net Price/i), { target: { value: "50" } });
+  return within(screen.getByTestId("order-confirm-summary"));
+}
+
+describe("ModifyOrderModal closes an exact subset of a grouped position", () => {
+  it("uses only the two closing calls' basis and leaves the short put unchanged", () => {
+    const { order, portfolio } = sndkSubsetClose();
+    const putClose: OpenOrder = { ...optionOrder("BUY", 5, 34.95), contract: {
+      conId: 13, symbol: "SNDK", secType: "OPT", right: "P", strike: 1400, expiry: "2026-10-23",
+    } };
+    const summary = renderSndkSubset(order, portfolio, [putClose]);
+    expect(summary.getByText("Close Credit:")).toBeTruthy();
+    expect(summary.getByText("$50,000")).toBeTruthy();
+    expect(summary.getByTestId("order-confirm-estimated-pnl").textContent).toBe("$10,250 (+25.8%)");
+    expect(summary.queryByText("Max Gain:")).toBeNull();
+    expect(summary.queryByText("Max Loss:")).toBeNull();
+  });
+
+  it("scales selected basis for a partial close", () => {
+    const { order, portfolio } = sndkSubsetClose();
+    const summary = renderSndkSubset(order, portfolio);
+    fireEvent.change(screen.getByLabelText(/New Quantity/i), { target: { value: "5" } });
+    expect(summary.getByTestId("order-confirm-estimated-pnl").textContent).toBe("$5,125 (+25.8%)");
+  });
+
+  it("keeps basis unavailable when the selected legs have mixed provenance", () => {
+    const { order, portfolio } = sndkSubsetClose();
+    portfolio.positions[0].legs[0].basis_source = "ib";
+    portfolio.positions[0].legs[1].basis_source = "session_fills";
+    const summary = renderSndkSubset(order, portfolio);
+    expect(summary.getByText("Close Credit:")).toBeTruthy();
+    expect(summary.queryByTestId("order-confirm-estimated-pnl")).toBeNull();
+  });
+
+  it("counts remaining contracts on another working close of a selected call", () => {
+    const { order, portfolio } = sndkSubsetClose();
+    const closingCall: OpenOrder = { ...optionOrder("SELL", 2, 70), contract: {
+      conId: 12, symbol: "SNDK", secType: "OPT", right: "C", strike: 1450, expiry: "2026-10-23",
+    } };
+    const summary = renderSndkSubset(order, portfolio, [closingCall]);
+    expect(summary.queryByText("Est. Realized P&L:")).toBeNull();
+    expect(summary.getByText("Max Loss:")).toBeTruthy();
+  });
+
+  it("uses reduced BAG ratios when the selected legs have unequal quantities", () => {
+    const { order, portfolio } = sndkSubsetClose();
+    order.totalQuantity = order.remaining = 5;
+    order.contract.comboLegs![1].ratio = 2;
+    portfolio.positions[0].legs[1].contracts = 5;
+    portfolio.positions[0].legs[1].entry_cost = -6_508;
+    const summary = renderSndkSubset(order, portfolio);
+    expect(summary.getByTestId("order-confirm-estimated-pnl").textContent).toBe("-$21,258 (-46.0%)");
+  });
+
+  it("requires a resolved working-orders snapshot before calling a subset riskless", () => {
+    const { order, portfolio } = sndkSubsetClose();
+    render(<ModifyOrderModal order={order} loading={false} portfolio={portfolio}
+      onConfirm={vi.fn()} onClose={() => {}} />);
+    fireEvent.change(screen.getByLabelText(/New Net Price/i), { target: { value: "50" } });
+    const summary = within(screen.getByTestId("order-confirm-summary"));
+    expect(summary.queryByText("Est. Realized P&L:")).toBeNull();
+    expect(summary.getByText("Max Loss:")).toBeTruthy();
+  });
+
+  it("does not classify an oversized subset order as a pure close", () => {
+    const { order, portfolio } = sndkSubsetClose();
+    const summary = renderSndkSubset(order, portfolio);
+    fireEvent.change(screen.getByLabelText(/New Quantity/i), { target: { value: "11" } });
+    expect(summary.queryByText("Est. Realized P&L:")).toBeNull();
+    expect(summary.getByText("Max Loss:")).toBeTruthy();
+  });
+});
