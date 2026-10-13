@@ -32,11 +32,10 @@ services:
       # not "off".
       AUTO_RESTART_TIME: "11:45 PM"
       TWS_COLD_RESTART: ""
-      # DUR-08: GC logging does NOT work via JAVA_TOOL_OPTIONS — the image's
-      # launcher blanks it before starting the JVM (verified on the java
-      # process /proc environ). It lives instead in the persistent ib-config
-      # volume: Jts/ibgateway/<ver>/ibgateway.vmoptions gets
-      # `-Xlog:gc*:stdout:time,uptime,level,tags` (applied live 2026-06-13).
+      # DUR-08: the image launcher blanks JAVA_TOOL_OPTIONS. GC flags live in
+      # the persistent volume file Jts/ibgateway/<ver>/ibgateway.vmoptions,
+      # below "### keep on update", or the next Gateway upgrade restores
+      # IB's desktop defaults. See docs/ib-gateway-recovery.md.
       VNC_SERVER_PASSWORD: ${VNC_SERVER_PASSWORD:-}
     ports:
       - "127.0.0.1:${IB_LIVE_PORT:-4001}:4003"
