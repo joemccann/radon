@@ -116,6 +116,13 @@ describe("GexPanel", () => {
     vi.useRealTimers();
   });
 
+  it("prints no em dash anywhere in the rendered panel (no-slop 14)", () => {
+    const { container } = renderWithData();
+    expect(container.textContent).toContain("SPX Gamma Exposure Levels");
+    expect(container.textContent).toContain("EXPECTED RANGE");
+    expect(container.textContent).not.toContain("\u2014");
+  });
+
   it("renders loading state", () => {
     mockUseGex.mockReturnValue({ data: null, loading: true, error: null, lastSync: null, syncing: false, syncNow: vi.fn() });
     const { container } = render(<GexPanel />);

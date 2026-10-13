@@ -37,7 +37,7 @@ type BreadthPanelProps = {
 
 function fmtSigned(v: number | null | undefined, decimals = 0): string {
   if (v == null || !Number.isFinite(v)) return "---";
-  return `${v >= 0 ? "+" : ""}${v.toFixed(decimals)}`;
+  return `${v >= 0 ? "+" : ""}${(v === 0 ? 0 : v).toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
 }
 
 const MIN_CORRELATION_PAIRS = 3;

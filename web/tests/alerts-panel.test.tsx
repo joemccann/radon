@@ -84,7 +84,7 @@ describe("AlertsPanel", () => {
       expect(start).toBeGreaterThan(-1);
       return css.slice(start, css.indexOf("}", start));
     };
-    for (const sel of [".alerts-form__label", ".alerts-form__submit", ".alerts-empty", ".alerts-count"]) {
+    for (const sel of [".alerts-form__label", ".alerts-form__select", ".alerts-form__submit", ".alerts-empty", ".alerts-count"]) {
       const body = block(sel);
       expect(body).toContain("text-transform: none");
       expect(body).toContain("font-family: var(--font-sans)");
@@ -211,6 +211,41 @@ describe("AlertsPanel", () => {
     fireEvent.change(screen.getByLabelText(/channel/i), { target: { value: "service_health" } });
     fireEvent.click(screen.getByRole("button", { name: /add rule/i }));
     await waitFor(() => expect(screen.getByText(/no alert rules/i)).toBeTruthy());
+  });
+
+  it("sentence-cases select labels via an opt-out class while posting raw keys", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    mockFetchSequence([
+      () => new Response(JSON.stringify({ rules: [] }), { status: 200 }),
+      (url, init) => {
+        calls.push({ url, init });
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      },
+      () => new Response(JSON.stringify({ rules: [] }), { status: 200 }),
+    ]);
+    render(<AlertsPanel />);
+    await waitFor(() => expect(screen.getByText(/no alert rules/i)).toBeTruthy());
+
+    for (const name of [/metric/i, /operator/i, /channel/i]) {
+      expect(screen.getByLabelText(name).classList.contains("alerts-form__select")).toBe(true);
+    }
+    expect(screen.getByRole("option", { name: "Flow strength" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Pushover" })).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText(/ticker/i), { target: { value: "AAPL" } });
+    fireEvent.change(screen.getByLabelText(/threshold/i), { target: { value: "70" } });
+    expect(calls).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: /add rule/i }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].url).toBe("/api/alerts");
+    expect(calls[0].init?.method).toBe("POST");
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({
+      ticker: "AAPL",
+      metric: "flow_strength",
+      op: ">",
+      threshold: 70,
+      channel: "pushover",
+    });
   });
 
   it("renders no raw hex colors", async () => {

@@ -143,6 +143,13 @@ describe("BreadthPanel — content", () => {
     expect(screen.getByText("13/20")).toBeTruthy();
   });
 
+  it("groups thousands in signed counts (no-slop 16)", () => {
+    const data = buildBreadthData();
+    renderPanel(hookState({ data: { ...data, latest: { ...data.latest!, cum_ad_change_20d: -5138 } } }));
+    expect(screen.getAllByText("-5,138").length).toBeGreaterThan(0);
+    expect(screen.queryByText("-5138")).toBeNull();
+  });
+
   it("renders both chart titles", () => {
     renderPanel(hookState({ data: buildBreadthData() }));
     expect(screen.getByText("CUMULATIVE A/D LINE VS SPY")).toBeTruthy();
