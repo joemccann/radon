@@ -53,7 +53,7 @@ def selection(**overrides):
 
 def verdict(**overrides):
     value = {"supported": True, "material_new_evidence": True, "not_market_ear": True, "no_unresolved_conflicts": True,
-             "not_forecast_as_flow": True, "reason": "matches page 1"}
+             "not_forecast_as_flow": True, "figures_complete": True, "reason": "matches page 1"}
     value.update(overrides)
     return value
 
@@ -68,7 +68,7 @@ def match(passing=None, **overrides):
         figures = []
         for i in offered:
             ok = passing is None or i in passing
-            figure = {"id": i, "is_chart": ok, "visible_text": ["Net foreign purchases of US equities"] if ok else [],
+            figure = {"id": i, "is_chart": ok, "complete_figure": ok, "visible_text": ["Net foreign purchases of US equities"] if ok else [],
                       "shows": "chart" if ok else "logo", "supports_finding": ok, "caption": f"{i} matched caption"}
             figure.update(overrides.get(i, {}))
             figures.append(figure)
@@ -574,11 +574,11 @@ def test_no_figure_showing_the_finding_holds_and_publishes_nothing(tmp_path, pub
 
 
 def test_a_chart_claim_without_transcribed_labels_does_not_pass():
-    claimed = {"figures": [{"id": "f1", "is_chart": True, "supports_finding": True, "visible_text": [], "shows": "x"},
-                           {"id": "f2", "is_chart": True, "supports_finding": True, "visible_text": [" "], "shows": "x"},
+    claimed = {"figures": [{"id": "f1", "is_chart": True, "complete_figure": True, "supports_finding": True, "visible_text": [], "shows": "x"},
+                           {"id": "f2", "is_chart": True, "complete_figure": True, "supports_finding": True, "visible_text": [" "], "shows": "x"},
                            {"id": "f3", "is_chart": False, "supports_finding": True, "visible_text": ["BTIG"], "shows": "logo"},
-                           {"id": "f9", "is_chart": True, "supports_finding": True, "visible_text": ["RSI (14)"], "shows": "x"},
-                           {"id": "f4", "is_chart": True, "supports_finding": True, "visible_text": ["RSI (14)"], "shows": "x"}]}
+                           {"id": "f9", "is_chart": True, "complete_figure": True, "supports_finding": True, "visible_text": ["RSI (14)"], "shows": "x"},
+                           {"id": "f4", "is_chart": True, "complete_figure": True, "supports_finding": True, "visible_text": ["RSI (14)"], "shows": "x"}]}
     assert set(intake.figure_match_passed(claimed, {"f1", "f2", "f3", "f4"})) == {"f4"}
     assert intake.figure_match_passed({"figures": "nope"}, {"f1"}) == {}
     assert intake.figure_match_passed(None, {"f1"}) == {}
@@ -714,3 +714,53 @@ def test_publisher_evidence_preserves_the_approved_visual_role_in_posts(tmp_path
     assert len(posts)==1
     assert posts[0]['source']['publisher']=='LSEG'
     assert posts[0]['source']['publisherEvidence']=={'page':2,'source_quote':'\n'.join(labels),'kind':role}
+
+
+@pytest.mark.parametrize("complete", [False, None, "true", 1])
+def test_incomplete_labelled_chart_is_held_before_factual_verification(tmp_path, publisher, complete):
+    reviewer = Reviewer([selection(), match(f1={
+        "complete_figure": complete,
+        "visible_text": ["T50 Longs - SPX (Daily)", "Morgan Stanley Prime Brokerage"],
+        "shows": "Axes, legend and report footer; plot body is cropped off",
+    }), verdict()])
+    assert build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", []) == []
+    assert [call[0] for call in reviewer.calls] == ["text", "match"]
+    assert not publisher.stored
+    assert any(entry.get("held") == "FIGURE_MISMATCH" for entry in audit_of(tmp_path))
+
+
+def test_missing_figure_completeness_is_not_accepted_as_legacy_match():
+    result = match()(["f1"])
+    result["figures"][0].pop("complete_figure")
+    assert intake.figure_match_passed(result, {"f1"}) == {}
+
+
+@pytest.mark.parametrize("complete", [False, None, "true", 1])
+def test_generic_factual_verdict_cannot_publish_incomplete_image(tmp_path, publisher, complete):
+    reviewer = Reviewer([selection(), verdict(figures_complete=complete)])
+    assert build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", []) == []
+    assert [call[0] for call in reviewer.calls] == ["text", "match", "multimodal"]
+    assert not publisher.stored
+    assert any(entry.get("held") == "VERIFY_FAILED" for entry in audit_of(tmp_path))
+
+
+def test_figure_verdict_requires_explicit_completeness_but_text_only_does_not():
+    factual = verdict()
+    factual.pop("figures_complete")
+    assert not intake.verdict_passed(factual, has_figures=True)
+    assert intake.verdict_passed(factual)
+
+
+def test_completeness_prompts_reject_footer_strip_without_requiring_table_axes():
+    assert "legend/footer strips" in intake.FIGURE_MATCH_INSTRUCTION
+    assert "tables require their headers and all rows/columns, not chart axes" in intake.FIGURE_MATCH_INSTRUCTION
+    assert "only axes, legends or a report footer fails" in intake.VERIFY_INSTRUCTION
+
+
+def test_final_publication_requires_completeness_field_not_just_factual_gates(tmp_path, publisher):
+    factual = verdict()
+    factual.pop("figures_complete")
+    reviewer = Reviewer([selection(), factual])
+    assert build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", []) == []
+    assert not publisher.stored
+    assert any(entry.get("held") == "VERIFY_FAILED" for entry in audit_of(tmp_path))
