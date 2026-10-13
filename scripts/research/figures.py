@@ -168,6 +168,33 @@ def _kind(count, images):
     return 'mixed'
 
 
+def _drawn_bounds(page, form=None, parent_matrix=None, depth=0):
+    """Yield drawn bounds in page coordinates, composing ancestor Form matrices.
+
+    PDFium reports a child's bounds in its containing Form's coordinate frame.
+    The object's own matrix is already included in those bounds; only ancestor
+    matrices belong here. Flattening get_objects() loses that distinction.
+    """
+    matrix = parent_matrix or pdfium.PdfMatrix()
+    for obj in page.get_objects(max_depth=1, form=form):
+        if obj.type == pdfium_c.FPDF_PAGEOBJ_FORM:
+            if depth < 7:
+                yield from _drawn_bounds(page, obj, obj.get_matrix().multiply(matrix), depth + 1)
+            continue
+        if obj.type not in DRAWN:
+            continue
+        try:
+            left, bottom, right, top = obj.get_bounds()
+            points = [matrix.on_point(x, y) for x, y in
+                      ((left, bottom), (left, top), (right, bottom), (right, top))]
+        except pdfium.PdfiumError:
+            continue
+        bounds = (min(p[0] for p in points), min(p[1] for p in points),
+                  max(p[0] for p in points), max(p[1] for p in points))
+        if all(math.isfinite(v) for v in bounds):
+            yield bounds, obj.type == pdfium_c.FPDF_PAGEOBJ_IMAGE
+
+
 def _figures_on_page(pdf_path, page_number):
     """(figures, skip_reason) for one 1-based page. skip_reason is set only when the frame is unusable."""
     with pdfium.PdfDocument(str(Path(pdf_path).resolve(strict=True))) as document:
@@ -178,12 +205,8 @@ def _figures_on_page(pdf_path, page_number):
             return [], reason
         rotation = page.get_rotation()
         items = []
-        for obj in page.get_objects(filter=DRAWN, max_depth=8):
-            try:
-                box = _norm(obj.get_bounds(), frame)
-            except pdfium.PdfiumError:
-                continue
-            is_image = obj.type == pdfium_c.FPDF_PAGEOBJ_IMAGE
+        for bounds, is_image in _drawn_bounds(page):
+            box = _norm(bounds, frame)
             if box[2] > box[0] and box[3] > box[1] and not _page_artwork(box, is_image):
                 items.append((box, is_image))
         textpage = page.get_textpage()

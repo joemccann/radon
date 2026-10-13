@@ -1,3 +1,8 @@
+# PDF source chart crop completeness (2026-10-13)
+
+- PDFium Form child object bounds are local to the containing Form. Compose ancestor matrices before page normalization; never double-apply the child object matrix. Include noncommuting nested transforms in regression fixtures.
+- Visible matching labels are not proof of a complete chart. Require explicit full-body completeness in both source-image matching and final publication verification; missing verdicts fail closed. Compare repaired pixels to the original full page before replacing a published asset.
+
 # Lessons
 ## 2026-10-09 — IR PR titles are one sentence, never the page dump
 
