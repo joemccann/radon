@@ -11427,3 +11427,35 @@ Delta Python files, three runs: 413 passed each. Delta cloud files, three runs: 
 | 3 | 14,969 passed / 2 skipped / 23 subtests | 10,575 passed / 1,072 files | 2,820 passed / 8 skipped | 0 added / 0 removed |
 
 Base cloud at `66719c09` with OpenSSL 3.6.5, Bash 5.3.20, caddy, and the 3.13 venv: 2,820 passed / 8 skipped, sorted FAILED list empty. Every closing FAILED list is empty. The comparison worktree was removed.
+
+## Delta audit 2026-10-13
+
+Range `66719c09424fa2df47878ca148705dab4f45d06c..35118b0883c52ffcda5a292d27227940c55c94cc`: 34 commits / 302 paths. Newest trusted checkpoint is the 2026-10-12 collaborator comment on issue #83 (`audited-through: 66719c09424fa2df47878ca148705dab4f45d06c`). No open `testing/` pull request. Open PR #1060 is `performance/2026-10-12` and is outside this loop. Numbering continues after T-550. The checkpoint carried no open verified T finding.
+
+The codemap on this range was generated at `66719c09` (`tools/codemap/codemap.json` meta `generated_at` 2026-10-12T09:00:05Z), so it does not contain edges for files added later. `rg` confirms `scripts/ib_realtime_server.js` symbolSamples is pinned only by `web/tests/ib-index-stream-contracts.test.ts:49-57`. Selected-leg close (`web/lib/order/positionTrade.ts`, `web/lib/order/selectedLegReservations.ts`) is executed by `web/tests/position-trade-selected-legs.test.ts`, `web/tests/selected-leg-reservations.test.ts`, and the armed `POST /api/orders/place` assertion at `web/tests/position-tab-selected-legs.test.tsx:124-140`. Margin retention executes real SQLite deletes in `scripts/tests/test_account_margin_samples_retention.py:114`. No new coverage-threshold drop and no shard exclusion growth. `ci.yml` added `e2e/selected-leg-close.spec.ts`, `e2e/mobile-selected-leg-close.spec.ts`, `e2e/mobile-price-format.spec.ts`, and `e2e/newsfeed-generated-charts.spec.ts` to the financial smoke job. New `pytest.skip` lines at `cloud/tests/test_control_service_wiring.py:182` and `:219` run the non-root sudo path and skip only when `euid == 0`. The delta touches 131 test files, which is not most of the suite; the new relay test was run three times and the three closing rounds cover the rest. No carried open T finding.
+
+### T-551 — P2 — deleting the search company name still passes
+
+`scripts/ib_realtime_server.js:2897` adds `description` when the IB contract has one. `TickerSearch` prints it only when that field arrives (`web/components/TickerSearch.tsx:549`). `web/tests/ib-index-stream-contracts.test.ts:54-57` matches source text for `c.contract` and `primaryExch` and does not mention `description`. `web/tests/ticker-search-rows.test.ts:63-71` posts a fake `searchResults` message that already contains the name. Deleting the spread left those files green (6 passed) and the new handler test red (2 failed): nested `NVIDIA CORP` and flat `APPLE INC` were absent from the message the real `symbolSamples` callback sent.
+
+Acceptance: executing `wireIBEvents`'s `symbolSamples` callback, a nested contract with `description: "NVIDIA CORP"` and `primaryExch` sends `searchResults` whose first result includes that description, `primaryExchange: "NASDAQ"`, and `derivativeSecTypes`. A blank description and a missing description omit the key. A flat legacy sample still forwards `description`. The source-string pin may stay green when the spread is deleted; this case must fail.
+
+Audited through: 35118b0883c52ffcda5a292d27227940c55c94cc on 2026-10-13 — 1 new finding
+
+## Remediation 2026-10-13
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-551 | DONE | Spread deleted: `ib-index-stream-contracts.test.ts` 4 passed and `ticker-search-rows.test.ts` 2 passed; `ib-search-description.test.ts` 2 failed (no `description` on either payload). Restored `scripts/ib_realtime_server.js:2897`. Both relay files 6 passed in each of three serial runs. Product source unchanged. |
+
+### Closing gates 2026-10-13
+
+The delta touches 131 test files, so the three closing rounds are the scoped rerun. Discarded before these rounds: a cloud run with `/usr/bin/python3` 3.9 on `PATH` failed `test_precloud_rollback_keeps_immutable_journal_support` (`zip(strict=True)`) and `test_notify_proxy_outlives_the_run_handoff_and_relays_while_docker_runs`; both passed in 2.04s at `66719c09` and in 1.98s at HEAD once `python3` was 3.13.16. Two full Vitest runs at the default 50% worker budget timed out the same five `next.config.mjs` imports at 5000ms under load 12–32; those five files then passed 29/29 alone. The counted Vitest rounds set `VITEST_MAX_WORKERS=4`. No assertion, skip, or coverage threshold changed.
+
+| Round | Root Python | Root Vitest | Cloud | Failed-list diff against base `66719c09` |
+|---|---|---|---|---|
+| 1 | 15,387 passed / 2 skipped / 23 subtests | 10,789 passed / 21 skipped / 1,099 files | 2,862 passed / 8 skipped | 0 added / 0 removed |
+| 2 | 15,387 passed / 2 skipped / 23 subtests | 10,789 passed / 21 skipped / 1,099 files | 2,862 passed / 8 skipped | 0 added / 0 removed |
+| 3 | 15,387 passed / 2 skipped / 23 subtests | 10,789 passed / 21 skipped / 1,099 files | 2,862 passed / 8 skipped | 0 added / 0 removed |
+
+Base cloud at `66719c09` with Python 3.13.16, OpenSSL 3.6.5, Bash 5.3.20, and caddy: 2,820 passed / 8 skipped, sorted FAILED list empty. Every closing FAILED list is empty. The count difference is tests added on main after that SHA. The comparison worktree was removed. Playwright was not run. No local screenshot or 390px result is claimed.
