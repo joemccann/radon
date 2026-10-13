@@ -243,7 +243,7 @@ def test_rotated_page_crop_lands_on_displayed_chart(tmp_path):
     _assert_chart_fills_crop(path, found[0]["bbox"], tmp_path, "rotated")
 
 
-def _form_pdf(content, matrices, extras="", image=None):
+def _form_pdf(content, matrices, extras="", image=None, page_content="/Fm Do"):
     """Nest content in Form XObjects; matrices run outermost to innermost."""
     def stream(dictionary, value):
         packed = zlib.compress(value.encode())
@@ -254,7 +254,7 @@ def _form_pdf(content, matrices, extras="", image=None):
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
         (f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {W} {H}] /Contents 4 0 R "
          f"/Resources << /XObject << /Fm 6 0 R >> >> {extras} >>").encode(),
-        stream("<<", "/Fm Do"),
+        stream("<<", page_content),
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     ]
     for index, matrix in enumerate(matrices):
@@ -433,3 +433,70 @@ def test_extra_box_spanning_two_detected_charts_is_not_a_third_figure(tmp_path):
     union = {"page": 1, "bbox": [70 / W, 90 / H, 542 / W, 714 / H]}
     found = figures.catalogue(path, [1], tmp_path / "out", extras=[union])
     assert len(found) == 2 and all(f.get("origin") is None for f in found)
+
+
+def test_clipped_series_do_not_pull_surrounding_narrative_into_crop(tmp_path):
+    # The time series continues outside the plot viewport. GetBounds includes
+    # invisible points there; those must never turn nearby prose into a title.
+    viewport = "q 72 400 468 280 re W n\n"
+    overflow = "1 w 70 180 m 200 770 l 400 300 l 550 740 l S\n"
+    content = (text(72, 750, "Narrative above the instrument.")
+               + text(72, 700, "Refined product margins", 12)
+               + viewport + chart(72, 400, 540, 680) + overflow + "Q\n"
+               + text(72, 380, "2020 2026")
+               + text(72, 362, "Sources: Market data", 8)
+               + text(72, 300, "Narrative below the instrument."))
+    path = tmp_path / "clipped-series.pdf"
+    path.write_bytes(_pdf(content))
+    found = figures.detect(path, 1)
+    assert len(found) == 1
+    assert found[0]["bbox"][1] > (H - 740) / H
+    assert found[0]["bbox"][3] < (H - 320) / H
+    assert found[0]["title"] == "Refined product margins"
+
+
+@pytest.mark.parametrize("raster", [False, True])
+def test_nested_form_clip_is_transformed_with_visible_bounds(tmp_path, raster):
+    content = "q 40 40 300 120 re W n\n"
+    content += image_chart(0, 0, 500, 250) if raster else chart(0, 0, 500, 250)
+    content += "Q\n"
+    path = tmp_path / "clipped-forms.pdf"
+    path.write_bytes(_form_pdf(content, [(0.8, 0, 0, 1.1, 100, 350), (0.7, 0, 0, 0.8, 30, 20)],
+                               image=(8, 8, GRAY) if raster else None))
+    fig = figures.detect(path, 1)[0]
+    # Visible local viewport, composed through both ancestor matrices.
+    expected = [146.4 / W, 1 - 512.8 / H, 314.4 / W, 1 - 407.2 / H]
+    assert fig["bbox"] == pytest.approx([expected[0] - figures.MARGIN, expected[1] - figures.MARGIN,
+                                         expected[2] + figures.MARGIN, expected[3] + figures.MARGIN], abs=0.001)
+
+
+def test_page_clip_applies_to_nested_form_objects(tmp_path):
+    path = tmp_path / "ancestor-clip.pdf"
+    path.write_bytes(_form_pdf(chart(20, 20, 420, 190), [(1, 0, 0, 1, 50, 350)],
+                               page_content="q 100 400 250 100 re W n /Fm Do Q"))
+    fig = figures.detect(path, 1)[0]
+    assert fig["bbox"] == pytest.approx([100 / W - figures.MARGIN, 1 - 500 / H - figures.MARGIN,
+                                         350 / W + figures.MARGIN, 1 - 400 / H + figures.MARGIN], abs=0.001)
+
+
+def test_compact_chart_header_and_wrapped_sources_and_notes_stay_inside(tmp_path):
+    content = (text(72, 748, "Narrative before the chart.")
+               + text(72, 711, "Refined product margins", 12)
+               + text(72, 696, "January 2020 to September 2026; USD per barrel", 10)
+               + chart(72, 400, 540, 680)
+               + text(72, 372, "Sources: Market data from", 8)
+               + text(180, 372, "several providers.", 8)
+               + text(72, 358, "Notes: Brent uses futures, gasoline uses", 8)
+               + text(260, 358, "spot prices, and diesel uses futures.", 8)
+               + text(72, 344, "The crack spread represents a refinery margin", 8)
+               + text(72, 330, "using two gasoline barrels and one distillate barrel.", 8)
+               + text(72, 300, "Narrative after the chart."))
+    path = tmp_path / "wrapped-notes.pdf"
+    path.write_bytes(_pdf(content))
+    fig = figures.detect(path, 1)[0]
+    assert fig["title"].startswith("Refined product margins")
+    assert fig["source_line"].endswith("several providers.")
+    assert fig["bbox"][1] <= (H - 720) / H
+    assert fig["bbox"][1] > (H - 740) / H
+    assert fig["bbox"][3] >= (H - 330) / H
+    assert fig["bbox"][3] < (H - 310) / H
