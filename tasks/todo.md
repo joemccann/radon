@@ -1,3 +1,14 @@
+# Task: Two-second market-hours portfolio/orders polling (2026-10-13)
+
+- [x] T1 depends_on: [] Inspect current hooks, market state, callers, rate limits and regression coverage.
+- [x] T2 depends_on: [T1] Add configurable healthy polling intervals; use 2 seconds for OPEN and existing 30 seconds otherwise; preserve inactive/hidden and failure/rate-limit guards.
+- [x] T3 depends_on: [T1] Add fake-timer and mocked browser coverage for cadence and market-state transitions.
+- [ ] T4 depends_on: [T2, T3] Repair startup-hook and browser-curation contracts from CI; create PR, verify exact-head GitHub CI and browser evidence, notify once green.
+
+Dependency graph: T1 -> T2, T3; T2 + T3 -> T4.
+
+Review: WorkspaceShell uses existing OPEN state for a 2-second healthy snapshot cadence. Extended cadence remains 30 seconds; closed portfolio polling remains paused and orders page remains 30 seconds. Deduplication, pending-sync10 seconds and original failure/rate-limit floors retained. Added 22 fake-timer hook regressions and 4 mocked browser cases with screenshots. No local suites. CI38426522529 passed all three browser shards and the new hook cases, and identified startup-spy options and held-out browser curation expectations; align the spy and curate the modified existing spec. Final exact-head CI pending.
+
 # Task: AI Industry implementation and verification (2026-10-10)
 
 - [x] T1 depends_on: [] Backend refinements in scripts/llm_token_index.py and scripts/ai_cycle (P1 SLA, H2 statement tags, C1 ask cohort).
@@ -9408,3 +9419,27 @@ Acceptance: leg P&L / abs(leg entry dollars) *100, signed results, zero/missing 
 - [ ] T3 Exact-head CI, mobile browser screenshots, notification and closing review. depends_on: [T2]
 Dependency graph: T1 -> T2 -> T3.
 No local test suites; use GitHub runners. Existing original checkout task edits preserved.
+## Return column and calculable combo return (2026-10-13)
+- [x] T1 Validate requested return basis, existing provenance and screenshot math. depends_on: []
+- [x] T2 Add calculation, column placement and browser red regressions. depends_on: [T1]
+- [ ] T3 Implement leg Return placement and calculable combo return with explicit basis. depends_on: [T1,T2]
+- [ ] T4 Independent agent verification, exact-head CI, desktop/mobile visuals and notification. depends_on: [T3]
+Dependency graph: T1 -> T2 -> T3 -> T4.
+Acceptance: dollar P&L only in P&L; percentages in Return. SNDK pictured $10,575 P&L / $15,275 net debit = 69.2%. Leg percentages retain own absolute entry-value basis. Preserve financial signs, zero/missing-data integrity, verified capital provenance; label any entry-value fallback explicitly and do not invent risk capital for credits.
+
+Baseline evidence: cab1a987, GitHub CI38429636088/job115408226153: 7/7 new Return column regressions failed (136 existing files passed). Implementation follows captured red.
+
+## P&L story entry/exit timing (2026-10-13)
+
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
+- [x] T1 depends_on: [] Reproduce the supplied TQQQ story against canonical journal/fill evidence; trace entry-time transport and render.
+- [x] T2 depends_on: [T1] Write failing data-path, story-render and mobile share regressions for entry/exit timing and hold duration.
+- [x] T3 depends_on: [T2] Repair the smallest affected source path without inventing unavailable timestamps or altering P&L arithmetic.
+- [x] T4 depends_on: [T3] Run focused and full gates, browser E2E and inspect the actual rendered story; update incident docs.
+- [ ] T5 depends_on: [T4] Publish the fix PR using the required template, wait for every exact-head CI check and confirm one green Pushover receipt.
+
+Plan review: The screenshot already renders the exit timestamp. Entry time and duration must come from matched executions or canonical journal evidence, including fully closed stock positions; missing precision remains explicit.
+
+Verification review: Live canonical twenty-fill TQQQ sequence reproduced four stock-timing failures; export-content tests reproduced three rendering failures. Focused share suites: 56 passed. New timing helper: 100% line coverage, 96.66% branches. Full Vitest after latest-main rebase: 10,885 passed, 21 skipped; full Python: 15,394 passed, 2 skipped (OpenSSL3 and isolated MENTHORQ_USER as before). TypeScript/scoped ESLint clean. Production compile and 12 desktop/mobile Playwright cases passed. Actual 1080x1920 story and iPhone preview visually inspected: ENTRY 8:46 AM PDT, HELD 44 minutes, EXIT 9:30 AM PDT; supplied P&L and existing entry-price identity preserved. No broker actions or journal writes. Delivery receipts will be recorded on the PR without a bookkeeping-only source push.
+
+CI curation review: PR #1068 head 8e517148 failed the changed-held-out-spec guard (CI 38434204207, scripts-df job 115423979347). The existing mobile executed/journal spec was held out, not curated; local reproduction returned 1 failed/5 passed. Promote the fully preflighted seven-case WebKit spec to the curated CI command and remove its held-out ledger membership, retaining dated review evidence. No test assertions or gates are weakened.

@@ -86,6 +86,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
   const { toasts, exitingIds, addToast, upsertToast, dismissToast, hasToastKey } = useToast();
   const marketState = useMarketHours();
   const isMarketActive = marketState !== MarketState.CLOSED;
+  const accountPollIntervalMs = marketState === MarketState.OPEN ? 2_000 : 30_000;
   // CME Globex session gate for the header ES/NQ/RTY futures strip — runs ~23h,
   // independent of the equities session above.
   const globexOpen = useGlobexOpen();
@@ -100,6 +101,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
   } = usePortfolio(isMarketActive, {
     initialSnapshot: initialPortfolio,
     includeEntryDates: isOrdersPage,
+    pollIntervalMs: accountPollIntervalMs,
   });
 
   const portfolioSymbols = useMemo(
@@ -133,7 +135,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
     lastSync: ordersLastSync,
     syncNow: ordersSyncNow,
     updateData: updateOrdersData,
-  } = useOrders(shouldAutoSyncOrders);
+  } = useOrders(shouldAutoSyncOrders, accountPollIntervalMs);
 
   const orderSymbols = useMemo(
     () => (orders?.open_orders ?? []).map((o) => o.contract.symbol),

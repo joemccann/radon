@@ -22,9 +22,9 @@ import {
   getAvgEntry,
   getInitialValue,
   getPnlDollars,
-  getPnlPct,
-  resolveReturnCapital,
-  describeReturnCapital,
+  getDisplayReturnPct,
+  resolveDisplayReturnBasis,
+  describeDisplayReturnBasis,
   getMultiplier,
   getLegMultiplier,
   resolveLegPnl,
@@ -200,7 +200,7 @@ function makePositionExtract(prices?: Record<string, PriceData>, riskFreeRate: n
       case "entry_cost": return resolveEntryCost(pos);
       case "market_value": return mv;
       case "pnl": return getPnlDollars(pos, mv);
-      case "pnl_pct": return getPnlPct(pos, mv);
+      case "pnl_pct": return getDisplayReturnPct(pos, mv);
       case "expiry": return pos.expiry === "N/A" ? null : pos.expiry;
       default: return null;
     }
@@ -357,14 +357,15 @@ function LegRow({
       {columns.pnl && (
         <td className={`right cell-muted ${legPnl != null ? (legPnl >= 0 ? "positive" : "negative") : ""}`}>
           <span data-testid="position-leg-pnl">{legPnl != null ? `${legPnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(legPnl))}` : "—"}</span>
-          <span style={{ display: "block", fontSize: 12 }}>
+        </td>
+      )}
+      {columns.pnl_pct && (
+        <td data-testid="position-leg-return-cell" className={`right cell-muted ${legPnlPct != null ? (legPnlPct >= 0 ? "positive" : "negative") : ""}`}>
           <span data-testid="position-leg-pnl-pct" aria-label="P&L % of entry value" title="P&L % of entry value">
             {legPnlPct != null ? `${legPnlPct >= 0 ? "+" : "-"}${Math.abs(legPnlPct).toFixed(1)}%` : "—"}
-          </span> of entry
           </span>
         </td>
       )}
-      {columns.pnl_pct && <td></td>}
       {showExpiry && columns.expiry && <td></td>}
     </tr>
   );
@@ -420,9 +421,9 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
   const mv = resolveRealtimeMarketValue(pos, prices) ?? resolveMarketValue(pos);
   const entryCost = resolveEntryCost(pos);
   const pnl = getPnlDollars(pos, mv);
-  const pnlPct = getPnlPct(pos, mv);
-  const returnBasis = resolveReturnCapital(pos);
-  const returnTitle = describeReturnCapital(returnBasis);
+  const pnlPct = getDisplayReturnPct(pos, mv);
+  const returnBasis = resolveDisplayReturnBasis(pos);
+  const returnTitle = describeDisplayReturnBasis(returnBasis);
   const avgEntry = getAvgEntry(pos);
   const initialValue = getInitialValue(pos);
   // Legs on disagreeing bases have no aggregate basis to show (T-253).
@@ -760,7 +761,7 @@ export default function PositionTable({
                 activeKey={sort.key}
                 direction={sort.direction}
                 onToggle={toggle}
-                helpText="Return uses exact max risk, net debit paid, or isolated broker-observed opening margin. Opening credits and unlinked capital remain N/A."
+                helpText="Return prefers verified max risk, debit paid, or isolated broker-observed opening margin. A combo with complete entry basis can use positive net entry debit, labeled as entry return. Legs use absolute entry value. Opening credits without verified capital remain N/A."
                 helpAriaLabel="Explain position return basis"
               />
             )}

@@ -630,7 +630,7 @@ available; portfolio and media archives cover only their respective data.
 | Piece | When (UTC) | What |
 |---|---|---|
 | `radon-portfolio-archive.timer` | **05:40** | Cold-archive `portfolio_snapshots` older than 30d → local monthly `jsonl.gz` → **Backblaze B2** upload → DELETE from Turso. Heartbeat: `portfolio-archive`. `TimeoutStartSec=7200`. |
-| `radon-db-retention.timer` | **08:10** | Keep-latest prune on append-only scan tables (gex/vcg/scanner/…); never touches journal or portfolio. Heartbeat: `db-retention`. |
+| `radon-db-retention.timer` | **08:10** | Keep-latest prune on append-only scan tables (gex/vcg/scanner/…), and delete `account_margin_samples` older than `MARGIN_SAMPLES_KEEP_DAYS` in [`scripts/db/retention.py`](../scripts/db/retention.py). A sample cited by `position_capital_observations` stays, as does a sample inside `MARGIN_SAMPLES_BRACKET_WINDOW_S` of a fill that no VALID observation covers. Never touches journal or portfolio. Heartbeat: `db-retention`. |
 | `radon-db-backup.timer` | **09:00** | Full Turso dump after archive + retention. |
 | `radon-media-backup.timer` | **10:15** | Mirror `media.radon.run` tree (`/home/radon/radon-cloud/media`) → B2 prefix `media/`. Heartbeat: `media-backup`. `TimeoutStartSec=3600`. |
 

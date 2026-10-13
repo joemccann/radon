@@ -237,7 +237,6 @@ mobile-charts.spec.ts
 mobile-cockpit-book-layout.spec.ts
 mobile-combo-instrument-switcher.spec.ts
 mobile-daily-dark-pool-history.spec.ts
-mobile-executed-journal.spec.ts
 mobile-info-tooltip-safe-area.spec.ts
 mobile-newsfeed-layout.spec.ts
 mobile-order-ticket.spec.ts
@@ -277,7 +276,6 @@ pltr-chain-position-focus.spec.ts
 portfolio-leg-row-runtime.spec.ts
 portfolio-market-closed.spec.ts
 portfolio-ratio-risk-reversal-label.spec.ts
-portfolio-request-cadence.spec.ts
 portfolio-return-capital.spec.ts
 price-chart-theme.spec.ts
 profile-credentials-tab.spec.ts
@@ -408,6 +406,7 @@ ws-connection-stability.spec.ts
 # REVIEWED 2026-10-08 mobile-executed-journal.spec.ts — local mobile Chromium
 #   393x852 run 5/5, incl. the tap-to-share wire assertion (PR #957).
 # REVIEWED 2026-10-09 mobile-executed-journal.spec.ts - local Chrome 393x852: share panel sits outside the pressable card, Story is above the fills, and the tall close hands radon-pnl-story.png to the share sheet. 4/4 Mobile executed orders passed.
+# REVIEWED 2026-10-13 mobile-executed-journal.spec.ts - Promoted to curated CI after production next start preflight: 7/7 iPhone/WebKit cases passed, including the actual TQQQ story PNG with entry/exit timestamps and 44-minute hold; PNG and browser preview visually inspected.
 # REVIEWED 2026-10-09 release-status.spec.ts - local Chrome on next dev, 1440 and 390: chip is the local channel, panel says Local build, Reload is absent, and GET /api/version is not sent. Held out of e2e-financial-smoke because that job serves next start, the production channel. Production poll and update states are in web/tests/release-status.test.tsx.
 # REVIEWED 2026-09-06 mobile-newsfeed-layout.spec.ts — compiled mobile Chromium
 #   next start verification passed in the 65/65 mobile financial group.
@@ -498,7 +497,6 @@ ws-connection-stability.spec.ts
 #   Remaining mobile polish cases are unchanged (no new mobile behavior).
 #   Held out of e2e-financial-smoke; not curated because the edit is a
 #   deletion of a removed-page test, not new browser behavior.
-# REVIEWED 2026-09-22 portfolio-request-cadence.spec.ts - statically reviewed
 # palette-only assertions replaced with direct ticker search focus; initial-read
 # and recovery request-count assertions are unchanged. Shortcut/search behavior
 # runs in curated clear-shell.spec.ts and ticker-search-chain.spec.ts, with

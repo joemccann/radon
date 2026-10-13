@@ -1176,3 +1176,10 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 ## 2026-10-13 - Per-leg P&L includes the requested percentage
 - When extending combo P&L, confirm both dollar and percentage views are covered. Label a leg entry-value percentage explicitly and retain the separate verified-capital return metric; do not omit percentages when the user requests them.
+
+## 2026-10-13 - Return percentages belong in the Return column
+- Place requested per-leg percentages in the existing Return column, respecting its visibility; keep the P&L column dollar-only. For requested calculable combo returns, use a documented, measurable denominator and show its basis; do not leave a measurable positive net-entry debit unavailable solely because risk-capital metadata is absent.
+
+## 2026-10-13 - P&L exports need the actual stock timing path
+- Verify entry/exit metadata from the execution data producer through the final PNG, including fully closed stocks; an options-only matcher and successful PNG dimensions do not prove timing is present.
+- Consume prior closes before using an opening execution timestamp, preserve exact fill timing over a date-only portfolio fallback, and derive hold duration from measured timestamps. Pacific timestamp labels must reflect PST/PDT instead of appending PST year-round.
