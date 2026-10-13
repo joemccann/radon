@@ -59,86 +59,109 @@ function rowToPost(row: PostRow) {
   };
 }
 
+type FeedRow = PostRow & {
+  provenance_json?: string | null;
+  feedback_vote?: string | null;
+  feedback_reasons?: string | null;
+  feedback_comment?: string | null;
+};
+
+type FeedPost = ReturnType<typeof rowToPost> & { feedback?: PostFeedback };
+
+const POSTS_WITH_FEEDBACK_SQL = `SELECT p.*, r.provenance_json,
+       f.vote AS feedback_vote, f.reasons AS feedback_reasons, f.comment AS feedback_comment
+FROM posts p
+LEFT JOIN research_post_sources r ON r.post_id = p.id
+LEFT JOIN (
+  SELECT f.post_id, f.vote, f.reasons, f.comment
+  FROM research_feedback f
+  WHERE f.target = 'post' AND f.rowid = (
+    SELECT g.rowid FROM research_feedback g
+    WHERE g.post_id = f.post_id AND g.target = 'post'
+    ORDER BY g.created_at DESC, g.rowid DESC LIMIT 1
+  )
+) f ON f.post_id = p.id
+ORDER BY p.timestamp DESC
+LIMIT 500`;
+
+const POSTS_WITH_SOURCES_SQL = `SELECT p.*, r.provenance_json
+FROM posts p LEFT JOIN research_post_sources r ON r.post_id = p.id
+ORDER BY p.timestamp DESC
+LIMIT 500`;
+
+const POSTS_LEGACY_SQL = `SELECT posts.*, NULL AS provenance_json
+FROM posts
+WHERE id NOT GLOB 'research-*'
+ORDER BY timestamp DESC
+LIMIT 500`;
+
 /** Demo and production databases apply additive migrations independently. */
-function isMissingResearchSourceTable(error: unknown): boolean {
+function isMissingTable(error: unknown, table: string): boolean {
   return error instanceof Error
     && (error as Error & { code?: string }).code === "SQLITE_ERROR"
-    && /^(?:SQLITE_ERROR:\s*)?(?:SQLite error:\s*)?no such table:\s*(?:main\.)?research_post_sources$/i.test(error.message);
+    && new RegExp(
+      `^(?:SQLITE_ERROR:\\s*)?(?:SQLite error:\\s*)?no such table:\\s*(?:main\\.)?${table}$`,
+      "i",
+    ).test(error.message);
+}
+
+function isMissingResearchSourceTable(error: unknown): boolean {
+  return isMissingTable(error, "research_post_sources");
+}
+
+function isMissingResearchFeedbackTable(error: unknown): boolean {
+  return isMissingTable(error, "research_feedback");
+}
+
+function parseFeedback(row: FeedRow): PostFeedback | undefined {
+  if (row.feedback_vote !== "up" && row.feedback_vote !== "down") return undefined;
+  let reasons: FeedbackReason[] = [];
+  try {
+    const parsed = JSON.parse(String(row.feedback_reasons ?? "[]"));
+    if (Array.isArray(parsed)) {
+      reasons = parsed.filter((r): r is FeedbackReason => typeof r === "string" && r in FEEDBACK_REASONS);
+    }
+  } catch { /* keep the vote, drop unreadable reasons */ }
+  return { vote: row.feedback_vote, reasons, comment: String(row.feedback_comment ?? "") };
+}
+
+function postsFromResult(rows: unknown[], { withFeedback }: { withFeedback: boolean }): FeedPost[] {
+  const posts: FeedPost[] = rows.map((raw) => {
+    const row = raw as FeedRow;
+    const post = rowToPost(row);
+    const feedback = withFeedback ? parseFeedback(row) : undefined;
+    return feedback ? { ...post, feedback } : post;
+  }).filter(post => !post.id.startsWith("research-") || post.source);
+  if (!posts.some(post => post.source)) {
+    return posts.map(({ feedback: _feedback, ...rest }) => rest);
+  }
+  return posts.filter(post => post.feedback?.vote !== "down");
 }
 
 async function fetchPosts() {
   // 500 wide rows — give the bounded chokepoint more headroom than the
   // default 3s single-row path without removing the hang ceiling.
   const options = { timeoutMs: 8_000, label: "newsfeed-posts" };
-  // Select the available post columns during independent additive migrations.
-  // rowToPost is the API field allowlist; absent image_sources becomes {}.
-  let result;
+  // One Turso execute when both additive tables exist (PERF-006). Absent
+  // tables fall back one hop; network/auth/SQL errors still fail the feed.
   try {
-    result = await dbExecute({
-      sql: `SELECT p.*, r.provenance_json
-            FROM posts p LEFT JOIN research_post_sources r ON r.post_id = p.id
-            ORDER BY p.timestamp DESC
-            LIMIT 500`,
-      args: [],
-    }, options);
+    const result = await dbExecute({ sql: POSTS_WITH_FEEDBACK_SQL, args: [] }, options);
+    return postsFromResult(result.rows, { withFeedback: true });
   } catch (error) {
-    // Only the absent additive table is compatible with a legacy read.
-    // Network, authorization, and all other SQL failures retain normal errors
-    // (or cachedRead's last-good result), never silently changing the feed.
-    if (!isMissingResearchSourceTable(error)) throw error;
-    result = await dbExecute({
-      sql: `SELECT posts.*, NULL AS provenance_json
-            FROM posts
-            WHERE id NOT GLOB 'research-*'
-            ORDER BY timestamp DESC
-            LIMIT 500`,
-      args: [],
-    }, options);
-  }
-  const posts: (ReturnType<typeof rowToPost> & { feedback?: PostFeedback })[] =
-    result.rows.map((r) => rowToPost(r as unknown as PostRow))
-      .filter(post => !post.id.startsWith("research-") || post.source);
-  // Feedback only exists for research posts; legacy and demo databases never pay for the overlay.
-  if (!posts.some(post => post.source)) return posts;
-  const feedback = await latestFeedback();
-  return posts
-    // The operator's latest thumbs-down retracts a research post; the row itself is untouched.
-    .filter(post => feedback.get(post.id)?.vote !== "down")
-    .map(post => feedback.has(post.id) ? { ...post, feedback: feedback.get(post.id) } : post);
-}
-
-let feedbackTableSeen = false;
-
-/** Latest operator vote per research post. A missing table (unmigrated database) is an empty map, never a feed outage. */
-async function latestFeedback(): Promise<Map<string, PostFeedback>> {
-  const votes = new Map<string, PostFeedback>();
-  try {
-    if (!feedbackTableSeen) {
-      // Probe without raising: a SQL error resets the pooled client, which a missing additive table must not do.
-      const probe = await dbExecute({
-        sql: "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'research_feedback'", args: [],
-      }, { timeoutMs: 3_000, label: "newsfeed-feedback-probe" });
-      if (!probe.rows.length) return votes;
-      feedbackTableSeen = true;
-    }
-    const result = await dbExecute({
-      sql: `SELECT f.post_id, f.vote, f.reasons, f.comment FROM research_feedback f
-            WHERE f.target = 'post' AND f.rowid = (
-              SELECT g.rowid FROM research_feedback g WHERE g.post_id = f.post_id AND g.target = 'post'
-              ORDER BY g.created_at DESC, g.rowid DESC LIMIT 1)`,
-      args: [],
-    }, { timeoutMs: 3_000, label: "newsfeed-feedback" });
-    for (const row of result.rows) {
-      if (row.vote !== "up" && row.vote !== "down") continue;
-      let reasons: FeedbackReason[] = [];
+    if (isMissingResearchFeedbackTable(error)) {
       try {
-        const parsed = JSON.parse(String(row.reasons ?? "[]"));
-        if (Array.isArray(parsed)) reasons = parsed.filter((r): r is FeedbackReason => typeof r === "string" && r in FEEDBACK_REASONS);
-      } catch { /* keep the vote, drop unreadable reasons */ }
-      votes.set(String(row.post_id), { vote: row.vote, reasons, comment: String(row.comment ?? "") });
+        const result = await dbExecute({ sql: POSTS_WITH_SOURCES_SQL, args: [] }, options);
+        return postsFromResult(result.rows, { withFeedback: false });
+      } catch (inner) {
+        if (!isMissingResearchSourceTable(inner)) throw inner;
+        const result = await dbExecute({ sql: POSTS_LEGACY_SQL, args: [] }, options);
+        return postsFromResult(result.rows, { withFeedback: false });
+      }
     }
-  } catch { /* feedback is an overlay; the feed must not depend on it */ }
-  return votes;
+    if (!isMissingResearchSourceTable(error)) throw error;
+    const result = await dbExecute({ sql: POSTS_LEGACY_SQL, args: [] }, options);
+    return postsFromResult(result.rows, { withFeedback: false });
+  }
 }
 
 export const radonCapability = "read";

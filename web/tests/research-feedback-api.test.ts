@@ -123,6 +123,10 @@ describe("POST /api/newsfeed/research/feedback", () => {
 describe("feed compatibility", () => {
   it("serves the feed when the feedback table has not been migrated yet", async () => {
     await db.execute("DROP TABLE research_feedback");
+    // dbExecute resets the pooled client on the missing-table error; keep
+    // the in-memory fixture the way the newsfeed legacy-table cases do.
+    const dbModule = await import("../lib/db");
+    vi.spyOn(dbModule, "getDb").mockReturnValue(db);
     expect((await feed()).map((p) => p.id)).toContain(POST_ID);
   });
 });
