@@ -34,6 +34,97 @@ def test_topic_folders_fall_back_to_page_one_brand(folder, text, expected):
     assert ident.publisher_source == ("page" if expected != "unknown" else "none")
 
 
+# Page excerpts from the ten production "unknown" posts of 2026-10-09/10 (all filed under other/).
+BODY = "Rates rose 25bp on the week while credit spreads widened 10bp. " * 8
+
+
+@pytest.mark.parametrize("name,pages,expected", [
+    ("10.06.2026-From-Ellen-Hazen-Congress-May-Change.pdf",
+     {1: "# The Investor’s Landscape ## Congress May Change. ### By Ellen Hazen, CFA, Chief Market Strategist\n" + BODY
+         + "\nF.L.PUTNAM INVESTMENT MANAGEMENT COMPANY **|** FLPUTNAM.COM **| September 2026**",
+      2: BODY + "\nF.L.PUTNAM INVESTMENT MANAGEMENT COMPANY **|** FLPUTNAM.COM **| September 2026**",
+      3: "Past performance may not be indicative of future results.\nF.L.PUTNAM INVESTMENT MANAGEMENT COMPANY **|** FLPUTNAM.COM **| September 2026**"},
+     "F.L.Putnam Investment Management"),
+    ("Financial_Forecasts_October_2026.pdf",
+     {1: "## RESEARCH\n\nresearch.natixis.com\n\n# Financial Forecasts\n\n### October 2026", 2: BODY + " Contact: a.b@natixis.com",
+      3: "This document has been prepared by Natixis. Links from Natixis web sites are meant for convenience only. www.natixis.com"},
+     "Natixis"),
+    ("AOM-Not-All-Tightening-Cycles-Are-Created-Equal.pdf",
+     {1: "# Alger On The Money\n# Not All Tightening Cycles Are Created Equal\n" + BODY,
+      2: "Copyright 2026 S&P Dow Jones Indices LLC, a subsidiary of S&P Global Inc. All rights reserved. "
+         "FactSet is an independent source, which Alger believes to be a reliable source. "
+         "**Fred Alger Management, LLC** 100 Pearl Street, New York, NY 10004 / 212.806.8800/ <u>www.alger.com</u> AOM 493"},
+     "Fred Alger Management"),
+    ("economic-commentary-091026.pdf",
+     {1: "### OCTOBER 9, 2026\n# WEEKLY ECONOMIC COMMENTARY\nGlobal Economic Research <u>northerntrust.com</u> "
+         "**Carl R. Tannenbaum** Chief Economist <u>ct92@ntrs.com</u>\n" + BODY + "\n*Northern Trust*",
+      2: BODY + "\n*Northern Trust*",
+      3: "© 2026 Northern Trust Corporation. Head Office: 50 South La Salle Street, Chicago, Illinois 60603 U.S.A.\n*Northern Trust*"},
+     "Northern Trust"),
+    ("credit-quarterly-new-terms.pdf",
+     {1: "# 3Q 2026 Credit Quarterly ## New Terms\n" + BODY,
+      2: "Oaktree believes that such information is accurate. © 2026 Oaktree Capital Management, L.P"},
+     "Oaktree Capital Management"),
+    ("made-in-europe.pdf",
+     {1: "### Global Investment Research | Equities # Made in Europe **AUTHORS** **Alex Nae** <u>Alex.Nae@lseg.com</u> "
+         "**David McNay, CFA** <u>David.McNay@lseg.com</u>",
+      2: "© [2026] London Stock Exchange Group plc and its applicable group undertakings (“LSEG”). Use of LSEG data requires a licence."},
+     "LSEG"),
+    ("2610-future-quality-insights.pdf",
+     {1: "# Future Quality Insights: what comes after the AI boom?\n" + BODY,
+      2: "**Amova Asset Management team in Europe** Email: EMEAenquiries@amova-am.com\n"
+         "**Important information:** This document is prepared by Amova Asset Management Co., Ltd. and/or its affiliates.",
+      3: "**United Kingdom:** This document is communicated by Amova Asset Management UK Limited, which is authorised by the FCA. "
+         "**Ireland:** This document is communicated by Amova Asset Management Ireland Limited."},
+     "Amova Asset Management"),
+    ("Market Musings - Time is of the Essence.pdf",
+     {1: "**INVESTMENT MANAGEMENT** ## Market Musings 10/26\n" + BODY,
+      2: "are entirely those of VLK Investment Management. **Capital at risk** vanlanschotkempen.com/ investment-management "
+         "©2026 Van Lanschot Kempen Investment Management Follow us on LinkedIn any given time, without prior notice."},
+     "Van Lanschot Kempen Investment Management"),
+    ("TDAGeneric_NAM_10122026.pdf",
+     {1: "NORTH AMERICA For Monday, October 12, 2026 ## Market Recap at 4 PM ET\n" + BODY,
+      2: "*For questions or comments about this report, email us at: **TheDay.Ahead@thomsonreuters.com.*** "
+         "*© 2026 London Stock Exchange Group plc. All rights reserved.* *LSEG* *10 Paternoster Square, London*"},
+     "LSEG"),
+    ("weekly-municipal-monitor-2026-10-08.pdf",
+     {1: "MARKETS October 08, 2026 # Weekly Municipal Monitor By Sam Weitzman\n" + BODY,
+      2: "*Source: Bloomberg, Franklin Templeton. As of 30 Sep 26.* ## Western Asset Key Themes for Muni Investors",
+      3: "© Western Asset Management Company, LLC 2025. Western Asset Management Company Ltd is authorised by the FCA."},
+     "Western Asset Management"),
+])
+def test_topic_folder_publisher_is_found_in_footers_disclaimers_and_domains(name, pages, expected):
+    ident = identify.identify(pages, meta(name, "other"), FOLDER)
+    assert ident.publisher == expected
+    # A grounded legal copyright line (LEGAL_PUBLISHERS) outranks document discovery.
+    assert ident.publisher_source == ("page" if ident.publisher_quote else "document")
+
+
+@pytest.mark.parametrize("pages", [
+    # Company names in the body and a data vendor's copyright are not a publisher.
+    {1: "# Apple Inc. raises guidance\nApple Inc. reported revenue up 8%. Microsoft Corporation lagged.\n" + BODY,
+     2: "Copyright 2026 S&P Dow Jones Indices LLC. Source: Bloomberg Finance L.P. Data: FactSet Research Systems Inc."},
+    # A single citation link is not a publisher either.
+    {1: BODY + " See https://www.reuters.com/markets/story-2026-10-01/", 2: BODY},
+])
+def test_topic_folder_without_publisher_evidence_stays_unknown(pages):
+    ident = identify.identify(pages, meta("note.pdf", "other"), FOLDER)
+    assert ident.publisher == "unknown"
+    assert ident.publisher_source == "none"
+
+
+def test_image_derived_text_names_the_publisher_of_a_scanned_pdf():
+    page = ("<!-- image-derived -->\nEconomics **Daily Alert** 7 October 2026 **Commonwealth Bank of Australia**\n"
+            "adam.donaldson@cba.com.au | carol.kong@cba.com.au\n<!-- /image-derived -->\n")
+    ident = identify.identify({1: page, 2: page}, meta("Economics Daily Alert.pdf", "other"), FOLDER)
+    assert ident.publisher == "Commonwealth Bank of Australia"
+
+
+def test_folder_publisher_still_wins_over_document_evidence():
+    ident = identify.identify({1: "© 2026 Northern Trust Corporation"}, meta("x.pdf", "jefferies"), FOLDER)
+    assert (ident.publisher, ident.publisher_source) == ("Jefferies", "folder")
+
+
 # --- report date ladder ----------------------------------------------------
 
 @pytest.mark.parametrize("text,expected,quote", [
@@ -190,11 +281,17 @@ def test_named_folder_priority_is_unchanged_and_new_fields_default():
 @pytest.mark.parametrize('text', [
     'LSEG market data shows that Reuters quoted Goldman Sachs.',
     'Photo: REUTERS/Adam Gray. LSEG shares rose.',
-    '© 2026 Independent Publisher. Data supplied by LSEG.',
 ])
 def test_body_mentions_photo_credits_and_data_credits_do_not_attribute_lseg(text):
     ident = identify.identify({1: 'A markets wrap.', 11: text}, meta('lseg reuters wrap.pdf', 'other'), FOLDER)
     assert ident.publisher == 'unknown' and ident.publisher_source == 'none'
+    assert ident.publisher_page is None and ident.publisher_quote is None
+
+
+def test_data_credit_names_the_copyright_holder_not_lseg():
+    ident = identify.identify({1: 'A markets wrap.', 11: '© 2026 Independent Publisher. Data supplied by LSEG.'},
+                              meta('lseg reuters wrap.pdf', 'other'), FOLDER)
+    assert ident.publisher == 'Independent Publisher' and ident.publisher_source == 'document'
     assert ident.publisher_page is None and ident.publisher_quote is None
 
 

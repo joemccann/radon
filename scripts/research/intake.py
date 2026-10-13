@@ -238,6 +238,10 @@ class Pipeline:
         review['triage'] = {'decision': decision, 'reason_code': code, 'overridden': bool((note or forced) and decision == 'drop')}
         if decision == 'drop' and not note and not forced:
             return self._finish(out, review, 'dropped', reason_code=code)
+        if identity.publisher == 'unknown':
+            # A feed card never says "unknown": the operator names the source from the Held review.
+            review['audit'].append({'held': 'PUBLISHER_UNKNOWN'})
+            return self._finish(out, review, 'held')
 
         fp = novelty.fingerprint(' '.join(text[p] for p in sorted(text)))
         duplicate = novelty.duplicate_of(fp, {k: v for k, v in self._fingerprints().items() if k != work['key']})
