@@ -86,7 +86,10 @@ test("modifying a held call subset uses selected basis and preserves the broker 
     return route.fulfill({ json: body });
   });
   await page.goto("/orders");
-  const row = page.locator("tbody tr").filter({ hasText: "SNDK Combo" }).first();
+  const row = page.getByRole("row")
+    .filter({ hasText: "Combo" })
+    .filter({ has: page.getByRole("button", { name: "View details for SNDK", exact: true }) });
+  await expect(row).toHaveCount(1);
   await expect(row).toBeVisible();
   await row.getByRole("button", { name: "MODIFY", exact: true }).click();
   const dialog = page.locator(".modify-dialog");
