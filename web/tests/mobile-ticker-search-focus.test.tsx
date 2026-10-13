@@ -63,7 +63,8 @@ describe("mobile ticker search focus", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close search" }));
     expect(screen.queryByRole("combobox")).toBeNull();
     expect(document.body.style.overflow).toBe("auto");
-    expect(document.activeElement).toBe(openSearch());
+    const reopenedInput = openSearch();
+    expect(document.activeElement).toBe(reopenedInput);
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("combobox")).toBeNull();
     expect(document.body.style.overflow).toBe("auto");
