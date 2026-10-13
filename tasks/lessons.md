@@ -1176,3 +1176,6 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 ## 2026-10-13 - Per-leg P&L includes the requested percentage
 - When extending combo P&L, confirm both dollar and percentage views are covered. Label a leg entry-value percentage explicitly and retain the separate verified-capital return metric; do not omit percentages when the user requests them.
+
+## 2026-10-13 - Return percentages belong in the Return column
+- Place requested per-leg percentages in the existing Return column, respecting its visibility; keep the P&L column dollar-only. For requested calculable combo returns, use a documented, measurable denominator and show its basis; do not leave a measurable positive net-entry debit unavailable solely because risk-capital metadata is absent.
