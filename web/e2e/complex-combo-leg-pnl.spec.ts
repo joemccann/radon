@@ -4,12 +4,12 @@ const now = new Date().toISOString();
 const dateOffset = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 const expiry = dateOffset(30);
 const legs = [
-  { direction: "LONG", type: "Call", strike: 1450, contracts: 10, entry_cost: 52766, avg_cost: 9999, market_price: 65, market_value: 65000 },
-  { direction: "SHORT", type: "Call", strike: 1600, contracts: 10, entry_cost: 13016, avg_cost: 1301.6, market_price: 17.72, market_value: -17720 },
-  { direction: "SHORT", type: "Put", strike: 1400, contracts: 5, entry_cost: 24475, avg_cost: 4895, market_price: 37, market_value: -18500 },
+  { direction: "LONG", type: "Call", strike: 1450, contracts: 10, entry_cost: 52766, avg_cost: 9999, market_price: 63.15, market_value: 63150 },
+  { direction: "SHORT", type: "Call", strike: 1600, contracts: 10, entry_cost: 13016, avg_cost: 1301.6, market_price: 17.55, market_value: -17550 },
+  { direction: "SHORT", type: "Put", strike: 1400, contracts: 5, entry_cost: 24475, avg_cost: 4895, market_price: 39.50, market_value: -19750 },
 ];
-const position = { id: 19, ticker: "SNDK", structure: "Combo (3 legs)", structure_type: "Combo", risk_profile: "undefined", expiry, contracts: 10, direction: "COMBO", entry_cost: 15275, max_risk: null, market_value: 28780, ib_daily_pnl: null, entry_date: dateOffset(-7), legs };
-const portfolio = { bankroll: 100000, peak_value: 100000, last_sync: now, total_deployed_pct: 0, total_deployed_dollars: 0, remaining_capacity_pct: 100, position_count: 1, defined_risk_count: 0, undefined_risk_count: 1, avg_kelly_optimal: null, exposure: {}, violations: [], account_summary: { net_liquidation: 100000, daily_pnl: 9000, unrealized_pnl: 13505, realized_pnl: 0, settled_cash: 100000, maintenance_margin: 0, excess_liquidity: 100000, buying_power: 200000, dividends: 0 }, positions: [position] };
+const position = { id: 19, ticker: "SNDK", structure: "Combo (3 legs)", structure_type: "Combo", risk_profile: "undefined", expiry, contracts: 10, direction: "COMBO", entry_cost: 15275, max_risk: null, market_value: 25850, ib_daily_pnl: null, entry_date: dateOffset(-7), legs };
+const portfolio = { bankroll: 100000, peak_value: 100000, last_sync: now, total_deployed_pct: 0, total_deployed_dollars: 0, remaining_capacity_pct: 100, position_count: 1, defined_risk_count: 0, undefined_risk_count: 1, avg_kelly_optimal: null, exposure: {}, violations: [], account_summary: { net_liquidation: 100000, daily_pnl: 9000, unrealized_pnl: 10575, realized_pnl: 0, settled_cash: 100000, maintenance_margin: 0, excess_liquidity: 100000, buying_power: 200000, dividends: 0 }, positions: [position] };
 const quote = { last: 1453.5, bid: 1453, ask: 1454, close: 1450, timestamp: now, lastIsCalculated: false, bidSize: 10, askSize: 10, volume: 10, delta: null, gamma: null, theta: null, vega: null, impliedVol: null, undPrice: 1453.5 };
 
 async function installFixtures(page: Page, sameDay = false, missingClose = false, zeroBasis = false) {
@@ -64,24 +64,34 @@ for (const width of [1440, 393]) {
   test(`complex ratio combo reconciles per-leg total and today P&L at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: width > 640 ? 1400 : 1000 });
     await installFixtures(page);
-    await expect.poll(() => page.evaluate(() => document.querySelector('[data-testid="position-cell-today-pnl"]')?.textContent ?? document.querySelector('[data-testid="mobile-position-today"]')?.textContent)).toContain("+$8,780");
+    await expect.poll(() => page.evaluate(() => document.querySelector('[data-testid="position-cell-today-pnl"]')?.textContent ?? document.querySelector('[data-testid="mobile-position-today"]')?.textContent)).toContain("+$5,850");
     if (width > 640) {
       const row = page.locator("tr", { hasText: "SNDK" }).first();
-      await expect(row.getByTestId("position-cell-pnl")).toHaveText("+$13,505");
-      await expect(row.getByTestId("position-cell-today-pnl")).toHaveText("+$8,780");
+      await expect(row.getByTestId("position-cell-pnl")).toHaveText("+$10,575");
+      await expect(row.getByTestId("position-cell-pnl-pct")).toHaveText("+69.2%");
+      await expect(row.getByTestId("position-cell-today-pnl")).toHaveText("+$5,850");
       await page.getByRole("button", { name: "Expand legs for SNDK" }).click();
-      await expect(page.getByTestId("position-leg-pnl")).toHaveText(["+$12,234", "-$4,704", "+$5,975"]);
-      await expect(page.getByTestId("position-leg-today-pnl")).toHaveText(["+$5,000", "+$2,280", "+$1,500"]);
+      await expect(page.getByTestId("position-leg-pnl")).toHaveText(["+$10,384", "-$4,534", "+$4,725"]);
+      await expect(page.getByTestId("position-leg-today-pnl")).toHaveText(["+$3,150", "+$2,450", "+$250"]);
+      for (const dollar of await page.getByTestId("position-leg-pnl").all()) {
+        await expect(dollar.locator("xpath=ancestor::td")).not.toContainText("%");
+      }
     } else {
       const card = page.getByTestId("mobile-position-SNDK");
-      await expect(card.getByTestId("mobile-position-pnl")).toHaveText("+$13,505");
-      await expect(card.getByTestId("mobile-position-today")).toContainText("+$8,780");
+      await expect(card.getByTestId("mobile-position-pnl")).toHaveText("+$10,575");
+      await expect(card).toContainText("+69.2%");
+      await expect(card.getByTestId("mobile-position-today")).toContainText("+$5,850");
       await card.getByRole("button", { name: "SNDK Combo (3 legs)", exact: true }).click();
-      await expect(card.getByTestId("position-leg-pnl")).toHaveText(["+$12,234", "-$4,704", "+$5,975"]);
-      await expect(card.getByTestId("position-leg-today-pnl")).toHaveText(["+$5,000", "+$2,280", "+$1,500"]);
+      await expect(card.getByTestId("position-leg-pnl")).toHaveText(["+$10,384", "-$4,534", "+$4,725"]);
+      await expect(card.getByTestId("position-leg-today-pnl")).toHaveText(["+$3,150", "+$2,450", "+$250"]);
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
     }
-    await expect(page.getByTestId("position-leg-pnl-pct")).toHaveText(["+23.2%", "-36.1%", "+24.4%"]);
+    await expect(page.getByTestId("position-leg-pnl-pct")).toHaveText(["+19.7%", "-34.8%", "+19.3%"]);
+    await expect(page.getByTestId("position-leg-return-cell")).toHaveCount(3);
+    for (const cell of await page.getByTestId("position-leg-return-cell").all()) {
+      await expect(cell.getByTestId("position-leg-pnl-pct")).toBeVisible();
+      await expect(cell.getByTestId("position-leg-pnl")).toHaveCount(0);
+    }
     for (const percent of await page.getByTestId("position-leg-pnl-pct").all()) {
       await expect(percent).toHaveAttribute("aria-label", "P&L % of entry value");
       await expect(percent).toHaveAttribute("title", "P&L % of entry value");
@@ -95,7 +105,7 @@ test("same-day ratio legs use their own entry basis", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await installFixtures(page, true);
   await page.getByRole("button", { name: "Expand legs for SNDK" }).click();
-  await expect(page.getByTestId("position-leg-today-pnl")).toHaveText(["+$12,234", "-$4,704", "+$5,975"]);
+  await expect(page.getByTestId("position-leg-today-pnl")).toHaveText(["+$10,384", "-$4,534", "+$4,725"]);
 });
 
 test("missing overnight close withholds that leg and the combo Today total", async ({ page }) => {
@@ -104,7 +114,7 @@ test("missing overnight close withholds that leg and the combo Today total", asy
   const row = page.locator("tr", { hasText: "SNDK" }).first();
   await expect(row.getByTestId("position-cell-today-pnl")).toHaveText("—");
   await page.getByRole("button", { name: "Expand legs for SNDK" }).click();
-  await expect(page.getByTestId("position-leg-today-pnl")).toHaveText(["+$5,000", "+$2,280", "—"]);
+  await expect(page.getByTestId("position-leg-today-pnl")).toHaveText(["+$3,150", "+$2,450", "—"]);
 });
 
 
@@ -114,7 +124,7 @@ for (const width of [1440, 393]) {
     await installFixtures(page, false, false, true);
     if (width > 640) await page.getByRole("button", { name: "Expand legs for SNDK" }).click();
     else await page.getByTestId("mobile-position-SNDK").getByRole("button", { name: "SNDK Combo (3 legs)", exact: true }).click();
-    await expect(page.getByTestId("position-leg-pnl").first()).toHaveText("+$65,000");
-    await expect(page.getByTestId("position-leg-pnl-pct")).toHaveText(["—", "-36.1%", "+24.4%"]);
+    await expect(page.getByTestId("position-leg-pnl").first()).toHaveText("+$63,150");
+    await expect(page.getByTestId("position-leg-pnl-pct")).toHaveText(["—", "-34.8%", "+19.3%"]);
   });
 }

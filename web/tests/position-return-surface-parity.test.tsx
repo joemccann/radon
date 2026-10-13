@@ -122,6 +122,32 @@ const ESTIMATED_CREDIT: PortfolioPosition = {
 };
 
 describe("position return surfaces use the shared basis", () => {
+  it("keeps positive net-entry combo Return and its basis aligned across surfaces", () => {
+    const pos: PortfolioPosition = {
+      ...DEFINED_CALL, ticker: "SNDK", structure: "Combo (3 legs)", structure_type: "Combo",
+      risk_profile: "undefined", direction: "COMBO", max_risk: null, entry_cost: 15275, market_value: 25850,
+      legs: [
+        { direction: "LONG", contracts: 10, type: "Call", strike: 1450, entry_cost: 52766, avg_cost: 5276.6, market_price: 63.15, market_value: 63150 },
+        { direction: "SHORT", contracts: 10, type: "Call", strike: 1600, entry_cost: 13016, avg_cost: 1301.6, market_price: 17.55, market_value: -17550 },
+        { direction: "SHORT", contracts: 5, type: "Put", strike: 1400, entry_cost: 24475, avg_cost: 4895, market_price: 39.5, market_value: -19750 },
+      ],
+    };
+    const portfolio = { positions: [pos] } as unknown as PortfolioData;
+    const rows = computeUnrealizedBreakdown(portfolio);
+    expect(rows[0].pnlPct).toBeCloseTo(10575 / 15275 * 100, 8);
+    const desktop = render(<PositionTable positions={[pos]} prices={{}} />);
+    expect(screen.getByText("+69.2%").getAttribute("title")).toContain("net entry debit");
+    desktop.unmount();
+    const mobile = render(<MobilePositionList positions={[pos]} prices={{}} />);
+    expect(screen.getAllByText("+69.23%").some(node => node.parentElement?.getAttribute("title")?.includes("net entry debit"))).toBe(true);
+    mobile.unmount();
+    const detail = render(<PositionTab position={pos} prices={{}} portfolio={portfolio} />);
+    expect(screen.getByText(/\+\$10,575 \(69\.2%\)/).getAttribute("title")).toContain("net entry debit");
+    detail.unmount();
+    render(<PnlBreakdownModal open title="Unrealized P&L" formula="Market value - entry cost" col1Header="Entry Cost" col2Header="Mkt Value" pctHeader="Return %" rows={rows} total={10575} onClose={() => undefined} />);
+    expect(screen.getByText("+69.23%").getAttribute("title")).toContain("net entry debit");
+  });
+
   it("keeps the breakdown helper in parity with positionUtils", () => {
     const row = computeUnrealizedBreakdown(PORTFOLIO)[0];
     expect(row.pnl).toBe(getPnlDollars(DEFINED_CALL));
