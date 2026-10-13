@@ -26,6 +26,8 @@ import {
   resolveReturnCapital,
   describeReturnCapital,
   getMultiplier,
+  getLegMultiplier,
+  resolveLegPnl,
   getLastPrice,
   getLastPriceIsCalculated,
   legPriceKey,
@@ -70,10 +72,6 @@ function useDensity(tableId: string): [DensityMode, () => void] {
 }
 
 /* ─── Helpers ──────────────────────────────────────────── */
-
-function getLegMultiplier(leg: { type: string }): number {
-  return leg.type === "Stock" ? 1 : 100;
-}
 
 /* ─── Sort extract factory ─────────────────────────────── */
 
@@ -232,6 +230,7 @@ export function resolveActiveInstrument(
 
 function LegRow({
   leg,
+  pnlValues,
   showExpiry,
   showUnderlying,
   showImplied,
@@ -242,6 +241,7 @@ function LegRow({
   onLegClick,
 }: {
   leg: PortfolioPosition["legs"][number];
+  pnlValues: ReturnType<typeof resolveLegPnl>;
   showExpiry: boolean;
   showUnderlying?: boolean;
   showImplied?: boolean;
@@ -259,12 +259,12 @@ function LegRow({
   const marketPrice = resolvedPrice.price;
   const isCalculated = resolvedPrice.isCalculated;
 
-  // Per-leg P&L: sign-aware (MV - EC)
-  const mult = leg.type === "Stock" ? 1 : 100;
-  const legMv = marketPrice != null ? marketPrice * leg.contracts * mult : leg.market_value != null ? Math.abs(leg.market_value) : null;
-  const legEc = Math.abs(leg.entry_cost);
+  const mult = getLegMultiplier(leg);
   const sign = leg.direction === "LONG" ? 1 : -1;
-  const legPnl = legMv != null ? sign * (legMv - legEc) : null;
+  const { marketValue: legMv, entryValue: legEc, pnl: legPnl, pnlPct: legPnlPct, todayPnl: legTodayPnl } = pnlValues;
+  const avgEntry = legEc != null && leg.contracts > 0
+    ? Math.abs(legEc) / (leg.contracts * mult)
+    : Number.isFinite(leg.avg_cost) ? Math.abs(leg.avg_cost) / mult : null;
 
   // A SHORT option leg's Avg Entry and Last Price are premium CREDITS and
   // display negative, matching the signed combo header row. Stock legs stay
@@ -309,7 +309,7 @@ function LegRow({
       {columns.direction && (descColumn === "direction" ? legDescription : <td></td>)}
       {showUnderlying && <td></td>}
       {columns.avg_entry && (
-        <td className="right cell-muted">{fmtPrice(displaySign * (Math.abs(leg.avg_cost) / mult))}</td>
+        <td className="right cell-muted">{avgEntry != null ? fmtPrice(displaySign * avgEntry) : "—"}</td>
       )}
       {columns.last_price && (
         <td className="right last-price-cell">
@@ -334,7 +334,11 @@ function LegRow({
         </td>
       )}
       {columns.daily_chg && <td></td>}
-      {columns.today_pnl && <td></td>}
+      {columns.today_pnl && (
+        <td data-testid="position-leg-today-pnl" className={`right cell-muted ${legTodayPnl != null ? (legTodayPnl >= 0 ? "positive" : "negative") : ""}`} title={pnlValues.todayBasis === "entry" ? "Today P&L from this leg's entry basis" : pnlValues.todayBasis === "previous-close" ? "Today P&L from this leg's previous close" : "Today P&L requires this leg's mark and baseline"}>
+          {legTodayPnl != null ? `${legTodayPnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(legTodayPnl))}` : "—"}
+        </td>
+      )}
       {/* Signed, like the parent row's equivalents (`mv` carries
           positionDirectionSign and Initial Value renders getInitialValue,
           which is negative for a short). Unsigned, a credit spread showed a
@@ -342,17 +346,22 @@ function LegRow({
           $1,600 — the short leg's credit rendered as a positive debit, with
           no arithmetic that reconciles the legs to the header. R-244. */}
       {columns.market_value && (
-        <td className="right cell-muted">{legMv != null ? fmtSignedUsd(sign * legMv) : "—"}</td>
+        <td className="right cell-muted">{legMv != null ? fmtSignedUsd(legMv) : "—"}</td>
       )}
       {columns.entry_cost && (
-        <td className="right cell-muted">{fmtPrice(sign * legEc)}</td>
+        <td className="right cell-muted">{legEc != null ? fmtPrice(legEc) : "—"}</td>
       )}
       {columns.initial_value && (
-        <td className="right cell-muted">{fmtSignedUsd(sign * legEc)}</td>
+        <td className="right cell-muted">{legEc != null ? fmtSignedUsd(legEc) : "—"}</td>
       )}
       {columns.pnl && (
         <td className={`right cell-muted ${legPnl != null ? (legPnl >= 0 ? "positive" : "negative") : ""}`}>
-          {legPnl != null ? `${legPnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(legPnl))}` : "—"}
+          <span data-testid="position-leg-pnl">{legPnl != null ? `${legPnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(legPnl))}` : "—"}</span>
+          <span style={{ display: "block", fontSize: 12 }}>
+          <span data-testid="position-leg-pnl-pct" aria-label="P&L % of entry value" title="P&L % of entry value">
+            {legPnlPct != null ? `${legPnlPct >= 0 ? "+" : "-"}${Math.abs(legPnlPct).toFixed(1)}%` : "—"}
+          </span> of entry
+          </span>
         </td>
       )}
       {columns.pnl_pct && <td></td>}
@@ -601,6 +610,7 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
           <LegRow
             key={`${pos.id}-leg-${i}`}
             leg={leg}
+            pnlValues={resolveLegPnl(pos, leg, prices)}
             showExpiry={showExpiry}
             showUnderlying={showUnderlying}
             showImplied={showImplied}

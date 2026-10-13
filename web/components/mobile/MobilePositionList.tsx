@@ -18,6 +18,8 @@ import {
   resolveReturnCapital,
   describeReturnCapital,
   getMultiplier,
+  getLegMultiplier,
+  resolveLegPnl,
   getLastPrice,
   getLastPriceIsCalculated,
   legPriceKey,
@@ -297,6 +299,7 @@ function PositionCard({ pos, prices, showExpiry, riskFreeRate, onLegClick }: { p
                 <LegItem
                   key={idx}
                   leg={leg}
+                  pnlValues={resolveLegPnl(pos, leg, prices)}
                   prices={prices}
                   ticker={pos.ticker}
                   expiry={pos.expiry}
@@ -313,7 +316,7 @@ function PositionCard({ pos, prices, showExpiry, riskFreeRate, onLegClick }: { p
   );
 }
 
-function LegItem({ leg, prices, ticker, expiry, showImplied, riskFreeRate, onClick }: { leg: PortfolioLeg; prices?: Record<string, PriceData>; ticker: string; expiry: string; showImplied: boolean; riskFreeRate: number | null; onClick: () => void }) {
+function LegItem({ leg, pnlValues, prices, ticker, expiry, showImplied, riskFreeRate, onClick }: { leg: PortfolioLeg; pnlValues: ReturnType<typeof resolveLegPnl>; prices?: Record<string, PriceData>; ticker: string; expiry: string; showImplied: boolean; riskFreeRate: number | null; onClick: () => void }) {
   let realtimeLeg: PriceData | null = null;
   if (leg.type === "Stock") {
     realtimeLeg = prices?.[ticker.toUpperCase()] ?? null;
@@ -328,11 +331,9 @@ function LegItem({ leg, prices, ticker, expiry, showImplied, riskFreeRate, onCli
   );
   const marketPrice = resolved.price;
   const isCalculated = resolved.isCalculated;
-  const mult = leg.type === "Stock" ? 1 : 100;
-  const legMv = marketPrice != null ? marketPrice * leg.contracts * mult : leg.market_value != null ? Math.abs(leg.market_value) : null;
-  const legEc = Math.abs(leg.entry_cost);
+  const mult = getLegMultiplier(leg);
   const sign = leg.direction === "LONG" ? 1 : -1;
-  const legPnl = legMv != null ? sign * (legMv - legEc) : null;
+  const { marketValue: legMv, entryValue: legEc, pnl: legPnl, pnlPct: legPnlPct, todayPnl: legTodayPnl } = pnlValues;
   const tone = toneFor(legPnl);
 
   // A SHORT option leg's Avg Entry and Last Price are premium CREDITS and
@@ -342,7 +343,10 @@ function LegItem({ leg, prices, ticker, expiry, showImplied, riskFreeRate, onCli
   const displaySign = leg.type === "Stock" ? 1 : sign;
   const signedLast = marketPrice != null ? displaySign * marketPrice : null;
   const { direction: legPriceDirection } = usePriceDirection(signedLast);
-  const legAvg = displaySign * (Math.abs(leg.avg_cost) / mult);
+  const legAvgMagnitude = legEc != null && leg.contracts > 0
+    ? Math.abs(legEc) / (leg.contracts * mult)
+    : Number.isFinite(leg.avg_cost) ? Math.abs(leg.avg_cost) / mult : null;
+  const legAvg = legAvgMagnitude != null ? displaySign * legAvgMagnitude : null;
 
   // Per-leg Black-Scholes, signed like the desktop LegRow implied cell.
   const legResult =
@@ -384,12 +388,19 @@ function LegItem({ leg, prices, ticker, expiry, showImplied, riskFreeRate, onCli
     >
       <div className="mobile-card__leg-head">
         <span className="mobile-card__leg-desc">{description}</span>
-        <span className="mobile-card__leg-pnl" style={{ color: toneColor(tone) }}>{fmtPnl(legPnl)}</span>
+        <div className="mobile-card__leg-pnl" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, color: toneColor(tone) }}>
+          <span data-testid="position-leg-pnl" aria-label="Total P&L">{fmtPnl(legPnl)}</span>
+          <span style={{ display: "block", fontSize: 12 }}>
+          <span data-testid="position-leg-pnl-pct" aria-label="P&L % of entry value" title="P&L % of entry value">
+            {legPnlPct != null ? `${legPnlPct >= 0 ? "+" : "-"}${Math.abs(legPnlPct).toFixed(1)}%` : "—"}
+          </span> of entry
+          </span>
+        </div>
       </div>
       <div className="mobile-card__leg-grid">
         <span className="mobile-card__leg-cell">
           <span className="mobile-card__leg-cell-k">Avg</span>
-          <span className="mobile-card__leg-cell-v">{fmtPrice(legAvg)}</span>
+          <span className="mobile-card__leg-cell-v">{legAvg != null ? fmtPrice(legAvg) : "—"}</span>
         </span>
         <span className="mobile-card__leg-cell">
           <span className="mobile-card__leg-cell-k">Last</span>
@@ -404,15 +415,19 @@ function LegItem({ leg, prices, ticker, expiry, showImplied, riskFreeRate, onCli
             <span className="mobile-card__leg-cell-v">{legImplied != null ? fmtPrice(legImplied) : "—"}</span>
           </span>
         )}
+        <span className="mobile-card__leg-cell" title={pnlValues.todayBasis === "entry" ? "Today P&L from this leg's entry basis" : pnlValues.todayBasis === "previous-close" ? "Today P&L from this leg's previous close" : "Today P&L requires this leg's mark and baseline"}>
+          <span className="mobile-card__leg-cell-k">Today P&L</span>
+          <span data-testid="position-leg-today-pnl" className="mobile-card__leg-cell-v" style={{ color: toneColor(toneFor(legTodayPnl)) }}>{fmtPnl(legTodayPnl)}</span>
+        </span>
         {/* Signed like the desktop LegRow: a short leg's MV and Initial Value
             are credits and must reconcile to the signed header (R-244). */}
         <span className="mobile-card__leg-cell">
           <span className="mobile-card__leg-cell-k">MV</span>
-          <span className="mobile-card__leg-cell-v">{legMv != null ? fmtSignedUsd(sign * legMv) : "—"}</span>
+          <span className="mobile-card__leg-cell-v">{legMv != null ? fmtSignedUsd(legMv) : "—"}</span>
         </span>
         <span className="mobile-card__leg-cell">
           <span className="mobile-card__leg-cell-k">Init</span>
-          <span className="mobile-card__leg-cell-v">{fmtSignedUsd(sign * legEc)}</span>
+          <span className="mobile-card__leg-cell-v">{legEc != null ? fmtSignedUsd(legEc) : "—"}</span>
         </span>
       </div>
     </div>

@@ -1170,3 +1170,9 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 - Regeneration must visually verify source dates and boundary-page publisher evidence before replacing stored provenance; preserve article publication timestamps.
 - A surpassed or passed market level is a threshold, not an exact observation; an exact comparison needs a separately reported measurement.
 - Monetary chart units require explicit matching currency on the cited amount; an unqualified billion value cannot be silently labeled USD. Range marks require one linked source interval, not independently grounded values from unrelated observations.
+
+## 2026-10-13 - Complex combo P&L must reconcile by leg
+- Calculate each leg using its own quantity, direction, persisted multiplier and entry basis; use the same resolved mark for total and daily P&L across desktop and mobile. Show leg daily results with their own baseline and withhold inferred aggregate daily results when any required leg baseline is missing. Never allocate a broker aggregate daily P&L across legs without leg-level evidence.
+
+## 2026-10-13 - Per-leg P&L includes the requested percentage
+- When extending combo P&L, confirm both dollar and percentage views are covered. Label a leg entry-value percentage explicitly and retain the separate verified-capital return metric; do not omit percentages when the user requests them.
