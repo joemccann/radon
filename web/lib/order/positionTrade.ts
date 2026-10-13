@@ -1,14 +1,14 @@
 /**
  * Position-deck trade construction.
  *
- * Turns a held position (whole combo OR one selected leg) + a user's
+ * Turns a held position (whole combo, one leg, or a selected subset) + a user's
  * action/qty/price into the two things every order surface needs: a branded
  * `OrderRiskInput` for `<OrderRiskGate>` and the `/api/orders/place` payload.
  *
  * This is the ONLY new money-math for the position-deck trade feature; it
  * mirrors the close-out + open conventions already proven in OrderTab's
  * NewOrderForm (single leg) and ComboOrderForm (combo), and adds the missing
- * case: trading ONE leg of a multi-leg combo as its own option order.
+ * cases: trading one leg as an option order and closing selected legs as a BAG.
  *
  * Conventions preserved (see CLAUDE.md):
  *  - leg.avg_cost is per-CONTRACT for options (already ×100), per-share stocks.
@@ -24,7 +24,11 @@ import type { OptionOrderRiskInput } from "@/lib/order";
 import { resolveClosingBasis } from "@/lib/positionUtils";
 import { fmtSignedPrice } from "@/lib/format";
 
-export type TradeTarget = { kind: "combo" } | { kind: "leg"; index: number };
+export type TradeTarget =
+  | { kind: "combo" }
+  | { kind: "leg"; index: number }
+  /** Close-only subset; indices refer to the original position's legs. */
+  | { kind: "legs"; indices: number[] };
 export type TradeAction = "BUY" | "SELL";
 
 export interface PositionTradeOrder {
@@ -83,6 +87,72 @@ export function heldComboUnits(position: PortfolioPosition): number {
   const contracts = tradeableOptionLegs(position).map(heldContracts).filter((c) => c > 0);
   if (contracts.length === 0) return 1;
   return contracts.reduce(greatestCommonDivisor);
+}
+
+/**
+ * Resolve a selected subset without borrowing the full combo's capital or
+ * basis. Sorting keeps the original held structure's leg order in the BAG.
+ * Missing basis and incompatible provenance remain unavailable; selecting
+ * homogeneous legs from a mixed parent can recover their own measured basis.
+ */
+export function resolvePositionTradeTarget(
+  position: PortfolioPosition,
+  target: TradeTarget,
+): PortfolioPosition | null {
+  if (target.kind === "combo") return position;
+  const indices = target.kind === "leg" ? [target.index] : target.indices;
+  if (!Array.isArray(indices) || indices.length === 0 || new Set(indices).size !== indices.length) return null;
+  if (indices.some(index => !Number.isInteger(index) || index < 0 || index >= position.legs.length)) return null;
+  const legs = [...indices].sort((a, b) => a - b).map(index => position.legs[index]);
+  if (legs.some(leg =>
+    (leg.type !== "Call" && leg.type !== "Put") ||
+    (leg.direction !== "LONG" && leg.direction !== "SHORT") ||
+    !Number.isFinite(leg.strike) || leg.strike! <= 0 ||
+    !Number.isSafeInteger(leg.contracts) || leg.contracts <= 0
+  )) return null;
+
+  const units = legs.map(leg => leg.contracts).reduce(greatestCommonDivisor);
+  const sources = new Set(legs.map(leg => leg.basis_source ??
+    (position.basis_source !== "mixed" ? position.basis_source : null)));
+  const unavailableBasis = legs.some(leg => !Number.isFinite(leg.entry_cost)) ||
+    sources.has("mixed") || sources.size > 1 ||
+    (position.basis_source === "mixed" && sources.has(null));
+  const basis = unavailableBasis ? null : legs.reduce((sum, leg) =>
+    sum + (leg.direction === "LONG" ? 1 : -1) * Math.abs(leg.entry_cost), 0);
+  const source = unavailableBasis ? "mixed" : [...sources][0];
+  const marketValue = legs.every(leg => Number.isFinite(leg.market_value))
+    ? legs.reduce((sum, leg) => sum + (leg.direction === "LONG" ? 1 : -1) * Math.abs(leg.market_value!), 0)
+    : null;
+  return {
+    ...position,
+    legs,
+    contracts: units,
+    direction: legs.length === 1 ? legs[0].direction : "COMBO",
+    structure: legs.map(leg => `${leg.direction} ${leg.type} $${leg.strike}`).join(" / "),
+    structure_type: legs.length === 1 ? legs[0].type : "Combo",
+    basis_source: source,
+    entry_cost: basis,
+    market_value: marketValue,
+    // These measurements describe the original full position, not this subset.
+    max_risk: null,
+    init_margin_at_entry: null,
+    init_margin_at_entry_metadata: null,
+    return_capital: null,
+    ib_daily_pnl: null,
+    kelly_optimal: null,
+    target: null,
+    stop: null,
+  };
+}
+
+/** Available held units of a target, with zero for an invalid selection. */
+export function heldPositionTradeUnits(position: PortfolioPosition, target: TradeTarget): number {
+  if (target.kind === "combo") return heldComboUnits(position);
+  if (target.kind === "leg") {
+    const leg = position.legs[target.index];
+    return leg ? heldContracts(leg) : 0;
+  }
+  return resolvePositionTradeTarget(position, target)?.contracts ?? 0;
 }
 
 /** True only when a combo SELL stays within the held BAG units. */
@@ -231,6 +301,10 @@ function isExcludedOrder(
 /** The action that CLOSES the target (so the UI can default to it). */
 export function closingActionFor(position: PortfolioPosition, target: TradeTarget): TradeAction {
   if (target.kind === "combo") return "SELL"; // SELL envelope flattens the combo
+  if (target.kind === "legs") {
+    const selected = resolvePositionTradeTarget(position, target);
+    return selected?.legs.length === 1 && selected.legs[0].direction === "SHORT" ? "BUY" : "SELL";
+  }
   const leg = position.legs[target.index];
   return leg.direction === "LONG" ? "SELL" : "BUY";
 }
@@ -263,6 +337,24 @@ export function buildPositionTradeOrder(params: {
 }): PositionTradeOrder | null {
   const { position, target, action, quantity, limitPrice, tif, quote, underlyingSpot } = params;
   const ticker = position.ticker;
+
+  if (target.kind === "legs") {
+    const selected = resolvePositionTradeTarget(position, target);
+    if (!selected || !Number.isSafeInteger(quantity) || quantity <= 0 || quantity > selected.contracts) return null;
+    if (action !== closingActionFor(position, target)) return null;
+    const order = buildPositionTradeOrder({
+      ...params,
+      position: selected,
+      target: selected.legs.length === 1 ? { kind: "leg", index: 0 } : { kind: "combo" },
+    });
+    if (!order?.isClosing) return null;
+    // The legacy single-leg path uses avg_cost. Selected subsets retire the
+    // measured leg entry values, including null when provenance is unavailable.
+    order.riskInput.closeOut = {
+      entryCostDollars: selected.entry_cost == null ? null : selected.entry_cost * quantity / selected.contracts,
+    };
+    return order;
+  }
 
   if (target.kind === "combo") {
     if (position.legs.length < 2) return null;

@@ -9364,3 +9364,19 @@ Hardening red evidence: PR #1047 head b04d698e8a2ee876c3acdc1c50de373f344ad0ed, 
 Remaining grounding review: User merged PR #1047 as 0d13b547fe207f9e1c8dce7e6b1cdd71b1ed2903 while the interrupted regression commit was local. Its exact head d912b054 passed 34 applicable checks; Pushover accepted request f9e50c84-c5d1-4775-8117-204a38aae203. Independent Luna review found missing-currency acceptance and fabricated range links. New branch codex/research-chart-grounding-completion starts from merged main; regression-only commit eb184063 adds two cases, with source repair gated on fresh CI red and preceding deployment completion.
 
 Remaining grounding red evidence: PR #1054 exact head 7b6fc79029d6f5f1e411428430a39162c3235eb6, CI 38317612906 job 115037983114 reproduced both new failures with 2,482 other shard tests passing. Repair remains scoped to generated-chart evidence and is followed by full exact-head CI.
+
+## Select and close combo legs (2026-10-12)
+
+Dependency graph: T1 -> T2 + T3 -> T4 -> T5.
+- [x] T1 depends_on: [] Inspect screenshots, selected-leg scope, current tickets and order/risk contracts.
+- [x] T2 depends_on: [T1] Add validated selected-leg targets, normalized ratios, subset basis and pricing regressions.
+- [x] T3 depends_on: [T1] Add desktop/mobile leg selection and close-only ticket with selected and remaining leg review.
+- [x] T4 depends_on: [T2, T3] Verify focused unit/request tests, Playwright desktop/mobile and screenshots; independent review.
+- [x] T5 depends_on: [T4] Run full relevant gates, update owner documentation and commit reviewed feature.
+
+Plan review: reuse existing /api/orders/place and OrderRiskGate. Selected LONG legs sell and SHORT legs buy back, retaining the BAG structure/envelope convention and contract ratios. No live order placement.
+
+- [ ] T6 depends_on: [T5] Publish requested PR, verify every exact-head CI check and accepted Pushover green notification.
+- [ ] T7 depends_on: [T6] Admin merge as requested, verify merge SHA and automatic production deploy.
+
+Review: Selected subsets use validated held identities, GCD ratios, selected signed basis and full-portfolio retained-risk projection. Working orders reserve exact economic close contracts; unknown snapshots fail closed. Relay/broker/degraded feed and oldest selected quote are checked before placement, including idle review age. Independent core, reservation and React reviews found no blockers. Desktop/mobile production preflight: 7 passed with mocked broker transport and screenshots inspected; no live orders. Full Python: 15,387 passed, 2 skipped using OpenSSL3 and an empty test-process MENTHORQ_USER to isolate ambient fallback. Docs/CI curation repairs preserve existing gates. TypeScript and scoped ESLint passed. Closing full Vitest: 10,787 passed, 21 skipped. Requested PR green and admin merge remain pending; their delivery receipts will be recorded on the PR without a bookkeeping-only source push.

@@ -811,6 +811,8 @@ jobs:
           e2e/chain-anchored-scroll.spec.ts
           e2e/chain-first-layout.spec.ts
           e2e/instrument-workspace-layout.spec.ts
+          e2e/selected-leg-close.spec.ts
+          e2e/mobile-selected-leg-close.spec.ts
           e2e/table-overflow-remediation.spec.ts
           e2e/performance-twr-payload.spec.ts
           e2e/leap-order-prefill.spec.ts
