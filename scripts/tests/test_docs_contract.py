@@ -2121,3 +2121,21 @@ class TestDocumentation20261013:
         assert "PUBLISHER_UNKNOWN" in doc
         assert "before fingerprinting" in doc
         assert "always-publish" in doc
+
+    def test_ramp_d7_cadence_is_not_the_monthly_source(self):
+        sys.path.insert(0, str(_ROOT))
+        from scripts.ai_cycle.collectors import RAMP_PRICE_WINDOW_DAYS
+        from scripts.ai_cycle.registry import series_cadence
+
+        assert series_cadence("D7", "tokens.price.blended.anthropic") == "daily"
+        assert series_cadence("D7", "tokens.volume.all") == "weekly"
+        assert series_cadence("D7", "tokens.spend.all") == "weekly"
+        cell = next(
+            line for line in (_ROOT / "docs/ai-infrastructure-operations.md").read_text().splitlines()
+            if line.startswith("| Ramp AI Index |")
+        )
+        assert f"{RAMP_PRICE_WINDOW_DAYS}-day" in cell
+        assert "daily" in cell
+        assert "weekly" in cell
+        assert "source cadence stays monthly" in cell
+        assert "staleness" in cell
