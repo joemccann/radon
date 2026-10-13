@@ -8,6 +8,8 @@
  * strip, the chart title, the brush, a null-DXY gap, and a NaN guard.
  */
 import React from "react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -167,6 +169,38 @@ describe("IeiHygPanel", () => {
     expect(screen.getByTestId("iei-hyg-dxy").textContent).toBe("98.80");
     expect(screen.getByText("3-7Y TREASURIES VS HIGH YIELD (IEI / HYG RATIO)")).toBeTruthy();
     expect(screen.getByTestId("iei-hyg-brush")).toBeTruthy();
+  });
+
+  it("draws the 52W low and high as one range tile with the ratio placed on it", () => {
+    mockUseIeiHyg.mockReturnValue(hookState({ data: buildData() }));
+    renderPanel();
+    expect(screen.queryByTestId("iei-hyg-strip-low")).toBeNull();
+    expect(screen.queryByTestId("iei-hyg-strip-high")).toBeNull();
+    const range = screen.getByTestId("iei-hyg-strip-range");
+    expect(range.textContent).toContain("1.4623");
+    expect(range.textContent).toContain("1.4758");
+    // Ratio 1.4623 sits on the 52W low: linear position 0% of the low-high span.
+    expect(screen.getByTestId("iei-hyg-range-marker").getAttribute("data-pos")).toBe("0.0");
+    expect(screen.getByText("Treasuries vs High Yield")).toBeTruthy();
+  });
+
+  it("fits the range dates on one line with short trader dates", () => {
+    mockUseIeiHyg.mockReturnValue(hookState({ data: buildData() }));
+    renderPanel();
+    const range = screen.getByTestId("iei-hyg-strip-range");
+    expect(range.textContent).toContain("Aug 21");
+    expect(range.textContent).toContain("Jun 26");
+    expect(range.textContent).not.toContain("2026");
+  });
+
+  it("re-columns the four-cell strip so no empty cell pads the row", () => {
+    mockUseIeiHyg.mockReturnValue(hookState({ data: buildData() }));
+    const { container } = renderPanel();
+    const strip = container.querySelector(".iei-hyg-strip .regime-strip") as HTMLElement;
+    expect(strip).toBeTruthy();
+    expect(strip.querySelectorAll(".regime-strip-cell").length).toBe(4);
+    const css = readFileSync(resolve(__dirname, "../app/globals.css"), "utf8");
+    expect(css).toMatch(/\.iei-hyg-strip \.regime-strip \{ grid-template-columns: repeat\(4, minmax\(0, 1fr\)\); \}/);
   });
 
   it("never emits NaN into chart paths, including across null DXY gaps", () => {

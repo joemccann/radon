@@ -307,7 +307,16 @@ describe("DispersionPanel — header strip", () => {
     expect(text).toContain("95-5 spread 2.41%");
     expect(text).toContain("14.43");
     expect(text).toContain("501 stocks / 11 sectors");
-    expect(text).toContain("stock 2.38 / sector 2.41 / VIX -0.31");
+    // The regime tile carries provenance, not a repeat of the three z tiles beside it.
+    expect(text).not.toContain("stock 2.38 / sector 2.41 / VIX -0.31");
+  });
+
+  it("folds source provenance into the regime tile so no tile orphans onto a second row", () => {
+    renderPanel(hookState({ data: buildData() }));
+    expect(screen.queryByTestId("dispersion-strip-source-updated")).toBeNull();
+    const regimeCell = screen.getByTestId("dispersion-strip-regime");
+    expect(regimeCell.textContent).toContain("501 stocks / 11 sectors");
+    expect(regimeCell.textContent).toContain(DATA_DATE);
   });
 
   it("renders a negative gap and a BROAD STRESS regime", () => {

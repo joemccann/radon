@@ -178,6 +178,14 @@ describe("DivYieldPanel — header strip", () => {
     expect(screen.getByTestId("divyield-updated").textContent).toContain(DATA_DATE);
   });
 
+  it("states pct above and count once, in one tile (they are the same fact)", () => {
+    renderPanel(hookState({ data: buildData() }));
+    expect(screen.queryByTestId("divyield-strip-count")).toBeNull();
+    const above = screen.getByTestId("divyield-strip-above");
+    expect(above.textContent).toContain("3.78%");
+    expect(above.textContent).toContain("19 / 503");
+  });
+
   it("labels an elevated reading through the shared regime helper", () => {
     const data = buildData();
     data.current = { ...data.current!, pct_above: 35, count_above: 176 };
