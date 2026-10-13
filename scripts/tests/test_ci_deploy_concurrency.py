@@ -46,7 +46,7 @@ TEST_JOBS = (
 def _declared_required_status_checks() -> set[str]:
     """Contexts the operator has declared as required status checks on `main`.
 
-    Verified against GitHub on 2026-09-07. Keep the offline mirror in sync
+    Verified against GitHub on 2026-10-12. Keep the offline mirror in sync
     after changing branch protection.
     """
     if not REQUIRED_STATUS_CHECKS.exists():
@@ -1075,3 +1075,11 @@ def test_cip018_revert_restores_v_suite_ownership_and_early_collection() -> None
     assert rows["scripts-gh"] == [
         "scripts/tests/test_[g-h]*.py", "scripts/tests/test_we*.py"
     ]
+
+
+def test_pr_body_template_is_a_declared_required_check() -> None:
+    """The PR body gate only blocks a merge when `main` requires it."""
+    workflow = yaml.safe_load(
+        (REQUIRED_STATUS_CHECKS.parent / "workflows" / "pr-body.yml").read_text()
+    )
+    assert workflow["jobs"]["pr-body"]["name"] in _declared_required_status_checks()
