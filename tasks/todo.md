@@ -8004,7 +8004,7 @@ Replace the anonymous composer-only overlay with a readable Clear conversation w
 - [x] T2 Composer implementation.
 - [x] T3 Conversation implementation.
 - [x] T4 Regression coverage and independent lifecycle review; all 8 Vitest shards and 10 browser scenarios pass on 0b54eecc.
-- [ ] T5 Exact-head CI and visual evidence, PR delivery.
+- [x] T5 Exact-head CI and visual evidence, PR delivery.
 
 ## Review
 PR #379: first GitHub run completed all 10 new browser scenarios; eight desktop/mobile light/dark screenshots inspected. Three unit assertions exposed missing whitespace across a heading line break; fixed the accessible text in the component. Remaining exact-head verification tracked in https://github.com/joemccann/radon/pull/379. No local suites executed. Sources: https://developer.apple.com/design/human-interface-guidelines/generative-ai and https://pair.withgoogle.com/guidebook-v2/chapter/explainability-trust/ . No system prompt or model-policy changes planned.
@@ -9388,7 +9388,16 @@ CI repair review: PR #1059 head e19f6ac8 failed two existing session-date assert
 - [x] T2 Add unit and browser regressions and record baseline failures in GitHub CI. depends_on: [T1]
 - [x] T3 Implement shared leg calculations and desktop/mobile parity. depends_on: [T1,T2]
 - [x] T4 Independent Sol and Luna verification; fix findings. depends_on: [T3]
-- [ ] T5 Exact-head CI green, visual verification, Pushover and final review. depends_on: [T4]
+- [x] T5 Exact-head CI green, visual verification, Pushover and final review. depends_on: [T4]
 Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
 
 Review checkpoint: baseline e15d6a26 GitHub CI 38412502774 failed as expected (new leg-helper tests: 11 failures, 1263 passes in affected shard). Sol and Luna independently verified signed SNDK 13505 total and 8780 daily, quantities, multipliers, basis and missing-data behavior. Local suites not run; static TypeScript/ESLint and diff checks passed. Exact-head green CI and screenshots pending.
+
+Final review: head 7a026b118fb22ca03200b3781386a48452893df8, 37 successful checks and 8 skipped, 16 focused calculation cases, 4 new browser cases, latest desktop/mobile artifacts visually verified. Sol and Luna verification complete; preserves single snapshots, finite signed leg mark parity, verified return-capital rules. Exactly one normal-priority radon PR green Pushover accepted HTTP200/status1. PR1064 open/mergeable; no merge or deployment performed.
+
+## Per-leg percentage P&L follow-up (2026-10-13)
+- [ ] T1 Define entry-value percentage and add calculation/browser red regressions. depends_on: []
+- [ ] T2 Add shared leg percentage and desktop/mobile display with explicit basis. depends_on: [T1]
+- [ ] T3 Sol/Luna verification, exact-head GitHub CI, screenshot check and green notification. depends_on: [T2]
+Dependency graph: T1 -> T2 -> T3.
+Acceptance: leg P&L / abs(leg entry dollars) *100, signed results, zero/missing basis unavailable. Display explicitly as entry-value P&L %, distinct from aggregate verified-capital Return %.

@@ -12,7 +12,7 @@ const position = { id: 19, ticker: "SNDK", structure: "Combo (3 legs)", structur
 const portfolio = { bankroll: 100000, peak_value: 100000, last_sync: now, total_deployed_pct: 0, total_deployed_dollars: 0, remaining_capacity_pct: 100, position_count: 1, defined_risk_count: 0, undefined_risk_count: 1, avg_kelly_optimal: null, exposure: {}, violations: [], account_summary: { net_liquidation: 100000, daily_pnl: 9000, unrealized_pnl: 13505, realized_pnl: 0, settled_cash: 100000, maintenance_margin: 0, excess_liquidity: 100000, buying_power: 200000, dividends: 0 }, positions: [position] };
 const quote = { last: 1453.5, bid: 1453, ask: 1454, close: 1450, timestamp: now, lastIsCalculated: false, bidSize: 10, askSize: 10, volume: 10, delta: null, gamma: null, theta: null, vega: null, impliedVol: null, undPrice: 1453.5 };
 
-async function installFixtures(page: Page, sameDay = false, missingClose = false) {
+async function installFixtures(page: Page, sameDay = false, missingClose = false, zeroBasis = false) {
   const activeQuotes = { SNDK: { ...quote, symbol: "SNDK" }, ...Object.fromEntries(legs.map((leg, i) => {
     const key = `SNDK_${expiry.replaceAll("-", "")}_${leg.strike}_${leg.type === "Call" ? "C" : "P"}`;
     return [key, { ...quote, symbol: key, last: leg.market_price, bid: null, ask: null, close: missingClose && i === 2 ? null : [60, 20, 40][i] }];
@@ -50,7 +50,7 @@ async function installFixtures(page: Page, sameDay = false, missingClose = false
   }, activeQuotes);
   await page.route("**/api/**", (route) => route.fulfill({ status: 200, json: {} }));
   const reads: Record<string, unknown> = {
-    portfolio: { ...portfolio, positions: [{ ...position, entry_date: sameDay ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date()) : position.entry_date }] },
+    portfolio: { ...portfolio, positions: [{ ...position, legs: zeroBasis ? legs.map((leg, i) => ({ ...leg, entry_cost: i === 0 ? 0 : leg.entry_cost })) : legs, entry_date: sameDay ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date()) : position.entry_date }] },
     orders: { last_sync: now, open_orders: [], executed_orders: [], open_count: 0, executed_count: 0 },
     "ib-status": { connected: true }, "ib/ws-ticket": { ticket: "test" },
     blotter: { as_of: now, summary: { realized_pnl: 0 }, closed_trades: [], open_trades: [] },
@@ -81,6 +81,11 @@ for (const width of [1440, 393]) {
       await expect(card.getByTestId("position-leg-today-pnl")).toHaveText(["+$5,000", "+$2,280", "+$1,500"]);
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
     }
+    await expect(page.getByTestId("position-leg-pnl-pct")).toHaveText(["+23.2%", "-36.1%", "+24.4%"]);
+    for (const percent of await page.getByTestId("position-leg-pnl-pct").all()) {
+      await expect(percent).toHaveAttribute("aria-label", "P&L % of entry value");
+      await expect(percent).toHaveAttribute("title", "P&L % of entry value");
+    }
     await expect(page.getByText("$52.77", { exact: true }).first()).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath(`complex-combo-leg-pnl-${width}.png`), fullPage: true });
   });
@@ -101,3 +106,15 @@ test("missing overnight close withholds that leg and the combo Today total", asy
   await page.getByRole("button", { name: "Expand legs for SNDK" }).click();
   await expect(page.getByTestId("position-leg-today-pnl")).toHaveText(["+$5,000", "+$2,280", "—"]);
 });
+
+
+for (const width of [1440, 393]) {
+  test(`zero leg entry value leaves P&L percentage unavailable at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await installFixtures(page, false, false, true);
+    if (width > 640) await page.getByRole("button", { name: "Expand legs for SNDK" }).click();
+    else await page.getByTestId("mobile-position-SNDK").getByRole("button", { name: "SNDK Combo (3 legs)", exact: true }).click();
+    await expect(page.getByTestId("position-leg-pnl").first()).toHaveText("+$65,000");
+    await expect(page.getByTestId("position-leg-pnl-pct")).toHaveText(["—", "-36.1%", "+24.4%"]);
+  });
+}

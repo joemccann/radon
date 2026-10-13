@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getTodayPnlDollars, getOptionDailyChg, getPnlDollars, resolveLegPnl, resolveRealtimeMarketValue } from "@/lib/positionUtils";
+import { getTodayPnlDollars, getOptionDailyChg, getPnlDollars, getPnlPct, resolveLegPnl, resolveRealtimeMarketValue } from "@/lib/positionUtils";
 import type { PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 
@@ -118,5 +118,44 @@ describe("complex combo per-leg P&L", () => {
     const pos=position(); pos.legs[0].market_price=null; pos.legs[0].market_value=null;
     expect(resolveLegPnl(pos,pos.legs[0],{}).pnl).toBeNull();
     expect(getPnlDollars(pos)).toBeNull();
+  });
+});
+
+
+describe("per-leg entry-value P&L percentage", () => {
+  it("measures each unequal-ratio SNDK leg against its own opening value", () => {
+    const pos=position();
+    const results=pos.legs.map(leg=>resolveLegPnl(pos,leg,prices()));
+    expect(results[0].pnlPct).toBeCloseTo(12234/52766*100,8);
+    expect(results[1].pnlPct).toBeCloseTo(-4704/13016*100,8);
+    expect(results[2].pnlPct).toBeCloseTo(5975/24475*100,8);
+    expect(results.map(result=>Number(result.pnlPct!.toFixed(2)))).toEqual([23.19,-36.14,24.41]);
+  });
+  it("applies a short's direction once and divides by its absolute entry credit", () => {
+    const pos=position();
+    const short={...pos.legs[2],entry_cost:-24475};
+    expect(resolveLegPnl(pos,short,prices()).pnlPct).toBeCloseTo(5975/24475*100,8);
+  });
+  it.each([0,NaN,Infinity,-Infinity,null as unknown as number,undefined as unknown as number])("withholds unavailable opening value %s", entry_cost => {
+    const pos=position();
+    expect(resolveLegPnl(pos,{...pos.legs[0],entry_cost},prices()).pnlPct).toBeNull();
+  });
+  it("withholds a percentage without a measurable market value", () => {
+    const pos=position();
+    const leg={...pos.legs[0],market_price:null,market_value:null};
+    expect(resolveLegPnl(pos,leg,{}).pnlPct).toBeNull();
+  });
+  it("withholds a nonfinite percentage from an extremely small opening value", () => {
+    const pos=position();
+    expect(resolveLegPnl(pos,{...pos.legs[0],entry_cost:Number.MIN_VALUE},prices()).pnlPct).toBeNull();
+  });
+  it("preserves a measured zero P&L as zero percent", () => {
+    const pos=position();
+    expect(resolveLegPnl(pos,{...pos.legs[0],entry_cost:65000},prices()).pnlPct).toBe(0);
+  });
+  it("preserves aggregate Return's verified-capital policy", () => {
+    const pos=position();
+    expect(getPnlPct(pos)).toBeNull();
+    expect(getPnlPct({...pos,risk_profile:"defined",max_risk:1000})).toBeCloseTo(1350.5,8);
   });
 });

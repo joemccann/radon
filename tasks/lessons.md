@@ -1173,3 +1173,6 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 ## 2026-10-13 - Complex combo P&L must reconcile by leg
 - Calculate each leg using its own quantity, direction, persisted multiplier and entry basis; use the same resolved mark for total and daily P&L across desktop and mobile. Show leg daily results with their own baseline and withhold inferred aggregate daily results when any required leg baseline is missing. Never allocate a broker aggregate daily P&L across legs without leg-level evidence.
+
+## 2026-10-13 - Per-leg P&L includes the requested percentage
+- When extending combo P&L, confirm both dollar and percentage views are covered. Label a leg entry-value percentage explicitly and retain the separate verified-capital return metric; do not omit percentages when the user requests them.
