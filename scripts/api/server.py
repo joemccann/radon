@@ -1300,7 +1300,7 @@ def _write_cache(path: Path, data: dict) -> None:
     fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp", prefix=".cache_")
     try:
         with os.fdopen(fd, "w") as f:
-            json.dump(data, f, indent=2)
+            json.dump(data, f, separators=(",", ":"))
         os.replace(tmp_path, str(path))
     except BaseException:
         try:
