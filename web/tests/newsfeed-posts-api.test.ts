@@ -17,6 +17,19 @@ CREATE TABLE IF NOT EXISTS posts (
   image_sources TEXT
  );
 CREATE TABLE research_post_sources (post_id TEXT PRIMARY KEY, provenance_json TEXT NOT NULL);
+CREATE TABLE research_feedback (
+  id TEXT PRIMARY KEY,
+  target TEXT NOT NULL,
+  post_id TEXT,
+  work_key TEXT,
+  file_id TEXT,
+  vote TEXT NOT NULL,
+  reasons TEXT NOT NULL DEFAULT '[]',
+  comment TEXT NOT NULL DEFAULT '',
+  actor TEXT NOT NULL,
+  snapshot_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
 `;
 
 const guard = vi.hoisted(() => vi.fn());
@@ -165,12 +178,11 @@ describe("operator feedback overlay", () => {
  it("attaches feedback for operators but strips it from non-operator responses", async () => {
   const base = "/api/newsfeed/research/files/" + "b".repeat(64);
   const source = {kind:"dropbox",publisher:"Synthetic Bank",url:base+".pdf",documentDate:"2026-09-07",folderDate:"2026-09-07",pages:[1],figures:[],fileId:"id:fb",revision:"r1",contentHash:"b".repeat(64)};
-  await db.execute("CREATE TABLE research_feedback (post_id TEXT, target TEXT, vote TEXT, reasons TEXT, comment TEXT, created_at TEXT)");
   const insertPost = "INSERT INTO posts (id, title, content, timestamp, images, raw_images, tags, tags_text, tags_vision, created_at, updated_at) VALUES (?, ?, ?, ?, '[]', '[]', '[]', '[]', '[]', ?, ?)";
   await db.execute({sql:insertPost,args:["regular","Public post",null,"2026-09-07T15:00:00Z","2026-09-07T15:00:00Z","2026-09-07T15:00:00Z"]});
   await db.execute({sql:insertPost,args:["research-fb","Private research","Evidence","2026-09-07T16:00:00Z","2026-09-07T16:00:00Z","2026-09-07T16:00:00Z"]});
   await db.execute({sql:"INSERT INTO research_post_sources VALUES (?, ?)",args:["research-fb",JSON.stringify(source)]});
-  await db.execute({sql:"INSERT INTO research_feedback VALUES (?, 'post', 'up', '[]', ?, ?)",args:["regular","private operator triage note","2026-09-07T17:00:00Z"]});
+  await db.execute({sql:"INSERT INTO research_feedback (id, target, post_id, vote, reasons, comment, actor, snapshot_json, created_at) VALUES (?, 'post', ?, 'up', '[]', ?, 'operator', '{}', ?)",args:["fb-regular","regular","private operator triage note","2026-09-07T17:00:00Z"]});
   const {GET} = await import("../app/api/newsfeed/posts/route");
   const operatorPosts = await (await GET()).json();
   const operatorRegular = operatorPosts.find((post: {id:string}) => post.id === "regular");
