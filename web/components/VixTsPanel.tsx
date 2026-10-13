@@ -1,5 +1,7 @@
 "use client";
 
+import type { CSSProperties } from "react";
+
 import { useMemo, useState } from "react";
 import { Activity } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
@@ -99,7 +101,7 @@ function writerAge(
     days >= 1 ? `${days}d` : hours >= 1 ? `${hours}h` : `${minutes}m`;
 
   return {
-    label: `${magnitude} ago`,
+    label: `PULLED ${magnitude} ago`,
     state: ageMs > windowMs ? "behind" : "current",
   };
 }
@@ -146,7 +148,6 @@ export default function VixTsPanel() {
   const regime = current.regime ?? vixTsRegimeLabel(current.ratio);
   const regimeColor = vixTsRegimeColor(regime);
   const writer = writerAge(data.scan_time);
-  const sourceSession = data.data_date ?? current.date ?? "---";
 
   const rows: VixTsChartRow[] = series.map((p) => ({
     date: p.date,
@@ -205,10 +206,9 @@ export default function VixTsPanel() {
             <MetricCell label="REGIME" value={regime} tone={regimeToneMobile(regimeColor)} />
             <MetricCell label="VIX" value={formatIndex(current.vix)} />
             <MetricCell label="VIX 3M" value={formatIndex(current.vix3m)} />
-            <MetricCell label="SOURCE UPDATED" value={sourceSession} />
           </div>
         ) : (
-          <RegimeStrip>
+          <div className="regime-strip-fit" style={{ "--fit-cols": 4, "--fit-cols-md": 2 } as CSSProperties}><RegimeStrip>
             <RegimeStripCell
               testId="vixts-strip-ratio"
               label="RATIO"
@@ -237,13 +237,7 @@ export default function VixTsPanel() {
               value={<span data-testid="vixts-vix3m">{formatIndex(current.vix3m)}</span>}
               sub={<>3-MONTH IMPLIED VOLATILITY</>}
             />
-            <RegimeStripCell
-              testId="vixts-strip-source-updated"
-              label="SOURCE UPDATED"
-              value={<span data-testid="vixts-source-updated">{sourceSession}</span>}
-              sub={<>LATEST SESSION IN THE CBOE FILE</>}
-            />
-          </RegimeStrip>
+          </RegimeStrip></div>
         )}
 
         <FreshnessRail

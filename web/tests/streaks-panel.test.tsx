@@ -229,6 +229,28 @@ describe("StreaksPanel strip", () => {
     expect(last).toContain("769.35");
     expect(last).toContain("2026-08-28 · UNUSUAL WHALES");
   });
+
+  it("with no streak running, says so and replaces the dead precedent tile with runs on record", () => {
+    const data = buildData({
+      current: { date: "2026-10-12", close: 778.1, streak: 0, day_change_pct: -0.06 },
+      stats: {
+        max_streak: 7,
+        max_streak_end: "2026-04-09",
+        runs_total: 60,
+        runs_ge_current: null,
+        avg_run: 2.18,
+        up_day_pct: 52.4,
+      },
+    });
+    renderPanel(hookState({ data }));
+
+    expect(screen.getByTestId("streaks-strip-current").textContent).toContain("NO STREAK RUNNING");
+    const precedent = screen.getByTestId("streaks-strip-precedent").textContent ?? "";
+    expect(precedent).not.toContain("---");
+    expect(precedent).toContain("RUNS ON RECORD");
+    expect(precedent).toContain("60");
+    expect(precedent).toContain("AVG 2.18 DAYS");
+  });
 });
 
 /* ─── Chart ────────────────────────────────────────────── */

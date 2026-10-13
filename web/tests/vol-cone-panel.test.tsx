@@ -9,6 +9,7 @@
  * Spec: docs/indicators/vol-cone.md.
  */
 import React from "react";
+import { expectStripFillsGrid } from "./helpers/stripFit";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -230,6 +231,24 @@ describe("VolConePanel — strip + table + chart", () => {
     expect(screen.getByText("38.5")).toBeTruthy();
     expect(screen.getByText("2026-08-12")).toBeTruthy();
     expect(screen.getByText("CHEAP WINGS")).toBeTruthy();
+  });
+
+  it("labels the wing score as a cone percentile so 0% reads as cheapest, not empty", () => {
+    // wing_score = mean of the 10C and 10P cone percentiles (fetch_vol_cone.py);
+    // 0% means both wings sit at the cone floor, which is what CHEAP WINGS asserts.
+    renderPanel(hookState({ data: buildData() }));
+    const wing = screen.getByTestId("vol-cone-strip-wing").textContent ?? "";
+    expect(wing).toContain("WING %ILE");
+    expect(wing).toContain("0% = CHEAPEST IN CONE");
+    expect(wing).not.toContain("WING SCORE");
+    const atm = screen.getByTestId("vol-cone-strip-atm").textContent ?? "";
+    expect(atm).toContain("VOL POINTS");
+    expect(atm).not.toContain("DECIMAL IV x 100");
+  });
+
+  it("fills the strip grid with no empty cells", () => {
+    const { container } = renderPanel(hookState({ data: buildData() }));
+    expectStripFillsGrid(container);
   });
 
   it("renders the selected cone title", () => {

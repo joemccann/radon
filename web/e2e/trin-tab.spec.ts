@@ -123,7 +123,7 @@ test.describe("/regime/trin - TRIN 60-minute tab", () => {
     await expect(page.locator('[data-testid="trin-state"]')).toHaveText("NEAR ZONE");
     await expect(page.locator('[data-testid="trin-daily"]')).toHaveText("0.68");
     await expect(page.locator('[data-testid="trin-advdec"]')).toHaveText("1510 / 1280");
-    await expect(page.locator('[data-testid="trin-source"]')).toContainText("IB+STOCKCHARTS");
+    await expect(page.locator('[data-testid="trin-source"]')).toContainText("IB LIVE · STOCKCHARTS DAILY");
   });
 
   test("renders the TRIN and MA10 series with the brush", async ({ page }) => {

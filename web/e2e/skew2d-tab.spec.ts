@@ -94,7 +94,7 @@ test.describe("/regime/skew2d — 2d change in SPX 1M put/call skew tab", () => 
 
     await expect(page.locator('[data-testid="skew2d-strip-level"]')).toContainText("1.24");
     await expect(page.locator('[data-testid="skew2d-strip-z"]')).toContainText("+2.7");
-    await expect(page.locator('[data-testid="skew2d-strip-tenor"]')).toContainText("2026-08-21");
+    await expect(page.locator('[data-testid="skew2d-strip-level"]')).toContainText("2026-08-21");
   });
 
   test("renders the chart, the view chips, and the brush", async ({ page }) => {
