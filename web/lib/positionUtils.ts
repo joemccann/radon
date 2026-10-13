@@ -825,6 +825,8 @@ export type LegPnl = {
   marketValue: number | null;
   entryValue: number | null;
   pnl: number | null;
+  /** P&L as a percentage of this leg's absolute opening value, not risk capital. */
+  pnlPct: number | null;
   todayPnl: number | null;
   todayBasis: "entry" | "previous-close" | null;
 };
@@ -853,6 +855,11 @@ export function resolveLegPnl(
   const entryValue = Number.isFinite(leg.entry_cost) ? sign * Math.abs(leg.entry_cost) : null;
   const measuredPnl = marketValue != null && entryValue != null ? marketValue - entryValue : null;
   const pnl = measuredPnl != null && Number.isFinite(measuredPnl) ? measuredPnl : null;
+  const openingValue = entryValue == null ? null : Math.abs(entryValue);
+  const measuredPct = pnl != null && openingValue != null && openingValue > 0
+    ? (pnl / openingValue) * 100
+    : null;
+  const pnlPct = measuredPct != null && Number.isFinite(measuredPct) ? measuredPct : null;
   const useEntry = isSameDay(pos) || (isMixedAgeCombo(pos) && leg.basis_source === "session_fills");
   const previousClose = useEntry ? null : resolvedLegPreviousCloseValue(pos, leg, prices);
   // Daily moves need a usable current mark. A synced dollar-only snapshot has
@@ -863,7 +870,7 @@ export function resolveLegPnl(
       : currentValue != null && entryValue != null ? currentValue - entryValue : null
     : currentValue != null && previousClose != null ? currentValue - previousClose : null;
   return {
-    marketValue, entryValue, pnl, todayPnl,
+    marketValue, entryValue, pnl, pnlPct, todayPnl,
     todayBasis: todayPnl == null ? null : useEntry ? "entry" : "previous-close",
   };
 }

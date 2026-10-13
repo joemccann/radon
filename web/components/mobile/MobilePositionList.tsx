@@ -333,7 +333,7 @@ function LegItem({ leg, pnlValues, prices, ticker, expiry, showImplied, riskFree
   const isCalculated = resolved.isCalculated;
   const mult = getLegMultiplier(leg);
   const sign = leg.direction === "LONG" ? 1 : -1;
-  const { marketValue: legMv, entryValue: legEc, pnl: legPnl, todayPnl: legTodayPnl } = pnlValues;
+  const { marketValue: legMv, entryValue: legEc, pnl: legPnl, pnlPct: legPnlPct, todayPnl: legTodayPnl } = pnlValues;
   const tone = toneFor(legPnl);
 
   // A SHORT option leg's Avg Entry and Last Price are premium CREDITS and
@@ -388,7 +388,14 @@ function LegItem({ leg, pnlValues, prices, ticker, expiry, showImplied, riskFree
     >
       <div className="mobile-card__leg-head">
         <span className="mobile-card__leg-desc">{description}</span>
-        <span data-testid="position-leg-pnl" aria-label="Total P&L" className="mobile-card__leg-pnl" style={{ color: toneColor(tone) }}>{fmtPnl(legPnl)}</span>
+        <div className="mobile-card__leg-pnl" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, color: toneColor(tone) }}>
+          <span data-testid="position-leg-pnl" aria-label="Total P&L">{fmtPnl(legPnl)}</span>
+          <span style={{ display: "block", fontSize: 12 }}>
+          <span data-testid="position-leg-pnl-pct" aria-label="P&L % of entry value" title="P&L % of entry value">
+            {legPnlPct != null ? `${legPnlPct >= 0 ? "+" : "-"}${Math.abs(legPnlPct).toFixed(1)}%` : "—"}
+          </span> of entry
+          </span>
+        </div>
       </div>
       <div className="mobile-card__leg-grid">
         <span className="mobile-card__leg-cell">

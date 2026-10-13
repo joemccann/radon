@@ -261,7 +261,7 @@ function LegRow({
 
   const mult = getLegMultiplier(leg);
   const sign = leg.direction === "LONG" ? 1 : -1;
-  const { marketValue: legMv, entryValue: legEc, pnl: legPnl, todayPnl: legTodayPnl } = pnlValues;
+  const { marketValue: legMv, entryValue: legEc, pnl: legPnl, pnlPct: legPnlPct, todayPnl: legTodayPnl } = pnlValues;
   const avgEntry = legEc != null && leg.contracts > 0
     ? Math.abs(legEc) / (leg.contracts * mult)
     : Number.isFinite(leg.avg_cost) ? Math.abs(leg.avg_cost) / mult : null;
@@ -355,8 +355,13 @@ function LegRow({
         <td className="right cell-muted">{legEc != null ? fmtSignedUsd(legEc) : "—"}</td>
       )}
       {columns.pnl && (
-        <td data-testid="position-leg-pnl" className={`right cell-muted ${legPnl != null ? (legPnl >= 0 ? "positive" : "negative") : ""}`}>
-          {legPnl != null ? `${legPnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(legPnl))}` : "—"}
+        <td className={`right cell-muted ${legPnl != null ? (legPnl >= 0 ? "positive" : "negative") : ""}`}>
+          <span data-testid="position-leg-pnl">{legPnl != null ? `${legPnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(legPnl))}` : "—"}</span>
+          <span style={{ display: "block", fontSize: 12 }}>
+          <span data-testid="position-leg-pnl-pct" aria-label="P&L % of entry value" title="P&L % of entry value">
+            {legPnlPct != null ? `${legPnlPct >= 0 ? "+" : "-"}${Math.abs(legPnlPct).toFixed(1)}%` : "—"}
+          </span> of entry
+          </span>
         </td>
       )}
       {columns.pnl_pct && <td></td>}
