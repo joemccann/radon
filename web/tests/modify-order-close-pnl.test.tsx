@@ -659,6 +659,16 @@ describe("ModifyOrderModal closes an exact subset of a grouped position", () => 
     expect(summary.getByText("Max Loss:")).toBeTruthy();
   });
 
+  it("blocks a subset close that newly uncovers a retained short call", () => {
+    const { order, portfolio } = sndkSubsetClose();
+    order.contract.comboLegs![0] = { ...order.contract.comboLegs![0], right: "P", strike: 1400 };
+    portfolio.positions[0].legs[2].contracts = 10;
+    const summary = renderSndkSubset(order, portfolio);
+    expect(summary.getByText("Close Credit:")).toBeTruthy();
+    expect(screen.getByText(/10 retained short calls uncovered by this close/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: /Modify Order/i }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("does not classify an oversized subset order as a pure close", () => {
     const { order, portfolio } = sndkSubsetClose();
     const summary = renderSndkSubset(order, portfolio);
