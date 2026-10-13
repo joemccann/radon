@@ -6,6 +6,7 @@ import { AiInfrastructureView } from "@/components/AiInfrastructurePanel";
 import { aiNumber, historyGroups, sourceHref } from "@/lib/aiInfrastructure";
 import { fetchAiInfrastructure } from "@/lib/useAiInfrastructure";
 import { aiFixture } from "./fixtures/aiInfrastructure";
+import { industryStage } from "@/lib/aiIndustryPresentation";
 vi.mock("@/components/AiIndustryHistoryChart", () => ({ default: () => <div>History chart</div> }));
 vi.mock("@/components/LlmTokenIndexCard", () => ({ default: () => <div>Legacy chart fixture</div> }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -80,6 +81,19 @@ describe("AI Industry value-chain presentation", () => {
     expect(screen.getByRole("heading", { level: 1, name: "AI Industry" })).toBeTruthy();
     expect(screen.getByText("6 measures")).toBeTruthy();
     expect(screen.getByText("3 sources")).toBeTruthy();
+  });
+  it("prints the title once and leads each stage with its computed coverage", () => {
+    render(<AiInfrastructureView data={aiFixture} error={null} loading={false} refresh={() => {}} />);
+    expect(screen.getAllByText("AI Industry", { selector: "h1" })).toHaveLength(1);
+    expect(screen.queryByText("Industry research")).toBeNull();
+    expect(screen.queryByText("Follow the value chain from adoption to cash returns.")).toBeNull();
+    for (const tab of screen.getAllByRole("tab")) {
+      const lead = tab.firstElementChild?.textContent ?? "";
+      expect(lead).not.toMatch(/^0\d/);
+      const id = tab.id.replace("ai-tab-", "");
+      const stage = aiFixture.indicators.filter(ind => industryStage(ind) === id);
+      if (stage.length) expect(lead).toBe(`${stage.filter(ind => ind.status === "available").length} / ${stage.length} available`);
+    }
   });
   it("filters coverage without dropping unknown publishers", () => {
     render(<AiInfrastructureView data={aiFixture} error={null} loading={false} refresh={() => {}} />);
