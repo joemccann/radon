@@ -514,6 +514,12 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
                 onPointerDown={(e) => {
                   if (e.pointerType !== "touch" && e.pointerType !== "pen") return;
                   e.preventDefault(); // retain focus and suppress compatibility mouse events
+                }}
+                onPointerUp={(e) => {
+                  if (e.pointerType !== "touch" && e.pointerType !== "pen") return;
+                  // A pan produces pointercancel instead of pointerup, so a
+                  // scroll gesture must not select the result it started on.
+                  e.preventDefault();
                   handleSelect(r.symbol);
                 }}
                 onMouseDown={(e) => {
@@ -604,6 +610,7 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
                     select the row / navigate to the ticker. */}
                 <span
                   onPointerDown={(e) => e.stopPropagation()}
+                  onPointerUp={(e) => e.stopPropagation()}
                   onMouseDown={(e) => {
                     e.preventDefault();
                     e.stopPropagation();

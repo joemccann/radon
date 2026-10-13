@@ -75,16 +75,22 @@ describe("mobile ticker search focus", () => {
     fireEvent.change(openSearch(), { target: { value: "aapl" } });
     act(() => vi.advanceTimersByTime(250));
     const option = screen.getByRole("option");
-    const touch = () => {
-      const event = new Event("pointerdown", { bubbles: true, cancelable: true });
+    const touch = (type = "pointerdown") => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
       Object.defineProperty(event, "pointerType", { value: "touch" });
       return event;
     };
     fireEvent(screen.getByTestId("star-toggle"), touch());
+    fireEvent(screen.getByTestId("star-toggle"), touch("pointerup"));
     expect(push).not.toHaveBeenCalled();
     const event = touch();
     fireEvent(option, event);
     expect(event.defaultPrevented).toBe(true);
+    expect(push).not.toHaveBeenCalled();
+    fireEvent(option, touch("pointercancel"));
+    expect(push).not.toHaveBeenCalled();
+    fireEvent(option, touch());
+    fireEvent(option, touch("pointerup"));
     expect(push).toHaveBeenCalledExactlyOnceWith("/AAPL");
     expect(screen.queryByRole("combobox")).toBeNull();
   });
