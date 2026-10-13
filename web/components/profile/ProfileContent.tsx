@@ -625,7 +625,7 @@ function WatchlistPanelMobile({
 
 /* ─── Desktop WatchRow ───────────────────────────────── */
 
-function WatchRow({
+export function WatchRow({
   entry,
   price,
   onOpen,
@@ -644,11 +644,11 @@ function WatchRow({
   }, [price]);
 
   return (
-    <li className="profile-watch panel">
+    <li className={`profile-watch panel${entry.sector ? "" : " profile-watch--no-sector"}`}>
       <button type="button" className="profile-watch__symbol" onClick={onOpen}>
         {entry.symbol}
       </button>
-      <span className="profile-watch__sector">{entry.sector ?? "---"}</span>
+      {entry.sector ? <span className="profile-watch__sector">{entry.sector}</span> : null}
       <span className="profile-watch__price">
         {price?.last != null ? (
           <>

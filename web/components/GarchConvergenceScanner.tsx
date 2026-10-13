@@ -98,6 +98,31 @@ function formatScanTime(iso: string | null | undefined): string {
   });
 }
 
+/** Collapse a producer gate string (carries per-row values) into its gate class. */
+export function garchGateClass(gate: string): string {
+  if (gate === "MISSING_DATA") return "missing data";
+  if (/: no LEAPs$/.test(gate)) return "no LEAPs";
+  if (/: IV rank unavailable$/.test(gate)) return "IV rank unavailable";
+  if (gate.startsWith("Divergence ")) return "divergence gate";
+  if (gate.startsWith("HV20−IV")) return "HV20−IV below +10 pts";
+  if (gate.startsWith("Lagger IV rank")) return "lagger IV rank 50% or higher";
+  if (gate === "No confirmed shared vol driver") return "no shared vol driver";
+  return gate;
+}
+
+function failureSummary(rows: GarchPair[]): string | null {
+  const failed = rows.filter((p) => !p.gates_passed);
+  if (failed.length === 0) return null;
+  const counts = new Map<string, number>();
+  for (const p of failed) {
+    const classes = new Set((p.failing_gates.length > 0 ? p.failing_gates : ["gates"]).map(garchGateClass));
+    for (const c of classes) counts.set(c, (counts.get(c) ?? 0) + 1);
+  }
+  let top: [string, number] | null = null;
+  for (const entry of counts) if (!top || entry[1] > top[1]) top = entry;
+  return `${failed.length} fail gates${top ? `, most often ${top[0]} (${top[1]})` : ""}`;
+}
+
 export default function GarchConvergenceScanner({
   data,
   loading = false,
@@ -108,10 +133,13 @@ export default function GarchConvergenceScanner({
   onScan,
   onTickerScan,
 }: GarchConvergenceScannerProps) {
-  const [gateFilter, setGateFilter] = useState<GateFilter>("all");
+  const [chosenFilter, setGateFilter] = useState<GateFilter | null>(null);
   const rows = data?.pairs ?? [];
   const actionableCount = rows.filter((p) => p.gates_passed).length;
   const failedCount = rows.length - actionableCount;
+  // Default to the actionable rows; with none, show everything rather than an empty table.
+  const gateFilter: GateFilter = chosenFilter ?? (actionableCount > 0 ? "actionable" : "all");
+  const failures = failureSummary(rows);
 
   const filtered = useMemo(() => {
     if (gateFilter === "actionable") return rows.filter((p) => p.gates_passed);
@@ -187,6 +215,16 @@ export default function GarchConvergenceScanner({
       className="garch-scanner"
       testId="garch-scanner-section"
     >
+      {rows.length > 0 && (
+        <div className="garch-scanner__summary">
+          <div className="garch-scanner__summary-head" data-testid="garch-summary">
+            {actionableCount} actionable of {rows.length} {rows.length === 1 ? "pair" : "pairs"}
+          </div>
+          {failures ? (
+            <div className="garch-scanner__summary-sub" data-testid="garch-summary-failures">{failures}</div>
+          ) : null}
+        </div>
+      )}
       {rows.length > 0 && (
         <div className="garch-scanner__filterbar" role="toolbar" aria-label="Filter pairs by gate status">
           {(
