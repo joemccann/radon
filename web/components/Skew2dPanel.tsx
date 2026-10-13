@@ -1,5 +1,7 @@
 "use client";
 
+import type { CSSProperties } from "react";
+
 import { useMemo, useState } from "react";
 import { Sigma } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
@@ -158,11 +160,9 @@ export function Skew2dPanel({ marketState }: { marketState?: MarketState }) {
             <MetricCell label="HIGH" value={formatSkew2dChange(stats.high)} />
             <MetricCell label="LOW" value={formatSkew2dChange(stats.low)} />
             <MetricCell label="STDDEV" value={formatSkew2dRatio(stats.stddev)} />
-            <MetricCell label="LATEST DATE" value={current.date} />
-            <MetricCell label="TENOR" value="30D CM" />
           </div>
         ) : (
-          <RegimeStrip>
+          <div className="regime-strip-fit" style={{ "--fit-cols": 6, "--fit-cols-md": 3 } as CSSProperties}><RegimeStrip>
             <RegimeStripCell
               testId="skew2d-strip-change"
               label="CHANGE"
@@ -177,7 +177,11 @@ export function Skew2dPanel({ marketState }: { marketState?: MarketState }) {
               testId="skew2d-strip-level"
               label="LEVEL"
               value={formatSkew2dRatio(current.ratio)}
-              sub={<>25D PUT IV OVER CALL IV</>}
+              sub={
+                <>
+                  25D PUT IV OVER CALL IV · 30D CM {current.expiry} ({current.dte}D)
+                </>
+              }
             />
             <RegimeStripCell
               testId="skew2d-strip-z"
@@ -203,23 +207,7 @@ export function Skew2dPanel({ marketState }: { marketState?: MarketState }) {
               value={formatSkew2dRatio(stats.stddev)}
               sub={<>POPULATION, ALL NON NULL 2D CHANGES</>}
             />
-            <RegimeStripCell
-              testId="skew2d-strip-date"
-              label="LATEST DATE"
-              value={current.date}
-              sub={<>FINAL SESSION</>}
-            />
-            <RegimeStripCell
-              testId="skew2d-strip-tenor"
-              label="TENOR"
-              value="30D CM"
-              sub={
-                <>
-                  {current.expiry} ({current.dte}D)
-                </>
-              }
-            />
-          </RegimeStrip>
+          </RegimeStrip></div>
         )}
 
         <FreshnessRail

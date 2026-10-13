@@ -137,7 +137,11 @@ export default function StreaksPanel() {
               tone={tone}
             />
             <MetricCell label="RECORD" value={formatStreakDays(stats.max_streak)} />
-            <MetricCell label="RUNS ≥ CUR" value={formatRunsAtOrAbove(stats.runs_ge_current)} />
+            {stats.runs_ge_current == null ? (
+              <MetricCell label="RUNS" value={String(stats.runs_total)} />
+            ) : (
+              <MetricCell label="RUNS ≥ CUR" value={formatRunsAtOrAbove(stats.runs_ge_current)} />
+            )}
             <MetricCell label="LAST CLOSE" value={formatCloseValue(current.close)} />
           </div>
         ) : (
@@ -150,7 +154,7 @@ export default function StreaksPanel() {
                   {formatStreakDays(current.streak)}
                 </span>
               }
-              sub={<>CONSECUTIVE UP CLOSES</>}
+              sub={<>{current.streak === 0 ? "NO STREAK RUNNING" : "CONSECUTIVE UP CLOSES"}</>}
             />
             <RegimeStripCell
               testId="streaks-strip-record"
@@ -160,9 +164,19 @@ export default function StreaksPanel() {
             />
             <RegimeStripCell
               testId="streaks-strip-precedent"
-              label="RUNS ≥ CURRENT"
-              value={formatRunsAtOrAbove(stats.runs_ge_current)}
-              sub={<>{stats.runs_total} RUNS ON RECORD · AVG {stats.avg_run ?? "---"}</>}
+              label={stats.runs_ge_current == null ? "RUNS ON RECORD" : "RUNS ≥ CURRENT"}
+              value={
+                stats.runs_ge_current == null
+                  ? String(stats.runs_total)
+                  : formatRunsAtOrAbove(stats.runs_ge_current)
+              }
+              sub={
+                stats.runs_ge_current == null ? (
+                  <>AVG {stats.avg_run ?? "---"} DAYS</>
+                ) : (
+                  <>{stats.runs_total} RUNS ON RECORD · AVG {stats.avg_run ?? "---"}</>
+                )
+              }
             />
             <RegimeStripCell
               testId="streaks-strip-updays"
