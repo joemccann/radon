@@ -11447,3 +11447,15 @@ Audited through: 35118b0883c52ffcda5a292d27227940c55c94cc on 2026-10-13 — 1 ne
 | Finding | Status | Red / green evidence |
 |---|---|---|
 | T-551 | DONE | Spread deleted: `ib-index-stream-contracts.test.ts` 4 passed and `ticker-search-rows.test.ts` 2 passed; `ib-search-description.test.ts` 2 failed (no `description` on either payload). Restored `scripts/ib_realtime_server.js:2897`. Both relay files 6 passed in each of three serial runs. Product source unchanged. |
+
+### Closing gates 2026-10-13
+
+The delta touches 131 test files, so the three closing rounds are the scoped rerun. Discarded before these rounds: a cloud run with `/usr/bin/python3` 3.9 on `PATH` failed `test_precloud_rollback_keeps_immutable_journal_support` (`zip(strict=True)`) and `test_notify_proxy_outlives_the_run_handoff_and_relays_while_docker_runs`; both passed in 2.04s at `66719c09` and in 1.98s at HEAD once `python3` was 3.13.16. Two full Vitest runs at the default 50% worker budget timed out the same five `next.config.mjs` imports at 5000ms under load 12–32; those five files then passed 29/29 alone. The counted Vitest rounds set `VITEST_MAX_WORKERS=4`. No assertion, skip, or coverage threshold changed.
+
+| Round | Root Python | Root Vitest | Cloud | Failed-list diff against base `66719c09` |
+|---|---|---|---|---|
+| 1 | 15,387 passed / 2 skipped / 23 subtests | 10,789 passed / 21 skipped / 1,099 files | 2,862 passed / 8 skipped | 0 added / 0 removed |
+| 2 | 15,387 passed / 2 skipped / 23 subtests | 10,789 passed / 21 skipped / 1,099 files | 2,862 passed / 8 skipped | 0 added / 0 removed |
+| 3 | 15,387 passed / 2 skipped / 23 subtests | 10,789 passed / 21 skipped / 1,099 files | 2,862 passed / 8 skipped | 0 added / 0 removed |
+
+Base cloud at `66719c09` with Python 3.13.16, OpenSSL 3.6.5, Bash 5.3.20, and caddy: 2,820 passed / 8 skipped, sorted FAILED list empty. Every closing FAILED list is empty. The count difference is tests added on main after that SHA. The comparison worktree was removed. Playwright was not run. No local screenshot or 390px result is claimed.
