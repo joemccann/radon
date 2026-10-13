@@ -1258,3 +1258,9 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 |---|---|---|
 | T-549 | DONE | Forcing the correction flag false left the budget and concurrency cases green and wrote `DO NOTHING` for `ORDER.01` (1 failed / 3 passed). Batch mode `"read"` failed only the new assertion (1 failed / 3 passed). Restored writer: `web/tests/journal-import-batch-budget.test.ts` 3 passed, three serial runs. Product source unchanged. |
 | T-550 | DONE | Deleting the tag push left the structural case green (1 failed / 2 passed). Deleting the existing-tag guard left it green (2 failed / 1 passed). Restored workflow: `scripts/tests/test_ci_deploy_concurrency.py` 42 passed, three serial runs. Workflow text unchanged. Closing rounds: root Python 14,969 passed / 2 skipped / 23 subtests, Vitest 10,575 passed / 1,072 files, cloud 2,820 passed / 8 skipped, FAILED-list diff against `66719c09` empty on all three rounds. |
+
+## 2026-10-13
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-551 | DONE | Deleting the description spread left `web/tests/ib-index-stream-contracts.test.ts` 4 passed and `web/tests/ticker-search-rows.test.ts` 2 passed. `web/tests/ib-search-description.test.ts` failed 2: nested `NVIDIA CORP` and flat `APPLE INC` missing from the real `symbolSamples` payload. Restored `scripts/ib_realtime_server.js`. Both relay files 6 passed, three serial runs. Product source unchanged. Closing rounds: root Python 15,387 passed / 2 skipped / 23 subtests, Vitest 10,789 passed / 21 skipped / 1,099 files, cloud 2,862 passed / 8 skipped, FAILED-list diff against `66719c09` empty on all three rounds. |
