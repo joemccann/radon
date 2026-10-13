@@ -6,7 +6,9 @@
 import type { PortfolioData } from "@/lib/types";
 import {
   getPnlDollars,
-  getPnlPct,
+  getDisplayReturnPct,
+  resolveDisplayReturnBasis,
+  describeDisplayReturnBasis,
   hasBlendedLegBasis,
   resolveEntryCost,
   resolveMarketValue,
@@ -46,7 +48,7 @@ export function computeUnrealizedBreakdown(
     // A blended-basis combo has no publishable aggregate entry (T-315) but its
     // per-leg P&L is measured, so it keeps a row: entry renders unavailable.
     const entry = resolveEntryCost(pos);
-    const pnlPct = getPnlPct(pos, mv);
+    const pnlPct = getDisplayReturnPct(pos, mv);
     return [{
       id: pos.id,
       ticker: pos.ticker,
@@ -55,6 +57,7 @@ export function computeUnrealizedBreakdown(
       col2: fmtSigned(mv, 2),
       pnl,
       pnlPct,
+      pnlPctTitle: describeDisplayReturnBasis(resolveDisplayReturnBasis(pos)),
     }];
   });
 }

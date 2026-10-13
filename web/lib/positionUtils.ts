@@ -459,6 +459,44 @@ export function getPnlPct(
   return (pnl / basis.amount) * 100;
 }
 
+/** Display-only denominator. Entry debit is a measured opening value,
+ * not risk capital; Gate 3 and close-out math continue to use ReturnCapitalBasis.
+ */
+export type DisplayReturnBasis = ReturnCapitalBasis | {
+  amount: number;
+  kind: "net-entry-debit";
+  source: "position.legs.entry_cost";
+};
+
+/** Prefer verified capital; otherwise measure a complete combo's net debit. */
+export function resolveDisplayReturnBasis(pos: PortfolioPosition): DisplayReturnBasis | null {
+  const verified = resolveReturnCapital(pos);
+  if (verified) return verified;
+  if (hasBlendedLegBasis(pos) || pos.legs.length < 2) return null;
+  const amount = resolveLegPnlBasis(pos);
+  if (amount == null || !Number.isFinite(amount) || amount <= 0) return null;
+  return { amount, kind: "net-entry-debit", source: "position.legs.entry_cost" };
+}
+
+export function describeDisplayReturnBasis(basis: DisplayReturnBasis | null): string {
+  if (basis?.kind === "net-entry-debit") {
+    return `Return on net entry debit · ${fmtUsd(basis.amount)}`;
+  }
+  return describeReturnCapital(basis);
+}
+
+/** Display return uses its labeled basis without changing risk-capital math. */
+export function getDisplayReturnPct(
+  pos: PortfolioPosition,
+  marketValue?: number | null,
+): number | null {
+  const pnl = getPnlDollars(pos, marketValue);
+  const basis = resolveDisplayReturnBasis(pos);
+  if (pnl == null || !Number.isFinite(pnl) || basis == null) return null;
+  const pct = (pnl / basis.amount) * 100;
+  return Number.isFinite(pct) ? pct : null;
+}
+
 export function getLastPrice(pos: PortfolioPosition): number | null {
   const mv = resolveMarketValue(pos);
   if (mv == null) return null;
