@@ -345,13 +345,13 @@ function GammaRotationBody({ data, lastSync, syncing, refreshFailed }: { data: G
         <div className="grg-hero">
           <div>
             <div className="grg-eyebrow">GRG residual</div>
-            <div className="grg-score" style={{ color: tone }}>{fmtZ(data.signal.grg_z)}</div>
             <div className="grg-state">{data.signal.state_label}</div>
+            <div className="grg-score">
+              Residual <span style={{ color: tone }}>{fmtZ(data.signal.grg_z)}</span>
+            </div>
             <p className="grg-summary">{data.signal.summary}</p>
           </div>
           <div className="grg-metric-grid">
-            <MetricCard label="SPY GEX" value={fmtExposure(data.assets.SPY.net_gex)} sub={`${data.assets.SPY.state} / ${fmtZ(data.assets.SPY.gamma_z)}`} color={assetColor(data.assets.SPY)} />
-            <MetricCard label="TLT GEX" value={fmtExposure(data.assets.TLT.net_gex)} sub={`${data.assets.TLT.state} / ${fmtZ(data.assets.TLT.gamma_z)}`} color={assetColor(data.assets.TLT)} />
             <MetricCard label="Top gate" value={`${data.signal.top_score}/5`} sub={data.top_bottom.top.active ? "active" : "inactive"} color={data.signal.top_score >= 4 ? "var(--warning)" : "var(--text-primary)"} />
             <MetricCard label="Bottom gate" value={`${data.signal.bottom_score}/5`} sub={data.top_bottom.bottom.active ? "active" : "inactive"} color={data.signal.bottom_score >= 4 ? "var(--signal-core)" : "var(--text-primary)"} />
           </div>

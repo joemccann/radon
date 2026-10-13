@@ -38,12 +38,12 @@ interface CurveChartRow {
   spread: number | null;
 }
 
-function spreadTone(v: number | null | undefined): "pos" | "neg" | "warn" | "mut" {
+function spreadTone(v: number | null | undefined): "neg" | "warn" | "mut" | undefined {
   const color = spreadColor(v);
   if (color === "var(--negative)") return "neg";
   if (color === "var(--warning)") return "warn";
-  if (color === "var(--positive)") return "pos";
-  return "mut";
+  if (color === "var(--text-muted)") return "mut";
+  return undefined;
 }
 
 export default function YieldCurvePanel() {
