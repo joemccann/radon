@@ -14,14 +14,15 @@ async function installSearchFixtures(page: Page) {
       }));
     });
   });
-  // Observe focus before the trusted opening click finishes bubbling. An
+  // Observe at window bubbling, after React handles its delegated document
+  // click but before the trusted gesture finishes. An
   // eventual toBeFocused() assertion would accept the old delayed focus,
   // which cannot request the iOS keyboard from the original user gesture.
   // Headless WebKit verifies this event boundary, not a native iOS keyboard.
   await page.addInitScript(() => {
     const observations: Array<{ trusted: boolean; focused: boolean }> = [];
     Object.defineProperty(window, "__mobileSearchFocus", { value: observations });
-    document.addEventListener("click", (event) => {
+    window.addEventListener("click", (event) => {
       if (!(event.target instanceof Element) || !event.target.closest('[data-testid="mobile-app-bar-search"]')) return;
       const input = document.querySelector('.mobile-search-input input');
       observations.push({ trusted: event.isTrusted, focused: input !== null && document.activeElement === input });
