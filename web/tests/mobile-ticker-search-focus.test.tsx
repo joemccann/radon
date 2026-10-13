@@ -70,6 +70,25 @@ describe("mobile ticker search focus", () => {
     expect(document.body.style.overflow).toBe("auto");
   });
 
+  it("selects a touched result without routing a touched watchlist star", () => {
+    render(<MobileShell title="Portfolio" />);
+    fireEvent.change(openSearch(), { target: { value: "aapl" } });
+    act(() => vi.advanceTimersByTime(250));
+    const option = screen.getByRole("option");
+    const touch = () => {
+      const event = new Event("pointerdown", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "pointerType", { value: "touch" });
+      return event;
+    };
+    fireEvent(screen.getByTestId("star-toggle"), touch());
+    expect(push).not.toHaveBeenCalled();
+    const event = touch();
+    fireEvent(option, event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(push).toHaveBeenCalledExactlyOnceWith("/AAPL");
+    expect(screen.queryByRole("combobox")).toBeNull();
+  });
+
   it("preserves typed symbol selection and closes before navigation", () => {
     render(<MobileShell title="Portfolio" />);
     fireEvent.change(openSearch(), { target: { value: "aapl" } });
