@@ -12319,6 +12319,14 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   color: var(--text-muted);
 }
 
+/* Stale cache: the posture is a dated sentence, not a verdict pill (plate 24). */
+.cta-briefing-stale-posture {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
 .cta-briefing-metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
@@ -18857,6 +18865,18 @@ body[data-mobile="true"] td.right {
   letter-spacing: 0.06em;
   color: var(--warn-text);
   vertical-align: middle;
+}
+
+/* Plate 26: a cached verdict is history, not the hero. The age badge carries
+   the state; direction and conviction drop to muted secondary weight. */
+.ticker-flow-badge--stale .ticker-flow-badge-label {
+  font-size: 16px;
+  color: var(--text-muted);
+}
+
+.ticker-flow-badge--stale .ticker-flow-badge-conviction-value {
+  font-size: 18px;
+  color: var(--text-muted);
 }
 
 .ticker-flow-badge-rationale {

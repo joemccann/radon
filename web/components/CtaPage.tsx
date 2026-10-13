@@ -407,6 +407,7 @@ export default function CtaPage() {
               tables={ctaData.tables}
               estSellingBn={estSellingBn}
               dayChangeBn={dayChangeBn}
+              staleAsOf={ctaIsStale ? staleCacheDate : null}
             />
             {order.map((key) => {
               const rows = ctaData.tables![key];

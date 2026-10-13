@@ -30,6 +30,19 @@ const TAB_PATHS: Partial<Record<OptionsWorkspaceTab, string>> = {
   "rv-ratio": "/options/rv-ratio",
 };
 
+const TAB_ENTRY = {
+  "net-gex": {
+    title: "Net GEX",
+    description: "Reconstructs strike-level dealer gamma exposure for one underlying.",
+    action: "Load exposure",
+  },
+  "rv-ratio": {
+    title: "Rel Vol",
+    description: "Compares one underlying's realized vol with its benchmark.",
+    action: "Load rel vol",
+  },
+} as const;
+
 const TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
 
 function normalizeTicker(value: string | undefined): string | null {
@@ -74,6 +87,8 @@ export default function OptionsWorkspacePanel({ symbol }: OptionsWorkspacePanelP
     setTickerError(null);
   }, [symbol]);
 
+  const entry = TAB_ENTRY[activeTab === "rv-ratio" ? "rv-ratio" : "net-gex"];
+
   const goToTab = (tab: OptionsWorkspaceTab) => {
     const path = TAB_PATHS[tab];
     if (!path) return;
@@ -117,7 +132,7 @@ export default function OptionsWorkspacePanel({ symbol }: OptionsWorkspacePanelP
         </span>
       </div>
 
-      <div role="tabpanel" aria-label={activeTab === "rv-ratio" ? "Rel Vol" : "Net GEX"}>
+      <div role="tabpanel" aria-label={entry.title}>
         {selectedSymbol ? (
           activeTab === "rv-ratio" ? (
             <RvRatioPanel symbol={selectedSymbol} />
@@ -127,9 +142,8 @@ export default function OptionsWorkspacePanel({ symbol }: OptionsWorkspacePanelP
         ) : (
           <section className={styles.entry} data-testid="options-ticker-entry">
             <div>
-              <div className={styles.entryEyebrow}>OPTIONS / NET GEX</div>
-              <h2>Measure dealer exposure</h2>
-              <p>Enter an underlying ticker to reconstruct strike-level options exposure.</p>
+              <h2>{entry.title}</h2>
+              <p>{entry.description}</p>
             </div>
             <form className={styles.entryForm} role="search" aria-label="Options ticker" onSubmit={submitTicker}>
               <label htmlFor="options-ticker-input">Ticker symbol</label>
@@ -148,7 +162,7 @@ export default function OptionsWorkspacePanel({ symbol }: OptionsWorkspacePanelP
                     if (tickerError) setTickerError(null);
                   }}
                 />
-                <button type="submit" disabled={!tickerInput.trim()}>Load exposure</button>
+                <button type="submit" disabled={!tickerInput.trim()}>{entry.action}</button>
               </div>
               {tickerError ? <ErrorToast message={tickerError} /> : null}
             </form>
