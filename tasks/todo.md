@@ -9475,3 +9475,16 @@ Constraints: preserve broker payload semantics and coverage gates; no local test
 Evidence: live read-only Positions view shows SNDK grouped with long 10 C1450 (basis 52766), short 10 C1600 (basis -13016), short 5 P1400 (basis -24475), all expiry 2026-10-23. SELL 10 BAG structural C1600 SELL / C1450 BUY closes the call subset; at $50 proceeds 50000, selected basis 39750, estimated P&L 10250, retaining the put. No live submissions.
 
 Verification: regression-only a4c99484 GitHub CI job 115503958270 reproduced 4 failures, including exact screenshot Total -50000/Max Gain50000/Max Loss100000 and missing close P&L. Independent browser agent reviewed fix and eight regressions. Static TypeScript syntax parsed all three owned TS files with 0 diagnostics.
+
+
+# Chart prose boundaries
+Dependency graph: T1 -> T2 -> T3 -> T4; T1 -> T3.
+- [x] T1 depends_on: [] Retrieve article provenance and inspect source PDF/crop.
+- [x] T2 depends_on: [T1] Fix deterministic chart clipping and add regression cases.
+- [ ] T3 depends_on: [T1, T2] Independently verify charts retain title/legend/axes/source/notes and exclude narrative copy.
+- [ ] T4 depends_on: [T2, T3] Publish PR, prove red/green on GitHub, wait exact-head CI green and notify Pushover.
+Constraints: no local test suites; preserve source evidence; no broad crop fallback; scope chart extraction.
+
+Source evidence: article research-68d8179b6af877c99ff478eda52ddcff8edb573c204d47df1a25f6240d5ef5b6; original PDF SHA75b8b0ec0f26a7bec597a9f078134f9727c727a2e78795fdd25ec64df9248af2 page3. Production f2 bbox[.2,.1987,.9723,.72] includes narrative before/after chart. Private source/audit/crop retained under /tmp/radon-prose-crop.
+
+Red GitHub evidence: d884b356 CIjob115599207114, 5 failed/2539passed. Corrected sourcepage3 cropbbox[.2038,.3925,.9723,.6865], 1411x698; AST/static compilation passed, no local suites. Nine new synthetic cases include compound and malformed clip fallback and rotation. Independent technical review passed.
