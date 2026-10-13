@@ -2108,3 +2108,16 @@ class TestDocumentation20261013:
         assert "position_capital_observations" in row
         assert "VALID" in row
         assert "journal or portfolio" in row
+
+    def test_unknown_publisher_is_held_before_selection(self):
+        intake = (_ROOT / "scripts/research/intake.py").read_text()
+        process = intake.split("def _process", 1)[1].split("\n    def ", 1)[0]
+        assert process.index("PUBLISHER_UNKNOWN") < process.index("fingerprint(")
+        identify = (_ROOT / "scripts/research/identify.py").read_text()
+        assert "TOPIC_FOLDERS" in identify
+        assert "_discover_publisher" in identify
+        doc = (_ROOT / "docs/dropbox-research.md").read_text()
+        assert "publisher from the Dropbox folder," not in doc
+        assert "PUBLISHER_UNKNOWN" in doc
+        assert "before fingerprinting" in doc
+        assert "always-publish" in doc
