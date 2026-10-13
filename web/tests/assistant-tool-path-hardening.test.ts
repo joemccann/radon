@@ -104,8 +104,19 @@ describe("assistant tool-path hardening", () => {
     it("plain read fetch_backend calls do not consume the spawn budget", async () => {
       const { executeTool, createAssistantTurnBudget } = await import("@/lib/assistant/tools");
       const budget = createAssistantTurnBudget();
-      await executeTool("fetch_backend", { method: "GET", path: "/earnings" }, OPERATOR, budget);
+      await executeTool("fetch_backend", { method: "GET", path: "/quote/AAPL" }, OPERATOR, budget);
       expect(budget.spawnAttempts).toBe(0);
+    });
+
+    it("subprocess-backed GETs count against the spawn budget", async () => {
+      const { executeTool, createAssistantTurnBudget } = await import("@/lib/assistant/tools");
+      const budget = createAssistantTurnBudget();
+      expect((await executeTool("fetch_backend", { method: "GET", path: "/ticker/ratings", query: { ticker: "AAPL" } }, OPERATOR, budget)).ok).toBe(true);
+      expect((await executeTool("fetch_backend", { method: "GET", path: "/earnings/ADBE" }, OPERATOR, budget)).ok).toBe(true);
+      const third = await executeTool("fetch_backend", { method: "GET", path: "/informed-flow/SPY" }, OPERATOR, budget);
+      expect(third.ok).toBe(false);
+      expect(third.error).toMatch(/spawn/i);
+      expect(mocks.radonFetch.mock.calls.map(([p]) => p)).toEqual(["/ticker/ratings?ticker=AAPL", "/earnings/ADBE"]);
     });
   });
 
