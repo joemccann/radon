@@ -81,6 +81,8 @@ Applies under `web/`. Mirrors `web/CLAUDE.md`; prefer the Claude file if it is n
 
 ## Key Component Notes
 
+- P&L share timing: `orders/stockEntryTime.ts` matches stock executions by broker conId, consuming earlier closes before pairing the target close with opening lots. Fully matched history supplies the earliest consumed timestamp independently of existing price/P&L math. Missing identity/history remains unknown. `/api/share/pnl` derives duration from timestamps, preserves timestamp-only rows, and labels Pacific time with its actual PST/PDT offset; same-day date-only entries never invent intraday duration. Regression: `share-pnl-stock-timing.test.ts`, `share-pnl-timing-render.test.ts`, and the pictured TQQQ case in `mobile-executed-journal.spec.ts`.
+
 - Every product `<table>` uses `SortTh` + `useSort`. Structural exceptions need `data-sortable-exempt` (`chain-layout` | `matrix` | `markdown` | `chrome` | `kit-demo`). Contract: `web/tests/sortable-table-contract.test.ts`.
 - Options chain sticky header requires separate borders, sticky header backgrounds, and z-index on `thead`.
 - Column visibility persists under `localStorage` key `radon:columns:<tableId>`.

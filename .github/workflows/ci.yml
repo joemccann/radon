@@ -808,6 +808,7 @@ jobs:
           e2e/orders-realized-pnl-portfolio-fallback.spec.ts
           e2e/orders-partial-realized-pnl.spec.ts
           e2e/share-pnl-entry-exit.spec.ts
+          e2e/mobile-executed-journal.spec.ts
           e2e/chain-deck-ticket-scroll.spec.ts
           e2e/chain-anchored-scroll.spec.ts
           e2e/chain-first-layout.spec.ts

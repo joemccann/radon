@@ -3,6 +3,7 @@ import { loadFonts } from "@/lib/og-fonts";
 import { OG } from "@/lib/og-theme";
 import { rateLimit, clientIp, SHARE_PNL_LIMIT, SHARE_WINDOW_MS } from "@/lib/rateLimit";
 import { SHARE_PNL_CANVAS, parseSharePnlFormat, sharePnlHeroLayout } from "@/lib/sharePnlHero";
+import { formatHoldDuration } from "@/lib/holdTime";
 
 export const runtime = "nodejs";
 // A satori render holding the whole bitmap must not run unbounded (R-310).
@@ -19,10 +20,10 @@ function fmtPct(v: number): string {
   return `${sign}${v.toFixed(2)}%`;
 }
 
-/** Format ISO timestamp to PST with date and time.
+/** Format ISO timestamp to Pacific time with the correct seasonal zone.
  *  Date-only strings (e.g., "2026-03-09" from trade_log) render as
  *  date only — no fake timestamp. */
-function fmtTimePST(isoTime: string): string {
+function fmtTimePacific(isoTime: string): string {
   try {
     // Date-only (no "T" separator) → display as date without time
     if (/^\d{4}-\d{2}-\d{2}$/.test(isoTime.trim())) {
@@ -39,7 +40,8 @@ function fmtTimePST(isoTime: string): string {
       hour: "numeric",
       minute: "2-digit",
       hour12: true,
-    }) + " PST";
+      timeZoneName: "short",
+    });
   } catch {
     return "";
   }
@@ -123,7 +125,9 @@ export async function GET(request: Request) {
     const exitPrice = exitPriceRaw != null ? parseFloat(exitPriceRaw) : null;
     const entryTime = searchParams.get("entryTime") ?? "";
     const exitTime = searchParams.get("exitTime") ?? "";
-    const holdTime = searchParams.get("holdTime") ?? "";
+    const holdTime = entryTime || exitTime
+      ? formatHoldDuration(entryTime, exitTime) ?? ""
+      : searchParams.get("holdTime") ?? "";
     const time = searchParams.get("time") ?? "";
     const format = parseSharePnlFormat(searchParams.get("format"));
 
@@ -151,13 +155,17 @@ export async function GET(request: Request) {
 
     const detailItems: { label: string; value: string }[] = [];
 
-    // Entry: price @ time (PST)
+    const entryTimeFormatted = entryTime ? fmtTimePacific(entryTime) : "";
+    const exitTimeFormatted = exitTime ? fmtTimePacific(exitTime) : "";
+
+    // Entry: price @ time, or timestamp alone when price is unmeasured.
     if (entryPrice != null && Number.isFinite(entryPrice)) {
-      const entryTimeFormatted = entryTime ? fmtTimePST(entryTime) : "";
       const entryValue = entryTimeFormatted
         ? `${fmtSignedPrice(entryPrice)} @ ${entryTimeFormatted}`
         : fmtSignedPrice(entryPrice);
       detailItems.push({ label: "ENTRY", value: entryValue });
+    } else if (entryTimeFormatted) {
+      detailItems.push({ label: "ENTRY", value: entryTimeFormatted });
     }
 
     // Hold time: entry to exit in natural language, centered between ENTRY and EXIT
@@ -165,13 +173,14 @@ export async function GET(request: Request) {
       detailItems.push({ label: "HELD", value: holdTime });
     }
 
-    // Exit: price @ time (PST)
+    // Exit: price @ time, or timestamp alone when price is unmeasured.
     if (exitPrice != null && Number.isFinite(exitPrice)) {
-      const exitTimeFormatted = exitTime ? fmtTimePST(exitTime) : "";
       const exitValue = exitTimeFormatted
         ? `${fmtSignedPrice(exitPrice)} @ ${exitTimeFormatted}`
         : fmtSignedPrice(exitPrice);
       detailItems.push({ label: "EXIT", value: exitValue });
+    } else if (exitTimeFormatted) {
+      detailItems.push({ label: "EXIT", value: exitTimeFormatted });
     }
 
     // Fallback: single fill price (no entry/exit)
