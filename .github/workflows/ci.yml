@@ -801,6 +801,7 @@ jobs:
           e2e/portfolio-same-day-equity-pnl.spec.ts
           e2e/stop-order-desktop.spec.ts
           e2e/modify-order-correlation-risk.spec.ts
+          e2e/modify-combo-subset-close.spec.ts
           e2e/form-focus-highlights.spec.ts
           e2e/historical-trades-filter.spec.ts
           e2e/chain-expiry-preserves-builder.spec.ts
@@ -1005,6 +1006,13 @@ jobs:
         with:
           name: profile-settings-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/profile-settings-*.png
+          retention-days: 7
+      - name: Upload modification close screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: modification-close-screenshots-shard-${{ matrix.shard }}
+          path: web/test-results/**/modify-sndk-subset-close*.png
           retention-days: 7
       - name: Upload traces on failure
         if: failure()
