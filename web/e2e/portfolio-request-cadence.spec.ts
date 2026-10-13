@@ -71,6 +71,8 @@ const ORDERS = {
 
 test("portfolio shell retains one initial read owner after the search shortcut", async ({ page }, testInfo) => {
   test.setTimeout(90_000);
+  // This ownership check intentionally observes the slower off-hours cadence.
+  await page.clock.setFixedTime(new Date("2026-10-13T12:00:00Z"));
   let portfolioReads = 0;
 
   await page.route("**/api/**", (route) => {
