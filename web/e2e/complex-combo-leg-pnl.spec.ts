@@ -4,7 +4,7 @@ const now = new Date().toISOString();
 const dateOffset = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 const expiry = dateOffset(30);
 const legs = [
-  { direction: "LONG", type: "Call", strike: 1450, contracts: 10, entry_cost: 52766, avg_cost: 5276.6, market_price: 65, market_value: 65000 },
+  { direction: "LONG", type: "Call", strike: 1450, contracts: 10, entry_cost: 52766, avg_cost: 9999, market_price: 65, market_value: 65000 },
   { direction: "SHORT", type: "Call", strike: 1600, contracts: 10, entry_cost: 13016, avg_cost: 1301.6, market_price: 17.72, market_value: -17720 },
   { direction: "SHORT", type: "Put", strike: 1400, contracts: 5, entry_cost: 24475, avg_cost: 4895, market_price: 37, market_value: -18500 },
 ];
@@ -15,7 +15,7 @@ const quote = { last: 1453.5, bid: 1453, ask: 1454, close: 1450, timestamp: now,
 async function installFixtures(page: Page, sameDay = false, missingClose = false) {
   const activeQuotes = { SNDK: { ...quote, symbol: "SNDK" }, ...Object.fromEntries(legs.map((leg, i) => {
     const key = `SNDK_${expiry.replaceAll("-", "")}_${leg.strike}_${leg.type === "Call" ? "C" : "P"}`;
-    return [key, { ...quote, symbol: key, last: leg.market_price, close: missingClose && i === 2 ? null : [60, 20, 40][i] }];
+    return [key, { ...quote, symbol: key, last: leg.market_price, bid: null, ask: null, close: missingClose && i === 2 ? null : [60, 20, 40][i] }];
   })) };
   await page.addInitScript((updates) => {
     class MockRelay {
@@ -50,7 +50,7 @@ async function installFixtures(page: Page, sameDay = false, missingClose = false
   }, activeQuotes);
   await page.route("**/api/**", (route) => route.fulfill({ status: 200, json: {} }));
   const reads: Record<string, unknown> = {
-    portfolio: { ...portfolio, positions: [{ ...position, entry_date: sameDay ? dateOffset(0) : position.entry_date }] },
+    portfolio: { ...portfolio, positions: [{ ...position, entry_date: sameDay ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date()) : position.entry_date }] },
     orders: { last_sync: now, open_orders: [], executed_orders: [], open_count: 0, executed_count: 0 },
     "ib-status": { connected: true }, "ib/ws-ticket": { ticket: "test" },
     blotter: { as_of: now, summary: { realized_pnl: 0 }, closed_trades: [], open_trades: [] },
@@ -64,6 +64,7 @@ for (const width of [1440, 393]) {
   test(`complex ratio combo reconciles per-leg total and today P&L at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 });
     await installFixtures(page);
+    await expect.poll(() => page.evaluate(() => document.querySelector('[data-testid="position-cell-today-pnl"]')?.textContent ?? document.querySelector('[data-testid="mobile-position-today"]')?.textContent)).toContain("+$8,780");
     if (width > 640) {
       const row = page.locator("tr", { hasText: "SNDK" }).first();
       await expect(row.getByTestId("position-cell-pnl")).toHaveText("+$13,505");
@@ -80,6 +81,7 @@ for (const width of [1440, 393]) {
       await expect(card.getByTestId("position-leg-today-pnl")).toHaveText(["+$5,000", "+$2,280", "+$1,500"]);
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
     }
+    await expect(page.getByText("$52.77", { exact: true }).first()).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath(`complex-combo-leg-pnl-${width}.png`), fullPage: true });
   });
 }

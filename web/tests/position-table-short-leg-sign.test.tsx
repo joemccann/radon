@@ -149,3 +149,22 @@ describe("PositionTable expanded leg rows — SHORT option leg sign", () => {
     expect(shortRow.textContent).toContain(`$-${putPerShare.toFixed(2)}`);
   });
 });
+
+
+describe("PositionTable leg basis reconciliation", () => {
+  it("uses journal leg basis and the actual contract multiplier instead of drifting broker avg cost", () => {
+    const customMultiplier = {
+      ...RATIO_RR,
+      legs: RATIO_RR.legs.map((leg, index) => Object.assign({}, leg, index === 0 ? {
+        contracts: 2, multiplier: 50, entry_cost: 1200, avg_cost: 9999,
+        market_price: 15, market_value: 1500,
+      } : {})),
+    };
+    render(<PositionTable positions={[customMultiplier]} prices={{}} />);
+    expandLegs();
+    const longRow = screen.getByText("LONG Call $410").closest("tr")!;
+    expect(longRow.textContent).toContain("$12.00");
+    expect(longRow.textContent).not.toContain("$199.98");
+    expect(longRow.querySelector('[data-testid="position-leg-pnl"]')?.textContent).toBe("+$300");
+  });
+});

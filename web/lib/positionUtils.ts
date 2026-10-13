@@ -130,7 +130,7 @@ export function resolveMarketValue(pos: PortfolioPosition): number | null {
  * two-way Stock/option split valued every one of them at 100x. The type
  * default is only the fallback for rows written before the field existed.
  */
-function getLegMultiplier(leg: { type: string; multiplier?: string | number | null }): number {
+export function getLegMultiplier(leg: { type: string; multiplier?: string | number | null }): number {
   const persisted = Number(leg.multiplier);
   if (Number.isFinite(persisted) && persisted > 0) return persisted;
   return leg.type === "Stock" ? 1 : 100;
@@ -680,28 +680,13 @@ function computeRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData>)
   let rtMv = 0;
   let contributed = false;
   for (const leg of pos.legs) {
-    // A zero-contract leg is worth nothing whatever it prices at; letting an
-    // unresolvable one null the whole walk drops the position to its stale
-    // synced value.
+    // Preserve the legacy zero-contract fallback when there are no holdings.
     if (!Number.isFinite(leg.contracts) || leg.contracts <= 0) continue;
-    // A stock leg inside a combo has no option key — it prices off the
-    // underlying's own quote, with the synced leg price underneath.
-    const key = legPriceKey(pos.ticker, pos.expiry, leg);
-    const lp = key
-      ? prices[key] ?? null
-      : leg.type === "Stock"
-        ? prices[pos.ticker] ?? prices[pos.ticker.toUpperCase()] ?? null
-        : null;
-    const current = resolveRealtimePrice(lp, leg.market_price, Boolean(leg.market_price_is_calculated)).price;
-    if (current == null) return null;
-    const sign = leg.direction === "LONG" ? 1 : -1;
-    rtMv += sign * current * leg.contracts * getLegMultiplier(leg);
+    const marketValue = resolveLegPnl(pos, leg, prices).marketValue;
+    if (marketValue == null) return null;
+    rtMv += marketValue;
     contributed = true;
   }
-  // No leg contributed, so 0 is the absence of a market value, not one. The
-  // deleted mobile helper guarded this; without it the caller's
-  // `?? resolveMarketValue` never fires and the position renders $0.00 with a
-  // full-loss P&L against its own entry cost.
   return contributed ? rtMv : null;
 }
 
@@ -743,28 +728,22 @@ export function getOptionDailyChg(pos: PortfolioPosition, prices?: Record<string
     return ((mv - ec) / Math.abs(ec)) * 100;
   }
 
-  // Compute WS close-based daily P&L and close value (needed for % calc)
-  let wsDailyPnl = 0;
+  // A daily percentage requires a usable baseline for every leg, even when
+  // IB supplies the dollar total. Never divide by a partial close value.
   let closeValue = 0;
-  let hasClose = false;
+  if (pos.legs.length === 0) return null;
   for (const leg of pos.legs) {
-    const key = legPriceKey(pos.ticker, pos.expiry, leg);
-    const lp = key ? prices[key] : null;
-    const current = resolveRealtimePrice(lp, leg.market_price, Boolean(leg.market_price_is_calculated)).price;
-    if (current == null) return null;
-    const sign = leg.direction === "LONG" ? 1 : -1;
-    if (lp?.close != null && lp.close > 0) {
-      const multiplier = getLegMultiplier(leg);
-      wsDailyPnl += sign * (current - lp.close) * leg.contracts * multiplier;
-      closeValue += sign * lp.close * leg.contracts * multiplier;
-      hasClose = true;
-    }
+    const part = resolveLegPnl(pos, leg, prices);
+    if (part.todayPnl == null) return null;
+    const baseline = part.todayBasis === "entry"
+      ? part.entryValue
+      : resolvedLegPreviousCloseValue(pos, leg, prices);
+    if (baseline == null) return null;
+    closeValue += baseline;
   }
-  if (!hasClose || closeValue === 0) return null;
-
-  // Prefer IB's per-position daily P&L (handles intraday additions correctly)
-  const effectivePnl = pos.ib_daily_pnl != null ? pos.ib_daily_pnl : wsDailyPnl;
-  return (effectivePnl / Math.abs(closeValue)) * 100;
+  if (closeValue === 0) return null;
+  const effectivePnl = getTodayPnlDollars(pos, prices);
+  return effectivePnl == null ? null : (effectivePnl / Math.abs(closeValue)) * 100;
 }
 
 /* ─── Stock daily change ──────────────────────────────────── */
@@ -824,29 +803,64 @@ function resolvedLegMark(
   return resolveRealtimePrice(lp, leg.market_price, Boolean(leg.market_price_is_calculated)).price;
 }
 
-function sessionFillLegTodayPnl(
+function resolvedLegPreviousCloseValue(
   pos: PortfolioPosition,
   leg: PortfolioPosition["legs"][number],
   prices?: Record<string, PriceData>,
 ): number | null {
-  const current = resolvedLegMark(pos, leg, prices);
-  if (current == null || !Number.isFinite(leg.entry_cost)) return null;
-  const sign = legDirectionSign(leg);
-  return sign * current * leg.contracts * getLegMultiplier(leg) - sign * Math.abs(leg.entry_cost);
+  const key = leg.type === "Stock" ? pos.ticker : legPriceKey(pos.ticker, pos.expiry, leg);
+  const quote = key ? prices?.[key] ?? prices?.[key.toUpperCase()] : null;
+  const close = quote?.close;
+  if (!isPositiveNumber(close) || !Number.isFinite(leg.contracts) || leg.contracts <= 0) return null;
+  return legDirectionSign(leg) * close * leg.contracts * getLegMultiplier(leg);
 }
 
-function overnightLegTodayPnl(
+export type LegPnl = {
+  /** Signed dollars; shorts are liabilities/entry credits. */
+  marketValue: number | null;
+  entryValue: number | null;
+  pnl: number | null;
+  todayPnl: number | null;
+  todayBasis: "entry" | "previous-close" | null;
+};
+
+/**
+ * Value an actual held leg independently of the combo's reporting quantity.
+ * Entry cost is already total contract dollars; avg_cost is never multiplied
+ * again. A broker aggregate daily total cannot be allocated to individual legs.
+ */
+export function resolveLegPnl(
   pos: PortfolioPosition,
   leg: PortfolioPosition["legs"][number],
   prices?: Record<string, PriceData>,
-): number | null {
+): LegPnl {
+  const sign = legDirectionSign(leg);
   const current = resolvedLegMark(pos, leg, prices);
-  if (current == null) return null;
-  const key = legPriceKey(pos.ticker, pos.expiry, leg);
-  const lp = key && prices ? prices[key] : null;
-  const close = lp?.close;
-  if (close == null || !Number.isFinite(close) || close <= 0) return null;
-  return legDirectionSign(leg) * (current - close) * leg.contracts * getLegMultiplier(leg);
+  const validQuantity = Number.isFinite(leg.contracts) && leg.contracts > 0;
+  const markedValue = current != null && validQuantity
+    ? sign * current * leg.contracts * getLegMultiplier(leg)
+    : null;
+  const currentValue = markedValue != null && Number.isFinite(markedValue) ? markedValue : null;
+  const syncedValue = leg.market_value != null && Number.isFinite(leg.market_value)
+    ? sign * Math.abs(leg.market_value)
+    : null;
+  const marketValue = currentValue ?? syncedValue;
+  const entryValue = Number.isFinite(leg.entry_cost) ? sign * Math.abs(leg.entry_cost) : null;
+  const measuredPnl = marketValue != null && entryValue != null ? marketValue - entryValue : null;
+  const pnl = measuredPnl != null && Number.isFinite(measuredPnl) ? measuredPnl : null;
+  const useEntry = isSameDay(pos) || (isMixedAgeCombo(pos) && leg.basis_source === "session_fills");
+  const previousClose = useEntry ? null : resolvedLegPreviousCloseValue(pos, leg, prices);
+  // Daily moves need a usable current mark. A synced dollar-only snapshot has
+  // no quote context with which to measure an overnight change.
+  const todayPnl = useEntry
+    ? isSameDay(pos)
+      ? pnl
+      : currentValue != null && entryValue != null ? currentValue - entryValue : null
+    : currentValue != null && previousClose != null ? currentValue - previousClose : null;
+  return {
+    marketValue, entryValue, pnl, todayPnl,
+    todayBasis: todayPnl == null ? null : useEntry ? "entry" : "previous-close",
+  };
 }
 
 function mixedAgeTodayPnl(
@@ -858,9 +872,7 @@ function mixedAgeTodayPnl(
   let pnl = 0;
   if (pos.legs.length === 0) return null;
   for (const leg of pos.legs) {
-    const part = leg.basis_source === "session_fills"
-      ? sessionFillLegTodayPnl(pos, leg, prices)
-      : overnightLegTodayPnl(pos, leg, prices);
+    const part = resolveLegPnl(pos, leg, prices).todayPnl;
     // A partial or non-finite leg sum is not a measurable position-level Today P&L.
     if (part == null || !Number.isFinite(part)) return null;
     pnl += part;
@@ -896,23 +908,16 @@ export function getTodayPnlDollars(pos: PortfolioPosition, prices?: Record<strin
     return getPnlDollars(pos, mv);
   }
 
-  // Prefer IB's per-position daily P&L for overnight positions
-  if (pos.ib_daily_pnl != null) return pos.ib_daily_pnl;
+  // Broker totals remain authoritative for overnight holdings. Individual
+  // legs still disclose unavailable baselines rather than invent allocations.
+  if (pos.ib_daily_pnl != null && Number.isFinite(pos.ib_daily_pnl)) return pos.ib_daily_pnl;
 
-  // Fall back to WS close-based calculation (overnight positions)
+  if (pos.legs.length === 0) return null;
   let pnl = 0;
-  let hasClose = false;
   for (const leg of pos.legs) {
-    const key = legPriceKey(pos.ticker, pos.expiry, leg);
-    const lp = key && prices ? prices[key] : null;
-    const last = (lp?.last != null && lp.last > 0) ? lp.last : (leg.market_price != null && leg.market_price > 0 ? leg.market_price : null);
-    if (last == null) return null;
-    const close = lp?.close;
-    if (close != null && close > 0) {
-      const sign = leg.direction === "LONG" ? 1 : -1;
-      pnl += sign * (last - close) * leg.contracts * getLegMultiplier(leg);
-      hasClose = true;
-    }
+    const part = resolveLegPnl(pos, leg, prices).todayPnl;
+    if (part == null || !Number.isFinite(part)) return null;
+    pnl += part;
   }
-  return hasClose ? pnl : null;
+  return pnl;
 }

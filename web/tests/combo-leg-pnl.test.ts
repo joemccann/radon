@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getTodayPnlDollars, getOptionDailyChg, getPnlDollars, resolveLegPnl } from "@/lib/positionUtils";
+import { getTodayPnlDollars, getOptionDailyChg, getPnlDollars, resolveLegPnl, resolveRealtimeMarketValue } from "@/lib/positionUtils";
 import type { PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 
@@ -85,6 +85,23 @@ describe("complex combo per-leg P&L", () => {
     const pos=position(); pos.legs[0].entry_cost=entry_cost;
     expect(resolveLegPnl(pos,pos.legs[0],prices()).pnl).toBeNull();
     expect(getPnlDollars(pos)).toBeNull();
+  });
+  it("reconciles a live leg and another leg with only synced market value", () => {
+    const pos=position(); pos.legs[2].market_price=null;
+    const quotes=prices(); delete quotes.SNDK_20261023_1400_P;
+    const breakdown=pos.legs.map(leg=>resolveLegPnl(pos,leg,quotes));
+    expect(breakdown[2].marketValue).toBe(-18500);
+    expect(breakdown[2].pnl).toBe(5975);
+    expect(breakdown[2].todayPnl).toBeNull();
+    expect(breakdown.reduce((sum,leg)=>sum+leg.pnl!,0)).toBe(13505);
+    expect(getPnlDollars(pos,resolveRealtimeMarketValue(pos,quotes))).toBe(13505);
+    expect(resolveRealtimeMarketValue(pos,quotes)).toBe(28780);
+    expect(getTodayPnlDollars(pos,quotes)).toBeNull();
+  });
+  it.each([NaN,Infinity,-Infinity])("ignores nonfinite overnight broker P&L %s", ib_daily_pnl => {
+    const pos={...position(),ib_daily_pnl};
+    expect(getTodayPnlDollars(pos,prices())).toBeCloseTo(8780,6);
+    expect(getOptionDailyChg(pos,prices())).toBeCloseTo(8780/20000*100,6);
   });
   it("withholds total when no current or synced leg value is available", () => {
     const pos=position(); pos.legs[0].market_price=null; pos.legs[0].market_value=null;
