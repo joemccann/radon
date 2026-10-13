@@ -331,6 +331,7 @@ describe("GarchConvergenceScanner", () => {
     expect(within(section).getByText("+2.41")).toBeTruthy();
     expect(within(section).getByText("STRONG")).toBeTruthy();
     expect(within(section).getByTestId("garch-actionable-count").textContent).toMatch(/1\s*ACTIONABLE/);
+    fireEvent.click(within(section).getByTestId("garch-filter-all"));
     // Failed gates named as chips (the WHY), not a bare dash.
     expect(within(section).getByText("Edge")).toBeTruthy();
     // Filter bar present
@@ -338,6 +339,42 @@ describe("GarchConvergenceScanner", () => {
 
     fireEvent.click(within(section).getByRole("button", { name: /^scan$/i }));
     expect(onScan).toHaveBeenCalledTimes(1);
+  });
+
+  it("defaults to actionable rows and says the failures once, computed from the gates", () => {
+    const failRow = (a: string, b: string, gate: string) => ({
+      ...garchData.pairs[1], pair: [a, b] as [string, string], leader: a, lagger: b, failing_gates: [gate],
+    });
+    const data: GarchConvergenceData = {
+      ...garchData,
+      pairs: [
+        garchData.pairs[0],
+        failRow("AAPL", "MSFT", "HV20−IV = -8.1 pts (need ≥+10)"),
+        failRow("CSCO", "ANET", "HV20−IV = -2.4 pts (need ≥+10)"),
+        failRow("ADSK", "PTC", "Lagger IV rank 62% (need <50%)"),
+      ],
+    };
+    render(<GarchConvergenceScanner data={data} />);
+    const section = screen.getByTestId("garch-scanner-section");
+    expect(within(section).getByTestId("garch-summary").textContent).toBe("1 actionable of 4 pairs");
+    expect(within(section).getByTestId("garch-summary-failures").textContent).toBe(
+      "3 fail gates, most often HV20−IV below +10 pts (2)",
+    );
+    expect(within(section).getByTestId("garch-filter-actionable").getAttribute("aria-pressed")).toBe("true");
+    expect(within(section).getByTestId("garch-row-NVDA-AMD")).toBeTruthy();
+    expect(within(section).queryByTestId("garch-row-AAPL-MSFT")).toBeNull();
+
+    fireEvent.click(within(section).getByTestId("garch-filter-failed"));
+    expect(within(section).getByTestId("garch-row-AAPL-MSFT")).toBeTruthy();
+  });
+
+  it("falls back to all rows when nothing is actionable", () => {
+    const data: GarchConvergenceData = { ...garchData, pairs: [garchData.pairs[1]] };
+    render(<GarchConvergenceScanner data={data} />);
+    const section = screen.getByTestId("garch-scanner-section");
+    expect(within(section).getByTestId("garch-summary").textContent).toBe("0 actionable of 1 pair");
+    expect(within(section).getByTestId("garch-filter-all").getAttribute("aria-pressed")).toBe("true");
+    expect(within(section).getByTestId("garch-row-GOOGL-META")).toBeTruthy();
   });
 
   it("filters to actionable pairs only", () => {
@@ -357,6 +394,7 @@ describe("GarchConvergenceScanner", () => {
     expect(link.textContent).toBe("AMD");
 
     expect(within(section).queryByTestId("garch-order-link-META")).toBeNull();
+    fireEvent.click(within(section).getByTestId("garch-filter-all"));
     const failed = within(section).getByTestId("garch-row-GOOGL-META");
     const failedLinks = Array.from(failed.querySelectorAll("a"));
     expect(failedLinks.map((a) => a.getAttribute("href"))).toEqual(["/META"]);
@@ -416,6 +454,7 @@ describe("GarchConvergenceScanner", () => {
   it("sorts by Gates when the header is clicked", () => {
     render(<GarchConvergenceScanner data={garchData} />);
     const section = screen.getByTestId("garch-scanner-section");
+    fireEvent.click(within(section).getByTestId("garch-filter-all"));
     const first = () => within(section).getAllByTestId(/^garch-row-/)[0].getAttribute("data-testid");
     const before = first();
     fireEvent.click(within(section).getByRole("columnheader", { name: /gates/i }));

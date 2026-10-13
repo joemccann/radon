@@ -5,6 +5,7 @@ import RequestError from "@/components/RequestError";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, Newspaper } from "lucide-react";
 import SectionEmptyState from "@/components/SectionEmptyState";
+import { isHeadlineAboutTicker } from "@/lib/tickerNewsRelevance";
 
 type NewsItem = {
   headline: string;
@@ -67,6 +68,15 @@ export default function NewsTab({ ticker, active }: NewsTabProps) {
   }, [active, fetchNews, retryAttempt]);
 
   const isCurrentTicker = resolvedTicker === ticker;
+  const visible = news.filter((item) => isHeadlineAboutTicker(item.headline ?? "", ticker));
+  const hiddenCount = news.length - visible.length;
+  // A badge every row wears carries no information.
+  const badgeMajor = visible.some((item) => item.is_major) && !visible.every((item) => item.is_major);
+  const hiddenNote = hiddenCount > 0 ? (
+    <div className="news-fallback-notice" data-testid="news-hidden-note">
+      {hiddenCount} {hiddenCount === 1 ? "headline" : "headlines"} hidden: {hiddenCount === 1 ? "it uses" : "they use"} &quot;{ticker.toLowerCase()}&quot; as a word, not the symbol.
+    </div>
+  ) : null;
 
   if (loading || (active && !isCurrentTicker)) {
     return (
@@ -80,7 +90,7 @@ export default function NewsTab({ ticker, active }: NewsTabProps) {
     return <div className="tab-empty"><RequestError error={error} fallback="This instrument data could not be loaded. Try again." onRetry={() => setRetryAttempt(attempt => attempt + 1)} /><button type="button" className="btn-secondary" onClick={() => setRetryAttempt(attempt => attempt + 1)}>Reload data</button></div>;
   }
 
-  if (isCurrentTicker && fetched && news.length === 0) {
+  if (isCurrentTicker && fetched && visible.length === 0) {
     return (
       <div className="tab-empty">
         <SectionEmptyState
@@ -88,20 +98,21 @@ export default function NewsTab({ ticker, active }: NewsTabProps) {
           headline={`No recent news for ${ticker}`}
           variant="compact"
         />
+        {hiddenNote}
       </div>
     );
   }
 
   return (
     <div className="news-tab">
-      {(isCurrentTicker ? news : []).map((item, i) => (
+      {(isCurrentTicker ? visible : []).map((item, i) => (
         <div key={i} className="news-item">
           <div className="news-meta">
             <span className="news-date">
               {item.created_at ? new Date(item.created_at).toLocaleDateString() : ""}
             </span>
             {item.source && <span className="news-source">{item.source}</span>}
-            {item.is_major && <span className="pill defined" style={{ fontSize: "var(--instrument-meta-size, 8px)", padding: "1px 4px" }}>MAJOR</span>}
+            {badgeMajor && item.is_major && <span className="pill defined" style={{ fontSize: "var(--instrument-meta-size, 8px)", padding: "1px 4px" }}>MAJOR</span>}
           </div>
           <div className="news-headline">
             {item.headline}
@@ -117,6 +128,7 @@ export default function NewsTab({ ticker, active }: NewsTabProps) {
           </div>
         </div>
       ))}
+      {isCurrentTicker ? hiddenNote : null}
       {source && source !== "unusualwhales" && (
         <div className="news-fallback-notice">via {source === "yahoo" ? "Yahoo Finance" : source}</div>
       )}

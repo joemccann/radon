@@ -2893,6 +2893,8 @@ function wireIBEvents() {
         primaryExchange: k.primaryExch ?? k.primaryExchange,
         currency: k.currency,
         derivativeSecTypes: c.derivativeSecTypes || [],
+        // Company name; @stoqey/ib decodes it only on BOND_ISSUERID+ gateways.
+        ...(k.description ? { description: k.description } : {}),
       };
     });
 

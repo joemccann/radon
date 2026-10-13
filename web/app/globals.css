@@ -1168,6 +1168,11 @@ body {
   padding: 10px 12px;
 }
 
+/* No sector known: price sits next to the symbol, star stays at the edge. */
+.profile-watch--no-sector.panel {
+  grid-template-columns: 80px 1fr auto;
+}
+
 .profile-watch__symbol {
   font-family: var(--font-mono);
   font-size: 14px;
@@ -14389,6 +14394,22 @@ body[data-mobile="true"] .journal-pnl-strip__stat--range {
   font-size: 10px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.garch-scanner__summary {
+  padding: 4px 12px 8px;
+}
+
+.garch-scanner__summary-head {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.garch-scanner__summary-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .garch-scanner__filterbar {
