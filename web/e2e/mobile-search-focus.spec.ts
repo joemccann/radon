@@ -68,7 +68,11 @@ for (const width of [320, 393]) {
     // Synthetic Clear fixtures can emit unrelated provider/recovery toasts;
     // dismiss them so the visual artifact shows the input and result row.
     const dismiss = page.getByRole("button", { name: "Dismiss", exact: true });
-    for (let i = 0; i < 5 && await dismiss.count(); i++) await dismiss.first().tap();
+    // Fixture toasts can auto-expire during actionability checks. Cleanup
+    // their current dismiss controls directly; search interactions stay taps.
+    await dismiss.evaluateAll((buttons) => {
+      for (const button of buttons) (button as HTMLButtonElement).click();
+    });
     await expect(dismiss).toHaveCount(0);
     await input.tap();
     await expect(input).toBeFocused();
