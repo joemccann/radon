@@ -8795,6 +8795,20 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
 .cockpit--mobile .pos-legs-table-wrap .pos-legs-table td { white-space: nowrap; }
 .pos-legs-table th { font-size: 9px; padding: 8px 10px; }
 .pos-legs-table td { font-size: 11px; padding: 6px 10px; }
+.position-leg-selection-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.position-leg-selection-actions .position-trade-cta:disabled { opacity: 0.5; cursor: not-allowed; }
+.pos-legs-table .pos-leg-selection-cell {
+  position: sticky; left: 0; z-index: 1; padding: 0;
+  background: var(--bg-panel); border-right: 1px solid var(--border-dim);
+}
+.pos-leg-select-control { display: flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; cursor: pointer; }
+.pos-leg-select-control input { width: 18px; height: 18px; accent-color: var(--signal-core); cursor: pointer; }
+.pos-leg-select-control input:focus-visible { outline: 2px solid var(--signal-core); outline-offset: 3px; }
+.pos-legs-table tr[data-selected] td { background: color-mix(in srgb, var(--signal-core) 10%, var(--bg-panel)); }
+.position-trade-leg-review { display: flex; flex-direction: column; gap: 12px; border: 1px solid var(--border-dim); border-radius: var(--radius-sm); padding: 12px; }
+.position-trade-leg-review h3 { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin: 0 0 6px; }
+.position-trade-leg-review ul { list-style: none; padding: 0; margin: 0; }
+.position-trade-leg-review li { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; line-height: 1.6; overflow-wrap: anywhere; }
 
 /* ── Position-deck trade affordances ─────────────────────────────────────── */
 .position-trade-actions {

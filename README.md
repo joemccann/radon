@@ -121,7 +121,7 @@ Durable facts. History and mechanism live in the owner file, not here.
 
 - **Indicators.** Regime tabs at `/regime/{skew,skew2d,straddle,cor,curve}`. Cheap-wing scanner at `/scanner?mode=vol-cone`. Specs: [`docs/indicators/`](docs/indicators/README.md).
 - **CMD+J.** Quotes, priced UW chains, and `evaluate.py` run from the in-app assistant. KB miss is not a dead end.
-- **Stop orders.** Desktop and mobile tickets place `STP` and `STP LMT` through `/api/orders/place`.
+- **Orders.** Desktop/mobile tickets support `STP` and `STP LMT`. In the Position tab, select put/call legs and choose **Close Selected Legs** to close a spread or cover a short leg; review retained legs before confirming.
 - **Incidents.** Watchdog artifacts under `data/incidents/`. Triage with `/incident <path>`. Cases: [`docs/incident-runbook.md`](docs/incident-runbook.md).
 - **Factory.** GitHub issues labeled `factory` become draft PRs via Foreman in [`joemccann/radon-factory`](https://github.com/joemccann/radon-factory). Contract: [`docs/factory.md`](docs/factory.md).
 
