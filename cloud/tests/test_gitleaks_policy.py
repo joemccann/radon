@@ -68,6 +68,10 @@ GENERIC_API_KEY_BASELINE_COMMITS = {
     # 2026-10-01 (PR #837): runner Pushover SENTINEL fixtures next to a
     # token identifier; rewritten to runtime construction afterwards.
     "5643de1d495a887c0d71d7cdc29a27b4ab291c1a",
+    # 2026-10-12 (PR #1045): /admin journal-redaction fixtures spelled fake
+    # api_key / auth_token values; rewritten to runtime construction in the
+    # follow-up commit.
+    "99886a99f10c7889803f2b23f815206981e1b087",
 }
 
 

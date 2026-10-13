@@ -120,6 +120,8 @@ export default function IvSpreadPanel() {
   const stats = data.stats;
   const regime = ivSpreadRegime(current.z_score) ?? current.regime;
   const regimeTone = ivSpreadRegimeColor(regime);
+  // A muted band tone is right for a caption, never for the headline figure.
+  const headlineTone = regimeTone === "var(--text-muted)" ? "var(--text-primary)" : regimeTone;
   const mean = finiteOrNull(stats?.mean);
   const stdev = finiteOrNull(stats?.stdev);
   const zSub =
@@ -230,11 +232,21 @@ export default function IvSpreadPanel() {
               testId="iv-spread-strip-spread"
               label="SPREAD"
               value={
-                <span data-testid="iv-spread-spread-value" style={{ color: regimeTone }}>
+                <span data-testid="iv-spread-spread-value" style={{ color: headlineTone }}>
                   {formatSpread(current.spread)}
                 </span>
               }
-              sub={<>1D {formatSpread(current.change_1d)} VOL PTS</>}
+              sub={
+                <>
+                  <span
+                    data-testid="iv-spread-regime-value"
+                    style={{ color: regimeTone, whiteSpace: "nowrap" }}
+                  >
+                    {regime ?? "---"}
+                  </span>
+                  {" · "}1D {formatSpread(current.change_1d)} VOL PTS
+                </>
+              }
             />
             <RegimeStripCell
               testId="iv-spread-strip-ndx"
@@ -259,19 +271,6 @@ export default function IvSpreadPanel() {
               label="PCTILE"
               value={formatPctPoints(current.pctile)}
               sub={<>SHARE OF SESSIONS BELOW</>}
-            />
-            <RegimeStripCell
-              testId="iv-spread-strip-regime"
-              label="REGIME"
-              value={
-                <span
-                  data-testid="iv-spread-regime-value"
-                  style={{ color: regimeTone, whiteSpace: "nowrap" }}
-                >
-                  {regime ?? "---"}
-                </span>
-              }
-              sub={<>TECH VOL PREMIUM VS MEAN</>}
             />
           </RegimeStrip>
         )}

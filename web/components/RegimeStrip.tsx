@@ -74,7 +74,25 @@ export function RegimeStripCell({ testId, label, value, change, sub, timestamp }
   );
 }
 
-/** `cadence="daily"` means the panel states the cadence once elsewhere, so per-tile DAILY pills hide. */
-export function RegimeStrip({ children, cadence }: { children: ReactNode; cadence?: "daily" }) {
-  return <div className="regime-strip" data-cadence={cadence}>{children}</div>;
+/**
+ * `cadence="daily"` means the panel states the cadence once elsewhere, so per-tile DAILY pills hide.
+ * `columns={4}` opts a four-cell strip out of the five-column grid so no dead tile pads the row.
+ */
+export function RegimeStrip({
+  children,
+  cadence,
+  columns,
+  className,
+}: {
+  children: ReactNode;
+  cadence?: "daily";
+  columns?: 4;
+  className?: string;
+}) {
+  const classes = ["regime-strip", columns ? `regime-strip--cols-${columns}` : null, className].filter(Boolean).join(" ");
+  return (
+    <div className={classes} data-cadence={cadence}>
+      {children}
+    </div>
+  );
 }

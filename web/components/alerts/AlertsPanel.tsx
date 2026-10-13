@@ -138,7 +138,7 @@ export function AlertsPanel() {
         </div>
         <div className="alerts-form__field">
           <span className="alerts-form__label">Metric</span>
-          <select aria-label="Metric" className="filter-select" value={metric} onChange={(e) => setMetric(e.target.value)}>
+          <select aria-label="Metric" className="filter-select alerts-form__select" value={metric} onChange={(e) => setMetric(e.target.value)}>
             {METRICS.map((m) => (
               <option key={m} value={m}>
                 {metricLabel(m)}
@@ -148,7 +148,7 @@ export function AlertsPanel() {
         </div>
         <div className="alerts-form__field">
           <span className="alerts-form__label">Operator</span>
-          <select aria-label="Operator" className="filter-select" value={op} onChange={(e) => setOp(e.target.value)}>
+          <select aria-label="Operator" className="filter-select alerts-form__select" value={op} onChange={(e) => setOp(e.target.value)}>
             {OPS.map((o) => (
               <option key={o} value={o}>
                 {o}
@@ -169,7 +169,7 @@ export function AlertsPanel() {
         </div>
         <div className="alerts-form__field">
           <span className="alerts-form__label">Send to</span>
-          <select aria-label="Channel" className="filter-select" value={channel} onChange={(e) => setChannel(e.target.value)}>
+          <select aria-label="Channel" className="filter-select alerts-form__select" value={channel} onChange={(e) => setChannel(e.target.value)}>
             {CHANNELS.map((c) => (
               <option key={c} value={c}>
                 {channelLabel(c)}

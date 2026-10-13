@@ -76,10 +76,11 @@ export function stateLabel(state: CreditVixState | null | undefined): string {
   return "---";
 }
 
-export type CreditVixTone = "positive" | "negative" | "muted";
+export type CreditVixTone = "positive" | "warning" | "muted";
 
 export function stateTone(state: CreditVixState | null | undefined): CreditVixTone {
-  if (state === "CREDIT WIDE") return "negative";
+  // Relative state scoped to the 252-session window, not a crisis alarm.
+  if (state === "CREDIT WIDE") return "warning";
   if (state === "VIX WIDE") return "positive";
   return "muted";
 }

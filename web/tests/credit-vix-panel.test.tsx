@@ -32,8 +32,8 @@ describe("formatSpread / stateLabel / stateTone", () => {
     expect(stateLabel(null)).toBe("---");
   });
 
-  it("tones CREDIT WIDE as negative and VIX WIDE as positive", () => {
-    expect(stateTone("CREDIT WIDE")).toBe("negative");
+  it("tones CREDIT WIDE as a warning (relative state, not a crisis) and VIX WIDE as positive", () => {
+    expect(stateTone("CREDIT WIDE")).toBe("warning");
     expect(stateTone("VIX WIDE")).toBe("positive");
     expect(stateTone("ALIGNED")).toBe("muted");
     expect(stateTone(null)).toBe("muted");
@@ -160,6 +160,7 @@ describe("CreditVixPanel", () => {
     expect(screen.getByTestId("credit-vix-vix").textContent).toBe("16.04");
     expect(screen.getByTestId("credit-vix-gap").textContent).toBe("0.85");
     expect(screen.getByTestId("credit-vix-state").textContent).toBe("CREDIT WIDE");
+    expect((screen.getByTestId("credit-vix-state") as HTMLElement).style.color).toBe("var(--warn-text)");
     expect(screen.getByTestId("credit-vix-widest-since").textContent).toContain("2015");
     expect(screen.getAllByText("SHY MINUS HYG VS VIX").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId("credit-vix-brush")).toBeTruthy();

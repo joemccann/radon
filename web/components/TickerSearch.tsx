@@ -25,7 +25,29 @@ type SearchResult = {
   primaryExchange: string;
   currency: string;
   derivativeSecTypes?: string[];
+  /** IB contract description (company name); absent on older gateways. */
+  description?: string;
+  /** Other venues listing the same symbol, folded into this row. */
+  alsoExchanges?: string[];
 };
+
+/** One row per symbol + type: selection navigates by symbol, so a second
+ *  listing (NVS on TSE and NYSE) is the same destination. The USD listing
+ *  leads; the others are named on the row. */
+export function foldListings(results: SearchResult[]): SearchResult[] {
+  const groups = new Map<string, SearchResult[]>();
+  for (const r of results) {
+    const key = `${r.symbol}|${r.secType}`;
+    const group = groups.get(key);
+    if (group) group.push(r);
+    else groups.set(key, [r]);
+  }
+  return Array.from(groups.values()).map((group) => {
+    const lead = group.find((r) => r.currency === "USD") ?? group[0];
+    const also = group.filter((r) => r !== lead).map((r) => r.primaryExchange).filter(Boolean);
+    return also.length > 0 ? { ...lead, alsoExchanges: also } : lead;
+  });
+}
 
 type TickerSearchProps = {
   onSelect: (symbol: string) => void;
@@ -92,6 +114,7 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
 
     const [query, setQuery] = useState("");
     const [results, setResults] = useState<SearchResult[]>([]);
+    const mixedTypes = new Set(results.map((r) => r.secType)).size > 1;
     const [activeIndex, setActiveIndex] = useState(-1);
     const [isOpen, setIsOpen] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -172,9 +195,9 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
                 if (data.type === "searchResults") {
                   const responsePattern = typeof data.pattern === "string" ? data.pattern.trim().toUpperCase() : "";
                   if (!responsePattern || responsePattern !== activePatternRef.current) return;
-                  const filtered: SearchResult[] = (data.results ?? [])
-                    .filter((r: SearchResult) => ALLOWED_SEC_TYPES.has(r.secType))
-                    .slice(0, MAX_RESULTS);
+                  const filtered: SearchResult[] = foldListings(
+                    (data.results ?? []).filter((r: SearchResult) => ALLOWED_SEC_TYPES.has(r.secType)),
+                  ).slice(0, MAX_RESULTS);
                   setResults(filtered);
                   setActiveIndex(-1);
                   setLoading(false);
@@ -518,12 +541,29 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
                     minWidth: "72px",
                     letterSpacing: "0.3px",
                   }}
+                  data-search-symbol
                 >
                   {r.symbol}
                 </span>
 
-                {/* secType capsule badge */}
-                <span
+                {r.description ? (
+                  <span
+                    style={{
+                      fontFamily: "Inter, sans-serif",
+                      fontSize: "12px",
+                      color: "var(--text-secondary)",
+                      minWidth: 0,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {r.description}
+                  </span>
+                ) : null}
+
+                {/* secType capsule badge: only when types differ across rows */}
+                {mixedTypes ? <span
                   style={{
                     fontFamily: "'IBM Plex Mono', monospace",
                     fontSize: "9px",
@@ -539,7 +579,7 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
                   }}
                 >
                   {r.secType}
-                </span>
+                </span> : null}
 
                 {/* Exchange — right-aligned, dimmer */}
                 <span
@@ -552,6 +592,7 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
                   }}
                 >
                   {r.primaryExchange}
+                  {r.alsoExchanges?.length ? ` · also ${r.alsoExchanges.join(", ")}` : ""}
                 </span>
 
                 {/* Watchlist star — stop propagation so starring doesn't

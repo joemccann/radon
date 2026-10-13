@@ -4,7 +4,7 @@
 .workspace h2, .drawer h2 { font-size: 21px; margin: 0; font-weight: 550; letter-spacing: -.02em; }
 .workspace h3 { font-size: 18px; margin: 3px 0 0; font-weight: 550; }
 .eyebrow { display: block; color: var(--text-muted); font-size: 12px; }
-.subtitle, .note { color: var(--text-muted); margin: 8px 0 12px; }
+.note { color: var(--text-muted); margin: 8px 0 12px; }
 .workspace button, .drawer button { min-height: 44px; padding: 9px 14px; border: 1px solid var(--line-grid); border-radius: 6px; background: var(--bg-panel); color: var(--text-primary); cursor: pointer; font: inherit; font-size: 13px; }
 .workspace button:hover, .drawer button:hover { background: var(--bg-panel-raised); }
 .workspace :is(button,a,summary,[tabindex]):focus-visible, .drawer :is(button,a):focus-visible { outline: 2px solid var(--signal-core-text); outline-offset: 3px; }

@@ -96,10 +96,12 @@ export default function AdminAttentionQueue({ conditions, loading = false, now, 
             const primary = index === 0;
             return (
               <li key={condition.id} className={primary ? styles.primaryCondition : styles.condition} data-tone={resolved ? "neutral" : condition.tone} data-priority={primary ? "primary" : "secondary"} data-testid={`admin-attention-${condition.id}`}>
-                <div className={styles.conditionContent}>
+                <div className={primary ? styles.conditionContent : `${styles.conditionContent} ${styles.conditionRow}`}>
                   <span className={styles.status} data-tone={resolved ? "neutral" : condition.tone}>{resolved ? "No longer observed" : condition.source === "health" ? "Broker" : condition.source === "services" ? "Services" : "Telemetry"}</span>
-                  <h3>{condition.title}</h3>
-                  <p>{resolved ? "This condition cleared in the latest observation." : condition.detail}</p>
+                  {/* Only the lead condition earns a paragraph; the rest are one
+                      row each, explanation on hover, so one failure cannot fill the fold. */}
+                  <h3 title={primary ? undefined : resolved ? "This condition cleared in the latest observation." : condition.detail}>{condition.title}</h3>
+                  {primary ? <p>{resolved ? "This condition cleared in the latest observation." : condition.detail}</p> : null}
                   {primary && !resolved && condition.action === "gateway" && primaryActionRef ? (
                     <div className={styles.primaryActions} ref={primaryActionRef} />
                   ) : (

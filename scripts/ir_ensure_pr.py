@@ -5,8 +5,8 @@ It creates a PR against ``main`` when none is open for that head, and
 no-ops when one already exists. It never merges.
 
 Fail closed: ``GROK_PAGE_AUTOPUSH`` not truthy, a private identifier in
-the title, body or branch (``ir_push_gate``), a body without the six real IR
-sections (``ir_pr_description``), missing ``gh``, unauthenticated ``gh``, or
+the title, body or branch (``ir_push_gate``), a body that is not the PR
+template rendered from the six real IR sections (``ir_pr_description``), missing ``gh``, unauthenticated ``gh``, or
 a token without ``pull_requests: write``. Branch-only is not a ship.
 
 Fine-grained PAT on ``joemccann/radon``: Contents Read/Write and Pull
@@ -147,9 +147,12 @@ def format_ir_pr_body(
     issue_text = issue
     if extras:
         issue_text = f"{issue}\n" + " ".join(extras)
+    # Fallback only: no root cause, so _require_ir_description refuses it.
+    # Real IR bodies come from the fix commit (description_from_commit).
     return pr_fmt.format_pr_body(
         issue=issue_text,
         fix=fix,
+        test_plan="Not recorded here; the fix commit's How it was verified section is the record.",
         next_action=next_action or DEFAULT_NEXT,
     )
 
@@ -312,9 +315,9 @@ def _update_pr_body(
 
 
 def _require_ir_description(body: str, *, head: str) -> None:
-    """A PR body must carry the six real IR sections, never a placeholder."""
+    """A PR body is the PR template rendered from the six real IR sections."""
     try:
-        ir_pr_description.validate_ir_description(body, branch=head)
+        ir_pr_description.validate_ir_pr_body(body, branch=head)
     except ir_pr_description.IrDescriptionError as exc:
         raise IrEnsurePrError(
             f"IR PR description invalid: {exc}. Build it from the fix "

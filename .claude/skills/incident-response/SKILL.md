@@ -104,6 +104,12 @@ evidence; paste that evidence before claiming the step done.
   That creates a PR against `main` if none is open for this head; no-op if
   one exists. Fail closed if `gh` is missing or the PAT lacks
   `pull_requests: write`. Branch-only is not a ship.
+- The PR body is built from the fix commit's six IR sections and rendered
+  into `.github/pull_request_template.md` (Summary, What changed, Test plan,
+  Risk and rollback, Operator Next Steps, Checklist). Never hand-write it
+  with `gh pr create --body`; if you must, fill that template. The
+  `PR body template` CI check (`scripts/ci/check_pr_body.py`) fails any
+  other shape.
 - Watch CI on the PR (`gh pr checks`) until green. Do not merge.
 
 ## 8. Verify live

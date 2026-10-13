@@ -12,6 +12,7 @@ import pytest
 import github_pr_output as pr_fmt
 import grok_page_responder as responder
 import ir_ensure_pr as ir
+import ir_pr_description
 
 REPO = Path(__file__).resolve().parents[2]
 SKILL = REPO / ".claude" / "skills" / "incident-response" / "SKILL.md"
@@ -21,13 +22,17 @@ RUNBOOK = REPO / "docs" / "incident-runbook.md"
 WRAPPER = REPO / "scripts" / "ir_open_pr.sh"
 
 
-VALID_BODY = (
+IR_COMMIT_BODY = (
     "## What broke\n\nLeap reports died on a PermissionError 502 at 12:00Z.\n\n"
     "## Root cause\n\nThe unit wrote reports outside its writable paths.\n\n"
     "## What changed\n\n- leap.py: write reports under the unit cache dir.\n\n"
     "## How it was verified\n\nFocused leap pytest passed locally, 12 cases.\n\n"
     "## Risk and rollback\n\nLow; revert the commit to restore the old path.\n\n"
     "## Still open\n\nNothing beyond the next scheduled leap run check.\n"
+)
+# The PR body is the template rendering of the commit's six IR sections.
+VALID_BODY = ir_pr_description.compose_ir_pr_body(
+    ir_pr_description.validate_ir_description(IR_COMMIT_BODY)
 )
 
 
@@ -159,16 +164,16 @@ class TestIrPrCopy:
         assert sentence.startswith(body)
         assert body == sentence or sentence[len(body)] == " "
 
-    def test_body_reuses_nightly_headings_and_links_the_incident(self):
+    def test_body_uses_the_pr_template_and_links_the_incident(self):
         body = ir.format_ir_pr_body(
             issue="Leap reports died on a PermissionError 502.",
             fix="Wrote reports under the cache dir the unit can write.",
             incident_id="20260914T120000Z-leap",
             case_id="leap-reports-permission",
         )
-        assert "## Issue discovered" in body
-        assert "## What was done to fix it" in body
-        assert "## Next" in body
+        assert "## Summary" in body
+        assert "## What changed" in body
+        assert "## Operator Next Steps" in body
         assert "20260914T120000Z-leap" in body
         assert "docs/incident-runbook.md#leap-reports-permission" in body
         assert ir.DEFAULT_NEXT in body
@@ -654,7 +659,7 @@ class TestGrokCycleEnsuresPr:
 
 class TestCliAndWrapper:
     def test_cli_emits_json(self, monkeypatch, capsys):
-        monkeypatch.setattr(ir, "_git_stdout", lambda *_a, **_k: VALID_BODY)
+        monkeypatch.setattr(ir, "_git_stdout", lambda *_a, **_k: IR_COMMIT_BODY)
         monkeypatch.setattr(
             ir,
             "ensure_pr",

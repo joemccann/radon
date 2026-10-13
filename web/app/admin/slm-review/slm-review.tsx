@@ -297,17 +297,21 @@ export default function SlmReview({ reviewer }: { reviewer: string }) {
         <div className={styles.headerActions}>
           {packet && <button className={styles.secondary} onClick={exportDecisions}>Export decisions</button>}
           <input ref={fileRef} className={styles.fileInput} type="file" accept="application/json,.json" aria-label="Load review packet" onChange={(event) => loadPacket(event.target.files?.[0])} />
-          <button className={styles.primary} onClick={() => fileRef.current?.click()}>Load review packet</button>
+          {packet && <button className={styles.primary} onClick={() => fileRef.current?.click()}>Load review packet</button>}
         </div>
       </header>
-      <div className={styles.privacy}>Operator only. The packet is kept in this browser for automatic resume. Decisions are backed up to Radon. Images load from their source.</div>
+      <div className={styles.privacy}>Operator only. Kept in this browser for resume; decisions back up to Radon. Images load from their source.</div>
       {error && <ErrorToast message={error} />}
       {notice && <p role="status" className={styles.notice}>{notice}</p>}
       {restoring ? <p role="status" className={styles.notice}>Restoring review…</p> : !packet || !item ? (
-        <section className={styles.empty}>
-          <h2>Choose the 200-item packet</h2>
-          <p>Load the packet for the frozen evaluation cohort. It contains 200 posts, at least 40 with images, and three aligned prediction sets.</p>
-          <button className={styles.primary} onClick={() => fileRef.current?.click()}>Choose JSON file</button>
+        <section
+          className={styles.empty}
+          data-testid="slm-review-dropzone"
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => { event.preventDefault(); void loadPacket(event.dataTransfer?.files?.[0]); }}
+        >
+          <h2>Drop the 200-item packet JSON, or <button type="button" className={styles.retry} onClick={() => fileRef.current?.click()}>choose file</button></h2>
+          <p>200 posts · at least 40 with images · 3 aligned prediction sets</p>
         </section>
       ) : (
         <>

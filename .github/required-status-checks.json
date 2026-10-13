@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "Mirror of main branch protection verified with the GitHub API on 2026-09-07.",
+    "Mirror of main branch protection verified with the GitHub API on 2026-10-12.",
     "Keep this offline contract synchronized after any live protection change."
   ],
   "branch": "main",
@@ -28,6 +28,10 @@
     "pytest (scripts-jm)",
     "pytest (scripts-npsz)",
     "pytest (scripts-rs)",
-    "pytest coverage ratchet"
+    "pytest coverage ratchet",
+    "Cross-tree contracts (cloud)",
+    "Cross-tree contracts (scripts)",
+    "Cross-tree contracts (root)",
+    "PR body template"
   ]
 }

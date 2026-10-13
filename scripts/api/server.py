@@ -71,6 +71,7 @@ from api.ib_gateway import (
 )
 from api import ib_gateway
 from api import services as admin_services
+from api import service_logs
 from clients.ib_client import DEFAULT_GATEWAY_PORT
 from api.order_audit import record_order_event
 from api.auth import verify_clerk_jwt, verify_clerk_bearer, verify_api_key, is_trusted_local_request, is_private_net_probe
@@ -2450,6 +2451,26 @@ async def admin_services_list():
         "host_role": admin_services.host_role(),
         "units": snapshot["units"],
     }
+
+
+@app.get("/admin/logs")
+async def admin_service_logs(
+    request: Request,
+    service: Optional[str] = None,
+    unit: Optional[str] = None,
+):
+    """Journal tail for one failed or stale /admin row.
+
+    Exactly one of ``service`` (a service_health name) or ``unit``
+    (``radon-NAME.service|timer``). An unreadable journal is 200 with
+    ``available=false`` and a reason; only a malformed query is 400.
+    """
+    try:
+        return await service_logs.read_logs(
+            service=service, unit=unit, actor=_admin_actor(request),
+        )
+    except service_logs.LogQueryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.post("/admin/services/{unit}/{action}")

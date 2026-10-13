@@ -169,3 +169,15 @@ describe("CalmStreakPanel content", () => {
     expect(q.getByTestId("calm-streak-freshness-rail").getAttribute("data-state")).toBe("current");
   });
 });
+
+describe("CalmStreakPanel — no orphan tile (plate 38)", () => {
+  it("folds the percentile into the state cell so the strip fills one row of five", () => {
+    hookState.current.data = buildData();
+    const { container } = render(<CalmStreakPanel />);
+    const q = within(container);
+    expect(container.querySelectorAll(".regime-strip > .regime-strip-cell").length).toBe(5);
+    expect(q.queryByTestId("calm-streak-strip-percentile")).toBeNull();
+    const state = q.getByTestId("calm-streak-strip-state");
+    expect(within(state).getByTestId("calm-streak-percentile").textContent).toBe("98.9%");
+  });
+});

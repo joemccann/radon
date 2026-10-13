@@ -86,9 +86,9 @@ Violating any rail is a failed run.
 2. **Push:** `git push -u origin <branch>` (the header's branch only).
 3. **Open one draft PR** against main with `gh pr create --draft --base main`:
    - Title: `Testing <date>: <plain-language issue>`.
-   - Body: exactly three sections, **Issue discovered**, **What was done to fix it** and **Next**, with one `- **Component**: what happened.` bullet per finding. What was done to fix it also says which gates ran locally and which were left to CI (for example Vitest without `node`, `cloud/tests` on bash 3.2, UI screenshots).
-   - Next holds only operator-only or blocked actions. If there are none, it says `Fixed with green deployment`.
-   - The runner sends every Pushover notification, including `radon PR green`. Pushover credentials are absent from your environment by design: do not send one, and do not list it under Next.
+   - Body: copy `.github/pull_request_template.md` into a file and fill every section in order (Summary, What changed, Test plan, Risk and rollback, Operator Next Steps, Checklist), one `- **Component**: what happened.` bullet per finding in Summary and per fix in What changed. Check it with `python3.13 scripts/ci/check_pr_body.py --body-file <file>` and pass `--body-file <file>` to `gh pr create`; the gh guard and the `PR body template` CI check refuse any other shape. Test plan says which gates ran locally and which were left to CI (for example Vitest without `node`, `cloud/tests` on bash 3.2, UI screenshots).
+   - Operator Next Steps holds only operator-only or blocked actions. If none, `None. Fixed with green deployment.`
+   - The runner sends every Pushover notification, including `radon PR green`. Pushover credentials are absent from your environment by design: do not send one, and do not list it under Operator Next Steps.
    - Audit tables, SHA ranges, finding inventories and gate counts stay on the rolling issue, not in the PR. To change the body later use `gh api -X PATCH repos/{owner}/{repo}/pulls/<n> -F body=@<file>` (this repo's `gh pr edit --body-file` aborts).
 4. **Watch CI:** `gh pr checks <url> --watch --interval 30`.
    - On a failure, read the failing job with `gh run view <run-id> --log-failed`; when that prints nothing, fetch `gh api repos/joemccann/radon/actions/jobs/<job-id>/logs`. Fix the root cause on the branch (failing test first when the fix is in source), commit, push, and watch again.

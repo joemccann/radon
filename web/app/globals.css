@@ -1127,10 +1127,6 @@ body {
   background: var(--bg-panel-raised);
 }
 
-.profile-bookmark__thumb--empty {
-  display: block;
-}
-
 .profile-bookmark__body {
   display: flex;
   flex-direction: column;
@@ -1170,6 +1166,11 @@ body {
   align-items: center;
   gap: 12px;
   padding: 10px 12px;
+}
+
+/* No sector known: price sits next to the symbol, star stays at the edge. */
+.profile-watch--no-sector.panel {
+  grid-template-columns: 80px 1fr auto;
 }
 
 .profile-watch__symbol {
@@ -3438,6 +3439,32 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
   margin-top: 0;
   padding: 12px 16px 16px;
   border-top: 1px solid var(--border-dim);
+}
+
+/* Skew stats ledger: secondary statistics as label/value rows under the
+   hero strip, so they stop competing with the skew level for weight. */
+.skew-ledger {
+  margin: 0;
+  padding: 4px 16px 8px;
+}
+
+.skew-ledger > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border-dim);
+}
+
+.skew-ledger dt {
+  color: var(--text-muted);
+}
+
+.skew-ledger dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
 }
 
 /* ───────────────────────────────────────────────────────────
@@ -7018,12 +7045,6 @@ tr.leg-row td {
   text-decoration: none;
 }
 .trial-expired-cta:hover { filter: brightness(1.08); }
-
-.trial-expired-countdown {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
-}
 
 /* ── Order Action Buttons ── */
 
@@ -11049,6 +11070,31 @@ tr {
   }
 }
 
+/* Opt-in four-cell strip (RegimeStrip columns={4}): no dead fifth tile. */
+@media (min-width: 761px) {
+  .regime-strip.regime-strip--cols-4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .regime-strip--cols-4 > .regime-strip-cell:nth-child(n) {
+    grid-column: auto;
+  }
+}
+
+/* Opt-in strip that fits its cells to one row: a panel with fewer than five
+   headline figures spans the row instead of leaving empty grid columns. */
+@media (min-width: 761px) {
+  .regime-strip.regime-strip--fit {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+  }
+
+  .regime-strip.regime-strip--fit > .regime-strip-cell:nth-child(n) {
+    grid-column: auto;
+  }
+}
+
 @media (max-width: 760px) {
   .regime-strip {
     grid-template-columns: 1fr;
@@ -12276,6 +12322,14 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-muted);
+}
+
+/* Stale cache: the posture is a dated sentence, not a verdict pill (plate 24). */
+.cta-briefing-stale-posture {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .cta-briefing-metrics {
@@ -14342,6 +14396,22 @@ body[data-mobile="true"] .journal-pnl-strip__stat--range {
   text-transform: uppercase;
 }
 
+.garch-scanner__summary {
+  padding: 4px 12px 8px;
+}
+
+.garch-scanner__summary-head {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.garch-scanner__summary-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 .garch-scanner__filterbar {
   display: flex;
   flex-wrap: wrap;
@@ -15774,12 +15844,11 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
 }
 
 .grg-score {
-  margin-top: 10px;
+  margin-top: 6px;
+  color: var(--text-secondary);
   font-family: var(--font-mono);
-  font-size: clamp(48px, 6vw, 78px);
+  font-size: var(--text-body);
   font-weight: 700;
-  line-height: 0.95;
-  letter-spacing: -0.08em;
 }
 
 .grg-state {
@@ -15800,7 +15869,7 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
 
 .grg-metric-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -18819,6 +18888,18 @@ body[data-mobile="true"] td.right {
   vertical-align: middle;
 }
 
+/* Plate 26: a cached verdict is history, not the hero. The age badge carries
+   the state; direction and conviction drop to muted secondary weight. */
+.ticker-flow-badge--stale .ticker-flow-badge-label {
+  font-size: 16px;
+  color: var(--text-muted);
+}
+
+.ticker-flow-badge--stale .ticker-flow-badge-conviction-value {
+  font-size: 18px;
+  color: var(--text-muted);
+}
+
 .ticker-flow-badge-rationale {
   font-family: var(--font-sans);
   font-size: 12px;
@@ -20077,6 +20158,143 @@ body[data-mobile="true"] td.right {
 }
 .admin-skeleton-line { height: 11px; }
 .admin-skeleton-row td { padding-top: 16px; padding-bottom: 16px; }
+
+/* --- Progressive log disclosure (Writer Freshness, Service Control) --- */
+.admin-row-expandable { cursor: pointer; }
+.admin-row-expandable:hover > td,
+.admin-row-expanded > td {
+  background: color-mix(in srgb, var(--neutral) 6%, transparent);
+}
+.admin-disclosure-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.admin-disclosure-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.admin-disclosure-btn:hover { color: var(--text-primary); }
+.admin-disclosure-btn:focus-visible {
+  outline: 2px solid var(--positive);
+  outline-offset: 1px;
+}
+.admin-disclosure-chevron { transition: transform 120ms ease-out; }
+.admin-disclosure-btn[aria-expanded="true"] .admin-disclosure-chevron { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) {
+  .admin-disclosure-chevron { transition: none; }
+}
+.admin-journal-row > td {
+  padding: 0 8px 10px;
+  background: color-mix(in srgb, var(--neutral) 6%, transparent);
+}
+.admin-journal-disclosure {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  background: var(--bg-panel-raised);
+  min-width: 0;
+}
+.admin-journal-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.admin-journal-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.admin-journal-unit { color: var(--text-primary); overflow-wrap: anywhere; }
+.admin-journal-filter {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.admin-journal-raw { display: flex; flex-direction: column; gap: 4px; }
+.admin-journal-raw-label {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--negative);
+}
+.admin-journal-raw-record {
+  margin: 0;
+  padding: 8px;
+  border-left: 2px solid var(--negative);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--negative) 6%, transparent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.admin-journal-loading { display: flex; flex-direction: column; gap: 6px; }
+.admin-journal-empty,
+.admin-journal-note {
+  margin: 0;
+  color: var(--text-muted);
+}
+.admin-journal-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.admin-journal-entry {
+  display: grid;
+  grid-template-columns: max-content 52px minmax(0, 1fr) max-content;
+  gap: 8px;
+  padding: 3px 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-dim) 60%, transparent);
+  color: var(--text-secondary);
+}
+.admin-journal-entry:last-child { border-bottom: none; }
+.admin-journal-ts { color: var(--text-muted); }
+.admin-journal-level { font-weight: 600; }
+.admin-journal-message { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-primary); }
+.admin-journal-entry-negative .admin-journal-level,
+.admin-journal-entry-negative .admin-journal-message { color: var(--negative); }
+.admin-journal-entry-warning .admin-journal-level,
+.admin-journal-entry-warning .admin-journal-message { color: var(--warn-text); }
+.admin-journal-entry-current {
+  background: color-mix(in srgb, var(--neutral) 8%, transparent);
+}
+.admin-journal-run {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+@media (max-width: 640px) {
+  .admin-journal-entry {
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+  .admin-journal-message { grid-column: 1 / -1; }
+  .admin-disclosure-btn { width: 28px; height: 28px; }
+}
 
 /* Pulsing dot for transitional (Starting/Stopping) verdicts. */
 .admin-status-dot-pulse { animation: admin-dot-pulse 1.1s ease-in-out infinite; }
@@ -21379,6 +21597,12 @@ body[data-mobile="true"] .content:has(.profile-surface--mobile) {
   text-transform: none;
   color: var(--text-secondary);
 }
+.alerts-form__select {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+}
 .alerts-form__submit {
   font-family: var(--font-sans);
   font-size: 13px;
@@ -21572,6 +21796,19 @@ body[data-mobile="true"] .alerts-rule__channel {
   width: 120px;
   text-align: right;
   font-family: var(--font-mono);
+}
+
+/* /setup token step: a secret, not a number; it takes the whole row. */
+.setup-token-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  text-align: left;
+}
+
+.setup-token-submit {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .preferences-row__toggle {
@@ -21931,6 +22168,19 @@ body[data-mobile="true"] .alerts-rule__channel {
    carries the validation verdict. Brand tokens only, 4px max radius.
    Spec: docs/indicators/vixcor.md section G. */
 
+/* Per-page opt-in: the panel sets --fit-cols / --fit-cols-md to exact
+   divisors of its tile count so no grid row ends in an empty cell. */
+.regime-strip-fit .regime-strip { grid-template-columns: repeat(var(--fit-cols), minmax(0, 1fr)); }
+.regime-strip-fit .regime-strip-cell:nth-child(n) { grid-column: auto; }
+
+@media (max-width: 1180px) {
+  .regime-strip-fit .regime-strip { grid-template-columns: repeat(var(--fit-cols-md), minmax(0, 1fr)); }
+}
+
+@media (max-width: 760px) {
+  .regime-strip-fit .regime-strip { grid-template-columns: 1fr; }
+}
+
 /* Six strip cells, so the shared five-column grid would leave a bare
    quarter-row of border tone. Re-column to an exact divisor of six. */
 .vixcor-strip .regime-strip { grid-template-columns: repeat(6, minmax(0, 1fr)); }
@@ -21941,6 +22191,18 @@ body[data-mobile="true"] .alerts-rule__channel {
 
 @media (max-width: 760px) {
   .vixcor-strip .regime-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* /regime/iei-hyg: four strip cells; re-column so no empty fifth cell pads the row. */
+.iei-hyg-strip .regime-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+@media (max-width: 1180px) {
+  .iei-hyg-strip .regime-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .iei-hyg-strip .regime-strip-cell:nth-child(n) { grid-column: auto; }
+}
+
+@media (max-width: 760px) {
+  .iei-hyg-strip .regime-strip { grid-template-columns: 1fr; }
 }
 
 .vixcor-chart-panel { padding: 16px; }

@@ -87,6 +87,16 @@
       "owners": ["docs/operations.md", "docs/cloud-services.md"]
     },
     {
+      "id": "pr-template",
+      "globs": [
+        ".github/pull_request_template.md",
+        ".github/workflows/pr-body.yml",
+        "scripts/ci/check_pr_body.py"
+      ],
+      "owners": ["CONTRIBUTING.md", "CLAUDE.md"],
+      "note": "One PR body template for every human and agent PR; the validator backs the CI check, the nightly gh guard, the publisher and the Claude Code hook."
+    },
+    {
       "id": "nightly-loops",
       "globs": [
         "scripts/*_nightly.sh",

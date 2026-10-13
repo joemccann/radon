@@ -20,7 +20,7 @@ const ROUTES = [
 ] as const;
 
 const SHARE_ROUTES = ["gex", "internals", "menthorq/cta", "newsfeed", "regime", "vcg"] as const;
-const ADMIN_ROUTES = ["edge-health", "health", "host-metrics", "reliability", "slo"] as const;
+const ADMIN_ROUTES = ["edge-health", "health", "host-metrics", "logs", "reliability", "slo"] as const;
 
 // Guarded routes outside the security-report ROUTES list — admin actions and
 // the alerts store, all of which carry their own requireRouteAccess call.

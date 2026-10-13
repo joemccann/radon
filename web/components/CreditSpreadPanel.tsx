@@ -37,6 +37,17 @@ interface CreditChartRow {
   hyg: number | null;
 }
 
+/** Finding-style panel title, derived from the 168-session HYG vs SPX regime. */
+export function creditHeadline(regime: CreditRegime | null | undefined): string {
+  switch (regime) {
+    case "divergent":   return "Credit is not confirming equities";
+    case "coupled":     return "Credit is confirming equities";
+    case "risk-off":    return "Credit and equities are both falling";
+    case "credit-lead": return "Credit is holding up while equities fall";
+    default:            return "Credit";
+  }
+}
+
 function regimeTone(regime: CreditRegime | null | undefined): "pos" | "neg" | "warn" | "mut" {
   const color = regimeColor(regime);
   if (color === "var(--negative)") return "neg";
@@ -122,7 +133,7 @@ export default function CreditSpreadPanel() {
         <div className="section-header">
           <div className="section-title">
             <Activity size={14} />
-            Credit
+            <span data-testid="credit-spread-title">{creditHeadline(current.regime)}</span>
             <InfoTooltip text={INFO_TOOLTIP} />
           </div>
           <PanelRefreshError error={error} testId="credit-spread-refresh-error" />

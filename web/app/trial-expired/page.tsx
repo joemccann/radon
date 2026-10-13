@@ -1,4 +1,3 @@
-import TrialExpiredRedirect from "./TrialExpiredRedirect";
 import { routeMetadata } from "@/lib/pageTitle";
 
 // Public landing page for expired demo trials (middleware isPublicRoute).
@@ -23,7 +22,14 @@ export default function TrialExpiredPage() {
           To learn more about Radon, or to get in touch about full access,
           head to the main site.
         </p>
-        <TrialExpiredRedirect />
+        {/* No auto-forward: a timed redirect swallowed this state and left
+            expired users on the marketing hero with no word that the trial
+            ended. The link is the only exit. */}
+        <div className="trial-expired-actions">
+          <a className="trial-expired-cta" href="https://radon.run">
+            Continue to radon.run
+          </a>
+        </div>
       </div>
     </div>
   );

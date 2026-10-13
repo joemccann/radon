@@ -16,7 +16,8 @@ PROPOSAL = {'charts': [{'plan': PLAN, 'evidence': [
 
 def verdict(**updates):
     value = {key: True for key in ('interpretable', 'appropriate_chart_type', 'faithful_to_source',
-             'labels_units_periods_correct', 'honest_axes', 'readable', 'no_invented_data')}
+             'labels_units_periods_correct', 'honest_axes', 'readable', 'no_invented_data',
+             'compatible_measurements', 'estimation_status_correct')}
     value.update(visible_data=copy.deepcopy(PLAN['bars']), reason='August and September expectations, correctly ordered and labelled.',
                  visible_attribution={'publisher':'Goldman Sachs','radon_url':'https://radon.run'})
     value.update(updates)
@@ -88,7 +89,8 @@ def test_unresolved_publisher_requires_honest_source_pdf_credit(tmp_path):
 
 
 @pytest.mark.parametrize('field', ['interpretable', 'appropriate_chart_type', 'faithful_to_source',
-                                 'labels_units_periods_correct', 'honest_axes', 'readable', 'no_invented_data'])
+                                 'labels_units_periods_correct', 'honest_axes', 'readable', 'no_invented_data',
+                                 'compatible_measurements', 'estimation_status_correct'])
 def test_any_review_failure_prevents_attachment(tmp_path, field):
     result, _, _ = generate(tmp_path, reviewed=verdict(**{field: False}))
     assert result['status'] == 'rejected' and result['charts'] == []
@@ -314,3 +316,208 @@ def test_visible_source_and_exact_radon_url_must_match_rendered_credits(tmp_path
     reviewed=verdict()
     reviewed['visible_attribution']=attribution
     assert generate(tmp_path,reviewed=reviewed)[0]['status']=='rejected'
+
+
+BOUNDED_REVENUE_QUOTE = (
+    "After guiding for FY27 AI revenue well above $100bn in March, the company's "
+    "most recent guidance from September was for $115bn."
+)
+
+
+def test_revenue_guidance_floor_is_not_an_exact_observation_but_later_guidance_is():
+    assert not gc._number_in_quote(100, 'USD billion', BOUNDED_REVENUE_QUOTE)
+    assert gc._number_in_quote(115, 'USD billion', BOUNDED_REVENUE_QUOTE)
+
+
+def test_floor_label_and_note_cannot_turn_a_bound_into_a_source_exact_point():
+    plan = {'kind': 'bar', 'title': 'AI revenue guidance', 'metric': 'Revenue guidance',
+            'unit': 'USD billion', 'axis': [0, 150], 'ticks': [0, 50, 100, 150],
+            'bars': [{'id': 'prior', 'label': 'Prior guidance floor', 'value': 100},
+                     {'id': 'latest', 'label': 'Latest guidance', 'value': 115}],
+            'note': 'The prior bar shows a lower bound, not an exact measured amount.'}
+    evidence = [{'id': row['id'], 'page': 1, 'source_quote': BOUNDED_REVENUE_QUOTE}
+                for row in plan['bars']]
+    assert gc.valid_plan(plan)
+    assert not gc.valid_evidence(plan, evidence, {1: BOUNDED_REVENUE_QUOTE})
+
+
+@pytest.mark.parametrize('quote,value', [
+    ('The deficit is approximately 5.4%.', 5.4),
+    ('The deficit is roughly 5.4%.', 5.4),
+    ('The deficit is about 5.4%.', 5.4),
+    ('The deficit is around 5.4%.', 5.4),
+    ('The deficit is ~5.4%.', 5.4),
+    ('The yield is above 4.75%.', 4.75),
+    ('The yield has topped 4.75% in recent weeks.', 4.75),
+    ('The yield is at least 4.75%.', 4.75),
+    ('The yield is more than 4.75%.', 4.75),
+    ('The yield is greater than 4.75%.', 4.75),
+    ('The yield is >4.75%.', 4.75),
+    ('The yield is below 4.75%.', 4.75),
+    ('The yield is at most 4.75%.', 4.75),
+    ('The yield is less than 4.75%.', 4.75),
+    ('The yield is no more than 4.75%.', 4.75),
+    ('The yield is <4.75%.', 4.75),
+])
+def test_approximate_or_bounded_percentages_are_not_exact_points(quote, value):
+    assert not gc._number_in_quote(value, '%', quote)
+
+
+def test_qualifier_on_another_observation_does_not_disqualify_an_exact_forecast():
+    quote = 'Earlier estimates were above 4.75%, but the current forecast is 5.4%.'
+    assert not gc._number_in_quote(4.75, '%', quote)
+    assert gc._number_in_quote(5.4, '%', quote)
+    assert gc._number_in_quote(5.4, '%', 'The bank forecasts a deficit of 5.4%.')
+
+
+@pytest.mark.parametrize('gate', ['compatible_measurements', 'estimation_status_correct'])
+def test_pixel_review_requires_explicit_comparison_and_estimation_status_gates(gate):
+    reviewed = verdict(compatible_measurements=True, estimation_status_correct=True)
+    reviewed.pop(gate)
+    assert not gc.review_passed(reviewed, PLAN, 'Goldman Sachs')
+
+
+def test_legacy_seven_true_image_gates_are_insufficient():
+    reviewed = verdict()
+    reviewed.pop('compatible_measurements')
+    reviewed.pop('estimation_status_correct')
+    assert not gc.review_passed(reviewed, PLAN, 'Goldman Sachs')
+
+
+@pytest.mark.parametrize('plan', [
+    {'kind': 'bar', 'title': 'IPP valuation multiples', 'metric': 'Target EV/EBITDA',
+     'unit': 'x', 'axis': [0, 25], 'ticks': [0, 5, 10, 15, 20, 25],
+     'bars': [{'id': 'ceg', 'label': 'CEG (P/E basis)', 'value': 21},
+              {'id': 'vst', 'label': 'VST (EV/EBITDA basis)', 'value': 10}],
+     'note': 'The different denominators are identified in the labels.'},
+    {'kind': 'bar', 'title': 'China forecasts', 'metric': 'Year-over-year growth',
+     'unit': '%', 'axis': [0, 30], 'ticks': [0, 10, 20, 30],
+     'bars': [{'id': 'exports', 'label': 'Exports', 'value': 24.8},
+              {'id': 'cpi', 'label': 'CPI inflation', 'value': 1}],
+     'note': 'The different metrics are distinguished by color and explanatory copy.'},
+])
+def test_same_unit_labels_notes_and_colors_do_not_make_measurements_compatible(plan):
+    reviewed = verdict(visible_data=plan['bars'], compatible_measurements=False,
+                       estimation_status_correct=True)
+    assert gc.valid_plan(plan)
+    assert not gc.review_passed(reviewed, plan, 'Goldman Sachs')
+
+
+def test_source_values_still_fail_if_image_misstates_estimation_status():
+    reviewed = verdict(compatible_measurements=True, estimation_status_correct=False)
+    assert not gc.review_passed(reviewed, PLAN, 'Goldman Sachs')
+
+
+@pytest.mark.parametrize('value', [76, 88])
+def test_range_endpoints_cannot_be_republished_as_exact_points(value):
+    quote = 'Spread share was 76-88% during the roll.'
+    assert not gc._number_in_quote(value, '%', quote)
+    assert gc._number_in_quote(value, '%', quote, allow_range=True)
+
+
+def test_explicit_closed_ranges_remain_source_exact_range_marks():
+    plan = {'kind': 'range', 'title': 'Reported yield ranges', 'unit': '%',
+            'axis': [0, 6], 'ticks': [0, 2, 4, 6],
+            'marks': [{'id': 'a', 'label': 'A', 'low': 3, 'high': 4, 'estimated': False},
+                      {'id': 'b', 'label': 'B', 'low': 4, 'high': 5, 'estimated': False}]}
+    quotes = ['A yields ranged from 3-4%.', 'B yields ranged from 4-5%.']
+    evidence = [{'id': row['id'], 'page': 1, 'source_quote': quote}
+                for row, quote in zip(plan['marks'], quotes)]
+    assert gc.valid_plan(plan)
+    assert gc.valid_evidence(plan, evidence, {1: ' '.join(quotes)})
+
+
+def test_currency_unit_requires_currency_in_each_source_quote():
+    assert gc._number_in_quote(1, 'USD billion', 'Revenue was $1bn.')
+    assert not gc._number_in_quote(1, 'USD billion', 'Revenue was 1bn.')
+    assert not gc._number_in_quote(1, 'USD billion', 'Revenue was €1bn.')
+
+
+@pytest.mark.parametrize(('unit', 'quote'), [
+    ('USD billion', 'Revenue was USD 1 billion.'),
+    ('USD billion', 'Revenue (billion): USD 1.'),
+    ('$bn', 'Revenue was $1bn.'),
+    ('EUR million', 'Revenue was €1mn.'),
+    ('£tn', 'Revenue was £1tn.'),
+])
+def test_explicit_currency_occurrences_and_unit_headers_remain_supported(unit, quote):
+    assert gc._number_in_quote(1, unit, quote)
+
+
+@pytest.mark.parametrize(('unit', 'quote'), [
+    ('$bn', 'Revenue was 1bn.'),
+    ('$bn', 'Revenue was €1bn.'),
+    ('USD billion', 'Expenses were $2bn; revenue was 1bn.'),
+    ('USD billion', 'Expenses were $2bn; revenue was €1bn.'),
+])
+def test_currency_cannot_be_borrowed_from_another_numeric_occurrence(unit, quote):
+    assert not gc._number_in_quote(1, unit, quote)
+
+
+def test_range_endpoints_must_be_linked_as_one_source_measurement():
+    quote = ('Asia yields were 3%; Europe yields were 4%; '
+             'Africa yields were 2%; North America yields were 5%.')
+    plan = {'kind': 'range', 'title': 'Reported yields by region', 'metric': 'Yield', 'unit': '%',
+            'axis': [0, 6], 'ticks': [0, 2, 4, 6],
+            'marks': [{'id': 'asia', 'label': 'Asia yields', 'low': 3, 'high': 4, 'estimated': False},
+                      {'id': 'africa', 'label': 'Africa yields', 'low': 2, 'high': 5, 'estimated': False}]}
+    evidence = [{'id': row['id'], 'page': 1, 'source_quote': quote} for row in plan['marks']]
+    assert gc.valid_plan(plan)
+    assert not gc.valid_evidence(plan, evidence, {1: quote})
+
+
+@pytest.mark.parametrize('quote', [
+    'Yield was 3-4%.',
+    'Yield was 3%-4%.',
+    'Yield was 3 to 4 percent.',
+    'Yield (%) was 3-4.',
+])
+def test_one_explicit_closed_range_and_unit_header_remain_supported(quote):
+    assert gc._range_in_quote(3, 4, '%', quote)
+
+
+@pytest.mark.parametrize(('low', 'high', 'quote'), [
+    (3, 3, 'Yield was 3-4%.'),
+    (3, 5, 'Yield was 3-4%; a separate yield was 5%.'),
+    (3, 4, 'Yield was 3-5%; a separate yield was 4%.'),
+    (3, 4, 'Spread was 3-4bp; separate yields were 3% and 4%.'),
+    (3, 4, 'Yield was about 3-4%.'),
+    (3, 4, 'Yield was above 3-4%.'),
+])
+def test_closed_range_pair_cannot_borrow_values_or_units(low, high, quote):
+    assert not gc._range_in_quote(low, high, '%', quote)
+
+
+def test_explicit_degenerate_closed_range_remains_exact():
+    assert gc._range_in_quote(3, 3, '%', 'Yield was 3-3%.')
+
+
+def test_closed_monetary_range_requires_matching_currency_on_the_range():
+    quote = 'Revenue was €3-4bn; expenses were $3bn and $4bn.'
+    assert gc._range_in_quote(3, 4, 'EUR billion', quote)
+    assert not gc._range_in_quote(3, 4, 'USD billion', quote)
+
+
+
+def test_wider_than_spread_bound_is_not_an_exact_observed_spread():
+    quote = 'At wider than 150bps. An earlier closing spread was 130bp.'
+    assert not gc._number_in_quote(150, 'bp', quote)
+    assert gc._number_in_quote(130, 'bp', quote)
+
+
+@pytest.mark.parametrize('quote', [
+    'The spread surpassed 130bp.',
+    'The spread surpassed the 130bp mark.',
+    'The spread passed 130bp.',
+    'The spread has passed the 130bp mark.',
+    'The spread exceeded the 130bp mark.',
+])
+def test_crossing_a_spread_mark_does_not_report_an_exact_observation(quote):
+    assert not gc._number_in_quote(130, 'bp', quote)
+
+
+@pytest.mark.parametrize('qualifier', ['or more', 'or less'])
+def test_suffixed_percentage_bounds_preserve_a_separate_exact_observation(qualifier):
+    quote = f'The deficit may be 5.4% {qualifier}. The earlier reported deficit was 5.0%.'
+    assert not gc._number_in_quote(5.4, '%', quote)
+    assert gc._number_in_quote(5.0, '%', quote)

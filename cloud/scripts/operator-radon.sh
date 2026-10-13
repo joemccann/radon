@@ -43,7 +43,18 @@ case "$requested_action" in
     unit_action="$2"
     unit_name="$3"
     ;;
-  *) echo "usage: radon {stop|start|restart|status|unit|repair-nextjs-replica|ib}" >&2; exit 2 ;;
+  logs)
+    # Read-only journal tail for the /admin log disclosure. Exactly one
+    # radon-NAME.service; the journalctl argv below is fixed, so the caller
+    # never supplies an option (sudoers grants `logs radon-*.service`).
+    if (( $# != 2 )) || [[ ! "${2:-}" =~ ^radon-[a-z0-9-]+\.service$ ]] \
+      || [[ "${2:-}" == radon-beta-* ]]; then
+      echo "usage: radon logs radon-NAME.service" >&2
+      exit 2
+    fi
+    unit_name="$2"
+    ;;
+  *) echo "usage: radon {stop|start|restart|status|unit|logs|repair-nextjs-replica|ib}" >&2; exit 2 ;;
 esac
 
 if [[ "$requested_action" != "status" && $EUID -ne 0 \
@@ -63,6 +74,8 @@ UNIT_ACTION_TIMEOUT_SECS="${RADON_OPERATOR_UNIT_TIMEOUT_SECS:-20}"
 UNIT_VERB_TIMEOUT_SECS="${RADON_OPERATOR_UNIT_VERB_TIMEOUT_SECS:-225}"
 SYSTEMCTL_BATCH_TIMEOUT_SECS="${RADON_OPERATOR_BATCH_TIMEOUT_SECS:-30}"
 SYSTEMCTL_QUERY_TIMEOUT_SECS="${RADON_OPERATOR_QUERY_TIMEOUT_SECS:-10}"
+# `radon logs`: radon-control waits 15s for the whole reply.
+JOURNAL_QUERY_TIMEOUT_SECS="${RADON_OPERATOR_JOURNAL_TIMEOUT_SECS:-10}"
 GATEWAY_ACTION_TIMEOUT_SECS="${RADON_OPERATOR_GATEWAY_TIMEOUT_SECS:-80}"
 case "$requested_action" in
   # Longer than UNIT_VERB_TIMEOUT_SECS so the lock wrapper does not SIGTERM
@@ -74,7 +87,8 @@ esac
 for timeout_value in \
   "$UNIT_ACTION_TIMEOUT_SECS" "$UNIT_VERB_TIMEOUT_SECS" \
   "$SYSTEMCTL_BATCH_TIMEOUT_SECS" \
-  "$SYSTEMCTL_QUERY_TIMEOUT_SECS" "$GATEWAY_ACTION_TIMEOUT_SECS" \
+  "$SYSTEMCTL_QUERY_TIMEOUT_SECS" "$JOURNAL_QUERY_TIMEOUT_SECS" \
+  "$GATEWAY_ACTION_TIMEOUT_SECS" \
   "$ACTION_TIMEOUT_SECS"; do
   if [[ ! "$timeout_value" =~ ^[1-9][0-9]*$ ]]; then
     echo "REFUSING operator action: timeout budgets must be positive integers" >&2
@@ -227,6 +241,15 @@ PY
   set -e
   return "$bounded_rc"
 }
+
+# Read-only and lock-free: it runs before unit enumeration and never mutates.
+if [[ "$requested_action" == "logs" ]]; then
+  journal_rc=0
+  run_bounded "$JOURNAL_QUERY_TIMEOUT_SECS" \
+    journalctl -u "$unit_name" -n 300 --no-pager -q -o json --output-fields=MESSAGE,PRIORITY \
+    || journal_rc=$?
+  exit "$journal_rc"
+fi
 
 cancel_unit_jobs() {
   local target_unit

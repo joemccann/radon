@@ -193,6 +193,17 @@ describe("HyAdPanel — header strip", () => {
     expect(screen.getByTestId("hyad-updated").textContent).toContain(DATA_DATE);
   });
 
+  it("gives each moving average its own tile instead of a wrapped compound pair", () => {
+    renderPanel(hookState({ data: buildData() }));
+    expect(screen.queryByTestId("hyad-strip-ma")).toBeNull();
+    expect(screen.getByTestId("hyad-strip-ma21").textContent).toContain("-1,010");
+    expect(screen.getByTestId("hyad-strip-ma21").textContent).not.toContain("850");
+    expect(screen.getByTestId("hyad-strip-ma50").textContent).toContain("850");
+    // Source date folds into the regime tile, keeping the strip at five tiles.
+    expect(screen.queryByTestId("hyad-strip-updated")).toBeNull();
+    expect(screen.getByTestId("hyad-strip-regime").textContent).toContain(DATA_DATE);
+  });
+
   it("signs a positive net and labels an advancing stack via the shared helper", () => {
     const data = buildData();
     data.current = { ...data.current!, net: 682, cum: 900, ma21: 400, ma50: -200 };

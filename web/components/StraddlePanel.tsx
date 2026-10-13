@@ -1,5 +1,7 @@
 "use client";
 
+import type { CSSProperties } from "react";
+
 import { useMemo, useState } from "react";
 import { Activity } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
@@ -169,11 +171,10 @@ export default function StraddlePanel({
             <MetricCell label="LOW" value={formatStat(stats.low)} />
             <MetricCell label="HIT RATE" value={formatHitRate(stats.hit_rate)} />
             <MetricCell label="IMPLIED 1D" value={formatStraddlePct(current.implied_straddle_pct)} />
-            <MetricCell label="DATE" value={current.date} />
             <MetricCell label="SOURCE" value={formatSourceDate(vix1dLastModified)} />
           </div>
         ) : (
-          <RegimeStrip>
+          <div className="regime-strip-fit" style={{ "--fit-cols": 4, "--fit-cols-md": 4 } as CSSProperties}><RegimeStrip>
             <RegimeStripCell
               testId="straddle-strip-live"
               label="LIVE"
@@ -228,21 +229,14 @@ export default function StraddlePanel({
               testId="straddle-strip-implied"
               label="IMPLIED 1D"
               value={formatStraddlePct(current.implied_straddle_pct)}
-              sub={<>PRIOR CLOSE STRADDLE</>}
+              sub={
+                <>
+                  PRIOR CLOSE STRADDLE · CBOE VIX1D{" "}
+                  <span data-testid="straddle-strip-source">{formatSourceDate(vix1dLastModified)}</span>
+                </>
+              }
             />
-            <RegimeStripCell
-              testId="straddle-strip-date"
-              label="LATEST DATE"
-              value={current.date}
-              sub={<>DAILY SERIES SINCE 2022-05</>}
-            />
-            <RegimeStripCell
-              testId="straddle-strip-source"
-              label="SOURCE UPDATED"
-              value={formatSourceDate(vix1dLastModified)}
-              sub={<>CBOE VIX1D HISTORY</>}
-            />
-          </RegimeStrip>
+          </RegimeStrip></div>
         )}
 
         <FreshnessRail

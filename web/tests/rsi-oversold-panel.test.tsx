@@ -177,6 +177,22 @@ describe("RsiOversoldPanel — content", () => {
     expect(q.getByTestId("rsi-oversold-highest").textContent).toBe("2026-03-13");
   });
 
+  it("captions in plain sentence case, never all-caps jargon", () => {
+    hookState.current.data = buildData();
+    const { container } = render(<RsiOversoldPanel />);
+    const subs = Array.from(container.querySelectorAll(".regime-strip-sub")).map((n) => n.textContent ?? "");
+    expect(subs.length).toBeGreaterThan(0);
+    for (const sub of subs) expect(sub).not.toMatch(/[A-Z]{4,}/);
+    expect(container.textContent).not.toContain("STRICTLY");
+  });
+
+  it("renders the headline percent at full contrast in a normal state", () => {
+    const base = buildData();
+    hookState.current.data = buildData({ current: { ...base.current!, pct_below_30: 4.2 } });
+    const { container } = render(<RsiOversoldPanel />);
+    expect(within(container).getByTestId("rsi-oversold-value").getAttribute("style")).toContain("var(--text-primary)");
+  });
+
   it("labels a reading at the 10% boundary as NORMAL", () => {
     hookState.current.data = buildData({
       current: {

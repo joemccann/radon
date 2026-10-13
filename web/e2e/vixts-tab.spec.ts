@@ -124,7 +124,8 @@ test.describe("/regime/vixts - VIX term structure tab", () => {
     await expect(page.locator('[data-testid="vixts-regime"]')).toHaveText("CONTANGO");
     await expect(page.locator('[data-testid="vixts-vix"]')).toHaveText("15.21");
     await expect(page.locator('[data-testid="vixts-vix3m"]')).toHaveText("17.99");
-    await expect(page.locator('[data-testid="vixts-source-updated"]')).toHaveText(DATA_DATE);
+    await expect(page.locator('[data-testid="vixts-source-updated"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="vixts-freshness-rail"]')).toContainText(DATA_DATE);
   });
 
   test("renders the ratio and SPX series with the range chips and brush", async ({ page }) => {

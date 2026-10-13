@@ -206,7 +206,7 @@ function ExpectedRangeBar({ data }: { data: GexData }) {
 
   return (
     <div className="gex-range-container">
-      <div className="gex-range-title">EXPECTED RANGE &mdash; {data.data_date}</div>
+      <div className="gex-range-title">EXPECTED RANGE · {data.data_date}</div>
       <div className="gex-range-bar">
         <div className="gex-range-fill" style={{ left: `${pct(low)}%`, width: `${pct(high) - pct(low)}%` }} />
         {accel && <div className="gex-range-marker" style={{ left: `${pct(accel)}%`, borderColor: "var(--accelerator, var(--fault))" }} title={`MAX ACCEL: ${fmtPrice(accel)}`} />}
@@ -261,7 +261,7 @@ function MqLevelsPanel({ mq, sourceDelta }: { mq: MqLevels; sourceDelta: SourceD
   }
 
   function fmtDelta(e: SourceDeltaEntry | undefined): React.ReactNode {
-    if (!e) return <span style={{ color: "var(--text-muted)" }}>—</span>;
+    if (!e) return <span style={{ color: "var(--text-muted)" }}>---</span>;
     const sign = e.delta > 0 ? "+" : "";
     return (
       <span style={deltaStyle(e.delta)}>
@@ -303,7 +303,7 @@ function MqLevelsPanel({ mq, sourceDelta }: { mq: MqLevels; sourceDelta: SourceD
             ].map(({ label, val }) => (
               <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: "var(--text-meta)", marginBottom: 5, fontFamily: "var(--font-mono)" }}>
                 <span style={{ color: "var(--text-secondary)", fontSize: "var(--text-meta)" }}>{label}</span>
-                <span style={{ color: "var(--gex-mq-accent)", fontWeight: 500 }}>{val != null ? fmtPrice(val) : "—"}</span>
+                <span style={{ color: "var(--gex-mq-accent)", fontWeight: 500 }}>{val != null ? fmtPrice(val) : "---"}</span>
               </div>
             ))}
             {mq.top_gex_strikes.length > 0 && (
@@ -517,7 +517,7 @@ export default function GexPanel({ marketState }: GexPanelProps) {
       <div className="regime-relationship-panel-head">
         <div className="regime-panel-title">
           <Activity size={14} />
-          {data.ticker} Gamma Exposure Levels &mdash; {data.data_date}
+          {data.ticker} Gamma Exposure Levels · {data.data_date}
           <InfoTooltip
             text="Gamma Exposure (GEX): net dealer gamma by strike. Positive = dealers long gamma (stabilizing, pins price). Negative = dealers short gamma (destabilizing, amplifies moves). Sources: Unusual Whales + MenthorQ."
             triggerTestId="gex-section-tooltip-trigger"
@@ -628,7 +628,7 @@ export default function GexPanel({ marketState }: GexPanelProps) {
         {/* ── GEX Profile Chart — Laplace curvature field ── */}
         <div className="gex-profile-chart" data-testid="gex-laplace-chart">
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-            <span className="gex-chart-title">GEX Profile &mdash; curvature field by strike</span>
+            <span className="gex-chart-title">GEX Profile · curvature field by strike</span>
             <span className="gex-chart-legend">
               <span style={{ color: "var(--signal-core-text)" }}>&#9632; Positive curvature (stabilizing)</span>
               {" "}

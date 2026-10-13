@@ -15,6 +15,7 @@
  * Spec: docs/indicators/vixts.md.
  */
 import React from "react";
+import { expectStripFillsGrid } from "./helpers/stripFit";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -222,7 +223,14 @@ describe("VixTsPanel — header strip", () => {
     expect(screen.getByTestId("vixts-regime").textContent).toBe("CONTANGO");
     expect(screen.getByTestId("vixts-vix").textContent).toBe("15.21");
     expect(screen.getByTestId("vixts-vix3m").textContent).toBe("17.99");
-    expect(screen.getByTestId("vixts-source-updated").textContent).toBe(DATA_DATE);
+    // The freshness rail owns the Cboe session date; the strip must not repeat it.
+    expect(screen.queryByTestId("vixts-source-updated")).toBeNull();
+    expect(screen.getByTestId("vixts-freshness-rail").textContent).toContain(DATA_DATE);
+  });
+
+  it("fills the strip grid with no empty cells", () => {
+    const { container } = renderPanel(hookState({ data: buildData() }));
+    expectStripFillsGrid(container);
   });
 
   it("labels a backwardated curve via the shared helper", () => {
@@ -320,6 +328,8 @@ describe("VixTsPanel — writer freshness", () => {
     const stamp = screen.getByTestId("vixts-writer-age");
     expect(stamp.textContent).toMatch(/\bago\b/i);
     expect(stamp.textContent).toMatch(/3h/);
+    // Names what the age measures, so it does not read as a third as-of date.
+    expect(stamp.textContent).toMatch(/^PULLED /);
   });
 
   it("marks a snapshot older than the catalog window as behind", () => {

@@ -246,7 +246,7 @@
 .radon-clear .trial-expired-panel { padding: 36px; border-radius: var(--radius-lg); background: var(--bg-subtle); }
 .radon-clear .trial-expired-title { font-size: 28px; font-weight: 500; letter-spacing: -0.04em; }
 .radon-clear .trial-expired-copy { font-size: 14px; }
-.radon-clear :is(.trial-expired-kicker, .trial-expired-countdown) { font: 500 12px var(--font-sans); letter-spacing: 0; text-transform: none; }
+.radon-clear .trial-expired-kicker { font: 500 12px var(--font-sans); letter-spacing: 0; text-transform: none; }
 .radon-clear .trial-expired-cta { display: inline-flex; align-items: center; min-height: 44px; border-radius: var(--radius); font: 600 14px var(--font-sans); letter-spacing: 0; text-transform: none; }
 
 .clear-auth { min-height: 100svh; padding: 36px clamp(24px, 6vw, 88px); }

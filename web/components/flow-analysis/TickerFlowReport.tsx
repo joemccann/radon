@@ -517,7 +517,7 @@ function SignalBadge({
       )}
 
       <div
-        className={`ticker-flow-badge ticker-flow-badge-${meta.className}`}
+        className={`ticker-flow-badge ticker-flow-badge-${meta.className}${servingStale ? " ticker-flow-badge--stale" : ""}`}
         role="status"
         aria-live="polite"
         data-direction={direction ?? "PENDING"}

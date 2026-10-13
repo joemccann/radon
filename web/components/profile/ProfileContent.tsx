@@ -478,9 +478,7 @@ function BookmarksPanel({
             {view.thumbnail ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img className="profile-bookmark__thumb" src={view.thumbnail} alt="" />
-            ) : (
-              <span className="profile-bookmark__thumb profile-bookmark__thumb--empty" aria-hidden />
-            )}
+            ) : null}
             <div className="profile-bookmark__body">
               <span className="profile-bookmark__headline">{view.headline}</span>
               <div className="profile-bookmark__meta">
@@ -490,7 +488,7 @@ function BookmarksPanel({
                 ) : null}
               </div>
             </div>
-            <StarToggle active onToggle={() => onUnstar(bookmark)} label="SAVED" />
+            <StarToggle active onToggle={() => onUnstar(bookmark)} />
           </li>
         );
       })}
@@ -537,7 +535,7 @@ function BookmarksPanelMobile({
                 {view.headline}
               </span>
             </div>
-            <StarToggle active onToggle={() => onUnstar(bookmark)} label="SAVED" />
+            <StarToggle active onToggle={() => onUnstar(bookmark)} />
           </li>
         );
       })}
@@ -627,7 +625,7 @@ function WatchlistPanelMobile({
 
 /* ─── Desktop WatchRow ───────────────────────────────── */
 
-function WatchRow({
+export function WatchRow({
   entry,
   price,
   onOpen,
@@ -646,11 +644,11 @@ function WatchRow({
   }, [price]);
 
   return (
-    <li className="profile-watch panel">
+    <li className={`profile-watch panel${entry.sector ? "" : " profile-watch--no-sector"}`}>
       <button type="button" className="profile-watch__symbol" onClick={onOpen}>
         {entry.symbol}
       </button>
-      <span className="profile-watch__sector">{entry.sector ?? "---"}</span>
+      {entry.sector ? <span className="profile-watch__sector">{entry.sector}</span> : null}
       <span className="profile-watch__price">
         {price?.last != null ? (
           <>

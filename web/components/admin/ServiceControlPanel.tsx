@@ -2,7 +2,8 @@
 
 import RequestError from "@/components/RequestError";
 
-import { useState } from "react";
+import { Fragment, useState, type MouseEvent } from "react";
+import { ChevronRight } from "lucide-react";
 import type {
   ServiceAction,
   ServicesListResponse,
@@ -17,6 +18,7 @@ import {
 } from "@/lib/adminFormat";
 import type { FlashTarget } from "./AdminWorkspace";
 import ConfirmDialog from "./ConfirmDialog";
+import ServiceLogDisclosure from "./ServiceLogDisclosure";
 import SortTh from "../SortTh";
 
 type ServiceControlPanelProps = {
@@ -254,12 +256,29 @@ function ServiceRow({
   const flashClass = resolveFlashClass(unit.unit, flashTarget);
   const rawState = `${unit.active_state} (${unit.sub_state})`;
   const transitional = verdict.label === "Starting" || verdict.label === "Stopping";
+  // A Failed unit (or a daemon that is down) discloses its journal on click.
+  const expandable = verdict.tone === "negative";
+  const [expanded, setExpanded] = useState(false);
+  const toggle = () => setExpanded((v) => !v);
+  const detailId = `service-logs-${unit.unit}`;
+  const onRowClick = (e: MouseEvent<HTMLTableRowElement>) => {
+    if ((e.target as HTMLElement).closest("button, a, input, label")) return;
+    toggle();
+  };
+  const rowClass = [
+    flashClass,
+    expandable ? "admin-row-expandable" : "",
+    expandable && expanded ? "admin-row-expanded" : "",
+  ].filter(Boolean).join(" ");
 
   return (
+    <Fragment>
     <tr
       data-testid={`service-row-${unit.unit}`}
-      className={flashClass}
+      className={rowClass || undefined}
       data-flash={flashClass ? "true" : undefined}
+      aria-expanded={expandable ? expanded : undefined}
+      onClick={expandable ? onRowClick : undefined}
     >
       <td data-label="Status">
         <div className="admin-verdict-cell" title={rawState}>
@@ -271,7 +290,25 @@ function ServiceRow({
         </div>
       </td>
       <td data-label="Unit">
-        <div className="admin-unit-name">{unit.unit}</div>
+        <div className="admin-unit-name">
+          {expandable ? (
+            <span className="admin-disclosure-cell">
+              <button
+                type="button"
+                className="admin-disclosure-btn"
+                aria-expanded={expanded}
+                aria-controls={expanded ? detailId : undefined}
+                aria-label={`${expanded ? "Hide" : "Show"} logs for ${unit.unit}`}
+                onClick={toggle}
+              >
+                <ChevronRight size={12} aria-hidden className="admin-disclosure-chevron" />
+              </button>
+              {unit.unit}
+            </span>
+          ) : (
+            unit.unit
+          )}
+        </div>
         {unit.description && <div className="admin-unit-desc">{unit.description}</div>}
       </td>
       <td data-label="Activity">
@@ -308,6 +345,14 @@ function ServiceRow({
         </div>
       </td>
     </tr>
+    {expandable && expanded && (
+      <tr className="admin-journal-row" id={detailId}>
+        <td colSpan={4}>
+          <ServiceLogDisclosure unit={unit.unit} />
+        </td>
+      </tr>
+    )}
+    </Fragment>
   );
 }
 

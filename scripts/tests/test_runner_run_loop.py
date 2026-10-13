@@ -558,7 +558,7 @@ def test_runner_prompts_leave_pushover_to_the_runner(prompt):
     (#870)."""
     body = prompt.read_text()
     assert PUSHOVER_OWNERSHIP in body
-    assert "do not list it under Next" in body
+    assert "do not list it under Next" in body or "do not list it under Operator Next Steps" in body
 
 
 # --- claude rungs -----------------------------------------------------------
@@ -947,7 +947,8 @@ def test_install_copies_hooks_helpers_and_the_bot_state_dir():
     src = (REPO / "scripts" / "runner" / "install.sh").read_text()
     for helper in ("nightly_pr_guard.py", "nightly_publish.py", "nightly_issue_prune.py", "nightly_green_base.py",
                    "nightly_audit_context.py", "nightly_deliver.py", "security_claude_ladder.py",
-                   "claude_cli_env_drift.py", "claude_cli_env_reviewed.txt", "nvidia_rate_limit.py"):
+                   "claude_cli_env_drift.py", "claude_cli_env_reviewed.txt", "nvidia_rate_limit.py",
+                   "ci/check_pr_body.py"):
         assert helper in src, helper
         assert (REPO / "scripts" / helper).is_file(), helper
     assert '"$SRC/hooks/"*' in src
@@ -1082,7 +1083,8 @@ def test_rel291_only_one_contender_can_reclaim_a_stale_lock(rig):
 
 _LIB = ("nightly_pr_guard.py", "nightly_publish.py", "nightly_issue_prune.py", "nightly_green_base.py",
         "nightly_audit_context.py", "nightly_deliver.py", "security_claude_ladder.py",
-        "claude_cli_env_drift.py", "claude_cli_env_reviewed.txt", "nvidia_rate_limit.py")
+        "claude_cli_env_drift.py", "claude_cli_env_reviewed.txt", "nvidia_rate_limit.py",
+        "ci/check_pr_body.py")
 
 
 def _source_tree(tmp_path):
@@ -1090,6 +1092,7 @@ def _source_tree(tmp_path):
     root = tmp_path / "clone"
     shutil.copytree(REPO / "scripts" / "runner", root / "scripts" / "runner")
     for name in _LIB:
+        (root / "scripts" / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPO / "scripts" / name, root / "scripts" / name)
     for path in [root, *root.rglob("*")]:
         path.chmod(0o755 if path.is_dir() or path.suffix == ".sh" else 0o644)
@@ -1113,7 +1116,7 @@ def test_install_proceeds_past_the_trust_check_on_a_private_operator_owned_tree(
 @pytest.mark.skipif(os.geteuid() == 0, reason="the refusal path is exercised as an unprivileged user")
 @pytest.mark.parametrize("rel", ["", "scripts", "scripts/runner", "scripts/runner/hooks",
                                  "scripts/runner/loops/documentation.env", "scripts/runner/run_loop.sh",
-                                 "scripts/nightly_pr_guard.py"])
+                                 "scripts/nightly_pr_guard.py", "scripts/ci", "scripts/ci/check_pr_body.py"])
 @pytest.mark.parametrize("mode", [0o777, 0o775, 0o1777])
 def test_install_refuses_a_group_or_world_writable_source_tree(tmp_path, rel, mode):
     root = _source_tree(tmp_path)

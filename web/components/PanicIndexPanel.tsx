@@ -128,9 +128,24 @@ export default function PanicIndexPanel() {
   const current = data.current;
   const stddev = data.stats?.stddev ?? current.delta_std_10y;
   const tone = deltaTone(current.delta_1d, stddev);
-  const sourceSession = data.data_date ?? current.date ?? "---";
   const rank = rankValue(data);
   const overlay = current.legs.skew25d;
+  const legRows: { key: string; label: string; value: string; z: string; testId: string; excluded?: boolean }[] = [
+    { key: "vix", label: "VIX", value: formatClose(current.legs.vix.value), z: formatZ(current.legs.vix.z), testId: "panic-index-vix" },
+    { key: "vvix", label: "VVIX", value: formatClose(current.legs.vvix.value), z: formatZ(current.legs.vvix.z), testId: "panic-index-vvix" },
+    { key: "ts", label: "VIX / VIX3M", value: formatTs(current.legs.ts.value), z: formatZ(current.legs.ts.z), testId: "panic-index-ts" },
+    { key: "skew", label: "SKEW", value: formatClose(current.legs.skew.value), z: formatZ(current.legs.skew.z), testId: "panic-index-skew" },
+  ];
+  if (overlay && overlay.value != null) {
+    legRows.push({
+      key: "skew25d",
+      label: "25D skew, UW overlay, excluded from composite",
+      value: formatClose(overlay.value),
+      z: "",
+      testId: "panic-index-skew25d",
+      excluded: true,
+    });
+  }
 
   const rows: PanicIndexChartRow[] = series.map((p: PanicIndexPoint) => ({
     date: p.date,
@@ -200,13 +215,12 @@ export default function PanicIndexPanel() {
             <MetricCell label="VVIX" value={formatClose(current.legs.vvix.value)} />
             <MetricCell label="VIX / VIX3M" value={formatTs(current.legs.ts.value)} />
             <MetricCell label="SKEW" value={formatClose(current.legs.skew.value)} />
-            <MetricCell label="SOURCE UPDATED" value={sourceSession} />
             {overlay && overlay.value != null ? (
               <MetricCell label="25D SKEW" value={formatClose(overlay.value)} />
             ) : null}
           </div>
         ) : (
-          <RegimeStrip>
+          <RegimeStrip className="regime-strip--fit">
             <RegimeStripCell
               testId="panic-index-strip-delta"
               label="1D CHANGE"
@@ -229,45 +243,32 @@ export default function PanicIndexPanel() {
               value={<span data-testid="panic-index-rank">{rank.text}</span>}
               sub={<>{rank.sub}</>}
             />
-            <RegimeStripCell
-              testId="panic-index-strip-vix"
-              label="VIX"
-              value={<span data-testid="panic-index-vix">{formatClose(current.legs.vix.value)}</span>}
-              sub={<>z {formatZ(current.legs.vix.z)}</>}
-            />
-            <RegimeStripCell
-              testId="panic-index-strip-vvix"
-              label="VVIX"
-              value={<span data-testid="panic-index-vvix">{formatClose(current.legs.vvix.value)}</span>}
-              sub={<>z {formatZ(current.legs.vvix.z)}</>}
-            />
-            <RegimeStripCell
-              testId="panic-index-strip-ts"
-              label="VIX / VIX3M"
-              value={<span data-testid="panic-index-ts">{formatTs(current.legs.ts.value)}</span>}
-              sub={<>z {formatZ(current.legs.ts.z)}</>}
-            />
-            <RegimeStripCell
-              testId="panic-index-strip-skew"
-              label="SKEW"
-              value={<span data-testid="panic-index-skew">{formatClose(current.legs.skew.value)}</span>}
-              sub={<>z {formatZ(current.legs.skew.z)}</>}
-            />
-            <RegimeStripCell
-              testId="panic-index-strip-source-updated"
-              label="SOURCE UPDATED"
-              value={<span data-testid="panic-index-source-updated">{sourceSession}</span>}
-              sub={<>latest joined session</>}
-            />
-            {overlay && overlay.value != null ? (
-              <RegimeStripCell
-                testId="panic-index-strip-skew25d"
-                label="25D SKEW"
-                value={<span data-testid="panic-index-skew25d">{formatClose(overlay.value)}</span>}
-                sub={<>overlay, UW, not in composite</>}
-              />
-            ) : null}
           </RegimeStrip>
+        )}
+
+        {!compact && (
+          <div className="table-wrap">
+            <table className="data-table" data-testid="panic-index-legs" data-sortable-exempt="matrix">
+              <thead>
+                <tr>
+                  <th>Leg</th>
+                  <th className="right">Value</th>
+                  <th className="right">z vs 10y</th>
+                </tr>
+              </thead>
+              <tbody>
+                {legRows.map((leg) => (
+                  <tr key={leg.key} style={leg.excluded ? { color: "var(--text-muted)" } : undefined}>
+                    <td>{leg.label}</td>
+                    <td className="right">
+                      <span data-testid={leg.testId}>{leg.value}</span>
+                    </td>
+                    <td className="right">{leg.z}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
 
         <FreshnessRail

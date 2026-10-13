@@ -150,8 +150,11 @@ export default function DivYieldPanel() {
 
         {compact ? (
           <div className="m-regime-grid2x2" data-testid="divyield-mobile-grid">
-            <MetricCell label="ABOVE 10Y" value={formatDivYieldPct(current.pct_above)} />
-            <MetricCell label="COUNT" value={formatDivYieldCount(current.count_above, current.total)} />
+            <MetricCell
+              label="ABOVE 10Y"
+              value={formatDivYieldPct(current.pct_above)}
+              title={`${formatDivYieldCount(current.count_above, current.total)} strictly above 10Y`}
+            />
             <MetricCell label="10Y YIELD" value={formatDivYieldPct(current.y10)} />
             <MetricCell
               label="REGIME"
@@ -166,13 +169,12 @@ export default function DivYieldPanel() {
               testId="divyield-strip-above"
               label="ABOVE 10Y"
               value={<span data-testid="divyield-above">{formatDivYieldPct(current.pct_above)}</span>}
-              sub={<>TTM YIELD VS 10Y</>}
-            />
-            <RegimeStripCell
-              testId="divyield-strip-count"
-              label="COUNT"
-              value={<span data-testid="divyield-count">{formatDivYieldCount(current.count_above, current.total)}</span>}
-              sub={<>STRICTLY ABOVE 10Y</>}
+              sub={
+                <>
+                  <span data-testid="divyield-count">{formatDivYieldCount(current.count_above, current.total)}</span>{" "}
+                  STRICTLY ABOVE 10Y
+                </>
+              }
             />
             <RegimeStripCell
               testId="divyield-strip-y10"
