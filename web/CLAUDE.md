@@ -6,6 +6,8 @@ Frontend rules and correctness invariants for the Next.js app. Loaded automatica
 
 ## Error presentation
 
+P&L share timing: `orders/stockEntryTime.ts` matches stock executions by broker conId, consuming earlier closes before pairing the target close with opening lots. Fully matched history supplies the earliest consumed timestamp independently of existing price/P&L math. Missing identity/history remains unknown. `/api/share/pnl` derives duration from timestamps, preserves timestamp-only rows, and labels Pacific time with its actual PST/PDT offset; same-day date-only entries never invent intraday duration. Regression: `share-pnl-stock-timing.test.ts`, `share-pnl-timing-render.test.ts`, and the pictured TQQQ case in `mobile-executed-journal.spec.ts`.
+
 Request, refresh, broker, validation and action errors use `RequestError` / `ErrorToast` (or the shared toast system), never inline banners. Preserve retry and retained-data guidance. Fatal framework fallbacks, financial risk conditions and stored diagnostic records are explicit exceptions; see `docs/reviews/2026-09-17-toast-errors.md`.
 
 ## Sortable Tables

@@ -3750,3 +3750,13 @@ service_health write raises.** Peak: 2026-10-08 22:14Z, page
   `scripts/tests/test_aa_frontier_refresh.py::test_ok_heartbeat_timeout_does_not_fail_the_oneshot`,
   `test_refresh_failure_still_exits_one_and_names_the_exception_class`.
 - **Code:** `scripts/aa_frontier_refresh.py` (`_record_ok_health`, `main`).
+## pnl-story-stock-entry-timing
+
+**A realized stock P&L story shows entry price and exit timestamp but omits entry timestamp and hold duration.**
+
+- **Observed artifact:** 2026-10-13 TQQQ, 10,000 shares, realized P&L $11,435.65. Canonical `executed_orders` contains ten opening fills at 15:46:31–32Z and ten closing fills at 16:30:30Z; the rendered story contained no ENTRY timestamp or HELD row.
+- **Mechanism:** `positionGroupShareData` matched only OPT opening fills, while the fully closed stock had no remaining portfolio position. The realized-P&L identity recovered the entry price but no time; the per-ticker latest journal date was the same-day opening date and was intentionally rejected as an imprecise intraday source. The export route also required prices to render timestamps, trusted a client-supplied duration, and appended PST during daylight time.
+- **Discriminating check:** read the affected stock's canonical executed fills and inspect the actual story request. If fully matching opening executions precede the close but `entryTime` is absent, run `share-pnl-stock-timing.test.ts`. Missing opening history is unknown data, not authority to synthesize midnight or an estimated holding period.
+- **Repair:** `orders/stockEntryTime.ts` replays stock executions by conId, consumes preceding closes, and requires full target quantity matching. Its output adds timing without changing P&L/entry-price arithmetic. Precise execution time outranks the date-only portfolio fallback. `/api/share/pnl` derives measured hold duration, preserves timestamp-only rows, and uses seasonal Pacific zone labels.
+- **Verification:** the sanitized twenty-fill fixture reproduces the supplied artifact; `share-pnl-timing-render.test.ts` asserts actual export tree content, and the pictured TQQQ case in `mobile-executed-journal.spec.ts` exercises the real 1080×1920 PNG route and saves a browser preview. Inspect ENTRY at 8:46 AM PDT, HELD 44 minutes and EXIT at 9:30 AM PDT.
+- **Rollback:** revert this focused fix through the normal CI-gated deployment path; no journal updates, broker actions or migrations are needed.

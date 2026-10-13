@@ -53,6 +53,7 @@ import { useBlotter } from "@/lib/useBlotter";
 import { formatTradeDate } from "@/lib/blotter/formatTradeDate";
 import { blotterFillPrice, formatBlotterFillPrice, FILL_PRICE_HELP, AGGREGATE_FILL_PRICE_HELP } from "@/lib/blotter/fillPrice";
 import { isEarlierLocalDay } from "@/lib/holdTime";
+import { resolveStockEntryTime } from "@/lib/orders/stockEntryTime";
 import CashFlowsSection from "@/components/CashFlowsSection";
 import { useSort } from "@/lib/useSort";
 import { useTableFilter } from "@/lib/useTableFilter";
@@ -411,7 +412,7 @@ export function positionGroupShareData(
 ): SharePnlData {
   let pnlPct: number | null = null;
   let entryPrice: number | null = null;
-  let entryTime: string | null = null;
+  let entryTime: string | null = resolveStockEntryTime(group, allGroups);
 
   if (group.totalPnL != null && group.isClosing) {
     const hasBagFills = group.fills.some((f) => f.contract.secType === "BAG");
@@ -482,7 +483,7 @@ export function positionGroupShareData(
           entryPrice = netCost;
         }
         // Use entry_date from portfolio (date only, no time)
-        if (matchingPosition.entry_date) {
+        if (entryTime == null && matchingPosition.entry_date) {
           entryTime = matchingPosition.entry_date;
         }
         // Calculate notional for P&L %
