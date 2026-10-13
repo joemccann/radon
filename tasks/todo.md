@@ -9459,3 +9459,19 @@ Plan review: The screenshot already renders the exit timestamp. Entry time and d
 Verification review: Live canonical twenty-fill TQQQ sequence reproduced four stock-timing failures; export-content tests reproduced three rendering failures. Focused share suites: 56 passed. New timing helper: 100% line coverage, 96.66% branches. Full Vitest after latest-main rebase: 10,885 passed, 21 skipped; full Python: 15,394 passed, 2 skipped (OpenSSL3 and isolated MENTHORQ_USER as before). TypeScript/scoped ESLint clean. Production compile and 12 desktop/mobile Playwright cases passed. Actual 1080x1920 story and iPhone preview visually inspected: ENTRY 8:46 AM PDT, HELD 44 minutes, EXIT 9:30 AM PDT; supplied P&L and existing entry-price identity preserved. No broker actions or journal writes. Delivery receipts will be recorded on the PR without a bookkeeping-only source push.
 
 CI curation review: PR #1068 head 8e517148 failed the changed-held-out-spec guard (CI 38434204207, scripts-df job 115423979347). The existing mobile executed/journal spec was held out, not curated; local reproduction returned 1 failed/5 passed. Promote the fully preflighted seven-case WebKit spec to the curated CI command and remove its held-out ledger membership, retaining dated review evidence. No test assertions or gates are weakened.
+
+
+# Modification payoff correction
+
+Dependency graph: T1 -> T2 -> T3 -> T4; T1 -> T3.
+
+- [x] T1 depends_on: [] Trace screenshot combo leg directions, signed premium and current risk presentation.
+- [x] T2 depends_on: [T1] Apply minimal correction and focused regression cases.
+- [ ] T3 depends_on: [T1, T2] Add browser regression, independent review and visual verification without live trading.
+- [ ] T4 depends_on: [T2, T3] Create PR, watch exact-head CI through green, notify Pushover and record review.
+
+Constraints: preserve broker payload semantics and coverage gates; no local test suites; no live submit.
+
+Evidence: live read-only Positions view shows SNDK grouped with long 10 C1450 (basis 52766), short 10 C1600 (basis -13016), short 5 P1400 (basis -24475), all expiry 2026-10-23. SELL 10 BAG structural C1600 SELL / C1450 BUY closes the call subset; at $50 proceeds 50000, selected basis 39750, estimated P&L 10250, retaining the put. No live submissions.
+
+Verification: regression-only a4c99484 GitHub CI job 115503958270 reproduced 4 failures, including exact screenshot Total -50000/Max Gain50000/Max Loss100000 and missing close P&L. Independent browser agent reviewed fix and eight regressions. Static TypeScript syntax parsed all three owned TS files with 0 diagnostics.
