@@ -2093,3 +2093,18 @@ class TestDocumentation20261013:
         assert "still 200" in bullet
         assert "available: false" in bullet
         assert "malformed query is 400" in bullet
+
+    def test_margin_sample_sweep_keeps_bracket_evidence(self):
+        retention = (_ROOT / "scripts/db/retention.py").read_text()
+        assert "MARGIN_SAMPLES_KEEP_DAYS = 90" in retention
+        assert "MARGIN_SAMPLES_BRACKET_WINDOW_S = 121" in retention
+        assert "position_capital_observations" in retention
+        assert "status = 'VALID'" in retention
+        cloud = (_ROOT / "docs/cloud-services.md").read_text()
+        row = next(line for line in cloud.splitlines() if "radon-db-retention.timer" in line)
+        assert "account_margin_samples" in row
+        assert "MARGIN_SAMPLES_KEEP_DAYS" in row
+        assert "MARGIN_SAMPLES_BRACKET_WINDOW_S" in row
+        assert "position_capital_observations" in row
+        assert "VALID" in row
+        assert "journal or portfolio" in row
