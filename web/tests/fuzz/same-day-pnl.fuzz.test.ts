@@ -30,8 +30,8 @@
  *   wide      spread >10%, last >5% off the mid      → mark = mid
  *   stale     last outside its own bid/ask           → mark = mid
  *   no-quote  nothing broadcast, synced leg price    → mark = leg.market_price
- *   unpriced  nothing broadcast, no synced price     → position falls to its
- *                                                      synced market value
+ *   unpriced  nothing broadcast, no synced price     → own synced leg value
+ *                                                      (single: position value)
  *
  * `oracleSameDay` then states the answer as
  * `Σ sign × mark × contracts × 100 − Σ sign × |entry|`, arithmetic the library
@@ -177,18 +177,6 @@ function dirSign(leg: { direction: "LONG" | "SHORT" }): number {
   return leg.direction === "LONG" ? 1 : -1;
 }
 
-/** The `last` each kind broadcasts, or null when nothing is broadcast. The
- *  overnight branch reads this RAW; the same-day branch resolves it to
- *  `leg.mark`. */
-function quotedLast(leg: LegSpec): number | null {
-  switch (leg.quote) {
-    case "tight": return leg.mark;
-    case "wide": return leg.mark * 1.06;
-    case "stale": return leg.mark * 0.5;
-    default: return null;
-  }
-}
-
 /** The synced per-contract price on the leg. A decoy for the kinds that carry
  *  a live quote: if a walk ever preferred it over the quote, the oracle parts
  *  company with the library. */
@@ -198,8 +186,8 @@ function legMarketPrice(leg: LegSpec): number | null {
   return leg.mark + 5;
 }
 
-/** The mark the leg MUST price at for the same-day walk, or null when nothing
- *  prices it and the whole position falls back to its synced value. */
+/** The live/synced price independently implied by the quote kind. A null
+ *  mark permits the leg's synced dollar value only for a multi-leg holding. */
 function sameDayMark(leg: LegSpec): number | null {
   return leg.quote === "unpriced" ? null : leg.mark;
 }
@@ -285,12 +273,16 @@ function oracleSyncedMv(spec: OptionSpec): number {
   return spec.syncedMv ?? dirSign(spec.legs[0]) * spec.legs[0].syncedMark * spec.legs[0].contracts * 100;
 }
 
-/** The market value the position MUST publish: the live walk when every leg
- *  prices, the synced value when any leg does not. */
+/** Combo valuation retains each available live mark, falling back to that
+ *  leg's independently generated snapshot. A single unpriced leg retains its
+ *  published position snapshot. This oracle never reads a production helper. */
 function oracleMarketValue(spec: OptionSpec): number {
-  if (spec.legs.some((leg) => sameDayMark(leg) == null)) return oracleSyncedMv(spec);
+  if (spec.legs.length === 1 && sameDayMark(spec.legs[0]) == null) return oracleSyncedMv(spec);
   let total = 0;
-  for (const leg of spec.legs) total += dirSign(leg) * sameDayMark(leg)! * leg.contracts * 100;
+  for (const leg of spec.legs) {
+    const mark = sameDayMark(leg) ?? leg.syncedMark;
+    total += dirSign(leg) * mark * leg.contracts * 100;
+  }
   return total;
 }
 
@@ -299,22 +291,16 @@ function oracleSameDay(spec: OptionSpec): number {
   return oracleMarketValue(spec) - oracleEntryCost(spec);
 }
 
-/** Today P&L for an OVERNIGHT position with no broker figure: the close-based
- *  walk off the RAW broadcast last, null when a leg has no price at all or no
- *  leg carries a usable close. */
+/** Overnight P&L uses the mark fixed by each quote KIND (last or midpoint),
+ *  against that quote's previous close. Every leg must carry both measurements;
+ *  a price-only/snapshot-only leg cannot support a partial daily total. */
 function oracleOvernight(spec: OptionSpec): number | null {
   let pnl = 0;
-  let hasClose = false;
   for (const leg of spec.legs) {
-    const marketPrice = legMarketPrice(leg);
-    const raw = quotedLast(leg) ?? (marketPrice != null && marketPrice > 0 ? marketPrice : null);
-    if (raw == null) return null;
-    if (leg.close != null && leg.close > 0 && quotedLast(leg) != null) {
-      pnl += dirSign(leg) * (raw - leg.close) * leg.contracts * 100;
-      hasClose = true;
-    }
+    if (leg.quote === "no-quote" || leg.quote === "unpriced" || leg.close == null || leg.close <= 0) return null;
+    pnl += dirSign(leg) * (leg.mark - leg.close) * leg.contracts * 100;
   }
-  return hasClose ? pnl : null;
+  return pnl;
 }
 
 /** What every surface renders as the position's P&L. Asserted against the
@@ -324,6 +310,20 @@ function surfaceTotalPnl(pos: PortfolioPosition, prices: Record<string, PriceDat
 }
 
 describe("same-day P&L identity (property)", () => {
+  it("an unpriced single leg retains its published position snapshot", () => {
+    const spec: OptionSpec = {
+      expiry: "2026-09-18",
+      legs: [{ direction: "LONG", type: "Call", contracts: 1, mark: 0.2,
+        syncedMark: 0.2, close: null, entryCost: 0, ownExpiry: null, quote: "unpriced" }],
+      entryCost: 0, ibDailyPnl: null, syncedMv: 0,
+    };
+    const { pos, prices } = buildOption(spec, TODAY);
+    expect(resolveRealtimeMarketValue(pos, prices)).toBeNull();
+    expect(resolveMarketValue(pos)).toBe(0);
+    expect(getTodayPnlDollars(pos, prices)).toBe(0);
+    expect(surfaceTotalPnl(pos, prices)).toBe(0);
+  });
+
   it("P1 — a same-day option position's Today P&L IS its total P&L", () => {
     fc.assert(
       fc.property(arbOptionPosition, (spec: OptionSpec) => {
