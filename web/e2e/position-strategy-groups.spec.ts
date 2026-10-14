@@ -243,7 +243,18 @@ for (const device of ["desktop", "mobile"] as const) {
     if (device === "desktop") await assertSplit(page);
     else await expect(page.getByRole("heading", { name: /^Defined Risk Positions/ })).toBeVisible();
     const reset = await openGrouping(page);
-    await reset.getByRole("button", { name: "Reset grouping", exact: true }).click();
+    const resetButton = reset.getByRole("button", { name: "Reset grouping", exact: true });
+    if (device === "desktop") {
+      const box = await resetButton.boundingBox();
+      const viewport = page.viewportSize()!;
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(12);
+      expect(box!.y).toBeGreaterThanOrEqual(12);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width - 12);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height - 12);
+      await capture(page, info, "desktop-reset-menu");
+    }
+    await resetButton.click();
     await expect(page.getByRole("heading", { name: /^Defined Risk Positions/ })).toHaveCount(0);
     expect(transport.writes).toEqual([]);
   });

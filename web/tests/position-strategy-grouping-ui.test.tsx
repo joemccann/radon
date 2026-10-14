@@ -39,6 +39,46 @@ function open() {
 }
 
 describe("strategy grouping interaction boundaries", () => {
+  it("fits the measured popover and Reset footer above the viewport edge on open and resize", () => {
+    const width = Object.getOwnPropertyDescriptor(window, "innerWidth")!;
+    const height = Object.getOwnPropertyDescriptor(window, "innerHeight")!;
+    const nativeRect = HTMLElement.prototype.getBoundingClientRect;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 900 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 600 });
+    const rect = (left: number, top: number, width: number, height: number): DOMRect => ({
+      x: left, y: top, left, top, width, height, right: left + width, bottom: top + height,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("strategy-group-trigger")) return rect(880, 560, 40, 40);
+      if (this.classList.contains("strategy-group-panel--menu")) return rect(parseFloat(this.style.left), parseFloat(this.style.top), 340, 450);
+      if (this.textContent === "Reset grouping") {
+        const panel = this.closest<HTMLElement>(".strategy-group-panel")!;
+        return rect(parseFloat(panel.style.left), parseFloat(panel.style.top) + 410, 120, 40);
+      }
+      return nativeRect.call(this);
+    });
+    try {
+      render(<PositionStrategyGrouping position={source()} controls={controls()} />);
+      const dialog = open();
+      const panel = screen.getByRole("dialog") as HTMLElement;
+      const reset = dialog.getByRole("button", { name: "Reset grouping" });
+      expect(parseFloat(panel.style.top)).toBe(138);
+      expect(panel.getBoundingClientRect().right).toBeLessThanOrEqual(888);
+      expect(reset.getBoundingClientRect().bottom).toBeLessThanOrEqual(588);
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 700 });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: 520 });
+      fireEvent(window, new Event("resize"));
+      expect(parseFloat(panel.style.top)).toBe(58);
+      expect(panel.getBoundingClientRect().right).toBeLessThanOrEqual(688);
+      expect(reset.getBoundingClientRect().bottom).toBeLessThanOrEqual(508);
+      expect(parseFloat(panel.style.top)).toBeGreaterThanOrEqual(12);
+    } finally {
+      Object.defineProperty(window, "innerWidth", width);
+      Object.defineProperty(window, "innerHeight", height);
+    }
+  });
+
   it("closes the preview on Escape bubbling from its focused Apply button without applying", () => {
     const state = controls();
     render(<PositionStrategyGrouping position={source()} controls={state} />);

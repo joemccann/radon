@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Layers, X } from "lucide-react";
 import type { PortfolioPosition } from "@/lib/types";
@@ -46,6 +46,24 @@ export default function PositionStrategyGrouping({ position, controls, prices }:
   const identity = strategySourceIdentity(source)?.fingerprint;
   useEffect(() => { setMode(null); setSelected([]); }, [identity]);
   useEffect(() => { if (mode) panelRef.current?.focus(); }, [mode, panelRef]);
+  useLayoutEffect(() => {
+    if (mode !== "menu" || !portalTarget || !panelRef.current) return;
+    const panel = panelRef.current;
+    const fit = () => {
+      if (window.innerWidth <= 640) return;
+      const bounds = panel.getBoundingClientRect();
+      setAnchor(current => {
+        const left = Math.max(12, Math.min(current.left, window.innerWidth - bounds.width - 12));
+        const top = Math.max(12, Math.min(current.top, window.innerHeight - bounds.height - 12));
+        return left === current.left && top === current.top ? current : { left, top };
+      });
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(fit);
+    observer?.observe(panel);
+    return () => { window.removeEventListener("resize", fit); observer?.disconnect(); };
+  }, [mode, portalTarget, panelRef]);
   if (legs.length < 2) return null;
   const suggestion = controls.suggestionFor(source);
   const currentGroups = controls.groupsFor(source);
@@ -78,7 +96,7 @@ export default function PositionStrategyGrouping({ position, controls, prices }:
     <button type="button" className="strategy-group-trigger" aria-label={`Group strategies for ${source.ticker}`} aria-haspopup="dialog" aria-expanded={mode != null}
       onClick={event => {
         const box = event.currentTarget.getBoundingClientRect();
-        setAnchor({ left: Math.max(12, Math.min(box.left, window.innerWidth - 352)), top: Math.min(box.bottom + 8, window.innerHeight - 360) });
+        setAnchor({ left: box.left, top: box.bottom + 8 });
         setError(null); setMode("menu");
       }}><Layers size={15} aria-hidden="true" /></button>
     {error && <ErrorToast message={error} />}
