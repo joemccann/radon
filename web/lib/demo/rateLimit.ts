@@ -11,8 +11,8 @@
 //   F — WS tickets   200/day   (daily reconnect ceiling)
 //   G — headlines    5/min     (bounded snapshot-poll bursts)
 //   H — headlines    5,000/day (three persistent one-minute polling tabs)
-//   I — shell polls   60/min    (portfolio/orders/health/quote refreshes)
-//   J — shell polls   50,000/day (three persistent tabs through Globex)
+//   I — shell polls   open-market minute for three tabs (accountPollBudget)
+//   J — shell polls   one equity day for those three tabs (accountPollBudget)
 //   K — reads        1,000/day  (user-global daily ceiling over tier A;
 //                               per-resource A keys alone let one account
 //                               hold 100/hr per segment forever — R-652)
@@ -27,6 +27,7 @@
 
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
+import { DEMO_SHELL_DAILY_LIMIT, DEMO_SHELL_MINUTE_LIMIT } from "../accountPollBudget";
 import {
   DEMO_HEADLINES_BURST_PER_MINUTE,
   DEMO_HEADLINES_DAILY_LIMIT,
@@ -55,8 +56,8 @@ const TIER_CONFIG: Record<DemoRateTier, TierConfig> = {
   F: { limit: 200, window: "1 d" },
   G: { limit: DEMO_HEADLINES_BURST_PER_MINUTE, window: "1 m" },
   H: { limit: DEMO_HEADLINES_DAILY_LIMIT, window: "1 d" },
-  I: { limit: 60, window: "1 m" },
-  J: { limit: 50_000, window: "1 d" },
+  I: { limit: DEMO_SHELL_MINUTE_LIMIT, window: "1 m" },
+  J: { limit: DEMO_SHELL_DAILY_LIMIT, window: "1 d" },
   K: { limit: 1_000, window: "1 d" },
   L: { limit: 50, window: "1 d" },
 };
