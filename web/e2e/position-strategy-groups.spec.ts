@@ -75,7 +75,7 @@ async function capture(page: Page, info: TestInfo, name: string) {
 
 function tickerRows(page: Page, section: "defined" | "undefined") {
   const container = section === "defined" ? page.getByTestId("defined-risk-section")
-    : page.locator(".section").filter({ has: page.getByRole("heading", { name: "Undefined Risk Positions", exact: true }) });
+    : page.locator(".section").filter({ has: page.getByRole("heading", { name: /^Undefined Risk Positions/ }) });
   return container.getByTestId("position-table").getByRole("row")
     .filter({ has: page.getByRole("button", { name: "View details for AAOI", exact: true }) });
 }
@@ -131,7 +131,7 @@ for (const device of ["desktop", "mobile"] as const) {
     await capture(page, info, `${device}-preview`);
     await initial.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    await expect(page.getByText("Defined Risk Positions", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: /^Defined Risk Positions/ })).toHaveCount(0);
 
     const preview = await suggestedPreview(page);
     if (device === "mobile") {
@@ -152,7 +152,7 @@ for (const device of ["desktop", "mobile"] as const) {
     }
     await capture(page, info, `${device}-applied`);
     await page.getByRole("button", { name: "Undo grouping", exact: true }).click();
-    await expect(page.getByText("Defined Risk Positions", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: /^Defined Risk Positions/ })).toHaveCount(0);
     expect(transport.writes).toEqual([]);
   });
 }
@@ -172,7 +172,7 @@ test("strategy grouping persists through reload and broker leg reorder; quantity
   await capture(page, info, "reordered-persisted");
   transport.changeQuantity();
   await page.reload({ waitUntil: "domcontentloaded" });
-  await expect(page.getByText("Defined Risk Positions", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /^Defined Risk Positions/ })).toHaveCount(0);
   const original = tickerRows(page, "undefined");
   await expect(original).toHaveCount(1);
   await expect(original).toContainText("Combo (3 legs)");
@@ -207,9 +207,9 @@ test(`manual selected legs form a spread and keyboard cancellation retains holdi
   await capture(page, info, `${device}-selected-legs-preview`);
   await dialog.getByRole("button", { name: "Apply grouping", exact: true }).click();
   if (device === "desktop") await assertSplit(page);
-  else await expect(page.getByRole("heading", { name: "Defined Risk Positions", exact: true })).toBeVisible();
+  else await expect(page.getByRole("heading", { name: /^Defined Risk Positions/ })).toBeVisible();
   await page.getByRole("button", { name: "Undo grouping", exact: true }).click();
-  await expect(page.getByText("Defined Risk Positions", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /^Defined Risk Positions/ })).toHaveCount(0);
   expect(transport.writes).toEqual([]);
 });
 }
@@ -241,10 +241,10 @@ for (const device of ["desktop", "mobile"] as const) {
     await expect(dialog).toContainText("-$5,614");
     await dialog.getByRole("button", { name: "Apply grouping", exact: true }).click();
     if (device === "desktop") await assertSplit(page);
-    else await expect(page.getByRole("heading", { name: "Defined Risk Positions", exact: true })).toBeVisible();
+    else await expect(page.getByRole("heading", { name: /^Defined Risk Positions/ })).toBeVisible();
     const reset = await openGrouping(page);
     await reset.getByRole("button", { name: "Reset grouping", exact: true }).click();
-    await expect(page.getByText("Defined Risk Positions", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: /^Defined Risk Positions/ })).toHaveCount(0);
     expect(transport.writes).toEqual([]);
   });
 }

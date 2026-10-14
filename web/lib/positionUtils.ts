@@ -354,6 +354,9 @@ function isNetDebitPaid(pos: PortfolioPosition, entryCost: number): boolean {
  * and not at all otherwise (R-146). Opening credits stay unavailable.
  */
 export function resolveReturnCapital(pos: PortfolioPosition): ReturnCapitalBasis | null {
+  // Custom display groups have no inherited risk measurement. Their signed
+  // basis can support a labeled entry-value return, not an exact loss bound.
+  if (pos.strategy_group_capital_verified === false) return null;
   // A blended leg basis is not a denominator. Gate 3 sizes the 2.5% bankroll
   // cap off this amount, and neither the max risk nor the net debit of a
   // partially rolled structure was ever actually paid (T-253).
