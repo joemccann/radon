@@ -9491,8 +9491,10 @@ Red GitHub evidence: d884b356 CIjob115599207114, 5 failed/2539passed. Corrected 
 
 # Mobile Preferences scrolling
 Dependency graph: T1 -> T2 -> T3 -> T4; T1 -> T3.
-- [ ] T1 depends_on: [] Trace mobile profile scroll ownership and clipped settings groups.
-- [ ] T2 depends_on: [T1] Add browser regression for scrolling all Preferences/Keys controls without writes.
-- [ ] T3 depends_on: [T1, T2] Fix scoped layout and preserve fixed profile actions/navigation.
+- [x] T1 depends_on: [] Trace mobile profile scroll ownership and clipped settings groups.
+- [x] T2 depends_on: [T1] Add browser regression for scrolling all Preferences/Keys controls without writes.
+- [x] T3 depends_on: [T1, T2] Fix scoped layout and preserve fixed profile actions/navigation.
 - [ ] T4 depends_on: [T2, T3] GitHub red/green, mobile screenshots, exact-head green PR and Pushover.
 No local test suites. Preserve unrelated work; use synthetic account/preferences/credentials.
+
+Red evidence: 1ad955ea GitHub38634078736, focusedCSS regression failed1(1312passed), browserjob116092819596 reproducedmobilecard clipping beforefix. Apply5line mobilechildsizing correction and reverifylatesthead.
