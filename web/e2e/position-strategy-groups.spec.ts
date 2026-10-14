@@ -99,9 +99,9 @@ async function assertSplit(page: Page) {
   await valueInColumn(spread, "Qty", "60");
   await valueInColumn(put, "Qty", "50");
   await valueInColumn(spread, "Initial Value", "$42,000");
-  await valueInColumn(put, "Initial Value", "-$44,386");
+  await valueInColumn(put, "Initial Value", "$-44,386");
   await valueInColumn(spread, "Market Value", "$31,800");
-  await valueInColumn(put, "Market Value", "-$50,000");
+  await valueInColumn(put, "Market Value", "$-50,000");
 }
 
 async function openGrouping(page: Page) {

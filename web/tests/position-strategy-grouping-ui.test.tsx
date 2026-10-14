@@ -39,6 +39,39 @@ function open() {
 }
 
 describe("strategy grouping interaction boundaries", () => {
+  it("closes the preview on Escape bubbling from its focused Apply button without applying", () => {
+    const state = controls();
+    render(<PositionStrategyGrouping position={source()} controls={state} />);
+    const dialog = open();
+    fireEvent.click(dialog.getByRole("button", { name: /^Suggested split/ }));
+    const apply = dialog.getByRole("button", { name: "Apply grouping" });
+    apply.focus();
+    // Dispatch at the real focused portal descendant, never directly at window.
+    fireEvent.keyDown(apply, { key: "Escape", bubbles: true });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(state.apply).not.toHaveBeenCalled();
+  });
+
+  it("lets Tab and Shift+Tab from an editor input reach the shared focus trap", () => {
+    const state = controls();
+    render(<PositionStrategyGrouping position={source()} controls={state} />);
+    const dialog = open();
+    fireEvent.click(dialog.getByRole("button", { name: /^Edit strategies/ }));
+    const panel = screen.getByRole("dialog");
+    // jsdom has no layout; mark the rendered controls as visible for the trap.
+    for (const element of panel.querySelectorAll<HTMLElement>("button,input,select")) {
+      Object.defineProperty(element, "offsetParent", { configurable: true, value: document.body });
+    }
+    const input = dialog.getByRole("textbox", { name: "Strategy name 1" });
+    input.focus();
+    fireEvent.keyDown(input, { key: "Tab", bubbles: true });
+    expect(document.activeElement).toBe(dialog.getByRole("button", { name: "Add strategy" }));
+    input.focus();
+    fireEvent.keyDown(input, { key: "Tab", shiftKey: true, bubbles: true });
+    expect(document.activeElement).toBe(dialog.getByRole("button", { name: "Close grouping" }));
+    expect(state.apply).not.toHaveBeenCalled();
+  });
+
   it("previews complete suggested financial rows and cancels without applying", () => {
     const position = source();
     const state = controls();

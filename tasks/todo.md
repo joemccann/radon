@@ -9501,3 +9501,5 @@ Acceptance: AAOI60longC105+60shortC140 ->60unit bullcall; 50shortP90 ->shortput.
 Contract: layout-only local browser preferences scoped by account and exact held contracts. Missing account identifiers stay memory-only. Project only display rows in PortfolioSections; pass canonical portfolio to details/risk and keep account totals unchanged. All three entry flows share verified preview/apply; global Undo remains discoverable after rows move risk sections.
 
 Verification: browser-onlye7586211 head reproduced7failures atmissing Groupstrategies controls (job115988704688). Static typecheck/lintgreen; model30casesprepared; independent financial review fixedcanonicalnavigation and exact-vs-labeled-entry-valuecapital distinction. No local suites.
+
+T4 repair review: 3516c17d GitHub run38606924428 passed40model/persistence/UI cases and coverage gates; browser2mobile cases passed,5failed. Replanned T4: preserve financial display formatting assertions, permit Escape/Tab to reach shared portal keyboard chrome, add2real-bubbling regressions, republish and reverify exact head. No local suites.

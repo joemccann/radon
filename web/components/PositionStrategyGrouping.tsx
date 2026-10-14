@@ -74,7 +74,7 @@ export default function PositionStrategyGrouping({ position, controls, prices }:
   const title = mode === "editor" ? `Edit ${source.ticker} strategies`
     : mode === "manual" ? `Select ${source.ticker} legs`
     : mode === "preview" ? `Preview ${source.ticker} grouping` : `Group ${source.ticker} strategies`;
-  return <span className="strategy-group-control" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
+  return <span className="strategy-group-control" onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") event.stopPropagation(); }}>
     <button type="button" className="strategy-group-trigger" aria-label={`Group strategies for ${source.ticker}`} aria-haspopup="dialog" aria-expanded={mode != null}
       onClick={event => {
         const box = event.currentTarget.getBoundingClientRect();
