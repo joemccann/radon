@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { useTickerDetail } from "@/lib/TickerDetailContext";
 import { isDeckKey, legacyTabToDeck, type DeckKey } from "@/lib/legacyTabToDeck";
+import { tickerHref } from "@/lib/tickerRoute";
 import type { DepthBook, PriceData, Trade } from "@/lib/pricesProtocol";
 import TickerDetailContent from "./TickerDetailContent";
 
@@ -63,7 +64,7 @@ export default function TickerWorkspace({
       params.set("deck", deck);
     }
     const qs = params.toString();
-    router.replace(`/${ticker}${qs ? `?${qs}` : ""}`, { scroll: false });
+    router.replace(`${tickerHref(ticker)}${qs ? `?${qs}` : ""}`, { scroll: false });
   }, [router, ticker, searchParams]);
 
   // Cross-track contract: TickerDetailContent's signature still takes
