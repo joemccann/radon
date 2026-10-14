@@ -1,6 +1,6 @@
 import type { PortfolioLeg, PortfolioPosition } from "@/lib/types";
 import { resolvePositionTradeTarget } from "@/lib/order/positionTrade";
-import { getLegMultiplier } from "@/lib/positionUtils";
+import { getLegMultiplier, isMixedAgeCombo } from "@/lib/positionUtils";
 
 /** Browser display preferences. They never describe an executable broker order. */
 export type StrategyGroup = { id: string; name: string; legIds: string[] };
@@ -132,6 +132,9 @@ export function projectStrategyGroups(source: PortfolioPosition, value: unknown)
     const indices = group.legIds.map(id => identities.find(leg => leg.id === id)!.index);
     const row = resolvePositionTradeTarget(source, { kind: "legs", indices });
     if (!row) return null;
+    // Basis can become homogeneous after splitting an overnight/session mix,
+    // while its original entry-date stamp still describes the combined holding.
+    row.strategy_group_mixed_age = isMixedAgeCombo(source);
     const expiries = new Set(row.legs.map(leg => expiryOf(source, leg)!));
     const expiry = [...expiries][0];
     row.expiry = expiries.size === 1 ? `${expiry.slice(0, 4)}-${expiry.slice(4, 6)}-${expiry.slice(6, 8)}` : "Mixed";

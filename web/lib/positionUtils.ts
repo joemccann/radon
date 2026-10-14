@@ -695,7 +695,7 @@ function parseDateOnly(rawDate: string | undefined): string | null {
  * but yesterday's close is still the overnight leg's baseline.
  */
 export function isMixedAgeCombo(pos: PortfolioPosition): boolean {
-  return hasBlendedLegBasis(pos);
+  return pos.strategy_group_mixed_age === true || hasBlendedLegBasis(pos);
 }
 
 /** True when the position was opened today. Yesterday's close is

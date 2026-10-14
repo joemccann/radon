@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { PriceData } from "../lib/pricesProtocol";
 import type { PortfolioPosition } from "../lib/types";
 import {
   defaultStrategyGroups, describeStrategyLegs, projectStrategyGroups,
   strategySourceIdentity, suggestStrategyGroups, validateStrategyGroups,
 } from "../lib/positionStrategyGroups";
-import { describeDisplayReturnBasis, getDisplayReturnPct, getPnlDollars, resolveDisplayReturnBasis, resolveReturnCapital } from "../lib/positionUtils";
+import { describeDisplayReturnBasis, getDisplayReturnPct, getPnlDollars, getTodayPnlDollars, isSameDay, resolveDisplayReturnBasis, resolveLegPnl, resolveReturnCapital } from "../lib/positionUtils";
 
 function aaoi(): PortfolioPosition {
   return {
@@ -162,4 +163,65 @@ describe("display-only strategy partition", () => {
     expect(row).toEqual(source);
     expect(row).not.toBe(source);
   });
+
+  it.each(["2026-10-14", "2026-10-13"])("preserves mixed-age daily baselines when parent date is %s", entryDate => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-14T16:00:00Z"));
+    try {
+      const source = aaoi();
+      source.entry_date = entryDate;
+      source.basis_source = "mixed";
+      source.legs[2].basis_source = "session_fills";
+      source.ib_daily_pnl = 12345;
+      const quotes = mixedAgeQuotes();
+      const [spread, put] = projectStrategyGroups(source, suggestStrategyGroups(source))!;
+      expect(spread.basis_source).toBe("ib");
+      expect(put.basis_source).toBe("session_fills");
+      expect(spread.strategy_group_mixed_age).toBe(true);
+      expect(put.strategy_group_mixed_age).toBe(true);
+      expect(isSameDay(spread)).toBe(false);
+      expect(resolveLegPnl(spread, spread.legs[0], quotes).todayBasis).toBe("previous-close");
+      expect(resolveLegPnl(put, put.legs[0], quotes).todayBasis).toBe("entry");
+      expect(getTodayPnlDollars(spread, quotes)).toBe(7800);
+      expect(getTodayPnlDollars(put, quotes)).toBe(-5614);
+      expect(getTodayPnlDollars(spread, quotes)! + getTodayPnlDollars(put, quotes)!).toBe(
+        getTodayPnlDollars({ ...source, ib_daily_pnl: null }, quotes),
+      );
+      expect(getTodayPnlDollars(source, quotes)).toBe(12345);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["close", "current"])("keeps a grouped mixed-age daily sum unavailable when %s is missing", missing => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-14T16:00:00Z"));
+    try {
+      const source = aaoi();
+      source.entry_date = "2026-10-14";
+      source.basis_source = "mixed";
+      source.legs[2].basis_source = "session_fills";
+      const quotes = mixedAgeQuotes();
+      if (missing === "close") quotes.AAOI_20261120_105_C.close = null;
+      else {
+        source.legs[0].market_price = null;
+        quotes.AAOI_20261120_105_C.last = null;
+      }
+      const [spread] = projectStrategyGroups(source, suggestStrategyGroups(source))!;
+      expect(getTodayPnlDollars(spread, quotes)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
+
+function mixedAgeQuotes(): Record<string, PriceData> {
+  return Object.fromEntries([
+    ["AAOI_20261120_105_C", 7.2, 6.5],
+    ["AAOI_20261120_140_C", 1.9, 2.5],
+    ["AAOI_20261120_90_P", 10, 8],
+  ].map(([symbol, last, close]) => [symbol, {
+    symbol, last, close, bid: null, ask: null, lastIsCalculated: false,
+    timestamp: "2026-10-14T16:00:00Z",
+  } as PriceData]));
+}
