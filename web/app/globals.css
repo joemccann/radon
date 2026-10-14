@@ -21555,6 +21555,11 @@ body[data-mobile="true"] .content:has(.profile-surface--mobile) {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
+/* Settings cards must retain their content height inside this scrollport.
+   Shrinking overflow-hidden cards clips their controls instead of scrolling. */
+.profile-surface--mobile > .preferences-shell > * {
+  flex-shrink: 0;
+}
 /* Four uppercase labels + counts overflow ~390px. Keep full words and
    scroll the strip instead of shrink-clipping BOOKMARKS. Same recipe as
    scanner mode tabs: overflow-x + snap, items no-shrink nowrap. */
