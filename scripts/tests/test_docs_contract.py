@@ -2160,3 +2160,12 @@ class TestDocumentation20261014:
         assert "resolveLegPnl" in legs
         assert "absolute opening value" in legs
         assert "not return on risk capital" in legs
+
+    def test_modify_subset_close_uses_held_basis(self):
+        modal = (_ROOT / "web/components/ModifyOrderModal.tsx").read_text()
+        assert "function findHeldSubsetForClose" in modal
+        assert "resolvePositionTradeTarget" in modal
+        close = (_ROOT / "web/CLAUDE.md").read_text().split("**Close-out branch.**", 1)[1].split("\n6. ", 1)[0]
+        assert "findHeldSubsetForClose" in close
+        assert "subset of a larger grouped position" in close
+        assert "opening-risk preview" in close
