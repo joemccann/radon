@@ -86,3 +86,30 @@ describe("MobileTickerSearch", () => {
     expect(new URL(pushed, "https://app.radon.run").origin).toBe("https://app.radon.run");
   });
 });
+
+describe("root-path ticker sinks", () => {
+  it("interpolate no ticker into a root path outside the chokepoint", async () => {
+    const { readdir, readFile } = await import("node:fs/promises");
+    const path = await import("node:path");
+    const root = path.resolve(__dirname, "..");
+    const roots = ["app", "components", "lib"];
+    // Matches any `/${…}` inside a template literal that starts a path.
+    const RAW_ROOT_PATH = /`\/\$\{(?![^}]*(?:encodeURIComponent|tickerHref))[^}]*\}/;
+    const offenders: string[] = [];
+    async function walk(dir: string) {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) { await walk(full); continue; }
+        if (!/\.tsx?$/.test(entry.name)) continue;
+        const source = await readFile(full, "utf8");
+        for (const [i, line] of source.split("\n").entries()) {
+          if (!RAW_ROOT_PATH.test(line)) continue;
+          if (!/\b(href|router\.(push|replace))\b/.test(line)) continue;
+          offenders.push(`${path.relative(root, full)}:${i + 1}`);
+        }
+      }
+    }
+    await Promise.all(roots.map((dir) => walk(path.join(root, dir))));
+    expect(offenders).toEqual([]);
+  });
+});

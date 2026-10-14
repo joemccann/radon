@@ -162,7 +162,7 @@ export default function ScannerHero() {
             return (
               <Link
                 key={`${row.ticker}:${row.expiry}`}
-                href={volConeOrderHref(row) ?? `/${row.ticker}`}
+                href={volConeOrderHref(row) ?? tickerHref(row.ticker)}
                 className="signals-hero__row signals-hero__row--cone"
                 role="row"
                 aria-label={ariaLabel ?? undefined}
