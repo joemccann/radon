@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-10-12T09:00:05Z",
-  "node_count": 3859,
-  "edge_count": 7905,
+  "generated_at": "2026-10-14T09:00:07Z",
+  "node_count": 3925,
+  "edge_count": 8020,
   "areas": {
-    "web": 2205,
+    "web": 2258,
     "site": 159,
-    "scripts": 1344,
-    "cloud": 104,
+    "scripts": 1356,
+    "cloud": 105,
     "lib": 28,
     "tests": 17,
     "tools": 2
@@ -20,12 +20,12 @@
     {
       "id": "web/components",
       "area": "web",
-      "count": 273
+      "count": 275
     },
     {
       "id": "web/e2e",
       "area": "web",
-      "count": 223
+      "count": 233
     },
     {
       "id": "web/e2e-setup-gate",
@@ -40,7 +40,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 428
+      "count": 432
     },
     {
       "id": "web/public",
@@ -60,7 +60,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 1027
+      "count": 1064
     },
     {
       "id": "site/app",
@@ -115,7 +115,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 132
+      "count": 136
     },
     {
       "id": "scripts/backtest",
@@ -125,7 +125,7 @@
     {
       "id": "scripts/ci",
       "area": "scripts",
-      "count": 5
+      "count": 6
     },
     {
       "id": "scripts/clients",
@@ -205,7 +205,7 @@
     {
       "id": "scripts/research",
       "area": "scripts",
-      "count": 28
+      "count": 31
     },
     {
       "id": "scripts/security",
@@ -220,7 +220,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 700
+      "count": 704
     },
     {
       "id": "scripts/trade_blotter",
@@ -255,7 +255,7 @@
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 91
+      "count": 92
     },
     {
       "id": "lib/tools",
@@ -282,36 +282,43 @@
     {
       "id": "web/lib/types.ts",
       "area": "web",
-      "in": 282,
+      "in": 295,
       "out": 1,
       "test": false
     },
     {
       "id": "web/lib/pricesProtocol.ts",
       "area": "web",
-      "in": 200,
+      "in": 203,
       "out": 0,
       "test": false
     },
     {
       "id": "web/lib/apiContracts.ts",
       "area": "web",
-      "in": 125,
+      "in": 126,
       "out": 0,
-      "test": false
-    },
-    {
-      "id": "web/lib/routeAccess.ts",
-      "area": "web",
-      "in": 98,
-      "out": 4,
       "test": false
     },
     {
       "id": "web/components/WorkspaceSections.tsx",
       "area": "web",
-      "in": 21,
-      "out": 81,
+      "in": 23,
+      "out": 84,
+      "test": false
+    },
+    {
+      "id": "web/lib/routeAccess.ts",
+      "area": "web",
+      "in": 99,
+      "out": 4,
+      "test": false
+    },
+    {
+      "id": "web/lib/radonApi.ts",
+      "area": "web",
+      "in": 99,
+      "out": 1,
       "test": false
     },
     {
@@ -329,23 +336,16 @@
       "test": false
     },
     {
-      "id": "web/lib/radonApi.ts",
-      "area": "web",
-      "in": 97,
-      "out": 1,
-      "test": false
-    },
-    {
       "id": "scripts/api/__init__.py",
       "area": "scripts",
-      "in": 93,
+      "in": 94,
       "out": 0,
       "test": false
     },
     {
       "id": "scripts/db/__init__.py",
       "area": "scripts",
-      "in": 91,
+      "in": 92,
       "out": 1,
       "test": false
     },
@@ -373,21 +373,21 @@
     {
       "id": "web/lib/db.ts",
       "area": "web",
-      "in": 62,
+      "in": 63,
       "out": 2,
       "test": false
     },
     {
       "id": "scripts/api/server.py",
       "area": "scripts",
-      "in": 48,
+      "in": 49,
       "out": 16,
       "test": false
     },
     {
       "id": "web/lib/positionUtils.ts",
       "area": "web",
-      "in": 59,
+      "in": 61,
       "out": 2,
       "test": false
     },
@@ -401,7 +401,7 @@
     {
       "id": "web/components/RegimePanel.tsx",
       "area": "web",
-      "in": 3,
+      "in": 4,
       "out": 57,
       "test": false
     },
@@ -448,17 +448,17 @@
       "test": false
     },
     {
+      "id": "web/components/ErrorToast.tsx",
+      "area": "web",
+      "in": 47,
+      "out": 1,
+      "test": false
+    },
+    {
       "id": "scripts/watchdog/__init__.py",
       "area": "scripts",
       "in": 47,
       "out": 0,
-      "test": false
-    },
-    {
-      "id": "web/components/ErrorToast.tsx",
-      "area": "web",
-      "in": 46,
-      "out": 1,
       "test": false
     },
     {
@@ -497,6 +497,20 @@
       "test": false
     },
     {
+      "id": "web/e2e/clear-fixtures.ts",
+      "area": "web",
+      "in": 29,
+      "out": 10,
+      "test": true
+    },
+    {
+      "id": "web/components/PositionTable.tsx",
+      "area": "web",
+      "in": 23,
+      "out": 15,
+      "test": false
+    },
+    {
       "id": "web/lib/refreshSchedule.ts",
       "area": "web",
       "in": 37,
@@ -504,16 +518,9 @@
       "test": false
     },
     {
-      "id": "web/components/PositionTable.tsx",
-      "area": "web",
-      "in": 22,
-      "out": 15,
-      "test": false
-    },
-    {
       "id": "scripts/api/auth.py",
       "area": "scripts",
-      "in": 36,
+      "in": 37,
       "out": 0,
       "test": false
     },
@@ -523,13 +530,6 @@
       "in": 34,
       "out": 2,
       "test": false
-    },
-    {
-      "id": "web/e2e/clear-fixtures.ts",
-      "area": "web",
-      "in": 26,
-      "out": 10,
-      "test": true
     },
     {
       "id": "web/components/ticker-detail/OrderTab.tsx",
