@@ -13,6 +13,7 @@ import { useWatchlist } from "@/lib/useWatchlist";
 import { ProposalCard } from "@/components/agent";
 import { buildScannerProposal } from "@/lib/agent/scannerProposal";
 import { formatExpiry } from "@/lib/optionsChainUtils";
+import { tickerHref } from "@/lib/tickerRoute";
 import type { ThetaHarvesterData, ThetaHarvesterEarnings, ThetaHarvesterLeg, ThetaHarvesterResult } from "@/lib/types";
 
 /** Sortable columns of the overhauled grid (Scanner Table Overhaul.dc.html). */
@@ -580,7 +581,7 @@ export default function ThetaHarvesterScanner({
           statement={proposal.statement}
           confidence={proposal.confidence}
           alternatives={proposal.alternatives}
-          onAccept={() => router.push(`/${proposal.ticker}`)}
+          onAccept={() => router.push(tickerHref(proposal.ticker))}
           onDismiss={() => setDismissedProposal(proposal.ticker)}
         />
       ) : null}

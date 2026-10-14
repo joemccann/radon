@@ -4,6 +4,7 @@ import { forwardRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import TickerSearch from "@/components/TickerSearch";
+import { tickerHref } from "@/lib/tickerRoute";
 
 type MobileTickerSearchProps = {
   open: boolean;
@@ -39,7 +40,7 @@ const MobileTickerSearch = forwardRef<HTMLInputElement, MobileTickerSearchProps>
 
   const handleSelect = (symbol: string) => {
     onClose();
-    router.push(`/${symbol.toUpperCase()}`);
+    router.push(tickerHref(symbol));
   };
 
   return (
