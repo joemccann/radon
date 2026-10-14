@@ -2169,3 +2169,40 @@ class TestDocumentation20261014:
         assert "findHeldSubsetForClose" in close
         assert "subset of a larger grouped position" in close
         assert "opening-risk preview" in close
+
+    def test_open_portfolio_poll_names_the_route_ceiling(self):
+        shell = (_ROOT / "web/components/WorkspaceShell.tsx").read_text()
+        match = re.search(r"MarketState\.OPEN \? ([\d_]+) : ([\d_]+)", shell)
+        assert match, "WorkspaceShell no longer states the open and off-hours poll"
+        open_ms = int(match.group(1).replace("_", ""))
+        off_ms = int(match.group(2).replace("_", ""))
+        assert "pollIntervalMs: accountPollIntervalMs" in shell
+        assert "useOrders(shouldAutoSyncOrders, accountPollIntervalMs)" in shell
+        route = (_ROOT / "web/app/api/portfolio/route.ts").read_text()
+        ceiling = re.search(r'key: "portfolio:route", limit: (\d+), windowMs: ([\d_]+)', route)
+        assert ceiling
+        limit = int(ceiling.group(1))
+        window_ms = int(ceiling.group(2).replace("_", ""))
+        orders = (_ROOT / "web/app/api/orders/route.ts").read_text()
+        get_fn = orders.split("export async function GET", 1)[1].split("export async function POST", 1)[0]
+        assert "rate:" not in get_fn
+        orders_hook = (_ROOT / "web/lib/useOrders.ts").read_text()
+        assert "const POLL_INTERVAL_MS = 30_000" in orders_hook
+        assert "const MAX_POLL_INTERVAL_MS = 5 * 60_000" in orders_hook
+        assert "POLL_INTERVAL_MS * 2 **" in orders_hook
+        section = (_ROOT / "web/CLAUDE.md").read_text().split(
+            "## Auto-sync is per-user rate-limited; tabs must not race it", 1
+        )[1].split("\n## ", 1)[0]
+        assert "MarketState.OPEN" in section
+        assert "2 seconds" in section
+        assert "30 seconds" in section
+        assert f"admits {limit} requests per {window_ms // 1000} seconds" in section
+        assert "portfolio:route" in section
+        assert "GET /api/orders" in section
+        assert "5 minutes" in section
+        asks_faster = window_ms // open_ms > limit
+        if asks_faster:
+            assert "more often than that route allows" in section
+        else:
+            assert "more often than that route allows" not in section
+        assert off_ms == 30_000
