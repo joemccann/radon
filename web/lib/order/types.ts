@@ -94,6 +94,12 @@ export interface OrderPresentationSummary {
   estimatedPnlPct?: number | null;
   estimatedPnlLabel?: string;
   /**
+   * Set when the order closes held inventory (declared by the surface or
+   * inferred by the chokepoint from the exact held contract). Surfaces use
+   * it to label the ticket "to close" instead of by opening structure.
+   */
+  closeOutAction?: "BUY" | "SELL" | null;
+  /**
    * Phase-1 margin-impact estimate. Optional/nullable so existing producers
    * may omit it; it rides inside the existing brand (no brand change). Only
    * populated by `useOrderRisk` when coverage is resolved AND a baseline
