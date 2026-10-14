@@ -194,7 +194,7 @@ function unavailablePortfolioResponse(
 export const radonCapability = { GET: "read", POST: "mutate.workspace" };
 
 export async function GET(request?: Request): Promise<Response> {
-  const access = await requireRouteAccess(request, { rate: { key: "portfolio:route", limit: 20, windowMs: 60_000 }, durableRateTier: "I" });
+  const access = await requireRouteAccess(request, { rate: { key: "portfolio:route", limit: 2000, windowMs: 60_000 }, durableRateTier: "I" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   // REL-245: demo principal implies demo DB. On a prod-marked TURSO_DB_URL
