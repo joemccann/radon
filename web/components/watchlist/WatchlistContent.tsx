@@ -10,6 +10,7 @@ import { fmtPrice } from "@/lib/positionUtils";
 import { useSort, type SortDirection } from "@/lib/useSort";
 import StarToggle from "@/components/StarToggle";
 import { formatShortDate, positionHoldingNotation } from "@/lib/traderNotation";
+import { tickerHref } from "@/lib/tickerRoute";
 
 type WatchlistContentProps = {
   prices?: Record<string, PriceData>;
@@ -205,7 +206,7 @@ export default function WatchlistContent({
 
   const handleOpen = useCallback(
     (symbol: string) => {
-      router.push(`/${symbol.toUpperCase()}`);
+      router.push(tickerHref(symbol));
     },
     [router],
   );
