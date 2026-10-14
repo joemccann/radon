@@ -160,12 +160,12 @@ IB recomputes `pos.avgCost` server-side on every fill including partial closes, 
 `open_basis` is also persisted per-row by `journal_rehydrate.py` since 4c85847; the lot-matcher prefers the persisted value when present and falls back to recomputation for older rows + rows written by the real-time daemon.
 
 ### Per-Leg P&L
-`Leg P&L = sign × (|MV| − |EC|)`. Sum = position P&L. Impl: `LegRow` in `PositionTable.tsx`.
+Dollar leg P&L is `marketValue - entryValue` from `resolveLegPnl`. Each side is `sign × |amount|`, so a short's credit and liability stay signed, and the legs sum to position P&L. The Return column's per-leg percentage is that dollar P&L divided by the leg's absolute opening value. It is not return on risk capital. Impl: `LegRow` in `PositionTable.tsx`.
 
 ### Open-position Return %
-`(MV − EC) / verified risk capital × 100`
+Risk-capital return (`getPnlPct`, `resolveReturnCapital`) is `(MV − EC) / verified risk capital × 100`. The denominator is exact positive `max_risk` for defined-risk; else broker-observed opening margin with full provenance (a bare projected what-if is invalid); debit paid only when it is demonstrably the full maximum loss (including long stock). Without that basis `getPnlPct` stays null. Never divide an opening credit by its absolute premium. Gate 3 and close-out math keep this basis.
 
-Denominator must be verified risk capital: exact positive `max_risk` for defined-risk; else broker-observed opening margin with full provenance (a bare projected what-if is invalid); debit paid only when it is demonstrably the full maximum loss (incl. long stock). Otherwise render Return as unavailable. Never divide an opening credit by its absolute premium.
+The Return column calls `getDisplayReturnPct`. It uses the verified basis when one exists. A multi-leg combo with no verified basis, no blended basis, and a positive signed net entry debit (`resolveLegPnlBasis`) shows return on that debit and labels it `Return on net entry debit`. A single leg, a nonpositive net debit, a missing leg entry, or a blended basis stays blank. That debit is measured opening value, not risk capital.
 
 ### Price Resolution
 

@@ -2139,3 +2139,24 @@ class TestDocumentation20261013:
         assert "weekly" in cell
         assert "source cadence stays monthly" in cell
         assert "staleness" in cell
+
+
+class TestDocumentation20261014:
+    """DOC-195..197: contracts that drifted after audited-through 35118b08."""
+
+    def test_display_return_is_not_only_verified_capital(self):
+        utils = (_ROOT / "web/lib/positionUtils.ts").read_text()
+        assert 'kind: "net-entry-debit"' in utils
+        assert "export function getDisplayReturnPct" in utils
+        assert "export function getPnlPct" in utils
+        claude = (_ROOT / "web/CLAUDE.md").read_text()
+        section = claude.split("### Open-position Return %", 1)[1].split("\n### ", 1)[0]
+        assert "Otherwise render Return as unavailable" not in section
+        assert "getPnlPct" in section
+        assert "getDisplayReturnPct" in section
+        assert "Return on net entry debit" in section
+        assert "not risk capital" in section
+        legs = claude.split("### Per-Leg P&L", 1)[1].split("\n### ", 1)[0]
+        assert "resolveLegPnl" in legs
+        assert "absolute opening value" in legs
+        assert "not return on risk capital" in legs
