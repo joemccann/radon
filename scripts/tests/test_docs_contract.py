@@ -2173,3 +2173,64 @@ class TestDocumentation20261015:
             assert adding in close
         else:
             assert adding not in close
+
+    def test_open_portfolio_poll_stays_inside_the_get_budget(self):
+        shell = (_ROOT / "web/components/WorkspaceShell.tsx").read_text()
+        match = re.search(r"MarketState\.OPEN \? ([\d_]+) : ([\d_]+)", shell)
+        assert match, "WorkspaceShell no longer states the open and off-hours poll"
+        open_ms = int(match.group(1).replace("_", ""))
+        off_ms = int(match.group(2).replace("_", ""))
+        assert "pollIntervalMs: accountPollIntervalMs" in shell
+        assert "useOrders(shouldAutoSyncOrders, accountPollIntervalMs)" in shell
+        route = (_ROOT / "web/app/api/portfolio/route.ts").read_text()
+        ceiling = re.search(
+            r'key: "portfolio:route", limit: (\d+), windowMs: ([\d_]+)',
+            route,
+        )
+        assert ceiling
+        limit = int(ceiling.group(1))
+        window_ms = int(ceiling.group(2).replace("_", ""))
+        orders = (_ROOT / "web/app/api/orders/route.ts").read_text()
+        get_fn = orders.split("export async function GET", 1)[1].split(
+            "export async function POST", 1
+        )[0]
+        assert "rate:" not in get_fn
+        orders_hook = (_ROOT / "web/lib/useOrders.ts").read_text()
+        poll_ms = int(
+            re.search(r"const POLL_INTERVAL_MS = ([\d_]+)", orders_hook)
+            .group(1)
+            .replace("_", "")
+        )
+        assert "const MAX_POLL_INTERVAL_MS = 5 * 60_000" in orders_hook
+        assert "failureStreakRef.current += 1" in orders_hook
+        assert "POLL_INTERVAL_MS * 2 ** failureStreakRef.current" in orders_hook
+        portfolio_hook = (_ROOT / "web/lib/usePortfolio.ts").read_text()
+        assert "retryDelayMs = POLL_INTERVAL_MS" in portfolio_hook
+        section = re.sub(
+            r"\s+",
+            " ",
+            (_ROOT / "web/CLAUDE.md").read_text().split(
+                "## Auto-sync is per-user rate-limited; tabs must not race it", 1
+            )[1].split("\n## ", 1)[0],
+        )
+        assert "MarketState.OPEN" in section
+        assert f"{open_ms // 1000} seconds" in section
+        assert f"{off_ms // 1000} seconds" in section
+        assert f"admits {limit} requests per {window_ms // 1000} seconds" in section
+        assert "portfolio:route" in section
+        assert "GET /api/orders" in section
+        assert "not on that bucket" in section
+        per_tab = window_ms // open_ms
+        if per_tab > limit:
+            assert "more often than that route allows" in section
+            assert "stays inside that budget" not in section
+        else:
+            assert "stays inside that budget" in section
+            assert "more often than that route allows" not in section
+        assert f"{poll_ms // 1000}-second hook constant" in section
+        assert "does not keep the 2-second pace" in section
+        first_wait_s = min(5 * 60, (poll_ms * 2) // 1000)
+        assert f"first failure waits {first_wait_s} seconds" in section
+        assert "5 minutes" in section
+        assert "does not adopt the 2-second interval" in section
+        assert off_ms == 30_000
