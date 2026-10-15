@@ -1008,3 +1008,9 @@ Exact-head CI repair (2026-10-07): initial scripts-df gate reported 1 failed / 1
 | ID | Status | Red / green evidence | Change |
 |---|---|---|---|
 | REL-323 / R-734 | DONE | RED 2 failed / 1 passed; GREEN 12 passed (pending + 429 + edge-budget + portfolio pending) | `useOrders` honors `X-Sync-Pending` and opaque Caddy 502/504 the same way `usePortfolio` does: schedule a 10s snapshot re-read instead of treating an in-flight IB refresh as `Sync failed`. Shared `SYNC_PENDING_REPOLL_MS` lives in `edgeBudget.ts`. No placement, halt, or broker path changed. Vitest ran locally; full pytest, cloud/tests, remaining Vitest and the order-idempotency drill stay on PR CI. |
+
+## Nightly remediation 2026-10-15
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-325 / R-736 | DONE | RED 1 failed / 25 passed; GREEN 42 passed (chokepoint + chain close + correlation banner) | Gate 3 reads the resolved `closeOutAction` as well as a declared `closeOut`. A chain sell of the exact held contract no longer renders as an add inside a breached cluster. Quantity above the holding still does. No placement, halt, or broker path changed. |
