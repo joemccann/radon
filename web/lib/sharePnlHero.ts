@@ -25,27 +25,44 @@ export const SHARE_PNL_CANVAS: Record<SharePnlFormat, { width: number; height: n
 };
 
 /**
- * Longest query-supplied string the card lays out. The 1200x630 plate shows
- * roughly 90 characters of 24px IBM Plex Mono on its description line and the
- * story frame roughly 40 at 44px, so 120 is already past anything either
- * canvas can display. Beyond it a caller is only buying satori layout time on
- * the process that also serves the trading UI (R-310).
+ * Cost bound on a query-supplied string, not a display bound — the 1200x630
+ * plate only shows ~74 characters of 24px IBM Plex Mono, but the app's own
+ * widest description (a mixed-expiry 5-leg close) runs to ~145, and a card
+ * must never drop a leg of the structure it reports. 400 leaves that headroom
+ * while staying three orders of magnitude below the multi-kilobyte strings
+ * that made one anonymous request cost ~100x a real render (R-310).
  */
-export const SHARE_PNL_MAX_TEXT_CHARS = 120;
+export const SHARE_PNL_MAX_TEXT_CHARS = 400;
 
 /**
  * The one gate every query-supplied string passes through on its way into the
- * render tree: control characters out (they carry no glyph and can break line
- * layout), then a hard character cap with an ellipsis so a truncated card
- * still reads as truncated.
+ * render tree. Two bounds, because the renderer charges for both:
+ *
+ *  - CHARACTER CLASS. `next/og` always installs satori's
+ *    `loadAdditionalAsset`, so any grapheme the bundled faces cannot resolve
+ *    sends the render to cdn.jsdelivr.net (emoji) or fonts.googleapis.com
+ *    (every other script) mid-layout and caches the result in a process-wide
+ *    Map keyed on the caller's own text. The bundled IBMPlexMono subsets
+ *    carry 229 code points and all of printable ASCII is among them, so
+ *    keeping only printable ASCII means no card can be made to fetch
+ *    anything. Dropping by code point also means a truncation can never split
+ *    a surrogate pair.
+ *  - LENGTH. Everything that survives is capped, with an ellipsis (U+2026,
+ *    which the faces do carry) so a truncated card reads as truncated.
  */
 export function clampCardText(
   value: string,
   maxChars: number = SHARE_PNL_MAX_TEXT_CHARS,
 ): string {
-  const printable = value.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim();
-  if (printable.length <= maxChars) return printable;
-  return `${printable.slice(0, maxChars - 1)}\u2026`;
+  const renderable = Array.from(value)
+    .map((ch) => {
+      const cp = ch.codePointAt(0) ?? 0;
+      return cp >= 0x20 && cp <= 0x7e ? ch : " ";
+    })
+    .join("")
+    .trim();
+  if (renderable.length <= maxChars) return renderable;
+  return `${renderable.slice(0, maxChars - 1)}\u2026`;
 }
 
 export function parseSharePnlFormat(value: string | null): SharePnlFormat {

@@ -120,7 +120,8 @@ export async function GET(request: Request) {
     // Every string below is attacker-chosen: this route is in
     // PUBLIC_SHARE_API_ROUTES, so an anonymous caller picks what satori lays
     // out. Clamp at the renderer entry, once (R-310).
-    const description = clampCardText(searchParams.get("description") ?? "");
+    const descriptionRaw = searchParams.get("description") ?? "";
+    const description = clampCardText(descriptionRaw);
     const pnlRaw = searchParams.get("pnl");
     const pnl = pnlRaw != null ? parseFloat(pnlRaw) : null;
     const pnlPctRaw = searchParams.get("pnlPct");
@@ -141,7 +142,10 @@ export async function GET(request: Request) {
     const time = clampCardText(searchParams.get("time") ?? "");
     const format = parseSharePnlFormat(searchParams.get("format"));
 
-    if (!description) {
+    // Gate on the RAW parameter: a whitespace-only contract description reaches
+    // this route from the blotter share path and has always rendered a card
+    // with an empty description line, not a 400.
+    if (!descriptionRaw) {
       return new Response("Missing description", { status: 400 });
     }
 
