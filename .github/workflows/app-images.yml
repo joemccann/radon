@@ -36,8 +36,55 @@ jobs:
         run: |
           set -euo pipefail
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Hash python image inputs
+        id: image-inputs
+        # A non-zero hash is fail-closed: reuse stays a miss and the build
+        # below runs. Web-only commits that do not touch these inputs keep
+        # the same digest (run 38597907211 still exported a 53.9s tarball).
+        run: |
+          set -euo pipefail
+          if hash="$(python3 scripts/ci/python_image_inputs.py)"; then
+            echo "hash=${hash}" >> "$GITHUB_OUTPUT"
+            echo "tag=ghcr.io/joemccann/radon-python:ihash-${hash}" >> "$GITHUB_OUTPUT"
+          else
+            echo "hash=" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "python image input hash refused; building"
+          fi
+      - name: Reuse identical python image
+        id: reuse
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          source="${{ steps.image-inputs.outputs.tag }}"
+          sha_tag="ghcr.io/joemccann/radon-python:${{ github.sha }}"
+          latest_tag="ghcr.io/joemccann/radon-python:latest"
+          if [ -z "$source" ]; then
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            echo "python image input hash unavailable; building"
+            exit 0
+          fi
+          if ! printf '%s\n' "$source" | grep -Eq '^ghcr.io/joemccann/radon-python:ihash-[0-9a-f]{64}$'; then
+            echo "refusing an input-hash tag outside radon-python:ihash-<64 hex>" >&2
+            exit 1
+          fi
+          if ! docker buildx imagetools inspect "$source" >/dev/null 2>&1; then
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            echo "no smoked image for ${source}; building"
+            exit 0
+          fi
+          source_raw="$(docker buildx imagetools inspect "$source" --raw | sha256sum | awk 'NR==1 { print $1 }')"
+          docker buildx imagetools create -t "$sha_tag" -t "$latest_tag" "$source"
+          dest_raw="$(docker buildx imagetools inspect "$sha_tag" --raw | sha256sum | awk 'NR==1 { print $1 }')"
+          if [ -z "$source_raw" ] || [ "$source_raw" != "$dest_raw" ]; then
+            echo "retagged manifest bytes do not match the input-hash image" >&2
+            exit 1
+          fi
+          echo "hit=true" >> "$GITHUB_OUTPUT"
+          echo "reused ${source} as ${sha_tag}"
       - name: Select image cache
         id: image-cache
+        if: steps.reuse.outputs.hit != 'true'
         env:
           IMAGE_REPO: ghcr.io/joemccann/radon-python
           GHA_SCOPE: radon-python
@@ -69,6 +116,7 @@ jobs:
             } >> "$GITHUB_OUTPUT"
           fi
       - name: Build and publish python image
+        if: steps.reuse.outputs.hit != 'true'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -83,12 +131,27 @@ jobs:
           cache-to: ${{ steps.image-cache.outputs.cache_to }}
           provenance: false
       - name: Smoke hardened Python browser runtime
+        if: steps.reuse.outputs.hit != 'true'
         run: |
           docker run --rm --pull=never --init --user 1000:1000 --network none \
             --cap-drop ALL --security-opt no-new-privileges \
             --entrypoint python \
             ghcr.io/joemccann/radon-python:${{ github.sha }} \
             -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); browser = p.chromium.launch(headless=True); page = browser.new_page(); page.set_content('<title>radon-browser-smoke</title>'); assert page.title() == 'radon-browser-smoke'; browser.close(); p.stop()"
+      - name: Record python image input hash
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.reuse.outputs.hit != 'true'
+        run: |
+          set -euo pipefail
+          tag="${{ steps.image-inputs.outputs.tag }}"
+          sha_tag="ghcr.io/joemccann/radon-python:${{ github.sha }}"
+          if ! printf '%s\n' "$tag" | grep -Eq '^ghcr.io/joemccann/radon-python:ihash-[0-9a-f]{64}$'; then
+            echo "::warning title=python image index::input-hash tag was not recorded; the next identical commit will rebuild"
+            exit 0
+          fi
+          if ! docker buildx imagetools create -t "$tag" "$sha_tag"; then
+            echo "::warning title=python image index::input-hash tag was not recorded; the next identical commit will rebuild"
+            exit 0
+          fi
 
   node-image:
     name: Build node image

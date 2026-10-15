@@ -1,0 +1,180 @@
+"""CIP-020: a main push whose Python image inputs are unchanged must retag
+the already-smoked digest instead of exporting that image again.
+
+Run 38597907211 built a fully cached python image for a web-only commit,
+spent 53.9s sending the docker tarball, and that job closed the deploy
+gates. The hardened smoke stays on the build path. The reuse path may
+publish only a digest recorded after that smoke.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import subprocess
+import textwrap
+from pathlib import Path
+
+import pytest
+import yaml
+
+REPO = Path(__file__).resolve().parents[2]
+WORKFLOW = REPO / ".github" / "workflows" / "app-images.yml"
+DOCKERFILE = REPO / "docker" / "app" / "Dockerfile.python"
+DOCKERIGNORE = REPO / "docker" / "app" / ".dockerignore"
+HASHER = REPO / "scripts" / "ci" / "python_image_inputs.py"
+DEPLOY_FILES = (
+    REPO / "cloud" / "scripts" / "deploy.sh",
+    REPO / "cloud" / "scripts" / "deploy-root-helper.sh",
+    REPO / "cloud" / "scripts" / "radon-app-runtime.sh",
+)
+def _python_job() -> dict:
+    jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    return jobs["python-image"]
+
+
+def _step(name: str) -> dict:
+    for step in _python_job()["steps"]:
+        if step.get("name") == name:
+            return step
+    raise AssertionError(f"missing step {name}")
+
+
+def _run(step_name: str) -> str:
+    return _step(step_name)["run"]
+
+
+def test_reuse_step_retags_only_an_input_hash_manifest() -> None:
+    reuse = _step("Reuse identical python image")
+    script = reuse["run"]
+    assert "github.ref == 'refs/heads/main'" in reuse["if"]
+    assert "github.event_name == 'push'" in reuse["if"]
+    assert "docker buildx imagetools inspect" in script
+    assert "docker buildx imagetools create" in script
+    assert "docker tag " not in script
+    assert "docker push " not in script
+    assert "docker build " not in script
+    assert "buildcache" not in script
+    assert "radon-python:ihash-" in script
+    assert "radon-python:${{ github.sha }}" in script
+    assert "radon-python:latest" in script
+    assert "hit=false" in script
+    assert "hit=true" in script
+    assert "manifest bytes do not match" in script
+
+
+def test_build_and_hardened_smoke_run_only_on_a_miss() -> None:
+    steps = _python_job()["steps"]
+    build_index = next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("uses", "").startswith("docker/build-push-action@")
+    )
+    build = steps[build_index]
+    smoke = steps[build_index + 1]
+    assert build["with"]["load"] is True
+    assert build["if"] == "steps.reuse.outputs.hit != 'true'"
+    assert smoke["if"] == "steps.reuse.outputs.hit != 'true'"
+    assert "docker run" in smoke["run"]
+    assert "--pull=never" in smoke["run"]
+    assert "--cap-drop ALL" in smoke["run"]
+    assert "--network none" in smoke["run"]
+    assert "ghcr.io/joemccann/radon-python:${{ github.sha }}" in smoke["run"]
+    record = steps[build_index + 2]
+    assert record["name"] == "Record python image input hash"
+    assert "steps.reuse.outputs.hit != 'true'" in record["if"]
+    assert "github.event_name == 'push'" in record["if"]
+    assert "docker buildx imagetools create" in record["run"]
+    # The index write is not a deploy gate. A registry hiccup must not
+    # block a release whose SHA tag is already pushed and smoked.
+    assert "input-hash tag was not recorded" in record["run"]
+    assert record["run"].strip().endswith("exit 0") or "exit 0" in record["run"]
+
+
+def test_deploy_paths_do_not_pull_the_input_hash_tag() -> None:
+    for path in DEPLOY_FILES:
+        text = path.read_text(encoding="utf-8")
+        assert "ihash-" not in text, path.name
+        assert "buildcache" not in text, path.name
+
+
+def _load_hasher():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("python_image_inputs", HASHER)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_hasher_matches_dockerfile_copies_and_ignores_tests() -> None:
+    assert HASHER.is_file()
+    module = _load_hasher()
+    files = module.input_files(REPO)
+    assert DOCKERFILE.relative_to(REPO).as_posix() in files
+    assert DOCKERIGNORE.relative_to(REPO).as_posix() in files
+    assert "requirements.txt" in files
+    assert "scripts/requirements-api.txt" in files
+    assert any(path.startswith("scripts/") and "/tests/" not in path for path in files)
+    assert not any(
+        path.startswith("scripts/tests/") or path.startswith("scripts/api/tests/")
+        for path in files
+    )
+    assert "web/public/fonts/Inter-Variable.woff2" in files
+    assert "web/public/fonts/IBMPlexMono-400.woff2" in files
+    assert "web/lib/order/types.ts" not in files
+    blob = {path: (REPO / path).read_bytes() for path in files}
+    digest = module.hash_files(blob)
+    assert len(digest) == 64
+    int(digest, 16)
+    assert module.hash_files(dict(blob)) == digest
+    changed = dict(blob)
+    changed["requirements.txt"] = changed["requirements.txt"] + b"\n"
+    assert module.hash_files(changed) != digest
+
+
+def test_unknown_dockerignore_pattern_fails_closed(tmp_path: Path) -> None:
+    module = _load_hasher()
+    broken = tmp_path / "Dockerfile.python"
+    broken.write_text(DOCKERFILE.read_text(encoding="utf-8"), encoding="utf-8")
+    ignore = tmp_path / ".dockerignore"
+    ignore.write_text(DOCKERIGNORE.read_text(encoding="utf-8") + "\n**/*.pyc\n", encoding="utf-8")
+    with pytest.raises(module.InputHashError, match="dockerignore"):
+        module.input_files_from(broken, ignore, REPO)
+
+
+def test_unparsed_copy_fails_closed(tmp_path: Path) -> None:
+    module = _load_hasher()
+    dockerfile = tmp_path / "Dockerfile.python"
+    dockerfile.write_text(
+        textwrap.dedent(
+            """
+            FROM python:3.13.16-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f
+            COPY requirements.txt ./requirements.txt
+            COPY scripts/*.py ./scripts/
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    ignore = tmp_path / ".dockerignore"
+    ignore.write_text(DOCKERIGNORE.read_text(encoding="utf-8"), encoding="utf-8")
+    with pytest.raises(module.InputHashError, match="COPY"):
+        module.input_files_from(dockerfile, ignore, REPO)
+
+
+def test_cli_fails_closed_on_unknown_pattern(tmp_path: Path) -> None:
+    """The workflow treats a non-zero hasher exit as a cache miss."""
+    completed = subprocess.run(
+        ["python3", str(HASHER), "--self-check"],
+        cwd=REPO,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert len(completed.stdout.strip()) == 64
+    # Stable across two calls.
+    again = subprocess.check_output(["python3", str(HASHER)], cwd=REPO, text=True).strip()
+    assert again == completed.stdout.strip()
+    assert hashlib.sha256(again.encode()).hexdigest()
