@@ -1221,6 +1221,143 @@ def test_transport_http_rejection_never_archives_body(tmp_path):
     assert not list(tmp_path.iterdir())
 
 
+def _eia_hour_body():
+    # One completed hour. parse_eia drops hours that end after fetched_at.
+    return {
+        "response": {
+            "total": 1,
+            "data": [
+                {
+                    "period": "2026-10-14T12",
+                    "parent": "PJM",
+                    "subba": "DOM",
+                    "value": 100,
+                    "value-units": "megawatthours",
+                }
+            ],
+        }
+    }
+
+
+def _install_eia_session(monkeypatch, *, timeouts):
+    """First `timeouts` GETs stall the way requests does on a 25s read timeout."""
+    import requests
+    from scripts.ai_cycle import collectors
+
+    body = json.dumps(_eia_hour_body()).encode()
+
+    class Response:
+        status_code = 200
+        headers = {}
+
+        def iter_content(self, _size):
+            yield body
+
+        def close(self):
+            pass
+
+    class Session:
+        def __init__(self):
+            self.calls = []
+
+        def request(self, method, url, **kwargs):
+            self.calls.append(url)
+            if len(self.calls) <= timeouts:
+                raise requests.Timeout("The read operation timed out")
+            return Response()
+
+    holder = {}
+
+    def factory():
+        holder["session"] = Session()
+        return holder["session"]
+
+    monkeypatch.setattr(collectors.requests, "Session", factory)
+    return holder
+
+
+def test_eia_read_timeout_retries_once_and_the_daily_record_exits_zero(tmp_path, monkeypatch, capsys):
+    """2026-10-15 radon-ai-cycle: EIA read stalled once, sibling sources had
+    already validated, and the oneshot exited 1 after the snapshot write."""
+    from scripts.ai_cycle.collect import main
+
+    holder = _install_eia_session(monkeypatch, timeouts=1)
+    monkeypatch.setenv("EIA_API_KEY", "test")
+    code = main(
+        [
+            "--record",
+            "--database",
+            str(tmp_path / "cycle.sqlite"),
+            "--sources",
+            "eia",
+            "--start",
+            "2026-10-14",
+            "--end",
+            "2026-10-14",
+            "--archive",
+            str(tmp_path / "raw"),
+        ]
+    )
+    assert code == 0
+    assert len(holder["session"].calls) == 2
+    assert all("api.eia.gov" in url for url in holder["session"].calls)
+    report = json.loads(capsys.readouterr().out)
+    assert report["observations"] == 2
+    assert report["sources"][0]["status"] == "available"
+    assert list((tmp_path / "raw").iterdir())
+
+
+def test_eia_read_timeout_still_fails_the_oneshot_when_the_retry_stalls(tmp_path, monkeypatch, capsys):
+    from scripts.ai_cycle.collect import main
+
+    holder = _install_eia_session(monkeypatch, timeouts=2)
+    monkeypatch.setenv("EIA_API_KEY", "test")
+    code = main(
+        [
+            "--record",
+            "--database",
+            str(tmp_path / "cycle.sqlite"),
+            "--sources",
+            "eia",
+            "--start",
+            "2026-10-14",
+            "--end",
+            "2026-10-14",
+            "--archive",
+            str(tmp_path / "raw"),
+        ]
+    )
+    assert code == 1
+    assert len(holder["session"].calls) == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["observations"] == 0
+    assert report["sources"][0]["status"] == "error"
+    assert report["sources"][0]["reason"] == "Publisher transport failed"
+    assert not (tmp_path / "raw").exists() or not list((tmp_path / "raw").iterdir())
+
+
+def test_publisher_http_error_is_not_retried(tmp_path):
+    class Response:
+        status_code = 500
+
+        def close(self):
+            pass
+
+    class Session:
+        def __init__(self):
+            self.calls = 0
+
+        def request(self, *a, **kw):
+            self.calls += 1
+            return Response()
+
+    session = Session()
+    with pytest.raises(SourceError, match="HTTP 500"):
+        Transport(tmp_path, session=session).fetch("https://api.eia.gov/v2/example")
+    assert session.calls == 1
+    assert not list(tmp_path.iterdir())
+
+
 def test_openrouter_corrupt_quota_ledger_fails_closed(tmp_path):
     ledger = tmp_path / "quota.json"
     ledger.write_text("broken")

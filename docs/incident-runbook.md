@@ -1229,6 +1229,58 @@ Peak: 2026-09-17 07:22Z, page `1e842638…`. Timer next ~24h.
 
 ---
 
+## ai-cycle-eia-read-timeout
+
+**`radon-ai-cycle.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+when the EIA read stalls once inside the 25s publisher timeout.** Peak:
+2026-10-15 07:27Z, page `0752354faa78835308a16641748d9b6c`. Timer next ~24h.
+
+- **Mechanism:** Daily `--record` walks publishers, then writes the API
+  snapshot. `Transport._download` used one `requests` read timeout of 25s
+  and mapped `RequestException` to `Publisher transport failed` with no
+  second attempt. EIA's completed-week window often spends most of that
+  budget streaming (archive gaps of 16s to 36s on prior days; 2026-10-14
+  landed a 23744-byte body at a 25.0s gap). On 2026-10-15 the read produced
+  no bytes. `checked_at` 07:19:18Z and the next source (vast) at 07:19:44Z
+  match that budget. Status `error` makes `main` return 1 after
+  `persist_api_snapshot`. `Type=oneshot` has no `Restart=`. Sibling
+  sources stayed `available`. Snapshot `generated_at` is
+  2026-10-15T07:27:01Z. EIA `observed_through` stayed 2026-10-13. No daily
+  EIA raw file was archived (yesterday's file is the 23744-byte body).
+  ExecMain 07:17:34Z to 07:27:04Z, `ExecMainStatus=1`, CPU about 38s, under
+  `TimeoutStartSec=1200`. `:8321/health/lite` stayed authenticated and
+  `database=up`. `GET /ai-cycle` returned the new snapshot. A keyless
+  probe of `api.eia.gov` returned HTTP 403 in 82ms, so the host could
+  reach the publisher. Not IB. Not a Turso platform outage.
+- **Detection:** `systemctl show` → `exit-code` / `NRestarts=0`. Live
+  `/ai-cycle` `sources` has `eia.status=error` and
+  `reason=Publisher transport failed`, with other enabled publishers
+  `available` and `generated_at` in the same run. Journal is root-only
+  (`User=root` via `radon-app-runtime`).
+- **Discriminating check:** the EIA attempt's wall gap to the next source
+  is about 25s, and the daily raw archive has no new EIA body. A second
+  stall, an HTTP status, or a schema error still fails the oneshot on
+  purpose (`Publisher returned HTTP`, `EIA geography`, missing
+  `EIA_API_KEY` is `unavailable`, not this case). Canary fail on
+  `SELECT 1` or `/ai-cycle` 503 → Turso, stand down. `Result=signal` or
+  exit 143 is deploy stop-clean. `/health/lite` down → API, stand down.
+  Do not `reset-failed` and start before this retry is live: the same
+  single stall still exits 1.
+- **Remediation (code):** retry the publisher download once after
+  `requests.RequestException` while the 500s run deadline remains. Keep
+  the OpenRouter ledger at one reservation for that fetch. Do not retry
+  HTTP status errors. A second stall still records `error` and exits 1.
+  After deploy, the next 07:15 UTC timer collects the missed window.
+  Inserts are append-only, and the snapshot from the failed run is
+  already stored.
+- **Regression:**
+  `scripts/tests/test_ai_cycle_collectors.py::test_eia_read_timeout_retries_once_and_the_daily_record_exits_zero`,
+  `test_eia_read_timeout_still_fails_the_oneshot_when_the_retry_stalls`,
+  `test_publisher_http_error_is_not_retried`.
+- **Code:** `scripts/ai_cycle/collectors.py` (`Transport._download`).
+
+---
+
 ## ai-cycle-backfill-snapshot-vintage-budget
 
 **`radon-ai-cycle-backfill.service` oneshot pages P1 `Result=exit-code`
