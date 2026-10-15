@@ -9498,3 +9498,11 @@ Dependency graph: T1 -> T2 -> T3 -> T4; T1 -> T3.
 No local test suites. Preserve unrelated work; use synthetic account/preferences/credentials.
 
 Red evidence: 1ad955ea GitHub38634078736, focusedCSS regression failed1(1312passed), browserjob116092819596 reproducedmobilecard clipping beforefix. Apply5line mobilechildsizing correction and reverifylatesthead.
+
+# PR repair and admin merge
+Dependency graph: T1 -> T2 -> T4; T1 -> T3 -> T4.
+- [x] T1 depends_on: [] Inventory all open PRs and assign exclusive ownership.
+- [ ] T2 depends_on: [T1] Resolve #1076 preserving current main policies, verify exact-head CI, admin merge and verify production CI.
+- [ ] T3 depends_on: [T1] Separate Sol/Luna swarm repairs all other conflicts/red CI; preserve drafts and do not merge others.
+- [ ] T4 depends_on: [T2, T3] Re-audit every remaining PR after main changes, confirm exact-head green, notify repaired PRs and report.
+No local test suites. Preserve usercheckout and unrelated edits.
