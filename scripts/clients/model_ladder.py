@@ -1481,6 +1481,55 @@ def _last_resort_last(order: Sequence[str]) -> tuple[str, ...]:
     return rest + ((LAST_RESORT_PROVIDER,) if LAST_RESORT_PROVIDER in order else ())
 
 
+# Subscription OAuth rungs whose credential the subscription-token daemon can
+# refresh in place (scripts.subscription_tokens PROVIDERS keys).
+_REFRESHABLE_SUBSCRIPTIONS = frozenset({"anthropic", "codex", "grok", "antigravity"})
+_EXPIRED_TOKEN_MARKERS = (
+    "token has expired",
+    "token expired",
+    "expired token",
+    "token is expired",
+    "re-authenticate",
+    "invalid_token",
+)
+
+
+def _is_expired_subscription_token(name: str, auth: "AuthMaterial", status: int, body: str) -> bool:
+    if status != 401 or auth.kind != "subscription" or name not in _REFRESHABLE_SUBSCRIPTIONS:
+        return False
+    lowered = (body or "").lower()
+    return any(marker in lowered for marker in _EXPIRED_TOKEN_MARKERS)
+
+
+def _refresh_subscription_token(name: str) -> None:
+    """Best-effort in-band refresh of one subscription credential.
+
+    Runs the same ``subscription_tokens`` pass the 30min timer runs, scoped to
+    one provider and under its run lock. If the timer is mid-run the lock is
+    held and this is a no-op; the caller re-reads the credential either way.
+    Never raises: a failed refresh just means the retry fails too.
+    """
+    try:
+        import subscription_tokens  # type: ignore  # PYTHONPATH=scripts (units)
+    except ImportError:
+        try:
+            from scripts import subscription_tokens  # type: ignore
+        except ImportError:
+            logger.warning("subscription refresh unavailable: module not importable")
+            return
+    try:
+        # No push login from the request path (it can block for minutes and
+        # needs Joe), and no service heartbeat: a one-provider pass must not
+        # overwrite the timer's fleet-wide health row.
+        runtime = subscription_tokens.Runtime(
+            login=lambda *_a, **_k: False,
+            heartbeat=lambda *_a, **_k: None,
+        )
+        subscription_tokens.run("once", [name], runtime)
+    except Exception as exc:  # noqa: BLE001 - refresh is best-effort
+        logger.warning("subscription refresh provider=%s failed: %s", name, type(exc).__name__)
+
+
 def _run_ladder(
     *,
     env: Mapping[str, str],
@@ -1492,7 +1541,9 @@ def _run_ladder(
     model_override: str | None = None,
     providers: Sequence[str] | None = None,
     nvidia_vision: bool = False,
+    refresh_token: Callable[[str], None] | None = None,
 ) -> tuple[Any, str, str, str, tuple[str, ...]]:
+    refresh_token = refresh_token or _refresh_subscription_token
     attempted: list[str] = []
     skipped: list[str] = []
     order = _last_resort_last(providers or MODEL_LADDER_ORDER)
@@ -1517,6 +1568,7 @@ def _run_ladder(
             name, env, kind=kind, model_override=model_override, nvidia_vision=nvidia_vision
         )
         provider_won = False
+        refreshed_once = False
         won_model = ""
         won_parsed: Any = None
         won_text = ""
@@ -1544,6 +1596,36 @@ def _run_ladder(
                 continue
 
             body_text = raw if isinstance(raw, str) else ""
+            if not refreshed_once and _is_expired_subscription_token(
+                name, auth, status, body_text
+            ):
+                # Expired OAuth access token: refresh once in-band, reload the
+                # credential, and retry this model once before falling through.
+                refreshed_once = True
+                logger.warning(
+                    "%s provider=%s model=%s auth=subscription token expired; "
+                    "refreshing and retrying once",
+                    log_prefix,
+                    name,
+                    model,
+                )
+                attempted.append(f"{name}:token_expired_refreshed")
+                refresh_token(name)
+                fresh = _auth_for(name, env)
+                if fresh is not None:
+                    auth = fresh
+                    try:
+                        status, raw, payload = call_provider(name, auth, model)
+                    except ModelResponseError:
+                        raise
+                    except RuntimeError as exc:
+                        code = str(exc) or "network"
+                        attempted.append(f"{name}:{code}")
+                        logger.warning(
+                            "%s provider=%s model=%s failed %s", log_prefix, name, model, code
+                        )
+                        continue
+                    body_text = raw if isinstance(raw, str) else ""
             if limiter is not None:
                 if status == 429:
                     limiter.note_429(None)
