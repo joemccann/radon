@@ -2316,3 +2316,9 @@ reuse step, missing `load` guard, missing hasher) and then green (7 passed).
 `TestImageBuildUsesRemoteCache` and `TestImageWorkflowTokenScope` stayed
 green (10 passed). Workflow YAML parses. Changed shell steps pass `bash -n`.
 Full suites, Vitest, Docker builds, and workflow lint are left to PR CI.
+PR CI run 38700766351 then failed the same contract on `pytest (scripts-ac)`:
+pytest-xdist wrote `__pycache__` under `scripts/` between two hasher
+processes, and `.dockerignore` still copied bytecode, so the two digests
+differed. `**/__pycache__` and `**/*.pyc` are now excluded, and the hasher
+matches those patterns. A clean checkout's image bytes do not change. An
+unknown pattern still refuses and the workflow still builds.

@@ -9,7 +9,6 @@ publish only a digest recorded after that smoke.
 
 from __future__ import annotations
 
-import hashlib
 import subprocess
 import textwrap
 from pathlib import Path
@@ -123,6 +122,7 @@ def test_hasher_matches_dockerfile_copies_and_ignores_tests() -> None:
     assert "web/public/fonts/Inter-Variable.woff2" in files
     assert "web/public/fonts/IBMPlexMono-400.woff2" in files
     assert "web/lib/order/types.ts" not in files
+    assert not any("__pycache__" in path or path.endswith(".pyc") for path in files)
     blob = {path: (REPO / path).read_bytes() for path in files}
     digest = module.hash_files(blob)
     assert len(digest) == 64
@@ -138,7 +138,7 @@ def test_unknown_dockerignore_pattern_fails_closed(tmp_path: Path) -> None:
     broken = tmp_path / "Dockerfile.python"
     broken.write_text(DOCKERFILE.read_text(encoding="utf-8"), encoding="utf-8")
     ignore = tmp_path / ".dockerignore"
-    ignore.write_text(DOCKERIGNORE.read_text(encoding="utf-8") + "\n**/*.pyc\n", encoding="utf-8")
+    ignore.write_text(DOCKERIGNORE.read_text(encoding="utf-8") + "\n**/*.pyo\n", encoding="utf-8")
     with pytest.raises(module.InputHashError, match="dockerignore"):
         module.input_files_from(broken, ignore, REPO)
 
@@ -163,8 +163,21 @@ def test_unparsed_copy_fails_closed(tmp_path: Path) -> None:
         module.input_files_from(dockerfile, ignore, REPO)
 
 
-def test_cli_fails_closed_on_unknown_pattern(tmp_path: Path) -> None:
-    """The workflow treats a non-zero hasher exit as a cache miss."""
+def test_cli_fails_closed_on_unknown_pattern(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The workflow treats a non-zero hasher exit as a cache miss.
+
+    Two CLI passes must agree even while pytest writes bytecode under
+    ``scripts/``. That bytecode is excluded from the image context.
+    """
+    module = _load_hasher()
+
+    def refuse(repo: Path = REPO) -> str:
+        del repo
+        raise module.InputHashError("dockerignore pattern is not understood: **/*.pyo")
+
+    monkeypatch.setattr(module, "image_input_hash", refuse)
+    assert module.main() == 2
+
     completed = subprocess.run(
         ["python3", str(HASHER), "--self-check"],
         cwd=REPO,
@@ -173,8 +186,14 @@ def test_cli_fails_closed_on_unknown_pattern(tmp_path: Path) -> None:
         check=False,
     )
     assert completed.returncode == 0, completed.stderr
-    assert len(completed.stdout.strip()) == 64
-    # Stable across two calls.
-    again = subprocess.check_output(["python3", str(HASHER)], cwd=REPO, text=True).strip()
-    assert again == completed.stdout.strip()
-    assert hashlib.sha256(again.encode()).hexdigest()
+    digest = completed.stdout.strip()
+    assert len(digest) == 64
+    int(digest, 16)
+    bytecode = REPO / "scripts" / "ci" / "__pycache__" / "cip020-race.pyc"
+    bytecode.parent.mkdir(exist_ok=True)
+    bytecode.write_bytes(b"bytecode-between-hashes")
+    try:
+        again = subprocess.check_output(["python3", str(HASHER)], cwd=REPO, text=True).strip()
+    finally:
+        bytecode.unlink(missing_ok=True)
+    assert again == digest
