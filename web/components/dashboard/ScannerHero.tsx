@@ -22,6 +22,7 @@ import {
   volConeTradeAriaLabel,
 } from "@/lib/volCone";
 import { fmtMoney } from "@/lib/format/money";
+import { tickerHref } from "@/lib/tickerRoute";
 
 const TOP_N = 4;
 
@@ -109,7 +110,7 @@ export default function ScannerHero() {
             {theta.data.results.slice(0, TOP_N).map((row, i) => (
               <Link
                 key={row.ticker}
-                href={`/${row.ticker}`}
+                href={tickerHref(row.ticker)}
                 className="signals-hero__row signals-hero__row--theta"
                 role="row"
               >
@@ -161,7 +162,7 @@ export default function ScannerHero() {
             return (
               <Link
                 key={`${row.ticker}:${row.expiry}`}
-                href={volConeOrderHref(row) ?? `/${row.ticker}`}
+                href={volConeOrderHref(row) ?? tickerHref(row.ticker)}
                 className="signals-hero__row signals-hero__row--cone"
                 role="row"
                 aria-label={ariaLabel ?? undefined}

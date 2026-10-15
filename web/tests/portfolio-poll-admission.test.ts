@@ -90,7 +90,7 @@ function shellPollsPerMinute(intervalMs: number): number {
 }
 
 describe("market-hours portfolio admission", () => {
-  it("admits three open-market tabs and refuses the next portfolio read", () => {
+  it("admits three open-market tabs and refuses reads beyond the configured ceiling", () => {
     const limit = declaredPortfolioLimit();
     const required = TABS * pollsPerWindow(openPollMs());
     const key = `route:portfolio:route:rel-324-${required}`;
@@ -99,6 +99,10 @@ describe("market-hours portfolio admission", () => {
       if (!rateLimit(key, { limit, windowMs: WINDOW_MS }).ok) refusedAt.push(i);
     }
     expect(refusedAt).toEqual([]);
+    expect(limit).toBe(2_000);
+    for (let i = required; i < limit; i++) {
+      expect(rateLimit(key, { limit, windowMs: WINDOW_MS }).ok).toBe(true);
+    }
     expect(rateLimit(key, { limit, windowMs: WINDOW_MS }).ok).toBe(false);
   });
 
