@@ -34,6 +34,8 @@ IMPLEMENTED = (
     "scripts/api/tests/",
     "web/tests/",
     "web/e2e/",
+    "**/__pycache__",
+    "**/*.pyc",
 )
 
 
@@ -67,6 +69,10 @@ def _matches(body: str, path: str) -> bool:
     if body in {"**/.venv", "**/node_modules", "**/.next"}:
         name = body.split("/")[-1]
         return name in path.split("/")
+    if body == "**/__pycache__":
+        return "__pycache__" in path.split("/")
+    if body == "**/*.pyc":
+        return Path(path).name.endswith(".pyc")
     raise InputHashError(f"dockerignore pattern is not understood: {body}")
 
 
