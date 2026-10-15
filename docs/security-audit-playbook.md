@@ -91,6 +91,13 @@ line here whenever you ship a security fix.**
 - **Public unauth routes rate-limited** — the 5 `*/share` POST generators + GET
   `/api/share/pnl` call `rateLimit()` (`web/lib/rateLimit.ts`) before any heavy work.
   (`web/tests/rate-limit.test.ts`)
+- **Unauthenticated render inputs are bounded, not just rate-limited** — a request
+  limiter counts requests, not the cost of one request, so every caller-supplied
+  value an image route hands to satori is bounded BEFORE layout: the canvas by
+  `web/lib/ctaImageLayout.ts` and the strings by
+  `clampCardText` (`web/lib/sharePnlHero.ts`). A new unauthenticated renderer
+  input without a size bound is a finding even when the route is rate-limited.
+  (`web/tests/share-image-bounds.test.ts`, `web/tests/share-pnl-text-bounds.test.ts`)
 - **Ops admin routes fail CLOSED** — `/api/admin/{stack/restart,ib/restart,
   ib/reset-backoff,services/[unit]/[action]}` call `requireDemoAdmin()` and 403 when
   the allowlist is empty (middleware `isAuthorizedUser` fails OPEN by design; these
