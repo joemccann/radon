@@ -15,6 +15,10 @@ import PositionTable, {
   type PositionToggleableColumnKey,
 } from "./PositionTable";
 import TableSearch from "./TableSearch";
+import ErrorToast from "./ErrorToast";
+import { usePositionStrategyGroups } from "@/lib/usePositionStrategyGroups";
+
+const EMPTY_POSITIONS: PortfolioPosition[] = [];
 
 export type PortfolioSectionsProps = {
   portfolio: PortfolioData | null;
@@ -34,7 +38,8 @@ function positionColumnEntries(hasOptions: boolean, hasExpiry: boolean) {
 
 /** Route-local surface so /portfolio does not download every workspace route. */
 export default function PortfolioSections({ portfolio, prices }: PortfolioSectionsProps) {
-  const positions = portfolio?.positions ?? [];
+  const grouping = usePositionStrategyGroups(portfolio?.positions ?? EMPTY_POSITIONS);
+  const positions = grouping.positions;
   const definedPositions = positions.filter((p) => p.risk_profile === "defined");
   const equityPositions = positions.filter((p) => p.risk_profile === "equity");
   const undefinedPositions = positions.filter((p) => p.risk_profile === "undefined" || p.risk_profile === "complex");
@@ -100,6 +105,13 @@ export default function PortfolioSections({ portfolio, prices }: PortfolioSectio
 
   return (
     <>
+      {grouping.error ? <ErrorToast message={grouping.error} testId="strategy-grouping-error" /> : null}
+      {grouping.canUndo ? (
+        <div className="position-grouping-notice" role="status">
+          <span>Position layout updated.</span>
+          <button type="button" className="btn-secondary" onClick={grouping.undo}>Undo grouping</button>
+        </div>
+      ) : null}
       {definedPositions.length > 0 && (
         <div className="section" data-testid="defined-risk-section">
           <div className="section-header">
@@ -126,7 +138,7 @@ export default function PortfolioSections({ portfolio, prices }: PortfolioSectio
             </div>
           </div>
           <div className="section-body">
-            <PositionTable positions={definedFilter.filtered} showUnderlying={true} prices={prices} portfolio={portfolio} tableId="positions-defined" columnVisibility={definedCols.visible} />
+            <PositionTable positions={definedFilter.filtered} showUnderlying={true} prices={prices} portfolio={portfolio} tableId="positions-defined" columnVisibility={definedCols.visible} strategyGrouping={grouping} />
           </div>
         </div>
       )}
@@ -157,7 +169,7 @@ export default function PortfolioSections({ portfolio, prices }: PortfolioSectio
             </div>
           </div>
           <div className="section-body">
-            <PositionTable positions={undefinedFilter.filtered} showUnderlying={true} prices={prices} portfolio={portfolio} tableId="positions-undefined" columnVisibility={undefinedCols.visible} />
+            <PositionTable positions={undefinedFilter.filtered} showUnderlying={true} prices={prices} portfolio={portfolio} tableId="positions-undefined" columnVisibility={undefinedCols.visible} strategyGrouping={grouping} />
           </div>
         </div>
       )}
@@ -188,7 +200,7 @@ export default function PortfolioSections({ portfolio, prices }: PortfolioSectio
             </div>
           </div>
           <div className="section-body">
-            <PositionTable positions={equityFilter.filtered} showExpiry={false} prices={prices} portfolio={portfolio} tableId="positions-equity" columnVisibility={equityCols.visible} />
+            <PositionTable positions={equityFilter.filtered} showExpiry={false} prices={prices} portfolio={portfolio} tableId="positions-equity" columnVisibility={equityCols.visible} strategyGrouping={grouping} />
           </div>
         </div>
       )}
@@ -207,7 +219,7 @@ export default function PortfolioSections({ portfolio, prices }: PortfolioSectio
               These positions carry no recognised risk profile. They are shown here so the
               book on this page reconciles with the snapshot; their risk bucket is unknown.
             </div>
-            <PositionTable positions={unclassifiedPositions} prices={prices} showExpiry />
+            <PositionTable positions={unclassifiedPositions} prices={prices} portfolio={portfolio} showExpiry strategyGrouping={grouping} />
           </div>
         </div>
       )}
