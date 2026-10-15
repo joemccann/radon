@@ -7,7 +7,8 @@ must not import from ``scripts/api`` and must not hold sync libsql either:
 ``libsql_experimental``'s native ``execute()``/``commit()`` has NO timeout
 and holds the GIL while blocked, so a slow Turso turned the watchdog's
 "best-effort heartbeat" into 60s SIGTERM kills (148 timeout results in 7
-days). urllib's socket timeout is a REAL bound.
+days). ``http.client`` keep-alive reuses one socket per thread; the socket
+timeout is a REAL bound.
 
 The ``service_health`` upsert statement stays single-source in
 ``scripts/db/service_health_sql.py``; this module only supplies the
@@ -27,10 +28,15 @@ except ImportError:  # flat script imports
     from utils.outcome_metrics import measure_operation
 
 import base64
+import http.client
+import io
 import json
 import os
+import ssl
+import threading
 import urllib.request
 from typing import Any, Optional, Sequence
+from urllib.parse import urlsplit
 
 try:  # scripts/ on sys.path (watchdog, pytest)
     from health_service.turso_http import http_url_from_libsql, read_env
@@ -42,6 +48,96 @@ except ImportError:  # imported as scripts.db.hrana_http from the repo root
 HRANA_TIMEOUT_S = 4.0
 
 _MAX_RESPONSE_BYTES = 1_048_576  # writes return tiny bodies
+
+# urllib.request.urlopen opens a fresh TCP/TLS socket per POST. Watchdog
+# heartbeats and sequential writer pipelines paid a handshake each time.
+# Thread-local keep-alive reuses one socket per worker thread. Tests that
+# replace urllib.request.urlopen still take that seam.
+_STDLIB_URLOPEN = urllib.request.urlopen
+_local = threading.local()
+
+
+class _PooledResponse(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _close_keepalive() -> None:
+    conn = getattr(_local, "conn", None)
+    _local.conn = None
+    _local.key = None
+    if conn is None:
+        return
+    try:
+        conn.close()
+    except OSError:
+        pass
+
+
+def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse:
+    parts = urlsplit(req.full_url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise OSError("unsupported Turso origin")
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    key = (parts.scheme, parts.hostname, port)
+    path = parts.path or "/"
+    if parts.query:
+        path = f"{path}?{parts.query}"
+    headers = {k: v for k, v in req.header_items()}
+    headers.setdefault("Connection", "keep-alive")
+    body = req.data or b""
+    method = req.get_method() or "POST"
+
+    def connect() -> http.client.HTTPConnection:
+        if parts.scheme == "https":
+            conn = http.client.HTTPSConnection(
+                parts.hostname,
+                port,
+                timeout=timeout,
+                context=ssl.create_default_context(),
+            )
+        else:
+            conn = http.client.HTTPConnection(parts.hostname, port, timeout=timeout)
+        _local.conn = conn
+        _local.key = key
+        return conn
+
+    reused = getattr(_local, "key", None) == key and getattr(_local, "conn", None) is not None
+    conn = getattr(_local, "conn", None) if reused else None
+    if conn is None:
+        conn = connect()
+    else:
+        conn.timeout = timeout
+
+    try:
+        conn.request(method, path, body, headers)
+    except OSError:
+        _close_keepalive()
+        if not reused:
+            raise
+        conn = connect()
+        conn.request(method, path, body, headers)
+
+    try:
+        resp = conn.getresponse()
+        raw = resp.read(_MAX_RESPONSE_BYTES)
+        if resp.status != 200:
+            _close_keepalive()
+            raise OSError(f"HTTP {resp.status}")
+        return _PooledResponse(raw)
+    except Exception:
+        _close_keepalive()
+        raise
+
+
+def _open_request(req: urllib.request.Request, timeout: float):
+    current = urllib.request.urlopen
+    if current is not _STDLIB_URLOPEN:
+        return current(req, timeout=timeout)
+    return _pooled_open(req, timeout)
 
 
 class HranaHttpError(RuntimeError):
@@ -85,9 +181,10 @@ def _post_pipeline(
         headers={
             "Content-Type": "application/json",
             "Authorization": "Bearer " + token,
+            "Connection": "keep-alive",
         },
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with _open_request(req, timeout) as resp:
         raw = resp.read(_MAX_RESPONSE_BYTES)
     return json.loads(raw.decode("utf-8"))
 

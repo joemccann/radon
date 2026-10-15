@@ -9505,3 +9505,18 @@ Verification: browser-onlye7586211 head reproduced7failures atmissing Groupstrat
 T4 repair review: 3516c17d GitHub run38606924428 passed40model/persistence/UI cases and coverage gates; browser2mobile cases passed,5failed. Replanned T4: preserve financial display formatting assertions, permit Escape/Tab to reach shared portal keyboard chrome, add2real-bubbling regressions, republish and reverify exact head. No local suites.
 
 T4 second repair review: 2a5abc29 passed42unitcases and6/7grouping browsercases. DesktopResetpopoverfooter exceededviewport; replace assumedmenuheight with measuredclamping onopen/resize/content changes. Addviewportregression andbrowserboundsassertion, preserveordinaryclick. Reverifylatesthead.
+# PR repair and admin merge
+Dependency graph: T1 -> T2 -> T4; T1 -> T3 -> T4.
+- [x] T1 depends_on: [] Inventory all open PRs and assign exclusive ownership.
+- [ ] T2 depends_on: [T1] Resolve #1076 preserving current main policies, verify exact-head CI, admin merge and verify production CI.
+- [ ] T3 depends_on: [T1] Separate Sol/Luna swarm repairs all other conflicts/red CI; preserve drafts and do not merge others.
+- [ ] T4 depends_on: [T2, T3] Re-audit every remaining PR after main changes, confirm exact-head green, notify repaired PRs and report.
+No local test suites. Preserve usercheckout and unrelated edits.
+
+## PR #1083 conflict repair (2026-10-15)
+Dependency graph: T1 -> T2 -> T3.
+- [x] T1 depends_on: [] Inspect exact PR head, latest main, and all merge conflicts.
+- [x] T2 depends_on: [T1] Merge latest main and preserve both task histories; inspect merged files and diff statically.
+- [ ] T3 depends_on: [T2] Push repaired head and await every applicable exact-head GitHub CI check.
+
+Review: Latest main c8549c323310d2b387db207b16946eff7e24060e; PR head 39597e71e32caac328950c2f3f348accad0c5b60. The only textual conflict is the append-only task log. No local test suites per operator policy. Exact-head CI pending.

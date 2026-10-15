@@ -1008,3 +1008,11 @@ Exact-head CI repair (2026-10-07): initial scripts-df gate reported 1 failed / 1
 | ID | Status | Red / green evidence | Change |
 |---|---|---|---|
 | REL-323 / R-734 | DONE | RED 2 failed / 1 passed; GREEN 12 passed (pending + 429 + edge-budget + portfolio pending) | `useOrders` honors `X-Sync-Pending` and opaque Caddy 502/504 the same way `usePortfolio` does: schedule a 10s snapshot re-read instead of treating an in-flight IB refresh as `Sync failed`. Shared `SYNC_PENDING_REPOLL_MS` lives in `edgeBudget.ts`. No placement, halt, or broker path changed. Vitest ran locally; full pytest, cloud/tests, remaining Vitest and the order-idempotency drill stay on PR CI. |
+
+## Nightly remediation 2026-10-14
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-324 / R-735 | DONE | RED 3 failed; GREEN 3 passed, focused neighborhood 61 passed | The portfolio GET bucket admits three 2s tabs (90/minute) and refuses the next read. The snapshot cache expires on that same poll so a newer Turso book is visible to the close ticket. Demo shell tiers I and J are the three-tab open minute (207) and one equity day (102960), still shared and still finite. No placement, halt, or broker path changed. |
+
+2026-10-15 PR #1076 conflict resolution: preserve main #1081 portfolio GET ceiling of 2,000/minute through the shared admission constant; retain two-second snapshot expiry and three-tab demo budgets. Regression exhausts the configured user ceiling after proving three-tab polling fits. Exact-head GitHub verification pending; no local suites.

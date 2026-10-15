@@ -1,3 +1,4 @@
+import { MARKET_HOURS_ACCOUNT_POLL_MS } from "@/lib/accountPollBudget";
 import {
   cachedRead,
   cachedReadResult,
@@ -10,9 +11,10 @@ export const PORTFOLIO_SNAPSHOT_CACHE_KEY = "portfolio:snapshot";
 export const PORTFOLIO_TRADE_LOG_DATES_CACHE_KEY = "portfolio:tradeLogDates";
 export const PORTFOLIO_CONTRACT_OPEN_DATES_CACHE_KEY = "portfolio:contractOpenDates";
 
-// Browser polling is 30 seconds. A 15-second bound coalesces overlapping tabs
-// without hiding a newly published 60-second writer snapshot for a full poll.
-export const PORTFOLIO_SNAPSHOT_CACHE_TTL_MS = 15_000;
+// The open-market poll is 2s. Keep the coalescing window inside that interval
+// so the next poll sees a snapshot another process published to Turso.
+// Overlapping tabs in the same window still share one read.
+export const PORTFOLIO_SNAPSHOT_CACHE_TTL_MS = MARKET_HOURS_ACCOUNT_POLL_MS;
 // Entry dates have day granularity and currently support the /orders share
 // card. Keep them warm across two browser poll intervals while that consumer
 // is separated from the default /portfolio payload.
