@@ -37,7 +37,7 @@ jobs:
           set -euo pipefail
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Hash python image inputs
-        id: image-inputs
+        id: pyimage
         # A non-zero hash is fail-closed: reuse stays a miss and the build
         # below runs. Web-only commits that do not touch these inputs keep
         # the same digest (run 38597907211 still exported a 53.9s tarball).
@@ -56,7 +56,7 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           set -euo pipefail
-          source="${{ steps.image-inputs.outputs.tag }}"
+          source="${{ steps.pyimage.outputs.tag }}"
           sha_tag="ghcr.io/joemccann/radon-python:${{ github.sha }}"
           latest_tag="ghcr.io/joemccann/radon-python:latest"
           if [ -z "$source" ]; then
@@ -142,7 +142,7 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.reuse.outputs.hit != 'true'
         run: |
           set -euo pipefail
-          tag="${{ steps.image-inputs.outputs.tag }}"
+          tag="${{ steps.pyimage.outputs.tag }}"
           sha_tag="ghcr.io/joemccann/radon-python:${{ github.sha }}"
           if ! printf '%s\n' "$tag" | grep -Eq '^ghcr.io/joemccann/radon-python:ihash-[0-9a-f]{64}$'; then
             echo "::warning title=python image index::input-hash tag was not recorded; the next identical commit will rebuild"
