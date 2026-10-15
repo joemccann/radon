@@ -63,7 +63,12 @@ SIDECAR_PATH = Path("/var/lib/radon/subscription-tokens/state.json")
 # any local user could pre-hold the flock and turn every fire into a silent
 # exit-0 skip.
 LOCK_PATH = SIDECAR_PATH.parent / "run.lock"
-EXPIRY_SKEW_SECONDS = 600
+# Refresh lead time. Must exceed the timer cadence (30min) plus its 60s
+# RandomizedDelaySec, or a token can expire between two fires: on 2026-10-15
+# the 13:30Z run saw 30min left (> the old 600s skew), skipped the refresh, and
+# the 14:00Z fire landed at 14:00:37Z, 31s after expiry, so a research call at
+# 14:00:16Z took a 401. 40min guarantees every token is refreshed a run early.
+EXPIRY_SKEW_SECONDS = 2400
 HTTP_TIMEOUT_SECONDS = 20
 HTTP_RETRIES = 2
 HTTP_USER_AGENT = "radon-subscription-tokens"
