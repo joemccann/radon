@@ -324,6 +324,15 @@ not backed off by a POST 429 (separate `portfolio:route` bucket). A 429 on the
 cached GET honours `Retry-After` and keeps the snapshot on screen; only a cold
 tab with nothing to show reports it (2026-08-24: 963 "Too Many Requests"
 banners from five aligned tabs).
+While the equity session is `MarketState.OPEN`, `WorkspaceShell` polls cached
+portfolio and orders GETs every 2 seconds. Extended and closed sessions stay
+on the hook default of 30 seconds. `GET /api/portfolio` admits 2000 requests
+per 60 seconds on `portfolio:route`. One open tab at that pace stays inside
+that budget. `GET /api/orders` is not on that bucket. A failed portfolio read
+retries on the 30-second hook constant and does not keep the 2-second pace.
+A failed orders read waits the hook constant times 2 to the failure streak
+after the streak increments, so the first failure waits 60 seconds, and the
+wait caps at 5 minutes. It does not adopt the 2-second interval.
 Tests: `tests/auto-sync-claim.test.ts`, `tests/use-portfolio-sync-429.test.ts`,
 `tests/use-orders-sync-429.test.ts`.
 
