@@ -1264,3 +1264,9 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | ID | Status | Evidence |
 |---|---|---|
 | T-551 | DONE | Deleting the description spread left `web/tests/ib-index-stream-contracts.test.ts` 4 passed and `web/tests/ticker-search-rows.test.ts` 2 passed. `web/tests/ib-search-description.test.ts` failed 2: nested `NVIDIA CORP` and flat `APPLE INC` missing from the real `symbolSamples` payload. Restored `scripts/ib_realtime_server.js`. Both relay files 6 passed, three serial runs. Product source unchanged. Closing rounds: root Python 15,387 passed / 2 skipped / 23 subtests, Vitest 10,789 passed / 21 skipped / 1,099 files, cloud 2,862 passed / 8 skipped, FAILED-list diff against `66719c09` empty on all three rounds. |
+
+## 2026-10-14
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-552 | DONE | A following `os.open` (`O_WRONLY\|O_CREAT`) left the three older deploy-lock tests green and changed the symlink target from mode `0644` to `0600` (1 failed / 3 passed). Restored `O_CREAT\|O_EXCL\|O_NOFOLLOW`: `cloud/tests/test_bootstrap_control_plane.py` 34 passed, three serial runs. Product source unchanged. Closing rounds: root Python 15,424 passed / 2 skipped / 23 subtests, Vitest 10,898 passed / 21 skipped / 1,107 files, cloud 2,866 passed / 8 skipped, FAILED-list diff against `63fd8992` empty on all three rounds. |
