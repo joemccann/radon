@@ -554,7 +554,7 @@ def _checkpoint_rows(rows: list[dict[str, Any]], scan_time: str) -> None:
 def _write_json_cache(payload: dict[str, Any]) -> None:
     VOL_CONE_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = VOL_CONE_JSON.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2))
+    tmp.write_text(json.dumps(payload, separators=(",", ":")))
     os.replace(tmp, VOL_CONE_JSON)
 
 
