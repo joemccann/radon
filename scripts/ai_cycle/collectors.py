@@ -224,35 +224,46 @@ class Transport:
             raise SourceError("Per-run time budget exhausted")
         if self.requests >= self.max_requests:
             raise SourceError("Per-run request budget exhausted")
+        # One local OpenRouter reservation covers this fetch. The retry below
+        # is the same reserved call after a read stall, not a second dataset.
         if urlsplit(url).hostname == "openrouter.ai":
             self._or_budget()
-        self.requests += 1
-        try:
-            response = self.session.request(
-                "POST" if body is not None else "GET",
-                url,
-                params=params,
-                headers=headers,
-                json=body,
-                timeout=min(self.timeout, max(1, self.deadline - time.monotonic())),
-                stream=True,
-            )
-            if response.status_code != 200:
-                raise SourceError(f"Publisher returned HTTP {response.status_code}")
-            chunks, size = [], 0
-            for chunk in response.iter_content(65536):
-                if time.monotonic() >= self.deadline:
-                    raise SourceError("Per-run time budget exhausted")
-                size += len(chunk)
-                if size > 20_000_000:
-                    raise SourceError("Publisher response exceeds 20 MB limit")
-                chunks.append(chunk)
-            return b"".join(chunks), dict(getattr(response, "headers", {}) or {})
-        except requests.RequestException:
-            raise SourceError("Publisher transport failed") from None
-        finally:
-            if "response" in locals():
-                response.close()
+        # EIA's daily window often streams for most of the 25s read budget
+        # (2026-10-15: one stall, no bytes, oneshot exit 1). One more attempt
+        # while the run deadline remains. HTTP errors are not retried.
+        for attempt in range(2):
+            if attempt and time.monotonic() >= self.deadline:
+                raise SourceError("Publisher transport failed")
+            self.requests += 1
+            response = None
+            try:
+                response = self.session.request(
+                    "POST" if body is not None else "GET",
+                    url,
+                    params=params,
+                    headers=headers,
+                    json=body,
+                    timeout=min(self.timeout, max(1, self.deadline - time.monotonic())),
+                    stream=True,
+                )
+                if response.status_code != 200:
+                    raise SourceError(f"Publisher returned HTTP {response.status_code}")
+                chunks, size = [], 0
+                for chunk in response.iter_content(65536):
+                    if time.monotonic() >= self.deadline:
+                        raise SourceError("Per-run time budget exhausted")
+                    size += len(chunk)
+                    if size > 20_000_000:
+                        raise SourceError("Publisher response exceeds 20 MB limit")
+                    chunks.append(chunk)
+                return b"".join(chunks), dict(getattr(response, "headers", {}) or {})
+            except requests.RequestException:
+                if attempt == 1 or time.monotonic() >= self.deadline:
+                    raise SourceError("Publisher transport failed") from None
+            finally:
+                if response is not None:
+                    response.close()
+        raise SourceError("Publisher transport failed")
 
     def fetch(self, url, *, params=None, headers=None, body=None):
         raw, _headers = self._download(url, params=params, headers=headers, body=body)
