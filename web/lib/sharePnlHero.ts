@@ -24,6 +24,30 @@ export const SHARE_PNL_CANVAS: Record<SharePnlFormat, { width: number; height: n
   story: { width: 1080, height: 1920 },
 };
 
+/**
+ * Longest query-supplied string the card lays out. The 1200x630 plate shows
+ * roughly 90 characters of 24px IBM Plex Mono on its description line and the
+ * story frame roughly 40 at 44px, so 120 is already past anything either
+ * canvas can display. Beyond it a caller is only buying satori layout time on
+ * the process that also serves the trading UI (R-310).
+ */
+export const SHARE_PNL_MAX_TEXT_CHARS = 120;
+
+/**
+ * The one gate every query-supplied string passes through on its way into the
+ * render tree: control characters out (they carry no glyph and can break line
+ * layout), then a hard character cap with an ellipsis so a truncated card
+ * still reads as truncated.
+ */
+export function clampCardText(
+  value: string,
+  maxChars: number = SHARE_PNL_MAX_TEXT_CHARS,
+): string {
+  const printable = value.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim();
+  if (printable.length <= maxChars) return printable;
+  return `${printable.slice(0, maxChars - 1)}\u2026`;
+}
+
 export function parseSharePnlFormat(value: string | null): SharePnlFormat {
   return value === "story" ? "story" : "card";
 }
