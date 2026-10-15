@@ -35,8 +35,8 @@ describe("durable demo rate limiter configuration", () => {
     vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "");
     __resetRateLimitForTests();
 
-    expect(await demoRateLimit("I", "user")).toMatchObject({ limit: 60, success: true });
-    expect(await demoRateLimit("J", "user")).toMatchObject({ limit: 50_000, success: true });
+    expect(await demoRateLimit("I", "user")).toMatchObject({ limit: 207, success: true });
+    expect(await demoRateLimit("J", "user")).toMatchObject({ limit: 102_960, success: true });
   });
 });
 
