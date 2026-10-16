@@ -2916,13 +2916,13 @@ authenticated and `database` up.
   `coverage_unverified` (`flex-pull-trade-coverage` or operator
   reconciliation). `twr_status=degraded` is `flex-pull-twr-degraded-exit`.
   `Result=timeout` is `flex-pull-ingest-timeout`.
-- **Remediation (code):** a transient coverage read returns
-  `outcome=coverage_unread` (`ok` true, claim retained, no replay, no
-  cash-flow-sync error). The puller does not count it as a new statement
-  and does not fail the oneshot. The ok heartbeat note is
-  `class=coverage_unread`. The next timer reads again. A real gap still
-  exits 1. Do not `reset-failed` for this page when the retry already
-  exited 0.
+- **Remediation (code), superseded by bounded retries:** retry a dropped
+  coverage read once and require actual persisted-row confirmation. A
+  recovered read returns `outcome=duplicate` and can report an ok cycle.
+  Persistent unread coverage remains `coverage_unverified` and exits 1.
+  Claims remain applied and cash/journal ingestion is never replayed.
+  This replaces the earlier nonfatal `coverage_unread` policy; see
+  `flex-pull-coverage-read-disconnect` for the current retry contract.
 - **Regression:**
   `scripts/tests/test_flex_pull_coverage_unread.py`.
 - **Code:** `scripts/flex_delivery_ingest.py` (`_is_transient_coverage_read`,
@@ -3906,3 +3906,5 @@ service_health write raises.** Peak: 2026-10-08 22:14Z, page
 - **Repair:** `orders/stockEntryTime.ts` replays stock executions by conId, consumes preceding closes, and requires full target quantity matching. Its output adds timing without changing P&L/entry-price arithmetic. Precise execution time outranks the date-only portfolio fallback. `/api/share/pnl` derives measured hold duration, preserves timestamp-only rows, and uses seasonal Pacific zone labels.
 - **Verification:** the sanitized twenty-fill fixture reproduces the supplied artifact; `share-pnl-timing-render.test.ts` asserts actual export tree content, and the pictured TQQQ case in `mobile-executed-journal.spec.ts` exercises the real 1080×1920 PNG route and saves a browser preview. Inspect ENTRY at 8:46 AM PDT, HELD 44 minutes and EXIT at 9:30 AM PDT.
 - **Rollback:** revert this focused fix through the normal CI-gated deployment path; no journal updates, broker actions or migrations are needed.
+
+2026-10-16 ordered-merge reconciliation: combined head08540ee2, CI38968880813 / job117208493390 reproduced four legacy nonfatal-read assertions (1599 other tests passed). Preserve the later stricter policy: a recovered check must prove persisted coverage; repeated disconnects/timeouts remain unverified and fail. Keep no-replay, real-gap, statement-error and exhausted-budget controls. Existing activity NAV repair remains an idempotent saved-statement repair, not cash/journal replay.
