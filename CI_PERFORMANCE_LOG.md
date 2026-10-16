@@ -2324,3 +2324,7 @@ matches those patterns. A clean checkout's image bytes do not change. An
 unknown pattern still refuses and the workflow still builds.
 
 2026-10-16 ordered-merge review: regression head 3cd5b7d0, CI38968296722 / job117200214357 reproduced 2 failed and 3037 passed: chmod-only COPY changes retained the same digest and directory symlinks were omitted. Hash copied file permissions, refuse directory symlinks and unusual directory modes, and retain full build/smoke fallback. GitHub owns fresh full-suite verification; no local suites.
+
+2026-10-16 parser follow-up: head8739c052, CI38969889199 / job117205531902 reproduced 4 unsupported-source failures (3039 other tests passed). Refuse unsupported COPY spelling/whitespace, ADD and unknown external stages instead of omitting source inputs. Known previously parsed stages remain covered by their original COPY inputs. Ignore links only when an understood dockerignore rule excludes their entire source path.
+
+CIP-013 requested organic-nightly evidence: read /Users/joemccann-mac-mini/radon-weekend/logs/codemap-nightly.log without rerunning suites. The 2026-10-16 nightly records `1 passed in 1.06s`, regenerated from b79e1f5c, passed the substantive-change gate, and published https://github.com/joemccann/radon/pull/1101 at a8248bc7. This supplies the pending host-only freshness evidence; it makes no CIP-020 latency claim.

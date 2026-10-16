@@ -206,6 +206,27 @@ def test_unsupported_source_instruction_cannot_be_silently_omitted(instruction):
         module.copy_sources(dockerfile)
 
 
+def test_known_stage_sources_remain_covered_by_their_original_copy():
+    module = _load_hasher()
+    assert module.copy_sources("FROM node AS vendor\nCOPY payload /payload\nFROM python\nCOPY --from=vendor /payload /payload") == ["payload"]
+
+
+def test_ignored_directory_links_cannot_change_the_input_hash(tmp_path):
+    module = _load_hasher()
+    config = tmp_path / "docker" / "app"
+    config.mkdir(parents=True)
+    (config / "Dockerfile.python").write_text("FROM scratch\nCOPY scripts /scripts\n")
+    (config / ".dockerignore").write_text("scripts/tests/\n")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "runtime.py").write_text("runtime payload")
+    original = module.image_input_hash(tmp_path)
+    ignored = scripts / "tests"
+    ignored.mkdir()
+    (ignored / "external").symlink_to(tmp_path / "outside", target_is_directory=True)
+    assert module.image_input_hash(tmp_path) == original
+
+
 def test_cli_fails_closed_on_unknown_pattern(monkeypatch: pytest.MonkeyPatch) -> None:
     """The workflow treats a non-zero hasher exit as a cache miss.
 
