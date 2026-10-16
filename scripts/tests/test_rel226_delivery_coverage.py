@@ -412,3 +412,80 @@ def test_live_exec_id_alias_does_not_cover_the_other_leg(monkeypatch):
     }
     _stub_trade_journal(monkeypatch, [execution], [row])
     assert ingest.delivery_rows_present(ingest.TRADES, TRADE_XML) is False
+
+
+def _applied_duplicate(monkeypatch, present):
+    monkeypatch.setattr(ingest, 'claim_flex_delivery', lambda *a, **k: False)
+    monkeypatch.setattr(ingest, 'flex_delivery_status', lambda d: 'applied')
+    monkeypatch.setattr(ingest, '_apply_classified', lambda *a, **k: pytest.fail('duplicate reapplied'))
+    monkeypatch.setattr(ingest, 'delivery_rows_present', present)
+
+
+def test_trade_duplicate_remote_disconnect_retries_and_confirms(monkeypatch):
+    """An applied Trade_History coverage read that dies once with
+    RemoteDisconnected must confirm on the fresh read. It must not replay
+    the delivery and must not report operator reconciliation."""
+    calls = {'n': 0}
+
+    def present(kind, xml):
+        calls['n'] += 1
+        if calls['n'] == 1:
+            raise hrana_http.HranaHttpError(
+                'RemoteDisconnected: Remote end closed connection without response'
+            )
+        assert kind == ingest.TRADES
+        return True
+
+    _applied_duplicate(monkeypatch, present)
+    result = ingest.ingest_xml(TRADE_XML)
+    assert result['ok'] is True
+    assert result['outcome'] == 'duplicate'
+    assert result['persistence_confirmed'] is True
+    assert result['classified_as'] == ingest.TRADES
+    assert calls['n'] == 2
+
+
+@pytest.mark.parametrize("message", [
+    "RemoteDisconnected: Remote end closed connection without response",
+    "TimeoutError: The read operation timed out",
+])
+def test_persistent_trade_coverage_disconnect_stays_unverified(monkeypatch, message):
+    calls = {'n': 0}
+
+    def present(kind, xml):
+        calls['n'] += 1
+        raise hrana_http.HranaHttpError(message)
+
+    _applied_duplicate(monkeypatch, present)
+    result = ingest.ingest_xml(TRADE_XML)
+    assert result['ok'] is False
+    assert result['outcome'] == 'coverage_unverified'
+    assert result['persistence_confirmed'] is False
+    assert calls['n'] == ingest._COVERAGE_READ_ATTEMPTS
+
+
+def test_nontransient_coverage_error_does_not_retry(monkeypatch):
+    calls = {'n': 0}
+
+    def present(kind, xml):
+        calls['n'] += 1
+        raise hrana_http.HranaHttpError('offline')
+
+    _applied_duplicate(monkeypatch, present)
+    result = ingest.ingest_xml(TRADE_XML)
+    assert result['persistence_confirmed'] is False
+    assert result['ok'] is False
+    assert calls['n'] == 1
+
+
+def test_coverage_budget_exhaustion_does_not_retry(monkeypatch):
+    calls = {'n': 0}
+
+    def present(kind, xml):
+        calls['n'] += 1
+        raise TimeoutError('duplicate coverage verification budget exhausted')
+
+    _applied_duplicate(monkeypatch, present)
+    result = ingest.ingest_xml(TRADE_XML)
+    assert result['persistence_confirmed'] is False
+    assert calls['n'] == 1

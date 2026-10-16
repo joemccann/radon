@@ -64,42 +64,45 @@ def mark_flex_delivery_applied(content_sha256: str) -> bool:
 # failure pages on it rather than on a new key: an uncatalogued key is invisible
 # and a scheduled one for a no-cadence signal ages to stale and pages forever.
 HEALTH_SERVICE = "flex-pull"
+# One extra coverage read. hrana_http closes the keep-alive socket before
+# raising RemoteDisconnected, so the next delivery_rows_present opens a new
+# connection. A standing failure still returns coverage_unverified and the
+# oneshot exits 1.
+_COVERAGE_READ_ATTEMPTS = 2
+_TRANSIENT_COVERAGE_MARKERS = (
+    "RemoteDisconnected:",
+    "TimeoutError:",
+    "timed out",
+    "ConnectionResetError:",
+    "ConnectionAbortedError:",
+    "BrokenPipeError:",
+    "URLError:",
+    "IncompleteRead:",
+    "BadStatusLine:",
+    "Remote end closed connection",
+    "Connection reset",
+)
+
+
+def _is_transient_coverage_read(exc: BaseException) -> bool:
+    """True for a dropped Turso read. False for a budget or statement error.
+
+    The verification budget raises TimeoutError('duplicate coverage
+    verification budget exhausted'). That walk is already over, so it must
+    not start again.
+    """
+    if isinstance(exc, TimeoutError) and "budget exhausted" in str(exc):
+        return False
+    text = f"{type(exc).__name__}: {exc}"
+    return any(marker in text for marker in _TRANSIENT_COVERAGE_MARKERS)
+
+
 # The cash-flows row. The monitor daemon's cash_flow_sync handler wrote it until
 # 2026-09-02 by spawning a no-source SendRequest run that exited
 # EXIT_FLEX_SEND_DISABLED daily. This ingest is the only path that writes
 # `cash_flows`, so it owns the heartbeat the watchdog's daily window and the
 # `/cash-flows` lozenge read.
 CASH_FLOW_HEALTH_SERVICE = "cash-flow-sync"
-
-
-# A dropped Turso read during duplicate verification. The local 15s walk
-# budget is not in this set: exhausting it means the check did not finish,
-# which stays coverage_unverified.
-_COVERAGE_BUDGET_EXHAUSTED = "duplicate coverage verification budget exhausted"
-_TRANSIENT_COVERAGE_MARKERS = (
-    "RemoteDisconnected",
-    "TimeoutError",
-    "timed out",
-    "ConnectionResetError",
-    "ConnectionAbortedError",
-    "BrokenPipeError",
-    "URLError",
-    "Remote end closed",
-    "Connection refused",
-    "HTTP 429",
-    "HTTP 500",
-    "HTTP 502",
-    "HTTP 503",
-    "HTTP 504",
-)
-
-
-def _is_transient_coverage_read(exc: BaseException) -> bool:
-    """True when the coverage read failed before it could see the rows."""
-    text = f"{type(exc).__name__}: {exc}"
-    if _COVERAGE_BUDGET_EXHAUSTED in text:
-        return False
-    return any(marker in text for marker in _TRANSIENT_COVERAGE_MARKERS)
 
 
 def delivery_rows_present(kind: str, xml_text: str) -> bool:
@@ -245,34 +248,40 @@ def ingest_xml(
                 "error": "claim is in_progress from an earlier run; retried once stale",
                 "source_path": source_path,
             }
-        try:
-            if (
-                status == "applied"
-                and kind == ACTIVITY
-                and not delivery_rows_present(kind, xml_text)
-            ):
-                # Suppressed TWR persist writes no series, so an applied
-                # activity claim can lack its NAV dates. Insert the missing
-                # ones. Cash that is absent stays unverified; do not replay.
-                _repair_unmirrored_activity_nav(xml_text)
-            confirmed = status == "applied" and delivery_rows_present(kind, xml_text)
-        except Exception as exc:
-            # A verification read failure does not authorize replay of the
-            # non-idempotent ingest. Retain the claim either way. A dropped
-            # connection is not a missing row: the next timer reads again.
-            # A statement error still reports unknown coverage.
-            print(f"[flex-ingest] duplicate coverage unavailable: {exc}", file=sys.stderr)
-            if _is_transient_coverage_read(exc):
-                return {
-                    "ok": True,
-                    "outcome": "coverage_unread",
-                    "persistence_confirmed": False,
-                    "classified_as": kind,
-                    "content_sha256": digest,
-                    "error": f"duplicate coverage unread: {exc}",
-                    "source_path": source_path,
-                }
-            confirmed = False
+        confirmed = False
+        for attempt in range(_COVERAGE_READ_ATTEMPTS):
+            try:
+                if (
+                    status == "applied"
+                    and kind == ACTIVITY
+                    and not delivery_rows_present(kind, xml_text)
+                ):
+                    # Suppressed TWR persist writes no series, so an applied
+                    # activity claim can lack its NAV dates. Insert the missing
+                    # ones. Cash that is absent stays unverified; do not replay.
+                    _repair_unmirrored_activity_nav(xml_text)
+                confirmed = status == "applied" and delivery_rows_present(kind, xml_text)
+                break
+            except Exception as exc:
+                # A verification read failure does not authorize replay of the
+                # non-idempotent ingest. A dropped keep-alive is retried once.
+                # Anything still unread stays unknown and retains its claim.
+                retry = (
+                    attempt + 1 < _COVERAGE_READ_ATTEMPTS
+                    and _is_transient_coverage_read(exc)
+                )
+                if retry:
+                    print(
+                        f"[flex-ingest] duplicate coverage read retry: {exc}",
+                        file=sys.stderr,
+                    )
+                    continue
+                confirmed = False
+                print(
+                    f"[flex-ingest] duplicate coverage unavailable: {exc}",
+                    file=sys.stderr,
+                )
+                break
         if not confirmed:
             message = "applied delivery lacks verified persisted-row coverage; operator reconciliation required"
             if kind == ACTIVITY:

@@ -3062,13 +3062,13 @@ authenticated and `database` up.
   `coverage_unverified` (`flex-pull-trade-coverage` or operator
   reconciliation). `twr_status=degraded` is `flex-pull-twr-degraded-exit`.
   `Result=timeout` is `flex-pull-ingest-timeout`.
-- **Remediation (code):** a transient coverage read returns
-  `outcome=coverage_unread` (`ok` true, claim retained, no replay, no
-  cash-flow-sync error). The puller does not count it as a new statement
-  and does not fail the oneshot. The ok heartbeat note is
-  `class=coverage_unread`. The next timer reads again. A real gap still
-  exits 1. Do not `reset-failed` for this page when the retry already
-  exited 0.
+- **Remediation (code), superseded by bounded retries:** retry a dropped
+  coverage read once and require actual persisted-row confirmation. A
+  recovered read returns `outcome=duplicate` and can report an ok cycle.
+  Persistent unread coverage remains `coverage_unverified` and exits 1.
+  Claims remain applied and cash/journal ingestion is never replayed.
+  This replaces the earlier nonfatal `coverage_unread` policy; see
+  `flex-pull-coverage-read-disconnect` for the current retry contract.
 - **Regression:**
   `scripts/tests/test_flex_pull_coverage_unread.py`.
 - **Code:** `scripts/flex_delivery_ingest.py` (`_is_transient_coverage_read`,
@@ -3098,6 +3098,9 @@ duplicate.** Peak: 2026-09-22 11:35Z, page `e1297eea…`.
 - **Discriminating check:** `classified_as=trades` and
   `outcome=coverage_unverified` on an applied duplicate whose missing
   Flex tradeIDs are covered by individual IB fills (this case).
+  A preceding `[flex-ingest] duplicate coverage unavailable:
+  RemoteDisconnected` (or another transport error on the coverage read)
+  is `flex-pull-coverage-read-disconnect`, not missing rows.
   A preceding `duplicate coverage unavailable:` line whose text is
   `RemoteDisconnected`, a read `TimeoutError`, or a connection reset
   is `flex-pull-coverage-unread`: the rows were not read.
@@ -3260,6 +3263,54 @@ Peak: 2026-09-22 12:35Z, page `d3b66eaf…`.
   `test_flex_from_file.py::test_suppressed_statement_still_records_nav_points`.
 - **Code:** `scripts/flex_delivery_ingest.py` (`_repair_unmirrored_activity_nav`),
   `scripts/perf_twr_builder.py` (`nav_points`, `_nav_snapshot_rows`).
+
+---
+
+## flex-pull-coverage-read-disconnect
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when an applied Trade_History duplicate's coverage read
+dies on one Turso disconnect.** Peak: 2026-10-16 11:35Z, page
+`c96336153e8157df025f71943e1824c9`. The 08:30 ET retry (12:30Z) exited 0.
+
+- **Mechanism:** newest-first applied today's Equity_Summary (cash exit 0,
+  `perf_twr` mirrored). `Trade_History.20261014` was already an applied
+  claim. `delivery_rows_present` reused the hrana keep-alive socket and
+  raised `HranaHttpError: RemoteDisconnected: Remote end closed connection
+  without response`. The except treated every read exception as
+  `coverage_unverified` / `operator reconciliation required`. The puller
+  exited 1. `Type=oneshot` has no `Restart=`, so `NRestarts=0`. The claim
+  stayed applied. At diagnosis `:8321/health/lite` returned HTTP 200 and
+  Python Turso canary `SELECT 1` succeeded (71 ms). The 12:30 retry exited 0.
+- **Detection:** journal `[flex-ingest] duplicate coverage unavailable:
+  RemoteDisconnected` then `[flex-pull] … ingest_failed:{… 'outcome':
+  'coverage_unverified', 'classified_as': 'trades' …}` on an applied
+  Trade_History. `systemctl show` at page time is `exit-code` / `0`.
+  A later same-day timer can already be `Result=success`.
+- **Discriminating check:** the coverage read itself raised a transport
+  error (`RemoteDisconnected`, connection reset, read timed out). Turso
+  canary `SELECT 1` succeeds, and a same-morning sibling write (perf_twr
+  mirror, cash sync) succeeded in that run. Canary fail is a Turso
+  platform outage: stand down, do not restart-flap. `classified_as=trades`
+  with `coverage_unverified` and no transport line is
+  `flex-pull-trade-coverage` (real missing rows or a quantity gap).
+  `Result=timeout` is `flex-pull-ingest-timeout`. If `/health/lite` is
+  down too, the API is the incident. Stand down.
+- **Remediation (code):** retry one transient coverage read. hrana closes
+  the dead socket before raising, so the retry opens a new connection.
+  A confirmed duplicate returns `outcome=duplicate`. A statement error,
+  a verification-budget timeout, or a second transport failure still
+  returns `coverage_unverified` and the oneshot exits 1. Do not replay
+  the delivery. Do not restart-flap. The 08:30 ET timer retries. After
+  deploy, `systemctl reset-failed radon-flex-pull.service` only if that
+  retry has not already exited 0.
+- **Regression:**
+  `scripts/tests/test_rel226_delivery_coverage.py::test_trade_duplicate_remote_disconnect_retries_and_confirms`,
+  `test_persistent_trade_coverage_disconnect_stays_unverified`,
+  `test_nontransient_coverage_error_does_not_retry`,
+  `test_coverage_budget_exhaustion_does_not_retry`.
+- **Code:** `scripts/flex_delivery_ingest.py` (`_is_transient_coverage_read`,
+  the coverage-read loop in `ingest_xml`).
 
 ---
 
@@ -4008,3 +4059,5 @@ service_health write raises.** Peak: 2026-10-08 22:14Z, page
 2026-10-16 ordered-merge verification: CI38968359522 / job117200713229 reproduced three retry-control regressions (3031 other tests passed). Each GET retry now consumes the remaining per-run and OpenRouter budgets; POSTs with lost responses are not replayed. No local suites.
 
 2026-10-16 ordered-merge verification: CI38968332478 / job117200674258 reproduced all four lost-write-response regressions (645 other tests passed). Retry only proven SELECT pipelines and retain all preceding cap, closure and pool-retirement defenses. A lost status line is never evidence that a write did not commit.
+
+2026-10-16 ordered-merge reconciliation: combined head08540ee2, CI38968880813 / job117208493390 reproduced four legacy nonfatal-read assertions (1599 other tests passed). Preserve the later stricter policy: a recovered check must prove persisted coverage; repeated disconnects/timeouts remain unverified and fail. Keep no-replay, real-gap, statement-error and exhausted-budget controls. Existing activity NAV repair remains an idempotent saved-statement repair, not cash/journal replay.
