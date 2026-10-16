@@ -9,6 +9,16 @@
 - Visible matching labels are not proof of a complete chart. Require explicit full-body completeness in both source-image matching and final publication verification; missing verdicts fail closed. Compare repaired pixels to the original full page before replacing a published asset.
 
 # Lessons
+## 2026-10-16: A coverage read disconnect is not missing Flex rows
+
+- `flex-pull-trade-coverage` is for an applied duplicate whose journal
+  check finished and found a real gap. Page `c96336153e8157df` logged
+  `duplicate coverage unavailable: RemoteDisconnected` and then the same
+  `coverage_unverified` / operator-reconciliation string. The 12:30 retry
+  exited 0. The rows were there. The keep-alive read died.
+- Do not send that file to operator reconciliation. Retry the coverage
+  read once. Stand down only when the Turso canary fails too.
+
 ## 2026-10-09 — IR PR titles are one sentence, never the page dump
 
 - `format_ir_pr_title` used to prefix the 32-hex page id and keep the

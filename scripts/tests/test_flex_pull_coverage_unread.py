@@ -72,17 +72,20 @@ def _drive(tmp_path, monkeypatch, coverage):
 
 
 def test_remote_disconnect_on_applied_trade_duplicate_does_not_fail_the_oneshot(tmp_path, monkeypatch):
-    """Reproduce 2026-10-16 11:30Z: a dropped coverage read must not page."""
+    """A dropped read that confirms on retry must not page or replay ingest."""
+    calls = []
 
     def coverage(*_a, **_k):
-        raise HranaHttpError(REMOTE_DISCONNECTED)
+        calls.append(1)
+        if len(calls) == 1:
+            raise HranaHttpError(REMOTE_DISCONNECTED)
+        return True
 
     code, beats = _drive(tmp_path, monkeypatch, coverage)
     assert code == 0
     assert beats[-1][0] == "ok"
-    note = beats[-1][1]
-    assert note["class"] == "coverage_unread"
-    assert "operator reconciliation" not in note["message"]
+    assert len(calls) == 2
+    assert "coverage_unread" not in str(beats[-1][1])
 
 
 def test_statement_error_on_applied_trade_duplicate_still_fails_the_oneshot(tmp_path, monkeypatch):
@@ -109,27 +112,36 @@ def _patch_applied_duplicate(monkeypatch, coverage):
     monkeypatch.setattr(ingest, "delivery_rows_present", coverage)
 
 
-def test_remote_disconnect_returns_coverage_unread_without_replay(monkeypatch):
+def test_persistent_disconnect_returns_unverified_without_replay(monkeypatch):
+    calls = []
     def coverage(*_a, **_k):
+        calls.append(1)
         raise HranaHttpError(REMOTE_DISCONNECTED)
 
     _patch_applied_duplicate(monkeypatch, coverage)
     result = ingest.ingest_xml(_trade_xml(), source_path="Trade_History.20261015.xml")
-    assert result["ok"] is True
-    assert result["outcome"] == "coverage_unread"
+    assert result["ok"] is False
+    assert result["outcome"] == "coverage_unverified"
     assert result["persistence_confirmed"] is False
     assert result["classified_as"] == ingest.TRADES
-    assert "operator reconciliation" not in result.get("error", "")
+    assert "operator reconciliation" in result.get("error", "")
+    assert len(calls) == ingest._COVERAGE_READ_ATTEMPTS
 
 
-def test_hrana_read_timeout_is_coverage_unread(monkeypatch):
+def test_hrana_read_timeout_confirms_on_retry(monkeypatch):
+    calls = []
     def coverage(*_a, **_k):
-        raise HranaHttpError("TimeoutError: The read operation timed out")
+        calls.append(1)
+        if len(calls) == 1:
+            raise HranaHttpError("TimeoutError: The read operation timed out")
+        return True
 
     _patch_applied_duplicate(monkeypatch, coverage)
     result = ingest.ingest_xml(_trade_xml())
-    assert result["outcome"] == "coverage_unread"
+    assert result["outcome"] == "duplicate"
     assert result["ok"] is True
+    assert result["persistence_confirmed"] is True
+    assert len(calls) == 2
 
 
 def test_verification_budget_exhaustion_stays_unverified(monkeypatch):
@@ -152,13 +164,19 @@ def test_activity_remote_disconnect_does_not_mark_cash_flow_sync_error(monkeypat
         '</FlexStatement></FlexStatements></FlexQueryResponse>'
     )
     health: list = []
+    calls = []
     monkeypatch.setattr(ingest, "_heartbeat_cash_flow_sync", lambda *a, **k: health.append(a))
 
     def coverage(*_a, **_k):
-        raise HranaHttpError(REMOTE_DISCONNECTED)
+        calls.append(1)
+        if len(calls) == 1:
+            raise HranaHttpError(REMOTE_DISCONNECTED)
+        return True
 
     _patch_applied_duplicate(monkeypatch, coverage)
     result = ingest.ingest_xml(xml)
-    assert result["outcome"] == "coverage_unread"
+    assert result["outcome"] == "duplicate"
+    assert result["persistence_confirmed"] is True
     assert result["classified_as"] == ingest.ACTIVITY
-    assert health == []
+    assert health == [("ok",)]
+    assert len(calls) == 3
