@@ -832,6 +832,7 @@ jobs:
           e2e/hyad-tab.spec.ts
           e2e/record-high-breadth-tab.spec.ts
           e2e/research-workbench.spec.ts
+          e2e/newsfeed-pdf-tab.spec.ts
           e2e/newsfeed-research-media.spec.ts
           e2e/newsfeed-generated-charts.spec.ts
           e2e/newsfeed-sharing.spec.ts

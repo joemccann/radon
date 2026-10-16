@@ -1017,6 +1017,12 @@ Exact-head CI repair (2026-10-07): initial scripts-df gate reported 1 failed / 1
 
 2026-10-15 PR #1076 conflict resolution: preserve main #1081 portfolio GET ceiling of 2,000/minute through the shared admission constant; retain two-second snapshot expiry and three-tab demo budgets. Regression exhausts the configured user ceiling after proving three-tab polling fits. Exact-head GitHub verification pending; no local suites.
 
+## Nightly remediation 2026-10-15
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-325 / R-736 | DONE | RED 1 failed / 25 passed; GREEN 42 passed (chokepoint + chain close + correlation banner) | Gate 3 reads the resolved `closeOutAction` as well as a declared `closeOut`. A chain sell of the exact held contract no longer renders as an add inside a breached cluster. Quantity above the holding still does. No placement, halt, or broker path changed. |
+
 ## Nightly remediation 2026-10-16
 
 | ID | Status | Red / green evidence | Change |

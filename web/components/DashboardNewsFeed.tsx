@@ -105,7 +105,7 @@ function PaginationBar({
 export default function DashboardNewsFeed() {
   const { posts, loading, refreshing, error, lastUpdated, refresh } = useNewsfeedPosts();
   const { items: headlines, status: headlinesStatus } = useHeadlines();
-  const [feedTab, setFeedTab] = useState<"commentary" | "headlines" | "held">("commentary");
+  const [feedTab, setFeedTab] = useState<"commentary" | "pdfs" | "headlines" | "held">("commentary");
   const [currentPage, setCurrentPage] = useState(1);
   const [lightboxFocus, setLightboxFocus] = useState<NewsfeedLightboxFocus | null>(null);
   const sectionRef = useRef<HTMLElement>(null);
@@ -176,22 +176,24 @@ export default function DashboardNewsFeed() {
   }, []);
 
   const filteredPosts = useMemo(() => {
-    const visible = hiddenPosts.size === 0 ? posts : posts.filter((post) => !hiddenPosts.has(post.id));
+    const visible = posts.filter((post) =>
+      !hiddenPosts.has(post.id) && (feedTab !== "pdfs" || Boolean(post.source)),
+    );
     if (selectedTags.size === 0) return visible;
     const required = Array.from(selectedTags);
     return visible.filter((post) => {
       const postTags = Array.isArray(post.tags) ? post.tags : [];
       return required.every((t) => postTags.includes(t));
     });
-  }, [posts, selectedTags, hiddenPosts]);
+  }, [posts, selectedTags, hiddenPosts, feedTab]);
 
   const totalPages = Math.max(1, Math.ceil(filteredPosts.length / PAGE_SIZE));
 
-  // Reset to page 1 whenever the filter changes (selectedTags identity changes).
+  // Reset to page 1 whenever the tag filter or feed collection changes.
   // Also clamp if current page exceeds the new totalPages after data refresh.
   useEffect(() => {
     setCurrentPage(1);
-  }, [selectedTags]);
+  }, [selectedTags, feedTab]);
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -260,6 +262,8 @@ export default function DashboardNewsFeed() {
   }, [safePage, totalPages, scrollToTop]);
 
   const commentaryOpen = feedTab === "commentary";
+  const pdfsOpen = feedTab === "pdfs";
+  const articlesOpen = commentaryOpen || pdfsOpen;
   const heldOpen = feedTab === "held";
   // Research provenance only reaches the operator, so its presence is the operator signal for the Held review tab.
   const showHeldTab = posts.some((post) => post.source);
@@ -267,11 +271,11 @@ export default function DashboardNewsFeed() {
   // Headlines they read the selected transport's status and newest print time,
   // not the commentary scraper's.
   const newestHeadlineMs = newestHeadlineTime(headlines);
-  const sampleAt = commentaryOpen ? (lastUpdated ? new Date(lastUpdated) : null) : heldOpen ? null : (newestHeadlineMs == null ? null : new Date(newestHeadlineMs));
+  const sampleAt = articlesOpen ? (lastUpdated ? new Date(lastUpdated) : null) : heldOpen ? null : (newestHeadlineMs == null ? null : new Date(newestHeadlineMs));
   const lastSample = sampleAt
     ? sampleAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
     : "---";
-  const captureBasis = commentaryOpen
+  const captureBasis = articlesOpen
     ? (error ? "fault" : loading ? "awaiting" : "scraper")
     : heldOpen ? "operator review" : (headlinesStatus === "down"
       ? "fault"
@@ -280,10 +284,12 @@ export default function DashboardNewsFeed() {
         : process.env.NEXT_PUBLIC_RADON_DEMO === "1"
           ? "flash"
           : "hub");
-  const live = commentaryOpen
+  const live = articlesOpen
     ? !loading && !error && posts.length > 0
     : !heldOpen && headlinesStatus === "live";
-  const sourceValue = commentaryOpen
+  const sourceValue = pdfsOpen
+    ? "PDF research"
+    : commentaryOpen
     ? (posts.some((p) => p.source) ? "Market Ear + Research" : "Market Ear")
     : heldOpen
       ? "Held research"
@@ -312,7 +318,7 @@ export default function DashboardNewsFeed() {
           {live ? (
             <span className={`news-feed-live-badge ${styles.liveBadge}`}>LIVE</span>
           ) : null}
-          {commentaryOpen ? (
+          {articlesOpen ? (
           <button
             type="button"
             className={`news-feed-refresh news-feed-refresh--rail ${styles.refresh}`}
@@ -346,6 +352,18 @@ export default function DashboardNewsFeed() {
         <button
           type="button"
           role="tab"
+          id="feed-tab-pdfs"
+          data-testid="feed-tab-pdfs"
+          aria-selected={pdfsOpen}
+          aria-controls="feed-panel-pdfs"
+          className={`feed-tabs__tab${pdfsOpen ? " feed-tabs__tab--on" : ""}`}
+          onClick={() => setFeedTab("pdfs")}
+        >
+          PDFs
+        </button>
+        <button
+          type="button"
+          role="tab"
           id="feed-tab-headlines"
           data-testid="feed-tab-headlines"
           aria-selected={feedTab === "headlines"}
@@ -371,12 +389,12 @@ export default function DashboardNewsFeed() {
         ) : null}
       </div>
       <div className="dashboard-news__body section-body">
-        {commentaryOpen ? (
+        {articlesOpen ? (
           <div
-            id="feed-panel-commentary"
+            id={pdfsOpen ? "feed-panel-pdfs" : "feed-panel-commentary"}
             role="tabpanel"
-            aria-labelledby="feed-tab-commentary"
-            data-testid="feed-panel-commentary"
+            aria-labelledby={pdfsOpen ? "feed-tab-pdfs" : "feed-tab-commentary"}
+            data-testid={pdfsOpen ? "feed-panel-pdfs" : "feed-panel-commentary"}
           >
         <NewsfeedTagBar
           selectedTags={selectedTags}
@@ -388,7 +406,9 @@ export default function DashboardNewsFeed() {
         ) : error ? (
           <ErrorToast message={userErrorMessage(error, 'News could not be loaded. Try again.')} />
         ) : posts.length === 0 ? (
-          <div className="news-feed-empty">No market analysis captured yet.</div>
+          <div className="news-feed-empty">{pdfsOpen ? "No PDF articles available." : "No market analysis captured yet."}</div>
+        ) : pdfsOpen && !posts.some((post) => post.source && !hiddenPosts.has(post.id)) ? (
+          <div className="news-feed-empty">No PDF articles available.</div>
         ) : items.length === 0 ? (
           <div className="news-feed-empty news-feed-empty-filtered">
             <span>No posts match the selected filter.</span>
