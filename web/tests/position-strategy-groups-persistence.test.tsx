@@ -51,7 +51,7 @@ describe("position strategy browser preferences", () => {
   it("retains the previous layout on storage failure, then persists undo", () => {
     const original = source();
     const hook = renderHook(() => usePositionStrategyGroups([original]));
-    const write = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("quota"); });
+    const write = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => { throw new Error("quota"); });
     act(() => { expect(hook.result.current.apply(original, suggestStrategyGroups(original)!)).toBe(false); });
     expect(hook.result.current.positions).toEqual([original]);
     expect(hook.result.current.error).toMatch(/could not be saved/i);
