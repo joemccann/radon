@@ -13,6 +13,7 @@ import json
 import socket
 import sys
 import threading
+import time
 
 import pytest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -186,6 +187,63 @@ def test_fresh_socket_closed_before_status_does_not_open_another(monkeypatch):
             hrana_http.hrana_query("SELECT 1")
         assert connections["n"] == 1
         assert posts["n"] == 1
+    finally:
+        _stop(server, thread)
+
+
+def test_status_timeout_on_reused_socket_opens_a_fresh_one(monkeypatch):
+    """A slow status line is not the idle-close retry.
+
+    The cash-flow heartbeat leaves a keep-alive in the pool. If the next
+    pipeline times out waiting for a status line, that socket stays
+    request-sent. The following coverage read must open a new connection
+    and return its own row. Reusing the timed-out socket raises
+    CannotSendRequest and the oneshot still exits 1.
+    """
+    posts = {"n": 0}
+    connections = {"n": 0}
+    lock = threading.Lock()
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def setup(self):
+            super().setup()
+            connections["n"] += 1
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", "0"))
+            self.rfile.read(length)
+            with lock:
+                posts["n"] += 1
+                n = posts["n"]
+            if n == 2:
+                time.sleep(1.0)
+            payload = _pipeline_body(str(n))
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Connection", "keep-alive")
+                self.end_headers()
+                self.wfile.write(payload)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                return
+
+        def log_message(self, *_args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    _point_at(server, monkeypatch)
+    try:
+        assert hrana_http.hrana_query("SELECT 1", timeout=0.3) == [("1",)]
+        with pytest.raises(hrana_http.HranaHttpError, match="TimeoutError|timed out"):
+            hrana_http.hrana_query("SELECT 1", timeout=0.3)
+        assert hrana_http.hrana_query("SELECT 1", timeout=0.3) == [("3",)]
+        assert connections["n"] == 2
+        assert posts["n"] == 3
     finally:
         _stop(server, thread)
 
