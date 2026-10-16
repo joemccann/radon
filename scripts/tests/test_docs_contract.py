@@ -2172,10 +2172,15 @@ class TestDocumentation20261014:
 
     def test_open_portfolio_poll_names_the_route_ceiling(self):
         shell = (_ROOT / "web/components/WorkspaceShell.tsx").read_text()
-        match = re.search(r"MarketState\.OPEN \? ([\d_]+) : ([\d_]+)", shell)
-        assert match, "WorkspaceShell no longer states the open and off-hours poll"
-        open_ms = int(match.group(1).replace("_", ""))
-        off_ms = int(match.group(2).replace("_", ""))
+        assert "marketState === MarketState.OPEN" in shell
+        assert "? MARKET_HOURS_ACCOUNT_POLL_MS" in shell
+        assert ": OFF_HOURS_ACCOUNT_POLL_MS" in shell
+        budget = (_ROOT / "web/lib/accountPollBudget.ts").read_text()
+        open_match = re.search(r"export const MARKET_HOURS_ACCOUNT_POLL_MS = ([\d_]+)", budget)
+        off_match = re.search(r"export const OFF_HOURS_ACCOUNT_POLL_MS = ([\d_]+)", budget)
+        assert open_match and off_match
+        open_ms = int(open_match.group(1).replace("_", ""))
+        off_ms = int(off_match.group(1).replace("_", ""))
         assert "pollIntervalMs: accountPollIntervalMs" in shell
         assert "useOrders(shouldAutoSyncOrders, accountPollIntervalMs)" in shell
         route = (_ROOT / "web/app/api/portfolio/route.ts").read_text()
