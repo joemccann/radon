@@ -72,6 +72,36 @@ HEALTH_SERVICE = "flex-pull"
 CASH_FLOW_HEALTH_SERVICE = "cash-flow-sync"
 
 
+# A dropped Turso read during duplicate verification. The local 15s walk
+# budget is not in this set: exhausting it means the check did not finish,
+# which stays coverage_unverified.
+_COVERAGE_BUDGET_EXHAUSTED = "duplicate coverage verification budget exhausted"
+_TRANSIENT_COVERAGE_MARKERS = (
+    "RemoteDisconnected",
+    "TimeoutError",
+    "timed out",
+    "ConnectionResetError",
+    "ConnectionAbortedError",
+    "BrokenPipeError",
+    "URLError",
+    "Remote end closed",
+    "Connection refused",
+    "HTTP 429",
+    "HTTP 500",
+    "HTTP 502",
+    "HTTP 503",
+    "HTTP 504",
+)
+
+
+def _is_transient_coverage_read(exc: BaseException) -> bool:
+    """True when the coverage read failed before it could see the rows."""
+    text = f"{type(exc).__name__}: {exc}"
+    if _COVERAGE_BUDGET_EXHAUSTED in text:
+        return False
+    return any(marker in text for marker in _TRANSIENT_COVERAGE_MARKERS)
+
+
 def delivery_rows_present(kind: str, xml_text: str) -> bool:
     """Independently verify duplicate coverage over bounded, read-only Hrana."""
     from db.hrana_http import hrana_query
@@ -228,9 +258,21 @@ def ingest_xml(
             confirmed = status == "applied" and delivery_rows_present(kind, xml_text)
         except Exception as exc:
             # A verification read failure does not authorize replay of the
-            # non-idempotent ingest; report unknown coverage and retain its claim.
-            confirmed = False
+            # non-idempotent ingest. Retain the claim either way. A dropped
+            # connection is not a missing row: the next timer reads again.
+            # A statement error still reports unknown coverage.
             print(f"[flex-ingest] duplicate coverage unavailable: {exc}", file=sys.stderr)
+            if _is_transient_coverage_read(exc):
+                return {
+                    "ok": True,
+                    "outcome": "coverage_unread",
+                    "persistence_confirmed": False,
+                    "classified_as": kind,
+                    "content_sha256": digest,
+                    "error": f"duplicate coverage unread: {exc}",
+                    "source_path": source_path,
+                }
+            confirmed = False
         if not confirmed:
             message = "applied delivery lacks verified persisted-row coverage; operator reconciliation required"
             if kind == ACTIVITY:
