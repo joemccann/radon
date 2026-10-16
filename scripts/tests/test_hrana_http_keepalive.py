@@ -203,3 +203,25 @@ def test_reused_close_and_fresh_retry_close_raises_once(monkeypatch):
         assert posts["n"] == 3
     finally:
         _stop(server, thread)
+
+
+@pytest.mark.parametrize("sql", [
+    "INSERT INTO counter(value) VALUES(1)",
+    "UPDATE counter SET value=value+1",
+    "DELETE FROM counter WHERE value=1",
+    "WITH chosen AS (SELECT 1) UPDATE counter SET value=value+1",
+])
+def test_lost_write_response_never_replays_the_statement(monkeypatch, sql):
+    """A peer can commit a POST before disconnecting without a status line."""
+    posts = {"n": 0}
+    connections = {"n": 0}
+    server, thread = _serve(posts, connections, drop_on={2})
+    _point_at(server, monkeypatch)
+    try:
+        assert hrana_http.hrana_query("SELECT 1") == [("1",)]
+        with pytest.raises(hrana_http.HranaHttpError):
+            hrana_http.hrana_execute(sql)
+        assert posts["n"] == 2, "unknown write outcome must not send another POST"
+        assert connections["n"] == 1
+    finally:
+        _stop(server, thread)
