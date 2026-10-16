@@ -3159,3 +3159,19 @@ The portfolio GET budget change to 2000/min (#1081) and the sell-to-close classi
 Standing sweeps HOLD: halt and limits at `scripts/clients/ib_client.py:708-752,864-910`, wire `placeOrder` at `:752,910`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:5975,6084,6162`, exit ack at `scripts/monitor_daemon/handlers/exit_orders.py:208-241`, Hrana daemon-state at `scripts/db/writer.py:2739-2752`. Whole-repo `placeOrder` / `place_order` enumeration contains only those two guarded funnels. No new `service_health` writer in the range. NEW_FINDINGS and the REL-021b remainder have no new changed-surface instance. Operator-only items stay NF-1, NF-4, REL-087 / R-232, REL-261 / R-682.
 
 Audited through: a92472f04d2aadfab583332ebf019df14a5e1408 on 2026-10-15 — 1 new finding
+
+## Delta audit 2026-10-16
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-737 / REL-326 | P1 | `scripts/db/hrana_http.py` `_pooled_open`; same pool in `scripts/api/db_http.py` | Keep-alive reads at most `_MAX_RESPONSE_BYTES` and returns that slice while the socket still holds the tail (`hrana_http.py` before the fix, `resp.read(_MAX_RESPONSE_BYTES)` with no `isclosed` check). The next pipeline on that thread is written and then discarded: `http.client.getresponse` raises `ResponseNotReady: Request-sent`. A committed follow-up write is reported as a transport error. The API transaction guard `read(_MAX_RESPONSE_BYTES + 1)` cannot see past the pool's earlier clip, so an over-cap batch body no longer trips `transaction response exceeds limit` on the real socket. Acceptance: an over-cap body fails that call, the server has seen one pipeline, and the next pipeline on the same thread returns its body with exactly one additional request. RED 2 failed (`ResponseNotReady` on the recovered call in both pools). GREEN 18 passed in the two transport files; focused neighborhood 86 passed. |
+
+Range `a92472f04d2aadfab583332ebf019df14a5e1408..b79e1f5c1f22609052560148be027662f283f57b`: 5 commits, 41 paths. Open draft #1087 already owns R-736 / REL-325 and was not repeated or renumbered. Highest IDs after tonight: R-737 / REL-326.
+
+Reviewed and not filed: vol-cone terminal upsert now retries only this run's fetched rows (`scripts/fetch_vol_cone.py` `_mirror_snapshot`); per-name checkpoints still persist each delta, and a Turso read failure still falls back to the JSON snapshot for the scan. Portfolio admission keeps the 2,000/minute ceiling and the 2s snapshot TTL (`web/lib/accountPollBudget.ts`). Strategy groups are a browser projection; ticket links use `sourceFor` (`web/lib/usePositionStrategyGroups.ts`). No new `placeOrder` site and no new `service_health` writer.
+
+Inherited operator-only items remain: NF-1 (live bankroll admission), NF-4 (legacy Flex reconstruction), REL-087 / R-232 (container lifecycle design), REL-261 / R-682 (recover original task before reuse). NEW_FINDINGS and the REL-021b remainder have no new changed-surface instance. The stale-socket resend runs only when `request()` raises before a response and is not a lost-commit replay of R-032.
+
+Standing sweeps HOLD: halt/limits at `scripts/clients/ib_client.py:708-719,864-906`, wire `placeOrder` at `:752,910`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:5975,6084,6162`, exit ack at `scripts/monitor_daemon/handlers/exit_orders.py:224-250`, Hrana daemon-state at `scripts/db/writer.py:2739-2752`. Whole-repo `placeOrder` enumeration is only those two call sites. Codemap importers of `hrana_http.py` (56) and `db_http.py` (11) are the blast radius; the fault is in the shared pool, not in a caller.
+
+Audited through: b79e1f5c1f22609052560148be027662f283f57b on 2026-10-16 — 1 new finding
