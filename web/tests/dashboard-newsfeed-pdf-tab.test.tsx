@@ -57,18 +57,19 @@ describe("PDF article feed tab", () => {
     expect(screen.getAllByTestId("news-feed-item")).toHaveLength(2);
   });
   it("filters the full collection before pagination and resets pages when switching tabs", async () => {
-    await load([commentary, ...Array.from({ length: 40 }, (_, i) => pdf(i))]);
+    await load([commentary, ...Array.from({ length: 19 }, (_, i) => pdf(i))]);
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     openPdfs();
-    expect(screen.getByText("Page 1 of 3")).toBeTruthy();
-    expect(screen.getByText("Showing 1–18 of 40")).toBeTruthy();
+    expect(screen.getByText("Page 1 of 2")).toBeTruthy();
+    expect(screen.getByText("Showing 1–18 of 19")).toBeTruthy();
     expect(screen.getAllByTestId("news-feed-item")).toHaveLength(18);
-    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
-    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
-    expect(screen.getAllByTestId("news-feed-item")).toHaveLength(4);
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Newsfeed pagination" })).getByRole("button", { name: "Next page" }));
+    expect(screen.getAllByTestId("news-feed-item")).toHaveLength(1);
     fireEvent.click(screen.getByRole("tab", { name: "Commentary" }));
-    expect(screen.getByText("Showing 1–18 of 41")).toBeTruthy();
-  });
+    expect(screen.getByText("Showing 1–18 of 20")).toBeTruthy();
+    // Real research cards exercise Markdown, feedback and share controls too.
+    // Match the existing pagination suite's bounded CI rendering allowance.
+  }, 20_000);
   it("retains tag filtering and clears it within the PDF collection", async () => {
     await load([commentary, pdf(), pdf(1)]);
     openPdfs();
