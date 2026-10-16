@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { closePutSubset, coverSingleShortCall, installSelectedLegFixtures } from "./selected-leg-close-fixtures";
+import { captureSelectedLegView, closePutSubset, coverSingleShortCall, installSelectedLegFixtures } from "./selected-leg-close-fixtures";
 
 test.describe.configure({ timeout: 90_000 });
 
@@ -10,6 +10,27 @@ test("selecting only held puts closes the vertical without the financing call", 
 
 test("one selected short call is covered with a BUY option order", async ({ page }, testInfo) => {
   await coverSingleShortCall(page, testInfo);
+});
+
+test("mixed-basis selected close sums measured legs and scales partial realized P&L", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const fixture = await installSelectedLegFixtures(page, "mixed");
+  await page.getByTestId("pos-leg-select-1").check();
+  await page.getByTestId("pos-leg-select-2").check();
+  await page.getByTestId("pos-trade-selected").click();
+  const ticket = page.getByTestId("position-trade-ticket");
+  await ticket.getByTestId("position-trade-qty").fill("25");
+  await ticket.getByTestId("position-trade-limit").fill("8.10");
+  await ticket.getByRole("button", { name: "Review Order", exact: true }).click();
+  const summary = ticket.getByTestId("order-confirm-summary");
+  // Retired basis = (69,969 - 11,969) * 25/100 = 14,500.
+  // Close proceeds = 8.10 * 100 * 25 = 20,250; realized P&L = 5,750.
+  await expect(summary).toContainText("Est. Realized P&L:");
+  await expect(summary).toContainText("$5,750");
+  await expect(ticket.getByTestId("position-trade-remaining-legs")).toContainText("270");
+  expect(fixture.placements).toHaveLength(0);
+  expect(fixture.pageErrors).toEqual([]);
+  await captureSelectedLegView(page, testInfo, "mixed-basis-selected-close-review");
 });
 
 test("selection survives sorting and cancellation; deselection never places an order", async ({ page }) => {

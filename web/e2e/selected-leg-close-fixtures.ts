@@ -17,8 +17,13 @@ const POSITION = {
 };
 
 type Placement = { url: string; method: string; body: unknown };
-export async function installSelectedLegFixtures(page: Page, variant: "put" | "call" = "put") {
-  const position = variant === "put" ? POSITION : {
+export async function installSelectedLegFixtures(page: Page, variant: "put" | "call" | "mixed" = "put") {
+  const position = variant === "mixed" ? {
+    ...POSITION, entry_cost: null, basis_source: "mixed",
+    legs: POSITION.legs.map((leg, index) => ({
+      ...leg, basis_source: index === 2 ? "session_fills" : "ib",
+    })),
+  } : variant === "put" ? POSITION : {
     ...POSITION, structure: "Risk Reversal Call Spread", structure_type: "Risk Reversal Call Spread",
     legs: [
       { ...POSITION.legs[0], type: "Put", strike: 230 },
