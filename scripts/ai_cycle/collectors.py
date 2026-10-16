@@ -224,16 +224,20 @@ class Transport:
             raise SourceError("Per-run time budget exhausted")
         if self.requests >= self.max_requests:
             raise SourceError("Per-run request budget exhausted")
-        # One local OpenRouter reservation covers this fetch. The retry below
-        # is the same reserved call after a read stall, not a second dataset.
-        if urlsplit(url).hostname == "openrouter.ai":
-            self._or_budget()
         # EIA's daily window often streams for most of the 25s read budget
         # (2026-10-15: one stall, no bytes, oneshot exit 1). One more attempt
-        # while the run deadline remains. HTTP errors are not retried.
-        for attempt in range(2):
+        # for GET while the run/request budgets remain. An unknown POST
+        # outcome must not be replayed; HTTP status errors are not retried.
+        attempts = 2 if body is None else 1
+        for attempt in range(attempts):
             if attempt and time.monotonic() >= self.deadline:
                 raise SourceError("Publisher transport failed")
+            if self.requests >= self.max_requests:
+                raise SourceError("Per-run request budget exhausted")
+            if urlsplit(url).hostname == "openrouter.ai":
+                self._or_budget()
+            if time.monotonic() >= self.deadline:
+                raise SourceError("Per-run time budget exhausted")
             self.requests += 1
             response = None
             try:
@@ -258,7 +262,7 @@ class Transport:
                     chunks.append(chunk)
                 return b"".join(chunks), dict(getattr(response, "headers", {}) or {})
             except requests.RequestException:
-                if attempt == 1 or time.monotonic() >= self.deadline:
+                if attempt + 1 >= attempts or time.monotonic() >= self.deadline:
                     raise SourceError("Publisher transport failed") from None
             finally:
                 if response is not None:
