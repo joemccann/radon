@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import sys
 import threading
+
+import pytest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -71,5 +73,134 @@ def test_five_sequential_pipelines_use_one_tcp_connection(monkeypatch):
         closer = getattr(hrana_http, "_close_keepalive", None)
         if closer:
             closer()
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+def test_oversized_body_rejects_and_leaves_the_next_pipeline_usable(monkeypatch):
+    """Same cap contract as the API transport. A prefix of an oversized 200
+    must not stick the thread-local socket, or the next watchdog write fails
+    before it is sent.
+    """
+    cap = hrana_http._MAX_RESPONSE_BYTES
+    over = b"X" * (cap + 1)
+    ok = json.dumps({
+        "results": [
+            {
+                "type": "ok",
+                "response": {
+                    "type": "execute",
+                    "result": {
+                        "cols": [{"name": "value"}],
+                        "rows": [[{"type": "text", "value": "kept"}]],
+                    },
+                },
+            },
+            {"type": "ok", "response": {"type": "close"}},
+        ]
+    }).encode("utf-8")
+    posts = {"n": 0}
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", "0"))
+            self.rfile.read(length)
+            posts["n"] += 1
+            payload = over if posts["n"] == 1 else ok
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *_args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address
+    monkeypatch.setenv("TURSO_DB_URL", f"http://{host}:{port}")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "token")
+    monkeypatch.setenv("RADON_DB_TEST_WRITE_OK", "1")
+    hrana_http._close_keepalive()
+    try:
+        with pytest.raises(hrana_http.HranaHttpError, match="exceeds limit"):
+            hrana_http.hrana_query("SELECT 1")
+        assert hrana_http.hrana_query("SELECT 1") == [("kept",)]
+        assert posts["n"] == 2
+    finally:
+        hrana_http._close_keepalive()
+        server.shutdown()
+        thread.join(timeout=2)
+
+def test_oversized_response_does_not_abandon_the_next_pipeline(monkeypatch):
+    """A body over the cap must fail that call only.
+
+    The keep-alive socket used to keep the unread tail. The next pipeline
+    was written onto that socket and then discarded, so a committed write
+    came back as a transport error.
+    """
+    posts: list[bytes] = []
+    small = json.dumps({
+        "results": [
+            {
+                "type": "ok",
+                "response": {
+                    "type": "execute",
+                    "result": {"cols": [], "rows": []},
+                },
+            },
+            {"type": "ok", "response": {"type": "close"}},
+        ]
+    }).encode("utf-8")
+    huge = b'{"overflow":"' + (b"x" * (hrana_http._MAX_RESPONSE_BYTES + 64))
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(length)
+            posts.append(body)
+            payload = huge if len(posts) == 1 else small
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            try:
+                self.wfile.write(payload)
+            except (BrokenPipeError, ConnectionResetError):
+                return
+
+        def log_message(self, *_args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address
+    monkeypatch.setenv("TURSO_DB_URL", f"http://{host}:{port}")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "token")
+    monkeypatch.setenv("RADON_DB_TEST_WRITE_OK", "1")
+    try:
+        try:
+            hrana_http.hrana_query("SELECT big")
+            raised = False
+        except hrana_http.HranaHttpError:
+            raised = True
+        assert raised, "an over-cap body must fail closed"
+        assert len(posts) == 1, f"the rejected read issued {len(posts)} pipelines"
+        assert hrana_http.hrana_query("SELECT 1") == []
+        assert len(posts) == 2, (
+            f"the recovered read saw {len(posts)} pipelines; "
+            "an abandoned follow-up must not be sent"
+        )
+    finally:
+        hrana_http._close_keepalive()
         server.shutdown()
         thread.join(timeout=2)
