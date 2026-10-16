@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radon Flow terminal plate</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Tokens mirror web/app/globals.css (Clear). Plate only; the app keeps its own component system. */
+:root{
+  --bg-canvas:#ffffff;--bg-panel:#ffffff;--bg-panel-raised:#e9f4ed;--bg-subtle:#f6f8f8;--line-grid:#e4eae7;
+  --signal-core:#087f53;--signal-deep:#086541;--warn:#96651c;--fault:#b5453e;--dislocation:#C026A0;--extreme:#7C3AED;--neutral:#62716d;
+  --text-primary:#172624;--text-secondary:#52645d;--text-muted:#62716d;--clear-attention-bg:#faf2e1;
+  --font-sans:"Inter",ui-sans-serif,system-ui,sans-serif;--font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,monospace;
+  --radius:8px;--radius-sm:6px;
+}
+:root[data-theme="dark"]{
+  --bg-canvas:#101714;--bg-panel:#101714;--bg-panel-raised:#202c25;--bg-subtle:#162019;--line-grid:#2c3c32;
+  --signal-core:#76d5a1;--signal-deep:#68bf8f;--warn:#F5A623;--fault:#E85D6C;--dislocation:#e55fb5;--extreme:#9e80f6;--neutral:#94a3b8;
+  --text-primary:#edf4ef;--text-secondary:#b0c1b7;--text-muted:#96aa9e;--clear-attention-bg:#30281a;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg-canvas);color:var(--text-primary);font:14px/1.5 var(--font-sans);-webkit-font-smoothing:antialiased}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.meta{font:12px/1.4 var(--font-mono);color:var(--text-muted);letter-spacing:.01em}
+.nav{height:48px;display:flex;align-items:center;gap:24px;padding:0 24px;border-bottom:1px solid var(--line-grid)}
+.wordmark{font-weight:600;letter-spacing:.04em;display:flex;align-items:center;gap:8px}
+.wordmark i{display:inline-block;width:10px;height:10px;background:var(--signal-core);border-radius:2px}
+.nav a{color:var(--text-secondary);text-decoration:none;font-size:13px}
+.nav a.on{color:var(--text-primary);font-weight:500;border-bottom:2px solid var(--signal-core);padding:14px 0}
+.nav .right{margin-left:auto;display:flex;gap:16px;align-items:center}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--signal-core);display:inline-block;margin-right:6px}
+.page{display:grid;grid-template-columns:minmax(0,1fr) 384px;gap:0;min-height:calc(100vh - 48px)}
+.main{padding:16px 16px 16px 24px;border-right:1px solid var(--line-grid);min-width:0}
+.rail{display:flex;flex-direction:column;min-width:0}
+.finding{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin:0 0 4px}
+.finding h1{font-size:18px;font-weight:600;margin:0;letter-spacing:-.01em}
+.finding .spot{font:600 22px/1 var(--font-mono);font-variant-numeric:tabular-nums}
+.finding .chg{font:13px var(--font-mono);color:var(--text-secondary)}
+.ledger{display:flex;gap:20px;flex-wrap:wrap;margin:4px 0 12px;font:13px/1.5 var(--font-mono);color:var(--text-secondary)}
+.ledger b{color:var(--text-primary);font-weight:500}
+.ledger .up{color:var(--signal-core)}.ledger .dn{color:var(--fault)}
+.toolbar{display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:13px;color:var(--text-secondary)}
+.seg{display:inline-flex;border:1px solid var(--line-grid);border-radius:var(--radius-sm);overflow:hidden}
+.seg span{padding:4px 10px;font:12px var(--font-mono);color:var(--text-secondary)}
+.seg span.on{background:var(--bg-panel-raised);color:var(--text-primary)}
+.toolbar .legend{margin-left:auto;display:flex;gap:14px;font:12px var(--font-mono);color:var(--text-muted);align-items:center;white-space:nowrap}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.legend i.call{background:var(--text-secondary)}.legend i.put{border:2px solid var(--text-secondary)}
+.legend i.lg{border-radius:2px;background:var(--signal-core);opacity:.6}.legend i.sg{border-radius:2px;background:var(--dislocation);opacity:.6}
+svg text{font-family:var(--font-mono);font-size:11px;fill:var(--text-muted)}
+svg .lbl{fill:var(--text-primary);font-weight:500}
+.chart{display:block;width:100%;height:auto}
+.panel{border-bottom:1px solid var(--line-grid);padding:12px 16px}
+.panel h2{font-size:14px;font-weight:600;margin:0 0 2px;display:flex;align-items:baseline;gap:10px}
+.panel h2 .meta{font-weight:400}
+.tape{width:100%;border-collapse:collapse;font:12px/1.3 var(--font-mono);font-variant-numeric:tabular-nums;margin-top:8px}
+.tape th{text-align:left;font-weight:500;color:var(--text-muted);padding:4px 4px;border-bottom:1px solid var(--line-grid);font-size:11px}
+.tape td{padding:5px 4px;border-bottom:1px solid var(--line-grid);white-space:nowrap}
+.tape .n{text-align:right}
+.tape tr.new td{background:var(--bg-subtle)}
+.tape .put{color:var(--text-primary)}.tape .put::after{content:"";}
+.edge{display:inline-block;min-width:22px;text-align:center;border-radius:4px;padding:0 4px;font-size:11px}
+.edge.e0,.edge.e1{color:var(--text-muted);background:var(--bg-subtle)}
+.edge.e2{color:var(--signal-deep);background:color-mix(in srgb,var(--signal-deep) 12%,transparent)}
+.edge.e3,.edge.e4{color:var(--signal-core);background:color-mix(in srgb,var(--signal-core) 14%,transparent)}
+.side{color:var(--text-muted)}
+.engine p{margin:6px 0 10px;color:var(--text-secondary)}
+.engine .status{font-size:14px;color:var(--text-primary);margin:0 0 10px}
+.row{display:grid;grid-template-columns:96px 1fr;align-items:center;gap:8px;margin:6px 0;font-size:13px}
+.row .k{color:var(--text-muted)}
+.chip{display:inline-flex;gap:4px}
+.chip span{padding:3px 9px;border:1px solid var(--line-grid);border-radius:var(--radius-sm);font:12px var(--font-mono);color:var(--text-secondary)}
+.chip span.on{background:var(--bg-panel-raised);color:var(--text-primary);border-color:transparent}
+.sizing{background:var(--bg-subtle);border-radius:var(--radius-sm);padding:10px 12px;margin:10px 0;font:12px/1.5 var(--font-mono);color:var(--text-secondary)}
+.sizing b{color:var(--text-primary);font-weight:500}
+.ack{display:flex;gap:8px;align-items:flex-start;font-size:12px;color:var(--text-secondary);margin:8px 0}
+.ack i{width:14px;height:14px;border:1px solid var(--neutral);border-radius:3px;flex:none;margin-top:2px}
+.btn{display:block;width:100%;padding:10px;border-radius:var(--radius-sm);border:1px solid var(--line-grid);background:var(--bg-subtle);color:var(--text-muted);font:500 13px var(--font-sans);text-align:center}
+.caps{margin-top:8px}
+.disclosure{grid-column:1/-1;border-top:1px solid var(--line-grid);padding:12px 24px;display:grid;grid-template-columns:1fr 1fr;gap:32px}
+.disclosure h3{font-size:13px;font-weight:600;margin:0 0 4px}
+.disclosure p{margin:0;font-size:13px;color:var(--text-secondary)}
+.score{width:100%;border-collapse:collapse;font:12px var(--font-mono);font-variant-numeric:tabular-nums}
+.score th{text-align:left;font-weight:500;color:var(--text-muted);padding:3px 6px;border-bottom:1px solid var(--line-grid)}
+.score td{padding:4px 6px;border-bottom:1px solid var(--line-grid)}
+.score .n{text-align:right}
+.score .hit{color:var(--signal-core)}.score .miss{color:var(--text-muted)}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <span class="wordmark"><i></i>RADON</span>
+  <a>Dashboard</a><a>Portfolio</a><a class="on">Flow</a><a>Exposure</a><a>Regime</a><a>Scanner</a><a>Orders</a>
+  <span class="right"><span class="meta"><span class="dot"></span>IB CHAIN 1S · UW TAPE · 10:15:30 ET</span><span class="meta">PAPER</span></span>
+</nav>
+
+<div class="page">
+<section class="main">
+  <div class="finding">
+    <span class="spot">SPX 7,806.89</span><span class="chg">SPXW 12 Oct 0DTE · 5h 44m to settle</span>
+    <h1>Dealers long gamma. Price pinned between the 7770 put wall and the 7860 call wall; puts bought net $2.6M since the open.</h1>
+  </div>
+  <div class="ledger">
+    <span>Net dealer γ <b class="up">+$1.53B</b> per 1%</span>
+    <span>Charm <b>+$373M/h</b> into the close</span>
+    <span>Expected move <b>±16</b> to settle, ATM IV 179%</span>
+    <span>0γ flip <b>7688</b>, 119 below</span>
+    <span>Net bought 5m <b class="dn">−$744k</b></span>
+    <span>Dark pool SPY pace <b>1.3×</b> prior, sellers</span>
+  </div>
+
+  <div class="toolbar">
+    <span class="seg"><span class="on">Tick</span><span>1m</span><span>5m</span><span>15m</span></span>
+    <span class="seg"><span class="on">Gamma</span><span>Charm</span><span>Vanna</span><span>Bought</span></span>
+    <span class="legend"><span><i class="call"></i>call</span><span><i class="put"></i>put</span><span>size premium · tone edge</span><span><i class="lg"></i>long γ</span><span><i class="sg"></i>short γ</span></span>
+  </div>
+
+  <!-- Instrument: price, prints and dealer ladder on ONE price axis -->
+  <svg class="chart" viewBox="0 0 1000 470" aria-label="SPX price with prints and dealer gamma by strike">
+    <defs>
+      <clipPath id="plot"><rect x="0" y="0" width="760" height="440"/></clipPath>
+    </defs>
+    <!-- y scale: 7765 at y=430, 7835 at y=10 -> 6px per point -->
+    <!-- expected move band ±16 around 7806.89 -->
+    <rect x="0" y="118" width="760" height="192" fill="var(--signal-core)" opacity=".05"/>
+    <!-- strike grid, every 5 -->
+    <g stroke="var(--line-grid)" stroke-width="1">
+      <line x1="0" x2="840" y1="10" y2="10"/><line x1="0" x2="840" y1="40" y2="40"/><line x1="0" x2="840" y1="70" y2="70"/><line x1="0" x2="840" y1="100" y2="100"/>
+      <line x1="0" x2="840" y1="130" y2="130"/><line x1="0" x2="840" y1="160" y2="160"/><line x1="0" x2="840" y1="190" y2="190"/><line x1="0" x2="840" y1="220" y2="220"/>
+      <line x1="0" x2="840" y1="250" y2="250"/><line x1="0" x2="840" y1="280" y2="280"/><line x1="0" x2="840" y1="310" y2="310"/><line x1="0" x2="840" y1="340" y2="340"/>
+      <line x1="0" x2="840" y1="370" y2="370"/><line x1="0" x2="840" y1="400" y2="400"/><line x1="0" x2="840" y1="430" y2="430"/>
+    </g>
+    <!-- strike labels on the shared axis -->
+    <g text-anchor="start">
+      <text x="846" y="14">7835</text><text x="846" y="44">7830</text><text x="846" y="74">7825</text><text x="846" y="104">7820</text>
+      <text x="846" y="134">7815</text><text x="846" y="164">7810</text><text x="846" y="224" class="lbl">7800</text>
+      <text x="846" y="254">7795</text><text x="846" y="284">7790</text><text x="846" y="314">7785</text><text x="846" y="344">7780</text>
+      <text x="846" y="374">7775</text><text x="846" y="404" class="lbl">7770</text><text x="846" y="434">7765</text>
+    </g>
+    <!-- dealer gamma ladder, long = right of x=770 (teal), short = left of x=770 (magenta); width = $ per 1% -->
+    <g opacity=".75">
+      <rect x="770" y="4"  width="52" height="12" fill="var(--signal-core)"/>
+      <rect x="770" y="34" width="60" height="12" fill="var(--signal-core)"/>
+      <rect x="770" y="64" width="44" height="12" fill="var(--signal-core)"/>
+      <rect x="770" y="94" width="30" height="12" fill="var(--signal-core)"/>
+      <rect x="770" y="124" width="18" height="12" fill="var(--signal-core)"/>
+      <rect x="716" y="154" width="54" height="12" fill="var(--dislocation)"/>
+      <rect x="738" y="184" width="32" height="12" fill="var(--dislocation)"/>
+      <rect x="700" y="214" width="70" height="12" fill="var(--dislocation)"/>
+      <rect x="742" y="244" width="28" height="12" fill="var(--dislocation)"/>
+      <rect x="726" y="274" width="44" height="12" fill="var(--dislocation)"/>
+      <rect x="740" y="304" width="30" height="12" fill="var(--dislocation)"/>
+      <rect x="708" y="334" width="62" height="12" fill="var(--dislocation)"/>
+      <rect x="748" y="364" width="22" height="12" fill="var(--dislocation)"/>
+      <rect x="770" y="394" width="26" height="12" fill="var(--signal-core)"/>
+      <rect x="752" y="424" width="18" height="12" fill="var(--dislocation)"/>
+    </g>
+    <line x1="770" x2="770" y1="0" y2="440" stroke="var(--line-grid)"/>
+    <!-- level rules -->
+    <line x1="0" x2="760" y1="220" y2="220" stroke="var(--dislocation)" stroke-dasharray="4 4"/>
+    <text x="6" y="215" fill="var(--dislocation)">ACCEL 7800 · largest short γ</text>
+    <line x1="0" x2="760" y1="400" y2="400" stroke="var(--signal-core)" stroke-dasharray="4 4"/>
+    <text x="6" y="395" fill="var(--signal-core)">PUT WALL 7770</text>
+    <!-- out-of-range levels pinned to edges -->
+    <text x="6" y="12" fill="var(--signal-core)">▲ CALL WALL 7860 · +53</text>
+    <text x="6" y="438" fill="var(--text-muted)">▼ 0γ FLIP 7688 · −119</text>
+    <!-- spot -->
+    <line x1="0" x2="840" y1="178.7" y2="178.7" stroke="var(--text-primary)" stroke-width="1"/>
+    <rect x="842" y="170" width="52" height="17" rx="3" fill="var(--text-primary)"/><text x="846" y="182" fill="var(--bg-canvas)" style="fill:var(--bg-canvas);font-weight:500">7806.9</text>
+    <!-- price path (tick bars simplified to a line + a few bars) -->
+    <g clip-path="url(#plot)">
+      <polyline fill="none" stroke="var(--text-primary)" stroke-width="1.2" points="
+        10,120 30,110 50,128 70,98 90,104 110,90 130,96 150,104 170,118 190,100 210,112 230,106 250,120 270,134 290,128 310,116 330,122 350,138 370,130 390,142 410,136 430,150 450,158 470,152 490,166 510,160 530,176 550,170 570,184 590,178 610,190 630,196 650,186 670,196 690,190 710,184 730,178 748,178.7"/>
+      <!-- prints: solid = call, hollow = put; radius = premium; tone = edge -->
+      <circle cx="248" cy="286" r="16" fill="var(--text-muted)" opacity=".18" stroke="var(--text-muted)" stroke-width="2"/>
+      <circle cx="262" cy="310" r="15" fill="var(--text-muted)" opacity=".18" stroke="var(--text-muted)" stroke-width="2"/>
+      <circle cx="286" cy="286" r="15" fill="var(--text-muted)" opacity=".18" stroke="var(--text-muted)" stroke-width="2"/>
+      <circle cx="470" cy="330" r="10" fill="var(--text-muted)" opacity=".18" stroke="var(--text-muted)" stroke-width="2"/>
+      <circle cx="560" cy="340" r="11" fill="var(--text-muted)" opacity=".18" stroke="var(--text-muted)" stroke-width="2"/>
+      <circle cx="628" cy="70"  r="22" fill="var(--signal-deep)" opacity=".85"/>
+      <circle cx="640" cy="10"  r="18" fill="var(--text-muted)" opacity=".55"/>
+      <circle cx="664" cy="310" r="15" fill="var(--text-muted)" opacity=".18" stroke="var(--text-muted)" stroke-width="2"/>
+      <circle cx="700" cy="370" r="12" fill="var(--text-muted)" opacity=".18" stroke="var(--text-muted)" stroke-width="2"/>
+      <circle cx="744" cy="10"  r="12" fill="var(--text-muted)" opacity=".55" stroke="var(--text-primary)" stroke-width="1.5"/>
+    </g>
+    <text x="596" y="104" class="lbl">7825C 1.7k · edge 2</text>
+    <text x="214" y="330">7790P 946 · edge 1</text>
+    <text x="668" y="396">7765P 926 · edge 1</text>
+    <!-- time axis -->
+    <g text-anchor="middle">
+      <text x="22" y="464">9:30</text><text x="200" y="464">9:42</text><text x="390" y="464">9:54</text><text x="580" y="464">10:06</text><text x="748" y="464">10:15</text>
+    </g>
+  </svg>
+
+  <!-- Flow strip shares the time axis -->
+  <svg class="chart" viewBox="0 0 1000 110" aria-label="0DTE premium bought minus sold">
+    <text x="0" y="12">NET PREMIUM BOUGHT, CALLS MINUS PUTS · session −$2.6M · 5m −$744k</text>
+    <line x1="0" x2="760" y1="50" y2="50" stroke="var(--line-grid)"/>
+    <g opacity=".5">
+      <rect x="240" y="30" width="4" height="20" fill="var(--dislocation)"/><rect x="258" y="34" width="4" height="16" fill="var(--dislocation)"/>
+      <rect x="470" y="40" width="4" height="10" fill="var(--dislocation)"/><rect x="520" y="36" width="4" height="14" fill="var(--dislocation)"/>
+      <rect x="560" y="32" width="4" height="18" fill="var(--dislocation)"/><rect x="626" y="22" width="4" height="28" fill="var(--signal-core)"/>
+      <rect x="700" y="38" width="4" height="12" fill="var(--dislocation)"/>
+    </g>
+    <polyline fill="none" stroke="var(--fault)" stroke-width="1.2" points="10,52 120,54 230,56 250,70 300,72 400,76 470,80 520,84 560,88 626,80 660,86 700,92 748,94"/>
+    <text x="766" y="98" fill="var(--fault)">−2.6M</text>
+    <text x="766" y="54">0</text>
+  </svg>
+</section>
+
+<aside class="rail">
+  <div class="panel">
+    <h2>Print tape</h2><div class="meta">UW OPTION_TRADES:SPX · SIGNED AT NBBO · 1S</div>
+    <table class="tape">
+      <thead><tr><th>ET</th><th>Contract</th><th class="n">Size</th><th class="n">Px</th><th>Side</th><th class="n">×norm</th><th class="n">Edge</th></tr></thead>
+      <tbody>
+        <tr class="new"><td>10:14:59</td><td>7835C block</td><td class="n">665</td><td class="n">0.68</td><td class="side">bid</td><td class="n">3</td><td class="n"><span class="edge e0">0</span></td></tr>
+        <tr><td>10:14:50</td><td class="put">7760P</td><td class="n">678</td><td class="n">0.88</td><td class="side">mid</td><td class="n">5</td><td class="n"><span class="edge e1">1</span></td></tr>
+        <tr><td>10:12:14</td><td class="put">7755P</td><td class="n">685</td><td class="n">0.78</td><td class="side">bid</td><td class="n">8</td><td class="n"><span class="edge e1">1</span></td></tr>
+        <tr><td>10:12:08</td><td class="put">7750P</td><td class="n">390</td><td class="n">0.68</td><td class="side">bid</td><td class="n">5</td><td class="n"><span class="edge e1">1</span></td></tr>
+        <tr><td>10:11:50</td><td class="put">7760P</td><td class="n">792</td><td class="n">0.98</td><td class="side">ask</td><td class="n">8</td><td class="n"><span class="edge e1">1</span></td></tr>
+        <tr><td>10:10:26</td><td class="put">7785P</td><td class="n">906</td><td class="n">2.83</td><td class="side">ask</td><td class="n">6</td><td class="n"><span class="edge e1">1</span></td></tr>
+        <tr><td>10:10:06</td><td>7835C block</td><td class="n">1,367</td><td class="n">0.68</td><td class="side">ask</td><td class="n">5</td><td class="n"><span class="edge e0">0</span></td></tr>
+        <tr><td>10:10:06</td><td>7825C block</td><td class="n">1,724</td><td class="n">1.53</td><td class="side">ask</td><td class="n">7</td><td class="n"><span class="edge e2">2</span></td></tr>
+        <tr><td>10:09:14</td><td class="put">7755P</td><td class="n">445</td><td class="n">0.63</td><td class="side">bid</td><td class="n">6</td><td class="n"><span class="edge e1">1</span></td></tr>
+        <tr><td>10:08:26</td><td class="put">7765P block</td><td class="n">926</td><td class="n">0.90</td><td class="side">ask</td><td class="n">8</td><td class="n"><span class="edge e1">1</span></td></tr>
+        <tr><td>10:08:20</td><td class="put">7775P</td><td class="n">800</td><td class="n">1.42</td><td class="side">ask</td><td class="n">5</td><td class="n"><span class="edge e1">1</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel engine">
+    <h2>Engine</h2><div class="meta">PAPER · ENTRY WINDOW 10:00 TO 12:59 ET · OPEN</div>
+    <p class="status">Flat. Watching call prints at edge 3 or better. None since the open.</p>
+    <div class="row"><span class="k">Side</span><span class="chip"><span class="on">Calls</span><span>Puts</span></span></div>
+    <div class="row"><span class="k">Min edge</span><span class="chip"><span>Any</span><span>2</span><span class="on">3</span><span>4</span></span></div>
+    <div class="row"><span class="k">Take profit</span><span class="chip"><span>2×</span><span class="on">3×</span><span>4×</span></span></div>
+    <div class="sizing">Buy at ask +1 tick, cancel after 6s. Resting sell at 3×, no stop, settle at 4:00.<br>Gate 1: gain 2.0× loss at 3×. <b>Gate 3: half Kelly $2,250 cap, 2.5% of $90,000.</b> One contract per print, $150 max premium.</div>
+    <div class="ack"><i></i><span>I understand the full premium is at risk on every entry and no stop will be placed.</span></div>
+    <div class="btn">Arm live orders</div>
+    <div class="caps meta">TRADES 0 OF 6 · PREMIUM $0 OF $600 · COOLDOWN 3M · FEES $1.40/CT</div>
+  </div>
+</aside>
+
+<div class="disclosure">
+  <div>
+    <h3>Model</h3>
+    <p>Dealer inventory is long call OI and short put OI as of the open, less what customers bought today, each print signed at the NBBO it hit. Greeks are Black Scholes to the 4:00 settle. The map is an estimate: it cannot see multi leg spreads or the true dealer book. Every signal is graded below on whether the contract reached 2× and 3× within 30 minutes.</p>
+  </div>
+  <div>
+    <h3>Scorecard <span class="meta">LAST 5 SESSIONS · 41 SIGNALS</span></h3>
+    <table class="score">
+      <thead><tr><th>Edge</th><th class="n">Signals</th><th class="n">Hit 2×</th><th class="n">Hit 3×</th><th class="n">Median to 2×</th></tr></thead>
+      <tbody>
+        <tr><td>3 or better</td><td class="n">9</td><td class="n hit">44%</td><td class="n hit">22%</td><td class="n">11m</td></tr>
+        <tr><td>2</td><td class="n">12</td><td class="n">25%</td><td class="n">8%</td><td class="n">14m</td></tr>
+        <tr><td>0 to 1</td><td class="n">20</td><td class="n miss">10%</td><td class="n miss">0%</td><td class="n">none</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+</div>
+</body>
+</html>

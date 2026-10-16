@@ -11459,3 +11459,35 @@ The delta touches 131 test files, so the three closing rounds are the scoped rer
 | 3 | 15,387 passed / 2 skipped / 23 subtests | 10,789 passed / 21 skipped / 1,099 files | 2,862 passed / 8 skipped | 0 added / 0 removed |
 
 Base cloud at `66719c09` with Python 3.13.16, OpenSSL 3.6.5, Bash 5.3.20, and caddy: 2,820 passed / 8 skipped, sorted FAILED list empty. Every closing FAILED list is empty. The count difference is tests added on main after that SHA. The comparison worktree was removed. Playwright was not run. No local screenshot or 390px result is claimed.
+
+## Delta audit 2026-10-14
+
+Range `35118b0883c52ffcda5a292d27227940c55c94cc..63fd899271228dacfb1aaf96b8c65e0f3fe9cd86`: 14 commits / 73 paths. Newest trusted checkpoint is the 2026-10-13 collaborator comment on issue #83 (`audited-through: 35118b0883c52ffcda5a292d27227940c55c94cc`). No open `testing/` pull request. Open PRs #1075 (`performance/2026-10-13`) and #1071 (`plan/flow-terminal`) carry no `T-###` and are outside this loop. Numbering continues after T-551. The checkpoint carried no open verified T finding.
+
+Money-path changes in the range (combo leg P&L, display Return, subset-close realized P&L, stock entry time, 2s account polling) ship with behavioral tests that execute the helpers and the surfaces. PDF clip crops, the newsfeed single-execute budget, compact cache JSON, and the assistant `read.spawn` catalog pin are likewise executed, not source greps. No new skip, xfail, coverage-threshold drop, or shard exclusion. The delta's test files are a small slice of the gated suites; the three closing rounds re-ran every gated file, including those.
+
+### T-552 — P1 — a deploy-lock symlink can be followed while the race test stays green
+
+`cloud/scripts/bootstrap-control-plane.sh:111` creates `~/.radon-deploy.lock` with one `os.open` (`O_CREAT|O_EXCL|O_NOFOLLOW`). `cloud/tests/test_bootstrap_control_plane.py:749` still swaps that path only inside a shim of `install`, which this script no longer calls. `test_deploy_lock_link_is_refused` checks the exit code and that the manifest was not written. Replacing the open with `O_WRONLY|O_CREAT` left those three lock tests green (3 passed) and `fchmod`'d the symlink target from `0644` to `0600`. The bytes stayed `sentinel-not-the-lock`. Restoring the exclusive no-follow open left the target untouched.
+
+Acceptance: a pre-existing symlink to a mode-`0644` sentinel file is refused, the sentinel bytes and mode stay unchanged, and no control-plane manifest is written. The older install-shim case may stay green when `install` is never invoked; this case must fail.
+
+Audited through: 63fd899271228dacfb1aaf96b8c65e0f3fe9cd86 on 2026-10-14 — 1 new finding
+
+## Remediation 2026-10-14
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-552 | DONE | Following open (`O_WRONLY\|O_CREAT`): `test_deploy_lock_creation_never_writes_through_a_raced_link`, `test_deploy_lock_is_created_as_a_private_regular_file`, and `test_deploy_lock_link_is_refused` passed; `test_existing_lock_symlink_does_not_change_its_target` failed (`384 == 420`, mode `0600` vs `0644`). Restored `cloud/scripts/bootstrap-control-plane.sh:111`. Owner file 34 passed in each of three serial runs. Product source unchanged. |
+
+### Closing gates 2026-10-14
+
+Discarded before these rounds: a cloud run with `/usr/bin/python3` 3.9 on `PATH` failed `test_precloud_rollback_keeps_immutable_journal_support` (`zip(strict=True)`) and `test_notify_proxy_outlives_the_run_handoff_and_relays_while_docker_runs`. Both passed alone once `python3` was 3.13.16 (0.17s and 1.81s). Counted Vitest rounds set `VITEST_MAX_WORKERS=4`. No assertion, skip, or coverage threshold changed.
+
+| Round | Root Python | Root Vitest | Cloud | Failed-list diff against base `63fd8992` |
+|---|---|---|---|---|
+| 1 | 15,424 passed / 2 skipped / 23 subtests | 10,898 passed / 21 skipped / 1,107 files (1 file skipped) | 2,866 passed / 8 skipped | 0 added / 0 removed |
+| 2 | 15,424 passed / 2 skipped / 23 subtests | 10,898 passed / 21 skipped / 1,107 files (1 file skipped) | 2,866 passed / 8 skipped | 0 added / 0 removed |
+| 3 | 15,424 passed / 2 skipped / 23 subtests | 10,898 passed / 21 skipped / 1,107 files (1 file skipped) | 2,866 passed / 8 skipped | 0 added / 0 removed |
+
+Base cloud at `63fd8992` with Python 3.13.16, OpenSSL 3, Bash 5.3.20, and caddy: 2,865 passed / 8 skipped, sorted FAILED list empty. Every closing FAILED list is empty. The count difference is the one test added tonight. The comparison worktree was removed. Playwright was not run. No local screenshot or 390px result is claimed.

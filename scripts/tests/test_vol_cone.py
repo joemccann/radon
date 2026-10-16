@@ -252,7 +252,7 @@ class TestRunHeartbeat:
         monkeypatch.setattr(
             mod,
             "_write_db_cache",
-            lambda payload, scan_time, rows_changed: self.db_writes.append(rows_changed),
+            lambda payload, scan_time, rows_changed, **_kw: self.db_writes.append(rows_changed),
         )
         monkeypatch.setattr(mod, "_read_history_rows", lambda: [])
         self.mod = mod
