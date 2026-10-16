@@ -11530,3 +11530,5 @@ Discarded before these rounds: root pytest with `/usr/bin/openssl` LibreSSL 3.3.
 | 3 | 15,435 passed / 2 skipped / 23 subtests | 10,956 passed / 21 skipped / 1,115 files (1 file skipped) | 2,839 passed / 27 failed / 8 skipped | 0 added / 0 removed |
 
 Base cloud at `b79e1f5c` with Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, and caddy 2.11.7: 2,839 passed / 27 failed / 8 skipped. Every closing failed-node set matches that list. The 27 are the bash 3.2 and host-Python baseline on this Mac. The comparison worktree was removed. Playwright was not run. No local screenshot or 390px result is claimed.
+
+T-554 follow-up: CI Vitest shard 8 failed the instance spy (`expected true to be false`) because jsdom calls `Storage.prototype.setItem` and ignores an own property. The test installs the throw on the storage object and on that prototype. Product source unchanged.
