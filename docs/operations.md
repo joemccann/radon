@@ -311,7 +311,13 @@ under `--security-opt seccomp=/etc/radon/seccomp/chromium.json` (source
 plus `clone`/`unshare`/`setns`/`chroot` for the namespace sandbox, the
 addition jessfraz's `chrome.json` makes), without host IPC, with a 512m
 private `/dev/shm`. The runtime refuses to start the unit (exit 78) if the
-profile is missing. If the host still refuses the sandbox at launch,
+profile is missing, and the same exit when its directory or the profile
+itself is a symlink, is not owned by root, or is writable by group or other:
+`/etc/radon` is radon-writable (`root:radon` 1770), so the profile directory
+is the component an unprivileged account could plant. If a legitimate
+install leaves either one group-writable, re-run
+`cloud/scripts/setup-vps.sh` rather than loosening the check.
+If the host still refuses the sandbox at launch,
 `scripts/newsfeed/browser.js` retries with `--no-sandbox` and logs
 `chromium sandbox unavailable`; `PLAYWRIGHT_CHROMIUM_SANDBOX=0` in
 `/etc/radon/env` forces that mode. Also,
