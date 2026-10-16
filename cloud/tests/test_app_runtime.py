@@ -1668,6 +1668,45 @@ def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
     assert "TURSO_AUTH_TOKEN=tok" in rendered.splitlines()
 
 
+def test_run_newsfeed_env_file_preserves_explicit_nvidia_model_controls(
+    tmp_path: Path,
+) -> None:
+    """Model overrides reach the restricted container without widening its keys."""
+    host_env = tmp_path / "models.env"
+    model_values = {
+        "NVIDIA_TEXT_MODEL": "nvidia/nemotron-3-super-120b-a12b",
+        "NVIDIA_VISION_MODEL": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+        "NVIDIA_MODEL": "meta/llama-3.2-90b-vision-instruct",
+    }
+    host_env.write_text(
+        "NODE_ENV=production\n"
+        + "".join(f"{key}='{value}'\n" for key, value in model_values.items())
+        + "NVIDIA_MODEL_PRIVATE=excluded\n"
+        + "NVIDIA_VISION_MODEL_SUFFIX=excluded\n"
+        + "NVIDIA_UNRELATED_KEY=excluded\n"
+        + "CLERK_SECRET_KEY=excluded\n"
+        + QUOTED_GATEWAY_SECRET_LINE,
+        encoding="utf-8",
+    )
+    original = host_env.read_text(encoding="utf-8")
+    result = _run(
+        tmp_path, ["run", "radon-newsfeed.service"],
+        extra_env={"RADON_TEST_ENV_FILE": str(host_env)},
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    match = re.search(r"--env-file (\S+)", _run_line(result))
+    assert match, _run_line(result)
+    rendered = Path(match.group(1))
+    values = dict(
+        line.split("=", 1)
+        for line in rendered.read_text(encoding="utf-8").splitlines()
+        if "=" in line and not line.startswith("#")
+    )
+    assert values == {"NODE_ENV": "production", **model_values}
+    assert stat.S_IMODE(rendered.stat().st_mode) == 0o600
+    assert host_env.read_text(encoding="utf-8") == original
+
+
 def test_run_newsfeed_env_file_carries_the_themarketear_login(
     tmp_path: Path,
 ) -> None:
