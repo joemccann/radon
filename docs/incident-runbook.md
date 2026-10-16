@@ -2874,15 +2874,18 @@ about 70s, not `TimeoutStartSec`. Next timer is the 08:30 ET retry.
 - **Remediation (code):** `getresponse` connection reset on a reused socket
   closes the pool and retries that POST once on a fresh socket. A fresh
   socket that dies still raises. A reset while reading a body that already
-  started is not retried. Do not replay the delivery. Do not restart-flap;
-  the 08:30 ET timer retries. After deploy,
+  started is not retried. Any other `getresponse` failure, including a
+  status-line timeout, closes the pool and does not retry, so the next
+  call cannot reuse a request-sent socket. Do not replay the delivery.
+  Do not restart-flap; the 08:30 ET timer retries. After deploy,
   `systemctl reset-failed radon-flex-pull.service` if that retry has not
   yet fired. The API sister `scripts/api/db_http.py` still has the old
   `getresponse` path. This page used the oneshot transport.
 - **Regression:**
   `scripts/tests/test_hrana_http_keepalive.py::test_reused_socket_closed_before_status_retries_once`,
   `test_fresh_socket_closed_before_status_does_not_open_another`,
-  `test_reused_close_and_fresh_retry_close_raises_once`.
+  `test_reused_close_and_fresh_retry_close_raises_once`,
+  `test_status_timeout_on_reused_socket_opens_a_fresh_one`.
 - **Code:** `scripts/db/hrana_http.py` (`_pooled_open`).
 
 ---

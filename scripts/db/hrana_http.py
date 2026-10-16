@@ -140,6 +140,12 @@ def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse
         except Exception:
             _close_keepalive()
             raise
+    except Exception:
+        # Timeout and any other status-line failure leave the socket
+        # request-sent. Drop it. The next call must open a new one.
+        # Connection resets are handled above and are not this path.
+        _close_keepalive()
+        raise
     try:
         raw = resp.read(_MAX_RESPONSE_BYTES)
         if resp.status != 200:
