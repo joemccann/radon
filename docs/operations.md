@@ -956,3 +956,7 @@ Unattended collection refreshes existing credentials and never opens consent.
 The timer inventory adds no credentials to `/etc/radon/env`; configure only the token-file path there, keeping rotating credentials in the private store.
 Do not commit the store or copy a developer account token during deployment.
 Missing or rejected credentials produce an error heartbeat while preserving previously stored observations.
+
+## NVIDIA model settings in the restricted newsfeed runtime
+
+The runtime renderer passes `NVIDIA_TEXT_MODEL`, `NVIDIA_VISION_MODEL`, and `NVIDIA_MODEL` explicitly into `radon-newsfeed.service`; arbitrary `NVIDIA_*` keys remain excluded. After an approved model-setting change, regenerate the runtime environment through the normal deployment procedure and restart the affected consumer. Existing processes do not reload host environment edits automatically. Keep the hosted [Nemotron Super VL pilot](nemotron-super-vl-pilot.md) vision-only until its quality gates pass; remove or restore the override and regenerate/restart to roll back.
