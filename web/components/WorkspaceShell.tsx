@@ -61,6 +61,7 @@ import { useFillToasts } from "@/lib/useFillToasts";
 import OfflineBanner from "@/components/OfflineBanner";
 import { useOfflineStatus } from "@/lib/offline/OfflineStatusContext";
 import { deriveLiveDataError } from "@/lib/offline/offlineStatus";
+import { formatSampleTime } from "@/lib/sampleTime";
 import { useTheme } from "@/lib/ThemeContext";
 
 type WorkspaceShellProps = {
@@ -543,7 +544,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
   // R-149: no snapshot at all is a BLACKOUT, and "Awaiting first sample" read
   // as a benign startup state for the rest of the session.
   const syncLabel = isDemoMode ? "Sample snapshot" : lastSync
-    ? `Last sample ${new Date(lastSync).toLocaleTimeString([], { hour12: false })}`
+    ? `Last sample ${formatSampleTime(lastSync)} ET`
     : error
       ? "Sync failed. Reconstruction incomplete."
       : "No sample yet. Reconstruction unavailable.";

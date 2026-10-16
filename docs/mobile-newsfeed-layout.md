@@ -776,3 +776,10 @@ shipping a visibly stale `+N` with `aria-expanded="true"`.
 `.app-shell { height: 100vh }` (globals.css:262) to `100dvh`, or drop the fixed height on
 mobile so `.main`'s `min-height: 100dvh` is the only anchor. See section 8. Defect B itself
 needs **no** globals.css change.
+
+
+## PDF articles tab
+
+The Live market analysis panel includes a PDFs tab alongside Commentary and Headlines. PDFs uses validated research-source provenance, including text-only PDF findings. Commentary remains the mixed feed and continues to include those same articles. PDF filtering applies before the shared 18-item pagination and composes with tag filters and hidden-post feedback. Refresh reloads the shared feed in either article tab. Source PDF links, charts/lightbox, bookmarks and sharing keep the existing article controls. An empty PDF collection reads “No PDF articles available.” Existing server-side research access rules still apply.
+
+Regression coverage: `web/tests/dashboard-newsfeed-pdf-tab.test.tsx` and curated `web/e2e/newsfeed-pdf-tab.spec.ts` at desktop and 393px widths.
