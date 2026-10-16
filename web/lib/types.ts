@@ -234,6 +234,13 @@ export type LegacyEntryMarginMetadata = Omit<LegacyPositionReturnCapitalPayload,
 
 export type PortfolioPosition = {
   id: number;
+  /** Display-only strategy subset: false prevents treating its net debit as
+   * verified risk capital. The separately labeled net-entry-debit metric may
+   * still use the subset's own complete, consistent leg basis. */
+  strategy_group_capital_verified?: boolean;
+  /** A display subset retains the original mixed-age daily baseline context,
+   * independently of whether its own entry basis is consistent. */
+  strategy_group_mixed_age?: boolean;
   account_id?: string | null;
   position_instance_id?: string | null;
   ticker: string;

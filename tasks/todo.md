@@ -9489,6 +9489,22 @@ Source evidence: article research-68d8179b6af877c99ff478eda52ddcff8edb573c204d47
 
 Red GitHub evidence: d884b356 CIjob115599207114, 5 failed/2539passed. Corrected sourcepage3 cropbbox[.2038,.3925,.9723,.6865], 1411x698; AST/static compilation passed, no local suites. Nine new synthetic cases include compound and malformed clip fallback and rotation. Independent technical review passed.
 
+
+# Position strategy grouping
+Dependency graph: T1 -> T2 -> T3 -> T4; T1 -> T3; T2 -> T4.
+- [x] T1 depends_on: [] Confirm display grouping ownership, financial projection and interaction contracts.
+- [x] T2 depends_on: [T1] Build shared grouping model, persistence, stable contract matching, preview and Undo.
+- [x] T3 depends_on: [T1, T2] Add suggested split, selection/group and strategy editor for desktop/mobile; preserve financial and trading safety.
+- [ ] T4 depends_on: [T2, T3] Regression coverage, independent review, browser screenshots, PR and exact-head green CI; Pushover accepted.
+Acceptance: AAOI60longC105+60shortC140 ->60unit bullcall; 50shortP90 ->shortput. No broker mutations; no duplication, quantities/basis/P&L conserved; persistence survives refreshed portfolio; ambiguous/stale groups fail closed; cancel/Undo; 44pxmobile/40pxdesktop controls; keyboard access. No local test suites.
+
+Contract: layout-only local browser preferences scoped by account and exact held contracts. Missing account identifiers stay memory-only. Project only display rows in PortfolioSections; pass canonical portfolio to details/risk and keep account totals unchanged. All three entry flows share verified preview/apply; global Undo remains discoverable after rows move risk sections.
+
+Verification: browser-onlye7586211 head reproduced7failures atmissing Groupstrategies controls (job115988704688). Static typecheck/lintgreen; model30casesprepared; independent financial review fixedcanonicalnavigation and exact-vs-labeled-entry-valuecapital distinction. No local suites.
+
+T4 repair review: 3516c17d GitHub run38606924428 passed40model/persistence/UI cases and coverage gates; browser2mobile cases passed,5failed. Replanned T4: preserve financial display formatting assertions, permit Escape/Tab to reach shared portal keyboard chrome, add2real-bubbling regressions, republish and reverify exact head. No local suites.
+
+T4 second repair review: 2a5abc29 passed42unitcases and6/7grouping browsercases. DesktopResetpopoverfooter exceededviewport; replace assumedmenuheight with measuredclamping onopen/resize/content changes. Addviewportregression andbrowserboundsassertion, preserveordinaryclick. Reverifylatesthead.
 # PR repair and admin merge
 Dependency graph: T1 -> T2 -> T4; T1 -> T3 -> T4.
 - [x] T1 depends_on: [] Inventory all open PRs and assign exclusive ownership.
@@ -9496,3 +9512,11 @@ Dependency graph: T1 -> T2 -> T4; T1 -> T3 -> T4.
 - [ ] T3 depends_on: [T1] Separate Sol/Luna swarm repairs all other conflicts/red CI; preserve drafts and do not merge others.
 - [ ] T4 depends_on: [T2, T3] Re-audit every remaining PR after main changes, confirm exact-head green, notify repaired PRs and report.
 No local test suites. Preserve usercheckout and unrelated edits.
+
+## PR #1083 conflict repair (2026-10-15)
+Dependency graph: T1 -> T2 -> T3.
+- [x] T1 depends_on: [] Inspect exact PR head, latest main, and all merge conflicts.
+- [x] T2 depends_on: [T1] Merge latest main and preserve both task histories; inspect merged files and diff statically.
+- [ ] T3 depends_on: [T2] Push repaired head and await every applicable exact-head GitHub CI check.
+
+Review: Latest main c8549c323310d2b387db207b16946eff7e24060e; PR head 39597e71e32caac328950c2f3f348accad0c5b60. The only textual conflict is the append-only task log. No local test suites per operator policy. Exact-head CI pending.
