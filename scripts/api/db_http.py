@@ -109,7 +109,10 @@ def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse
 
     try:
         conn.request(method, path, body, headers)
-    except OSError:
+    except (OSError, http.client.HTTPException):
+        # HTTPException covers CannotSendRequest / ResponseNotReady: a socket
+        # left mid-response is not an OSError, and without this the pooled
+        # socket would stay poisoned for the life of the thread.
         _close_keepalive()
         if not reused:
             raise

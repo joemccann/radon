@@ -240,6 +240,15 @@ line here whenever you ship a security fix.**
   never ride a subprocess argv.
   (`scripts/tests/test_model_ladder.py`, `cloud/tests/test_app_runtime.py`,
   `scripts/tests/test_fetch_x_xai_token.py`)
+- **A pooled socket is retired, never parked, when a response is left
+  unconsumed** — both bounded Turso transports read a response under a hard
+  byte ceiling, so an over-ceiling body leaves `http.client` mid-response; that
+  connection is closed instead of returned to the thread-local pool, the
+  truncated body is refused rather than parsed, and the request guard covers
+  `http.client.HTTPException` (`CannotSendRequest` / `ResponseNotReady` are not
+  `OSError`) so a socket poisoned by any route still takes the single
+  reconnect instead of wedging that thread for the process lifetime.
+  (`scripts/tests/test_hrana_keepalive_oversized_body.py`)
 
 ## Triage & patch policy
 
