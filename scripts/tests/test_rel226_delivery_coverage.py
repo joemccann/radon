@@ -445,14 +445,16 @@ def test_trade_duplicate_remote_disconnect_retries_and_confirms(monkeypatch):
     assert calls['n'] == 2
 
 
-def test_persistent_trade_coverage_disconnect_stays_unverified(monkeypatch):
+@pytest.mark.parametrize("message", [
+    "RemoteDisconnected: Remote end closed connection without response",
+    "TimeoutError: The read operation timed out",
+])
+def test_persistent_trade_coverage_disconnect_stays_unverified(monkeypatch, message):
     calls = {'n': 0}
 
     def present(kind, xml):
         calls['n'] += 1
-        raise hrana_http.HranaHttpError(
-            'RemoteDisconnected: Remote end closed connection without response'
-        )
+        raise hrana_http.HranaHttpError(message)
 
     _applied_duplicate(monkeypatch, present)
     result = ingest.ingest_xml(TRADE_XML)
