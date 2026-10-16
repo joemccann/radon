@@ -2567,6 +2567,53 @@ gateway stays up, and the tick never heartbeats.** Peak: 2026-09-04
 
 ---
 
+## orders-sync-cloud-gateway-down-stale
+
+**Autonomous `orders-sync` pages P1 `kind=stale` during an operator hold
+when the last heartbeat is the cloud-mode gateway-down string.** Peak:
+2026-10-16 18:50Z, page `0607c7011bbec0468c17fef4ec2f0585`, silent for 16m
+(window 10m) while the market was open.
+
+- **Mechanism:** `_run_ib_script_with_recovery` rewrites a connection
+  failure in cloud mode to `IB Gateway is not responding (cloud mode).
+  Check remote host and Tailscale.` `_orders_sync_tick` heartbeated that
+  as `sync-failed` / `state=error` at 18:33:41Z. The pool then dropped.
+  Later ticks took the gateway-down skip and wrote nothing, so
+  `updated_at` froze. `_IB_SHAPED_PATTERNS` did not contain that phrase,
+  so the stale row was not IB-caused. Operator hold (set 18:40:20Z,
+  `held: true`, `auth_state=unreachable`, `port_listening=false`) only
+  absorbs IB-caused failures, and the per-service P1 fired at 18:50Z.
+  `portfolio-sync` was stale with no `last_error` and would have grouped.
+  `ib-watchdog` stayed `ok` and named the hold. `:8321/health/lite`
+  database stayed `up`.
+- **Detection:** `service_health.orders-sync` `state=error`, `updated_at`
+  older than 10m, `last_error.message` contains `IB Gateway is not
+  responding`. `/health` `ib_gateway.operator_hold.held` is true, or
+  `auth_state` is `unreachable` with `port_listening` false. Intraday
+  bucket shows `orders-sync stale fired=True` after one hysteresis cycle.
+- **Discriminating check:** the latched text is the cloud-mode or
+  lock-aware "not responding" string, not a timeout and not an execution
+  fact conflict. A timeout while the gateway TCP probe is up and
+  `/health/lite` is authenticated is `orders-sync-miss-stale`. Capacity
+  shed lines are `orders-sync-capacity-shed-stale`. Do not `radon restart`
+  during a hold.
+- **Remediation (code):** a confirmed gateway-down sync result stays
+  silent (no heartbeat), same as the pool-disconnected gateway-down skip.
+  The same phrases count as IB-shaped, so a row that already latched
+  them is absorbed during an operator hold and grouped with other IB
+  failures otherwise. A real miss while the gateway is up still
+  heartbeats `error`.
+- **Regression:**
+  `test_orders_sync_loop.py::test_orders_sync_tick_confirmed_gateway_down_stays_silent`,
+  `test_grouping_operator_hold.py::test_cloud_gateway_down_stale_is_absorbed_during_a_hold`,
+  `test_grouping_operator_hold.py::test_execution_fact_conflict_still_pages_during_a_hold`,
+  `test_grouping.py::TestUnreachableCopyAndNonIbDiscriminator::test_cloud_mode_not_responding_groups_when_unreachable`.
+- **Code:** `scripts/api/server.py` (`_orders_sync_failure_is_gateway_down`,
+  `_orders_sync_tick`), `scripts/watchdog/grouping.py`
+  (`_IB_SHAPED_PATTERNS`).
+
+---
+
 ## flow-report-ticker-capacity-502
 
 **Operator `/flow-analysis/{TICKER}` ANALYZE returns instant HTTP 502
