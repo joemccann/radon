@@ -1016,3 +1016,9 @@ Exact-head CI repair (2026-10-07): initial scripts-df gate reported 1 failed / 1
 | REL-324 / R-735 | DONE | RED 3 failed; GREEN 3 passed, focused neighborhood 61 passed | The portfolio GET bucket admits three 2s tabs (90/minute) and refuses the next read. The snapshot cache expires on that same poll so a newer Turso book is visible to the close ticket. Demo shell tiers I and J are the three-tab open minute (207) and one equity day (102960), still shared and still finite. No placement, halt, or broker path changed. |
 
 2026-10-15 PR #1076 conflict resolution: preserve main #1081 portfolio GET ceiling of 2,000/minute through the shared admission constant; retain two-second snapshot expiry and three-tab demo budgets. Regression exhausts the configured user ceiling after proving three-tab polling fits. Exact-head GitHub verification pending; no local suites.
+
+## Nightly remediation 2026-10-16
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-326 / R-737 | DONE | RED 2 failed (both pools, `ResponseNotReady` on the next pipeline); GREEN 18 passed in the two transport files, focused neighborhood 86 passed | Keep-alive reads one byte past the cap and drops the socket unless the body was fully consumed and the status is 200. An over-cap body fails that call only. The next pipeline opens a new socket and is not written onto the unread tail. Patched `urlopen` seams are unchanged. No retry was added. |
