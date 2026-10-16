@@ -193,6 +193,19 @@ def test_unparsed_copy_fails_closed(tmp_path: Path) -> None:
         module.input_files_from(dockerfile, ignore, REPO)
 
 
+@pytest.mark.parametrize("instruction", [
+    "copy payload /payload",
+    "COPY\tpayload /payload",
+    "ADD payload /payload",
+    "COPY --from=ghcr.io/example/untracked:latest /payload /payload",
+])
+def test_unsupported_source_instruction_cannot_be_silently_omitted(instruction):
+    module = _load_hasher()
+    dockerfile = "FROM python:3.13\nCOPY requirements.txt /requirements.txt\n" + instruction
+    with pytest.raises(module.InputHashError):
+        module.copy_sources(dockerfile)
+
+
 def test_cli_fails_closed_on_unknown_pattern(monkeypatch: pytest.MonkeyPatch) -> None:
     """The workflow treats a non-zero hasher exit as a cache miss.
 
