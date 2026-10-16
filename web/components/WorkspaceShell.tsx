@@ -11,6 +11,7 @@ import { navItems } from "@/lib/data";
 import { resolveSectionFromPath } from "@/lib/chat";
 import { usePortfolio } from "@/lib/usePortfolio";
 import { useOrders } from "@/lib/useOrders";
+import { MARKET_HOURS_ACCOUNT_POLL_MS, OFF_HOURS_ACCOUNT_POLL_MS } from "@/lib/accountPollBudget";
 import { useMarketHours, MarketState } from "@/lib/useMarketHours";
 import { useAutoSyncOnStale } from "@/lib/useAutoSyncOnStale";
 import {
@@ -86,7 +87,9 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
   const { toasts, exitingIds, addToast, upsertToast, dismissToast, hasToastKey } = useToast();
   const marketState = useMarketHours();
   const isMarketActive = marketState !== MarketState.CLOSED;
-  const accountPollIntervalMs = marketState === MarketState.OPEN ? 2_000 : 30_000;
+  const accountPollIntervalMs = marketState === MarketState.OPEN
+    ? MARKET_HOURS_ACCOUNT_POLL_MS
+    : OFF_HOURS_ACCOUNT_POLL_MS;
   // CME Globex session gate for the header ES/NQ/RTY futures strip — runs ~23h,
   // independent of the equities session above.
   const globexOpen = useGlobexOpen();

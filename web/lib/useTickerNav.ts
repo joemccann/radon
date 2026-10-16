@@ -2,15 +2,14 @@
 
 import { useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { tickerHref } from "@/lib/tickerRoute";
 
 export function useTickerNav() {
   const router = useRouter();
 
   const navigateToTicker = useCallback(
     (ticker: string, positionId?: number) => {
-      const path = `/${ticker.toUpperCase()}`;
-      const qs = positionId != null ? `?posId=${positionId}` : "";
-      router.push(`${path}${qs}`);
+      router.push(tickerHref(ticker, positionId));
     },
     [router],
   );

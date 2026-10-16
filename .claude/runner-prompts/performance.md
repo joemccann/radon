@@ -98,6 +98,9 @@ Post exactly one comment on the rolling issue with `gh issue comment <n> --body-
 - every still-open `PERF-###` with surface, metric, baseline and acceptance criterion, carried forward even on a quiet night, plus the ones fixed tonight with before/after;
 - tonight's PR URL, or why there is none.
 
+If no PR was opened tonight (zero-finding run), prune superseded comments so the rolling issue retains only the current checkpoint and report:
+`python3.13 scripts/nightly_issue_prune.py --gh-bin gh --issue <n> --branch-prefix performance/`
+
 ## Final message
 
 The last line of your output must be one short line:

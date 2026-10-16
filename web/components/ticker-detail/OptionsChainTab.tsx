@@ -467,7 +467,7 @@ function OrderBuilder({
       // a naked single-leg short surfaces a Reg-T requirement (not maxLoss).
       underlyingSpot: spot ?? null,
     };
-  }, [isValidPrice, parsedPrice, totalQty, structure, isDebit, legs, ticker, netPrices.bid, netPrices.ask, spot]);
+  }, [isValidPrice, parsedPrice, totalQty, structure, isCombo, isDebit, legs, ticker, netPrices.bid, netPrices.ask, spot]);
 
   // Pull the resolved state for the coverage chip + (later) submit gating.
   // Calling `useOrderRisk` directly here is equivalent to the gate; the gate
@@ -487,6 +487,11 @@ function OrderBuilder({
   );
 
   const riskState = useOrderRisk(riskInput, portfolio);
+  const closeOutAction = riskState?.summary.closeOutAction ?? null;
+  const transmitLabel =
+    closeOutAction === "SELL" ? "Sell to Close"
+    : closeOutAction === "BUY" ? "Buy to Close"
+    : structure || "Order";
   const submitPermitted = chainOrderSubmitPermitted(isValidPrice, riskState, isCombo, isDebit);
 
   /**
@@ -672,7 +677,7 @@ function OrderBuilder({
       <div className="order-builder-section order-builder-section--structure">
         <div className="order-builder-header">
           <span className="order-builder-title">
-            ORDER BUILDER{structure ? ` : ${structure}` : ""}
+            ORDER BUILDER{closeOutAction != null ? ` : ${transmitLabel}` : structure ? ` : ${structure}` : ""}
           </span>
           <button
             type="button"
@@ -1012,7 +1017,7 @@ function OrderBuilder({
                 {loading
                   ? "Transmitting..."
                   : transmitArmed
-                    ? `Transmit ${structure || "Order"}`
+                    ? `Transmit ${transmitLabel}`
                     : "Transmit: awaiting acknowledgement"}
               </button>
             </div>

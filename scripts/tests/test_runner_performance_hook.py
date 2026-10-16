@@ -156,3 +156,70 @@ def test_prompt_keeps_the_agent_off_production_and_out_of_ci_performance_scope()
     assert "belongs to the `ci-performance` loop" in prompt
     assert "--label performance-nightly" in prompt
     assert "scripts/db/migrations/*" in prompt
+    assert "nightly_issue_prune.py" in prompt
+
+
+def test_prune_deadman_is_called_with_loop_issue_and_branch_prefix(rig):
+    gh_script = rig.calls / "fake-gh"
+    gh_script.write_text(
+        "#!/bin/bash\n"
+        "if [[ \"$*\" == *\"issue list\"* ]]; then\n"
+        "  echo '1000'\n"
+        "fi\n"
+    )
+    gh_script.chmod(0o755)
+
+    pruner = rig.runner / "lib" / "nightly_issue_prune.py"
+    prune_record = rig.calls / "prune-record.txt"
+    pruner.write_text(
+        "import sys\n"
+        "from pathlib import Path\n"
+        f"Path({str(prune_record)!r}).write_text(' '.join(sys.argv[1:]))\n"
+    )
+
+    out = rig.run(RADON_RUNNER_GH=str(gh_script))
+    assert out.returncode == 0, out.stderr
+    assert prune_record.exists(), "pruner should have been invoked"
+    argv = prune_record.read_text().split()
+    assert "--issue" in argv and "1000" in argv
+    assert "--branch-prefix" in argv and "performance/" in argv
+
+
+def test_prune_deadman_is_skippable_via_env(rig):
+    gh_script = rig.calls / "fake-gh"
+    gh_script.write_text(
+        "#!/bin/bash\n"
+        "if [[ \"$*\" == *\"issue list\"* ]]; then\n"
+        "  echo '1000'\n"
+        "fi\n"
+    )
+    gh_script.chmod(0o755)
+
+    pruner = rig.runner / "lib" / "nightly_issue_prune.py"
+    prune_record = rig.calls / "prune-record.txt"
+    pruner.write_text(
+        "import sys\n"
+        "from pathlib import Path\n"
+        f"Path({str(prune_record)!r}).write_text(' '.join(sys.argv[1:]))\n"
+    )
+
+    out = rig.run(RADON_RUNNER_GH=str(gh_script), RADON_WEEKEND_SKIP_ISSUE_PRUNE="1")
+    assert out.returncode == 0, out.stderr
+    assert not prune_record.exists(), "pruner should have been skipped"
+
+
+def test_prune_deadman_failure_does_not_fail_pre_run_hook(rig):
+    gh_script = rig.calls / "fake-gh"
+    gh_script.write_text(
+        "#!/bin/bash\n"
+        "if [[ \"$*\" == *\"issue list\"* ]]; then\n"
+        "  echo '1000'\n"
+        "fi\n"
+    )
+    gh_script.chmod(0o755)
+
+    pruner = rig.runner / "lib" / "nightly_issue_prune.py"
+    pruner.write_text("import sys; sys.exit(1)\n")
+
+    out = rig.run(RADON_RUNNER_GH=str(gh_script))
+    assert out.returncode == 0, out.stderr
