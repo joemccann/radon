@@ -142,3 +142,109 @@ for (const viewport of [
     });
   }
 }
+
+function multiGroupPreferences(): PreferencesPayload {
+  const payload = preferences();
+  const scanning = Array.from({ length: 4 }, (_, index): PreferenceEntry => ({
+    ...payload.preferences[0], key: `RADON_SAMPLE_SCAN_${index + 1}`, group: "Scanning",
+    label: `Scanning threshold ${index + 1}`, value: index + 1, default: index + 1,
+    description: "Require enough measured flow observations before including an instrument in the scanner. This setting controls sample quality and applies to the next scan.",
+  }));
+  return { ...payload, preferences: [...payload.preferences, ...scanning], groups: ["Order Limits", "Scanning"] };
+}
+
+function multiGroupCredentials(): CredentialsPayload {
+  const payload = credentials();
+  const groups = ["Market data", "Execution", "Research"];
+  return { ...payload, groups, services: groups.map((group, index) => ({
+    ...payload.services[0], id: `sample_group_${index}`, label: `${group} service`, group,
+    fields: Array.from({ length: 3 }, (_, fieldIndex) => ({
+      ...payload.services[0].fields[0], name: `SAMPLE_GROUP_${index}_KEY_${fieldIndex}`,
+      label: `${group} key ${fieldIndex + 1}`,
+    })),
+  })) };
+}
+
+async function assertNaturalCards(shell: Locator) {
+  const measurements = await shell.locator(":scope > .admin-card").evaluateAll((cards) => cards.map((card) => {
+    const element = card as HTMLElement;
+    return { client: element.clientHeight, content: element.scrollHeight };
+  }));
+  expect(measurements.length).toBeGreaterThan(1);
+  for (const measurement of measurements) {
+    expect(measurement.client, "each group card must retain its full content height instead of shrink-clipping controls")
+      .toBeGreaterThanOrEqual(measurement.content - 1);
+  }
+  const overflow = await shell.evaluate((element) => ({
+    client: element.clientHeight, content: element.scrollHeight, overflow: getComputedStyle(element).overflowY,
+  }));
+  expect(overflow.overflow).toMatch(/auto|scroll/);
+  expect(overflow.content, "the mobile settings panel must expose its complete scroll extent")
+    .toBeGreaterThan(overflow.client + 100);
+}
+
+for (const theme of ["light", "dark"] as const) {
+  test(`mobile ${theme} multi-group Preferences and Keys scroll through full cards to the last control`, async ({ page }, testInfo) => {
+    test.setTimeout(90000);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await installClearFixtures(page);
+    await installClearRealtimeFixtures(page);
+    await page.addInitScript((value) => localStorage.setItem("theme", value), theme);
+    const writes: string[] = [];
+    const prefPayload = multiGroupPreferences();
+    const credentialPayload = multiGroupCredentials();
+    for (const [path, payload] of [["preferences", prefPayload], ["credentials", credentialPayload]] as const) {
+      await page.route(`**/api/${path}**`, async (route) => {
+        if (route.request().method() !== "GET") {
+          writes.push(`${route.request().method()} ${path}`);
+          await route.fulfill({ status: 403, json: { error: "Settings writes forbidden in scroll regression" } });
+          return;
+        }
+        await route.fulfill({ json: payload });
+      });
+    }
+    await page.goto("/profile?tab=preferences");
+    await expect(page.getByTestId("preference-input-RADON_SAMPLE_SCAN_4")).toHaveValue("4");
+    await page.evaluate(() => document.fonts.ready);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    for (const panel of ["preferences", "credentials"] as const) {
+      if (panel === "credentials") await page.getByRole("tab", { name: "Keys", exact: true }).click();
+      const shell = page.getByTestId(panel === "preferences" ? "preferences-section" : "credentials-panel");
+      const lastControl = panel === "preferences"
+        ? page.getByTestId("preference-input-RADON_SAMPLE_SCAN_4")
+        : page.getByLabel("Research key 3", { exact: true });
+      await expect(lastControl).toHaveCount(1);
+      await page.screenshot({ path: testInfo.outputPath(`profile-settings-mobile-${theme}-${panel}-scroll-start.png`), animations: "disabled" });
+      await assertNaturalCards(shell);
+      const viewport = await box(shell);
+      const header = page.locator(".profile-surface--mobile > .profile-header");
+      const headerBefore = await box(header);
+      const tabsBefore = await box(page.getByRole("tab", { name: "Keys", exact: true }));
+      await expect(page.getByTestId("mobile-tab-bar")).toBeVisible();
+      // Wheel input targets the actual bounded mobile scrollport. Do not use
+      // scrollIntoView or locator actions that conceal clipped flex children.
+      await page.mouse.move(viewport.x + viewport.width / 2, viewport.y + viewport.height / 2);
+      await page.mouse.wheel(0, 10000);
+      await expect.poll(() => shell.evaluate((element) => element.scrollTop + element.clientHeight - element.scrollHeight))
+        .toBeGreaterThanOrEqual(-1);
+      const control = await box(lastControl);
+      const headerAfter = await box(header);
+      const tabsAfter = await box(page.getByRole("tab", { name: "Keys", exact: true }));
+      expect(Math.abs(headerAfter.y - headerBefore.y)).toBeLessThanOrEqual(1);
+      expect(Math.abs(tabsAfter.y - tabsBefore.y)).toBeLessThanOrEqual(1);
+      await expect(page.getByTestId("mobile-tab-bar")).toBeVisible();
+      const card = await box(lastControl.locator("xpath=ancestor::section[contains(@class,'admin-card')][1]"));
+      expect(control.y).toBeGreaterThanOrEqual(viewport.y - 1);
+      expect(control.y + control.height).toBeLessThanOrEqual(viewport.y + viewport.height + 1);
+      expect(control.y + control.height).toBeLessThanOrEqual(card.y + card.height + 1);
+      const reachable = await lastControl.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+        return hit === element || element.contains(hit);
+      });
+      expect(reachable, "last input must be reachable by a pointer after scrolling, without clipping or overlay interception").toBe(true);
+      await page.screenshot({ path: testInfo.outputPath(`profile-settings-mobile-${theme}-${panel}-scroll-end.png`), animations: "disabled" });
+    }
+    expect(writes).toEqual([]);
+  });
+}
