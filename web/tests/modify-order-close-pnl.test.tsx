@@ -620,13 +620,13 @@ describe("ModifyOrderModal closes an exact subset of a grouped position", () => 
     expect(summary.getByTestId("order-confirm-estimated-pnl").textContent).toBe("$5,125 (+25.8%)");
   });
 
-  it("keeps basis unavailable when the selected legs have mixed provenance", () => {
+  it("realises selected legs whose basis comes from different sources", () => {
     const { order, portfolio } = sndkSubsetClose();
     portfolio.positions[0].legs[0].basis_source = "ib";
     portfolio.positions[0].legs[1].basis_source = "session_fills";
     const summary = renderSndkSubset(order, portfolio);
     expect(summary.getByText("Close Credit:")).toBeTruthy();
-    expect(summary.queryByTestId("order-confirm-estimated-pnl")).toBeNull();
+    expect(summary.getByTestId("order-confirm-estimated-pnl").textContent).toBe("$10,250 (+25.8%)");
   });
 
   it("counts remaining contracts on another working close of a selected call", () => {

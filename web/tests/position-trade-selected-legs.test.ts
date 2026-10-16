@@ -145,23 +145,35 @@ describe("selected held position legs", () => {
     expect(order(position, [1], 10, "BUY")?.riskInput.closeOut?.entryCostDollars).toBeNull();
   });
 
-  it("refuses mixed basis but recovers homogeneous selected legs from a mixed parent", () => {
+  it("realises selected legs whose measured basis comes from different sources", () => {
     const position = crwd();
     position.basis_source = "mixed";
     position.legs[0].basis_source = "ib";
     expect(order(position)?.riskInput.closeOut?.entryCostDollars).toBe(58000);
     position.legs[1].basis_source = "session_fills";
-    expect(order(position)?.riskInput.closeOut?.entryCostDollars).toBeNull();
+    expect(resolvePositionTradeTarget(position, { kind: "legs", indices: [1, 2] })?.entry_cost).toBeNull();
+    expect(order(position)?.riskInput.closeOut?.entryCostDollars).toBe(58000);
     position.legs[1].basis_source = "mixed";
-    expect(order(position, [1], 10, "BUY")?.riskInput.closeOut?.entryCostDollars).toBeNull();
+    expect(order(position, [1], 10, "BUY")?.riskInput.closeOut?.entryCostDollars).toBe(-1196.9);
   });
 
-  it("does not infer compatible provenance when a mixed parent lacks leg sources", () => {
-    const position = crwd();
-    position.basis_source = "mixed";
-    delete position.legs[1].basis_source;
-    delete position.legs[2].basis_source;
-    expect(order(position)?.riskInput.closeOut?.entryCostDollars).toBeNull();
+  it("VIX bull call spread: overnight long + same-session short still reports realised P&L", () => {
+    const vix: PortfolioPosition = {
+      id: 9, ticker: "VIX", structure: "Bull Call Spread $20.0/$23.5", structure_type: "Bull Call Spread",
+      risk_profile: "defined", expiry: "2026-10-20", contracts: 1000, direction: "DEBIT",
+      entry_cost: null, max_risk: null, market_value: 65000, kelly_optimal: null, target: null,
+      stop: null, entry_date: "2026-09-01", basis_source: "mixed",
+      legs: [
+        { direction: "LONG", type: "Call", strike: 20, contracts: 1000, avg_cost: 188.99028,
+          entry_cost: 188990.28, market_price: 1.3, market_value: 130000, basis_source: "journal" },
+        { direction: "SHORT", type: "Call", strike: 23.5, contracts: 1000, avg_cost: 100,
+          entry_cost: 100000, market_price: 0.65, market_value: 65000, basis_source: "session_fills" },
+      ],
+    };
+    const built = buildPositionTradeOrder({ position: vix, target: { kind: "legs", indices: [0, 1] },
+      action: "SELL", quantity: 1000, limitPrice: 3.5, tif: "GTC" })!;
+    expect(built.isClosing).toBe(true);
+    expect(built.riskInput.closeOut?.entryCostDollars).toBeCloseTo(88990.28, 2);
   });
 
   it("uses published leg basis for legacy rows without source labels and leaves unknown marks unavailable", () => {

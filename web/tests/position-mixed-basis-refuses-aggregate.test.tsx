@@ -330,7 +330,7 @@ describe("MetricCards Open P&L includes a `mixed` position's measured leg P&L (R
   });
 });
 
-describe("close ticket carries no realised figure for a `mixed` position (T-315)", () => {
+describe("close ticket realises a `mixed` position from its measured legs", () => {
   function comboClose(pos: PortfolioPosition) {
     return buildPositionTradeOrder({
       position: pos,
@@ -342,23 +342,28 @@ describe("close ticket carries no realised figure for a `mixed` position (T-315)
     })!;
   }
 
-  it("buildPositionTradeOrder marks the close-out basis unavailable", () => {
+  // Realised P&L is additive per leg: closing both legs retires each leg's
+  // own measured basis, so the $1,000 sum is cash flow, not a blended entry.
+  it("buildPositionTradeOrder retires the summed leg basis", () => {
     const o = comboClose(MIXED);
     expect(o.isClosing).toBe(true);
-    expect(o.riskInput.closeOut).not.toBeNull();
-    expect(o.riskInput.closeOut?.entryCostDollars).toBeNull();
+    expect(o.riskInput.closeOut?.entryCostDollars).toBe(1000);
     expect(comboClose(CLEAN).riskInput.closeOut?.entryCostDollars).toBe(1000);
   });
 
-  it("useOrderRisk yields estimatedPnl null and the ticket prints no Est. Realized P&L", () => {
+  it("useOrderRisk yields the realised P&L and the ticket prints it", () => {
     const o = comboClose(MIXED);
     const { result } = renderHook(() => useOrderRisk(o.riskInput, portfolioOf(MIXED)));
-    expect(result.current!.summary.estimatedPnl).toBeNull();
-    expect(result.current!.summary.estimatedPnlPct).toBeNull();
+    expect(result.current!.summary.estimatedPnl).toBe(3500);
     expect(result.current!.okToSubmit).toBe(true);
     render(<OrderConfirmSummary summary={result.current!.summary} />);
-    expect(document.body.textContent).not.toContain("Est. Realized P&L");
-    expect(document.body.textContent).not.toContain("3,500");
+    expect(screen.getByTestId("order-confirm-estimated-pnl").textContent).toContain("$3,500");
+  });
+
+  it("stays unavailable when a leg has no measured basis", () => {
+    const unmeasured = partiallyRolledVertical("mixed");
+    unmeasured.legs[1].entry_cost = null as unknown as number;
+    expect(comboClose(unmeasured).riskInput.closeOut?.entryCostDollars).toBeNull();
   });
 
   it("still reports the realised figure when every leg agrees", () => {
