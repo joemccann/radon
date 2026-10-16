@@ -3146,6 +3146,20 @@ Standing sweeps HOLD: halt/limits at `scripts/clients/ib_client.py:708-719,864-9
 
 Audited through: 63fd899271228dacfb1aaf96b8c65e0f3fe9cd86 on 2026-10-14 — 1 new finding
 
+## Delta audit 2026-10-15
+
+Trusted cursor `63fd899271228dacfb1aaf96b8c65e0f3fe9cd86` through `a92472f04d2aadfab583332ebf019df14a5e1408`: 3 commits, 15 changed paths. Codemap `generated_at` 2026-10-12T09:00:05Z predates the cursor, so importers of the changed order-risk and portfolio modules were confirmed with `rg` (`useOrderRisk` call sites and `requireRouteAccess` on the portfolio route). Open draft #1076 reserves R-735 / REL-324 and was not repeated. Highest IDs before tonight: R-735 / REL-324.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-736 / REL-325 | P1 | `web/lib/order/risk/OrderRiskGate.tsx` `resolveCorrelationOrderContext` | DONE. A chain sell of the exact held contract is classified as a close (`closeOutAction`) without `input.closeOut`. Gate 3 still read only that flag, so the ticket said Sell to Close while the banner said the order was adding to a breached cluster. Acceptance: render the gate on a 50-of-100 held-call sell inside a breached cluster and assert no add warning; a 150-lot oversell still shows the add warning. RED 1 failed / 25 passed. GREEN 42 passed (chokepoint, chain close, correlation banner). |
+
+The portfolio GET budget change to 2000/min (#1081) and the sell-to-close classifier (#1082) were read. #1081 supersedes the operator half of R-735's 20/min refusal; the 15s snapshot-cache half stays on draft #1076. Ticker navigation encoding (#1078) keeps a leading-slash segment on this origin. No second defect verified.
+
+Standing sweeps HOLD: halt and limits at `scripts/clients/ib_client.py:708-752,864-910`, wire `placeOrder` at `:752,910`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:5975,6084,6162`, exit ack at `scripts/monitor_daemon/handlers/exit_orders.py:208-241`, Hrana daemon-state at `scripts/db/writer.py:2739-2752`. Whole-repo `placeOrder` / `place_order` enumeration contains only those two guarded funnels. No new `service_health` writer in the range. NEW_FINDINGS and the REL-021b remainder have no new changed-surface instance. Operator-only items stay NF-1, NF-4, REL-087 / R-232, REL-261 / R-682.
+
+Audited through: a92472f04d2aadfab583332ebf019df14a5e1408 on 2026-10-15 — 1 new finding
+
 ## Delta audit 2026-10-16
 
 | ID | Sev | Where | Finding |

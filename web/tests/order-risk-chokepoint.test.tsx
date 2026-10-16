@@ -259,6 +259,96 @@ describe("OrderRiskGate — gate is a thin pairing", () => {
     expect(container.textContent).toMatch(/AAA \+ BBB/);
   });
 
+  it("a chain sell of the exact held contract reduces a breached cluster (R-736)", () => {
+    // CRWD 2026-10-14 classified this SELL as a close inside useOrderRisk
+    // without setting input.closeOut. Gate 3 still read only that flag, so
+    // the banner told the operator the close was an add (2026-09-01 TQQQ).
+    const held: PortfolioData = {
+      ...emptyPortfolio,
+      positions: [
+        {
+          id: 3,
+          ticker: "CRWD",
+          structure: "Long Call",
+          structure_type: "Long Option",
+          risk_profile: "DEFINED",
+          expiry: "2026-10-16",
+          contracts: 100,
+          direction: "LONG",
+          entry_cost: 130_000,
+          max_risk: 130_000,
+          market_value: 22_200,
+          legs: [
+            {
+              direction: "LONG",
+              contracts: 100,
+              type: "Call",
+              strike: 260,
+              expiry: "2026-10-16",
+              entry_cost: 130_000,
+              avg_cost: 1_300,
+              market_price: 2.22,
+              market_value: 22_200,
+            },
+          ],
+          kelly_optimal: null,
+          target: null,
+          stop: null,
+          entry_date: "2026-10-01",
+        },
+      ],
+      risk_budget: {
+        clusters: [{
+          tickers: ["CRWD", "PANW"],
+          aggregate_exposure: 0.08,
+          budget: 0.025,
+          breached: true,
+          max_pair_corr: 0.91,
+          per_ticker_exposure: { CRWD: 0.05, PANW: 0.03 },
+        }],
+        breaches: [{
+          tickers: ["CRWD", "PANW"],
+          aggregate_exposure: 0.08,
+          budget: 0.025,
+          breached: true,
+          max_pair_corr: 0.91,
+          per_ticker_exposure: { CRWD: 0.05, PANW: 0.03 },
+        }],
+        aggregate_exposure: 0.08,
+        insufficient_data: [],
+        corr_threshold: 0.7,
+        book_budget: 0.025,
+      },
+    } as unknown as PortfolioData;
+    const sellHeld = {
+      ticker: "CRWD",
+      chainLegs: [
+        { action: "SELL" as const, right: "C" as const, strike: 260, expiry: "20261016", quantity: 50 },
+      ],
+      netPremium: -4,
+      description: "Short Call @ $4.00",
+      totalCost: -20_000,
+    };
+    const { container } = render(
+      <OrderRiskGate input={sellHeld} portfolio={held} surface="chain-builder" />,
+    );
+    expect(container.textContent).toMatch(/Sell to Close/);
+    // Level "reduce" renders no Gate 3 module. The failure mode is the add
+    // warning on a close, which is what the chain showed before R-736.
+    expect(container.querySelector("[data-testid='correlation-risk-banner']")).toBeNull();
+    expect(container.textContent).not.toMatch(/adding/i);
+
+    const oversell = {
+      ...sellHeld,
+      chainLegs: [{ ...sellHeld.chainLegs[0], quantity: 150 }],
+    };
+    const opened = render(
+      <OrderRiskGate input={oversell} portfolio={held} surface="chain-builder" />,
+    );
+    expect(opened.container.textContent).toMatch(/adding/i);
+    expect(opened.container.textContent).not.toMatch(/this order reduces/);
+  });
+
   it("resolved portfolio without correlation data reports measurement unavailable", () => {
     const { container } = render(
       <OrderRiskGate input={sampleInput} portfolio={emptyPortfolio} surface="test" />,
