@@ -2202,10 +2202,19 @@ class TestDocumentation20261015:
 
     def test_open_portfolio_poll_stays_inside_the_get_budget(self):
         shell = (_ROOT / "web/components/WorkspaceShell.tsx").read_text()
-        match = re.search(r"MarketState\.OPEN \? ([\d_]+) : ([\d_]+)", shell)
-        assert match, "WorkspaceShell no longer states the open and off-hours poll"
-        open_ms = int(match.group(1).replace("_", ""))
-        off_ms = int(match.group(2).replace("_", ""))
+        poll_budget = (_ROOT / "web/lib/accountPollBudget.ts").read_text()
+        assert "MARKET_HOURS_ACCOUNT_POLL_MS" in shell
+        assert "OFF_HOURS_ACCOUNT_POLL_MS" in shell
+        open_ms = int(
+            re.search(r"MARKET_HOURS_ACCOUNT_POLL_MS = ([\d_]+)", poll_budget)
+            .group(1)
+            .replace("_", "")
+        )
+        off_ms = int(
+            re.search(r"OFF_HOURS_ACCOUNT_POLL_MS = ([\d_]+)", poll_budget)
+            .group(1)
+            .replace("_", "")
+        )
         assert "pollIntervalMs: accountPollIntervalMs" in shell
         assert "useOrders(shouldAutoSyncOrders, accountPollIntervalMs)" in shell
         route = (_ROOT / "web/app/api/portfolio/route.ts").read_text()
