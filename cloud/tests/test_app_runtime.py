@@ -1395,6 +1395,79 @@ def test_run_newsfeed_refuses_to_start_without_the_seccomp_profile(tmp_path: Pat
     assert not [line for line in log.splitlines() if line.startswith("run ")]
 
 
+def _planted_profile(tmp_path: Path, name: str = "seccomp") -> Path:
+    """A well-formed profile at <tmp>/<name>/chromium.json, like the installed
+    control-plane copy at /etc/radon/seccomp/chromium.json."""
+    directory = tmp_path / name
+    directory.mkdir(parents=True, exist_ok=True)
+    directory.chmod(0o755)
+    profile = directory / "chromium.json"
+    profile.write_text('{"defaultAction": "SCMP_ACT_ERRNO"}\n', encoding="utf-8")
+    profile.chmod(0o644)
+    return profile
+
+
+def _newsfeed_profile_result(tmp_path: Path, profile: Path):
+    return _run(
+        tmp_path,
+        ["run", "radon-newsfeed.service"],
+        extra_env={"RADON_TEST_SECCOMP_PROFILE": str(profile)},
+    )
+
+
+def test_run_newsfeed_refuses_a_seccomp_profile_under_a_symlinked_directory(
+    tmp_path: Path,
+) -> None:
+    """DS-2026-09-24-01 residual: /etc/radon is radon-writable (1770), so the
+    profile's own directory is the untrusted component. A leaf -f/-L test
+    follows a planted directory link and loads a radon-authored filter."""
+    real = _planted_profile(tmp_path, "radon-owned")
+    link = tmp_path / "seccomp"
+    link.symlink_to(real.parent)
+    result = _newsfeed_profile_result(tmp_path, link / "chromium.json")
+    assert result.returncode == 78, result.stderr
+    assert "seccomp profile" in result.stderr
+    log = result.docker_log.read_text(encoding="utf-8") if result.docker_log.exists() else ""  # type: ignore[attr-defined]
+    assert not [line for line in log.splitlines() if line.startswith("run ")]
+
+
+def test_run_newsfeed_refuses_a_group_writable_seccomp_profile(tmp_path: Path) -> None:
+    profile = _planted_profile(tmp_path)
+    profile.chmod(0o664)
+    result = _newsfeed_profile_result(tmp_path, profile)
+    assert result.returncode == 78, result.stderr
+    assert "seccomp profile" in result.stderr
+
+
+def test_run_newsfeed_refuses_a_group_writable_seccomp_directory(tmp_path: Path) -> None:
+    profile = _planted_profile(tmp_path)
+    profile.parent.chmod(0o775)
+    result = _newsfeed_profile_result(tmp_path, profile)
+    assert result.returncode == 78, result.stderr
+    assert "seccomp profile" in result.stderr
+
+
+def test_run_newsfeed_refuses_a_symlinked_seccomp_profile(tmp_path: Path) -> None:
+    profile = _planted_profile(tmp_path)
+    link = profile.parent / "linked.json"
+    link.symlink_to(profile)
+    result = _newsfeed_profile_result(tmp_path, link)
+    assert result.returncode == 78, result.stderr
+    assert "seccomp profile" in result.stderr
+
+
+def test_run_newsfeed_starts_with_a_private_owner_only_writable_profile(
+    tmp_path: Path,
+) -> None:
+    profile = _planted_profile(tmp_path)
+    result = _newsfeed_profile_result(tmp_path, profile)
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    run_lines = [line for line in log.splitlines() if line.startswith("run ")]
+    assert len(run_lines) == 1, log
+    assert f"seccomp={profile}" in run_lines[0]
+
+
 def test_run_newsfeed_no_longer_forces_the_chromium_sandbox_off(tmp_path: Path) -> None:
     """The profile lets Chromium build its namespace sandbox, so the runtime
     stops injecting PLAYWRIGHT_CHROMIUM_SANDBOX=0 (which meant --no-sandbox)."""
