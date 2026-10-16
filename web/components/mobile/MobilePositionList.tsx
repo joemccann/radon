@@ -36,9 +36,11 @@ import TickerLink from "@/components/TickerLink";
 import InstrumentDetailModal from "@/components/InstrumentDetailModal";
 import Card from "./Card";
 import MetricCell from "./MetricCell";
+import PositionStrategyGrouping, { type PositionStrategyGroupingControls } from "@/components/PositionStrategyGrouping";
 
 type MobilePositionListProps = {
   positions: PortfolioPosition[];
+  strategyGrouping?: PositionStrategyGroupingControls;
   prices?: Record<string, PriceData>;
   showExpiry?: boolean;
   portfolio?: PortfolioData | null;
@@ -112,7 +114,7 @@ function TrendArrow({ direction }: { direction: "up" | "down" | null }) {
   return null;
 }
 
-function PositionCard({ pos, prices, showExpiry, riskFreeRate, onLegClick }: { pos: PortfolioPosition; prices?: Record<string, PriceData>; showExpiry: boolean; riskFreeRate: number | null; onLegClick: (leg: PortfolioLeg, pos: PortfolioPosition) => void }) {
+function PositionCard({ pos, prices, showExpiry, riskFreeRate, onLegClick, strategyGrouping }: { pos: PortfolioPosition; prices?: Record<string, PriceData>; showExpiry: boolean; riskFreeRate: number | null; onLegClick: (leg: PortfolioLeg, pos: PortfolioPosition) => void; strategyGrouping?: PositionStrategyGroupingControls }) {
   const [expanded, setExpanded] = useState(false);
 
   const isStock = pos.structure_type === "Stock";
@@ -203,8 +205,9 @@ function PositionCard({ pos, prices, showExpiry, riskFreeRate, onLegClick }: { p
           <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                <TickerLink ticker={pos.ticker} positionId={pos.id} />
+                <TickerLink ticker={pos.ticker} positionId={strategyGrouping?.sourceFor(pos).id ?? pos.id} />
               </span>
+              {strategyGrouping && <PositionStrategyGrouping position={pos} controls={strategyGrouping} prices={prices} />}
               <span className={`pill ${riskPillClass(pos)}`}>{pos.direction}</span>
               <span className="mobile-card__subtitle" data-testid={`mobile-position-${pos.ticker}-qty`} style={{ fontSize: "var(--text-meta)" }}>
                 {pos.contracts}x
@@ -435,7 +438,7 @@ function LegItem({ leg, pnlValues, prices, ticker, expiry, showImplied, riskFree
   );
 }
 
-export default function MobilePositionList({ positions, prices, showExpiry = true, portfolio = null }: MobilePositionListProps) {
+export default function MobilePositionList({ positions, prices, showExpiry = true, portfolio = null, strategyGrouping }: MobilePositionListProps) {
   const sorted = useMemo(() => [...positions].sort((a, b) => a.ticker.localeCompare(b.ticker)), [positions]);
 
   // null until FRED answers — same gate as the desktop Implied columns (R-229).
@@ -458,7 +461,7 @@ export default function MobilePositionList({ positions, prices, showExpiry = tru
   return (
     <div className="mobile-card-list" data-testid="mobile-position-list">
       {sorted.map((pos) => (
-        <PositionCard key={pos.id} pos={pos} prices={prices} showExpiry={showExpiry} riskFreeRate={riskFreeRate} onLegClick={handleLegClick} />
+        <PositionCard key={pos.id} pos={pos} prices={prices} showExpiry={showExpiry} riskFreeRate={riskFreeRate} onLegClick={handleLegClick} strategyGrouping={strategyGrouping} />
       ))}
       {activeInstrument && prices && (
         <InstrumentDetailModal

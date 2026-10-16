@@ -43,6 +43,7 @@ import { useViewport } from "@/lib/useViewport";
 import { isIbDailyPnlFromCurrentSession, withSessionIbDailyPnl } from "@/lib/ibDailyPnlSession";
 import { ColumnsToggle, type ColumnsToggleEntry } from "./ColumnsToggle";
 import MobilePositionList from "./mobile/MobilePositionList";
+import PositionStrategyGrouping, { type PositionStrategyGroupingControls } from "./PositionStrategyGrouping";
 
 const DENSITY_STORAGE_PREFIX = "radon:density:";
 
@@ -373,7 +374,7 @@ function LegRow({
 
 /* ─── Position row ─────────────────────────────────────── */
 
-function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImplied = false, columns, realtimePrice, prices, riskFreeRate = null, onLegClick }: { pos: PortfolioPosition; showExpiry?: boolean; showUnderlying?: boolean; showImplied?: boolean; columns: PositionColumnVisibility; realtimePrice?: PriceData | null; prices?: Record<string, PriceData>; riskFreeRate?: number | null; onLegClick?: (leg: PortfolioLeg, pos: PortfolioPosition) => void }) {
+function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImplied = false, columns, realtimePrice, prices, riskFreeRate = null, onLegClick, strategyGrouping }: { pos: PortfolioPosition; showExpiry?: boolean; showUnderlying?: boolean; showImplied?: boolean; columns: PositionColumnVisibility; realtimePrice?: PriceData | null; prices?: Record<string, PriceData>; riskFreeRate?: number | null; onLegClick?: (leg: PortfolioLeg, pos: PortfolioPosition) => void; strategyGrouping?: PositionStrategyGroupingControls }) {
   const [legsExpanded, setLegsExpanded] = useState(false);
   const hasMultipleLegs = pos.legs.length > 1;
 
@@ -486,7 +487,7 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
         <td>
           {hasMultipleLegs ? (
             <span className="ticker-with-chevron">
-              <TickerLink ticker={pos.ticker} positionId={pos.id} />
+              <TickerLink ticker={pos.ticker} positionId={strategyGrouping?.sourceFor(pos).id ?? pos.id} />
               <button
                 className="leg-toggle-btn"
                 onClick={() => setLegsExpanded((v) => !v)}
@@ -497,8 +498,9 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
               </button>
             </span>
           ) : (
-            <TickerLink ticker={pos.ticker} positionId={pos.id} />
+            <TickerLink ticker={pos.ticker} positionId={strategyGrouping?.sourceFor(pos).id ?? pos.id} />
           )}
+          {strategyGrouping && <PositionStrategyGrouping position={pos} controls={strategyGrouping} prices={prices} />}
         </td>
         {columns.structure && <td>{structureDisplay}</td>}
         {columns.qty && <td className="right">{pos.contracts}</td>}
@@ -637,8 +639,10 @@ export default function PositionTable({
   portfolio = null,
   tableId = "positions",
   columnVisibility: controlledVisibility,
+  strategyGrouping,
 }: {
   positions: PortfolioPosition[];
+  strategyGrouping?: PositionStrategyGroupingControls;
   showExpiry?: boolean;
   showUnderlying?: boolean;
   prices?: Record<string, PriceData>;
@@ -692,16 +696,17 @@ export default function PositionTable({
   const [activeInstrument, setActiveInstrument] = useState<ActiveInstrumentIdentity | null>(null);
 
   const handleLegClick = useCallback((leg: PortfolioLeg, pos: PortfolioPosition) => {
+    const source = strategyGrouping?.sourceFor(pos) ?? pos;
     setActiveInstrument({
-      positionId: pos.id,
+      positionId: source.id,
       conId: leg.con_id ?? null,
-      legIndex: pos.legs.indexOf(leg),
+      legIndex: source.legs.indexOf(leg),
     });
-  }, []);
+  }, [strategyGrouping]);
 
   const resolvedInstrument = useMemo(
-    () => resolveActiveInstrument(positions, activeInstrument),
-    [activeInstrument, positions],
+    () => resolveActiveInstrument(strategyGrouping ? positions.map(position => strategyGrouping.sourceFor(position)) : positions, activeInstrument),
+    [activeInstrument, positions, strategyGrouping],
   );
 
   useEffect(() => {
@@ -709,7 +714,7 @@ export default function PositionTable({
   }, [activeInstrument, resolvedInstrument]);
 
   if (isMobile && hasMounted) {
-    return <MobilePositionList positions={sorted} prices={prices} showExpiry={showExpiry} portfolio={portfolio} />;
+    return <MobilePositionList positions={sorted} prices={prices} showExpiry={showExpiry} portfolio={portfolio} strategyGrouping={strategyGrouping} />;
   }
 
   return (
@@ -770,7 +775,7 @@ export default function PositionTable({
         </thead>
         <tbody>
           {sorted.map((pos) => (
-            <PositionRow key={pos.id} pos={pos} showExpiry={showExpiry} showUnderlying={showUnderlying} showImplied={showImplied} columns={columns} realtimePrice={prices?.[pos.ticker]} prices={prices} riskFreeRate={riskFreeRate} onLegClick={handleLegClick} />
+            <PositionRow key={pos.id} pos={pos} showExpiry={showExpiry} showUnderlying={showUnderlying} showImplied={showImplied} columns={columns} realtimePrice={prices?.[pos.ticker]} prices={prices} riskFreeRate={riskFreeRate} onLegClick={handleLegClick} strategyGrouping={strategyGrouping} />
           ))}
         </tbody>
       </table>
