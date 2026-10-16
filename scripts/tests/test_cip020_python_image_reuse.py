@@ -143,6 +143,36 @@ def test_unknown_dockerignore_pattern_fails_closed(tmp_path: Path) -> None:
         module.input_files_from(broken, ignore, REPO)
 
 
+def test_input_hash_changes_when_copied_file_permissions_change(tmp_path: Path) -> None:
+    module = _load_hasher()
+    config = tmp_path / "docker" / "app"
+    config.mkdir(parents=True)
+    (config / "Dockerfile.python").write_text("FROM scratch\nCOPY payload /payload\n")
+    (config / ".dockerignore").write_text("")
+    payload = tmp_path / "payload"
+    payload.write_text("unchanged bytes")
+    payload.chmod(0o644)
+    original = module.image_input_hash(tmp_path)
+    payload.chmod(0o755)
+    assert module.image_input_hash(tmp_path) != original
+
+
+def test_input_hash_refuses_a_symlink_directory_in_a_copy(tmp_path: Path) -> None:
+    module = _load_hasher()
+    config = tmp_path / "docker" / "app"
+    config.mkdir(parents=True)
+    (config / "Dockerfile.python").write_text("FROM scratch\nCOPY payload /payload\n")
+    (config / ".dockerignore").write_text("")
+    payload = tmp_path / "payload"
+    payload.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "script").write_text("executable payload")
+    (payload / "linked").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(module.InputHashError, match="symlink"):
+        module.image_input_hash(tmp_path)
+
+
 def test_unparsed_copy_fails_closed(tmp_path: Path) -> None:
     module = _load_hasher()
     dockerfile = tmp_path / "Dockerfile.python"
