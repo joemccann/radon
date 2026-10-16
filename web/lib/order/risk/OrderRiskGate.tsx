@@ -165,7 +165,7 @@ export function OrderRiskGate({
       <CorrelationRiskBanner
         report={state.correlationReport}
         showUnavailable={state.coverageStatus === "resolved"}
-        order={resolveCorrelationOrderContext(input)}
+        order={resolveCorrelationOrderContext(input, state)}
       />
       {showLocateChip && (
         <LocateFeeChip status={locateStatus} data={locateData} />
@@ -212,11 +212,21 @@ export function resolveLocateChipEnabled(
  */
 export function resolveCorrelationOrderContext(
   input: OrderRiskInput | null,
+  state: OrderRiskState | null = null,
 ): CorrelationOrderContext | null {
   if (input == null || !input.ticker) return null;
+  // A chain ticket does not set `closeOut`. The chokepoint still classifies
+  // a single-leg trade of the exact held contract as a close and stamps
+  // `closeOutAction`. Gate 3 must use that verdict: reading only the input
+  // flag told the operator a sell-to-close was adding to a breached cluster
+  // (R-736). Declared closes keep the input flag, including linear closes
+  // that do not stamp `closeOutAction`.
+  const action = state?.summary.closeOutAction;
+  const inferredClose = action === "BUY" || action === "SELL";
   return {
     ticker: input.ticker,
-    reducesExposure: (input as { closeOut?: unknown }).closeOut != null,
+    reducesExposure:
+      (input as { closeOut?: unknown }).closeOut != null || inferredClose,
   };
 }
 

@@ -85,6 +85,8 @@ Cerebras is the last resort in every order, including a caller's `providers=` ov
 
 Hetzner hosts that only mount prepaid Anthropic/XAI/OpenAI keys will skip those rungs and use NVIDIA when keyed — they will not burn prepaid wallets then fall through to Cerebras. Mount subscription tokens for fuller band coverage.
 
+**Expired subscription token.** When a subscription rung (Anthropic / Codex / Grok / Antigravity) answers 401 with an expired-token body, the ladder runs one `subscription_tokens` pass for that provider under the timer's run lock (no push login, no heartbeat), re-reads the credential and retries the same model once before falling through. The timer itself refreshes any token with under 40 minutes left (`EXPIRY_SKEW_SECONDS = 2400`, longer than its 30-minute cadence plus 60 s jitter), so this retry is a backstop.
+
 Auth-file API keys obey the same prepaid opt-in as environment keys. Codex
 `OPENAI_API_KEY` and Grok `api_key`, `apiKey`, or `credentials.api_key` are
 classified as `api_key` only with `RADON_LADDER_ALLOW_PREPAID=1`; they do not
