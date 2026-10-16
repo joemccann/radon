@@ -99,17 +99,30 @@ def path_ignored(path: str, patterns: list[str]) -> bool:
 
 def copy_sources(dockerfile_text: str) -> list[str]:
     sources: list[str] = []
+    stages: set[str] = set()
     for raw in dockerfile_text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        if not line.startswith("COPY "):
+        parts = line.split()
+        instruction = parts[0].upper()
+        if instruction == "FROM":
+            if len(parts) >= 4 and parts[-2].upper() == "AS":
+                stages.add(parts[-1])
             continue
+        if instruction == "ADD":
+            raise InputHashError(f"ADD cannot be hashed: {line}")
+        if instruction != "COPY":
+            continue
+        if not line.startswith("COPY "):
+            raise InputHashError(f"COPY cannot be hashed: {line}")
         if "--from=" in line:
+            origin = [part.removeprefix("--from=") for part in parts if part.startswith("--from=")]
+            if len(origin) != 1 or origin[0] not in stages:
+                raise InputHashError(f"COPY stage cannot be hashed: {line}")
             continue
         if any(token in line for token in ("--chown", "--chmod", "--link", "$", "*", "?", "[")):
             raise InputHashError(f"COPY cannot be hashed: {line}")
-        parts = line.split()
         if len(parts) < 3 or any(part.startswith("-") for part in parts[1:]):
             raise InputHashError(f"COPY cannot be hashed: {line}")
         sources.extend(parts[1:-1])
@@ -129,11 +142,11 @@ def _collect(repo: Path, source: str, patterns: list[str]) -> dict[str, Path]:
     # so filtering to is_file first silently dropped COPY input links.
     files = [path] if path.is_file() else [path, *sorted(path.rglob("*"))]
     for file in files:
-        if file.is_symlink():
-            raise InputHashError(f"symlink in image inputs: {file}")
         relative = file.relative_to(repo).as_posix()
         if path_ignored(relative, patterns):
             continue
+        if file.is_symlink():
+            raise InputHashError(f"symlink in image inputs: {file}")
         if file.is_dir():
             # Git does not track directory modes. An unusual checkout mode
             # cannot be represented by the file digest: build conservatively.
