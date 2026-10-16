@@ -226,3 +226,52 @@ class TestHranaKeepAlive:
             db_http._close_keepalive()
             server.shutdown()
             thread.join(timeout=2)
+
+    def test_oversized_body_rejects_and_leaves_the_next_pipeline_usable(self, monkeypatch):
+        """A body past the cap must not be parsed as a prefix, and the unread
+        tail must not fail the next pipeline on this thread. The keep-alive
+        reader used to stop at the cap, return the prefix, and leave the
+        socket in Request-sent so the following call never left the process.
+        """
+        cap = db_http._MAX_RESPONSE_BYTES
+        over = b"X" * (cap + 1)
+        ok = json.dumps(_pipeline_body(
+            ["value"],
+            [[{"type": "text", "value": "kept"}]],
+        )).encode("utf-8")
+        posts = {"n": 0}
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", "0"))
+                self.rfile.read(length)
+                posts["n"] += 1
+                payload = over if posts["n"] == 1 else ok
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Connection", "keep-alive")
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, *_args):
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        host, port = server.server_address
+        monkeypatch.setenv("TURSO_DB_URL", f"http://{host}:{port}")
+        monkeypatch.setenv("TURSO_AUTH_TOKEN", "token")
+        db_http._close_keepalive()
+        try:
+            with pytest.raises(db_http.DbHttpError, match="exceeds limit"):
+                db_http.hrana_execute("SELECT 1")
+            assert db_http.hrana_execute("SELECT 1") == [("kept",)]
+            assert posts["n"] == 2
+        finally:
+            db_http._close_keepalive()
+            server.shutdown()
+            thread.join(timeout=2)
