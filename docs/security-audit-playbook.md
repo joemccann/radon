@@ -91,6 +91,17 @@ line here whenever you ship a security fix.**
 - **Public unauth routes rate-limited** — the 5 `*/share` POST generators + GET
   `/api/share/pnl` call `rateLimit()` (`web/lib/rateLimit.ts`) before any heavy work.
   (`web/tests/rate-limit.test.ts`)
+- **Unauthenticated render inputs are bounded, not just rate-limited** — a request
+  limiter counts requests, not the cost of one request, so every caller-supplied
+  value an image route hands to satori is bounded BEFORE layout: the canvas by
+  `web/lib/ctaImageLayout.ts`, and the strings by `clampCardText`
+  (`web/lib/sharePnlHero.ts`) in BOTH dimensions — length, and character class.
+  The character class matters because `next/og` always installs satori's
+  `loadAdditionalAsset`, so a grapheme the bundled faces cannot resolve turns a
+  render into an outbound fetch plus a process-wide cache entry keyed on the
+  caller's text. A new unauthenticated renderer input without both bounds is a
+  finding even when the route is rate-limited.
+  (`web/tests/share-image-bounds.test.ts`, `web/tests/share-pnl-text-bounds.test.ts`)
 - **Ops admin routes fail CLOSED** — `/api/admin/{stack/restart,ib/restart,
   ib/reset-backoff,services/[unit]/[action]}` call `requireDemoAdmin()` and 403 when
   the allowlist is empty (middleware `isAuthorizedUser` fails OPEN by design; these
@@ -229,6 +240,15 @@ line here whenever you ship a security fix.**
   never ride a subprocess argv.
   (`scripts/tests/test_model_ladder.py`, `cloud/tests/test_app_runtime.py`,
   `scripts/tests/test_fetch_x_xai_token.py`)
+- **A pooled socket is retired, never parked, when a response is left
+  unconsumed** — both bounded Turso transports read a response under a hard
+  byte ceiling, so an over-ceiling body leaves `http.client` mid-response; that
+  connection is closed instead of returned to the thread-local pool, the
+  truncated body is refused rather than parsed, and the request guard covers
+  `http.client.HTTPException` (`CannotSendRequest` / `ResponseNotReady` are not
+  `OSError`) so a socket poisoned by any route still takes the single
+  reconnect instead of wedging that thread for the process lifetime.
+  (`scripts/tests/test_hrana_keepalive_oversized_body.py`)
 
 ## Triage & patch policy
 
