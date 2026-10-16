@@ -32,6 +32,7 @@ import http.client
 import io
 import json
 import os
+import re
 import ssl
 import threading
 import urllib.request
@@ -77,6 +78,35 @@ def _close_keepalive() -> None:
         pass
 
 
+def _retry_safe_read(req: urllib.request.Request) -> bool:
+    """Only explicit SELECT pipelines may be resent after an unknown outcome.
+
+    hrana_query also accepts row-returning writes, so its caller name cannot
+    establish replay safety. Refuse unparsed, mixed and CTE pipelines rather
+    than guessing whether a statement has already committed.
+    """
+    try:
+        operations = json.loads(req.data or b"")["requests"]
+        if not isinstance(operations, list) or not operations:
+            return False
+        reads = 0
+        for operation in operations:
+            if operation.get("type") == "close":
+                continue
+            if operation.get("type") != "execute":
+                return False
+            sql = operation["stmt"]["sql"]
+            if not isinstance(sql, str):
+                return False
+            sql = sql.strip().removesuffix(";").strip()
+            if not re.match(r"SELECT\b", sql, re.IGNORECASE) or ";" in sql:
+                return False
+            reads += 1
+        return reads > 0
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return False
+
+
 def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse:
     parts = urlsplit(req.full_url)
     if parts.scheme not in ("http", "https") or not parts.hostname:
@@ -114,24 +144,12 @@ def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse
 
     try:
         conn.request(method, path, body, headers)
-    except OSError:
-        _close_keepalive()
-        if not reused:
-            raise
-        # Stale keep-alive: the POST never left this socket. One fresh retry.
-        conn = connect()
-        conn.request(method, path, body, headers)
-        reused = False
-
-    try:
         resp = conn.getresponse()
-    except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError):
-        # The peer accepted the reused POST and closed before a status line
-        # (idle keep-alive). That request was not applied. One fresh socket.
-        # A fresh socket that dies is a real outage: do not retry it, and do
-        # not retry a reset while reading a body that already started.
+    except (OSError, http.client.HTTPException):
+        # A disconnected peer may have committed the POST before losing its
+        # response. Close every poisoned socket, but resend only proven reads.
         _close_keepalive()
-        if not reused:
+        if not reused or not _retry_safe_read(req):
             raise
         conn = connect()
         try:
@@ -140,11 +158,21 @@ def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse
         except Exception:
             _close_keepalive()
             raise
+    except Exception:
+        _close_keepalive()
+        raise
+
     try:
-        raw = resp.read(_MAX_RESPONSE_BYTES)
-        if resp.status != 200:
+        # A short read leaves the remainder on this socket. The next pipeline
+        # is then sent and discarded (ResponseNotReady), which reports a
+        # committed write as a transport failure. REL-326.
+        raw = resp.read(_MAX_RESPONSE_BYTES + 1)
+        over_cap = len(raw) > _MAX_RESPONSE_BYTES or not resp.isclosed()
+        if over_cap or resp.status != 200:
             _close_keepalive()
-            raise OSError(f"HTTP {resp.status}")
+            if resp.status != 200:
+                raise OSError(f"HTTP {resp.status}")
+            raise OSError("response exceeds limit")
         return _PooledResponse(raw)
     except Exception:
         _close_keepalive()
