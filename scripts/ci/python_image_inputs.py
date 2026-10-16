@@ -10,6 +10,7 @@ misses the identical-image tag and takes the normal build path.
 from __future__ import annotations
 
 import hashlib
+import stat
 import sys
 from pathlib import Path
 
@@ -119,16 +120,28 @@ def copy_sources(dockerfile_text: str) -> list[str]:
 
 def _collect(repo: Path, source: str, patterns: list[str]) -> dict[str, Path]:
     path = repo / source
+    if path.is_symlink():
+        raise InputHashError(f"symlink in image inputs: {path}")
     if not path.exists():
         raise InputHashError(f"missing COPY source: {source}")
     found: dict[str, Path] = {}
-    files = [path] if path.is_file() else sorted(item for item in path.rglob("*") if item.is_file())
+    # Inspect directories too: rglob does not descend into directory links,
+    # so filtering to is_file first silently dropped COPY input links.
+    files = [path] if path.is_file() else [path, *sorted(path.rglob("*"))]
     for file in files:
         if file.is_symlink():
             raise InputHashError(f"symlink in image inputs: {file}")
         relative = file.relative_to(repo).as_posix()
         if path_ignored(relative, patterns):
             continue
+        if file.is_dir():
+            # Git does not track directory modes. An unusual checkout mode
+            # cannot be represented by the file digest: build conservatively.
+            if stat.S_IMODE(file.stat().st_mode) != 0o755:
+                raise InputHashError(f"nonstandard directory mode in image inputs: {file}")
+            continue
+        if not file.is_file():
+            raise InputHashError(f"unsupported file type in image inputs: {file}")
         found[relative] = file
     return found
 
@@ -166,7 +179,13 @@ def hash_files(files: dict[str, bytes]) -> str:
 
 def image_input_hash(repo: Path = REPO) -> str:
     paths = input_files(repo)
-    blob = {path: (repo / path).read_bytes() for path in paths}
+    # Docker COPY preserves file permissions, so unchanged bytes alone do
+    # not prove the same image. Fixed-width mode bytes disambiguate metadata.
+    blob = {
+        path: stat.S_IMODE((repo / path).stat().st_mode).to_bytes(4, "big")
+        + (repo / path).read_bytes()
+        for path in paths
+    }
     return hash_files(blob)
 
 

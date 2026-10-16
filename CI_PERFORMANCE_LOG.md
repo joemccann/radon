@@ -2322,3 +2322,5 @@ processes, and `.dockerignore` still copied bytecode, so the two digests
 differed. `**/__pycache__` and `**/*.pyc` are now excluded, and the hasher
 matches those patterns. A clean checkout's image bytes do not change. An
 unknown pattern still refuses and the workflow still builds.
+
+2026-10-16 ordered-merge review: regression head 3cd5b7d0, CI38968296722 / job117200214357 reproduced 2 failed and 3037 passed: chmod-only COPY changes retained the same digest and directory symlinks were omitted. Hash copied file permissions, refuse directory symlinks and unusual directory modes, and retain full build/smoke fallback. GitHub owns fresh full-suite verification; no local suites.
