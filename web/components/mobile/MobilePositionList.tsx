@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight } from "lucide-react";
 import type { PortfolioData, PortfolioLeg, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
@@ -28,6 +28,7 @@ import {
   getTodayPnlDollars,
   resolveRealtimePrice,
   resolveRealtimeMarketValue,
+  positionPricesUnchanged,
 } from "@/lib/positionUtils";
 import { computeLegImpliedValue, computePositionImpliedValue, resolveUnderlyingSpot } from "@/lib/impliedValue";
 import { useRiskFreeRateState } from "@/lib/useRiskFreeRate";
@@ -36,7 +37,7 @@ import TickerLink from "@/components/TickerLink";
 import InstrumentDetailModal from "@/components/InstrumentDetailModal";
 import Card from "./Card";
 import MetricCell from "./MetricCell";
-import PositionStrategyGrouping, { type PositionStrategyGroupingControls } from "@/components/PositionStrategyGrouping";
+import PositionStrategyGrouping, { groupingControlsEqual, type PositionStrategyGroupingControls } from "@/components/PositionStrategyGrouping";
 
 type MobilePositionListProps = {
   positions: PortfolioPosition[];
@@ -114,7 +115,25 @@ function TrendArrow({ direction }: { direction: "up" | "down" | null }) {
   return null;
 }
 
-function PositionCard({ pos, prices, showExpiry, riskFreeRate, onLegClick, strategyGrouping }: { pos: PortfolioPosition; prices?: Record<string, PriceData>; showExpiry: boolean; riskFreeRate: number | null; onLegClick: (leg: PortfolioLeg, pos: PortfolioPosition) => void; strategyGrouping?: PositionStrategyGroupingControls }) {
+type PositionCardProps = {
+  pos: PortfolioPosition;
+  prices?: Record<string, PriceData>;
+  showExpiry: boolean;
+  riskFreeRate: number | null;
+  onLegClick: (leg: PortfolioLeg, pos: PortfolioPosition) => void;
+  strategyGrouping?: PositionStrategyGroupingControls;
+};
+
+function positionCardPropsEqual(prev: PositionCardProps, next: PositionCardProps): boolean {
+  return prev.pos === next.pos
+    && prev.showExpiry === next.showExpiry
+    && prev.riskFreeRate === next.riskFreeRate
+    && prev.onLegClick === next.onLegClick
+    && groupingControlsEqual(prev.strategyGrouping, next.strategyGrouping)
+    && positionPricesUnchanged(next.pos, prev.prices, next.prices);
+}
+
+const PositionCard = memo(function PositionCard({ pos, prices, showExpiry, riskFreeRate, onLegClick, strategyGrouping }: PositionCardProps) {
   const [expanded, setExpanded] = useState(false);
 
   const isStock = pos.structure_type === "Stock";
@@ -317,7 +336,7 @@ function PositionCard({ pos, prices, showExpiry, riskFreeRate, onLegClick, strat
       </Card>
     </div>
   );
-}
+}, positionCardPropsEqual);
 
 function LegItem({ leg, pnlValues, prices, ticker, expiry, showImplied, riskFreeRate, onClick }: { leg: PortfolioLeg; pnlValues: ReturnType<typeof resolveLegPnl>; prices?: Record<string, PriceData>; ticker: string; expiry: string; showImplied: boolean; riskFreeRate: number | null; onClick: () => void }) {
   let realtimeLeg: PriceData | null = null;

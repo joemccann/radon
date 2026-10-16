@@ -106,14 +106,14 @@ describe("dashboard feed tabs", () => {
   it("defaults to Commentary as the first selected tab", () => {
     render(<DashboardNewsFeed />);
     const tabs = screen.getAllByRole("tab");
-    expect(tabs.map((tab) => tab.textContent)).toEqual(["Commentary", "Headlines"]);
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["Commentary", "PDFs", "Headlines"]);
     expect(tabs[0].getAttribute("aria-selected")).toBe("true");
     expect(tabs[1].getAttribute("aria-selected")).toBe("false");
     expect(screen.getByText("What to watch")).toBeTruthy();
     expect(screen.queryByTestId("headlines-tape")).toBeNull();
   });
 
-  it("shows the headlines tape on the second tab", () => {
+  it("shows the headlines tape on its own tab", () => {
     render(<DashboardNewsFeed />);
     fireEvent.click(screen.getByRole("tab", { name: "Headlines" }));
     expect(screen.getByRole("tab", { name: "Headlines" }).getAttribute("aria-selected")).toBe("true");

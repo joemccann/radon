@@ -32,6 +32,11 @@ describe("mobile profile Prefs/Keys scroll + tab strip", () => {
     expect(shared).not.toMatch(/profile-panel-scroll/);
   });
 
+  it("keeps settings cards at content height inside the mobile scrollport", () => {
+    const block = ruleBlock(".profile-surface--mobile > .preferences-shell > *");
+    expect(block).toMatch(/flex-shrink:\s*0/);
+  });
+
   it("lets the profile segment scroll horizontally so BOOKMARKS does not clip", () => {
     const block = ruleBlock(".profile-surface--mobile > .m-segment");
     expect(block).toMatch(/overflow-x:\s*auto/);

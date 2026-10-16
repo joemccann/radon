@@ -1199,3 +1199,7 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 ## 2026-10-13 - PDF chart crops exclude narrative prose
 - Verify visible painted chart bounds against PDF clipping paths before expanding for text. Preserve the complete title, subtitle, legends, axes, sources and wrapped notes, but never attach neighboring report paragraphs solely because their text rectangles are near an oversized drawing bound. Replay the reported source page and independently inspect the resulting crop.
+
+## Mobile settings scroll containment (2026-10-14)
+- A flex scrollport can have overflow-y:auto yet remain unusable if its overflow-hidden child cards shrink to fit. Keep direct mobile settings children at natural height with flex-shrink:0.
+- Verify multiple settings groups with real scroll input, full card content height and pointer reachability of the final control. CSS-rule presence or offscreen bounding boxes alone do not prove scrolling works.
