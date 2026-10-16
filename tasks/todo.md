@@ -1,3 +1,29 @@
+# Nemotron Super VL implementation (2026-10-16)
+
+Dependency graph: T1 -> T2,T3; T2,T3 -> T4 -> T5 -> T6.
+
+- [x] T1 depends_on: [] Isolate work from current branch; swarm design and regression review.
+- [x] T2 depends_on: [T1] Implement model-scoped Super VL request controls and opt-in vision pilot, preserving defaults until measured quality gates pass.
+- [x] T3 depends_on: [T1] Add regression/evaluation coverage and runtime setting propagation; no local suites.
+- [x] T4 depends_on: [T2,T3] Independent review, static verification, documented rollout and rollback.
+- [ ] T5 depends_on: [T4] Create PR and repair every applicable exact-head GitHub CI failure until green, including mapped owner documents and stale base polling documentation contract.
+- [ ] T6 depends_on: [T5] Confirm accepted Pushover notification and record final evidence.
+
+## Review
+Implemented exact-model reasoning-off/non-SSE controls and explicit runtime model settings. Two swarm reviewers approved design and compatibility; 12 ladder regression cases and one runtime propagation case added. Python syntax (3 files), shell syntax and diff checks passed. Defaults remain unchanged pending measured pilot. PR #1105 d92ff51f: new ladder/runtime regressions passed in GitHub shards. Initial CI identified required owner-document updates and a stale base polling documentation contract; repair delegated and verification re-planned. Final CI and notification pending; no local suites run.
+
+# Nemotron upgrade assessment (2026-10-16)
+
+Dependency graph: T1 and T2 parallel; T1,T2 -> T3 -> T4.
+
+- [x] T1 depends_on: [] Inventory NVIDIA consumers and compatibility constraints, read-only.
+- [x] T2 depends_on: [] Verify latest Nemotron 3.5 Super VL specifications and hosted API from primary sources.
+- [x] T3 depends_on: [T1,T2] Produce per-workload upgrade recommendation and staged validation plan.
+- [x] T4 depends_on: [T3] Review evidence and save linked assessment; no runtime changes or local suites.
+
+## Review
+Completed: tasks/nemotron-upgrade-assessment-2026-10-16.md. Official October 15 release, hosted API and model cards checked; independent read-only repository review completed. Vision pilot recommended, text deferred to separate evaluation, parser/embeddings/GPU adapters retained. Explicit JSON response streaming, model-scoped reasoning controls, runtime env filtering and CLI selection documented. No production changes, inference calls or local suites. Diff whitespace check passed.
+
 # Research PDF cropped chart repair (2026-10-13)
 
 Dependency graph: T1 -> T2 -> T3 -> T4; T2 -> T5; T4,T5 -> T6.
