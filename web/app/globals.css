@@ -2044,10 +2044,12 @@ body[data-mobile="true"] .dashboard-surface__feed {
 
 .feed-tabs {
   display: flex;
+  flex-wrap: wrap;
   border-bottom: 1px solid var(--line-grid);
   margin: 0 0 12px;
 }
 .feed-tabs__tab {
+  flex: 1 0 auto;
   font-family: var(--font-mono);
   font-size: var(--text-meta);
   letter-spacing: var(--tracking-meta);
@@ -2056,7 +2058,7 @@ body[data-mobile="true"] .dashboard-surface__feed {
   background: transparent;
   border: 0;
   border-right: 1px solid var(--line-grid);
-  padding: 8px 14px;
+  padding: 8px 10px;
   cursor: pointer;
   min-height: var(--hit-min);
 }
