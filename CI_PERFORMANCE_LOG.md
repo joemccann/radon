@@ -2255,3 +2255,76 @@ selector learned to keep GHA cache-from when `buildcache` is absent. Green
 after: 10 passed in that class plus the PR token-scope tests. Workflow YAML
 parses. Both selector scripts pass `bash -n`. Full suites, Vitest, Docker
 builds and workflow lint are left to PR CI.
+
+## CIP-020 - retag a smoked python image when its inputs are unchanged (2026-10-15)
+
+Status: **VALIDATING**.
+
+**Pre-edit baseline and hypothesis.**
+CIP-019 stopped writing the Actions cache on main. A fresh builder then
+re-downloads the registry cache and `load: true` still exports a docker
+tarball so the hardened browser smoke can `docker run --pull=never`. On
+web-only run 38597907211 (job 115969417991) every Dockerfile layer was
+cached, `#17` still fetched a 655MB blob (about 75s), and `sending tarball`
+took 53.9s. The python image job finished at 198s and the next gate at 150s,
+so the image closed the deploy. Release clock 339s. The same shape on the
+other image-authorizing web runs: 38583477883 wall 207s overhang 76s clock
+371s; 38579158094 wall 191s overhang 60s clock 373s; 38433108405 wall 226s
+overhang 96s clock 426s. Older web runs whose GHA cache was still warm hid
+this job behind Vitest (overhang 0). Mixed test-bound releases had save p50
+0s in the same window. Hypothesis: publishing the existing smoked digest
+under the commit SHA, when `scripts/ci/python_image_inputs.py` matches the
+`ihash-<sha256>` tag recorded after a previous smoke, removes that job from
+the critical path. Expected save is the overhang, about 48-76s on the three
+newest web releases, and about 0s when Vitest or pytest already finishes
+later. Confidence medium. Runner minutes fall on a hit (the python image
+job shrinks) and stay flat on a miss. No new shard.
+
+**Safety and revert trigger.**
+A miss, an empty hash, or an unknown COPY or dockerignore pattern builds
+and smokes exactly as before (`load: true`, `--pull=never`, `--network none`,
+`--cap-drop ALL`). The `ihash-` tag is written only after that smoke. The
+reuse path retags that digest to the 40-character SHA and to `:latest` with
+`docker buildx imagetools create`, then refuses the job unless the raw
+manifest bytes match. It does not `docker pull`, and it is not a deploy
+ref. `deploy.sh`, `deploy-root-helper.sh`, and `radon-app-runtime.sh` do
+not mention `ihash-` or `buildcache`. An index-write failure warns and
+still lets the smoked SHA tag deploy. No test inventory, coverage, path
+ownership, `needs`, health check, 40-second stability window, rollback
+artifact, transition journal, green marker, or non-cancelling deploy lock
+changes. Revert if a reused digest was not smoked, if deploy pulls `ihash-`,
+if a changed Dockerfile input is retagged, or if provenance, health, or
+rollback regresses.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Exact app images / Build python image | 178s | pending | TBD until 5 samples |
+
+Before is the python image job wall on run 38597907211 (job
+115969417991), the newest web release whose build log showed a full layer
+cache hit plus the 53.9s tarball. Five comparable image-authorizing web
+releases before and five after are required: same-class p50 at least 10%
+and 15s faster; p95 no worse than 5% or 15s; cold p50 no worse than 10%;
+runner minutes no more than 20% higher unless disclosed; every test, gate,
+provenance, health, recovery, and rollback rail intact. Warm test-bound
+releases are a separate class and are not expected to move. Neither local
+timing nor green PR CI establishes a win.
+
+**Verification.**
+`scripts/tests/test_cip020_python_image_reuse.py` was red (6 failed: missing
+reuse step, missing `load` guard, missing hasher) and then green (7 passed).
+`TestImageBuildUsesRemoteCache` and `TestImageWorkflowTokenScope` stayed
+green (10 passed). Workflow YAML parses. Changed shell steps pass `bash -n`.
+Full suites, Vitest, Docker builds, and workflow lint are left to PR CI.
+PR CI run 38700766351 then failed the same contract on `pytest (scripts-ac)`:
+pytest-xdist wrote `__pycache__` under `scripts/` between two hasher
+processes, and `.dockerignore` still copied bytecode, so the two digests
+differed. `**/__pycache__` and `**/*.pyc` are now excluded, and the hasher
+matches those patterns. A clean checkout's image bytes do not change. An
+unknown pattern still refuses and the workflow still builds.
+
+2026-10-16 ordered-merge review: regression head 3cd5b7d0, CI38968296722 / job117200214357 reproduced 2 failed and 3037 passed: chmod-only COPY changes retained the same digest and directory symlinks were omitted. Hash copied file permissions, refuse directory symlinks and unusual directory modes, and retain full build/smoke fallback. GitHub owns fresh full-suite verification; no local suites.
+
+2026-10-16 parser follow-up: head8739c052, CI38969889199 / job117205531902 reproduced 4 unsupported-source failures (3039 other tests passed). Refuse unsupported COPY spelling/whitespace, ADD and unknown external stages instead of omitting source inputs. Known previously parsed stages remain covered by their original COPY inputs. Ignore links only when an understood dockerignore rule excludes their entire source path.
+
+CIP-013 requested organic-nightly evidence: read /Users/joemccann-mac-mini/radon-weekend/logs/codemap-nightly.log without rerunning suites. The 2026-10-16 nightly records `1 passed in 1.06s`, regenerated from b79e1f5c, passed the substantive-change gate, and published https://github.com/joemccann/radon/pull/1101 at a8248bc7. This supplies the pending host-only freshness evidence; it makes no CIP-020 latency claim.

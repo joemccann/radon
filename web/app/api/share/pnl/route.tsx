@@ -2,7 +2,12 @@ import { ImageResponse } from "next/og";
 import { loadFonts } from "@/lib/og-fonts";
 import { OG } from "@/lib/og-theme";
 import { rateLimit, clientIp, SHARE_PNL_LIMIT, SHARE_WINDOW_MS } from "@/lib/rateLimit";
-import { SHARE_PNL_CANVAS, parseSharePnlFormat, sharePnlHeroLayout } from "@/lib/sharePnlHero";
+import {
+  SHARE_PNL_CANVAS,
+  clampCardText,
+  parseSharePnlFormat,
+  sharePnlHeroLayout,
+} from "@/lib/sharePnlHero";
 import { formatHoldDuration } from "@/lib/holdTime";
 
 export const runtime = "nodejs";
@@ -112,7 +117,11 @@ export async function GET(request: Request) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const description = searchParams.get("description") ?? "";
+    // Every string below is attacker-chosen: this route is in
+    // PUBLIC_SHARE_API_ROUTES, so an anonymous caller picks what satori lays
+    // out. Clamp at the renderer entry, once (R-310).
+    const descriptionRaw = searchParams.get("description") ?? "";
+    const description = clampCardText(descriptionRaw);
     const pnlRaw = searchParams.get("pnl");
     const pnl = pnlRaw != null ? parseFloat(pnlRaw) : null;
     const pnlPctRaw = searchParams.get("pnlPct");
@@ -125,13 +134,18 @@ export async function GET(request: Request) {
     const exitPrice = exitPriceRaw != null ? parseFloat(exitPriceRaw) : null;
     const entryTime = searchParams.get("entryTime") ?? "";
     const exitTime = searchParams.get("exitTime") ?? "";
-    const holdTime = entryTime || exitTime
-      ? formatHoldDuration(entryTime, exitTime) ?? ""
-      : searchParams.get("holdTime") ?? "";
-    const time = searchParams.get("time") ?? "";
+    const holdTime = clampCardText(
+      entryTime || exitTime
+        ? formatHoldDuration(entryTime, exitTime) ?? ""
+        : searchParams.get("holdTime") ?? "",
+    );
+    const time = clampCardText(searchParams.get("time") ?? "");
     const format = parseSharePnlFormat(searchParams.get("format"));
 
-    if (!description) {
+    // Gate on the RAW parameter: a whitespace-only contract description reaches
+    // this route from the blotter share path and has always rendered a card
+    // with an empty description line, not a 400.
+    if (!descriptionRaw) {
       return new Response("Missing description", { status: 400 });
     }
 
@@ -143,8 +157,10 @@ export async function GET(request: Request) {
     const accentColor = isPositive ? OG.positive : OG.negative;
 
     // Build hero text parts
-    const heroDollar = pnl != null && Number.isFinite(pnl) ? fmtDollar(pnl) : null;
-    const heroPct = pnlPct != null && Number.isFinite(pnlPct) ? fmtPct(pnlPct) : null;
+    // A finite float still formats to hundreds of digits (1e308), so the hero
+    // figures go through the same clamp as the free text.
+    const heroDollar = pnl != null && Number.isFinite(pnl) ? clampCardText(fmtDollar(pnl)) : null;
+    const heroPct = pnlPct != null && Number.isFinite(pnlPct) ? clampCardText(fmtPct(pnlPct)) : null;
     const heroLayout = sharePnlHeroLayout(
       { dollar: heroDollar != null, pct: heroPct != null },
       format,
