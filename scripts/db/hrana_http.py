@@ -118,11 +118,29 @@ def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse
         _close_keepalive()
         if not reused:
             raise
+        # Stale keep-alive: the POST never left this socket. One fresh retry.
         conn = connect()
         conn.request(method, path, body, headers)
+        reused = False
 
     try:
         resp = conn.getresponse()
+    except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError):
+        # The peer accepted the reused POST and closed before a status line
+        # (idle keep-alive). That request was not applied. One fresh socket.
+        # A fresh socket that dies is a real outage: do not retry it, and do
+        # not retry a reset while reading a body that already started.
+        _close_keepalive()
+        if not reused:
+            raise
+        conn = connect()
+        try:
+            conn.request(method, path, body, headers)
+            resp = conn.getresponse()
+        except Exception:
+            _close_keepalive()
+            raise
+    try:
         raw = resp.read(_MAX_RESPONSE_BYTES)
         if resp.status != 200:
             _close_keepalive()
