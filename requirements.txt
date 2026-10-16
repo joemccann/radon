@@ -80,7 +80,7 @@ huggingface-hub==1.24.0
 # (starlette>=0.27, uvicorn>=0.31.1) are satisfied by both combos. Every new
 # wheel is pure-Python except rpds-py, which ships cp313 manylinux x86_64
 # and cp311 macOS arm64 wheels — both hosts covered.
-mcp==1.28.1
+mcp==1.30.0
 # mcp transitive pins, held explicitly so a fresh provision resolves the
 # exact versions the laptop verified for these packages.
 attrs==26.1.0
