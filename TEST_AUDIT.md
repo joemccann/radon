@@ -11491,3 +11491,42 @@ Discarded before these rounds: a cloud run with `/usr/bin/python3` 3.9 on `PATH`
 | 3 | 15,424 passed / 2 skipped / 23 subtests | 10,898 passed / 21 skipped / 1,107 files (1 file skipped) | 2,866 passed / 8 skipped | 0 added / 0 removed |
 
 Base cloud at `63fd8992` with Python 3.13.16, OpenSSL 3, Bash 5.3.20, and caddy: 2,865 passed / 8 skipped, sorted FAILED list empty. Every closing FAILED list is empty. The count difference is the one test added tonight. The comparison worktree was removed. Playwright was not run. No local screenshot or 390px result is claimed.
+
+## Delta audit 2026-10-16
+
+Range `a92472f04d2aadfab583332ebf019df14a5e1408..b79e1f5c1f22609052560148be027662f283f57b`: 5 commits / 41 paths. Newest trusted checkpoint is the 2026-10-15 collaborator comment on issue #83 (`audited-through: a92472f04d2aadfab583332ebf019df14a5e1408`). No open `testing/` pull request. #1077 is merged. Numbering continues after T-552. The checkpoint carried no open verified T finding.
+
+Vol-cone history indexing, compact JSON, and the incremental upsert are executed against literal row identities and a visit budget. Portfolio admission executes `rateLimit` and `demoRateLimit` and pins the 2,000 ceiling as a literal. Position grouping unit tests execute the projection with literal dollars. The new Playwright spec is in the curated CI list. No new skip, xfail, coverage-threshold change, or shard exclusion.
+
+### T-553 — P1 — an oversized Hrana body fails the next pipeline on that thread
+
+`scripts/api/db_http.py` and `scripts/db/hrana_http.py` `_pooled_open` read `_MAX_RESPONSE_BYTES` and returned that prefix on HTTP 200. The unread tail left the keep-alive socket in Request-sent. The next call raised `ResponseNotReady` and the local server saw one POST. `test_five_sequential_pipelines_use_one_tcp_connection` stayed green on small bodies.
+
+Acceptance: a 200 body of cap+1 bytes raises an error whose message contains `exceeds limit`, and the next pipeline on that thread returns the following small row. Both transports.
+
+### T-554 — P1 — the grouping quota test never makes the write throw on Node 26
+
+`web/tests/position-strategy-groups-persistence.test.tsx` spied on `Storage.prototype.setItem`. `window.localStorage` is a plain object on Node 26.10.0, so that spy did not throw, the write succeeded, and `apply` returned true. The same assertion fails for a real ignored quota only after the spy is on `window.localStorage.setItem`.
+
+Acceptance: a throwing `window.localStorage.setItem` makes `apply` return false and leaves the previous rows. Continuing after the catch fails that assertion. Product source stays unchanged when the catch already returns false.
+
+Audited through: b79e1f5c1f22609052560148be027662f283f57b on 2026-10-16 — 2 new findings
+
+## Remediation 2026-10-16
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-553 | DONE | Both oversized-body tests failed (`JSONDecodeError`, not `exceeds limit`). After reading one byte past the cap and closing that socket: `test_api_db_http.py`, `test_hrana_http_keepalive.py`, and `test_hrana_http_failure_modes.py` passed 24 tests on each of three serial runs. |
+| T-554 | DONE | Prototype spy: `apply` returned true because the write succeeded. Instance spy, with `return false` removed from `commit`: `expected true to be false`. Restored the return. Persistence file passed 7 tests on each of three serial runs. Product source unchanged. |
+
+### Closing gates 2026-10-16
+
+Discarded before these rounds: root pytest with `/usr/bin/openssl` LibreSSL 3.3.6 first was 54 failed / 15,381 passed, all `CERTIFICATE_VERIFY_FAILED` / missing AKI in the gateway remote suites. OpenSSL 3.6.5 ahead of that binary cleared it. A Vitest run at the default worker count timed out five `next.config.mjs` imports at 5s; those five files passed alone (29 tests). Counted Vitest rounds set `VITEST_MAX_WORKERS=4`. No assertion, skip, or coverage threshold changed.
+
+| Round | Root Python | Root Vitest | Cloud | Failed-list diff against base `b79e1f5c` |
+|---|---|---|---|---|
+| 1 | 15,435 passed / 2 skipped / 23 subtests | 10,956 passed / 21 skipped / 1,115 files (1 file skipped) | 2,839 passed / 27 failed / 8 skipped | 0 added / 0 removed |
+| 2 | 15,435 passed / 2 skipped / 23 subtests | 10,956 passed / 21 skipped / 1,115 files (1 file skipped) | 2,839 passed / 27 failed / 8 skipped | 0 added / 0 removed |
+| 3 | 15,435 passed / 2 skipped / 23 subtests | 10,956 passed / 21 skipped / 1,115 files (1 file skipped) | 2,839 passed / 27 failed / 8 skipped | 0 added / 0 removed |
+
+Base cloud at `b79e1f5c` with Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, and caddy 2.11.7: 2,839 passed / 27 failed / 8 skipped. Every closing failed-node set matches that list. The 27 are the bash 3.2 and host-Python baseline on this Mac. The comparison worktree was removed. Playwright was not run. No local screenshot or 390px result is claimed.
