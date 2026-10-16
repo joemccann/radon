@@ -130,3 +130,7 @@ Chart bounds also respect each object's PDF clipping envelope before its ancesto
 
 
 Intake v2 requires an exact boolean `complete_figure:true` from FIGURE MATCH and, for findings carrying source figures, `figures_complete:true` from the final verifier. Both existing vision calls must inspect the full plot or table body and relevant titles, axes, legends, headers and source labels. Readable axis/legend/footer strips cannot qualify solely because their labels name the finding. Missing, false or non-boolean completeness verdicts hold the candidate before publication. This adds no provider calls and preserves the existing document deadline and provider-outage behavior. Uncertain crops stay held for review; the original PDF remains immutable.
+
+## Hosted Super VL vision pilot
+
+`NVIDIA_VISION_MODEL=nvidia/nemotron-3.5-super-vl-120b-a12b` opts the existing NVIDIA vision rung into Nemotron 3.5 Super VL. Only that exact NVIDIA model receives `reasoning_effort: none` and API `stream: false`; transport reads remain bounded and existing JSON/grounding validators remain authoritative. The default model, provider order, Llama fallback, Nemotron Parse and embeddings do not change. Follow [the pilot gates and rollback](nemotron-super-vl-pilot.md) before enabling a consumer. `RADON_RESEARCH_MODEL` does not select NVIDIA image models.

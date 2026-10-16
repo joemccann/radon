@@ -109,6 +109,7 @@ _NVIDIA_VISION_DEFAULT = "meta/llama-3.2-90b-vision-instruct"
 _NVIDIA_VISION_FALLBACK = "meta/llama-3.2-11b-vision-instruct"
 # Catalog-valid NIM text default (meta/llama-3.3-70b-instruct → http_410 on Joe's catalog).
 _NVIDIA_TEXT_DEFAULT = "nvidia/nemotron-3-super-120b-a12b"
+_NVIDIA_SUPER_VL = "nvidia/nemotron-3.5-super-vl-120b-a12b"
 
 # Back-compat aliases for cloud/.env.example inventory tests and callers.
 _ANTHROPIC_KEYS = _ANTHROPIC_PREPAID_KEYS + _ANTHROPIC_SUBSCRIPTION_ENV + ("CLAUDE_CODE_OAUTH_TOKEN_FILE",)
@@ -1139,6 +1140,18 @@ def _openai_multimodal_body(
     return body
 
 
+def _nvidia_request_extras(model: str) -> dict[str, Any]:
+    """Keep Super VL's reasoning within our small, final-JSON budgets.
+
+    API token streaming is separate from the bounded HTTP transport reader:
+    the latter expects one JSON document, not SSE events. These fields are
+    model-specific so the retained Llama vision fallback stays compatible.
+    """
+    if model == _NVIDIA_SUPER_VL:
+        return {"reasoning_effort": "none", "stream": False}
+    return {}
+
+
 def _call_vision_provider(
     name: str,
     auth: AuthMaterial,
@@ -1206,7 +1219,7 @@ def _call_vision_provider(
                 "authorization": f"Bearer {api_key}",
                 "content-type": "application/json",
             },
-            _openai_vision_body(model, b64, prompt),
+            _openai_vision_body(model, b64, prompt, extra=_nvidia_request_extras(model)),
             timeout=120.0,
             stream=True,
             max_bytes=max_response_bytes,
@@ -1414,7 +1427,8 @@ def _call_text_provider(
                 "content-type": "application/json",
             },
             _openai_multimodal_body(
-                model, system, instruction, labeled_b64, max_tokens=max_tokens
+                model, system, instruction, labeled_b64, max_tokens=max_tokens,
+                extra=_nvidia_request_extras(model),
             ),
             timeout=read_timeout,
             stream=True,
