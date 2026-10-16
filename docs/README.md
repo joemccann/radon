@@ -67,6 +67,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | IB Flex sFTP setup (install) | [`docs/flex-sftp-setup.md`](flex-sftp-setup.md) |
 | IB Flex transfers / TWR | [`docs/ib-flex-transfers-runbook.md`](ib-flex-transfers-runbook.md) |
 | Performance reconstruction | [`docs/performance-reconstruction.md`](performance-reconstruction.md) |
+| Position strategy groups (saved display layouts) | [`docs/position-strategy-groups.md`](position-strategy-groups.md) |
 | Chart system | [`docs/chart-system.md`](chart-system.md) |
 | Brand identity | [`docs/brand-identity.md`](brand-identity.md) |
 | Public agent-design surface + eval scenarios | [`docs/design-evals.md`](design-evals.md) |
