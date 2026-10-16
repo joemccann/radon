@@ -129,10 +129,19 @@ export function usePositionStrategyGroups(sources: PortfolioPosition[]) {
     return true;
   }, [commit]);
 
+  const sourceFor = useCallback(
+    (row: PortfolioPosition) => projection.sourceByRow.get(row) ?? projection.sourceById.get(row.id) ?? row,
+    [projection],
+  );
+  const groupsFor = useCallback(
+    (source: PortfolioPosition) => currentPlan(source)?.groups ?? defaultStrategyGroups(source),
+    [currentPlan],
+  );
+
   return {
     positions: projection.positions,
-    sourceFor: (row: PortfolioPosition) => projection.sourceByRow.get(row) ?? projection.sourceById.get(row.id) ?? row,
-    groupsFor: (source: PortfolioPosition) => currentPlan(source)?.groups ?? defaultStrategyGroups(source),
+    sourceFor,
+    groupsFor,
     suggestionFor: suggestStrategyGroups,
     preview: projectStrategyGroups,
     apply, reset, undo, canUndo, error,

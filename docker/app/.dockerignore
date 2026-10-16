@@ -12,3 +12,5 @@ scripts/tests/
 scripts/api/tests/
 web/tests/
 web/e2e/
+**/__pycache__
+**/*.pyc
