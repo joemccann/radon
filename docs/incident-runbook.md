@@ -2914,13 +2914,12 @@ about 70s, not `TimeoutStartSec`. Next timer is the 08:30 ET retry.
   `flex-pull-sftp-get-reset`. If `/health/lite` is down too → API, stand
   down. If the Turso canary fails too → platform, stand down.
 - **Remediation (code):** `getresponse` connection reset on a reused socket
-  closes the pool and retries that POST once on a fresh socket. A fresh
+  closes the pool and retries an explicit SELECT-only pipeline once on a fresh socket. Writes, mixed pipelines and unparsed SQL are never replayed after an unknown outcome. A fresh
   socket that dies still raises. A reset while reading a body that already
   started is not retried. Do not replay the delivery. Do not restart-flap;
   the 08:30 ET timer retries. After deploy,
   `systemctl reset-failed radon-flex-pull.service` if that retry has not
-  yet fired. The API sister `scripts/api/db_http.py` still has the old
-  `getresponse` path. This page used the oneshot transport.
+  yet fired. The API sister `scripts/api/db_http.py` retains its separate transport. This page used the oneshot transport.
 - **Regression:**
   `scripts/tests/test_hrana_http_keepalive.py::test_reused_socket_closed_before_status_retries_once`,
   `test_fresh_socket_closed_before_status_does_not_open_another`,
@@ -3854,3 +3853,5 @@ service_health write raises.** Peak: 2026-10-08 22:14Z, page
 - **Repair:** `orders/stockEntryTime.ts` replays stock executions by conId, consumes preceding closes, and requires full target quantity matching. Its output adds timing without changing P&L/entry-price arithmetic. Precise execution time outranks the date-only portfolio fallback. `/api/share/pnl` derives measured hold duration, preserves timestamp-only rows, and uses seasonal Pacific zone labels.
 - **Verification:** the sanitized twenty-fill fixture reproduces the supplied artifact; `share-pnl-timing-render.test.ts` asserts actual export tree content, and the pictured TQQQ case in `mobile-executed-journal.spec.ts` exercises the real 1080×1920 PNG route and saves a browser preview. Inspect ENTRY at 8:46 AM PDT, HELD 44 minutes and EXIT at 9:30 AM PDT.
 - **Rollback:** revert this focused fix through the normal CI-gated deployment path; no journal updates, broker actions or migrations are needed.
+
+2026-10-16 ordered-merge verification: CI38968332478 / job117200674258 reproduced all four lost-write-response regressions (645 other tests passed). Retry only proven SELECT pipelines and retain all preceding cap, closure and pool-retirement defenses. A lost status line is never evidence that a write did not commit.
