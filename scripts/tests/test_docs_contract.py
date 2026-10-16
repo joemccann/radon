@@ -2142,7 +2142,7 @@ class TestDocumentation20261013:
 
 
 class TestDocumentation20261016:
-    """DOC-200..201: grouping owner drifted after audited-through a92472f0."""
+    """DOC-200..202: contracts that drifted after audited-through a92472f0."""
 
     def test_manual_strategy_group_is_not_calls_only(self):
         ui = (_ROOT / "web/components/PositionStrategyGrouping.tsx").read_text()
@@ -2156,3 +2156,20 @@ class TestDocumentation20261016:
         index = (_ROOT / "docs/README.md").read_text()
         assert "position-strategy-groups.md" in index
         assert (_ROOT / "docs/position-strategy-groups.md").is_file()
+
+    def test_hrana_timeout_is_http_client_keep_alive(self):
+        hrana = (_ROOT / "scripts/db/hrana_http.py").read_text()
+        assert "http.client" in hrana
+        assert "keep-alive reuses one socket per thread" in hrana
+        section = _markdown_heading(
+            "docs/cloud-services.md",
+            "Bounded vs process-bound Turso writes (R5 partial)",
+        )
+        prose = next(
+            line for line in section.splitlines()
+            if "hrana_http.py" in line and line.startswith("`libsql")
+        )
+        assert "urllib" not in prose
+        assert "http.client" in prose
+        assert "keep-alive" in prose
+        assert "one socket per thread" in prose
