@@ -2880,6 +2880,56 @@ Peak: 2026-09-16 11:35Z, page `5a2eb828…`.
 
 ---
 
+## flex-pull-coverage-unread
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+when a duplicate coverage read drops the Turso connection.** Peak:
+2026-10-16 11:35Z, page `c96336153e8157df025f71943e1824c9`. The 07:30 ET
+fire. The 08:30 ET retry exited 0 in about 38s. Span of the failed fire
+was minutes, not `TimeoutStartSec`. `:8321/health/lite` stayed
+authenticated and `database` up.
+
+- **Mechanism:** newest-first applied today's activity statement
+  (`perf_twr` wrote and mirrored). An already-applied Trade_History
+  duplicate then called `delivery_rows_present`. Hrana raised
+  `RemoteDisconnected: Remote end closed connection without response`.
+  `ingest_xml` caught every verification exception and returned
+  `coverage_unverified` with
+  `applied delivery lacks verified persisted-row coverage; operator
+  reconciliation required`. The puller treats `ok: False` as
+  `ingest_failed`, heartbeats `one or more files rejected`, and exits 1.
+  `Type=oneshot` has no `Restart=`, so `NRestarts=0`. The claim stays
+  `applied`. The read never saw the journal, so this is not a row gap.
+- **Detection:** journal `[flex-ingest] duplicate coverage unavailable:
+  RemoteDisconnected: Remote end closed connection without response`
+  then `[flex-pull] … ingest_failed:{… 'outcome': 'coverage_unverified',
+  'classified_as': 'trades' …}`. `systemctl show` on that invocation is
+  `exit-code` / `NRestarts=0`. The next timer is `Result=success`.
+- **Discriminating check:** the coverage exception is a transport blip
+  (`RemoteDisconnected`, hrana `TimeoutError: The read operation timed
+  out`, connection reset) on an applied duplicate. Python Turso canary
+  succeeds, or a same-minute sibling write (here `perf_twr` mirrored)
+  succeeded, and `/health/lite` `database` is `up`. Canary fail is a
+  Turso platform outage: stand down, do not restart-flap.
+  `delivery_rows_present` returning false, a statement error (`no such
+  column`), or `duplicate coverage verification budget exhausted` stays
+  `coverage_unverified` (`flex-pull-trade-coverage` or operator
+  reconciliation). `twr_status=degraded` is `flex-pull-twr-degraded-exit`.
+  `Result=timeout` is `flex-pull-ingest-timeout`.
+- **Remediation (code):** a transient coverage read returns
+  `outcome=coverage_unread` (`ok` true, claim retained, no replay, no
+  cash-flow-sync error). The puller does not count it as a new statement
+  and does not fail the oneshot. The ok heartbeat note is
+  `class=coverage_unread`. The next timer reads again. A real gap still
+  exits 1. Do not `reset-failed` for this page when the retry already
+  exited 0.
+- **Regression:**
+  `scripts/tests/test_flex_pull_coverage_unread.py`.
+- **Code:** `scripts/flex_delivery_ingest.py` (`_is_transient_coverage_read`,
+  `ingest_xml`), `scripts/flex_sftp_pull.py` (`coverage_unread`).
+
+---
+
 ## flex-pull-trade-coverage
 
 **`radon-flex-pull.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
@@ -2905,6 +2955,9 @@ duplicate.** Peak: 2026-09-22 11:35Z, page `e1297eea…`.
   A preceding `[flex-ingest] duplicate coverage unavailable:
   RemoteDisconnected` (or another transport error on the coverage read)
   is `flex-pull-coverage-read-disconnect`, not missing rows.
+  A preceding `duplicate coverage unavailable:` line whose text is
+  `RemoteDisconnected`, a read `TimeoutError`, or a connection reset
+  is `flex-pull-coverage-unread`: the rows were not read.
   A Flex `ibExecID` that is the live five-part `ib_exec_id` minus the
   trailing `.01` is `flex-pull-live-exec-id`.
   `twr_status=degraded` is `flex-pull-twr-degraded-exit`.
