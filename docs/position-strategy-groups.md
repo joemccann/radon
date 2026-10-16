@@ -7,7 +7,7 @@ The Positions page supports a saved display layout for multi-leg option holdings
 Open **Group strategies** beside a position:
 
 - **Suggested split** recognizes an equal-quantity, same-expiry bull call spread and separates remaining legs. Review both groups before applying.
-- **Select legs** lets you choose the calls and create a spread with a toolbar action. Unselected legs remain visible in their own groups.
+- **Select legs** lets you choose at least two held legs and group them as a spread. Unselected legs remain visible in their own groups.
 - **Edit strategies** assigns every held leg to a named group. Each leg must appear exactly once. Group names do not determine risk classification.
 
 Desktop uses a compact position menu and a side-panel editor. Mobile uses a bottom sheet for grouping and a full-screen editor. Every path previews quantities, signed basis and P&L before applying. Cancel leaves the current layout intact. **Undo grouping** restores the prior layout for the current session; **Reset grouping** restores the original holding.
