@@ -176,16 +176,22 @@ export function resolveEntryCost(pos: PortfolioPosition): number | null {
 
 /**
  * The signed basis a pure combo close of `quantity` of `comboUnits` held
- * units retires, for the ticket's realised P&L. `null` when the position has
- * no aggregate basis, so the ticket prints no realised figure at all.
+ * units retires, for the ticket's realised P&L. Realised P&L is additive per
+ * leg, so legs measured from different sources (T-315) still retire their
+ * own basis; only a leg with no measured basis leaves the figure unavailable.
  */
 export function resolveClosingBasis(
   pos: PortfolioPosition,
   quantity: number,
   comboUnits: number,
 ): number | null {
-  const entryCost = resolveEntryCost(pos);
+  const entryCost = pos.legs.length > 0 ? signedLegBasis(pos.legs) : resolveEntryCost(pos);
   return entryCost == null ? null : entryCost * (quantity / comboUnits);
+}
+
+function signedLegBasis(legs: PortfolioPosition["legs"]): number | null {
+  if (legs.some((l) => !Number.isFinite(l.entry_cost))) return null;
+  return legs.reduce((s, l) => s + (l.direction === "LONG" ? 1 : -1) * Math.abs(l.entry_cost), 0);
 }
 
 export function getAvgEntry(pos: PortfolioPosition): number | null {
