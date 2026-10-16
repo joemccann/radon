@@ -2139,3 +2139,20 @@ class TestDocumentation20261013:
         assert "weekly" in cell
         assert "source cadence stays monthly" in cell
         assert "staleness" in cell
+
+
+class TestDocumentation20261016:
+    """DOC-200..201: grouping owner drifted after audited-through a92472f0."""
+
+    def test_manual_strategy_group_is_not_calls_only(self):
+        ui = (_ROOT / "web/components/PositionStrategyGrouping.tsx").read_text()
+        assert "Select at least two held legs" in ui
+        doc = (_ROOT / "docs/position-strategy-groups.md").read_text()
+        select = next(line for line in doc.splitlines() if line.startswith("- **Select legs**"))
+        assert "choose the calls" not in select
+        assert "at least two held legs" in select
+
+    def test_strategy_group_owner_is_indexed(self):
+        index = (_ROOT / "docs/README.md").read_text()
+        assert "position-strategy-groups.md" in index
+        assert (_ROOT / "docs/position-strategy-groups.md").is_file()
