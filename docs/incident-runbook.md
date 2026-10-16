@@ -2931,6 +2931,54 @@ Peak: 2026-09-16 11:35Z, page `5a2eb828…`.
 
 ---
 
+## flex-pull-coverage-keepalive-reset
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+when an applied Trade_History coverage read hits a stale Hrana keep-alive.**
+Peak: 2026-10-16 11:35Z, page `c9633615…`. ExecMain 11:30:00Z to 11:31:10Z,
+about 70s, not `TimeoutStartSec`. Next timer is the 08:30 ET retry.
+
+- **Mechanism:** the activity statement's cash-flow heartbeat is the thread's
+  first Hrana call (`record_service_health` → `scripts/db/hrana_http.py`).
+  `perf_twr` then runs on libsql for tens of seconds, and the peer drops the
+  idle keep-alive. The next file is an already-applied Trade_History
+  duplicate. `delivery_rows_present` reuses that socket. `getresponse`
+  raises `RemoteDisconnected: Remote end closed connection without response`
+  because `_pooled_open` retried a dead socket only when `request()` itself
+  raised. `ingest_xml` maps any coverage-read exception to
+  `coverage_unverified` and does not replay the claim. The oneshot exits 1.
+  The activity cash-flow sync in the same run still finishes `ok`.
+  `:8321/health/lite` stays up.
+- **Detection:** journal `[flex-ingest] duplicate coverage unavailable:
+  RemoteDisconnected: Remote end closed connection without response` then
+  `ingest_failed` with `outcome=coverage_unverified` and
+  `classified_as=trades`. No `Flex aggregate disagrees` line.
+  `systemctl show` → `exit-code` / `NRestarts=0` / `ExecMainStatus=1`.
+- **Discriminating check:** the coverage read raises `RemoteDisconnected`
+  (connection closed before a status line) and Turso answered other calls
+  in the same run, or a same-minute Python `SELECT 1` / `:8321/health/lite`
+  `database=up` succeeds. That is this case. A real row gap
+  (`delivery_rows_present` false, quantity or exec-id mismatch) is
+  `flex-pull-trade-coverage`, `flex-pull-bag-envelope-as-stock`, or
+  `flex-pull-live-exec-id`. `Result=timeout` is
+  `flex-pull-ingest-timeout`. kex / connection-reset on GET is
+  `flex-pull-sftp-get-reset`. If `/health/lite` is down too → API, stand
+  down. If the Turso canary fails too → platform, stand down.
+- **Remediation (code):** `getresponse` connection reset on a reused socket
+  closes the pool and retries an explicit SELECT-only pipeline once on a fresh socket. Writes, mixed pipelines and unparsed SQL are never replayed after an unknown outcome. A fresh
+  socket that dies still raises. A reset while reading a body that already
+  started is not retried. Do not replay the delivery. Do not restart-flap;
+  the 08:30 ET timer retries. After deploy,
+  `systemctl reset-failed radon-flex-pull.service` if that retry has not
+  yet fired. The API sister `scripts/api/db_http.py` retains its separate transport. This page used the oneshot transport.
+- **Regression:**
+  `scripts/tests/test_hrana_http_keepalive.py::test_reused_socket_closed_before_status_retries_once`,
+  `test_fresh_socket_closed_before_status_does_not_open_another`,
+  `test_reused_close_and_fresh_retry_close_raises_once`.
+- **Code:** `scripts/db/hrana_http.py` (`_pooled_open`).
+
+---
+
 ## flex-pull-trade-coverage
 
 **`radon-flex-pull.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
@@ -2956,6 +3004,9 @@ duplicate.** Peak: 2026-09-22 11:35Z, page `e1297eea…`.
   A Flex `ibExecID` that is the live five-part `ib_exec_id` minus the
   trailing `.01` is `flex-pull-live-exec-id`.
   `twr_status=degraded` is `flex-pull-twr-degraded-exit`.
+  `duplicate coverage unavailable: RemoteDisconnected` (the coverage
+  read raised before it could compare rows) is
+  `flex-pull-coverage-keepalive-reset`.
   `classified_as=activity` with `outcome=coverage_unverified` is
   `flex-pull-activity-nav`.
   `Result=timeout` is `flex-pull-ingest-timeout`. A quantity gap equal
@@ -3855,3 +3906,5 @@ service_health write raises.** Peak: 2026-10-08 22:14Z, page
 - **Rollback:** revert this focused fix through the normal CI-gated deployment path; no journal updates, broker actions or migrations are needed.
 
 2026-10-16 ordered-merge verification: CI38968359522 / job117200713229 reproduced three retry-control regressions (3031 other tests passed). Each GET retry now consumes the remaining per-run and OpenRouter budgets; POSTs with lost responses are not replayed. No local suites.
+
+2026-10-16 ordered-merge verification: CI38968332478 / job117200674258 reproduced all four lost-write-response regressions (645 other tests passed). Retry only proven SELECT pipelines and retain all preceding cap, closure and pool-retirement defenses. A lost status line is never evidence that a write did not commit.
