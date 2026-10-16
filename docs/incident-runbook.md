@@ -1229,6 +1229,57 @@ Peak: 2026-09-17 07:22Z, page `1e842638…`. Timer next ~24h.
 
 ---
 
+## ai-cycle-eia-read-timeout
+
+**`radon-ai-cycle.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+when the EIA read stalls once inside the 25s publisher timeout.** Peak:
+2026-10-15 07:27Z, page `0752354faa78835308a16641748d9b6c`. Timer next ~24h.
+
+- **Mechanism:** Daily `--record` walks publishers, then writes the API
+  snapshot. `Transport._download` used one `requests` read timeout of 25s
+  and mapped `RequestException` to `Publisher transport failed` with no
+  second attempt. EIA's completed-week window often spends most of that
+  budget streaming (archive gaps of 16s to 36s on prior days; 2026-10-14
+  landed a 23744-byte body at a 25.0s gap). On 2026-10-15 the read produced
+  no bytes. `checked_at` 07:19:18Z and the next source (vast) at 07:19:44Z
+  match that budget. Status `error` makes `main` return 1 after
+  `persist_api_snapshot`. `Type=oneshot` has no `Restart=`. Sibling
+  sources stayed `available`. Snapshot `generated_at` is
+  2026-10-15T07:27:01Z. EIA `observed_through` stayed 2026-10-13. No daily
+  EIA raw file was archived (yesterday's file is the 23744-byte body).
+  ExecMain 07:17:34Z to 07:27:04Z, `ExecMainStatus=1`, CPU about 38s, under
+  `TimeoutStartSec=1200`. `:8321/health/lite` stayed authenticated and
+  `database=up`. `GET /ai-cycle` returned the new snapshot. A keyless
+  probe of `api.eia.gov` returned HTTP 403 in 82ms, so the host could
+  reach the publisher. Not IB. Not a Turso platform outage.
+- **Detection:** `systemctl show` → `exit-code` / `NRestarts=0`. Live
+  `/ai-cycle` `sources` has `eia.status=error` and
+  `reason=Publisher transport failed`, with other enabled publishers
+  `available` and `generated_at` in the same run. Journal is root-only
+  (`User=root` via `radon-app-runtime`).
+- **Discriminating check:** the EIA attempt's wall gap to the next source
+  is about 25s, and the daily raw archive has no new EIA body. A second
+  stall, an HTTP status, or a schema error still fails the oneshot on
+  purpose (`Publisher returned HTTP`, `EIA geography`, missing
+  `EIA_API_KEY` is `unavailable`, not this case). Canary fail on
+  `SELECT 1` or `/ai-cycle` 503 → Turso, stand down. `Result=signal` or
+  exit 143 is deploy stop-clean. `/health/lite` down → API, stand down.
+  Do not `reset-failed` and start before this retry is live: the same
+  single stall still exits 1.
+- **Remediation (code):** retry the publisher download once after
+  `requests.RequestException` while the 500s run deadline remains. Reserve
+  each actual OpenRouter GET attempt and enforce the remaining request budget. Do not retry POSTs with unknown outcomes or HTTP status errors. A second stall still records `error` and exits 1.
+  After deploy, the next 07:15 UTC timer collects the missed window.
+  Inserts are append-only, and the snapshot from the failed run is
+  already stored.
+- **Regression:**
+  `scripts/tests/test_ai_cycle_collectors.py::test_eia_read_timeout_retries_once_and_the_daily_record_exits_zero`,
+  `test_eia_read_timeout_still_fails_the_oneshot_when_the_retry_stalls`,
+  `test_publisher_http_error_is_not_retried`.
+- **Code:** `scripts/ai_cycle/collectors.py` (`Transport._download`).
+
+---
+
 ## ai-cycle-backfill-snapshot-vintage-budget
 
 **`radon-ai-cycle-backfill.service` oneshot pages P1 `Result=exit-code`
@@ -2880,6 +2931,54 @@ Peak: 2026-09-16 11:35Z, page `5a2eb828…`.
 
 ---
 
+## flex-pull-coverage-keepalive-reset
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+when an applied Trade_History coverage read hits a stale Hrana keep-alive.**
+Peak: 2026-10-16 11:35Z, page `c9633615…`. ExecMain 11:30:00Z to 11:31:10Z,
+about 70s, not `TimeoutStartSec`. Next timer is the 08:30 ET retry.
+
+- **Mechanism:** the activity statement's cash-flow heartbeat is the thread's
+  first Hrana call (`record_service_health` → `scripts/db/hrana_http.py`).
+  `perf_twr` then runs on libsql for tens of seconds, and the peer drops the
+  idle keep-alive. The next file is an already-applied Trade_History
+  duplicate. `delivery_rows_present` reuses that socket. `getresponse`
+  raises `RemoteDisconnected: Remote end closed connection without response`
+  because `_pooled_open` retried a dead socket only when `request()` itself
+  raised. `ingest_xml` maps any coverage-read exception to
+  `coverage_unverified` and does not replay the claim. The oneshot exits 1.
+  The activity cash-flow sync in the same run still finishes `ok`.
+  `:8321/health/lite` stays up.
+- **Detection:** journal `[flex-ingest] duplicate coverage unavailable:
+  RemoteDisconnected: Remote end closed connection without response` then
+  `ingest_failed` with `outcome=coverage_unverified` and
+  `classified_as=trades`. No `Flex aggregate disagrees` line.
+  `systemctl show` → `exit-code` / `NRestarts=0` / `ExecMainStatus=1`.
+- **Discriminating check:** the coverage read raises `RemoteDisconnected`
+  (connection closed before a status line) and Turso answered other calls
+  in the same run, or a same-minute Python `SELECT 1` / `:8321/health/lite`
+  `database=up` succeeds. That is this case. A real row gap
+  (`delivery_rows_present` false, quantity or exec-id mismatch) is
+  `flex-pull-trade-coverage`, `flex-pull-bag-envelope-as-stock`, or
+  `flex-pull-live-exec-id`. `Result=timeout` is
+  `flex-pull-ingest-timeout`. kex / connection-reset on GET is
+  `flex-pull-sftp-get-reset`. If `/health/lite` is down too → API, stand
+  down. If the Turso canary fails too → platform, stand down.
+- **Remediation (code):** `getresponse` connection reset on a reused socket
+  closes the pool and retries an explicit SELECT-only pipeline once on a fresh socket. Writes, mixed pipelines and unparsed SQL are never replayed after an unknown outcome. A fresh
+  socket that dies still raises. A reset while reading a body that already
+  started is not retried. Do not replay the delivery. Do not restart-flap;
+  the 08:30 ET timer retries. After deploy,
+  `systemctl reset-failed radon-flex-pull.service` if that retry has not
+  yet fired. The API sister `scripts/api/db_http.py` retains its separate transport. This page used the oneshot transport.
+- **Regression:**
+  `scripts/tests/test_hrana_http_keepalive.py::test_reused_socket_closed_before_status_retries_once`,
+  `test_fresh_socket_closed_before_status_does_not_open_another`,
+  `test_reused_close_and_fresh_retry_close_raises_once`.
+- **Code:** `scripts/db/hrana_http.py` (`_pooled_open`).
+
+---
+
 ## flex-pull-coverage-unread
 
 **`radon-flex-pull.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
@@ -2961,6 +3060,9 @@ duplicate.** Peak: 2026-09-22 11:35Z, page `e1297eea…`.
   A Flex `ibExecID` that is the live five-part `ib_exec_id` minus the
   trailing `.01` is `flex-pull-live-exec-id`.
   `twr_status=degraded` is `flex-pull-twr-degraded-exit`.
+  `duplicate coverage unavailable: RemoteDisconnected` (the coverage
+  read raised before it could compare rows) is
+  `flex-pull-coverage-keepalive-reset`.
   `classified_as=activity` with `outcome=coverage_unverified` is
   `flex-pull-activity-nav`.
   `Result=timeout` is `flex-pull-ingest-timeout`. A quantity gap equal
@@ -3906,5 +4008,9 @@ service_health write raises.** Peak: 2026-10-08 22:14Z, page
 - **Repair:** `orders/stockEntryTime.ts` replays stock executions by conId, consumes preceding closes, and requires full target quantity matching. Its output adds timing without changing P&L/entry-price arithmetic. Precise execution time outranks the date-only portfolio fallback. `/api/share/pnl` derives measured hold duration, preserves timestamp-only rows, and uses seasonal Pacific zone labels.
 - **Verification:** the sanitized twenty-fill fixture reproduces the supplied artifact; `share-pnl-timing-render.test.ts` asserts actual export tree content, and the pictured TQQQ case in `mobile-executed-journal.spec.ts` exercises the real 1080×1920 PNG route and saves a browser preview. Inspect ENTRY at 8:46 AM PDT, HELD 44 minutes and EXIT at 9:30 AM PDT.
 - **Rollback:** revert this focused fix through the normal CI-gated deployment path; no journal updates, broker actions or migrations are needed.
+
+2026-10-16 ordered-merge verification: CI38968359522 / job117200713229 reproduced three retry-control regressions (3031 other tests passed). Each GET retry now consumes the remaining per-run and OpenRouter budgets; POSTs with lost responses are not replayed. No local suites.
+
+2026-10-16 ordered-merge verification: CI38968332478 / job117200674258 reproduced all four lost-write-response regressions (645 other tests passed). Retry only proven SELECT pipelines and retain all preceding cap, closure and pool-retirement defenses. A lost status line is never evidence that a write did not commit.
 
 2026-10-16 ordered-merge reconciliation: combined head08540ee2, CI38968880813 / job117208493390 reproduced four legacy nonfatal-read assertions (1599 other tests passed). Preserve the later stricter policy: a recovered check must prove persisted coverage; repeated disconnects/timeouts remain unverified and fail. Keep no-replay, real-gap, statement-error and exhausted-budget controls. Existing activity NAV repair remains an idempotent saved-statement repair, not cash/journal replay.
