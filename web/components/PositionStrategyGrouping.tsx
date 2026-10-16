@@ -21,6 +21,22 @@ export type PositionStrategyGroupingControls = {
   canUndo: boolean;
 };
 
+export function groupingControlsEqual(
+  prev?: PositionStrategyGroupingControls,
+  next?: PositionStrategyGroupingControls,
+): boolean {
+  if (prev === next) return true;
+  if (!prev || !next) return false;
+  return prev.sourceFor === next.sourceFor
+    && prev.groupsFor === next.groupsFor
+    && prev.suggestionFor === next.suggestionFor
+    && prev.preview === next.preview
+    && prev.apply === next.apply
+    && prev.reset === next.reset
+    && prev.undo === next.undo
+    && prev.canUndo === next.canUndo;
+}
+
 type Mode = "menu" | "manual" | "editor" | "preview";
 function money(value: number | null): string {
   return value == null || !Number.isFinite(value) ? "Unavailable" : `${value < 0 ? "-" : ""}${fmtUsd(Math.abs(value))}`;

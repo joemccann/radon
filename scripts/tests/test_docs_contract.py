@@ -2141,8 +2141,38 @@ class TestDocumentation20261013:
         assert "staleness" in cell
 
 
-class TestDocumentation20261014:
-    """DOC-195..197: contracts that drifted after audited-through 35118b08."""
+class TestDocumentation20261015:
+    """DOC-198..199: contracts that drifted after audited-through 63fd8992."""
+
+    def test_inferred_held_contract_close_is_not_an_opening_short(self):
+        hook = (_ROOT / "web/lib/order/risk/useOrderRisk.ts").read_text()
+        assert "function inferHeldContractCloseOut" in hook
+        assert "if (held < quantity) return null" in hook
+        assert "opt.closeOut == null ? inferHeldContractCloseOut" in hook
+        assert "inferredCloseOut != null ? -(opt.totalCost ?? 0)" in hook
+        gate = (_ROOT / "web/lib/order/risk/OrderRiskGate.tsx").read_text()
+        fn = gate.split("export function resolveCorrelationOrderContext", 1)[1].split(
+            "\nfunction ", 1
+        )[0]
+        declared_only = "closeOutAction" not in fn
+        banner = (_ROOT / "web/lib/correlationRiskBanner.ts").read_text()
+        adding = "Trim or hedge before adding correlated risk."
+        assert adding in banner
+        close = (_ROOT / "web/CLAUDE.md").read_text().split("**Close-out branch.**", 1)[1].split(
+            "\n6. ", 1
+        )[0]
+        assert "inferHeldContractCloseOut" in close
+        assert "at most the held count" in close
+        assert "not split" in close
+        assert "closeOutAction" in close
+        assert "basis_source" in close
+        assert "Sell to Close" in close
+        if declared_only:
+            assert "resolveCorrelationOrderContext" in close
+            assert "declared `closeOut`" in close
+            assert adding in close
+        else:
+            assert adding not in close
 
     def test_display_return_is_not_only_verified_capital(self):
         utils = (_ROOT / "web/lib/positionUtils.ts").read_text()

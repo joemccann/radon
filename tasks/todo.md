@@ -9489,6 +9489,16 @@ Source evidence: article research-68d8179b6af877c99ff478eda52ddcff8edb573c204d47
 
 Red GitHub evidence: d884b356 CIjob115599207114, 5 failed/2539passed. Corrected sourcepage3 cropbbox[.2038,.3925,.9723,.6865], 1411x698; AST/static compilation passed, no local suites. Nine new synthetic cases include compound and malformed clip fallback and rotation. Independent technical review passed.
 
+# Mobile Preferences scrolling
+Dependency graph: T1 -> T2 -> T3 -> T4; T1 -> T3.
+- [x] T1 depends_on: [] Trace mobile profile scroll ownership and clipped settings groups.
+- [x] T2 depends_on: [T1] Add browser regression for scrolling all Preferences/Keys controls without writes.
+- [x] T3 depends_on: [T1, T2] Fix scoped layout and preserve fixed profile actions/navigation.
+- [ ] T4 depends_on: [T2, T3] GitHub red/green, mobile screenshots, exact-head green PR and Pushover.
+No local test suites. Preserve unrelated work; use synthetic account/preferences/credentials.
+
+Red evidence: 1ad955ea GitHub38634078736, focusedCSS regression failed1(1312passed), browserjob116092819596 reproducedmobilecard clipping beforefix. Apply5line mobilechildsizing correction and reverifylatesthead.
+
 
 # Position strategy grouping
 Dependency graph: T1 -> T2 -> T3 -> T4; T1 -> T3; T2 -> T4.
@@ -9520,3 +9530,19 @@ Dependency graph: T1 -> T2 -> T3.
 - [ ] T3 depends_on: [T2] Push repaired head and await every applicable exact-head GitHub CI check.
 
 Review: Latest main c8549c323310d2b387db207b16946eff7e24060e; PR head 39597e71e32caac328950c2f3f348accad0c5b60. The only textual conflict is the append-only task log. No local test suites per operator policy. Exact-head CI pending.
+
+
+## PDF articles feed tab (2026-10-16)
+
+- [x] T1 depends_on: [] Trace the feed, validated PDF provenance, pagination and access filtering.
+- [x] T2 depends_on: [T1] Add PDF-only view while preserving the mixed Commentary feed, tags, refresh and shared article actions.
+- [x] T3 depends_on: [T2] Verify focused regressions, desktop/mobile browser flows, screenshots and full required gates.
+- [ ] T4 depends_on: [T3] Publish PR, wait exact-head green CI, notify, admin merge and verify deployment.
+
+Review: The existing endpoint returns the latest 500 visible posts; PDF filtering belongs before client pagination. Retain server authorization and operator feedback filtering. Preserve unrelated checkout changes.
+
+CI baseline: main run 38911508191 failed the portfolio-poll documentation contract. Upstream main dc888260 includes the independent repair (50818e5e), so the duplicate local repair was dropped during rebase. This PR changes no polling/admission policy.
+
+Review: 10964 Vitest passed, 21 skipped (Node26 webstorage disabled for jsdom Storage prototype parity). Python baseline 15443 passed/2 skipped with one existing documentation-contract failure; repaired documentation and curation gate 158 passed. Production compile, TypeScript, component ESLint and diff checks green. Browser 4/4 desktop/mobile against next start; screenshots retained at /tmp/radon-pdf-browser-clean. PDF provenance, text-only sources, full-collection pagination, tags, hidden feedback, refresh and main-feed retention covered. Exact-head delivery receipts belong in the PR after CI and deployment.
+
+CI repair: run 38968894246 / job 117203223236 timed out the PDF pagination regression at the 5s default. Keep the full-collection and tab-reset assertions with 19 PDF items crossing the 18-item boundary, scope page controls and use the existing pagination suite's 20s case allowance. No runtime changes or retries.
