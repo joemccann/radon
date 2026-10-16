@@ -2172,16 +2172,33 @@ class TestDocumentation20261014:
 
     def test_open_portfolio_poll_names_the_route_ceiling(self):
         shell = (_ROOT / "web/components/WorkspaceShell.tsx").read_text()
-        match = re.search(r"MarketState\.OPEN \? ([\d_]+) : ([\d_]+)", shell)
-        assert match, "WorkspaceShell no longer states the open and off-hours poll"
-        open_ms = int(match.group(1).replace("_", ""))
-        off_ms = int(match.group(2).replace("_", ""))
+        budget = (_ROOT / "web/lib/accountPollBudget.ts").read_text()
+        constants = {
+            name: int(value.replace("_", ""))
+            for name, value in re.findall(r"export const (\w+) = ([\d_]+);", budget)
+        }
+        match = re.search(
+            r"accountPollIntervalMs = marketState === MarketState\.OPEN\s*"
+            r"\? (\w+)\s*:\s*(\w+)", shell,
+        )
+        assert match, "WorkspaceShell no longer selects open and off-hours account polls"
+        assert re.search(
+            r'import\s*\{[^}]*\b' + match.group(1) + r'\b[^}]*\b'
+            + match.group(2) + r'\b[^}]*\}\s*from "@/lib/accountPollBudget"', shell,
+        ), "WorkspaceShell must consume the shared account poll budget"
+        open_ms = constants[match.group(1)]
+        off_ms = constants[match.group(2)]
+        assert open_ms == 2_000
         assert "pollIntervalMs: accountPollIntervalMs" in shell
         assert "useOrders(shouldAutoSyncOrders, accountPollIntervalMs)" in shell
         route = (_ROOT / "web/app/api/portfolio/route.ts").read_text()
-        ceiling = re.search(r'key: "portfolio:route", limit: (\d+), windowMs: ([\d_]+)', route)
+        ceiling = re.search(r'key: "portfolio:route", limit: (\w+), windowMs: ([\d_]+)', route)
         assert ceiling
-        limit = int(ceiling.group(1))
+        assert re.search(
+            r'import\s*\{\s*' + ceiling.group(1)
+            + r'\s*\}\s*from "@/lib/accountPollBudget"', route,
+        ), "Portfolio GET must consume the shared admission ceiling"
+        limit = constants[ceiling.group(1)]
         window_ms = int(ceiling.group(2).replace("_", ""))
         orders = (_ROOT / "web/app/api/orders/route.ts").read_text()
         get_fn = orders.split("export async function GET", 1)[1].split("export async function POST", 1)[0]
@@ -2196,7 +2213,7 @@ class TestDocumentation20261014:
         assert "MarketState.OPEN" in section
         assert "2 seconds" in section
         assert "30 seconds" in section
-        assert f"admits {limit} requests per {window_ms // 1000} seconds" in section
+        assert f"admits {limit:,} requests per {window_ms // 1000} seconds" in section
         assert "portfolio:route" in section
         assert "GET /api/orders" in section
         assert "5 minutes" in section

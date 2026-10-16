@@ -326,7 +326,7 @@ tab with nothing to show reports it (2026-08-24: 963 "Too Many Requests"
 banners from five aligned tabs).
 While the equity session is `MarketState.OPEN`, `WorkspaceShell` polls cached
 portfolio and orders GETs every 2 seconds. Extended and closed sessions stay
-on the hook default of 30 seconds. `GET /api/portfolio` admits 20 requests per 60 seconds on `portfolio:route`, so one open tab asks more often than that route allows; the 429 keeps the last snapshot. `GET /api/orders` is not
+on the hook default of 30 seconds. The cadence and route ceiling are shared constants in `lib/accountPollBudget.ts`. `GET /api/portfolio` admits 2,000 requests per 60 seconds on `portfolio:route`, which accommodates the open-session cadence; a 429 still keeps the last snapshot. `GET /api/orders` is not
 on that bucket. A failed read backs off from the 30-second hook constant,
 doubling up to 5 minutes, and does not adopt the 2-second interval.
 Tests: `tests/auto-sync-claim.test.ts`, `tests/use-portfolio-sync-429.test.ts`,
