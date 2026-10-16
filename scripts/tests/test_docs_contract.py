@@ -2218,13 +2218,18 @@ class TestDocumentation20261015:
         assert "pollIntervalMs: accountPollIntervalMs" in shell
         assert "useOrders(shouldAutoSyncOrders, accountPollIntervalMs)" in shell
         route = (_ROOT / "web/app/api/portfolio/route.ts").read_text()
+        assert 'key: "portfolio:route", limit: PORTFOLIO_GET_LIMIT,' in route
+        limit_match = re.search(
+            r"PORTFOLIO_GET_LIMIT = ([\d_]+)", poll_budget
+        )
+        assert limit_match
+        limit = int(limit_match.group(1).replace("_", ""))
         ceiling = re.search(
-            r'key: "portfolio:route", limit: (\d+), windowMs: ([\d_]+)',
+            r'key: "portfolio:route", limit: PORTFOLIO_GET_LIMIT, windowMs: ([\d_]+)',
             route,
         )
         assert ceiling
-        limit = int(ceiling.group(1))
-        window_ms = int(ceiling.group(2).replace("_", ""))
+        window_ms = int(ceiling.group(1).replace("_", ""))
         orders = (_ROOT / "web/app/api/orders/route.ts").read_text()
         get_fn = orders.split("export async function GET", 1)[1].split(
             "export async function POST", 1
