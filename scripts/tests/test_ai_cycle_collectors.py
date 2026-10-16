@@ -1358,6 +1358,61 @@ def test_publisher_http_error_is_not_retried(tmp_path):
     assert not list(tmp_path.iterdir())
 
 
+def test_publisher_retry_obeys_remaining_request_budget(tmp_path):
+    import requests
+
+    class Session:
+        calls = 0
+
+        def request(self, *args, **kwargs):
+            self.calls += 1
+            raise requests.Timeout("lost response")
+
+    session = Session()
+    transport = Transport(tmp_path, session=session, max_requests=1)
+    with pytest.raises(SourceError):
+        transport.fetch("https://api.eia.gov/example")
+    assert session.calls == 1
+    assert transport.requests == 1
+
+
+def test_openrouter_retry_reserves_each_actual_attempt(tmp_path, monkeypatch):
+    import requests
+
+    class Session:
+        calls = 0
+
+        def request(self, *args, **kwargs):
+            self.calls += 1
+            raise requests.Timeout("lost response")
+
+    session = Session()
+    transport = Transport(tmp_path, session=session)
+    reservations = []
+    monkeypatch.setattr(transport, "_or_budget", lambda: reservations.append(1))
+    with pytest.raises(SourceError):
+        transport.fetch("https://openrouter.ai/api/v1/datasets/rankings-daily")
+    assert session.calls == 2
+    assert len(reservations) == session.calls
+
+
+def test_publisher_post_with_unknown_outcome_is_not_retried(tmp_path):
+    import requests
+
+    class Session:
+        calls = 0
+
+        def request(self, method, *args, **kwargs):
+            assert method == "POST"
+            self.calls += 1
+            raise requests.Timeout("response lost after accepting POST")
+
+    session = Session()
+    with pytest.raises(SourceError):
+        Transport(tmp_path, session=session).fetch("https://publisher.example/submit", body={"value": 1})
+    assert session.calls == 1
+
+
 def test_openrouter_corrupt_quota_ledger_fails_closed(tmp_path):
     ledger = tmp_path / "quota.json"
     ledger.write_text("broken")
