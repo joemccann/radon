@@ -2954,6 +2954,84 @@ async def attribution():
 # Phase 2: IB file-writer endpoints
 # ---------------------------------------------------------------------------
 
+# Auth states that join ib-gateway-grouped via the stale bucket. A fresh
+# error row would clear that bucket, so a miss in these states stays silent.
+_PORTFOLIO_SYNC_SILENT_AUTH = frozenset({"awaiting_2fa", "unreachable"})
+
+
+def _portfolio_sync_miss_reason(reason: str) -> str:
+    """Short scrubbed text safe to store on service_health and to log."""
+    text = _scrub_secrets(reason or "")
+    text = " ".join(str(text).split())
+    if not text:
+        text = "portfolio sync failed"
+    if len(text) > 500:
+        text = text[:500]
+    return text
+
+
+async def _portfolio_gateway_allows_miss_heartbeat() -> bool:
+    """True when a fresh error row will not hide an IB-outage group.
+
+    Grouping pages stale while auth is awaiting_2fa or unreachable and the
+    row is old. A probe that raises is not proof the gateway is down;
+    leaving the row silent is the page this heartbeat exists to stop.
+    """
+    try:
+        pool_status = ib_pool.status() if ib_pool is not None else None
+    except Exception:
+        logger.exception("portfolio-sync: pool status failed after sync miss")
+        pool_status = None
+    try:
+        gw = await check_ib_gateway(pool_status=pool_status)
+    except Exception:
+        logger.exception("portfolio-sync: gateway probe failed after sync miss")
+        return True
+    if not gw.get("port_listening") or gw.get("upstream_dead"):
+        return False
+    if gw.get("auth_state") in _PORTFOLIO_SYNC_SILENT_AUTH:
+        return False
+    return True
+
+
+async def _heartbeat_portfolio_sync_miss(reason: str) -> None:
+    """Record a /portfolio/sync miss that never reached service_cycle.
+
+    ib_sync heartbeats only inside save_portfolio. A 502 before that leaves
+    state=ok and freezes updated_at, so the open 10-minute window pages
+    silence. Stamp error, never ok. Gateway down and 2FA stay silent so
+    the stale bucket can still join ib-gateway-grouped.
+    """
+    text = _portfolio_sync_miss_reason(reason)
+    if not await _portfolio_gateway_allows_miss_heartbeat():
+        logger.warning(
+            "portfolio-sync miss left silent for gateway grouping: %s",
+            text,
+        )
+        return
+    extra = {
+        "class": "sync-failed",
+        "message": f"portfolio sync missed (sync-failed): {text}",
+    }
+    try:
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        await asyncio.to_thread(
+            db_http.hrana_execute,
+            SERVICE_HEALTH_UPSERT_SQL,
+            service_health_upsert_args(
+                "portfolio-sync",
+                "error",
+                started_at=now,
+                finished_at=now,
+                error=extra,
+            ),
+        )
+    except Exception:
+        logger.exception("portfolio-sync: miss heartbeat failed (%s)", text)
+    else:
+        logger.warning("portfolio-sync miss: %s", text)
+
+
 @app.post("/portfolio/sync")
 async def portfolio_sync():
     """Sync portfolio from IB and return the live payload.
@@ -2963,6 +3041,7 @@ async def portfolio_sync():
     """
     outcome = await _coordinated_portfolio_sync()
     if not outcome.ok:
+        await _heartbeat_portfolio_sync_miss(outcome.error or "Portfolio sync failed")
         raise HTTPException(status_code=502, detail=outcome.error)
     return outcome.payload or {}
 
