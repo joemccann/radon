@@ -345,7 +345,7 @@ TradingView alert fires `POST` to `app.radon.run/api/webhooks/tradingview/<TV_WE
 
 ### Bounded vs process-bound Turso writes (R5 partial)
 
-`libsql_experimental` has **no client timeouts** and holds the GIL while blocked. Prefer `scripts/db/hrana_http.py` (real `urllib` socket timeout) for hang-risk writers; leave bulk/oneshot scan writers on sync libsql under process supervision. Full inventory: module docstring of `scripts/db/client.py`.
+`libsql_experimental` has **no client timeouts** and holds the GIL while blocked. Prefer `scripts/db/hrana_http.py` (`http.client` keep-alive, one socket per thread, real socket timeout) for hang-risk writers; leave bulk/oneshot scan writers on sync libsql under process supervision. Full inventory: module docstring of `scripts/db/client.py`.
 
 | Path | Transport | Why |
 |---|---|---|
@@ -1342,7 +1342,7 @@ aws s3 ls "s3://radon-archive/db_backups/" --endpoint-url "$RADON_ARCHIVE_S3_END
 Restore is unchanged: pull the object, then follow the "Restore runbook"
 above against the downloaded `radon-<stamp>.sql.gz`.
 
-A duplicate Flex ingest verifies cash-flow IDs and NAV dates, or journal execution coverage, through bounded Hrana reads before reporting persistence. An applied activity duplicate with all expected cash-flow IDs present can insert missing NAV dates from the saved statement; this retry is not read-only. It never overwrites existing NAV corrections and never replays cash. See the [activity NAV incident diagnosis](incident-runbook.md#flex-pull-activity-nav) and the [ingest implementation](../scripts/flex_delivery_ingest.py). Flex trade IDs that were not stored because individual IB fills already match that contract-day's quantity and gross notional count as covered. A quantity or notional disagreement does not. Missing cash, unreadable coverage, or coverage still unverified after the NAV repair retains the applied claim, returns an error, and requires operator reconciliation; the puller rejects duplicate results without explicit confirmation. It never replays an applied delivery.
+A duplicate Flex ingest verifies cash-flow IDs and NAV dates, or journal execution coverage, through bounded Hrana reads before reporting persistence. An applied activity duplicate with all expected cash-flow IDs present can insert missing NAV dates from the saved statement; this retry is not read-only. It never overwrites existing NAV corrections and never replays cash. See the [activity NAV incident diagnosis](incident-runbook.md#flex-pull-activity-nav) and the [ingest implementation](../scripts/flex_delivery_ingest.py). Flex trade IDs that were not stored because individual IB fills already match that contract-day's quantity and gross notional count as covered. A quantity or notional disagreement does not. Missing cash or coverage still unverified after the NAV repair retains the applied claim, returns an error, and requires operator reconciliation; the puller rejects duplicate results without explicit confirmation. A transient coverage read failure (dropped connection, read timeout, HTTP 429/5xx) returns `coverage_unread`: the puller keeps the applied claim, heartbeats `ok` with `class=coverage_unread`, and rechecks on the next timer without replay. A statement error or exhausted local verification budget remains `coverage_unverified` and fails the pull. It never replays an applied delivery.
 
 
 ## Legacy Flex aggregate cleanup
