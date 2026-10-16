@@ -1,3 +1,8 @@
+# Flex duplicate coverage unread is not a row gap (2026-10-16)
+
+- `coverage_unverified` plus "operator reconciliation required" on an applied Trade_History duplicate is `flex-pull-trade-coverage` only when `delivery_rows_present` returned false. A preceding `duplicate coverage unavailable: RemoteDisconnected` (or a hrana read timeout / connection reset) means the journal was not read. Do not reconcile. Do not replay the statement. The next flex-pull timer reads again.
+- Same-minute `perf_twr` mirror success, or a Python Turso `SELECT 1`, separates this blip from a Turso platform outage.
+
 # PDF source chart crop completeness (2026-10-13)
 
 - PDFium Form child object bounds are local to the containing Form. Compose ancestor matrices before page normalization; never double-apply the child object matrix. Include noncommuting nested transforms in regression fixtures.

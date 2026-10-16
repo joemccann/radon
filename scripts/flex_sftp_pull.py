@@ -851,6 +851,7 @@ def _run(
     failed_keys: set[str] = set()
     ingested = 0
     transient_gets = 0
+    coverage_unread = 0
     covered_by_key: Dict[str, date] = {}
     newest_period_end: Optional[date] = None
     newest_by_key: Dict[str, date] = {}
@@ -898,6 +899,11 @@ def _run(
             if plain.suffix.lower() != ".xml":
                 plain = plain.with_suffix(".xml")
             result = ingest_fn(xml_text, source_path=str(plain))
+            # A dropped coverage read on an applied duplicate is not a gap
+            # and is not a new statement. The next timer reads it again.
+            if result.get("outcome") == "coverage_unread":
+                coverage_unread += 1
+                continue
             if not result.get("ok", True):
                 raise FlexSftpError(f"ingest_failed:{result}")
             # `_sftp` issues no `rm` or `rename`, so a delivered file is never
@@ -995,7 +1001,13 @@ def _run(
             "message": f"transient sftp get failed for {transient_gets} file(s)",
             "class": "sftp_transient",
         }
-    _heartbeat("ok", _merge_notes(note, gap_note))
+    unread_note = None
+    if coverage_unread:
+        unread_note = {
+            "message": f"duplicate coverage unread for {coverage_unread} file(s)",
+            "class": "coverage_unread",
+        }
+    _heartbeat("ok", _merge_notes(note, gap_note, unread_note))
     return 0
 
 
