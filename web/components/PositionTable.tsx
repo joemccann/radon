@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronUp } from "lucide-react";
 import type { PortfolioData, PortfolioLeg, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
@@ -35,6 +35,7 @@ import {
   getStockDailyChg,
   getTodayPnlDollars,
   resolveRealtimePrice,
+  positionPricesUnchanged,
 } from "@/lib/positionUtils";
 import { computeLegImpliedValue, computePositionImpliedValue, resolveUnderlyingSpot } from "@/lib/impliedValue";
 import { useRiskFreeRateState } from "@/lib/useRiskFreeRate";
@@ -43,7 +44,7 @@ import { useViewport } from "@/lib/useViewport";
 import { isIbDailyPnlFromCurrentSession, withSessionIbDailyPnl } from "@/lib/ibDailyPnlSession";
 import { ColumnsToggle, type ColumnsToggleEntry } from "./ColumnsToggle";
 import MobilePositionList from "./mobile/MobilePositionList";
-import PositionStrategyGrouping, { type PositionStrategyGroupingControls } from "./PositionStrategyGrouping";
+import PositionStrategyGrouping, { groupingControlsEqual, type PositionStrategyGroupingControls } from "./PositionStrategyGrouping";
 
 const DENSITY_STORAGE_PREFIX = "radon:density:";
 
@@ -374,7 +375,33 @@ function LegRow({
 
 /* ─── Position row ─────────────────────────────────────── */
 
-function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImplied = false, columns, realtimePrice, prices, riskFreeRate = null, onLegClick, strategyGrouping }: { pos: PortfolioPosition; showExpiry?: boolean; showUnderlying?: boolean; showImplied?: boolean; columns: PositionColumnVisibility; realtimePrice?: PriceData | null; prices?: Record<string, PriceData>; riskFreeRate?: number | null; onLegClick?: (leg: PortfolioLeg, pos: PortfolioPosition) => void; strategyGrouping?: PositionStrategyGroupingControls }) {
+type PositionRowProps = {
+  pos: PortfolioPosition;
+  showExpiry?: boolean;
+  showUnderlying?: boolean;
+  showImplied?: boolean;
+  columns: PositionColumnVisibility;
+  realtimePrice?: PriceData | null;
+  prices?: Record<string, PriceData>;
+  riskFreeRate?: number | null;
+  onLegClick?: (leg: PortfolioLeg, pos: PortfolioPosition) => void;
+  strategyGrouping?: PositionStrategyGroupingControls;
+};
+
+function positionRowPropsEqual(prev: PositionRowProps, next: PositionRowProps): boolean {
+  return prev.pos === next.pos
+    && prev.showExpiry === next.showExpiry
+    && prev.showUnderlying === next.showUnderlying
+    && prev.showImplied === next.showImplied
+    && prev.columns === next.columns
+    && prev.realtimePrice === next.realtimePrice
+    && prev.riskFreeRate === next.riskFreeRate
+    && prev.onLegClick === next.onLegClick
+    && groupingControlsEqual(prev.strategyGrouping, next.strategyGrouping)
+    && positionPricesUnchanged(next.pos, prev.prices, next.prices);
+}
+
+const PositionRow = memo(function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImplied = false, columns, realtimePrice, prices, riskFreeRate = null, onLegClick, strategyGrouping }: PositionRowProps) {
   const [legsExpanded, setLegsExpanded] = useState(false);
   const hasMultipleLegs = pos.legs.length > 1;
 
@@ -627,7 +654,7 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
       })}
     </>
   );
-}
+}, positionRowPropsEqual);
 
 /* ─── Position table ───────────────────────────────────── */
 
@@ -695,14 +722,15 @@ export default function PositionTable({
   // Instrument detail modal state
   const [activeInstrument, setActiveInstrument] = useState<ActiveInstrumentIdentity | null>(null);
 
+  const sourceFor = strategyGrouping?.sourceFor;
   const handleLegClick = useCallback((leg: PortfolioLeg, pos: PortfolioPosition) => {
-    const source = strategyGrouping?.sourceFor(pos) ?? pos;
+    const source = sourceFor?.(pos) ?? pos;
     setActiveInstrument({
       positionId: source.id,
       conId: leg.con_id ?? null,
       legIndex: source.legs.indexOf(leg),
     });
-  }, [strategyGrouping]);
+  }, [sourceFor]);
 
   const resolvedInstrument = useMemo(
     () => resolveActiveInstrument(strategyGrouping ? positions.map(position => strategyGrouping.sourceFor(position)) : positions, activeInstrument),

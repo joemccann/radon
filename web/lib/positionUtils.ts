@@ -543,6 +543,33 @@ export function legPriceKey(
   return optionKey({ symbol: ticker.toUpperCase(), expiry: expiryClean, strike: leg.strike, right });
 }
 
+/** Quote-map keys a position's mark, implied value, and underlying read. */
+export function positionPriceKeys(pos: PortfolioPosition): string[] {
+  const keys = new Set<string>();
+  keys.add(pos.ticker);
+  const upper = pos.ticker.toUpperCase();
+  keys.add(upper);
+  for (const leg of pos.legs) {
+    const key = legPriceKey(pos.ticker, pos.expiry, leg);
+    if (key) keys.add(key);
+  }
+  return [...keys];
+}
+
+/** True when every quote this row reads is the same object as last render. */
+export function positionPricesUnchanged(
+  pos: PortfolioPosition,
+  prev?: Record<string, PriceData>,
+  next?: Record<string, PriceData>,
+): boolean {
+  if (prev === next) return true;
+  if (prev == null || next == null) return prev === next;
+  for (const key of positionPriceKeys(pos)) {
+    if (prev[key] !== next[key]) return false;
+  }
+  return true;
+}
+
 /* ─── Spread net price resolution ─────────────────────────── */
 
 function integerGcd(a: number, b: number): number {

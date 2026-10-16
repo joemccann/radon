@@ -51,11 +51,28 @@ describe("position strategy browser preferences", () => {
   it("retains the previous layout on storage failure, then persists undo", () => {
     const original = source();
     const hook = renderHook(() => usePositionStrategyGroups([original]));
-    const write = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("quota"); });
-    act(() => { expect(hook.result.current.apply(original, suggestStrategyGroups(original)!)).toBe(false); });
-    expect(hook.result.current.positions).toEqual([original]);
-    expect(hook.result.current.error).toMatch(/could not be saved/i);
-    write.mockRestore();
+    // Node's built-in localStorage is a plain object, so a Storage.prototype
+    // spy never runs. jsdom calls the prototype method and ignores an own
+    // property, so an instance spy never runs there. Install the throw on both.
+    const storage = window.localStorage;
+    const proto = Object.getPrototypeOf(storage);
+    const throwing = () => { throw new Error("quota"); };
+    const own = Object.getOwnPropertyDescriptor(storage, "setItem");
+    const previousProto = proto && "setItem" in proto ? proto.setItem : undefined;
+    Object.defineProperty(storage, "setItem", { configurable: true, writable: true, value: throwing });
+    if (previousProto) proto.setItem = throwing;
+    const restore = () => {
+      if (own) Object.defineProperty(storage, "setItem", own);
+      else delete storage.setItem;
+      if (previousProto) proto.setItem = previousProto;
+    };
+    try {
+      act(() => { expect(hook.result.current.apply(original, suggestStrategyGroups(original)!)).toBe(false); });
+      expect(hook.result.current.positions).toEqual([original]);
+      expect(hook.result.current.error).toMatch(/could not be saved/i);
+    } finally {
+      restore();
+    }
     act(() => { hook.result.current.apply(original, suggestStrategyGroups(original)!); });
     expect(hook.result.current.canUndo).toBe(true);
     act(() => { expect(hook.result.current.undo()).toBe(true); });
