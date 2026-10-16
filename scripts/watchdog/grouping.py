@@ -148,6 +148,13 @@ _IB_SHAPED_PATTERNS = (
     "awaiting_2fa",
     "awaiting 2fa",
     "2fa",
+    # Cloud-mode and lock-aware fast-fails. "Failed to connect to IB" is
+    # rewritten into these before orders-sync heartbeats, so a latched row
+    # would otherwise page per-service during an operator hold.
+    "ib gateway is not responding",
+    "ib gateway is not accepting connections",
+    "ib gateway is down and restart failed",
+    "ib gateway connection recently failed",
 )
 
 

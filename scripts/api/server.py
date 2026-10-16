@@ -700,6 +700,24 @@ async def _run_script_retrying_capacity(
 ORDERS_SYNC_MAX_CONSECUTIVE_SHEDS = 3
 _orders_sync_consecutive_sheds = 0
 
+# _run_ib_script_with_recovery returns these only after it has already
+# decided the gateway is down (cloud mode, lock-aware watchdog, preflight
+# port closed, or the short cooldown that follows). They are not a writer
+# miss while the gateway is up. Heartbeating them latches a last_error the
+# IB grouper does not treat as an outage; later silent ticks then page
+# orders-sync during an operator hold.
+_GATEWAY_DOWN_SYNC_MARKERS = (
+    "ib gateway is not responding",
+    "ib gateway is not accepting connections",
+    "ib gateway is down and restart failed",
+    "ib gateway connection recently failed",
+)
+
+
+def _orders_sync_failure_is_gateway_down(error: object) -> bool:
+    hay = str(error or "").lower()
+    return any(marker in hay for marker in _GATEWAY_DOWN_SYNC_MARKERS)
+
 
 def _reset_orders_sync_shed_state() -> None:
     """Called after a successful sync, and by tests."""
@@ -843,6 +861,16 @@ async def _orders_sync_tick() -> None:
         await _heartbeat_orders_sync_skip("subprocess capacity exhausted")
         return
     logger.warning("orders-sync loop: sync failed: %s", outcome.error)
+    if _orders_sync_failure_is_gateway_down(outcome.error):
+        # Stay silent. A heartbeat would freeze a non-IB last_error, and the
+        # pool-disconnected path then stops refreshing it, so the 10-minute
+        # window pages orders-sync instead of letting IB grouping absorb it.
+        _reset_orders_sync_shed_state()
+        logger.warning(
+            "orders-sync loop: gateway down, leaving orders-sync silent: %s",
+            outcome.error,
+        )
+        return
     await _heartbeat_orders_sync_skip(
         outcome.error or "orders sync failed",
         error_class="sync-failed",

@@ -314,6 +314,51 @@ async def test_orders_sync_tick_real_failure_does_not_stamp_ok():
     assert args[1] == "error"
 
 
+# Confirmed-down strings from _run_ib_script_with_recovery. Heartbeating
+# one of these latches a last_error the IB grouper does not recognize;
+# the next ticks stay silent and the 10-minute window pages orders-sync
+# during an operator hold (page 0607c701, 2026-10-16 18:50Z).
+_GATEWAY_DOWN_SYNC_ERRORS = (
+    "IB Gateway is not responding (cloud mode). Check remote host and Tailscale.",
+    "IB Gateway is not responding. Lock-aware watchdog recovery is pending; "
+    "approve any existing IBKR Mobile 2FA prompt.",
+    "IB Gateway is not accepting connections. Check IBKR Mobile for 2FA approval.",
+    "IB Gateway connection recently failed. Retrying shortly.",
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", _GATEWAY_DOWN_SYNC_ERRORS)
+async def test_orders_sync_tick_confirmed_gateway_down_stays_silent(error: str):
+    """Gateway-down fast-fail must not write service_health.
+
+    A timeout or script miss while the gateway is up still heartbeats
+    error (page 99dad5ec). A confirmed-down result must stay silent so
+    IB grouping, including operator-hold absorption, can see the stale.
+    """
+    srv._reset_orders_sync_shed_state()
+    srv._orders_sync_consecutive_sheds = srv.ORDERS_SYNC_MAX_CONSECUTIVE_SHEDS
+    captured, fake_hrana = _capture_hrana()
+
+    with patch.object(srv, "test_mode", False):
+        with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
+            with patch.object(srv, "_pool_has_any_connection", return_value=True):
+                with patch.object(
+                    srv,
+                    "_coordinated_orders_sync",
+                    new=AsyncMock(return_value=_fail_outcome(error)),
+                ):
+                    with patch.object(srv.db_http, "hrana_execute", new=fake_hrana):
+                        await srv._orders_sync_tick()
+
+    assert captured == [], (
+        "a confirmed gateway-down tick must not heartbeat; "
+        f"wrote {captured!r} for {error!r}"
+    )
+    assert srv._orders_sync_consecutive_sheds == 0
+    srv._reset_orders_sync_shed_state()
+
+
 # ---------------------------------------------------------------------------
 # _orders_sync_loop unit tests
 # ---------------------------------------------------------------------------
