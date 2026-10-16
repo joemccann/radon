@@ -776,6 +776,63 @@ finally:
 PY_PRIVATE_DIR
 }
 
+# DS-2026-09-24-01 residual: the engine loads this filter as root, and
+# /etc/radon is radon-writable (root:radon 1770), so the profile's own
+# directory is the untrusted component. A leaf -f/-L test follows a planted
+# directory link, which is how radon could hand Chromium a filter it wrote
+# itself. Check the last two components without following either, and require
+# both to be owned by this user and writable by nobody else.
+require_trusted_seccomp_profile() {
+  # -I: the interpreter reads the program from stdin, so without isolation
+  # sys.path[0] is the working directory and a planted module would load.
+  "$PYTHON" -I - "$1" "${RADON_APP_RUNTIME_TEST_MODE:-0}" <<'PY_SECCOMP_PROFILE'
+import os, stat, sys
+from pathlib import Path
+
+path, test = Path(sys.argv[1]), sys.argv[2] == '1'
+expected_uid = os.getuid() if test else 0
+
+
+def refuse(reason):
+    print(f'radon-app-runtime: chromium seccomp profile {reason}: {path}', file=sys.stderr)
+    raise SystemExit(78)
+
+
+if not path.is_absolute() or '..' in path.parts:
+    refuse('is not an absolute path without traversal')
+grandparent_fd = dir_fd = None
+try:
+    try:
+        grandparent_fd = os.open(str(path.parent.parent), os.O_DIRECTORY | os.O_RDONLY)
+        dir_fd = os.open(
+            path.parent.name,
+            os.O_NOFOLLOW | os.O_DIRECTORY | os.O_RDONLY,
+            dir_fd=grandparent_fd,
+        )
+    except OSError:
+        refuse('directory is missing or a symlink')
+    dir_st = os.fstat(dir_fd)
+    if dir_st.st_uid != expected_uid or dir_st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        refuse('directory is not owned by this user or is writable by others')
+    try:
+        fd = os.open(path.name, os.O_NOFOLLOW | os.O_RDONLY, dir_fd=dir_fd)
+    except OSError:
+        refuse('is missing or a symlink')
+    try:
+        st = os.fstat(fd)
+    finally:
+        os.close(fd)
+    if not stat.S_ISREG(st.st_mode):
+        refuse('is not a regular file')
+    if st.st_uid != expected_uid or st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        refuse('is not owned by this user or is writable by others')
+finally:
+    for open_fd in (dir_fd, grandparent_fd):
+        if open_fd is not None:
+            os.close(open_fd)
+PY_SECCOMP_PROFILE
+}
+
 cmd_run() {
   local unit="${1:-}"
   local ids image workdir rendered_env
@@ -803,10 +860,8 @@ cmd_run() {
 
   # Fail closed: the newsfeed never starts under the engine default filter,
   # which would kill Chromium's namespace sandbox at launch.
-  if [[ "$unit" == "radon-newsfeed.service" ]] && \
-     [[ ! -f "$CHROMIUM_SECCOMP_PROFILE" || -L "$CHROMIUM_SECCOMP_PROFILE" ]]; then
-    echo "radon-app-runtime: chromium seccomp profile missing: ${CHROMIUM_SECCOMP_PROFILE}" >&2
-    exit 78
+  if [[ "$unit" == "radon-newsfeed.service" ]]; then
+    require_trusted_seccomp_profile "$CHROMIUM_SECCOMP_PROFILE" || exit 78
   fi
 
   local credential_gid=""
