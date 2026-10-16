@@ -25,9 +25,14 @@ payload / swallow).
 
 from __future__ import annotations
 
+import http.client
+import io
 import json
+import ssl
+import threading
 import urllib.request
 from typing import Any, Sequence
+from urllib.parse import urlsplit
 
 from health_service.turso_http import _cell_value, http_url_from_libsql, read_env
 from utils.outcome_metrics import measure_operation
@@ -38,6 +43,98 @@ from utils.outcome_metrics import measure_operation
 HRANA_TIMEOUT_S = 4.0
 
 _MAX_RESPONSE_BYTES = 8_388_608  # hard ceiling; these result sets are tiny
+
+# urllib.request.urlopen opens a fresh TCP/TLS socket per POST. The FastAPI
+# process issues Hrana pipelines on a hot path (/health/lite every 5s, plus
+# every route). Thread-local keep-alive reuses one socket per worker thread.
+# Tests that replace urllib.request.urlopen still take that seam.
+_STDLIB_URLOPEN = urllib.request.urlopen
+_local = threading.local()
+
+
+class _PooledResponse(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _close_keepalive() -> None:
+    conn = getattr(_local, "conn", None)
+    _local.conn = None
+    _local.key = None
+    if conn is None:
+        return
+    try:
+        conn.close()
+    except OSError:
+        pass
+
+
+def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse:
+    parts = urlsplit(req.full_url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise OSError("unsupported Turso origin")
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    key = (parts.scheme, parts.hostname, port)
+    path = parts.path or "/"
+    if parts.query:
+        path = f"{path}?{parts.query}"
+    headers = {k: v for k, v in req.header_items()}
+    headers.setdefault("Connection", "keep-alive")
+    body = req.data or b""
+    method = req.get_method() or "POST"
+
+    def connect() -> http.client.HTTPConnection:
+        if parts.scheme == "https":
+            conn = http.client.HTTPSConnection(
+                parts.hostname,
+                port,
+                timeout=timeout,
+                context=ssl.create_default_context(),
+            )
+        else:
+            conn = http.client.HTTPConnection(parts.hostname, port, timeout=timeout)
+        _local.conn = conn
+        _local.key = key
+        return conn
+
+    reused = getattr(_local, "key", None) == key and getattr(_local, "conn", None) is not None
+    conn = getattr(_local, "conn", None) if reused else None
+    if conn is None:
+        conn = connect()
+    else:
+        conn.timeout = timeout
+
+    try:
+        conn.request(method, path, body, headers)
+    except OSError:
+        _close_keepalive()
+        if not reused:
+            raise
+        # Stale keep-alive: the POST never left this socket. One fresh retry.
+        conn = connect()
+        conn.request(method, path, body, headers)
+
+    try:
+        resp = conn.getresponse()
+        raw = resp.read(_MAX_RESPONSE_BYTES)
+        if resp.status != 200:
+            _close_keepalive()
+            raise OSError(f"HTTP {resp.status}")
+        return _PooledResponse(raw)
+    except Exception:
+        _close_keepalive()
+        raise
+
+
+def _open_request(req: urllib.request.Request, timeout: float):
+    """POST the pipeline. Honor a patched urlopen so budget tests stay on the wire fake."""
+    current = urllib.request.urlopen
+    if current is not _STDLIB_URLOPEN:
+        return current(req, timeout=timeout)
+    return _pooled_open(req, timeout)
 
 
 class DbHttpError(RuntimeError):
@@ -86,9 +183,10 @@ def _post_statements(
         headers={
             "Content-Type": "application/json",
             "Authorization": "Bearer " + token,
+            "Connection": "keep-alive",
         },
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with _open_request(req, timeout) as resp:
         raw = resp.read(_MAX_RESPONSE_BYTES)
     return json.loads(raw.decode("utf-8"))
 
@@ -199,9 +297,10 @@ def hrana_transaction(statements: Sequence[tuple[str, Sequence[Any]]], timeout: 
     if len(payload) > 2_097_152:
         raise ValueError("transaction payload exceeds 2 MiB")
     req = urllib.request.Request(origin.rstrip("/") + "/v2/pipeline", data=payload, method="POST",
-                                 headers={"Content-Type": "application/json", "Authorization": "Bearer " + token})
+                                 headers={"Content-Type": "application/json", "Authorization": "Bearer " + token,
+                                          "Connection": "keep-alive"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
+        with _open_request(req, timeout) as response:
             raw = response.read(_MAX_RESPONSE_BYTES + 1)
         if len(raw) > _MAX_RESPONSE_BYTES:
             raise DbHttpError("transaction response exceeds limit")

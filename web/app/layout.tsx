@@ -7,6 +7,7 @@ import ThemeBootstrap from "@/components/ThemeBootstrap";
 import { DEFAULT_DOCUMENT_TITLE, TITLE_TEMPLATE } from "@/lib/pageTitle";
 import "./globals.css";
 import "./clear.css";
+import "./position-strategy-groups.css";
 
 // Local files keep both page loads and production builds independent of the
 // Google Fonts network. Variables preserve the existing typography contract.

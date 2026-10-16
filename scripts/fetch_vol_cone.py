@@ -446,14 +446,20 @@ def _flatten_history_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _mirror_snapshot(
-    payload: dict[str, Any], scan_time: str, *, rows_changed: bool
+    payload: dict[str, Any],
+    scan_time: str,
+    *,
+    rows_changed: bool,
+    new_rows: Optional[list[dict[str, Any]]] = None,
 ) -> Any:
     """Mirror the shared cone snapshot to Turso; return the writer module.
 
     Both writers publish the same ``vol-cone`` snapshot, but each stamps its
     OWN service_health row — the row is a statement about that writer, not
     about the data (cf. feedback_service_health_writer_state_not_event).
-    Durable rows are skipped unless a completed session was added.
+    Durable rows are skipped unless a completed session was added. The
+    terminal upsert is the checkpoint retry (PERF-011): only this run's
+    fetched rows, never a flatten of the whole payload.
     """
     try:
         from db import writer
@@ -462,7 +468,7 @@ def _mirror_snapshot(
     try:
         writer.ensure_no_replica_for_writers()
         if rows_changed:
-            writer.upsert_vol_cone_rows(_flatten_history_rows(payload), recorded_at=scan_time)
+            writer.upsert_vol_cone_rows(new_rows or [], recorded_at=scan_time)
         writer.upsert_scan_snapshot("vol-cone", scan_time, payload)
         return writer
     except Exception as exc:  # noqa: BLE001 — best-effort mirror
@@ -471,7 +477,11 @@ def _mirror_snapshot(
 
 
 def _write_db_cache(
-    payload: dict[str, Any], scan_time: str, *, rows_changed: bool
+    payload: dict[str, Any],
+    scan_time: str,
+    *,
+    rows_changed: bool,
+    new_rows: Optional[list[dict[str, Any]]] = None,
 ) -> None:
     """EOD writer: data/vol_cone.json is the disk fallback.
 
@@ -479,7 +489,9 @@ def _write_db_cache(
     the snapshot + heartbeat run EVERY cycle so the staleness banner
     notices a silent writer (cf. feedback_service_health_heartbeat).
     """
-    writer = _mirror_snapshot(payload, scan_time, rows_changed=rows_changed)
+    writer = _mirror_snapshot(
+        payload, scan_time, rows_changed=rows_changed, new_rows=new_rows
+    )
     if writer is None:
         return
     try:
@@ -542,7 +554,7 @@ def _checkpoint_rows(rows: list[dict[str, Any]], scan_time: str) -> None:
 def _write_json_cache(payload: dict[str, Any]) -> None:
     VOL_CONE_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = VOL_CONE_JSON.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2))
+    tmp.write_text(json.dumps(payload, separators=(",", ":")))
     os.replace(tmp, VOL_CONE_JSON)
 
 
@@ -736,12 +748,15 @@ def run(
     else:
         universe = [str(ticker).strip().upper() for ticker in tickers if str(ticker).strip()]
 
-    by_key = {
-        (row["ticker"], row["date"], row["expiry"]): row
-        for row in _read_history_rows()
-    }
+    # One pass over history: nested `for pair: for row in by_key.values()`
+    # scanned 147M rows at universe cap (PERF-010). Last-write wins on date,
+    # matching the old (ticker, date, expiry) dict.
+    by_pair: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+    for row in _read_history_rows():
+        by_pair.setdefault((row["ticker"], row["expiry"]), {})[row["date"]] = row
     deadline = _monotonic() + _budget_seconds()
     rows_changed = False
+    new_rows: list[dict[str, Any]] = []
     for ticker, expiry in _scan_targets(universe, expiries):
         if _monotonic() >= deadline:
             print(
@@ -750,19 +765,18 @@ def run(
             )
             break
         expiry_s = expiry.isoformat()
-        stored = {
-            row["date"]
-            for row in by_key.values()
-            if row["ticker"] == ticker and row["expiry"] == expiry_s
-        }
+        stored_rows = by_pair.get((ticker, expiry_s))
+        stored = set(stored_rows) if stored_rows else set()
         if last_completed in stored:
             continue
         fetched = _backfill_ticker(client, ticker, expiry, last_completed, stored)
         if not fetched:
             continue
+        bucket = by_pair.setdefault((ticker, expiry_s), {})
         for row in fetched:
-            by_key[(row["ticker"], row["date"], row["expiry"])] = row
+            bucket[row["date"]] = row
         rows_changed = True
+        new_rows.extend(fetched)
         _checkpoint_rows(fetched, scan_time)
 
     if not rows_changed:
@@ -772,20 +786,20 @@ def run(
     for ticker in universe:
         for expiry in expiries:
             expiry_s = expiry.isoformat()
-            series = [
-                _series_point(row)
-                for row in by_key.values()
-                if row["ticker"] == ticker and row["expiry"] == expiry_s
-            ]
+            stored_rows = by_pair.get((ticker, expiry_s))
+            if not stored_rows:
+                continue
+            series = [_series_point(row) for row in stored_rows.values()]
             series.sort(key=lambda row: row["date"])
-            if series:
-                names.append(compute_name(ticker, expiry_s, series))
+            names.append(compute_name(ticker, expiry_s, series))
 
     if not any(name.get("series") for name in names):
         raise ValueError("vol-cone produced zero series")
 
     payload = build_output(names, scan_time, last_completed)
-    _write_db_cache(payload, scan_time, rows_changed=rows_changed)
+    _write_db_cache(
+        payload, scan_time, rows_changed=rows_changed, new_rows=new_rows
+    )
     _write_json_cache(payload)
     return payload
 
