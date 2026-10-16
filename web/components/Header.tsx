@@ -6,6 +6,7 @@ import ReleaseStatus from "./ReleaseStatus";
 import TickerSearch from "./TickerSearch";
 import { useTickerNav } from "@/lib/useTickerNav";
 import { useIBStatusContext, type IBDisplayStatus } from "@/lib/IBStatusContext";
+import { formatSampleTime } from "@/lib/sampleTime";
 import styles from "./ClearShell.module.css";
 
 type HeaderProps = {
@@ -34,16 +35,6 @@ type HeaderProps = {
 };
 
 type IntegrityClass = "ok" | "warn" | "dead" | "demo";
-
-function formatSampleTime(lastSync: string | null | undefined): string {
-  if (!lastSync) return "---";
-  const sampled = new Date(lastSync);
-  if (Number.isNaN(sampled.getTime())) return "---";
-  return sampled.toLocaleTimeString("en-US", {
-    hour12: false,
-    timeZone: "America/New_York",
-  });
-}
 
 function integrityFor(status: IBDisplayStatus): { text: string; cls: IntegrityClass } {
   switch (status) {
