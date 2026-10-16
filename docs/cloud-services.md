@@ -345,7 +345,7 @@ TradingView alert fires `POST` to `app.radon.run/api/webhooks/tradingview/<TV_WE
 
 ### Bounded vs process-bound Turso writes (R5 partial)
 
-`libsql_experimental` has **no client timeouts** and holds the GIL while blocked. Prefer `scripts/db/hrana_http.py` (real `urllib` socket timeout) for hang-risk writers; leave bulk/oneshot scan writers on sync libsql under process supervision. Full inventory: module docstring of `scripts/db/client.py`.
+`libsql_experimental` has **no client timeouts** and holds the GIL while blocked. Prefer `scripts/db/hrana_http.py` (`http.client` keep-alive, one socket per thread, real socket timeout) for hang-risk writers; leave bulk/oneshot scan writers on sync libsql under process supervision. Full inventory: module docstring of `scripts/db/client.py`.
 
 | Path | Transport | Why |
 |---|---|---|

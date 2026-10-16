@@ -2274,3 +2274,37 @@ class TestDocumentation20261015:
         assert "5 minutes" in section
         assert "does not adopt the 2-second interval" in section
         assert off_ms == 30_000
+
+class TestDocumentation20261016:
+    """DOC-200..202: contracts that drifted after audited-through a92472f0."""
+
+    def test_manual_strategy_group_is_not_calls_only(self):
+        ui = (_ROOT / "web/components/PositionStrategyGrouping.tsx").read_text()
+        assert "Select at least two held legs" in ui
+        doc = (_ROOT / "docs/position-strategy-groups.md").read_text()
+        select = next(line for line in doc.splitlines() if line.startswith("- **Select legs**"))
+        assert "choose the calls" not in select
+        assert "at least two held legs" in select
+
+    def test_strategy_group_owner_is_indexed(self):
+        index = (_ROOT / "docs/README.md").read_text()
+        assert "position-strategy-groups.md" in index
+        assert (_ROOT / "docs/position-strategy-groups.md").is_file()
+
+    def test_hrana_timeout_is_http_client_keep_alive(self):
+        hrana = (_ROOT / "scripts/db/hrana_http.py").read_text()
+        assert "http.client" in hrana
+        assert "keep-alive reuses one socket per thread" in hrana
+        section = _markdown_heading(
+            "docs/cloud-services.md",
+            "Bounded vs process-bound Turso writes (R5 partial)",
+        )
+        prose = next(
+            line for line in section.splitlines()
+            if "hrana_http.py" in line and line.startswith("`libsql")
+        )
+        assert "urllib" not in prose
+        assert "http.client" in prose
+        assert "keep-alive" in prose
+        assert "one socket per thread" in prose
+
