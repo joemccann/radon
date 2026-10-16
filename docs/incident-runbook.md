@@ -1267,9 +1267,8 @@ when the EIA read stalls once inside the 25s publisher timeout.** Peak:
   Do not `reset-failed` and start before this retry is live: the same
   single stall still exits 1.
 - **Remediation (code):** retry the publisher download once after
-  `requests.RequestException` while the 500s run deadline remains. Keep
-  the OpenRouter ledger at one reservation for that fetch. Do not retry
-  HTTP status errors. A second stall still records `error` and exits 1.
+  `requests.RequestException` while the 500s run deadline remains. Reserve
+  each actual OpenRouter GET attempt and enforce the remaining request budget. Do not retry POSTs with unknown outcomes or HTTP status errors. A second stall still records `error` and exits 1.
   After deploy, the next 07:15 UTC timer collects the missed window.
   Inserts are append-only, and the snapshot from the failed run is
   already stored.
@@ -3854,3 +3853,5 @@ service_health write raises.** Peak: 2026-10-08 22:14Z, page
 - **Repair:** `orders/stockEntryTime.ts` replays stock executions by conId, consumes preceding closes, and requires full target quantity matching. Its output adds timing without changing P&L/entry-price arithmetic. Precise execution time outranks the date-only portfolio fallback. `/api/share/pnl` derives measured hold duration, preserves timestamp-only rows, and uses seasonal Pacific zone labels.
 - **Verification:** the sanitized twenty-fill fixture reproduces the supplied artifact; `share-pnl-timing-render.test.ts` asserts actual export tree content, and the pictured TQQQ case in `mobile-executed-journal.spec.ts` exercises the real 1080×1920 PNG route and saves a browser preview. Inspect ENTRY at 8:46 AM PDT, HELD 44 minutes and EXIT at 9:30 AM PDT.
 - **Rollback:** revert this focused fix through the normal CI-gated deployment path; no journal updates, broker actions or migrations are needed.
+
+2026-10-16 ordered-merge verification: CI38968359522 / job117200713229 reproduced three retry-control regressions (3031 other tests passed). Each GET retry now consumes the remaining per-run and OpenRouter budgets; POSTs with lost responses are not replayed. No local suites.
