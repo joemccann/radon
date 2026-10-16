@@ -119,10 +119,16 @@ def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse
 
     try:
         resp = conn.getresponse()
-        raw = resp.read(_MAX_RESPONSE_BYTES)
-        if resp.status != 200:
+        # A short read leaves the remainder on this socket. The next pipeline
+        # is then sent and discarded (ResponseNotReady), which reports a
+        # committed write as a transport failure. REL-326.
+        raw = resp.read(_MAX_RESPONSE_BYTES + 1)
+        over_cap = len(raw) > _MAX_RESPONSE_BYTES or not resp.isclosed()
+        if over_cap or resp.status != 200:
             _close_keepalive()
-            raise OSError(f"HTTP {resp.status}")
+            if resp.status != 200:
+                raise OSError(f"HTTP {resp.status}")
+            raise OSError("response exceeds limit")
         return _PooledResponse(raw)
     except Exception:
         _close_keepalive()
