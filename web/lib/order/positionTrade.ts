@@ -349,9 +349,9 @@ export function buildPositionTradeOrder(params: {
     });
     if (!order?.isClosing) return null;
     // The legacy single-leg path uses avg_cost. Selected subsets retire the
-    // measured leg entry values, including null when provenance is unavailable.
+    // measured leg entry values, null only when a leg has none.
     order.riskInput.closeOut = {
-      entryCostDollars: selected.entry_cost == null ? null : selected.entry_cost * quantity / selected.contracts,
+      entryCostDollars: resolveClosingBasis(selected, quantity, selected.contracts),
     };
     return order;
   }
