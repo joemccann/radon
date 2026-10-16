@@ -2174,6 +2174,32 @@ class TestDocumentation20261015:
         else:
             assert adding not in close
 
+    def test_display_return_is_not_only_verified_capital(self):
+        utils = (_ROOT / "web/lib/positionUtils.ts").read_text()
+        assert 'kind: "net-entry-debit"' in utils
+        assert "export function getDisplayReturnPct" in utils
+        assert "export function getPnlPct" in utils
+        claude = (_ROOT / "web/CLAUDE.md").read_text()
+        section = claude.split("### Open-position Return %", 1)[1].split("\n### ", 1)[0]
+        assert "Otherwise render Return as unavailable" not in section
+        assert "getPnlPct" in section
+        assert "getDisplayReturnPct" in section
+        assert "Return on net entry debit" in section
+        assert "not risk capital" in section
+        legs = claude.split("### Per-Leg P&L", 1)[1].split("\n### ", 1)[0]
+        assert "resolveLegPnl" in legs
+        assert "absolute opening value" in legs
+        assert "not return on risk capital" in legs
+
+    def test_modify_subset_close_uses_held_basis(self):
+        modal = (_ROOT / "web/components/ModifyOrderModal.tsx").read_text()
+        assert "function findHeldSubsetForClose" in modal
+        assert "resolvePositionTradeTarget" in modal
+        close = (_ROOT / "web/CLAUDE.md").read_text().split("**Close-out branch.**", 1)[1].split("\n6. ", 1)[0]
+        assert "findHeldSubsetForClose" in close
+        assert "subset of a larger grouped position" in close
+        assert "opening-risk preview" in close
+
     def test_open_portfolio_poll_stays_inside_the_get_budget(self):
         shell = (_ROOT / "web/components/WorkspaceShell.tsx").read_text()
         match = re.search(r"MarketState\.OPEN \? ([\d_]+) : ([\d_]+)", shell)

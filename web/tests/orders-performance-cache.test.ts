@@ -93,21 +93,21 @@ describe("order mutation cache invalidation contract", () => {
 describe("portfolio read cache policy", () => {
   // T-168: the declared constant AND the wiring. Asserting the source text of
   // the declaration left `cachedReadResult(key, 0, ...)` green, so every read
-  // could miss the cache while the regex still matched. Literal 14_999/15_001
+  // could miss the cache while the regex still matched. Literal 1_999/2_001
   // boundaries (never the constant itself) keep this from going self-referential.
-  it("serves one snapshot fetch for the whole 15-second window, then refetches", async () => {
-    expect(PORTFOLIO_SNAPSHOT_CACHE_TTL_MS).toBe(15_000);
+  it("serves one snapshot fetch for one open-market poll, then refetches", async () => {
+    expect(PORTFOLIO_SNAPSHOT_CACHE_TTL_MS).toBe(2_000);
     const fetcher = vi.fn()
       .mockResolvedValueOnce("snapshot-v1")
       .mockResolvedValueOnce("snapshot-v2");
 
     await expect(readCachedPortfolioSnapshot(fetcher)).resolves.toMatchObject({ value: "snapshot-v1" });
     await expect(readCachedPortfolioSnapshot(fetcher)).resolves.toMatchObject({ value: "snapshot-v1" });
-    vi.setSystemTime(14_999);
+    vi.setSystemTime(1_999);
     await expect(readCachedPortfolioSnapshot(fetcher)).resolves.toMatchObject({ value: "snapshot-v1" });
     expect(fetcher).toHaveBeenCalledTimes(1);
 
-    vi.setSystemTime(15_001);
+    vi.setSystemTime(2_001);
     await expect(readCachedPortfolioSnapshot(fetcher)).resolves.toMatchObject({ value: "snapshot-v2" });
     expect(fetcher).toHaveBeenCalledTimes(2);
   });

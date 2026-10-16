@@ -1865,6 +1865,48 @@ while FastAPI and IB are up.** Peak: 2026-08-14 17:00:00Z, RTH, exit 22.
 
 ---
 
+## portfolio-sync-miss-stale
+
+**`portfolio-sync` pages P1 `kind=stale` during the open session when
+`POST /portfolio/sync` fails before `service_cycle` and nothing heartbeats.**
+Peak: 2026-10-14 16:10Z, page `1e269d9f…`, 15m silent (window 10m) while
+market open.
+
+- **Mechanism:** `radon-portfolio-sync.timer` runs
+  `scripts/run_portfolio_refresh.sh`, which POSTs `/portfolio/sync`.
+  `service_cycle("portfolio-sync")` lives inside `ib_sync.save_portfolio`.
+  A 502 from cooldown, a script miss, or capacity shed never enters that
+  block, so `service_health` stays `state=ok` and `updated_at` freezes.
+  The wrapper retries HTTP 502/503 (see `portfolio-sync-unit-502`) and
+  still exits 22 when every attempt fails. Two watchdog cycles later the
+  10-minute open window pages silence. `/health` stays authenticated.
+  Sibling IB writers (orders-sync, fill-monitor, relay) stay fresh, so
+  grouping does not fire.
+- **Discriminating check:** only `portfolio-sync` stale; `/health/lite`
+  authenticated; orders-sync and the other intraday names fresh; user
+  journal `FastAPI transient (curl=22 http=502)` then
+  `Portfolio refresh FAILED (exit 22)` once a minute; snapshot gap in
+  `portfolio_snapshots.taken_at`. An instant 502 with no script warning
+  is `portfolio-sync-unit-502` (capacity). `Result=signal` is deploy
+  stop-clean. `auth_state` `awaiting_2fa` or `unreachable`, or two or
+  more IB services stale together, is `ib-gateway-grouped`. Turso
+  platform failure takes the siblings down too.
+- **Remediation (code):** on `POST /portfolio/sync` failure, heartbeat
+  `error` (never `ok`) when the gateway probe is up and auth is not
+  `awaiting_2fa` or `unreachable`, so `_check_stale` cannot page silence
+  and the error bucket names the scrubbed miss. Gateway down,
+  `upstream_dead`, 2FA, and unreachable stay silent so grouping can
+  still page stale. Do not restart the gateway for this page.
+- **Regression:**
+  `scripts/api/tests/test_portfolio_sync_miss_heartbeat.py::test_portfolio_sync_miss_heartbeats_error_when_gateway_up`,
+  `test_portfolio_sync_miss_stays_silent_when_grouping_should_page`,
+  `test_portfolio_sync_probe_failure_still_heartbeats`,
+  `test_portfolio_sync_success_does_not_stamp_error`.
+- **Code:** `scripts/api/server.py` (`portfolio_sync`,
+  `_heartbeat_portfolio_sync_miss`).
+
+---
+
 ## demo-mirror-scan-snapshots-502
 
 **`radon-demo-mirror.service` oneshot pages P1 `Result=exit-code` on a single
