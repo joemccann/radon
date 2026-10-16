@@ -1188,3 +1188,9 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-10-13 - P&L exports need the actual stock timing path
 - Verify entry/exit metadata from the execution data producer through the final PNG, including fully closed stocks; an options-only matcher and successful PNG dimensions do not prove timing is present.
 - Consume prior closes before using an opening execution timestamp, preserve exact fill timing over a date-only portfolio fallback, and derive hold duration from measured timestamps. Pacific timestamp labels must reflect PST/PDT instead of appending PST year-round.
+
+## 2026-10-13 - Modification P&L follows closing contracts
+- Resolve modified combo closes against exact held contracts, including selected legs inside a grouped position. Use only their verified signed cost basis and contract-specific reservations; retain portfolio risk checks for legs left open. Never infer an opening trade solely because the held position contains extra legs.
+
+## 2026-10-13 - PDF chart crops exclude narrative prose
+- Verify visible painted chart bounds against PDF clipping paths before expanding for text. Preserve the complete title, subtitle, legends, axes, sources and wrapped notes, but never attach neighboring report paragraphs solely because their text rectangles are near an oversized drawing bound. Replay the reported source page and independently inspect the resulting crop.

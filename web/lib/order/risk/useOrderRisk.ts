@@ -468,6 +468,62 @@ function retainedShortCallRiskAfterStockClose(
   return `${uncoveredAfter} retained short call${uncoveredAfter === 1 ? "" : "s"} uncovered after selling stock collateral`;
 }
 
+type InferredCloseOut = NonNullable<OptionOrderRiskInput["closeOut"]> & {
+  description: string;
+};
+
+/**
+ * A single-leg SELL against held LONG (or BUY against held SHORT) of the
+ * exact same contract is a close, not an opening leg "covered by" the
+ * holding. Surfaces that know the holding declare `closeOut` themselves;
+ * the chain ticket hands in raw legs, so the chokepoint recognises the
+ * close here (CRWD 2026-10-14: partial sale of 100 held $260 calls rendered
+ * as a short call plus a spread). Quantity above the holding is an opening
+ * order for the excess and stays on the augmentation path. Basis follows
+ * `avg_cost` (per contract, already ×100); legs on disagreeing basis
+ * sources yield no realised figure (T-315).
+ */
+function inferHeldContractCloseOut(
+  opt: OptionOrderRiskInput,
+  portfolio: PortfolioData | null,
+): InferredCloseOut | null {
+  if (portfolio == null || opt.chainLegs.length !== 1) return null;
+  const leg = opt.chainLegs[0];
+  const quantity = Math.max(1, Math.trunc(leg.quantity));
+  const heldSide = leg.action === "SELL" ? "LONG" : "SHORT";
+  const key = `${leg.expiry.replace(/-/g, "")}|${leg.right}|${leg.strike}`;
+  let held = 0;
+  let basis = 0;
+  let basisKnown = true;
+  const basisSources = new Set<string>();
+  for (const position of portfolio.positions) {
+    if (position.ticker.toUpperCase() !== opt.ticker.toUpperCase()) continue;
+    for (const heldLeg of position.legs) {
+      if (heldLeg.type === "Stock" || heldLeg.direction !== heldSide) continue;
+      if (heldLeg.strike == null || !Number.isFinite(heldLeg.strike)) continue;
+      const expiry = (heldLeg.expiry ?? position.expiry ?? "").replace(/-/g, "");
+      const right = heldLeg.type === "Call" ? "C" : "P";
+      if (`${expiry}|${right}|${heldLeg.strike}` !== key) continue;
+      const contracts = Math.max(0, heldLeg.contracts);
+      held += contracts;
+      if (Number.isFinite(heldLeg.avg_cost)) basis += contracts * Math.abs(heldLeg.avg_cost);
+      else basisKnown = false;
+      if (heldLeg.basis_source) basisSources.add(heldLeg.basis_source);
+    }
+  }
+  if (held < quantity) return null;
+  const aggregateBasis = basisKnown && basisSources.size <= 1 ? (basis / held) * quantity : null;
+  const entryCostDollars =
+    aggregateBasis == null ? null : heldSide === "SHORT" ? -aggregateBasis : aggregateBasis;
+  const verb = leg.action === "SELL" ? "Sell to Close" : "Buy to Close";
+  const rightLabel = leg.right === "C" ? "Call" : "Put";
+  const price = Math.abs(opt.netPremium).toFixed(2);
+  return {
+    entryCostDollars,
+    description: `${verb} ${quantity}× $${leg.strike} ${rightLabel} @ $${price}`,
+  };
+}
+
 type ResidualOptionRisk = { reason: string; unbounded: boolean };
 
 /**
@@ -868,18 +924,24 @@ export function useOrderRisk(
 
     // Close-out: project the exact closing legs through retained portfolio
     // exposure before surfacing proceeds + realized P&L.
-    if (opt.closeOut != null) {
-      const proceeds = opt.totalCost ?? 0;
-      const basis = opt.closeOut.entryCostDollars;
+    const inferredCloseOut = opt.closeOut == null ? inferHeldContractCloseOut(opt, portfolio) : null;
+    const closeOut = opt.closeOut ?? inferredCloseOut;
+    if (closeOut != null) {
+      // The chain hands in a signed debit/credit total; a close reports
+      // proceeds (positive = cash in), so a SELL's credit flips sign here.
+      const proceeds = inferredCloseOut != null ? -(opt.totalCost ?? 0) : (opt.totalCost ?? 0);
+      const basis = closeOut.entryCostDollars;
       const pnl = basis == null ? null : proceeds - basis;
       const residualRisk = retainedOptionRiskAfterClose(opt, portfolio);
       const closeSummary: OrderPresentationSummary = {
         ...baseSummary,
+        description: inferredCloseOut?.description ?? baseSummary.description,
+        closeOutAction: opt.chainLegs[0]?.action ?? null,
         totalCost: Math.abs(proceeds),
         totalLabel: opt.totalLabel ?? (proceeds >= 0 ? "Close Credit:" : "Close Debit:"),
         estimatedPnl: pnl,
         estimatedPnlPct: estimatedPnlPct(pnl, basis),
-        estimatedPnlLabel: opt.closeOut.estimatedPnlLabel ?? "Est. Realized P&L:",
+        estimatedPnlLabel: closeOut.estimatedPnlLabel ?? "Est. Realized P&L:",
         maxLossUnbounded: residualRisk?.unbounded || undefined,
         undefinedRiskReason: residualRisk?.reason ?? null,
         // A pure close consumes no margin. A close that exposes retained risk

@@ -3,7 +3,7 @@
 import ErrorToast from "@/components/ErrorToast";
 
 import { useEffect, useMemo, useState } from "react";
-import type { OpenOrder, PortfolioData, PortfolioLeg } from "@/lib/types";
+import type { OpenOrder, OrdersData, PortfolioData, PortfolioLeg, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { oldestQuoteTimestamp, optionKey } from "@/lib/pricesProtocol";
 import type { ModifyComboLeg, ModifyOrderRequest } from "@/lib/orderModify";
@@ -20,9 +20,11 @@ import { fmtPrice, legPriceKey, resolveClosingBasis } from "@/lib/positionUtils"
 import {
   findHeldComboForClose,
   heldComboUnits,
+  resolvePositionTradeTarget,
   workingSellComboUnits,
   type ComboStructureLeg,
 } from "@/lib/order/positionTrade";
+import { availablePositionTradeUnits } from "@/lib/order/selectedLegReservations";
 import { computeLegImpliedValue } from "@/lib/impliedValue";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import { OrderQuoteTelemetry } from "./QuoteTelemetry";
@@ -50,7 +52,7 @@ type ModifyOrderModalProps = {
   portfolio?: PortfolioData | null;
   /** R-112: the open-orders snapshot, so a close-out can see what is
    *  already working on the same BAG. */
-  openOrders?: { open_orders?: unknown[] } | null;
+  openOrders?: Pick<OrdersData, "open_orders"> | null;
   /** R-641: live-feed connectivity. `false` disarms Modify; undefined means
    *  unknown and only the quote-age gate applies. */
   feedConnected?: boolean;
@@ -153,6 +155,43 @@ export function normalizeComboLegs(legs: EditableComboLeg[]): ModifyComboLeg[] |
   });
 
   return normalized.every((leg): leg is ModifyComboLeg => leg != null) ? normalized : null;
+}
+
+/** Match a BAG close against its exact held subset, preserving unrelated legs. */
+function findHeldSubsetForClose(
+  order: OpenOrder,
+  quantity: number,
+  structureLegs: ComboStructureLeg[],
+  portfolio: PortfolioData | null | undefined,
+  openOrders: Pick<OrdersData, "open_orders"> | null | undefined,
+): PortfolioPosition | null {
+  if (order.action !== "SELL" || !portfolio || !Array.isArray(openOrders?.open_orders)) return null;
+  const orders = { open_orders: openOrders.open_orders.filter(row =>
+    order.permId != null ? row?.permId !== order.permId : row?.orderId !== order.orderId) };
+  for (const position of portfolio.positions) {
+    if (position.ticker.toUpperCase() !== comboUnderlyingSymbol(order)) continue;
+    if (position.legs.length <= structureLegs.length) continue;
+    const indices: number[] = [];
+    for (const structure of structureLegs) {
+      const index = position.legs.findIndex((leg, index) =>
+        !indices.includes(index) &&
+        leg.direction === (structure.action === "BUY" ? "LONG" : "SHORT") &&
+        leg.type === (structure.right === "C" ? "Call" : "Put") &&
+        leg.strike === structure.strike &&
+        (leg.expiry ?? position.expiry).replace(/-/g, "") === structure.expiry.replace(/-/g, ""));
+      if (index < 0) break;
+      indices.push(index);
+    }
+    if (indices.length !== structureLegs.length) continue;
+    const target = { kind: "legs" as const, indices };
+    const subset = resolvePositionTradeTarget(position, target);
+    if (!subset) continue;
+    const units = heldComboUnits(subset);
+    if (structureLegs.some((leg, index) => position.legs[indices[index]].contracts / units !== leg.ratio)) continue;
+    const available = availablePositionTradeUnits(position, target, orders);
+    if (available != null && quantity <= available) return subset;
+  }
+  return null;
 }
 
 export function effectiveComboLegAction(
@@ -429,7 +468,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
           openOrders,
           { permId: order.permId, orderId: order.orderId },
         ),
-      });
+      }) ?? findHeldSubsetForClose(order, parsedQtyLocal, structureLegs, portfolio, openOrders);
       if (closingCombo) {
         const units = heldComboUnits(closingCombo);
         return {

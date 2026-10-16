@@ -796,3 +796,26 @@ def test_deploy_lock_link_is_refused(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "lock" in result.stderr.lower()
     assert not _manifest_path(sandbox.rootfs).exists()
+
+
+def test_existing_lock_symlink_does_not_change_its_target(tmp_path: Path) -> None:
+    """Creation must fail closed on a name that already points elsewhere.
+
+    The install-race case swaps the path only when `install` runs. Bootstrap
+    creates the lock with os.open, so that shim never fires. A following open
+    still fchmods the target and the older refusal checks stay green.
+    """
+    sandbox = _sandbox(tmp_path)
+    target = tmp_path / "elsewhere.lock"
+    target.write_bytes(b"sentinel-not-the-lock")
+    target.chmod(0o644)
+    sandbox.lock_path.parent.mkdir(parents=True, exist_ok=True)
+    sandbox.lock_path.symlink_to(target)
+
+    result = sandbox.run()
+
+    assert result.returncode != 0
+    assert "lock" in result.stderr.lower()
+    assert target.read_bytes() == b"sentinel-not-the-lock"
+    assert stat.S_IMODE(target.stat().st_mode) == 0o644
+    assert not _manifest_path(sandbox.rootfs).exists()

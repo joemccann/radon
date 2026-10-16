@@ -135,7 +135,10 @@ export function chainFetch(input: RequestInfo | URL): Promise<Response> {
   return jsonResponse({});
 }
 
-export function renderChain(prices: Record<string, PriceData> = PRICES) {
+export function renderChain(
+  prices: Record<string, PriceData> = PRICES,
+  portfolio: PortfolioData = PORTFOLIO,
+) {
   return render(
     <OrderActionsProvider>
       <TickerDetailProvider>
@@ -145,7 +148,7 @@ export function renderChain(prices: Record<string, PriceData> = PRICES) {
           onTabChange={vi.fn()}
           prices={prices}
           fundamentals={{}}
-          portfolio={PORTFOLIO}
+          portfolio={portfolio}
           orders={ORDERS}
           theme="dark"
         />
@@ -168,8 +171,8 @@ export function clickCallCell(strike: number, index: number) {
 }
 
 /** Render the chain, wait for the expiry + rows to settle, then apply leg clicks. */
-export async function chainWithLegs(clicks: () => void) {
-  renderChain();
+export async function chainWithLegs(clicks: () => void, portfolio: PortfolioData = PORTFOLIO) {
+  renderChain(PRICES, portfolio);
   const expirySelect = (await screen.findAllByRole("combobox"))[0] as HTMLSelectElement;
   await waitFor(() => expect(expirySelect.value).toBe(EXPIRY.compact));
   await waitFor(() => findStrikeRow(970));

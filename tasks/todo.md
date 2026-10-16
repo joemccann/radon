@@ -9459,3 +9459,64 @@ Plan review: The screenshot already renders the exit timestamp. Entry time and d
 Verification review: Live canonical twenty-fill TQQQ sequence reproduced four stock-timing failures; export-content tests reproduced three rendering failures. Focused share suites: 56 passed. New timing helper: 100% line coverage, 96.66% branches. Full Vitest after latest-main rebase: 10,885 passed, 21 skipped; full Python: 15,394 passed, 2 skipped (OpenSSL3 and isolated MENTHORQ_USER as before). TypeScript/scoped ESLint clean. Production compile and 12 desktop/mobile Playwright cases passed. Actual 1080x1920 story and iPhone preview visually inspected: ENTRY 8:46 AM PDT, HELD 44 minutes, EXIT 9:30 AM PDT; supplied P&L and existing entry-price identity preserved. No broker actions or journal writes. Delivery receipts will be recorded on the PR without a bookkeeping-only source push.
 
 CI curation review: PR #1068 head 8e517148 failed the changed-held-out-spec guard (CI 38434204207, scripts-df job 115423979347). The existing mobile executed/journal spec was held out, not curated; local reproduction returned 1 failed/5 passed. Promote the fully preflighted seven-case WebKit spec to the curated CI command and remove its held-out ledger membership, retaining dated review evidence. No test assertions or gates are weakened.
+
+
+# Modification payoff correction
+
+Dependency graph: T1 -> T2 -> T3 -> T4; T1 -> T3.
+
+- [x] T1 depends_on: [] Trace screenshot combo leg directions, signed premium and current risk presentation.
+- [x] T2 depends_on: [T1] Apply minimal correction and focused regression cases.
+- [ ] T3 depends_on: [T1, T2] Add browser regression, independent review and visual verification without live trading.
+- [ ] T4 depends_on: [T2, T3] Create PR, watch exact-head CI through green, notify Pushover and record review.
+
+Constraints: preserve broker payload semantics and coverage gates; no local test suites; no live submit.
+
+Evidence: live read-only Positions view shows SNDK grouped with long 10 C1450 (basis 52766), short 10 C1600 (basis -13016), short 5 P1400 (basis -24475), all expiry 2026-10-23. SELL 10 BAG structural C1600 SELL / C1450 BUY closes the call subset; at $50 proceeds 50000, selected basis 39750, estimated P&L 10250, retaining the put. No live submissions.
+
+Verification: regression-only a4c99484 GitHub CI job 115503958270 reproduced 4 failures, including exact screenshot Total -50000/Max Gain50000/Max Loss100000 and missing close P&L. Independent browser agent reviewed fix and eight regressions. Static TypeScript syntax parsed all three owned TS files with 0 diagnostics.
+
+
+# Chart prose boundaries
+Dependency graph: T1 -> T2 -> T3 -> T4; T1 -> T3.
+- [x] T1 depends_on: [] Retrieve article provenance and inspect source PDF/crop.
+- [x] T2 depends_on: [T1] Fix deterministic chart clipping and add regression cases.
+- [ ] T3 depends_on: [T1, T2] Independently verify charts retain title/legend/axes/source/notes and exclude narrative copy.
+- [ ] T4 depends_on: [T2, T3] Publish PR, prove red/green on GitHub, wait exact-head CI green and notify Pushover.
+Constraints: no local test suites; preserve source evidence; no broad crop fallback; scope chart extraction.
+
+Source evidence: article research-68d8179b6af877c99ff478eda52ddcff8edb573c204d47df1a25f6240d5ef5b6; original PDF SHA75b8b0ec0f26a7bec597a9f078134f9727c727a2e78795fdd25ec64df9248af2 page3. Production f2 bbox[.2,.1987,.9723,.72] includes narrative before/after chart. Private source/audit/crop retained under /tmp/radon-prose-crop.
+
+Red GitHub evidence: d884b356 CIjob115599207114, 5 failed/2539passed. Corrected sourcepage3 cropbbox[.2038,.3925,.9723,.6865], 1411x698; AST/static compilation passed, no local suites. Nine new synthetic cases include compound and malformed clip fallback and rotation. Independent technical review passed.
+
+
+# Position strategy grouping
+Dependency graph: T1 -> T2 -> T3 -> T4; T1 -> T3; T2 -> T4.
+- [x] T1 depends_on: [] Confirm display grouping ownership, financial projection and interaction contracts.
+- [x] T2 depends_on: [T1] Build shared grouping model, persistence, stable contract matching, preview and Undo.
+- [x] T3 depends_on: [T1, T2] Add suggested split, selection/group and strategy editor for desktop/mobile; preserve financial and trading safety.
+- [ ] T4 depends_on: [T2, T3] Regression coverage, independent review, browser screenshots, PR and exact-head green CI; Pushover accepted.
+Acceptance: AAOI60longC105+60shortC140 ->60unit bullcall; 50shortP90 ->shortput. No broker mutations; no duplication, quantities/basis/P&L conserved; persistence survives refreshed portfolio; ambiguous/stale groups fail closed; cancel/Undo; 44pxmobile/40pxdesktop controls; keyboard access. No local test suites.
+
+Contract: layout-only local browser preferences scoped by account and exact held contracts. Missing account identifiers stay memory-only. Project only display rows in PortfolioSections; pass canonical portfolio to details/risk and keep account totals unchanged. All three entry flows share verified preview/apply; global Undo remains discoverable after rows move risk sections.
+
+Verification: browser-onlye7586211 head reproduced7failures atmissing Groupstrategies controls (job115988704688). Static typecheck/lintgreen; model30casesprepared; independent financial review fixedcanonicalnavigation and exact-vs-labeled-entry-valuecapital distinction. No local suites.
+
+T4 repair review: 3516c17d GitHub run38606924428 passed40model/persistence/UI cases and coverage gates; browser2mobile cases passed,5failed. Replanned T4: preserve financial display formatting assertions, permit Escape/Tab to reach shared portal keyboard chrome, add2real-bubbling regressions, republish and reverify exact head. No local suites.
+
+T4 second repair review: 2a5abc29 passed42unitcases and6/7grouping browsercases. DesktopResetpopoverfooter exceededviewport; replace assumedmenuheight with measuredclamping onopen/resize/content changes. Addviewportregression andbrowserboundsassertion, preserveordinaryclick. Reverifylatesthead.
+# PR repair and admin merge
+Dependency graph: T1 -> T2 -> T4; T1 -> T3 -> T4.
+- [x] T1 depends_on: [] Inventory all open PRs and assign exclusive ownership.
+- [ ] T2 depends_on: [T1] Resolve #1076 preserving current main policies, verify exact-head CI, admin merge and verify production CI.
+- [ ] T3 depends_on: [T1] Separate Sol/Luna swarm repairs all other conflicts/red CI; preserve drafts and do not merge others.
+- [ ] T4 depends_on: [T2, T3] Re-audit every remaining PR after main changes, confirm exact-head green, notify repaired PRs and report.
+No local test suites. Preserve usercheckout and unrelated edits.
+
+## PR #1083 conflict repair (2026-10-15)
+Dependency graph: T1 -> T2 -> T3.
+- [x] T1 depends_on: [] Inspect exact PR head, latest main, and all merge conflicts.
+- [x] T2 depends_on: [T1] Merge latest main and preserve both task histories; inspect merged files and diff statically.
+- [ ] T3 depends_on: [T2] Push repaired head and await every applicable exact-head GitHub CI check.
+
+Review: Latest main c8549c323310d2b387db207b16946eff7e24060e; PR head 39597e71e32caac328950c2f3f348accad0c5b60. The only textual conflict is the append-only task log. No local test suites per operator policy. Exact-head CI pending.
