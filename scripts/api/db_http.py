@@ -109,7 +109,10 @@ def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse
 
     try:
         conn.request(method, path, body, headers)
-    except OSError:
+    except (OSError, http.client.HTTPException):
+        # HTTPException covers CannotSendRequest / ResponseNotReady: a socket
+        # left mid-response is not an OSError, and without this the pooled
+        # socket would stay poisoned for the life of the thread.
         _close_keepalive()
         if not reused:
             raise
@@ -123,6 +126,13 @@ def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse
         if resp.status != 200:
             _close_keepalive()
             raise OSError(f"HTTP {resp.status}")
+        if not resp.isclosed():
+            # Body above the ceiling: http.client never finished the response,
+            # so this socket can never carry another request. Retire it rather
+            # than park a wedged socket in the pool, and refuse the truncated
+            # body instead of handing back a half-parsed pipeline.
+            _close_keepalive()
+            raise OSError(f"Turso response exceeds {_MAX_RESPONSE_BYTES} bytes")
         return _PooledResponse(raw)
     except Exception:
         _close_keepalive()
