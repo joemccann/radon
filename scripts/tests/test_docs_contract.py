@@ -2184,10 +2184,11 @@ class TestDocumentation20261014:
         assert "pollIntervalMs: accountPollIntervalMs" in shell
         assert "useOrders(shouldAutoSyncOrders, accountPollIntervalMs)" in shell
         route = (_ROOT / "web/app/api/portfolio/route.ts").read_text()
-        ceiling = re.search(r'key: "portfolio:route", limit: (\d+), windowMs: ([\d_]+)', route)
-        assert ceiling
-        limit = int(ceiling.group(1))
-        window_ms = int(ceiling.group(2).replace("_", ""))
+        ceiling = re.search(r'key: "portfolio:route", limit: PORTFOLIO_GET_LIMIT, windowMs: ([\d_]+)', route)
+        limit_match = re.search(r"export const PORTFOLIO_GET_LIMIT = ([\d_]+)", budget)
+        assert ceiling and limit_match
+        limit = int(limit_match.group(1).replace("_", ""))
+        window_ms = int(ceiling.group(1).replace("_", ""))
         orders = (_ROOT / "web/app/api/orders/route.ts").read_text()
         get_fn = orders.split("export async function GET", 1)[1].split("export async function POST", 1)[0]
         assert "rate:" not in get_fn
