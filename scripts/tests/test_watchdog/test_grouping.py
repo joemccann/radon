@@ -936,6 +936,57 @@ class TestUnreachableCopyAndNonIbDiscriminator:
         assert "orders-sync" in body and "position-reconcile" in body
         assert "Approve on phone" not in body
 
+    def test_cloud_mode_not_responding_groups_when_unreachable(
+        self, db_conn, monkeypatch, fresh_now
+    ):
+        """The cloud-mode rewrite is the same outage as 'Failed to connect'.
+
+        2026-10-16 18:50Z: orders-sync latched that string, went silent,
+        and paged per-service while portfolio-sync was also stale and
+        /health was unreachable.
+        """
+        from watchdog import grouping
+
+        monkeypatch.setenv("PUSHOVER_USER", "u")
+        monkeypatch.setenv("PUSHOVER_TOKEN", "t")
+
+        http_calls = []
+
+        def fake_http_post(url, payload, headers=None):
+            http_calls.append((url, payload))
+            return (200, b"")
+
+        outcomes = [
+            _fired(
+                "orders-sync",
+                now=fresh_now,
+                message=(
+                    "silent for 16m (window 10m) — market open"
+                ),
+                last_error={
+                    "class": "sync-failed",
+                    "message": (
+                        "orders sync missed (sync-failed): "
+                        "IB Gateway is not responding (cloud mode). "
+                        "Check remote host and Tailscale."
+                    ),
+                },
+            ),
+            _fired("portfolio-sync", now=fresh_now),
+        ]
+        with patch("watchdog.notify._http_post", side_effect=fake_http_post), \
+             patch("watchdog.grouping.fetch_health", return_value={"auth_state": "unreachable"}), \
+             patch("watchdog.grouping._api_recently_restarted", return_value=False):
+            grouping.dispatch_with_grouping(outcomes=outcomes, now=fresh_now)
+
+        push_calls = _push_calls(http_calls)
+        assert len(push_calls) == 1
+        title = push_calls[0][1]["title"]
+        body = push_calls[0][1]["message"]
+        assert title == "radon watchdog: IB Gateway unreachable"
+        assert "orders-sync" in body and "portfolio-sync" in body
+        assert "radon watchdog: orders-sync" not in title
+
 
 class FakeFp:
     """urlopen-style context-managed response stub."""

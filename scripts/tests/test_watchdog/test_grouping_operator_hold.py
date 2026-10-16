@@ -69,6 +69,69 @@ def test_non_ib_failures_still_page_during_a_hold(db_conn, monkeypatch, now):
     assert "newsfeed-scraper" in pushes[0][1]["title"] + pushes[0][1]["message"]
 
 
+_CLOUD_GATEWAY_DOWN = {
+    "class": "sync-failed",
+    "message": (
+        "orders sync missed (sync-failed): "
+        "IB Gateway is not responding (cloud mode). "
+        "Check remote host and Tailscale."
+    ),
+}
+
+
+def _fired_with_error(service: str, *, now: datetime, last_error):
+    from watchdog.check import CheckOutcome
+    import json
+
+    blob = last_error if isinstance(last_error, str) else json.dumps(last_error)
+    return CheckOutcome(
+        service=service,
+        kind="stale",
+        status="stale",
+        severity="P1",
+        fired=True,
+        message=f"{service} silent for 16m (window 10m) — market open",
+        consecutive_failures=2,
+        now=now,
+        last_error=blob,
+    )
+
+
+def test_cloud_gateway_down_stale_is_absorbed_during_a_hold(db_conn, monkeypatch, now):
+    """2026-10-16 18:50Z page 0607c701: orders-sync stale 16m while the
+    operator hold was already set. The latched cloud-mode string is an
+    IB outage, so the hold must absorb it instead of paging orders-sync.
+    """
+    monkeypatch.setenv("PUSHOVER_USER", "u")
+    monkeypatch.setenv("PUSHOVER_TOKEN", "t")
+    outcomes = [
+        _fired_with_error("orders-sync", now=now, last_error=_CLOUD_GATEWAY_DOWN),
+        _fired("portfolio-sync", now=now),
+    ]
+    pushes = _dispatch(
+        outcomes, now, {"auth_state": "unreachable", "operator_hold": True}
+    )
+    assert pushes == []
+
+
+def test_execution_fact_conflict_still_pages_during_a_hold(db_conn, monkeypatch, now):
+    """A writer-integrity latch is not the gateway. The hold must not swallow it."""
+    monkeypatch.setenv("PUSHOVER_USER", "u")
+    monkeypatch.setenv("PUSHOVER_TOKEN", "t")
+    outcomes = [
+        _fired_with_error(
+            "orders-sync",
+            now=now,
+            last_error={"message": "execution fact conflict for con 1"},
+        )
+    ]
+    pushes = _dispatch(
+        outcomes, now, {"auth_state": "unreachable", "operator_hold": True}
+    )
+    assert len(pushes) == 1
+    assert "orders-sync" in pushes[0][1]["title"] + pushes[0][1]["message"]
+
+
 def test_without_a_hold_the_unreachable_page_still_fires(db_conn, monkeypatch, now):
     monkeypatch.setenv("PUSHOVER_USER", "u")
     monkeypatch.setenv("PUSHOVER_TOKEN", "t")
