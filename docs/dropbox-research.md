@@ -152,3 +152,6 @@ Intake v2 requires an exact boolean `complete_figure:true` from FIGURE MATCH and
 ## Hosted Super VL vision pilot
 
 `NVIDIA_VISION_MODEL=nvidia/nemotron-3.5-super-vl-120b-a12b` opts the existing NVIDIA vision rung into Nemotron 3.5 Super VL. Only that exact NVIDIA model receives `reasoning_effort: none` and API `stream: false`; transport reads remain bounded and existing JSON/grounding validators remain authoritative. The default model, provider order, Llama fallback, Nemotron Parse and embeddings do not change. Follow [the pilot gates and rollback](nemotron-super-vl-pilot.md) before enabling a consumer. `RADON_RESEARCH_MODEL` does not select NVIDIA image models.
+
+
+Incomplete review responses remain terminal for that model call and never publish partial JSON. Their persisted safe error now includes only an allowlisted terminal reason (otherwise missing/other) and bounded integer input/output token counts (otherwise unknown). This allows operators to distinguish an actual output limit from another stop condition on the next normal retry without retaining provider content. Request budgets, models, credentials, backoff and verification gates do not change.
