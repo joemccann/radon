@@ -3700,17 +3700,66 @@ after the IB-skip path has already chosen the cached payload.** Peak:
   this case. No `/home/radon/.radon-deploy-transition.json`.
   `Result=signal` or exit 143 inside a deploy window is
   `deploy-stop-clean-oneshot-signal`. A ledger statement error (not a
-  read timeout) still fails the oneshot on purpose.
+  read timeout) still fails the oneshot on purpose. A
+  `RemoteDisconnected` on the same ledger calls is
+  `grok-page-responder-ledger-disconnect`.
 - **Remediation (code):** a ledger `TimeoutError` logs
   `grok page ledger non-fatal`, skips the ok heartbeat, releases the
   lock, and exits 0. The timer starts the next cycle in 30s. A claim
   the server already applied stays until `STALE_CLAIM_SECS` (2h); a
-  claim that never landed is eligible on that next cycle. Other
-  `HranaHttpError` values still propagate. The unit is not on
+  claim that never landed is eligible on that next cycle. A statement
+  error still propagates. The unit is not on
   `RERUNNABLE_ONESHOT_UNITS`.
 - **Regression:**
   `scripts/tests/test_grok_page_ledger_timeout.py::TestLedgerReadTimeout`.
 - **Code:** `scripts/grok_page_responder.py` (`_ledger_read_timeout`).
+
+## grok-page-responder-ledger-disconnect
+
+**`radon-grok-page-responder.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when `complete_page` reuses a keep-alive the peer closed
+during grok.** Peak: 2026-10-17 06:54:48Z, page
+`eaaaff8194a0fb8086edc8f55bb438ed`, paged 06:55:00Z. Same traceback at
+05:31:17Z and 05:47:30Z the same morning.
+
+- **Mechanism:** `Type=oneshot`, no `Restart=`. `claim_page` opens the
+  thread-local Hrana keep-alive. Grok then runs for minutes. The peer
+  closes that idle socket. `complete_page`'s UPDATE is sent on it.
+  `getresponse` raises `RemoteDisconnected: Remote end closed connection
+  without response`. `_pooled_open` does not replay a write (the peer may
+  already have committed). `_ledger_read_timeout` matched only
+  `TimeoutError`, so the exception escaped `run_cycle` and the interpreter
+  exited 1. systemd recorded `Result=exit-code`, `NRestarts=0`. The
+  watchdog paged this unit about itself. `requires_ib` is false. Exec span
+  is the grok run (minutes), not `TimeoutStartSec=3900`. Quick
+  `pending: 0` cycles in the same hour exited 0. They never idled the
+  socket across a subprocess.
+- **Detection:** journal traceback ends at
+  `db.hrana_http.HranaHttpError: RemoteDisconnected: Remote end closed connection without response`
+  with `grok_page_responder.py` `run_cycle` calling `pages_mod.complete_page`.
+  InactiveEnter on this page is 2026-10-17 06:54:48Z.
+- **Discriminating check:** Python Turso canary `SELECT 1` succeeds
+  (651 ms at diagnosis). Canary fail is a Turso platform outage: stand
+  down, do not restart-flap. A `TimeoutError: The read operation timed out`
+  on `claim_page` or `complete_page` is `grok-page-responder-ledger-timeout`.
+  A statement error (`no such table`) still fails the oneshot.
+  `FileNotFoundError` on `GROK_BIN` is `grok-page-responder-missing-binary`.
+  `Result=signal` or exit 143 inside a deploy window is
+  `deploy-stop-clean-oneshot-signal`. `/health/lite` `database=down` with
+  a successful canary is the 0.35s dependency deadline, not this exit.
+  Anonymous `/api/service-health` 401 is not this exit. Not
+  `ib-gateway-grouped`. No `/home/radon/.radon-deploy-transition.json`.
+- **Remediation (code):** after grok returns, drop the idle keep-alive
+  before `record_attempt_failure` or `complete_page`, so the UPDATE is the
+  first send on a new socket. If that write still raises
+  `RemoteDisconnected`, log `grok page ledger non-fatal`, skip the ok
+  heartbeat, release the lock, and exit 0. The next timer is 30s. A
+  statement error still propagates. Do not restart-flap. The unit is not
+  on `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `scripts/tests/test_grok_page_ledger_timeout.py::TestLedgerRemoteDisconnect`.
+- **Code:** `scripts/grok_page_responder.py` (`_ledger_read_timeout`,
+  `_drop_idle_hrana_socket`).
 
 ## grok-page-responder-missing-binary
 
