@@ -1251,3 +1251,9 @@ When an operator asks for automated release or updater recovery, ship the durabl
 - A raw extraction catalogue can contain photos or prose crops. Label counts as extracted figures and preserve bounded selector explanations through storage, API and UI without silent mid-word truncation. Metadata repairs must preserve existing review/held/expiry timestamps.
 
 - Retry not-before timestamps are eligibility gates, not queue age. Restart recovery can retain a zero sentinel on newer interrupted rows; order aged eligible retries by insertion row ID so those zeros cannot bypass the oldest backlog.
+
+
+### 2026-10-17: Diagnose incomplete responses from terminal evidence
+
+- A generic incomplete response does not prove max_tokens, provider outage or bad PDF data. Retain only allowlisted terminal reasons and bounded numeric usage through the existing safe error path before changing request budgets or prompts. Never retain provider content or accept partial JSON.
+- Existing selection artifacts may be stale: compare their timestamp with the current attempt's figure crops before asserting a fresh SELECT completed or that the artifact is absent.
