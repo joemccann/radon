@@ -804,11 +804,21 @@ Protection (once, both servers): `hcloud server enable-protection ib-gateway del
 ### CI deploy over the tailnet
 
 `stage-release`, `prepull-images`, and `deploy` in `.github/workflows/ci.yml`
-join the tailnet with `tailscale/github-action` (OAuth client, `tags: tag:ci`)
-then SSH to `secrets.VPS_TAILNET_HOST` (`100.112.32.16`) with
-`secrets.VPS_SSH_KEY` and host-key `secrets.VPS_SSH_FINGERPRINT`. They no
-longer use `secrets.VPS_HOST`. The public address secret stays defined for
-anything that still needs it; these three jobs do not read it.
+check out this repo, then join the tailnet with the in-repo composite
+`.github/actions/connect-tailscale` (OAuth client, `tags: tag:ci`) then SSH
+to `secrets.VPS_TAILNET_HOST` (`100.112.32.16`) with `secrets.VPS_SSH_KEY`
+and host-key `secrets.VPS_SSH_FINGERPRINT`. They no longer use
+`secrets.VPS_HOST`. The public address secret stays defined for anything
+that still needs it; these three jobs do not read it.
+
+`tailscale/github-action` is not on the joemccann/radon Actions allowlist
+(GitHub-owned, `appleboy/ssh-action`, `astral-sh/setup-uv`, the two Docker
+build actions, `oven-sh/setup-bun`; every third-party pin is a full commit
+SHA). A `uses:` of a disallowed action fails the whole workflow at parse
+time, including PR runs whose deploy jobs are skipped. The composite
+installs pinned Tailscale `1.94.2` (sha256 literal in the action) and
+calls `tailscale up --authkey=${TS_OAUTH_SECRET}?preauthorized=true&ephemeral=true`
+with `--advertise-tags=tag:ci`, matching that official action's OAuth path.
 
 Hetzner Cloud Firewalls filter the public NIC only. Tailnet SSH to port 22
 does not traverse `fw-radon-app`. Closing public 22 is safe only after a
