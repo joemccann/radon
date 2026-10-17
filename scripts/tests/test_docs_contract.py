@@ -32,6 +32,22 @@ _EXEMPT_PREFIXES = (
 )
 
 
+def test_performance_probe_documents_same_uid_credential_boundary():
+    """A pre-run hook does not isolate its bot-readable key from the agent."""
+    hook = (_ROOT / "scripts/runner/hooks/performance_pre.sh").read_text()
+    assert 'KEY="${RADON_PERF_SSH_KEY:-$HOME/.ssh/radon_perf_probe}"' in hook
+    doc = (_ROOT / "docs/runner.md").read_text()
+    section = doc.split("### 8c. Performance loop production probe", 1)[1]
+    section = section.split("\n### ", 1)[0]
+    assert "the agent never connects" not in section.lower(), (
+        "The agent shares the runner uid and can use its readable probe key"
+    )
+    assert "same uid" in section.lower()
+    assert "private key" in section.lower() and "can read" in section.lower()
+    assert "advisory" in section.lower()
+    assert "server-enforced" in section.lower() and "forced command" in section.lower()
+
+
 def _load_owners() -> dict:
     assert _OWNERS.is_file(), (
         "docs/owners.json is missing. It is the path-glob to owner-doc map "
