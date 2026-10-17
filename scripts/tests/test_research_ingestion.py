@@ -419,8 +419,44 @@ def test_idle_review_rejects_invalid_database_canary(state,tmp_path,monkeypatch,
     assert detail['state']=='error' and detail['error']=='DbHttpError'
 
 
+@pytest.mark.parametrize('failure_kind',['provider','evidence'])
+@pytest.mark.parametrize('fail_first_probe',[False,True])
+def test_idle_database_recovery_never_clears_an_unrelated_review_error(state,tmp_path,monkeypatch,failure_kind,fail_first_probe):
+    import json
+    import api.db_http
+    from research import feedback, ingestion, publish
+    from research.model import ModelError
+    from research.pipeline import EvidenceError
+    error=ModelError('Model ladder exhausted') if failure_kind=='provider' else EvidenceError('source extraction failed')
+    ingestion.stage_health(tmp_path,'review','error',error)
+    original=json.loads((tmp_path/'health-review.json').read_text())
+    stop,parsed=threading.Event(),threading.Event()
+    clock=SimpleNamespace(now=0);calls=[]
+    monkeypatch.setattr(ingestion.os,'setsid',lambda:None)
+    monkeypatch.setattr(ingestion.time,'monotonic',lambda:clock.now)
+    monkeypatch.setattr(feedback,'apply',lambda *args,**kwargs:0)
+    monkeypatch.setattr(publish,'expire_stale_held',lambda:0)
+    def probe(*args,**kwargs):
+        calls.append(clock.now)
+        if fail_first_probe and len(calls)==1:
+            raise api.db_http.DbHttpError('database unavailable too')
+        return [(1,)]
+    monkeypatch.setattr(api.db_http,'hrana_execute',probe)
+    def advance(seconds):
+        clock.now+=seconds
+        if clock.now>=65:
+            stop.set()
+    monkeypatch.setattr(stop,'wait',advance)
+    monkeypatch.setattr(parsed,'wait',advance)
+    ingestion._consumer(tmp_path,stop,threading.Event(),parsed,Backoff(multiprocessing.get_context('spawn')),
+                        True,False,pipeline_factory=lambda:SimpleNamespace())
+    assert calls==[0,60]
+    assert json.loads((tmp_path/'health-review.json').read_text())==original
+
+
 @pytest.mark.parametrize('failed_stage',['novelty','pipeline'])
-def test_review_database_outage_does_not_exhaust_document_attempts(state,tmp_path,failed_stage):
+@pytest.mark.parametrize('prior_attempts',[0,5])
+def test_review_database_outage_does_not_exhaust_document_attempts(state,tmp_path,failed_stage,prior_attempts):
     import json
     import time
     from api.db_http import DbHttpError
@@ -428,7 +464,7 @@ def test_review_database_outage_does_not_exhaust_document_attempts(state,tmp_pat
     from research.dropbox import content_hash
     value=entry();value['content_hash']=content_hash(b'pdf');ingest(state,[value])
     assert parse_one(tmp_path,state,SpawnClient(),spawn_extract,Backoff(multiprocessing.get_context('spawn')))
-    state.db.execute('UPDATE work SET attempts=5');state.db.commit()
+    state.db.execute('UPDATE work SET attempts=?',(prior_attempts,));state.db.commit()
     recovered=False
     processed=[]
     def recent_posts(**kwargs):
@@ -445,7 +481,7 @@ def test_review_database_outage_does_not_exhaust_document_attempts(state,tmp_pat
     assert ingestion.review_one(tmp_path,state,SimpleNamespace(process=process),publisher,True)
     row=state.db.execute('SELECT key,status,attempts,error,result,available_at FROM work').fetchone()
     assert row['status']=='pending', 'a database outage must not permanently hold a valid PDF'
-    assert row['attempts']==5 and row['error']=='database_unavailable' and row['result'] is None
+    assert row['attempts']==prior_attempts and row['error']=='database_unavailable' and row['result'] is None
     assert row['available_at']>=before+ingestion.PROVIDER_PARK_SECS
     detail=json.loads((tmp_path/'health-review.json').read_text())
     assert detail['state']=='error' and detail['error']=='DbHttpError'
@@ -674,3 +710,11 @@ def test_rel302_watched_unpadded_cursor_survives_padded_folder_arrival(state, mo
     assert (alias, 'old-cursor') in calls
     assert state.cursor(alias) == 'new-cursor'
     assert state.work_count(folder_date='2026-10-02') == 2
+
+
+def test_park_rejects_untrusted_error_reason_without_changing_work(state):
+    ingest(state,[entry()]);key=state.pending()[0]['key'];assert state.claim(key)
+    before=dict(state.db.execute('SELECT * FROM work WHERE key=?',(key,)).fetchone())
+    with pytest.raises(ValueError,match='Invalid research park reason'):
+        state.park(key,123,reason='HTTP body with private credentials')
+    assert dict(state.db.execute('SELECT * FROM work WHERE key=?',(key,)).fetchone())==before
