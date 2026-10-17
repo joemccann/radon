@@ -12,6 +12,9 @@ export const radonCapability = "internal";
 const DAILY_SAMPLE = 10;
 /** Process time (updated_at) vs America/Los_Angeles. 24h duration; not folder_date. */
 const HELD_TTL_MS = 24 * 60 * 60 * 1000;
+const SELECTOR_REASON_MAX_CHARS = 4096;
+const SELECTOR_REASON_BOUNDARY_LOOKBACK = 256;
+const SELECTOR_REASON_WHITESPACE = new Set([" ", "\t", "\n", "\r", "\f", "\v"]);
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
@@ -19,6 +22,24 @@ function json(body: unknown, status = 200): Response {
 
 function parseJson<T>(value: unknown, fallback: T): T {
   try { return JSON.parse(String(value ?? "")) as T; } catch { return fallback; }
+}
+
+/** Preserve bounded notes exactly and mark overflow after a nearby whitespace boundary. */
+function boundedSelectorReason(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const chars = Array.from(value);
+  if (chars.length <= SELECTOR_REASON_MAX_CHARS) return value;
+  const prefix = chars.slice(0, SELECTOR_REASON_MAX_CHARS - 1);
+  const boundaryStart = Math.max(0, prefix.length - SELECTOR_REASON_BOUNDARY_LOOKBACK);
+  let boundary = -1;
+  for (let index = prefix.length - 1; index >= boundaryStart; index -= 1) {
+    if (SELECTOR_REASON_WHITESPACE.has(prefix[index])) { boundary = index; break; }
+  }
+  if (boundary >= 0) {
+    while (boundary > 0 && SELECTOR_REASON_WHITESPACE.has(prefix[boundary - 1])) boundary -= 1;
+    return prefix.slice(0, boundary).join("") + "…";
+  }
+  return prefix.join("") + "…";
 }
 
 /** Only typed fields leave the mirror, and the PDF link must be an authenticated research asset. */
@@ -29,7 +50,7 @@ function parseContext(value: unknown): HeldContext {
   return {
     pageCount: Number.isInteger(raw.pageCount) ? raw.pageCount as number : null,
     figureCount: Number.isInteger(raw.figureCount) ? raw.figureCount as number : 0,
-    dateSource: text(raw.dateSource, 20), excerpt: text(raw.excerpt, 900), selectorReason: text(raw.selectorReason, 600),
+    dateSource: text(raw.dateSource, 20), excerpt: text(raw.excerpt, 900), selectorReason: boundedSelectorReason(raw.selectorReason),
     sourceUrl: PRIVATE_RESEARCH_ASSET.test(url) && url.endsWith(".pdf") ? url : "",
   };
 }
