@@ -871,6 +871,7 @@ def test_text_only_reselect_can_still_attach_a_visually_proven_real_chart(tmp_pa
     assert posts[0]['source']['figures'][0]['caption'] == 'f2 matched caption'
     assert 'chartGeneration' not in posts[0]['source']
     assert len(reviewer.calls[-1][2]) == 1 and str(reviewer.calls[-1][2][0][1]).endswith('f2.png')
+    assert '"text_only": false' in reviewer.calls[-1][1]
 
 
 @pytest.mark.parametrize('defect', [

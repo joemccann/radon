@@ -185,6 +185,20 @@ def test_feedback_note_and_handled_marker_commit_atomically(state):
     assert feedback.apply(s, fetch) == 0
 
 
+def test_stale_handled_snapshot_cannot_apply_the_same_vote_again(state, monkeypatch):
+    s, key = state
+    captured_handled = s.feedback_handled()
+    monkeypatch.setattr(s, 'feedback_handled', lambda: captured_handled)
+    fetch = lambda: [row('stale-snapshot-vote', 'held', 'up', work_key=key, comment='Apply exactly once')]
+    assert feedback.apply(s, fetch) == 1
+    assert s.claim(key)
+    s.complete(key, {'status': 'reviewed', 'items': 0})
+    completed = dict(s.db.execute('SELECT * FROM work WHERE key=?', (key,)).fetchone())
+    assert feedback.apply(s, fetch) == 0, 'the transaction must reject an already handled vote despite stale reads'
+    assert dict(s.db.execute('SELECT * FROM work WHERE key=?', (key,)).fetchone()) == completed
+    assert s.db.execute('SELECT COUNT(*) FROM feedback_handled WHERE id=?', ('stale-snapshot-vote',)).fetchone()[0] == 1
+
+
 @pytest.mark.parametrize('terminal_status', ['deleted', 'superseded'])
 def test_vote_for_terminal_target_is_still_marked_handled_without_changing_work(state, terminal_status):
     s, key = state
