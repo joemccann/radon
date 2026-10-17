@@ -52,6 +52,35 @@ def _uses() -> list[str]:
     return found
 
 
+# Repo Actions policy: GitHub-owned, joemccann-owned, local `./`, or this
+# list. A disallowed `uses:` fails the workflow at parse time
+# (startup_failure), including PR runs whose jobs that would use it are skipped.
+ALLOWED_THIRD_PARTY_PREFIXES = (
+    "appleboy/ssh-action@",
+    "astral-sh/setup-uv@",
+    "docker/build-push-action@",
+    "docker/setup-buildx-action@",
+    "oven-sh/setup-bun@",
+)
+GITHUB_OWNED_OWNERS = {"actions", "github"}
+
+
+def test_third_party_actions_match_the_org_allowlist() -> None:
+    sha_pin = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}$")
+    for uses in _uses():
+        ref = str(uses).split("#", 1)[0].strip()
+        if ref.startswith("./") or ref.startswith("joemccann/"):
+            continue
+        owner = ref.split("/", 1)[0]
+        if owner in GITHUB_OWNED_OWNERS:
+            assert sha_pin.match(ref), uses
+            continue
+        assert any(ref.startswith(prefix) for prefix in ALLOWED_THIRD_PARTY_PREFIXES), (
+            f"{uses} is not on the joemccann/radon Actions allowlist"
+        )
+        assert sha_pin.match(ref), uses
+
+
 def test_official_js_actions_use_node24_pins() -> None:
     uses = _uses()
     for action, shas in NODE24_PINS.items():
