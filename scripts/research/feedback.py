@@ -74,7 +74,11 @@ def apply(state, fetch=fetch_rows, root=None):
         if action.kind == 'more':
             note.update(post_id=action.post_id, title=action.title)
         key = action.work_key or state.work_key_for_file(action.file_id)
-        if key and state.requeue_with_note(key, json.dumps(note)):
-            requeued += 1
+        if key:
+            if state.requeue_with_note(key, json.dumps(note), feedback_id=action.id):
+                requeued += 1
+                continue  # The note and handled marker committed together.
+            if state.has_live_work(key):
+                continue  # Busy work may finish between the refusal and this read; keep the vote actionable.
         state.mark_feedback_handled(action.id)
     return requeued

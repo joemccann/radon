@@ -720,6 +720,17 @@ class TestCodexSubscriptionGoesThroughChatGpt:
         )
         return codex_home
 
+    @staticmethod
+    def _completed_response(value):
+        events = [
+            {'type': 'response.created', 'response': {'id': 'r1'}},
+            {'type': 'response.output_text.delta', 'delta': json.dumps(value)},
+            {'type': 'response.completed', 'response': {'status': 'completed'}},
+        ]
+        return _StreamingResponse({}, chunks=[b''.join(
+            b'data: ' + json.dumps(event).encode() + b'\n\n' for event in events
+        )])
+
     def test_auth_carries_the_account_id(self, tmp_path):
         auth = model_ladder._auth_for("codex", {"CODEX_HOME": str(self._codex_home(tmp_path))})
         assert auth is not None
@@ -748,12 +759,15 @@ class TestCodexSubscriptionGoesThroughChatGpt:
             post=post,
         )
         assert result.provider == "codex"
+        assert result.model == 'gpt-6.1-sol'
         assert result.data == {"ok": True}
         url, headers, body = seen[0]
         assert url == "https://chatgpt.com/backend-api/codex/responses"
         assert headers["authorization"] == "Bearer codex-grant"
         assert headers["chatgpt-account-id"] == "acct-1"
         assert body["stream"] is True
+        assert body['store'] is False
+        assert body['model'] == 'gpt-6.1-sol'
         assert body["instructions"] == "You are Radon."
         assert body["input"][0]["content"][-1] == {"type": "input_text", "text": "evaluate"}
 
@@ -766,6 +780,78 @@ class TestCodexSubscriptionGoesThroughChatGpt:
         )
         assert result.provider == "codex"
         assert any("api.openai.com" in u for u in router.calls)
+
+    @pytest.mark.parametrize('auth_kind', ['subscription', 'api_key'])
+    @pytest.mark.parametrize('call_kind', ['text', 'research_image', 'vision_extract'])
+    @pytest.mark.parametrize('overrides', [
+        {},
+        {'OPENAI_MODEL': 'operator-general-model'},
+        {'OPENAI_VISION_MODEL': 'operator-vision-model'},
+        {'OPENAI_MODEL': 'operator-general-model', 'OPENAI_VISION_MODEL': 'operator-vision-model'},
+    ])
+    def test_auth_kind_defaults_and_explicit_model_precedence(self, tmp_path, auth_kind, call_kind, overrides):
+        if auth_kind == 'subscription':
+            env = {'CODEX_HOME': str(self._codex_home(tmp_path)), 'RADON_LADDER_NO_AUTH_FILES': '0',
+                   'OPENAI_API_KEY': 'sk-wallet-must-not-be-used'}
+            expected_model = 'gpt-6.1-sol'
+            endpoint = 'https://chatgpt.com/backend-api/codex/responses'
+        else:
+            env = {'OPENAI_API_KEY': 'sk-openai-test', 'RADON_LADDER_ALLOW_PREPAID': '1'}
+            expected_model = 'gpt-5.5'
+            endpoint = 'https://api.openai.com/v1/chat/completions'
+        env.update(overrides)
+        if call_kind != 'text' and overrides.get('OPENAI_VISION_MODEL'):
+            expected_model = overrides['OPENAI_VISION_MODEL']
+        else:
+            expected_model = overrides.get('OPENAI_MODEL', expected_model)
+        seen = []
+        value = ROWS if call_kind == 'vision_extract' else OBJ
+        def post(url, *, headers=None, json=None, timeout=None, stream=False):
+            seen.append((url, headers or {}, json or {}))
+            assert url == endpoint, 'model resolution must not change the authentication route'
+            if auth_kind == 'subscription':
+                return self._completed_response(value)
+            return _openai_ok() if call_kind == 'vision_extract' else _openai_obj_ok()
+        if call_kind == 'text':
+            result = complete_text_json('evaluate', env=env, post=post, providers=('codex',))
+            assert result.data == OBJ
+        elif call_kind == 'research_image':
+            result = complete_multimodal_json('evaluate', images=[('PDF chart', PNG)], env=env,
+                                              post=post, providers=('codex',))
+            assert result.data == OBJ
+        else:
+            result = extract_via_vision(PNG, PROMPT, env=env, post=post)
+            assert result.rows == ROWS
+        assert result.provider == 'codex' and result.model == expected_model
+        assert len(seen) == 1 and seen[0][2]['model'] == expected_model
+        if auth_kind == 'subscription':
+            _, headers, body = seen[0]
+            assert headers['authorization'] == 'Bearer codex-grant'
+            assert headers['chatgpt-account-id'] == 'acct-1'
+            assert body['stream'] is True and body['store'] is False
+            images = [item for item in body['input'][0]['content'] if item['type'] == 'input_image']
+            assert len(images) == (0 if call_kind == 'text' else 1)
+
+    def test_subscription_failure_does_not_fall_back_to_prepaid_openai(self, tmp_path):
+        seen = []
+        env = {'CODEX_HOME': str(self._codex_home(tmp_path)), 'RADON_LADDER_NO_AUTH_FILES': '0',
+               'OPENAI_API_KEY': 'sk-wallet-must-not-be-used', 'NVIDIA_API_KEY': 'nvapi-fallback'}
+        def post(url, **kwargs):
+            seen.append(url)
+            assert 'api.openai.com' not in url
+            if 'chatgpt.com' in url:
+                return _Resp(400, {'error': {'message': 'model not supported with ChatGPT account'}})
+            return _openai_obj_ok()
+        result = complete_multimodal_json('evaluate', images=[('PDF chart', PNG)], env=env, post=post,
+                                          providers=('codex', 'nvidia'))
+        assert result.provider == 'nvidia' and len(seen) == 2
+
+    def test_api_key_without_prepaid_opt_in_never_sends_request(self):
+        with pytest.raises(ModelLadderExhausted):
+            complete_multimodal_json('evaluate', images=[('PDF chart', PNG)],
+                                      env={'OPENAI_API_KEY': 'sk-wallet-must-not-be-used'},
+                                      providers=('codex',),
+                                      post=lambda *args, **kwargs: pytest.fail('prepaid opt-in is required'))
 
 
 class TestAntigravityRungRunsThroughTheCli:
