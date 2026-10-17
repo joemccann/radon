@@ -6,6 +6,7 @@ import { radonFetch } from "@/lib/radonApi";
 import {
   getRequestId,
   jsonApiError,
+  scrubSecrets,
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
 import { dbExecute } from "@/lib/dbExecute";
@@ -68,8 +69,13 @@ async function loadTradeLogDates(): Promise<Record<string, string>> {
       return dates;
     }
   } catch (error) {
+    // dbExecute scrubs its own diagnostic and rethrows the ORIGINAL error, so
+    // a raw copy here put libsql URLs, bearer tokens and account ids in the
+    // server log. Route it through the same scrubber.
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[Portfolio] trade_log_dates journal query failed: ${message}`);
+    console.warn(
+      scrubSecrets(`[Portfolio] trade_log_dates journal query failed: ${message}`),
+    );
   }
   return {};
 }
@@ -125,7 +131,9 @@ async function loadContractOpenDates(): Promise<Record<string, string>> {
     return buildContractEntryDates(rows);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[Portfolio] contract_open_dates journal query failed: ${message}`);
+    console.warn(
+      scrubSecrets(`[Portfolio] contract_open_dates journal query failed: ${message}`),
+    );
     return {};
   }
 }
