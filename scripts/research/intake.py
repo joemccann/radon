@@ -574,7 +574,7 @@ class Pipeline:
                 caption = passed[i].get('caption')
                 candidate['captions'][i] = (caption.strip() if isinstance(caption, str) and caption.strip()
                                             else catalogue[i].get('title') or f'Figure, page {catalogue[i]["page"]}')
-        candidate['figure_ids'] = kept
+        candidate.update(figure_ids=kept, text_only=False)
         candidate['captions'] = {i: candidate['captions'][i] for i in kept}
         return True
 
