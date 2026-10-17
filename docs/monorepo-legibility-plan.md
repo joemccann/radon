@@ -161,7 +161,7 @@ Add (GitHub's missing questions):
 
 - Maintainers: Joe McCann, single operator.
 - Help: not a supported product; security reports via `SECURITY.md`;
-  operator issues use the factory template.
+  operator work uses standard GitHub issues.
 
 Nested README fixes, same wave:
 
@@ -181,8 +181,8 @@ Add:
   ([GitHub docs](https://docs.github.com/en/code-security/getting-started/adding-a-security-policy-to-your-repository))
 - `SUPPORT.md`. This software is proprietary and unsupported for clones.
 - `.github/CODEOWNERS` with `* @joemccann`.
-- `.github/ISSUE_TEMPLATE/` with a `factory` template (label `factory`)
-  and a blank `config.yml` that disables empty issues if desired.
+- `.github/ISSUE_TEMPLATE/config.yml` with the private security contact.
+  Operator implementation requests use standard issues.
 - Optional `.github/pull_request_template.md`: TDD, no `git add -A`,
   wait for in-flight deploy.
 
@@ -209,7 +209,7 @@ Tighten the About description to one sentence. Drop the repeated
 
 No path moves. No lockfile deletes. Cannot break runtime.
 
-- [x] L0a `SECURITY.md`, `SUPPORT.md`, `.github/CODEOWNERS`, factory issue template
+- [x] L0a `SECURITY.md`, `SUPPORT.md`, `.github/CODEOWNERS`, issue intake configuration
 - [x] L0b `docs/README.md` as the documentation index (absorb What's where)
 - [x] L0c Slim root README; keep `## Now true` with 1-5 bullets; TestThinIndex extended
 - [x] L0d Fix `web/README.md` (bun) and `cloud/README.md` (monorepo voice)
