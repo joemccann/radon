@@ -179,6 +179,14 @@ parents, so adding and then deleting an identifier still refuses publication.
 Empty and binary files, filenames and branch names are included; refusal
 messages replace private filenames with a redacted location.
 
+A refused branch stays on the VPS and is listed every cycle, but its Pushover
+page (identifier or IR-body refusal) fires once per branch head. Pickup records
+the paged head in `logs/grok-fix-pickup/refusal-pages.json` in its clone; a new
+commit on the branch pages again, and a deleted branch is forgotten. To retire
+a superseded refused fix, keep it under `refs/archive/<branch>` in
+`/home/radon/radon-page-responder` and delete the branch there. The responder
+prompt tells Grok to use invented ids (`demo`) instead of real broker ids.
+
 **Symptom:** pickup refuses publication and leaves the incident fix local.
 **Prerequisites:** access to the pickup clone and its refusal log; inspect no secret values.
 **Blast radius:** refusal blocks the fix's push and PR; it does not deploy or alter production.

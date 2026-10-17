@@ -1,5 +1,6 @@
 """The worker acts on operator votes: "should have published" and "want more" re-queue the document with the operator's note."""
 import json
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
@@ -64,6 +65,181 @@ def test_want_more_finds_the_document_by_file_and_revision_and_carries_the_post_
     assert feedback.apply(s, fetch) == 1
     note = json.loads(s.pending()[0]["note"])
     assert note == {"kind": "more", "comment": "add the dot plot chart", "feedback_id": "f3", "post_id": "research-" + "1" * 64, "title": "FOMC hikes 25 bps"}
+
+
+@pytest.mark.parametrize('busy_status', ['pending', 'processing'])
+def test_held_vote_waits_for_busy_document_then_applies_exact_note_once(state, busy_status):
+    s, key = state
+    current_note = json.dumps({'kind': 'publish', 'comment': 'Current review instruction', 'feedback_id': 'prior'})
+    assert s.requeue_with_note(key, current_note)
+    if busy_status == 'processing':
+        assert s.claim(key)
+    with s.db:
+        s.db.execute('UPDATE work SET attempts=4,error=? WHERE key=?', ('previous_retry', key))
+    before = dict(s.db.execute('SELECT * FROM work WHERE key=?', (key,)).fetchone())
+    fetch = lambda: [row('arrived-while-busy', 'held', 'up', work_key=key,
+                         comment='Use the exact source table after this review finishes')]
+    assert feedback.apply(s, fetch) == 0
+    assert 'arrived-while-busy' not in s.feedback_handled(), 'busy work must not consume an unapplied vote'
+    assert dict(s.db.execute('SELECT * FROM work WHERE key=?', (key,)).fetchone()) == before
+    if busy_status == 'pending':
+        assert s.claim(key)
+    s.complete(key, {'status': 'reviewed', 'items': 0})
+    assert feedback.apply(s, fetch) == 1
+    pending = s.pending()[0]
+    assert pending['key'] == key and pending['attempts'] == 0
+    assert json.loads(pending['note']) == {
+        'kind': 'publish', 'comment': 'Use the exact source table after this review finishes',
+        'feedback_id': 'arrived-while-busy',
+    }
+    assert 'arrived-while-busy' in s.feedback_handled()
+    after = dict(s.db.execute('SELECT * FROM work WHERE key=?', (key,)).fetchone())
+    assert feedback.apply(s, fetch) == 0
+    assert dict(s.db.execute('SELECT * FROM work WHERE key=?', (key,)).fetchone()) == after
+
+
+@pytest.mark.parametrize('older_status', ['complete', 'published'])
+@pytest.mark.parametrize('busy_status', ['pending', 'processing'])
+def test_file_vote_waits_for_latest_busy_revision_instead_of_requeueing_older_work(state, older_status, busy_status):
+    s, older_key = state
+    s.ingest_page('2026/September/Sep 07', {'cursor': 'new-revision', 'entries': [entry(rev='rev2')]}, '2026-09-07')
+    latest_key = s.pending()[0]['key']
+    # Published history is retained; complete is also possible in legacy queue snapshots.
+    with s.db:
+        s.db.execute('UPDATE work SET status=? WHERE key=?', (older_status, older_key))
+        s.db.execute('UPDATE work SET note=?,attempts=3 WHERE key=?',
+                     (json.dumps({'kind': 'publish', 'comment': 'Current revision note', 'feedback_id': 'current'}), latest_key))
+    if busy_status == 'processing':
+        assert s.claim(latest_key)
+    older_before = dict(s.db.execute('SELECT * FROM work WHERE key=?', (older_key,)).fetchone())
+    latest_before = dict(s.db.execute('SELECT * FROM work WHERE key=?', (latest_key,)).fetchone())
+    post_id = 'research-' + '1' * 64
+    fetch = lambda: [row('latest-revision-vote', 'post', 'up', post_id=post_id, reasons=['want_more'],
+                         comment='Add the measured chart after the current revision finishes',
+                         snapshot={'title': 'Existing finding'})]
+    assert feedback.apply(s, fetch) == 0, 'an older completed revision must not jump ahead of current work'
+    assert s.work_key_for_file('id:one') == latest_key
+    assert 'latest-revision-vote' not in s.feedback_handled()
+    assert dict(s.db.execute('SELECT * FROM work WHERE key=?', (older_key,)).fetchone()) == older_before
+    assert dict(s.db.execute('SELECT * FROM work WHERE key=?', (latest_key,)).fetchone()) == latest_before
+    if busy_status == 'pending':
+        assert s.claim(latest_key)
+    s.complete(latest_key, {'status': 'reviewed', 'items': 0})
+    assert feedback.apply(s, fetch) == 1
+    pending = s.pending()[0]
+    assert pending['key'] == latest_key and pending['attempts'] == 0
+    assert json.loads(pending['note']) == {
+        'kind': 'more', 'comment': 'Add the measured chart after the current revision finishes',
+        'feedback_id': 'latest-revision-vote', 'post_id': post_id, 'title': 'Existing finding',
+    }
+    assert 'latest-revision-vote' in s.feedback_handled()
+    assert feedback.apply(s, fetch) == 0
+    assert dict(s.db.execute('SELECT * FROM work WHERE key=?', (older_key,)).fetchone()) == older_before
+
+
+def test_vote_is_not_lost_when_review_finishes_after_requeue_refusal(state, monkeypatch):
+    s, key = state
+    assert s.requeue_with_note(key, json.dumps({'comment': 'Current work'}))
+    assert s.claim(key)
+    original_requeue = s.requeue_with_note
+    calls = []
+    def finishes_during_refusal(work_key, note, **kwargs):
+        result = original_requeue(work_key, note, **kwargs)
+        calls.append(result)
+        if len(calls) == 1:
+            assert result is False
+            s.complete(key, {'status': 'reviewed', 'items': 0})
+        return result
+    monkeypatch.setattr(s, 'requeue_with_note', finishes_during_refusal)
+    fetch = lambda: [row('finish-race', 'held', 'up', work_key=key, comment='Apply after current review')]
+    assert feedback.apply(s, fetch) == 0
+    assert 'finish-race' not in s.feedback_handled()
+    assert s.db.execute('SELECT status FROM work WHERE key=?', (key,)).fetchone()[0] == 'complete'
+    assert feedback.apply(s, fetch) == 1
+    assert json.loads(s.pending()[0]['note']) == {
+        'kind': 'publish', 'comment': 'Apply after current review', 'feedback_id': 'finish-race',
+    }
+    assert 'finish-race' in s.feedback_handled()
+    assert feedback.apply(s, fetch) == 0
+
+
+def test_feedback_note_and_handled_marker_commit_atomically(state):
+    s, key = state
+    with s.db:
+        s.db.execute('UPDATE work SET attempts=4,note=? WHERE key=?', ('previous context', key))
+        s.db.execute("""CREATE TRIGGER reject_feedback_marker BEFORE INSERT ON feedback_handled
+            BEGIN SELECT RAISE(ABORT, 'feedback marker unavailable'); END""")
+    before = dict(s.db.execute('SELECT * FROM work WHERE key=?', (key,)).fetchone())
+    fetch = lambda: [row('atomic-vote', 'held', 'up', work_key=key, comment='Do not lose this instruction')]
+    with pytest.raises(sqlite3.IntegrityError, match='feedback marker unavailable'):
+        feedback.apply(s, fetch)
+    assert dict(s.db.execute('SELECT * FROM work WHERE key=?', (key,)).fetchone()) == before
+    assert 'atomic-vote' not in s.feedback_handled()
+    with s.db:
+        s.db.execute('DROP TRIGGER reject_feedback_marker')
+    assert feedback.apply(s, fetch) == 1
+    assert json.loads(s.pending()[0]['note']) == {
+        'kind': 'publish', 'comment': 'Do not lose this instruction', 'feedback_id': 'atomic-vote',
+    }
+    assert 'atomic-vote' in s.feedback_handled()
+    assert feedback.apply(s, fetch) == 0
+
+
+def test_stale_handled_snapshot_cannot_apply_the_same_vote_again(state, monkeypatch):
+    s, key = state
+    captured_handled = s.feedback_handled()
+    monkeypatch.setattr(s, 'feedback_handled', lambda: captured_handled)
+    fetch = lambda: [row('stale-snapshot-vote', 'held', 'up', work_key=key, comment='Apply exactly once')]
+    assert feedback.apply(s, fetch) == 1
+    assert s.claim(key)
+    s.complete(key, {'status': 'reviewed', 'items': 0})
+    completed = dict(s.db.execute('SELECT * FROM work WHERE key=?', (key,)).fetchone())
+    assert feedback.apply(s, fetch) == 0, 'the transaction must reject an already handled vote despite stale reads'
+    assert dict(s.db.execute('SELECT * FROM work WHERE key=?', (key,)).fetchone()) == completed
+    assert s.db.execute('SELECT COUNT(*) FROM feedback_handled WHERE id=?', ('stale-snapshot-vote',)).fetchone()[0] == 1
+
+
+@pytest.mark.parametrize('terminal_status', ['deleted', 'superseded'])
+def test_vote_for_terminal_target_is_still_marked_handled_without_changing_work(state, terminal_status):
+    s, key = state
+    with s.db:
+        s.db.execute('UPDATE work SET status=? WHERE key=?', (terminal_status, key))
+    before = dict(s.db.execute('SELECT * FROM work WHERE key=?', (key,)).fetchone())
+    fetch = lambda: [row('terminal-vote', 'held', 'up', work_key=key, comment='Stale target')]
+    assert feedback.apply(s, fetch) == 0
+    assert 'terminal-vote' in s.feedback_handled()
+    assert dict(s.db.execute('SELECT * FROM work WHERE key=?', (key,)).fetchone()) == before
+
+
+def test_file_vote_for_deleted_latest_revision_never_resurrects_published_history(state):
+    s, older_key = state
+    post_id = 'research-' + '1' * 64
+    assert s.requeue_with_note(older_key, None)
+    assert s.claim(older_key)
+    s.complete(older_key, {'status': 'reviewed', 'items': 1}, publications=[{'id': post_id, 'title': 'Published history'}])
+    s.published(post_id)
+    scope = '2026/September/Sep 07'
+    s.ingest_page(scope, {'cursor': 'revision-two', 'entries': [entry(rev='rev2')]}, '2026-09-07')
+    latest_key = s.pending()[0]['key']
+    assert s.claim(latest_key)
+    s.complete(latest_key, {'status': 'reviewed', 'items': 0})
+    assert s.requeue_with_note(latest_key, json.dumps({'comment': 'Keep latest revision context'}))
+    assert s.claim(latest_key)
+    s.retry(latest_key, ValueError('retry'), delay=0)
+    s.ingest_page(scope, {'cursor': 'file-deleted', 'entries': [
+        {'.tag': 'deleted', 'path_lower': entry()['path_lower']},
+    ]}, '2026-09-07')
+    before = {record['key']: dict(record) for record in s.db.execute('SELECT * FROM work')}
+    assert before[older_key]['status'] == 'published' and before[latest_key]['status'] == 'deleted'
+    outbox_before = [tuple(record) for record in s.db.execute('SELECT * FROM outbox')]
+    fetch = lambda: [row('deleted-file-vote', 'post', 'up', post_id=post_id, reasons=['want_more'],
+                         comment='Do not revive a deleted source revision')]
+    assert feedback.apply(s, fetch) == 0
+    assert s.work_key_for_file('id:one') is None
+    assert 'deleted-file-vote' in s.feedback_handled()
+    assert {record['key']: dict(record) for record in s.db.execute('SELECT * FROM work')} == before
+    assert [tuple(record) for record in s.db.execute('SELECT * FROM outbox')] == outbox_before
+    assert s.pending() == [] and s.outbox() == []
 
 
 def test_vote_for_an_unknown_document_is_marked_handled_not_retried_forever(state):

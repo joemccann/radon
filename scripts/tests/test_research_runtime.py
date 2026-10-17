@@ -11,6 +11,7 @@ import pytest
 # T-498: file-backed subscriptions are opt-in synthetic fixtures.
 pytestmark = pytest.mark.usefixtures("isolated_model_credentials")
 import requests
+import httpx
 
 from research import model, pipeline, seed, worker
 from research.publish import stable_post_id
@@ -674,3 +675,315 @@ def test_discover_gap_is_loud_when_eligible_pdfs_have_no_work(tmp_path, monkeypa
     assert local['state'] == 'error'
     assert local['last_error']['discovery_errors'][0]['type'] == 'dropbox_work_gap'
     state.close()
+
+
+# A Reviewer is reused by the daemon. Timeout learning belongs to one document,
+# and a text-model timeout says nothing about an untried image-model request.
+def _budget_env(**extra):
+    return {"CLAUDE_CODE_OAUTH_TOKEN": "synthetic-subscription",
+            "XAI_API_KEY": "synthetic-prepaid", "RADON_LADDER_ALLOW_PREPAID": "1",
+            "RADON_LADDER_NO_AUTH_FILES": "1", **extra}
+
+
+def _budget_response(provider, data=None, status=200):
+    data = {"candidates": []} if data is None else data
+    payload = ({"stop_reason": "end_turn", "content": [{"type": "text", "text": json.dumps(data)}]}
+               if provider == "anthropic" else {"choices": [{"message": {"content": json.dumps(data)}}]})
+    raw = json.dumps(payload).encode()
+    return SimpleNamespace(status_code=status, text=raw.decode(), json=lambda: payload,
+                           iter_content=lambda _: iter([raw]), close=lambda: None)
+
+
+def _budget_provider(url):
+    return ("anthropic" if "anthropic.com" in url else
+            "grok" if "x.ai" in url else "cerebras")
+
+
+@pytest.mark.parametrize("first,second", [("text", "text"), ("text", "empty"),
+                                          ("empty", "text"), ("image", "image")])
+@pytest.mark.parametrize("timeout_class", [requests.ReadTimeout, requests.ConnectTimeout, httpx.WriteTimeout, httpx.PoolTimeout, requests.Timeout, TimeoutError])
+def test_document_reviewer_does_not_repeat_successfully_bypassed_network_timeout(tmp_path, first, second, timeout_class):
+    image = tmp_path / "evidence.png"
+    image.write_bytes(b"synthetic-image")
+    calls = []
+
+    def post(url, **kwargs):
+        provider = _budget_provider(url)
+        calls.append((provider, kwargs))
+        if provider == "anthropic":
+            raise timeout_class("private source and credential must not be logged")
+        return _budget_response(provider)
+
+    reviewer = model.Reviewer(env=_budget_env(), session=SimpleNamespace(post=post))
+
+    def ask(mode):
+        return (reviewer.ask_text("select") if mode == "text" else
+                reviewer.ask("inspect", [("source", image)] if mode == "image" else ()))
+
+    assert ask(first) == {"candidates": []}
+    assert ask(second) == {"candidates": []}
+    assert [p for p, _ in calls] == ["anthropic", "grok", "grok"]
+    assert calls[0][1]["headers"]["authorization"] == "Bearer synthetic-subscription"
+    assert calls[0][1]["timeout"] == (10, 120)
+    assert all(kwargs["timeout"] == 120 for provider, kwargs in calls if provider == "grok")
+
+
+@pytest.mark.parametrize("first_images", [False, True])
+def test_document_timeout_does_not_suppress_untried_modality(tmp_path, first_images):
+    image = tmp_path / "evidence.png"
+    image.write_bytes(b"synthetic-image")
+    calls = []
+
+    def post(url, **kwargs):
+        provider = _budget_provider(url)
+        calls.append(provider)
+        if len(calls) == 1:
+            raise requests.ReadTimeout("synthetic timeout")
+        return _budget_response(provider)
+
+    reviewer = model.Reviewer(env=_budget_env(), session=SimpleNamespace(post=post))
+    image_request = lambda: reviewer.ask("inspect", [("source", image)])
+    text_request = lambda: reviewer.ask_text("select")
+    first, second = ((image_request, text_request) if first_images else (text_request, image_request))
+    assert first() == second() == {"candidates": []}
+    assert calls == ["anthropic", "grok", "anthropic"]
+
+
+@pytest.mark.parametrize("failure", ["http_401", "http_429", "http_500", "parse", "claim", "network"])
+def test_document_non_timeout_failure_does_not_exclude_provider(failure):
+    calls = []
+
+    def post(url, **kwargs):
+        provider = _budget_provider(url)
+        calls.append(provider)
+        if len(calls) == 1:
+            if failure == "network":
+                raise requests.ConnectionError("ReadTimeout is merely remote message text")
+            if failure == "parse":
+                response = _budget_response(provider)
+                response.iter_content = lambda _: iter([b'{"stop_reason":"end_turn","content":[{"type":"text","text":"not JSON"}]}'])
+                return response
+            if failure == "claim":
+                return _budget_response(provider, {"supported": False, "reason": "Claim fails provenance"})
+            return _budget_response(provider, status=int(failure.split("_")[1]))
+        return _budget_response(provider)
+
+    reviewer = model.Reviewer(env=_budget_env(), session=SimpleNamespace(post=post))
+    first = reviewer.ask_text("verify")
+    assert reviewer.ask_text("reselect") == {"candidates": []}
+    assert calls == (["anthropic", "anthropic"] if failure == "claim" else ["anthropic", "grok", "anthropic"])
+    if failure == "claim":
+        assert first["supported"] is False
+
+
+def test_document_timeout_filter_preserves_cerebras_last_and_other_failures():
+    calls = []
+
+    def post(url, **kwargs):
+        provider = _budget_provider(url)
+        calls.append(provider)
+        if provider == "anthropic":
+            raise requests.ReadTimeout("synthetic timeout")
+        return _budget_response(provider, status=500 if provider == "grok" else 200)
+
+    reviewer = model.Reviewer(env=_budget_env(CEREBRAS_API_KEY="synthetic-free-tier"),
+                              session=SimpleNamespace(post=post))
+    assert reviewer.ask_text("select") == reviewer.ask("reselect") == {"candidates": []}
+    assert calls == ["anthropic", "grok", "cerebras", "grok", "cerebras"]
+
+
+def test_document_timeout_filter_does_not_enable_prepaid_fallback():
+    calls = []
+
+    def post(url, **kwargs):
+        calls.append(_budget_provider(url))
+        raise requests.ReadTimeout("synthetic timeout")
+
+    env = _budget_env()
+    env.pop("RADON_LADDER_ALLOW_PREPAID")
+    reviewer = model.Reviewer(env=env, session=SimpleNamespace(post=post))
+    with pytest.raises(model.ModelError, match="ladder exhausted"):
+        reviewer.ask_text("select")
+    assert calls == ["anthropic"]
+
+
+def test_document_timeout_filter_does_not_restart_full_ladder_when_no_eligible_credentials():
+    calls = []
+
+    def post(url, **kwargs):
+        provider = _budget_provider(url)
+        calls.append(provider)
+        if provider == "anthropic":
+            raise requests.ReadTimeout("synthetic timeout")
+        return _budget_response(provider)
+
+    reviewer = model.Reviewer(env=_budget_env(), session=SimpleNamespace(post=post))
+    assert reviewer.ask_text("select") == {"candidates": []}
+    reviewer.env.pop("XAI_API_KEY")
+    with pytest.raises(model.ModelError) as error:
+        reviewer.ask_text("verify")
+    assert model.is_provider_outage(error.value)
+    assert calls == ["anthropic", "grok"]
+
+
+def test_document_timeout_on_earlier_model_cannot_exclude_winning_provider(monkeypatch):
+    from clients.model_ladder import LadderResult
+    calls = []
+
+    def complete(*args, **kwargs):
+        calls.append(kwargs.get("providers"))
+        return LadderResult(data={"supported": True}, text="{}", provider="grok", model="synthetic",
+                            attempted=("grok:network:ReadTimeout", "grok:ok"))
+
+    monkeypatch.setattr(model, "complete_text_json", complete)
+    reviewer = model.Reviewer(env=_budget_env())
+    assert reviewer.ask_text("first") == reviewer.ask_text("second") == {"supported": True}
+    assert calls[1] is None or "grok" in calls[1]
+
+
+@pytest.mark.parametrize("pipeline_version", ["v1", "v2"])
+@pytest.mark.parametrize("first_fails", [False, True])
+def test_reused_pipeline_resets_timeout_learning_for_each_document(tmp_path, monkeypatch, pipeline_version, first_fails):
+    from research import intake
+    calls = []
+
+    def post(url, **kwargs):
+        provider = _budget_provider(url)
+        calls.append(provider)
+        if provider == "anthropic":
+            raise requests.ReadTimeout("synthetic timeout")
+        return _budget_response(provider)
+
+    reviewer = model.Reviewer(env=_budget_env(), session=SimpleNamespace(post=post))
+    cls = pipeline.Pipeline if pipeline_version == "v1" else intake.Pipeline
+    pipe = cls(tmp_path, reviewer, SimpleNamespace())
+
+    def process(work, pdf, recent, out):
+        reviewer.ask_text("select")
+        reviewer.ask("reselect")
+        if first_fails and work["key"] == "first":
+            raise model.ModelError("synthetic provider unavailable after selection")
+        return []
+
+    monkeypatch.setattr(pipe, "_process", process)
+    if first_fails:
+        with pytest.raises(model.ModelError):
+            pipe.process({"key": "first"}, tmp_path / "first.pdf", [])
+    else:
+        assert pipe.process({"key": "first"}, tmp_path / "first.pdf", []) == []
+    assert pipe.process({"key": "second"}, tmp_path / "second.pdf", []) == []
+    assert calls == ["anthropic", "grok", "grok", "anthropic", "grok", "grok"]
+
+
+def test_intake_resets_distinct_injected_document_agents_once(tmp_path, monkeypatch):
+    from research import intake
+    calls = []
+
+    def agent(name):
+        return SimpleNamespace(begin_document=lambda: calls.append(name))
+
+    claims, producer, verifier, publisher = [agent(name) for name in ("claims", "producer", "verifier", "publisher")]
+    pipe = intake.Pipeline(tmp_path, claims, SimpleNamespace(), chart_producer=producer,
+                           chart_reviewer=verifier, publisher_reviewer=publisher)
+    monkeypatch.setattr(pipe, "_process", lambda *args: [])
+    pipe.process({"key": "first"}, tmp_path / "first.pdf", [])
+    assert sorted(calls) == ["claims", "producer", "publisher", "verifier"]
+    calls.clear()
+    pipe.chart_producer = claims
+    pipe.publisher_reviewer = verifier
+    pipe.process({"key": "second"}, tmp_path / "second.pdf", [])
+    assert sorted(calls) == ["claims", "verifier"]
+
+
+@pytest.mark.parametrize("attempt", ["anthropic:network:ReadTimeout:extra", "anthropic:ReadTimeout",
+                                      "anthropic:http_504", "anthropic:unparseable",
+                                      "anthropic:network:SomeTimeout", "anthropic:network:TimeoutExpired"])
+def test_document_timeout_filter_requires_exact_typed_diagnostic(monkeypatch, attempt):
+    from clients.model_ladder import LadderResult
+    calls = []
+
+    def complete(*args, **kwargs):
+        calls.append(kwargs.get("providers"))
+        return LadderResult(data={}, text="{}", provider="grok", model="synthetic",
+                            attempted=(attempt, "grok:ok"))
+
+    monkeypatch.setattr(model, "complete_text_json", complete)
+    reviewer = model.Reviewer(env=_budget_env())
+    reviewer.ask_text("first")
+    reviewer.ask_text("second")
+    assert calls[1] is None or "anthropic" in calls[1]
+
+
+def test_document_truncation_does_not_exclude_provider():
+    calls = []
+
+    def post(url, **kwargs):
+        provider = _budget_provider(url)
+        calls.append(provider)
+        response = _budget_response(provider)
+        if len(calls) == 1:
+            response.iter_content = lambda _: iter([b'{"stop_reason":"max_tokens","content":[{"type":"text","text":"{}"}]}'])
+        return response
+
+    reviewer = model.Reviewer(env=_budget_env(), session=SimpleNamespace(post=post))
+    with pytest.raises(model.ModelError, match="complete response"):
+        reviewer.ask_text("first")
+    assert reviewer.ask_text("second") == {"candidates": []}
+    assert calls == ["anthropic", "anthropic"]
+
+
+@pytest.mark.parametrize("method", ["ask_text", "ask"])
+@pytest.mark.parametrize("iterator_name", ["iter_content", "iter_bytes"])
+@pytest.mark.parametrize("error_class,quarantined", [(httpx.ReadTimeout, True),
+                                                     (requests.ReadTimeout, True),
+                                                     (TimeoutError, True),
+                                                     (httpx.TimeoutException, False)])
+def test_document_timeout_during_stream_body_falls_back_and_closes_response(method, iterator_name, error_class, quarantined):
+    calls, closed = [], []
+
+    def post(url, **kwargs):
+        provider = _budget_provider(url)
+        calls.append(provider)
+        assert kwargs["stream"] is True
+        if provider != "anthropic":
+            return _budget_response(provider)
+
+        def chunks(_size):
+            yield b'{"stop_reason":"end_turn","content":['
+            raise error_class("synthetic body timeout with private-source-text")
+
+        return SimpleNamespace(status_code=200, **{iterator_name: chunks}, close=lambda: closed.append(provider))
+
+    reviewer = model.Reviewer(env=_budget_env(), session=SimpleNamespace(post=post))
+    assert getattr(reviewer, method)("select") == {"candidates": []}
+    assert getattr(reviewer, method)("verify") == {"candidates": []}
+    assert calls == (["anthropic", "grok", "grok"] if quarantined else
+                     ["anthropic", "grok", "anthropic", "grok"])
+    assert closed == (["anthropic"] if quarantined else ["anthropic", "anthropic"])
+
+
+@pytest.mark.parametrize("method", ["ask_text", "ask"])
+@pytest.mark.parametrize("failure,match", [("size", "exceeds limit"),
+                                          ("truncation", "complete response"),
+                                          ("json", "malformed response")])
+def test_document_stream_non_transport_failures_remain_terminal_and_closed(method, failure, match):
+    calls, closed = [], []
+
+    def post(url, **kwargs):
+        provider = _budget_provider(url)
+        calls.append(provider)
+        if len(calls) != 1:
+            return _budget_response(provider)
+        chunks = {
+            "size": [b"x" * 2_000_001],
+            "truncation": [b'{"stop_reason":"max_tokens","content":[{"type":"text","text":"{}"}]}'],
+            "json": [b'{"stop_reason":'],
+        }[failure]
+        return SimpleNamespace(status_code=200, iter_content=lambda _: iter(chunks), close=lambda: closed.append(provider))
+
+    reviewer = model.Reviewer(env=_budget_env(), session=SimpleNamespace(post=post))
+    with pytest.raises(model.ModelError, match=match):
+        getattr(reviewer, method)("select")
+    assert calls == closed == ["anthropic"]
+    assert getattr(reviewer, method)("verify") == {"candidates": []}
+    assert calls == ["anthropic", "anthropic"]
