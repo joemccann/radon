@@ -1261,3 +1261,7 @@ When an operator asks for automated release or updater recovery, ship the durabl
 
 - A generic incomplete response does not prove max_tokens, provider outage or bad PDF data. Retain only allowlisted terminal reasons and bounded numeric usage through the existing safe error path before changing request budgets or prompts. Never retain provider content or accept partial JSON.
 - Existing selection artifacts may be stale: compare their timestamp with the current attempt's figure crops before asserting a fresh SELECT completed or that the artifact is absent.
+
+### 2026-10-17: Verify source pixels and report dates after recovery
+
+- A mechanically valid publication still needs image-to-source review. Keep self-contained raster boundaries separate from nearby body prose, while preserving explicit external titles and credits. Verify all cited claims, author attribution and the printed byline date against the complete PDF. Derive month aliases from canonical names; an extra alias must never shift later months.

@@ -155,3 +155,7 @@ Intake v2 requires an exact boolean `complete_figure:true` from FIGURE MATCH and
 
 
 Incomplete review responses remain terminal for that model call and never publish partial JSON. Their persisted safe error now includes only an allowlisted terminal reason (otherwise missing/other) and bounded integer input/output token counts (otherwise unknown). This allows operators to distinguish an actual output limit from another stop condition on the next normal retry without retaining provider content. Request budgets, models, credentials, backoff and verification gates do not change.
+
+### Native raster bounds and report-date aliases
+
+Self-contained raster clusters keep their image bounds plus explicitly matched external title/source lines and the normal crop margin. Nearby body prose is not absorbed; vector and mixed clusters retain text growth. Report-date month aliases derive from the twelve full month names, with `sept` explicitly mapped to September. Date exclusions, folder-date future cutoff and text/PDF/Dropbox fallback order remain unchanged.

@@ -65,7 +65,8 @@ _EXCLUDE_BEFORE = re.compile(
     r'|\d(?:st|nd|rd|th)?\s*[-–—]\s*(?:\d{1,2}(?:st|nd|rd|th)?\s*)?|\b(?:to|through|until|from)\s*)$', re.I)
 # A trailing range partner ("- 17 September 2026"), not a clock time ("- 05:45 PM").
 _EXCLUDE_AFTER = re.compile(rf'^\s*(?:[-–—]\s*\d{{1,2}}(?:st|nd|rd|th)?\s+(?:{_MONTH}|20\d\d)|(?:to|through|until)\b)', re.I)
-_MONTH_INDEX = {m: i % 12 + 1 for i, m in enumerate(MONTHS.split('|') + MONTHS_ABBR.split('|'))}
+_MONTH_INDEX = {alias: number for number, month in enumerate(MONTHS.split('|'), 1)
+                for alias in (month, month[:3])}
 _MONTH_INDEX['sept'] = 9
 
 
