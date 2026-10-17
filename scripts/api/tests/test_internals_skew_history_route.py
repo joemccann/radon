@@ -34,7 +34,7 @@ def uw_wire(monkeypatch):
 
     paths: list[str] = []
 
-    async def _candidates(ticker, expiry=None):
+    async def _candidates(ticker, expiry=None, client=None):
         return ([], ["2026-12-18"], "uw")
 
     def _get(self, endpoint, params=None):

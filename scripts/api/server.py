@@ -1970,12 +1970,19 @@ def _needs_deeper_backfill(rows: List[dict], timeframe: str) -> bool:
 async def _resolve_expiry_candidates(
     ticker: str,
     expiry: Optional[str] = None,
+    client: Optional[UWClient] = None,
 ) -> Tuple[List[str], List[str], str]:
     normalized_ticker = ticker.upper()
     uw_candidates: List[str] = []
     try:
-        with UWClient() as client:
+        owns_client = client is None
+        if owns_client:
+            client = UWClient()
+        try:
             expiry_breakdown = client.get_expiry_breakdown(normalized_ticker)
+        finally:
+            if owns_client and client is not None:
+                client.close()
         uw_candidates = _sort_expiry_candidates(_extract_expiry_candidates(expiry_breakdown))
     except Exception:
         uw_candidates = []
@@ -2015,58 +2022,63 @@ async def _fetch_risk_reversal_history(
     max_expiries: int = 8,
 ) -> Tuple[List[dict], List[str], str]:
     normalized_ticker = ticker.upper()
-    ib_candidates, uw_candidates, expiry_source = await _resolve_expiry_candidates(normalized_ticker, expiry)
-    selected_candidates = _compose_expiry_candidates(ib_candidates, uw_candidates, max_expiries)
-
     last_error: Optional[BaseException] = None
     merged_rows: List[List[dict]] = []
     used_expiries: List[str] = []
     requested_expiry = _normalize_expiry_string(expiry)
 
-    for candidate_expiry in selected_candidates:
-        try:
-            with UWClient() as client:
+    # One Session per ticker (PERF-014): expiry discovery and every skew
+    # GET used to open a fresh TLS client.
+    with UWClient() as client:
+        ib_candidates, uw_candidates, expiry_source = await _resolve_expiry_candidates(
+            normalized_ticker, expiry, client=client
+        )
+        selected_candidates = _compose_expiry_candidates(
+            ib_candidates, uw_candidates, max_expiries
+        )
+
+        for candidate_expiry in selected_candidates:
+            try:
                 payload = client.get_historical_risk_reversal_skew(
                     normalized_ticker,
                     expiry=candidate_expiry,
                     timeframe=timeframe,
                     delta=delta,
                 )
-            rows = _normalize_risk_reversal_series(payload)
-            if rows:
-                merged_rows.append(rows)
-                used_expiries.append(candidate_expiry)
-        except UWNotFoundError as exc:
-            last_error = exc
-            if requested_expiry and candidate_expiry == requested_expiry:
+                rows = _normalize_risk_reversal_series(payload)
+                if rows:
+                    merged_rows.append(rows)
+                    used_expiries.append(candidate_expiry)
+            except UWNotFoundError as exc:
+                last_error = exc
+                if requested_expiry and candidate_expiry == requested_expiry:
+                    continue
+            except UWAPIError as exc:
+                last_error = exc
                 continue
-        except UWAPIError as exc:
-            last_error = exc
-            continue
 
-    merged = _merge_risk_reversal_series(merged_rows)
-    if "uw" in expiry_source and _needs_deeper_backfill(merged, timeframe):
-        extra_candidates = _limit_expiry_candidates(
-            [candidate for candidate in uw_candidates if candidate not in selected_candidates],
-            12,
-        )
-        for candidate_expiry in extra_candidates:
-            try:
-                with UWClient() as client:
+        merged = _merge_risk_reversal_series(merged_rows)
+        if "uw" in expiry_source and _needs_deeper_backfill(merged, timeframe):
+            extra_candidates = _limit_expiry_candidates(
+                [candidate for candidate in uw_candidates if candidate not in selected_candidates],
+                12,
+            )
+            for candidate_expiry in extra_candidates:
+                try:
                     payload = client.get_historical_risk_reversal_skew(
                         normalized_ticker,
                         expiry=candidate_expiry,
                         timeframe=timeframe,
                         delta=delta,
                     )
-                rows = _normalize_risk_reversal_series(payload)
-                if rows:
-                    merged_rows.append(rows)
-                    used_expiries.append(candidate_expiry)
-            except UWAPIError as exc:
-                last_error = exc
-                continue
-        merged = _merge_risk_reversal_series(merged_rows)
+                    rows = _normalize_risk_reversal_series(payload)
+                    if rows:
+                        merged_rows.append(rows)
+                        used_expiries.append(candidate_expiry)
+                except UWAPIError as exc:
+                    last_error = exc
+                    continue
+            merged = _merge_risk_reversal_series(merged_rows)
 
     if merged:
         return merged, used_expiries, expiry_source
