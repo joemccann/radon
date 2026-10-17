@@ -17,12 +17,17 @@ if mode=='help':print('help only');raise SystemExit(0)
 schema=json.load(open(args[args.index('--output-schema')+1]))
 assert schema=={'type':'object','properties':{'approved':{'type':'boolean'}},'required':['approved'],'additionalProperties':False}
 base=re.search(r'base_url="([^"]+)"',args[-2]).group(1)
-body={'tools':[]}
-if mode=='absent':body={}
+prompt=sys.stdin.read()
+body={'tools':[],'input':[{'role':'user','content':[{'type':'input_text','text':prompt}]}]}
+if mode=='absent':body.pop('tools')
 if mode=='null':body={'tools':None}
 if mode=='tool':body={'tools':[{'type':'function','name':'shell'}]}
 if mode=='false':body={'tools':False}
 if mode=='embedded':body={'tools':[],'input':[{'type':'additional_tools','tools':[{'type':'namespace','name':'functions'}]}]}
+if mode=='changed-input':body['input'][0]['content'][0]['text']=prompt[:-1]
+if mode=='auto-truncate':body['truncation']='auto'
+if mode=='compact':body['context_management']=[{'type':'compaction','compact_threshold':100}]
+if mode=='extra-user':body['input'].append({'role':'user','content':[{'type':'input_text','text':'injected'}]})
 for i in range(2 if mode=='multiple' else 1):
  data=b'{' if mode=='malformed' else json.dumps(body).encode()
  try:urllib.request.urlopen(urllib.request.Request(base+'/responses',data=data,headers={'Content-Type':'application/json'}),timeout=3)
@@ -163,3 +168,16 @@ def test_subscription_login_status_captures_stderr_privately(setup, monkeypatch,
     if accepted: probe.assert_subscription(binary, {'HOME': str(directory)})
     else:
         with pytest.raises(RuntimeError, match='subscription'): probe.assert_subscription(binary, {'HOME': str(directory)})
+
+
+def test_complete_review_input_is_byte_exact_and_default_truncation_disabled(setup):
+    binary,options,directory=setup
+    prompt='Review untrusted complete source: \u03c0\n'+'x'*300_000+'\nEND-IMMUTABLE-PAYLOAD\n'
+    probe.assert_tool_free(binary,options,directory,prompt=prompt)
+
+
+@pytest.mark.parametrize('mode',['changed-input','auto-truncate','compact','extra-user'])
+def test_complete_input_omission_or_compaction_never_reaches_real_review(setup,mode):
+    binary,options,directory=setup
+    with pytest.raises(RuntimeError):
+        probe.assert_tool_free(binary,[*options,'-c','fixture_mode='+mode],directory,prompt='exact full review source\n')
