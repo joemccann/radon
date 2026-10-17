@@ -78,7 +78,7 @@ def _production_host_jobs() -> dict[str, dict]:
 def test_the_workflow_has_jobs_that_reach_the_production_host() -> None:
     # Guards the two tests below from passing vacuously if the SSH action or
     # the secret name is ever renamed.
-    assert _production_host_jobs(), "no job references secrets.VPS_HOST"
+    assert _production_host_jobs(), "no job reaches the production host"
 
 
 def test_every_job_that_ssh_es_to_production_waits_on_the_full_gate() -> None:
@@ -292,9 +292,11 @@ def test_the_population_still_covers_every_literal_vps_host_job() -> None:
     literal = {
         name
         for name, job in jobs.items()
-        if "secrets.VPS_HOST" in yaml.safe_dump(job, default_flow_style=False)
+        if "secrets.VPS_TAILNET_HOST" in yaml.safe_dump(job, default_flow_style=False)
     }
-    assert literal, "no job references secrets.VPS_HOST any more; re-derive this pin"
+    assert literal, (
+        "no job references secrets.VPS_TAILNET_HOST any more; re-derive this pin"
+    )
     assert literal <= set(_production_host_jobs()), (
         "the mechanism-derived population lost jobs the literal secret name still finds"
     )

@@ -623,6 +623,30 @@ runs plain sshd with key auth and Tailscale SSH off
 (`tailscale set --ssh=false`); the `tcp:22` grant reaches that sshd on the
 tailnet address.
 
+CI deploy jobs join as ephemeral `tag:ci` nodes and SSH to the app host's
+tailnet address (`secrets.VPS_TAILNET_HOST`, `100.112.32.16`). The checked-in
+policy owns that grant; apply it before the first tailnet deploy:
+
+```json
+"tagOwners": {
+  "tag:ci": ["group:operator"]
+}
+```
+
+```json
+{
+  "src": ["tag:ci"],
+  "dst": ["tag:radon-app"],
+  "ip":  ["tcp:22"]
+}
+```
+
+That is SSH only: no 8321, no broker, no ops. The policy `tests` block asserts
+`tag:ci` accepts `tag:radon-app:22` and denies the other service ports.
+Creating the OAuth client, saving this grant live, and adding GitHub secrets
+are operator steps (see [CI deploy over the tailnet](#ci-deploy-over-the-tailnet));
+merging the file does not apply them.
+
 **Symptom:** peer access is broader than the declared policy, or a required
 operator path fails after a policy change.
 **Prerequisites:** operator access to the Tailscale admin console, a saved live
@@ -719,7 +743,7 @@ Declared ufw rulesets, operator-run only. Deploy (`deploy.sh`, the root helper, 
 
 Sources are env, IPv4 `/32` only (anything wider is refused): `RADON_FW_OPERATOR_SOURCES` (laptop `100.98.36.17`, Mac mini `100.87.184.89`, phone `100.113.204.20`, plus a public recovery address) and `RADON_FW_OPS_SOURCES` (future ops hosts; leave empty until they exist). Each ops `/32` gets `allow 8341/tcp` then `deny` everything else, ahead of every broad allow (ufw is first-match).
 
-- **App:** 22/tcp any (CI deploys over SSH from GitHub-hosted runners, whose addresses are not fixed; narrowing 22 needs the deploy path moved first), 80/443 any, 41641/udp, 8321 from operator `/32`s and from `10.0.0.4` (broker watchdog). The blanket `allow in on tailscale0` and the `10.0.0.0/16` 8321 rule are gone.
+- **App:** 22/tcp any (CI now SSHes over the tailnet; this ufw allow still matches `tailscale0`. Do not narrow it in this cutover. Public SSH is the Hetzner Cloud Firewall rule below), 80/443 any, 41641/udp, 8321 from operator `/32`s and from `10.0.0.4` (broker watchdog). The blanket `allow in on tailscale0` and the `10.0.0.0/16` 8321 rule are gone.
 - **Broker** (ufw inactive today): 22 from operator `/32`s only (refuses to run with none), 4001 and 8340 from `10.0.0.2`, 41641/udp, deny else.
 - **Docker caveat:** ports Docker publishes (broker `10.0.0.4:4001`) are DNAT'd before ufw's INPUT chain, so the 4001 rule documents intent but does not filter. 4001 is protected by its bind address: `10.0.0.4` is reachable only from radon-private, whose only other member is the app.
 
@@ -737,7 +761,7 @@ As root, set `BACKUP=<printed /etc/radon-ufw-rollback.* path>`, then run `cp -a 
 
 `fw-radon-app.json`, `fw-radon-broker.json`, `fw-radon-ops.json` are `hcloud firewall replace-rules` rule files, inbound only (anything not listed is dropped; outbound is open). `hcloud_firewalls.py` renders `__OPERATOR_RECOVERY_IP__/32` from `--recovery-ip` (one public IPv4) and prints the commands; `--apply` runs them with your own `hcloud` context. Deploy never calls it (`cloud/tests/test_hetzner_firewalls.py` pins the shapes and that fact).
 
-- **fw-radon-app:** 22, 80, 443 any; 41641/udp any. SSH stays open to any because CI deploys over SSH from GitHub-hosted runners; restricting it needs the deploy path moved first.
+- **fw-radon-app:** 22, 80, 443 any; 41641/udp any. The checked-in `fw-radon-app.json` still opens public tcp/22 (this change does not edit that file). After CI deploys over the tailnet and one green deploy is confirmed, remove only that public 22 rule; see [CI deploy over the tailnet](#ci-deploy-over-the-tailnet).
 - **fw-radon-broker:** 22 from the recovery `/32`; 41641/udp any. No web ports.
 - **fw-radon-ops:** 22 from the recovery `/32`; 80, 443 any; 41641/udp any.
 - No 4001/8340 rules: Hetzner Cloud Firewalls filter the public interface only, so the app-to-broker private-net path (`10.0.0.2` -> `10.0.0.4:4001/8340`) never passes them. That path is held by the bind addresses and the broker ufw set above.
@@ -776,6 +800,63 @@ session open, and involve the operator with provider access if state or recovery
 access cannot be established. Do not continue to the next server.
 
 Protection (once, both servers): `hcloud server enable-protection ib-gateway delete rebuild` and `hcloud server enable-protection radon-broker delete rebuild`. Verify `hcloud server describe <name> -o json | jq .protection` shows `delete` and `rebuild` true. Disable with `disable-protection` before a deliberate rebuild (spof-host-split.md "Never").
+
+### CI deploy over the tailnet
+
+`stage-release`, `prepull-images`, and `deploy` in `.github/workflows/ci.yml`
+join the tailnet with `tailscale/github-action` (OAuth client, `tags: tag:ci`)
+then SSH to `secrets.VPS_TAILNET_HOST` (`100.112.32.16`) with
+`secrets.VPS_SSH_KEY` and host-key `secrets.VPS_SSH_FINGERPRINT`. They no
+longer use `secrets.VPS_HOST`. The public address secret stays defined for
+anything that still needs it; these three jobs do not read it.
+
+Hetzner Cloud Firewalls filter the public NIC only. Tailnet SSH to port 22
+does not traverse `fw-radon-app`. Closing public 22 is safe only after a
+green deploy has used the tailnet path.
+
+Cutover, in this order. Do not skip or reorder:
+
+1. **Create the Tailscale OAuth client and ACL.** In the Tailscale admin
+   console, add `tag:ci` to tagOwners (`group:operator`), save the grant
+   above (`src tag:ci` -> `dst tag:radon-app` `tcp:22`), and require the
+   policy tests to pass. Create an OAuth client whose tags are exactly
+   `tag:ci` with the `auth_keys` write scope (the GitHub Action mints an
+   ephemeral auth key; every tag on the client must match `tags: tag:ci`).
+   Add these secrets to the GitHub **Production** environment (same place as
+   `VPS_SSH_KEY`, main-only):
+   - `TS_OAUTH_CLIENT_ID`
+   - `TS_OAUTH_SECRET`
+   - `VPS_TAILNET_HOST` = `100.112.32.16`
+   - `VPS_SSH_FINGERPRINT` = SHA256 fingerprint of the app host key
+     (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256` on the
+     host; store the `SHA256:...` value the ssh-action `fingerprint` input
+     accepts)
+2. **Merge, then confirm one successful deploy over the tailnet.** Watch
+   `gh run list --workflow=ci.yml --limit 1` on the first main push after
+   merge. The three host jobs must Connect Tailscale then SSH. Do not touch
+   `fw-radon-app` until that run is green.
+3. **Only then** remove the public port-22 rule from Hetzner firewall
+   `fw-radon-app` (edit `cloud/hetzner/firewalls/fw-radon-app.json` in a
+   follow-up and apply with `hcloud_firewalls.py`; this change does not
+   edit that file). Keep 80/443 and 41641/udp. Verify
+   `https://app.radon.run/health` and that a subsequent CI deploy still
+   succeeds.
+4. **Recovery** after public 22 is closed is the Hetzner web console
+   (not public SSH). Keep a tailnet SSH session from an operator device
+   while applying the firewall change. Rollback is restoring the saved
+   `fw-radon-app` rules, including public 22, then verifying console and
+   tailnet SSH.
+
+**Stop:** stop if the OAuth client cannot mint a tagged key, if Connect
+Tailscale or SSH fails, or if a deploy after closing public 22 fails.
+Re-open public 22 from the console before further diagnosis.
+**Verification:** one green `ci.yml` deploy whose SSH target was the
+tailnet address, then (only after step 3) a public `nc` to port 22 on the
+app's public IP fails while tailnet SSH still works.
+**Rollback:** restore the previous live tailnet policy and, if step 3 ran,
+the previous `fw-radon-app` rules. The workflow can SSH to
+`secrets.VPS_HOST` again only by reverting the ci.yml change; prefer
+restoring firewall and ACL first.
 
 ## Health monitoring (isolated daemon + edge surface)
 
@@ -877,7 +958,8 @@ including backup, review, stop conditions and post-commit recovery.
 
 `git push origin main` triggers `.github/workflows/ci.yml`. Superseded test jobs
 may cancel independently, but the production deploy job uses a non-canceling
-`deploy-production` concurrency group. It SSHes to Hetzner as `radon`, extracts
+`deploy-production` concurrency group. It joins the tailnet as `tag:ci` and
+SSHes to the app host tailnet address as `radon`, extracts
 `cloud/` from the tested `${{ github.sha }}` into an immutable support runner at
 `/home/radon/.radon-deploy-runners/<sha>.<run>/cloud`, and invokes that runner's
 deploy script. The monorepo [`cloud/`](../cloud/) directory is the canonical
