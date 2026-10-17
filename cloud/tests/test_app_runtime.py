@@ -877,7 +877,7 @@ def test_run_refuses_to_start_when_the_notify_proxy_cannot_bind(tmp_path: Path) 
     failing_python = tmp_path / "failing-python"
     lease_dir = shlex.quote(str(tmp_path / 'state' / 'ib-lease'))
     _write_executable(failing_python,
-        f'#!/bin/bash\nif [[ "${{2:-}}" == {lease_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
+        f'#!/bin/bash\nif [[ "${{3:-}}" == {lease_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
     # The injected proxy never binds. Exercise all admission polls without
     # paying their sleep delay on the shared runner; keep the timeout intact.
     _write_executable(tmp_path / "sleep", "#!/bin/bash\nexit 0\n")
@@ -1187,7 +1187,7 @@ def test_run_api_cleans_staged_credential_on_pre_exec_failure(
     lease_dir = shlex.quote(str(tmp_path / 'state' / 'ib-lease'))
     control_dir = shlex.quote(str(tmp_path / 'state' / 'control'))
     _write_executable(failing_python,
-        f'#!/bin/bash\nif [[ "${{2:-}}" == {private_anchor} || "${{2:-}}" == {secret_store} || "${{2:-}}" == {lease_dir} || "${{2:-}}" == {control_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
+        f'#!/bin/bash\nif [[ "${{3:-}}" == {private_anchor} || "${{3:-}}" == {secret_store} || "${{3:-}}" == {lease_dir} || "${{3:-}}" == {control_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
     result = _run(
         tmp_path,
         ["run", "radon-api.service"],
