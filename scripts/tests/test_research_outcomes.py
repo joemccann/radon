@@ -397,3 +397,79 @@ def test_expiry_transport_calls_share_the_remaining_deadline(monkeypatch):
                                   ('["HELD_EXPIRED"]',)).fetchone() == (4,)
     finally:
         connection.close()
+
+
+@pytest.fixture
+def outcome_store(monkeypatch):
+    """Execute the production upsert against the real outcome schema."""
+    connection = _outcome_db()
+    connection.execute("ALTER TABLE research_outcomes ADD COLUMN context_json TEXT NOT NULL DEFAULT '{}'")
+    clock = SimpleNamespace(now=datetime(2026, 10, 14, 12, 0, tzinfo=timezone.utc))
+
+    class ClockDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock.now if tz is None else clock.now.astimezone(tz)
+
+    def execute(sql, args=(), **kwargs):
+        cursor = connection.execute(sql, args)
+        return cursor.fetchall() if cursor.description else []
+
+    monkeypatch.setattr(publish, 'datetime', ClockDateTime)
+    monkeypatch.setattr(publish, 'hrana_execute', execute)
+    yield connection, clock
+    connection.close()
+
+
+def test_fresh_hold_after_expiry_gets_one_new_ttl_without_replay_extending_it(outcome_store):
+    from datetime import timedelta
+    connection, clock = outcome_store
+    publish.record_outcome(work(), review())
+    first_held = clock.now.isoformat()
+    clock.now += timedelta(days=2)
+    connection.execute(publish._EXPIRE_SQL, (clock.now.isoformat(), publish.held_cutoff(clock.now).isoformat())).fetchall()
+    assert connection.execute('SELECT outcome,expired_at FROM research_outcomes').fetchone() == ('dropped', clock.now.isoformat())
+
+    clock.now += timedelta(days=1)
+    restarted = clock.now.isoformat()
+    publish.record_outcome(work(), review())
+    outcome, held_at, expired_at, codes = connection.execute('SELECT outcome,held_at,expired_at,reason_codes FROM research_outcomes').fetchone()
+    assert outcome == 'held' and held_at == restarted and held_at != first_held
+    assert expired_at is None and 'HELD_EXPIRED' not in json.loads(codes)
+
+    clock.now += timedelta(hours=23)
+    publish.record_outcome(work(), review())
+    assert connection.execute('SELECT held_at,expired_at FROM research_outcomes').fetchone() == (restarted, None)
+    assert connection.execute(publish._EXPIRE_SQL, (clock.now.isoformat(), publish.held_cutoff(clock.now).isoformat())).fetchall() == []
+    clock.now += timedelta(hours=2)
+    assert connection.execute(publish._EXPIRE_SQL, (clock.now.isoformat(), publish.held_cutoff(clock.now).isoformat())).fetchall() == [('k' * 64,)]
+    assert connection.execute('SELECT outcome,held_at FROM research_outcomes').fetchone() == ('dropped', restarted)
+
+
+def test_publishing_an_expired_hold_clears_expiry_and_keeps_historical_hold_time(outcome_store):
+    from datetime import timedelta
+    connection, clock = outcome_store
+    publish.record_outcome(work(), review())
+    held_at = clock.now.isoformat()
+    clock.now += timedelta(days=2)
+    connection.execute(publish._EXPIRE_SQL, (clock.now.isoformat(), publish.held_cutoff(clock.now).isoformat())).fetchall()
+    clock.now += timedelta(hours=1)
+    publish.record_outcome(work(), review(posts=[{'id': 'synthetic-published'}], audit=[]))
+    assert connection.execute('SELECT outcome,posts,held_at,expired_at,reason_codes FROM research_outcomes').fetchone() == \
+        ('published', 1, held_at, None, '[]')
+
+
+@pytest.mark.parametrize('intermediate', ['dropped', 'published'])
+def test_returning_to_held_starts_new_clock_after_a_different_decision(outcome_store, intermediate):
+    from datetime import timedelta
+    connection, clock = outcome_store
+    publish.record_outcome(work(), review())
+    original = clock.now.isoformat()
+    clock.now += timedelta(hours=1)
+    changed = (review(posts=[{'id': 'synthetic-published'}], audit=[]) if intermediate == 'published' else
+               review(outcome='dropped', reason_code='DOC_TYPE_FX_PAIR_NOTE', audit=[], selection=None))
+    publish.record_outcome(work(), changed)
+    assert connection.execute('SELECT outcome,held_at FROM research_outcomes').fetchone() == (intermediate, original)
+    clock.now += timedelta(days=2)
+    publish.record_outcome(work(), review())
+    assert connection.execute('SELECT outcome,held_at,expired_at FROM research_outcomes').fetchone() == ('held', clock.now.isoformat(), None)
