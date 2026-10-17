@@ -158,6 +158,9 @@ every 5 minutes:
 
 - `remote_ip` allowlist of the four TradingView addresses.
 - `request_body max_size 16KB`.
+- The site access log filters `request>uri` for this path, so the authenticator
+  the path carries is not written to `/var/log/caddy/radon.log` in cleartext.
+  The route, status and duration are still logged; the token reads `REDACTED`.
 - Pinned in `cloud/tests/test_caddyfile.py`. A TradingView IP change shows up as a spike
   in refused requests, which the drain job reports.
 
