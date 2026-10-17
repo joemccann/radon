@@ -178,6 +178,23 @@ describe("the share card never lays out an unbounded query string", () => {
     }
   });
 
+  it("clamps a finite hero figure that formats past the cost bound", async () => {
+    // 1e308 is finite. fmtDollar prints 416 characters with en-US grouping,
+    // past SHARE_PNL_MAX_TEXT_CHARS. The description-only cases stay green
+    // if the hero clamp is removed.
+    const params = new URLSearchParams({
+      description: "Closed AAOI",
+      pnl: "1e308",
+      pnlPct: "1e308",
+      format: "card",
+    });
+    expect((await GET(new Request(`https://radon.run/api/share/pnl?${params}`))).status).toBe(200);
+    for (const s of strings(rendered.tree)) {
+      expect(s.length).toBeLessThanOrEqual(SHARE_PNL_MAX_TEXT_CHARS);
+      expect(s).toMatch(EMITTABLE);
+    }
+  });
+
   it("keeps 400 for an absent description and renders a blank one as before", async () => {
     expect((await GET(new Request("https://radon.run/api/share/pnl?pnl=1"))).status).toBe(400);
     // A whitespace-only contract_desc reaches this route from the blotter share
