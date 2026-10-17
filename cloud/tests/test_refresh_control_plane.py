@@ -119,6 +119,12 @@ def _diff_marker(source_rel: str) -> str:
     return "\n# radon-refresh-test\n"
 
 
+def _source_path(cloud: Path, relative: str) -> Path:
+    if relative.startswith("repo/"):
+        return cloud.parent / relative.removeprefix("repo/")
+    return cloud / relative
+
+
 class Sandbox:
     def __init__(self, tmp_path: Path) -> None:
         self.tmp = tmp_path
@@ -172,9 +178,9 @@ exit 0
         for source_rel, target, mode in zip(
             CONTROL_PLANE_SOURCES, CONTROL_PLANE_TARGETS, CONTROL_PLANE_MODES, strict=True
         ):
-            source = self.cloud / source_rel
+            source = _source_path(self.cloud, source_rel)
             source.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(CLOUD_ROOT / source_rel, source)
+            shutil.copy2(_source_path(CLOUD_ROOT, source_rel), source)
             installed = self.rootfs / target.lstrip("/")
             installed.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, installed)
@@ -211,7 +217,7 @@ exit 0
         for source_rel, target in zip(
             CONTROL_PLANE_SOURCES, CONTROL_PLANE_TARGETS, strict=True
         ):
-            digest = _sha256_path(self.cloud / source_rel)
+            digest = _sha256_path(_source_path(self.cloud, source_rel))
             lines.append(f"{digest}  {source_rel} -> {target}")
         self.manifest.parent.mkdir(parents=True, exist_ok=True)
         self.manifest.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -226,7 +232,7 @@ exit 0
         return self.rootfs / CONTROL_PLANE_TARGETS[index].lstrip("/")
 
     def commit_sources(self) -> None:
-        _git(self.tmp, "add", "--force", "cloud")
+        _git(self.tmp, "add", "--force", "cloud", "scripts")
         _git(self.tmp, "commit", "--allow-empty", "-m", "control-plane sources")
 
     def mutate_source(self, source_rel: str) -> None:
@@ -236,7 +242,7 @@ exit 0
 
     def mutate_source_uncommitted(self, source_rel: str) -> None:
         """What an attacker with the radon account can do: edit, never commit."""
-        path = self.cloud / source_rel
+        path = _source_path(self.cloud, source_rel)
         path.write_text(path.read_text(encoding="utf-8") + _diff_marker(source_rel), encoding="utf-8")
 
     def snapshot_installed(self) -> dict[Path, bytes]:

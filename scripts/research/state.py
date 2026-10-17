@@ -289,21 +289,33 @@ class State:
     def work_key_for_file(self, file_id):
         if not file_id:
             return None
-        row = self.db.execute("""SELECT key FROM work WHERE file_id=? AND status IN ('complete','published')
+        row = self.db.execute("""SELECT key,status FROM work WHERE file_id=?
             ORDER BY rowid DESC LIMIT 1""", (file_id,)).fetchone()
-        return row[0] if row else None
+        return row[0] if row and row[1] in ('pending', 'processing', 'complete', 'published') else None
 
-    def requeue_with_note(self, key, note):
+    def has_live_work(self, key):
+        return bool(self.db.execute("""SELECT 1 FROM work WHERE key=?
+            AND status IN ('pending','processing','complete','published')""", (key,)).fetchone())
+
+    def requeue_with_note(self, key, note, feedback_id=None):
         # Only finished work is re-queued; a document still in flight keeps its current review.
         with self.db:
-            return bool(self.db.execute("""UPDATE work SET status='pending',attempts=0,available_at=0,result=NULL,error=NULL,note=?
-                WHERE key=? AND status IN ('complete','published')""", (note, key)).rowcount)
+            updated = bool(self.db.execute("""UPDATE work SET status='pending',attempts=0,available_at=0,result=NULL,error=NULL,note=?
+                WHERE key=? AND status IN ('complete','published')
+                AND (? IS NULL OR NOT EXISTS(SELECT 1 FROM feedback_handled WHERE id=?))""",
+                (note, key, feedback_id, feedback_id)).rowcount)
+            if updated and feedback_id is not None:
+                # A failed acknowledgement rolls the queue mutation back too.
+                self.db.execute('INSERT INTO feedback_handled VALUES(?,?)', (feedback_id, time.time()))
+            return updated
 
-    def park(self, key, retry_at):
-        # A provider outage is not a document failure: give the attempt back and wait for the provider.
+    def park(self, key, retry_at, reason='provider_outage'):
+        # Infrastructure outages are not document failures: give the attempt back and wait.
+        if reason not in ('provider_outage', 'database_unavailable'):
+            raise ValueError('Invalid research park reason')
         with self.db:
-            self.db.execute("""UPDATE work SET status='pending',attempts=MAX(0,attempts-1),error='provider_outage',available_at=?
-                WHERE key=? AND status='processing'""", (max(time.time(), retry_at), key))
+            self.db.execute("""UPDATE work SET status='pending',attempts=MAX(0,attempts-1),error=?,available_at=?
+                WHERE key=? AND status='processing'""", (reason, max(time.time(), retry_at), key))
 
     def recover(self):
         with self.db:

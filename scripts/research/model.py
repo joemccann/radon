@@ -45,14 +45,36 @@ class Reviewer:
             self.env["CLAUDE_CODE_OAUTH_TOKEN"] = api_key
         self.model = model or self.env.get("RADON_RESEARCH_MODEL")
         self.session = session
+        self.begin_document()
         if not wired_providers(self.env):
             raise ModelError("No keyed model provider is configured for research review")
+
+    def begin_document(self):
+        """Retry every configured provider for each PDF, including reused pipelines."""
+        self._document_timeouts = {False: set(), True: set()}
+
+    def _providers(self, has_images):
+        providers = tuple(name for name in wired_providers(self.env)
+                          if name not in self._document_timeouts[has_images])
+        if not providers:
+            # The shared ladder treats an empty tuple as its full default order.
+            raise ModelError("Research reviewer unavailable: no eligible provider remains for this document")
+        return providers
+
+    def _remember_timeouts(self, result, has_images):
+        timeout_classes = {"ReadTimeout", "ConnectTimeout", "WriteTimeout", "PoolTimeout", "Timeout", "TimeoutError"}
+        for attempt in result.attempted:
+            parts = attempt.split(":")
+            if (len(parts) == 3 and parts[1] == "network" and parts[2] in timeout_classes
+                    and parts[0] != result.provider):
+                self._document_timeouts[has_images].add(parts[0])
 
     def ask_text(self, instruction):
         """Text-only JSON completion (intake v2 SELECT): no images, larger output budget, cheapest text rung."""
         try:
             result = complete_text_json(
                 instruction,
+                providers=self._providers(False),
                 system=_policy_text(),
                 env=self.env,
                 post=self.session.post if self.session is not None else None,
@@ -68,6 +90,7 @@ class Reviewer:
             raise ModelError(safe_error_message(exc)) from None
         except (ValueError, TypeError, KeyError):
             raise ModelError("Research reviewer unavailable or malformed response") from None
+        self._remember_timeouts(result, False)
         return result.data
 
     def ask(self, instruction, images=()):
@@ -79,6 +102,7 @@ class Reviewer:
             result = complete_multimodal_json(
                 instruction,
                 images,
+                providers=self._providers(bool(images)),
                 system=_policy_text(),
                 env=self.env,
                 post=self.session.post if self.session is not None else None,
@@ -94,6 +118,7 @@ class Reviewer:
             raise ModelError(safe_error_message(exc)) from None
         except (ValueError, TypeError, KeyError):
             raise ModelError("Research reviewer unavailable or malformed response") from None
+        self._remember_timeouts(result, bool(images))
         return result.data
 
 

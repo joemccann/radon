@@ -63,8 +63,11 @@ class TestLogging:
         assert re.search(r"^\s*log\s*\{", content, re.MULTILINE)
 
     def test_json_format(self, caddy_dir):
+        """json stays the encoder, whether direct or wrapped by a filter."""
         content = read_caddyfile(caddy_dir)
-        assert re.search(r"^\s*format\s+json\b", content, re.MULTILINE)
+        assert re.search(
+            r"^\s*format\s+json\b|^\s*wrap\s+json\b", content, re.MULTILINE
+        )
 
 
 class TestRouting:
@@ -808,3 +811,134 @@ class TestTradingViewWebhookEdge:
         tv = active.index("handle " + TV_MATCHER)
         catch_all = re.search(r"(?m)^\s*handle\s*\{", active).start()
         assert tv < catch_all
+
+
+MAX_APP_BODY_BYTES = 12 * 1024 * 1024
+
+
+def app_site_handle_blocks(content):
+    """Every `handle`/`handle_path` block of the app site, with its matcher.
+
+    Returns `[(label, block), ...]` in file order. The app site is the only
+    site that fronts Next.js, and each of its handles is an independent edge
+    policy: a setting in one says nothing about the others.
+    """
+    site = site_block(content, "{$DOMAIN:app.radon.run}")
+    blocks = []
+    for match in re.finditer(r"(handle_path|handle)([^\n{]*)\{", site):
+        label = (match.group(1) + match.group(2)).strip()
+        blocks.append((label, _balanced_block(site, match.end() - 1)))
+    return blocks
+
+
+def declared_body_cap_bytes(block):
+    """The block's own `request_body { max_size ... }` in bytes, None if absent."""
+    match = re.search(r"request_body\s*\{[^}]*max_size\s+(\d+)(KB|MB)", block)
+    if not match:
+        return None
+    size, unit = int(match.group(1)), match.group(2)
+    return size * (1024 if unit == "KB" else 1024 * 1024)
+
+
+class TestEveryNextjsHandleBoundsTheBody:
+    """Caddy is the only body cap in front of Next.js.
+
+    Next.js middleware never reads the body, and 25 of the 27 route handlers
+    that call `request.json()` have no size check of their own, so whatever
+    the edge forwards is buffered whole in the single Node process that also
+    serves the operator's live trading UI. The `/api/assistant*` handle was
+    capped for exactly this reason; every other handle that dials the app
+    upstream needs the same bound, including the catch-all that 80-odd API
+    routes ride.
+    """
+
+    def _nextjs_blocks(self, caddy_dir):
+        blocks = [
+            (label, block)
+            for label, block in app_site_handle_blocks(read_caddyfile(caddy_dir))
+            if re.search(r"reverse_proxy\s+" + re.escape(APP_UPSTREAM) + r"\b", block)
+        ]
+        assert blocks, "no app-site handle proxies to the Next.js upstream"
+        return blocks
+
+    def test_every_nextjs_handle_declares_a_body_cap(self, caddy_dir):
+        missing = [
+            label for label, block in self._nextjs_blocks(caddy_dir)
+            if declared_body_cap_bytes(block) is None
+        ]
+        assert not missing, (
+            "these app-site handles forward an unbounded request body to "
+            f"Next.js: {missing}"
+        )
+
+    def test_no_nextjs_body_cap_exceeds_the_largest_route_payload(self, caddy_dir):
+        too_wide = {
+            label: cap
+            for label, block in self._nextjs_blocks(caddy_dir)
+            for cap in [declared_body_cap_bytes(block)]
+            if cap is not None and cap > MAX_APP_BODY_BYTES
+        }
+        assert not too_wide, (
+            "body caps above the largest legitimate payload do not bound "
+            f"anything: {too_wide}"
+        )
+
+    def test_the_catch_all_is_one_of_the_capped_handles(self, caddy_dir):
+        """Named so the catch-all can never be the exempt one."""
+        catch_all = handle_block(read_caddyfile(caddy_dir))
+        assert declared_body_cap_bytes(catch_all) is not None, (
+            "the catch-all handle forwards an unbounded request body to Next.js"
+        )
+
+
+# The webhook's authenticator travels in the request PATH, and the json access
+# log encoder records the full request URI, so an unfiltered access log writes
+# that credential to disk in cleartext on every delivery (CWE-532). Reading the
+# log already needs privilege, which is why this is hygiene rather than an
+# access grant, but it is a credential sitting in an unrotated plaintext file
+# that nothing else needs.
+TV_LOG_PREFIX = "/api/webhooks/tradingview/"
+
+
+def _app_site_log_block(caddy_dir):
+    active = strip_comments(read_caddyfile(caddy_dir))
+    start = re.search(r"(?m)^\s*log\s*\{", active)
+    assert start, "the app site must still keep an access log block"
+    return _balanced_block(active, start.start())
+
+
+class TestTradingViewWebhookIsNotLoggedInCleartext:
+    def test_the_access_log_filters_the_request_uri(self, caddy_dir):
+        block = _app_site_log_block(caddy_dir)
+        assert re.search(r"format\s+filter\b", block), (
+            "the access log must use a `filter` encoder; a bare `format json` "
+            "writes the webhook path token to /var/log/caddy/radon.log"
+        )
+        assert re.search(r"wrap\s+json\b", block), (
+            "the filter must wrap json so every other record keeps its shape"
+        )
+
+    def test_the_filter_redacts_the_webhook_path_and_nothing_else(self, caddy_dir):
+        block = _app_site_log_block(caddy_dir)
+        field = re.search(
+            r"request>uri\s+regexp\s+\"([^\"]+)\"\s+\"([^\"]+)\"", block
+        )
+        assert field, (
+            "need a `request>uri regexp <pattern> <replacement>` field filter "
+            f"covering {TV_LOG_PREFIX}"
+        )
+        pattern, replacement = field.group(1), field.group(2)
+        # Caddy applies this as a Go regexp replacement over the whole URI.
+        expand = re.sub(r"\$\{(\d+)\}", r"\\\1", replacement)
+        secret = "s3cret-path-token"
+        redacted = re.sub(pattern, expand, f"{TV_LOG_PREFIX}{secret}?tf=5")
+        assert secret not in redacted, (
+            f"the path token survives the filter: {redacted}"
+        )
+        assert redacted.startswith(TV_LOG_PREFIX), (
+            "the route must stay identifiable in the log for traffic accounting"
+        )
+        untouched = "/api/orders/modify?id=42"
+        assert re.sub(pattern, expand, untouched) == untouched, (
+            "the filter must not rewrite any other route's URI"
+        )
