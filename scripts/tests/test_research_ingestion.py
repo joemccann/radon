@@ -358,6 +358,108 @@ def test_consumer_review_loop_uses_ready_cache_and_stops(state,tmp_path,monkeypa
     assert state.db.execute('SELECT status FROM work').fetchone()[0]=='complete'
 
 
+def test_idle_review_rechecks_database_and_clears_stale_error_only_after_recovery(state,tmp_path,monkeypatch):
+    import json
+    import api.db_http
+    from research import feedback, ingestion, publish
+    clock=SimpleNamespace(now=0)
+    stop,parsed=threading.Event(),threading.Event()
+    calls=[];snapshots={}
+    ingestion.stage_health(tmp_path,'review','error',api.db_http.DbHttpError('old failure'))
+    original=json.loads((tmp_path/'health-review.json').read_text())
+    monkeypatch.setattr(ingestion.os,'setsid',lambda:None)
+    monkeypatch.setattr(ingestion.time,'monotonic',lambda:clock.now)
+    monkeypatch.setattr(feedback,'apply',lambda *args,**kwargs:0)
+    monkeypatch.setattr(publish,'expire_stale_held',lambda:0)
+    monkeypatch.setattr(publish,'publish',lambda *args:pytest.fail('idle probe must not publish'))
+    def probe(sql,args=(),**kwargs):
+        calls.append((clock.now,sql,args,kwargs))
+        if len(calls)==1:
+            raise api.db_http.DbHttpError('still unavailable')
+        return [(1,)]
+    monkeypatch.setattr(api.db_http,'hrana_execute',probe)
+    def advance(seconds):
+        clock.now+=seconds
+        if clock.now in (59,61):
+            snapshots[clock.now]=json.loads((tmp_path/'health-review.json').read_text())
+        if clock.now>=125:
+            stop.set()
+    monkeypatch.setattr(stop,'wait',advance)
+    monkeypatch.setattr(parsed,'wait',advance)
+    ingestion._consumer(tmp_path,stop,threading.Event(),parsed,Backoff(multiprocessing.get_context('spawn')),
+                        True,True,pipeline_factory=lambda:SimpleNamespace(process=lambda *args,**kwargs:pytest.fail('no ready work')))
+    assert [call[0] for call in calls]==[0,60,120], 'idle checks must recover without polling the database every second'
+    assert all(call[1:] == ('SELECT 1',(),{'timeout':2}) for call in calls)
+    assert snapshots[59]['state']=='error' and snapshots[59]['error']=='DbHttpError'
+    assert snapshots[61]['state']=='ok' and snapshots[61]['error'] is None
+    detail=json.loads((tmp_path/'health-review.json').read_text())
+    assert detail['state']=='ok' and detail['updated_at']!=original['updated_at']
+    assert state.db.execute('SELECT COUNT(*) FROM work').fetchone()[0]==0
+    assert not state.outbox()
+
+
+@pytest.mark.parametrize('rows',[[],[(0,)]])
+def test_idle_review_rejects_invalid_database_canary(state,tmp_path,monkeypatch,rows):
+    import json
+    import api.db_http
+    from research import feedback, ingestion, publish
+    stop,parsed=threading.Event(),threading.Event()
+    calls=[]
+    ingestion.stage_health(tmp_path,'review','error',api.db_http.DbHttpError('old failure'))
+    monkeypatch.setattr(ingestion.os,'setsid',lambda:None)
+    monkeypatch.setattr(feedback,'apply',lambda *args,**kwargs:0)
+    monkeypatch.setattr(publish,'expire_stale_held',lambda:0)
+    monkeypatch.setattr(api.db_http,'hrana_execute',lambda *args,**kwargs:calls.append(args) or rows)
+    monkeypatch.setattr(stop,'wait',lambda seconds:stop.set())
+    monkeypatch.setattr(parsed,'wait',lambda seconds:stop.set())
+    ingestion._consumer(tmp_path,stop,threading.Event(),parsed,Backoff(multiprocessing.get_context('spawn')),
+                        True,False,pipeline_factory=lambda:SimpleNamespace())
+    assert len(calls)==1, 'empty queues still require a real database check'
+    detail=json.loads((tmp_path/'health-review.json').read_text())
+    assert detail['state']=='error' and detail['error']=='DbHttpError'
+
+
+@pytest.mark.parametrize('failed_stage',['novelty','pipeline'])
+def test_review_database_outage_does_not_exhaust_document_attempts(state,tmp_path,failed_stage):
+    import json
+    import time
+    from api.db_http import DbHttpError
+    from research import ingestion
+    from research.dropbox import content_hash
+    value=entry();value['content_hash']=content_hash(b'pdf');ingest(state,[value])
+    assert parse_one(tmp_path,state,SpawnClient(),spawn_extract,Backoff(multiprocessing.get_context('spawn')))
+    state.db.execute('UPDATE work SET attempts=5');state.db.commit()
+    recovered=False
+    processed=[]
+    def recent_posts(**kwargs):
+        if not recovered and failed_stage=='novelty':
+            raise DbHttpError('database read unavailable')
+        return []
+    def process(work,pdf,recent,progress):
+        if not recovered:
+            raise DbHttpError('database unavailable during review')
+        processed.append(work['key'])
+        return []
+    publisher=SimpleNamespace(recent_posts=recent_posts,publish=lambda *args:pytest.fail('no accepted post'))
+    before=time.time()
+    assert ingestion.review_one(tmp_path,state,SimpleNamespace(process=process),publisher,True)
+    row=state.db.execute('SELECT key,status,attempts,error,result,available_at FROM work').fetchone()
+    assert row['status']=='pending', 'a database outage must not permanently hold a valid PDF'
+    assert row['attempts']==5 and row['error']=='database_unavailable' and row['result'] is None
+    assert row['available_at']>=before+ingestion.PROVIDER_PARK_SECS
+    detail=json.loads((tmp_path/'health-review.json').read_text())
+    assert detail['state']=='error' and detail['error']=='DbHttpError'
+    assert not state.outbox() and not processed
+    recovered=True
+    state.db.execute('UPDATE work SET available_at=0');state.db.commit()
+    assert ingestion.review_one(tmp_path,state,SimpleNamespace(process=process),publisher,True)
+    assert processed==[row['key']]
+    completed=state.db.execute('SELECT status,result,error FROM work').fetchone()
+    assert completed['status']=='complete' and completed['error'] is None
+    assert json.loads(completed['result'])=={'status':'reviewed','items':0}
+    assert json.loads((tmp_path/'health-review.json').read_text())['state']=='ok'
+
+
 @pytest.mark.parametrize('failure',[False,True])
 def test_telemetry_preserves_discovery_and_stage_error_without_blocking_poll(tmp_path,monkeypatch,failure):
     import json
