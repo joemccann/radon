@@ -638,6 +638,37 @@ class TestPushGate:
         assert "fix/journal-leak" not in listed.stdout
         assert ensure.calls == []
 
+    def test_refused_branch_pages_once_per_head(self, world):
+        """2026-10-16: two refused fix branches paged every 15-minute cycle
+        (81 pages for one). A refusal pages once per branch head; a new
+        commit on that branch pages again."""
+        vps = world["vps"]
+        assert _git(vps, "checkout", "-q", "-b", "fix/journal-leak").returncode == 0
+        leak = "U" + "1234567"
+        _commit(vps, "app.py", f"ROW = '{leak}'\n", _valid_ir_message("fix/journal-leak"))
+        alerts: list[tuple[str, str]] = []
+
+        def alerter(b, r):
+            alerts.append((b, r))
+
+        for _ in range(3):
+            results = _run(world, alerter=alerter)
+            assert [r["action"] for r in results] == ["refused"]
+        assert [a[0] for a in alerts] == ["fix/journal-leak"]
+
+        _commit(vps, "app.py", f"ROW = '{leak}'\nx = 4\n", _valid_ir_message("fix/journal-leak"))
+        _run(world, alerter=alerter)
+        _run(world, alerter=alerter)
+        assert [a[0] for a in alerts] == ["fix/journal-leak", "fix/journal-leak"]
+
+    def test_invalid_description_pages_once_per_head(self, world):
+        _vps_branch(world, "fix/x", message="grok incident fix on fix/x")
+        alerts: list[tuple[str, str]] = []
+        for _ in range(3):
+            results = _run(world, alerter=lambda b, r: alerts.append((b, r)))
+            assert "IR description" in results[0]["reason"]
+        assert [a[0] for a in alerts] == ["fix/x"]
+
     def test_clean_tip_cannot_publish_a_private_identifier_in_earlier_history(self, world):
         vps = world["vps"]
         _vps_branch(world, "fix/history-leak")
