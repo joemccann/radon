@@ -128,6 +128,17 @@ readonly -a CONTROL_PLANE_MODES=(
 )
 
 if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
+  # Test mode substitutes systemctl, rm, sync, the session python and setpriv
+  # with paths taken from the environment, and relaxes the root-ownership
+  # expectation to `id -u`. This helper is a NOPASSWD root chokepoint, so the
+  # mode is refused outright as root: a future sudoers edit adding SETENV or an
+  # RADON_* env_keep would otherwise turn an environment variable into root
+  # code execution. The guard sits ahead of the first RADON_TEST_* read so no
+  # substitution has happened when it fires.
+  if (( EUID == 0 )); then
+    printf 'deploy-root-helper: test mode is refused when running as root\n' >&2
+    exit 64
+  fi
   readonly HELPER_TEST_MODE=1
   readonly STATE_DIR="$(dirname "${RADON_TEST_ACTIVE_STATE_FILE:?test active-state file is required}")"
   readonly LEGACY_STATE_DIR="${RADON_TEST_LEGACY_STATE_DIR:-}"

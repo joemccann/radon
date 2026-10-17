@@ -691,3 +691,49 @@ def test_publish_caddy_action_timeout_outlasts_reload_and_restart():
 
 if __name__ == "__main__":  # pragma: no cover - convenience only
     sys.exit(pytest.main([__file__]))
+
+
+def test_helper_test_mode_is_refused_before_any_test_variable_is_read():
+    """`RADON_DEPLOY_HELPER_TEST_MODE=1` swaps systemctl, rm, sync, the session
+    python and setpriv for paths taken from `RADON_TEST_*`, and relaxes the
+    root-ownership expectation to `id -u`. The helper is a NOPASSWD root
+    chokepoint, so the mode must be refused outright when the process is root:
+    one sudoers edit adding `SETENV` or an `RADON_*` `env_keep` would otherwise
+    turn an environment variable into root code execution.
+
+    Structural, because a test cannot become root here. The guard must sit
+    BEFORE the first `RADON_TEST_*` read, or the substitution has already
+    happened by the time it fires.
+    """
+    text = ROOT_HELPER.read_text(encoding="utf-8")
+    lines = text.splitlines()
+
+    guard = next(
+        (i for i, line in enumerate(lines) if re.search(r"EUID\s*==\s*0", line)),
+        None,
+    )
+    assert guard is not None, (
+        "deploy-root-helper.sh enters test mode on the environment alone, with "
+        "no effective-uid guard"
+    )
+
+    # A parameter expansion, not a mention in prose: `${RADON_TEST_RM:?...}`.
+    first_test_var = next(
+        (
+            i
+            for i, line in enumerate(lines)
+            if re.search(r"\$\{RADON_TEST_[A-Z0-9_]+[:}]", line)
+        ),
+        None,
+    )
+    assert first_test_var is not None
+    assert guard < first_test_var, (
+        "the root refusal must precede the first RADON_TEST_* substitution"
+    )
+
+    mode_select = next(
+        i for i, line in enumerate(lines) if "RADON_DEPLOY_HELPER_TEST_MODE" in line
+    )
+    assert mode_select <= guard < first_test_var, (
+        "the guard must live inside the test-mode branch it protects"
+    )
