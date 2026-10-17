@@ -57,6 +57,10 @@ def cycle_env(monkeypatch, tmp_path):
     monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "0")
     monkeypatch.setenv("GROK_PAGE_AUTOPUSH", "0")
     monkeypatch.setenv("GROK_PAGE_SYNC_REMOTE", "0")
+    # The live poller holds /var/lib/radon/grok-runtime/grok-runtime.lock
+    # for the whole grok subprocess. A blocking flock on that path deadlocks
+    # this file against the unit under test.
+    monkeypatch.setenv("RADON_GROK_RUNTIME_LOCK", str(tmp_path / "runtime.lock"))
     heartbeats: list[str] = []
     followups: list[dict] = []
     invocations: list = []
@@ -87,7 +91,7 @@ def cycle_env(monkeypatch, tmp_path):
 
 
 def _timeout(*_a, **_k):
-    raise HranaHttpError(_TIMEOUT)
+    raise HranaHttpError(_TIMEOUT) from TimeoutError("The read operation timed out")
 
 
 class TestLedgerReadTimeout:

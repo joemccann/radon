@@ -21,6 +21,26 @@ except ImportError:  # pragma: no cover
 
 log = logging.getLogger("watchdog.pages")
 
+
+def _hrana():
+    try:
+        from db.hrana_http import (
+            HranaHttpError,
+            _close_keepalive,
+            hrana_execute,
+            hrana_query,
+            is_transport_error,
+        )
+    except ImportError:
+        from scripts.db.hrana_http import (
+            HranaHttpError,
+            _close_keepalive,
+            hrana_execute,
+            hrana_query,
+            is_transport_error,
+        )
+    return HranaHttpError, _close_keepalive, hrana_execute, hrana_query, is_transport_error
+
 SERVICE_RE = re.compile(r"^[A-Za-z0-9_.:/-]{1,64}$")
 KIND_RE = re.compile(r"^[A-Za-z0-9_.:/-]{1,32}$")
 SEVERITY_RE = re.compile(r"^P[0-4]$")
@@ -199,44 +219,85 @@ def reruns_since(service: str, *, since: datetime) -> int:
     return int(rows[0][0] or 0) if rows else 0
 
 
-def claim_page(page_id: str, *, now: datetime, claim_token: str) -> bool:
-    try:
-        from db.hrana_http import hrana_execute, hrana_query
-    except ImportError:
-        from scripts.db.hrana_http import hrana_execute, hrana_query
-
-    stale_before = _iso(now - timedelta(seconds=STALE_CLAIM_SECS))
-    hrana_execute(CLAIM_SQL, (_iso(now), claim_token, page_id, stale_before))
-    rows = hrana_query(
-        "SELECT claim_token FROM watchdog_pages WHERE page_id = ?",
+def _claim_state(page_id: str, claim_token: str, query) -> str:
+    """'owned' | 'pending' | 'lost' from a fresh SELECT."""
+    rows = query(
+        "SELECT status, claim_token FROM watchdog_pages WHERE page_id = ?",
         (page_id,),
     )
-    return bool(rows) and rows[0][0] == claim_token
+    if not rows:
+        return "lost"
+    status, token = rows[0]
+    if token == claim_token:
+        return "owned"
+    if status == "pending":
+        return "pending"
+    return "lost"
+
+
+def claim_page(page_id: str, *, now: datetime, claim_token: str) -> bool:
+    HranaHttpError, close_keepalive, hrana_execute, hrana_query, is_transport = _hrana()
+    stale_before = _iso(now - timedelta(seconds=STALE_CLAIM_SECS))
+    args = (_iso(now), claim_token, page_id, stale_before)
+
+    def attempt() -> str:
+        hrana_execute(CLAIM_SQL, args)
+        return _claim_state(page_id, claim_token, hrana_query)
+
+    try:
+        state = attempt()
+    except HranaHttpError as exc:
+        if not is_transport(exc):
+            raise
+        close_keepalive()
+        log.warning("watchdog_pages claim transport; reading back %s", page_id)
+        try:
+            state = _claim_state(page_id, claim_token, hrana_query)
+        except HranaHttpError as read_exc:
+            if not is_transport(read_exc):
+                raise
+            raise exc
+        if state == "owned":
+            return True
+        if state != "pending":
+            return False
+        try:
+            state = attempt()
+        except HranaHttpError as retry_exc:
+            if not is_transport(retry_exc):
+                raise
+            raise exc
+    return state == "owned"
 
 
 def complete_page(
-    page_id: str, *, status: str, result: str, now: datetime
+    page_id: str,
+    *,
+    status: str,
+    result: str,
+    now: datetime,
+    claim_token: Optional[str] = None,
 ) -> None:
-    try:
-        from db.hrana_http import hrana_execute
-    except ImportError:
-        from scripts.db.hrana_http import hrana_execute
-
+    _HranaHttpError, _close, hrana_execute, _query, _is_transport = _hrana()
     hrana_execute(
         """
         UPDATE watchdog_pages
         SET status = ?, finished_at = ?, result = ?, claim_token = NULL
         WHERE page_id = ?
+          AND (? IS NULL OR claim_token = ?)
         """,
-        (status, _iso(now), (result or "")[:2000], page_id),
+        (status, _iso(now), (result or "")[:2000], page_id, claim_token, claim_token),
     )
 
 
-def record_attempt_failure(page_id: str, *, now: datetime, error: str) -> str:
-    try:
-        from db.hrana_http import hrana_execute, hrana_query
-    except ImportError:
-        from scripts.db.hrana_http import hrana_execute, hrana_query
+def record_attempt_failure(
+    page_id: str,
+    *,
+    now: datetime,
+    error: str,
+    claim_token: Optional[str] = None,
+) -> str:
+    HranaHttpError, close_keepalive, hrana_execute, hrana_query, is_transport = _hrana()
 
     rows = hrana_query(
         "SELECT attempts FROM watchdog_pages WHERE page_id = ?",
@@ -244,15 +305,43 @@ def record_attempt_failure(page_id: str, *, now: datetime, error: str) -> str:
     )
     attempts = int(rows[0][0] or 0) + 1 if rows else 1
     status = "skipped" if attempts >= MAX_ATTEMPTS else "pending"
-    hrana_execute(
-        """
-        UPDATE watchdog_pages
-        SET attempts = ?, status = ?, claim_token = NULL, claimed_at = NULL,
-            finished_at = ?, result = ?
-        WHERE page_id = ?
-        """,
-        (attempts, status, _iso(now), (error or "")[:1000], page_id),
+    args = (
+        attempts,
+        status,
+        _iso(now),
+        (error or "")[:1000],
+        page_id,
+        claim_token,
+        claim_token,
     )
+
+    def write() -> None:
+        hrana_execute(
+            """
+            UPDATE watchdog_pages
+            SET attempts = ?, status = ?, claim_token = NULL, claimed_at = NULL,
+                finished_at = ?, result = ?
+            WHERE page_id = ?
+              AND (? IS NULL OR claim_token = ?)
+            """,
+            args,
+        )
+
+    try:
+        write()
+    except HranaHttpError as exc:
+        if not is_transport(exc):
+            raise
+        close_keepalive()
+        try:
+            write()
+        except HranaHttpError as retry_exc:
+            if not is_transport(retry_exc):
+                raise
+            row = get_page(page_id)
+            if row and row.get("status") in {"pending", "skipped"}:
+                return str(row["status"])
+            raise exc
     return status
 
 
