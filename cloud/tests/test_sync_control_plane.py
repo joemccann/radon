@@ -669,7 +669,11 @@ class TestLegacyRunnerRefusal:
 
     def test_deploy_job_refuses_the_legacy_runner_on_a_bootstrapped_host(self):
         workflow = yaml.safe_load(CI.read_text(encoding="utf-8"))
-        script = workflow["jobs"]["deploy"]["steps"][0]["with"]["script"]
+        script = next(
+            step["with"]["script"]
+            for step in workflow["jobs"]["deploy"]["steps"]
+            if "ssh-action" in str(step.get("uses", ""))
+        )
         marker_check = script.index(
             'if [[ ! -e "$RADON_CONTROL_PLANE_READY" && ! -L "$RADON_CONTROL_PLANE_READY" ]]; then'
         )
