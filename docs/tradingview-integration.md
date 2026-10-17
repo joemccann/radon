@@ -266,7 +266,7 @@ separate future work; the research client's allowlist excludes those messages.
 ## Phase 3 — MCP client (read-only)
 
 The implementation is `scripts/clients/tradingview_client.py` and
-`scripts/clients/tradingview_auth.py`, using the pinned `mcp==1.28.1` SDK for
+`scripts/clients/tradingview_auth.py`, using the Python `mcp` SDK pinned in `requirements.txt` for
 Streamable HTTP and OAuth discovery, PKCE, registration and refresh. It enforces
 a research-tool allowlist and stores credentials atomically in an owned 0600 file.
 Unconfigured access is explicit and cannot initiate browser consent unattended.
