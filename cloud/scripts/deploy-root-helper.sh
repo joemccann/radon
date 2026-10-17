@@ -14,6 +14,8 @@ readonly PREHELD_UNIT=radon-ib-gateway-preheld-restart.service
 readonly -a CONTROL_PLANE_SOURCES=(
   scripts/deploy-root-helper.sh
   scripts/ib-gateway-control.sh
+  scripts/ib-operator-hold.sh
+  repo/scripts/utils/ib_operator_hold.py
   scripts/operator-radon.sh
   scripts/drift_audit.py
   scripts/disk_cleanup.py
@@ -64,6 +66,8 @@ readonly -a CONTROL_PLANE_SOURCES=(
 readonly -a CONTROL_PLANE_TARGETS=(
   /usr/local/sbin/radon-deploy-root
   /usr/local/bin/radon-ib-gateway-control
+  /usr/local/sbin/radon-ib-hold
+  /usr/local/lib/radon/ib_operator_hold.py
   /usr/local/bin/radon
   /usr/local/lib/radon/drift_audit.py
   /usr/local/lib/radon/disk_cleanup.py
@@ -112,7 +116,7 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/systemd/system/radon-research-archive.service.d/runtime-container.conf
 )
 readonly -a CONTROL_PLANE_MODES=(
-  755 755 755 644 644 755 755 644
+  755 755 755 644 755 644 644 755 755 644
   440 440 440 440
   644
   644
@@ -279,7 +283,7 @@ prepare_state_dir() {
 # O_NOFOLLOW fd of a root-owned, non-writable directory, and only root-owned
 # regular files. Nothing moves once the new directory holds state.
 migrate_legacy_state() {
-  "$SESSION_PYTHON" - "$LEGACY_STATE_DIR" "$STATE_DIR" "$HELPER_TEST_MODE" <<'PY_MIGRATE_STATE'
+  "$SESSION_PYTHON" -I - "$LEGACY_STATE_DIR" "$STATE_DIR" "$HELPER_TEST_MODE" <<'PY_MIGRATE_STATE'
 import os, re, secrets, stat, sys
 legacy, target, test = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
 owner = os.getuid() if test else 0
@@ -331,7 +335,7 @@ finally:
 PY_MIGRATE_STATE
 }
 
-if (( $# != 1 )); then
+if (( $# != 1 )) && ! { (( $# == 2 )) && [[ "${1:-}" == sync-control-plane && "${2:-}" =~ ^[0-9a-f]{40}$ ]]; }; then
   echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy|install-units|revert-units|sync-scheduled-units|sync-control-plane|refresh-control-plane|refresh-control-plane-privileged}" >&2
   exit 64
 fi
@@ -363,6 +367,19 @@ root_ownership_matches() {
   else
     [[ "$(stat -f '%Su:%Sg' "$1")" == "root:root" ]]
   fi
+}
+
+broker_control_plane_source() {
+  case "$1" in
+    scripts/deploy-root-helper.sh|scripts/ib-gateway-control.sh|\
+    scripts/ib-operator-hold.sh|scripts/operator-radon.sh|\
+    repo/scripts/utils/ib_operator_hold.py|\
+    scripts/radon-docker-gw.sh|docker-compose.yml|\
+    services/radon-ib-gateway.service|services/radon-ib-gateway-preheld-restart.service|\
+    services/radon-ib-watchdog.service|services/radon-ib-watchdog.timer|\
+    services/radon-ib-gateway-remote.service) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 read_host_role() {
@@ -397,8 +414,11 @@ app_skips_control_plane_source() {
 role_skips_control_plane_source() {
   local role
   role="$(read_host_role)"
+  if [[ "$role" == "broker" ]] && ! broker_control_plane_source "$1"; then
+    return 0
+  fi
   case "$1" in
-    scripts/ib-gateway-control.sh|\
+    scripts/ib-gateway-control.sh|scripts/ib-operator-hold.sh|repo/scripts/utils/ib_operator_hold.py|\
     services/radon-ib-gateway.service|\
     services/radon-ib-gateway-preheld-restart.service|\
     services/radon-ib-watchdog.service|\
@@ -414,7 +434,36 @@ role_skips_control_plane_source() {
 
 verify_control_plane() {
   local line expected_hash source_rel logical_target installed_target installed_hash
-  local index=0
+  local index=0 contract_index role manifest_rows legacy_app_manifest=0
+  local -a contract_sources=() contract_targets=() contract_modes=()
+  role="$(read_host_role)"
+  # Older app bootstraps wrote the combined manifest while refresh removed
+  # broker files. Accept that exact historical contract until the next sync;
+  # new app manifests contain only their required artifacts.
+  if [[ "$role" == app && -f "$CONTROL_PLANE_MANIFEST" && ! -L "$CONTROL_PLANE_MANIFEST" ]]; then
+    manifest_rows="$(wc -l < "$CONTROL_PLANE_MANIFEST")"
+    if (( manifest_rows == ${#CONTROL_PLANE_SOURCES[@]} )); then
+      legacy_app_manifest=1
+    elif (( manifest_rows == ${#CONTROL_PLANE_SOURCES[@]} - 2 )); then
+      legacy_app_manifest=2
+    fi
+  fi
+  for contract_index in "${!CONTROL_PLANE_SOURCES[@]}"; do
+    if [[ "$role" == "broker" ]] && ! broker_control_plane_source "${CONTROL_PLANE_SOURCES[$contract_index]}"; then
+      continue
+    fi
+    if [[ "$legacy_app_manifest" == 2 ]]; then
+      case "${CONTROL_PLANE_SOURCES[$contract_index]}" in
+        scripts/ib-operator-hold.sh|repo/scripts/utils/ib_operator_hold.py) continue ;;
+      esac
+    fi
+    if [[ "$role" == app && "$legacy_app_manifest" == 0 ]] && role_skips_control_plane_source "${CONTROL_PLANE_SOURCES[$contract_index]}"; then
+      continue
+    fi
+    contract_sources+=("${CONTROL_PLANE_SOURCES[$contract_index]}")
+    contract_targets+=("${CONTROL_PLANE_TARGETS[$contract_index]}")
+    contract_modes+=("${CONTROL_PLANE_MODES[$contract_index]}")
+  done
 
   [[ -x "$SHA256SUM" && -f "$CONTROL_PLANE_MANIFEST" && \
      ! -L "$CONTROL_PLANE_MANIFEST" ]] || {
@@ -422,7 +471,7 @@ verify_control_plane() {
     return 1
   }
   while IFS= read -r line; do
-    if (( index >= ${#CONTROL_PLANE_TARGETS[@]} )) || \
+    if (( index >= ${#contract_targets[@]} )) || \
        [[ ! "$line" =~ ^([0-9a-f]{64})[[:space:]][[:space:]]([^[:space:]]+)[[:space:]]-\>[[:space:]](/.+)$ ]]; then
       echo "control-plane manifest contract is malformed" >&2
       return 1
@@ -430,8 +479,8 @@ verify_control_plane() {
     expected_hash="${BASH_REMATCH[1]}"
     source_rel="${BASH_REMATCH[2]}"
     logical_target="${BASH_REMATCH[3]}"
-    if [[ "$source_rel" != "${CONTROL_PLANE_SOURCES[$index]}" || \
-          "$logical_target" != "${CONTROL_PLANE_TARGETS[$index]}" ]]; then
+    if [[ "$source_rel" != "${contract_sources[$index]}" || \
+          "$logical_target" != "${contract_targets[$index]}" ]]; then
       echo "control-plane manifest does not match the fixed target contract" >&2
       return 1
     fi
@@ -451,14 +500,14 @@ verify_control_plane() {
       return 1
     fi
     if [[ "$installed_hash" != "$expected_hash" || \
-          "$(file_mode "$installed_target")" != "${CONTROL_PLANE_MODES[$index]}" ]] || \
+          "$(file_mode "$installed_target")" != "${contract_modes[$index]}" ]] || \
        ! root_ownership_matches "$installed_target"; then
       echo "installed control-plane target drifted: ${logical_target}" >&2
       return 1
     fi
     index=$((index + 1))
   done < "$CONTROL_PLANE_MANIFEST"
-  if (( index != ${#CONTROL_PLANE_TARGETS[@]} )); then
+  if (( index != ${#contract_targets[@]} )); then
     echo "control-plane manifest is incomplete" >&2
     return 1
   fi
@@ -910,7 +959,7 @@ stage_caddy_candidate() {
 # fchmod through an O_NOFOLLOW fd: a by-name chmod on an entry in a
 # radon-owned directory follows whatever link radon swapped in.
 chmod_dir_nofollow() {
-  "$SESSION_PYTHON" - "$1" "$2" <<'PY_CHMOD_DIR'
+  "$SESSION_PYTHON" -I - "$1" "$2" <<'PY_CHMOD_DIR'
 import os, sys
 fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 try:
@@ -1603,15 +1652,59 @@ resolve_fetched_main_tip() {
 # current is a no-op. Before this verb every helper/sudoers/polkit edit, and
 # every root hot-patch of a drop-in, blocked all deploys at preflight until
 # a human ran bootstrap over SSH (2026-08-21, 2026-08-29). R-430.
+# Refuse an automatic downgrade to a bundle whose inline interpreter calls
+# again accept the invoking account's import paths. This runs before any
+# candidate bootstrap code and also gates privileged in-place refreshes.
+python_inline_is_isolated() {
+  "$SESSION_PYTHON" -I - "$1" <<'PY_INLINE_ISOLATION'
+from pathlib import Path
+import re
+import shlex
+import sys
+
+# Inspect logical shell lines without evaluating candidate code. Accept the
+# canonical isolated option before inline code, including variable expansion,
+# literal interpreter paths and continued shell commands.
+text = Path(sys.argv[1]).read_text(encoding="utf-8").replace("\\\n", " ")
+interpreter = re.compile(
+    r"^\s*(?:(?:exec|if|elif|then|!)\s+)*(?:[\"']?)(?:\$\{[^}\n]*python[^}\n]*\}"
+    r"|\$[a-z_]*python[a-z_0-9]*|(?:/[a-z0-9_.+-]+)*/?python(?:[0-9]+(?:\.[0-9]+)*)?)"
+    r"(?:[\"']?)(?=[ \t])", re.IGNORECASE)
+for line in text.splitlines():
+    if line.lstrip().startswith("#"):
+        continue
+    for match in interpreter.finditer(line):
+        try:
+            lexer = shlex.shlex(line[match.end():], posix=True)
+            lexer.whitespace_split = True
+            isolated = False
+            for arg in lexer:
+                if arg == "-I":
+                    isolated = True
+                if arg == "-" or arg.startswith("-c"):
+                    if not isolated:
+                        raise ValueError("unisolated inline interpreter")
+                    break  # Do not parse inline code or multiline code quotes.
+        except ValueError:
+            print("control-plane interpreter isolation is missing", file=sys.stderr)
+            raise SystemExit(76)
+
+PY_INLINE_ISOLATION
+}
+
 sync_control_plane() {
-  local tip workdir bootstrap rc
+  local tip workdir bootstrap rc host_role expected="${1:-}"
 
   tip="$(resolve_fetched_main_tip)" || return $?
+  if [[ -n "$expected" && "$expected" != "$tip" ]]; then
+    echo "expected control-plane SHA is no longer the GitHub main tip" >&2
+    return 76
+  fi
   workdir="$(mktemp -d "${PROVISION_ROOT}/control-plane-sync.XXXXXX")" || {
     echo "could not create a root-owned control-plane staging tree" >&2
     return 73
   }
-  if ! provision_git -c tar.umask=022 archive --format=tar "$tip" cloud \
+  if ! provision_git -c tar.umask=022 archive --format=tar "$tip" cloud scripts/utils/ib_operator_hold.py \
       | "$TAR" -x -C "$workdir"; then
     "$RM" -rf "$workdir"
     echo "could not extract cloud/ at the GitHub main tip ${tip}" >&2
@@ -1623,8 +1716,26 @@ sync_control_plane() {
     echo "GitHub main tip ${tip} ships no control-plane bootstrap" >&2
     return 66
   fi
+  local candidate_script
+  for candidate_script in deploy-root-helper.sh bootstrap-control-plane.sh operator-radon.sh ib-gateway-control.sh radon-app-runtime.sh; do
+    if [[ ! -f "${workdir}/cloud/scripts/${candidate_script}" || -L "${workdir}/cloud/scripts/${candidate_script}" ]]; then
+      "$RM" -rf "$workdir"
+      echo "control-plane isolation-check script is missing" >&2
+      return 76
+    fi
+    if ! python_inline_is_isolated "${workdir}/cloud/scripts/${candidate_script}"; then
+      "$RM" -rf "$workdir"
+      return 76
+    fi
+  done
+  host_role="$(read_host_role)"
   printf 'sync-control-plane: reconciling the installed control plane with %s\n' "$tip"
-  if RADON_BOOTSTRAP_CLOUD_ROOT="${workdir}/cloud" "$BOOTSTRAP_RUNNER" "$bootstrap"; then
+  if [[ -n "$expected" && "$(remote_main_sha)" != "$expected" ]]; then
+    "$RM" -rf "$workdir"
+    echo "GitHub main moved while staging the expected control-plane SHA" >&2
+    return 76
+  fi
+  if RADON_BOOTSTRAP_CLOUD_ROOT="${workdir}/cloud" RADON_BOOTSTRAP_HOST_ROLE="$host_role" "$BOOTSTRAP_RUNNER" "$bootstrap"; then
     rc=0
   else
     rc=$?
@@ -1632,6 +1743,13 @@ sync_control_plane() {
   "$RM" -rf "$workdir"
   if (( rc == 0 )); then
     record_control_plane_floor "$tip" || rc=$?
+    if (( rc == 0 )) && [[ -n "$expected" && "$(remote_main_sha)" != "$expected" ]]; then
+      echo "GitHub main moved before the expected control-plane receipt" >&2
+      rc=76
+    fi
+    if (( rc == 0 )); then
+      printf 'sync-control-plane: installed_sha=%s host_role=%s\n' "$tip" "$host_role"
+    fi
   fi
   return "$rc"
 }
@@ -1795,8 +1913,8 @@ refresh_install_file() {
         return 73
       fi
       ;;
-    */radon-deploy-root|*/radon-ib-gateway-control|*/usr/local/bin/radon|*/radon-app-runtime|*/radon-docker-gw)
-      if ! bash -n "$candidate"; then
+    */radon-deploy-root|*/radon-ib-gateway-control|*/radon-ib-hold|*/usr/local/bin/radon|*/radon-app-runtime|*/radon-docker-gw)
+      if ! bash -n "$candidate" || ! python_inline_is_isolated "$candidate"; then
         echo "shell syntax validation failed: ${dest}" >&2
         "$RM" -f "$candidate"
         return 73
@@ -1832,7 +1950,7 @@ refresh_install_file() {
     # The newsfeed Chromium seccomp filter. Mirrors bootstrap's seccomp kind:
     # it must parse and deny by default, or root's engine loads a no-op filter.
     */radon/seccomp/*.json)
-      if ! "$SESSION_PYTHON" -c 'import json, sys; sys.exit(json.load(open(sys.argv[1], encoding="utf-8")).get("defaultAction") != "SCMP_ACT_ERRNO")' "$candidate"; then
+      if ! "$SESSION_PYTHON" -I -c 'import json, sys; sys.exit(json.load(open(sys.argv[1], encoding="utf-8")).get("defaultAction") != "SCMP_ACT_ERRNO")' "$candidate"; then
         echo "seccomp profile validation failed: ${dest}" >&2
         "$RM" -f "$candidate"
         return 73
@@ -1840,7 +1958,7 @@ refresh_install_file() {
       ;;
     */lib/radon/*.py)
       # Parse only; importing would execute candidate code as root.
-      if ! "$SESSION_PYTHON" -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1])' "$candidate"; then
+      if ! "$SESSION_PYTHON" -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1])' "$candidate"; then
         echo "python syntax validation failed: ${dest}" >&2
         "$RM" -f "$candidate"
         return 73
@@ -1994,7 +2112,7 @@ compose_body_is_valid() {
 # (DS-2026-09-27-01). Create, write, own and mode through one O_NOFOLLOW fd,
 # then rename relative to a pinned directory fd.
 install_state_file() {
-  "$SESSION_PYTHON" - "$1" "$2" "$3" "$HELPER_TEST_MODE" <<'PY_STATE_FILE'
+  "$SESSION_PYTHON" -I - "$1" "$2" "$3" "$HELPER_TEST_MODE" <<'PY_STATE_FILE'
 import os, secrets, sys
 source, target, mode, test = sys.argv[1], sys.argv[2], int(sys.argv[3], 8), sys.argv[4] == "1"
 parent, name = os.path.split(target)
@@ -2133,7 +2251,7 @@ resolve_deployed_control_plane_commit() {
 # did not.
 stage_control_plane_sources() {
   local commit="$1" staging="$2"
-  local index source_rel staged
+  local index source_rel staged git_path
 
   for index in "${!CONTROL_PLANE_SOURCES[@]}"; do
     source_rel="${CONTROL_PLANE_SOURCES[$index]}"
@@ -2141,8 +2259,10 @@ stage_control_plane_sources() {
     mkdir -p "$(dirname -- "$staged")" || return 73
     # A source absent at this commit stays absent, so the existing
     # missing-source arms (drop-in rollback, app-role skip) still decide.
+    git_path="cloud/${source_rel}"
+    [[ "$source_rel" != repo/* ]] || git_path="${source_rel#repo/}"
     if ! provision_git cat-file blob \
-      "${commit}:cloud/${source_rel}" > "$staged" 2>/dev/null; then
+      "${commit}:${git_path}" > "$staged" 2>/dev/null; then
       /bin/rm -f -- "$staged"
       continue
     fi
@@ -2421,7 +2541,7 @@ supervise_root_action() {
   trap 'handle_root_supervisor_signal TERM' TERM
   trap 'handle_root_supervisor_signal INT' INT
   trap 'handle_root_supervisor_signal HUP' HUP
-  "$SESSION_PYTHON" -c '
+  "$SESSION_PYTHON" -I -c '
 import os
 import sys
 os.setsid()
@@ -2504,7 +2624,7 @@ case "$1" in
     sync_scheduled_units
     ;;
   sync-control-plane)
-    sync_control_plane
+    sync_control_plane "${2:-}"
     ;;
   refresh-control-plane)
     refresh_control_plane
