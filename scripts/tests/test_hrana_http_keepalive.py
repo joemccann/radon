@@ -6,6 +6,7 @@ writer pipelines each opened a fresh urllib socket.
 from __future__ import annotations
 
 import json
+import http.client
 import socket
 import sys
 import threading
@@ -19,6 +20,16 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from db import hrana_http  # noqa: E402
+from api import db_http  # noqa: E402
+
+
+@pytest.fixture(params=[hrana_http, db_http], ids=['shared', 'api'])
+def transport(request):
+    module = request.param
+    query = module.hrana_query if module is hrana_http else module.hrana_execute
+    error = module.HranaHttpError if module is hrana_http else module.DbHttpError
+    rows = [('1',)] if module is hrana_http else [(1,)]
+    return module, query, error, rows
 
 
 def test_five_sequential_pipelines_use_one_tcp_connection(monkeypatch):
@@ -224,7 +235,7 @@ def _pipeline_body(value: str) -> bytes:
     }).encode("utf-8")
 
 
-def _serve(posts, connections, *, drop_on):
+def _serve(posts, connections, *, drop_on, received=None):
     """HTTP/1.1 keep-alive. `drop_on` post counts close before any status."""
     body = _pipeline_body("1")
 
@@ -240,6 +251,8 @@ def _serve(posts, connections, *, drop_on):
             length = int(self.headers.get("Content-Length", "0"))
             self.rfile.read(length)
             posts["n"] += 1
+            if received is not None:
+                received.set()
             if posts["n"] in drop_on:
                 self.close_connection = True
                 try:
@@ -271,15 +284,15 @@ def _point_at(server, monkeypatch):
     monkeypatch.setenv("RADON_DB_TEST_WRITE_OK", "1")
 
 
-def _stop(server, thread):
-    closer = getattr(hrana_http, "_close_keepalive", None)
+def _stop(server, thread, module=hrana_http):
+    closer = getattr(module, "_close_keepalive", None)
     if closer:
         closer()
     server.shutdown()
     thread.join(timeout=2)
 
 
-def test_reused_socket_closed_before_status_retries_once(monkeypatch):
+def test_reused_socket_closed_before_status_retries_once(monkeypatch, transport):
     """Idle keep-alive dies during the next statement's status line.
 
     The cash-flow heartbeat holds the socket across a long libsql mirror.
@@ -288,45 +301,50 @@ def test_reused_socket_closed_before_status_retries_once(monkeypatch):
     return the row. A second reconnect would hide a real outage.
     """
     posts = {"n": 0}
+    module, query, error, rows = transport
     connections = {"n": 0}
     server, thread = _serve(posts, connections, drop_on={2})
     _point_at(server, monkeypatch)
     try:
-        assert hrana_http.hrana_query("SELECT 1") == [("1",)]
-        assert hrana_http.hrana_query("SELECT 1") == [("1",)]
+        assert query("SELECT 1") == rows
+        assert query("SELECT 1") == rows
         assert connections["n"] == 2
         assert posts["n"] == 3
     finally:
-        _stop(server, thread)
+        _stop(server, thread, module)
 
 
-def test_fresh_socket_closed_before_status_does_not_open_another(monkeypatch):
+def test_fresh_socket_closed_before_status_does_not_open_another(monkeypatch, transport):
+    module, query, error, rows = transport
     posts = {"n": 0}
     connections = {"n": 0}
     server, thread = _serve(posts, connections, drop_on={1})
     _point_at(server, monkeypatch)
     try:
-        with pytest.raises(hrana_http.HranaHttpError, match="RemoteDisconnected|Connection reset|Connection aborted"):
-            hrana_http.hrana_query("SELECT 1")
+        with pytest.raises(error, match="RemoteDisconnected|Connection reset|Connection aborted"):
+            query("SELECT 1")
         assert connections["n"] == 1
         assert posts["n"] == 1
+        assert getattr(module._local, 'conn', None) is None
     finally:
-        _stop(server, thread)
+        _stop(server, thread, module)
 
 
-def test_reused_close_and_fresh_retry_close_raises_once(monkeypatch):
+def test_reused_close_and_fresh_retry_close_raises_once(monkeypatch, transport):
+    module, query, error, rows = transport
     posts = {"n": 0}
     connections = {"n": 0}
     server, thread = _serve(posts, connections, drop_on={2, 3})
     _point_at(server, monkeypatch)
     try:
-        assert hrana_http.hrana_query("SELECT 1") == [("1",)]
-        with pytest.raises(hrana_http.HranaHttpError):
-            hrana_http.hrana_query("SELECT 1")
+        assert query("SELECT 1") == rows
+        with pytest.raises(error):
+            query("SELECT 1")
         assert connections["n"] == 2
         assert posts["n"] == 3
+        assert getattr(module._local, 'conn', None) is None
     finally:
-        _stop(server, thread)
+        _stop(server, thread, module)
 
 
 @pytest.mark.parametrize("sql", [
@@ -337,20 +355,78 @@ def test_reused_close_and_fresh_retry_close_raises_once(monkeypatch):
     "SELECT 1; UPDATE counter SET value=value+1",
     "PRAGMA user_version=5",
 ])
-def test_lost_write_response_never_replays_the_statement(monkeypatch, sql):
+def test_lost_write_response_never_replays_the_statement(monkeypatch, sql, transport):
     """A peer can commit a POST before disconnecting without a status line."""
     posts = {"n": 0}
+    module, query, error, rows = transport
     connections = {"n": 0}
     server, thread = _serve(posts, connections, drop_on={2})
     _point_at(server, monkeypatch)
     try:
-        assert hrana_http.hrana_query("SELECT 1") == [("1",)]
-        with pytest.raises(hrana_http.HranaHttpError):
-            hrana_http.hrana_execute(sql)
+        assert query("SELECT 1") == rows
+        with pytest.raises(error):
+            module.hrana_execute(sql)
         assert posts["n"] == 2, "unknown write outcome must not send another POST"
         assert connections["n"] == 1
     finally:
-        _stop(server, thread)
+        _stop(server, thread, module)
+
+
+@pytest.mark.parametrize('sql', [
+    'INSERT INTO counter(value) VALUES(1)',
+    'UPDATE counter SET value=value+1',
+])
+def test_request_error_after_peer_received_write_never_replays(monkeypatch, sql, transport):
+    """A send failure can occur after the server received the mutation."""
+    module, query, error, rows = transport
+    posts, connections, received = {'n': 0}, {'n': 0}, threading.Event()
+    server, thread = _serve(posts, connections, drop_on={2}, received=received)
+    _point_at(server, monkeypatch)
+    original_request = http.client.HTTPConnection.request
+    requests = {'n': 0}
+    def request_then_fail(connection, *args, **kwargs):
+        requests['n'] += 1
+        original_request(connection, *args, **kwargs)
+        if requests['n'] == 2:
+            assert received.wait(2), 'the peer must receive the write before its send error'
+            raise OSError('response outcome unknown after send')
+    monkeypatch.setattr(http.client.HTTPConnection, 'request', request_then_fail)
+    try:
+        assert query('SELECT 1') == rows
+        received.clear()
+        with pytest.raises(error):
+            module.hrana_execute(sql)
+        assert posts['n'] == 2 and requests['n'] == 2, 'an uncertain write must not be sent twice'
+        assert connections['n'] == 1
+        assert getattr(module._local, 'conn', None) is None
+    finally:
+        _stop(server, thread, module)
+
+
+def test_failed_fresh_read_retry_retires_the_socket(monkeypatch, transport):
+    module, query, error, rows = transport
+    posts, connections, received = {'n': 0}, {'n': 0}, threading.Event()
+    server, thread = _serve(posts, connections, drop_on={2, 3}, received=received)
+    _point_at(server, monkeypatch)
+    original_request = http.client.HTTPConnection.request
+    requests = {'n': 0}
+    def request_then_fail(connection, *args, **kwargs):
+        requests['n'] += 1
+        received.clear()
+        original_request(connection, *args, **kwargs)
+        if requests['n'] > 1:
+            assert received.wait(2)
+            raise OSError('send outcome unknown')
+    monkeypatch.setattr(http.client.HTTPConnection, 'request', request_then_fail)
+    try:
+        assert query('SELECT 1') == rows
+        with pytest.raises(error):
+            query('SELECT 1')
+        assert posts['n'] == 3 and requests['n'] == 3
+        assert connections['n'] == 2
+        assert getattr(module._local, 'conn', None) is None
+    finally:
+        _stop(server, thread, module)
 
 
 @pytest.mark.parametrize("payload, safe", [
@@ -365,13 +441,139 @@ def test_lost_write_response_never_replays_the_statement(monkeypatch, sql):
     ({"requests": []}, False),
     ({}, False),
 ])
-def test_retry_requires_a_proven_read_only_pipeline(payload, safe):
+def test_retry_requires_a_proven_read_only_pipeline(payload, safe, transport):
     import urllib.request
     request = urllib.request.Request("https://example.invalid/v2/pipeline", data=json.dumps(payload).encode())
-    assert hrana_http._retry_safe_read(request) is safe
+    assert transport[0]._retry_safe_read(request) is safe
 
 
-def test_retry_refuses_an_unparsed_pipeline():
+def test_retry_refuses_an_unparsed_pipeline(transport):
     import urllib.request
     request = urllib.request.Request("https://example.invalid/v2/pipeline", data=b"not json")
-    assert hrana_http._retry_safe_read(request) is False
+    assert transport[0]._retry_safe_read(request) is False
+
+
+@pytest.fixture
+def idle_pool(monkeypatch, transport):
+    """No sleeps or sockets: time advances only when a response completes."""
+    from types import SimpleNamespace
+    import urllib.request
+
+    module = transport[0]
+    module._close_keepalive()
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic=lambda: clock.now), raising=False)
+    connections, responses = [], []
+
+    class Response:
+        status = 200
+
+        def read(self, _limit):
+            return _pipeline_body('1')
+
+        def isclosed(self):
+            return True
+
+    class Connection:
+        def __init__(self, host, port, timeout, **kwargs):
+            self.host, self.port, self.timeout = host, port, timeout
+            self.requests, self.closed = [], False
+            connections.append(self)
+
+        def request(self, method, path, body, headers):
+            assert not self.closed, 'a retired connection received another request'
+            self.requests.append((method, path, json.loads(body), self.timeout))
+
+        def getresponse(self):
+            value = responses.pop(0) if responses else Response()
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(module.http.client, 'HTTPConnection', Connection)
+    monkeypatch.setattr(module.http.client, 'HTTPSConnection', Connection)
+
+    def request(sql='SELECT 1', timeout=4.0, origin='https://synthetic.invalid'):
+        body = json.dumps({'requests': [{'type': 'execute', 'stmt': {'sql': sql}}, {'type': 'close'}]}).encode()
+        req = urllib.request.Request(origin + '/v2/pipeline', data=body, method='POST')
+        return module._pooled_open(req, timeout).read()
+
+    yield module, clock, connections, responses, request, Response
+    module._close_keepalive()
+
+
+@pytest.mark.parametrize('sql', ['SELECT 1', 'UPDATE synthetic_counter SET value=value+1'])
+@pytest.mark.parametrize('idle,expired', [(0.0, False), (4.999, False), (5.0, True), (70.0, True)])
+def test_pool_expires_idle_connections_before_sending_reads_or_writes(idle_pool, sql, idle, expired):
+    module, clock, connections, responses, request, _ = idle_pool
+    request()
+    clock.now += idle
+    request(sql, timeout=2.0)
+    assert len(connections) == (2 if expired else 1)
+    assert len(connections[0].requests) == (1 if expired else 2)
+    assert connections[0].closed is expired
+    assert connections[-1].requests[-1][2]['requests'][0]['stmt']['sql'] == sql
+    assert connections[-1].requests[-1][3] == 2.0
+    assert sum(len(conn.requests) for conn in connections) == 2, 'expiry is retirement, never a write retry'
+
+
+def test_pool_idle_age_starts_after_full_successful_response(idle_pool):
+    module, clock, connections, responses, request, Response = idle_pool
+
+    class SlowResponse(Response):
+        def read(self, limit):
+            clock.now += 20.0
+            return super().read(limit)
+
+    responses.append(SlowResponse())
+    request()
+    assert clock.now == 120.0
+    clock.now = 124.999
+    request('UPDATE synthetic_counter SET value=value+1')
+    assert len(connections) == 1, 'request duration is not idle age'
+    clock.now = 129.999
+    request('UPDATE synthetic_counter SET value=value+1')
+    assert len(connections) == 2, 'every full success refreshes the five-second idle clock'
+
+
+@pytest.mark.parametrize('failure', ['headers', 'body', 'oversized', 'http'])
+def test_pool_failure_retires_connection_and_clears_idle_clock(idle_pool, failure, monkeypatch):
+    module, clock, connections, responses, request, Response = idle_pool
+    request()
+    assert module._local.last_success == 100.0
+    clock.now = 101.0
+
+    class FailedResponse(Response):
+        status = 503 if failure == 'http' else 200
+
+        def read(self, limit):
+            if failure == 'body':
+                raise OSError('synthetic interrupted body')
+            return b'x' * (limit + 1) if failure == 'oversized' else super().read(limit)
+
+    responses.append(http.client.RemoteDisconnected('synthetic lost write response')
+                     if failure == 'headers' else FailedResponse())
+    with pytest.raises((OSError, http.client.HTTPException)):
+        request('UPDATE synthetic_counter SET value=value+1')
+    assert len(connections) == 1 and len(connections[0].requests) == 2
+    assert connections[0].closed
+    assert getattr(module._local, 'conn', None) is None
+    assert getattr(module._local, 'last_success', None) is None
+    clock.now = 102.0
+    request('UPDATE synthetic_counter SET value=value+1')
+    assert len(connections) == 2 and len(connections[-1].requests) == 1
+    assert module._local.last_success == 102.0
+
+
+def test_pool_origin_change_retires_prior_connection_and_starts_fresh_idle_clock(idle_pool):
+    module, clock, connections, responses, request, _ = idle_pool
+    request()
+    clock.now = 101.0
+    request(origin='https://other-synthetic.invalid')
+    assert len(connections) == 2
+    assert connections[0].closed, 'changing origins cannot retain an unreachable old pooled socket'
+    assert connections[1].host == 'other-synthetic.invalid'
+    assert module._local.last_success == 101.0
