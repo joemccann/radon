@@ -58,9 +58,31 @@ body { font-family: 'Inter', sans-serif; background: #0a0f14; color: #e2e8f0; wi
 
 # ── Data loading ──────────────────────────────────────────────────
 
-def load_cri(target_date: Optional[str] = None) -> dict:
-    """Load latest CRI cache, scheduled dir first then legacy cri.json."""
-    # Try scheduled dir
+def _load_cri_from_db(target_date: Optional[str] = None) -> Optional[dict]:
+    """Latest cri_snapshots row from Turso, the same source the CRI page reads."""
+    try:
+        from db.client import get_db  # lazy: disk fallback must work without libsql
+
+        if target_date:
+            rows = get_db().execute(
+                "SELECT payload FROM cri_snapshots WHERE date = ? ORDER BY taken_at DESC LIMIT 1",
+                (target_date,),
+            ).fetchall()
+        else:
+            rows = get_db().execute(
+                "SELECT payload FROM cri_snapshots ORDER BY taken_at DESC LIMIT 1"
+            ).fetchall()
+        if not rows:
+            return None
+        data = json.loads(rows[0][0])
+    except Exception as exc:  # noqa: BLE001 — any DB failure falls back to disk
+        print(f"[regime-share] db read unavailable, using disk cache: {exc}", file=sys.stderr)
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _load_cri_from_disk(target_date: Optional[str] = None) -> Optional[dict]:
+    """Scheduled dir first, then legacy cri.json."""
     if SCHEDULED_DIR.exists():
         files = sorted(SCHEDULED_DIR.glob("cri-*.json"))
         if target_date:
@@ -73,13 +95,23 @@ def load_cri(target_date: Optional[str] = None) -> dict:
                 return json.loads(raw[start:])
             except Exception:
                 pass
-    # Fallback to cri.json
     if CACHE_PATH.exists():
-        with open(CACHE_PATH) as f:
-            raw = f.read()
-        start = raw.find("{")
-        return json.loads(raw[start:])
-    raise FileNotFoundError("No CRI cache found. Run cri_scan.py first.")
+        try:
+            with open(CACHE_PATH) as f:
+                raw = f.read()
+            start = raw.find("{")
+            return json.loads(raw[start:])
+        except Exception:
+            pass
+    return None
+
+
+def load_cri(target_date: Optional[str] = None) -> dict:
+    """Load the freshest CRI payload from Turso or the local cache."""
+    candidates = [d for d in (_load_cri_from_db(target_date), _load_cri_from_disk(target_date)) if d]
+    if not candidates:
+        raise FileNotFoundError("No CRI data found in Turso or the local cache. Run cri_scan.py first.")
+    return max(candidates, key=lambda d: d.get("scan_time") or "")
 
 
 # ── Helpers ───────────────────────────────────────────────────────
