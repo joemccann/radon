@@ -251,7 +251,6 @@ class State:
               CASE WHEN w.note IS NOT NULL THEN w.attempts>0 END,
               CASE WHEN w.note IS NOT NULL THEN w.folder_date END DESC,
               CASE WHEN w.note IS NOT NULL THEN w.rowid END DESC,
-              CASE WHEN w.attempts>0 OR w.error IS NOT NULL THEN w.available_at END ASC,
               CASE WHEN w.attempts>0 OR w.error IS NOT NULL THEN w.rowid END ASC,
               w.folder_date DESC,w.rowid DESC LIMIT ?""",
             (now, now-REVIEW_RETRY_AGE_SECS, 0 if retry_slot else 1,
