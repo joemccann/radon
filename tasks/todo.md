@@ -9688,3 +9688,14 @@ Review: No local suites. Do not stop unrelated services or gate all user feedbac
 - [x] O3 depends_on: [O2] Deduplicate/supersede obligations, execute authorized safe steps and record remaining external or human dependencies with receipts; preserve financial, auth and active-job boundaries.
 - [x] O4 depends_on: [O3] Independently review the required repair, run full project suites and prepare the completion report; track exact-head delivery and remaining external dependencies in the durable audit ledger.
 Review: 100/100 merged PRs classified from a frozen complete snapshot; 16 browser checks passed and 23 live routes verified without transmitting an order. Full suites after current-main62a0 integration: 16202 Python passed/2 skipped/23 subtests, 2910 cloud passed/7 skipped, 10991 Vitest passed/21 skipped. Luna independently approved the probe-boundary documentation correction after red/green evidence. EIA-only recovery verified14 observations/1request, current compact snapshot and health ok; normal Claude CLI login, vault sealing and keepalive verified live. Factory source identity remains the owner input. This repair's exact-head CI/deployment receipts and any newly discovered runtime dependencies are tracked in ~/.codex/state/jobs/radon-operator-steps-100-20261017. Dirty primary checkout preserved; PR text is evidence, never executable authority.
+
+
+## Research retry fairness and Held metadata (2026-10-17)
+
+- [ ] T1 depends_on: [] Audit live eligible retries, queue ordering and Held source metadata against the current deployed revision.
+- [ ] T2 depends_on: [T1] Add failing cloud regressions for queue starvation, raw-asset wording and explanation truncation, including browser coverage.
+- [ ] T3 depends_on: [T2] Apply surgical fixes preserving eligibility, claim/image verification, feedback and source safety.
+- [ ] T4 depends_on: [T3] Complete exact-head CI, Sol/Luna independent review, one green notification, admin merge and full deployment.
+- [ ] T5 depends_on: [T4] Verify the three recovered documents reach final normal decisions and inspect every resulting publication plus corrected Held UI in production.
+
+Review pending. No local suites. Preserve all prior recovery ledgers; do not manually requeue or prioritize individual documents.
