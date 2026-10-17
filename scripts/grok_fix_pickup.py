@@ -151,12 +151,18 @@ def refusal_reason(
     if commits > max_commits:
         return f"{commits} commits exceeds the cap of {max_commits}"
 
+    # -z: without it git C-quotes any path carrying a non-ASCII byte, a quote
+    # or a newline, so `.github/workflows/<non-ascii>.yml` arrived as
+    # `".github/workflows/\303\251.yml"`, did not start with `.github/`, and
+    # the branch was pushed and opened as a same-repository PR where
+    # pull_request workflows run from the PR head. NUL-separated output is the
+    # literal pathname, so the prefix test is what it claims to be.
     diff_proc = _git(
-        repo, ["diff", "--name-only", f"{fork_point}..{ref}"], runner=runner
+        repo, ["diff", "-z", "--name-only", f"{fork_point}..{ref}"], runner=runner
     )
     if getattr(diff_proc, "returncode", 1) != 0:
         return "cannot list changed paths"
-    for path in _stdout(diff_proc).splitlines():
+    for path in _stdout(diff_proc).split("\0"):
         if path.startswith(REFUSED_PATH_PREFIXES):
             return f"changes {path}: .github/ is never picked up automatically"
     return None

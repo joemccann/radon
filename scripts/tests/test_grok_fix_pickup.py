@@ -211,6 +211,23 @@ class TestRefusals:
         assert "fix/ci-tweak" not in listed.stdout
         assert ensure.calls == []
 
+    def test_refuses_a_dot_github_path_git_would_c_quote(self, world):
+        """`git diff --name-only` C-quotes a path with a non-ASCII byte, so the
+        emitted line is `".github/workflows/\303\251.yml"` and does not start
+        with `.github/`. The refusal must not read that textual form."""
+        _vps_branch(
+            world, "fix/ci-quote", relpath=".github/workflows/\u00e9.yml"
+        )
+        ensure = _FakeEnsurePr()
+
+        results = _run(world, ensure=ensure)
+
+        assert [r["action"] for r in results] == ["refused"]
+        assert "github" in results[0]["reason"].lower()
+        listed = _git(world["origin"], "for-each-ref", "--format=%(refname)")
+        assert "fix/ci-quote" not in listed.stdout
+        assert ensure.calls == []
+
     def test_ignores_refs_outside_fix(self, world):
         vps = world["vps"]
         assert _git(vps, "checkout", "-q", "-b", "main-ish").returncode == 0
