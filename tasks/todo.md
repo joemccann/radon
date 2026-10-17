@@ -9606,6 +9606,6 @@ Review: No local suites. A photo or prose crop is not a chart. Never treat absen
 ## Recovery feedback preservation (2026-10-17)
 - [x] F1 depends_on: [] Independent operational review identified feedback.apply marking an actionable vote handled when pending/processing work refused its requeue.
 - [x] F2 depends_on: [F1] GitHub f6b173ee reproduced eight feedback failures with 2651 passing tests (run39047098441, job117437942440); all decorative-routing regressions passed.
-- [x] F3 depends_on: [F2] Implemented atomic note/handled acknowledgment with a transactional duplicate guard and live-revision deferral; final combined CI/review pending.
+- [ ] F3 depends_on: [F2] Atomic acknowledgment and busy deferral implemented; independent review requires a latest-deleted-revision regression/repair before final approval.
 - [ ] F4 depends_on: [F3, Q4] Independently approve a short SQLite write-fenced recovery, deploy, requeue only the three proven routing cases and verify every outcome.
 Review: No local suites. Do not stop unrelated services or gate all user feedback writes. Recovery must not erase or consume operator feedback that arrives concurrently.

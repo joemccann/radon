@@ -211,6 +211,37 @@ def test_vote_for_terminal_target_is_still_marked_handled_without_changing_work(
     assert dict(s.db.execute('SELECT * FROM work WHERE key=?', (key,)).fetchone()) == before
 
 
+def test_file_vote_for_deleted_latest_revision_never_resurrects_published_history(state):
+    s, older_key = state
+    post_id = 'research-' + '1' * 64
+    assert s.requeue_with_note(older_key, None)
+    assert s.claim(older_key)
+    s.complete(older_key, {'status': 'reviewed', 'items': 1}, publications=[{'id': post_id, 'title': 'Published history'}])
+    s.published(post_id)
+    scope = '2026/September/Sep 07'
+    s.ingest_page(scope, {'cursor': 'revision-two', 'entries': [entry(rev='rev2')]}, '2026-09-07')
+    latest_key = s.pending()[0]['key']
+    assert s.claim(latest_key)
+    s.complete(latest_key, {'status': 'reviewed', 'items': 0})
+    assert s.requeue_with_note(latest_key, json.dumps({'comment': 'Keep latest revision context'}))
+    assert s.claim(latest_key)
+    s.retry(latest_key, ValueError('retry'), delay=0)
+    s.ingest_page(scope, {'cursor': 'file-deleted', 'entries': [
+        {'.tag': 'deleted', 'path_lower': entry()['path_lower']},
+    ]}, '2026-09-07')
+    before = {record['key']: dict(record) for record in s.db.execute('SELECT * FROM work')}
+    assert before[older_key]['status'] == 'published' and before[latest_key]['status'] == 'deleted'
+    outbox_before = [tuple(record) for record in s.db.execute('SELECT * FROM outbox')]
+    fetch = lambda: [row('deleted-file-vote', 'post', 'up', post_id=post_id, reasons=['want_more'],
+                         comment='Do not revive a deleted source revision')]
+    assert feedback.apply(s, fetch) == 0
+    assert s.work_key_for_file('id:one') is None
+    assert 'deleted-file-vote' in s.feedback_handled()
+    assert {record['key']: dict(record) for record in s.db.execute('SELECT * FROM work')} == before
+    assert [tuple(record) for record in s.db.execute('SELECT * FROM outbox')] == outbox_before
+    assert s.pending() == [] and s.outbox() == []
+
+
 def test_vote_for_an_unknown_document_is_marked_handled_not_retried_forever(state):
     s, _ = state
     fetch = lambda: [row("f9", "held", "up", work_key="e" * 64)]
