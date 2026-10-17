@@ -65,9 +65,22 @@ def _workers_spawned(monkeypatch, numprocesses: str) -> int:
          "-k", "test_local_auto_uses_half_the_cores"],
         cwd=REPO, capture_output=True, text=True, timeout=180,
     )
-    scheduled = re.search(r"^(\d+) workers \[1 item\]", proc.stdout, re.MULTILINE)
-    assert scheduled, proc.stdout + proc.stderr
-    return int(scheduled.group(1))
+    scheduled = _scheduled_worker_count(proc.stdout)
+    assert scheduled is not None, proc.stdout + proc.stderr
+    return scheduled
+
+
+def _scheduled_worker_count(stdout: str) -> int | None:
+    scheduled = re.search(r"^(\d+) workers? \[1 item\]", stdout, re.MULTILINE)
+    return int(scheduled.group(1)) if scheduled else None
+
+
+@pytest.mark.parametrize(
+    ("stdout", "expected"),
+    [("1 worker [1 item]\n", 1), ("7 workers [1 item]\n", 7)],
+)
+def test_scheduled_worker_parser_accepts_pytest_singular_and_plural(stdout, expected):
+    assert _scheduled_worker_count(stdout) == expected
 
 
 @pytest.mark.parametrize("numprocesses", ["auto", "64"])

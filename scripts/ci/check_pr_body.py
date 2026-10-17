@@ -68,6 +68,10 @@ TEMPLATE_PLACEHOLDERS = (
     "<None, or the operator work still open: merge (automation never merges), "
     "secret or flag change, host package or unit install, data backfill, "
     "2FA or gateway action, follow-up outside CI.>",
+    "<None, or the operator work still open: merge (nightly bot never merges; "
+    "operator release coordinator may use standing policy), secret or flag "
+    "change, host package or unit install, data backfill, 2FA or gateway "
+    "action, follow-up outside CI.>",
 )
 
 CHECKLIST_ITEMS = (

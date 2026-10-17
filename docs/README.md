@@ -29,6 +29,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Topic | Doc |
 |-------|-----|
 | Background services, watchdogs, env | [`docs/operations.md`](operations.md) |
+| Unattended maintenance releases and toolchain recovery | [`docs/unattended-releases.md`](unattended-releases.md) · [`docs/nightly-toolchain-updates.md`](nightly-toolchain-updates.md) |
 | Nightly agent runner (one clone, one prompt, one session) | [`docs/runner.md`](runner.md) |
 | Cloud architecture, Turso, two-mode deploy | [`docs/cloud-services.md`](cloud-services.md) |
 | Production network topology (app / broker split) | [`docs/spof-host-split.md`](spof-host-split.md) · [`docs/radon-network-topology.png`](radon-network-topology.png) |

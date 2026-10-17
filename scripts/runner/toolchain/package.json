@@ -1,0 +1,12 @@
+{
+  "private": true,
+  "name": "radon-deepsec-reviewed-toolchain",
+  "version": "1.0.0",
+  "dependencies": {
+    "deepsec": "2.3.8"
+  },
+  "overrides": {
+    "@openai/codex": "0.162.1",
+    "@openai/codex-sdk": "0.162.1"
+  }
+}
