@@ -334,16 +334,18 @@ def test_text_only_on_cited_figures_reselect_attaches_and_continues(tmp_path, pu
 
 def test_text_only_on_cited_figures_reselect_still_text_only_is_held(tmp_path, publisher):
     text_only = selection(figure_ids=[], text_only=True, captions={}, pages=[1])
-    reviewer = Reviewer([text_only, text_only])
+    unrelated_chart = match(passing=set(), f1={'visual_type': 'chart', 'is_chart': True,
+        'complete_figure': True, 'visible_text': ['Unrelated data'], 'shows': 'Chart of an unrelated market'})
+    reviewer = Reviewer([text_only, text_only, unrelated_chart])
     pipe = intake.Pipeline(tmp_path, reviewer, publisher, extractor=extractor,
                            figure_catalogue=catalogue_on(1), pdf_created=lambda pdf: None)
     posts = pipe.process(work(), tmp_path / "r.pdf", [])
-    assert posts == [] and publisher.stored == [] and [c[0] for c in reviewer.calls] == ["text", "text"]
+    assert posts == [] and publisher.stored == [] and [c[0] for c in reviewer.calls] == ["text", "text", "match"]
     review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
     first_miss = next(a for a in review["audit"] if a.get("text_only_with_figures") and "held" not in a)
     assert first_miss["figures_on_cited_pages"] == ["f1"]
-    held = [a for a in review["audit"] if a.get("held") == "TEXT_ONLY_WITH_FIGURES"]
-    assert held and held[0]["reselect"] is True and held[0]["claim_key"] == "tic-july-equity-buying"
+    held = [a for a in review['audit'] if a.get('held') in ('TEXT_ONLY_WITH_FIGURES', 'FIGURE_MISMATCH')]
+    assert held and held[0]['claim_key'] == 'tic-july-equity-buying'
 
 
 def test_text_only_on_cited_figures_reselect_bare_candidate_attaches(tmp_path, publisher):
@@ -598,7 +600,8 @@ def test_select_catalogue_carries_each_figure_bbox(tmp_path, publisher):
     assert '"bbox": [0.6965, 0.0371, 0.8918, 0.0736]' in reviewer.calls[0][1]
 
 
-def test_generated_png_is_reviewed_by_separate_agent_before_publication(tmp_path, publisher):
+@pytest.mark.parametrize('has_decorative_assets', [False, True])
+def test_generated_png_is_reviewed_by_separate_agent_before_publication(tmp_path, publisher, has_decorative_assets):
     from research.generated_charts import REVIEW_GATES
     plan = {'kind': 'bar', 'title': 'Foreign purchases by asset', 'unit': '$bn', 'axis': [0, 50], 'ticks': [0, 10, 20, 30, 40, 50],
             'bars': [{'id': 'equities', 'label': 'US equities', 'value': 45}, {'id': 'treasuries', 'label': 'Treasuries', 'value': 12}]}
@@ -609,8 +612,11 @@ def test_generated_png_is_reviewed_by_separate_agent_before_publication(tmp_path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b'\x89PNG\r\n\x1a\nrendered pixels')
         return {'path': str(path), 'width': 2400, 'height': 1440, 'renderer': 'test-renderer'}
-    claim_agent = Reviewer([selection(figure_ids=[], text_only=True, captions={}), verdict()])
-    pipe = intake.Pipeline(tmp_path, claim_agent, publisher, extractor=extractor, figure_catalogue=lambda *a: [],
+    text_only = selection(figure_ids=[], text_only=True, captions={}, pages=[1, 2] if has_decorative_assets else [1])
+    replies = [text_only, text_only, nonchart_reply(), verdict()] if has_decorative_assets else [text_only, verdict()]
+    claim_agent = Reviewer(replies)
+    figures = decorative_catalogue() if has_decorative_assets else lambda *a: []
+    pipe = intake.Pipeline(tmp_path, claim_agent, publisher, extractor=extractor, figure_catalogue=figures,
                            pdf_created=lambda pdf: None, chart_producer=producer, chart_reviewer=image_agent, chart_renderer=renderer)
     posts = pipe.process(work(), tmp_path / 'r.pdf', [])
     assert posts[0]['images'][0].endswith('.png')
@@ -618,7 +624,9 @@ def test_generated_png_is_reviewed_by_separate_agent_before_publication(tmp_path
     assert posts[0]['source']['chartGeneration']['status'] == 'passed'
     assert posts[0]['source']['chartGeneration']['charts'][0]['review']['visible_data'] == plan['bars']
     assert image_agent.calls[0][2][0][1].read_bytes().startswith(b'\x89PNG')
-    assert len(claim_agent.calls) == 2 and len(image_agent.calls) == 1
+    assert len(claim_agent.calls) == (4 if has_decorative_assets else 2) and len(image_agent.calls) == 1
+    assert claim_agent.calls[-1][2] == (), 'Claim VERIFY receives no decorative image'
+    assert not any(path.endswith('/figures/f1.png') or path.endswith('/figures/f2.png') for path in publisher.stored)
 
 
 def test_rejected_generated_image_preserves_text_and_disables_browser_fallback(tmp_path, publisher):
@@ -764,3 +772,185 @@ def test_final_publication_requires_completeness_field_not_just_factual_gates(tm
     assert build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", []) == []
     assert not publisher.stored
     assert any(entry.get("held") == "VERIFY_FAILED" for entry in audit_of(tmp_path))
+
+
+def decorative_catalogue(count=2):
+    def render(pdf, pages, output, dpi=216):
+        output.mkdir(parents=True, exist_ok=True)
+        result = []
+        for index in range(1, count + 1):
+            name = f'f{index}.png'
+            (output / name).write_bytes(b'\x89PNG\r\n\x1a\n' + name.encode())
+            result.append({'id': f'f{index}', 'page': 2, 'bbox': [.1, .2, .9, .6], 'objects': 1,
+                           'kind': 'raster', 'title': 'Catalogue title does not prove a data chart',
+                           'source_line': None, 'image_file': name, 'width': 800, 'height': 400})
+        return result
+    return render
+
+
+def nonchart_reply(visual_types=('photo', 'prose'), mutate=None):
+    def reply(offered):
+        result = {'figures': [
+            {'id': identity, 'visual_type': visual_types[index % len(visual_types)],
+             'is_chart': False, 'supports_finding': False, 'complete_figure': True,
+             'visible_text': [], 'shows': f'A decorative {visual_types[index % len(visual_types)]} without data marks'}
+            for index, identity in enumerate(offered)
+        ]}
+        return mutate(result) if mutate else result
+    reply.figure_match = True
+    return reply
+
+
+def decorative_pipeline(tmp_path, reviewer, publisher, count=2, **kwargs):
+    return intake.Pipeline(tmp_path, reviewer, publisher, extractor=extractor,
+                           figure_catalogue=decorative_catalogue(count), pdf_created=lambda pdf: None,
+                           chart_producer=EmptyChartAgent(), chart_reviewer=EmptyChartAgent(), **kwargs)
+
+
+@pytest.mark.parametrize('initially_text_only', [False, True])
+def test_independently_proven_photos_and_prose_reach_text_verification(tmp_path, publisher, initially_text_only):
+    first = selection(pages=[1, 2], figure_ids=[] if initially_text_only else ['f1'],
+                      text_only=initially_text_only, captions={} if initially_text_only else {'f1': 'Proposed figure'})
+    responses = [first]
+    if initially_text_only:
+        responses.append(selection(pages=[1, 2], figure_ids=[], text_only=True, captions={}))
+    responses.extend([nonchart_reply(), verdict()])
+    reviewer = Reviewer(responses)
+    posts = decorative_pipeline(tmp_path, reviewer, publisher).process(work(), tmp_path / 'r.pdf', [])
+    assert len(posts) == 1 and posts[0]['images'] == [] and posts[0]['source']['figures'] == []
+    assert posts[0]['source']['chartGeneration']['status'] == 'no_comparable_data'
+    expected = ['text', 'text', 'match', 'multimodal'] if initially_text_only else ['text', 'match', 'multimodal']
+    assert [call[0] for call in reviewer.calls] == expected
+    inspected = next(call for call in reviewer.calls if call[0] == 'match')
+    assert offered_ids(inspected[1]) == ['f1', 'f2'] and len(inspected[2]) == 2
+    verified = reviewer.calls[-1]
+    assert verified[2] == () and 'TOKENS NOT MATCHED BY CODE' in verified[1]
+    assert not any(path.endswith('.png') for path in publisher.stored)
+
+
+@pytest.mark.parametrize('visual_type', ['photo', 'prose', 'logo', 'letterhead', 'banner', 'signature'])
+@pytest.mark.parametrize('complete', [False, True])
+def test_explicit_non_data_visual_types_are_eligible_for_text_only(tmp_path, publisher, visual_type, complete):
+    def annotate(result):
+        for figure in result['figures']:
+            figure['complete_figure'] = complete
+        return result
+    reviewer = Reviewer([selection(pages=[1, 2]), nonchart_reply((visual_type,), mutate=annotate), verdict()])
+    posts = decorative_pipeline(tmp_path, reviewer, publisher).process(work(), tmp_path / 'r.pdf', [])
+    assert len(posts) == 1 and posts[0]['images'] == []
+    assert reviewer.calls[-1][0] == 'multimodal' and reviewer.calls[-1][2] == ()
+
+
+def test_text_only_reselect_can_still_attach_a_visually_proven_real_chart(tmp_path, publisher):
+    text_only = selection(pages=[1, 2], figure_ids=[], text_only=True, captions={})
+    reviewer = Reviewer([text_only, text_only, match(passing={'f2'}), verdict()])
+    pipe = intake.Pipeline(tmp_path, reviewer, publisher, extractor=extractor,
+                           figure_catalogue=logo_and_chart, pdf_created=lambda pdf: None)
+    posts = pipe.process(work(), tmp_path / 'r.pdf', [])
+    assert len(posts) == 1 and len(posts[0]['images']) == 1
+    assert posts[0]['source']['figures'][0]['caption'] == 'f2 matched caption'
+    assert 'chartGeneration' not in posts[0]['source']
+    assert len(reviewer.calls[-1][2]) == 1 and str(reviewer.calls[-1][2][0][1]).endswith('f2.png')
+
+
+@pytest.mark.parametrize('defect', [
+    'missing_id', 'missing_id_field', 'list_id', 'dict_id', 'integer_id', 'duplicate_id',
+    'duplicate_existing', 'extra_id', 'non_object', 'missing_type', 'nonstring_type', 'chart', 'table',
+    'chart_fragment', 'unknown', 'is_chart_true', 'supports_true', 'string_false',
+    'is_chart_integer', 'supports_integer', 'supports_missing',
+    'missing_completeness', 'nonboolean_completeness', 'missing_labels', 'nonlist_labels',
+    'nonstring_label', 'blank_shows', 'missing_shows', 'nonstring_shows', 'nonlist_figures',
+])
+def test_uncertain_or_incomplete_nonchart_proof_holds(tmp_path, publisher, defect):
+    def mutate(result):
+        figures = result['figures']
+        if defect == 'missing_id': figures.pop()
+        elif defect == 'missing_id_field': figures[0].pop('id')
+        elif defect == 'list_id': figures[0]['id'] = []
+        elif defect == 'dict_id': figures[0]['id'] = {}
+        elif defect == 'integer_id': figures[0]['id'] = 1
+        elif defect == 'duplicate_id': figures[1]['id'] = figures[0]['id']
+        elif defect == 'duplicate_existing': figures.append(dict(figures[0]))
+        elif defect == 'extra_id': figures.append(dict(figures[0], id='unoffered'))
+        elif defect == 'non_object': figures.append(None)
+        elif defect == 'missing_type': figures[0].pop('visual_type')
+        elif defect == 'nonstring_type': figures[0]['visual_type'] = ['photo']
+        elif defect in ('chart', 'table', 'chart_fragment', 'unknown'): figures[0]['visual_type'] = defect
+        elif defect == 'is_chart_true': figures[0]['is_chart'] = True
+        elif defect == 'supports_true': figures[0]['supports_finding'] = True
+        elif defect == 'string_false': figures[0]['is_chart'] = 'false'
+        elif defect == 'is_chart_integer': figures[0]['is_chart'] = 0
+        elif defect == 'supports_integer': figures[0]['supports_finding'] = 0
+        elif defect == 'supports_missing': figures[0].pop('supports_finding')
+        elif defect == 'missing_completeness': figures[0].pop('complete_figure')
+        elif defect == 'nonboolean_completeness': figures[0]['complete_figure'] = 0
+        elif defect == 'missing_labels': figures[0].pop('visible_text')
+        elif defect == 'nonlist_labels': figures[0]['visible_text'] = ''
+        elif defect == 'nonstring_label': figures[0]['visible_text'] = [None]
+        elif defect == 'blank_shows': figures[0]['shows'] = ' '
+        elif defect == 'missing_shows': figures[0].pop('shows')
+        elif defect == 'nonstring_shows': figures[0]['shows'] = 123
+        elif defect == 'nonlist_figures': result['figures'] = 'no charts'
+        return result
+    reviewer = Reviewer([selection(pages=[1, 2]), nonchart_reply(mutate=mutate), verdict()])
+    posts = decorative_pipeline(tmp_path, reviewer, publisher).process(work(), tmp_path / 'r.pdf', [])
+    assert posts == [] and not publisher.stored
+    assert [call[0] for call in reviewer.calls] == ['text', 'match']
+    assert any(entry.get('held') for entry in audit_of(tmp_path))
+
+
+@pytest.mark.parametrize('count', [8, 9])
+def test_all_cited_assets_must_be_visually_inspected_within_cap(tmp_path, publisher, count):
+    reviewer = Reviewer([selection(pages=[1, 2]), nonchart_reply(), verdict()])
+    posts = decorative_pipeline(tmp_path, reviewer, publisher, count=count).process(work(), tmp_path / 'r.pdf', [])
+    inspected = [call for call in reviewer.calls if call[0] == 'match']
+    assert all(len(call[2]) <= 8 for call in inspected)
+    if count == 8:
+        assert len(posts) == 1 and posts[0]['images'] == []
+        assert len(inspected) == 1 and set(offered_ids(inspected[0][1])) == {f'f{i}' for i in range(1, 9)}
+    else:
+        assert posts == [] and not publisher.stored
+        assert not any(call[0] == 'multimodal' for call in reviewer.calls)
+
+
+@pytest.mark.parametrize('failed_gate', list(intake.GATES))
+def test_nonchart_clearance_cannot_bypass_normal_claim_verification(tmp_path, publisher, failed_gate):
+    reviewer = Reviewer([selection(pages=[1, 2]), nonchart_reply(), verdict(**{failed_gate: False})])
+    posts = decorative_pipeline(tmp_path, reviewer, publisher).process(work(), tmp_path / 'r.pdf', [])
+    assert posts == [] and not publisher.stored
+    assert [call[0] for call in reviewer.calls] == ['text', 'match', 'multimodal']
+    assert reviewer.calls[-1][2] == ()
+    assert any(entry.get('held') == 'VERIFY_FAILED' for entry in audit_of(tmp_path))
+
+
+@pytest.mark.parametrize('initially_text_only', [False, True])
+def test_nonchart_visual_inspection_outage_propagates_for_queue_retry(tmp_path, publisher, initially_text_only):
+    text_only = selection(pages=[1, 2], figure_ids=[], text_only=True, captions={})
+    def unavailable(offered):
+        raise model.ModelError('Model ladder exhausted: provider unavailable')
+    unavailable.figure_match = True
+    responses = [text_only, text_only] if initially_text_only else [selection(pages=[1, 2])]
+    reviewer = Reviewer(responses + [unavailable])
+    with pytest.raises(model.ModelError, match='provider unavailable'):
+        decorative_pipeline(tmp_path, reviewer, publisher).process(work(), tmp_path / 'r.pdf', [])
+    assert not publisher.stored
+
+
+@pytest.mark.parametrize('bad_reselect', [
+    {'candidates': []},
+    {'candidates': [{'title': 'Missing candidate shape'}]},
+    selection(pages=[], figure_ids=[], text_only=True, captions={}),
+    selection(pages=[1, 2], figure_ids=[], text_only=False, captions={}),
+])
+def test_malformed_text_only_reselect_cannot_reuse_old_candidate(tmp_path, publisher, bad_reselect):
+    first = selection(pages=[1, 2], figure_ids=[], text_only=True, captions={})
+    reviewer = Reviewer([first, bad_reselect, nonchart_reply(), verdict()])
+    assert decorative_pipeline(tmp_path, reviewer, publisher).process(work(), tmp_path / 'r.pdf', []) == []
+    assert [call[0] for call in reviewer.calls] == ['text', 'text'] and not publisher.stored
+
+
+def test_nonchart_proof_prompt_requests_explicit_visual_types_and_full_id_coverage():
+    prompt = intake.FIGURE_MATCH_INSTRUCTION
+    assert 'visual_type' in prompt and 'chart_fragment' in prompt
+    for kind in ('photo', 'prose', 'logo', 'letterhead', 'banner', 'signature', 'unknown'):
+        assert kind in prompt
