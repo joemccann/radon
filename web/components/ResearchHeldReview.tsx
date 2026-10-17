@@ -14,7 +14,7 @@ function describeDocument(item: HeldDocument): string {
   const parts = [];
   if (item.documentDate) parts.push(`Report dated ${item.documentDate}${DATE_SOURCES[item.context?.dateSource ?? ""] ? ` (${DATE_SOURCES[item.context.dateSource]})` : ""}`);
   if (item.context?.pageCount) parts.push(`${item.context.pageCount} ${item.context.pageCount === 1 ? "page" : "pages"}`);
-  if (item.context?.figureCount) parts.push(`${item.context.figureCount} ${item.context.figureCount === 1 ? "chart" : "charts"}`);
+  if (item.context?.figureCount) parts.push(`${item.context.figureCount} extracted ${item.context.figureCount === 1 ? "figure" : "figures"}`);
   return parts.join(" · ");
 }
 

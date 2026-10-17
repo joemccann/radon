@@ -9692,10 +9692,10 @@ Review: 100/100 merged PRs classified from a frozen complete snapshot; 16 browse
 
 ## Research retry fairness and Held metadata (2026-10-17)
 
-- [ ] T1 depends_on: [] Audit live eligible retries, queue ordering and Held source metadata against the current deployed revision.
-- [ ] T2 depends_on: [T1] Add failing cloud regressions for queue starvation, raw-asset wording and explanation truncation, including browser coverage.
-- [ ] T3 depends_on: [T2] Apply surgical fixes preserving eligibility, claim/image verification, feedback and source safety.
+- [x] T1 depends_on: [] Audit live eligible retries, queue ordering and Held source metadata against the current deployed revision.
+- [x] T2 depends_on: [T1] Add failing cloud regressions for queue starvation, raw-asset wording and explanation truncation, including browser coverage.
+- [x] T3 depends_on: [T2] Apply surgical fixes preserving eligibility, claim/image verification, feedback and source safety.
 - [ ] T4 depends_on: [T3] Complete exact-head CI, Sol/Luna independent review, one green notification, admin merge and full deployment.
 - [ ] T5 depends_on: [T4] Verify the three recovered documents reach final normal decisions and inspect every resulting publication plus corrected Held UI in production.
 
-Review pending. No local suites. Preserve all prior recovery ledgers; do not manually requeue or prioritize individual documents.
+Review: live audit confirmed109 eligible, original3 ranks107–109;19 fresh/0 retry reviews in60min. GitHub regression751170a3 run39070511670:10 Python failures/2763 passed,2 UI failures/1273 passed,1 API failure/1419 passed. Minimal source fix implemented; full green CI and independent review pending. No local suites. Preserve all prior recovery ledgers; do not manually requeue or prioritize individual documents.
