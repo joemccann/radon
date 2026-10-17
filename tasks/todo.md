@@ -8,8 +8,12 @@ Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
 - [ ] T4 depends_on: [T3] Independent Sol/Luna review and exact-head full GitHub CI green.
 - [ ] T5 depends_on: [T4] Coordinated deployment after the preceding production release; verify normal recovered-document review outcomes.
 
+## Streamed transport follow-up
+- [x] T6 depends_on: [T3] Add production-shaped stream-body timeout and terminal response-error regression coverage after independent Sol review.
+- [ ] T7 depends_on: [T6] Confirm GitHub red before transport source repair, then rerun exact-head CI and independent review.
+
 ## Review
-Inspection confirmed the production ingestion consumer reuses its Pipeline and Reviewer across documents. Timeout state therefore requires an explicit document reset in both pipeline versions. Text and image calls use different provider models; timeout exclusion must preserve the untried modality. GitHub regression-only head 2c1a16cb, run 39048551062/job 117442189465: 31 failed, 2678 passed. Minimal repair keeps exact network timeout exclusions per document and text/image lane, preserves each winning provider, explicitly rejects empty eligible sets, and resets reused and distinct injected agents at both document boundaries. Python AST and diff checks passed; no local suites. Independent Sol/Luna review and exact-head CI pending.
+Inspection confirmed the production ingestion consumer reuses its Pipeline and Reviewer across documents. Timeout state therefore requires an explicit document reset in both pipeline versions. Text and image calls use different provider models; timeout exclusion must preserve the untried modality. GitHub regression-only head 2c1a16cb, run 39048551062/job 117442189465: 31 failed, 2678 passed. Minimal repair keeps exact network timeout exclusions per document and text/image lane, preserves each winning provider, explicitly rejects empty eligible sets, and resets reused and distinct injected agents at both document boundaries. Python AST and diff checks passed; no local suites. Independent Sol review found a streamed-body timeout escaping the shared transport wrapper. Added 22 synthetic response-stream regressions covering typed and generic timeout fallback, exact-class quarantine, response closure, byte limit, truncation and unchanged malformed JSON behavior. Transport source unchanged pending GitHub red; no local suites. Independent Sol/Luna review and exact-head CI pending.
 
 # Nemotron Super VL implementation (2026-10-16)
 
