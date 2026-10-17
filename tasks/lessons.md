@@ -1265,3 +1265,8 @@ When an operator asks for automated release or updater recovery, ship the durabl
 ### 2026-10-17: Verify source pixels and report dates after recovery
 
 - A mechanically valid publication still needs image-to-source review. Keep self-contained raster boundaries separate from nearby body prose, while preserving explicit external titles and credits. Verify all cited claims, author attribution and the printed byline date against the complete PDF. Derive month aliases from canonical names; an extra alias must never shift later months.
+
+
+### 2026-10-17: Complete prose can still invalidate a figure crop
+
+- A complete, related paragraph above a chart is still a composition defect when it dominates the image. Preserve an independent visual block even when numerical claims and HTTP/hash checks pass. Self-contained raster crops must bound external title attachment as well as generic nearby-text growth; verify the exact final figure rather than an earlier selection.

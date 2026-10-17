@@ -9773,3 +9773,12 @@ Wilson source correction review:879e fullmain39076695022 all37jobs success; actu
 SELECT budget review: cloud RED73f93735/run39077076334/research117526378112 reproduced2 failures,2833 passes,65 warnings105.14s before runtime edits. Only ask_text output allowance increased6000→10000; request count,120s/2MB/end_turn, multimodal6000, providers/auth, retries and verification remain unchanged. Exact-head full GREEN and independent source review pending. No local suites.
 
 Independent scope review: ask_text is also used by the separate generated-chart planner. Explicitly retain one bounded10000 maximum for all existing text calls, document the planning allowance, and add an actual generated_charts.generate→Reviewer→ladder request regression. Multimodal/image-verification6000 and all publication gates remain unchanged; no extra request/interface introduced. Prior02a240a6 source review is superseded; new exact-head reviews required.
+
+## Native raster title boundary (2026-10-17)
+
+- [x] G1 depends_on: [] Preserve independent production visual block and exact finalf4/source provenance.
+- [x] G2 depends_on: [G1] Cloud RED for body paragraph attachment, with genuine external title/subtitle/source preservation.
+- [ ] G3 depends_on: [G2] Minimal raster-only title guard, exact-head full CI and source/image Sol/Luna review, notification and authorized merge/deploy.
+- [ ] G4 depends_on: [G3] Actual deployed native rerender, guarded same-ID correction and all resulting production/source image verification.
+
+Review: Goldman normal6 publishes one supported native table, but external attachment records709chars/5lines of preceding prose as title. Independent Luna blocked visual quality; root/Sol accept superseding old visual approval. Preserve all data/claims/metadata/queue and complete source pixels. No local test suites.
