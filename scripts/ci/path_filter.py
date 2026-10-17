@@ -494,8 +494,11 @@ def changed_paths(base: str, head: str, cwd: Path | None = None) -> list[str]:
     # or a newline, so the gate selector compared `"scripts/\303\251.py"`
     # against its prefix filters, matched nothing and skipped the gate that
     # path should have run. NUL-separated output is the literal pathname.
+    # --no-renames: a detected rename emits only the destination, so moving a
+    # runtime file out of scripts/ selected no python gate even though the
+    # python tree changed. Without renames the move is a delete plus an add.
     result = subprocess.run(
-        ["git", "diff", "-z", "--name-only", f"{base}...{head}"],
+        ["git", "diff", "--no-renames", "-z", "--name-only", f"{base}...{head}"],
         cwd=cwd,
         check=True,
         capture_output=True,
