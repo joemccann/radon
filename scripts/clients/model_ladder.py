@@ -87,6 +87,8 @@ _CLAUDE_CODE_USER_AGENT = "claude-cli/2.1.140"
 # ChatGPT subscription endpoint the codex CLI uses. api.openai.com meters the
 # prepaid wallet and rejects the grant ("no credits remaining", live 2026-09-18).
 _CHATGPT_CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
+# GPT-5.5 retired from ChatGPT sign-in on 2026-10-14; API-key sessions retain it.
+_CODEX_SUBSCRIPTION_MODEL = "gpt-6.1-sol"
 # Google access runs ONLY through the Antigravity CLI (`agy -p`), operator
 # 2026-09-18: no Google API key or OAuth token path, under any flag. The
 # Antigravity grant lacks the generativelanguage scope (403 live), so there is
@@ -514,7 +516,9 @@ def _key_for(name: str, env: Mapping[str, str]) -> str:
     return auth.token if auth is not None else ""
 
 
-def _model_for(name: str, env: Mapping[str, str], *, kind: str = "vision") -> str:
+def _model_for(
+    name: str, env: Mapping[str, str], *, kind: str = "vision", auth_kind: str = "api_key"
+) -> str:
     defaults = _DEFAULT_VISION_MODELS if kind == "vision" else _DEFAULT_TEXT_MODELS
     if name == "anthropic":
         if kind == "text":
@@ -530,11 +534,12 @@ def _model_for(name: str, env: Mapping[str, str], *, kind: str = "vision") -> st
     if name == "grok":
         return _first_env_model(env, "XAI_MODEL", "GROK_MODEL", default=defaults["grok"])
     if name == "codex":
+        default = _CODEX_SUBSCRIPTION_MODEL if auth_kind == "subscription" else defaults["codex"]
         if kind == "vision":
             return _first_env_model(
-                env, "OPENAI_VISION_MODEL", "OPENAI_MODEL", default=defaults["codex"]
+                env, "OPENAI_VISION_MODEL", "OPENAI_MODEL", default=default
             )
-        return _first_env_model(env, "OPENAI_MODEL", default=defaults["codex"])
+        return _first_env_model(env, "OPENAI_MODEL", default=default)
     if name == "antigravity":
         return _first_env_model(env, "ANTIGRAVITY_MODEL", default=defaults["antigravity"])
     if name == "nvidia":
@@ -1478,12 +1483,15 @@ def _models_for_attempt(
     kind: str,
     model_override: str | None,
     nvidia_vision: bool,
+    auth_kind: str,
 ) -> tuple[str, ...]:
     if name == "anthropic" and model_override:
         return (model_override,)
     if name == "nvidia" and (kind == "vision" or nvidia_vision):
         return _nvidia_vision_models(env)
-    return (_model_for(name, env, kind=kind),)
+    if name == "codex" and nvidia_vision:
+        kind = "vision"  # Research JSON calls carry attached images separately from their text contract.
+    return (_model_for(name, env, kind=kind, auth_kind=auth_kind),)
 
 
 LAST_RESORT_PROVIDER = "cerebras"
@@ -1579,7 +1587,8 @@ def _run_ladder(
             auth.mechanism,
         )
         models = _models_for_attempt(
-            name, env, kind=kind, model_override=model_override, nvidia_vision=nvidia_vision
+            name, env, kind=kind, model_override=model_override, nvidia_vision=nvidia_vision,
+            auth_kind=auth.kind,
         )
         provider_won = False
         refreshed_once = False

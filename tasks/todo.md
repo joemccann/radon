@@ -9580,3 +9580,32 @@ CI repair: run 38968894246 / job 117203223236 timed out the PDF pagination regre
 - [ ] T3 depends_on: [T2] Complete exact-head CI, independent review and authorized deployment.
 - [ ] T4 depends_on: [T1, T3] Audit blocked document eligibility, recover infrastructure failures with checkpoints and verify live publication/health.
 Review: Preserve publication quality gates and source attribution; no local test suites. Investigate extraction errors separately from editorial holds.
+
+
+## Research review stale API connection follow-up (2026-10-17)
+- [x] R1 depends_on: [] Observe a new DbHttpError during three-key recovery; confirm API/shared transport retry gap without assuming the unrecorded exception cause.
+- [x] R2 depends_on: [R1] Extended real-socket regressions to API transport; GitHub c1dead71 reproduced16 failures/678 passing tests (job117429409148).
+- [ ] R3 depends_on: [R2] Port proven read-only reconnect classification and socket retirement; bba2f554 had 694 passed and 37 green checks with Sol source review. API source remains byte-identical after merging c899d37e; new-head CI is pending.
+- [ ] R4 depends_on: [R3] Wait for the separate control-plane release; deploy without weakening isolation, verify recovery and canonical outcomes.
+Review: No local suites. Never replay ambiguous writes. Preserve existing database outage parking and publication quality gates.
+
+## Research Codex subscription model retirement (2026-10-17)
+- [x] M1 depends_on: [] Confirm subscription model retirement and current account multi-image compatibility with a bounded synthetic canary.
+- [x] M2 depends_on: [M1] GitHub bda67981 reproduced nine failures with 1356 passing tests (run39045543319, job117433454016); preserve API-key defaults and explicit model overrides.
+- [ ] M3 depends_on: [M2] Select the verified subscription replacement, obtain independent review and exact-head green CI.
+- [ ] M4 depends_on: [M3] Deploy after the separate control-plane release, finish normal recovery and verify production outcomes.
+Review: Official model retirement applies to ChatGPT sign-in only. Existing production subscription request completed a two-image strict-JSON canary with gpt-6.1-sol. Preserve existing endpoint, token handling, publication gates and prepaid policy. No local test suites.
+
+## Research decorative-asset routing (2026-10-17)
+- [x] Q1 depends_on: [] Audit all 23 expired decisions and visually inspect three rejected decorative/prose crops; identify contradictory text-only RESELECT handling.
+- [x] Q2 depends_on: [Q1] GitHub 96512183 reproduced 27 failures with 2606 passing tests (run39046492003, job117436193779), including real malformed-ID crashes.
+- [x] Q3 depends_on: [Q2] Implemented strict independent all-assets routing; GitHub f6b173ee passed its regressions while exposing only feedback failures.
+- [ ] Q4 depends_on: [Q3, M3] Complete independent review and combined exact-head CI, deploy after control-plane repair and verify normal recovery outcomes.
+Review: No local suites. A photo or prose crop is not a chart. Never treat absent/malformed/uninspected classification as proof that no source chart exists. Normal verification and separate generated-PNG review remain mandatory.
+
+## Recovery feedback preservation (2026-10-17)
+- [x] F1 depends_on: [] Independent operational review identified feedback.apply marking an actionable vote handled when pending/processing work refused its requeue.
+- [x] F2 depends_on: [F1] GitHub f6b173ee reproduced eight feedback failures with 2651 passing tests (run39047098441, job117437942440); all decorative-routing regressions passed.
+- [x] F3 depends_on: [F2] Implemented atomic acknowledgment, busy deferral and latest-terminal handling; GitHub db555b91 reproduced the deletion edge (1 failed, 2660 passed) before its lookup repair.
+- [ ] F4 depends_on: [F3, Q4] Independently approve a short SQLite write-fenced recovery, deploy, requeue only the three proven routing cases and verify every outcome.
+Review: No local suites. Do not stop unrelated services or gate all user feedback writes. Recovery must not erase or consume operator feedback that arrives concurrently.
