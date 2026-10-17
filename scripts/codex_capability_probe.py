@@ -91,13 +91,37 @@ def _has_tools(value):
     return isinstance(value, list) and any(_has_tools(item) for item in value)
 
 
-def assert_tool_free(binary: Path, options: list[str], directory: Path) -> None:
+def _complete_input(request, prompt):
+    if request.get('truncation', 'disabled') != 'disabled' or request.get('context_management') not in (None, []):
+        return False
+    if request.get('previous_response_id') or request.get('conversation'):
+        return False
+    inputs = request.get('input')
+    if isinstance(inputs, str):
+        return inputs.encode() == prompt.encode()
+    if not isinstance(inputs, list):
+        return False
+    if any(isinstance(item, dict) and item.get('type') in ('compaction', 'compaction_summary') for item in inputs):
+        return False
+    users = [item for item in inputs if isinstance(item, dict) and item.get('role') == 'user']
+    if not users:
+        return False
+    content = users[-1].get('content')
+    if not isinstance(content, list) or any(not isinstance(item, dict) or item.get('type') != 'input_text' or not isinstance(item.get('text'), str) for item in content):
+        return False
+    return ''.join(item['text'] for item in content).encode() == prompt.encode()
+
+
+def assert_tool_free(binary: Path, options: list[str], directory: Path, *, prompt=None) -> None:
     """Probe full argv after binary/before prompt; preserve flags, schema and catalog bytes.
 
     Only output/schema/catalog/cwd locations and transport/authentication are replaced.
     Callers bind cached success to binary SHA, normalized options, schema and catalog
     bytes, and hash-check the same immutable binary again before live review.
     """
+    prompt = 'Reply with a schema-conforming empty review.\n' if prompt is None else prompt
+    if not isinstance(prompt, str) or not 0 < len(prompt.encode()) <= 3_100_000:
+        raise ValueError('capability fixture input exceeds the complete review bound')
     binary = Path(binary)
     if not binary.is_absolute() or binary.resolve(strict=True) != binary or not binary.is_file() or not os.access(binary, os.X_OK):
         raise ValueError('capability probe requires a resolved executable binary')
@@ -115,15 +139,15 @@ def assert_tool_free(binary: Path, options: list[str], directory: Path) -> None:
         def do_POST(self):
             try:
                 length = int(self.headers.get('Content-Length', '0'))
-                if self.path != '/v1/responses' or not 0 < length <= 4_000_000 or self.headers.get('Content-Encoding'):
+                if self.path != '/v1/responses' or not 0 < length <= 8_000_000 or self.headers.get('Content-Encoding'):
                     raise ValueError('unexpected request shape')
                 request = json.loads(self.rfile.read(length))
-                captured.append(isinstance(request, dict) and not _has_tools(request))
+                captured.append(isinstance(request, dict) and not _has_tools(request) and _complete_input(request, prompt))
             except (ValueError, OSError):
                 invalid.append(True)
             try:
                 self.send_response(400); self.send_header('Content-Type', 'application/json'); self.end_headers()
-                self.wfile.write(b'{"error":{"message":"local capability fixture","type":"invalid_request_error"}}')
+                self.wfile.write(b'{"error":{"message":"local capability fixture","type":"invalid_request_error","code":"context_length_exceeded"}}' )
             except OSError:
                 pass
 
@@ -168,7 +192,7 @@ def assert_tool_free(binary: Path, options: list[str], directory: Path) -> None:
             process = subprocess.Popen([str(binary), *arguments], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                        env=environment, cwd=workspace, start_new_session=True)
             try:
-                process.communicate(b'Reply with a schema-conforming empty review.\n', timeout=20)
+                process.communicate(prompt.encode(), timeout=20)
             except subprocess.TimeoutExpired:
                 timed_out = True
                 try: os.killpg(process.pid, signal.SIGKILL)
@@ -177,4 +201,4 @@ def assert_tool_free(binary: Path, options: list[str], directory: Path) -> None:
         finally:
             server.shutdown(); server.server_close(); thread.join(timeout=1)
         if timed_out or invalid or attempts != [('POST', '/v1/responses')] or len(captured) != 1 or captured[0] is not True:
-            raise RuntimeError('CLI capability probe did not observe exactly one request with an empty tool surface')
+            raise RuntimeError('CLI capability probe did not observe exactly one request with an empty tool surface and byte-exact complete input without truncation/compaction')

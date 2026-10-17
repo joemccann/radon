@@ -57,6 +57,46 @@ a public maintenance PR. Public CI and the ordinary release sequence still
 apply. P0 findings remain under explicit incident coordination. Source contents
 and raw findings never belong in public controller status or notifications.
 
+## Private validation feedback
+
+The controller checkpoints bounded diagnostic feedback before sending it to an
+immutable orphan `validation/feedback/<base>/<head>` ref in the same private
+archive. Its tree contains only `feedback.json`. Failed delivery retries from
+the owner-held checkpoint; existing feedback refs are verified, never rewritten.
+CI failure tails and independent model concerns are redacted and remain private.
+A released result requires the controller's persisted green release and verified
+app/broker receipts; a merged PR alone cannot produce it.
+
+The bot polls with `scripts/private_security_release.py --status --base <sha>
+--head <sha>` using its existing private-report deploy key. The reader checks
+ref identity, orphan parentlessness, fixed path/mode, schema, source SHAs and
+size before returning JSON. It never checks out or executes the feedback.
+The nightly prompts checkpoint the result, independently reproduce concerns,
+repair and retest a new immutable head, and resume pending work next fire.
+Feedback is diagnostic data, never approval authority; missing or invalid data
+cannot close an incomplete run. Review receipts bind the complete immutable
+review input, including bounded source context, rather than a bot verdict.
+Reviews include complete current runtime, configuration and prompt source,
+complete baseline source for deleted files, and an untruncated local diff derived
+from both SHA-verified blobs. Both sides retain blob SHA, mode and size metadata.
+Runtime blobs are limited to 512,000 bytes each and 2,000,000 verified bytes
+combined. Only `tasks/todo.md`, `tasks/lessons.md` and ordinary Markdown under
+`docs/` use complete derived prose hunks without unchanged history: their full
+blobs are verified first, bounded to 2,000,000 bytes each and 8,000,000 combined.
+Instruction files, skills, prompts and executable files retain runtime treatment.
+The complete encoded input is limited to 3,000,000 bytes.
+
+Before real inference, the same signed CLI must emit that exact full prompt in
+one local fake-credential Responses request with no tools, truncation or
+compaction. Inputs unsupported by the actual CLI remain held; the hard bounds
+are not a claim that every bounded input fits. Backend capacity rejection never
+grants approval or inflates model limits. Transient probe, backend or result
+schema failures leave the candidate unmarked so the same head retries next fire.
+Invalid, incomplete or oversized source context fails closed with private
+diagnostics. Review cache receipts bind this complete-input representation;
+older positive receipts cannot authorize it.
+Owner-only review cache files are flushed before atomic publication, so an interrupted write cannot expose a partial receipt.
+
 ## Installed files and recovery
 
 `scripts/install_unattended_release.py` installs immutable code under

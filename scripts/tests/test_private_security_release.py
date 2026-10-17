@@ -168,7 +168,7 @@ class FakeReviewer:
         self.approved, self.head, self.digest = approved, head, digest
         self.calls = []
 
-    def review(self, pr, diff):
+    def review(self, pr, diff, **kwargs):
         self.calls.append((pr, diff))
         return [
             ur.ReviewReceipt(model, self.head, self.digest, self.approved, authenticated=True)
@@ -386,8 +386,8 @@ def test_bridge_rechecks_public_base_and_private_ci_after_review(tmp_path, monke
     github = FakeGitHub()
 
     class ChangingReviewer(FakeReviewer):
-        def review(self, pr, diff):
-            result = super().review(pr, diff)
+        def review(self, pr, diff, **kwargs):
+            result = super().review(pr, diff, **kwargs)
             if mutation == "main":
                 github.public_main = "e" * 40
             else:
@@ -434,6 +434,7 @@ def test_bridge_publishes_only_reviewed_sha_and_sanitized_public_metadata_then_i
     marker = tmp_path / "private-state" / f"{HEAD}.json"
     assert json.loads(marker.read_text(encoding="utf-8")) == {
         "head_sha": HEAD,
+        "base_sha": BASE,
         "public_pr": "https://github.com/joemccann/radon/pull/1118",
         "status": "public-ci-pending",
     }
@@ -463,7 +464,8 @@ def test_private_review_rejection_releases_other_public_candidates(tmp_path, mon
 
     assert _bridge(tmp_path, github=github, reviewer=reviewer).run_once() == "private-validation-failed"
     marker = tmp_path / "private-state" / f"{HEAD}.json"
-    assert json.loads(marker.read_text()) == {"head_sha": HEAD, "status": "private-review-rejected"}
+    assert json.loads(marker.read_text())["status"] == "private-review-rejected"
+    assert json.loads(marker.read_text())["feedback"]["head_sha"] == HEAD
 
 
 def test_marker_creation_failure_never_leaves_a_partial_authority_file(tmp_path, monkeypatch):
@@ -624,3 +626,251 @@ def test_public_pr_green_and_readiness_include_bounded_exact_head_legacy_statuse
     assert events == ([(1118, HEAD)] if legacy == 'success' else [])
     assert result == ('public-ready' if legacy == 'success' else 'public-ci-pending' if legacy == 'pending' else 'private-validation-failed')
     assert bridge.priority_pr_number == (1118 if legacy == 'success' else None)
+
+
+def test_feedback_schema_is_bounded_identity_bound_and_redacts_secrets():
+    from types import SimpleNamespace
+    receipt = SimpleNamespace(reviewer='sol', review_input_digest='d' * 64,
+        findings=('token=credential Bearer opaquevalue github_pat_abcdef sk-abcdefghijklmno UNUSUAL_WHALES_API_KEY=anothercredential',))
+    value = bridge_module._make_feedback(BASE, HEAD, 'private-review-rejected', receipts=[receipt])
+    encoded = bridge_module._validate_feedback(value, BASE, HEAD)
+    assert b'anothercredential' not in encoded and b'credential' not in encoded and b'opaquevalue' not in encoded and b'github_pat_' not in encoded and b'sk-abcdefgh' not in encoded
+    assert value['review_input_digests'] == ['d' * 64]
+    for mutation in ({**value, 'head_sha': MERGE}, {**value, 'extra': True}, {**value, 'schema': True},
+                     {**value, 'findings': [{'reviewer': 'sol', 'message': 'x' * 140000}]}):
+        with pytest.raises(ValueError): bridge_module._validate_feedback(mutation, BASE, HEAD)
+    with pytest.raises(ValueError): bridge_module._feedback_ref('../escape', HEAD)
+    with pytest.raises(ValueError): bridge_module._make_feedback(BASE, HEAD, 'released')
+
+
+def _feedback_api(monkeypatch, bridge, *, fail_ref_once=False):
+    blobs, trees, commits, refs, calls = {}, {}, {}, {}, []
+    def api(path, *args, **kwargs):
+        calls.append((path, args, kwargs))
+        payload = kwargs.get('payload', {})
+        suffix = path.removeprefix(f'repos/{PRIVATE}/')
+        if path == f'repos/{PRIVATE}': return {'private': True}
+        if suffix.startswith('git/ref/'):
+            ref = 'refs/' + suffix.removeprefix('git/ref/')
+            if ref not in refs: raise RuntimeError('not found')
+            return {'object': {'sha': refs[ref]}}
+        if suffix == 'git/blobs':
+            sha = hashlib.sha1(payload['content'].encode()).hexdigest(); blobs[sha] = payload['content']
+            return {'sha': sha}
+        if suffix == 'git/trees':
+            sha = hashlib.sha1(json.dumps(payload).encode()).hexdigest(); trees[sha] = payload['tree']
+            return {'sha': sha}
+        if suffix == 'git/commits':
+            sha = hashlib.sha1(json.dumps(payload).encode()).hexdigest(); commits[sha] = payload
+            return {'sha': sha}
+        if suffix == 'git/refs':
+            if fail_ref_once and not getattr(api, 'failed', False):
+                api.failed = True; raise RuntimeError('network unavailable')
+            assert payload['ref'] not in refs
+            refs[payload['ref']] = payload['sha']; return {'ref': payload['ref']}
+        if suffix.startswith('git/commits/'):
+            row = commits[suffix.rsplit('/', 1)[1]]
+            return {'parents': row['parents'], 'tree': {'sha': row['tree']}}
+        if suffix.startswith('git/trees/'):
+            return {'tree': trees[suffix.rsplit('/', 1)[1]], 'truncated': False}
+        if suffix.startswith('git/blobs/'):
+            text = blobs[suffix.rsplit('/', 1)[1]]
+            return {'size': len(text.encode()), 'encoding': 'base64', 'content': base64.b64encode(text.encode()).decode()}
+        raise AssertionError(path)
+    monkeypatch.setattr(bridge, '_api', api)
+    return refs, commits, calls
+
+
+def test_terminal_feedback_is_durable_before_transport_and_retries_immutable_orphan(tmp_path, monkeypatch):
+    bridge = _bridge(tmp_path)
+    marker = bridge.directory / f'{HEAD}.json'
+    bridge._terminal_marker(marker, BASE, HEAD, 'private-checks-failed')
+    refs, commits, calls = _feedback_api(monkeypatch, bridge, fail_ref_once=True)
+    with pytest.raises(RuntimeError): bridge.flush_feedback({})
+    assert json.loads(marker.read_text())['feedback']['status'] == 'private-checks-failed'
+    bridge.flush_feedback({}); bridge.flush_feedback({})
+    assert list(refs) == [f'refs/heads/validation/feedback/{BASE}/{HEAD}']
+    assert all(value['parents'] == [] for value in commits.values())
+    assert sum(path.endswith('git/refs') for path, _, _ in calls) == 2
+    assert not any('PATCH' in args for _, args, _ in calls)
+
+
+def test_released_feedback_requires_persisted_green_matching_both_host_receipts(tmp_path, monkeypatch):
+    bridge = _bridge(tmp_path)
+    marker = bridge.directory / f'{HEAD}.json'
+    bridge._save_marker(marker, {'head_sha': HEAD, 'base_sha': BASE, 'public_pr': f'https://github.com/{PUBLIC}/pull/42'})
+    refs, _, _ = _feedback_api(monkeypatch, bridge)
+    record = {'status': 'green', 'pr_number': 42, 'head_sha': HEAD, 'merge_sha': MERGE,
+              'sync_receipt': {'main_sha': MERGE, 'hosts': {'app': True, 'broker': False}}}
+    bridge.flush_feedback({f'42:{HEAD}': record}); assert not refs
+    record['sync_receipt']['hosts']['broker'] = True
+    bridge.flush_feedback({f'42:{HEAD}': record})
+    assert json.loads(marker.read_text())['feedback']['status'] == 'released'
+    assert len(refs) == 1
+
+
+@pytest.mark.parametrize('kind', ['valid', 'missing', 'parent', 'path', 'near-path', 'symlink', 'extra', 'oversize', 'head', 'schema', 'secret'])
+def test_bot_polls_only_bounded_identity_bound_orphan_feedback_with_existing_git_key(tmp_path, monkeypatch, kind):
+    archive = tmp_path / 'archive.git'
+    subprocess.run(['git', 'init', '--bare', '-q', str(archive)], check=True)
+    def git(*args, input=None):
+        return subprocess.run(['git', '-C', str(archive), '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', *args], input=input, check=True, capture_output=True).stdout.strip().decode()
+    value = bridge_module._make_feedback(BASE, HEAD, 'private-review-rejected')
+    if kind == 'head': value['head_sha'] = MERGE
+    if kind == 'schema': value['extra'] = True
+    if kind == 'secret': value['findings'] = [{'reviewer': 'sol', 'message': 'Bearer credentialliteral'}]
+    raw = json.dumps(value).encode() if kind != 'oversize' else b'x' * (bridge_module.MAX_FEEDBACK_BYTES + 1)
+    blob = git('hash-object', '-w', '--stdin', input=raw)
+    tree_input = f'{"120000" if kind == "symlink" else "100644"} blob {blob}\t{"other.json" if kind == "path" else "feedbackXjson" if kind == "near-path" else "feedback.json"}\n'
+    if kind == 'extra': tree_input += f'100644 blob {blob}\textra.json\n'
+    tree = git('mktree', input=tree_input.encode())
+    parent = git('commit-tree', tree, input=b'orphan\n')
+    commit = git('commit-tree', tree, '-p', parent, input=b'parented\n') if kind == 'parent' else parent
+    if kind != 'missing': git('update-ref', f'refs/heads/validation/feedback/{BASE}/{HEAD}', commit)
+    key = tmp_path / '.radon-runner-reports-key'; key.write_text('fixture'); key.chmod(0o600)
+    monkeypatch.setattr(Path, 'home', classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(bridge_module, '_require_private_archive', lambda: None)
+    real_run = subprocess.run
+    environments = []
+    def local_transport(args, **kwargs):
+        environments.append(kwargs.get('env', {}))
+        return real_run([str(archive) if a == f'git@github.com:{PRIVATE}.git' else a for a in args], **kwargs)
+    monkeypatch.setattr(bridge_module.subprocess, 'run', local_transport)
+    if kind == 'valid': assert bridge_module.poll_feedback(BASE, HEAD, cwd=tmp_path) == value
+    elif kind == 'missing': assert bridge_module.poll_feedback(BASE, HEAD, cwd=tmp_path)['status'] == 'private-validation-pending'
+    else:
+        with pytest.raises(ValueError): bridge_module.poll_feedback(BASE, HEAD, cwd=tmp_path)
+    assert environments
+    assert all(not {'GH_TOKEN', 'GITHUB_TOKEN', 'SSH_AUTH_SOCK'}.intersection(env) for env in environments)
+    assert all('IdentitiesOnly=yes' in env['GIT_SSH_COMMAND'] and 'StrictHostKeyChecking=yes' in env['GIT_SSH_COMMAND'] for env in environments)
+
+
+def test_ci_feedback_contains_bounded_redacted_log_tail_from_only_fixed_repo_job(monkeypatch):
+    import sys
+    real_popen = subprocess.Popen
+    calls = []
+    def fixture(args, **kwargs):
+        calls.append(args)
+        return real_popen([sys.executable, '-c', "print('x'*20000); print('\\x1b]0;untrusted title\\x07\\x1b[31massert expected == actual\\x1b[0m; token=credentialliteral\\r')"], **kwargs)
+    monkeypatch.setattr(bridge_module.subprocess, 'Popen', fixture)
+    page = {'check_runs': [{'head_sha': HEAD, 'status': 'completed', 'conclusion': 'failure', 'name': 'pytest',
+                           'details_url': f'https://github.com/{PRIVATE}/actions/runs/1/job/2'}]}
+    messages = bridge_module._ci_diagnostics(page, PRIVATE, HEAD)
+    assert 'expected == actual' in ' '.join(messages)
+    assert 'credentialliteral' not in ' '.join(messages)
+    assert len(' '.join(messages).encode()) < 18000
+    assert calls[0] == ['/opt/homebrew/bin/gh', 'api', '--allow-escape-sequences', f'repos/{PRIVATE}/actions/jobs/2/logs']
+    assert not any(ord(c) < 32 and c not in '\n\t' for c in ''.join(messages))
+    assert 'untrusted title' not in ''.join(messages)
+    page['check_runs'][0]['details_url'] = 'https://untrusted.invalid/job/2'
+    bridge_module._ci_diagnostics(page, PRIVATE, HEAD)
+    assert len(calls) == 1
+
+
+def test_feedback_prompts_poll_checkpoint_and_independently_repair_new_head():
+    root = Path(__file__).resolve().parents[2]
+    for name in ('security.md', 'security-deepsec.md'):
+        text = (root / '.claude/runner-prompts' / name).read_text()
+        assert '--status --base <base-sha> --head <fixed-sha>' in text
+        assert 'untrusted diagnostic' in text and 'NEW tested head' in text
+        assert 'Do not blindly amend/retry' in text
+
+
+def test_feedback_publication_recovers_lost_ref_response_without_duplicate_write(tmp_path, monkeypatch):
+    bridge = _bridge(tmp_path)
+    bridge._terminal_marker(bridge.directory / f'{HEAD}.json', BASE, HEAD, 'private-review-rejected')
+    refs, _, calls = _feedback_api(monkeypatch, bridge)
+    api = bridge._api
+    def lost_response(path, *args, **kwargs):
+        result = api(path, *args, **kwargs)
+        if path.endswith('git/refs'): raise RuntimeError('response lost after acceptance')
+        return result
+    monkeypatch.setattr(bridge, '_api', lost_response)
+    bridge.flush_feedback({}); bridge.flush_feedback({})
+    assert len(refs) == 1
+    assert sum(path.endswith('git/refs') for path, _, _ in calls) == 1
+
+
+def test_feedback_never_rewrites_a_conflicting_immutable_ref(tmp_path, monkeypatch):
+    bridge = _bridge(tmp_path)
+    marker = bridge.directory / f'{HEAD}.json'
+    bridge._terminal_marker(marker, BASE, HEAD, 'private-review-rejected')
+    refs, _, calls = _feedback_api(monkeypatch, bridge)
+    bridge.flush_feedback({}); before = dict(refs)
+    data = json.loads(marker.read_text()); del data['feedback_published']
+    data['feedback']['status'] = 'private-review-invalid'
+    bridge._replace_marker(marker, data)
+    with pytest.raises(PermissionError, match='immutable'): bridge.flush_feedback({})
+    assert refs == before
+    assert sum(path.endswith('git/refs') for path, _, _ in calls) == 1
+
+
+@pytest.mark.parametrize('stage', ['private', 'public'])
+def test_invalid_review_feedback_explains_context_capacity_failure(tmp_path, monkeypatch, stage):
+    github = FakeGitHub()
+    reviewer = FakeReviewer()
+    monkeypatch.setattr(bridge_module.subprocess, 'run', lambda args, **kwargs: subprocess.CompletedProcess(args, 0, stdout=DIFF))
+    bridge = _bridge(tmp_path, github=github, reviewer=reviewer)
+    if stage == 'public':
+        assert bridge.run_once() == 'public-ci-pending'
+        github.public_check_runs = _green_runs()
+    reviewer.failure_reason = 'Full review source exceeds capacity; reduce the atomic patch while retaining complete context.'
+    reviewer.review = lambda *a, **k: []
+    assert bridge.run_once() == 'private-validation-failed'
+    feedback = json.loads((bridge.directory / f'{HEAD}.json').read_text())['feedback']
+    assert feedback['status'] == f'{stage}-review-invalid'
+    assert 'capacity' in feedback['findings'][0]['message']
+    assert feedback['findings'][0]['reviewer'] == 'controller'
+
+
+@pytest.mark.parametrize('failure_stage', ['probe', 'source'])
+def test_transient_real_review_probe_retries_same_private_head_without_terminal_feedback(tmp_path, monkeypatch, failure_stage):
+    import codex_capability_probe as probe
+    reviewer = ur.CodexReviews(_policy(), tmp_path / 'reviews')
+    binary = tmp_path / 'codex'; binary.write_text('signed-binary-fixture'); binary.chmod(0o500)
+    if failure_stage == 'probe':
+        monkeypatch.setattr(reviewer, '_review_payload', lambda *a, **k: json.dumps({'changed_files': []}))
+    else:
+        raw = b'def repaired():\n    return True\n'
+        blob = hashlib.sha1(f'blob {len(raw)}\0'.encode() + raw).hexdigest()
+        objects = {
+            f'repos/{PRIVATE}/git/commits/{revision}': {'sha': revision, 'tree': {'sha': tree}}
+            for revision, tree in ((BASE, '1' * 40), (HEAD, '2' * 40))
+        }
+        objects.update({
+            f'repos/{PRIVATE}/git/trees/{"1" * 40}?recursive=1': {'sha': '1' * 40, 'truncated': False, 'tree': []},
+            f'repos/{PRIVATE}/git/trees/{"2" * 40}?recursive=1': {'sha': '2' * 40, 'truncated': False, 'tree': [
+                {'path': 'scripts/repaired.py', 'type': 'blob', 'mode': '100644', 'sha': blob, 'size': len(raw)}]},
+            f'repos/{PRIVATE}/git/blobs/{blob}': {'sha': blob, 'size': len(raw), 'encoding': 'base64', 'content': base64.b64encode(raw).decode()},
+        })
+        fetches = []
+        def intermittent_source(path):
+            fetches.append(path)
+            if len(fetches) == 1: raise RuntimeError('temporary GitHub fetch unavailable')
+            return objects[path]
+        monkeypatch.setattr(reviewer, '_api', intermittent_source)
+    monkeypatch.setattr(reviewer, '_model_context', lambda model: {'context_window': 272000, 'effective_context_window_percent': 95})
+    monkeypatch.setattr(probe, 'snapshot_binary', lambda *a: binary)
+    monkeypatch.setattr(probe, 'assert_subscription', lambda *a: None)
+    attempts = []
+    def intermittent_probe(*args, **kwargs):
+        attempts.append(kwargs['prompt'])
+        if failure_stage == 'probe' and len(attempts) == 1: raise RuntimeError('temporary local probe unavailable')
+    monkeypatch.setattr(probe, 'assert_tool_free', intermittent_probe)
+    def inference(args, **kwargs):
+        Path(args[args.index('--output-last-message') + 1]).write_text(json.dumps({'approved': True, 'findings': []}))
+        return ''
+    monkeypatch.setattr(ur, '_command', inference)
+    monkeypatch.setattr(bridge_module.subprocess, 'run', lambda args, **kwargs: subprocess.CompletedProcess(args, 0, stdout=DIFF))
+    github = FakeGitHub()
+    bridge = _bridge(tmp_path, github=github, reviewer=reviewer)
+    marker = bridge.directory / f'{HEAD}.json'
+    with pytest.raises(RuntimeError):
+        bridge.run_once()
+    assert not marker.exists()
+    assert not any(path.endswith(('git/refs', '/pulls')) for path, args in github.calls)
+    assert bridge.run_once() == 'public-ci-pending'
+    saved = json.loads(marker.read_text())
+    assert saved['head_sha'] == HEAD and saved['base_sha'] == BASE
+    assert saved['status'] == 'public-ci-pending' and 'feedback' not in saved
+    assert sum(path == f'repos/{PUBLIC}/pulls' for path, args in github.calls) == 1
