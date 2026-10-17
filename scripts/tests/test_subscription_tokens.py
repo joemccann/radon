@@ -237,20 +237,191 @@ def test_antigravity_refresh_is_agy_native_when_installed(tmp_path):
     assert http.calls == []
 
 
-def test_antigravity_token_endpoint_refresh_names_the_antigravity_client(tmp_path):
-    http = FakeHttp({"https://oauth2.googleapis.com/token": [ok_token_response()]})
-    rt = make_runtime(tmp_path, http=http)
-    path = write_doc(rt, "antigravity", antigravity_doc(NOW + timedelta(seconds=60)))
-    report = st.run("once", ["antigravity"], rt)
-    assert report["providers"][0]["state"] == st.REFRESHED
-    method, url, form = http.calls[-1]
-    assert url == "https://oauth2.googleapis.com/token"
-    assert form["grant_type"] == "refresh_token"
-    assert form["client_id"] == st.ANTIGRAVITY_CLIENT_ID
-    after = json.loads(path.read_text())
-    assert after["token"]["access_token"] == FAKE_NEW_ACCESS
-    assert after["auth_method"] == "consumer"
-    assert st.PROVIDERS["antigravity"].read_expiry(after) > NOW + timedelta(minutes=30)
+@pytest.mark.parametrize("minutes", [6, 20, 40, 60])
+def test_antigravity_valid_native_login_is_live_without_early_http_refresh(tmp_path, minutes):
+    http = FakeHttp()
+    probe = FakeProbe(st.PROBE_OK)
+    rt = make_runtime(tmp_path, http=http, which=installed, probe=probe)
+    path = write_doc(rt, "antigravity", antigravity_doc(NOW + timedelta(minutes=minutes)))
+    original = path.read_bytes()
+    result = st.run("once", ["antigravity"], rt)["providers"][0]
+    assert result["state"] == st.LIVE
+    assert result["last_refresh_at"] is None
+    assert result["last_probe_at"] == NOW.isoformat()
+    assert path.read_bytes() == original
+    assert rt.vault.get("antigravity") == original.decode()
+    assert probe.calls == ["antigravity"]
+    assert http.calls == []
+
+
+@pytest.mark.parametrize("outcome,expected", [
+    (st.PROBE_FAILED, st.ERROR), (st.PROBE_AUTH_FAILED, st.NEEDS_REAUTH),
+])
+@pytest.mark.parametrize("rotate", [False, True])
+def test_antigravity_native_failure_is_not_hidden_by_nonexpired_file(tmp_path, outcome, expected, rotate):
+    http = FakeHttp()
+    rt = make_runtime(tmp_path, http=http, which=installed)
+    path = write_doc(rt, "antigravity", antigravity_doc(NOW + timedelta(hours=1)))
+    def probe(*_args):
+        if rotate:
+            doc = antigravity_doc(NOW + timedelta(hours=2))
+            doc["token"]["refresh_token"] = FAKE_NEW_REFRESH
+            path.write_text(json.dumps(doc))
+        return outcome
+    rt.probe = probe
+    result = st.run("once", ["antigravity"], rt)["providers"][0]
+    assert result["state"] == expected
+    assert result["last_probe_at"] is None
+    assert rt.vault.get("antigravity") == path.read_text()
+    assert http.calls == []
+
+
+def test_antigravity_requires_installed_cli_even_when_file_looks_live(tmp_path):
+    rt = make_runtime(tmp_path)
+    write_doc(rt, "antigravity", antigravity_doc(NOW + timedelta(hours=1)))
+    result = st.run("once", ["antigravity"], rt)["providers"][0]
+    assert result["state"] == st.ERROR
+    assert "native" in result["last_error"]
+    assert rt.http.calls == []
+
+
+@pytest.mark.parametrize("mutation", ["expired", "missing-expiry", "missing-access", "malformed", "deleted"])
+def test_antigravity_probe_success_requires_usable_canonical_reread(tmp_path, mutation):
+    rt = make_runtime(tmp_path, which=installed)
+    path = write_doc(rt, "antigravity", antigravity_doc(NOW + timedelta(minutes=20)))
+    def probe(*_args):
+        doc = antigravity_doc(NOW + timedelta(hours=1))
+        if mutation == "expired": doc = antigravity_doc(NOW)
+        elif mutation == "missing-expiry": del doc["token"]["expiry"]
+        elif mutation == "missing-access": del doc["token"]["access_token"]
+        elif mutation == "malformed":
+            path.write_text("{truncated")
+            return st.PROBE_OK
+        elif mutation == "deleted":
+            path.unlink()
+            return st.PROBE_OK
+        path.write_text(json.dumps(doc))
+        return st.PROBE_OK
+    rt.probe = probe
+    result = st.run("once", ["antigravity"], rt)["providers"][0]
+    assert result["state"] == st.ERROR
+    assert rt.http.calls == []
+
+
+def test_antigravity_expiry_is_checked_again_after_native_probe(tmp_path):
+    rt = make_runtime(tmp_path, which=installed)
+    write_doc(rt, "antigravity", antigravity_doc(NOW + timedelta(seconds=1)))
+    def probe(*_args):
+        rt.now = lambda: NOW + timedelta(seconds=2)
+        return st.PROBE_OK
+    rt.probe = probe
+    result = st.run("once", ["antigravity"], rt)["providers"][0]
+    assert result["state"] == st.ERROR
+    assert rt.http.calls == []
+
+
+def test_antigravity_native_success_requires_vault_seal(tmp_path):
+    class UnsealableVault(FakeVault):
+        def seal(self, *_args): raise RuntimeError("synthetic vault failure")
+    rt = make_runtime(tmp_path, vault=UnsealableVault(), which=installed, probe=FakeProbe(st.PROBE_OK))
+    write_doc(rt, "antigravity", antigravity_doc(NOW + timedelta(hours=1)))
+    result = st.run("once", ["antigravity"], rt)["providers"][0]
+    assert result["state"] == st.ERROR
+    assert "seal" in result["last_error"]
+    assert rt.http.calls == []
+
+
+@pytest.mark.parametrize("outcome", [st.PROBE_OK, st.PROBE_AUTH_FAILED])
+def test_antigravity_post_probe_seal_failure_takes_precedence_over_login(tmp_path, outcome):
+    class FailRotatedSeal(FakeVault):
+        def seal(self, provider, value):
+            if self.seals: raise RuntimeError("synthetic rotated seal failure")
+            super().seal(provider, value)
+    rt = make_runtime(tmp_path, vault=FailRotatedSeal(), which=installed)
+    path = write_doc(rt, "antigravity", antigravity_doc(NOW + timedelta(minutes=20)))
+    rotated = antigravity_doc(NOW + timedelta(hours=1))
+    rotated["token"]["refresh_token"] = FAKE_NEW_REFRESH
+    rt.probe = FakeProbe(outcome, on_call=lambda: path.write_text(json.dumps(rotated)))
+    result = st.run("once", ["antigravity"], rt)["providers"][0]
+    assert result["state"] == st.ERROR
+    assert "vault seal failed" in result["last_error"]
+    assert result["last_probe_at"] is None
+    assert json.loads(path.read_text()) == rotated
+    assert rt.http.calls == []
+
+
+def test_antigravity_check_uses_only_fresh_matching_native_proof(tmp_path):
+    probe = FakeProbe(st.PROBE_OK)
+    rt = make_runtime(tmp_path, which=installed, probe=probe)
+    path = write_doc(rt, "antigravity", antigravity_doc(NOW + timedelta(minutes=20)))
+    assert st.run("check", ["antigravity"], rt)["providers"][0]["state"] == st.EXPIRING
+    assert probe.calls == []
+    st.run("once", ["antigravity"], rt)
+    before = rt.sidecar_path.read_bytes()
+    assert st.run("check", ["antigravity"], rt)["providers"][0]["state"] == st.LIVE
+    assert rt.sidecar_path.read_bytes() == before
+    assert probe.calls == ["antigravity"]
+    path.write_text(json.dumps(antigravity_doc(NOW + timedelta(minutes=30))))
+    assert st.run("check", ["antigravity"], rt)["providers"][0]["state"] == st.EXPIRING
+
+
+@pytest.mark.parametrize("prior_state", [st.ERROR, st.NEEDS_REAUTH, st.LIVE])
+def test_antigravity_check_never_trusts_failed_or_stale_native_proof(tmp_path, prior_state):
+    rt = make_runtime(tmp_path, which=installed)
+    path = write_doc(rt, "antigravity", antigravity_doc(NOW + timedelta(days=2)))
+    rt.vault.data["antigravity"] = path.read_text()
+    rt.sidecar_path.write_text(json.dumps({"providers": {"antigravity": {
+        "state": prior_state, "expires_at": (NOW + timedelta(days=2)).isoformat(),
+        "last_probe_at": (NOW - timedelta(days=1) if prior_state == st.LIVE else NOW).isoformat(),
+    }}}))
+    assert st.run("check", ["antigravity"], rt)["providers"][0]["state"] == st.EXPIRING
+
+
+@pytest.mark.parametrize("seconds,state", [(300, st.ERROR), (301, st.LIVE)])
+def test_antigravity_respects_native_renewal_boundary_after_probe(tmp_path, seconds, state):
+    rt = make_runtime(tmp_path, which=installed)
+    write_doc(rt, "antigravity", antigravity_doc(NOW + timedelta(seconds=seconds + 150)))
+    def probe(*_args):
+        rt.now = lambda: NOW + timedelta(seconds=150)
+        return st.PROBE_OK
+    rt.probe = probe
+    result = st.run("once", ["antigravity"], rt)["providers"][0]
+    assert result["state"] == state
+    assert rt.http.calls == []
+
+
+@pytest.mark.parametrize("seconds,state", [(300, st.ERROR), (301, st.REFRESHED)])
+def test_antigravity_short_native_advance_must_clear_renewal_boundary(tmp_path, seconds, state):
+    rt = make_runtime(tmp_path, which=installed)
+    path = write_doc(rt, "antigravity", antigravity_doc(NOW - timedelta(seconds=1)))
+    rt.probe = FakeProbe(st.PROBE_OK, on_call=lambda: path.write_text(json.dumps(antigravity_doc(NOW + timedelta(seconds=seconds)))))
+    result = st.run("once", ["antigravity"], rt)["providers"][0]
+    assert result["state"] == state
+    assert rt.vault.get("antigravity") == path.read_text()
+    assert rt.http.calls == []
+
+
+@pytest.mark.parametrize("mutation", ["missing-expiry", "missing-access"])
+def test_antigravity_malformed_native_rewrite_preserves_refreshable_vault(tmp_path, mutation):
+    rt = make_runtime(tmp_path, which=installed)
+    path = write_doc(rt, "antigravity", antigravity_doc(NOW + timedelta(minutes=20)))
+    original = path.read_text()
+    doc = antigravity_doc(NOW + timedelta(hours=1))
+    del doc["token"]["expiry" if mutation == "missing-expiry" else "access_token"]
+    rt.probe = FakeProbe(st.PROBE_OK, on_call=lambda: path.write_text(json.dumps(doc)))
+    assert st.run("once", ["antigravity"], rt)["providers"][0]["state"] == st.ERROR
+    assert rt.vault.get("antigravity") == original
+
+
+@pytest.mark.parametrize("mode", ["seal", "restore"])
+def test_antigravity_manual_write_does_not_reuse_old_native_proof(tmp_path, mode):
+    rt = make_runtime(tmp_path, which=installed, probe=FakeProbe(st.PROBE_OK))
+    path = write_doc(rt, "antigravity", antigravity_doc(NOW + timedelta(minutes=20)))
+    st.run("once", ["antigravity"], rt)
+    # Explicit credential maintenance is not an authenticated native proof.
+    if mode == "seal": path.write_text(json.dumps(antigravity_doc(NOW + timedelta(minutes=30))))
+    st.run(mode, ["antigravity"], rt)
+    assert st.run("check", ["antigravity"], rt)["providers"][0]["state"] == st.EXPIRING
 
 
 def test_grok_token_endpoint_comes_from_oidc_discovery(tmp_path):
@@ -406,10 +577,10 @@ def test_invalid_grant_pages_once_then_respects_cooldown(tmp_path):
 
 @pytest.mark.parametrize("error_code", ["invalid_request", "invalid_client"])
 def test_refresh_request_error_pages_without_reauthenticating_a_valid_login(tmp_path, error_code):
-    provider = st.PROVIDERS["antigravity"]
+    provider = st.PROVIDERS["anthropic"]
     http = FakeHttp({provider.token_url: [st.HttpResponse(400, {"error": error_code})]})
     rt = make_runtime(tmp_path, http=http, which=installed, probe=FakeProbe(st.PROBE_OK))
-    path = write_doc(rt, provider.name, antigravity_doc(NOW + timedelta(minutes=20)))
+    path = write_doc(rt, provider.name, anthropic_doc(NOW + timedelta(minutes=20)))
     original = path.read_bytes()
 
     for _ in range(st.ERROR_PAGE_AFTER):
