@@ -74,3 +74,42 @@ def test_empty_trades_section_is_trades():
         "</FlexStatement></FlexStatements></FlexQueryResponse>"
     )
     assert classify_flex_xml(xml) == TRADES
+
+
+# xml.etree.ElementTree expands internal entities. Statement text reaches the
+# classifier from `--file`, `--inbox` and the sFTP delivery, so an internal DTD
+# with nested entities inflates in memory inside the ingest process. Attacker
+# control over that channel is weak -- IB is the upstream and the inbox is
+# operator-fed -- so the realistic impact is ingest availability, which is
+# exactly why rejecting the declaration outright costs nothing: a Flex
+# statement never carries one.
+BILLION_LAUGHS = (
+    '<?xml version="1.0"?>\n'
+    "<!DOCTYPE FlexQueryResponse [\n"
+    '  <!ENTITY a "aaaaaaaaaa">\n'
+    '  <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">\n'
+    '  <!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">\n'
+    "]>\n"
+    "<FlexQueryResponse><FlexStatements><FlexStatement>"
+    "<CashTransactions>&c;</CashTransactions>"
+    "</FlexStatement></FlexStatements></FlexQueryResponse>"
+)
+
+
+def test_a_doctype_declaration_is_refused_by_the_classifier():
+    with pytest.raises(FlexClassifyError, match="doctype"):
+        classify_flex_xml(BILLION_LAUGHS)
+
+
+def test_a_doctype_declaration_is_refused_by_the_metadata_reader():
+    from lib.flex_classify import statement_metadata
+
+    with pytest.raises(FlexClassifyError, match="doctype"):
+        statement_metadata(BILLION_LAUGHS)
+
+
+def test_the_real_fixtures_still_parse():
+    from lib.flex_classify import statement_metadata
+
+    for xml in (ACTIVITY_XML, TRADES_XML):
+        assert statement_metadata(xml)["account_id"]

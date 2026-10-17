@@ -153,3 +153,31 @@ def test_responder_clone_origin_needs_no_credential():
     text = setup.read_text(encoding="utf-8")
     assert 'ORIGIN_URL="${RADON_PAGE_RESPONDER_ORIGIN:-https://github.com/' in text
     assert 'git -C "$CLONE" remote set-url origin "$ORIGIN_URL"' in text
+
+
+# radon-subscription-tokens.service runs three unpinned third-party agent CLIs
+# (agy, grok, codex) out of radon-writable ~/.local/bin, as the same user, with
+# /etc/radon/env loaded. subscription_tokens.py builds an allowlisted child
+# environment, which stops accidental inheritance but is not a boundary against
+# a compromised CLI distribution: the file itself was readable (root:radon
+# 0640, and ProtectSystem=full restricts writes, not reads). systemd reads
+# EnvironmentFile before the namespace is built, so hiding the file from the
+# process costs the unit nothing, exactly as the two grok units already do.
+TOKENS_ENV_FILE = "/etc/radon/env"
+
+
+def test_token_keeper_cannot_read_its_own_env_file_at_runtime():
+    text = (SERVICES / TOKENS).read_text(encoding="utf-8")
+    assert f"EnvironmentFile={TOKENS_ENV_FILE}" in text
+    assert TOKENS_ENV_FILE in _paths(TOKENS, "InaccessiblePaths"), (
+        "the agent CLIs this unit launches could read the production env file "
+        "directly; systemd has already loaded it by then"
+    )
+
+
+def test_token_keeper_restricts_procfs_to_its_own_user():
+    text = (SERVICES / TOKENS).read_text(encoding="utf-8")
+    assert re.search(r"(?m)^ProtectProc=(invisible|noaccess|ptraceable)$", text), (
+        "the unit launches third-party CLIs and must not expose other users' "
+        "process metadata to them"
+    )

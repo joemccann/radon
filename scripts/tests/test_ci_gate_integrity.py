@@ -322,3 +322,39 @@ def test_e2e_starts_after_secret_scan_to_stay_under_the_job_slot_cap() -> None:
         "the Playwright smoke stays non-gating; deferral must never make "
         "it a deploy dependency"
     )
+
+
+def test_the_changes_job_hands_no_token_to_pull_request_controlled_code() -> None:
+    """The `changes` job checks out the PR revision and runs
+    `scripts/ci/path_filter.py` from that checkout. `gate_base` only calls the
+    Actions API on `push`; on `pull_request` it reads BASE_SHA from the
+    environment. So the token was handed to untrusted code on exactly the event
+    where it is unused. Low impact on a public repository -- it is a read-only
+    token -- but there is no reason to pass it at all.
+    """
+    jobs = _workflow()["jobs"]
+    step = next(
+        step
+        for step in jobs["changes"]["steps"]
+        if step.get("id") == "filter"
+    )
+    token = step["env"]["GH_TOKEN"]
+    assert "github.event_name == 'push'" in token, (
+        "GH_TOKEN must be conditional on the push event; path_filter.py reads "
+        f"BASE_SHA on pull_request and never calls the API there: {token}"
+    )
+    assert "github.token" in token
+
+
+def test_path_filter_only_queries_the_actions_api_on_push() -> None:
+    """Pins the premise of the test above: if gate_base ever needs the API on
+    pull_request, the conditional token becomes a bug rather than a fix.
+    """
+    source = (
+        Path(__file__).resolve().parents[1] / "ci" / "path_filter.py"
+    ).read_text(encoding="utf-8")
+    body = re.search(r"(?ms)^def gate_base\(.*?\n(?=^\S)", source)
+    assert body, "path_filter.py must still define gate_base"
+    assert "GITHUB_EVENT_NAME" in body.group(0)
+    assert "!= 'push'" in body.group(0) or '!= "push"' in body.group(0)
+    assert "BASE_SHA" in body.group(0)
