@@ -35,6 +35,8 @@ class Artifact:
 ARTIFACTS = (
     Artifact("scripts/deploy-root-helper.sh", "/usr/local/sbin/radon-deploy-root", 0o755),
     Artifact("scripts/ib-gateway-control.sh", "/usr/local/bin/radon-ib-gateway-control", 0o755),
+    Artifact("scripts/ib-operator-hold.sh", "/usr/local/sbin/radon-ib-hold", 0o755),
+    Artifact("repo/scripts/utils/ib_operator_hold.py", "/usr/local/lib/radon/ib_operator_hold.py", 0o644),
     Artifact("scripts/operator-radon.sh", "/usr/local/bin/radon", 0o755),
     # Root runs the audit, so its payload cannot live in the radon-writable
     # checkout. It is data for a root-owned interpreter, hence 0644 not 0755.
@@ -243,6 +245,12 @@ class Sandbox:
         )
 
 
+def _source_path(cloud_root: Path, source: str) -> Path:
+    if source.startswith("repo/"):
+        return cloud_root.parent / source.removeprefix("repo/")
+    return cloud_root / source
+
+
 def _sandbox(tmp_path: Path) -> Sandbox:
     source = tmp_path / "cloud"
     rootfs = tmp_path / "rootfs"
@@ -250,9 +258,9 @@ def _sandbox(tmp_path: Path) -> Sandbox:
     command_log = tmp_path / "commands.log"
 
     for artifact in ARTIFACTS:
-        destination = source / artifact.source
+        destination = _source_path(source, artifact.source)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(CLOUD_ROOT / artifact.source, destination)
+        shutil.copy2(_source_path(CLOUD_ROOT, artifact.source), destination)
 
     for base in _dropin_base_units():
         destination = source / base
@@ -306,7 +314,7 @@ fi
 # Mirror production systemd-analyze: unit files reference absolute helpers
 # that must already exist when verify runs.
 helper="{gateway_helper}"
-if [[ ! -x "$helper" ]]; then
+if [[ "${{RADON_BOOTSTRAP_HOST_ROLE:-}}" != app && ! -x "$helper" ]]; then
   printf 'Command %s is not executable: No such file or directory\\n' "$helper" >&2
   exit 1
 fi
@@ -515,7 +523,7 @@ def test_success_installs_exact_bundle_manifest_then_daemon_reloads_once(
 
     assert result.returncode == 0, result.stderr
     for artifact in ARTIFACTS:
-        source = sandbox.source / artifact.source
+        source = _source_path(sandbox.source, artifact.source)
         target = _installed_path(sandbox.rootfs, artifact)
         assert target.read_bytes() == source.read_bytes()
         assert stat.S_IMODE(target.stat().st_mode) == artifact.mode
@@ -525,7 +533,7 @@ def test_success_installs_exact_bundle_manifest_then_daemon_reloads_once(
     assert len(records) == len(ARTIFACTS)
     for artifact, record in zip(ARTIFACTS, records, strict=True):
         expected_hash = hashlib.sha256(
-            (sandbox.source / artifact.source).read_bytes()
+            (_source_path(sandbox.source, artifact.source)).read_bytes()
         ).hexdigest()
         assert record == f"{expected_hash}  {artifact.source} -> {artifact.target}"
 
@@ -560,7 +568,7 @@ def test_root_verifier_rejects_installed_target_drift(
         target.unlink()
     elif mutation == "symlink":
         target.unlink()
-        target.symlink_to(sandbox.source / artifact.source)
+        target.symlink_to(_source_path(sandbox.source, artifact.source))
     elif mutation == "hash":
         target.write_text("drifted\n", encoding="utf-8")
     else:
@@ -819,3 +827,96 @@ def test_existing_lock_symlink_does_not_change_its_target(tmp_path: Path) -> Non
     assert target.read_bytes() == b"sentinel-not-the-lock"
     assert stat.S_IMODE(target.stat().st_mode) == 0o644
     assert not _manifest_path(sandbox.rootfs).exists()
+
+
+BROKER_SOURCES = {
+    "scripts/deploy-root-helper.sh", "scripts/ib-gateway-control.sh",
+    "scripts/ib-operator-hold.sh", "scripts/operator-radon.sh",
+    "repo/scripts/utils/ib_operator_hold.py",
+    "scripts/radon-docker-gw.sh", "docker-compose.yml",
+    "services/radon-ib-gateway.service", "services/radon-ib-gateway-preheld-restart.service",
+    "services/radon-ib-watchdog.service", "services/radon-ib-watchdog.timer",
+    "services/radon-ib-gateway-remote.service",
+}
+
+
+def test_broker_bootstrap_installs_only_its_bundle_without_node_or_sudoers(tmp_path):
+    sandbox = _sandbox(tmp_path)
+    result = sandbox.run(RADON_BOOTSTRAP_HOST_ROLE="broker",
+                         RADON_BOOTSTRAP_NODE_BIN="no-node-on-broker",
+                         RADON_BOOTSTRAP_VISUDO_BIN="no-visudo-on-broker",
+                         RADON_BOOTSTRAP_TEST_EXPECTED_TARGETS="\n".join(
+                             str(_installed_path(sandbox.rootfs, a)) for a in ARTIFACTS if a.source in BROKER_SOURCES))
+    assert result.returncode == 0, result.stdout + result.stderr
+    for artifact in ARTIFACTS:
+        assert _installed_path(sandbox.rootfs, artifact).exists() == (artifact.source in BROKER_SOURCES)
+    assert "Installed and verified 12 control-plane artifacts" in result.stdout
+    host_env = sandbox.rootfs / "etc/radon/env"
+    host_env.write_text("RADON_HOST_ROLE=broker\n")
+    verified = _run_root_control_plane_verifier(sandbox)
+    assert verified.returncode == 0, verified.stdout + verified.stderr
+    assert not (sandbox.rootfs / "etc/sudoers.d").exists()
+    log = sandbox.command_log.read_text()
+    assert "node\t" not in log and "visudo\t" not in log
+    assert "daemon-reload" in log
+    assert not any(word in log for word in (" restart ", " start ", " stop "))
+
+
+def test_broker_bootstrap_rejects_missing_dependency_before_install(tmp_path):
+    sandbox = _sandbox(tmp_path)
+    _source_path(sandbox.source, "repo/scripts/utils/ib_operator_hold.py").unlink()
+    result = sandbox.run(RADON_BOOTSTRAP_HOST_ROLE="broker")
+    assert result.returncode != 0
+    assert not (sandbox.rootfs / "usr/local/sbin/radon-deploy-root").exists()
+
+
+def test_bootstrap_rejects_writable_dependency_parent(tmp_path):
+    sandbox = _sandbox(tmp_path)
+    _source_path(sandbox.source, "repo/scripts/utils/ib_operator_hold.py").parent.chmod(0o777)
+    result = sandbox.run(RADON_BOOTSTRAP_HOST_ROLE="broker")
+    assert result.returncode != 0
+    assert "dependency directory is writable" in result.stderr
+    assert not (sandbox.rootfs / "usr/local/sbin/radon-deploy-root").exists()
+
+
+APP_EXCLUDED_SOURCES = {
+    "scripts/ib-gateway-control.sh", "scripts/ib-operator-hold.sh",
+    "repo/scripts/utils/ib_operator_hold.py",
+    "services/radon-ib-gateway.service", "services/radon-ib-gateway-preheld-restart.service",
+    "services/radon-ib-watchdog.service", "services/radon-ib-watchdog.timer",
+    "services/radon-ib-gateway-remote.service",
+}
+
+
+def test_app_bootstrap_preserves_the_absence_of_broker_artifacts(tmp_path):
+    sandbox = _sandbox(tmp_path)
+    expected = [a for a in ARTIFACTS if a.source not in APP_EXCLUDED_SOURCES]
+    result = sandbox.run(RADON_BOOTSTRAP_HOST_ROLE="app",
+                         RADON_BOOTSTRAP_TEST_EXPECTED_TARGETS="\n".join(
+                             str(_installed_path(sandbox.rootfs, a)) for a in expected))
+    assert result.returncode == 0, result.stdout + result.stderr
+    for artifact in ARTIFACTS:
+        assert _installed_path(sandbox.rootfs, artifact).exists() == (artifact.source not in APP_EXCLUDED_SOURCES)
+    host_env = sandbox.rootfs / "etc/radon/env"
+    host_env.write_text("RADON_HOST_ROLE=app\n")
+    verified = _run_root_control_plane_verifier(sandbox)
+    assert verified.returncode == 0, verified.stdout + verified.stderr
+    rows = _manifest_path(sandbox.rootfs).read_text().splitlines()
+    assert len(rows) == len(expected)
+
+
+def test_app_verifier_accepts_the_pre_hold_legacy_manifest(tmp_path):
+    sandbox = _sandbox(tmp_path)
+    result = sandbox.run()
+    assert result.returncode == 0, result.stdout + result.stderr
+    manifest = _manifest_path(sandbox.rootfs)
+    rows = [line for line in manifest.read_text().splitlines()
+            if '  scripts/ib-operator-hold.sh -> ' not in line
+            and '  repo/scripts/utils/ib_operator_hold.py -> ' not in line]
+    manifest.write_text("\n".join(rows) + "\n")
+    for artifact in ARTIFACTS:
+        if artifact.source in APP_EXCLUDED_SOURCES:
+            _installed_path(sandbox.rootfs, artifact).unlink(missing_ok=True)
+    (sandbox.rootfs / 'etc/radon/env').write_text('RADON_HOST_ROLE=app\n')
+    verified = _run_root_control_plane_verifier(sandbox)
+    assert verified.returncode == 0, verified.stdout + verified.stderr

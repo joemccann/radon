@@ -1213,3 +1213,7 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## Mobile settings scroll containment (2026-10-14)
 - A flex scrollport can have overflow-y:auto yet remain unusable if its overflow-hidden child cards shrink to fit. Keep direct mobile settings children at natural height with flex-shrink:0.
 - Verify multiple settings groups with real scroll input, full card content height and pointer reachability of the final control. CSS-rule presence or offscreen bounding boxes alone do not prove scrolling works.
+
+
+## 2026-10-17 - Distinguish stale stage health from a live research outage
+- An aggregate heartbeat timestamp does not refresh its nested stage evidence. Compare stage timestamps and run a same-host bounded database canary before diagnosing a current Turso outage. Editorial held expiry, exhausted infrastructure review attempts and superseded ingestion rows are different states; recover only verified current infrastructure failures.
