@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import multiprocessing
 from pathlib import Path
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -102,6 +103,115 @@ def test_today_and_fresh_parse_outrank_old_retry(state):
     ingest(state, [entry('old', day='07')], day='07')
     ingest(state, [entry('new')])
     assert state.unparsed()[0]['file_id'] == 'new'
+
+
+def _review_ready(state, file_id, day='08', rev='1'):
+    ingest(state, [entry(file_id, rev=rev, day=day)], day=day)
+    key = state.db.execute('SELECT key FROM work WHERE file_id=? AND rev=?', (file_id, rev)).fetchone()[0]
+    assert state.claim_parse(key)
+    state.parsed(key, f'/cached/{file_id}.pdf')
+    return key
+
+
+def _finish_review_claim(state, key):
+    assert state.claim(key)
+    state.complete(key, {'status': 'reviewed', 'items': 0})
+
+
+def test_aged_retry_gets_first_review_slot_ahead_of_newer_fresh_work(state):
+    oldest = _review_ready(state, 'oldest', day='07')
+    later = _review_ready(state, 'later', day='07')
+    fresh = _review_ready(state, 'fresh', day='08')
+    with state.db:
+        state.db.execute("UPDATE work SET attempts=1,error='database_unavailable',available_at=0 WHERE key=?", (oldest,))
+        state.db.execute("UPDATE work SET attempts=2,error='database_unavailable',available_at=? WHERE key=?", (time.time() - 3600, later))
+    assert [work['key'] for work in state.ready(limit=1)] == [oldest]
+    _finish_review_claim(state, oldest)
+    assert [work['key'] for work in state.ready(limit=1)] == [fresh]
+
+
+def test_review_admission_gives_three_fresh_claims_then_another_aged_retry(state):
+    first_retry = _review_ready(state, 'retry-first', day='07')
+    second_retry = _review_ready(state, 'retry-second', day='07')
+    with state.db:
+        state.db.execute("UPDATE work SET attempts=1,available_at=0,error='database_unavailable' WHERE key IN (?,?)",
+                         (first_retry, second_retry))
+    assert state.ready(limit=1)[0]['key'] == first_retry
+    _finish_review_claim(state, first_retry)
+    for index in range(3):
+        fresh = _review_ready(state, f'fresh-{index}', day='08')
+        assert state.ready(limit=1)[0]['key'] == fresh
+        _finish_review_claim(state, fresh)
+    newest = _review_ready(state, 'fresh-newest', day='08')
+    assert state.ready(limit=1)[0]['key'] == second_retry
+    _finish_review_claim(state, second_retry)
+    assert state.ready(limit=1)[0]['key'] == newest
+
+
+def test_review_operator_note_precedes_aged_retry_without_consuming_its_slot(state):
+    retry = _review_ready(state, 'retry', day='07')
+    noted = _review_ready(state, 'noted', day='08')
+    with state.db:
+        state.db.execute("UPDATE work SET attempts=1,available_at=0,error='database_unavailable' WHERE key=?", (retry,))
+        state.db.execute("UPDATE work SET note='operator requested another review' WHERE key=?", (noted,))
+    assert state.ready(limit=1)[0]['key'] == noted
+    _finish_review_claim(state, noted)
+    assert state.ready(limit=1)[0]['key'] == retry
+
+
+def test_review_retry_age_and_existing_eligibility_gates(state):
+    recent_retry = _review_ready(state, 'recent-retry', day='07')
+    not_due = _review_ready(state, 'not-due', day='07')
+    unparsed = _review_ready(state, 'superseded', day='07')
+    fresh = _review_ready(state, 'fresh', day='08')
+    with state.db:
+        state.db.execute("UPDATE work SET attempts=1,available_at=?,error='database_unavailable' WHERE key=?",
+                         (time.time() - 60, recent_retry))
+        state.db.execute("UPDATE work SET attempts=1,available_at=?,error='database_unavailable' WHERE key=?",
+                         (time.time() + 3600, not_due))
+    ingest(state, [entry('superseded', rev='2', day='07')], day='07')
+    assert state.db.execute('SELECT status FROM work WHERE key=?', (unparsed,)).fetchone()[0] == 'superseded'
+    assert state.ready(limit=1)[0]['key'] == fresh
+    _finish_review_claim(state, fresh)
+    assert state.ready(limit=1)[0]['key'] == recent_retry, 'a due retry remains runnable when no fresh work exists'
+
+
+def test_zero_attempt_parked_database_retry_is_still_an_aged_retry(state):
+    parked = _review_ready(state, 'parked', day='07')
+    fresh = _review_ready(state, 'fresh', day='08')
+    with state.db:
+        state.db.execute("UPDATE work SET attempts=0,available_at=?,error='database_unavailable' WHERE key=?",
+                         (time.time() - 3600, parked))
+    assert state.ready(limit=1)[0]['key'] == parked
+    _finish_review_claim(state, parked)
+    assert state.ready(limit=1)[0]['key'] == fresh
+
+
+def test_review_claim_slot_persists_reopen_and_failed_claim_does_not_advance_it(state, tmp_path):
+    first_retry = _review_ready(state, 'retry-first', day='07')
+    second_retry = _review_ready(state, 'retry-second', day='07')
+    with state.db:
+        state.db.execute("UPDATE work SET attempts=1,available_at=0,error='database_unavailable' WHERE key IN (?,?)",
+                         (first_retry, second_retry))
+    assert state.ready(limit=1)[0]['key'] == first_retry
+    assert not state.claim('missing-key')
+    assert state.ready(limit=1)[0]['key'] == first_retry
+    _finish_review_claim(state, first_retry)
+    first_fresh = _review_ready(state, 'fresh-0', day='08')
+    _finish_review_claim(state, first_fresh)
+    state.close()
+    reopened = State(tmp_path / 'state.sqlite')
+    try:
+        for index in (1, 2):
+            fresh = _review_ready(reopened, f'fresh-{index}', day='08')
+            assert reopened.ready(limit=1)[0]['key'] == fresh
+            _finish_review_claim(reopened, fresh)
+        newest = _review_ready(reopened, 'fresh-3', day='08')
+        assert reopened.ready(limit=1)[0]['key'] == second_retry
+        _finish_review_claim(reopened, second_retry)
+        assert reopened.ready(limit=1)[0]['key'] == newest
+    finally:
+        reopened.close()
 
 
 def test_provider_backoff_blocks_download(state, tmp_path):
