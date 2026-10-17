@@ -14,6 +14,10 @@ Request, refresh, broker, validation and action errors use `RequestError` / `Err
 
 Every product `<table>` uses `SortTh` + `useSort`. Structural exceptions set `data-sortable-exempt` to one of: `chain-layout`, `matrix`, `markdown`, `chrome`, `kit-demo`. Contract: `web/tests/sortable-table-contract.test.ts`.
 
+## UI Taste
+
+New or redesigned screens follow `.claude/skills/no-slop-app/SKILL.md` (tells, process, and which taste-skill rules Radon rejects). Generated-UI copy (AI cliches, "Oops", Lorem ipsum, placeholder names) is banned in `web/` and `site/` source. Contract: `web/tests/ui-copy-slop-contract.test.ts`.
+
 ## Production Build Constraint
 
 Next.js 16 prerender crashes on `/_global-error` + `/_not-found` (root ClerkProvider not materialised in workers). `web/package.json` build uses `next build --experimental-build-mode=compile`. `app/error.tsx`, `app/[ticker]/not-found.tsx`, `app/global-error.tsx` use plain `<a>` + pure JSX (no `next/link`, no `useEffect`, no `globals.css`).
