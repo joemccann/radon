@@ -819,13 +819,18 @@ def _request(
     if stream and max_bytes and callable(stream_iter):
         raw = bytearray()
         try:
-            for chunk in stream_iter(65536):
-                raw.extend(chunk)
-                if len(raw) > max_bytes:
-                    raise ModelResponseError(
-                        "response_too_large",
-                        "Research reviewer response exceeds limit",
-                    )
+            try:
+                for chunk in stream_iter(65536):
+                    raw.extend(chunk)
+                    if len(raw) > max_bytes:
+                        raise ModelResponseError(
+                            "response_too_large",
+                            "Research reviewer response exceeds limit",
+                        )
+            except ModelResponseError:
+                raise
+            except Exception as exc:  # noqa: BLE001 — a streamed body can fail after headers
+                raise RuntimeError(f"network:{type(exc).__name__}") from exc
             text = raw.decode("utf-8", errors="replace")
             payload = None if raw_text_only else json.loads(text)
             status = int(getattr(resp, "status_code", 0) or 0)

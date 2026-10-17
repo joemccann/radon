@@ -1,3 +1,20 @@
+# Research review provider timeout budget (2026-10-17)
+
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
+
+- [x] T1 depends_on: [] Inspect Reviewer, shared ladder timeout diagnostics and both pipeline document boundaries; preserve subscription, provider order and prepaid policy.
+- [x] T2 depends_on: [T1] Commit synthetic regression-only coverage and demonstrate exact-head GitHub CI failures before source changes; no local suites.
+- [x] T3 depends_on: [T2] Skip only proven timed-out provider attempts within the same document and request modality; reset at each document boundary.
+- [ ] T4 depends_on: [T3] Independent Sol/Luna review and exact-head full GitHub CI green.
+- [ ] T5 depends_on: [T4] Coordinated deployment after the preceding production release; verify normal recovered-document review outcomes.
+
+## Streamed transport follow-up
+- [x] T6 depends_on: [T3] Add production-shaped stream-body timeout and terminal response-error regression coverage after independent Sol review.
+- [x] T7 depends_on: [T6] Confirm GitHub red before minimal streamed transport source repair; exact-head CI and independent review remain tracked in T4.
+
+## Review
+Inspection confirmed the production ingestion consumer reuses its Pipeline and Reviewer across documents. Timeout state therefore requires an explicit document reset in both pipeline versions. Text and image calls use different provider models; timeout exclusion must preserve the untried modality. GitHub regression-only head 2c1a16cb, run 39048551062/job 117442189465: 31 failed, 2678 passed. Minimal repair keeps exact network timeout exclusions per document and text/image lane, preserves each winning provider, explicitly rejects empty eligible sets, and resets reused and distinct injected agents at both document boundaries. Python AST and diff checks passed; no local suites. Independent Sol review found a streamed-body timeout escaping the shared transport wrapper. Added 22 synthetic response-stream regressions covering typed and generic timeout fallback, exact-class quarantine, response closure, byte limit, truncation and unchanged malformed JSON behavior. GitHub streamed regression head ac2104ab, run 39049215035/job 117444244059: 16 failed, 2715 passed. Stream iteration errors now use the existing network diagnostic path, preserving response-size errors and decode/JSON/status behavior outside the transport catch. Integrated main release 64471fd7 before final CI. No local suites. Sol and Luna approved source head b7ce48a1. GitHub scripts-df job 117444847414 found the missing owner-document update: 1 failed, 1602 passed, 3 skipped. Added the existing docs/dropbox-research.md timeout contract without a docs-skip exception; final exact-head CI and latest-head review confirmation pending.
+
 # Nemotron Super VL implementation (2026-10-16)
 
 Dependency graph: T1 -> T2,T3; T2,T3 -> T4 -> T5 -> T6.
