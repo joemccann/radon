@@ -3718,15 +3718,18 @@ after the IB-skip path has already chosen the cached payload.** Peak:
   this case. No `/home/radon/.radon-deploy-transition.json`.
   `Result=signal` or exit 143 inside a deploy window is
   `deploy-stop-clean-oneshot-signal`. A ledger statement error (not a
-  read timeout) still fails the oneshot on purpose. Connection reset,
-  broken pipe, SSL EOF, URLError, HTTP 502/503/504, and
-  `RemoteDisconnected` are `grok-page-responder-ledger-transport`.
+  read timeout) still fails the oneshot on purpose. A
+  `RemoteDisconnected` on the same ledger calls is
+  `grok-page-responder-ledger-disconnect`. Connection reset,
+  broken pipe, SSL EOF, URLError, HTTP 502/503/504, and follow-up
+  recovery after a lost write are
+  `grok-page-responder-ledger-transport`.
 - **Remediation (code):** a ledger `TimeoutError` logs
   `grok page ledger non-fatal`, skips the ok heartbeat, releases the
   lock, and exits 0. The timer starts the next cycle in 30s. A claim
   the server already applied stays until `STALE_CLAIM_SECS` (2h); a
-  claim that never landed is eligible on that next cycle. Other
-  `HranaHttpError` values still propagate. The unit is not on
+  claim that never landed is eligible on that next cycle. A statement
+  error still propagates. The unit is not on
   `RERUNNABLE_ONESHOT_UNITS`.
 - **Regression:**
   `scripts/tests/test_grok_page_ledger_timeout.py::TestLedgerReadTimeout`.
@@ -3752,7 +3755,9 @@ Peak family: 2026-09-27 ledger timeout (`a1c550c1`) and 2026-10-17
   traceback that still fails the oneshot.
 - **Discriminating check:** Python Turso `SELECT 1` succeeds. Canary
   fail is a Turso platform outage: stand down, do not restart-flap. A
-  `FileNotFoundError` on `GROK_BIN` is
+  `RemoteDisconnected` after a long grok run is also
+  `grok-page-responder-ledger-disconnect` (same classifier, peak
+  incident write-up). A `FileNotFoundError` on `GROK_BIN` is
   `grok-page-responder-missing-binary`. `Result=signal` or exit 143
   inside a deploy window is `deploy-stop-clean-oneshot-signal`.
 - **Remediation (code):** `hrana_http.is_transport_error` classifies by
@@ -3772,6 +3777,75 @@ Peak family: 2026-09-27 ledger timeout (`a1c550c1`) and 2026-10-17
   `HttpStatusError`), `scripts/watchdog/pages.py` (`claim_page`,
   `complete_page`), `scripts/grok_page_responder.py`
   (`_complete_page_with_followup`).
+
+## grok-page-responder-ledger-disconnect
+
+**`radon-grok-page-responder.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when `complete_page` hits `RemoteDisconnected` after a
+long grok run.** Peak: 2026-10-17 06:54:48Z, page
+`eaaaff8194a0fb8086edc8f55bb438ed`, paged 06:55:00Z. Same class at
+02:59:39Z (`0bd43c03976d2cb9b20ce3e5724fc667`, also 03:13:21Z,
+03:33:21Z, 04:55:14Z) and 05:31:17Z / 05:47:30Z.
+
+- **Symptom:** oneshot exits 1. systemd records `Result=exit-code`,
+  `NRestarts=0`. The watchdog pages this unit about itself. Journal
+  traceback ends at
+  `db.hrana_http.HranaHttpError: RemoteDisconnected: Remote end closed connection without response`
+  with `grok_page_responder.py` `run_cycle` calling `complete_page`.
+  Exec span is the grok run (minutes), not `TimeoutStartSec=3900`.
+  The line before the traceback on a long cycle may be
+  `failed at incident time; retrying last-known-good`.
+- **Root cause:** `claim_page` opens the thread-local Hrana keep-alive.
+  Grok then runs for minutes. The peer closes that idle socket.
+  `complete_page`'s UPDATE is sent on it. `getresponse` raises
+  `RemoteDisconnected`. The pool does not replay a write (the peer may
+  already have committed). `_ledger_read_timeout` matched only
+  `TimeoutError`, so the exception escaped `run_cycle`. Main
+  `af773f0f` now retires sockets idle for 5s or more in
+  `scripts/db/hrana_http.py` (`_KEEPALIVE_IDLE_S`) before the next send.
+  This branch still drops the idle socket after grok returns
+  (`_drop_idle_hrana_socket`) so the UPDATE is the first send on a new
+  connection even if the pool reuse path is skipped.
+- **Detection:** `systemctl show radon-grok-page-responder.service -p
+  Result,NRestarts` → `exit-code` / `0` on that invocation.
+  InactiveEnter on the 06:54Z page is 2026-10-17 06:54:48Z.
+- **Discriminating check:** Python Turso canary `SELECT 1` succeeds
+  (58-651 ms at diagnosis). Canary fail is a Turso platform outage:
+  stand down, do not restart-flap. Sibling `service_health` rows in the
+  same minute, and later `pending: 0` cycles that never held a socket
+  across grok, confirm a single dropped keep-alive. A `TimeoutError`
+  on `claim_page` or `complete_page` is
+  `grok-page-responder-ledger-timeout`. A statement error (`no such
+  table`) or a missing credential still fails the oneshot.
+  `FileNotFoundError` on `GROK_BIN` is
+  `grok-page-responder-missing-binary`. `Result=signal` or exit 143
+  inside a deploy window is `deploy-stop-clean-oneshot-signal`.
+  `/health/lite` `database=down` with a successful canary is the 0.35s
+  dependency deadline, not this exit. Anonymous `/api/service-health`
+  401 is not this exit. `requires_ib` is false, so this is not the
+  grouped IB outage. No `/home/radon/.radon-deploy-transition.json`.
+- **Remediation (code):** `_ledger_transport_error` classifies
+  `RemoteDisconnected` by type via `hrana_http.is_transport_error`
+  (not message text). After grok returns, drop the idle keep-alive
+  (`_drop_idle_hrana_socket`) before `record_attempt_failure` or
+  `complete_page`. If that write still raises, `_complete_page_with_followup`
+  retries once on a fresh socket, then `get_page`. A `done` row still
+  sends the priority-0 follow-up. Unconfirmed writes log
+  `grok page ledger non-fatal`, skip the ok heartbeat, release the
+  lock, and exit 0. A claim the server already applied stays until
+  `STALE_CLAIM_SECS` (2h). The next timer is 30s. A statement error
+  still propagates. The unit is not on `RERUNNABLE_ONESHOT_UNITS`.
+- **Operator action:** do not `reset-failed` as the fix. Do not
+  restart-flap the unit. Confirm the canary, then wait for this deploy.
+  A page whose `complete_page` response was lost stays claimed until
+  the 2h stale window. After deploy, the next cycle exits 0 on the same
+  transport drop.
+- **Regression:**
+  `scripts/tests/test_grok_page_ledger_timeout.py::TestLedgerRemoteDisconnect`.
+- **Code:** `scripts/grok_page_responder.py` (`_ledger_transport_error`,
+  `_drop_idle_hrana_socket`, `_complete_page_with_followup`). Pool
+  expiry: `scripts/db/hrana_http.py` (`_KEEPALIVE_IDLE_S`, `af773f0f`,
+  `is_transport_error`).
 
 ## grok-page-responder-missing-binary
 

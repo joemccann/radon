@@ -1,8 +1,8 @@
 # Grok page responder ledger transport resilience
 
-Follow-up to PR #1113 (`fix/grok-page-responder-ledger-disconnect`) and
-main `af773f0f` (drop Hrana keep-alives idle >= 5s before the next send).
-This document is the design for a **new** PR based on `main`.
+Follow-up to PR #1113 (`ae2a6a0f` on main) and `af773f0f` (drop Hrana
+keep-alives idle >= 5s before the next send). This document is the
+design for PR #1130.
 
 Python 3.13 only.
 
@@ -33,16 +33,20 @@ for minutes). Remaining gaps:
 
 ## Stacking on #1113
 
-**Base this PR on `main`.** Do not branch from
-`fix/grok-page-responder-ledger-disconnect`.
+#1113 is on `main` (`ae2a6a0f`). This branch merges `origin/main` and
+keeps #1113's idle drop, disconnect runbook (folded #1110/#1112 peaks),
+and lessons entry. The type-based classifier is the single path:
+`_ledger_transport_error` wraps `is_transport_error` and replaces
+#1113's `RemoteDisconnected` string match without dropping any case
+that string match covered. `_ledger_read_timeout` is an alias.
 
 | #1113 file | This PR | Overlap |
 |---|---|---|
-| `scripts/grok_page_responder.py` | Yes: replace `_ledger_read_timeout` with type-based classification, add complete/claim recovery and the non-paging signal | Unavoidable. Keep the diff to the classifier, post-grok finish helper, and the existing `HranaHttpError` handler. Do **not** add `_drop_idle_hrana_socket` (main already expires idle sockets). |
-| `scripts/tests/test_grok_page_ledger_timeout.py` | Touch only as needed so existing timeout cases still pass under retry+readback. Put new cases in a **new** file. | Minimal: private runtime lock fixture already required; add it if missing on main (it is missing today). |
-| `docs/incident-runbook.md` | Add a new case after the timeout case. Do not rewrite #1113's disconnect section. | Low. Adjacent insert; rebase after #1113 by keeping both headings or folding disconnect into transport. |
+| `scripts/grok_page_responder.py` | Replace string match with type-based classification; keep `_drop_idle_hrana_socket`; add complete/claim recovery and the non-paging signal | Classifier, post-grok finish helper, existing `HranaHttpError` handler |
+| `scripts/tests/test_grok_page_ledger_timeout.py` | Wrap `RemoteDisconnected` as `__cause__` so type classification hits; mock `get_page`; keep #1113 idle-drop and timeout cases | Private runtime lock fixture |
+| `docs/incident-runbook.md` | Keep timeout, disconnect, and transport headings. Disconnect keeps the folded #1110/#1112 write-up | Cross-links between the three cases |
 
-New files this PR owns (no #1113 conflict):
+New files this PR owns:
 
 - `plans/grok-page-responder-ledger-resilience.md` (this file)
 - `scripts/tests/test_grok_page_ledger_transport.py`
@@ -50,9 +54,7 @@ New files this PR owns (no #1113 conflict):
 - `scripts/watchdog/pages.py` (claim readback, complete token guard)
 - `docs/grok-page-responder.md` (states / health)
 
-**Merge order:** merge #1113 first, then rebase this branch onto `main`.
-The classifier in this PR supersedes #1113's `RemoteDisconnected` string
-match. RemoteDisconnected is `http.client.RemoteDisconnected`, a
+RemoteDisconnected is `http.client.RemoteDisconnected`, a
 `ConnectionResetError`, so type matching covers it without looking at
 the message.
 
@@ -222,13 +224,13 @@ counter.
 |---|---|
 | `scripts/db/hrana_http.py` | `HttpStatusError`; `_pooled_open` raises it for non-200; `is_transport_error()` |
 | `scripts/watchdog/pages.py` | `claim_page` readback/retry; `complete_page(..., claim_token=)`; `record_attempt_failure(..., claim_token=)` token guard |
-| `scripts/grok_page_responder.py` | `_ledger_transport_error`; `_note_ledger_transport`; `_complete_page_with_followup`; pass `claim_token` into complete/failure; keep `except HranaHttpError` |
+| `scripts/grok_page_responder.py` | `_ledger_transport_error`; keep `_drop_idle_hrana_socket`; `_note_ledger_transport`; `_complete_page_with_followup`; pass `claim_token` into complete/failure; keep `except HranaHttpError` |
 | `scripts/tests/test_grok_page_ledger_transport.py` | **New.** Classifier, complete retry+follow-up, claim ownership recovery, statement still fails, heartbeat/paging contract. `RADON_GROK_RUNTIME_LOCK` on a tmp path in the cycle fixture. |
 | `scripts/tests/test_grok_page_ledger_timeout.py` | Set `RADON_GROK_RUNTIME_LOCK` (main is missing it; without it this file flocks the live VPS lock). Existing timeout cases must still exit 0. |
 | `scripts/tests/test_watchdog/test_page_responder.py` | Token guard: foreign claim is not completed; retry no-op on `done`; claim transport then matching token returns True |
 | `scripts/tests/test_hrana_http_keepalive.py` | Non-200 raises `HttpStatusError` with `.status` (shared module only; api copy unchanged) |
 | `docs/grok-page-responder.md` | Ticket states: claim/complete recovery; health: transport signal |
-| `docs/incident-runbook.md` | New case `grok-page-responder-ledger-transport` |
+| `docs/incident-runbook.md` | New case `grok-page-responder-ledger-transport`; keep #1113 disconnect case |
 | `plans/grok-page-responder-ledger-resilience.md` | This plan |
 
 No migration. `claim_token` already exists (0048).
@@ -338,7 +340,7 @@ Then the related importer set used by #1113 (`test_grok_page_missing_binary`,
 | `ok` + `last_error` pages the error bucket | Error bucket is `state == 'error'` only; pin with a check test |
 | Skipping ok heartbeat on one-off unrecovered looks like a stall | Next `pending: 0` cycle (30s) heartbeats ok. Standing outage still ages out at 90m |
 | Residual double-fault on claim readback | Document 2h stale reclaim; no third try |
-| Merge conflict with #1113 on `_ledger_read_timeout` | This PR's type match supersedes; rebase after #1113 |
+| Merge conflict with #1113 on `_ledger_read_timeout` | Type match is the single path; keep idle drop and both runbook cases |
 | Test hangs the live poller | Private `RADON_GROK_RUNTIME_LOCK` on every `run_cycle` test |
 | Follow-up after a `done` row that another host completed | Token guard plus `status in done/skipped` only when token already NULL (our write). Foreign `done` with NULL token could in theory send a duplicate follow-up if we lost the write **and** another host finished first in the same race; both cycles sending priority 0 is acceptable, P1 is not |
 
@@ -347,14 +349,12 @@ Do not restart-flap the oneshot.
 
 ## Rollout
 
-1. Land #1113 if it is still open (string match + explicit idle drop).
-   Harmless once `af773f0f` is on main; this PR then rebases.
-2. Merge this PR to `main`. CI then Production deploy. The responder
+1. Merge this PR to `main`. CI then Production deploy. The responder
    clone `ff`s `origin/main` on the next clean cycle (`GROK_PAGE_SYNC_REMOTE=1`).
-3. Operator: none. No env, token, or unit install. Grep
+2. Operator: none. No env, token, or unit install. Grep
    `journalctl -u radon-grok-page-responder --grep grok_page_ledger_transport`
    after the next real page if a disconnect reproduces.
-4. If a statement error is newly treated as transport (should not
+3. If a statement error is newly treated as transport (should not
    happen): revert. Discriminator remains `pytest
    test_statement_error_still_fails_the_oneshot`.
 
