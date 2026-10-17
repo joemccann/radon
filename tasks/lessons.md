@@ -1,3 +1,8 @@
+# A dropped hrana ledger connection is not a statement error (2026-10-17)
+
+- `grok-page-responder-ledger-timeout` used to match only `TimeoutError`. A `complete_page` `RemoteDisconnected: Remote end closed connection without response` is the same dropped keep-alive. Exit 0, skip the ok heartbeat, and leave the ticket for the next cycle.
+- A statement error and a missing credential still fail the oneshot. Stand down only when the Python Turso canary fails too.
+
 # Flex duplicate coverage unread is not a row gap (2026-10-16)
 
 - `coverage_unverified` plus "operator reconciliation required" on an applied Trade_History duplicate is `flex-pull-trade-coverage` only when `delivery_rows_present` returned false. A preceding `duplicate coverage unavailable: RemoteDisconnected` (or a hrana read timeout / connection reset) means the journal was not read. Do not reconcile. Do not replay the statement. The next flex-pull timer reads again.
