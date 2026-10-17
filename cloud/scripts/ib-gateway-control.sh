@@ -70,7 +70,7 @@ inherited_lock_is_valid() {
   local fd_text="$2"
   local lock_path="$3"
   [[ "$marker" == "1" && "$fd_text" =~ ^[0-9]+$ ]] || return 1
-  "$LOCK_PYTHON" - "$fd_text" "$lock_path" <<'PY'
+  "$LOCK_PYTHON" -I - "$fd_text" "$lock_path" <<'PY'
 import fcntl
 import os
 import sys
@@ -101,7 +101,7 @@ acquire_deploy_lock() {
     echo "REFUSING Gateway mutation: deploy/control lock runtime unavailable" >&2
     return 1
   fi
-  exec "$LOCK_PYTHON" - \
+  exec "$LOCK_PYTHON" -I - \
     "$DEPLOY_LOCK_PATH" "$LOCK_CLI" "$WATCHDOG_HOLDER" "$0" "$@" <<'PY'
 import fcntl
 import os
@@ -153,7 +153,7 @@ acquire_lifecycle_mutex() {
   # Hold flock across an exec back into this script. The inherited descriptor
   # stays open for the entire Docker mutation, serializing start/stop/restart
   # without extending the 10-minute 2FA push lease.
-  exec "$LOCK_PYTHON" - \
+  exec "$LOCK_PYTHON" -I - \
     "$CONTROL_GUARD_PATH" "$CONTROL_LOCK_WAIT_SECS" "$LOCK_CLI" \
     "$WATCHDOG_HOLDER" "$0" "$@" <<'PY'
 import fcntl
@@ -196,7 +196,7 @@ PY
 run_bounded() {
   local timeout_secs="$1"
   shift
-  "$LOCK_PYTHON" - "$timeout_secs" "$@" <<'PY'
+  "$LOCK_PYTHON" -I - "$timeout_secs" "$@" <<'PY'
 import os
 import signal
 import subprocess
@@ -254,7 +254,7 @@ container_running() {
 write_transition() {
   local desired="$1"
   local action="$2"
-  "$LOCK_PYTHON" - "$TRANSITION_PATH" "$desired" "$action" <<'PY'
+  "$LOCK_PYTHON" -I - "$TRANSITION_PATH" "$desired" "$action" <<'PY'
 import json
 import os
 from pathlib import Path
@@ -287,7 +287,7 @@ PY
 }
 
 clear_transition() {
-  "$LOCK_PYTHON" - "$TRANSITION_PATH" <<'PY'
+  "$LOCK_PYTHON" -I - "$TRANSITION_PATH" <<'PY'
 import os
 from pathlib import Path
 import sys
@@ -306,7 +306,7 @@ PY
 }
 
 transition_desired() {
-  "$LOCK_PYTHON" - "$TRANSITION_PATH" <<'PY'
+  "$LOCK_PYTHON" -I - "$TRANSITION_PATH" <<'PY'
 import json
 from pathlib import Path
 import sys
