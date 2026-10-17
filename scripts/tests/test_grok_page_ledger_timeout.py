@@ -10,6 +10,7 @@ A statement error is not a read timeout and must still fail the unit.
 
 from __future__ import annotations
 
+import http.client
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -75,6 +76,7 @@ def cycle_env(monkeypatch, tmp_path):
     monkeypatch.setattr(pages_mod, "actions_since", lambda **_k: 0)
     monkeypatch.setattr(pages_mod, "list_actionable_pages", lambda **_k: [_page()])
     monkeypatch.setattr(pages_mod, "claim_page", lambda *_a, **_k: True)
+    monkeypatch.setattr(pages_mod, "get_page", lambda *_a, **_k: None)
 
     def runner(*_a, **_k):
         invocations.append(_a)
@@ -91,7 +93,7 @@ def cycle_env(monkeypatch, tmp_path):
 
 
 def _timeout(*_a, **_k):
-    raise HranaHttpError(_TIMEOUT)
+    raise HranaHttpError(_TIMEOUT) from TimeoutError("The read operation timed out")
 
 
 class TestLedgerReadTimeout:
@@ -177,7 +179,10 @@ _DISCONNECT = (
 
 
 def _disconnect(*_a, **_k):
-    raise HranaHttpError(_DISCONNECT)
+    cause = http.client.RemoteDisconnected(
+        "Remote end closed connection without response"
+    )
+    raise HranaHttpError(_DISCONNECT) from cause
 
 
 class TestLedgerRemoteDisconnect:

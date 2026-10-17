@@ -33,6 +33,7 @@ from watchdog import units as units_mod
 from watchdog.check import CheckOutcome
 from watchdog.pages import (
     claim_page,
+    complete_page,
     enqueue_delivered_page,
     list_actionable_pages,
     page_id,
@@ -210,6 +211,55 @@ class TestClaim:
         assert claim_page(pid, now=later, claim_token="tok-b") is True
         actionable = list_actionable_pages(now=NOW + timedelta(minutes=1))
         assert actionable == []
+
+
+class TestCompleteTokenGuard:
+    def test_foreign_claim_is_not_completed(self, db_conn):
+        pid = enqueue_delivered_page(
+            service="vcg-scan",
+            severity="P1",
+            kind="stale",
+            message="silent",
+            now=NOW,
+        )
+        assert claim_page(pid, now=NOW, claim_token="tok-a") is True
+        complete_page(
+            pid,
+            status="done",
+            result="stand_down: other",
+            now=NOW,
+            claim_token="tok-b",
+        )
+        row = db_conn.execute(
+            "SELECT status, claim_token, result FROM watchdog_pages WHERE page_id=?",
+            (pid,),
+        ).fetchone()
+        assert row[0] == "claimed"
+        assert row[1] == "tok-a"
+        assert row[2] is None
+
+    def test_retry_after_done_does_not_rewrite(self, db_conn):
+        pid = enqueue_delivered_page(
+            service="vcg-scan",
+            severity="P1",
+            kind="stale",
+            message="silent",
+            now=NOW,
+        )
+        assert claim_page(pid, now=NOW, claim_token="tok-a") is True
+        complete_page(
+            pid, status="done", result="stand_down: first", now=NOW, claim_token="tok-a"
+        )
+        complete_page(
+            pid, status="done", result="stand_down: retry", now=NOW, claim_token="tok-a"
+        )
+        row = db_conn.execute(
+            "SELECT status, claim_token, result FROM watchdog_pages WHERE page_id=?",
+            (pid,),
+        ).fetchone()
+        assert row[0] == "done"
+        assert row[1] is None
+        assert row[2] == "stand_down: first"
 
 
 class TestResponder:
