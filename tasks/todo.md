@@ -9733,3 +9733,13 @@ Review: live audit confirmed109 eligible, original3 ranks107–109;19 fresh/0 re
 - [x] A4 depends_on: [A3] Update owner/runbook guidance and the consumer-policy lesson; complete focused tests and independently reviewed full gates before publication.
 - [ ] A5 depends_on: [A4] Deliver only after the preceding main production release; require exact-head green CI, accepted notification, normal production deployment and real native in-skew proof.
 Review: Initial regressions reproduced18 failures; boundary/vault-proof cases reproduced6 failures and simultaneous auth/seal failure reproduced1 failure before repair. Focused172 and docs160 passed; full Python16239 passed/2 skipped/23 subtests, cloud2910 passed/7 skipped. Sol independently approved the source and final sealing guards and ran the preceding170 focused cases. Native helper executable-line coverage47/49 (95.92%) via stdlib trace before the final sealing cases. No provider calls, credential changes or timer changes occurred during local verification. Publication and live proof remain pending; primary checkout preserved.
+
+
+## Research incomplete-response evidence (2026-10-17)
+
+- [x] D1 depends_on: [] Preserve the three live initial-SELECT failure receipts and add failing cloud regressions for sanitized terminal/usage evidence.
+- [x] D2 depends_on: [D1] Retain only fixed allowlisted terminal reason and bounded numeric token usage through the existing safe error path; preserve request settings and fail-closed retry/publication gates.
+- [ ] D3 depends_on: [D2] Complete exact-head CI, independent Sol/Luna review, accepted green notification, authorized admin merge and full deployment.
+- [ ] D4 depends_on: [D3] Observe next normal retries with actual safe diagnostics, finish any evidenced narrow remedy, and verify all original final decisions/publications.
+
+Review: regression-only c8ba51f8 cloud CI39073806724 model shard19fail/1369pass; propagation shard failed as expected. Minimal diagnostic-only source prepared; final exact-head CI/source reviews and production evidence pending. All three normal retries failed before a fresh SELECT checkpoint; actual terminal reason/usage absent. No local suites; no partial JSON acceptance, queue resets, priority overrides or model/auth/config changes.
