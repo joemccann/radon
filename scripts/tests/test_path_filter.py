@@ -671,7 +671,10 @@ def test_ci_changes_job_resolves_the_push_base_from_deploy_history() -> None:
         "comes from deploy history (T-312)"
     )
     assert "github.event.pull_request.base.sha" in env["BASE_SHA"]
-    assert env["GH_TOKEN"] == "${{ github.token }}"
+    # The lookback needs the token on push; it is deliberately withheld on
+    # pull_request, where gate_base reads BASE_SHA and never calls the API.
+    assert "github.token" in env["GH_TOKEN"]
+    assert "github.event_name == 'push'" in env["GH_TOKEN"]
     assert changes["permissions"]["actions"] == "read"
     assert changes["permissions"]["contents"] == "read"
 
