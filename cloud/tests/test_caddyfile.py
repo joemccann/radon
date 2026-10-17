@@ -808,3 +808,81 @@ class TestTradingViewWebhookEdge:
         tv = active.index("handle " + TV_MATCHER)
         catch_all = re.search(r"(?m)^\s*handle\s*\{", active).start()
         assert tv < catch_all
+
+
+MAX_APP_BODY_BYTES = 12 * 1024 * 1024
+
+
+def app_site_handle_blocks(content):
+    """Every `handle`/`handle_path` block of the app site, with its matcher.
+
+    Returns `[(label, block), ...]` in file order. The app site is the only
+    site that fronts Next.js, and each of its handles is an independent edge
+    policy: a setting in one says nothing about the others.
+    """
+    site = site_block(content, "{$DOMAIN:app.radon.run}")
+    blocks = []
+    for match in re.finditer(r"(handle_path|handle)([^\n{]*)\{", site):
+        label = (match.group(1) + match.group(2)).strip()
+        blocks.append((label, _balanced_block(site, match.end() - 1)))
+    return blocks
+
+
+def declared_body_cap_bytes(block):
+    """The block's own `request_body { max_size ... }` in bytes, None if absent."""
+    match = re.search(r"request_body\s*\{[^}]*max_size\s+(\d+)(KB|MB)", block)
+    if not match:
+        return None
+    size, unit = int(match.group(1)), match.group(2)
+    return size * (1024 if unit == "KB" else 1024 * 1024)
+
+
+class TestEveryNextjsHandleBoundsTheBody:
+    """Caddy is the only body cap in front of Next.js.
+
+    Next.js middleware never reads the body, and 25 of the 27 route handlers
+    that call `request.json()` have no size check of their own, so whatever
+    the edge forwards is buffered whole in the single Node process that also
+    serves the operator's live trading UI. The `/api/assistant*` handle was
+    capped for exactly this reason; every other handle that dials the app
+    upstream needs the same bound, including the catch-all that 80-odd API
+    routes ride.
+    """
+
+    def _nextjs_blocks(self, caddy_dir):
+        blocks = [
+            (label, block)
+            for label, block in app_site_handle_blocks(read_caddyfile(caddy_dir))
+            if re.search(r"reverse_proxy\s+" + re.escape(APP_UPSTREAM) + r"\b", block)
+        ]
+        assert blocks, "no app-site handle proxies to the Next.js upstream"
+        return blocks
+
+    def test_every_nextjs_handle_declares_a_body_cap(self, caddy_dir):
+        missing = [
+            label for label, block in self._nextjs_blocks(caddy_dir)
+            if declared_body_cap_bytes(block) is None
+        ]
+        assert not missing, (
+            "these app-site handles forward an unbounded request body to "
+            f"Next.js: {missing}"
+        )
+
+    def test_no_nextjs_body_cap_exceeds_the_largest_route_payload(self, caddy_dir):
+        too_wide = {
+            label: cap
+            for label, block in self._nextjs_blocks(caddy_dir)
+            for cap in [declared_body_cap_bytes(block)]
+            if cap is not None and cap > MAX_APP_BODY_BYTES
+        }
+        assert not too_wide, (
+            "body caps above the largest legitimate payload do not bound "
+            f"anything: {too_wide}"
+        )
+
+    def test_the_catch_all_is_one_of_the_capped_handles(self, caddy_dir):
+        """Named so the catch-all can never be the exempt one."""
+        catch_all = handle_block(read_caddyfile(caddy_dir))
+        assert declared_body_cap_bytes(catch_all) is not None, (
+            "the catch-all handle forwards an unbounded request body to Next.js"
+        )

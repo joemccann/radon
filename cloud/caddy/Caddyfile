@@ -213,6 +213,17 @@
     # No retry loop (scans are POST requests; Caddy default is zero retries).
     @scan_routes path /api/scanner/*/scan* /api/*/scan*
     handle @scan_routes {
+        # Nothing between the edge and Next.js bounds a request body: the
+        # middleware never reads it and almost every route handler calls
+        # request.json() with no size check of its own, so an oversized POST
+        # buffers whole in the single Node process that also serves the live
+        # trading UI. Every handle that dials the app upstream carries this
+        # cap; 12MB matches /api/assistant*, just above the largest payload
+        # any route legitimately accepts.
+        request_body {
+            max_size 12MB
+        }
+
         reverse_proxy 127.0.0.1:3000 {
             transport http {
                 dial_timeout 5s
@@ -229,6 +240,11 @@
     # (2026-10-09). Scoped to this path. No retry loop: a replayed POST would
     # cancel and place again.
     handle /api/orders/modify {
+        # Same edge body cap as @scan_routes above.
+        request_body {
+            max_size 12MB
+        }
+
         reverse_proxy 127.0.0.1:3000 {
             transport http {
                 dial_timeout 5s
@@ -239,6 +255,11 @@
     }
 
     handle {
+        # Same edge body cap as @scan_routes above.
+        request_body {
+            max_size 12MB
+        }
+
         reverse_proxy 127.0.0.1:3000 {
             lb_try_duration 15s
             lb_try_interval 250ms
