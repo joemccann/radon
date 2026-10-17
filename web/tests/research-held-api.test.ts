@@ -85,6 +85,30 @@ describe("GET /api/newsfeed/research/held", () => {
     expect((await held()).body.items[0].context).toEqual(context);
   });
 
+  it("preserves bounded selector whitespace and applies the shared overflow rule", async () => {
+    const exact = "First paragraph.\n\nSecond paragraph. " + "x".repeat(4096 - "First paragraph.\n\nSecond paragraph. ".length);
+    const cases = [
+      ["exact", exact, exact],
+      ["word-boundary", "signal ".repeat(700), ("signal ".repeat(700)).slice(0, 4095).trimEnd() + "…"],
+      ["giant-token", "x".repeat(5000), "x".repeat(4095) + "…"],
+      ["whitespace", " \n\t".repeat(1500), "…"],
+      ["distant-boundary", "x".repeat(3837) + " " + "y".repeat(300), "x".repeat(3837) + " " + "y".repeat(257) + "…"],
+    ] as const;
+    for (const [name, reason] of cases) {
+      await outcome(name, "held", ["NO_CANDIDATES"]);
+      await db.execute({ sql: "UPDATE research_outcomes SET context_json = ? WHERE work_key = ?",
+        args: [JSON.stringify({ selectorReason: reason }), wk(name)] });
+    }
+    const items = (await held()).body.items;
+    for (const [name, , expected] of cases) {
+      const actual = (items.find((item) => item.fileName === name + ".pdf")?.context as { selectorReason: string }).selectorReason;
+      expect(actual).toBe(expected);
+      expect(actual.length).toBeLessThanOrEqual(4096);
+    }
+    const wordBounded = (items.find((item) => item.fileName === "word-boundary.pdf")?.context as { selectorReason: string }).selectorReason;
+    expect("signal ".repeat(700)[wordBounded.length - 1]).toMatch(/\s/);
+  });
+
   it("never serves a source link that is not an authenticated research PDF", async () => {
     await outcome("x", "held", ["NO_CANDIDATES"]);
     await db.execute({ sql: "UPDATE research_outcomes SET context_json = ? WHERE work_key = ?", args: [JSON.stringify({ sourceUrl: "https://evil.example/x.pdf", excerpt: 7 }), wk("x")] });
