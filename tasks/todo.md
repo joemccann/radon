@@ -1,3 +1,16 @@
+# Subscription error page guidance (2026-10-17)
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+- [x] T1 depends_on: [] Inspect subscription paging and genuine native/device-login callers; isolate from the operator-audit worktree.
+- [x] T2 depends_on: [T1] Reproduce maintainer-error pages incorrectly requesting reauthentication with synthetic regression tests.
+- [x] T3 depends_on: [T2] Restrict login guidance to needs_reauth pages and update the subscription-token owner document.
+- [x] T4 depends_on: [T3] Run focused and full Python/cloud verification and independent Luna review; publish through the standard CI and production delivery gates.
+
+## Review
+
+Red: six new regressions failed while two genuine reauthentication controls passed. Focused subscription and expiry-retry suites: 122 passed. Full Python on production-green f2db23d4: 16,210 passed, two skipped and 23 subtests passed. Scope is alert guidance only; refresh behavior, expiry lead, error classification, provider calls and credentials are unchanged. Parent approved the state guard and eight regression cases. After the explanatory comment and dated Antigravity 1.4.0 limitation note, focused suites again passed 122 and the documentation contract passed 160. Full cloud: 2,910 passed, seven skipped. Independent Luna review approved the implementation, tests and corrected owner documentation; its focused rerun passed 122. Python compilation and whitespace checks pass. Delivery receipts are tracked in the durable operator-audit job; no unrelated files are staged.
+
 # Research database idle socket expiry (2026-10-17)
 
 Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
