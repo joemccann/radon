@@ -155,7 +155,7 @@ class TestNoSecretLeakageFastAPI:
         # Force the helper down the "had candidates, all failed" path so it
         # raises with last_error.args[0]. _resolve_expiry_candidates returns
         # (ib_candidates, uw_candidates, expiry_source).
-        async def _candidates(*args, **kwargs):
+        def _candidates(*args, **kwargs):
             return ([], ["2026-12-18"], "uw")
 
         monkeypatch.setattr(server, "_resolve_expiry_candidates", _candidates)
