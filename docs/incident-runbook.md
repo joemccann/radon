@@ -3051,7 +3051,10 @@ when a duplicate coverage read drops the Turso connection.** Peak:
 2026-10-16 11:35Z, page `c96336153e8157df025f71943e1824c9`. The 07:30 ET
 fire. The 08:30 ET retry exited 0 in about 38s. Span of the failed fire
 was minutes, not `TimeoutStartSec`. `:8321/health/lite` stayed
-authenticated and `database` up.
+authenticated and `database` up. This page predates the one-retry
+contract. Ingest does not return `coverage_unread`. A transport line
+that is still unread after that retry is
+`flex-pull-coverage-read-disconnect`.
 
 - **Mechanism:** newest-first applied today's activity statement
   (`perf_twr` wrote and mirrored). An already-applied Trade_History
@@ -3116,18 +3119,15 @@ duplicate.** Peak: 2026-09-22 11:35Z, page `e1297eea…`.
 - **Discriminating check:** `classified_as=trades` and
   `outcome=coverage_unverified` on an applied duplicate whose missing
   Flex tradeIDs are covered by individual IB fills (this case).
-  A preceding `[flex-ingest] duplicate coverage unavailable:
-  RemoteDisconnected` (or another transport error on the coverage read)
-  is `flex-pull-coverage-read-disconnect`, not missing rows.
-  A preceding `duplicate coverage unavailable:` line whose text is
-  `RemoteDisconnected`, a read `TimeoutError`, or a connection reset
-  is `flex-pull-coverage-unread`: the rows were not read.
+  A preceding `[flex-ingest] duplicate coverage unavailable:` line
+  (`RemoteDisconnected`, a read timeout, or a connection reset) means
+  the coverage read never compared rows. That is
+  `flex-pull-coverage-read-disconnect`: the read was already retried
+  once, the oneshot still exits 1, and it is not a missing-row gap.
+  Do not reconcile from that line and do not replay the delivery.
   A Flex `ibExecID` that is the live five-part `ib_exec_id` minus the
   trailing `.01` is `flex-pull-live-exec-id`.
   `twr_status=degraded` is `flex-pull-twr-degraded-exit`.
-  `duplicate coverage unavailable: RemoteDisconnected` (the coverage
-  read raised before it could compare rows) is
-  `flex-pull-coverage-keepalive-reset`.
   `classified_as=activity` with `outcome=coverage_unverified` is
   `flex-pull-activity-nav`.
   `Result=timeout` is `flex-pull-ingest-timeout`. A quantity gap equal
