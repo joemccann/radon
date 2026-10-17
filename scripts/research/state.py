@@ -289,9 +289,9 @@ class State:
     def work_key_for_file(self, file_id):
         if not file_id:
             return None
-        row = self.db.execute("""SELECT key FROM work WHERE file_id=? AND status IN ('pending','processing','complete','published')
+        row = self.db.execute("""SELECT key,status FROM work WHERE file_id=?
             ORDER BY rowid DESC LIMIT 1""", (file_id,)).fetchone()
-        return row[0] if row else None
+        return row[0] if row and row[1] in ('pending', 'processing', 'complete', 'published') else None
 
     def has_live_work(self, key):
         return bool(self.db.execute("""SELECT 1 FROM work WHERE key=?
