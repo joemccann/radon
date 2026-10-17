@@ -140,16 +140,22 @@ _THIRD_PARTY = re.compile(
     r"^(?:s&p|standard & poor|dow jones|bloomberg|msci|factset|refinitiv|ice\b|intercontinental exchange|morningstar|haver"
     r"|macrobond|datastream|ftse|russell|federal reserve|fred$|reuters|the wall street journal"
     r"|moody|fitch|ishares|google|microsoft|apple|amazon|linkedin|twitter|youtube|facebook|instagram|adobe|capital iq"
-    r"|bureau of|u\.?s\.? department|financial conduct|monetary authority|securities and|commodity futures|the content|all rights"
-    r"|all\b|our\b|this|these|the information|information|important|disclaimer|source|data|notes?|figure|chart|exhibit|table|page)", re.I)
+    r"|bureau of|u\.?s\.? department|financial conduct|monetary authority|securities and|commodity futures)", re.I)
+# Sentence and label fragments that are never a firm.
+_NOISE = re.compile(r"^(?:the content|all rights|all\b|our\b|this|these|the information|information|important|disclaimer|sources?\b"
+                    r"|data|notes?|figure|chart|exhibit|table|page)", re.I)
+# Trailing words a domain may leave off: "Scotiabank Europe" at scotiabank.com is Scotiabank.
+_GENERIC_TAIL = {'bank', 'banking', 'investment', 'investments', 'investors', 'management', 'asset', 'group', 'financial', 'services',
+                 'solutions', 'exchange', 'securities', 'research', 'insurance', 'wealth', 'overseas', 'economics', 'europe',
+                 'australia', 'americas', 'asia', 'uk', 'im'}
 _CITATION_DOMAINS = {
     'reuters', 'bloomberg', 'wsj', 'ft', 'nytimes', 'cnbc', 'marketwatch', 'barrons', 'economist', 'sec', 'federalreserve',
     'linkedin', 'twitter', 'x', 'youtube', 'facebook', 'instagram', 'google', 'gmail', 'outlook', 'yahoo', 'apple', 'amazon',
-    'microsoft', 'adobe', 'msci', 'spglobal', 'spdji', 'factset', 'morningstar', 'refinitiv', 'theice', 'ishares', 'wikipedia',
+    'microsoft', 'adobe', 'msci', 'spglobal', 'spdji', 'factset', 'refinitiv', 'theice', 'ishares', 'wikipedia',
     'imf', 'worldbank', 'oecd', 'bis', 'ecb', 'europa', 'treasury', 'bls', 'bea', 'census', 'stlouisfed', 'newyorkfed',
     'finra', 'coinmarketcap', 'fca', 'mas', 'sfc', 'esma', 'bit', 'doi', 'github', 'medium', 'substack', 'eia',
 }
-_DISPLAY_TAIL = re.compile(r'(?:[\s,]+(?:Group Holdings|Holdings|Pty|Company|Co\.?|Corporation|Corp\.?|Incorporated|Inc\.?|LLC|L\.\s?L\.\s?C\.?'
+_DISPLAY_TAIL = re.compile(r'(?:[\s,]+(?:Group Holdings|Holdings|Pty|ABN|BD|AB|ASA|Company|Co\.?|Corporation|Corp\.?|Incorporated|Inc\.?|LLC|L\.\s?L\.\s?C\.?'
                            r'|L\.\s?P\.?|LP|LLP|Ltd\.?|Limited|plc|PLC|AG|S\.A\.|SA|N\.V\.|NV|GmbH|SE))+\s*$')
 _ALIASES = {'londonstockexchangegroup': 'LSEG'}
 # Email and web domains whose label does not spell the firm.
@@ -170,7 +176,7 @@ def _display(name):
     if letters and all(c.isupper() for c in letters) and len(letters) > 5:
         name = ' '.join(word if len(word) <= 3 and '.' not in word else word.title() for word in name.split())
     # Two-column extraction runs the next sentence on: "Ares Management. Interests ..."
-    name = re.split(r'(?<=[A-Za-z]{4})\.\s', name, maxsplit=1)[0]
+    name = re.split(r'(?:(?<=[A-Za-z]{4})|(?<=\b[A-Z]{3}))\.\s', name, maxsplit=1)[0]
     name = _DISPLAY_TAIL.sub('', name).strip(' ,.;:-&')
     return _ALIASES.get(_key(name), name)
 
@@ -190,6 +196,23 @@ def _running_lines(pages):
     return [line for line, count in seen.items() if count >= floor]
 
 
+# A full link to a document is a footnote citation ("23 Monolithic Power Systems, 2026 Corporate
+# Responsibility Report. https://www.monolithicpower.com/media/....pdf"), not the issuer's address.
+_CITED_PATH = re.compile(r'\.pdf\b|/media/|/news/|/articles?/|/(?:19|20)\d\d/', re.I)
+_OWN_PATH = re.compile(r'privacy|legal|terms|disclaimer|disclosure|contact|important-information|cookie', re.I)
+
+
+def _link_weight(match, text):
+    """1 for a bare domain or email, 0.5 for a link to some page, 0 for a cited document; own legal pages count in full."""
+    linked = match.group(0).lower().startswith('http') or text[max(0, match.start() - 3):match.start()] == '://'
+    path = re.match(r'/[^\s)\]|>]*', text[match.end():match.end() + 200])
+    if not linked or not path or len(path.group(0)) < 2:
+        return 1
+    if _OWN_PATH.search(path.group(0)):
+        return 1
+    return 0 if _CITED_PATH.search(path.group(0)) else 0.5
+
+
 def _discover_publisher(page_text):
     """Best publisher name from copyright, issuer, footer and domain evidence, or None."""
     numbers = sorted(page_text)
@@ -200,13 +223,15 @@ def _discover_publisher(page_text):
     pages = {n: _plain((page_text[n] or '').replace(_FENCE_OPEN, ' ').replace(_FENCE_CLOSE, ' ')) for n in numbers}
     focus_numbers = list(dict.fromkeys([*numbers[:2], *numbers[-3:]]))
     focus = [pages[n] for n in focus_numbers]
-    scores, names = {}, {}
+    scores, names, vendors, backed = {}, {}, set(), set()
 
     def add(raw, weight):
         name = _display(raw)
         key = _key(name)
-        if len(key) < 3 or _THIRD_PARTY.match(name) or not re.search(r'[A-Za-z]{2}', name):
+        if len(key) < 3 or _NOISE.match(name) or not re.search(r'[A-Za-z]{2}', name):
             return None
+        if _THIRD_PARTY.match(name):
+            vendors.add(key)  # a data vendor counts only when the document's own domain is theirs too
         scores[key] = scores.get(key, 0) + weight
         names.setdefault(key, name)
         return key
@@ -238,23 +263,38 @@ def _discover_publisher(page_text):
         for match in _DOMAIN_RE.finditer(text):
             label = match.group(2).lower()
             if label not in _CITATION_DOMAINS:
-                domains[label] = domains.get(label, 0) + (2 if number in focus_numbers else 1)
+                weight = _link_weight(match, text)
+                if weight:
+                    domains[label] = domains.get(label, 0) + weight * (2 if number in focus_numbers else 1)
     def initials(key):
         return ''.join(w[0] for w in re.findall(r"[A-Za-z][\w'’.&+-]*", names[key]) if w.lower() not in ('of', 'and', 'the')).lower()
 
     for label, count in domains.items():
         stems = {label.replace('-', '')} | {part for part in label.split('-') if len(part) >= 4}
-        matched = [key for key in scores if initials(key) == label] or [key for key in scores if any(len(stem) >= 4 and (stem in key or key.startswith(stem[:max(5, len(key))])) for stem in stems)]
+        matched = [key for key in scores if initials(key) == label] or [key for key in scores if any(len(stem) >= 4 and (stem in key or key.startswith(stem[:max(5, len(key))])) for stem in stems)] or [key for key in scores if len(_key(names[key].split()[0])) >= 4 and label.replace("-", "").startswith(_key(names[key].split()[0]))]
+        # The issuer's own domain recurs in every footer; a cited company's appears once or twice.
+        strength = min(2 + count, 8)
         for key in matched:
-            scores[key] += 4
+            scores[key] += strength
+            backed.add(key)
+            words = names[key].split()
+            prefix = next((' '.join(words[:n]) for n in range(1, len(words))
+                           if _key(' '.join(words[:n])) == label.replace('-', '') and {w.lower() for w in words[n:]} <= _GENERIC_TAIL), None)
+            if prefix:
+                names[key] = prefix  # "Brown Advisory Investment" spelled by brownadvisory.com is "Brown Advisory"
         if label in _DOMAIN_BRANDS:
             add(_DOMAIN_BRANDS[label], 4 + min(count, 3))
         elif not matched and count >= 2:
             stem = label.split('-')[0]
-            spelled = re.search(rf'\b{re.escape(stem)}\b', ' '.join(pages.values()), re.I)
-            spelled = spelled.group(0) if spelled and not spelled.group(0).islower() else stem.title()
-            add(spelled, 4)
+            # Spelled as the document writes it: brownadvisory -> "Brown Advisory".
+            spaced = r'\s?'.join(map(re.escape, stem))
+            spelled = next((m.group(0) for m in re.finditer(rf'\b{spaced}\b', ' '.join(pages.values()), re.I) if not m.group(0).islower()), None)
+            spelled = spelled or (stem.upper() if len(stem) <= 4 else stem.title())
+            # Only a domain repeated across pages (a running footer, author emails) carries a name alone.
+            add(spelled, min(1 + count, 8))
 
+    for key in vendors - backed:
+        scores.pop(key, None)
     if not scores:
         return None
     # A base name gathers half the weight of its own variants ("X Asset Management" over "X Asset Management UK").
