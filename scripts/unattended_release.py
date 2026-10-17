@@ -430,7 +430,7 @@ class GitHubClient:
         rows = json.loads(_command(["/opt/homebrew/bin/gh", "pr", "list", "--repo", REPO, "--state", "open", "--limit", "100", "--json", "number,headRefOid,headRefName,baseRefName,baseRefOid,author,isCrossRepository,isDraft"]))
         output = []
         for row in sorted(rows, key=lambda row: row["number"]):
-            if row["isCrossRepository"] or row["isDraft"] or row["author"]["login"] not in self.policy.authors or not any(row["headRefName"].startswith(p) for p in self.policy.branch_prefixes):
+            if row["isCrossRepository"] or row["isDraft"] or row["baseRefName"] != "main" or row["author"]["login"] not in self.policy.authors or not any(row["headRefName"].startswith(p) for p in self.policy.branch_prefixes):
                 continue
             base = row["baseRefOid"]
             comparison = self.api(f"repos/{REPO}/compare/{base}...{row['headRefOid']}")
@@ -469,6 +469,8 @@ class GitHubClient:
 
     def merge_status(self, pr_number, expected_head_sha):
         row = self.api(f"repos/{REPO}/pulls/{pr_number}")
+        if not isinstance(row.get("base"), dict) or row["base"].get("ref") != "main":
+            return MergeReceipt(False, row["head"]["sha"], "")
         if row["merged"] and row["head"]["sha"] == expected_head_sha:
             return MergeReceipt(True, expected_head_sha, row["merge_commit_sha"])
         if row["head"]["sha"] != expected_head_sha or row.get("state") == "closed":
@@ -481,16 +483,34 @@ class GitHubClient:
         row = self.api(f"repos/{REPO}/compare/{ancestor}...{main_sha}")
         return row.get("status") in ("ahead", "identical") and row.get("merge_base_commit", {}).get("sha") == ancestor
 
+    def merge_gate_enforced(self):
+        try:
+            protection = self.api(f"repos/{REPO}/branches/main/protection")
+        except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired):
+            return False
+        if not isinstance(protection, dict):
+            return False
+        checks, admins = protection.get("required_status_checks"), protection.get("enforce_admins")
+        if not isinstance(checks, dict) or not isinstance(admins, dict) or checks.get("strict") is not True or admins.get("enabled") is not True:
+            return False
+        required = checks.get("checks")
+        if not isinstance(required, list):
+            return False
+        bound = {check.get("context") for check in required if isinstance(check, dict) and type(check.get("app_id")) is int and check["app_id"] > 0}
+        return set(self.policy.required_checks).issubset(bound)
+
     def merge(self, pr_number, expected_head_sha):
         row = self.api(f"repos/{REPO}/pulls/{pr_number}")
-        if row["head"]["sha"] != expected_head_sha:
+        if row["head"]["sha"] != expected_head_sha or not isinstance(row.get("base"), dict) or row["base"].get("ref") != "main":
             return MergeReceipt(False, row["head"]["sha"], "")
         if row["merged"]:
             return MergeReceipt(True, expected_head_sha, row["merge_commit_sha"])
-        # The SHA match is an API-side compare-and-swap. Recheck every check
-        # even on recovery from a crash immediately before the merge request.
+        # SHA binds the head only. Strict protected-branch checks, including
+        # administrators, must reject a base changed after our local checks.
         pr = PullRequest(pr_number, expected_head_sha, row["head"]["ref"])
         if not _checks_green(self.checks(pr_number, expected_head_sha), pr, self.policy):
+            return MergeReceipt(False, expected_head_sha, "")
+        if not self.merge_gate_enforced():
             return MergeReceipt(False, expected_head_sha, "")
         receipt = self.api(f"repos/{REPO}/pulls/{pr_number}/merge", "--method", "PUT", "-f", f"sha={expected_head_sha}", "-f", "merge_method=merge")
         return MergeReceipt(receipt.get("merged", False), expected_head_sha, receipt.get("sha", ""))

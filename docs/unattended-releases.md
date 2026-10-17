@@ -9,9 +9,11 @@ GitHub token, SSH credentials, user config, repository hooks or project rules.
 
 ## Release sequence
 
-Every five minutes the controller resumes its durable release journal before
-considering new work. Eligible branches and authors come from the installed
-owner-controlled policy. Drafts, forks, absent or incomplete checks, cancelled
+Every five minutes the controller first reconciles the current deployed main,
+then resumes its durable release journal before considering new work. Eligible branches and authors come from the installed
+owner-controlled policy. Discovery rejects non-main targets before even updating
+a candidate branch; fresh merge and already-merged recovery reads bind both the
+expected head SHA and the main target. Drafts, forks, absent or incomplete checks, cancelled
 checks, stale heads, missing independent Sol/Luna approvals, and a production
 release still running all defer release. Every expected test shard, both
 coverage gates, cloud tests, perimeter smoke, secret scan and PR-body gate must
@@ -22,11 +24,29 @@ The controller copies the Homebrew CLI into an owner-only snapshot, verifies
 its OpenAI Developer ID signature, and binds review receipts to its SHA-256.
 Before each uncached review, a fake-credential local transport probes the same
 binary, schema and restricted model catalog and rejects advertised tools.
-The GitHub merge API receives that exact head SHA as a compare-and-swap. The
-controller waits for the main CI deployment, then reconciles both app and broker
-root control-plane bundles against the approved main SHA over the operator's
-existing SSH access. Host success requires an installed-SHA receipt from each
-host. A partial host failure retries reconciliation before another merge.
+The GitHub merge API receives that exact head SHA as a compare-and-swap for
+the head. Immediately before a new merge request, the controller verifies that
+main requires strict up-to-date status checks, enforces protection for
+administrators, and retains app-bound checks for every installed-policy required
+name. Missing, unreadable or weakened protection defers merging. The controller
+never selects an administrator bypass. When strengthening protection, retain
+all existing required check names, app IDs and other protection fields.
+[GitHub documents strict base freshness and administrator enforcement](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches).
+
+Strict protection rejects an outdated base at the server even if another actor
+merges after the controller's final local check; additional SHA reads alone
+cannot close that race. This protects the reviewed head against a stale base.
+It does not provide a deployment mutex for every other authorized merge actor.
+The controller defers its own work while observed main CI/deployment is pending.
+
+The controller waits for successful main CI and deployment, then reconciles both
+app and broker root control-plane bundles against that exact main SHA over the
+operator's existing SSH access. This runs for externally merged main changes
+even with no eligible maintenance PR. Host success requires an installed-SHA
+receipt from each host and unchanged GitHub main after both receipts. Complete
+receipts persist in the private WAL and avoid repeated SSH for unchanged main
+across restarts. A partial host failure or moving main records no new success
+and retries reconciliation before another controller merge.
 No bot-controlled directory or mutable release marker becomes root authority.
 
 P1 fixes are exported to `validation/fix/<base>/<head>` in the existing private

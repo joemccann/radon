@@ -474,7 +474,7 @@ def test_github_adapter_refuses_merge_when_remote_head_changed(monkeypatch):
 
     def api(path, *args):
         calls.append((path, args))
-        return {"head": {"sha": "e" * 40, "ref": "security/2026-10-17"}, "merged": False}
+        return {"head": {"sha": "e" * 40, "ref": "security/2026-10-17"}, "base": {"ref": "main"}, "merged": False}
 
     monkeypatch.setattr(client, "api", api)
 
@@ -493,7 +493,7 @@ def test_github_adapter_rechecks_checks_before_merge_mutation(monkeypatch, concl
     def api(path, *args):
         calls.append((path, args))
         if path.endswith("/pulls/42"):
-            return {"head": {"sha": HEAD, "ref": "security/2026-10-17"}, "merged": False}
+            return {"head": {"sha": HEAD, "ref": "security/2026-10-17"}, "base": {"ref": "main"}, "merged": False}
         if path.endswith("check-runs?per_page=100"):
             return {
                 "check_runs": [
@@ -525,7 +525,7 @@ def test_github_adapter_merge_request_uses_expected_head_compare_and_swap(monkey
     def api(path, *args):
         calls.append((path, args))
         if path.endswith("/pulls/42"):
-            return {"head": {"sha": HEAD, "ref": "security/2026-10-17"}, "merged": False}
+            return {"head": {"sha": HEAD, "ref": "security/2026-10-17"}, "base": {"ref": "main"}, "merged": False}
         if path.endswith("check-runs?per_page=100"):
             return {
                 "check_runs": [
@@ -535,6 +535,8 @@ def test_github_adapter_merge_request_uses_expected_head_compare_and_swap(monkey
             }
         if path.endswith("/status"):
             return {"statuses": []}
+        if path.endswith("/protection"):
+            return _enforced_merge_protection()
         if path.endswith("/merge"):
             return {"merged": True, "sha": MERGE}
         raise AssertionError(f"unexpected GitHub API call: {path}")
@@ -548,6 +550,8 @@ def test_github_adapter_merge_request_uses_expected_head_compare_and_swap(monkey
     assert len(merge_calls) == 1
     assert "-f" in merge_calls[0][1]
     assert f"sha={HEAD}" in merge_calls[0][1]
+    assert calls[-2][0].endswith("/protection")
+    assert not any("--admin" in args for _, args in calls)
 
 
 @pytest.mark.parametrize(
@@ -1002,3 +1006,88 @@ def test_external_main_moving_during_review_must_reconcile_before_merge():
     assert github.merge_calls == [(42, HEAD)]
     assert deploy.sync_calls == [MAIN, latest]
     assert state.control_plane.main_sha == latest
+
+
+def _enforced_merge_protection():
+    return {'required_status_checks': {'strict': True, 'checks': [{'context': name, 'app_id': 15368} for name in CHECK_NAMES]}, 'enforce_admins': {'enabled': True}}
+
+
+@pytest.mark.parametrize('broken', ['missing', 'loose', 'admin-bypass', 'no-checks', 'missing-check', 'unbound-check', 'unreadable'])
+def test_merge_requires_server_side_strict_checks_enforced_for_admins(monkeypatch, broken):
+    client = ur.GitHubClient(_policy(), reviews=object()); calls = []
+    protection = _enforced_merge_protection()
+    if broken == 'missing': protection = {}
+    elif broken == 'loose': protection['required_status_checks']['strict'] = False
+    elif broken == 'admin-bypass': protection['enforce_admins']['enabled'] = False
+    elif broken == 'no-checks': protection['required_status_checks']['checks'] = []
+    elif broken == 'missing-check': protection['required_status_checks']['checks'].pop()
+    elif broken == 'unbound-check': protection['required_status_checks']['checks'][0]['app_id'] = -1
+    def api(path, *args):
+        calls.append((path, args))
+        if path.endswith('/pulls/42'): return {'head': {'sha': HEAD, 'ref': 'security/test'}, 'base': {'ref': 'main'}, 'merged': False}
+        if path.endswith('/protection'):
+            if broken == 'unreadable': raise RuntimeError('GitHub protection unavailable')
+            return protection
+        if path.endswith('/merge'): return {'merged': True, 'sha': MERGE}
+        raise AssertionError(path)
+    monkeypatch.setattr(client, 'api', api)
+    monkeypatch.setattr(client, 'checks', lambda *a: _green_checks())
+    assert client.merge(42, HEAD) == ur.MergeReceipt(False, HEAD, '')
+    assert not any(path.endswith('/merge') for path, _ in calls)
+
+
+def test_server_stale_base_rejection_never_retries_with_admin_bypass(monkeypatch):
+    client = ur.GitHubClient(_policy(), reviews=object()); calls = []
+    def api(path, *args):
+        calls.append((path, args))
+        if path.endswith('/pulls/42'): return {'head': {'sha': HEAD, 'ref': 'security/test'}, 'base': {'ref': 'main'}, 'merged': False}
+        if path.endswith('/protection'): return _enforced_merge_protection()
+        if path.endswith('/merge'): raise RuntimeError('GitHub rejects newly stale base branch')
+        raise AssertionError(path)
+    monkeypatch.setattr(client, 'api', api)
+    monkeypatch.setattr(client, 'checks', lambda *a: _green_checks())
+    with pytest.raises(RuntimeError, match='stale base'): client.merge(42, HEAD)
+    assert [path.rsplit('/', 1)[-1] for path, _ in calls] == ['42', 'protection', 'merge']
+    assert f'sha={HEAD}' in calls[-1][1]
+
+
+def test_already_merged_recovery_is_read_only_when_protection_is_unavailable(monkeypatch):
+    client = ur.GitHubClient(_policy(), reviews=object()); calls = []
+    def api(path, *args):
+        calls.append(path)
+        assert path.endswith('/pulls/42')
+        return {'head': {'sha': HEAD}, 'base': {'ref': 'main'}, 'merged': True, 'merge_commit_sha': MERGE}
+    monkeypatch.setattr(client, 'api', api)
+    assert client.merge(42, HEAD) == ur.MergeReceipt(True, HEAD, MERGE)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('method', ['merge', 'merge_status'])
+@pytest.mark.parametrize('merged', [False, True])
+@pytest.mark.parametrize('base', [{'ref': 'release/unrelated'}, None])
+def test_fresh_merge_and_recovery_reject_retargeted_or_missing_main_base(monkeypatch, method, merged, base):
+    client = ur.GitHubClient(_policy(), reviews=object()); calls = []
+    def api(path, *args):
+        calls.append(path)
+        if path.endswith('/pulls/42'):
+            return {'head': {'sha': HEAD, 'ref': 'security/test'}, 'base': base, 'merged': merged, 'state': 'closed' if merged else 'open', 'merge_commit_sha': MERGE}
+        if path.endswith('/protection'): return _enforced_merge_protection()
+        if path.endswith('/merge'): return {'merged': True, 'sha': MERGE}
+        raise AssertionError(path)
+    monkeypatch.setattr(client, 'api', api)
+    monkeypatch.setattr(client, 'checks', lambda *a: _green_checks())
+    assert getattr(client, method)(42, HEAD) == ur.MergeReceipt(False, HEAD, '')
+    assert calls == [f'repos/{ur.REPO}/pulls/42']
+
+
+def test_candidate_discovery_never_updates_a_branch_targeting_another_base(monkeypatch):
+    client = ur.GitHubClient(_policy(), reviews=object()); mutations = []
+    row = {'number': 42, 'headRefOid': HEAD, 'headRefName': 'security/test', 'baseRefName': 'release/unrelated', 'baseRefOid': MAIN, 'author': {'login': 'radon-runner-bot'}, 'isCrossRepository': False, 'isDraft': False}
+    monkeypatch.setattr(ur, '_command', lambda *a, **kw: json.dumps([row]))
+    def api(path, *args):
+        if path.endswith('/update-branch'):
+            mutations.append(path); return {}
+        return {'files': [], 'merge_base_commit': {'sha': 'e' * 40}}
+    monkeypatch.setattr(client, 'api', api)
+    assert client.candidate_prs() == []
+    assert mutations == []
