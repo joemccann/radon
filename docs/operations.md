@@ -873,6 +873,15 @@ in a detached target-SHA worktree, journals and restores the active topology,
 and gates FastAPI `/health/lite`, Next.js HTTP, relay TCP/HTTP, and stable core
 service restart counts. IB state remains advisory.
 
+### Control-plane reconciliation
+
+Root control-plane helpers invoke inline Python in isolated mode. Bootstrap
+and sync select the app or broker artifact contract from the host role; app
+hosts do not acquire broker units, and broker hosts do not require app Node,
+polkit or sudoers artifacts. The root sync verb accepts an optional expected
+40-character main SHA, rejects a stale or unisolated candidate before bootstrap,
+and prints `installed_sha` plus `host_role` only after manifest verification.
+
 ### App image prune
 
 `pull <sha>` and the no-argument `prune` delete different tags. Both take the deploy lock without blocking and skip when they cannot, when rollback state is invalid, or when no running app container is using a managed image. A tag a running app container still references is kept.
