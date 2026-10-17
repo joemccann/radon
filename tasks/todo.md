@@ -9580,3 +9580,16 @@ CI repair: run 38968894246 / job 117203223236 timed out the PDF pagination regre
 - [ ] T3 depends_on: [T2] Complete exact-head CI, independent review and authorized deployment.
 - [ ] T4 depends_on: [T1, T3] Audit blocked document eligibility, recover infrastructure failures with checkpoints and verify live publication/health.
 Review: Preserve publication quality gates and source attribution; no local test suites. Investigate extraction errors separately from editorial holds.
+
+## Unattended release and toolchain recovery (2026-10-17)
+
+- [x] T1 depends_on: [] Sol/Luna audit current runner, privilege boundaries, held fix, current PRs and updater evidence.
+- [ ] T2 depends_on: [T1] Independent Luna review, resolve conflicts and deliver #1117/#1114 through exact-head green CI.
+- [x] T3 depends_on: [T1] Sol implements and tests root-owned isolated control-plane updates and role-correct host sync.
+- [x] T4 depends_on: [T1] Implement trusted unattended release authorization, merge/deploy reconciliation, durability and failure reporting.
+- [ ] T5 depends_on: [T1] Sol recovers DeepSec reviewer and implements staged automatic tool/app updates with rollback and health checks.
+- [ ] T6 depends_on: [T2,T3,T4,T5] Luna adversarial tests plus Sol review, full required suites, sanitized PR(s), exact-head green CI, admin merge and live receipts.
+
+Constraints: preserve the original dirty checkout; never convert app-controlled files into root authorization; no exploit details or secrets in public Git; no authenticated/trading bypass; updates must not interrupt active jobs; bootstrap privilege gaps are recorded honestly. User authorizes automating release/update work rather than requiring terminal commands on the Mini.
+
+Review checkpoint: full Python 15,762 passed/2 skipped/23 subtests passed; full Vitest 10,987 passed/21 skipped; full cloud 2,887 passed/7 skipped. Root app42/broker12 artifacts installed with unchanged service invocations and healthy app status; both hosts refuse unsafe older candidates. Actual subscription reviews through the signed immutable CLI snapshot passed for Sol and Luna. Root-updater crash recovery 48 passed; operator-refresh durability 28 passed. Existing operator updater completed exit0; Chrome hourly updater restored through its signed vendor recovery, without browser restart or quarantine override. Final Sol review found no actionable P1/P2 issue across the frozen operator modules; phase/installer focused gate 87 passed. Private P1 workflow provisioning succeeded through existing operator SSH, registered four workflows without triggering default-branch CI and preserved every existing report. Root-only commit 2c9083fa was cherry-picked as 356e515f onto concurrent main e8844235 for immutable private validation. PR delivery, actual bot inference and one-time macOS administrator bootstrap remain pending.

@@ -248,7 +248,7 @@ Violating any rail is a failed run.
    market data, or run a script capable of brokerage mutation.
 5. **Never use production credentials or data.** The clone and child
    processes receive no Radon `.env`, brokerage, database, deploy, cloud,
-   OAuth, or operator tokens. The only allowed secrets are the claude.ai
+   OAuth, or operator tokens. The only allowed secrets are the bot's claude.ai or Codex ChatGPT
    subscription session, a write-only credential for the canonical private
    security archive, and the preconfigured dead-man channel credential.
 6. **Never expose a secret.** Do not print, copy, hash into a report, or
@@ -258,8 +258,15 @@ Violating any rail is a failed run.
    paths, PoCs, sensitive topology, DeepSec exports, and unpatched details
    never enter a public issue, PR, discussion, commit message, branch,
    artifact, CI log, or repository file. Follow `SECURITY.md`.
-8. **Never auto-update security tooling.** Do not use `@latest`, run `npx
-   deepsec`, install or upgrade the package, alter the lockfile, regenerate
+8. **Never update security tooling during a scan.** Approved idle maintenance
+    may stage exact stable releases, smoke them as the bot, and promote with
+    rollback through `scripts/nightly_toolchain_update.py` under
+    `scripts/runner/toolchain-policy.json`; see `docs/nightly-toolchain-updates.md`.
+    The scoped `ensure-deepsec` preflight may stage, smoke and recover only
+    this loop's private dependency tree before source processing, under its
+    existing exclusive runner lifecycle and private maintenance gate.
+    Outside that scoped preflight, no nightly agent may use `@latest`, run
+   `npx deepsec`, install or upgrade the package, alter the lockfile, regenerate
    matchers, or accept new model terms unattended. Use only the already
    installed `.deepsec/node_modules/.bin/deepsec`. Its version is not
    pinned (operator decision 2026-09-19); record `deepsec --version` in the
@@ -272,7 +279,7 @@ Violating any rail is a failed run.
     service, resource exhaustion, credential attacks, persistence, malware,
     data destruction, history rewriting, or exploit chaining outside a
     bounded local fixture.
-11. **Never push `main` or deploy.** Human merge and production verification
+11. **Never push `main` or deploy.** Separate operator-coordinator merge and production verification
     remain mandatory. A critical or high finding stays private and unpushed
     until the operator coordinates disclosure and remediation.
 12. **Fail closed.** Missing prerequisites, ambiguous scope, dirty shared
@@ -332,8 +339,20 @@ outside the diff. `base: UNRESOLVED` or no file: compute the range as below.
 
 ### Stage 1: preflight
 
-- Record `./.deepsec/node_modules/.bin/deepsec --version` in the run-record;
-  no version pin is enforced.
+- Before any process/revalidate operation, run
+  `python3.13 scripts/nightly_toolchain_update.py ensure-deepsec --workspace .deepsec`
+  and capture its JSON privately. This narrowly authorized preflight owns only
+  the private `.deepsec` dependency tree under this loop's exclusive installed
+  runner lifecycle. It validates the bot UID, canonical workspace and state,
+  live runner ancestry, and absence of an active reviewer; it holds a separate
+  private advisory gate, stages exact locked releases, performs a real SDK
+  subscription inference, then promotes with private journal and rollback.
+  It never updates global Codex, agent CLIs, config, matchers or audit state.
+  A successful `reviewer-ready` or `reviewer-recovered` result proves the
+  actual installed reviewer passed, not merely a login-status command.
+  On failure preserve the exact pending immutable range and existing run ID,
+  record `INCOMPLETE`, and do not advance the audited SHA or start DeepSec.
+  Record observed versions and the rollback/candidate paths privately.
 - `deepsec.config.ts` must still route `ai: {mode: "local", provider:
   "local"}` and no `.deepsec/.env*` may carry a key line; otherwise
   `OPERATOR_REQUIRED` and stop before DeepSec runs.
@@ -355,14 +374,14 @@ umask 077
 RUN_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ./.deepsec/node_modules/.bin/deepsec --version >"$PRIVATE_RUN_DIR/deepsec-version.log" 2>&1
 set +e
-./.deepsec/node_modules/.bin/deepsec process --project-id radon \
+./.deepsec/node_modules/.bin/deepsec process --project-id radon --agent codex --model gpt-6.1-sol \
   --diff "$LAST_AUDITED_SHA..$HEAD_SHA" --concurrency 2 \
   --comment-out "$PRIVATE_RUN_DIR/deepsec-findings.md" \
   >"$PRIVATE_RUN_DIR/deepsec-process.log" 2>&1
 DEEPSEC_RC=$?
 set -e
 case "$DEEPSEC_RC" in 0|1) ;; *) exit "$DEEPSEC_RC" ;; esac
-./.deepsec/node_modules/.bin/deepsec revalidate --project-id radon --min-severity MEDIUM --concurrency 2 \
+./.deepsec/node_modules/.bin/deepsec revalidate --project-id radon --agent codex --model gpt-6.1-sol --min-severity MEDIUM --concurrency 2 \
   >"$PRIVATE_RUN_DIR/deepsec-revalidate.log" 2>&1
 ./.deepsec/node_modules/.bin/deepsec export --project-id radon --format json --since "$RUN_STARTED_AT" \
   --out "$PRIVATE_RUN_DIR/deepsec-current-run-findings.json" >"$PRIVATE_RUN_DIR/deepsec-export.log" 2>&1
@@ -417,12 +436,35 @@ verification and archival all completed. If the archive is not configured,
 record `OPERATOR_REQUIRED`, retain the mode-`0700` run directory, and do NOT
 advance the SHA.
 
+## Standing unattended release policy (2026-10-17)
+
+The operator has authorized the separately installed release coordinator to
+validate and release completed P1 fixes without a terminal-written marker.
+The nightly agent still cannot merge, deploy, use operator credentials, or
+publish a private finding directly to the public repository.
+
+For each complete P1-only private commit, preserve it in `held.git`, rebase
+onto the current public main when necessary, and export its immutable base/head:
+`python3.13 scripts/private_security_release.py --severity P1 --base <base-sha> --head <fixed-sha>`.
+This pushes source only to the existing private report repository using its
+existing dedicated deploy key. Never mix P0 changes into this candidate.
+The operator coordinator verifies private repository visibility, opens private
+CI validation, waits for every required exact-head check, obtains independent
+tool-free Sol and Luna reviews, and rechecks refs and checks before publication.
+It then owns the public PR, fresh public CI, SHA-bound merge, production wait,
+and root-host reconciliation. A mutable `released:` line is not its authority.
+Report `private-validation-pending` as automatic work, with no manual release
+command. A stale candidate must be rebased, re-tested and exported again by
+this loop. An incomplete test, failed review, missing authentication or failed
+private export remains INCOMPLETE; never advance the audited SHA to hide it.
+P0 remains private and requires explicit incident coordination.
+
 ## Severity and disposition
 
 | Level | Required evidence and response |
 |---|---|
 | `P0 Critical` | Unauthenticated or practical remote money movement, live credential disclosure, operator/admin auth bypass, production RCE/root, deploy takeover, destructive journal/account impact, or public sensitive account data. Archive privately, send a sanitized urgent alert, require operator coordination. Never push or disclose. |
-| `P1 High` | Production-reachable privilege escalation, IDOR/sensitive disclosure, SSRF to a valuable trust boundary, supply-chain compromise, or high-impact integrity/availability failure with credible preconditions. Private fix; no public branch or PR until operator approval. |
+| `P1 High` | Production-reachable privilege escalation, IDOR/sensitive disclosure, SSRF to a valuable trust boundary, supply-chain compromise, or high-impact integrity/availability failure with credible preconditions. Private fix; public publication only through the independent operator coordinator after private validation. |
 | `P2 Medium` | Bounded exploitable impact or meaningful defense failure with limited reach. Remediate after P0/P1; public delivery only when the completed patch and sanitized metadata disclose no exploitable detail. |
 | `P3 Low` | Limited hygiene or defense-in-depth issue with no demonstrated material exploit. Record privately; fix only when a tiny change closes a recurring root cause. |
 | `REJECTED` | False positive, stale, unreachable, duplicate, or claim without proof. Preserve the private rationale. |
@@ -491,7 +533,7 @@ Because the clone is re-cloned every night, that branch is kept in the
 private bare repository `$RADON_RUNNER_LOOP_STATE/held.git`: push it there
 (`git push "$RADON_RUNNER_LOOP_STATE/held.git" security-deepsec-private/<date>`)
 and fetch earlier held branches from there, never from or to `origin`.
-P2/P3 fixes and operator-released P0/P1 fixes go on the dated branch the
+P2/P3 fixes and explicitly coordinated P0 fixes go on the dated branch the
 deliver phase pushes.
 
 1. Re-read the current SHA and reproduce the violation with the smallest
@@ -513,11 +555,11 @@ deliver phase pushes.
    prevents recurrence of a new root-cause class.
 7. Commit locally with a sanitized message. Never include attack steps,
    secret/topology details, scanner dumps, or raw identifiers.
-8. P0/P1 work remains local/private until an operator writes a
-   `released: <finding id>` line into the private run-record. P2/P3 and
-   released P0/P1 fixes are pushed on `security-deepsec/<YYYY-MM-DD>` and
-   opened as ONE sanitized PR by the deliver phase only when the complete
-   fix is green and the public diff does not create an exploitable window.
+8. P0 remains private until explicit incident coordination. Export P1 fixes
+   to private validation under the standing policy above; never publish them
+   directly. P2/P3 fixes are pushed on `security-deepsec/<YYYY-MM-DD>` and
+   opened as ONE sanitized PR only when the complete fix is green. The
+   separately installed operator coordinator owns independent review and merge.
 
 Do not auto-remediate a dependency advisory, rotate a credential, rewrite
 Git history, alter production topology, change external policy, or deploy.
@@ -702,7 +744,7 @@ phase-completion marker while `deepsec process` or a suite is still running
 start a fresh run id while a resumable incomplete run-record for the same
 phase exists; generate work merely so the loop appears productive; run `gh
 issue comment`, `gh issue create`, or `gh issue edit`; push or open a PR for
-a P0/P1 fix the operator has not released; merge a PR; stop at one fix while
+an uncoordinated P0 fix or publish a P1 directly; merge a PR; stop at one fix while
 other verified findings stay unimplemented; print the deliver verdict while
 a check is still red or pending; run gitleaks history sweeps, Claude
 Security, or active local tests here (the security loop owns them).

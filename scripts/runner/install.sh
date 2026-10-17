@@ -23,7 +23,7 @@ GUARD_PYTHON="${RADON_RUNNER_PYTHON:-/opt/homebrew/bin/python3.13}"
 # and the gh guard run these, never the agent-writable clone's copies.
 LIB_FILES="nightly_pr_guard.py nightly_publish.py nightly_issue_prune.py nightly_green_base.py
   nightly_audit_context.py nightly_deliver.py security_claude_ladder.py claude_cli_env_drift.py
-  claude_cli_env_reviewed.txt nvidia_rate_limit.py ci/check_pr_body.py"
+  claude_cli_env_reviewed.txt nvidia_rate_limit.py ci/check_pr_body.py nightly_toolchain_update.py utils/atomic_io.py"
 
 # Root installs from $SRC, so every path it reads must be one only root or the
 # operator can change: each directory from / down to the clone owned by one of
@@ -53,7 +53,7 @@ check_source() {
   local paths=("$tree/scripts/runner") file
   for file in $LIB_FILES; do paths+=("$tree/scripts/$file"); done
   bad="$({ find "$tree" "$tree/scripts" "$tree/scripts/ci" -maxdepth 0 \( \( ! -user 0 ! -user "$uid" \) -o -perm -0020 -o -perm -0002 \) -print
-    find "${paths[@]}" \( \( ! -user 0 ! -user "$uid" \) -o -perm -0020 -o -perm -0002 -o -type l \) -print; } 2>&1 | head -n 1)"
+    find "${paths[@]}" \( \( ! -user 0 ! -user "$uid" \) -o -perm -0020 -o -perm -0002 -o -type l \) -print; } 2>&1 | sed -n '1p')"
   [[ -z "$bad" ]] || refuse "$bad"
 }
 
@@ -74,8 +74,9 @@ print_plist() {
     <string>$BOT</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/bash</string>
-        <string>$PREFIX/run_loop.sh</string>
+        <string>$GUARD_PYTHON</string>
+        <string>-I</string>
+        <string>$PREFIX/lifecycle_gate.py</string>
         <string>$loop</string>
     </array>
     <key>EnvironmentVariables</key>
@@ -188,18 +189,69 @@ write_dotenv_path() {
   fi
 }
 
+# Preserve complete installed programs and plists across kills or power loss.
+# All targets are under trusted root-owned directories; never truncate the
+# installed updater that must repair an interrupted generation on its next fire.
+atomic_replace() {
+  "$GUARD_PYTHON" -I - "$1" "$2" <<'PY_REPLACE'
+import os, sys
+source, target = sys.argv[1:]
+fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
+try:
+    os.fsync(fd)
+finally:
+    os.close(fd)
+os.replace(source, target)
+fd = os.open(os.path.dirname(target), os.O_RDONLY)
+try:
+    os.fsync(fd)
+finally:
+    os.close(fd)
+PY_REPLACE
+}
+
+atomic_install() {
+  local args=("$@") target temporary
+  target="${args[${#args[@]}-1]}"
+  temporary="$(mktemp "$(dirname "$target")/.radon-copy.XXXXXX")"
+  args[${#args[@]}-1]="$temporary"
+  if ! install "${args[@]}"; then rm -f -- "$temporary"; return 1; fi
+  atomic_replace "$temporary" "$target"
+}
+
+atomic_text() {
+  local target="$1" mode="$2" temporary
+  shift 2
+  temporary="$(mktemp "$(dirname "$target")/.radon-text.XXXXXX")"
+  if ! "$@" > "$temporary"; then rm -f -- "$temporary"; return 1; fi
+  chown root:wheel "$temporary"
+  chmod "$mode" "$temporary"
+  atomic_replace "$temporary" "$target"
+}
+
 install_runner() {
   local file
+  rm -f -- "$PREFIX/maintenance-ready.json"
   install -d -o root -g wheel -m 755 "$PREFIX" "$PREFIX/loops" "$PREFIX/hooks" "$PREFIX/lib" "$PREFIX/guard"
-  install -o root -g wheel -m 755 "$SRC/run_loop.sh" "$PREFIX/run_loop.sh"
-  print_gitconfig > "$PREFIX/gitconfig"
-  chown root:wheel "$PREFIX/gitconfig"
-  chmod 644 "$PREFIX/gitconfig"
+  atomic_install -o root -g wheel -m 755 "$SRC/run_loop.sh" "$PREFIX/run_loop.sh"
+  atomic_install -o root -g wheel -m 755 "$SRC/lifecycle_gate.py" "$PREFIX/lifecycle_gate.py"
+  atomic_install -o root -g wheel -m 755 "$SRC/update_installed.py" "$PREFIX/update_installed.py"
+  [[ -e "$PREFIX/maintenance.lock" ]] || atomic_install -o root -g wheel -m 644 /dev/null "$PREFIX/maintenance.lock"
+  atomic_install -o root -g wheel -m 644 "$SRC/toolchain-policy.json" "$PREFIX/toolchain-policy.json"
+  install -d -o root -g wheel -m 755 "$PREFIX/toolchain"
+  atomic_install -o root -g wheel -m 644 "$SRC/toolchain/package.json" "$PREFIX/toolchain/package.json"
+  atomic_install -o root -g wheel -m 644 "$SRC/toolchain/package-lock.json" "$PREFIX/toolchain/package-lock.json"
+  atomic_text "$PREFIX/gitconfig" 644 print_gitconfig
   for file in "$SRC/hooks/"*; do
-    [[ -f "$file" ]] && install -o root -g wheel -m 755 "$file" "$PREFIX/hooks/$(basename "$file")"
+    [[ -f "$file" ]] && atomic_install -o root -g wheel -m 755 "$file" "$PREFIX/hooks/$(basename "$file")"
   done
   for file in $LIB_FILES; do
-    install -o root -g wheel -m 755 "$SRC/../$file" "$PREFIX/lib/${file##*/}"
+    if [[ "$file" == utils/* ]]; then
+      install -d -o root -g wheel -m 755 "$PREFIX/lib/utils"
+      atomic_install -o root -g wheel -m 644 "$SRC/../$file" "$PREFIX/lib/$file"
+    else
+      atomic_install -o root -g wheel -m 755 "$SRC/../$file" "$PREFIX/lib/${file##*/}"
+    fi
   done
   write_dotenv_path
 }
@@ -207,24 +259,124 @@ install_runner() {
 install_loop() {
   local loop="$1" label="com.radon.runner.$1"
   local plist="/Library/LaunchDaemons/$label.plist"
-  install -o root -g wheel -m 644 "$SRC/loops/$loop.env" "$PREFIX/loops/$loop.env"
+  atomic_install -o root -g wheel -m 644 "$SRC/loops/$loop.env" "$PREFIX/loops/$loop.env"
   if [[ "$(loop_setting "$loop" GH_GUARD)" == 1 ]]; then
     install -d -o root -g wheel -m 755 "$PREFIX/guard/$loop"
-    print_guard "$loop" > "$PREFIX/guard/$loop/gh"
-    chown root:wheel "$PREFIX/guard/$loop/gh"
-    chmod 755 "$PREFIX/guard/$loop/gh"
+    atomic_text "$PREFIX/guard/$loop/gh" 755 print_guard "$loop"
   fi
-  print_plist "$loop" > "$plist"
-  chown root:wheel "$plist"
-  chmod 644 "$plist"
+  atomic_text "$plist" 644 print_plist "$loop"
   plutil -lint "$plist" >/dev/null
   launchctl bootout "system/$label" 2>/dev/null || true
   launchctl bootstrap system "$plist"
   echo "installed $label"
 }
 
+refuse_active_install() {
+  local loop output
+  for loop in documentation ci-performance performance testing reliability security security-deepsec; do
+    if output="$(launchctl print "system/com.radon.runner.$loop" 2>/dev/null)"; then
+      if ! grep -qE '^[[:space:]]*state = not running[[:space:]]*$' <<< "$output"; then
+        echo "maintenance deferred: $loop is active or unverifiable" >&2
+        return 75
+      fi
+    fi
+  done
+  if output="$(launchctl print system/com.radon.runner-native-update 2>/dev/null)"; then
+    if ! grep -qE '^[[:space:]]*state = not running[[:space:]]*$' <<< "$output"; then
+      echo "maintenance deferred: native CLI update is active or unverifiable" >&2
+      return 75
+    fi
+  fi
+}
+
+print_native_update_plist() {
+  cat <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.radon.runner-native-update</string>
+<key>UserName</key><string>$BOT</string>
+<key>EnvironmentVariables</key><dict><key>HOME</key><string>$BOT_HOME</string><key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin</string></dict>
+<key>ProgramArguments</key><array><string>$GUARD_PYTHON</string><string>-I</string><string>$PREFIX/lib/nightly_toolchain_update.py</string><string>native</string><string>--policy</string><string>$PREFIX/toolchain-policy.json</string><string>--package-dir</string><string>$PREFIX/toolchain</string><string>--release-root</string><string>$BOT_HOME/radon-runner/toolchain</string></array>
+<key>StartInterval</key><integer>3600</integer>
+<key>ProcessType</key><string>Background</string>
+<key>StandardOutPath</key><string>$BOT_HOME/radon-runner/native-update.log</string>
+<key>StandardErrorPath</key><string>$BOT_HOME/radon-runner/native-update.log</string>
+</dict></plist>
+EOF
+}
+
+install_native_update_service() {
+  local label=com.radon.runner-native-update plist=/Library/LaunchDaemons/com.radon.runner-native-update.plist
+  atomic_text "$plist" 644 print_native_update_plist
+  plutil -lint "$plist" >/dev/null
+  if ! launchctl print "system/$label" >/dev/null 2>&1; then
+    launchctl bootstrap system "$plist"
+  fi
+}
+
+print_update_plist() {
+  cat <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.radon.runner-update</string>
+<key>UserName</key><string>root</string>
+<key>ProgramArguments</key><array><string>$GUARD_PYTHON</string><string>-I</string><string>$PREFIX/update_installed.py</string></array>
+<key>StartInterval</key><integer>21600</integer>
+<key>ProcessType</key><string>Background</string>
+<key>StandardOutPath</key><string>/var/log/radon-runner-update.log</string>
+<key>StandardErrorPath</key><string>/var/log/radon-runner-update.log</string>
+</dict></plist>
+EOF
+}
+
+install_update_service() {
+  local label=com.radon.runner-update plist=/Library/LaunchDaemons/com.radon.runner-update.plist
+  atomic_text "$plist" 644 print_update_plist
+  plutil -lint "$plist" >/dev/null
+  # Refresh must not boot out its own live launchd job before writing receipt.
+  if ! launchctl print "system/$label" >/dev/null 2>&1; then
+    launchctl bootstrap system "$plist"
+  fi
+}
+
+write_maintenance_ready() {
+  "$GUARD_PYTHON" -I - "$PREFIX" <<'PY_READY'
+import json, os, pathlib, plistlib, tempfile, subprocess
+root = pathlib.Path(__import__('sys').argv[1])
+loops = ['documentation', 'ci-performance', 'performance', 'testing', 'reliability', 'security', 'security-deepsec']
+ready = root / 'maintenance-ready.json'
+for loop in loops:
+    path = pathlib.Path('/Library/LaunchDaemons') / f'com.radon.runner.{loop}.plist'
+    if not path.is_file() or path.is_symlink() or path.stat().st_uid != 0:
+        ready.unlink(missing_ok=True)
+        raise SystemExit(0)
+    args = plistlib.loads(path.read_bytes()).get('ProgramArguments', [])
+    loaded = subprocess.run(['/bin/launchctl', 'print', f'system/com.radon.runner.{loop}'], capture_output=True, text=True)
+    if loaded.returncode or str(root / 'lifecycle_gate.py') not in loaded.stdout or str(root / 'lifecycle_gate.py') not in args:
+        ready.unlink(missing_ok=True)
+        raise SystemExit(0)
+fd, temporary = tempfile.mkstemp(dir=root, prefix='.maintenance-ready-')
+with os.fdopen(fd, 'w') as stream:
+    json.dump({'version': 1, 'loops': loops}, stream)
+    stream.flush()
+    os.fsync(stream.fileno())
+os.chmod(temporary, 0o644)
+os.replace(temporary, ready)
+PY_READY
+}
+
 main() {
   [[ $# -gt 0 ]] || { echo "usage: $0 <loop>... | --print-plist <loop> | --print-guard <loop> | --print-gitconfig | --write-dotenv-path" >&2; exit 64; }
+  if [[ "$1" == "--print-native-update-plist" ]]; then
+    print_native_update_plist
+    return 0
+  fi
+  if [[ "$1" == "--print-update-plist" ]]; then
+    print_update_plist
+    return 0
+  fi
   if [[ "$1" == "--print-plist" ]]; then
     print_plist "${2:?loop}"
     return 0
@@ -247,10 +399,14 @@ main() {
   for loop in "$@"; do
     [[ -f "$SRC/loops/$loop.env" ]] || { echo "no scripts/runner/loops/$loop.env" >&2; exit 64; }
   done
+  refuse_active_install
   ensure_user
   configure_user
   install_runner
   for loop in "$@"; do install_loop "$loop"; done
+  write_maintenance_ready
+  install_update_service
+  install_native_update_service
 }
 
 main "$@"

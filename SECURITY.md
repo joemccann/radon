@@ -27,3 +27,11 @@ agent scratch directories.
 ## Supported versions
 
 Only the `main` branch as deployed to `app.radon.run`.
+
+## Internal maintenance releases
+
+The nightly account cannot merge or deploy. Completed P1 fixes may use the
+operator's [standing unattended release policy](docs/unattended-releases.md):
+private CI, independent Sol/Luna review, immutable source publication, fresh
+public CI, SHA-bound merge and verified deployment. This is not permission to
+publish a raw report or exploit. P0 requires explicit incident coordination.

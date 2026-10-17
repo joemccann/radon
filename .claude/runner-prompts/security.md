@@ -331,9 +331,10 @@ Violating any rail is a failed run.
     bombs, credential attacks, persistence, malware, data destruction,
     ransomware simulation, history rewriting, or exploit chaining outside a
     bounded local fixture.
-11. **Never push `main` or deploy.** Human merge and production verification
-    remain mandatory. A critical or high finding stays private and unpushed
-    until the operator coordinates disclosure and remediation.
+11. **Never push `main`, merge or deploy as the nightly bot.** The separate
+    operator coordinator may use its standing P1 release policy after private
+    validation. P0 stays private pending explicit incident coordination.
+    Production verification remains mandatory.
 12. **Fail closed.** Missing prerequisites, ambiguous scope, dirty shared
     state, unexpected network access, a scanner requesting broader
     permissions, or unverifiable external state is `OPERATOR_REQUIRED` or
@@ -656,6 +657,29 @@ cause; (13) real-money business logic through local fakes only; (14) AI prompt
 injection/retrieved untrusted content/agent-tool permissions/MCP boundaries/
 mutation confirmation/sensitive-context disclosure.
 
+## Standing unattended release policy (2026-10-17)
+
+The operator has authorized the separately installed release coordinator to
+validate and release completed P1 fixes without a terminal-written marker.
+The nightly agent still cannot merge, deploy, use operator credentials, or
+publish a private finding directly to the public repository.
+
+For each complete P1-only private commit, preserve it in `held.git`, rebase
+onto the current public main when necessary, and export its immutable base/head:
+`python3.13 scripts/private_security_release.py --severity P1 --base <base-sha> --head <fixed-sha>`.
+This pushes source only to the existing private report repository using its
+existing dedicated deploy key. Never mix P0 changes into this candidate.
+The operator coordinator verifies private repository visibility, opens private
+CI validation, waits for every required exact-head check, obtains independent
+tool-free Sol and Luna reviews, and rechecks refs and checks before publication.
+It then owns the public PR, fresh public CI, SHA-bound merge, production wait,
+and root-host reconciliation. A mutable `released:` line is not its authority.
+Report `private-validation-pending` as automatic work, with no manual release
+command. A stale candidate must be rebased, re-tested and exported again by
+this loop. An incomplete test, failed review, missing authentication or failed
+private export remains INCOMPLETE; never advance the audited SHA to hide it.
+P0 remains private and requires explicit incident coordination.
+
 ## Severity and disposition
 
 Severity follows demonstrated Radon impact and exploitability, not scanner
@@ -664,7 +688,7 @@ labels:
 | Level | Required evidence and response |
 |---|---|
 | `P0 Critical` | Unauthenticated or practical remote money movement, live credential disclosure, operator/admin auth bypass, production RCE/root, deploy takeover, destructive journal/account impact, or public sensitive account data. Stop normal work, archive privately, send a sanitized urgent alert, and require operator coordination. Never push or disclose. |
-| `P1 High` | Production-reachable privilege escalation, IDOR/sensitive disclosure, SSRF to a valuable trust boundary, supply-chain compromise, or high-impact integrity/availability failure with credible preconditions. Prioritize a private fix; no public branch or PR until operator approval. |
+| `P1 High` | Production-reachable privilege escalation, IDOR/sensitive disclosure, SSRF to a valuable trust boundary, supply-chain compromise, or high-impact integrity/availability failure with credible preconditions. Prioritize a private fix; public publication only through the independent operator coordinator after private validation. |
 | `P2 Medium` | Bounded exploitable impact, meaningful defense failure with limited reach, or a realistic chain component requiring nontrivial access. Remediate after P0/P1; public delivery only when the completed patch and sanitized metadata disclose no exploitable detail. |
 | `P3 Low` | Limited hygiene or defense-in-depth issue with no demonstrated material exploit. Record privately; do not create nightly churn unless a tiny fix closes a recurring root cause. |
 | `REJECTED` | False positive, stale, unreachable, duplicate, accepted external-only state, or claim without proof. Preserve the private rationale so it is not repeatedly resurrected. |
@@ -699,7 +723,7 @@ is re-cloned every night, that branch is kept in the private bare repository
 `$RADON_RUNNER_LOOP_STATE/held.git`: push it there
 (`git push "$RADON_RUNNER_LOOP_STATE/held.git" security-private/<date>`) and
 fetch earlier held branches from there, never from or to `origin`. P2/P3
-fixes and operator-released P0/P1 fixes go on the dated branch the deliver
+fixes and explicitly coordinated P0 fixes go on the dated branch the deliver
 phase pushes.
 
 1. Re-read the current SHA and reproduce the violation with the smallest
@@ -721,13 +745,12 @@ phase pushes.
    a dated audit page, or generic advice.
 7. Commit locally with a sanitized message. Never include attack steps,
    secret/topology details, scanner dumps, or raw identifiers.
-8. P0/P1 work remains local/private until an operator coordinates a private
-   advisory, deployment, and disclosure (a `released: <finding id>` line in
-   the private run-record is that release). P2/P3 fixes, and released P0/P1
-   fixes, are pushed on `security/<YYYY-MM-DD>` and opened as ONE sanitized
-   PR by the deliver phase only when the complete fix is green and the public
-   diff itself does not create an exploitable window. Human merge is
-   mandatory. The PR is written via §Pull request output.
+8. P0 remains private until explicit incident coordination. Export a completed
+   P1 to private validation under the standing policy above; never push it to
+   origin yourself. P2/P3 fixes are pushed on `security/<YYYY-MM-DD>` and
+   opened as ONE sanitized PR only when the complete fix is green. The
+   separately installed operator coordinator owns independent review and merge.
+   The PR is written via §Pull request output.
 
 Do not auto-remediate a dependency advisory, rotate a credential, rewrite Git
 history, alter production topology, change external policy, or deploy. State
@@ -744,10 +767,10 @@ The runner caps this phase at 3h (`PHASES` in
 
 Security rails for this phase, in addition to every hard rail above:
 
-- Push and open a PR ONLY for P2/P3 fixes and for P0/P1 fixes the operator
-  has explicitly released: a `released: <private finding id>` line the
-  operator wrote into the private `run-record.md`. An unreleased P0/P1 fix
-  stays on a private branch in `$RADON_RUNNER_LOOP_STATE/held.git`, is never
+- Push and open a public PR ONLY for P2/P3 fixes or explicitly coordinated
+  P0 releases. Export P1 fixes privately under the standing policy; only the
+  operator coordinator may publish them. An unvalidated private fix
+  stays in `$RADON_RUNNER_LOOP_STATE/held.git`, is never
   pushed to origin, and is named in the run-record only. The public PR, commits, branch name, and the dead-man
   comment carry no vulnerability detail (rail 7): never a route, file,
   attack path, exploit, secret, or account.
@@ -973,7 +996,7 @@ a completed one); start a fresh run id while a resumable incomplete
 run-record for the same phase exists; generate work merely so the nightly
 loop appears productive; run `gh issue comment`, `gh issue create`, or
 `gh issue edit` (the runner posts the only public issue comment); push or
-open a PR for a P0/P1 fix the operator has not released; merge a PR; stop at
+open a PR for an uncoordinated P0 fix or publish a P1 directly; merge a PR; stop at
 one fix while other verified findings stay unimplemented; print the deliver
 verdict while a check is still red or pending.
 
