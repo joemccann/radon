@@ -67,6 +67,12 @@ CI failure tails and independent model concerns are redacted and remain private.
 A released result requires the controller's persisted green release and verified
 app/broker receipts; a merged PR alone cannot produce it.
 
+A candidate with more than one commit ahead of its recorded base is terminally
+rejected as `private-review-invalid`, using the existing feedback schema. The
+bounded diagnostic tells the repair bot to reduce the change to one independently
+tested commit and export the new head. No private diff is fetched or published;
+later ticks retain the rejection and retry only immutable feedback delivery.
+
 The bot polls with `scripts/private_security_release.py --status --base <sha>
 --head <sha>` using its existing private-report deploy key. The reader checks
 ref identity, orphan parentlessness, fixed path/mode, schema, source SHAs and
