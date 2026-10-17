@@ -9,6 +9,7 @@ journal_rehydrate.
 from __future__ import annotations
 
 import os
+import re
 import xml.etree.ElementTree as ET
 from typing import Any, Dict
 
@@ -22,9 +23,26 @@ TRADES = "trades"
 # beside it. R-359.
 _ACCOUNT_ENV = "IB_FLEX_ACCOUNT_ID"
 
+# xml.etree.ElementTree expands internal entities, and statement text reaches
+# here from --file, --inbox and the sFTP delivery, so a nested internal DTD
+# inflates in memory inside the ingest process. A Flex statement never carries
+# a document type declaration, so refusing one outright closes the expansion
+# without a new dependency and without a parser subclass.
+_DOCTYPE = re.compile(r"<!DOCTYPE", re.IGNORECASE)
+
 
 class FlexClassifyError(ValueError):
     """Statement does not uniquely match 1442520 or 1422766."""
+
+
+def _parse(xml_text: str) -> ET.Element:
+    """The one place statement text becomes a tree."""
+    if _DOCTYPE.search(xml_text):
+        raise FlexClassifyError("doctype_rejected")
+    try:
+        return ET.fromstring(xml_text)
+    except ET.ParseError as exc:
+        raise FlexClassifyError(f"unreadable_xml:{exc}") from exc
 
 
 def statement_metadata(xml_text: str) -> Dict[str, Any]:
@@ -33,10 +51,7 @@ def statement_metadata(xml_text: str) -> Dict[str, Any]:
     `0059_flex_deliveries.sql` reserves `period_from`/`period_to` for exactly
     this; nothing populated or consulted them until R-326/R-359.
     """
-    try:
-        root = ET.fromstring(xml_text)
-    except ET.ParseError as exc:
-        raise FlexClassifyError(f"unreadable_xml:{exc}") from exc
+    root = _parse(xml_text)
     statement = root.find(".//FlexStatement")
     if statement is None:
         return {"account_id": None, "period_from": None, "period_to": None}
@@ -48,10 +63,7 @@ def statement_metadata(xml_text: str) -> Dict[str, Any]:
 
 
 def classify_flex_xml(xml_text: str) -> str:
-    try:
-        root = ET.fromstring(xml_text)
-    except ET.ParseError as exc:
-        raise FlexClassifyError(f"unreadable_xml:{exc}") from exc
+    root = _parse(xml_text)
 
     configured = (os.environ.get(_ACCOUNT_ENV) or "").strip()
     if configured:

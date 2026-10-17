@@ -130,7 +130,12 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.sha }}
-          GH_TOKEN: ${{ github.token }}
+          # Only on push. This step runs path_filter.py out of the checked-out
+          # PR revision, and gate_base calls the Actions API only on push; on
+          # pull_request it reads BASE_SHA above. Handing the token to
+          # PR-controlled code on the one event that never uses it is free to
+          # stop doing.
+          GH_TOKEN: ${{ github.event_name == 'push' && github.token || '' }}
         run: python3 scripts/ci/path_filter.py
 
   app-images:

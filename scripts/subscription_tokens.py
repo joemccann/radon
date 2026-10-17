@@ -67,7 +67,8 @@ LOCK_PATH = SIDECAR_PATH.parent / "run.lock"
 # RandomizedDelaySec, or a token can expire between two fires: on 2026-10-15
 # the 13:30Z run saw 30min left (> the old 600s skew), skipped the refresh, and
 # the 14:00Z fire landed at 14:00:37Z, 31s after expiry, so a research call at
-# 14:00:16Z took a 401. 40min guarantees every token is refreshed a run early.
+# 14:00:16Z took a 401. Raw-bearer providers must refresh a run early; native
+# consumers use their vendor renewal margin instead (see Provider below).
 EXPIRY_SKEW_SECONDS = 2400
 HTTP_TIMEOUT_SECONDS = 20
 HTTP_RETRIES = 2
@@ -366,16 +367,10 @@ def _codex_apply(doc, resp, now):
 #
 # ~/.gemini/antigravity-cli is Google's fixed on-disk location for the
 # Antigravity CLI. `agy` keeps its Google OAuth grant in a nested `token` object with an
-# RFC 3339 `expiry` at nanosecond precision. `agy models` is a cheap
-# authenticated call that refreshes the file in place, so it is the CLI-native
-# refresh; the token endpoint is the fallback when `agy` is not on PATH.
-
-# Public OAuth client id observed in the Antigravity CLI's own login URL.
-# A public id does not imply secretless refresh: AGY 1.4.0's early HTTP
-# fallback requires client_secret; see docs/subscription-tokens.md.
-ANTIGRAVITY_CLIENT_ID = (
-    "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
-)
+# RFC 3339 `expiry` at nanosecond precision. `agy models` is an authenticated
+# native call. AGY alone consumes and renews this grant (including on real
+# requests); Radon must not impose a raw-bearer refresh lead or construct an
+# unsupported Google token request. See docs/subscription-tokens.md.
 
 
 def _antigravity_tokens(doc) -> Mapping[str, Any]:
@@ -444,6 +439,8 @@ class Provider:
     login_args: Optional[tuple] = None
     login_hosts: tuple = ()
     login_needs_code: bool = False
+    # Authentication and renewal belong to the native CLI, not a raw bearer consumer.
+    native_auth_margin_seconds: Optional[int] = None
     # Returns a message when the doc is a shape this adapter refuses to refresh
     # in place; the provider then reports needs_reauth instead of half-healing.
     read_blocker: Callable[[Mapping[str, Any]], Optional[str]] = _no_blocker
@@ -563,7 +560,7 @@ PROVIDERS: dict[str, Provider] = {
         default_subdir=".gemini/antigravity-cli",
         filename="antigravity-oauth-token",
         # Google's published OAuth 2.0 token endpoint.
-        token_url="https://oauth2.googleapis.com/token",
+        token_url=None,  # Personal subscription authentication is native-CLI owned.
         read_expiry=_antigravity_expiry,
         read_refresh=_antigravity_refresh,
         read_issuer=_no_issuer,
@@ -577,7 +574,7 @@ PROVIDERS: dict[str, Provider] = {
             "authentication required",  # `agy -p`
             "authentication failed",
         ),
-        client_id=ANTIGRAVITY_CLIENT_ID,
+        native_auth_margin_seconds=300,  # Vendor-native renewal starts five minutes early.
         reauth_command="ssh -t radon@radon-app '~/.local/bin/agy -p ok' then open the printed URL and paste the code within 60s, see docs/subscription-tokens.md",
     ),
 }
@@ -1086,7 +1083,10 @@ class _Run:
                 or prior.get("last_refresh_at"),
                 "consecutive_error_count": errors,
                 "last_error": result.last_error,
-                "last_probe_at": result.last_probe_at or prior.get("last_probe_at"),
+                "last_probe_at": result.last_probe_at or (
+                    None if PROVIDERS[result.provider].native_auth_margin_seconds is not None
+                    and self.mode in {"seal", "restore"} else prior.get("last_probe_at")
+                ),
                 "unproven_since": _unproven_since(result, prior, self.now),
             }
         self.sidecar["updated_at"] = self.now.isoformat()
@@ -1368,6 +1368,69 @@ def _keepalive(
     return result
 
 
+def _evaluate_native(
+    run: _Run, provider: Provider, path: Path, raw: str, doc: Mapping[str, Any], restored: bool
+) -> ProviderResult:
+    """Prove the native consumer, then inspect and seal its actual credential."""
+    expiry = provider.read_expiry(doc)
+    expires_at = expiry.isoformat() if expiry else None
+    margin = timedelta(seconds=provider.native_auth_margin_seconds or 0)
+    if not run.rt.which(provider.cli_binary):
+        return ProviderResult(provider.name, ERROR, expires_at=expires_at, last_error="native CLI unavailable")
+    if run.mode == "check":
+        # Observation only: a stale success or a newer unproven file cannot
+        # override a failed native invocation. Never probe or seal here.
+        prior = run.sidecar["providers"].get(provider.name, {})
+        proven = _parse_rfc3339(prior.get("last_probe_at"))
+        now = run.rt.now()
+        usable = (
+            expiry is not None and expiry > now + margin
+            and prior.get("state") in HEALTHY_STATES
+            and proven is not None and timedelta(0) <= now - proven < KEEPALIVE_INTERVAL
+            and prior.get("expires_at") == expires_at
+            and run.rt.vault.get(provider.name) == raw
+        )
+        return ProviderResult(
+            provider.name, LIVE if usable else EXPIRING, expires_at=expires_at,
+            last_error=None if usable else "native login needs an authenticated probe",
+        )
+
+    seal_error = _seal_guarded(run, provider, raw, doc)
+    if seal_error:
+        return ProviderResult(provider.name, ERROR, expires_at=expires_at, last_error=seal_error)
+    outcome = run.probe(provider)
+    new_raw, new_doc = _read_doc(path)
+    # Reread/reseal even when the call failed after rotating its grant. Never
+    # replay the old refresh token or manufacture an expiry on its behalf.
+    new_expiry = provider.read_expiry(new_doc or {})
+    tokens = _antigravity_tokens(new_doc or {})
+    has_access = isinstance(tokens.get("access_token"), str) and bool(tokens["access_token"])
+    if new_raw is not None and new_doc is not None and new_expiry is not None and has_access:
+        seal_error = _seal_guarded(run, provider, new_raw, new_doc)
+    now = run.rt.now()
+    expires_at = new_expiry.isoformat() if new_expiry else None
+    if seal_error:
+        return ProviderResult(provider.name, ERROR, expires_at=expires_at, last_error=seal_error)
+    if outcome == PROBE_AUTH_FAILED:
+        return ProviderResult(provider.name, NEEDS_REAUTH, expires_at=expires_at, last_error="native CLI rejected the login")
+    if outcome != PROBE_OK:
+        return ProviderResult(provider.name, ERROR, expires_at=expires_at, last_error="native authenticated probe unavailable or inconclusive", probe_inconclusive=True)
+    if new_doc is None or new_raw is None or new_expiry is None:
+        return ProviderResult(provider.name, ERROR, expires_at=expires_at, last_error="native credential missing or malformed after probe")
+    if not has_access:
+        return ProviderResult(provider.name, ERROR, expires_at=expires_at, last_error="native credential has no access token")
+    if not provider.read_refresh(new_doc):
+        return ProviderResult(provider.name, NEEDS_REAUTH, expires_at=expires_at, last_error="no refresh token in native credential")
+    if new_expiry <= now + margin:
+        return ProviderResult(provider.name, ERROR, expires_at=expires_at, last_error="native credential did not clear its renewal window after authenticated probe")
+    advanced = expiry is None or new_expiry > expiry
+    return ProviderResult(
+        provider.name, REFRESHED if advanced else RESTORED if restored else LIVE,
+        expires_at=expires_at, last_refresh_at=now.isoformat() if advanced else None,
+        last_probe_at=now.isoformat(),
+    )
+
+
 def _evaluate(run: _Run, provider: Provider) -> ProviderResult:
     rt = run.rt
     path = provider.path(rt.env)
@@ -1404,6 +1467,9 @@ def _evaluate(run: _Run, provider: Provider) -> ProviderResult:
                 provider.name, ERROR, last_error="vault copy is unparsable"
             )
         restored = True
+
+    if provider.native_auth_margin_seconds is not None:
+        return _evaluate_native(run, provider, path, raw, doc, restored)
 
     expiry = provider.read_expiry(doc)
     expires_at = expiry.isoformat() if expiry else None

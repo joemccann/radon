@@ -38,6 +38,16 @@
             wrap json
             fields {
                 request>uri regexp "^(/api/webhooks/tradingview/).*$" "${1}REDACTED"
+                # Caddy masks Authorization, Cookie, Set-Cookie and
+                # Proxy-Authorization by default, but not a custom header.
+                # scripts/api/auth.py authenticates machine callers with
+                # X-API-Key and the demo frontend with X-Radon-Service-Token,
+                # and handle_path /api/ib/* forwards straight to FastAPI, so
+                # an unfiltered log recorded a long-lived shared credential on
+                # every machine call. Drop both fields outright: nothing reads
+                # them from the log.
+                request>headers>X-Api-Key delete
+                request>headers>X-Radon-Service-Token delete
             }
         }
     }

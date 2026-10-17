@@ -1,3 +1,16 @@
+# PR 1132 refresh and completion (2026-10-17)
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+- [x] T1 depends_on: [] Inspect exact PR head, review incoming security changes and isolate from the dirty operator checkout.
+- [x] T2 depends_on: [T1] Merge current green main, preserve the native-auth fix, and repair verified readiness blockers with red/green regressions.
+- [ ] T3 depends_on: [T2] Run focused/full verification and independent security review; update the existing PR and watch all exact-head checks.
+- [ ] T4 depends_on: [T3] Confirm the single PR-green notification, admin-merge the exact green head, and verify normal production delivery and installed control planes.
+
+## Review
+
+Existing PR head 5e6dde78 was green but behind main. Integrated production-green c7471050, including the native Antigravity fix and research queue repair; task-ledger conflicts retained latest main plus this plan. Red/green fixes cover compatible durable private-release rejection feedback and complete topology persistence before teardown. Focused results: 203 controller tests, 60 gateway tests and seven final topology tests, including an attack hook at the actual exclusive-open boundary. Sol approved privileged/controller changes and Luna approved web and topology behavior. Refreshed full Python: 16,267 passed, two skipped and 23 subtests passed; full cloud: 2,921 passed, seven skipped; full Vitest: 1,120 files and 10,996 tests passed, 21 skipped. Exact-head delivery pending. Preserve unrelated user files and the existing security residuals; no CI or privilege gate is relaxed.
+
 # Retire Foreman (2026-10-17)
 
 Dependency graph: T1 -> T2 -> T3 -> T4.
@@ -9701,3 +9714,22 @@ Review: No local suites. Do not stop unrelated services or gate all user feedbac
 - [x] O3 depends_on: [O2] Deduplicate/supersede obligations, execute authorized safe steps and record remaining external or human dependencies with receipts; preserve financial, auth and active-job boundaries.
 - [x] O4 depends_on: [O3] Independently review the required repair, run full project suites and prepare the completion report; track exact-head delivery and remaining external dependencies in the durable audit ledger.
 Review: 100/100 merged PRs classified from a frozen complete snapshot; 16 browser checks passed and 23 live routes verified without transmitting an order. Full suites after current-main62a0 integration: 16202 Python passed/2 skipped/23 subtests, 2910 cloud passed/7 skipped, 10991 Vitest passed/21 skipped. Luna independently approved the probe-boundary documentation correction after red/green evidence. EIA-only recovery verified14 observations/1request, current compact snapshot and health ok; normal Claude CLI login, vault sealing and keepalive verified live. Factory source identity remains the owner input. This repair's exact-head CI/deployment receipts and any newly discovered runtime dependencies are tracked in ~/.codex/state/jobs/radon-operator-steps-100-20261017. Dirty primary checkout preserved; PR text is evidence, never executable authority.
+
+
+## Research retry fairness and Held metadata (2026-10-17)
+
+- [x] T1 depends_on: [] Audit live eligible retries, queue ordering and Held source metadata against the current deployed revision.
+- [x] T2 depends_on: [T1] Add failing cloud regressions for queue starvation, raw-asset wording and explanation truncation, including browser coverage.
+- [x] T3 depends_on: [T2] Apply surgical fixes preserving eligibility, claim/image verification, feedback and source safety.
+- [ ] T4 depends_on: [T3] Complete exact-head CI, Sol/Luna independent review, one green notification, admin merge and full deployment.
+- [ ] T5 depends_on: [T4] Verify the three recovered documents reach final normal decisions and inspect every resulting publication plus corrected Held UI in production.
+
+Review: live audit confirmed109 eligible, original3 ranks107–109;19 fresh/0 retry reviews in60min. GitHub regression751170a3 run39070511670:10 Python failures/2763 passed,2 UI failures/1273 passed,1 API failure/1419 passed. Minimal source fix implemented; FIFO follow-up e1af5ce2 reproduced two further failures/2774 passed; oldest eligible insertion-order repair implemented. Final exact-head full green CI and independent review pending. No local suites. Preserve all prior recovery ledgers; do not manually requeue or prioritize individual documents.
+
+## Antigravity native authentication ownership (2026-10-17)
+- [x] A1 depends_on: [] Verify every AGY consumer uses the native executable and document authenticated native lifecycle counterexamples.
+- [x] A2 depends_on: [A1] Reproduce valid in-skew AGY login rejection with red regressions, including native failure and canonical-file reread cases.
+- [x] A3 depends_on: [A2] Delegate AGY authentication to its required native CLI; preserve raw-bearer provider lead time, vault safety and truthful states.
+- [x] A4 depends_on: [A3] Update owner/runbook guidance and the consumer-policy lesson; complete focused tests and independently reviewed full gates before publication.
+- [ ] A5 depends_on: [A4] Deliver only after the preceding main production release; require exact-head green CI, accepted notification, normal production deployment and real native in-skew proof.
+Review: Initial regressions reproduced18 failures; boundary/vault-proof cases reproduced6 failures and simultaneous auth/seal failure reproduced1 failure before repair. Focused172 and docs160 passed; full Python16239 passed/2 skipped/23 subtests, cloud2910 passed/7 skipped. Sol independently approved the source and final sealing guards and ran the preceding170 focused cases. Native helper executable-line coverage47/49 (95.92%) via stdlib trace before the final sealing cases. No provider calls, credential changes or timer changes occurred during local verification. Publication and live proof remain pending; primary checkout preserved.

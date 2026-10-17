@@ -25,6 +25,8 @@ ROOT = '/joe mccann/current'
 MONTHS = ('January February March April May June July August September October November December').split()
 DEFAULT_LOOKBACK_DAYS = 7
 MAX_LOOKBACK_DAYS = 31
+REVIEW_RETRY_AGE_SECS = 15 * 60
+REVIEW_RETRY_EVERY_CLAIMS = 4
 
 
 def lookback_days(env=None):
@@ -117,6 +119,10 @@ class State:
           id TEXT PRIMARY KEY, work_key TEXT NOT NULL, payload TEXT NOT NULL,
           status TEXT NOT NULL DEFAULT 'pending');
         CREATE TABLE IF NOT EXISTS feedback_handled(id TEXT PRIMARY KEY, handled_at REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS review_admission(
+          singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+          non_note_claims INTEGER NOT NULL DEFAULT 0);
+        INSERT OR IGNORE INTO review_admission(singleton,non_note_claims) VALUES(1,0);
         ''')
         # Operator note carried into the next review of a re-queued document (research.feedback).
         if 'note' not in {row[1] for row in self.db.execute('PRAGMA table_info(work)')}:
@@ -232,9 +238,23 @@ class State:
                 (json.dumps({'status':'held','stage':'extraction','error':_persist_error(error)}),_persist_error(error),key,key))
 
     def ready(self, limit=20):
+        now = time.time()
+        claims = self.db.execute('SELECT non_note_claims FROM review_admission WHERE singleton=1').fetchone()[0]
+        retry_slot = claims % REVIEW_RETRY_EVERY_CLAIMS == 0
         rows = self.db.execute("""SELECT w.*,i.pdf FROM work w JOIN ingestion i ON i.work_key=w.key
             WHERE w.status='pending' AND i.status='ready' AND w.available_at<=?
-            ORDER BY w.note IS NULL,w.attempts>0,w.folder_date DESC,w.rowid DESC LIMIT ?""", (time.time(),limit))
+            ORDER BY w.note IS NULL,
+              CASE WHEN w.note IS NOT NULL THEN 0
+                   WHEN (w.attempts>0 OR w.error IS NOT NULL) AND w.available_at<=? THEN ?
+                   WHEN w.attempts=0 AND w.error IS NULL THEN ?
+                   ELSE 2 END,
+              CASE WHEN w.note IS NOT NULL THEN w.attempts>0 END,
+              CASE WHEN w.note IS NOT NULL THEN w.folder_date END DESC,
+              CASE WHEN w.note IS NOT NULL THEN w.rowid END DESC,
+              CASE WHEN w.attempts>0 OR w.error IS NOT NULL THEN w.rowid END ASC,
+              w.folder_date DESC,w.rowid DESC LIMIT ?""",
+            (now, now-REVIEW_RETRY_AGE_SECS, 0 if retry_slot else 1,
+             1 if retry_slot else 0, limit))
         return [{**dict(r), 'metadata':json.loads(r['metadata'])} for r in rows]
 
     def pending(self, limit=20):
@@ -243,7 +263,14 @@ class State:
 
     def claim(self, key):
         with self.db:
-            return bool(self.db.execute("UPDATE work SET status='processing',attempts=attempts+1 WHERE key=? AND status='pending' AND available_at<=?", (key,time.time())).rowcount)
+            updated = bool(self.db.execute("UPDATE work SET status='processing',attempts=attempts+1 WHERE key=? AND status='pending' AND available_at<=?", (key,time.time())).rowcount)
+            if updated:
+                row = self.db.execute('SELECT note FROM work WHERE key=?', (key,)).fetchone()
+                if row['note'] is None and self.db.execute("SELECT 1 FROM ingestion WHERE work_key=? AND status='ready'", (key,)).fetchone():
+                    # The claim and quota advance commit together; a failed claim never spends a slot.
+                    if self.db.execute('UPDATE review_admission SET non_note_claims=non_note_claims+1 WHERE singleton=1').rowcount != 1:
+                        raise RuntimeError('Review admission counter unavailable')
+            return updated
 
     def is_processing(self, key):
         row = self.db.execute('SELECT status FROM work WHERE key=?', (key,)).fetchone()
