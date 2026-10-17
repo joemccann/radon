@@ -15,6 +15,10 @@ import urllib.request
 
 import pytest
 
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
 
 def read_caddyfile(caddy_dir):
     return (caddy_dir / "Caddyfile").read_text()
@@ -941,4 +945,41 @@ class TestTradingViewWebhookIsNotLoggedInCleartext:
         untouched = "/api/orders/modify?id=42"
         assert re.sub(pattern, expand, untouched) == untouched, (
             "the filter must not rewrite any other route's URI"
+        )
+
+
+# scripts/api/auth.py authenticates machine callers by comparing the X-API-Key
+# header against MDW_API_KEY, and the demo frontend authenticates with
+# X-Radon-Service-Token. Caddy's json encoder masks Authorization, Cookie,
+# Set-Cookie and Proxy-Authorization by default, but not a custom header, and
+# `handle_path /api/ib/*` forwards straight to FastAPI — so every machine call
+# wrote a long-lived shared credential into /var/log/caddy/radon.log in
+# cleartext (CWE-532).
+CREDENTIAL_HEADERS = ("X-Api-Key", "X-Radon-Service-Token")
+
+
+class TestCredentialHeadersAreNotLoggedInCleartext:
+    @pytest.mark.parametrize("header", CREDENTIAL_HEADERS)
+    def test_the_access_log_drops_each_credential_header(self, caddy_dir, header):
+        block = _app_site_log_block(caddy_dir)
+        assert re.search(
+            rf"(?mi)^\s*request>headers>{re.escape(header)}\s+delete\s*$", block
+        ), (
+            f"the access log must `delete` request>headers>{header}; Caddy only "
+            "masks Authorization, Cookie, Set-Cookie and Proxy-Authorization"
+        )
+
+    def test_every_custom_credential_header_the_api_reads_is_covered(self):
+        """A new custom credential header must be added to the log filter too."""
+        auth = (REPO_ROOT / "scripts" / "api" / "auth.py").read_text(encoding="utf-8")
+        read = {
+            match.group(1)
+            for match in re.finditer(
+                r"headers\.get\(\s*[\"'](X-[A-Za-z0-9-]+)[\"']", auth
+            )
+        }
+        covered = {header.lower() for header in CREDENTIAL_HEADERS}
+        assert {name.lower() for name in read} <= covered, (
+            "scripts/api/auth.py reads a custom credential header that the "
+            f"Caddy access-log filter does not drop: {sorted(read)}"
         )
