@@ -9743,3 +9743,15 @@ Review: Initial regressions reproduced18 failures; boundary/vault-proof cases re
 - [ ] D4 depends_on: [D3] Observe next normal retries with actual safe diagnostics, finish any evidenced narrow remedy, and verify all original final decisions/publications.
 
 Review: regression-only c8ba51f8 cloud CI39073806724 model shard19fail/1369pass; propagation shard failed as expected. Minimal diagnostic-only source prepared; final exact-head CI/source reviews and production evidence pending. All three normal retries failed before a fresh SELECT checkpoint; actual terminal reason/usage absent. No local suites; no partial JSON acceptance, queue resets, priority overrides or model/auth/config changes.
+
+
+## Recovered Wilson native crop quality (2026-10-17)
+
+- [x] C1 depends_on: [] Compare exact published PNG and all published claims/metadata against sealed source pages and matched figure bounds.
+- [ ] C2 depends_on: [C1] Reproduce the generic crop-boundary mechanism in cloud regressions, then minimally retain full chart/title/axes/source without following prose.
+- [ ] C3 depends_on: [C2] Complete exact-head cloud CI, independent Sol/Luna review, accepted notification and authorized deployment after the prior main run is fully complete.
+- [ ] C4 depends_on: [C3, C5] Regenerate the exact affected publication through the existing verified path, preserve article/source/revision/outbox consistency, and inspect final PNG/source in production with Sol/Luna.
+
+- [ ] C5 depends_on: [C1] Verify and correct cited-page coverage, byline date and attribution from the complete sealed source using existing source gates.
+
+Review: published research-7d6d3955... is native generated=false, complete and readable but includes a clipped following prose line. Sealed source page3/raw raster bounds confirm _grow_text absorbs external prose. Matched published figure is f2, not pre-match f1. Page1 supports the final paragraph but is uncited; its byline date is2026-10-13, while the publication uses Dropbox fallback2026-10-14, and its We'd argue attribution needs correction. The existing user authorization covers the quality correction and regeneration; preserve source pixels/revision and canonical/outbox consistency with source/hash/gate evidence. No local suites, manual priority or recovery-ledger reruns.
