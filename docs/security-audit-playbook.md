@@ -250,6 +250,17 @@ line here whenever you ship a security fix.**
   reconnect instead of wedging that thread for the process lifetime.
   (`scripts/tests/test_hrana_keepalive_oversized_body.py`)
 
+- **Every edge handle fronting an app process declares a body cap** — Caddy is
+  the only size bound in front of Next.js: `web/middleware.ts` never reads the
+  body, and almost every route handler calls `request.json()` with no size
+  check, so whatever the edge forwards buffers whole in the single Node process
+  that also serves the live trading UI. Each `handle` in `cloud/caddy/Caddyfile`
+  that dials `127.0.0.1:3000` carries `request_body { max_size 12MB }` (12MB is
+  the largest payload any route legitimately accepts, `/api/assistant*`), and
+  `/api/ib/*`, `/mcp*` and the TradingView webhook keep their tighter caps. A
+  new edge handle without a cap is a finding, not a default.
+  (`cloud/tests/test_caddyfile.py::TestEveryNextjsHandleBoundsTheBody`)
+
 ## Triage & patch policy
 
 - Severity = verifier-revised, real-world impact for a **single-operator** app, not
