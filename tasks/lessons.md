@@ -1259,7 +1259,7 @@ When an operator asks for automated release or updater recovery, ship the durabl
 
 ### 2026-10-17: Diagnose incomplete responses from terminal evidence
 
-- A generic incomplete response does not prove max_tokens, provider outage or bad PDF data. Retain only allowlisted terminal reasons and bounded numeric usage through the existing safe error path before changing request budgets or prompts. Never retain provider content or accept partial JSON.
+- A generic incomplete response does not prove max_tokens, provider outage or bad PDF data. Retain only allowlisted terminal reasons and bounded numeric usage through the existing safe error path before changing request budgets or prompts. Never retain provider content or accept partial JSON. A bounded output increase is a mitigation, not proof of completion: preserve one-call and fail-closed behavior and verify the next normal production decision. Synthetic token metadata proves protocol handling only.
 - Existing selection artifacts may be stale: compare their timestamp with the current attempt's figure crops before asserting a fresh SELECT completed or that the artifact is absent.
 
 ### 2026-10-17: Verify source pixels and report dates after recovery
