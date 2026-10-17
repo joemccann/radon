@@ -4,6 +4,7 @@ import os
 import fcntl
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -1397,3 +1398,108 @@ def test_stop_still_works_while_held(control_env):
 
     assert result.returncode == 0, result.stderr
     assert state.read_text().strip() == "stopped"
+
+
+def _topology_fake_bin(tmp_path: Path) -> Path:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir(exist_ok=True)
+    _write_executable(
+        fake_bin / "systemctl",
+        """#!/bin/sh
+if [ "${1:-}" = list-units ]; then
+  for unit in radon-ib-gateway radon-api radon-nextjs radon-relay radon-monitor radon-newsfeed radon-health; do
+    printf '%s.service loaded active running persistent\n' "$unit"
+  done
+  printf '%s\n' 'radon-portfolio-sync.timer loaded active waiting active-timer'
+  exit 0
+fi
+if [ "${1:-}" = list-unit-files ]; then
+  printf '%s\n' 'radon-portfolio-sync.timer enabled enabled'
+  exit 0
+fi
+printf 'systemctl %s\n' "$*" >> "$RADON_OPERATOR_EVENTS"
+""",
+    )
+    _write_executable(
+        fake_bin / "gateway-control",
+        """#!/bin/sh
+printf 'gateway %s\n' "$*" >> "$RADON_OPERATOR_EVENTS"
+""",
+    )
+    return fake_bin
+
+
+def _topology_env(tmp_path: Path, fake_bin: Path, topology: Path) -> dict:
+    return {
+        **os.environ,
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "RADON_IB_GATEWAY_CONTROL": str(fake_bin / "gateway-control"),
+        "RADON_OPERATOR_EVENTS": str(tmp_path / "events.log"),
+        "RADON_TEST_EXTRA_ACTIVE_UNITS": "0",
+        "RADON_OPERATOR_TOPOLOGY_PATH": str(topology),
+        "RADON_OPERATOR_ALLOW_ROOT": "1",
+        "RADON_OPERATOR_PYTHON": sys.executable,
+        "RADON_DEPLOY_LOCK_FILE": str(tmp_path / "deploy.lock"),
+    }
+
+
+def test_topology_persistence_never_writes_through_a_substituted_temp_entry(
+    tmp_path: Path,
+):
+    """`radon stop` is a NOPASSWD root action for the unprivileged `radon`
+    account, and /var/lib/radon belongs to `radon`, so the temp entry
+    `persist_topology` creates can be unlinked and replaced with a symlink
+    before it is opened for writing. Root then truncates and overwrites an
+    attacker-chosen file.
+
+    The window is modelled by shadowing `mktemp`: it returns a name that is
+    already a symlink to an outside file, which is exactly what the attacker
+    arranges in the gap between creation and the re-resolving write.
+    """
+    fake_bin = _topology_fake_bin(tmp_path)
+    victim = tmp_path / "victim"
+    victim.write_text("root-only content\n", encoding="utf-8")
+    topology = tmp_path / "state" / "operator-topology"
+    squat = topology.parent / "squatted.tmp"
+    _write_executable(
+        fake_bin / "mktemp",
+        f"""#!/bin/sh
+mkdir -p '{topology.parent}'
+rm -f '{squat}'
+ln -s '{victim}' '{squat}'
+printf '%s\\n' '{squat}'
+""",
+    )
+
+    result = subprocess.run(
+        [str(CLOUD_ROOT / "scripts" / "operator-radon.sh"), "stop"],
+        env=_topology_env(tmp_path, fake_bin, topology),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert victim.read_text(encoding="utf-8") == "root-only content\n", (
+        "root followed the substituted temp entry and overwrote an outside file"
+        f"; stdout={result.stdout} stderr={result.stderr}"
+    )
+
+
+def test_topology_persistence_still_writes_the_private_unit_list(tmp_path: Path):
+    fake_bin = _topology_fake_bin(tmp_path)
+    topology = tmp_path / "state" / "operator-topology"
+
+    result = subprocess.run(
+        [str(CLOUD_ROOT / "scripts" / "operator-radon.sh"), "stop"],
+        env=_topology_env(tmp_path, fake_bin, topology),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert topology.is_file() and not topology.is_symlink()
+    assert stat.S_IMODE(topology.stat().st_mode) == 0o600
+    units = topology.read_text(encoding="utf-8").splitlines()
+    for unit in ("radon-api", "radon-nextjs", "radon-relay", "radon-monitor"):
+        assert f"{unit}.service" in units
