@@ -780,3 +780,19 @@ def test_changes_job_and_gh_api_lookback_are_bounded(monkeypatch) -> None:
 def test_rel108_image_changes_run_their_offline_acceptance(path, target):
     """REL-108: a web-only repair must still execute its Python fault contract."""
     assert target in select_gates([path]).contract_tests
+
+
+def test_a_non_ascii_changed_path_is_returned_verbatim(tmp_path: Path) -> None:
+    """`git diff --name-only` C-quotes a path with a non-ASCII byte, so a
+    runtime file arrived as `"scripts/\\303\\251.py"` and matched no filter —
+    the gate it should have selected was silently skipped."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    base = _commit(repo, "README.md", "seed")
+    head = _commit(repo, "scripts/é.py", "runtime change")
+
+    paths = changed_paths(base, head, cwd=repo)
+
+    assert paths == ["scripts/é.py"]
+    assert classify(paths) == classify(["scripts/ascii.py"])
