@@ -299,11 +299,13 @@ class State:
             return bool(self.db.execute("""UPDATE work SET status='pending',attempts=0,available_at=0,result=NULL,error=NULL,note=?
                 WHERE key=? AND status IN ('complete','published')""", (note, key)).rowcount)
 
-    def park(self, key, retry_at):
-        # A provider outage is not a document failure: give the attempt back and wait for the provider.
+    def park(self, key, retry_at, reason='provider_outage'):
+        # Infrastructure outages are not document failures: give the attempt back and wait.
+        if reason not in ('provider_outage', 'database_unavailable'):
+            raise ValueError('Invalid research park reason')
         with self.db:
-            self.db.execute("""UPDATE work SET status='pending',attempts=MAX(0,attempts-1),error='provider_outage',available_at=?
-                WHERE key=? AND status='processing'""", (max(time.time(), retry_at), key))
+            self.db.execute("""UPDATE work SET status='pending',attempts=MAX(0,attempts-1),error=?,available_at=?
+                WHERE key=? AND status='processing'""", (reason, max(time.time(), retry_at), key))
 
     def recover(self):
         with self.db:

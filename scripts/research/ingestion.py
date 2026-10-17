@@ -12,6 +12,7 @@ import threading
 from research.dropbox import DropboxClient, DropboxError, content_hash
 from utils.atomic_io import atomic_save
 from datetime import datetime, timezone
+from api.db_http import DbHttpError
 from research.model import PROVIDER_PARK_SECS, classify_error, is_provider_outage
 from research.state import State
 
@@ -151,7 +152,9 @@ def review_one(root, state, pipeline, publisher, publish):
         stage_health(root, 'review', 'error', error)
         if not state.is_processing(work['key']):
             return True
-        if is_provider_outage(error):
+        if isinstance(error, DbHttpError):
+            state.park(work['key'], time.time() + PROVIDER_PARK_SECS, reason='database_unavailable')
+        elif is_provider_outage(error):
             state.park(work['key'], time.time() + PROVIDER_PARK_SECS)
         elif work['attempts'] >= 5:
             state.complete(work['key'], {'status': 'held', 'error': classify_error(error)})
@@ -160,6 +163,24 @@ def review_one(root, state, pipeline, publisher, publish):
     if publish:
         flush_outbox(state, publisher)
     return True
+
+
+def _check_idle_review(root):
+    """Recheck the actual DB transport without erasing unrelated review failures."""
+    from api.db_http import hrana_execute
+    path = Path(root) / 'health-review.json'
+    previous = json.loads(path.read_text()) if path.exists() else {}
+    preserve_error = previous.get('state') == 'error' and previous.get('error') != 'DbHttpError'
+    try:
+        rows = hrana_execute('SELECT 1', timeout=2)
+        if rows != [(1,)] or type(rows[0][0]) is not int:
+            raise DbHttpError('Invalid idle review database canary')
+    except DbHttpError:
+        if preserve_error:
+            return  # A later DB recovery cannot clear a still-unresolved provider/evidence error.
+        raise
+    if not preserve_error:
+        stage_health(root, 'review', 'ok')
 
 
 def _consumer(root, stop, wake, parsed, backoff, review, publish, client_factory=None, pipeline_factory=None, extractor=None):
@@ -171,6 +192,7 @@ def _consumer(root, stop, wake, parsed, backoff, review, publish, client_factory
     state = State(Path(root) / 'state.sqlite')
     client = pipeline = None
     next_feedback = 0
+    next_idle_check = 0
     try:
         while not stop.is_set():
             try:
@@ -188,6 +210,10 @@ def _consumer(root, stop, wake, parsed, backoff, review, publish, client_factory
                             pass  # Same best-effort as apply_feedback; never requeue or publish.
                         next_feedback = time.monotonic() + FEEDBACK_POLL_SECS
                     worked = review_one(root, state, pipeline, publisher, publish)
+                    if not worked and time.monotonic() >= next_idle_check:
+                        # Advance before I/O so failed probes retain the same bounded cadence.
+                        next_idle_check = time.monotonic() + FEEDBACK_POLL_SECS
+                        _check_idle_review(root)
                     event = parsed
                 else:
                     if backoff.remaining():

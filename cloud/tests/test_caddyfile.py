@@ -63,8 +63,11 @@ class TestLogging:
         assert re.search(r"^\s*log\s*\{", content, re.MULTILINE)
 
     def test_json_format(self, caddy_dir):
+        """json stays the encoder, whether direct or wrapped by a filter."""
         content = read_caddyfile(caddy_dir)
-        assert re.search(r"^\s*format\s+json\b", content, re.MULTILINE)
+        assert re.search(
+            r"^\s*format\s+json\b|^\s*wrap\s+json\b", content, re.MULTILINE
+        )
 
 
 class TestRouting:
@@ -885,4 +888,57 @@ class TestEveryNextjsHandleBoundsTheBody:
         catch_all = handle_block(read_caddyfile(caddy_dir))
         assert declared_body_cap_bytes(catch_all) is not None, (
             "the catch-all handle forwards an unbounded request body to Next.js"
+        )
+
+
+# The webhook's authenticator travels in the request PATH, and the json access
+# log encoder records the full request URI, so an unfiltered access log writes
+# that credential to disk in cleartext on every delivery (CWE-532). Reading the
+# log already needs privilege, which is why this is hygiene rather than an
+# access grant, but it is a credential sitting in an unrotated plaintext file
+# that nothing else needs.
+TV_LOG_PREFIX = "/api/webhooks/tradingview/"
+
+
+def _app_site_log_block(caddy_dir):
+    active = strip_comments(read_caddyfile(caddy_dir))
+    start = re.search(r"(?m)^\s*log\s*\{", active)
+    assert start, "the app site must still keep an access log block"
+    return _balanced_block(active, start.start())
+
+
+class TestTradingViewWebhookIsNotLoggedInCleartext:
+    def test_the_access_log_filters_the_request_uri(self, caddy_dir):
+        block = _app_site_log_block(caddy_dir)
+        assert re.search(r"format\s+filter\b", block), (
+            "the access log must use a `filter` encoder; a bare `format json` "
+            "writes the webhook path token to /var/log/caddy/radon.log"
+        )
+        assert re.search(r"wrap\s+json\b", block), (
+            "the filter must wrap json so every other record keeps its shape"
+        )
+
+    def test_the_filter_redacts_the_webhook_path_and_nothing_else(self, caddy_dir):
+        block = _app_site_log_block(caddy_dir)
+        field = re.search(
+            r"request>uri\s+regexp\s+\"([^\"]+)\"\s+\"([^\"]+)\"", block
+        )
+        assert field, (
+            "need a `request>uri regexp <pattern> <replacement>` field filter "
+            f"covering {TV_LOG_PREFIX}"
+        )
+        pattern, replacement = field.group(1), field.group(2)
+        # Caddy applies this as a Go regexp replacement over the whole URI.
+        expand = re.sub(r"\$\{(\d+)\}", r"\\\1", replacement)
+        secret = "s3cret-path-token"
+        redacted = re.sub(pattern, expand, f"{TV_LOG_PREFIX}{secret}?tf=5")
+        assert secret not in redacted, (
+            f"the path token survives the filter: {redacted}"
+        )
+        assert redacted.startswith(TV_LOG_PREFIX), (
+            "the route must stay identifiable in the log for traffic accounting"
+        )
+        untouched = "/api/orders/modify?id=42"
+        assert re.sub(pattern, expand, untouched) == untouched, (
+            "the filter must not rewrite any other route's URI"
         )
