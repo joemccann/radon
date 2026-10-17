@@ -9572,3 +9572,11 @@ CI baseline: main run 38911508191 failed the portfolio-poll documentation contra
 Review: 10964 Vitest passed, 21 skipped (Node26 webstorage disabled for jsdom Storage prototype parity). Python baseline 15443 passed/2 skipped with one existing documentation-contract failure; repaired documentation and curation gate 158 passed. Production compile, TypeScript, component ESLint and diff checks green. Browser 4/4 desktop/mobile against next start; screenshots retained at /tmp/radon-pdf-browser-clean. PDF provenance, text-only sources, full-collection pagination, tags, hidden feedback, refresh and main-feed retention covered. Exact-head delivery receipts belong in the PR after CI and deployment.
 
 CI repair: run 38968894246 / job 117203223236 timed out the PDF pagination regression at the 5s default. Keep the full-collection and tab-reset assertions with 19 PDF items crossing the 18-item boundary, scope page controls and use the existing pagination suite's 20s case allowance. No runtime changes or retries.
+
+
+## Dropbox research publication incident (2026-10-17)
+- [x] T1 depends_on: [] Verify live database/review health with independent swarm; SELECT1 succeeds41ms and review heartbeat predates deployment.
+- [ ] T2 depends_on: [T1] Reproduce stale idle heartbeat on GitHub before minimal source repair.
+- [ ] T3 depends_on: [T2] Complete exact-head CI, independent review and authorized deployment.
+- [ ] T4 depends_on: [T1, T3] Audit blocked document eligibility, recover infrastructure failures with checkpoints and verify live publication/health.
+Review: Preserve publication quality gates and source attribution; no local test suites. Investigate extraction errors separately from editorial holds.
