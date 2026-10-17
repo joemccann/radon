@@ -438,13 +438,67 @@ for unit in "${ACTIVE_UNITS[@]}"; do
   esac
 done
 
+# `radon stop` is a NOPASSWD root action for the unprivileged `radon` account
+# and /var/lib/radon is radon-owned, so a pathname root re-resolves between
+# creating the temp entry and writing it can be swapped for a symlink: root
+# then truncates and overwrites an attacker-chosen file. Same idiom as the
+# root private-directory helper: pin every ancestor with O_NOFOLLOW, create
+# the temp entry O_EXCL|O_NOFOLLOW relative to that fd, then write, fchmod
+# and rename by fd so no name is resolved twice.
 persist_topology() {
-  local tmp
-  mkdir -p "$(dirname "$TOPOLOGY_PATH")"
-  tmp="$(mktemp "${TOPOLOGY_PATH}.tmp.XXXXXX")"
-  printf '%s\n' "$@" > "$tmp"
-  chmod 0600 "$tmp"
-  mv -f "$tmp" "$TOPOLOGY_PATH"
+  "$OPERATOR_PYTHON" -I - "$TOPOLOGY_PATH" "$@" <<'PY_PERSIST_TOPOLOGY' || exit 74
+import os, sys
+from pathlib import Path
+
+path, units = sys.argv[1], sys.argv[2:]
+parts = Path(path).parts
+if not parts or parts[0] != '/' or '..' in parts:
+    print('operator-radon: topology path must be absolute without traversal', file=sys.stderr)
+    raise SystemExit(74)
+
+dir_flags = os.O_NOFOLLOW | os.O_DIRECTORY | os.O_RDONLY
+parent_fd = None
+try:
+    parent_fd = os.open('/', dir_flags)
+    for part in parts[1:-1]:
+        try:
+            os.mkdir(part, 0o700, dir_fd=parent_fd)
+        except FileExistsError:
+            pass
+        child_fd = os.open(part, dir_flags, dir_fd=parent_fd)
+        os.close(parent_fd)
+        parent_fd = child_fd
+    name = parts[-1]
+    tmp_name = f'{name}.tmp.{os.getpid()}'
+    try:
+        os.unlink(tmp_name, dir_fd=parent_fd)
+    except FileNotFoundError:
+        pass
+    fd = os.open(
+        tmp_name,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+        0o600,
+        dir_fd=parent_fd,
+    )
+    try:
+        remaining = memoryview(''.join(f'{unit}\n' for unit in units).encode())
+        while remaining:
+            written = os.write(fd, remaining)
+            if written <= 0:
+                raise OSError('topology write made no progress')
+            remaining = remaining[written:]
+        os.fchmod(fd, 0o600)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.rename(tmp_name, name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+except OSError as error:
+    print(f'operator-radon: refusing to persist topology: {error}', file=sys.stderr)
+    raise SystemExit(74)
+finally:
+    if parent_fd is not None:
+        os.close(parent_fd)
+PY_PERSIST_TOPOLOGY
 }
 
 saved_timers() {

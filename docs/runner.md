@@ -73,7 +73,7 @@ sudo /bin/bash "$RI/scripts/runner/install.sh" documentation ci-performance perf
 /bin/rm -rf "$RI"
 ```
 
-Always clone into a fresh `mktemp -d` directory, never a fixed `/tmp` path another account could create first. `install.sh` refuses (exit 77) when the clone, or any directory above it, is owned by someone other than root or you, or is group- or world-writable.
+Always clone into a fresh `mktemp -d` directory, never a fixed `/tmp` path another account could create first. `install.sh` refuses (exit 77) when the clone, or any directory above it, is owned by someone other than root or you, or is group- or world-writable. The same bar applies to `scripts/` and to every directory a `LIB_FILES` entry lives in, derived from that list rather than written out, so a new library subdirectory is checked without anyone remembering to extend it. Paths are resolved physically (`pwd -P`) on both sides of the check, so a symlinked ancestor cannot make validation and the later reads walk different chains.
 
 It asks for your sudo password, then `User password:` for the new `_radonbot` account. Choose a password and save it (your password manager, or `security add-generic-password -s radon-runnerbot-login -a _radonbot -w`); step 5 reuses it. The `No clear text password ... FDE` warning and `Home directory is assigned (not created!)` are expected: the script creates the home right after. It ends with one `installed com.radon.runner.<loop>` line per loop.
 
