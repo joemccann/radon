@@ -1,3 +1,7 @@
+# Retired integrations are not missing operator setup (2026-10-17)
+
+- The owner confirmed Foreman is retired. Remove its intake, setup, owner map and active documentation instead of requiring a factory source or new setup. Preserve historical evidence and unrelated repositories; do not recreate the retired service during audits.
+
 # A dropped hrana ledger connection is not a statement error (2026-10-17)
 
 - `grok-page-responder-ledger-disconnect` (PR #1113) treats a `complete_page` `RemoteDisconnected: Remote end closed connection without response` as a stale Turso keep-alive after a long grok run, not a statement error. `run_cycle` used to match only `TimeoutError`. Exit 0, skip the ok heartbeat, and leave the ticket for the next cycle. After grok returns, drop the idle socket so the UPDATE is the first send on a new connection. Main `af773f0f` now also retires sockets idle for 5s or more in the Hrana pool.
