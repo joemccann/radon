@@ -2320,7 +2320,7 @@ def _heading_section(path: str, heading: str) -> str:
 
 
 class TestDocumentation20261017:
-    """DOC-203: one Flex transport line had three recovery cases."""
+    """DOC-203 and DOC-204: recovery and token-refresh contracts after b79e1f5c."""
 
     def test_flex_transport_line_has_one_current_case(self):
         section = _heading_section("docs/incident-runbook.md", "flex-pull-trade-coverage")
@@ -2330,4 +2330,20 @@ class TestDocumentation20261017:
         ingest = (_ROOT / "scripts/flex_delivery_ingest.py").read_text()
         assert '"outcome": "coverage_unread"' not in ingest
         assert "_COVERAGE_READ_ATTEMPTS = 2" in ingest
+
+    def test_subscription_refresh_lead_is_not_the_cadence_alone(self):
+        src = (_ROOT / "scripts/subscription_tokens.py").read_text()
+        match = re.search(r"^EXPIRY_SKEW_SECONDS = (\d+)$", src, re.M)
+        assert match is not None
+        assert int(match.group(1)) == 2400
+        owner = (_ROOT / "docs/subscription-tokens.md").read_text()
+        assert "2400" in owner
+        assert "40 minutes" in owner
+        cloud = (_ROOT / "docs/cloud-services.md").read_text()
+        assert "always refreshed at least once inside its life" not in cloud
+        timer = (_ROOT / "cloud/services/radon-subscription-tokens.timer").read_text()
+        assert "the cadence is half" not in timer
+        assert "EXPIRY_SKEW_SECONDS" in timer
+        research = (_ROOT / "docs/dropbox-research.md").read_text()
+        assert "EXPIRY_SKEW_SECONDS = 2400" not in research
 
