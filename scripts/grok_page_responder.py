@@ -707,13 +707,21 @@ def _heartbeat(state: str, now: datetime, *, error: Optional[dict] = None) -> No
 
 
 def _ledger_read_timeout(exc: BaseException) -> bool:
-    """True for the hrana read stall that must not fail the oneshot.
+    """True for a hrana transport blip that must not fail the oneshot.
 
-    Production string: ``TimeoutError: The read operation timed out``.
-    A statement error or missing credential still fails the unit.
+    Production strings: ``TimeoutError: The read operation timed out`` and
+    ``RemoteDisconnected: Remote end closed connection without response``.
+    hrana does not retry a ledger write after the peer drops: the UPDATE
+    may already have committed. A statement error or missing credential
+    still fails the unit.
     """
     text = str(exc)
-    return "TimeoutError" in text or "The read operation timed out" in text
+    return (
+        "TimeoutError" in text
+        or "The read operation timed out" in text
+        or "RemoteDisconnected" in text
+        or "Remote end closed connection without response" in text
+    )
 
 
 def _default_grok_runner(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -990,10 +998,12 @@ def run_cycle(
         }))
         return 0
     except HranaHttpError as exc:
-        # A 4s ledger read stall is the heartbeat timeout's sibling: the
-        # next timer is 30s away. Exit 0 so systemd does not page this
-        # poller about itself. Skip the ok heartbeat so a standing Turso
-        # outage still goes stale.
+        # A 4s ledger read stall, or a keep-alive RemoteDisconnected on
+        # the ledger write, is the heartbeat timeout's sibling: the next
+        # timer is 30s away. Exit 0 so systemd does not page this poller
+        # about itself. Skip the ok heartbeat so a standing Turso outage
+        # still goes stale. Do not send a follow-up; the completion is
+        # unconfirmed when the response was lost.
         completed = False
         if _ledger_read_timeout(exc):
             print(f"grok page ledger non-fatal: {exc}", file=sys.stderr)
