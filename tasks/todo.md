@@ -9777,7 +9777,7 @@ Independent scope review: ask_text is also used by the separate generated-chart 
 ## Native raster title boundary (2026-10-17)
 
 - [x] G1 depends_on: [] Preserve independent production visual block and exact finalf4/source provenance.
-- [ ] G2 depends_on: [G1] Cloud RED for body paragraph attachment, with genuine external title/subtitle/source preservation.
+- [x] G2 depends_on: [G1] Cloud RED for body paragraph attachment, with genuine external title/subtitle/source preservation.
 - [ ] G3 depends_on: [G2] Minimal raster-only title guard, exact-head full CI and source/image Sol/Luna review, notification and authorized merge/deploy.
 - [ ] G4 depends_on: [G3] Actual deployed native rerender, guarded same-ID correction and all resulting production/source image verification.
 
