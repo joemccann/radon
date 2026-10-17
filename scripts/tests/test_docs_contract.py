@@ -2308,3 +2308,55 @@ class TestDocumentation20261016:
         assert "keep-alive" in prose
         assert "one socket per thread" in prose
 
+
+def _heading_section(path: str, heading: str) -> str:
+    text = (_ROOT / path).read_text()
+    marker = f"## {heading}"
+    start = text.find(marker)
+    assert start != -1, f"{path} is missing {marker}"
+    rest = text[start + len(marker):]
+    nxt = rest.find("\n## ")
+    return rest if nxt == -1 else rest[:nxt]
+
+
+class TestDocumentation20261017:
+    """DOC-203..205: contracts that drifted after audited-through b79e1f5c."""
+
+    def test_flex_transport_line_has_one_current_case(self):
+        section = _heading_section("docs/incident-runbook.md", "flex-pull-trade-coverage")
+        assert "flex-pull-coverage-read-disconnect" in section
+        assert "flex-pull-coverage-unread" not in section
+        assert "flex-pull-coverage-keepalive-reset" not in section
+        ingest = (_ROOT / "scripts/flex_delivery_ingest.py").read_text()
+        assert '"outcome": "coverage_unread"' not in ingest
+        assert "_COVERAGE_READ_ATTEMPTS = 2" in ingest
+
+    def test_subscription_refresh_lead_is_not_the_cadence_alone(self):
+        src = (_ROOT / "scripts/subscription_tokens.py").read_text()
+        match = re.search(r"^EXPIRY_SKEW_SECONDS = (\d+)$", src, re.M)
+        assert match is not None
+        assert int(match.group(1)) == 2400
+        owner = (_ROOT / "docs/subscription-tokens.md").read_text()
+        assert "2400" in owner
+        assert "40 minutes" in owner
+        cloud = (_ROOT / "docs/cloud-services.md").read_text()
+        assert "always refreshed at least once inside its life" not in cloud
+        timer = (_ROOT / "cloud/services/radon-subscription-tokens.timer").read_text()
+        assert "the cadence is half" not in timer
+        assert "EXPIRY_SKEW_SECONDS" in timer
+        research = (_ROOT / "docs/dropbox-research.md").read_text()
+        assert "EXPIRY_SKEW_SECONDS = 2400" not in research
+
+    def test_tradingview_docs_follow_the_mcp_pin(self):
+        req = (_ROOT / "requirements.txt").read_text()
+        pin = re.search(r"^mcp==(\S+)$", req, re.M)
+        assert pin is not None and pin.group(1) == "1.30.0"
+        assert "mcp 1.28.1" not in req
+        for rel in (
+            "docs/tradingview-mcp-client.md",
+            "docs/tradingview-integration.md",
+        ):
+            text = (_ROOT / rel).read_text()
+            assert re.findall(r"mcp==[0-9.]+", text) == []
+            assert "requirements.txt" in text
+

@@ -76,10 +76,10 @@ huggingface-hub==1.24.0
 # Code on the laptop; nothing on the VPS imports it. pip-check was run on the
 # laptop venv, which had drifted ahead of this file's pins (to fastapi
 # 0.136.1 / starlette 1.0.0 / uvicorn 0.47.0); the pins here stay
-# fastapi==0.135.2 / uvicorn==0.42.0, and mcp 1.28.1's constraints
-# (starlette>=0.27, uvicorn>=0.31.1) are satisfied by both combos. Every new
-# wheel is pure-Python except rpds-py, which ships cp313 manylinux x86_64
-# and cp311 macOS arm64 wheels — both hosts covered.
+# fastapi==0.135.2 / uvicorn==0.42.0. The mcp pin below requires
+# starlette>=0.27 and uvicorn>=0.31.1 on Python 3.13, which both of
+# those satisfy. Every new wheel is pure-Python except rpds-py, which
+# ships cp313 manylinux x86_64 and cp311 macOS arm64 wheels — both hosts covered.
 mcp==1.30.0
 # mcp transitive pins, held explicitly so a fresh provision resolves the
 # exact versions the laptop verified for these packages.

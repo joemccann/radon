@@ -46,7 +46,11 @@ them too.
    always before it overwrites a file that parses.
    The value is the exact bytes of the credential file, so a re-seal round
    trips byte for byte and a field Radon does not model is never lost.
-3. Refreshes an expiring access token. The provider's own CLI goes first,
+3. Refreshes an expiring access token. Expiring means remaining life is at
+   most 40 minutes (`EXPIRY_SKEW_SECONDS = 2400`). That lead is longer than
+   the 30-minute timer plus its 60-second delay, so a one-hour token is
+   refreshed on the run before it can expire between fires. The 30-minute
+   cadence alone does not provide that lead. The provider's own CLI goes first,
    because the CLI is the authority on its own file format: one real model call
    makes it refresh its own file. Otherwise the refresh goes to the provider's
    token endpoint with `grant_type=refresh_token` and the provider's public
@@ -95,7 +99,7 @@ Evaluated per provider, every run.
 
 | State | Meaning | Pages |
 |---|---|---|
-| `live` | File present, parses, expiry comfortably in the future. Proven by the keepalive probe once a day where the provider's CLI is installed. | no |
+| `live` | File present, parses, expiry more than 40 minutes ahead. Proven by the keepalive probe once a day where the provider's CLI is installed. | no |
 | `refreshed` | Was expiring or expired, the refresh succeeded, the file was rewritten. | no |
 | `restored` | File missing or corrupt, the vault had a copy, it was written back and re-evaluated. | no |
 | `unbootstrapped` | No file and no vault copy. Nobody has ever logged this provider in on this host. Not an error. | no |
