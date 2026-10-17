@@ -1,9 +1,12 @@
-"""PERF-014: GET /internals/skew-history reuses one UW session per ticker.
+"""PERF-014 / PERF-015: GET /internals/skew-history UW session and overlap budgets.
 
-A cache miss used to construct a new UWClient (requests.Session, TLS) for
-the expiry-breakdown call and again for every expiry skew fetch. Two
+PERF-014: a cache miss used to construct a new UWClient (requests.Session,
+TLS) for expiry discovery and again for every expiry skew fetch. Two
 tickers x (1 breakdown + 3 expiries) was 8 sessions. One client per ticker
 covers both legs.
+
+PERF-015: NDX and SPX legs are independent. Sequential awaits kept max
+in-flight ticker work at 1; gather + to_thread raises it to 2.
 """
 from __future__ import annotations
 
@@ -28,7 +31,7 @@ class _CountingUWClient:
     inits = 0
 
     def __init__(self, *args, **kwargs):
-        type(self).inits += 1
+        _CountingUWClient.inits += 1
 
     def __enter__(self):
         return self
@@ -71,3 +74,46 @@ def test_skew_history_uses_one_uw_client_per_ticker(client):
         f"UWClient constructions {_CountingUWClient.inits} "
         "(want 2: one session per ticker, not one per expiry)"
     )
+
+
+def test_skew_history_fetches_nq_and_spx_concurrently(monkeypatch):
+    """PERF-015: NDX and SPX skew legs are independent; do not await them in series.
+
+    Sequential awaits kept max in-flight ticker work at 1. asyncio.gather
+    plus to_thread raises it to 2 without extra UW calls.
+    """
+    import threading
+    import time
+
+    from scripts.api import auth, server
+
+    lock = threading.Lock()
+    state = {"in_flight": 0, "max_in_flight": 0}
+
+    class _OverlapClient(_CountingUWClient):
+        def get_expiry_breakdown(self, ticker):
+            with lock:
+                state["in_flight"] += 1
+                state["max_in_flight"] = max(state["max_in_flight"], state["in_flight"])
+            try:
+                time.sleep(0.05)
+                return super().get_expiry_breakdown(ticker)
+            finally:
+                with lock:
+                    state["in_flight"] -= 1
+
+    _CountingUWClient.inits = 0
+    monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
+    monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
+    monkeypatch.setattr(server, "uw_available", True)
+    monkeypatch.setattr(server, "_read_internals_skew_cache", lambda path: None)
+    monkeypatch.setattr(server, "_write_cache", lambda path, payload: None)
+    monkeypatch.setattr(server, "UWClient", _OverlapClient)
+    monkeypatch.setenv("UW_TOKEN", "synthetic-test-token")
+
+    response = TestClient(server.app).get("/internals/skew-history")
+    assert response.status_code == 200, response.text
+    assert state["max_in_flight"] == 2, (
+        f"max in-flight ticker fetches {state['max_in_flight']} (want 2)"
+    )
+    assert _CountingUWClient.inits == 2

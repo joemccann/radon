@@ -1967,7 +1967,7 @@ def _needs_deeper_backfill(rows: List[dict], timeframe: str) -> bool:
     return False
 
 
-async def _resolve_expiry_candidates(
+def _resolve_expiry_candidates(
     ticker: str,
     expiry: Optional[str] = None,
     client: Optional[UWClient] = None,
@@ -2014,7 +2014,7 @@ def _compose_expiry_candidates(
     return selected + _limit_expiry_candidates(uw_only, remaining)
 
 
-async def _fetch_risk_reversal_history(
+def _fetch_risk_reversal_history_blocking(
     ticker: str,
     timeframe: str,
     delta: int,
@@ -2030,7 +2030,7 @@ async def _fetch_risk_reversal_history(
     # One Session per ticker (PERF-014): expiry discovery and every skew
     # GET used to open a fresh TLS client.
     with UWClient() as client:
-        ib_candidates, uw_candidates, expiry_source = await _resolve_expiry_candidates(
+        ib_candidates, uw_candidates, expiry_source = _resolve_expiry_candidates(
             normalized_ticker, expiry, client=client
         )
         selected_candidates = _compose_expiry_candidates(
@@ -2088,6 +2088,24 @@ async def _fetch_risk_reversal_history(
     raise HTTPException(
         status_code=502,
         detail=getattr(last_error, "args", (f"Failed to fetch skew history for {normalized_ticker}",))[0],
+    )
+
+
+async def _fetch_risk_reversal_history(
+    ticker: str,
+    timeframe: str,
+    delta: int,
+    expiry: Optional[str] = None,
+    max_expiries: int = 8,
+) -> Tuple[List[dict], List[str], str]:
+    """Run the blocking UW fan-out off the event loop (PERF-015)."""
+    return await asyncio.to_thread(
+        _fetch_risk_reversal_history_blocking,
+        ticker,
+        timeframe,
+        delta,
+        expiry,
+        max_expiries,
     )
 
 
@@ -5209,19 +5227,24 @@ async def internals_skew_history(
         return cached
 
     try:
-        nq_rows, used_nq_expiries, nq_expiry_source = await _fetch_risk_reversal_history(
-            nq_ticker,
-            normalized_timeframe,
-            nq_delta,
-            nq_expiry,
-            max_expiries=12,
-        )
-        spx_rows, used_spx_expiries, spx_expiry_source = await _fetch_risk_reversal_history(
-            spx_ticker,
-            normalized_timeframe,
-            spx_delta,
-            spx_expiry,
-            max_expiries=12,
+        (
+            (nq_rows, used_nq_expiries, nq_expiry_source),
+            (spx_rows, used_spx_expiries, spx_expiry_source),
+        ) = await asyncio.gather(
+            _fetch_risk_reversal_history(
+                nq_ticker,
+                normalized_timeframe,
+                nq_delta,
+                nq_expiry,
+                max_expiries=12,
+            ),
+            _fetch_risk_reversal_history(
+                spx_ticker,
+                normalized_timeframe,
+                spx_delta,
+                spx_expiry,
+                max_expiries=12,
+            ),
         )
     except HTTPException:
         raise
