@@ -438,6 +438,13 @@ class TestGrokPromptAndPlaybook:
         assert "## What broke" in prompt
         assert "Pickup opens the PR from this body" in prompt
 
+    def test_prompt_forbids_real_broker_identifiers(self):
+        """2026-10-16: two fix branches put a real IB account id and Flex
+        exec ids in tests and commit messages; the push gate refused both."""
+        prompt = responder.build_prompt(_page(), autoship=True, autopush=True)
+        assert "Never copy a real IB account id" in prompt
+        assert '"demo"' in prompt
+
     def test_skill_ships_via_fix_branch_and_ensure_pr(self):
         text = SKILL.read_text(encoding="utf-8")
         assert "fix/" in text
