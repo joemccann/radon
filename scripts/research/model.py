@@ -79,7 +79,7 @@ class Reviewer:
                 env=self.env,
                 post=self.session.post if self.session is not None else None,
                 model_override=self.env.get("RADON_RESEARCH_TEXT_MODEL") or self.model,
-                max_tokens=6000,
+                max_tokens=10000,
                 read_timeout=120.0,
                 max_response_bytes=2_000_000,
                 require_end_turn=True,
