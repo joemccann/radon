@@ -44,7 +44,7 @@ BODY = "Rates rose 25bp on the week while credit spreads widened 10bp. " * 8
          + "\nF.L.PUTNAM INVESTMENT MANAGEMENT COMPANY **|** FLPUTNAM.COM **| September 2026**",
       2: BODY + "\nF.L.PUTNAM INVESTMENT MANAGEMENT COMPANY **|** FLPUTNAM.COM **| September 2026**",
       3: "Past performance may not be indicative of future results.\nF.L.PUTNAM INVESTMENT MANAGEMENT COMPANY **|** FLPUTNAM.COM **| September 2026**"},
-     "F.L.Putnam Investment Management"),
+     "F.L.Putnam"),
     ("Financial_Forecasts_October_2026.pdf",
      {1: "## RESEARCH\n\nresearch.natixis.com\n\n# Financial Forecasts\n\n### October 2026", 2: BODY + " Contact: a.b@natixis.com",
       3: "This document has been prepared by Natixis. Links from Natixis web sites are meant for convenience only. www.natixis.com"},
@@ -81,7 +81,7 @@ BODY = "Rates rose 25bp on the week while credit spreads widened 10bp. " * 8
      {1: "**INVESTMENT MANAGEMENT** ## Market Musings 10/26\n" + BODY,
       2: "are entirely those of VLK Investment Management. **Capital at risk** vanlanschotkempen.com/ investment-management "
          "©2026 Van Lanschot Kempen Investment Management Follow us on LinkedIn any given time, without prior notice."},
-     "Van Lanschot Kempen Investment Management"),
+     "Van Lanschot Kempen"),
     ("TDAGeneric_NAM_10122026.pdf",
      {1: "NORTH AMERICA For Monday, October 12, 2026 ## Market Recap at 4 PM ET\n" + BODY,
       2: "*For questions or comments about this report, email us at: **TheDay.Ahead@thomsonreuters.com.*** "
@@ -111,6 +111,39 @@ def test_topic_folder_without_publisher_evidence_stays_unknown(pages):
     ident = identify.identify(pages, meta("note.pdf", "other"), FOLDER)
     assert ident.publisher == "unknown"
     assert ident.publisher_source == "none"
+
+
+def test_footnote_links_to_a_cited_company_do_not_make_it_the_publisher():
+    # Brown Advisory "Energy Expansion" (2026-10-09): the endnotes link Monolithic Power Systems' own report.
+    holding = "Monolithic Power Systems Inc. (MPWR), held in the Brown Advisory Large-Cap Sustainable Growth Strategy. "
+    footer = "\nwww.brownadvisory.com\n"
+    notes = ("23 Monolithic Power Systems, 2026 Corporate Responsibility Report. "
+             "[https://www.monolithicpower.com/media/mps_cms_document/c/o/corporate-responsibility-report-2026.pdf] "
+             "24 Monolithic Power Systems Inc., *2026 Corporate Responsibility Report*. "
+             "[https://www.monolithicpower.com/media/mps_cms_document/2/0/2026-report.pdf]")
+    pages = {1: BODY + holding + footer, 2: BODY + footer, 3: BODY + holding + footer,
+             4: "Source: Brown Advisory analysis." + footer, 5: notes + footer}
+    ident = identify.identify(pages, meta("Energy_Expansion_and_the_Economics_of_Constraint.pdf", "other"), FOLDER)
+    assert ident.publisher == "Brown Advisory"
+
+
+def test_a_vendor_counts_when_the_document_is_on_its_own_domain():
+    # Morningstar Manager Research (HSA Landscape 2026) is excluded as a data vendor everywhere else.
+    pages = {1: "MANAGER RESEARCH | SEPTEMBER 2026 # 2026 Health Savings Account Landscape\n" + BODY,
+             2: BODY + " Contact greg.carlson@morningstar.com",
+             3: "©2026 Morningstar. All Rights Reserved. To license the research, visit global.morningstar.com."}
+    assert identify.identify(pages, meta("HSA_Landscape_2026_FINAL.pdf", "other"), FOLDER).publisher == "Morningstar"
+    cited = {1: BODY, 2: "© 2026 Morningstar. All Rights Reserved. © 2026 Northern Trust Corporation. northerntrust.com"}
+    assert identify.identify(cited, meta("x.pdf", "other"), FOLDER).publisher == "Northern Trust"
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("WTW. Proprietary and Confidential", "WTW"),
+    ("Westpac Banking Corporation ABN", "Westpac Banking"),
+    ("Neuberger Berman BD, LLC", "Neuberger Berman"),
+])
+def test_display_name_drops_run_on_sentences_and_registration_tails(raw, expected):
+    assert identify._display(raw) == expected
 
 
 def test_image_derived_text_names_the_publisher_of_a_scanned_pdf():
