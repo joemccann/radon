@@ -1,6 +1,19 @@
+# A green PR can still be behind main (2026-10-17)
+
+- Fetch and integrate the latest main immediately before publishing a requested branch refresh. Verify required checks on the resulting exact head; earlier green checks do not establish readiness after the base or source changes.
+
 # Retired integrations are not missing operator setup (2026-10-17)
 
 - The owner confirmed Foreman is retired. Remove its intake, setup, owner map and active documentation instead of requiring a factory source or new setup. Preserve historical evidence and unrelated repositories; do not recreate the retired service during audits.
+
+# Requested reports must render in the conversation (2026-10-17)
+
+- Deliver requested in-chat reports through an inline visualization content reference. Verify phone rendering and real click expansion; local HTML downloads or previews do not establish that the report is visible in chat.
+
+# Authentication lifetime belongs to the actual consumer (2026-10-17)
+
+- Inspect every production consumer before imposing a cached-bearer refresh margin. AGY consumers execute the native CLI; they do not send its Google token through Radon HTTP. A correct native login is not a failed raw-bearer refresh.
+- Keep the native documented renewal boundary, actual post-probe expiry, authenticated proof and canonical vault seal as hard gates. Do not fabricate expiry, extract compiled client secrets, or add a second scheduler to satisfy an inapplicable generic policy.
 
 # A dropped hrana ledger connection is not a statement error (2026-10-17)
 
@@ -1235,3 +1248,10 @@ When an operator asks for automated release or updater recovery, ship the durabl
 
 ## 2026-10-17: Release admission must stop before mutations
 - Chain exact-head checks, required-check registration, current-main freshness and production-idle assertions with notification/merge in one fail-closed operation. A failed assertion must prevent all later mutations. Treat an older cancelled check as superseded only when a newer matching check has completed successfully; strict protection must remain enabled when another release advances main.
+
+
+## 2026-10-17 - Fresh intake requires bounded retry admission
+- Throughput and a healthy database do not prove recovery progress. Audit the oldest eligible retries and completed first/retry counts under continuous new arrivals. Keep fresh-news priority with an explicit durable retry share; never classify a returned-attempt infrastructure park as a never-tried document.
+- A raw extraction catalogue can contain photos or prose crops. Label counts as extracted figures and preserve bounded selector explanations through storage, API and UI without silent mid-word truncation. Metadata repairs must preserve existing review/held/expiry timestamps.
+
+- Retry not-before timestamps are eligibility gates, not queue age. Restart recovery can retain a zero sentinel on newer interrupted rows; order aged eligible retries by insertion row ID so those zeros cannot bypass the oldest backlog.

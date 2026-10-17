@@ -211,6 +211,53 @@ class TestRefusals:
         assert "fix/ci-tweak" not in listed.stdout
         assert ensure.calls == []
 
+    def test_refuses_a_dot_github_path_git_would_c_quote(self, world):
+        """`git diff --name-only` C-quotes a path with a non-ASCII byte, so the
+        emitted line is `".github/workflows/\303\251.yml"` and does not start
+        with `.github/`. The refusal must not read that textual form."""
+        _vps_branch(
+            world, "fix/ci-quote", relpath=".github/workflows/\u00e9.yml"
+        )
+        ensure = _FakeEnsurePr()
+
+        results = _run(world, ensure=ensure)
+
+        assert [r["action"] for r in results] == ["refused"]
+        assert "github" in results[0]["reason"].lower()
+        listed = _git(world["origin"], "for-each-ref", "--format=%(refname)")
+        assert "fix/ci-quote" not in listed.stdout
+        assert ensure.calls == []
+
+    def test_refuses_moving_a_file_out_of_dot_github(self, world):
+        """Rename detection is on by default, and for a detected rename
+        `--name-only` emits only the destination, so moving a workflow or
+        CODEOWNERS OUT of `.github/` showed the permitted destination alone and
+        the refusal never saw the protected source."""
+        vps = world["vps"]
+        assert _git(vps, "checkout", "-q", "-b", "fix/move-ci").returncode == 0
+        workflow = vps / ".github" / "workflows" / "ci.yml"
+        workflow.parent.mkdir(parents=True, exist_ok=True)
+        workflow.write_text("name: ci\n", encoding="utf-8")
+        _git(vps, "add", ".github/workflows/ci.yml")
+        _git(vps, "commit", "-q", "-m", _valid_ir_message("seed-ci"))
+        _git(vps, "push", "-q", "origin", "HEAD:main")
+        assert _git(vps, "checkout", "-q", "main").returncode == 0
+        assert _git(vps, "pull", "-q", "origin", "main").returncode == 0
+        assert _git(vps, "checkout", "-q", "-b", "fix/move-out").returncode == 0
+        _git(vps, "mv", ".github/workflows/ci.yml", "docs-ci.yml")
+        _git(vps, "commit", "-q", "-m", _valid_ir_message("move-out"))
+        mini = world["mini"]
+        assert _git(mini, "fetch", "-q", "origin", "main").returncode == 0
+        assert _git(mini, "reset", "-q", "--hard", "origin/main").returncode == 0
+        ensure = _FakeEnsurePr()
+
+        results = _run(world, ensure=ensure)
+
+        moves = [r for r in results if r.get("branch") == "fix/move-out"]
+        assert moves and moves[0]["action"] == "refused", results
+        assert "github" in moves[0]["reason"].lower()
+        assert ensure.calls == []
+
     def test_ignores_refs_outside_fix(self, world):
         vps = world["vps"]
         assert _git(vps, "checkout", "-q", "-b", "main-ish").returncode == 0
