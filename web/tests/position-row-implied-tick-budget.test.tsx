@@ -167,4 +167,28 @@ describe("PERF-013 position implied-value tick budget", () => {
     expect(spy.mock.calls.length - afterMount).toBe(0);
     spy.mockRestore();
   });
+
+  it("desktop: an option-quote tick recomputes only that row", () => {
+    const positions = Array.from({ length: ROW_COUNT }, (_, i) =>
+      optionPosition(i + 1, `T${i}`),
+    );
+    const prices = bookPrices(positions.map((p) => p.ticker));
+    const optionKey = `T0_${EXPIRY_COMPACT}_295_P`;
+    const spy = vi.spyOn(impliedValue, "computePositionImpliedValue");
+    const { rerender } = render(<PositionTable positions={positions} prices={prices} />);
+    const afterMount = spy.mock.calls.length;
+
+    rerender(
+      <PositionTable
+        positions={positions}
+        prices={{
+          ...prices,
+          [optionKey]: pd({ symbol: optionKey, impliedVol: 0.9 }),
+        }}
+      />,
+    );
+    const extra = spy.mock.calls.slice(afterMount);
+    expect(new Set(extra.map((call) => call[0].ticker))).toEqual(new Set(["T0"]));
+    spy.mockRestore();
+  });
 });

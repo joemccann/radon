@@ -11532,3 +11532,53 @@ Discarded before these rounds: root pytest with `/usr/bin/openssl` LibreSSL 3.3.
 Base cloud at `b79e1f5c` with Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, and caddy 2.11.7: 2,839 passed / 27 failed / 8 skipped. Every closing failed-node set matches that list. The 27 are the bash 3.2 and host-Python baseline on this Mac. The comparison worktree was removed. Playwright was not run. No local screenshot or 390px result is claimed.
 
 T-554 follow-up: CI Vitest shard 8 failed the instance spy (`expected true to be false`) because jsdom calls `Storage.prototype.setItem` and ignores an own property. The test installs the throw on the storage object and on that prototype. Product source unchanged.
+
+## Delta audit 2026-10-17
+
+Range `b79e1f5c1f22609052560148be027662f283f57b..c1ea550195af4fb9cc8692af6eefa3377423b37a`: 117 commits / 88 paths. Newest trusted checkpoint is the 2026-10-16 collaborator comment on issue #83 (`audited-through: b79e1f5c1f22609052560148be027662f283f57b`). No open `testing/` pull request. Numbering continues after T-554. The checkpoint carried no open verified T finding.
+
+Flex coverage unread, portfolio-sync miss heartbeats, mixed-basis close, the PDF newsfeed tab, the sample-time pin, the subscription skew, the hrana read retry, and the python-image input list are executed by tests that call the behavior. No new skip, xfail, coverage-threshold change, or shard exclusion. `ci.yml` only added `e2e/newsfeed-pdf-tab.spec.ts` to the curated Playwright list.
+
+Not filed: deleting `"ib gateway is down and restart failed"` from `scripts/watchdog/grouping.py` left the new orders test green, because the producer sentence always ends in "2FA" and `_IB_SHAPED_PATTERNS` already contains `"2fa"`. The widened `db_http` `request()` retry still does not replay a lost `getresponse()`. The subscription timer is not read by the skew test; the constant move is still above the timer period.
+
+### T-555 — P2 — a failed gateway restart can heartbeat orders-sync
+
+`scripts/api/server.py` `_run_ib_script_with_recovery` returns `IB Gateway is down and restart failed. ...` (`server.py:6292`). `_GATEWAY_DOWN_SYNC_MARKERS` lists that sentence (`server.py:712`). `test_orders_sync_tick_confirmed_gateway_down_stays_silent` only feeds the other four producer sentences (`scripts/tests/test_orders_sync_loop.py:321`). Deleting the new marker left those four green and wrote an `orders-sync` error row.
+
+Acceptance: the sentence `_run_ib_script_with_recovery` returns after a refused restart must not write `service_health`. The four older silence cases stay green when only that marker is removed.
+
+### T-556 — P2 — an option quote tick can skip the row that owns the leg
+
+`positionPriceKeys` adds each leg key (`web/lib/positionUtils.ts:552`). `position-row-implied-tick-budget.test.tsx` ticked an unrelated symbol or the underlying ticker. Dropping the leg loop left those three green and made an IV-only tick recompute nothing.
+
+Acceptance: replacing one option-leg quote recomputes implied value for that ticker only. The three older tick-budget cases stay green when the leg loop is removed.
+
+### T-557 — P2 — a finite share-card dollar can lay out past 400 characters
+
+`fmtDollar` uses `toLocaleString` (`web/app/api/share/pnl/route.tsx:17`). `1e308` formats to 416 characters. The route clamps it (`route.tsx:162`). The existing card tests send small `pnl` values. Removing `clampCardText` around `fmtDollar` left those cases green and put a 416-character string in the tree.
+
+Acceptance: `pnl=1e308` still returns 200 and every string in the render tree is at most `SHARE_PNL_MAX_TEXT_CHARS`. The description, hold, and time cases stay green when only the hero dollar clamp is removed.
+
+Audited through: c1ea550195af4fb9cc8692af6eefa3377423b37a on 2026-10-17 — 3 new findings
+
+## Remediation 2026-10-17
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-555 | DONE | Marker deleted: `test_restart_failed_producer_stays_silent` wrote a `service_health` error; the four parametrized silence cases passed (1 failed / 4 passed). Restored marker. `scripts/tests/test_orders_sync_loop.py` 21 passed. Product source unchanged. |
+| T-556 | DONE | Leg loop deleted: the new case expected `Set { "T0" }` and got `Set {}`; the three older cases passed (1 failed / 3 passed). Restored loop. File 4 passed. Product source unchanged. |
+| T-557 | DONE | Hero dollar clamp removed: `expected 416 to be less than or equal to 400`; the other 13 cases passed. Restored clamp. File 14 passed. Product source unchanged. |
+
+Delta files, three times: root Python 415 passed each run; Vitest 151 passed / 11 files each run. `cloud/tests/test_app_runtime.py` was 1 failed / 135 passed each run (`test_notify_proxy_outlives_the_run_handoff_and_relays_while_docker_runs`, `ConnectionRefusedError`). That node is in the base SHA failed list too (`/usr/bin/python3` is 3.9.6; `socket.timeout` is not `TimeoutError`). The three Playwright specs in the delta were not run here.
+
+### Closing gates 2026-10-17
+
+Discarded before these rounds: root pytest with `/usr/bin/openssl` LibreSSL 3.3.6 was 54 failed / 15,488 passed, all `CERTIFICATE_VERIFY_FAILED` in the gateway remote suites. OpenSSL 3.6.5 ahead of that binary cleared it (15,542 passed / 2 skipped / 23 subtests before tonight's test). A Vitest run at the default worker count timed out five `next.config.mjs` imports at 5s; those five files passed alone (29 tests). Counted Vitest rounds set `VITEST_MAX_WORKERS=4`. No assertion, skip, or coverage threshold changed.
+
+| Round | Root Python | Root Vitest | Cloud | Failed-list diff against base `b79e1f5c` |
+|---|---|---|---|---|
+| 1 | 15,543 passed / 2 skipped / 23 subtests | 10,989 passed / 21 skipped / 1,119 files (1 file skipped) | 2,845 passed / 27 failed / 8 skipped | 0 added / 1 removed |
+| 2 | 15,543 passed / 2 skipped / 23 subtests | 10,989 passed / 21 skipped / 1,119 files (1 file skipped) | 2,845 passed / 27 failed / 8 skipped | 0 added / 1 removed |
+| 3 | 15,543 passed / 2 skipped / 23 subtests | 10,989 passed / 21 skipped / 1,119 files (1 file skipped) | 2,845 passed / 27 failed / 8 skipped | 0 added / 1 removed |
+
+Base cloud at `b79e1f5c` with Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, and caddy 2.11.7: 2,838 passed / 28 failed / 8 skipped. The only node in that list and absent from all three closing lists is `test_a_hung_upstream_becomes_a_5xx_within_a_bound`. It passed alone on both SHAs (30.16s and 30.27s). The other 27 match. They are the bash 3.2 and host-Python baseline on this Mac. The comparison worktree was removed. Playwright was not run. No local screenshot or 390px result is claimed.
