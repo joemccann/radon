@@ -35,6 +35,7 @@ import os
 import re
 import ssl
 import threading
+import time
 import urllib.request
 from typing import Any, Optional, Sequence
 from urllib.parse import urlsplit
@@ -47,6 +48,7 @@ except ImportError:  # imported as scripts.db.hrana_http from the repo root
 # Direct-to-cloud Turso writes are 30-60 ms in steady state; 4 s absorbs a
 # slow tail while staying far below every caller's cycle ceiling.
 HRANA_TIMEOUT_S = 4.0
+_KEEPALIVE_IDLE_S = 5.0
 
 _MAX_RESPONSE_BYTES = 1_048_576  # writes return tiny bodies
 
@@ -70,6 +72,7 @@ def _close_keepalive() -> None:
     conn = getattr(_local, "conn", None)
     _local.conn = None
     _local.key = None
+    _local.last_success = None
     if conn is None:
         return
     try:
@@ -133,8 +136,18 @@ def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse
             conn = http.client.HTTPConnection(parts.hostname, port, timeout=timeout)
         _local.conn = conn
         _local.key = key
+        _local.last_success = None
         return conn
 
+    last_success = getattr(_local, "last_success", None)
+    if getattr(_local, "conn", None) is not None and (
+        getattr(_local, "key", None) != key
+        or last_success is None
+        or time.monotonic() - last_success >= _KEEPALIVE_IDLE_S
+    ):
+        # Retire before sending: an idle write must never discover a dead
+        # socket after its outcome has become uncertain.
+        _close_keepalive()
     reused = getattr(_local, "key", None) == key and getattr(_local, "conn", None) is not None
     conn = getattr(_local, "conn", None) if reused else None
     if conn is None:
@@ -173,6 +186,7 @@ def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse
             if resp.status != 200:
                 raise OSError(f"HTTP {resp.status}")
             raise OSError("response exceeds limit")
+        _local.last_success = time.monotonic()
         return _PooledResponse(raw)
     except Exception:
         _close_keepalive()

@@ -1,3 +1,16 @@
+# Research database idle socket expiry (2026-10-17)
+
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
+
+- [x] T1 depends_on: [] Inspect both pooled transports, production idle-socket evidence and existing held-TTL contract.
+- [x] T2 depends_on: [T1] Commit fake-clock transport regressions and demonstrate GitHub red for idle transport and held-clock transitions before source changes; no local suites.
+- [x] T3 depends_on: [T2] Retire sockets idle for five seconds before sending any request, preserving conservative read replay and never replaying uncertain writes.
+- [ ] T4 depends_on: [T3] Independent review and exact-head full GitHub CI green; record notification and deployment evidence.
+- [ ] T5 depends_on: [T4] Verify canonical research mirrors and normal document outcomes without requeuing completed work.
+
+## Review
+Production read-only canary reproduced a stale socket after a 70-second idle; a subsequent fresh SELECT succeeded. Both transport pools currently retain sockets indefinitely. Existing held-row upserts preserve an expired row's old clock and expiry stamp. Approved transition-only plan has real SQLite regressions: fresh decisions clear expiry, re-entry to held starts a new clock, and repeated active-held writes retain their original clock. Regression-only f8daf7f4, CI 39052361901: pool job 117453393631 had 20 failed/704 passed; TTL job 117453393436 had 4 failed/2739 passed. Both pools now retire connections before sending at five idle seconds, reset clocks on close/connect and stamp after full HTTP success. Outcome upserts reset clocks only when entering a new held period and clear stale expiry stamps. Existing owner documentation updated. Python AST and diff checks passed; no local suites. Exact-head full CI and independent review pending.
+
 # Research review provider timeout budget (2026-10-17)
 
 Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.

@@ -451,3 +451,129 @@ def test_retry_refuses_an_unparsed_pipeline(transport):
     import urllib.request
     request = urllib.request.Request("https://example.invalid/v2/pipeline", data=b"not json")
     assert transport[0]._retry_safe_read(request) is False
+
+
+@pytest.fixture
+def idle_pool(monkeypatch, transport):
+    """No sleeps or sockets: time advances only when a response completes."""
+    from types import SimpleNamespace
+    import urllib.request
+
+    module = transport[0]
+    module._close_keepalive()
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic=lambda: clock.now), raising=False)
+    connections, responses = [], []
+
+    class Response:
+        status = 200
+
+        def read(self, _limit):
+            return _pipeline_body('1')
+
+        def isclosed(self):
+            return True
+
+    class Connection:
+        def __init__(self, host, port, timeout, **kwargs):
+            self.host, self.port, self.timeout = host, port, timeout
+            self.requests, self.closed = [], False
+            connections.append(self)
+
+        def request(self, method, path, body, headers):
+            assert not self.closed, 'a retired connection received another request'
+            self.requests.append((method, path, json.loads(body), self.timeout))
+
+        def getresponse(self):
+            value = responses.pop(0) if responses else Response()
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(module.http.client, 'HTTPConnection', Connection)
+    monkeypatch.setattr(module.http.client, 'HTTPSConnection', Connection)
+
+    def request(sql='SELECT 1', timeout=4.0, origin='https://synthetic.invalid'):
+        body = json.dumps({'requests': [{'type': 'execute', 'stmt': {'sql': sql}}, {'type': 'close'}]}).encode()
+        req = urllib.request.Request(origin + '/v2/pipeline', data=body, method='POST')
+        return module._pooled_open(req, timeout).read()
+
+    yield module, clock, connections, responses, request, Response
+    module._close_keepalive()
+
+
+@pytest.mark.parametrize('sql', ['SELECT 1', 'UPDATE synthetic_counter SET value=value+1'])
+@pytest.mark.parametrize('idle,expired', [(0.0, False), (4.999, False), (5.0, True), (70.0, True)])
+def test_pool_expires_idle_connections_before_sending_reads_or_writes(idle_pool, sql, idle, expired):
+    module, clock, connections, responses, request, _ = idle_pool
+    request()
+    clock.now += idle
+    request(sql, timeout=2.0)
+    assert len(connections) == (2 if expired else 1)
+    assert len(connections[0].requests) == (1 if expired else 2)
+    assert connections[0].closed is expired
+    assert connections[-1].requests[-1][2]['requests'][0]['stmt']['sql'] == sql
+    assert connections[-1].requests[-1][3] == 2.0
+    assert sum(len(conn.requests) for conn in connections) == 2, 'expiry is retirement, never a write retry'
+
+
+def test_pool_idle_age_starts_after_full_successful_response(idle_pool):
+    module, clock, connections, responses, request, Response = idle_pool
+
+    class SlowResponse(Response):
+        def read(self, limit):
+            clock.now += 20.0
+            return super().read(limit)
+
+    responses.append(SlowResponse())
+    request()
+    assert clock.now == 120.0
+    clock.now = 124.999
+    request('UPDATE synthetic_counter SET value=value+1')
+    assert len(connections) == 1, 'request duration is not idle age'
+    clock.now = 129.999
+    request('UPDATE synthetic_counter SET value=value+1')
+    assert len(connections) == 2, 'every full success refreshes the five-second idle clock'
+
+
+@pytest.mark.parametrize('failure', ['headers', 'body', 'oversized', 'http'])
+def test_pool_failure_retires_connection_and_clears_idle_clock(idle_pool, failure, monkeypatch):
+    module, clock, connections, responses, request, Response = idle_pool
+    request()
+    assert module._local.last_success == 100.0
+    clock.now = 101.0
+
+    class FailedResponse(Response):
+        status = 503 if failure == 'http' else 200
+
+        def read(self, limit):
+            if failure == 'body':
+                raise OSError('synthetic interrupted body')
+            return b'x' * (limit + 1) if failure == 'oversized' else super().read(limit)
+
+    responses.append(http.client.RemoteDisconnected('synthetic lost write response')
+                     if failure == 'headers' else FailedResponse())
+    with pytest.raises((OSError, http.client.HTTPException)):
+        request('UPDATE synthetic_counter SET value=value+1')
+    assert len(connections) == 1 and len(connections[0].requests) == 2
+    assert connections[0].closed
+    assert getattr(module._local, 'conn', None) is None
+    assert getattr(module._local, 'last_success', None) is None
+    clock.now = 102.0
+    request('UPDATE synthetic_counter SET value=value+1')
+    assert len(connections) == 2 and len(connections[-1].requests) == 1
+    assert module._local.last_success == 102.0
+
+
+def test_pool_origin_change_retires_prior_connection_and_starts_fresh_idle_clock(idle_pool):
+    module, clock, connections, responses, request, _ = idle_pool
+    request()
+    clock.now = 101.0
+    request(origin='https://other-synthetic.invalid')
+    assert len(connections) == 2
+    assert connections[0].closed, 'changing origins cannot retain an unreachable old pooled socket'
+    assert connections[1].host == 'other-synthetic.invalid'
+    assert module._local.last_success == 101.0
