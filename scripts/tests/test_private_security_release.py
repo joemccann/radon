@@ -70,6 +70,7 @@ class FakeGitHub:
             "head": {"sha": HEAD}, "base": {"ref": "main", "sha": BASE},
         }
         self.public_check_runs = {"total_count": 0, "check_runs": []}
+        self.public_statuses = {"sha": HEAD, "total_count": 0, "statuses": []}
         self.public_comparison = {"status": "ahead", "merge_base_commit": {"sha": BASE}, "files": [{"filename": "fix.py"}]}
         self.calls = []
         self.check_runs = _green_runs()
@@ -148,6 +149,8 @@ class FakeGitHub:
             return self.comparison
         if path == f"repos/{PUBLIC}/commits/{HEAD}/check-runs?per_page=100":
             return self.public_check_runs
+        if path == f"repos/{PUBLIC}/commits/{HEAD}/status?per_page=100":
+            return self.public_statuses
         if path == f"repos/{PUBLIC}/compare/{BASE}...{HEAD}":
             return self.public_comparison
         if path.startswith(f"repos/{PUBLIC}/pulls?state=all"):
@@ -583,3 +586,41 @@ def test_workflow_source_requires_immutable_sha_before_any_api(tmp_path):
     with pytest.raises(ValueError, match='immutable'):
         _bridge(tmp_path, github=github).ensure_validation_workflows('main')
     assert not github.calls
+
+
+@pytest.mark.parametrize('public_state', ['pending', 'stale-check', 'changed-head', 'green', 'review-rejected'])
+def test_bridge_queues_only_exact_public_ci_green_even_if_review_rejects(tmp_path, monkeypatch, public_state):
+    github = FakeGitHub()
+    reviewer = FakeReviewer()
+    events = []
+    monkeypatch.setattr(bridge_module.subprocess, 'run', lambda args, **kwargs: subprocess.CompletedProcess(args, 0, stdout=DIFF))
+    bridge = _bridge(tmp_path, github=github, reviewer=reviewer)
+    bridge.on_public_green = lambda number, head: events.append((number, head))
+    assert bridge.run_once() == 'public-ci-pending'
+    if public_state != 'pending': github.public_check_runs = _green_runs()
+    if public_state == 'stale-check': github.public_check_runs = _green_runs(head=MERGE)
+    if public_state == 'changed-head': github.public_pull['head']['sha'] = MERGE
+    if public_state == 'review-rejected': reviewer.approved = False
+    result = bridge.run_once()
+    assert events == ([(1118, HEAD)] if public_state in ('green', 'review-rejected') else [])
+    if public_state == 'review-rejected': assert result == 'private-validation-failed'
+
+
+@pytest.mark.parametrize('legacy', ['pending', 'failure', 'error', 'success', 'wrong-sha', 'truncated', 'count-mismatch'])
+def test_public_pr_green_and_readiness_include_bounded_exact_head_legacy_statuses(tmp_path, monkeypatch, legacy):
+    github = FakeGitHub()
+    events = []
+    monkeypatch.setattr(bridge_module.subprocess, 'run', lambda args, **kwargs: subprocess.CompletedProcess(args, 0, stdout=DIFF))
+    bridge = _bridge(tmp_path, github=github)
+    bridge.on_public_green = lambda number, head: events.append((number, head))
+    assert bridge.run_once() == 'public-ci-pending'
+    github.public_check_runs = _green_runs()
+    state = legacy if legacy in ('pending', 'failure', 'error', 'success') else 'success'
+    github.public_statuses = {'sha': HEAD, 'total_count': 1, 'statuses': [{'context': 'external preview', 'state': state}]}
+    if legacy == 'wrong-sha': github.public_statuses['sha'] = MERGE
+    if legacy == 'truncated': github.public_statuses['total_count'] = 101
+    if legacy == 'count-mismatch': github.public_statuses['total_count'] = 2
+    result = bridge.run_once()
+    assert events == ([(1118, HEAD)] if legacy == 'success' else [])
+    assert result == ('public-ready' if legacy == 'success' else 'public-ci-pending' if legacy == 'pending' else 'private-validation-failed')
+    assert bridge.priority_pr_number == (1118 if legacy == 'success' else None)
