@@ -212,6 +212,18 @@ class FileStateStore:
         finally:
             os.close(fd)
 
+    def synced_main(self, main_sha, hosts):
+        receipt = self.data.get("control_plane")
+        if not isinstance(receipt, dict) or receipt.get("main_sha") != main_sha or not isinstance(receipt.get("hosts"), dict):
+            return None
+        if all(receipt["hosts"].get(host) is True for host in hosts):
+            return SyncReceipt(main_sha, receipt["hosts"].copy())
+        return None
+
+    def record_control_plane(self, receipt):
+        self.data["control_plane"] = asdict(receipt)
+        self._save()
+
     def claim(self, pr_number, head_sha):
         if not self._locked:
             try:
@@ -285,6 +297,22 @@ def _reviewed(pr, policy, github):
                    and r.diff_digest == pr.diff_digest for r in reviews) for reviewer in policy.reviewers)
 
 
+def _sync_main(main_sha, policy, github, state, deploy):
+    # Caller checked production_idle after reading this exact SHA. Recheck
+    # around the host writes so another merger cannot produce a stale proof.
+    if not SHA.fullmatch(main_sha) or github.main_sha() != main_sha:
+        return None
+    cached = state.synced_main(main_sha, policy.hosts)
+    if cached is not None:
+        return cached
+    synced = deploy.sync_control_plane(main_sha)
+    if (synced.main_sha != main_sha or any(synced.hosts.get(host) is not True for host in policy.hosts)
+            or github.main_sha() != main_sha):
+        return None
+    state.record_control_plane(synced)
+    return synced
+
+
 def _finish(key, record, policy, github, state, deploy):
     # merge() is idempotent: the real adapter first queries existing merge
     # status and rechecks exact-head checks before any new merge mutation.
@@ -298,8 +326,8 @@ def _finish(key, record, policy, github, state, deploy):
     current_main = github.main_sha()
     if not deploy.production_idle() or (current_main != receipt.merge_sha and not github.contains_commit(current_main, receipt.merge_sha)):
         return RunResult("deploy-pending", record["pr_number"])
-    synced = deploy.sync_control_plane(current_main)
-    if synced.main_sha != current_main or any(synced.hosts.get(host) is not True for host in policy.hosts):
+    synced = _sync_main(current_main, policy, github, state, deploy)
+    if synced is None:
         return RunResult("sync-pending", record["pr_number"])
     state.record(key, "green", merge_sha=receipt.merge_sha, sync_receipt=synced)
     return RunResult("green", record["pr_number"])
@@ -317,6 +345,11 @@ def run_once(*, policy, github, state, deploy, notifier, now, only_pr_number=Non
             state.notification_rejected(item.event_id)
             raise
         state.mark_notified(item.event_id)
+    current_main = github.main_sha()
+    if not deploy.production_idle():
+        return RunResult("production-busy")
+    if _sync_main(current_main, policy, github, state, deploy) is None:
+        return RunResult("sync-pending")
     pending = state.pending_releases()
     if only_pr_number is not None and pending:
         priority_pending = [item for item in pending if item[1].get("pr_number") == only_pr_number
@@ -348,9 +381,12 @@ def run_once(*, policy, github, state, deploy, notifier, now, only_pr_number=Non
                 return RunResult("review-pending", record["pr_number"])
             if not _checks_green(github.checks(pr.number, pr.head_sha), pr, policy):
                 return RunResult("checks-pending", pr.number)
+            current_main = github.main_sha()
+            if not deploy.production_idle():
+                return RunResult("production-busy")
+            if _sync_main(current_main, policy, github, state, deploy) is None:
+                return RunResult("sync-pending", pr.number)
         return _finish(key, record, policy, github, state, deploy)
-    if not deploy.production_idle():
-        return RunResult("production-busy")
     candidates = github.candidate_prs()
     if only_pr_number is not None:
         candidates = [pr for pr in candidates if pr.number == only_pr_number
@@ -360,8 +396,11 @@ def run_once(*, policy, github, state, deploy, notifier, now, only_pr_number=Non
             continue
         if not _checks_green(github.checks(pr.number, pr.head_sha), pr, policy):
             continue
+        current_main = github.main_sha()
         if not deploy.production_idle():
             return RunResult("production-busy")
+        if _sync_main(current_main, policy, github, state, deploy) is None:
+            return RunResult("sync-pending", pr.number)
         if not state.claim(pr.number, pr.head_sha):
             continue
         return _finish(f"{pr.number}:{pr.head_sha}", {"pr_number": pr.number, "head_sha": pr.head_sha}, policy, github, state, deploy)
@@ -559,7 +598,7 @@ class ProductionDeploy:
                 results[name] = bool(re.search(rf"^sync-control-plane: installed_sha={main_sha} host_role={name}$", output, re.MULTILINE))
             except (RuntimeError, subprocess.TimeoutExpired):
                 results[name] = False
-        return SyncReceipt(main_sha, results)
+        return SyncReceipt(main_sha, results if self.github.main_sha() == main_sha else {})
 
 
 class DeliveryRejected(RuntimeError):
