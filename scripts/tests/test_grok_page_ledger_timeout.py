@@ -10,6 +10,7 @@ A statement error is not a read timeout and must still fail the unit.
 
 from __future__ import annotations
 
+import http.client
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -75,6 +76,7 @@ def cycle_env(monkeypatch, tmp_path):
     monkeypatch.setattr(pages_mod, "actions_since", lambda **_k: 0)
     monkeypatch.setattr(pages_mod, "list_actionable_pages", lambda **_k: [_page()])
     monkeypatch.setattr(pages_mod, "claim_page", lambda *_a, **_k: True)
+    monkeypatch.setattr(pages_mod, "get_page", lambda *_a, **_k: None)
 
     def runner(*_a, **_k):
         invocations.append(_a)
@@ -169,3 +171,74 @@ class TestLedgerReadTimeout:
         assert cycle_env["heartbeats"] == []
         assert cycle_env["invocations"] == []
         assert not cycle_env["lock"].exists()
+
+
+_DISCONNECT = (
+    "RemoteDisconnected: Remote end closed connection without response"
+)
+
+
+def _disconnect(*_a, **_k):
+    cause = http.client.RemoteDisconnected(
+        "Remote end closed connection without response"
+    )
+    raise HranaHttpError(_DISCONNECT) from cause
+
+
+class TestLedgerRemoteDisconnect:
+    """Page eaaaff8194 (2026-10-17 06:54:48Z): grok had finished and
+    complete_page's UPDATE reused the keep-alive claim_page opened.
+    The peer had closed that idle socket. getresponse raised
+    RemoteDisconnected, the write is not replayed, and the oneshot
+    exited 1. systemd recorded Result=exit-code, NRestarts=0.
+    """
+
+    def test_complete_disconnect_does_not_fail_the_oneshot(
+        self, cycle_env, monkeypatch, capsys
+    ):
+        """06:54:48Z and the 05:31Z / 05:47Z siblings: complete_page raised
+        HranaHttpError RemoteDisconnected after grok exited 0. The oneshot
+        must exit 0, release the lock, skip the ok heartbeat, and skip the
+        follow-up. A statement error still fails (covered above)."""
+        monkeypatch.setattr(pages_mod, "complete_page", _disconnect)
+
+        rc = responder.run_cycle(
+            cycle_env["root"], now=NOW, grok_runner=cycle_env["runner"]
+        )
+
+        assert rc == 0
+        assert len(cycle_env["invocations"]) == 1
+        assert cycle_env["heartbeats"] == []
+        assert cycle_env["followups"] == []
+        assert not cycle_env["lock"].exists()
+        err = capsys.readouterr().err
+        assert "grok page ledger non-fatal" in err
+        assert _DISCONNECT in err
+
+    def test_post_grok_write_drops_the_idle_keepalive_first(
+        self, cycle_env, monkeypatch
+    ):
+        """The completion UPDATE must be the first send on a new socket.
+        Replaying it after RemoteDisconnected is unsafe (the peer may
+        have committed). Dropping the idle pool before the write is the
+        send, not a retry."""
+        from db import hrana_http
+
+        order: list[str] = []
+
+        def close() -> None:
+            order.append("close")
+
+        def complete(*_a, **_k) -> None:
+            order.append("complete")
+
+        monkeypatch.setattr(hrana_http, "_close_keepalive", close)
+        monkeypatch.setattr(pages_mod, "complete_page", complete)
+
+        rc = responder.run_cycle(
+            cycle_env["root"], now=NOW, grok_runner=cycle_env["runner"]
+        )
+
+        assert rc == 0
+        assert order == ["close", "complete"]
+        assert len(cycle_env["invocations"]) == 1
