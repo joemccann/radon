@@ -28,8 +28,10 @@ from __future__ import annotations
 import http.client
 import io
 import json
+import re
 import ssl
 import threading
+import time
 import urllib.request
 from typing import Any, Sequence
 from urllib.parse import urlsplit
@@ -41,6 +43,7 @@ from utils.outcome_metrics import measure_operation
 # steady state; 4 s absorbs a slow tail while keeping a wedged request far
 # below FastAPI route timeouts.
 HRANA_TIMEOUT_S = 4.0
+_KEEPALIVE_IDLE_S = 5.0
 
 _MAX_RESPONSE_BYTES = 8_388_608  # hard ceiling; these result sets are tiny
 
@@ -64,12 +67,41 @@ def _close_keepalive() -> None:
     conn = getattr(_local, "conn", None)
     _local.conn = None
     _local.key = None
+    _local.last_success = None
     if conn is None:
         return
     try:
         conn.close()
     except OSError:
         pass
+
+
+def _retry_safe_read(req: urllib.request.Request) -> bool:
+    """Only explicit SELECT pipelines may be resent after an unknown outcome.
+
+    The API accepts writes and mixed pipelines too. Caller names cannot
+    establish replay safety; refuse unparsed, mixed and CTE statements.
+    """
+    try:
+        operations = json.loads(req.data or b'')['requests']
+        if not isinstance(operations, list) or not operations:
+            return False
+        reads = 0
+        for operation in operations:
+            if operation.get('type') == 'close':
+                continue
+            if operation.get('type') != 'execute':
+                return False
+            sql = operation['stmt']['sql']
+            if not isinstance(sql, str):
+                return False
+            sql = sql.strip().removesuffix(';').strip()
+            if not re.match(r'SELECT\b', sql, re.IGNORECASE) or ';' in sql:
+                return False
+            reads += 1
+        return reads > 0
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return False
 
 
 def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse:
@@ -98,8 +130,18 @@ def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse
             conn = http.client.HTTPConnection(parts.hostname, port, timeout=timeout)
         _local.conn = conn
         _local.key = key
+        _local.last_success = None
         return conn
 
+    last_success = getattr(_local, "last_success", None)
+    if getattr(_local, "conn", None) is not None and (
+        getattr(_local, "key", None) != key
+        or last_success is None
+        or time.monotonic() - last_success >= _KEEPALIVE_IDLE_S
+    ):
+        # Retire before sending: an idle write must never discover a dead
+        # socket after its outcome has become uncertain.
+        _close_keepalive()
     reused = getattr(_local, "key", None) == key and getattr(_local, "conn", None) is not None
     conn = getattr(_local, "conn", None) if reused else None
     if conn is None:
@@ -109,19 +151,25 @@ def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse
 
     try:
         conn.request(method, path, body, headers)
+        resp = conn.getresponse()
     except (OSError, http.client.HTTPException):
-        # HTTPException covers CannotSendRequest / ResponseNotReady: a socket
-        # left mid-response is not an OSError, and without this the pooled
-        # socket would stay poisoned for the life of the thread.
+        # The peer may have committed a POST before its response was lost.
+        # Retire every failed socket, but resend only proven reads.
         _close_keepalive()
-        if not reused:
+        if not reused or not _retry_safe_read(req):
             raise
-        # Stale keep-alive: the POST never left this socket. One fresh retry.
         conn = connect()
-        conn.request(method, path, body, headers)
+        try:
+            conn.request(method, path, body, headers)
+            resp = conn.getresponse()
+        except Exception:
+            _close_keepalive()
+            raise
+    except Exception:
+        _close_keepalive()
+        raise
 
     try:
-        resp = conn.getresponse()
         # A short read leaves the remainder on this socket. The next pipeline
         # is then sent and discarded (ResponseNotReady), which reports a
         # committed write as a transport failure. REL-326.
@@ -132,6 +180,7 @@ def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse
             if resp.status != 200:
                 raise OSError(f"HTTP {resp.status}")
             raise OSError("response exceeds limit")
+        _local.last_success = time.monotonic()
         return _PooledResponse(raw)
     except Exception:
         _close_keepalive()

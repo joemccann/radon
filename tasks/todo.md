@@ -1,3 +1,33 @@
+# Research database idle socket expiry (2026-10-17)
+
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
+
+- [x] T1 depends_on: [] Inspect both pooled transports, production idle-socket evidence and existing held-TTL contract.
+- [x] T2 depends_on: [T1] Commit fake-clock transport regressions and demonstrate GitHub red for idle transport and held-clock transitions before source changes; no local suites.
+- [x] T3 depends_on: [T2] Retire sockets idle for five seconds before sending any request, preserving conservative read replay and never replaying uncertain writes.
+- [ ] T4 depends_on: [T3] Independent review and exact-head full GitHub CI green; record notification and deployment evidence.
+- [ ] T5 depends_on: [T4] Verify canonical research mirrors and normal document outcomes without requeuing completed work.
+
+## Review
+Production read-only canary reproduced a stale socket after a 70-second idle; a subsequent fresh SELECT succeeded. Both transport pools currently retain sockets indefinitely. Existing held-row upserts preserve an expired row's old clock and expiry stamp. Approved transition-only plan has real SQLite regressions: fresh decisions clear expiry, re-entry to held starts a new clock, and repeated active-held writes retain their original clock. Regression-only f8daf7f4, CI 39052361901: pool job 117453393631 had 20 failed/704 passed; TTL job 117453393436 had 4 failed/2739 passed. Both pools now retire connections before sending at five idle seconds, reset clocks on close/connect and stamp after full HTTP success. Outcome upserts reset clocks only when entering a new held period and clear stale expiry stamps. Existing owner documentation updated. Python AST and diff checks passed; no local suites. Exact-head full CI and independent review pending.
+
+# Research review provider timeout budget (2026-10-17)
+
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
+
+- [x] T1 depends_on: [] Inspect Reviewer, shared ladder timeout diagnostics and both pipeline document boundaries; preserve subscription, provider order and prepaid policy.
+- [x] T2 depends_on: [T1] Commit synthetic regression-only coverage and demonstrate exact-head GitHub CI failures before source changes; no local suites.
+- [x] T3 depends_on: [T2] Skip only proven timed-out provider attempts within the same document and request modality; reset at each document boundary.
+- [ ] T4 depends_on: [T3] Independent Sol/Luna review and exact-head full GitHub CI green.
+- [ ] T5 depends_on: [T4] Coordinated deployment after the preceding production release; verify normal recovered-document review outcomes.
+
+## Streamed transport follow-up
+- [x] T6 depends_on: [T3] Add production-shaped stream-body timeout and terminal response-error regression coverage after independent Sol review.
+- [x] T7 depends_on: [T6] Confirm GitHub red before minimal streamed transport source repair; exact-head CI and independent review remain tracked in T4.
+
+## Review
+Inspection confirmed the production ingestion consumer reuses its Pipeline and Reviewer across documents. Timeout state therefore requires an explicit document reset in both pipeline versions. Text and image calls use different provider models; timeout exclusion must preserve the untried modality. GitHub regression-only head 2c1a16cb, run 39048551062/job 117442189465: 31 failed, 2678 passed. Minimal repair keeps exact network timeout exclusions per document and text/image lane, preserves each winning provider, explicitly rejects empty eligible sets, and resets reused and distinct injected agents at both document boundaries. Python AST and diff checks passed; no local suites. Independent Sol review found a streamed-body timeout escaping the shared transport wrapper. Added 22 synthetic response-stream regressions covering typed and generic timeout fallback, exact-class quarantine, response closure, byte limit, truncation and unchanged malformed JSON behavior. GitHub streamed regression head ac2104ab, run 39049215035/job 117444244059: 16 failed, 2715 passed. Stream iteration errors now use the existing network diagnostic path, preserving response-size errors and decode/JSON/status behavior outside the transport catch. Integrated main release 64471fd7 before final CI. No local suites. Sol and Luna approved source head b7ce48a1. GitHub scripts-df job 117444847414 found the missing owner-document update: 1 failed, 1602 passed, 3 skipped. Added the existing docs/dropbox-research.md timeout contract without a docs-skip exception; final exact-head CI and latest-head review confirmation pending.
+
 # Nemotron Super VL implementation (2026-10-16)
 
 Dependency graph: T1 -> T2,T3; T2,T3 -> T4 -> T5 -> T6.
@@ -9580,3 +9610,61 @@ CI repair: run 38968894246 / job 117203223236 timed out the PDF pagination regre
 - [ ] T3 depends_on: [T2] Complete exact-head CI, independent review and authorized deployment.
 - [ ] T4 depends_on: [T1, T3] Audit blocked document eligibility, recover infrastructure failures with checkpoints and verify live publication/health.
 Review: Preserve publication quality gates and source attribution; no local test suites. Investigate extraction errors separately from editorial holds.
+
+
+## Unattended release and toolchain recovery (2026-10-17)
+
+- [x] T1 depends_on: [] Sol/Luna audit current runner, privilege boundaries, held fix, current PRs and updater evidence.
+- [ ] T2 depends_on: [T1] Independent Luna review, resolve conflicts and deliver #1117/#1114 through exact-head green CI.
+- [x] T3 depends_on: [T1] Sol implements and tests root-owned isolated control-plane updates and role-correct host sync.
+- [x] T4 depends_on: [T1] Implement trusted unattended release authorization, merge/deploy reconciliation, durability and failure reporting.
+- [ ] T5 depends_on: [T1] Sol recovers DeepSec reviewer and implements staged automatic tool/app updates with rollback and health checks.
+- [ ] T6 depends_on: [T2,T3,T4,T5] Luna adversarial tests plus Sol review, full required suites, sanitized PR(s), exact-head green CI, admin merge and live receipts.
+
+Constraints: preserve the original dirty checkout; never convert app-controlled files into root authorization; no exploit details or secrets in public Git; no authenticated/trading bypass; updates must not interrupt active jobs; bootstrap privilege gaps are recorded honestly. User authorizes automating release/update work rather than requiring terminal commands on the Mini.
+
+Review checkpoint: latest completed full Python 15,813 passed/2 skipped/23 subtests passed; full Vitest 10,987 passed/21 skipped. Root-control's most recent completed cloud repair gate was 2,889 passed/7 skipped; subsequent root follow-up reviews and validation remain pending. Controller external-main convergence bfa39a48 passed 59 focused cases and persists exact-SHA both-host receipts across restart; the strict/admin-enforced server merge gate and fresh target binding passed 77 focused cases. The parent strengthened only GitHub strict=true, preserving all 28 required contexts/app IDs and enforce_admins=true. Signed immutable CLI subscription reviews passed for Sol and Luna. The scheduled operator updater completed exit0; Chrome's signed vendor recovery restored its hourly job (actual run exit0), Docker's live backend confirms automatic check/download enabled, and Signal/Warp logs confirm current vendor update checks. Private validation workflows are provisioned, but new root reviews, immutable private validation/delivery, exact-head public CI/merge receipts, actual bot inference and one-time legitimate macOS administrator bootstrap remain pending. Release completion is not claimed.
+
+Delivery checkpoint: root recovery PR #1123 merged c899d37e after all 44 applicable checks completed and accepted PR-green notification. Main CI 39046250713 completed successfully; both app/broker exact c899d37e reconciliation receipts and manifest verification exit0. Final bridge-owned notification gate passed 130 focused cases, independent Luna review, and full Python 15,813 passed/2 skipped/23 subtests. Automation delivery, edge PRs and actual bot-account bootstrap/inference remain pending.
+
+Release checkpoint (2026-10-17): Root #1123 exact-head 44 checks green/expected skips, admin merge c899d37e, production CI39046250713 success, app/broker pinned sync and installed manifests verified; Pushover accepted status1. #1117 exact afb6d184: 43 checks green/expected skips with all28 required registered; Pushover status1, admin merge a9201fd0, production CI39047698592 running. #1114 conflict resolved locally preserving both security suites, no push before prior deployment finishes.
+
+Final follow-up review: immutable private CI/model feedback checkpoints and complete-source review binding pass179 focused cases; worker-output singular/plural compatibility passes10 cases after reproduced red. Both signed CLI model inferences authenticated; the contradictory Luna #1117 negative is preserved and independently verified as no actionable defect. Full-source contexts remain held when installed model capacity is insufficient; no context inflation or source truncation. Full Python gate and independent Sol/Luna cross-review are in progress. Private retrospective root CI baseline mismatch is preserved; replacement candidate includes only that test compatibility repair. Mini administrator bootstrap and actual bot inference remain pending.
+
+Integrated delivery review: Independent Sol/Luna review found and repaired transient source-fetch terminalization and interrupted cache writes. Final focused controller/private/probe gate227passed; signed Sol+Luna exact-input fixtures both pass664,766-byte production-shaped root context, including context_length_exceeded with one request and no compaction/retry/tools. Previous full Python15894passed2skipped23subtests; final integrated gate pending. External main57a7 advanced during1114CI; preserve green1114head5ed747ca in1124's ancestry and use one combined exact-head CI/deployment cycle. Existing1114Pushoveraccepted once.
+
+Final integration review (2026-10-17): current-main57a7 plus preserved1114head5ed747ca and all final recovery changes passed15905Python tests/2skips/23subtests,2910cloud tests/7skips; fullVitest10987passed21skipped remains applicable with no JS changes. Complete595KBchange secret scan clean. Final Sol and Luna source reviews approved; one superseded intermediate-capacity finding withdrawn after current-source verification. Root updater digest unchanged c1eb3d03. Current production57a7 has both exact-SHA host sync and manifest receipts. Final1124publication, exact-head CI/adminmerge/deploy, owner activation, Mini OS authorization and bot inference still pending.
+
+
+Final current-main review: merged64471fd7; 16045 Python passed/2skips/23subtests after committed-baseline ownership check. Cloud2910passed7skips and Vitest10987passed21skips remain applicable because those trees are unchanged. Production64471 has both-role sync/manifest receipts. Sol and Luna approved the temporary native bootstrap observer; seven observer tests passed. Final new-headCI/adminmerge/deployment, owner activation and one nativeOSauthorization/botSDKreceipt remain pending.
+
+Latest integration review: external main20075e0e merged without conflicts; fullPython16115passed2skipped23subtests. Automation and root-updater hashes unchanged; final CI/merge/production receipts and initial native bootstrap remain pending.
+
+## Research review stale API connection follow-up (2026-10-17)
+- [x] R1 depends_on: [] Observe a new DbHttpError during three-key recovery; confirm API/shared transport retry gap without assuming the unrecorded exception cause.
+- [x] R2 depends_on: [R1] Extended real-socket regressions to API transport; GitHub c1dead71 reproduced16 failures/678 passing tests (job117429409148).
+- [ ] R3 depends_on: [R2] Port proven read-only reconnect classification and socket retirement; bba2f554 had 694 passed and 37 green checks with Sol source review. API source remains byte-identical after merging c899d37e; new-head CI is pending.
+- [ ] R4 depends_on: [R3] Wait for the separate control-plane release; deploy without weakening isolation, verify recovery and canonical outcomes.
+Review: No local suites. Never replay ambiguous writes. Preserve existing database outage parking and publication quality gates.
+
+## Research Codex subscription model retirement (2026-10-17)
+- [x] M1 depends_on: [] Confirm subscription model retirement and current account multi-image compatibility with a bounded synthetic canary.
+- [x] M2 depends_on: [M1] GitHub bda67981 reproduced nine failures with 1356 passing tests (run39045543319, job117433454016); preserve API-key defaults and explicit model overrides.
+- [ ] M3 depends_on: [M2] Select the verified subscription replacement, obtain independent review and exact-head green CI.
+- [ ] M4 depends_on: [M3] Deploy after the separate control-plane release, finish normal recovery and verify production outcomes.
+Review: Official model retirement applies to ChatGPT sign-in only. Existing production subscription request completed a two-image strict-JSON canary with gpt-6.1-sol. Preserve existing endpoint, token handling, publication gates and prepaid policy. No local test suites.
+
+## Research decorative-asset routing (2026-10-17)
+- [x] Q1 depends_on: [] Audit all 23 expired decisions and visually inspect three rejected decorative/prose crops; identify contradictory text-only RESELECT handling.
+- [x] Q2 depends_on: [Q1] GitHub 96512183 reproduced 27 failures with 2606 passing tests (run39046492003, job117436193779), including real malformed-ID crashes.
+- [x] Q3 depends_on: [Q2] Implemented strict independent all-assets routing; GitHub f6b173ee passed its regressions while exposing only feedback failures.
+- [ ] Q4 depends_on: [Q3, M3] Complete independent review and combined exact-head CI, deploy after control-plane repair and verify normal recovery outcomes.
+Review: No local suites. A photo or prose crop is not a chart. Never treat absent/malformed/uninspected classification as proof that no source chart exists. Normal verification and separate generated-PNG review remain mandatory.
+
+## Recovery feedback preservation (2026-10-17)
+- [x] F1 depends_on: [] Independent operational review identified feedback.apply marking an actionable vote handled when pending/processing work refused its requeue.
+- [x] F2 depends_on: [F1] GitHub f6b173ee reproduced eight feedback failures with 2651 passing tests (run39047098441, job117437942440); all decorative-routing regressions passed.
+- [x] F3 depends_on: [F2] Implemented atomic acknowledgment, busy deferral and latest-terminal handling; GitHub db555b91 reproduced the deletion edge (1 failed, 2660 passed) before its lookup repair.
+- [ ] F4 depends_on: [F3, Q4] Independently approve a short SQLite write-fenced recovery, deploy, requeue only the three proven routing cases and verify every outcome.
+Review: No local suites. Do not stop unrelated services or gate all user feedback writes. Recovery must not erase or consume operator feedback that arrives concurrently.
+

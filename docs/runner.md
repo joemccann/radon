@@ -409,9 +409,9 @@ failures with the loop name and sanitized log, never credentials.
 | launchd's own output (start failures) | `sudo -u _radonbot tail /Users/_radonbot/radon-runner/launchd-documentation.log` |
 | Is the job loaded, when did it last run | `sudo launchctl print system/com.radon.runner.documentation \| grep -E 'state\|last exit'` |
 | Run a loop now | `sudo launchctl kickstart system/com.radon.runner.documentation` |
-| Change `run_loop.sh` or a loop `.env` | merge to `main`, then repeat step 2 on the mini (clone into a fresh `mktemp -d` directory, `sudo install.sh <loop>`, e.g. `sudo install.sh documentation`, then remove the clone); the installed copy does not change until you do. The prompt is read from `main` every night and needs no reinstall |
+| Change `run_loop.sh` or a loop `.env` | after one installation of the cooperative runner, `com.radon.runner-update` refreshes deployed, CI-green main every six hours while all loops are idle. Prompts still refresh every night. See [unattended releases](unattended-releases.md) |
 | Rotate the GitHub token (before its expiry) | step 7.5 to 7.6, then step 8 |
-| Release a held security P0/P1 | `sudo -u _radonbot sh -c 'echo "released: <finding-id>" >> ~/radon-runner/state/<loop>/scratch/<run-id>/run-record.md'` |
+| Release a completed P1 fix | the loop exports immutable source to private CI; the operator coordinator owns independent review, public PR, merge and host sync. No terminal-written marker. P0 requires incident coordination |
 | Read a security loop's private report | the Pushover page's "Open private report" link (`joemccann/radon-security-reports`) |
 | After a reboot | `security unlock-keychain ~/Library/Keychains/login.keychain-db` in the bot shell. Until then agy fails |
 | Re-sign a CLI | the bot shell, then the sign-in command from step 4 |
@@ -422,7 +422,7 @@ An uncertain lock requires operator inspection of its recorded PID and process s
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `sudo: a password is required` from an agent or script | `sudo` needs your password at a terminal | Run the command yourself in Terminal |
+| `sudo: a password is required` during initial root-runner upgrade | the old install has no unattended root updater | one legitimate macOS administrator authorization installs the reviewed updater; later CI-green runner refreshes need no terminal command. Never grant a bot-writable script root authority |
 | Security loop log: `Not logged in · Please run /login` | `CLAUDE_CODE_OAUTH_TOKEN` missing or expired in `~/.radon-runner.env` | Step 8b.4 `claude setup-token`, then kick the loop |
 | Security log: `Claude Security did not run (OPERATOR_REQUIRED)`, claude `auth status` logged out | The agent's shell does not inherit `CLAUDE_CODE_OAUTH_TOKEN`; Stage 4 reads it from `~/.radon-runner.env` itself, so the token there is missing or expired | `sudo -H -u _radonbot sh -c 'cd; CLAUDE_CODE_OAUTH_TOKEN=$(grep ^CLAUDE_CODE_OAUTH_TOKEN= .radon-runner.env \| cut -d= -f2-) .local/bin/claude auth status'`; re-mint with step 8b.4 if logged out |
 | "Keychain Not Found ... antigravity" dialog | The bot has no login keychain | Cancel, then step 5 |
