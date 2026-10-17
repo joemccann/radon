@@ -3701,15 +3701,65 @@ after the IB-skip path has already chosen the cached payload.** Peak:
   `Result=signal` or exit 143 inside a deploy window is
   `deploy-stop-clean-oneshot-signal`. A ledger statement error (not a
   read timeout) still fails the oneshot on purpose.
+  `RemoteDisconnected` on the same ledger calls is
+  `grok-page-responder-ledger-remote-disconnect`, not a statement error.
 - **Remediation (code):** a ledger `TimeoutError` logs
   `grok page ledger non-fatal`, skips the ok heartbeat, releases the
   lock, and exits 0. The timer starts the next cycle in 30s. A claim
   the server already applied stays until `STALE_CLAIM_SECS` (2h); a
-  claim that never landed is eligible on that next cycle. Other
-  `HranaHttpError` values still propagate. The unit is not on
+  claim that never landed is eligible on that next cycle. Statement
+  errors and missing credentials still propagate.
+  `RemoteDisconnected` does not: see
+  `grok-page-responder-ledger-remote-disconnect`. The unit is not on
   `RERUNNABLE_ONESHOT_UNITS`.
 - **Regression:**
   `scripts/tests/test_grok_page_ledger_timeout.py::TestLedgerReadTimeout`.
+- **Code:** `scripts/grok_page_responder.py` (`_ledger_read_timeout`).
+
+## grok-page-responder-ledger-remote-disconnect
+
+**`radon-grok-page-responder.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when `complete_page` loses the Turso response.** Peak:
+2026-10-17 02:59:39Z, page `0bd43c03976d2cb9b20ce3e5724fc667`, paged
+03:00:02Z. Same traceback at 03:13:21Z, 03:33:21Z, and 04:55:14Z.
+
+- **Mechanism:** `Type=oneshot`, no `Restart=`. A cycle that has already
+  finished grok calls `pages.complete_page`, an hrana UPDATE. The
+  keep-alive socket is closed by the peer during `getresponse`
+  (`http.client.RemoteDisconnected: Remote end closed connection
+  without response`). hrana will not resend that write: the UPDATE may
+  already have committed. `HranaHttpError` escapes `run_cycle` because
+  `_ledger_read_timeout` only matched `TimeoutError`. The interpreter
+  exits 1. systemd records `Result=exit-code`, `NRestarts=0`. The
+  watchdog pages this unit about itself. Exec span is the grok run
+  (minutes), not `TimeoutStartSec`. Later 30s cycles that only list
+  pages log `pending: 0` and exit 0. `requires_ib` is false.
+- **Detection:** journal traceback ends at
+  `db.hrana_http.HranaHttpError: RemoteDisconnected: Remote end closed
+  connection without response` with `grok_page_responder.py` `run_cycle`
+  calling `complete_page`. The line before the traceback on a long
+  cycle may be `failed at incident time; retrying last-known-good`.
+- **Discriminating check:** Python Turso canary `SELECT 1` succeeds
+  (59 ms at diagnosis). Canary fail means Turso platform: stand down,
+  do not restart-flap. `:8321/health/lite` stayed `database=up` and
+  `auth_state=authenticated`. No
+  `/home/radon/.radon-deploy-transition.json`. A `TimeoutError` on
+  `claim_page` or `complete_page` is
+  `grok-page-responder-ledger-timeout`. A statement error (`no such
+  table`, missing credential) still fails the oneshot on purpose.
+  `Result=signal` or exit 143 inside a deploy window is
+  `deploy-stop-clean-oneshot-signal`. `/health/lite` down is the API,
+  stand down. Not `ib-gateway-grouped`. A gateway-down probe in the
+  same hour is not this exit.
+- **Remediation (code):** `_ledger_read_timeout` also matches
+  `RemoteDisconnected`. The cycle logs `grok page ledger non-fatal`,
+  skips the ok heartbeat, releases the lock, and exits 0. No follow-up:
+  the completion is unconfirmed when the response was lost. A claim
+  the server already applied stays until `STALE_CLAIM_SECS` (2h). The
+  timer starts the next cycle in 30s. Do not `reset-failed` as the
+  fix. The unit is not on `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `scripts/tests/test_grok_page_ledger_timeout.py::TestLedgerRemoteDisconnect::test_complete_remote_disconnect_does_not_fail_the_oneshot`.
 - **Code:** `scripts/grok_page_responder.py` (`_ledger_read_timeout`).
 
 ## grok-page-responder-missing-binary
