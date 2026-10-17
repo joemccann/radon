@@ -2,7 +2,7 @@
 """Validate a pull request body against .github/pull_request_template.md.
 
 Every PR, whoever drafts it (an operator, an interactive agent, a nightly
-runner loop, the IR pickup, the codemap job, Foreman), carries the
+runner loop, the IR pickup, the codemap job), carries the
 template's six `##` sections in order, each with real content:
 
     Summary, What changed, Test plan, Risk and rollback,
