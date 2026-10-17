@@ -9598,7 +9598,14 @@ Review: Official model retirement applies to ChatGPT sign-in only. Existing prod
 
 ## Research decorative-asset routing (2026-10-17)
 - [x] Q1 depends_on: [] Audit all 23 expired decisions and visually inspect three rejected decorative/prose crops; identify contradictory text-only RESELECT handling.
-- [ ] Q2 depends_on: [Q1] Reproduce blocked text-only verification and conservative all-assets classification contracts on GitHub.
+- [x] Q2 depends_on: [Q1] GitHub 96512183 reproduced 27 failures with 2606 passing tests (run39046492003, job117436193779), including real malformed-ID crashes.
 - [ ] Q3 depends_on: [Q2] Accept text-only routing only after independent exact all-assets non-data classification; preserve real/incomplete-chart, provider, factual and publisher holds.
 - [ ] Q4 depends_on: [Q3, M3] Complete independent review and combined exact-head CI, deploy after control-plane repair and verify normal recovery outcomes.
 Review: No local suites. A photo or prose crop is not a chart. Never treat absent/malformed/uninspected classification as proof that no source chart exists. Normal verification and separate generated-PNG review remain mandatory.
+
+## Recovery feedback preservation (2026-10-17)
+- [x] F1 depends_on: [] Independent operational review identified feedback.apply marking an actionable vote handled when pending/processing work refused its requeue.
+- [ ] F2 depends_on: [F1] Reproduce lost busy-work feedback on GitHub, including direct work-key and latest file-revision lookup.
+- [ ] F3 depends_on: [F2] Preserve unapplied busy-work feedback until successful requeue, retaining unknown-document handling and source/quality gates.
+- [ ] F4 depends_on: [F3, Q4] Independently approve a short SQLite write-fenced recovery, deploy, requeue only the three proven routing cases and verify every outcome.
+Review: No local suites. Do not stop unrelated services or gate all user feedback writes. Recovery must not erase or consume operator feedback that arrives concurrently.

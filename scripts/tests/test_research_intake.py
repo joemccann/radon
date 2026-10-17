@@ -586,6 +586,26 @@ def test_a_chart_claim_without_transcribed_labels_does_not_pass():
     assert intake.figure_match_passed(None, {"f1"}) == {}
 
 
+@pytest.mark.parametrize('visual_type', [
+    'chart_fragment', 'unknown', 'photo', 'prose', 'logo', 'letterhead', 'banner', 'signature',
+    None, [], {}, 1, True,
+])
+def test_explicit_nonchart_or_unknown_type_cannot_claim_complete_chart_flags(visual_type):
+    result = match(f1={'visual_type': visual_type})(['f1'])
+    figure = result['figures'][0]
+    assert figure['is_chart'] is True and figure['supports_finding'] is True
+    assert figure['complete_figure'] is True and figure['visible_text']
+    assert intake.figure_match_passed(result, {'f1'}) == {}
+
+
+@pytest.mark.parametrize('visual_type', ['chart', 'table', 'legacy_missing'])
+def test_normal_chart_match_accepts_data_types_and_legacy_absent_type(visual_type):
+    result = match()(['f1'])
+    if visual_type != 'legacy_missing':
+        result['figures'][0]['visual_type'] = visual_type
+    assert intake.figure_match_passed(result, {'f1'}) == {'f1': result['figures'][0]}
+
+
 def test_malformed_figure_match_holds(tmp_path, publisher):
     bad = lambda offered: {"verdict": "looks fine"}
     bad.figure_match = True
