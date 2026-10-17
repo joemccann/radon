@@ -9757,3 +9757,13 @@ Review: regression-only c8ba51f8 cloud CI39073806724 model shard19fail/1369pass;
 Review: published research-7d6d3955... is native generated=false, complete and readable but includes a clipped following prose line. Sealed source page3/raw raster bounds confirm _grow_text absorbs external prose. Matched published figure is f2, not pre-match f1. Page1 supports the final paragraph but is uncited; its byline date is2026-10-13, while the publication uses Dropbox fallback2026-10-14, and its We'd argue attribution needs correction. The existing user authorization covers the quality correction and regeneration; preserve source pixels/revision and canonical/outbox consistency with source/hash/gate evidence. No local suites, manual priority or recovery-ledger reruns.
 
 Crop/date cloud RED: ab2661b4 / CI39075914272 research117522956297 reproduced5 failed,2828 passed: raster prose boundary, exact October13 byline and oct/nov/dec aliases. Minimal pure-raster bounds and canonical month alias fixes prepared; full final-head CI pending.
+
+
+## Research SELECT output allowance (2026-10-17)
+
+- [x] B1 depends_on: [] Preserve exact deployed terminal-reason evidence for the exhausted normal SELECT attempt and independently bound the remedy.
+- [ ] B2 depends_on: [B1] Reproduce the old output ceiling in cloud tests before changing the existing text-only request allowance.
+- [ ] B3 depends_on: [B2] Apply the bounded allowance while preserving complete-response, verification, provider, timeout and queue gates; finish full exact-head CI and independent review.
+- [ ] B4 depends_on: [B3] Deliver after the preceding main deployment, verify actual loaded source, observe normal final decisions and review every resulting publication in production.
+
+Review: verified200e Goldman normal attempt4 recorded stop_reason=max_tokens,input_tokens=21433,output_tokens=6000. This proves exhaustion only for that attempt. Proposed10000 allowance remains one existing text-only request, with120s/2MB/end_turn and multimodal/provider/publication behavior preserved. Cloud RED required before runtime edits; no local suites or original work resets/priority changes.
