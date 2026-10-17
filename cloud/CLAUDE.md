@@ -131,7 +131,11 @@ That validator's deny-list refuses EVERY host-namespace join, not only
 `pid:` — `ipc:`, `userns_mode:`, `uts:` and `cgroup:` widen the container's
 runtime the same way (R-668/REL-249), and the deny greps match quoted values
 too (`privileged: "true"` / `'true'` — the bare-`true` grep alone waved the
-quoted form through until T-441 caught it). The three copies
+quoted form through until T-441 caught it). `deploy-root-helper.sh` additionally refuses
+`RADON_DEPLOY_HELPER_TEST_MODE=1` outright when its effective uid is 0, ahead
+of the first `RADON_TEST_*` expansion: the mode substitutes systemctl, rm,
+sync, the session python and setpriv from the environment, and the helper is
+a NOPASSWD root chokepoint. The three copies
 (deploy-root-helper, bootstrap-control-plane, setup-vps) stay byte-identical;
 a parity test in `cloud/tests/test_rel234_compose_gate.py` pins them. Their
 body predicates consume here-strings, never `printf | grep -q` or another
