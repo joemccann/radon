@@ -1,3 +1,16 @@
+# PR 1132 refresh and completion (2026-10-17)
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+- [x] T1 depends_on: [] Inspect exact PR head, review incoming security changes and isolate from the dirty operator checkout.
+- [ ] T2 depends_on: [T1] Merge current green main, preserve the native-auth fix, and repair verified readiness blockers with red/green regressions.
+- [ ] T3 depends_on: [T2] Run focused/full verification and independent security review; update the existing PR and watch all exact-head checks.
+- [ ] T4 depends_on: [T3] Confirm the single PR-green notification, admin-merge the exact green head, and verify normal production delivery and installed control planes.
+
+## Review
+
+Existing PR head 5e6dde78 is green but behind production-green f699752d. Source review identified a new private-release terminal status missing from its feedback validator; regression and repair pending. Preserve unrelated user files and the existing security residuals; no CI or privilege gate is relaxed.
+
 # Subscription error page guidance (2026-10-17)
 
 Dependency graph: T1 -> T2 -> T3 -> T4.
