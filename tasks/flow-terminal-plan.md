@@ -1,6 +1,7 @@
 # Flow Terminal (SPX 0DTE desk): Build Plan
 
-> **STATUS (2026-10-13): PROPOSED.** Nothing here is built. Source material:
+> **STATUS (2026-10-17): DECIDED, NOT BUILT.** The five § 8 decisions were
+> answered by the operator on 2026-10-17. Nothing here is built. Source material:
 > the @BuildwithPublic "TZU" thread brief (`docs/design/flow-terminal/source-brief.md`,
 > gathered by GrokBot from X on 2026-10-13), the reference screenshot
 > (`docs/design/flow-terminal/before-tzu.jpg`), the no-slop review and direction
@@ -29,13 +30,14 @@ and changes four things:
 
 | TZU | Radon | Why |
 |---|---|---|
-| Prints inferred from volume deltas | UW `option_trades:SPX` websocket (per trade, side tagged at NBBO, premium, multi leg flags); volume delta inference only as a labelled fallback | The critique is right; provenance is shown per print |
+| Prints inferred from volume deltas | UW `option_trades:SPX` websocket only (per trade, side tagged at NBBO, premium, multi leg flags); no inferred path | The critique is right; v1 waits for the UW Advanced tier rather than ship unsigned prints |
 | Take profit 2× (gain 1× loss) | Take profit 3× minimum for live orders; 2× stays available in paper for scorecard breadth | Gate 1: gain ≥ 2× loss |
 | Fixed $600 / 6 trade caps | `kelly_ticket()` with p from the scorecard's hit rate for that edge bucket, half Kelly, 2.5% bankroll hard cap, plus the daily caps | Gate 3 |
 | Edge = options tape only | Edge criterion 6 = dark pool SPY pace agrees with the direction (`docs/evaluation.md` intraday interpolation); required for live arming | Gate 2: flow signal or nothing |
 
 Scorecard first: every signal is graded on whether the contract reached 2× and
-3× within 30 minutes, by edge bucket and by print source. The engine does not
+3× within 30 minutes, by edge bucket, by entry hour and by whether criterion 6
+(dark pool agreement) held. The engine does not
 arm live until the scorecard has at least five sessions.
 
 **Canonical name everywhere:** `flow-terminal` / `flow_terminal`.
@@ -82,7 +84,7 @@ FastAPI `/flow-terminal/...`, Next `/api/flow-terminal/...`, page
 |---|---|---|---|---|
 | SPX spot | IB `reqMktData` on the SPX index | UW `price:SPX` ws | stream | Same session as the chain |
 | SPXW 0DTE chain: bid/ask/last/volume/OI/IV/delta/gamma | IB streaming lines, strikes within spot ± 3 expected moves, re-centred every 5 min | UW `GET /stock/SPX/greeks?expiry=` + `option-contracts` at 60s | stream, snapshot every 1s | ~50 to 90 lines; the all strikes chain tab already streams up to 202 contracts through the relay (`scripts/CLAUDE.md` § Relay subscription admission), so the line budget is known to hold. Measured in M0 |
-| Prints | UW ws `option_trades:SPX` (needs Advanced tier; probed in M0) | Volume delta inference from the IB chain, `source = "inferred"` | per trade | Never mix sources in one scorecard bucket |
+| Prints | UW ws `option_trades:SPX` (Advanced tier; upgrade before M0) | none: no tape, no signals, the finding names the missing feed | per trade | Decision 3: no inferred path in v1 |
 | Dark pool SPY | UW `GET /darkpool/SPY` via `uw_client.get_darkpool_flow` | none | 60s | Pace vs prior 5 sessions per `docs/evaluation.md` § Intraday Dark Pool Interpolation |
 | Dealer exposure cross check | UW `GET /stock/SPX/spot-exposures/{expiry}/strike` (per strike `call/put_{gamma,charm,vanna}_{oi,vol,ask_vol,bid_vol}`, `docs/unusual_whales_api_spec.yaml:14600-14640`, wrapper to add beside `uw_client.get_spot_exposures`) | none | 60s | Radon publishes its own map AND the drift from UW's; the drift is a scorecard column |
 | Risk free rate | FRED DFF (same source as `web/lib/useRiskFreeRate.ts`) | 0.0 | daily | |
@@ -91,9 +93,19 @@ FastAPI `/flow-terminal/...`, Next `/api/flow-terminal/...`, page
 Robinhood serves NBBO/last only (root `CLAUDE.md` § Data Source Priority) and
 has no greeks, OI or tape, so it is not on this path. Yahoo is not on this path.
 
+Public's Trading API (the source TZU used) was checked on 2026-10-17 and is not
+on this path either. Its documented market data is `POST .../option-chain`
+(bid/ask/last, sizes, `volume`, `openInterest`, greeks, IV per contract),
+`GET .../option-details/{accountId}/greeks` (max 250 OSI symbols per call),
+quotes and bars (`public.com/api/docs`). It documents no time and sales, no
+trade prints, no websocket and no rate limit, and the thread's author said
+streaming is "coming". It duplicates what the IB lines already give and cannot
+replace the UW tape. Revisit if Public ships a print feed.
+
 Confidence: IB line budget high (the relay streams a 202 contract chain today);
-UW websocket entitlement unknown until M0; UW spot exposure field names high
-(read from the spec).
+UW websocket entitlement confirmed only after the upgrade, verified in M0; UW
+spot exposure field names high (read from the spec); Public API surface moderate
+(read from the docs index and two endpoint pages, not called).
 
 ---
 
@@ -111,7 +123,7 @@ scripts/flow_terminal/
   sizing.py        size_entry(edge_bucket_stats, premium, bankroll) via scripts/kelly.py       [pure]
   engine.py        FLAT -> ENTERING -> IN_POSITION state machine, caps, windows, cooldown      [pure]
   ingest_ib.py     IB session: spot + chain lines, 1s snapshots, client_id="auto"
-  ingest_uw.py     UW websocket consumer (option_trades:SPX), reconnect, inferred fallback
+  ingest_uw.py     UW websocket consumer (option_trades:SPX), bounded reconnect, gap marker
   darkpool.py      60s SPY dark pool pace
   store.py         batched Turso writes (chunked multi row INSERT, 5s cadence)
   publish.py       atomic_save() of data/flow_terminal/latest.json + prints-YYYY-MM-DD.jsonl
@@ -151,7 +163,7 @@ connection per batch.
 Rules as published (brief § 3), made explicit:
 
 - Watch: OTM, mid $0.50 to $3.00.
-- Block: ≥ 500 contracts in one trade (tape) or one read (inferred).
+- Block: ≥ 500 contracts in one trade.
 - Burst: ≥ 300 contracts in 60s at ≥ 5× NORM.
 - Skip: contract already up > 100% in the last 2 minutes.
 - Edge, six binary criteria, one point each:
@@ -161,13 +173,16 @@ Rules as published (brief § 3), made explicit:
   4. Print signed at the ask (buyer initiated).
   5. Burst and block both true, or premium ≥ $100k.
   6. Dark pool SPY pace ≥ 1.2× prior and on the same side (Gate 2 marker).
-- Live arming requires criterion 6 true on the triggering print; paper does not.
+- Live arming requires criterion 6 true on the triggering print (decision 4);
+  paper takes every print that passes the other rules so the scorecard can
+  measure what the dark pool filter adds.
 
 ### 4.4 Engine (`engine.py`, `sizing.py`)
 
-- Entry: side filter (calls or puts), min edge (default 3), entry windows
-  (default 10:00 to 12:59 and 15:45 to 15:55 ET, configurable), cooldown 3m,
-  OTM ≤ 0.8%, ask $1.00 to $1.50.
+- Entry: side filter (calls or puts), min edge (default 3), entry window
+  (default 09:45 to 15:55 ET, decision 5; configurable as a list of windows),
+  cooldown 3m, OTM ≤ 0.8%, ask $1.00 to $1.50. The scorecard reports hit rate
+  per entry hour so the window can be narrowed on evidence.
 - Order: limit at ask + 1 tick, cancel after 6s; on fill a resting limit sell at
   the take profit multiple; no stop; hold to the 16:00 cash settle.
 - Sizing: `kelly_ticket(prob_win = scorecard hit rate for the edge bucket and
@@ -194,7 +209,7 @@ Rules as published (brief § 3), made explicit:
 
 ```
 flow_prints          (id, session_date, ts, symbol, expiry, strike, right, size, price, premium,
-                      side bid|mid|ask, source tape|inferred, is_block, burst_x, edge, edge_bits,
+                      side bid|mid|ask, is_block, burst_x, edge, edge_bits,
                       spot, raw json)                       -- every flagged print
 flow_dealer_snapshots(session_date, ts, symbol, expiry, mode, spot, net_gex, charm, vanna,
                       flip, call_wall, put_wall, accel, em, by_strike json, uw_drift)
@@ -269,9 +284,9 @@ exhaustive), `resolveSectionFromPath` (`web/lib/chat.ts:533`), the switch in
 | `FlowFinding.tsx` | The sentence and the six item ledger | Sentence built from state by `lib/flowTerminal/finding.ts`; missing inputs render the brand error pattern ("Dealer map unavailable. Chain feed incomplete. Last valid sample 10:14:59 ET."), never an empty sentence |
 | `FlowInstrument.tsx` | SVG: price path, print bubbles, ladder bars on the shared price axis, walls / accel / flip rules, EM band, spot tag | Hand built SVG like `instruments/GexLaplaceContour.tsx` and `RegimeRelationshipView.tsx`; d3 scales only. Bubble fill = call solid / put hollow; tone = edge state (`--text-muted` → `--signal-deep` → `--signal-core`); ladder `--signal-core` long γ, `--dislocation` short γ |
 | `FlowPremiumStrip.tsx` | Net premium bought line + per bar flow histogram on the same time scale | `--fault` for the signed line only |
-| `PrintTape.tsx` | Dense table, newest first, `SortTh` + `useSort` | Columns ET, contract, size, px, side, ×norm, edge, source badge when inferred |
+| `PrintTape.tsx` | Dense table, newest first, `SortTh` + `useSort` | Columns ET, contract, size, px, side, ×norm, edge; a tape gap renders as one muted row naming its start and end |
 | `EnginePanel.tsx` | Side, min edge, TP multiple, sizing summary, ack, Arm, caps line; **owns the arm fetch** | Renders `<OrderRiskGate>` for the representative one contract long call (bounded); typed confirmation on arm; disabled until ack |
-| `ScorecardTable.tsx`, `ModelDisclosure.tsx` | Scorecard by edge bucket and source, UW drift column; model text | Below the fold |
+| `ScorecardTable.tsx`, `ModelDisclosure.tsx` | Scorecard by edge bucket, entry hour and criterion 6, UW drift column; model text | Below the fold |
 | `mobile/MobileFlowTerminal.tsx` | One column: finding, instrument with the ladder collapsed to the three levels, tape, engine as `BottomSheet` | 393×852 capture before M3 closes |
 
 Rules: tokens only, `color-mix` washes, 6 to 10px radii per Clear; no raw hex;
@@ -296,8 +311,9 @@ Python (`scripts/tests/test_flow_terminal/`):
   dark pool pace helper.
 - `test_sizing.py`: half Kelly, 2.5% cap wins, refusal below five sessions.
 - `test_engine.py`: entry at ask + 1 tick, cancel at 6s, TP resting after fill,
-  caps, cooldown, windows, Gate 1 refuses live TP < 3×, disarm on halt /
-  degraded / restart, idempotency key = signal id.
+  caps, cooldown, the 09:45 to 15:55 default window, Gate 1 refuses live
+  TP < 3×, live arm refused when criterion 6 is false on the triggering print,
+  disarm on halt / degraded / restart / UW tape gap, idempotency key = signal id.
 - `test_store.py`: chunked multi row INSERT, 5s batching, cursor reads.
 - `test_contract_resolver_spxw.py`.
 - FastAPI route tests: stream emits `state` then `print`, `Last-Event-ID`
@@ -326,7 +342,7 @@ Coverage target 95% on `scripts/flow_terminal/` and `web/components/flow-termina
 
 | M | Scope | Done when |
 |---|---|---|
-| M0 Probe | `probe.py`: UW ws `option_trades:SPX` for 60s during RTH; IB session with 90 SPXW lines and ticks 100/101/106; SPXW resolver fix | Evidence file with message counts, line errors, OI tick presence; decision recorded: tape vs inferred |
+| M0 Probe | UW Advanced tier active (operator); `probe.py`: UW ws `option_trades:SPX` for 60s during RTH; IB session with 90 SPXW lines and ticks 100/101/106; SPXW resolver fix | Evidence file with UW ws message counts > 0 and side tags present, IB line errors, OI tick presence. No UW tape = M0 does not close |
 | M1 Model | `greeks`, `dealer`, `detector`, `edge`, `sizing`, `engine` pure modules | All Python tests green; fixture reproduces the TZU snapshot's level ordering |
 | M2 Daemon, paper only | ingest, publish, store, unit, health | Runs three full sessions on Hetzner; rows in Turso `flow_dealer_snapshots` / `flow_prints` / `flow_signals`; `latest.json` under 1.5s old through RTH; UW drift column populated |
 | M3 UI read only | page, finding, instrument, tape, scorecard, mobile | Vitest + E2E green; chrome-cdp screenshots light/dark/mobile attached to the PR; no-slop re-score ≤ 0.5 |
@@ -338,25 +354,33 @@ green, Pushover `radon PR green` on each.
 
 ---
 
-## 8. Decisions needed before M0
+## 8. Decisions (operator, 2026-10-17)
 
-1. **Underlying:** SPX only for v1. SPY (American, physically settled, no 16:00
-   cash settle) is a later variant with its own engine rules.
-2. **Host:** the daemon runs on Hetzner next to the gateway (cloud mode). Laptop
-   only for development against the local gateway.
-3. **UW tier:** websocket needs the Advanced tier. If M0 shows no entitlement,
-   v1 ships inferred prints labelled as such and the live arm stays disabled
-   until a tape source exists.
-4. **Gate 2 for live:** criterion 6 (dark pool SPY agreement) is required to
-   arm. Recommended yes; without it the terminal is a lit flow follower, which
-   is not Radon's edge.
-5. **Entry windows:** keep TZU's defaults as config, no rationale was given in
-   the thread; the scorecard will say whether they matter.
+1. **Underlying: SPX only.** SPY (American, physically settled, no 16:00 cash
+   settle) is a later variant with its own engine rules.
+2. **Host: Hetzner, cloud mode.** The daemon runs next to the gateway and
+   FastAPI. Laptop only for development against the local gateway.
+3. **Prints: upgrade UW to the Advanced tier first.** No inferred path in v1.
+   M0 blocks until the `option_trades:SPX` websocket delivers side tagged
+   prints. Public's API was considered and rejected for prints (§ 3: no tape,
+   no websocket).
+4. **Gate 2: dark pool agreement required for live.** Criterion 6 must be true
+   on the triggering print to arm live; paper ignores it so the scorecard can
+   measure the filter.
+5. **Entry window: whole session, 09:45 to 15:55 ET.** Configurable as a list of
+   windows; the scorecard reports hit rate per entry hour so it can be narrowed
+   on evidence.
 
 ## 9. Risks
 
-- Inferred print misattribution: shown per print, scored per source, never
-  pooled.
+- UW websocket outage or tier lapse: no prints means no signals. The finding
+  names the missing feed, the tape shows the gap, the engine disarms on any
+  gap longer than 30 seconds, and `service_health[flow-terminal]` records
+  `warn`.
+- Whole session window: midday tape is thinner and the 15:45 to 15:55 slice
+  has the worst fills into the settle. The per hour scorecard is the control;
+  the five session minimum before live applies to each hour bucket the engine
+  trades.
 - Naive dealer sign convention: the UW drift column makes disagreement visible
   every 60s; a drift above a threshold paints the finding sentence with the
   warn state.
