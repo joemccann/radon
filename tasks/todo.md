@@ -9580,3 +9580,11 @@ CI repair: run 38968894246 / job 117203223236 timed out the PDF pagination regre
 - [ ] T3 depends_on: [T2] Complete exact-head CI, independent review and authorized deployment.
 - [ ] T4 depends_on: [T1, T3] Audit blocked document eligibility, recover infrastructure failures with checkpoints and verify live publication/health.
 Review: Preserve publication quality gates and source attribution; no local test suites. Investigate extraction errors separately from editorial holds.
+
+
+## Research review stale API connection follow-up (2026-10-17)
+- [x] R1 depends_on: [] Observe a new DbHttpError during three-key recovery; confirm API/shared transport retry gap without assuming the unrecorded exception cause.
+- [ ] R2 depends_on: [R1] Extend existing real-socket regressions to API transport; prove red on GitHub.
+- [ ] R3 depends_on: [R2] Port proven read-only reconnect classification and socket retirement; independent review and exact-head green CI.
+- [ ] R4 depends_on: [R3] Wait for the separate control-plane release; deploy without weakening isolation, verify recovery and canonical outcomes.
+Review: No local suites. Never replay ambiguous writes. Preserve existing database outage parking and publication quality gates.
