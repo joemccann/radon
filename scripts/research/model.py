@@ -70,7 +70,7 @@ class Reviewer:
                 self._document_timeouts[has_images].add(parts[0])
 
     def ask_text(self, instruction):
-        """Text-only JSON completion (intake v2 SELECT): no images, larger output budget, cheapest text rung."""
+        """Bounded text-only JSON for selection and chart planning; no images, cheapest text rung."""
         try:
             result = complete_text_json(
                 instruction,
@@ -79,7 +79,7 @@ class Reviewer:
                 env=self.env,
                 post=self.session.post if self.session is not None else None,
                 model_override=self.env.get("RADON_RESEARCH_TEXT_MODEL") or self.model,
-                max_tokens=6000,
+                max_tokens=10000,
                 read_timeout=120.0,
                 max_response_bytes=2_000_000,
                 require_end_turn=True,
