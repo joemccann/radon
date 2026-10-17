@@ -26,6 +26,11 @@ from watchdog import pages as pages_mod  # noqa: E402
 
 NOW = datetime(2026, 9, 27, 0, 15, tzinfo=timezone.utc)
 _TIMEOUT = "TimeoutError: The read operation timed out"
+# 2026-10-17 02:59:39Z complete_page. hrana wraps the socket drop as
+# ``{type}: {message}`` and the oneshot must not treat that as a statement error.
+_DISCONNECT = (
+    "RemoteDisconnected: Remote end closed connection without response"
+)
 
 
 def _page() -> dict:
@@ -90,6 +95,10 @@ def _timeout(*_a, **_k):
     raise HranaHttpError(_TIMEOUT)
 
 
+def _disconnect(*_a, **_k):
+    raise HranaHttpError(_DISCONNECT)
+
+
 class TestLedgerReadTimeout:
     def test_claim_timeout_does_not_fail_the_oneshot(
         self, cycle_env, monkeypatch, capsys
@@ -147,6 +156,29 @@ class TestLedgerReadTimeout:
         assert cycle_env["heartbeats"] == []
         assert not cycle_env["lock"].exists()
         assert "grok page ledger non-fatal" in capsys.readouterr().err
+
+    def test_complete_remote_disconnect_does_not_fail_the_oneshot(
+        self, cycle_env, monkeypatch, capsys
+    ):
+        """02:59:39Z: grok had finished and complete_page raised
+        RemoteDisconnected. The TimeoutError matcher let it escape, the
+        interpreter exited 1, and the poller paged itself. Exit 0, release
+        the lock, skip the ok heartbeat, and do not follow up a page that
+        is not recorded done."""
+        monkeypatch.setattr(pages_mod, "complete_page", _disconnect)
+
+        rc = responder.run_cycle(
+            cycle_env["root"], now=NOW, grok_runner=cycle_env["runner"]
+        )
+
+        assert rc == 0
+        assert len(cycle_env["invocations"]) == 1
+        assert cycle_env["heartbeats"] == []
+        assert cycle_env["followups"] == []
+        assert not cycle_env["lock"].exists()
+        err = capsys.readouterr().err
+        assert "grok page ledger non-fatal" in err
+        assert _DISCONNECT in err
 
     def test_statement_error_still_fails_the_oneshot(self, cycle_env, monkeypatch):
         """A ledger statement error is the cycle failing, not a read stall.
