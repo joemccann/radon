@@ -157,7 +157,10 @@ pickup refuses:
   which would execute attacker-authored CI in this repository. The changed
   paths are read with `git diff -z --name-only` and split on NUL: without
   `-z`, git C-quotes a path carrying a non-ASCII byte, a quote or a newline,
-  and `".github/workflows/é.yml"` does not start with `.github/`;
+  and `".github/workflows/é.yml"` does not start with `.github/`. It also
+  passes `--no-renames`: a detected rename emits only the destination, so
+  moving a workflow or CODEOWNERS out of `.github/` showed the permitted
+  destination alone;
 - a branch that does not descend from `origin/main`, or exceeds the commit cap
   (default 20);
 - anything at all unless `GROK_PAGE_AUTOPUSH` is truthy in the pickup job's

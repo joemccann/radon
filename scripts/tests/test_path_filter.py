@@ -799,3 +799,22 @@ def test_a_non_ascii_changed_path_is_returned_verbatim(tmp_path: Path) -> None:
 
     assert paths == ["scripts/é.py"]
     assert classify(paths) == classify(["scripts/ascii.py"])
+
+
+def test_a_rename_reports_both_endpoints(tmp_path: Path) -> None:
+    """Rename detection is on by default and a detected rename emits only the
+    destination, so moving a runtime file out of scripts/ selected no python
+    gate even though the python tree changed."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    base = _commit(repo, "scripts/runtime.py", "seed")
+    (repo / "docs").mkdir()
+    _git(repo, "mv", "scripts/runtime.py", "docs/runtime.md")
+    _git(repo, "commit", "-q", "--no-verify", "-m", "move out of scripts")
+    head = _git(repo, "rev-parse", "HEAD")
+
+    paths = changed_paths(base, head, cwd=repo)
+
+    assert "scripts/runtime.py" in paths and "docs/runtime.md" in paths
+    assert classify(paths)[0] is True

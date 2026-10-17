@@ -267,7 +267,11 @@ line here whenever you ship a security fix.**
   prefix test against it matches nothing. The same root cause produced a
   publication-refusal bypass in `scripts/grok_fix_pickup.py` and a silently
   skipped CI gate in `scripts/ci/path_filter.py`. Every consumer passes `-z`
-  and splits on NUL. A new `--name-only` call without `-z` is a finding.
+  and splits on NUL, and `--no-renames` with it: rename detection is on by
+  default and a detected rename emits only the DESTINATION, so moving a
+  protected file OUT of `.github/` showed the permitted destination alone, and
+  moving a runtime file out of `scripts/` selected no python gate. A new
+  `--name-only` call without both flags is a finding.
   (`scripts/tests/test_grok_fix_pickup.py`, `scripts/tests/test_path_filter.py`)
 
 ## Triage & patch policy

@@ -157,8 +157,15 @@ def refusal_reason(
     # the branch was pushed and opened as a same-repository PR where
     # pull_request workflows run from the PR head. NUL-separated output is the
     # literal pathname, so the prefix test is what it claims to be.
+    # --no-renames for the same reason, one layer up: rename detection is on
+    # by default and a detected rename emits only the DESTINATION, so moving a
+    # workflow or CODEOWNERS out of `.github/` showed the permitted
+    # destination alone. Without renames the move is a delete plus an add and
+    # the protected source is back in the list.
     diff_proc = _git(
-        repo, ["diff", "-z", "--name-only", f"{fork_point}..{ref}"], runner=runner
+        repo,
+        ["diff", "--no-renames", "-z", "--name-only", f"{fork_point}..{ref}"],
+        runner=runner,
     )
     if getattr(diff_proc, "returncode", 1) != 0:
         return "cannot list changed paths"
