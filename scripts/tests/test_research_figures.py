@@ -198,10 +198,33 @@ def test_single_raster_image_chart_is_a_figure(tmp_path):
     assert len(found) == 1
     fig = found[0]
     assert fig["kind"] == "raster"
+    assert fig["title"] == "Exhibit 1: S&P 500 EPS revisions breadth"
+    assert fig["source_line"] == "Source: Goldman Sachs Global Investment Research"
     l, t, r, b = fig["bbox"]
     assert l <= 72 / W and r >= 540 / W
     assert t <= (H - 712) / H and b >= (H - 370) / H, "title and Source line are inside the crop"
     assert b < (H - 330) / H, "body prose stays outside the crop"
+
+
+def test_pure_raster_figure_does_not_grow_into_adjacent_prose(tmp_path):
+    # A self-contained raster chart needs no external PDF text. The next body
+    # sentence is close enough to pass TEXT_REACH, but it is not a chart label.
+    image_bottom = 400
+    prose_baseline = 382
+    content = (image_chart(72, image_bottom, 540, 680)
+               + text(72, prose_baseline,
+                      "This, recall, is on top of the actual tightening, and the next paragraph continues."))
+    path = tmp_path / "raster-with-nearby-prose.pdf"
+    path.write_bytes(_pdf(content, image=(8, 8, GRAY)))
+
+    found = figures.detect(path, 1)
+    assert len(found) == 1
+    figure = found[0]
+    assert figure["kind"] == "raster" and figure["objects"] == 1
+    assert figure["title"] is None and figure["source_line"] is None
+    assert figure["bbox"][1] <= (H - 680) / H
+    assert figure["bbox"][3] >= (H - image_bottom) / H
+    assert figure["bbox"][3] < (H - prose_baseline) / H, "following body prose must stay outside the crop"
 
 
 def test_two_lone_raster_charts_are_two_figures(tmp_path):

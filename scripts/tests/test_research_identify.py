@@ -178,6 +178,35 @@ def test_text_date_is_found_with_its_literal_quote(text, expected, quote):
     assert quote in ident.date_quote
 
 
+def test_tyler_durden_october_byline_precedes_the_next_day_folder_date():
+    text = "BY TYLER DURDEN TUESDAY, OCT 13, 2026 - 08:55 PM"
+    ident = identify.identify({1: text}, meta("x.pdf"), "2026-10-14")
+
+    assert ident.date == "2026-10-13"
+    assert ident.date_source == "text"
+    assert ident.date_page == 1
+    assert "OCT 13, 2026" in ident.date_quote
+
+
+@pytest.mark.parametrize("month_token,month_number", [
+    ("january", 1), ("february", 2), ("march", 3), ("april", 4),
+    ("may", 5), ("june", 6), ("july", 7), ("august", 8),
+    ("september", 9), ("october", 10), ("november", 11), ("december", 12),
+    ("jan", 1), ("feb", 2), ("mar", 3), ("apr", 4), ("may", 5),
+    ("jun", 6), ("jul", 7), ("aug", 8), ("sep", 9), ("sept", 9),
+    ("oct", 10), ("nov", 11), ("dec", 12),
+])
+def test_all_month_names_and_abbreviations_parse_before_next_day_cutoff(month_token, month_number):
+    text = f"{month_token.upper()} 13, 2026"
+    folder_date = f"2026-{month_number:02d}-14"
+    ident = identify.identify({1: text}, meta("x.pdf"), folder_date)
+
+    assert ident.date == f"2026-{month_number:02d}-13"
+    assert ident.date_source == "text"
+    assert ident.date_page == 1
+    assert ident.date_quote == text
+
+
 def test_download_stamp_is_skipped_for_the_report_date():
     text = ("Downloaded from Capital IQ by Someone at BlackRock, Inc. on Monday Sep 07 2026 09:44:42 PM, Sessionid:abc "
             "### Utilities # The Wolfe Power Trip August 31, 2026 ## A peek at the peaks")
