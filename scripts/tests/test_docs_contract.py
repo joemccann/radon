@@ -2308,3 +2308,26 @@ class TestDocumentation20261016:
         assert "keep-alive" in prose
         assert "one socket per thread" in prose
 
+
+def _heading_section(path: str, heading: str) -> str:
+    text = (_ROOT / path).read_text()
+    marker = f"## {heading}"
+    start = text.find(marker)
+    assert start != -1, f"{path} is missing {marker}"
+    rest = text[start + len(marker):]
+    nxt = rest.find("\n## ")
+    return rest if nxt == -1 else rest[:nxt]
+
+
+class TestDocumentation20261017:
+    """DOC-203: one Flex transport line had three recovery cases."""
+
+    def test_flex_transport_line_has_one_current_case(self):
+        section = _heading_section("docs/incident-runbook.md", "flex-pull-trade-coverage")
+        assert "flex-pull-coverage-read-disconnect" in section
+        assert "flex-pull-coverage-unread" not in section
+        assert "flex-pull-coverage-keepalive-reset" not in section
+        ingest = (_ROOT / "scripts/flex_delivery_ingest.py").read_text()
+        assert '"outcome": "coverage_unread"' not in ingest
+        assert "_COVERAGE_READ_ATTEMPTS = 2" in ingest
+
