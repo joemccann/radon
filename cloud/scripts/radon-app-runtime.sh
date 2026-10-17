@@ -258,7 +258,7 @@ image_in_local_store() {
 image_matches_registry() {
   # `buildx imagetools` is docker-only; podman re-pulls, which is layer-incremental.
   [[ "$ENGINE" == podman ]] && return 1
-  "$PYTHON" - "$DOCKER" "$1" <<'PYCODE'
+  "$PYTHON" -I - "$DOCKER" "$1" <<'PYCODE'
 import json, re, subprocess, sys
 docker, image = sys.argv[1:]
 def read(args):
@@ -356,7 +356,7 @@ acquire_pull_lock() {
     return 71
   fi
   exec 9<>"$PULL_LOCK_FILE" || return 71
-  "$PYTHON" - "$PULL_LOCK_FILE" "$PULL_LOCK_WAIT_SECS" <<'PYCODE'
+  "$PYTHON" -I - "$PULL_LOCK_FILE" "$PULL_LOCK_WAIT_SECS" <<'PYCODE'
 import fcntl, os, stat, sys, time
 path, wait = sys.argv[1], float(sys.argv[2])
 opened, named = os.fstat(9), os.lstat(path)
@@ -439,7 +439,7 @@ cmd_prune() {
 
 # $2 is 1 when the caller already holds the pull lock shared on fd 9.
 prune_stale_app_images() {
-  "$PYTHON" - "$DOCKER" "$1" "$DEPLOY_LOCK_FILE" "$GREEN_MARKER_FILE" "$TRANSITION_JOURNAL_FILE" "$PULL_LOCK_FILE" "$2" <<'PYCODE'
+  "$PYTHON" -I - "$DOCKER" "$1" "$DEPLOY_LOCK_FILE" "$GREEN_MARKER_FILE" "$TRANSITION_JOURNAL_FILE" "$PULL_LOCK_FILE" "$2" <<'PYCODE'
 import fcntl, json, os, re, stat, subprocess, sys
 from pathlib import Path
 
@@ -585,7 +585,7 @@ cmd_halt() {
 cmd_notify_proxy() {
   local listen="${1:-}" upstream="${2:-}"
   [[ -n "$listen" && -n "$upstream" ]] || usage
-  exec "$PYTHON" - "$listen" "$upstream" <<'PY'
+  exec "$PYTHON" -I - "$listen" "$upstream" <<'PY'
 import os, socket, sys
 listen, upstream = sys.argv[1], sys.argv[2]
 try:
@@ -693,7 +693,7 @@ render_env_file() {
 prepare_research_dir() {
   local ids="$1" anchor=/var/lib/radon-private
   [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]] && anchor="${STATE_DIR}/private"
-  "$PYTHON" - "$anchor" "$ids" "${RADON_APP_RUNTIME_TEST_MODE:-0}" <<'PY_RESEARCH'
+  "$PYTHON" -I - "$anchor" "$ids" "${RADON_APP_RUNTIME_TEST_MODE:-0}" <<'PY_RESEARCH'
 import os, stat, sys
 from pathlib import Path
 anchor = Path(sys.argv[1])
@@ -740,7 +740,7 @@ PY_RESEARCH
 # and use. Shared chokepoint for the secret store and the 2FA lease dir.
 prepare_private_dir() {
   local ids="$1" dir="$2" label="$3"
-  "$PYTHON" - "$dir" "$ids" "${RADON_APP_RUNTIME_TEST_MODE:-0}" "$label" <<'PY_PRIVATE_DIR' || exit 78
+  "$PYTHON" -I - "$dir" "$ids" "${RADON_APP_RUNTIME_TEST_MODE:-0}" "$label" <<'PY_PRIVATE_DIR' || exit 78
 import os, sys
 from pathlib import Path
 path, ids, test, label = sys.argv[1], sys.argv[2], sys.argv[3] == '1', sys.argv[4]

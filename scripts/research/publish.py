@@ -250,8 +250,10 @@ def record_outcome(work: dict, review: dict) -> None:
         f"INSERT INTO research_outcomes ({','.join(_OUTCOME_COLUMNS)},updated_at,held_at) "
         f"VALUES ({','.join('?' * len(_OUTCOME_COLUMNS))},?,?) "
         f"ON CONFLICT(work_key) DO UPDATE SET {updates},updated_at=excluded.updated_at,"
-        f"held_at=CASE WHEN excluded.outcome='held' THEN COALESCE(research_outcomes.held_at, excluded.held_at) "
-        f"ELSE research_outcomes.held_at END",
+        f"held_at=CASE WHEN excluded.outcome='held' THEN CASE "
+        f"WHEN research_outcomes.outcome='held' AND research_outcomes.expired_at IS NULL "
+        f"THEN COALESCE(research_outcomes.held_at, excluded.held_at) ELSE excluded.held_at END "
+        f"ELSE research_outcomes.held_at END,expired_at=NULL",
         (*[row[c] for c in _OUTCOME_COLUMNS], now, held_at))
 
 

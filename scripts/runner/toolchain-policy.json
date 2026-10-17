@@ -1,0 +1,13 @@
+{
+  "deepsec": "2.3.8",
+  "codex": "0.162.1",
+  "smoke_model": "gpt-6.1-sol",
+  "desktop_casks": {
+    "codex": null,
+    "visual-studio-code": "Visual Studio Code.app",
+    "obsidian": "Obsidian.app"
+  },
+  "automatic_stable_updates": true,
+  "maintenance_gate": "/usr/local/radon-runner/maintenance.lock",
+  "maintenance_ready": "/usr/local/radon-runner/maintenance-ready.json"
+}
