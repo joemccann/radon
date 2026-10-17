@@ -57,6 +57,9 @@ def cycle_env(monkeypatch, tmp_path):
     monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "0")
     monkeypatch.setenv("GROK_PAGE_AUTOPUSH", "0")
     monkeypatch.setenv("GROK_PAGE_SYNC_REMOTE", "0")
+    # The VPS lock dir is writable, so an unset override blocks on the
+    # live incident run. These tests must not take that lock.
+    monkeypatch.setenv("RADON_GROK_RUNTIME_LOCK", str(tmp_path / "runtime.lock"))
     heartbeats: list[str] = []
     followups: list[dict] = []
     invocations: list = []
@@ -88,6 +91,18 @@ def cycle_env(monkeypatch, tmp_path):
 
 def _timeout(*_a, **_k):
     raise HranaHttpError(_TIMEOUT)
+
+
+# Page 0bd43c03976d2cb9b20ce3e5724fc667, 2026-10-17 02:59:39Z.
+# complete_page's hrana execute wrapped http.client.RemoteDisconnected.
+# The oneshot must treat that transport drop like the read timeout above.
+_REMOTE_DISCONNECT = (
+    "RemoteDisconnected: Remote end closed connection without response"
+)
+
+
+def _remote_disconnect(*_a, **_k):
+    raise HranaHttpError(_REMOTE_DISCONNECT)
 
 
 class TestLedgerReadTimeout:
@@ -165,3 +180,26 @@ class TestLedgerReadTimeout:
         assert cycle_env["heartbeats"] == []
         assert cycle_env["invocations"] == []
         assert not cycle_env["lock"].exists()
+
+
+class TestLedgerRemoteDisconnect:
+    def test_complete_remote_disconnect_does_not_fail_the_oneshot(
+        self, cycle_env, monkeypatch, capsys
+    ):
+        """02:59:39Z: grok had already finished and complete_page raised
+        HranaHttpError RemoteDisconnected. Exiting 1 paged this poller.
+        Exit 0, no ok heartbeat, no follow-up for a page that is not done."""
+        monkeypatch.setattr(pages_mod, "complete_page", _remote_disconnect)
+
+        rc = responder.run_cycle(
+            cycle_env["root"], now=NOW, grok_runner=cycle_env["runner"]
+        )
+
+        assert rc == 0
+        assert len(cycle_env["invocations"]) == 1
+        assert cycle_env["heartbeats"] == []
+        assert cycle_env["followups"] == []
+        assert not cycle_env["lock"].exists()
+        err = capsys.readouterr().err
+        assert "grok page ledger non-fatal" in err
+        assert _REMOTE_DISCONNECT in err
