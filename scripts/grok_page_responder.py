@@ -711,13 +711,35 @@ def _heartbeat(state: str, now: datetime, *, error: Optional[dict] = None) -> No
 
 
 def _ledger_read_timeout(exc: BaseException) -> bool:
-    """True for the hrana read stall that must not fail the oneshot.
+    """True when a ledger transport blip must not fail the oneshot.
 
-    Production string: ``TimeoutError: The read operation timed out``.
+    Production strings: ``TimeoutError: The read operation timed out`` and
+    ``RemoteDisconnected: Remote end closed connection without response``.
     A statement error or missing credential still fails the unit.
     """
     text = str(exc)
-    return "TimeoutError" in text or "The read operation timed out" in text
+    return (
+        "TimeoutError" in text
+        or "The read operation timed out" in text
+        or "RemoteDisconnected" in text
+        or "Remote end closed connection" in text
+    )
+
+
+def _drop_idle_hrana_socket() -> None:
+    """Drop the thread-local Hrana socket before a post-grok ledger write.
+
+    ``claim_page`` opens a keep-alive, then grok runs for minutes. The peer
+    closes that idle socket. The completion UPDATE is not replay-safe, so a
+    ``RemoteDisconnected`` on the dead socket fails the oneshot instead of
+    recording the page. Closing first makes that UPDATE the first send on a
+    new connection.
+    """
+    try:
+        from db.hrana_http import _close_keepalive
+    except ImportError:  # pragma: no cover - package import layout
+        from scripts.db.hrana_http import _close_keepalive
+    _close_keepalive()
 
 
 def _default_grok_runner(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -902,6 +924,11 @@ def run_cycle(
             }), file=sys.stderr)
             return 0
 
+        # The subprocess held this thread for minutes. The claim socket is
+        # idle and the peer may already have closed it. Drop it before any
+        # ledger write so the UPDATE is not a send on that dead keep-alive.
+        _drop_idle_hrana_socket()
+
         if timeout_err:
             status = pages_mod.record_attempt_failure(
                 page["page_id"],
@@ -994,10 +1021,10 @@ def run_cycle(
         }))
         return 0
     except HranaHttpError as exc:
-        # A 4s ledger read stall is the heartbeat timeout's sibling: the
-        # next timer is 30s away. Exit 0 so systemd does not page this
-        # poller about itself. Skip the ok heartbeat so a standing Turso
-        # outage still goes stale.
+        # A 4s ledger stall, or a keep-alive the peer closed while grok ran,
+        # is the heartbeat timeout's sibling: the next timer is 30s away.
+        # Exit 0 so systemd does not page this poller about itself. Skip the
+        # ok heartbeat so a standing Turso outage still goes stale.
         completed = False
         if _ledger_read_timeout(exc):
             print(f"grok page ledger non-fatal: {exc}", file=sys.stderr)
