@@ -16,7 +16,9 @@ set -euo pipefail
 BOT="${RADON_RUNNER_USER:-_radonbot}"
 BOT_HOME="/Users/$BOT"
 PREFIX="${RADON_RUNNER_PREFIX:-/usr/local/radon-runner}"
-SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# pwd -P, matching check_source: with a logical path the ancestor walk
+# validates one chain and the copies later read another.
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REAL_GH="${RADON_RUNNER_GH:-/opt/homebrew/bin/gh}"
 GUARD_PYTHON="${RADON_RUNNER_PYTHON:-/opt/homebrew/bin/python3.13}"
 # Copied from scripts/ into $PREFIX/lib, root-owned: the hooks, the resolver
@@ -51,8 +53,19 @@ check_source() {
     dir="$(dirname "$dir")"
   done
   local paths=("$tree/scripts/runner") file
-  for file in $LIB_FILES; do paths+=("$tree/scripts/$file"); done
-  bad="$({ find "$tree" "$tree/scripts" "$tree/scripts/ci" -maxdepth 0 \( \( ! -user 0 ! -user "$uid" \) -o -perm -0020 -o -perm -0002 \) -print
+  # Every directory a LIB_FILES entry lives in, derived rather than listed: a
+  # leaf-only check accepted a group-writable scripts/utils, and that is where
+  # utils/atomic_io.py the root updater imports comes from.
+  local dirs=("$tree" "$tree/scripts") seen=" scripts "
+  for file in $LIB_FILES; do
+    paths+=("$tree/scripts/$file")
+    [[ "$file" == */* ]] || continue
+    local sub="${file%/*}"
+    [[ "$seen" == *" $sub "* ]] && continue
+    seen+="$sub "
+    dirs+=("$tree/scripts/$sub")
+  done
+  bad="$({ find "${dirs[@]}" -maxdepth 0 \( \( ! -user 0 ! -user "$uid" \) -o -perm -0020 -o -perm -0002 \) -print
     find "${paths[@]}" \( \( ! -user 0 ! -user "$uid" \) -o -perm -0020 -o -perm -0002 -o -type l \) -print; } 2>&1 | sed -n '1p')"
   [[ -z "$bad" ]] || refuse "$bad"
 }
