@@ -21,6 +21,24 @@ each artifact's `case_id` anchors into this file. Triage them with the
 
 ---
 
+## control-plane-isolation-admission
+
+- **Detection:** `radon-deploy-root sync-control-plane` exits 76 with
+  `control-plane interpreter isolation is missing` before candidate bootstrap.
+  A missing fixed helper is also an admission failure, not a service outage.
+- **Discriminating check:** run `cloud/tests/test_root_python_isolation.py`;
+  the isolated validator fixture must ignore caller module paths and accept
+  the actual five helpers. Alternate unisolated interpreter spellings and
+  missing-helper fixtures in `test_sync_control_plane.py` must refuse bootstrap.
+- **Fix:** preserve `-I` on inline Python in `deploy-root-helper.sh`,
+  `bootstrap-control-plane.sh`, `operator-radon.sh`, `ib-gateway-control.sh`
+  and `radon-app-runtime.sh`. Repair the reviewed source rather than bypassing
+  admission. Stage only immutable approved source under root ownership and
+  run the role-specific bootstrap transaction; verify the installed manifest
+  with `radon-deploy-root verify-control-plane` and retain its receipt.
+  Control-plane reconciliation does not restart services; verify service
+  identities remain unchanged before retrying the normal deployment.
+
 ## combo-replace-ib-202-cancel
 
 **Combo modify cancel-replace treats IB error 202 as a failed cancel and never
