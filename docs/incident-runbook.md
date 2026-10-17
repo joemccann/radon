@@ -21,6 +21,24 @@ each artifact's `case_id` anchors into this file. Triage them with the
 
 ---
 
+## control-plane-isolation-admission
+
+- **Detection:** `radon-deploy-root sync-control-plane` exits 76 with
+  `control-plane interpreter isolation is missing` before candidate bootstrap.
+  A missing fixed helper is also an admission failure, not a service outage.
+- **Discriminating check:** run `cloud/tests/test_root_python_isolation.py`;
+  the isolated validator fixture must ignore caller module paths and accept
+  the actual five helpers. Alternate unisolated interpreter spellings and
+  missing-helper fixtures in `test_sync_control_plane.py` must refuse bootstrap.
+- **Fix:** preserve `-I` on inline Python in `deploy-root-helper.sh`,
+  `bootstrap-control-plane.sh`, `operator-radon.sh`, `ib-gateway-control.sh`
+  and `radon-app-runtime.sh`. Repair the reviewed source rather than bypassing
+  admission. Stage only immutable approved source under root ownership and
+  run the role-specific bootstrap transaction; verify the installed manifest
+  with `radon-deploy-root verify-control-plane` and retain its receipt.
+  Control-plane reconciliation does not restart services; verify service
+  identities remain unchanged before retrying the normal deployment.
+
 ## combo-replace-ib-202-cancel
 
 **Combo modify cancel-replace treats IB error 202 as a failed cancel and never
@@ -4061,3 +4079,49 @@ service_health write raises.** Peak: 2026-10-08 22:14Z, page
 2026-10-16 ordered-merge verification: CI38968332478 / job117200674258 reproduced all four lost-write-response regressions (645 other tests passed). Retry only proven SELECT pipelines and retain all preceding cap, closure and pool-retirement defenses. A lost status line is never evidence that a write did not commit.
 
 2026-10-16 ordered-merge reconciliation: combined head08540ee2, CI38968880813 / job117208493390 reproduced four legacy nonfatal-read assertions (1599 other tests passed). Preserve the later stricter policy: a recovered check must prove persisted coverage; repeated disconnects/timeouts remain unverified and fail. Keep no-replay, real-gap, statement-error and exhausted-budget controls. Existing activity NAV repair remains an idempotent saved-statement repair, not cash/journal replay.
+
+
+## research-idle-review-stale-db-error
+
+**Research review remains red after database recovery; database failures exhaust document attempts.**
+
+- **Observed 2026-10-17:** production `c1ea5501` was active with no automatic research restarts. The review health file still carried `DbHttpError` from 2026-10-15T20:02:02Z, although the same-host API transport `SELECT 1` succeeded in 41 ms and the authenticated service-health route had no synthetic Turso error. Three completed Oct 14 documents had six attempts, `held/DbHttpError` results and no review artifact.
+- **Mechanism:** an empty review queue returns before updating stage health, while aggregation republishes the old error with fresh discovery timestamps indefinitely. Separately, a database read failure before model review consumes the document's evidence-failure budget and eventually completes the document as held. Editorial HELD_EXPIRED outcomes are a separate 24-hour mirror transition, not proof of database failure.
+- **Discriminating checks:** compare `health-review.json.updated_at` with discovery timestamps; run `api.db_http.hrana_execute('SELECT 1', timeout=2)` inside the live research container; inspect authenticated `/api/service-health` body; join local work to ingestion and distinguish current ready work from superseded revisions. Never infer current database outage from an old stage error alone.
+- **Repair:** verify idle database access with a read-only, two-second canary no more than once per minute. Clear review health only after the expected result. Park database failures without spending document attempts; retain independent source, numeric, date and image verification.
+- **Recovery:** snapshot exact affected keys/revisions/results, check the retained Dropbox PDF content hash and sealed cached evidence, exclude superseded/deleted revisions and existing outbox publications, then use `State.requeue_with_note(key, None)` for infrastructure-failed completed work only. Do not inject a `publish` feedback note. Let the normal daemon review and publish through its outbox; verify canonical posts and provenance afterward. Preserve prior artifacts before rerunning.
+- **Non-recoverable by queue reset:** no-candidate, verification/crop/publisher holds and the 1..100-page extraction guard require their own source evidence. On this incident, the eleven generic extraction errors were all over 100 pages; two pending rows were superseded. Do not bulk-reset attempts or raise the page limit as an incident shortcut.
+- **Regression:** `scripts/tests/test_research_ingestion.py` exercises idle failure/recovery, invalid canaries, probe rate limits and real database exceptions before/during review at both ends of the attempt budget. Regression-only head `00d6e601`; GitHub results and deployment evidence are recorded on PR #1119.
+
+- **API transport follow-up (#1120):** API Hrana was a separate implementation from shared `db.hrana_http`. Its reused-socket `getresponse()` disconnect had no read retry, while its request-error branch could replay a write whose outcome was unknown. `test_hrana_http_keepalive.py` now exercises both transports with real HTTP peers, including post-receipt send failures and lost status lines. Regression-only `c1dead71`, GitHub run `39044128899`, job `117429409148`: 16 failed, 678 passed. Port the shared SELECT-only payload classifier and one-fresh-connection policy; retire sockets on every failed fresh attempt and never replay ambiguous writes. An observed `DbHttpError` alone does not identify its underlying exception.
+
+## research-codex-subscription-retired-model
+
+**Research review parks after provider exhaustion and Codex returns an unsupported-model error.**
+
+- **Observed 2026-10-17:** normal review replay reached the Codex subscription fallback, which returned HTTP400 for the checked-in GPT-5.5 default. [OpenAI's retirement notice](https://learn.chatgpt.com/docs/models) retires that model from ChatGPT sign-in on October 14; API-key sessions are unaffected. This is separate from a database failure or an editorial rejection.
+- **Discriminating checks:** inspect the authentication kind and resolved model without logging credentials. The existing account completed one bounded, tool-free, two-synthetic-image request with `gpt-6.1-sol`: HTTP200, terminal `response.completed`, exact values from both images, 2,790 ms. The public model catalog returned403 for this existing token flow, so a bundled or cached catalog alone cannot establish current entitlement.
+- **Repair:** choose the proven replacement only for default subscription requests. Preserve API-key defaults, explicit `OPENAI_MODEL` choices, the existing endpoint and credential handling. Requests with attached research images honor `OPENAI_VISION_MODEL` before `OPENAI_MODEL`; text-only requests retain the generic override. Do not silently redirect subscription failures to prepaid OpenAI credentials.
+- **Recovery:** provider outages park normal review work without spending document attempts. Let the daemon retry through independent source, date, numeric, crop and image verification. Do not inject publication feedback, reset editorial holds or weaken the PDF page limit. Token renewal, billing failures and upstream timeouts require their own evidence; this repair does not assert they are resolved.
+- **Regression:** `scripts/tests/test_model_ladder.py` covers subscription versus API-key selection across text, research images and vision extraction, override precedence, request routing and prepaid policy. Exact red/green CI evidence is recorded on PR #1121.
+
+## research-decorative-assets-block-text-only
+
+**A measured text finding is rejected because its cited pages contain a photo, logo or prose crop.**
+
+- **Observed 2026-10-17:** all 23 expired review decisions completed before the persisted database error. Visual inspection of three rejected source assets found a stock photograph, a prose page and a skyline photograph with prose. One valid text-only RESELECT response was rejected unconditionally, despite the prompt explicitly permitting it when no figure supports the finding. Two selected non-data crops were rejected before the normal text verification and generated-chart path.
+- **Discriminating checks:** inspect retained review reason codes, exact cited-page catalogue IDs and original crop pixels. Catalogue titles, raster/vector labels and the SELECT model's assertion do not establish whether an asset is a chart. Unsupported numerical claims, transposed values, duplicate findings and unresolved publisher evidence remain separate holds.
+- **Repair:** reuse the independent visual figure-matching request. Permit text-only routing only when its structured result accounts exactly once for every cited-page catalogue asset and explicitly identifies every asset as non-data decoration or prose. Missing, duplicate, untyped, unknown or uninspected IDs fail closed; real charts, tables and chart fragments remain in the existing matching/completeness path. Never exceed the image-review cap or infer that an omitted asset is harmless.
+- **Verification:** the ordinary claim/source/number/novelty checks still run after non-data clearance. Decorative PNGs are never published as charts. Generated charts still require grounded data, accurate publisher attribution and a separate agent's rendered-PNG review. Provider outages propagate for normal queue parking.
+- **Recovery:** only individually audited current revisions affected by this routing defect may be retried after deployment. Verify live Dropbox identity/content hash, sealed cached evidence, absence of prior publications/outbox/operator feedback, and exact original review state; preserve every original review/crop/PDF in a checksummed backup. Atomically requeue with a unique recovery ledger, without publication feedback. Existing editorial decisions and the PDF page limit remain in force.
+- **Regression:** `scripts/tests/test_research_intake.py` covers photo/prose clearance, exact all-assets coverage and image caps, malformed IDs/reselection, real/incomplete charts, provider failures, retained claim gates and separate generated-PNG verification. GitHub regression-only integration `96512183`, run39046492003/job117436193779: 27 failed, 2606 passed. Final green evidence belongs to PR #1121.
+
+## research-recovery-consumes-busy-feedback
+
+**An operator vote is acknowledged while its document is still pending or processing, without applying its instruction.**
+
+- **Mechanism:** `feedback.apply` marked every actionable vote handled even when `State.requeue_with_note` refused busy work. File-based votes could select an older finished revision while the current revision was busy, or resurrect retained published history after the latest revision was deleted. The queue update and handled marker also committed separately, so marker failure could leave an instruction applied without its durable acknowledgment.
+- **Repair:** resolve the latest file revision before checking whether it is live, preserve refused votes for live targets and acknowledge successful queue changes in the same SQLite transaction as their note. Guard the mutation against an already-handled ID inside the write transaction. Unknown, deleted and superseded direct targets retain their existing terminal handling; non-feedback requeues retain their two-argument interface.
+- **Recovery fence:** perform network preflight before acquiring a short SQLite write fence. Revalidate exact completed rows and immutable evidence under the fence, then back up, hash, fsync and atomically insert the recovery ledger with the queue transition. No network calls belong inside the fence. Source/image/release hashes must prove the full tested repair is deployed first. Do not stop unrelated services or inject publication feedback.
+- **Delivery bound:** busy votes remain durably unhandled; the existing 14-day, oldest-2000-row feedback polling window is unchanged. This repair does not promise unbounded eventual delivery beyond that window.
+- **Regression:** `scripts/tests/test_research_feedback_actions.py` exercises pending/processing votes, latest revision lookup, completion during refusal, stale handled snapshots, terminal targets and a real SQLite trigger that aborts marker insertion. GitHub regression-only `f6b173ee`, run39047098441/job117437942440: 8 failed, 2651 passed; all decorative-routing regressions passed in that run. A real Dropbox deletion/revision fixture at `db555b91`, run39047623586/job117439480262 reproduced one failure with 2660 passing tests before the final latest-row correction.

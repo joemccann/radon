@@ -101,7 +101,7 @@ inherited_lock_is_valid() {
   local fd_text="$2"
   local lock_path="$3"
   [[ "$marker" == "1" && "$fd_text" =~ ^[0-9]+$ ]] || return 1
-  "$OPERATOR_PYTHON" - "$fd_text" "$lock_path" <<'PY'
+  "$OPERATOR_PYTHON" -I - "$fd_text" "$lock_path" <<'PY'
 import fcntl
 import os
 import sys
@@ -132,7 +132,7 @@ acquire_deploy_lock() {
     echo "REFUSING stack action: system Python 3.13 unavailable" >&2
     return 1
   fi
-  exec "$OPERATOR_PYTHON" - \
+  exec "$OPERATOR_PYTHON" -I - \
     "$DEPLOY_LOCK_PATH" "$ACTION_TIMEOUT_SECS" "$0" "$@" <<'PY'
 import fcntl
 import os
@@ -205,7 +205,7 @@ run_bounded() {
   local timeout_secs="$1"
   shift
   set +e
-  "$OPERATOR_PYTHON" - "$timeout_secs" "$@" <<'PY'
+  "$OPERATOR_PYTHON" -I - "$timeout_secs" "$@" <<'PY'
 import os
 import signal
 import subprocess

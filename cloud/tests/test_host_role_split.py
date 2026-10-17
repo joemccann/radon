@@ -330,7 +330,11 @@ class TestRemoteDaemonUnit:
         """
         helper = HELPER.read_text(encoding="utf-8")
         body = _function_body(helper, "role_skips_control_plane_source")
+        broker_body = _function_body(helper, "broker_control_plane_source")
         shell = f"""
+broker_control_plane_source() {{
+{broker_body}
+}}
 set -u
 role_skips_control_plane_source() {{
 {body}
@@ -445,3 +449,18 @@ preflight_control_plane
         combined = result.stdout + result.stderr
         assert result.returncode == 0, combined
         assert "refresh-control-plane-privileged" in combined or "privileged" in combined.lower()
+
+
+def test_broker_ib_cli_routes_to_included_hold_without_app_dependencies(tmp_path):
+    hold = tmp_path / "hold"
+    hold.write_text('#!/bin/bash\nprintf "hold:%s\\n" "$*"\n')
+    hold.chmod(0o755)
+    result = subprocess.run(
+        ["bash", str(OPERATOR), "ib", "status"],
+        env={**os.environ, "RADON_IB_HOLD_BIN": str(hold),
+             "RADON_OPERATOR_PYTHON": str(tmp_path / "absent-app-python")},
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "hold:status\n"
+    assert "radon-app-runtime" not in OPERATOR.read_text()
