@@ -9581,6 +9581,14 @@ CI repair: run 38968894246 / job 117203223236 timed out the PDF pagination regre
 - [ ] T4 depends_on: [T1, T3] Audit blocked document eligibility, recover infrastructure failures with checkpoints and verify live publication/health.
 Review: Preserve publication quality gates and source attribution; no local test suites. Investigate extraction errors separately from editorial holds.
 
+
+## Research review stale API connection follow-up (2026-10-17)
+- [x] R1 depends_on: [] Observe a new DbHttpError during three-key recovery; confirm API/shared transport retry gap without assuming the unrecorded exception cause.
+- [x] R2 depends_on: [R1] Extended real-socket regressions to API transport; GitHub c1dead71 reproduced16 failures/678 passing tests (job117429409148).
+- [ ] R3 depends_on: [R2] Port proven read-only reconnect classification and socket retirement; bba2f554 had 694 passed and 37 green checks with Sol source review. API source remains byte-identical after merging c899d37e; new-head CI is pending.
+- [ ] R4 depends_on: [R3] Wait for the separate control-plane release; deploy without weakening isolation, verify recovery and canonical outcomes.
+Review: No local suites. Never replay ambiguous writes. Preserve existing database outage parking and publication quality gates.
+
 ## Research Codex subscription model retirement (2026-10-17)
 - [x] M1 depends_on: [] Confirm subscription model retirement and current account multi-image compatibility with a bounded synthetic canary.
 - [x] M2 depends_on: [M1] GitHub bda67981 reproduced nine failures with 1356 passing tests (run39045543319, job117433454016); preserve API-key defaults and explicit model overrides.
