@@ -488,6 +488,25 @@ Hetzner host systemd is the production surface. Laptop dev uses launchd plists i
 | performance | 22:00 | `/Users/_radonbot/radon-runner/work/performance` | `scripts/runner/run_loop.sh performance` / `com.radon.runner.performance` LaunchDaemon | `performance-nightly` |
 | documentation | 03:00 | `/Users/_radonbot/radon-runner/work/documentation` | `scripts/runner/run_loop.sh documentation` / `com.radon.runner.documentation` LaunchDaemon | `documentation-nightly` |
 
+**Unattended release and toolchain maintenance.** The separate operator-owned
+`com.radon.operator-releases` controller accepts only its installed maintenance
+policy, complete exact-head CI, independent Sol/Luna reviews and strict
+administrator-enforced main protection. It reconciles both host roles after
+successful production deployment, including changes merged by other actors.
+P1 candidates use private validation rather than terminal-written release
+markers; the nightly bot retains no merge or production SSH authority.
+See [Unattended maintenance releases](unattended-releases.md).
+
+`nightly_toolchain_update.py` stages compatible DeepSec and bundled Codex
+CLI/SDK releases, verifies the existing subscription with a real SDK smoke,
+and retains rollback state. The fresh DeepSec prompt repairs its private tree
+before reviewing source. Installed loop wrappers hold a shared maintenance
+lock; the root updater checks deployed main and waits for all seven jobs to be
+idle before refreshing installed copies. One legitimate administrator bootstrap
+is required on an existing Mini; subsequent refreshes are scheduled. Operator
+and vendor application updates retain independent activity checks. See
+[Nightly toolchain maintenance](nightly-toolchain-updates.md).
+
 **The security loops on the runner.** `security` and `security-deepsec` use the runner's optional knobs (all in their root-owned loop env, docs/runner.md "Loop config"):
 
 - **Three phases, one session each.** `PHASES="audit:<secs> remediate:21600 deliver:10800"` (audit 2h for security, 8h for DeepSec, which runs `deepsec process` / `revalidate` / `export` in-session). Every phase runs whatever the earlier one returned; each gets its own header (`Phase:`, `State:`), timeout and page. The runner exits 75 when any phase is not OK and 2 when one was refused.
@@ -872,6 +891,15 @@ any dependency build, service stop, or transition journal mutation. It builds
 in a detached target-SHA worktree, journals and restores the active topology,
 and gates FastAPI `/health/lite`, Next.js HTTP, relay TCP/HTTP, and stable core
 service restart counts. IB state remains advisory.
+
+### Control-plane reconciliation
+
+Root control-plane helpers invoke inline Python in isolated mode. Bootstrap
+and sync select the app or broker artifact contract from the host role; app
+hosts do not acquire broker units, and broker hosts do not require app Node,
+polkit or sudoers artifacts. The root sync verb accepts an optional expected
+40-character main SHA, rejects a stale or unisolated candidate before bootstrap,
+and prints `installed_sha` plus `host_role` only after manifest verification.
 
 ### App image prune
 

@@ -1218,3 +1218,16 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## Mobile settings scroll containment (2026-10-14)
 - A flex scrollport can have overflow-y:auto yet remain unusable if its overflow-hidden child cards shrink to fit. Keep direct mobile settings children at natural height with flex-shrink:0.
 - Verify multiple settings groups with real scroll input, full card content height and pointer reachability of the final control. CSS-rule presence or offscreen bounding boxes alone do not prove scrolling works.
+
+
+## 2026-10-17 - Distinguish stale stage health from a live research outage
+- An aggregate heartbeat timestamp does not refresh its nested stage evidence. Compare stage timestamps and run a same-host bounded database canary before diagnosing a current Turso outage. Editorial held expiry, exhausted infrastructure review attempts and superseded ingestion rows are different states; recover only verified current infrastructure failures.
+
+## 2026-10-17: unattended operations require an executable recovery path
+
+When an operator asks for automated release or updater recovery, ship the durable controller, validated policy, scheduler integration and end-to-end receipts. Do not leave recurring work as a copied terminal command or treat a missing reviewer as a successful audit. Separate trusted authorization and root-owned code from mutable app/agent state; report genuinely missing bootstrap credentials or consent rather than manufacturing them.
+
+- 2026-10-17: A head-SHA merge compare-and-swap and repeated main reads do not protect the base against another merger. Require server-side strict up-to-date checks enforced for administrators before unattended merges; retain required check/app bindings. Bind fresh merge/recovery reads to the expected head and main target, and skip unrelated targets before branch-update mutations. Distinguish tested-base freshness from global serialization of other actors' production deployments.
+
+## 2026-10-17: Release admission must stop before mutations
+- Chain exact-head checks, required-check registration, current-main freshness and production-idle assertions with notification/merge in one fail-closed operation. A failed assertion must prevent all later mutations. Treat an older cancelled check as superseded only when a newer matching check has completed successfully; strict protection must remain enabled when another release advances main.
