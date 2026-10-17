@@ -370,8 +370,9 @@ def _codex_apply(doc, resp, now):
 # authenticated call that refreshes the file in place, so it is the CLI-native
 # refresh; the token endpoint is the fallback when `agy` is not on PATH.
 
-# Public OAuth client id of the Antigravity CLI (installed-app client, no
-# secret), read off its own login URL. Google's refresh grant requires it.
+# Public OAuth client id observed in the Antigravity CLI's own login URL.
+# A public id does not imply secretless refresh: AGY 1.4.0's early HTTP
+# fallback requires client_secret; see docs/subscription-tokens.md.
 ANTIGRAVITY_CLIENT_ID = (
     "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
 )
@@ -845,12 +846,14 @@ def parse_login_prompt(provider: Provider, output: str) -> Optional[LoginPrompt]
 
 
 def _page_body(result: "ProviderResult", prompt: Optional[LoginPrompt]) -> dict:
-    """Pushover message fields. With a prompt, the page IS the login link."""
-    provider = PROVIDERS.get(result.provider)
-    command = provider.reauth_command if provider else ""
+    """Pushover fields; append login instructions only for needs_reauth."""
     headline = f"{result.provider}: {result.state}" + (
         f" ({result.last_error})" if result.last_error else ""
     )
+    if result.state != NEEDS_REAUTH:
+        return {"message": headline}
+    provider = PROVIDERS.get(result.provider)
+    command = provider.reauth_command if provider else ""
     if prompt is None:
         return {"message": headline + (f"\nRe-auth: {command}" if command else "")}
     steps = "Tap the link to sign in" + (

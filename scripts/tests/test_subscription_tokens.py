@@ -404,6 +404,61 @@ def test_invalid_grant_pages_once_then_respects_cooldown(tmp_path):
     assert len(rt.sent) == 2
 
 
+@pytest.mark.parametrize("error_code", ["invalid_request", "invalid_client"])
+def test_refresh_request_error_pages_without_reauthenticating_a_valid_login(tmp_path, error_code):
+    provider = st.PROVIDERS["antigravity"]
+    http = FakeHttp({provider.token_url: [st.HttpResponse(400, {"error": error_code})]})
+    rt = make_runtime(tmp_path, http=http, which=installed, probe=FakeProbe(st.PROBE_OK))
+    path = write_doc(rt, provider.name, antigravity_doc(NOW + timedelta(minutes=20)))
+    original = path.read_bytes()
+
+    for _ in range(st.ERROR_PAGE_AFTER):
+        report = st.run("once", [provider.name], rt)
+        assert report["providers"][0]["state"] == st.ERROR
+        assert report["exit_code"] == 1
+
+    assert path.read_bytes() == original
+    assert len(rt.sent) == 1
+    page = rt.sent[0]
+    assert "refresh failed with HTTP 400" in page["message"]
+    assert "Re-auth:" not in page["message"]
+    assert "ssh" not in page["message"]
+    assert "Sign in" not in page["message"]
+    assert "url" not in page
+    assert "url_title" not in page
+
+
+@pytest.mark.parametrize("state", [st.ERROR, st.STORE_UNAVAILABLE])
+@pytest.mark.parametrize("with_prompt", [False, True])
+def test_maintainer_error_pages_never_offer_a_login(state, with_prompt):
+    result = st.ProviderResult("codex", state, last_error="provider configuration failed")
+    prompt = st.LoginPrompt("https://auth.openai.com/codex/device", "FAKE-CODE") if with_prompt else None
+
+    page = st._page_body(result, prompt)
+
+    assert page == {"message": f"codex: {state} (provider configuration failed)"}
+
+
+@pytest.mark.parametrize("provider_name", ["antigravity", "codex"])
+def test_needs_reauth_pages_keep_native_and_device_fallbacks(provider_name):
+    result = st.ProviderResult(provider_name, st.NEEDS_REAUTH)
+    prompt = (
+        st.LoginPrompt("https://auth.openai.com/codex/device", "FAKE-CODE")
+        if provider_name == "codex" else None
+    )
+
+    page = st._page_body(result, prompt)
+
+    assert st.PROVIDERS[provider_name].reauth_command in page["message"]
+    if prompt is None:
+        assert "Re-auth:" in page["message"]
+    else:
+        assert page["url"] == prompt.url
+        assert page["url_title"] == "Sign in to codex"
+        assert "FAKE-CODE" in page["message"]
+        assert "Fallback:" in page["message"]
+
+
 def test_no_refresh_token_is_needs_reauth_without_any_request(tmp_path):
     http = FakeHttp()
     rt = make_runtime(tmp_path, http=http)
