@@ -123,6 +123,13 @@ to absorb one full grok run (`GROK_TIMEOUT_SECS`, 1h) of legitimate skipping.
 The row is this writer's health, never the ticket verdict — a stand_down is a
 healthy cycle.
 
+A recovered ledger transport blip heartbeats `ok` with
+`last_error.class=ledger_transport` (the error bucket pages only on
+`state=error`, so this does not self-page). Unrecovered blips skip the
+ok heartbeat and print `{"event":"grok_page_ledger_transport",...}` plus
+`grok page ledger non-fatal` so `journalctl -u radon-grok-page-responder`
+can see them.
+
 ## Verify
 
 ```bash
@@ -516,6 +523,23 @@ a row that does not already carry them rather than trusting the writer.
 `pending` → `claimed` → `done`. Three failed Grok runs → `skipped`.
 Stale claims older than 2h are reclaimable. Overlapping cycles skip on
 `.responder.lock`.
+
+A Turso transport blip (timeout, reset, broken pipe, SSL EOF, URLError,
+HTTP 502/503/504) on `claim_page` or `complete_page` does not fail the
+oneshot. Classification is by exception type, not message text. SQL
+errors still exit 1.
+
+`claim_page` reads the row back on a fresh connection after a wire
+failure. If this run's `claim_token` is present, the cycle continues.
+If the row is still `pending`, it retries the UPDATE once. Otherwise it
+skips (`lost_claim`). A double-fault (write and read both drop) can
+still orphan the row until the 2h stale window.
+
+`complete_page` is guarded by `claim_token` so it only applies while
+this run holds the claim. After a transport error the cycle retries
+once on a fresh socket, then `get_page`. If the row is already `done`,
+it still sends the priority-0 follow-up. Unrecovered, it skips the
+follow-up and the ok heartbeat rather than launching grok again.
 
 The lock holds only while its PID is alive. A cycle killed before its
 `finally` leaves the file behind, and the next poll steals it once

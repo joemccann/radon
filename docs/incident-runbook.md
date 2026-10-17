@@ -3718,7 +3718,9 @@ after the IB-skip path has already chosen the cached payload.** Peak:
   this case. No `/home/radon/.radon-deploy-transition.json`.
   `Result=signal` or exit 143 inside a deploy window is
   `deploy-stop-clean-oneshot-signal`. A ledger statement error (not a
-  read timeout) still fails the oneshot on purpose.
+  read timeout) still fails the oneshot on purpose. Connection reset,
+  broken pipe, SSL EOF, URLError, HTTP 502/503/504, and
+  `RemoteDisconnected` are `grok-page-responder-ledger-transport`.
 - **Remediation (code):** a ledger `TimeoutError` logs
   `grok page ledger non-fatal`, skips the ok heartbeat, releases the
   lock, and exits 0. The timer starts the next cycle in 30s. A claim
@@ -3728,7 +3730,48 @@ after the IB-skip path has already chosen the cached payload.** Peak:
   `RERUNNABLE_ONESHOT_UNITS`.
 - **Regression:**
   `scripts/tests/test_grok_page_ledger_timeout.py::TestLedgerReadTimeout`.
-- **Code:** `scripts/grok_page_responder.py` (`_ledger_read_timeout`).
+- **Code:** `scripts/grok_page_responder.py` (`_ledger_transport_error`).
+
+## grok-page-responder-ledger-transport
+
+**`radon-grok-page-responder.service` oneshot must not exit 1 on a Turso
+wire blip, and must not drop a follow-up when `complete_page` committed.**
+Peak family: 2026-09-27 ledger timeout (`a1c550c1`) and 2026-10-17
+`RemoteDisconnected` on `complete_page` (`eaaaff8194`). Follow-up to
+`grok-page-responder-ledger-timeout` and PR #1113.
+
+- **Mechanism:** `Type=oneshot`, no `Restart=`. `claim_page` /
+  `complete_page` ride the thread-local Hrana keep-alive. The peer can
+  reset, break the pipe, send SSL EOF, raise `URLError`, or answer
+  HTTP 502/503/504. `_pooled_open` does not replay a write. A statement
+  error (`no such table`) is a different failure and still exits 1.
+- **Detection:** journal JSON
+  `{"event":"grok_page_ledger_transport",...}` or stderr
+  `grok page ledger transport` / `grok page ledger non-fatal`. systemd
+  Result stays `success` (exit 0). Discriminate from a statement error
+  traceback that still fails the oneshot.
+- **Discriminating check:** Python Turso `SELECT 1` succeeds. Canary
+  fail is a Turso platform outage: stand down, do not restart-flap. A
+  `FileNotFoundError` on `GROK_BIN` is
+  `grok-page-responder-missing-binary`. `Result=signal` or exit 143
+  inside a deploy window is `deploy-stop-clean-oneshot-signal`.
+- **Remediation (code):** `hrana_http.is_transport_error` classifies by
+  exception type (`TimeoutError`, `RemoteDisconnected`,
+  `ConnectionResetError`, `BrokenPipeError`, `SSLEOFError`, `URLError`,
+  `HttpStatusError` 502/503/504). `claim_page` reads back the token on a
+  fresh connection and retries once if still pending. `complete_page`
+  applies only while this run holds `claim_token`; a lost response
+  retries once, then `get_page`, and still sends the priority-0
+  follow-up if the row is `done`. Unrecovered skips the ok heartbeat so
+  a standing outage goes stale. Recovered cycles heartbeat `ok` with
+  `last_error.class=ledger_transport` (not `state=error`). Do not
+  restart-flap. The unit is not on `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `scripts/tests/test_grok_page_ledger_transport.py`.
+- **Code:** `scripts/db/hrana_http.py` (`is_transport_error`,
+  `HttpStatusError`), `scripts/watchdog/pages.py` (`claim_page`,
+  `complete_page`), `scripts/grok_page_responder.py`
+  (`_complete_page_with_followup`).
 
 ## grok-page-responder-missing-binary
 
