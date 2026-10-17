@@ -154,7 +154,10 @@ pickup refuses:
 
 - refs outside `fix/<slug>` (no refspec, option or path tricks);
 - a diff touching `.github/` — a PR-triggered workflow runs from the PR head,
-  which would execute attacker-authored CI in this repository;
+  which would execute attacker-authored CI in this repository. The changed
+  paths are read with `git diff -z --name-only` and split on NUL: without
+  `-z`, git C-quotes a path carrying a non-ASCII byte, a quote or a newline,
+  and `".github/workflows/é.yml"` does not start with `.github/`;
 - a branch that does not descend from `origin/main`, or exceeds the commit cap
   (default 20);
 - anything at all unless `GROK_PAGE_AUTOPUSH` is truthy in the pickup job's
