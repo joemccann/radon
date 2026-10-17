@@ -930,3 +930,60 @@ def test_document_truncation_does_not_exclude_provider():
         reviewer.ask_text("first")
     assert reviewer.ask_text("second") == {"candidates": []}
     assert calls == ["anthropic", "anthropic"]
+
+
+@pytest.mark.parametrize("method", ["ask_text", "ask"])
+@pytest.mark.parametrize("iterator_name", ["iter_content", "iter_bytes"])
+@pytest.mark.parametrize("error_class,quarantined", [(httpx.ReadTimeout, True),
+                                                     (requests.ReadTimeout, True),
+                                                     (TimeoutError, True),
+                                                     (httpx.TimeoutException, False)])
+def test_document_timeout_during_stream_body_falls_back_and_closes_response(method, iterator_name, error_class, quarantined):
+    calls, closed = [], []
+
+    def post(url, **kwargs):
+        provider = _budget_provider(url)
+        calls.append(provider)
+        assert kwargs["stream"] is True
+        if provider != "anthropic":
+            return _budget_response(provider)
+
+        def chunks(_size):
+            yield b'{"stop_reason":"end_turn","content":['
+            raise error_class("synthetic body timeout with private-source-text")
+
+        return SimpleNamespace(status_code=200, **{iterator_name: chunks}, close=lambda: closed.append(provider))
+
+    reviewer = model.Reviewer(env=_budget_env(), session=SimpleNamespace(post=post))
+    assert getattr(reviewer, method)("select") == {"candidates": []}
+    assert getattr(reviewer, method)("verify") == {"candidates": []}
+    assert calls == (["anthropic", "grok", "grok"] if quarantined else
+                     ["anthropic", "grok", "anthropic", "grok"])
+    assert closed == (["anthropic"] if quarantined else ["anthropic", "anthropic"])
+
+
+@pytest.mark.parametrize("method", ["ask_text", "ask"])
+@pytest.mark.parametrize("failure,match", [("size", "exceeds limit"),
+                                          ("truncation", "complete response"),
+                                          ("json", "malformed response")])
+def test_document_stream_non_transport_failures_remain_terminal_and_closed(method, failure, match):
+    calls, closed = [], []
+
+    def post(url, **kwargs):
+        provider = _budget_provider(url)
+        calls.append(provider)
+        if len(calls) != 1:
+            return _budget_response(provider)
+        chunks = {
+            "size": [b"x" * 2_000_001],
+            "truncation": [b'{"stop_reason":"max_tokens","content":[{"type":"text","text":"{}"}]}'],
+            "json": [b'{"stop_reason":'],
+        }[failure]
+        return SimpleNamespace(status_code=200, iter_content=lambda _: iter(chunks), close=lambda: closed.append(provider))
+
+    reviewer = model.Reviewer(env=_budget_env(), session=SimpleNamespace(post=post))
+    with pytest.raises(model.ModelError, match=match):
+        getattr(reviewer, method)("select")
+    assert calls == closed == ["anthropic"]
+    assert getattr(reviewer, method)("verify") == {"candidates": []}
+    assert calls == ["anthropic", "anthropic"]
