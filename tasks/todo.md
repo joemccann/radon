@@ -9583,7 +9583,7 @@ Review: Preserve publication quality gates and source attribution; no local test
 
 ## Research Codex subscription model retirement (2026-10-17)
 - [x] M1 depends_on: [] Confirm subscription model retirement and current account multi-image compatibility with a bounded synthetic canary.
-- [ ] M2 depends_on: [M1] Reproduce retired subscription defaults on GitHub; preserve API-key defaults and explicit model overrides.
+- [x] M2 depends_on: [M1] GitHub bda67981 reproduced nine failures with 1356 passing tests (run39045543319, job117433454016); preserve API-key defaults and explicit model overrides.
 - [ ] M3 depends_on: [M2] Select the verified subscription replacement, obtain independent review and exact-head green CI.
 - [ ] M4 depends_on: [M3] Deploy after the separate control-plane release, finish normal recovery and verify production outcomes.
 Review: Official model retirement applies to ChatGPT sign-in only. Existing production subscription request completed a two-image strict-JSON canary with gpt-6.1-sol. Preserve existing endpoint, token handling, publication gates and prepaid policy. No local test suites.
