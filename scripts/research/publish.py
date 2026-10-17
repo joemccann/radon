@@ -17,6 +17,9 @@ PT = ZoneInfo("America/Los_Angeles")
 HELD_TTL_HOURS = 24
 HELD_EXPIRY_PAGE_SIZE = 200
 HELD_EXPIRY_BUDGET_S = 30.0
+SELECTOR_REASON_MAX_CHARS = 4096
+SELECTOR_REASON_BOUNDARY_LOOKBACK = 256
+_SELECTOR_REASON_WHITESPACE = " \t\n\r\f\v"
 # Product clock is America/Los_Angeles. Age from held_at (fallback updated_at for
 # legacy rows). Do not overwrite updated_at; that stays the review/decision time.
 _EXPIRE_SQL = """UPDATE research_outcomes
@@ -119,6 +122,20 @@ def stable_post_id(file_id: str, finding_key: str) -> str:
     if not file_id or not finding_key:
         raise ValueError("file ID and stable finding key are required")
     return "research-" + hashlib.sha256(json.dumps([file_id, finding_key]).encode()).hexdigest()[:32]
+
+
+def _bounded_selector_reason(value) -> str:
+    """Keep complete selector notes when possible; visibly bound oversized notes."""
+    reason = str(value or "")
+    if len(reason) <= SELECTOR_REASON_MAX_CHARS:
+        return reason
+    prefix = reason[:SELECTOR_REASON_MAX_CHARS - 1]
+    boundary_start = max(0, len(prefix) - SELECTOR_REASON_BOUNDARY_LOOKBACK)
+    boundary = max((index for index in range(boundary_start, len(prefix))
+                    if prefix[index] in _SELECTOR_REASON_WHITESPACE), default=-1)
+    if boundary >= 0:
+        return prefix[:boundary].rstrip(_SELECTOR_REASON_WHITESPACE) + "…"
+    return prefix + "…"
 
 
 def _asset_url(value: str, extension: str | None = None) -> str:
@@ -226,7 +243,7 @@ def outcome_row(work: dict, review: dict) -> dict:
     document = review.get("document") or {}
     context = {"pageCount": document.get("page_count"), "figureCount": len(review.get("figures") or []),
                "dateSource": identity.get("date_source") or "", "excerpt": str(document.get("excerpt") or "")[:900],
-               "selectorReason": str(((review.get("selection") or {}).get("reason")) or "")[:600],
+               "selectorReason": _bounded_selector_reason(((review.get("selection") or {}).get("reason"))),
                "sourceUrl": document.get("source_url") or ""}
     if review.get("always_publish"):
         context["alwaysPublish"] = True

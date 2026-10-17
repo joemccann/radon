@@ -4244,6 +4244,15 @@ service_health write raises.** Peak: 2026-10-08 22:14Z, page
 - **Regression:** `scripts/tests/test_research_feedback_actions.py` exercises pending/processing votes, latest revision lookup, completion during refusal, stale handled snapshots, terminal targets and a real SQLite trigger that aborts marker insertion. GitHub regression-only `f6b173ee`, run39047098441/job117437942440: 8 failed, 2651 passed; all decorative-routing regressions passed in that run. A real Dropbox deletion/revision fixture at `db555b91`, run39047623586/job117439480262 reproduced one failure with 2660 passing tests before the final latest-row correction.
 
 
+## research-fresh-intake-starves-ready-retries
+
+- **Observed 2026-10-17:** production `20d0843d` had 109 eligible ready documents, 94 first attempts and 15 retries. Three recovered Oct14 PDFs were the oldest eligible rows but ranked 107–109. In the prior 60 minutes, 19 first attempts completed, zero retries completed and 13 publications were mirrored; database and stage health were healthy.
+- **Discriminating check:** inspect the live `State.ready` ORDER BY, join pending work to ready ingestion, compare not-before times, latest revision and feedback, and count completed first/retry attempts. Healthy throughput alone does not establish fair retry progress.
+- **Mechanism:** the `attempts>0` sort key plus descending folder/row order admits an unbounded stream of fresh documents before old retries. Removing only the attempts key leaves newer folders ahead.
+- **Repair:** durable one-in-four aged retry admission, oldest eligible insertion order first; preserve operator notes, eligibility, backoff and transactional claim accounting. Never reset individual attempts, set forced publication feedback or bump the affected keys.
+- **Regression:** `scripts/tests/test_research_ingestion.py` covers continuous fresh arrivals, restart durability, failed/read-only claims, operator precedence, due/ingestion/revision gates and zero-attempt infrastructure parks. Regression-only `751170a3` and exact GitHub red/green evidence are recorded on PR #1136. A second production-derived checkpoint `e1af5ce2` reproduced two FIFO failures when newer interrupted rows carried zero not-before timestamps: run39071561404/job117510130414, two failed and2774 passed. Eligible retry order uses insertion row ID, not a backoff deadline or zero restart sentinel.
+- **Verification:** normal final decisions, canonical/outbox/provenance and every resulting production source PDF/PNG must be verified. Metadata-only restoration of a Held reason uses exact canonical CAS and preserves every decision/expiry clock.
+
 ## subscription-antigravity-native-auth
 
 - **Mechanism:** the shared subscription daemon imposed its raw-bearer forty-minute lead on AGY, whose consumers use only the native CLI. A valid native probe then fell through to an unsupported Google refresh request and returned `400 invalid_request` requiring client configuration.
