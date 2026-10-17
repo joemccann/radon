@@ -254,6 +254,31 @@ def alert_refused_publish(
     )
 
 
+# Branch -> head SHA last paged for a refusal. A refused branch stays on the
+# VPS and is re-listed every 15-minute cycle; 2026-10-16 one paged 81 times.
+# logs/ is untracked, so the launchd `reset --hard` keeps this file.
+REFUSAL_PAGES = Path("logs") / "grok-fix-pickup" / "refusal-pages.json"
+
+
+def _load_refusal_pages(repo_root: Path) -> dict:
+    try:
+        data = json.loads((repo_root / REFUSAL_PAGES).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_refusal_pages(repo_root: Path, pages: dict) -> None:
+    path = repo_root / REFUSAL_PAGES
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(pages, sort_keys=True), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError as exc:
+        print(f"grok fix pickup: cannot record refusal pages: {exc}", file=sys.stderr)
+
+
 def _running_code_is_stale(repo_root: Path, *, origin: str, runner: Runner) -> bool:
     """True when this script runs from ``repo_root`` and lags origin/main.
 
@@ -343,7 +368,21 @@ def pickup_once(
         )
 
     results: list[dict] = []
+    paged = _load_refusal_pages(repo_root)
+    listed: set[str] = set()
+
+    def page_once(name: str, local_ref: str, send: Callable[[], None]) -> None:
+        """Page a refusal once per branch head; a new commit pages again."""
+        head = _stdout(_git(repo_root, ["rev-parse", local_ref], runner=run))
+        if head and paged.get(name) == head:
+            return
+        send()
+        if head:
+            paged[name] = head
+            _save_refusal_pages(repo_root, paged)
+
     for name in list_source_branches(repo_root, source, runner=run):
+        listed.add(name)
         origin_head = _origin_head(repo_root, name, origin=origin, runner=run)
 
         local_ref = f"{PICKUP_NAMESPACE}{name}"
@@ -386,7 +425,7 @@ def pickup_once(
                 list_ci_urls=list_ci_urls,
             )
         except ir_pr_description.IrDescriptionError as exc:
-            alert_invalid_description(name, str(exc), alerter=alerter)
+            page_once(name, local_ref, lambda: alert_invalid_description(name, str(exc), alerter=alerter))
             results.append({
                 "branch": name,
                 "action": "refused",
@@ -404,7 +443,7 @@ def pickup_once(
                 runner=run,
             )
         except ir_push_gate.IrPushRefused as exc:
-            alert_refused_publish(name, str(exc), alerter=alerter)
+            page_once(name, local_ref, lambda: alert_refused_publish(name, str(exc), alerter=alerter))
             results.append({"branch": name, "action": "refused", "reason": str(exc)})
             continue
 
@@ -430,6 +469,9 @@ def pickup_once(
             "action": pr["action"] if pr.get("action") in {"closed", "merged"} else "picked_up",
             "url": (pr or {}).get("url"),
         })
+    # Forget branches no longer on the VPS so a recreated name pages again.
+    if any(name not in listed for name in paged):
+        _save_refusal_pages(repo_root, {k: v for k, v in paged.items() if k in listed})
     return results
 
 
