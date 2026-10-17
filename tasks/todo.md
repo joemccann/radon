@@ -9,7 +9,7 @@ Dependency graph: T1 -> T2 -> T3 -> T4.
 
 ## Review
 
-Existing PR head 5e6dde78 is green but behind production-green f699752d. Main f699752d merged; the only conflict was the append-only task ledger, resolved by retaining latest main plus this plan. A private-release bridge regression failed before repair and passed after using the existing compatible terminal status plus actionable guidance. Private tests: 68 passed; combined controller tests: 203 passed. Sol approved root/service/CI/runner changes and Luna approved both web paths. Full verification pending. Preserve unrelated user files and the existing security residuals; no CI or privilege gate is relaxed.
+Existing PR head 5e6dde78 was green but behind main. Integrated production-green c7471050, including the native Antigravity fix and research queue repair; task-ledger conflicts retained latest main plus this plan. Red/green fixes cover compatible durable private-release rejection feedback and complete topology persistence before teardown. Focused results: 203 controller tests, 60 gateway tests and seven final topology tests, including an attack hook at the actual exclusive-open boundary. Sol approved privileged/controller changes and Luna approved web and topology behavior. Refreshed full Python: 16,267 passed, two skipped and 23 subtests passed; full cloud: 2,921 passed, seven skipped; full Vitest: 1,120 files and 10,996 tests passed, 21 skipped. Exact-head delivery pending. Preserve unrelated user files and the existing security residuals; no CI or privilege gate is relaxed.
 
 # Retire Foreman (2026-10-17)
 

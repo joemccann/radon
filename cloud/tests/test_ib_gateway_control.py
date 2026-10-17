@@ -1446,43 +1446,44 @@ def _topology_env(tmp_path: Path, fake_bin: Path, topology: Path) -> dict:
 def test_topology_persistence_never_writes_through_a_substituted_temp_entry(
     tmp_path: Path,
 ):
-    """`radon stop` is a NOPASSWD root action for the unprivileged `radon`
-    account, and /var/lib/radon belongs to `radon`, so the temp entry
-    `persist_topology` creates can be unlinked and replaced with a symlink
-    before it is opened for writing. Root then truncates and overwrites an
-    attacker-chosen file.
-
-    The window is modelled by shadowing `mktemp`: it returns a name that is
-    already a symlink to an outside file, which is exactly what the attacker
-    arranges in the gap between creation and the re-resolving write.
-    """
+    """Inject the symlink at the actual fd-relative exclusive-open boundary."""
     fake_bin = _topology_fake_bin(tmp_path)
-    victim = tmp_path / "victim"
-    victim.write_text("root-only content\n", encoding="utf-8")
-    topology = tmp_path / "state" / "operator-topology"
-    squat = topology.parent / "squatted.tmp"
-    _write_executable(
-        fake_bin / "mktemp",
-        f"""#!/bin/sh
-mkdir -p '{topology.parent}'
-rm -f '{squat}'
-ln -s '{victim}' '{squat}'
-printf '%s\\n' '{squat}'
-""",
-    )
-
+    victim = tmp_path / 'victim'
+    victim.write_text('root-only content\n')
+    topology = tmp_path / 'state' / 'operator-topology'
+    hook = tmp_path / 'topology-open-hook-ran'
+    attack_python = fake_bin / 'attack-python'
+    _write_executable(attack_python, f'''#!{sys.executable}
+import os, sys
+from pathlib import Path
+if len(sys.argv) > 3 and sys.argv[3] == {str(topology)!r}:
+    source = sys.stdin.read()
+    sys.argv = sys.argv[2:]
+    original_open = os.open
+    def substituted_open(path, flags, *args, **kwargs):
+        if str(path).startswith('operator-topology.tmp.') and flags & os.O_CREAT:
+            os.symlink({str(victim)!r}, path, dir_fd=kwargs['dir_fd'])
+            Path({str(hook)!r}).write_text('exclusive-open attack executed')
+        return original_open(path, flags, *args, **kwargs)
+    os.open = substituted_open
+    exec(compile(source, '<topology-symlink-fixture>', 'exec'))
+else:
+    os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
+''')
+    env = _topology_env(tmp_path, fake_bin, topology)
+    env['RADON_OPERATOR_PYTHON'] = str(attack_python)
     result = subprocess.run(
-        [str(CLOUD_ROOT / "scripts" / "operator-radon.sh"), "stop"],
-        env=_topology_env(tmp_path, fake_bin, topology),
-        text=True,
-        capture_output=True,
-        check=False,
+        [str(CLOUD_ROOT / 'scripts/operator-radon.sh'), 'stop'],
+        env=env, text=True, capture_output=True, timeout=30,
     )
 
-    assert victim.read_text(encoding="utf-8") == "root-only content\n", (
-        "root followed the substituted temp entry and overwrote an outside file"
-        f"; stdout={result.stdout} stderr={result.stderr}"
-    )
+    assert hook.read_text() == 'exclusive-open attack executed'
+    assert victim.read_text() == 'root-only content\n'
+    assert result.returncode == 74, result.stdout + result.stderr
+    assert 'refusing to persist topology' in result.stderr
+    assert not topology.exists()
+    events = tmp_path / 'events.log'
+    assert not events.exists() or events.read_text() == ''
 
 
 def test_topology_persistence_still_writes_the_private_unit_list(tmp_path: Path):
@@ -1503,3 +1504,67 @@ def test_topology_persistence_still_writes_the_private_unit_list(tmp_path: Path)
     units = topology.read_text(encoding="utf-8").splitlines()
     for unit in ("radon-api", "radon-nextjs", "radon-relay", "radon-monitor"):
         assert f"{unit}.service" in units
+
+
+def test_topology_short_write_failure_preserves_prior_state_and_never_stops(tmp_path: Path):
+    """A real file-size ceiling first short-writes, then refuses remaining bytes."""
+    fake_bin = _topology_fake_bin(tmp_path)
+    topology = tmp_path / 'state' / 'operator-topology'
+    topology.parent.mkdir()
+    original = 'radon-prior-schedule.timer\n'
+    topology.write_text(original)
+    limited_python = fake_bin / 'limited-python'
+    _write_executable(limited_python, f'''#!{sys.executable}
+import os, resource, signal, sys
+if len(sys.argv) > 3 and sys.argv[3] == {str(topology)!r}:
+    signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+    resource.setrlimit(resource.RLIMIT_FSIZE, (32, 32))
+os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
+''')
+    env = _topology_env(tmp_path, fake_bin, topology)
+    env['RADON_OPERATOR_PYTHON'] = str(limited_python)
+    result = subprocess.run([str(CLOUD_ROOT / 'scripts/operator-radon.sh'), 'stop'],
+                            env=env, text=True, capture_output=True, timeout=30)
+
+    assert topology.read_text() == original, result.stdout + result.stderr
+    assert result.returncode == 74, result.stdout + result.stderr
+    events = tmp_path / 'events.log'
+    assert not events.exists() or events.read_text() == ''
+    assert 'refusing to persist topology' in result.stderr
+
+
+@pytest.mark.parametrize('write_size', [7, 0])
+def test_topology_short_writes_complete_or_refuse_no_progress(tmp_path: Path, write_size: int):
+    fake_bin = _topology_fake_bin(tmp_path)
+    topology = tmp_path / 'state' / 'operator-topology'
+    short_python = fake_bin / 'short-python'
+    _write_executable(short_python, f'''#!{sys.executable}
+import os, sys
+if len(sys.argv) > 3 and sys.argv[3] == {str(topology)!r}:
+    source = sys.stdin.read()
+    sys.argv = sys.argv[2:]
+    original_write = os.write
+    os.write = lambda fd, data: original_write(fd, data[:{write_size}])
+    exec(compile(source, '<topology-short-write-fixture>', 'exec'))
+else:
+    os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
+''')
+    env = _topology_env(tmp_path, fake_bin, topology)
+    env['RADON_OPERATOR_PYTHON'] = str(short_python)
+    result = subprocess.run([str(CLOUD_ROOT / 'scripts/operator-radon.sh'), 'stop'],
+                            env=env, text=True, capture_output=True, timeout=30)
+
+    if write_size == 0:
+        assert result.returncode == 74, result.stdout + result.stderr
+        assert not topology.exists()
+        events = tmp_path / 'events.log'
+        assert not events.exists() or events.read_text() == ''
+        return
+    assert result.returncode == 0, result.stdout + result.stderr
+    content = topology.read_text()
+    assert content.endswith('\n')
+    assert set(content.splitlines()) == {
+        'radon-api.service', 'radon-nextjs.service', 'radon-relay.service',
+        'radon-monitor.service', 'radon-newsfeed.service', 'radon-portfolio-sync.timer',
+    }
+    assert stat.S_IMODE(topology.stat().st_mode) == 0o600

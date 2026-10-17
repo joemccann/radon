@@ -942,3 +942,33 @@ def test_export_candidate_accepts_a_single_commit_candidate(monkeypatch, tmp_pat
 
     assert result == {"status": "private-validation-pending", "head_sha": HEAD}
     assert len(pushed) == 1
+
+
+def test_bridge_multi_commit_rejection_persists_compatible_actionable_feedback(tmp_path, monkeypatch):
+    github = FakeGitHub()
+    github.comparison['ahead_by'] = 2
+    reviewer = FakeReviewer()
+    bridge = _bridge(tmp_path, github=github, reviewer=reviewer)
+    monkeypatch.setattr(bridge, '_publish', lambda *args: pytest.fail('invalid candidate must never publish'))
+    monkeypatch.setattr(bridge_module.subprocess, 'run', lambda *args, **kwargs: pytest.fail('invalid candidate must not fetch diff or execute Git'))
+
+    assert bridge.run_once() == 'private-validation-failed'
+    marker = bridge.directory / f'{HEAD}.json'
+    saved = json.loads(marker.read_text())
+    # Existing schema/readers already understand this invalid review input.
+    assert saved['status'] == 'private-review-invalid'
+    feedback = saved['feedback']
+    assert feedback['status'] == saved['status']
+    assert bridge_module._validate_feedback(feedback, BASE, HEAD)
+    assert 'exactly one commit' in feedback['findings'][0]['message']
+    assert reviewer.calls == []
+    assert not any(path.startswith((f'repos/{PUBLIC}/pulls', f'repos/{PUBLIC}/git/refs')) for path, _ in github.calls)
+
+    comparisons = sum('/compare/' in path for path, _ in github.calls)
+    assert bridge.run_once() == 'private-validation-failed'
+    assert sum('/compare/' in path for path, _ in github.calls) == comparisons
+    refs, _, calls = _feedback_api(monkeypatch, bridge)
+    bridge.flush_feedback({}); bridge.flush_feedback({})
+    assert list(refs) == [f'refs/heads/validation/feedback/{BASE}/{HEAD}']
+    assert sum(path.endswith('git/refs') for path, _, _ in calls) == 1
+    assert json.loads(marker.read_text())['feedback_published'] == refs[f'refs/heads/validation/feedback/{BASE}/{HEAD}']

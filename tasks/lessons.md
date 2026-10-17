@@ -1,3 +1,7 @@
+# A green PR can still be behind main (2026-10-17)
+
+- Fetch and integrate the latest main immediately before publishing a requested branch refresh. Verify required checks on the resulting exact head; earlier green checks do not establish readiness after the base or source changes.
+
 # Retired integrations are not missing operator setup (2026-10-17)
 
 - The owner confirmed Foreman is retired. Remove its intake, setup, owner map and active documentation instead of requiring a factory source or new setup. Preserve historical evidence and unrelated repositories; do not recreate the retired service during audits.

@@ -481,7 +481,12 @@ try:
         dir_fd=parent_fd,
     )
     try:
-        os.write(fd, ''.join(f'{unit}\n' for unit in units).encode())
+        remaining = memoryview(''.join(f'{unit}\n' for unit in units).encode())
+        while remaining:
+            written = os.write(fd, remaining)
+            if written <= 0:
+                raise OSError('topology write made no progress')
+            remaining = remaining[written:]
         os.fchmod(fd, 0o600)
         os.fsync(fd)
     finally:

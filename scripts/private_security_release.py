@@ -572,7 +572,10 @@ class PrivateReleaseBridge:
             # Same reason as export_candidate: _publish transfers the head
             # commit's whole ancestry into the public repository.
             if comparison.get('ahead_by') != 1:
-                self._terminal_marker(marker, base, head, 'private-candidate-not-single-commit')
+                self._terminal_marker(marker, base, head, 'private-review-invalid', diagnostics=(
+                    'Candidate must be exactly one commit ahead of its recorded base. '
+                    'Reduce the repair to one independently tested commit and export the new head; '
+                    'intermediate private commits must never enter public history.',))
                 terminal_failure = True
                 continue
             if len(comparison.get('files', [])) >= 300: continue

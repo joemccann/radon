@@ -298,6 +298,9 @@ Pushes to `main` run the root CI workflow. The deploy job:
 The journal helper is loaded from the immutable runner so rollback to a commit
 that predates `cloud/` cannot delete its own recovery implementation. Root
 topology state is durable across reboot under `/var/lib/radon-deploy`.
+The operator writes every byte of the saved unit list before fsync and atomic
+rename; a partial write or persistence error refuses service teardown and retains
+the prior topology file.
 
 **Interrupted backups.** The release snapshot includes an active or activating
 `radon-db-backup.service`. Stop it before replacing code, then asynchronously
