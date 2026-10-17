@@ -199,9 +199,20 @@ def export_candidate(base, head, *, severity, cwd):
     _require_private_archive()
     with tempfile.TemporaryDirectory(prefix='private-release-') as temporary:
         environment = _archive_git_environment(Path(temporary))
-        def git(*args):
-            subprocess.run(['/usr/bin/git', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', *args], cwd=cwd, env=environment, check=True, capture_output=True, timeout=180)
+        def git(*args, capture=False):
+            return subprocess.run(['/usr/bin/git', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', *args], cwd=cwd, env=environment, check=True, capture_output=True, text=capture or None, timeout=180)
         git('merge-base', '--is-ancestor', base, head)
+        # The release path pushes `head` itself into the PUBLIC repository with
+        # no depth restriction, while review covers only the aggregate
+        # base...head diff and its changed blobs. Content committed in an
+        # intermediate commit and removed again before the final tree would
+        # stay permanently reachable in public git history. A squash would
+        # break the deliberate SHA pinning the whole pipeline rests on, so a
+        # candidate that is more than one commit ahead of base is refused and
+        # must be reduced to a single commit first.
+        ahead = (git('rev-list', '--count', f'{base}..{head}', capture=True).stdout or '').strip()
+        if ahead != '1':
+            raise ValueError(f'candidate must be exactly one commit ahead of base, not {ahead or "unknown"}: every intermediate commit would become public history')
         git('push', '--atomic', f'git@github.com:{PRIVATE}.git', f'{base}:refs/heads/validation/base/{base}', f'{head}:refs/heads/validation/fix/{base}/{head}')
     return {'status': 'private-validation-pending', 'head_sha': head}
 
@@ -558,6 +569,12 @@ class PrivateReleaseBridge:
                 return 'private-ci-pending'
             comparison = self._api(f'repos/{PRIVATE}/compare/{base}...{head}')
             if comparison.get('status') != 'ahead' or comparison.get('merge_base_commit', {}).get('sha') != base: continue
+            # Same reason as export_candidate: _publish transfers the head
+            # commit's whole ancestry into the public repository.
+            if comparison.get('ahead_by') != 1:
+                self._terminal_marker(marker, base, head, 'private-candidate-not-single-commit')
+                terminal_failure = True
+                continue
             if len(comparison.get('files', [])) >= 300: continue
             diff = subprocess.run(['/opt/homebrew/bin/gh', 'api', f'repos/{PRIVATE}/compare/{base}...{head}', '-H', 'Accept: application/vnd.github.diff'], check=True, capture_output=True, text=True, timeout=120).stdout
             pr = PullRequest(row['number'], head, head_branch, diff_digest=hashlib.sha256(diff.encode()).hexdigest(), repository=PRIVATE, base_sha=base)

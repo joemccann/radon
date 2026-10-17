@@ -71,13 +71,16 @@ class FakeGitHub:
         }
         self.public_check_runs = {"total_count": 0, "check_runs": []}
         self.public_statuses = {"sha": HEAD, "total_count": 0, "statuses": []}
-        self.public_comparison = {"status": "ahead", "merge_base_commit": {"sha": BASE}, "files": [{"filename": "fix.py"}]}
+        self.public_comparison = {"status": "ahead", "ahead_by": 1, "merge_base_commit": {"sha": BASE}, "files": [{"filename": "fix.py"}]}
         self.calls = []
         self.check_runs = _green_runs()
         self.fresh_check_runs = None
         self.private_pr = _pr()
         self.fresh_private_pr = None
-        self.comparison = {"status": "ahead", "merge_base_commit": {"sha": BASE}}
+        # ahead_by must be 1: the release path pushes the head commit's whole
+        # ancestry into the public repository, so a multi-commit candidate
+        # would publish intermediate trees that review never saw.
+        self.comparison = {"status": "ahead", "ahead_by": 1, "merge_base_commit": {"sha": BASE}}
         self.public_main = BASE
         self.archive_main = "f" * 40
         self.workflow_paths = [f".github/workflows/{name}" for name in ("ci.yml", "pr-body.yml", "app-images-pr.yml", "app-images.yml")]
@@ -244,9 +247,9 @@ def test_export_candidate_uses_only_pinned_private_atomic_refs(monkeypatch, tmp_
 
     def fake_run(args, **kwargs):
         calls.append((args, kwargs))
-        if args[2:4] == ["merge-base", "--is-ancestor"]:
-            return subprocess.CompletedProcess(args, 0)
-        return subprocess.CompletedProcess(args, 0)
+        if "rev-list" in args:
+            return subprocess.CompletedProcess(args, 0, stdout="1\n")
+        return subprocess.CompletedProcess(args, 0, stdout="")
 
     monkeypatch.setattr(bridge_module.subprocess, "run", fake_run)
     result = bridge_module.export_candidate(BASE, HEAD, severity="P1", cwd=tmp_path)
@@ -874,3 +877,68 @@ def test_transient_real_review_probe_retries_same_private_head_without_terminal_
     assert saved['head_sha'] == HEAD and saved['base_sha'] == BASE
     assert saved['status'] == 'public-ci-pending' and 'feedback' not in saved
     assert sum(path == f'repos/{PUBLIC}/pulls' for path, args in github.calls) == 1
+
+
+def test_export_candidate_refuses_a_candidate_more_than_one_commit_ahead(
+    monkeypatch, tmp_path
+):
+    """`_publish` fetches the candidate head with no depth restriction and
+    pushes it into the PUBLIC repository, while review covers only the
+    aggregate base...head diff and its changed blobs. Content committed in an
+    intermediate commit and removed before the final tree stays permanently
+    reachable in public git history, which makes this the loop's own rail-7
+    disclosure channel. A squash would break the deliberate SHA pinning, so a
+    multi-commit candidate is refused instead.
+    """
+    key = tmp_path / ".radon-runner-reports-key"
+    key.write_text("synthetic-private-key", encoding="utf-8")
+    key.chmod(0o600)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+    def private_archive_404(*args, **kwargs):
+        raise urllib.error.HTTPError("url", 404, "private fixture", {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", private_archive_404)
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        if "rev-list" in args:
+            return subprocess.CompletedProcess(args, 0, stdout="2\n")
+        return subprocess.CompletedProcess(args, 0, stdout="")
+
+    monkeypatch.setattr(bridge_module.subprocess, "run", fake_run)
+
+    with pytest.raises(ValueError, match="one commit"):
+        bridge_module.export_candidate(BASE, HEAD, severity="P1", cwd=tmp_path)
+
+    assert not any("--atomic" in args for args in calls), (
+        "a multi-commit candidate must be refused before anything is pushed"
+    )
+
+
+def test_export_candidate_accepts_a_single_commit_candidate(monkeypatch, tmp_path):
+    key = tmp_path / ".radon-runner-reports-key"
+    key.write_text("synthetic-private-key", encoding="utf-8")
+    key.chmod(0o600)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+    def private_archive_404(*args, **kwargs):
+        raise urllib.error.HTTPError("url", 404, "private fixture", {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", private_archive_404)
+    pushed = []
+
+    def fake_run(args, **kwargs):
+        if "--atomic" in args:
+            pushed.append(args)
+        if "rev-list" in args:
+            return subprocess.CompletedProcess(args, 0, stdout="1\n")
+        return subprocess.CompletedProcess(args, 0, stdout="")
+
+    monkeypatch.setattr(bridge_module.subprocess, "run", fake_run)
+
+    result = bridge_module.export_candidate(BASE, HEAD, severity="P1", cwd=tmp_path)
+
+    assert result == {"status": "private-validation-pending", "head_sha": HEAD}
+    assert len(pushed) == 1
