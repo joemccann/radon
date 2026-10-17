@@ -132,7 +132,15 @@ class MemoryState:
         self.outbox = []
         self.notified = set()
         self.attempted_notifications = set()
+        self.control_plane = None
         self._lock = threading.Lock()
+
+    def synced_main(self, main_sha, hosts):
+        receipt = self.control_plane
+        return receipt if receipt and receipt.main_sha == main_sha and all(receipt.hosts.get(host) is True for host in hosts) else None
+
+    def record_control_plane(self, receipt):
+        self.control_plane = receipt
 
     def claim(self, pr_number, head_sha):
         key = (pr_number, head_sha)
@@ -291,7 +299,7 @@ def test_ineligible_pull_request_never_merges(pr):
     _run(github=github, deploy=deploy)
 
     assert github.merge_calls == []
-    assert deploy.sync_calls == []
+    assert deploy.sync_calls == [MERGE]  # Deployed main reconciles independently of this PR.
 
 
 @pytest.mark.parametrize(
@@ -351,7 +359,7 @@ def test_non_green_or_stale_exact_head_checks_never_merge(snapshot, reason):
     _run(github=github, deploy=deploy)
 
     assert github.merge_calls == [], reason
-    assert deploy.sync_calls == []
+    assert deploy.sync_calls == [MERGE]  # Deployed main reconciles independently of this PR.
 
 
 @pytest.mark.parametrize(
@@ -422,7 +430,7 @@ def test_merge_is_bound_to_the_reviewed_head_and_rechecks_expected_sha():
     _run(github=github, deploy=deploy)
 
     assert github.merge_calls == [(42, HEAD)]
-    assert deploy.sync_calls == []
+    assert deploy.sync_calls == [MERGE]  # Deployed main reconciles independently of this PR.
 
 
 def test_priority_release_does_not_consider_other_public_candidates():
@@ -691,19 +699,27 @@ def test_control_plane_sync_uses_immutable_main_and_fails_closed_on_any_host(tmp
     _run(github=github, deploy=deploy, state=state, notifier=notifier)
 
     assert deploy.sync_calls == [MERGE]
-    assert state.records
+    assert github.merge_calls == []
+    assert state.control_plane is None
     assert all(record[1] != "ready" for record in state.records)
     assert not any("ready" in message.lower() for _, message in notifier.calls)
 
 
 def test_control_plane_sync_waits_when_main_moves_after_merge():
-    github = FakeGitHub(main_sha="e" * 40)
-    deploy = FakeDeploy()
+    github = FakeGitHub(main_sha=MAIN)
+    deploy = FakeDeploy(sync_result=ur.SyncReceipt(MAIN, {"app": True, "broker": True}))
+    original = github.merge
+    def merge(number, head):
+        receipt = original(number, head)
+        github.current_main_sha = "e" * 40
+        return receipt
+    github.merge = merge
 
-    _run(github=github, deploy=deploy)
+    result = _run(github=github, deploy=deploy)
 
+    assert result.status == "deploy-pending"
     assert github.merge_calls == [(42, HEAD)]
-    assert deploy.sync_calls == []
+    assert deploy.sync_calls == [MAIN]
 
 
 def test_state_symlink_and_parent_traversal_cannot_write_outside_root(tmp_path):
@@ -829,17 +845,17 @@ def test_pending_release_waits_for_main_ancestry_and_syncs_current_main_only():
     state = MemoryState()
     state.releases.append((f"42:{HEAD}", {"status": "merged", "pr_number": 42, "head_sha": HEAD, "merge_sha": MERGE}))
     github = FakeGitHub(main_sha=MAIN, merge_status=ur.MergeReceipt(True, HEAD, MERGE), main_contains_merge=False)
-    deploy = FakeDeploy()
+    deploy = FakeDeploy(sync_result=ur.SyncReceipt(MAIN, {"app": True, "broker": True}))
 
     blocked = _run(github=github, state=state, deploy=deploy)
     assert blocked.status == "deploy-pending"
-    assert deploy.sync_calls == []
+    assert deploy.sync_calls == [MAIN]
 
     github.main_contains_merge = True
     synced = FakeDeploy(sync_result=ur.SyncReceipt(main_sha=MAIN, hosts={"app": True, "broker": True}))
     result = _run(github=github, state=state, deploy=synced)
     assert result.status == "green"
-    assert synced.sync_calls == [MAIN]
+    assert synced.sync_calls == []  # Persisted current-main proof already covers both hosts.
 
 
 def test_control_plane_sync_receipt_must_match_current_main_sha():
@@ -850,3 +866,139 @@ def test_control_plane_sync_receipt_must_match_current_main_sha():
 
     assert result.status == "sync-pending"
     assert deploy.sync_calls == [MERGE]
+
+
+def test_external_main_merge_reconciles_without_a_controller_release():
+    github = FakeGitHub(prs=[], main_sha=MAIN)
+    deploy = FakeDeploy(sync_result=ur.SyncReceipt(MAIN, {'app': True, 'broker': True}))
+    state = MemoryState()
+    assert _run(github=github, deploy=deploy, state=state).status == 'waiting'
+    assert deploy.sync_calls == [MAIN]
+    assert state.synced_main(MAIN, ('app', 'broker')) is not None
+    assert github.merge_calls == []
+    _run(github=github, deploy=deploy, state=state)
+    assert deploy.sync_calls == [MAIN]
+
+
+def test_successful_external_main_receipt_survives_wal_restart(tmp_path):
+    path = tmp_path / 'state'
+    github = FakeGitHub(prs=[], main_sha=MAIN)
+    deploy = FakeDeploy(sync_result=ur.SyncReceipt(MAIN, {'app': True, 'broker': True}))
+    state = ur.FileStateStore(path)
+    with state.locked(): _run(github=github, deploy=deploy, state=state)
+    restarted = ur.FileStateStore(path)
+    with restarted.locked(): _run(github=github, deploy=deploy, state=restarted)
+    assert deploy.sync_calls == [MAIN]
+    assert restarted.synced_main(MAIN, ('app', 'broker')).hosts == {'app': True, 'broker': True}
+
+
+def test_partial_external_sync_retries_and_blocks_new_maintenance_merge():
+    github = FakeGitHub(main_sha=MAIN)
+    state = MemoryState()
+    deploy = FakeDeploy(sync_result=ur.SyncReceipt(MAIN, {'app': True, 'broker': False}))
+    assert _run(github=github, deploy=deploy, state=state).status == 'sync-pending'
+    assert state.control_plane is None and github.merge_calls == []
+    deploy.sync_result = ur.SyncReceipt(MAIN, {'app': True, 'broker': True})
+    github.prs = []
+    assert _run(github=github, deploy=deploy, state=state).status == 'waiting'
+    assert deploy.sync_calls == [MAIN, MAIN]
+    assert state.control_plane.main_sha == MAIN
+
+
+def test_main_moving_during_external_sync_never_records_success_or_merges():
+    github = FakeGitHub(main_sha=MAIN)
+    state = MemoryState()
+    class MovingDeploy(FakeDeploy):
+        def sync_control_plane(self, main_sha):
+            receipt = super().sync_control_plane(main_sha)
+            github.current_main_sha = 'e' * 40
+            return receipt
+    deploy = MovingDeploy(sync_result=ur.SyncReceipt(MAIN, {'app': True, 'broker': True}))
+    assert _run(github=github, deploy=deploy, state=state).status == 'sync-pending'
+    assert state.control_plane is None and github.merge_calls == []
+
+
+def test_missing_or_failed_main_deployment_never_reconciles_or_merges():
+    github = FakeGitHub(main_sha=MAIN)
+    state = MemoryState(); deploy = FakeDeploy(idle=False)
+    assert _run(github=github, deploy=deploy, state=state).status == 'production-busy'
+    assert deploy.sync_calls == [] and state.control_plane is None and github.merge_calls == []
+
+
+def test_legacy_wal_without_control_plane_receipt_loads_and_reconciles(tmp_path):
+    path = tmp_path / 'state'; path.mkdir(mode=0o700)
+    legacy = {'releases': {}, 'outbox': {}}
+    wal = path / 'findings.jsonl'; wal.write_text(json.dumps({'state': legacy}) + '\n'); wal.chmod(0o600)
+    state = ur.FileStateStore(path)
+    assert state.synced_main(MAIN, ('app', 'broker')) is None
+    github = FakeGitHub(prs=[], main_sha=MAIN)
+    deploy = FakeDeploy(sync_result=ur.SyncReceipt(MAIN, {'app': True, 'broker': True}))
+    with state.locked(): _run(github=github, deploy=deploy, state=state)
+    assert state.data['releases'] == {} and state.data['outbox'] == {}
+    assert state.synced_main(MAIN, ('app', 'broker')) is not None
+
+
+def test_real_sync_adapter_rechecks_main_after_both_host_receipts(monkeypatch):
+    github = FakeGitHub(main_sha=MAIN); calls = []
+    def ssh(args, **kwargs):
+        role = 'app' if args[args.index('-l') + 2] == 'app-host' else 'broker'
+        calls.append(role)
+        if len(calls) == 2: github.current_main_sha = 'e' * 40
+        return f'sync-control-plane: installed_sha={MAIN} host_role={role}\n'
+    monkeypatch.setattr(ur, '_command', ssh)
+    adapter = ur.ProductionDeploy(github, {'app': 'app-host', 'broker': 'broker-host'})
+    receipt = adapter.sync_control_plane(MAIN)
+    assert len(calls) == 2
+    assert not all(receipt.hosts.get(host) is True for host in ('app', 'broker'))
+
+
+def test_each_new_external_main_invalidates_the_cached_sync_receipt():
+    github = FakeGitHub(prs=[], main_sha=MAIN); state = MemoryState()
+    deploy = FakeDeploy(sync_result=ur.SyncReceipt(MAIN, {'app': True, 'broker': True}))
+    _run(github=github, deploy=deploy, state=state)
+    latest = 'e' * 40
+    github.current_main_sha = latest
+    deploy.sync_result = ur.SyncReceipt(latest, {'app': True, 'broker': True})
+    _run(github=github, deploy=deploy, state=state)
+    assert deploy.sync_calls == [MAIN, latest]
+    assert state.control_plane.main_sha == latest
+
+
+def test_maintenance_merge_requires_external_main_receipt_first():
+    github = FakeGitHub(main_sha=MAIN); state = MemoryState()
+    deploy = FakeDeploy(sync_result=ur.SyncReceipt(MAIN, {'app': True, 'broker': True}))
+    original = github.merge
+    def merge(number, head):
+        assert state.synced_main(MAIN, ('app', 'broker')) is not None
+        original(number, head)
+        return ur.MergeReceipt(False, head, '')
+    github.merge = merge
+    assert _run(github=github, deploy=deploy, state=state).status == 'merge-pending'
+    assert deploy.sync_calls == [MAIN] and github.merge_calls == [(42, HEAD)]
+
+
+def test_cached_receipt_cannot_bypass_a_later_pending_or_failed_deployment():
+    state = MemoryState()
+    state.control_plane = ur.SyncReceipt(MAIN, {'app': True, 'broker': True})
+    github = FakeGitHub(main_sha=MAIN); deploy = FakeDeploy(idle=False)
+    assert _run(github=github, deploy=deploy, state=state).status == 'production-busy'
+    assert deploy.sync_calls == [] and github.merge_calls == []
+
+
+def test_external_main_moving_during_review_must_reconcile_before_merge():
+    state = MemoryState(); github = FakeGitHub(main_sha=MAIN)
+    latest = 'e' * 40
+    original_reviews = github.review_receipts
+    def reviews(number):
+        github.current_main_sha = latest
+        return original_reviews(number)
+    github.review_receipts = reviews
+    class CurrentDeploy(FakeDeploy):
+        def sync_control_plane(self, main_sha):
+            self.sync_calls.append(main_sha)
+            return ur.SyncReceipt(main_sha, {'app': True, 'broker': True})
+    deploy = CurrentDeploy()
+    _run(github=github, deploy=deploy, state=state)
+    assert github.merge_calls == [(42, HEAD)]
+    assert deploy.sync_calls == [MAIN, latest]
+    assert state.control_plane.main_sha == latest
