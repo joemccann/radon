@@ -36,6 +36,7 @@ import re
 import ssl
 import threading
 import time
+import urllib.error
 import urllib.request
 from typing import Any, Optional, Sequence
 from urllib.parse import urlsplit
@@ -184,7 +185,7 @@ def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse
         if over_cap or resp.status != 200:
             _close_keepalive()
             if resp.status != 200:
-                raise OSError(f"HTTP {resp.status}")
+                raise HttpStatusError(resp.status)
             raise OSError("response exceeds limit")
         _local.last_success = time.monotonic()
         return _PooledResponse(raw)
@@ -200,9 +201,47 @@ def _open_request(req: urllib.request.Request, timeout: float):
     return _pooled_open(req, timeout)
 
 
+class HttpStatusError(OSError):
+    """Non-200 HTTP status from the Hrana pipeline. ``.status`` is the code."""
+
+    def __init__(self, status: int):
+        self.status = int(status)
+        super().__init__(f"HTTP {self.status}")
+
+
 class HranaHttpError(RuntimeError):
     """Raised on ANY hrana failure: missing creds, HTTP/socket error,
     timeout, malformed response, or a statement-level error."""
+
+
+_TRANSIENT_HTTP = frozenset({502, 503, 504})
+_TRANSPORT_CAUSES = (
+    TimeoutError,
+    ConnectionResetError,
+    BrokenPipeError,
+    ssl.SSLEOFError,
+)
+
+
+def is_transport_error(exc: BaseException) -> bool:
+    """True for a Turso wire blip. Inspects types, never message text.
+
+    Statement errors and missing credentials are ``HranaHttpError`` with
+    no ``__cause__`` and must stay fatal for the grok page responder.
+    """
+    if isinstance(exc, HranaHttpError):
+        if exc.__cause__ is None:
+            return False
+        return is_transport_error(exc.__cause__)
+    if isinstance(exc, HttpStatusError):
+        return exc.status in _TRANSIENT_HTTP
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in _TRANSIENT_HTTP
+    if isinstance(exc, urllib.error.URLError):
+        return True
+    if isinstance(exc, http.client.RemoteDisconnected):
+        return True
+    return isinstance(exc, _TRANSPORT_CAUSES)
 
 
 def _encode_arg(value: Any) -> dict[str, Any]:
