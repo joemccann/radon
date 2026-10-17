@@ -52,7 +52,7 @@ describe("ResearchHeldReview", () => {
   it("shows report meta, the full selector note, and the PDF, not the raw article excerpt", async () => {
     render(<ResearchHeldReview />);
     const card = (await screen.findByText("jpm_flows___liquidity.pdf")).closest("li") as HTMLElement;
-    expect(within(card).getByText("Report dated 2026-09-16 (from the document text) · 14 pages · 6 charts")).toBeTruthy();
+    expect(within(card).getByText("Report dated 2026-09-16 (from the document text) · 14 pages · 6 extracted figures")).toBeTruthy();
     expect(within(card).queryByRole("heading", { name: "Market Watch" })).toBeNull();
     expect(card.textContent).not.toContain("Flows & Liquidity. How much upward pressure on global bond yields from tech bond issuance?");
     const note = within(card).getByTestId("held-selector-note");
@@ -68,7 +68,7 @@ describe("ResearchHeldReview", () => {
   it("keeps a long selector note fully in the DOM and scrollable", async () => {
     const longNote = "Two incremental measured findings selected from this Standard Chartered note. "
       + "The UBS Fed item already covered the dot plot rounding and target range. "
-      + "The labor market remains the unresolved swing factor through year-end. "
+      + "The labor market remains the unresolved swing factor through year-end. ".repeat(12)
       + "End of selector note.";
     const long = [...items];
     long[0] = { ...items[0], context: { ...items[0].context, excerpt: "# Market Watch\n\nThe US Federal Reserve hiked.", selectorReason: longNote } };
@@ -87,6 +87,15 @@ describe("ResearchHeldReview", () => {
     expect(block).toMatch(/overflow-y:\s*auto/);
     expect(block).toMatch(/max-height:/);
     expect(block).toMatch(/min-height:\s*0/);
+  });
+
+  it("describes extracted figure assets without claiming they are charts", async () => {
+    const assets = [{ ...items[0], context: { ...items[0].context, figureCount: 1 } }];
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ items: assets, pending: 1 }), { status: 200 }));
+    render(<ResearchHeldReview />);
+    const card = (await screen.findByText("jpm_flows___liquidity.pdf")).closest("li") as HTMLElement;
+    expect(within(card).getByText("Report dated 2026-09-16 (from the document text) · 14 pages · 1 extracted figure")).toBeTruthy();
+    expect(card.textContent).not.toContain("chart");
   });
 
   it("renders the draft body as markdown, not raw source, and never mounts the article excerpt", async () => {

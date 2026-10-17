@@ -113,6 +113,45 @@ def test_outcome_row_carries_enough_context_to_judge_a_document_with_no_drafts()
                        "sourceUrl": "/api/newsfeed/research/files/" + "c" * 64 + ".pdf"}
 
 
+def test_outcome_row_preserves_bounded_selector_reason_without_cutting_midword():
+    reason = ("Selector found a measured finding and rejected a repeated claim. " * 35).strip()
+    context = json.loads(publish.outcome_row(work(), review(
+        audit=[], selection={"candidates": [], "reason": reason},
+    ))["context_json"])
+    assert context["selectorReason"] == reason
+
+
+def test_selector_reason_exact_limit_preserves_paragraph_whitespace():
+    reason = "First paragraph.\n\nSecond paragraph. " + "x" * (4096 - len("First paragraph.\n\nSecond paragraph. "))
+    context = json.loads(publish.outcome_row(work(), review(
+        audit=[], selection={"candidates": [], "reason": reason},
+    ))["context_json"])
+    assert len(reason) == 4096
+    assert context["selectorReason"] == reason
+
+
+def test_selector_reason_overflow_uses_nearby_word_boundary():
+    reason = "signal " * 700
+    clipped = json.loads(publish.outcome_row(work(), review(
+        audit=[], selection={"candidates": [], "reason": reason},
+    ))["context_json"])["selectorReason"]
+    assert len(clipped) <= 4096 and clipped.endswith("…")
+    assert clipped[:-1] == reason[:4095].rstrip()
+    assert reason[len(clipped) - 1].isspace()
+
+
+@pytest.mark.parametrize("reason,expected", [
+    ("x" * 5000, "x" * 4095 + "…"),
+    (" \n\t" * 1500, "…"),
+    (("x" * 3837) + " " + ("y" * 300), ("x" * 3837) + " " + ("y" * 257) + "…"),
+])
+def test_selector_reason_overflow_falls_back_to_hard_cap_without_nearby_whitespace(reason, expected):
+    clipped = json.loads(publish.outcome_row(work(), review(
+        audit=[], selection={"candidates": [], "reason": reason},
+    ))["context_json"])["selectorReason"]
+    assert clipped == expected
+
+
 def test_outcome_row_surfaces_text_only_with_figures_and_figure_count():
     row = publish.outcome_row(work(), review(
         audit=[{"held": "TEXT_ONLY_WITH_FIGURES", "claim_key": "tic-july", "figures_on_cited_pages": ["f1"]}],
