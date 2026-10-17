@@ -312,7 +312,8 @@ def _figures_on_page(pdf_path, page_number):
         if (images >= 1 and w * h > MAX_IMAGE_AREA) or _edges(box) >= 3:
             continue
         title, source = _attach(box, lines, LINE_REACH)
-        crop = _grow_text(box, lines, TEXT_REACH)
+        # Raster charts already contain their own labels; nearby prose is not part of the figure.
+        crop = list(box) if images == count else _grow_text(box, lines, TEXT_REACH)
         for hit in (title, source):
             if hit:
                 crop = _union(crop, hit[1])
