@@ -1217,3 +1217,7 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 ## 2026-10-17 - Distinguish stale stage health from a live research outage
 - An aggregate heartbeat timestamp does not refresh its nested stage evidence. Compare stage timestamps and run a same-host bounded database canary before diagnosing a current Turso outage. Editorial held expiry, exhausted infrastructure review attempts and superseded ingestion rows are different states; recover only verified current infrastructure failures.
+
+## 2026-10-17: unattended operations require an executable recovery path
+
+When an operator asks for automated release or updater recovery, ship the durable controller, validated policy, scheduler integration and end-to-end receipts. Do not leave recurring work as a copied terminal command or treat a missing reviewer as a successful audit. Separate trusted authorization and root-owned code from mutable app/agent state; report genuinely missing bootstrap credentials or consent rather than manufacturing them.
