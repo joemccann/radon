@@ -1,3 +1,16 @@
+# Retire Foreman (2026-10-17)
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+- [x] T1 depends_on: [] Confirm owner retirement and inventory the exact Vercel project and repository references.
+- [x] T2 depends_on: [T1] Remove retired intake/setup/contracts, active documentation and obsolete knowledge example; record the retirement and owner correction.
+- [x] T3 depends_on: [T2] Run documentation/knowledge contracts, full Python/cloud verification and independent review.
+- [ ] T4 depends_on: [T3] Publish a focused PR, watch exact-head CI, notify once, admin-merge, verify normal deployment and resolve the audit owner-input item.
+
+## Review
+
+Owner confirmed Foreman is retired. Scope is the identified radon-factory Vercel project and its Radon integration. Preserve unrelated repositories, shared CI/security rules and historical evidence. Focused docs/knowledge contracts: 194 passed. Full Python: 16,149 passed, 2 skipped, 23 subtests; 55 failed, including the docs owner-map contract fixed in this diff and TLS tests that reproduce on clean base 20d0843d as `CERTIFICATE_VERIFY_FAILED: Missing Authority Key Identifier`. Independent review found no blocker or live integration effect. Previous main run 39069344344 completed successfully at 20d0843d. Delivery and exact-head verification pending.
+
 # Subscription error page guidance (2026-10-17)
 
 Dependency graph: T1 -> T2 -> T3 -> T4.
