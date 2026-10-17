@@ -9585,6 +9585,6 @@ Review: Preserve publication quality gates and source attribution; no local test
 ## Research review stale API connection follow-up (2026-10-17)
 - [x] R1 depends_on: [] Observe a new DbHttpError during three-key recovery; confirm API/shared transport retry gap without assuming the unrecorded exception cause.
 - [x] R2 depends_on: [R1] Extended real-socket regressions to API transport; GitHub c1dead71 reproduced16 failures/678 passing tests (job117429409148).
-- [ ] R3 depends_on: [R2] Port proven read-only reconnect classification and socket retirement; independent review and exact-head green CI.
+- [ ] R3 depends_on: [R2] Port proven read-only reconnect classification and socket retirement; bba2f554 had 694 passed and 37 green checks with Sol source review. API source remains byte-identical after merging c899d37e; new-head CI is pending.
 - [ ] R4 depends_on: [R3] Wait for the separate control-plane release; deploy without weakening isolation, verify recovery and canonical outcomes.
 Review: No local suites. Never replay ambiguous writes. Preserve existing database outage parking and publication quality gates.
