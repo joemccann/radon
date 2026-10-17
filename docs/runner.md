@@ -329,7 +329,9 @@ Steps 6 to 8 write into the bot's home only as the bot: your account reads your 
 
 ### 8c. Performance loop production probe (operator, bot shell, VPS)
 
-The `performance` loop reads production through one forced-command ssh key: the VPS runs `cloud/scripts/perf_probe.py` (read-only, stdlib, as `radon`, never root) for that key and nothing else, whatever the client sends. The pre-run hook (`scripts/runner/hooks/performance_pre.sh`) pulls the snapshot into `state/performance/prod-probe.json` with `StrictHostKeyChecking=yes` against the bot's pinned known_hosts file. The agent never connects. Without this step the loop still runs, and its probe file records why the snapshot is missing.
+The `performance` loop reads production through one forced-command ssh key: the VPS runs `cloud/scripts/perf_probe.py` (read-only, stdlib, as `radon`, never root) for that key and nothing else, whatever the client sends. The pre-run hook (`scripts/runner/hooks/performance_pre.sh`) pulls the snapshot into `state/performance/prod-probe.json` with `StrictHostKeyChecking=yes` against the bot's pinned known_hosts file. Without this step the loop still runs, and its probe file records why the snapshot is missing.
+
+The hook and agent run as the same uid, `_radonbot`. The agent can read the private key at `~/.ssh/radon_perf_probe` and can initiate the same SSH probe itself; having the hook collect the snapshot is advisory separation. The server-enforced boundary is the `authorized_keys` forced command and `restrict` options below: this key can invoke only the read-only probe as `radon`, without a shell, port forwarding or root access. Keep strict host-key verification when using it.
 
 The checked-in target is `radon@5.78.148.38` (`PERF_SSH_TARGET` in `scripts/runner/loops/performance.env`). The bot has no ssh config, so this value is an address, not a Host alias. `ssh-keyscan` and the verification ssh must use that same address. A known_hosts line recorded under another name does not match it, so a check against the other name can succeed while the nightly probe fails.
 
