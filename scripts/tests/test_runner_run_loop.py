@@ -434,7 +434,7 @@ def test_installed_daemon_runs_the_root_owned_runner_as_the_bot_user():
     plist = plistlib.loads(out.stdout)
     assert plist["Label"] == "com.radon.runner.documentation"
     assert plist["UserName"] == "_radonbot"
-    assert plist["ProgramArguments"] == ["/bin/bash", "/usr/local/radon-runner/run_loop.sh", "documentation"]
+    assert plist["ProgramArguments"] == ["/opt/homebrew/bin/python3.13", "-I", "/usr/local/radon-runner/lifecycle_gate.py", "documentation"]
     assert plist["EnvironmentVariables"]["HOME"] == "/Users/_radonbot"
     # Per-user CLI installs (agy and fx in ~/.local/bin, grok in ~/.grok/bin) go on the agent's PATH
     # only; run_loop.sh prepends them there. codex comes from Homebrew.
@@ -453,7 +453,7 @@ def test_ci_performance_runs_on_the_runner_in_the_old_loops_slot():
     plist = plistlib.loads(out.stdout)
     assert plist["Label"] == "com.radon.runner.ci-performance"
     assert plist["UserName"] == "_radonbot"
-    assert plist["ProgramArguments"] == ["/bin/bash", "/usr/local/radon-runner/run_loop.sh", "ci-performance"]
+    assert plist["ProgramArguments"] == ["/opt/homebrew/bin/python3.13", "-I", "/usr/local/radon-runner/lifecycle_gate.py", "ci-performance"]
     assert plist["StartCalendarInterval"] == {"Hour": 0, "Minute": 20}
 
     env = (REPO / "scripts" / "runner" / "loops" / "ci-performance.env").read_text()
@@ -486,7 +486,7 @@ def test_testing_and_reliability_run_on_the_runner_in_their_old_slots(loop, hour
     plist = plistlib.loads(out.stdout)
     assert plist["Label"] == f"com.radon.runner.{loop}"
     assert plist["UserName"] == "_radonbot"
-    assert plist["ProgramArguments"] == ["/bin/bash", "/usr/local/radon-runner/run_loop.sh", loop]
+    assert plist["ProgramArguments"] == ["/opt/homebrew/bin/python3.13", "-I", "/usr/local/radon-runner/lifecycle_gate.py", loop]
     assert plist["StartCalendarInterval"] == {"Hour": hour, "Minute": minute}
 
     env = (REPO / "scripts" / "runner" / "loops" / f"{loop}.env").read_text()
@@ -939,7 +939,7 @@ def test_every_runner_git_reads_the_root_owned_gitconfig():
                          capture_output=True, text=True, check=True).stdout
     assert "helper = !/opt/homebrew/bin/gh auth git-credential" in out
     src = (REPO / "scripts" / "runner" / "install.sh").read_text()
-    assert 'print_gitconfig > "$PREFIX/gitconfig"' in src
+    assert 'atomic_text "$PREFIX/gitconfig" 644 print_gitconfig' in src
     assert "git config --global" not in src
 
 
@@ -1084,7 +1084,8 @@ def test_rel291_only_one_contender_can_reclaim_a_stale_lock(rig):
 _LIB = ("nightly_pr_guard.py", "nightly_publish.py", "nightly_issue_prune.py", "nightly_green_base.py",
         "nightly_audit_context.py", "nightly_deliver.py", "security_claude_ladder.py",
         "claude_cli_env_drift.py", "claude_cli_env_reviewed.txt", "nvidia_rate_limit.py",
-        "ci/check_pr_body.py")
+        "ci/check_pr_body.py", "nightly_toolchain_update.py", "utils/atomic_io.py",
+        "codex_capability_probe.py")
 
 
 def _source_tree(tmp_path):

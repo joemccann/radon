@@ -69,6 +69,14 @@ tree_writer="$(find "$CLOUD_ROOT" \( ! -user "$EUID" -o \( ! -type l \
 [[ -z "$tree_writer" ]] || \
   die "cloud root is writable by an account other than root: $tree_writer (run radon-deploy-root sync-control-plane)"
 
+host_role="${RADON_BOOTSTRAP_HOST_ROLE:-}"
+if [[ -z "$host_role" && -f "$(root_path /etc/radon/env)" ]]; then
+  host_role="$(awk -F= '/^RADON_HOST_ROLE=/{v=$2} END{print v}' "$(root_path /etc/radon/env)")"
+fi
+host_role="${host_role:-combined}"
+case "$host_role" in app|broker|combined) ;; *) die "invalid host role" 78 ;; esac
+readonly HOST_ROLE="$host_role"
+
 readonly FLOCK_BIN="${RADON_BOOTSTRAP_FLOCK_BIN:-flock}"
 readonly VISUDO_BIN="${RADON_BOOTSTRAP_VISUDO_BIN:-visudo}"
 readonly NODE_BIN="${RADON_BOOTSTRAP_NODE_BIN:-node}"
@@ -77,11 +85,16 @@ readonly SYSTEMCTL_BIN="${RADON_BOOTSTRAP_SYSTEMCTL_BIN:-systemctl}"
 readonly PYTHON_BIN="${RADON_BOOTSTRAP_PYTHON_BIN:-python3}"
 
 for required_command in \
-  "$FLOCK_BIN" "$VISUDO_BIN" "$NODE_BIN" \
+  "$FLOCK_BIN" \
   "$SYSTEMD_ANALYZE_BIN" "$SYSTEMCTL_BIN" "$PYTHON_BIN"; do
   command -v "$required_command" >/dev/null 2>&1 || \
     die "required validator is unavailable: $required_command"
 done
+if [[ "$HOST_ROLE" != broker ]]; then
+  for required_command in "$VISUDO_BIN" "$NODE_BIN"; do
+    command -v "$required_command" >/dev/null 2>&1 || die "required validator is unavailable: $required_command"
+  done
+fi
 
 readonly DEPLOY_LOCK_PATH="$(root_path /home/radon/.radon-deploy.lock)"
 readonly APP_TRANSITION_PATH="$(root_path /home/radon/.radon-deploy-transition.json)"
@@ -100,7 +113,7 @@ mkdir -p "$(dirname "$DEPLOY_LOCK_PATH")"
 # The lock sits in radon's home, so radon can swap its name at any moment.
 # Create it with one O_EXCL|O_NOFOLLOW open, open it without O_CREAT, and
 # accept the fd only when it is the regular file the name still holds.
-"$PYTHON_BIN" - "$DEPLOY_LOCK_PATH" "$TEST_MODE" <<'PY_CREATE_LOCK' || \
+"$PYTHON_BIN" -I - "$DEPLOY_LOCK_PATH" "$TEST_MODE" <<'PY_CREATE_LOCK' || \
   die "cannot create deploy/control lock: $DEPLOY_LOCK_PATH"
 import os
 import pwd
@@ -123,7 +136,7 @@ PY_CREATE_LOCK
   die "deploy/control lock is not a regular file: $DEPLOY_LOCK_PATH"
 exec {DEPLOY_LOCK_FD}<"$DEPLOY_LOCK_PATH" || \
   die "cannot open deploy/control lock: $DEPLOY_LOCK_PATH"
-"$PYTHON_BIN" -c '
+"$PYTHON_BIN" -I -c '
 import os, stat, sys
 held, named = os.fstat(int(sys.argv[1])), os.lstat(sys.argv[2])
 sys.exit(not (stat.S_ISREG(named.st_mode)
@@ -147,6 +160,8 @@ done
 readonly -a SOURCES=(
   scripts/deploy-root-helper.sh
   scripts/ib-gateway-control.sh
+  scripts/ib-operator-hold.sh
+  repo/scripts/utils/ib_operator_hold.py
   scripts/operator-radon.sh
   scripts/drift_audit.py
   scripts/disk_cleanup.py
@@ -197,6 +212,8 @@ readonly -a SOURCES=(
 readonly -a LOGICAL_TARGETS=(
   /usr/local/sbin/radon-deploy-root
   /usr/local/bin/radon-ib-gateway-control
+  /usr/local/sbin/radon-ib-hold
+  /usr/local/lib/radon/ib_operator_hold.py
   /usr/local/bin/radon
   /usr/local/lib/radon/drift_audit.py
   /usr/local/lib/radon/disk_cleanup.py
@@ -245,7 +262,7 @@ readonly -a LOGICAL_TARGETS=(
   /etc/systemd/system/radon-research-archive.service.d/runtime-container.conf
 )
 readonly -a MODES=(
-  0755 0755 0755 0644 0644 0755 0755 0644
+  0755 0755 0755 0644 0755 0644 0644 0755 0755 0644
   0440 0440 0440 0440
   0644
   0644
@@ -257,7 +274,7 @@ readonly -a MODES=(
   0644
 )
 readonly -a KINDS=(
-  shell shell shell python python shell shell compose
+  shell shell shell python shell python python shell shell compose
   sudoers sudoers sudoers sudoers
   polkit
   seccomp
@@ -274,6 +291,44 @@ readonly -a KINDS=(
    "${#SOURCES[@]}" -eq "${#MODES[@]}" && \
    "${#SOURCES[@]}" -eq "${#KINDS[@]}" ]] || \
   die "internal artifact table is inconsistent"
+
+app_control_plane_source_is_excluded() {
+  case "$1" in
+    scripts/ib-gateway-control.sh|scripts/ib-operator-hold.sh|\
+    repo/scripts/utils/ib_operator_hold.py|\
+    services/radon-ib-gateway.service|services/radon-ib-gateway-preheld-restart.service|\
+    services/radon-ib-watchdog.service|services/radon-ib-watchdog.timer|\
+    services/radon-ib-gateway-remote.service) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+broker_control_plane_source() {
+  case "$1" in
+    scripts/deploy-root-helper.sh|scripts/ib-gateway-control.sh|\
+    scripts/ib-operator-hold.sh|scripts/operator-radon.sh|\
+    repo/scripts/utils/ib_operator_hold.py|\
+    scripts/radon-docker-gw.sh|docker-compose.yml|\
+    services/radon-ib-gateway.service|services/radon-ib-gateway-preheld-restart.service|\
+    services/radon-ib-watchdog.service|services/radon-ib-watchdog.timer|\
+    services/radon-ib-gateway-remote.service) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+declare -a BUNDLE_SOURCES=() BUNDLE_TARGETS=() BUNDLE_MODES=() BUNDLE_KINDS=()
+for bundle_index in "${!SOURCES[@]}"; do
+  if [[ "$HOST_ROLE" == broker ]] && ! broker_control_plane_source "${SOURCES[$bundle_index]}"; then
+    continue
+  fi
+  if [[ "$HOST_ROLE" == app ]] && app_control_plane_source_is_excluded "${SOURCES[$bundle_index]}"; then
+    continue
+  fi
+  BUNDLE_SOURCES+=("${SOURCES[$bundle_index]}")
+  BUNDLE_TARGETS+=("${LOGICAL_TARGETS[$bundle_index]}")
+  BUNDLE_MODES+=("${MODES[$bundle_index]}")
+  BUNDLE_KINDS+=("${KINDS[$bundle_index]}")
+done
 
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -333,7 +388,7 @@ declare -a BACKUP_EXISTED=()
 # name, then rename it over the target, which replaces a link, never follows it.
 restore_target() {
   local index="$1" target="$2"
-  "$PYTHON_BIN" - "$BACKUP_DIR/$index" "$target" "${BACKUP_EXISTED[$index]:-0}" "$TEST_MODE" <<'PY_RESTORE_TARGET'
+  "$PYTHON_BIN" -I - "$BACKUP_DIR/$index" "$target" "${BACKUP_EXISTED[$index]:-0}" "$TEST_MODE" <<'PY_RESTORE_TARGET'
 import os, secrets, stat, sys
 backup, target, existed, test = sys.argv[1], sys.argv[2], sys.argv[3] == "1", sys.argv[4] == "1"
 parent, name = os.path.split(target)
@@ -523,21 +578,36 @@ declare -a SOURCE_HASHES=()
 declare -a INSTALLED_TARGETS=()
 declare -a SYSTEMD_CANDIDATES=()
 
-for index in "${!SOURCES[@]}"; do
-  relative_source="${SOURCES[$index]}"
+for index in "${!BUNDLE_SOURCES[@]}"; do
+  relative_source="${BUNDLE_SOURCES[$index]}"
   source_path="$CLOUD_ROOT/$relative_source"
+  case "$relative_source" in
+    repo/scripts/utils/ib_operator_hold.py)
+      source_path="$(dirname "$CLOUD_ROOT")/${relative_source#repo/}"
+      for dependency_dir in "$(dirname "$CLOUD_ROOT")" "$(dirname "$CLOUD_ROOT")/scripts" "$(dirname "$source_path")"; do
+        directory_is_root_owned "$dependency_dir" || die "dependency directory is not root-owned: $relative_source"
+        dependency_mode="$(file_mode "$dependency_dir")"
+        (( (8#$dependency_mode & 8#022) == 0 )) || die "dependency directory is writable by another account: $relative_source"
+      done
+      dependency_writer="$(find "$source_path" \( ! -user "$EUID" -o -perm -0022 \) -print -quit)"
+      [[ -z "$dependency_writer" ]] || die "dependency source is writable by another account: $relative_source"
+      ;;
+  esac
   [[ -f "$source_path" && ! -L "$source_path" ]] || \
     die "source artifact is missing or not a regular file: $relative_source"
   source_parent="$(cd "$(dirname "$source_path")" && pwd -P)"
   case "$source_parent/" in
     "$CLOUD_ROOT/"*) ;;
+    "$(dirname "$CLOUD_ROOT")/scripts/utils/")
+      [[ "$relative_source" == repo/scripts/utils/ib_operator_hold.py ]] || die "source escapes cloud root"
+      ;;
     *) die "source artifact escapes canonical cloud root: $relative_source" ;;
   esac
 
   staged_path="$STAGE_DIR/candidates/$index/$(basename "$relative_source")"
   mkdir -p "$(dirname "$staged_path")"
   source_hash_before="$(sha256_file "$source_path")"
-  install -m "${MODES[$index]}" "$source_path" "$staged_path"
+  install -m "${BUNDLE_MODES[$index]}" "$source_path" "$staged_path"
   source_hash_after="$(sha256_file "$source_path")"
   staged_hash="$(sha256_file "$staged_path")"
   if [[ "$source_hash_before" != "$source_hash_after" || \
@@ -545,7 +615,7 @@ for index in "${!SOURCES[@]}"; do
     die "source changed while staging: $relative_source"
   fi
 
-  case "${KINDS[$index]}" in
+  case "${BUNDLE_KINDS[$index]}" in
     shell)
       bash -n "$staged_path" || die "shell syntax validation failed: $relative_source"
       ;;
@@ -566,13 +636,13 @@ for index in "${!SOURCES[@]}"; do
     # The newsfeed Chromium seccomp filter root's engine loads. Same gate as
     # deploy-root-helper.sh refresh_install_file: parses, and denies by default.
     seccomp)
-      "$PYTHON_BIN" -c 'import json, sys; sys.exit(json.load(open(sys.argv[1], encoding="utf-8")).get("defaultAction") != "SCMP_ACT_ERRNO")' \
+      "$PYTHON_BIN" -I -c 'import json, sys; sys.exit(json.load(open(sys.argv[1], encoding="utf-8")).get("defaultAction") != "SCMP_ACT_ERRNO")' \
         "$staged_path" || die "seccomp profile validation failed: $relative_source"
       ;;
     python)
       # Parse only. Importing or compiling to disk would execute or cache
       # candidate code during a privileged transaction.
-      "$PYTHON_BIN" -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1])' \
+      "$PYTHON_BIN" -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1])' \
         "$staged_path" || die "python syntax validation failed: $relative_source"
       ;;
     systemd)
@@ -621,7 +691,7 @@ for index in "${!SOURCES[@]}"; do
 
   STAGED+=("$staged_path")
   SOURCE_HASHES+=("$staged_hash")
-  INSTALLED_TARGETS+=("$(root_path "${LOGICAL_TARGETS[$index]}")")
+  INSTALLED_TARGETS+=("$(root_path "${BUNDLE_TARGETS[$index]}")")
 done
 
 # systemd-analyze verify resolves absolute ExecStart paths. On the first live
@@ -629,8 +699,8 @@ done
 # at their final paths before unit validation. On failure, remove only the
 # helpers this run created so a partial seed cannot linger.
 declare -a PRESEEDED_HELPERS=()
-for index in "${!KINDS[@]}"; do
-  if [[ "${KINDS[$index]}" != "shell" ]]; then
+for index in "${!BUNDLE_KINDS[@]}"; do
+  if [[ "${BUNDLE_KINDS[$index]}" != "shell" ]]; then
     continue
   fi
   helper_target="${INSTALLED_TARGETS[$index]}"
@@ -639,12 +709,12 @@ for index in "${!KINDS[@]}"; do
   fi
   mkdir -p "$(dirname "$helper_target")"
   if [[ "$TEST_MODE" == "1" ]]; then
-    install -m "${MODES[$index]}" "${STAGED[$index]}" "$helper_target" || \
-      die "failed to preseed helper for unit validation: ${LOGICAL_TARGETS[$index]}"
+    install -m "${BUNDLE_MODES[$index]}" "${STAGED[$index]}" "$helper_target" || \
+      die "failed to preseed helper for unit validation: ${BUNDLE_TARGETS[$index]}"
   else
-    install -m "${MODES[$index]}" -o root -g root \
+    install -m "${BUNDLE_MODES[$index]}" -o root -g root \
       "${STAGED[$index]}" "$helper_target" || \
-      die "failed to preseed helper for unit validation: ${LOGICAL_TARGETS[$index]}"
+      die "failed to preseed helper for unit validation: ${BUNDLE_TARGETS[$index]}"
   fi
   PRESEEDED_HELPERS+=("$helper_target")
 done
@@ -657,9 +727,9 @@ if ! "$SYSTEMD_ANALYZE_BIN" verify "${SYSTEMD_CANDIDATES[@]}" >/dev/null; then
 fi
 
 STAGED_MANIFEST="$STAGE_DIR/control-plane-manifest.sha256"
-for index in "${!SOURCES[@]}"; do
+for index in "${!BUNDLE_SOURCES[@]}"; do
   printf '%s  %s -> %s\n' \
-    "${SOURCE_HASHES[$index]}" "${SOURCES[$index]}" "${LOGICAL_TARGETS[$index]}" \
+    "${SOURCE_HASHES[$index]}" "${BUNDLE_SOURCES[$index]}" "${BUNDLE_TARGETS[$index]}" \
     >> "$STAGED_MANIFEST"
 done
 STAGED_READY="$STAGE_DIR/control-plane-ready"
@@ -680,7 +750,7 @@ for index in "${!INSTALLED_TARGETS[@]}"; do
   target_path="${INSTALLED_TARGETS[$index]}"
   if [[ ! -f "$target_path" || -L "$target_path" ]] || \
      [[ "$(sha256_file "$target_path" 2>/dev/null || true)" != "${SOURCE_HASHES[$index]}" ]] || \
-     ! mode_matches "$target_path" "${MODES[$index]}" || \
+     ! mode_matches "$target_path" "${BUNDLE_MODES[$index]}" || \
      ! ownership_matches "$target_path"; then
     bundle_is_current=0
     break
@@ -705,7 +775,7 @@ atomic_install() {
   local target="$2"
   local mode="$3"
   mkdir -p "$(dirname "$target")"
-  "$PYTHON_BIN" - "$source" "$target" "$mode" "$TEST_MODE" <<'PY_ATOMIC_INSTALL'
+  "$PYTHON_BIN" -I - "$source" "$target" "$mode" "$TEST_MODE" <<'PY_ATOMIC_INSTALL'
 import os, secrets, sys
 source, target, mode, test = sys.argv[1], sys.argv[2], int(sys.argv[3], 8), sys.argv[4] == "1"
 parent, name = os.path.split(target)
@@ -759,17 +829,17 @@ done
 TRANSACTION_ACTIVE=1
 rm -f -- "$READY_PATH"
 for index in "${!INSTALLED_TARGETS[@]}"; do
-  atomic_install "${STAGED[$index]}" "${INSTALLED_TARGETS[$index]}" "${MODES[$index]}" || \
-    die "failed to install: ${LOGICAL_TARGETS[$index]}"
+  atomic_install "${STAGED[$index]}" "${INSTALLED_TARGETS[$index]}" "${BUNDLE_MODES[$index]}" || \
+    die "failed to install: ${BUNDLE_TARGETS[$index]}"
 done
 
 for index in "${!INSTALLED_TARGETS[@]}"; do
   target_path="${INSTALLED_TARGETS[$index]}"
   installed_hash="$(sha256_file "$target_path")"
   if [[ "$installed_hash" != "${SOURCE_HASHES[$index]}" ]] || \
-     ! mode_matches "$target_path" "${MODES[$index]}" || \
+     ! mode_matches "$target_path" "${BUNDLE_MODES[$index]}" || \
      ! ownership_matches "$target_path"; then
-    die "installed artifact verification failed: ${LOGICAL_TARGETS[$index]}"
+    die "installed artifact verification failed: ${BUNDLE_TARGETS[$index]}"
   fi
 done
 
@@ -794,4 +864,4 @@ mode_matches "$READY_PATH" 0644 && ownership_matches "$READY_PATH" || \
 
 TRANSACTION_COMMITTED=1
 TRANSACTION_ACTIVE=0
-printf 'Installed and verified %d control-plane artifacts.\n' "${#SOURCES[@]}"
+printf 'Installed and verified %d control-plane artifacts.\n' "${#BUNDLE_SOURCES[@]}"

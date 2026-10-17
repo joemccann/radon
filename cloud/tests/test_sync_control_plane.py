@@ -24,6 +24,7 @@ import subprocess
 import sys
 
 import yaml
+import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -74,7 +75,13 @@ def _init_release_repo(tmp_path: pathlib.Path, *, with_bootstrap: bool = True) -
     if with_bootstrap:
         (scripts / "bootstrap-control-plane.sh").write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
     (scripts / "deploy-root-helper.sh").write_text("#!/bin/bash\n# tip helper\n", encoding="utf-8")
+    for name in ("operator-radon.sh", "ib-gateway-control.sh", "radon-app-runtime.sh"):
+        (scripts / name).write_text("#!/bin/bash\n# trusted helper\n", encoding="utf-8")
     (services / "runtime-container.conf").write_text("[Service]\nType=notify\n", encoding="utf-8")
+    for name in ("ib_operator_hold.py",):
+        dependency = repo / "scripts" / "utils" / name
+        dependency.parent.mkdir(parents=True, exist_ok=True)
+        dependency.write_text("# trusted utility\n", encoding="utf-8")
     (repo / "README.md").write_text("not part of cloud/\n", encoding="utf-8")
     _git(repo, "init", "-q", "-b", "main")
     sha = _commit_all(repo, "release")
@@ -719,3 +726,108 @@ preflight_database
         _, calls = self._preflight(tmp_path, probe_exits=[0])
         assert "timeout" in calls[0]
         assert "SELECT 1" in calls[0]
+
+
+def test_sync_refuses_unisolated_candidate_before_running_its_bootstrap(tmp_path):
+    repo, _ = _init_release_repo(tmp_path)
+    candidate = repo / "cloud/scripts/bootstrap-control-plane.sh"
+    candidate.write_text('#!/bin/bash\n"$PYTHON_BIN" -c \'import ast\'\n')
+    _commit_all(repo, "candidate without interpreter isolation")
+    env, bootstrap_log = _helper_env(tmp_path, repo)
+    result = _run_sync(env)
+    assert result.returncode == 76, result.stdout + result.stderr
+    assert not bootstrap_log.exists()
+    assert "interpreter isolation" in result.stderr
+
+
+def test_expected_sha_sync_refuses_stale_commit_before_bootstrap(tmp_path):
+    repo, _ = _init_release_repo(tmp_path)
+    env, log = _helper_env(tmp_path, repo)
+    result = subprocess.run(["bash", str(ROOT_HELPER), "sync-control-plane", "a" * 40],
+                            env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 76, result.stdout + result.stderr
+    assert not log.exists()
+
+
+def test_expected_sha_sync_prints_an_exact_install_receipt(tmp_path):
+    repo, sha = _init_release_repo(tmp_path)
+    env, log = _helper_env(tmp_path, repo)
+    result = subprocess.run(["bash", str(ROOT_HELPER), "sync-control-plane", sha],
+                            env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert log.exists()
+    assert f"installed_sha={sha} host_role=combined" in result.stdout
+
+
+def _advanceable_main(tmp_path):
+    repo, expected = _init_release_repo(tmp_path)
+    (repo / 'README.md').write_text('concurrent main update\n')
+    advanced = _commit_all(repo, 'advance main during expected sync')
+    _git(repo, 'update-ref', 'refs/heads/main', expected)
+    return repo, expected, advanced
+
+
+def test_expected_sha_sync_resolves_role_before_final_tip_admission(tmp_path):
+    repo, expected, advanced = _advanceable_main(tmp_path)
+    env, log = _helper_env(tmp_path, repo)
+    # Resolving the host role may block on local configuration. Main can
+    # advance during that work, before the candidate bootstrap is admitted.
+    role = f'''read_host_role() {{
+  git -C {shlex.quote(str(repo))} update-ref refs/heads/main {advanced}
+  printf 'combined\\n'
+}}'''
+    script = re.sub(r'^read_host_role\(\) \{.*?^\}', lambda _: role,
+                    ROOT_HELPER.read_text(), count=1, flags=re.MULTILINE | re.DOTALL)
+    helper = tmp_path / 'role-race-helper'
+    _write_executable(helper, script)
+    result = subprocess.run(['bash', str(helper), 'sync-control-plane', expected],
+                            env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 76, result.stdout + result.stderr
+    assert not log.exists()
+    assert 'installed_sha=' not in result.stdout
+
+
+def test_expected_sha_sync_never_receipts_main_that_moves_during_bootstrap(tmp_path):
+    repo, expected, advanced = _advanceable_main(tmp_path)
+    env, log = _helper_env(tmp_path, repo)
+    runner = pathlib.Path(env['RADON_TEST_BOOTSTRAP_RUNNER'])
+    _write_executable(runner, f'''#!/bin/bash
+printf 'bootstrap ran\\n' >> {shlex.quote(str(log))}
+git -C {shlex.quote(str(repo))} update-ref refs/heads/main {advanced}
+exit 0
+''')
+    result = subprocess.run(['bash', str(ROOT_HELPER), 'sync-control-plane', expected],
+                            env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 76, result.stdout + result.stderr
+    assert log.exists()
+    assert 'installed_sha=' not in result.stdout
+
+
+@pytest.mark.parametrize("invocation", [
+    '"$python_bin" -c', '${python_bin} -c', '"${python_bin:-/usr/bin/python3}" -c',
+    '/usr/bin/python3 -c', 'python3.13 -u -c', '"$PYTHON_BIN" \\\n-c',
+])
+def test_sync_rejects_alternate_unisolated_python_invocations(tmp_path, invocation):
+    repo, _ = _init_release_repo(tmp_path)
+    (repo / "cloud/scripts/bootstrap-control-plane.sh").write_text(
+        "#!/bin/bash\n" + invocation + " 'import ast'\n")
+    _commit_all(repo, "unisolated interpreter spelling")
+    env, log = _helper_env(tmp_path, repo)
+    result = _run_sync(env)
+    assert result.returncode == 76, result.stdout + result.stderr
+    assert not log.exists()
+
+
+@pytest.mark.parametrize("name", [
+    "deploy-root-helper.sh", "operator-radon.sh", "ib-gateway-control.sh", "radon-app-runtime.sh",
+])
+def test_sync_requires_every_isolation_checked_script(tmp_path, name):
+    repo, _ = _init_release_repo(tmp_path)
+    path = repo / "cloud/scripts" / name
+    if path.exists():
+        path.unlink()
+    _commit_all(repo, "missing required helper")
+    env, log = _helper_env(tmp_path, repo)
+    result = _run_sync(env)
+    assert result.returncode == 76, result.stdout + result.stderr
+    assert not log.exists()

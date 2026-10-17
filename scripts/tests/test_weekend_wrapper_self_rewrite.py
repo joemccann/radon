@@ -25,7 +25,7 @@ def test_every_nightly_loop_runs_the_root_owned_runner_outside_the_clone(loop: s
     out = subprocess.run([BASH, str(REPO / "scripts" / "runner" / "install.sh"), "--print-plist", loop],
                          capture_output=True, check=True)
     plist = plistlib.loads(out.stdout)
-    assert plist["ProgramArguments"] == ["/bin/bash", "/usr/local/radon-runner/run_loop.sh", loop]
+    assert plist["ProgramArguments"] == ["/opt/homebrew/bin/python3.13", "-I", "/usr/local/radon-runner/lifecycle_gate.py", loop]
     assert plist["UserName"] == "_radonbot"
 
 
