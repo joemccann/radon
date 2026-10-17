@@ -131,6 +131,40 @@ def test_aged_retry_gets_first_review_slot_ahead_of_newer_fresh_work(state):
     assert [work['key'] for work in state.ready(limit=1)] == [fresh]
 
 
+def test_aged_retry_slot_is_fifo_when_newer_interrupted_retry_has_zero_deadline(state):
+    older = _review_ready(state, 'older-due-retry', day='07')
+    interrupted = _review_ready(state, 'newer-interrupted-retry', day='08')
+    fresh = _review_ready(state, 'fresh', day='08')
+    with state.db:
+        state.db.execute("UPDATE work SET attempts=1,error='database_unavailable',available_at=? WHERE key=?",
+                         (time.time() - 3600, older))
+        state.db.execute("UPDATE work SET attempts=1,error=NULL,available_at=0 WHERE key=?", (interrupted,))
+    assert state.ready(limit=1)[0]['key'] == older
+    _finish_review_claim(state, older)
+    assert state.ready(limit=1)[0]['key'] == fresh
+
+
+def test_new_zero_deadline_retries_cannot_bypass_older_due_retries_on_later_slots(state):
+    older_first = _review_ready(state, 'older-first', day='07')
+    older_second = _review_ready(state, 'older-second', day='07')
+    with state.db:
+        state.db.execute("UPDATE work SET attempts=1,error='database_unavailable',available_at=? WHERE key=?",
+                         (time.time() - 3600, older_first))
+        state.db.execute("UPDATE work SET attempts=1,error='database_unavailable',available_at=? WHERE key=?",
+                         (time.time() - 1800, older_second))
+    for index in range(3):
+        newer = _review_ready(state, f'interrupted-{index}', day='08')
+        fresh = _review_ready(state, f'fresh-{index}', day='08')
+        with state.db:
+            state.db.execute("UPDATE work SET attempts=1,error=NULL,available_at=0 WHERE key=?", (newer,))
+        if index == 0:
+            assert state.ready(limit=1)[0]['key'] == older_first
+            _finish_review_claim(state, older_first)
+        assert state.ready(limit=1)[0]['key'] == fresh
+        _finish_review_claim(state, fresh)
+    assert state.ready(limit=1)[0]['key'] == older_second
+
+
 def test_review_admission_gives_three_fresh_claims_then_another_aged_retry(state):
     first_retry = _review_ready(state, 'retry-first', day='07')
     second_retry = _review_ready(state, 'retry-second', day='07')
