@@ -30,6 +30,15 @@ PrivateTmp=yes
 RestrictSUIDSGID=yes
 ProtectSystem=full
 CapabilityBoundingSet=
+# systemd reads EnvironmentFile before the namespace is built, so hiding the
+# file from the process costs this unit nothing and stops the three unpinned
+# agent CLIs it launches from reading the production credentials straight off
+# disk (ProtectSystem=full restricts writes, not reads). Same contract as the
+# two grok units. Residual, which no namespace option closes: those CLIs run
+# under the same uid as this process, so /proc/<parent>/environ still carries
+# whatever systemd loaded here — closing that needs a separate account.
+InaccessiblePaths=-/etc/radon/env
+ProtectProc=invisible
 # The sidecar /var/lib/radon/subscription-tokens/state.json carries the page
 # cooldowns and the consecutive-error streak. Without this the directory is not
 # owned by radon and every run silently loses both.

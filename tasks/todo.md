@@ -1,3 +1,16 @@
+# PR 1132 refresh and completion (2026-10-17)
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+- [x] T1 depends_on: [] Inspect exact PR head, review incoming security changes and isolate from the dirty operator checkout.
+- [x] T2 depends_on: [T1] Merge current green main, preserve the native-auth fix, and repair verified readiness blockers with red/green regressions.
+- [ ] T3 depends_on: [T2] Run focused/full verification and independent security review; update the existing PR and watch all exact-head checks.
+- [ ] T4 depends_on: [T3] Confirm the single PR-green notification, admin-merge the exact green head, and verify normal production delivery and installed control planes.
+
+## Review
+
+Existing PR head 5e6dde78 was green but behind main. Integrated production-green c7471050, including the native Antigravity fix and research queue repair; task-ledger conflicts retained latest main plus this plan. Red/green fixes cover compatible durable private-release rejection feedback and complete topology persistence before teardown. Focused results: 203 controller tests, 60 gateway tests and seven final topology tests, including an attack hook at the actual exclusive-open boundary. Sol approved privileged/controller changes and Luna approved web and topology behavior. Refreshed full Python: 16,267 passed, two skipped and 23 subtests passed; full cloud: 2,921 passed, seven skipped; full Vitest: 1,120 files and 10,996 tests passed, 21 skipped. Exact-head delivery pending. Preserve unrelated user files and the existing security residuals; no CI or privilege gate is relaxed.
+
 # Retire Foreman (2026-10-17)
 
 Dependency graph: T1 -> T2 -> T3 -> T4.

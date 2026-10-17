@@ -671,7 +671,10 @@ def test_ci_changes_job_resolves_the_push_base_from_deploy_history() -> None:
         "comes from deploy history (T-312)"
     )
     assert "github.event.pull_request.base.sha" in env["BASE_SHA"]
-    assert env["GH_TOKEN"] == "${{ github.token }}"
+    # The lookback needs the token on push; it is deliberately withheld on
+    # pull_request, where gate_base reads BASE_SHA and never calls the API.
+    assert "github.token" in env["GH_TOKEN"]
+    assert "github.event_name == 'push'" in env["GH_TOKEN"]
     assert changes["permissions"]["actions"] == "read"
     assert changes["permissions"]["contents"] == "read"
 
@@ -780,3 +783,38 @@ def test_changes_job_and_gh_api_lookback_are_bounded(monkeypatch) -> None:
 def test_rel108_image_changes_run_their_offline_acceptance(path, target):
     """REL-108: a web-only repair must still execute its Python fault contract."""
     assert target in select_gates([path]).contract_tests
+
+
+def test_a_non_ascii_changed_path_is_returned_verbatim(tmp_path: Path) -> None:
+    """`git diff --name-only` C-quotes a path with a non-ASCII byte, so a
+    runtime file arrived as `"scripts/\\303\\251.py"` and matched no filter —
+    the gate it should have selected was silently skipped."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    base = _commit(repo, "README.md", "seed")
+    head = _commit(repo, "scripts/é.py", "runtime change")
+
+    paths = changed_paths(base, head, cwd=repo)
+
+    assert paths == ["scripts/é.py"]
+    assert classify(paths) == classify(["scripts/ascii.py"])
+
+
+def test_a_rename_reports_both_endpoints(tmp_path: Path) -> None:
+    """Rename detection is on by default and a detected rename emits only the
+    destination, so moving a runtime file out of scripts/ selected no python
+    gate even though the python tree changed."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    base = _commit(repo, "scripts/runtime.py", "seed")
+    (repo / "docs").mkdir()
+    _git(repo, "mv", "scripts/runtime.py", "docs/runtime.md")
+    _git(repo, "commit", "-q", "--no-verify", "-m", "move out of scripts")
+    head = _git(repo, "rev-parse", "HEAD")
+
+    paths = changed_paths(base, head, cwd=repo)
+
+    assert "scripts/runtime.py" in paths and "docs/runtime.md" in paths
+    assert classify(paths)[0] is True

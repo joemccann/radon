@@ -56,3 +56,47 @@ describe("a dead Upstash instance denies, it does not crash the request", () => 
     expect(result.remaining).toBe(0);
   });
 });
+
+describe("a Redis timeout denies instead of resolving as an allow", () => {
+  it("treats the library's timeout resolution as unavailable", async () => {
+    // @upstash/ratelimit does NOT throw when Redis is slow. It races the
+    // command against `timeout` (5000 ms by default) and RESOLVES the race
+    // with `{ success: true, reason: "timeout" }`, so the catch below never
+    // runs and the documented fail-closed posture silently became fail-open:
+    // during slow Redis an authenticated demo user exceeded the durable
+    // cross-instance and daily ceilings that protect the expensive scanner
+    // routes.
+    vi.stubEnv("NEXT_PUBLIC_RADON_DEMO", "1");
+    __setLimiterFactoryForTests(() => ({
+      limit: async () => ({
+        success: true,
+        limit: 0,
+        remaining: 0,
+        reset: 0,
+        reason: "timeout",
+      }),
+    }));
+    const result = await demoRateLimit("B", "user_1");
+    expect(result.success).toBe(false);
+    expect(result.remaining).toBe(0);
+  });
+
+  it("still allows a genuine success that carries a non-timeout reason", async () => {
+    vi.stubEnv("NEXT_PUBLIC_RADON_DEMO", "1");
+    __setLimiterFactoryForTests(() => ({
+      limit: async () => ({
+        success: true,
+        limit: 10,
+        remaining: 9,
+        reset: 1_700_000_000,
+        reason: "cacheBlock",
+      }),
+    }));
+    expect(await demoRateLimit("B", "user_1")).toEqual({
+      success: true,
+      limit: 10,
+      remaining: 9,
+      reset: 1_700_000_000,
+    });
+  });
+});
