@@ -441,10 +441,10 @@ done
 # `radon stop` is a NOPASSWD root action for the unprivileged `radon` account
 # and /var/lib/radon is radon-owned, so a pathname root re-resolves between
 # creating the temp entry and writing it can be swapped for a symlink: root
-# then truncates and overwrites an attacker-chosen file. Same idiom as
-# radon-app-runtime.sh prepare_private_dir: pin every ancestor with
-# O_NOFOLLOW, create the temp entry O_EXCL|O_NOFOLLOW relative to that fd,
-# then write, fchmod and rename by fd so no name is resolved twice.
+# then truncates and overwrites an attacker-chosen file. Same idiom as the
+# root private-directory helper: pin every ancestor with O_NOFOLLOW, create
+# the temp entry O_EXCL|O_NOFOLLOW relative to that fd, then write, fchmod
+# and rename by fd so no name is resolved twice.
 persist_topology() {
   "$OPERATOR_PYTHON" -I - "$TOPOLOGY_PATH" "$@" <<'PY_PERSIST_TOPOLOGY' || exit 74
 import os, sys
