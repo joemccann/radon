@@ -1056,6 +1056,34 @@ def test_text_selector_budget_completes_long_selection_without_changing_vision_b
     assert closed == [True, True, True]
 
 
+def test_generated_chart_planner_uses_bounded_text_allowance_without_extra_calls(tmp_path):
+    from research import generated_charts
+    calls, closed = [], []
+
+    def post(url, **kwargs):
+        calls.append((url, kwargs))
+        assert _budget_provider(url) == "anthropic"
+        assert kwargs["json"]["max_tokens"] == 10_000
+        return _synthetic_anthropic_response(
+            "end_turn", '{"charts": []}', input_tokens=300,
+            output_tokens=10, closed=closed,
+        )
+
+    producer = model.Reviewer(env=_budget_env(), session=SimpleNamespace(post=post))
+    verifier = SimpleNamespace(ask=lambda *args, **kwargs: pytest.fail("Empty plans need no image review"))
+    result = generated_charts.generate(
+        {"title": "Synthetic evidence"}, [], tmp_path,
+        producer=producer, reviewer=verifier,
+        renderer=lambda *args, **kwargs: pytest.fail("Empty plans must not render"),
+        publisher="Synthetic desk", document_date="2026-10-14",
+    )
+    assert result["status"] == "no_comparable_data" and result["charts"] == []
+    assert len(calls) == 1 and closed == [True]
+    request = calls[0][1]
+    assert request["timeout"] == (10.0, 120.0)
+    assert request["headers"]["authorization"] == "Bearer synthetic-subscription"
+
+
 def test_text_selector_still_rejects_max_tokens_at_new_bound_in_one_call():
     calls, closed = [], []
 

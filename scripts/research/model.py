@@ -70,7 +70,7 @@ class Reviewer:
                 self._document_timeouts[has_images].add(parts[0])
 
     def ask_text(self, instruction):
-        """Text-only JSON completion (intake v2 SELECT): no images, larger output budget, cheapest text rung."""
+        """Bounded text-only JSON for selection and chart planning; no images, cheapest text rung."""
         try:
             result = complete_text_json(
                 instruction,
