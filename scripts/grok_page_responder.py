@@ -706,14 +706,27 @@ def _heartbeat(state: str, now: datetime, *, error: Optional[dict] = None) -> No
         print(f"grok page heartbeat non-fatal: {exc}", file=sys.stderr)
 
 
-def _ledger_read_timeout(exc: BaseException) -> bool:
-    """True for the hrana read stall that must not fail the oneshot.
+# A dropped keep-alive is the same class as the 4s read stall. Matching
+# only TimeoutError let RemoteDisconnected on complete_page exit 1 and
+# page this poller about itself (2026-10-17).
+_LEDGER_TRANSPORT_MARKERS = (
+    "TimeoutError",
+    "The read operation timed out",
+    "RemoteDisconnected",
+    "Remote end closed connection without response",
+)
 
-    Production string: ``TimeoutError: The read operation timed out``.
-    A statement error or missing credential still fails the unit.
+
+def _ledger_read_timeout(exc: BaseException) -> bool:
+    """True for a stalled or dropped hrana ledger call.
+
+    Production strings:
+    ``TimeoutError: The read operation timed out``
+    ``RemoteDisconnected: Remote end closed connection without response``
+    A statement error or a missing credential still fails the unit.
     """
     text = str(exc)
-    return "TimeoutError" in text or "The read operation timed out" in text
+    return any(marker in text for marker in _LEDGER_TRANSPORT_MARKERS)
 
 
 def _default_grok_runner(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -990,10 +1003,10 @@ def run_cycle(
         }))
         return 0
     except HranaHttpError as exc:
-        # A 4s ledger read stall is the heartbeat timeout's sibling: the
-        # next timer is 30s away. Exit 0 so systemd does not page this
-        # poller about itself. Skip the ok heartbeat so a standing Turso
-        # outage still goes stale.
+        # A 4s ledger read stall, or a keep-alive drop with no response,
+        # is the heartbeat timeout's sibling: the next timer is 30s away.
+        # Exit 0 so systemd does not page this poller about itself.
+        # Skip the ok heartbeat so a standing Turso outage still goes stale.
         completed = False
         if _ledger_read_timeout(exc):
             print(f"grok page ledger non-fatal: {exc}", file=sys.stderr)
