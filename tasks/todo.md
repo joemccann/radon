@@ -3,13 +3,13 @@
 Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
 
 - [x] T1 depends_on: [] Inspect Reviewer, shared ladder timeout diagnostics and both pipeline document boundaries; preserve subscription, provider order and prepaid policy.
-- [ ] T2 depends_on: [T1] Commit synthetic regression-only coverage and demonstrate exact-head GitHub CI failures before source changes; no local suites.
-- [ ] T3 depends_on: [T2] Skip only proven timed-out provider attempts within the same document and request modality; reset at each document boundary.
+- [x] T2 depends_on: [T1] Commit synthetic regression-only coverage and demonstrate exact-head GitHub CI failures before source changes; no local suites.
+- [x] T3 depends_on: [T2] Skip only proven timed-out provider attempts within the same document and request modality; reset at each document boundary.
 - [ ] T4 depends_on: [T3] Independent Sol/Luna review and exact-head full GitHub CI green.
 - [ ] T5 depends_on: [T4] Coordinated deployment after the preceding production release; verify normal recovered-document review outcomes.
 
 ## Review
-Inspection confirmed the production ingestion consumer reuses its Pipeline and Reviewer across documents. Timeout state therefore requires an explicit document reset in both pipeline versions. Text and image calls use different provider models; timeout exclusion must preserve the untried modality. No source changes or local suites; regression design awaiting independent production critique.
+Inspection confirmed the production ingestion consumer reuses its Pipeline and Reviewer across documents. Timeout state therefore requires an explicit document reset in both pipeline versions. Text and image calls use different provider models; timeout exclusion must preserve the untried modality. GitHub regression-only head 2c1a16cb, run 39048551062/job 117442189465: 31 failed, 2678 passed. Minimal repair keeps exact network timeout exclusions per document and text/image lane, preserves each winning provider, explicitly rejects empty eligible sets, and resets reused and distinct injected agents at both document boundaries. Python AST and diff checks passed; no local suites. Independent Sol/Luna review and exact-head CI pending.
 
 # Nemotron Super VL implementation (2026-10-16)
 
