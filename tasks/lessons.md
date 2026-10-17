@@ -2,6 +2,15 @@
 
 - The owner confirmed Foreman is retired. Remove its intake, setup, owner map and active documentation instead of requiring a factory source or new setup. Preserve historical evidence and unrelated repositories; do not recreate the retired service during audits.
 
+# Requested reports must render in the conversation (2026-10-17)
+
+- Deliver requested in-chat reports through an inline visualization content reference. Verify phone rendering and real click expansion; local HTML downloads or previews do not establish that the report is visible in chat.
+
+# Authentication lifetime belongs to the actual consumer (2026-10-17)
+
+- Inspect every production consumer before imposing a cached-bearer refresh margin. AGY consumers execute the native CLI; they do not send its Google token through Radon HTTP. A correct native login is not a failed raw-bearer refresh.
+- Keep the native documented renewal boundary, actual post-probe expiry, authenticated proof and canonical vault seal as hard gates. Do not fabricate expiry, extract compiled client secrets, or add a second scheduler to satisfy an inapplicable generic policy.
+
 # A dropped hrana ledger connection is not a statement error (2026-10-17)
 
 - `grok-page-responder-ledger-disconnect` (PR #1113) treats a `complete_page` `RemoteDisconnected: Remote end closed connection without response` as a stale Turso keep-alive after a long grok run, not a statement error. `run_cycle` used to match only `TimeoutError`. Exit 0, skip the ok heartbeat, and leave the ticket for the next cycle. After grok returns, drop the idle socket so the UPDATE is the first send on a new connection. Main `af773f0f` now also retires sockets idle for 5s or more in the Hrana pool.
