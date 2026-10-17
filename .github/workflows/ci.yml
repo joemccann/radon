@@ -1133,16 +1133,24 @@ jobs:
     concurrency:
       group: ci-stage-release-${{ github.ref }}
       cancel-in-progress: true
-    # The VPS SSH secrets live in the main-only production Environment; a job
-    # outside it cannot read them (test_pr_workflows_hold_no_secrets.py).
+    # The VPS SSH and Tailscale OAuth secrets live in the main-only production
+    # Environment; a job outside it cannot read them
+    # (test_pr_workflows_hold_no_secrets.py).
     environment: production
     steps:
+      - name: Connect Tailscale
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: "tag:ci"
       - name: Prestage via SSH
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
-          host: ${{ secrets.VPS_HOST }}
+          host: ${{ secrets.VPS_TAILNET_HOST }}
           username: radon
           key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: ${{ secrets.VPS_SSH_FINGERPRINT }}
           command_timeout: 15m
           script: |
             set -euo pipefail
@@ -1223,16 +1231,24 @@ jobs:
     concurrency:
       group: ci-prepull-images-${{ github.ref }}
       cancel-in-progress: true
-    # The VPS SSH secrets live in the main-only production Environment; a job
-    # outside it cannot read them (test_pr_workflows_hold_no_secrets.py).
+    # The VPS SSH and Tailscale OAuth secrets live in the main-only production
+    # Environment; a job outside it cannot read them
+    # (test_pr_workflows_hold_no_secrets.py).
     environment: production
     steps:
+      - name: Connect Tailscale
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: "tag:ci"
       - name: Pull exact SHA pair via installed helper
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
-          host: ${{ secrets.VPS_HOST }}
+          host: ${{ secrets.VPS_TAILNET_HOST }}
           username: radon
           key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: ${{ secrets.VPS_SSH_FINGERPRINT }}
           command_timeout: 12m
           script: |
             set -euo pipefail
@@ -1287,15 +1303,22 @@ jobs:
       name: production
       url: https://app.radon.run
     steps:
+      - name: Connect Tailscale
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: "tag:ci"
       - name: Deploy via SSH
         # Pinned to the v1.2.5 commit SHA (was the mutable `@v1` tag). This step
         # receives the VPS SSH key + deploy secrets, so a hijacked tag would be a
         # supply-chain RCE on the production host. Bump deliberately.
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
-          host: ${{ secrets.VPS_HOST }}
+          host: ${{ secrets.VPS_TAILNET_HOST }}
           username: radon
           key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: ${{ secrets.VPS_SSH_FINGERPRINT }}
           command_timeout: 55m
           script: |
             set -euo pipefail
