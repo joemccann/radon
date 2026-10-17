@@ -21,6 +21,24 @@ each artifact's `case_id` anchors into this file. Triage them with the
 
 ---
 
+## control-plane-isolation-admission
+
+- **Detection:** `radon-deploy-root sync-control-plane` exits 76 with
+  `control-plane interpreter isolation is missing` before candidate bootstrap.
+  A missing fixed helper is also an admission failure, not a service outage.
+- **Discriminating check:** run `cloud/tests/test_root_python_isolation.py`;
+  the isolated validator fixture must ignore caller module paths and accept
+  the actual five helpers. Alternate unisolated interpreter spellings and
+  missing-helper fixtures in `test_sync_control_plane.py` must refuse bootstrap.
+- **Fix:** preserve `-I` on inline Python in `deploy-root-helper.sh`,
+  `bootstrap-control-plane.sh`, `operator-radon.sh`, `ib-gateway-control.sh`
+  and `radon-app-runtime.sh`. Repair the reviewed source rather than bypassing
+  admission. Stage only immutable approved source under root ownership and
+  run the role-specific bootstrap transaction; verify the installed manifest
+  with `radon-deploy-root verify-control-plane` and retain its receipt.
+  Control-plane reconciliation does not restart services; verify service
+  identities remain unchanged before retrying the normal deployment.
+
 ## combo-replace-ib-202-cancel
 
 **Combo modify cancel-replace treats IB error 202 as a failed cancel and never
@@ -4074,6 +4092,8 @@ service_health write raises.** Peak: 2026-10-08 22:14Z, page
 - **Recovery:** snapshot exact affected keys/revisions/results, check the retained Dropbox PDF content hash and sealed cached evidence, exclude superseded/deleted revisions and existing outbox publications, then use `State.requeue_with_note(key, None)` for infrastructure-failed completed work only. Do not inject a `publish` feedback note. Let the normal daemon review and publish through its outbox; verify canonical posts and provenance afterward. Preserve prior artifacts before rerunning.
 - **Non-recoverable by queue reset:** no-candidate, verification/crop/publisher holds and the 1..100-page extraction guard require their own source evidence. On this incident, the eleven generic extraction errors were all over 100 pages; two pending rows were superseded. Do not bulk-reset attempts or raise the page limit as an incident shortcut.
 - **Regression:** `scripts/tests/test_research_ingestion.py` exercises idle failure/recovery, invalid canaries, probe rate limits and real database exceptions before/during review at both ends of the attempt budget. Regression-only head `00d6e601`; GitHub results and deployment evidence are recorded on PR #1119.
+
+- **API transport follow-up (#1120):** API Hrana was a separate implementation from shared `db.hrana_http`. Its reused-socket `getresponse()` disconnect had no read retry, while its request-error branch could replay a write whose outcome was unknown. `test_hrana_http_keepalive.py` now exercises both transports with real HTTP peers, including post-receipt send failures and lost status lines. Regression-only `c1dead71`, GitHub run `39044128899`, job `117429409148`: 16 failed, 678 passed. Port the shared SELECT-only payload classifier and one-fresh-connection policy; retire sockets on every failed fresh attempt and never replay ambiguous writes. An observed `DbHttpError` alone does not identify its underlying exception.
 
 ## research-codex-subscription-retired-model
 
