@@ -27,7 +27,19 @@
 
     log {
         output file /var/log/caddy/radon.log
-        format json
+        # The TradingView webhook carries its authenticator in the path
+        # (docs/tradingview-integration.md), and the json encoder records the
+        # full request URI, so an unfiltered access log writes that credential
+        # to /var/log/caddy/radon.log in cleartext on every delivery. Keep the
+        # route visible for traffic accounting; drop everything after the
+        # prefix. A `filter` log wraps the same json encoder, so the record
+        # shape is unchanged for every other request.
+        format filter {
+            wrap json
+            fields {
+                request>uri regexp "^(/api/webhooks/tradingview/).*$" "${1}REDACTED"
+            }
+        }
     }
 
     handle /ws-headlines {
