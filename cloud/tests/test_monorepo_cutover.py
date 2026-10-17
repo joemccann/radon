@@ -443,7 +443,11 @@ recover_pending_transition
 def test_root_workflow_uses_immutable_runner_and_readiness_gated_fallback() -> None:
     workflow_text = ROOT_CI.read_text(encoding="utf-8")
     workflow = yaml.safe_load(workflow_text)
-    script = workflow["jobs"]["deploy"]["steps"][0]["with"]["script"]
+    script = next(
+        step["with"]["script"]
+        for step in workflow["jobs"]["deploy"]["steps"]
+        if "ssh-action" in str(step.get("uses", ""))
+    )
 
     assert ".radon-deploy-runners" in script
     assert re.search(r"git\s+[^\n]*\barchive\b", script) or "git worktree add" in script
@@ -505,7 +509,11 @@ def test_runner_retention_keeps_current_newest_and_active_runner(tmp_path: Path)
 
 def test_root_workflow_never_invokes_unversioned_legacy_fallback_after_readiness() -> None:
     workflow = yaml.safe_load(ROOT_CI.read_text(encoding="utf-8"))
-    script = workflow["jobs"]["deploy"]["steps"][0]["with"]["script"]
+    script = next(
+        step["with"]["script"]
+        for step in workflow["jobs"]["deploy"]["steps"]
+        if "ssh-action" in str(step.get("uses", ""))
+    )
     marker_check = script.index("RADON_CONTROL_PLANE_READY")
     legacy_call = script.index('bash "$LEGACY_CLOUD/scripts/deploy.sh"')
     assert marker_check < legacy_call
