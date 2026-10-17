@@ -601,6 +601,9 @@ class Pipeline:
         self._deadline = self.clock() + self.document_budget_secs
         self._progress = progress
         try:
+            begin_document = getattr(self.reviewer, 'begin_document', None)
+            if callable(begin_document):
+                begin_document()
             return self._process(work, pdf, recent, out)
         finally:
             self._deadline = None

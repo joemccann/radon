@@ -219,6 +219,14 @@ class Pipeline:
         self._deadline = self.clock() + self.document_budget_secs
         self._progress = progress
         try:
+            seen = set()
+            for reviewer in (self.reviewer, self.chart_producer, self.chart_reviewer, self.publisher_reviewer):
+                if id(reviewer) in seen:
+                    continue
+                seen.add(id(reviewer))
+                begin_document = getattr(reviewer, 'begin_document', None)
+                if callable(begin_document):
+                    begin_document()
             return self._process(work, Path(pdf), recent, out)
         finally:
             self._deadline = None
