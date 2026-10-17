@@ -9749,11 +9749,27 @@ Review: regression-only c8ba51f8 cloud CI39073806724 model shard19fail/1369pass;
 
 - [x] C1 depends_on: [] Compare exact published PNG and all published claims/metadata against sealed source pages and matched figure bounds.
 - [x] C2 depends_on: [C1] Reproduce the generic crop-boundary mechanism in cloud regressions, then minimally retain full chart/title/axes/source without following prose.
-- [ ] C3 depends_on: [C2] Complete exact-head cloud CI, independent Sol/Luna review, accepted notification and authorized deployment after the prior main run is fully complete.
+- [x] C3 depends_on: [C2] Complete exact-head cloud CI, independent Sol/Luna review, accepted notification and authorized deployment after the prior main run is fully complete.
 - [ ] C4 depends_on: [C3, C5] Regenerate the exact affected publication through the existing verified path, preserve article/source/revision/outbox consistency, and inspect final PNG/source in production with Sol/Luna.
 
-- [ ] C5 depends_on: [C1] Verify and correct cited-page coverage, byline date and attribution from the complete sealed source using existing source gates.
+- [x] C5 depends_on: [C1] Verify and correct cited-page coverage, byline date and attribution from the complete sealed source using existing source gates.
 
 Review: published research-7d6d3955... is native generated=false, complete and readable but includes a clipped following prose line. Sealed source page3/raw raster bounds confirm _grow_text absorbs external prose. Matched published figure is f2, not pre-match f1. Page1 supports the final paragraph but is uncited; its byline date is2026-10-13, while the publication uses Dropbox fallback2026-10-14, and its We'd argue attribution needs correction. The existing user authorization covers the quality correction and regeneration; preserve source pixels/revision and canonical/outbox consistency with source/hash/gate evidence. No local suites, manual priority or recovery-ledger reruns.
 
 Crop/date cloud RED: ab2661b4 / CI39075914272 research117522956297 reproduced5 failed,2828 passed: raster prose boundary, exact October13 byline and oct/nov/dec aliases. Minimal pure-raster bounds and canonical month alias fixes prepared; full final-head CI pending.
+
+
+## Research SELECT output allowance (2026-10-17)
+
+- [x] B1 depends_on: [] Preserve exact deployed terminal-reason evidence for the exhausted normal SELECT attempt and independently bound the remedy.
+- [x] B2 depends_on: [B1] Reproduce the old output ceiling in cloud tests before changing the existing text-only request allowance.
+- [ ] B3 depends_on: [B2] Apply the bounded allowance while preserving complete-response, verification, provider, timeout and queue gates; finish full exact-head CI and independent review.
+- [ ] B4 depends_on: [B3] Deliver after the preceding main deployment, verify actual loaded source, observe normal final decisions and review every resulting publication in production.
+
+Review: verified200e Goldman normal attempt4 recorded stop_reason=max_tokens,input_tokens=21433,output_tokens=6000. This proves exhaustion only for that attempt. Proposed10000 allowance remains one existing text-only request, with120s/2MB/end_turn and multimodal/provider/publication behavior preserved. Cloud RED required before runtime edits; no local suites or original work resets/priority changes.
+
+Wilson source correction review:879e fullmain39076695022 all37jobs success; actual7imports/all3images/health200 verified. One guarded same-ID correction applied with3canonical rows/1published outbox payload; PDF/revision, clocks, queue and feedback preserved. Raw production receipt d72f50df...; final production card/lightbox and original3 normal final decisions remain pending.
+
+SELECT budget review: cloud RED73f93735/run39077076334/research117526378112 reproduced2 failures,2833 passes,65 warnings105.14s before runtime edits. Only ask_text output allowance increased6000→10000; request count,120s/2MB/end_turn, multimodal6000, providers/auth, retries and verification remain unchanged. Exact-head full GREEN and independent source review pending. No local suites.
+
+Independent scope review: ask_text is also used by the separate generated-chart planner. Explicitly retain one bounded10000 maximum for all existing text calls, document the planning allowance, and add an actual generated_charts.generate→Reviewer→ladder request regression. Multimodal/image-verification6000 and all publication gates remain unchanged; no extra request/interface introduced. Prior02a240a6 source review is superseded; new exact-head reviews required.
