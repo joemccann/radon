@@ -261,6 +261,15 @@ line here whenever you ship a security fix.**
   new edge handle without a cap is a finding, not a default.
   (`cloud/tests/test_caddyfile.py::TestEveryNextjsHandleBoundsTheBody`)
 
+- **A changed-path list is read NUL-separated, never line-split** — `git diff
+  --name-only` C-quotes any path carrying a non-ASCII byte, a quote or a
+  newline, so the emitted line is `".github/workflows/\303\251.yml"` and a
+  prefix test against it matches nothing. The same root cause produced a
+  publication-refusal bypass in `scripts/grok_fix_pickup.py` and a silently
+  skipped CI gate in `scripts/ci/path_filter.py`. Every consumer passes `-z`
+  and splits on NUL. A new `--name-only` call without `-z` is a finding.
+  (`scripts/tests/test_grok_fix_pickup.py`, `scripts/tests/test_path_filter.py`)
+
 ## Triage & patch policy
 
 - Severity = verifier-revised, real-world impact for a **single-operator** app, not
