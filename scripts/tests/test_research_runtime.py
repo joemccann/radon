@@ -932,6 +932,33 @@ def test_document_truncation_does_not_exclude_provider():
     assert calls == ["anthropic", "anthropic"]
 
 
+def test_reviewer_text_incomplete_response_preserves_safe_terminal_diagnostic():
+    payload = {
+        "stop_reason": "max_tokens",
+        "usage": {"input_tokens": 123, "output_tokens": 6000,
+                  "private-token-and-source": "must-never-appear"},
+        "content": [{"type": "text", "text": "private-token-and-source"}],
+    }
+    session, closed, calls = session_response(payload)
+    reviewer = model.Reviewer(
+        env={"ANTHROPIC_API_KEY": "test", "RADON_LADDER_ALLOW_PREPAID": "1"},
+        session=session,
+    )
+    with pytest.raises(model.ModelError) as caught:
+        reviewer.ask_text("private-prompt")
+    expected = (
+        "Research reviewer did not finish a complete response "
+        "(stop_reason=max_tokens; input_tokens=123; output_tokens=6000)"
+    )
+    assert str(caught.value) == expected
+    assert model.classify_error(caught.value) == expected
+    assert not model.is_provider_outage(caught.value)
+    assert len(calls) == 1
+    assert closed == [True]
+    assert "private-token-and-source" not in str(caught.value)
+    assert "private-prompt" not in str(caught.value)
+
+
 @pytest.mark.parametrize("method", ["ask_text", "ask"])
 @pytest.mark.parametrize("iterator_name", ["iter_content", "iter_bytes"])
 @pytest.mark.parametrize("error_class,quarantined", [(httpx.ReadTimeout, True),
