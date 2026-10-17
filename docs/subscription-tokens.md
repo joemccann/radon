@@ -9,7 +9,8 @@ a ladder rung unavailable. Billing and fallback policy belong to the
 
 `scripts/subscription_tokens` maintains those credential files. On every
 run it evaluates each provider, refreshes what it can refresh, restores what it
-can restore from the vault, proves each login with a real model call once a day,
+can restore from the vault, proves raw-bearer logins once a day and AGY through
+its authenticated native CLI on every run,
 and when a grant is truly dead it starts the CLI's own login and pages the
 operator the link.
 
@@ -29,24 +30,40 @@ throwaway home so no live credential was touched.
 | anthropic | `~/.claude/.credentials.json` (`CLAUDE_CONFIG_DIR`) | `claudeAiOauth.expiresAt` | `claude -p`, then token endpoint with the public client id | `claude -p ... --max-turns 1` | paste-code: `claude auth login --claudeai` over SSH |
 | codex | `~/.codex/auth.json` (`CODEX_HOME`) | `exp` claim of the access-token JWT (ten days) | `codex exec`, then token endpoint with the public client id | `codex exec --skip-git-repo-check ...` | **push**: device code |
 | grok | `~/.grok/auth.json` | `expires_at` (earliest entry) | `grok -p`, then OIDC-discovered token endpoint | `grok -p ...` | **push**: device code |
-| antigravity (`agy`) | `~/.gemini/antigravity-cli/antigravity-oauth-token` | `token.expiry` | `agy models`, then Google's token endpoint with the CLI's public client id | `agy models` (authenticated, not a model call) | paste-code: `agy -p ok` over SSH, 60s window |
+| antigravity (`agy`) | `~/.gemini/antigravity-cli/antigravity-oauth-token` | `token.expiry` | `agy models` only; native CLI owns authentication and renewal | `agy models` (authenticated, not a model call) | paste-code: `agy -p ok` over SSH, 60s window |
 
 `grok` and `agy` install to `~/.local/bin`. The unit puts it on `PATH`, and the
 daemon searches `~/.local/bin` and `~/.grok/bin` itself so a manual run finds
 them too.
 
-### Antigravity 1.4.0 early-refresh limitation (2026-10-17)
+### Antigravity native authentication ownership (2026-10-17)
 
-The installed CLI uses the configured public client ID. Its `agy models` probe
-accepted a valid login without advancing an expiry inside the 40-minute lead;
-the HTTP fallback returned `400 invalid_request` reporting missing
-`client_secret`. Public client IDs do not guarantee secretless
-[desktop refresh grants](https://developers.google.com/identity/protocols/oauth2/native-app).
-No forced early refresh or client-configuration export was found in installed
-help or the [official CLI reference](https://antigravity.google/docs/cli/reference).
-Proactive refresh remains a maintainer integration dependency, not a reason to
-reauthenticate. Native refresh near actual expiry may still work; the 40-minute
-lead and error classification remain unchanged.
+All production Google subscription consumers invoke `agy`; they do not read its
+bearer token into a Radon HTTP request. Native AGY owns authentication and renews
+on use. Google's [CLI 1.1.23 release notes](https://github.com/google-antigravity/antigravity-cli/blob/main/CHANGELOG.md)
+document a five-minute proactive renewal window. The installed 1.4.0 CLI also
+completed a normal native refresh on 2026-10-17 without operator reauthentication.
+
+Every `--once` requires an installed `agy` and a successful authenticated
+`agy models` probe, then rereads and seals the actual canonical credential.
+`live` requires a refreshable credential with expiry more than five minutes
+ahead **after** the probe. Only a real expiry advance is `refreshed`; an
+unchanged valid login between five and forty minutes remains `live`.
+At exactly five minutes or less, failure to clear the native renewal window is
+`error`, including when the probe exits successfully. Missing CLI, timeout,
+inconclusive probe, malformed file and seal failure also remain `error`.
+Only native authentication rejection or a missing refresh grant justifies
+`needs_reauth`.
+
+`--check` never invokes the CLI or writes state. It reuses only a healthy,
+less-than-24-hour native proof whose expiry and sealed credential still match
+the current file, with more than five minutes remaining. Without that evidence
+it reports `expiring`; explicit `--seal`/`--restore` do not create such proof.
+
+The former direct Google refresh fallback failed with `400 invalid_request`
+requiring client configuration that Radon does not own. It is not used.
+No vendor secret, fabricated expiry, secondary refresh scheduler or new timer
+is needed. The forty-minute lead remains unchanged for raw-bearer providers.
 
 ---
 
@@ -59,7 +76,8 @@ lead and error classification remain unchanged.
    always before it overwrites a file that parses.
    The value is the exact bytes of the credential file, so a re-seal round
    trips byte for byte and a field Radon does not model is never lost.
-3. Refreshes an expiring access token. Expiring means remaining life is at
+3. Refreshes an expiring raw-bearer access token (Anthropic, Codex and Grok).
+   Expiring means remaining life is at
    most 40 minutes (`EXPIRY_SKEW_SECONDS = 2400`). That lead is longer than
    the 30-minute timer plus its 60-second delay, so a one-hour token is
    refreshed on the run before it can expire between fires. The 30-minute
@@ -67,14 +85,14 @@ lead and error classification remain unchanged.
    because the CLI is the authority on its own file format: one real model call
    makes it refresh its own file. Otherwise the refresh goes to the provider's
    token endpoint with `grant_type=refresh_token` and the provider's public
-   OAuth `client_id`. The anthropic, OpenAI and Google endpoints all answer
-   `400 invalid_request` without one.
+   OAuth `client_id`. AGY follows its separate native contract above and never
+   enters this token-endpoint path.
 4. Writes the result atomically (temp file in the same directory, `fsync`,
    `os.replace`, mode 0600) and re-seals it. It never adds a key the vendor did
    not write into the vendor's own file.
 5. **Keepalive.** Once per `KEEPALIVE_INTERVAL` (24h) a credential that looks
    live is proven with one real call through its own CLI (a one-word model
-   reply; for `agy` the authenticated `agy models`).
+   reply). AGY instead requires its authenticated `agy models` on every run.
    An expiry field in the future says nothing about a revoked grant or a lapsed
    subscription, and an unexercised refresh token is what goes stale: Codex's
    own guidance is a weekly exercise, Google retires a refresh token after six
@@ -112,16 +130,16 @@ Evaluated per provider, every run.
 
 | State | Meaning | Pages |
 |---|---|---|
-| `live` | File present, parses, expiry more than 40 minutes ahead. Proven by the keepalive probe once a day where the provider's CLI is installed. | no |
+| `live` | Raw-bearer credential: expiry more than 40 minutes ahead, with daily keepalive. AGY: successful native proof, refreshable canonical credential sealed, expiry more than five minutes after the probe. | no |
 | `refreshed` | Was expiring or expired, the refresh succeeded, the file was rewritten. | no |
 | `restored` | File missing or corrupt, the vault had a copy, it was written back and re-evaluated. | no |
 | `unbootstrapped` | No file and no vault copy. Nobody has ever logged this provider in on this host. Not an error. | no |
 | `needs_reauth` | The grant is dead: the token endpoint answered `invalid_grant` / 401 / a `token_expired` family code, the keepalive probe got the CLI's own "not logged in" answer, or there is no refresh token at all. | yes, with a login link when the provider has a push login |
 | `store_unavailable` | The vault could not be opened. Never reported as an empty store. | yes |
 | `error` | Anything else: network, exhausted 5xx retries, an unparsable response, **or a 4xx that is not a dead grant** (a malformed request is a bug here, not the operator's problem). | on the 3rd consecutive run |
-| `expiring` | `--check` only. The token is missing or past the skew and `--check` changes nothing, so no refresh was attempted. `--once` never reports it. | no |
+| `expiring` | `--check` only. The token is missing, past its provider margin, or lacks fresh matching native proof; `--check` changes nothing. `--once` never reports it. | no |
 
-A keepalive probe that fails for a reason other than the login (a usage cap, a
+For raw-bearer providers, a keepalive probe that fails for a reason other than the login (a usage cap, a
 vendor outage, a timeout) is **inconclusive**: the provider stays `live`,
 `last_error` says `keepalive probe inconclusive`, `last_probe_at` is not
 stamped, and the next run asks again. Whatever the probe reported, the file is

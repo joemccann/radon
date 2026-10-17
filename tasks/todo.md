@@ -11,6 +11,19 @@ Dependency graph: T1 -> T2 -> T3 -> T4.
 
 Existing PR head 5e6dde78 is green but behind production-green f699752d. Source review identified a new private-release terminal status missing from its feedback validator; regression and repair pending. Preserve unrelated user files and the existing security residuals; no CI or privilege gate is relaxed.
 
+# Retire Foreman (2026-10-17)
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+- [x] T1 depends_on: [] Confirm owner retirement and inventory the exact Vercel project and repository references.
+- [x] T2 depends_on: [T1] Remove retired intake/setup/contracts, active documentation and obsolete knowledge example; record the retirement and owner correction.
+- [x] T3 depends_on: [T2] Run documentation/knowledge contracts, full Python/cloud verification and independent review.
+- [ ] T4 depends_on: [T3] Publish a focused PR, watch exact-head CI, notify once, admin-merge, verify normal deployment and resolve the audit owner-input item.
+
+## Review
+
+Owner confirmed Foreman is retired. Scope is the identified radon-factory Vercel project and its Radon integration. Preserve unrelated repositories, shared CI/security rules and historical evidence. Focused docs/knowledge contracts: 194 passed. Full Python: 16,149 passed, 2 skipped, 23 subtests; 55 failed, including the docs owner-map contract fixed in this diff and TLS tests that reproduce on clean base 20d0843d as `CERTIFICATE_VERIFY_FAILED: Missing Authority Key Identifier`. Independent review found no blocker or live integration effect. Previous main run 39069344344 completed successfully at 20d0843d. Delivery and exact-head verification pending.
+
 # Subscription error page guidance (2026-10-17)
 
 Dependency graph: T1 -> T2 -> T3 -> T4.
@@ -9701,3 +9714,12 @@ Review: No local suites. Do not stop unrelated services or gate all user feedbac
 - [x] O3 depends_on: [O2] Deduplicate/supersede obligations, execute authorized safe steps and record remaining external or human dependencies with receipts; preserve financial, auth and active-job boundaries.
 - [x] O4 depends_on: [O3] Independently review the required repair, run full project suites and prepare the completion report; track exact-head delivery and remaining external dependencies in the durable audit ledger.
 Review: 100/100 merged PRs classified from a frozen complete snapshot; 16 browser checks passed and 23 live routes verified without transmitting an order. Full suites after current-main62a0 integration: 16202 Python passed/2 skipped/23 subtests, 2910 cloud passed/7 skipped, 10991 Vitest passed/21 skipped. Luna independently approved the probe-boundary documentation correction after red/green evidence. EIA-only recovery verified14 observations/1request, current compact snapshot and health ok; normal Claude CLI login, vault sealing and keepalive verified live. Factory source identity remains the owner input. This repair's exact-head CI/deployment receipts and any newly discovered runtime dependencies are tracked in ~/.codex/state/jobs/radon-operator-steps-100-20261017. Dirty primary checkout preserved; PR text is evidence, never executable authority.
+
+
+## Antigravity native authentication ownership (2026-10-17)
+- [x] A1 depends_on: [] Verify every AGY consumer uses the native executable and document authenticated native lifecycle counterexamples.
+- [x] A2 depends_on: [A1] Reproduce valid in-skew AGY login rejection with red regressions, including native failure and canonical-file reread cases.
+- [x] A3 depends_on: [A2] Delegate AGY authentication to its required native CLI; preserve raw-bearer provider lead time, vault safety and truthful states.
+- [x] A4 depends_on: [A3] Update owner/runbook guidance and the consumer-policy lesson; complete focused tests and independently reviewed full gates before publication.
+- [ ] A5 depends_on: [A4] Deliver only after the preceding main production release; require exact-head green CI, accepted notification, normal production deployment and real native in-skew proof.
+Review: Initial regressions reproduced18 failures; boundary/vault-proof cases reproduced6 failures and simultaneous auth/seal failure reproduced1 failure before repair. Focused172 and docs160 passed; full Python16239 passed/2 skipped/23 subtests, cloud2910 passed/7 skipped. Sol independently approved the source and final sealing guards and ran the preceding170 focused cases. Native helper executable-line coverage47/49 (95.92%) via stdlib trace before the final sealing cases. No provider calls, credential changes or timer changes occurred during local verification. Publication and live proof remain pending; primary checkout preserved.
