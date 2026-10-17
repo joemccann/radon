@@ -9576,7 +9576,7 @@ CI repair: run 38968894246 / job 117203223236 timed out the PDF pagination regre
 
 ## Dropbox research publication incident (2026-10-17)
 - [x] T1 depends_on: [] Verify live database/review health with independent swarm; SELECT1 succeeds41ms and review heartbeat predates deployment.
-- [ ] T2 depends_on: [T1] Reproduce stale idle heartbeat on GitHub before minimal source repair.
+- [x] T2 depends_on: [T1] Reproduced stale idle heartbeat and database attempt loss on GitHub: 5 failed/2561 passed at 00d6e601; minimal repair and twelve regression cases prepared.
 - [ ] T3 depends_on: [T2] Complete exact-head CI, independent review and authorized deployment.
 - [ ] T4 depends_on: [T1, T3] Audit blocked document eligibility, recover infrastructure failures with checkpoints and verify live publication/health.
 Review: Preserve publication quality gates and source attribution; no local test suites. Investigate extraction errors separately from editorial holds.
