@@ -9,7 +9,7 @@ IB execution or the existing price-provider order. SDK-created OAuth metadata
 requests omit User-Agent; stamp `User-Agent: radon/2.0` on every auth request or
 the vendor returns 403.
 
-Use the already pinned Python `mcp==1.28.1` SDK for protocol negotiation and
+Use the Python `mcp` SDK pinned in `requirements.txt` for protocol negotiation and
 OAuth discovery, PKCE, dynamic client registration, refresh and session framing.
 Do not copy Robinhood's provider-specific token endpoint or scrape browser tokens.
 HTTP operations and complete research calls have finite deadlines.
