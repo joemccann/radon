@@ -1240,3 +1240,5 @@ When an operator asks for automated release or updater recovery, ship the durabl
 ## 2026-10-17 - Fresh intake requires bounded retry admission
 - Throughput and a healthy database do not prove recovery progress. Audit the oldest eligible retries and completed first/retry counts under continuous new arrivals. Keep fresh-news priority with an explicit durable retry share; never classify a returned-attempt infrastructure park as a never-tried document.
 - A raw extraction catalogue can contain photos or prose crops. Label counts as extracted figures and preserve bounded selector explanations through storage, API and UI without silent mid-word truncation. Metadata repairs must preserve existing review/held/expiry timestamps.
+
+- Retry not-before timestamps are eligibility gates, not queue age. Restart recovery can retain a zero sentinel on newer interrupted rows; order aged eligible retries by insertion row ID so those zeros cannot bypass the oldest backlog.
