@@ -2320,7 +2320,7 @@ def _heading_section(path: str, heading: str) -> str:
 
 
 class TestDocumentation20261017:
-    """DOC-203 and DOC-204: recovery and token-refresh contracts after b79e1f5c."""
+    """DOC-203..205: contracts that drifted after audited-through b79e1f5c."""
 
     def test_flex_transport_line_has_one_current_case(self):
         section = _heading_section("docs/incident-runbook.md", "flex-pull-trade-coverage")
@@ -2346,4 +2346,17 @@ class TestDocumentation20261017:
         assert "EXPIRY_SKEW_SECONDS" in timer
         research = (_ROOT / "docs/dropbox-research.md").read_text()
         assert "EXPIRY_SKEW_SECONDS = 2400" not in research
+
+    def test_tradingview_docs_follow_the_mcp_pin(self):
+        req = (_ROOT / "requirements.txt").read_text()
+        pin = re.search(r"^mcp==(\S+)$", req, re.M)
+        assert pin is not None and pin.group(1) == "1.30.0"
+        assert "mcp 1.28.1" not in req
+        for rel in (
+            "docs/tradingview-mcp-client.md",
+            "docs/tradingview-integration.md",
+        ):
+            text = (_ROOT / rel).read_text()
+            assert re.findall(r"mcp==[0-9.]+", text) == []
+            assert "requirements.txt" in text
 
