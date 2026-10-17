@@ -8,7 +8,7 @@ The canonical developer runbook is `CLAUDE.md`. Read it before making changes. F
 
 ## Workflow
 
-- Commit on a task branch and open a pull request against `main`. The body follows `.github/pull_request_template.md` (Summary, What changed, Test plan, Risk and rollback, Operator Next Steps, Checklist); the `PR body template` check fails any other shape, including `gh pr create --body` text that skipped the template. Never push directly to `main`. Follow the repository review requirements and verify all applicable checks on the latest PR head before the operator merges.
+- Commit on a task branch and open a pull request against `main`. The body follows `.github/pull_request_template.md` (Summary, What changed, Test plan, Risk and rollback, Operator Next Steps, Checklist); the `PR body template` check fails any other shape, including `gh pr create --body` text that skipped the template. Never push directly to `main`. Follow the repository review requirements and verify all applicable checks on the latest PR head before merge. The separate operator release coordinator may use the [standing unattended release policy](docs/unattended-releases.md); the nightly machine account still cannot merge or deploy.
 - Red/green TDD is required: write a failing test first, make it pass, then commit.
   - Web: Vitest.
   - Python: pytest.
