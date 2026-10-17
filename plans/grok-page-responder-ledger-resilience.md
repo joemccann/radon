@@ -122,16 +122,12 @@ follow-up, row already `done` or still `claimed`.
 
 ```sql
 WHERE page_id = ?
-  AND (
-    ? IS NULL
-    OR claim_token = ?
-    OR (status IN ('done', 'skipped') AND claim_token IS NULL)
-  )
+  AND (? IS NULL OR claim_token = ?)
 ```
 
 - Token match: this run still holds the claim.
-- Already `done`/`skipped` with a cleared token: retry is a no-op
-  overwrite of the same terminal row (idempotent).
+- Already `done` with a cleared token: 0 rows. Readback (`get_page`)
+  sees `done` and still sends the follow-up. Do not rewrite the row.
 - Foreign live claim: 0 rows. Do not steal.
 - `claim_token is None`: legacy unguarded path for existing unit tests
   that do not pass a token. The responder always passes the token it
