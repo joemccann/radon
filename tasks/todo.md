@@ -9712,3 +9712,11 @@ Review: 100/100 merged PRs classified from a frozen complete snapshot; 16 browse
 - [ ] T5 depends_on: [T4] Verify the three recovered documents reach final normal decisions and inspect every resulting publication plus corrected Held UI in production.
 
 Review: live audit confirmed109 eligible, original3 ranks107–109;19 fresh/0 retry reviews in60min. GitHub regression751170a3 run39070511670:10 Python failures/2763 passed,2 UI failures/1273 passed,1 API failure/1419 passed. Minimal source fix implemented; FIFO follow-up e1af5ce2 reproduced two further failures/2774 passed; oldest eligible insertion-order repair implemented. Final exact-head full green CI and independent review pending. No local suites. Preserve all prior recovery ledgers; do not manually requeue or prioritize individual documents.
+
+## Antigravity native authentication ownership (2026-10-17)
+- [x] A1 depends_on: [] Verify every AGY consumer uses the native executable and document authenticated native lifecycle counterexamples.
+- [x] A2 depends_on: [A1] Reproduce valid in-skew AGY login rejection with red regressions, including native failure and canonical-file reread cases.
+- [x] A3 depends_on: [A2] Delegate AGY authentication to its required native CLI; preserve raw-bearer provider lead time, vault safety and truthful states.
+- [x] A4 depends_on: [A3] Update owner/runbook guidance and the consumer-policy lesson; complete focused tests and independently reviewed full gates before publication.
+- [ ] A5 depends_on: [A4] Deliver only after the preceding main production release; require exact-head green CI, accepted notification, normal production deployment and real native in-skew proof.
+Review: Initial regressions reproduced18 failures; boundary/vault-proof cases reproduced6 failures and simultaneous auth/seal failure reproduced1 failure before repair. Focused172 and docs160 passed; full Python16239 passed/2 skipped/23 subtests, cloud2910 passed/7 skipped. Sol independently approved the source and final sealing guards and ran the preceding170 focused cases. Native helper executable-line coverage47/49 (95.92%) via stdlib trace before the final sealing cases. No provider calls, credential changes or timer changes occurred during local verification. Publication and live proof remain pending; primary checkout preserved.
