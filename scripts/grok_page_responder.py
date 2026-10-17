@@ -710,14 +710,101 @@ def _heartbeat(state: str, now: datetime, *, error: Optional[dict] = None) -> No
         print(f"grok page heartbeat non-fatal: {exc}", file=sys.stderr)
 
 
-def _ledger_read_timeout(exc: BaseException) -> bool:
-    """True for the hrana read stall that must not fail the oneshot.
+def _ledger_transport_error(exc: BaseException) -> bool:
+    """True when a ledger wire blip must not fail the oneshot.
 
-    Production string: ``TimeoutError: The read operation timed out``.
+    Classification is by exception type (see ``hrana_http.is_transport_error``).
     A statement error or missing credential still fails the unit.
     """
-    text = str(exc)
-    return "TimeoutError" in text or "The read operation timed out" in text
+    try:
+        from db.hrana_http import is_transport_error
+    except ImportError:  # pragma: no cover
+        from scripts.db.hrana_http import is_transport_error
+    return is_transport_error(exc)
+
+
+_ledger_read_timeout = _ledger_transport_error
+
+
+def _close_hrana_socket() -> None:
+    try:
+        from db.hrana_http import _close_keepalive
+    except ImportError:  # pragma: no cover
+        from scripts.db.hrana_http import _close_keepalive
+    _close_keepalive()
+
+
+def _note_ledger_transport(
+    op: str, recovered: bool, exc: BaseException | None
+) -> dict:
+    cause = exc.__cause__ if exc is not None and exc.__cause__ is not None else exc
+    payload = {
+        "event": "grok_page_ledger_transport",
+        "op": op,
+        "recovered": recovered,
+        "cause": type(cause).__name__ if cause is not None else None,
+    }
+    print(json.dumps(payload))
+    print(f"grok page ledger transport: {json.dumps(payload)}", file=sys.stderr)
+    if not recovered:
+        print(f"grok page ledger non-fatal: {exc}", file=sys.stderr)
+    return {
+        "class": "ledger_transport",
+        "op": op,
+        "recovered": recovered,
+        "cause": payload["cause"],
+    }
+
+
+def _complete_page_with_followup(
+    page_id: str,
+    *,
+    status: str,
+    result: str,
+    now: datetime,
+    claim_token: str,
+    followup: dict,
+) -> tuple[str, Optional[dict]]:
+    """Write complete_page, retry once on transport, send the follow-up.
+
+    Returns ``("completed", note)`` or ``("unknown", None)``. ``note`` is
+    the last_error payload for an ok heartbeat after a recovered write.
+    """
+    recovered_exc: Optional[BaseException] = None
+    try:
+        pages_mod.complete_page(
+            page_id,
+            status=status,
+            result=result,
+            now=now,
+            claim_token=claim_token,
+        )
+    except HranaHttpError as exc:
+        if not _ledger_transport_error(exc):
+            raise
+        recovered_exc = exc
+        _close_hrana_socket()
+        try:
+            pages_mod.complete_page(
+                page_id,
+                status=status,
+                result=result,
+                now=now,
+                claim_token=claim_token,
+            )
+        except HranaHttpError as retry_exc:
+            if not _ledger_transport_error(retry_exc):
+                raise
+            row = pages_mod.get_page(page_id)
+            if not (row and row.get("status") in {"done", "skipped"}):
+                _note_ledger_transport("complete_page", False, retry_exc)
+                return "unknown", None
+            recovered_exc = retry_exc
+    _send_followup(**followup)
+    note = None
+    if recovered_exc is not None:
+        note = _note_ledger_transport("complete_page", True, recovered_exc)
+    return "completed", note
 
 
 def _default_grok_runner(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -757,6 +844,7 @@ def run_cycle(
 
     runner = grok_runner or _default_grok_runner
     completed = True
+    health_error: Optional[dict] = None
     try:
         if autopush_enabled() and install_push_guard(repo_root) is None:
             # A push-capable cycle without the git-level refspec guard is
@@ -827,17 +915,23 @@ def run_cycle(
         if rerun:
             disposition, summary = rerun
             finished = datetime.now(timezone.utc)
-            pages_mod.complete_page(
+            finish, note = _complete_page_with_followup(
                 page["page_id"],
                 status="done",
                 result=f"{disposition}: {summary}",
                 now=finished,
+                claim_token=token,
+                followup={
+                    "service": page["service"],
+                    "disposition": disposition,
+                    "summary": summary,
+                },
             )
-            _send_followup(
-                service=page["service"],
-                disposition=disposition,
-                summary=summary,
-            )
+            if finish != "completed":
+                completed = False
+                return 0
+            if note:
+                health_error = note
             print(json.dumps({
                 "at": finished.isoformat(),
                 "page_id": page["page_id"],
@@ -907,6 +1001,7 @@ def run_cycle(
                 page["page_id"],
                 now=datetime.now(timezone.utc),
                 error=f"grok timed out after {GROK_TIMEOUT_SECS}s",
+                claim_token=token,
             )
             print(json.dumps({
                 "at": now.isoformat(),
@@ -924,6 +1019,7 @@ def run_cycle(
                 page["page_id"],
                 now=datetime.now(timezone.utc),
                 error=f"grok exit {returncode}: {stderr[-400:]}",
+                claim_token=token,
             )
             print(json.dumps({
                 "at": now.isoformat(),
@@ -949,6 +1045,7 @@ def run_cycle(
                     page["page_id"],
                     now=finished,
                     error=f"PR_FAILED: {pr_error}",
+                    claim_token=token,
                 )
                 # A pushed branch without an open PR has no review/deploy path.
                 # Keep the ticket actionable and let the responder's own health
@@ -972,17 +1069,23 @@ def run_cycle(
         stamp = grok_runtime.runtime_stamp(runtime.model, runtime.cli_version)
         if stamp not in summary:
             summary = f"{summary} {stamp}".strip()
-        pages_mod.complete_page(
+        finish, note = _complete_page_with_followup(
             page["page_id"],
             status="done",
             result=f"{disposition}: {summary}",
             now=finished,
+            claim_token=token,
+            followup={
+                "service": page["service"],
+                "disposition": disposition,
+                "summary": summary,
+            },
         )
-        _send_followup(
-            service=page["service"],
-            disposition=disposition,
-            summary=summary,
-        )
+        if finish != "completed":
+            completed = False
+            return 0
+        if note:
+            health_error = note
         print(json.dumps({
             "at": finished.isoformat(),
             "page_id": page["page_id"],
@@ -994,13 +1097,13 @@ def run_cycle(
         }))
         return 0
     except HranaHttpError as exc:
-        # A 4s ledger read stall is the heartbeat timeout's sibling: the
-        # next timer is 30s away. Exit 0 so systemd does not page this
-        # poller about itself. Skip the ok heartbeat so a standing Turso
-        # outage still goes stale.
+        # A 4s ledger stall or a keep-alive the peer closed is the
+        # heartbeat timeout's sibling: the next timer is 30s away.
+        # Exit 0 so systemd does not page this poller about itself. Skip
+        # the ok heartbeat so a standing Turso outage still goes stale.
         completed = False
-        if _ledger_read_timeout(exc):
-            print(f"grok page ledger non-fatal: {exc}", file=sys.stderr)
+        if _ledger_transport_error(exc):
+            _note_ledger_transport("ledger", False, exc)
             return 0
         raise
     except BaseException:
@@ -1010,7 +1113,7 @@ def run_cycle(
         raise
     finally:
         if completed:
-            _heartbeat("ok", now)
+            _heartbeat("ok", now, error=health_error)
         lock.unlink(missing_ok=True)
 
 
