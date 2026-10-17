@@ -9587,3 +9587,10 @@ Review: Preserve publication quality gates and source attribution; no local test
 - [ ] M3 depends_on: [M2] Select the verified subscription replacement, obtain independent review and exact-head green CI.
 - [ ] M4 depends_on: [M3] Deploy after the separate control-plane release, finish normal recovery and verify production outcomes.
 Review: Official model retirement applies to ChatGPT sign-in only. Existing production subscription request completed a two-image strict-JSON canary with gpt-6.1-sol. Preserve existing endpoint, token handling, publication gates and prepaid policy. No local test suites.
+
+## Research decorative-asset routing (2026-10-17)
+- [x] Q1 depends_on: [] Audit all 23 expired decisions and visually inspect three rejected decorative/prose crops; identify contradictory text-only RESELECT handling.
+- [ ] Q2 depends_on: [Q1] Reproduce blocked text-only verification and conservative all-assets classification contracts on GitHub.
+- [ ] Q3 depends_on: [Q2] Accept text-only routing only after independent exact all-assets non-data classification; preserve real/incomplete-chart, provider, factual and publisher holds.
+- [ ] Q4 depends_on: [Q3, M3] Complete independent review and combined exact-head CI, deploy after control-plane repair and verify normal recovery outcomes.
+Review: No local suites. A photo or prose crop is not a chart. Never treat absent/malformed/uninspected classification as proof that no source chart exists. Normal verification and separate generated-PNG review remain mandatory.
