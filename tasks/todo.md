@@ -9606,6 +9606,8 @@ Integrated delivery review: Independent Sol/Luna review found and repaired trans
 Final integration review (2026-10-17): current-main57a7 plus preserved1114head5ed747ca and all final recovery changes passed15905Python tests/2skips/23subtests,2910cloud tests/7skips; fullVitest10987passed21skipped remains applicable with no JS changes. Complete595KBchange secret scan clean. Final Sol and Luna source reviews approved; one superseded intermediate-capacity finding withdrawn after current-source verification. Root updater digest unchanged c1eb3d03. Current production57a7 has both exact-SHA host sync and manifest receipts. Final1124publication, exact-head CI/adminmerge/deploy, owner activation, Mini OS authorization and bot inference still pending.
 
 
+Final current-main review: merged64471fd7; 16045 Python passed/2skips/23subtests after committed-baseline ownership check. Cloud2910passed7skips and Vitest10987passed21skips remain applicable because those trees are unchanged. Production64471 has both-role sync/manifest receipts. Sol and Luna approved the temporary native bootstrap observer; seven observer tests passed. Final new-headCI/adminmerge/deployment, owner activation and one nativeOSauthorization/botSDKreceipt remain pending.
+
 ## Research review stale API connection follow-up (2026-10-17)
 - [x] R1 depends_on: [] Observe a new DbHttpError during three-key recovery; confirm API/shared transport retry gap without assuming the unrecorded exception cause.
 - [x] R2 depends_on: [R1] Extended real-socket regressions to API transport; GitHub c1dead71 reproduced16 failures/678 passing tests (job117429409148).
