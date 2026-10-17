@@ -82,8 +82,14 @@ Pushover cannot provide exactly-once delivery across a lost response. The
 controller claims notification attempts durably before sending, records accepted
 responses, and quarantines uncertain attempts instead of blindly duplicating
 an accepted page. Release completion is represented by CI and host receipts,
-not by notification delivery. The nightly loop retains its PR-green page; the
-operator controller sends a separate release-verification page.
+not by notification delivery. The nightly loop retains its ordinary PR-green
+page. For public PRs created by the private-validation bridge, the controller
+queues a separate `radon PR green` page after exact-head public CI and all
+legacy commit-status contexts succeed,
+even when subsequent model review rejects the candidate. Its durable PR/head
+event survives restarts, uses the same accepted/rejected/uncertain delivery
+handling, and drains even while validation waits. The controller sends a
+separate release-verification page after production and host reconciliation.
 
 ## Toolchain and root-owned runner updates
 

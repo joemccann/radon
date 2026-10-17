@@ -55,12 +55,13 @@ def export_candidate(base, head, *, severity, cwd):
 
 
 class PrivateReleaseBridge:
-    def __init__(self, github, reviewer, policy, state_directory):
+    def __init__(self, github, reviewer, policy, state_directory, *, on_public_green=None):
         self.github, self.reviewer, self.policy = github, reviewer, policy
         self.directory = Path(state_directory)
         self.directory.mkdir(mode=0o700, exist_ok=True)
         self.priority_pr_number = None
         self.priority_head_sha = None
+        self.on_public_green = on_public_green
 
     def _check_failure(self, snapshot, pr):
         if snapshot.head_sha != pr.head_sha:
@@ -100,16 +101,23 @@ class PrivateReleaseBridge:
         checks = self._api(f'repos/{PUBLIC}/commits/{head}/check-runs?per_page=100')
         from unattended_release import Check, ChecksSnapshot, PullRequest, _checks_green
         pr = PullRequest(number, head, f'security-private-release/{head}')
-        snapshot = ChecksSnapshot(head, self.policy.required_checks,
-                                  [Check(c['name'], c['status'], c['conclusion'], c['head_sha']) for c in checks.get('check_runs', [])])
-        if checks.get('total_count', 0) > 100:
+        statuses = self._api(f'repos/{PUBLIC}/commits/{head}/status?per_page=100')
+        rows, count = statuses.get('statuses'), statuses.get('total_count')
+        if (checks.get('total_count', 0) > 100 or statuses.get('sha') != head
+                or not isinstance(rows, list) or type(count) is not int or count > 100 or count != len(rows)):
             self._finish_marker(marker, 'public-checks-invalid')
             return 'private-validation-failed'
+        result = [Check(c['name'], c['status'], c['conclusion'], c['head_sha']) for c in checks.get('check_runs', [])]
+        result.extend(Check(c['context'], 'COMPLETED' if c['state'] in ('success', 'failure', 'error') else 'PENDING',
+                            'SUCCESS' if c['state'] == 'success' else c['state'].upper(), head) for c in rows)
+        snapshot = ChecksSnapshot(head, self.policy.required_checks, result)
         if not _checks_green(snapshot, pr, self.policy):
             if self._check_failure(snapshot, pr):
                 self._finish_marker(marker, 'public-checks-failed')
                 return 'private-validation-failed'
             return 'public-ci-pending'
+        if self.on_public_green is not None:
+            self.on_public_green(number, head)
         comparison = self._api(f'repos/{PUBLIC}/compare/{base}...{head}')
         if comparison.get('status') != 'ahead' or comparison.get('merge_base_commit', {}).get('sha') != base or len(comparison.get('files', [])) >= 300:
             self._finish_marker(marker, 'public-diff-invalid')

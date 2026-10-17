@@ -249,6 +249,17 @@ class FileStateStore:
             self.data["outbox"].setdefault(key, {"event_id": key, "message": f"Release verified: https://github.com/{REPO}/pull/{entry['pr_number']}", "sent": False})
         self._save()
 
+    def enqueue_pr_green(self, pr_number, head_sha):
+        if type(pr_number) is not int or pr_number <= 0 or not isinstance(head_sha, str) or not SHA.fullmatch(head_sha):
+            raise ValueError("invalid PR-green identity")
+        event_id = f"pr-green:{pr_number}:{head_sha}"
+        self.data["outbox"].setdefault(event_id, {
+            "event_id": event_id,
+            "message": f"Maintenance correction CI green: https://github.com/{REPO}/pull/{pr_number}",
+            "sent": False,
+        })
+        self._save()
+
     def pending_releases(self):
         return [(key, value) for key, value in self.data["releases"].items() if value["status"] not in ("green", "rejected")]
 
@@ -333,9 +344,7 @@ def _finish(key, record, policy, github, state, deploy):
     return RunResult("green", record["pr_number"])
 
 
-def run_once(*, policy, github, state, deploy, notifier, now, only_pr_number=None, only_pr_head_sha=None):
-    """Release at most one immutable head; resume an interrupted release first."""
-    del now
+def _drain_notifications(state, notifier):
     for item in state.pending_notifications():
         if not state.begin_notification(item.event_id):
             continue
@@ -345,6 +354,12 @@ def run_once(*, policy, github, state, deploy, notifier, now, only_pr_number=Non
             state.notification_rejected(item.event_id)
             raise
         state.mark_notified(item.event_id)
+
+
+def run_once(*, policy, github, state, deploy, notifier, now, only_pr_number=None, only_pr_head_sha=None):
+    """Release at most one immutable head; resume an interrupted release first."""
+    del now
+    _drain_notifications(state, notifier)
     current_main = github.main_sha()
     if not deploy.production_idle():
         return RunResult("production-busy")
@@ -637,7 +652,7 @@ class PushoverNotifier:
         import urllib.error
         import socket
         import ssl
-        data = {**self.credentials, "priority": "0", "title": "radon release verified", "message": message, "url": message.split()[-1], "url_title": "Open pull request"}
+        data = {**self.credentials, "priority": "0", "title": "radon PR green" if event_id.startswith("pr-green:") else "radon release verified", "message": message, "url": message.split()[-1], "url_title": "Open pull request"}
         try:
             with urllib.request.urlopen("https://api.pushover.net/1/messages.json", data=urllib.parse.urlencode(data).encode(), timeout=30) as response:
                 if json.load(response).get("status") != 1:
@@ -679,13 +694,19 @@ def main(argv=None):
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         from private_security_release import PrivateReleaseBridge
         deploy = ProductionDeploy(github, hosts)
-        bridge = PrivateReleaseBridge(github, github.reviews, policy, args.state / "private")
-        bridge_status = bridge.run_once() if deploy.production_idle() else "waiting"
+        notifier = PushoverNotifier(credentials)
+        bridge = PrivateReleaseBridge(github, github.reviews, policy, args.state / "private",
+                                      on_public_green=state.enqueue_pr_green)
+        try:
+            bridge_status = bridge.run_once() if deploy.production_idle() else "waiting"
+        finally:
+            # Public CI can be green even if review subsequently fails or waits.
+            _drain_notifications(state, notifier)
         if bridge_status in ("private-ci-pending", "public-ci-pending"):
             result = RunResult(bridge_status)
         else:
             result = run_once(policy=policy, github=github, state=state, deploy=deploy,
-                              notifier=PushoverNotifier(credentials), now=datetime.now(timezone.utc),
+                              notifier=notifier, now=datetime.now(timezone.utc),
                               only_pr_number=bridge.priority_pr_number,
                               only_pr_head_sha=bridge.priority_head_sha)
         from operator_runtime_refresh import refresh

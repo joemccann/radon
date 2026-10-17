@@ -1091,3 +1091,97 @@ def test_candidate_discovery_never_updates_a_branch_targeting_another_base(monke
     monkeypatch.setattr(client, 'api', api)
     assert client.candidate_prs() == []
     assert mutations == []
+
+
+def test_bridge_pr_green_outbox_survives_restart_and_keeps_release_page_separate(tmp_path):
+    state = ur.FileStateStore(tmp_path / 'notifications')
+    notifier = FakeNotifier()
+    with state.locked():
+        state.enqueue_pr_green(42, HEAD)
+        state.enqueue_pr_green(42, HEAD)
+        ur._drain_notifications(state, notifier)
+    restarted = ur.FileStateStore(state.path)
+    with restarted.locked():
+        restarted.enqueue_pr_green(42, HEAD)
+        assert restarted.pending_notifications() == []
+        assert restarted.claim(42, HEAD)
+        restarted.record(f'42:{HEAD}', 'green', merge_sha=MERGE)
+        ur._drain_notifications(restarted, notifier)
+    assert [event for event, _ in notifier.calls] == [f'pr-green:42:{HEAD}', f'42:{HEAD}']
+    assert all('https://github.com/joemccann/radon/pull/42' in message for _, message in notifier.calls)
+
+
+@pytest.mark.parametrize('ambiguous', [False, True])
+def test_bridge_pr_green_delivery_preserves_rejection_retry_and_uncertain_quarantine(tmp_path, ambiguous):
+    state = ur.FileStateStore(tmp_path / 'notifications')
+    notifier = FakeNotifier(fail_after_accept=ambiguous, reject_before_accept=not ambiguous)
+    with state.locked():
+        state.enqueue_pr_green(42, HEAD)
+        with pytest.raises(RuntimeError):
+            ur._drain_notifications(state, notifier)
+    restarted = ur.FileStateStore(state.path)
+    with restarted.locked():
+        restarted.enqueue_pr_green(42, HEAD)
+        ur._drain_notifications(restarted, notifier)
+    event = restarted.data['outbox'][f'pr-green:42:{HEAD}']
+    assert len(notifier.calls) == (1 if ambiguous else 2)
+    assert event['sent'] is (not ambiguous)
+    assert event['attempted'] is True
+
+
+@pytest.mark.parametrize(('event_id', 'title'), [(f'pr-green:42:{HEAD}', 'radon PR green'), (f'42:{HEAD}', 'radon release verified')])
+@pytest.mark.parametrize('status', [0, 1])
+def test_pushover_pr_green_title_and_acceptance(event_id, title, status, monkeypatch):
+    import io
+    import urllib.parse
+    import urllib.request
+    payloads = []
+    def send(url, *, data, timeout):
+        payloads.append(urllib.parse.parse_qs(data.decode()))
+        return io.StringIO(json.dumps({'status': status}))
+    monkeypatch.setattr(urllib.request, 'urlopen', send)
+    notifier = ur.PushoverNotifier({'user': 'fixture', 'token': 'fixture'})
+    message = 'Maintenance correction CI green: https://github.com/joemccann/radon/pull/42'
+    if status:
+        notifier.send(event_id, message)
+    else:
+        with pytest.raises(ur.DeliveryRejected): notifier.send(event_id, message)
+    assert payloads[0]['title'] == [title]
+    assert payloads[0]['priority'] == ['0']
+    assert payloads[0]['url'] == ['https://github.com/joemccann/radon/pull/42']
+    assert payloads[0]['url_title'] == ['Open pull request']
+
+
+@pytest.mark.parametrize('bridge_status', ['private-ci-pending', 'public-ci-pending', 'review-error'])
+def test_main_drains_bridge_green_outbox_even_when_bridge_waits_or_review_fails(tmp_path, monkeypatch, bridge_status, capsys):
+    import private_security_release
+    import operator_runtime_refresh
+    from types import SimpleNamespace
+    notifier = FakeNotifier()
+    class Bridge:
+        priority_pr_number = None
+        priority_head_sha = None
+        def __init__(self, *args, on_public_green=None): self.callback = on_public_green
+        def run_once(self):
+            assert callable(self.callback)
+            self.callback(42, HEAD)
+            if bridge_status == 'review-error': raise RuntimeError('review unavailable')
+            return bridge_status
+    monkeypatch.setattr(ur, 'load_trusted_policy', lambda *a, **k: _policy())
+    monkeypatch.setattr(ur, 'CodexReviews', lambda *a: object())
+    monkeypatch.setattr(ur, 'GitHubClient', lambda *a: SimpleNamespace(reviews=object()))
+    monkeypatch.setattr(ur, 'ProductionDeploy', lambda *a: FakeDeploy())
+    monkeypatch.setattr(ur, 'PushoverNotifier', lambda *a: notifier)
+    monkeypatch.setattr(private_security_release, 'PrivateReleaseBridge', Bridge)
+    monkeypatch.setattr(operator_runtime_refresh, 'refresh', lambda *a: None)
+    hosts, credentials = tmp_path / 'hosts.json', tmp_path / 'notifications.env'
+    hosts.write_text(json.dumps({'app': 'app', 'broker': 'broker'}))
+    credentials.write_text('PUSHOVER_USER=fixture\nPUSHOVER_TOKEN=fixture\n')
+    hosts.chmod(0o600); credentials.chmod(0o600)
+    args = ['--policy', str(tmp_path / 'policy'), '--state', str(tmp_path / 'state'), '--hosts', str(hosts), '--notifications', str(credentials)]
+    if bridge_status == 'review-error':
+        with pytest.raises(RuntimeError, match='review unavailable'): ur.main(args)
+    else:
+        assert ur.main(args) == 0
+        assert json.loads(capsys.readouterr().out)['status'] == bridge_status
+    assert [event for event, _ in notifier.calls] == [f'pr-green:42:{HEAD}']
