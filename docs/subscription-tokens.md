@@ -35,6 +35,19 @@ throwaway home so no live credential was touched.
 daemon searches `~/.local/bin` and `~/.grok/bin` itself so a manual run finds
 them too.
 
+### Antigravity 1.4.0 early-refresh limitation (2026-10-17)
+
+The installed CLI uses the configured public client ID. Its `agy models` probe
+accepted a valid login without advancing an expiry inside the 40-minute lead;
+the HTTP fallback returned `400 invalid_request` reporting missing
+`client_secret`. Public client IDs do not guarantee secretless
+[desktop refresh grants](https://developers.google.com/identity/protocols/oauth2/native-app).
+No forced early refresh or client-configuration export was found in installed
+help or the [official CLI reference](https://antigravity.google/docs/cli/reference).
+Proactive refresh remains a maintainer integration dependency, not a reason to
+reauthenticate. Native refresh near actual expiry may still work; the 40-minute
+lead and error classification remain unchanged.
+
 ---
 
 ## What the daemon does
@@ -122,6 +135,13 @@ Two things that look like a dead login and are not, both `error`: OIDC discovery
 not answering (an issuer outage), and a token endpoint rejecting the **client**
 (`invalid_client` / `unauthorized_client`, fixed in the provider table, never by
 logging in again). A dead grant is never presented a second time.
+
+The page formatter adds sign-in links, device codes and native login commands
+only for `needs_reauth`. For `error` and `store_unavailable`, it discards any
+stale login prompt and preserves the provider state and diagnostic. A diagnostic
+may itself contain a failure-specific recovery command, such as the fallback
+from an explicitly requested unsupported push login. Paging thresholds and
+cooldowns still apply.
 
 The aggregate `service_health` state is the worst provider state of the run.
 
