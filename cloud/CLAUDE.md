@@ -139,13 +139,22 @@ early-exit producer pipeline: under `pipefail`, SIGPIPE can reject a safe body
 or bypass a forbidden match. Large-body regressions exercise both outcomes
 in all three copies.
 
-**The broker host gets none of this from CI.** `.github/workflows/ci.yml`
-deploys to a single `secrets.VPS_HOST`. Every control-plane change reaches the
-broker by hand: as root there, run `radon-deploy-root sync-control-plane`
-(it needs no checkout, only the root provision store below), or rsync the
-`cloud/` tree at the tested SHA to a root-owned path (`--chown=0:0`, no group
-or other write) and run `bootstrap-control-plane.sh` with
-`RADON_BOOTSTRAP_CLOUD_ROOT` pointed at it.
+**The broker uses a separate bundle.** `radon-deploy-root sync-control-plane`
+reads its `broker` role from the host environment file and invokes the trusted
+bootstrap with that role. The broker installs only the deploy helper, Gateway
+control helpers, the existing root-owned operator hold CLI, compose and broker
+units. It installs no app runtime, sudoers, polkit, app units or container
+drop-ins, and requires neither Node nor visudo. It does not restart Gateway.
+Initial provisioning uses root SSH and a root-owned archive of the tested
+commit; subsequent syncs use the pinned root provision store. Root release
+controllers may pass `sync-control-plane <sha>`: the exact SHA must still be
+the pinned remote main tip at admission and immediately before bootstrap.
+Success prints `installed_sha=<sha> host_role=<role>` after the transaction
+and floor record succeed. The no-argument verb and its sudoers grant remain
+unchanged; no new unprivileged grant is installed. Root hold CLI
+source is `scripts/utils/ib_operator_hold.py`; the manifest marks repository
+sources with `repo/` and the archive includes that one dependency alongside
+`cloud/`.
 
 `inspect-running` passes docker's stdout, stderr and exit code through
 untouched: `gateway_state()` tells `missing` from `unknown` by matching
@@ -194,12 +203,23 @@ export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
 STORE=/opt/radon-provision/radon.git
 git --git-dir="$STORE" cat-file -e "${SHA}^{commit}"
 STAGE="$(mktemp -d /opt/radon-provision/manual.XXXXXX)"
-git --git-dir="$STORE" -c tar.umask=022 archive "$SHA" cloud | tar -x -C "$STAGE"
+git --git-dir="$STORE" -c tar.umask=022 archive "$SHA" cloud scripts/utils/ib_operator_hold.py | tar -x -C "$STAGE"
 RADON_BOOTSTRAP_CLOUD_ROOT="$STAGE/cloud" bash "$STAGE/cloud/scripts/bootstrap-control-plane.sh"
 rm -rf "$STAGE"
 # only when deliberately pinning an older privileged set:
 printf '%s\n' "$SHA" > /opt/radon-provision/control-plane-floor
 ```
+
+Deploy, bootstrap, operator, Gateway control and app runtime inline Python run with `-I`. Their
+stdlib validators and process supervisors ignore caller working directories,
+`PYTHONPATH`, and user site packages. Keep isolation when adding Python calls
+to these entrypoints. Automatic sync checks all five candidate scripts before
+executing the candidate bootstrap; a missing helper or isolation flag refuses
+admission. The fixed-source admission check covers variable expansions, literal
+Python paths and continued commands; source review remains required. See
+[the admission runbook](../docs/incident-runbook.md#control-plane-isolation-admission).
+Privileged refresh applies the same check before installing shell helpers.
+These checks also reject older bundles that omit interpreter isolation.
 
 The five app-plane drop-ins run the container with the systemd notify
 socket proxied: `radon-app-runtime run` spawns `notify-proxy` inside the
