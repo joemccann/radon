@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 import multiprocessing
 from pathlib import Path
+import sqlite3
 import threading
 import time
 from types import SimpleNamespace
@@ -212,6 +213,18 @@ def test_review_claim_slot_persists_reopen_and_failed_claim_does_not_advance_it(
         assert reopened.ready(limit=1)[0]['key'] == newest
     finally:
         reopened.close()
+
+
+def test_review_claim_rolls_back_if_admission_counter_cannot_advance(state):
+    key = _review_ready(state, 'counter-failure')
+    state.db.execute('''CREATE TRIGGER reject_review_admission BEFORE UPDATE ON review_admission
+        BEGIN SELECT RAISE(ABORT, 'counter update rejected'); END''')
+    before = state.db.execute('SELECT status,attempts FROM work WHERE key=?', (key,)).fetchone()
+    with pytest.raises(sqlite3.DatabaseError, match='counter update rejected'):
+        state.claim(key)
+    after = state.db.execute('SELECT status,attempts FROM work WHERE key=?', (key,)).fetchone()
+    assert tuple(after) == tuple(before) == ('pending', 0)
+    assert state.ready(limit=1)[0]['key'] == key
 
 
 def test_provider_backoff_blocks_download(state, tmp_path):
