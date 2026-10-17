@@ -75,6 +75,7 @@ function denyUnavailable(tier: DemoRateTier): DemoRateLimitResult {
 
 type LimiterLike = { limit: (key: string) => Promise<DemoRateLimitResult | {
   success: boolean; limit: number; remaining: number; reset: number;
+  reason?: string;
 }> };
 
 let _redis: Redis | null | undefined; // undefined = not yet resolved
@@ -121,7 +122,19 @@ export async function demoRateLimit(
       : allowAll(tier);
   }
   try {
-    const { success, limit, remaining, reset } = await limiter.limit(userId);
+    const outcome = await limiter.limit(userId);
+    // @upstash/ratelimit does NOT throw when Redis is slow: it races the
+    // command against its `timeout` (5000 ms by default) and RESOLVES the race
+    // with `{ success: true, reason: "timeout" }`. The catch below never ran,
+    // so the fail-closed posture this function documents was silently
+    // fail-open and a demo user could exceed the durable cross-instance and
+    // daily ceilings during a Redis slowdown. A timed-out check decided
+    // nothing, so it is treated exactly like an unavailable limiter.
+    if ("reason" in outcome && outcome.reason === "timeout") {
+      console.error(`[demo-rate-limit] tier ${tier} timed out; denying`);
+      return denyUnavailable(tier);
+    }
+    const { success, limit, remaining, reset } = outcome;
     return { success, limit, remaining, reset };
   } catch (error) {
     // A dead or expired Redis must not throw out of middleware — unhandled,
