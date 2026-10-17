@@ -417,18 +417,6 @@
       ]
     },
     {
-      "id": "q-docs-035-factory",
-      "question": "How does the Foreman software factory open draft PRs?",
-      "category": "exact_term",
-      "relevant": [
-        {
-          "source": "docs",
-          "doc_key_pattern": "^docs/factory\\.md$",
-          "grade": 3
-        }
-      ]
-    },
-    {
       "id": "q-docs-036-grok-page-responder",
       "question": "How does the VPS P1 auto-fix Grok page responder work?",
       "category": "paraphrase",

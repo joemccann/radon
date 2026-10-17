@@ -38,7 +38,6 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Cloud operating contract | [`cloud/CLAUDE.md`](../cloud/CLAUDE.md) |
 | Incident cases and `/incident` | [`docs/incident-runbook.md`](incident-runbook.md) |
 | Grok P1 auto-fix | [`docs/grok-page-responder.md`](grok-page-responder.md) |
-| Software factory (Foreman) | [`docs/factory.md`](factory.md) |
 
 ## Market data and strategies
 
