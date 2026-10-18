@@ -18,7 +18,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 POLICY = ROOT / "tailscale" / "policy.hujson"
 
-TAGS = {"tag:radon-app", "tag:radon-broker", "tag:radon-ops", "tag:radon-gpu"}
+HOST_TAGS = {"tag:radon-app", "tag:radon-broker", "tag:radon-ops", "tag:radon-gpu"}
+CI_TAG = "tag:ci"
+TAGS = HOST_TAGS | {CI_TAG}
 SERVER_TAGS = {"tag:radon-app", "tag:radon-broker"}
 FORBIDDEN_OPS_PORTS = {"8321", "4001", "8330", "8340"}
 OPERATOR_PLACEHOLDER = "__OPERATOR_LOGIN__"
@@ -157,7 +159,7 @@ def test_operator_reaches_ssh_on_every_radon_tag(policy):
         for dst in g["dst"]
         for spec in g["ip"]
     }
-    for tag in TAGS:
+    for tag in HOST_TAGS:
         assert (tag, "tcp:22") in reach, tag
     assert ("tag:radon-app", "tcp:8321") in reach
     # Nothing on the broker but SSH: the order path is the private net.
@@ -207,6 +209,35 @@ def test_policy_tests_agree_with_the_grants(policy):
             assert granted(case["src"], target), (case["src"], target)
         for target in case.get("deny", []):
             assert not granted(case["src"], target), (case["src"], target)
+
+
+def test_ci_tag_reaches_only_ssh_on_the_app_host(policy):
+    grants = [g for g in policy["grants"] if CI_TAG in g["src"]]
+    assert grants, "no grant for tag:ci"
+    reach = {
+        (dst, spec)
+        for g in grants
+        for dst in g["dst"]
+        for spec in g["ip"]
+    }
+    assert reach == {("tag:radon-app", "tcp:22")}
+    for grant in grants:
+        assert grant["src"] == [CI_TAG], grant
+
+
+def test_ci_tag_is_owned_by_the_operator(policy):
+    assert policy["tagOwners"][CI_TAG] == ["group:operator"]
+
+
+def test_policy_tests_accept_ci_ssh_to_app_and_deny_the_rest(policy):
+    cases = [t for t in policy["tests"] if t["src"] == CI_TAG]
+    assert cases, "no ACL test with src tag:ci"
+    accepted = {a for t in cases for a in t.get("accept", [])}
+    denied = {d for t in cases for d in t.get("deny", [])}
+    assert "tag:radon-app:22" in accepted
+    assert "tag:radon-app:8321" in denied
+    assert "tag:radon-broker:22" in denied
+    assert "tag:radon-broker:4001" in denied
 
 
 def test_no_tailscale_ssh_rules(policy):

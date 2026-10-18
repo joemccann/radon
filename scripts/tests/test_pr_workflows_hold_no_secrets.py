@@ -429,7 +429,14 @@ def test_dependency_guard_is_valid_when_success_is_required(condition):
 # Deploy credentials reach production over SSH. Every job that reads them is
 # bound to the main-only `production` Environment, so a workflow file pushed on
 # any other branch cannot obtain them even when it omits every `if:` guard.
-DEPLOY_SECRETS = {"VPS_HOST", "VPS_SSH_KEY"}
+DEPLOY_SECRETS = {
+    "VPS_HOST",
+    "VPS_TAILNET_HOST",
+    "VPS_SSH_KEY",
+    "VPS_SSH_FINGERPRINT",
+    "TS_OAUTH_CLIENT_ID",
+    "TS_OAUTH_SECRET",
+}
 DEPLOY_ENVIRONMENT = "production"
 
 

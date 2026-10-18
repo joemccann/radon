@@ -17,6 +17,7 @@
     "tag:radon-broker": ["group:operator"],  // radon-broker (5.78.144.125 / 10.0.0.4)
     "tag:radon-ops":    ["group:operator"],  // future ops-plane hosts
     "tag:radon-gpu":    ["group:operator"],  // SLM host (docs/gpu-host-deployment.md)
+    "tag:ci":           ["group:operator"],  // GitHub Actions OAuth client (ephemeral)
   },
 
   "grants": [
@@ -34,6 +35,15 @@
     {
       "src": ["group:operator"],
       "dst": ["tag:radon-app", "tag:radon-broker", "tag:radon-ops", "tag:radon-gpu"],
+      "ip":  ["tcp:22"],
+    },
+
+    // GitHub-hosted CI: ephemeral tagged nodes SSH to the app host only.
+    // Required before fw-radon-app can drop public tcp/22. Operator-applied;
+    // deploy never writes this policy.
+    {
+      "src": ["tag:ci"],
+      "dst": ["tag:radon-app"],
       "ip":  ["tcp:22"],
     },
 
@@ -121,6 +131,21 @@
         "tag:radon-broker:8340",
         "tag:radon-app:8330",
         "tag:radon-ops:8341",
+      ],
+    },
+    {
+      "src": "tag:ci",
+      "accept": ["tag:radon-app:22"],
+      "deny": [
+        "tag:radon-app:8321",
+        "tag:radon-app:8330",
+        "tag:radon-app:8340",
+        "tag:radon-app:8341",
+        "tag:radon-broker:22",
+        "tag:radon-broker:4001",
+        "tag:radon-broker:8340",
+        "tag:radon-ops:22",
+        "tag:radon-gpu:22",
       ],
     },
   ],
