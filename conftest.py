@@ -11,10 +11,74 @@ xdist installed from rejecting the xdist hook.
 from __future__ import annotations
 
 import os
+from urllib import request as urllib_request
+from urllib.parse import urlsplit
 
 import pytest
 
 from ci.worker_budget import budgeted_workers
+
+
+PUSHOVER_CREDENTIAL_KEYS = ("PUSHOVER_USER", "PUSHOVER_TOKEN")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_pushover(monkeypatch):
+    """Tests opt into synthetic credentials and fake transports, never delivery.
+
+    Cover every pytest subtree, including cloud and API tests. Keep an attempt
+    latch because production notifiers deliberately catch transport exceptions.
+    """
+    def strip_credentials():
+        for key in PUSHOVER_CREDENTIAL_KEYS:
+            monkeypatch.delenv(key, raising=False)
+
+    strip_credentials()
+    try:
+        import dotenv
+    except ImportError:
+        pass
+    else:
+        real_load_dotenv = dotenv.load_dotenv
+
+        def load_dotenv_without_pushover(*args, **kwargs):
+            loaded = real_load_dotenv(*args, **kwargs)
+            strip_credentials()
+            return loaded
+
+        monkeypatch.setattr(dotenv, "load_dotenv", load_dotenv_without_pushover)
+
+    attempts = []
+    forbidden = "Pushover network delivery is forbidden in tests; mock the sender"
+
+    def guard(url):
+        host = urlsplit(url).hostname or ""
+        if host == "pushover.net" or host.endswith(".pushover.net"):
+            attempts.append(host)
+            raise AssertionError(forbidden)
+
+    real_open = urllib_request.OpenerDirector.open
+
+    def guarded_open(opener, fullurl, *args, **kwargs):
+        guard(fullurl.full_url if isinstance(fullurl, urllib_request.Request) else fullurl)
+        return real_open(opener, fullurl, *args, **kwargs)
+
+    monkeypatch.setattr(urllib_request.OpenerDirector, "open", guarded_open)
+    try:
+        import requests
+    except ImportError:
+        pass
+    else:
+        real_send = requests.sessions.Session.send
+
+        def guarded_send(session, request, **kwargs):
+            guard(request.url)
+            return real_send(session, request, **kwargs)
+
+        monkeypatch.setattr(requests.sessions.Session, "send", guarded_send)
+
+    yield
+    assert not attempts, forbidden
 
 
 @pytest.hookimpl(optionalhook=True)
@@ -30,6 +94,9 @@ def pytest_configure(config: pytest.Config) -> None:
     `config.option.tx`, so the budget is applied to that list; a hand-written
     `--tx` topology is left alone.
     """
+    # Strip inherited operator credentials before collection and xdist spawn.
+    for key in PUSHOVER_CREDENTIAL_KEYS:
+        os.environ.pop(key, None)
     specs = list(getattr(config.option, "tx", None) or [])
     if not specs or any(spec != "popen" for spec in specs):
         return
