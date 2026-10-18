@@ -1,0 +1,2512 @@
+{
+  "source": "GET https://api.unusualwhales.com/api/stock/VIX/options-volume?limit=500",
+  "captured_utc": "2026-10-18T04:32:00Z",
+  "ticker": "VIX",
+  "auth": "Bearer UW_TOKEN",
+  "user_agent": "radon/2.0",
+  "n": 500,
+  "newest": "2026-10-16",
+  "oldest": "2024-10-18",
+  "data": [
+    {
+      "date": "2026-10-16",
+      "put_volume": 573686,
+      "call_volume": 1729988
+    },
+    {
+      "date": "2026-10-15",
+      "put_volume": 218214,
+      "call_volume": 606968
+    },
+    {
+      "date": "2026-10-14",
+      "put_volume": 270894,
+      "call_volume": 913057
+    },
+    {
+      "date": "2026-10-13",
+      "put_volume": 130364,
+      "call_volume": 444822
+    },
+    {
+      "date": "2026-10-12",
+      "put_volume": 97165,
+      "call_volume": 351983
+    },
+    {
+      "date": "2026-10-09",
+      "put_volume": 143918,
+      "call_volume": 350594
+    },
+    {
+      "date": "2026-10-08",
+      "put_volume": 175180,
+      "call_volume": 495972
+    },
+    {
+      "date": "2026-10-07",
+      "put_volume": 294133,
+      "call_volume": 695274
+    },
+    {
+      "date": "2026-10-06",
+      "put_volume": 142860,
+      "call_volume": 717110
+    },
+    {
+      "date": "2026-10-05",
+      "put_volume": 182122,
+      "call_volume": 580029
+    },
+    {
+      "date": "2026-10-02",
+      "put_volume": 69370,
+      "call_volume": 1084468
+    },
+    {
+      "date": "2026-10-01",
+      "put_volume": 326959,
+      "call_volume": 572946
+    },
+    {
+      "date": "2026-09-30",
+      "put_volume": 188279,
+      "call_volume": 296116
+    },
+    {
+      "date": "2026-09-29",
+      "put_volume": 136620,
+      "call_volume": 310172
+    },
+    {
+      "date": "2026-09-28",
+      "put_volume": 136086,
+      "call_volume": 259225
+    },
+    {
+      "date": "2026-09-25",
+      "put_volume": 86540,
+      "call_volume": 447542
+    },
+    {
+      "date": "2026-09-24",
+      "put_volume": 192144,
+      "call_volume": 501288
+    },
+    {
+      "date": "2026-09-23",
+      "put_volume": 183747,
+      "call_volume": 457520
+    },
+    {
+      "date": "2026-09-22",
+      "put_volume": 278185,
+      "call_volume": 563352
+    },
+    {
+      "date": "2026-09-21",
+      "put_volume": 254240,
+      "call_volume": 396269
+    },
+    {
+      "date": "2026-09-18",
+      "put_volume": 107575,
+      "call_volume": 479234
+    },
+    {
+      "date": "2026-09-17",
+      "put_volume": 185012,
+      "call_volume": 387006
+    },
+    {
+      "date": "2026-09-16",
+      "put_volume": 368068,
+      "call_volume": 900038
+    },
+    {
+      "date": "2026-09-15",
+      "put_volume": 198540,
+      "call_volume": 575955
+    },
+    {
+      "date": "2026-09-14",
+      "put_volume": 259179,
+      "call_volume": 637565
+    },
+    {
+      "date": "2026-09-11",
+      "put_volume": 287552,
+      "call_volume": 671614
+    },
+    {
+      "date": "2026-09-10",
+      "put_volume": 310534,
+      "call_volume": 1218643
+    },
+    {
+      "date": "2026-09-09",
+      "put_volume": 279002,
+      "call_volume": 783956
+    },
+    {
+      "date": "2026-09-08",
+      "put_volume": 216534,
+      "call_volume": 708085
+    },
+    {
+      "date": "2026-09-04",
+      "put_volume": 183083,
+      "call_volume": 858610
+    },
+    {
+      "date": "2026-09-03",
+      "put_volume": 170952,
+      "call_volume": 343592
+    },
+    {
+      "date": "2026-09-02",
+      "put_volume": 163359,
+      "call_volume": 431232
+    },
+    {
+      "date": "2026-09-01",
+      "put_volume": 193188,
+      "call_volume": 566174
+    },
+    {
+      "date": "2026-08-31",
+      "put_volume": 112812,
+      "call_volume": 404009
+    },
+    {
+      "date": "2026-08-28",
+      "put_volume": 141187,
+      "call_volume": 569723
+    },
+    {
+      "date": "2026-08-27",
+      "put_volume": 361304,
+      "call_volume": 860376
+    },
+    {
+      "date": "2026-08-26",
+      "put_volume": 119861,
+      "call_volume": 342445
+    },
+    {
+      "date": "2026-08-25",
+      "put_volume": 165515,
+      "call_volume": 408253
+    },
+    {
+      "date": "2026-08-24",
+      "put_volume": 108371,
+      "call_volume": 404193
+    },
+    {
+      "date": "2026-08-21",
+      "put_volume": 218849,
+      "call_volume": 1025097
+    },
+    {
+      "date": "2026-08-20",
+      "put_volume": 95027,
+      "call_volume": 506504
+    },
+    {
+      "date": "2026-08-19",
+      "put_volume": 163932,
+      "call_volume": 527336
+    },
+    {
+      "date": "2026-08-18",
+      "put_volume": 228536,
+      "call_volume": 514269
+    },
+    {
+      "date": "2026-08-17",
+      "put_volume": 292385,
+      "call_volume": 717982
+    },
+    {
+      "date": "2026-08-14",
+      "put_volume": 256587,
+      "call_volume": 531351
+    },
+    {
+      "date": "2026-08-13",
+      "put_volume": 231778,
+      "call_volume": 372551
+    },
+    {
+      "date": "2026-08-12",
+      "put_volume": 268553,
+      "call_volume": 485112
+    },
+    {
+      "date": "2026-08-11",
+      "put_volume": 137719,
+      "call_volume": 699505
+    },
+    {
+      "date": "2026-08-10",
+      "put_volume": 134398,
+      "call_volume": 394160
+    },
+    {
+      "date": "2026-08-07",
+      "put_volume": 144290,
+      "call_volume": 495056
+    },
+    {
+      "date": "2026-08-06",
+      "put_volume": 224944,
+      "call_volume": 495599
+    },
+    {
+      "date": "2026-08-05",
+      "put_volume": 226252,
+      "call_volume": 568619
+    },
+    {
+      "date": "2026-08-04",
+      "put_volume": 170815,
+      "call_volume": 573050
+    },
+    {
+      "date": "2026-08-03",
+      "put_volume": 318242,
+      "call_volume": 487308
+    },
+    {
+      "date": "2026-07-31",
+      "put_volume": 142916,
+      "call_volume": 422890
+    },
+    {
+      "date": "2026-07-30",
+      "put_volume": 252319,
+      "call_volume": 729092
+    },
+    {
+      "date": "2026-07-29",
+      "put_volume": 297017,
+      "call_volume": 421704
+    },
+    {
+      "date": "2026-07-28",
+      "put_volume": 168235,
+      "call_volume": 215974
+    },
+    {
+      "date": "2026-07-27",
+      "put_volume": 97684,
+      "call_volume": 198998
+    },
+    {
+      "date": "2026-07-24",
+      "put_volume": 163702,
+      "call_volume": 371892
+    },
+    {
+      "date": "2026-07-23",
+      "put_volume": 273974,
+      "call_volume": 1076500
+    },
+    {
+      "date": "2026-07-22",
+      "put_volume": 266431,
+      "call_volume": 378823
+    },
+    {
+      "date": "2026-07-21",
+      "put_volume": 453785,
+      "call_volume": 882149
+    },
+    {
+      "date": "2026-07-20",
+      "put_volume": 244965,
+      "call_volume": 380808
+    },
+    {
+      "date": "2026-07-17",
+      "put_volume": 305257,
+      "call_volume": 856080
+    },
+    {
+      "date": "2026-07-16",
+      "put_volume": 160406,
+      "call_volume": 632849
+    },
+    {
+      "date": "2026-07-15",
+      "put_volume": 160909,
+      "call_volume": 468813
+    },
+    {
+      "date": "2026-07-14",
+      "put_volume": 151271,
+      "call_volume": 449605
+    },
+    {
+      "date": "2026-07-13",
+      "put_volume": 241060,
+      "call_volume": 477975
+    },
+    {
+      "date": "2026-07-10",
+      "put_volume": 231285,
+      "call_volume": 525054
+    },
+    {
+      "date": "2026-07-09",
+      "put_volume": 193056,
+      "call_volume": 369302
+    },
+    {
+      "date": "2026-07-08",
+      "put_volume": 262876,
+      "call_volume": 499852
+    },
+    {
+      "date": "2026-07-07",
+      "put_volume": 120719,
+      "call_volume": 568687
+    },
+    {
+      "date": "2026-07-06",
+      "put_volume": 194785,
+      "call_volume": 459521
+    },
+    {
+      "date": "2026-07-02",
+      "put_volume": 212298,
+      "call_volume": 549509
+    },
+    {
+      "date": "2026-07-01",
+      "put_volume": 119684,
+      "call_volume": 365223
+    },
+    {
+      "date": "2026-06-30",
+      "put_volume": 235432,
+      "call_volume": 391872
+    },
+    {
+      "date": "2026-06-29",
+      "put_volume": 165156,
+      "call_volume": 210477
+    },
+    {
+      "date": "2026-06-26",
+      "put_volume": 125685,
+      "call_volume": 155818
+    },
+    {
+      "date": "2026-06-25",
+      "put_volume": 131157,
+      "call_volume": 229400
+    },
+    {
+      "date": "2026-06-24",
+      "put_volume": 202618,
+      "call_volume": 265065
+    },
+    {
+      "date": "2026-06-23",
+      "put_volume": 162798,
+      "call_volume": 414969
+    },
+    {
+      "date": "2026-06-22",
+      "put_volume": 76696,
+      "call_volume": 355258
+    },
+    {
+      "date": "2026-06-18",
+      "put_volume": 71552,
+      "call_volume": 352768
+    },
+    {
+      "date": "2026-06-17",
+      "put_volume": 139038,
+      "call_volume": 422710
+    },
+    {
+      "date": "2026-06-16",
+      "put_volume": 260917,
+      "call_volume": 1097969
+    },
+    {
+      "date": "2026-06-15",
+      "put_volume": 508383,
+      "call_volume": 386348
+    },
+    {
+      "date": "2026-06-12",
+      "put_volume": 346165,
+      "call_volume": 513046
+    },
+    {
+      "date": "2026-06-11",
+      "put_volume": 161814,
+      "call_volume": 380434
+    },
+    {
+      "date": "2026-06-10",
+      "put_volume": 248706,
+      "call_volume": 629417
+    },
+    {
+      "date": "2026-06-09",
+      "put_volume": 244012,
+      "call_volume": 637113
+    },
+    {
+      "date": "2026-06-08",
+      "put_volume": 304334,
+      "call_volume": 403650
+    },
+    {
+      "date": "2026-06-05",
+      "put_volume": 416499,
+      "call_volume": 932311
+    },
+    {
+      "date": "2026-06-04",
+      "put_volume": 303885,
+      "call_volume": 348308
+    },
+    {
+      "date": "2026-06-03",
+      "put_volume": 199019,
+      "call_volume": 655866
+    },
+    {
+      "date": "2026-06-02",
+      "put_volume": 172060,
+      "call_volume": 491996
+    },
+    {
+      "date": "2026-06-01",
+      "put_volume": 174101,
+      "call_volume": 325276
+    },
+    {
+      "date": "2026-05-29",
+      "put_volume": 145704,
+      "call_volume": 397962
+    },
+    {
+      "date": "2026-05-28",
+      "put_volume": 275067,
+      "call_volume": 442096
+    },
+    {
+      "date": "2026-05-27",
+      "put_volume": 65715,
+      "call_volume": 214192
+    },
+    {
+      "date": "2026-05-26",
+      "put_volume": 183943,
+      "call_volume": 341897
+    },
+    {
+      "date": "2026-05-22",
+      "put_volume": 230290,
+      "call_volume": 278426
+    },
+    {
+      "date": "2026-05-21",
+      "put_volume": 180293,
+      "call_volume": 329037
+    },
+    {
+      "date": "2026-05-20",
+      "put_volume": 197327,
+      "call_volume": 335396
+    },
+    {
+      "date": "2026-05-19",
+      "put_volume": 182817,
+      "call_volume": 1028318
+    },
+    {
+      "date": "2026-05-18",
+      "put_volume": 539789,
+      "call_volume": 1065258
+    },
+    {
+      "date": "2026-05-15",
+      "put_volume": 180524,
+      "call_volume": 505731
+    },
+    {
+      "date": "2026-05-14",
+      "put_volume": 304609,
+      "call_volume": 426427
+    },
+    {
+      "date": "2026-05-13",
+      "put_volume": 140371,
+      "call_volume": 475089
+    },
+    {
+      "date": "2026-05-12",
+      "put_volume": 287178,
+      "call_volume": 385802
+    },
+    {
+      "date": "2026-05-11",
+      "put_volume": 274518,
+      "call_volume": 408508
+    },
+    {
+      "date": "2026-05-08",
+      "put_volume": 133666,
+      "call_volume": 368835
+    },
+    {
+      "date": "2026-05-07",
+      "put_volume": 194015,
+      "call_volume": 379785
+    },
+    {
+      "date": "2026-05-06",
+      "put_volume": 310626,
+      "call_volume": 817135
+    },
+    {
+      "date": "2026-05-05",
+      "put_volume": 144436,
+      "call_volume": 304265
+    },
+    {
+      "date": "2026-05-04",
+      "put_volume": 63167,
+      "call_volume": 399567
+    },
+    {
+      "date": "2026-05-01",
+      "put_volume": 100412,
+      "call_volume": 348414
+    },
+    {
+      "date": "2026-04-30",
+      "put_volume": 181748,
+      "call_volume": 406245
+    },
+    {
+      "date": "2026-04-29",
+      "put_volume": 91343,
+      "call_volume": 476484
+    },
+    {
+      "date": "2026-04-28",
+      "put_volume": 161520,
+      "call_volume": 229248
+    },
+    {
+      "date": "2026-04-27",
+      "put_volume": 209199,
+      "call_volume": 317619
+    },
+    {
+      "date": "2026-04-24",
+      "put_volume": 206937,
+      "call_volume": 479896
+    },
+    {
+      "date": "2026-04-23",
+      "put_volume": 137013,
+      "call_volume": 211920
+    },
+    {
+      "date": "2026-04-22",
+      "put_volume": 180277,
+      "call_volume": 242069
+    },
+    {
+      "date": "2026-04-21",
+      "put_volume": 172400,
+      "call_volume": 357167
+    },
+    {
+      "date": "2026-04-20",
+      "put_volume": 183379,
+      "call_volume": 188715
+    },
+    {
+      "date": "2026-04-17",
+      "put_volume": 222245,
+      "call_volume": 623247
+    },
+    {
+      "date": "2026-04-16",
+      "put_volume": 303924,
+      "call_volume": 1272382
+    },
+    {
+      "date": "2026-04-15",
+      "put_volume": 363615,
+      "call_volume": 600742
+    },
+    {
+      "date": "2026-04-14",
+      "put_volume": 517221,
+      "call_volume": 1787895
+    },
+    {
+      "date": "2026-04-13",
+      "put_volume": 385322,
+      "call_volume": 664057
+    },
+    {
+      "date": "2026-04-10",
+      "put_volume": 318554,
+      "call_volume": 914456
+    },
+    {
+      "date": "2026-04-09",
+      "put_volume": 487032,
+      "call_volume": 675521
+    },
+    {
+      "date": "2026-04-08",
+      "put_volume": 506290,
+      "call_volume": 1076514
+    },
+    {
+      "date": "2026-04-07",
+      "put_volume": 332380,
+      "call_volume": 589950
+    },
+    {
+      "date": "2026-04-06",
+      "put_volume": 200570,
+      "call_volume": 491280
+    },
+    {
+      "date": "2026-04-02",
+      "put_volume": 206106,
+      "call_volume": 378068
+    },
+    {
+      "date": "2026-04-01",
+      "put_volume": 450197,
+      "call_volume": 933340
+    },
+    {
+      "date": "2026-03-31",
+      "put_volume": 439341,
+      "call_volume": 361460
+    },
+    {
+      "date": "2026-03-30",
+      "put_volume": 216228,
+      "call_volume": 312124
+    },
+    {
+      "date": "2026-03-27",
+      "put_volume": 390544,
+      "call_volume": 488628
+    },
+    {
+      "date": "2026-03-26",
+      "put_volume": 468962,
+      "call_volume": 402877
+    },
+    {
+      "date": "2026-03-25",
+      "put_volume": 263283,
+      "call_volume": 463881
+    },
+    {
+      "date": "2026-03-24",
+      "put_volume": 220338,
+      "call_volume": 597503
+    },
+    {
+      "date": "2026-03-23",
+      "put_volume": 393909,
+      "call_volume": 575733
+    },
+    {
+      "date": "2026-03-20",
+      "put_volume": 237666,
+      "call_volume": 471081
+    },
+    {
+      "date": "2026-03-19",
+      "put_volume": 331223,
+      "call_volume": 682603
+    },
+    {
+      "date": "2026-03-18",
+      "put_volume": 318861,
+      "call_volume": 780469
+    },
+    {
+      "date": "2026-03-17",
+      "put_volume": 496088,
+      "call_volume": 1061353
+    },
+    {
+      "date": "2026-03-16",
+      "put_volume": 238240,
+      "call_volume": 735990
+    },
+    {
+      "date": "2026-03-13",
+      "put_volume": 363175,
+      "call_volume": 875253
+    },
+    {
+      "date": "2026-03-12",
+      "put_volume": 466722,
+      "call_volume": 822542
+    },
+    {
+      "date": "2026-03-11",
+      "put_volume": 239725,
+      "call_volume": 534290
+    },
+    {
+      "date": "2026-03-10",
+      "put_volume": 550632,
+      "call_volume": 883532
+    },
+    {
+      "date": "2026-03-09",
+      "put_volume": 542296,
+      "call_volume": 928852
+    },
+    {
+      "date": "2026-03-06",
+      "put_volume": 727175,
+      "call_volume": 921300
+    },
+    {
+      "date": "2026-03-05",
+      "put_volume": 566828,
+      "call_volume": 682070
+    },
+    {
+      "date": "2026-03-04",
+      "put_volume": 421652,
+      "call_volume": 806561
+    },
+    {
+      "date": "2026-03-03",
+      "put_volume": 599041,
+      "call_volume": 958859
+    },
+    {
+      "date": "2026-03-02",
+      "put_volume": 317213,
+      "call_volume": 604985
+    },
+    {
+      "date": "2026-02-27",
+      "put_volume": 248476,
+      "call_volume": 545204
+    },
+    {
+      "date": "2026-02-26",
+      "put_volume": 224680,
+      "call_volume": 811473
+    },
+    {
+      "date": "2026-02-25",
+      "put_volume": 162516,
+      "call_volume": 519075
+    },
+    {
+      "date": "2026-02-24",
+      "put_volume": 145525,
+      "call_volume": 361127
+    },
+    {
+      "date": "2026-02-23",
+      "put_volume": 169508,
+      "call_volume": 375348
+    },
+    {
+      "date": "2026-02-20",
+      "put_volume": 189374,
+      "call_volume": 441706
+    },
+    {
+      "date": "2026-02-19",
+      "put_volume": 155018,
+      "call_volume": 385030
+    },
+    {
+      "date": "2026-02-18",
+      "put_volume": 210763,
+      "call_volume": 818346
+    },
+    {
+      "date": "2026-02-17",
+      "put_volume": 407478,
+      "call_volume": 1116041
+    },
+    {
+      "date": "2026-02-13",
+      "put_volume": 365263,
+      "call_volume": 767016
+    },
+    {
+      "date": "2026-02-12",
+      "put_volume": 546472,
+      "call_volume": 796258
+    },
+    {
+      "date": "2026-02-11",
+      "put_volume": 204410,
+      "call_volume": 530008
+    },
+    {
+      "date": "2026-02-10",
+      "put_volume": 221812,
+      "call_volume": 416280
+    },
+    {
+      "date": "2026-02-09",
+      "put_volume": 213913,
+      "call_volume": 464788
+    },
+    {
+      "date": "2026-02-06",
+      "put_volume": 320596,
+      "call_volume": 408223
+    },
+    {
+      "date": "2026-02-05",
+      "put_volume": 441685,
+      "call_volume": 600662
+    },
+    {
+      "date": "2026-02-04",
+      "put_volume": 239219,
+      "call_volume": 462176
+    },
+    {
+      "date": "2026-02-03",
+      "put_volume": 381061,
+      "call_volume": 745115
+    },
+    {
+      "date": "2026-02-02",
+      "put_volume": 215785,
+      "call_volume": 932553
+    },
+    {
+      "date": "2026-01-30",
+      "put_volume": 184459,
+      "call_volume": 545500
+    },
+    {
+      "date": "2026-01-29",
+      "put_volume": 264041,
+      "call_volume": 649978
+    },
+    {
+      "date": "2026-01-28",
+      "put_volume": 122451,
+      "call_volume": 489217
+    },
+    {
+      "date": "2026-01-27",
+      "put_volume": 100634,
+      "call_volume": 392590
+    },
+    {
+      "date": "2026-01-26",
+      "put_volume": 157666,
+      "call_volume": 298988
+    },
+    {
+      "date": "2026-01-23",
+      "put_volume": 141601,
+      "call_volume": 417327
+    },
+    {
+      "date": "2026-01-22",
+      "put_volume": 243779,
+      "call_volume": 614260
+    },
+    {
+      "date": "2026-01-21",
+      "put_volume": 360409,
+      "call_volume": 941293
+    },
+    {
+      "date": "2026-01-20",
+      "put_volume": 620564,
+      "call_volume": 1388526
+    },
+    {
+      "date": "2026-01-16",
+      "put_volume": 154388,
+      "call_volume": 535246
+    },
+    {
+      "date": "2026-01-15",
+      "put_volume": 319830,
+      "call_volume": 609200
+    },
+    {
+      "date": "2026-01-14",
+      "put_volume": 398214,
+      "call_volume": 981219
+    },
+    {
+      "date": "2026-01-13",
+      "put_volume": 342418,
+      "call_volume": 884091
+    },
+    {
+      "date": "2026-01-12",
+      "put_volume": 226940,
+      "call_volume": 238006
+    },
+    {
+      "date": "2026-01-09",
+      "put_volume": 213859,
+      "call_volume": 430325
+    },
+    {
+      "date": "2026-01-08",
+      "put_volume": 230965,
+      "call_volume": 404468
+    },
+    {
+      "date": "2026-01-07",
+      "put_volume": 149000,
+      "call_volume": 408723
+    },
+    {
+      "date": "2026-01-06",
+      "put_volume": 159441,
+      "call_volume": 321884
+    },
+    {
+      "date": "2026-01-05",
+      "put_volume": 222126,
+      "call_volume": 489536
+    },
+    {
+      "date": "2026-01-02",
+      "put_volume": 129897,
+      "call_volume": 291099
+    },
+    {
+      "date": "2025-12-31",
+      "put_volume": 151265,
+      "call_volume": 406821
+    },
+    {
+      "date": "2025-12-30",
+      "put_volume": 134476,
+      "call_volume": 373137
+    },
+    {
+      "date": "2025-12-29",
+      "put_volume": 110085,
+      "call_volume": 428362
+    },
+    {
+      "date": "2025-12-26",
+      "put_volume": 42149,
+      "call_volume": 226167
+    },
+    {
+      "date": "2025-12-24",
+      "put_volume": 78899,
+      "call_volume": 124236
+    },
+    {
+      "date": "2025-12-23",
+      "put_volume": 74434,
+      "call_volume": 272779
+    },
+    {
+      "date": "2025-12-22",
+      "put_volume": 185832,
+      "call_volume": 410172
+    },
+    {
+      "date": "2025-12-19",
+      "put_volume": 180057,
+      "call_volume": 597053
+    },
+    {
+      "date": "2025-12-18",
+      "put_volume": 100580,
+      "call_volume": 555175
+    },
+    {
+      "date": "2025-12-17",
+      "put_volume": 292548,
+      "call_volume": 323125
+    },
+    {
+      "date": "2025-12-16",
+      "put_volume": 421323,
+      "call_volume": 770864
+    },
+    {
+      "date": "2025-12-15",
+      "put_volume": 342099,
+      "call_volume": 495862
+    },
+    {
+      "date": "2025-12-12",
+      "put_volume": 693448,
+      "call_volume": 862131
+    },
+    {
+      "date": "2025-12-11",
+      "put_volume": 307830,
+      "call_volume": 521663
+    },
+    {
+      "date": "2025-12-10",
+      "put_volume": 555147,
+      "call_volume": 835626
+    },
+    {
+      "date": "2025-12-09",
+      "put_volume": 300441,
+      "call_volume": 531423
+    },
+    {
+      "date": "2025-12-08",
+      "put_volume": 291720,
+      "call_volume": 414717
+    },
+    {
+      "date": "2025-12-05",
+      "put_volume": 429280,
+      "call_volume": 606891
+    },
+    {
+      "date": "2025-12-04",
+      "put_volume": 207959,
+      "call_volume": 293878
+    },
+    {
+      "date": "2025-12-03",
+      "put_volume": 313217,
+      "call_volume": 323773
+    },
+    {
+      "date": "2025-12-02",
+      "put_volume": 247250,
+      "call_volume": 656391
+    },
+    {
+      "date": "2025-12-01",
+      "put_volume": 258845,
+      "call_volume": 377025
+    },
+    {
+      "date": "2025-11-28",
+      "put_volume": 136235,
+      "call_volume": 77626
+    },
+    {
+      "date": "2025-11-26",
+      "put_volume": 217802,
+      "call_volume": 500790
+    },
+    {
+      "date": "2025-11-25",
+      "put_volume": 240498,
+      "call_volume": 349557
+    },
+    {
+      "date": "2025-11-24",
+      "put_volume": 207537,
+      "call_volume": 251384
+    },
+    {
+      "date": "2025-11-21",
+      "put_volume": 372065,
+      "call_volume": 876787
+    },
+    {
+      "date": "2025-11-20",
+      "put_volume": 611149,
+      "call_volume": 814830
+    },
+    {
+      "date": "2025-11-19",
+      "put_volume": 567688,
+      "call_volume": 753023
+    },
+    {
+      "date": "2025-11-18",
+      "put_volume": 822310,
+      "call_volume": 1324267
+    },
+    {
+      "date": "2025-11-17",
+      "put_volume": 550297,
+      "call_volume": 1049740
+    },
+    {
+      "date": "2025-11-14",
+      "put_volume": 539819,
+      "call_volume": 702918
+    },
+    {
+      "date": "2025-11-13",
+      "put_volume": 416615,
+      "call_volume": 684904
+    },
+    {
+      "date": "2025-11-12",
+      "put_volume": 397918,
+      "call_volume": 640796
+    },
+    {
+      "date": "2025-11-11",
+      "put_volume": 231480,
+      "call_volume": 682557
+    },
+    {
+      "date": "2025-11-10",
+      "put_volume": 400052,
+      "call_volume": 370825
+    },
+    {
+      "date": "2025-11-07",
+      "put_volume": 533157,
+      "call_volume": 502803
+    },
+    {
+      "date": "2025-11-06",
+      "put_volume": 284189,
+      "call_volume": 338753
+    },
+    {
+      "date": "2025-11-05",
+      "put_volume": 222254,
+      "call_volume": 307240
+    },
+    {
+      "date": "2025-11-04",
+      "put_volume": 319535,
+      "call_volume": 845535
+    },
+    {
+      "date": "2025-11-03",
+      "put_volume": 189524,
+      "call_volume": 310785
+    },
+    {
+      "date": "2025-10-31",
+      "put_volume": 183612,
+      "call_volume": 335865
+    },
+    {
+      "date": "2025-10-30",
+      "put_volume": 393896,
+      "call_volume": 490382
+    },
+    {
+      "date": "2025-10-29",
+      "put_volume": 223842,
+      "call_volume": 208151
+    },
+    {
+      "date": "2025-10-28",
+      "put_volume": 209498,
+      "call_volume": 467285
+    },
+    {
+      "date": "2025-10-27",
+      "put_volume": 213597,
+      "call_volume": 512955
+    },
+    {
+      "date": "2025-10-24",
+      "put_volume": 116569,
+      "call_volume": 312762
+    },
+    {
+      "date": "2025-10-23",
+      "put_volume": 278495,
+      "call_volume": 287816
+    },
+    {
+      "date": "2025-10-22",
+      "put_volume": 215872,
+      "call_volume": 639145
+    },
+    {
+      "date": "2025-10-21",
+      "put_volume": 514233,
+      "call_volume": 565477
+    },
+    {
+      "date": "2025-10-20",
+      "put_volume": 573489,
+      "call_volume": 692086
+    },
+    {
+      "date": "2025-10-17",
+      "put_volume": 590851,
+      "call_volume": 916151
+    },
+    {
+      "date": "2025-10-16",
+      "put_volume": 902132,
+      "call_volume": 860395
+    },
+    {
+      "date": "2025-10-15",
+      "put_volume": 304061,
+      "call_volume": 631924
+    },
+    {
+      "date": "2025-10-14",
+      "put_volume": 357379,
+      "call_volume": 553736
+    },
+    {
+      "date": "2025-10-13",
+      "put_volume": 325120,
+      "call_volume": 957845
+    },
+    {
+      "date": "2025-10-10",
+      "put_volume": 789609,
+      "call_volume": 1069976
+    },
+    {
+      "date": "2025-10-09",
+      "put_volume": 143551,
+      "call_volume": 425280
+    },
+    {
+      "date": "2025-10-08",
+      "put_volume": 176207,
+      "call_volume": 468247
+    },
+    {
+      "date": "2025-10-07",
+      "put_volume": 253608,
+      "call_volume": 429881
+    },
+    {
+      "date": "2025-10-06",
+      "put_volume": 119092,
+      "call_volume": 348933
+    },
+    {
+      "date": "2025-10-03",
+      "put_volume": 168402,
+      "call_volume": 552030
+    },
+    {
+      "date": "2025-10-02",
+      "put_volume": 221765,
+      "call_volume": 262818
+    },
+    {
+      "date": "2025-10-01",
+      "put_volume": 123967,
+      "call_volume": 265102
+    },
+    {
+      "date": "2025-09-30",
+      "put_volume": 199371,
+      "call_volume": 195596
+    },
+    {
+      "date": "2025-09-29",
+      "put_volume": 205698,
+      "call_volume": 588567
+    },
+    {
+      "date": "2025-09-26",
+      "put_volume": 37420,
+      "call_volume": 106412
+    },
+    {
+      "date": "2025-09-25",
+      "put_volume": 113931,
+      "call_volume": 217266
+    },
+    {
+      "date": "2025-09-24",
+      "put_volume": 105167,
+      "call_volume": 315163
+    },
+    {
+      "date": "2025-09-23",
+      "put_volume": 178932,
+      "call_volume": 333327
+    },
+    {
+      "date": "2025-09-22",
+      "put_volume": 102052,
+      "call_volume": 298740
+    },
+    {
+      "date": "2025-09-19",
+      "put_volume": 109981,
+      "call_volume": 194465
+    },
+    {
+      "date": "2025-09-18",
+      "put_volume": 314601,
+      "call_volume": 392082
+    },
+    {
+      "date": "2025-09-17",
+      "put_volume": 381786,
+      "call_volume": 623231
+    },
+    {
+      "date": "2025-09-16",
+      "put_volume": 601551,
+      "call_volume": 1166172
+    },
+    {
+      "date": "2025-09-15",
+      "put_volume": 603082,
+      "call_volume": 515657
+    },
+    {
+      "date": "2025-09-12",
+      "put_volume": 347817,
+      "call_volume": 532082
+    },
+    {
+      "date": "2025-09-11",
+      "put_volume": 228677,
+      "call_volume": 423413
+    },
+    {
+      "date": "2025-09-10",
+      "put_volume": 296251,
+      "call_volume": 846211
+    },
+    {
+      "date": "2025-09-09",
+      "put_volume": 216922,
+      "call_volume": 405537
+    },
+    {
+      "date": "2025-09-08",
+      "put_volume": 106814,
+      "call_volume": 338482
+    },
+    {
+      "date": "2025-09-05",
+      "put_volume": 289319,
+      "call_volume": 1432986
+    },
+    {
+      "date": "2025-09-04",
+      "put_volume": 419298,
+      "call_volume": 321828
+    },
+    {
+      "date": "2025-09-03",
+      "put_volume": 105152,
+      "call_volume": 301012
+    },
+    {
+      "date": "2025-09-02",
+      "put_volume": 348867,
+      "call_volume": 617563
+    },
+    {
+      "date": "2025-08-29",
+      "put_volume": 288752,
+      "call_volume": 829844
+    },
+    {
+      "date": "2025-08-28",
+      "put_volume": 211915,
+      "call_volume": 441761
+    },
+    {
+      "date": "2025-08-27",
+      "put_volume": 226842,
+      "call_volume": 780169
+    },
+    {
+      "date": "2025-08-26",
+      "put_volume": 197816,
+      "call_volume": 250322
+    },
+    {
+      "date": "2025-08-25",
+      "put_volume": 296165,
+      "call_volume": 326122
+    },
+    {
+      "date": "2025-08-22",
+      "put_volume": 285075,
+      "call_volume": 657370
+    },
+    {
+      "date": "2025-08-21",
+      "put_volume": 335637,
+      "call_volume": 291751
+    },
+    {
+      "date": "2025-08-20",
+      "put_volume": 358649,
+      "call_volume": 899454
+    },
+    {
+      "date": "2025-08-19",
+      "put_volume": 577714,
+      "call_volume": 635908
+    },
+    {
+      "date": "2025-08-18",
+      "put_volume": 377148,
+      "call_volume": 527847
+    },
+    {
+      "date": "2025-08-15",
+      "put_volume": 288380,
+      "call_volume": 541271
+    },
+    {
+      "date": "2025-08-14",
+      "put_volume": 126852,
+      "call_volume": 478985
+    },
+    {
+      "date": "2025-08-13",
+      "put_volume": 159623,
+      "call_volume": 471068
+    },
+    {
+      "date": "2025-08-12",
+      "put_volume": 372307,
+      "call_volume": 735278
+    },
+    {
+      "date": "2025-08-11",
+      "put_volume": 135630,
+      "call_volume": 484297
+    },
+    {
+      "date": "2025-08-08",
+      "put_volume": 168257,
+      "call_volume": 402858
+    },
+    {
+      "date": "2025-08-07",
+      "put_volume": 172443,
+      "call_volume": 472827
+    },
+    {
+      "date": "2025-08-06",
+      "put_volume": 231361,
+      "call_volume": 420586
+    },
+    {
+      "date": "2025-08-05",
+      "put_volume": 137197,
+      "call_volume": 205906
+    },
+    {
+      "date": "2025-08-04",
+      "put_volume": 142610,
+      "call_volume": 396102
+    },
+    {
+      "date": "2025-08-01",
+      "put_volume": 563823,
+      "call_volume": 1292911
+    },
+    {
+      "date": "2025-07-31",
+      "put_volume": 167525,
+      "call_volume": 503502
+    },
+    {
+      "date": "2025-07-30",
+      "put_volume": 357011,
+      "call_volume": 456291
+    },
+    {
+      "date": "2025-07-29",
+      "put_volume": 521477,
+      "call_volume": 456101
+    },
+    {
+      "date": "2025-07-28",
+      "put_volume": 114420,
+      "call_volume": 184617
+    },
+    {
+      "date": "2025-07-25",
+      "put_volume": 104059,
+      "call_volume": 185274
+    },
+    {
+      "date": "2025-07-24",
+      "put_volume": 199191,
+      "call_volume": 343845
+    },
+    {
+      "date": "2025-07-23",
+      "put_volume": 300427,
+      "call_volume": 468469
+    },
+    {
+      "date": "2025-07-22",
+      "put_volume": 152953,
+      "call_volume": 218789
+    },
+    {
+      "date": "2025-07-21",
+      "put_volume": 87976,
+      "call_volume": 413284
+    },
+    {
+      "date": "2025-07-18",
+      "put_volume": 339589,
+      "call_volume": 583042
+    },
+    {
+      "date": "2025-07-17",
+      "put_volume": 223796,
+      "call_volume": 423625
+    },
+    {
+      "date": "2025-07-16",
+      "put_volume": 177669,
+      "call_volume": 542779
+    },
+    {
+      "date": "2025-07-15",
+      "put_volume": 441962,
+      "call_volume": 561189
+    },
+    {
+      "date": "2025-07-14",
+      "put_volume": 261785,
+      "call_volume": 394458
+    },
+    {
+      "date": "2025-07-11",
+      "put_volume": 272684,
+      "call_volume": 362959
+    },
+    {
+      "date": "2025-07-10",
+      "put_volume": 153846,
+      "call_volume": 361029
+    },
+    {
+      "date": "2025-07-09",
+      "put_volume": 485408,
+      "call_volume": 520634
+    },
+    {
+      "date": "2025-07-08",
+      "put_volume": 228748,
+      "call_volume": 485277
+    },
+    {
+      "date": "2025-07-07",
+      "put_volume": 211694,
+      "call_volume": 355144
+    },
+    {
+      "date": "2025-07-03",
+      "put_volume": 145638,
+      "call_volume": 344750
+    },
+    {
+      "date": "2025-07-02",
+      "put_volume": 60382,
+      "call_volume": 427766
+    },
+    {
+      "date": "2025-07-01",
+      "put_volume": 278512,
+      "call_volume": 529687
+    },
+    {
+      "date": "2025-06-30",
+      "put_volume": 414462,
+      "call_volume": 497112
+    },
+    {
+      "date": "2025-06-27",
+      "put_volume": 266725,
+      "call_volume": 846078
+    },
+    {
+      "date": "2025-06-26",
+      "put_volume": 250073,
+      "call_volume": 470075
+    },
+    {
+      "date": "2025-06-25",
+      "put_volume": 206167,
+      "call_volume": 370492
+    },
+    {
+      "date": "2025-06-24",
+      "put_volume": 175104,
+      "call_volume": 549011
+    },
+    {
+      "date": "2025-06-23",
+      "put_volume": 286186,
+      "call_volume": 302990
+    },
+    {
+      "date": "2025-06-20",
+      "put_volume": 200440,
+      "call_volume": 348940
+    },
+    {
+      "date": "2025-06-18",
+      "put_volume": 156779,
+      "call_volume": 369838
+    },
+    {
+      "date": "2025-06-17",
+      "put_volume": 275881,
+      "call_volume": 799152
+    },
+    {
+      "date": "2025-06-16",
+      "put_volume": 212604,
+      "call_volume": 565517
+    },
+    {
+      "date": "2025-06-13",
+      "put_volume": 338135,
+      "call_volume": 934073
+    },
+    {
+      "date": "2025-06-12",
+      "put_volume": 187416,
+      "call_volume": 438493
+    },
+    {
+      "date": "2025-06-11",
+      "put_volume": 290390,
+      "call_volume": 809215
+    },
+    {
+      "date": "2025-06-10",
+      "put_volume": 365313,
+      "call_volume": 529791
+    },
+    {
+      "date": "2025-06-09",
+      "put_volume": 381206,
+      "call_volume": 365234
+    },
+    {
+      "date": "2025-06-06",
+      "put_volume": 141832,
+      "call_volume": 357619
+    },
+    {
+      "date": "2025-06-05",
+      "put_volume": 169504,
+      "call_volume": 385772
+    },
+    {
+      "date": "2025-06-04",
+      "put_volume": 134076,
+      "call_volume": 339139
+    },
+    {
+      "date": "2025-06-03",
+      "put_volume": 129605,
+      "call_volume": 303188
+    },
+    {
+      "date": "2025-06-02",
+      "put_volume": 181573,
+      "call_volume": 301770
+    },
+    {
+      "date": "2025-05-30",
+      "put_volume": 106289,
+      "call_volume": 278601
+    },
+    {
+      "date": "2025-05-29",
+      "put_volume": 64407,
+      "call_volume": 456405
+    },
+    {
+      "date": "2025-05-28",
+      "put_volume": 121060,
+      "call_volume": 313351
+    },
+    {
+      "date": "2025-05-27",
+      "put_volume": 160066,
+      "call_volume": 441365
+    },
+    {
+      "date": "2025-05-23",
+      "put_volume": 204847,
+      "call_volume": 297882
+    },
+    {
+      "date": "2025-05-22",
+      "put_volume": 233138,
+      "call_volume": 396269
+    },
+    {
+      "date": "2025-05-21",
+      "put_volume": 208919,
+      "call_volume": 423874
+    },
+    {
+      "date": "2025-05-20",
+      "put_volume": 157023,
+      "call_volume": 576165
+    },
+    {
+      "date": "2025-05-19",
+      "put_volume": 111767,
+      "call_volume": 200347
+    },
+    {
+      "date": "2025-05-16",
+      "put_volume": 118626,
+      "call_volume": 390799
+    },
+    {
+      "date": "2025-05-15",
+      "put_volume": 194058,
+      "call_volume": 870850
+    },
+    {
+      "date": "2025-05-14",
+      "put_volume": 232144,
+      "call_volume": 584935
+    },
+    {
+      "date": "2025-05-13",
+      "put_volume": 487362,
+      "call_volume": 702848
+    },
+    {
+      "date": "2025-05-12",
+      "put_volume": 813515,
+      "call_volume": 885451
+    },
+    {
+      "date": "2025-05-09",
+      "put_volume": 154173,
+      "call_volume": 422203
+    },
+    {
+      "date": "2025-05-08",
+      "put_volume": 169337,
+      "call_volume": 801443
+    },
+    {
+      "date": "2025-05-07",
+      "put_volume": 214126,
+      "call_volume": 399750
+    },
+    {
+      "date": "2025-05-06",
+      "put_volume": 97766,
+      "call_volume": 191240
+    },
+    {
+      "date": "2025-05-05",
+      "put_volume": 132759,
+      "call_volume": 259213
+    },
+    {
+      "date": "2025-05-02",
+      "put_volume": 232371,
+      "call_volume": 292236
+    },
+    {
+      "date": "2025-05-01",
+      "put_volume": 189580,
+      "call_volume": 368465
+    },
+    {
+      "date": "2025-04-30",
+      "put_volume": 169621,
+      "call_volume": 521824
+    },
+    {
+      "date": "2025-04-29",
+      "put_volume": 259293,
+      "call_volume": 507263
+    },
+    {
+      "date": "2025-04-28",
+      "put_volume": 79735,
+      "call_volume": 341737
+    },
+    {
+      "date": "2025-04-25",
+      "put_volume": 196734,
+      "call_volume": 303903
+    },
+    {
+      "date": "2025-04-24",
+      "put_volume": 136817,
+      "call_volume": 260742
+    },
+    {
+      "date": "2025-04-23",
+      "put_volume": 247409,
+      "call_volume": 406181
+    },
+    {
+      "date": "2025-04-22",
+      "put_volume": 287626,
+      "call_volume": 337941
+    },
+    {
+      "date": "2025-04-21",
+      "put_volume": 208870,
+      "call_volume": 331875
+    },
+    {
+      "date": "2025-04-17",
+      "put_volume": 122603,
+      "call_volume": 231307
+    },
+    {
+      "date": "2025-04-16",
+      "put_volume": 309809,
+      "call_volume": 585643
+    },
+    {
+      "date": "2025-04-15",
+      "put_volume": 540232,
+      "call_volume": 805770
+    },
+    {
+      "date": "2025-04-14",
+      "put_volume": 677933,
+      "call_volume": 840783
+    },
+    {
+      "date": "2025-04-11",
+      "put_volume": 550347,
+      "call_volume": 1030708
+    },
+    {
+      "date": "2025-04-10",
+      "put_volume": 474236,
+      "call_volume": 773679
+    },
+    {
+      "date": "2025-04-09",
+      "put_volume": 783572,
+      "call_volume": 772941
+    },
+    {
+      "date": "2025-04-08",
+      "put_volume": 563198,
+      "call_volume": 896405
+    },
+    {
+      "date": "2025-04-07",
+      "put_volume": 622988,
+      "call_volume": 783338
+    },
+    {
+      "date": "2025-04-04",
+      "put_volume": 863299,
+      "call_volume": 1343799
+    },
+    {
+      "date": "2025-04-03",
+      "put_volume": 652665,
+      "call_volume": 1419260
+    },
+    {
+      "date": "2025-04-02",
+      "put_volume": 430439,
+      "call_volume": 629513
+    },
+    {
+      "date": "2025-04-01",
+      "put_volume": 187658,
+      "call_volume": 366541
+    },
+    {
+      "date": "2025-03-31",
+      "put_volume": 224107,
+      "call_volume": 468175
+    },
+    {
+      "date": "2025-03-28",
+      "put_volume": 319142,
+      "call_volume": 486678
+    },
+    {
+      "date": "2025-03-27",
+      "put_volume": 177757,
+      "call_volume": 318342
+    },
+    {
+      "date": "2025-03-26",
+      "put_volume": 153647,
+      "call_volume": 478382
+    },
+    {
+      "date": "2025-03-25",
+      "put_volume": 322209,
+      "call_volume": 988996
+    },
+    {
+      "date": "2025-03-24",
+      "put_volume": 263224,
+      "call_volume": 638021
+    },
+    {
+      "date": "2025-03-21",
+      "put_volume": 151657,
+      "call_volume": 340875
+    },
+    {
+      "date": "2025-03-20",
+      "put_volume": 136434,
+      "call_volume": 298242
+    },
+    {
+      "date": "2025-03-19",
+      "put_volume": 219185,
+      "call_volume": 422581
+    },
+    {
+      "date": "2025-03-18",
+      "put_volume": 142025,
+      "call_volume": 665287
+    },
+    {
+      "date": "2025-03-17",
+      "put_volume": 603676,
+      "call_volume": 841366
+    },
+    {
+      "date": "2025-03-14",
+      "put_volume": 481388,
+      "call_volume": 680401
+    },
+    {
+      "date": "2025-03-13",
+      "put_volume": 322112,
+      "call_volume": 733609
+    },
+    {
+      "date": "2025-03-12",
+      "put_volume": 387418,
+      "call_volume": 933893
+    },
+    {
+      "date": "2025-03-11",
+      "put_volume": 880151,
+      "call_volume": 1459792
+    },
+    {
+      "date": "2025-03-10",
+      "put_volume": 591786,
+      "call_volume": 978235
+    },
+    {
+      "date": "2025-03-07",
+      "put_volume": 422783,
+      "call_volume": 414196
+    },
+    {
+      "date": "2025-03-06",
+      "put_volume": 673870,
+      "call_volume": 541953
+    },
+    {
+      "date": "2025-03-05",
+      "put_volume": 297284,
+      "call_volume": 1204508
+    },
+    {
+      "date": "2025-03-04",
+      "put_volume": 917503,
+      "call_volume": 1485495
+    },
+    {
+      "date": "2025-03-03",
+      "put_volume": 359320,
+      "call_volume": 825086
+    },
+    {
+      "date": "2025-02-28",
+      "put_volume": 369490,
+      "call_volume": 562193
+    },
+    {
+      "date": "2025-02-27",
+      "put_volume": 209370,
+      "call_volume": 1083570
+    },
+    {
+      "date": "2025-02-26",
+      "put_volume": 118761,
+      "call_volume": 247241
+    },
+    {
+      "date": "2025-02-25",
+      "put_volume": 355478,
+      "call_volume": 464919
+    },
+    {
+      "date": "2025-02-24",
+      "put_volume": 200404,
+      "call_volume": 343231
+    },
+    {
+      "date": "2025-02-21",
+      "put_volume": 331501,
+      "call_volume": 855354
+    },
+    {
+      "date": "2025-02-20",
+      "put_volume": 234937,
+      "call_volume": 546157
+    },
+    {
+      "date": "2025-02-19",
+      "put_volume": 166567,
+      "call_volume": 526395
+    },
+    {
+      "date": "2025-02-18",
+      "put_volume": 318598,
+      "call_volume": 1053648
+    },
+    {
+      "date": "2025-02-14",
+      "put_volume": 208724,
+      "call_volume": 796812
+    },
+    {
+      "date": "2025-02-13",
+      "put_volume": 184027,
+      "call_volume": 447255
+    },
+    {
+      "date": "2025-02-12",
+      "put_volume": 219407,
+      "call_volume": 414825
+    },
+    {
+      "date": "2025-02-11",
+      "put_volume": 119214,
+      "call_volume": 342183
+    },
+    {
+      "date": "2025-02-10",
+      "put_volume": 109996,
+      "call_volume": 447330
+    },
+    {
+      "date": "2025-02-07",
+      "put_volume": 168601,
+      "call_volume": 529201
+    },
+    {
+      "date": "2025-02-06",
+      "put_volume": 178683,
+      "call_volume": 409798
+    },
+    {
+      "date": "2025-02-05",
+      "put_volume": 231014,
+      "call_volume": 436138
+    },
+    {
+      "date": "2025-02-04",
+      "put_volume": 131463,
+      "call_volume": 342926
+    },
+    {
+      "date": "2025-02-03",
+      "put_volume": 378357,
+      "call_volume": 470982
+    },
+    {
+      "date": "2025-01-31",
+      "put_volume": 255865,
+      "call_volume": 315525
+    },
+    {
+      "date": "2025-01-30",
+      "put_volume": 219993,
+      "call_volume": 1239443
+    },
+    {
+      "date": "2025-01-29",
+      "put_volume": 141042,
+      "call_volume": 742634
+    },
+    {
+      "date": "2025-01-28",
+      "put_volume": 126422,
+      "call_volume": 305304
+    },
+    {
+      "date": "2025-01-27",
+      "put_volume": 388521,
+      "call_volume": 605332
+    },
+    {
+      "date": "2025-01-24",
+      "put_volume": 121015,
+      "call_volume": 425767
+    },
+    {
+      "date": "2025-01-23",
+      "put_volume": 120126,
+      "call_volume": 370621
+    },
+    {
+      "date": "2025-01-22",
+      "put_volume": 205566,
+      "call_volume": 1055731
+    },
+    {
+      "date": "2025-01-21",
+      "put_volume": 481303,
+      "call_volume": 1033662
+    },
+    {
+      "date": "2025-01-17",
+      "put_volume": 356405,
+      "call_volume": 1108974
+    },
+    {
+      "date": "2025-01-16",
+      "put_volume": 268520,
+      "call_volume": 1044815
+    },
+    {
+      "date": "2025-01-15",
+      "put_volume": 529807,
+      "call_volume": 769839
+    },
+    {
+      "date": "2025-01-14",
+      "put_volume": 310656,
+      "call_volume": 331599
+    },
+    {
+      "date": "2025-01-13",
+      "put_volume": 418461,
+      "call_volume": 506614
+    },
+    {
+      "date": "2025-01-10",
+      "put_volume": 313592,
+      "call_volume": 641914
+    },
+    {
+      "date": "2025-01-08",
+      "put_volume": 215868,
+      "call_volume": 391782
+    },
+    {
+      "date": "2025-01-07",
+      "put_volume": 292358,
+      "call_volume": 1139286
+    },
+    {
+      "date": "2025-01-06",
+      "put_volume": 216732,
+      "call_volume": 326928
+    },
+    {
+      "date": "2025-01-03",
+      "put_volume": 133905,
+      "call_volume": 445011
+    },
+    {
+      "date": "2025-01-02",
+      "put_volume": 155122,
+      "call_volume": 220312
+    },
+    {
+      "date": "2024-12-31",
+      "put_volume": 137321,
+      "call_volume": 328093
+    },
+    {
+      "date": "2024-12-30",
+      "put_volume": 102909,
+      "call_volume": 187056
+    },
+    {
+      "date": "2024-12-27",
+      "put_volume": 165252,
+      "call_volume": 257748
+    },
+    {
+      "date": "2024-12-26",
+      "put_volume": 121616,
+      "call_volume": 191334
+    },
+    {
+      "date": "2024-12-24",
+      "put_volume": 155021,
+      "call_volume": 146424
+    },
+    {
+      "date": "2024-12-23",
+      "put_volume": 125048,
+      "call_volume": 262541
+    },
+    {
+      "date": "2024-12-20",
+      "put_volume": 446269,
+      "call_volume": 388425
+    },
+    {
+      "date": "2024-12-19",
+      "put_volume": 581282,
+      "call_volume": 795886
+    },
+    {
+      "date": "2024-12-18",
+      "put_volume": 392487,
+      "call_volume": 894233
+    },
+    {
+      "date": "2024-12-17",
+      "put_volume": 460015,
+      "call_volume": 726365
+    },
+    {
+      "date": "2024-12-16",
+      "put_volume": 347928,
+      "call_volume": 495406
+    },
+    {
+      "date": "2024-12-13",
+      "put_volume": 185411,
+      "call_volume": 633516
+    },
+    {
+      "date": "2024-12-12",
+      "put_volume": 195838,
+      "call_volume": 704603
+    },
+    {
+      "date": "2024-12-11",
+      "put_volume": 221200,
+      "call_volume": 485480
+    },
+    {
+      "date": "2024-12-10",
+      "put_volume": 108484,
+      "call_volume": 372852
+    },
+    {
+      "date": "2024-12-09",
+      "put_volume": 162979,
+      "call_volume": 787098
+    },
+    {
+      "date": "2024-12-06",
+      "put_volume": 262811,
+      "call_volume": 495133
+    },
+    {
+      "date": "2024-12-05",
+      "put_volume": 68812,
+      "call_volume": 206933
+    },
+    {
+      "date": "2024-12-04",
+      "put_volume": 176289,
+      "call_volume": 571824
+    },
+    {
+      "date": "2024-12-03",
+      "put_volume": 165836,
+      "call_volume": 562410
+    },
+    {
+      "date": "2024-12-02",
+      "put_volume": 143744,
+      "call_volume": 446511
+    },
+    {
+      "date": "2024-11-29",
+      "put_volume": 118871,
+      "call_volume": 173500
+    },
+    {
+      "date": "2024-11-27",
+      "put_volume": 56191,
+      "call_volume": 202969
+    },
+    {
+      "date": "2024-11-26",
+      "put_volume": 144379,
+      "call_volume": 315753
+    },
+    {
+      "date": "2024-11-25",
+      "put_volume": 159899,
+      "call_volume": 272239
+    },
+    {
+      "date": "2024-11-22",
+      "put_volume": 165988,
+      "call_volume": 200550
+    },
+    {
+      "date": "2024-11-21",
+      "put_volume": 130924,
+      "call_volume": 247211
+    },
+    {
+      "date": "2024-11-20",
+      "put_volume": 265802,
+      "call_volume": 624730
+    },
+    {
+      "date": "2024-11-19",
+      "put_volume": 367976,
+      "call_volume": 869433
+    },
+    {
+      "date": "2024-11-18",
+      "put_volume": 277568,
+      "call_volume": 494521
+    },
+    {
+      "date": "2024-11-15",
+      "put_volume": 706680,
+      "call_volume": 791139
+    },
+    {
+      "date": "2024-11-14",
+      "put_volume": 274425,
+      "call_volume": 445478
+    },
+    {
+      "date": "2024-11-13",
+      "put_volume": 354839,
+      "call_volume": 564367
+    },
+    {
+      "date": "2024-11-12",
+      "put_volume": 354641,
+      "call_volume": 510166
+    },
+    {
+      "date": "2024-11-11",
+      "put_volume": 291435,
+      "call_volume": 708684
+    },
+    {
+      "date": "2024-11-08",
+      "put_volume": 250635,
+      "call_volume": 377702
+    },
+    {
+      "date": "2024-11-07",
+      "put_volume": 636121,
+      "call_volume": 640232
+    },
+    {
+      "date": "2024-11-06",
+      "put_volume": 640137,
+      "call_volume": 911688
+    },
+    {
+      "date": "2024-11-05",
+      "put_volume": 517000,
+      "call_volume": 545085
+    },
+    {
+      "date": "2024-11-04",
+      "put_volume": 1098954,
+      "call_volume": 335235
+    },
+    {
+      "date": "2024-11-01",
+      "put_volume": 571213,
+      "call_volume": 225321
+    },
+    {
+      "date": "2024-10-31",
+      "put_volume": 880314,
+      "call_volume": 678953
+    },
+    {
+      "date": "2024-10-30",
+      "put_volume": 363224,
+      "call_volume": 293255
+    },
+    {
+      "date": "2024-10-29",
+      "put_volume": 249140,
+      "call_volume": 330670
+    },
+    {
+      "date": "2024-10-28",
+      "put_volume": 182645,
+      "call_volume": 147438
+    },
+    {
+      "date": "2024-10-25",
+      "put_volume": 171648,
+      "call_volume": 249605
+    },
+    {
+      "date": "2024-10-24",
+      "put_volume": 213119,
+      "call_volume": 300268
+    },
+    {
+      "date": "2024-10-23",
+      "put_volume": 231691,
+      "call_volume": 227078
+    },
+    {
+      "date": "2024-10-22",
+      "put_volume": 425884,
+      "call_volume": 373401
+    },
+    {
+      "date": "2024-10-21",
+      "put_volume": 140721,
+      "call_volume": 322826
+    },
+    {
+      "date": "2024-10-18",
+      "put_volume": 209751,
+      "call_volume": 197381
+    }
+  ]
+}

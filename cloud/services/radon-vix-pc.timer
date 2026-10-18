@@ -1,0 +1,14 @@
+[Unit]
+Description=Radon VIX P/C Indicator - daily 5-session VIX put/call ratio
+
+[Timer]
+# 02:00 UTC is after the 16:00 ET close year-round (20:00 UTC summer,
+# 21:00 UTC winter), so the UW VIX options-volume row is final. Runs
+# every calendar day: weekend and holiday runs are unchanged-data
+# heartbeats that keep service_health fresh inside the 26h window.
+OnCalendar=*-*-* 02:00:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
