@@ -4,6 +4,7 @@ import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead, staleCollapse } from "@/lib/dbFirstRead";
+import { snapshotMaxAgeMs } from "@/lib/demo/snapshotWindow";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json). Without this, the framework freezes the first response and
 // serves stale data until the dev server restarts.
@@ -56,7 +57,7 @@ export async function GET(): Promise<Response> {
   const result = await dbFirstRead({
     fromDb: readCalmStreakFromDb,
     fromDisk: readCalmStreakFromDisk,
-    maxAgeMs: CALM_STREAK_MAX_AGE_MS,
+    maxAgeMs: await snapshotMaxAgeMs(CALM_STREAK_MAX_AGE_MS),
     label: "calm-streak",
   });
   // Past CALM_STREAK_MAX_AGE_MS the writer is down: collapse to missing +

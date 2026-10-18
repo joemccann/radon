@@ -38,6 +38,8 @@ FastAPI short-circuits auth on `is_trusted_local_request` (`scripts/api/auth.py:
 
 **Workstation sample contract:** live-service-dependent read surfaces are completed at request time after the Clerk principal resolves to `demo`. Performance, current executions, cash flows, theta, ticker flow, option calendars/chains/exposure, CRI, VCG, GRG, GEX, dispersion, TRIN, and BPI therefore remain current without disk writers, Turso snapshots, FastAPI producers, or vendor credentials. Fixtures accept an injected clock, carry explicit sample provenance, and are covered at the route boundary. Seeded open orders remain intact when current-session executions are added.
 
+**Mirrored snapshot window:** regime surfaces that still read mirrored `scan_snapshots` rows (VIX term structure, IV rank, skew, vol cone and the other freshness-gated indicators) resolve their stale window through `web/lib/demo/snapshotWindow.ts`. A demo principal gets at least 96h, the worst weekend gap of the Mon..Fri `radon-demo-mirror.timer`; operator windows are unchanged. `web/tests/demo-snapshot-window.test.ts` fails when a new freshness-gated route skips the helper.
+
 ## Guardrails (enforcement points)
 
 - **No real orders** — (backend) VM `RADON_API_TEST_MODE=1`; (UX) `web/app/api/orders/place/route.ts` detects `demoRole` via `auth()` and routes to `/paper/place` → `paper_fills`. Both present; neither load-bearing alone.
