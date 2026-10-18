@@ -10,11 +10,18 @@ describe("classifyRateTier", () => {
   });
 
   it("expensive scans are tier B before the mutation bucket catches them", () => {
-    expect(classifyRateTier("POST", "/api/vcg/scan")).toBe("B");
-    expect(classifyRateTier("POST", "/api/gex/scan")).toBe("B");
+    expect(classifyRateTier("POST", "/api/gex")).toBe("B");
+    expect(classifyRateTier("POST", "/api/gamma-rotation")).toBe("B");
+    expect(classifyRateTier("POST", "/api/breadth")).toBe("B");
     expect(classifyRateTier("POST", "/api/leap/scan")).toBe("B");
-    expect(classifyRateTier("POST", "/api/pi/exec")).toBe("B");
-    expect(classifyRateTier("POST", "/api/performance/build")).toBe("B");
+    expect(classifyRateTier("POST", "/api/garch-convergence/scan")).toBe("B");
+    expect(classifyRateTier("POST", "/api/scanner/vol-skew-mr/scan")).toBe("B");
+  });
+
+  it("operator account mutations stay in the write tier", () => {
+    expect(classifyRateTier("POST", "/api/pi")).toBe("C");
+    expect(classifyRateTier("POST", "/api/performance")).toBe("C");
+    expect(classifyRateTier("POST", "/api/flow-analysis")).toBe("C");
   });
 
   it("keeps cached measurement reads out of producer quotas", () => {
