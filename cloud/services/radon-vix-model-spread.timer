@@ -1,0 +1,12 @@
+[Unit]
+Description=Radon VIX Model Spread - daily official close sampling
+
+[Timer]
+# Sampling time only; Cboe does not promise a publication SLA.
+# Weekends refresh the unchanged-source heartbeat and actual session lag.
+OnCalendar=*-*-* 02:50:00 UTC
+Persistent=true
+RandomizedDelaySec=0
+
+[Install]
+WantedBy=timers.target
