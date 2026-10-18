@@ -22,7 +22,10 @@ export type DemoContext = {
   demoRole: DemoRole | null;
   trialStartedAt: string | null;
   trialExpiresAt: string | null;
+  /** Access denied: a lapsed trial OR a pending one (see `pending`). */
   expired: boolean;
+  /** Provisioning not finished: demoRole "pending" or no parseable expiry. */
+  pending: boolean;
 };
 
 function parseMs(value: unknown): number | null {
@@ -36,10 +39,12 @@ function parseMs(value: unknown): number | null {
  * demo user (no `demoRole`) — default-deny: absence of the role means "not a
  * trial", so non-demo callers get `null` and skip every demo gate.
  *
- * `expired` is true only for a demo user whose expiry timestamp is in the past
- * (relative to `now`, default: call time). A demo user with no/invalid expiry
- * is treated as NOT expired here (the webhook always writes one; a missing
- * value is a provisioning bug, not an expiry — the Phase-2 sweep reconciles).
+ * `pending` is true while provisioning is unfinished: the webhook stamps
+ * `demoRole: "pending"` before computing the expiry, so a brand-new user has
+ * the role but no parseable expiry yet. `expired` means access is denied and
+ * is true for a pending user too (fail closed), or once `now` reaches the
+ * expiry. Callers that route users check `pending` first so a half-provisioned
+ * signup lands on /demo-pending instead of /trial-expired.
  */
 export function resolveDemoContext(
   metadata: DemoPublicMetadata | null | undefined,
@@ -53,7 +58,8 @@ export function resolveDemoContext(
   const expiresMs = parseMs(trialExpiresAt);
   // A tagged demo identity is active only with an affirmative, parseable,
   // future expiry. Pending/malformed metadata must never become access.
-  const expired = expiresMs === null || now >= expiresMs;
+  const pending = demoRole === "pending" || expiresMs === null;
+  const expired = pending || now >= (expiresMs as number);
 
   return {
     isDemo: true,
@@ -61,5 +67,6 @@ export function resolveDemoContext(
     trialStartedAt,
     trialExpiresAt,
     expired,
+    pending,
   };
 }
