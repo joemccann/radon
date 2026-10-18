@@ -1,4 +1,4 @@
--- 0096_vix_pc.sql — VIX 5-session cumulative put/call ratio.
+-- 0096_vix_pc.sql  -  VIX 5-session cumulative put/call ratio.
 -- Raw daily put/call volumes plus the single-day ratio. cum5_ratio is
 -- NULL for the first WINDOW-1 rows and when the 5-session call sum is 0.
 -- source is 'uw'. Recomputed on every run over the full stored series.
