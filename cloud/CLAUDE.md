@@ -576,6 +576,13 @@ the latest stable Grok CLI, smokes it, and auto-promotes on pass (writes
 `/var/lib/radon/grok_lkg.json`). A failed smoke stays on last-known-good
 and pages via Pushover plus the unit watchdog. The job heartbeats
 `service_health` as `grok-upgrade` (26h daily window). Contract:
+The optional isolated responder is prepared through
+`cloud/scripts/setup-grok-responder-account.sh`, from a root-only provision
+stage. Nested `services/responder-domain/` units are outside automatic fleet
+installation. The explicit native-login and pickup checks precede a
+transactional timer handover; root-private installed-unit inventory adds the
+optional units to ongoing drift verification. The canonical keeper upgrader
+remains unchanged. Migration and rollback commands are owned by
 [`docs/grok-page-responder.md`](../docs/grok-page-responder.md).
 `cloud/tests/test_grok_upgrade_setup.py` pins the inventory-and-enable.
 The unit names every link the upgrader may move (`--live-bin`,
