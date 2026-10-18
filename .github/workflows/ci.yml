@@ -1488,7 +1488,7 @@ jobs:
               RADON_DEPLOY_RECOVER_ONLY=1 bash "$RUNNER/cloud/scripts/deploy.sh" "$SHA"
             fi
             if [[ -f "$RUNNER/cloud/scripts/sync-control-plane.sh" ]]; then
-              bash "$RUNNER/cloud/scripts/sync-control-plane.sh"
+              bash "$RUNNER/cloud/scripts/sync-control-plane.sh" "$SHA"
             fi
             # If prestage deferred to this control-plane sync, retain the same
             # exact-image proof and host-build fallback used by prestage.
