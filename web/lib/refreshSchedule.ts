@@ -117,6 +117,9 @@ export const COR_REFRESH: RefreshSchedule = [daily(2, 20)];
 /** cloud/services/radon-vixcor.timer */
 export const VIXCOR_REFRESH: RefreshSchedule = [daily(2, 35)];
 
+/** cloud/services/radon-vix-pc.timer */
+export const VIX_PC_REFRESH: RefreshSchedule = [daily(2, 0)];
+
 /** cloud/services/radon-vixts.timer */
 export const VIXTS_REFRESH: RefreshSchedule = [daily(2, 45)];
 
