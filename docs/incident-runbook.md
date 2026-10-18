@@ -21,6 +21,34 @@ each artifact's `case_id` anchors into this file. Triage them with the
 
 ---
 
+## test-created-operator-hold-page
+
+- **Detection:** a Pushover `IB Gateway HELD` page names actor `test` and
+  reason `operator web login`, while the broker hold file remains cleared.
+- **Mechanism:** `test_ib_watchdog_operator_hold.py` isolated hold/lock/audit
+  files but called the real `_page_operator`; inherited or dotenv-loaded
+  Pushover credentials could turn the fake hold into an operator page.
+  Cloud RED at `1cdf8f37` reproduced one attempted delivery with a fake sender.
+  The exact execution that emitted the reported October 18 page is unconfirmed.
+- **Discriminating check:** compare the broker's hold file and hold audit with
+  existing watchdog journal samples around the page timestamp. The reported
+  `2026-10-18T04:51:24Z` test hold was absent from broker state; adjacent journal
+  samples reported `healthy:reachable/authenticated`. A message alone does not
+  establish that the broker is held; do not resume or restart it on that basis.
+- **Remediation:** root `conftest.py` removes inherited Pushover credentials
+  before collection/worker spawn and per test, strips them after dotenv loads,
+  and blocks real urllib/requests delivery and cancellation to Pushover. A
+  recorded transport attempt fails teardown even if a notifier catches the
+  exception. Notification tests explicitly set synthetic credentials and fake
+  the sender/HTTP boundary. Hold-cycle tests default to a fake `_page_operator`;
+  paging semantics tests supply their own observable sender. Production
+  notification, hold and Gateway recovery code is unchanged.
+- **Regression:** `scripts/tests/test_pushover_test_isolation.py` exercises
+  root/API/cloud subtrees, dotenv reloads, delivery/cancellation, both clients
+  and swallowed exceptions. The hold regression exercises the actual cycle.
+  Every RED probe replaces the last transport boundary, so reproducing the
+  defect never sends a real page.
+
 ## control-plane-isolation-admission
 
 - **Detection:** `radon-deploy-root sync-control-plane` exits 76 with

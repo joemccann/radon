@@ -27,6 +27,8 @@ def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RADON_IB_OPERATOR_HOLD_AUDIT", str(tmp_path / "hold.jsonl"))
     monkeypatch.setenv("RADON_IB_OPERATOR_HOLD_OWNER_UID", str(os.getuid()))
     monkeypatch.setattr("ib_watchdog.data_plane_window_active", lambda *a, **k: True)
+    # Paging-specific tests replace this with their own observable fake sender.
+    monkeypatch.setattr("ib_watchdog._page_operator", lambda *a, **k: True)
 
 
 def _cycle(state_path: Path, *, health_reachable: bool):

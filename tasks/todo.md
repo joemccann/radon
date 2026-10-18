@@ -9845,8 +9845,10 @@ Final integration review: eac73b0b is included. All 44 incoming indicator files 
 ## Test notification isolation (2026-10-18)
 
 - [x] N1 depends_on: [] Confirm the unmocked hold paging path and preserve unrelated workspace changes.
-- [ ] N2 depends_on: [N1] Reproduce credential and notification transport leaks in cloud regression tests, without sending any external request.
-- [ ] N3 depends_on: [N2] Isolate test credentials and live Pushover transports, default-mock hold paging, and document the contract.
+- [x] N2 depends_on: [N1] Reproduce credential and notification transport leaks in cloud regression tests, without sending any external request.
+- [x] N3 depends_on: [N2] Isolate test credentials and live Pushover transports, default-mock hold paging, and document the contract.
 - [ ] N4 depends_on: [N3] Open PR, complete all exact-head CI gates and deliver one accepted PR-green notification.
 
 Review: Production Gateway paging, hold behavior and broker state are outside the patch. Tests run in GitHub Actions only; regression probes replace the last transport boundary before exercising the old behavior.
+
+Notification isolation review: cloud RED `1cdf8f37`, run `39151257572`: hold shard 1 failed/1152 passed (one fake sender call); isolation shard 5 failed/2578 passed/1 skipped. Shared root fixtures strip credentials and block urllib/requests Pushover message/cancellation requests with a teardown latch. Default hold pager is fake; explicit paging tests still supply observable senders. Production files remain unchanged. Full final-head CI pending.
