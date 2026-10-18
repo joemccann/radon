@@ -68,9 +68,9 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     "data-refresh":     {"open": 35 * _MIN, "closed": 3 * _DAY, "requires_ib": False},
     # radon-incident-watchdog.timer: every 5 min, around the clock.
     "incident-watchdog": {"open": 15 * _MIN, "closed": 15 * _MIN, "requires_ib": False},
-    # radon-demo-mirror.timer: Mon-Fri 21:45 UTC, once a day. Closed window
-    # absorbs the weekend gap between Friday's and Monday's runs.
-    "demo-mirror":      {"open": 26 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
+    # radon-demo-mirror.timer: daily 21:45 + 23:30 UTC retry slot, weekends
+    # included, so no window needs to absorb a weekend gap.
+    "demo-mirror":      {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # Market-hours-only writers (gated by MonitorDaemon's
     # requires_market_hours=True). Mirrors web/lib/serviceHealthWindows.ts;
     # closed window absorbs the longest weekend gap so the banner doesn't
