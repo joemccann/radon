@@ -99,6 +99,8 @@ export const DEMO_ROUTE_POLICY: Readonly<Record<string, DemoRoutePolicy>> = {
   "/api/setup/complete": { POST: { mode: "blocked", via: "setupMode" } },
   "/api/setup/status": { POST: { mode: "blocked", via: "setupMode" } },
   "/api/setup/validate": { POST: { mode: "blocked", via: "setupMode" } },
+  // Personal-use Cboe collector (docs/indicators/vix-model-spread.md).
+  "/api/vix-model-spread": { GET: OPERATOR },
 
   // ── account: seeded book, request-time samples, paper orders ────────────
   "/api/blotter": { GET: { mode: "demo-db", tables: ["journal"] }, POST: OPERATOR },

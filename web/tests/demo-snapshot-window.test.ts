@@ -184,6 +184,8 @@ describe("demo snapshot window coverage", () => {
     const missing = gated.filter((file) => {
       if (file in EXEMPT_FROM_DEMO_WINDOW) return false;
       const text = readFileSync(join(webRoot, file), "utf8");
+      // Operator-only routes refuse demo principals before any read.
+      if (/operatorOnly:\s*true/.test(text)) return false;
       return !/maxAgeMs:\s*await snapshotMaxAgeMs\(/.test(text);
     });
     expect(missing).toEqual([]);
