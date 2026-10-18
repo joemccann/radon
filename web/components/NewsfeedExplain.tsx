@@ -12,8 +12,6 @@ const ELAPSED_TICK_MS = 250;
 type ExplainPost = { id: string; title: string; content: string };
 type ExplainResult = { explanation: string; thin?: boolean };
 
-const drafts = new Map<string, ExplainResult>();
-
 type ExplainFrame = { event: string; data: unknown };
 
 function decodeFrame(frame: string): ExplainFrame | null {
@@ -85,7 +83,6 @@ export default function NewsfeedExplain({
   post: ExplainPost;
   imageUrls?: string[];
 }) {
-  const cached = drafts.get(post.id);
   const trigger = useRef<HTMLButtonElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const panelId = useId();
@@ -93,7 +90,7 @@ export default function NewsfeedExplain({
   const [entered, setEntered] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [result, setResult] = useState<ExplainResult | undefined>(cached);
+  const [result, setResult] = useState<ExplainResult | undefined>();
   const [stage, setStage] = useState<ExplainStage>("queued");
   const elapsedMs = useElapsedMs(loading);
   const seconds = Math.floor(elapsedMs / 1000);
@@ -119,10 +116,6 @@ export default function NewsfeedExplain({
     abortRef.current?.abort();
     const abort = new AbortController();
     abortRef.current = abort;
-    setError("");
-    setOpen(true);
-    setLoading(true);
-    setStage("queued");
     try {
       const timeout = typeof AbortSignal.timeout === "function"
         ? AbortSignal.timeout(EXPLAIN_CLIENT_TIMEOUT_MS)
@@ -148,7 +141,6 @@ export default function NewsfeedExplain({
         setStage(next);
       }));
       if (abort.signal.aborted) return;
-      drafts.set(post.id, payload);
       setResult(payload);
     } catch (err) {
       if (abort.signal.aborted || (err instanceof DOMException && err.name === "AbortError")) return;
@@ -158,11 +150,20 @@ export default function NewsfeedExplain({
     }
   }
 
+  function startExplain() {
+    if (loading) return;
+    setError("");
+    setOpen(true);
+    setLoading(true);
+    setStage("queued");
+    void requestExplain();
+  }
+
   function onTrigger() {
     if (loading) return;
     if (result && open) { setOpen(false); return; }
     if (result && !open) { setOpen(true); setError(""); return; }
-    void requestExplain();
+    startExplain();
   }
 
   return <div
@@ -208,11 +209,11 @@ export default function NewsfeedExplain({
       {loading ? <p className={styles.elapsed} aria-hidden>{seconds}s</p> : null}
       {loading ? <p className={styles.visuallyHidden} role="status">{stage}, {seconds}s elapsed</p> : null}
       {!loading && result ? <p className={styles.body}>{result.explanation}</p> : null}
-      <div className={styles.toolbar}>
-        {!loading && result ? <button type="button" onClick={() => setOpen(false)}>Hide explanation</button> : null}
-        {!loading && error ? <button type="button" onClick={() => void requestExplain()}>Retry</button> : null}
-      </div>
+      {!loading && (result || error) ? <div className={styles.toolbar}>
+        {result ? <button type="button" onClick={() => setOpen(false)}>Hide explanation</button> : null}
+        {error ? <button type="button" onClick={startExplain}>Retry</button> : null}
+      </div> : null}
     </section> : null}
-    {error ? <ErrorToast message={error} onRetry={loading ? undefined : () => void requestExplain()} /> : null}
+    {error ? <ErrorToast message={error} onRetry={loading ? undefined : startExplain} /> : null}
   </div>;
 }
