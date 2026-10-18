@@ -1,5 +1,6 @@
 import type { MarketEarPost } from "./useNewsfeedPosts";
 import { withoutEmDashes } from "./copyPunctuation";
+import { withXShareFooter } from "./xShareCopy";
 
 export type SharePost = MarketEarPost & { href: string; isoTimestamp: string };
 
@@ -189,11 +190,11 @@ export function buildShareCaption(post: SharePost, _imageUrl = post.images?.[0])
   const content = sanitizeXShareText(post.content || "");
   // Keep existing paragraph boundaries; add breathing room to single-block prose.
   const paragraphs = (content.includes("\n") ? content.split(/\n+/) : splitSentences(content)).filter(Boolean);
-  return [title, ...paragraphs].filter(Boolean).join("\n\n");
+  return withXShareFooter([title, ...paragraphs].filter(Boolean).join("\n\n"));
 }
 
 export function buildXShareUrl(caption: string): string {
-  return `https://twitter.com/intent/tweet?${new URLSearchParams({ text: sanitizeXShareText(caption) })}`;
+  return `https://twitter.com/intent/tweet?${new URLSearchParams({ text: withXShareFooter(sanitizeXShareText(caption)) })}`;
 }
 
 /** Break long words as well as prose, so provider text cannot escape the card. */
