@@ -52,11 +52,11 @@ sessions. The latest fixture session is **2026-10-16, cum5 = 0.318849**,
 | Snapshot service | `scan_snapshots.service = 'vix-pc'` |
 | Disk fallback | `data/vix-pc.json` |
 | Rail group | **Volatility** (after `vixts`) |
-| Migration | `0096_vix_pc.sql` (version 96) |
+| Migration | `0097_vix_pc.sql` (version 97) |
 | Freshness constant | `VIX_PC_REFRESH` |
 
-`MAX(version)` in the local tree is **95**. **96 is free.** Only the
-ingestion implementer owns the migration.
+`MAX(version)` in the local tree is **96** (`0096_newsfeed_explanations.sql`).
+**97 is free.** Only the ingestion implementer owns the migration.
 
 **One-line description** (InfoTooltip first sentence):
 
@@ -241,10 +241,10 @@ the calibration pins for that 500-row sample only.
 
 ---
 
-## D. Schema  -  migration `0096_vix_pc.sql`
+## D. Schema  -  migration `0097_vix_pc.sql`
 
 ```sql
--- 0096_vix_pc.sql  -  VIX 5-session cumulative put/call ratio.
+-- 0097_vix_pc.sql  -  VIX 5-session cumulative put/call ratio.
 -- Raw daily put/call volumes plus the single-day ratio. cum5_ratio is
 -- NULL for the first WINDOW-1 rows and when the 5-session call sum is 0.
 -- source is 'uw'. Recomputed on every run over the full stored series.
@@ -262,7 +262,7 @@ CREATE TABLE IF NOT EXISTS vix_pc_history (
 CREATE INDEX IF NOT EXISTS idx_vix_pc_history_date
   ON vix_pc_history(date DESC);
 
-INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (96, datetime('now'));
+INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (97, datetime('now'));
 ```
 
 ---
@@ -515,7 +515,7 @@ prefix it could collide with. There is no `vix` tab today; keep
 
 1. `scripts/tests/test_vix_pc.py`  -  fixture integrity; C.3 examples;
    C.4 boundaries; fixture calibration to 6dp; Oct 8 is the series min;
-   Jan 2025 coverage; migration 96 schema + upsert idempotency + 400-row
+   Jan 2025 coverage; migration 97 schema + upsert idempotency + 400-row
    chunks; unchanged path heartbeats without row upserts; UW raise +
    cache → `stale_source`; no cache → raise; writer arity.
 2. `web/tests/vix-pc-api.test.ts`  -  Turso beats older disk; disk
@@ -534,7 +534,7 @@ prefix it could collide with. There is no `vix` tab today; keep
 
 ## I. File checklist
 
-Create: `scripts/fetch_vix_pc.py`, `scripts/db/migrations/0096_vix_pc.sql`,
+Create: `scripts/fetch_vix_pc.py`, `scripts/db/migrations/0097_vix_pc.sql`,
 `scripts/tests/test_vix_pc.py`, `scripts/tests/fixtures/vix_pc_sample.json`,
 `web/app/api/vix-pc/route.ts`, `web/lib/vixPc.ts`, `web/lib/useVixPc.ts`,
 `web/components/VixPcPanel.tsx`, `web/app/regime/vix-pc/page.tsx`,
