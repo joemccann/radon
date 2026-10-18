@@ -108,6 +108,9 @@ export const BPI_REFRESH: RefreshSchedule = [
 /** cloud/services/radon-margin-debt.timer */
 export const MARGIN_DEBT_REFRESH: RefreshSchedule = [daily(13, 10)];
 
+/** cloud/services/radon-vix-pc.timer */
+export const VIX_PC_REFRESH: RefreshSchedule = [daily(2, 0)];
+
 /** cloud/services/radon-straddle.timer */
 export const STRADDLE_REFRESH: RefreshSchedule = [daily(2, 15)];
 

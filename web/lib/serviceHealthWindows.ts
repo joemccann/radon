@@ -264,6 +264,11 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // The llama-server sidecar has no service_health row (unit watchdog only).
   "slm-tagger-monitor": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``vix-pc`` — radon-vix-pc.timer fires daily 02:00 UTC every calendar day
+  // (weekend runs are unchanged-data heartbeats), so a uniform 26h window
+  // matches its daily siblings. UW VIX options-volume only — no IB.
+  "vix-pc": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``vixts`` — radon-vixts.timer fires daily 02:45 UTC every calendar day,
   // ten minutes behind radon-vixcor so the Cboe CDN hits stay staggered
   // (weekend and holiday runs are 304 heartbeats), so a uniform 26h window

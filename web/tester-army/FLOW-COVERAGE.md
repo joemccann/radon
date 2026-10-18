@@ -61,6 +61,7 @@ All current 67 App Router pages appear exactly once in the manifest test. Four g
 | `/regime/trin` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/regime/vcg` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/regime/vixcor` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
+| `/regime/vix-pc` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/regime/vixts` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/regime/panic-index` | explicit empty measurement state | canonical Clear inventory asserts the same empty state; deterministic fixture has no panic reading |
 | `/regime/vol-cone` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |

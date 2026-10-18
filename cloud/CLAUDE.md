@@ -596,7 +596,8 @@ after the promote and before `restart-managed`, `deploy.sh` runs
 `radon-deploy-root install-units`, which copies each unit whose
 `cloud/services/` content hashes to its entry in
 `config/installed-units.sha256`, daemon-reloads once, and `enable --now`s
-NEW timers only (never a timer-owned `.service`). The manifest digest is the
+NEW timers only (never a timer-owned `.service`). New indicator pairs such as
+`radon-vix-pc.{service,timer}` ship the same way. The manifest digest is the
 review gate: editing a unit in `services/` and bumping its hash in the same
 commit is the whole procedure -- no root SSH. An edit whose hash is NOT
 bumped is left uninstalled (the drift audit then flags it), so the

@@ -261,6 +261,10 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # (weekend/holiday runs are 304 heartbeats). Uniform 26h window mirrors its
     # cor parent. Cboe CDN plus Turso cor_history only — no IB dependency.
     "vixcor":           {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # vix-pc - radon-vix-pc.timer, daily 02:00 UTC every calendar day
+    # (weekend/holiday runs are unchanged-data heartbeats). Uniform 26h
+    # window matches its daily siblings. UW VIX options-volume only - no IB.
+    "vix-pc":           {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # vixts — radon-vixts.timer, daily 02:45 UTC every calendar day, in the
     # slot after straddle/cor/vixcor so the Cboe CDN hits stay staggered
     # (weekend/holiday runs are 304 heartbeats). Uniform 26h window mirrors
@@ -650,6 +654,9 @@ BUCKETS: dict[str, list[str]] = {
         # behind its radon-cor parent) — hourly check surfaces a missed run
         # within 1h of the 26h window expiring.
         "vixcor",
+        # Daily 02:00 UTC UW VIX options-volume pull - hourly check
+        # surfaces a missed run within 1h of the 26h window expiring.
+        "vix-pc",
         # Daily 02:45 UTC Cboe VIX/VIX3M term-structure pull — hourly check
         # surfaces a missed run within 1h of the 26h window expiring.
         "vixts",
