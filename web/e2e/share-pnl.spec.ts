@@ -88,11 +88,23 @@ test.describe("Share PnL", () => {
   });
 
   test("popover has Copy & Tweet and Copy buttons", async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { write: async () => {} } });
+      window.open = url => {
+        (window as unknown as { shareTweetUrl: string }).shareTweetUrl = String(url);
+        return null;
+      };
+    });
     await stubOrdersShareApis(page);
     const popover = await openSharePopover(page);
     // Should have a "Copy & Tweet" button and a "Copy" button
     await expect(popover.getByRole("button", { name: "Copy & Tweet" })).toBeVisible();
     await expect(popover.getByRole("button", { name: /^Copy$/ })).toBeVisible();
+    await popover.getByRole("button", { name: "Copy & Tweet" }).click();
+    await expect.poll(() => page.evaluate(() => {
+      const url = (window as unknown as { shareTweetUrl?: string }).shareTweetUrl;
+      return url ? new URL(url).searchParams.get("text") : "";
+    })).toMatch(/\n\n@grok explain this for normies$/);
   });
 
   test("unchecking P&L $ disables it but keeps % checked", async ({ page }, testInfo) => {
