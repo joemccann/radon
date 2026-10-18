@@ -1606,3 +1606,16 @@ def test_existing_negative_review_receipt_is_never_overwritten(monkeypatch,tmp_p
     assert reviews._store_receipt(path,negative)==negative
     assert reviews._store_receipt(path,{'approved':True,'findings':[]})==negative
     assert json.loads(path.read_text())==negative
+
+
+@pytest.mark.parametrize('path',['.github/workflows/ci.yml','.github/actions/setup/action.yml','.github/CODEOWNERS'])
+def test_candidate_that_changes_its_own_ci_definition_needs_a_human_merge(monkeypatch,tmp_path,path):
+    reviews=ur.CodexReviews(_policy(),tmp_path/'reviews')
+    objects,_=_source_context_fixture(monkeypatch,reviews)
+    head_tree=objects[f'repos/{ur.REPO}/git/trees/{"2"*40}?recursive=1']['tree']
+    head_tree.append(dict(head_tree[0],path=path))
+    pr,diff=_context_pr()
+    with pytest.raises(ur.HumanMergeRequired):reviews._review_payload(pr,diff,repository=ur.REPO,base_sha=MAIN)
+    monkeypatch.setattr(ur,'_command',lambda *a,**kw:pytest.fail('no reviewer may run'))
+    assert reviews.review(pr,diff)==[]
+    assert 'human merge' in reviews.failure_reason and 'no approval' in reviews.failure_reason
