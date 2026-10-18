@@ -829,7 +829,7 @@ OPERATOR_UNIT_TIMEOUT_S = 75.0
 # Shared with radon-cloud deploy/operator control so admin mutations never
 # race a release mid-transition. Override only in tests.
 DEPLOY_LOCK_FILE = Path(
-    os.environ.get("RADON_DEPLOY_LOCK_FILE", "/home/radon/.radon-deploy.lock")
+    os.environ.get("RADON_DEPLOY_LOCK_FILE", "/var/lib/radon-lock/deploy.lock")
 )
 SYSTEMCTL_MUTATION_TIMEOUT_S = 60.0
 
@@ -979,34 +979,33 @@ async def _control_via_host(request: dict, unit: str, action: str, timeout: floa
 
 
 async def _control_unit_under_deploy_lock(unit: str, action: str) -> ActionResult:
-    """Run a non-gateway systemctl mutation while holding the deploy lock."""
+    """Hold both installed generations while controlling a host unit."""
+    paths = [DEPLOY_LOCK_FILE]
+    legacy = os.environ.get("RADON_DEPLOY_LEGACY_LOCK_FILE", "")
+    if not legacy and DEPLOY_LOCK_FILE == Path("/var/lib/radon-lock/deploy.lock"):
+        legacy = "/home/radon/.radon-deploy.lock"
+    if legacy and Path(legacy) not in paths:
+        paths.append(Path(legacy))
+    handles = []
     try:
-        handle = open(DEPLOY_LOCK_FILE, "a+", encoding="utf-8")
-    except OSError as exc:
-        return ActionResult(
-            unit,
-            action,
-            False,
-            f"cannot open deploy/control lock at {DEPLOY_LOCK_FILE}: {exc}",
-            -1,
-        )
-
-    try:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        handle.close()
-        return ActionResult(
-            unit,
-            action,
-            False,
-            "deploy/control lock held",
-            PUSH_LOCK_HELD_RC,
-        )
-
-    try:
-        stdout, stderr, rc = await _systemctl(
-            action, unit, timeout=SYSTEMCTL_MUTATION_TIMEOUT_S,
-        )
+        for path in paths:
+            try:
+                if path == Path("/var/lib/radon-lock/deploy.lock") or path != DEPLOY_LOCK_FILE:
+                    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                    handle = os.fdopen(fd, "r", encoding="utf-8")
+                else:
+                    handle = open(path, "a+", encoding="utf-8")
+                handles.append(handle)
+                held, named = os.fstat(handle.fileno()), os.lstat(path)
+                import stat
+                if not stat.S_ISREG(named.st_mode) or (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino):
+                    raise OSError("deploy lock changed while opening")
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return ActionResult(unit, action, False, "deploy/control lock held", PUSH_LOCK_HELD_RC)
+            except OSError as exc:
+                return ActionResult(unit, action, False, f"cannot open deploy/control lock at {path}: {exc}", -1)
+        stdout, stderr, rc = await _systemctl(action, unit, timeout=SYSTEMCTL_MUTATION_TIMEOUT_S)
         detail = stderr or stdout or f"systemctl exited with rc={rc}"
         if rc == -1 and "timed out" in detail.lower():
             cancel_detail = await _cancel_pending_systemd_jobs(unit)
@@ -1014,9 +1013,7 @@ async def _control_unit_under_deploy_lock(unit: str, action: str) -> ActionResul
                 detail = f"{detail}; {cancel_detail}"
         return ActionResult(unit, action, rc == 0, detail, rc)
     finally:
-        try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        finally:
+        for handle in reversed(handles):
             handle.close()
 
 

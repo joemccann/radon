@@ -1588,6 +1588,78 @@ configure_sudoers() {
 # by hand on 2026-05-04; checking the canonical copy into setup-vps.sh so a
 # wipe-vps.sh rebuild restores it automatically.
 
+install_deploy_lock() {
+  local python="${RADON_SYSTEM_PYTHON:-/usr/bin/python3.13}"
+  local target="${RADON_DEPLOY_LOCK_TARGET:-/var/lib/radon-lock/deploy.lock}"
+  local legacy="${RADON_DEPLOY_LEGACY_LOCK_TARGET:-/home/radon/.radon-deploy.lock}"
+  "$python" -I - "$target" "$legacy" "${RADON_HELPER_SKIP_CHOWN:-0}" <<'PY_LOCKS' || return 1
+import os, pathlib, pwd, stat, sys
+primary, legacy, test = sys.argv[1:]
+account = pwd.getpwuid(os.getuid()) if test == "1" else pwd.getpwnam("radon")
+owner = os.getuid() if test == "1" else 0
+parent = pathlib.Path(primary).parent
+if test == "1":
+    parent.parent.mkdir(parents=True, exist_ok=True)
+anchor = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+try:
+    for part in parent.parent.parts[1:]:
+        next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=anchor)
+        os.close(anchor); anchor = next_fd
+        info = os.fstat(anchor)
+        if test != "1" and (info.st_uid != 0 or stat.S_IMODE(info.st_mode) & 0o022):
+            raise SystemExit("deploy lock ancestor ownership/mode refused")
+    try:
+        os.mkdir(parent.name, 0o750, dir_fd=anchor)
+        created = True
+    except FileExistsError:
+        created = False
+    directory = os.open(parent.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=anchor)
+    try:
+        if created:
+            if test != "1": os.fchown(directory, 0, account.pw_gid)
+            os.fchmod(directory, 0o750)
+        info = os.fstat(directory)
+        if info.st_uid != owner or stat.S_IMODE(info.st_mode) != 0o750 or (test != "1" and info.st_gid != account.pw_gid):
+            raise SystemExit("deploy lock directory ownership/mode refused")
+        try:
+            fd = os.open(pathlib.Path(primary).name, os.O_RDONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o640, dir_fd=directory)
+            created = True
+        except FileExistsError:
+            fd = os.open(pathlib.Path(primary).name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+            created = False
+        try:
+            if created:
+                if test != "1": os.fchown(fd, 0, account.pw_gid)
+                os.fchmod(fd, 0o640)
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != owner or stat.S_IMODE(info.st_mode) != 0o640 or info.st_nlink != 1 or (test != "1" and info.st_gid != account.pw_gid):
+                raise SystemExit("deploy lock file ownership/mode refused")
+        finally: os.close(fd)
+    finally: os.close(directory)
+finally: os.close(anchor)
+pathlib.Path(legacy).parent.mkdir(parents=True, exist_ok=True)
+try:
+    fd = os.open(legacy, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+except FileExistsError:
+    pass
+else:
+    try:
+        if test != "1": os.fchown(fd, account.pw_uid, account.pw_gid)
+        os.fchmod(fd, 0o600)
+    finally: os.close(fd)
+PY_LOCKS
+  local destination="${RADON_DEPLOY_TMPFILES_TARGET:-/usr/lib/tmpfiles.d/radon-deploy.conf}"
+  local staged
+  local -a owners=(-o root -g root)
+  [[ "${RADON_HELPER_SKIP_CHOWN:-0}" == "1" ]] && owners=()
+  staged="$(mktemp "${destination}.tmp.XXXXXX")"
+  if ! stage_from_checkout "${CLOUD_DIR}/config/tmpfiles.d/radon-deploy.conf" "$staged" 0644 ${owners[@]+"${owners[@]}"}; then
+    rm -f "$staged"
+    return 1
+  fi
+  mv -Tf "$staged" "$destination"
+}
+
 install_gateway_control() {
   local target="${RADON_GATEWAY_CONTROL_TARGET:-/usr/local/bin/radon-ib-gateway-control}"
   local source="${CLOUD_DIR}/scripts/ib-gateway-control.sh"
@@ -1943,6 +2015,7 @@ main() {
   setup_node
   install_caddy
   configure_caddy
+  install_deploy_lock
   copy_systemd_services
   install_gateway_control
   install_journald_limits

@@ -112,7 +112,12 @@ readonly DOCKER_GW="${RADON_DOCKER_GW:-/usr/local/sbin/radon-docker-gw}"
 readonly APP_IMAGE_PREPULL_TIMEOUT="${RADON_APP_IMAGE_PREPULL_TIMEOUT:-600}"
 readonly NEXT_RUNTIME_DROPIN="${RADON_NEXT_RUNTIME_DROPIN:-/etc/systemd/system/radon-nextjs.service.d/runtime-container.conf}"
 readonly SYSTEMCTL="${RADON_SYSTEMCTL:-/usr/bin/systemctl}"
-readonly DEPLOY_LOCK_FILE="${RADON_DEPLOY_LOCK_FILE:-/home/radon/.radon-deploy.lock}"
+readonly DEPLOY_LOCK_FILE="${RADON_DEPLOY_LOCK_FILE:-/var/lib/radon-lock/deploy.lock}"
+if [[ -n "${RADON_DEPLOY_LOCK_FILE:-}" ]]; then
+  readonly LEGACY_DEPLOY_LOCK_FILE="${RADON_DEPLOY_LEGACY_LOCK_FILE:-}"
+else
+  readonly LEGACY_DEPLOY_LOCK_FILE="${RADON_DEPLOY_LEGACY_LOCK_FILE:-/home/radon/.radon-deploy.lock}"
+fi
 readonly GREEN_MARKER_FILE="${RADON_DEPLOY_GREEN_MARKER:-/home/radon/.radon-last-green-deploy}"
 readonly DEPLOY_ROOT_HELPER="${RADON_DEPLOY_ROOT_HELPER:-/usr/local/sbin/radon-deploy-root}"
 readonly GATEWAY_CONTROL_HELPER="${RADON_GATEWAY_CONTROL_HELPER:-/usr/local/bin/radon-ib-gateway-control}"
@@ -1990,7 +1995,7 @@ handle_supervisor_signal() {
   terminate_supervised_process_group
   supervisor_recover_once
   log_error "Deploy supervisor received ${signal_name}; recovery completed before lock release"
-  exec 9>&-
+  exec 8>&- 9>&-
   exit "$exit_code"
 }
 
@@ -1998,19 +2003,53 @@ supervise_deploy_command() {
   # FD 9 and its flock are owned by this outer supervisor. The timeout process
   # closes FD 9 before exec, so neither the inner deploy nor any descendant can
   # keep the production lock alive after the supervisor returns.
-  if ! exec 9>"$DEPLOY_LOCK_FILE"; then
+  # Production lock is pre-provisioned and opened without creation/truncation.
+  local open_rc=0 lock_path="$DEPLOY_LOCK_FILE" recovery_legacy_only=0
+  # The first upgraded runner recovers any old transition BEFORE trusted root
+  # bootstrap can install the new inode. Only this recovery pass may hold the
+  # existing compatibility inode alone; normal deployment always requires both.
+  if [[ "${RADON_DEPLOY_RECOVER_ONLY:-0}" == "1" && ! -e "$lock_path" && ! -L "$lock_path" \
+    && -n "$LEGACY_DEPLOY_LOCK_FILE" ]]; then
+    lock_path="$LEGACY_DEPLOY_LOCK_FILE"
+    recovery_legacy_only=1
+    [[ -f "$lock_path" && ! -L "$lock_path" ]] && exec 9<>"$lock_path" || open_rc=$?
+  elif [[ "$DEPLOY_LOCK_FILE" == "/var/lib/radon-lock/deploy.lock" || -n "$LEGACY_DEPLOY_LOCK_FILE" ]]; then
+    [[ -f "$lock_path" && ! -L "$lock_path" ]] && exec 9<"$lock_path" || open_rc=$?
+  else
+    exec 9>"$lock_path" || open_rc=$?
+  fi
+  if (( open_rc != 0 )); then
     log_error "Cannot open production deploy lock ${DEPLOY_LOCK_FILE}"
     return 1
   fi
   if ! flock -n 9; then
     if [[ "${RADON_DEPLOY_STAGE:-0}" == "1" ]]; then
       log_warn "Another deployment owns ${DEPLOY_LOCK_FILE}; skipping prestage"
-      exec 9>&-
+      exec 8>&- 9>&-
       return 0
     fi
     log_error "Another deployment owns ${DEPLOY_LOCK_FILE}; refusing to overlap"
-    exec 9>&-
+    exec 8>&- 9>&-
     return 75
+  fi
+  if ! "$SYSTEM_PYTHON" -I -c 'import os,stat,sys; a=os.fstat(9);b=os.lstat(sys.argv[1]);sys.exit(not(stat.S_ISREG(b.st_mode) and (a.st_dev,a.st_ino)==(b.st_dev,b.st_ino)))' "$lock_path"; then
+    log_error "Deploy lock changed while opening"
+    exec 8>&- 9>&-
+    return 75
+  fi
+  if (( ! recovery_legacy_only )) && [[ -n "$LEGACY_DEPLOY_LOCK_FILE" && "$LEGACY_DEPLOY_LOCK_FILE" != "$DEPLOY_LOCK_FILE" ]]; then
+    if [[ ! -f "$LEGACY_DEPLOY_LOCK_FILE" || -L "$LEGACY_DEPLOY_LOCK_FILE" ]] \
+      || ! exec 8<>"$LEGACY_DEPLOY_LOCK_FILE" || ! flock -n 8; then
+      log_error "Compatibility deploy lock unavailable; refusing to overlap"
+      exec 8>&- 9>&-
+      [[ "${RADON_DEPLOY_STAGE:-0}" == "1" ]] && return 0
+      return 75
+    fi
+    if ! "$SYSTEM_PYTHON" -I -c 'import os,stat,sys; a=os.fstat(8);b=os.lstat(sys.argv[1]);sys.exit(not(stat.S_ISREG(b.st_mode) and (a.st_dev,a.st_ino)==(b.st_dev,b.st_ino)))' "$LEGACY_DEPLOY_LOCK_FILE"; then
+      log_error "Compatibility deploy lock changed while opening"
+      exec 8>&- 9>&-
+      return 75
+    fi
   fi
   log_success "Acquired production deploy lock"
 
@@ -2025,14 +2064,14 @@ supervise_deploy_command() {
     if [[ "${RADON_DEPLOY_STAGE:-0}" == "1" ]]; then
       log_warn "Unfinished transition present; skipping prestage"
       trap - TERM INT HUP
-      exec 9>&-
+      exec 8>&- 9>&-
       return 0
     fi
     log_warn "Found an unfinished deploy transition; recovering it before starting new work"
     if ! recover_pending_transition; then
       log_error "Unfinished transition recovery failed; refusing a new deploy"
       trap - TERM INT HUP
-      exec 9>&-
+      exec 8>&- 9>&-
       return 76
     fi
   fi
@@ -2045,13 +2084,13 @@ supervise_deploy_command() {
   if [[ "${RADON_DEPLOY_RECOVER_ONLY:-0}" == "1" ]]; then
     log_info "Recovery pass complete; no deploy requested"
     trap - TERM INT HUP
-    exec 9>&-
+    exec 8>&- 9>&-
     return 0
   fi
 
   local exit_code=0
   timeout --signal=TERM --kill-after="${DEPLOY_KILL_AFTER}s" \
-    "${DEPLOY_TIMEOUT}s" "$@" 9>&- &
+    "${DEPLOY_TIMEOUT}s" "$@" 8>&- 9>&- &
   SUPERVISED_TIMEOUT_PID=$!
   if wait "$SUPERVISED_TIMEOUT_PID"; then
     exit_code=0
@@ -2068,7 +2107,7 @@ supervise_deploy_command() {
       ;;
   esac
   trap - TERM INT HUP
-  exec 9>&-
+  exec 8>&- 9>&-
   # Prestage leaves the green marker alone, and the unlocked prepull job may
   # be pulling the target pair right now; pruning here removed it.
   if (( exit_code == 0 )) && [[ "${RADON_DEPLOY_STAGE:-0}" != "1" ]]; then

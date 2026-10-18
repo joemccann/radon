@@ -62,7 +62,12 @@ if [[ "$requested_action" != "status" && $EUID -ne 0 \
   exec sudo -n "${RADON_OPERATOR_INSTALLED_PATH:-/usr/local/bin/radon}" "$@"
 fi
 
-DEPLOY_LOCK_PATH="${RADON_DEPLOY_LOCK_FILE:-/home/radon/.radon-deploy.lock}"
+DEPLOY_LOCK_PATH="${RADON_DEPLOY_LOCK_FILE:-/var/lib/radon-lock/deploy.lock}"
+if [[ -n "${RADON_DEPLOY_LOCK_FILE:-}" ]]; then
+  LEGACY_DEPLOY_LOCK_PATH="${RADON_DEPLOY_LEGACY_LOCK_FILE:-}"
+else
+  LEGACY_DEPLOY_LOCK_PATH="${RADON_DEPLOY_LEGACY_LOCK_FILE:-/home/radon/.radon-deploy.lock}"
+fi
 OPERATOR_PYTHON="${RADON_OPERATOR_PYTHON:-/usr/bin/python3.13}"
 UNIT_ACTION_TIMEOUT_SECS="${RADON_OPERATOR_UNIT_TIMEOUT_SECS:-20}"
 # `radon unit restart` blocks in systemctl for the stop and then the start.
@@ -123,6 +128,9 @@ acquire_deploy_lock() {
   if [[ "${RADON_DEPLOY_LOCKED:-0}" == "1" ]]; then
     if inherited_lock_is_valid \
       "${RADON_DEPLOY_LOCKED:-0}" "${RADON_DEPLOY_LOCK_FD:-}" "$DEPLOY_LOCK_PATH"; then
+      if [[ -n "$LEGACY_DEPLOY_LOCK_PATH" ]]; then
+        inherited_lock_is_valid "1" "${RADON_DEPLOY_LEGACY_LOCK_FD:-}" "$LEGACY_DEPLOY_LOCK_PATH" || return 74
+      fi
       return 0
     fi
     echo "REFUSING stack action: inherited deploy-lock proof is invalid" >&2
@@ -133,7 +141,7 @@ acquire_deploy_lock() {
     return 1
   fi
   exec "$OPERATOR_PYTHON" -I - \
-    "$DEPLOY_LOCK_PATH" "$ACTION_TIMEOUT_SECS" "$0" "$@" <<'PY'
+    "$DEPLOY_LOCK_PATH" "$LEGACY_DEPLOY_LOCK_PATH" "$ACTION_TIMEOUT_SECS" "$0" "$@" <<'PY'
 import fcntl
 import os
 from pathlib import Path
@@ -143,10 +151,10 @@ import stat
 import subprocess
 import sys
 
-lock_text, timeout_text, script, *args = sys.argv[1:]
+lock_text, legacy_text, timeout_text, script, *args = sys.argv[1:]
 lock_path = Path(lock_text)
-canonical_lock = Path("/home/radon/.radon-deploy.lock")
-if os.geteuid() == 0 and lock_path == canonical_lock:
+canonical_lock = Path("/var/lib/radon-lock/deploy.lock")
+if lock_path == canonical_lock:
     try:
         metadata = lock_path.stat()
         radon = pwd.getpwnam("radon")
@@ -155,13 +163,13 @@ if os.geteuid() == 0 and lock_path == canonical_lock:
         raise SystemExit(74)
     if (
         not stat.S_ISREG(metadata.st_mode)
-        or metadata.st_uid != radon.pw_uid
+        or metadata.st_uid != 0
         or metadata.st_gid != radon.pw_gid
-        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or stat.S_IMODE(metadata.st_mode) != 0o640
     ):
         print("REFUSING stack action: canonical deploy lock ownership/mode is unsafe", file=sys.stderr)
         raise SystemExit(74)
-    fd = os.open(lock_path, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
+    fd = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
 else:
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
@@ -170,14 +178,30 @@ try:
 except BlockingIOError:
     print(f"REFUSING stack action: deploy/control lock held: {lock_path}", file=sys.stderr)
     raise SystemExit(74)
-os.set_inheritable(fd, True)
+fds = [fd]
+if legacy_text and legacy_text != lock_text:
+    try:
+        legacy_fd = os.open(legacy_text, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        import stat
+        held, named = os.fstat(legacy_fd), os.lstat(legacy_text)
+        if not stat.S_ISREG(named.st_mode) or (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino):
+            raise OSError("compatibility lock changed")
+        fcntl.flock(legacy_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print("REFUSING action: compatibility deploy lock unavailable", file=sys.stderr)
+        raise SystemExit(74)
+    fds.append(legacy_fd)
+for descriptor in fds:
+    os.set_inheritable(descriptor, True)
 env = os.environ.copy()
 env["RADON_DEPLOY_LOCKED"] = "1"
 env["RADON_DEPLOY_LOCK_FD"] = str(fd)
+if len(fds) > 1:
+    env["RADON_DEPLOY_LEGACY_LOCK_FD"] = str(fds[1])
 proc = subprocess.Popen(
     [script, *args],
     env=env,
-    pass_fds=(fd,),
+    pass_fds=tuple(fds),
     start_new_session=True,
 )
 try:
@@ -222,6 +246,10 @@ if os.environ.get("RADON_DEPLOY_LOCKED") == "1" and fd_text.isdigit():
         pass
     else:
         pass_fds = (deploy_lock_fd,)
+        legacy_text = os.environ.get("RADON_DEPLOY_LEGACY_LOCK_FD", "")
+        if legacy_text.isdigit():
+            os.fstat(int(legacy_text))
+            pass_fds += (int(legacy_text),)
 proc = subprocess.Popen(command, start_new_session=True, pass_fds=pass_fds)
 try:
     raise SystemExit(proc.wait(timeout=float(timeout)))
