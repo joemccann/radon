@@ -12,7 +12,8 @@
 // Operator, authenticated, and test principals keep the route's own window
 // unchanged; the helper only ever widens, never narrows.
 
-import { requireRouteAccess, type RoutePrincipal } from "@/lib/routeAccess";
+import type { RoutePrincipal } from "@/lib/routeAccess";
+import { requestPrincipalKind } from "./requestPrincipal";
 
 export const DEMO_SNAPSHOT_MAX_AGE_MS = 96 * 60 * 60_000;
 
@@ -25,13 +26,7 @@ export function demoSnapshotMaxAgeMs(
     : operatorMaxAgeMs;
 }
 
-/**
- * Resolve the request's principal and return the window `dbFirstRead` should
- * apply. No rate budget is passed, so this adds no limiter to routes that rely
- * on the middleware perimeter, and a denied resolution keeps the operator
- * window (middleware still owns the rejection).
- */
+/** Resolve the request's principal and return the window `dbFirstRead` should apply. */
 export async function snapshotMaxAgeMs(operatorMaxAgeMs: number): Promise<number> {
-  const access = await requireRouteAccess();
-  return demoSnapshotMaxAgeMs(operatorMaxAgeMs, access.ok ? access.principal.kind : null);
+  return demoSnapshotMaxAgeMs(operatorMaxAgeMs, await requestPrincipalKind());
 }
