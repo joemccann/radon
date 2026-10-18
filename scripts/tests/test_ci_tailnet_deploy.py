@@ -147,3 +147,14 @@ def test_connect_tailscale_action_pins_tarball_version_and_checksum() -> None:
     assert "--advertise-tags=" in text
     assert "oauth-client-id" in text
     assert "oauth-secret" in text
+
+
+def test_cutover_runbook_names_the_host_key_drone_ssh_negotiates() -> None:
+    # appleboy/ssh-action v1.2.5 runs drone-ssh 1.8.2, which negotiates the
+    # host's ECDSA key first. An ed25519 fingerprint in VPS_SSH_FINGERPRINT
+    # fails all three host jobs with "host key fingerprint mismatch".
+    text = (ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
+    section = text.split("### CI deploy over the tailnet", 1)[1].split("\n### ", 1)[0]
+    assert "ssh_host_ed25519_key.pub" not in section
+    assert "ssh-keyscan -t ecdsa" in section
+    assert "host key fingerprint" in section
