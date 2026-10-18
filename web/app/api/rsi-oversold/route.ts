@@ -4,6 +4,7 @@ import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead, staleCollapse } from "@/lib/dbFirstRead";
+import { snapshotMaxAgeMs } from "@/lib/demo/snapshotWindow";
 export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
@@ -52,7 +53,7 @@ export async function GET(): Promise<Response> {
   const result = await dbFirstRead({
     fromDb: readRsiOversoldFromDb,
     fromDisk: readRsiOversoldFromDisk,
-    maxAgeMs: RSI_OVERSOLD_MAX_AGE_MS,
+    maxAgeMs: await snapshotMaxAgeMs(RSI_OVERSOLD_MAX_AGE_MS),
     label: "rsi-oversold",
   });
   const response = NextResponse.json(
