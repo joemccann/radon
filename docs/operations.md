@@ -300,15 +300,56 @@ uses the verb and refuses rather than falling back. Recovery after a hand-edit
 of `/etc/radon/env`: run the verb as root. Contract:
 `cloud/tests/test_mcp_env_ownership.py`.
 
-**The served media volume is read-only outside the newsfeed (2026-10-18).**
-`media.radon.run` serves `/var/lib/radon/media` through Caddy `file_server`,
-which follows symlinks, so write access inside a container let it have the
-host Caddy process read a file the container cannot. `radon-app-runtime` now
-binds that volume `:ro` into every app-plane unit except
-`radon-newsfeed.service`, which downloads the images. The newsfeed's own write
-path still reaches the directory Caddy serves; closing it needs a publication
-directory no container can modify and remains an open operator action.
-Contract: `cloud/tests/test_app_runtime.py`.
+### Public media publication
+
+The newsfeed writes staging files under
+`/var/lib/radon/media`; application mounts keep their existing paths and modes.
+Caddy serves independent snapshots under `/var/lib/radon-public/media`, owned
+by `root:caddy` with directory mode `0750` and file mode `0640`. No application
+container mounts that tree. The credential-free, root-owned
+`radon-media-publish.service` copies canonical PNG leaves, never links or
+subdirectories. It pins directory and file descriptors, verifies source ownership
+and a stable single-link regular file, bounds file/count/byte work, and replaces
+each destination atomically. Existing filenames and `https://media.radon.run/`
+URLs are preserved. Private research media continues through its existing
+subscriber API and is independent of this public tree.
+
+The `.path` unit notices new staging entries; the 15-second retry timer handles
+incomplete writes, missed events and deferred batches. A protected index avoids
+rereading unchanged image bytes. Each batch reserves at most 256 MiB for attempted
+source and destination reads, including failed reads and one-byte growth sentinels; each image
+at most 80 MiB, and source enumeration stops at 20,000 entries. Initially oversized files are rejected before opening. The producer in
+`scripts/newsfeed/media.js` decodes and re-encodes source formats as single-frame
+PNG under a 16,000,000-pixel bound. The publisher independently checks PNG
+chunk framing, CRCs, IHDR dimensions and terminal IEND with no trailing bytes;
+it does not decode image pixels as root. Non-PNG extensions and malformed or
+oversized PNGs are rejected, with prior published bytes retained. The publisher
+preserves every supported leaf still present in staging, including older files.
+Staging cleanup alone owns its 90-day/5,000-file retention policy. More than
+5,000 supported source leaves fails before any public copy or removal rather
+than selecting a subset of existing URLs. Only actual staging removals are
+mirrored, after a complete successful scan. Invalid replacements
+retain the previous approved bytes; an unavailable or replaced staging directory
+never triggers deletion. Images that remain deferred are retried on the next fire.
+Failures are visible through systemd and the existing unit watchdog; this root
+service has no production database credentials and writes no service-health row.
+
+Rollout installs the publisher and service/path/timer through the verified
+control-plane bundle. Before the new Caddy root can become live, `publish-caddy`
+synchronously drains up to 20 cached batches and enables the watcher and timer.
+A failed or incomplete initial migration leaves the previous Caddy configuration
+active. A large backlog can be advanced by running the installed publisher as
+root; exit 75 means another bounded batch is needed. Fresh-host setup uses the
+same drain-before-switch order. Source compatibility paths and legacy reader
+ACLs remain available during this rollout.
+
+Rollback restores the reviewed previous Caddy configuration through the standard
+release rollback, then root may stop and disable `radon-media-publish.path` and
+`radon-media-publish.timer` after confirming the old root is serving. Keep both
+the staging and protected trees intact during rollback. Do not point the producer
+at the protected tree or recursively change ownership of staging. B2 backup keeps
+using staging; restored files return there and pass through publication again.
+Contract: `cloud/tests/test_media_publication.py`.
 
 **Privileged file-op hardening (2026-09-20).** `setup-vps.sh` stages
 root-installed artifacts from committed git blobs (`git cat-file`) rather
@@ -444,7 +485,7 @@ Three deployment modes selected by `IB_GATEWAY_MODE`:
 
 **Hetzner control boundary.** `radon-ib-gateway.service`, the watchdog adapter, admin controls, boot, and operator commands all call the installed monorepo helper at `/usr/local/bin/radon-ib-gateway-control` (sourced from `/home/radon/radon/cloud`). FastAPI runs with `IB_GATEWAY_MODE=cloud` and must not inspect or mutate the production Compose project directly. Set `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud`. Secrets are `/etc/radon/env` (`0640` root:radon); `/home/radon/radon-cloud/.env` is a compatibility symlink. Root demotion of the helper must run from a radon-readable cwd (never leave cwd as `/root`).
 
-Caddy is not in group `radon` (that gid reads the env file). `media.radon.run` is served from `/var/lib/radon/media` via group `radon-media` and a parent traverse ACL. The recursive ACL refresh in `setup-vps.sh` and `publish-caddy` runs as `radon`, which owns the tree; if it reports a permission error, a file under media is not radon-owned (`chown -hR radon /var/lib/radon/media` as root).
+Caddy is not in group `radon` (that gid reads the env file). `media.radon.run` serves protected snapshots from `/var/lib/radon-public/media` via group `caddy`. Legacy `radon-media` staging read ACLs remain during rollout and rollback; publication never changes source ownership or permissions. For permission errors, inspect the publisher unit and the affected leaf rather than recursively changing staging ownership.
 
 **ib_insync request bounding.** `ib_insync` has no built-in timeout on its async API calls — `qualifyContractsAsync`, `reqHistoricalDataAsync`, and `reqMktData` will block forever when the gateway is logged in but the user session isn't authenticated (the 2FA-pending state). Any script that imports `ib_insync` directly must wrap each await in `asyncio.wait_for(..., timeout=15)` and pre-check `auth_state == "authenticated"` against FastAPI `/health` before instantiating `IB()`. `cri_scan.py` is the reference implementation.
 
