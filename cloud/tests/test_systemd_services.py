@@ -175,6 +175,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-flex-pull.timer",
     "radon-vix-pc.service",
     "radon-vix-pc.timer",
+    "radon-vix-model-spread.service",
+    "radon-vix-model-spread.timer",
 ]
 
 LONG_RUNNING_SERVICES = [
@@ -1769,3 +1771,25 @@ class TestTradingViewAlertsDrain:
         assert timer["oncalendar"] == "*:02/5:23"
         assert timer["persistent"] == "false"
         assert timer.get("unit", "radon-tv-alerts.service") == "radon-tv-alerts.service"
+
+
+def test_vix_model_spread_timer_install_and_source_contract():
+    """A merged indicator installs automatically with the exact UI countdown slot."""
+    import hashlib
+
+    cloud = Path(__file__).parents[1]
+    timer = (cloud / 'services/radon-vix-model-spread.timer').read_text()
+    service = (cloud / 'services/radon-vix-model-spread.service').read_text()
+    assert 'OnCalendar=*-*-* 02:50:00 UTC' in timer
+    assert 'RandomizedDelaySec=0' in timer
+    assert 'Persistent=true' in timer
+    assert 'User=radon' in service
+    assert 'scripts/fetch_vix_model_spread.py' in service
+    assert 'Environment=RADON_DB_NO_REPLICA=1' in service
+    manifest = (cloud / 'config/installed-units.sha256').read_text()
+    setup = (cloud / 'scripts/setup-vps.sh').read_text()
+    for suffix in ('service', 'timer'):
+        name = f'radon-vix-model-spread.{suffix}'
+        digest = hashlib.sha256((cloud / 'services' / name).read_bytes()).hexdigest()
+        assert f'{digest}  {name}' in manifest
+        assert f'  {name}\n' in setup
