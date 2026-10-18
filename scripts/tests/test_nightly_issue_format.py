@@ -3,8 +3,8 @@
 The loops post to rolling issues (security #204, testing #83, reliability
 #81, CI performance #196, documentation #202). Every loop runs on
 scripts/runner/run_loop.sh; for security and DeepSec the root-owned post-run
-hook (scripts/runner/hooks/security_post.sh) posts a PHASE STAMP status
-dead-man line. Non-security agents still write the three-section update. The
+hook (scripts/runner/hooks/security_post.sh) posts the machine-readable
+phase line. Non-security agents still write the three-section update. The
 hook creates the issue once with a timeless rolling-dead-man description; run
 history stays in comments.
 """
@@ -402,7 +402,8 @@ class TestWrappersAndSkillsUseTheTemplate:
         assert "**Issue discovered**" not in fmt, wrapper.name
         assert "Fixed with green deployment" not in fmt, wrapper.name
         assert "Nothing went wrong this" not in fmt, wrapper.name
-        assert "'**%s** %s **%s**'" in fmt, wrapper.name
+        assert "phase_status_body" in fmt, wrapper.name
+        assert "'**%s** %s **%s**'" not in fmt, wrapper.name
 
     @pytest.mark.parametrize("skill", SKILLS, ids=lambda p: p.stem)
     def test_skill_pr_body_uses_the_pr_template_not_the_issue_headings(self, skill: Path):
@@ -472,7 +473,8 @@ class TestWrapperFormatterNeverExecsDiskPython:
     @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
     def test_wrapper_deadman_interpolates_phase_and_status(self, wrapper: Path):
         fmt = _format_issue_body_fn(wrapper)
-        assert "'**%s** %s **%s**'" in fmt, wrapper.name
+        assert "phase_status_body" in fmt, wrapper.name
+        assert "'**%s** %s **%s**'" not in fmt, wrapper.name
         assert "**Issue discovered**" not in fmt, wrapper.name
 
     @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
@@ -504,7 +506,9 @@ class TestSanitizeUsesPinnedSed:
         planted.chmod(planted.stat().st_mode | stat.S_IXUSR)
         script = tmp_path / "run.sh"
         script.write_text(
-            "#!/usr/bin/env bash\nset -euo pipefail\nISSUE_SANITIZE=1\n"
+            "#!/usr/bin/env bash\nset -euo pipefail\n"
+            + _phase_status_preamble()
+            + "ISSUE_SANITIZE=1\n"
             + fns
             + f"\n_format_issue_body audit OK {_secret_detail()!r}\n",
             encoding="utf-8",
@@ -519,8 +523,7 @@ class TestSanitizeUsesPinnedSed:
         assert proc.returncode == 0, proc.stderr
         assert "PWNED_FROM_PATH_SED" not in proc.stdout, proc.stdout
         assert "Hq7notreal" not in proc.stdout
-        assert "**audit**" in proc.stdout
-        assert "**OK**" in proc.stdout
+        assert "exit=0" in proc.stdout
         assert "**Issue discovered**" not in proc.stdout
 
 
@@ -534,8 +537,11 @@ class TestSecurityBashFallbackSanitizes:
         fns = _secret_ere_block(src) + src[start:end]
         script = tmp_path / "run.sh"
         script.write_text(
-            "#!/usr/bin/env bash\nset -euo pipefail\nISSUE_SANITIZE=1\n"
+            "#!/usr/bin/env bash\nset -euo pipefail\n"
+            + _phase_status_preamble()
+            + "ISSUE_SANITIZE=1\n"
             + fns
+            + f"\n_sanitize_issue_text {self.RAW!r}\n"
             + f"\n_format_issue_body audit OK {self.RAW!r}\n",
             encoding="utf-8",
         )
@@ -547,8 +553,8 @@ class TestSecurityBashFallbackSanitizes:
         )
         assert proc.returncode == 0, proc.stderr
         out = proc.stdout
-        assert "**audit**" in out
-        assert "**OK**" in out
+        assert "exit=0" in out
+        assert "[REDACTED]" in out
         assert "**Issue discovered**" not in out
         assert "/api/orders/place" not in out
         assert "scripts/api/server.py:412" not in out
@@ -612,8 +618,11 @@ class TestSecurityBashSanitizesCredentialLiterals:
         detail = "scanner tail: " + " ".join(literals.values()) + " sha 1f04011f"
         script = tmp_path / "run.sh"
         script.write_text(
-            "#!/usr/bin/env bash\nset -euo pipefail\nISSUE_SANITIZE=1\n"
+            "#!/usr/bin/env bash\nset -euo pipefail\n"
+            + _phase_status_preamble()
+            + "ISSUE_SANITIZE=1\n"
             + fns
+            + f"\n_sanitize_issue_text {detail!r}\n"
             + f"\n_format_issue_body audit OK {detail!r}\n",
             encoding="utf-8",
         )
@@ -640,6 +649,14 @@ _QUOTED_SECRETS = {
     "hyphenated_header": ("X-API-Key: qz9NOTREAL222", "qz9NOTREAL222"),
     "hyphenated_lower": ("api-key=qz0NOTREAL333", "qz0NOTREAL333"),
 }
+
+
+def _phase_status_preamble() -> str:
+    lib = (REPO / "scripts" / "runner" / "phase_status.sh").read_text(encoding="utf-8")
+    return (
+        "LOOP=security\nPHASE_RC=0\nPHASE_AUDITED_SHA=\nPHASE_REFUSED=\n"
+        "PHASE_KILLED=\nPHASE_HOOK_REQUIRED=\n" + lib + "\n"
+    )
 
 
 def _secret_ere_block(src: str) -> str:
