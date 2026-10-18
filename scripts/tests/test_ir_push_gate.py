@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -182,6 +183,28 @@ class TestScanCommitRange:
                 env={"GROK_PAGE_AUTOPUSH": "1"},
             )
         assert IB_EXEC not in str(exc.value)
+
+    def test_commit_identity_fields_are_scanned_like_the_message(self, repo):
+        """`git push` publishes the commit OBJECT, so the author and committer
+        identities go public with it. The scan read only %H and %B, so a
+        recognisable identifier parked in an author name or email reached the
+        public repository with clean messages, patches and PR text."""
+        for field, value in (
+            ("user.name", f"responder {PAPER_ACCOUNT}"),
+            ("user.email", f"{IB_EXEC}@example.invalid"),
+        ):
+            assert _git(repo, "config", field, value).returncode == 0
+            _commit(repo, f"x = {len(value)}\n", "fix: clean message")
+            found = gate.scan_commit_range(repo, "main", "fix/relay")
+            assert any("commit identity" in item for item in found), (field, found)
+            assert value not in json.dumps(found)
+            assert PAPER_ACCOUNT not in json.dumps(found)
+            assert IB_EXEC not in json.dumps(found)
+            assert _git(repo, "config", field, "t" if field == "user.name" else "t@example.invalid").returncode == 0
+
+    def test_a_clean_identity_adds_no_finding(self, repo):
+        _commit(repo, "x = 2\n", "fix: clean message")
+        assert gate.scan_commit_range(repo, "main", "fix/relay") == []
 
     def test_deleted_file_in_an_earlier_commit_is_still_scanned(self, repo):
         report = repo / "diagnostic.txt"
@@ -471,3 +494,64 @@ class TestCliBuildsARealBody:
         )
         assert ir.main(["--head", "fix/relay"]) == 2
         assert "description invalid" in capsys.readouterr().err
+
+
+# DS-2026-10-17-22: both jobs inspect attacker-influenced branches with
+# subprocess.run(capture_output=True), which buffers the child's complete
+# output in memory. One oversized blob, patch or commit message could exhaust
+# memory and terminate the run instead of producing a refusal.
+
+
+def test_bounded_run_refuses_output_past_the_cap_without_buffering_it(tmp_path):
+    produced = tmp_path / "produced"
+    argv = [
+        sys.executable,
+        "-I",
+        "-c",
+        # Write far past the cap, in chunks, so the reader has to stop early.
+        "import sys\n"
+        "chunk = b'x' * 65536\n"
+        "for _ in range(400):\n"
+        "    sys.stdout.buffer.write(chunk)\n"
+        "    sys.stdout.buffer.flush()\n"
+        f"open({str(produced)!r}, 'w').write('finished')\n",
+    ]
+    with pytest.raises(gate.IrPushRefused) as refusal:
+        gate.bounded_run(argv, limit=1 << 20)
+    assert "too large" in str(refusal.value)
+    # The child is killed at the cap, not waited out.
+    assert not produced.exists()
+
+
+def test_bounded_run_returns_complete_output_under_the_cap():
+    argv = [sys.executable, "-I", "-c", "print('under the cap')"]
+    proc = gate.bounded_run(argv)
+    assert proc.returncode == 0
+    assert proc.stdout.strip() == "under the cap"
+
+
+def test_bounded_run_preserves_the_exit_code_and_timeout():
+    argv = [sys.executable, "-I", "-c", "raise SystemExit(3)"]
+    assert gate.bounded_run(argv).returncode == 3
+    with pytest.raises(subprocess.TimeoutExpired):
+        gate.bounded_run(
+            [sys.executable, "-I", "-c", "import time; time.sleep(30)"], timeout=1
+        )
+
+
+def test_undecodable_output_is_a_refusal_not_a_crash():
+    argv = [
+        sys.executable,
+        "-I",
+        "-c",
+        "import sys; sys.stdout.buffer.write(b'\\xff\\xfe not utf-8')",
+    ]
+    with pytest.raises(gate.IrPushRefused):
+        gate.bounded_run(argv)
+
+
+def test_both_jobs_scan_through_the_bounded_runner():
+    import grok_fix_pickup
+
+    assert gate._default_runner is gate.bounded_run
+    assert grok_fix_pickup._default_runner is gate.bounded_run

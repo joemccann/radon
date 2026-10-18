@@ -25,7 +25,7 @@ def _final_invocation() -> str:
     script = next(s for s in job["steps"] if s.get("name") == "Deploy via SSH")["with"]["script"]
     # Execute the real workflow tail after recovery and control-plane sync.
     # A source grep for the flag would also pass if it were never exported.
-    tail = script.split('bash "$RUNNER/cloud/scripts/sync-control-plane.sh"\n', 1)[1]
+    tail = script.split('bash "$RUNNER/cloud/scripts/sync-control-plane.sh" "$SHA"\n', 1)[1]
     return tail.split("fi\n", 1)[1].split('"$RUNNER/cloud/scripts/prune-deploy-runners.py"', 1)[0]
 
 

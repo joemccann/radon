@@ -6,6 +6,7 @@ describe("classifyRateTier", () => {
     expect(classifyRateTier("POST", "/api/assistant")).toBe("D");
     expect(classifyRateTier("GET", "/api/ticker/seasonality")).toBe("D");
     expect(classifyRateTier("GET", "/api/ticker/info")).toBe("D");
+    expect(classifyRateTier("POST", "/api/newsfeed/explain")).toBe("D");
   });
 
   it("expensive scans are tier B before the mutation bucket catches them", () => {
