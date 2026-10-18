@@ -1114,3 +1114,27 @@ Missing or rejected credentials produce an error heartbeat while preserving prev
 ## NVIDIA model settings in the restricted newsfeed runtime
 
 The runtime renderer passes `NVIDIA_TEXT_MODEL`, `NVIDIA_VISION_MODEL`, and `NVIDIA_MODEL` explicitly into `radon-newsfeed.service`; arbitrary `NVIDIA_*` keys remain excluded. After an approved model-setting change, regenerate the runtime environment through the normal deployment procedure and restart the affected consumer. Existing processes do not reload host environment edits automatically. Keep the hosted [Nemotron Super VL pilot](nemotron-super-vl-pilot.md) vision-only until its quality gates pass; remove or restore the override and regenerate/restart to roll back.
+
+### Deploy lock transition
+
+The protected deploy lock is `/var/lib/radon-lock/deploy.lock`, provisioned
+root:radon `0640` under a root:radon `0750` directory by trusted control-plane
+bootstrap or initial setup. The fixed tmpfiles contract preserves those
+permissions across boot. Consumers open the existing inode without replacing
+it. A missing primary refuses normal deployment and operator mutation.
+
+During transition, updated deploy, operator, Gateway, admin-control, cleanup
+and image-prune consumers acquire the protected lock first and then the existing
+`/home/radon/.radon-deploy.lock`. The compatibility inode is retained unchanged
+for older installed consumers. Do not delete either lock to clear contention.
+The supervisor alone holds both descriptors; bounded children cannot retain
+them after it exits.
+
+The first upgraded CI runner may perform its recovery-only pass under the
+existing compatibility lock before trusted bootstrap provisions the primary.
+This exception cannot run a normal deployment. Subsequent recovery uses both
+locks. The observer checks both generations and permits an absent primary only
+so the first trusted provisioning step remains reachable. Rollback retains both
+inodes, allowing older consumers to serialize against updated consumers without
+changing ownership or splitting the lock domain. No Gateway restart is part of
+lock provisioning.

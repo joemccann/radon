@@ -62,6 +62,7 @@ readonly -a CONTROL_PLANE_SOURCES=(
   services/radon-ai-cycle-backfill.service.d/runtime-container.conf
   services/radon-aa-frontier-refresh.service.d/runtime-container.conf
   services/radon-research-archive.service.d/runtime-container.conf
+  config/tmpfiles.d/radon-deploy.conf
 )
 readonly -a CONTROL_PLANE_TARGETS=(
   /usr/local/sbin/radon-deploy-root
@@ -114,6 +115,7 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/systemd/system/radon-ai-cycle-backfill.service.d/runtime-container.conf
   /etc/systemd/system/radon-aa-frontier-refresh.service.d/runtime-container.conf
   /etc/systemd/system/radon-research-archive.service.d/runtime-container.conf
+  /usr/lib/tmpfiles.d/radon-deploy.conf
 )
 readonly -a CONTROL_PLANE_MODES=(
   755 755 755 644 755 644 644 755 755 644
@@ -124,6 +126,7 @@ readonly -a CONTROL_PLANE_MODES=(
   644 644 644 644 644
   644 644
   644 644 644 644 644
+  644
   644
 )
 
@@ -389,7 +392,7 @@ broker_control_plane_source() {
     scripts/deploy-root-helper.sh|scripts/ib-gateway-control.sh|\
     scripts/ib-operator-hold.sh|scripts/operator-radon.sh|\
     repo/scripts/utils/ib_operator_hold.py|\
-    scripts/radon-docker-gw.sh|docker-compose.yml|\
+    scripts/radon-docker-gw.sh|docker-compose.yml|config/tmpfiles.d/radon-deploy.conf|\
     services/radon-ib-gateway.service|services/radon-ib-gateway-preheld-restart.service|\
     services/radon-ib-watchdog.service|services/radon-ib-watchdog.timer|\
     services/radon-ib-gateway-remote.service) return 0 ;;
@@ -2031,6 +2034,12 @@ refresh_install_file() {
     */radon/seccomp/*.json)
       if ! "$SESSION_PYTHON" -I -c 'import json, sys; sys.exit(json.load(open(sys.argv[1], encoding="utf-8")).get("defaultAction") != "SCMP_ACT_ERRNO")' "$candidate"; then
         echo "seccomp profile validation failed: ${dest}" >&2
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+    */tmpfiles.d/radon-deploy.conf)
+      if ! "$SESSION_PYTHON" -I -c 'import pathlib,sys; lines=[x.strip() for x in pathlib.Path(sys.argv[1]).read_text().splitlines() if x.strip() and not x.lstrip().startswith("#")]; sys.exit(lines != ["d /var/lib/radon-lock 0750 root radon -", "f /var/lib/radon-lock/deploy.lock 0640 root radon -"])' "$candidate"; then
         "$RM" -f "$candidate"
         return 73
       fi

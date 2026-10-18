@@ -1361,11 +1361,36 @@ jobs:
             # previous deploy was in its last minute; a manual re-run shipped
             # it). deploy.sh itself stays non-blocking; this observer waits a
             # bounded time for the lock to free, then lets deploy.sh decide.
-            DEPLOY_LOCK_FILE="${RADON_DEPLOY_LOCK_FILE:-${HOME}/.radon-deploy.lock}"
+            DEPLOY_LOCK_FILE="${RADON_DEPLOY_LOCK_FILE:-/var/lib/radon-lock/deploy.lock}"
+            LEGACY_DEPLOY_LOCK_FILE="${RADON_DEPLOY_LEGACY_LOCK_FILE:-${HOME}/.radon-deploy.lock}"
             DEPLOY_LOCK_WAIT_SECS="${RADON_DEPLOY_LOCK_WAIT_SECS:-480}"
+            deploy_locks_are_free() {
+              # Missing primary is allowed only for this observer before the
+              # first trusted bootstrap. Nonblocking opens refuse FIFO names.
+              /usr/bin/python3.13 -I - "$DEPLOY_LOCK_FILE" "$LEGACY_DEPLOY_LOCK_FILE" <<'PY_DEPLOY_LOCKS'
+            import fcntl, os, stat, sys
+            descriptors = []
+            try:
+                for path in dict.fromkeys(sys.argv[1:]):
+                    try:
+                        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                    except FileNotFoundError:
+                        continue
+                    descriptors.append(fd)
+                    held, named = os.fstat(fd), os.lstat(path)
+                    if not stat.S_ISREG(named.st_mode) or (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino):
+                        raise OSError("deploy lock changed")
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                raise SystemExit(1)
+            finally:
+                for fd in reversed(descriptors):
+                    os.close(fd)
+            PY_DEPLOY_LOCKS
+            }
             wait_for_deploy_lock() {
               local waited=0
-              while ! flock -n "$DEPLOY_LOCK_FILE" true 2>/dev/null; do
+              while ! deploy_locks_are_free 2>/dev/null; do
                 if (( waited >= DEPLOY_LOCK_WAIT_SECS )); then
                   echo "production deploy lock still held after ${waited}s; handing over to deploy.sh" >&2
                   return 0
