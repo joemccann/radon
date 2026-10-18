@@ -1,5 +1,5 @@
 /**
- * VIX P/C indicator — payload types + pure helpers for the 5-session
+ * VIX P/C indicator - payload types + pure helpers for the 5-session
  * cumulative VIX put/call regime tab.
  *
  * Mirrors the GET /api/vix-pc contract: five-session sum of VIX put volume
@@ -133,7 +133,11 @@ export interface VixPcChartRow {
 export function buildVixPcChartRows(series: ReadonlyArray<VixPcEntry>): VixPcChartRow[] {
   return series.map((entry) => ({
     date: entry.date,
-    cum5_ratio: entry.cum5_ratio,
-    daily_ratio: entry.daily_ratio,
+    cum5_ratio: entry.cum5_ratio != null && Number.isFinite(entry.cum5_ratio)
+      ? entry.cum5_ratio
+      : null,
+    daily_ratio: entry.daily_ratio != null && Number.isFinite(entry.daily_ratio)
+      ? entry.daily_ratio
+      : null,
   }));
 }

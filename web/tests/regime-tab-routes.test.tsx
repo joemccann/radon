@@ -84,6 +84,7 @@ describe.each([
   ["ivrank", "app/regime/ivrank/page.tsx"],
   ["iv-spread", "app/regime/iv-spread/page.tsx"],
   ["vixts", "app/regime/vixts/page.tsx"],
+  ["vix-pc", "app/regime/vix-pc/page.tsx"],
   ["panic-index", "app/regime/panic-index/page.tsx"],
   ["dispersion", "app/regime/dispersion/page.tsx"],
   ["streaks", "app/regime/streaks/page.tsx"],
@@ -196,6 +197,9 @@ vi.mock("../components/IvSpreadPanel", () => ({
 }));
 vi.mock("../components/VixTsPanel", () => ({
   default: () => <div data-testid="vixts-panel-stub" />,
+}));
+vi.mock("../components/VixPcPanel", () => ({
+  default: () => <div data-testid="vix-pc-panel-stub" />,
 }));
 vi.mock("../components/PanicIndexPanel", () => ({
   default: () => <div data-testid="panic-index-panel-stub" />,
@@ -628,6 +632,20 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^VIX TS$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/vixts");
+  });
+
+  it("renders the VIX P/C panel when pathname is /regime/vix-pc", () => {
+    mockedPathname = "/regime/vix-pc";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("vix-pc-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("vixts-panel-stub")).toBeNull();
+  });
+
+  it("clicking VIX P/C tab pushes /regime/vix-pc", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^VIX P\/C$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/vix-pc");
   });
 
   it("renders the Panic Proxy panel when pathname is /regime/panic-index", () => {

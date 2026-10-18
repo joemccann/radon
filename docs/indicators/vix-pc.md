@@ -1,4 +1,4 @@
-# VIX P/C — 5-session cumulative VIX put/call ratio
+# VIX P/C  -  5-session cumulative VIX put/call ratio
 
 **Status:** authoritative build spec. Implementers follow this literally.
 Pattern authority: `.claude/skills/new-indicator/SKILL.md`.
@@ -179,7 +179,7 @@ script: `k = (n-1) * p/100`, then interpolate between `floor(k)` and
 
 ### C.3 Hand-computable worked examples (pin exactly)
 
-**Example 1 — nominal window of 5.**
+**Example 1  -  nominal window of 5.**
 
 ```
 puts  = [10, 20, 30, 40, 50]
@@ -188,17 +188,17 @@ daily_ratio last = 50 / 100 = 0.5 exactly
 cum5 = 150 / 500 = 0.3 exactly
 ```
 
-**Example 2 — zero call volume is None, not zero.**
+**Example 2  -  zero call volume is None, not zero.**
 
 ```
 puts = [10], calls = [0]  -> daily_ratio is None
 ```
 
-**Example 3 — first four sessions have no cum5.**
+**Example 3  -  first four sessions have no cum5.**
 
 A 4-row history emits `cum5_ratio: None` on every row.
 
-**Example 4 — fixture calibration (scratch-derived 2026-10-18, not from
+**Example 4  -  fixture calibration (scratch-derived 2026-10-18, not from
 the functions under test).** Against
 `scripts/tests/fixtures/vix_pc_sample.json` (500 rows, 2024-10-18 ..
 2026-10-16):
@@ -241,10 +241,10 @@ the calibration pins for that 500-row sample only.
 
 ---
 
-## D. Schema — migration `0096_vix_pc.sql`
+## D. Schema  -  migration `0096_vix_pc.sql`
 
 ```sql
--- 0096_vix_pc.sql — VIX 5-session cumulative put/call ratio.
+-- 0096_vix_pc.sql  -  VIX 5-session cumulative put/call ratio.
 -- Raw daily put/call volumes plus the single-day ratio. cum5_ratio is
 -- NULL for the first WINDOW-1 rows and when the 5-session call sum is 0.
 -- source is 'uw'. Recomputed on every run over the full stored series.
@@ -267,7 +267,7 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (96, dateti
 
 ---
 
-## E. Ingestion — `scripts/fetch_vix_pc.py`
+## E. Ingestion  -  `scripts/fetch_vix_pc.py`
 
 Model: `scripts/fetch_ivrank.py` (composed methods, stderr progress,
 atomic JSON, unchanged fast path). No IB rung.
@@ -380,12 +380,12 @@ rail `asOf`.
 - `scripts/watchdog/services.py`: window
   `{"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False}`
   plus the daily-bucket list, comment naming 02:00 UTC
-- `cloud/services/radon-vix-pc.service` — copy `radon-ivrank.service`
+- `cloud/services/radon-vix-pc.service`  -  copy `radon-ivrank.service`
   (`Type=oneshot`, `User=radon`, `WorkingDirectory=/home/radon/radon`,
   `EnvironmentFile=/etc/radon/env`, `Environment=RADON_DB_NO_REPLICA=1`,
   `Environment=RADON_UW_CALLER=vix-pc`, venv python directly,
   `TimeoutStartSec=300`)
-- `cloud/services/radon-vix-pc.timer` — `OnCalendar=*-*-* 02:00:00 UTC`,
+- `cloud/services/radon-vix-pc.timer`  -  `OnCalendar=*-*-* 02:00:00 UTC`,
   `Persistent=true`, `RandomizedDelaySec=120`, comment the 02:00 UTC
   reasoning
 - `cloud/scripts/setup-vps.sh` `SERVICE_FILES` append both units
@@ -398,7 +398,7 @@ rail `asOf`.
 
 ### F.1 FastAPI: none
 
-### F.2 Next.js — `web/app/api/vix-pc/route.ts`
+### F.2 Next.js  -  `web/app/api/vix-pc/route.ts`
 
 Copy `web/app/api/ivrank/route.ts`.
 
@@ -437,9 +437,9 @@ hasPost: false, extractTimestamp: d => d.scan_time })`),
 `web/lib/serviceHealthWindows.ts` entry:
 
 ```ts
-// ``vix-pc`` — radon-vix-pc.timer fires daily 02:00 UTC every calendar day
+// ``vix-pc``  -  radon-vix-pc.timer fires daily 02:00 UTC every calendar day
 // (weekend runs are unchanged-data heartbeats), so a uniform 26h window
-// matches its daily siblings. UW VIX options-volume only — no IB.
+// matches its daily siblings. UW VIX options-volume only  -  no IB.
 "vix-pc": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 ```
 
@@ -513,21 +513,21 @@ prefix it could collide with. There is no `vix` tab today; keep
 
 ## H. Test pins (write first, red before implementation)
 
-1. `scripts/tests/test_vix_pc.py` — fixture integrity; C.3 examples;
+1. `scripts/tests/test_vix_pc.py`  -  fixture integrity; C.3 examples;
    C.4 boundaries; fixture calibration to 6dp; Oct 8 is the series min;
    Jan 2025 coverage; migration 96 schema + upsert idempotency + 400-row
    chunks; unchanged path heartbeats without row upserts; UW raise +
    cache → `stale_source`; no cache → raise; writer arity.
-2. `web/tests/vix-pc-api.test.ts` — Turso beats older disk; disk
+2. `web/tests/vix-pc-api.test.ts`  -  Turso beats older disk; disk
    fallback; exact `MISSING_VIX_PC` at 200; no cross-service leak;
    `dynamic === "force-dynamic"`; cache tag `vix-pc`.
-3. `web/tests/vix-pc-panel.test.tsx` — loader label; empty state; strip
+3. `web/tests/vix-pc-panel.test.tsx`  -  loader label; empty state; strip
    values; freshness rail (`vix-pc-freshness-rail` / `vix-pc-strip-asof`
    / countdown `1h 30m` at 00:30 UTC); chart title; NaN guard; no em
    dash / cadence copy.
 4. Lockstep: `regime-tab-routes` describe.each + render/navigation;
    `service-health-windows` entry; `refresh-schedule` PINNED row.
-5. `web/e2e/vix-pc-tab.spec.ts` — route mocks + ambient, abort prices;
+5. `web/e2e/vix-pc-tab.spec.ts`  -  route mocks + ambient, abort prices;
    active tab, rendered paths, brush, missing-state copy.
 
 ---
