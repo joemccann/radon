@@ -184,6 +184,28 @@ class TestScanCommitRange:
             )
         assert IB_EXEC not in str(exc.value)
 
+    def test_commit_identity_fields_are_scanned_like_the_message(self, repo):
+        """`git push` publishes the commit OBJECT, so the author and committer
+        identities go public with it. The scan read only %H and %B, so a
+        recognisable identifier parked in an author name or email reached the
+        public repository with clean messages, patches and PR text."""
+        for field, value in (
+            ("user.name", f"responder {PAPER_ACCOUNT}"),
+            ("user.email", f"{IB_EXEC}@example.invalid"),
+        ):
+            assert _git(repo, "config", field, value).returncode == 0
+            _commit(repo, f"x = {len(value)}\n", "fix: clean message")
+            found = gate.scan_commit_range(repo, "main", "fix/relay")
+            assert any("commit identity" in item for item in found), (field, found)
+            assert value not in json.dumps(found)
+            assert PAPER_ACCOUNT not in json.dumps(found)
+            assert IB_EXEC not in json.dumps(found)
+            assert _git(repo, "config", field, "t" if field == "user.name" else "t@example.invalid").returncode == 0
+
+    def test_a_clean_identity_adds_no_finding(self, repo):
+        _commit(repo, "x = 2\n", "fix: clean message")
+        assert gate.scan_commit_range(repo, "main", "fix/relay") == []
+
     def test_deleted_file_in_an_earlier_commit_is_still_scanned(self, repo):
         report = repo / "diagnostic.txt"
         report.write_text(f"account={PAPER_ACCOUNT}\n")

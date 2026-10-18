@@ -219,10 +219,11 @@ def scan_commit_range(
 ) -> list[str]:
     """Findings for everything ``ref`` would publish on top of ``base``.
 
-    Scans each commit message (subject, body and trailers) and every line
-    and path any commit in the range adds, including merge resolutions.
-    Cleaning the tip does not remove private data from the history being
-    published (REL-296 / R-715). Removed lines are already public on a parent.
+    Scans each commit message (subject, body and trailers), the author and
+    committer identities the commit OBJECT carries, and every line and path
+    any commit in the range adds, including merge resolutions. Cleaning the
+    tip does not remove private data from the history being published
+    (REL-296 / R-715). Removed lines are already public on a parent.
     """
     run = runner or _default_runner
     repo = Path(repo)
@@ -233,17 +234,31 @@ def scan_commit_range(
     # The pushed branch name is public too.
     for kind in find_private_identifiers(ref):
         findings.append(f"{kind} in branch name")
-    log = _git(repo, ["log", "--format=%H%x00%B%x1e", f"{fork}..{ref}"], run)
+    # The identities are read with the message because `git push` publishes
+    # the commit OBJECT: an identifier parked in an author name or email goes
+    # public with clean messages, patches and PR text. A name or email cannot
+    # contain a NUL (it would terminate the commit header), so the field split
+    # is unambiguous; one that carries the RECORD separator is caught by the
+    # sha check on the following record, as a message always was.
+    log = _git(
+        repo,
+        ["log", "--format=%H%x00%an%x00%ae%x00%cn%x00%ce%x00%B%x1e", f"{fork}..{ref}"],
+        run,
+    )
     for record in log.split("\x1e"):
         if not record.strip():
             continue
-        sha, _, message = record.strip("\n").partition("\x00")
-        if not _SHA.fullmatch(sha.strip()):
+        fields = record.strip("\n").split("\x00", 5)
+        if len(fields) != 6 or not _SHA.fullmatch(fields[0].strip()):
             # A message carrying the record separator would otherwise
             # smuggle text past the scan as a fake sha field.
             raise IrPushRefused("cannot scan the branch: unparseable commit log")
+        sha, author_name, author_email, committer_name, committer_email, message = fields
         for kind in find_private_identifiers(message):
             findings.append(f"{kind} in commit message {sha.strip()[:12]}")
+        identity = "\n".join((author_name, author_email, committer_name, committer_email))
+        for kind in find_private_identifiers(identity):
+            findings.append(f"{kind} in commit identity {sha.strip()[:12]}")
     # Every commit's own patch, not one aggregate diff: pushing publishes
     # each intermediate blob, so content added then removed still counts.
     # --text and --no-textconv: a branch-authored .gitattributes (-diff,
