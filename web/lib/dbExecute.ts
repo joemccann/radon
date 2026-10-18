@@ -1,5 +1,5 @@
 // Bounded, self-healing Turso read — the canonical chokepoint every Next.js
-// route should use instead of a bare `getDb().execute(...)`.
+// route should use instead of a bare `getDb().execute(...)` / `getDb().batch(...)`.
 //
 // In the Node runtime `@libsql/client` resolves `libsql://`/`https://` to an
 // HTTP client whose undici keep-alive POOL can go stale (half-open sockets
@@ -12,7 +12,7 @@
 // wholesale still exercise the real bounding logic against their mocked client.
 // See `feedback_libsql_http_transport_no_wss_singleton`.
 
-import type { InStatement, ResultSet } from "@libsql/client";
+import type { InStatement, ResultSet, TransactionMode } from "@libsql/client";
 import { scrubSecrets } from "./apiContracts";
 import { getDb, resetDb, getPoolStats } from "./db";
 import { withTimeout } from "./asyncTimeout";
@@ -39,11 +39,12 @@ export function describeDbError(err: unknown): string {
   return discriminator ? `${message} (cause: ${discriminator})` : message;
 }
 
-export async function dbExecute(
-  stmt: InStatement,
-  opts: { timeoutMs?: number; label?: string } = {},
-): Promise<ResultSet> {
-  const { timeoutMs = DEFAULT_DB_READ_TIMEOUT_MS, label = "db" } = opts;
+async function runDbCall<T>(
+  label: string,
+  timeoutMs: number,
+  timeoutMessage: string,
+  call: () => Promise<T>,
+): Promise<T> {
   // REL-245 / F20260917-C04: demo-scoped callers must never read a
   // prod-marked DB. Enforced here so every dbExecute caller inherits it;
   // throws BEFORE the client is touched (no pool reset needed).
@@ -52,17 +53,34 @@ export async function dbExecute(
   identity.label ??= label;
   try {
     return await runWithDbOperation(identity, () =>
-      withTimeout(
-        getDb().execute(stmt),
-        timeoutMs,
-        `${label} read timed out after ${timeoutMs}ms`,
-      ),
+      withTimeout(call(), timeoutMs, timeoutMessage),
     );
   } catch (err) {
     console.warn(scrubSecrets(`[dbExecute:${label}] ${describeDbError(err)}${poolStatsSuffix()}`));
     resetDb(identity);
     throw err;
   }
+}
+
+export async function dbExecute(
+  stmt: InStatement,
+  opts: { timeoutMs?: number; label?: string } = {},
+): Promise<ResultSet> {
+  const { timeoutMs = DEFAULT_DB_READ_TIMEOUT_MS, label = "db" } = opts;
+  return runDbCall(label, timeoutMs, `${label} read timed out after ${timeoutMs}ms`, () =>
+    getDb().execute(stmt),
+  );
+}
+
+/** One Turso `/v2/pipeline` for independent statements (PERF-016). */
+export async function dbBatch(
+  stmts: InStatement[],
+  opts: { timeoutMs?: number; label?: string; mode?: TransactionMode } = {},
+): Promise<ResultSet[]> {
+  const { timeoutMs = DEFAULT_DB_READ_TIMEOUT_MS, label = "db", mode = "read" } = opts;
+  return runDbCall(label, timeoutMs, `${label} batch timed out after ${timeoutMs}ms`, () =>
+    getDb().batch(stmts, mode),
+  );
 }
 
 /** Best-effort — route tests mock @/lib/db wholesale without getPoolStats,
