@@ -2376,3 +2376,38 @@ class TestDocumentation20261017:
             assert re.findall(r"mcp==[0-9.]+", text) == []
             assert "requirements.txt" in text
 
+
+class TestDocumentation20261018:
+    """DOC-206..208: contracts that drifted after audited-through c1ea5501."""
+
+    def test_agy_recovery_does_not_use_a_google_token_endpoint(self):
+        src = (_ROOT / "scripts/subscription_tokens.py").read_text()
+        start = src.index('name="antigravity"')
+        block = src[start:src.index("\nclass Vault:")]
+        assert "token_url=None" in block
+        assert 'last_error="native CLI unavailable"' in src
+        owner = (_ROOT / "docs/subscription-tokens.md").read_text()
+        assert "falls back to Google's token endpoint" not in owner
+        reauth = owner.split("### antigravity (`agy`): paste-code over SSH", 1)[1]
+        reauth = reauth.split("\n## ", 1)[0]
+        assert "native CLI unavailable" in reauth
+        cloud = (_ROOT / "docs/cloud-services.md").read_text()
+        assert "proves each login with one real model call a day" not in cloud
+        section = cloud.split("## Subscription tokens (agent CLIs)", 1)[1]
+        section = section.split("\n## ", 1)[0]
+        assert "agy models" in section
+        assert "one real model call a day" in section
+        assert "does not use a token endpoint" in section
+
+    def test_vix_pc_migration_97_is_not_free(self):
+        sql = (_ROOT / "scripts/db/migrations/0097_vix_pc.sql").read_text()
+        assert "VALUES (97," in sql
+        spec = (_ROOT / "docs/indicators/vix-pc.md").read_text()
+        assert "97 is free" not in spec
+        assert "is **96**" not in spec
+        assert "0097_vix_pc.sql" in spec
+        index = (_ROOT / "docs/indicators/README.md").read_text()
+        row = next(line for line in index.splitlines() if line.startswith("| vix-pc |"))
+        assert "0097_vix_pc.sql" in row
+        assert "version 97" in row
+

@@ -33,7 +33,12 @@ eval "${!var:-exit 0}"
 """
 GH_STUB = f"""#!/bin/bash
 printf '%s\\n' "$*" >> "$CALLS/gh.argv"
-case "$*" in "pr list"*) echo "{PR_URL}" ;; esac
+case "$*" in
+  "pr list"*) echo "{PR_URL}" ;;
+  "issue list"*) echo "${{STUB_ISSUE:-81}}" ;;
+  "issue comment"*) echo "https://github.com/stub/radon/issues/81#issuecomment-1" ;;
+  "issue create"*) echo "https://github.com/stub/radon/issues/81" ;;
+esac
 """
 CURL_STUB = """#!/bin/bash
 printf '%s\\n' "$@" >> "$CALLS/curl.argv"
@@ -73,6 +78,7 @@ def rig(tmp_path):
     install = tmp_path / "install"
     (install / "loops").mkdir(parents=True)
     shutil.copy2(RUNNER, install / "run_loop.sh")
+    shutil.copy2(REPO / "scripts" / "runner" / "phase_status.sh", install / "phase_status.sh")
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -525,12 +531,16 @@ def _operations_issue_label(loop: str) -> str:
     return f"{loop}-nightly"
 
 
+def _gh_argv(rig) -> str:
+    path = rig.calls / "gh.argv"
+    return path.read_text() if path.exists() else ""
+
+
 @pytest.mark.parametrize("loop", _loops_without_post_run())
 def test_loops_without_a_post_run_hook_post_the_dead_man_from_the_prompt(loop):
-    """The runner never posts to GitHub for non-security loops (report() is
-    Pushover only). The agent prompt is the only place the dead-man comment
-    can come from, so every loop without POST_RUN must instruct the agent
-    to post it. A newly added loop without a hook is covered automatically."""
+    """The agent prompt still posts the narrative dead-man comment. The
+    harness posts the machine-readable phase line separately, so every loop
+    without POST_RUN must still tell the agent to post the write-up."""
     env = _loop_env_assignments(loop)
     assert "POST_RUN" not in env
     prompt = REPO / ".claude" / "runner-prompts" / f"{loop}.md"
@@ -913,6 +923,88 @@ def test_sigterm_kills_the_agent_pages_killed_and_runs_post_run(rig, tmp_path):
     assert not (rig.state / "doc.lock").exists()
 
 
+def test_a_finished_session_posts_exit_0_and_the_audited_sha(rig):
+    rig.configure(DEADMAN_LABEL="testing-nightly", DEADMAN_TITLE="Nightly testing runner")
+    proc = rig.run()
+    assert proc.returncode == 0, rig.log()
+    sha = subprocess.run(["git", "-C", str(rig.work), "rev-parse", "HEAD"],
+                         capture_output=True, text=True, check=True).stdout.strip()
+    posted = _gh_argv(rig)
+    assert f"loop=doc phase=audit exit=0 audited-through={sha}" in posted
+    assert f"audited-through: {sha}" in posted
+
+
+def test_a_nonzero_agent_exit_posts_exit_1_without_a_sha(rig):
+    rig.configure(DEADMAN_LABEL="testing-nightly", DEADMAN_TITLE="Nightly testing runner")
+    proc = rig.run(STUB_GROK="exit 3", STUB_CODEX="exit 5")
+    assert proc.returncode == 1
+    posted = _gh_argv(rig)
+    assert "loop=doc phase=audit exit=1" in posted
+    assert "audited-through" not in posted
+
+
+def test_a_timeout_posts_exit_124(rig):
+    rig.configure(DEADMAN_LABEL="testing-nightly", DEADMAN_TITLE="Nightly testing runner")
+    proc = rig.run(STUB_GROK="exit 124")
+    assert proc.returncode == 1
+    assert "loop=doc phase=audit exit=124" in _gh_argv(rig)
+    assert "audited-through" not in _gh_argv(rig)
+
+
+def test_a_missing_hook_status_posts_exit_1(rig):
+    rig.configure(PHASES="audit:60", POST_RUN="hooks/post.sh",
+                  DEADMAN_LABEL="testing-nightly", DEADMAN_TITLE="Nightly testing runner")
+    rig.hook("post.sh", ":\n")
+    proc = rig.run()
+    assert proc.returncode == 75, rig.log()
+    posted = _gh_argv(rig)
+    assert "loop=doc phase=audit exit=1" in posted
+    assert "audited-through" not in posted
+
+
+def test_a_hook_that_already_posted_is_not_posted_again(rig):
+    rig.configure(PHASES="audit:60", POST_RUN="hooks/post.sh",
+                  DEADMAN_LABEL="testing-nightly", DEADMAN_TITLE="Nightly testing runner")
+    rig.hook("post.sh", 'echo "status=OK"\necho "marker_posted=1"\n')
+    proc = rig.run()
+    assert proc.returncode == 0, rig.log()
+    assert "issue comment" not in _gh_argv(rig)
+
+
+def test_a_refused_phase_posts_exit_2(rig):
+    rig.configure(AGENTS="claude grok", ALLOWED_AGENTS="claude",
+                  DEADMAN_LABEL="security-nightly", DEADMAN_TITLE="Nightly security runner")
+    proc = rig.run()
+    assert proc.returncode == 2
+    assert "loop=doc phase=audit exit=2" in _gh_argv(rig)
+
+
+def test_a_clone_failure_posts_exit_70(rig, tmp_path):
+    rig.configure(REPO_URL=str(tmp_path / "missing.git"),
+                  DEADMAN_LABEL="testing-nightly", DEADMAN_TITLE="Nightly testing runner")
+    proc = rig.run()
+    assert proc.returncode == 70
+    assert "loop=doc phase=audit exit=70" in _gh_argv(rig)
+    assert "audited-through" not in _gh_argv(rig)
+
+
+def test_sigterm_still_posts_exit_1(rig, tmp_path):
+    rig.configure(PHASES="audit:60", POST_RUN="hooks/post.sh",
+                  DEADMAN_LABEL="testing-nightly", DEADMAN_TITLE="Nightly testing runner")
+    rig.hook("post.sh", 'echo "status=[$PHASE_STATUS]"\n')
+    marker = tmp_path / "agent.pid"
+    proc = rig.start(STUB_GROK=f"echo $$ > {marker}; sleep 300")
+    for _ in range(100):
+        if marker.exists() and marker.read_text().strip():
+            break
+        time.sleep(0.1)
+    proc.send_signal(signal.SIGTERM)
+    proc.wait(timeout=30)
+    assert proc.returncode == 143
+    assert "loop=doc phase=audit exit=1" in _gh_argv(rig)
+    assert "audited-through" not in _gh_argv(rig)
+
+
 # --- install.sh ---------------------------------------------------------------
 
 
@@ -946,12 +1038,13 @@ def test_every_runner_git_reads_the_root_owned_gitconfig():
 def test_install_copies_hooks_helpers_and_the_bot_state_dir():
     src = (REPO / "scripts" / "runner" / "install.sh").read_text()
     for helper in ("nightly_pr_guard.py", "nightly_publish.py", "nightly_issue_prune.py", "nightly_green_base.py",
-                   "nightly_audit_context.py", "nightly_deliver.py", "security_claude_ladder.py",
-                   "claude_cli_env_drift.py", "claude_cli_env_reviewed.txt", "nvidia_rate_limit.py",
-                   "ci/check_pr_body.py"):
+                   "nightly_audit_context.py", "nightly_phase_status.py", "nightly_deliver.py",
+                   "security_claude_ladder.py", "claude_cli_env_drift.py", "claude_cli_env_reviewed.txt",
+                   "nvidia_rate_limit.py", "ci/check_pr_body.py"):
         assert helper in src, helper
         assert (REPO / "scripts" / helper).is_file(), helper
     assert '"$SRC/hooks/"*' in src
+    assert 'atomic_install -o root -g wheel -m 644 "$SRC/phase_status.sh"' in src
     assert 'for dir in "$BOT_HOME/radon-runner" "$BOT_HOME/radon-runner/state" "$BOT_HOME/radon-runner/tmp"; do' in src
     assert 'as_bot /bin/mkdir -p -m 700 "$dir"' in src
     # Root never writes, chmods or chowns a path inside the bot's home.
@@ -1082,7 +1175,7 @@ def test_rel291_only_one_contender_can_reclaim_a_stale_lock(rig):
 # --- install.sh: source-tree trust -----------------------------------------------
 
 _LIB = ("nightly_pr_guard.py", "nightly_publish.py", "nightly_issue_prune.py", "nightly_green_base.py",
-        "nightly_audit_context.py", "nightly_deliver.py", "security_claude_ladder.py",
+        "nightly_audit_context.py", "nightly_phase_status.py", "nightly_deliver.py", "security_claude_ladder.py",
         "claude_cli_env_drift.py", "claude_cli_env_reviewed.txt", "nvidia_rate_limit.py",
         "ci/check_pr_body.py", "nightly_toolchain_update.py", "utils/atomic_io.py",
         "codex_capability_probe.py")

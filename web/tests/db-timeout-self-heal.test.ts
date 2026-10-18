@@ -27,11 +27,15 @@ afterEach(() => {
 
 function mockDb(overrides: {
   execute?: (...args: unknown[]) => Promise<unknown>;
+  batch?: (...args: unknown[]) => Promise<unknown>;
   syncDb?: () => Promise<void>;
 }) {
   const resetDb = vi.fn();
   vi.doMock("@/lib/db", () => ({
-    getDb: () => ({ execute: overrides.execute ?? hanging }),
+    getDb: () => ({
+      execute: overrides.execute ?? hanging,
+      batch: overrides.batch ?? hanging,
+    }),
     syncDb: overrides.syncDb ?? (async () => {}),
     resetDb,
   }));
@@ -104,9 +108,9 @@ describe("dbFirstRead self-heal", () => {
 });
 
 describe("readOrdersFromDb self-heal", () => {
-  it("calls resetDb when the open-orders read times out", async () => {
+  it("calls resetDb when the orders snapshot batch times out", async () => {
     vi.useFakeTimers();
-    const { resetDb } = mockDb({ execute: hanging });
+    const { resetDb } = mockDb({ batch: hanging });
     const { readOrdersFromDb } = await import("../lib/orders/readOrdersFromDb");
 
     const read = readOrdersFromDb();
@@ -120,6 +124,7 @@ describe("readOrdersFromDb self-heal", () => {
     vi.useFakeTimers();
     const { resetDb } = mockDb({
       execute: async () => ({ rows: [] }),
+      batch: async () => [{ rows: [] }, { rows: [] }],
       syncDb: () => hanging(),
     });
     const { readOrdersFromDb } = await import("../lib/orders/readOrdersFromDb");

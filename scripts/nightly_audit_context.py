@@ -63,6 +63,19 @@ def gh(gh_bin: str, args: list, timeout: int) -> str | None:
     return proc.stdout if proc.returncode == 0 else None
 
 
+def cursor_comment_counts(body: str) -> bool:
+    """A machine line that is not an audit exit 0 must not move the cursor.
+
+    ImportError keeps the old behavior so a runner install that has not yet
+    copied nightly_phase_status.py still reads legacy checkpoints.
+    """
+    try:
+        from nightly_phase_status import cursor_allowed
+    except ImportError:
+        return True
+    return cursor_allowed(body)
+
+
 def rolling_issue(gh_bin: str, repo: str, label: str, timeout: int):
     """(number, title, marker comments oldest first), or None if unreachable."""
     out = gh(gh_bin, ["issue", "list", "--repo", repo, "--label", label, "--state", "open",
@@ -84,7 +97,8 @@ def rolling_issue(gh_bin: str, repo: str, label: str, timeout: int):
             continue
         if not isinstance(row, dict) or row.get("author_association") not in TRUSTED_ASSOCIATIONS:
             continue
-        if MARKER.search(row.get("body") or ""):
+        body = row.get("body") or ""
+        if MARKER.search(body) and cursor_comment_counts(body):
             marked.append(row)
     return number, title, marked
 

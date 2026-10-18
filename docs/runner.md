@@ -463,10 +463,42 @@ Optional knobs (empty means off; the security loops use them):
 | `AGENTS_RESOLVER` | A root-owned script under `/usr/local/radon-runner`, run as `/opt/homebrew/bin/python3.13 -I <script> --rungs`; its stdout replaces `AGENTS`. Empty or failed output keeps `AGENTS` and is logged |
 | `KEEP_PATHS` | Relative paths moved into `state/<loop>/keep/` before the re-clone and back after it. Whatever is in `keep/` is always restored, so a crash leaves nothing behind and an operator can seed it |
 | `PHASES` | `name:secs ...`: one agent session per phase with its own timeout and a header carrying `Phase:` and `State:`. Every phase runs whatever the earlier rc; each pages `radon <loop> <phase>`. The runner exits 75 if any phase is not OK and 2 if one was refused |
-| `PRE_RUN` / `POST_RUN` | Root-owned hooks under `/usr/local/radon-runner`, run around each phase with `LOOP`, `PHASE`, `WORK`, `LOOP_STATE`, `BRANCH` (and, after it, `PHASE_RC`, `PHASE_LOG`, `PHASE_START_MARK`), the runner's `PATH`, and a 900s cap. A non-zero `PRE_RUN` skips the agent (`REFUSED`); its `refused=` reason is public dead-man text, so it names a class and never a path (the file goes to the runner log), and `POST_RUN` sanitizes it again (routes including dynamic segments, credential and session values, complete Cookie and Set-Cookie header lines); `POST_RUN` prints `status=` (`OK...` means success; the last one printed wins), `pr_url=` and `report_url=` for the page. A `POST_RUN` that prints no `status=` (timed out, crashed, missing) fails the phase. With `PRE_RUN` set, the header tells the agent to branch from `HEAD` (the base the hook pinned), not `origin/main` |
+| `PRE_RUN` / `POST_RUN` | Root-owned hooks under `/usr/local/radon-runner`, run around each phase with `LOOP`, `PHASE`, `WORK`, `LOOP_STATE`, `BRANCH` (and, after it, `PHASE_RC`, `PHASE_LOG`, `PHASE_START_MARK`, `PHASE_AUDITED_SHA`), the runner's `PATH`, and a 900s cap. A non-zero `PRE_RUN` skips the agent (`REFUSED`); its `refused=` reason names a class and never a path (the file goes to the runner log). The public issue comment does not include that reason. `POST_RUN` prints `status=` (`OK...` means success; the last one printed wins), `pr_url=`, `report_url=` and, after it has posted the phase line, `marker_posted=1`. A `POST_RUN` that prints no `status=` (timed out, crashed, missing) fails the phase. With `PRE_RUN` set, the header tells the agent to branch from `HEAD` (the base the hook pinned), not `origin/main` |
 | `GH_GUARD=1` | Puts `/usr/local/radon-runner/guard/<loop>/gh` first on the agent's `PATH`: every `pr` / `api` / `issue` / `alias` call goes through `nightly_pr_guard.py` |
+| `DEADMAN_LABEL` / `DEADMAN_TITLE` | When set, the harness posts the [phase status line](#phase-status-line) on the open issue with that label, creating it with the title if absent. Empty means no harness issue comment |
 
-Every agent gets `RADON_RUNNER_LOOP_STATE` (the loop's state directory), `RADON_RUNNER_PIDFILE` (list a detached job's pid there and the runner reaps it), `RADON_RUNNER_AGENT` and `RADON_RUNNER_MODEL`. After each agent the runner kills its process group, then every bot process whose cwd is in the loop's clone or state and every declared pid that started during the phase, except one that is, or descends from, another loop's live runner. On SIGTERM, including one that arrives while a hook runs, it does the same, pages `KILLED`, gives `POST_RUN` ten seconds and exits 143. The LaunchDaemon sets `DISABLE_AUTOUPDATER=1`, `TMPDIR` (the bot's `radon-runner/tmp/`) and `ExitTimeOut` 60. PR lookup ignores fork PRs.
+Every agent gets `RADON_RUNNER_LOOP_STATE` (the loop's state directory), `RADON_RUNNER_PIDFILE` (list a detached job's pid there and the runner reaps it), `RADON_RUNNER_AGENT` and `RADON_RUNNER_MODEL`. After each agent the runner kills its process group, then every bot process whose cwd is in the loop's clone or state and every declared pid that started during the phase, except one that is, or descends from, another loop's live runner. On SIGTERM, including one that arrives while a hook runs, it does the same, pages `KILLED`, gives `POST_RUN` ten seconds, posts the phase line if the hook did not, and exits 143. The LaunchDaemon sets `DISABLE_AUTOUPDATER=1`, `TMPDIR` (the bot's `radon-runner/tmp/`) and `ExitTimeOut` 60. PR lookup ignores fork PRs.
+
+## Phase status line
+
+The harness (`scripts/runner/phase_status.sh`, called from `run_loop.sh` and the security post-run hook) posts one comment per phase from the real process exit. The agent does not write it. `finish_phase` posts it, and the SIGTERM trap posts it again when the hook did not print `marker_posted=1`, so a crashed or killed phase still leaves a code.
+
+```
+<!-- radon-phase loop=testing phase=audit exit=0 audited-through=<sha> ts=2026-10-18T15:47:00Z -->
+radon-phase loop=testing phase=audit exit=0 audited-through=<sha> ts=2026-10-18T15:47:00Z
+audited-through: <sha>
+```
+
+Fields, in order: `loop`, `phase`, `exit`, optional `audited-through`, `ts` (`YYYY-MM-DDTHH:MM:SSZ`). Tokens are `[a-z0-9][a-z0-9-]*`.
+
+| Exit | Meaning |
+|---|---|
+| 0 | OK |
+| 1 | FAILED (agent or post-run hook failed, the hook gave no status, or the phase was signalled; the runner process still exits 143) |
+| 2 | REFUSED (a guard stopped the phase before the agent ran) |
+| 70 | GROUND TRUTH FAILED |
+| 75 | INCOMPLETE (resumable; a zero process exit whose hook status is `INCOMPLETE` or `TRUNCATED`) |
+| 124 | TIMEOUT (a process exit 124 stays 124 even when the deliver hook rewrites the status word to `INCOMPLETE`) |
+
+`audited-through` is present only for `phase=audit` with exit 0. The sha is `git rev-parse HEAD` taken after `PRE_RUN` and before the agent (the pinned green base). The colon form is what `scripts/nightly_audit_context.py` and `scripts/nightly_issue_prune.py` already match. A non-zero exit never carries it, and the audit-context reader ignores a machine line that is not an audit exit 0, so a failed phase cannot advance the cursor. Comments with no machine line stay eligible.
+
+Security and `security-deepsec` now post this public audit comment too. The body is the three lines above and nothing else: no finding text, no PR numbers for held fixes, no paths, no secrets, no refusal class. The class stays in the runner log and the Pushover `status=`. The private report is unchanged.
+
+Loops without `PHASES` (reliability, ci-performance, documentation, testing) run audit, remediate and deliver in one process. They post one comment, `phase=audit`, with that process's exit. They do not emit three codes. `performance` posts its real phase name (`perf`).
+
+`scripts/nightly_phase_status.py` parses the line and falls back to the banner (`Healthy` / `Fixed` / `Needs you` / `Incomplete`) and the old `**PHASE** STAMP **status**` wording. There is no separate nightly-runners report script in this repo. `joemccann/radon-factory` was not found; the runner lives here.
+
+`install.sh` copies `phase_status.sh` next to `run_loop.sh` and `nightly_phase_status.py` into `$PREFIX/lib`. Prompts update when the night re-clones `main`. The installed harness does not, until `install.sh` runs again (the scheduled root updater, or the operator command in the PR).
 
 ## Migration from the per-loop wrappers
 
