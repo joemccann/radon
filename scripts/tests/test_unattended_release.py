@@ -1224,7 +1224,12 @@ def _source_context_fixture(monkeypatch, reviews, *, repository=ur.REPO):
     def entry(path, sha, raw):
         return {"path":path,"type":"blob","mode":"100644","sha":sha,"size":len(raw)}
     objects={
-        f"repos/{repository}/git/commits/{ref}": {"sha":ref,"tree":{"sha":tree}}
+        f"repos/{repository}/git/commits/{ref}": {
+            "sha":ref,"tree":{"sha":tree},
+            "message":f"fix: tighten the admission check ({ref[:7]})",
+            "author":{"name":"radon bot","email":"bot@example.test","date":"2026-10-18T00:00:00Z"},
+            "committer":{"name":"radon bot","email":"bot@example.test","date":"2026-10-18T00:00:00Z"},
+        }
         for ref,tree in trees.items()
     }
     objects[f"repos/{repository}/git/trees/{trees[MAIN]}?recursive=1"]={"sha":trees[MAIN],"truncated":False,"tree":[entry("scripts/security.py",old,old_raw),entry("scripts/removed.py",removed,removed_raw)]}
@@ -1242,6 +1247,48 @@ def _source_context_fixture(monkeypatch, reviews, *, repository=ur.REPO):
 def _context_pr(repository=ur.REPO):
     patch="diff --git a/scripts/security.py b/scripts/security.py\n-    return False\n+    return True\n"
     return _pr(repository=repository,base_sha=MAIN,diff_digest=hashlib.sha256(patch.encode()).hexdigest()),patch
+
+
+# DS-2026-10-17-21: the review input covered the comparison diff and the
+# changed blobs but never the candidate's own commit message or author
+# metadata, while _publish transfers the original commit object into public
+# history. A nightly agent that put finding detail in a commit message would
+# publish it unreviewed.
+
+def test_review_context_carries_the_candidate_commit_metadata(monkeypatch,tmp_path):
+    reviews=ur.CodexReviews(_policy(),tmp_path/"reviews")
+    _source_context_fixture(monkeypatch,reviews)
+    pr,diff=_context_pr()
+    data=json.loads(reviews._review_payload(pr,diff,repository=ur.REPO,base_sha=MAIN))
+    head=data['commit_metadata']
+    assert head['sha']==HEAD
+    assert head['message']==f"fix: tighten the admission check ({HEAD[:7]})"
+    assert head['author']=={"name":"radon bot","email":"bot@example.test","date":"2026-10-18T00:00:00Z"}
+    assert head['committer']==head['author']
+
+
+def test_a_candidate_commit_message_that_is_not_bounded_text_is_refused(monkeypatch,tmp_path):
+    for message in (None, 12, "x"*40_001):
+        reviews=ur.CodexReviews(_policy(),tmp_path/f"reviews-{type(message).__name__}-{len(str(message))}")
+        objects,_=_source_context_fixture(monkeypatch,reviews)
+        objects[f"repos/{ur.REPO}/git/commits/{HEAD}"]["message"]=message
+        pr,diff=_context_pr()
+        with pytest.raises(ValueError):
+            reviews._review_payload(pr,diff,repository=ur.REPO,base_sha=MAIN)
+
+
+def test_commit_metadata_reaches_the_reviewer_prompt_as_reviewed_content(monkeypatch,tmp_path):
+    reviews=ur.CodexReviews(_policy(),tmp_path/"reviews")
+    _source_context_fixture(monkeypatch,reviews)
+    pr,diff=_context_pr()
+    payload=json.loads(reviews._review_payload(pr,diff,repository=ur.REPO,base_sha=MAIN))
+    # The digest the feedback record publishes must change when only the
+    # commit message changes, or the metadata is decorative.
+    import hashlib as _h
+    first=_h.sha256(json.dumps(payload,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+    payload['commit_metadata']['message']='different'
+    second=_h.sha256(json.dumps(payload,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+    assert first!=second
 
 
 def test_review_context_contains_complete_before_after_and_deleted_source(monkeypatch,tmp_path):
@@ -1559,3 +1606,16 @@ def test_existing_negative_review_receipt_is_never_overwritten(monkeypatch,tmp_p
     assert reviews._store_receipt(path,negative)==negative
     assert reviews._store_receipt(path,{'approved':True,'findings':[]})==negative
     assert json.loads(path.read_text())==negative
+
+
+@pytest.mark.parametrize('path',['.github/workflows/ci.yml','.github/actions/setup/action.yml','.github/CODEOWNERS'])
+def test_candidate_that_changes_its_own_ci_definition_needs_a_human_merge(monkeypatch,tmp_path,path):
+    reviews=ur.CodexReviews(_policy(),tmp_path/'reviews')
+    objects,_=_source_context_fixture(monkeypatch,reviews)
+    head_tree=objects[f'repos/{ur.REPO}/git/trees/{"2"*40}?recursive=1']['tree']
+    head_tree.append(dict(head_tree[0],path=path))
+    pr,diff=_context_pr()
+    with pytest.raises(ur.HumanMergeRequired):reviews._review_payload(pr,diff,repository=ur.REPO,base_sha=MAIN)
+    monkeypatch.setattr(ur,'_command',lambda *a,**kw:pytest.fail('no reviewer may run'))
+    assert reviews.review(pr,diff)==[]
+    assert 'human merge' in reviews.failure_reason and 'no approval' in reviews.failure_reason

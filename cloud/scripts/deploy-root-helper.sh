@@ -162,6 +162,8 @@ if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
   readonly INSTALL="${RADON_TEST_INSTALL:-$(command -v install)}"
   readonly CADDY_SOURCE="${RADON_TEST_CADDY_SOURCE:-}"
   readonly CADDY_CONFIG="${RADON_TEST_CADDY_CONFIG:-}"
+  readonly MCP_ENV_SOURCE="${RADON_TEST_MCP_ENV_SOURCE:-}"
+  readonly MCP_ENV_TARGET="${RADON_TEST_MCP_ENV_TARGET:-}"
   readonly CADDY_BIN="${RADON_TEST_CADDY_BIN:-}"
   readonly SYSTEMD_UNIT_DIR="${RADON_TEST_SYSTEMD_UNIT_DIR:-}"
   readonly GIT="${RADON_TEST_GIT:-$(command -v git)}"
@@ -229,6 +231,8 @@ else
   readonly SETPRIV=/usr/bin/setpriv
   readonly CADDY_SOURCE=/home/radon/radon/cloud/caddy/Caddyfile
   readonly CADDY_CONFIG=/etc/caddy/Caddyfile
+  readonly MCP_ENV_SOURCE=/etc/radon/env
+  readonly MCP_ENV_TARGET=/etc/radon/mcp.env
   readonly CADDY_BIN=/usr/bin/caddy
   readonly SYSTEMD_UNIT_DIR=/etc/systemd/system
   readonly GIT=/usr/bin/git
@@ -347,7 +351,7 @@ PY_MIGRATE_STATE
 }
 
 if (( $# != 1 )) && ! { (( $# == 2 )) && [[ "${1:-}" == sync-control-plane && "${2:-}" =~ ^[0-9a-f]{40}$ ]]; }; then
-  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy|install-units|revert-units|sync-scheduled-units|sync-control-plane|refresh-control-plane|refresh-control-plane-privileged}" >&2
+  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy|publish-mcp-env|install-units|revert-units|sync-scheduled-units|sync-control-plane|refresh-control-plane|refresh-control-plane-privileged}" >&2
   exit 64
 fi
 
@@ -1703,6 +1707,70 @@ for line in text.splitlines():
 PY_INLINE_ISOLATION
 }
 
+# radon-mcp.service terminates anonymous internet traffic and loads this file
+# for its Clerk verification inputs and operator allowlist, so it is the PUBLIC
+# MCP auth boundary. Both unprivileged writers used to publish it radon:radon
+# 0600, which let the account radon-mcp runs as -- holding a sudoers restart
+# grant -- decide who the public endpoint trusts with no root step
+# (DS-2026-10-18-04). Root derives it here instead: both paths are constants,
+# the caller supplies nothing, and the result is root:radon 0640 so the service
+# still reads it through group radon. Same key set as deploy.sh:MCP_ENV_KEYS
+# and setup-vps.sh:write_mcp_env; cloud/tests/test_mcp_env_ownership.py pins
+# the three copies together.
+readonly MCP_ENV_KEYS='^(CLERK_JWKS_URL|CLERK_ISSUER|ALLOWED_USER_IDS|RADON_MCP_[A-Z0-9_]+)='
+
+publish_mcp_env() {
+  local staged mode
+
+  [[ -n "$MCP_ENV_SOURCE" && -n "$MCP_ENV_TARGET" ]] || {
+    echo "mcp env paths are not configured" >&2
+    return 78
+  }
+  # The canonical env is root-owned 0640; a symlink or a group/other-writable
+  # file there is the same substitution this verb exists to close.
+  [[ -f "$MCP_ENV_SOURCE" && ! -L "$MCP_ENV_SOURCE" ]] || {
+    echo "canonical env is missing or is not a regular file" >&2
+    return 78
+  }
+  mode="$(file_mode "$MCP_ENV_SOURCE")"
+  if (( (8#$mode & 8#022) != 0 )); then
+    echo "canonical env is group- or world-writable; refusing to derive from it" >&2
+    return 78
+  fi
+  # /etc/radon is radon-writable, so the destination can be a radon-planted
+  # symlink. Refuse anything present that is not a regular file, then publish
+  # by staging a sibling in the same directory and renaming over it, so the
+  # write never follows the destination path.
+  if [[ -L "$MCP_ENV_TARGET" || ( -e "$MCP_ENV_TARGET" && ! -f "$MCP_ENV_TARGET" ) ]]; then
+    echo "live mcp env is not a regular file" >&2
+    return 74
+  fi
+  staged="$(mktemp "${MCP_ENV_TARGET}.XXXXXX")" || {
+    echo "could not stage the mcp env" >&2
+    return 73
+  }
+  chmod 0600 "$staged"
+  if ! grep -E "$MCP_ENV_KEYS" "$MCP_ENV_SOURCE" > "$staged"; then
+    # An env carrying none of the keys is a real state (grep exits 1), not an
+    # error: radon-mcp then fails its own startup checks rather than reading a
+    # file this verb left behind half-written.
+    :
+  fi
+  if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" != "1" ]]; then
+    if ! chown root:radon "$staged"; then
+      "$RM" -f "$staged"
+      echo "could not set ownership on the staged mcp env" >&2
+      return 73
+    fi
+  fi
+  # Widened only after the content is complete and owned: radon-mcp reads it.
+  chmod 0640 "$staged"
+  # -T: a directory link raced into the destination is replaced, not entered.
+  mv -T -f "$staged" "$MCP_ENV_TARGET"
+  "$SYNC" -f "$MCP_ENV_TARGET" 2>/dev/null || true
+  printf 'publish-mcp-env: published %s\n' "$MCP_ENV_TARGET"
+}
+
 sync_control_plane() {
   local tip workdir bootstrap rc host_role expected="${1:-}"
 
@@ -2527,6 +2595,10 @@ root_action_timeout() {
       # py_compile) for the whole bundle; not in the job-cancel class.
       printf '%s\n' "$ROOT_SYNC_ACTION_TIMEOUT"
       ;;
+    publish-mcp-env)
+      # One grep and one rename over a constant path; nothing to wait on.
+      printf '%s\n' "$ROOT_VERIFY_ACTION_TIMEOUT"
+      ;;
     verify-restored|verify-control-plane)
       printf '%s\n' "$ROOT_VERIFY_ACTION_TIMEOUT"
       ;;
@@ -2633,6 +2705,9 @@ case "$1" in
     ;;
   sync-scheduled-units)
     sync_scheduled_units
+    ;;
+  publish-mcp-env)
+    publish_mcp_env
     ;;
   sync-control-plane)
     sync_control_plane "${2:-}"

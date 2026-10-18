@@ -192,6 +192,13 @@ parents, so adding and then deleting an identifier still refuses publication.
 Empty and binary files, filenames and branch names are included; refusal
 messages replace private filenames with a redacted location.
 
+DS-2026-10-17-22: the gate and the pickup job read a branch an outside
+contributor shapes, so both now run every `git` call through one bounded
+runner that reads incrementally and kills the child past 32MB. Output over
+that cap is a refusal naming the limit, not an exhausted process: a single
+oversized blob, patch or commit message used to be buffered whole in memory.
+The same bound covers the PR builder reading a complete commit message.
+
 A refused branch stays on the VPS and is listed every cycle, but its Pushover
 page (identifier or IR-body refusal) fires once per branch head. Pickup records
 the paged head in `logs/grok-fix-pickup/refusal-pages.json` in its clone; a new

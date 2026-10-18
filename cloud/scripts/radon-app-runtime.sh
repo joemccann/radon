@@ -964,9 +964,17 @@ cmd_run() {
         ;;
     esac
   elif ! is_research_unit "$unit"; then
+    # DS-2026-10-17-20: media.radon.run serves this directory through Caddy
+    # file_server, which follows symlinks, so write here lets a container have
+    # the host Caddy process read a file the container cannot -- including
+    # Caddy's own key material. The newsfeed downloads the images and is the
+    # only writer; every other unit reads. The newsfeed's own write path needs
+    # a publication-topology change and is an operator action.
+    local media_mode=ro
+    [[ "$unit" == radon-newsfeed.service ]] && media_mode=rw
     set -- "$@" \
       -v "${DATA_DIR}:/home/radon/radon/data" \
-      -v "${MEDIA_DIR}:${MEDIA_DIR_IN_CONTAINER}" \
+      -v "${MEDIA_DIR}:${MEDIA_DIR_IN_CONTAINER}:${media_mode}" \
       -v "${LEASE_DIR}:/var/lib/radon/ib-lease"
   fi
 
