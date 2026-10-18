@@ -23,6 +23,15 @@ cloud/
   docker-compose.yml         # production IB Gateway container
 ```
 
+## VIX model spread schedule
+
+`radon-vix-model-spread.service` and `.timer` are included in setup's
+`SERVICE_FILES` and `config/installed-units.sha256`; the normal green deploy
+installs them and enables the timer without an operator root install. The
+personal-use collector samples official Cboe closes daily at 02:50 UTC, with
+no randomized delay. Migration 0098, payload/storage and operator-only access
+are defined in [the indicator spec](../docs/indicators/vix-model-spread.md).
+
 ## Runtime Planes
 
 Production is three planes. Do not collapse them.
@@ -550,8 +559,9 @@ with no key and reaches the vault through the broker socket
 cutover (removing the plaintext seed key): `docs/operations.md` "Secret-store
 key cutover". Contract: `cloud/tests/test_ds_secret_store_key_units.py`.
 The Python image carries integrity-pinned `claude`, `codex`, `grok` and `agy`
-(`docker/app/vendor-clis/`), so `radon-api` never mounts host
-`~/.local/bin` while it holds the key group. Root `prepare_private_dir` pins
+(`docker/app/vendor-clis/`), so `radon-api` and `radon-research` never mount host
+`~/.local/bin`. Provider credential directories and `HOME=/home/radon` remain
+unchanged; Antigravity retains its existing writable refresh/state directories. Root `prepare_private_dir` pins
 every ancestor with `O_NOFOLLOW`, and an unverifiable `id -nG radon` refuses
 every key-bearing start. Contract: `cloud/tests/test_secret_jobs_runtime.py`.
 
