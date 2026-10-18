@@ -297,3 +297,15 @@ def test_js_resolver_honors_the_same_order(tmp_path):
     )
     assert proc.returncode == 0, proc.stderr
     assert Path(proc.stdout.strip()) == chosen.resolve()
+
+
+def test_security_prompt_can_run_the_native_workflow_without_registration():
+    # 2026-10-18 remediate: `Workflow({ name: "security-audit" })` was not
+    # registered in that session (only plugin workflows were), so the native
+    # stage went OPERATOR_REQUIRED. The prompt must name the clone's script by
+    # absolute path as the fallback, which needs no registration.
+    prompt = (REPO / ".claude" / "runner-prompts" / "security.md").read_text(encoding="utf-8")
+    fallback = 'scriptPath: "<the value of $RADON_REPO_ROOT>/.claude/workflows/security-audit.mjs"'
+    assert fallback in prompt
+    assert (REPO / ".claude" / "workflows" / "security-audit.mjs").is_file()
+    assert prompt.index('Workflow({ name: "security-audit"') < prompt.index(fallback)
