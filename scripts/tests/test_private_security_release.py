@@ -837,7 +837,15 @@ def test_transient_real_review_probe_retries_same_private_head_without_terminal_
         raw = b'def repaired():\n    return True\n'
         blob = hashlib.sha1(f'blob {len(raw)}\0'.encode() + raw).hexdigest()
         objects = {
-            f'repos/{PRIVATE}/git/commits/{revision}': {'sha': revision, 'tree': {'sha': tree}}
+            f'repos/{PRIVATE}/git/commits/{revision}': {
+                'sha': revision, 'tree': {'sha': tree},
+                # A real commit object carries these, and the reviewer now
+                # reads them: _publish transfers the commit object, not just
+                # its tree (DS-2026-10-17-21).
+                'message': 'fix: repair the admission check',
+                'author': {'name': 'radon bot', 'email': 'bot@example.test', 'date': '2026-10-18T00:00:00Z'},
+                'committer': {'name': 'radon bot', 'email': 'bot@example.test', 'date': '2026-10-18T00:00:00Z'},
+            }
             for revision, tree in ((BASE, '1' * 40), (HEAD, '2' * 40))
         }
         objects.update({

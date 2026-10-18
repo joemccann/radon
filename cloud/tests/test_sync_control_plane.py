@@ -517,11 +517,13 @@ def _rejected(tmp_path: pathlib.Path) -> pathlib.Path:
     return tmp_path / "control-plane-rejected"
 
 
-def _run_sync_script(tmp_path: pathlib.Path, sudo: pathlib.Path) -> subprocess.CompletedProcess[str]:
+def _run_sync_script(
+    tmp_path: pathlib.Path, sudo: pathlib.Path, *args: str
+) -> subprocess.CompletedProcess[str]:
     fake_sleep = tmp_path / "sleep"
     _write_executable(fake_sleep, f"#!/bin/bash\nprintf 'sleep %s\\n' \"$1\" >> {shlex.quote(str(tmp_path / 'sudo.log'))}\n")
     return subprocess.run(
-        ["bash", str(SYNC)],
+        ["bash", str(SYNC), *args],
         env={
             **os.environ,
             "RADON_SYNC_SUDO": str(sudo),
@@ -658,7 +660,7 @@ class TestRejectedBundleNeverReachesTeardown:
             line.strip() for line in deploy_job.splitlines()
             if line.strip().startswith("bash ") and "sync-control-plane.sh" in line
         ]
-        assert sync_lines == ['bash "$RUNNER/cloud/scripts/sync-control-plane.sh"']
+        assert sync_lines == ['bash "$RUNNER/cloud/scripts/sync-control-plane.sh" "$SHA"']
 
 
 class TestLegacyRunnerRefusal:
@@ -831,3 +833,105 @@ def test_sync_requires_every_isolation_checked_script(tmp_path, name):
     result = _run_sync(env)
     assert result.returncode == 76, result.stdout + result.stderr
     assert not log.exists()
+
+
+# DS-2026-10-18-01: the helper's expected-SHA guards were dead code because no
+# caller ever passed a SHA, so a green run installed whatever GitHub main was
+# at that instant. The pin has to reach the helper, and sudo has to allow it.
+
+SHA_A = "a" * 40
+SHA_B = "b" * 40
+
+
+def _pinning_sudo(
+    tmp_path: pathlib.Path, *, pinned_granted: bool, unpinned_granted: bool = True, exits: list[int] | None = None
+) -> tuple[pathlib.Path, pathlib.Path]:
+    """A sudo whose -l answer differs for the pinned and unpinned verb forms."""
+    log = tmp_path / "sudo.log"
+    counter = tmp_path / "sudo.count"
+    counter.write_text("0", encoding="utf-8")
+    exits_literal = " ".join(str(code) for code in (exits or [0]))
+    sudo = tmp_path / "sudo"
+    _write_executable(
+        sudo,
+        f"""#!/bin/bash
+printf '%s\\n' "$*" >> {shlex.quote(str(log))}
+if [[ "$1" == "-n" && "$2" == "-l" ]]; then
+  if [[ "$#" -ge 6 ]]; then
+    exit {0 if pinned_granted else 1}
+  fi
+  exit {0 if unpinned_granted else 1}
+fi
+n="$(cat {shlex.quote(str(counter))})"
+codes=({exits_literal})
+printf '%s' "$((n + 1))" > {shlex.quote(str(counter))}
+exit "${{codes[$n]:-0}}"
+""",
+    )
+    return sudo, log
+
+
+class TestTestedShaIsPinnedThroughTheCallChain:
+    HELPER = "/usr/local/sbin/radon-deploy-root"
+
+    def test_ci_hands_the_tested_sha_to_the_sync_wrapper(self):
+        ci = CI.read_text(encoding="utf-8")
+        deploy_job = ci.split("\n  deploy:\n", 1)[1]
+        assert 'bash "$RUNNER/cloud/scripts/sync-control-plane.sh" "$SHA"' in deploy_job
+
+    def test_sudoers_grants_the_sha_pinned_verb_and_still_no_free_argument(self):
+        sudoers = SUDOERS.read_text(encoding="utf-8")
+        assert "/usr/local/sbin/radon-deploy-root sync-control-plane [0-9a-f]*" in sudoers
+        assert "sync-control-plane *" not in sudoers
+
+    def test_pinned_verb_is_used_when_the_grant_exists(self, tmp_path):
+        sudo, log = _pinning_sudo(tmp_path, pinned_granted=True)
+        result = _run_sync_script(tmp_path, sudo, SHA_A)
+        assert result.returncode == 0, result.stderr
+        assert log.read_text(encoding="utf-8").splitlines() == [
+            f"-n -l -- {self.HELPER} sync-control-plane {SHA_A}",
+            f"-n {self.HELPER} sync-control-plane {SHA_A}",
+        ]
+
+    def test_falls_back_to_the_unpinned_verb_while_the_host_grant_is_old(self, tmp_path):
+        # The sudoers line that allows the pinned form ships in the same bundle
+        # this verb installs, so the first run after the release still has the
+        # old grant. Falling back keeps that deploy alive; it warns so the
+        # unpinned arm cannot go unnoticed.
+        sudo, log = _pinning_sudo(tmp_path, pinned_granted=False, unpinned_granted=True)
+        result = _run_sync_script(tmp_path, sudo, SHA_A)
+        assert result.returncode == 0, result.stderr
+        assert "unpinned" in result.stderr
+        assert log.read_text(encoding="utf-8").splitlines() == [
+            f"-n -l -- {self.HELPER} sync-control-plane {SHA_A}",
+            f"-n -l -- {self.HELPER} sync-control-plane",
+            f"-n {self.HELPER} sync-control-plane",
+        ]
+
+    def test_no_argument_keeps_the_unpinned_behaviour(self, tmp_path):
+        sudo, log = _pinning_sudo(tmp_path, pinned_granted=True)
+        result = _run_sync_script(tmp_path, sudo)
+        assert result.returncode == 0, result.stderr
+        assert log.read_text(encoding="utf-8").splitlines() == [
+            f"-n -l -- {self.HELPER} sync-control-plane",
+            f"-n {self.HELPER} sync-control-plane",
+        ]
+
+    @pytest.mark.parametrize(
+        "argument",
+        ["not-a-sha", "a" * 39, "A" * 40, f"{SHA_A} extra", "../../etc", f"-{'a' * 39}"],
+    )
+    def test_a_non_sha_argument_is_refused_before_any_sudo_call(self, tmp_path, argument):
+        sudo, log = _pinning_sudo(tmp_path, pinned_granted=True)
+        result = _run_sync_script(tmp_path, sudo, *argument.split(" "))
+        assert result.returncode == 64, result.stdout + result.stderr
+        assert not log.exists() or log.read_text(encoding="utf-8") == ""
+
+    def test_a_stale_pin_is_propagated_and_recorded_without_retry(self, tmp_path):
+        # 76 is the helper's "main moved" refusal: it must stop the deploy, not
+        # fall back to installing the newer tip.
+        sudo, log = _pinning_sudo(tmp_path, pinned_granted=True, exits=[76])
+        result = _run_sync_script(tmp_path, sudo, SHA_B)
+        assert result.returncode == 76
+        assert log.read_text(encoding="utf-8").count(f"sync-control-plane {SHA_B}") == 2
+        assert _rejected(tmp_path).read_text(encoding="utf-8").strip() == "76"

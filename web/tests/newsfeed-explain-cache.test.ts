@@ -169,4 +169,17 @@ describe("newsfeed explain cache and generate", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
+
+  it("does not follow redirects away from the admitted image host", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { loadExplainImages } = await import("@/lib/newsfeedExplainImages");
+    await loadExplainImages(["https://media.radon.run/newsfeed/chart.png"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://media.radon.run/newsfeed/chart.png",
+      expect.objectContaining({ redirect: "error" }),
+    );
+    vi.unstubAllGlobals();
+  });
 });

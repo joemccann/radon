@@ -154,8 +154,16 @@ commit; subsequent syncs use the pinned root provision store. Root release
 controllers may pass `sync-control-plane <sha>`: the exact SHA must still be
 the pinned remote main tip at admission and immediately before bootstrap.
 Success prints `installed_sha=<sha> host_role=<role>` after the transaction
-and floor record succeed. The no-argument verb and its sudoers grant remain
-unchanged; no new unprivileged grant is installed. Root hold CLI
+and floor record succeed. The deploy job passes the tested SHA (DS-2026-10-18-01):
+without it the three expected-SHA guards were dead code and a green run
+installed whatever main was at that instant, so a commit whose own checks were
+still pending could install its root sudoers and deploy helper. The sudoers
+grant therefore also admits `sync-control-plane [0-9a-f]*`, following the
+existing `radon-app-runtime pull [0-9a-f]*` shape. That argument only NARROWS
+what root will install: it cannot name a tree, and a SHA that is not the
+pinned remote main tip is refused. The no-argument verb and its grant are
+unchanged, and the wrapper falls back to it while a host still carries the
+older policy. Root hold CLI
 source is `scripts/utils/ib_operator_hold.py`; the manifest marks repository
 sources with `repo/` and the archive includes that one dependency alongside
 `cloud/`.
@@ -371,8 +379,10 @@ root-only staging tree under `/opt/radon-provision/`, and runs that tip's own
 atomic install, manifest rewrite). A bundle that is already current is a
 no-op. Helper, sudoers, polkit, control-plane unit and drop-in edits, and
 root hot-patches of installed drop-ins, therefore reconcile on the next green
-push without root SSH. The verb takes no argument: radon cannot hand root a
-tree, only ask it to converge on GitHub main. Prestage skips (does not fail)
+push without root SSH. The verb's only argument is an expected 40-hex SHA:
+radon cannot hand root a tree, only ask it to converge on GitHub main, and
+pinning the tested commit makes root refuse when main has moved past it.
+Prestage skips (does not fail)
 when the bundle is not ready. The manual sequence below remains the recovery
 path when the verb itself is not yet granted or GitHub is unreachable.
 

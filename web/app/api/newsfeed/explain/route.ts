@@ -1,5 +1,6 @@
 import { scrubSecrets } from "@/lib/apiContracts";
 import { requireRouteAccess } from "@/lib/routeAccess";
+import { enforceDemoAiQuota } from "@/lib/demo/enforceAiQuota";
 import { explainInput, type NewsfeedExplainInput } from "@/lib/newsfeedExplain";
 import { encodeExplainEvent, EXPLAIN_BUDGET_MS, type ExplainStage } from "@/lib/newsfeedExplainProgress";
 import { explainNewsfeedPost } from "@/lib/newsfeedExplainGenerate";
@@ -74,5 +75,7 @@ export async function POST(request: Request): Promise<Response> {
     input = explainInput(JSON.parse(raw));
   } catch { return json({ error: "Provide a valid news title and content." }, 400); }
   if (!input) return json({ error: "Provide a news title and content within the length limits." }, 400);
+  const quota = await enforceDemoAiQuota("newsfeed/explain");
+  if (quota) return quota;
   return streamExplain(request, input, access.principal.token);
 }

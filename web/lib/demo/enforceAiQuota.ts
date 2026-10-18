@@ -1,7 +1,7 @@
-// AI-quota enforcement for the 3 demo LLM routes (Phase 4).
+// AI-quota enforcement for the demo LLM routes (Phase 4).
 //
-// Single chokepoint the assistant / ticker-seasonality / ticker-info routes
-// call BEFORE doing any expensive LLM work. Returns a `Response` to short out
+// Single chokepoint the assistant / ticker-seasonality / ticker-info /
+// newsfeed-explain routes call BEFORE doing any expensive LLM work. Returns a `Response` to short out
 // the handler (403 expired / 429 over quota / 401 no identity), or `null` to
 // proceed.
 //
