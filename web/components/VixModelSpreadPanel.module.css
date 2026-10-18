@@ -1,0 +1,15 @@
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.controls :global(.history-range-chips) :global(.history-range-chip) {
+  min-height: 44px;
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  border-radius: var(--radius-sm);
+}

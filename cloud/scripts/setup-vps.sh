@@ -229,6 +229,8 @@ readonly SERVICE_FILES=(
   radon-slm-tagger-monitor.timer
   radon-vix-pc.service
   radon-vix-pc.timer
+  radon-vix-model-spread.service
+  radon-vix-model-spread.timer
 )
 
 
