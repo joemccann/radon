@@ -1,13 +1,13 @@
 // Freshness window for snapshot-backed routes, widened for demo principals.
 //
 // Demo snapshot rows have no writer of their own: radon-demo-mirror.timer
-// (cloud/services/radon-demo-mirror.timer, Mon..Fri 21:45 UTC) copies the
-// latest prod rows into the demo Turso. A demo row is therefore as old as the
-// prod row was at mirror time PLUS the time since the last mirror. The worst
-// case is the weekend: a daily writer's Friday 02:45 UTC row is mirrored Friday
-// 21:45 and not replaced until Monday 21:45, 91h after it was written. 96h
-// covers that gap with a few hours of slack. Anything older means the mirror
-// itself is down, which demo users should see as stale like anyone else.
+// (cloud/services/radon-demo-mirror.timer, daily 21:45 UTC with a 23:30 retry)
+// copies the latest prod rows into the demo Turso. A demo row is therefore as
+// old as the prod row was at mirror time PLUS the time since the last mirror.
+// The worst case is a weekday-only prod writer over a weekend: its Friday
+// evening row stays newest until Monday evening (~72h), and the mirror can add
+// up to 24h on top. 96h covers that. Anything older means the mirror itself is
+// down, which demo users should see as stale like anyone else.
 //
 // Operator, authenticated, and test principals keep the route's own window
 // unchanged; the helper only ever widens, never narrows.
