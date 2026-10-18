@@ -88,9 +88,11 @@ the newest CI-green `main`, cleans the clone except `.deepsec/`,
 record. It enforces the wall-clock caps (audit 8h, remediate 6h, deliver
 3h), and after each phase its post-run hook decides the phase status from
 this session's output, publishes your private report, and posts a SANITIZED
-per-phase GitHub issue comment (`**PHASE** STAMP **status**`; never a route,
-file, attack path, exploit, secret, account, or log pointer) on the rolling
-issue labelled `security-deepsec`, plus a Pushover page. You never author
+per-phase GitHub issue comment (the machine-readable `radon-phase` line:
+loop, phase, exit code, and `audited-through` only when audit exited 0;
+never a route, file, attack path, exploit, secret, account, PR number, or
+log pointer) on the rolling issue labelled `security-deepsec`, plus a
+Pushover page. You never author
 that comment: do not run `gh issue comment`, `gh issue create`, or `gh issue
 edit` (the `gh` on your PATH refuses them). Hook-only. The runner does NOT
 bootstrap DeepSec.
@@ -739,16 +741,17 @@ one, and do not list it under Next.
 
 The public repository receives no audit ledger. Do not run `gh issue
 comment`, `gh issue create`, or `gh issue edit`. The runner posts the only
-public GitHub issue comment, already sanitized, on the rolling issue
-labelled `security-deepsec`:
+public GitHub issue comment on the rolling issue labelled `security-deepsec`:
 
-**PHASE** STAMP **status**
-optional sanitized detail
+<!-- radon-phase loop=security-deepsec phase=audit exit=0 audited-through=<sha> ts=<utc> -->
+radon-phase loop=security-deepsec phase=audit exit=0 audited-through=<sha> ts=<utc>
+audited-through: <sha>
 
+`audited-through` is present only when audit exited 0. A failed phase omits it.
 Operators read two dead-men: `security-nightly` for the security loop and
 `security-deepsec` for this one. A missing daily comment on either means
 that runner did not fire. Neither comment may name a route, file, attack,
-secret, or account.
+secret, account, or PR number.
 
 ## Anti-patterns
 
