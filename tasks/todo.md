@@ -1,3 +1,16 @@
+# X share-copy footer (2026-10-18)
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+- [x] T1 depends_on: [] Inventory every X copy builder, generated report preview and outbound clipboard/composer path.
+- [x] T2 depends_on: [T1] Append the exact standalone footer once across P&L, newsfeed and all report builders, including verified CTA LLM copy.
+- [x] T3 depends_on: [T2] Update existing copy assertions and verify focused/full suites plus actual browser copy/composer behavior.
+- [ ] T4 depends_on: [T3] Publish a focused PR, watch all exact-head checks, notify once, admin-merge and verify normal production delivery.
+
+## Review
+
+Footer: @grok explain this for normies. Preserve existing copy, sanitization, cashtags, financial values and media rendering. No external post is submitted. The primary checkout has unrelated task/output changes and remains untouched. Verification: focused Vitest 207 passed; affected Python 110 passed; full Python 16,329 passed, 2 skipped and 23 subtests passed; full cloud 2,921 passed and 7 skipped; full Vitest 1,120 files and 10,996 tests passed, 21 skipped; Playwright 5 passed with mobile/desktop screenshots inspected. All four report builders and previews, CTA verified generated copy and fallback, and formatting idempotence passed smoke checks. Temporary local dependency-root overrides were restored; no runtime configuration change is included. React review found no new state, effects, fetching or dependency concerns. PR delivery pending.
+
 # PR 1132 refresh and completion (2026-10-17)
 
 Dependency graph: T1 -> T2 -> T3 -> T4.
