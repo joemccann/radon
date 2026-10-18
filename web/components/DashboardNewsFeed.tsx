@@ -18,6 +18,7 @@ import { useBookmarks } from "../lib/useBookmarks";
 import NewsfeedTagBar from "./NewsfeedTagBar";
 import NewsfeedLightbox, { type NewsfeedLightboxFocus } from "./NewsfeedLightbox";
 import NewsfeedShare from "./NewsfeedShare";
+import NewsfeedExplain from "./NewsfeedExplain";
 import ResearchFeedback from "./ResearchFeedback";
 import ResearchHeldReview from "./ResearchHeldReview";
 import { getImageSource } from "@/lib/newsfeedSource";
@@ -534,7 +535,10 @@ export default function DashboardNewsFeed() {
                     {!firstImage ? " · Text-only source evidence" : ""}
                   </p> : null}
                   {post.source ? <ResearchFeedback postId={post.id} initial={post.feedback} onHidden={hidePost} /> : null}
-                  <NewsfeedShare post={post} imageUrl={firstImage ?? undefined} />
+                  <div className={styles.postActions}>
+                    <NewsfeedExplain post={post} imageUrls={post.images ?? []} />
+                    <NewsfeedShare post={post} imageUrl={firstImage ?? undefined} />
+                  </div>
                   <div data-testid="news-feed-footer" className={`news-feed-footer ${styles.footer}`}>
                     <span
                       data-testid="news-feed-timestamp"
