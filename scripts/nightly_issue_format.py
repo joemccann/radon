@@ -5,10 +5,10 @@ Operators read the rolling issues (security, testing, reliability, CI
 performance). Status dumps and pointers to a log file on a
 machine are not a write-up.
 
-This module is the agent three-section spec and CLI. Wrapper runner-health
-comments are a distinct PHASE STAMP status dead-man line in-main bash
-(never this file). Wrappers create the issue once with a timeless
-rolling-dead-man description and never exec this module after the agent.
+This module is the agent three-section spec and CLI. The harness posts a
+separate machine-readable phase line (scripts/runner/phase_status.sh) from
+the process exit and never execs this module to do it. Wrappers create the
+issue once with a timeless rolling-dead-man description.
 
 Agent write-up shape:
 
@@ -24,8 +24,8 @@ Agent write-up shape:
 Next is only for work that still must happen OUTSIDE of CI pushing a new
 deployment. If nothing remains, Next is "Fixed with green deployment".
 
-Security agents do not write GitHub issue comments. The wrapper posts the
-only public security comment, already sanitized.
+Security agents do not write GitHub issue comments. The harness posts the
+only public security comment: loop, phase, exit code, sha and timestamp.
 
 Stdlib only.
 """

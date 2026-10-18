@@ -55,9 +55,6 @@ sessions. The latest fixture session is **2026-10-16, cum5 = 0.318849**,
 | Migration | `0097_vix_pc.sql` (version 97) |
 | Freshness constant | `VIX_PC_REFRESH` |
 
-`MAX(version)` in the local tree is **96** (`0096_newsfeed_explanations.sql`).
-**97 is free.** Only the ingestion implementer owns the migration.
-
 **One-line description** (InfoTooltip first sentence):
 
 > The five-session cumulative VIX put/call ratio, which is the sum of

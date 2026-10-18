@@ -381,7 +381,8 @@ class TestIssueGenerationIsUntouched:
             fmt_start = text.index("_format_issue_body() {")
             fmt_end = text.index("\nreport() {", fmt_start)
             fmt = text[fmt_start:fmt_end]
-            assert "'**%s** %s **%s**'" in fmt, path.name
+            assert "phase_status_body" in fmt, path.name
+            assert "'**%s** %s **%s**'" not in fmt, path.name
             assert "**Issue discovered**" not in fmt, path.name
             assert "**What was done to fix it**" not in fmt, path.name
             assert "Fixed with green deployment" not in fmt, path.name

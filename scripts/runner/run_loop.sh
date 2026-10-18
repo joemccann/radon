@@ -11,6 +11,8 @@ set -uo pipefail
 
 SELF="${BASH_SOURCE[0]}"
 RUNNER_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+# shellcheck disable=SC1091
+source "$RUNNER_DIR/phase_status.sh"
 STATE_DIR="${RADON_RUNNER_STATE:-$HOME/radon-runner}"
 SECRETS_FILE="${RADON_RUNNER_ENV:-$HOME/.radon-runner.env}"
 # Resolvers and hooks run under an isolated interpreter (no cwd, no user site).
@@ -50,6 +52,15 @@ load_config() {
   GH_GUARD=0
   PRE_RUN=""
   POST_RUN=""
+  DEADMAN_LABEL=""
+  DEADMAN_TITLE=""
+  GH_REPO="${RADON_WEEKEND_GH_REPO:-joemccann/radon}"
+  PHASE_RC=0
+  PHASE_REFUSED=""
+  PHASE_AUDITED_SHA=""
+  PHASE_HOOK_REQUIRED=""
+  PHASE_KILLED=""
+  MARKER_POSTED=""
   local config="$RUNNER_DIR/loops/$LOOP.env"
   [[ -f "$config" ]] || { echo "no config $config" >&2; exit 64; }
   # shellcheck disable=SC1090
@@ -310,6 +321,9 @@ resolve_agents() {
 
 refuse() {
   notify "radon $LOOP: REFUSED" "$1"
+  PHASE_REFUSED="${1:-refused}"
+  PHASE_RC=2
+  post_phase_marker "${PHASE:-audit}" "REFUSED"
   exit 2
 }
 
@@ -649,7 +663,8 @@ run_hook() {
   ( cd "$WORK" 2>/dev/null || cd /
     export PATH="$RUNNER_PATH"
     export LOOP PHASE WORK LOOP_STATE BRANCH RUNNER_DIR REPO_URL KEEP_PATHS AGENT_UNSET \
-      PHASE_RC PHASE_LOG PHASE_START_MARK PHASE_REFUSED PHASE_STATUS RUNNER_PYTHON
+      PHASE_RC PHASE_LOG PHASE_START_MARK PHASE_REFUSED PHASE_STATUS RUNNER_PYTHON \
+      PHASE_AUDITED_SHA PHASE_HOOK_REQUIRED PHASE_KILLED
     exec "$TIMEOUT_BIN" -k 10 "$HOOK_SECS" /bin/bash "$RUNNER_DIR/$1" ) > "$out_file" 2>> "$LOG" &
   HOOK_PID=$!
   wait "$HOOK_PID"
@@ -663,8 +678,52 @@ run_hook() {
 
 hook_value() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | tail -n 1; }
 
+# HEAD after the pre-run pin, before the agent. Published only for an audit
+# that exits 0.
+capture_audited_sha() {
+  PHASE_AUDITED_SHA=""
+  [[ -e "$WORK/.git" ]] || return 0
+  PHASE_AUDITED_SHA="$(git -C "$WORK" rev-parse HEAD 2>/dev/null || true)"
+}
+
+# Public dead-man line from the process exit. The agent does not write it.
+# Best-effort: a missing label, a hook that already printed marker_posted=1,
+# or a failed gh call does not change the phase result. A killed phase still
+# reaches this from the SIGTERM trap.
+post_phase_marker() {
+  local phase="$1" status="$2" body issue gh title
+  [[ -n "${DEADMAN_LABEL:-}" ]] || return 0
+  [[ -z "${MARKER_POSTED:-}" ]] || return 0
+  phase="${phase:-audit}"
+  body="$(phase_status_body "$LOOP" "$phase" "$status" || true)"
+  [[ -n "$body" ]] || return 0
+  gh="${RADON_RUNNER_GH:-}"
+  [[ -n "$gh" ]] || gh="$(command -v gh || true)"
+  [[ -n "$gh" && -n "${TIMEOUT_BIN:-}" ]] || { log "phase marker not posted: no gh"; return 0; }
+  issue="$("$TIMEOUT_BIN" 20 "$gh" issue list -R "$GH_REPO" --label "$DEADMAN_LABEL" --state open \
+    --json number -q '.[0].number' 2>>"$LOG" || true)"
+  if [[ ! "$issue" =~ ^[0-9]+$ ]]; then
+    title="${DEADMAN_TITLE:-Nightly ${LOOP} runner}"
+    "$TIMEOUT_BIN" 20 "$gh" issue create -R "$GH_REPO" --title "$title" --label "$DEADMAN_LABEL" \
+      --body "Rolling dead-man for the nightly ${LOOP} loop. Machine-readable phase status only. A missing daily comment means the runner did not fire." \
+      >/dev/null 2>>"$LOG" || true
+    issue="$("$TIMEOUT_BIN" 20 "$gh" issue list -R "$GH_REPO" --label "$DEADMAN_LABEL" --state open \
+      --json number -q '.[0].number' 2>>"$LOG" || true)"
+  fi
+  [[ "$issue" =~ ^[0-9]+$ ]] || { log "phase marker not posted: no issue"; return 0; }
+  if "$TIMEOUT_BIN" 20 "$gh" issue comment "$issue" -R "$GH_REPO" --body "$body" >>"$LOG" 2>&1; then
+    MARKER_POSTED=1
+    log "phase marker posted loop=$LOOP phase=$phase"
+  else
+    log "phase marker post failed"
+  fi
+  return 0
+}
+
 finish_phase() {
   local out="" status="" pr="" report_url=""
+  MARKER_POSTED=""
+  PHASE_HOOK_REQUIRED=""
   if [[ -n "$POST_RUN" ]]; then
     run_hook "$POST_RUN"
     out="$HOOK_OUT"
@@ -672,9 +731,13 @@ finish_phase() {
     status="$(hook_value "$out" status)"
     pr="$(hook_value "$out" pr_url)"
     report_url="$(hook_value "$out" report_url)"
+    MARKER_POSTED="$(hook_value "$out" marker_posted)"
     # Fail closed: a hook that timed out, crashed or is missing decided nothing
     # (a refused phase still pages REFUSED below).
-    [[ -n "$status" || -n "$PHASE_REFUSED" ]] || status="FAILED (post-run hook gave no status)"
+    if [[ -z "$status" && -z "$PHASE_REFUSED" ]]; then
+      status="FAILED (post-run hook gave no status)"
+      PHASE_HOOK_REQUIRED=1
+    fi
   else
     pr="$(find_pr)"
   fi
@@ -687,6 +750,7 @@ finish_phase() {
   [[ -z "$PHASE_REFUSED" ]] || ANY_REFUSED=1
   [[ "$status" == OK* ]] || ANY_NOT_OK=1
   notify "radon $LOOP $PHASE" "$status${pr:+ $pr}" "$report_url" "${report_url:+Open private report}"
+  post_phase_marker "$PHASE" "$status"
 }
 
 # PHASES="name:secs ...": one agent session per phase, each with its own
@@ -707,6 +771,9 @@ run_phases() {
     PHASE_REFUSED=""
     PHASE_STATUS=""
     PHASE_RC=0
+    PHASE_KILLED=""
+    PHASE_HOOK_REQUIRED=""
+    MARKER_POSTED=""
     log "phase $PHASE: budget ${TIMEOUT_SECS}s"
     if [[ -n "$PRE_RUN" ]]; then
       run_hook "$PRE_RUN"
@@ -719,6 +786,7 @@ run_phases() {
         PHASE_RC=2
       fi
     fi
+    capture_audited_sha
     offset="$(wc -c < "$LOG" | tr -d ' ')"
     if [[ -z "$PHASE_REFUSED" ]]; then
       build_prompt
@@ -743,13 +811,17 @@ on_signal() {
   HOOK_PID=""
   reap_leftovers
   notify "radon $LOOP${PHASE:+ $PHASE}" "KILLED (SIG$1)"
+  PHASE_KILLED=1
+  PHASE_RC=143
+  PHASE_STATUS="KILLED (SIG$1)"
+  MARKER_POSTED=""
   if [[ -n "$POST_RUN" && -n "$PHASE" ]]; then
-    PHASE_STATUS="KILLED (SIG$1)"
-    PHASE_RC=143
     HOOK_SECS=10
     run_hook "$POST_RUN"
     [[ -z "$HOOK_OUT" ]] || printf '%s\n' "$HOOK_OUT" >> "$LOG"
+    MARKER_POSTED="$(hook_value "$HOOK_OUT" marker_posted)"
   fi
+  post_phase_marker "${PHASE:-audit}" "KILLED (SIG$1)"
   exit 143
 }
 
@@ -766,6 +838,9 @@ main() {
   require_guard
   if ! fresh_clone; then
     notify "radon $LOOP: FAILED" "could not clone $REPO_URL"
+    PHASE_RC=70
+    PHASE_AUDITED_SHA=""
+    post_phase_marker audit "GROUND TRUTH FAILED"
     return 70
   fi
   if [[ -n "$PHASES" ]]; then
@@ -775,8 +850,18 @@ main() {
   build_prompt
   PHASE_STARTED_AT="$(date +%s)"
   rm -f "$RADON_RUNNER_PIDFILE"
+  capture_audited_sha
   run_agents_in_order
+  PHASE_RC="${AGENT_RC:-1}"
+  [[ -z "${USED_AGENT:-}" ]] || PHASE_RC=0
+  local phase_word rc
+  if [[ "$PHASE_RC" == "$TIMED_OUT" ]]; then phase_word="TIMEOUT"
+  elif [[ "$PHASE_RC" == 0 ]]; then phase_word="OK"
+  else phase_word="FAILED (exit $PHASE_RC)"; fi
   report
+  rc=$?
+  post_phase_marker audit "$phase_word"
+  return "$rc"
 }
 
 if [[ "${1:-}" == "--launch" ]]; then

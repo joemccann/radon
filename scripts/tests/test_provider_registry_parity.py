@@ -12,7 +12,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 LOOPS = REPO / "scripts" / "runner" / "loops"
 # Keys that are the loop's own identity, budget or workspace.
-OWN = {"BRANCH_PREFIX", "PROMPT", "PHASES", "KEEP_PATHS", "SCHEDULE_MINUTE"}
+OWN = {"BRANCH_PREFIX", "PROMPT", "PHASES", "KEEP_PATHS", "SCHEDULE_MINUTE",
+       "DEADMAN_LABEL", "DEADMAN_TITLE"}
 
 
 def _settings(name: str) -> dict[str, str]:
@@ -37,3 +38,7 @@ def test_both_security_loops_use_the_shared_hooks_and_guard():
         assert env["PRE_RUN"] == "hooks/security_pre.sh"
         assert env["POST_RUN"] == "hooks/security_post.sh"
         assert env["GH_GUARD"] == "1"
+        assert env["DEADMAN_LABEL"] == ("security-nightly" if name == "security" else "security-deepsec")
+        assert env["DEADMAN_TITLE"] == (
+            '"Nightly security runner"' if name == "security" else '"Nightly DeepSec runner"'
+        )

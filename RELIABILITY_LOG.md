@@ -1028,3 +1028,9 @@ Exact-head CI repair (2026-10-07): initial scripts-df gate reported 1 failed / 1
 | ID | Status | Red / green evidence | Change |
 |---|---|---|---|
 | REL-326 / R-737 | DONE | RED 2 failed (both pools, `ResponseNotReady` on the next pipeline); GREEN 18 passed in the two transport files, focused neighborhood 86 passed | Keep-alive reads one byte past the cap and drops the socket unless the body was fully consumed and the status is 200. An over-cap body fails that call only. The next pipeline opens a new socket and is not written onto the unread tail. Patched `urlopen` seams are unchanged. No retry was added. |
+
+## Nightly remediation 2026-10-18
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-327 / R-738 | DONE | RED 1 failed (second reader AbortError); GREEN 6 passed in `web/tests/newsfeed-explain-cache.test.ts`, neighborhood 28 passed across the four explain suites | The flight owns `AbortSignal.timeout(EXPLAIN_BUDGET_MS)`. A reader who leaves rejects only their wait. One model call remains. No placement, halt, or broker path changed. Permanent drills 95 passed. Full pytest, cloud/tests, remaining Vitest and the order-idempotency drill stay on PR CI. |

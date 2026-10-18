@@ -21,8 +21,8 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 HOOKS = REPO / "scripts" / "runner" / "hooks"
 LIB = ("nightly_pr_guard.py", "nightly_publish.py", "nightly_issue_prune.py", "nightly_green_base.py",
-       "nightly_audit_context.py", "nightly_deliver.py", "security_claude_ladder.py", "claude_cli_env_drift.py",
-       "claude_cli_env_reviewed.txt")
+       "nightly_audit_context.py", "nightly_phase_status.py", "nightly_deliver.py",
+       "security_claude_ladder.py", "claude_cli_env_drift.py", "claude_cli_env_reviewed.txt")
 BASH = shutil.which("bash") or "/bin/bash"
 TIMEOUT_DIR = str(Path(shutil.which("timeout") or shutil.which("gtimeout") or "/usr/bin/timeout").parent)
 MARKERS = {"security": "SECURITY-NIGHTLY PHASE COMPLETE:", "security-deepsec": "SECURITY-DEEPSEC PHASE COMPLETE:"}
@@ -79,6 +79,7 @@ def rig(request, tmp_path):
     runner = tmp_path / "runner"
     (runner / "hooks").mkdir(parents=True)
     (runner / "lib").mkdir()
+    shutil.copy2(REPO / "scripts" / "runner" / "phase_status.sh", runner / "phase_status.sh")
     for hook in HOOKS.iterdir():
         shutil.copy2(hook, runner / "hooks" / hook.name)
     for name in LIB:
@@ -227,8 +228,8 @@ def test_pre_refuses_a_credential_file(rig, path):
 
     assert proc.returncode == 2
     reason = next(line for line in proc.stdout.splitlines() if line.startswith("refused="))
-    # The refusal reason reaches the public dead-man; the path stays in the
-    # private runner log (stderr).
+    # The path stays in the private runner log (stderr). The public issue
+    # comment is exit 2 and does not include this reason.
     assert "credential file" in reason and path not in reason, reason
     assert path in proc.stderr
 
@@ -469,31 +470,61 @@ def test_post_prints_its_verdict_before_any_network_step(rig):
     assert lines[-3].startswith("status=OK")
 
 
-def test_the_deadman_is_a_sanitized_phase_stamp_status_line(rig):
+def test_the_deadman_is_the_machine_readable_phase_line(rig):
     rig.post(output=f"{rig.marker} audit run_id=r1\n")
 
     comment = rig.comment()
-    assert comment.startswith("issue comment 204 -R joemccann/radon --body **audit** ")
-    assert "**OK" in comment
+    assert comment.startswith("issue comment 204 -R joemccann/radon --body <!-- radon-phase ")
+    assert f"loop={rig.loop} phase=audit exit=0" in comment
+    assert "audited-through" not in comment
+    assert "**OK" not in comment
 
 
-def test_hook_detail_is_sanitized_before_it_reaches_the_public_issue(rig):
+def _issue_comments(rig):
+    return [c for c in rig.gh_calls() if c.startswith("issue comment")]
+
+
+def test_a_public_audit_comment_carries_the_sha_only_on_exit_0(rig):
+    sha = subprocess.run(["git", "-C", str(rig.work), "rev-parse", "HEAD"],
+                         capture_output=True, text=True, check=True).stdout.strip()
+    out = rig.post(output=f"{rig.marker} audit run_id=r1\n", PHASE_AUDITED_SHA=sha)
+    comment = _issue_comments(rig)[-1]
+    assert out["marker_posted"] == "1"
+    assert f"loop={rig.loop} phase=audit exit=0 audited-through={sha}" in comment
+    assert f"audited-through: {sha}" in comment
+    assert "secret" not in comment
+
+    rig.post(rc=3, PHASE_AUDITED_SHA=sha)
+    failed = _issue_comments(rig)[-1]
+    assert "exit=1" in failed
+    assert "audited-through" not in failed
+    assert sha not in failed
+
+    rig.post(phase="remediate", output=f"{rig.marker} remediate\n", PHASE_AUDITED_SHA=sha)
+    later = _issue_comments(rig)[-1]
+    assert "phase=remediate exit=0" in later
+    assert "audited-through" not in later
+
+
+def test_hook_detail_never_reaches_the_public_issue(rig):
     rig.post(PHASE_REFUSED=f"{CANARY_FINDING} TOKEN={CANARY_TOKEN} ops@radon.run https://app.radon.run/admin")
 
     comment = rig.comment()
-    for leak in ("secret.ts:12", "/api/admin/keys", CANARY_TOKEN, "ops@radon.run", "app.radon.run"):
+    for leak in ("secret.ts:12", "/api/admin/keys", CANARY_TOKEN, "ops@radon.run",
+                 "app.radon.run", "[REDACTED]", "TOKEN"):
         assert leak not in comment, leak
-    assert "[REDACTED]" in comment
+    assert "exit=2" in comment
 
 
 @pytest.mark.parametrize("header", ["Cookie", "Set-Cookie", "cOoKiE"])
-def test_cookie_headers_are_fully_redacted_at_the_public_comment_boundary(rig, header):
+def test_cookie_headers_never_reach_the_public_comment(rig, header):
     rig.post(PHASE_REFUSED=f"{header}: first=qzFirstNOTREAL; opaque=qzSecondNOTREAL\nretry after review")
     comment = rig.comment()
     assert comment
     assert "NOTREAL" not in comment, comment
-    assert "[REDACTED]" in comment
-    assert "retry after review" in comment
+    assert "[REDACTED]" not in comment
+    assert "retry after review" not in comment
+    assert "exit=2" in comment
 
 
 def test_the_deadman_issue_is_created_when_absent(rig):
