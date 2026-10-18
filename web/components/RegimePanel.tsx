@@ -17,6 +17,7 @@ import CorPanel from "./CorPanel";
 import VixCorPanel from "./VixCorPanel";
 import VixTsPanel from "./VixTsPanel";
 import VixPcPanel from "./VixPcPanel";
+import VixModelSpreadPanel from "./VixModelSpreadPanel";
 import PanicIndexPanel from "./PanicIndexPanel";
 import DispersionPanel from "./DispersionPanel";
 import IvRankPanel from "./IvRankPanel";
@@ -73,6 +74,7 @@ const MOBILE_TAB_LABEL: Partial<Record<RegimeTab, string>> = {
   vixcor: "VIX-COR",
   vixts: "VIX TS",
   "vix-pc": "VIX P/C",
+  "vix-model-spread": "VIX MODEL",
   "panic-index": "PANIC",
   dispersion: "DISPERSION",
   ivrank: "IV RANK",
@@ -92,7 +94,7 @@ const MOBILE_TAB_LABEL: Partial<Record<RegimeTab, string>> = {
 function tabFromPathname(pathname: string | null): RegimeTab {
   if (!pathname) return "cri";
   // Longest prefix first within each family: skew2d before skew, vixcor before cor.
-  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|record-high-breadth|breadth|bpi|ma-ratio|rsi-oversold|calm-streak|margin|straddle|streaks|vixcor|vixts|vix-pc|panic-index|dispersion|iv-spread|ivrank|cor|skew2d|skew|curve|credit-vix|credit|iei-hyg|trin|divyield|hyad|hhlev|cot|ats|short|llm|backtest)(?:\/|$)/);
+  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|record-high-breadth|breadth|bpi|ma-ratio|rsi-oversold|calm-streak|margin|straddle|streaks|vixcor|vixts|vix-pc|vix-model-spread|panic-index|dispersion|iv-spread|ivrank|cor|skew2d|skew|curve|credit-vix|credit|iei-hyg|trin|divyield|hyad|hhlev|cot|ats|short|llm|backtest)(?:\/|$)/);
   if (match && (REGIME_TABS as readonly string[]).includes(match[1])) {
     return match[1] as RegimeTab;
   }
@@ -396,7 +398,7 @@ export default function RegimePanel({
 
   const tabBar = compact ? (
     <div className="m-regime-tabs" ref={mobileTabsRef} role="tablist" aria-label="Regime tabs">
-      {(["cri", "vcg", "gex", "grg", "breadth", "record-high-breadth", "ma-ratio", "rsi-oversold", "trin", "divyield", "hyad", "bpi", "margin", "hhlev", "credit", "iei-hyg", "credit-vix", "straddle", "cor", "streaks", "vixcor", "vixts", "vix-pc", "panic-index", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "calm-streak", "cot", "ats", "short", "backtest"] as RegimeTab[]).map((t) => (
+      {(["cri", "vcg", "gex", "grg", "breadth", "record-high-breadth", "ma-ratio", "rsi-oversold", "trin", "divyield", "hyad", "bpi", "margin", "hhlev", "credit", "iei-hyg", "credit-vix", "straddle", "cor", "streaks", "vixcor", "vixts", "vix-pc", "vix-model-spread", "panic-index", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "calm-streak", "cot", "ats", "short", "backtest"] as RegimeTab[]).map((t) => (
         <button
           key={t}
           type="button"
@@ -477,6 +479,10 @@ export default function RegimePanel({
 
   if (activeTab === "vixts") {
     return renderShell(<VixTsPanel />);
+  }
+
+  if (activeTab === "vix-model-spread") {
+    return renderShell(<VixModelSpreadPanel />);
   }
 
   if (activeTab === "vix-pc") {
