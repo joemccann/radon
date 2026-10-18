@@ -8,11 +8,12 @@
 
 import type { DemoRateTier } from "./rateLimit";
 
-// The three LLM routes — coarse backstop above the per-endpoint AI quota.
+// The LLM routes — coarse backstop above the per-endpoint AI quota.
 const AI_PATHS = new Set<string>([
   "/api/assistant",
   "/api/ticker/seasonality",
   "/api/ticker/info",
+  "/api/newsfeed/explain",
 ]);
 
 // Expensive producers / aggregations / IB-touching exec. Cached GETs are

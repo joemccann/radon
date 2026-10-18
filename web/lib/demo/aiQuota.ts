@@ -26,6 +26,7 @@ export const DEMO_AI_DAILY_LIMITS: Record<string, number> = {
   assistant: 5,
   "ticker/seasonality": 10,
   "ticker/info": 20,
+  "newsfeed/explain": 5,
 };
 
 const _ET_DATE_FMT = new Intl.DateTimeFormat("en-CA", {
