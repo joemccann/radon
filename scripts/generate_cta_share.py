@@ -38,7 +38,6 @@ PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from utils.card_screenshot import screenshot_card  # noqa: E402
-from utils.x_share import with_x_share_footer  # noqa: E402
 from utils.cta_history import (  # noqa: E402
     clean_underlying_name,
     derive_change_context,
@@ -902,7 +901,7 @@ def build_tweet(data: dict, ds: str, priors: Optional[list] = None) -> str:
         parts.extend(["", changes])
     parts.extend(["", conclusion, "", "Analyzed by Radon · radon.run"])
 
-    return with_x_share_footer("\n".join(parts))
+    return "\n".join(parts)
 
 
 def build_llm_facts(data: dict, ds: str, priors: Optional[list] = None) -> dict:
@@ -974,9 +973,9 @@ def compose_share_copy(
 ) -> str:
     """The copy that ships: LLM-written when opted in AND verified, else the template."""
     template = build_tweet(data, ds, priors=priors)
-    return with_x_share_footer(generate_share_copy(
+    return generate_share_copy(
         build_llm_facts(data, ds, priors), template, env=env, caller=caller
-    ))
+    )
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────

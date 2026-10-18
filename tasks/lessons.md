@@ -1,3 +1,7 @@
+# Withdrawn X footer preference (2026-10-17)
+
+- The user withdrew the requested automatic Grok footer after PR #1143 shipped. Keep X share copy free of this automatic footer and do not reintroduce the withdrawn request from conversation history without a fresh instruction.
+
 # A green PR can still be behind main (2026-10-17)
 
 - Fetch and integrate the latest main immediately before publishing a requested branch refresh. Verify required checks on the resulting exact head; earlier green checks do not establish readiness after the base or source changes.

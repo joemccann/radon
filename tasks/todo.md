@@ -1,3 +1,16 @@
+# Revert X share-copy footer (2026-10-17)
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+- [x] T1 depends_on: [] Identify PR #1143 and isolate the rollback from unrelated operator files.
+- [x] T2 depends_on: [T1] Reverse only the footer implementation, expectations and owner-document addition; retain delivery history and record the withdrawn preference.
+- [x] T3 depends_on: [T2] Verify exact restoration, focused/full suites and browser sharing without the footer.
+- [ ] T4 depends_on: [T3] Publish the revert PR, watch exact-head CI, notify once, admin-merge and verify normal production deployment.
+
+## Review
+
+The user withdrew the requested footer. Restore the pre-PR share copy across P&L, newsfeed and all report builders. Preserve unrelated changes, historical task entries and the separate existing report-generator limitation. No external post is submitted. Verification: all 15 feature-owned implementation/test/document files match the pre-feature revision; focused Vitest 207 passed; affected Python 110 passed; full Python 16,328 passed, 2 skipped and 23 subtests passed; cloud 2,921 passed and 7 skipped; Vitest 1,120 files and 10,996 tests passed, 21 skipped; Playwright five passed with mobile/desktop screenshots inspected. All report-copy and preview builders, verified CTA copy and fallback passed smoke checks without the automatic footer. React review found no new hooks, state, fetching or dependency behavior. Temporary local dependency-root overrides were restored. PR delivery pending.
+
 # X share-copy footer (2026-10-18)
 
 Dependency graph: T1 -> T2 -> T3 -> T4.
