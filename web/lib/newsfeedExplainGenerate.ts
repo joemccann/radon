@@ -4,6 +4,7 @@ import {
   NEWSFEED_EXPLAIN_SYSTEM,
   explainContentHash,
   isThinExplainInput,
+  stripExplainDisclaimer,
   type NewsfeedExplainInput,
 } from "@/lib/newsfeedExplain";
 import { readExplainCache, writeExplainCache } from "@/lib/newsfeedExplainCache";
@@ -95,7 +96,7 @@ async function draftExplanation(
     signal,
   });
   onStage("checking");
-  const explanation = result.text.trim();
+  const explanation = stripExplainDisclaimer(result.text);
   if (!explanation) throw new Error("Empty explanation");
   const hasImage = images.length > 0;
   await writeExplainCache({
