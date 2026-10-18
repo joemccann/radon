@@ -935,4 +935,3 @@ class TestTestedShaIsPinnedThroughTheCallChain:
         assert result.returncode == 76
         assert log.read_text(encoding="utf-8").count(f"sync-control-plane {SHA_B}") == 2
         assert _rejected(tmp_path).read_text(encoding="utf-8").strip() == "76"
-

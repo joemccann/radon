@@ -1902,12 +1902,19 @@ write_mcp_env() {
   chmod 0600 "$mcp_env_tmp"
   grep -E '^(CLERK_JWKS_URL|CLERK_ISSUER|ALLOWED_USER_IDS|RADON_MCP_[A-Z0-9_]+)=' "$ENV_FILE" > "$mcp_env_tmp" || true
   if [[ "${RADON_POLICY_SKIP_CHOWN:-0}" != "1" ]]; then
-    if ! chown radon:radon "$mcp_env_tmp"; then
+    # root:radon, not radon:radon (DS-2026-10-18-04). This file is the public
+    # MCP auth boundary and radon-mcp only needs to READ it; leaving it owned
+    # by the account that service runs as, and that holds a sudoers restart
+    # grant, let an unprivileged compromise choose who the public endpoint
+    # trusts. Every deploy republishes it through
+    # `radon-deploy-root publish-mcp-env`, so nothing unprivileged needs write.
+    if ! chown root:radon "$mcp_env_tmp"; then
       rm -f "$mcp_env_tmp"
       log_error "Could not chown staged ${mcp_env_target}"
       return 1
     fi
   fi
+  chmod 0640 "$mcp_env_tmp"
   # -T: a directory link raced into the destination is replaced, not entered.
   mv -T -f "$mcp_env_tmp" "$mcp_env_target"
   log_success "Hosted MCP env written to ${mcp_env_target}"
