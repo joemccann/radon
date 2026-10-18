@@ -523,3 +523,10 @@ mobile-risk-reversal-quote-sign.spec.ts
 # REVIEWED 2026-10-12 skew2d-tab.spec.ts - Local Chromium (next dev, authless) passed 3/3 after the tenor assertion moved from the dropped TENOR tile to the LEVEL tile. Spec stays held out of CI Playwright.
 # REVIEWED 2026-10-12 trin-tab.spec.ts - Local Chromium (next dev, authless) passed 4/4 with the source assertion updated to the plain provenance copy (IB LIVE · STOCKCHARTS DAILY). Spec stays held out of CI Playwright.
 # REVIEWED 2026-10-12 rv-ratio.spec.ts - Static review only: the reserved VIX slot is asserted absent from the tablist and named in the Coming note shipped by #1037. Unit coverage in web/tests/rv-ratio-panel.test.tsx; no local browser pass claimed (worktree dev server could not build).
+# REVIEWED 2026-10-18 newsfeed-explain.spec.ts - 2/2 Chromium against local next
+#   dev :3000 with RADON_AUTHLESS_TEST and a recorded SSE fixture. Pins idle,
+#   loading, and explained states on a text-only PJM post and a chart post at
+#   1440 and 393x852. Plates live in docs/design-shots/explain-button/. Wire
+#   pins live in Vitest newsfeed-explain-ui. Held out of e2e-financial-smoke
+#   because the spec writes design plates and was not preflighted on next start.
+newsfeed-explain.spec.ts
