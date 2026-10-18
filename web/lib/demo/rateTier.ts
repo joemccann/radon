@@ -8,12 +8,19 @@
 
 import type { DemoRateTier } from "./rateLimit";
 
-// The LLM routes — coarse backstop above the per-endpoint AI quota.
+// Every route that can reach an LLM provider — the coarse SHARED backstop above
+// the per-endpoint AI quota. A route's own `durableRateTier` guard is keyed on
+// `route:<key>:<user>`, so it is an independent budget: a route missing from
+// this set gets its own daily allowance on top of the documented shared AI
+// ceiling, against production provider keys. Drift pin:
+// demo-ai-budget-route-coverage.test.ts walks the real import graph and fails
+// when a new LLM route ships unlisted (DS-2026-10-18-03).
 const AI_PATHS = new Set<string>([
   "/api/assistant",
+  "/api/newsfeed/explain",
+  "/api/newsfeed/share",
   "/api/ticker/seasonality",
   "/api/ticker/info",
-  "/api/newsfeed/explain",
 ]);
 
 // Expensive producers / aggregations / IB-touching exec. Cached GETs are
