@@ -39,6 +39,8 @@ const GUARDED_ADMIN_ACTION_ROUTES = [
   "newsfeed/research/files/[asset]",
   // Operator ground-truth labels on research items: requireRouteAccess operatorOnly on the only verb.
   "newsfeed/research/feedback", "newsfeed/research/held", "newsfeed/research/rules",
+  // Newsfeed Explain: requireRouteAccess (any admitted principal), paid LLM path.
+  "newsfeed/explain",
   // Original-page evidence and account/assistant audit exports are operator-only.
   "research/evidence/[asset]", "research/governance",
   // R-180: this POST SPAWNS garch_convergence.py. Its leap/scan sibling has
