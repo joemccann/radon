@@ -1,6 +1,6 @@
 import type { Static } from "@sinclair/typebox";
 import { resetDb, syncDb } from "@/lib/db";
-import { dbExecute } from "@/lib/dbExecute";
+import { dbBatch } from "@/lib/dbExecute";
 import {
   createDbOperationIdentity,
   runWithDbOperation,
@@ -63,24 +63,24 @@ export async function readOrdersFromDb(): Promise<OrdersSnapshot | null> {
   const cutoff = new Date(
     Date.now() - EXECUTED_SQL_LOOKBACK_HOURS * 60 * 60 * 1000,
   ).toISOString();
-  const [openResult, execResult] = await Promise.all([
-    dbExecute(
+  // One /v2/pipeline for both SELECTs (PERF-016). FastAPI already does this
+  // in `_read_orders_snapshot_from_db` (PERF-002); the Next.js poll path
+  // still issued two HTTP round-trips.
+  const [openResult, execResult] = await dbBatch(
+    [
       {
         sql: `SELECT payload, updated_at FROM open_orders ORDER BY updated_at DESC`,
         args: [],
       },
-      { timeoutMs: DB_READ_TIMEOUT_MS, label: "open orders" },
-    ),
-    dbExecute(
       {
         sql: `SELECT payload, fill_time FROM executed_orders
               WHERE fill_time >= ?
               ORDER BY fill_time DESC`,
         args: [cutoff],
       },
-      { timeoutMs: DB_READ_TIMEOUT_MS, label: "executed orders" },
-    ),
-  ]);
+    ],
+    { timeoutMs: DB_READ_TIMEOUT_MS, label: "orders snapshot", mode: "read" },
+  );
 
   const open: Open[] = [];
   let latestOpenSync = "";

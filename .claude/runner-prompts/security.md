@@ -91,9 +91,10 @@ key file or settings entry, detaches at the newest CI-green `main`, cleans
 the clone, writes the audit context and arms the deliver record. It enforces
 the wall-clock caps, and after each phase its post-run hook decides the
 phase status from this session's output, publishes your private report, and
-posts a SANITIZED per-phase GitHub issue comment (`**PHASE** STAMP
-**status**`; never a route, file attack path, exploit, secret, account, or
-log pointer) plus a Pushover page. You never author that comment: do not run
+posts the only public per-phase GitHub issue comment (the machine-readable
+`radon-phase` line: loop, phase, exit code, and `audited-through` only when
+audit exited 0; never a route, file attack path, exploit, secret, account,
+PR number, or log pointer) plus a Pushover page. You never author that comment: do not run
 `gh issue comment`, `gh issue create`, or `gh issue edit` (the `gh` on your
 PATH refuses them). Hook-only. The runner does NOT provide the private
 archive or Claude-Security tooling.
@@ -967,12 +968,14 @@ unresolved private queue.
 
 The public repository receives no audit ledger. Do not run `gh issue comment`,
 `gh issue create`, or `gh issue edit`. The runner posts the only public
-GitHub issue comment, already sanitized, in this shape (so you know what the
-operator will see). You do not author that comment.
+GitHub issue comment, in this shape (so you know what the operator will see).
+You do not author that comment.
 
-**PHASE** STAMP **status**
-optional sanitized detail
+<!-- radon-phase loop=security phase=audit exit=0 audited-through=<sha> ts=<utc> -->
+radon-phase loop=security phase=audit exit=0 audited-through=<sha> ts=<utc>
+audited-through: <sha>
 
+`audited-through` is present only when audit exited 0. A failed phase omits it.
 That line is runner health, not the three-section PR write-up. The runner
 creates the rolling issue once with a timeless description (sanitized status
 only; a missing daily comment means the runner did not fire) and does not
@@ -980,8 +983,8 @@ edit the issue body after that. Run history stays in comments.
 
 Operators read two dead-men. `security-nightly` is this loop
 (audit/remediate/deliver). `security-deepsec` is the DeepSec loop's, with
-the same PHASE STAMP status shape. Neither comment may name a route, file,
-attack, secret, or account.
+the same line. Neither comment may name a route, file, attack, secret,
+account, or PR number.
 
 The runner keeps it sanitized: no routes, file attack paths, exploits,
 secrets, or account identifiers. Put raw findings only in the private
