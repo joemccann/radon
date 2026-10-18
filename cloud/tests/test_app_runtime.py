@@ -2177,3 +2177,40 @@ def test_rel158_notify_proxy_filters_container_control_messages() -> None:
                 proc.terminate()
                 proc.wait(timeout=5)
                 proc.stderr.close()
+
+
+# DS-2026-10-17-20: media.radon.run serves /var/lib/radon/media through Caddy
+# file_server, which follows symlinks, and that directory was bind-mounted
+# READ-WRITE into every app unit. Any one of them could plant a symlink and
+# have the host Caddy process read a file the container cannot. The newsfeed
+# is the only writer -- it downloads the images -- so every other unit loses
+# the capability. The newsfeed's own write path is a publication-topology
+# change and is carried as an operator action.
+
+@pytest.mark.parametrize(
+    "unit",
+    [
+        "radon-api.service",
+        "radon-nextjs.service",
+        "radon-monitor.service",
+        "radon-relay.service",
+    ],
+)
+def test_run_mounts_media_read_only_outside_the_newsfeed(tmp_path: Path, unit: str) -> None:
+    result = _run(tmp_path, ["run", unit])
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    media = [arg for arg in log.split() if ":/var/lib/radon/media" in arg]
+    assert media, log
+    for arg in media:
+        assert arg.endswith(":/var/lib/radon/media:ro"), arg
+
+
+def test_run_newsfeed_keeps_write_on_the_media_volume_it_fills(tmp_path: Path) -> None:
+    result = _run(tmp_path, ["run", "radon-newsfeed.service"])
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    media = [arg for arg in log.split() if ":/var/lib/radon/media" in arg]
+    assert media, log
+    for arg in media:
+        assert not arg.endswith(":ro"), arg
