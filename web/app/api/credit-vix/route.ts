@@ -4,6 +4,7 @@ import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead, staleCollapse, isMissingPayload } from "@/lib/dbFirstRead";
+import { snapshotMaxAgeMs } from "@/lib/demo/snapshotWindow";
 import { MISSING_CREDIT_VIX } from "@/lib/creditVix";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +44,7 @@ export async function GET(): Promise<Response> {
   const result = await dbFirstRead({
     fromDb: readCreditVixFromDb,
     fromDisk: readCreditVixFromDisk,
-    maxAgeMs: CREDIT_VIX_MAX_AGE_MS,
+    maxAgeMs: await snapshotMaxAgeMs(CREDIT_VIX_MAX_AGE_MS),
     label: "credit-vix",
     isDegraded: isMissingPayload,
   });
