@@ -39,6 +39,8 @@ const GUARDED_ADMIN_ACTION_ROUTES = [
   "newsfeed/research/files/[asset]",
   // Operator ground-truth labels on research items: requireRouteAccess operatorOnly on the only verb.
   "newsfeed/research/feedback", "newsfeed/research/held", "newsfeed/research/rules",
+  // Newsfeed Explain: requireRouteAccess (any admitted principal), paid LLM path.
+  "newsfeed/explain",
   // Original-page evidence and account/assistant audit exports are operator-only.
   "research/evidence/[asset]", "research/governance",
   // R-180: this POST SPAWNS garch_convergence.py. Its leap/scan sibling has
@@ -86,7 +88,7 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
   // are present in this deployment, never any key material — same posture as
   // its llm-token-index sibling, so the middleware perimeter is the only layer.
   "models", "prices",
-  "risk-free-rate", "skew", "skew2d", "straddle", "version", "vixcor", "vixts", "panic-index",
+  "risk-free-rate", "skew", "skew2d", "straddle", "version", "vix-pc", "vixcor", "vixts", "panic-index",
   "vol-cone", "watchlist", "watchlist/[symbol]", "yield-curve",
   "yield-curve/live",
 ] as const;

@@ -1,3 +1,31 @@
+# Nightly phase status line (2026-10-18)
+
+Dependency graph: T1 -> T2 -> T3; T4 and T5 depend_on: [T2]; T6 depends_on: [T3, T4, T5].
+
+- [x] T1 depends_on: [] Map runner loops, exit codes, and dead-man posting.
+- [x] T2 depends_on: [T1] Harness emits the radon-phase line from the process exit, including kill and missing hook status.
+- [x] T3 depends_on: [T2] Security and DeepSec public audit comments are that line only.
+- [x] T4 depends_on: [T2] Formatter, parser, and failure-path tests green.
+- [x] T5 depends_on: [T2] Audit-context reader skips a non-zero machine line and keeps the legacy fallback.
+- [ ] T6 depends_on: [T3, T4, T5] docs/runner.md, PR, CI green, ready.
+
+## Review
+
+Focused pytest: phase status, audit context, issue format, PR output, reporting doc, security hooks, run_loop, install trust: 191 + 243 passed. The runner is in this repo. joemccann/radon-factory was not found.
+
+# Newsfeed Explain button (2026-10-18)
+
+Dependency graph: T1 -> T2; T3 parallel to T2; T4 depends_on: [T2, T3].
+
+- [x] T1 depends_on: [] Spec the Explain button, cache table, prompt, auth pin and UI states.
+- [ ] T2 depends_on: [T1] Backend: route, LLM, image fetch, Turso cache, writer, failing-then-green tests.
+- [ ] T3 depends_on: [T1] UI: Explain control, panel/sheet, desktop and mobile CSS, component tests.
+- [ ] T4 depends_on: [T2, T3] Merge, Playwright plates, CI green, operator PR.
+
+## Review
+
+Pending swarm merge.
+
 # X share-copy footer (2026-10-18)
 
 Dependency graph: T1 -> T2 -> T3 -> T4.
@@ -9795,3 +9823,20 @@ Independent scope review: ask_text is also used by the separate generated-chart 
 - [ ] G4 depends_on: [G3] Actual deployed native rerender, guarded same-ID correction and all resulting production/source image verification.
 
 Review: Goldman normal6 publishes one supported native table, but external attachment records709chars/5lines of preceding prose as title. Independent Luna blocked visual quality; root/Sol accept superseding old visual approval. Preserve all data/claims/metadata/queue and complete source pixels. No local test suites.
+
+# Revert X share-copy footer (2026-10-17)
+
+Dependency graph: T1 -> T2 -> T3 -> T5 -> T6 -> T4.
+
+- [x] T1 depends_on: [] Identify PR #1143 and isolate the rollback from unrelated operator files.
+- [x] T2 depends_on: [T1] Reverse only the footer implementation, expectations and owner-document addition; retain delivery history and record the withdrawn preference.
+- [x] T3 depends_on: [T2] Verify exact restoration, focused/full suites and browser sharing without the footer.
+- [x] T5 depends_on: [T3] Integrate concurrent Explain PR #1145, resolve only the overlap, refresh verification and wait for the preceding production deployment.
+- [x] T6 depends_on: [T5] Integrate concurrent indicator PR #1144, preserve its changes and refresh verification after its production deployment.
+- [ ] T4 depends_on: [T3,T5,T6] Publish the revert PR, watch exact-head CI, notify once, admin-merge and verify normal production deployment.
+
+## Review
+
+The user withdrew the requested footer. Restore the pre-PR share copy across P&L, newsfeed and all report builders. Preserve unrelated changes, historical task entries and the separate existing report-generator limitation. No external post is submitted. Verification: all 15 feature-owned implementation/test/document files match the pre-feature revision; focused Vitest 207 passed; affected Python 110 passed; full Python 16,328 passed, 2 skipped and 23 subtests passed; cloud 2,921 passed and 7 skipped; Vitest 1,120 files and 10,996 tests passed, 21 skipped; Playwright five passed with mobile/desktop screenshots inspected. All report-copy and preview builders, verified CTA copy and fallback passed smoke checks without the automatic footer. React review found no new hooks, state, fetching or dependency behavior. Temporary local dependency-root overrides were restored. Concurrent main 3c9b7e67 is integrated; all 34 incoming Explain files match current main exactly and both task-ledger entries are retained. Refreshed Python 16,336 passed, two skipped and 23 subtests passed; cloud 2,921 passed and seven skipped; focused web 207 passed; Playwright five passed. The default full web run had five unchanged Next-config import timeouts; those five files passed 29 tests in isolation. Full Vitest using the supported history-derived build-version override passed 1,124 files and 11,023 tests, 21 skipped. No test/timeout/retry/worker/CI gate changed. The updated-base mobile screenshot clips the incoming share layout; it is retained unchanged and recorded in PR risks. Updated-head CI and production delivery pending.
+
+Final integration review: eac73b0b is included. All 44 incoming indicator files and the Explain feature are preserved exactly; the 15 footer-owned implementation/test/document files still match the pre-footer revision. Current-base full Python 16,367 passed, two skipped and 23 subtests passed; cloud 2,926 passed and seven skipped; full Vitest 1,126 files and 11,060 tests passed, 21 skipped with the supported derived build-version setting; focused web 207 passed and browser five passed. Preceding main CI/deploy is green. Updated-head CI and delivery remain pending.
