@@ -525,7 +525,14 @@ write_mcp_env() {
   # (DS-2026-10-18-04). The grant ships in the bundle the control-plane sync
   # installs, so the unprivileged write below has to survive one release; a
   # host that has taken the grant never reaches it.
-  if [[ -z "${1:-}" && -z "${2:-}" ]] \
+  #
+  # The choice is made on the RESOLVED paths, not on whether arguments were
+  # passed: `main` calls this with the canonical env explicitly, so keying on
+  # "no arguments" left the privileged path unreachable in production while
+  # every bare test call still exercised it. A dev or test invocation against
+  # some other destination is not the production boundary and keeps the
+  # unprivileged write.
+  if [[ "$cloud_env" == "$ENV_FILE_DEFAULT" && "$mcp_env" == "$MCP_ENV_FILE" ]] \
     && sudo -n -l -- "$DEPLOY_ROOT_HELPER" publish-mcp-env >/dev/null 2>&1; then
     if sudo -n "$DEPLOY_ROOT_HELPER" publish-mcp-env; then
       return 0
