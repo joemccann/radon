@@ -836,11 +836,13 @@ Cutover, in this order. Do not skip or reorder:
    `VPS_SSH_KEY`, main-only):
    - `TS_OAUTH_CLIENT_ID`
    - `TS_OAUTH_SECRET`
-   - `VPS_TAILNET_HOST` = `100.112.32.16`
-   - `VPS_SSH_FINGERPRINT` = SHA256 fingerprint of the app host key
-     (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256` on the
-     host; store the `SHA256:...` value the ssh-action `fingerprint` input
-     accepts)
+   - `VPS_TAILNET_HOST` = `100.112.32.16` (set 2026-10-18)
+   - `VPS_SSH_FINGERPRINT` = SHA256 fingerprint of the app host's **ECDSA**
+     key (set 2026-10-18; `ssh-keyscan -t ecdsa 100.112.32.16 | ssh-keygen
+     -lf - -E sha256`, store the `SHA256:...` value). Not ed25519: drone-ssh
+     1.8.2, which `appleboy/ssh-action` v1.2.5 runs, negotiates ECDSA first,
+     and an ed25519 fingerprint fails every step with `host key fingerprint
+     mismatch`. The same key answers on the public and tailnet addresses.
 2. **Merge, then confirm one successful deploy over the tailnet.** Watch
    `gh run list --workflow=ci.yml --limit 1` on the first main push after
    merge. The three host jobs must Connect Tailscale then SSH. Do not touch
