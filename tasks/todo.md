@@ -9852,3 +9852,27 @@ Final integration review: eac73b0b is included. All 44 incoming indicator files 
 Review: Production Gateway paging, hold behavior and broker state are outside the patch. Tests run in GitHub Actions only; regression probes replace the last transport boundary before exercising the old behavior.
 
 Notification isolation review: cloud RED `1cdf8f37`, run `39151257572`: hold shard 1 failed/1152 passed (one fake sender call); isolation shard 5 failed/2578 passed/1 skipped. Shared root fixtures strip credentials and block urllib/requests Pushover message/cancellation requests with a teardown latch. Default hold pager is fake; explicit paging tests still supply observable senders. Production files remain unchanged. Full final-head CI pending.
+
+
+## VIX model spread indicator (2026-10-18)
+
+- [x] T1 (depends_on: []): Verify VIX / VIXEQ / COR1M sources, units, windows, licensing and capture fixtures.
+- [x] T2 (depends_on: [T1]): Specify formula, API, storage and chart; record failing Python/API/UI tests.
+- [x] T3 (depends_on: [T2]): Implement ingestion, storage and trusted scheduled units.
+- [x] T4 (depends_on: [T2]): Implement API, types, hook and freshness schedule.
+- [x] T5 (depends_on: [T2]): Implement Regime chart, navigation and browser coverage.
+- [x] T6 (depends_on: [T3, T4, T5]): Integrate, run full suites, ingest real data and verify browser.
+- [ ] T7 (depends_on: [T6]): PR, exact-head green CI, Pushover, admin merge and production verification.
+
+### Review
+
+- Source research reproduced 3,101 aligned Cboe sessions, 2014-06-19 through 2026-10-16.
+- Formula verified: sqrt(COR1M / 100) * VIXEQ; latest model 13.235944, spread 6.754056.
+- Screenshot bands use 252 sessions (mean 3.949551), while requested prose specifies 20 (mean 4.327849). Preserve explicit window labels.
+- User confirmed personal, non-commercial use only on 2026-10-18. Source gate resolved within that scope; no public/demo data or raw-source redistribution.
+- Integrated suites: Python 16,155 passed/2 skipped (74.49% coverage), after integrating main 948fedc8; Vitest 11,136 passed/21 skipped; cloud 2,982 passed/7 skipped. Touched collector 61 passed/97.58% coverage after real full-history upload regression. Synthetic desktop/mobile Playwright 6 passed.
+- Production Turso migration 98 applied; direct query verifies 3,101 history rows (2014-06-19 through 2026-10-16), complete snapshot at 2026-10-18T22:00:11.019739Z and service health. Native authenticated production-build browser verified 3,101 sessions, 20/252 bands, timer-derived countdown and four inspected desktop/mobile theme screenshots; exact-head delivery remains pending.
+
+- Final updated-base verification: full Python 16,155 passed/2 skipped, cloud 2,982 passed/7 skipped, full Vitest 11,136 passed/21 skipped with every coverage ratchet green. Production compile and native-session real-data browser checks passed; existing two newsfeed type errors reproduce on the clean base and remain outside this feature. React review verified unconditional hooks, ResizeObserver cleanup, finite chart values and explicit window/range state.
+
+VIX model delivery review: initial exact-head CI found missing canonical Clear/TesterArmy route registration (TesterArmy run 39170989963: 1 failed/78 passed). Add the new page to the unchanged strict inventory check; local inventory/generator now cover all 70 App Router pages exactly once. No runtime code or test gate changed. Focused exact inventory plus new-route desktop/mobile Playwright: 3 passed; repaired-head CI pending.
