@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { guard, explainNewsfeedPost } = vi.hoisted(() => ({
+const { guard, explainNewsfeedPost, enforceDemoAiQuota } = vi.hoisted(() => ({
   guard: vi.fn(),
   explainNewsfeedPost: vi.fn(),
+  enforceDemoAiQuota: vi.fn(),
 }));
 
 vi.mock("../lib/routeAccess", () => ({ requireRouteAccess: guard }));
 vi.mock("../lib/newsfeedExplainGenerate", () => ({ explainNewsfeedPost }));
+vi.mock("../lib/demo/enforceAiQuota", () => ({ enforceDemoAiQuota }));
 
 import { POST, radonCapability } from "../app/api/newsfeed/explain/route";
 import { EXPLAIN_BUDGET_MS } from "../lib/newsfeedExplainProgress";
@@ -43,6 +45,7 @@ function parseEvents(text: string): SseEvent[] {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  enforceDemoAiQuota.mockResolvedValue(null);
   guard.mockResolvedValue({ ok: true, principal: { userId: "joe", kind: "operator" } });
   explainNewsfeedPost.mockImplementation(async (_input, { onStage }) => {
     onStage("loading");
@@ -60,6 +63,13 @@ describe("POST /api/newsfeed/explain", () => {
   it.each([401, 403, 429])("preserves access rejection %s without model calls", async (status) => {
     guard.mockResolvedValue({ ok: false, response: new Response(null, { status }) });
     expect((await POST(request())).status).toBe(status);
+    expect(explainNewsfeedPost).not.toHaveBeenCalled();
+  });
+
+  it("returns the demo AI quota rejection before any model call", async () => {
+    enforceDemoAiQuota.mockResolvedValue(new Response(null, { status: 429 }));
+    expect((await POST(request())).status).toBe(429);
+    expect(enforceDemoAiQuota).toHaveBeenCalledWith("newsfeed/explain");
     expect(explainNewsfeedPost).not.toHaveBeenCalled();
   });
 
