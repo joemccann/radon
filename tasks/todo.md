@@ -1,16 +1,15 @@
-# Revert X share-copy footer (2026-10-17)
+# Newsfeed Explain button (2026-10-18)
 
-Dependency graph: T1 -> T2 -> T3 -> T5 -> T4.
+Dependency graph: T1 -> T2; T3 parallel to T2; T4 depends_on: [T2, T3].
 
-- [x] T1 depends_on: [] Identify PR #1143 and isolate the rollback from unrelated operator files.
-- [x] T2 depends_on: [T1] Reverse only the footer implementation, expectations and owner-document addition; retain delivery history and record the withdrawn preference.
-- [x] T3 depends_on: [T2] Verify exact restoration, focused/full suites and browser sharing without the footer.
-- [ ] T5 depends_on: [T3] Integrate concurrent Explain PR #1145, resolve only the overlap, refresh verification and wait for the preceding production deployment.
-- [ ] T4 depends_on: [T3,T5] Publish the revert PR, watch exact-head CI, notify once, admin-merge and verify normal production deployment.
+- [x] T1 depends_on: [] Spec the Explain button, cache table, prompt, auth pin and UI states.
+- [ ] T2 depends_on: [T1] Backend: route, LLM, image fetch, Turso cache, writer, failing-then-green tests.
+- [ ] T3 depends_on: [T1] UI: Explain control, panel/sheet, desktop and mobile CSS, component tests.
+- [ ] T4 depends_on: [T2, T3] Merge, Playwright plates, CI green, operator PR.
 
 ## Review
 
-The user withdrew the requested footer. Restore the pre-PR share copy across P&L, newsfeed and all report builders. Preserve unrelated changes, historical task entries and the separate existing report-generator limitation. No external post is submitted. Verification: all 15 feature-owned implementation/test/document files match the pre-feature revision; focused Vitest 207 passed; affected Python 110 passed; full Python 16,328 passed, 2 skipped and 23 subtests passed; cloud 2,921 passed and 7 skipped; Vitest 1,120 files and 10,996 tests passed, 21 skipped; Playwright five passed with mobile/desktop screenshots inspected. All report-copy and preview builders, verified CTA copy and fallback passed smoke checks without the automatic footer. React review found no new hooks, state, fetching or dependency behavior. Temporary local dependency-root overrides were restored. PR delivery pending.
+Pending swarm merge.
 
 # X share-copy footer (2026-10-18)
 
@@ -9809,3 +9808,17 @@ Independent scope review: ask_text is also used by the separate generated-chart 
 - [ ] G4 depends_on: [G3] Actual deployed native rerender, guarded same-ID correction and all resulting production/source image verification.
 
 Review: Goldman normal6 publishes one supported native table, but external attachment records709chars/5lines of preceding prose as title. Independent Luna blocked visual quality; root/Sol accept superseding old visual approval. Preserve all data/claims/metadata/queue and complete source pixels. No local test suites.
+
+# Revert X share-copy footer (2026-10-17)
+
+Dependency graph: T1 -> T2 -> T3 -> T5 -> T4.
+
+- [x] T1 depends_on: [] Identify PR #1143 and isolate the rollback from unrelated operator files.
+- [x] T2 depends_on: [T1] Reverse only the footer implementation, expectations and owner-document addition; retain delivery history and record the withdrawn preference.
+- [x] T3 depends_on: [T2] Verify exact restoration, focused/full suites and browser sharing without the footer.
+- [x] T5 depends_on: [T3] Integrate concurrent Explain PR #1145, resolve only the overlap, refresh verification and wait for the preceding production deployment.
+- [ ] T4 depends_on: [T3,T5] Publish the revert PR, watch exact-head CI, notify once, admin-merge and verify normal production deployment.
+
+## Review
+
+The user withdrew the requested footer. Restore the pre-PR share copy across P&L, newsfeed and all report builders. Preserve unrelated changes, historical task entries and the separate existing report-generator limitation. No external post is submitted. Verification: all 15 feature-owned implementation/test/document files match the pre-feature revision; focused Vitest 207 passed; affected Python 110 passed; full Python 16,328 passed, 2 skipped and 23 subtests passed; cloud 2,921 passed and 7 skipped; Vitest 1,120 files and 10,996 tests passed, 21 skipped; Playwright five passed with mobile/desktop screenshots inspected. All report-copy and preview builders, verified CTA copy and fallback passed smoke checks without the automatic footer. React review found no new hooks, state, fetching or dependency behavior. Temporary local dependency-root overrides were restored. Concurrent main 3c9b7e67 is integrated; all 34 incoming Explain files match current main exactly and both task-ledger entries are retained. Refreshed Python 16,336 passed, two skipped and 23 subtests passed; cloud 2,921 passed and seven skipped; focused web 207 passed; Playwright five passed. The default full web run had five unchanged Next-config import timeouts; those five files passed 29 tests in isolation. Full Vitest using the supported history-derived build-version override passed 1,124 files and 11,023 tests, 21 skipped. No test/timeout/retry/worker/CI gate changed. The updated-base mobile screenshot clips the incoming share layout; it is retained unchanged and recorded in PR risks. Updated-head CI and production delivery pending.

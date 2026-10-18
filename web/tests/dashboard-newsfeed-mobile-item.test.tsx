@@ -226,7 +226,12 @@ describe("DashboardNewsFeed.module.css mobile rules", () => {
     // carries the doubled-class bump like every other rule in the file: a bare
     // `.tagMore` is (0,1,0), a tie with globals' `.news-feed-tag-chip
     // { display: inline-flex }` that resolves on injection order alone.
-    expect(unscoped).toEqual([".tsCompact", ".tagMore.tagMore"]);
+    expect(unscoped).toEqual([
+      ".tsCompact",
+      ".tagMore.tagMore",
+      ".postActions",
+      ".postActions :global([data-newsfeed-share])",
+    ]);
   });
 
   it("drops the item's inline padding and moves to the four-step spacing scale", () => {
