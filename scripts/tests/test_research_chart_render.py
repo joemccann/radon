@@ -27,6 +27,31 @@ def test_verified_publisher_is_preserved():
     assert publisher_label(" LSEG ") == "LSEG"
 
 
+# Shipped 2026-10-18: a three-line model note ran into the source footer.
+VERBOSE_NOTE = ("Sorted by value descending. Returns are YTD as of the week ending 17 Oct 2026. Desk notes PnL "
+                "'remains positive but has moderated' and tolerance for further losses has diminished. Source: Morgan "
+                "Stanley PB Content Team via Nick Savone, 17 Oct 2026.")
+
+
+@pytest.mark.parametrize("field", ["note", "sourceNote"])
+def test_rejects_chart_note_longer_than_one_footer_line(field):
+    plan = inflation_plan()
+    plan.pop("note")
+    plan[field] = VERBOSE_NOTE
+    with pytest.raises(ChartRenderError, match="brief"):
+        validate_plan(plan)
+
+
+def test_note_and_source_note_share_one_footer_line():
+    plan = inflation_plan()
+    plan["note"] = "x" * 60
+    plan["sourceNote"] = "y" * 60
+    with pytest.raises(ChartRenderError, match="brief"):
+        validate_plan(plan)
+    plan["sourceNote"] = "y" * 39
+    validate_plan(plan)
+
+
 def test_rejects_misleading_nonzero_bar_axis():
     plan = inflation_plan()
     plan["axis"] = [4, 4.5]
@@ -226,7 +251,7 @@ def test_horizontal_axis_title_has_clear_gap_above_footnote(tmp_path):
 @pytest.mark.integration
 def test_clipped_annotation_fails_before_overwriting_previous_export(tmp_path):
     plan = inflation_plan()
-    plan["note"] = "Unbroken-source-label-" * 20
+    plan["subtitle"] = "Unbroken-source-label-" * 20
     output = tmp_path / "approved.png"
     output.write_bytes(b"previous approved export")
     with pytest.raises(ChartRenderError, match="overflow"):
