@@ -585,6 +585,7 @@ Stable fx path (2026-09-26). `com.radon.fx-stable-sync` (installed by `bash scri
 | `radon-ma-ratio.timer` | daily 22:45 UTC | SPX pct above 50d MA over pct above 200d MA (after the close; 5 min behind divyield). Spec: [`indicators/ma-ratio.md`](indicators/ma-ratio.md) |
 | `radon-rsi-oversold.timer` | daily 23:05 UTC | SPX pct of members with Wilder RSI(14) strictly below 30 (after the close; 20 min behind ma-ratio so the shared member-close store is already fresh). Spec: [`indicators/rsi-oversold.md`](indicators/rsi-oversold.md) |
 | `radon-calm-streak.timer` | daily 02:40 + 14:30 UTC | Consecutive SPX sessions without a >1% intraday band, from Cboe `_SPX.json` (conditional GET; unchanged runs are heartbeats). Spec: [`indicators/calm-streak.md`](indicators/calm-streak.md) |
+| `radon-vix-model-spread.timer` | daily 02:50 UTC | Personal-use VIX minus sqrt(COR1M/100) * VIXEQ; operator-only `/regime/vix-model-spread`, migration 0098, same-session Cboe history and 20/252-session bands. Both units are manifest-pinned for automatic installation. Spec: [`indicators/vix-model-spread.md`](indicators/vix-model-spread.md) |
 | `radon-bounce-setup.timer` | Mon..Fri 21:10 UTC | BOUNCE SETUP scanner: stretch rank from Turso closes (largecaps), then UW fixed-strike put vol and 25-delta skew on the top 30. Writes `data/bounce_setup.json` + `scan_snapshots` service `bounce-setup`. Spec: [`bounce-setup.md`](bounce-setup.md). |
 | `radon-iv-spread.timer` | daily 22:15 UTC | NDX minus SPX 1M ATM implied vol spread from IB (after the close; between ivrank and dispersion). Spec: [`indicators/iv-spread.md`](indicators/iv-spread.md) |
 | `radon-watchdog-{intraday,continuous,daily,error}.timer` | varies | Service-health alerting (Pushover) |
@@ -785,10 +786,11 @@ As root, set `BACKUP=<printed /etc/radon-ufw-rollback.* path>`, then run `cp -a 
 
 ### Hetzner Cloud Firewalls (`cloud/hetzner/firewalls/`)
 
-`fw-radon-app.json`, `fw-radon-broker.json`, `fw-radon-ops.json` are `hcloud firewall replace-rules` rule files, inbound only (anything not listed is dropped; outbound is open). `hcloud_firewalls.py` renders `__OPERATOR_RECOVERY_IP__/32` from `--recovery-ip` (one public IPv4) and prints the commands; `--apply` runs them with your own `hcloud` context. Deploy never calls it (`cloud/tests/test_hetzner_firewalls.py` pins the shapes and that fact).
+`fw-radon-app.json`, `fw-radon-broker.json`, `fw-radon-demo.json`, `fw-radon-ops.json` are `hcloud firewall replace-rules` rule files, inbound only (anything not listed is dropped; outbound is open). `hcloud_firewalls.py` renders `__OPERATOR_RECOVERY_IP__/32` from `--recovery-ip` (one public IPv4) and prints the commands; `--apply` runs them with your own `hcloud` context. Deploy never calls it (`cloud/tests/test_hetzner_firewalls.py` pins the shapes and that fact).
 
 - **fw-radon-app:** 80/443 any; 41641/udp any. Public tcp/22 is closed in the declared rules. CI SSH uses the tailnet, and recovery uses the Hetzner web console; see [CI deploy over the tailnet](#ci-deploy-over-the-tailnet).
 - **fw-radon-broker:** 22 from the recovery `/32`; 41641/udp any. No web ports.
+- **fw-radon-demo:** 22 from the recovery `/32`; 80/443 any. No Tailscale UDP rule: demo has no Tailscale interface and no IB connection. The FastAPI `8321` and Caddy admin `2019` ports remain container-only.
 - **fw-radon-ops:** 22 from the recovery `/32`; 80, 443 any; 41641/udp any.
 - No 4001/8340 rules: Hetzner Cloud Firewalls filter the public interface only, so the app-to-broker private-net path (`10.0.0.2` -> `10.0.0.4:4001/8340`) never passes them. That path is held by the bind addresses and the broker ufw set above.
 
@@ -809,9 +811,10 @@ rules and attachment before another apply. Do not infer absence from an error.
 Rollout, one server at a time:
 
 1. Dry run: `python3 cloud/hetzner/firewalls/hcloud_firewalls.py --firewall fw-radon-broker --server radon-broker --recovery-ip <your public ip>`.
-2. Same with `--apply`, only after reviewing the rendered rules and target. From a fresh laptop connection to the broker's tailnet address, verify SSH; from the app verify the broker's 8340 `/healthz` and authenticated readiness through the [host-split owner](spof-host-split.md).
+2. Same with `--apply`, only after reviewing the rendered rules and target. Verify fresh broker SSH both over the tailnet and over public IPv4 from the recovery `/32`; public IPv6 SSH and an independent public IPv4 source must be denied. Confirm a direct Tailscale UDP path still works. From the app verify private `10.0.0.4:4001`, the broker's 8340 `/healthz`, and authenticated readiness through the [host-split owner](spof-host-split.md).
 3. For `--firewall fw-radon-app --server radon-app`, first confirm a green tailnet CI deploy and fresh tailnet SSH, and retain that session plus Hetzner console access. The app rules remove public tcp/22 and retain 80/443 and 41641/udp. Review the dry run before applying; verify fresh tailnet SSH, blocked public tcp/22, `https://app.radon.run/edge-health/ping`, and another successful CI deploy through the [deployment owner](../cloud/CLAUDE.md#deployment-contract).
-4. Apply `fw-radon-ops` only after independently identifying its server.
+4. For demo, dry run `python3 cloud/hetzner/firewalls/hcloud_firewalls.py --firewall fw-radon-demo --server radon-demo --recovery-ip <your public ip>`. Retain a public SSH recovery session and Hetzner console access, confirm the recovery IPv4 from the server-observed SSH source, then apply only to provider server `radon-demo` (`5.78.181.75`). Verify a fresh SSH connection from that `/32`, denied public IPv6 SSH and SSH from an independent IPv4 source, HTTP/HTTPS over both families, and `https://demo-api.radon.run/health` returning 200. Demo has no tailnet recovery path.
+5. Apply `fw-radon-ops` only after independently identifying its server.
 
 **Stop:** stop on any refusal, timeout, unexpected rules/attachment or failed
 fresh-access check. Never replay an uncertain mutation to discover its outcome.
