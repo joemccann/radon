@@ -28,7 +28,6 @@ PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from utils.card_screenshot import screenshot_card  # noqa: E402
-from utils.x_share import with_x_share_footer  # noqa: E402
 
 DATA_DIR = PROJECT_ROOT / "data"
 CACHE_PATH = DATA_DIR / "gex.json"
@@ -548,7 +547,7 @@ def build_tweet(data: dict, ds: str) -> str:
         "",
         "Analyzed by Radon · radon.run",
     ]
-    return with_x_share_footer("\n".join(lines))
+    return "\n".join(lines)
 
 
 # ── Preview HTML ──────────────────────────────────────────────────

@@ -7,7 +7,6 @@ import { Share2 } from "lucide-react";
 import { buildShareCaption, buildXShareUrl, sanitizeShareText, sanitizeXShareText, renderShareCard, canvasToPng, canvasToMp4, supportsMp4Export, type SharePost } from "@/lib/newsfeedShare";
 import { readVoiceRewrite, voiceProgress, VOICE_REWRITE_CLIENT_TIMEOUT_MS, VOICE_STAGE_LABELS, type VoiceStage } from "@/lib/newsfeedVoiceProgress";
 import styles from "./NewsfeedShare.module.css";
-import { withXShareFooter } from "@/lib/xShareCopy";
 
 const voiceDrafts = new Map<string, { title: string; content: string }>();
 export function resetNewsfeedShareVoiceCache() { voiceDrafts.clear(); }
@@ -30,7 +29,6 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
   const id = useId();
   const cached = voiceDrafts.get(post.id);
   const [caption, setCaption] = useState(() => buildShareCaption(post, imageUrl));
-  const xCaption = withXShareFooter(sanitizeXShareText(caption));
   const original = useRef(post);
   const [rewrite, setRewrite] = useState<{ title: string; content: string } | undefined>(cached);
   const [rewriting, setRewriting] = useState(!cached);
@@ -130,7 +128,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
   }
 
   async function copyCaption() {
-    try { await navigator.clipboard.writeText(xCaption); setMessage("Caption copied."); }
+    try { await navigator.clipboard.writeText(sanitizeXShareText(caption)); setMessage("Caption copied."); }
     catch { setError("Copy unavailable. Select and copy the caption below."); }
   }
 
@@ -144,7 +142,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
         {preview ? <img src={preview} alt={`Portrait share preview: ${sanitizeShareText(post.title)}`} /> : <span>{error ? "" : "Preparing preview…"}</span>}
       </div>
       <div className={styles.actions}>
-        <a className={styles.action} href={buildXShareUrl(xCaption)} target="_blank" rel="noopener noreferrer">Compose on X</a>
+        <a className={styles.action} href={buildXShareUrl(caption)} target="_blank" rel="noopener noreferrer">Compose on X</a>
         <button type="button" disabled={!preview || busy || rewriting} onClick={() => void download(false)}>Download Story image</button>
         <button type="button" disabled={!preview || busy || rewriting || !mp4} onClick={() => void download(true)}>{busy ? "Exporting…" : "Download Reels / TikTok video"}</button>
         <p>Save the image or video, then upload in your social app. Attach images separately on X.</p>
@@ -153,7 +151,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
     </div>
     <label className={styles.label} htmlFor={id}>Post caption</label>
     <textarea id={id} disabled={rewriting} value={caption} onChange={event => setCaption(event.target.value)} rows={4} />
-    <div className={styles.captionActions}><button type="button" disabled={rewriting} onClick={() => void copyCaption()}>Copy caption</button><span>{Array.from(xCaption).length} characters</span></div>
+    <div className={styles.captionActions}><button type="button" disabled={rewriting} onClick={() => void copyCaption()}>Copy caption</button><span>{Array.from(caption).length} characters</span></div>
     <p className={styles.note}>The image and video use the preview copy. Caption edits apply only to your post.</p>
     {voiceError ? <ErrorToast message={voiceError} onRetry={busy || rewriting ? undefined : () => setVoiceAttempt(value => value + 1)} /> : null}
     {error ? <ErrorToast message={error} onRetry={busy ? undefined : () => { setError(""); setAttempt(value => value + 1); }} /> : null}
