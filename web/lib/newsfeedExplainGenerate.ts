@@ -54,10 +54,39 @@ function pickProvider(hasImages: boolean): { provider: Provider; sendImages: boo
   return { provider: primary, sendImages: false };
 }
 
-function beginFlight(key: string, work: () => Promise<ExplainResult>): Promise<ExplainResult> {
+function callerAbortError(signal: AbortSignal): DOMException {
+  const reason = signal.reason;
+  if (reason instanceof DOMException) return reason;
+  return new DOMException("The operation was aborted", "AbortError");
+}
+
+/** A reader who leaves rejects only their wait. The draft keeps its own deadline (REL-327). */
+function waitForCaller(flight: Promise<ExplainResult>, signal: AbortSignal): Promise<ExplainResult> {
+  if (signal.aborted) return Promise.reject(callerAbortError(signal));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(callerAbortError(signal));
+    signal.addEventListener("abort", onAbort, { once: true });
+    flight.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+function beginFlight(
+  key: string,
+  work: (signal: AbortSignal) => Promise<ExplainResult>,
+): Promise<ExplainResult> {
   const existing = flights.get(key);
   if (existing) return existing;
-  const promise = work().finally(() => {
+  const signal = AbortSignal.timeout(EXPLAIN_BUDGET_MS);
+  const promise = work(signal).finally(() => {
     if (flights.get(key) === promise) flights.delete(key);
   });
   flights.set(key, promise);
@@ -129,5 +158,8 @@ export async function explainNewsfeedPost(
   }
   if (isThinExplainInput(input)) return thinResult();
   options.signal.throwIfAborted();
-  return beginFlight(`${input.postId}:${contentHash}`, () => draftExplanation(input, contentHash, options));
+  const flight = beginFlight(`${input.postId}:${contentHash}`, (signal) =>
+    draftExplanation(input, contentHash, { ...options, signal }),
+  );
+  return waitForCaller(flight, options.signal);
 }

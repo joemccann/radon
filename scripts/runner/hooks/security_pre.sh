@@ -2,9 +2,9 @@
 # PRE_RUN hook for loops/security.env and loops/security-deepsec.env.
 # Installed root-owned in /usr/local/radon-runner/hooks; run_loop.sh runs it
 # before every phase with cwd = the clone. A non-zero exit refuses the phase
-# (the agent does not start) and a `refused=<reason>` line names why; the
-# reason reaches the public dead-man only through security_post.sh's
-# sanitizer.
+# (the agent does not start) and a `refused=<reason>` line names why. The
+# reason is the page and the runner log. The public issue comment is the
+# machine-readable phase line (exit 2) and does not include the reason.
 #
 # Ported from scripts/security_nightly.sh (prologue and run_phase):
 # the clone and origin checks, refuse_credential_files,

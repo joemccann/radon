@@ -1,3 +1,18 @@
+# Nightly phase status line (2026-10-18)
+
+Dependency graph: T1 -> T2 -> T3; T4 and T5 depend_on: [T2]; T6 depends_on: [T3, T4, T5].
+
+- [x] T1 depends_on: [] Map runner loops, exit codes, and dead-man posting.
+- [x] T2 depends_on: [T1] Harness emits the radon-phase line from the process exit, including kill and missing hook status.
+- [x] T3 depends_on: [T2] Security and DeepSec public audit comments are that line only.
+- [x] T4 depends_on: [T2] Formatter, parser, and failure-path tests green.
+- [x] T5 depends_on: [T2] Audit-context reader skips a non-zero machine line and keeps the legacy fallback.
+- [ ] T6 depends_on: [T3, T4, T5] docs/runner.md, PR, CI green, ready.
+
+## Review
+
+Focused pytest: phase status, audit context, issue format, PR output, reporting doc, security hooks, run_loop, install trust: 191 + 243 passed. The runner is in this repo. joemccann/radon-factory was not found.
+
 # Newsfeed Explain button (2026-10-18)
 
 Dependency graph: T1 -> T2; T3 parallel to T2; T4 depends_on: [T2, T3].

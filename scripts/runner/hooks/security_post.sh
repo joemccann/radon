@@ -3,8 +3,10 @@
 # Installed root-owned in /usr/local/radon-runner/hooks; run_loop.sh runs it
 # after every phase (and, bounded to 10s, from its TERM trap). It decides the
 # phase status from the phase's own log slice, publishes the agent's private
-# report to the PRIVATE reports repository, posts the sanitized dead-man
-# comment, and prints `status=` / `pr_url=` / `report_url=` for the page.
+# report to the PRIVATE reports repository, posts the machine-readable public
+# phase line, and prints `status=` / `pr_url=` / `report_url=` for the page.
+# The public comment is that line only. Finding text, PR numbers, paths and
+# the refusal class stay off the issue.
 #
 # Ported from scripts/security_nightly.sh: phase_status, phase_marker_in_slice,
 # deliver_status, _deliver_urls_verified, deliver_record_fresh_terminal,
@@ -19,6 +21,8 @@ set -uo pipefail
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
 
 : "${LOOP:?}" "${PHASE:?}" "${WORK:?}" "${LOOP_STATE:?}" "${RUNNER_DIR:?}"
+# shellcheck disable=SC1091
+source "$RUNNER_DIR/phase_status.sh"
 PHASE_RC="${PHASE_RC:-0}"
 PHASE_LOG="${PHASE_LOG:-/dev/null}"
 # Never a bot-writable directory: the agent's CLI dirs are not on this PATH.
@@ -315,23 +319,16 @@ _sanitize_issue_text() {
 }
 
 _format_issue_body() {
-  local phase="$1" status="$2" detail="$3"
-  local clean body
-  phase="$(_sanitize_issue_text "$phase")"
-  status="$(_sanitize_issue_text "$status")"
-  detail="$(_sanitize_issue_text "$detail")"
-  clean="${detail%%\`\`\`*}"
-  body="$(printf '**%s** %s **%s**' "$phase" "${STAMP:-}" "$status")"
-  if [[ -n "$clean" ]]; then
-    body="${body}"$'\n'"${clean}"
-  fi
-  body="$(_sanitize_issue_text "$body")"
-  printf '%s\n' "$body"
+  local phase="$1" status="$2"
+  # $3, the old detail argument, is not published. The public comment is the
+  # harness line: loop, phase, exit, sha and timestamp.
+  phase_status_body "$LOOP" "$phase" "$status"
 }
 
 # R-612: post FIRST; prune only once the post is confirmed, keeping it.
 report() {
   local body issue posted keep
+  PHASE_MARKER_POSTED=""
   body="$(_format_issue_body "$PHASE" "$STATUS" "$DETAIL")"
   issue="$(net_bounded "$GH" issue list -R "$GH_REPO" --label "$DEADMAN_LABEL" --state open \
     --json number -q '.[0].number' 2>/dev/null || true)"
@@ -348,6 +345,7 @@ report() {
     echo "gh issue call failed: the phase comment did not post" >&2
     return 0
   fi
+  PHASE_MARKER_POSTED=1
   # R-657: no parseable comment id, no prune.
   keep="${posted##*issuecomment-}"
   [[ "$keep" =~ ^[0-9]+$ ]] || return 0
@@ -372,6 +370,7 @@ main() {
   if [[ -z "${PHASE_STATUS:-}" ]]; then publish_private_report; else REPORT_URL=""; fi
   pr="$(resolve_pr_url)"
   report
+  [[ -z "${PHASE_MARKER_POSTED:-}" ]] || echo "marker_posted=1"
   prune_scratch
   pr_line="$(protocol_value "$pr")"
   report_line="$(protocol_value "$REPORT_URL")"
