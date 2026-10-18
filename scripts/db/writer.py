@@ -1953,6 +1953,49 @@ def upsert_ivrank_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = 
     db.commit()
 
 
+def upsert_vix_pc_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """VIX P/C indicator - one row per VIX options session, idempotent on date.
+    daily_ratio / cum5_ratio are NULL when the call denominator is 0;
+    cum5_ratio is also NULL for the first WINDOW-1 rows.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): every changed run
+    rewrites the full stored series (~500 sessions), which per-row would
+    be hundreds of statements on one stream (the rv-ratio 2026-07-21 502
+    incident). ~2 chunked round-trips instead.
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(
+                (
+                    row["date"],
+                    int(row["put_volume"]),
+                    int(row["call_volume"]),
+                    row.get("daily_ratio"),
+                    row.get("cum5_ratio"),
+                    row.get("source") or "uw",
+                    stamp,
+                )
+            )
+        db.execute(
+            "INSERT INTO vix_pc_history "
+            "(date, put_volume, call_volume, daily_ratio, cum5_ratio, source, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date) DO UPDATE SET "
+            "put_volume = excluded.put_volume, call_volume = excluded.call_volume, "
+            "daily_ratio = excluded.daily_ratio, cum5_ratio = excluded.cum5_ratio, "
+            "source = excluded.source, recorded_at = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
+
 def upsert_iv_spread_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
     """IV SPREAD indicator - one row per paired SPX/NDX session, idempotent on
     date. spread is NULL only for a session the leg-level bad-print gate
@@ -3496,3 +3539,66 @@ def upsert_record_high_breadth_rows(rows: list[dict[str, Any]], recorded_at: Opt
             tuple(params),
         )
     db.commit()
+
+
+def upsert_newsfeed_explanation(
+    post_id: str,
+    content_hash: str,
+    explanation: str,
+    *,
+    model: str,
+    provider: str,
+    has_image: bool,
+    created_at: Optional[str] = None,
+) -> None:
+    """Cache one newsfeed explanation keyed by post_id + content_hash."""
+    if not str(explanation or "").strip():
+        raise ValueError("explanation is blank")
+    db = get_db()
+    db.execute(
+        """
+        INSERT OR REPLACE INTO newsfeed_explanations
+          (post_id, content_hash, explanation, model, provider, has_image, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            post_id,
+            content_hash,
+            explanation,
+            model,
+            provider,
+            1 if has_image else 0,
+            created_at or _now_iso(),
+        ),
+    )
+    db.commit()
+
+
+def get_newsfeed_explanation(post_id: str, content_hash: str) -> Optional[dict[str, Any]]:
+    """Return the cached explanation row, or None."""
+    db = get_db()
+    row = db.execute(
+        """
+        SELECT post_id, content_hash, explanation, model, provider, has_image, created_at
+        FROM newsfeed_explanations
+        WHERE post_id = ? AND content_hash = ?
+        """,
+        (post_id, content_hash),
+    ).fetchone()
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        return row
+    keys = getattr(row, "keys", None)
+    if callable(keys):
+        return {key: row[key] for key in keys()}
+    return {
+        "post_id": row[0],
+        "content_hash": row[1],
+        "explanation": row[2],
+        "model": row[3],
+        "provider": row[4],
+        "has_image": row[5],
+        "created_at": row[6],
+    }
+

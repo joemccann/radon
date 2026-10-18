@@ -1056,6 +1056,63 @@ export function StreaksFixture(symbol = "SPY") {
   return buildPayload(symbol);
 }
 
+// Source: e2e/vix-pc-tab.spec.ts
+export function VixPcFixture() {
+  const SERIES_LENGTH = 80;
+  function daysAgo(n: number): string {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - n);
+    return d.toISOString().slice(0, 10);
+  }
+  const DATA_DATE = daysAgo(1);
+  const series = Array.from({ length: SERIES_LENGTH }, (_, i) => {
+    const date = i === SERIES_LENGTH - 1 ? DATA_DATE : daysAgo(SERIES_LENGTH - i);
+    const put = 900_000 + (i % 17) * 8_000;
+    const call = 2_700_000 + (i % 13) * 12_000;
+    return {
+      date,
+      put_volume: put,
+      call_volume: call,
+      daily_ratio: put / call,
+      cum5_ratio: i < 4 ? null : 0.31 + 0.02 * Math.sin(i / 11),
+    };
+  });
+  series[SERIES_LENGTH - 1] = {
+    date: DATA_DATE,
+    put_volume: 176_423,
+    call_volume: 531_412,
+    daily_ratio: 0.33161270482801036,
+    cum5_ratio: 0.3188487844029556,
+  };
+  return {
+    scan_time: new Date().toISOString(),
+    status: "ok",
+    source: "uw",
+    as_of: DATA_DATE,
+    data_date: DATA_DATE,
+    window: 5,
+    count: SERIES_LENGTH,
+    cum5_count: SERIES_LENGTH - 4,
+    current: {
+      date: DATA_DATE,
+      put_volume: 176_423,
+      call_volume: 531_412,
+      daily_ratio: 0.33161270482801036,
+      cum5_ratio: 0.3188487844029556,
+      percentile: 4.032258064516129,
+      regime: "CAUTIOUS",
+      series_min: 0.2417297884911582,
+      series_max: 0.87,
+      series_p10: 0.32,
+      series_p90: 0.71,
+      series_min_date: "2026-10-08",
+      is_series_low: false,
+    },
+    stats: { min: 0.2417297884911582, p10: 0.32, p25: 0.38, median: 0.48, p75: 0.61, p90: 0.71, max: 0.87, mean: 0.5 },
+    series,
+  };
+}
+
 // Source: e2e/curve-tab.spec.ts
 export function CurveFixture() {
   function buildSeries() {
