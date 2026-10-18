@@ -78,9 +78,25 @@ def test_key_holding_container_gets_no_host_executable_or_checkout_bind(tmp_path
             assert destination not in ("/home/radon", "/home/radon/radon"), run
 
 
-def test_non_key_llm_consumers_keep_the_host_cli_bind(tmp_path):
+def test_research_uses_image_clis_even_when_host_executables_exist(tmp_path):
     home = _subscription_home(tmp_path)
     result = _run(tmp_path, ["run", "radon-research.service"], extra_env={
+        "RADON_SUBSCRIPTION_HOME": str(home), "NOTIFY_SOCKET": "",
+    })
+    assert result.returncode == 0, result.stderr
+    run = _run_line(result)
+    assert f"{home}/.local/bin:" not in run
+    assert "HOME=/home/radon" in run
+    for grant in (".grok", ".codex"):
+        assert f"{home}/{grant}:/home/radon/{grant}:ro" in run
+    for grant in (".gemini/antigravity-cli", ".gemini/config"):
+        assert f"{home}/{grant}:/home/radon/{grant}:rw" in run
+
+
+@pytest.mark.parametrize("unit", ("radon-newsfeed.service", "radon-nextjs.service"))
+def test_node_consumers_retain_their_existing_cli_mount(tmp_path, unit):
+    home = _subscription_home(tmp_path)
+    result = _run(tmp_path, ["run", unit], extra_env={
         "RADON_SUBSCRIPTION_HOME": str(home), "NOTIFY_SOCKET": "",
     })
     assert result.returncode == 0, result.stderr

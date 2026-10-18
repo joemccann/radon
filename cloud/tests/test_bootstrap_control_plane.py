@@ -182,6 +182,7 @@ ARTIFACTS = (
     Artifact("services/radon-ai-cycle-backfill.service.d/runtime-container.conf", "/etc/systemd/system/radon-ai-cycle-backfill.service.d/runtime-container.conf", 0o644),
     Artifact("services/radon-aa-frontier-refresh.service.d/runtime-container.conf", "/etc/systemd/system/radon-aa-frontier-refresh.service.d/runtime-container.conf", 0o644),
     Artifact("services/radon-research-archive.service.d/runtime-container.conf", "/etc/systemd/system/radon-research-archive.service.d/runtime-container.conf", 0o644),
+    Artifact("scripts/subscription_service_env.py", "/usr/local/lib/radon/subscription_service_env.py", 0o644),
 )
 
 

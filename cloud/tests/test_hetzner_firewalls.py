@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FW_DIR = ROOT / "hetzner" / "firewalls"
 ANY = ["0.0.0.0/0", "::/0"]
 PLACEHOLDER = "__OPERATOR_RECOVERY_IP__/32"
-NAMES = ("fw-radon-app", "fw-radon-broker", "fw-radon-ops")
+NAMES = ("fw-radon-app", "fw-radon-broker", "fw-radon-demo", "fw-radon-ops")
 
 
 def _load_tool():
@@ -46,7 +46,7 @@ def _shape(rules):
     }
 
 
-def test_exactly_three_rule_files():
+def test_rule_files_match_supported_firewalls():
     assert sorted(p.stem for p in FW_DIR.glob("*.json")) == sorted(NAMES)
 
 
@@ -74,6 +74,14 @@ def test_broker_shape():
     }
 
 
+def test_demo_shape_limits_ssh_to_recovery_and_excludes_udp():
+    assert _shape(_rules("fw-radon-demo")) == {
+        ("in", "tcp", "22", (PLACEHOLDER,)),
+        ("in", "tcp", "80", tuple(ANY)),
+        ("in", "tcp", "443", tuple(ANY)),
+    }
+
+
 def test_ops_shape():
     assert _shape(_rules("fw-radon-ops")) == {
         ("in", "tcp", "22", (PLACEHOLDER,)),
@@ -89,14 +97,15 @@ def test_no_service_port_is_public(name):
     assert not ports & {"3000", "4001", "4002", "5900", "8321", "8330", "8340", "8341", "8765"}
 
 
-def test_web_ports_only_on_app_and_ops():
+def test_broker_has_no_web_ports():
     assert not {r["port"] for r in _rules("fw-radon-broker")} & {"80", "443"}
 
 
 class TestTool:
-    def test_render_substitutes_the_recovery_address(self):
+    @pytest.mark.parametrize("name", ["fw-radon-broker", "fw-radon-demo"])
+    def test_render_substitutes_the_recovery_address(self, name):
         tool = _load_tool()
-        rendered = tool.render("fw-radon-broker", "93.184.216.34")
+        rendered = tool.render(name, "93.184.216.34")
         ssh = [r for r in rendered if r["port"] == "22"]
         assert ssh[0]["source_ips"] == ["93.184.216.34/32"]
         assert PLACEHOLDER not in json.dumps(rendered)
@@ -104,10 +113,11 @@ class TestTool:
     @pytest.mark.parametrize(
         "bad", ["", "203.0.113.0/24", "100.98.36.17", "10.0.0.2", "0.0.0.0", "host.example"]
     )
-    def test_recovery_must_be_one_public_ipv4(self, bad):
+    @pytest.mark.parametrize("name", ["fw-radon-broker", "fw-radon-demo"])
+    def test_recovery_must_be_one_public_ipv4(self, bad, name):
         tool = _load_tool()
         with pytest.raises(ValueError):
-            tool.render("fw-radon-broker", bad)
+            tool.render(name, bad)
 
     def test_app_needs_no_recovery_address(self):
         tool = _load_tool()
