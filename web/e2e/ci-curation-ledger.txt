@@ -529,4 +529,8 @@ mobile-risk-reversal-quote-sign.spec.ts
 #   1440 and 393x852. Plates live in docs/design-shots/explain-button/. Wire
 #   pins live in Vitest newsfeed-explain-ui. Held out of e2e-financial-smoke
 #   because the spec writes design plates and was not preflighted on next start.
+# REVIEWED 2026-10-18 newsfeed-explain.spec.ts - Recaptured plates after prompt
+#   v2 dropped the investment-advice disclaimer. 2/2 Chromium against local
+#   next dev :3000 with the recorded SSE fixture. Explained cards end on the
+#   capacity-charges sentence and do not contain investment or financial advice.
 newsfeed-explain.spec.ts
