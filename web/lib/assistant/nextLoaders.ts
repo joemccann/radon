@@ -80,6 +80,7 @@ export const NEXT_MODULES: Record<string, () => Promise<NextRouteModule>> = {
   "ticker/seasonality": () => import("@/app/api/ticker/seasonality/route") as Promise<NextRouteModule>,
   "trin": () => import("@/app/api/trin/route") as Promise<NextRouteModule>,
   "vcg": () => import("@/app/api/vcg/route") as Promise<NextRouteModule>,
+  "vix-pc": () => import("@/app/api/vix-pc/route") as Promise<NextRouteModule>,
   "vixcor": () => import("@/app/api/vixcor/route") as Promise<NextRouteModule>,
   "panic-index": () => import("@/app/api/panic-index/route") as Promise<NextRouteModule>,
   "vixts": () => import("@/app/api/vixts/route") as Promise<NextRouteModule>,

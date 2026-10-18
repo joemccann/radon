@@ -267,7 +267,12 @@ from it.
 
 ## Deployment Contract
 
-Pushes to `main` run the root CI workflow. The deploy job:
+Pushes to `main` run the root CI workflow. Every ssh-action step that reaches
+the app host pins `fingerprint: ${{ secrets.VPS_SSH_FINGERPRINT }}` (Production
+environment). drone-ssh negotiates the host's ECDSA key, not ed25519, so the
+secret is `ssh-keyscan -t ecdsa <host> | ssh-keygen -lf - -E sha256`'s
+`SHA256:...` value; a rebuilt host needs the secret updated before the next
+push or every deploy step fails the handshake. The deploy job:
 
 1. Fetches the exact tested SHA.
 2. Before the root readiness marker exists, uses the known legacy runner,
@@ -596,7 +601,8 @@ after the promote and before `restart-managed`, `deploy.sh` runs
 `radon-deploy-root install-units`, which copies each unit whose
 `cloud/services/` content hashes to its entry in
 `config/installed-units.sha256`, daemon-reloads once, and `enable --now`s
-NEW timers only (never a timer-owned `.service`). The manifest digest is the
+NEW timers only (never a timer-owned `.service`). New indicator pairs such as
+`radon-vix-pc.{service,timer}` ship the same way. The manifest digest is the
 review gate: editing a unit in `services/` and bumping its hash in the same
 commit is the whole procedure -- no root SSH. An edit whose hash is NOT
 bumped is left uninstalled (the drift audit then flags it), so the

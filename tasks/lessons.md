@@ -1,3 +1,7 @@
+# Withdrawn X footer preference (2026-10-17)
+
+- The user withdrew the requested automatic Grok footer after PR #1143 shipped. Keep X share copy free of this automatic footer and do not reintroduce the withdrawn request from conversation history without a fresh instruction.
+
 # A green PR can still be behind main (2026-10-17)
 
 - Fetch and integrate the latest main immediately before publishing a requested branch refresh. Verify required checks on the resulting exact head; earlier green checks do not establish readiness after the base or source changes.
@@ -1255,3 +1259,18 @@ When an operator asks for automated release or updater recovery, ship the durabl
 - A raw extraction catalogue can contain photos or prose crops. Label counts as extracted figures and preserve bounded selector explanations through storage, API and UI without silent mid-word truncation. Metadata repairs must preserve existing review/held/expiry timestamps.
 
 - Retry not-before timestamps are eligibility gates, not queue age. Restart recovery can retain a zero sentinel on newer interrupted rows; order aged eligible retries by insertion row ID so those zeros cannot bypass the oldest backlog.
+
+
+### 2026-10-17: Diagnose incomplete responses from terminal evidence
+
+- A generic incomplete response does not prove max_tokens, provider outage or bad PDF data. Retain only allowlisted terminal reasons and bounded numeric usage through the existing safe error path before changing request budgets or prompts. Never retain provider content or accept partial JSON. A bounded output increase is a mitigation, not proof of completion: preserve one-call and fail-closed behavior and verify the next normal production decision. Synthetic token metadata proves protocol handling only.
+- Existing selection artifacts may be stale: compare their timestamp with the current attempt's figure crops before asserting a fresh SELECT completed or that the artifact is absent.
+
+### 2026-10-17: Verify source pixels and report dates after recovery
+
+- A mechanically valid publication still needs image-to-source review. Keep self-contained raster boundaries separate from nearby body prose, while preserving explicit external titles and credits. Verify all cited claims, author attribution and the printed byline date against the complete PDF. Derive month aliases from canonical names; an extra alias must never shift later months.
+
+
+### 2026-10-17: Complete prose can still invalidate a figure crop
+
+- A complete, related paragraph above a chart is still a composition defect when it dominates the image. Preserve an independent visual block even when numerical claims and HTTP/hash checks pass. Self-contained raster crops must bound external title attachment as well as generic nearby-text growth; verify the exact final figure rather than an earlier selection.

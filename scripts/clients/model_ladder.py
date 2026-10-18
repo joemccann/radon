@@ -1827,9 +1827,22 @@ def complete_multimodal_json(
 
     def parse_success(name: str, payload: dict[str, Any]) -> tuple[Any, str]:
         if require_end_turn and name == "anthropic" and payload.get("stop_reason") != "end_turn":
+            reason = payload.get("stop_reason")
+            safe_reason = "missing" if reason is None else "other"
+            if reason in ("max_tokens", "stop_sequence", "tool_use", "pause_turn",
+                          "refusal", "model_context_window_exceeded"):
+                safe_reason = reason
+            usage = payload.get("usage")
+            usage = usage if isinstance(usage, dict) else {}
+            counts = []
+            for key in ("input_tokens", "output_tokens"):
+                value = usage.get(key)
+                counts.append(str(value) if type(value) is int and 0 <= value <= 1_000_000_000
+                              else "unknown")
             raise ModelResponseError(
                 "incomplete",
-                "Research reviewer did not finish a complete response",
+                "Research reviewer did not finish a complete response "
+                f"(stop_reason={safe_reason}; input_tokens={counts[0]}; output_tokens={counts[1]})",
             )
         text = _extract_text(name, payload)
         obj = parse_json_object(text)

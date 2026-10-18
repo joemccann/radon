@@ -312,7 +312,13 @@ def _figures_on_page(pdf_path, page_number):
         if (images >= 1 and w * h > MAX_IMAGE_AREA) or _edges(box) >= 3:
             continue
         title, source = _attach(box, lines, LINE_REACH)
-        crop = _grow_text(box, lines, TEXT_REACH)
+        # Self-contained rasters already include their labels. A paragraph-sized
+        # external block is body prose, not a compact title/subtitle or units.
+        if images == count and title:
+            if len(title[2].splitlines()) > 3 or len(' '.join(title[2].split())) > 160:
+                title = None
+        # Raster charts already contain their own labels; nearby prose is not part of the figure.
+        crop = list(box) if images == count else _grow_text(box, lines, TEXT_REACH)
         for hit in (title, source):
             if hit:
                 crop = _union(crop, hit[1])
