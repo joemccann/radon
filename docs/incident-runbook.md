@@ -4260,3 +4260,31 @@ service_health write raises.** Peak: 2026-10-08 22:14Z, page
 - **Discriminating check:** inspect the daemon's native probe result and canonical expiry after the probe, without printing credential bytes. Actual native authentication rejection is `needs_reauth`; timeout, missing CLI, malformed file and failure to clear AGY's five-minute native renewal window are `error`.
 - **Repair:** native authentication owns AGY lifecycle. Require successful native proof, current canonical reread and vault seal, and more than five minutes of actual remaining life; classify only a real expiry advance as `refreshed`. Other providers retain the forty-minute lead. See [subscription tokens](subscription-tokens.md#antigravity-native-authentication-ownership-2026-10-17).
 - **Regressions:** `scripts/tests/test_subscription_tokens.py` covers valid in-skew native login, exact 300/301-second boundaries, post-probe clock advancement, native failure after rotation, missing/malformed canonical files, sealing failure and read-only proof freshness.
+
+
+## research-incomplete-response-missing-terminal-evidence
+
+**Initial SELECT fails before a fresh checkpoint, retaining only a generic incomplete-response message.**
+
+- **Observed 2026-10-17:** after PR1136 restored retry admission, Wilson, BTIG and Goldman each received normal reserved retries. All three retained the same incomplete-response error. Their selection artifacts existed but predated the latest figure crops; no fresh selection/review checkpoint, terminal reason or token usage was retained. Database SELECT1 and API lite health remained healthy. This is not evidence of renewed starvation or a database outage.
+- **Discriminating check:** inspect current work attempts/error, exact release hashes, latest figure-crop and selection timestamps, and normal retry eligibility. Require actual terminal reason/usage before diagnosing output exhaustion; stale completed selections and a 6000-token request cap alone do not establish the cause.
+- **Diagnostic repair:** append only a fixed terminal-reason allowlist or missing/other and exact bounded integer input/output token counts or unknown to the existing safe incomplete-response error. Preserve its code and generic prefix; never persist arbitrary provider text, response content, prompts, IDs or other usage fields. Non-integer values (including booleans), negative counts and counts above one billion become unknown.
+- **Recovery:** keep require_end_turn, terminal within-call behavior, model/request limits, normal backoff and all publication gates unchanged. Observe the next ordinary attempt. Do not accept partial JSON, bump an individual priority, reset attempts, change credentials or infer max_tokens without the new evidence. Any subsequent stage-specific remedy needs its own red/green regression.
+- **Regression:** PR1139 regression-only c8ba51f8, CI39073806724: model-ladder job117516745135 reproduced19 missing-diagnostic failures with1369 tests passing. Research propagation job117516745172 reproduced1 failure with2805 passing tests at the same safe-error boundary. Exact final green and production evidence are tracked on the PR.
+
+### Research SELECT output ceiling
+
+For an incomplete SELECT, use the recorded allowlisted stop reason and bounded token usage rather than inferring a cause from the generic prefix. A verified normal Goldman attempt on release200e recorded `max_tokens` with21,433 input and6,000 output tokens. All `Reviewer.ask_text()` calls now allow10,000 output tokens, including SELECT/re-SELECT and the independent chart-planning producer. This raises the planning maximum too; it adds no calls. Multimodal `ask()` requests, including image verification, remain6,000. The120s/2MB bounds, complete-response rejection, provider order, document lease and source/image/publication gates remain intact. A still-truncated response must fail closed and return to the normal durable retry policy. Never reset attempts, prioritize a target, accept partial JSON or force a publication to demonstrate recovery.
+
+Cloud regression73f93735/run39077076334/job117526378112 reproduced2 failures with2833 passes before the allowance change. Synthetic protocol fixtures verify request/terminal handling, not actual provider tokenization or completion; final exact-head CI and observed normal production decisions are separate evidence.
+
+
+## research-raster-title-attaches-body-paragraph
+
+**A native raster table is complete but its PNG includes a large preceding paragraph.**
+
+- **Observed 2026-10-17:** normal Goldman attempt6 on d3e7c493 published one source-supported article. Its final native f4 catalogue classified five lines/709 characters of preceding article prose as an external title. Independent visual review blocked the PNG composition even though table values, credits, canonical/outbox consistency and HTTP hashes passed.
+- **Discriminating checks:** inspect final canonical figure mapping and exact PNG, rather than initial selection IDs. Compare the raw raster object bounds with `_attach()` title bounds. Pure raster already bypasses `_grow_text()`, but title attachment can still union nearby prose into its crop.
+- **Repair:** suppress only pure-raster external title blocks exceeding three physical lines or160 whitespace-normalized characters. Keep the complete raster image, compact external titles/subtitles/units, source/notes and margins. Vector/mixed behavior is unchanged. A legitimate unusually long external title may no longer extend the crop; source/image verification remains required before publication.
+- **Regression:** public PDF detection fixtures cover four short prose lines, five paragraph lines and one overlong extracted line, plus compact two/three-line external titles and units for raster/vector/mixed figures. Regression-only72753f7e, GitHub39079499672/job117533421676:3failed2842passed; failures are the three false-title cases. No local suites. Final green, source preview and deployed image evidence belong to PR1142.
+- **Recovery:** render the exact original PDF through the deployed source, visually verify all table rows/title/credits, then use an exact guarded same-ID publication correction preserving canonical/outbox identity and clocks. Never requeue the source or accept a mechanical browser pass as visual approval.

@@ -121,6 +121,7 @@ Every row is tested at desktop 1440×1000 and mobile 390×844 with the mode desc
 | `app/regime/trin/page.tsx` | `/regime/trin` | Loaded TRIN chart/table; selected indicator |
 | `app/regime/vcg/page.tsx` | `/regime/vcg` | Loaded VCG chart/table; selected indicator |
 | `app/regime/vixcor/page.tsx` | `/regime/vixcor` | Loaded VIXCOR chart/table; selected indicator |
+| `app/regime/vix-pc/page.tsx` | `/regime/vix-pc` | Loaded VIX P/C chart; selected indicator |
 | `app/regime/vixts/page.tsx` | `/regime/vixts` | Loaded VIXTS chart/table; selected indicator |
 | `app/regime/vol-cone/page.tsx` | `/regime/vol-cone` | Redirect → `/scanner?mode=vol-cone`; `[data-testid="vol-cone-chart-section"]` |
 | `app/internals/page.tsx` | `/internals` | Redirect → `/regime/cri`; Loaded CRI chart/table; selected indicator |

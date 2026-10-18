@@ -1,3 +1,44 @@
+# Nightly phase status line (2026-10-18)
+
+Dependency graph: T1 -> T2 -> T3; T4 and T5 depend_on: [T2]; T6 depends_on: [T3, T4, T5].
+
+- [x] T1 depends_on: [] Map runner loops, exit codes, and dead-man posting.
+- [x] T2 depends_on: [T1] Harness emits the radon-phase line from the process exit, including kill and missing hook status.
+- [x] T3 depends_on: [T2] Security and DeepSec public audit comments are that line only.
+- [x] T4 depends_on: [T2] Formatter, parser, and failure-path tests green.
+- [x] T5 depends_on: [T2] Audit-context reader skips a non-zero machine line and keeps the legacy fallback.
+- [ ] T6 depends_on: [T3, T4, T5] docs/runner.md, PR, CI green, ready.
+
+## Review
+
+Focused pytest: phase status, audit context, issue format, PR output, reporting doc, security hooks, run_loop, install trust: 191 + 243 passed. The runner is in this repo. joemccann/radon-factory was not found.
+
+# Newsfeed Explain button (2026-10-18)
+
+Dependency graph: T1 -> T2; T3 parallel to T2; T4 depends_on: [T2, T3].
+
+- [x] T1 depends_on: [] Spec the Explain button, cache table, prompt, auth pin and UI states.
+- [ ] T2 depends_on: [T1] Backend: route, LLM, image fetch, Turso cache, writer, failing-then-green tests.
+- [ ] T3 depends_on: [T1] UI: Explain control, panel/sheet, desktop and mobile CSS, component tests.
+- [ ] T4 depends_on: [T2, T3] Merge, Playwright plates, CI green, operator PR.
+
+## Review
+
+Pending swarm merge.
+
+# X share-copy footer (2026-10-18)
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+- [x] T1 depends_on: [] Inventory every X copy builder, generated report preview and outbound clipboard/composer path.
+- [x] T2 depends_on: [T1] Append the exact standalone footer once across P&L, newsfeed and all report builders, including verified CTA LLM copy.
+- [x] T3 depends_on: [T2] Update existing copy assertions and verify focused/full suites plus actual browser copy/composer behavior.
+- [ ] T4 depends_on: [T3] Publish a focused PR, watch all exact-head checks, notify once, admin-merge and verify normal production delivery.
+
+## Review
+
+Footer: @grok explain this for normies. Preserve existing copy, sanitization, cashtags, financial values and media rendering. No external post is submitted. The primary checkout has unrelated task/output changes and remains untouched. Verification: focused Vitest 207 passed; affected Python 110 passed; full Python 16,329 passed, 2 skipped and 23 subtests passed; full cloud 2,921 passed and 7 skipped; full Vitest 1,120 files and 10,996 tests passed, 21 skipped; Playwright 5 passed with mobile/desktop screenshots inspected. All four report builders and previews, CTA verified generated copy and fallback, and formatting idempotence passed smoke checks. Temporary local dependency-root overrides were restored; no runtime configuration change is included. React review found no new state, effects, fetching or dependency concerns. PR delivery pending.
+
 # PR 1132 refresh and completion (2026-10-17)
 
 Dependency graph: T1 -> T2 -> T3 -> T4.
@@ -9733,3 +9774,69 @@ Review: live audit confirmed109 eligible, original3 ranks107–109;19 fresh/0 re
 - [x] A4 depends_on: [A3] Update owner/runbook guidance and the consumer-policy lesson; complete focused tests and independently reviewed full gates before publication.
 - [ ] A5 depends_on: [A4] Deliver only after the preceding main production release; require exact-head green CI, accepted notification, normal production deployment and real native in-skew proof.
 Review: Initial regressions reproduced18 failures; boundary/vault-proof cases reproduced6 failures and simultaneous auth/seal failure reproduced1 failure before repair. Focused172 and docs160 passed; full Python16239 passed/2 skipped/23 subtests, cloud2910 passed/7 skipped. Sol independently approved the source and final sealing guards and ran the preceding170 focused cases. Native helper executable-line coverage47/49 (95.92%) via stdlib trace before the final sealing cases. No provider calls, credential changes or timer changes occurred during local verification. Publication and live proof remain pending; primary checkout preserved.
+
+
+## Research incomplete-response evidence (2026-10-17)
+
+- [x] D1 depends_on: [] Preserve the three live initial-SELECT failure receipts and add failing cloud regressions for sanitized terminal/usage evidence.
+- [x] D2 depends_on: [D1] Retain only fixed allowlisted terminal reason and bounded numeric token usage through the existing safe error path; preserve request settings and fail-closed retry/publication gates.
+- [ ] D3 depends_on: [D2] Complete exact-head CI, independent Sol/Luna review, accepted green notification, authorized admin merge and full deployment.
+- [ ] D4 depends_on: [D3] Observe next normal retries with actual safe diagnostics, finish any evidenced narrow remedy, and verify all original final decisions/publications.
+
+Review: regression-only c8ba51f8 cloud CI39073806724 model shard19fail/1369pass; propagation shard failed as expected. Minimal diagnostic-only source prepared; final exact-head CI/source reviews and production evidence pending. All three normal retries failed before a fresh SELECT checkpoint; actual terminal reason/usage absent. No local suites; no partial JSON acceptance, queue resets, priority overrides or model/auth/config changes.
+
+
+## Recovered Wilson native crop quality (2026-10-17)
+
+- [x] C1 depends_on: [] Compare exact published PNG and all published claims/metadata against sealed source pages and matched figure bounds.
+- [x] C2 depends_on: [C1] Reproduce the generic crop-boundary mechanism in cloud regressions, then minimally retain full chart/title/axes/source without following prose.
+- [x] C3 depends_on: [C2] Complete exact-head cloud CI, independent Sol/Luna review, accepted notification and authorized deployment after the prior main run is fully complete.
+- [ ] C4 depends_on: [C3, C5] Regenerate the exact affected publication through the existing verified path, preserve article/source/revision/outbox consistency, and inspect final PNG/source in production with Sol/Luna.
+
+- [x] C5 depends_on: [C1] Verify and correct cited-page coverage, byline date and attribution from the complete sealed source using existing source gates.
+
+Review: published research-7d6d3955... is native generated=false, complete and readable but includes a clipped following prose line. Sealed source page3/raw raster bounds confirm _grow_text absorbs external prose. Matched published figure is f2, not pre-match f1. Page1 supports the final paragraph but is uncited; its byline date is2026-10-13, while the publication uses Dropbox fallback2026-10-14, and its We'd argue attribution needs correction. The existing user authorization covers the quality correction and regeneration; preserve source pixels/revision and canonical/outbox consistency with source/hash/gate evidence. No local suites, manual priority or recovery-ledger reruns.
+
+Crop/date cloud RED: ab2661b4 / CI39075914272 research117522956297 reproduced5 failed,2828 passed: raster prose boundary, exact October13 byline and oct/nov/dec aliases. Minimal pure-raster bounds and canonical month alias fixes prepared; full final-head CI pending.
+
+
+## Research SELECT output allowance (2026-10-17)
+
+- [x] B1 depends_on: [] Preserve exact deployed terminal-reason evidence for the exhausted normal SELECT attempt and independently bound the remedy.
+- [x] B2 depends_on: [B1] Reproduce the old output ceiling in cloud tests before changing the existing text-only request allowance.
+- [ ] B3 depends_on: [B2] Apply the bounded allowance while preserving complete-response, verification, provider, timeout and queue gates; finish full exact-head CI and independent review.
+- [ ] B4 depends_on: [B3] Deliver after the preceding main deployment, verify actual loaded source, observe normal final decisions and review every resulting publication in production.
+
+Review: verified200e Goldman normal attempt4 recorded stop_reason=max_tokens,input_tokens=21433,output_tokens=6000. This proves exhaustion only for that attempt. Proposed10000 allowance remains one existing text-only request, with120s/2MB/end_turn and multimodal/provider/publication behavior preserved. Cloud RED required before runtime edits; no local suites or original work resets/priority changes.
+
+Wilson source correction review:879e fullmain39076695022 all37jobs success; actual7imports/all3images/health200 verified. One guarded same-ID correction applied with3canonical rows/1published outbox payload; PDF/revision, clocks, queue and feedback preserved. Raw production receipt d72f50df...; final production card/lightbox and original3 normal final decisions remain pending.
+
+SELECT budget review: cloud RED73f93735/run39077076334/research117526378112 reproduced2 failures,2833 passes,65 warnings105.14s before runtime edits. Only ask_text output allowance increased6000→10000; request count,120s/2MB/end_turn, multimodal6000, providers/auth, retries and verification remain unchanged. Exact-head full GREEN and independent source review pending. No local suites.
+
+Independent scope review: ask_text is also used by the separate generated-chart planner. Explicitly retain one bounded10000 maximum for all existing text calls, document the planning allowance, and add an actual generated_charts.generate→Reviewer→ladder request regression. Multimodal/image-verification6000 and all publication gates remain unchanged; no extra request/interface introduced. Prior02a240a6 source review is superseded; new exact-head reviews required.
+
+## Native raster title boundary (2026-10-17)
+
+- [x] G1 depends_on: [] Preserve independent production visual block and exact finalf4/source provenance.
+- [x] G2 depends_on: [G1] Cloud RED for body paragraph attachment, with genuine external title/subtitle/source preservation.
+- [ ] G3 depends_on: [G2] Minimal raster-only title guard, exact-head full CI and source/image Sol/Luna review, notification and authorized merge/deploy.
+- [ ] G4 depends_on: [G3] Actual deployed native rerender, guarded same-ID correction and all resulting production/source image verification.
+
+Review: Goldman normal6 publishes one supported native table, but external attachment records709chars/5lines of preceding prose as title. Independent Luna blocked visual quality; root/Sol accept superseding old visual approval. Preserve all data/claims/metadata/queue and complete source pixels. No local test suites.
+
+# Revert X share-copy footer (2026-10-17)
+
+Dependency graph: T1 -> T2 -> T3 -> T5 -> T6 -> T4.
+
+- [x] T1 depends_on: [] Identify PR #1143 and isolate the rollback from unrelated operator files.
+- [x] T2 depends_on: [T1] Reverse only the footer implementation, expectations and owner-document addition; retain delivery history and record the withdrawn preference.
+- [x] T3 depends_on: [T2] Verify exact restoration, focused/full suites and browser sharing without the footer.
+- [x] T5 depends_on: [T3] Integrate concurrent Explain PR #1145, resolve only the overlap, refresh verification and wait for the preceding production deployment.
+- [x] T6 depends_on: [T5] Integrate concurrent indicator PR #1144, preserve its changes and refresh verification after its production deployment.
+- [ ] T4 depends_on: [T3,T5,T6] Publish the revert PR, watch exact-head CI, notify once, admin-merge and verify normal production deployment.
+
+## Review
+
+The user withdrew the requested footer. Restore the pre-PR share copy across P&L, newsfeed and all report builders. Preserve unrelated changes, historical task entries and the separate existing report-generator limitation. No external post is submitted. Verification: all 15 feature-owned implementation/test/document files match the pre-feature revision; focused Vitest 207 passed; affected Python 110 passed; full Python 16,328 passed, 2 skipped and 23 subtests passed; cloud 2,921 passed and 7 skipped; Vitest 1,120 files and 10,996 tests passed, 21 skipped; Playwright five passed with mobile/desktop screenshots inspected. All report-copy and preview builders, verified CTA copy and fallback passed smoke checks without the automatic footer. React review found no new hooks, state, fetching or dependency behavior. Temporary local dependency-root overrides were restored. Concurrent main 3c9b7e67 is integrated; all 34 incoming Explain files match current main exactly and both task-ledger entries are retained. Refreshed Python 16,336 passed, two skipped and 23 subtests passed; cloud 2,921 passed and seven skipped; focused web 207 passed; Playwright five passed. The default full web run had five unchanged Next-config import timeouts; those five files passed 29 tests in isolation. Full Vitest using the supported history-derived build-version override passed 1,124 files and 11,023 tests, 21 skipped. No test/timeout/retry/worker/CI gate changed. The updated-base mobile screenshot clips the incoming share layout; it is retained unchanged and recorded in PR risks. Updated-head CI and production delivery pending.
+
+Final integration review: eac73b0b is included. All 44 incoming indicator files and the Explain feature are preserved exactly; the 15 footer-owned implementation/test/document files still match the pre-footer revision. Current-base full Python 16,367 passed, two skipped and 23 subtests passed; cloud 2,926 passed and seven skipped; full Vitest 1,126 files and 11,060 tests passed, 21 skipped with the supported derived build-version setting; focused web 207 passed and browser five passed. Preceding main CI/deploy is green. Updated-head CI and delivery remain pending.

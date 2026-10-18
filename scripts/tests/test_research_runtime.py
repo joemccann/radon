@@ -932,6 +932,181 @@ def test_document_truncation_does_not_exclude_provider():
     assert calls == ["anthropic", "anthropic"]
 
 
+def test_reviewer_text_incomplete_response_preserves_safe_terminal_diagnostic():
+    payload = {
+        "stop_reason": "max_tokens",
+        "usage": {"input_tokens": 123, "output_tokens": 6000,
+                  "private-token-and-source": "must-never-appear"},
+        "content": [{"type": "text", "text": "private-token-and-source"}],
+    }
+    session, closed, calls = session_response(payload)
+    reviewer = model.Reviewer(
+        env={"ANTHROPIC_API_KEY": "test", "RADON_LADDER_ALLOW_PREPAID": "1"},
+        session=session,
+    )
+    with pytest.raises(model.ModelError) as caught:
+        reviewer.ask_text("private-prompt")
+    expected = (
+        "Research reviewer did not finish a complete response "
+        "(stop_reason=max_tokens; input_tokens=123; output_tokens=6000)"
+    )
+    assert str(caught.value) == expected
+    assert model.classify_error(caught.value) == expected
+    assert not model.is_provider_outage(caught.value)
+    assert len(calls) == 1
+    assert closed == [True]
+    assert "private-token-and-source" not in str(caught.value)
+    assert "private-prompt" not in str(caught.value)
+
+
+
+def _synthetic_anthropic_response(stop_reason, text, *, input_tokens, output_tokens, closed):
+    # The usage values simulate terminal metadata; this fixture does not model a tokenizer.
+    payload = {
+        "stop_reason": stop_reason,
+        "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+        "content": [{"type": "text", "text": text}],
+    }
+    raw = json.dumps(payload).encode()
+    return SimpleNamespace(
+        status_code=200,
+        text=raw.decode(),
+        json=lambda: payload,
+        iter_content=lambda _size: iter([raw]),
+        close=lambda: closed.append(True),
+    )
+
+
+def test_text_selector_budget_completes_long_selection_without_changing_vision_budget(tmp_path, monkeypatch):
+    candidates = [
+        {"title": f"Finding {index}", "content": "measured evidence " * 140,
+         "claim_key": f"finding-{index}", "pages": [1], "figure_ids": [],
+         "captions": {}, "tags": ["MACRO"], "text_only": True}
+        for index in range(8)
+    ]
+    complete_json = json.dumps({"candidates": candidates, "reason": "Synthetic complete selection"})
+    calls, closed = [], []
+
+    def post(url, **kwargs):
+        provider = _budget_provider(url)
+        calls.append((provider, url, kwargs))
+        assert provider == "anthropic"
+        assert url == "https://api.anthropic.com/v1/messages"
+        assert kwargs["headers"]["authorization"] == "Bearer synthetic-subscription"
+        assert kwargs["stream"] is True
+        body = kwargs["json"]
+        # The first request reproduces the observed stop at 6,000; after the
+        # bounded increase it returns a synthetic complete 8-candidate payload.
+        # Usage values are protocol fixtures, not a tokenizer model.
+        if len(calls) == 1 and body["max_tokens"] == 6_000:
+            return _synthetic_anthropic_response(
+                "max_tokens", '{"candidates":[', input_tokens=21_433,
+                output_tokens=6_000, closed=closed,
+            )
+        if len(calls) == 1:
+            assert body["max_tokens"] == 10_000
+            return _synthetic_anthropic_response(
+                "end_turn", complete_json, input_tokens=21_433,
+                output_tokens=8_200, closed=closed,
+            )
+        assert body["max_tokens"] == 6_000
+        return _synthetic_anthropic_response(
+            "end_turn", '{"candidates": []}', input_tokens=100,
+            output_tokens=10, closed=closed,
+        )
+
+    original_complete = model.complete_text_json
+    completion_options = []
+
+    def observe_complete(*args, **kwargs):
+        completion_options.append({key: kwargs[key] for key in (
+            "max_tokens", "read_timeout", "max_response_bytes", "require_end_turn")})
+        return original_complete(*args, **kwargs)
+
+    monkeypatch.setattr(model, "complete_text_json", observe_complete)
+    reviewer = model.Reviewer(env=_budget_env(), session=SimpleNamespace(post=post))
+    result = reviewer.ask_text("synthetic large selection")
+    assert result == {"candidates": candidates, "reason": "Synthetic complete selection"}
+    assert completion_options == [{
+        "max_tokens": 10_000, "read_timeout": 120.0,
+        "max_response_bytes": 2_000_000, "require_end_turn": True,
+    }]
+    assert len(calls) == 1 and closed == [True]
+    request = calls[0][2]
+    assert request["timeout"] == (10.0, 120.0)
+    assert request["json"]["max_tokens"] == 10_000
+
+    image = tmp_path / "chart.png"
+    image.write_bytes(b"synthetic-image")
+    vision_result = reviewer.ask("inspect chart", [("source", image)])
+    assert vision_result == {"candidates": []}
+    vision_request = calls[1][2]
+    assert vision_request["json"]["max_tokens"] == 6_000
+    assert any(block.get("type") == "image" for block in vision_request["json"]["messages"][0]["content"])
+    assert vision_request["timeout"] == (10.0, 120.0)
+    assert vision_request["headers"]["authorization"] == "Bearer synthetic-subscription"
+
+    no_image_result = reviewer.ask("inspect without an image")
+    assert no_image_result == {"candidates": []}
+    no_image_request = calls[2][2]
+    assert no_image_request["json"]["max_tokens"] == 6_000
+    assert not any(block.get("type") == "image" for block in no_image_request["json"]["messages"][0]["content"])
+    assert no_image_request["timeout"] == (10.0, 120.0)
+    assert [provider for provider, _url, _kwargs in calls] == ["anthropic", "anthropic", "anthropic"]
+    assert closed == [True, True, True]
+
+
+def test_generated_chart_planner_uses_bounded_text_allowance_without_extra_calls(tmp_path):
+    from research import generated_charts
+    calls, closed = [], []
+
+    def post(url, **kwargs):
+        calls.append((url, kwargs))
+        assert _budget_provider(url) == "anthropic"
+        assert kwargs["json"]["max_tokens"] == 10_000
+        return _synthetic_anthropic_response(
+            "end_turn", '{"charts": []}', input_tokens=300,
+            output_tokens=10, closed=closed,
+        )
+
+    producer = model.Reviewer(env=_budget_env(), session=SimpleNamespace(post=post))
+    verifier = SimpleNamespace(ask=lambda *args, **kwargs: pytest.fail("Empty plans need no image review"))
+    result = generated_charts.generate(
+        {"title": "Synthetic evidence"}, [], tmp_path,
+        producer=producer, reviewer=verifier,
+        renderer=lambda *args, **kwargs: pytest.fail("Empty plans must not render"),
+        publisher="Synthetic desk", document_date="2026-10-14",
+    )
+    assert result["status"] == "no_comparable_data" and result["charts"] == []
+    assert len(calls) == 1 and closed == [True]
+    request = calls[0][1]
+    assert request["timeout"] == (10.0, 120.0)
+    assert request["headers"]["authorization"] == "Bearer synthetic-subscription"
+
+
+def test_text_selector_still_rejects_max_tokens_at_new_bound_in_one_call():
+    calls, closed = [], []
+
+    def post(url, **kwargs):
+        calls.append((url, kwargs))
+        assert kwargs["json"]["max_tokens"] == 10_000
+        return _synthetic_anthropic_response(
+            "max_tokens", '{"candidates":[', input_tokens=21_433,
+            output_tokens=10_000, closed=closed,
+        )
+
+    reviewer = model.Reviewer(env=_budget_env(), session=SimpleNamespace(post=post))
+    with pytest.raises(model.ModelError) as caught:
+        reviewer.ask_text("private prompt and source")
+    assert str(caught.value) == (
+        "Research reviewer did not finish a complete response "
+        "(stop_reason=max_tokens; input_tokens=21433; output_tokens=10000)"
+    )
+    assert len(calls) == 1 and closed == [True]
+    assert "private prompt" not in str(caught.value)
+    assert '{"candidates"' not in str(caught.value)
+
+
 @pytest.mark.parametrize("method", ["ask_text", "ask"])
 @pytest.mark.parametrize("iterator_name", ["iter_content", "iter_bytes"])
 @pytest.mark.parametrize("error_class,quarantined", [(httpx.ReadTimeout, True),

@@ -198,10 +198,125 @@ def test_single_raster_image_chart_is_a_figure(tmp_path):
     assert len(found) == 1
     fig = found[0]
     assert fig["kind"] == "raster"
+    assert fig["title"] == "Exhibit 1: S&P 500 EPS revisions breadth"
+    assert fig["source_line"] == "Source: Goldman Sachs Global Investment Research"
     l, t, r, b = fig["bbox"]
     assert l <= 72 / W and r >= 540 / W
     assert t <= (H - 712) / H and b >= (H - 370) / H, "title and Source line are inside the crop"
     assert b < (H - 330) / H, "body prose stays outside the crop"
+
+
+def test_pure_raster_figure_does_not_grow_into_adjacent_prose(tmp_path):
+    # A self-contained raster chart needs no external PDF text. The next body
+    # sentence is close enough to pass TEXT_REACH, but it is not a chart label.
+    image_bottom = 400
+    prose_baseline = 382
+    content = (image_chart(72, image_bottom, 540, 680)
+               + text(72, prose_baseline,
+                      "This, recall, is on top of the actual tightening, and the next paragraph continues."))
+    path = tmp_path / "raster-with-nearby-prose.pdf"
+    path.write_bytes(_pdf(content, image=(8, 8, GRAY)))
+
+    found = figures.detect(path, 1)
+    assert len(found) == 1
+    figure = found[0]
+    assert figure["kind"] == "raster" and figure["objects"] == 1
+    assert figure["title"] is None and figure["source_line"] is None
+    assert figure["bbox"][1] <= (H - 680) / H
+    assert figure["bbox"][3] >= (H - image_bottom) / H
+    assert figure["bbox"][3] < (H - prose_baseline) / H, "following body prose must stay outside the crop"
+
+
+@pytest.mark.parametrize("prose", [
+    [
+        "Tech was net sold.",
+        "Exposure remains high.",
+        "The table follows.",
+        "This is article prose.",
+    ],
+    [
+        "We discussed the rotation earlier this week when dealers stepped back.",
+        "The asymmetry had shifted and the prime book told a similar story.",
+        "Technology was net sold, but the position remained very crowded.",
+        "It represented a large share of North America net exposure.",
+        "That is why selling does not imply an underweight sector.",
+    ],
+])
+def test_pure_raster_table_does_not_attach_preceding_paragraph_as_title(tmp_path, prose):
+    # The Goldman page-4 topology is a self-contained raster table immediately
+    # below article prose. Four short lines isolate the line-count boundary:
+    # their combined length is under the 160-character guard. Five longer lines
+    # reproduce the paragraph-sized false title seen in the source provenance.
+    assert len(prose) == 5 or len(" ".join(prose)) <= 160
+    content = "".join(text(72, 724 - 14 * index, line) for index, line in enumerate(prose))
+    content += image_chart(72, 400, 540, 650)
+    content += text(72, 382, "Source: Morgan Stanley Prime Brokerage, October 2026", 8)
+    path = tmp_path / "raster-table-after-prose.pdf"
+    path.write_bytes(_pdf(content, image=(8, 8, GRAY)))
+
+    found = figures.detect(path, 1)
+    assert len(found) == 1
+    figure = found[0]
+    assert figure["kind"] == "raster" and figure["objects"] == 1
+    assert figure["title"] is None, "body paragraph is not external figure metadata"
+    assert figure["source_line"].startswith("Source: Morgan Stanley")
+    _left, top, _right, bottom = figure["bbox"]
+    assert top >= (H - 650) / H - figures.MARGIN - 0.002, "crop starts at table, not at prose"
+    assert top <= (H - 650) / H
+    assert bottom >= (H - 382) / H, "external source credit remains visible"
+
+
+def test_pure_raster_table_does_not_attach_overlong_single_line_as_title(tmp_path):
+    # OCR/PDF text extraction can return one long visual line instead of a
+    # wrapped paragraph. Line-count filtering alone must not admit that prose.
+    prose = "The crowded position remained in place despite net selling in the sector, " * 3
+    assert len(prose.strip()) > 160
+    content = text(72, 666, prose, 6) + image_chart(72, 400, 540, 650)
+    path = tmp_path / "raster-table-after-long-line.pdf"
+    path.write_bytes(_pdf(content, image=(8, 8, GRAY)))
+
+    found = figures.detect(path, 1)
+    assert len(found) == 1
+    figure = found[0]
+    assert figure["kind"] == "raster" and figure["objects"] == 1
+    assert figure["title"] is None
+    assert figure["bbox"][1] >= (H - 650) / H - figures.MARGIN - 0.002
+
+
+@pytest.mark.parametrize("kind", ["raster", "vector", "mixed"])
+@pytest.mark.parametrize("title_lines", [2, 3])
+def test_compact_external_title_units_and_source_survive_figure_crop(tmp_path, kind, title_lines):
+    # A short wrapped title and its units really are external figure labels.
+    # The three-line case remains below 160 characters: it isolates the line
+    # boundary from the separate long-title limit. Preserve vector/mixed crops.
+    title = [(712, "Exhibit 4: North America sector exposure", 12),
+             (696, "Percent of net exposure; since 2010", 10)]
+    if title_lines == 3:
+        title = [(728, "Exhibit 4: North America sector exposure", 12),
+                 (712, "Percent of total net exposure", 10),
+                 (696, "Units: percent; since 2010", 10)]
+    assert len(" ".join(value for _y, value, _size in title)) <= 160
+    content = "".join(text(72, y, value, size) for y, value, size in title)
+    if kind in {"raster", "mixed"}:
+        content += image_chart(72, 400, 540, 680)
+    if kind in {"vector", "mixed"}:
+        content += chart(72, 400, 540, 680)
+    content += (text(72, 372, "Source: Morgan Stanley Prime Brokerage", 8)
+                + text(72, 330, "Neighboring article prose must not join the crop."))
+    path = tmp_path / f"{kind}-external-title.pdf"
+    path.write_bytes(_pdf(content, image=(8, 8, GRAY) if kind != "vector" else None))
+
+    found = figures.detect(path, 1)
+    assert len(found) == 1
+    figure = found[0]
+    assert figure["kind"] == kind
+    assert "Exhibit 4" in figure["title"]
+    assert "since 2010" in figure["title"]
+    assert figure["source_line"].startswith("Source: Morgan Stanley")
+    _left, top, _right, bottom = figure["bbox"]
+    assert top <= (H - title[0][0]) / H
+    assert bottom >= (H - 372) / H
+    assert bottom < (H - 330) / H, "neighboring prose stays outside"
 
 
 def test_two_lone_raster_charts_are_two_figures(tmp_path):

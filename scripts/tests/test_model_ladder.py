@@ -281,6 +281,99 @@ class TestTextJsonPath:
             )
 
     @pytest.mark.parametrize(
+        ("stop_reason", "expected_reason"),
+        [
+            ("max_tokens", "max_tokens"),
+            ("stop_sequence", "stop_sequence"),
+            ("tool_use", "tool_use"),
+            ("pause_turn", "pause_turn"),
+            ("refusal", "refusal"),
+            ("model_context_window_exceeded", "model_context_window_exceeded"),
+            (None, "missing"),
+            ("private-token-and-source", "other"),
+            (["private-token-and-source"], "other"),
+            ({"private-token-and-source": True}, "other"),
+        ],
+    )
+    def test_incomplete_anthropic_reports_only_allowlisted_stop_reason(self, stop_reason, expected_reason):
+        payload = {
+            "stop_reason": stop_reason,
+            "usage": {"input_tokens": 123, "output_tokens": 6000,
+                      "private-token-and-source": "must-never-appear"},
+            "content": [{"type": "text", "text": "private-token-and-source"}],
+        }
+        router = _Router({"api.anthropic.com": _Resp(200, payload)})
+        with pytest.raises(ModelResponseError) as caught:
+            complete_multimodal_json(
+                "private-prompt", env={"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"},
+                post=router, stream_anthropic=False,
+            )
+        assert caught.value.code == "incomplete"
+        assert str(caught.value) == (
+            "Research reviewer did not finish a complete response "
+            f"(stop_reason={expected_reason}; input_tokens=123; output_tokens=6000)"
+        )
+        assert "private-token-and-source" not in str(caught.value)
+        assert "private-prompt" not in str(caught.value)
+        assert router.calls == ["https://api.anthropic.com/v1/messages"]
+
+    def test_incomplete_anthropic_missing_stop_reason_and_usage_are_unknown(self):
+        payload = {"content": [{"type": "text", "text": "{}"}]}
+        with pytest.raises(ModelResponseError) as caught:
+            complete_multimodal_json(
+                "evaluate", env={"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"},
+                post=_Router({"api.anthropic.com": _Resp(200, payload)}), stream_anthropic=False,
+            )
+        assert str(caught.value) == (
+            "Research reviewer did not finish a complete response "
+            "(stop_reason=missing; input_tokens=unknown; output_tokens=unknown)"
+        )
+
+    @pytest.mark.parametrize(
+        ("usage", "expected_input", "expected_output"),
+        [
+            ({"input_tokens": 0, "output_tokens": 1_000_000_000}, "0", "1000000000"),
+            ({"input_tokens": True, "output_tokens": False}, "unknown", "unknown"),
+            ({"input_tokens": -1, "output_tokens": 1_000_000_001}, "unknown", "unknown"),
+            ({"input_tokens": "123", "output_tokens": "private-token-and-source"}, "unknown", "unknown"),
+            ({"input_tokens": 1.5, "output_tokens": None}, "unknown", "unknown"),
+            ({}, "unknown", "unknown"),
+            (None, "unknown", "unknown"),
+            (["private-token-and-source"], "unknown", "unknown"),
+        ],
+    )
+    def test_incomplete_anthropic_reports_only_bounded_integer_usage(self, usage, expected_input, expected_output):
+        payload = {
+            "stop_reason": "max_tokens",
+            "usage": usage,
+            "content": [{"type": "text", "text": "{}"}],
+        }
+        with pytest.raises(ModelResponseError) as caught:
+            complete_multimodal_json(
+                "evaluate", env={"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"},
+                post=_Router({"api.anthropic.com": _Resp(200, payload)}), stream_anthropic=False,
+            )
+        assert str(caught.value) == (
+            "Research reviewer did not finish a complete response "
+            f"(stop_reason=max_tokens; input_tokens={expected_input}; output_tokens={expected_output})"
+        )
+        assert "private-token-and-source" not in str(caught.value)
+
+    @pytest.mark.parametrize(("stop_reason", "require_end_turn"), [
+        ("end_turn", True), ("max_tokens", False),
+    ])
+    def test_complete_or_nonrequiring_call_has_no_terminal_diagnostic(self, stop_reason, require_end_turn):
+        payload = {"stop_reason": stop_reason, "usage": {"input_tokens": 123, "output_tokens": 6000},
+                   "content": [{"type": "text", "text": json.dumps(OBJ)}]}
+        result = complete_multimodal_json(
+            "evaluate", env={"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"},
+            post=_Router({"api.anthropic.com": _Resp(200, payload)}),
+            stream_anthropic=False, require_end_turn=require_end_turn,
+        )
+        assert result.data == OBJ
+        assert result.provider == "anthropic"
+
+    @pytest.mark.parametrize(
         ("env", "needle", "payload"),
         [
             ({"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"}, "api.anthropic.com", {"stop_reason": "end_turn", "content": [{"type": "text", "text": json.dumps(OBJ)}]}),
