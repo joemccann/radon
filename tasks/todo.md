@@ -9852,3 +9852,33 @@ Final integration review: eac73b0b is included. All 44 incoming indicator files 
 Review: Production Gateway paging, hold behavior and broker state are outside the patch. Tests run in GitHub Actions only; regression probes replace the last transport boundary before exercising the old behavior.
 
 Notification isolation review: cloud RED `1cdf8f37`, run `39151257572`: hold shard 1 failed/1152 passed (one fake sender call); isolation shard 5 failed/2578 passed/1 skipped. Shared root fixtures strip credentials and block urllib/requests Pushover message/cancellation requests with a teardown latch. Default hold pager is fake; explicit paging tests still supply observable senders. Production files remain unchanged. Full final-head CI pending.
+
+
+## Responder service account maintenance (2026-10-18)
+
+- [x] RA1 depends_on: [] Map account, native authentication, runtime promotion, state, clone pickup and action grants.
+- [x] RA2 depends_on: [RA1] Obtain cloud red for the isolated account and gated migration contracts.
+- [x] RA3 depends_on: [RA2] Implement independent account/runtime and complete trusted host handover.
+- [ ] RA4 depends_on: [RA3] Complete cloud gates and prepare the independent maintenance PR.
+
+Review: Existing subscription credential lifecycle remains separate; host migration requires explicit native authentication under the new service account.
+
+Responder account review: private cloud red run 39162568477 proved the missing account/domain contracts. Optional source deploy is inert; trusted preparation, native login and explicit pickup acknowledgement are required before timer handover. Keeper runtime remains separate. Synthetic transport and handover tests cover rollback/race paths; cloud green pending. No production state or credential material changed in this session.
+
+
+### Private CI integration repair (2026-10-18)
+- [x] CI1 depends_on: [] Inspect exact-head private CI failures without local suites or production access.
+- [x] CI2 depends_on: [CI1] Repair implementation defects and align synthetic fixtures and owner documentation with the intended maintenance contract.
+- [x] CI3 depends_on: [CI2] Parse changed sources, check shell syntax and whitespace, and return a committed candidate for private cloud verification.
+
+Review: Existing gates remain mandatory; no production provisioning or credential operation belongs to this repair.
+
+Static repair review: changed Python sources parse, changed shell entrypoints pass syntax validation, and `git diff --check` is clean. No local test suite or live/production test ran. Exact candidate cloud re-verification remains required.
+
+
+### Independent responder review repair
+- [x] RR1 depends_on: [] Verify transient systemd states and the native installer output location against existing source.
+- [x] RR2 depends_on: [RR1] Refuse busy/unknown workload state on both sides of timer disable and normalize native CLI layout before reporting readiness.
+- [x] RR3 depends_on: [RR2] Add synthetic transient-state, lookup-failure and provisioned-layout coverage for cloud verification.
+
+Independent review repair: handover reads explicit ActiveState and permits only confirmed inactive/failed workloads; transient states and query failures refuse before timer changes or restore the prior timers after disable. Native CLI installation normalizes only an absent canonical slot as the dedicated account and validates the executable before preparation completes. Synthetic coverage authored for both handover directions, second-check races and native installer layouts. AST and whitespace checks pass; cloud verification remains pending.
