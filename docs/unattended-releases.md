@@ -18,6 +18,9 @@ checks, stale heads, missing independent Sol/Luna approvals, and a production
 release still running all defer release. Every expected test shard, both
 coverage gates, cloud tests, perimeter smoke, secret scan and PR-body gate must
 be present and successful. Other applicable checks must also complete.
+A candidate that changes anything under `.github/` is never reviewed or
+merged unattended: pull-request CI runs the candidate's own workflow files, so
+those checks cannot judge it. It waits for a human merge.
 
 Reviews are cached by model, immutable head SHA and complete diff digest.
 The controller copies the Homebrew CLI into an owner-only snapshot, verifies

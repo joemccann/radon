@@ -289,6 +289,10 @@ class FileStateStore:
         self._save()
 
 
+class HumanMergeRequired(ValueError):
+    pass
+
+
 def _checks_green(snapshot, pr, policy):
     if snapshot.head_sha != pr.head_sha or not snapshot.checks:
         return False
@@ -602,6 +606,10 @@ class CodexReviews:
         paths = sorted(path for path in before.keys() | after.keys() if before.get(path) != after.get(path))
         if not paths or len(paths) >= 300:
             raise ValueError("unbounded changed source")
+        # Pull-request CI runs the candidate's own workflow files, so a
+        # candidate that edits them would define the checks that judge it.
+        if any(path.startswith(".github/") for path in paths):
+            raise HumanMergeRequired("candidate changes its own CI definition")
         def prose(path):
             parts = path.split("/")
             allowed = path in ("tasks/todo.md", "tasks/lessons.md") or (path.startswith("docs/") and path.endswith(".md"))
@@ -702,6 +710,9 @@ class CodexReviews:
         except (RuntimeError, OSError, subprocess.TimeoutExpired):
             self.failure_reason = "Immutable source fetch temporarily failed; preserve the exact candidate and retry. No review or approval was issued."
             raise RuntimeError(self.failure_reason) from None
+        except HumanMergeRequired:
+            self.failure_reason = "Changes under .github/ define their own CI and need a human merge; no approval was issued."
+            return []
         except (ValueError, KeyError, TypeError, binascii.Error):
             self.failure_reason = ("Source review context is incomplete, invalid or oversized. "
                                    "Require exact Git blobs; limits are 299 changed files, "
