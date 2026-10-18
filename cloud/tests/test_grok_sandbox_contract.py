@@ -163,12 +163,13 @@ def test_responder_clone_origin_needs_no_credential():
 # 0640, and ProtectSystem=full restricts writes, not reads). systemd reads
 # EnvironmentFile before the namespace is built, so hiding the file from the
 # process costs the unit nothing, exactly as the two grok units already do.
-TOKENS_ENV_FILE = "/etc/radon/env"
+TOKENS_ENV_FILE = "/etc/radon/subscription-tokens/env"
 
 
 def test_token_keeper_cannot_read_its_own_env_file_at_runtime():
     text = (SERVICES / TOKENS).read_text(encoding="utf-8")
     assert f"EnvironmentFile={TOKENS_ENV_FILE}" in text
+    assert "/etc/radon/env" in _paths(TOKENS, "InaccessiblePaths")
     assert TOKENS_ENV_FILE in _paths(TOKENS, "InaccessiblePaths"), (
         "the agent CLIs this unit launches could read the production env file "
         "directly; systemd has already loaded it by then"

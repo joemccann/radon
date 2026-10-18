@@ -1114,3 +1114,15 @@ Missing or rejected credentials produce an error heartbeat while preserving prev
 ## NVIDIA model settings in the restricted newsfeed runtime
 
 The runtime renderer passes `NVIDIA_TEXT_MODEL`, `NVIDIA_VISION_MODEL`, and `NVIDIA_MODEL` explicitly into `radon-newsfeed.service`; arbitrary `NVIDIA_*` keys remain excluded. After an approved model-setting change, regenerate the runtime environment through the normal deployment procedure and restart the affected consumer. Existing processes do not reload host environment edits automatically. Keep the hosted [Nemotron Super VL pilot](nemotron-super-vl-pilot.md) vision-only until its quality gates pass; remove or restore the override and regenerate/restart to roll back.
+
+
+## Subscription keeper environment publication
+
+`setup-vps.sh` installs the root-owned subscription environment publisher and seeds
+`/etc/radon/subscription-tokens/env` before activating the keeper. Each deploy
+refreshes that allowlist through `radon-deploy-root publish-subscription-env` after
+canonical environment validation and before builds or service changes. Publication
+failure aborts the deploy. The derived directory is root-private; see
+[subscription token operations](subscription-tokens.md) for its supported inputs
+and rollback. The keeper keeps its existing uid and native provider credential
+locations.

@@ -196,6 +196,7 @@ IB_GATEWAY_DEPENDENTS = [
 
 ENV_FILE_PATH = "/etc/radon/env"
 STRIPPED_ENV_SERVICES = {
+    "radon-subscription-tokens.service": "/etc/radon/subscription-tokens/env",
     "radon-grok-page-responder.service": "/home/radon/radon-page-responder.env",
     "radon-grok-upgrade.service": "/home/radon/radon-page-responder.env",
     "radon-flex-pull.service": "/var/lib/radon/flex-secrets/env",
@@ -298,7 +299,7 @@ class TestSubscriptionTokens:
         assert svc["user"] == "radon"
         assert svc["umask"] == "0077"
         assert svc["workingdirectory"] == "/home/radon/radon"
-        assert svc["environmentfile"] == ENV_FILE_PATH
+        assert svc["environmentfile"] == STRIPPED_ENV_SERVICES[self.SERVICE]
 
     def test_reaches_the_vault_through_the_broker_without_the_key(self, unit, services_dir):
         # DS-2026-10-05-05: this unit runs third-party CLIs out of
