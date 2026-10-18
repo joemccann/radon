@@ -306,8 +306,6 @@ for (const width of [1440, 393]) {
       await caption.fill("Seasonality — still improving. Range: 10&#8212;20%. Source: The Market Ear https://themarketear.com/posts/example ZeroHedge https://zerohedge.com/markets/example");
       const outbound = new URL((await compose.getAttribute("href"))!).searchParams.get("text");
       expect(outbound).toContain("Seasonality, still improving. Range: 10 to 20%.");
-      expect(outbound?.endsWith("\n\n@grok explain this for normies")).toBe(true);
-      expect(outbound?.match(/@grok explain this for normies/g)).toHaveLength(1);
       expect(outbound).not.toMatch(excludedPublisher);
       expect(outbound).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
       await panel.getByRole("button", { name: "Copy caption", exact: true }).click();
@@ -344,7 +342,7 @@ for (const width of [1440, 393]) {
     expect(originalCaption).not.toMatch(/Source:|@Synthetic/);
     await panel.getByRole("textbox", { name: "Post caption" }).fill("Edited yen analysis & source attribution");
     const compose = panel.getByRole("link", { name: "Compose on X" });
-    expect(new URL((await compose.getAttribute("href"))!).searchParams.get("text")).toBe("Edited yen analysis & source attribution\n\n@grok explain this for normies");
+    expect(new URL((await compose.getAttribute("href"))!).searchParams.get("text")).toBe("Edited yen analysis & source attribution");
     const pngDownload = page.waitForEvent("download");
     await panel.getByRole("button", { name: "Download Story image" }).click();
     const png = await pngDownload;
@@ -423,7 +421,7 @@ for (const width of [1440, 393]) {
       content: 'Morgan Stanley’s AI CDS basket now trades ~45bp wider than CDX IG.\n\nMS says buying CDS protection "remains our preferred way of playing the AI story in the credit derivatives market." The reason is not just a bearish default call. MS expects "increasing needs for non-economic hedging to manage counterparty exposure," even in a benign scenario where AI investments are profitable and continue.\n\nThat is an important distinction. The hedge bid can grow even if the capex cycle keeps working. More AI financing creates more counterparty exposure, and that creates more demand for protection.',
       source: { ...source, publisher: "Tyler Durden", documentDate: "2026-10-07" },
     };
-    const expected = `${fixture.title}\n\n${fixture.content}`.replace(/Morgan Stanley|\bMS\b/g, "@morganstanley") + "\n\n@grok explain this for normies";
+    const expected = `${fixture.title}\n\n${fixture.content}`.replace(/Morgan Stanley|\bMS\b/g, "@morganstanley");
     let requests = 0;
     let releaseRewrite!: () => void;
     const rewriteReady = new Promise<void>(resolve => { releaseRewrite = resolve; });

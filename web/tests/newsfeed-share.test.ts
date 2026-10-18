@@ -21,7 +21,7 @@ describe("social captions", () => {
   it("does not append image-provider attribution to X share captions", () => {
     const image = "https://media.radon.run/adoption.png";
     const attributed = { ...post, images: [image], imageSources: { [image]: "Ramp" } };
-    expect(buildShareCaption(attributed)).toBe("Yen hedge demand jumps\n\nPositioning is near neutral.\n\n@grok explain this for normies");
+    expect(buildShareCaption(attributed)).toBe("Yen hedge demand jumps\n\nPositioning is near neutral.");
     expect(buildShareCaption(attributed)).not.toMatch(/market[\s-]*ear/i);
     const other = "https://media.radon.run/other.png";
     const multi = { ...attributed, images: [image, other], imageSources: { [image]: "Ramp", [other]: "Goldman Sachs" } };
@@ -39,12 +39,12 @@ describe("social captions", () => {
     const content = `Positioning ${dash} still neutral. Returns: -2.5%.`;
     expect(sanitizeShareText(content)).toBe("Positioning, still neutral. Returns: -2.5%.");
     const caption = buildShareCaption({ ...post, title: `Yen ${dash} the setup`, content });
-    expect(caption).toBe("Yen, the setup\n\nPositioning, still neutral.\n\nReturns: -2.5%.\n\n@grok explain this for normies");
-    expect(new URL(buildXShareUrl(content)).searchParams.get("text")).toBe("Positioning, still neutral. Returns: -2.5%.\n\n@grok explain this for normies");
+    expect(caption).toBe("Yen, the setup\n\nPositioning, still neutral.\n\nReturns: -2.5%.");
+    expect(new URL(buildXShareUrl(content)).searchParams.get("text")).toBe("Positioning, still neutral. Returns: -2.5%.");
   });
   it("removes publisher profile links and handles without orphan URLs", () => {
     const caption = buildShareCaption({ ...post, content: "Neutral positioning. https://x.com/zerohedge/status/123 https://twitter.com/themarketear @ZeroHedge @themarketear" });
-    expect(caption).toBe("Yen hedge demand jumps\n\nNeutral positioning.\n\n@grok explain this for normies");
+    expect(caption).toBe("Yen hedge demand jumps\n\nNeutral positioning.");
   });
 
   it.each(["The Market Ear", "themarketear", "ZeroHedge", "ZERO HEDGE", "Zero-Hedge"])("excludes %s from embedded text and edited X captions", publisher => {
@@ -54,7 +54,7 @@ describe("social captions", () => {
   });
   it("omits feed attribution and preserves the full caption through the X intent", () => {
     const caption = buildShareCaption(post);
-    expect(caption).toBe("Yen hedge demand jumps\n\nPositioning is near neutral.\n\n@grok explain this for normies");
+    expect(caption).toBe("Yen hedge demand jumps\n\nPositioning is near neutral.");
     const url = new URL(buildXShareUrl(caption));
     expect(url.origin + url.pathname).toBe("https://twitter.com/intent/tweet");
     expect(url.searchParams.get("text")).toBe(caption);
@@ -65,7 +65,7 @@ describe("social captions", () => {
       fileId: "file-private-id", revision: "private-revision", contentHash: "secret", url: "/api/newsfeed/research/files/secret.pdf",
     } };
     const caption = buildShareCaption(privatePost);
-    expect(caption).toBe("Yen hedge demand jumps\n\nPositioning is near neutral.\n\n@grok explain this for normies");
+    expect(caption).toBe("Yen hedge demand jumps\n\nPositioning is near neutral.");
     expect(caption).not.toContain("Source:");
     expect(caption).not.toMatch(/secret|private|\/api\//);
   });
@@ -80,7 +80,7 @@ describe("social captions", () => {
     expect(caption.split("\n\n")[0]).toBe(equityIssuance.title.replace("Goldman", "@GoldmanSachs"));
     expect(caption.length).toBeGreaterThan(SHARE_CAPTION_SOFT_CAP);
     expect(caption.replace(/\s+/g, " ")).toBe(
-      `${equityIssuance.title} ${equityIssuance.content}`.replace(/\bGoldman\b/g, "@GoldmanSachs") + " @grok explain this for normies",
+      `${equityIssuance.title} ${equityIssuance.content}`.replace(/\bGoldman\b/g, "@GoldmanSachs"),
     );
     expect(caption).toContain("$252bn");
     expect(caption).toContain("$700bn");
@@ -104,7 +104,7 @@ describe("social captions", () => {
       "US corps raised a record $252bn in 2Q equity supply\n\n"
       + "• @GoldmanSachs sees ~$700bn total equity supply in 2026\n\n"
       + "• AI infra / hyperscaler capex is a big slice\n\n"
-      + "• Supply overhang = headwind, not a gale\n\n@grok explain this for normies",
+      + "• Supply overhang = headwind, not a gale",
     );
   });
   it("shares the complete Morgan Stanley screenshot post with bank handles", () => {
@@ -119,7 +119,7 @@ describe("social captions", () => {
     expect(caption).toContain('@morganstanley says buying CDS protection "remains our preferred way of playing the AI story in the credit derivatives market."');
     expect(caption).toContain('The reason is not just a bearish default call.');
     expect(caption).toContain('@morganstanley expects "increasing needs for non-economic hedging to manage counterparty exposure," even in a benign scenario where AI investments are profitable and continue.');
-    expect(caption.endsWith("More AI financing creates more counterparty exposure, and that creates more demand for protection.\n\n@grok explain this for normies")).toBe(true);
+    expect(caption.endsWith("More AI financing creates more counterparty exposure, and that creates more demand for protection.")).toBe(true);
     expect(caption.length).toBeGreaterThan(SHARE_CAPTION_SOFT_CAP);
     expect(caption).not.toMatch(/Source:|Tyler Durden|2026-10-07|\bMS\b|Morgan Stanley/);
     expect(new URL(buildXShareUrl(caption)).searchParams.get("text")).toBe(caption);
@@ -139,15 +139,15 @@ describe("social captions", () => {
     ["Bloomberg", "@business"], ["Reuters", "@Reuters"], ["Ramp", "@tryramp"],
   ])("uses the known source handle for %s", (name, handle) => {
     expect(buildShareCaption({ ...post, title: name, content: `${name} sees demand.` }))
-      .toBe(`${handle}\n\n${handle} sees demand.\n\n@grok explain this for normies`);
+      .toBe(`${handle}\n\n${handle} sees demand.`);
   });
   it("preserves URLs, email addresses, cashtags and lowercase ramp prose", () => {
     const content = "See https://example.com/Goldman and research@Goldman.com. $MS and MSFT rise as capex ramps up. The capex ramp continues.";
-    expect(new URL(buildXShareUrl(content)).searchParams.get("text")).toBe(content + "\n\n@grok explain this for normies");
+    expect(new URL(buildXShareUrl(content)).searchParams.get("text")).toBe(content);
   });
   it("removes any source line from manually edited X copy and preserves all other copy", () => {
     const caption = "MS sees hedging demand.\n\nSource: Tyler Durden · 2026-10-07\n\nGoldman Sachs sees issuance.\nSource: Acme Research\n\nJ.P. Morgan sees demand.";
-    expect(new URL(buildXShareUrl(caption)).searchParams.get("text")).toBe("@morganstanley sees hedging demand.\n\n@GoldmanSachs sees issuance.\n\n@jpmorgan sees demand.\n\n@grok explain this for normies");
+    expect(new URL(buildXShareUrl(caption)).searchParams.get("text")).toBe("@morganstanley sees hedging demand.\n\n@GoldmanSachs sees issuance.\n\n@jpmorgan sees demand.");
   });
   it("assembles a voice caption as blank-line separated sentences", () => {
     const caption = assembleShareCaption("Seasonality", "• 104 to 130\n• Year 3, month +9.");
