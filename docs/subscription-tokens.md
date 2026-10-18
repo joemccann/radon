@@ -112,6 +112,32 @@ with `HOME`, a `PATH`, locale, proxy and XDG variables plus that provider's own
 config-dir override, and nothing else. It runs in an empty temporary directory,
 in its own process group, with stdin closed, and is killed as a group on timeout.
 
+### Service environment lifecycle
+
+The host unit reads `/etc/radon/subscription-tokens/env`, a root-owned `0600`
+file in a root-owned `0700` directory. The trusted publisher selects only
+`TURSO_DB_URL`, `TURSO_AUTH_TOKEN`, `PUSHOVER_USER`, `PUSHOVER_TOKEN` and the
+optional `CLAUDE_CONFIG_DIR` / `CODEX_HOME` directory overrides. The vault
+socket and replica policy remain fixed unit settings. Provider credential
+locations and the keeper's `radon` UID remain unchanged.
+
+Control-plane sync installs the publisher before deploy derives the file.
+Deploy republishes it after canonical environment validation and before any
+scheduled unit activation; initial setup publishes before installing units.
+Rotations therefore replace the entire selected set. Missing required inputs
+leave the previous complete file intact and stop that publication/deploy.
+The publisher follows no directory or file links and publishes by descriptor
+into its private directory. It never prints values.
+
+For an explicit refresh after editing the canonical root environment, run
+`sudo -n /usr/local/sbin/radon-deploy-root publish-subscription-env`. Do not
+change the unit to load the full production environment. Retain the derived
+file and trusted publisher when rolling application code back; no native
+login, vault credential, or CLI credential file is copied or replaced. This
+change narrows the keeper's inputs; it does not change host UID isolation.
+
+Contract: `cloud/tests/test_subscription_service_env.py`.
+
 Registry names in the vault:
 
     SUBSCRIPTION_TOKEN_ANTHROPIC

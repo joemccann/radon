@@ -203,6 +203,8 @@ def test_unadvertised_render_reference_and_fabricated_annotation_rejected(tmp_pa
     lambda p: p.update(ticks=[0, 2, 1]),
     lambda p: p.update(unit=''),
     lambda p: p.update(note='x'*301),
+    lambda p: p.update(note='x'*101),
+    lambda p: p.update(note='x'*60, sourceNote='y'*60),
 ])
 def test_structural_distortions_and_unbounded_plans_fail_before_render(tmp_path, mutate):
     proposal = copy.deepcopy(PROPOSAL); mutate(proposal['charts'][0]['plan'])
@@ -521,3 +523,8 @@ def test_suffixed_percentage_bounds_preserve_a_separate_exact_observation(qualif
     quote = f'The deficit may be 5.4% {qualifier}. The earlier reported deficit was 5.0%.'
     assert not gc._number_in_quote(5.4, '%', quote)
     assert gc._number_in_quote(5.0, '%', quote)
+
+
+def test_plan_instruction_keeps_notes_brief_and_credit_free():
+    assert 'note? (one short clause, at most 100 characters' in gc.PLAN_INSTRUCTION
+    assert 'no source credit' in gc.PLAN_INSTRUCTION
