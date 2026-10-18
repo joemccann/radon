@@ -1,5 +1,4 @@
 "use client";
-import { withXShareFooter } from "@/lib/xShareCopy";
 import RequestError from "@/components/RequestError";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -88,7 +87,7 @@ export function buildTweetText(
   if (metric) blocks.push(metric);
   if (holdTime) blocks.push(`Held ${holdTime}`);
   blocks.push("Executed with Radon", "https://radon.run");
-  return withXShareFooter(blocks.join("\n\n"));
+  return blocks.join("\n\n");
 }
 
 type SharePnlActions = ReturnType<typeof useSharePnl>;
