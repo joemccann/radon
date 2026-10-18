@@ -543,8 +543,9 @@ with no key and reaches the vault through the broker socket
 cutover (removing the plaintext seed key): `docs/operations.md` "Secret-store
 key cutover". Contract: `cloud/tests/test_ds_secret_store_key_units.py`.
 The Python image carries integrity-pinned `claude`, `codex`, `grok` and `agy`
-(`docker/app/vendor-clis/`), so `radon-api` never mounts host
-`~/.local/bin` while it holds the key group. Root `prepare_private_dir` pins
+(`docker/app/vendor-clis/`), so `radon-api` and `radon-research` never mount host
+`~/.local/bin`. Provider credential directories and `HOME=/home/radon` remain
+unchanged; Antigravity retains its existing writable refresh/state directories. Root `prepare_private_dir` pins
 every ancestor with `O_NOFOLLOW`, and an unverifiable `id -nG radon` refuses
 every key-bearing start. Contract: `cloud/tests/test_secret_jobs_runtime.py`.
 
