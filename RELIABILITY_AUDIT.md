@@ -3175,3 +3175,19 @@ Inherited operator-only items remain: NF-1 (live bankroll admission), NF-4 (lega
 Standing sweeps HOLD: halt/limits at `scripts/clients/ib_client.py:708-719,864-906`, wire `placeOrder` at `:752,910`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:5975,6084,6162`, exit ack at `scripts/monitor_daemon/handlers/exit_orders.py:224-250`, Hrana daemon-state at `scripts/db/writer.py:2739-2752`. Whole-repo `placeOrder` enumeration is only those two call sites. Codemap importers of `hrana_http.py` (56) and `db_http.py` (11) are the blast radius; the fault is in the shared pool, not in a caller.
 
 Audited through: b79e1f5c1f22609052560148be027662f283f57b on 2026-10-16 — 1 new finding
+
+## Delta audit 2026-10-18
+
+Trusted cursor `c1ea550195af4fb9cc8692af6eefa3377423b37a` (rolling issue #81, 2026-10-17) through `30bbaec2bd208d41fe04a9d115c393f9aa5bfb0e`: 155 commits, 216 paths. No open `reliability/` PR. Highest IDs before tonight: R-737 / REL-326. Codemap `generated_at` 2026-10-17T09:00:07Z omits `scripts/fetch_vix_pc.py`, `web/lib/newsfeedExplainGenerate.ts`, `web/app/api/newsfeed/explain/route.ts`, and `scripts/unattended_release.py`; those files and the importers of changed modules were read directly.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-738 / REL-327 | P2 | `web/lib/newsfeedExplainGenerate.ts` `beginFlight` | DONE. The shared draft used the first reader's `AbortSignal`. A disconnect or the route timeout aborted the model call, and every other in-flight reader of the same `post_id` and content hash received that rejection (the route emits 502 to anyone still connected). Acceptance: two readers share one model call; aborting the first after chat has started rejects only that reader; the second receives the explanation; the model signal stays open. RED 1 failed (AbortError on the second reader). GREEN 6 passed in `web/tests/newsfeed-explain-cache.test.ts`; 28 passed across the four explain suites. |
+
+Reviewed and not filed: hrana SELECT-only replay stays fail-closed for writes, CTEs, semicolons, and batch transactions. `fetch_vix_pc` Turso write errors stay best-effort beside the 26h catalog page. Caddy body cap and header redaction, Flex DOCTYPE refusal, subscription-token admission, the demo rate-limit deny path, research review admission, and the control-plane deploy split were read as intentional fail-closed behavior. No new placement path.
+
+Inherited operator-only items remain: NF-1 (live bankroll admission), NF-4 (legacy Flex reconstruction), REL-087 / R-232 (container lifecycle design), REL-261 / R-682 (recover original task before reuse). NEW_FINDINGS and the REL-021b remainder have no new changed-surface instance.
+
+Standing sweeps HOLD: halt and limits at `scripts/clients/ib_client.py:708-749` and `:864-906`, wire `placeOrder` at `:752` and `:910`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:6117` (used at `:6226` and `:6304`), exit ack at `scripts/monitor_daemon/handlers/exit_orders.py:218-235` (used at `:790`), Hrana daemon-state at `scripts/db/writer.py:2782-2795`. Whole-repo `.placeOrder(` is only those two call sites. `vix-pc` is in `scripts/watchdog/services.py` (`:267`, bucket `:659`) and `web/lib/serviceHealthWindows.ts:270`.
+
+Audited through: 30bbaec2bd208d41fe04a9d115c393f9aa5bfb0e on 2026-10-18 — 1 new finding

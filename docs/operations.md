@@ -285,6 +285,31 @@ then verify with `id -nG radon` (no `docker` in the output).
 
 **No GitHub credential on the VPS (2026-10-03).** `setup-vps.sh` clones the public repo over anonymous HTTPS and never generates `/home/radon/.ssh/id_ed25519`; the old unregistered key was deleted. Do not add a GitHub SSH or deploy key for `radon`.
 
+**The MCP env is published by root (2026-10-18).** `/etc/radon/mcp.env` is
+the public MCP auth boundary: `radon-mcp.service` terminates anonymous
+internet traffic and loads it for the Clerk verification inputs and the
+operator allowlist. It is now `root:radon` `0640` at both writers.
+`setup-vps.sh` publishes that ownership directly; every deploy republishes it
+through `sudo -n /usr/local/sbin/radon-deploy-root publish-mcp-env`, whose
+source (`/etc/radon/env`) and destination are root-side constants the caller
+cannot supply, and which refuses a symlinked or group-writable canonical env
+and a destination that is not a regular file. The sudoers grant for that verb
+ships in the bundle the control-plane sync installs, so the first deploy after
+this release still takes `deploy.sh`'s unprivileged write; every later one
+uses the verb and refuses rather than falling back. Recovery after a hand-edit
+of `/etc/radon/env`: run the verb as root. Contract:
+`cloud/tests/test_mcp_env_ownership.py`.
+
+**The served media volume is read-only outside the newsfeed (2026-10-18).**
+`media.radon.run` serves `/var/lib/radon/media` through Caddy `file_server`,
+which follows symlinks, so write access inside a container let it have the
+host Caddy process read a file the container cannot. `radon-app-runtime` now
+binds that volume `:ro` into every app-plane unit except
+`radon-newsfeed.service`, which downloads the images. The newsfeed's own write
+path still reaches the directory Caddy serves; closing it needs a publication
+directory no container can modify and remains an open operator action.
+Contract: `cloud/tests/test_app_runtime.py`.
+
 **Privileged file-op hardening (2026-09-20).** `setup-vps.sh` stages
 root-installed artifacts from committed git blobs (`git cat-file`) rather
 than the working tree, and refuses to publish `mcp.env` through a

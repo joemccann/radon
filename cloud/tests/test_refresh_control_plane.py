@@ -291,7 +291,12 @@ def test_sudoers_grants_exact_refresh_verb_and_privileged() -> None:
     assert "radon-*" not in sudoers
     assert "/usr/bin/systemctl" not in sudoers
     for verb in verbs:
-        assert "*" not in verb
+        # No free-form argument. The one argument any verb may take is the
+        # 40-hex SHA pin the deploy passes to sync-control-plane, matched by
+        # the same shape the radon-app-runtime pull grant already uses; the
+        # helper independently requires ^[0-9a-f]{40}$ and refuses a SHA that
+        # is not the pinned remote main tip (DS-2026-10-18-01).
+        assert re.fullmatch(r"[a-z-]+(?: \[0-9a-f\]\*)?", verb), verb
         assert "?" not in verb
 
 

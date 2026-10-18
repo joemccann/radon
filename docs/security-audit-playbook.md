@@ -273,6 +273,12 @@ line here whenever you ship a security fix.**
   moving a runtime file out of `scripts/` selected no python gate. A new
   `--name-only` call without both flags is a finding.
   (`scripts/tests/test_grok_fix_pickup.py`, `scripts/tests/test_path_filter.py`)
+- **An unattended gate never judges a change to itself** — pull-request CI runs
+  the candidate's own workflow files, so the release coordinator and the
+  private bridge refuse review for any candidate whose base or head tree
+  differs under `.github/` and leave it to a human merge. Any new automated
+  merge or deploy authority must answer "can the candidate change the gate that
+  judges it?" before it ships. (`scripts/tests/test_unattended_release.py`)
 
 ## Triage & patch policy
 

@@ -11582,3 +11582,39 @@ Discarded before these rounds: root pytest with `/usr/bin/openssl` LibreSSL 3.3.
 | 3 | 15,543 passed / 2 skipped / 23 subtests | 10,989 passed / 21 skipped / 1,119 files (1 file skipped) | 2,845 passed / 27 failed / 8 skipped | 0 added / 1 removed |
 
 Base cloud at `b79e1f5c` with Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, and caddy 2.11.7: 2,838 passed / 28 failed / 8 skipped. The only node in that list and absent from all three closing lists is `test_a_hung_upstream_becomes_a_5xx_within_a_bound`. It passed alone on both SHAs (30.16s and 30.27s). The other 27 match. They are the bash 3.2 and host-Python baseline on this Mac. The comparison worktree was removed. Playwright was not run. No local screenshot or 390px result is claimed.
+
+## Delta audit 2026-10-18
+
+Range `c1ea550195af4fb9cc8692af6eefa3377423b37a..30bbaec2bd208d41fe04a9d115c393f9aa5bfb0e`: 155 commits / 216 paths. Newest trusted checkpoint is the 2026-10-17 collaborator comment on issue #83 (`audited-through: c1ea550195af4fb9cc8692af6eefa3377423b37a`). No open `testing/` pull request. Numbering continues after T-557. The checkpoint carried no open verified T finding.
+
+Flex DOCTYPE refusal, demo rate-limit timeout fail-closed, model-ladder stop-reason diagnostics, lifecycle plist pins, portfolio journal log scrubbing, hrana keepalive retry, hrana transport classification, vix-pc stale collapse, the newsfeed explanation writer, and the explain disclaimer strip are executed by tests that call the behavior. No new skip, xfail, coverage-threshold change, or blanket exclude. `ci.yml` added `e2e/vix-pc-tab.spec.ts` to the curated Playwright list and stopped handing `GH_TOKEN` to path_filter on `pull_request`. `web/e2e/newsfeed-explain.spec.ts` stays on the existing curation hold in `web/e2e/ci-curation-ledger.txt`.
+
+Not filed: `time.sleep` in `scripts/api/tests/test_internals_skew_uw_client_budget.py` and `scripts/tests/test_release_installation.py`, and `page.waitForTimeout` in `web/e2e/newsfeed-explain.spec.ts`. None was shown to pass while the behavior under test was wrong. The newsfeed share voice log still interpolates `error.message` (`web/app/api/newsfeed/share/route.ts`); that file is outside this range.
+
+### T-558 — P2 — the explain failure log copies the upstream error the reply test never reads
+
+`failureEvent` logged `error.message` (`web/app/api/newsfeed/explain/route.ts`, pre-fix). `readErrorDetail` returns the raw response body (`web/lib/llm/provider.ts:312`) and the thrown error interpolates it (`provider.ts:420`). `does not expose provider errors or mention cerebras` only read the SSE body (`web/tests/newsfeed-explain-api.test.ts`). With a thrown message containing `sk-ant-api03-abcdefghij` and `libsql://radon-joemccann.aws-us-west-2.turso.io`, the body checks passed and `console.error` received both strings (1 failed / 12 passed).
+
+Acceptance: that thrown message is absent from both the SSE body and `console.error`. The log still happens and contains `[redacted-key]` and `[redacted-db-url]`. The error event stays `Could not explain this post. Try again.` with status 502. The other 12 cases stay green.
+
+Audited through: 30bbaec2bd208d41fe04a9d115c393f9aa5bfb0e on 2026-10-18 — 1 new finding
+
+## Remediation 2026-10-18
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-558 | DONE | The extended log assertions failed while the SSE body checks passed (1 failed / 12 passed). `failureEvent` now logs `scrubSecrets` of the same detail (`route.ts:25`). `web/tests/newsfeed-explain-api.test.ts` 13 passed. |
+
+Delta files, three times: root Python 1,868 passed each run (38 files, cloud excluded so the conftests do not clash); Vitest 496 passed / 20 files each run; the 11 cloud files in the delta were 25 failed / 1,094 passed each run, and every failed node is in the base SHA list.
+
+### Closing gates 2026-10-18
+
+Counted Vitest rounds used `VITEST_MAX_WORKERS=4` then `2`. Rounds 1 and 2 timed out the same five `next.config.mjs` imports at 5s (`csp-img-src-allowlist`, `csp-nonce`, `cta-output-tracing-config`, `next-security-headers`, `robots-noindex`). Those five files passed alone (29 tests). Round 3 was clean at workers 2. The counted Vitest total is the isolated re-run added back. No assertion, skip, or coverage threshold changed. OpenSSL 3.6.5 was ahead of `/usr/bin/openssl` for every Python gate.
+
+| Round | Root Python | Root Vitest | Cloud | Failed-list diff against base `30bbaec2` |
+|---|---|---|---|---|
+| 1 | 16,367 passed / 2 skipped / 23 subtests | 11,060 passed / 21 skipped / 1,126 files (1 file skipped) | 2,892 passed / 33 failed / 8 skipped | 1 added / 0 removed |
+| 2 | 16,367 passed / 2 skipped / 23 subtests | 11,060 passed / 21 skipped / 1,126 files (1 file skipped) | 2,893 passed / 32 failed / 8 skipped | 0 added / 0 removed |
+| 3 | 16,367 passed / 2 skipped / 23 subtests | 11,060 passed / 21 skipped / 1,126 files (1 file skipped) | 2,893 passed / 32 failed / 8 skipped | 0 added / 0 removed |
+
+Base cloud at `30bbaec2` with Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, and caddy 2.11.7: 2,893 passed / 32 failed / 8 skipped. Round 1 added only `test_a_streaming_turn_survives_the_generic_header_guard`; it passed alone in 38.19s. Rounds 2 and 3 match the base node set. The 32 are the bash 3.2 `mapfile` and host-Python baseline on this Mac. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed.
