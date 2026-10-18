@@ -98,10 +98,29 @@ describe("POST /api/newsfeed/explain", () => {
   });
 
   it("does not expose provider errors or mention cerebras", async () => {
-    explainNewsfeedPost.mockRejectedValue(new Error("CEREBRAS_API_KEY secret upstream"));
+    const logged: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(" "));
+    });
+    // The SSE body already hides this. The server log is the other copy:
+    // failureEvent interpolates error.message, and chat() builds that message
+    // from the raw upstream body (provider.ts readErrorDetail).
+    const leaked = "sk-ant-api03-abcdefghij";
+    const dbUrl = "libsql://radon-joemccann.aws-us-west-2.turso.io";
+    explainNewsfeedPost.mockRejectedValue(
+      new Error(`CEREBRAS_API_KEY secret upstream ${leaked} ${dbUrl}`),
+    );
     const text = await (await POST(request())).text();
     expect(text).not.toContain("secret");
     expect(text).not.toContain("CEREBRAS");
+    expect(text).not.toContain(leaked);
+    expect(text).not.toContain(dbUrl);
+    const logText = logged.join("\n");
+    expect(logText.length).toBeGreaterThan(0);
+    expect(logText).not.toContain(leaked);
+    expect(logText).not.toContain(dbUrl);
+    expect(logText).toContain("[redacted-key]");
+    expect(logText).toContain("[redacted-db-url]");
     expect(parseEvents(text).at(-1)).toEqual({
       event: "error",
       data: { error: "Could not explain this post. Try again.", status: 502 },
