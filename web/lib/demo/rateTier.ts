@@ -23,18 +23,26 @@ const AI_PATHS = new Set<string>([
   "/api/ticker/info",
 ]);
 
-// Expensive producers / aggregations / IB-touching exec. Cached GETs are
-// ordinary reads; classifying them here made passive panels spend a 10/hour
-// producer allowance before an operator touched a control.
+// Producer mutations: non-GET requests that recompute, scan or render on the
+// server. Derived from the real route tree, where each of these handlers
+// declares `durableRateTier: "B"` on its own guard. Cached GETs are ordinary
+// reads; classifying them here made passive panels spend a 10/hour producer
+// allowance before an operator touched a control. Drift pin:
+// demo-rate-tier-route-coverage.test.ts runs every mutating route on disk
+// through this classifier, so a new producer cannot land in tier C (the
+// 5/day budget it would share with paper orders).
 const EXPENSIVE_PATTERNS: RegExp[] = [
-  /^\/api\/(vcg|gex|cri|leap)\/scan$/,
-  /^\/api\/regime(\/|$)/,
-  /^\/api\/performance(\/|$)/,
-  /^\/api\/scanner(\/|$)/,
-  /^\/api\/discover(\/|$)/,
-  /^\/api\/evaluate(\/|$)/,
-  /^\/api\/pi(\/|$)/,
+  /^\/api\/(breadth|discover|gamma-rotation|gex|internals|regime|scanner)$/,
+  /^\/api\/(gex|internals|regime|vcg|menthorq\/cta)\/share$/,
+  /^\/api\/scanner\/(bounce|strength|theta|vol-skew-mr)\/scan$/,
+  /^\/api\/(garch-convergence|leap)\/scan$/,
+  /^\/api\/flow-analysis\/[^/]+$/,
+  /^\/api\/options\/rv-ratio$/,
+  /^\/api\/knowledge\/search$/,
 ];
+
+// Reads sent as POST because the request carries a bounded symbol batch.
+const READ_POST_PATHS = new Set<string>(["/api/previous-close"]);
 
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
@@ -66,6 +74,7 @@ export function classifyRateTier(
   if (normalizedMethod === "GET" && PASSIVE_POLL_PATHS.has(pathname)) return "I";
   if (AI_PATHS.has(pathname)) return "D";
   if (normalizedMethod !== "GET" && EXPENSIVE_PATTERNS.some((re) => re.test(pathname))) return "B";
+  if (normalizedMethod === "POST" && READ_POST_PATHS.has(pathname)) return "A";
   if (WRITE_METHODS.has(normalizedMethod)) return "C";
   return "A";
 }
