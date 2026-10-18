@@ -1,11 +1,12 @@
 # Revert X share-copy footer (2026-10-17)
 
-Dependency graph: T1 -> T2 -> T3 -> T4.
+Dependency graph: T1 -> T2 -> T3 -> T5 -> T4.
 
 - [x] T1 depends_on: [] Identify PR #1143 and isolate the rollback from unrelated operator files.
 - [x] T2 depends_on: [T1] Reverse only the footer implementation, expectations and owner-document addition; retain delivery history and record the withdrawn preference.
 - [x] T3 depends_on: [T2] Verify exact restoration, focused/full suites and browser sharing without the footer.
-- [ ] T4 depends_on: [T3] Publish the revert PR, watch exact-head CI, notify once, admin-merge and verify normal production deployment.
+- [ ] T5 depends_on: [T3] Integrate concurrent Explain PR #1145, resolve only the overlap, refresh verification and wait for the preceding production deployment.
+- [ ] T4 depends_on: [T3,T5] Publish the revert PR, watch exact-head CI, notify once, admin-merge and verify normal production deployment.
 
 ## Review
 
