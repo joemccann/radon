@@ -91,12 +91,12 @@ afterEach(() => {
 describe("NewsfeedExplain", () => {
   it("sits beside Share on the feed card and stays idle until armed", async () => {
     render(<DashboardNewsFeed />);
-    const item = await screen.findByText(/PJM 2028/);
+    const item = (await screen.findAllByText(/PJM 2028/))[0];
     const card = item.closest("[data-testid='news-feed-item']") ?? document.body;
     expect(card.querySelector("[data-testid='newsfeed-explain']")).toBeTruthy();
     expect(card.querySelector("[data-newsfeed-share]")).toBeTruthy();
     const explain = screen.getAllByRole("button", { name: "Explain" })[0];
-    expect(explain).toHaveAttribute("aria-expanded", "false");
+    expect(explain.getAttribute("aria-expanded")).toBe("false");
     expect(fetchMock.mock.calls.some(([url, init]) =>
       (typeof url === "string" ? url : url.url) === "/api/newsfeed/explain"
       && (init as RequestInit | undefined)?.method === "POST",
@@ -152,7 +152,7 @@ describe("NewsfeedExplain", () => {
     });
     render(<NewsfeedExplain post={post} imageUrls={[]} />);
     fireEvent.click(screen.getByRole("button", { name: "Explain" }));
-    expect(screen.getByRole("button", { name: /Explain/ })).toBeDisabled();
+    expect((screen.getByRole("button", { name: /Explain/ }) as HTMLButtonElement).disabled).toBe(true);
     await act(async () => {
       resolveExplain({
         ok: false,

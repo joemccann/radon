@@ -273,3 +273,24 @@
   height: var(--touch-min);
   transform: translate(-50%, -50%);
 }
+
+.postActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 14px;
+  min-width: 0;
+}
+
+.postActions :global([data-newsfeed-share]) {
+  order: 2;
+  flex: 0 0 auto;
+  min-width: 0;
+  margin-top: 0;
+}
+
+:global(body[data-mobile="true"]) .postActions {
+  margin-top: 0;
+  gap: var(--nf-s2);
+}
