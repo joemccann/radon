@@ -228,10 +228,21 @@ def _real_uw_fetch() -> dict[str, Any]:
     """UW VIX options-volume JSON (limit=500). Honest UA radon/2.0 via UWClient."""
     from clients.uw_client import UWClient
 
-    with UWClient() as client:
-        return client._get(
-            f"stock/{TICKER}/options-volume", params={"limit": UW_LIMIT}
-        )
+    try:
+        with UWClient() as client:
+            return client._get(
+                f"stock/{TICKER}/options-volume", params={"limit": UW_LIMIT}
+            )
+    except Exception:
+        if writer is not None:
+            scan_time = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            writer.record_service_health(
+                SERVICE,
+                "error",
+                finished_at=scan_time,
+                error={"message": "vix-pc: UW client construction or fetch failed"},
+            )
+        raise
 
 
 # ── persistence ───────────────────────────────────────────────────
