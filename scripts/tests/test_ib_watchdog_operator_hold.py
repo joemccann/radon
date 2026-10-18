@@ -27,6 +27,8 @@ def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RADON_IB_OPERATOR_HOLD_AUDIT", str(tmp_path / "hold.jsonl"))
     monkeypatch.setenv("RADON_IB_OPERATOR_HOLD_OWNER_UID", str(os.getuid()))
     monkeypatch.setattr("ib_watchdog.data_plane_window_active", lambda *a, **k: True)
+    # Paging-specific tests replace this with their own observable fake sender.
+    monkeypatch.setattr("ib_watchdog._page_operator", lambda *a, **k: True)
 
 
 def _cycle(state_path: Path, *, health_reachable: bool):
@@ -189,3 +191,18 @@ def test_an_unwritable_auto_hold_still_does_not_restart(tmp_path):
     assert restart.call_count == 0
     assert state.last_outcome == "session_taken:hold_unwritten"
     assert health.call_args.args[0] == "error"
+
+
+def test_default_hold_cycle_cannot_deliver_with_credentials(tmp_path, monkeypatch):
+    """A developer's configured Pushover must not turn a fake hold into a page."""
+    monkeypatch.setenv("PUSHOVER_USER", "synthetic-user")
+    monkeypatch.setenv("PUSHOVER_TOKEN", "synthetic-token")
+    ib_operator_hold.set_hold("operator web login", "test")
+    # Catch the old leak before any network call, even in the RED revision.
+    with patch("watchdog.notify._post_pushover", return_value=None) as deliver:
+        state, restart, _health, _fetch = _cycle(
+            tmp_path / "state.json", health_reachable=False
+        )
+    assert state.last_outcome == "operator_hold"
+    restart.assert_not_called()
+    deliver.assert_not_called()

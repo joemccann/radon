@@ -1274,3 +1274,8 @@ When an operator asks for automated release or updater recovery, ship the durabl
 ### 2026-10-17: Complete prose can still invalidate a figure crop
 
 - A complete, related paragraph above a chart is still a composition defect when it dominates the image. Preserve an independent visual block even when numerical claims and HTTP/hash checks pass. Self-contained raster crops must bound external title attachment as well as generic nearby-text growth; verify the exact final figure rather than an earlier selection.
+
+
+### 2026-10-18: Test state isolation must include notifications
+
+- Temporary hold/lock/audit files do not isolate external side effects. Strip inherited and dotenv-loaded notification credentials in every pytest subtree, block unmocked live delivery even when callers swallow errors, and make hold tests use an explicit fake pager. Verify broker state and existing journal evidence before treating a test-actor alert as a real hold.
