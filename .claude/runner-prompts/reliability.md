@@ -94,6 +94,7 @@ This machine is slow and shared with other scheduled loops: a full pytest run th
 
 Post exactly one comment on the rolling issue with `gh issue comment <n> --body-file <file>`. Comment only: never create, edit or close the issue. Follow `docs/dead-man-comment-format.md` (banner with verdict, loop, date; What broke; The fix; Needs you, only when non-empty; collapsed `<details>` for the rest). The collapsed part is the durable record for the next night, so it must carry:
 - `audited-through: <origin/main sha you audited>` on its own line, only when the audit finished;
+- Do not write a `radon-phase` line or an exit code. The runner posts that line from the process exit.
 - every still-open `R-###` / `REL-###` with severity, one plain-language line and its acceptance criteria, carried forward even on a quiet night, plus the ones resolved tonight with evidence;
 - the drill counts;
 - on a night with nothing substantive, the ledger entries you would have written;

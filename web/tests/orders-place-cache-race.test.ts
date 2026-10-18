@@ -14,7 +14,7 @@
  * on a controlled deferred, race a real GET through it, and assert the mutating
  * route's own response reflects post-refresh Turso state.
  *
- * SAFETY: `radonFetch` and `dbExecute` are mocked. Nothing reaches IB or Turso.
+ * SAFETY: `radonFetch` and `dbExecute`/`dbBatch` are mocked. Nothing reaches IB or Turso.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __clearDbCache } from "@/lib/dbCache";
@@ -31,6 +31,9 @@ vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 const mockRadonFetch = vi.fn();
 const mockDbExecute = vi.fn();
+const mockDbBatch = vi.fn((stmts: Array<{ sql: string }>) =>
+  Promise.all(stmts.map((stmt) => mockDbExecute(stmt))),
+);
 
 vi.mock("@/lib/radonApi", () => ({
   radonFetch: mockRadonFetch,
@@ -52,12 +55,13 @@ vi.mock("@/lib/radonApi", () => ({
 
 vi.mock("@/lib/dbExecute", () => ({
   dbExecute: mockDbExecute,
+  dbBatch: mockDbBatch,
   DEFAULT_DB_READ_TIMEOUT_MS: 3_000,
   describeDbError: (err: unknown) => String(err),
 }));
 
 vi.mock("@/lib/db", () => ({
-  getDb: () => ({ execute: mockDbExecute }),
+  getDb: () => ({ execute: mockDbExecute, batch: mockDbBatch }),
   syncDb: vi.fn().mockResolvedValue(undefined),
   resetDb: vi.fn(),
   getPoolStats: () => ({}),
