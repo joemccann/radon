@@ -1569,6 +1569,38 @@ def test_a_url_on_any_other_host_is_never_pushed_to_the_operators_phone():
     assert st.parse_login_prompt(st.PROVIDERS["codex"], hostile) is None
 
 
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        # DS-2026-10-18-02: urlsplit() reports the allowlisted hostname for
+        # every one of these, while a browser navigates to the attacker host.
+        # The operator taps the link on their phone, so the raw string is the
+        # only thing that matters.
+        "https://attacker.example\\@auth.openai.com/codex/device",
+        "https://auth.openai.com\\@attacker.example/codex/device",
+        "https://attacker.example\\auth.openai.com/codex/device",
+        "https://user:pw@auth.openai.com@attacker.example/codex/device",
+        "https://attacker.example#@auth.openai.com/codex/device",
+        "https://attacker.example?@auth.openai.com/codex/device",
+    ],
+)
+def test_a_parser_confusing_url_is_never_pushed_to_the_operators_phone(candidate):
+    output = f"Open {candidate} and enter ABCD-EFGH\n"
+    assert st.parse_login_prompt(st.PROVIDERS["codex"], output) is None
+
+
+def test_only_the_exact_login_origin_is_accepted():
+    # A host that merely ends with the allowlisted name, and the allowlisted
+    # name as a path segment, both resolve elsewhere.
+    for host in ("auth.openai.com.evil.example", "xauth.openai.com", "evil.example"):
+        output = f"Open https://{host}/codex/device and enter ABCD-EFGH\n"
+        assert st.parse_login_prompt(st.PROVIDERS["codex"], output) is None
+    good = "Open https://auth.openai.com/codex/device and enter ABCD-EFGH\n"
+    assert st.parse_login_prompt(st.PROVIDERS["codex"], good) == st.LoginPrompt(
+        "https://auth.openai.com/codex/device", "ABCD-EFGH"
+    )
+
+
 def healing_login(path: Path, doc: dict, prompt):
     def login(provider, binary, env, on_prompt, wait_seconds):
         on_prompt(prompt)
