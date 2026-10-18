@@ -9852,3 +9852,12 @@ Final integration review: eac73b0b is included. All 44 incoming indicator files 
 Review: Production Gateway paging, hold behavior and broker state are outside the patch. Tests run in GitHub Actions only; regression probes replace the last transport boundary before exercising the old behavior.
 
 Notification isolation review: cloud RED `1cdf8f37`, run `39151257572`: hold shard 1 failed/1152 passed (one fake sender call); isolation shard 5 failed/2578 passed/1 skipped. Shared root fixtures strip credentials and block urllib/requests Pushover message/cancellation requests with a teardown latch. Default hold pager is fake; explicit paging tests still supply observable senders. Production files remain unchanged. Full final-head CI pending.
+
+## Operator hardening: research image executables (2026-10-18)
+- [x] RCLI-T1 (depends_on: []): Verify image CLI and research auth/mount contracts.
+- [x] RCLI-T2 (depends_on: [RCLI-T1]): Pin research executable boundary to image while retaining provider grants.
+- [ ] RCLI-T3 (depends_on: [RCLI-T2]): Cloud red/green regression and full CI; document rollout and review.
+
+### Research executable review
+- Cloud regression RED verified in private CI job 117778809500; GREEN validation pending.
+- Scope review: research executable mount only; auth/HOME/state and Node unit mounts retained.
