@@ -2,7 +2,9 @@
 
 The contract for every comment an agent posts on a rolling dead-man issue
 (`testing-nightly`, `reliability-nightly`, `ci-performance-nightly`, `performance-nightly`, `documentation-nightly`). The
-wrapper's one-line phase comment is not covered here; this governs the write-up the agent authors.
+harness posts a separate machine-readable line (`radon-phase`, documented in
+`docs/runner.md`). Agents do not write that line or an exit code. This page
+governs the write-up the agent authors.
 
 ## The problem this fixes
 

@@ -1149,6 +1149,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: radon
           key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: ${{ secrets.VPS_SSH_FINGERPRINT }}
           command_timeout: 15m
           script: |
             set -euo pipefail
@@ -1239,6 +1240,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: radon
           key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: ${{ secrets.VPS_SSH_FINGERPRINT }}
           command_timeout: 12m
           script: |
             set -euo pipefail
@@ -1302,6 +1304,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: radon
           key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: ${{ secrets.VPS_SSH_FINGERPRINT }}
           command_timeout: 55m
           script: |
             set -euo pipefail
