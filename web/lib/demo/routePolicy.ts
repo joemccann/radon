@@ -193,35 +193,11 @@ export const DEMO_ROUTE_POLICY: Readonly<Record<string, DemoRoutePolicy>> = {
   "/api/trin": { GET: { mode: "fixture" } },
   "/api/vcg": { GET: { mode: "fixture" } },
 
-  // Demo branches landing in a concurrent change (pendingFixture).
-  "/api/ai-cycle": {
-    GET: { mode: "fixture", pendingFixture: true, note: "Today: backend /ai-cycle." },
-  },
-  "/api/breadth": {
-    GET: { mode: "fixture", pendingFixture: true, note: "Today: demo-db breadth_snapshots." },
-    POST: { mode: "backend", endpoints: ["/breadth/scan"], tables: ["breadth_snapshots"] },
-  },
-  "/api/catalysts": {
-    GET: {
-      mode: "fixture",
-      pendingFixture: true,
-      note: "Today: demo-db catalysts, which no mirror fills.",
-    },
-  },
-  "/api/ticker/info": {
-    GET: {
-      mode: "fixture",
-      pendingFixture: true,
-      note: "Today: Unusual Whales + Exa + Yahoo under the tier-D quota.",
-    },
-  },
-  "/api/ticker/seasonality": {
-    GET: {
-      mode: "fixture",
-      pendingFixture: true,
-      note: "Today: Unusual Whales, then an Anthropic vision fallback, under the tier-D quota.",
-    },
-  },
+  "/api/ai-cycle": { GET: { mode: "fixture" } },
+  "/api/breadth": { GET: { mode: "fixture" }, POST: { mode: "fixture" } },
+  "/api/catalysts": { GET: { mode: "fixture" } },
+  "/api/ticker/info": { GET: { mode: "fixture" } },
+  "/api/ticker/seasonality": { GET: { mode: "fixture" } },
 
   // ── mirrored market snapshots (scripts/db/mirror_market_snapshots_to_demo.js)
   "/api/calm-streak": { GET: SCAN_SNAPSHOTS },

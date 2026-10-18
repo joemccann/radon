@@ -151,7 +151,7 @@ const LEGITIMATELY_EMPTY: Record<string, string> = {
 
 // ── assertions ──────────────────────────────────────────────────────────────
 
-const DEMO_BRANCH = /principal\.kind === "demo"|resolveDemoOrderDecision\(/;
+const DEMO_BRANCH = /principal\.kind === "demo"|requestPrincipalKind\(\) === "demo"|resolveDemoOrderDecision\(/;
 
 type Entry = { key: string; route: string; method: DemoHttpMethod; policy: DemoMethodPolicy; file: RouteFile };
 
