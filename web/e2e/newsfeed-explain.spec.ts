@@ -24,7 +24,7 @@ const chart = {
 };
 
 const explanation =
-  "PJM paid power plants to stay available in 2028 and 2029. A capacity auction buys that standby power, priced in dollars per megawatt-day. The price hit the $325 cap and the region was still 6.8 gigawatts short. This can raise capacity charges on power bills. This is not investment advice.";
+  "PJM paid power plants to stay available in 2028 and 2029. A capacity auction buys that standby power, priced in dollars per megawatt-day. The price hit the $325 cap and the region was still 6.8 gigawatts short. This can raise capacity charges on power bills.";
 
 const svg =
   '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675"><rect width="1200" height="675" fill="#101714"/><text x="40" y="80" fill="#e8eee9" font-size="28">Synthetic PJM stack</text></svg>';
@@ -117,5 +117,7 @@ for (const width of [1440, 393] as const) {
     await testInfo.attach(`explained-image-${width}`, { path: imagePath, contentType: "image/png" });
     await expect(textCard).not.toContainText("—");
     await expect(imageCard).not.toContainText("—");
+    await expect(textCard).not.toContainText(/investment advice|financial advice/i);
+    await expect(imageCard).not.toContainText(/investment advice|financial advice/i);
   });
 }

@@ -1,12 +1,15 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   EXPLAIN_THIN_MESSAGE,
+  NEWSFEED_EXPLAIN_PROMPT_VERSION,
   NEWSFEED_EXPLAIN_SYSTEM,
   explainContentHash,
   explainInput,
   isThinExplainInput,
+  stripExplainDisclaimer,
 } from "@/lib/newsfeedExplain";
 
 const fixture = JSON.parse(
@@ -27,6 +30,11 @@ describe("newsfeed explain contract", () => {
     expect(explainContentHash(input!)).not.toBe(
       explainContentHash({ ...input!, imageUrls: [] }),
     );
+    const v1 = createHash("sha256")
+      .update(JSON.stringify([input!.title, input!.content, input!.imageUrls]))
+      .digest("hex");
+    expect(NEWSFEED_EXPLAIN_PROMPT_VERSION).toBeGreaterThanOrEqual(2);
+    expect(explainContentHash(input!)).not.toBe(v1);
   });
 
   it("rejects missing ids, oversized copy, and junk image lists", () => {
@@ -60,10 +68,12 @@ describe("newsfeed explain contract", () => {
     expect(EXPLAIN_THIN_MESSAGE).not.toMatch(/buy|sell|invest/i);
   });
 
-  it("pins a jargon-defining, no-advice system prompt without cerebras or em dashes", () => {
+  it("pins a jargon-defining system prompt that forbids buy-sell copy and output disclaimers", () => {
     expect(NEWSFEED_EXPLAIN_SYSTEM).toMatch(/plain English/i);
     expect(NEWSFEED_EXPLAIN_SYSTEM).toMatch(/jargon/i);
-    expect(NEWSFEED_EXPLAIN_SYSTEM).toMatch(/not investment advice/i);
+    expect(NEWSFEED_EXPLAIN_SYSTEM).toMatch(/buy,\s*sell,\s*or hold/i);
+    expect(NEWSFEED_EXPLAIN_SYSTEM).toMatch(/never (?:write|add) disclaimers/i);
+    expect(NEWSFEED_EXPLAIN_SYSTEM).not.toMatch(/this is not investment advice/i);
     expect(NEWSFEED_EXPLAIN_SYSTEM).not.toMatch(/—|&(?:mdash|#8212);/);
     expect(NEWSFEED_EXPLAIN_SYSTEM).not.toMatch(/CEREBRAS/i);
     expect(NEWSFEED_EXPLAIN_SYSTEM).toMatch(/untrusted/i);
@@ -71,5 +81,16 @@ describe("newsfeed explain contract", () => {
     expect(fixture.explanation).toMatch(/MW-day/);
     expect(fixture.explanation).toMatch(/collar/);
     expect(fixture.explanation).not.toMatch(/—/);
+    expect(fixture.explanation).not.toMatch(/investment advice|financial advice|not a recommendation/i);
+  });
+
+  it("strips disclaimer boilerplate the model may still append", () => {
+    const body = "PJM paid plants to stay available. A capacity auction buys standby power.";
+    expect(stripExplainDisclaimer(`${body} This is not investment advice.`)).toBe(body);
+    expect(stripExplainDisclaimer(`${body} This is not financial advice.`)).toBe(body);
+    expect(stripExplainDisclaimer(`${body} Not a recommendation to buy or sell.`)).toBe(body);
+    expect(stripExplainDisclaimer(body)).toBe(body);
+    expect(stripExplainDisclaimer(`${body} This can raise capacity charges on power bills.`))
+      .toBe(`${body} This can raise capacity charges on power bills.`);
   });
 });

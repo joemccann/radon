@@ -104,6 +104,24 @@ describe("newsfeed explain cache and generate", () => {
     expect(chat).not.toHaveBeenCalled();
   });
 
+  it("strips a trailing disclaimer before the cache write", async () => {
+    chat.mockResolvedValue({
+      text: "The auction paid plants to stay available. This is not investment advice.",
+      provider: "anthropic",
+      model: "claude-opus-5",
+    });
+    const { explainNewsfeedPost, resetExplainSingleFlight } = await import("@/lib/newsfeedExplainGenerate");
+    resetExplainSingleFlight();
+    const out = await explainNewsfeedPost(input, {
+      signal: new AbortController().signal,
+      onStage: () => {},
+    });
+    expect(out.explanation).toBe("The auction paid plants to stay available.");
+    expect(out.explanation).not.toMatch(/investment advice/i);
+    const stored = await db.execute("SELECT explanation FROM newsfeed_explanations");
+    expect(String(stored.rows[0].explanation)).toBe("The auction paid plants to stay available.");
+  });
+
   it("refuses loopback image fetches before a socket opens", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
