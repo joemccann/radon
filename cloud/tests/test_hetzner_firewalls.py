@@ -7,8 +7,8 @@ the rule shapes so an edit cannot quietly open a service port publicly.
 
 Hetzner Cloud Firewalls filter the public interface only; radon-private
 traffic (app 10.0.0.2 -> broker 4001/8340) never passes them, so those
-ports must never appear here. App SSH stays open to any: CI deploys over
-SSH from GitHub-hosted runners with unfixed addresses.
+ports must never appear here. CI deploys over the tailnet as tag:ci;
+public app SSH is closed and recovery uses the Hetzner web console.
 """
 
 from __future__ import annotations
@@ -59,9 +59,8 @@ def test_rules_are_inbound_only_with_descriptions(name):
         assert rule["description"]
 
 
-def test_app_shape():
+def test_app_shape_excludes_public_ssh_after_tailnet_cutover():
     assert _shape(_rules("fw-radon-app")) == {
-        ("in", "tcp", "22", tuple(ANY)),
         ("in", "tcp", "80", tuple(ANY)),
         ("in", "tcp", "443", tuple(ANY)),
         ("in", "udp", "41641", tuple(ANY)),

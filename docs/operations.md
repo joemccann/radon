@@ -787,7 +787,7 @@ As root, set `BACKUP=<printed /etc/radon-ufw-rollback.* path>`, then run `cp -a 
 
 `fw-radon-app.json`, `fw-radon-broker.json`, `fw-radon-ops.json` are `hcloud firewall replace-rules` rule files, inbound only (anything not listed is dropped; outbound is open). `hcloud_firewalls.py` renders `__OPERATOR_RECOVERY_IP__/32` from `--recovery-ip` (one public IPv4) and prints the commands; `--apply` runs them with your own `hcloud` context. Deploy never calls it (`cloud/tests/test_hetzner_firewalls.py` pins the shapes and that fact).
 
-- **fw-radon-app:** 22, 80, 443 any; 41641/udp any. The checked-in `fw-radon-app.json` still opens public tcp/22 (this change does not edit that file). After CI deploys over the tailnet and one green deploy is confirmed, remove only that public 22 rule; see [CI deploy over the tailnet](#ci-deploy-over-the-tailnet).
+- **fw-radon-app:** 80/443 any; 41641/udp any. Public tcp/22 is closed in the declared rules. CI SSH uses the tailnet, and recovery uses the Hetzner web console; see [CI deploy over the tailnet](#ci-deploy-over-the-tailnet).
 - **fw-radon-broker:** 22 from the recovery `/32`; 41641/udp any. No web ports.
 - **fw-radon-ops:** 22 from the recovery `/32`; 80, 443 any; 41641/udp any.
 - No 4001/8340 rules: Hetzner Cloud Firewalls filter the public interface only, so the app-to-broker private-net path (`10.0.0.2` -> `10.0.0.4:4001/8340`) never passes them. That path is held by the bind addresses and the broker ufw set above.
@@ -797,7 +797,7 @@ out while replacing rules or attaching a firewall.
 **Prerequisites:** the operator's intended `hcloud` context, independently
 confirmed provider server identity, a saved copy of the prior rules and
 attachment, and a second recovery SSH session. Provider server names are not
-Tailscale hostnames; the app's provider name remains `ib-gateway`.
+Tailscale hostnames; verify the app provider name `radon-app` against its public `5.78.148.38` and private `10.0.0.2` addresses.
 **Blast radius:** replacement or attachment changes public access to the selected
 server; a partial apply can leave its rules or attachment changed.
 **Diagnosis:** inspect the [tool](../cloud/hetzner/firewalls/hcloud_firewalls.py)
@@ -810,7 +810,7 @@ Rollout, one server at a time:
 
 1. Dry run: `python3 cloud/hetzner/firewalls/hcloud_firewalls.py --firewall fw-radon-broker --server radon-broker --recovery-ip <your public ip>`.
 2. Same with `--apply`, only after reviewing the rendered rules and target. From a fresh laptop connection to the broker's tailnet address, verify SSH; from the app verify the broker's 8340 `/healthz` and authenticated readiness through the [host-split owner](spof-host-split.md).
-3. Repeat the dry-run/apply sequence for `--firewall fw-radon-app --server ib-gateway`, retaining the recovery address. Verify fresh SSH, `https://app.radon.run/health`, and the expected deployed SHA through the [deployment owner](../cloud/CLAUDE.md#deployment-contract).
+3. For `--firewall fw-radon-app --server radon-app`, first confirm a green tailnet CI deploy and fresh tailnet SSH, and retain that session plus Hetzner console access. The app rules remove public tcp/22 and retain 80/443 and 41641/udp. Review the dry run before applying; verify fresh tailnet SSH, blocked public tcp/22, `https://app.radon.run/edge-health/ping`, and another successful CI deploy through the [deployment owner](../cloud/CLAUDE.md#deployment-contract).
 4. Apply `fw-radon-ops` only after independently identifying its server.
 
 **Stop:** stop on any refusal, timeout, unexpected rules/attachment or failed
@@ -873,12 +873,12 @@ Cutover, in this order. Do not skip or reorder:
    `gh run list --workflow=ci.yml --limit 1` on the first main push after
    merge. The three host jobs must Connect Tailscale then SSH. Do not touch
    `fw-radon-app` until that run is green.
-3. **Only then** remove the public port-22 rule from Hetzner firewall
-   `fw-radon-app` (edit `cloud/hetzner/firewalls/fw-radon-app.json` in a
-   follow-up and apply with `hcloud_firewalls.py`; this change does not
-   edit that file). Keep 80/443 and 41641/udp. Verify
-   `https://app.radon.run/health` and that a subsequent CI deploy still
-   succeeds.
+3. **Only then** apply the declared `cloud/hetzner/firewalls/fw-radon-app.json`
+   rules to Hetzner firewall `fw-radon-app` with `hcloud_firewalls.py`.
+   They omit public tcp/22 and retain 80/443 and 41641/udp. Keep the
+   operator tailnet SSH session and Hetzner console access available.
+   Verify fresh tailnet SSH, blocked public tcp/22,
+   `https://app.radon.run/edge-health/ping`, and a subsequent successful CI deploy.
 4. **Recovery** after public 22 is closed is the Hetzner web console
    (not public SSH). Keep a tailnet SSH session from an operator device
    while applying the firewall change. Rollback is restoring the saved

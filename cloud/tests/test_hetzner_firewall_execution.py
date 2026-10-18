@@ -33,9 +33,9 @@ MUTATION_KWARGS = {"timeout": 30}
 
 def expected_rules(name):
     """Independent security policy oracle, rather than calling the renderer."""
-    ssh_sources = ["0.0.0.0/0", "::/0"] if name == "fw-radon-app" else ["93.184.216.34/32"]
-    rules = {("in", "tcp", "22", tuple(ssh_sources)),
-             ("in", "udp", "41641", ("0.0.0.0/0", "::/0"))}
+    rules = {("in", "udp", "41641", ("0.0.0.0/0", "::/0"))}
+    if name != "fw-radon-app":
+        rules.add(("in", "tcp", "22", ("93.184.216.34/32",)))
     if name != "fw-radon-broker":
         rules |= {("in", "tcp", port, ("0.0.0.0/0", "::/0")) for port in ("80", "443")}
     return rules
