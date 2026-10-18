@@ -158,3 +158,40 @@ def test_installed_mode_contract_uses_stat_canonical_strings():
     modes = re.findall(r"\b[0-7]+\b", declaration)
     assert modes
     assert all(mode == format(int(mode, 8), "o") for mode in modes)
+
+
+@pytest.mark.parametrize("relative, variable", [
+    ("cloud/scripts/deploy.sh", "LEGACY_DEPLOY_LOCK_FILE"),
+    ("cloud/scripts/operator-radon.sh", "LEGACY_DEPLOY_LOCK_PATH"),
+    ("cloud/scripts/ib-gateway-control.sh", "LEGACY_DEPLOY_LOCK_PATH"),
+])
+@pytest.mark.parametrize("primary, override, expected", [
+    (None, None, LEGACY),
+    ("", None, LEGACY),
+    (CANONICAL, None, LEGACY),
+    ("/isolated/deploy.lock", None, ""),
+    (CANONICAL, "/isolated/compatibility.lock", "/isolated/compatibility.lock"),
+])
+def test_selector_preserves_canonical_compatibility(relative, variable, primary, override, expected):
+    """Exercise only assignment logic; never execute a deploy or Gateway helper."""
+    import os
+    import re
+    import subprocess
+    source = (ROOT / relative).read_text()
+    selector = re.search(
+        r'^if \[\[ -n "\$\{RADON_DEPLOY_LOCK_FILE:-\}".*?^fi$',
+        source, re.MULTILINE | re.DOTALL,
+    )
+    assert selector, "The isolated custom-path selector must remain identifiable"
+    env = {key: value for key, value in os.environ.items()
+           if key not in {"RADON_DEPLOY_LOCK_FILE", "RADON_DEPLOY_LEGACY_LOCK_FILE"}}
+    if primary is not None:
+        env["RADON_DEPLOY_LOCK_FILE"] = primary
+    if override is not None:
+        env["RADON_DEPLOY_LEGACY_LOCK_FILE"] = override
+    result = subprocess.run(
+        ["bash", "-c", selector.group() + '\nprintf "%s" "$' + variable + '"'],
+        env=env, text=True, capture_output=True, timeout=5, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == expected

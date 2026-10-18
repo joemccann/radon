@@ -1138,3 +1138,8 @@ so the first trusted provisioning step remains reachable. Rollback retains both
 inodes, allowing older consumers to serialize against updated consumers without
 changing ownership or splitting the lock domain. No Gateway restart is part of
 lock provisioning.
+
+An explicit `RADON_DEPLOY_LOCK_FILE=/var/lib/radon-lock/deploy.lock` keeps the
+same two-lock transition as the default configuration. A noncanonical isolated
+lock override uses only that path unless `RADON_DEPLOY_LEGACY_LOCK_FILE` is
+supplied as well.

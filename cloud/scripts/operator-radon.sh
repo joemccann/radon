@@ -63,7 +63,8 @@ if [[ "$requested_action" != "status" && $EUID -ne 0 \
 fi
 
 DEPLOY_LOCK_PATH="${RADON_DEPLOY_LOCK_FILE:-/var/lib/radon-lock/deploy.lock}"
-if [[ -n "${RADON_DEPLOY_LOCK_FILE:-}" ]]; then
+if [[ -n "${RADON_DEPLOY_LOCK_FILE:-}" \
+  && "${RADON_DEPLOY_LOCK_FILE:-}" != "/var/lib/radon-lock/deploy.lock" ]]; then
   LEGACY_DEPLOY_LOCK_PATH="${RADON_DEPLOY_LEGACY_LOCK_FILE:-}"
 else
   LEGACY_DEPLOY_LOCK_PATH="${RADON_DEPLOY_LEGACY_LOCK_FILE:-/home/radon/.radon-deploy.lock}"

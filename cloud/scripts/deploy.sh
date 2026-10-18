@@ -113,7 +113,8 @@ readonly APP_IMAGE_PREPULL_TIMEOUT="${RADON_APP_IMAGE_PREPULL_TIMEOUT:-600}"
 readonly NEXT_RUNTIME_DROPIN="${RADON_NEXT_RUNTIME_DROPIN:-/etc/systemd/system/radon-nextjs.service.d/runtime-container.conf}"
 readonly SYSTEMCTL="${RADON_SYSTEMCTL:-/usr/bin/systemctl}"
 readonly DEPLOY_LOCK_FILE="${RADON_DEPLOY_LOCK_FILE:-/var/lib/radon-lock/deploy.lock}"
-if [[ -n "${RADON_DEPLOY_LOCK_FILE:-}" ]]; then
+if [[ -n "${RADON_DEPLOY_LOCK_FILE:-}" \
+  && "${RADON_DEPLOY_LOCK_FILE:-}" != "/var/lib/radon-lock/deploy.lock" ]]; then
   readonly LEGACY_DEPLOY_LOCK_FILE="${RADON_DEPLOY_LEGACY_LOCK_FILE:-}"
 else
   readonly LEGACY_DEPLOY_LOCK_FILE="${RADON_DEPLOY_LEGACY_LOCK_FILE:-/home/radon/.radon-deploy.lock}"
