@@ -9852,3 +9852,25 @@ Final integration review: eac73b0b is included. All 44 incoming indicator files 
 Review: Production Gateway paging, hold behavior and broker state are outside the patch. Tests run in GitHub Actions only; regression probes replace the last transport boundary before exercising the old behavior.
 
 Notification isolation review: cloud RED `1cdf8f37`, run `39151257572`: hold shard 1 failed/1152 passed (one fake sender call); isolation shard 5 failed/2578 passed/1 skipped. Shared root fixtures strip credentials and block urllib/requests Pushover message/cancellation requests with a teardown latch. Default hold pager is fake; explicit paging tests still supply observable senders. Production files remain unchanged. Full final-head CI pending.
+
+
+## Subscription service environment maintenance (2026-10-18)
+
+- [x] SE1 depends_on: [] Verify current service inputs and installation sequence.
+- [x] SE2 depends_on: [SE1] Add synthetic environment publication regression and obtain cloud red evidence.
+- [x] SE3 depends_on: [SE2] Publish the service allowlist before unit activation and on every deploy.
+- [ ] SE4 depends_on: [SE3] Complete cloud gates and prepare the independent maintenance PR.
+
+Review: Production provisioning and credential operations require operator coordination; no live changes are part of this branch.
+
+Subscription environment review: cloud red recorded on private run 39162568477; the dedicated publisher uses pinned directory descriptors and root-private output. Keeper UID, canonical native credential writes, vault socket and paging stay unchanged. Cloud green pending; no production operations performed.
+
+
+### Private CI integration repair (2026-10-18)
+- [x] CI1 depends_on: [] Inspect exact-head private CI failures without local suites or production access.
+- [x] CI2 depends_on: [CI1] Repair implementation defects and align synthetic fixtures and owner documentation with the intended maintenance contract.
+- [x] CI3 depends_on: [CI2] Parse changed sources, check shell syntax and whitespace, and return a committed candidate for private cloud verification.
+
+Review: Existing gates remain mandatory; no production provisioning or credential operation belongs to this repair.
+
+Static repair review: changed Python sources parse, changed shell entrypoints pass syntax validation, and `git diff --check` is clean. No local test suite or live/production test ran. Exact candidate cloud re-verification remains required.

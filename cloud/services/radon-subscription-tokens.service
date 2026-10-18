@@ -12,32 +12,23 @@ Type=oneshot
 User=radon
 UMask=0077
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/etc/radon/env
+EnvironmentFile=/etc/radon/subscription-tokens/env
 Environment=RADON_DB_NO_REPLICA=1
 Environment=RADON_SUBSCRIPTION_VAULT_SOCKET=/run/radon-subscription-vault/vault.sock
 # The Antigravity and Grok installers place `agy` and `grok` in ~/.local/bin;
 # the daemon prefers each CLI-native refresh. (The module also searches that
 # directory itself, so a manual run outside this unit finds them too.)
 Environment=PATH=/home/radon/.local/bin:/usr/local/bin:/usr/bin:/bin
-# The CLIs this unit runs (agy, grok, codex) are unpinned third-party
-# binaries out of radon-writable ~/.local/bin, with the production env file
-# loaded, so the unit holds no secret-store key (DS-2026-10-05-05): the
-# broker radon-subscription-vault does. ProtectSystem=strict is off the
-# table because the unit rewrites credential files across /home/radon;
-# everything else closes.
+# Provider CLIs retain their canonical credential locations and the vault
+# socket. Only the keeper's database, paging and provider-directory inputs
+# are loaded from its private derived environment.
 NoNewPrivileges=yes
 PrivateTmp=yes
 RestrictSUIDSGID=yes
 ProtectSystem=full
 CapabilityBoundingSet=
-# systemd reads EnvironmentFile before the namespace is built, so hiding the
-# file from the process costs this unit nothing and stops the three unpinned
-# agent CLIs it launches from reading the production credentials straight off
-# disk (ProtectSystem=full restricts writes, not reads). Same contract as the
-# two grok units. Residual, which no namespace option closes: those CLIs run
-# under the same uid as this process, so /proc/<parent>/environ still carries
-# whatever systemd loaded here — closing that needs a separate account.
-InaccessiblePaths=-/etc/radon/env
+# systemd loads the root-private environment before building this namespace.
+InaccessiblePaths=-/etc/radon/env -/etc/radon/subscription-tokens/env
 ProtectProc=invisible
 # The sidecar /var/lib/radon/subscription-tokens/state.json carries the page
 # cooldowns and the consecutive-error streak. Without this the directory is not

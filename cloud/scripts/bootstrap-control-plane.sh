@@ -208,6 +208,7 @@ readonly -a SOURCES=(
   services/radon-ai-cycle-backfill.service.d/runtime-container.conf
   services/radon-aa-frontier-refresh.service.d/runtime-container.conf
   services/radon-research-archive.service.d/runtime-container.conf
+  scripts/subscription_service_env.py
 )
 readonly -a LOGICAL_TARGETS=(
   /usr/local/sbin/radon-deploy-root
@@ -260,6 +261,7 @@ readonly -a LOGICAL_TARGETS=(
   /etc/systemd/system/radon-ai-cycle-backfill.service.d/runtime-container.conf
   /etc/systemd/system/radon-aa-frontier-refresh.service.d/runtime-container.conf
   /etc/systemd/system/radon-research-archive.service.d/runtime-container.conf
+  /usr/local/lib/radon/subscription_service_env.py
 )
 readonly -a MODES=(
   0755 0755 0755 0644 0755 0644 0644 0755 0755 0644
@@ -271,6 +273,7 @@ readonly -a MODES=(
   0644 0644 0644 0644 0644
   0644 0644
   0644 0644 0644 0644 0644
+  0644
   0644
 )
 readonly -a KINDS=(
@@ -285,6 +288,7 @@ readonly -a KINDS=(
   systemd dropin
   systemd dropin dropin dropin dropin
   dropin
+  python
 )
 
 [[ "${#SOURCES[@]}" -eq "${#LOGICAL_TARGETS[@]}" && \
