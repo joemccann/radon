@@ -10,6 +10,8 @@ import { useDialogChrome } from "@/lib/useDialogChrome";
 import { useBookmarks } from "@/lib/useBookmarks";
 import styles from "./NewsfeedResearchMedia.module.css";
 import NewsfeedShare from "./NewsfeedShare";
+import NewsfeedExplain from "./NewsfeedExplain";
+import feedStyles from "./DashboardNewsFeed.module.css";
 import { getImageSource } from "@/lib/newsfeedSource";
 import NewsfeedPostContent from "./NewsfeedPostContent";
 import { ResearchCharts } from "./PlannedCharts";
@@ -268,7 +270,13 @@ export default function NewsfeedLightbox({
                 {absolute}
               </span>
             </footer>
-            <NewsfeedShare key={post.id} post={post} imageUrl={imageUrl} />
+            <div className={feedStyles.postActions}>
+              <NewsfeedExplain
+                post={post}
+                imageUrls={imageUrl ? [imageUrl] : (post.images ?? [])}
+              />
+              <NewsfeedShare key={post.id} post={post} imageUrl={imageUrl} />
+            </div>
             {onNavigate && (canNavigatePrev || canNavigateNext) ? (
               <p className="newsfeed-lightbox__hint" aria-hidden>
                 ← / → to cycle posts · Esc to close
