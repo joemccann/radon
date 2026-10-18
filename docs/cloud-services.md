@@ -829,6 +829,18 @@ into `hhlev_history` and heartbeats `hhlev` regardless. Installed by the
 deploy's `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/hhlev.md`](indicators/hhlev.md).
 
+### VIX P/C (`radon-vix-pc.timer`)
+
+Daily `02:00 UTC` (`RandomizedDelaySec=120`), oneshot `scripts/fetch_vix_pc.py`,
+`TimeoutStartSec=300`. Five-session cumulative VIX put/call ratio from
+Unusual Whales `GET /api/stock/VIX/options-volume?limit=500`. IB has no
+historical VIX put versus call volume split. 02:00 UTC is after the 16:00 ET
+close year-round. Runs every calendar day; weekend and holiday runs are
+unchanged-data heartbeats that keep `vix-pc` inside its 26h window. A UW
+failure re-serves the cached payload as `stale_source` with an `error`
+heartbeat. Installed by the deploy's `install-units` verb from
+`installed-units.sha256`. Spec: [`indicators/vix-pc.md`](indicators/vix-pc.md).
+
 ### VIX TS (`radon-vixts.timer`)
 
 Daily `02:45 UTC` (`RandomizedDelaySec=120`), oneshot `scripts/fetch_vixts.py`,

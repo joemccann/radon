@@ -571,6 +571,21 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("aa-frontier-basket")).toBe(false);
   });
 
+  // ``vix-pc`` — radon-vix-pc.timer fires daily 02:00 UTC every calendar day
+  // (weekend runs are unchanged-data heartbeats), so a uniform 26h window
+  // matches its daily siblings. UW VIX options-volume only — no IB.
+  it("vix-pc is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["vix-pc"]).toBeDefined();
+    expect(getServiceCategory("vix-pc")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("vix-pc", state)).toBe(26 * HOUR);
+      expect(getFreshnessWindowMs("vix-pc", state)).toBe(
+        getFreshnessWindowMs("vixts", state),
+      );
+    }
+    expect(requiresIb("vix-pc")).toBe(false);
+  });
+
   // ``vixts`` — radon-vixts.timer fires daily 02:45 UTC every calendar day,
   // ten minutes behind radon-vixcor so the Cboe CDN hits stay staggered
   // (weekend and holiday runs are 304 heartbeats), so a uniform 26h window

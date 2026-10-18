@@ -1,0 +1,23 @@
+[Unit]
+Description=Radon VIX P/C Indicator (5-session VIX put/call ratio, daily)
+After=network.target
+
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=RADON_DB_NO_REPLICA=1
+# Without this every vix-pc UW hit is counted but unattributed in
+# /uw/usage top_callers.
+Environment=RADON_UW_CALLER=vix-pc
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_vix_pc.py
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
