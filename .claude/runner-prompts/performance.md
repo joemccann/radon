@@ -93,6 +93,7 @@ Violating any rail is a failed run.
 
 Post exactly one comment on the rolling issue with `gh issue comment <n> --body-file <file>`. Comment only: never create, edit or close the issue. Follow `docs/dead-man-comment-format.md`. The collapsed `<details>` part is the durable record for the next night and must carry:
 - `audited-through: <sha you audited>` on its own line, only when the audit finished;
+- Do not write a `radon-phase` line or an exit code. The runner posts that line from the process exit.
 - tonight's probe summary as a compact table (load and PSI, worst disk await, TCP retrans, top five units by memory and by CPU, restarts since last night, health-route p50/p95, TLS p50 per upstream) or the probe error;
 - the surfaces measured tonight and the rotation surface;
 - every still-open `PERF-###` with surface, metric, baseline and acceptance criterion, carried forward even on a quiet night, plus the ones fixed tonight with before/after;

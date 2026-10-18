@@ -161,6 +161,23 @@ class TestGenerator:
         assert run_ctx(repo_dir, fake_gh(tmp_path, ["audited-through: " + "e" * 40]), out).returncode == 0
         assert "base: UNRESOLVED" in out.read_text()
 
+    def test_a_failed_machine_line_does_not_advance_the_cursor(self, tmp_path, git_repo):
+        repo_dir, shas = git_repo
+        failed = (
+            "<!-- radon-phase loop=testing phase=audit exit=1 ts=2026-10-18T15:47:00Z -->\n"
+            f"audited-through: {shas[2]}\n"
+        )
+        ok = (
+            f"<!-- radon-phase loop=testing phase=audit exit=0 audited-through={shas[1]} "
+            "ts=2026-10-18T15:47:00Z -->\n"
+            f"audited-through: {shas[1]}\n"
+        )
+        gh = fake_gh(tmp_path, [ok, failed])
+        out = tmp_path / "ctx.md"
+        assert run_ctx(repo_dir, gh, out).returncode == 0, out.read_text() if out.exists() else ""
+        assert f"base: {shas[1]}" in out.read_text()
+        assert f"base: {shas[2]}" not in out.read_text()
+
     def test_a_newer_marker_off_main_falls_back_to_the_newest_valid_one(self, tmp_path, git_repo):
         repo_dir, shas = git_repo
         gh = fake_gh(tmp_path, [f"audited-through: {shas[1]}", "audited-through: dc6c77a8"])
