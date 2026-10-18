@@ -35,6 +35,32 @@ describe("handleDemoGate", () => {
     expect((await res!.json()).code).toBe("DEMO_ACCESS_PENDING");
   });
 
+  it.each([
+    ["demoRole pending", { demoRole: "pending" }],
+    ["trial with no expiry yet", { demoRole: "trial" }],
+  ])("%s: page goes to /demo-pending, not /trial-expired", async (_label, metadata) => {
+    const res = await handleDemoGate(
+      { userId: "u", metadata, request: new NextRequest("https://demo.radon.run/portfolio") },
+      { now: NOW, rateLimiter: async () => allow, demoDeployment: true },
+    );
+    expect(res?.status).toBe(307);
+    expect(new URL(res!.headers.get("location")!).pathname).toBe("/demo-pending");
+  });
+
+  it.each([
+    ["demoRole pending", { demoRole: "pending" }],
+    ["trial with no expiry yet", { demoRole: "trial" }],
+  ])("%s: API stays 403 DEMO_ACCESS_PENDING", async (_label, metadata) => {
+    const limiter = vi.fn(async () => allow);
+    const res = await handleDemoGate(
+      { userId: "u", metadata, request: apiReq() },
+      { now: NOW, rateLimiter: limiter, demoDeployment: true },
+    );
+    expect(res?.status).toBe(403);
+    expect((await res!.json()).code).toBe("DEMO_ACCESS_PENDING");
+    expect(limiter).not.toHaveBeenCalled();
+  });
+
   it("active demo user under limit passes through", async () => {
     const res = await handleDemoGate(
       { userId: "u", metadata: activeMeta, request: apiReq() },
