@@ -55,14 +55,11 @@ _PICKUP_BRANCH = re.compile(r"^fix/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 Runner = Callable[..., subprocess.CompletedProcess]
 
 
-def _default_runner(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        argv,
-        cwd=kwargs.get("cwd"),
-        capture_output=True,
-        text=True,
-        timeout=kwargs.get("timeout", 120),
-    )
+# Shared with the publish gate so one bound covers every place this job reads
+# an attacker-influenced branch: the subprocess runner, the PR builder's whole
+# commit message, and the gate's full patches (DS-2026-10-17-22). Oversized
+# output is a refusal, not an exhausted process.
+_default_runner = ir_push_gate.bounded_run
 
 
 def is_pickup_branch(name: str) -> bool:

@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import os
 import re
+import selectors
 import subprocess
+import time
 from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
@@ -111,14 +113,73 @@ def _safe_path(path: str) -> str:
     return "[private path]"
 
 
-def _default_runner(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
-    return subprocess.run(
+# Everything this gate and the pickup job read comes off a branch an outside
+# contributor can shape: a blob, a patch, a commit message. `capture_output`
+# buffers the child's COMPLETE output in memory, so one oversized object could
+# exhaust memory and kill the run rather than produce a refusal
+# (DS-2026-10-17-22). 32MB is far above any real commit message, patch or
+# ls-remote listing these jobs read, and far below a figure that matters here.
+OUTPUT_LIMIT = 32 * 1024 * 1024
+
+
+def bounded_run(
+    argv: list[str], *, limit: int = OUTPUT_LIMIT, **kwargs
+) -> subprocess.CompletedProcess:
+    """Run ``argv`` and refuse, rather than buffer, oversized output.
+
+    Reads incrementally and kills the child at the cap, so memory is bounded
+    by ``limit`` no matter how much the child intends to write. stderr is
+    merged: it is read the same way and its size is attacker-influenced too.
+    The wall-clock bound the previous ``subprocess.run(timeout=...)`` provided
+    is kept on the READ, not only on the final wait: a child that holds the
+    pipe open without writing would otherwise block the loop forever.
+    """
+    timeout = kwargs.get("timeout", 120)
+    deadline = time.monotonic() + timeout if timeout is not None else None
+    with subprocess.Popen(
         argv,
         cwd=kwargs.get("cwd"),
-        capture_output=True,
-        text=True,
-        timeout=kwargs.get("timeout", 120),
-    )
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    ) as proc:
+        chunks: list[bytes] = []
+        total = 0
+        try:
+            with selectors.DefaultSelector() as selector:
+                selector.register(proc.stdout, selectors.EVENT_READ)
+                while True:
+                    remaining = None if deadline is None else deadline - time.monotonic()
+                    if remaining is not None and remaining <= 0:
+                        raise subprocess.TimeoutExpired(argv, timeout)
+                    if not selector.select(remaining):
+                        raise subprocess.TimeoutExpired(argv, timeout)
+                    chunk = proc.stdout.read1(1 << 16)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > limit:
+                        raise IrPushRefused(
+                            f"cannot scan the branch: {argv[0]} output is too large "
+                            f"(over {limit} bytes); reduce the change"
+                        )
+                    chunks.append(chunk)
+            remaining = None if deadline is None else max(deadline - time.monotonic(), 0)
+            returncode = proc.wait(timeout=remaining)
+        except BaseException:
+            proc.kill()
+            proc.wait()
+            raise
+    raw = b"".join(chunks)
+    try:
+        stdout = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise IrPushRefused(
+            f"cannot scan the branch: {argv[0]} output is not text"
+        ) from None
+    return subprocess.CompletedProcess(argv, returncode, stdout=stdout, stderr="")
+
+
+_default_runner = bounded_run
 
 
 def _git(repo: Path, argv: list[str], runner: Runner) -> str:
