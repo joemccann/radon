@@ -1,3 +1,4 @@
+import { scrubSecrets } from "@/lib/apiContracts";
 import { requireRouteAccess } from "@/lib/routeAccess";
 import { explainInput, type NewsfeedExplainInput } from "@/lib/newsfeedExplain";
 import { encodeExplainEvent, EXPLAIN_BUDGET_MS, type ExplainStage } from "@/lib/newsfeedExplainProgress";
@@ -20,11 +21,8 @@ function failureEvent(error: unknown, timeout: AbortSignal): { error: string; st
   if (timeout.aborted || (error instanceof Error && error.name === "TimeoutError")) {
     return { error: "Explanation timed out. Try again.", status: 504 };
   }
-  console.error(
-    `[newsfeed/explain] failed: ${
-      error instanceof Error ? `${error.name}: ${error.message.slice(0, 300)}` : String(error)
-    }`,
-  );
+  const detail = error instanceof Error ? `${error.name}: ${error.message.slice(0, 300)}` : String(error);
+  console.error(scrubSecrets(`[newsfeed/explain] failed: ${detail}`));
   return { error: "Could not explain this post. Try again.", status: 502 };
 }
 
