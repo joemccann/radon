@@ -190,3 +190,66 @@ class TestContracts:
         # The grant ships with the bundle the control-plane sync installs, so
         # the unprivileged write has to survive one release.
         assert "mv -f" in body
+
+    def test_the_production_call_reaches_the_privileged_verb(self, tmp_path):
+        """The one real caller passes the canonical env explicitly.
+
+        Selecting the verb on "no arguments were given" made the privileged
+        path unreachable in production while every test that called it bare
+        passed: `main` calls `write_mcp_env "$ENV_FILE_DEFAULT"`. The choice
+        has to be made on the RESOLVED paths.
+        """
+        deploy_text = DEPLOY.read_text(encoding="utf-8")
+        assert 'write_mcp_env "$ENV_FILE_DEFAULT"' in deploy_text
+        log = tmp_path / "sudo.log"
+        sudo = tmp_path / "sudo"
+        _write_executable(
+            sudo,
+            f"""#!/bin/bash
+printf '%s\\n' "$*" >> {shlex.quote(str(log))}
+exit 0
+""",
+        )
+        canonical = tmp_path / "env"
+        canonical.write_text(CANONICAL_ENV, encoding="utf-8")
+        canonical.chmod(0o640)
+        command = f"""
+set -euo pipefail
+export RADON_DIR={tmp_path / "radon"!s}
+export RADON_DEPLOY_ENV_FILE={canonical!s}
+export RADON_MCP_ENV_FILE={tmp_path / "mcp.env"!s}
+export RADON_DEPLOY_ROOT_HELPER={shlex.quote("/usr/local/sbin/radon-deploy-root")}
+source {DEPLOY!s}
+sudo() {{ {shlex.quote(str(sudo))} "$@"; }}
+write_mcp_env "$ENV_FILE_DEFAULT"
+"""
+        result = subprocess.run(["bash", "-c", command], capture_output=True, text=True, timeout=60)
+        assert result.returncode == 0, result.stderr
+        lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+        assert lines, "the explicit canonical call never asked for the verb"
+        assert lines[-1] == "-n /usr/local/sbin/radon-deploy-root publish-mcp-env", lines
+        # The unprivileged write must not also have run.
+        assert not (tmp_path / "mcp.env").exists()
+
+    def test_a_non_canonical_destination_stays_on_the_unprivileged_write(self, tmp_path):
+        """A dev or test invocation against some other path is not the
+        production boundary and must not ask root to publish the real one."""
+        log = tmp_path / "sudo.log"
+        sudo = tmp_path / "sudo"
+        _write_executable(sudo, f"#!/bin/bash\nprintf '%s\\n' \"$*\" >> {shlex.quote(str(log))}\nexit 0\n")
+        canonical = tmp_path / "env"
+        canonical.write_text(CANONICAL_ENV, encoding="utf-8")
+        elsewhere = tmp_path / "elsewhere.env"
+        command = f"""
+set -euo pipefail
+export RADON_DIR={tmp_path / "radon"!s}
+export RADON_DEPLOY_ENV_FILE={canonical!s}
+export RADON_MCP_ENV_FILE={tmp_path / "mcp.env"!s}
+source {DEPLOY!s}
+sudo() {{ {shlex.quote(str(sudo))} "$@"; }}
+write_mcp_env "$ENV_FILE_DEFAULT" {shlex.quote(str(elsewhere))}
+"""
+        result = subprocess.run(["bash", "-c", command], capture_output=True, text=True, timeout=60)
+        assert result.returncode == 0, result.stderr
+        assert not log.exists() or "publish-mcp-env" not in log.read_text(encoding="utf-8")
+        assert elsewhere.read_text(encoding="utf-8") == EXPECTED
