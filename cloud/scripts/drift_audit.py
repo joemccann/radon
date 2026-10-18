@@ -109,6 +109,7 @@ HEALTH_WRITE_ATTEMPTS = 3
 
 # (live absolute path, repo-relative path, drift label)
 FILE_PAIRS = [
+    ("/usr/local/lib/radon/media_publish.py", "scripts/media_publish.py", "media-publisher"),
     ("/etc/caddy/Caddyfile", "caddy/Caddyfile", "caddyfile"),
     ("/usr/local/bin/radon", "scripts/operator-radon.sh", "operator-cli"),
     (
@@ -165,7 +166,7 @@ FILE_PAIRS = [
 
 GIT_BLOB_PREFIX = "git:"
 
-UNIT_GLOBS = ("radon-*.service", "radon-*.timer")
+UNIT_GLOBS = ("radon-*.service", "radon-*.timer", "radon-*.path")
 
 _UPSERT_SQL = (
     "INSERT INTO service_health (service, state, last_attempt_started_at, "
