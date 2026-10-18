@@ -300,6 +300,48 @@ def test_the_population_still_covers_every_literal_vps_host_job() -> None:
     )
 
 
+# DS-2026-10-17-18: without `fingerprint:` the ssh-action accepts any host key,
+# so the job that hands the deploy key and runs root-capable scripts never
+# proves it reached the production host. drone-ssh negotiates the host's ECDSA
+# key first, so the secret holds that key's SHA256 fingerprint.
+HOST_KEY_PIN = "${{ secrets.VPS_SSH_FINGERPRINT }}"
+
+
+def _remote_exec_steps() -> list[tuple[str, dict]]:
+    return [
+        (name, step)
+        for name, job in _production_host_jobs().items()
+        for step in job.get("steps") or []
+        if _REMOTE_EXEC_ACTION_RE.search(str(step.get("uses", "")))
+    ]
+
+
+def test_every_production_ssh_step_pins_the_host_key() -> None:
+    steps = _remote_exec_steps()
+    assert len(steps) >= 3, "expected prestage, prepull and deploy ssh steps"
+    unpinned = [
+        f"{name}: {step.get('name', step['uses'])}"
+        for name, step in steps
+        if (step.get("with") or {}).get("fingerprint") != HOST_KEY_PIN
+    ]
+    assert not unpinned, f"these steps accept any host key: {unpinned}"
+
+
+def test_dropping_one_host_key_pin_fails_the_check() -> None:
+    text = WORKFLOW.read_text(encoding="utf-8")
+    pin = f"          fingerprint: {HOST_KEY_PIN}\n"
+    assert text.count(pin) >= 3
+    mutated = yaml.load(text.replace(pin, "", 1), Loader=yaml.BaseLoader)
+    pinned = [
+        step
+        for job in mutated["jobs"].values()
+        if _touches_production_host(job)
+        for step in job.get("steps") or []
+        if (step.get("with") or {}).get("fingerprint") == HOST_KEY_PIN
+    ]
+    assert len(pinned) == len(_remote_exec_steps()) - 1
+
+
 def test_e2e_starts_after_secret_scan_to_stay_under_the_job_slot_cap() -> None:
     """CIP-009: the gate fan-out must not exceed the 20-job concurrency cap.
 

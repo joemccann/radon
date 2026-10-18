@@ -92,6 +92,44 @@ describe("newsfeed explain cache and generate", () => {
     expect(Number(stored.rows[0].n)).toBe(1);
   });
 
+  it("keeps the shared draft after the first reader leaves (REL-327)", async () => {
+    let release: (value: { text: string; provider: string; model: string }) => void = () => {};
+    let modelSignal: AbortSignal | undefined;
+    chat.mockImplementation((args: { signal?: AbortSignal }) => new Promise((resolve, reject) => {
+      modelSignal = args.signal;
+      release = resolve;
+      args.signal?.addEventListener("abort", () => {
+        reject(new DOMException("The operation was aborted", "AbortError"));
+      });
+    }));
+    const { explainNewsfeedPost, resetExplainSingleFlight } = await import("@/lib/newsfeedExplainGenerate");
+    resetExplainSingleFlight();
+    const first = new AbortController();
+    const second = new AbortController();
+    const left = explainNewsfeedPost(input, { signal: first.signal, onStage: () => {} });
+    await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(1));
+    const stayed = explainNewsfeedPost(input, { signal: second.signal, onStage: () => {} });
+    // The cache read is async. Abort only after the second reader has joined
+    // the flight; joining must not open a second model call.
+    await vi.waitFor(() => expect(modelSignal).toBeDefined());
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(chat).toHaveBeenCalledTimes(1);
+    first.abort();
+    await expect(left).rejects.toMatchObject({ name: "AbortError" });
+    release({
+      text: "The auction paid plants to stay available.",
+      provider: "anthropic",
+      model: "claude-opus-5",
+    });
+    await expect(stayed).resolves.toMatchObject({
+      explanation: "The auction paid plants to stay available.",
+      cached: false,
+    });
+    expect(chat).toHaveBeenCalledTimes(1);
+    expect(modelSignal?.aborted).toBe(false);
+    expect(second.signal.aborted).toBe(false);
+  });
+
   it("skips the model for thin posts and never invents a market call", async () => {
     const { explainNewsfeedPost } = await import("@/lib/newsfeedExplainGenerate");
     const { EXPLAIN_THIN_MESSAGE } = await import("@/lib/newsfeedExplain");
