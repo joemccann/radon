@@ -104,6 +104,7 @@ const PINNED: Record<string, PinnedCapability> = {
   "menthorq/cta/share/content": "internal",
   "models": "read",
   "newsfeed/posts": "read",
+  "newsfeed/explain": "internal",
   "newsfeed/share": "internal",
   "newsfeed/research/files/[asset]": "internal",
   "newsfeed/research/feedback": "internal",

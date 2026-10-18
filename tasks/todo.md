@@ -1,3 +1,16 @@
+# Newsfeed Explain button (2026-10-18)
+
+Dependency graph: T1 -> T2; T3 parallel to T2; T4 depends_on: [T2, T3].
+
+- [x] T1 depends_on: [] Spec the Explain button, cache table, prompt, auth pin and UI states.
+- [ ] T2 depends_on: [T1] Backend: route, LLM, image fetch, Turso cache, writer, failing-then-green tests.
+- [ ] T3 depends_on: [T1] UI: Explain control, panel/sheet, desktop and mobile CSS, component tests.
+- [ ] T4 depends_on: [T2, T3] Merge, Playwright plates, CI green, operator PR.
+
+## Review
+
+Pending swarm merge.
+
 # X share-copy footer (2026-10-18)
 
 Dependency graph: T1 -> T2 -> T3 -> T4.
