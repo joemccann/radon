@@ -25,7 +25,7 @@ import pytest
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SAMPLE: dict[str, Any] = json.loads((FIXTURES / "vix_pc_sample.json").read_text())
-MIGRATION = Path(__file__).parents[1] / "db" / "migrations" / "0096_vix_pc.sql"
+MIGRATION = Path(__file__).parents[1] / "db" / "migrations" / "0097_vix_pc.sql"
 
 RAW_ROWS: list[dict[str, Any]] = SAMPLE["data"]
 
@@ -286,7 +286,7 @@ class _RecordingConnection:
 
 @pytest.fixture
 def vix_pc_db(monkeypatch: pytest.MonkeyPatch):
-    assert MIGRATION.exists(), "scripts/db/migrations/0096_vix_pc.sql must exist"
+    assert MIGRATION.exists(), "scripts/db/migrations/0097_vix_pc.sql must exist"
     conn = sqlite3.connect(":memory:")
     conn.execute(
         "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT)"
@@ -303,16 +303,16 @@ def vix_pc_db(monkeypatch: pytest.MonkeyPatch):
 
 
 class TestVixPcStorage:
-    def test_migration_registers_version_96(self):
-        assert MIGRATION.exists(), "scripts/db/migrations/0096_vix_pc.sql must exist"
+    def test_migration_registers_version_97(self):
+        assert MIGRATION.exists(), "scripts/db/migrations/0097_vix_pc.sql must exist"
         conn = sqlite3.connect(":memory:")
         conn.execute(
             "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT)"
         )
         conn.executescript(MIGRATION.read_text())
         assert conn.execute(
-            "SELECT version FROM schema_migrations WHERE version = 96"
-        ).fetchone() == (96,)
+            "SELECT version FROM schema_migrations WHERE version = 97"
+        ).fetchone() == (97,)
 
     def test_table_columns_pk_and_index(self):
         conn = sqlite3.connect(":memory:")
