@@ -9852,3 +9852,31 @@ Final integration review: eac73b0b is included. All 44 incoming indicator files 
 Review: Production Gateway paging, hold behavior and broker state are outside the patch. Tests run in GitHub Actions only; regression probes replace the last transport boundary before exercising the old behavior.
 
 Notification isolation review: cloud RED `1cdf8f37`, run `39151257572`: hold shard 1 failed/1152 passed (one fake sender call); isolation shard 5 failed/2578 passed/1 skipped. Shared root fixtures strip credentials and block urllib/requests Pushover message/cancellation requests with a teardown latch. Default hold pager is fake; explicit paging tests still supply observable senders. Production files remain unchanged. Full final-head CI pending.
+
+## Performance snapshot helper (2026-10-18)
+
+- [x] P1 depends_on: [] Verify the installed runner and current snapshot handoff contract.
+- [x] P2 depends_on: [P1] Reproduce helper isolation and snapshot validation requirements in cloud tests.
+- [x] P3 depends_on: [P2] Implement dedicated scheduled helper installation and consume only its validated snapshot.
+- [ ] P4 depends_on: [P3] Complete exact-head cloud checks and document owner-run migration and rollback.
+
+Review: Rootless plist review and static checks are permitted locally; execution tests run in cloud CI. Host account provisioning and credential handover require the existing administrator installation path. Preserve all existing credentials until the administrator verifies handover.
+
+Snapshot helper review: private cloud regression run confirmed the consumer, plist and installer contracts fail before implementation. The final implementation uses helper-only private inputs and a dedicated read group for mode-750/mode-640 exports; collection has fixed configuration, byte/time bounds, strict host-key verification and atomic output. AST, bash syntax and rootless plist lint passed. No local suites, live probe, account creation or credential movement ran. Administrator handover and final exact-head cloud verification remain pending.
+
+
+### Private CI integration repair (2026-10-18)
+- [x] CI1 depends_on: [] Inspect exact-head private CI failures without local suites or production access.
+- [x] CI2 depends_on: [CI1] Repair implementation defects and align synthetic fixtures and owner documentation with the intended maintenance contract.
+- [x] CI3 depends_on: [CI2] Parse changed sources, check shell syntax and whitespace, and return a committed candidate for private cloud verification.
+
+Review: Existing gates remain mandatory; no production provisioning or credential operation belongs to this repair.
+
+Static repair review: changed Python sources parse, changed shell entrypoints pass syntax validation, and `git diff --check` is clean. No local test suite or live/production test ran. Exact candidate cloud re-verification remains required.
+
+
+### Private CI follow-up
+- [x] PC1 depends_on: [] Read failed scripts-df job 117794290142 without a local test run.
+- [x] PC2 depends_on: [PC1] Replace the obsolete shell-target assertion with the canonical Python collector target and host-pin derivation contract.
+
+Follow-up review: the helper issues SSH through a Python argv list from root-installed config, so the old quoted shell `$target` command no longer exists. The documentation contract now pins host extraction, protected config and the exact Python target operand. Python AST and whitespace checks pass; fresh private CI remains required.

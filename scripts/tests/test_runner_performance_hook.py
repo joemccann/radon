@@ -1,8 +1,7 @@
-"""scripts/runner/hooks/performance_pre.sh: pin the green base, pull the
-read-only production probe over the forced-command key, never refuse the
-phase because production is unreachable.
+"""Pin the green base and consume a separate helper's snapshot, without SSH.
 
-Drives the real hook against a local bare origin with ssh stubbed.
+Drives the real hook against a local bare origin with the read helper stubbed.
+The real helper's output and credential boundaries have separate coverage.
 """
 from __future__ import annotations
 
@@ -19,11 +18,6 @@ REPO = Path(__file__).resolve().parents[2]
 HOOK = REPO / "scripts" / "runner" / "hooks" / "performance_pre.sh"
 LOOP_ENV = REPO / "scripts" / "runner" / "loops" / "performance.env"
 BASH = shutil.which("bash") or "/bin/bash"
-
-SSH_STUB = """#!/bin/bash
-printf '%s\\n' "$@" > "$CALLS/ssh.argv"
-eval "${STUB_SSH:-echo '{\\"schema\\": 1, \\"host\\": {\\"loadavg\\": [0.1, 0.1, 0.1]}}'}"
-"""
 
 
 def _git(*args, cwd):
@@ -49,18 +43,20 @@ def rig(tmp_path):
     (runner / "lib" / "nightly_green_base.py").write_text("print('')\n")
     shutil.copy2(LOOP_ENV, runner / "loops" / "performance.env")
 
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    (bin_dir / "ssh").write_text(SSH_STUB)
-    (bin_dir / "ssh").chmod(0o755)
     home = tmp_path / "home"
-    (home / ".ssh").mkdir(parents=True)
-    (home / ".ssh" / "radon_perf_probe").write_text("key\n")
-    (home / ".ssh" / "radon_perf_known_hosts").write_text("host\n")
+    home.mkdir()
     state = tmp_path / "state"
     state.mkdir()
     calls = tmp_path / "calls"
     calls.mkdir()
+
+    (runner / "perf_probe_helper.py").write_text(
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        "Path(os.environ['CALLS'], 'read.argv').write_text(' '.join(sys.argv[1:]))\n"
+        "if os.environ.get('STUB_PROBE_FAILURE'): sys.exit(75)\n"
+        "print(json.dumps({'schema': 1, 'host': {'loadavg': [0.1, 0.1, 0.1]}}))\n"
+    )
 
     class Rig:
         pass
@@ -75,28 +71,24 @@ def rig(tmp_path):
             "WORK": str(work), "LOOP_STATE": str(state), "RUNNER_DIR": str(runner),
             "REPO_URL": str(origin), "RUNNER_PYTHON": sys.executable,
             "RADON_RUNNER_PATH": f"{timeout_dir}:/usr/bin:/bin:{os.path.dirname(shutil.which('git'))}",
-            "RADON_RUNNER_GH": "/usr/bin/false", "RADON_PERF_SSH": str(bin_dir / "ssh"), **extra,
+            "RADON_RUNNER_GH": "/usr/bin/false", **extra,
         }
         return subprocess.run([BASH, str(HOOK)], cwd=work, env=env, capture_output=True, text=True, timeout=60)
 
     r.run = run
     r.probe = lambda: json.loads((state / "prod-probe.json").read_text())
-    r.ssh_argv = lambda: (calls / "ssh.argv").read_text().splitlines() if (calls / "ssh.argv").exists() else None
+    r.read_argv = lambda: (calls / "read.argv").read_text() if (calls / "read.argv").exists() else None
     return r
 
 
-def test_probe_is_pulled_over_the_pinned_forced_command_key(rig):
+def test_probe_is_copied_from_the_separate_helper_without_ssh(rig):
     out = rig.run()
     assert out.returncode == 0, out.stderr
     assert "probe=ok" in out.stdout
     assert rig.probe()["schema"] == 1
-    argv = rig.ssh_argv()
-    for opt in ("BatchMode=yes", "StrictHostKeyChecking=yes", "IdentitiesOnly=yes",
-                f"UserKnownHostsFile={rig.home}/.ssh/radon_perf_known_hosts"):
-        assert opt in argv
-    assert argv[argv.index("-i") + 1] == f"{rig.home}/.ssh/radon_perf_probe"
-    assert "radon@5.78.148.38" in argv
+    assert rig.read_argv() == 'read'
     assert oct((rig.state / "prod-probe.json").stat().st_mode & 0o777) == "0o600"
+    assert not (rig.home / '.ssh').exists()
 
 
 def test_the_clone_is_pinned_to_a_detached_base(rig):
@@ -107,38 +99,28 @@ def test_the_clone_is_pinned_to_a_detached_base(rig):
     assert branch.returncode != 0, "HEAD must be detached at the green base"
 
 
-@pytest.mark.parametrize("stub", ["exit 255", "echo not-json", "echo '{\"no_schema\": 1}'"])
-def test_an_unreachable_or_bad_probe_never_refuses_the_phase(rig, stub):
+def test_an_unavailable_snapshot_never_refuses_the_phase(rig):
     (rig.state / "prod-probe.json").write_text('{"schema": 1, "stale": true}')
-    out = rig.run(STUB_SSH=stub)
+    out = rig.run(STUB_PROBE_FAILURE='1')
     assert out.returncode == 0, out.stderr
     assert "probe=unavailable" in out.stdout
     probe = rig.probe()
-    assert "error" in probe and "stale" not in probe, "last night's snapshot must not pass as tonight's"
+    assert "error" in probe and "stale" not in probe
 
 
-def test_a_missing_key_skips_ssh_entirely(rig):
-    (rig.home / ".ssh" / "radon_perf_known_hosts").unlink()
+def test_a_missing_helper_never_falls_back_to_a_connection(rig):
+    (rig.runner / 'perf_probe_helper.py').unlink()
     out = rig.run()
     assert out.returncode == 0
-    assert rig.ssh_argv() is None
-    assert "known_hosts" in rig.probe()["error"]
-
-
-def test_a_missing_target_skips_ssh_entirely(rig):
-    env = rig.runner / "loops" / "performance.env"
-    env.write_text("".join(ln + "\n" for ln in env.read_text().splitlines() if not ln.startswith("PERF_SSH_TARGET=")))
-    out = rig.run()
-    assert out.returncode == 0
-    assert rig.ssh_argv() is None
-    assert "PERF_SSH_TARGET" in rig.probe()["error"]
+    assert rig.read_argv() is None
+    assert "helper" in rig.probe()["error"]
 
 
 def test_a_clone_of_another_repository_is_refused(rig, tmp_path):
     out = rig.run(REPO_URL=str(tmp_path / "elsewhere.git"))
     assert out.returncode == 2
     assert "refused=" in out.stdout
-    assert rig.ssh_argv() is None
+    assert rig.read_argv() is None
 
 
 def test_loop_config_wires_the_hook_one_phase_and_the_overnight_slot():
