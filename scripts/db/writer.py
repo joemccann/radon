@@ -1953,6 +1953,49 @@ def upsert_ivrank_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = 
     db.commit()
 
 
+def upsert_vix_pc_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """VIX P/C indicator - one row per VIX options session, idempotent on date.
+    daily_ratio / cum5_ratio are NULL when the call denominator is 0;
+    cum5_ratio is also NULL for the first WINDOW-1 rows.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): every changed run
+    rewrites the full stored series (~500 sessions), which per-row would
+    be hundreds of statements on one stream (the rv-ratio 2026-07-21 502
+    incident). ~2 chunked round-trips instead.
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(
+                (
+                    row["date"],
+                    int(row["put_volume"]),
+                    int(row["call_volume"]),
+                    row.get("daily_ratio"),
+                    row.get("cum5_ratio"),
+                    row.get("source") or "uw",
+                    stamp,
+                )
+            )
+        db.execute(
+            "INSERT INTO vix_pc_history "
+            "(date, put_volume, call_volume, daily_ratio, cum5_ratio, source, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date) DO UPDATE SET "
+            "put_volume = excluded.put_volume, call_volume = excluded.call_volume, "
+            "daily_ratio = excluded.daily_ratio, cum5_ratio = excluded.cum5_ratio, "
+            "source = excluded.source, recorded_at = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
+
 def upsert_iv_spread_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
     """IV SPREAD indicator - one row per paired SPX/NDX session, idempotent on
     date. spread is NULL only for a session the leg-level bad-print gate
