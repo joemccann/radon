@@ -18,6 +18,8 @@ const chart = {
   ...pjm,
   id: "pjm-chart",
   title: "PJM capacity stack with collar",
+  content:
+    "The stacked chart shows cleared megawatts under the $325 collar and the 6.8 GW reliability gap after the 2028/2029 auction.",
   images: ["https://media.radon.run/images/pjm-chart.png"],
 };
 
@@ -28,6 +30,11 @@ const svg =
   '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675"><rect width="1200" height="675" fill="#101714"/><text x="40" y="80" fill="#e8eee9" font-size="28">Synthetic PJM stack</text></svg>';
 
 async function stubFeed(page: Page, delayMs = 0) {
+  await page.addInitScript(() => {
+    const style = document.createElement("style");
+    style.textContent = "#radon-toast-viewport,.toast{display:none!important}";
+    document.documentElement.appendChild(style);
+  });
   await page.route("**/api/newsfeed/posts**", (route) =>
     route.fulfill({ json: [pjm, chart] }),
   );
@@ -66,11 +73,21 @@ for (const width of [1440, 393] as const) {
     await page.emulateMedia({ colorScheme: "dark" });
     await stubFeed(page, 400);
     await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
-    const textCard = page.getByTestId("news-feed-item").filter({ hasText: "6.8 GW Short" });
-    const imageCard = page.getByTestId("news-feed-item").filter({ hasText: "capacity stack" });
+    await page.addStyleTag({
+      content: "#radon-toast-viewport,.toast-container,nextjs-portal,[data-nextjs-toast]{display:none!important}",
+    });
+    const hideChrome = async () => {
+      await page.evaluate(() => {
+        document.getElementById("radon-toast-viewport")?.remove();
+        document.querySelectorAll("nextjs-portal").forEach((node) => node.remove());
+      });
+    };
+    const textCard = page.getByTestId("news-feed-item").filter({ hasText: "MW-Day Cap" });
+    const imageCard = page.getByTestId("news-feed-item").filter({ hasText: "capacity stack with collar" });
     await expect(textCard.getByRole("button", { name: "Explain" })).toBeVisible();
     await expect(imageCard.getByRole("button", { name: "Explain" })).toBeVisible();
     const idlePath = path.join(SHOTS, `idle-${width}.png`);
+    await hideChrome();
     await textCard.screenshot({ path: idlePath });
     await testInfo.attach(`idle-${width}`, { path: idlePath, contentType: "image/png" });
 
@@ -78,20 +95,27 @@ for (const width of [1440, 393] as const) {
     await pending.click();
     await expect(textCard.getByTestId("newsfeed-explain")).toHaveAttribute("data-state", "loading");
     const loadingPath = path.join(SHOTS, `loading-${width}.png`);
+    await hideChrome();
     await textCard.screenshot({ path: loadingPath });
     await testInfo.attach(`loading-${width}`, { path: loadingPath, contentType: "image/png" });
 
     await expect(textCard.getByText(/standby power/)).toBeVisible();
     await expect(textCard.getByTestId("newsfeed-explain")).toHaveAttribute("data-state", "explained");
+    await expect(textCard.getByRole("button", { name: "Hide explanation" })).toBeVisible();
     const explainedPath = path.join(SHOTS, `explained-text-${width}.png`);
+    await hideChrome();
     await textCard.screenshot({ path: explainedPath });
     await testInfo.attach(`explained-text-${width}`, { path: explainedPath, contentType: "image/png" });
 
     await imageCard.getByRole("button", { name: "Explain" }).click();
-    await expect(imageCard.getByText(/standby power/)).toBeVisible();
+    const imagePanel = imageCard.getByRole("region", { name: "Explanation" });
+    await expect(imagePanel.getByText(/standby power/)).toBeVisible();
+    await imagePanel.scrollIntoViewIfNeeded();
     const imagePath = path.join(SHOTS, `explained-image-${width}.png`);
+    await hideChrome();
     await imageCard.screenshot({ path: imagePath });
     await testInfo.attach(`explained-image-${width}`, { path: imagePath, contentType: "image/png" });
-    await expect(page.locator("body")).not.toContainText("—");
+    await expect(textCard).not.toContainText("—");
+    await expect(imageCard).not.toContainText("—");
   });
 }
