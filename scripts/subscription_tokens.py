@@ -809,9 +809,32 @@ class LoginPrompt:
 _ANSI = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]")
 # Both must be followed by whitespace: output arrives in arbitrary chunks, and a
 # link or code cut off mid-read must never be the one that gets pushed.
-_URL = re.compile(r"https://[^\s\x00-\x1f\x7f\"'<>]+(?=\s)")
+# A backslash is excluded because no legitimate URL carries a raw one, while a
+# browser normalises it to "/": "https://attacker.example\\@auth.openai.com/..."
+# is reported by urlsplit() as the allowlisted host and navigates to the
+# attacker's. DS-2026-10-18-02.
+_URL = re.compile(r"https://[^\s\\\x00-\x1f\x7f\"'<>]+(?=\s)")
 _SENTENCE_PUNCTUATION = ".,;)]"
 _DEVICE_CODE = re.compile(r"(?<![A-Za-z0-9-])[A-Z0-9]{4}-[A-Z0-9]{4,6}(?=\s)")
+
+
+def _is_login_origin(candidate: str, provider: Provider) -> bool:
+    """True only when the RAW string begins with an allowlisted HTTPS origin.
+
+    Parsing the candidate and comparing `urlsplit().hostname` is not enough: a
+    URL that confuses Python's parser and a browser differently reports an
+    allowlisted host here and navigates elsewhere in the hand holding the
+    phone. The literal origin prefix has no such ambiguity, and it leaves no
+    room before the host for userinfo, a second scheme or a delimiter trick.
+    """
+    if "\\" in candidate:
+        return False
+    for host in provider.login_hosts:
+        origin = f"https://{host}"
+        if candidate == origin or candidate.startswith(f"{origin}/"):
+            # Belt and braces: the parser must agree with the raw prefix.
+            return urllib_parse.urlsplit(candidate).hostname == host
+    return False
 
 
 def parse_login_prompt(provider: Provider, output: str) -> Optional[LoginPrompt]:
@@ -827,7 +850,7 @@ def parse_login_prompt(provider: Provider, output: str) -> Optional[LoginPrompt]
             for candidate in (
                 found.rstrip(_SENTENCE_PUNCTUATION) for found in _URL.findall(text)
             )
-            if urllib_parse.urlsplit(candidate).hostname in provider.login_hosts
+            if _is_login_origin(candidate, provider)
         ),
         None,
     )
