@@ -173,6 +173,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-dispersion.timer",
     "radon-flex-pull.service",
     "radon-flex-pull.timer",
+    "radon-vix-pc.service",
+    "radon-vix-pc.timer",
 ]
 
 LONG_RUNNING_SERVICES = [
