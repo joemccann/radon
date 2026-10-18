@@ -625,7 +625,11 @@ regression critic workflow after the two external engines; its role is
 adjudication and coverage, not a third vote. Invoke it as
 `Workflow({ name: "security-audit", args: { repoRoot: "<the value of $RADON_REPO_ROOT>", focus: [...] } })`;
 the Workflow runtime cannot read the environment, so pass the clone root
-explicitly. **Do not run its `secrets`
+explicitly. If that name is not registered in this session (only plugin
+workflows are listed), run the clone's own file instead, which needs no
+registration:
+`Workflow({ scriptPath: "<the value of $RADON_REPO_ROOT>/.claude/workflows/security-audit.mjs", args: { repoRoot: "<the value of $RADON_REPO_ROOT>", focus: [...] } })`.
+Mark the native stage incomplete only if both forms fail. **Do not run its `secrets`
 dimension unchanged**: it instructs model agents to grep raw Git history, while
 Radon's gitleaks policy has intentional historical exceptions that may still
 hold credential material. Deterministic local gitleaks owns history inspection.
