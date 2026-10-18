@@ -7,15 +7,22 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 type MockRow = Record<string, unknown>;
 
+function resultForSql(sql: string, openRows: MockRow[], execRows: MockRow[]) {
+  if (/FROM\s+open_orders/i.test(sql)) return { rows: openRows };
+  if (/FROM\s+executed_orders/i.test(sql)) return { rows: execRows };
+  throw new Error(`unexpected sql: ${sql}`);
+}
+
 function mockGetDb(openRows: MockRow[], execRows: MockRow[]): { syncCalls: number } {
   const counters = { syncCalls: 0 };
-  let call = 0;
   vi.doMock("@/lib/db", () => ({
     getDb: () => ({
-      execute: vi.fn().mockImplementation(() => {
-        call += 1;
-        return Promise.resolve({ rows: call === 1 ? openRows : execRows });
-      }),
+      execute: vi.fn().mockImplementation(({ sql }: { sql: string }) =>
+        Promise.resolve(resultForSql(sql, openRows, execRows)),
+      ),
+      batch: vi.fn().mockImplementation((stmts: Array<{ sql: string }>) =>
+        Promise.resolve(stmts.map((stmt) => resultForSql(stmt.sql, openRows, execRows))),
+      ),
     }),
     syncDb: vi.fn().mockImplementation(async () => {
       counters.syncCalls += 1;
@@ -64,35 +71,28 @@ const execPayload = (execId: string, time = todayFillIso) => ({
 });
 
 describe("readOrdersFromDb", () => {
-  it("starts the independent open and executed order queries concurrently", async () => {
-    let resolveOpen!: (value: { rows: MockRow[] }) => void;
-    let resolveExecuted!: (value: { rows: MockRow[] }) => void;
-    const execute = vi.fn().mockImplementation(({ sql }: { sql: string }) => {
-      if (/FROM\s+open_orders/i.test(sql)) {
-        return new Promise<{ rows: MockRow[] }>((resolve) => { resolveOpen = resolve; });
-      }
-      return new Promise<{ rows: MockRow[] }>((resolve) => { resolveExecuted = resolve; });
-    });
+  it("loads open and executed orders in one read batch", async () => {
+    const batch = vi.fn().mockResolvedValue([{ rows: [] }, { rows: [] }]);
+    const execute = vi.fn();
     vi.doMock("@/lib/db", () => ({
-      getDb: () => ({ execute }),
+      getDb: () => ({ execute, batch }),
       syncDb: vi.fn().mockResolvedValue(undefined),
       resetDb: vi.fn(),
     }));
 
     const { readOrdersFromDb } = await import("../lib/orders/readOrdersFromDb");
-    const pending = readOrdersFromDb();
-
-    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
-    resolveOpen({ rows: [] });
-    resolveExecuted({ rows: [] });
-    await expect(pending).resolves.toBeNull();
+    await expect(readOrdersFromDb()).resolves.toBeNull();
+    expect(execute).not.toHaveBeenCalled();
+    expect(batch).toHaveBeenCalledTimes(1);
+    expect(batch.mock.calls[0][0]).toHaveLength(2);
+    expect(batch.mock.calls[0][1]).toBe("read");
   });
 
   it("coalesces concurrent snapshot callers into one two-query DB read", async () => {
     process.env.RADON_DB_CACHE_FORCE = "1";
-    const execute = vi.fn().mockResolvedValue({ rows: [] });
+    const batch = vi.fn().mockResolvedValue([{ rows: [] }, { rows: [] }]);
     vi.doMock("@/lib/db", () => ({
-      getDb: () => ({ execute }),
+      getDb: () => ({ execute: vi.fn(), batch }),
       syncDb: vi.fn().mockResolvedValue(undefined),
       resetDb: vi.fn(),
     }));
@@ -108,11 +108,11 @@ describe("readOrdersFromDb", () => {
         readOrdersSnapshotFromDb(),
       ]);
       await readOrdersSnapshotFromDb();
-      expect(execute).toHaveBeenCalledTimes(2);
+      expect(batch).toHaveBeenCalledTimes(1);
 
       invalidateOrdersSnapshotCache();
       await readOrdersSnapshotFromDb();
-      expect(execute).toHaveBeenCalledTimes(4);
+      expect(batch).toHaveBeenCalledTimes(2);
     } finally {
       delete process.env.RADON_DB_CACHE_FORCE;
     }
@@ -233,9 +233,9 @@ describe("readOrdersFromDb", () => {
 
   it("scopes replica-sync recovery to the failed DB operation", async () => {
     const resetDb = vi.fn();
-    const execute = vi.fn().mockResolvedValue({ rows: [] });
+    const batch = vi.fn().mockResolvedValue([{ rows: [] }, { rows: [] }]);
     vi.doMock("@/lib/db", () => ({
-      getDb: () => ({ execute }),
+      getDb: () => ({ execute: vi.fn(), batch }),
       syncDb: vi.fn().mockRejectedValue(new Error("replica sync failed")),
       resetDb,
     }));
