@@ -1,0 +1,63 @@
+name: Connect Tailscale
+description: >
+  Join the tailnet as an ephemeral tagged node using a Tailscale OAuth
+  client. Local composite because tailscale/github-action is not on the
+  joemccann/radon Actions allowlist; a uses of that action fails the
+  whole workflow at parse time, including PR runs whose deploy jobs skip.
+
+inputs:
+  oauth-client-id:
+    description: Tailscale OAuth client ID (must be present; the secret is the auth key)
+    required: true
+  oauth-secret:
+    description: Tailscale OAuth client secret, passed to tailscale up as --authkey
+    required: true
+  tags:
+    description: Advertise-tags for the ephemeral node (exactly tag:ci for CI deploys)
+    required: true
+    default: tag:ci
+
+runs:
+  using: composite
+  steps:
+    - name: Install pinned Tailscale and bring the node up
+      shell: bash
+      env:
+        TS_OAUTH_CLIENT_ID: ${{ inputs.oauth-client-id }}
+        TS_OAUTH_SECRET: ${{ inputs.oauth-secret }}
+        TS_TAGS: ${{ inputs.tags }}
+      run: |
+        set -euo pipefail
+        test -n "${TS_OAUTH_CLIENT_ID}"
+        test -n "${TS_OAUTH_SECRET}"
+        test -n "${TS_TAGS}"
+        version="1.94.2"
+        sha256="c6f99a5d774c7783b56902188d69e9756fc3dddfb08ac6be4cb2585f3fecdc32"
+        arch="amd64"
+        tarball="tailscale_${version}_${arch}.tgz"
+        curl -fsSL -o "${tarball}" \
+          "https://pkgs.tailscale.com/stable/tailscale_${version}_${arch}.tgz"
+        echo "${sha256}  ${tarball}" | sha256sum --check --status
+        tar -xzf "${tarball}"
+        sudo cp "tailscale_${version}_${arch}/tailscale" \
+          "tailscale_${version}_${arch}/tailscaled" /usr/local/bin/
+        sudo chmod +x /usr/local/bin/tailscale /usr/local/bin/tailscaled
+        sudo -E /usr/local/bin/tailscaled --state=mem: >/tmp/tailscaled.log 2>&1 &
+        sock=/var/run/tailscale/tailscaled.sock
+        for _ in $(seq 1 40); do
+          if sudo test -S "${sock}"; then
+            break
+          fi
+          sleep 0.25
+        done
+        sudo test -S "${sock}"
+        host="github-${GITHUB_RUN_ID:-local}-${GITHUB_JOB:-job}"
+        host="${host:0:63}"
+        TS_AUTHKEY="${TS_OAUTH_SECRET}?preauthorized=true&ephemeral=true"
+        sudo -E /usr/local/bin/tailscale up \
+          --authkey="${TS_AUTHKEY}" \
+          --advertise-tags="${TS_TAGS}" \
+          --hostname="${host}" \
+          --accept-routes \
+          --timeout=60s
+        sudo /usr/local/bin/tailscale status
