@@ -23,6 +23,15 @@ cloud/
   docker-compose.yml         # production IB Gateway container
 ```
 
+## VIX model spread schedule
+
+`radon-vix-model-spread.service` and `.timer` are included in setup's
+`SERVICE_FILES` and `config/installed-units.sha256`; the normal green deploy
+installs them and enables the timer without an operator root install. The
+personal-use collector samples official Cboe closes daily at 02:50 UTC, with
+no randomized delay. Migration 0098, payload/storage and operator-only access
+are defined in [the indicator spec](../docs/indicators/vix-model-spread.md).
+
 ## Runtime Planes
 
 Production is three planes. Do not collapse them.
