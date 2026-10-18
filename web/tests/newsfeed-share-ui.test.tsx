@@ -65,7 +65,7 @@ describe("news feed sharing", () => {
     vi.mocked(fetch).mockImplementation(() => new Promise<Response>(resolve => { resolveRewrite = resolve; }));
     const { unmount } = render(<NewsfeedShare post={original} />);
     fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
-    const expected = `${original.title}\n\n${original.content}`.replace(/Morgan Stanley|\bMS\b/g, "@morganstanley");
+    const expected = `${original.title}\n\n${original.content}`.replace(/Morgan Stanley|\bMS\b/g, "@morganstanley") + "\n\n@grok explain this for normies";
     const caption = screen.getByRole("textbox", { name: "Post caption" }) as HTMLTextAreaElement;
     expect(caption.value).toBe(expected);
     expect(expected.length).toBeGreaterThan(400);
@@ -100,7 +100,7 @@ describe("news feed sharing", () => {
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ title: "Hedge demand is back.", content: "Positioning is neutral. Source: ZeroHedge" }) } as Response);
     render(<NewsfeedShare post={post} />);
     await openShare();
-    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Yen hedge demand\n\nHedge demand increased.");
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Yen hedge demand\n\nHedge demand increased.\n\n@grok explain this for normies");
     expect(engine.renderShareCard).toHaveBeenCalledWith(expect.objectContaining({ title: "Hedge demand is back.", content: "Positioning is neutral." }), undefined);
     expect(fetch).toHaveBeenCalledWith("/api/newsfeed/share", expect.objectContaining({ method: "POST", cache: "no-store" }));
   });
@@ -120,7 +120,7 @@ describe("news feed sharing", () => {
     render(<NewsfeedShare post={attributed} imageUrl={imageUrl} />);
     await openShare();
     const caption = (screen.getByRole("textbox", { name: "Post caption" }) as HTMLTextAreaElement).value;
-    expect(caption).toBe("Yen hedge demand\n\nHedge demand increased.");
+    expect(caption).toBe("Yen hedge demand\n\nHedge demand increased.\n\n@grok explain this for normies");
     expect(caption).not.toContain("Source:");
     expect(caption).not.toContain(provider);
     expect(caption).not.toContain(otherProvider);
@@ -140,7 +140,7 @@ describe("news feed sharing", () => {
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Copy caption" }) as HTMLButtonElement).disabled).toBe(true);
     const compose = screen.getByRole("link", { name: "Compose on X" });
-    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe("Yen hedge demand\n\nHedge demand increased.");
+    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe("Yen hedge demand\n\nHedge demand increased.\n\n@grok explain this for normies");
     expect(compose.getAttribute("aria-disabled")).not.toBe("true");
     expect(compose.getAttribute("target")).toBe("_blank");
     expect((screen.getByRole("button", { name: "Download Story image" }) as HTMLButtonElement).disabled).toBe(true);
@@ -177,7 +177,7 @@ describe("news feed sharing", () => {
     expect(bar.getAttribute("aria-valuetext")).toMatch(/^Still drafting\. Trying a second model, \d+s elapsed$/);
     await act(async () => { push("stage", { stage: "checking" }); push("result", { title: "Hedge demand is back.", content: "Positioning remains neutral." }); finish(); });
     await waitFor(() => expect(screen.queryByRole("progressbar")).toBeNull());
-    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Yen hedge demand\n\nHedge demand increased.");
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Yen hedge demand\n\nHedge demand increased.\n\n@grok explain this for normies");
   });
 
   it("surfaces a streamed server error as the rewrite toast", async () => {
@@ -201,7 +201,7 @@ describe("news feed sharing", () => {
       resolveRewrite({ ok: true, json: async () => ({ title: "Hedge demand is back.", content: "Positioning remains neutral." }) } as Response);
     });
     await waitFor(() => expect(engine.renderShareCard).toHaveBeenLastCalledWith(expect.objectContaining({ title: "Hedge demand is back." }), undefined));
-    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe("Yen hedge demand\n\nHedge demand increased.");
+    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe("Yen hedge demand\n\nHedge demand increased.\n\n@grok explain this for normies");
     expect(compose.getAttribute("aria-disabled")).not.toBe("true");
     expect(screen.getByText("Preparing preview…")).not.toBeNull();
     expect((screen.getByRole("button", { name: "Download Story image" }) as HTMLButtonElement).disabled).toBe(true);
@@ -223,7 +223,7 @@ describe("news feed sharing", () => {
     expect(caption).toContain("@GoldmanSachs estimates");
     expect(caption).toContain("Supply overhang is a headwind, not a gale.");
     expect(caption.replace(/\s+/g, " ")).toBe(
-      `${equityIssuance.title} ${equityIssuance.content}`.replace(/\bGoldman\b/g, "@GoldmanSachs"),
+      `${equityIssuance.title} ${equityIssuance.content}`.replace(/\bGoldman\b/g, "@GoldmanSachs") + " @grok explain this for normies",
     );
     expect(compose.getAttribute("aria-disabled")).not.toBe("true");
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
@@ -263,9 +263,9 @@ describe("news feed sharing", () => {
     const caption = "JPY & USD: hedge demand? #JPY";
     fireEvent.change(screen.getByRole("textbox", { name: "Post caption" }), { target: { value: caption } });
     fireEvent.click(screen.getByRole("button", { name: "Copy caption" }));
-    await waitFor(() => expect(clipboard).toHaveBeenCalledWith(caption));
+    await waitFor(() => expect(clipboard).toHaveBeenCalledWith(caption + "\n\n@grok explain this for normies"));
     const link = screen.getByRole("link", { name: "Compose on X" });
-    expect(new URL(link.getAttribute("href")!).searchParams.get("text")).toBe(caption);
+    expect(new URL(link.getAttribute("href")!).searchParams.get("text")).toBe(caption + "\n\n@grok explain this for normies");
     expect(link.getAttribute("rel")).toContain("noopener");
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Caption copied."));
   });

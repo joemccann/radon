@@ -1130,21 +1130,21 @@ describe("buildTweetText", () => {
       "3 days",
     );
     expect(text).toBe(
-      "💸 Closed $SNDK 9/25 (Long $1700 Put)\n\n+33.03%\n\nHeld 3 days\n\nExecuted with Radon\n\nhttps://radon.run",
+      "💸 Closed $SNDK 9/25 (Long $1700 Put)\n\n+33.03%\n\nHeld 3 days\n\nExecuted with Radon\n\nhttps://radon.run\n\n@grok explain this for normies",
     );
   });
 
   it("keeps dollar and percent on one metric line when both enabled", () => {
     const text = buildTweetText("Closed AAOI Risk Reversal", 6871, 20.88, true, true, "1 day");
     expect(text).toBe(
-      "💸 Closed $AAOI Risk Reversal\n\n+$6,871.00 +20.88%\n\nHeld 1 day\n\nExecuted with Radon\n\nhttps://radon.run",
+      "💸 Closed $AAOI Risk Reversal\n\n+$6,871.00 +20.88%\n\nHeld 1 day\n\nExecuted with Radon\n\nhttps://radon.run\n\n@grok explain this for normies",
     );
   });
 
   it("omits the metric block when both $ and % are off, without a stray blank line", () => {
     const text = buildTweetText("Closed X", 100, 50, false, false, "37 minutes");
     expect(text).toBe(
-      "💸 Closed $X\n\nHeld 37 minutes\n\nExecuted with Radon\n\nhttps://radon.run",
+      "💸 Closed $X\n\nHeld 37 minutes\n\nExecuted with Radon\n\nhttps://radon.run\n\n@grok explain this for normies",
     );
     expect(text).not.toContain("· Held");
   });
