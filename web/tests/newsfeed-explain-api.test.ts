@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { guard, explainNewsfeedPost } = vi.hoisted(() => ({
+const { guard, explainNewsfeedPost, enforceDemoAiQuota } = vi.hoisted(() => ({
   guard: vi.fn(),
   explainNewsfeedPost: vi.fn(),
+  enforceDemoAiQuota: vi.fn(),
 }));
 
 vi.mock("../lib/routeAccess", () => ({ requireRouteAccess: guard }));
 vi.mock("../lib/newsfeedExplainGenerate", () => ({ explainNewsfeedPost }));
+vi.mock("../lib/demo/enforceAiQuota", () => ({ enforceDemoAiQuota }));
 
 import { POST, radonCapability } from "../app/api/newsfeed/explain/route";
 import { EXPLAIN_BUDGET_MS } from "../lib/newsfeedExplainProgress";
@@ -43,6 +45,7 @@ function parseEvents(text: string): SseEvent[] {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  enforceDemoAiQuota.mockResolvedValue(null);
   guard.mockResolvedValue({ ok: true, principal: { userId: "joe", kind: "operator" } });
   explainNewsfeedPost.mockImplementation(async (_input, { onStage }) => {
     onStage("loading");
@@ -60,6 +63,13 @@ describe("POST /api/newsfeed/explain", () => {
   it.each([401, 403, 429])("preserves access rejection %s without model calls", async (status) => {
     guard.mockResolvedValue({ ok: false, response: new Response(null, { status }) });
     expect((await POST(request())).status).toBe(status);
+    expect(explainNewsfeedPost).not.toHaveBeenCalled();
+  });
+
+  it("returns the demo AI quota rejection before any model call", async () => {
+    enforceDemoAiQuota.mockResolvedValue(new Response(null, { status: 429 }));
+    expect((await POST(request())).status).toBe(429);
+    expect(enforceDemoAiQuota).toHaveBeenCalledWith("newsfeed/explain");
     expect(explainNewsfeedPost).not.toHaveBeenCalled();
   });
 
@@ -98,10 +108,29 @@ describe("POST /api/newsfeed/explain", () => {
   });
 
   it("does not expose provider errors or mention cerebras", async () => {
-    explainNewsfeedPost.mockRejectedValue(new Error("CEREBRAS_API_KEY secret upstream"));
+    const logged: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(" "));
+    });
+    // The SSE body already hides this. The server log is the other copy:
+    // failureEvent interpolates error.message, and chat() builds that message
+    // from the raw upstream body (provider.ts readErrorDetail).
+    const leaked = "sk-ant-api03-abcdefghij";
+    const dbUrl = "libsql://radon-joemccann.aws-us-west-2.turso.io";
+    explainNewsfeedPost.mockRejectedValue(
+      new Error(`CEREBRAS_API_KEY secret upstream ${leaked} ${dbUrl}`),
+    );
     const text = await (await POST(request())).text();
     expect(text).not.toContain("secret");
     expect(text).not.toContain("CEREBRAS");
+    expect(text).not.toContain(leaked);
+    expect(text).not.toContain(dbUrl);
+    const logText = logged.join("\n");
+    expect(logText.length).toBeGreaterThan(0);
+    expect(logText).not.toContain(leaked);
+    expect(logText).not.toContain(dbUrl);
+    expect(logText).toContain("[redacted-key]");
+    expect(logText).toContain("[redacted-db-url]");
     expect(parseEvents(text).at(-1)).toEqual({
       event: "error",
       data: { error: "Could not explain this post. Try again.", status: 502 },

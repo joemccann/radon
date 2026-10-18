@@ -76,7 +76,7 @@ async function fetchTarget(
 ): Promise<ExplainImageBlock | null> {
   const response = target.kind === "research"
     ? await radonFetchResponse(target.path, { token: opts?.token, signal: opts?.signal, cache: "no-store" })
-    : await fetch(target.url, { signal: opts?.signal, cache: "no-store" });
+    : await fetch(target.url, { signal: opts?.signal, cache: "no-store", redirect: "error" });
   if (!response.ok) return null;
   const bytes = await readBytes(response);
   if (!bytes) return null;

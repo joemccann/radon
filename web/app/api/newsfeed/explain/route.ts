@@ -1,4 +1,6 @@
+import { scrubSecrets } from "@/lib/apiContracts";
 import { requireRouteAccess } from "@/lib/routeAccess";
+import { enforceDemoAiQuota } from "@/lib/demo/enforceAiQuota";
 import { explainInput, type NewsfeedExplainInput } from "@/lib/newsfeedExplain";
 import { encodeExplainEvent, EXPLAIN_BUDGET_MS, type ExplainStage } from "@/lib/newsfeedExplainProgress";
 import { explainNewsfeedPost } from "@/lib/newsfeedExplainGenerate";
@@ -20,11 +22,8 @@ function failureEvent(error: unknown, timeout: AbortSignal): { error: string; st
   if (timeout.aborted || (error instanceof Error && error.name === "TimeoutError")) {
     return { error: "Explanation timed out. Try again.", status: 504 };
   }
-  console.error(
-    `[newsfeed/explain] failed: ${
-      error instanceof Error ? `${error.name}: ${error.message.slice(0, 300)}` : String(error)
-    }`,
-  );
+  const detail = error instanceof Error ? `${error.name}: ${error.message.slice(0, 300)}` : String(error);
+  console.error(scrubSecrets(`[newsfeed/explain] failed: ${detail}`));
   return { error: "Could not explain this post. Try again.", status: 502 };
 }
 
@@ -76,5 +75,7 @@ export async function POST(request: Request): Promise<Response> {
     input = explainInput(JSON.parse(raw));
   } catch { return json({ error: "Provide a valid news title and content." }, 400); }
   if (!input) return json({ error: "Provide a news title and content within the length limits." }, 400);
+  const quota = await enforceDemoAiQuota("newsfeed/explain");
+  if (quota) return quota;
   return streamExplain(request, input, access.principal.token);
 }

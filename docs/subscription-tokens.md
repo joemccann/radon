@@ -244,8 +244,8 @@ ssh -t radon@radon-app '~/.local/bin/agy -p ok'
 
 Like claude, that pasted code is why there is no push login for it. The daemon
 refreshes and proves the grant through `agy models` (a sub-second authenticated
-call, not a model call), and falls back to Google's token endpoint with the
-CLI's public client id when `agy` is not installed.
+call, not a model call). A missing `agy` is `error` (`native CLI unavailable`).
+There is no Google token-endpoint fallback.
 
 Until a provider has ever been logged in on this host it reports
 `unbootstrapped`, which is the honest answer and does not page.

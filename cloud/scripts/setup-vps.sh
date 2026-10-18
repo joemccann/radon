@@ -964,8 +964,12 @@ create_etc_radon_dir() {
 
 # fchmod through an O_NOFOLLOW fd: a by-name chmod on an entry in a
 # radon-owned directory follows whatever link radon swapped in.
+# -I: setup runs as root from the radon-owned checkout, and an interpreter
+# reading its program from stdin prepends that cwd to sys.path, so a planted
+# module would execute as root on the first import. Same invariant the
+# control-plane admission check enforces for the other helpers.
 chmod_dir_nofollow() {
-  "${RADON_SYSTEM_PYTHON:-/usr/bin/python3.13}" - "$1" "$2" <<'PY_CHMOD_DIR'
+  "${RADON_SYSTEM_PYTHON:-/usr/bin/python3.13}" -I - "$1" "$2" <<'PY_CHMOD_DIR'
 import os, sys
 fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 try:
@@ -1708,7 +1712,7 @@ install_app_runtime() {
   fi
   staged="$(mktemp "${profile_target}.tmp.XXXXXX")"
   if ! stage_from_checkout "$profile_source" "$staged" 0644 ${owner_args[@]+"${owner_args[@]}"} || \
-     ! python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1], encoding="utf-8")).get("defaultAction") != "SCMP_ACT_ERRNO")' "$staged"; then
+     ! "${RADON_SYSTEM_PYTHON:-/usr/bin/python3.13}" -I -c 'import json, sys; sys.exit(json.load(open(sys.argv[1], encoding="utf-8")).get("defaultAction") != "SCMP_ACT_ERRNO")' "$staged"; then
     rm -f "$staged"
     log_error "Chromium seccomp profile failed provenance/validation"
     return 1
@@ -1902,12 +1906,19 @@ write_mcp_env() {
   chmod 0600 "$mcp_env_tmp"
   grep -E '^(CLERK_JWKS_URL|CLERK_ISSUER|ALLOWED_USER_IDS|RADON_MCP_[A-Z0-9_]+)=' "$ENV_FILE" > "$mcp_env_tmp" || true
   if [[ "${RADON_POLICY_SKIP_CHOWN:-0}" != "1" ]]; then
-    if ! chown radon:radon "$mcp_env_tmp"; then
+    # root:radon, not radon:radon (DS-2026-10-18-04). This file is the public
+    # MCP auth boundary and radon-mcp only needs to READ it; leaving it owned
+    # by the account that service runs as, and that holds a sudoers restart
+    # grant, let an unprivileged compromise choose who the public endpoint
+    # trusts. Every deploy republishes it through
+    # `radon-deploy-root publish-mcp-env`, so nothing unprivileged needs write.
+    if ! chown root:radon "$mcp_env_tmp"; then
       rm -f "$mcp_env_tmp"
       log_error "Could not chown staged ${mcp_env_target}"
       return 1
     fi
   fi
+  chmod 0640 "$mcp_env_tmp"
   # -T: a directory link raced into the destination is replaced, not entered.
   mv -T -f "$mcp_env_tmp" "$mcp_env_target"
   log_success "Hosted MCP env written to ${mcp_env_target}"
