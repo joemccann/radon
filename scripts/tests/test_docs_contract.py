@@ -2418,7 +2418,7 @@ class TestDocumentation20261018:
 
 
 class TestDocumentation20261019:
-    """DOC-209: public /health may carry a deploy revision."""
+    """DOC-209..210: public health revision and demo AI spend."""
 
     def test_public_health_may_include_revision(self):
         server = (_ROOT / "scripts/api/server.py").read_text()
@@ -2429,4 +2429,19 @@ class TestDocumentation20261019:
             assert "40-hex" in text
             assert "REVISION" in text
             assert '{"status":"ok"}` only' not in text
+
+    def test_demo_ai_spend_is_not_three_routes(self):
+        quota = (_ROOT / "web/lib/demo/aiQuota.ts").read_text()
+        assert '"newsfeed/explain": 5' in quota
+        tier = (_ROOT / "web/lib/demo/rateTier.ts").read_text()
+        assert '"/api/newsfeed/share"' in tier
+        enforce = (_ROOT / "web/lib/demo/enforceAiQuota.ts").read_text()
+        assert "DEMO_QUOTA_UNAVAILABLE" in enforce
+        assert "status: 503" in enforce
+        doc = (_ROOT / "docs/demo-environment.md").read_text()
+        assert "3 Next.js LLM routes" not in doc
+        assert "DEMO_AI_DAILY_LIMITS" in doc
+        assert "AI_PATHS" in doc
+        assert "DEMO_QUOTA_UNAVAILABLE" in doc
+        assert "/api/newsfeed/share" in doc
 
