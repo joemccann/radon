@@ -1171,11 +1171,11 @@ gunzip -c /tmp/2026-06.jsonl.gz | head
 
 ## Media backup (media.radon.run → B2)
 
-Nightly off-box mirror of the Caddy static tree for `media.radon.run`.
+Nightly off-box mirror of the newsfeed staging tree. The protected publisher independently copies approved leaves into Caddy’s served tree for `media.radon.run`; restores return to staging and pass through publication.
 
 | | |
 |---|---|
-| Local root | `/var/lib/radon/media` (Caddy `file_server` root; `~/radon-cloud/media` is a compatibility symlink) |
+| Local root | `/var/lib/radon/media` staging (`~/radon-cloud/media` compatibility symlink); the publisher copies approved leaves into Caddy’s `/var/lib/radon-public/media` |
 | Object store | Same Backblaze B2 bucket as portfolio archive (`radon-archive`) |
 | Object prefix | `media/` (override with `RADON_MEDIA_BACKUP_PREFIX`) |
 | Script | `cloud/scripts/media_backup.py` |

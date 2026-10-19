@@ -80,6 +80,7 @@ systemctl disable radon-refresh 2>/dev/null || true
 log_info "Removing systemd unit files and drop-ins..."
 rm -f /etc/systemd/system/radon-*.service
 rm -f /etc/systemd/system/radon-*.timer
+rm -f /etc/systemd/system/radon-*.path
 # `radon-*.service` cannot match the drop-in DIRECTORIES the control plane
 # installs (radon-.service.d/ fleet prefix, radon-<unit>.service.d/
 # runtime-container.conf). Left behind, a fresh setup-vps.sh silently
@@ -87,6 +88,7 @@ rm -f /etc/systemd/system/radon-*.timer
 rm -rf /etc/systemd/system/radon-.service.d
 rm -rf /etc/systemd/system/radon-*.service.d
 rm -rf /etc/systemd/system/radon-*.timer.d
+rm -rf /etc/systemd/system/radon-*.path.d
 rm -f /etc/systemd/journald.conf.d/radon.conf /etc/systemd/journald.conf.d/zz-radon.conf
 systemctl daemon-reload
 

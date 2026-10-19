@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Nightly backup of the media.radon.run static tree to Backblaze B2.
 
-Caddy serves ``https://media.radon.run`` from
-``/var/lib/radon/media`` (see cloud/caddy/Caddyfile). The
-newsfeed scraper rsyncs immutable content-derived filenames into that
-directory. This oneshot mirrors the tree off-box so a VPS disk loss
+The newsfeed stages immutable content-derived filenames under
+``/var/lib/radon/media``. A protected publisher copies approved raster leaves
+to Caddy’s independent ``/var/lib/radon-public/media`` tree. This backup
+retains the staging copy; restores pass through the publisher again. This oneshot mirrors the tree off-box so a VPS disk loss
 does not wipe newsfeed images.
 
 Transport: S3-compatible API via boto3 (same path as portfolio cold-

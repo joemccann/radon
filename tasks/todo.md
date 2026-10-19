@@ -9908,6 +9908,23 @@ Review: Existing subscription credential lifecycle remains separate; host migrat
 
 Responder account review: private cloud red run 39162568477 proved the missing account/domain contracts. Optional source deploy is inert; trusted preparation, native login and explicit pickup acknowledgement are required before timer handover. Keeper runtime remains separate. Synthetic transport and handover tests cover rollback/race paths; cloud green pending. No production state or credential material changed in this session.
 
+## Operator hardening: public media publication (2026-10-18)
+- [x] MPUB-T1 (depends_on: []): Verify current producer, edge, backup, and trusted-install contracts.
+- [x] MPUB-T2 (depends_on: [MPUB-T1]): Add descriptor-bound publisher regression coverage and cloud RED evidence.
+- [x] MPUB-T3 (depends_on: [MPUB-T2]): Implement bounded publication, initial migration, trusted units, cleanup, and rollback.
+- [ ] MPUB-T4 (depends_on: [MPUB-T3]): Cloud GREEN/full CI, isolated permission checks, and final review.
+
+### Public media publication review
+- Private CI RED verified in job 117778809500; GREEN validation pending.
+- Current source metadata inventory supplied by root: 4291 regular single-link radon-owned PNGs; no links or directories.
+- Preserves producer/API paths, public URLs and staging backup; initial edge switch requires complete bounded backfill.
+- Static AST, shell syntax, artifact-table count and whitespace checks completed; no local suites or production mutations.
+
+### Public media source-lifecycle review repair
+- Preserve all supported source leaves, including aged files still served from staging; source cleanup remains the retention owner.
+- Reject supported-source overcount before copies/removals; regressions cover initial backfill, cached/uncached refresh, and unchanged destination/cache on overflow.
+- Static AST/whitespace verification only; replacement private cloud validation and independent review remain pending.
+
 
 ### Private CI integration repair (2026-10-18)
 - [x] CI1 depends_on: [] Inspect exact-head private CI failures without local suites or production access.
@@ -9925,3 +9942,10 @@ Static repair review: changed Python sources parse, changed shell entrypoints pa
 - [x] RR3 depends_on: [RR2] Add synthetic transient-state, lookup-failure and provisioned-layout coverage for cloud verification.
 
 Independent review repair: handover reads explicit ActiveState and permits only confirmed inactive/failed workloads; transient states and query failures refuse before timer changes or restore the prior timers after disable. Native CLI installation normalizes only an absent canonical slot as the dedicated account and validates the executable before preparation completes. Synthetic coverage authored for both handover directions, second-check races and native installer layouts. AST and whitespace checks pass; cloud verification remains pending.
+
+### Independent media review repair
+- [x] MR1 depends_on: [] Verify bounded-read accounting and the canonical public PNG producer contract.
+- [x] MR2 depends_on: [MR1] Reject initial oversize without opening payload, reserve attempted source/destination reads and validate PNG framing/dimensions.
+- [x] MR3 depends_on: [MR2] Author synthetic budget, read-failure and malformed/oversized PNG coverage for private cloud verification.
+
+Independent media review: initial stat oversize is refused before payload open; each source/destination attempt reserves its stat-size plus growth sentinel before any read, including failures and rejected content. Source reads use the pinned stat-size bound rather than the global cap. Public producer always emits PNG; the publisher now enforces PNG chunk framing/CRC, 16MP IHDR dimensions and terminal IEND without privileged pixel decoding. Synthetic regressions cover invalid magic, read failures, destination comparisons, oversized initial metadata and malformed/dimension-overflow PNGs. AST and whitespace pass; cloud verification pending.
