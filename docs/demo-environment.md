@@ -229,11 +229,30 @@ no reachable IB port on any prod host.
 The 09-04 ship was a manual ssh+tar from macOS: it carried 2,193 AppleDouble
 `._*` files into the image, wrote no record of which commit it was, and by
 2026-10-18 the VM was 847 commits behind main in `scripts/` with 8 routes the
-demo frontend calls missing (`/ai-cycle` 404 x213). Nothing deploys the VM
-automatically and nothing can from GitHub: `fw-radon-demo` admits SSH only from
-the recovery /32.
+demo frontend calls missing (`/ai-cycle` 404 x213). Nothing can push to the VM
+from GitHub: `fw-radon-demo` admits SSH only from the recovery /32.
 
-**Deploy** from the operator host (the Mac mini, which has `ssh radon-demo`),
+**Auto-deploy (pull-based).** `radon-demo-autodeploy.timer` on the VM
+(`cloud/demo-vm/`) fires every 15 minutes. `demo_vm_autodeploy.py`
+(stdlib, `python3 -I`, root) reads the newest `ci.yml` push run on `main`
+that concluded `success` from the public GitHub API: a green run means the
+full test gate passed and prod deployed that sha. It compares the
+`scripts` / `requirements.txt` / `pyproject.toml` tree ids at that sha with
+the live `app/REVISION`. Equal trees are a no-op with no download. Otherwise it
+downloads the commit tarball, repacks only those paths (no `._*`, no links),
+and runs the INSTALLED `/usr/local/lib/radon-demo/deploy-demo-vm-remote.sh`,
+the last known-good copy, with the gates and rollback below. After a green
+deploy it refreshes both installed tools from that commit. A sha that fails is
+written to `/var/lib/radon-demo-autodeploy/failed-sha` and is not rebuilt every
+15 minutes; the next green main sha is tried normally. No credential, no
+inbound access, no dependency on the Mac mini. Logs:
+`journalctl -u radon-demo-autodeploy.service`.
+
+One-time install (or upgrade of the units) from the operator host:
+`cloud/scripts/deploy-demo-vm.sh --install-autodeploy "$(git rev-parse origin/main)"`
+(`--dry-run` contacts no host).
+
+**Manual deploy** from the operator host (the Mac mini, which has `ssh radon-demo`),
 from a checkout that has fetched the target commit:
 
 ```
@@ -274,11 +293,11 @@ operator host. Re-running the live sha is a no-op. Manual rollback:
 (prod) keep the old payload.
 
 **Drift check.** `.github/workflows/demo-vm-drift.yml` runs
-`scripts/ci/check_demo_vm_drift.py` daily on main. It fails when `/health`
-reports no revision, a revision not on main, or when the oldest main commit
-touching the backend paths that the VM lacks is more than 7 days old. The
-failed-run email is the alert. Until the first `deploy-demo-vm.sh` run it fails
-by design: the 09-04 image has no `revision`.
+`scripts/ci/check_demo_vm_drift.py` every 6 hours on main. It fails when
+`/health` reports no revision, a revision not on main, or when the oldest main
+commit touching the backend paths that the VM lacks is more than 1 day old,
+which means the auto-deploy agent is failing or stopped. The failed-run email
+is the alert.
 
 ### Second root cause: Svix auto-disabled the endpoint (found 2026-09-04)
 

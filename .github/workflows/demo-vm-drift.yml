@@ -1,13 +1,13 @@
 name: Demo VM backend drift
 
-# The demo VM backend is deployed by hand from the operator host
-# (cloud/scripts/deploy-demo-vm.sh <sha>): fw-radon-demo admits SSH only from
-# the recovery /32, so no runner can push to it. This job is the off-box
-# observer for that gap. It reads the public https://demo-api.radon.run/health
-# `revision` and fails when it is missing, not on main, or behind main's
-# scripts/ requirements.txt pyproject.toml for more than 7 days
-# (scripts/ci/check_demo_vm_drift.py). GitHub's email on the failed run is
-# the operator alert.
+# The demo VM deploys itself: radon-demo-autodeploy.timer (cloud/demo-vm/)
+# pulls the latest green main every 15 minutes, because fw-radon-demo admits
+# SSH only from the recovery /32 and no runner can push to it. This job is the
+# off-box observer that the agent is still working. It reads the public
+# https://demo-api.radon.run/health `revision` and fails when it is missing,
+# not on main, or behind main's scripts/ requirements.txt pyproject.toml for
+# more than 1 day (scripts/ci/check_demo_vm_drift.py). GitHub's email on the
+# failed run is the operator alert.
 #
 # Not a step of external-health-probe.yml: that runs every 5 minutes, so a
 # multi-day condition would fail (and email) hundreds of times, and it checks
@@ -15,7 +15,7 @@ name: Demo VM backend drift
 
 on:
   schedule:
-    - cron: "17 13 * * *"
+    - cron: "17 */6 * * *"
   workflow_dispatch: {}
 
 concurrency:
@@ -40,4 +40,4 @@ jobs:
           python-version: "3.13"
       # stdlib-only: no pip install.
       - name: Check demo VM drift
-        run: python3 scripts/ci/check_demo_vm_drift.py --ref HEAD --max-days 7
+        run: python3 scripts/ci/check_demo_vm_drift.py --ref HEAD --max-days 1
