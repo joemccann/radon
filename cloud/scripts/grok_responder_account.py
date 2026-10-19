@@ -236,7 +236,8 @@ def prepare(stage: Path):
         as_account(["/usr/bin/git", "-C", repo, "config", key, value])
     as_account(["/usr/bin/touch", repo / ".radon-page-responder"])
     as_account(["/usr/bin/chmod", "-R", "g-w,g+rX,o-rwx", repo])
-    as_account(["/usr/bin/git", "config", "--global", "--add", "safe.directory", repo], account="radon")
+    for path in (repo, repo / ".git"):
+        as_account(["/usr/bin/git", "config", "--global", "--add", "safe.directory", path], account="radon")
     if not (repo / ".venv/bin/python").exists():
         as_account(["/usr/bin/python3.13", "-m", "venv", repo / ".venv"])
     as_account([repo / ".venv/bin/pip", "install", "-q", "-r", repo / "requirements.txt"])
