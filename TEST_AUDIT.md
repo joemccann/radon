@@ -11618,3 +11618,35 @@ Counted Vitest rounds used `VITEST_MAX_WORKERS=4` then `2`. Rounds 1 and 2 timed
 | 3 | 16,367 passed / 2 skipped / 23 subtests | 11,060 passed / 21 skipped / 1,126 files (1 file skipped) | 2,893 passed / 32 failed / 8 skipped | 0 added / 0 removed |
 
 Base cloud at `30bbaec2` with Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, and caddy 2.11.7: 2,893 passed / 32 failed / 8 skipped. Round 1 added only `test_a_streaming_turn_survives_the_generic_header_guard`; it passed alone in 38.19s. Rounds 2 and 3 match the base node set. The 32 are the bash 3.2 `mapfile` and host-Python baseline on this Mac. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed.
+
+## Delta audit 2026-10-19
+
+Range `30bbaec2bd208d41fe04a9d115c393f9aa5bfb0e..2f08fe78f30b2ea3f086034c64ab1c77f4b937dd`: 166 commits / 298 paths. Newest trusted checkpoint is the 2026-10-18 collaborator comment on issue #83 (`audited-through: 30bbaec2bd208d41fe04a9d115c393f9aa5bfb0e`). No open `testing/` pull request. Numbering continues after T-558. The checkpoint carried no open verified T finding. Operator-only T-130, T-435, T-488, and T-490 stay operator-only from earlier ledgers and were not reopened.
+
+AI-cycle HTTP 503 retry, deploy revision echo, chart-note footer cap, demo AI quota fail-closed, orders snapshot batch, explain prompt wording, Clerk auto-proxy disable, Vercel instrumentation timers, and the demo VM pull deploy are executed by tests that call the behavior. `ci.yml` added `e2e/vix-model-spread-tab.spec.ts` to the curated Playwright list and moved deploy SSH onto the tailnet. No coverage threshold change and no new blanket exclude. New `pytest.skip` lines are platform gates (`sys.platform != 'linux'`, root euid) in the performance-probe helper, not product skips. The delta touches 107 test files, so a scoped three-times rerun is the full gate. Those counts are the closing rounds below.
+
+Not filed: `valid_plan` and `validate_plan` both refuse a note over `NOTE_CHARS` (`scripts/research/generated_charts.py:113`, `scripts/research/chart_render.py:107`). `test_research_generated_charts.py:529` greps the prompt, and `test_research_chart_render.py:37` already fails render. Dropping only the generator check still dies in `render_chart` as `ValueError`.
+
+### T-559 — P2 — a failed cold portfolio read is proved only on a panel the test props itself
+
+`WorkspaceShell` passes `loadError={portfolioError}` into the lazy portfolio surface (`web/components/WorkspaceShell.tsx:637`). Demo mode drops the live-data banner (`web/lib/offline/offlineStatus.ts:137`), so that prop is the only "unavailable" signal. `portfolio-sections-load-error.test.tsx:32` renders `PortfolioSections` with `loadError` supplied by the test. Removing the shell prop left that file and `portfolio-startup-performance-contract.test.ts` green (11 passed).
+
+Acceptance: a shell render whose `usePortfolio` error is `Service Unavailable` and whose snapshot is null hands `loadError: "Service Unavailable"` to the portfolio chunk. A quiet read hands null. The leaf panel tests stay green when only the shell prop is removed.
+
+Audited through: 2f08fe78f30b2ea3f086034c64ab1c77f4b937dd on 2026-10-19 — 1 new finding
+
+## Remediation 2026-10-19
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-559 | DONE | Shell prop removed: the two existing portfolio files passed 11 tests. The new shell assertion then failed (`expected undefined to be 'Service Unavailable'`, 1 failed / 9 skipped in that file). Restored prop. `portfolio-startup-performance-contract.test.ts` and `portfolio-sections-load-error.test.tsx` passed 12 tests on each of three serial runs. Product source unchanged. |
+
+Closing gates, serial, from the repo root. Root pytest exit 0 each round. Vitest exit 1 each round on the same five `await import("../next.config.mjs")` cases (`Test timed out in 5000ms`). A serial diagnostic of those five files with `--testTimeout=20000 --maxWorkers=1` passed 29 tests in 35.21s (imports 6489–7239 ms). The committed ceiling was not raised. Cloud exit 1 each round on the same 54 nodes.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs base `30bbaec2` |
+|---|---|---|---|---|
+| 1 | 16,612 passed / 10 skipped / 23 subtests (153.44s) | 5 failed / 11,259 passed / 21 skipped / 1,145 files (159.64s) | 54 failed / 3,197 passed / 11 skipped (756.87s) | 22 added / 0 removed |
+| 2 | 16,612 passed / 10 skipped / 23 subtests (120.87s) | 5 failed / 11,259 passed / 21 skipped / 1,145 files (161.61s) | 54 failed / 3,197 passed / 11 skipped (763.86s) | 22 added / 0 removed |
+| 3 | 16,612 passed / 10 skipped / 23 subtests (110.91s) | 5 failed / 11,259 passed / 21 skipped / 1,145 files (160.37s) | 54 failed / 3,197 passed / 11 skipped (823.56s) | 22 added / 0 removed |
+
+Base cloud at `30bbaec2` on this Mac (Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, caddy 2.11.7): 32 failed / 2,893 passed / 8 skipped (734.88s). The 22 added nodes are identical on rounds 1–3: four `test_deploy_lock_migration.py` cases (`flock: command not found`), eight `test_responder_service_account.py` slot cases (`FileNotFoundError: /usr/bin/test`), nine `test_sync_control_plane.py` cases (`pin[@]: unbound variable` under bash 3.2 `set -u` on an empty array), and `test_setup_boot_enable_does_not_reactivate_retired_media_path` (`persistent_units[@]: unbound variable`). The 32 base failures stayed failed. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The five next.config timeouts are the same load class as 2026-10-18; they pass when the ceiling is 20s and the import itself is about 6.5–7.2s.
