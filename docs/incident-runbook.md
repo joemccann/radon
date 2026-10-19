@@ -49,6 +49,24 @@ each artifact's `case_id` anchors into this file. Triage them with the
   Every RED probe replaces the last transport boundary, so reproducing the
   defect never sends a real page.
 
+## prestage-subscription-publisher-upgrade
+
+- **Detection:** first-upgrade prestage reports `Subscription service environment
+  publication failed` while the ordinary deploy can still synchronize its
+  control plane and complete.
+- **Mechanism:** prestage runs before the deploy job installs the target helper
+  and grant. Requiring its new publication action at that point rejects the
+  upgrade that supplies it.
+- **Discriminating check:** `cloud/tests/test_subscription_service_env.py`
+  exercises real main/publication paths with missing grants, missing helper
+  actions and ready helpers; prestage must skip publication, while normal
+  deploys must require it even for an already-green release.
+- **Remediation:** preserve recover-only, pinned control-plane sync, then
+  ordinary deploy. Skip subscription publication only in prestage; retain
+  required publication after environment validation in ordinary deploys.
+  Do not relax grants or alter rollback journals. A failed-job rerun may also
+  rerun dependent deployment jobs; observe the entire run before proceeding.
+
 ## control-plane-isolation-admission
 
 - **Detection:** `radon-deploy-root sync-control-plane` exits 76 with

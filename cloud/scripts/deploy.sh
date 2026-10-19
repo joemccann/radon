@@ -1803,7 +1803,11 @@ main() {
   fi
   # The hosted MCP unit loads a stripped env derived from the file just validated.
   write_mcp_env "$ENV_FILE_DEFAULT"
-  write_subscription_env
+  # Prestage precedes the deploy job's pinned control-plane sync. A first
+  # upgrade may not have this publisher or its grant until that sync completes.
+  if [[ "${RADON_DEPLOY_STAGE:-0}" != "1" ]]; then
+    write_subscription_env
+  fi
 
   local prev_commit
   prev_commit="$(current_commit)"

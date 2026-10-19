@@ -536,9 +536,10 @@ reviewed disclosures and source limits are documented in
 [`docs/ai-infrastructure-operations.md`](../docs/ai-infrastructure-operations.md).
 The subscription keeper loads the root-private derived environment
 `/etc/radon/subscription-tokens/env`. Setup derives it before installing units;
-each deploy refreshes it through the fixed `publish-subscription-env` root
-verb after environment preflight. The keeper's UID, native credential paths
-and vault socket are unchanged. Lifecycle and rollback ownership:
+each ordinary deploy refreshes it through the fixed `publish-subscription-env`
+root verb after environment preflight and the job's pinned control-plane sync.
+Prestage precedes that sync and skips this publisher. The keeper's UID, native
+credential paths and vault socket are unchanged. Lifecycle and rollback ownership:
 [`docs/subscription-tokens.md`](../docs/subscription-tokens.md#service-environment-lifecycle).
 
 `radon-subscription-tokens.timer` runs every 30 minutes UTC (`Persistent=true`)
