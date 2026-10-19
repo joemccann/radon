@@ -654,6 +654,13 @@ Jul 11. `radon-disk-cleanup` automates the manual reclaim.
 | `radon-disk-cleanup.timer` | VPS | Weekly **Sun 03:20 UTC**, `RandomizedDelaySec=300`, `Persistent=true`. Clear of portfolio-archive (05:40), db-retention (08:10) and db-backup (09:00). |
 | `radon-disk-cleanup.service` | VPS | Oneshot, `User=root` (root-only docker socket + journald vacuum), `TimeoutStartSec=900`. Runs the control-plane copy at `/usr/local/lib/radon/disk_cleanup.py` under `python3 -I`, never the radon-writable checkout. |
 | `cloud/scripts/disk_cleanup.py` | VPS | Five categories: stale app images, dangling layers, leaked release worktrees, npm/pip caches, journald. |
+
+### Demo mirror (`radon-demo-mirror.timer`)
+
+| Piece | Where | What |
+|---|---|---|
+| `radon-demo-mirror.timer` | VPS | Daily **21:45 UTC** plus a **23:30 UTC** retry slot, weekends included, `Persistent=true`. A weekday-only schedule aged demo snapshots past the regime routes' 48h budget every weekend, and a pass a deploy SIGTERMed was never re-run. |
+| `radon-demo-mirror.service` | VPS | Oneshot: `migrate.py --demo`, then `demo_seed.py` (re-anchors the synthetic book's expiries to the run date; refuses any non `radon-demo` URL), then `mirror_market_snapshots_to_demo.js`. Heartbeat: `demo-mirror` (26h). Contract: [`demo-environment.md`](demo-environment.md). |
 | `service_health` heartbeat | row `disk-cleanup` | Written on EVERY run — `ok` with per-category bytes plus free-space before/after, `error` naming the failing categories. 8-day freshness window. |
 
 Retention constants (`cloud/scripts/disk_cleanup.py`):

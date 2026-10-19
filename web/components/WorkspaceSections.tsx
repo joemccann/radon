@@ -2524,14 +2524,16 @@ function JournalSections() {
             <InfoTooltip text={SECTION_TOOLTIPS["Trade Journal"]} />
           </div>
           <div className="section-header-actions">
-            <button
-              className="btn-sync"
-              onClick={handleSync}
-              disabled={syncing}
-              title="Sync unreconciled IB trades into journal"
-            >
-              {syncing ? "SYNCING..." : "SYNC IB"}
-            </button>
+            {process.env.NEXT_PUBLIC_RADON_DEMO !== "1" ? (
+              <button
+                className="btn-sync"
+                onClick={handleSync}
+                disabled={syncing}
+                title="Sync unreconciled IB trades into journal"
+              >
+                {syncing ? "SYNCING..." : "SYNC IB"}
+              </button>
+            ) : null}
             {lastSyncResult && (
               <span className="pill defined" style={{ fontSize: "var(--text-meta)" }}>
                 {lastSyncResult.imported > 0

@@ -5,6 +5,8 @@ import { cachedRead } from "@/lib/dbCache";
 import { dbExecute } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { buildDemoCatalysts } from "@/lib/demo/fixtures/catalysts";
+import { requestPrincipalKind } from "@/lib/demo/requestPrincipal";
 
 /**
  * GET /api/catalysts
@@ -57,6 +59,11 @@ export const radonCapability = "read";
 
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
+  // Only scripts/fetch_catalysts.py creates the `catalysts` table, and it never
+  // runs against the demo Turso; demo principals get a request-time sample.
+  if (await requestPrincipalKind() === "demo") {
+    return setNoStoreResponseHeaders(NextResponse.json(buildDemoCatalysts(new Date())), requestId);
+  }
   const result = await cachedRead("catalysts:snapshot", READ_CACHE_TTL_MS, () =>
     dbFirstRead({
       fromDb: readCatalystsFromDb,
