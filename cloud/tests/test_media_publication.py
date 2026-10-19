@@ -556,7 +556,8 @@ def test_real_systemd_recovery_retires_burst_path_and_keeps_timer_publication():
                     "for n in range(100): p.write_text('burst-'+str(n))\n")
         time.sleep(2)
         assert count() == first, "burst writes must not trigger publisher starts"
-        until(lambda: count() >= first + 3, 56, "timer must complete three subsequent publications")
+        until(lambda: count() >= first + 3 and state("service", "ActiveState") == "inactive",
+              56, "timer must complete three subsequent publications")
         assert (data / "public" / "value").read_text() == "burst-99"
         assert state("service", "Result") == "success"
         assert state("path", "ActiveState") == "inactive"
