@@ -1077,6 +1077,9 @@ grant_caddy_media_access() {
 # Called only from the fixed edge publish action, before its candidate is live.
 # A deferred batch persists its root-owned index and resumes on the next pass.
 prepare_public_media_publication() {
+  # Directory bursts can exhaust the service start limit and latch the path.
+  # Retain its artifact for rollback, but use only bounded timer scheduling.
+  "$SYSTEMCTL" disable --now radon-media-publish.path || return 1
   local attempt status
   local -a publisher=(/usr/bin/python3 -I /usr/local/lib/radon/media_publish.py)
   if (( HELPER_TEST_MODE == 1 )); then
@@ -1086,7 +1089,8 @@ prepare_public_media_publication() {
     status=0
     "${publisher[@]}" || status=$?
     if (( status == 0 )); then
-      "$SYSTEMCTL" enable --now radon-media-publish.path radon-media-publish.timer
+      "$SYSTEMCTL" reset-failed radon-media-publish.service radon-media-publish.path || return 1
+      "$SYSTEMCTL" enable --now radon-media-publish.timer
       return $?
     fi
     (( status == 75 )) || return "$status"

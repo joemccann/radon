@@ -10035,8 +10035,10 @@ Final readiness checkpoint: expanded focused cloud validation passed 101/101 wit
 ## Media publication watcher recovery (2026-10-18)
 
 - [x] MP1 depends_on: [] Preserve actual failed-unit metadata and bounded journal evidence; establish the trigger/start failure sequence.
-- [ ] MP2 depends_on: [MP1] Reproduce the observed scheduling failure in a real isolated cloud systemd fixture before runtime changes.
+- [x] MP2 depends_on: [MP1] Reproduce the observed scheduling failure in a real isolated cloud systemd fixture before runtime changes.
 - [ ] MP3 depends_on: [MP2] Apply the smallest bounded scheduling/recovery repair and obtain cloud GREEN plus independent Sol/Luna review.
 - [ ] MP4 depends_on: [MP3] Complete exact-head public CI, one accepted green notification, authorized merge/deploy and independent live publication checks.
 
 Review: no local test suites; retain all PNG validation, authority, read-budget and timeout controls. No IB Gateway or unrelated service changes. Current deployed1bd6 CI green; path failed with unit-start-limit-hit while retry timer is active. Full final live verification remains incomplete.
+
+Media scheduling regression: corrected cloud RED `39191147518` at test source `df0eb32f` recorded 8 failed/42 passed/0 skipped, including ten real successful systemd starts, service `start-limit-hit`, path `unit-start-limit-hit`, and the old helper leaving the path failed. Initial fixture-only failures are excluded. Runtime changes applied only after this valid RED; all PNG and resource-bound source remains unchanged.

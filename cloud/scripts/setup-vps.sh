@@ -1210,11 +1210,14 @@ install_media_publication() {
       "/etc/systemd/system/radon-media-publish.${kind}" 0644 -o root -g root || return 1
   done
   systemctl daemon-reload || return 1
+  # Retire burst-triggered starts before backfill; the timer owns retries.
+  systemctl disable --now radon-media-publish.path || return 1
   for ((attempt=0; attempt<20; attempt++)); do
     status=0
     /usr/bin/python3 -I /usr/local/lib/radon/media_publish.py || status=$?
     if (( status == 0 )); then
-      systemctl enable --now radon-media-publish.path radon-media-publish.timer
+      systemctl reset-failed radon-media-publish.service radon-media-publish.path || return 1
+      systemctl enable --now radon-media-publish.timer
       return $?
     fi
     (( status == 75 )) || return "$status"
@@ -1352,6 +1355,8 @@ enable_services() {
   for svc in "${SERVICE_FILES[@]}"; do
     # Research requires private runtime credentials and explicit activation.
     [[ "$svc" == "radon-research.service" ]] && continue
+    # Installed for rollback only; media publication is timer-owned.
+    [[ "$svc" == "radon-media-publish.path" ]] && continue
     [[ "$svc" == "radon-ib-gateway-preheld-restart.service" ]] && continue
     # SLM tagger sidecar + monitor stay copied but disabled until Joe enables
     # after C WINS. No model is installed on a fresh host.

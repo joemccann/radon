@@ -314,8 +314,10 @@ each destination atomically. Existing filenames and `https://media.radon.run/`
 URLs are preserved. Private research media continues through its existing
 subscriber API and is independent of this public tree.
 
-The `.path` unit notices new staging entries; the 15-second retry timer handles
-incomplete writes, missed events and deferred batches. A protected index avoids
+The timer starts publication 15 seconds after the service becomes inactive,
+handling incomplete writes and deferred batches without burst-triggered starts.
+The legacy `.path` artifact remains installed for rollback but is stopped and
+disabled; fresh setup and upgrades do not enable it. A protected index avoids
 rereading unchanged image bytes. Each batch reserves at most 256 MiB for attempted
 source and destination reads, including failed reads and one-byte growth sentinels; each image
 at most 80 MiB, and source enumeration stops at 20,000 entries. Initially oversized files are rejected before opening. The producer in
@@ -336,7 +338,8 @@ service has no production database credentials and writes no service-health row.
 
 Rollout installs the publisher and service/path/timer through the verified
 control-plane bundle. Before the new Caddy root can become live, `publish-caddy`
-synchronously drains up to 20 cached batches and enables the watcher and timer.
+stops and disables the legacy path, synchronously drains up to 20 cached batches,
+clears prior service/path failures, and enables only the timer.
 A failed or incomplete initial migration leaves the previous Caddy configuration
 active. A large backlog can be advanced by running the installed publisher as
 root; exit 75 means another bounded batch is needed. Fresh-host setup uses the
