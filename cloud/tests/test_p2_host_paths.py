@@ -36,6 +36,9 @@ def test_fleet_units_load_etc_radon_env() -> None:
         if path.name == "radon-mcp.service":
             assert value == "/etc/radon/mcp.env", path.name
             continue
+        if path.name == "radon-subscription-tokens.service":
+            assert value == "/etc/radon/subscription-tokens/env", path.name
+            continue
         assert value == CANONICAL_ENV, path.name
     assert found >= 40
 

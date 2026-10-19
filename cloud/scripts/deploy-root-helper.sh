@@ -62,6 +62,7 @@ readonly -a CONTROL_PLANE_SOURCES=(
   services/radon-ai-cycle-backfill.service.d/runtime-container.conf
   services/radon-aa-frontier-refresh.service.d/runtime-container.conf
   services/radon-research-archive.service.d/runtime-container.conf
+  scripts/subscription_service_env.py
   scripts/media_publish.py
   services/radon-media-publish.service
   services/radon-media-publish.path
@@ -118,6 +119,7 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/systemd/system/radon-ai-cycle-backfill.service.d/runtime-container.conf
   /etc/systemd/system/radon-aa-frontier-refresh.service.d/runtime-container.conf
   /etc/systemd/system/radon-research-archive.service.d/runtime-container.conf
+  /usr/local/lib/radon/subscription_service_env.py
   /usr/local/lib/radon/media_publish.py
   /etc/systemd/system/radon-media-publish.service
   /etc/systemd/system/radon-media-publish.path
@@ -132,6 +134,7 @@ readonly -a CONTROL_PLANE_MODES=(
   644 644 644 644 644
   644 644
   644 644 644 644 644
+  644
   644
   644 644 644 644
 )
@@ -360,7 +363,7 @@ PY_MIGRATE_STATE
 }
 
 if (( $# != 1 )) && ! { (( $# == 2 )) && [[ "${1:-}" == sync-control-plane && "${2:-}" =~ ^[0-9a-f]{40}$ ]]; }; then
-  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy|publish-mcp-env|install-units|revert-units|sync-scheduled-units|sync-control-plane|refresh-control-plane|refresh-control-plane-privileged}" >&2
+  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy|publish-mcp-env|publish-subscription-env|install-units|revert-units|sync-scheduled-units|sync-control-plane|refresh-control-plane|refresh-control-plane-privileged}" >&2
   exit 64
 fi
 
@@ -2633,7 +2636,7 @@ root_action_timeout() {
       # py_compile) for the whole bundle; not in the job-cancel class.
       printf '%s\n' "$ROOT_SYNC_ACTION_TIMEOUT"
       ;;
-    publish-mcp-env)
+    publish-mcp-env|publish-subscription-env)
       # One grep and one rename over a constant path; nothing to wait on.
       printf '%s\n' "$ROOT_VERIFY_ACTION_TIMEOUT"
       ;;
@@ -2746,6 +2749,9 @@ case "$1" in
     ;;
   publish-mcp-env)
     publish_mcp_env
+    ;;
+  publish-subscription-env)
+    "$SESSION_PYTHON" -I /usr/local/lib/radon/subscription_service_env.py /etc/radon/env /etc/radon/subscription-tokens/env
     ;;
   sync-control-plane)
     sync_control_plane "${2:-}"

@@ -11,6 +11,7 @@ const REPO_ROOT = join(__dirname, "..");
 // The CTA route was the canary; commit 0575bc1 fixed it. This contract test
 // keeps the rest of the family in line.
 const DYNAMIC_ROUTES = [
+  "app/api/vix-model-spread/route.ts",
   "app/api/menthorq/cta/route.ts",
   "app/api/journal/route.ts",
   "app/api/discover/route.ts",
@@ -57,6 +58,7 @@ const DYNAMIC_ROUTES = [
 // wrapper hooks such as useDiscover — patching it once covers every
 // downstream hook that delegates to it.
 const NO_STORE_HOOKS = [
+  "lib/useVixModelSpread.ts",
   "lib/useMenthorqCta.ts",
   "lib/useSyncHook.ts",
   "lib/useJournal.ts",
@@ -116,6 +118,7 @@ describe("client hooks/components — every fetch must use cache: 'no-store'", (
 // source-of-truth migration). Each must invoke a DB read function from
 // inside its GET handler — the DB-first contract.
 const DB_FIRST_ROUTES: { path: string; dbHelperPattern: RegExp }[] = [
+  { path: "app/api/vix-model-spread/route.ts", dbHelperPattern: /readFromDb\b/ },
   { path: "app/api/orders/route.ts", dbHelperPattern: /readOrdersSnapshotFromDb\s*\(/ },
   { path: "app/api/vcg/route.ts", dbHelperPattern: /readVcgFromDb\b/ },
   { path: "app/api/gex/route.ts", dbHelperPattern: /readCachedGexFromDb\s*\(/ },

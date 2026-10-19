@@ -267,6 +267,8 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // ``vix-pc`` — radon-vix-pc.timer fires daily 02:00 UTC every calendar day
   // (weekend runs are unchanged-data heartbeats), so a uniform 26h window
   // matches its daily siblings. UW VIX options-volume only — no IB.
+  // Daily Cboe source sampling; tolerate one off-session missed heartbeat.
+  "vix-model-spread": { open: 26 * HOUR, extended: 26 * HOUR, closed: 48 * HOUR, category: "scheduled", requires_ib: false },
   "vix-pc": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``vixts`` — radon-vixts.timer fires daily 02:45 UTC every calendar day,
@@ -608,6 +610,7 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Smoke then auto-promote, or stay on last-known-good. Pure xAI CLI +
   // Turso heartbeat — no IB. 26h window = daily cadence + timer jitter.
   "grok-upgrade": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+  "grok-responder-upgrade": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``portfolio-archive`` is the portfolio_snapshots cold-archive oneshot
   // (scripts/archive_portfolio_snapshots.py via radon-portfolio-archive.timer
