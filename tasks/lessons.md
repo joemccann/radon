@@ -1,3 +1,8 @@
+# The unit Result is the latest run, not the paged one (2026-10-17)
+
+- `radon-ai-cycle.service` keeps only the last oneshot result. A P1 at 07:20Z can be an uncaught cloud insert, while `systemctl show` the next day shows a different publisher `error` from the following timer. Read `service_health_events` at `paged_at` before treating the live `/ai-cycle` source list as the page cause.
+- Pooled Hrana `HTTP 503` is not urllib's `HTTP Error 503`. `ai_cycle` cloud writes must use `is_transport_error` or a single 503 aborts the oneshot before any source status. A statement error still fails fast. Stand down only when the Python Turso canary fails too.
+
 # Withdrawn X footer preference (2026-10-17)
 
 - The user withdrew the requested automatic Grok footer after PR #1143 shipped. Keep X share copy free of this automatic footer and do not reintroduce the withdrawn request from conversation history without a fresh instruction.

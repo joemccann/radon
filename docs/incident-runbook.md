@@ -1349,6 +1349,57 @@ when the EIA read stalls once inside the 25s publisher timeout.** Peak:
 
 ---
 
+## ai-cycle-observation-insert-http-503
+
+**`radon-ai-cycle.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+when the first cloud observation insert gets one pooled HTTP 503.** Peak:
+2026-10-17 07:18Z, page `436c91e12b8bc7a7a6f5de7a2168f899`. The unit's later
+`Result` is a newer run. Timer next ~24h.
+
+- **Mechanism:** `--record` archives OpenRouter (one model file plus seven
+  app-ranking days), then `append_observations` sends `INSERT OR IGNORE`.
+  Pooled Hrana turns a non-200 into `HttpStatusError` (`HTTP 503`). At this
+  page the pool still raised `OSError("HTTP 503")`. `hrana_execute` wraps
+  that as `HranaHttpError` with the status as `__cause__`. The store's
+  retry markers look for urllib's `HTTP Error 5`, so the text `HTTP 503`
+  was not transient. The insert was not retried. `HranaHttpError` is not
+  in the per-source catch list, so `main` wrote
+  `Collection failed; inspect sanitized source statuses` and re-raised.
+  No `ai_cycle_source_status` row and no observation `available_at` landed
+  for that minute. Health `finished_at` was 07:18:20.076Z, the same second
+  as the last raw file. `Type=oneshot` has no `Restart=`. A later same-day
+  run reached `service_health[ai-cycle]=ok` at 20:29:56Z. The payloads
+  parse and insert in local SQLite. Python Turso canary `SELECT 1`
+  succeeded after the page. `:8321/health/lite` stayed authenticated with
+  `database=up`.
+- **Detection:** `service_health_events` for `ai-cycle` at the page minute
+  is that sanitized uncaught message, not
+  `Enabled publisher collection failed`. `systemctl show` on a later day
+  shows the newer run. Journal is root-only (`User=root` via
+  `radon-app-runtime`); the 300-line tail does not reach this crash once
+  a later run prints its report.
+- **Discriminating check:** OpenRouter raw files for the run exist and
+  parse, and `ai_cycle_source_status` has no row in that minute. Canary
+  `SELECT 1` succeeds. A source row with `Publisher transport failed` is
+  the EIA or NOAA case, not this one. Canary fail too means Turso
+  platform, stand down. `Result=signal` or exit 143 is deploy stop-clean.
+  `/health/lite` down means API, stand down. Do not `reset-failed` and
+  start on a binary that still treats `HTTP 503` as fatal: the same blip
+  exits 1 again.
+- **Remediation (code):** classify a cloud write as transient when
+  `is_transport_error` says so (HTTP 502/503/504, reset, broken pipe),
+  and keep the timeout string markers. Retry the idempotent insert up to
+  three attempts. A statement error still fails on the first attempt. A
+  503 that survives the budget still exits 1. After deploy, the next
+  07:15 UTC timer collects the day. Inserts are `INSERT OR IGNORE`.
+- **Regression:**
+  `test_ai_cycle_core.py::test_cloud_observation_insert_retries_a_pooled_http_503`,
+  `test_cloud_observation_insert_still_fails_when_http_503_persists`,
+  `test_cloud_writes_fail_fast_on_statement_errors`.
+- **Code:** `scripts/ai_cycle/store.py` (`_is_transient_hrana`, `_execute`).
+
+---
+
 ## ai-cycle-backfill-snapshot-vintage-budget
 
 **`radon-ai-cycle-backfill.service` oneshot pages P1 `Result=exit-code`
