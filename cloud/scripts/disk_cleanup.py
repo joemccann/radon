@@ -540,8 +540,41 @@ def remove_tree(path: Path) -> int:
     if DRY_RUN:
         print(f"[disk-cleanup] DRY RUN would remove {path} ({size} bytes)", file=sys.stderr)
         return size
-    shutil.rmtree(path)
+    _rmtree_pinned(Path(path))
     return size
+
+
+_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+_SAFE_RMTREE = shutil.rmtree.avoids_symlink_attacks
+
+
+def _rmtree_pinned(path: Path) -> None:
+    """Delete ``path`` through directory fds pinned from ``/`` without links.
+
+    The pathname checks in `remove_tree` run before the delete, so an ancestor
+    swapped for a symlink in between would otherwise redirect root's rmtree.
+    Every component is opened O_NOFOLLOW from a trusted root fd and the leaf is
+    removed relative to its pinned parent. Fails closed where the platform's
+    rmtree cannot honour ``dir_fd`` safely.
+    """
+    if not _SAFE_RMTREE:
+        raise OSError("refusing to remove: platform rmtree is not symlink-safe")
+    if not path.is_absolute() or ".." in path.parts or len(path.parts) < 2:
+        raise ValueError(f"refusing to remove non-canonical path: {path}")
+    fd = os.open("/", _DIR_FLAGS)
+    try:
+        for part in path.parts[1:-1]:
+            child = os.open(part, _DIR_FLAGS, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        try:
+            leaf = os.open(path.name, _DIR_FLAGS, dir_fd=fd)
+        except FileNotFoundError:
+            return
+        os.close(leaf)
+        shutil.rmtree(path.name, dir_fd=fd)
+    finally:
+        os.close(fd)
 
 
 def cleanup_docker_images() -> tuple[int, str]:
