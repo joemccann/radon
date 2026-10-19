@@ -9985,3 +9985,13 @@ Review: implementation is scoped to independently verified current behavior; pre
 Service isolation source review: cloud-only regression RED recorded before implementation. Research CLI, keeper environment, performance helper, responder and media source candidates have independent Sol/Luna reviews; the lock migration has Sol source review with final Luna confirmation pending. Review repaired transient oneshot detection, native CLI normalization, first-upgrade recovery and bounded rejected-media reads before delivery. No production provisioning or native authentication has been performed. Full final-head CI and separate public PR delivery remain pending.
 
 Deploy serialization private validation `981bbe7c`: scripts-ac 4 failed/3119 passed/1 skipped; scripts-df 1 failed/1606 passed/3 skipped; cloud-al 24 failed/2925 passed/2 skipped. Repaired isolated interpreter dependencies, observer transport fixtures, owner documentation and canonical installed-mode comparison. Preserve wait budgets and add real temporary-file observer coverage for both generations, first bootstrap, FIFO and symlink refusal. Replacement immutable-head full CI remains required.
+
+
+## Subscription publisher prestage ordering (2026-10-18)
+
+- [x] PS1 depends_on: [] Confirm first-upgrade behavior and normal recovery/sync/deploy ordering against the reviewed final stack.
+- [x] PS2 depends_on: [PS1] Author isolated main-path regressions for old grants/helpers, prestage and required normal publication.
+- [ ] PS3 depends_on: [PS2] Record cloud-only RED before applying the minimal runtime guard.
+- [ ] PS4 depends_on: [PS3] Apply the scoped fix, obtain cloud GREEN and independent review, preserving recovery journals and normal deployment ordering.
+
+Review: test-only preparation; local suites, source publication and production actions remain excluded. The runtime proposal is retained outside the checkout until cloud RED.
