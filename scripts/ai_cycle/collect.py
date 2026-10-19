@@ -199,6 +199,8 @@ def _main(argv=None):
         store.initialize()
     checkpoint = Path(args.checkpoint) if args.checkpoint else None
     completed = set(json.loads(checkpoint.read_text())) if checkpoint and checkpoint.exists() else set()
+    from scripts.db.hrana_http import HranaHttpError
+
     report, row_count, budget_exhausted = [], 0, False
     for source in selected:
         # Event-only disclosures have no provider check without an explicit import.
@@ -262,27 +264,36 @@ def _main(argv=None):
                         temp.write_text(json.dumps(sorted(completed)))
                         temp.replace(checkpoint)
                 row_count += len(rows)
-            except (SourceError, KeyError, TypeError, ValueError, OSError) as exc:
-                reason = (
-                    str(exc) if isinstance(exc, SourceError) else "Source schema or local archive validation failed"
-                )
-                budget_exhausted = reason in (
-                    "Per-run time budget exhausted",
-                    "Per-run request budget exhausted",
-                    "Local OpenRouter daily request reserve reached; retry tomorrow",
-                )
-                state = (
-                    "restricted"
-                    if "HTTP 401" in reason or "HTTP 403" in reason
-                    else (
-                        "error"
-                        if "HTTP " in reason or "transport failed" in reason or "validation failed" in reason
-                        else "unavailable"
+            except (SourceError, KeyError, TypeError, ValueError, OSError, HranaHttpError) as exc:
+                if isinstance(exc, HranaHttpError):
+                    # Driver text can include a host or SQL. Keep the status row fixed.
+                    reason = "Observation persistence failed"
+                    budget_exhausted = False
+                    state = "error"
+                else:
+                    reason = (
+                        str(exc) if isinstance(exc, SourceError) else "Source schema or local archive validation failed"
                     )
-                )
+                    budget_exhausted = reason in (
+                        "Per-run time budget exhausted",
+                        "Per-run request budget exhausted",
+                        "Local OpenRouter daily request reserve reached; retry tomorrow",
+                    )
+                    state = (
+                        "restricted"
+                        if "HTTP 401" in reason or "HTTP 403" in reason
+                        else (
+                            "error"
+                            if "HTTP " in reason or "transport failed" in reason or "validation failed" in reason
+                            else "unavailable"
+                        )
+                    )
                 status = dict(source_id=source, status=state, reason=reason, checked_at=checked)
             if store:
-                store.record_source_status(status)
+                try:
+                    store.record_source_status(status)
+                except HranaHttpError:
+                    print("[ai-cycle] source status write failed", file=sys.stderr)
             report.append({**status, "start": first, "end": last})
             if budget_exhausted:
                 break
