@@ -1997,7 +1997,7 @@ def test_run_research_binds_subscription_and_antigravity(tmp_path: Path) -> None
     for agy_dir in (".gemini/antigravity-cli", ".gemini/config"):
         assert f"{home}/{agy_dir}:/home/radon/{agy_dir}:rw" in log
     assert f"{home}/.gemini:" not in log  # retired Gemini CLI creds stay out
-    assert f"{home}/.local/bin:/home/radon/.local/bin:ro" in log
+    assert f"{home}/.local/bin:" not in log
     assert "HOME=/home/radon" in log
 
 

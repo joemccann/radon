@@ -1953,6 +1953,26 @@ def upsert_ivrank_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = 
     db.commit()
 
 
+def upsert_vix_model_spread_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """Idempotent same-session correction upserts, in bounded Hrana chunks."""
+    if not rows:
+        return
+    fields = ['date', 'vix', 'vixeq', 'cor1m', 'model_vix', 'spread'] + [
+        f'{name}_{window}' for window in (20, 252) for name in ('mean', 'std', 'upper', 'lower', 'z')
+    ]
+    columns = fields + ['recorded_at']
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ', '.join('(' + ', '.join('?' for _ in columns) + ')' for _ in chunk)
+        params = [value for row in chunk for value in [*(row.get(f) for f in fields), stamp]]
+        updates = ', '.join(f'{f} = excluded.{f}' for f in columns if f != 'date')
+        db.execute(f"INSERT INTO vix_model_spread_history ({', '.join(columns)}) VALUES {placeholders} "
+                   f"ON CONFLICT(date) DO UPDATE SET {updates}", tuple(params))
+    db.commit()
+
+
 def upsert_vix_pc_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
     """VIX P/C indicator - one row per VIX options session, idempotent on date.
     daily_ratio / cum5_ratio are NULL when the call denominator is 0;

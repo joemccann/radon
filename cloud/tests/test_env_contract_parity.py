@@ -68,6 +68,7 @@ EXEMPT: dict[str, str] = {
     # Override knobs with an in-code default URL/binary.
     "CBOE_DAILY_PRICES_BASE_URL": "override for _DEFAULT_BASE_URL in clients/cboe_client.py",
     "FINRA_MARGIN_XLSX_URL": "override for _DEFAULT_XLSX_URL in clients/finra_client.py",
+    "GROK_UPGRADE_DOMAIN": "set by the optional responder upgrade unit to select its separate runtime; unset preserves the existing keeper runtime",
     "GROK_BIN": "override for the `grok` binary name on PATH",
     "GROK_MODEL": "optional override; unset resolves the live default from `grok models` or last-known-good",
     "GROK_CLI_VERSION": "optional stamp override for tests; unset is probed from `grok --version`",

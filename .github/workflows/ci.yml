@@ -834,6 +834,7 @@ jobs:
           e2e/portfolio-request-cadence.spec.ts
           e2e/vixts-tab.spec.ts
           e2e/vix-pc-tab.spec.ts
+          e2e/vix-model-spread-tab.spec.ts
           e2e/panic-index-tab.spec.ts
           e2e/hyad-tab.spec.ts
           e2e/record-high-breadth-tab.spec.ts

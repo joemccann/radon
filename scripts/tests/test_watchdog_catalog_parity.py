@@ -362,6 +362,10 @@ class TestDur02BrakeAndFlapReach:
 #               own freshness window, so each is its own task; carried as the
 #               standing remainder of R-277.
 EXEMPT_UNITS: dict[str, str] = {
+    "radon-media-publish": (
+        "gap: writes no service_health row. Credential-free root publisher emits "
+        "bounded publication counts to journald; failures page via the unit watchdog."
+    ),
     # Nine former entries were deleted once `_names_in` learned the
     # bounded-stdlib writer shape (R-412): db-backup, db-retention,
     # disk-cleanup, drift-audit, grok-page-responder, host-metrics,

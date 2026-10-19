@@ -571,6 +571,14 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("aa-frontier-basket")).toBe(false);
   });
 
+  it("vix-model-spread has daily scheduled Cboe freshness budgets", () => {
+    expect(getServiceCategory("vix-model-spread")).toBe("scheduled");
+    expect(getFreshnessWindowMs("vix-model-spread", "open")).toBe(26 * HOUR);
+    expect(getFreshnessWindowMs("vix-model-spread", "extended")).toBe(26 * HOUR);
+    expect(getFreshnessWindowMs("vix-model-spread", "closed")).toBe(48 * HOUR);
+    expect(requiresIb("vix-model-spread")).toBe(false);
+  });
+
   // ``vix-pc`` — radon-vix-pc.timer fires daily 02:00 UTC every calendar day
   // (weekend runs are unchanged-data heartbeats), so a uniform 26h window
   // matches its daily siblings. UW VIX options-volume only — no IB.

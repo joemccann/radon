@@ -2409,6 +2409,7 @@ set -euo pipefail
 source {DEPLOY!s}
 preflight_control_plane() {{ return 0; }}
 preflight_env() {{ return 0; }}
+write_subscription_env() {{ return 0; }}
 current_commit() {{ printf '%s\\n' {sha}; }}
 git() {{
   case "$*" in
@@ -3228,6 +3229,7 @@ set -euo pipefail
 source {DEPLOY!s}
 preflight_control_plane() {{ return 0; }}
 preflight_env() {{ return 0; }}
+write_subscription_env() {{ return 0; }}
 current_commit() {{ printf '%s\\n' {sha}; }}
 git() {{
   case "$*" in
@@ -3276,6 +3278,7 @@ set -euo pipefail
 source {DEPLOY!s}
 preflight_control_plane() {{ return 0; }}
 preflight_env() {{ return 0; }}
+write_subscription_env() {{ return 0; }}
 current_commit() {{ printf '%s\\n' {'0' * 40}; }}
 git() {{
   case "$*" in

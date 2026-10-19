@@ -30,7 +30,7 @@ polkit.addRule(function(action, subject) {
 // test_allowlist_matches_the_polkit_grant).
 polkit.addRule(function(action, subject) {
     if (action.id != "org.freedesktop.systemd1.manage-units" ||
-        subject.user != "radon") {
+        (subject.user != "radon" && subject.user != "radon-responder")) {
         return polkit.Result.NOTHING;
     }
     var unit = action.lookup("unit");

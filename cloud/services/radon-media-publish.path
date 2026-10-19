@@ -1,0 +1,11 @@
+[Unit]
+Description=Watch newsfeed staging for media publication
+
+[Path]
+PathChanged=/var/lib/radon/media
+Unit=radon-media-publish.service
+TriggerLimitIntervalSec=60
+TriggerLimitBurst=30
+
+[Install]
+WantedBy=multi-user.target

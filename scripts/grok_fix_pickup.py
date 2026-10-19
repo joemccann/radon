@@ -40,6 +40,8 @@ import ir_ensure_pr
 import ir_pr_description
 import ir_push_gate
 
+# Explicit RADON_GROK_FIX_SOURCE selection moves pickup to an optional
+# responder account only after the operator completes its staged migration.
 DEFAULT_SOURCE = os.environ.get(
     "RADON_GROK_FIX_SOURCE",
     "ssh://radon@radon-app/home/radon/radon-page-responder",
