@@ -15,6 +15,7 @@ the second must still be handed a clean one.
 from __future__ import annotations
 
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -51,6 +52,9 @@ def trusted_client(monkeypatch, tmp_path):
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
     for module in _route_module_instances():
+        # Freeze only the route's cooldown clock; wall time in a busy CI worker
+        # must not expire it, and asyncio keeps its real global time module.
+        monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: 1000.0))
         monkeypatch.setattr(
             module, "is_trusted_local_request", lambda request: True, raising=False
         )
