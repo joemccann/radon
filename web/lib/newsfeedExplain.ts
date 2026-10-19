@@ -5,10 +5,11 @@ export const EXPLAIN_THIN_MESSAGE =
   "This post does not have enough detail to explain. Open the source or wait for a fuller item.";
 
 /** Bump when the prompt or output contract changes so stale Turso rows miss. */
-export const NEWSFEED_EXPLAIN_PROMPT_VERSION = 2;
+export const NEWSFEED_EXPLAIN_PROMPT_VERSION = 3;
 
-export const NEWSFEED_EXPLAIN_SYSTEM = `Explain this news item in short plain English for a non-expert.
-Cover what happened, why it matters, and what it could mean for markets or ordinary people.
+export const NEWSFEED_EXPLAIN_SYSTEM = `Explain this news item in short plain English.
+Cover what happened, why it matters, and what it could mean for markets, households, and businesses.
+Never describe or label the reader, any audience, or anyone's level of expertise.
 Define jargon inline on first use (for example MW-day, capacity auction, collar).
 No hype, no emoji, no hashtags, no engagement bait, and no invented facts.
 Do not tell anyone to buy, sell, or hold anything.

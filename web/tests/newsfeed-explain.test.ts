@@ -33,7 +33,7 @@ describe("newsfeed explain contract", () => {
     const v1 = createHash("sha256")
       .update(JSON.stringify([input!.title, input!.content, input!.imageUrls]))
       .digest("hex");
-    expect(NEWSFEED_EXPLAIN_PROMPT_VERSION).toBeGreaterThanOrEqual(2);
+    expect(NEWSFEED_EXPLAIN_PROMPT_VERSION).toBeGreaterThanOrEqual(3);
     expect(explainContentHash(input!)).not.toBe(v1);
   });
 
@@ -82,6 +82,12 @@ describe("newsfeed explain contract", () => {
     expect(fixture.explanation).toMatch(/collar/);
     expect(fixture.explanation).not.toMatch(/—/);
     expect(fixture.explanation).not.toMatch(/investment advice|financial advice|not a recommendation/i);
+  });
+
+  it("never labels the reader as ordinary or a non-expert", () => {
+    expect(NEWSFEED_EXPLAIN_SYSTEM).not.toMatch(/ordinary|non-expert|layperson|everyday people|average person/i);
+    expect(NEWSFEED_EXPLAIN_SYSTEM).toMatch(/never describe or label the reader/i);
+    expect(fixture.explanation).not.toMatch(/ordinary people|non-expert|layperson|everyday people/i);
   });
 
   it("strips disclaimer boilerplate the model may still append", () => {
