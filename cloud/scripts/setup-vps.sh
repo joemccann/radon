@@ -127,6 +127,9 @@ readonly SERVICE_FILES=(
   radon-portfolio-archive.timer
   radon-research-archive.service
   radon-research-archive.timer
+  radon-media-publish.service
+  radon-media-publish.path
+  radon-media-publish.timer
   radon-media-backup.service
   radon-media-backup.timer
   radon-db-retention.service
@@ -1196,6 +1199,30 @@ install_caddy() {
   fi
 }
 
+# Publish existing approved leaves before the edge configuration switches roots.
+# Neither this fixed entrypoint nor its credential-free units load production env.
+install_media_publication() {
+  stage_from_checkout "${CLOUD_DIR}/scripts/media_publish.py" \
+    /usr/local/lib/radon/media_publish.py 0644 -o root -g root || return 1
+  local kind status attempt
+  for kind in service path timer; do
+    stage_from_checkout "${CLOUD_DIR}/services/radon-media-publish.${kind}" \
+      "/etc/systemd/system/radon-media-publish.${kind}" 0644 -o root -g root || return 1
+  done
+  systemctl daemon-reload || return 1
+  for ((attempt=0; attempt<20; attempt++)); do
+    status=0
+    /usr/bin/python3 -I /usr/local/lib/radon/media_publish.py || status=$?
+    if (( status == 0 )); then
+      systemctl enable --now radon-media-publish.path radon-media-publish.timer
+      return $?
+    fi
+    (( status == 75 )) || return "$status"
+  done
+  log_error "Media backfill remains incomplete; retaining the current edge configuration"
+  return 75
+}
+
 configure_caddy() {
   local config_dir candidate rollback=""
   config_dir="$(dirname "$CADDY_CONFIG_PATH")"
@@ -1954,6 +1981,7 @@ main() {
   setup_python
   setup_node
   install_caddy
+  install_media_publication
   configure_caddy
   copy_systemd_services
   install_gateway_control

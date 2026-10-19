@@ -61,7 +61,7 @@ def _unit_files() -> dict[str, pathlib.Path]:
     units = {
         p.name: p
         for p in SERVICES_DIR.iterdir()
-        if p.is_file() and p.suffix in {".service", ".timer"}
+        if p.is_file() and p.suffix in {".service", ".timer", ".path"}
     }
     for dropin in SERVICES_DIR.glob("*.service.d/*.conf"):
         if dropin.is_file():

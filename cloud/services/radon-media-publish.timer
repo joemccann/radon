@@ -1,0 +1,11 @@
+[Unit]
+Description=Retry bounded newsfeed media publication
+
+[Timer]
+OnBootSec=15
+OnUnitInactiveSec=15
+AccuracySec=1
+Unit=radon-media-publish.service
+
+[Install]
+WantedBy=timers.target

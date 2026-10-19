@@ -348,7 +348,7 @@ media.radon.run {
     }
 
     handle {
-        root * /var/lib/radon/media
+        root * /var/lib/radon-public/media
         file_server {
             precompressed gzip
         }
