@@ -218,11 +218,13 @@ def _probe_deploy_entrypoint(tmp_path, *, state, stage=True, selector="default",
         selected = tmp_path / "custom.lock"
     elif state == "missing-parent":
         canonical.parent.rmdir()
-    elif state in {"missing-file", "writable-parent", "writable-authority", "foreign-authority", "foreign-parent-group"}:
+    elif state in {"missing-file", "writable-parent", "writable-authority", "foreign-authority", "foreign-parent-group", "wrong-parent-mode"}:
         if state == "writable-parent":
             canonical.parent.chmod(0o777)
         elif state == "writable-authority":
             tmp_path.chmod(0o777)
+        elif state == "wrong-parent-mode":
+            canonical.parent.chmod(0o700)
     elif state == "symlink":
         canonical.symlink_to(victim)
     elif state == "dangling-symlink":
@@ -379,7 +381,7 @@ def test_entrypoint_prestage_refuses_unsafe_existing_lock_without_work(tmp_path,
 
 
 @pytest.mark.parametrize("selector", ["default", "canonical"])
-@pytest.mark.parametrize("state", ["writable-parent", "writable-authority", "foreign-authority", "foreign-parent-group"])
+@pytest.mark.parametrize("state", ["writable-parent", "writable-authority", "foreign-authority", "foreign-parent-group", "wrong-parent-mode"])
 def test_entrypoint_prestage_refuses_missing_leaf_without_directory_authority(tmp_path, selector, state):
     result, calls, selected, _ = _probe_deploy_entrypoint(tmp_path, state=state, selector=selector)
     assert result.returncode != 0, result.stdout + result.stderr
