@@ -43,7 +43,9 @@
         "scripts/api/services.py",
         "cloud/services/radon-ib-gateway-remote.service",
         "cloud/scripts/ib-gateway-remote-certs.sh",
-        "cloud/scripts/check-env.py"
+        "cloud/scripts/check-env.py",
+        "tools/render_network_topology.py",
+        "docs/radon-network-topology.svg"
       ],
       "owners": ["docs/spof-host-split.md"],
       "note": "App/broker split contract: mTLS Gateway control, cert lifecycle, role env checks. Recurring runbook drift class (DOC-002/006/009/010/017/018/019)."

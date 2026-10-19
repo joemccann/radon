@@ -42,11 +42,11 @@ for FastAPI and scripts, plus `web/.env` for Next.js.
 
 | Service | Purpose | Notes |
 |---|---|---|
-| **Hetzner Cloud** | Hosts the production app and broker roles described by the [host-split owner](spof-host-split.md). | Credential placement and recovery: [operations](operations.md#encrypted-credential-store-profile-credentials-tab); environment contract: [cloud owner](../cloud/CLAUDE.md#environment-handling). |
+| **Hetzner Cloud** | Hosts the app, broker and isolated demo described by the [topology owner](spof-host-split.md). Public ingress is restricted by operator-applied provider firewalls. | Credential placement and recovery: [operations](operations.md#encrypted-credential-store-profile-credentials-tab); environment contract: [cloud owner](../cloud/CLAUDE.md#environment-handling). |
 | **Backblaze B2** | Cold storage for archived portfolio snapshot months (`portfolio_snapshots/YYYY-MM.jsonl.gz`). | Bucket `radon-archive` |
-| **Tailscale** | Mesh VPN between laptop and VPS. The laptop reaches the app host (`radon-app`) on SSH and FastAPI `:8321` only; the allowed paths are declared in `cloud/tailscale/policy.hujson`. | [tailscale.com](https://tailscale.com/) |
+| **Tailscale** | Private operator app/broker access and ephemeral CI-to-app SSH. Allowed paths are declared in [`cloud/tailscale/policy.hujson`](../cloud/tailscale/policy.hujson); demo is not enrolled. | [tailscale.com](https://tailscale.com/) |
 | **Caddy** | TLS termination + reverse proxy on the VPS. Serves `app.radon.run` and `media.radon.run`. | Canonical config: [`cloud/caddy/`](../cloud/caddy/) |
-| **GitHub Actions** | `git push origin main` triggers `.github/workflows/ci.yml`, which runs the Vitest + pytest gate then deploys the tested monorepo SHA on green. | Confirm: `gh run list --workflow=ci.yml --limit 1` |
+| **GitHub Actions** | `git push origin main` triggers `.github/workflows/ci.yml`, which runs the Vitest + pytest gate then deploys the tested monorepo SHA on green over Tailscale. The three host jobs connect before SSH; Production secrets and enrollment are owned by [operations](operations.md#ci-deploy-over-the-tailnet). | Confirm: `gh run list --workflow=ci.yml --limit 1` |
 
 ## Optional alerting / fallback data
 
