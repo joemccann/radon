@@ -163,3 +163,158 @@ write_subscription_env
     result = subprocess.run(["bash", "-c", shell], capture_output=True, text=True)
     assert result.returncode == delivery_status
     assert calls.read_text().strip() == "-n /usr/local/sbin/radon-deploy-root publish-subscription-env"
+
+
+def _run_deploy_main_with_publication_state(tmp_path, *, stage, publication_state, already_green=False, journal_present=False):
+    """Run real main/publication paths with only isolated command substitutes."""
+    import shlex
+    import subprocess
+
+    target_sha = "a" * 40
+    previous_sha = target_sha if already_green else "b" * 40
+    calls = tmp_path / "calls"
+    calls.touch()
+    journal = tmp_path / "transition.json"
+    if journal_present:
+        journal.write_text("synthetic unfinished transition\n")
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    helper = tmp_path / "deploy-root"
+    helper.write_text('''#!/bin/bash
+set -euo pipefail
+printf 'helper:%s\\n' "$*" >> "$CALLS"
+case "$1" in
+  publish-mcp-env) exit 0 ;;
+  publish-subscription-env)
+    [[ "$PUBLICATION_STATE" == ready ]] && exit 0
+    printf 'unknown action\\n' >&2
+    exit 2 ;;
+  commit-transition) exit 0 ;;
+  *) exit 99 ;;
+esac
+''')
+    helper.chmod(0o755)
+    sudo = fake_bin / "sudo"
+    sudo.write_text('''#!/bin/bash
+set -euo pipefail
+printf 'sudo:%s\\n' "$*" >> "$CALLS"
+[[ "${1:-}" == -n ]] && shift
+if [[ "${1:-}" == -l ]]; then
+  shift
+  [[ "${1:-}" == -- ]] && shift
+  [[ "$1" == "$HELPER" && "$2" == publish-mcp-env ]]
+  exit "$?"
+fi
+[[ "$1" == "$HELPER" ]] || exit 99
+if [[ "$2" == publish-subscription-env && "$PUBLICATION_STATE" == old-grant ]]; then
+  printf 'sudo: a password is required\\n' >&2
+  exit 1
+fi
+exec "$@"
+''')
+    sudo.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        "CALLS": str(calls), "HELPER": str(helper),
+        "PUBLICATION_STATE": publication_state,
+        "TARGET_SHA": target_sha, "PREVIOUS_SHA": previous_sha,
+        "ALREADY_GREEN": "1" if already_green else "0",
+        "RADON_DIR": str(tmp_path / "checkout"),
+        "RADON_CLOUD_DIR": str(CLOUD),
+        "RADON_RUNTIME": "host",
+        "RADON_DEPLOY_STAGE": "1" if stage else "0",
+        "RADON_DEPLOY_ROOT_HELPER": str(helper),
+        "RADON_DEPLOY_ENV_FILE": str(tmp_path / "canonical.env"),
+        "RADON_MCP_ENV_FILE": str(tmp_path / "mcp.env"),
+        "RADON_DEPLOY_TRANSITION_JOURNAL": str(journal),
+        "RADON_DEPLOY_GREEN_MARKER": str(tmp_path / "green"),
+        "RADON_DEPLOY_PRESTAGE": str(tmp_path / "prestage"),
+    }
+    # Every downstream external operation is a harmless event recorder. Real
+    # main(), write_mcp_env() and write_subscription_env() remain under test.
+    shell = f'''
+source {shlex.quote(str(CLOUD / 'scripts/deploy.sh'))}
+event() {{ printf '%s\\n' "$*" >> "$CALLS"; }}
+preflight_control_plane() {{ event control-plane; }}
+preflight_env() {{ event env-preflight; }}
+current_commit() {{ printf '%s\\n' "$PREVIOUS_SHA"; }}
+git() {{
+  case "$3" in
+    fetch) event git-fetch ;;
+    rev-parse) printf '%s\\n' "$TARGET_SHA" ;;
+    *) return 99 ;;
+  esac
+}}
+verify_tracked_drift_matches_target() {{ event drift-check; }}
+green_marker_matches() {{ [[ "$ALREADY_GREEN" == 1 ]]; }}
+build_staged_release() {{ event build; }}
+write_prestage() {{ event prestage; }}
+load_prestage() {{ return 1; }}
+prepull_app_images() {{ event image-pull; }}
+preflight_database() {{ event database-preflight; }}
+restart_services() {{ event restart; }}
+deploy_gate() {{ event gate; }}
+write_transition_phase() {{ event transition-phase; }}
+record_deploy_marker() {{ event deploy-marker; }}
+write_green_marker() {{ event green-marker; }}
+sync_scheduled_units() {{ event scheduled-sync; }}
+publish_edge_config() {{ event edge-publish; }}
+finalize_release_artifacts() {{ event finalize; }}
+short_log() {{ printf synthetic; }}
+notify_release_live() {{ event notification; }}
+main "$TARGET_SHA"
+'''
+    result = subprocess.run(["bash", "-c", shell], env=env, capture_output=True, text=True, timeout=10)
+    return result, calls.read_text().splitlines(), journal, helper
+
+
+@pytest.mark.parametrize("publication_state", ["old-grant", "old-helper", "ready"])
+@pytest.mark.parametrize("already_green", [False, True])
+def test_prestage_does_not_require_or_invoke_subscription_publication(tmp_path, publication_state, already_green):
+    result, calls, journal, _ = _run_deploy_main_with_publication_state(
+        tmp_path, stage=True, publication_state=publication_state, already_green=already_green,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "helper:publish-mcp-env" in calls
+    assert not any("publish-subscription-env" in call for call in calls)
+    assert ("build" in calls) is not already_green
+    assert ("prestage" in calls) is not already_green
+    assert "restart" not in calls
+    assert "transition-phase" not in calls
+    assert not journal.exists()
+
+
+@pytest.mark.parametrize("publication_state", ["old-grant", "old-helper", "ready"])
+@pytest.mark.parametrize("already_green", [False, True])
+def test_normal_deploy_requires_subscription_publication_even_for_green_release(tmp_path, publication_state, already_green):
+    result, calls, journal, helper = _run_deploy_main_with_publication_state(
+        tmp_path, stage=False, publication_state=publication_state, already_green=already_green,
+    )
+    publication_call = f"sudo:-n {helper} publish-subscription-env"
+    assert publication_call in calls
+    assert calls.index("helper:publish-mcp-env") < calls.index(publication_call)
+    if publication_state != "ready":
+        assert result.returncode != 0
+        assert "Subscription service environment publication failed" in result.stdout + result.stderr
+        assert "git-fetch" not in calls
+        assert "build" not in calls
+        assert "restart" not in calls
+        assert "gate" not in calls
+        assert "transition-phase" not in calls
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert calls.index("helper:publish-subscription-env") < calls.index("git-fetch")
+        assert "gate" in calls
+        assert ("restart" in calls) is not already_green
+    assert not journal.exists()
+
+
+def test_prestage_preserves_pending_journal_on_old_control_plane(tmp_path):
+    result, calls, journal, _ = _run_deploy_main_with_publication_state(
+        tmp_path, stage=True, publication_state="old-grant", journal_present=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert journal.read_text() == "synthetic unfinished transition\n"
+    assert not any("publish-subscription-env" in call for call in calls)
+    assert not {"build", "prestage", "restart", "transition-phase"}.intersection(calls)

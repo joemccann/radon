@@ -195,3 +195,237 @@ def test_selector_preserves_canonical_compatibility(relative, variable, primary,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout == expected
+
+
+def _probe_deploy_entrypoint(tmp_path, *, state, stage=True, selector="default", python_fault=None, journal_present=True):
+    """Execute the outer entrypoint; a child sensor never executes a deploy."""
+    import os
+    import subprocess
+    import sys
+
+    canonical = tmp_path / "canonical-parent/deploy.lock"
+    canonical.parent.mkdir(mode=0o750)
+    legacy = tmp_path / "legacy.lock"
+    legacy.write_text("existing compatibility inode\n")
+    legacy.chmod(0o600)
+    journal = tmp_path / "transition.json"
+    if journal_present:
+        journal.write_text("existing transition must remain untouched\n")
+    victim = tmp_path / "victim"
+    victim.write_text("untouched\n")
+    selected = canonical
+    if selector.startswith("custom"):
+        selected = tmp_path / "custom.lock"
+    elif state == "missing-parent":
+        canonical.parent.rmdir()
+    elif state in {"missing-file", "writable-parent", "writable-authority", "foreign-authority", "foreign-parent-group", "wrong-parent-mode"}:
+        if state == "writable-parent":
+            canonical.parent.chmod(0o777)
+        elif state == "writable-authority":
+            tmp_path.chmod(0o777)
+        elif state == "wrong-parent-mode":
+            canonical.parent.chmod(0o700)
+    elif state == "symlink":
+        canonical.symlink_to(victim)
+    elif state == "dangling-symlink":
+        canonical.symlink_to(tmp_path / "absent-victim")
+    elif state == "fifo":
+        os.mkfifo(canonical)
+    elif state == "directory":
+        canonical.mkdir()
+    else:
+        canonical.write_text("existing protected inode\n")
+        if state == "symlink-parent":
+            real_parent = tmp_path / "real-parent"
+            canonical.parent.rename(real_parent)
+            canonical.parent.symlink_to(real_parent, target_is_directory=True)
+        elif state in {"unreadable-parent", "unreadable-file"}:
+            assert os.geteuid() != 0, "permission regression requires the unprivileged cloud runner"
+            (canonical.parent if state == "unreadable-parent" else canonical).chmod(0)
+        else:
+            assert state == "regular"
+
+    # Map fixed production names only in this temporary script copy. An unset
+    # override still takes the default/canonical branch; explicit canonical and
+    # custom overrides retain the production selector's equality semantics.
+    source = (ROOT / "cloud/scripts/deploy.sh").read_text()
+    assert CANONICAL in source and LEGACY in source
+    # Production authority is UID 0 from filesystem root. Deliberately map
+    # that fixed namespace/data pair to this real UID-owned temporary root;
+    # no ancestor outside tmp_path is part of the synthetic authority domain.
+    # Every directory inside it retains real stat/mode checks. A foreign
+    # authority case changes only the expected UID, so the actual stat owner
+    # is observably foreign; neither os.stat nor the supervisor is mocked.
+    authority_uid = os.getuid() + (1 if state == "foreign-authority" else 0)
+    assert tmp_path.stat().st_uid == os.getuid()
+    if state in {"missing-parent", "missing-file"}:
+        assert tmp_path.stat().st_mode & 0o022 == 0
+        if state == "missing-file":
+            assert canonical.parent.stat().st_mode & 0o777 == 0o750
+            assert canonical.parent.stat().st_gid == os.getgid()
+    if state not in {"missing-parent", "symlink-parent"}:
+        assert canonical.parent.stat().st_uid == os.getuid()
+    copied_source = source.replace(CANONICAL, str(canonical)).replace(LEGACY, str(legacy))
+    copied_source = copied_source.replace('authority_root = "/"', f'authority_root = {str(tmp_path)!r}')
+    copied_source = copied_source.replace('authority_uid = 0', f'authority_uid = {authority_uid}')
+    authority_gid = os.getgid() + (1 if state == "foreign-parent-group" else 0)
+    copied_source = copied_source.replace('authority_gid = pwd.getpwnam("radon").pw_gid', f'authority_gid = {authority_gid}')
+    script = tmp_path / "deploy.sh"
+    script.write_text(copied_source)
+    calls = tmp_path / "calls"
+    calls.touch()
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    timeout = fake_bin / "timeout"
+    timeout.write_text('#!/bin/sh\nprintf "child\\n" >> "$PROBE_CALLS"\nexit 97\n')
+    timeout.chmod(0o755)
+    helper = fake_bin / "deploy-root"
+    helper.write_text('#!/bin/sh\nprintf "helper\\n" >> "$PROBE_CALLS"\nexit 98\n')
+    helper.chmod(0o755)
+    for command in ("sudo", "git", "systemctl"):
+        path = fake_bin / command
+        path.write_text(helper.read_text())
+        path.chmod(0o755)
+    python = sys.executable
+    if python_fault:
+        wrapper = tmp_path / "python-wrapper"
+        wrapper.write_text(f'''#!{sys.executable}
+import os, sys
+if os.environ["PROBE_PYTHON_FAULT"] == "unknown":
+    raise SystemExit(74)
+if any("os.fstat(9)" in arg for arg in sys.argv[1:]):
+    os.unlink(os.environ["PROBE_PRIMARY"])
+    os.symlink(os.environ["PROBE_VICTIM"], os.environ["PROBE_PRIMARY"])
+os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])
+''')
+        wrapper.chmod(0o755)
+        python = str(wrapper)
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        "PROBE_CALLS": str(calls), "PROBE_PRIMARY": str(canonical),
+        "PROBE_VICTIM": str(victim), "PROBE_PYTHON_FAULT": python_fault or "",
+        "RADON_DIR": str(tmp_path / "checkout"),
+        "RADON_CLOUD_DIR": str(ROOT / "cloud"),
+        "RADON_DEPLOY_INTERNAL": "0", "RADON_DEPLOY_RECOVER_ONLY": "0",
+        "RADON_DEPLOY_STAGE": "1" if stage else "0",
+        "RADON_DEPLOY_ROOT_HELPER": str(helper), "RADON_APP_RUNTIME_HELPER": str(helper),
+        "RADON_SYSTEM_PYTHON": python,
+        "RADON_DEPLOY_TRANSITION_JOURNAL": str(journal),
+        "RADON_DEPLOY_GREEN_MARKER": str(tmp_path / "green"),
+        "RADON_DEPLOY_PRESTAGE": str(tmp_path / "prestage"),
+        "RADON_DEPLOY_ENV_FILE": str(tmp_path / "canonical.env"),
+        "RADON_MCP_ENV_FILE": str(tmp_path / "mcp.env"),
+    }
+    if selector == "default":
+        env.pop("RADON_DEPLOY_LOCK_FILE", None)
+    else:
+        env["RADON_DEPLOY_LOCK_FILE"] = str(selected)
+    if selector == "custom-with-legacy":
+        env["RADON_DEPLOY_LEGACY_LOCK_FILE"] = str(legacy)
+    else:
+        env.pop("RADON_DEPLOY_LEGACY_LOCK_FILE", None)
+    before_legacy = (legacy.stat().st_ino, legacy.read_bytes())
+    before_journal = (journal.stat().st_ino, journal.read_bytes()) if journal_present else None
+    try:
+        result = subprocess.run(["bash", str(script), "a" * 40], env=env,
+                                text=True, capture_output=True, timeout=5, check=False)
+    finally:
+        if state == "writable-authority":
+            tmp_path.chmod(0o700)
+        if state == "unreadable-parent":
+            canonical.parent.chmod(0o750)
+        elif state == "unreadable-file":
+            canonical.chmod(0o600)
+    assert (legacy.stat().st_ino, legacy.read_bytes()) == before_legacy
+    if journal_present:
+        assert (journal.stat().st_ino, journal.read_bytes()) == before_journal
+    else:
+        assert not journal.exists()
+    assert victim.read_text() == "untouched\n"
+    for name in ("green", "prestage", "canonical.env", "mcp.env"):
+        assert not (tmp_path / name).exists()
+    return result, calls.read_text().splitlines(), selected, canonical
+
+
+@pytest.mark.parametrize("selector", ["default", "canonical"])
+@pytest.mark.parametrize("state", ["missing-parent", "missing-file"])
+def test_entrypoint_prestage_defers_unprovisioned_canonical_lock_without_work(tmp_path, selector, state):
+    result, calls, selected, _ = _probe_deploy_entrypoint(tmp_path, state=state, selector=selector)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not calls, "prestage deferral must not start a child or privileged helper"
+    assert not selected.exists()
+    if state == "missing-parent":
+        assert not selected.parent.exists()
+
+
+@pytest.mark.parametrize("selector", ["default", "canonical"])
+@pytest.mark.parametrize("state", ["missing-parent", "missing-file"])
+def test_entrypoint_normal_deploy_still_requires_provisioned_canonical_lock(tmp_path, selector, state):
+    result, calls, selected, _ = _probe_deploy_entrypoint(tmp_path, state=state, stage=False, selector=selector)
+    assert result.returncode != 0
+    assert not calls
+    assert not selected.exists()
+    if state == "missing-parent":
+        assert not selected.parent.exists()
+
+
+@pytest.mark.parametrize("state", [
+    "symlink", "dangling-symlink", "symlink-parent", "fifo", "directory",
+    "unreadable-parent", "unreadable-file",
+])
+def test_entrypoint_prestage_refuses_unsafe_existing_lock_without_work(tmp_path, state):
+    result, calls, _, _ = _probe_deploy_entrypoint(tmp_path, state=state)
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert not calls
+
+
+@pytest.mark.parametrize("selector", ["default", "canonical"])
+@pytest.mark.parametrize("state", ["writable-parent", "writable-authority", "foreign-authority", "foreign-parent-group", "wrong-parent-mode"])
+def test_entrypoint_prestage_refuses_missing_leaf_without_directory_authority(tmp_path, selector, state):
+    result, calls, selected, _ = _probe_deploy_entrypoint(tmp_path, state=state, selector=selector)
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert not calls
+    assert not selected.exists()
+    assert selected.parent.is_dir(), "unsafe existing authority must not be removed or rebuilt"
+
+
+@pytest.mark.parametrize("selector", ["default", "canonical"])
+@pytest.mark.parametrize("state", ["missing-parent", "missing-file"])
+def test_entrypoint_prestage_does_not_treat_unknown_lookup_as_first_bootstrap(tmp_path, selector, state):
+    result, calls, selected, _ = _probe_deploy_entrypoint(
+        tmp_path, state=state, selector=selector, python_fault="unknown",
+    )
+    assert result.returncode != 0
+    assert not calls
+    assert not selected.exists()
+
+
+def test_entrypoint_prestage_refuses_inode_replacement_after_open(tmp_path):
+    result, calls, _, canonical = _probe_deploy_entrypoint(
+        tmp_path, state="regular", python_fault="replace-after-open", journal_present=False,
+    )
+    assert result.returncode != 0
+    assert not calls
+    assert canonical.is_symlink(), "the isolated race sensor must actually replace the name"
+
+
+@pytest.mark.parametrize("selector", ["custom", "custom-with-legacy"])
+def test_entrypoint_custom_lock_override_keeps_existing_creation_policy(tmp_path, selector):
+    result, calls, selected, _ = _probe_deploy_entrypoint(
+        tmp_path, state="missing-file", selector=selector, journal_present=False,
+    )
+    if selector == "custom":
+        assert result.returncode == 97, result.stdout + result.stderr
+        assert calls == ["child"], "custom standalone lock must reach the bounded child sensor"
+        assert selected.is_file()
+    else:
+        assert result.returncode != 0
+        assert not calls
+        assert not selected.exists()
+
+
+def test_entrypoint_ready_canonical_locks_reach_bounded_child_sensor(tmp_path):
+    result, calls, _, _ = _probe_deploy_entrypoint(tmp_path, state="regular", journal_present=False)
+    assert result.returncode == 97, result.stdout + result.stderr
+    assert calls == ["child"], "the fixture must detect real work when both locks are ready"

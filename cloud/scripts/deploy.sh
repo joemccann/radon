@@ -1803,7 +1803,11 @@ main() {
   fi
   # The hosted MCP unit loads a stripped env derived from the file just validated.
   write_mcp_env "$ENV_FILE_DEFAULT"
-  write_subscription_env
+  # Prestage precedes the deploy job's pinned control-plane sync. A first
+  # upgrade may not have this publisher or its grant until that sync completes.
+  if [[ "${RADON_DEPLOY_STAGE:-0}" != "1" ]]; then
+    write_subscription_env
+  fi
 
   local prev_commit
   prev_commit="$(current_commit)"
@@ -2008,11 +2012,100 @@ handle_supervisor_signal() {
   exit "$exit_code"
 }
 
+prestage_lock_readiness() {
+  "$SYSTEM_PYTHON" -I - "$DEPLOY_LOCK_FILE" <<'PY_PRESTAGE_LOCK'
+import os, pathlib, pwd, stat, sys
+path = pathlib.Path(sys.argv[1])
+authority_root = "/"
+authority_uid = 0
+flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK
+fds = []
+links = []
+def authority(info, canonical_parent=False):
+    mode = stat.S_IMODE(info.st_mode)
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != authority_uid or mode & 0o022:
+        raise OSError("deploy lock directory authority refused")
+    if canonical_parent and (mode != 0o750 or info.st_gid != authority_gid):
+        raise OSError("deploy lock parent mode/group refused")
+def stable():
+    held, named = os.fstat(fds[0]), os.stat(authority_root, follow_symlinks=False)
+    authority(held)
+    authority(named)
+    if (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino):
+        raise OSError("deploy lock authority root changed")
+    for parent, name, child, final in links:
+        held, named = os.fstat(child), os.stat(name, dir_fd=parent, follow_symlinks=False)
+        authority(held, final)
+        authority(named, final)
+        if (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino):
+            raise OSError("deploy lock directory changed")
+def absent(parent, name):
+    stable()
+    try:
+        os.stat(name, dir_fd=parent, follow_symlinks=False)
+    except FileNotFoundError:
+        print("unprovisioned")
+        return
+    raise OSError("deploy lock appeared during lookup")
+try:
+    authority_gid = pwd.getpwnam("radon").pw_gid
+    current = os.open(authority_root, flags)
+    fds.append(current)
+    authority(os.fstat(current))
+    parts = path.parent.relative_to(authority_root).parts
+    for index, part in enumerate(parts):
+        final = index == len(parts) - 1
+        try:
+            child = os.open(part, flags, dir_fd=current)
+        except FileNotFoundError:
+            if not final:
+                raise
+            absent(current, part)
+            break
+        fds.append(child)
+        authority(os.fstat(child), final)
+        links.append((current, part, child, final))
+        current = child
+    else:
+        try:
+            named = os.stat(path.name, dir_fd=current, follow_symlinks=False)
+        except FileNotFoundError:
+            absent(current, path.name)
+        else:
+            stable()
+            if not stat.S_ISREG(named.st_mode):
+                raise OSError("deploy lock is not regular")
+            print("ready")
+except (OSError, ValueError, KeyError):
+    raise SystemExit(1)
+finally:
+    for fd in reversed(fds):
+        os.close(fd)
+PY_PRESTAGE_LOCK
+}
+
 supervise_deploy_command() {
   # FD 9 and its flock are owned by this outer supervisor. The timeout process
   # closes FD 9 before exec, so neither the inner deploy nor any descendant can
   # keep the production lock alive after the supervisor returns.
   # Production lock is pre-provisioned and opened without creation/truncation.
+  if [[ "${RADON_DEPLOY_STAGE:-0}" == "1" \
+    && "${RADON_DEPLOY_RECOVER_ONLY:-0}" != "1" \
+    && "$DEPLOY_LOCK_FILE" == "/var/lib/radon-lock/deploy.lock" ]]; then
+    local readiness
+    if ! readiness="$(prestage_lock_readiness)"; then
+      log_error "Cannot inspect production deploy lock readiness"
+      return 1
+    fi
+    case "$readiness" in
+      unprovisioned)
+        log_warn "Production deploy lock is not provisioned; skipping prestage (the deploy job syncs it)"
+        return 0
+        ;;
+      ready) ;;
+      *) log_error "Unknown production deploy lock readiness"; return 1 ;;
+    esac
+  fi
   local open_rc=0 lock_path="$DEPLOY_LOCK_FILE" recovery_legacy_only=0
   # The first upgraded runner recovers any old transition BEFORE trusted root
   # bootstrap can install the new inode. Only this recovery pass may hold the
