@@ -216,6 +216,7 @@ def scan_commit_range(
     ref: str,
     *,
     runner: Runner | None = None,
+    name: str | None = None,
 ) -> list[str]:
     """Findings for everything ``ref`` would publish on top of ``base``.
 
@@ -231,8 +232,9 @@ def scan_commit_range(
     if not fork:
         raise IrPushRefused(f"cannot scan the branch: no merge base with {base}")
     findings: list[str] = []
-    # The pushed branch name is public too.
-    for kind in find_private_identifiers(ref):
+    # The pushed branch name is public too. ``name`` is that name when ``ref``
+    # is a pinned sha (a sha is not a name and can look like a numeric id).
+    for kind in find_private_identifiers(name or ref):
         findings.append(f"{kind} in branch name")
     # The identities are read with the message because `git push` publishes
     # the commit OBJECT: an identifier parked in an author name or email goes
@@ -322,14 +324,18 @@ def check_publish(
     body: str | None = None,
     runner: Runner | None = None,
     env: Mapping[str, str] | None = None,
+    name: str | None = None,
 ) -> None:
-    """Raise :class:`IrPushRefused` unless this push/PR may go public."""
+    """Raise :class:`IrPushRefused` unless this push/PR may go public.
+
+    ``name`` is the branch name when ``ref`` is a pinned commit sha.
+    """
     require_autopush(env)
     findings: list[str] = [
-        f"{kind} in branch name" for kind in find_private_identifiers((ref or "").replace("/", "\n"))
+        f"{kind} in branch name" for kind in find_private_identifiers((name or ref or "").replace("/", "\n"))
     ]
     if repo is not None and base and ref:
-        findings += scan_commit_range(repo, base, ref, runner=runner)
+        findings += scan_commit_range(repo, base, ref, runner=runner, name=name)
     findings += scan_pr_text(title=title, body=body)
     if findings:
         raise IrPushRefused(refusal_message(findings))
