@@ -1039,7 +1039,8 @@ cmd_run() {
   case "$unit" in
     radon-api.service|radon-newsfeed.service|radon-research.service|radon-nextjs.service)
       for cred_dir in .grok .codex .claude; do
-        if [[ -d "${subscription_home}/${cred_dir}" ]]; then
+        if [[ -L "${subscription_home}/${cred_dir}" || -d "${subscription_home}/${cred_dir}" ]]; then
+          require_bind_source "$ids" "${subscription_home}/${cred_dir}"
           set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:ro"
         fi
       done
@@ -1053,13 +1054,16 @@ cmd_run() {
       # units consume; its ladder falls past antigravity.
       for cred_dir in .gemini/antigravity-cli .gemini/config; do
         [[ "$unit" == "radon-newsfeed.service" ]] && continue
-        if [[ -d "${subscription_home}/${cred_dir}" ]]; then
+        if [[ -L "${subscription_home}/${cred_dir}" || -d "${subscription_home}/${cred_dir}" ]]; then
+          require_bind_source "$ids" "${subscription_home}/${cred_dir}"
           set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:rw"
         fi
       done
       # Python API and research images carry pinned, image-owned provider CLIs.
       # Provider grants above retain their established HOME and refresh paths.
-      if [[ "$unit" != "radon-api.service" && "$unit" != "radon-research.service" && -d "${subscription_home}/.local/bin" ]]; then
+      if [[ "$unit" != "radon-api.service" && "$unit" != "radon-research.service" ]] \
+        && [[ -L "${subscription_home}/.local/bin" || -d "${subscription_home}/.local/bin" ]]; then
+        require_bind_source "$ids" "${subscription_home}/.local/bin"
         set -- "$@" -v "${subscription_home}/.local/bin:/home/radon/.local/bin:ro"
       fi
       ;;
