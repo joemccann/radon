@@ -6,9 +6,10 @@ name: CI (test gate + deploy)
 # Actions `needs:` cannot reference jobs in another workflow file.
 on:
   pull_request:
-  # The main merge queue (ruleset main-merge-queue) builds a temporary
-  # gh-readonly-queue/main/* branch and fires merge_group, not pull_request.
-  # Every required check must report on it or the queue entry times out.
+  # A GitHub merge queue builds a temporary gh-readonly-queue/main/* branch
+  # and fires merge_group, not pull_request. Every required check reports on
+  # it so a queue can be enabled (organization-owned repos only) with no
+  # workflow change; a required check that never runs on it parks the queue.
   merge_group:
     branches: [main]
   push:
