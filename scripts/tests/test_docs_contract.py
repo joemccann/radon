@@ -2416,3 +2416,17 @@ class TestDocumentation20261018:
         assert "0097_vix_pc.sql" in row
         assert "version 97" in row
 
+
+class TestDocumentation20261019:
+    """DOC-209: public /health may carry a deploy revision."""
+
+    def test_public_health_may_include_revision(self):
+        server = (_ROOT / "scripts/api/server.py").read_text()
+        assert 'return _with_revision({"status": "ok"})' in server
+        assert r'^[0-9a-f]{40}$' in server
+        for rel in ("scripts/api/CLAUDE.md", "docs/operations.md"):
+            text = (_ROOT / rel).read_text()
+            assert "40-hex" in text
+            assert "REVISION" in text
+            assert '{"status":"ok"}` only' not in text
+
