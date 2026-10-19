@@ -56,10 +56,17 @@ describe("classifyRateTier", () => {
     expect(classifyRateTier("POST", "/api/orders")).toBe("C");
   });
 
-  it("the bounded batch read fans out to third parties, so it pays the producer tier", () => {
+  it("the bounded batch read gets its own fan-out tier", () => {
     // One POST reaches up to 30 symbols, each costing a UW call plus a Yahoo
-    // fallback. The ordinary-read ceiling priced it as a single cheap read.
-    expect(classifyRateTier("POST", "/api/previous-close")).toBe("B");
+    // fallback, so the ordinary-read ceiling priced it as a single cheap read.
+    // It is not a producer either: its daily bucket must stay off the one the
+    // scans share.
+    expect(classifyRateTier("POST", "/api/previous-close")).toBe("M");
+  });
+
+  it("keeps the fan-out tier on a per-resource key", () => {
+    expect(demoRateLimitKey("M", "user", "/api/previous-close"))
+      .toBe("user:resource:previous-close");
   });
 
   it("plain reads are tier A", () => {

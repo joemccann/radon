@@ -39,11 +39,15 @@ const EXPENSIVE_PATTERNS: RegExp[] = [
   /^\/api\/flow-analysis\/[^/]+$/,
   /^\/api\/options\/rv-ratio$/,
   /^\/api\/knowledge\/search$/,
-  // A batch price read sent as POST: one request fans out to up to 30
-  // third-party lookups (a UW quote plus a Yahoo fallback per symbol), so it
-  // is priced as a producer rather than as a single ordinary read.
-  /^\/api\/previous-close$/,
 ];
+
+// Reads sent as POST because the request carries a bounded symbol batch. One
+// request reaches up to 30 symbols and each uncached symbol costs a quote plus
+// a fallback, so the ordinary-read ceiling priced a 60-call fan-out as a single
+// cheap read. They get their own tier rather than the producer tier: these
+// fire automatically off the price stream, not from an operator control, and
+// tier B's daily bucket is shared with every scan.
+const BATCH_FANOUT_POST_PATHS = new Set<string>(["/api/previous-close"]);
 
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
@@ -75,6 +79,7 @@ export function classifyRateTier(
   if (normalizedMethod === "GET" && PASSIVE_POLL_PATHS.has(pathname)) return "I";
   if (AI_PATHS.has(pathname)) return "D";
   if (normalizedMethod !== "GET" && EXPENSIVE_PATTERNS.some((re) => re.test(pathname))) return "B";
+  if (normalizedMethod === "POST" && BATCH_FANOUT_POST_PATHS.has(pathname)) return "M";
   if (WRITE_METHODS.has(normalizedMethod)) return "C";
   return "A";
 }
@@ -116,7 +121,7 @@ export function demoRateLimitKey(
   userId: string,
   pathname: string,
 ): string {
-  if (tier !== "A" && tier !== "B") return userId;
+  if (tier !== "A" && tier !== "B" && tier !== "M") return userId;
   const segment = /^\/api\/([^/]+)/.exec(pathname)?.[1];
   const resource = segment && KNOWN_API_SEGMENTS.has(segment) ? segment : "other";
   return `${userId}:resource:${resource}`;

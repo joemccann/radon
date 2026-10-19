@@ -161,11 +161,29 @@ async function fetchFromIB(symbols: string[], token: string | null): Promise<Rec
   });
 }
 
+/* ── Source outcomes ────────────────────────────────────── */
+
+/**
+ * A source either resolved a close, answered that it has none, could not be
+ * reached, or was skipped because it is not configured. Only a definitive
+ * "missing" from a source that actually answered may be remembered: caching a
+ * 429 or a timeout would cost the previous close for the rest of the session
+ * on a symbol a retry resolves.
+ */
+type SourceOutcome =
+  | { status: "resolved"; close: number }
+  | { status: "missing" }
+  | { status: "unavailable" }
+  | { status: "skipped" };
+
+const MISSING: SourceOutcome = { status: "missing" };
+const UNAVAILABLE: SourceOutcome = { status: "unavailable" };
+
 /* ── UW source ──────────────────────────────────────────── */
 
-async function fetchFromUW(symbol: string): Promise<number | null> {
+async function fetchFromUW(symbol: string): Promise<SourceOutcome> {
   const token = process.env.UW_TOKEN;
-  if (!token) return null;
+  if (!token) return { status: "skipped" };
   try {
     const res = await countedUwFetch(
       `https://api.unusualwhales.com/api/stock/${encodeURIComponent(symbol)}/quote`,
@@ -174,7 +192,7 @@ async function fetchFromUW(symbol: string): Promise<number | null> {
         signal: AbortSignal.timeout(5000),
       },
     );
-    if (!res.ok) return null;
+    if (!res.ok) return UNAVAILABLE;
     const data = await res.json();
     // UW quote response shape varies — try common field names
     const prev =
@@ -182,10 +200,10 @@ async function fetchFromUW(symbol: string): Promise<number | null> {
       data?.data?.prev_close ??
       data?.previous_close ??
       data?.prev_close;
-    if (typeof prev === "number" && prev > 0) return prev;
-    return null;
+    if (typeof prev === "number" && prev > 0) return { status: "resolved", close: prev };
+    return MISSING;
   } catch {
-    return null;
+    return UNAVAILABLE;
   }
 }
 
@@ -245,30 +263,32 @@ function lastClosePriorToTodayEt(
  *   3. Nothing else — return null and let the UI show "---" rather than
  *      a confidently wrong number.
  */
-async function fetchFromYahoo(symbol: string): Promise<number | null> {
+async function fetchFromYahoo(symbol: string): Promise<SourceOutcome> {
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5d&interval=1d`;
     const res = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0" },
       signal: AbortSignal.timeout(5000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) return UNAVAILABLE;
     const data = await res.json();
     const result = data?.chart?.result?.[0];
-    if (!result) return null;
+    if (!result) return MISSING;
 
     const dailyClose = lastClosePriorToTodayEt(
       result.timestamp,
       result.indicators?.quote?.[0]?.close,
     );
-    if (dailyClose != null) return dailyClose;
+    if (dailyClose != null) return { status: "resolved", close: dailyClose };
 
     const regularPrev = result.meta?.regularMarketPreviousClose;
-    if (typeof regularPrev === "number" && regularPrev > 0) return regularPrev;
+    if (typeof regularPrev === "number" && regularPrev > 0) {
+      return { status: "resolved", close: regularPrev };
+    }
 
-    return null;
+    return MISSING;
   } catch {
-    return null;
+    return UNAVAILABLE;
   }
 }
 
@@ -284,18 +304,21 @@ async function getPreviousClose(symbol: string): Promise<number | null> {
 
   // IB is tried in batch before this function — skip individual IB calls.
   // Try UW, then Yahoo as last resort.
-  let close = await fetchFromUW(symbol);
-  if (close == null) {
-    close = await fetchFromYahoo(symbol);
-  }
+  const outcomes = [await fetchFromUW(symbol)];
+  if (outcomes[0].status !== "resolved") outcomes.push(await fetchFromYahoo(symbol));
 
-  if (close != null) {
-    cache.set(key, close);
+  const resolved = outcomes.find((outcome) => outcome.status === "resolved");
+  if (resolved && resolved.status === "resolved") {
+    cache.set(key, resolved.close);
     misses.delete(key);
-  } else {
-    rememberMiss(key, now);
+    return resolved.close;
   }
-  return close;
+  // Remember only a definitive answer: at least one source said it has no
+  // close for this symbol, and none of them failed to answer.
+  const answered = outcomes.some((outcome) => outcome.status === "missing");
+  const failed = outcomes.some((outcome) => outcome.status === "unavailable");
+  if (answered && !failed) rememberMiss(key, now);
+  return null;
 }
 
 /* ── Route handler ──────────────────────────────────────── */
@@ -303,7 +326,7 @@ async function getPreviousClose(symbol: string): Promise<number | null> {
 export const radonCapability = "read";
 
 export async function POST(req: Request) {
-  const access = await requireRouteAccess(undefined, { rate: { key: "previous-close:route", limit: 20, windowMs: 60_000 }, durableRateTier: "B" });
+  const access = await requireRouteAccess(undefined, { rate: { key: "previous-close:route", limit: 20, windowMs: 60_000 }, durableRateTier: "M" });
   if (!access.ok) return access.response;
   try {
     const { symbols } = await req.json();

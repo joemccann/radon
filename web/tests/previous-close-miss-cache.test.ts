@@ -93,6 +93,33 @@ describe("POST /api/previous-close unresolvable-symbol replay", () => {
     expect(upstream.filter((u) => u.includes("finance.yahoo.com"))).toHaveLength(1);
   });
 
+  it("does not remember a miss when a source failed rather than answered", async () => {
+    // A UW 429 or a Yahoo timeout is not "no source has this symbol". Caching
+    // it would cost the previous close for the rest of the browser session on
+    // a symbol a retry one second later resolves.
+    const upstream: string[] = [];
+    let uwFails = true;
+    mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      upstream.push(url);
+      if (url.includes("unusualwhales.com")) {
+        if (uwFails) return { ok: false, status: 429, json: async () => ({}) };
+        return { ok: true, json: async () => ({ data: { previous_close: 31.5 } }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+
+    const { POST } = await import("@/app/api/previous-close/route");
+
+    const first = await POST(postRequest(["FLAKEU7"]));
+    expect((await first.json()).closes.FLAKEU7).toBeUndefined();
+
+    uwFails = false;
+    const second = await POST(postRequest(["FLAKEU7"]));
+    expect((await second.json()).closes.FLAKEU7).toBe(31.5);
+    expect(upstream.filter((u) => u.includes("unusualwhales.com"))).toHaveLength(2);
+  });
+
   it("still resolves a symbol the sources can serve while a miss is remembered", async () => {
     const upstream: string[] = [];
     mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
