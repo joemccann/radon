@@ -4,6 +4,7 @@ import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
+import { snapshotMaxAgeMs } from "@/lib/demo/snapshotWindow";
 
 /**
  * GET /api/equibles-filing-forensics?ticker=AAPL  -> one pre-trade dossier
@@ -101,7 +102,7 @@ export async function GET(request: Request): Promise<Response> {
   const result = await dbFirstRead<Dossier>({
     fromDb: () => readDossierFromDb(ticker),
     fromDisk: () => readDossierFromDisk(ticker),
-    maxAgeMs: FILING_FORENSICS_MAX_AGE_MS,
+    maxAgeMs: await snapshotMaxAgeMs(FILING_FORENSICS_MAX_AGE_MS),
     label: "equibles-filing-forensics",
   });
   if (!result.ok) return respond(missingDossier(ticker), requestId);

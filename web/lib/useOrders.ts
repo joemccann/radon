@@ -153,6 +153,12 @@ export function useOrders(
   pollCachedRef.current = pollCached;
 
   const triggerSync = useCallback(async () => {
+    // Demo snapshots are read-only and the producer POST is operatorOnly, so a
+    // manual sync re-reads the sample snapshot instead (useSyncHook contract).
+    if (process.env.NEXT_PUBLIC_RADON_DEMO === "1") {
+      await fetchOrders();
+      return;
+    }
     if (syncingRef.current) return;
     syncingRef.current = true;
     const syncGeneration = ++dataGenerationRef.current;
@@ -195,7 +201,7 @@ export function useOrders(
       syncingRef.current = false;
       if (mountedRef.current) setSyncing(false);
     }
-  }, [scheduleNext]);
+  }, [fetchOrders, scheduleNext]);
 
   const syncNow = useCallback(() => {
     void triggerSync();
