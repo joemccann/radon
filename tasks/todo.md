@@ -10010,3 +10010,5 @@ Prestage ordering review: cloud RED recorded 7 failed/25 passed. All seven failu
 Review: test-only preparation; no local suites or production actions. Preserve normal required locks, recovery-only compatibility, journals and pinned synchronization.
 
 Independent readiness review: require valid directory authority before classifying a missing canonical leaf. Add writable-parent, writable-authority and foreign-authority cases using real temporary metadata; the script-copy fixture explicitly maps the production filesystem root/UID-0 domain to its temporary root/current UID, without changing production policy or mocking supervisor/flock/stat. Runtime remains unapplied pending cloud RED.
+
+Canonical parent contract review: temporary script copies explicitly map the fixed radon group lookup to the fixture's actual gid; a mismatched expected gid and a nonwritable but incorrect0700 parent mode must refuse missing-leaf deferral for default and explicit-canonical selectors. Production's exact0750/radon-gid contract is unchanged in the unapplied proposal.
