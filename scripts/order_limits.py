@@ -162,7 +162,11 @@ def _combo_credit_per_unit(params: dict, price: float, multiplier: int) -> float
 
 
 def _ib_order_type(params: dict) -> str:
-    """STP / STP LMT / LMT, normalized exactly as ``ib_place_order`` does."""
+    """STP / STP LMT / LMT, using ``ib_place_order``'s own normalization.
+
+    An order type ``place_order`` refuses outright reads as LMT here; it never
+    reaches IB, and pricing it on its limit is what the caps did before.
+    """
     raw = str(params.get("orderType") or "LMT").strip().upper()
     raw = raw.replace("_", " ").replace("-", " ")
     if raw in ("STOP", "STOP MARKET", "STP"):
@@ -175,19 +179,19 @@ def _ib_order_type(params: dict) -> str:
 def effective_order_price(params: dict) -> float:
     """|Price| the order can actually execute at, by IB order type.
 
-    A STP order executes at market once the stop triggers: ``ib_place_order``
-    builds ``StopOrder(stopPrice=...)`` and never sends ``limitPrice``, so
-    pricing the caps on a supplied limit let a decoy value understate a stop
-    order's notional and max loss. A STP LMT sends both, so the worse of the
-    two bounds it. Everything else prices on its limit, falling back to a
-    stop price when only that is given.
+    A stop order has no execution price. ``ib_place_order`` builds
+    ``StopOrder(stopPrice=...)`` and never sends ``limitPrice``, while the
+    request schema permits both, so pricing the caps on the limit alone let a
+    decoy value understate the order. Neither supplied field may lower the
+    bound either: a BUY stop at a token price triggers immediately and reaches
+    IB as a market order. Both stop forms therefore take the worse of the two
+    prices on hand, which can only ever be at or above what the caps read
+    before. Everything else prices on its limit, falling back to a stop price
+    when only that is given.
     """
     limit = abs(_finite(params.get("limitPrice")) or 0.0)
     stop = abs(_finite(params.get("stopPrice")) or 0.0)
-    kind = _ib_order_type(params)
-    if kind == "STP":
-        return stop
-    if kind == "STP LMT":
+    if _ib_order_type(params) in ("STP", "STP LMT"):
         return max(limit, stop)
     return limit or stop
 

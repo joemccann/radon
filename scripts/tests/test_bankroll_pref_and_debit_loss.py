@@ -119,6 +119,11 @@ class TestStopOrderPricing:
             self._stock(orderType="STP LMT", limitPrice=0.01, stopPrice=1000.0))
         assert loss == pytest.approx(10_000_000)
 
+    def test_stp_max_loss_never_prices_below_a_supplied_limit(self):
+        loss = bankroll_guard.order_max_loss(
+            self._stock(orderType="STP", limitPrice=1000.0, stopPrice=0.01))
+        assert loss == pytest.approx(10_000_000)
+
     def test_limit_order_still_prices_on_its_limit(self):
         loss = bankroll_guard.order_max_loss(
             self._stock(orderType="LMT", limitPrice=20.0))
@@ -130,3 +135,17 @@ class TestStopOrderPricing:
             snapshot=_snapshot())
         assert verdict is not None
         assert verdict.get("code") == "BANKROLL_CAP_EXCEEDED", verdict
+
+
+class TestKellyGuardSharesTheSamePricing:
+    """kelly_guard is the third guard reading an order price; a decoy field
+    must not give it a different answer from Gate 3."""
+
+    def test_option_stop_worst_case_loss_matches_gate_3(self):
+        import kelly_guard
+
+        params = {"type": "option", "symbol": "AAPL", "action": "BUY",
+                  "quantity": 400, "orderType": "STP",
+                  "limitPrice": 0.01, "stopPrice": 50.0}
+        assert kelly_guard._worst_case_loss(params) == pytest.approx(2_000_000)
+        assert bankroll_guard.order_max_loss(params) == pytest.approx(2_000_000)

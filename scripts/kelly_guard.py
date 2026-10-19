@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from kelly import KELLY_MAX_PCT, kelly_config
-from order_limits import combo_max_loss
+from order_limits import combo_max_loss, effective_order_price
 
 _LOG = logging.getLogger(__name__)
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -73,9 +73,11 @@ def _worst_case_loss(params: dict) -> Optional[float]:
             return None
         try:
             qty = abs(float(params.get("quantity") or 0))
-            price = abs(float(params.get("limitPrice") or 0))
         except (TypeError, ValueError):
             return None
+        # Same pricing as the notional cap and Gate 3: a stop order carries no
+        # limit at execution, so a decoy limitPrice must not price this guard.
+        price = effective_order_price(params)
         if qty <= 0 or price <= 0:
             return None
         return qty * price * 100.0
