@@ -17,6 +17,11 @@
 //                               per-resource A keys alone let one account
 //                               hold 100/hr per segment forever — R-652)
 //   L — expensive    50/day     (user-global daily ceiling over tier B)
+//   M — batch read   20/hr      (one request fans out to up to 30 symbols,
+//                               each costing a quote plus a fallback)
+//   N — batch read   100/day    (user-global daily ceiling over tier M, kept
+//                               off tier L so automatic price backfill cannot
+//                               spend the producer allowance the scans share)
 //
 // The limiter is constructed LAZILY from UPSTASH_REDIS_REST_URL / _TOKEN.
 // Production and demo deployments fail closed if it is unavailable; local
@@ -36,7 +41,7 @@ import {
 export type DemoRateTier =
   | "A" | "B" | "C" | "D" | "E"
   | "F" | "G" | "H" | "I" | "J"
-  | "K" | "L";
+  | "K" | "L" | "M" | "N";
 
 export type DemoRateLimitResult = {
   success: boolean;
@@ -60,6 +65,8 @@ const TIER_CONFIG: Record<DemoRateTier, TierConfig> = {
   J: { limit: DEMO_SHELL_DAILY_LIMIT, window: "1 d" },
   K: { limit: 1_000, window: "1 d" },
   L: { limit: 50, window: "1 d" },
+  M: { limit: 20, window: "1 h" },
+  N: { limit: 100, window: "1 d" },
 };
 
 // Generous no-op result for builds without Upstash configured.
