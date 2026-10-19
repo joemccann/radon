@@ -45,6 +45,14 @@ radon/                          # sole product repo
 
 ---
 
+## Deployment transport after migration
+
+The monorepo path and immutable-runner contract below are unchanged by the
+private-network cutover. The three CI host jobs use Tailscale before OpenSSH;
+public app SSH is closed. Enrollment, Production secrets, host-key pinning,
+and recovery are owned by [CI deploy over the tailnet](operations.md#ci-deploy-over-the-tailnet).
+The app/broker/demo boundaries are shown in the [network overview](spof-host-split.md#deployed-topology-and-access).
+
 ## Phases
 
 ### Phase 1 — Import (this change)
