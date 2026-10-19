@@ -16,6 +16,10 @@ import sys
 import tempfile
 
 
+# The SVG wraps notes at 100 characters; a second line collides with the source footer.
+NOTE_CHARS = 100
+
+
 class ChartRenderError(ValueError):
     """A chart cannot be exported without violating the rendering contract."""
 
@@ -100,6 +104,8 @@ def validate_plan(plan: dict) -> None:
     for field in ("subtitle", "note", "sourceNote", "xLabel", "yLabel", "metric"):
         if field in plan and (not isinstance(plan[field], str) or len(plan[field]) > 1000):
             raise ChartRenderError("Chart annotations must be bounded text")
+    if len(" ".join(plan[field] for field in ("note", "sourceNote") if plan.get(field))) > NOTE_CHARS:
+        raise ChartRenderError("Chart notes must stay one brief footer line")
 
 
 def _rasterize(svg: str, output: Path, width: int, height: int) -> dict:

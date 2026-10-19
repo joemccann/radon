@@ -112,6 +112,7 @@ const ROUTES: ReadonlyArray<{ path: string; params?: Record<string, string>; ext
   { path: "ticker/news" },
   { path: "ticker/ratings" },
   { path: "ticker/seasonality" },
+  { path: "vix-model-spread" },
   { path: "vcg" },
   { path: "service-health" },
 ];

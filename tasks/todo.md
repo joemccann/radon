@@ -9853,6 +9853,61 @@ Review: Production Gateway paging, hold behavior and broker state are outside th
 
 Notification isolation review: cloud RED `1cdf8f37`, run `39151257572`: hold shard 1 failed/1152 passed (one fake sender call); isolation shard 5 failed/2578 passed/1 skipped. Shared root fixtures strip credentials and block urllib/requests Pushover message/cancellation requests with a teardown latch. Default hold pager is fake; explicit paging tests still supply observable senders. Production files remain unchanged. Full final-head CI pending.
 
+
+## VIX model spread indicator (2026-10-18)
+
+- [x] T1 (depends_on: []): Verify VIX / VIXEQ / COR1M sources, units, windows, licensing and capture fixtures.
+- [x] T2 (depends_on: [T1]): Specify formula, API, storage and chart; record failing Python/API/UI tests.
+- [x] T3 (depends_on: [T2]): Implement ingestion, storage and trusted scheduled units.
+- [x] T4 (depends_on: [T2]): Implement API, types, hook and freshness schedule.
+- [x] T5 (depends_on: [T2]): Implement Regime chart, navigation and browser coverage.
+- [x] T6 (depends_on: [T3, T4, T5]): Integrate, run full suites, ingest real data and verify browser.
+- [ ] T7 (depends_on: [T6]): PR, exact-head green CI, Pushover, admin merge and production verification.
+
+### Review
+
+- Source research reproduced 3,101 aligned Cboe sessions, 2014-06-19 through 2026-10-16.
+- Formula verified: sqrt(COR1M / 100) * VIXEQ; latest model 13.235944, spread 6.754056.
+- Screenshot bands use 252 sessions (mean 3.949551), while requested prose specifies 20 (mean 4.327849). Preserve explicit window labels.
+- User confirmed personal, non-commercial use only on 2026-10-18. Source gate resolved within that scope; no public/demo data or raw-source redistribution.
+- Integrated suites: Python 16,155 passed/2 skipped (74.49% coverage), after integrating main 948fedc8; Vitest 11,136 passed/21 skipped; cloud 2,982 passed/7 skipped. Touched collector 61 passed/97.58% coverage after real full-history upload regression. Synthetic desktop/mobile Playwright 6 passed.
+- Production Turso migration 98 applied; direct query verifies 3,101 history rows (2014-06-19 through 2026-10-16), complete snapshot at 2026-10-18T22:00:11.019739Z and service health. Native authenticated production-build browser verified 3,101 sessions, 20/252 bands, timer-derived countdown and four inspected desktop/mobile theme screenshots; exact-head delivery remains pending.
+
+- Final updated-base verification: full Python 16,155 passed/2 skipped, cloud 2,982 passed/7 skipped, full Vitest 11,136 passed/21 skipped with every coverage ratchet green. Production compile and native-session real-data browser checks passed; existing two newsfeed type errors reproduce on the clean base and remain outside this feature. React review verified unconditional hooks, ResizeObserver cleanup, finite chart values and explicit window/range state.
+
+VIX model delivery review: initial exact-head CI found missing canonical Clear/TesterArmy route registration (TesterArmy run 39170989963: 1 failed/78 passed). Add the new page to the unchanged strict inventory check; local inventory/generator now cover all 70 App Router pages exactly once. No runtime code or test gate changed. Focused exact inventory plus new-route desktop/mobile Playwright: 3 passed; repaired-head CI pending.
+
+## Operator hardening: research image executables (2026-10-18)
+- [x] RCLI-T1 (depends_on: []): Verify image CLI and research auth/mount contracts.
+- [x] RCLI-T2 (depends_on: [RCLI-T1]): Pin research executable boundary to image while retaining provider grants.
+- [ ] RCLI-T3 (depends_on: [RCLI-T2]): Cloud red/green regression and full CI; document rollout and review.
+
+### Research executable review
+- Cloud regression RED verified in private CI job 117778809500; GREEN validation pending.
+- Scope review: research executable mount only; auth/HOME/state and Node unit mounts retained.
+
+## Subscription service environment maintenance (2026-10-18)
+
+- [x] SE1 depends_on: [] Verify current service inputs and installation sequence.
+- [x] SE2 depends_on: [SE1] Add synthetic environment publication regression and obtain cloud red evidence.
+- [x] SE3 depends_on: [SE2] Publish the service allowlist before unit activation and on every deploy.
+- [ ] SE4 depends_on: [SE3] Complete cloud gates and prepare the independent maintenance PR.
+
+Review: Production provisioning and credential operations require operator coordination; no live changes are part of this branch.
+
+Subscription environment review: cloud red recorded on private run 39162568477; the dedicated publisher uses pinned directory descriptors and root-private output. Keeper UID, canonical native credential writes, vault socket and paging stay unchanged. Cloud green pending; no production operations performed.
+
+## Responder service account maintenance (2026-10-18)
+
+- [x] RA1 depends_on: [] Map account, native authentication, runtime promotion, state, clone pickup and action grants.
+- [x] RA2 depends_on: [RA1] Obtain cloud red for the isolated account and gated migration contracts.
+- [x] RA3 depends_on: [RA2] Implement independent account/runtime and complete trusted host handover.
+- [ ] RA4 depends_on: [RA3] Complete cloud gates and prepare the independent maintenance PR.
+
+Review: Existing subscription credential lifecycle remains separate; host migration requires explicit native authentication under the new service account.
+
+Responder account review: private cloud red run 39162568477 proved the missing account/domain contracts. Optional source deploy is inert; trusted preparation, native login and explicit pickup acknowledgement are required before timer handover. Keeper runtime remains separate. Synthetic transport and handover tests cover rollback/race paths; cloud green pending. No production state or credential material changed in this session.
+
 ## Operator hardening: public media publication (2026-10-18)
 - [x] MPUB-T1 (depends_on: []): Verify current producer, edge, backup, and trusted-install contracts.
 - [x] MPUB-T2 (depends_on: [MPUB-T1]): Add descriptor-bound publisher regression coverage and cloud RED evidence.
@@ -9880,6 +9935,13 @@ Review: Existing gates remain mandatory; no production provisioning or credentia
 
 Static repair review: changed Python sources parse, changed shell entrypoints pass syntax validation, and `git diff --check` is clean. No local test suite or live/production test ran. Exact candidate cloud re-verification remains required.
 
+
+### Independent responder review repair
+- [x] RR1 depends_on: [] Verify transient systemd states and the native installer output location against existing source.
+- [x] RR2 depends_on: [RR1] Refuse busy/unknown workload state on both sides of timer disable and normalize native CLI layout before reporting readiness.
+- [x] RR3 depends_on: [RR2] Add synthetic transient-state, lookup-failure and provisioned-layout coverage for cloud verification.
+
+Independent review repair: handover reads explicit ActiveState and permits only confirmed inactive/failed workloads; transient states and query failures refuse before timer changes or restore the prior timers after disable. Native CLI installation normalizes only an absent canonical slot as the dedicated account and validates the executable before preparation completes. Synthetic coverage authored for both handover directions, second-check races and native installer layouts. AST and whitespace checks pass; cloud verification remains pending.
 
 ### Independent media review repair
 - [x] MR1 depends_on: [] Verify bounded-read accounting and the canonical public PNG producer contract.
