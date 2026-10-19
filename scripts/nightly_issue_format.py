@@ -103,10 +103,13 @@ _ROUTE_RE = re.compile(
 # Any scheme, not just http(s): database, cache and socket URIs carry
 # credentials in their userinfo or query.
 _URL_RE = re.compile(r"\b[a-z][a-z0-9+.-]*://\S+", re.I)
-# The quota ladder's one operator URL, kept only when nothing follows it.
-_USAGE_KEEP_RE = re.compile(
-    r"(?:https?://)?claude\.ai/settings/usage(?=[\s).,;:!'\"\]>]|$)", re.I
+# The quota ladder's one operator URL. Its token is kept only when sentence
+# punctuation alone follows the literal; any other suffix (path, query, host
+# tail) redacts the whole token, which carries no scheme once matched.
+_USAGE_TOKEN_RE = re.compile(
+    r"(?<![\w.-])(?:https?://)?claude\.ai/settings/usage(\S*)", re.I
 )
+_USAGE_TAIL_OK_RE = re.compile(r"[).,;:!'\"\]>]*")
 _FILE_LINE_RE = re.compile(
     r"\b[\w./-]+\.(?:py|ts|tsx|js|mjs|cjs|sh|go|rb|java|json|yml|yaml|toml|md):\d+\b"
 )
@@ -190,7 +193,12 @@ def sanitize(text: str) -> str:
     if not text:
         return text
     # Preserve the one operator URL the quota ladder names, then restore.
-    text = _USAGE_KEEP_RE.sub("\x00USAGE\x00", text)
+    text = _USAGE_TOKEN_RE.sub(
+        lambda m: "\x00USAGE\x00" + m.group(1)
+        if _USAGE_TAIL_OK_RE.fullmatch(m.group(1))
+        else REDACTED,
+        text,
+    )
     text = _PRIVATE_KEY_BLOCK_RE.sub(REDACTED, text)
     text = _COOKIE_HEADER_RE.sub(lambda m: f"{m.group(1)}{REDACTED}", text)
     text = _URL_RE.sub(REDACTED, text)
