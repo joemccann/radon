@@ -1,6 +1,6 @@
 # demo.radon.run — Demo Environment Plan
 
-A public, Clerk-gated demo of Radon that real users can self-serve try for **max 3 trading days**, fully isolated from the real IB Gateway / brokerage account / production Turso. Scoped 2026-06-25. **Planning doc — build is phased; nothing is live until the infra below is provisioned.**
+A public, Clerk-gated demo of Radon that real users can self-serve try for **max 3 trading days**, fully isolated from the real IB Gateway / brokerage account / production Turso. Scoped 2026-06-25. The frontend and backend are deployed; the historical build checklist below is not a live inventory.
 
 ## Decisions (locked)
 
@@ -20,8 +20,8 @@ FastAPI short-circuits auth on `is_trusted_local_request` (`scripts/api/auth.py:
 
 ## Architecture
 
-- **New Hetzner VM** (own public IP) running FastAPI for bounded demo-only operations. The Vercel frontend does not require an IB relay for workstation reads.
-- **Cloudflare** (orange-cloud) in front: WAF + volumetric DDoS + IP rate-limiting before origin.
+- **Separate Hetzner VM** (own public IP) running FastAPI for bounded demo-only operations. The Vercel frontend does not require an IB relay for workstation reads.
+- **Vercel frontend** at `demo.radon.run`, with its edge protection and Clerk trial gate. It calls the separate Caddy backend at `demo-api.radon.run` over public HTTPS; Cloudflare was the original plan, not the deployed frontend edge.
 - FastAPI runs **`RADON_API_TEST_MODE=1`** → every IB path stubbed at source (`server.py:1760` returns synthetic permIds without calling `ib_place_order.py`). **No IB Gateway container, no Tailscale route to `ib-gateway:4001`** — IB is physically unreachable.
 - **Sample quote feed (decision 5):** the client builds deterministic minute-bucketed quotes, depth, tape, fundamentals, and option marks for requested instruments. Demo pages never request an IB ticket or open a market-data WebSocket.
 - Same git repo deploys both; a **CI isolation guard** (`scripts/ci/check_demo_isolation.py`, run by the `py-coverage` job in `.github/workflows/ci.yml` on pushes with the repository `TURSO_DEMO_DB_URL` / `TURSO_DEMO_APP_DB_URL` secrets provisioned on 2026-09-28) rejects any demo deploy whose env carries a prod `TURSO_DB_URL` or a reachable IB host. It checks BOTH `TURSO_DEMO_DB_URL` and `TURSO_DB_URL` against the prod marker: every account route reads through `dbExecute` → `getDb()` → `TURSO_DB_URL`, so that variable is the isolation boundary (`getDemoDb()` serves only `/api/admin/demo-users`). The two being equal on the demo VM is the desired state. Until 2026-08-23 nothing invoked the guard and it never inspected `TURSO_DB_URL` at all (RELIABILITY_AUDIT R-156). The CI guard is deploy-time only; the serving path also fails closed at runtime: `web/lib/demo/demoDbIsolation.ts` checks `TURSO_DB_URL` against the same prod marker per request, demo-principal DB reads return 403 `DEMO_DB_ISOLATION` (`web/lib/apiContracts.ts`) and routes fall back to fixtures (test: `web/tests/demo-db-isolation.test.ts`) — a mis-provisioned prod `TURSO_DB_URL` never serves live rows if the CI guard is unavailable.
@@ -51,6 +51,20 @@ FastAPI short-circuits auth on `is_trusted_local_request` (`scripts/api/auth.py:
 
 Counted via the existing market calendar (`scripts/utils/market_calendar.py:get_last_n_trading_days` — weekends + US holidays + IBKR closures excluded), expiring at **16:00 ET of the 3rd trading day** from signup. Marked at signup on the Clerk `user.created` webhook → `publicMetadata.{demoRole,demoTrialStartedAt,demoTrialExpiresAt}` (expiry computed via a small FastAPI helper since the calendar logic is Python-only) + mirrored to a demo Turso `demo_users` row. Enforced in `web/middleware.ts` (block expired) + a scheduled sweep. **Email-verify (decision 7)** required before the trial clock starts (deters bot signups burning fresh quotas).
 
+## Network access and isolation
+
+The [network overview](spof-host-split.md#deployed-topology-and-access) includes
+both demo layers. `fw-radon-demo` permits public HTTP/HTTPS and restricts SSH
+to the configured recovery IPv4 `/32`; public IPv6 SSH is denied. FastAPI and
+Caddy admin ports are container-only. The VM has no Tailscale interface, no
+production private-network attachment and no IB Gateway. Vercel's frontend
+protection does not replace this backend firewall.
+
+Use the [network-trust owner](operations.md#network-trust-ops-plane-step-2)
+for rollout and [recovery-IP changes](operations.md#recovery-ip-changes-and-roaming)
+when roaming or the ISP changes the address. Do not enroll demo in the
+production tailnet to avoid maintaining a recovery address.
+
 ## Operator runbook
 
 - **Self-serve signup:** `demo.radon.run` landing → "Start 3-day demo" → standard Clerk `/sign-up` (email-verify) → `user.created` webhook sets metadata + inserts `demo_users`. No operator action to start a trial.
@@ -58,9 +72,13 @@ Counted via the existing market calendar (`scripts/utils/market_calendar.py:get_
 
 ## Environment variables (the demo's runtime dependency)
 
+The staging notes in this table record the original rollout, not current
+secret or deployment status. Inspect the operator-managed project settings
+and backend environment before making a change.
+
 The demo reads the vars below. They live in **two places**: `web/.env` (local dev) and the **`radon-demo` Vercel project** env (encrypted, all targets). **Prod must NOT carry `TURSO_DEMO_*` / `UPSTASH_*`** — their absence is what guarantees prod can never reach the demo DB (`web/lib/db.ts:getDemoDb()` throws when unset). Read paths: `getDemoDb()` (Turso), `web/lib/demo/demoGate.ts:demoRateLimit` (Upstash), the 3 LLM routes (AI keys).
 
-| Var(s) | Source | Status |
+| Var(s) | Source | Initial provisioning notes (historical) |
 |---|---|---|
 | `TURSO_DEMO_DB_URL` · `TURSO_DEMO_AUTH_TOKEN` | demo Turso DB `radon-demo` (aws-us-west-2, isolated from `radon-joemccann`) | ✅ provisioned + staged |
 | `UPSTASH_REDIS_REST_URL` · `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis `radon-demo-ratelimit` (us-east-1, co-located with Vercel `iad1`) | ✅ provisioned + staged |
@@ -69,11 +87,11 @@ The demo reads the vars below. They live in **two places**: `web/.env` (local de
 | `RADON_API_URL` | demo VM FastAPI over TLS (e.g. `demo-api.radon.run`) | ⏳ pending (VM) |
 | Clerk publishable / secret keys | same instance (decision 1) | ⏳ to stage |
 
-**Topology revised from the original plan (2026-06-27):** the **frontend runs on Vercel** (`demo.radon.run`, project `radon-demo`, root `web/`) behind **Vercel WAF + rate-limiting** (100 req/min/IP challenge, 1000 req/min/IP deny) — replacing the Cloudflare layer described above. Only **FastAPI + the relay** run on the Hetzner VM; the Vercel frontend calls the VM backend over the public internet via `RADON_API_URL`, so the backend authenticates the Clerk JWT (no localhost-trust bypass). The managed OWASP WAF ruleset is Enterprise-only and not enabled on Pro.
+**Topology revised from the original plan (2026-06-27):** the **frontend runs on Vercel** (`demo.radon.run`, project `radon-demo`, root `web/`) behind **Vercel WAF + rate-limiting** (100 req/min/IP challenge, 1000 req/min/IP deny) — replacing the Cloudflare layer described above. The Hetzner VM runs **Caddy + FastAPI**; the Vercel frontend calls the VM backend over the public internet via `RADON_API_URL`, so the backend requires the configured service token or valid JWT (no localhost-trust bypass); see the Vercel-to-VM authentication contract below. The managed OWASP WAF ruleset is Enterprise-only and not enabled on Pro.
 
 **Ignored Build Step:** `web/vercel.json` → `scripts/vercel-ignore-build.mjs` skips the `radon-demo` build unless `web/` or `lib/tools` changed (the `@tools` webpack alias). Docs/tasks/site-only pushes cancel with "Canceled by Ignored Build Step", matching the marketing `site/` project. Defaults to continuing the build if the diff cannot be determined.
 
-## Build phases
+## Historical build phases (not a live infrastructure checklist)
 
 **Operator-provisioned infra (you; I provide configs/checklists):**
 - **VM** — new Hetzner VM + docker-compose (demo stack, no IB container/route), Caddy for `demo.radon.run`.
