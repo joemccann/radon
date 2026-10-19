@@ -28,6 +28,7 @@ HELPER_USER = '_radonprobe'
 READ_GROUP = '_radonprobe_read'
 BASE = Path('/private/var/db/radon-perf-probe')
 RUNNER = Path('/usr/local/radon-runner')
+LOG_PATH = Path('/private/var/log/radon-perf-probe.log')
 MAX_BYTES = 1_000_000
 MAX_AGE = 15 * 60
 SSH_SECONDS = 180
@@ -88,7 +89,9 @@ def validate(payload):
         raise ValueError('snapshot contains non-finite numbers')
     report = json.loads(payload, parse_constant=invalid_constant)
     if (not isinstance(report, dict) or type(report.get('schema')) is not int or report['schema'] != 1
-            or not isinstance(report.get('host'), str) or not report['host']
+            # The canonical producer replaces its hostname with host metrics
+            # when that section succeeds; failures retain the hostname.
+            or not isinstance(report.get('host'), (str, dict)) or not report['host']
             or not isinstance(report.get('errors'), dict)):
         raise ValueError('snapshot schema is invalid')
     taken = datetime.strptime(report['taken_at'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
@@ -213,6 +216,36 @@ def read_snapshot():
         os.close(fd)
 
 
+def _provision_log(uid):
+    for parent in reversed(LOG_PATH.parents):
+        _secure(parent, {ROOT_UID}, directory=True)
+    directory_fd = _open_checked(LOG_PATH.parent, {ROOT_UID}, directory=True)
+    file_fd = None
+    try:
+        try:
+            file_fd = os.open(LOG_PATH.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                              0o600, dir_fd=directory_fd)
+        except FileExistsError:
+            # Existing bytes and metadata are preserved. Refuse unsafe objects
+            # before opening them, including FIFOs and extra hard links.
+            file_fd = _open_checked(LOG_PATH, {uid}, mode=0o600, gid=_read_gid())
+        else:
+            os.fchown(file_fd, uid, _read_gid())
+            os.fchmod(file_fd, 0o600)
+            os.fsync(file_fd)
+            os.fsync(directory_fd)
+        held = os.fstat(file_fd)
+        named = os.stat(LOG_PATH.name, dir_fd=directory_fd, follow_symlinks=False)
+        if (not stat.S_ISREG(held.st_mode) or held.st_uid != uid or held.st_gid != _read_gid()
+                or stat.S_IMODE(held.st_mode) != 0o600 or held.st_nlink != 1
+                or (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino)):
+            raise RuntimeError('snapshot log ownership or permissions are invalid')
+    finally:
+        if file_fd is not None:
+            os.close(file_fd)
+        os.close(directory_fd)
+
+
 def provision():
     if os.geteuid() != 0:
         raise RuntimeError('snapshot provisioning requires administrator installation')
@@ -241,6 +274,8 @@ def provision():
     target = targets[0].strip()
     if not re.fullmatch(r'[a-z_][a-z0-9_-]*@[A-Za-z0-9][A-Za-z0-9.:-]*', target):
         raise ValueError('snapshot target is invalid')
+    # launchd opens stdout/stderr as the daemon uid before Python starts.
+    _provision_log(uid)
     name = BASE / ('.config-' + secrets.token_hex(16))
     try:
         fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)

@@ -4390,3 +4390,39 @@ Cloud regression73f93735/run39077076334/job117526378112 reproduced2 failures wit
 - **Repair:** suppress only pure-raster external title blocks exceeding three physical lines or160 whitespace-normalized characters. Keep the complete raster image, compact external titles/subtitles/units, source/notes and margins. Vector/mixed behavior is unchanged. A legitimate unusually long external title may no longer extend the crop; source/image verification remains required before publication.
 - **Regression:** public PDF detection fixtures cover four short prose lines, five paragraph lines and one overlong extracted line, plus compact two/three-line external titles and units for raster/vector/mixed figures. Regression-only72753f7e, GitHub39079499672/job117533421676:3failed2842passed; failures are the three false-title cases. No local suites. Final green, source preview and deployed image evidence belong to PR1142.
 - **Recovery:** render the exact original PDF through the deployed source, visually verify all table rows/title/credits, then use an exact guarded same-ID publication correction preserving canonical/outbox identity and clocks. Never requeue the source or accept a mechanical browser pass as visual approval.
+
+
+## runner-perf-probe-launchd-and-host-schema
+
+The isolated Mac performance collector can fail at two independent boundaries.
+A launchd job running as `_radonprobe` cannot create its fixed stdout/stderr
+file in root-owned `/var/log`. Its status is `spawn failed`, exit `78: EX_CONFIG`,
+with `Unable to open stdout path ... Permission denied`; Python never ran.
+After startup is repaired, the canonical schema-1 producer replaces its initial
+`host` hostname with a metrics object when that section succeeds. A consumer
+that requires only a hostname string rejects that valid snapshot.
+
+Discriminating checks: inspect the matching launchd state and unified-log
+message before changing SSH grants. Resolve the actual target through its
+pinned host key: the performance target is the app host, so a file missing on
+the Gateway broker is not evidence that the forced command is broken. Validate
+the canonical `cloud/scripts/perf_probe.py` output, including its successful
+host metrics and its hostname fallback on section failure.
+
+Provision the fixed log as a regular, single-link file owned by the helper's
+dedicated uid and read group, mode `0600`, beneath the protected system log
+directory. Refuse symlinks, FIFOs, directories, wrong owners, extra links and
+unsafe modes without changing their targets. Preserve valid existing log bytes.
+The consumer accepts a nonempty host metrics object or hostname fallback;
+SSH, byte, freshness, finite-number and ownership restrictions stay in force.
+
+Regressions live in `scripts/tests/test_runner_perf_probe_helper.py`: canonical
+producer output and real root-to-unprivileged log access in an isolated Linux
+filesystem root, including adversarial log objects. The isolated root preserves
+the installer's refusal of sticky writable ancestors.
+
+For a partial operator handover, preserve the existing key pair, grant proof
+and acknowledgement. Continue that exact grant only after a fresh collection
+and permission proof. A startup attempt does not justify retiring the old key.
+Rollback preserves the separate account and protected key boundary; revert the
+source change or leave collection unavailable while investigating.

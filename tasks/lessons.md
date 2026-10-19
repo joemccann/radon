@@ -1284,3 +1284,16 @@ When an operator asks for automated release or updater recovery, ship the durabl
 ### 2026-10-18: Test state isolation must include notifications
 
 - Temporary hold/lock/audit files do not isolate external side effects. Strip inherited and dotenv-loaded notification credentials in every pytest subtree, block unmocked live delivery even when callers swallow errors, and make hold tests use an explicit fake pager. Verify broker state and existing journal evidence before treating a test-actor alert as a real hold.
+
+
+## 2026-10-18 - Verify the complete isolated collector before retiring credentials
+
+- Provision a launchd daemon's fixed log for its configured unprivileged uid
+  before bootstrap. Test actual unprivileged `O_RDWR` access below a protected
+  parent, and preserve refusals for unsafe existing objects.
+- Derive consumer fixtures from the canonical producer. Its schema-1 `host`
+  field contains metrics after success and a hostname fallback on failure.
+- Match the diagnostic host to the pinned performance host key. The app host
+  and Gateway broker have different checkouts.
+
+- Before requesting another authenticated handover, validate every downstream dependency: launchd log open, canonical schema, reachable pinned transport, installed config and retained partial-grant receipts. A successful source admission is insufficient.
