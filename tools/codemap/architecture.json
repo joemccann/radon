@@ -1,31 +1,31 @@
 {
-  "generated_at": "2026-10-18T09:00:08Z",
-  "node_count": 3999,
-  "edge_count": 8192,
+  "generated_at": "2026-10-19T09:00:08Z",
+  "node_count": 4056,
+  "edge_count": 8301,
   "areas": {
-    "web": 2298,
+    "web": 2329,
     "site": 159,
-    "scripts": 1389,
-    "cloud": 106,
+    "scripts": 1401,
+    "cloud": 119,
     "lib": 28,
     "tests": 17,
-    "tools": 2
+    "tools": 3
   },
   "groups": [
     {
       "id": "web/app",
       "area": "web",
-      "count": 235
+      "count": 237
     },
     {
       "id": "web/components",
       "area": "web",
-      "count": 278
+      "count": 280
     },
     {
       "id": "web/e2e",
       "area": "web",
-      "count": 237
+      "count": 238
     },
     {
       "id": "web/e2e-setup-gate",
@@ -40,7 +40,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 443
+      "count": 451
     },
     {
       "id": "web/public",
@@ -60,7 +60,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 1083
+      "count": 1101
     },
     {
       "id": "site/app",
@@ -100,7 +100,7 @@
     {
       "id": "scripts",
       "area": "scripts",
-      "count": 186
+      "count": 188
     },
     {
       "id": "scripts/ai_cycle",
@@ -115,7 +115,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 138
+      "count": 139
     },
     {
       "id": "scripts/backtest",
@@ -125,7 +125,7 @@
     {
       "id": "scripts/ci",
       "area": "scripts",
-      "count": 7
+      "count": 8
     },
     {
       "id": "scripts/clients",
@@ -210,7 +210,7 @@
     {
       "id": "scripts/runner",
       "area": "scripts",
-      "count": 2
+      "count": 3
     },
     {
       "id": "scripts/security",
@@ -225,7 +225,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 725
+      "count": 732
     },
     {
       "id": "scripts/trade_blotter",
@@ -243,6 +243,11 @@
       "count": 13
     },
     {
+      "id": "cloud/demo-vm",
+      "area": "cloud",
+      "count": 1
+    },
+    {
       "id": "cloud/gpu",
       "area": "cloud",
       "count": 1
@@ -255,12 +260,12 @@
     {
       "id": "cloud/scripts",
       "area": "cloud",
-      "count": 11
+      "count": 14
     },
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 93
+      "count": 102
     },
     {
       "id": "lib/tools",
@@ -281,6 +286,11 @@
       "id": "tools/codemap",
       "area": "tools",
       "count": 2
+    },
+    {
+      "id": "tools",
+      "area": "tools",
+      "count": 1
     }
   ],
   "hubs": [
@@ -301,28 +311,28 @@
     {
       "id": "web/lib/apiContracts.ts",
       "area": "web",
-      "in": 127,
+      "in": 129,
       "out": 0,
-      "test": false
-    },
-    {
-      "id": "web/components/WorkspaceSections.tsx",
-      "area": "web",
-      "in": 23,
-      "out": 84,
       "test": false
     },
     {
       "id": "web/lib/routeAccess.ts",
       "area": "web",
-      "in": 100,
+      "in": 104,
       "out": 4,
+      "test": false
+    },
+    {
+      "id": "web/components/WorkspaceSections.tsx",
+      "area": "web",
+      "in": 24,
+      "out": 84,
       "test": false
     },
     {
       "id": "web/components/WorkspaceShell.tsx",
       "area": "web",
-      "in": 58,
+      "in": 59,
       "out": 44,
       "test": false
     },
@@ -343,14 +353,14 @@
     {
       "id": "scripts/db/__init__.py",
       "area": "scripts",
-      "in": 97,
+      "in": 98,
       "out": 1,
       "test": false
     },
     {
       "id": "scripts/api/__init__.py",
       "area": "scripts",
-      "in": 97,
+      "in": 98,
       "out": 0,
       "test": false
     },
@@ -358,7 +368,7 @@
       "id": "web/lib/assistant/nextLoaders.ts",
       "area": "web",
       "in": 2,
-      "out": 82,
+      "out": 83,
       "test": false
     },
     {
@@ -371,7 +381,7 @@
     {
       "id": "web/lib/pageTitle.ts",
       "area": "web",
-      "in": 72,
+      "in": 73,
       "out": 2,
       "test": false
     },
@@ -399,14 +409,14 @@
     {
       "id": "scripts/db/hrana_http.py",
       "area": "scripts",
-      "in": 60,
+      "in": 61,
       "out": 3,
       "test": false
     },
     {
       "id": "web/lib/useSyncHook.ts",
       "area": "web",
-      "in": 56,
+      "in": 57,
       "out": 6,
       "test": false
     },
@@ -414,34 +424,34 @@
       "id": "web/components/RegimePanel.tsx",
       "area": "web",
       "in": 4,
-      "out": 58,
+      "out": 59,
       "test": false
     },
     {
       "id": "web/lib/dbFirstRead.ts",
       "area": "web",
-      "in": 51,
+      "in": 52,
       "out": 5,
       "test": false
     },
     {
       "id": "web/components/SectionEmptyState.tsx",
       "area": "web",
-      "in": 53,
+      "in": 54,
       "out": 0,
       "test": false
     },
     {
       "id": "web/lib/dbExecute.ts",
       "area": "web",
-      "in": 48,
+      "in": 49,
       "out": 5,
       "test": false
     },
     {
       "id": "web/components/InfoTooltip.tsx",
       "area": "web",
-      "in": 52,
+      "in": 53,
       "out": 0,
       "test": false
     },
@@ -455,7 +465,7 @@
     {
       "id": "web/components/SpectralLoader.tsx",
       "area": "web",
-      "in": 49,
+      "in": 50,
       "out": 0,
       "test": false
     },
@@ -469,14 +479,14 @@
     {
       "id": "web/components/RequestError.tsx",
       "area": "web",
-      "in": 45,
+      "in": 46,
       "out": 2,
       "test": false
     },
     {
       "id": "web/lib/useViewport.ts",
       "area": "web",
-      "in": 44,
+      "in": 45,
       "out": 1,
       "test": false
     },
@@ -490,9 +500,16 @@
     {
       "id": "web/lib/chartSystem.ts",
       "area": "web",
-      "in": 40,
+      "in": 41,
       "out": 0,
       "test": false
+    },
+    {
+      "id": "web/e2e/clear-fixtures.ts",
+      "area": "web",
+      "in": 31,
+      "out": 10,
+      "test": true
     },
     {
       "id": "scripts/clients/ib_client.py",
@@ -500,13 +517,6 @@
       "in": 37,
       "out": 3,
       "test": false
-    },
-    {
-      "id": "web/e2e/clear-fixtures.ts",
-      "area": "web",
-      "in": 30,
-      "out": 10,
-      "test": true
     },
     {
       "id": "web/components/PositionTable.tsx",
@@ -518,7 +528,7 @@
     {
       "id": "web/lib/refreshSchedule.ts",
       "area": "web",
-      "in": 38,
+      "in": 39,
       "out": 0,
       "test": false
     },
@@ -530,6 +540,20 @@
       "test": false
     },
     {
+      "id": "web/lib/serviceHealthWindows.ts",
+      "area": "web",
+      "in": 37,
+      "out": 0,
+      "test": false
+    },
+    {
+      "id": "web/components/mobile/MetricCell.tsx",
+      "area": "web",
+      "in": 37,
+      "out": 0,
+      "test": false
+    },
+    {
       "id": "web/components/DashboardNewsFeed.tsx",
       "area": "web",
       "in": 17,
@@ -537,14 +561,7 @@
       "test": false
     },
     {
-      "id": "web/lib/serviceHealthWindows.ts",
-      "area": "web",
-      "in": 36,
-      "out": 0,
-      "test": false
-    },
-    {
-      "id": "web/components/mobile/MetricCell.tsx",
+      "id": "web/components/RegimeStrip.tsx",
       "area": "web",
       "in": 36,
       "out": 0,
@@ -555,13 +572,6 @@
       "area": "web",
       "in": 34,
       "out": 2,
-      "test": false
-    },
-    {
-      "id": "web/components/ticker-detail/OrderTab.tsx",
-      "area": "web",
-      "in": 12,
-      "out": 24,
       "test": false
     }
   ],
