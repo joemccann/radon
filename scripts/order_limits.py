@@ -161,17 +161,45 @@ def _combo_credit_per_unit(params: dict, price: float, multiplier: int) -> float
     return price * multiplier if receives_premium else 0.0
 
 
+def _ib_order_type(params: dict) -> str:
+    """STP / STP LMT / LMT, normalized exactly as ``ib_place_order`` does."""
+    raw = str(params.get("orderType") or "LMT").strip().upper()
+    raw = raw.replace("_", " ").replace("-", " ")
+    if raw in ("STOP", "STOP MARKET", "STP"):
+        return "STP"
+    if raw in ("STOP LIMIT", "STOP LMT", "STPLMT", "STP LMT"):
+        return "STP LMT"
+    return "LMT"
+
+
+def effective_order_price(params: dict) -> float:
+    """|Price| the order can actually execute at, by IB order type.
+
+    A STP order executes at market once the stop triggers: ``ib_place_order``
+    builds ``StopOrder(stopPrice=...)`` and never sends ``limitPrice``, so
+    pricing the caps on a supplied limit let a decoy value understate a stop
+    order's notional and max loss. A STP LMT sends both, so the worse of the
+    two bounds it. Everything else prices on its limit, falling back to a
+    stop price when only that is given.
+    """
+    limit = abs(_finite(params.get("limitPrice")) or 0.0)
+    stop = abs(_finite(params.get("stopPrice")) or 0.0)
+    kind = _ib_order_type(params)
+    if kind == "STP":
+        return stop
+    if kind == "STP LMT":
+        return max(limit, stop)
+    return limit or stop
+
+
 def _quantity_and_price(params: dict) -> tuple[Optional[float], Optional[float]]:
-    try:
-        quantity = abs(float(params.get("quantity") or 0))
-        price = abs(float(params.get("limitPrice") or 0))
-        if not price:
-            price = abs(float(params.get("stopPrice") or 0))
-    except (TypeError, ValueError):
+    quantity = _finite(params.get("quantity"))
+    if quantity is None:
         return None, None
+    quantity = abs(quantity)
     if not quantity:
         return None, None
-    return quantity, price
+    return quantity, effective_order_price(params)
 
 
 def order_notional(params: dict) -> Optional[float]:

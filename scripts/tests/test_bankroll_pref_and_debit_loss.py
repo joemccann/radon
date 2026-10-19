@@ -96,3 +96,37 @@ class TestDebitMaxLossIsPremium:
         # 100 x $10-wide for $2.00 = $20k on $1.28M NLV (1.6%): width math refused this.
         verdict = REAL_CHECK(_combo(BULL_CALL, quantity=100, price=2.0), snapshot=_snapshot())
         assert verdict is None
+
+
+class TestStopOrderPricing:
+    """Gate 3 must price a stop order on the price IB actually sends.
+
+    ``ib_place_order`` builds ``StopOrder(stopPrice=...)`` for a STP order and
+    drops ``limitPrice`` entirely, so a decoy limit understated max loss.
+    """
+
+    def _stock(self, **extra):
+        return {"type": "stock", "symbol": "AAPL", "action": "BUY",
+                "quantity": 10_000, **extra}
+
+    def test_stp_max_loss_uses_the_stop_price(self):
+        loss = bankroll_guard.order_max_loss(
+            self._stock(orderType="STP", limitPrice=0.01, stopPrice=1000.0))
+        assert loss == pytest.approx(10_000_000)
+
+    def test_stp_limit_max_loss_uses_the_worse_price(self):
+        loss = bankroll_guard.order_max_loss(
+            self._stock(orderType="STP LMT", limitPrice=0.01, stopPrice=1000.0))
+        assert loss == pytest.approx(10_000_000)
+
+    def test_limit_order_still_prices_on_its_limit(self):
+        loss = bankroll_guard.order_max_loss(
+            self._stock(orderType="LMT", limitPrice=20.0))
+        assert loss == pytest.approx(200_000)
+
+    def test_decoy_limit_no_longer_admits_an_over_cap_stop(self):
+        verdict = REAL_CHECK(
+            self._stock(orderType="STP", limitPrice=0.01, stopPrice=1000.0),
+            snapshot=_snapshot())
+        assert verdict is not None
+        assert verdict.get("code") == "BANKROLL_CAP_EXCEEDED", verdict

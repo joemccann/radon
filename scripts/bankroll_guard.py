@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from kelly import KELLY_MAX_PCT
-from order_limits import _finite, combo_max_loss
+from order_limits import _finite, combo_max_loss, effective_order_price
 
 MAX_SNAPSHOT_AGE_SECS = 15 * 60
 _CLOCK_SKEW_SECS = 60
@@ -215,7 +215,10 @@ def order_max_loss(params: dict) -> Optional[float]:
         return max(loss, debit)
     sell = str(params.get("action") or "").upper().startswith("SELL")
     quantity = abs(_finite(params.get("quantity")) or 0.0)
-    price = abs(_finite(params.get("limitPrice")) or _finite(params.get("stopPrice")) or 0.0)
+    # The price IB actually sends for this order type: a STP order carries no
+    # limit, so a decoy limitPrice must not price the cap (see
+    # order_limits.effective_order_price).
+    price = effective_order_price(params)
     if quantity <= 0 or price <= 0:
         return None
     if order_type == "option":
