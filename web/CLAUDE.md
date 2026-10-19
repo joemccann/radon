@@ -277,6 +277,7 @@ cushion = excess_liquidity / net_liquidation
 ## Auth (Next.js side)
 
 - **Middleware** at `web/middleware.ts` enforces Clerk JWT. Localhost auto-bypass when `NODE_ENV !== "production"`. `RADON_AUTHLESS_TEST=1` for Playwright — but never on a live-Clerk deployment: `assertAuthlessTestFlagAbsentInProduction` (R-666) throws at middleware module load when the flag is set alongside a `pk_live_` Clerk key, failing the deploy at boot.
+- **Clerk Frontend API proxy stays off.** `@clerk/nextjs` turns `frontendApiProxy` on by itself when the request host ends with `.vercel.app` and the key is live. This instance rejects those hosts, so middleware passes `frontendApiProxy: { enabled: false }`. Leaving the default on answers `/__clerk/*` with 400 `host_invalid` and breaks sign-in on the demo Vercel host. Pin: `web/tests/clerk-vercel-auto-proxy.test.ts`.
 - **WebSocket auth** via `scripts/api/ws_ticket.py` (30s TTL).
 - **Auth-exempt at FastAPI** (also reachable from Next.js): `/health`, `/ws-ticket/validate`, `/demo/trial-expiry`, all `*/share` routes. (`/docs` + `/openapi.json` are trusted-local only since the 2026-06-28 audit — public callers get 401.)
 - **Public `*/share/content` routes serve ONLY `tweet-<type>-<date>[-card-N].html` from directly inside `reports/`** (validator `web/lib/shareReportPath.ts`). They are unauthenticated (link-preview exemption) and used to serve any file under `reports/`, leaking portfolio/eval reports. Never widen to arbitrary paths.

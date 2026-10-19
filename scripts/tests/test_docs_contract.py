@@ -2418,7 +2418,7 @@ class TestDocumentation20261018:
 
 
 class TestDocumentation20261019:
-    """DOC-209..211: health revision, demo AI spend, login-link prefix."""
+    """DOC-209..212: contracts that drifted after audited-through 30bbaec2."""
 
     def test_public_health_may_include_revision(self):
         server = (_ROOT / "scripts/api/server.py").read_text()
@@ -2458,4 +2458,13 @@ class TestDocumentation20261019:
         assert "backslash" in section
         assert "auth.openai.com" in section
         assert "accounts.x.ai" in section
+
+    def test_clerk_vercel_proxy_stays_off(self):
+        middleware = (_ROOT / "web/middleware.ts").read_text()
+        assert "frontendApiProxy: { enabled: false }" in middleware
+        auth = (_ROOT / "web/CLAUDE.md").read_text()
+        auth = auth.split("## Auth (Next.js side)", 1)[1].split("\n## ", 1)[0]
+        assert "frontendApiProxy" in auth
+        assert "enabled: false" in auth
+        assert ".vercel.app" in auth
 
