@@ -1307,6 +1307,63 @@ def test_eia_read_timeout_retries_once_and_the_daily_record_exits_zero(tmp_path,
     assert list((tmp_path / "raw").iterdir())
 
 
+def test_locked_observation_insert_does_not_skip_later_publishers(tmp_path, monkeypatch, capsys):
+    """2026-10-17 07:20Z radon-ai-cycle: OpenRouter was archived, the Turso
+    insert never committed, and vercel onward never ran. HranaHttpError is
+    outside the source handler, so one locked batch aborts the oneshot
+    before source status and before the API snapshot.
+    """
+    from scripts.ai_cycle.collect import main
+    from scripts.ai_cycle.store import ObservationStore
+    from scripts.db.hrana_http import HranaHttpError
+
+    monkeypatch.delenv("RADON_SECRET_STORE_PATH", raising=False)
+    monkeypatch.delenv("RADON_AI_CYCLE_DB_PATH", raising=False)
+    collected = []
+    appended = []
+
+    def fake_collect(source, *_args, **_kwargs):
+        collected.append(source)
+        return [{"source_id": source}]
+
+    def append(self, rows):
+        source = rows[0]["source_id"]
+        appended.append(source)
+        if source == "openrouter":
+            raise HranaHttpError("SQLITE_BUSY: database is locked")
+        return len(rows)
+
+    monkeypatch.setattr("scripts.ai_cycle.collect.collect_source", fake_collect)
+    monkeypatch.setattr(ObservationStore, "append_observations", append)
+    code = main(
+        [
+            "--record",
+            "--database",
+            str(tmp_path / "cycle.sqlite"),
+            "--sources",
+            "openrouter,vercel",
+            "--start",
+            "2026-10-14",
+            "--end",
+            "2026-10-14",
+            "--archive",
+            str(tmp_path / "raw"),
+        ]
+    )
+    report = json.loads(capsys.readouterr().out)
+    assert collected == ["openrouter", "vercel"]
+    assert appended == ["openrouter", "vercel"]
+    assert code == 1
+    by_source = {item["source_id"]: item for item in report["sources"]}
+    assert by_source["openrouter"]["status"] == "error"
+    assert by_source["openrouter"]["reason"] == "Observation persistence failed"
+    assert "SQLITE_BUSY" not in report["sources"][0]["reason"]
+    assert by_source["vercel"]["status"] == "available"
+    snapshot = ObservationStore(tmp_path / "cycle.sqlite").read_api_snapshot()
+    assert snapshot is not None
+    assert snapshot["generated_at"]
+
+
 def test_eia_read_timeout_still_fails_the_oneshot_when_the_retry_stalls(tmp_path, monkeypatch, capsys):
     from scripts.ai_cycle.collect import main
 

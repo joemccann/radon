@@ -153,6 +153,49 @@ def test_cloud_writes_fail_fast_on_statement_errors(monkeypatch):
     assert len(calls) == 1
 
 
+def test_cloud_writes_retry_a_turso_writer_lock_past_the_idle_reap(monkeypatch):
+    """A SQLITE_BUSY insert must wait out Turso's abandoned-transaction reap.
+
+    2026-10-17 07:18Z radon-ai-cycle archived OpenRouter, then the oneshot
+    was failed by 07:19Z with no observation row and no source status.
+    Knowledge ingest already retries this lock for 12s. A constraint error
+    still fails on the first attempt.
+    """
+    from scripts.db import hrana_http
+
+    calls = []
+    sleeps = []
+
+    def flaky(sql, args):
+        calls.append(sql)
+        if len(calls) == 1:
+            raise hrana_http.HranaHttpError("SQLITE_BUSY")
+
+    monkeypatch.setattr(hrana_http, "hrana_execute", flaky)
+    monkeypatch.setattr("scripts.ai_cycle.store.time.sleep", lambda delay: sleeps.append(delay))
+    ObservationStore()._execute("INSERT OR IGNORE INTO test VALUES (?)", (1,))
+    assert calls == ["INSERT OR IGNORE INTO test VALUES (?)"] * 2
+    assert sleeps == [12.0]
+
+
+def test_cloud_writes_stop_after_the_lock_retry_budget(monkeypatch):
+    from scripts.db import hrana_http
+
+    calls = []
+    sleeps = []
+
+    def locked(sql, args):
+        calls.append(1)
+        raise hrana_http.HranaHttpError("database is locked")
+
+    monkeypatch.setattr(hrana_http, "hrana_execute", locked)
+    monkeypatch.setattr("scripts.ai_cycle.store.time.sleep", lambda delay: sleeps.append(delay))
+    with pytest.raises(hrana_http.HranaHttpError):
+        ObservationStore()._execute("INSERT INTO test VALUES (?)", (1,))
+    assert len(calls) == 3
+    assert sleeps == [12.0, 24.0]
+
+
 def test_cloud_observation_append_splits_when_the_hrana_batch_times_out(monkeypatch):
     """100-row SEC batches blew the 4s Hrana budget on every retry.
 
