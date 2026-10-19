@@ -300,15 +300,56 @@ uses the verb and refuses rather than falling back. Recovery after a hand-edit
 of `/etc/radon/env`: run the verb as root. Contract:
 `cloud/tests/test_mcp_env_ownership.py`.
 
-**The served media volume is read-only outside the newsfeed (2026-10-18).**
-`media.radon.run` serves `/var/lib/radon/media` through Caddy `file_server`,
-which follows symlinks, so write access inside a container let it have the
-host Caddy process read a file the container cannot. `radon-app-runtime` now
-binds that volume `:ro` into every app-plane unit except
-`radon-newsfeed.service`, which downloads the images. The newsfeed's own write
-path still reaches the directory Caddy serves; closing it needs a publication
-directory no container can modify and remains an open operator action.
-Contract: `cloud/tests/test_app_runtime.py`.
+### Public media publication
+
+The newsfeed writes staging files under
+`/var/lib/radon/media`; application mounts keep their existing paths and modes.
+Caddy serves independent snapshots under `/var/lib/radon-public/media`, owned
+by `root:caddy` with directory mode `0750` and file mode `0640`. No application
+container mounts that tree. The credential-free, root-owned
+`radon-media-publish.service` copies canonical PNG leaves, never links or
+subdirectories. It pins directory and file descriptors, verifies source ownership
+and a stable single-link regular file, bounds file/count/byte work, and replaces
+each destination atomically. Existing filenames and `https://media.radon.run/`
+URLs are preserved. Private research media continues through its existing
+subscriber API and is independent of this public tree.
+
+The `.path` unit notices new staging entries; the 15-second retry timer handles
+incomplete writes, missed events and deferred batches. A protected index avoids
+rereading unchanged image bytes. Each batch reserves at most 256 MiB for attempted
+source and destination reads, including failed reads and one-byte growth sentinels; each image
+at most 80 MiB, and source enumeration stops at 20,000 entries. Initially oversized files are rejected before opening. The producer in
+`scripts/newsfeed/media.js` decodes and re-encodes source formats as single-frame
+PNG under a 16,000,000-pixel bound. The publisher independently checks PNG
+chunk framing, CRCs, IHDR dimensions and terminal IEND with no trailing bytes;
+it does not decode image pixels as root. Non-PNG extensions and malformed or
+oversized PNGs are rejected, with prior published bytes retained. The publisher
+preserves every supported leaf still present in staging, including older files.
+Staging cleanup alone owns its 90-day/5,000-file retention policy. More than
+5,000 supported source leaves fails before any public copy or removal rather
+than selecting a subset of existing URLs. Only actual staging removals are
+mirrored, after a complete successful scan. Invalid replacements
+retain the previous approved bytes; an unavailable or replaced staging directory
+never triggers deletion. Images that remain deferred are retried on the next fire.
+Failures are visible through systemd and the existing unit watchdog; this root
+service has no production database credentials and writes no service-health row.
+
+Rollout installs the publisher and service/path/timer through the verified
+control-plane bundle. Before the new Caddy root can become live, `publish-caddy`
+synchronously drains up to 20 cached batches and enables the watcher and timer.
+A failed or incomplete initial migration leaves the previous Caddy configuration
+active. A large backlog can be advanced by running the installed publisher as
+root; exit 75 means another bounded batch is needed. Fresh-host setup uses the
+same drain-before-switch order. Source compatibility paths and legacy reader
+ACLs remain available during this rollout.
+
+Rollback restores the reviewed previous Caddy configuration through the standard
+release rollback, then root may stop and disable `radon-media-publish.path` and
+`radon-media-publish.timer` after confirming the old root is serving. Keep both
+the staging and protected trees intact during rollback. Do not point the producer
+at the protected tree or recursively change ownership of staging. B2 backup keeps
+using staging; restored files return there and pass through publication again.
+Contract: `cloud/tests/test_media_publication.py`.
 
 **Privileged file-op hardening (2026-09-20).** `setup-vps.sh` stages
 root-installed artifacts from committed git blobs (`git cat-file`) rather
@@ -444,7 +485,7 @@ Three deployment modes selected by `IB_GATEWAY_MODE`:
 
 **Hetzner control boundary.** `radon-ib-gateway.service`, the watchdog adapter, admin controls, boot, and operator commands all call the installed monorepo helper at `/usr/local/bin/radon-ib-gateway-control` (sourced from `/home/radon/radon/cloud`). FastAPI runs with `IB_GATEWAY_MODE=cloud` and must not inspect or mutate the production Compose project directly. Set `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud`. Secrets are `/etc/radon/env` (`0640` root:radon); `/home/radon/radon-cloud/.env` is a compatibility symlink. Root demotion of the helper must run from a radon-readable cwd (never leave cwd as `/root`).
 
-Caddy is not in group `radon` (that gid reads the env file). `media.radon.run` is served from `/var/lib/radon/media` via group `radon-media` and a parent traverse ACL. The recursive ACL refresh in `setup-vps.sh` and `publish-caddy` runs as `radon`, which owns the tree; if it reports a permission error, a file under media is not radon-owned (`chown -hR radon /var/lib/radon/media` as root).
+Caddy is not in group `radon` (that gid reads the env file). `media.radon.run` serves protected snapshots from `/var/lib/radon-public/media` via group `caddy`. Legacy `radon-media` staging read ACLs remain during rollout and rollback; publication never changes source ownership or permissions. For permission errors, inspect the publisher unit and the affected leaf rather than recursively changing staging ownership.
 
 **ib_insync request bounding.** `ib_insync` has no built-in timeout on its async API calls — `qualifyContractsAsync`, `reqHistoricalDataAsync`, and `reqMktData` will block forever when the gateway is logged in but the user session isn't authenticated (the 2FA-pending state). Any script that imports `ib_insync` directly must wrap each await in `asyncio.wait_for(..., timeout=15)` and pre-check `auth_state == "authenticated"` against FastAPI `/health` before instantiating `IB()`. `cri_scan.py` is the reference implementation.
 
@@ -585,6 +626,7 @@ Stable fx path (2026-09-26). `com.radon.fx-stable-sync` (installed by `bash scri
 | `radon-ma-ratio.timer` | daily 22:45 UTC | SPX pct above 50d MA over pct above 200d MA (after the close; 5 min behind divyield). Spec: [`indicators/ma-ratio.md`](indicators/ma-ratio.md) |
 | `radon-rsi-oversold.timer` | daily 23:05 UTC | SPX pct of members with Wilder RSI(14) strictly below 30 (after the close; 20 min behind ma-ratio so the shared member-close store is already fresh). Spec: [`indicators/rsi-oversold.md`](indicators/rsi-oversold.md) |
 | `radon-calm-streak.timer` | daily 02:40 + 14:30 UTC | Consecutive SPX sessions without a >1% intraday band, from Cboe `_SPX.json` (conditional GET; unchanged runs are heartbeats). Spec: [`indicators/calm-streak.md`](indicators/calm-streak.md) |
+| `radon-vix-model-spread.timer` | daily 02:50 UTC | Personal-use VIX minus sqrt(COR1M/100) * VIXEQ; operator-only `/regime/vix-model-spread`, migration 0098, same-session Cboe history and 20/252-session bands. Both units are manifest-pinned for automatic installation. Spec: [`indicators/vix-model-spread.md`](indicators/vix-model-spread.md) |
 | `radon-bounce-setup.timer` | Mon..Fri 21:10 UTC | BOUNCE SETUP scanner: stretch rank from Turso closes (largecaps), then UW fixed-strike put vol and 25-delta skew on the top 30. Writes `data/bounce_setup.json` + `scan_snapshots` service `bounce-setup`. Spec: [`bounce-setup.md`](bounce-setup.md). |
 | `radon-iv-spread.timer` | daily 22:15 UTC | NDX minus SPX 1M ATM implied vol spread from IB (after the close; between ivrank and dispersion). Spec: [`indicators/iv-spread.md`](indicators/iv-spread.md) |
 | `radon-watchdog-{intraday,continuous,daily,error}.timer` | varies | Service-health alerting (Pushover) |
@@ -785,10 +827,11 @@ As root, set `BACKUP=<printed /etc/radon-ufw-rollback.* path>`, then run `cp -a 
 
 ### Hetzner Cloud Firewalls (`cloud/hetzner/firewalls/`)
 
-`fw-radon-app.json`, `fw-radon-broker.json`, `fw-radon-ops.json` are `hcloud firewall replace-rules` rule files, inbound only (anything not listed is dropped; outbound is open). `hcloud_firewalls.py` renders `__OPERATOR_RECOVERY_IP__/32` from `--recovery-ip` (one public IPv4) and prints the commands; `--apply` runs them with your own `hcloud` context. Deploy never calls it (`cloud/tests/test_hetzner_firewalls.py` pins the shapes and that fact).
+`fw-radon-app.json`, `fw-radon-broker.json`, `fw-radon-demo.json`, `fw-radon-ops.json` are `hcloud firewall replace-rules` rule files, inbound only (anything not listed is dropped; outbound is open). `hcloud_firewalls.py` renders `__OPERATOR_RECOVERY_IP__/32` from `--recovery-ip` (one public IPv4) and prints the commands; `--apply` runs them with your own `hcloud` context. Deploy never calls it (`cloud/tests/test_hetzner_firewalls.py` pins the shapes and that fact).
 
 - **fw-radon-app:** 80/443 any; 41641/udp any. Public tcp/22 is closed in the declared rules. CI SSH uses the tailnet, and recovery uses the Hetzner web console; see [CI deploy over the tailnet](#ci-deploy-over-the-tailnet).
 - **fw-radon-broker:** 22 from the recovery `/32`; 41641/udp any. No web ports.
+- **fw-radon-demo:** 22 from the recovery `/32`; 80/443 any. No Tailscale UDP rule: demo has no Tailscale interface and no IB connection. The FastAPI `8321` and Caddy admin `2019` ports remain container-only.
 - **fw-radon-ops:** 22 from the recovery `/32`; 80, 443 any; 41641/udp any.
 - No 4001/8340 rules: Hetzner Cloud Firewalls filter the public interface only, so the app-to-broker private-net path (`10.0.0.2` -> `10.0.0.4:4001/8340`) never passes them. That path is held by the bind addresses and the broker ufw set above.
 
@@ -809,9 +852,10 @@ rules and attachment before another apply. Do not infer absence from an error.
 Rollout, one server at a time:
 
 1. Dry run: `python3 cloud/hetzner/firewalls/hcloud_firewalls.py --firewall fw-radon-broker --server radon-broker --recovery-ip <your public ip>`.
-2. Same with `--apply`, only after reviewing the rendered rules and target. From a fresh laptop connection to the broker's tailnet address, verify SSH; from the app verify the broker's 8340 `/healthz` and authenticated readiness through the [host-split owner](spof-host-split.md).
+2. Same with `--apply`, only after reviewing the rendered rules and target. Verify fresh broker SSH both over the tailnet and over public IPv4 from the recovery `/32`; public IPv6 SSH and an independent public IPv4 source must be denied. Confirm a direct Tailscale UDP path still works. From the app verify private `10.0.0.4:4001`, the broker's 8340 `/healthz`, and authenticated readiness through the [host-split owner](spof-host-split.md).
 3. For `--firewall fw-radon-app --server radon-app`, first confirm a green tailnet CI deploy and fresh tailnet SSH, and retain that session plus Hetzner console access. The app rules remove public tcp/22 and retain 80/443 and 41641/udp. Review the dry run before applying; verify fresh tailnet SSH, blocked public tcp/22, `https://app.radon.run/edge-health/ping`, and another successful CI deploy through the [deployment owner](../cloud/CLAUDE.md#deployment-contract).
-4. Apply `fw-radon-ops` only after independently identifying its server.
+4. For demo, dry run `python3 cloud/hetzner/firewalls/hcloud_firewalls.py --firewall fw-radon-demo --server radon-demo --recovery-ip <your public ip>`. Retain a public SSH recovery session and Hetzner console access, confirm the recovery IPv4 from the server-observed SSH source, then apply only to provider server `radon-demo` (`5.78.181.75`). Verify a fresh SSH connection from that `/32`, denied public IPv6 SSH and SSH from an independent IPv4 source, HTTP/HTTPS over both families, and `https://demo-api.radon.run/health` returning 200. Demo has no tailnet recovery path.
+5. Apply `fw-radon-ops` only after independently identifying its server.
 
 **Stop:** stop on any refusal, timeout, unexpected rules/attachment or failed
 fresh-access check. Never replay an uncertain mutation to discover its outcome.
@@ -1061,6 +1105,18 @@ than duplicating commands in this runbook.
 
 ## Private Dropbox research runtime
 
+The research worker executes the Python image's pinned `claude`, `codex`,
+`grok`, and `agy` binaries. It does not bind host `~/.local/bin`. Credential
+directories, `HOME=/home/radon`, and Antigravity refresh/state mounts retain
+their existing paths and modes. The image build verifies each installed CLI's
+version and ownership as the runtime user without calling provider APIs.
+
+Rollout uses the normal verified-image deployment: install the runtime wrapper
+from the same release and restart the managed research unit. No account,
+credential migration, or host CLI installation is required. If image CLI
+compatibility fails, roll back the complete release and its runtime wrapper
+together; do not add an unreviewed host executable mount.
+
 `radon-research.service` is optional and starts only after explicit activation. Its container receives a private read/write bind from `/var/lib/radon-private/research` to `/var/lib/radon/research`; the API receives the same bind read-only. The host anchor is root-owned `0700`, its research child is radon-owned `0700`, and provisioning rejects symlinked or writable ancestors. Seed approved batches through the container bind; host user radon cannot traverse the root-only anchor. Research files never enter the public media bind or demo mirror.
 
 The API credential staging/cleanup contract remains in force when research mount provisioning fails: decrypted credential files must be removed on failure as well as normal stop. The research worker receives no API master-key mount, public media mount, or IB lease mount. Dropbox offline credentials and the model provider key remain in restricted runtime configuration. Apply migration 71 and verify private media before publication, then enable the worker. Full import and activation order: [Dropbox research](dropbox-research.md).
@@ -1114,6 +1170,18 @@ Missing or rejected credentials produce an error heartbeat while preserving prev
 ## NVIDIA model settings in the restricted newsfeed runtime
 
 The runtime renderer passes `NVIDIA_TEXT_MODEL`, `NVIDIA_VISION_MODEL`, and `NVIDIA_MODEL` explicitly into `radon-newsfeed.service`; arbitrary `NVIDIA_*` keys remain excluded. After an approved model-setting change, regenerate the runtime environment through the normal deployment procedure and restart the affected consumer. Existing processes do not reload host environment edits automatically. Keep the hosted [Nemotron Super VL pilot](nemotron-super-vl-pilot.md) vision-only until its quality gates pass; remove or restore the override and regenerate/restart to roll back.
+
+
+## Subscription keeper environment publication
+
+`setup-vps.sh` installs the root-owned subscription environment publisher and seeds
+`/etc/radon/subscription-tokens/env` before activating the keeper. Each deploy
+refreshes that allowlist through `radon-deploy-root publish-subscription-env` after
+canonical environment validation and before builds or service changes. Publication
+failure aborts the deploy. The derived directory is root-private; see
+[subscription token operations](subscription-tokens.md) for its supported inputs
+and rollback. The keeper keeps its existing uid and native provider credential
+locations.
 
 ### Deploy lock transition
 

@@ -9,6 +9,127 @@ the fixer against `/home/radon/radon`. Cloud options that were rejected
 (Cursor Cloud Agents, weekend clone) are in
 [`show-me-grok-cloud.html`](archive/show-me/show-me-grok-cloud.html).
 
+## Isolated responder account migration
+
+The optional responder domain uses `radon-responder`, with its own native
+Grok login, clone, runtime lock, last-known-good state, cache and upgrader.
+The account has no membership in the production application group. Both
+optional units use `ProtectProc=invisible`, `ProtectHome=yes` and a strict
+filesystem write set. The canonical `radon-grok-upgrade` timer remains
+responsible for the subscription keeper's original Grok installation.
+
+These units live under `cloud/services/responder-domain/`. A source deploy
+does not install or enable them and does not interrupt the existing responder.
+The explicit preparation below installs them disabled and records their
+root-owned inventory at `/etc/radon/grok-responder/installed-units.sha256`.
+The daily drift auditor then compares them, including drop-ins, against their
+canonical nested sources. Rollback retains that inventory and those disabled
+units, so their configuration remains observable.
+
+### Prepare the optional account
+
+After the tested maintenance commit has deployed, run as root from the same
+trusted provision-store staging pattern used by the legacy installer:
+
+```bash
+export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+STORE=/opt/radon-provision/radon.git
+SHA="$(git ls-remote https://github.com/joemccann/radon.git refs/heads/main | cut -f1)"
+git --git-dir="$STORE" cat-file -e "${SHA}^{commit}"
+STAGE="$(mktemp -d /opt/radon-provision/responder-account.XXXXXX)"
+git --git-dir="$STORE" -c tar.umask=022 archive "$SHA" cloud scripts | tar -x -C "$STAGE"
+bash "$STAGE/cloud/scripts/setup-grok-responder-account.sh"
+rm -rf "$STAGE"
+sudo -u radon-responder -H /var/lib/radon-responder/.local/bin/grok login --device-auth
+```
+
+Approve the dedicated login. No production account credential file is copied.
+Preparation preserves the legacy clone and its branches. It derives a private
+root-owned environment at `/etc/radon/grok-responder/env`, using the existing
+scoped responder Turso token and Pushover inputs. It preserves bounded operator
+controls, always forces `GROK_PAGE_AUTOPUSH=0`, and carries no GitHub token.
+Set `GROK_PAGE_RESPONDER=1` there explicitly if the inherited switch was off.
+The native CLI continues to own renewal of this separate login.
+
+Preparation requires the standard root-installed Python, Node and Bun
+prerequisites. Dependency installation and the native CLI installer execute
+only as the dedicated account. The trusted stdlib upgrade controller is
+installed separately at `/usr/local/lib/radon/grok-responder-upgrade`; it
+does not replace the keeper's original controller or runtime.
+
+### Configure read-only branch pickup
+
+The existing pickup default still addresses the legacy clone. Before finalizing,
+process any outstanding legacy `fix/*` branches and change only the installed
+Mac pickup job's source. Set its `EnvironmentVariables` entry to
+`RADON_GROK_FIX_SOURCE=ssh://radon@radon-app/var/lib/radon-responder/repo`.
+For an already installed launch agent:
+
+```bash
+pickup_plist="$HOME/Library/LaunchAgents/com.radon.grok-fix-pickup.plist"
+/usr/libexec/PlistBuddy -c 'Set :EnvironmentVariables:RADON_GROK_FIX_SOURCE ssh://radon@radon-app/var/lib/radon-responder/repo' "$pickup_plist" || \
+  /usr/libexec/PlistBuddy -c 'Add :EnvironmentVariables:RADON_GROK_FIX_SOURCE string ssh://radon@radon-app/var/lib/radon-responder/repo' "$pickup_plist"
+launchctl bootout "gui/$(id -u)/com.radon.grok-fix-pickup"
+launchctl bootstrap "gui/$(id -u)" "$pickup_plist"
+GIT_SSH_COMMAND='ssh -o ControlMaster=no -o ControlPath=none' \
+  git ls-remote ssh://radon@radon-app/var/lib/radon-responder/repo HEAD
+```
+
+Preparation grants `radon` read access to the clone through a dedicated pickup
+group, with group writes removed, and registers only that directory as a Git
+safe directory for the pickup account. The responder is not added to `radon`
+or any privileged group. Native authentication and runtime directories remain
+private. A fresh SSH connection is needed to pick up the new group membership.
+Existing pickup push-policy and description gates remain unchanged.
+
+### Finalize and verify
+
+As root, explicitly acknowledge that Mac pickup is configured:
+
+```bash
+/usr/bin/python3.13 -I /usr/local/lib/radon/grok_responder_account.py finalize --pickup-configured
+systemctl is-active radon-grok-responder.timer radon-grok-responder-upgrade.timer
+systemctl show radon-grok-responder.service -p User -p ProtectProc -p ProtectHome
+systemctl is-enabled radon-grok-page-responder.timer
+```
+
+Finalization verifies the installed unit hashes and deployed action policy,
+proves the dedicated native login through the existing bounded CLI probe,
+seeds its own last-known-good state, checks pickup readability and refuses
+unmerged legacy work. Only then does it disable the legacy responder timer,
+publish the root-owned readiness marker and enable the new timers. An active
+legacy responder makes it stop before handover; retry after that run finishes.
+An enable failure restores the previous timer. The marker is outside the
+account's writable directories.
+
+The responder keeps the existing `grok-page-responder` heartbeat as its
+replacement owner. Its independent upgrader writes `grok-responder-upgrade`
+with a 26-hour freshness window; the keeper continues to write `grok-upgrade`.
+Finalization performs a native authentication probe and can consume one
+subscription response. Ordinary deploys and preparation do not run this probe.
+
+### Rollback the account migration
+
+```bash
+/usr/bin/python3.13 -I /usr/local/lib/radon/grok_responder_account.py rollback
+```
+
+Rollback waits for an inactive new responder/upgrader, disables their timers,
+withdraws readiness and enables the legacy responder timer. It never copies
+authentication files or rewrites either clone. A failed legacy enable restores
+the new domain's readiness and timers. The optional upgrade health row is
+retired by one exact root-owned database operation; if telemetry retirement
+fails after legacy restoration, rerun rollback to finish that operation.
+
+Restore the Mac pickup source to
+`ssh://radon@radon-app/home/radon/radon-page-responder` and reload its launch
+agent using the same commands above. The dedicated account, native login and
+disabled unit inventory remain available for a later retry. Preparation
+refuses an active readiness marker; use rollback before preparing a newer
+optional runtime. The canonical keeper upgrade timer is unchanged throughout.
+
+Contracts: `cloud/tests/test_responder_service_account.py`.
+
 ## What you get on the phone
 
 | Title | When | Priority | Starts Grok? |
@@ -584,3 +705,18 @@ running` every 30 seconds.
 | `cloud/scripts/deploy.sh` | `notify_release_live` after green marker |
 
 A quiet healthy cycle prints `{"pending": 0}`.
+
+
+### Account preparation and handover checks
+
+Preparation accepts the native installer output at `~/.grok/bin/grok` and
+creates `~/.local/bin/grok` as the dedicated account only when the canonical
+slot is absent. It validates the canonical executable before reporting the
+login command; a dangling link, non-executable file or directory is refused
+without replacing that slot. No authentication is copied from another account.
+
+Both handover directions query `ActiveState` before and after disabling their
+source timers. `active`, `activating`, `deactivating` and `reloading` workloads
+refuse handover. A failed, empty or unknown state lookup also refuses; only
+confirmed `inactive` or `failed` workloads permit timer ownership to change.
+The second check retains the existing timer restoration path on refusal.

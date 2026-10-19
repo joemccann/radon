@@ -1164,11 +1164,11 @@ gunzip -c /tmp/2026-06.jsonl.gz | head
 
 ## Media backup (media.radon.run → B2)
 
-Nightly off-box mirror of the Caddy static tree for `media.radon.run`.
+Nightly off-box mirror of the newsfeed staging tree. The protected publisher independently copies approved leaves into Caddy’s served tree for `media.radon.run`; restores return to staging and pass through publication.
 
 | | |
 |---|---|
-| Local root | `/var/lib/radon/media` (Caddy `file_server` root; `~/radon-cloud/media` is a compatibility symlink) |
+| Local root | `/var/lib/radon/media` staging (`~/radon-cloud/media` compatibility symlink); the publisher copies approved leaves into Caddy’s `/var/lib/radon-public/media` |
 | Object store | Same Backblaze B2 bucket as portfolio archive (`radon-archive`) |
 | Object prefix | `media/` (override with `RADON_MEDIA_BACKUP_PREFIX`) |
 | Script | `cloud/scripts/media_backup.py` |
@@ -1437,3 +1437,17 @@ exclusive maintenance window or recoverable pre-change rows cannot be verified.
    using the [restore runbook](#restore-runbook)'s scratch comparison and
    partial-table recovery. Do not perform a blind full restore over newer
    journal activity; escalate recovery decisions to the database operator.
+
+
+## Optional responder account units
+
+The separate responder account uses the opt-in unit inventory under
+`/etc/radon/grok-responder/installed-units.sha256`. Root preparation validates
+the nested service/timer pairs and owns that inventory before drift audit
+includes them. An absent inventory preserves the existing fleet; malformed,
+unsafe or incomplete opt-in inventory reports drift. The responder and its
+independent upgrade timer remain unstarted until the explicit handover in
+[responder operations](grok-page-responder.md). `GROK_UPGRADE_DOMAIN=responder`
+is pinned by the optional upgrade unit; the existing keeper upgrade path
+keeps its normal runtime when the variable is absent. Rollback restores the
+previous timers through the same recorded handover procedure.

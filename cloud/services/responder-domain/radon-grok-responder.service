@@ -1,0 +1,39 @@
+[Unit]
+Description=Radon isolated page responder
+After=network.target
+ConditionPathExists=/var/lib/radon-responder/ready
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+User=radon-responder
+Group=radon-responder
+UMask=0027
+WorkingDirectory=/var/lib/radon-responder/repo
+EnvironmentFile=/etc/radon/grok-responder/env
+Environment=GROK_PAGE_NO_DOTENV=1
+Environment=GROK_PAGE_SYNC_REMOTE=1
+Environment=HOME=/var/lib/radon-responder
+Environment=PATH=/var/lib/radon-responder/.local/bin:/var/lib/radon-responder/.grok/bin:/usr/local/bin:/usr/bin:/bin
+Environment=GROK_BIN=/var/lib/radon-responder/.local/bin/grok
+Environment=RADON_GROK_LKG_PATH=/var/lib/radon-responder/runtime/grok_lkg.json
+Environment=RADON_GROK_RUNTIME_LOCK=/var/lib/radon-responder/runtime/grok-runtime.lock
+Environment=XDG_CACHE_HOME=/var/lib/radon-responder/cache
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/var/lib/radon-responder/repo/.venv/bin/python /var/lib/radon-responder/repo/scripts/grok_page_responder.py
+TimeoutStartSec=3900
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectProc=invisible
+ProtectHome=yes
+ProtectSystem=strict
+RestrictSUIDSGID=yes
+CapabilityBoundingSet=
+InaccessiblePaths=/var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root -/etc/radon/env /etc/radon/grok-responder -/var/lib/radon/flex-secrets -/var/lib/radon/rh-mcp
+ReadOnlyPaths=/var/lib/radon-responder/.local /var/lib/radon-responder/runtime /var/lib/radon-responder/upgrade /var/lib/radon-responder/.grok/bin /var/lib/radon-responder/.grok/hooks /var/lib/radon-responder/.grok/downloads
+ReadWritePaths=/var/lib/radon-responder/repo /var/lib/radon-responder/.grok /var/lib/radon-responder/cache /var/lib/radon-responder/runtime/grok-runtime.lock
+
+[Install]
+WantedBy=multi-user.target

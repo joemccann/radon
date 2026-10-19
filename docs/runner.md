@@ -329,53 +329,61 @@ Steps 6 to 8 write into the bot's home only as the bot: your account reads your 
 
 ### 8c. Performance loop production probe (operator, bot shell, VPS)
 
-The `performance` loop reads production through one forced-command ssh key: the VPS runs `cloud/scripts/perf_probe.py` (read-only, stdlib, as `radon`, never root) for that key and nothing else, whatever the client sends. The pre-run hook (`scripts/runner/hooks/performance_pre.sh`) pulls the snapshot into `state/performance/prod-probe.json` with `StrictHostKeyChecking=yes` against the bot's pinned known_hosts file. Without this step the loop still runs, and its probe file records why the snapshot is missing.
+The `performance` loop consumes one read-only snapshot from a separate disabled-login account, `_radonprobe`. Only that account owns the forced-command SSH key and pinned host keys. Its root-installed LaunchDaemon runs at **21:55 in the Mac's local timezone**, five minutes before the performance loop. Collection has a 180-second deadline and a 1,000,000-byte ceiling. No collection occurs at install, load or boot. For manual runs, an administrator starts the fixed helper first.
 
-The hook and agent run as the same uid, `_radonbot`. The agent can read the private key at `~/.ssh/radon_perf_probe` and can initiate the same SSH probe itself; having the hook collect the snapshot is advisory separation. The server-enforced boundary is the `authorized_keys` forced command and `restrict` options below: this key can invoke only the read-only probe as `radon`, without a shell, port forwarding or root access. Keep strict host-key verification when using it.
+The root-owned installer copies `PERF_SSH_TARGET` from the installed `performance.env` into `/private/var/db/radon-perf-probe/config.json`. The checked-in target is `radon@5.78.148.38`. The private directory is helper-owned mode 700; the key and known_hosts are mode 600. The helper-owned public directory is mode 750 and contains only the atomic mode-640 `prod-probe.json`; `_radonprobe_read` grants read access to the helper and `_radonbot` only. The config is root-owned mode 640 with that group. Unrelated local accounts cannot read it. `_radonbot` can read that snapshot and cannot write it or traverse the private directory. No sudo rule, root command, arbitrary path or command argument is provided to the agent.
 
-The checked-in target is `radon@5.78.148.38` (`PERF_SSH_TARGET` in `scripts/runner/loops/performance.env`). The bot has no ssh config, so this value is an address, not a Host alias. `ssh-keyscan` and the verification ssh must use that same address. A known_hosts line recorded under another name does not match it, so a check against the other name can succeed while the nightly probe fails.
+The pre-run hook invokes the root-installed helper's `read` mode. It validates ownership, modes, regular files, schema 1, timestamp and size before copying the snapshot into `state/performance/prod-probe.json`. Snapshots older than 15 minutes or more than 60 seconds in the future are unavailable. A missing helper, missing credentials, host-key mismatch or stale snapshot records an error and leaves the local performance phase usable. There is no SSH fallback in the bot process. Existing agents can still alter their own copied evidence; this handoff protects credentials and the authoritative snapshot, not the integrity of a same-uid agent's workspace.
 
-1. Bot shell: read the installed target, mint the key, and pin that host key (no trust on first use):
+Administrator rollout, from a reviewed operator-owned checkout with no active runner/native-update/helper jobs:
+
+1. Install the reviewed source using the ordinary trusted-source path. It creates `_radonprobe` with a disabled shell and a distinct non-root uid, installs the program and schedule, and prepares protected directories. Existing helper credentials survive subsequent installer/self-refresh runs. The update service and helper share the root-owned maintenance gate.
 
    ```bash
+   sudo /bin/bash /path/to/reviewed/clone/scripts/runner/install.sh performance
+   sudo dscl . -read /Users/_radonprobe UniqueID UserShell NFSHomeDirectory
+   sudo dscl . -read /Groups/_radonprobe_read GroupMembership PrimaryGroupID
+   sudo launchctl print system/com.radon.runner-perf-probe
+   ```
+
+2. Generate a **new** key as the helper; do not copy the bot's existing private key. Run once. `ssh-keygen` must refuse an existing key rather than overwrite it. Capture host keys in a temporary helper-owned file, verify their fingerprint out of band against the server's host key, then rename the candidate. The SSH commands use that same `$target` address and enforce `StrictHostKeyChecking=yes`.
+
+   ```bash
+   sudo -u _radonprobe /bin/sh -c 'key=/private/var/db/radon-perf-probe/private/id_ed25519; test ! -e "$key" && test ! -L "$key" && exec /usr/bin/ssh-keygen -t ed25519 -N "" -C radon-perf-snapshot -f "$key"'
    target=$(sed -n 's/^PERF_SSH_TARGET=//p' /usr/local/radon-runner/loops/performance.env | tail -n 1 | tr -d "\"'")
    host=${target#*@}
-   ssh-keygen -t ed25519 -N '' -C radon-perf-probe -f ~/.ssh/radon_perf_probe
-   ssh-keyscan -t ed25519 "$host" > ~/.ssh/radon_perf_known_hosts
-   ssh-keygen -lf ~/.ssh/radon_perf_known_hosts
-   chmod 600 ~/.ssh/radon_perf_probe ~/.ssh/radon_perf_known_hosts
+   sudo -u _radonprobe /bin/sh -c 'umask 077; candidate=$(mktemp /private/var/db/radon-perf-probe/private/.known-hosts.XXXXXX); ssh-keyscan -t ed25519 "$1" > "$candidate" && ssh-keygen -lf "$candidate"; printf "candidate=%s\n" "$candidate"' sh "$host"
    ```
 
-   Compare that fingerprint with `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the VPS before appending a key.
+   Compare the candidate fingerprint with `/etc/ssh/ssh_host_ed25519_key.pub` through the existing administrator channel. Only after a match, rename that exact candidate to `private/known_hosts` as `_radonprobe`, and verify both input files are mode 600. Do not use trust on first use or replace a pin automatically.
 
-2. VPS, as `radon`: append one line to `~/.ssh/authorized_keys` (the `restrict` option disables pty, agent, X11 and port forwarding):
+3. On the server, add the helper's **public** key under the existing restricted account using the same forced command. Keep the old bot public key until successful handover. The server runs only `cloud/scripts/perf_probe.py` as `radon`, never root, with no shell, pty or forwarding:
 
    ```
-   restrict,command="/usr/bin/python3 -I /home/radon/radon/cloud/scripts/perf_probe.py" ssh-ed25519 AAAA... radon-perf-probe
+   restrict,command="/usr/bin/python3 -I /home/radon/radon/cloud/scripts/perf_probe.py" ssh-ed25519 AAAA... radon-perf-snapshot
    ```
 
-3. Changing `PERF_SSH_TARGET` requires a new `ssh-keyscan` of the new address and `install.sh performance`.
-4. Verify from the bot shell, using the same `$target` as step 1:
+4. Start the fixed helper, wait for exit, then verify the authoritative snapshot and access boundaries. Never start a second collection while the first is active.
 
    ```bash
-   ssh -i ~/.ssh/radon_perf_probe -o IdentitiesOnly=yes -o BatchMode=yes \
-     -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/radon_perf_known_hosts \
-     -T "$target" probe | python3 -m json.tool | head
-   ssh -i ~/.ssh/radon_perf_probe -o IdentitiesOnly=yes -o BatchMode=yes \
-     -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/radon_perf_known_hosts \
-     "$target" -t bash | head
+   sudo launchctl kickstart system/com.radon.runner-perf-probe
+   sudo launchctl print system/com.radon.runner-perf-probe
+   sudo -u _radonbot /opt/homebrew/bin/python3.13 -I /usr/local/radon-runner/perf_probe_helper.py read
+   sudo -u _radonbot test ! -r /private/var/db/radon-perf-probe/private/id_ed25519
+   sudo -u _radonbot test ! -w /private/var/db/radon-perf-probe/public
+   sudo -u nobody test ! -r /private/var/db/radon-perf-probe/public/prod-probe.json
    ```
 
-   The first command prints the probe JSON. The second still prints only JSON.
+5. After successful JSON/freshness/permission verification, revoke only the old bot probe public-key line on the server, then remove only its corresponding bot private/public key and old probe known_hosts files as `_radonbot`. Verify the old key is rejected through the owner channel before deleting its local copy. Do not remove unrelated authorized keys. The isolation change is not complete until the old credential is revoked and retired.
 
-- **Symptom:** `state/performance/prod-probe.json` records an ssh failure, or a name-based ssh succeeds while the loop target is an address.
-- **Prerequisites:** bot shell, the installed `PERF_SSH_TARGET`, and a fingerprint that matches the VPS host key.
-- **Blast radius:** the forced command runs `perf_probe.py` only. It does not open a shell.
-- **Safe diagnosis:** compare `ssh-keygen -lf` on the pinned file with the VPS host key. Do not turn off strict host-key checking.
-- **Stop conditions:** the fingerprints differ, or the known_hosts line is not for the address in `PERF_SSH_TARGET`. Do not append `authorized_keys`.
-- **Verification:** ssh to that exact `$target` prints JSON, and requesting a shell still prints only JSON.
-- **Rollback:** delete the `authorized_keys` line.
-- **Escalation:** leave the loop running. It records a missing snapshot and does not open its own connection.
+- **Symptom:** the copied probe reports unavailable or stale.
+- **Prerequisites:** an administrator for account creation, the reviewed runner install, a verified pinned host key and the new restricted public key registration. The current operator session requires an interactive sudo password; merging/deploying does not finish Mac credential handover.
+- **Blast radius:** one read-only snapshot on the existing schedule; the helper cannot execute an arbitrary command or write to the agent workspace.
+- **Safe diagnosis:** inspect the helper's last exit status and `/var/log/radon-perf-probe.log`; compare fingerprints through the administrator channel. The log contains only an availability class.
+- **Stop conditions:** wrong ownership, writable/symlinked paths, matching uids, administrator-group membership, active helper/runner during install, mismatched fingerprint or unknown key ownership. Do not install a fallback credential in the bot home.
+- **Verification:** the bot can read fresh JSON but cannot read the private inputs or write the public directory; the original credential is revoked after handover.
+- **Rollback:** unload `com.radon.runner-perf-probe` and revoke the new restricted public key. Keep the bot on the snapshot consumer so it records unavailable; do not restore a bot-readable key. A reviewed prior helper version can be installed while idle without changing its private inputs.
+- **Escalation:** leave the local loop usable and record unavailable evidence until the administrator completes or repairs provisioning.
 
 ### 9. Smoke test (bot shell)
 

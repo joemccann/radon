@@ -353,7 +353,10 @@ def _record_health(state: str, detail: str | None = None) -> None:
     # REL-293 / R-712: the transport accepts a structured error, not last_error.
     error = {"message": detail} if detail else None
     try:
-        write_service_health_http(SERVICE_NAME, state, error=error)
+        if os.environ.get("GROK_UPGRADE_DOMAIN") == "responder":
+            write_service_health_http("grok-responder-upgrade", state, error=error)
+        else:
+            write_service_health_http(SERVICE_NAME, state, error=error)
     except Exception as exc:  # noqa: BLE001 — telemetry must not fail the job
         print(f"grok upgrade heartbeat non-fatal: {exc}", file=sys.stderr)
 

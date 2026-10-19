@@ -33,7 +33,9 @@ MUTATION_KWARGS = {"timeout": 30}
 
 def expected_rules(name):
     """Independent security policy oracle, rather than calling the renderer."""
-    rules = {("in", "udp", "41641", ("0.0.0.0/0", "::/0"))}
+    rules = set()
+    if name != "fw-radon-demo":
+        rules.add(("in", "udp", "41641", ("0.0.0.0/0", "::/0")))
     if name != "fw-radon-app":
         rules.add(("in", "tcp", "22", ("93.184.216.34/32",)))
     if name != "fw-radon-broker":
@@ -41,7 +43,7 @@ def expected_rules(name):
     return rules
 
 
-@pytest.mark.parametrize("name", ["fw-radon-app", "fw-radon-broker", "fw-radon-ops"])
+@pytest.mark.parametrize("name", ["fw-radon-app", "fw-radon-broker", "fw-radon-demo", "fw-radon-ops"])
 @pytest.mark.parametrize("exists", [False, True])
 def test_apply_delivers_exact_policy_and_resource_to_hcloud(tool, monkeypatch, name, exists):
     calls = []

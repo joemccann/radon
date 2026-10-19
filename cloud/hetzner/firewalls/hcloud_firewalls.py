@@ -33,7 +33,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 PLACEHOLDER = "__OPERATOR_RECOVERY_IP__/32"
-FIREWALLS = ("fw-radon-app", "fw-radon-broker", "fw-radon-ops")
+FIREWALLS = ("fw-radon-app", "fw-radon-broker", "fw-radon-demo", "fw-radon-ops")
 HCLOUD_TIMEOUT_S = 30
 
 

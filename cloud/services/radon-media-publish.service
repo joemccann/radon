@@ -1,0 +1,36 @@
+[Unit]
+Description=Publish validated newsfeed media into protected edge storage
+After=local-fs.target
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/python3 -I /usr/local/lib/radon/media_publish.py
+SuccessExitStatus=75
+TimeoutStartSec=120
+UMask=0077
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/lib/radon/media
+ReadWritePaths=/var/lib/radon-public
+PrivateNetwork=true
+PrivateTmp=true
+PrivateDevices=true
+NoNewPrivileges=true
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_CHOWN CAP_FOWNER
+MemoryMax=384M
+TasksMax=8
