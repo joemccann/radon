@@ -9998,3 +9998,13 @@ Deploy serialization private validation `981bbe7c`: scripts-ac 4 failed/3119 pas
 Review: test-only preparation was committed separately; the runtime guard was applied only after cloud RED. Local suites, source publication and production actions remain excluded.
 
 Prestage ordering review: cloud RED recorded 7 failed/25 passed. All seven failures exercised premature stage publication; all six strict normal-deploy cases passed. Applied the stage-only guard after RED and clarified the environment owner. Recovery, pinned synchronization and rollback journals are unchanged. Static checks only locally; focused cloud GREEN and independent review remain pending.
+
+
+### Prestage lock bootstrap readiness
+
+- [x] PL1 depends_on: [] Confirm entrypoint lock admission precedes prestage and trusted bootstrap provisions the new canonical inode.
+- [x] PL2 depends_on: [PL1] Author cloud-only entrypoint regressions for canonical first bootstrap, strict normal admission and unsafe/unknown lock state.
+- [ ] PL3 depends_on: [PL2] Record intended cloud RED before changing runtime.
+- [ ] PL4 depends_on: [PL3] Apply only the reviewed stage deferral, then obtain cloud GREEN and independent final review.
+
+Review: test-only preparation; no local suites or production actions. Preserve normal required locks, recovery-only compatibility, journals and pinned synchronization.
