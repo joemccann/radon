@@ -152,7 +152,13 @@ function barWidth(absReturn: number): number {
   return Math.max(5, Math.min(100, Math.abs(absReturn) * 100 * 10));
 }
 
-type DataSource = "uw" | "uw+equityclock" | "equityclock" | null;
+type DataSource = "uw" | "uw+equityclock" | "equityclock" | "sample" | null;
+
+const SOURCE_BADGE: Record<Exclude<DataSource, "uw" | null>, string> = {
+  "uw+equityclock": "UW + EQUITYCLOCK",
+  equityclock: "EQUITYCLOCK",
+  sample: "SAMPLE DATA",
+};
 
 export default function SeasonalityTab({ ticker, active }: SeasonalityTabProps) {
   const [months, setMonths] = useState<MonthData[]>([]);
@@ -267,7 +273,7 @@ export default function SeasonalityTab({ ticker, active }: SeasonalityTabProps) 
           )}
           {source && source !== "uw" && (
             <span className="seasonality-source-badge">
-              {source === "equityclock" ? "EQUITYCLOCK" : "UW + EQUITYCLOCK"}
+              {SOURCE_BADGE[source]}
             </span>
           )}
         </div>
