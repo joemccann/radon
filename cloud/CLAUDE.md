@@ -318,6 +318,18 @@ push or every deploy step fails the handshake. The deploy job:
    gates.
 9. Commits the topology transition and green marker only after verification.
 
+Prestage runs before the normal job's pinned control-plane synchronization.
+If the selected canonical deploy lock or its immediate parent is genuinely
+unprovisioned, a read-only check of the fixed root-owned directory authority
+allows prestage to defer before a deployment child, publisher, privileged
+helper or journal work.
+Existing writable, foreign-owned, symlinked, unreadable or uncertain paths
+refuse deferral; the existing canonical parent must retain its `0750` mode and
+`radon` group. Custom lock overrides and recovery-only behavior retain their
+existing policy. Ordinary deployment still requires its provisioned locks and
+subscription environment publication after synchronization, including an
+already-green release. Rollback journals and service recovery are unchanged.
+
 The journal helper is loaded from the immutable runner so rollback to a commit
 that predates `cloud/` cannot delete its own recovery implementation. Root
 topology state is durable across reboot under `/var/lib/radon-deploy`.

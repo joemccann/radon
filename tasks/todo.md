@@ -10004,11 +10004,14 @@ Prestage ordering review: cloud RED recorded 7 failed/25 passed. All seven failu
 
 - [x] PL1 depends_on: [] Confirm entrypoint lock admission precedes prestage and trusted bootstrap provisions the new canonical inode.
 - [x] PL2 depends_on: [PL1] Author cloud-only entrypoint regressions for canonical first bootstrap, strict normal admission and unsafe/unknown lock state.
-- [ ] PL3 depends_on: [PL2] Record intended cloud RED before changing runtime.
-- [ ] PL4 depends_on: [PL3] Apply only the reviewed stage deferral, then obtain cloud GREEN and independent final review.
+- [x] PL3 depends_on: [PL2] Record intended cloud RED before changing runtime.
+- [x] PL4 depends_on: [PL3] Apply only the reviewed stage deferral.
+- [ ] PL5 depends_on: [PL4] Obtain expanded cloud GREEN and independent final review before delivery.
 
-Review: test-only preparation; no local suites or production actions. Preserve normal required locks, recovery-only compatibility, journals and pinned synchronization.
+Review: applied the reviewed guard after the intended cloud RED was confirmed. Preserve normal required locks, recovery-only compatibility, journals and pinned synchronization; expanded cloud GREEN and independent final review remain pending.
 
-Independent readiness review: require valid directory authority before classifying a missing canonical leaf. Add writable-parent, writable-authority and foreign-authority cases using real temporary metadata; the script-copy fixture explicitly maps the production filesystem root/UID-0 domain to its temporary root/current UID, without changing production policy or mocking supervisor/flock/stat. Runtime remains unapplied pending cloud RED.
+Independent readiness review: require valid directory authority before classifying a missing canonical leaf. Add writable-parent, writable-authority and foreign-authority cases using real temporary metadata; the script-copy fixture explicitly maps the production filesystem root/UID-0 domain to its temporary root/current UID, without changing production policy or mocking supervisor/flock/stat. Runtime guard applied after cloud RED; expanded cloud GREEN and independent final review remain pending.
 
-Canonical parent contract review: temporary script copies explicitly map the fixed radon group lookup to the fixture's actual gid; a mismatched expected gid and a nonwritable but incorrect0700 parent mode must refuse missing-leaf deferral for default and explicit-canonical selectors. Production's exact0750/radon-gid contract is unchanged in the unapplied proposal.
+Canonical parent contract review: temporary script copies explicitly map the fixed radon group lookup to the fixture's actual gid; a mismatched expected gid and a nonwritable but incorrect0700 parent mode must refuse missing-leaf deferral for default and explicit-canonical selectors. Production's exact0750/radon-gid contract is enforced before missing-leaf deferral.
+
+Expanded readiness cloud RED recorded 5 failed/96 passed/0 skipped: four canonical first-bootstrap stage cases and the symlink-parent case failed; all subscription environment cases passed. Applied the reviewed root-authority stage guard after that evidence. No local suites or production actions; expanded cloud GREEN and independent final source review remain pending.
