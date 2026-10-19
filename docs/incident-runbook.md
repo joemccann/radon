@@ -52,18 +52,23 @@ each artifact's `case_id` anchors into this file. Triage them with the
 ## prestage-subscription-publisher-upgrade
 
 - **Detection:** first-upgrade prestage reports `Subscription service environment
-  publication failed` while the ordinary deploy can still synchronize its
-  control plane and complete.
-- **Mechanism:** prestage runs before the deploy job installs the target helper
-  and grant. Requiring its new publication action at that point rejects the
-  upgrade that supplies it.
+  publication failed` or `Cannot open production deploy lock`, while ordinary
+  deployment can still synchronize its control plane and complete.
+- **Mechanism:** prestage precedes the job's pinned synchronization. The incoming
+  runner may require a publisher action/grant or canonical lock inode that the
+  installed control plane does not provide until that synchronization.
 - **Discriminating check:** `cloud/tests/test_subscription_service_env.py`
-  exercises real main/publication paths with missing grants, missing helper
-  actions and ready helpers; prestage must skip publication, while normal
-  deploys must require it even for an already-green release.
-- **Remediation:** preserve recover-only, pinned control-plane sync, then
-  ordinary deploy. Skip subscription publication only in prestage; retain
-  required publication after environment validation in ordinary deploys.
+  exercises real publication/main paths; `cloud/tests/test_deploy_lock_migration.py`
+  exercises the real outer entrypoint with isolated filesystem authority and
+  command sensors. Stage must skip subscription publication and may defer
+  without work only for proven canonical first-bootstrap absence. Unsafe or
+  uncertain paths must refuse; normal deploy must require publication/locks.
+- **Remediation:** preserve recover-only, pinned control-plane sync, then ordinary
+  deploy. Prestage's lock readiness check reads trusted directory metadata and
+  never creates a lock, starts a deployment child/privileged helper, changes a
+  journal or publishes an environment file. Existing canonical directory authority, exact parent mode
+  and group must validate before missing-leaf deferral. Custom overrides,
+  recovery compatibility and normal required locks/publication remain unchanged.
   Do not relax grants or alter rollback journals. A failed-job rerun may also
   rerun dependent deployment jobs; observe the entire run before proceeding.
 
