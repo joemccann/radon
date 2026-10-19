@@ -154,7 +154,7 @@ Break-glass if the broker shell is unreachable: Hetzner Cloud console or API `PO
 
 Never: a public unauthenticated URL, Tailscale Funnel, signed GET links, or the Clerk loopback bypass for these verbs (already disabled for Gateway POSTs, `server.py:2158`).
 
-Auth caveat found: broker `sshd -T` shows `listenaddress 0.0.0.0:22`, `passwordauthentication yes` (root is `without-password`). The phone key must carry `from=` tailnet; separately consider `ListenAddress` tailnet-only or confirm the Hetzner firewall blocks 22 publicly.
+The phone key remains restricted by its tailnet `from=` constraint. Broker public SSH is separately limited by `fw-radon-broker` to the configured recovery IPv4 `/32`; public IPv6 SSH is blocked. The broker sshd inventory still allows passwords for non-root users (root is key-only); the provider source rule controls reachability, not authentication. A listening sshd socket alone does not prove internet exposure. [Network trust](operations.md#network-trust-ops-plane-step-2) owns provider verification and recovery-IP updates.
 
 **Audit trail** (every set/clear/refusal): append-only JSONL `/var/log/radon/ib-operator-hold.jsonl` on broker (actor = key comment / `SSH_CLIENT` IP / `app:clerk:<user_id>`), journald tag `radon-ib-hold`, Pushover P0, and best-effort Turso `service_health['ib-operator-hold']` row (never blocking; broker may lack Turso). Refused starts log `HELD` with caller.
 
