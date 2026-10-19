@@ -10,6 +10,7 @@ import {
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
 import { enforceDemoAiQuota } from "@/lib/demo/enforceAiQuota";
+import { buildDemoSeasonality } from "@/lib/demo/fixtures/tickerInfo";
 import { countedUwFetch } from "@/lib/uwCountedFetch";
 import { anthropicRequestAuth } from "@/lib/llm/provider";
 
@@ -173,6 +174,12 @@ export async function GET(request: Request): Promise<Response> {
     });
   }
 
+  // The demo deployment has no UW_TOKEN and no persistent disk cache, so the
+  // seasonality read is completed at request time with no LLM or vendor work.
+  if (access.principal.kind === "demo") {
+    return setNoStoreResponseHeaders(NextResponse.json({ ...buildDemoSeasonality(symbol), requestId }), requestId);
+  }
+
   // 1. Check cache
   const cached = await readCache(symbol);
   if (cached) {
@@ -186,11 +193,6 @@ export async function GET(request: Request): Promise<Response> {
     });
   }
 
-  // Demo AI quota (Phase 4) — charged only on a cache MISS (real LLM work);
-  // no-op for non-demo users.
-  const quota = await enforceDemoAiQuota("ticker/seasonality");
-  if (quota) return quota;
-
   const token = process.env.UW_TOKEN;
   if (!token) {
     return jsonApiError({
@@ -200,6 +202,12 @@ export async function GET(request: Request): Promise<Response> {
       requestId,
     });
   }
+
+  // Demo AI quota (Phase 4) — charged only on a cache MISS (real LLM work)
+  // and only after every precondition passed, so a config error never burns
+  // a call; no-op for non-demo users.
+  const quota = await enforceDemoAiQuota("ticker/seasonality");
+  if (quota) return quota;
 
   try {
     // 2. Fetch UW API
