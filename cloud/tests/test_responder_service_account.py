@@ -414,7 +414,7 @@ def test_prepare_allows_exact_upload_pack_gitdir_without_trusting_other_reposito
             selected["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1"
         return subprocess.run(
             ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", *map(str, args)],
-            env=selected, capture_output=True, text=True, timeout=15,
+            cwd=tmp_path, env=selected, capture_output=True, text=True, timeout=15,
         )
 
     for candidate in (repo, unrelated):
@@ -431,6 +431,7 @@ def test_prepare_allows_exact_upload_pack_gitdir_without_trusting_other_reposito
         refused = git("ls-remote", candidate / ".git", "HEAD", different_owner=True)
         assert refused.returncode != 0
         assert "dubious ownership" in refused.stderr
+        assert str(candidate / ".git") in refused.stderr
 
     class DependencyBoundary(Exception):
         pass
@@ -478,6 +479,7 @@ def test_prepare_allows_exact_upload_pack_gitdir_without_trusting_other_reposito
     assert status.stdout == ""
     refused = git("ls-remote", unrelated / ".git", "HEAD", different_owner=True)
     assert refused.returncode != 0 and "dubious ownership" in refused.stderr
+    assert str(unrelated / ".git") in refused.stderr
     values = git("config", "--global", "--get-all", "safe.directory").stdout.splitlines()
     assert values == ["/synthetic/prior", str(repo), str(repo / ".git")]
     assert registrations == [str(repo), str(repo / ".git")]
