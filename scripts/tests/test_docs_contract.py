@@ -32,20 +32,19 @@ _EXEMPT_PREFIXES = (
 )
 
 
-def test_performance_probe_documents_same_uid_credential_boundary():
-    """A pre-run hook does not isolate its bot-readable key from the agent."""
+def test_performance_probe_documents_separate_credential_boundary():
+    """The agent consumes a snapshot; only the separate helper owns SSH inputs."""
     hook = (_ROOT / "scripts/runner/hooks/performance_pre.sh").read_text()
-    assert 'KEY="${RADON_PERF_SSH_KEY:-$HOME/.ssh/radon_perf_probe}"' in hook
+    assert "RADON_PERF_SSH" not in hook
+    assert "perf_probe_helper.py" in hook and " read " in hook
     doc = (_ROOT / "docs/runner.md").read_text()
     section = doc.split("### 8c. Performance loop production probe", 1)[1]
     section = section.split("\n### ", 1)[0]
-    assert "the agent never connects" not in section.lower(), (
-        "The agent shares the runner uid and can use its readable probe key"
-    )
-    assert "same uid" in section.lower()
-    assert "private key" in section.lower() and "can read" in section.lower()
-    assert "advisory" in section.lower()
-    assert "server-enforced" in section.lower() and "forced command" in section.lower()
+    assert "_radonprobe" in section and "distinct non-root uid" in section
+    assert "private key" in section and "cannot write" in section
+    assert "no SSH fallback" in section
+    assert "forced command" in section and "StrictHostKeyChecking=yes" in section
+    assert "same-uid agent's workspace" in section
 
 
 def _load_owners() -> dict:
@@ -1965,13 +1964,19 @@ class TestDocumentation20261011:
         host = target.split("@", 1)[1]
         assert host and "@" not in host
         hook = (_ROOT / "scripts/runner/hooks/performance_pre.sh").read_text()
-        assert 'StrictHostKeyChecking=yes' in hook
-        assert "PERF_SSH_TARGET" in hook
+        helper = (_ROOT / 'scripts/runner/perf_probe_helper.py').read_text()
+        assert 'StrictHostKeyChecking=yes' in helper
+        assert 'perf_probe_helper.py' in hook and ' read ' in hook
+        assert 'RADON_PERF_SSH' not in hook
         section = _markdown_heading("docs/runner.md", "8c. Performance loop production probe (operator, bot shell, VPS)")
         assert "ssh-keyscan -t ed25519 radon-app" not in section
         assert "radon@radon-app" not in section
-        assert 'ssh-keyscan -t ed25519 "$host"' in section
-        assert '"$target"' in section
+        assert 'ssh-keyscan -t ed25519 "$1"' in section
+        assert 'sh "$host"' in section
+        assert 'host=${target#*@}' in section
+        assert 'config.json' in section
+        assert "target = config.get('target', '')" in helper
+        assert "ssh_output([*argv, '-T', target, 'probe'])" in helper
         assert "StrictHostKeyChecking=yes" in section
         assert target in section
         for boundary in ("Symptom", "Prerequisites", "Blast radius", "Safe diagnosis",

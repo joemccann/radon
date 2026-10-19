@@ -9925,6 +9925,17 @@ Responder account review: private cloud red run 39162568477 proved the missing a
 - Reject supported-source overcount before copies/removals; regressions cover initial backfill, cached/uncached refresh, and unchanged destination/cache on overflow.
 - Static AST/whitespace verification only; replacement private cloud validation and independent review remain pending.
 
+## Performance snapshot helper (2026-10-18)
+
+- [x] P1 depends_on: [] Verify the installed runner and current snapshot handoff contract.
+- [x] P2 depends_on: [P1] Reproduce helper isolation and snapshot validation requirements in cloud tests.
+- [x] P3 depends_on: [P2] Implement dedicated scheduled helper installation and consume only its validated snapshot.
+- [ ] P4 depends_on: [P3] Complete exact-head cloud checks and document owner-run migration and rollback.
+
+Review: Rootless plist review and static checks are permitted locally; execution tests run in cloud CI. Host account provisioning and credential handover require the existing administrator installation path. Preserve all existing credentials until the administrator verifies handover.
+
+Snapshot helper review: private cloud regression run confirmed the consumer, plist and installer contracts fail before implementation. The final implementation uses helper-only private inputs and a dedicated read group for mode-750/mode-640 exports; collection has fixed configuration, byte/time bounds, strict host-key verification and atomic output. AST, bash syntax and rootless plist lint passed. No local suites, live probe, account creation or credential movement ran. Administrator handover and final exact-head cloud verification remain pending.
+
 
 ### Private CI integration repair (2026-10-18)
 - [x] CI1 depends_on: [] Inspect exact-head private CI failures without local suites or production access.
@@ -9949,3 +9960,9 @@ Independent review repair: handover reads explicit ActiveState and permits only 
 - [x] MR3 depends_on: [MR2] Author synthetic budget, read-failure and malformed/oversized PNG coverage for private cloud verification.
 
 Independent media review: initial stat oversize is refused before payload open; each source/destination attempt reserves its stat-size plus growth sentinel before any read, including failures and rejected content. Source reads use the pinned stat-size bound rather than the global cap. Public producer always emits PNG; the publisher now enforces PNG chunk framing/CRC, 16MP IHDR dimensions and terminal IEND without privileged pixel decoding. Synthetic regressions cover invalid magic, read failures, destination comparisons, oversized initial metadata and malformed/dimension-overflow PNGs. AST and whitespace pass; cloud verification pending.
+
+### Private CI follow-up
+- [x] PC1 depends_on: [] Read failed scripts-df job 117794290142 without a local test run.
+- [x] PC2 depends_on: [PC1] Replace the obsolete shell-target assertion with the canonical Python collector target and host-pin derivation contract.
+
+Follow-up review: the helper issues SSH through a Python argv list from root-installed config, so the old quoted shell `$target` command no longer exists. The documentation contract now pins host extraction, protected config and the exact Python target operand. Python AST and whitespace checks pass; fresh private CI remains required.
