@@ -1,3 +1,16 @@
+# Dedicated responder SSH pickup safety (2026-10-18)
+
+Dependency graph: GP1 -> GP2 -> GP3 -> GP4.
+
+- [x] GP1 depends_on: [] Confirm the SSH upload-pack safety mismatch and isolate the change from production preparation and the dirty operator checkout.
+- [x] GP2 depends_on: [GP1] Reproduce the actual Git ownership safety refusal with a temporary committed repository and isolated pickup configuration in cloud CI.
+- [x] GP3 depends_on: [GP2] Register only the dedicated repository root and its exact `.git` path as the pickup account, document fresh SSH verification, and obtain focused cloud green.
+- [ ] GP4 depends_on: [GP3] Complete independent review, publish the focused PR, watch exact-head CI, merge and verify normal deployment before retrying supported account preparation.
+
+## Review
+
+Cloud red reproduced the exact `.git` ownership refusal after production preparation: 1 failed and 54 passed. With the unchanged regression, focused cloud green passed all 55 account contracts with 0 failures and 0 skips. The fix registers only the root and `.git` paths as the pickup account. Runtime/test AST parsing and whitespace checks passed. Sol approved the source; Luna final review, full public CI and deployment are pending. No local suites or production changes. Native login, pickup handover and timers remain separate operator steps; no wildcard Git trust is permitted.
+
 # Nightly phase status line (2026-10-18)
 
 Dependency graph: T1 -> T2 -> T3; T4 and T5 depend_on: [T2]; T6 depends_on: [T3, T4, T5].

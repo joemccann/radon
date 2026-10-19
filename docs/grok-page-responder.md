@@ -71,16 +71,20 @@ pickup_plist="$HOME/Library/LaunchAgents/com.radon.grok-fix-pickup.plist"
   /usr/libexec/PlistBuddy -c 'Add :EnvironmentVariables:RADON_GROK_FIX_SOURCE string ssh://radon@radon-app/var/lib/radon-responder/repo' "$pickup_plist"
 launchctl bootout "gui/$(id -u)/com.radon.grok-fix-pickup"
 launchctl bootstrap "gui/$(id -u)" "$pickup_plist"
-GIT_SSH_COMMAND='ssh -o ControlMaster=no -o ControlPath=none' \
+GIT_SSH_COMMAND='ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ControlMaster=no -o ControlPath=none' \
   git ls-remote ssh://radon@radon-app/var/lib/radon-responder/repo HEAD
 ```
 
 Preparation grants `radon` read access to the clone through a dedicated pickup
-group, with group writes removed, and registers only that directory as a Git
-safe directory for the pickup account. The responder is not added to `radon`
-or any privileged group. Native authentication and runtime directories remain
-private. A fresh SSH connection is needed to pick up the new group membership.
-Existing pickup push-policy and description gates remain unchanged.
+group, with group writes removed, and registers only the repository root and its
+exact `.git` path as Git safe directories for the pickup account. SSH upload-pack
+checks the `.git` path on servers that enforce ownership there; trust remains
+limited to these two exact paths. The responder is not added to `radon` or any
+privileged group. Native authentication and runtime directories remain private.
+A fresh SSH connection is needed to pick up the new group membership. After a
+setup change deploys, rerun preparation from a trusted stage of that deployed
+commit before the ordinary `ls-remote` check above. Existing pickup push-policy
+and description gates remain unchanged.
 
 ### Finalize and verify
 
