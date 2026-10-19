@@ -81,8 +81,19 @@ export async function enforceDemoAiQuota(
     );
   }
 
-  const db = opts.dbFactory ? opts.dbFactory() : await defaultDb();
-  const result = await checkAndIncrementQuota({ userId, endpoint, db, now });
+  // The quota is the only AI-spend guard for demo users, so an unreadable
+  // store denies. Left uncaught, a demo-DB outage escaped the route as an
+  // empty-body 500.
+  let result: Awaited<ReturnType<typeof checkAndIncrementQuota>>;
+  try {
+    const db = opts.dbFactory ? opts.dbFactory() : await defaultDb();
+    result = await checkAndIncrementQuota({ userId, endpoint, db, now });
+  } catch {
+    return NextResponse.json(
+      { error: "Demo AI quota is temporarily unavailable.", code: "DEMO_QUOTA_UNAVAILABLE" },
+      { status: 503 },
+    );
+  }
   if (!result.allowed) {
     return NextResponse.json(
       {
