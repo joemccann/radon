@@ -10008,3 +10008,5 @@ Prestage ordering review: cloud RED recorded 7 failed/25 passed. All seven failu
 - [ ] PL4 depends_on: [PL3] Apply only the reviewed stage deferral, then obtain cloud GREEN and independent final review.
 
 Review: test-only preparation; no local suites or production actions. Preserve normal required locks, recovery-only compatibility, journals and pinned synchronization.
+
+Independent readiness review: require valid directory authority before classifying a missing canonical leaf. Add writable-parent, writable-authority and foreign-authority cases using real temporary metadata; the script-copy fixture explicitly maps the production filesystem root/UID-0 domain to its temporary root/current UID, without changing production policy or mocking supervisor/flock/stat. Runtime remains unapplied pending cloud RED.
