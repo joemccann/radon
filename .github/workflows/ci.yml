@@ -6,6 +6,12 @@ name: CI (test gate + deploy)
 # Actions `needs:` cannot reference jobs in another workflow file.
 on:
   pull_request:
+  # A GitHub merge queue builds a temporary gh-readonly-queue/main/* branch
+  # and fires merge_group, not pull_request. Every required check reports on
+  # it so a queue can be enabled (organization-owned repos only) with no
+  # workflow change; a required check that never runs on it parks the queue.
+  merge_group:
+    branches: [main]
   push:
     branches: [main]
 
@@ -62,8 +68,8 @@ jobs:
       - name: Scan this event's commits for secrets
         env:
           EVENT_NAME: ${{ github.event_name }}
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           PUSH_BEFORE: ${{ github.event.before }}
           PUSH_HEAD: ${{ github.sha }}
         run: |
@@ -74,7 +80,7 @@ jobs:
             git fetch --no-tags --prune origin "$sha"
             git cat-file -e "${sha}^{commit}"
           }
-          if [ "$EVENT_NAME" = "pull_request" ]; then
+          if [ "$EVENT_NAME" = "pull_request" ] || [ "$EVENT_NAME" = "merge_group" ]; then
             ensure_commit "$PR_BASE"
             ensure_commit "$PR_HEAD"
             merge_base="$(git merge-base "$PR_BASE" "$PR_HEAD")"
@@ -128,7 +134,7 @@ jobs:
         # or green; a docs-only push on top of a red main diffed as
         # documentation, skipped every gate and deployed the red tree. T-312.
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
           HEAD_SHA: ${{ github.sha }}
           # Only on push. This step runs path_filter.py out of the checked-out
           # PR revision, and gate_base calls the Actions API only on push; on
@@ -226,7 +232,7 @@ jobs:
     name: Vitest (shard ${{ matrix.shard }}/8)
     needs: [changes]
     # Required PR checks must run even when the changed paths are docs-only.
-    if: github.event_name == 'pull_request' || needs.changes.outputs.web == 'true'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -326,7 +332,7 @@ jobs:
     name: pytest (${{ matrix.shard }})
     needs: [changes]
     # Required PR checks must run even when the changed paths are docs-only.
-    if: github.event_name == 'pull_request' || needs.changes.outputs.python == 'true'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -368,7 +374,7 @@ jobs:
       group: ci-py-tests-${{ github.ref }}-${{ matrix.shard }}
       cancel-in-progress: true
     env:
-      DOCS_CONTRACT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+      DOCS_CONTRACT_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -515,7 +521,7 @@ jobs:
     name: pytest (cloud ${{ matrix.shard }})
     needs: [changes]
     # Required PR checks must run even when the changed paths are docs-only.
-    if: github.event_name == 'pull_request' || needs.changes.outputs.python == 'true'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -624,7 +630,7 @@ jobs:
     name: Perimeter smoke (next start + curl)
     needs: [changes]
     # Required PR checks must run even when the changed paths are docs-only.
-    if: github.event_name == 'pull_request' || needs.changes.outputs.web == 'true'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: ci-perimeter-smoke-${{ github.ref }}
