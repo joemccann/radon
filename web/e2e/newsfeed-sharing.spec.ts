@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { installClearFixtures } from "./clear-fixtures";
 
 const base = "/api/newsfeed/research/files/";
 const first = base + "a".repeat(64) + ".png";
@@ -22,6 +23,9 @@ async function dismissNotices(page: Page) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await installClearFixtures(page);
+  // Progress assertions need an advancing clock after the shared dated fixtures.
+  await page.clock.setSystemTime(new Date());
   await page.route("**/api/newsfeed/share", async route => {
     const request = route.request().postDataJSON() as { title: string; content: string };
     await route.fulfill({ json: {
@@ -471,4 +475,75 @@ for (const width of [1440, 393]) {
       await page.unrouteAll({ behavior: "wait" });
     }
   });
+}
+
+for (const width of [320, 393, 640, 1440]) {
+  for (const surface of ["feed", "lightbox"] as const) {
+    test(`share panel stays contained while pending and ready in ${surface} at ${width}px`, async ({ page }, testInfo) => {
+      test.setTimeout(90_000);
+      await page.setViewportSize({ width, height: 1000 });
+      if (width === 393) await page.addInitScript(() => localStorage.setItem("theme", "dark"));
+      await page.route("**/api/newsfeed/posts**", route => route.fulfill({ json: [post] }));
+      await page.route("**/api/newsfeed/research/files/*.png", route => route.fulfill({ contentType: "image/svg+xml", body: svg }));
+      let release!: () => void;
+      const held = new Promise<void>(resolve => { release = resolve; });
+      await page.route("**/api/newsfeed/share", async route => {
+        await held;
+        await route.fulfill({ json: { title: post.title, content: post.content } });
+      });
+      try {
+        await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+        const item = page.getByTestId("news-feed-item").filter({ hasText: post.title });
+        let container = item;
+        if (surface === "lightbox") {
+          await item.locator(".news-feed-image-wrapper").first().click();
+          container = page.getByRole("dialog");
+        }
+        await container.getByRole("button", { name: "Share", exact: true }).click();
+        const panel = container.getByRole("region", { name: "Share news item" });
+        const caption = panel.getByRole("textbox", { name: "Post caption" });
+        async function assertContained(state: string) {
+          const notices = page.getByRole("button", { name: "Dismiss", exact: true });
+          for (let count = 0; count < 16 && await notices.count(); count += 1) await notices.first().click();
+          await panel.screenshot({ path: testInfo.outputPath(`share-${surface}-${width}-${state}.png`) });
+          const geometry = await panel.evaluate(el => {
+            const box = el.getBoundingClientRect();
+            const parent = el.closest(".news-feed-item, .newsfeed-lightbox__copy") ?? el.parentElement!.parentElement!;
+            const parentBox = parent.getBoundingClientRect();
+            const controls = [...el.querySelectorAll("button, a, textarea, img, [role=progressbar]")].map(node => {
+              const rect = node.getBoundingClientRect();
+              return { text: node.textContent || node.getAttribute("aria-label") || node.tagName, left: rect.left, right: rect.right };
+            });
+            return { left: box.left, right: box.right, parentLeft: parentBox.left, parentRight: parentBox.right,
+              client: el.clientWidth, scroll: el.scrollWidth, viewport: document.documentElement.clientWidth,
+              pageScroll: document.documentElement.scrollWidth, controls };
+          });
+          expect(geometry.left).toBeGreaterThanOrEqual(Math.max(0, geometry.parentLeft) - 1);
+          expect(geometry.right).toBeLessThanOrEqual(Math.min(geometry.viewport, geometry.parentRight) + 1);
+          expect(geometry.scroll).toBeLessThanOrEqual(geometry.client + 1);
+          expect(geometry.pageScroll).toBeLessThanOrEqual(geometry.viewport + 1);
+          for (const control of geometry.controls) {
+            expect(control.left, control.text).toBeGreaterThanOrEqual(geometry.left - 1);
+            expect(control.right, control.text).toBeLessThanOrEqual(geometry.right + 1);
+          }
+        }
+        await expect(panel.getByRole("progressbar", { name: "Voice rewrite progress" })).toBeVisible();
+        await assertContained("pending");
+        release();
+        await expect(panel.getByRole("button", { name: "Download Story image" })).toBeEnabled();
+        const longCaption = `${post.title}\n\nhttps://example.invalid/${"research".repeat(40)}`;
+        await caption.fill(longCaption);
+        await expect(caption).toHaveValue(longCaption);
+        await assertContained("ready");
+        const download = page.waitForEvent("download");
+        await panel.getByRole("button", { name: "Download Story image" }).click();
+        expect((await download).suggestedFilename()).toMatch(/\.png$/);
+        await container.getByRole("button", { name: "Share", exact: true }).click();
+        await expect(panel).toHaveCount(0);
+      } finally {
+        release();
+        await page.unrouteAll({ behavior: "ignoreErrors" });
+      }
+    });
+  }
 }

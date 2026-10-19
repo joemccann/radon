@@ -4471,3 +4471,21 @@ and acknowledgement. Continue that exact grant only after a fresh collection
 and permission proof. A startup attempt does not justify retiring the old key.
 Rollback preserves the separate account and protected key boundary; revert the
 source change or leave collection unavailable while investigating.
+
+## newsfeed-share-panel-horizontal-overflow
+
+- **Signal:** opening Share in a mobile feed item or lightbox clips the preview,
+  progress bar, caption or export controls past the article's right edge.
+- **Discriminating check:** compare `getBoundingClientRect()` for the share
+  region, its article/action row and the layout viewport, then compare
+  `scrollWidth` with `clientWidth`. A visually clipped page can still have a
+  viewport-sized document because an ancestor hides horizontal overflow.
+- **Mechanism:** the shared action row gives the share root `flex: 0 0 auto`.
+  An open panel's intrinsic width became the root's non-shrinking flex basis.
+- **Repair:** cap the root at 100% and make an open root use the full row;
+  allow the panel's text and actions grid to shrink. Keep controls visible
+  instead of hiding overflow. See `NewsfeedShare.module.css` and
+  `docs/mobile-newsfeed-layout.md`.
+- **Regression:** `web/e2e/newsfeed-sharing.spec.ts`, eight containment cases:
+  feed/lightbox at 320/393/640/1440px, pending/ready, long caption and PNG
+  download. The 393px pre-fix failure measured right=612px, allowed<=318px.
