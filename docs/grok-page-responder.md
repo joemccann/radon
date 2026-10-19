@@ -317,7 +317,8 @@ parents, so adding and then deleting an identifier still refuses publication.
 Empty and binary files, filenames and branch names are included; refusal
 messages replace private filenames with a redacted location. The raw commit
 object is read too: a header other than `tree`, `parent`, `author`,
-`committer`, `encoding` or `gpgsig`/`gpgsig-sha256` refuses the branch, and
+`committer`, `encoding` or `gpgsig`/`gpgsig-sha256`, or a continuation line
+after anything but a signature, refuses the branch, and
 the free-text values of the allowed signature and encoding headers are scanned.
 
 DS-2026-10-17-22: the gate and the pickup job read a branch an outside
