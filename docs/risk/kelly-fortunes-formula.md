@@ -131,6 +131,16 @@ premium or spread width paid. Under this spec:
    drawdown, after which (3) `drawdown_halt_pct` stops new sizing until an
    operator resets.
 
+The per-ticket bound is only as honest as the price it reads. `order_max_loss`
+and `kelly_guard._worst_case_loss` both price through
+`order_limits.effective_order_price_bounds`: a stop order spans both prices (it
+reaches IB as a `StopOrder` and carries no limit, so neither supplied field may
+be trusted alone) and everything else has only its limit. Each branch takes the
+end that costs more under its own arithmetic: the high end for a debit or a
+notional, the low end for a short put, whose assignment loss falls as the
+premium collected rises. A price field the placement funnel ignores must never
+be the one a cap is computed on.
+
 What this does NOT cover, and the spec should not pretend it does: undefined
 risk structures (Gate 4 is disabled; a naked short has no `max_loss`, so
 `kelly_ticket()` must refuse it with `reason: "UNDEFINED_RISK"` rather than
