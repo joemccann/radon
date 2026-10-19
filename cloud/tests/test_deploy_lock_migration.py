@@ -218,8 +218,11 @@ def _probe_deploy_entrypoint(tmp_path, *, state, stage=True, selector="default",
         selected = tmp_path / "custom.lock"
     elif state == "missing-parent":
         canonical.parent.rmdir()
-    elif state == "missing-file":
-        pass
+    elif state in {"missing-file", "writable-parent", "writable-authority", "foreign-authority", "foreign-parent-group"}:
+        if state == "writable-parent":
+            canonical.parent.chmod(0o777)
+        elif state == "writable-authority":
+            tmp_path.chmod(0o777)
     elif state == "symlink":
         canonical.symlink_to(victim)
     elif state == "dangling-symlink":
@@ -245,8 +248,28 @@ def _probe_deploy_entrypoint(tmp_path, *, state, stage=True, selector="default",
     # custom overrides retain the production selector's equality semantics.
     source = (ROOT / "cloud/scripts/deploy.sh").read_text()
     assert CANONICAL in source and LEGACY in source
+    # Production authority is UID 0 from filesystem root. Deliberately map
+    # that fixed namespace/data pair to this real UID-owned temporary root;
+    # no ancestor outside tmp_path is part of the synthetic authority domain.
+    # Every directory inside it retains real stat/mode checks. A foreign
+    # authority case changes only the expected UID, so the actual stat owner
+    # is observably foreign; neither os.stat nor the supervisor is mocked.
+    authority_uid = os.getuid() + (1 if state == "foreign-authority" else 0)
+    assert tmp_path.stat().st_uid == os.getuid()
+    if state in {"missing-parent", "missing-file"}:
+        assert tmp_path.stat().st_mode & 0o022 == 0
+        if state == "missing-file":
+            assert canonical.parent.stat().st_mode & 0o777 == 0o750
+            assert canonical.parent.stat().st_gid == os.getgid()
+    if state not in {"missing-parent", "symlink-parent"}:
+        assert canonical.parent.stat().st_uid == os.getuid()
+    copied_source = source.replace(CANONICAL, str(canonical)).replace(LEGACY, str(legacy))
+    copied_source = copied_source.replace('authority_root = "/"', f'authority_root = {str(tmp_path)!r}')
+    copied_source = copied_source.replace('authority_uid = 0', f'authority_uid = {authority_uid}')
+    authority_gid = os.getgid() + (1 if state == "foreign-parent-group" else 0)
+    copied_source = copied_source.replace('authority_gid = pwd.getpwnam("radon").pw_gid', f'authority_gid = {authority_gid}')
     script = tmp_path / "deploy.sh"
-    script.write_text(source.replace(CANONICAL, str(canonical)).replace(LEGACY, str(legacy)))
+    script.write_text(copied_source)
     calls = tmp_path / "calls"
     calls.touch()
     fake_bin = tmp_path / "bin"
@@ -306,6 +329,8 @@ os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])
         result = subprocess.run(["bash", str(script), "a" * 40], env=env,
                                 text=True, capture_output=True, timeout=5, check=False)
     finally:
+        if state == "writable-authority":
+            tmp_path.chmod(0o700)
         if state == "unreadable-parent":
             canonical.parent.chmod(0o750)
         elif state == "unreadable-file":
@@ -351,6 +376,16 @@ def test_entrypoint_prestage_refuses_unsafe_existing_lock_without_work(tmp_path,
     result, calls, _, _ = _probe_deploy_entrypoint(tmp_path, state=state)
     assert result.returncode != 0, result.stdout + result.stderr
     assert not calls
+
+
+@pytest.mark.parametrize("selector", ["default", "canonical"])
+@pytest.mark.parametrize("state", ["writable-parent", "writable-authority", "foreign-authority", "foreign-parent-group"])
+def test_entrypoint_prestage_refuses_missing_leaf_without_directory_authority(tmp_path, selector, state):
+    result, calls, selected, _ = _probe_deploy_entrypoint(tmp_path, state=state, selector=selector)
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert not calls
+    assert not selected.exists()
+    assert selected.parent.is_dir(), "unsafe existing authority must not be removed or rebuilt"
 
 
 @pytest.mark.parametrize("selector", ["default", "canonical"])
