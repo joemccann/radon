@@ -315,7 +315,10 @@ pickup refuses:
 REL-296 / R-715: the gate scans each unpublished commit, including merge
 parents, so adding and then deleting an identifier still refuses publication.
 Empty and binary files, filenames and branch names are included; refusal
-messages replace private filenames with a redacted location.
+messages replace private filenames with a redacted location. The raw commit
+object is read too: a header other than `tree`, `parent`, `author`,
+`committer`, `encoding` or `gpgsig`/`gpgsig-sha256` refuses the branch, and
+the free-text values of the allowed signature and encoding headers are scanned.
 
 DS-2026-10-17-22: the gate and the pickup job read a branch an outside
 contributor shapes, so both now run every `git` call through one bounded

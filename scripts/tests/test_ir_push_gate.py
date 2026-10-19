@@ -376,6 +376,45 @@ class TestScanCommitRangeOpaqueContent:
         assert "ib_exec_id in diff of app.py" in found
         assert any(f.startswith("ib_account_id in diff of") for f in found)
 
+    def _commit_with_header(self, repo: Path, header: str) -> str:
+        """Hand-build a commit object carrying ``header`` and point HEAD at it."""
+        raw = _git(repo, "cat-file", "commit", "HEAD").stdout
+        head, _, message = raw.partition("\n\n")
+        lines = head.split("\n")
+        tree = next(line for line in lines if line.startswith("tree "))
+        idents = [line for line in lines if line.startswith(("author ", "committer "))]
+        parent = _git(repo, "rev-parse", "HEAD").stdout.strip()
+        body = "\n".join([tree, f"parent {parent}", *idents, header]) + "\n\nfix: relay\n"
+        sha = subprocess.run(
+            ["git", "hash-object", "-t", "commit", "-w", "--stdin"],
+            cwd=repo, input=body, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        assert _git(repo, "update-ref", "refs/heads/fix/relay", sha).returncode == 0
+        return sha
+
+    @pytest.mark.parametrize("header", [f"x-note {GH_TOKEN}", f"x-note {ACCOUNT}", "x-note clean"])
+    def test_a_non_standard_commit_header_is_refused(self, repo, header):
+        """`git push` publishes the raw commit OBJECT, extra headers included.
+        A header outside the standard set is refused, whatever it carries."""
+        _commit(repo, "x = 2\n", "fix: relay")
+        self._commit_with_header(repo, header)
+        with pytest.raises(gate.IrPushRefused, match="commit header") as exc:
+            gate.scan_commit_range(repo, "main", "fix/relay")
+        assert GH_TOKEN not in str(exc.value)
+        assert ACCOUNT not in str(exc.value)
+
+    def test_a_standard_hand_built_commit_still_passes(self, repo):
+        _commit(repo, "x = 2\n", "fix: relay")
+        self._commit_with_header(repo, "encoding UTF-8")
+        assert gate.scan_commit_range(repo, "main", "fix/relay") == []
+
+    def test_an_allowed_header_value_is_scanned(self, repo):
+        _commit(repo, "x = 2\n", "fix: relay")
+        sha = self._commit_with_header(repo, f"encoding {ACCOUNT}")
+        found = gate.scan_commit_range(repo, "main", "fix/relay")
+        assert f"ib_account_id in commit header {sha[:12]}" in found
+        assert ACCOUNT not in json.dumps(found)
+
     def test_clean_binary_free_branch_still_passes(self, repo):
         self._add(repo, ".gitattributes", b"*.txt -diff\n")
         self._add(repo, "notes.txt", b"nothing private here\n")
