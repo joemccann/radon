@@ -187,6 +187,7 @@ ARTIFACTS = (
     Artifact("services/radon-media-publish.service", "/etc/systemd/system/radon-media-publish.service", 0o644),
     Artifact("services/radon-media-publish.path", "/etc/systemd/system/radon-media-publish.path", 0o644),
     Artifact("services/radon-media-publish.timer", "/etc/systemd/system/radon-media-publish.timer", 0o644),
+    Artifact("config/tmpfiles.d/radon-deploy.conf", "/usr/lib/tmpfiles.d/radon-deploy.conf", 0o644),
 )
 
 
@@ -835,6 +836,7 @@ def test_existing_lock_symlink_does_not_change_its_target(tmp_path: Path) -> Non
 
 
 BROKER_SOURCES = {
+    "config/tmpfiles.d/radon-deploy.conf",
     "scripts/deploy-root-helper.sh", "scripts/ib-gateway-control.sh",
     "scripts/ib-operator-hold.sh", "scripts/operator-radon.sh",
     "repo/scripts/utils/ib_operator_hold.py",
@@ -855,7 +857,7 @@ def test_broker_bootstrap_installs_only_its_bundle_without_node_or_sudoers(tmp_p
     assert result.returncode == 0, result.stdout + result.stderr
     for artifact in ARTIFACTS:
         assert _installed_path(sandbox.rootfs, artifact).exists() == (artifact.source in BROKER_SOURCES)
-    assert "Installed and verified 12 control-plane artifacts" in result.stdout
+    assert "Installed and verified 13 control-plane artifacts" in result.stdout
     host_env = sandbox.rootfs / "etc/radon/env"
     host_env.write_text("RADON_HOST_ROLE=broker\n")
     verified = _run_root_control_plane_verifier(sandbox)

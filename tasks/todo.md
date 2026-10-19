@@ -9966,3 +9966,22 @@ Independent media review: initial stat oversize is refused before payload open; 
 - [x] PC2 depends_on: [PC1] Replace the obsolete shell-target assertion with the canonical Python collector target and host-pin derivation contract.
 
 Follow-up review: the helper issues SSH through a Python argv list from root-installed config, so the old quoted shell `$target` command no longer exists. The documentation contract now pins host extraction, protected config and the exact Python target operand. Python AST and whitespace checks pass; fresh private CI remains required.
+
+## Service isolation maintenance (2026-10-18)
+
+- [x] T0 depends_on: [] Verify current applicability, existing deliveries and safe rollout dependencies.
+- [ ] T1 depends_on: [T0] Prepare isolated performance snapshot helper with provisioning and regressions as its own PR.
+- [ ] T2 depends_on: [T0] Prepare research runtime CLI configuration as its own PR.
+- [ ] T3 depends_on: [T0] Prepare deploy serialization migration and compatibility as its own PR.
+- [ ] T4 depends_on: [T0] Prepare token keeper environment contract as its own PR.
+- [ ] T5 depends_on: [T0,T4] Prepare page responder identity provisioning as its own PR.
+- [ ] T6 depends_on: [T0,T2] Prepare media publication isolation and asset migration as its own PR.
+- [x] T7 depends_on: [T0] Verify existing host-key deployment controls.
+- [ ] T8 depends_on: [T1,T2,T3,T4,T5,T6,T7] Complete immutable-head CI and independent reviews for each relevant PR.
+- [ ] T9 depends_on: [T8] Verify authorized release order and provisioning receipts or identify exact remaining bootstrap.
+
+Review: implementation is scoped to independently verified current behavior; preserve unrelated workspace files, production availability, credential boundaries and the existing workflow review policy. Test suites run in cloud only.
+
+Service isolation source review: cloud-only regression RED recorded before implementation. Research CLI, keeper environment, performance helper, responder and media source candidates have independent Sol/Luna reviews; the lock migration has Sol source review with final Luna confirmation pending. Review repaired transient oneshot detection, native CLI normalization, first-upgrade recovery and bounded rejected-media reads before delivery. No production provisioning or native authentication has been performed. Full final-head CI and separate public PR delivery remain pending.
+
+Deploy serialization private validation `981bbe7c`: scripts-ac 4 failed/3119 passed/1 skipped; scripts-df 1 failed/1606 passed/3 skipped; cloud-al 24 failed/2925 passed/2 skipped. Repaired isolated interpreter dependencies, observer transport fixtures, owner documentation and canonical installed-mode comparison. Preserve wait budgets and add real temporary-file observer coverage for both generations, first bootstrap, FIFO and symlink refusal. Replacement immutable-head full CI remains required.

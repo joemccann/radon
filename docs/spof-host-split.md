@@ -215,6 +215,11 @@ Operator commands after the cut:
   down, rows fall back to the host health daemon (`127.0.0.1:8330/status`,
   `status_source=host-health`, `can_control=false`) and the panel is
   read-only. Gateway status stays on the remote ladder above.
+- Host-local service actions take the provisioned
+  `/var/lib/radon-lock/deploy.lock` and then the retained compatibility lock.
+  A held lock refuses the action before systemd mutation. App-container actions
+  continue through the host control socket; Gateway actions continue through
+  the broker path above. Lock provisioning does not restart Gateway.
 - App `Restart All Services` stays app-plane. It does not cycle Gateway.
   Through the control socket it is answered first and runs detached, since
   it restarts radon-api itself.

@@ -1182,3 +1182,32 @@ failure aborts the deploy. The derived directory is root-private; see
 [subscription token operations](subscription-tokens.md) for its supported inputs
 and rollback. The keeper keeps its existing uid and native provider credential
 locations.
+
+### Deploy lock transition
+
+The protected deploy lock is `/var/lib/radon-lock/deploy.lock`, provisioned
+root:radon `0640` under a root:radon `0750` directory by trusted control-plane
+bootstrap or initial setup. The fixed tmpfiles contract preserves those
+permissions across boot. Consumers open the existing inode without replacing
+it. A missing primary refuses normal deployment and operator mutation.
+
+During transition, updated deploy, operator, Gateway, admin-control, cleanup
+and image-prune consumers acquire the protected lock first and then the existing
+`/home/radon/.radon-deploy.lock`. The compatibility inode is retained unchanged
+for older installed consumers. Do not delete either lock to clear contention.
+The supervisor alone holds both descriptors; bounded children cannot retain
+them after it exits.
+
+The first upgraded CI runner may perform its recovery-only pass under the
+existing compatibility lock before trusted bootstrap provisions the primary.
+This exception cannot run a normal deployment. Subsequent recovery uses both
+locks. The observer checks both generations and permits an absent primary only
+so the first trusted provisioning step remains reachable. Rollback retains both
+inodes, allowing older consumers to serialize against updated consumers without
+changing ownership or splitting the lock domain. No Gateway restart is part of
+lock provisioning.
+
+An explicit `RADON_DEPLOY_LOCK_FILE=/var/lib/radon-lock/deploy.lock` keeps the
+same two-lock transition as the default configuration. A noncanonical isolated
+lock override uses only that path unless `RADON_DEPLOY_LEGACY_LOCK_FILE` is
+supplied as well.

@@ -301,6 +301,7 @@ supervise_deploy_command bash -c 'printf deployed > {tmp_path / "deployed"}'
             env={
                 **os.environ,
                 "RADON_DEPLOY_LOCK_FILE": str(tmp_path / "deploy.lock"),
+                "RADON_SYSTEM_PYTHON": sys.executable,
                 "RADON_DEPLOY_TRANSITION_JOURNAL": str(journal_file),
                 "RADON_DEPLOY_RECOVER_ONLY": recover_only,
                 "DEPLOY_TIMEOUT": "30",
@@ -361,6 +362,7 @@ supervise_deploy_command bash -c 'exit {deploy_rc}'
         result = subprocess.run(
             ["bash", "-c", shell],
             env={**os.environ, "RADON_DEPLOY_LOCK_FILE": str(lock),
+                 "RADON_SYSTEM_PYTHON": sys.executable,
                  "RADON_DEPLOY_TRANSITION_JOURNAL": str(tmp_path / "none.json"),
                  "RADON_DEPLOY_STAGE": stage,
                  "DEPLOY_TIMEOUT": "30", "DEPLOY_KILL_AFTER": "5"},
@@ -375,9 +377,9 @@ supervise_deploy_command bash -c 'exit {deploy_rc}'
         assert "-n /usr/local/sbin/radon-app-runtime prune" in lines
         assert "free" in lines and "held" not in lines
         # The real supervisor holds an flock on FD 9 while the body runs; the
-        # prune call sits after `exec 9>&-` in the same function.
+        # prune call sits after both deploy-lock descriptors close.
         body = function_body(DEPLOY.read_text(encoding="utf-8"), "supervise_deploy_command")
-        assert body.rindex("exec 9>&-") < body.index("prune_app_images_after_deploy")
+        assert body.rindex("exec 8>&- 9>&-") < body.index("prune_app_images_after_deploy")
         del fcntl
 
     def test_failed_deploy_does_not_prune(self, tmp_path):

@@ -61,6 +61,7 @@ class TestDeployOwnership:
         env = {
             **os.environ,
             "RADON_DEPLOY_LOCK_FILE": str(lock),
+            "RADON_SYSTEM_PYTHON": sys.executable,
             "DEPLOY_TIMEOUT": "30",
         }
         holder = subprocess.Popen(
@@ -234,6 +235,7 @@ exec "$@"
                 "DEPLOY_TIMEOUT": "7",
                 "DEPLOY_KILL_AFTER": "2",
                 "RADON_DEPLOY_LOCK_FILE": str(tmp_path / "deploy.lock"),
+                "RADON_SYSTEM_PYTHON": sys.executable,
             },
             capture_output=True,
             text=True,

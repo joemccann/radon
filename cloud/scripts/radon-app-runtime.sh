@@ -38,6 +38,7 @@ if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
   NOTIFY_PROXY_DIR="${RADON_TEST_NOTIFY_PROXY_DIR:-${STATE_DIR}/notify}"
   CONTROL_DIR="${RADON_TEST_CONTROL_DIR:-${STATE_DIR}/control}"
   DEPLOY_LOCK_FILE="${RADON_TEST_DEPLOY_LOCK:-${STATE_DIR}/deploy.lock}"
+  LEGACY_DEPLOY_LOCK_FILE="${RADON_TEST_DEPLOY_LEGACY_LOCK:-}"
   PULL_LOCK_FILE="${RADON_TEST_PULL_LOCK:-${STATE_DIR}/image-pull.lock}"
   PULL_LOCK_WAIT_SECS="${RADON_TEST_PULL_LOCK_WAIT_SECS:-300}"
   GREEN_MARKER_FILE="${RADON_TEST_GREEN_MARKER:-${STATE_DIR}/last-green}"
@@ -82,7 +83,8 @@ else
   GETENT=/usr/bin/getent
   NOTIFY_PROXY_DIR=/run/radon-app-runtime
   CONTROL_DIR=/run/radon-control
-  DEPLOY_LOCK_FILE=/home/radon/.radon-deploy.lock
+  DEPLOY_LOCK_FILE=/var/lib/radon-lock/deploy.lock
+  LEGACY_DEPLOY_LOCK_FILE=/home/radon/.radon-deploy.lock
   # Root-only: /run is root-owned and this verb creates the directory 0755.
   PULL_LOCK_FILE=/run/radon-app-runtime/image-pull.lock
   PULL_LOCK_WAIT_SECS=300
@@ -439,11 +441,11 @@ cmd_prune() {
 
 # $2 is 1 when the caller already holds the pull lock shared on fd 9.
 prune_stale_app_images() {
-  "$PYTHON" -I - "$DOCKER" "$1" "$DEPLOY_LOCK_FILE" "$GREEN_MARKER_FILE" "$TRANSITION_JOURNAL_FILE" "$PULL_LOCK_FILE" "$2" <<'PYCODE'
+  "$PYTHON" -I - "$DOCKER" "$1" "$DEPLOY_LOCK_FILE" "$GREEN_MARKER_FILE" "$TRANSITION_JOURNAL_FILE" "$PULL_LOCK_FILE" "$2" "$LEGACY_DEPLOY_LOCK_FILE" <<'PYCODE'
 import fcntl, json, os, re, stat, subprocess, sys
 from pathlib import Path
 
-docker, target, lock_path, green_path, journal_path, pull_lock_path, pull_lock_held = sys.argv[1:]
+docker, target, lock_path, green_path, journal_path, pull_lock_path, pull_lock_held, legacy_lock_path = sys.argv[1:]
 def skip(reason):
     print(f"radon-app-runtime: image prune skipped: {reason}", file=sys.stderr)
     raise SystemExit(0)
@@ -471,11 +473,17 @@ except OSError as exc:
 
 try:
     # Do not create a root-owned lock that would prevent radon from deploying.
-    fd = os.open(lock_path, os.O_RDWR | os.O_NOFOLLOW)
-    with os.fdopen(fd, "r+") as lock:
+    fd = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "r") as lock:
         if not stat.S_ISREG(os.fstat(lock.fileno()).st_mode):
             skip("deploy lock is not a regular file")
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if legacy_lock_path and legacy_lock_path != lock_path:
+            legacy_fd = os.open(legacy_lock_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            held, named = os.fstat(legacy_fd), os.lstat(legacy_lock_path)
+            if not stat.S_ISREG(named.st_mode) or (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino):
+                skip("compatibility deploy lock changed")
+            fcntl.flock(legacy_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         protected = {target} if target else set()
         journal = Path(journal_path)
         if journal.exists() or journal.is_symlink():

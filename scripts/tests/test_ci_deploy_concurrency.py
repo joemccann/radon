@@ -10,10 +10,13 @@ from __future__ import annotations
 
 import ast
 import fnmatch
+import fcntl
 import json
 import os
 import subprocess
 import re
+import shlex
+import sys
 from pathlib import Path
 
 import pytest
@@ -141,7 +144,10 @@ def test_deploy_waits_for_the_finishing_release_before_refusing() -> None:
     lock for a bounded time first."""
     script = _deploy_script()
     assert "wait_for_deploy_lock()" in script
-    assert 'flock -n "$DEPLOY_LOCK_FILE" true' in script
+    assert "deploy_locks_are_free()" in script
+    assert "while ! deploy_locks_are_free" in script
+    assert '"$DEPLOY_LOCK_FILE" "$LEGACY_DEPLOY_LOCK_FILE"' in script
+    assert "fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)" in script
     assert ".radon-deploy.lock" in script
     assert 0 < _deploy_lock_wait_seconds() <= 600
     # The wait runs before EVERY deploy.sh invocation, including the legacy
@@ -1017,32 +1023,33 @@ def test_mcp_golden_report_runs_once_in_the_full_python_matrix() -> None:
     assert "-r requirements.txt" in _job_commands(jobs[job_name])
 
 
+def _deploy_shell_function(name: str) -> str:
+    match = re.search(rf"^{re.escape(name)}\(\) \{{\n.*?^\}}", _deploy_script(), re.M | re.S)
+    assert match, f"deploy function missing: {name}"
+    return match.group()
+
+
 @pytest.mark.parametrize("failures,budget,expected_probes,expected_sleeps", [
     (0, 20, 1, 0), (2, 30, 3, 2), (999, 20, 3, 2),
 ])
-def test_real_deploy_lock_wait_with_fake_lock_and_clock(tmp_path, failures, budget, expected_probes, expected_sleeps):
-    script = _deploy_script()
-    start = script.index("wait_for_deploy_lock() {")
-    end = script.index("\nwait_for_deploy_lock", start)
-    helper = script[start:end]
+def test_deploy_lock_wait_with_fake_observer_and_clock(tmp_path, failures, budget, expected_probes, expected_sleeps):
+    # Clock admission is independent of how the two lock generations are probed.
+    helper = _deploy_shell_function("wait_for_deploy_lock")
+    observer = """deploy_locks_are_free() {
+      n=$(cat "$PROBE_FILE" 2>/dev/null || echo 0)
+      n=$((n + 1)); echo "$n" > "$PROBE_FILE"
+      [ "$n" -gt "$FAILURES" ]
+    }
+"""
     bindir = tmp_path / "bin"
     bindir.mkdir()
-    (bindir / "flock").write_text(
-        "#!/bin/sh\n"
-        'n=$(cat "$PROBE_FILE" 2>/dev/null || echo 0)\n'
-        'n=$((n + 1)); echo "$n" > "$PROBE_FILE"\n'
-        '[ "$1" = -n ] && [ "$2" = "$EXPECTED_LOCK" ] && [ "$3" = true ] || exit 99\n'
-        '[ "$n" -gt "$FAILURES" ]\n'
-    )
     (bindir / "sleep").write_text('#!/bin/sh\nprintf "%s\\n" "$1" >> "$SLEEP_FILE"\n')
-    for tool in bindir.iterdir():
-        tool.chmod(0o755)
+    (bindir / "sleep").chmod(0o755)
     probe, sleeps = tmp_path / "probes", tmp_path / "sleeps"
-    lock = str(tmp_path / "fake.lock")
     env = {**os.environ, "PATH": str(bindir) + os.pathsep + os.environ["PATH"],
-           "PROBE_FILE": str(probe), "SLEEP_FILE": str(sleeps), "EXPECTED_LOCK": lock,
-           "FAILURES": str(failures), "DEPLOY_LOCK_FILE": lock, "DEPLOY_LOCK_WAIT_SECS": str(budget)}
-    result = subprocess.run(["bash", "-c", helper + "\nwait_for_deploy_lock"],
+           "PROBE_FILE": str(probe), "SLEEP_FILE": str(sleeps),
+           "FAILURES": str(failures), "DEPLOY_LOCK_WAIT_SECS": str(budget)}
+    result = subprocess.run(["bash", "-c", observer + helper + "\nwait_for_deploy_lock"],
                             env=env, capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stdout + result.stderr
     assert int(probe.read_text()) == expected_probes
@@ -1053,6 +1060,74 @@ def test_real_deploy_lock_wait_with_fake_lock_and_clock(tmp_path, failures, budg
         assert "freed after 20s" in result.stdout
     else:
         assert result.stdout == result.stderr == ""
+
+
+def _probe_deploy_locks(primary: Path, legacy: Path) -> subprocess.CompletedProcess:
+    observer = _deploy_shell_function("deploy_locks_are_free")
+    assert observer.count("/usr/bin/python3.13") == 1
+    # The production path remains fixed; only this isolated fixture substitutes
+    # the test interpreter so no host provisioning is required to exercise it.
+    observer = observer.replace("/usr/bin/python3.13", shlex.quote(sys.executable))
+    return subprocess.run(
+        ["bash", "-c", observer + "\ndeploy_locks_are_free"],
+        env={**os.environ, "DEPLOY_LOCK_FILE": str(primary), "LEGACY_DEPLOY_LOCK_FILE": str(legacy)},
+        capture_output=True, text=True, timeout=5,
+    )
+
+
+@pytest.mark.parametrize("held", [(), ("primary",), ("legacy",), ("primary", "legacy")])
+def test_real_deploy_observer_checks_both_lock_generations(tmp_path, held):
+    paths = {name: tmp_path / (name + ".lock") for name in ("primary", "legacy")}
+    for path in paths.values():
+        path.write_bytes(b"retain existing inode\n")
+    before = {name: (path.stat().st_ino, path.read_bytes()) for name, path in paths.items()}
+    descriptors = []
+    try:
+        for name in held:
+            fd = os.open(paths[name], os.O_RDWR)
+            descriptors.append(fd)
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = _probe_deploy_locks(paths["primary"], paths["legacy"])
+        assert result.returncode == (1 if held else 0), result.stdout + result.stderr
+        assert {name: (path.stat().st_ino, path.read_bytes()) for name, path in paths.items()} == before
+    finally:
+        for fd in descriptors:
+            os.close(fd)
+    assert _probe_deploy_locks(paths["primary"], paths["legacy"]).returncode == 0
+
+
+@pytest.mark.parametrize("legacy_held", [False, True])
+def test_first_upgrade_observer_permits_absent_primary_but_checks_legacy(tmp_path, legacy_held):
+    primary, legacy = tmp_path / "primary.lock", tmp_path / "legacy.lock"
+    legacy.write_bytes(b"existing compatibility lock\n")
+    with legacy.open("r+") as handle:
+        if legacy_held:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = _probe_deploy_locks(primary, legacy)
+        assert result.returncode == (1 if legacy_held else 0), result.stdout + result.stderr
+    assert not primary.exists(), "the observer must not provision the primary"
+    assert legacy.read_bytes() == b"existing compatibility lock\n"
+
+
+@pytest.mark.parametrize("generation", ["primary", "legacy"])
+@pytest.mark.parametrize("shape", ["fifo", "symlink"])
+def test_real_deploy_observer_refuses_unsafe_lock_names_without_blocking(tmp_path, generation, shape):
+    paths = {name: tmp_path / (name + ".lock") for name in ("primary", "legacy")}
+    for path in paths.values():
+        path.write_bytes(b"existing lock\n")
+    unsafe = paths[generation]
+    unsafe.unlink()
+    target = tmp_path / "unrelated-file"
+    target.write_bytes(b"do not change\n")
+    if shape == "fifo":
+        os.mkfifo(unsafe)
+    else:
+        unsafe.symlink_to(target)
+    before = unsafe.lstat()
+    result = _probe_deploy_locks(paths["primary"], paths["legacy"])
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert (unsafe.lstat().st_ino, unsafe.lstat().st_mode) == (before.st_ino, before.st_mode)
+    assert target.read_bytes() == b"do not change\n"
 
 
 def test_cip018_revert_restores_v_suite_ownership_and_early_collection() -> None:

@@ -96,7 +96,8 @@ if [[ "$HOST_ROLE" != broker ]]; then
   done
 fi
 
-readonly DEPLOY_LOCK_PATH="$(root_path /home/radon/.radon-deploy.lock)"
+readonly DEPLOY_LOCK_PATH="$(root_path /var/lib/radon-lock/deploy.lock)"
+readonly LEGACY_DEPLOY_LOCK_PATH="$(root_path /home/radon/.radon-deploy.lock)"
 readonly APP_TRANSITION_PATH="$(root_path /home/radon/.radon-deploy-transition.json)"
 readonly GATEWAY_TRANSITION_PATH="$(root_path /var/lib/radon/ib-gateway-transition.json)"
 readonly ROOT_ACTIVE_UNITS_PATH="$(root_path /var/lib/radon-deploy/active-units)"
@@ -109,43 +110,82 @@ readonly READY_PATH="$(root_path /var/lib/radon/control-plane-ready)"
 readonly STATE_DIR="$(dirname "$MANIFEST_PATH")"
 readonly LOGICAL_MANIFEST_PATH="/var/lib/radon/control-plane-manifest.sha256"
 
-mkdir -p "$(dirname "$DEPLOY_LOCK_PATH")"
-# The lock sits in radon's home, so radon can swap its name at any moment.
-# Create it with one O_EXCL|O_NOFOLLOW open, open it without O_CREAT, and
-# accept the fd only when it is the regular file the name still holds.
-"$PYTHON_BIN" -I - "$DEPLOY_LOCK_PATH" "$TEST_MODE" <<'PY_CREATE_LOCK' || \
-  die "cannot create deploy/control lock: $DEPLOY_LOCK_PATH"
-import os
-import pwd
-import sys
-
-path, test_mode = sys.argv[1], sys.argv[2]
+# Provision a stable primary inode under a root-owned directory. Existing
+# legacy inode remains unchanged for already-installed consumers.
+"$PYTHON_BIN" -I - "$DEPLOY_LOCK_PATH" "$LEGACY_DEPLOY_LOCK_PATH" "$TEST_MODE" <<'PY_LOCKS' || die "cannot provision deploy/control locks"
+import os, pathlib, pwd, stat, sys
+primary, legacy, test = sys.argv[1:]
+account = pwd.getpwuid(os.getuid()) if test == "1" else pwd.getpwnam("radon")
+owner = os.getuid() if test == "1" else 0
+parent = pathlib.Path(primary).parent
+if test == "1":
+    parent.parent.mkdir(parents=True, exist_ok=True)
+anchor = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
 try:
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    for part in parent.parent.parts[1:]:
+        next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=anchor)
+        os.close(anchor); anchor = next_fd
+        info = os.fstat(anchor)
+        if test != "1" and (info.st_uid != 0 or stat.S_IMODE(info.st_mode) & 0o022):
+            raise SystemExit("deploy lock ancestor ownership/mode refused")
+    try:
+        os.mkdir(parent.name, 0o750, dir_fd=anchor)
+        created = True
+    except FileExistsError:
+        created = False
+    directory = os.open(parent.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=anchor)
+    try:
+        if created:
+            if test != "1": os.fchown(directory, 0, account.pw_gid)
+            os.fchmod(directory, 0o750)
+        info = os.fstat(directory)
+        if info.st_uid != owner or stat.S_IMODE(info.st_mode) != 0o750 or (test != "1" and info.st_gid != account.pw_gid):
+            raise SystemExit("deploy lock directory ownership/mode refused")
+        try:
+            fd = os.open(pathlib.Path(primary).name, os.O_RDONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o640, dir_fd=directory)
+            created = True
+        except FileExistsError:
+            fd = os.open(pathlib.Path(primary).name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+            created = False
+        try:
+            if created:
+                if test != "1": os.fchown(fd, 0, account.pw_gid)
+                os.fchmod(fd, 0o640)
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != owner or stat.S_IMODE(info.st_mode) != 0o640 or info.st_nlink != 1 or (test != "1" and info.st_gid != account.pw_gid):
+                raise SystemExit("deploy lock file ownership/mode refused")
+        finally: os.close(fd)
+    finally: os.close(directory)
+finally: os.close(anchor)
+pathlib.Path(legacy).parent.mkdir(parents=True, exist_ok=True)
+try:
+    fd = os.open(legacy, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
 except FileExistsError:
-    raise SystemExit(0)
-try:
-    if test_mode != "1":
-        account = pwd.getpwnam("radon")
-        os.fchown(fd, account.pw_uid, account.pw_gid)
-    os.fchmod(fd, 0o600)
-finally:
-    os.close(fd)
-PY_CREATE_LOCK
-[[ -f "$DEPLOY_LOCK_PATH" && ! -L "$DEPLOY_LOCK_PATH" ]] || \
-  die "deploy/control lock is not a regular file: $DEPLOY_LOCK_PATH"
-exec {DEPLOY_LOCK_FD}<"$DEPLOY_LOCK_PATH" || \
-  die "cannot open deploy/control lock: $DEPLOY_LOCK_PATH"
-"$PYTHON_BIN" -I -c '
-import os, stat, sys
-held, named = os.fstat(int(sys.argv[1])), os.lstat(sys.argv[2])
-sys.exit(not (stat.S_ISREG(named.st_mode)
-              and (held.st_dev, held.st_ino) == (named.st_dev, named.st_ino)))
-' "$DEPLOY_LOCK_FD" "$DEPLOY_LOCK_PATH" || \
-  die "deploy/control lock changed while opening: $DEPLOY_LOCK_PATH"
-if ! "$FLOCK_BIN" -n "$DEPLOY_LOCK_FD"; then
-  die "deploy/control lock is held: $DEPLOY_LOCK_PATH" 75
-fi
+    pass
+else:
+    try:
+        if test != "1": os.fchown(fd, account.pw_uid, account.pw_gid)
+        os.fchmod(fd, 0o600)
+    finally: os.close(fd)
+PY_LOCKS
+
+for lock_name in "$DEPLOY_LOCK_PATH" "$LEGACY_DEPLOY_LOCK_PATH"; do
+  [[ -f "$lock_name" && ! -L "$lock_name" ]] || die "deploy/control lock is not regular: $lock_name"
+  if [[ "$lock_name" == "$LEGACY_DEPLOY_LOCK_PATH" ]]; then
+    # Read/write open cannot block on a FIFO raced into the compatibility name.
+    exec {LOCK_FD}<>"$lock_name" || die "cannot open deploy/control lock: $lock_name"
+  else
+    exec {LOCK_FD}<"$lock_name" || die "cannot open deploy/control lock: $lock_name"
+  fi
+  "$PYTHON_BIN" -I -c '
+import os,stat,sys
+held,named=os.fstat(int(sys.argv[1])),os.lstat(sys.argv[2])
+sys.exit(not(stat.S_ISREG(named.st_mode) and (held.st_dev,held.st_ino)==(named.st_dev,named.st_ino)))
+' "$LOCK_FD" "$lock_name" || die "deploy/control lock changed while opening"
+  "$FLOCK_BIN" -n "$LOCK_FD" || die "deploy/control lock is held: $lock_name" 75
+  if [[ "$lock_name" == "$DEPLOY_LOCK_PATH" ]]; then DEPLOY_LOCK_FD="$LOCK_FD"; else LEGACY_DEPLOY_LOCK_FD="$LOCK_FD"; fi
+  # Each dynamic descriptor remains open for the full bootstrap transaction.
+done
 
 for transition_path in \
   "$APP_TRANSITION_PATH" "$GATEWAY_TRANSITION_PATH" \
@@ -213,6 +253,7 @@ readonly -a SOURCES=(
   services/radon-media-publish.service
   services/radon-media-publish.path
   services/radon-media-publish.timer
+  config/tmpfiles.d/radon-deploy.conf
 )
 readonly -a LOGICAL_TARGETS=(
   /usr/local/sbin/radon-deploy-root
@@ -270,6 +311,7 @@ readonly -a LOGICAL_TARGETS=(
   /etc/systemd/system/radon-media-publish.service
   /etc/systemd/system/radon-media-publish.path
   /etc/systemd/system/radon-media-publish.timer
+  /usr/lib/tmpfiles.d/radon-deploy.conf
 )
 readonly -a MODES=(
   0755 0755 0755 0644 0755 0644 0644 0755 0755 0644
@@ -284,6 +326,7 @@ readonly -a MODES=(
   0644
   0644
   0644 0644 0644 0644
+  0644
 )
 readonly -a KINDS=(
   shell shell shell python shell python python shell shell compose
@@ -299,6 +342,7 @@ readonly -a KINDS=(
   dropin
   python
   python systemd systemd systemd
+  tmpfiles
 )
 
 [[ "${#SOURCES[@]}" -eq "${#LOGICAL_TARGETS[@]}" && \
@@ -322,7 +366,7 @@ broker_control_plane_source() {
     scripts/deploy-root-helper.sh|scripts/ib-gateway-control.sh|\
     scripts/ib-operator-hold.sh|scripts/operator-radon.sh|\
     repo/scripts/utils/ib_operator_hold.py|\
-    scripts/radon-docker-gw.sh|docker-compose.yml|\
+    scripts/radon-docker-gw.sh|docker-compose.yml|config/tmpfiles.d/radon-deploy.conf|\
     services/radon-ib-gateway.service|services/radon-ib-gateway-preheld-restart.service|\
     services/radon-ib-watchdog.service|services/radon-ib-watchdog.timer|\
     services/radon-ib-gateway-remote.service) return 0 ;;
@@ -658,6 +702,9 @@ for index in "${!BUNDLE_SOURCES[@]}"; do
       # candidate code during a privileged transaction.
       "$PYTHON_BIN" -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1])' \
         "$staged_path" || die "python syntax validation failed: $relative_source"
+      ;;
+    tmpfiles)
+      "$PYTHON_BIN" -I -c 'import pathlib,sys; lines=[x.strip() for x in pathlib.Path(sys.argv[1]).read_text().splitlines() if x.strip() and not x.lstrip().startswith("#")]; sys.exit(lines != ["d /var/lib/radon-lock 0750 root radon -", "f /var/lib/radon-lock/deploy.lock 0640 root radon -"])' "$staged_path" || die "deploy tmpfiles contract refused"
       ;;
     systemd)
       SYSTEMD_CANDIDATES+=("$staged_path")
