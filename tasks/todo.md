@@ -9985,3 +9985,35 @@ Review: implementation is scoped to independently verified current behavior; pre
 Service isolation source review: cloud-only regression RED recorded before implementation. Research CLI, keeper environment, performance helper, responder and media source candidates have independent Sol/Luna reviews; the lock migration has Sol source review with final Luna confirmation pending. Review repaired transient oneshot detection, native CLI normalization, first-upgrade recovery and bounded rejected-media reads before delivery. No production provisioning or native authentication has been performed. Full final-head CI and separate public PR delivery remain pending.
 
 Deploy serialization private validation `981bbe7c`: scripts-ac 4 failed/3119 passed/1 skipped; scripts-df 1 failed/1606 passed/3 skipped; cloud-al 24 failed/2925 passed/2 skipped. Repaired isolated interpreter dependencies, observer transport fixtures, owner documentation and canonical installed-mode comparison. Preserve wait budgets and add real temporary-file observer coverage for both generations, first bootstrap, FIFO and symlink refusal. Replacement immutable-head full CI remains required.
+
+
+## Subscription publisher prestage ordering (2026-10-18)
+
+- [x] PS1 depends_on: [] Confirm first-upgrade behavior and normal recovery/sync/deploy ordering against the reviewed final stack.
+- [x] PS2 depends_on: [PS1] Author isolated main-path regressions for old grants/helpers, prestage and required normal publication.
+- [x] PS3 depends_on: [PS2] Record cloud-only RED before applying the minimal runtime guard.
+- [x] PS4 depends_on: [PS3] Apply the scoped fix while preserving recovery journals and normal deployment ordering.
+- [ ] PS5 depends_on: [PS4] Obtain cloud GREEN and independent review before delivery.
+
+Review: test-only preparation was committed separately; the runtime guard was applied only after cloud RED. Local suites, source publication and production actions remain excluded.
+
+Prestage ordering review: cloud RED recorded 7 failed/25 passed. All seven failures exercised premature stage publication; all six strict normal-deploy cases passed. Applied the stage-only guard after RED and clarified the environment owner. Recovery, pinned synchronization and rollback journals are unchanged. Static checks only locally; focused cloud GREEN and independent review remain pending.
+
+
+### Prestage lock bootstrap readiness
+
+- [x] PL1 depends_on: [] Confirm entrypoint lock admission precedes prestage and trusted bootstrap provisions the new canonical inode.
+- [x] PL2 depends_on: [PL1] Author cloud-only entrypoint regressions for canonical first bootstrap, strict normal admission and unsafe/unknown lock state.
+- [x] PL3 depends_on: [PL2] Record intended cloud RED before changing runtime.
+- [x] PL4 depends_on: [PL3] Apply only the reviewed stage deferral.
+- [x] PL5 depends_on: [PL4] Obtain expanded cloud GREEN and independent final review before delivery.
+
+Review: applied the reviewed guard after the intended cloud RED was confirmed. Preserve normal required locks, recovery-only compatibility, journals and pinned synchronization; expanded cloud GREEN and independent final review are complete; public CI remains pending.
+
+Independent readiness review: require valid directory authority before classifying a missing canonical leaf. Add writable-parent, writable-authority and foreign-authority cases using real temporary metadata; the script-copy fixture explicitly maps the production filesystem root/UID-0 domain to its temporary root/current UID, without changing production policy or mocking supervisor/flock/stat. Runtime guard applied after cloud RED; expanded cloud GREEN and independent final review are complete; public CI remains pending.
+
+Canonical parent contract review: temporary script copies explicitly map the fixed radon group lookup to the fixture's actual gid; a mismatched expected gid and a nonwritable but incorrect0700 parent mode must refuse missing-leaf deferral for default and explicit-canonical selectors. Production's exact0750/radon-gid contract is enforced before missing-leaf deferral.
+
+Expanded readiness cloud RED recorded 5 failed/96 passed/0 skipped: four canonical first-bootstrap stage cases and the symlink-parent case failed; all subscription environment cases passed. Applied the reviewed root-authority stage guard after that evidence. No local suites or production actions; expanded cloud GREEN and independent final source review are complete; public CI remains pending.
+
+Final readiness checkpoint: expanded focused cloud validation passed 101/101 with 0 failures and 0 skips. Sol and Luna approved the same runtime/test/documentation source. This checkpoint changes task status only; public full CI remains pending before delivery. No local suites or production actions ran.
