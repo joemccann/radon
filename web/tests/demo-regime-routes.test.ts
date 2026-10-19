@@ -15,7 +15,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/routeAccess", () => ({ requireRouteAccess: mocks.requireRouteAccess }));
-vi.mock("@/lib/dbExecute", () => ({ dbExecute: mocks.dbExecute }));
+vi.mock("@/lib/dbExecute", () => ({
+  dbExecute: mocks.dbExecute,
+  describeDbError: (error: unknown) => String(error),
+}));
 vi.mock("@/lib/db", () => ({ getDb: mocks.getDb, resetDb: vi.fn() }));
 vi.mock("@/lib/radonApi", () => ({ radonFetch: mocks.radonFetch }));
 vi.mock("fs/promises", () => ({
@@ -130,6 +133,25 @@ describe("demo regime GET routes", () => {
     expect(Object.values(body.indices).every(isBpiPayload)).toBe(true);
     expectNoUpstreamWork();
   });
+
+  it("serves breadth without DB or disk work", async () => {
+    const { GET } = await import("../app/api/breadth/route");
+    const response = await GET();
+    const body = await response.json();
+    expectDemoResponse(response);
+    expect(body.missing).toBeUndefined();
+    expect(body.source).toBe("sample");
+    expect(body.latest.net_ad).not.toBeNull();
+    expectNoUpstreamWork();
+  });
+
+  it("keeps the operator breadth read", async () => {
+    mocks.requireRouteAccess.mockResolvedValue({ ok: true, principal: { userId: "op", kind: "operator" } });
+    const { GET } = await import("../app/api/breadth/route");
+    const body = await (await GET()).json();
+    expect(body.missing).toBe(true);
+    expect(mocks.getDb).toHaveBeenCalled();
+  });
 });
 
 describe("demo producer routes", () => {
@@ -137,6 +159,7 @@ describe("demo producer routes", () => {
     ["CRI", () => import("../app/api/regime/route")],
     ["gamma rotation", () => import("../app/api/gamma-rotation/route")],
     ["GEX", () => import("../app/api/gex/route")],
+    ["breadth", () => import("../app/api/breadth/route")],
   ])("serves %s POST from the same fixture without spawning work", async (_label, loadRoute) => {
     const { POST } = await loadRoute();
     const response = await POST();

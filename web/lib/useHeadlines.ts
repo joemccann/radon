@@ -61,6 +61,9 @@ function useHeadlinesConnection(enabled: boolean): HeadlinesValue {
       // REL-246 (R-663): back off the poll cadence on consecutive failures
       // instead of re-arming at the fixed interval forever.
       let failures = 0;
+      // 401/403 is a terminal auth failure (signed out, expired trial): a
+      // retry cannot succeed, so the poll stops instead of re-arming forever.
+      let authFailed = false;
 
       async function refresh() {
         request = new AbortController();
@@ -69,6 +72,7 @@ function useHeadlinesConnection(enabled: boolean): HeadlinesValue {
             cache: "no-store",
             signal: request.signal,
           });
+          if (response.status === 401 || response.status === 403) authFailed = true;
           if (!response.ok) throw new Error("Headline snapshot unavailable");
           const payload = await response.json() as { items?: unknown; degraded?: unknown };
           if (!Array.isArray(payload.items)) throw new Error("Invalid headline snapshot");
@@ -82,7 +86,7 @@ function useHeadlinesConnection(enabled: boolean): HeadlinesValue {
           if (!stopped) setStatus("down");
         } finally {
           request = null;
-          if (!stopped) {
+          if (!stopped && !authFailed) {
             const delay = Math.min(
               DEMO_HEADLINES_POLL_MS * 2 ** Math.min(failures, 10),
               DEMO_HEADLINES_POLL_BACKOFF_MAX_MS,

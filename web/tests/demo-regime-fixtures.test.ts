@@ -5,6 +5,7 @@ import { lastCompletedSessionDate, mostRecentSessionDate } from "@/lib/marketSes
 import { scanTimeToEtDate } from "@/lib/parseScanTime";
 import {
   buildDemoBpiFixture,
+  buildDemoBreadthFixture,
   buildDemoCriFixture,
   buildDemoDispersionFixture,
   buildDemoGammaRotationFixture,
@@ -128,5 +129,31 @@ describe("deterministic demo regime fixtures", () => {
       ((trin.current?.adv ?? 0) / (trin.current?.dec ?? 1))
       / ((trin.current?.up_vol ?? 0) / (trin.current?.down_vol ?? 1)),
     ).toBeCloseTo(trin.current?.trin ?? 0, 2);
+  });
+});
+
+describe("demo breadth fixture", () => {
+  it.each([
+    ["during RTH", new Date("2031-02-10T18:45:00.000Z")],
+    ["on a weekend", new Date("2031-02-08T18:45:00.000Z")],
+  ])("is stable, sample-labelled, and coherent with its own history %s", (_label, now) => {
+    const breadth = buildDemoBreadthFixture(now);
+    expect(buildDemoBreadthFixture(now)).toEqual(breadth);
+    expect(breadth.source).toBe("sample");
+    expect(breadth.missing).toBeUndefined();
+    expect(breadth.latest?.session_date).toBe(mostRecentSessionDate(now));
+    expect(breadth.history.at(-1)).toMatchObject({
+      date: breadth.latest?.session_date,
+      net_ad: breadth.latest?.net_ad,
+      cum_ad: breadth.latest?.cum_ad,
+    });
+    expect(breadth.latest?.net_ad_prev).toBe(breadth.history.at(-2)?.net_ad);
+    expect(breadth.latest?.sessions_positive_20).toBe(
+      breadth.history.slice(-20).filter((entry) => entry.net_ad > 0).length,
+    );
+    expect(breadth.intraday.length).toBeGreaterThan(0);
+    expect(breadth.intraday.at(-1)?.net_ad).toBe(breadth.latest?.net_ad);
+    expect(Date.parse(breadth.intraday.at(-1)?.time ?? "")).toBeLessThanOrEqual(now.getTime());
+    expect(Date.parse(breadth.scan_time ?? "")).toBeLessThanOrEqual(now.getTime());
   });
 });

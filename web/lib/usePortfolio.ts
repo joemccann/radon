@@ -187,6 +187,12 @@ export function usePortfolio(
   pollCachedRef.current = pollCached;
 
   const doSync = useCallback(async () => {
+    // Demo snapshots are read-only and the producer POST is operatorOnly, so a
+    // manual sync re-reads the sample snapshot instead (useSyncHook contract).
+    if (process.env.NEXT_PUBLIC_RADON_DEMO === "1") {
+      await fetchPortfolio();
+      return;
+    }
     if (syncingRef.current) return;
     syncingRef.current = true;
     const syncGeneration = ++dataGenerationRef.current;
@@ -237,7 +243,7 @@ export function usePortfolio(
       syncingRef.current = false;
       if (mountedRef.current) setSyncing(false);
     }
-  }, [includeEntryDates, scheduleNext]);
+  }, [fetchPortfolio, includeEntryDates, scheduleNext]);
 
   const syncNow = useCallback(() => {
     void doSync();
