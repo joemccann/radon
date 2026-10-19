@@ -9876,3 +9876,12 @@ Notification isolation review: cloud RED `1cdf8f37`, run `39151257572`: hold sha
 - Final updated-base verification: full Python 16,155 passed/2 skipped, cloud 2,982 passed/7 skipped, full Vitest 11,136 passed/21 skipped with every coverage ratchet green. Production compile and native-session real-data browser checks passed; existing two newsfeed type errors reproduce on the clean base and remain outside this feature. React review verified unconditional hooks, ResizeObserver cleanup, finite chart values and explicit window/range state.
 
 VIX model delivery review: initial exact-head CI found missing canonical Clear/TesterArmy route registration (TesterArmy run 39170989963: 1 failed/78 passed). Add the new page to the unchanged strict inventory check; local inventory/generator now cover all 70 App Router pages exactly once. No runtime code or test gate changed. Focused exact inventory plus new-route desktop/mobile Playwright: 3 passed; repaired-head CI pending.
+
+## Operator hardening: research image executables (2026-10-18)
+- [x] RCLI-T1 (depends_on: []): Verify image CLI and research auth/mount contracts.
+- [x] RCLI-T2 (depends_on: [RCLI-T1]): Pin research executable boundary to image while retaining provider grants.
+- [ ] RCLI-T3 (depends_on: [RCLI-T2]): Cloud red/green regression and full CI; document rollout and review.
+
+### Research executable review
+- Cloud regression RED verified in private CI job 117778809500; GREEN validation pending.
+- Scope review: research executable mount only; auth/HOME/state and Node unit mounts retained.
