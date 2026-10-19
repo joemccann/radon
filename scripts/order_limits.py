@@ -176,24 +176,38 @@ def _ib_order_type(params: dict) -> str:
     return "LMT"
 
 
-def effective_order_price(params: dict) -> float:
-    """|Price| the order can actually execute at, by IB order type.
+def effective_order_price_bounds(params: dict) -> tuple[float, float]:
+    """(low, high) |price| the order can actually execute at.
 
     A stop order has no execution price. ``ib_place_order`` builds
     ``StopOrder(stopPrice=...)`` and never sends ``limitPrice``, while the
     request schema permits both, so pricing the caps on the limit alone let a
-    decoy value understate the order. Neither supplied field may lower the
-    bound either: a BUY stop at a token price triggers immediately and reaches
-    IB as a market order. Both stop forms therefore take the worse of the two
-    prices on hand, which can only ever be at or above what the caps read
-    before. Everything else prices on its limit, falling back to a stop price
-    when only that is given.
+    decoy value understate the order. Neither supplied field may be trusted
+    alone either: a BUY stop at a token price triggers immediately and reaches
+    IB as a market order. A stop form therefore spans both prices on hand, and
+    each guard takes the end that costs more under its own arithmetic — a
+    higher premium raises a notional but LOWERS a short put's assignment loss.
+    Everything else has one price: its limit, falling back to a stop price when
+    only that is given.
     """
     limit = abs(_finite(params.get("limitPrice")) or 0.0)
     stop = abs(_finite(params.get("stopPrice")) or 0.0)
     if _ib_order_type(params) in ("STP", "STP LMT"):
-        return max(limit, stop)
-    return limit or stop
+        supplied = [price for price in (limit, stop) if price]
+        if not supplied:
+            return 0.0, 0.0
+        return min(supplied), max(supplied)
+    price = limit or stop
+    return price, price
+
+
+def effective_order_price(params: dict) -> float:
+    """The end of the price range that costs MORE to pay or to hold.
+
+    Right for a notional and for a debit; a short put's assignment loss falls
+    as the premium rises, so that branch reads the low end instead.
+    """
+    return effective_order_price_bounds(params)[1]
 
 
 def _quantity_and_price(params: dict) -> tuple[Optional[float], Optional[float]]:

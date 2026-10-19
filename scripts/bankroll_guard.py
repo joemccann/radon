@@ -16,7 +16,12 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from kelly import KELLY_MAX_PCT
-from order_limits import _finite, combo_max_loss, effective_order_price
+from order_limits import (
+    _finite,
+    combo_max_loss,
+    effective_order_price,
+    effective_order_price_bounds,
+)
 
 MAX_SNAPSHOT_AGE_SECS = 15 * 60
 _CLOCK_SKEW_SECS = 60
@@ -226,7 +231,10 @@ def order_max_loss(params: dict) -> Optional[float]:
             return quantity * price * 100.0
         if _norm_right(params.get("right")) == "P":
             strike = _finite(params.get("strike")) or 0.0
-            return quantity * max(strike - price, 0.0) * 100.0 if strike > 0 else None
+            # Assignment loss falls as the premium collected rises, so the
+            # conservative end of a stop order's price range is the low one.
+            credit = effective_order_price_bounds(params)[0]
+            return quantity * max(strike - credit, 0.0) * 100.0 if strike > 0 else None
         return None
     if order_type == "stock" and not sell:
         return quantity * price

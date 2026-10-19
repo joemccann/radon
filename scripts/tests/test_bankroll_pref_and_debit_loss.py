@@ -137,6 +137,25 @@ class TestStopOrderPricing:
         assert verdict.get("code") == "BANKROLL_CAP_EXCEEDED", verdict
 
 
+class TestShortPutPricesTheOtherDirection:
+    """A higher premium REDUCES a short put's assignment loss, so the
+    conservative end of a stop order's price range is the low one there, not
+    the high one the notional cap wants."""
+
+    def _short_put(self, **extra):
+        return {"type": "option", "symbol": "AAPL", "action": "SELL",
+                "right": "P", "strike": 100.0, "quantity": 1, **extra}
+
+    def test_stop_decoy_cannot_shrink_assignment_loss(self):
+        loss = bankroll_guard.order_max_loss(
+            self._short_put(orderType="STP", limitPrice=0.01, stopPrice=95.0))
+        assert loss == pytest.approx(9_999)
+
+    def test_plain_limit_short_put_unchanged(self):
+        loss = bankroll_guard.order_max_loss(self._short_put(limitPrice=2.0))
+        assert loss == pytest.approx(9_800)
+
+
 class TestKellyGuardSharesTheSamePricing:
     """kelly_guard is the third guard reading an order price; a decoy field
     must not give it a different answer from Gate 3."""
