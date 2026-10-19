@@ -1,3 +1,16 @@
+# Dedicated responder SSH pickup safety (2026-10-18)
+
+Dependency graph: GP1 -> GP2 -> GP3 -> GP4.
+
+- [x] GP1 depends_on: [] Confirm the SSH upload-pack safety mismatch and isolate the change from production preparation and the dirty operator checkout.
+- [ ] GP2 depends_on: [GP1] Reproduce the actual Git ownership safety refusal with a temporary committed repository and isolated pickup configuration in cloud CI.
+- [ ] GP3 depends_on: [GP2] Register only the dedicated repository root and its exact `.git` path as the pickup account, document fresh SSH verification, and obtain cloud green plus independent review.
+- [ ] GP4 depends_on: [GP3] Publish the focused PR, watch exact-head CI, merge and verify normal deployment before retrying supported account preparation.
+
+## Review
+
+Pending cloud red/green. No local suites or production changes. Native login, pickup handover and timers remain separate operator steps; no wildcard Git trust is permitted.
+
 # Nightly phase status line (2026-10-18)
 
 Dependency graph: T1 -> T2 -> T3; T4 and T5 depend_on: [T2]; T6 depends_on: [T3, T4, T5].
