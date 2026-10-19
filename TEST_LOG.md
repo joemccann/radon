@@ -1292,3 +1292,9 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | ID | Status | Evidence |
 |---|---|---|
 | T-558 | DONE | The explain failure log copied `error.message` while the SSE body stayed generic. Extending the existing case to read `console.error` failed 1 / 12 passed: the log contained `sk-ant-api03-abcdefghij` and `libsql://radon-joemccann.aws-us-west-2.turso.io`. `failureEvent` now passes that detail through `scrubSecrets`. `web/tests/newsfeed-explain-api.test.ts` 13 passed. Closing rounds: root Python 16,367 passed / 2 skipped / 23 subtests each round. Vitest rounds 1 and 2 timed out five `next.config.mjs` imports; those files passed alone (29). Counted Vitest is 11,060 passed / 21 skipped / 1,126 files each round; round 3 was clean without an isolate. Cloud base `30bbaec2` was 2,893 passed / 32 failed / 8 skipped. Round 1 was 33 failed and added only `test_a_streaming_turn_survives_the_generic_header_guard`, which passed alone in 38.19s. Rounds 2 and 3 matched the base failed-node set. |
+
+## 2026-10-19
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-559 | DONE | Removing `loadError={portfolioError}` left `portfolio-sections-load-error.test.tsx` and `portfolio-startup-performance-contract.test.ts` at 11 passed. The new shell handoff then failed: `expected undefined to be 'Service Unavailable'`. Restored prop. Those two files passed 12 tests on each of three serial runs. Product source unchanged. Closing rounds: root Python 16,612 passed / 10 skipped / 23 subtests each round. Vitest 5 failed / 11,259 passed / 21 skipped each round (five `next.config.mjs` imports over 5s; the same five passed 29 tests at a 20s ceiling in 35.21s). Cloud 54 failed / 3,197 passed / 11 skipped each round, same nodes. Against base `30bbaec2` (32 failed / 2,893 passed / 8 skipped) each round added 22 and removed 0: bash 3.2 empty-array expansion, missing `flock`, and missing `/usr/bin/test`. |
