@@ -280,6 +280,24 @@ line here whenever you ship a security fix.**
   merge or deploy authority must answer "can the candidate change the gate that
   judges it?" before it ships. (`scripts/tests/test_unattended_release.py`)
 
+- **A risk guard prices on the field the executing path reads** — the notional
+  cap and the Gate 3 max-loss guard preferred `limitPrice`, but a STP order is
+  built as `StopOrder(stopPrice=...)` and its limit never reaches IB, so a
+  decoy limit alongside a real stop bounded the order on a value with no
+  effect. Both guards share `order_limits.effective_order_price`: `stopPrice`
+  for STP, the worse of the two for STP LMT. A schema that accepts a price
+  field the placement funnel ignores is a finding whenever a cap reads it.
+  (`scripts/tests/test_order_limits.py`,
+  `scripts/tests/test_bankroll_pref_and_debit_loss.py`)
+- **A demo quota is priced on what the request costs upstream, not on its
+  method** — `POST /api/previous-close` reads prices, but one request fans out
+  to up to 30 third-party lookups, so it pays the producer tier, and an
+  unresolvable symbol is remembered briefly because the day cache stores only
+  resolved closes and a replayed batch otherwise re-issued the whole fan-out.
+  A new route whose single request multiplies into upstream calls belongs in
+  the producer tier. (`web/tests/demo-rate-tier.test.ts`,
+  `web/tests/previous-close-miss-cache.test.ts`)
+
 ## Triage & patch policy
 
 - Severity = verifier-revised, real-world impact for a **single-operator** app, not
