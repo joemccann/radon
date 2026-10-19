@@ -18,6 +18,34 @@ import { countedUwFetch } from "@/lib/uwCountedFetch";
 // In-memory cache keyed by "SYMBOL:YYYY-MM-DD" — previous close doesn't change within a day
 const cache = new Map<string, number>();
 
+// The day cache only holds resolved closes, so a batch of well-formed but
+// unresolvable tickers re-issued the whole UW + Yahoo fan-out on every POST
+// (up to 30 symbols per request). Remember a miss briefly so a replayed batch
+// costs one round of third-party calls instead of one per request. The window
+// is longer than the client's retry ladder and shorter than a session, and the
+// map is bounded so a rotating symbol list cannot grow it without limit.
+const MISS_TTL_MS = 10 * 60_000;
+const MISS_CACHE_MAX = 2_000;
+const misses = new Map<string, number>();
+
+function isRecentMiss(key: string, now: number): boolean {
+  const expiresAt = misses.get(key);
+  if (expiresAt == null) return false;
+  if (expiresAt > now) return true;
+  misses.delete(key);
+  return false;
+}
+
+function rememberMiss(key: string, now: number): void {
+  misses.delete(key); // re-insert so eviction order stays newest-last
+  misses.set(key, now + MISS_TTL_MS);
+  while (misses.size > MISS_CACHE_MAX) {
+    const oldest = misses.keys().next().value;
+    if (oldest === undefined) break;
+    misses.delete(oldest);
+  }
+}
+
 function etDateString(now: Date): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/New_York",
@@ -249,6 +277,10 @@ async function fetchFromYahoo(symbol: string): Promise<number | null> {
 async function getPreviousClose(symbol: string): Promise<number | null> {
   const key = cacheKey(symbol);
   if (cache.has(key)) return cache.get(key)!;
+  const now = Date.now();
+  // IB is still attempted in batch on every request (data-source priority);
+  // only the third-party fallbacks are suppressed inside the miss window.
+  if (isRecentMiss(key, now)) return null;
 
   // IB is tried in batch before this function — skip individual IB calls.
   // Try UW, then Yahoo as last resort.
@@ -259,6 +291,9 @@ async function getPreviousClose(symbol: string): Promise<number | null> {
 
   if (close != null) {
     cache.set(key, close);
+    misses.delete(key);
+  } else {
+    rememberMiss(key, now);
   }
   return close;
 }
@@ -268,7 +303,7 @@ async function getPreviousClose(symbol: string): Promise<number | null> {
 export const radonCapability = "read";
 
 export async function POST(req: Request) {
-  const access = await requireRouteAccess(undefined, { rate: { key: "previous-close:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
+  const access = await requireRouteAccess(undefined, { rate: { key: "previous-close:route", limit: 20, windowMs: 60_000 }, durableRateTier: "B" });
   if (!access.ok) return access.response;
   try {
     const { symbols } = await req.json();

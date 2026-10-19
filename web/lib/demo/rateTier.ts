@@ -39,10 +39,11 @@ const EXPENSIVE_PATTERNS: RegExp[] = [
   /^\/api\/flow-analysis\/[^/]+$/,
   /^\/api\/options\/rv-ratio$/,
   /^\/api\/knowledge\/search$/,
+  // A batch price read sent as POST: one request fans out to up to 30
+  // third-party lookups (a UW quote plus a Yahoo fallback per symbol), so it
+  // is priced as a producer rather than as a single ordinary read.
+  /^\/api\/previous-close$/,
 ];
-
-// Reads sent as POST because the request carries a bounded symbol batch.
-const READ_POST_PATHS = new Set<string>(["/api/previous-close"]);
 
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
@@ -74,7 +75,6 @@ export function classifyRateTier(
   if (normalizedMethod === "GET" && PASSIVE_POLL_PATHS.has(pathname)) return "I";
   if (AI_PATHS.has(pathname)) return "D";
   if (normalizedMethod !== "GET" && EXPENSIVE_PATTERNS.some((re) => re.test(pathname))) return "B";
-  if (normalizedMethod === "POST" && READ_POST_PATHS.has(pathname)) return "A";
   if (WRITE_METHODS.has(normalizedMethod)) return "C";
   return "A";
 }

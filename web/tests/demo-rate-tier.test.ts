@@ -56,6 +56,12 @@ describe("classifyRateTier", () => {
     expect(classifyRateTier("POST", "/api/orders")).toBe("C");
   });
 
+  it("the bounded batch read fans out to third parties, so it pays the producer tier", () => {
+    // One POST reaches up to 30 symbols, each costing a UW call plus a Yahoo
+    // fallback. The ordinary-read ceiling priced it as a single cheap read.
+    expect(classifyRateTier("POST", "/api/previous-close")).toBe("B");
+  });
+
   it("plain reads are tier A", () => {
     expect(classifyRateTier("get", "/api/blotter")).toBe("A"); // case-insensitive
     expect(classifyRateTier("GET", "/api/preferences")).toBe("A");
