@@ -90,8 +90,8 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   "data-refresh": { open: 35 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: false },
   // radon-incident-watchdog.timer fires every 5 min around the clock.
   "incident-watchdog": { open: 15 * MIN, extended: 15 * MIN, closed: 15 * MIN, category: "scheduled", requires_ib: false },
-  // radon-demo-mirror.timer fires weekdays at 21:45 UTC, once a day.
-  "demo-mirror": { open: 26 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
+  // radon-demo-mirror.timer fires daily at 21:45 UTC with a 23:30 retry slot.
+  "demo-mirror": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // Market-hours-only IB feeds. The monitor daemon gates these on
   // `requires_market_hours=True`, so they only run 09:30–16:00 ET. The
