@@ -2,6 +2,11 @@
 # deploy-demo-vm.sh -- ship one exact commit of the FastAPI backend to the demo VM.
 #
 #   cloud/scripts/deploy-demo-vm.sh [--dry-run] <40-hex-sha>
+#   cloud/scripts/deploy-demo-vm.sh --install-autodeploy [--dry-run] <40-hex-sha>
+#
+# Normally the VM deploys itself: radon-demo-autodeploy.timer (cloud/demo-vm/)
+# pulls the latest green main every 15 minutes. This script is the manual path
+# and the one-time installer for that timer.
 #
 # Run FROM THE OPERATOR HOST (the Mac mini), which has `ssh radon-demo`. GitHub
 # runners cannot do this: fw-radon-demo admits SSH only from the recovery /32.
@@ -37,13 +42,15 @@ PATHS=(scripts requirements.txt pyproject.toml)
 
 log() { printf '[deploy-demo-vm] %s\n' "$*"; }
 die() { printf '[deploy-demo-vm] ERROR: %s\n' "$*" >&2; exit 1; }
-usage() { die "usage: $0 [--dry-run] <40-hex-sha>"; }
+usage() { die "usage: $0 [--install-autodeploy] [--dry-run] <40-hex-sha>"; }
 
 DRY_RUN=0
+INSTALL_AUTODEPLOY=0
 SHA=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN=1 ;;
+    --install-autodeploy) INSTALL_AUTODEPLOY=1 ;;
     -h|--help) usage ;;
     -*) die "unknown flag: $1" ;;
     *) [[ -z "$SHA" ]] || usage; SHA="$1" ;;
@@ -63,6 +70,44 @@ cleanup() {
   if [[ "$LOCKED" == 1 ]]; then rm -rf "$LOCK_DIR"; fi
 }
 trap cleanup EXIT
+
+AUTODEPLOY_FILES=(
+  cloud/scripts/deploy-demo-vm-remote.sh
+  cloud/demo-vm/demo_vm_autodeploy.py
+  cloud/demo-vm/radon-demo-autodeploy.service
+  cloud/demo-vm/radon-demo-autodeploy.timer
+)
+
+# Installs the pull-based agent from the exact commit (git objects, never the
+# working tree) and enables its timer. Re-running upgrades in place.
+install_autodeploy() {
+  local kit="$WORK/autodeploy.tar"
+  git -C "$REPO_ROOT" archive --format=tar -o "$kit" "$SHA" "${AUTODEPLOY_FILES[@]}"
+  log "autodeploy: ${AUTODEPLOY_FILES[*]} @ ${SHA:0:12}"
+  log "autodeploy: -> $HOST:/usr/local/lib/radon-demo + /etc/systemd/system, enable --now radon-demo-autodeploy.timer"
+  if [[ "$DRY_RUN" == 1 ]]; then
+    log "DRY RUN: no host contacted, nothing installed"
+    return 0
+  fi
+  "$SSH" "$HOST" 'set -euo pipefail
+    stage="$(mktemp -d)"
+    trap "rm -rf \"$stage\"" EXIT
+    tar -xf - -C "$stage"
+    install -d -m 0755 /usr/local/lib/radon-demo
+    install -m 0755 "$stage/cloud/scripts/deploy-demo-vm-remote.sh" /usr/local/lib/radon-demo/deploy-demo-vm-remote.sh
+    install -m 0755 "$stage/cloud/demo-vm/demo_vm_autodeploy.py" /usr/local/lib/radon-demo/demo_vm_autodeploy.py
+    install -m 0644 "$stage/cloud/demo-vm/radon-demo-autodeploy.service" /etc/systemd/system/radon-demo-autodeploy.service
+    install -m 0644 "$stage/cloud/demo-vm/radon-demo-autodeploy.timer" /etc/systemd/system/radon-demo-autodeploy.timer
+    systemctl daemon-reload
+    systemctl enable --now radon-demo-autodeploy.timer
+    systemctl list-timers radon-demo-autodeploy.timer --no-pager | sed -n 2p' < "$kit"
+  log "autodeploy installed"
+}
+
+if [[ "$INSTALL_AUTODEPLOY" == 1 ]]; then
+  install_autodeploy
+  exit 0
+fi
 
 TARBALL="$WORK/$SHA.tar"
 git -C "$REPO_ROOT" archive --format=tar -o "$TARBALL" "$SHA" "${PATHS[@]}"
